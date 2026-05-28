@@ -36,7 +36,7 @@ Full reference for commands, flags, configuration, and internals. For a quick ov
 | `yoloai system check` | Verify prerequisites for CI/CD pipelines |
 | `yoloai system disk` | Report on-disk usage per backend (sandboxes + image cache + snapshots) |
 | `yoloai system doctor` | Show capability status for all backends and isolation modes |
-| `yoloai system prune` | Remove orphaned resources (`--dry-run`, `--yes`, `--all`, `--backend`, `--cache`) |
+| `yoloai system prune` | Remove orphaned resources across all backends (`--dry-run`, `--yes`, `--cache`) |
 | `yoloai system setup` | Re-run interactive first-run setup |
 | `yoloai sandbox` (alias: `sb`) | Sandbox inspection |
 | `yoloai sandbox list` | List sandboxes and their status |
@@ -655,7 +655,7 @@ The cache directory persists across agent restarts (`yoloai stop` / `yoloai star
 Container backends accumulate disk over time — image layers, overlayfs snapshots, BuildKit cache, retired volumes. yoloai exposes two commands for this:
 
 - **`yoloai system disk`** — read-only report of what each available backend is consuming, plus the size of `~/.yoloai/sandboxes/`. Run this when `df` looks unhappy to identify which backend is the culprit.
-- **`yoloai system prune --cache`** — reclaims the backend image cache, snapshots, volumes, and build cache (in addition to the orphaned-resource cleanup the bare `system prune` already does). Forces yoloai-base to rebuild on the next `yoloai new`, so expect a multi-minute first run afterwards. `--all` runs across every available backend; `--dry-run` previews what would be removed.
+- **`yoloai system prune --cache`** — reclaims the backend image cache, snapshots, volumes, and build cache (in addition to the orphaned-resource cleanup the bare `system prune` already does). Forces yoloai-base to rebuild on the next `yoloai new`, so expect a multi-minute first run afterwards. Prune always runs across every available backend; `--dry-run` previews what would be removed.
 
 The cache prune is intentionally aggressive: backends don't tag their content by who created it, so `--cache` removes ALL unused image/snapshot/volume content the backend tracks, not only yoloai's. On a host dedicated to yoloai (CI, dev VM) that's exactly what you want; on a shared workstation, prefer the backend's own prune (`docker system prune`, `podman system prune`, etc.) so you don't nuke unrelated projects' caches.
 
