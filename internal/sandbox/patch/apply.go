@@ -18,6 +18,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/internal/workspace"
+	"github.com/kstenerud/yoloai/internal/yoerrors"
 )
 
 // execInSandbox runs cmd inside the sandbox's container and returns
@@ -32,14 +33,27 @@ func execInSandbox(ctx context.Context, rt runtime.Runtime, name string, meta *s
 	return result.Stdout, nil
 }
 
+// AppliedCommit describes one commit replayed onto the host by a series apply:
+// its subject, the source SHA in the sandbox, and the host SHA after git am
+// rewrote it (empty on a DryRun preview, where nothing is applied yet).
+type AppliedCommit struct {
+	Subject   string
+	SourceSHA string
+	HostSHA   string
+}
+
 // ApplyResult describes the outcome of applying a sandbox's changes.
 type ApplyResult struct {
 	// Dir is the host directory that was patched.
 	Dir string
-	// FilesChanged is the number of files modified.
-	FilesChanged int
-	// Stat is the human-readable diff stat summary.
+	// Stat is the human-readable diff stat summary (net-diff / NoCommit applies).
 	Stat string
+	// Commits are the commits replayed, in order (series applies); empty for a
+	// NoCommit/net-diff apply. On a DryRun preview, HostSHA is empty.
+	Commits []AppliedCommit
+	// WIPApplied is true when uncommitted (work-in-progress) edits were also
+	// applied as unstaged changes.
+	WIPApplied bool
 }
 
 // ApplyAllOptions configures ApplyAll.
@@ -110,6 +124,142 @@ func ApplyAll(ctx context.Context, layout config.Layout, rt runtime.Runtime, nam
 	}
 
 	return &ApplyResult{Dir: hostPath, Stat: stat}, nil
+}
+
+// ApplySeriesOptions configures ApplySeries.
+type ApplySeriesOptions struct {
+	IncludeWIP bool     // also apply the agent's uncommitted edits as unstaged changes
+	Paths      []string // optional path filter; when non-empty the baseline is NOT advanced
+	DryRun     bool     // list the commits that would apply, without applying
+}
+
+// ApplySeries replays the sandbox's beyond-baseline commits onto the host
+// workdir as a commit series (git format-patch → git am), preserving each
+// commit's message/author — the normal apply flow (D26).
+//
+// Return contract (comply-or-complain, D27):
+//   - (nil, nil): nothing to apply (no beyond-baseline commits). WIP-only changes
+//     are a NoCommit concern — the caller routes there.
+//   - (nil, err): hard failure, nothing landed — a non-git target (*UsageError;
+//     you can't git am into a non-repo, so the caller picks NoCommit), or
+//     generate / git am failed outright.
+//   - (*ApplyResult, nil): full success (or, on DryRun, the preview).
+//   - (*ApplyResult, err): the commits landed (result lists them) but a
+//     follow-on step had a non-fatal issue — git am left a stash it couldn't
+//     reapply, or WIP failed to apply. The caller reports what landed and
+//     surfaces err (typically as a warning).
+//
+// The library never decides the non-git fallback or prompts; that's policy.
+func ApplySeries(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, opts ApplySeriesOptions) (*ApplyResult, error) {
+	unlock, err := store.AcquireLock(layout, name)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+
+	meta, err := store.LoadMeta(layout.SandboxDir(name))
+	if err != nil {
+		return nil, err
+	}
+	if meta.Workdir.Mode != "copy" {
+		return nil, nil
+	}
+
+	hostPath := meta.Workdir.HostPath
+	if !workspace.IsGitRepo(hostPath) {
+		return nil, yoerrors.NewUsageError(
+			"cannot replay a commit series onto %s: not a git repository — apply with NoCommit to land the net changes instead",
+			hostPath)
+	}
+
+	commits, err := ListCommitsBeyondBaseline(ctx, layout, rt, name)
+	if err != nil {
+		return nil, err
+	}
+	if len(commits) == 0 {
+		return nil, nil
+	}
+
+	if opts.DryRun {
+		return seriesResult(hostPath, commits, nil), nil
+	}
+
+	patchDir, files, err := GenerateFormatPatch(ctx, layout, rt, name, opts.Paths)
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(patchDir) //nolint:errcheck // best-effort cleanup
+
+	if len(files) == 0 {
+		return nil, nil
+	}
+
+	shaMap, amErr := workspace.ApplyFormatPatch(patchDir, files, hostPath)
+	if amErr != nil && shaMap == nil {
+		// git am failed outright — nothing applied.
+		return nil, amErr
+	}
+
+	return finishSeriesApply(ctx, layout, rt, name, hostPath, opts, seriesResult(hostPath, commits, shaMap), amErr)
+}
+
+// finishSeriesApply advances the baseline (unless path-filtered), surfaces a git
+// am stash error (commits already landed), and applies WIP when requested. amErr
+// is the non-nil-but-non-fatal error from ApplyFormatPatch (a stash it couldn't
+// reapply); the commits in result did land.
+func finishSeriesApply(ctx context.Context, layout config.Layout, rt runtime.Runtime, name, hostPath string, opts ApplySeriesOptions, result *ApplyResult, amErr error) (*ApplyResult, error) {
+	// Advance the baseline past the applied commits (skip for path-filtered
+	// applies — the remaining paths still diff against it).
+	if len(opts.Paths) == 0 {
+		if err := AdvanceBaseline(ctx, layout, rt, name); err != nil {
+			return result, fmt.Errorf("advance baseline: %w", err)
+		}
+	}
+	// A stash git am couldn't reapply (pre-existing host changes). Surface it;
+	// the commits did land. WIP is skipped in this state.
+	if amErr != nil {
+		return result, amErr
+	}
+	if opts.IncludeWIP {
+		applied, err := applySeriesWIP(ctx, layout, rt, name, hostPath, opts.Paths)
+		if err != nil {
+			return result, err
+		}
+		result.WIPApplied = applied
+	}
+	return result, nil
+}
+
+// seriesResult builds an ApplyResult from the replayed commits. shaMap (sandbox
+// SHA → host SHA, lowercased keys) is nil for a DryRun preview, leaving HostSHA
+// empty.
+func seriesResult(hostPath string, commits []CommitInfo, shaMap map[string]string) *ApplyResult {
+	result := &ApplyResult{Dir: hostPath, Commits: make([]AppliedCommit, 0, len(commits))}
+	for _, c := range commits {
+		ac := AppliedCommit{Subject: c.Subject, SourceSHA: c.SHA}
+		if shaMap != nil {
+			ac.HostSHA = shaMap[strings.ToLower(c.SHA)]
+		}
+		result.Commits = append(result.Commits, ac)
+	}
+	return result
+}
+
+// applySeriesWIP applies the agent's uncommitted edits as unstaged changes after
+// the commit series has landed. Errors are wrapped to make clear the commits
+// already applied (the caller surfaces them as a warning, not a hard failure).
+func applySeriesWIP(ctx context.Context, layout config.Layout, rt runtime.Runtime, name, hostPath string, paths []string) (bool, error) {
+	wipPatch, _, err := GenerateWIPDiff(ctx, layout, rt, name, paths)
+	if err != nil {
+		return false, fmt.Errorf("generate WIP diff (commits already applied): %w", err)
+	}
+	if len(wipPatch) == 0 {
+		return false, nil
+	}
+	if err := workspace.ApplyPatch(wipPatch, hostPath, true); err != nil {
+		return false, fmt.Errorf("apply WIP changes (commits already applied): %w", err)
+	}
+	return true, nil
 }
 
 // CommitInfo is an alias for workspace.CommitInfo.

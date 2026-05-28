@@ -83,9 +83,15 @@ func (w *Workdir) Diff(ctx context.Context, opts DiffOptions) (string, error) {
 	})
 }
 
-// ApplyResult describes the outcome of an Apply: the host directory patched and
-// a `git diff --stat` summary. Re-exported (type alias) from internal/sandbox/patch.
+// ApplyResult describes the outcome of an Apply: the host directory patched,
+// the replayed Commits (series apply) or a `git diff --stat` (NoCommit), and
+// whether WIP was applied. Re-exported (type alias) from internal/sandbox/patch.
 type ApplyResult = patch.ApplyResult
+
+// AppliedCommit is one commit replayed onto the host by a series apply — its
+// Subject, the SourceSHA in the sandbox, and the HostSHA after git am rewrote
+// it. Re-exported (type alias) from internal/sandbox/patch.
+type AppliedCommit = patch.AppliedCommit
 
 // ApplyOptions configures Workdir.Apply.
 type ApplyOptions struct {
@@ -93,27 +99,43 @@ type ApplyOptions struct {
 	// edits as unstaged modifications on the host. Mirrors `yoloai apply
 	// --include-wip`.
 	IncludeWIP bool
+	// NoCommit lands the changes as a single net diff in the working tree
+	// (unstaged), instead of replaying the commit series — the `--no-commit`
+	// mode. It's the only mode possible against a non-git host target; the
+	// default (series replay) refuses such a target with a *UsageError, leaving
+	// the non-git→NoCommit decision to the caller (D26/D27).
+	NoCommit bool
 	// Paths narrows the apply to specific files (relative to the workdir). When
 	// set, the diff baseline is NOT advanced (the remaining paths still diff
 	// against it).
 	Paths []string
-	// DryRun generates and validates the patch (so the caller can preview the
-	// returned Stat and confirm) but does not apply it or advance the baseline.
-	// The library never prompts; the CLI uses this to render its confirmation.
+	// DryRun previews without applying or advancing the baseline — the series
+	// path returns the commits that would apply, the NoCommit path returns the
+	// stat. The library never prompts; the CLI uses this to render confirmation.
 	DryRun bool
 }
 
-// Apply lands the agent's changes back on the original host workdir as a single
-// squashed patch (copy-mode). Returns (nil, nil) when there's nothing to apply —
-// branch on result == nil rather than a sentinel error (Q-P). On success (and
-// unless Paths filters the apply) it advances the diff baseline. With
-// opts.DryRun it generates + validates but does not apply, returning what would
-// apply so callers can preview/confirm without the library prompting.
+// Apply lands the agent's changes back on the original host workdir. By default
+// it replays the sandbox's beyond-baseline commits as a series (git format-patch
+// → git am), preserving each commit's message/author; with opts.NoCommit it
+// instead applies the net diff unstaged into the working tree. Returns
+// (nil, nil) when there's nothing to apply — branch on result == nil rather than
+// a sentinel error (Q-P). On success (and unless Paths filters the apply) it
+// advances the diff baseline.
 //
-// This is the squash apply; the selective-ref / export / overlay variants
-// remain on Client for now (folded in later sub-steps).
+// Comply-or-complain (§2): the series default refuses a non-git host target with
+// a *UsageError rather than silently degrading to NoCommit — that policy call is
+// the caller's. A (*ApplyResult, error) pair means the commits landed but a
+// follow-on step (git am stash, WIP) had a non-fatal issue (see ApplySeries).
 func (w *Workdir) Apply(ctx context.Context, opts ApplyOptions) (*ApplyResult, error) {
-	return patch.ApplyAll(ctx, w.s.c.layout, w.s.c.rt, w.s.name, patch.ApplyAllOptions{
+	if opts.NoCommit {
+		return patch.ApplyAll(ctx, w.s.c.layout, w.s.c.rt, w.s.name, patch.ApplyAllOptions{
+			IncludeWIP: opts.IncludeWIP,
+			Paths:      opts.Paths,
+			DryRun:     opts.DryRun,
+		})
+	}
+	return patch.ApplySeries(ctx, w.s.c.layout, w.s.c.rt, w.s.name, patch.ApplySeriesOptions{
 		IncludeWIP: opts.IncludeWIP,
 		Paths:      opts.Paths,
 		DryRun:     opts.DryRun,

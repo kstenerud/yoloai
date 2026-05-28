@@ -1402,3 +1402,34 @@ func TestApplyFlow_NonGitFallback(t *testing.T) {
 	content, _ := os.ReadFile(filepath.Join(targetDir, "feature.txt")) //nolint:gosec
 	assert.Equal(t, "feature\n", string(content))
 }
+
+// TestApplySeries_NonGitTargetRefuses verifies comply-or-complain (D26/D27): a
+// series replay onto a non-git host target refuses with a typed *UsageError
+// rather than silently degrading to a net-diff apply. The refusal precedes any
+// runtime call, so rt is nil here.
+func TestApplySeries_NonGitTargetRefuses(t *testing.T) {
+	tmpDir := t.TempDir()
+	name := "series-nongit"
+	layout := testLayout(tmpDir)
+	require.NoError(t, os.MkdirAll(layout.SandboxDir(name), 0750))
+
+	hostPath := filepath.Join(tmpDir, "plain-project")
+	require.NoError(t, os.MkdirAll(hostPath, 0750)) // exists but not a git repo
+
+	meta := &store.Meta{
+		Name:  name,
+		Agent: "test",
+		Workdir: store.WorkdirMeta{
+			HostPath:    hostPath,
+			MountPath:   hostPath,
+			Mode:        "copy",
+			BaselineSHA: "abc",
+		},
+	}
+	require.NoError(t, store.SaveMeta(layout.SandboxDir(name), meta))
+
+	_, err := ApplySeries(context.Background(), layout, nil, name, ApplySeriesOptions{})
+	require.Error(t, err)
+	var ue *yoerrors.UsageError
+	require.ErrorAs(t, err, &ue, "non-git target must yield a *UsageError")
+}
