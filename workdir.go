@@ -93,51 +93,72 @@ type ApplyResult = patch.ApplyResult
 // it. Re-exported (type alias) from internal/sandbox/patch.
 type AppliedCommit = patch.AppliedCommit
 
-// ApplyOptions configures Workdir.Apply.
+// ApplyMode selects how Apply lands changes. Required — there is no default,
+// because the choice is consequential and mutually exclusive, and a movable
+// default would silently change behavior out from under callers (§4: empty
+// isn't a free default). The CLI, as the policy layer, picks the mode for the
+// user (the commit-preserving default, or NoCommit for --no-commit / a non-git
+// target); the library requires it explicitly.
+type ApplyMode string
+
+const (
+	// ApplyModeCommits replays the sandbox's beyond-baseline commits onto the
+	// host as a series (git format-patch → git am), preserving each commit's
+	// message/author. Requires a git host target — a non-git target is refused
+	// with a *UsageError (the caller picks ApplyModeNoCommit there).
+	ApplyModeCommits ApplyMode = "commits"
+	// ApplyModeNoCommit lands the changes as a single net diff in the working
+	// tree (unstaged), not as commits — the `--no-commit` mode, and the only
+	// mode possible against a non-git host target.
+	ApplyModeNoCommit ApplyMode = "no-commit"
+)
+
+// ApplyOptions configures Workdir.Apply. Mode is required.
 type ApplyOptions struct {
+	// Mode selects commit-series replay vs. net-diff. Required; the zero value
+	// is rejected with a *UsageError.
+	Mode ApplyMode
 	// IncludeWIP additionally applies the agent's uncommitted (work-in-progress)
 	// edits as unstaged modifications on the host. Mirrors `yoloai apply
 	// --include-wip`.
 	IncludeWIP bool
-	// NoCommit lands the changes as a single net diff in the working tree
-	// (unstaged), instead of replaying the commit series — the `--no-commit`
-	// mode. It's the only mode possible against a non-git host target; the
-	// default (series replay) refuses such a target with a *UsageError, leaving
-	// the non-git→NoCommit decision to the caller (D26/D27).
-	NoCommit bool
 	// Paths narrows the apply to specific files (relative to the workdir). When
 	// set, the diff baseline is NOT advanced (the remaining paths still diff
 	// against it).
 	Paths []string
-	// DryRun previews without applying or advancing the baseline — the series
-	// path returns the commits that would apply, the NoCommit path returns the
-	// stat. The library never prompts; the CLI uses this to render confirmation.
+	// DryRun previews without applying or advancing the baseline — ApplyModeCommits
+	// returns the commits that would apply, ApplyModeNoCommit returns the stat.
+	// The library never prompts; the CLI uses this to render confirmation.
 	DryRun bool
 }
 
-// Apply lands the agent's changes back on the original host workdir. By default
-// it replays the sandbox's beyond-baseline commits as a series (git format-patch
-// → git am), preserving each commit's message/author; with opts.NoCommit it
-// instead applies the net diff unstaged into the working tree. Returns
-// (nil, nil) when there's nothing to apply — branch on result == nil rather than
-// a sentinel error (Q-P). On success (and unless Paths filters the apply) it
-// advances the diff baseline.
+// Apply lands the agent's changes back on the original host workdir, per
+// opts.Mode: ApplyModeCommits replays the beyond-baseline commits as a series
+// (preserving message/author), ApplyModeNoCommit applies the net diff unstaged.
+// Returns (nil, nil) when there's nothing to apply — branch on result == nil
+// rather than a sentinel error (Q-P). On success (and unless Paths filters the
+// apply) it advances the diff baseline.
 //
-// Comply-or-complain (§2): the series default refuses a non-git host target with
-// a *UsageError rather than silently degrading to NoCommit — that policy call is
-// the caller's. A (*ApplyResult, error) pair means the commits landed but a
+// Comply-or-complain (§2/§4): Mode is required — an unset mode is a *UsageError,
+// not a silent default. ApplyModeCommits refuses a non-git host target with a
+// *UsageError rather than degrading to net-diff; that policy call is the
+// caller's. A (*ApplyResult, error) pair means the commits landed but a
 // follow-on step (git am stash, WIP) had a non-fatal issue (see ApplySeries).
 func (w *Workdir) Apply(ctx context.Context, opts ApplyOptions) (*ApplyResult, error) {
-	if opts.NoCommit {
+	switch opts.Mode {
+	case ApplyModeCommits:
+		return patch.ApplySeries(ctx, w.s.c.layout, w.s.c.rt, w.s.name, patch.ApplySeriesOptions{
+			IncludeWIP: opts.IncludeWIP,
+			Paths:      opts.Paths,
+			DryRun:     opts.DryRun,
+		})
+	case ApplyModeNoCommit:
 		return patch.ApplyAll(ctx, w.s.c.layout, w.s.c.rt, w.s.name, patch.ApplyAllOptions{
 			IncludeWIP: opts.IncludeWIP,
 			Paths:      opts.Paths,
 			DryRun:     opts.DryRun,
 		})
+	default:
+		return nil, sandbox.NewUsageError("apply mode is required: set ApplyOptions.Mode to yoloai.ApplyModeCommits or yoloai.ApplyModeNoCommit")
 	}
-	return patch.ApplySeries(ctx, w.s.c.layout, w.s.c.rt, w.s.name, patch.ApplySeriesOptions{
-		IncludeWIP: opts.IncludeWIP,
-		Paths:      opts.Paths,
-		DryRun:     opts.DryRun,
-	})
 }

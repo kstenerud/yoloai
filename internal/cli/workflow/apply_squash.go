@@ -29,7 +29,7 @@ func applySquash(cmd *cobra.Command, name string, paths []string, meta *store.Me
 	err := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		var e error
 		preview, e = c.Sandbox(name).Workdir().Apply(ctx, yoloai.ApplyOptions{
-			NoCommit: true, IncludeWIP: includeWIP, Paths: paths, DryRun: true,
+			Mode: yoloai.ApplyModeNoCommit, IncludeWIP: includeWIP, Paths: paths, DryRun: true,
 		})
 		return e
 	})
@@ -78,7 +78,7 @@ func applySquash(cmd *cobra.Command, name string, paths []string, meta *store.Me
 
 	err = cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		_, e := c.Sandbox(name).Workdir().Apply(ctx, yoloai.ApplyOptions{
-			NoCommit: true, IncludeWIP: includeWIP, Paths: paths, DryRun: false,
+			Mode: yoloai.ApplyModeNoCommit, IncludeWIP: includeWIP, Paths: paths, DryRun: false,
 		})
 		return e
 	})

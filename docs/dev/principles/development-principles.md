@@ -217,7 +217,7 @@ Default rule: **reject empty at the public boundary** (`*UsageError`). The calle
 
 Exceptions exist — `Profile == ""` legitimately means "no profile" because there's no other way to say it, and the no-profile case is the common path. The bar is: prove the empty-as-meaningful semantics is the cleanest shape before adopting it. Implicit default behavior tends to become evil — silent fallbacks compound across releases and turn into Hyrum's law magnets.
 
-F4 in `../CRITIQUE.md` is the worked example that motivated this rule.
+The same rule covers a consequential *mode* with no good default. `ApplyOptions.Mode` (commit-series replay vs. net-diff) is **required** — the zero value is a `*UsageError`, not a silently-chosen mode (D26). The proof it earns the rule: a movable default flipped apply behavior out from under an existing caller (4c-i1: `Workdir().Apply`'s default moved from net-diff to series, silently breaking `apply_squash`), and only an integration test caught it. The CLI, as the policy layer, picks the mode for the user; the library requires it. F4 (`../CRITIQUE.md`, required `Backend`) is the originating worked example.
 
 ### Sources
 

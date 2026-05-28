@@ -40,7 +40,8 @@
 //	})
 //	if err != nil { log.Fatal(err) }
 //	if info.Status == yoloai.StatusDone {
-//	    client.Sandbox(info.Meta.Name).Workdir().Apply(ctx, yoloai.ApplyOptions{})
+//	    client.Sandbox(info.Meta.Name).Workdir().Apply(ctx,
+//	        yoloai.ApplyOptions{Mode: yoloai.ApplyModeCommits})
 //	}
 package yoloai
 
