@@ -14,6 +14,10 @@ fields). Provide a typed escape hatch (`RunRaw(ctx, opts *AdvancedOptions)`
 or similar) for embedders who need every CLI flag. Two-tier surface;
 documented boundary between basic and advanced.
 
+**Designed + signed off (2026-05-28):** `f1-f3-public-surface.md`. Escape
+hatch is `Create(ctx, yoloai.CreateOptions)` (public struct), not `RunRaw`.
+6 decisions resolved there. Implementation lands with the F2 re-rooting.
+
 ### F2 — Sub-handle grouping: judge per-method, present for owner approval
 
 Walk each of the 18 per-sandbox Client methods. For each, propose a
@@ -35,6 +39,10 @@ Run remains the convenience entry (curated 8-field surface). Internally
 materializes into `Create(ctx, opts.Materialize())`. F1's escape-hatch
 path becomes the deep entry.
 
+**Designed + signed off (2026-05-28):** `f1-f3-public-surface.md` (shared
+with F1). `Run` → `materialize()` → `Create(public CreateOptions)` →
+`toInternal()` → `manager.Create`.
+
 ### F4 — Hard error on `Backend == ""`; broader: forbid `""` unless demonstrably beneficial
 
 `Options.Backend == ""` returns `*UsageError` at construction. Matches
@@ -45,6 +53,12 @@ typed-name / config / identity fields unless there's a demonstrated
 benefit to allowing it. Implicit behavior tends to become evil. To be
 added to `docs/dev/principles/development-principles.md` as part of
 this work.
+
+**Status (2026-05-28):** broader principle already landed
+(development-principles.md §4, the "empty string isn't a free default"
+subsection). The `Backend == ""` guard itself is **bundled into the
+F1+F3 implementation** (same `NewWithOptions` surface) — see
+`f1-f3-public-surface.md` decision 5.
 
 ### F5 — Full sandbox/ god-package carve
 

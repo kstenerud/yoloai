@@ -104,23 +104,21 @@ func (c *Client) Create(ctx, CreateOptions) (string, error)
   (it currently builds the internal struct directly) — bulk of the impl work,
   not this design pass.
 
-## Open decisions for the owner
+## Decisions — RESOLVED (owner, 2026-05-28; all recommendations accepted)
 
-1. **Dropped fields** — confirm `Yes`, `Attach`, `Version` leave the public
-   creation surface (lib never prompts; attach is a separate call; version is
-   build-info). Recommended: yes.
-2. **`Ports` typing** — public `CreateOptions.Ports` as `[]PortMapping` (typed,
-   per Q-Y) vs. keeping `[]string` ("3000:3000"). Recommended: `[]PortMapping`.
-3. **`Create` return type** — keep `(string, error)` (the name) vs. return
-   `(*Info, error)`. Recommended: keep `string`; `Run` is the one that returns
-   `*Info` (after Wait).
-4. **`RunOptions.WorkDir`** — keep the curated `WorkDir string` (copy-mode
-   implied) vs. promote to `Workdir DirSpec` even in Tier 1. Recommended: keep
-   the string in Tier 1 (the whole point of the curated tier is "don't make me
-   think about mount modes"); DirSpec lives in Tier 2.
-5. **F4 timing** — bundle `Options.Backend == "" → *UsageError` into this work
-   (it's the same "public construction surface" area) or keep it a separate
-   small commit. Recommended: bundle — it's one line + a test and belongs with
-   the public-surface pass.
-6. **Naming** — `Create(ctx, CreateOptions)` (public type, same name) confirmed
-   over `RunRaw(ctx, *AdvancedOptions)`.
+1. ✅ **Drop `Yes`, `Attach`, `Version`** from the public creation surface. The
+   library never prompts; create-then-attach is two calls; version is build-info.
+2. ✅ **`CreateOptions.Ports` is `[]PortMapping`** (typed, per Q-Y). The CLI
+   parses its `--port` flag into `PortMapping` at the boundary.
+3. ✅ **`Create` returns `(string, error)`** (the name). `Run` is the one that
+   returns `*Info` (after Wait); Create doesn't wait.
+4. ✅ **`RunOptions.WorkDir` stays `string`** (copy-mode implied). Full `DirSpec`
+   (mode / mount-path / `:rw` / `:overlay`) lives only in Tier-2 `CreateOptions`.
+5. ✅ **Bundle F4** — `Options.Backend == "" → *UsageError` lands in this pass
+   (same `NewWithOptions` construction surface; one guard + a test).
+6. ✅ **`Create(ctx, CreateOptions)`** — keep the name; F1/F3 only swap its
+   parameter from the internal struct to the public one. No `RunRaw`.
+
+Design fully signed off. Implementation is the shared re-rooting PR with the F2
+mapping (`f2-subhandle-mapping.md`) — both reshape the root `Run`/`Create` entry
+points, so they land together.
