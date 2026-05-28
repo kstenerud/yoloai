@@ -76,6 +76,15 @@ func clientWithSandbox(t *testing.T) (*Client, *SystemClient) {
 	return c, sys
 }
 
+// mustSandbox returns a validated sandbox handle, failing the test if the
+// sandbox doesn't exist (Client.Sandbox now validates at construction — F22).
+func mustSandbox(t *testing.T, c *Client, name string) *Sandbox {
+	t.Helper()
+	sb, err := c.Sandbox(name)
+	require.NoError(t, err)
+	return sb
+}
+
 // --- AllowedDomain derivation ---
 
 func TestNetwork_Allowed_NoIsolation_Empty(t *testing.T) {
@@ -90,7 +99,7 @@ func TestNetwork_Allowed_NoIsolation_Empty(t *testing.T) {
 		CreatedAt: time.Now(),
 	}))
 
-	allowed, err := c.Sandbox("box").Network().Allowed(context.Background())
+	allowed, err := mustSandbox(t, c, "box").Network().Allowed(context.Background())
 	require.NoError(t, err)
 	assert.NotNil(t, allowed)
 	assert.Empty(t, allowed)
@@ -104,7 +113,7 @@ func TestNetwork_Allowed_AgentRequirement_Provenance(t *testing.T) {
 		"example.com",
 	})
 
-	allowed, err := c.Sandbox("box").Network().Allowed(context.Background())
+	allowed, err := mustSandbox(t, c, "box").Network().Allowed(context.Background())
 	require.NoError(t, err)
 	require.Len(t, allowed, 2)
 
@@ -122,7 +131,7 @@ func TestNetwork_Allowed_UnknownAgent_AllUser(t *testing.T) {
 	c, sys := clientWithSandbox(t)
 	writeIsolatedSandbox(t, sys, "box", "ghost-agent", []string{"a.example", "b.example"})
 
-	allowed, err := c.Sandbox("box").Network().Allowed(context.Background())
+	allowed, err := mustSandbox(t, c, "box").Network().Allowed(context.Background())
 	require.NoError(t, err)
 	require.Len(t, allowed, 2)
 	for _, d := range allowed {
@@ -139,7 +148,7 @@ func TestNetwork_Allowed_PreservesOrder(t *testing.T) {
 		"other.example",
 	})
 
-	allowed, err := c.Sandbox("box").Network().Allowed(context.Background())
+	allowed, err := mustSandbox(t, c, "box").Network().Allowed(context.Background())
 	require.NoError(t, err)
 	require.Len(t, allowed, 3)
 	assert.Equal(t, "example.com", allowed[0].Domain, "Allowed() preserves meta-on-disk order")
@@ -149,7 +158,9 @@ func TestNetwork_Allowed_PreservesOrder(t *testing.T) {
 
 func TestNetwork_Allowed_NotFound(t *testing.T) {
 	c, _ := clientWithSandbox(t)
-	_, err := c.Sandbox("ghost").Network().Allowed(context.Background())
+	// F22: a missing sandbox is rejected at handle construction, where the name
+	// was typed — not lazily inside Network().Allowed.
+	_, err := c.Sandbox("ghost")
 	assert.ErrorIs(t, err, sandbox.ErrSandboxNotFound)
 }
 
@@ -159,7 +170,7 @@ func TestNetwork_Allow_AddsNewDomains(t *testing.T) {
 	c, sys := clientWithSandbox(t)
 	writeIsolatedSandbox(t, sys, "box", "claude", []string{"api.anthropic.com"})
 
-	result, err := c.Sandbox("box").Network().Allow(context.Background(), "extra.example", "other.example")
+	result, err := mustSandbox(t, c, "box").Network().Allow(context.Background(), "extra.example", "other.example")
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.ElementsMatch(t, []string{"extra.example", "other.example"}, result.Added)
@@ -168,7 +179,7 @@ func TestNetwork_Allow_AddsNewDomains(t *testing.T) {
 	assert.False(t, result.Live)
 
 	// Re-read via Allowed() to confirm persistence and provenance.
-	allowed, err := c.Sandbox("box").Network().Allowed(context.Background())
+	allowed, err := mustSandbox(t, c, "box").Network().Allowed(context.Background())
 	require.NoError(t, err)
 	require.Len(t, allowed, 3)
 	domains := map[string]DomainSource{}
@@ -184,7 +195,7 @@ func TestNetwork_Allow_DedupsAgainstExisting(t *testing.T) {
 	c, sys := clientWithSandbox(t)
 	writeIsolatedSandbox(t, sys, "box", "claude", []string{"a.example", "b.example"})
 
-	result, err := c.Sandbox("box").Network().Allow(context.Background(), "a.example", "c.example", "b.example")
+	result, err := mustSandbox(t, c, "box").Network().Allow(context.Background(), "a.example", "c.example", "b.example")
 	require.NoError(t, err)
 	assert.Equal(t, []string{"c.example"}, result.Added,
 		"Allow must drop entries that already exist; only the genuinely new domain is reported")
@@ -194,7 +205,7 @@ func TestNetwork_Allow_DedupsWithinInput(t *testing.T) {
 	c, sys := clientWithSandbox(t)
 	writeIsolatedSandbox(t, sys, "box", "claude", nil)
 
-	result, err := c.Sandbox("box").Network().Allow(context.Background(), "x.example", "x.example", "y.example")
+	result, err := mustSandbox(t, c, "box").Network().Allow(context.Background(), "x.example", "x.example", "y.example")
 	require.NoError(t, err)
 	assert.Equal(t, []string{"x.example", "y.example"}, result.Added,
 		"Allow must dedupe within the input slice too — duplicates cause one add")
@@ -204,7 +215,7 @@ func TestNetwork_Allow_AllExisting_NoAdds(t *testing.T) {
 	c, sys := clientWithSandbox(t)
 	writeIsolatedSandbox(t, sys, "box", "claude", []string{"a.example"})
 
-	result, err := c.Sandbox("box").Network().Allow(context.Background(), "a.example")
+	result, err := mustSandbox(t, c, "box").Network().Allow(context.Background(), "a.example")
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.NotNil(t, result.Added, "Added is non-nil empty slice (JSON renders [])")
@@ -216,7 +227,7 @@ func TestNetwork_Allow_NoDomains_UsageError(t *testing.T) {
 	c, sys := clientWithSandbox(t)
 	writeIsolatedSandbox(t, sys, "box", "claude", nil)
 
-	_, err := c.Sandbox("box").Network().Allow(context.Background())
+	_, err := mustSandbox(t, c, "box").Network().Allow(context.Background())
 	require.Error(t, err)
 	var usage *sandbox.UsageError
 	assert.ErrorAs(t, err, &usage)
@@ -226,7 +237,7 @@ func TestNetwork_Allow_NoneNetworkMode_UsageError(t *testing.T) {
 	c, sys := clientWithSandbox(t)
 	writeNoNetworkSandbox(t, sys, "box")
 
-	_, err := c.Sandbox("box").Network().Allow(context.Background(), "a.example")
+	_, err := mustSandbox(t, c, "box").Network().Allow(context.Background(), "a.example")
 	require.Error(t, err)
 	var usage *sandbox.UsageError
 	require.ErrorAs(t, err, &usage)
@@ -245,7 +256,7 @@ func TestNetwork_Allow_NotIsolated_UsageError(t *testing.T) {
 		// no NetworkMode set
 	}))
 
-	_, err := c.Sandbox("box").Network().Allow(context.Background(), "a.example")
+	_, err := mustSandbox(t, c, "box").Network().Allow(context.Background(), "a.example")
 	require.Error(t, err)
 	var usage *sandbox.UsageError
 	require.ErrorAs(t, err, &usage)
@@ -261,7 +272,7 @@ func TestNetwork_Deny_RemovesAndTagsSource(t *testing.T) {
 		"example.com",       // user
 	})
 
-	result, err := c.Sandbox("box").Network().Deny(context.Background(), "api.anthropic.com", "example.com")
+	result, err := mustSandbox(t, c, "box").Network().Deny(context.Background(), "api.anthropic.com", "example.com")
 	require.NoError(t, err)
 	require.Len(t, result.Removed, 2)
 
@@ -283,7 +294,7 @@ func TestNetwork_Deny_DomainNotInList_UsageError(t *testing.T) {
 	c, sys := clientWithSandbox(t)
 	writeIsolatedSandbox(t, sys, "box", "claude", []string{"a.example"})
 
-	_, err := c.Sandbox("box").Network().Deny(context.Background(), "absent.example")
+	_, err := mustSandbox(t, c, "box").Network().Deny(context.Background(), "absent.example")
 	require.Error(t, err)
 	var usage *sandbox.UsageError
 	require.ErrorAs(t, err, &usage)
@@ -297,7 +308,7 @@ func TestNetwork_Deny_PartialFailureRollsBack(t *testing.T) {
 	// half-commits.
 	writeIsolatedSandbox(t, sys, "box", "claude", []string{"a.example", "b.example"})
 
-	_, err := c.Sandbox("box").Network().Deny(context.Background(), "a.example", "absent.example")
+	_, err := mustSandbox(t, c, "box").Network().Deny(context.Background(), "a.example", "absent.example")
 	require.Error(t, err)
 
 	meta, err := store.LoadMeta(sys.layout.SandboxDir("box"))
@@ -310,7 +321,7 @@ func TestNetwork_Deny_NoDomains_UsageError(t *testing.T) {
 	c, sys := clientWithSandbox(t)
 	writeIsolatedSandbox(t, sys, "box", "claude", []string{"a.example"})
 
-	_, err := c.Sandbox("box").Network().Deny(context.Background())
+	_, err := mustSandbox(t, c, "box").Network().Deny(context.Background())
 	require.Error(t, err)
 	var usage *sandbox.UsageError
 	assert.ErrorAs(t, err, &usage)

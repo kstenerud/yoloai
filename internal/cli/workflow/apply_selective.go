@@ -93,7 +93,11 @@ func runSeriesApply(cmd *cobra.Command, name string, backend runtime.BackendName
 	var result *yoloai.ApplyResult
 	err := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		var applyErr error
-		result, applyErr = c.Sandbox(name).Workdir().Apply(ctx, yoloai.ApplyOptions{
+		sb, sbErr := c.Sandbox(name)
+		if sbErr != nil {
+			return sbErr
+		}
+		result, applyErr = sb.Workdir().Apply(ctx, yoloai.ApplyOptions{
 			Mode:   yoloai.ApplyModeCommits,
 			Refs:   refs,
 			Paths:  paths,

@@ -5,9 +5,11 @@
 package yoloai
 
 import (
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestResetOptions_toInternal(t *testing.T) {
@@ -37,6 +39,15 @@ func TestResetOptions_toInternal_Defaults(t *testing.T) {
 }
 
 func TestClient_Sandbox_BindsName(t *testing.T) {
-	c := &Client{}
-	assert.Equal(t, "mybox", c.Sandbox("mybox").Name())
+	c, sys := clientWithSandbox(t)
+	require.NoError(t, os.MkdirAll(sys.layout.SandboxDir("mybox"), 0750))
+	sb, err := c.Sandbox("mybox")
+	require.NoError(t, err)
+	assert.Equal(t, "mybox", sb.Name())
+}
+
+func TestClient_Sandbox_NotFound(t *testing.T) {
+	c, _ := clientWithSandbox(t)
+	_, err := c.Sandbox("ghost")
+	assert.ErrorIs(t, err, ErrSandboxNotFound)
 }

@@ -346,7 +346,11 @@ func executeNewCreate(cmd *cobra.Command, ctx context.Context, c *yoloai.Client,
 		return nil
 	}
 
-	return c.Sandbox(sandboxName).Attach(ctx, cliutil.IOStreams())
+	sb, err := c.Sandbox(sandboxName)
+	if err != nil {
+		return err
+	}
+	return sb.Attach(ctx, cliutil.IOStreams())
 }
 
 // confirmDirtyWorkdir renders the uncommitted-changes warning and asks the user

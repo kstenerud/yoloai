@@ -16,12 +16,29 @@ import (
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 )
 
+// newSandboxHandle builds a validated *Sandbox over a temp layout with a
+// sandbox dir holding the given meta. Returns the handle for Workdir tests.
+func newSandboxHandle(t *testing.T, meta *store.Meta) *Sandbox {
+	t.Helper()
+	tmpDir := t.TempDir()
+	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
+	require.NoError(t, os.MkdirAll(layout.SandboxDir(meta.Name), 0750))
+	require.NoError(t, store.SaveMeta(layout.SandboxDir(meta.Name), meta))
+	sb, err := (&Client{layout: layout}).Sandbox(meta.Name)
+	require.NoError(t, err)
+	return sb
+}
+
 // TestWorkdir_Apply_RequiresMode verifies the consequential apply mode has no
 // free default: an unset Mode is a *UsageError (§4), not a silently-chosen
-// behavior that could change out from under callers. The check precedes any
-// backend use, so a zero-value Client suffices.
+// behavior that could change out from under callers.
 func TestWorkdir_Apply_RequiresMode(t *testing.T) {
-	_, err := (&Client{}).Sandbox("box").Workdir().Apply(context.Background(), ApplyOptions{})
+	sb := newSandboxHandle(t, &store.Meta{
+		Name:    "box",
+		Agent:   "test",
+		Workdir: store.WorkdirMeta{HostPath: "/x", MountPath: "/x", Mode: store.DirModeCopy, BaselineSHA: "abc"},
+	})
+	_, err := sb.Workdir().Apply(context.Background(), ApplyOptions{})
 	require.Error(t, err)
 	var ue *sandbox.UsageError
 	require.ErrorAs(t, err, &ue, "unset apply mode must be a *UsageError")
@@ -29,22 +46,25 @@ func TestWorkdir_Apply_RequiresMode(t *testing.T) {
 
 // TestWorkdir_Apply_OverlayRefusesCommits verifies comply-or-complain (D29): an
 // :overlay workdir has no commit history, so ApplyModeCommits is refused with a
-// *UsageError rather than silently doing something else. The refusal precedes
-// any backend use, so a nil runtime suffices.
+// *UsageError rather than silently doing something else.
 func TestWorkdir_Apply_OverlayRefusesCommits(t *testing.T) {
-	tmpDir := t.TempDir()
-	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
-	require.NoError(t, os.MkdirAll(layout.SandboxDir("box"), 0750))
-	meta := &store.Meta{
+	sb := newSandboxHandle(t, &store.Meta{
 		Name:    "box",
 		Agent:   "test",
 		Workdir: store.WorkdirMeta{HostPath: "/x", MountPath: "/x", Mode: store.DirModeOverlay, BaselineSHA: "abc"},
-	}
-	require.NoError(t, store.SaveMeta(layout.SandboxDir("box"), meta))
-
-	c := &Client{layout: layout}
-	_, err := c.Sandbox("box").Workdir().Apply(context.Background(), ApplyOptions{Mode: ApplyModeCommits})
+	})
+	_, err := sb.Workdir().Apply(context.Background(), ApplyOptions{Mode: ApplyModeCommits})
 	require.Error(t, err)
 	var ue *sandbox.UsageError
 	require.ErrorAs(t, err, &ue, "ApplyModeCommits on an overlay workdir must be a *UsageError")
+}
+
+// TestClient_Sandbox_NotFoundHandle verifies the handle constructor itself
+// refuses an unknown name (F22) — the error surfaces here, not lazily inside a
+// later operation.
+func TestClient_Sandbox_NotFoundHandle(t *testing.T) {
+	tmpDir := t.TempDir()
+	c := &Client{layout: config.NewLayout(filepath.Join(tmpDir, ".yoloai"))}
+	_, err := c.Sandbox("ghost")
+	require.ErrorIs(t, err, ErrSandboxNotFound)
 }

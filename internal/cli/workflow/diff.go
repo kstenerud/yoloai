@@ -117,7 +117,11 @@ func runDiffCmd(cmd *cobra.Command, args []string) error {
 func diffSingle(cmd *cobra.Command, name string, paths []string, stat, nameOnly bool) error {
 	backend := cliutil.ResolveBackendForSandbox(name)
 	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
-		out, err := c.Sandbox(name).Workdir().Diff(ctx, yoloai.DiffOptions{Paths: paths, Stat: stat, NameOnly: nameOnly})
+		sb, err := c.Sandbox(name)
+		if err != nil {
+			return err
+		}
+		out, err := sb.Workdir().Diff(ctx, yoloai.DiffOptions{Paths: paths, Stat: stat, NameOnly: nameOnly})
 		if err != nil {
 			return err
 		}
@@ -156,7 +160,11 @@ func hasOverlayDirs(meta *store.Meta) bool {
 
 // requireOverlayRunning verifies the sandbox container is running (required for overlay ops).
 func requireOverlayRunning(ctx context.Context, c *yoloai.Client, name string) error {
-	info, err := c.Sandbox(name).Inspect(ctx)
+	sb, err := c.Sandbox(name)
+	if err != nil {
+		return fmt.Errorf(":overlay sandbox %s must be running for this operation — use 'yoloai start %s'", name, name)
+	}
+	info, err := sb.Inspect(ctx)
 	if err != nil {
 		return fmt.Errorf(":overlay sandbox %s must be running for this operation — use 'yoloai start %s'", name, name)
 	}
@@ -174,7 +182,11 @@ func diffOverlay(cmd *cobra.Command, name string, stat, nameOnly bool) error {
 		if err := requireOverlayRunning(ctx, c, name); err != nil {
 			return err
 		}
-		out, err := c.Sandbox(name).Workdir().Diff(ctx, yoloai.DiffOptions{Stat: stat, NameOnly: nameOnly})
+		sb, err := c.Sandbox(name)
+		if err != nil {
+			return err
+		}
+		out, err := sb.Workdir().Diff(ctx, yoloai.DiffOptions{Stat: stat, NameOnly: nameOnly})
 		if err != nil {
 			return err
 		}
@@ -375,7 +387,11 @@ func diffLogUncommitted(cmd *cobra.Command, name string, out io.Writer) {
 func diffRef(cmd *cobra.Command, name, ref string, stat bool) error {
 	backend := cliutil.ResolveBackendForSandbox(name)
 	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
-		out, err := c.Sandbox(name).Workdir().Diff(ctx, yoloai.DiffOptions{Ref: ref, Stat: stat})
+		sb, err := c.Sandbox(name)
+		if err != nil {
+			return err
+		}
+		out, err := sb.Workdir().Diff(ctx, yoloai.DiffOptions{Ref: ref, Stat: stat})
 		if err != nil {
 			return err
 		}
@@ -389,7 +405,11 @@ func agentRunningWarning(cmd *cobra.Command, name string) {
 	backend := cliutil.ResolveBackendForSandbox(name)
 	//nolint:errcheck // intentional: best-effort warning, failure here should not affect the diff command
 	_ = cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
-		info, err := c.Sandbox(name).Inspect(ctx)
+		sb, err := c.Sandbox(name)
+		if err != nil {
+			return nil //nolint:nilerr // best-effort warning; inspection failure should not affect the diff command
+		}
+		info, err := sb.Inspect(ctx)
 		if err != nil {
 			return nil //nolint:nilerr // best-effort warning; inspection failure should not affect the diff command
 		}

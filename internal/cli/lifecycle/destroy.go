@@ -180,7 +180,12 @@ func resolveDestroyArgs(ctx context.Context, c *yoloai.Client, args []string) ([
 func confirmDestroy(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, names []string) (done bool, err error) {
 	var warnings []string
 	for _, name := range names {
-		active, reason := c.Sandbox(name).HasActiveWork(ctx)
+		sb, err := c.Sandbox(name)
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("  %s: %v", name, err))
+			continue
+		}
+		active, reason := sb.HasActiveWork(ctx)
 		if active {
 			warnings = append(warnings, fmt.Sprintf("  %s: %s", name, reason))
 		}
@@ -220,7 +225,11 @@ func executeDestroy(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, n
 		var results []destroyResult
 		for _, name := range names {
 			slog.Info("destroying sandbox", "event", "sandbox.destroy", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
-			if err := c.Sandbox(name).Destroy(ctx, yoloai.DestroyOptions{Force: true}); err != nil {
+			sb, err := c.Sandbox(name)
+			if err == nil {
+				err = sb.Destroy(ctx, yoloai.DestroyOptions{Force: true})
+			}
+			if err != nil {
 				results = append(results, destroyResult{Name: name, Error: err.Error()})
 			} else {
 				slog.Info("sandbox destroyed", "event", "sandbox.destroy.complete", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
@@ -233,7 +242,11 @@ func executeDestroy(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, n
 	var errs []error
 	for _, name := range names {
 		slog.Info("destroying sandbox", "event", "sandbox.destroy", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
-		if err := c.Sandbox(name).Destroy(ctx, yoloai.DestroyOptions{Force: true}); err != nil {
+		sb, err := c.Sandbox(name)
+		if err == nil {
+			err = sb.Destroy(ctx, yoloai.DestroyOptions{Force: true})
+		}
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: destroy %s: %v\n", name, err) //nolint:errcheck // best-effort output
 			errs = append(errs, err)
 		} else {

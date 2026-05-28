@@ -28,7 +28,11 @@ func applyNoCommit(cmd *cobra.Command, name string, paths []string, meta *store.
 	var preview *yoloai.ApplyResult
 	err := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		var e error
-		preview, e = c.Sandbox(name).Workdir().Apply(ctx, yoloai.ApplyOptions{
+		sb, sbErr := c.Sandbox(name)
+		if sbErr != nil {
+			return sbErr
+		}
+		preview, e = sb.Workdir().Apply(ctx, yoloai.ApplyOptions{
 			Mode: yoloai.ApplyModeNoCommit, IncludeUncommitted: includeUncommitted, Paths: paths, DryRun: true,
 		})
 		return e
@@ -77,7 +81,11 @@ func applyNoCommit(cmd *cobra.Command, name string, paths []string, meta *store.
 	}
 
 	err = cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
-		_, e := c.Sandbox(name).Workdir().Apply(ctx, yoloai.ApplyOptions{
+		sb, e := c.Sandbox(name)
+		if e != nil {
+			return e
+		}
+		_, e = sb.Workdir().Apply(ctx, yoloai.ApplyOptions{
 			Mode: yoloai.ApplyModeNoCommit, IncludeUncommitted: includeUncommitted, Paths: paths, DryRun: false,
 		})
 		return e

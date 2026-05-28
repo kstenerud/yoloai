@@ -69,7 +69,11 @@ func runReset(cmd *cobra.Command, args []string, opts *resetOpts) error {
 	backend := cliutil.ResolveBackendForSandbox(name)
 	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		slog.Info("resetting sandbox", "event", "sandbox.reset", "sandbox", name, "restart", opts.restart, "clear_state", opts.clearState) //nolint:gosec // G706: name is validated by ValidateName
-		if err := c.Sandbox(name).Reset(ctx, yoloai.ResetOptions{
+		sb, err := c.Sandbox(name)
+		if err != nil {
+			return cliutil.SandboxErrorHint(name, err)
+		}
+		if err := sb.Reset(ctx, yoloai.ResetOptions{
 			RestartContainer: opts.restart,
 			ClearState:       opts.clearState,
 			KeepCache:        opts.keepCache,
@@ -89,14 +93,14 @@ func runReset(cmd *cobra.Command, args []string, opts *resetOpts) error {
 		}
 
 		if opts.attach {
-			return c.Sandbox(name).Attach(ctx, cliutil.IOStreams())
+			return sb.Attach(ctx, cliutil.IOStreams())
 		}
 
 		if opts.restart {
-			_, err := fmt.Fprintf(cmd.OutOrStdout(), "Sandbox %s reset\nRun 'yoloai attach %s' to reconnect\n", name, name)
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "Sandbox %s reset\nRun 'yoloai attach %s' to reconnect\n", name, name)
 			return err
 		}
-		_, err := fmt.Fprintf(cmd.OutOrStdout(), "Sandbox %s reset\n", name)
+		_, err = fmt.Fprintf(cmd.OutOrStdout(), "Sandbox %s reset\n", name)
 		return err
 	})
 }

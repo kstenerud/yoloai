@@ -13,23 +13,31 @@ import (
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 )
 
-// Sandbox is a name-scoped handle for a single sandbox. Methods on
-// the handle don't pre-validate that the sandbox exists — reads
-// happen lazily when individual operations are invoked, so the
-// caller gets a meaningful error from the operation that needs it.
+// Sandbox is a name-scoped handle for a single sandbox. The handle is
+// validated at construction (see Client.Sandbox), so methods on it can
+// assume the sandbox exists.
 //
 // Q-G resolution (Shape B): name-bound handles group per-sandbox
-// operations behind one accessor so the Client root stays
-// uncluttered. Today only Network() is exposed; the design also
-// reserves Workdir() and other sub-handles for future surface.
+// operations behind one accessor so the Client root stays uncluttered.
+// Sub-handles (Workdir, Network) are pure namespace expansion off a
+// validated *Sandbox — no IO, no error.
 type Sandbox struct {
 	c    *Client
 	name string
 }
 
-// Sandbox returns a sandbox-scoped handle.
-func (c *Client) Sandbox(name string) *Sandbox {
-	return &Sandbox{c: c, name: name}
+// Sandbox returns a sandbox-scoped handle, validating that the sandbox
+// exists. A missing name is rejected with ErrSandboxNotFound here — at
+// the point the caller typed the name — rather than lazily deep inside a
+// later operation (F22 / §4 parse-don't-validate; the Q-G design rejected
+// the GCS-style lazy handle since validation is local, not a network
+// round-trip). Existence is a sandbox-directory check; a corrupt meta.json
+// surfaces from the individual operation that reads it.
+func (c *Client) Sandbox(name string) (*Sandbox, error) {
+	if err := store.RequireSandboxDir(c.layout.SandboxDir(name)); err != nil {
+		return nil, err
+	}
+	return &Sandbox{c: c, name: name}, nil
 }
 
 // Name returns the sandbox name this handle is bound to. Useful for

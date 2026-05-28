@@ -65,7 +65,11 @@ func runStart(cmd *cobra.Command, args []string, opts *startOpts) error {
 	slog.Info("starting sandbox", "event", "sandbox.start", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
 	backend := cliutil.ResolveBackendForSandbox(name)
 	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
-		if err := c.Sandbox(name).Start(ctx, sandbox.StartOptions{
+		sb, err := c.Sandbox(name)
+		if err != nil {
+			return cliutil.SandboxErrorHint(name, err)
+		}
+		if err := sb.Start(ctx, sandbox.StartOptions{
 			Resume:       opts.resume,
 			Prompt:       opts.prompt,
 			PromptFile:   opts.promptFile,
@@ -83,9 +87,9 @@ func runStart(cmd *cobra.Command, args []string, opts *startOpts) error {
 		}
 
 		if opts.attach {
-			return c.Sandbox(name).Attach(ctx, cliutil.IOStreams())
+			return sb.Attach(ctx, cliutil.IOStreams())
 		}
-		_, err := fmt.Fprintf(cmd.OutOrStdout(), "Sandbox %s started\nRun 'yoloai attach %s' to reconnect\n", name, name)
+		_, err = fmt.Fprintf(cmd.OutOrStdout(), "Sandbox %s started\nRun 'yoloai attach %s' to reconnect\n", name, name)
 		return err
 	})
 }

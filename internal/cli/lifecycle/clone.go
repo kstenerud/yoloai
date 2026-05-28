@@ -45,13 +45,8 @@ func runClone(cmd *cobra.Command, args []string) error {
 	// backend may differ from src's, so this opens its own Client tied to
 	// dst's current backend.
 	if force {
-		if _, err := os.Stat(cliutil.Layout().SandboxDir(dst)); err == nil { //nolint:gosec // G703: dst is validated sandbox name
-			destBackend := cliutil.ResolveBackendForSandbox(dst)
-			if err := cliutil.WithClient(cmd, destBackend, func(ctx context.Context, c *yoloai.Client) error {
-				return c.Sandbox(dst).Destroy(ctx, yoloai.DestroyOptions{Force: true})
-			}); err != nil {
-				return fmt.Errorf("destroy existing destination: %w", err)
-			}
+		if err := forceDestroyIfExists(cmd, dst); err != nil {
+			return err
 		}
 	}
 
@@ -84,7 +79,11 @@ func runClone(cmd *cobra.Command, args []string) error {
 // Attach reaches for raw runtime via AttachToSandboxByName — Client doesn't
 // yet expose attach (see CONVENTIONS.md "Hybrid handlers").
 func runCloneStart(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, src, dst, prompt, promptFile string, attach bool) error {
-	if err := c.Sandbox(dst).Start(ctx, sandbox.StartOptions{
+	sb, err := c.Sandbox(dst)
+	if err != nil {
+		return err
+	}
+	if err := sb.Start(ctx, sandbox.StartOptions{
 		Prompt:     prompt,
 		PromptFile: promptFile,
 	}); err != nil {
@@ -105,6 +104,22 @@ func runCloneStart(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, sr
 		return nil
 	}
 	return cliutil.AttachToSandboxByName(cmd, dst)
+}
+
+// forceDestroyIfExists destroys the sandbox at dst if it already exists on disk.
+// The existing dst's backend may differ from src's, so this opens its own Client.
+func forceDestroyIfExists(cmd *cobra.Command, dst string) error {
+	if _, statErr := os.Stat(cliutil.Layout().SandboxDir(dst)); os.IsNotExist(statErr) { //nolint:gosec // G703: dst is validated sandbox name
+		return nil // does not exist — nothing to destroy
+	}
+	destBackend := cliutil.ResolveBackendForSandbox(dst)
+	return cliutil.WithClient(cmd, destBackend, func(ctx context.Context, c *yoloai.Client) error {
+		sb, err := c.Sandbox(dst)
+		if err != nil {
+			return err
+		}
+		return sb.Destroy(ctx, yoloai.DestroyOptions{Force: true})
+	})
 }
 
 // addCloneFlags registers the shared flags for clone commands.

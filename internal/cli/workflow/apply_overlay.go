@@ -85,7 +85,11 @@ func overlayApplyViaClient(cmd *cobra.Command, name string, backend runtime.Back
 			return runErr
 		}
 		var applyErr error
-		result, applyErr = c.Sandbox(name).Workdir().Apply(ctx, yoloai.ApplyOptions{
+		sb, sbErr := c.Sandbox(name)
+		if sbErr != nil {
+			return sbErr
+		}
+		result, applyErr = sb.Workdir().Apply(ctx, yoloai.ApplyOptions{
 			Mode:   yoloai.ApplyModeNoCommit,
 			Paths:  paths,
 			DryRun: dryRun,

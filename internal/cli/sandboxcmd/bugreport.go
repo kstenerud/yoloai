@@ -146,7 +146,14 @@ func WriteSandboxSectionsForFlag(w io.Writer, name, reportType string) {
 
 // writeBugReportSandboxDetail writes section 6: sandbox-specific detail.
 func writeBugReportSandboxDetail(ctx context.Context, w io.Writer, c *yoloai.Client, name, reportType string) {
-	info, err := c.Sandbox(name).Inspect(ctx)
+	sb, err := c.Sandbox(name)
+	if err != nil {
+		err = fmt.Errorf("sandbox handle: %w", err)
+	}
+	var info *sandbox.Info
+	if err == nil {
+		info, err = sb.Inspect(ctx)
+	}
 
 	fmt.Fprintln(w, "<details>")                         //nolint:errcheck
 	fmt.Fprintln(w, "<summary>Sandbox detail</summary>") //nolint:errcheck
@@ -246,7 +253,11 @@ func writeContainerLog(ctx context.Context, w io.Writer, c *yoloai.Client, name 
 	fmt.Fprintln(w, "**Container log:**") //nolint:errcheck
 	fmt.Fprintln(w)                       //nolint:errcheck
 
-	logs := c.Sandbox(name).ContainerLogs(ctx, containerLogTailLines)
+	sb, sbErr := c.Sandbox(name)
+	var logs string
+	if sbErr == nil {
+		logs = sb.ContainerLogs(ctx, containerLogTailLines)
+	}
 	fmt.Fprintln(w, "```") //nolint:errcheck
 	if logs == "" {
 		fmt.Fprintln(w, "*(no logs available)*") //nolint:errcheck
@@ -385,7 +396,11 @@ func writeBugReportAgentOutput(w io.Writer, name string) {
 // Unsafe-only because the captured pane may contain user prompts,
 // API responses, or other sensitive content the safe report sanitizes.
 func writeBugReportTerminalSnapshot(ctx context.Context, w io.Writer, c *yoloai.Client, name string) {
-	snap, err := c.Sandbox(name).CaptureTerminal(ctx, terminalSnapshotScrollback)
+	sb, err := c.Sandbox(name)
+	if err != nil {
+		return
+	}
+	snap, err := sb.CaptureTerminal(ctx, terminalSnapshotScrollback)
 	if err != nil {
 		// Sandbox not running, runtime error, etc. — silently skip.
 		return

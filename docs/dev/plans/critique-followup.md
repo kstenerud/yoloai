@@ -117,12 +117,17 @@ move to optional interfaces (`LogTailer`, `DiagHinter`,
 drop trivial impls. Callers use the existing helper-function pattern
 (`runtime.LogsFor(rt, ...)` etc.). Strict "core = universal" bar.
 
-### F22 — Strict `Sandbox(name)` validation
+### F22 — Strict `Sandbox(name)` validation — DONE (2026-05-28)
 
-`Client.Sandbox(name)` becomes `(*Sandbox, error)`. Loads meta + checks
-sandbox-dir existence upfront. Surfaces `ErrSandboxNotFound` where the
-caller typed the name. Matches `api_surface.go`'s Q-G design + §4
-parse-don't-validate.
+`Client.Sandbox(name)` is now `(*Sandbox, error)`, validating sandbox-dir
+existence upfront via `store.RequireSandboxDir` and surfacing
+`ErrSandboxNotFound` where the caller typed the name. Matches `api_surface.go`'s
+Q-G design + §4 parse-don't-validate. Implementation note: existence is a
+dir check, not a meta-load — that's the `ErrSandboxNotFound` surface, and it
+avoids a redundant double meta-read (ops load meta anyway; a corrupt meta.json
+surfaces from the op that reads it). ~55 call sites across `internal/` migrated
+to hoist `sb, err := c.Sandbox(name)`; sub-accessors (`Workdir()`/`Network()`)
+stay pure namespace expansion. See BREAKING-CHANGES F22 entry.
 
 ### F23 — Migrate all four cross-backend ops into SystemClient
 

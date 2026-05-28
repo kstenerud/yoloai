@@ -77,7 +77,11 @@ func (p *ProxyServer) ServeStdio(ctx context.Context) error {
 		return err
 	}
 
-	innerCmd, err := expandCmd(p.innerCmd, p.c.Sandbox(meta.Name).Dir(), meta)
+	sb, err := p.c.Sandbox(meta.Name)
+	if err != nil {
+		return fmt.Errorf("sandbox handle %q: %w", meta.Name, err)
+	}
+	innerCmd, err := expandCmd(p.innerCmd, sb.Dir(), meta)
 	if err != nil {
 		return fmt.Errorf("expand inner command: %w", err)
 	}
@@ -88,7 +92,15 @@ func (p *ProxyServer) ServeStdio(ctx context.Context) error {
 // ensureRunning guarantees the sandbox container is running, creating it if
 // needed. Returns the sandbox metadata for path template expansion.
 func (p *ProxyServer) ensureRunning(ctx context.Context) (*store.Meta, error) {
-	info, err := p.c.Sandbox(p.sandboxName).Inspect(ctx)
+	sb, sbErr := p.c.Sandbox(p.sandboxName)
+	if errors.Is(sbErr, sandbox.ErrSandboxNotFound) {
+		return p.createSandbox(ctx)
+	}
+	if sbErr != nil {
+		return nil, fmt.Errorf("sandbox handle %q: %w", p.sandboxName, sbErr)
+	}
+
+	info, err := sb.Inspect(ctx)
 
 	if errors.Is(err, sandbox.ErrSandboxNotFound) {
 		return p.createSandbox(ctx)
@@ -105,7 +117,7 @@ func (p *ProxyServer) ensureRunning(ctx context.Context) (*store.Meta, error) {
 
 	case sandbox.StatusStopped, sandbox.StatusRemoved:
 		// Container stopped or removed — restart it
-		if err := p.c.Sandbox(p.sandboxName).Start(ctx, sandbox.StartOptions{}); err != nil {
+		if err := sb.Start(ctx, sandbox.StartOptions{}); err != nil {
 			return nil, fmt.Errorf("start sandbox %q: %w", p.sandboxName, err)
 		}
 		return info.Meta, nil
@@ -137,7 +149,11 @@ func (p *ProxyServer) createSandbox(ctx context.Context) (*store.Meta, error) {
 		return nil, fmt.Errorf("create sandbox %q: %w", p.sandboxName, err)
 	}
 
-	info, err := p.c.Sandbox(p.sandboxName).Inspect(ctx)
+	sb, err := p.c.Sandbox(p.sandboxName)
+	if err != nil {
+		return nil, fmt.Errorf("sandbox handle %q after create: %w", p.sandboxName, err)
+	}
+	info, err := sb.Inspect(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("inspect sandbox %q after create: %w", p.sandboxName, err)
 	}
@@ -238,7 +254,10 @@ func (p *ProxyServer) run(ctx context.Context, in io.Reader, out io.Writer, _ *s
 	// outer reader and writer loops below see EOF and unwind.
 	execDone := make(chan error, 1)
 	go func() {
-		err := p.c.Sandbox(p.sandboxName).Exec(ctx, yoloai.ExecOptions{Command: innerCmd}, yoloai.IOStreams{In: innerInRead, Out: innerOutWrite, Err: os.Stderr})
+		sb, err := p.c.Sandbox(p.sandboxName)
+		if err == nil {
+			err = sb.Exec(ctx, yoloai.ExecOptions{Command: innerCmd}, yoloai.IOStreams{In: innerInRead, Out: innerOutWrite, Err: os.Stderr})
+		}
 		_ = innerOutWrite.Close()
 		_ = innerInRead.Close()
 		execDone <- err
@@ -434,7 +453,11 @@ func (p *ProxyServer) tryHandleLocalToolCall(
 func (p *ProxyServer) handleProxyDiff(args map[string]any) map[string]any {
 	stat, _ := args["stat"].(bool)
 
-	diff, err := p.c.Sandbox(p.sandboxName).Workdir().Diff(context.Background(), yoloai.DiffOptions{Stat: stat})
+	sb, err := p.c.Sandbox(p.sandboxName)
+	if err != nil {
+		return mcpTextContent(errorf("sandbox handle %q: %v", p.sandboxName, err))
+	}
+	diff, err := sb.Workdir().Diff(context.Background(), yoloai.DiffOptions{Stat: stat})
 	if err != nil {
 		return mcpTextContent(errorf("diff sandbox %q: %v", p.sandboxName, err))
 	}

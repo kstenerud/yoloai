@@ -200,7 +200,11 @@ func runApplyCommits(cmd *cobra.Command, name string, paths []string, meta *stor
 	var result *yoloai.ApplyResult
 	applyErr := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		var e error
-		result, e = c.Sandbox(name).Workdir().Apply(ctx, yoloai.ApplyOptions{
+		sb, sbErr := c.Sandbox(name)
+		if sbErr != nil {
+			return sbErr
+		}
+		result, e = sb.Workdir().Apply(ctx, yoloai.ApplyOptions{
 			Mode: yoloai.ApplyModeCommits, IncludeUncommitted: includeUncommitted, Paths: paths,
 		})
 		return e

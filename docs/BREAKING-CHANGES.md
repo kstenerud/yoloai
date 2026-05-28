@@ -165,6 +165,18 @@ move `ResetOptions.Restart` → `RestartContainer` and drop its `Name`.
 one accessor, drop the repeated `name` argument and the method-prefix sprawl, and
 make `Destroy`'s safety check atomic (typed refusal, no check-then-act gap).
 
+**F22 — `Client.Sandbox(name)` now validates and returns `(*Sandbox, error)`.**
+The handle constructor changed from `func (c *Client) Sandbox(name string) *Sandbox`
+to `func (c *Client) Sandbox(name string) (*Sandbox, error)`. A missing sandbox is
+rejected with `ErrSandboxNotFound` at construction — where the caller typed the
+name — rather than lazily deep inside a later operation (§4 parse-don't-validate;
+the Q-G design rejected the GCS-style lazy handle because local validation needs
+no network round-trip). Existence is a sandbox-directory check (`store.RequireSandboxDir`);
+a corrupt `meta.json` still surfaces from the individual operation that reads it.
+Migration: `c.Sandbox(name).Foo(…)` → `sb, err := c.Sandbox(name); if err != nil { … }; sb.Foo(…)`.
+The handle's sub-accessors (`Workdir()`, `Network()`) remain pure namespace
+expansion (no IO, no error).
+
 ### Public creation surface: `Create` takes `yoloai.CreateOptions`, `Backend` required, dirty workdir refused
 
 This reshapes the Go embedding API for sandbox creation (F1/F3/F4). The CLI is

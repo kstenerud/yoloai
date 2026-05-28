@@ -160,7 +160,11 @@ func AttachToSandboxByName(cmd *cobra.Command, name string) error {
 
 	backend := ResolveBackendForSandbox(name)
 	return WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
-		return c.Sandbox(name).Attach(ctx, IOStreams())
+		sb, err := c.Sandbox(name)
+		if err != nil {
+			return err
+		}
+		return sb.Attach(ctx, IOStreams())
 	})
 }
 

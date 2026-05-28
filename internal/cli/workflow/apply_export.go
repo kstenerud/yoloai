@@ -36,7 +36,11 @@ func runExport(cmd *cobra.Command, name string, meta *store.Meta, refs, paths []
 			hasUncommitted, _ = c.HasUncommittedChanges(ctx, name)
 		}
 		var exportErr error
-		result, exportErr = c.Sandbox(name).Workdir().Export(ctx, yoloai.ExportOptions{
+		sb, sbErr := c.Sandbox(name)
+		if sbErr != nil {
+			return sbErr
+		}
+		result, exportErr = sb.Workdir().Export(ctx, yoloai.ExportOptions{
 			Dir:                dir,
 			Refs:               refs,
 			Paths:              paths,

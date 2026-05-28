@@ -190,7 +190,11 @@ func (s *Server) handleSandboxStatus(ctx context.Context, req mcp.CallToolReques
 		return textResult(errorf("name is required")), nil
 	}
 
-	info, err := s.c.Sandbox(name).Inspect(ctx)
+	sb, err := s.c.Sandbox(name)
+	if err != nil {
+		return textResult(errorf("sandbox handle %q: %v", name, err)), nil
+	}
+	info, err := sb.Inspect(ctx)
 	if err != nil {
 		return textResult(errorf("inspect sandbox %q: %v", name, err)), nil
 	}
@@ -253,15 +257,20 @@ func (s *Server) handleSandboxDestroy(ctx context.Context, req mcp.CallToolReque
 		return textResult(errorf("name is required")), nil
 	}
 
+	sb, err := s.c.Sandbox(name)
+	if err != nil {
+		return textResult(errorf("sandbox handle %q: %v", name, err)), nil
+	}
+
 	if !force {
-		if active, reason := s.c.Sandbox(name).HasActiveWork(ctx); active {
+		if active, reason := sb.HasActiveWork(ctx); active {
 			return textResult(errorf("sandbox %q has unapplied changes (%s). Use force=true to destroy anyway.", name, reason)), nil
 		}
 	}
 
 	// Active-work gate-checked above when force was false; force here skips
 	// the typed *ActiveWorkError refusal.
-	if err := s.c.Sandbox(name).Destroy(ctx, yoloai.DestroyOptions{Force: true}); err != nil {
+	if err := sb.Destroy(ctx, yoloai.DestroyOptions{Force: true}); err != nil {
 		return textResult(errorf("destroy sandbox %q: %v", name, err)), nil
 	}
 
@@ -276,7 +285,11 @@ func (s *Server) handleSandboxDiff(_ context.Context, req mcp.CallToolRequest) (
 		return textResult(errorf("name is required")), nil
 	}
 
-	diff, err := s.c.Sandbox(name).Workdir().Diff(context.Background(), yoloai.DiffOptions{Stat: stat})
+	sb, err := s.c.Sandbox(name)
+	if err != nil {
+		return textResult(errorf("sandbox handle %q: %v", name, err)), nil
+	}
+	diff, err := sb.Workdir().Diff(context.Background(), yoloai.DiffOptions{Stat: stat})
 	if err != nil {
 		return textResult(errorf("diff sandbox %q: %v", name, err)), nil
 	}
@@ -301,7 +314,11 @@ func (s *Server) handleSandboxDiffFile(ctx context.Context, req mcp.CallToolRequ
 	// Workdir().Diff uses the Client's bound runtime and resolves
 	// copy-vs-overlay internally; for Docker / Podman / containerd that's
 	// host-side git (the patch package handles container-vs-host selection).
-	diff, err := s.c.Sandbox(name).Workdir().Diff(ctx, yoloai.DiffOptions{Paths: []string{path}})
+	sb, err := s.c.Sandbox(name)
+	if err != nil {
+		return textResult(errorf("sandbox handle %q: %v", name, err)), nil
+	}
+	diff, err := sb.Workdir().Diff(ctx, yoloai.DiffOptions{Paths: []string{path}})
 	if err != nil {
 		return textResult(errorf("diff file %q in sandbox %q: %v", path, name, err)), nil
 	}
@@ -325,7 +342,11 @@ func (s *Server) handleSandboxLog(_ context.Context, req mcp.CallToolRequest) (*
 		lines = 100
 	}
 
-	logPath := store.AgentLogPath(s.c.Sandbox(name).Dir())
+	sb, err := s.c.Sandbox(name)
+	if err != nil {
+		return textResult(errorf("sandbox handle %q: %v", name, err)), nil
+	}
+	logPath := store.AgentLogPath(sb.Dir())
 	output, err := tailFile(logPath, lines)
 	if err != nil {
 		return textResult(errorf("read log for sandbox %q: %v", name, err)), nil
@@ -349,7 +370,11 @@ func (s *Server) handleSandboxInput(ctx context.Context, req mcp.CallToolRequest
 		return textResult(errorf("text is required")), nil
 	}
 
-	if err := s.c.Sandbox(name).SendInput(ctx, text); err != nil {
+	sb, err := s.c.Sandbox(name)
+	if err != nil {
+		return textResult(errorf("sandbox handle %q: %v", name, err)), nil
+	}
+	if err := sb.SendInput(ctx, text); err != nil {
 		return textResult(errorf("send input to sandbox %q: %v", name, err)), nil
 	}
 
@@ -364,15 +389,20 @@ func (s *Server) handleSandboxReset(ctx context.Context, req mcp.CallToolRequest
 		return textResult(errorf("name is required")), nil
 	}
 
+	sb, err := s.c.Sandbox(name)
+	if err != nil {
+		return textResult(errorf("sandbox handle %q: %v", name, err)), nil
+	}
+
 	// If a new prompt is provided, write it to prompt.txt before resetting.
 	if prompt != "" {
-		promptPath := store.PromptFilePath(s.c.Sandbox(name).Dir())
+		promptPath := store.PromptFilePath(sb.Dir())
 		if err := fileutil.WriteFile(promptPath, []byte(prompt), 0600); err != nil {
 			return textResult(errorf("write prompt for sandbox %q: %v", name, err)), nil
 		}
 	}
 
-	if err := s.c.Sandbox(name).Reset(ctx, yoloai.ResetOptions{RestartContainer: true}); err != nil {
+	if err := sb.Reset(ctx, yoloai.ResetOptions{RestartContainer: true}); err != nil {
 		return textResult(errorf("reset sandbox %q: %v", name, err)), nil
 	}
 
@@ -385,7 +415,11 @@ func (s *Server) handleSandboxFilesList(_ context.Context, req mcp.CallToolReque
 		return textResult(errorf("name is required")), nil
 	}
 
-	filesDir := store.FilesDir(s.c.Sandbox(name).Dir())
+	sb, err := s.c.Sandbox(name)
+	if err != nil {
+		return textResult(errorf("sandbox handle %q: %v", name, err)), nil
+	}
+	filesDir := store.FilesDir(sb.Dir())
 	entries, err := os.ReadDir(filesDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -420,7 +454,11 @@ func (s *Server) handleSandboxFilesRead(_ context.Context, req mcp.CallToolReque
 		return textResult(errorf("%v", err)), nil
 	}
 
-	path := filepath.Join(store.FilesDir(s.c.Sandbox(name).Dir()), filename)
+	sb, err := s.c.Sandbox(name)
+	if err != nil {
+		return textResult(errorf("sandbox handle %q: %v", name, err)), nil
+	}
+	path := filepath.Join(store.FilesDir(sb.Dir()), filename)
 	data, err := os.ReadFile(path) //nolint:gosec // path validated by validateFilename
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -447,7 +485,11 @@ func (s *Server) handleSandboxFilesWrite(_ context.Context, req mcp.CallToolRequ
 		return textResult(errorf("%v", err)), nil
 	}
 
-	filesDir := store.FilesDir(s.c.Sandbox(name).Dir())
+	sb, err := s.c.Sandbox(name)
+	if err != nil {
+		return textResult(errorf("sandbox handle %q: %v", name, err)), nil
+	}
+	filesDir := store.FilesDir(sb.Dir())
 	if err := fileutil.MkdirAll(filesDir, 0750); err != nil {
 		return textResult(errorf("create files dir for sandbox %q: %v", name, err)), nil
 	}
