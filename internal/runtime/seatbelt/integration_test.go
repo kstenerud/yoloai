@@ -41,7 +41,7 @@ func TestSeatbelt_New_ReturnsRuntime(t *testing.T) {
 func TestSeatbelt_Descriptor_AdvertisesHostFilesystem(t *testing.T) {
 	rt, _ := seatbeltSetup(t)
 	desc := rt.Descriptor()
-	assert.Equal(t, "seatbelt", desc.Name)
+	assert.Equal(t, runtime.BackendSeatbelt, desc.Name)
 	assert.True(t, desc.Capabilities.HostFilesystem,
 		"seatbelt should declare HostFilesystem (process runs against host paths)")
 	assert.False(t, desc.Capabilities.ContainerAttach,

@@ -46,7 +46,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, sandboxName, meta.Name)
 	assert.Equal(t, agent.AgentTest, meta.Agent)
-	assert.Equal(t, "copy", meta.Workdir.Mode)
+	assert.Equal(t, store.DirModeCopy, meta.Workdir.Mode)
 	assert.NotEmpty(t, meta.Workdir.BaselineSHA)
 
 	workDir := store.WorkDir(mgr.Layout().SandboxDir(sandboxName), meta.Workdir.HostPath)
@@ -146,7 +146,7 @@ func TestIntegration_CreateNoStart(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "nostart", meta.Name)
 	assert.Equal(t, agent.AgentTest, meta.Agent)
-	assert.Equal(t, "copy", meta.Workdir.Mode)
+	assert.Equal(t, store.DirModeCopy, meta.Workdir.Mode)
 	assert.NotEmpty(t, meta.Workdir.BaselineSHA)
 
 	// Verify work copy contains our file
@@ -175,7 +175,7 @@ func TestIntegration_CopyMode(t *testing.T) {
 
 	meta, err := store.LoadMeta(mgr.Layout().SandboxDir("copymode"))
 	require.NoError(t, err)
-	assert.Equal(t, "copy", meta.Workdir.Mode)
+	assert.Equal(t, store.DirModeCopy, meta.Workdir.Mode)
 
 	workDir := store.WorkDir(mgr.Layout().SandboxDir("copymode"), meta.Workdir.HostPath)
 
@@ -208,7 +208,7 @@ func TestIntegration_RWMode(t *testing.T) {
 
 	meta, err := store.LoadMeta(mgr.Layout().SandboxDir("rwmode"))
 	require.NoError(t, err)
-	assert.Equal(t, "rw", meta.Workdir.Mode)
+	assert.Equal(t, store.DirModeRW, meta.Workdir.Mode)
 }
 
 // Q-U (2026-05-25): aux directories can no longer be :copy or
@@ -259,7 +259,7 @@ func TestIntegration_AuxDirRW(t *testing.T) {
 	meta, err := store.LoadMeta(mgr.Layout().SandboxDir("auxrw"))
 	require.NoError(t, err)
 	require.Len(t, meta.Directories, 1)
-	assert.Equal(t, "rw", meta.Directories[0].Mode)
+	assert.Equal(t, store.DirModeRW, meta.Directories[0].Mode)
 }
 
 func TestIntegration_AuxDirRO(t *testing.T) {
@@ -281,7 +281,7 @@ func TestIntegration_AuxDirRO(t *testing.T) {
 	meta, err := store.LoadMeta(mgr.Layout().SandboxDir("auxro"))
 	require.NoError(t, err)
 	require.Len(t, meta.Directories, 1)
-	assert.Equal(t, "ro", meta.Directories[0].Mode)
+	assert.Equal(t, store.DirModeRO, meta.Directories[0].Mode)
 }
 
 func TestIntegration_Replace(t *testing.T) {

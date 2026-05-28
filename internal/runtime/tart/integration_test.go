@@ -24,7 +24,7 @@ func TestTart_New_ReturnsRuntime(t *testing.T) {
 func TestTart_Descriptor_AdvertisesVMCapabilities(t *testing.T) {
 	rt, _ := tartSetup(t)
 	desc := rt.Descriptor()
-	assert.Equal(t, "tart", desc.Name)
+	assert.Equal(t, "tart", string(desc.Name))
 	assert.False(t, desc.Capabilities.HostFilesystem,
 		"tart runs the agent inside a VM, not on the host filesystem")
 	assert.False(t, desc.Capabilities.ContainerAttach,

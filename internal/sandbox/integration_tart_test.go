@@ -99,7 +99,7 @@ func TestIntegrationTart_FullLifecycle(t *testing.T) {
 	assert.Equal(t, sandboxName, meta.Name)
 	assert.Equal(t, agent.AgentTest, meta.Agent)
 	assert.Equal(t, runtime.BackendTart, meta.Backend)
-	assert.Equal(t, "copy", meta.Workdir.Mode)
+	assert.Equal(t, store.DirModeCopy, meta.Workdir.Mode)
 	assert.NotEmpty(t, meta.Workdir.BaselineSHA, "baseline SHA should be set after VM work dir setup")
 
 	// Verify work directory path is VM-local (not VirtioFS)
@@ -246,7 +246,7 @@ func TestIntegrationTart_MultipleAuxDirs(t *testing.T) {
 	require.Len(t, meta.Directories, 2, "should have two aux directories")
 
 	for i, dir := range meta.Directories {
-		assert.Equal(t, "rw", dir.Mode)
+		assert.Equal(t, store.DirModeRW, dir.Mode)
 		// :rw is a live bind-mount; there's no baseline to capture.
 		assert.Empty(t, dir.BaselineSHA, "aux dir %d should have no baseline (rw)", i)
 
