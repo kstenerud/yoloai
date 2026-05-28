@@ -18,12 +18,34 @@ object (the only attributes callers read are `returncode`, `stdout`,
 
 from __future__ import annotations
 
+import os
+import shutil
 import subprocess
 from typing import Any, Callable
 
 Runner = Callable[..., "subprocess.CompletedProcess[str]"]
 
 _runner: Runner = subprocess.run
+
+
+def _resolve_tmux_bin() -> str:
+    """Return the absolute path to tmux.
+
+    Resolved once at import time so transient PATH-search failures during
+    macOS security scans (observed after xcodebuild -runFirstLaunch on Tart
+    VMs) don't cause FileNotFoundError later when tmux is actually called.
+    Falls back to well-known Homebrew paths if shutil.which returns nothing.
+    """
+    found = shutil.which("tmux")
+    if found:
+        return found
+    for p in ("/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux"):
+        if os.path.isfile(p):
+            return p
+    return "tmux"  # let subprocess produce the error with a clear message
+
+
+_TMUX_BIN: str = _resolve_tmux_bin()
 
 
 def set_runner(fn: Runner) -> None:
@@ -45,7 +67,7 @@ def run(cmd: list[str], **kwargs: Any) -> "subprocess.CompletedProcess[str]":
 
 def tmux(*args: str, socket: str | None = None) -> "subprocess.CompletedProcess[str]":
     """Run a tmux command, optionally with a per-sandbox socket."""
-    cmd: list[str] = ["tmux"]
+    cmd: list[str] = [_TMUX_BIN]
     if socket:
         cmd.extend(["-S", socket])
     cmd.extend(args)

@@ -72,6 +72,7 @@ row to the index.
 | `yoloai new --attach` hangs after "Sandbox created"; Python setup never completes | [Tart: mount_map uses Docker paths, triggering macOS automount](#tart-mount_map-uses-docker-style-paths-triggering-macos-automount-hang) |
 | `FileNotFoundError` at `get_working_dir()` / agent starts in wrong directory | [Tart: workdir setup races Python startup](#tart-vm-workdir-setup-races-python-startup) |
 | `yoloai apply` fails: `git add: git [add -A]: exit status 128: … index.lock: File exists` while agent is running | [Docker/Podman: agent git and apply git race on index.lock](#dockerpodman-agent-git-and-apply-git-race-on-indexlock) |
+| `FileNotFoundError: 'tmux'` in `sandbox-setup.py::setup_tmux_session` on Tart VM | [Tart: transient PATH failure makes tmux unresolvable at call time](#tart-transient-path-failure-makes-tmux-unresolvable-at-call-time) |
 
 ---
 
@@ -1325,5 +1326,31 @@ so `tmux set-environment` is skipped; secrets reach the agent via the explicit
 `read_secrets` / `signal_secrets_consumed` vs `get_working_dir`);
 `internal/sandbox/create.go` (ordering of `launchContainer` vs
 `executeVMWorkDirSetup`).
+
+---
+
+### Tart: transient PATH failure makes tmux unresolvable at call time
+
+**Symptom:** `sandbox-setup.py` crashes with `FileNotFoundError: [Errno 2] No such
+file or directory: 'tmux'` inside `setup_tmux_session`. The Tart VM is booted
+and running; tmux is installed; the crash is intermittent and usually follows
+the `xcodebuild -runFirstLaunch` completion log line in `setup.log`.
+
+**Explanation:** macOS's security scanning (XPC/Gatekeeper background activity)
+kicks in after `xcodebuild -runFirstLaunch` completes, transiently shadowing or
+blocking executable PATH searches for a short window. During this window,
+`shutil.which("tmux")` returns `None` and `subprocess.run(["tmux", ...])` raises
+`FileNotFoundError`. Because the PATH search happened at call time (not import
+time), the failed run leaves no tmux binary resolved.
+
+**Fix:** `tmux_io.py` now resolves the tmux absolute path **once at module import
+time** via `shutil.which()` + known Homebrew fallback paths
+(`/opt/homebrew/bin/tmux`, `/usr/local/bin/tmux`, `/usr/bin/tmux`). All tmux
+invocations (in `tmux_io.tmux()` and the `subprocess.run` calls in
+`sandbox-setup.py::setup_tmux_session`) use the pre-resolved `_TMUX_BIN`
+constant. Import happens before xcodebuild runs, so the PATH scan succeeds.
+
+**Code:** `internal/runtime/monitor/tmux_io.py` (`_resolve_tmux_bin`,
+`_TMUX_BIN`); `internal/runtime/monitor/sandbox-setup.py::setup_tmux_session`.
 
 ---

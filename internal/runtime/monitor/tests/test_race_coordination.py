@@ -18,6 +18,7 @@ behavior.
 from __future__ import annotations
 
 import itertools
+import os
 import subprocess
 import threading
 import time
@@ -147,7 +148,7 @@ def test_lifecycle_banner_orders_after_agent_launch(
     # Only the banner tmux calls must come after launch_agent; on_start
     # commands run before pane_ready.wait() and are allowed to interleave.
     banner_seqs = [seq for seq, name, cmd in entries
-                   if name == "lifecycle" and cmd and cmd[0] == "tmux"]
+                   if name == "lifecycle" and cmd and os.path.basename(cmd[0]) == "tmux"]
     assert launch_seqs, f"expected launch_agent calls in log; got {entries}"
     assert banner_seqs, f"expected lifecycle banner tmux calls in log; got {entries}"
     assert max(launch_seqs) < min(banner_seqs), (
@@ -197,7 +198,7 @@ def test_lifecycle_commands_run_before_banner_within_thread(
         seq for seq, _, cmd in entries
         if len(cmd) >= 3 and cmd[0] == "sh" and "echo lifecycle-marker" in cmd[2]
     ]
-    banner_seqs = [seq for seq, _, cmd in entries if cmd and cmd[0] == "tmux"]
+    banner_seqs = [seq for seq, _, cmd in entries if cmd and os.path.basename(cmd[0]) == "tmux"]
     assert cmd_seqs, f"expected lifecycle on_start command in log; got {entries}"
     assert banner_seqs, f"expected banner tmux calls in log; got {entries}"
     assert max(cmd_seqs) < min(banner_seqs), (
@@ -231,7 +232,7 @@ def test_no_banner_when_no_lifecycle(tmp_path: Path, recorder: CallRecorder) -> 
     assert not lifecycle_thread.is_alive(), "lifecycle thread did not finish"
 
     entries = recorder.snapshot()
-    banner_seqs = [seq for seq, _, cmd in entries if cmd and cmd[0] == "tmux"]
+    banner_seqs = [seq for seq, _, cmd in entries if cmd and os.path.basename(cmd[0]) == "tmux"]
     assert not banner_seqs, (
         f"expected no banner tmux calls with no lifecycle config; got {entries}"
     )

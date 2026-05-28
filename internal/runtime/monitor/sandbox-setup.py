@@ -687,11 +687,11 @@ def setup_tmux_session(cfg, yoloai_dir, socket=None):
     session_args = ["new-session", "-d", "-s", "main", "-x", "200", "-y", "50"]
 
     if tmux_conf in ("default", "default+host"):
-        cmd = ["tmux"] + base_args + ["-f", tmux_conf_file] + session_args
+        cmd = [tmux_io._TMUX_BIN] + base_args + ["-f", tmux_conf_file] + session_args
     elif tmux_conf == "host" and host_tmux_conf and os.path.isfile(host_tmux_conf):
-        cmd = ["tmux"] + base_args + ["-f", host_tmux_conf] + session_args
+        cmd = [tmux_io._TMUX_BIN] + base_args + ["-f", host_tmux_conf] + session_args
     else:
-        cmd = ["tmux"] + base_args + session_args
+        cmd = [tmux_io._TMUX_BIN] + base_args + session_args
 
     log_debug("tmux.start", f"starting tmux session (tmux_conf={tmux_conf})")
     result = tmux_io.run(cmd, capture_output=True, text=True)

@@ -1864,6 +1864,12 @@ def main() -> int:
                     result = run_test(ctx, test_name, lambda t, s=spec: test_fn(t, s), attempt=attempt)
                     if result.passed:
                         break
+            # On VM backends, a failed test can leave a running VM that consumes
+            # one of the macOS 2-VM slots and blocks subsequent VM tests. Destroy
+            # sandboxes immediately after all retries are exhausted (state is
+            # already preserved under log_dir/sandboxes/ at this point).
+            if not result.passed and spec.is_vm:
+                _destroy_retry_sandboxes(ctx, sandbox_count_before)
 
     # -------------------------------------------------------------------------
     # Non-matrix tests (full tier only)
