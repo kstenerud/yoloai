@@ -1109,7 +1109,7 @@ def test_full_workflow(t: Test, spec: BackendSpec) -> None:
     t.assert_ok(r, "diff")
     t.assert_in("output.txt", r.stdout, "diff output")
 
-    r = t.run("apply", name, "--yes", "--include-wip")
+    r = t.run("apply", name, "--yes", "--include-uncommitted")
     t.assert_ok(r, "apply")
 
     output_file = project / "output.txt"
@@ -1172,7 +1172,7 @@ def test_stop_start(t: Test, spec: BackendSpec) -> None:
     t.assert_in("output2.txt", r.stdout, "diff after restart")
 
     # Apply and verify the file lands in the project directory
-    r = t.run("apply", name, "--yes", "--include-wip")
+    r = t.run("apply", name, "--yes", "--include-uncommitted")
     t.assert_ok(r, "apply after restart")
 
     output2 = project / "output2.txt"
