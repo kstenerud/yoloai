@@ -1766,15 +1766,32 @@ def main() -> int:
     atexit.register(cleanup, ctx)
 
     is_linux = sys.platform.startswith("linux")
-    if ctx.full:
+    # When filters are active, use the full matrix so --test / --backend can
+    # reach backends (e.g. seatbelt) that live outside the base tier.
+    if ctx.full or ctx.test_filter or ctx.backend_filter:
         matrix = FULL_LINUX_BACKENDS if is_linux else FULL_MACOS_BACKENDS
     else:
         matrix = BASE_LINUX_BACKENDS if is_linux else BASE_MACOS_BACKENDS
 
-    # Build the full list of specs to check: default backend + matrix (deduped).
+    # Build the list of specs to prereq-check.  When explicit filters narrow
+    # the run, restrict prereq checking (and image builds) to only the backends
+    # that will actually be exercised.  DEFAULT_BACKEND is always included
+    # because it supplies the credentials check.
     matrix_labels = {s.label for s in matrix}
+    def _spec_needed(spec: "BackendSpec") -> bool:
+        if not (ctx.test_filter or ctx.backend_filter):
+            return True
+        if ctx.backend_filter and spec.label in ctx.backend_filter:
+            return True
+        if ctx.test_filter:
+            for test_prefix in ("full_workflow", "stop_start", "isolation_check"):
+                if f"{test_prefix}/{spec.label}" in ctx.test_filter:
+                    return True
+        return False
+
     all_specs = [DEFAULT_BACKEND] + [
-        s for s in matrix if s.label != DEFAULT_BACKEND.label
+        s for s in matrix
+        if s.label != DEFAULT_BACKEND.label and _spec_needed(s)
     ]
 
     tier = "full" if ctx.full else "base"
