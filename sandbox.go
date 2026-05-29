@@ -10,6 +10,7 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox"
+	"github.com/kstenerud/yoloai/internal/sandbox/lifecycle"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 )
 
@@ -86,30 +87,30 @@ func (s *Sandbox) Dir() string {
 
 // Stop stops the running container without destroying the sandbox.
 func (s *Sandbox) Stop(ctx context.Context) error {
-	return s.c.manager.Stop(ctx, s.name)
+	return lifecycle.Stop(ctx, s.c.deps(), s.name)
 }
 
 // Start launches (or relaunches) the container for the existing sandbox.
 // The sandbox must exist on disk; use Client.Run/Create for a new one.
 func (s *Sandbox) Start(ctx context.Context, opts StartOptions) (*StartResult, error) {
-	return s.c.manager.Start(ctx, s.name, opts)
+	return lifecycle.Start(ctx, s.c.deps(), s.name, opts)
 }
 
 // Restart stops then starts the sandbox, applying opts on the way back up
 // (e.g. StartOptions.Isolation to bring it up under a different isolation
 // mode, StartOptions.Resume to re-feed the prompt).
 func (s *Sandbox) Restart(ctx context.Context, opts StartOptions) (*StartResult, error) {
-	if err := s.c.manager.Stop(ctx, s.name); err != nil {
+	if err := lifecycle.Stop(ctx, s.c.deps(), s.name); err != nil {
 		return nil, err
 	}
-	return s.c.manager.Start(ctx, s.name, opts)
+	return lifecycle.Start(ctx, s.c.deps(), s.name, opts)
 }
 
 // Reset re-copies the workdir into the sandbox, resets the diff baseline, and
 // (per opts) optionally restarts the container and wipes agent state. Use for
 // "start over" workflows that abandon the agent's current changes.
 func (s *Sandbox) Reset(ctx context.Context, opts ResetOptions) (*ResetResult, error) {
-	return s.c.manager.Reset(ctx, opts.toInternal(s.name))
+	return lifecycle.Reset(ctx, s.c.deps(), opts.toInternal(s.name))
 }
 
 // HasActiveWork reports whether destroying the sandbox would lose work — a
@@ -118,7 +119,7 @@ func (s *Sandbox) Reset(ctx context.Context, opts ResetOptions) (*ResetResult, e
 // use it to pre-flight a batch of sandboxes before prompting once. For the
 // single-sandbox case prefer Destroy's atomic typed refusal.
 func (s *Sandbox) HasActiveWork(ctx context.Context) (bool, string) {
-	return s.c.manager.NeedsConfirmation(ctx, s.name)
+	return lifecycle.NeedsConfirmation(ctx, s.c.deps(), s.name)
 }
 
 // Destroy removes the sandbox and its container. With opts.Force false it
@@ -131,7 +132,7 @@ func (s *Sandbox) Destroy(ctx context.Context, opts DestroyOptions) (*DestroyRes
 			return nil, sandbox.NewActiveWorkError("%s", reason)
 		}
 	}
-	return s.c.manager.Destroy(ctx, s.name)
+	return lifecycle.Destroy(ctx, s.c.deps(), s.name)
 }
 
 // SendInput appends text to the running sandbox's tmux session as if the user

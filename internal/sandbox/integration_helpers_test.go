@@ -15,6 +15,7 @@ import (
 	dockerrt "github.com/kstenerud/yoloai/internal/runtime/docker"
 	sandbox "github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/create"
+	"github.com/kstenerud/yoloai/internal/sandbox/lifecycle"
 	"github.com/kstenerud/yoloai/internal/sandbox/state"
 	"github.com/kstenerud/yoloai/internal/testutil"
 	"github.com/stretchr/testify/require"
@@ -25,6 +26,22 @@ import (
 // Engine.Create). EnsureSetup is already performed by integrationSetup.
 func createSandbox(ctx context.Context, mgr *sandbox.Engine, opts sandbox.CreateOptions) (string, error) {
 	return create.Run(ctx, state.Deps{Runtime: mgr.Runtime(), Layout: mgr.Layout(), Input: strings.NewReader("")}, opts)
+}
+
+func stopSandbox(ctx context.Context, mgr *sandbox.Engine, name string) error {
+	return lifecycle.Stop(ctx, state.Deps{Runtime: mgr.Runtime(), Layout: mgr.Layout(), Input: strings.NewReader("")}, name)
+}
+
+func startSandbox(ctx context.Context, mgr *sandbox.Engine, name string, opts sandbox.StartOptions) (*sandbox.StartResult, error) {
+	return lifecycle.Start(ctx, state.Deps{Runtime: mgr.Runtime(), Layout: mgr.Layout(), Input: strings.NewReader("")}, name, opts)
+}
+
+func resetSandbox(ctx context.Context, mgr *sandbox.Engine, opts sandbox.ResetOptions) (*sandbox.ResetResult, error) {
+	return lifecycle.Reset(ctx, state.Deps{Runtime: mgr.Runtime(), Layout: mgr.Layout(), Input: strings.NewReader("")}, opts)
+}
+
+func destroySandbox(ctx context.Context, mgr *sandbox.Engine, name string) (*sandbox.DestroyResult, error) {
+	return lifecycle.Destroy(ctx, state.Deps{Runtime: mgr.Runtime(), Layout: mgr.Layout(), Input: strings.NewReader("")}, name)
 }
 
 // integrationSetup sets HOME to a temp dir, connects to Docker,

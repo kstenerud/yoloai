@@ -85,7 +85,7 @@ func TestIntegrationTart_FullLifecycle(t *testing.T) {
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { mgr.Destroy(ctx, sandboxName) }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { destroySandbox(ctx, mgr, sandboxName) }) //nolint:errcheck // test cleanup
 
 	// Wait for VM to become active
 	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName(sandboxName), 90*time.Second)
@@ -164,7 +164,7 @@ func TestIntegrationTart_FullLifecycle(t *testing.T) {
 	assert.Contains(t, string(applied), "fmt.Println")
 
 	// Stop VM: suspends the VM, freeing the quota slot.
-	require.NoError(t, mgr.Stop(ctx, sandboxName))
+	require.NoError(t, stopSandbox(ctx, mgr, sandboxName))
 
 	status, err = sandbox.DetectStatus(ctx, mgr.Runtime(), store.InstanceName(sandboxName), mgr.Layout().SandboxDir(sandboxName))
 	require.NoError(t, err)
@@ -173,7 +173,7 @@ func TestIntegrationTart_FullLifecycle(t *testing.T) {
 	// Restart: attempts to resume from suspend, but Apple VZ framework cannot restore
 	// VMs with VirtioFS (--dir) mounts from a snapshot (VZErrorDomain Code=12), so
 	// lifecycle falls back to destroy + recreate from staging. VM is fresh on start.
-	_, startErr := mgr.Start(ctx, sandboxName, sandbox.StartOptions{})
+	_, startErr := startSandbox(ctx, mgr, sandboxName, sandbox.StartOptions{})
 	require.NoError(t, startErr)
 	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName(sandboxName), 90*time.Second)
 
@@ -189,7 +189,7 @@ func TestIntegrationTart_FullLifecycle(t *testing.T) {
 	assert.Empty(t, result.Stdout, "work dir should be clean after recreate from staging")
 
 	// Reset should restore clean state
-	_, resetErr := mgr.Reset(ctx, sandbox.ResetOptions{Name: sandboxName})
+	_, resetErr := resetSandbox(ctx, mgr, sandbox.ResetOptions{Name: sandboxName})
 	require.NoError(t, resetErr)
 
 	// Wait for VM to be active again after reset
@@ -202,7 +202,7 @@ func TestIntegrationTart_FullLifecycle(t *testing.T) {
 	assert.Empty(t, result.Stdout, "work dir should be clean after reset")
 
 	// Destroy
-	_, destroyErr := mgr.Destroy(ctx, sandboxName)
+	_, destroyErr := destroySandbox(ctx, mgr, sandboxName)
 	require.NoError(t, destroyErr)
 	assert.NoDirExists(t, sandboxDir)
 
@@ -239,7 +239,7 @@ func TestIntegrationTart_MultipleAuxDirs(t *testing.T) {
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { mgr.Destroy(ctx, sandboxName) }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { destroySandbox(ctx, mgr, sandboxName) }) //nolint:errcheck // test cleanup
 
 	// Wait for VM to become active
 	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName(sandboxName), 90*time.Second)
@@ -288,7 +288,7 @@ func TestIntegrationTart_GitCorruption(t *testing.T) {
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { mgr.Destroy(ctx, sandboxName) }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { destroySandbox(ctx, mgr, sandboxName) }) //nolint:errcheck // test cleanup
 
 	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName(sandboxName), 90*time.Second)
 
@@ -313,7 +313,7 @@ func TestIntegrationTart_GitCorruption(t *testing.T) {
 	}
 
 	// Reset and verify git still works
-	_, resetErr := mgr.Reset(ctx, sandbox.ResetOptions{Name: sandboxName})
+	_, resetErr := resetSandbox(ctx, mgr, sandbox.ResetOptions{Name: sandboxName})
 	require.NoError(t, resetErr)
 	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName(sandboxName), 90*time.Second)
 
@@ -355,7 +355,7 @@ func TestIntegrationTart_VMLocalStorageVerification(t *testing.T) {
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { mgr.Destroy(ctx, sandboxName) }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { destroySandbox(ctx, mgr, sandboxName) }) //nolint:errcheck // test cleanup
 
 	meta, err := store.LoadMeta(mgr.Layout().SandboxDir(sandboxName))
 	require.NoError(t, err)
@@ -367,7 +367,7 @@ func TestIntegrationTart_VMLocalStorageVerification(t *testing.T) {
 		"Tart work dir should not be on VirtioFS")
 
 	// Start VM and verify directory exists on local storage
-	_, startErr := mgr.Start(ctx, sandboxName, sandbox.StartOptions{})
+	_, startErr := startSandbox(ctx, mgr, sandboxName, sandbox.StartOptions{})
 	require.NoError(t, startErr)
 	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName(sandboxName), 90*time.Second)
 

@@ -76,14 +76,14 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	assert.Contains(t, diffResult, "fmt")
 
 	// Stop container and verify
-	require.NoError(t, mgr.Stop(ctx, sandboxName))
+	require.NoError(t, stopSandbox(ctx, mgr, sandboxName))
 
 	status, err = sandbox.DetectStatus(ctx, mgr.Runtime(), store.InstanceName(sandboxName), mgr.Layout().SandboxDir(sandboxName))
 	require.NoError(t, err)
 	assert.Equal(t, sandbox.StatusStopped, status)
 
 	// Restart container and verify
-	_, startErr := mgr.Start(ctx, sandboxName, sandbox.StartOptions{})
+	_, startErr := startSandbox(ctx, mgr, sandboxName, sandbox.StartOptions{})
 	require.NoError(t, startErr)
 	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName(sandboxName), 15*time.Second)
 
@@ -117,7 +117,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	assert.Contains(t, string(applied), "fmt.Println")
 
 	// Destroy
-	_, destroyErr := mgr.Destroy(ctx, sandboxName)
+	_, destroyErr := destroySandbox(ctx, mgr, sandboxName)
 	require.NoError(t, destroyErr)
 	assert.NoDirExists(t, sandboxDir)
 
@@ -139,7 +139,7 @@ func TestIntegration_CreateNoStart(t *testing.T) {
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { mgr.Destroy(ctx, "nostart") }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { destroySandbox(ctx, mgr, "nostart") }) //nolint:errcheck // test cleanup
 
 	sandboxDir := mgr.Layout().SandboxDir("nostart")
 	assert.DirExists(t, sandboxDir)
@@ -173,7 +173,7 @@ func TestIntegration_CopyMode(t *testing.T) {
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { mgr.Destroy(ctx, "copymode") }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { destroySandbox(ctx, mgr, "copymode") }) //nolint:errcheck // test cleanup
 
 	meta, err := store.LoadMeta(mgr.Layout().SandboxDir("copymode"))
 	require.NoError(t, err)
@@ -206,7 +206,7 @@ func TestIntegration_RWMode(t *testing.T) {
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { mgr.Destroy(ctx, "rwmode") }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { destroySandbox(ctx, mgr, "rwmode") }) //nolint:errcheck // test cleanup
 
 	meta, err := store.LoadMeta(mgr.Layout().SandboxDir("rwmode"))
 	require.NoError(t, err)
@@ -256,7 +256,7 @@ func TestIntegration_AuxDirRW(t *testing.T) {
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { mgr.Destroy(ctx, "auxrw") }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { destroySandbox(ctx, mgr, "auxrw") }) //nolint:errcheck // test cleanup
 
 	meta, err := store.LoadMeta(mgr.Layout().SandboxDir("auxrw"))
 	require.NoError(t, err)
@@ -278,7 +278,7 @@ func TestIntegration_AuxDirRO(t *testing.T) {
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { mgr.Destroy(ctx, "auxro") }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { destroySandbox(ctx, mgr, "auxro") }) //nolint:errcheck // test cleanup
 
 	meta, err := store.LoadMeta(mgr.Layout().SandboxDir("auxro"))
 	require.NoError(t, err)
@@ -299,7 +299,7 @@ func TestIntegration_Replace(t *testing.T) {
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { mgr.Destroy(ctx, "replaceme") }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { destroySandbox(ctx, mgr, "replaceme") }) //nolint:errcheck // test cleanup
 
 	// Replace with new sandbox
 	_, err = createSandbox(ctx, mgr, sandbox.CreateOptions{
@@ -330,7 +330,7 @@ func TestIntegration_Reset(t *testing.T) {
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { mgr.Destroy(ctx, "resettest") }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { destroySandbox(ctx, mgr, "resettest") }) //nolint:errcheck // test cleanup
 
 	// Wait for container to become active
 	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName("resettest"), 15*time.Second)
@@ -347,7 +347,7 @@ func TestIntegration_Reset(t *testing.T) {
 	))
 
 	// Reset
-	_, resetErr := mgr.Reset(ctx, sandbox.ResetOptions{Name: "resettest"})
+	_, resetErr := resetSandbox(ctx, mgr, sandbox.ResetOptions{Name: "resettest"})
 	require.NoError(t, resetErr)
 
 	// Reset is synchronous (stop+restore+start completes before returning), so
@@ -373,7 +373,7 @@ func TestIntegration_Exec(t *testing.T) {
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { mgr.Destroy(ctx, "exectest") }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { destroySandbox(ctx, mgr, "exectest") }) //nolint:errcheck // test cleanup
 
 	// Wait for container to become active
 	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName("exectest"), 15*time.Second)
@@ -397,7 +397,7 @@ func TestIntegration_DiffClean(t *testing.T) {
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { mgr.Destroy(ctx, "diffclean") }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { destroySandbox(ctx, mgr, "diffclean") }) //nolint:errcheck // test cleanup
 
 	diffResult, err := patch.GenerateDiff(ctx, patch.DiffOptions{Name: "diffclean", Layout: mgr.Layout(), Runtime: mgr.Runtime()})
 	require.NoError(t, err)
@@ -416,7 +416,7 @@ func TestIntegration_DiffWithChanges(t *testing.T) {
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { mgr.Destroy(ctx, "diffchanges") }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { destroySandbox(ctx, mgr, "diffchanges") }) //nolint:errcheck // test cleanup
 
 	meta, err := store.LoadMeta(mgr.Layout().SandboxDir("diffchanges"))
 	require.NoError(t, err)
@@ -446,7 +446,7 @@ func TestIntegration_ApplyPatch(t *testing.T) {
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { mgr.Destroy(ctx, "applypatch") }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { destroySandbox(ctx, mgr, "applypatch") }) //nolint:errcheck // test cleanup
 
 	meta, err := store.LoadMeta(mgr.Layout().SandboxDir("applypatch"))
 	require.NoError(t, err)
@@ -493,7 +493,7 @@ func TestIntegration_Prompt(t *testing.T) {
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { mgr.Destroy(ctx, "prompttest") }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { destroySandbox(ctx, mgr, "prompttest") }) //nolint:errcheck // test cleanup
 
 	sandboxDir := mgr.Layout().SandboxDir("prompttest")
 	meta, err := store.LoadMeta(sandboxDir)
@@ -520,7 +520,7 @@ func TestIntegration_ResourceLimits(t *testing.T) {
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { mgr.Destroy(ctx, "reslimits") }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { destroySandbox(ctx, mgr, "reslimits") }) //nolint:errcheck // test cleanup
 
 	meta, err := store.LoadMeta(mgr.Layout().SandboxDir("reslimits"))
 	require.NoError(t, err)
@@ -542,7 +542,7 @@ func TestIntegration_PortForwarding(t *testing.T) {
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { mgr.Destroy(ctx, "portfwd") }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { destroySandbox(ctx, mgr, "portfwd") }) //nolint:errcheck // test cleanup
 
 	meta, err := store.LoadMeta(mgr.Layout().SandboxDir("portfwd"))
 	require.NoError(t, err)
@@ -564,8 +564,8 @@ func TestIntegration_MultiSandbox(t *testing.T) {
 		require.NoError(t, err)
 	}
 	t.Cleanup(func() {
-		mgr.Destroy(ctx, "multi-a") //nolint:errcheck // test cleanup
-		mgr.Destroy(ctx, "multi-b") //nolint:errcheck // test cleanup
+		destroySandbox(ctx, mgr, "multi-a") //nolint:errcheck // test cleanup
+		destroySandbox(ctx, mgr, "multi-b") //nolint:errcheck // test cleanup
 	})
 
 	// Both should exist
@@ -600,7 +600,7 @@ func TestIntegration_DestroyCleanup(t *testing.T) {
 	sandboxDir := mgr.Layout().SandboxDir("destroyme")
 	assert.DirExists(t, sandboxDir)
 
-	_, destroyErr := mgr.Destroy(ctx, "destroyme")
+	_, destroyErr := destroySandbox(ctx, mgr, "destroyme")
 	require.NoError(t, destroyErr)
 	assert.NoDirExists(t, sandboxDir)
 
@@ -626,7 +626,7 @@ func TestIntegration_NetworkIsolation(t *testing.T) {
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { mgr.Destroy(ctx, "netisolated") }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { destroySandbox(ctx, mgr, "netisolated") }) //nolint:errcheck // test cleanup
 
 	// Verify runtime-config.json has network_isolated: true so the test
 	// can't pass vacuously (e.g., if the config field were never written).
@@ -677,7 +677,7 @@ func TestIntegration_ReadOnlyMountVerified(t *testing.T) {
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { mgr.Destroy(ctx, "romount") }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { destroySandbox(ctx, mgr, "romount") }) //nolint:errcheck // test cleanup
 
 	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName("romount"), 15*time.Second)
 
@@ -720,7 +720,7 @@ func TestIntegration_CredentialInjection(t *testing.T) {
 	})
 	require.NoError(t, err)
 	_ = meta
-	t.Cleanup(func() { mgr.Destroy(ctx, "credinject") }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { destroySandbox(ctx, mgr, "credinject") }) //nolint:errcheck // test cleanup
 
 	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName("credinject"), 15*time.Second)
 
@@ -783,7 +783,7 @@ func TestIntegration_AgentStubWorkflow(t *testing.T) {
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { mgr.Destroy(ctx, "stubworkflow") }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { destroySandbox(ctx, mgr, "stubworkflow") }) //nolint:errcheck // test cleanup
 
 	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName("stubworkflow"), 15*time.Second)
 
@@ -835,8 +835,8 @@ func TestIntegration_Clone(t *testing.T) {
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		mgr.Destroy(ctx, "clone-a") //nolint:errcheck // test cleanup
-		mgr.Destroy(ctx, "clone-b") //nolint:errcheck // test cleanup
+		destroySandbox(ctx, mgr, "clone-a") //nolint:errcheck // test cleanup
+		destroySandbox(ctx, mgr, "clone-b") //nolint:errcheck // test cleanup
 	})
 
 	// Seed a change in A's work copy
@@ -889,7 +889,7 @@ func TestIntegration_Overlay(t *testing.T) {
 		ovlEncoded := store.EncodePath(projectDir)
 		mgr.Runtime().Exec(ctx, store.InstanceName("overlay-integ"), //nolint:errcheck // best-effort
 			[]string{"rm", "-rf", "/yoloai/overlay/" + ovlEncoded + "/ovlwork"}, "root")
-		mgr.Destroy(ctx, "overlay-integ") //nolint:errcheck // test cleanup
+		destroySandbox(ctx, mgr, "overlay-integ") //nolint:errcheck // test cleanup
 	})
 
 	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName("overlay-integ"), 15*time.Second)

@@ -1,10 +1,9 @@
-package sandbox
+package lifecycle
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,60 +17,17 @@ import (
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox/runtimeconfig"
+	"github.com/kstenerud/yoloai/internal/sandbox/state"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/internal/testutil"
+	"github.com/kstenerud/yoloai/internal/workspace"
 )
 
-// lifecycleMockRuntime extends mockRuntime for lifecycle tests.
-type lifecycleMockRuntime struct {
-	mockRuntime
-	stopFn    func(ctx context.Context, name string) error
-	startFn   func(ctx context.Context, name string) error
-	removeFn  func(ctx context.Context, name string) error
-	inspectFn func(ctx context.Context, name string) (runtime.InstanceInfo, error)
-	execFn    func(ctx context.Context, name string, cmd []string, user string) (runtime.ExecResult, error)
-}
-
-func (m *lifecycleMockRuntime) Stop(ctx context.Context, name string) error {
-	if m.stopFn != nil {
-		return m.stopFn(ctx, name)
-	}
-	return nil
-}
-
-func (m *lifecycleMockRuntime) Start(ctx context.Context, name string) error {
-	if m.startFn != nil {
-		return m.startFn(ctx, name)
-	}
-	return nil
-}
-
-func (m *lifecycleMockRuntime) Remove(ctx context.Context, name string) error {
-	if m.removeFn != nil {
-		return m.removeFn(ctx, name)
-	}
-	return nil
-}
-
-func (m *lifecycleMockRuntime) Inspect(ctx context.Context, name string) (runtime.InstanceInfo, error) {
-	if m.inspectFn != nil {
-		return m.inspectFn(ctx, name)
-	}
-	return runtime.InstanceInfo{}, errMockNotImplemented
-}
-
-func (m *lifecycleMockRuntime) Exec(ctx context.Context, name string, cmd []string, user string) (runtime.ExecResult, error) {
-	if m.execFn != nil {
-		return m.execFn(ctx, name, cmd, user)
-	}
-	return m.mockRuntime.Exec(ctx, name, cmd, user)
-}
-
-// newLifecycleMgr creates a Engine with the given mock runtime and a discard output.
-// tmpDir is the test's t.TempDir(); the Engine's Layout is rooted at tmpDir/.yoloai
-// so it operates on the same tree as createTestSandbox writes to.
-func newLifecycleMgr(rt *lifecycleMockRuntime, tmpDir string) *Engine {
+// newLifecycleDeps builds a state.Deps backed by the given mock runtime and
+// a layout rooted at tmpDir/.yoloai — mirrors what the Engine would build.
+func newLifecycleDeps(rt runtime.Runtime, tmpDir string) state.Deps {
 	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
-	return NewEngine(rt, slog.Default(), strings.NewReader(""), WithLayout(layout))
+	return state.Deps{Runtime: rt, Layout: layout, Input: strings.NewReader("")}
 }
 
 // createTestSandbox creates a sandbox directory with environment.json for lifecycle tests.
@@ -93,6 +49,42 @@ func createTestSandbox(t *testing.T, tmpDir, name, hostPath string, mode store.D
 	require.NoError(t, store.SaveMeta(sandboxDir, meta))
 }
 
+// createRWSandbox creates a minimal :rw mode sandbox directory structure for tests.
+func createRWSandbox(t *testing.T, tmpDir, name, hostPath string) {
+	t.Helper()
+	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
+	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
+	meta := &store.Meta{
+		Name:      name,
+		Agent:     "test",
+		CreatedAt: time.Now(),
+		Workdir: store.WorkdirMeta{
+			HostPath:  hostPath,
+			MountPath: hostPath,
+			Mode:      "rw",
+		},
+	}
+	require.NoError(t, store.SaveMeta(sandboxDir, meta))
+}
+
+// gitHEAD returns the HEAD commit SHA for the git repo at dir.
+func gitHEAD(t *testing.T, dir string) string {
+	t.Helper()
+	sha, err := workspace.HeadSHA(dir)
+	require.NoError(t, err)
+	return sha
+}
+
+// noticeText joins a result's notice messages for substring assertions.
+func noticeText(ns []Notice) string {
+	var b strings.Builder
+	for _, n := range ns {
+		b.WriteString(n.Message)
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
 // Stop tests
 
 func TestStop_Running(t *testing.T) {
@@ -108,8 +100,8 @@ func TestStop_Running(t *testing.T) {
 		},
 	}
 
-	mgr := newLifecycleMgr(mock, tmpDir)
-	err := mgr.Stop(context.Background(), "test-stop")
+	d := newLifecycleDeps(mock, tmpDir)
+	err := Stop(context.Background(), d, "test-stop")
 	require.NoError(t, err)
 	assert.True(t, stopCalled)
 }
@@ -126,8 +118,8 @@ func TestStop_AlreadyStopped(t *testing.T) {
 		},
 	}
 
-	mgr := newLifecycleMgr(mock, tmpDir)
-	err := mgr.Stop(context.Background(), "test-stop-already")
+	d := newLifecycleDeps(mock, tmpDir)
+	err := Stop(context.Background(), d, "test-stop-already")
 	assert.NoError(t, err) // idempotent
 }
 
@@ -143,8 +135,8 @@ func TestStop_ContainerRemoved(t *testing.T) {
 		},
 	}
 
-	mgr := newLifecycleMgr(mock, tmpDir)
-	err := mgr.Stop(context.Background(), "test-stop-removed")
+	d := newLifecycleDeps(mock, tmpDir)
+	err := Stop(context.Background(), d, "test-stop-removed")
 	assert.NoError(t, err) // idempotent
 }
 
@@ -152,9 +144,9 @@ func TestStop_SandboxNotFound(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	mock := &lifecycleMockRuntime{}
-	mgr := newLifecycleMgr(mock, tmpDir)
-	err := mgr.Stop(context.Background(), "nonexistent")
-	assert.ErrorIs(t, err, ErrSandboxNotFound)
+	d := newLifecycleDeps(mock, tmpDir)
+	err := Stop(context.Background(), d, "nonexistent")
+	assert.ErrorIs(t, err, store.ErrSandboxNotFound)
 }
 
 // Start tests
@@ -170,27 +162,16 @@ func TestStart_AlreadyRunning(t *testing.T) {
 		},
 	}
 
-	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
-	mgr := NewEngine(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
+	d := newLifecycleDeps(mock, tmpDir)
 
 	// DetectStatus will call Inspect (running=true),
 	// then try Exec for tmux. Since our mock returns errMockNotImplemented
 	// for exec, DetectStatus defaults to StatusActive.
-	res, err := mgr.Start(context.Background(), "test-start-running", StartOptions{})
+	res, err := Start(context.Background(), d, "test-start-running", StartOptions{})
 	require.NoError(t, err)
 	require.NotNil(t, res)
 	assert.Contains(t, noticeText(res.Notices), "already running",
 		"already-running status is now returned as a notice, not written to output")
-}
-
-// noticeText joins a result's notice messages for substring assertions.
-func noticeText(ns []Notice) string {
-	var b strings.Builder
-	for _, n := range ns {
-		b.WriteString(n.Message)
-		b.WriteString("\n")
-	}
-	return b.String()
 }
 
 func TestStart_Stopped(t *testing.T) {
@@ -209,11 +190,11 @@ func TestStart_Stopped(t *testing.T) {
 		},
 	}
 
-	mgr := newLifecycleMgr(mock, tmpDir)
+	d := newLifecycleDeps(mock, tmpDir)
 
 	// After remove, Start routes to recreateContainer which fails
 	// (no runtime-config.json) — same pattern as TestStart_Removed.
-	_, err := mgr.Start(context.Background(), "test-start-stopped", StartOptions{})
+	_, err := Start(context.Background(), d, "test-start-stopped", StartOptions{})
 	assert.Error(t, err)
 	assert.True(t, removeCalled, "should remove stopped container before recreating")
 	assert.Contains(t, err.Error(), store.RuntimeConfigFile)
@@ -223,9 +204,9 @@ func TestStart_SandboxNotFound(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	mock := &lifecycleMockRuntime{}
-	mgr := newLifecycleMgr(mock, tmpDir)
-	_, err := mgr.Start(context.Background(), "nonexistent", StartOptions{})
-	assert.ErrorIs(t, err, ErrSandboxNotFound)
+	d := newLifecycleDeps(mock, tmpDir)
+	_, err := Start(context.Background(), d, "nonexistent", StartOptions{})
+	assert.ErrorIs(t, err, store.ErrSandboxNotFound)
 }
 
 func TestStart_Removed(t *testing.T) {
@@ -239,11 +220,11 @@ func TestStart_Removed(t *testing.T) {
 		},
 	}
 
-	mgr := newLifecycleMgr(mock, tmpDir)
+	d := newLifecycleDeps(mock, tmpDir)
 
 	// recreateContainer will fail because there's no runtime-config.json,
 	// but we're testing that Start routes to recreateContainer for StatusRemoved.
-	_, err := mgr.Start(context.Background(), "test-start-removed", StartOptions{})
+	_, err := Start(context.Background(), d, "test-start-removed", StartOptions{})
 	assert.Error(t, err)
 	// Should be a recreateContainer error (runtime-config.json missing), not a routing error
 	assert.Contains(t, err.Error(), store.RuntimeConfigFile)
@@ -261,8 +242,8 @@ func TestStart_Resume_RequiresPrompt(t *testing.T) {
 		},
 	}
 
-	mgr := newLifecycleMgr(mock, tmpDir)
-	_, err := mgr.Start(context.Background(), "test-resume-noprompt", StartOptions{Resume: true})
+	d := newLifecycleDeps(mock, tmpDir)
+	_, err := Start(context.Background(), d, "test-resume-noprompt", StartOptions{Resume: true})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "--resume requires a sandbox created with --prompt")
 }
@@ -323,8 +304,8 @@ func TestStart_Resume_DoneStatus(t *testing.T) {
 		return runtime.ExecResult{ExitCode: 1}, fmt.Errorf("mock error")
 	}
 
-	mgr := newLifecycleMgr(mock, tmpDir)
-	_, _ = mgr.Start(context.Background(), name, StartOptions{Resume: true})
+	d := newLifecycleDeps(mock, tmpDir)
+	_, _ = Start(context.Background(), d, name, StartOptions{Resume: true})
 	// The sendResumePrompt exec might fail but the respawn should have happened
 	// We just check that the respawn used interactive command (no headless prompt)
 
@@ -385,12 +366,12 @@ func TestStart_Resume_StoppedStatus(t *testing.T) {
 		},
 	}
 
-	mgr := newLifecycleMgr(mock, tmpDir)
+	d := newLifecycleDeps(mock, tmpDir)
 
 	// Start with resume will call prepareResumeFiles then recreateContainer.
 	// recreateContainer will fail (no work dir, no secrets etc.) but we can check
 	// that resume-prompt.txt was created and runtime-config.json was patched.
-	_, _ = mgr.Start(context.Background(), name, StartOptions{Resume: true})
+	_, _ = Start(context.Background(), d, name, StartOptions{Resume: true})
 
 	// Verify runtime-config.json was patched to interactive command
 	updatedCfgData, err := os.ReadFile(filepath.Join(sandboxDir, store.RuntimeConfigFile)) //nolint:gosec // test file in controlled temp dir
@@ -420,8 +401,8 @@ func TestNeedsConfirmation_Running(t *testing.T) {
 		},
 	}
 
-	mgr := newLifecycleMgr(mock, tmpDir)
-	needs, reason := mgr.NeedsConfirmation(context.Background(), "test-confirm-running")
+	d := newLifecycleDeps(mock, tmpDir)
+	needs, reason := NeedsConfirmation(context.Background(), d, "test-confirm-running")
 	assert.True(t, needs)
 	assert.Equal(t, "agent is still running", reason)
 }
@@ -436,10 +417,10 @@ func TestNeedsConfirmation_ChangesExist(t *testing.T) {
 	workDir := filepath.Join(sandboxDir, "work", store.EncodePath(hostPath))
 	require.NoError(t, os.MkdirAll(workDir, 0750))
 
-	initGitRepo(t, workDir)
-	writeTestFile(t, workDir, "file.txt", "original")
-	gitAdd(t, workDir, ".")
-	gitCommit(t, workDir, "initial")
+	testutil.InitGitRepo(t, workDir)
+	testutil.WriteFile(t, workDir, "file.txt", "original")
+	testutil.GitAdd(t, workDir, ".")
+	testutil.GitCommit(t, workDir, "initial")
 
 	meta := &store.Meta{
 		Name:      name,
@@ -454,7 +435,7 @@ func TestNeedsConfirmation_ChangesExist(t *testing.T) {
 	require.NoError(t, store.SaveMeta(sandboxDir, meta))
 
 	// Make changes in work dir
-	writeTestFile(t, workDir, "file.txt", "modified")
+	testutil.WriteFile(t, workDir, "file.txt", "modified")
 
 	mock := &lifecycleMockRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
@@ -463,8 +444,8 @@ func TestNeedsConfirmation_ChangesExist(t *testing.T) {
 		},
 	}
 
-	mgr := newLifecycleMgr(mock, tmpDir)
-	needs, reason := mgr.NeedsConfirmation(context.Background(), "test-confirm-changes")
+	d := newLifecycleDeps(mock, tmpDir)
+	needs, reason := NeedsConfirmation(context.Background(), d, "test-confirm-changes")
 	assert.True(t, needs)
 	assert.Equal(t, "unapplied changes exist", reason)
 }
@@ -479,10 +460,10 @@ func TestNeedsConfirmation_NoChanges(t *testing.T) {
 	workDir := filepath.Join(sandboxDir, "work", store.EncodePath(hostPath))
 	require.NoError(t, os.MkdirAll(workDir, 0750))
 
-	initGitRepo(t, workDir)
-	writeTestFile(t, workDir, "file.txt", "content")
-	gitAdd(t, workDir, ".")
-	gitCommit(t, workDir, "initial")
+	testutil.InitGitRepo(t, workDir)
+	testutil.WriteFile(t, workDir, "file.txt", "content")
+	testutil.GitAdd(t, workDir, ".")
+	testutil.GitCommit(t, workDir, "initial")
 
 	meta := &store.Meta{
 		Name:      name,
@@ -502,8 +483,8 @@ func TestNeedsConfirmation_NoChanges(t *testing.T) {
 		},
 	}
 
-	mgr := newLifecycleMgr(mock, tmpDir)
-	needs, reason := mgr.NeedsConfirmation(context.Background(), "test-confirm-clean")
+	d := newLifecycleDeps(mock, tmpDir)
+	needs, reason := NeedsConfirmation(context.Background(), d, "test-confirm-clean")
 	assert.False(t, needs)
 	assert.Empty(t, reason)
 }
@@ -516,12 +497,12 @@ func TestDestroy_RemovesDir(t *testing.T) {
 	createTestSandbox(t, tmpDir, "test-destroy", "/tmp/project", "copy")
 
 	mock := &lifecycleMockRuntime{}
-	mgr := newLifecycleMgr(mock, tmpDir)
+	d := newLifecycleDeps(mock, tmpDir)
 
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", "test-destroy")
 	assert.DirExists(t, sandboxDir)
 
-	_, err := mgr.Destroy(context.Background(), "test-destroy")
+	_, err := Destroy(context.Background(), d, "test-destroy")
 	require.NoError(t, err)
 	assert.NoDirExists(t, sandboxDir)
 }
@@ -532,11 +513,11 @@ func TestDestroy_RemovesLockFile(t *testing.T) {
 	createTestSandbox(t, tmpDir, "test-destroy-lock", "/tmp/project", "copy")
 
 	mock := &lifecycleMockRuntime{}
-	mgr := newLifecycleMgr(mock, tmpDir)
+	d := newLifecycleDeps(mock, tmpDir)
 
-	lockPath := mgr.layout.SandboxLockPath("test-destroy-lock")
+	lockPath := d.Layout.SandboxLockPath("test-destroy-lock")
 
-	_, err := mgr.Destroy(context.Background(), "test-destroy-lock")
+	_, err := Destroy(context.Background(), d, "test-destroy-lock")
 	require.NoError(t, err)
 	assert.NoFileExists(t, lockPath, "destroy should remove the per-sandbox lock file")
 }
@@ -545,8 +526,8 @@ func TestDestroy_SandboxNotFound(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	mock := &lifecycleMockRuntime{}
-	mgr := newLifecycleMgr(mock, tmpDir)
-	_, err := mgr.Destroy(context.Background(), "nonexistent")
+	d := newLifecycleDeps(mock, tmpDir)
+	_, err := Destroy(context.Background(), d, "nonexistent")
 	assert.NoError(t, err)
 }
 
@@ -558,7 +539,7 @@ func TestReset_RecopiesWorkdir(t *testing.T) {
 	// Create original source directory
 	origDir := filepath.Join(tmpDir, "original")
 	require.NoError(t, os.MkdirAll(origDir, 0750))
-	writeTestFile(t, origDir, "file.txt", "original content\n")
+	testutil.WriteFile(t, origDir, "file.txt", "original content\n")
 
 	// Create sandbox with work copy
 	name := "test-reset"
@@ -571,14 +552,14 @@ func TestReset_RecopiesWorkdir(t *testing.T) {
 	filesDir := filepath.Join(sandboxDir, "files")
 	require.NoError(t, os.MkdirAll(cacheDir, 0750))
 	require.NoError(t, os.MkdirAll(filesDir, 0750))
-	writeTestFile(t, cacheDir, "cached.txt", "cached data\n")
-	writeTestFile(t, filesDir, "shared.txt", "shared data\n")
+	testutil.WriteFile(t, cacheDir, "cached.txt", "cached data\n")
+	testutil.WriteFile(t, filesDir, "shared.txt", "shared data\n")
 
 	// Copy original to work dir and create baseline
-	writeTestFile(t, workDir, "file.txt", "original content\n")
-	initGitRepo(t, workDir)
-	gitAdd(t, workDir, ".")
-	gitCommit(t, workDir, "yoloai baseline")
+	testutil.WriteFile(t, workDir, "file.txt", "original content\n")
+	testutil.InitGitRepo(t, workDir)
+	testutil.GitAdd(t, workDir, ".")
+	testutil.GitCommit(t, workDir, "yoloai baseline")
 	sha := gitHEAD(t, workDir)
 
 	meta := &store.Meta{
@@ -595,7 +576,7 @@ func TestReset_RecopiesWorkdir(t *testing.T) {
 	require.NoError(t, store.SaveMeta(sandboxDir, meta))
 
 	// Modify work copy
-	writeTestFile(t, workDir, "file.txt", "modified by agent\n")
+	testutil.WriteFile(t, workDir, "file.txt", "modified by agent\n")
 
 	// Container not running → auto-upgrades to restart.
 	// Stop/Start will eventually fail (no runtime-config.json), but
@@ -609,11 +590,11 @@ func TestReset_RecopiesWorkdir(t *testing.T) {
 		},
 	}
 
-	mgr := newLifecycleMgr(mock, tmpDir)
+	d := newLifecycleDeps(mock, tmpDir)
 
 	// Reset will re-copy and re-baseline, then fail at Start (recreateContainer
 	// needs runtime-config.json). That's OK — we verify the re-copy happened.
-	_, _ = mgr.Reset(context.Background(), ResetOptions{Name: name})
+	_, _ = Reset(context.Background(), d, ResetOptions{Name: name})
 
 	// Verify work copy was re-copied from original
 	content, err := os.ReadFile(filepath.Join(workDir, "file.txt")) //nolint:gosec // G304: test file path
@@ -638,7 +619,7 @@ func TestReset_State(t *testing.T) {
 
 	origDir := filepath.Join(tmpDir, "original")
 	require.NoError(t, os.MkdirAll(origDir, 0750))
-	writeTestFile(t, origDir, "file.txt", "content\n")
+	testutil.WriteFile(t, origDir, "file.txt", "content\n")
 
 	name := "test-reset-state"
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
@@ -648,12 +629,12 @@ func TestReset_State(t *testing.T) {
 	require.NoError(t, os.MkdirAll(agentStateDir, 0750))
 
 	// Add content to agent-runtime
-	writeTestFile(t, agentStateDir, "session.json", `{"key":"value"}`)
+	testutil.WriteFile(t, agentStateDir, "session.json", `{"key":"value"}`)
 
-	writeTestFile(t, workDir, "file.txt", "content\n")
-	initGitRepo(t, workDir)
-	gitAdd(t, workDir, ".")
-	gitCommit(t, workDir, "yoloai baseline")
+	testutil.WriteFile(t, workDir, "file.txt", "content\n")
+	testutil.InitGitRepo(t, workDir)
+	testutil.GitAdd(t, workDir, ".")
+	testutil.GitCommit(t, workDir, "yoloai baseline")
 	sha := gitHEAD(t, workDir)
 
 	meta := &store.Meta{
@@ -678,9 +659,9 @@ func TestReset_State(t *testing.T) {
 		},
 	}
 
-	mgr := newLifecycleMgr(mock, tmpDir)
+	d := newLifecycleDeps(mock, tmpDir)
 	// --state implies --restart
-	_, _ = mgr.Reset(context.Background(), ResetOptions{Name: name, ClearState: true})
+	_, _ = Reset(context.Background(), d, ResetOptions{Name: name, ClearState: true})
 
 	// agent-runtime dir should exist with only settings.json (re-applied by
 	// ensureContainerSettings after clean wipe)
@@ -702,9 +683,9 @@ func TestReset_RWMode_Error(t *testing.T) {
 	createRWSandbox(t, tmpDir, "test-reset-rw", hostDir)
 
 	mock := &lifecycleMockRuntime{}
-	mgr := newLifecycleMgr(mock, tmpDir)
+	d := newLifecycleDeps(mock, tmpDir)
 
-	_, err := mgr.Reset(context.Background(), ResetOptions{Name: "test-reset-rw"})
+	_, err := Reset(context.Background(), d, ResetOptions{Name: "test-reset-rw"})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), ":rw directories")
 }
@@ -715,17 +696,17 @@ func TestReset_OriginalMissing(t *testing.T) {
 	// Create original dir, then delete it
 	origDir := filepath.Join(tmpDir, "vanished")
 	require.NoError(t, os.MkdirAll(origDir, 0750))
-	writeTestFile(t, origDir, "file.txt", "content\n")
+	testutil.WriteFile(t, origDir, "file.txt", "content\n")
 
 	name := "test-reset-missing"
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
 	workDir := filepath.Join(sandboxDir, "work", store.EncodePath(origDir))
 	require.NoError(t, os.MkdirAll(workDir, 0750))
 
-	writeTestFile(t, workDir, "file.txt", "content\n")
-	initGitRepo(t, workDir)
-	gitAdd(t, workDir, ".")
-	gitCommit(t, workDir, "yoloai baseline")
+	testutil.WriteFile(t, workDir, "file.txt", "content\n")
+	testutil.InitGitRepo(t, workDir)
+	testutil.GitAdd(t, workDir, ".")
+	testutil.GitCommit(t, workDir, "yoloai baseline")
 	sha := gitHEAD(t, workDir)
 
 	meta := &store.Meta{
@@ -753,9 +734,9 @@ func TestReset_OriginalMissing(t *testing.T) {
 		},
 	}
 
-	mgr := newLifecycleMgr(mock, tmpDir)
+	d := newLifecycleDeps(mock, tmpDir)
 	// Container not running → auto-upgrades to restart
-	_, err := mgr.Reset(context.Background(), ResetOptions{Name: name})
+	_, err := Reset(context.Background(), d, ResetOptions{Name: name})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "original directory no longer exists")
 }
@@ -772,7 +753,7 @@ func TestReset_InPlace_SyncsWorkdir(t *testing.T) {
 	// Create original source directory
 	origDir := filepath.Join(tmpDir, "original")
 	require.NoError(t, os.MkdirAll(origDir, 0750))
-	writeTestFile(t, origDir, "file.txt", "original content\n")
+	testutil.WriteFile(t, origDir, "file.txt", "original content\n")
 
 	// Create sandbox with work copy
 	name := "test-reset-inplace"
@@ -785,14 +766,14 @@ func TestReset_InPlace_SyncsWorkdir(t *testing.T) {
 	filesDir := filepath.Join(sandboxDir, "files")
 	require.NoError(t, os.MkdirAll(cacheDir, 0750))
 	require.NoError(t, os.MkdirAll(filesDir, 0750))
-	writeTestFile(t, cacheDir, "cached.txt", "cached data\n")
-	writeTestFile(t, filesDir, "shared.txt", "shared data\n")
+	testutil.WriteFile(t, cacheDir, "cached.txt", "cached data\n")
+	testutil.WriteFile(t, filesDir, "shared.txt", "shared data\n")
 
 	// Set up work copy with baseline
-	writeTestFile(t, workDir, "file.txt", "original content\n")
-	initGitRepo(t, workDir)
-	gitAdd(t, workDir, ".")
-	gitCommit(t, workDir, "yoloai baseline")
+	testutil.WriteFile(t, workDir, "file.txt", "original content\n")
+	testutil.InitGitRepo(t, workDir)
+	testutil.GitAdd(t, workDir, ".")
+	testutil.GitCommit(t, workDir, "yoloai baseline")
 	sha := gitHEAD(t, workDir)
 
 	meta := &store.Meta{
@@ -810,12 +791,12 @@ func TestReset_InPlace_SyncsWorkdir(t *testing.T) {
 	require.NoError(t, store.SaveMeta(sandboxDir, meta))
 
 	// Simulate agent changes in work copy
-	writeTestFile(t, workDir, "file.txt", "modified by agent\n")
-	writeTestFile(t, workDir, "agent-new.txt", "agent created this\n")
+	testutil.WriteFile(t, workDir, "file.txt", "modified by agent\n")
+	testutil.WriteFile(t, workDir, "agent-new.txt", "agent created this\n")
 
 	// Simulate upstream changes in original
-	writeTestFile(t, origDir, "file.txt", "updated upstream\n")
-	writeTestFile(t, origDir, "upstream-new.txt", "new upstream file\n")
+	testutil.WriteFile(t, origDir, "file.txt", "updated upstream\n")
+	testutil.WriteFile(t, origDir, "upstream-new.txt", "new upstream file\n")
 
 	// Mock: container is running
 	mock := &lifecycleMockRuntime{
@@ -824,11 +805,11 @@ func TestReset_InPlace_SyncsWorkdir(t *testing.T) {
 		},
 	}
 
-	mgr := newLifecycleMgr(mock, tmpDir)
+	d := newLifecycleDeps(mock, tmpDir)
 
 	// Default reset (in-place). sendResetNotification will fail (no runtime-config.json
 	// and exec mock not wired), but workspace sync and baseline should succeed.
-	_, _ = mgr.Reset(context.Background(), ResetOptions{Name: name})
+	_, _ = Reset(context.Background(), d, ResetOptions{Name: name})
 
 	// Verify work copy was synced from updated original
 	content, err := os.ReadFile(filepath.Join(workDir, "file.txt")) //nolint:gosec // test
@@ -866,7 +847,7 @@ func TestReset_InPlace_KeepCache(t *testing.T) {
 
 	origDir := filepath.Join(tmpDir, "original")
 	require.NoError(t, os.MkdirAll(origDir, 0750))
-	writeTestFile(t, origDir, "file.txt", "content\n")
+	testutil.WriteFile(t, origDir, "file.txt", "content\n")
 
 	name := "test-reset-keep-cache"
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
@@ -878,13 +859,13 @@ func TestReset_InPlace_KeepCache(t *testing.T) {
 	filesDir := filepath.Join(sandboxDir, "files")
 	require.NoError(t, os.MkdirAll(cacheDir, 0750))
 	require.NoError(t, os.MkdirAll(filesDir, 0750))
-	writeTestFile(t, cacheDir, "cached.txt", "cached data\n")
-	writeTestFile(t, filesDir, "shared.txt", "shared data\n")
+	testutil.WriteFile(t, cacheDir, "cached.txt", "cached data\n")
+	testutil.WriteFile(t, filesDir, "shared.txt", "shared data\n")
 
-	writeTestFile(t, workDir, "file.txt", "content\n")
-	initGitRepo(t, workDir)
-	gitAdd(t, workDir, ".")
-	gitCommit(t, workDir, "yoloai baseline")
+	testutil.WriteFile(t, workDir, "file.txt", "content\n")
+	testutil.InitGitRepo(t, workDir)
+	testutil.GitAdd(t, workDir, ".")
+	testutil.GitCommit(t, workDir, "yoloai baseline")
 	sha := gitHEAD(t, workDir)
 
 	meta := &store.Meta{
@@ -906,8 +887,8 @@ func TestReset_InPlace_KeepCache(t *testing.T) {
 		},
 	}
 
-	mgr := newLifecycleMgr(mock, tmpDir)
-	_, _ = mgr.Reset(context.Background(), ResetOptions{Name: name, KeepCache: true})
+	d := newLifecycleDeps(mock, tmpDir)
+	_, _ = Reset(context.Background(), d, ResetOptions{Name: name, KeepCache: true})
 
 	// Cache should be preserved
 	assert.FileExists(t, filepath.Join(cacheDir, "cached.txt"))
@@ -925,7 +906,7 @@ func TestReset_InPlace_KeepFiles(t *testing.T) {
 
 	origDir := filepath.Join(tmpDir, "original")
 	require.NoError(t, os.MkdirAll(origDir, 0750))
-	writeTestFile(t, origDir, "file.txt", "content\n")
+	testutil.WriteFile(t, origDir, "file.txt", "content\n")
 
 	name := "test-reset-keep-files"
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
@@ -937,13 +918,13 @@ func TestReset_InPlace_KeepFiles(t *testing.T) {
 	filesDir := filepath.Join(sandboxDir, "files")
 	require.NoError(t, os.MkdirAll(cacheDir, 0750))
 	require.NoError(t, os.MkdirAll(filesDir, 0750))
-	writeTestFile(t, cacheDir, "cached.txt", "cached data\n")
-	writeTestFile(t, filesDir, "shared.txt", "shared data\n")
+	testutil.WriteFile(t, cacheDir, "cached.txt", "cached data\n")
+	testutil.WriteFile(t, filesDir, "shared.txt", "shared data\n")
 
-	writeTestFile(t, workDir, "file.txt", "content\n")
-	initGitRepo(t, workDir)
-	gitAdd(t, workDir, ".")
-	gitCommit(t, workDir, "yoloai baseline")
+	testutil.WriteFile(t, workDir, "file.txt", "content\n")
+	testutil.InitGitRepo(t, workDir)
+	testutil.GitAdd(t, workDir, ".")
+	testutil.GitCommit(t, workDir, "yoloai baseline")
 	sha := gitHEAD(t, workDir)
 
 	meta := &store.Meta{
@@ -965,8 +946,8 @@ func TestReset_InPlace_KeepFiles(t *testing.T) {
 		},
 	}
 
-	mgr := newLifecycleMgr(mock, tmpDir)
-	_, _ = mgr.Reset(context.Background(), ResetOptions{Name: name, KeepFiles: true})
+	d := newLifecycleDeps(mock, tmpDir)
+	_, _ = Reset(context.Background(), d, ResetOptions{Name: name, KeepFiles: true})
 
 	// Cache should be cleared
 	assert.NoFileExists(t, filepath.Join(cacheDir, "cached.txt"))
@@ -981,7 +962,7 @@ func TestReset_UpgradesToRestartWhenNotRunning(t *testing.T) {
 	// Create original source directory
 	origDir := filepath.Join(tmpDir, "original")
 	require.NoError(t, os.MkdirAll(origDir, 0750))
-	writeTestFile(t, origDir, "file.txt", "original content\n")
+	testutil.WriteFile(t, origDir, "file.txt", "original content\n")
 
 	// Create sandbox with work copy
 	name := "test-reset-upgrade-restart"
@@ -989,10 +970,10 @@ func TestReset_UpgradesToRestartWhenNotRunning(t *testing.T) {
 	workDir := filepath.Join(sandboxDir, "work", store.EncodePath(origDir))
 	require.NoError(t, os.MkdirAll(workDir, 0750))
 
-	writeTestFile(t, workDir, "file.txt", "original content\n")
-	initGitRepo(t, workDir)
-	gitAdd(t, workDir, ".")
-	gitCommit(t, workDir, "yoloai baseline")
+	testutil.WriteFile(t, workDir, "file.txt", "original content\n")
+	testutil.InitGitRepo(t, workDir)
+	testutil.GitAdd(t, workDir, ".")
+	testutil.GitCommit(t, workDir, "yoloai baseline")
 	sha := gitHEAD(t, workDir)
 
 	meta := &store.Meta{
@@ -1009,7 +990,7 @@ func TestReset_UpgradesToRestartWhenNotRunning(t *testing.T) {
 	require.NoError(t, store.SaveMeta(sandboxDir, meta))
 
 	// Modify work copy
-	writeTestFile(t, workDir, "file.txt", "modified by agent\n")
+	testutil.WriteFile(t, workDir, "file.txt", "modified by agent\n")
 
 	// Mock: container not found (removed)
 	mock := &lifecycleMockRuntime{
@@ -1021,13 +1002,12 @@ func TestReset_UpgradesToRestartWhenNotRunning(t *testing.T) {
 		},
 	}
 
-	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
-	mgr := NewEngine(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
+	d := newLifecycleDeps(mock, tmpDir)
 
 	// Default reset; container not running → auto-upgrades to restart.
 	// Restart path will fail at Start (no runtime-config.json), but re-copy should
 	// happen and the upgrade notice is returned even on the later error.
-	res, _ := mgr.Reset(context.Background(), ResetOptions{Name: name})
+	res, _ := Reset(context.Background(), d, ResetOptions{Name: name})
 
 	// Verify the upgrade notice was emitted (now returned, not written to output).
 	require.NotNil(t, res)
@@ -1167,9 +1147,9 @@ func TestDestroy_BrokenSandbox(t *testing.T) {
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 
 	mock := &lifecycleMockRuntime{}
-	mgr := newLifecycleMgr(mock, tmpDir)
+	d := newLifecycleDeps(mock, tmpDir)
 
-	_, err := mgr.Destroy(context.Background(), "broken")
+	_, err := Destroy(context.Background(), d, "broken")
 	require.NoError(t, err)
 	assert.NoDirExists(t, sandboxDir)
 }
@@ -1184,7 +1164,7 @@ func TestDestroy_ReadOnlyFiles(t *testing.T) {
 	// Create read-only nested structure (like Go module cache)
 	readonlyDir := filepath.Join(sandboxDir, "work", "modcache", "pkg")
 	require.NoError(t, os.MkdirAll(readonlyDir, 0750))
-	writeTestFile(t, readonlyDir, "mod.go", "package mod")
+	testutil.WriteFile(t, readonlyDir, "mod.go", "package mod")
 	// Make directory read-only
 	require.NoError(t, os.Chmod(readonlyDir, 0o555))               //nolint:gosec // intentionally read-only for test
 	require.NoError(t, os.Chmod(filepath.Dir(readonlyDir), 0o555)) //nolint:gosec // intentionally read-only for test
@@ -1198,9 +1178,9 @@ func TestDestroy_ReadOnlyFiles(t *testing.T) {
 	require.NoError(t, store.SaveMeta(sandboxDir, meta))
 
 	mock := &lifecycleMockRuntime{}
-	mgr := newLifecycleMgr(mock, tmpDir)
+	d := newLifecycleDeps(mock, tmpDir)
 
-	_, err := mgr.Destroy(context.Background(), name)
+	_, err := Destroy(context.Background(), d, name)
 	require.NoError(t, err)
 	assert.NoDirExists(t, sandboxDir)
 }
@@ -1218,8 +1198,8 @@ func TestNeedsConfirmation_InspectError(t *testing.T) {
 		},
 	}
 
-	mgr := newLifecycleMgr(mock, tmpDir)
-	needs, reason := mgr.NeedsConfirmation(context.Background(), "test-confirm-err")
+	d := newLifecycleDeps(mock, tmpDir)
+	needs, reason := NeedsConfirmation(context.Background(), d, "test-confirm-err")
 	// When inspect fails, DetectStatus returns an error → NeedsConfirmation returns false
 	assert.False(t, needs)
 	assert.Empty(t, reason)

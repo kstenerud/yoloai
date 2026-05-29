@@ -199,6 +199,12 @@ func (c *Client) Close() error {
 	return c.rt.Close()
 }
 
+// deps bundles the Client's runtime, layout, and input into state.Deps for
+// use with lifecycle and create free functions.
+func (c *Client) deps() state.Deps {
+	return state.Deps{Runtime: c.rt, Layout: c.layout, Input: c.input}
+}
+
 // RunOptions configures a sandbox run.
 type RunOptions struct {
 	// Name is the sandbox identifier. Required.
@@ -333,7 +339,7 @@ func (c *Client) Create(ctx context.Context, opts CreateOptions) (string, error)
 	if err := c.manager.EnsureSetup(ctx, c.output); err != nil {
 		return "", err
 	}
-	return create.Run(ctx, state.Deps{Runtime: c.rt, Layout: c.layout, Input: c.input}, internal)
+	return create.Run(ctx, c.deps(), internal)
 }
 
 // ListCommits returns the sandbox's commit history beyond baseline (one

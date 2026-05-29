@@ -12,7 +12,6 @@ import (
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/sandbox/state"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 )
 
@@ -249,12 +248,6 @@ func (m *Engine) SandboxFiles(name string) string {
 // SandboxCache returns the path to the per-sandbox cache directory.
 func (m *Engine) SandboxCache(name string) string {
 	return store.CacheDir(m.layout.SandboxDir(name))
-}
-
-// deps bundles the Engine's runtime + layout + input for the launch/lifecycle
-// and create free functions in subpackages.
-func (m *Engine) deps() state.Deps {
-	return state.Deps{Runtime: m.runtime, Layout: m.layout, Input: m.input}
 }
 
 // SendInput sends text to the sandbox agent's terminal via tmux send-keys.
