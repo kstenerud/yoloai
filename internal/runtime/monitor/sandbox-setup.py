@@ -23,6 +23,7 @@ import time
 from pathlib import Path
 
 from setup_helpers import (
+    build_agent_launch_command,
     cmd_str as _cmd_str_helper,
     compose_prompt_content,
     lifecycle_preamble as _lifecycle_preamble_helper,
@@ -805,31 +806,22 @@ def launch_agent(cfg, socket=None, working_dir=None, backend_inst=None, secrets=
             return
         log_debug("sandbox.agent_found", f"agent binary found: {found_at}")
 
-    # Build environment variable exports for secrets
-    # tmux set-environment doesn't propagate to shells that are already running,
-    # so we need to explicitly export them in the shell command before exec'ing the agent.
-    env_exports = ""
-    if secrets:
-        for name, value in secrets.items():
-            # Escape single quotes in the value by replacing ' with '\''
-            escaped_value = value.replace("'", "'\\''")
-            env_exports += f"export {name}='{escaped_value}'; "
-
-    if working_dir:
-        # Quote working_dir to handle paths with spaces (e.g. Tart VirtioFS paths)
-        base_cmd = f"{env_exports}cd '{working_dir}' && exec {agent_command}"
-    else:
-        base_cmd = f"{env_exports}exec {agent_command}"
-
+    # Compose the launch command (secret exports + cd + exec) in a pure helper
+    # so the shell-escaping and quoting is unit-tested (setup_helpers). tmux
+    # set-environment doesn't reach already-running shells, so secrets are
+    # exported inline before exec'ing the agent.
+    #
     # Prefer the stored launch prefix (W1a single-source-of-truth) when the gate
     # is set; fall back to backend.prepare_launch_command for sandboxes created
     # before this field existed. W1b retires the fallback one release later.
     if cfg.get("use_launch_prefix"):
-        send_cmd = cfg.get("agent_launch_prefix", "") + base_cmd
+        send_cmd = build_agent_launch_command(
+            agent_command, working_dir, secrets, cfg.get("agent_launch_prefix", ""))
     elif backend_inst:
+        base_cmd = build_agent_launch_command(agent_command, working_dir, secrets)
         send_cmd = backend_inst.prepare_launch_command(base_cmd)
     else:
-        send_cmd = base_cmd
+        send_cmd = build_agent_launch_command(agent_command, working_dir, secrets)
 
     tmux("send-keys", "-t", "main", send_cmd, "Enter", socket=socket)
     log_info("sandbox.agent_launch", "agent process started", agent=agent, model=model)

@@ -114,6 +114,47 @@ def compose_prompt_content(preamble: str | None, prompt_text: str | None) -> str
     return "\n\n".join(parts)
 
 
+def build_secret_exports(secrets: dict[str, str] | None) -> str:
+    """Build a POSIX-sh ``export NAME='value'; `` prefix for the given secrets.
+
+    Single quotes in values are escaped as ``'\\''`` so the export is safe to
+    embed in a shell command. Returns ``""`` when there are no secrets.
+
+    tmux ``set-environment`` doesn't reach shells that are already running, so
+    the agent launch command must export secrets inline — this builds that
+    prefix. Pure: it composes a string and does not touch ``os.environ``.
+    """
+    if not secrets:
+        return ""
+    parts: list[str] = []
+    for name, value in secrets.items():
+        escaped = value.replace("'", "'\\''")
+        parts.append(f"export {name}='{escaped}'; ")
+    return "".join(parts)
+
+
+def build_agent_launch_command(
+    agent_command: str,
+    working_dir: str | None,
+    secrets: dict[str, str] | None,
+    launch_prefix: str = "",
+) -> str:
+    """Compose the shell command sent to the agent's tmux pane.
+
+    Prepends the secret exports (see :func:`build_secret_exports`), ``cd``s into
+    ``working_dir`` (single-quoted, to tolerate spaces) when set, ``exec``s
+    ``agent_command`` (so the agent replaces the shell and its exit code becomes
+    the pane's), and prepends ``launch_prefix`` (e.g. a ``PATH=... `` prefix a
+    backend needs). Pure string composition — no tmux, no subprocess.
+    """
+    exports = build_secret_exports(secrets)
+    if working_dir:
+        base = f"{exports}cd '{working_dir}' && exec {agent_command}"
+    else:
+        base = f"{exports}exec {agent_command}"
+    return launch_prefix + base
+
+
 def load_secret_files(secrets_dir: str) -> dict[str, str]:
     """Read secret files from a directory into a {name: value} mapping.
 

@@ -179,3 +179,56 @@ def test_load_secret_files_preserves_exact_contents(tmp_path: Path) -> None:
     # verbatim so any whitespace the user put in the file is preserved.
     (tmp_path / "MULTILINE").write_text("line1\nline2\n")
     assert setup_helpers.load_secret_files(str(tmp_path)) == {"MULTILINE": "line1\nline2\n"}
+
+
+# --- build_secret_exports ---
+
+
+def test_build_secret_exports_empty_for_no_secrets() -> None:
+    assert setup_helpers.build_secret_exports(None) == ""
+    assert setup_helpers.build_secret_exports({}) == ""
+
+
+def test_build_secret_exports_emits_export_per_secret() -> None:
+    out = setup_helpers.build_secret_exports({"A": "1", "B": "2"})
+    assert out == "export A='1'; export B='2'; "
+
+
+def test_build_secret_exports_escapes_single_quotes() -> None:
+    # A value containing a single quote must not break out of the surrounding
+    # single-quoted shell literal — this is the injection-class bug the carve
+    # exists to pin down.
+    out = setup_helpers.build_secret_exports({"K": "a'b"})
+    assert out == "export K='a'\\''b'; "
+
+
+# --- build_agent_launch_command ---
+
+
+def test_build_agent_launch_command_no_workdir_no_secrets() -> None:
+    assert (
+        setup_helpers.build_agent_launch_command("claude --foo", None, None)
+        == "exec claude --foo"
+    )
+
+
+def test_build_agent_launch_command_cds_into_quoted_workdir() -> None:
+    # working_dir is single-quoted so paths with spaces (e.g. Tart VirtioFS)
+    # survive the shell.
+    assert (
+        setup_helpers.build_agent_launch_command("claude", "/work space", None)
+        == "cd '/work space' && exec claude"
+    )
+
+
+def test_build_agent_launch_command_prepends_secret_exports() -> None:
+    out = setup_helpers.build_agent_launch_command("claude", "/w", {"T": "x"})
+    assert out == "export T='x'; cd '/w' && exec claude"
+
+
+def test_build_agent_launch_command_applies_launch_prefix() -> None:
+    # The W1a launch prefix (e.g. Tart's PATH=...) is prepended verbatim, ahead
+    # of the secret exports and cd.
+    out = setup_helpers.build_agent_launch_command(
+        "claude", "/w", {"T": "x"}, launch_prefix='PATH="/opt/bin:$PATH" ')
+    assert out == "PATH=\"/opt/bin:$PATH\" export T='x'; cd '/w' && exec claude"
