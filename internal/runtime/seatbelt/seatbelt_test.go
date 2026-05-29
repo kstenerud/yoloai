@@ -150,6 +150,33 @@ func TestGenerateProfile_SystemPaths(t *testing.T) {
 	}
 }
 
+func TestGenerateProfile_SystemPathsSymlinkResolved(t *testing.T) {
+	// Regression: macOS firmlinks /var -> /private/var, and the sandbox checks
+	// access at the vnode level (post symlink resolution). A bare /var/db rule
+	// does NOT match a read of the resolved /private/var/db, so claude's ICU
+	// timezone load from /private/var/db/timezone/... is denied (SIGTRAP).
+	// Every systemReadPaths() entry that is a symlink must emit its resolved
+	// variant as well as the original.
+	cfg := runtime.InstanceConfig{Name: "test"}
+	profile := GenerateProfile(cfg, "/tmp/sandbox", "/Users/testuser")
+
+	for _, path := range systemReadPaths() {
+		for _, variant := range resolvePathVariants(path) {
+			if !strings.Contains(profile, fmt.Sprintf(`(subpath %q)`, variant)) {
+				t.Errorf("profile should allow read access to variant %q of system path %q", variant, path)
+			}
+		}
+	}
+
+	// /var must resolve to /private/var on a real macOS host; assert the
+	// resolved form is present whenever resolution actually differs.
+	if variants := resolvePathVariants("/var/db"); len(variants) == 2 {
+		if !strings.Contains(profile, fmt.Sprintf(`(subpath %q)`, variants[0])) {
+			t.Errorf("profile should contain resolved /var/db variant %q", variants[0])
+		}
+	}
+}
+
 func TestGenerateProfile_EmptyMountSourceSkipped(t *testing.T) {
 	cfg := runtime.InstanceConfig{
 		Name: "test",

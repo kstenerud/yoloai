@@ -59,7 +59,14 @@ func writeProfileHeader(b *strings.Builder) {
 func writeProfileSystemPaths(b *strings.Builder) {
 	b.WriteString("; System libraries, frameworks, and binaries\n")
 	for _, path := range systemReadPaths() {
-		fmt.Fprintf(b, "(allow file-read* (subpath %q))\n", path)
+		// Resolve symlink variants: macOS firmlinks /var -> /private/var (and
+		// /etc, /tmp), and the sandbox checks access at the vnode level (after
+		// symlink resolution). A rule for /var/db does NOT match a read of the
+		// resolved /private/var/db, so e.g. claude's ICU timezone load from
+		// /private/var/db/timezone/... is denied and the process aborts (SIGTRAP).
+		for _, p := range resolvePathVariants(path) {
+			fmt.Fprintf(b, "(allow file-read* (subpath %q))\n", p)
+		}
 	}
 	b.WriteString("\n")
 
