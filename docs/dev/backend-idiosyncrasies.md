@@ -46,6 +46,7 @@ row to the index.
 | `git apply` silently fails on overlay patch | [Docker: Exec strips trailing newline](#docker-sdk-exec-strips-the-trailing-newline) |
 | `tmux attach` exits with `EACCES` on `/dev/tty` (gVisor ARM64) | [Docker: gVisor ARM64 TIOCSCTTY](#gvisor-on-arm64-docker-exec--it-does-not-call-tiocsctty) |
 | `failed to create an image ... after deleting the existing one: AlreadyExists` (intermittent) | [Docker: AlreadyExists race on rebuild of identical tag](#docker-daemon-races-on-alreadyexists-when-rebuilding-an-existing-tag-with-identical-content) |
+| `yoloai system disk`/`doctor` reports absurd reclaimable cache (e.g. podman 129 GiB vs ~5 GiB from `system df`) | [Docker/Podman: Images[].Size includes shared layers](#diskusageimagessize-includes-shared-layers-summing-it-multiply-counts-them) |
 | Container starts as root / wrong uid under rootless Podman | [Podman: rootless detection uses socket path](#rootless-detection-must-use-socket-path-not-osgetuid) |
 | Wrong uid inside container on macOS Podman | [Podman: macOS keep-id maps VM uid](#macos---usernkeep-id-maps-the-podman-machine-uid-1000-not-the-macos-uid) |
 | Podman rejects per-file bind mounts for secrets | [Podman: per-file bind mounts rejected](#per-file-bind-mounts-rejected-by-podmans-docker-compatible-api) |
@@ -670,6 +671,20 @@ An empty value disables LXC seccomp for that container entirely. The container m
 **Impact on yoloai:** Rootless Docker silently fails inside `container-privileged` sandboxes on Proxmox LXC hosts even though yoloai's configuration is correct. Rootful Docker works because it does not use a user namespace.
 
 **Code:** `sandbox/create_instance.go` — the seccomp setting is correct; the failure is environmental.
+
+---
+
+### `DiskUsage().Images[].Size` includes shared layers; summing it multiply-counts them
+
+**Symptom:** `yoloai system disk` / `yoloai doctor` reports an absurd reclaimable cache — e.g. podman at **129.74 GiB** when `podman system df` says only ~5 GiB. The inflation scales with the number of images: dozens of intermediate base-build stages each "weigh" ~5 GiB in the report.
+
+**Explanation:** The Docker/Podman SDK's `client.DiskUsage()` returns each `image.Summary.Size` as that image's *total* size **including layers it shares with other images**. yoloai's base build leaves many `<none>` intermediate stages that all share one ~5 GiB base, so summing `img.Size` across them counts the shared layers once per image. `docker/podman system df` does not do this — its images SIZE column is the deduplicated layer-store total, which the SDK exposes separately as `types.DiskUsage.LayersSize`.
+
+**Fix:** Use `du.LayersSize` for the image portion of the cache total; add container `SizeRw`, volume `UsageData.Size`, and build-cache `Size` on top (those live outside the image layer store and are not deduplicated against it). Never sum `du.Images[].Size`.
+
+**Code:** `internal/runtime/docker/prune.go` `cacheBytes()` (shared by docker + podman). Guard test: `internal/runtime/docker/prune_test.go::TestCacheBytes_UsesDeduplicatedLayersSize`.
+
+**Related (display):** the "unknown" sentinel `BytesUsed == -1` (seatbelt/tart report no image-cache size) must be filtered before display, or it renders as a literal `-1 B` and skews the total — see `internal/cli/doctorcmd/doctor.go` `renderReclaimableSpace`.
 
 ---
 

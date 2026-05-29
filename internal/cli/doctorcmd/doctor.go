@@ -250,7 +250,10 @@ func renderReclaimableSpace(w io.Writer, disk *yoloai.DiskUsage) {
 	var total int64
 	var rows []yoloai.BackendDiskUsage
 	for _, b := range disk.PerBackend {
-		if b.Err != nil || b.Bytes == 0 {
+		// Skip errored backends and those with nothing to reclaim. Bytes < 0 is
+		// the "unknown" sentinel (e.g. seatbelt/tart report no image-cache size)
+		// — it must not render as a literal "-1 B" or poison the total.
+		if b.Err != nil || b.Bytes <= 0 {
 			continue
 		}
 		rows = append(rows, b)
@@ -398,7 +401,9 @@ func cacheUsageJSONList(disk *yoloai.DiskUsage) []cacheUsageJSON {
 	}
 	out := make([]cacheUsageJSON, 0, len(disk.PerBackend))
 	for _, b := range disk.PerBackend {
-		if b.Err != nil || b.Bytes == 0 {
+		// Match renderReclaimableSpace: omit errored and unknown (-1) backends so
+		// a JSON consumer never sees a nonsensical negative byte count.
+		if b.Err != nil || b.Bytes <= 0 {
 			continue
 		}
 		out = append(out, cacheUsageJSON{

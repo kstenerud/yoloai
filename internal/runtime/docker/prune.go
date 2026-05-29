@@ -193,10 +193,20 @@ func (r *Runtime) CacheUsage(ctx context.Context) (runtime.CacheUsage, error) {
 	if err != nil {
 		return runtime.CacheUsage{BytesUsed: -1}, fmt.Errorf("%s disk usage: %w", r.binaryName, err)
 	}
-	var total int64
-	for _, img := range du.Images {
-		total += img.Size
-	}
+	detail := fmt.Sprintf("%d images, %d containers, %d volumes, %d build-cache entries",
+		len(du.Images), len(du.Containers), len(du.Volumes), len(du.BuildCache))
+	return runtime.CacheUsage{BytesUsed: cacheBytes(du), Detail: detail}, nil
+}
+
+// cacheBytes totals the daemon-managed bytes that `prune --cache` would
+// reclaim. The image portion uses du.LayersSize — the deduplicated layer-store
+// total that `docker/podman system df` reports — NOT the sum of each
+// img.Size, which multiply-counts shared base layers (dozens of intermediate
+// build stages sharing one 5 GiB base would otherwise read as ~130 GiB).
+// Container writable layers, volumes, and build cache sit outside the image
+// layer store, so they are added on top.
+func cacheBytes(du types.DiskUsage) int64 {
+	total := du.LayersSize
 	for _, ct := range du.Containers {
 		total += ct.SizeRw
 	}
@@ -208,7 +218,5 @@ func (r *Runtime) CacheUsage(ctx context.Context) (runtime.CacheUsage, error) {
 	for _, bc := range du.BuildCache {
 		total += bc.Size
 	}
-	detail := fmt.Sprintf("%d images, %d containers, %d volumes, %d build-cache entries",
-		len(du.Images), len(du.Containers), len(du.Volumes), len(du.BuildCache))
-	return runtime.CacheUsage{BytesUsed: total, Detail: detail}, nil
+	return total
 }

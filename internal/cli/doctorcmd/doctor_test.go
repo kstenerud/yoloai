@@ -51,6 +51,7 @@ func TestRenderReclaimableSpace(t *testing.T) {
 		PerBackend: []yoloai.BackendDiskUsage{
 			{Name: "docker", Bytes: 1 << 30},
 			{Name: "tart", Bytes: 0},                // skipped: zero bytes
+			{Name: "podman", Bytes: -1},             // skipped: unknown sentinel
 			{Name: "seatbelt", Err: assert.AnError}, // skipped: error
 		},
 	})
@@ -58,7 +59,10 @@ func TestRenderReclaimableSpace(t *testing.T) {
 	assert.Contains(t, out, "Reclaimable space")
 	assert.Contains(t, out, "docker:")
 	assert.NotContains(t, out, "tart:")
+	assert.NotContains(t, out, "podman:")
 	assert.NotContains(t, out, "seatbelt:")
+	// The unknown sentinel must never surface as a literal negative size.
+	assert.NotContains(t, out, "-1 B")
 	assert.Contains(t, out, "yoloai system prune --cache")
 }
 
