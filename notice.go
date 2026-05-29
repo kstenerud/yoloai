@@ -30,3 +30,7 @@ type DestroyResult = sandbox.DestroyResult
 // notices emitted (e.g. "Sandbox X started"). Re-exported (type alias) from
 // internal/sandbox.
 type StartResult = sandbox.StartResult
+
+// ResetResult reports the outcome of a Reset — the advisory/status notices
+// emitted. Re-exported (type alias) from internal/sandbox.
+type ResetResult = sandbox.ResetResult

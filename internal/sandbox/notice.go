@@ -54,3 +54,9 @@ type DestroyResult struct {
 type StartResult struct {
 	Notices []Notice
 }
+
+// ResetResult reports the outcome of a Reset: the advisory/status notices
+// emitted (e.g. "upgrading to restart", plus the restart's own start notices).
+type ResetResult struct {
+	Notices []Notice
+}

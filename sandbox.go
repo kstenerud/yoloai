@@ -108,7 +108,7 @@ func (s *Sandbox) Restart(ctx context.Context, opts StartOptions) (*StartResult,
 // Reset re-copies the workdir into the sandbox, resets the diff baseline, and
 // (per opts) optionally restarts the container and wipes agent state. Use for
 // "start over" workflows that abandon the agent's current changes.
-func (s *Sandbox) Reset(ctx context.Context, opts ResetOptions) error {
+func (s *Sandbox) Reset(ctx context.Context, opts ResetOptions) (*ResetResult, error) {
 	return s.c.manager.Reset(ctx, opts.toInternal(s.name))
 }
 

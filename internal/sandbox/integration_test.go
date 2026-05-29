@@ -347,7 +347,8 @@ func TestIntegration_Reset(t *testing.T) {
 	))
 
 	// Reset
-	require.NoError(t, mgr.Reset(ctx, sandbox.ResetOptions{Name: "resettest"}))
+	_, resetErr := mgr.Reset(ctx, sandbox.ResetOptions{Name: "resettest"})
+	require.NoError(t, resetErr)
 
 	// Reset is synchronous (stop+restore+start completes before returning), so
 	// just wait for the container to be active again.

@@ -533,27 +533,29 @@ func clearAgentState(sandboxDir string, perms IsolationPerms) error {
 // Reset re-copies the workdir from the original host directory and resets
 // the git baseline. By default, resets in-place (agent stays running).
 // With --restart, stops and restarts the container.
-func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
+func (m *Manager) Reset(ctx context.Context, opts ResetOptions) (*ResetResult, error) {
 	unlock, err := store.AcquireLock(m.layout, opts.Name)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer unlock()
 
 	slog.Info("resetting sandbox", "event", "sandbox.reset", "sandbox", opts.Name)
 	sandboxDir := m.layout.SandboxDir(opts.Name)
 	if err := store.RequireSandboxDir(sandboxDir); err != nil {
-		return err
+		return nil, err
 	}
 
 	meta, err := store.LoadMeta(sandboxDir)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if meta.Workdir.Mode == "rw" {
-		return fmt.Errorf("reset is not applicable for :rw directories — changes are already in the original")
+		return nil, fmt.Errorf("reset is not applicable for :rw directories — changes are already in the original")
 	}
+
+	var n notices
 
 	// Auto-upgrade to restart: --state implies restart (can't wipe state while agent is running)
 	if opts.ClearState {
@@ -575,16 +577,18 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 	if !opts.Restart {
 		status, err := DetectStatus(ctx, m.runtime, store.InstanceName(opts.Name), sandboxDir)
 		if err != nil || (status != StatusActive && status != StatusIdle) {
-			fmt.Fprintf(m.output, "Container is not running, upgrading to restart\n") //nolint:errcheck // best-effort output
+			n.infof("Container is not running, upgrading to restart")
 			opts.Restart = true
 		}
 	}
 
 	if !opts.Restart {
-		return m.resetInPlace(ctx, opts, meta, sandboxDir)
+		err := m.resetInPlace(ctx, opts, meta, sandboxDir)
+		return &ResetResult{Notices: n.list}, err
 	}
 
-	return m.prepareResetRestart(ctx, opts, sandboxDir, meta)
+	err = m.prepareResetRestart(ctx, opts, sandboxDir, meta, &n)
+	return &ResetResult{Notices: n.list}, err
 }
 
 // reinitLogs removes and recreates the sandbox log files with appropriate permissions.
@@ -642,7 +646,7 @@ func (m *Manager) applyPostResetOptions(opts ResetOptions, sandboxDir string, pe
 
 // prepareResetRestart performs the full stop → wipe → recopy → start flow for
 // reset --restart. Extracted from Reset to reduce its cyclomatic complexity.
-func (m *Manager) prepareResetRestart(ctx context.Context, opts ResetOptions, sandboxDir string, meta *store.Meta) error {
+func (m *Manager) prepareResetRestart(ctx context.Context, opts ResetOptions, sandboxDir string, meta *store.Meta, n *notices) error {
 	// Destroy the container so start() sees StatusRemoved and does a clean
 	// recreate. Using Remove (not Stop) avoids suspending a VM we're about
 	// to rebuild — the suspend state would be stale after the host workdir
@@ -681,14 +685,9 @@ func (m *Manager) prepareResetRestart(ctx context.Context, opts ResetOptions, sa
 	defer cleanup()
 
 	slog.Info("reset complete", "event", "sandbox.reset.complete", "sandbox", opts.Name)
-	// Start the container. Reset still renders to m.output (its own notice
-	// migration is a later F8 phase); bridge the start notices there for now.
-	var startNotices notices
-	if err := m.start(ctx, opts.Name, StartOptions{}, &startNotices); err != nil {
+	// Start the container; its status notices flow into the reset's notices.
+	if err := m.start(ctx, opts.Name, StartOptions{}, n); err != nil {
 		return err
-	}
-	for _, sn := range startNotices.list {
-		fmt.Fprintln(m.output, sn.Message) //nolint:errcheck // best-effort output (temporary bridge until Reset's F8 phase)
 	}
 
 	// Execute VM-side work directory setup if baseline was deferred (Tart VMs)

@@ -615,7 +615,7 @@ func TestReset_RecopiesWorkdir(t *testing.T) {
 
 	// Reset will re-copy and re-baseline, then fail at Start (recreateContainer
 	// needs runtime-config.json). That's OK — we verify the re-copy happened.
-	_ = mgr.Reset(context.Background(), ResetOptions{Name: name})
+	_, _ = mgr.Reset(context.Background(), ResetOptions{Name: name})
 
 	// Verify work copy was re-copied from original
 	content, err := os.ReadFile(filepath.Join(workDir, "file.txt")) //nolint:gosec // G304: test file path
@@ -682,7 +682,7 @@ func TestReset_State(t *testing.T) {
 
 	mgr := newLifecycleMgr(mock, tmpDir)
 	// --state implies --restart
-	_ = mgr.Reset(context.Background(), ResetOptions{Name: name, ClearState: true})
+	_, _ = mgr.Reset(context.Background(), ResetOptions{Name: name, ClearState: true})
 
 	// agent-runtime dir should exist with only settings.json (re-applied by
 	// ensureContainerSettings after clean wipe)
@@ -706,7 +706,7 @@ func TestReset_RWMode_Error(t *testing.T) {
 	mock := &lifecycleMockRuntime{}
 	mgr := newLifecycleMgr(mock, tmpDir)
 
-	err := mgr.Reset(context.Background(), ResetOptions{Name: "test-reset-rw"})
+	_, err := mgr.Reset(context.Background(), ResetOptions{Name: "test-reset-rw"})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), ":rw directories")
 }
@@ -757,7 +757,7 @@ func TestReset_OriginalMissing(t *testing.T) {
 
 	mgr := newLifecycleMgr(mock, tmpDir)
 	// Container not running → auto-upgrades to restart
-	err := mgr.Reset(context.Background(), ResetOptions{Name: name})
+	_, err := mgr.Reset(context.Background(), ResetOptions{Name: name})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "original directory no longer exists")
 }
@@ -830,7 +830,7 @@ func TestReset_InPlace_SyncsWorkdir(t *testing.T) {
 
 	// Default reset (in-place). sendResetNotification will fail (no runtime-config.json
 	// and exec mock not wired), but workspace sync and baseline should succeed.
-	_ = mgr.Reset(context.Background(), ResetOptions{Name: name})
+	_, _ = mgr.Reset(context.Background(), ResetOptions{Name: name})
 
 	// Verify work copy was synced from updated original
 	content, err := os.ReadFile(filepath.Join(workDir, "file.txt")) //nolint:gosec // test
@@ -909,7 +909,7 @@ func TestReset_InPlace_KeepCache(t *testing.T) {
 	}
 
 	mgr := newLifecycleMgr(mock, tmpDir)
-	_ = mgr.Reset(context.Background(), ResetOptions{Name: name, KeepCache: true})
+	_, _ = mgr.Reset(context.Background(), ResetOptions{Name: name, KeepCache: true})
 
 	// Cache should be preserved
 	assert.FileExists(t, filepath.Join(cacheDir, "cached.txt"))
@@ -968,7 +968,7 @@ func TestReset_InPlace_KeepFiles(t *testing.T) {
 	}
 
 	mgr := newLifecycleMgr(mock, tmpDir)
-	_ = mgr.Reset(context.Background(), ResetOptions{Name: name, KeepFiles: true})
+	_, _ = mgr.Reset(context.Background(), ResetOptions{Name: name, KeepFiles: true})
 
 	// Cache should be cleared
 	assert.NoFileExists(t, filepath.Join(cacheDir, "cached.txt"))
@@ -1028,11 +1028,13 @@ func TestReset_UpgradesToRestartWhenNotRunning(t *testing.T) {
 	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), &output, WithLayout(layout))
 
 	// Default reset; container not running → auto-upgrades to restart.
-	// Restart path will fail at Start (no runtime-config.json), but re-copy should happen.
-	_ = mgr.Reset(context.Background(), ResetOptions{Name: name})
+	// Restart path will fail at Start (no runtime-config.json), but re-copy should
+	// happen and the upgrade notice is returned even on the later error.
+	res, _ := mgr.Reset(context.Background(), ResetOptions{Name: name})
 
-	// Verify upgrade message was printed
-	assert.Contains(t, output.String(), "Container is not running, upgrading to restart")
+	// Verify the upgrade notice was emitted (now returned, not written to output).
+	require.NotNil(t, res)
+	assert.Contains(t, noticeText(res.Notices), "Container is not running, upgrading to restart")
 
 	// Verify work copy was re-copied from original (restart behavior)
 	content, err := os.ReadFile(filepath.Join(workDir, "file.txt")) //nolint:gosec // test

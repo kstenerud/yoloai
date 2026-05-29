@@ -402,7 +402,7 @@ func (s *Server) handleSandboxReset(ctx context.Context, req mcp.CallToolRequest
 		}
 	}
 
-	if err := sb.Reset(ctx, yoloai.ResetOptions{RestartContainer: true}); err != nil {
+	if _, err := sb.Reset(ctx, yoloai.ResetOptions{RestartContainer: true}); err != nil {
 		return textResult(errorf("reset sandbox %q: %v", name, err)), nil
 	}
 

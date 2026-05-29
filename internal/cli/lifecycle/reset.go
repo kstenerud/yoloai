@@ -73,15 +73,19 @@ func runReset(cmd *cobra.Command, args []string, opts *resetOpts) error {
 		if err != nil {
 			return cliutil.SandboxErrorHint(name, err)
 		}
-		if err := sb.Reset(ctx, yoloai.ResetOptions{
+		res, resetErr := sb.Reset(ctx, yoloai.ResetOptions{
 			RestartContainer: opts.restart,
 			ClearState:       opts.clearState,
 			KeepCache:        opts.keepCache,
 			KeepFiles:        opts.keepFiles,
 			NoPrompt:         opts.noPrompt,
 			Debug:            opts.debug,
-		}); err != nil {
-			return cliutil.SandboxErrorHint(name, err)
+		})
+		if res != nil {
+			cliutil.RenderNotices(cmd, res.Notices)
+		}
+		if resetErr != nil {
+			return cliutil.SandboxErrorHint(name, resetErr)
 		}
 		slog.Info("sandbox reset complete", "event", "sandbox.reset.complete", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
 

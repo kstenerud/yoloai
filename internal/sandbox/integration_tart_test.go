@@ -189,7 +189,8 @@ func TestIntegrationTart_FullLifecycle(t *testing.T) {
 	assert.Empty(t, result.Stdout, "work dir should be clean after recreate from staging")
 
 	// Reset should restore clean state
-	require.NoError(t, mgr.Reset(ctx, sandbox.ResetOptions{Name: sandboxName}))
+	_, resetErr := mgr.Reset(ctx, sandbox.ResetOptions{Name: sandboxName})
+	require.NoError(t, resetErr)
 
 	// Wait for VM to be active again after reset
 	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName(sandboxName), 90*time.Second)
@@ -312,7 +313,8 @@ func TestIntegrationTart_GitCorruption(t *testing.T) {
 	}
 
 	// Reset and verify git still works
-	require.NoError(t, mgr.Reset(ctx, sandbox.ResetOptions{Name: sandboxName}))
+	_, resetErr := mgr.Reset(ctx, sandbox.ResetOptions{Name: sandboxName})
+	require.NoError(t, resetErr)
 	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName(sandboxName), 90*time.Second)
 
 	// Verify git operations work after reset
