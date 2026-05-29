@@ -18,6 +18,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
 	yoloai "github.com/kstenerud/yoloai"
+	"github.com/kstenerud/yoloai/internal/buildinfo"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
@@ -51,7 +52,7 @@ func runSandboxBugReport(cmd *cobra.Command, name string, reportType string) err
 	}()
 
 	// Section 1: Header
-	bugreport.WriteHeader(f, cliutil.Version, cliutil.Commit, cliutil.Date, reportType)
+	bugreport.WriteHeader(f, buildinfo.Version, buildinfo.Commit, buildinfo.Date, reportType)
 
 	// Section 3: System
 	bugreport.WriteSystem(f)

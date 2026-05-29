@@ -4,16 +4,13 @@
 
 package cliutil
 
-// Build-time CLI metadata stamped via -ldflags at compile time.
-// Set by SetBuildInfo at the start of Execute; read by subpackages.
-var (
-	Version string
-	Commit  string
-	Date    string
-)
+import "github.com/kstenerud/yoloai/internal/buildinfo"
 
 // SetBuildInfo records the version/commit/date passed in from main.
-// Called once from Execute() before any command runs.
+// Called once from Execute() before any command runs. Delegates to the
+// internal/buildinfo leaf package, which is the canonical store so that
+// lower-level packages (e.g. runtime/tart) can read build info without
+// importing cli/cliutil.
 func SetBuildInfo(version, commit, date string) {
-	Version, Commit, Date = version, commit, date
+	buildinfo.Set(version, commit, date)
 }

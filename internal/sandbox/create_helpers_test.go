@@ -377,11 +377,30 @@ func TestEnsureHomeSeedConfig_SetsInstallMethod(t *testing.T) {
 	}))
 
 	agentDef := agent.GetAgent("claude")
-	require.NoError(t, ensureHomeSeedConfig(agentDef, sandboxDir))
+	require.NoError(t, ensureHomeSeedConfig(agentDef, sandboxDir, "npm-global"))
 
 	config, err := readJSONMap(filepath.Join(homeSeedDir, ".claude.json"))
 	require.NoError(t, err)
 	assert.Equal(t, "npm-global", config["installMethod"])
+	assert.Equal(t, "preserved", config["otherKey"])
+}
+
+func TestEnsureHomeSeedConfig_NativeMethodForTart(t *testing.T) {
+	sandboxDir := t.TempDir()
+	homeSeedDir := filepath.Join(sandboxDir, "home-seed")
+	require.NoError(t, os.MkdirAll(homeSeedDir, 0750))
+
+	require.NoError(t, writeJSONMap(filepath.Join(homeSeedDir, ".claude.json"), map[string]any{
+		"installMethod": "native",
+		"otherKey":      "preserved",
+	}))
+
+	agentDef := agent.GetAgent("claude")
+	require.NoError(t, ensureHomeSeedConfig(agentDef, sandboxDir, "native"))
+
+	config, err := readJSONMap(filepath.Join(homeSeedDir, ".claude.json"))
+	require.NoError(t, err)
+	assert.Equal(t, "native", config["installMethod"])
 	assert.Equal(t, "preserved", config["otherKey"])
 }
 
@@ -390,7 +409,7 @@ func TestEnsureHomeSeedConfig_NoopForTestAgent(t *testing.T) {
 	agentDef := agent.GetAgent("test")
 
 	// Should not error even with no home-seed dir
-	require.NoError(t, ensureHomeSeedConfig(agentDef, sandboxDir))
+	require.NoError(t, ensureHomeSeedConfig(agentDef, sandboxDir, "npm-global"))
 }
 
 // shellEscapeForDoubleQuotes tests

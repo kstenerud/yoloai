@@ -125,6 +125,7 @@ type BackendDescriptor struct {
 	InstallHint               string          // install URL or shell command; "" when no install is needed
 	BaseModeName              IsolationMode   // typed label for the backend's default (no-isolation) mode
 	AgentProvisionedByBackend bool            // true when the backend's image/VM ships the agent binary
+	AgentInstallMethod        string          // how the backend installs Claude Code ("npm-global" or "native"); patched into seeded .claude.json so it matches reality. "" when AgentProvisionedByBackend is false.
 	SupportedIsolationModes   []IsolationMode // non-default isolation modes this backend can support
 	Capabilities              BackendCaps     // feature-set flags
 

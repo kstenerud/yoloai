@@ -479,8 +479,15 @@ class TartBackend(Backend):
         return working_dir
 
     def prepare_environment(self):
-        """Tart needs Homebrew paths prepended for node/npm binaries, plus Xcode tools if mounted."""
-        homebrew_bins = ["/opt/homebrew/opt/node/bin", "/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin"]
+        """Tart needs the provisioned tool dirs prepended: native Claude Code in
+        ~/.local/bin, keg-only node@22, and Homebrew, plus Xcode tools if mounted."""
+        homebrew_bins = [
+            os.path.expanduser("~/.local/bin"),
+            "/opt/homebrew/opt/node@22/bin",
+            "/opt/homebrew/bin",
+            "/opt/homebrew/sbin",
+            "/usr/local/bin",
+        ]
 
         # Add host-mounted Xcode tools to PATH and set DEVELOPER_DIR if available
         xcode_base = "/Users/admin/host-xcode/Contents"
@@ -526,11 +533,11 @@ class TartBackend(Backend):
         return read_secrets(os.path.join(self.yoloai_dir, "secrets"), socket=socket)
 
     def prepare_launch_command(self, base_cmd):
-        """Prepend node 25 to PATH to avoid broken node@24 from Cirrus base image."""
-        # The login shell's ~/.zprofile puts node@24 before node 25 in PATH.
-        # Prepend node 25's bin dir so the claude shebang (#!/usr/bin/env node)
-        # resolves to node 25, not the broken node@24.
-        return f'PATH="/opt/homebrew/opt/node/bin:$PATH" {base_cmd}'
+        """Prepend the provisioned tool dirs so the agent launches from a
+        non-login shell. Claude Code is native in ~/.local/bin; node@22 is
+        keg-only. Mirrors TartBackend.PrepareAgentCommand in runtime/tart/tart.go.
+        """
+        return f'PATH="$HOME/.local/bin:/opt/homebrew/opt/node@22/bin:/opt/homebrew/bin:$PATH" {base_cmd}'
 
 
 class SeatbeltBackend(Backend):

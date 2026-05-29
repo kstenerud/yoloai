@@ -1072,7 +1072,7 @@ func resolveDetectors(idle agent.IdleSupport) []string {
 
 // buildContainerConfig creates the config.json content.
 // agentLaunchPrefix is the backend-specific wrap prefix that PrepareAgentCommand
-// would prepend (e.g. 'PATH="/opt/homebrew/opt/node/bin:$PATH" ' for Tart);
+// would prepend (e.g. a 'PATH="..." ' prefix for Tart);
 // computed once by the caller, stored here as single source of truth for the
 // agent-command wrap (W1a of the architecture remediation plan).
 func buildContainerConfig(layout config.Layout, agentDef *agent.Definition, agentCommand string, agentLaunchPrefix string, tmuxConf string, workingDir string, debug bool, networkIsolated bool, allowedDomains []string, passthrough []string, overlayMounts []overlayMountConfig, setupCommands []string, autoCommitInterval int, copyDirs []string, sandboxName string, tmuxSocket string, isolation runtime.IsolationMode, vscodeTunnel bool, vscodeTunnelName string, lifecycle *lifecycleConfig) ([]byte, error) {
@@ -1873,12 +1873,14 @@ func ensureShellContainerSettings(sandboxDir string, _ runtime.IsolationMode) er
 	return nil
 }
 
-// ensureHomeSeedConfig patches home-seed/.claude.json to set installMethod to
-// "npm-global". The host file typically has "native" since the user's local
-// Claude Code uses the native installer, but inside the container we install
-// via npm. Without this fix Claude Code shows spurious warnings about missing
-// ~/.local/bin/claude and PATH misconfiguration.
-func ensureHomeSeedConfig(agentDef *agent.Definition, sandboxDir string) error {
+// ensureHomeSeedConfig patches home-seed/.claude.json so its installMethod
+// matches how the backend actually installed Claude Code (installMethod is the
+// backend's AgentInstallMethod — "npm-global" for the container backends,
+// "native" for Tart). The seeded file comes from the host, which usually says
+// "native"; when the backend installs via npm, a mismatch makes Claude Code
+// emit spurious warnings about a missing ~/.local/bin/claude and PATH
+// misconfiguration. Writing the backend's real method keeps them consistent.
+func ensureHomeSeedConfig(agentDef *agent.Definition, sandboxDir, installMethod string) error {
 	// Only relevant for agents that seed .claude.json into HomeDir
 	var hasHomeSeed bool
 	for _, sf := range agentDef.SeedFiles {
@@ -1898,7 +1900,7 @@ func ensureHomeSeedConfig(agentDef *agent.Definition, sandboxDir string) error {
 		return err
 	}
 
-	config["installMethod"] = "npm-global"
+	config["installMethod"] = installMethod
 
 	return writeJSONMap(configPath, config)
 }

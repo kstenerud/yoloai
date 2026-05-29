@@ -46,6 +46,7 @@ var descriptor = runtime.BackendDescriptor{
 	InstallHint:               "brew install cirruslabs/cli/tart",
 	BaseModeName:              runtime.IsolationModeVM,
 	AgentProvisionedByBackend: true,
+	AgentInstallMethod:        "native",
 	SupportedIsolationModes:   nil,
 	Capabilities: runtime.BackendCaps{
 		NetworkIsolation: false,
@@ -556,10 +557,13 @@ func (r *Runtime) DiagHint(instanceName string) string {
 	return fmt.Sprintf("check VM log at %s", logPath)
 }
 
-// PrepareAgentCommand prepends node 25 to PATH to avoid broken node@24 from
-// the Cirrus base image's .zprofile.
+// PrepareAgentCommand prepends the provisioned tool dirs to PATH so the agent
+// launches correctly from a non-login shell (tart exec bash -c does not source
+// ~/.zprofile). Claude Code is installed natively in ~/.local/bin; node@22 is
+// keg-only at /opt/homebrew/opt/node@22/bin. Mirrors the login PATH composed in
+// the base image's ~/.zprofile (see runtime/tart/build.go provisionCommands).
 func (r *Runtime) PrepareAgentCommand(cmd string) string {
-	return fmt.Sprintf(`PATH="/opt/homebrew/opt/node/bin:$PATH" %s`, cmd)
+	return fmt.Sprintf(`PATH="$HOME/.local/bin:/opt/homebrew/opt/node@22/bin:/opt/homebrew/bin:$PATH" %s`, cmd)
 }
 
 // TmuxSocket returns the explicit tmux socket path for Tart VMs.
@@ -1339,17 +1343,42 @@ func (r *Runtime) startTempVM(ctx context.Context, vmName string) error {
 	// Add VM name
 	args = append(args, vmName)
 
-	// Start VM in background
+	// Start VM in background, capturing output to a temp log so a failed boot
+	// can be diagnosed (notably Apple's concurrent-VM cap, where tart run exits
+	// immediately). A file — not a bytes.Buffer — because os/exec's output-copy
+	// goroutine may still be writing when waitForBoot times out; reading the
+	// buffer concurrently would be a data race, but a file read is not.
+	runLog, err := os.CreateTemp("", "yoloai-tart-tmp-*.log")
+	if err != nil {
+		return fmt.Errorf("create VM log: %w", err)
+	}
+	runLogPath := runLog.Name()
+	defer os.Remove(runLogPath) //nolint:errcheck // best-effort cleanup
+
 	cmd := exec.CommandContext(ctx, r.tartBin, args...) //nolint:gosec // G204: args are constructed internally
+	cmd.Stdout = runLog
+	cmd.Stderr = runLog
 	if err := cmd.Start(); err != nil {
+		_ = runLog.Close()
 		return fmt.Errorf("start VM: %w", err)
 	}
 
 	// Wait for boot
 	procDone := make(chan error, 1)
-	go func() { procDone <- cmd.Wait() }()
+	go func() {
+		procDone <- cmd.Wait()
+		_ = runLog.Close()
+	}()
 
-	return r.waitForBoot(ctx, vmName, procDone)
+	if err := r.waitForBoot(ctx, vmName, procDone); err != nil {
+		if logData, readErr := os.ReadFile(runLogPath); readErr == nil { //nolint:gosec // G304: temp file we created
+			if limitErr := checkVMLimitError(string(logData)); limitErr != nil {
+				return limitErr
+			}
+		}
+		return err
+	}
+	return nil
 }
 
 // configureXcodeInVM sets up Xcode symlinks and configuration inside the VM.

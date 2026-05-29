@@ -40,6 +40,7 @@ var descriptor = runtime.BackendDescriptor{
 	InstallHint:               "https://docs.docker.com/get-docker/",
 	BaseModeName:              runtime.IsolationModeContainer,
 	AgentProvisionedByBackend: true,
+	AgentInstallMethod:        "npm-global",
 	SupportedIsolationModes:   []runtime.IsolationMode{runtime.IsolationModeContainerEnhanced, runtime.IsolationModeContainerPrivileged},
 	Capabilities: runtime.BackendCaps{
 		NetworkIsolation: true,

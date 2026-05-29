@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/kstenerud/yoloai/internal/buildinfo"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 )
@@ -29,52 +30,44 @@ const (
 )
 
 // provisionCommands are the shell commands to install dev tools in the base VM.
-// Each entry is run via tart exec as the admin user. They install:
-// - Xcode Command Line Tools, Homebrew, Node.js, tmux, git, jq, ripgrep, Claude Code
+// Each entry is run via tart exec as the admin user. They install Homebrew,
+// node@22, tmux, jq, ripgrep, and Claude Code, then compose a deterministic
+// login-shell PATH.
 //
-// Robustness notes:
-//   - node@24 (and other versioned formulae) may be pre-installed in the base
-//     image but broken (e.g. missing libsimdjson). We remove them so they don't
-//     shadow our node installation or crash when npm is invoked.
-//   - We use "$(brew --prefix node)/bin/npm" instead of bare "npm" to avoid
-//     picking up a shadowing binary from PATH (e.g. a broken node@24 keg that
-//     was force-linked or explicitly added to PATH in ~/.zprofile).
+// These commands are checksummed (see provisionChecksum): any edit invalidates
+// the stored checksum and forces a rebuild. Verification and the build imprint
+// are deliberately NOT part of this slice — the imprint embeds the checksum, so
+// including it would be circular; they run as trailing dynamic steps instead.
+//
+// Notes:
+//   - Claude Code is installed via the native installer; the npm package is
+//     deprecated as of v2.1.15 and slated to stop working. The native installer
+//     drops a standalone binary in ~/.local/bin and self-updates — no node
+//     dependency, which removes the whole node-version-shadowing class of bugs
+//     that the old npm-based install fought against.
+//   - node@22 is a keg-only (versioned) formula, so brew does not link it into
+//     /opt/homebrew/bin. We add its bin dir to the login PATH explicitly.
 var provisionCommands = []string{
-	// Accept Xcode license and install CLI tools (may already be present in base image)
-	"sudo xcode-select --install 2>/dev/null || true",
+	// Install Homebrew if not present (non-interactive).
+	`which brew >/dev/null 2>&1 || NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"`,
 
-	// Install Homebrew if not present
-	`which brew >/dev/null 2>&1 || /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"`,
+	// Install pinned tools. node@22 is keg-only; its bin dir is added to the
+	// login PATH below rather than relying on brew link.
+	`eval "$(/opt/homebrew/bin/brew shellenv)" && brew install tmux jq ripgrep node@22`,
 
-	// Remove versioned node formulae that may be broken or shadow our install.
-	// Failures are silenced — these formulae may not be present.
-	`eval "$(/opt/homebrew/bin/brew shellenv)" && brew uninstall --ignore-dependencies node@24 node@22 node@20 2>/dev/null; true`,
+	// Install Claude Code via the native installer (standalone binary in
+	// ~/.local/bin, self-updating, no node dependency).
+	`curl -fsSL https://claude.ai/install.sh | bash`,
 
-	// Install our preferred node and other tools.
-	`eval "$(/opt/homebrew/bin/brew shellenv)" && brew install node tmux jq ripgrep`,
-
-	// Install Claude Code. npm's shebang is "#!/usr/bin/env node"; if node@24
-	// is still in PATH (even after uninstall, it may linger via launchd env),
-	// env node resolves to node@24 which crashes due to simdjson ABI mismatch.
-	// Prepend the node 25 bin dir to PATH so env node reliably finds node 25.
-	`eval "$(/opt/homebrew/bin/brew shellenv)" && PATH="$(brew --prefix node)/bin:$PATH" npm install -g @anthropic-ai/claude-code`,
-
-	// Fix the login-shell PATH so node 25 comes before node@24.
-	// The Cirrus base image adds /opt/homebrew/opt/node@24/bin to ~/.zprofile;
-	// this persists in login shells (including the tmux pane) even after brew
-	// uninstall, causing node@24 (broken: simdjson ABI mismatch) to shadow
-	// node 25 when claude's "#!/usr/bin/env node" shebang resolves "node".
-	// Remove the node@24 PATH line and prepend node 25 explicitly.
-	`sed -i '' '/opt\/homebrew\/opt\/node@24/d' ~/.zprofile 2>/dev/null; echo 'export PATH="/opt/homebrew/opt/node/bin:$PATH"' >> ~/.zprofile`,
-
-	// Force-remove node@24 keg. brew uninstall --ignore-dependencies may leave
-	// the keg if brew thinks a formula depends on it. Without the keg, any
-	// stale PATH reference pointing at it is harmless.
-	`sudo rm -rf /opt/homebrew/Cellar/node@24 /opt/homebrew/opt/node@24 2>/dev/null; true`,
-
-	// Add Homebrew to shell profile for future logins (idempotent).
-	`grep -q 'brew shellenv' ~/.zprofile 2>/dev/null || echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile`,
+	// Compose a deterministic login-shell PATH: Homebrew, keg-only node@22, and
+	// the native Claude install dir. Guarded by a marker so it is idempotent.
+	`grep -q 'yoloai-base PATH' ~/.zprofile 2>/dev/null || printf '%s\n' '# yoloai-base PATH' 'eval "$(/opt/homebrew/bin/brew shellenv)"' 'export PATH="/opt/homebrew/opt/node@22/bin:$HOME/.local/bin:$PATH"' >> ~/.zprofile`,
 }
+
+// requiredTools are the binaries the provisioned base must expose on the login
+// shell PATH. Verified in-guest after provisioning; a missing tool fails the
+// build before the new base is promoted.
+var requiredTools = []string{"tmux", "node", "jq", "rg", "claude"}
 
 // Setup ensures the provisioned base VM image exists, pulling and provisioning
 // as needed. If imageRef is set in config (tart.image override), it uses that
@@ -87,6 +80,16 @@ var provisionCommands = []string{
 func (r *Runtime) Setup(ctx context.Context, _ config.Layout, sourceDir string, output io.Writer, logger *slog.Logger, force bool) error {
 	baseImage := r.resolveBaseImage(sourceDir)
 
+	// Serialize base creation so concurrent processes don't race on the shared
+	// yoloai-base VM. Mirrors the Docker backend's Setup (Q-W.4a).
+	release, err := AcquireBaseLock(r.layout, provisionedImageName)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	// Re-check inside the lock: another process may have built the base while
+	// we were blocked acquiring it.
 	if !force {
 		rebuild, err := r.needsBuild(ctx, baseImage)
 		if err != nil {
@@ -97,12 +100,11 @@ func (r *Runtime) Setup(ctx context.Context, _ config.Layout, sourceDir string, 
 		}
 	}
 
-	// Check if the base image needs to be pulled
+	// Ensure the upstream base image is present.
 	baseExists, err := r.vmExistsNamed(ctx, baseImage)
 	if err != nil {
 		return fmt.Errorf("check base image: %w", err)
 	}
-
 	if !baseExists {
 		fmt.Fprintf(output, "Pulling base macOS VM image (%s)...\n", baseImage)            //nolint:errcheck // best-effort
 		fmt.Fprintln(output, "This is a one-time download (~30 GB) and may take a while.") //nolint:errcheck // best-effort
@@ -112,31 +114,40 @@ func (r *Runtime) Setup(ctx context.Context, _ config.Layout, sourceDir string, 
 		}
 	}
 
-	// Delete existing provisioned image if rebuilding
-	provExists, _ := r.vmExistsNamed(ctx, provisionedImageName)
-	if provExists {
-		fmt.Fprintln(output, "Removing old provisioned image...") //nolint:errcheck // best-effort
-		if _, err := r.runTart(ctx, "delete", provisionedImageName); err != nil {
-			logger.Warn("failed to delete old provisioned image", "err", err)
-		}
-	}
+	// Provision into a temp VM, then atomically swap it into place. The
+	// existing yoloai-base (if any) stays intact and trusted until the new one
+	// is fully provisioned and verified — so a crash mid-build can never leave
+	// a trusted-but-empty base.
+	tempVM := generateTempVMName(provisionedImageName)
+	defer r.cleanupTempVM(ctx, tempVM)
 
-	// Clone base image to create our provisioned image
 	fmt.Fprintln(output, "Cloning base image for provisioning...") //nolint:errcheck // best-effort
-	if _, err := r.runTart(ctx, "clone", baseImage, provisionedImageName); err != nil {
+	if _, err := r.runTart(ctx, "clone", baseImage, tempVM); err != nil {
 		return fmt.Errorf("clone base image: %w", err)
 	}
 
-	// Boot the provisioned image for provisioning
 	fmt.Fprintln(output, "Booting VM for provisioning (installing dev tools)...") //nolint:errcheck // best-effort
-	if err := r.bootForProvisioning(ctx, provisionedImageName, output, logger); err != nil {
-		// Clean up on failure
-		_, _ = r.runTart(ctx, "delete", provisionedImageName)
+	if err := r.bootForProvisioning(ctx, tempVM, baseImage, output, logger); err != nil {
 		return fmt.Errorf("provision VM: %w", err)
 	}
 
-	// Record the checksum so future runs can skip this provisioning step.
+	// Swap: replace the old base with the freshly verified temp VM.
+	provExists, _ := r.vmExistsNamed(ctx, provisionedImageName)
+	if provExists {
+		fmt.Fprintln(output, "Promoting newly provisioned image...") //nolint:errcheck // best-effort
+		if _, err := r.runTart(ctx, "delete", provisionedImageName); err != nil {
+			return fmt.Errorf("delete old base: %w", err)
+		}
+	}
+	if _, err := r.runTart(ctx, "clone", tempVM, provisionedImageName); err != nil {
+		return fmt.Errorf("promote provisioned image: %w", err)
+	}
+
+	// Record the checksum and host-side build info LAST — only after a verified
+	// base is in place. This closes the decoupling gap: a stale checksum can
+	// never bless a missing base (needsBuild sees the VM is absent and rebuilds).
 	r.recordBuildChecksum(baseImage)
+	r.recordBuildInfo(baseImage)
 
 	fmt.Fprintln(output, "Base VM image provisioned successfully.") //nolint:errcheck // best-effort
 	return nil
@@ -213,6 +224,56 @@ func (r *Runtime) recordBuildChecksum(baseImage string) {
 	_ = fileutil.WriteFile(r.tartBaseChecksumPath(), []byte(sum), 0600) //nolint:gosec // G304: path is DataDir/cache/
 }
 
+// tartBaseInfoPath returns the path of the host-side build-info sidecar, next
+// to the checksum file under the layout's cache directory.
+func (r *Runtime) tartBaseInfoPath() string {
+	return filepath.Join(r.layout.CacheDir(), ".tart-base-info")
+}
+
+// buildInfoContent renders the build imprint: the yoloai build that produced
+// the base, the provision checksum, the base image, and a UTC build timestamp.
+// Shared by the in-guest imprint and the host-side sidecar so they agree.
+func (r *Runtime) buildInfoContent(baseImage string) string {
+	return fmt.Sprintf(
+		"yoloai_version=%s\nyoloai_commit=%s\nyoloai_build_date=%s\nprovision_checksum=%s\nbase_image=%s\nbuilt_at=%s\n",
+		buildinfo.Version, buildinfo.Commit, buildinfo.Date,
+		r.provisionChecksum(baseImage), baseImage,
+		time.Now().UTC().Format(time.RFC3339),
+	)
+}
+
+// recordBuildInfo writes the host-side build-info sidecar (best-effort).
+func (r *Runtime) recordBuildInfo(baseImage string) {
+	_ = fileutil.WriteFile(r.tartBaseInfoPath(), []byte(r.buildInfoContent(baseImage)), 0600) //nolint:gosec // G304: path is DataDir/cache/
+}
+
+// verifyTools asserts every requiredTools binary resolves on the VM's login
+// shell PATH (zsh -l sources ~/.zprofile). Returns an error naming the first
+// missing tool — that is what the provisioned base must guarantee.
+func (r *Runtime) verifyTools(ctx context.Context, vmName string, output io.Writer) error {
+	script := fmt.Sprintf(
+		`for t in %s; do command -v "$t" >/dev/null 2>&1 || { echo "MISSING: $t" >&2; exit 1; }; done`,
+		strings.Join(requiredTools, " "),
+	)
+	args := execArgs(vmName, "zsh", "-lc", script)
+	cmd := exec.CommandContext(ctx, r.tartBin, args...) //nolint:gosec // G204
+	cmd.Stdout = output
+	cmd.Stderr = output
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("tool verification failed (a required tool of %v is missing from the login PATH): %w", requiredTools, err)
+	}
+	return nil
+}
+
+// writeImprint writes the build-info file inside the guest at ~/.yoloai-base-info.
+// The content is piped via stdin to avoid shell-quoting the multi-line payload.
+func (r *Runtime) writeImprint(ctx context.Context, vmName, baseImage string) error {
+	args := execArgs(vmName, "bash", "-c", "cat > ~/.yoloai-base-info")
+	cmd := exec.CommandContext(ctx, r.tartBin, args...) //nolint:gosec // G204
+	cmd.Stdin = strings.NewReader(r.buildInfoContent(baseImage))
+	return cmd.Run()
+}
+
 // pullImage pulls a Tart VM image from a registry.
 func (r *Runtime) pullImage(ctx context.Context, imageRef string, output io.Writer) error {
 	cmd := exec.CommandContext(ctx, r.tartBin, "pull", imageRef) //nolint:gosec // G204: imageRef from config
@@ -221,8 +282,10 @@ func (r *Runtime) pullImage(ctx context.Context, imageRef string, output io.Writ
 	return cmd.Run()
 }
 
-// bootForProvisioning boots a VM, runs provision commands, then shuts it down.
-func (r *Runtime) bootForProvisioning(ctx context.Context, vmName string, output io.Writer, logger *slog.Logger) error {
+// bootForProvisioning boots a VM, runs provision commands, verifies the
+// required tools resolve on the login PATH, writes a build imprint, then shuts
+// the VM down. baseImage is needed for the imprint's provision checksum.
+func (r *Runtime) bootForProvisioning(ctx context.Context, vmName, baseImage string, output io.Writer, logger *slog.Logger) error {
 	// Capture tart run output to a temp log for debugging
 	vmLog, err := os.CreateTemp("", "yoloai-tart-*.log")
 	if err != nil {
@@ -266,6 +329,12 @@ func (r *Runtime) bootForProvisioning(ctx context.Context, vmName string, output
 	if err := r.waitForBoot(ctx, vmName, procDone); err != nil {
 		// Show tart run output on failure to aid debugging
 		if logData, readErr := os.ReadFile(vmLogPath); readErr == nil && len(logData) > 0 { //nolint:gosec // G304: temp file we created
+			// The most common boot failure is Apple's concurrent-VM cap: a base
+			// build needs to run a VM, but two macOS VMs may already be running.
+			// Surface the actionable "stop a sandbox" guidance instead of a raw log.
+			if limitErr := checkVMLimitError(string(logData)); limitErr != nil {
+				return limitErr
+			}
 			fmt.Fprintf(output, "tart run output:\n%s\n", string(logData)) //nolint:errcheck,gosec // best-effort diagnostic output
 		}
 		return fmt.Errorf("vm did not become accessible: %w", err)
@@ -284,6 +353,23 @@ func (r *Runtime) bootForProvisioning(ctx context.Context, vmName string, output
 		if err := provCmd.Run(); err != nil {
 			return fmt.Errorf("provision step %d failed: %w", i+1, err)
 		}
+	}
+
+	// Verify every required tool resolves on the LOGIN shell PATH (zsh -l
+	// sources ~/.zprofile) — that is the PATH the agent and tmux pane will use.
+	// A missing tool fails the build here, before the new base is promoted.
+	fmt.Fprintln(output, "Verifying provisioned tools...") //nolint:errcheck // best-effort
+	if err := r.verifyTools(ctx, vmName, output); err != nil {
+		return err
+	}
+
+	// Write the build imprint: which yoloai build produced this base, plus the
+	// provision checksum and a UTC timestamp. Metadata only — not a rebuild
+	// trigger (the checksum drives rebuilds; embedding it here would be
+	// circular if it were part of provisionCommands).
+	fmt.Fprintln(output, "Writing base image imprint...") //nolint:errcheck // best-effort
+	if err := r.writeImprint(ctx, vmName, baseImage); err != nil {
+		return fmt.Errorf("write imprint: %w", err)
 	}
 
 	// Trigger an in-guest shutdown to flush all APFS write buffers before the

@@ -60,7 +60,7 @@ row to the index.
 | `Failed to start launchd_sim: could not bind to session` when booting simulator | [Tart: ditto'd runtime is incomplete](#dittod-ios-runtime-is-incomplete-use-xcodebuild--downloadplatform) |
 | `git diff` fails with "unable to read" object / git corruption on Tart VM | [Tart: VirtioFS corrupts git repositories](#virtiofs-corrupts-git-repositories) |
 | `yoloai new` times out / "command timed out" on Tart; sandbox.jsonl stops after xcodebuild firstlaunch; agent never starts | [Tart: signal_secrets_consumed deadlock with get_working_dir](#tart-signal_secrets_consumed-must-run-before-get_working_dir) |
-| Agent silently fails after `yoloai restart` on Tart (node not found) | [Tart: node@24 in .zprofile breaks agent launch](#node24-in-zprofile-breaks-agent-launch-after-restart) |
+| Agent silently fails after `yoloai restart` on Tart (claude/node not found) | [Tart: provisioned tool dirs missing from non-login PATH](#provisioned-tool-dirs-missing-from-the-non-login-path-at-agent-launch) |
 | Agent silently fails after `yoloai restart` on Seatbelt (Swift PM sandbox error) | [Seatbelt: swift-wrapper not sourced on restart](#swift-wrapper-not-sourced-on-restart) |
 | Agent dies silently/SIGTRAP (exit 133) on Seatbelt at launch; ICU/timezone deny in unified log | [Seatbelt: SBPL subpaths need vnode-resolved paths](#agent-dies-silently-sigtrap--sbpl-subpath-rules-must-use-vnode-resolved-paths) |
 | VS Code tunnel re-prompts for login on every container restart | [VS Code CLI: hostname-based keychain encryption](#vs-code-cli-file-keychain-uses-hostname-in-encryption-key) |
@@ -1180,15 +1180,15 @@ VirtioFS should only be used for:
 
 **Code:** `runtime/tart/tart.go::ResolveCopyMount`, `runtime/tart/tart.go::Create`, `sandbox/lifecycle.go::Reset` (needs implementation)
 
-### node@24 in .zprofile breaks agent launch after restart
+### Provisioned tool dirs missing from the non-login PATH at agent launch
 
-**Symptom:** Agent silently fails to start after `yoloai restart` on a Tart VM. The tmux pane shows a shell prompt but no agent process. Works fine on first `yoloai new`.
+**Symptom:** Agent silently fails to start after `yoloai restart` on a Tart VM (and would fail at first launch too if the wrap prefix were wrong). The tmux pane shows a shell prompt but no agent process.
 
-**Explanation:** The Cirrus CI base image's `~/.zprofile` puts `node@24` before `node 25` in PATH. The Claude Code shebang (`#!/usr/bin/env node`) resolves to the broken `node@24`. On first launch, the Python `sandbox-setup.py` calls `prepare_launch_command()` which prepends `/opt/homebrew/opt/node/bin` to PATH. But `yoloai restart` relaunches the agent from Go via `respawn-pane` in `lifecycle.go`, bypassing the Python path entirely.
+**Explanation:** The provisioned base puts its tools on the *login* PATH via `~/.zprofile` (Homebrew, keg-only `node@22`, and `~/.local/bin` where the native Claude Code binary lives). But the agent is launched via `tart exec bash -c` (non-login) and, on restart, from Go via `respawn-pane` in `lifecycle.go` — neither sources `~/.zprofile`, so `claude` is not found.
 
-**Fix:** Added `PrepareAgentCommand(cmd string) string` to the `runtime.Runtime` interface. The Tart implementation prepends `PATH="/opt/homebrew/opt/node/bin:$PATH"` to the command, matching the Python workaround. `lifecycle.go` calls this before `respawn-pane`.
+**Fix:** `PrepareAgentCommand(cmd string) string` on the `runtime.Runtime` interface prepends the provisioned tool dirs (`PATH="$HOME/.local/bin:/opt/homebrew/opt/node@22/bin:/opt/homebrew/bin:$PATH"`) to the command. The Go and Python launch paths use the same prefix. (Historical note: an earlier base installed Claude Code via npm with a `#!/usr/bin/env node` shebang that the Cirrus image's `node@24` shadowed; switching to the native standalone binary removed that whole class of node-version shadowing, but the agent still needs `~/.local/bin` on the non-login PATH.)
 
-**Code:** `runtime/tart/tart.go::PrepareAgentCommand`, `sandbox/lifecycle.go` (relaunch path), `runtime/monitor/sandbox-setup.py::TartBackend.prepare_launch_command`
+**Code:** `runtime/tart/tart.go::PrepareAgentCommand`, `runtime/tart/build.go` (provisionCommands compose the login PATH), `sandbox/lifecycle.go` (relaunch path), `runtime/monitor/sandbox-setup.py::TartBackend.prepare_launch_command`
 
 ---
 
