@@ -93,6 +93,12 @@ type Runtime struct {
 	client     *dockerclient.Client
 	binaryName string // CLI binary name ("docker" or "podman")
 
+	// imageBytesFn computes the rebuild-forcing image-layer total from a
+	// DiskUsage snapshot. nil means "use du.LayersSize" (the daemon's
+	// deduplicated layer-store total). Podman injects its own because its
+	// docker-compat API reports LayersSize=0 (see backend-idiosyncrasies.md).
+	imageBytesFn imageBytesFunc
+
 	// Capability fields — built once in New(), returned by RequiredCapabilities.
 	gvisorRunsc      caps.HostCapability
 	gvisorRegistered caps.HostCapability

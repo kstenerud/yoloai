@@ -47,6 +47,8 @@ row to the index.
 | `tmux attach` exits with `EACCES` on `/dev/tty` (gVisor ARM64) | [Docker: gVisor ARM64 TIOCSCTTY](#gvisor-on-arm64-docker-exec--it-does-not-call-tiocsctty) |
 | `failed to create an image ... after deleting the existing one: AlreadyExists` (intermittent) | [Docker: AlreadyExists race on rebuild of identical tag](#docker-daemon-races-on-alreadyexists-when-rebuilding-an-existing-tag-with-identical-content) |
 | `yoloai system disk`/`doctor` reports absurd reclaimable cache (e.g. podman 129 GiB vs ~5 GiB from `system df`) | [Docker/Podman: Images[].Size includes shared layers](#diskusageimagessize-includes-shared-layers-summing-it-multiply-counts-them) |
+| `doctor`/`disk` reports podman images as 0 B despite a multi-GB base | [Podman: /system/df reports LayersSize 0](#podman-systemdf-reports-layerssize-0) |
+| `doctor` shows containerd image cache as `?`; `prune --images` leaves devmapper pool blocks used / df unchanged | [containerd: both snapshotters hold a copy](#containerd-both-overlayfs-and-devmapper-snapshotters-hold-a-copy-prune-and-sizing-must-cover-both) |
 | Docker base image reads ~33 GiB on Linux vs ~5 GiB on macOS; `image rm` frees ~0; prune undercounts reclaim | [Docker: containerd store pins layers via build cache](#docker-containerd-image-store-image-rm-frees-no-disk-until-the-build-cache-is-pruned-sdk-spacereclaimed-undercounts) |
 | Container starts as root / wrong uid under rootless Podman | [Podman: rootless detection uses socket path](#rootless-detection-must-use-socket-path-not-osgetuid) |
 | Wrong uid inside container on macOS Podman | [Podman: macOS keep-id maps VM uid](#macos---usernkeep-id-maps-the-podman-machine-uid-1000-not-the-macos-uid) |
@@ -685,7 +687,9 @@ An empty value disables LXC seccomp for that container entirely. The container m
 
 **Code:** `internal/runtime/docker/prune.go` `splitCacheBytes()` (shared by docker + podman; returns the no-rebuild `cached` total and the rebuild-forcing `images` total separately). Guard test: `internal/runtime/docker/prune_test.go::TestSplitCacheBytes_ImagesUseDeduplicatedLayersSize`.
 
-**Related (display):** the "unknown" sentinel `ImageBytes == -1` (containerd reports no cheap image-cache size) must be filtered before display, or it renders as a literal `-1 B` and skews the total — see `internal/cli/doctorcmd/doctor.go` `renderReclaimTier`.
+**Related (Podman):** the `du.LayersSize` fix above silently fails on Podman, whose docker-compat `/system/df` returns `LayersSize: 0`. The Podman backend injects a per-image dedup instead — see [Podman: `/system/df` reports `LayersSize: 0`](#podman-systemdf-reports-layerssize-0).
+
+**Related (display):** containerd now sizes its image cache via the snapshot `Usage` API (see [containerd: both snapshotters hold a copy](#containerd-both-overlayfs-and-devmapper-snapshotters-hold-a-copy-prune-and-sizing-must-cover-both)); `ImageBytes == -1` remains only as an error fallback when listing images fails, and the `<= 0` filter in `internal/cli/doctorcmd/doctor.go` `renderReclaimTier` still guards it (a `-1` would otherwise render as a literal `-1 B` and skew the total).
 
 ---
 
@@ -702,6 +706,16 @@ An empty value disables LXC seccomp for that container entirely. The container m
 ---
 
 ## Podman
+
+### Podman: `/system/df` reports `LayersSize: 0`
+
+**Symptom:** `yoloai doctor` / `yoloai system disk` reports the podman backend's images as **0 B** even though `podman system df` shows a multi-GB base image (e.g. ~5.5 GB). The cached tier (build cache, volumes) reports correctly; only the image tier reads zero.
+
+**Explanation:** yoloai sizes images from the Docker SDK's `client.DiskUsage()`, taking the deduplicated `du.LayersSize` (see [`Images[].Size` includes shared layers](#diskusageimagessize-includes-shared-layers-summing-it-multiply-counts-them)). Docker populates `LayersSize` with the daemon's deduplicated layer-store total; **Podman's docker-compat `/system/df` always returns `LayersSize: 0`** and only fills the per-image `Size`/`SharedSize` fields. So the inherited docker code, correct for Docker, yields 0 for Podman.
+
+**Fix:** The Podman backend injects a per-image dedup via `docker.Runtime.SetImageBytesFunc`. Summing `img.Size` would multiply-count the shared base (38 build stages sharing one ~5.5 GB base read as ~150 GB — the failure mode of the shared-layers entry above). The deduplicated total is `Σ(img.Size − img.SharedSize) + max(img.SharedSize)`: every image's unique bytes plus the shared layer set counted once. For yoloai's single-base build chain the largest `SharedSize` captures the full shared union exactly; multiple independent bases would slightly underestimate the shared tier.
+
+**Code:** `internal/runtime/podman/podman.go` `podmanImageBytes()` (injected in `New` via `SetImageBytesFunc`); `internal/runtime/docker/prune.go` `splitCacheBytes()` (uses `imageBytesFn` when set, else `du.LayersSize`). Guard tests: `podman_test.go::TestPodmanImageBytes_*`, `docker/prune_test.go::TestSplitCacheBytes_ImageBytesFuncOverride`.
 
 ### Rootless detection must use socket path, not `os.Getuid()`
 
@@ -844,6 +858,18 @@ Additionally, all parent blobs (manifest list, platform manifests) must have
 direct image → root target link by default; without these labels it cannot
 reach manifests, configs, and layers further down the tree and will collect them.
 See `image.go::linkFromDockerNamespace`, `shareDescriptorTree`, `setGCRefLabels`.
+
+### containerd: both overlayfs and devmapper snapshotters hold a copy; prune and sizing must cover both
+
+**Symptom (sizing):** before the fix, `yoloai doctor` reported the containerd backend's image cache as `?` (the `ImageBytes == -1` "unknown" sentinel), hiding several GB of real disk. **Symptom (prune):** `yoloai system prune --images` left thin-pool allocation behind — `dmsetup status containerd-pool` still showed >50% data blocks used after a prune that claimed success — and the leaked snapshots eventually filled the pool (a likely contributor to the `smoke-containerd-disk-pressure` ENOSPC stalls).
+
+**Explanation:** yoloai selects the snapshotter per isolation mode (`lifecycle.go`): **overlayfs** for `--isolation vm`/container, **devmapper** for `--isolation vm-enhanced` (Firecracker). A host that has run both modes therefore holds **two physical copies** of the base image's layers — one in `io.containerd.snapshotter.v1.overlayfs`, one in the devmapper thin-pool. The original `CacheUsage`/`pruneSnapshots` hardcoded `SnapshotService("overlayfs")`, so devmapper snapshots were never counted and never removed.
+
+Sizing must go through the **containerd socket**, not the host filesystem: yoloai may run unprivileged via the `containerd` group, and `/var/lib/containerd` is root-only (so `du`/`dmsetup` are unavailable on the normal path). The snapshot `Usage(ctx, key).Size` API returns real allocated bytes for *both* snapshotters over the socket (devmapper reports per-thin-device allocation, summing to the pool's used-block total), so summing `Usage` across every snapshot in each snapshotter is the portable, root-free measurement.
+
+**devmapper caveat:** removing a devmapper thin snapshot returns its blocks to the pool (the `dmsetup` used-block count drops), but the pool's backing loopback file (`/var/lib/containerd/devmapper/data`, host-configured at a fixed size, ~10 GB) **does not shrink** — discards are not punched back to the host file. So host `df` is unchanged by a prune even though the pool regains free blocks. yoloai's prune prints this explicitly so the reported reclaim isn't mistaken for freed host disk. (The pool itself is a host prerequisite, configured by the devmapper setup script + `/etc/containerd/config.toml`, not owned by yoloai — yoloai only prunes the snapshots it created inside it.)
+
+**Code:** `internal/runtime/containerd/prune.go` — `snapshotterNames` (`{overlayfs, devmapper}`), `snapshotNames` (Walk; `present=false` skips an unconfigured snapshotter), `pruneSnapshots` (iterates both, sums removed `Usage`, prints the devmapper caveat), `CacheUsage` (sums `Usage` across both into `ImageBytes`, per-snapshotter breakdown in `Detail`).
 
 ### Kata: orphaned snapshots from crashed runs must be pre-cleared
 

@@ -95,7 +95,7 @@ func runSystemPrune(cmd *cobra.Command, dryRun, explicitYes, images bool) error 
 	if err != nil {
 		return err
 	}
-	printActualRemoval(output, actualResult, isJSON)
+	printActualRemoval(output, actualResult, images, isJSON)
 
 	// Offer to reclaim the trash dir (it may now include sandboxes just
 	// quarantined plus anything from prior runs).
@@ -148,7 +148,7 @@ func previewPrune(cmd *cobra.Command, scan *yoloai.PruneResult, dryRun, images, 
 
 // printActualRemoval reports what the non-dry-run prune actually removed
 // and quarantined (human-mode only).
-func printActualRemoval(output interface{ Write([]byte) (int, error) }, result *yoloai.PruneResult, isJSON bool) {
+func printActualRemoval(output interface{ Write([]byte) (int, error) }, result *yoloai.PruneResult, images, isJSON bool) {
 	if isJSON {
 		return
 	}
@@ -168,7 +168,11 @@ func printActualRemoval(output interface{ Write([]byte) (int, error) }, result *
 		fmt.Fprintf(output, "Quarantined broken sandbox %s to trash (%s)\n", t.Name, t.Dest) //nolint:errcheck
 	}
 	if result.FreedBytes > 0 {
-		fmt.Fprintf(output, "Reclaimed %s of backend cache.\n", cliutil.HumanBytes(result.FreedBytes)) //nolint:errcheck
+		what := "backend cache"
+		if images {
+			what = "backend cache + base images"
+		}
+		fmt.Fprintf(output, "Reclaimed %s of %s.\n", cliutil.HumanBytes(result.FreedBytes), what) //nolint:errcheck
 	}
 }
 
@@ -180,7 +184,11 @@ func announceReclaim(output interface{ Write([]byte) (int, error) }, reclaimByte
 		return
 	}
 	if reclaimBytes > 0 {
-		fmt.Fprintf(output, "Reclaimable backend cache (no rebuild): ~%s\n", cliutil.HumanBytes(reclaimBytes)) //nolint:errcheck
+		label := "Reclaimable backend cache (no rebuild)"
+		if images {
+			label = "Reclaimable backend cache + base images"
+		}
+		fmt.Fprintf(output, "%s: ~%s\n", label, cliutil.HumanBytes(reclaimBytes)) //nolint:errcheck
 	}
 	if images {
 		fmt.Fprintln(output, "--images: also removing base images (forces yoloai-base rebuild on next 'new')") //nolint:errcheck

@@ -14,6 +14,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/docker/docker/api/types"
+
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/runtime/caps"
@@ -87,7 +89,7 @@ var _ runtime.Runtime = (*Runtime)(nil)
 var _ runtime.UsernsProvider = (*Runtime)(nil)
 var _ runtime.IsolationCapabilityProvider = (*Runtime)(nil)
 var _ runtime.CachePruner = (*Runtime)(nil)       // inherited from embedded docker.Runtime
-var _ runtime.DiskUsageReporter = (*Runtime)(nil) // inherited from embedded docker.Runtime
+var _ runtime.DiskUsageReporter = (*Runtime)(nil) // inherited; image bytes via podmanImageBytes (LayersSize=0 workaround)
 
 // New creates a Podman Runtime by discovering the Podman socket and
 // connecting via the Docker SDK.
@@ -110,7 +112,36 @@ func New(ctx context.Context) (*Runtime, error) {
 	r := &Runtime{Runtime: dockerRT, rootless: rootless}
 	r.rootlessCheck = buildRootlessCheckCap(rootless)
 	r.gvisorRunsc = caps.NewGVisorRunsc(runscLookPath)
+
+	// Podman's docker-compat /system/df reports LayersSize=0, so the inherited
+	// docker CacheUsage would report 0 image bytes. Inject a per-image dedup.
+	dockerRT.SetImageBytesFunc(podmanImageBytes)
 	return r, nil
+}
+
+// podmanImageBytes computes the deduplicated on-disk image-layer total for
+// Podman from its per-image Size/SharedSize fields, since Podman's
+// docker-compat /system/df returns the aggregate LayersSize as 0.
+//
+// Summing each image's Size multiply-counts shared layers (38 build stages
+// sharing one ~5.5 GiB base read as ~150 GiB). The deduplicated total is the
+// sum of every image's unique bytes plus the shared layer set counted once.
+// SharedSize is per-image "bytes shared with ≥1 other image"; for yoloai's
+// single-base build chain the largest SharedSize captures the full shared
+// union, so total ≈ Σ(Size − SharedSize) + max(SharedSize). With multiple
+// independent bases this slightly underestimates the shared tier.
+func podmanImageBytes(du types.DiskUsage) int64 {
+	var unique, maxShared int64
+	for _, img := range du.Images {
+		if img == nil {
+			continue
+		}
+		unique += img.Size - img.SharedSize
+		if img.SharedSize > maxShared {
+			maxShared = img.SharedSize
+		}
+	}
+	return unique + maxShared
 }
 
 // Create wraps the Docker Create to inject --userns=keep-id for rootless mode.

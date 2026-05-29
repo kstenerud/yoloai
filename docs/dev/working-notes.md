@@ -754,6 +754,25 @@ Trash is a lightweight quarantine: `os.Rename` into `~/.yoloai/trash/<name>` (`s
 
 **Composition.** Extends the D21 disk/prune surface and the D32 doctor advisory (read + delegate; doctor still never deletes). Thin-CLI/library-owns-I/O boundary (D27): the library measures and returns `FreedBytes`; the CLI renders it.
 
+## D36 — Accurate disk reporting + pruning for Podman and containerd; socket-only measurement
+
+**Date:** 2026-05-29. **Status:** Accepted. **Context:** With the D35 two-tier reporting in place, a testbed on this dev machine (the only thing it runs is yoloai) sat at 67% disk while `doctor` reported the whole machine's reclaimable cache as ~64 MiB — off by ~25 GB. Two backend-specific gaps (both now in `backend-idiosyncrasies.md`): Podman's docker-compat `/system/df` returns `LayersSize: 0`, so the D35 `splitCacheBytes` (which trusts `LayersSize`) reported podman images as 0 B; and the containerd backend punted entirely (`ImageBytes = -1`, "unknown") *and* its prune hardcoded the overlayfs snapshotter, so the devmapper thin-pool copy (used by `--isolation vm-enhanced`) was neither sized nor pruned — leaking snapshots that fill the pool (a likely contributor to the `smoke-containerd-disk-pressure` ENOSPC stalls).
+
+**Decision — measure through the backend socket/API, never the host filesystem.** yoloai may run unprivileged (Docker/Podman group, containerd group) and `/var/lib/{docker,containerd}` is root-only, so `du`/`dmsetup` are off the table on the normal path. All sizing goes through the daemon API.
+
+**Mechanics.**
+- **Podman image bytes:** `docker.Runtime` gains an injectable `imageBytesFn` (default: `du.LayersSize`); `splitCacheBytes` becomes a method that uses it. Podman's `New` injects `podmanImageBytes`, which dedups from per-image fields: `Σ(Size − SharedSize) + max(SharedSize)` — unique bytes plus the shared layer set counted once. Exact for a single-base build chain; slight underestimate with multiple independent bases. Fixes both `CacheUsage` and the dry-run estimate with one hook.
+- **containerd sizing:** `CacheUsage` sums snapshot `Usage(ctx, key).Size` across **both** snapshotters (`overlayfs` + `devmapper`) in the yoloai namespace into `ImageBytes` (both physically occupy disk → the sum is the honest footprint). `-1` survives only as an error fallback. `snapshotNames` returns `present=false` to silently skip an unconfigured snapshotter (devmapper on a plain Linux box).
+- **containerd prune:** `pruneSnapshots` iterates both snapshotters, measures each removed snapshot's `Usage` for the returned reclaim total, and prints the devmapper caveat.
+
+**The devmapper caveat (honesty).** Removing a devmapper thin snapshot returns blocks to the pool but the pool's fixed-size backing loopback file does not shrink, so host `df` is unchanged. Prune says so explicitly; the reported reclaim is pool-block reclaim, not freed host disk. The pool is a host prerequisite, not yoloai-owned — yoloai prunes only the snapshots it created.
+
+**CLI labels.** `FreedBytes` aggregates the no-rebuild tier *and* (under `--images`) the rebuild-forcing tier, so the prune banner/`Reclaimed` line now say "backend cache + base images" when `--images` is set, "backend cache" otherwise.
+
+**Validated on testbed (2026-05-29):** podman 5.18 GiB (matches `/system/df` dedup exactly), containerd 10.87 GiB (overlayfs 5.30 + devmapper 5.53, matching summed snapshot `Usage` and `dmsetup` ~57% of the 10 GB pool); dry-run lists 28 overlayfs + 28 devmapper snapshots. Pre-fix doctor reported ~64 MiB total.
+
+**Composition.** Extends D35 (same `CachePruner`/`DiskUsageReporter` surface, same `FreedBytes` aggregation). Thin-CLI/library-owns-I/O (D27): backends measure and return bytes; CLI renders. **macOS unverified** — see `docs/dev/macos-disk-reporting-checklist.md` (Docker Desktop's LinuxKit VM hides the data root from host `statfs`; Tart/Seatbelt have entirely different disk models).
+
 ---
 
 # Convention reminders

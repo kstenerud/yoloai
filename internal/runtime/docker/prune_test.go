@@ -26,9 +26,24 @@ func TestSplitCacheBytes_ImagesUseDeduplicatedLayersSize(t *testing.T) {
 			{Size: 5 * gib},
 		},
 	}
-	cached, images := splitCacheBytes(du)
+	cached, images := (&Runtime{}).splitCacheBytes(du)
 	assert.Equal(t, int64(0), cached)
 	assert.Equal(t, 5*gib, images)
+}
+
+// When an imageBytesFn is injected (the Podman path, whose API reports
+// LayersSize=0), it replaces du.LayersSize for the image tier; the cached tier
+// is unaffected.
+func TestSplitCacheBytes_ImageBytesFuncOverride(t *testing.T) {
+	r := &Runtime{}
+	r.SetImageBytesFunc(func(types.DiskUsage) int64 { return 7 * gib })
+	du := types.DiskUsage{
+		LayersSize: 0, // would be the image total without the override
+		Containers: []*container.Summary{{SizeRw: 42}},
+	}
+	cached, images := r.splitCacheBytes(du)
+	assert.Equal(t, int64(42), cached)
+	assert.Equal(t, 7*gib, images)
 }
 
 // Containers' writable layers, volumes, and build cache live outside the image
@@ -40,7 +55,7 @@ func TestSplitCacheBytes_NonImageUsageIsCachedTier(t *testing.T) {
 		Volumes:    []*volume.Volume{{UsageData: &volume.UsageData{Size: 50}}},
 		BuildCache: []*build.CacheRecord{{Size: 25}},
 	}
-	cached, images := splitCacheBytes(du)
+	cached, images := (&Runtime{}).splitCacheBytes(du)
 	assert.Equal(t, int64(100+200+50+25), cached)
 	assert.Equal(t, 5*gib, images)
 }
@@ -55,7 +70,7 @@ func TestSplitCacheBytes_IgnoresUnknownVolumeSize(t *testing.T) {
 			{UsageData: &volume.UsageData{Size: 500}},
 		},
 	}
-	cached, images := splitCacheBytes(du)
+	cached, images := (&Runtime{}).splitCacheBytes(du)
 	assert.Equal(t, int64(500), cached)
 	assert.Equal(t, gib, images)
 }

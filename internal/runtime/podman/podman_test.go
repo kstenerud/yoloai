@@ -7,12 +7,46 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/image"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/kstenerud/yoloai/internal/runtime/caps"
 )
+
+const gib = int64(1024 * 1024 * 1024)
+
+// Podman's docker-compat /system/df reports LayersSize=0, so the inherited
+// docker image-byte computation would read 0. podmanImageBytes must instead
+// dedup from per-image Size/SharedSize. Summing Size would multiply-count the
+// shared base (here 3 stages sharing a 5 GiB base → 15 GiB); the correct
+// dedup is Σ(unique) + shared-once.
+func TestPodmanImageBytes_DedupsSharedBase(t *testing.T) {
+	du := types.DiskUsage{
+		LayersSize: 0, // the Podman bug this function works around
+		Images: []*image.Summary{
+			{Size: 5 * gib, SharedSize: 5 * gib},     // base, all shared
+			{Size: 5*gib + 100, SharedSize: 5 * gib}, // +100 unique
+			{Size: 5*gib + 200, SharedSize: 5 * gib}, // +200 unique
+		},
+	}
+	// unique = 0 + 100 + 200 = 300; maxShared = 5 GiB.
+	assert.Equal(t, 5*gib+300, podmanImageBytes(du))
+}
+
+func TestPodmanImageBytes_Empty(t *testing.T) {
+	assert.Equal(t, int64(0), podmanImageBytes(types.DiskUsage{}))
+}
+
+func TestPodmanImageBytes_SkipsNilEntries(t *testing.T) {
+	du := types.DiskUsage{Images: []*image.Summary{
+		nil,
+		{Size: gib, SharedSize: 0}, // fully unique, unshared
+	}}
+	assert.Equal(t, gib, podmanImageBytes(du))
+}
 
 func TestDiscoverSocket_ContainerHost(t *testing.T) {
 	t.Setenv("CONTAINER_HOST", "unix:///custom/podman.sock")

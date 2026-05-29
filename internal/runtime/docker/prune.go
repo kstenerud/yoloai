@@ -217,7 +217,7 @@ func (r *Runtime) pruneCacheDryRun(ctx context.Context, includeImages bool, outp
 		fmt.Fprintf(output, "%s: cache prune skipped (--dry-run); usage query failed: %v\n", r.binaryName, err) //nolint:errcheck
 		return 0
 	}
-	cached, images := splitCacheBytes(du)
+	cached, images := r.splitCacheBytes(du)
 	what := "unused volumes, build cache"
 	estimate := cached
 	if includeImages {
@@ -250,21 +250,36 @@ func (r *Runtime) CacheUsage(ctx context.Context) (runtime.CacheUsage, error) {
 	if err != nil {
 		return runtime.CacheUsage{CachedBytes: 0, ImageBytes: -1}, fmt.Errorf("%s disk usage: %w", r.binaryName, err)
 	}
-	cached, images := splitCacheBytes(du)
+	cached, images := r.splitCacheBytes(du)
 	detail := fmt.Sprintf("%d images, %d containers, %d volumes, %d build-cache entries",
 		len(du.Images), len(du.Containers), len(du.Volumes), len(du.BuildCache))
 	return runtime.CacheUsage{CachedBytes: cached, ImageBytes: images, Detail: detail}, nil
 }
 
+// imageBytesFunc computes the rebuild-forcing image-layer total from a
+// DiskUsage snapshot. Injected via SetImageBytesFunc so Podman can override
+// the default (du.LayersSize) that its docker-compat API reports as 0.
+type imageBytesFunc func(types.DiskUsage) int64
+
+// SetImageBytesFunc overrides how image-layer bytes are computed from a
+// DiskUsage snapshot. Used by the Podman backend, whose docker-compat
+// /system/df returns LayersSize=0; it injects a per-image dedup instead.
+func (r *Runtime) SetImageBytesFunc(fn imageBytesFunc) { r.imageBytesFn = fn }
+
 // splitCacheBytes returns (cachedBytes, imageBytes): the no-rebuild-forcing
 // reclaim (build cache + container writable layers + volumes) and the
-// rebuild-forcing reclaim (image layers). The image portion uses du.LayersSize
-// — the deduplicated layer-store total that `docker/podman system df` reports —
-// NOT the sum of each img.Size, which multiply-counts shared base layers
-// (dozens of intermediate build stages sharing one 5 GiB base would otherwise
-// read as ~130 GiB).
-func splitCacheBytes(du types.DiskUsage) (cached, images int64) {
-	images = du.LayersSize
+// rebuild-forcing reclaim (image layers). The image portion defaults to
+// du.LayersSize — the deduplicated layer-store total that `docker system df`
+// reports — NOT the sum of each img.Size, which multiply-counts shared base
+// layers (dozens of intermediate build stages sharing one 5 GiB base would
+// otherwise read as ~130 GiB). Podman injects a replacement via
+// SetImageBytesFunc because its API reports LayersSize=0.
+func (r *Runtime) splitCacheBytes(du types.DiskUsage) (cached, images int64) {
+	if r.imageBytesFn != nil {
+		images = r.imageBytesFn(du)
+	} else {
+		images = du.LayersSize
+	}
 	for _, ct := range du.Containers {
 		cached += ct.SizeRw
 	}
