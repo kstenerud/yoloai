@@ -1,4 +1,4 @@
-package sandbox
+package status
 
 import (
 	"context"
@@ -15,28 +15,8 @@ import (
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/internal/testutil"
 )
-
-// inspectMockRuntime extends mockRuntime to support Inspect and Exec for inspect tests.
-type inspectMockRuntime struct {
-	mockRuntime
-	inspectFn func(ctx context.Context, name string) (runtime.InstanceInfo, error)
-	execFn    func(ctx context.Context, name string, cmd []string, user string) (runtime.ExecResult, error)
-}
-
-func (m *inspectMockRuntime) Inspect(ctx context.Context, name string) (runtime.InstanceInfo, error) {
-	if m.inspectFn != nil {
-		return m.inspectFn(ctx, name)
-	}
-	return runtime.InstanceInfo{}, errMockNotImplemented
-}
-
-func (m *inspectMockRuntime) Exec(ctx context.Context, name string, cmd []string, user string) (runtime.ExecResult, error) {
-	if m.execFn != nil {
-		return m.execFn(ctx, name, cmd, user)
-	}
-	return m.mockRuntime.Exec(ctx, name, cmd, user)
-}
 
 // FormatAge tests
 
@@ -66,9 +46,9 @@ func TestInspectSandbox_NotFound(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
-	mock := &inspectMockRuntime{}
+	mock := &fakeRuntime{}
 	_, err := InspectSandbox(context.Background(), layout, mock, "nonexistent")
-	assert.ErrorIs(t, err, ErrSandboxNotFound)
+	assert.ErrorIs(t, err, store.ErrSandboxNotFound)
 }
 
 func TestInspectSandbox_Removed(t *testing.T) {
@@ -89,7 +69,7 @@ func TestInspectSandbox_Removed(t *testing.T) {
 	}
 	require.NoError(t, store.SaveMeta(sandboxDir, meta))
 
-	mock := &inspectMockRuntime{
+	mock := &fakeRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
 			return runtime.InstanceInfo{}, fmt.Errorf("not found: %w", runtime.ErrNotFound)
 		},
@@ -110,7 +90,7 @@ func TestListSandboxes_Empty(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, ".yoloai", "sandboxes"), 0750))
 
 	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
-	mock := &inspectMockRuntime{}
+	mock := &fakeRuntime{}
 	result, err := ListSandboxes(context.Background(), layout, mock)
 	require.NoError(t, err)
 	assert.Empty(t, result)
@@ -140,7 +120,7 @@ func TestListSandboxes_IncludesBroken(t *testing.T) {
 	brokenDir := filepath.Join(sandboxesDir, "broken")
 	require.NoError(t, os.MkdirAll(brokenDir, 0750))
 
-	mock := &inspectMockRuntime{
+	mock := &fakeRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
 			return runtime.InstanceInfo{}, fmt.Errorf("not found: %w", runtime.ErrNotFound)
 		},
@@ -174,7 +154,7 @@ func TestListSandboxes_IncludesBroken(t *testing.T) {
 // DetectStatus tests (exec fallback — empty sandboxDir)
 
 func TestDetectStatus_Running(t *testing.T) {
-	mock := &inspectMockRuntime{
+	mock := &fakeRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
 			return runtime.InstanceInfo{Running: true}, nil
 		},
@@ -193,7 +173,7 @@ func TestDetectStatus_Done(t *testing.T) {
 	statusData := fmt.Sprintf(`{"status":"done","exit_code":%d,"timestamp":%d}`, exitCode, time.Now().Unix())
 	require.NoError(t, os.WriteFile(filepath.Join(dir, store.AgentStatusFile), []byte(statusData), 0600))
 
-	mock := &inspectMockRuntime{
+	mock := &fakeRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
 			return runtime.InstanceInfo{Running: true}, nil
 		},
@@ -209,7 +189,7 @@ func TestDetectStatus_Failed(t *testing.T) {
 	statusData := fmt.Sprintf(`{"status":"done","exit_code":%d,"timestamp":%d}`, exitCode, time.Now().Unix())
 	require.NoError(t, os.WriteFile(filepath.Join(dir, store.AgentStatusFile), []byte(statusData), 0600))
 
-	mock := &inspectMockRuntime{
+	mock := &fakeRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
 			return runtime.InstanceInfo{Running: true}, nil
 		},
@@ -220,7 +200,7 @@ func TestDetectStatus_Failed(t *testing.T) {
 }
 
 func TestDetectStatus_NoStatusFile(t *testing.T) {
-	mock := &inspectMockRuntime{
+	mock := &fakeRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
 			return runtime.InstanceInfo{Running: true}, nil
 		},
@@ -232,7 +212,7 @@ func TestDetectStatus_NoStatusFile(t *testing.T) {
 }
 
 func TestDetectStatus_Removed(t *testing.T) {
-	mock := &inspectMockRuntime{
+	mock := &fakeRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
 			return runtime.InstanceInfo{}, fmt.Errorf("not found: %w", runtime.ErrNotFound)
 		},
@@ -243,7 +223,7 @@ func TestDetectStatus_Removed(t *testing.T) {
 }
 
 func TestDetectStatus_Stopped(t *testing.T) {
-	mock := &inspectMockRuntime{
+	mock := &fakeRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
 			return runtime.InstanceInfo{Running: false}, nil
 		},
@@ -270,7 +250,7 @@ func TestDetectStatus_StatusJSON_Active(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, store.AgentStatusFile),
 		statusJSONBytes("active", nil, time.Now().Unix()), 0600))
 
-	mock := &inspectMockRuntime{
+	mock := &fakeRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
 			return runtime.InstanceInfo{Running: true}, nil
 		},
@@ -285,7 +265,7 @@ func TestDetectStatus_StatusJSON_Idle(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, store.AgentStatusFile),
 		statusJSONBytes("idle", nil, time.Now().Unix()), 0600))
 
-	mock := &inspectMockRuntime{
+	mock := &fakeRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
 			return runtime.InstanceInfo{Running: true}, nil
 		},
@@ -300,7 +280,7 @@ func TestDetectStatus_StatusJSON_Done(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, store.AgentStatusFile),
 		statusJSONBytes("done", new(0), time.Now().Unix()), 0600))
 
-	mock := &inspectMockRuntime{
+	mock := &fakeRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
 			return runtime.InstanceInfo{Running: true}, nil
 		},
@@ -315,7 +295,7 @@ func TestDetectStatus_StatusJSON_Failed(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, store.AgentStatusFile),
 		statusJSONBytes("done", new(1), time.Now().Unix()), 0600))
 
-	mock := &inspectMockRuntime{
+	mock := &fakeRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
 			return runtime.InstanceInfo{Running: true}, nil
 		},
@@ -330,7 +310,7 @@ func TestDetectStatus_StatusJSON_Stale(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, store.AgentStatusFile),
 		statusJSONBytes("active", nil, time.Now().Add(-30*time.Second).Unix()), 0600))
 
-	mock := &inspectMockRuntime{
+	mock := &fakeRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
 			return runtime.InstanceInfo{Running: true}, nil
 		},
@@ -348,7 +328,7 @@ func TestDetectStatus_StatusJSON_StaleDone(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, store.AgentStatusFile),
 		statusJSONBytes("done", new(0), time.Now().Add(-30*time.Second).Unix()), 0600))
 
-	mock := &inspectMockRuntime{
+	mock := &fakeRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
 			return runtime.InstanceInfo{Running: true}, nil
 		},
@@ -404,43 +384,43 @@ func TestParseStatusJSON(t *testing.T) {
 // ProbeWorkData tests
 
 func TestProbeWorkData_NoWorkDir(t *testing.T) {
-	state, _ := ProbeWorkData(t.TempDir())
-	assert.Equal(t, WorkDataNone, state)
+	st, _ := ProbeWorkData(t.TempDir())
+	assert.Equal(t, WorkDataNone, st)
 }
 
 func TestProbeWorkData_EmptyWorkDir(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.Mkdir(filepath.Join(dir, "work"), 0o750))
-	state, _ := ProbeWorkData(dir)
-	assert.Equal(t, WorkDataNone, state)
+	st, _ := ProbeWorkData(dir)
+	assert.Equal(t, WorkDataNone, st)
 }
 
 func TestProbeWorkData_CopyCleanIsAmbiguous(t *testing.T) {
 	dir := t.TempDir()
 	work := filepath.Join(dir, "work", store.EncodePath("/home/u/proj"))
 	require.NoError(t, os.MkdirAll(work, 0o750))
-	initGitRepo(t, work)
-	writeTestFile(t, work, "file.txt", "hello")
-	gitAdd(t, work, ".")
-	gitCommit(t, work, "initial")
+	testutil.InitGitRepo(t, work)
+	testutil.WriteFile(t, work, "file.txt", "hello")
+	testutil.GitAdd(t, work, ".")
+	testutil.GitCommit(t, work, "initial")
 
 	// Clean tree, but baseline is unknown without meta — preserve it.
-	state, _ := ProbeWorkData(dir)
-	assert.Equal(t, WorkDataAmbiguous, state)
+	st, _ := ProbeWorkData(dir)
+	assert.Equal(t, WorkDataAmbiguous, st)
 }
 
 func TestProbeWorkData_CopyDirtyIsPresent(t *testing.T) {
 	dir := t.TempDir()
 	work := filepath.Join(dir, "work", store.EncodePath("/home/u/proj"))
 	require.NoError(t, os.MkdirAll(work, 0o750))
-	initGitRepo(t, work)
-	writeTestFile(t, work, "file.txt", "hello")
-	gitAdd(t, work, ".")
-	gitCommit(t, work, "initial")
-	writeTestFile(t, work, "file.txt", "modified")
+	testutil.InitGitRepo(t, work)
+	testutil.WriteFile(t, work, "file.txt", "hello")
+	testutil.GitAdd(t, work, ".")
+	testutil.GitCommit(t, work, "initial")
+	testutil.WriteFile(t, work, "file.txt", "modified")
 
-	state, detail := ProbeWorkData(dir)
-	assert.Equal(t, WorkDataPresent, state)
+	st, detail := ProbeWorkData(dir)
+	assert.Equal(t, WorkDataPresent, st)
 	assert.NotEmpty(t, detail)
 }
 
@@ -448,10 +428,10 @@ func TestProbeWorkData_OverlayUpperNonEmptyIsPresent(t *testing.T) {
 	dir := t.TempDir()
 	upper := filepath.Join(dir, "work", store.EncodePath("/home/u/proj"), "upper")
 	require.NoError(t, os.MkdirAll(upper, 0o750))
-	writeTestFile(t, upper, "changed.txt", "diff")
+	testutil.WriteFile(t, upper, "changed.txt", "diff")
 
-	state, detail := ProbeWorkData(dir)
-	assert.Equal(t, WorkDataPresent, state)
+	st, detail := ProbeWorkData(dir)
+	assert.Equal(t, WorkDataPresent, st)
 	assert.NotEmpty(t, detail)
 }
 
@@ -461,6 +441,6 @@ func TestProbeWorkData_OverlayUpperEmptyIsAmbiguous(t *testing.T) {
 	upper := filepath.Join(dir, "work", store.EncodePath("/home/u/proj"), "upper")
 	require.NoError(t, os.MkdirAll(upper, 0o750))
 
-	state, _ := ProbeWorkData(dir)
-	assert.Equal(t, WorkDataAmbiguous, state)
+	st, _ := ProbeWorkData(dir)
+	assert.Equal(t, WorkDataAmbiguous, st)
 }
