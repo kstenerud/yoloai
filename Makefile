@@ -73,7 +73,7 @@ check: lint tidy-check hadolint actionlint test python-test
 ## `make check` is cheap and removes any need to call setup-dev-python by hand.
 ensure-python-venv:
 	@if command -v uv >/dev/null 2>&1; then \
-		uv venv --quiet $(VENV); \
+		[ -x $(VENV)/bin/python ] || uv venv --quiet $(VENV); \
 		uv pip sync --quiet --python $(VENV)/bin/python $(PY_REQ_LOCK); \
 	fi
 
@@ -105,7 +105,7 @@ python-typecheck: ensure-python-venv
 ## requirements-dev.txt: uv pip compile --generate-hashes requirements-dev.txt -o requirements-dev.lock
 setup-dev-python:
 	@command -v uv >/dev/null 2>&1 || { echo "uv is required: install from https://docs.astral.sh/uv/"; exit 1; }
-	uv venv $(VENV)
+	uv venv --clear $(VENV)
 	uv pip sync --python $(VENV)/bin/python $(PY_REQ_LOCK)
 
 ## cover: show test coverage per package and total
