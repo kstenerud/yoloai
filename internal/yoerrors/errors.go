@@ -180,7 +180,8 @@ func (e *DiskSpaceError) Error() string {
 		"no space left on device while %s: %v\n"+
 			"Free space and retry:\n"+
 			"  yoloai system disk             # show what yoloai is using\n"+
-			"  yoloai system prune --cache    # reclaim backend image cache (forces base rebuild)",
+			"  yoloai system prune            # reclaim cache, no rebuild\n"+
+			"  yoloai system prune --images   # also remove base images (forces rebuild)",
 		e.Op, e.Err,
 	)
 }

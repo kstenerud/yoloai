@@ -48,7 +48,7 @@ func TestEmitLowDiskWarning_BelowThreshold(t *testing.T) {
 	assert.Contains(t, out, "100.0 MiB")
 	assert.Contains(t, out, "/path/to/data")
 	assert.Contains(t, out, "yoloai system disk")
-	assert.Contains(t, out, "yoloai system prune --cache")
+	assert.Contains(t, out, "yoloai system prune --images")
 }
 
 func TestEmitLowDiskWarning_AboveThreshold(t *testing.T) {

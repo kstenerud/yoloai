@@ -19,9 +19,10 @@ SOFT CLEANUP (run these first)
                                     held by a dead PID)
   yoloai system prune             Remove orphaned backend resources
                                     (containers, volumes, stale temp
-                                    dirs) — runs per backend
-  yoloai system prune --cache     Also reclaim backend image caches
-                                    (forces base image rebuild)
+                                    dirs) and reclaim the no-rebuild
+                                    cache (build cache, volumes)
+  yoloai system prune --images    Also remove backend base/profile
+                                    images (forces base image rebuild)
 
   These are sufficient for >95% of cases. If a resource resists
   removal, identify which "stuck state" applies below.
@@ -140,8 +141,8 @@ NUCLEAR OPTION: RESET EVERYTHING
      # 1. Destroy every sandbox
      yoloai destroy --all
 
-     # 2. Prune every backend, including image caches
-     yoloai system prune --cache
+     # 2. Prune every backend, including base/profile images
+     yoloai system prune --images
 
      # 3. Manually clean any remnants from the recipes above
      #    (e.g., leftover /tmp/yoloai-* dirs, orphan netns)

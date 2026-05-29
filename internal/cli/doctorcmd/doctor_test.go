@@ -49,27 +49,45 @@ func TestRenderReclaimableSpace(t *testing.T) {
 	var b bytes.Buffer
 	renderReclaimableSpace(&b, &yoloai.DiskUsage{
 		PerBackend: []yoloai.BackendDiskUsage{
-			{Name: "docker", Bytes: 1 << 30},
-			{Name: "tart", Bytes: 0},                // skipped: zero bytes
-			{Name: "podman", Bytes: -1},             // skipped: unknown sentinel
-			{Name: "seatbelt", Err: assert.AnError}, // skipped: error
+			{Name: "docker", CachedBytes: 2 << 30, ImageBytes: 1 << 30},
+			{Name: "tart", CachedBytes: 0, ImageBytes: 0},    // skipped: nothing in either tier
+			{Name: "podman", CachedBytes: 0, ImageBytes: -1}, // skipped: unknown image sentinel, no cache
+			{Name: "seatbelt", Err: assert.AnError},          // skipped: error
 		},
 	})
 	out := b.String()
-	assert.Contains(t, out, "Reclaimable space")
+	// Both tiers should render with their distinct headers and commands.
+	assert.Contains(t, out, "Reclaimable cached data that's no longer needed:")
+	assert.Contains(t, out, "Reclaimable images (these will need to be regenerated to use yoloAI):")
 	assert.Contains(t, out, "docker:")
 	assert.NotContains(t, out, "tart:")
 	assert.NotContains(t, out, "podman:")
 	assert.NotContains(t, out, "seatbelt:")
 	// The unknown sentinel must never surface as a literal negative size.
 	assert.NotContains(t, out, "-1 B")
-	assert.Contains(t, out, "yoloai system prune --cache")
+	assert.Contains(t, out, "yoloai system prune\n")
+	assert.Contains(t, out, "yoloai system prune --images")
+}
+
+func TestRenderReclaimableSpace_OnlyCacheTier(t *testing.T) {
+	var b bytes.Buffer
+	renderReclaimableSpace(&b, &yoloai.DiskUsage{
+		PerBackend: []yoloai.BackendDiskUsage{
+			{Name: "docker", CachedBytes: 1 << 30, ImageBytes: 0},
+		},
+	})
+	out := b.String()
+	assert.Contains(t, out, "Reclaimable cached data that's no longer needed:")
+	assert.Contains(t, out, "yoloai system prune")
+	// No image tier when nothing image-reclaimable.
+	assert.NotContains(t, out, "Reclaimable images")
+	assert.NotContains(t, out, "--images")
 }
 
 func TestRenderReclaimableSpace_AllZeroIsSilent(t *testing.T) {
 	var b bytes.Buffer
 	renderReclaimableSpace(&b, &yoloai.DiskUsage{
-		PerBackend: []yoloai.BackendDiskUsage{{Name: "docker", Bytes: 0}},
+		PerBackend: []yoloai.BackendDiskUsage{{Name: "docker", CachedBytes: 0, ImageBytes: 0}},
 	})
 	assert.Empty(t, b.String())
 }
@@ -93,7 +111,7 @@ func TestRenderTrash(t *testing.T) {
 
 func TestBuildDoctorJSON(t *testing.T) {
 	rep := buildDoctorJSON(nil, samplePrune(), &yoloai.DiskUsage{
-		PerBackend: []yoloai.BackendDiskUsage{{Name: "docker", Bytes: 2048}},
+		PerBackend: []yoloai.BackendDiskUsage{{Name: "docker", CachedBytes: 2048, ImageBytes: 4096}},
 	}, nil)
 	assert.Len(t, rep.ReclaimableNow, 3)
 	assert.Len(t, rep.ReclaimableSpace, 1)
@@ -101,6 +119,8 @@ func TestBuildDoctorJSON(t *testing.T) {
 	assert.Equal(t, 2, rep.Trash.Count)
 	assert.Equal(t, int64(4096), rep.Trash.Bytes)
 	assert.Equal(t, "docker", rep.ReclaimableSpace[0].Backend)
+	assert.Equal(t, int64(2048), rep.ReclaimableSpace[0].CachedBytes)
+	assert.Equal(t, int64(4096), rep.ReclaimableSpace[0].ImageBytes)
 }
 
 func TestBuildDoctorJSON_NilProbesYieldEmptySlices(t *testing.T) {

@@ -1,6 +1,6 @@
 //go:build !windows
 
-// ABOUTME: Unit tests for tart Prune (orphan sweep) and PruneCache (--cache),
+// ABOUTME: Unit tests for tart Prune (orphan sweep) and PruneCache (--images),
 // ABOUTME: driven by a fake tart binary so no real VM or tart CLI is needed.
 
 package tart
@@ -98,7 +98,8 @@ func TestPruneCacheRemovesBaseAndChecksum(t *testing.T) {
 	checksum := r.tartBaseChecksumPath()
 	require.NoError(t, os.WriteFile(checksum, []byte("deadbeef"), 0600))
 
-	require.NoError(t, r.PruneCache(context.Background(), false, os.Stderr))
+	_, err := r.PruneCache(context.Background(), true /*includeImages*/, false /*dryRun*/, os.Stderr)
+	require.NoError(t, err)
 
 	deleted := deletedNames(t, deleteLog)
 	require.Contains(t, deleted, provisionedImageName)
@@ -107,13 +108,30 @@ func TestPruneCacheRemovesBaseAndChecksum(t *testing.T) {
 	require.NoFileExists(t, checksum)
 }
 
+// Without --images tart has no no-rebuild cache to reclaim, so PruneCache is a
+// no-op: the base image and provision checksum must survive (the invariant that
+// plain `prune` never forces a rebuild).
+func TestPruneCacheWithoutImagesIsNoOp(t *testing.T) {
+	r, deleteLog := fakeTart(t, []string{provisionedImageName, defaultBaseImage})
+
+	checksum := r.tartBaseChecksumPath()
+	require.NoError(t, os.WriteFile(checksum, []byte("deadbeef"), 0600))
+
+	_, err := r.PruneCache(context.Background(), false /*includeImages*/, false /*dryRun*/, os.Stderr)
+	require.NoError(t, err)
+
+	require.Empty(t, deletedNames(t, deleteLog))
+	require.FileExists(t, checksum)
+}
+
 func TestPruneCacheDryRunKeepsEverything(t *testing.T) {
 	r, deleteLog := fakeTart(t, []string{provisionedImageName, defaultBaseImage})
 
 	checksum := r.tartBaseChecksumPath()
 	require.NoError(t, os.WriteFile(checksum, []byte("deadbeef"), 0600))
 
-	require.NoError(t, r.PruneCache(context.Background(), true, os.Stderr))
+	_, err := r.PruneCache(context.Background(), true /*includeImages*/, true /*dryRun*/, os.Stderr)
+	require.NoError(t, err)
 
 	require.Empty(t, deletedNames(t, deleteLog))
 	require.FileExists(t, checksum)

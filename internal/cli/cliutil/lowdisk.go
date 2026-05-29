@@ -84,7 +84,8 @@ func emitLowDiskWarning(stderr io.Writer, path string, free, threshold int64) bo
 	fmt.Fprintf(stderr, //nolint:errcheck // best-effort stderr write
 		"Warning: only %s free on %s — operation may run out of disk space.\n"+
 			"  yoloai system disk             # see what's using space\n"+
-			"  yoloai system prune --cache    # reclaim backend image cache\n",
+			"  yoloai system prune            # reclaim cache, no rebuild\n"+
+			"  yoloai system prune --images   # also remove base images (forces rebuild)\n",
 		HumanBytes(free), path,
 	)
 	return true

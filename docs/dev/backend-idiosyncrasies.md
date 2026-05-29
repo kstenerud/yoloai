@@ -47,6 +47,7 @@ row to the index.
 | `tmux attach` exits with `EACCES` on `/dev/tty` (gVisor ARM64) | [Docker: gVisor ARM64 TIOCSCTTY](#gvisor-on-arm64-docker-exec--it-does-not-call-tiocsctty) |
 | `failed to create an image ... after deleting the existing one: AlreadyExists` (intermittent) | [Docker: AlreadyExists race on rebuild of identical tag](#docker-daemon-races-on-alreadyexists-when-rebuilding-an-existing-tag-with-identical-content) |
 | `yoloai system disk`/`doctor` reports absurd reclaimable cache (e.g. podman 129 GiB vs ~5 GiB from `system df`) | [Docker/Podman: Images[].Size includes shared layers](#diskusageimagessize-includes-shared-layers-summing-it-multiply-counts-them) |
+| Docker base image reads ~33 GiB on Linux vs ~5 GiB on macOS; `image rm` frees ~0; prune undercounts reclaim | [Docker: containerd store pins layers via build cache](#docker-containerd-image-store-image-rm-frees-no-disk-until-the-build-cache-is-pruned-sdk-spacereclaimed-undercounts) |
 | Container starts as root / wrong uid under rootless Podman | [Podman: rootless detection uses socket path](#rootless-detection-must-use-socket-path-not-osgetuid) |
 | Wrong uid inside container on macOS Podman | [Podman: macOS keep-id maps VM uid](#macos---usernkeep-id-maps-the-podman-machine-uid-1000-not-the-macos-uid) |
 | Podman rejects per-file bind mounts for secrets | [Podman: per-file bind mounts rejected](#per-file-bind-mounts-rejected-by-podmans-docker-compatible-api) |
@@ -682,9 +683,21 @@ An empty value disables LXC seccomp for that container entirely. The container m
 
 **Fix:** Use `du.LayersSize` for the image portion of the cache total; add container `SizeRw`, volume `UsageData.Size`, and build-cache `Size` on top (those live outside the image layer store and are not deduplicated against it). Never sum `du.Images[].Size`.
 
-**Code:** `internal/runtime/docker/prune.go` `cacheBytes()` (shared by docker + podman). Guard test: `internal/runtime/docker/prune_test.go::TestCacheBytes_UsesDeduplicatedLayersSize`.
+**Code:** `internal/runtime/docker/prune.go` `splitCacheBytes()` (shared by docker + podman; returns the no-rebuild `cached` total and the rebuild-forcing `images` total separately). Guard test: `internal/runtime/docker/prune_test.go::TestSplitCacheBytes_ImagesUseDeduplicatedLayersSize`.
 
-**Related (display):** the "unknown" sentinel `BytesUsed == -1` (seatbelt/tart report no image-cache size) must be filtered before display, or it renders as a literal `-1 B` and skews the total — see `internal/cli/doctorcmd/doctor.go` `renderReclaimableSpace`.
+**Related (display):** the "unknown" sentinel `ImageBytes == -1` (containerd reports no cheap image-cache size) must be filtered before display, or it renders as a literal `-1 B` and skews the total — see `internal/cli/doctorcmd/doctor.go` `renderReclaimTier`.
+
+---
+
+### Docker containerd image store: `image rm` frees no disk until the build cache is pruned; SDK `SpaceReclaimed` undercounts
+
+**Symptom:** On Linux Docker with the containerd image store enabled (`features.containerd-snapshotter`), `yoloai system disk` reports the docker backend consuming far more than the image's apparent size — e.g. **33.66 GiB** for a base image that occupies ~5 GiB on macOS Docker Desktop (classic store). `docker image rm <id>` reports success but frees ~0 bytes on disk. After `docker builder prune -af`, the same `image rm`/`image prune` suddenly frees ~20 GiB even though the SDK's `ImagesPrune.SpaceReclaimed` reported only ~5.9 GiB.
+
+**Explanation:** With the containerd snapshotter, BuildKit's build cache holds references to the image layers it produced. While those cache records exist, the layers are pinned: removing the image record drops the tag but containerd's GC can't reclaim the still-referenced content blobs/snapshots. Pruning the build cache releases the references, and only then does layer removal actually return disk. Separately, the SDK's `SpaceReclaimed` field counts only the content it directly deleted in that call, not the cascading snapshot/blob GC that follows — so it undercounts real reclaim by ~4x. The classic (non-containerd) store on macOS Docker Desktop doesn't exhibit either behavior, which is why the same base image reads ~5 GiB there.
+
+**Fix:** Prune the build cache *before* (or in the same pass as) image removal so layers actually free. yoloai's plain `prune` does `BuildCachePrune(all=true)` + `VolumesPrune` + dangling `ImagesPrune` (no rebuild forced); `--images` adds full image removal. Because `SpaceReclaimed` is unreliable, the reclaimed total is measured as a `statfs` free-space delta around the prune (free-after − free-before on the daemon's data root) when that root is host-visible, falling back to the SDK sum only when it isn't (e.g. Docker Desktop's LinuxKit VM).
+
+**Code:** `internal/runtime/docker/prune.go` — `PruneCache` (prune order + `measuredReclaim`), `freeBytes`/`daemonDataRoot` (statfs delta), `splitCacheBytes` (build cache counted as no-rebuild `cached`, `LayersSize` as rebuild-forcing `images`).
 
 ---
 

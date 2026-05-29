@@ -73,17 +73,25 @@ func (r *Runtime) Prune(ctx context.Context, knownInstances []string, dryRun boo
 // Refuses to run if any container in the namespace is still active — the
 // caller must stop those first (typically via `yoloai destroy` or
 // `yoloai system prune`).
-func (r *Runtime) PruneCache(ctx context.Context, dryRun bool, output io.Writer) error {
+func (r *Runtime) PruneCache(ctx context.Context, includeImages, dryRun bool, output io.Writer) (int64, error) {
+	// The containerd backend has no regenerable build cache distinct from the
+	// base image — image layers and their snapshots ARE the only reclaimable
+	// content, and removing them forces a rebuild. So plain `prune`
+	// (includeImages=false) is a no-op; only `prune --images` reclaims.
+	if !includeImages {
+		return 0, nil
+	}
+
 	ctx = r.withNamespace(ctx)
 
 	if err := r.refuseIfContainersExist(ctx); err != nil {
-		return err
+		return 0, err
 	}
 	if err := r.pruneImages(ctx, dryRun, output); err != nil {
-		return err
+		return 0, err
 	}
 	r.pruneSnapshots(ctx, dryRun, output)
-	return nil
+	return 0, nil
 }
 
 // refuseIfContainersExist returns an error if any yoloai-* container record
@@ -150,14 +158,15 @@ func (r *Runtime) pruneSnapshots(ctx context.Context, dryRun bool, output io.Wri
 
 // CacheUsage implements runtime.DiskUsageReporter for containerd. Counts
 // images and snapshots in the yoloai namespace; byte totals require reading
-// the content store which is expensive, so BytesUsed is left at -1 (unknown)
-// and the count is reported in Detail.
+// the content store which is expensive, so ImageBytes is left at -1 (unknown)
+// and the count is reported in Detail. Containerd has no no-rebuild-forcing
+// cache, so CachedBytes is always 0.
 func (r *Runtime) CacheUsage(ctx context.Context) (runtime.CacheUsage, error) {
 	ctx = r.withNamespace(ctx)
 
 	imgs, err := r.client.ImageService().List(ctx)
 	if err != nil {
-		return runtime.CacheUsage{BytesUsed: -1}, fmt.Errorf("list images: %w", err)
+		return runtime.CacheUsage{CachedBytes: 0, ImageBytes: -1}, fmt.Errorf("list images: %w", err)
 	}
 
 	var snapCount int
@@ -167,7 +176,8 @@ func (r *Runtime) CacheUsage(ctx context.Context) (runtime.CacheUsage, error) {
 	})
 
 	return runtime.CacheUsage{
-		BytesUsed: -1,
-		Detail:    fmt.Sprintf("%d images, %d snapshots in namespace %q (run 'du -sh /var/lib/containerd' for bytes)", len(imgs), snapCount, r.namespace),
+		CachedBytes: 0,
+		ImageBytes:  -1,
+		Detail:      fmt.Sprintf("%d images, %d snapshots in namespace %q (run 'du -sh /var/lib/containerd' for bytes)", len(imgs), snapCount, r.namespace),
 	}, nil
 }

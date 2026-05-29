@@ -600,8 +600,9 @@ doctorcmd.NewCmd (cli/doctorcmd/doctor.go)
       → caps.ComputeAvailability(results) → Ready/NeedsSetup/Unavailable
     → caps.FormatDoctor(reports, output) — render table with fix instructions
   → SystemClient.Prune({DryRun:true}) + SystemClient.DiskUsage() — read-only advisory:
-    → Reclaimable now    (RemovedItems)        → "yoloai system prune"
-    → Reclaimable space  (per-backend caches)  → "yoloai system prune --cache"
+    → Reclaimable now    (RemovedItems)              → "yoloai system prune"
+    → Reclaimable cached (CachedBytes, no rebuild)   → "yoloai system prune"
+    → Reclaimable images (ImageBytes, forces build)  → "yoloai system prune --images"
     → Unreviewed work    (RefusedDataBearing)  → "yoloai diff / yoloai destroy"
     → Trash              (TrashContents)       → recover with mv / reclaim via prune
 ```

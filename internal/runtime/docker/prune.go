@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"syscall"
 
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types"
@@ -128,43 +129,58 @@ func formatBytes(b uint64) string {
 	}
 }
 
-// PruneCache implements runtime.CachePruner. Removes unused images, stopped
-// containers, unused volumes, unused networks, and the full BuildKit cache.
-// Equivalent to `docker system prune -a --force --volumes` plus a buildx
-// prune. Forces a yoloai-base rebuild on next sandbox creation.
+// PruneCache implements runtime.CachePruner. The depth is set by includeImages:
+//
+//   - false (plain `prune`): stopped containers + unused volumes/networks +
+//     the full BuildKit cache. The base/profile IMAGES are kept, so the next
+//     `new` reuses them — no rebuild. On the containerd image store this is the
+//     step that actually frees space: image layers stay pinned by the build
+//     cache until it's pruned, so removing dangling images alone reclaims
+//     nothing (see backend-idiosyncrasies.md).
+//   - true (`prune --images`): also `images prune -a`, removing unused base
+//     images and forcing a rebuild on next creation.
 //
 // Affects ALL backend content, not just yoloai's — appropriate for a host
 // dedicated to yoloai testing; on shared hosts users should run the backend's
 // own prune commands instead.
-func (r *Runtime) PruneCache(ctx context.Context, dryRun bool, output io.Writer) error {
+//
+// Returns bytes reclaimed, measured as the free-space delta on the daemon's
+// data root (statfs). The Docker SDK's per-call SpaceReclaimed badly
+// undercounts on the containerd image store (it ignores layers freed by GC
+// once the pinning build cache is gone), so it's used only as a fallback when
+// the data root isn't visible on the host filesystem (e.g. Docker Desktop's
+// LinuxKit VM on macOS).
+func (r *Runtime) PruneCache(ctx context.Context, includeImages, dryRun bool, output io.Writer) (int64, error) {
 	if dryRun {
-		// PruneReport has no dry-run mode in the Docker API; report intent and
-		// fall through to leave nothing removed.
-		fmt.Fprintf(output, "%s: cache prune skipped (--dry-run): would remove unused images, volumes, build cache\n", r.binaryName) //nolint:errcheck
-		return nil
+		return r.pruneCacheDryRun(ctx, includeImages, output), nil
 	}
 
-	var reclaimed uint64
+	rootDir := r.daemonDataRoot(ctx)
+	freeBefore := freeBytes(rootDir) // -1 if not host-visible
+
+	var sdkReclaimed uint64
 
 	// Containers first (stopped only). Removing stopped containers releases
 	// holds on otherwise-unreferenced images.
 	if rep, err := r.client.ContainersPrune(ctx, filters.NewArgs()); err == nil {
-		reclaimed += rep.SpaceReclaimed
+		sdkReclaimed += rep.SpaceReclaimed
 	} else {
 		fmt.Fprintf(output, "%s: containers prune failed: %v\n", r.binaryName, err) //nolint:errcheck
 	}
 
-	// Images: -a (also non-dangling). Won't touch images still referenced by
-	// running containers.
-	if rep, err := r.client.ImagesPrune(ctx, filters.NewArgs(filters.Arg("dangling", "false"))); err == nil {
-		reclaimed += rep.SpaceReclaimed
-	} else {
-		fmt.Fprintf(output, "%s: images prune failed: %v\n", r.binaryName, err) //nolint:errcheck
+	// BuildKit cache: usually the biggest single category on a heavy-build
+	// host, and the pin that keeps image layers alive on the containerd image
+	// store. Prune it before images so the layers they share are actually
+	// freed by containerd GC.
+	if rep, err := r.client.BuildCachePrune(ctx, build.CachePruneOptions{All: true}); err == nil && rep != nil {
+		sdkReclaimed += rep.SpaceReclaimed
+	} else if err != nil {
+		fmt.Fprintf(output, "%s: build cache prune failed: %v\n", r.binaryName, err) //nolint:errcheck
 	}
 
 	// Volumes (only unused ones).
 	if rep, err := r.client.VolumesPrune(ctx, filters.NewArgs()); err == nil {
-		reclaimed += rep.SpaceReclaimed
+		sdkReclaimed += rep.SpaceReclaimed
 	} else {
 		fmt.Fprintf(output, "%s: volumes prune failed: %v\n", r.binaryName, err) //nolint:errcheck
 	}
@@ -174,49 +190,116 @@ func (r *Runtime) PruneCache(ctx context.Context, dryRun bool, output io.Writer)
 		fmt.Fprintf(output, "%s: networks prune failed: %v\n", r.binaryName, err) //nolint:errcheck
 	}
 
-	// BuildKit cache: usually the biggest single category on a heavy-build host.
-	if rep, err := r.client.BuildCachePrune(ctx, build.CachePruneOptions{All: true}); err == nil && rep != nil {
-		reclaimed += rep.SpaceReclaimed
-	} else if err != nil {
-		fmt.Fprintf(output, "%s: build cache prune failed: %v\n", r.binaryName, err) //nolint:errcheck
+	// Images last, and only when asked: -a (also non-dangling). This is what
+	// forces a rebuild, so it's gated behind includeImages. Dangling images
+	// from prior builds are already removed by the core Prune; here we drop the
+	// reusable base/profile images too.
+	if includeImages {
+		if rep, err := r.client.ImagesPrune(ctx, filters.NewArgs(filters.Arg("dangling", "false"))); err == nil {
+			sdkReclaimed += rep.SpaceReclaimed
+		} else {
+			fmt.Fprintf(output, "%s: images prune failed: %v\n", r.binaryName, err) //nolint:errcheck
+		}
 	}
 
-	fmt.Fprintf(output, "%s: reclaimed %s\n", r.binaryName, formatBytes(reclaimed)) //nolint:errcheck
-	return nil
+	reclaimed := measuredReclaim(freeBefore, freeBytes(rootDir), sdkReclaimed)
+	fmt.Fprintf(output, "%s: reclaimed %s\n", r.binaryName, formatBytes(uint64(reclaimed))) //nolint:errcheck,gosec // G115: reclaim is non-negative
+	return reclaimed, nil
 }
 
-// CacheUsage implements runtime.DiskUsageReporter. Returns the total
-// daemon-managed bytes (images + containers + volumes + build cache) with a
-// short breakdown.
+// pruneCacheDryRun reports what PruneCache would remove and returns an estimate
+// of the reclaimable bytes (build cache + volumes, plus images when
+// includeImages). The Docker API has no dry-run prune, so this reads current
+// disk usage instead of removing anything.
+func (r *Runtime) pruneCacheDryRun(ctx context.Context, includeImages bool, output io.Writer) int64 {
+	du, err := r.client.DiskUsage(ctx, types.DiskUsageOptions{})
+	if err != nil {
+		fmt.Fprintf(output, "%s: cache prune skipped (--dry-run); usage query failed: %v\n", r.binaryName, err) //nolint:errcheck
+		return 0
+	}
+	cached, images := splitCacheBytes(du)
+	what := "unused volumes, build cache"
+	estimate := cached
+	if includeImages {
+		what = "unused images, volumes, build cache"
+		estimate += images
+	}
+	fmt.Fprintf(output, "%s: cache prune skipped (--dry-run): would remove %s (~%s)\n", r.binaryName, what, formatBytes(uint64(estimate))) //nolint:errcheck,gosec // G115: estimate is non-negative
+	return estimate
+}
+
+// measuredReclaim prefers the statfs free-space delta (accurate on the
+// containerd image store) and falls back to the SDK's reported total when the
+// data root isn't visible on the host (freeBefore/freeAfter == -1) or the delta
+// is non-positive (concurrent writes outran the prune).
+func measuredReclaim(freeBefore, freeAfter int64, sdkReclaimed uint64) int64 {
+	if freeBefore >= 0 && freeAfter >= 0 {
+		if delta := freeAfter - freeBefore; delta > 0 {
+			return delta
+		}
+	}
+	return int64(sdkReclaimed) //nolint:gosec // G115: daemon-reported byte counts fit in int64
+}
+
+// CacheUsage implements runtime.DiskUsageReporter, splitting reclaimable bytes
+// by whether freeing them forces a rebuild: CachedBytes (build cache + volumes,
+// reclaimed by plain `prune`) vs ImageBytes (image layers, reclaimed only by
+// `prune --images`).
 func (r *Runtime) CacheUsage(ctx context.Context) (runtime.CacheUsage, error) {
 	du, err := r.client.DiskUsage(ctx, types.DiskUsageOptions{})
 	if err != nil {
-		return runtime.CacheUsage{BytesUsed: -1}, fmt.Errorf("%s disk usage: %w", r.binaryName, err)
+		return runtime.CacheUsage{CachedBytes: 0, ImageBytes: -1}, fmt.Errorf("%s disk usage: %w", r.binaryName, err)
 	}
+	cached, images := splitCacheBytes(du)
 	detail := fmt.Sprintf("%d images, %d containers, %d volumes, %d build-cache entries",
 		len(du.Images), len(du.Containers), len(du.Volumes), len(du.BuildCache))
-	return runtime.CacheUsage{BytesUsed: cacheBytes(du), Detail: detail}, nil
+	return runtime.CacheUsage{CachedBytes: cached, ImageBytes: images, Detail: detail}, nil
 }
 
-// cacheBytes totals the daemon-managed bytes that `prune --cache` would
-// reclaim. The image portion uses du.LayersSize — the deduplicated layer-store
-// total that `docker/podman system df` reports — NOT the sum of each
-// img.Size, which multiply-counts shared base layers (dozens of intermediate
-// build stages sharing one 5 GiB base would otherwise read as ~130 GiB).
-// Container writable layers, volumes, and build cache sit outside the image
-// layer store, so they are added on top.
-func cacheBytes(du types.DiskUsage) int64 {
-	total := du.LayersSize
+// splitCacheBytes returns (cachedBytes, imageBytes): the no-rebuild-forcing
+// reclaim (build cache + container writable layers + volumes) and the
+// rebuild-forcing reclaim (image layers). The image portion uses du.LayersSize
+// — the deduplicated layer-store total that `docker/podman system df` reports —
+// NOT the sum of each img.Size, which multiply-counts shared base layers
+// (dozens of intermediate build stages sharing one 5 GiB base would otherwise
+// read as ~130 GiB).
+func splitCacheBytes(du types.DiskUsage) (cached, images int64) {
+	images = du.LayersSize
 	for _, ct := range du.Containers {
-		total += ct.SizeRw
+		cached += ct.SizeRw
 	}
 	for _, v := range du.Volumes {
 		if v.UsageData != nil && v.UsageData.Size > 0 {
-			total += v.UsageData.Size
+			cached += v.UsageData.Size
 		}
 	}
 	for _, bc := range du.BuildCache {
-		total += bc.Size
+		cached += bc.Size
 	}
-	return total
+	return cached, images
+}
+
+// daemonDataRoot returns the daemon's on-disk data root (e.g. /var/lib/docker),
+// used to measure a statfs free-space delta around a prune. Empty string if the
+// daemon can't be queried; freeBytes treats that as "not host-visible".
+func (r *Runtime) daemonDataRoot(ctx context.Context) string {
+	info, err := r.client.Info(ctx)
+	if err != nil {
+		return ""
+	}
+	return info.DockerRootDir
+}
+
+// freeBytes returns user-visible free bytes on the filesystem backing path, or
+// -1 if path is empty or not statable on this host (e.g. the daemon's data root
+// lives inside a VM, as with Docker Desktop on macOS).
+func freeBytes(path string) int64 {
+	if path == "" {
+		return -1
+	}
+	var st syscall.Statfs_t
+	if err := syscall.Statfs(path, &st); err != nil {
+		return -1
+	}
+	return int64(st.Bavail) * int64(st.Bsize) //nolint:gosec // G115: filesystem free space fits in int64
 }

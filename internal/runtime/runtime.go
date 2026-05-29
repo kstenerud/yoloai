@@ -408,22 +408,37 @@ type StdioExecer interface {
 // CachePruner is an optional interface for backends that maintain an
 // image/snapshot/build cache that accumulates across sandbox runs. The
 // `Prune()` method on the core interface only removes orphaned yoloai
-// instances; this reclaims the heavier backend-managed storage (image layers,
-// overlay snapshots, BuildKit cache, volumes). Called by `yoloai system prune
-// --cache`.
+// instances; this reclaims the heavier backend-managed storage.
 //
-// More aggressive than `Prune`: removes ALL unused content the backend tracks,
-// not just yoloai's. Documented as a "machine dedicated to yoloai" operation.
-// Forces a base-image rebuild on next sandbox creation.
+// includeImages selects the depth, drawing the line at "does this force a
+// rebuild?":
+//
+//   - false (plain `yoloai system prune`): reclaim only regenerable content
+//     that does NOT force a rebuild — BuildKit cache, unused volumes/networks.
+//     The base/profile images are kept, so the next `new` reuses them. On
+//     backends whose only reclaimable content IS the base image (tart,
+//     containerd), this is a no-op.
+//   - true (`yoloai system prune --images`): also remove unused images,
+//     forcing a base-image rebuild on next sandbox creation.
+//
+// Removes ALL unused content the backend tracks, not just yoloai's — a
+// "machine dedicated to yoloai" operation. Returns the bytes reclaimed on the
+// backend's data filesystem (best-effort; 0 when unmeasurable or dry-run).
 type CachePruner interface {
-	PruneCache(ctx context.Context, dryRun bool, output io.Writer) error
+	PruneCache(ctx context.Context, includeImages, dryRun bool, output io.Writer) (int64, error)
 }
 
-// CacheUsage reports the backend's on-disk cache footprint. Returned by
-// DiskUsageReporter.
+// CacheUsage reports the backend's on-disk cache footprint, split by whether
+// reclaiming it forces a base-image rebuild. Returned by DiskUsageReporter.
 type CacheUsage struct {
-	BytesUsed int64  // -1 if unknown
-	Detail    string // optional human-readable breakdown ("32 images, 304 snapshots")
+	// CachedBytes is reclaimable by plain `prune` without forcing a rebuild
+	// (BuildKit cache, unused volumes). Always >= 0; 0 means "none" (not
+	// "unknown").
+	CachedBytes int64
+	// ImageBytes is reclaimable only by `prune --images`, which forces a base
+	// rebuild (base/profile image layers). -1 if unknown.
+	ImageBytes int64
+	Detail     string // optional human-readable breakdown ("32 images, 304 snapshots")
 }
 
 // DiskUsageReporter is an optional interface for backends that can estimate
@@ -433,22 +448,22 @@ type DiskUsageReporter interface {
 	CacheUsage(ctx context.Context) (CacheUsage, error)
 }
 
-// PruneCacheFor calls rt.PruneCache if implemented; otherwise prints a notice
-// that the backend has no cache to prune and returns nil.
-func PruneCacheFor(ctx context.Context, rt Runtime, dryRun bool, output io.Writer) error {
+// PruneCacheFor calls rt.PruneCache if implemented (returning the bytes
+// reclaimed); for backends without a cache it's a no-op returning (0, nil).
+func PruneCacheFor(ctx context.Context, rt Runtime, includeImages, dryRun bool, output io.Writer) (int64, error) {
 	if p, ok := rt.(CachePruner); ok {
-		return p.PruneCache(ctx, dryRun, output)
+		return p.PruneCache(ctx, includeImages, dryRun, output)
 	}
-	return nil
+	return 0, nil
 }
 
 // CacheUsageFor calls rt.CacheUsage if implemented; otherwise returns a
-// CacheUsage with BytesUsed=-1 to signal "unknown".
+// CacheUsage with ImageBytes=-1 to signal "unknown".
 func CacheUsageFor(ctx context.Context, rt Runtime) (CacheUsage, error) {
 	if r, ok := rt.(DiskUsageReporter); ok {
 		return r.CacheUsage(ctx)
 	}
-	return CacheUsage{BytesUsed: -1}, nil
+	return CacheUsage{CachedBytes: 0, ImageBytes: -1}, nil
 }
 
 // LogTailer is an optional interface for backends that can return recent

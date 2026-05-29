@@ -736,6 +736,26 @@ Trash is a lightweight quarantine: `os.Rename` into `~/.yoloai/trash/<name>` (`s
 
 ---
 
+## D35 — Prune invariant: plain `prune` never forces a rebuild; `--cache`→`--images`; two-tier reporting
+
+**Date:** 2026-05-29. **Status:** Accepted. **Context:** A user on Linux Docker (containerd image store) saw free space shrink every smoke run, with `yoloai system prune --cache` reclaiming little and `system disk` reporting docker at **33.66 GiB** for a base image that reads ~5 GiB on macOS Docker Desktop. Root cause was two backend behaviors now in `backend-idiosyncrasies.md`: on the containerd store the BuildKit build cache pins image layers (so `image rm` frees ~0 until the build cache is pruned), and the SDK's `SpaceReclaimed` undercounts the cascading GC by ~4x. The old bare `prune` never touched the build cache, so the obvious reclaimable space sat unclaimed; `--cache` was both too blunt (always forced a rebuild) and too generically named to convey that cost.
+
+**Decision — the invariant.** `yoloai system prune` reclaims as much as it can **without leaving yoloai in a state where it must rebuild something**: after a plain prune, any command (`new`, etc.) still runs without triggering a build. Concretely, plain prune now also reclaims each backend's *no-rebuild* cache (Docker/Podman build cache, retired volumes, dangling images) — the tagged base image keeps its own layer pins, so it survives. The rebuild-forcing tier (base/profile images) moves behind a renamed flag **`--images`** (was `--cache`).
+
+**Mechanics.**
+- `runtime.CachePruner.PruneCache(ctx, includeImages, dryRun, output) (int64, error)`: docker prunes ContainersPrune → BuildCachePrune(all) → VolumesPrune → NetworksPrune → (if `includeImages`) ImagesPrune(dangling=false). tart/containerd have no no-rebuild cache distinct from the base image, so `includeImages=false` is a no-op there.
+- Reclaim is measured as a `statfs` free-space delta on the daemon data root (`measuredReclaim`/`freeBytes`/`daemonDataRoot`) because `SpaceReclaimed` is unreliable; falls back to the SDK sum when the data root isn't host-visible (Docker Desktop LinuxKit VM).
+- `runtime.CacheUsage` splits into `{CachedBytes (no-rebuild, ≥0), ImageBytes (rebuild-forcing, −1=unknown), Detail}`. `splitCacheBytes` maps `LayersSize`→images, container `SizeRw`+volumes+build cache→cached. `SystemClient` always calls `PruneCacheFor` (no longer gated on the flag) and aggregates the reclaimed bytes into the pre-existing `PruneResult.FreedBytes`.
+- Reporting splits to match: `system disk` → `CACHE`/`IMAGES` columns; `doctor` → two reclaim tiers (`renderReclaimTier` ×2); prune prints `Reclaimed <n>` and emits `freed_bytes` in `--json`.
+
+**Why `--images` over `--include-base-image`** (api_surface.go's aspirational name): shorter, and "images" is the word users already use for the thing that gets rebuilt. The api_surface note is aspiration, not spec — the fact (what forces a rebuild) drove the name.
+
+**Consequences.** Breaking: `--cache` removed in favor of `--images`, and bare `prune` now clears the build cache (BREAKING-CHANGES entry added). Only regenerable cache is touched by the default, so the invariant holds.
+
+**Composition.** Extends the D21 disk/prune surface and the D32 doctor advisory (read + delegate; doctor still never deletes). Thin-CLI/library-owns-I/O boundary (D27): the library measures and returns `FreedBytes`; the CLI renders it.
+
+---
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.

@@ -66,14 +66,20 @@ type DiskUsage struct {
 	PerBackend []BackendDiskUsage
 }
 
-// BackendDiskUsage is one row of DiskUsage's per-backend section.
-// When Err is non-nil, Bytes is 0 and Detail carries any partial
-// progress info from the backend.
+// BackendDiskUsage is one row of DiskUsage's per-backend section, split by
+// whether reclaiming the space forces a base-image rebuild. When Err is
+// non-nil, the byte counts are 0 and Detail carries any partial progress info
+// from the backend.
 type BackendDiskUsage struct {
-	Name   BackendName
-	Bytes  int64
-	Detail string
-	Err    error
+	Name BackendName
+	// CachedBytes is reclaimable by plain `prune` without a rebuild (build
+	// cache, volumes). Always >= 0.
+	CachedBytes int64
+	// ImageBytes is reclaimable only by `prune --images`, forcing a rebuild
+	// (base/profile image layers). -1 when the backend can't report a size.
+	ImageBytes int64
+	Detail     string
+	Err        error
 }
 
 // DiskUsage returns a per-backend disk-usage snapshot plus yoloai's
@@ -93,10 +99,11 @@ func (s *SystemClient) DiskUsage(ctx context.Context) (*DiskUsage, error) {
 		usage, usageErr := runtime.CacheUsageFor(ctx, rt)
 		_ = rt.Close()
 		du.PerBackend = append(du.PerBackend, BackendDiskUsage{
-			Name:   desc.Name,
-			Bytes:  usage.BytesUsed,
-			Detail: usage.Detail,
-			Err:    usageErr,
+			Name:        desc.Name,
+			CachedBytes: usage.CachedBytes,
+			ImageBytes:  usage.ImageBytes,
+			Detail:      usage.Detail,
+			Err:         usageErr,
 		})
 	}
 	return du, nil
@@ -492,9 +499,10 @@ func (s *SystemClient) checkIsolation(ctx context.Context, rt runtime.Runtime, i
 type PruneOptions struct {
 	// DryRun reports what would be removed without removing it.
 	DryRun bool
-	// IncludeBaseImage also reclaims the backend's image cache,
-	// snapshots, volumes, and build cache (forces yoloai-base to
-	// rebuild on next sandbox creation).
+	// IncludeBaseImage additionally removes the backend's base/profile
+	// images (forces yoloai-base to rebuild on next sandbox creation).
+	// Build cache, volumes, and dangling images are always reclaimed —
+	// even without this — because doing so forces no rebuild.
 	IncludeBaseImage bool
 	// Output receives line-oriented progress from underlying tools.
 	// nil = io.Discard. Backend prune commands can be chatty; route
@@ -576,9 +584,10 @@ const staleTempFileAge = 1 * time.Hour
 
 // Prune removes orphaned backend resources (sandbox containers with no
 // matching sandbox dir on the host) and stale yoloai temp dirs across
-// every available backend. With IncludeBaseImage, also reclaims each
-// backend's image cache + snapshots + build cache (forces yoloai-base
-// to rebuild). DryRun reports what would be removed without removing.
+// every available backend. Always reclaims each backend's no-rebuild cache
+// (build cache, volumes, dangling images); with IncludeBaseImage, also removes
+// base/profile images (forces yoloai-base to rebuild). DryRun reports what
+// would be removed without removing.
 func (s *SystemClient) Prune(ctx context.Context, opts PruneOptions) (*PruneResult, error) {
 	out := opts.Output
 	if out == nil {
@@ -588,8 +597,9 @@ func (s *SystemClient) Prune(ctx context.Context, opts PruneOptions) (*PruneResu
 	result := &PruneResult{}
 
 	for _, desc := range runtime.Descriptors() {
-		items := s.pruneBackend(ctx, desc.Name, known, opts, out)
+		items, reclaimed := s.pruneBackend(ctx, desc.Name, known, opts, out)
 		result.RemovedItems = append(result.RemovedItems, items...)
+		result.FreedBytes += reclaimed
 	}
 
 	// Apply host-side sandbox-dir classifications.
@@ -655,21 +665,23 @@ func (s *SystemClient) applyBrokenClassifications(broken []classifiedSandbox, dr
 	}
 }
 
-// pruneBackend handles one backend's scan + (optionally) execute +
-// optional cache reclaim. Returns the items removed (or, under
-// DryRun, that would be removed). Per-backend failures are logged
-// to opts.Output rather than aborting the whole prune.
-func (s *SystemClient) pruneBackend(ctx context.Context, backend BackendName, known []string, opts PruneOptions, out io.Writer) []PruneItem {
+// pruneBackend handles one backend's scan + (optionally) execute + cache
+// reclaim. Returns the items removed (or, under DryRun, that would be removed)
+// and the bytes reclaimed by the cache prune. Cache pruning always runs: plain
+// prune reclaims the build cache (no rebuild forced), and IncludeBaseImage also
+// drops the base images. Per-backend failures are logged to opts.Output rather
+// than aborting the whole prune.
+func (s *SystemClient) pruneBackend(ctx context.Context, backend BackendName, known []string, opts PruneOptions, out io.Writer) ([]PruneItem, int64) {
 	rt, err := newRuntime(ctx, backend, s.layout)
 	if err != nil {
-		return nil
+		return nil, 0
 	}
 	defer rt.Close() //nolint:errcheck // best-effort
 
 	scan, err := rt.Prune(ctx, known, true, out)
 	if err != nil {
 		fmt.Fprintf(out, "Warning: scan %s failed: %v\n", backend, err) //nolint:errcheck
-		return nil
+		return nil, 0
 	}
 
 	var items []PruneItem
@@ -677,7 +689,7 @@ func (s *SystemClient) pruneBackend(ctx context.Context, backend BackendName, kn
 		actual, pruneErr := rt.Prune(ctx, known, false, out)
 		if pruneErr != nil {
 			fmt.Fprintf(out, "Warning: prune %s failed: %v\n", backend, pruneErr) //nolint:errcheck
-			return nil
+			return nil, 0
 		}
 		for _, item := range actual.Items {
 			items = append(items, PruneItem{
@@ -696,12 +708,11 @@ func (s *SystemClient) pruneBackend(ctx context.Context, backend BackendName, kn
 		}
 	}
 
-	if opts.IncludeBaseImage {
-		if err := runtime.PruneCacheFor(ctx, rt, opts.DryRun, out); err != nil {
-			fmt.Fprintf(out, "Warning: cache prune %s failed: %v\n", backend, err) //nolint:errcheck
-		}
+	reclaimed, err := runtime.PruneCacheFor(ctx, rt, opts.IncludeBaseImage, opts.DryRun, out)
+	if err != nil {
+		fmt.Fprintf(out, "Warning: cache prune %s failed: %v\n", backend, err) //nolint:errcheck
 	}
-	return items
+	return items, reclaimed
 }
 
 // pruneTempFiles scans (and, when !dryRun, removes) stale yoloai

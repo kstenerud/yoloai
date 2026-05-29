@@ -44,12 +44,16 @@ type reclaimItemJSON struct {
 	Name    string `json:"name"`
 }
 
-// cacheUsageJSON is one backend's reclaimable cache footprint (image cache,
-// snapshots, build cache). Reclaiming forces a base-image rebuild.
+// cacheUsageJSON is one backend's reclaimable footprint, split by whether
+// reclaiming forces a rebuild. CachedBytes (build cache, volumes, dangling
+// images) is freed by `yoloai system prune` with no rebuild; ImageBytes (base
+// images) is freed only by `yoloai system prune --images`, which forces a
+// rebuild. ImageBytes is omitted when the backend can't size it cheaply.
 type cacheUsageJSON struct {
-	Backend string `json:"backend"`
-	Bytes   int64  `json:"bytes"`
-	Detail  string `json:"detail,omitempty"`
+	Backend     string `json:"backend"`
+	CachedBytes int64  `json:"cached_bytes"`
+	ImageBytes  int64  `json:"image_bytes,omitempty"`
+	Detail      string `json:"detail,omitempty"`
 }
 
 // unreviewedWorkJSON is one broken sandbox dir that holds detectable user work.
@@ -107,10 +111,11 @@ Capability status per backend and isolation mode:
   Not available    — hardware or OS mismatch (not actionable)
 
 Plus a read-only repair advisory (nothing is deleted by doctor):
-  Reclaimable now      — orphaned resources, lock files, temp dirs, never-init dirs
-  Reclaimable space    — backend image/build caches (reclaim forces base rebuild)
-  Unreviewed work      — broken sandbox dirs still holding work (review/remove yourself)
-  Trash                — quarantined dirs recoverable with mv
+  Reclaimable now        — orphaned resources, lock files, temp dirs, never-init dirs
+  Reclaimable cached data — build caches reclaimable by 'prune' (no rebuild)
+  Reclaimable images     — base images reclaimable only by 'prune --images' (forces rebuild)
+  Unreviewed work        — broken sandbox dirs still holding work (review/remove yourself)
+  Trash                  — quarantined dirs recoverable with mv
 
 Exit code 0 if no NeedsSetup entries; 1 if any NeedsSetup entries exist.
 Unavailable entries and advisory sections do not affect the exit code.`,
@@ -241,34 +246,44 @@ func renderReclaimItem(w io.Writer, it yoloai.PruneItem) {
 	fmt.Fprintf(w, "    %s: %s\n", it.Kind, it.Name) //nolint:errcheck
 }
 
-// renderReclaimableSpace lists per-backend reclaimable cache size. Only shown
-// when at least one backend reports a non-zero, error-free footprint.
+// renderReclaimableSpace lists per-backend reclaimable bytes in two tiers:
+// cached data that plain `prune` frees without a rebuild, and base images that
+// only `prune --images` frees (forcing a rebuild). Each tier is shown only when
+// at least one backend reports a non-zero, error-free footprint for it.
 func renderReclaimableSpace(w io.Writer, disk *yoloai.DiskUsage) {
 	if disk == nil {
 		return
 	}
+	renderReclaimTier(w, disk, "Reclaimable cached data that's no longer needed:",
+		"build cache", "yoloai system prune",
+		func(b yoloai.BackendDiskUsage) int64 { return b.CachedBytes })
+	renderReclaimTier(w, disk, "Reclaimable images (these will need to be regenerated to use yoloAI):",
+		"base images", "yoloai system prune --images",
+		func(b yoloai.BackendDiskUsage) int64 { return b.ImageBytes })
+}
+
+// renderReclaimTier prints one reclaim section (cached-data or images). bytesOf
+// selects the relevant field; values <= 0 (nothing, or the unknown sentinel)
+// are skipped so they don't render as "-1 B" or poison the total.
+func renderReclaimTier(w io.Writer, disk *yoloai.DiskUsage, header, label, command string, bytesOf func(yoloai.BackendDiskUsage) int64) {
 	var total int64
 	var rows []yoloai.BackendDiskUsage
 	for _, b := range disk.PerBackend {
-		// Skip errored backends and those with nothing to reclaim. Bytes < 0 is
-		// the "unknown" sentinel (e.g. seatbelt/tart report no image-cache size)
-		// — it must not render as a literal "-1 B" or poison the total.
-		if b.Err != nil || b.Bytes <= 0 {
+		if b.Err != nil || bytesOf(b) <= 0 {
 			continue
 		}
 		rows = append(rows, b)
-		total += b.Bytes
+		total += bytesOf(b)
 	}
 	if len(rows) == 0 {
 		return
 	}
-	fmt.Fprintln(w)                                                                           //nolint:errcheck
-	fmt.Fprintln(w, "Reclaimable space (backend caches — DESTRUCTIVE, forces base rebuild):") //nolint:errcheck
+	fmt.Fprintln(w)         //nolint:errcheck
+	fmt.Fprintln(w, header) //nolint:errcheck
 	for _, b := range rows {
-		fmt.Fprintf(w, "    %s: %s\n", b.Name, cliutil.HumanBytes(b.Bytes)) //nolint:errcheck
+		fmt.Fprintf(w, "    %s: %s %s\n", b.Name, cliutil.HumanBytes(bytesOf(b)), label) //nolint:errcheck
 	}
-	fmt.Fprintf(w, "  Total: %s\n", cliutil.HumanBytes(total))     //nolint:errcheck
-	fmt.Fprintln(w, "  Reclaim with: yoloai system prune --cache") //nolint:errcheck
+	fmt.Fprintf(w, "  Reclaim with: %s\n", command) //nolint:errcheck
 }
 
 // renderUnreviewedWork lists broken sandbox dirs that still hold detectable
@@ -401,15 +416,25 @@ func cacheUsageJSONList(disk *yoloai.DiskUsage) []cacheUsageJSON {
 	}
 	out := make([]cacheUsageJSON, 0, len(disk.PerBackend))
 	for _, b := range disk.PerBackend {
-		// Match renderReclaimableSpace: omit errored and unknown (-1) backends so
-		// a JSON consumer never sees a nonsensical negative byte count.
-		if b.Err != nil || b.Bytes <= 0 {
+		// Match renderReclaimableSpace: omit errored backends, and omit any
+		// backend with nothing reclaimable in either tier. A negative ImageBytes
+		// is the unknown sentinel — clamp it to 0 so a JSON consumer never sees a
+		// nonsensical negative count (it's then omitempty-elided).
+		if b.Err != nil {
+			continue
+		}
+		imageBytes := b.ImageBytes
+		if imageBytes < 0 {
+			imageBytes = 0
+		}
+		if b.CachedBytes <= 0 && imageBytes <= 0 {
 			continue
 		}
 		out = append(out, cacheUsageJSON{
-			Backend: string(b.Name),
-			Bytes:   b.Bytes,
-			Detail:  b.Detail,
+			Backend:     string(b.Name),
+			CachedBytes: b.CachedBytes,
+			ImageBytes:  imageBytes,
+			Detail:      b.Detail,
 		})
 	}
 	return out

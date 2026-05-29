@@ -34,7 +34,7 @@ func (r *Runtime) Prune(ctx context.Context, knownInstances []string, dryRun boo
 		// The provisioned base template shares the yoloai- prefix and the
 		// tart-list VM namespace with sandboxes, but it is not an orphan — it
 		// is the reusable image every `new` clones from. Reclaiming it is the
-		// job of PruneCache (`--cache`), never the orphan sweep.
+		// job of PruneCache (`--images`), never the orphan sweep.
 		if name == provisionedImageName {
 			continue
 		}
@@ -68,10 +68,17 @@ func (r *Runtime) Prune(ctx context.Context, knownInstances []string, dryRun boo
 // yoloai-base VM and the pulled base macOS image, then drops the build-checksum
 // marker so the next sandbox creation re-pulls and re-provisions from scratch.
 //
-// More aggressive than Prune: the pulled base image is multi-GB, so this is a
-// "host dedicated to yoloai" operation. Running sandboxes are unaffected — they
-// are independent clones, not references to these images.
-func (r *Runtime) PruneCache(ctx context.Context, dryRun bool, output io.Writer) error {
+// Tart has no regenerable build cache distinct from the base image, so when
+// includeImages is false (plain `prune`) there is nothing to reclaim without
+// forcing a re-pull — this is a no-op. With includeImages true (`prune
+// --images`) it removes the multi-GB base image: a "host dedicated to yoloai"
+// operation. Running sandboxes are unaffected — they are independent clones,
+// not references to these images. Returns 0 reclaimed (tart byte totals aren't
+// measured).
+func (r *Runtime) PruneCache(ctx context.Context, includeImages, dryRun bool, output io.Writer) (int64, error) {
+	if !includeImages {
+		return 0, nil
+	}
 	// resolveBaseImage honours the tart.image config override; an empty
 	// sourceDir is fine because the override (if any) is process-level.
 	baseImage := r.resolveBaseImage("")
@@ -108,5 +115,5 @@ func (r *Runtime) PruneCache(ctx context.Context, dryRun bool, output io.Writer)
 		// if a future base happens to hash identically.
 		_ = os.Remove(r.tartBaseChecksumPath()) //nolint:errcheck // best-effort
 	}
-	return nil
+	return 0, nil
 }

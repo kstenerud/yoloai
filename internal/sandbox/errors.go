@@ -80,8 +80,8 @@ type SandboxLockedError = yoerrors.SandboxLockedError
 // DiskSpaceError is an alias for yoerrors.DiskSpaceError. Surfaced
 // when an operation fails because the host filesystem ran out of
 // space — fatal to the current operation but recoverable via
-// `yoloai system prune --cache` or freeing space on the relevant
-// mount.
+// `yoloai system prune` (or `--images` to also drop base images) or
+// freeing space on the relevant mount.
 type DiskSpaceError = yoerrors.DiskSpaceError
 
 // IsDiskSpaceError forwards to yoerrors.IsDiskSpaceError. Use to

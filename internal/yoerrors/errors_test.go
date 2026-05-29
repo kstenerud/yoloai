@@ -120,7 +120,7 @@ func TestDiskSpaceError_MessageMentionsPruneAndDisk(t *testing.T) {
 	assert.Contains(t, msg, "unpack image")
 	assert.Contains(t, msg, "no space left on device")
 	assert.Contains(t, msg, "yoloai system disk")
-	assert.Contains(t, msg, "yoloai system prune --cache")
+	assert.Contains(t, msg, "yoloai system prune --images")
 }
 
 func TestDiskSpaceError_ImplementsError(t *testing.T) {

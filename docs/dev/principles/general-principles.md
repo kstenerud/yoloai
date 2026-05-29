@@ -119,7 +119,7 @@ For every proposed feature: (a) is there an existing tool that solves this? (b) 
 - **Profile system** is "a Dockerfile + a config.yaml" (D12). The alternative — a templating layer over Dockerfile — was rejected; users already know Dockerfile syntax, and the templating layer would be another thing to learn, document, and debug.
 - **Environment archetypes** (D18, `docs/design/environments.md`) parse existing `.devcontainer/devcontainer.json` files rather than requiring projects to learn a new format. Don't reinvent — work with files projects already have.
 - **In-sandbox monitoring** uses `tmux` panes for session logging + screen capture (`docs/design/bugreport.md`). The alternative — a bespoke terminal multiplexer — would have been weeks of work to reach feature parity with tmux.
-- **`yoloai system disk` / `system prune --cache`** (D21, today) surface backend-native disk/cache information rather than reimplementing inventory. Compose with `docker system df`, `podman system df`, etc.
+- **`yoloai system disk` / `system prune` (and `--images`)** (D21, D35) surface backend-native disk/cache information rather than reimplementing inventory. Compose with `docker system df`, `podman system df`, etc.
 
 ### Cost-vs-benefit
 
@@ -143,7 +143,7 @@ Threshold: every irreversible action gets explicit user-initiation + slow-path c
 
 ### Worked examples
 
-- *Type 1 (one-way doors)*: `yoloai destroy <name>` (removes a sandbox's full state, including the agent's uncommitted work); `yoloai system prune --cache` (reclaims every available backend's image cache, forcing a multi-minute yoloai-base rebuild on next `new`); `yoloai apply` itself when the target directory has uncommitted changes. All three require explicit user-initiation; `apply` adds the dirty-repo warning.
+- *Type 1 (one-way doors)*: `yoloai destroy <name>` (removes a sandbox's full state, including the agent's uncommitted work); `yoloai system prune --images` (reclaims every available backend's base images, forcing a multi-minute yoloai-base rebuild on next `new` — plain `prune` is *not* a one-way door: it only reclaims regenerable cache); `yoloai apply` itself when the target directory has uncommitted changes. All three require explicit user-initiation; `apply` adds the dirty-repo warning.
 - *Type 2 (two-way doors)*: flag rename, command grouping, help text rewording, error message refinement. CLI Pass 1–4 (commits `370599a`–`fa3ca8d`, 2026-03-04) shipped these without ceremony. Each was reversible; speed was the right call.
 - *Type 1.5*: CLI surface changes that retrain user muscle memory (`--detach`/`-d` → `--attach`/`-a` flip in commit `94f46c4`); config schema changes (multiple `defaults.*` reorganisations). Treated as Type 1 by recording the breaking change in `docs/BREAKING-CHANGES.md` and surfacing migration guidance.
 - The 12 rounds of pre-implementation critique (D2) were Type 1 process applied to Type 1 decisions (architecture, security model, capability grants). Not Type 1 process applied to flag names.
@@ -177,7 +177,7 @@ Threshold: **bound any operation whose worst case is bounded by machine or agent
 - **Idle detection timeout** (D14): a sandbox with an unresponsive agent surfaces idle state through `agent-status.json`. The bound prevents "agent ran forever; nothing told us."
 - **Disk pre-flight** (D21, commit `0d8d650`): a smoke test that would have failed with ENOSPC mid-way is refused upfront. The bound converts a confusing partial failure into a clear pre-flight error.
 - **Two-stage smoke sentinel** (D21): early sentinel + final sentinel. Distinguishes "test never started" from "test started but didn't finish."
-- **`yoloai system prune --cache`** (D21): bounds the disk-fill failure mode by giving users a primary lever to recover.
+- **`yoloai system prune`** (D21, D35): bounds the disk-fill failure mode by giving users a primary lever to recover (`--images` for the deeper, rebuild-forcing reclaim).
 - **NOT bounded**: number of sandboxes created (no daily limit); number of profiles (no cap). Both will be observed; bounds added if real evidence shows runaway.
 
 ### Cost-vs-benefit
@@ -297,7 +297,7 @@ Threshold: when a failure mode has been observed twice and produced confusion, w
 
 - **Disk pre-flight** (D21, commit `0d8d650`): a smoke test that was failing as "agent idle 9s+" was actually disk-full. The pre-flight refuses upfront with a clear ENOSPC message. The memory entry `project_smoke_disk_pressure.md` records this case explicitly.
 - **Two-stage smoke sentinel** (D21): distinguishes "test never started" from "test started but didn't finish."
-- **`yoloai system disk`** + **`system prune --cache`** (D21, commit `d894f00`): surface disk inventory and give users the primary recovery lever directly.
+- **`yoloai system disk`** + **`system prune` (and `--images`)** (D21, commit `d894f00`; D35): surface disk inventory and give users the primary recovery lever directly.
 - **Backend idiosyncrasies catalog** (`docs/dev/backend-idiosyncrasies.md`): every observed surprise (e.g., "containerd GitExec returns `*runtime.ExecError` on non-zero exit", commit `8749864`) becomes a documented entry with a symptom index. "Read this before diagnosing any backend problem" is the project rule.
 - **Structured logging + bug-report bundle** (`docs/design/bugreport.md`, commits `222bf71` → `ec21f2c`, March 2026): a single `yoloai bugreport` produces a sanitized, timestamped diagnostic bundle. The user doesn't have to manually collect logs from multiple sources.
 - **Capture container logs before removal** (commit `387f278`, 2026-03-17): an explicit fix for "container vanished before we could diagnose."

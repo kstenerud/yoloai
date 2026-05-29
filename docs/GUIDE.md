@@ -36,7 +36,7 @@ Full reference for commands, flags, configuration, and internals. For a quick ov
 | `yoloai system check` | Verify prerequisites for CI/CD pipelines |
 | `yoloai system disk` | Report on-disk usage per backend (sandboxes + image cache + snapshots) |
 | `yoloai doctor` | Capability status for all backends + a read-only repair advisory (see [Repair & cleanup](#repair--cleanup)) |
-| `yoloai system prune` | Clean up leftover state across all backends (`--dry-run`, `--yes`, `--cache`) — see [Repair & cleanup](#repair--cleanup) |
+| `yoloai system prune` | Clean up leftover state across all backends (`--dry-run`, `--yes`, `--images`) — see [Repair & cleanup](#repair--cleanup) |
 | `yoloai system setup` | Re-run interactive first-run setup |
 | `yoloai sandbox` (alias: `sb`) | Sandbox inspection |
 | `yoloai sandbox list` | List sandboxes and their status |
@@ -335,7 +335,7 @@ Errors are output to stderr as `{"error": "message"}`. Interactive commands (`at
 | 7     | Auth error — credentials completely absent (e.g., `ANTHROPIC_API_KEY` not set) |
 | 8     | Permission error — access denied by policy (e.g., user not in docker group) |
 | 9     | Sandbox locked — another process holds the per-sandbox lock; `yoloai sandbox <name> unlock` if stale |
-| 10    | Disk space exhausted — host filesystem full; `yoloai system disk` + `yoloai system prune --cache` to recover |
+| 10    | Disk space exhausted — host filesystem full; `yoloai system disk` + `yoloai system prune` (or `--images`) to recover |
 | 128+N | Terminated by signal N (POSIX convention) |
 | 130   | Interrupted by SIGINT / Ctrl+C |
 
@@ -654,10 +654,11 @@ The cache directory persists across agent restarts (`yoloai stop` / `yoloai star
 
 Container backends accumulate disk over time — image layers, overlayfs snapshots, BuildKit cache, retired volumes. yoloai exposes two commands for this:
 
-- **`yoloai system disk`** — read-only report of what each available backend is consuming, plus the size of `~/.yoloai/sandboxes/`. Run this when `df` looks unhappy to identify which backend is the culprit.
-- **`yoloai system prune --cache`** — reclaims the backend image cache, snapshots, volumes, and build cache (in addition to the orphaned-resource cleanup the bare `system prune` already does). Forces yoloai-base to rebuild on the next `yoloai new`, so expect a multi-minute first run afterwards. Prune always runs across every available backend; `--dry-run` previews what would be removed.
+- **`yoloai system disk`** — read-only report of what each available backend is consuming, plus the size of `~/.yoloai/sandboxes/`. The `CACHE` column is reclaimable with no rebuild; the `IMAGES` column needs `--images` and forces a rebuild. Run this when `df` looks unhappy to identify which backend is the culprit.
+- **`yoloai system prune`** — always reclaims each backend's *no-rebuild* cache: build cache, retired volumes, and dangling images. Crucially, this does **not** force a rebuild — the base image is kept, so the next `yoloai new` still runs without rebuilding. This is the safe default.
+- **`yoloai system prune --images`** — additionally removes each backend's base/profile images. This forces yoloai-base to rebuild on the next `yoloai new`, so expect a multi-minute first run afterwards. Prune always runs across every available backend; `--dry-run` previews what would be removed.
 
-The cache prune is intentionally aggressive: backends don't tag their content by who created it, so `--cache` removes ALL unused image/snapshot/volume content the backend tracks, not only yoloai's. On a host dedicated to yoloai (CI, dev VM) that's exactly what you want; on a shared workstation, prefer the backend's own prune (`docker system prune`, `podman system prune`, etc.) so you don't nuke unrelated projects' caches.
+`--images` is intentionally aggressive: backends don't tag their content by who created it, so it removes ALL image content the backend tracks, not only yoloai's. On a host dedicated to yoloai (CI, dev VM) that's exactly what you want; on a shared workstation, prefer the backend's own prune (`docker system prune`, `podman system prune`, etc.) so you don't nuke unrelated projects' images.
 
 ## Repair & cleanup
 
@@ -666,7 +667,7 @@ Over time a yoloai install accumulates cruft: orphaned containers/VMs from crash
 **`yoloai doctor`** is the place to start. It's read-only — it never deletes anything — and reports four things alongside the backend capability status:
 
 - **Reclaimable now** — orphaned resources, lock files, temp dirs, and never-initialized sandbox dirs. Fix: `yoloai system prune`.
-- **Reclaimable space** — backend image/build caches. Fix: `yoloai system prune --cache` (forces a base rebuild).
+- **Reclaimable space** — split into two tiers: cached data freed by plain `yoloai system prune` (no rebuild), and base images freed by `yoloai system prune --images` (forces a base rebuild).
 - **Unreviewed work** — broken sandbox dirs that still hold changes the agent made. yoloai refuses to touch these; review with `yoloai diff <name>` and remove with `yoloai destroy <name>` once you're done.
 - **Trash** — dirs that were quarantined rather than deleted (see below).
 

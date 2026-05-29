@@ -1764,7 +1764,7 @@ def check_prerequisites(
                 f"ERROR: host / is {pct}% full ({free_gb}G free).\n"
                 "Containerd-based tests fail with ENOSPC-adjacent network errors "
                 "at this fill level. Free space before running:\n"
-                "  sudo yoloai system prune --cache --yes",
+                "  sudo yoloai system prune --images --yes",
                 file=sys.stderr,
             )
             sys.exit(1)

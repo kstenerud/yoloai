@@ -28,27 +28,31 @@ orphaned lock files. Broken sandbox dirs that still hold unreviewed work are
 never touched (reported with a fix command); broken dirs that can't be
 classified are quarantined to the trash dir, not deleted.
 
---cache also reclaims each backend's image cache, snapshots, volumes,
-and build cache (forces yoloai-base to rebuild on next sandbox creation).
-Use on a host dedicated to yoloai; on shared machines, prefer the
-backend's own prune (e.g., 'docker system prune').`,
+Always reclaims each backend's no-rebuild cache (build cache, volumes,
+dangling images) — this never forces a rebuild, so 'new' still runs
+without rebuilding afterward.
+
+--images additionally removes each backend's base/profile images, which
+forces yoloai-base to rebuild on the next sandbox creation. Use on a host
+dedicated to yoloai; on shared machines, prefer the backend's own prune
+(e.g., 'docker system prune').`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			dryRun, _ := cmd.Flags().GetBool("dry-run")
 			explicitYes, _ := cmd.Flags().GetBool("yes")
-			cache, _ := cmd.Flags().GetBool("cache")
-			return runSystemPrune(cmd, dryRun, explicitYes, cache)
+			images, _ := cmd.Flags().GetBool("images")
+			return runSystemPrune(cmd, dryRun, explicitYes, images)
 		},
 	}
 
 	cmd.Flags().Bool("dry-run", false, "Report only, don't remove anything")
 	cmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompts (including trash deletion)")
-	cmd.Flags().Bool("cache", false, "Also reclaim backend image cache + snapshots + build cache (DESTRUCTIVE: forces base rebuild)")
+	cmd.Flags().Bool("images", false, "Also remove backend base/profile images (DESTRUCTIVE: forces base rebuild)")
 
 	return cmd
 }
 
-func runSystemPrune(cmd *cobra.Command, dryRun, explicitYes, cache bool) error {
+func runSystemPrune(cmd *cobra.Command, dryRun, explicitYes, images bool) error {
 	ctx := cmd.Context()
 	output := cmd.OutOrStdout()
 	isJSON := cliutil.JSONEnabled(cmd)
@@ -61,22 +65,22 @@ func runSystemPrune(cmd *cobra.Command, dryRun, explicitYes, cache bool) error {
 	// First, a dry-run scan to find what's there.
 	scanResult, err := cliutil.NewSystemClient().Prune(ctx, yoloai.PruneOptions{
 		DryRun:           true,
-		IncludeBaseImage: cache,
+		IncludeBaseImage: images,
 		Output:           output,
 	})
 	if err != nil {
 		return err
 	}
 
-	proceed, err := previewPrune(cmd, scanResult, dryRun, cache, isJSON)
+	proceed, err := previewPrune(cmd, scanResult, dryRun, images, isJSON)
 	if err != nil || !proceed {
 		return err
 	}
 
 	totalItems := len(scanResult.RemovedItems)
-	hasWork := totalItems > 0 || cache || len(scanResult.Trashed) > 0
+	hasWork := totalItems > 0 || scanResult.FreedBytes > 0 || len(scanResult.Trashed) > 0
 	if hasWork && !skipPruneConfirm {
-		confirmed, err := confirmPrune(cmd, ctx, totalItems, cache)
+		confirmed, err := confirmPrune(cmd, ctx, totalItems, images)
 		if err != nil || !confirmed {
 			return err
 		}
@@ -85,7 +89,7 @@ func runSystemPrune(cmd *cobra.Command, dryRun, explicitYes, cache bool) error {
 	// Actual removal. The library does the work; we just report.
 	actualResult, err := cliutil.NewSystemClient().Prune(ctx, yoloai.PruneOptions{
 		DryRun:           false,
-		IncludeBaseImage: cache,
+		IncludeBaseImage: images,
 		Output:           output,
 	})
 	if err != nil {
@@ -109,13 +113,13 @@ func runSystemPrune(cmd *cobra.Command, dryRun, explicitYes, cache bool) error {
 // cache banner) and decides whether the caller should proceed to the
 // actual removal. Returns proceed=false when there's nothing to do or when
 // this was itself a --dry-run invocation.
-func previewPrune(cmd *cobra.Command, scan *yoloai.PruneResult, dryRun, cache, isJSON bool) (bool, error) {
+func previewPrune(cmd *cobra.Command, scan *yoloai.PruneResult, dryRun, images, isJSON bool) (bool, error) {
 	output := cmd.OutOrStdout()
 	printRefusedDataBearing(output, scan.RefusedDataBearing, isJSON)
 	printTrashedPreview(output, scan.Trashed, isJSON)
 
 	totalItems := len(scan.RemovedItems)
-	hasWork := totalItems > 0 || cache || len(scan.Trashed) > 0
+	hasWork := totalItems > 0 || scan.FreedBytes > 0 || len(scan.Trashed) > 0
 	if !hasWork && scan.TrashContents.Count == 0 {
 		if isJSON {
 			return false, writePruneJSON(cmd, scan, true)
@@ -130,7 +134,7 @@ func previewPrune(cmd *cobra.Command, scan *yoloai.PruneResult, dryRun, cache, i
 	if totalItems > 0 {
 		printPruneFoundItems(output, scan.RemovedItems, isJSON)
 	}
-	announceCache(output, cache, isJSON)
+	announceReclaim(output, scan.FreedBytes, images, isJSON)
 
 	if dryRun {
 		printTrashStatus(output, scan.TrashContents, isJSON)
@@ -163,28 +167,39 @@ func printActualRemoval(output interface{ Write([]byte) (int, error) }, result *
 	for _, t := range result.Trashed {
 		fmt.Fprintf(output, "Quarantined broken sandbox %s to trash (%s)\n", t.Name, t.Dest) //nolint:errcheck
 	}
+	if result.FreedBytes > 0 {
+		fmt.Fprintf(output, "Reclaimed %s of backend cache.\n", cliutil.HumanBytes(result.FreedBytes)) //nolint:errcheck
+	}
 }
 
-// announceCache prints the cache-reclaim banner (human-mode only).
-func announceCache(output interface{ Write([]byte) (int, error) }, cache, isJSON bool) {
-	if !cache || isJSON {
+// announceReclaim previews the cache that will be reclaimed (best-effort
+// estimate) and, when --images is set, warns that base images will be removed
+// (forcing a rebuild). Human-mode only.
+func announceReclaim(output interface{ Write([]byte) (int, error) }, reclaimBytes int64, images, isJSON bool) {
+	if isJSON {
 		return
 	}
-	fmt.Fprintln(output, "Cache reclaim requested across all available backends.") //nolint:errcheck
-	fmt.Fprintln(output, "  (forces base image rebuild on next sandbox creation)") //nolint:errcheck
+	if reclaimBytes > 0 {
+		fmt.Fprintf(output, "Reclaimable backend cache (no rebuild): ~%s\n", cliutil.HumanBytes(reclaimBytes)) //nolint:errcheck
+	}
+	if images {
+		fmt.Fprintln(output, "--images: also removing base images (forces yoloai-base rebuild on next 'new')") //nolint:errcheck
+	}
 }
 
 // confirmPrune prompts the user to confirm removal and returns
 // whether they confirmed.
-func confirmPrune(cmd *cobra.Command, ctx context.Context, totalItems int, cache bool) (bool, error) {
+func confirmPrune(cmd *cobra.Command, ctx context.Context, totalItems int, images bool) (bool, error) {
 	var prompt string
 	switch {
-	case totalItems == 0 && cache:
-		prompt = "Reclaim backend cache (rebuilds yoloai-base on next 'new')? [y/N]: "
-	case cache:
-		prompt = fmt.Sprintf("Remove %d resource(s) + reclaim backend cache (rebuilds yoloai-base on next 'new')? [y/N]: ", totalItems)
+	case totalItems == 0 && images:
+		prompt = "Reclaim cache and remove base images (rebuilds yoloai-base on next 'new')? [y/N]: "
+	case images:
+		prompt = fmt.Sprintf("Remove %d resource(s), reclaim cache, and remove base images (rebuilds yoloai-base on next 'new')? [y/N]: ", totalItems)
+	case totalItems == 0:
+		prompt = "Reclaim backend cache? [y/N]: "
 	default:
-		prompt = fmt.Sprintf("Remove %d resource(s)? [y/N]: ", totalItems)
+		prompt = fmt.Sprintf("Remove %d resource(s) and reclaim cache? [y/N]: ", totalItems)
 	}
 	return sandbox.Confirm(ctx, prompt, cmd.InOrStdin(), cmd.ErrOrStderr())
 }
@@ -337,6 +352,7 @@ func writePruneJSON(cmd *cobra.Command, result *yoloai.PruneResult, dryRun bool)
 		"items":       items,
 		"refused":     refused,
 		"trashed":     trashed,
+		"freed_bytes": result.FreedBytes,
 		"trash_count": result.TrashContents.Count,
 		"trash_bytes": result.TrashContents.Bytes,
 		"dry_run":     dryRun,

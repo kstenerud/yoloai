@@ -2001,7 +2001,8 @@ const (
 //       CLI breaking changes (W-L8b/d, add to BREAKING-CHANGES.md):
 //         --backend  removed (always all backends)
 //         --all      removed (always all backends; flag is redundant)
-//         --cache    renamed to --include-base-image
+//         --cache    renamed to --images (plain prune now also reclaims
+//                    the no-rebuild cache; --images adds base-image removal)
 //
 //       Codified principle: when option fields accumulate, audit each
 //       against actual use cases — not hypothetical ones. YAGNI applies

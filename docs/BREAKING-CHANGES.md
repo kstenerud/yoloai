@@ -337,6 +337,22 @@ Human-readable output also gains an `" (agent requirement)"` annotation next to 
 - Drop `--all` and `--backend` from scripts and CI invocations.
 - The behavior of bare `yoloai system prune` matches the old `--all` invocation.
 
+### `yoloai system prune --cache` renamed to `--images`; plain prune now reclaims the no-rebuild cache
+
+**Previous behavior:** Bare `yoloai system prune` only removed orphaned resources (containers/VMs with no sandbox dir, stale temp dirs, lock files) — it reclaimed no backend cache. `--cache` reclaimed the backend image cache, snapshots, volumes, and build cache in one destructive step that always forced a yoloai-base rebuild.
+
+**New behavior:** The reclaim is split into two tiers by the prune invariant *plain prune must never force a rebuild*:
+- Bare `yoloai system prune` now **also reclaims each backend's no-rebuild cache** (Docker/Podman build cache, retired volumes, dangling images). The base image is kept, so a subsequent `yoloai new` still runs without rebuilding.
+- `--cache` is renamed **`--images`**, which additionally removes base/profile images and forces a rebuild on the next `new`.
+
+`yoloai system disk` now reports two columns (`CACHE` = no-rebuild reclaim, `IMAGES` = rebuild-forcing) and `yoloai doctor` splits "reclaimable space" into the same two tiers. Prune also now reports bytes reclaimed (`freed_bytes` in `--json`).
+
+**Rationale:** `--cache` was too generic to convey the rebuild cost, and the old bare prune left obvious reclaimable build cache on disk. The invariant gives users a safe default (`prune`, no rebuild) and an explicit destructive lever (`--images`, forces rebuild). On Docker's containerd image store, the build cache pins image layers, so the build cache must be pruned for `image rm` to actually free disk — bare prune now does this. See `docs/dev/backend-idiosyncrasies.md`.
+
+**Migration:**
+- Replace `yoloai system prune --cache` with `yoloai system prune --images`.
+- If you relied on bare `prune` *not* touching the build cache, note it now does (this only reclaims regenerable cache; no rebuild is forced).
+
 ### `yoloai system runtime` renamed to `yoloai system tart`
 
 **Previous behavior:** Apple simulator runtime base images were managed via `yoloai system runtime add|list|remove`. The command name read as generic, but the surface is structurally Tart-only (and is the only CLI subtree that imports `runtime/tart` directly).

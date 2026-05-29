@@ -87,9 +87,10 @@ func printRunError(runErr error, rootCmd *cobra.Command, activeCmd *cobra.Comman
 	// *DiskSpaceError carries. Append the same hint here so the message
 	// is actionable regardless of whether the runtime layer wrapped.
 	if _, alreadyWrapped := errors.AsType[*sandbox.DiskSpaceError](runErr); !alreadyWrapped && sandbox.IsDiskSpaceError(runErr) {
-		fmt.Fprintln(os.Stderr, "Free space and retry:")                                                                //nolint:errcheck
-		fmt.Fprintln(os.Stderr, "  yoloai system disk             # show what yoloai is using")                         //nolint:errcheck
-		fmt.Fprintln(os.Stderr, "  yoloai system prune --cache    # reclaim backend image cache (forces base rebuild)") //nolint:errcheck
+		fmt.Fprintln(os.Stderr, "Free space and retry:")                                                       //nolint:errcheck
+		fmt.Fprintln(os.Stderr, "  yoloai system disk             # show what yoloai is using")                //nolint:errcheck
+		fmt.Fprintln(os.Stderr, "  yoloai system prune            # reclaim cache, no rebuild")                //nolint:errcheck
+		fmt.Fprintln(os.Stderr, "  yoloai system prune --images   # also remove base images (forces rebuild)") //nolint:errcheck
 	}
 
 	if activeCmd != nil {

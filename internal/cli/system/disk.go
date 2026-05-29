@@ -1,7 +1,7 @@
 package system
 
 // ABOUTME: `yoloai system disk` reports backend cache usage so users can spot
-// when it's time to run `yoloai system prune --cache`.
+// when it's time to run `yoloai system prune` (or `--images`).
 
 import (
 	"fmt"
@@ -20,9 +20,11 @@ func newSystemDiskCmd() *cobra.Command {
 		Long: `Report on-disk usage for yoloai and its registered backends.
 
 Surfaces how much space each container backend is consuming so you can spot
-when it's time to run 'yoloai system prune --cache'. Backend cache sizes
-include all images / snapshots / volumes the backend tracks — not just
-yoloai's — because the backend doesn't tag content by who created it.`,
+when it's time to prune. The CACHE column is reclaimable by 'yoloai system
+prune' with no rebuild (build cache, volumes); the IMAGES column is reclaimable
+only by 'yoloai system prune --images', which forces a base rebuild. Sizes
+include all content the backend tracks — not just yoloai's — because the
+backend doesn't tag content by who created it.`,
 		Args: cobra.NoArgs,
 		RunE: runSystemDisk,
 	}
@@ -42,24 +44,32 @@ func runSystemDisk(cmd *cobra.Command, _ []string) error {
 	}
 
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "SOURCE\tSIZE\tDETAIL")                                                                  //nolint:errcheck
-	fmt.Fprintf(w, "sandboxes\t%s\t%s\n", cliutil.HumanBytes(du.Sandboxes), cliutil.Layout().SandboxesDir()) //nolint:errcheck
+	fmt.Fprintln(w, "SOURCE\tCACHE\tIMAGES\tDETAIL")                                                            //nolint:errcheck
+	fmt.Fprintf(w, "sandboxes\t-\t%s\t%s\n", cliutil.HumanBytes(du.Sandboxes), cliutil.Layout().SandboxesDir()) //nolint:errcheck
 	for _, b := range du.PerBackend {
-		switch {
-		case b.Err != nil:
-			fmt.Fprintf(w, "%s\t-\t%v\n", b.Name, b.Err) //nolint:errcheck
-		case b.Bytes < 0:
-			fmt.Fprintf(w, "%s\t?\t%s\n", b.Name, b.Detail) //nolint:errcheck
-		default:
-			fmt.Fprintf(w, "%s\t%s\t%s\n", b.Name, cliutil.HumanBytes(b.Bytes), b.Detail) //nolint:errcheck
+		if b.Err != nil {
+			fmt.Fprintf(w, "%s\t-\t-\t%v\n", b.Name, b.Err) //nolint:errcheck
+			continue
 		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", b.Name, cliutil.HumanBytes(b.CachedBytes), imageBytesCell(b.ImageBytes), b.Detail) //nolint:errcheck
 	}
 	if err := w.Flush(); err != nil {
 		return err
 	}
-	fmt.Fprintln(out)                                                                          //nolint:errcheck
-	fmt.Fprintln(out, "Reclaim with: yoloai system prune --cache (forces base image rebuild)") //nolint:errcheck
+	fmt.Fprintln(out)                                                                      //nolint:errcheck
+	fmt.Fprintln(out, "Reclaim cached data (no rebuild):    yoloai system prune")          //nolint:errcheck
+	fmt.Fprintln(out, "Reclaim images (forces rebuild):     yoloai system prune --images") //nolint:errcheck
 	return nil
+}
+
+// imageBytesCell renders the IMAGES column, showing "?" for the
+// unknown sentinel (backends like containerd/tart that can't size images
+// cheaply) rather than a misleading "0 B" or "-1 B".
+func imageBytesCell(n int64) string {
+	if n < 0 {
+		return "?"
+	}
+	return cliutil.HumanBytes(n)
 }
 
 // formatDiskJSON renders a DiskUsage into the existing JSON shape so
@@ -73,7 +83,8 @@ func formatDiskJSON(du *yoloai.DiskUsage, sandboxesDir string) map[string]any {
 		if b.Err != nil {
 			entry["error"] = b.Err.Error()
 		} else {
-			entry["bytes"] = b.Bytes
+			entry["cached_bytes"] = b.CachedBytes
+			entry["image_bytes"] = b.ImageBytes
 			entry["detail"] = b.Detail
 		}
 		entries = append(entries, entry)

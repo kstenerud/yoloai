@@ -15,9 +15,9 @@ const gib = int64(1024 * 1024 * 1024)
 
 // Regression: many intermediate build stages share one base image, so summing
 // each img.Size multiply-counts the shared layers (a real podman cache of one
-// ~5 GiB base read as ~130 GiB). cacheBytes must use the deduplicated
-// LayersSize for the image portion and ignore per-image Size entirely.
-func TestCacheBytes_UsesDeduplicatedLayersSize(t *testing.T) {
+// ~5 GiB base read as ~130 GiB). The image tier must use the deduplicated
+// LayersSize and ignore per-image Size entirely.
+func TestSplitCacheBytes_ImagesUseDeduplicatedLayersSize(t *testing.T) {
 	du := types.DiskUsage{
 		LayersSize: 5 * gib,
 		Images: []*image.Summary{
@@ -26,23 +26,27 @@ func TestCacheBytes_UsesDeduplicatedLayersSize(t *testing.T) {
 			{Size: 5 * gib},
 		},
 	}
-	assert.Equal(t, 5*gib, cacheBytes(du))
+	cached, images := splitCacheBytes(du)
+	assert.Equal(t, int64(0), cached)
+	assert.Equal(t, 5*gib, images)
 }
 
 // Containers' writable layers, volumes, and build cache live outside the image
-// layer store, so they add on top of LayersSize.
-func TestCacheBytes_AddsNonImageUsage(t *testing.T) {
+// layer store — they're the no-rebuild "cached" tier, separate from images.
+func TestSplitCacheBytes_NonImageUsageIsCachedTier(t *testing.T) {
 	du := types.DiskUsage{
 		LayersSize: 5 * gib,
 		Containers: []*container.Summary{{SizeRw: 100}, {SizeRw: 200}},
 		Volumes:    []*volume.Volume{{UsageData: &volume.UsageData{Size: 50}}},
 		BuildCache: []*build.CacheRecord{{Size: 25}},
 	}
-	assert.Equal(t, 5*gib+100+200+50+25, cacheBytes(du))
+	cached, images := splitCacheBytes(du)
+	assert.Equal(t, int64(100+200+50+25), cached)
+	assert.Equal(t, 5*gib, images)
 }
 
 // A volume with unknown size (UsageData nil or -1) must not corrupt the total.
-func TestCacheBytes_IgnoresUnknownVolumeSize(t *testing.T) {
+func TestSplitCacheBytes_IgnoresUnknownVolumeSize(t *testing.T) {
 	du := types.DiskUsage{
 		LayersSize: gib,
 		Volumes: []*volume.Volume{
@@ -51,7 +55,9 @@ func TestCacheBytes_IgnoresUnknownVolumeSize(t *testing.T) {
 			{UsageData: &volume.UsageData{Size: 500}},
 		},
 	}
-	assert.Equal(t, gib+500, cacheBytes(du))
+	cached, images := splitCacheBytes(du)
+	assert.Equal(t, int64(500), cached)
+	assert.Equal(t, gib, images)
 }
 
 func TestFormatBytes_Bytes(t *testing.T) {
