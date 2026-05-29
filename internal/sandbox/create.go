@@ -544,7 +544,7 @@ func (m *Engine) replaceSandboxIfNeeded(ctx context.Context, opts CreateOptions,
 			return err
 		}
 	}
-	if _, err := m.destroy(ctx, opts.Name); err != nil {
+	if _, err := launch.Teardown(ctx, m.deps(), opts.Name); err != nil {
 		return fmt.Errorf("replace existing sandbox: %w", err)
 	}
 	return nil

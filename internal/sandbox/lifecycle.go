@@ -5,7 +5,6 @@ package sandbox
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -14,7 +13,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
@@ -377,36 +375,14 @@ func (m *Engine) Destroy(ctx context.Context, name string) (*DestroyResult, erro
 }
 
 func (m *Engine) destroy(ctx context.Context, name string) (*DestroyResult, error) {
-	slog.Info("destroying sandbox", "event", "sandbox.destroy", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
-	sandboxDir := m.layout.SandboxDir(name)
-	if err := store.RequireSandboxDir(sandboxDir); err != nil {
-		if errors.Is(err, ErrSandboxNotFound) {
-			return &DestroyResult{}, nil // nothing to destroy
-		}
+	warnings, err := launch.Teardown(ctx, m.deps(), name)
+	if err != nil {
 		return nil, err
 	}
-
-	cname := store.InstanceName(name)
-
-	// Stop instance (ignore errors — may not be running)
-	_ = m.runtime.Stop(ctx, cname)
-
-	// Remove instance (ignore errors — may not exist)
-	_ = m.runtime.Remove(ctx, cname)
-
 	var n notices
-	// Remove the metadata file first so a partial directory removal still frees
-	// the name for reuse: Create keys "already exists" off the metadata, not the
-	// directory, so a leftover (e.g. root-owned overlay/VM state we can't delete)
-	// won't block re-creating with the same name.
-	_ = os.Remove(filepath.Join(sandboxDir, store.EnvironmentFile)) //nolint:errcheck // best-effort; forceRemoveAll removes it too in the common case
-
-	// Remove sandbox directory. Some files (e.g. Go module cache) are
-	// read-only, so make everything writable first.
-	if err := forceRemoveAll(sandboxDir); err != nil {
-		n.warnf("sandbox %s removed, but some files could not be deleted (likely root-owned overlay/VM state from the backend): %v\n  reclaim the leftover disk with: sudo rm -rf %s   (or run 'yoloai system prune')", name, err, sandboxDir)
+	for _, w := range warnings {
+		n.warnf("%s", w)
 	}
-
 	return &DestroyResult{Notices: n.list}, nil
 }
 
@@ -1485,35 +1461,4 @@ func PatchConfigAllowedDomains(sandboxDir string, domains []string) error {
 		return fmt.Errorf("write runtime-config.json for domain patch: %w", err)
 	}
 	return nil
-}
-
-// forceRemoveAll removes a directory tree, making read-only entries writable
-// first (e.g. Go module cache files are installed read-only).
-func forceRemoveAll(path string) error {
-	// First pass: ensure all directories are writable so their contents can
-	// be removed. We only need to fix directories — os.RemoveAll handles
-	// read-only files fine once the parent directory is writable.
-	_ = filepath.WalkDir(path, func(p string, d os.DirEntry, err error) error {
-		if err != nil {
-			// If the directory isn't readable/executable, fix it and retry.
-			_ = os.Chmod(p, 0o700) //nolint:errcheck,gosec // best-effort; 0700 needed for directory traversal before removal
-			return nil             //nolint:nilerr // returning nil continues the walk after a best-effort chmod
-		}
-		if d.IsDir() {
-			_ = os.Chmod(p, 0o700) //nolint:errcheck,gosec // best-effort; 0700 needed for directory traversal before removal
-		}
-		return nil
-	})
-	// Retry removal a few times. On macOS, system services (Spotlight,
-	// FSEvents) can momentarily recreate files in the directory between
-	// content removal and the final rmdir, causing "directory not empty".
-	var err error
-	for range 3 {
-		err = os.RemoveAll(path)
-		if err == nil {
-			return nil
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	return err
 }

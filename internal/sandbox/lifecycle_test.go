@@ -1223,26 +1223,3 @@ func TestNeedsConfirmation_InspectError(t *testing.T) {
 	assert.False(t, needs)
 	assert.Empty(t, reason)
 }
-
-// forceRemoveAll tests
-
-func TestForceRemoveAll_ReadOnlyNested(t *testing.T) {
-	dir := t.TempDir()
-	nested := filepath.Join(dir, "a", "b", "c")
-	require.NoError(t, os.MkdirAll(nested, 0750))
-	writeTestFile(t, nested, "file.txt", "content")
-
-	// Make everything read-only
-	require.NoError(t, os.Chmod(nested, 0o555))                             //nolint:gosec // intentionally read-only for test
-	require.NoError(t, os.Chmod(filepath.Dir(nested), 0o555))               //nolint:gosec // intentionally read-only for test
-	require.NoError(t, os.Chmod(filepath.Dir(filepath.Dir(nested)), 0o555)) //nolint:gosec // intentionally read-only for test
-
-	err := forceRemoveAll(dir)
-	require.NoError(t, err)
-	assert.NoDirExists(t, dir)
-}
-
-func TestForceRemoveAll_NonExistentPath(t *testing.T) {
-	err := forceRemoveAll("/tmp/nonexistent-path-" + t.Name())
-	assert.NoError(t, err)
-}
