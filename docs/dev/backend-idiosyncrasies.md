@@ -298,13 +298,16 @@ resets when the orphan is killed or the host reboots (`tart stop` can't
 touch a VM tart no longer tracks).
 
 **Gotcha — the XPC process is shared across apps:** `com.apple.Virtualization.VirtualMachine`
-is used by *every* app built on Virtualization.framework (e.g. **Claude.app**
-runs its own `claudevm.bundle` microVM), not just tart. You cannot assume
-such a process is a tart VM, and you must **never** kill one blindly —
-killing another app's VM breaks that app. The reliable discriminator:
-a tart VM holds a `~/.tart/vms/<name>/disk.img` open (visible via
-`lsof -p <pid>`); foreign VMs don't. Foreign VMs are also typically Linux
-guests, which are **not** subject to the macOS 2-VM limit.
+is used by *every* app built on Virtualization.framework, not just tart —
+e.g. **Claude.app** runs its own `claudevm.bundle` microVM, and **Podman's
+`applehv` machine** (`podman-machine-default`) is itself a Virtualization.framework
+VM. You cannot assume such a process is a tart VM, and you must **never**
+kill one blindly — killing another app's VM breaks that app (a hand-killed
+orphan in an early build of this feature took down the podman machine
+mid-session, before the disk-image check below existed). The reliable
+discriminator: a tart VM holds a `~/.tart/vms/<name>/disk.img` open
+(visible via `lsof -p <pid>`); foreign VMs don't. Foreign VMs are also
+typically Linux guests, which are **not** subject to the macOS 2-VM limit.
 
 **Fix in code:** `tart/census.go` enumerates the XPC processes
 (`detectVMProcesses`), keeps only those positively identified as tart
