@@ -40,6 +40,14 @@ VM_TIMEOUT = 180        # seconds: VM boot + agent startup (Firecracker/Tart)
 QEMU_TIMEOUT = 300      # seconds: QEMU-based Kata VM — slower boot than Firecracker
 CMD_TIMEOUT = 60        # seconds: individual yoloai commands
 
+# Upfront base-image build budgets (prerequisite phase). Container/seatbelt
+# builds are local and fast. Tart's first run pulls a ~30 GB macOS VM image,
+# which legitimately needs a much larger budget so it completes and the backend
+# actually gets tested. A timeout aborts the run (exit 1) rather than skipping
+# the backend — a release gate must not pass while silently dropping coverage.
+BASE_BUILD_TIMEOUT = 600       # seconds: local image build (docker/podman/seatbelt/containerd)
+TART_BASE_BUILD_TIMEOUT = 3600  # seconds: one-time ~30 GB macOS VM image pull
+
 STALL_GRACE_SECS = 30   # ignore stall detection for this many seconds after polling starts
 STALL_IDLE_COUNT = 3    # consecutive idle polls before declaring a stall (3×3s = 9s sustained idle)
 # Terminal sandbox statuses that mean the agent will never write the sentinel.
@@ -1784,10 +1792,24 @@ def check_prerequisites(
 
     for daemon in sorted(all_daemons):
         print(f"  Building yoloai-base image for {daemon} backend (output below)...")
-        r = subprocess.run(
-            [ctx.yoloai_bin, "system", "build", "--backend", daemon],
-            timeout=600,
-        )
+        build_timeout = TART_BASE_BUILD_TIMEOUT if daemon == "tart" else BASE_BUILD_TIMEOUT
+        try:
+            r = subprocess.run(
+                [ctx.yoloai_bin, "system", "build", "--backend", daemon],
+                timeout=build_timeout,
+            )
+        except subprocess.TimeoutExpired:
+            # Fail loud rather than skip: a release gate must not pass while
+            # silently dropping a backend. The larger tart budget normally lets
+            # the one-time ~30 GB pull finish; if it still times out, pre-pull
+            # it once outside the run so the build is a fast no-op here.
+            print(
+                f"\nERROR: base image build for {daemon} timed out after {build_timeout}s.\n"
+                f"Pre-pull it once outside the smoke run, then retry:\n"
+                f"  {ctx.yoloai_bin} system build --backend {daemon}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
         print()
         if r.returncode != 0:
             continue
