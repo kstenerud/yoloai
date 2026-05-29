@@ -118,7 +118,7 @@ cover:
 	rm -f coverage.out
 
 base-image: build
-	./$(BINARY) system build
+	./$(BINARY) system build --backend docker
 
 integration:
 	@if docker info >/dev/null 2>&1; then \
