@@ -4,10 +4,18 @@ COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
 DATE    := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)
 
+# Python dev tooling lives in a uv-managed venv so mypy/pytest run at
+# lockfile-pinned versions (requirements-dev.lock), decoupled from whatever
+# ambient `python3 -m mypy` happens to be installed. See setup-dev-python.
+VENV := .venv
+MYPY := $(VENV)/bin/mypy
+PYTEST := $(VENV)/bin/pytest
+PY_REQ_LOCK := internal/runtime/monitor/tests/requirements-dev.lock
+
 GOFILES := $(shell find . -name '*.go' -not -path './vendor/*')
 EMBEDFILES := $(shell find internal -type f \( -name 'Dockerfile' -o -name '*.sh' -o -name '*.py' -o -name '*.conf' -o -name '*.md' \) -not -path './vendor/*' -not -path '*/__pycache__/*' -not -path '*/tests/*')
 
-.PHONY: build test fmt lint tidy-check govulncheck hadolint actionlint check cover integration e2e integration-podman integration-seatbelt integration-tart python-test python-typecheck setup-dev-python smoketest smoketest-full releasetest setcap clean
+.PHONY: build test fmt lint tidy-check govulncheck hadolint actionlint check cover integration e2e integration-podman integration-seatbelt integration-tart python-test python-typecheck ensure-python-venv setup-dev-python smoketest smoketest-full releasetest setcap clean
 
 build: $(BINARY)
 
@@ -57,33 +65,48 @@ actionlint:
 ## check: run all CI checks locally (same as PR checks)
 check: lint tidy-check hadolint actionlint test python-test
 
-## python-test: run pytest on internal/runtime/monitor/tests (skip when pytest absent)
-## Detects pytest availability so fresh clones without dev deps still get a
-## clean `make check`. CI installs deps via `make setup-dev-python` and
-## treats this target as required.
-python-test: python-typecheck
-	@if python3 -m pytest --version >/dev/null 2>&1; then \
-		python3 -m pytest internal/runtime/monitor/tests/ -v; \
-		python3 -m pytest scripts/tests/ -v; \
-	else \
-		echo "Python tests skipped (install pytest + mypy via 'make setup-dev-python' to enable)"; \
+## ensure-python-venv: provision the uv-managed venv on demand (idempotent).
+## When uv is present this syncs the lockfile-pinned tools into .venv; when uv
+## is absent it does nothing, so the python-* targets below skip gracefully and
+## a fresh clone without uv still gets a green `make check`. uv pip sync is
+## near-instant once the venv already matches the lock, so running this on every
+## `make check` is cheap and removes any need to call setup-dev-python by hand.
+ensure-python-venv:
+	@if command -v uv >/dev/null 2>&1; then \
+		uv venv --quiet $(VENV); \
+		uv pip sync --quiet --python $(VENV)/bin/python $(PY_REQ_LOCK); \
 	fi
 
-## python-typecheck: run mypy --strict on the typed Python surface
+## python-test: run pytest from the uv-managed venv (skip when venv absent)
+python-test: python-typecheck
+	@if [ -x $(PYTEST) ]; then \
+		$(PYTEST) internal/runtime/monitor/tests/ -v; \
+		$(PYTEST) scripts/tests/ -v; \
+	else \
+		echo "Python tests skipped (install uv to enable: https://docs.astral.sh/uv/)"; \
+	fi
+
+## python-typecheck: run mypy --strict from the uv-managed venv on the typed surface
 ## Two invocations: the monitor surface and the smoke harness each have their
 ## own tests/conftest.py, which mypy would otherwise reject as a duplicate
 ## top-level "conftest" module if checked in one pass.
-python-typecheck:
-	@if python3 -m mypy --version >/dev/null 2>&1; then \
-		python3 -m mypy --strict internal/runtime/monitor/setup_helpers.py internal/runtime/monitor/tmux_io.py internal/runtime/monitor/tests/; \
-		python3 -m mypy --strict scripts/smoke_test.py scripts/tests/; \
+python-typecheck: ensure-python-venv
+	@if [ -x $(MYPY) ]; then \
+		$(MYPY) --strict internal/runtime/monitor/setup_helpers.py internal/runtime/monitor/tmux_io.py internal/runtime/monitor/tests/; \
+		$(MYPY) --strict scripts/smoke_test.py scripts/tests/; \
 	else \
-		echo "Python type-check skipped (install mypy via 'make setup-dev-python' to enable)"; \
+		echo "Python type-check skipped (install uv to enable: https://docs.astral.sh/uv/)"; \
 	fi
 
-## setup-dev-python: install Python dev deps (pytest, mypy) for python-test/python-typecheck
+## setup-dev-python: explicitly provision the uv-managed venv with lockfile-pinned
+## dev tools. Optional for local dev (the python-* targets self-provision via
+## ensure-python-venv); kept for CI and as an explicit "set it up now" entry that
+## fails loudly if uv is missing. Regenerate the lock after editing
+## requirements-dev.txt: uv pip compile --generate-hashes requirements-dev.txt -o requirements-dev.lock
 setup-dev-python:
-	python3 -m pip install -r internal/runtime/monitor/tests/requirements-dev.txt
+	@command -v uv >/dev/null 2>&1 || { echo "uv is required: install from https://docs.astral.sh/uv/"; exit 1; }
+	uv venv $(VENV)
+	uv pip sync --python $(VENV)/bin/python $(PY_REQ_LOCK)
 
 ## cover: show test coverage per package and total
 cover:

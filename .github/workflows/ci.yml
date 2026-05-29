@@ -25,6 +25,9 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
       - name: Install golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
