@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kstenerud/yoloai/internal/runtime"
+	"github.com/kstenerud/yoloai/internal/sandbox/mounts"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 )
 
@@ -182,14 +183,14 @@ func applyOverlayAndCaps(state *State, caps runtime.BackendCaps, instanceCfg *ru
 	// an opaque error. runtime.SupportsOverlayDirs encodes the policy
 	// (container-enhanced / gVisor is the rejection case); the message stays
 	// here because it's CLI-shaped advice.
-	if hasOverlayDirs(state) && !runtime.SupportsOverlayDirs(state.Isolation) {
+	if mounts.HasOverlayDirs(state) && !runtime.SupportsOverlayDirs(state.Isolation) {
 		return fmt.Errorf(
 			":overlay directories require --isolation container; " +
 				"--isolation container-enhanced uses gVisor, which does not support overlayfs inside the container")
 	}
 
 	// CAP_SYS_ADMIN required for overlay mounts inside the container
-	if hasOverlayDirs(state) {
+	if mounts.HasOverlayDirs(state) {
 		if !caps.OverlayDirs {
 			return fmt.Errorf(":overlay mode requires a container backend that supports overlayfs (not supported with %s)", runtimeName)
 		}

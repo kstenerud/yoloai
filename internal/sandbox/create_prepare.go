@@ -18,6 +18,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox/archetype"
+	mountspkg "github.com/kstenerud/yoloai/internal/sandbox/mounts"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/internal/workspace"
 )
@@ -1041,7 +1042,7 @@ func printArchetypeOutput(output io.Writer, arch archetype.Archetype, source str
 func validateAndExpandMounts(mounts []string, homeDir string, env map[string]string) ([]string, error) {
 	result := make([]string, len(mounts))
 	for i, m := range mounts {
-		spec, err := parseConfigMount(m, homeDir, env)
+		spec, err := mountspkg.ParseConfigMount(m, homeDir, env)
 		if err != nil {
 			return nil, fmt.Errorf("invalid mount %q: %w", m, err)
 		}
