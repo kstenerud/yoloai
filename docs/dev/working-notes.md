@@ -884,6 +884,22 @@ While carving `create/`, three symbols turned out to be shared across the create
 - **Rationale for not using `launch/`:** `launch/` is container start/stop/teardown; `provision/` is per-sandbox credential/seed prep. Neither image building (a *profile* concern) nor the config.json contract (its own versioned data shape) is a launch behavior. Single-responsibility placement keeps `launch/` from becoming a grab-bag.
 - **F5.3 follow-up:** `CheckIsolationPrerequisites` still lives in `create/` and is referenced by façade `lifecycle.go` (legal today — `package sandbox` may import `create`). When `lifecycle/` is carved into its own sibling package, that symbol must also relocate to a shared lower leaf (likely `runtimeconfig`-adjacent or a new `caps`-using leaf) to avoid a `lifecycle → create` edge.
 
+## D44 — F5.3: `lifecycle/` + `status/` leaves carved; F5 (and the 31-finding critique) complete
+
+**Date:** 2026-05-29. **Status:** Accepted (owner, 2026-05-29). **Implements** D40's `lifecycle/` leaf and the read-model split; **resolves** D43's F5.3 follow-up on `CheckIsolationPrerequisites`.
+
+Final F5 carve, in three steps:
+
+- **F5.3a — `status/` leaf.** All of `inspect.go` (the sandbox read-model: `DetectStatus`, `InspectSandbox`, `ListSandboxes`, `ProbeWorkData`, the `Status`/`AgentStatus`/`WorkDataState` types + constants, age/size formatting) moves wholesale into `internal/sandbox/status/` (`package status`). The façade `inspect.go` becomes pure aliases (`type Info = status.Info`, `var InspectSandbox = status.InspectSandbox`, `const StatusActive = status.StatusActive`, …). `IsolationPerms`/`Perms` are `state` re-exports (consumed by lifecycle) and stay aliased in the façade, not moved to `status/`.
+- **F5.3b — `CheckIsolationPrerequisites` → `launch/`.** D43 flagged this as the last `lifecycle → create` back-edge risk. Resolved by homing it in `launch/` (the lowest leaf both create/ and lifecycle/ already import), *not* a new caps-leaf as D43 speculated — `launch/` already depends on `runtime`/`caps` and is the natural shared-launch home, so no new package was warranted. `create.go` drops its copy and its `runtime/caps` import; both create/ and lifecycle/ now call `launch.CheckIsolationPrerequisites`. This makes create/ and lifecycle/ true siblings with **no** edge between them.
+- **F5.3c — `lifecycle/` leaf, methods dissolved.** `lifecycle.go` + `notice.go` (~1450 LOC) move into `internal/sandbox/lifecycle/` (`package lifecycle`). The Engine lifecycle methods (`Stop/Start/Destroy/Reset/NeedsConfirmation` + ~40 helpers) dissolve into free functions taking `state.Deps` — no delegators. `yoloai.Sandbox` calls `lifecycle.Stop(ctx, s.c.deps(), name)` etc. directly; `Client.deps()`/the new `Sandbox` plumbing build `state.Deps` from `c.rt`/`c.layout`/`c.input`. `Engine` loses its lifecycle methods and the now-unused `deps()` helper; only `SendInput` remains a method (it is genuinely Engine-scoped tmux plumbing, not lifecycle orchestration). Façade `lifecycle.go`/`notice.go` keep alias re-exports (`StartOptions`, `ResetOptions`, `PatchConfigAllowedDomains`, `Notice`/`NoticeLevel`/`*Result`).
+
+Decisions / notes:
+
+- **Per-leaf test mocks.** Each carved leaf (`status/`, `lifecycle/`) gets its own `fakeruntime_test.go` implementing the full `runtime.Runtime` (unimplemented methods return a sentinel) instead of importing the façade's shared `mockRuntime`. Helpers that `clone_test.go`/`terminal_test.go` (still in `package sandbox`) had borrowed from the old `lifecycle_test.go` were relocated into `testhelpers_test.go` so those tests keep compiling.
+- **Integration tests.** `mgr.Stop/Start/Reset/Destroy` call sites route through `stopSandbox`/`startSandbox`/`resetSandbox`/`destroySandbox` helpers that build `state.Deps` from `mgr.Runtime()`/`mgr.Layout()`/`strings.NewReader("")`, mirroring the F5.2d `createSandbox` helper.
+- **F5 done.** With lifecycle/ + status/ carved, `package sandbox` is a thin façade (Engine deps-holder + aliases + a few un-carved helpers: clone, parse, setup, terminal/attach). The full DAG `state ← {mounts, invocation, provision, profiles, runtimeconfig} ← launch ← {create, lifecycle} ← façade` holds, enforced by the absence of import cycles. **This closes F5 and the entire 31-finding layering critique.**
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.

@@ -24,10 +24,19 @@ internal/runtime/tart/        → Tart (macOS VM) implementation of runtime.Runt
 internal/runtime/seatbelt/    → Seatbelt (macOS sandbox-exec) implementation of runtime.Runtime
 internal/runtime/containerd/  → Containerd implementation of runtime.Runtime (Kata Containers VM isolation)
 internal/runtime/monitor/     → Embedded monitoring scripts shared across all backends (sandbox-setup.py, status-monitor.py, diagnose-idle.sh)
-internal/sandbox/             → Core logic: Engine, create, lifecycle, clone, inspect
+internal/sandbox/             → Façade (package sandbox): Engine deps-holder + alias re-exports; clone, parse, setup, terminal/attach
+internal/sandbox/create/      → Leaf: sandbox-creation orchestration (Run = prepare → seed → build) + context files
+internal/sandbox/lifecycle/   → Leaf: Start/Stop/Destroy/Reset/NeedsConfirmation free functions + restart/relaunch + Notice types
+internal/sandbox/status/      → Leaf: sandbox read-model — DetectStatus, InspectSandbox, ListSandboxes, work-data probing
+internal/sandbox/launch/      → Leaf: shared launch primitives (instance build/start, Teardown, vm-workdir, CheckIsolationPrerequisites)
+internal/sandbox/mounts/      → Leaf: mount-spec construction from DirSpec/Meta
+internal/sandbox/invocation/  → Leaf: agent invocation/command assembly
+internal/sandbox/provision/   → Leaf: agent-files seeding + keychain credential sourcing
+internal/sandbox/profiles/    → Leaf: profile image building (dependency order, staleness)
+internal/sandbox/runtimeconfig/ → Leaf: ContainerConfig assembly for the runtime layer
 internal/sandbox/archetype/   → Project archetype detection (devcontainer, compose, apple, simple) + .yoloai.yaml + VS Code workspace injection
 internal/sandbox/patch/       → Git-format diff/apply machinery for :copy, :overlay, and :rw modes
-internal/sandbox/state/       → Leaf: shared create-pipeline value types (DirSpec, State) — see F5 carve
+internal/sandbox/state/       → Leaf: shared value types (DirSpec, State, Deps, IsolationPerms/Perms) every F5 leaf imports
 internal/sandbox/store/       → On-disk sandbox state: paths, Meta record, SandboxState completion flags
 internal/testutil/            → Shared test helpers (git, fixtures, home isolation, container polling) — test use only
 internal/workspace/           → Workspace utilities (copy, git, safety checks, tags)
@@ -37,7 +46,7 @@ test/e2e/                → End-to-end tests against the compiled binary (build
 
 Public Go surface is the **`yoloai` package only** (W-L12). Every other Go package lives under `internal/` and is unreachable from external imports by the Go compiler itself. `cmd/yoloai` is the binary entry, not a library.
 
-Dependency direction (W-L8 + W-L12 shape): `cmd/yoloai` → `internal/cli` → `yoloai` (Client + SystemClient) → `internal/sandbox` + `internal/sandbox/patch` + `internal/sandbox/store` + `internal/runtime`; `internal/sandbox` → `internal/sandbox/archetype` + `internal/sandbox/store` + `internal/runtime` + `internal/agent` + `internal/workspace`; `internal/sandbox/patch` → `internal/sandbox` + `internal/sandbox/store`; `internal/sandbox/store` and `internal/sandbox/state` are leaves (`state` holds the shared `DirSpec`/`State` value types so the in-progress F5 subpackages — create/mounts/lifecycle — depend on it without importing the `sandbox` façade); `internal/agent` stands alone; `internal/mcpsrv` depends on `yoloai` (not `sandbox.Engine`). The CLI doesn't reach into `internal/sandbox/*` or `internal/runtime/*` for orchestration — every command goes through `yoloai.Client` or `yoloai.SystemClient`. The `withRuntime`/`withManager` helpers were removed in W-L10. Cross-backend enumeration (`ls`, `doctor`, `system info`) goes through `SystemClient.ListAcrossBackends` / `Doctor` / `Info` (F23); the only remaining `cliutil.NewRuntime` callers are `cliutil.CheckBackend` (the availability-probe chokepoint, used by a few read-only displays) and the backend-scoped `system tart` subtree. Depguard (`.golangci.yml`) enforces the boundary going forward.
+Dependency direction (W-L8 + W-L12 shape): `cmd/yoloai` → `internal/cli` → `yoloai` (Client + SystemClient) → `internal/sandbox` + `internal/sandbox/patch` + `internal/sandbox/store` + `internal/runtime`; `internal/sandbox` → `internal/sandbox/archetype` + `internal/sandbox/store` + `internal/runtime` + `internal/agent` + `internal/workspace`; `internal/sandbox/patch` → `internal/sandbox` + `internal/sandbox/store`; `internal/sandbox/store` and `internal/sandbox/state` are leaves (`state` holds the shared `DirSpec`/`State`/`Deps`/`Perms` value types so the F5 subpackages depend on it without importing the `sandbox` façade). Post-F5 the `sandbox` package is a thin **façade**: it re-exports leaf types/functions via `type X = leaf.X` / `var X = leaf.X` aliases and holds the `Engine` deps-holder, while orchestration lives in the leaves. The F5 DAG is `state ← {mounts, invocation, provision, profiles, runtimeconfig} ← launch ← {create, lifecycle}` (create/ and lifecycle/ are siblings — neither imports the other; their one-time shared check `CheckIsolationPrerequisites` lives in `launch/`) `← sandbox` (façade). Methods were **dissolved** into free functions taking `state.Deps`, not left as thin delegators; `yoloai.Client`/`Sandbox` call e.g. `lifecycle.Stop(ctx, deps, name)` and `create.Run(ctx, deps, ...)` directly. `internal/agent` stands alone; `internal/mcpsrv` depends on `yoloai` (not `sandbox.Engine`). The CLI doesn't reach into `internal/sandbox/*` or `internal/runtime/*` for orchestration — every command goes through `yoloai.Client` or `yoloai.SystemClient`. The `withRuntime`/`withManager` helpers were removed in W-L10. Cross-backend enumeration (`ls`, `doctor`, `system info`) goes through `SystemClient.ListAcrossBackends` / `Doctor` / `Info` (F23); the only remaining `cliutil.NewRuntime` callers are `cliutil.CheckBackend` (the availability-probe chokepoint, used by a few read-only displays) and the backend-scoped `system tart` subtree. Depguard (`.golangci.yml`) enforces the boundary going forward.
 
 ## File Index
 
@@ -289,32 +298,46 @@ Dynamic capability detection system. Probes the host, checks backend prerequisit
 | `status-monitor.py` | Writes `agent-status.json` with idle detection and agent process health. |
 | `diagnose-idle.sh` | Diagnostic script for idle detection troubleshooting. |
 
-### `sandbox/`
+### `sandbox/` (façade)
+
+Post-F5, `package sandbox` is a thin façade. Orchestration lives in the leaf
+subpackages below; the root holds the `Engine` deps-holder plus alias files
+(`type X = leaf.X` / `var X = leaf.X`) that keep the public API stable, and a
+few helpers not yet carved out (clone, parse, setup, terminal/attach).
 
 | File | Purpose |
 |------|---------|
-| `engine.go` | `Engine` struct — central orchestrator. Holds a `runtime.Runtime`. `EnsureSetup()` / `EnsureSetupNonInteractive()` for first-run auto-setup (dirs, resources, image, config). |
-| `create.go` | `Create()` — top-level sandbox creation orchestrator. Calls prepare, seed, and instance-building phases. |
-| `create_prepare.go` | `prepareSandboxState()` — profile resolution, directory validation, safety checks, workdir copy, git baseline, meta persistence. |
-| `create_instance.go` | `buildAndStart()` — constructs `runtime.InstanceConfig` from sandbox state, builds mounts, creates and starts the container/VM instance. |
-| `create_seed.go` | `seedSandbox()` — copies seed files, agent config files, home config into sandbox directories. |
-| `lifecycle.go` | `Start()`, `Stop()`, `Destroy()`, `Reset()` — sandbox lifecycle. `recreateContainer()` and `relaunchAgent()` for restart scenarios. `resetInPlace()` for in-place resets (default). `clearCacheAndFiles()` clears cache/files dirs. `clearOverlayDirs()` clears upper/ovlwork for instant `:overlay` reset. |
-| `clone.go` | `Clone()` — clone an existing sandbox with new name. `CloneOptions` configures source/dest. |
-| `inspect.go` | `DetectStatus()` — reads `agent-status.json` written by in-container monitor; falls back to exec-based tmux query for old sandboxes. `InspectSandbox()`, `ListSandboxes()` — metadata + live status. |
-| `parse.go` | `ParseDirArg()` — parses `path:copy`, `path:overlay`, `path:rw`, `path:force` suffixes into `DirSpec`. |
-| `context.go` | `GenerateContext()` — builds markdown description of sandbox environment (dirs, network, resources). `WriteContextFiles()` — writes `context.md` and inlines context into agent instruction file (e.g., `CLAUDE.md`). |
-| `agent_files.go` | `copyAgentFiles()` — copies files from host into sandbox `agent-runtime/` per `agent_files` config. Handles string/list forms, exclusion patterns, first-run tracking via `store.SandboxState`. |
-| `profile_build.go` | Profile image building — ensures profile images are built in dependency order (base → parent → child). Staleness detection. |
-| `prune.go` | `PruneTempFiles()` — cleans up stale `/tmp/yoloai-*` temporary directories. |
-| `tags.go` | Git tag information — `TagInfo`, commit matching helpers, delegates to `workspace` package. |
-| `fileutil.go` | Path expansion wrappers (delegates to `config.ExpandPath` and `internal/fileutil`). JSON read/write helpers. |
-| `keychain_darwin.go` | macOS Keychain integration — reads credentials via `security find-generic-password` when seed files are missing. |
-| `keychain_other.go` | Non-macOS stub for Keychain integration. |
-| `lock_unix.go` / `lock_windows.go` | Per-sandbox advisory file locking via flock(2) on Unix/macOS; no-op on Windows. `AcquireLock` is exported for use from `sandbox/patch`. |
-| `setup.go` | `RunSetup()`, `runNewUserSetup()` — interactive first-run setup: tmux config, default backend, default agent. |
-| `confirm.go` | `Confirm()` — context-aware y/N interactive prompt with stdin/context racing. |
-| `errors.go` | Sentinel errors (`ErrSandboxNotFound`, `ErrSandboxExists`, `ErrNoChanges`, etc.); `ErrSandboxNotFound` is re-exported from `sandbox/store` for visibility. |
-| `*_test.go` | Unit tests for each file above. `integration_test.go` has the `integration` build tag. |
+| `engine.go` | `Engine` struct — slim deps-holder (`runtime.Runtime`, layout, input). `EnsureSetup()` / `EnsureSetupNonInteractive()` for first-run auto-setup. Lifecycle/create methods were dissolved into leaf free functions; `SendInput()` remains here. |
+| `aliases.go` | Type/const aliases re-exporting the `create/` leaf's public symbols (CreateOptions, etc.) into package sandbox. |
+| `inspect.go` | Façade re-exports of the read-model — `type Info = status.Info`, `var InspectSandbox/ListSandboxes/DetectStatus = status.…`, Status/AgentStatus/WorkDataState constants. Implementation in `status/`. |
+| `lifecycle.go` | Façade re-exports of lifecycle — `type StartOptions/ResetOptions = lifecycle.…`, `var PatchConfigAllowedDomains = lifecycle.…`. Implementation in `lifecycle/`. |
+| `notice.go` | Façade re-exports of `Notice`/`NoticeLevel`/`DestroyResult`/`StartResult`/`ResetResult` from `lifecycle/`. |
+| `profile_build.go` | Façade re-exports of profile image-build helpers; implementation in `profiles/`. |
+| `clone.go` | `Engine.Clone()` — deep-copies an existing sandbox state dir to a new name, preserving agent state/workdir, resetting identity. |
+| `parse.go` | `ParseDirArg()` — parses `path[:suffix...]=[mount]` into a `state.DirSpec`. |
+| `terminal.go` | Non-interactive tmux capture-pane wrapper for diagnostics. |
+| `attach.go` | Attach-readiness helpers — polls `sandbox.jsonl` / tmux `has-session`. |
+| `prune.go` | `PruneTempFiles()` — cleans stale `/tmp/yoloai-*` dirs. |
+| `tags.go` | Git tag info — `TagInfo`, commit matching, delegates to `workspace`. |
+| `fileutil.go` | Path-expansion + JSON read/write wrappers. |
+| `setup.go` | `RunSetup()`, `runNewUserSetup()` — interactive first-run setup. |
+| `confirm.go` | `Confirm()` — context-aware y/N prompt with stdin/context racing. |
+| `errors.go` | Sentinel errors; `ErrSandboxNotFound` re-exported from `sandbox/store`. |
+| `*_test.go` | Façade + remaining-helper unit tests. `integration_test.go` has the `integration` build tag. |
+
+### `sandbox/create/`, `lifecycle/`, `status/`, `launch/`
+
+The F5 orchestration leaves. Functions take `state.Deps` (runtime + layout +
+input) rather than hanging off `Engine`. DAG: `state ← {mounts, invocation,
+provision, profiles, runtimeconfig} ← launch ← {create, lifecycle}`.
+
+| Package | Purpose |
+|---------|---------|
+| `create/` | `Run()` orchestrates creation (prepare → seed → build) via `create_prepare.go`; `context.go` writes `context.md` + inlines env into the agent instruction file. |
+| `lifecycle/` | `Start/Stop/Destroy/Reset/NeedsConfirmation` free functions. `recreateContainer()`/`relaunchAgent()` for restart; `resetInPlace()` for in-place resets; overlay/cache clearing; `PatchConfigAllowedDomains`. `notice.go` defines the `Notice`/result types. |
+| `status/` | Read-model: `DetectStatus()` (reads `agent-status.json`, falls back to tmux exec), `InspectSandbox()`, `ListSandboxes()`, work-data probing, age/size formatting. |
+| `launch/` | Shared launch primitives both create/ and lifecycle/ use: instance build/start, `Teardown`, vm-workdir resolution, and `CheckIsolationPrerequisites` (host-capability gate, homed here so create/ and lifecycle/ stay siblings). |
+| `mounts/`, `invocation/`, `provision/`, `profiles/`, `runtimeconfig/` | Lower leaves: mount-spec construction, agent invocation assembly, agent-files seeding + keychain sourcing, profile image building, and runtime `ContainerConfig` assembly respectively. |
 
 ### `sandbox/archetype/`
 
@@ -430,7 +453,7 @@ Host context: `IsRoot`, `IsWSL2`, `InContainer`, `KVMGroup`. Detected once per i
 
 | CLI Command | Entry Point | Core Logic |
 |-------------|-------------|------------|
-| `yoloai new` | `cli/lifecycle/new.go:NewNewCmd` | `yoloai.Client.Create()` (→ `sandbox.Engine.Create` in `sandbox/create.go`) |
+| `yoloai new` | `cli/lifecycle/new.go:NewNewCmd` | `yoloai.Client.Create()` (→ `create.Run` in `sandbox/create/create.go`) |
 | `yoloai attach` | `cli/workflow/attach.go:NewAttachCmd` | `yoloai.Client.Attach()` (PTY-sized via `cliutil.IOStreams`) |
 | `yoloai diff` | `cli/workflow/diff.go:NewDiffCmd` | `yoloai.Client.GenerateMultiPatch()` (→ `sandbox.GenerateMultiDiff` in `sandbox/diff.go`) |
 | `yoloai apply` | `cli/workflow/apply.go:NewApplyCmd` | `yoloai.Client.GeneratePatch()` / `ApplyPatch()` / `GenerateFormatPatch()` |
@@ -452,7 +475,7 @@ Host context: `IsRoot`, `IsWSL2`, `InContainer`, `KVMGroup`. Detected once per i
 | `yoloai system completion` | `cli/system/completion.go` | Cobra's built-in completion generators |
 | `yoloai mcp serve` | `cli/mcp/mcp.go` | `mcpsrv.New()` — MCP server on stdio |
 | `yoloai mcp proxy` | `cli/mcp/mcp.go` | MCP proxy through sandbox |
-| `yoloai sandbox list` | `cli/sandboxcmd/list.go` | `yoloai.Client.List()` (→ `sandbox.ListSandboxes` in `sandbox/inspect.go`) |
+| `yoloai sandbox list` | `cli/sandboxcmd/list.go` | `yoloai.Client.List()` (→ `status.ListSandboxes` in `sandbox/status/`, re-exported via the façade) |
 | `yoloai sandbox <name> info` | `cli/sandboxcmd/info.go` | `yoloai.Client.Inspect()` |
 | `yoloai sandbox <name> log` | `cli/sandboxcmd/log.go` | Structured JSONL log display with filtering |
 | `yoloai sandbox <name> exec` | `cli/sandboxcmd/exec.go` | `yoloai.Client.Exec()` |
@@ -478,9 +501,9 @@ Host context: `IsRoot`, `IsWSL2`, `InContainer`, `KVMGroup`. Detected once per i
 ```
 NewNewCmd (cli/lifecycle/new.go)
   → cliutil.WithClient (cli/cliutil/client.go)
-    → yoloai.Client.Create  (wraps sandbox.Engine.Create in sandbox/create.go)
+    → yoloai.Client.Create  (calls create.Run(ctx, deps, opts) in sandbox/create/create.go)
       → EnsureSetup: create dirs, seed resources, build image, write config.yaml
-      → prepareSandboxState (sandbox/create_prepare.go):
+      → prepareSandboxState (sandbox/create/create.go):
           resolve profile chain → applyConfigDefaults
           → resolveAndApplyArchetype: load .yoloai.yaml → CLI > yaml > auto-detect priority
               → devcontainer: load devcontainer.json → merge ports/env/mounts, set workspaceFolder
@@ -489,13 +512,13 @@ NewNewCmd (cli/lifecycle/new.go)
           → ParseDirArg → validate name/agent/workdir/auxdirs → safety checks
           → :copy dirs: copyDir (cp -rp / clonefile on macOS) → removeGitDirs → gitBaseline
           → :overlay dirs: createOverlayDirs (upper/ovlwork in sandbox state)
-          → seedSandbox (sandbox/create_seed.go):
+          → seed phase (provision/ leaf):
               copySeedFiles → copyAgentFiles → ensureContainerSettings → seedHomeConfig
           → readPrompt → resolveModel → buildAgentCommand
           → SaveMeta (environment.json) → SaveSandboxState (sandbox-state.json)
           → write prompt.txt, log.txt, runtime-config.json
-          → WriteContextFiles (context.md + agent instruction file)
-      → buildAndStart (sandbox/create_instance.go):
+          → WriteContextFiles (context.md + agent instruction file — sandbox/create/context.go)
+      → buildAndStart (sandbox/launch/launch.go):
           createSecretsDir (config env vars + API keys from host env)
           → buildMounts (workdir + aux dirs, overlay mount configs for :overlay dirs)
           → runtime.Create (with CAP_SYS_ADMIN for :overlay) → runtime.Start
@@ -578,8 +601,8 @@ lifecycle.go (reset):
 ### Container Start/Restart (`yoloai start`)
 
 ```
-Engine.Start (sandbox/lifecycle.go)
-  → DetectStatus (sandbox/inspect.go): runtime.Inspect + status file read
+lifecycle.Start(ctx, deps, name, opts) (sandbox/lifecycle/lifecycle.go)
+  → DetectStatus (sandbox/status/status.go): runtime.Inspect + status file read
   → StatusActive: no-op
   → StatusDone/Failed: relaunchAgent via tmux respawn-pane
   → StatusStopped: runtime.Start
@@ -738,13 +761,13 @@ with `mv`. The CLI confirms before emptying trash (it may hold wanted data);
 3. CLI presentation: `internal/cli/diff.go` and `internal/cli/apply.go`
 
 **Change container creation (mounts, networking):**
-1. Mount construction: `buildAndStart()` in `sandbox/create_instance.go` → populates `runtime.MountSpec`
-2. Container config: `buildAndStart()` → builds `runtime.InstanceConfig`
-3. Port parsing: `parsePortBindings()` in `sandbox/create.go` → populates `runtime.PortMapping`
+1. Mount construction: `mounts.Build()` (`sandbox/mounts/`) → populates `runtime.MountSpec`
+2. Container config: `buildAndStart()` in `sandbox/launch/launch.go` → builds `runtime.InstanceConfig`
+3. Port parsing: `parsePortBindings()` in `sandbox/launch/launch.go` → populates `runtime.PortMapping`
 4. Runtime creation: `runtime.Create()` dispatched to the active backend
 
 **Change sandbox status detection:**
-1. `DetectStatus()` in `sandbox/inspect.go` — reads `agent-status.json` from sandbox dir (written by status monitor), falls back to legacy `status.json` then `runtime.Exec()` for old sandboxes
+1. `DetectStatus()` in `sandbox/status/status.go` — reads `agent-status.json` from sandbox dir (written by status monitor), falls back to legacy `status.json` then `runtime.Exec()` for old sandboxes
 2. Status constants are in the same file
 
 **Change config handling:**
