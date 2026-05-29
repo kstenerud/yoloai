@@ -18,7 +18,6 @@ import (
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/sandbox/create"
 	"github.com/kstenerud/yoloai/internal/sandbox/invocation"
 	"github.com/kstenerud/yoloai/internal/sandbox/launch"
 	"github.com/kstenerud/yoloai/internal/sandbox/patch"
@@ -116,7 +115,7 @@ func (m *Engine) applyIsolationOverride(ctx context.Context, opts StartOptions, 
 			return NewUsageError("isolation mode %q is not supported by the %s backend", opts.Isolation, desc.Name)
 		}
 	}
-	if err := create.CheckIsolationPrerequisites(ctx, m.runtime, opts.Isolation); err != nil {
+	if err := launch.CheckIsolationPrerequisites(ctx, m.runtime, opts.Isolation); err != nil {
 		return err
 	}
 	meta.Isolation = opts.Isolation

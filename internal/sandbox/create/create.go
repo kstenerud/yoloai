@@ -20,7 +20,6 @@ import (
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/runtime/caps"
 	"github.com/kstenerud/yoloai/internal/sandbox/archetype"
 	"github.com/kstenerud/yoloai/internal/sandbox/invocation"
 	"github.com/kstenerud/yoloai/internal/sandbox/launch"
@@ -126,19 +125,6 @@ func outputFor(o io.Writer) io.Writer {
 	return io.Discard
 }
 
-// CheckIsolationPrerequisites validates isolation prerequisites via RequiredCapabilities.
-// Returns nil when all checks pass, or a formatted error listing missing prerequisites.
-// Used by lifecycle.go when changing the isolation mode of an existing sandbox.
-func CheckIsolationPrerequisites(ctx context.Context, rt runtime.Runtime, isolation runtime.IsolationMode) error {
-	capList := runtime.RequiredCapabilitiesFor(rt, isolation)
-	if len(capList) == 0 {
-		return nil // backend has no requirements for this mode
-	}
-	env := caps.DetectEnvironment()
-	results := caps.RunChecks(ctx, capList, env)
-	return caps.FormatError(results)
-}
-
 // Run creates and optionally starts a new sandbox.
 // Returns the sandbox name on success (empty on no-start).
 // EnsureSetup is assumed to have already been called by the caller.
@@ -170,7 +156,7 @@ func Run(ctx context.Context, d state.Deps, opts Options) (name string, err erro
 	credOverrides := provision.RecoverSudoCredentials()
 	// Validate isolation prerequisites before the potentially expensive image build.
 	if opts.Isolation != "" {
-		if err := CheckIsolationPrerequisites(ctx, d.Runtime, opts.Isolation); err != nil {
+		if err := launch.CheckIsolationPrerequisites(ctx, d.Runtime, opts.Isolation); err != nil {
 			return "", err
 		}
 	}
