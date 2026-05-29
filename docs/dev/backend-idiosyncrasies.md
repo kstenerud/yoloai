@@ -74,6 +74,7 @@ row to the index.
 | `FileNotFoundError` at `get_working_dir()` / agent starts in wrong directory | [Tart: workdir setup races Python startup](#tart-vm-workdir-setup-races-python-startup) |
 | `yoloai apply` fails: `git add: git [add -A]: exit status 128: … index.lock: File exists` while agent is running | [Docker/Podman: agent git and apply git race on index.lock](#dockerpodman-agent-git-and-apply-git-race-on-indexlock) |
 | `FileNotFoundError: 'tmux'` in `sandbox-setup.py::setup_tmux_session` on Tart VM (intermittent) | [Tart: transient FS/PATH failure makes tmux unresolvable during the firstlaunch window](#tart-transient-fspath-failure-makes-tmux-unresolvable-during-the-firstlaunch-window) |
+| Smoke test: `full_workflow`/`stop_start` fails "agent idle"; pane shows `Error: Exit code N` + a clarifying question; other backends pass | [Smoke harness: agent stalls when the sentinel command errors](#agent-stalls-when-the-sentinel-command-errors) |
 | Is it safe to delete a `.lock` file while holding its flock? (prune / Destroy) | [Removing a .lock file while holding its flock is safe](#removing-a-lock-file-while-holding-its-flock-is-safe) |
 
 ---
@@ -1399,6 +1400,50 @@ short tail. This ties the wait to the actual cause rather than a fixed timeout.
 `_FIRSTLAUNCH_MAX_WAIT_SECONDS`); `internal/runtime/monitor/sandbox-setup.py`
 (firstlaunch launch in `TartBackend.setup()`, plus `setup_tmux_session` and the
 `main()` `wait-for` block).
+
+---
+
+## Smoke harness (agent task execution)
+
+### Agent stalls when the sentinel command errors
+
+**Symptom:** a `full_workflow` or `stop_start` smoke test fails with "agent idle
+for Ns+ … no progress past sentinel 'done'", and `fingerprint: null` (before this
+entry existed). The same test passes on other backends in the same run. The
+preserved `terminal-snapshot.txt` shows the agent *did* receive the prompt and *did*
+attempt the command, but Claude Code rendered a tool error — e.g.
+
+```
+⏺ Bash(touch …/files/in-progress && echo smoke > output.txt && mv …)
+  ⎿  Error: Exit code 64
+     usage: mv [-f | -i | -n] [-hv] source target
+```
+
+— after which the agent printed a clarifying question ("Did you mean… / Could you
+verify the complete command?") and went idle waiting for a human. The exchange dir
+holds `in-progress` but never `done`.
+
+**Explanation:** this is an **agent-side** failure, not an infra/backend fault. The
+product worked: the prompt was delivered intact (visible verbatim in the pane), the
+filesystem was writable (`in-progress` was created, `output.txt` written, a git
+commit made). What failed is the agent's own tool call — the model dropped the `mv`
+*target* path when constructing the `Bash` tool input, so `mv` got one argument and
+exited 64. Observed with the small `haiku-4-5` model on a long single-line command
+carrying two ~90-char absolute paths; larger models on the same prompt completed it.
+It is intermittent and model-dependent, which is why only some backends in a run trip
+it even though the prompt is identical everywhere.
+
+**Fix / triage:** there is nothing to fix in the backend. The smoke harness now
+fingerprints this signature (it scans `terminal-snapshot.txt` for Claude Code's
+`Error: Exit code N` tool-error block) so triage immediately reads "agent garbled the
+sentinel command" instead of hunting for an infra bug. If it recurs often enough to
+be noise, make the smoke prompt easier for a small model to execute exactly — e.g.
+`cd` into the exchange dir and use relative `in-progress`/`done` names instead of two
+long absolute paths on one line.
+
+**Code:** `scripts/smoke_test.py` (`FINGERPRINTS` entry "agent's sentinel command
+failed; agent stalled", and `_autopsy_artifact_files` now includes
+`terminal-snapshot.txt`).
 
 ---
 

@@ -967,6 +967,15 @@ FINGERPRINTS: list[Fingerprint] = [
         "request-timed-out-in-claude-code--api-unreachable-not-dns-failure",
     ),
     Fingerprint(
+        "agent's sentinel command failed; agent stalled (tool error in pane)",
+        r"error: exit code \d+",
+        "agent-stalls-when-the-sentinel-command-errors",
+        "the agent ran a command that exited non-zero, then stopped (often asking "
+        "for clarification) instead of completing — the sentinel was never "
+        "written. Usually a small-model tool-call garble on a long multi-path "
+        "command, not an infra fault: prompt delivery and fs writability are fine",
+    ),
+    Fingerprint(
         "disk full (ENOSPC)",
         r"enospc|no space left on device",
     ),
@@ -1010,6 +1019,12 @@ def _autopsy_artifact_files(attempt_dir: Path) -> list[Path]:
         diag = sandbox_dir / "network-diag.txt"
         if diag.is_file():
             out.append(diag)
+        # The captured agent pane is the only place an agent-side failure shows
+        # up — a command the agent ran that errored, or a clarifying question it
+        # stalled on. The structured logs see "idle", not why.
+        snapshot = sandbox_dir / "terminal-snapshot.txt"
+        if snapshot.is_file():
+            out.append(snapshot)
     return out
 
 

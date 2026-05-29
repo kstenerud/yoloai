@@ -72,6 +72,26 @@ def test_no_fingerprint_when_artifacts_clean(tmp_path: Path) -> None:
     assert hits == []
 
 
+def test_agent_stall_fingerprint_from_terminal_snapshot(tmp_path: Path) -> None:
+    """An agent that ran the sentinel command but hit a tool error (and then
+    stalled) is fingerprinted from terminal-snapshot.txt — the structured logs
+    only see 'idle', not the failed command. Mirrors the observed Haiku
+    mv-target-drop on long commands."""
+    attempt = _make_attempt(tmp_path, setup_log="setup completed\n")
+    snapshot = (
+        "⏺ Bash(touch .../in-progress && echo smoke > output.txt && mv ...)\n"
+        "  ⏎  Error: Exit code 64\n"
+        "     usage: mv [-f | -i | -n] [-hv] source target\n"
+        "Could you verify the complete command?\n"
+    )
+    (attempt / "sb" / "terminal-snapshot.txt").write_text(snapshot)
+    hits = smoke_test.scan_fingerprints(attempt)
+    assert hits, "expected the agent-stall fingerprint to match"
+    assert hits[0].fp.label.startswith("agent's sentinel command failed")
+    assert hits[0].source == "terminal-snapshot.txt"
+    assert "sentinel-command-errors" in hits[0].fp.anchor
+
+
 # --- timeline ------------------------------------------------------------
 
 
