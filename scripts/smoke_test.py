@@ -222,7 +222,7 @@ FULL_LINUX_BACKENDS: list[BackendSpec] = [
                 check_backend="docker", retries=1),
     BackendSpec("linux", "container",          "podman", "podman",
                 check_backend="podman"),
-    BackendSpec("linux", "container-enhanced", None,     "docker-cenhanced",
+    BackendSpec("linux", "container-enhanced", "docker", "docker-cenhanced",
                 check_backend="docker"),
     BackendSpec("linux", "vm",                 None,     "containerd-vm",
                 check_backend="containerd", is_vm=True, check_isolation="vm",

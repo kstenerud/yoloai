@@ -103,6 +103,15 @@ func e2eSetup(t *testing.T) string {
 	require.NoError(t, os.MkdirAll(layout.CacheDir(), 0750))
 	dockerrt.RecordBuildChecksum(layout, "")
 
+	// Pin the container backend to docker. Otherwise `new` resolves the
+	// backend by auto-detect, which on a host with both docker and podman
+	// installed can silently pick podman — running the "docker" e2e suite
+	// against the wrong daemon. The Makefile builds the base image with
+	// --backend docker, so the suite must exercise docker too.
+	require.NoError(t, os.MkdirAll(layout.DefaultsDir(), 0750))
+	require.NoError(t, os.WriteFile(layout.DefaultsConfigPath(),
+		[]byte("container_backend: docker\n"), 0600))
+
 	projectDir := filepath.Join(t.TempDir(), "project")
 	require.NoError(t, os.MkdirAll(projectDir, 0750))
 	require.NoError(t, os.WriteFile(
