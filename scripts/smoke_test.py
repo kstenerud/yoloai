@@ -34,8 +34,7 @@ from typing import Callable, Optional
 # Constants
 # ---------------------------------------------------------------------------
 
-SENTINEL = "done"
-IN_PROGRESS = "in-progress"  # sentinel touched at prompt start; renamed to SENTINEL on success
+SENTINEL = "done"  # touched in the exchange dir when the agent finishes its prompt
 DEFAULT_TIMEOUT = 90    # seconds: container + agent startup for non-VM backends
 VM_TIMEOUT = 180        # seconds: VM boot + agent startup (Firecracker/Tart)
 QEMU_TIMEOUT = 300      # seconds: QEMU-based Kata VM — slower boot than Firecracker
@@ -384,20 +383,9 @@ class Test:
                 if status == "idle":
                     consecutive_idle += 1
                     if consecutive_idle >= STALL_IDLE_COUNT:
-                        # DF6: distinguish "never reached READY" (agent
-                        # is idle pre-prompt; VM-startup or ready-pattern
-                        # tuning) from "idle after prompt" (agent read
-                        # the prompt and stopped; agent-behavior tuning).
-                        # The smoke prompt's first action is `touch
-                        # /yoloai/files/in-progress`, so if IN_PROGRESS
-                        # is in the exchange dir, the agent processed the
-                        # prompt. If the dir is empty, the agent never
-                        # got that far. Two different diagnoses, two
-                        # different messages.
-                        phase = self._idle_phase(sandbox_name)
                         raise AssertionError(
                             f"agent idle for {consecutive_idle * 3}s+ "
-                            f"({phase} sentinel {sentinel!r})"
+                            f"without sentinel {sentinel!r}"
                             f"{self._sentinel_diag(sandbox_name)}"
                         )
                 else:
@@ -410,41 +398,15 @@ class Test:
             f"(log: {self.log_file}){self._sentinel_diag(sandbox_name)}"
         )
 
-    def _idle_phase(self, sandbox_name: str) -> str:
-        """Classify an idle stall as "post-prompt" or "pre-prompt".
-
-        The smoke prompt's first action is `touch /yoloai/files/in-progress`,
-        so the exchange dir's contents tell us which phase the idle hit:
-
-        - in-progress (or done) present → agent read the prompt and ran
-          at least one tool call before going idle. Diagnosis points at
-          agent behavior (DF2's tool-less response, model-side timeout,
-          ConnectionRefused that recovered after one ack, …).
-        - exchange dir empty → agent never touched in-progress. Diagnosis
-          points at VM-startup / ready-pattern tuning (the `❯` pattern
-          isn't matching, the prompt was never delivered, or the agent
-          got stuck before its first action).
-
-        Returns a phrase to slot into the failure message ("after the
-        prompt was delivered, no progress before" / "before the prompt
-        was even read; never wrote").
-        """
-        ls = self.run("files", sandbox_name, "ls", timeout=15)
-        if ls.returncode != 0:
-            return "phase unknown (ls failed); no"
-        present = {line.strip() for line in ls.stdout.splitlines() if line.strip()}
-        if IN_PROGRESS in present or SENTINEL in present:
-            return "after the prompt was delivered, no progress past"
-        return "before the prompt was even processed; no"
-
     def _sentinel_diag(self, sandbox_name: str) -> str:
         """Build a one-line diagnostic for sentinel-wait failures.
 
         Reports what (if anything) is in the exchange dir, plus host disk
         state, plus an in-sandbox network probe (DF5), so "agent idle 9s+"
         tells you which failure mode you hit:
-        - in-progress present → agent ran the prompt but didn't finish (often ENOSPC mid-write)
-        - exchange dir empty → agent never started the prompt
+        - exchange dir empty → agent never wrote the sentinel (it stalled,
+          erred on the command, or never processed the prompt); the preserved
+          terminal-snapshot.txt shows which
         - host disk near full → almost certainly ENOSPC; prune containerd
         - network unreachable → DF8's Kata netns warm-up race; not an agent stall
         """
@@ -1470,13 +1432,12 @@ def create_fixture(tmpdir: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 def _prompt(exdir: str, work: str, sentinel: str = SENTINEL) -> str:
-    """Wrap the agent's work in a two-stage sentinel.
+    """Wrap the agent's work in a single completion sentinel.
 
-    `touch in-progress` signals the prompt started; `mv in-progress <sentinel>`
-    signals it completed. The rename is the completion signal because rename(2)
-    doesn't allocate disk blocks — so the success signal survives a mid-prompt
-    ENOSPC, and the host can tell "agent never started" (neither file present)
-    from "agent started but didn't finish" (in-progress lingering).
+    The agent does its work, then `touch <exdir>/<sentinel>` signals it
+    finished; the host polls `yoloai files ls` for that file. One chained
+    command, with the exchange path appearing exactly once — the shortest,
+    least-garblable form for a small model to reproduce verbatim.
 
     Prompt iteration history (preserve to avoid regressing):
 
@@ -1500,23 +1461,28 @@ def _prompt(exdir: str, work: str, sentinel: str = SENTINEL) -> str:
          produces a tool-less narrative reply (which would classify as
          idle in monitor.py).
 
-    v4 (this) — bind the exchange dir to a shell variable so the long path
-         appears ONCE instead of three times. Both seatbelt full_workflow
-         and stop_start flaked here (run 20260529-034737): the haiku agent
-         dropped the `mv` *target* — the third occurrence of seatbelt's
-         ~90-char host exchange path — and stalled asking the user to
-         clarify, so `done` was never written. docker/podman passed the same
-         prompt because their exdir is the short `/yoloai/files`; the failure
-         tracked path length/repetition, not the backend. `$d/in-progress`
-         and `$d/done` are short tokens a small model is unlikely to garble.
-         `{work}` still runs in the cwd (it must: test_full_workflow asserts
-         output.txt lands in the work dir after apply), and the two-stage
-         rename-within-dir sentinel is preserved unchanged.
+    v4 — bind the exchange dir to a shell variable so the long path appears
+         once instead of three times. Both seatbelt full_workflow and
+         stop_start flaked (run 20260529-034737): the haiku agent dropped the
+         `mv` *target* — the third occurrence of seatbelt's ~90-char host
+         exchange path — and stalled asking the user to clarify, so `done`
+         was never written. docker/podman passed because their exdir is the
+         short `/yoloai/files`; the failure tracked path length/repetition.
+
+    v5 (this) — drop the two-stage in-progress→done rename entirely. The
+         rename existed so the success signal survived a mid-prompt ENOSPC
+         (rename(2) allocates no blocks), but check_prerequisites now aborts
+         the whole run at ≥90% disk full, so that case can't be reached. A
+         single `touch <exdir>/<sentinel>` after the work needs the long path
+         only once and no shell-var indirection — even simpler than v4. The
+         lost "agent started but didn't finish" vs "never started" split
+         (_idle_phase, removed with this change) is now covered by the
+         preserved terminal-snapshot.txt + its `Error: Exit code N`
+         fingerprint, which show directly whether the agent ran anything.
+         `{work}` still runs in the cwd (test_full_workflow asserts output.txt
+         lands in the work dir after apply).
     """
-    cmd = (
-        f'd={exdir}; touch "$d/{IN_PROGRESS}" && {work} '
-        f'&& mv "$d/{IN_PROGRESS}" "$d/{sentinel}"'
-    )
+    cmd = f"{work} && touch {exdir}/{sentinel}"
     return f"Run this shell command exactly as written, using your shell/bash tool:\n{cmd}"
 
 
