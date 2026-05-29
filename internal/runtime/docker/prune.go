@@ -18,6 +18,13 @@ import (
 	"github.com/kstenerud/yoloai/internal/runtime"
 )
 
+// managedLabel marks Docker volumes created by yoloai. Volume reclaim
+// accounting (splitCacheBytes) and volume pruning (PruneCache) are scoped to
+// volumes carrying this label so yoloai never counts or deletes the user's
+// unrelated volumes — e.g. a project's database volume. yoloai creates no
+// volumes today; any future code that does MUST stamp them with this label.
+const managedLabel = "com.yoloai.managed"
+
 // Prune implements runtime.Runtime.
 func (r *Runtime) Prune(ctx context.Context, knownInstances []string, dryRun bool, output io.Writer) (runtime.PruneResult, error) {
 	known := make(map[string]bool, len(knownInstances))
@@ -171,14 +178,18 @@ func (r *Runtime) PruneCache(ctx context.Context, includeImages, dryRun bool, ou
 	// BuildKit cache: usually the biggest single category on a heavy-build
 	// host, and the pin that keeps image layers alive on the containerd image
 	// store. Prune it before images so the layers they share are actually
-	// freed by containerd GC. (Podman's docker-compat API has no build cache;
-	// its "Not Found" error here is expected and harmless.)
-	if _, err := r.client.BuildCachePrune(ctx, build.CachePruneOptions{All: true}); err != nil {
+	// freed by containerd GC. Podman's docker-compat API has no build cache
+	// endpoint and returns 404; that's expected, so swallow Not Found silently.
+	if _, err := r.client.BuildCachePrune(ctx, build.CachePruneOptions{All: true}); err != nil && !cerrdefs.IsNotFound(err) {
 		fmt.Fprintf(output, "%s: build cache prune failed: %v\n", r.binaryName, err) //nolint:errcheck
 	}
 
-	// Volumes (only unused ones).
-	if _, err := r.client.VolumesPrune(ctx, filters.NewArgs()); err != nil {
+	// Volumes: only yoloai's own (label-scoped). all=true so named yoloai
+	// volumes are removed, not just anonymous ones. Scoping by label keeps the
+	// user's unrelated volumes (e.g. a project database) untouched and out of
+	// the reclaim accounting (see splitCacheBytes).
+	volFilter := filters.NewArgs(filters.Arg("label", managedLabel), filters.Arg("all", "true"))
+	if _, err := r.client.VolumesPrune(ctx, volFilter); err != nil {
 		fmt.Fprintf(output, "%s: volumes prune failed: %v\n", r.binaryName, err) //nolint:errcheck
 	}
 
@@ -285,6 +296,9 @@ func (r *Runtime) splitCacheBytes(du types.DiskUsage) (cached, images int64) {
 		cached += ct.SizeRw
 	}
 	for _, v := range du.Volumes {
+		if _, ok := v.Labels[managedLabel]; !ok {
+			continue // not yoloai's — don't count the user's own volumes
+		}
 		if v.UsageData != nil && v.UsageData.Size > 0 {
 			cached += v.UsageData.Size
 		}

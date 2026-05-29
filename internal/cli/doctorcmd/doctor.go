@@ -255,7 +255,7 @@ func renderReclaimableSpace(w io.Writer, disk *yoloai.DiskUsage) {
 		return
 	}
 	renderReclaimTier(w, disk, "Reclaimable cached data that's no longer needed:",
-		"build cache", "yoloai system prune",
+		"build cache + volumes", "yoloai system prune",
 		func(b yoloai.BackendDiskUsage) int64 { return b.CachedBytes })
 	renderReclaimTier(w, disk, "Reclaimable images (these will need to be regenerated to use yoloAI):",
 		"base images", "yoloai system prune --images",

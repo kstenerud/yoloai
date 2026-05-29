@@ -46,13 +46,22 @@ func TestSplitCacheBytes_ImageBytesFuncOverride(t *testing.T) {
 	assert.Equal(t, 7*gib, images)
 }
 
-// Containers' writable layers, volumes, and build cache live outside the image
-// layer store — they're the no-rebuild "cached" tier, separate from images.
+// yoloaiVol returns a yoloai-labeled volume of the given size — only such
+// volumes count toward the reclaimable cached tier.
+func yoloaiVol(size int64) *volume.Volume {
+	return &volume.Volume{
+		Labels:    map[string]string{managedLabel: "true"},
+		UsageData: &volume.UsageData{Size: size},
+	}
+}
+
+// Containers' writable layers, yoloai volumes, and build cache live outside the
+// image layer store — they're the no-rebuild "cached" tier, separate from images.
 func TestSplitCacheBytes_NonImageUsageIsCachedTier(t *testing.T) {
 	du := types.DiskUsage{
 		LayersSize: 5 * gib,
 		Containers: []*container.Summary{{SizeRw: 100}, {SizeRw: 200}},
-		Volumes:    []*volume.Volume{{UsageData: &volume.UsageData{Size: 50}}},
+		Volumes:    []*volume.Volume{yoloaiVol(50)},
 		BuildCache: []*build.CacheRecord{{Size: 25}},
 	}
 	cached, images := (&Runtime{}).splitCacheBytes(du)
@@ -60,14 +69,30 @@ func TestSplitCacheBytes_NonImageUsageIsCachedTier(t *testing.T) {
 	assert.Equal(t, 5*gib, images)
 }
 
-// A volume with unknown size (UsageData nil or -1) must not corrupt the total.
+// Regression: volumes yoloai didn't create (no managedLabel) — e.g. a user's
+// project database — must NOT be counted as reclaimable. Counting them
+// over-promised a reclaim that the (label-scoped) prune never delivered, and
+// risked listing the user's data as "no longer needed".
+func TestSplitCacheBytes_ExcludesUnlabeledVolumes(t *testing.T) {
+	du := types.DiskUsage{
+		Volumes: []*volume.Volume{
+			{UsageData: &volume.UsageData{Size: 500 * 1024 * 1024}},                                                     // user's postgres DB — no label
+			{Labels: map[string]string{"com.docker.compose.project": "foley"}, UsageData: &volume.UsageData{Size: 100}}, // someone else's label
+			yoloaiVol(42),
+		},
+	}
+	cached, _ := (&Runtime{}).splitCacheBytes(du)
+	assert.Equal(t, int64(42), cached)
+}
+
+// A yoloai volume with unknown size (UsageData nil or -1) must not corrupt the total.
 func TestSplitCacheBytes_IgnoresUnknownVolumeSize(t *testing.T) {
 	du := types.DiskUsage{
 		LayersSize: gib,
 		Volumes: []*volume.Volume{
-			{UsageData: nil},
-			{UsageData: &volume.UsageData{Size: -1}},
-			{UsageData: &volume.UsageData{Size: 500}},
+			{Labels: map[string]string{managedLabel: "true"}, UsageData: nil},
+			{Labels: map[string]string{managedLabel: "true"}, UsageData: &volume.UsageData{Size: -1}},
+			yoloaiVol(500),
 		},
 	}
 	cached, images := (&Runtime{}).splitCacheBytes(du)

@@ -50,6 +50,8 @@ row to the index.
 | `doctor`/`disk` reports podman images as 0 B despite a multi-GB base | [Podman: /system/df reports LayersSize 0](#podman-systemdf-reports-layerssize-0) |
 | `doctor` shows containerd image cache as `?`; `prune --images` leaves devmapper pool blocks used / df unchanged | [containerd: both snapshotters hold a copy](#containerd-both-overlayfs-and-devmapper-snapshotters-hold-a-copy-prune-and-sizing-must-cover-both) |
 | Docker base image reads ~33 GiB on Linux vs ~5 GiB on macOS; `image rm` frees ~0; prune undercounts reclaim | [Docker: containerd store pins layers via build cache](#docker-containerd-image-store-image-rm-frees-no-disk-until-the-build-cache-is-pruned-sdk-spacereclaimed-undercounts) |
+| `prune` dry-run promises to reclaim "volumes" but reports `reclaimed 0 B`; doctor counts the user's own (non-yoloai) volumes | [Docker/Podman: volume prune is anonymous-only; scope to yoloai volumes](#dockerpodman-volume-prune-default-filter-removes-only-anonymous-volumes-reclaim-accounting-must-be-scoped-to-yoloais-own-volumes) |
+| `podman: build cache prune failed: Error response from daemon: Not Found` | [Podman: no build-cache endpoint (404)](#podman-docker-compat-api-has-no-build-cache-endpoint--buildcacheprune-returns-404-not-found) |
 | `prune --images` on Podman reports absurd reclaim (e.g. 142 GB freed for a ~5 GiB footprint) | [Podman: `ImagesPrune` `SpaceReclaimed` un-dedup sum](#podman-imagesprune-spacereclaimed-is-the-un-deduplicated-image-size-sum) |
 | `prune --images` leaves a snapshot chain; `Remove` → `cannot remove snapshot with child` | [containerd: remove snapshots leaf-first](#containerd-snapshots-must-be-removed-leaf-first-children-before-parents-or-removal-silently-stalls) |
 | `system disk` reports 0 containerd image bytes right after a successful `system build --backend containerd` | [containerd: import inconsistently materializes snapshots](#containerd-image-import-inconsistently-materializes-overlayfs-snapshots) |
@@ -722,6 +724,30 @@ An empty value disables LXC seccomp for that container entirely. The container m
 **Why it matters / what we verified (2026-05-29, Docker 29.4.0 via OrbStack):** the socket/API-only sizing path is store- and VM-agnostic, so it Just Works regardless of which macOS Docker you run. `yoloai system disk` reported docker `image_bytes = 5023481654` (4.68 GiB) — **byte-exact** against `docker system df` Images SIZE `5.023GB` — and `cached_bytes = 507954634` (484.4 MiB) matching Local Volumes `508MB`. Because OrbStack uses the **classic** store (not the containerd snapshotter), the [`image rm` frees no disk until build cache pruned](#docker-containerd-image-store-image-rm-frees-no-disk-until-the-build-cache-is-pruned-sdk-spacereclaimed-undercounts) pinning behavior does **not** apply, and the logical-vs-physical reclaim gap collapses (logical ≈ physical). No code change needed; the takeaway is to **check `docker info` for the active context/store before comparing numbers** — "macOS Docker" is not necessarily Docker Desktop.
 
 **Code:** none (verification only). Sizing path: `internal/runtime/docker/prune.go` `CacheUsage`/`splitCacheBytes`.
+
+---
+
+### Docker/Podman: `volume prune` (default filter) removes only *anonymous* volumes; reclaim accounting must be scoped to yoloai's own volumes
+
+**Symptom:** `yoloai doctor`/`system disk` report a large reclaimable "cached" figure (e.g. 484.4 MiB) that is actually the user's **named** volumes — `docker volume ls` shows things like `foley_postgres-data` (a compose database) and `vscode`, which have nothing to do with yoloai. `yoloai system prune` dry-run promises to remove them ("would remove unused volumes …"), then the real prune reports `reclaimed 0 B` because nothing was freed.
+
+**Explanation:** Two compounding problems. (1) Since Docker 23, `docker volume prune` / the SDK `VolumesPrune` with default filters removes only **anonymous** volumes — named volumes survive unless `all=true` is set. So the dry-run estimate (which summed *every* volume's size) over-promised relative to what the prune could remove. (2) More fundamentally, yoloai **creates no Docker volumes at all**, so counting *any* host volume as yoloai-reclaimable is wrong — and threatening to delete the user's database volume is dangerous. The only reason the DB survived was the anonymous-only quirk masking the over-promise. (See also the OrbStack verification note above, which observed `cached_bytes` == the 508MB Local Volumes and mistook it for legitimate yoloai cache.)
+
+**Fix:** Scope both the estimate and the prune to volumes carrying the `com.yoloai.managed` label. `splitCacheBytes` counts only labeled volumes; `PruneCache` calls `VolumesPrune` with `label=com.yoloai.managed` + `all=true` (so named yoloai volumes are removed, not just anonymous ones). yoloai creates no volumes today, so this currently reclaims nothing and reports nothing for volumes — correct. Any future code that creates a volume MUST stamp it with `managedLabel`.
+
+**Code:** `internal/runtime/docker/prune.go` — `managedLabel` const, `splitCacheBytes` (label-gated volume loop), `PruneCache` (label+all `VolumesPrune` filter).
+
+---
+
+### Podman: docker-compat API has no build-cache endpoint — `BuildCachePrune` returns 404 (Not Found)
+
+**Symptom:** `yoloai system prune` against the Podman backend prints `podman: build cache prune failed: Error response from daemon: Not Found`.
+
+**Explanation:** Podman's Docker-compatible API has no BuildKit build-cache endpoint; `POST /build/prune` returns HTTP 404. The Podman backend embeds `*docker.Runtime` and inherits its `PruneCache`, which unconditionally calls `BuildCachePrune`. The 404 is expected and harmless, but surfacing it as "failed" is misleading.
+
+**Fix:** In `PruneCache`, swallow the error when `cerrdefs.IsNotFound(err)` is true (it stays a real failure for any other error). Podman has no build cache to free, so skipping is correct.
+
+**Code:** `internal/runtime/docker/prune.go` — `PruneCache` (`BuildCachePrune` error guarded by `!cerrdefs.IsNotFound`).
 
 ---
 
