@@ -199,3 +199,24 @@ def test_write_failure_autopsy_populates_result_and_file(
     body = out.read_text()
     assert "# Failure autopsy: full_workflow/tart" in body
     assert "GAP 32s" in body
+
+
+# --- testcache root resolution -------------------------------------------
+
+
+def test_testcache_root_defaults_to_repo_local(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Without the override, the cache sits at <repo-root>/.testcache so each
+    # checkout keeps its own state instead of clashing in ~/.yoloai.
+    monkeypatch.delenv("YOLOAI_SMOKE_CACHE", raising=False)
+    root = smoke_test._testcache_root()
+    assert root.name == ".testcache"
+    assert root.parent == Path(smoke_test.__file__).resolve().parent.parent
+
+
+def test_testcache_root_honors_env_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("YOLOAI_SMOKE_CACHE", str(tmp_path / "elsewhere"))
+    assert smoke_test._testcache_root() == tmp_path / "elsewhere"

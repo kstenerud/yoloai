@@ -1135,7 +1135,21 @@ def build_timeline(attempt_dir: Path, max_lines: int = 40) -> list[str]:
 # at tmux.start", without hunting down a prior passing run by hand.
 # ---------------------------------------------------------------------------
 
-_BASELINE_ROOT = Path.home() / ".yoloai" / "smoke-baselines"
+def _testcache_root() -> Path:
+    """Repo-local cache for smoke-test state: run dirs, baselines, and the index.
+
+    Lives at <repo-root>/.testcache (gitignored) rather than ~/.yoloai so that
+    multiple checkouts of the repo don't clash on shared state, and so cruft can
+    be cleared at different levels (drop runs/ but keep baselines+index, or nuke
+    the whole dir). Override with YOLOAI_SMOKE_CACHE for a custom location."""
+    env = os.environ.get("YOLOAI_SMOKE_CACHE")
+    if env:
+        return Path(env).expanduser()
+    return Path(__file__).resolve().parent.parent / ".testcache"
+
+
+_TESTCACHE_ROOT = _testcache_root()
+_BASELINE_ROOT = _TESTCACHE_ROOT / "baselines"
 
 
 def _baseline_path(test_name: str) -> Path:
@@ -1897,8 +1911,9 @@ def print_summary(results: list[TestResult]) -> None:
 
 # Persistent cross-run index. One JSON object per line, appended after every
 # run, so "when did seatbelt start failing / on which sha?" is a grep instead
-# of mining 2000+ bugreports. Lives outside any single run dir.
-_SMOKE_INDEX = Path.home() / ".yoloai" / "smoke-index.jsonl"
+# of mining 2000+ bugreports. Lives in the repo-local .testcache (see
+# _testcache_root), outside any single run dir.
+_SMOKE_INDEX = _TESTCACHE_ROOT / "smoke-index.jsonl"
 
 
 def _result_status(r: TestResult) -> str:
@@ -1911,8 +1926,8 @@ def write_run_manifest(
     ctx: RunContext, results: list[TestResult], *, host: str, tier: str
 ) -> Optional[Path]:
     """Write <log_dir>/manifest.json (machine-readable sibling of summary.txt)
-    and append a one-line row to ~/.yoloai/smoke-index.jsonl. Best-effort:
-    returns the manifest path, or None if it couldn't be written."""
+    and append a one-line row to the repo-local .testcache/smoke-index.jsonl.
+    Best-effort: returns the manifest path, or None if it couldn't be written."""
     ver = binary_version_info(ctx.yoloai_bin)
     failed = [r for r in results if not r.passed and not r.skipped]
     totals = {
@@ -2033,8 +2048,8 @@ def parse_args() -> argparse.Namespace:
         metavar="DIR",
         help=(
             "Parent directory for the per-run yoloai-smoketest-<ts>/ log dir. "
-            "Defaults to the current directory. Use e.g. ~/.yoloai/smoke-runs "
-            "to keep run artifacts out of the repo root."
+            "Defaults to <repo>/.testcache/runs/ (gitignored). Override to put "
+            "run artifacts elsewhere; see also YOLOAI_SMOKE_CACHE."
         ),
     )
     return parser.parse_args()
@@ -2246,7 +2261,7 @@ def main() -> int:
     tmpdir = Path(tempfile.mkdtemp(prefix="yoloai-smoke-"))
     _t = time.time()
     _ms = int(_t * 1000) % 1000
-    out_parent = Path(args.out_dir).expanduser() if args.out_dir else Path.cwd()
+    out_parent = Path(args.out_dir).expanduser() if args.out_dir else _TESTCACHE_ROOT / "runs"
     log_dir = out_parent / time.strftime(f"yoloai-smoketest-%Y%m%d-%H%M%S.{_ms:03d}", time.gmtime(_t))
     try:
         log_dir.mkdir(parents=True, exist_ok=True)

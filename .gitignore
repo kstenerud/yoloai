@@ -30,6 +30,11 @@ Thumbs.db
 yoloai-bugreport-*.md
 yoloai-smoketest-*
 
+# Smoke-test cache: per-run logs, last-good baselines, and the run index.
+# Repo-local (not ~/.yoloai) so multiple checkouts don't clash; see
+# scripts/smoke_test.py _testcache_root.
+.testcache/
+
 # Python
 __pycache__/
 *.py[cod]
