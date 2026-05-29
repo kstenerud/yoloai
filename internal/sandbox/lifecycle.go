@@ -889,38 +889,38 @@ func (m *Engine) recreateContainer(ctx context.Context, name string, meta *store
 	// unauthenticated even though the original `new` worked.
 	credOverrides := recoverSudoCredentials()
 
-	state := &sandboxState{
-		name:          name,
-		sandboxDir:    sandboxDir,
-		workdir:       workdir,
-		workCopyDir:   store.WorkDir(sandboxDir, meta.Workdir.HostPath),
-		auxDirs:       auxDirs,
-		agent:         agentDef,
-		model:         meta.Model,
-		profile:       meta.Profile,
-		imageRef:      meta.ImageRef,
-		env:           envVars,
-		hasPrompt:     meta.HasPrompt,
-		networkMode:   meta.NetworkMode,
-		networkAllow:  meta.NetworkAllow,
-		ports:         meta.Ports,
-		configMounts:  meta.Mounts,
-		tmuxConf:      cfgJSON.TmuxConf,
-		resources:     meta.Resources,
-		capAdd:        meta.CapAdd,
-		devices:       meta.Devices,
-		setup:         meta.Setup,
-		isolation:     meta.Isolation,
-		vscodeTunnel:  meta.VscodeTunnel,
-		credOverrides: credOverrides,
-		configJSON:    configData,
-		layout:        m.layout,
-		homeDir:       m.layout.HomeDir,
-		output:        &noticeWriter{n: n, level: NoticeWarn},
+	state := &State{
+		Name:          name,
+		SandboxDir:    sandboxDir,
+		Workdir:       workdir,
+		WorkCopyDir:   store.WorkDir(sandboxDir, meta.Workdir.HostPath),
+		AuxDirs:       auxDirs,
+		Agent:         agentDef,
+		Model:         meta.Model,
+		Profile:       meta.Profile,
+		ImageRef:      meta.ImageRef,
+		Env:           envVars,
+		HasPrompt:     meta.HasPrompt,
+		NetworkMode:   meta.NetworkMode,
+		NetworkAllow:  meta.NetworkAllow,
+		Ports:         meta.Ports,
+		ConfigMounts:  meta.Mounts,
+		TmuxConf:      cfgJSON.TmuxConf,
+		Resources:     meta.Resources,
+		CapAdd:        meta.CapAdd,
+		Devices:       meta.Devices,
+		Setup:         meta.Setup,
+		Isolation:     meta.Isolation,
+		VscodeTunnel:  meta.VscodeTunnel,
+		CredOverrides: credOverrides,
+		ConfigJSON:    configData,
+		Layout:        m.layout,
+		HomeDir:       m.layout.HomeDir,
+		Output:        &noticeWriter{n: n, level: NoticeWarn},
 	}
 
 	if resume {
-		state.promptSourcePath = filepath.Join(sandboxDir, "resume-prompt.txt")
+		state.PromptSourcePath = filepath.Join(sandboxDir, "resume-prompt.txt")
 	}
 
 	if err := m.launchContainer(ctx, state); err != nil {

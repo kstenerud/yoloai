@@ -8,15 +8,6 @@ import (
 	"strings"
 )
 
-// ResolvedMountPath returns the container mount path. If MountPath is
-// set, it is returned; otherwise Path (mirroring the host path).
-func (d *DirSpec) ResolvedMountPath() string {
-	if d.MountPath != "" {
-		return d.MountPath
-	}
-	return d.Path
-}
-
 // knownSuffixes are the recognized directory argument suffixes.
 var knownSuffixes = map[string]bool{
 	"copy":    true,

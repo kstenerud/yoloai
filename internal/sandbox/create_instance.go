@@ -1,4 +1,4 @@
-// ABOUTME: buildAndStart and buildInstanceConfig translate sandboxState into a
+// ABOUTME: buildAndStart and buildInstanceConfig translate State into a
 // ABOUTME: runtime.InstanceConfig, start the container, and verify it is running.
 package sandbox
 
@@ -21,12 +21,12 @@ import (
 // timeout the caller removes the secrets dir anyway (we never leak it).
 const secretsConsumedTimeout = 30 * time.Second
 
-// buildAndStart constructs the runtime InstanceConfig from sandboxState and
+// buildAndStart constructs the runtime InstanceConfig from State and
 // starts the instance. hasSecrets indicates whether secrets were injected via
 // a temporary directory that the caller will remove after this call returns.
 // Extracted from launchContainer().
-func (m *Engine) buildAndStart(ctx context.Context, state *sandboxState, mounts []runtime.MountSpec, ports []runtime.PortMapping, hasSecrets bool) error {
-	cname := store.InstanceName(state.name)
+func (m *Engine) buildAndStart(ctx context.Context, state *State, mounts []runtime.MountSpec, ports []runtime.PortMapping, hasSecrets bool) error {
+	cname := store.InstanceName(state.Name)
 	instanceCfg, err := m.buildInstanceConfig(state, mounts, ports)
 	if err != nil {
 		return err
@@ -35,7 +35,7 @@ func (m *Engine) buildAndStart(ctx context.Context, state *sandboxState, mounts 
 	// Clear any stale marker from a prior boot so the wait below observes
 	// only this launch's signal (the marker file lives in the persistent
 	// sandbox dir and survives restarts).
-	markerPath := filepath.Join(state.sandboxDir, store.SecretsConsumedMarker)
+	markerPath := filepath.Join(state.SandboxDir, store.SecretsConsumedMarker)
 	if hasSecrets {
 		_ = os.Remove(markerPath) //nolint:errcheck // best-effort; absent is fine
 	}
@@ -96,12 +96,12 @@ func waitForSecretsConsumed(markerPath string, timeout time.Duration) {
 }
 
 // buildInstanceConfig constructs the runtime.InstanceConfig from sandbox state.
-func (m *Engine) buildInstanceConfig(state *sandboxState, mounts []runtime.MountSpec, ports []runtime.PortMapping) (runtime.InstanceConfig, error) {
-	cname := store.InstanceName(state.name)
+func (m *Engine) buildInstanceConfig(state *State, mounts []runtime.MountSpec, ports []runtime.PortMapping) (runtime.InstanceConfig, error) {
+	cname := store.InstanceName(state.Name)
 	desc := m.runtime.Descriptor()
 	caps := desc.Capabilities
 
-	if state.networkMode == "isolated" {
+	if state.NetworkMode == "isolated" {
 		if !caps.NetworkIsolation {
 			return runtime.InstanceConfig{}, fmt.Errorf("--network=isolated is not supported by the %s backend", desc.Name)
 		}
@@ -111,18 +111,18 @@ func (m *Engine) buildInstanceConfig(state *sandboxState, mounts []runtime.Mount
 		// silent no-op. Refuse rather than lie. See
 		// docs/design/network-isolation.md for the redesign that removes this
 		// limitation by moving enforcement to the host netns.
-		if !runtime.IsolationEnforcesInSandboxIptables(state.isolation) {
+		if !runtime.IsolationEnforcesInSandboxIptables(state.Isolation) {
 			return runtime.InstanceConfig{}, fmt.Errorf(
 				"--network=isolated cannot be enforced with --isolation=%s: "+
 					"gVisor's userspace netstack ignores in-sandbox iptables rules. "+
 					"Use --isolation=container (default) or a VM-based isolation mode "+
 					"(--isolation=vm or --isolation=vm-enhanced) instead",
-				state.isolation,
+				state.Isolation,
 			)
 		}
 	}
 
-	resolvedImage := state.imageRef
+	resolvedImage := state.ImageRef
 	if resolvedImage == "" {
 		resolvedImage = "yoloai-base"
 	}
@@ -130,10 +130,10 @@ func (m *Engine) buildInstanceConfig(state *sandboxState, mounts []runtime.Mount
 	instanceCfg := runtime.InstanceConfig{
 		Name:        cname,
 		ImageRef:    resolvedImage,
-		WorkingDir:  overlayOrResolvedMountPath(state.workdir),
+		WorkingDir:  overlayOrResolvedMountPath(state.Workdir),
 		Mounts:      mounts,
 		Ports:       ports,
-		NetworkMode: state.networkMode,
+		NetworkMode: state.NetworkMode,
 		UseInit:     true,
 		// C.UTF-8 is always present without locale-gen; without it apps like Claude Code render ASCII-only.
 		ContainerEnv: []string{"LANG=C.UTF-8"},
@@ -143,7 +143,7 @@ func (m *Engine) buildInstanceConfig(state *sandboxState, mounts []runtime.Mount
 		return runtime.InstanceConfig{}, err
 	}
 
-	if state.networkMode == "isolated" && caps.NetworkIsolation {
+	if state.NetworkMode == "isolated" && caps.NetworkIsolation {
 		instanceCfg.CapAdd = append(instanceCfg.CapAdd, "NET_ADMIN")
 	}
 
@@ -151,24 +151,24 @@ func (m *Engine) buildInstanceConfig(state *sandboxState, mounts []runtime.Mount
 		return runtime.InstanceConfig{}, err
 	}
 
-	if state.isolation == "container-privileged" {
+	if state.Isolation == "container-privileged" {
 		instanceCfg.Privileged = true
 	}
 
 	// Set the runtime identifier for both Docker (OCI --runtime name) and containerd (shimv2 type).
 	// IsolationContainerRuntime returns "" for container isolation where the default suffices.
-	instanceCfg.ContainerRuntime = runtime.IsolationContainerRuntime(state.isolation)
-	instanceCfg.Snapshotter = runtime.IsolationSnapshotter(state.isolation)
+	instanceCfg.ContainerRuntime = runtime.IsolationContainerRuntime(state.Isolation)
+	instanceCfg.Snapshotter = runtime.IsolationSnapshotter(state.Isolation)
 
 	return instanceCfg, nil
 }
 
 // applyResourceLimits converts and applies resource limits to the instance config.
-func applyResourceLimits(state *sandboxState, instanceCfg *runtime.InstanceConfig) error {
-	if state.resources == nil {
+func applyResourceLimits(state *State, instanceCfg *runtime.InstanceConfig) error {
+	if state.Resources == nil {
 		return nil
 	}
-	rtResources, err := parseResourceLimits(state.resources)
+	rtResources, err := parseResourceLimits(state.Resources)
 	if err != nil {
 		return err
 	}
@@ -177,12 +177,12 @@ func applyResourceLimits(state *sandboxState, instanceCfg *runtime.InstanceConfi
 }
 
 // applyOverlayAndCaps validates and applies overlay/capability requirements to the instance config.
-func applyOverlayAndCaps(state *sandboxState, caps runtime.BackendCaps, instanceCfg *runtime.InstanceConfig, runtimeName runtime.BackendName) error {
+func applyOverlayAndCaps(state *State, caps runtime.BackendCaps, instanceCfg *runtime.InstanceConfig, runtimeName runtime.BackendName) error {
 	// Catch isolation-mode/overlay conflicts early before Docker fails with
 	// an opaque error. runtime.SupportsOverlayDirs encodes the policy
 	// (container-enhanced / gVisor is the rejection case); the message stays
 	// here because it's CLI-shaped advice.
-	if hasOverlayDirs(state) && !runtime.SupportsOverlayDirs(state.isolation) {
+	if hasOverlayDirs(state) && !runtime.SupportsOverlayDirs(state.Isolation) {
 		return fmt.Errorf(
 			":overlay directories require --isolation container; " +
 				"--isolation container-enhanced uses gVisor, which does not support overlayfs inside the container")
@@ -197,18 +197,18 @@ func applyOverlayAndCaps(state *sandboxState, caps runtime.BackendCaps, instance
 	}
 
 	// Recipe fields (cap_add, devices, setup) require a backend with CapAdd support
-	if !caps.CapAdd && (len(state.capAdd) > 0 || len(state.devices) > 0 || len(state.setup) > 0) {
+	if !caps.CapAdd && (len(state.CapAdd) > 0 || len(state.Devices) > 0 || len(state.Setup) > 0) {
 		return fmt.Errorf("cap_add, devices, and setup require a container backend (not supported with %s)", runtimeName)
 	}
-	instanceCfg.CapAdd = append(instanceCfg.CapAdd, state.capAdd...)
-	instanceCfg.Devices = state.devices
+	instanceCfg.CapAdd = append(instanceCfg.CapAdd, state.CapAdd...)
+	instanceCfg.Devices = state.Devices
 
 	return nil
 }
 
 // verifyInstanceRunning checks that the instance is still running after start,
 // collecting log output for diagnostics if it has exited.
-func (m *Engine) verifyInstanceRunning(ctx context.Context, state *sandboxState, cname string) error {
+func (m *Engine) verifyInstanceRunning(ctx context.Context, state *State, cname string) error {
 	// Verify instance is still running (catches immediate crashes).
 	time.Sleep(1 * time.Second)
 	info, err := m.runtime.Inspect(ctx, cname)
@@ -221,9 +221,9 @@ func (m *Engine) verifyInstanceRunning(ctx context.Context, state *sandboxState,
 
 	var parts []string
 	// Try sandbox.jsonl first — written by entrypoint.sh and entrypoint.py.
-	if tail := readLogTail(filepath.Join(state.sandboxDir, "logs", "sandbox.jsonl"), 20); tail != "" {
+	if tail := readLogTail(filepath.Join(state.SandboxDir, "logs", "sandbox.jsonl"), 20); tail != "" {
 		parts = append(parts, tail)
-	} else if tail := readLogTail(filepath.Join(state.sandboxDir, store.AgentLogFile), 20); tail != "" {
+	} else if tail := readLogTail(filepath.Join(state.SandboxDir, store.AgentLogFile), 20); tail != "" {
 		// Try agent log file (written after tmux setup).
 		parts = append(parts, tail)
 	}

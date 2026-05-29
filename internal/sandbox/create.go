@@ -26,6 +26,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/runtime/caps"
 	"github.com/kstenerud/yoloai/internal/sandbox/archetype"
+	"github.com/kstenerud/yoloai/internal/sandbox/state"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 )
 
@@ -106,15 +107,11 @@ const (
 	DirModeRO      = store.DirModeRO
 )
 
-// DirSpec describes a directory to mount in the sandbox.
-// Use this instead of raw ":copy"/":rw" string syntax.
-type DirSpec struct {
-	Path               string  // absolute host path; required
-	Mode               DirMode // mount mode; required for workdir
-	MountPath          string  // custom container mount path; empty = mirror host path
-	AllowDirty         bool    // proceed even if this directory has uncommitted git changes
-	AllowDangerousPath bool    // mount even if this is a dangerous path (e.g. $HOME); the :force suffix
-}
+// DirSpec describes a directory to mount in the sandbox. The canonical
+// definition lives in the state leaf package (so create/mounts/lifecycle can
+// share it without importing this façade); aliased here to keep the public
+// sandbox.DirSpec name stable.
+type DirSpec = state.DirSpec
 
 // CreateOptions holds all parameters for sandbox creation.
 type CreateOptions struct {
@@ -150,46 +147,10 @@ type CreateOptions struct {
 	Output io.Writer
 }
 
-// sandboxState holds resolved state computed during preparation.
-type sandboxState struct {
-	name              string
-	sandboxDir        string
-	workdir           *DirSpec
-	workCopyDir       string
-	auxDirs           []*DirSpec
-	agent             *agent.Definition
-	model             string
-	profile           string
-	imageRef          string
-	env               map[string]string // merged env (base + profile chain)
-	credOverrides     map[string]string // sudo-recovered credential defaults (keys absent from os.Environ)
-	hasPrompt         bool
-	promptSourcePath  string // overrides default prompt.txt path for /yoloai/prompt.txt mount
-	networkMode       string
-	networkAllow      []string
-	ports             []string
-	configMounts      []string // extra bind mounts from config/profile (host:container[:ro])
-	tmuxConf          string
-	resources         *config.ResourceLimits
-	capAdd            []string              // Linux capabilities from config/profile
-	devices           []string              // host devices from config/profile
-	setup             []string              // setup commands from config/profile
-	isolation         runtime.IsolationMode // isolation mode from config/profile
-	isolationExplicit bool                  // true when isolation was set via --isolation flag
-	vscodeTunnel      bool                  // true when VS Code Remote Tunnel is enabled
-	meta              *store.Meta
-	configJSON        []byte
-	// Archetype fields
-	archetype                 archetype.Archetype
-	dockerdRequired           bool
-	devcontainer              *archetype.DevcontainerConfig
-	devcontainerMounts        []string
-	devcontainerMountWarnings []string
-	workdirMode               string        // resolved workdir mode ("copy", "overlay", "rw")
-	layout                    config.Layout // Q-W.3: DataDir-rooted Layout propagated from the Engine
-	homeDir                   string        // Q-W.6: host home dir (layout.HomeDir); used for ~ expansion
-	output                    io.Writer     // create-pipeline progress writer (CreateOptions.Output); F8
-}
+// State holds resolved state computed during preparation. The canonical
+// definition lives in the state leaf package; aliased here so in-package
+// create-pipeline code can keep referring to it unqualified during the F5 carve.
+type State = state.State
 
 // overlayMountConfig describes a single overlay mount for config.json.
 type overlayMountConfig struct {
@@ -308,23 +269,23 @@ func (m *Engine) Create(ctx context.Context, opts CreateOptions) (name string, e
 
 	if err := m.launchContainer(ctx, state); err != nil {
 		// Clean up sandbox directory and attempt container removal.
-		_ = os.RemoveAll(state.sandboxDir)
-		_ = m.runtime.Remove(ctx, store.InstanceName(state.name))
+		_ = os.RemoveAll(state.SandboxDir)
+		_ = m.runtime.Remove(ctx, store.InstanceName(state.Name))
 		return "", err
 	}
 
 	// Execute VM-side work directory setup if baseline was deferred
-	if state.meta.Workdir.Mode == "copy" && state.meta.Workdir.BaselineSHA == "" {
-		if err := executeVMWorkDirSetup(ctx, m.runtime, state.name, state.sandboxDir, state.meta); err != nil {
+	if state.Meta.Workdir.Mode == "copy" && state.Meta.Workdir.BaselineSHA == "" {
+		if err := executeVMWorkDirSetup(ctx, m.runtime, state.Name, state.SandboxDir, state.Meta); err != nil {
 			// Clean up on failure
-			_ = os.RemoveAll(state.sandboxDir)
-			_ = m.runtime.Remove(ctx, store.InstanceName(state.name))
+			_ = os.RemoveAll(state.SandboxDir)
+			_ = m.runtime.Remove(ctx, store.InstanceName(state.Name))
 			return "", fmt.Errorf("execute VM work dir setup: %w", err)
 		}
 	}
 
-	slog.Info("sandbox created", "event", "sandbox.create.complete", "sandbox", state.name)
-	return state.name, nil
+	slog.Info("sandbox created", "event", "sandbox.create.complete", "sandbox", state.Name)
+	return state.Name, nil
 }
 
 // checkUnappliedWork checks if the named sandbox has any unapplied work
@@ -357,7 +318,7 @@ func checkUnappliedWork(name string, sandboxDir string) error {
 
 // prepareSandboxState handles validation, safety checks, directory
 // creation, workdir copy, git baseline, and meta/config writing.
-func (m *Engine) prepareSandboxState(ctx context.Context, opts CreateOptions, credOverrides map[string]string) (*sandboxState, error) {
+func (m *Engine) prepareSandboxState(ctx context.Context, opts CreateOptions, credOverrides map[string]string) (*State, error) {
 	agentDef, sandboxDir, ycfg, gcfg, err := m.validateAndLoadConfig(opts)
 	if err != nil {
 		return nil, err
@@ -482,44 +443,44 @@ func (m *Engine) buildConfigAndMeta(ctx context.Context, opts CreateOptions, pr 
 	return configData, meta, tmuxConf, promptText, nil
 }
 
-// buildSandboxStateResult constructs the sandboxState from all resolved values.
-func buildSandboxStateResult(opts CreateOptions, sandboxDir string, workdir *DirSpec, workCopyDir string, auxDirs []*DirSpec, agentDef *agent.Definition, meta *store.Meta, pr *profileResult, mergedMounts []string, configData []byte, tmuxConf string, resolvedArchetype archetype.Archetype, archetypeDockerDRequired bool, devcontainerCfg *archetype.DevcontainerConfig, dcMounts []string, dcMountWarnings []string, credOverrides map[string]string, layout config.Layout, homeDir string) *sandboxState {
-	return &sandboxState{
-		name:                      opts.Name,
-		sandboxDir:                sandboxDir,
-		workdir:                   workdir,
-		workCopyDir:               workCopyDir,
-		auxDirs:                   auxDirs,
-		agent:                     agentDef,
-		model:                     meta.Model,
-		profile:                   pr.name,
-		imageRef:                  pr.imageRef,
-		env:                       pr.env,
-		credOverrides:             credOverrides,
-		hasPrompt:                 meta.HasPrompt,
-		networkMode:               meta.NetworkMode,
-		networkAllow:              meta.NetworkAllow,
-		ports:                     opts.Ports,
-		configMounts:              mergedMounts,
-		tmuxConf:                  tmuxConf,
-		resources:                 pr.resources,
-		capAdd:                    pr.capAdd,
-		devices:                   pr.devices,
-		setup:                     pr.setup,
-		isolation:                 pr.isolation,
-		isolationExplicit:         pr.isolationExplicit,
-		vscodeTunnel:              opts.VscodeTunnel,
-		meta:                      meta,
-		configJSON:                configData,
-		archetype:                 resolvedArchetype,
-		dockerdRequired:           archetypeDockerDRequired,
-		devcontainer:              devcontainerCfg,
-		devcontainerMounts:        dcMounts,
-		devcontainerMountWarnings: dcMountWarnings,
-		workdirMode:               string(workdir.Mode),
-		layout:                    layout,
-		homeDir:                   homeDir,
-		output:                    opts.Output,
+// buildSandboxStateResult constructs the State from all resolved values.
+func buildSandboxStateResult(opts CreateOptions, sandboxDir string, workdir *DirSpec, workCopyDir string, auxDirs []*DirSpec, agentDef *agent.Definition, meta *store.Meta, pr *profileResult, mergedMounts []string, configData []byte, tmuxConf string, resolvedArchetype archetype.Archetype, archetypeDockerDRequired bool, devcontainerCfg *archetype.DevcontainerConfig, dcMounts []string, dcMountWarnings []string, credOverrides map[string]string, layout config.Layout, homeDir string) *State {
+	return &State{
+		Name:                      opts.Name,
+		SandboxDir:                sandboxDir,
+		Workdir:                   workdir,
+		WorkCopyDir:               workCopyDir,
+		AuxDirs:                   auxDirs,
+		Agent:                     agentDef,
+		Model:                     meta.Model,
+		Profile:                   pr.name,
+		ImageRef:                  pr.imageRef,
+		Env:                       pr.env,
+		CredOverrides:             credOverrides,
+		HasPrompt:                 meta.HasPrompt,
+		NetworkMode:               meta.NetworkMode,
+		NetworkAllow:              meta.NetworkAllow,
+		Ports:                     opts.Ports,
+		ConfigMounts:              mergedMounts,
+		TmuxConf:                  tmuxConf,
+		Resources:                 pr.resources,
+		CapAdd:                    pr.capAdd,
+		Devices:                   pr.devices,
+		Setup:                     pr.setup,
+		Isolation:                 pr.isolation,
+		IsolationExplicit:         pr.isolationExplicit,
+		VscodeTunnel:              opts.VscodeTunnel,
+		Meta:                      meta,
+		ConfigJSON:                configData,
+		Archetype:                 resolvedArchetype,
+		DockerdRequired:           archetypeDockerDRequired,
+		Devcontainer:              devcontainerCfg,
+		DevcontainerMounts:        dcMounts,
+		DevcontainerMountWarnings: dcMountWarnings,
+		WorkdirMode:               string(workdir.Mode),
+		Layout:                    layout,
+		HomeDir:                   homeDir,
+		Output:                    opts.Output,
 	}
 }
 
@@ -841,13 +802,13 @@ func writeStatFiles(sandboxDir string, meta *store.Meta, agentDef *agent.Definit
 	return nil
 }
 
-// launchContainer creates a sandbox instance from sandboxState, starts it,
+// launchContainer creates a sandbox instance from State, starts it,
 // and cleans up credential temp files. Used by both initial creation and
 // recreation from meta.json.
-func (m *Engine) launchContainer(ctx context.Context, state *sandboxState) error {
-	slog.Info("launching container", "event", "sandbox.create.container.launch", "sandbox", state.name, "image", state.imageRef)
+func (m *Engine) launchContainer(ctx context.Context, state *State) error {
+	slog.Info("launching container", "event", "sandbox.create.container.launch", "sandbox", state.Name, "image", state.ImageRef)
 	// Use pre-merged env from state if available, otherwise load from config.
-	envVars := state.env
+	envVars := state.Env
 	if envVars == nil {
 		cfg, cfgErr := config.LoadConfig(m.layout)
 		if cfgErr != nil {
@@ -856,7 +817,7 @@ func (m *Engine) launchContainer(ctx context.Context, state *sandboxState) error
 		envVars = cfg.Env
 	}
 
-	secretsDir, err := createSecretsDir(state.agent, envVars, state.isolation, state.credOverrides)
+	secretsDir, err := createSecretsDir(state.Agent, envVars, state.Isolation, state.CredOverrides)
 	if err != nil {
 		return fmt.Errorf("create secrets: %w", err)
 	}
@@ -866,11 +827,11 @@ func (m *Engine) launchContainer(ctx context.Context, state *sandboxState) error
 
 	mounts := buildMounts(state, secretsDir)
 
-	ports, err := parsePortBindings(state.ports)
+	ports, err := parsePortBindings(state.Ports)
 	if err != nil {
 		return err
 	}
-	ports = filterAvailablePorts(ports, m.outputFor(state.output))
+	ports = filterAvailablePorts(ports, m.outputFor(state.Output))
 
 	return m.buildAndStart(ctx, state, mounts, ports, secretsDir != "")
 }
@@ -1303,7 +1264,7 @@ func sudoParentEnv() map[string]string {
 }
 
 // buildMounts constructs the bind mounts for the sandbox instance.
-func buildMounts(state *sandboxState, secretsDir string) []runtime.MountSpec {
+func buildMounts(state *State, secretsDir string) []runtime.MountSpec {
 	var mounts []runtime.MountSpec
 	mounts = append(mounts, buildWorkdirMounts(state)...)
 	mounts = append(mounts, buildAuxDirMounts(state)...)
@@ -1315,15 +1276,15 @@ func buildMounts(state *sandboxState, secretsDir string) []runtime.MountSpec {
 }
 
 // buildWorkdirMounts returns the mount specs for the sandbox workdir.
-func buildWorkdirMounts(state *sandboxState) []runtime.MountSpec {
-	switch state.workdir.Mode {
+func buildWorkdirMounts(state *State) []runtime.MountSpec {
+	switch state.Workdir.Mode {
 	case "copy":
 		return []runtime.MountSpec{{
-			HostPath:      state.workCopyDir,
-			ContainerPath: state.workdir.ResolvedMountPath(),
+			HostPath:      state.WorkCopyDir,
+			ContainerPath: state.Workdir.ResolvedMountPath(),
 		}}
 	case "overlay":
-		encoded := store.EncodePath(state.workdir.Path)
+		encoded := store.EncodePath(state.Workdir.Path)
 		// Mount the entire overlay work base dir (upper/ovlwork/merged/lower) as
 		// a single bind mount so upper and ovlwork share the same underlying Docker
 		// volume — a kernel requirement for overlayfs to work inside a container.
@@ -1331,29 +1292,29 @@ func buildWorkdirMounts(state *sandboxState) []runtime.MountSpec {
 		// the lower/ subdirectory within the same volume.
 		return []runtime.MountSpec{
 			{
-				HostPath:      store.OverlayWorkBaseDir(state.sandboxDir, state.workdir.Path),
+				HostPath:      store.OverlayWorkBaseDir(state.SandboxDir, state.Workdir.Path),
 				ContainerPath: "/yoloai/overlay/" + encoded,
 			},
 			{
-				HostPath:      state.workdir.Path,
+				HostPath:      state.Workdir.Path,
 				ContainerPath: "/yoloai/overlay/" + encoded + "/lower",
 				ReadOnly:      true,
 			},
 		}
 	default:
 		return []runtime.MountSpec{{
-			HostPath:      state.workdir.Path,
-			ContainerPath: state.workdir.ResolvedMountPath(),
-			ReadOnly:      state.workdir.Mode != "rw",
+			HostPath:      state.Workdir.Path,
+			ContainerPath: state.Workdir.ResolvedMountPath(),
+			ReadOnly:      state.Workdir.Mode != "rw",
 		}}
 	}
 }
 
 // buildAuxDirMounts returns the mount specs for all auxiliary directories.
-func buildAuxDirMounts(state *sandboxState) []runtime.MountSpec {
+func buildAuxDirMounts(state *State) []runtime.MountSpec {
 	var mounts []runtime.MountSpec
-	for _, ad := range state.auxDirs {
-		mounts = append(mounts, buildSingleAuxDirMount(state.sandboxDir, ad)...)
+	for _, ad := range state.AuxDirs {
+		mounts = append(mounts, buildSingleAuxDirMount(state.SandboxDir, ad)...)
 	}
 	return mounts
 }
@@ -1395,19 +1356,19 @@ func buildSingleAuxDirMount(sandboxDir string, ad *DirSpec) []runtime.MountSpec 
 }
 
 // buildAgentMounts returns mount specs for the agent runtime dir, VS Code CLI, and home-seed files.
-func buildAgentMounts(state *sandboxState) []runtime.MountSpec {
+func buildAgentMounts(state *State) []runtime.MountSpec {
 	var mounts []runtime.MountSpec
 
 	// Agent runtime directory (agent's own managed state)
-	if state.agent.StateDir != "" {
+	if state.Agent.StateDir != "" {
 		mounts = append(mounts, runtime.MountSpec{
-			HostPath:      filepath.Join(state.sandboxDir, store.AgentRuntimeDir),
-			ContainerPath: state.agent.StateDir,
+			HostPath:      filepath.Join(state.SandboxDir, store.AgentRuntimeDir),
+			ContainerPath: state.Agent.StateDir,
 		})
 	}
 
 	// VS Code CLI data dir
-	if state.vscodeTunnel {
+	if state.VscodeTunnel {
 		mounts = append(mounts, buildVscodeMounts(state)...)
 	}
 
@@ -1418,18 +1379,18 @@ func buildAgentMounts(state *sandboxState) []runtime.MountSpec {
 }
 
 // buildVscodeMounts returns mount specs for VS Code tunnel support.
-func buildVscodeMounts(state *sandboxState) []runtime.MountSpec {
+func buildVscodeMounts(state *State) []runtime.MountSpec {
 	var mounts []runtime.MountSpec
 
 	// VS Code CLI data dir — per-sandbox to prevent singleton lock conflicts when
 	// multiple sandboxes run tunnels concurrently. Token is seeded from the global
 	// dir (~/.yoloai/vscode-cli/) on first use so re-authentication is only needed
 	// once across all sandboxes.
-	vscodeSandboxCLIDir := filepath.Join(state.sandboxDir, "vscode-cli")
+	vscodeSandboxCLIDir := filepath.Join(state.SandboxDir, "vscode-cli")
 	_ = fileutil.MkdirAll(vscodeSandboxCLIDir, 0750) //nolint:gosec // G301: sandbox dir, private
 
 	// Seed token from global dir if this sandbox hasn't authenticated yet.
-	globalTokenPath := filepath.Join(state.layout.VscodeCLIDir(), "token.json")
+	globalTokenPath := filepath.Join(state.Layout.VscodeCLIDir(), "token.json")
 	sandboxTokenPath := filepath.Join(vscodeSandboxCLIDir, "token.json")
 	if _, err := os.Stat(sandboxTokenPath); os.IsNotExist(err) {
 		if data, err2 := os.ReadFile(globalTokenPath); err2 == nil { //nolint:gosec // G304: path is sandbox-controlled
@@ -1444,7 +1405,7 @@ func buildVscodeMounts(state *sandboxState) []runtime.MountSpec {
 
 	// Stable machine-id — VS Code CLI ties its token to /etc/machine-id; a
 	// fresh random ID on each container restart causes re-authentication.
-	machineIDPath := filepath.Join(state.sandboxDir, store.MachineIDFile)
+	machineIDPath := filepath.Join(state.SandboxDir, store.MachineIDFile)
 	if err := ensureMachineID(machineIDPath); err == nil {
 		mounts = append(mounts, runtime.MountSpec{
 			HostPath:      machineIDPath,
@@ -1457,10 +1418,10 @@ func buildVscodeMounts(state *sandboxState) []runtime.MountSpec {
 }
 
 // buildHomeSeedMounts returns mount specs for home-seed files.
-func buildHomeSeedMounts(state *sandboxState) []runtime.MountSpec {
+func buildHomeSeedMounts(state *State) []runtime.MountSpec {
 	var mounts []runtime.MountSpec
 	mountedDirs := map[string]bool{}
-	for _, sf := range state.agent.SeedFiles {
+	for _, sf := range state.Agent.SeedFiles {
 		if !sf.HomeDir {
 			continue
 		}
@@ -1472,7 +1433,7 @@ func buildHomeSeedMounts(state *sandboxState) []runtime.MountSpec {
 			if mountedDirs[topDir] {
 				continue
 			}
-			src := filepath.Join(state.sandboxDir, "home-seed", topDir)
+			src := filepath.Join(state.SandboxDir, "home-seed", topDir)
 			if _, err := os.Stat(src); err != nil {
 				continue
 			}
@@ -1482,7 +1443,7 @@ func buildHomeSeedMounts(state *sandboxState) []runtime.MountSpec {
 			})
 			mountedDirs[topDir] = true
 		} else {
-			src := filepath.Join(state.sandboxDir, "home-seed", sf.TargetPath)
+			src := filepath.Join(state.SandboxDir, "home-seed", sf.TargetPath)
 			if _, err := os.Stat(src); err != nil {
 				continue // skip if not seeded
 			}
@@ -1496,25 +1457,25 @@ func buildHomeSeedMounts(state *sandboxState) []runtime.MountSpec {
 }
 
 // buildSystemMounts returns mount specs for logs, status, prompt, config, files, and cache.
-func buildSystemMounts(state *sandboxState) []runtime.MountSpec {
+func buildSystemMounts(state *State) []runtime.MountSpec {
 	mounts := []runtime.MountSpec{
 		// Structured log directory
 		{
-			HostPath:      filepath.Join(state.sandboxDir, store.LogsDir),
+			HostPath:      filepath.Join(state.SandboxDir, store.LogsDir),
 			ContainerPath: "/yoloai/" + store.LogsDir,
 		},
 		// Agent status file (for in-container status monitor)
 		{
-			HostPath:      filepath.Join(state.sandboxDir, store.AgentStatusFile),
+			HostPath:      filepath.Join(state.SandboxDir, store.AgentStatusFile),
 			ContainerPath: "/yoloai/" + store.AgentStatusFile,
 		},
 	}
 
 	// Prompt file
-	if state.hasPrompt {
-		promptSource := filepath.Join(state.sandboxDir, "prompt.txt")
-		if state.promptSourcePath != "" {
-			promptSource = state.promptSourcePath
+	if state.HasPrompt {
+		promptSource := filepath.Join(state.SandboxDir, "prompt.txt")
+		if state.PromptSourcePath != "" {
+			promptSource = state.PromptSourcePath
 		}
 		mounts = append(mounts, runtime.MountSpec{
 			HostPath:      promptSource,
@@ -1526,18 +1487,18 @@ func buildSystemMounts(state *sandboxState) []runtime.MountSpec {
 	mounts = append(mounts,
 		// Runtime config file
 		runtime.MountSpec{
-			HostPath:      filepath.Join(state.sandboxDir, store.RuntimeConfigFile),
+			HostPath:      filepath.Join(state.SandboxDir, store.RuntimeConfigFile),
 			ContainerPath: "/yoloai/" + store.RuntimeConfigFile,
 			ReadOnly:      true,
 		},
 		// File exchange directory
 		runtime.MountSpec{
-			HostPath:      filepath.Join(state.sandboxDir, "files"),
+			HostPath:      filepath.Join(state.SandboxDir, "files"),
 			ContainerPath: "/yoloai/files",
 		},
 		// Cache directory
 		runtime.MountSpec{
-			HostPath:      filepath.Join(state.sandboxDir, "cache"),
+			HostPath:      filepath.Join(state.SandboxDir, "cache"),
 			ContainerPath: "/yoloai/cache",
 		},
 	)
@@ -1546,12 +1507,12 @@ func buildSystemMounts(state *sandboxState) []runtime.MountSpec {
 }
 
 // buildGitAndTmuxMounts returns mount specs for git identity and tmux configuration.
-func buildGitAndTmuxMounts(state *sandboxState) []runtime.MountSpec {
+func buildGitAndTmuxMounts(state *State) []runtime.MountSpec {
 	var mounts []runtime.MountSpec
 
 	// Defaults tmux config
-	if state.tmuxConf == "default" || state.tmuxConf == "default+host" {
-		defaultsTmuxConf := filepath.Join(state.layout.DefaultsDir(), "tmux.conf")
+	if state.TmuxConf == "default" || state.TmuxConf == "default+host" {
+		defaultsTmuxConf := filepath.Join(state.Layout.DefaultsDir(), "tmux.conf")
 		if _, err := os.Stat(defaultsTmuxConf); err == nil {
 			// Ensure the file is world-readable (0644). It may have been written
 			// with 0600 by older yoloai versions. Inside Kata VMs the file is
@@ -1569,8 +1530,8 @@ func buildGitAndTmuxMounts(state *sandboxState) []runtime.MountSpec {
 	}
 
 	// Host tmux config (when tmux_conf is default+host or host)
-	if state.tmuxConf == "default+host" || state.tmuxConf == "host" {
-		tmuxConfPath := ExpandTilde("~/.tmux.conf", state.homeDir)
+	if state.TmuxConf == "default+host" || state.TmuxConf == "host" {
+		tmuxConfPath := ExpandTilde("~/.tmux.conf", state.HomeDir)
 		if _, err := os.Stat(tmuxConfPath); err == nil {
 			mounts = append(mounts, runtime.MountSpec{
 				HostPath:      tmuxConfPath,
@@ -1583,7 +1544,7 @@ func buildGitAndTmuxMounts(state *sandboxState) []runtime.MountSpec {
 	// Git identity: mount ~/.gitconfig and ~/.config/git/ read-only so that
 	// git commands inside the container can resolve user.name / user.email.
 	// Mirrors the symlink-based approach used by the Seatbelt backend.
-	gitconfigPath := ExpandTilde("~/.gitconfig", state.homeDir)
+	gitconfigPath := ExpandTilde("~/.gitconfig", state.HomeDir)
 	if _, err := os.Stat(gitconfigPath); err == nil {
 		mounts = append(mounts, runtime.MountSpec{
 			HostPath:      gitconfigPath,
@@ -1591,7 +1552,7 @@ func buildGitAndTmuxMounts(state *sandboxState) []runtime.MountSpec {
 			ReadOnly:      true,
 		})
 	}
-	gitConfigDir := ExpandTilde("~/.config/git", state.homeDir)
+	gitConfigDir := ExpandTilde("~/.config/git", state.HomeDir)
 	if info, err := os.Stat(gitConfigDir); err == nil && info.IsDir() {
 		mounts = append(mounts, runtime.MountSpec{
 			HostPath:      gitConfigDir,
@@ -1604,12 +1565,12 @@ func buildGitAndTmuxMounts(state *sandboxState) []runtime.MountSpec {
 }
 
 // buildConfigAndSecretsMounts returns mount specs for config/profile mounts and secrets.
-func buildConfigAndSecretsMounts(state *sandboxState, secretsDir string) []runtime.MountSpec {
+func buildConfigAndSecretsMounts(state *State, secretsDir string) []runtime.MountSpec {
 	var mounts []runtime.MountSpec
 
 	// Config/profile mounts (host:container[:ro])
-	for _, m := range state.configMounts {
-		spec, err := parseConfigMount(m, state.homeDir, state.layout.Env)
+	for _, m := range state.ConfigMounts {
+		spec, err := parseConfigMount(m, state.HomeDir, state.Layout.Env)
 		if err != nil {
 			continue // skip unparseable mounts (validated at creation time)
 		}
@@ -1962,8 +1923,8 @@ func parseMemoryString(s string) (int64, error) {
 // mode. Q-U (2026-05-25) collapsed aux :overlay to the workdir only,
 // so this is now a single-field check. Kept as a named predicate for
 // callsite readability.
-func hasOverlayDirs(state *sandboxState) bool {
-	return state.workdir.Mode == "overlay"
+func hasOverlayDirs(state *State) bool {
+	return state.Workdir.Mode == "overlay"
 }
 
 // parseConfigMount parses a "host:container[:ro]" mount string into a MountSpec.

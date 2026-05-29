@@ -435,12 +435,12 @@ func TestShellEscapeForDoubleQuotes(t *testing.T) {
 
 func TestBuildMounts_CopyMode(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
-	state := &sandboxState{
-		sandboxDir:  "/home/user/.yoloai/sandboxes/test",
-		workdir:     &DirSpec{Path: "/home/user/project", Mode: DirMode("copy")},
-		workCopyDir: "/home/user/.yoloai/sandboxes/test/work/project",
-		agent:       agentDef,
-		hasPrompt:   true,
+	state := &State{
+		SandboxDir:  "/home/user/.yoloai/sandboxes/test",
+		Workdir:     &DirSpec{Path: "/home/user/project", Mode: DirMode("copy")},
+		WorkCopyDir: "/home/user/.yoloai/sandboxes/test/work/project",
+		Agent:       agentDef,
+		HasPrompt:   true,
 	}
 
 	mounts := buildMounts(state, "")
@@ -454,15 +454,15 @@ func TestBuildMounts_CopyMode(t *testing.T) {
 		}
 	}
 	require.NotNil(t, workMount)
-	assert.Equal(t, state.workCopyDir, workMount.HostPath)
+	assert.Equal(t, state.WorkCopyDir, workMount.HostPath)
 }
 
 func TestBuildMounts_RWMode(t *testing.T) {
 	agentDef := agent.GetAgent("test")
-	state := &sandboxState{
-		sandboxDir: "/home/user/.yoloai/sandboxes/test",
-		workdir:    &DirSpec{Path: "/home/user/project", Mode: DirMode("rw")},
-		agent:      agentDef,
+	state := &State{
+		SandboxDir: "/home/user/.yoloai/sandboxes/test",
+		Workdir:    &DirSpec{Path: "/home/user/project", Mode: DirMode("rw")},
+		Agent:      agentDef,
 	}
 
 	mounts := buildMounts(state, "")
@@ -481,10 +481,10 @@ func TestBuildMounts_RWMode(t *testing.T) {
 
 func TestBuildMounts_IncludesAgentState(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
-	state := &sandboxState{
-		sandboxDir: "/sandbox",
-		workdir:    &DirSpec{Path: "/project", Mode: DirMode("copy")},
-		agent:      agentDef,
+	state := &State{
+		SandboxDir: "/sandbox",
+		Workdir:    &DirSpec{Path: "/project", Mode: DirMode("copy")},
+		Agent:      agentDef,
 	}
 
 	mounts := buildMounts(state, "")
@@ -501,11 +501,11 @@ func TestBuildMounts_IncludesAgentState(t *testing.T) {
 
 func TestBuildMounts_IncludesPrompt(t *testing.T) {
 	agentDef := agent.GetAgent("test")
-	state := &sandboxState{
-		sandboxDir: "/sandbox",
-		workdir:    &DirSpec{Path: "/project", Mode: DirMode("copy")},
-		agent:      agentDef,
-		hasPrompt:  true,
+	state := &State{
+		SandboxDir: "/sandbox",
+		Workdir:    &DirSpec{Path: "/project", Mode: DirMode("copy")},
+		Agent:      agentDef,
+		HasPrompt:  true,
 	}
 
 	mounts := buildMounts(state, "")
@@ -522,11 +522,11 @@ func TestBuildMounts_IncludesPrompt(t *testing.T) {
 
 func TestBuildMounts_ExcludesPromptWhenNone(t *testing.T) {
 	agentDef := agent.GetAgent("test")
-	state := &sandboxState{
-		sandboxDir: "/sandbox",
-		workdir:    &DirSpec{Path: "/project", Mode: DirMode("copy")},
-		agent:      agentDef,
-		hasPrompt:  false,
+	state := &State{
+		SandboxDir: "/sandbox",
+		Workdir:    &DirSpec{Path: "/project", Mode: DirMode("copy")},
+		Agent:      agentDef,
+		HasPrompt:  false,
 	}
 
 	mounts := buildMounts(state, "")
@@ -538,10 +538,10 @@ func TestBuildMounts_ExcludesPromptWhenNone(t *testing.T) {
 
 func TestBuildMounts_IncludesSecrets(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
-	state := &sandboxState{
-		sandboxDir: "/sandbox",
-		workdir:    &DirSpec{Path: "/project", Mode: DirMode("copy")},
-		agent:      agentDef,
+	state := &State{
+		SandboxDir: "/sandbox",
+		Workdir:    &DirSpec{Path: "/project", Mode: DirMode("copy")},
+		Agent:      agentDef,
 	}
 
 	secretsDir := t.TempDir()
@@ -900,10 +900,10 @@ func TestPrepareSandboxState_NetworkIsolatedSetsAllowlist(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, state)
 
-	assert.Equal(t, "isolated", state.networkMode)
-	assert.Contains(t, state.networkAllow, "api.anthropic.com")
-	assert.Contains(t, state.networkAllow, "statsig.anthropic.com")
-	assert.Contains(t, state.networkAllow, "sentry.io")
+	assert.Equal(t, "isolated", state.NetworkMode)
+	assert.Contains(t, state.NetworkAllow, "api.anthropic.com")
+	assert.Contains(t, state.NetworkAllow, "statsig.anthropic.com")
+	assert.Contains(t, state.NetworkAllow, "sentry.io")
 }
 
 // TestBuildInstanceConfig_RejectsNetworkIsolatedWithGvisor verifies that
@@ -917,12 +917,12 @@ func TestPrepareSandboxState_NetworkIsolatedSetsAllowlist(t *testing.T) {
 // this combination must fail loudly.
 func TestBuildInstanceConfig_RejectsNetworkIsolatedWithGvisor(t *testing.T) {
 	mgr := NewEngine(&mockRuntime{}, slog.Default(), strings.NewReader(""), WithLayout(config.NewLayout(t.TempDir())))
-	state := &sandboxState{
-		name:        "test",
-		workdir:     &DirSpec{Path: "/project", Mode: DirMode("copy")},
-		agent:       agent.GetAgent("test"),
-		networkMode: "isolated",
-		isolation:   "container-enhanced",
+	state := &State{
+		Name:        "test",
+		Workdir:     &DirSpec{Path: "/project", Mode: DirMode("copy")},
+		Agent:       agent.GetAgent("test"),
+		NetworkMode: "isolated",
+		Isolation:   "container-enhanced",
 	}
 
 	_, err := mgr.buildInstanceConfig(state, nil, nil)
@@ -943,12 +943,12 @@ func TestBuildInstanceConfig_AllowsNetworkIsolatedOnSupportedModes(t *testing.T)
 	for _, isolation := range supported {
 		t.Run("isolation="+string(isolation), func(t *testing.T) {
 			mgr := NewEngine(&mockRuntime{}, slog.Default(), strings.NewReader(""), WithLayout(config.NewLayout(t.TempDir())))
-			state := &sandboxState{
-				name:        "test",
-				workdir:     &DirSpec{Path: "/project", Mode: DirMode("copy")},
-				agent:       agent.GetAgent("test"),
-				networkMode: "isolated",
-				isolation:   isolation,
+			state := &State{
+				Name:        "test",
+				Workdir:     &DirSpec{Path: "/project", Mode: DirMode("copy")},
+				Agent:       agent.GetAgent("test"),
+				NetworkMode: "isolated",
+				Isolation:   isolation,
 			}
 			_, err := mgr.buildInstanceConfig(state, nil, nil)
 			require.NoError(t, err)
@@ -999,9 +999,9 @@ func TestPrepareSandboxState_NetworkAllowAddsExtraDomains(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, state)
 
-	assert.Equal(t, "isolated", state.networkMode)
-	assert.Contains(t, state.networkAllow, "api.anthropic.com")
-	assert.Contains(t, state.networkAllow, "api.example.com")
+	assert.Equal(t, "isolated", state.NetworkMode)
+	assert.Contains(t, state.NetworkAllow, "api.anthropic.com")
+	assert.Contains(t, state.NetworkAllow, "api.example.com")
 }
 
 // IsolationSnapshotter tests
