@@ -196,7 +196,20 @@ operator-identity contract, not just paths.
 - **F19** — Add `Architectures []string` to `BackendDescriptor`; Tart declares `["arm64"]`; drop hardcoded check in `setup.go`
 - **F20** — Folds into F11 (typed IsolationMode → `exhaustive` checks the 4 string-switches)
 - **F21** — Move isolation/OS routing into `runtime.SelectContainerBackend`; CLI calls with all three preferences
-- **F24** — Continue W3 pattern: incremental Python helper carves; no single landing
+- **F24** — Continue W3 pattern: incremental Python helper carves; no single landing.
+  **Progress 2026-05-29:** the four candidates from the post-F8 review were assessed against
+  the actual code — two were already carved by prior work (`cmd_str`/`lifecycle_preamble` and
+  `compose_prompt_content`/`load_secret_files` live in `setup_helpers.py`), and the
+  credential-priority logic lives on the Go side (`create.go` `createSecretsDir`, tested), not
+  Python. The two genuinely-uncarved pieces landed: (1) `build_secret_exports` +
+  `build_agent_launch_command` — the agent launch-command shell composition + secret-export
+  escaping (was inline in `launch_agent`); (2) `lifecycle_on_create_marker` +
+  `should_run_on_create` — the once-per-sandbox on-create gating (was a duplicated marker literal
+  + decision across `lifecycle_preamble` and `run_lifecycle_commands`). Dead `_cmd_str` and the
+  `lifecycle_preamble` shim removed. `setup_helpers.py` is now ~230 lines of tested pure surface;
+  `sandbox-setup.py` ~1330 lines, still imperative-heavy (the backend classes + tmux/subprocess
+  procedures are the irreducible core). Remaining is judgment-call extraction (await owner: is more
+  needed?), e.g. a `parse_submit_sequence` dedup is too marginal to be worth the churn.
 - **F25** — Single source of truth for `runtime-config.json` schema version (likely `go:generate` writing a Python const file)
 - **F26** — Calibration; no change
 - **F27** — Calibration; no change
