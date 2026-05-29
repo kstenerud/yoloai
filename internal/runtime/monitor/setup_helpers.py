@@ -63,24 +63,46 @@ def cmd_str(entry: dict[str, Any]) -> str:
     return str(cmd)
 
 
+def lifecycle_on_create_marker(yoloai_dir: str) -> str:
+    """Path of the marker recording that on-create lifecycle commands have run.
+
+    Single source of truth for the filename, shared by the preamble (which
+    decides whether to advertise on-create commands as pending) and the runner
+    (which writes it after on-create succeeds). Keeping the literal here prevents
+    the two readers from drifting apart.
+    """
+    return os.path.join(yoloai_dir, "lifecycle-on-create-done")
+
+
+def should_run_on_create(lifecycle: dict[str, Any], marker_exists: bool) -> bool:
+    """Whether on-create lifecycle commands should run on this start.
+
+    They run once per sandbox: skipped when the cfg flag ``on_create_done`` is
+    set (recorded at create time) or the marker file already exists (a prior
+    start ran them). Centralizes the gating that both the preamble and the runner
+    depend on, so they can't disagree — the on-create-runs-twice / never bug
+    class.
+    """
+    return not lifecycle.get("on_create_done", False) and not marker_exists
+
+
 def lifecycle_preamble(cfg: dict[str, Any], yoloai_dir: str) -> str:
     """Build the preamble describing lifecycle commands running in the background.
 
     Returns the empty string if no lifecycle commands are pending; otherwise
     returns the multi-line notice that gets prepended to the user prompt.
 
-    The "on-create" commands are skipped if the cfg flag `on_create_done` is
-    set or if the on-create marker file exists in `yoloai_dir`.
+    The "on-create" commands are advertised only when :func:`should_run_on_create`
+    says they'll run this start.
     """
     lifecycle = cfg.get("lifecycle")
     if not lifecycle:
         return ""
 
-    marker = os.path.join(yoloai_dir, "lifecycle-on-create-done")
-    on_create_done = lifecycle.get("on_create_done", False) or os.path.exists(marker)
+    marker_exists = os.path.exists(lifecycle_on_create_marker(yoloai_dir))
 
     pending: list[str] = []
-    if not on_create_done:
+    if should_run_on_create(lifecycle, marker_exists):
         for entry in lifecycle.get("on_create", []):
             pending.append(f"  onCreateCommand: {cmd_str(entry)}")
     for entry in lifecycle.get("on_start", []):

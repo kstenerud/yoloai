@@ -24,11 +24,12 @@ from pathlib import Path
 
 from setup_helpers import (
     build_agent_launch_command,
-    cmd_str as _cmd_str_helper,
     compose_prompt_content,
-    lifecycle_preamble as _lifecycle_preamble_helper,
+    lifecycle_on_create_marker,
+    lifecycle_preamble,
     load_secret_files,
     read_runtime_config,
+    should_run_on_create,
 )
 import tmux_io
 from tmux_io import set_title, tmux, tmux_output
@@ -1111,9 +1112,9 @@ def run_lifecycle_commands(cfg, yoloai_dir, log):
     if lifecycle.get("dockerd_required"):
         start_dockerd(log)
 
-    marker = os.path.join(yoloai_dir, "lifecycle-on-create-done")
+    marker = lifecycle_on_create_marker(yoloai_dir)
 
-    if not lifecycle.get("on_create_done") and not os.path.exists(marker):
+    if should_run_on_create(lifecycle, os.path.exists(marker)):
         log("lifecycle: running on-create commands")
         for entry in lifecycle.get("on_create", []):
             if not run_lifecycle_command(entry, log):
@@ -1132,19 +1133,6 @@ def run_lifecycle_commands(cfg, yoloai_dir, log):
             log("lifecycle: on-start command failed")
             # Continue with remaining on-start commands (partial start is better than none)
     return True
-
-
-def _cmd_str(entry):
-    """Return a human-readable string for a lifecycle command entry."""
-    return _cmd_str_helper(entry)
-
-
-def lifecycle_preamble(cfg, yoloai_dir):
-    """Return a preamble describing lifecycle commands running in the background.
-
-    Returns empty string if no lifecycle commands are pending.
-    """
-    return _lifecycle_preamble_helper(cfg, yoloai_dir)
 
 
 def run_lifecycle_background(cfg, yoloai_dir, socket, log, pane_ready_event):

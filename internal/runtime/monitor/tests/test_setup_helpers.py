@@ -119,6 +119,32 @@ def test_lifecycle_preamble_skips_on_create_when_cfg_flag_set(tmp_path: Path) ->
     assert setup_helpers.lifecycle_preamble(cfg, str(tmp_path)) == ""
 
 
+# --- lifecycle_on_create_marker / should_run_on_create ---
+
+
+def test_lifecycle_on_create_marker_path(tmp_path: Path) -> None:
+    # The runner writes this file and both the runner and the preamble read it;
+    # the literal must stay identical, hence the single helper.
+    assert setup_helpers.lifecycle_on_create_marker(str(tmp_path)) == str(
+        tmp_path / "lifecycle-on-create-done"
+    )
+
+
+def test_should_run_on_create_first_start() -> None:
+    # No prior marker, flag unset → on-create runs.
+    assert setup_helpers.should_run_on_create({}, marker_exists=False) is True
+
+
+def test_should_run_on_create_skips_when_marker_exists() -> None:
+    assert setup_helpers.should_run_on_create({}, marker_exists=True) is False
+
+
+def test_should_run_on_create_skips_when_cfg_flag_set() -> None:
+    # on_create_done is stamped at create time (e.g. a clone that already ran
+    # on-create on the source); honor it even without a marker file.
+    assert setup_helpers.should_run_on_create({"on_create_done": True}, marker_exists=False) is False
+
+
 # --- compose_prompt_content ---
 
 
