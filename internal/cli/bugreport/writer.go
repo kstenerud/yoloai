@@ -152,6 +152,52 @@ func WriteBackends(ctx context.Context, w io.Writer) {
 	fmt.Fprintln(w)               //nolint:errcheck
 }
 
+// WriteVMCensus writes the host VM-slot census (macOS Virtualization.framework
+// concurrency). It is omitted entirely on platforms/backends without a census
+// (e.g. Linux, or when tart can't be constructed) so the report stays brief.
+// When present, the slot occupancy is high-value: a reached limit is a common,
+// hard-to-diagnose cause of "VM won't start" failures in the wild — see the
+// doctor "VM slots" section and the orphaned-VM idiosyncrasy.
+func WriteVMCensus(ctx context.Context, w io.Writer) {
+	census := cliutil.NewSystemClient().VMCensus(ctx)
+	if census == nil {
+		return
+	}
+
+	fmt.Fprintln(w, "<details>")                   //nolint:errcheck
+	fmt.Fprintln(w, "<summary>VM slots</summary>") //nolint:errcheck
+	fmt.Fprintln(w)                                //nolint:errcheck
+
+	status := "ok"
+	if census.Blocked() {
+		status = "LIMIT REACHED — blocks new VMs"
+	}
+	fmt.Fprintf(w, "- **In use:** %d of %d (%s)\n", census.InUse(), census.Limit, status) //nolint:errcheck
+	for _, s := range census.Slots {
+		fmt.Fprintf(w, "  - %s\n", vmSlotLine(s)) //nolint:errcheck
+	}
+
+	fmt.Fprintln(w)               //nolint:errcheck
+	fmt.Fprintln(w, "</details>") //nolint:errcheck
+	fmt.Fprintln(w)               //nolint:errcheck
+}
+
+// vmSlotLine renders one VM slot as a compact bug-report line.
+func vmSlotLine(s yoloairuntime.VMSlot) string {
+	name := s.VMName
+	if name == "" {
+		name = "(unknown)"
+	}
+	switch {
+	case s.Owned:
+		return fmt.Sprintf("pid %d  %s — owned sandbox", s.PID, name)
+	case s.Deleted:
+		return fmt.Sprintf("pid %d  %s — orphan (image deleted), holding a slot", s.PID, name)
+	default:
+		return fmt.Sprintf("pid %d  %s — orphan (launcher gone), holding a slot", s.PID, name)
+	}
+}
+
 // WriteConfig writes section 5: configuration files.
 func WriteConfig(w io.Writer, reportType string) {
 	fmt.Fprintln(w, "<details>")                        //nolint:errcheck
@@ -192,7 +238,7 @@ func WriteLiveLog(w io.Writer, logBytes []byte, reportType string) {
 	fmt.Fprintln(w, "```")                         //nolint:errcheck
 
 	if reportType == "safe" {
-		sanitized := SanitizeJSONLBytes(logBytes, nil)
+		sanitized := SanitizeJSONLBytes(logBytes, nil, true)
 		fmt.Fprintf(w, "%s", sanitized) //nolint:errcheck
 	} else {
 		fmt.Fprintf(w, "%s", logBytes) //nolint:errcheck
@@ -269,12 +315,16 @@ var sanitizeTextPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`eyJ[A-Za-z0-9\-_]{10,}\.[A-Za-z0-9\-_]{10,}\.[A-Za-z0-9\-_]{10,}`),
 	// Long hex strings (32+ chars)
 	regexp.MustCompile(`[a-fA-F0-9]{32,}`),
-	// Long base64 strings (40+ chars)
-	regexp.MustCompile(`[A-Za-z0-9+/\-_]{40,}={0,2}`),
+	// Long base64 strings (40+ chars). The charset deliberately excludes '/'
+	// so this does not collapse ordinary filesystem paths (e.g. a long
+	// /Users/.../project/... path) to [REDACTED] — paths are prime
+	// diagnostic data. Standard-base64 secrets that contain '/' but no
+	// recognizable prefix are the only gap, and those are rare.
+	regexp.MustCompile(`[A-Za-z0-9+\-_]{40,}={0,2}`),
 }
 
-// sanitizeText applies pattern-based redaction to a text string.
-// First match wins (patterns are applied in order).
+// sanitizeText applies pattern-based redaction to a text string. Every pattern
+// runs in turn, each over the result of the previous replacement.
 func sanitizeText(text string) string {
 	for _, re := range sanitizeTextPatterns {
 		text = re.ReplaceAllString(text, "[REDACTED]")
@@ -282,9 +332,11 @@ func sanitizeText(text string) string {
 	return text
 }
 
-// SanitizeJSONLBytes sanitizes JSONL content. If omitEvents is non-nil, lines matching
-// those event patterns are removed. String values are sanitized in all modes.
-func SanitizeJSONLBytes(data []byte, omitEvents []string) []byte {
+// SanitizeJSONLBytes filters JSONL content. If omitEvents is non-nil, lines
+// matching those event patterns are removed. When redactText is true, string
+// values are run through the secret-redaction patterns; unsafe reports pass
+// false so the report stays a faithful, unredacted record.
+func SanitizeJSONLBytes(data []byte, omitEvents []string, redactText bool) []byte {
 	var out bytes.Buffer
 	for line := range bytes.SplitSeq(data, []byte("\n")) {
 		trimmed := bytes.TrimSpace(line)
@@ -298,9 +350,10 @@ func SanitizeJSONLBytes(data []byte, omitEvents []string) []byte {
 				continue
 			}
 		}
-		// Sanitize string values
-		sanitized := sanitizeJSONLLine(trimmed)
-		out.Write(sanitized)
+		if redactText {
+			trimmed = sanitizeJSONLLine(trimmed)
+		}
+		out.Write(trimmed)
 		out.WriteByte('\n')
 	}
 	return out.Bytes()

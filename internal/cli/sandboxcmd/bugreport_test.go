@@ -104,6 +104,55 @@ func TestWriteBugReportJSONLFile_IncludesAll(t *testing.T) {
 	assert.Contains(t, buf.String(), "allowing domain")
 }
 
+func TestWriteBugReportJSONLFile_UnsafePreservesPathsAndIDs(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "sandbox.jsonl")
+	// A filesystem path and a 64-hex container id — both prime diagnostic data
+	// that the regex sanitizer would eat. Unsafe mode must keep them verbatim.
+	line := `{"event":"start","msg":"workdir /Users/me/Projects/yoloai/internal/cli cid e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}` + "\n"
+	require.NoError(t, os.WriteFile(path, []byte(line), 0600))
+
+	var buf bytes.Buffer
+	writeBugReportJSONLFile(&buf, "logs/sandbox.jsonl", path, "unsafe", nil)
+	out := buf.String()
+	assert.Contains(t, out, "/Users/me/Projects/yoloai/internal/cli")
+	assert.Contains(t, out, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+	assert.NotContains(t, out, "[REDACTED]")
+}
+
+func TestWriteBugReportJSONLFile_TailsLargeDump(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "monitor.jsonl")
+	var sb bytes.Buffer
+	for i := 0; i < maxJSONLDumpLines+50; i++ {
+		fmt.Fprintf(&sb, `{"event":"detector.result","msg":"entry %d"}`+"\n", i)
+	}
+	require.NoError(t, os.WriteFile(path, sb.Bytes(), 0600))
+
+	var buf bytes.Buffer
+	writeBugReportJSONLFile(&buf, "logs/monitor.jsonl", path, "unsafe", nil)
+	out := buf.String()
+	assert.Contains(t, out, fmt.Sprintf("showing last %d of %d lines", maxJSONLDumpLines, maxJSONLDumpLines+50))
+	// Most-recent entry kept; earliest dropped.
+	assert.Contains(t, out, fmt.Sprintf("entry %d", maxJSONLDumpLines+49))
+	assert.NotContains(t, out, `"entry 0"`)
+}
+
+func TestTailLines(t *testing.T) {
+	t.Run("under cap returns unchanged", func(t *testing.T) {
+		data := []byte("a\nb\nc\n")
+		out, omitted := tailLines(data, 10)
+		assert.Equal(t, 0, omitted)
+		assert.Equal(t, data, out)
+	})
+	t.Run("over cap keeps the tail", func(t *testing.T) {
+		data := []byte("a\nb\nc\nd\n")
+		out, omitted := tailLines(data, 2)
+		assert.Equal(t, 2, omitted)
+		assert.Equal(t, "c\nd\n", string(out))
+	})
+}
+
 // --- writeBugReportMonitorTail (DF4) -----------------------------------------
 
 func TestWriteBugReportMonitorTail_NotFound(t *testing.T) {

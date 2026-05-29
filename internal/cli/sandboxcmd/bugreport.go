@@ -60,6 +60,10 @@ func runSandboxBugReport(cmd *cobra.Command, name string, reportType string) err
 	// Section 4: Backends
 	bugreport.WriteBackends(cmd.Context(), f)
 
+	// Section 4.5: VM slots (macOS Virtualization.framework concurrency).
+	// Omitted on platforms/backends without a census.
+	bugreport.WriteVMCensus(cmd.Context(), f)
+
 	// Section 5: Configuration
 	bugreport.WriteConfig(f, reportType)
 
@@ -344,6 +348,25 @@ func writeBugReportMonitorTail(w io.Writer, path string) {
 	fmt.Fprintln(w)        //nolint:errcheck
 }
 
+// maxJSONLDumpLines caps how many lines of any one JSONL log are inlined into
+// the report. The full logs live in the sandbox dir; the report only needs the
+// recent tail to stay within GitHub's issue-body limit. monitor.jsonl is the
+// main beneficiary — its decisive signal is already surfaced separately in the
+// "Recent detector decisions" section.
+const maxJSONLDumpLines = 500
+
+// tailLines returns the last max lines of data and how many earlier lines were
+// dropped. A trailing newline is preserved. data with <= max lines is returned
+// unchanged with omitted == 0.
+func tailLines(data []byte, max int) (tail []byte, omitted int) {
+	lines := bytes.Split(bytes.TrimRight(data, "\n"), []byte("\n"))
+	if len(lines) <= max {
+		return data, 0
+	}
+	omitted = len(lines) - max
+	return append(bytes.Join(lines[omitted:], []byte("\n")), '\n'), omitted
+}
+
 // writeBugReportJSONLFile writes a JSONL file section with optional sanitization and event filtering.
 func writeBugReportJSONLFile(w io.Writer, title, path, reportType string, omitEvents []string) {
 	fmt.Fprintf(w, "<details>\n<summary>%s</summary>\n\n", title) //nolint:errcheck
@@ -353,6 +376,10 @@ func writeBugReportJSONLFile(w io.Writer, title, path, reportType string, omitEv
 	if err != nil {
 		fmt.Fprintf(w, "*(not found or unreadable)*\n") //nolint:errcheck
 	} else {
+		data, omitted := tailLines(data, maxJSONLDumpLines)
+		if omitted > 0 {
+			fmt.Fprintf(w, "(showing last %d of %d lines — full file in the sandbox's logs dir)\n", maxJSONLDumpLines, maxJSONLDumpLines+omitted) //nolint:errcheck
+		}
 		fmt.Fprintf(w, "%s", data) //nolint:errcheck
 	}
 
@@ -491,6 +518,7 @@ func sanitizeJSONLFile(path, reportType string, omitEvents []string) ([]byte, er
 	if err != nil {
 		return nil, err
 	}
-	_ = reportType // sanitization always applied for consistency
-	return bugreport.SanitizeJSONLBytes(data, omitEvents), nil
+	// Secret redaction applies to safe reports only; an unsafe report is meant
+	// to be a faithful, unredacted record (paths, container IDs, digests intact).
+	return bugreport.SanitizeJSONLBytes(data, omitEvents, reportType == "safe"), nil
 }

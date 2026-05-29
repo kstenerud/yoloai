@@ -8,9 +8,30 @@ import (
 	"testing"
 	"time"
 
+	yoloairuntime "github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// --- vmSlotLine ---
+
+func TestVMSlotLine(t *testing.T) {
+	tests := []struct {
+		name string
+		slot yoloairuntime.VMSlot
+		want string
+	}{
+		{"owned", yoloairuntime.VMSlot{PID: 100, VMName: "alpha", Owned: true}, "pid 100  alpha — owned sandbox"},
+		{"orphan", yoloairuntime.VMSlot{PID: 200, VMName: "ghost"}, "pid 200  ghost — orphan (launcher gone), holding a slot"},
+		{"orphan deleted", yoloairuntime.VMSlot{PID: 300, VMName: "tmp", Deleted: true}, "pid 300  tmp — orphan (image deleted), holding a slot"},
+		{"unknown name", yoloairuntime.VMSlot{PID: 400}, "pid 400  (unknown) — orphan (launcher gone), holding a slot"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, vmSlotLine(tt.slot))
+		})
+	}
+}
 
 // --- Filename ---
 
@@ -147,28 +168,51 @@ func TestShouldOmitEvent_EmptyPatterns(t *testing.T) {
 
 func TestSanitizeJSONLBytes_OmitsEvents(t *testing.T) {
 	line := `{"event":"network.allow","msg":"allowing domain"}` + "\n"
-	result := SanitizeJSONLBytes([]byte(line), []string{"network.allow"})
+	result := SanitizeJSONLBytes([]byte(line), []string{"network.allow"}, true)
 	assert.NotContains(t, string(result), "network.allow")
 }
 
 func TestSanitizeJSONLBytes_SkipsEmptyLines(t *testing.T) {
 	input := `{"event":"a","msg":"hello"}` + "\n\n" + `{"event":"b","msg":"world"}` + "\n"
-	result := SanitizeJSONLBytes([]byte(input), nil)
+	result := SanitizeJSONLBytes([]byte(input), nil, true)
 	lines := strings.Split(strings.TrimSpace(string(result)), "\n")
 	assert.Len(t, lines, 2)
 }
 
 func TestSanitizeJSONLBytes_PassesThroughMalformed(t *testing.T) {
 	input := "not valid json\n"
-	result := SanitizeJSONLBytes([]byte(input), nil)
+	result := SanitizeJSONLBytes([]byte(input), nil, true)
 	assert.Contains(t, string(result), "not valid json")
 }
 
 func TestSanitizeJSONLBytes_SanitizesAPIKey(t *testing.T) {
 	line := `{"event":"test","msg":"key is sk-ant-secret123"}` + "\n"
-	result := SanitizeJSONLBytes([]byte(line), nil)
+	result := SanitizeJSONLBytes([]byte(line), nil, true)
 	assert.NotContains(t, string(result), "sk-ant-secret123")
 	assert.Contains(t, string(result), "[REDACTED]")
+}
+
+func TestSanitizeJSONLBytes_NoRedactWhenDisabled(t *testing.T) {
+	// Unsafe reports pass redactText=false: the line must survive verbatim so
+	// the report is a faithful record.
+	line := `{"event":"test","msg":"key is sk-ant-secret123"}` + "\n"
+	result := SanitizeJSONLBytes([]byte(line), nil, false)
+	assert.Contains(t, string(result), "sk-ant-secret123")
+	assert.NotContains(t, string(result), "[REDACTED]")
+}
+
+func TestSanitizeJSONLBytes_DisabledStillOmitsEvents(t *testing.T) {
+	// Event omission is independent of text redaction.
+	line := `{"event":"network.allow","msg":"allowing domain"}` + "\n"
+	result := SanitizeJSONLBytes([]byte(line), []string{"network.allow"}, false)
+	assert.NotContains(t, string(result), "allowing domain")
+}
+
+func TestSanitizeText_PreservesFilesystemPaths(t *testing.T) {
+	// A long path must not be collapsed to [REDACTED] — paths are prime
+	// diagnostic data. The '/' is what previously triggered the base64 rule.
+	path := "/Users/karlstenerud/Projects/yoloai/internal/cli/sandboxcmd"
+	assert.Equal(t, path, sanitizeText(path))
 }
 
 // --- WriteHeader ---
