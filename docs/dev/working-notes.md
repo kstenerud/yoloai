@@ -840,6 +840,18 @@ Generic file utils (`mkdirAllPerm`, `writeFilePerm`) go to the existing `interna
 
 **Revised sequence:** F5.2a `invocation/`; F5.2b `provision/`; F5.2c `launch/` (+`Deps` in `state/`); F5.2d `create/` orchestration (Client.Create → `create.Run`); F5.3 `lifecycle/`. Each its own green commit.
 
+## D41 — F5.2c refinements: `BuildInstanceConfig` narrowed to `BackendDescriptor`, config.json assembly deferred to `create/`, slim `state.Deps`
+
+**Date:** 2026-05-29. **Status:** Accepted (owner, 2026-05-29). **Refines** D40's `launch/` carve as executed.
+
+Three deviations from D40's literal grouping, each forced by the dependency facts the carve surfaced:
+
+- **`buildInstanceConfig` takes `runtime.BackendDescriptor`, not `runtime.Runtime`.** It only ever read the backend's capabilities/name off `rt`. Narrowing the param to the descriptor it actually consumes (a) makes the dependency honest and (b) lets the launch tests construct a literal `runtime.BackendDescriptor{...}` instead of dragging in the sandbox-package `mockRuntime`. Net: launch's tests no longer couple to the façade's test doubles.
+- **`buildContainerConfig` + the launch config types (`containerConfig`, `lifecycleConfig`, `overlayMountConfig`) + `buildLifecycleConfig` + `lifecycleCmdToJSON` stay in the façade, deferred to F5.2d `create/`** — *not* moved to `launch/` as D40's bullet listed. Reason: this is config.json *assembly*, and only the create path builds config.json. `lifecycle.recreateContainer` reads the *existing* config.json off disk; it never rebuilds. So this machinery belongs with create orchestration, not the shared launch base. D40's grouping was written before that read/write asymmetry was confirmed.
+- **`state.Deps` shipped slim: `{Runtime, Layout}` only**, not the fuller `{runtime, layout, logger, input, progress}` D40 sketched. `LaunchContainer` needed only runtime+layout; the rest stay Engine fields until a later phase proves a free function needs them. Added a doc note that fields will grow as more methods dissolve. Avoids speculative width (YAGNI).
+
+Outcome: `create_instance.go`/`_test.go` deleted (fully absorbed), `launch.LaunchContainer(ctx, m.deps(), st)` called from both create.go:233 and lifecycle.go:929, `make check` + `go vet -tags=integration` green.
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.

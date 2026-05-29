@@ -21,6 +21,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox/invocation"
+	"github.com/kstenerud/yoloai/internal/sandbox/launch"
 	provision "github.com/kstenerud/yoloai/internal/sandbox/provision"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/internal/workspace"
@@ -925,7 +926,7 @@ func (m *Engine) recreateContainer(ctx context.Context, name string, meta *store
 		state.PromptSourcePath = filepath.Join(sandboxDir, "resume-prompt.txt")
 	}
 
-	if err := m.launchContainer(ctx, state); err != nil {
+	if err := launch.LaunchContainer(ctx, m.deps(), state); err != nil {
 		return err
 	}
 

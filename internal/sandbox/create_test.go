@@ -14,7 +14,6 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
-	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/workspace"
 )
 
@@ -77,26 +76,6 @@ func TestBuildContainerConfig_StateDirName(t *testing.T) {
 			assert.Equal(t, tt.expected, cfg.StateDirName)
 		})
 	}
-}
-
-func TestParsePortBindings_Valid(t *testing.T) {
-	mappings, err := parsePortBindings([]string{"3000:3000", "8080:80"})
-	require.NoError(t, err)
-	require.Len(t, mappings, 2)
-
-	assert.Equal(t, runtime.PortMapping{HostPort: 3000, ContainerPort: 3000, Protocol: "tcp"}, mappings[0])
-	assert.Equal(t, runtime.PortMapping{HostPort: 8080, ContainerPort: 80, Protocol: "tcp"}, mappings[1])
-}
-
-func TestParsePortBindings_Invalid(t *testing.T) {
-	_, err := parsePortBindings([]string{"invalid"})
-	require.Error(t, err)
-}
-
-func TestParsePortBindings_Empty(t *testing.T) {
-	mappings, err := parsePortBindings(nil)
-	require.NoError(t, err)
-	assert.Nil(t, mappings)
 }
 
 func TestGitBaseline_FreshInit(t *testing.T) {
@@ -280,107 +259,4 @@ func TestBuildContainerConfig_AutoCommitIntervalZero(t *testing.T) {
 
 	assert.Equal(t, 0, cfg.AutoCommitInterval)
 	assert.Nil(t, cfg.CopyDirs)
-}
-
-func TestParseResourceLimits(t *testing.T) {
-	tests := []struct {
-		name    string
-		input   *config.ResourceLimits
-		wantCPU int64
-		wantMem int64
-		wantNil bool
-		wantErr bool
-	}{
-		{
-			name:    "both set",
-			input:   &config.ResourceLimits{CPUs: "4", Memory: "8g"},
-			wantCPU: 4_000_000_000,
-			wantMem: 8 * 1024 * 1024 * 1024,
-		},
-		{
-			name:    "cpus only",
-			input:   &config.ResourceLimits{CPUs: "2.5"},
-			wantCPU: 2_500_000_000,
-		},
-		{
-			name:    "memory only",
-			input:   &config.ResourceLimits{Memory: "512m"},
-			wantMem: 512 * 1024 * 1024,
-		},
-		{
-			name:    "neither set",
-			input:   &config.ResourceLimits{},
-			wantNil: true,
-		},
-		{
-			name:    "invalid cpus",
-			input:   &config.ResourceLimits{CPUs: "abc"},
-			wantErr: true,
-		},
-		{
-			name:    "invalid memory",
-			input:   &config.ResourceLimits{Memory: "xyz"},
-			wantErr: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			checkResourceLimits(t, tt.input, tt.wantCPU, tt.wantMem, tt.wantNil, tt.wantErr)
-		})
-	}
-}
-
-// checkResourceLimits is the assertion body for a single TestParseResourceLimits case.
-func checkResourceLimits(t *testing.T, input *config.ResourceLimits, wantCPU, wantMem int64, wantNil, wantErr bool) {
-	t.Helper()
-	result, err := parseResourceLimits(input)
-	if wantErr {
-		require.Error(t, err)
-		return
-	}
-	require.NoError(t, err)
-	if wantNil {
-		require.Nil(t, result)
-		return
-	}
-	require.NotNil(t, result)
-	require.Equal(t, wantCPU, result.NanoCPUs, "NanoCPUs")
-	require.Equal(t, wantMem, result.Memory, "Memory")
-}
-
-func TestParseMemoryString(t *testing.T) {
-	tests := []struct {
-		input   string
-		want    int64
-		wantErr bool
-	}{
-		{"1g", 1024 * 1024 * 1024, false},
-		{"512m", 512 * 1024 * 1024, false},
-		{"1024k", 1024 * 1024, false},
-		{"1048576b", 1048576, false},
-		{"1048576", 1048576, false},        // no suffix = bytes
-		{"0.5g", 512 * 1024 * 1024, false}, // fractional
-		{"", 0, false},
-		{"abc", 0, true},
-		{"-1g", 0, true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			got, err := parseMemoryString(tt.input)
-			if tt.wantErr {
-				if err == nil {
-					t.Fatal("expected error, got nil")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if got != tt.want {
-				t.Errorf("parseMemoryString(%q) = %d, want %d", tt.input, got, tt.want)
-			}
-		})
-	}
 }

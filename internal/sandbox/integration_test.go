@@ -706,7 +706,7 @@ func TestIntegration_CredentialInjection(t *testing.T) {
 	// Snapshot pre-existing yoloai-secrets-* dirs so the cleanup assertion
 	// below flags only one THIS run leaked — not an orphan a previously
 	// killed run (e.g. a timed-out Tart smoke) left in the shared system
-	// temp dir. The defer in launchContainer cleans up on normal return; an
+	// temp dir. The defer in launch.LaunchContainer cleans up on normal return; an
 	// abnormally terminated run elsewhere can leave a dir we didn't create.
 	secretsBefore := existingSecretsDirs(t)
 
@@ -743,7 +743,7 @@ func TestIntegration_CredentialInjection(t *testing.T) {
 		"credential should be injected via /run/secrets and available in agent env")
 
 	// The host-side temp secrets dir (yoloai-secrets-*) should have been
-	// removed by the defer in launchContainer. Assert no *new* one survived;
+	// removed by the defer in launch.LaunchContainer. Assert no *new* one survived;
 	// orphans from other/prior runs in the shared temp dir are out of scope.
 	for name := range existingSecretsDirs(t) {
 		if _, preexisting := secretsBefore[name]; !preexisting {

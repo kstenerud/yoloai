@@ -10,11 +10,9 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
-	"net"
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -25,7 +23,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/runtime/caps"
 	"github.com/kstenerud/yoloai/internal/sandbox/archetype"
 	"github.com/kstenerud/yoloai/internal/sandbox/invocation"
-	mountspkg "github.com/kstenerud/yoloai/internal/sandbox/mounts"
+	"github.com/kstenerud/yoloai/internal/sandbox/launch"
 	provision "github.com/kstenerud/yoloai/internal/sandbox/provision"
 	"github.com/kstenerud/yoloai/internal/sandbox/state"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
@@ -232,7 +230,7 @@ func (m *Engine) Create(ctx context.Context, opts CreateOptions) (name string, e
 		return "", nil
 	}
 
-	if err := m.launchContainer(ctx, state); err != nil {
+	if err := launch.LaunchContainer(ctx, m.deps(), state); err != nil {
 		// Clean up sandbox directory and attempt container removal.
 		_ = os.RemoveAll(state.SandboxDir)
 		_ = m.runtime.Remove(ctx, store.InstanceName(state.Name))
@@ -397,7 +395,7 @@ func (m *Engine) buildConfigAndMeta(ctx context.Context, opts CreateOptions, pr 
 	archetypeDockerDRequired := pr.archetypeDockerDRequired
 	lifecycleCfg := buildLifecycleConfig(resolvedArchetype, archetypeDockerDRequired, state_onCreateDone, devcontainerCfg)
 
-	configData, err := buildContainerConfig(m.layout, agentDef, agentCommand, runtime.PrepareAgentCommandFor(m.runtime, ""), tmuxConf, overlayOrResolvedMountPath(workdir), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, collectOverlayMounts(workdir, auxDirs), pr.setup, pr.autoCommitInterval, collectCopyDirs(workdir, auxDirs), opts.Name, m.runtime.TmuxSocket(sandboxDir), pr.isolation, opts.VscodeTunnel, invocation.SanitizeTunnelName(opts.Name), lifecycleCfg)
+	configData, err := buildContainerConfig(m.layout, agentDef, agentCommand, runtime.PrepareAgentCommandFor(m.runtime, ""), tmuxConf, launch.OverlayOrResolvedMountPath(workdir), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, collectOverlayMounts(workdir, auxDirs), pr.setup, pr.autoCommitInterval, collectCopyDirs(workdir, auxDirs), opts.Name, m.runtime.TmuxSocket(sandboxDir), pr.isolation, opts.VscodeTunnel, invocation.SanitizeTunnelName(opts.Name), lifecycleCfg)
 	if err != nil {
 		return nil, nil, "", "", fmt.Errorf("build %s: %w", store.RuntimeConfigFile, err)
 	}
@@ -702,7 +700,7 @@ func buildMeta(opts CreateOptions, pr *profileResult, workdir *DirSpec, baseline
 		Model:         model,
 		Workdir: store.WorkdirMeta{
 			HostPath:     workdir.Path,
-			MountPath:    overlayOrResolvedMountPath(workdir),
+			MountPath:    launch.OverlayOrResolvedMountPath(workdir),
 			Mode:         workdir.Mode,
 			BaselineSHA:  baselineSHA,
 			InceptionSHA: baselineSHA,
@@ -767,40 +765,6 @@ func writeStatFiles(sandboxDir string, meta *store.Meta, agentDef *agent.Definit
 	return nil
 }
 
-// launchContainer creates a sandbox instance from State, starts it,
-// and cleans up credential temp files. Used by both initial creation and
-// recreation from meta.json.
-func (m *Engine) launchContainer(ctx context.Context, state *State) error {
-	slog.Info("launching container", "event", "sandbox.create.container.launch", "sandbox", state.Name, "image", state.ImageRef)
-	// Use pre-merged env from state if available, otherwise load from config.
-	envVars := state.Env
-	if envVars == nil {
-		cfg, cfgErr := config.LoadConfig(m.layout)
-		if cfgErr != nil {
-			return fmt.Errorf("load config: %w", cfgErr)
-		}
-		envVars = cfg.Env
-	}
-
-	secretsDir, err := provision.CreateSecretsDir(state.Agent, envVars, state.Isolation, state.CredOverrides)
-	if err != nil {
-		return fmt.Errorf("create secrets: %w", err)
-	}
-	if secretsDir != "" {
-		defer os.RemoveAll(secretsDir) //nolint:errcheck // best-effort cleanup
-	}
-
-	mounts := mountspkg.Build(state, secretsDir)
-
-	ports, err := parsePortBindings(state.Ports)
-	if err != nil {
-		return err
-	}
-	ports = filterAvailablePorts(ports, m.outputFor(state.Output))
-
-	return m.buildAndStart(ctx, state, mounts, ports, secretsDir != "")
-}
-
 // buildContainerConfig creates the config.json content.
 // agentLaunchPrefix is the backend-specific wrap prefix that PrepareAgentCommand
 // would prepend (e.g. a 'PATH="..." ' prefix for Tart);
@@ -863,146 +827,7 @@ func lifecycleCmdToJSON(lc archetype.LifecycleCmd) map[string]any {
 	}
 }
 
-// parsePortBindings converts ["host:container", ...] to runtime port mappings.
-// filterAvailablePorts removes any port mappings where the host port is already
-// in use, printing a warning for each skipped entry. Best-effort: a TOCTOU race
-// is possible but Docker's own error is the fallback for that case.
-func filterAvailablePorts(ports []runtime.PortMapping, output io.Writer) []runtime.PortMapping {
-	var available []runtime.PortMapping
-	for _, p := range ports {
-		l, err := net.Listen("tcp", fmt.Sprintf(":%d", p.HostPort))
-		if err != nil {
-			fmt.Fprintf(output, "Warning: skipping port %d:%d — host port %d is already in use\n", //nolint:errcheck // best-effort output
-				p.HostPort, p.ContainerPort, p.HostPort)
-			continue
-		}
-		_ = l.Close()
-		available = append(available, p)
-	}
-	return available
-}
-
-func parsePortBindings(ports []string) ([]runtime.PortMapping, error) {
-	if len(ports) == 0 {
-		return nil, nil
-	}
-
-	var result []runtime.PortMapping
-	for _, p := range ports {
-		parts := strings.SplitN(p, ":", 2)
-		if len(parts) != 2 {
-			return nil, NewUsageError("invalid port format %q (expected host:container)", p)
-		}
-		hostPort, err := strconv.Atoi(parts[0])
-		if err != nil {
-			return nil, NewUsageError("invalid host port %q in mapping %q: %v", parts[0], p, err)
-		}
-		containerPort, err := strconv.Atoi(parts[1])
-		if err != nil {
-			return nil, NewUsageError("invalid container port %q in mapping %q: %v", parts[1], p, err)
-		}
-		result = append(result, runtime.PortMapping{
-			HostPort:      hostPort,
-			ContainerPort: containerPort,
-			Protocol:      "tcp",
-		})
-	}
-
-	return result, nil
-}
-
 // containsLocalhost returns true if the URL string references localhost or 127.0.0.1.
 func containsLocalhost(url string) bool {
 	return strings.Contains(url, "localhost") || strings.Contains(url, "127.0.0.1")
-}
-
-// overlayOrResolvedMountPath returns the container working directory path for a directory.
-// For overlay mode, this is the bind-mounted merged path; otherwise the resolved mount path.
-func overlayOrResolvedMountPath(d *DirSpec) string {
-	if d.Mode == "overlay" {
-		return "/yoloai/overlay/" + store.EncodePath(d.Path) + "/merged"
-	}
-	return d.ResolvedMountPath()
-}
-
-// readLogTail returns the last n lines of the file at path.
-// Returns empty string on any error or if the file is empty.
-func readLogTail(path string, n int) string {
-	data, err := os.ReadFile(path) //nolint:gosec // G304: path is constructed from sandbox dir
-	if err != nil || len(data) == 0 {
-		return ""
-	}
-	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
-	if len(lines) > n {
-		lines = lines[len(lines)-n:]
-	}
-	return strings.Join(lines, "\n")
-}
-
-// parseResourceLimits converts user-facing string resource limits to
-// runtime-level int64 values (NanoCPUs, bytes).
-func parseResourceLimits(rl *config.ResourceLimits) (*runtime.ResourceLimits, error) {
-	result := &runtime.ResourceLimits{}
-
-	if rl.CPUs != "" {
-		cpus, err := strconv.ParseFloat(rl.CPUs, 64)
-		if err != nil || cpus <= 0 {
-			return nil, fmt.Errorf("invalid cpus value %q: must be a positive number (e.g., 4, 2.5)", rl.CPUs)
-		}
-		result.NanoCPUs = int64(cpus * 1e9)
-	}
-
-	if rl.Memory != "" {
-		mem, err := parseMemoryString(rl.Memory)
-		if err != nil {
-			return nil, err
-		}
-		result.Memory = mem
-	}
-
-	if result.NanoCPUs == 0 && result.Memory == 0 {
-		return nil, nil
-	}
-	return result, nil
-}
-
-// parseMemoryString parses a Docker-style memory string (e.g., "512m", "8g")
-// into bytes. Supported suffixes: b, k, m, g (case-insensitive).
-func parseMemoryString(s string) (int64, error) {
-	if s == "" {
-		return 0, nil
-	}
-
-	s = strings.TrimSpace(s)
-	if len(s) == 0 {
-		return 0, fmt.Errorf("empty memory value")
-	}
-
-	// Check for suffix
-	lastChar := strings.ToLower(s[len(s)-1:])
-	var multiplier int64 = 1
-	numStr := s
-
-	switch lastChar {
-	case "b":
-		numStr = s[:len(s)-1]
-	case "k":
-		multiplier = 1024
-		numStr = s[:len(s)-1]
-	case "m":
-		multiplier = 1024 * 1024
-		numStr = s[:len(s)-1]
-	case "g":
-		multiplier = 1024 * 1024 * 1024
-		numStr = s[:len(s)-1]
-	default:
-		// No suffix — treat as bytes
-	}
-
-	val, err := strconv.ParseFloat(numStr, 64)
-	if err != nil || val <= 0 {
-		return 0, fmt.Errorf("invalid memory value %q: must be a positive number with optional suffix (b, k, m, g)", s)
-	}
-
-	return int64(val * float64(multiplier)), nil
 }

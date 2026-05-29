@@ -248,56 +248,6 @@ func TestPrepareSandboxState_NetworkIsolatedSetsAllowlist(t *testing.T) {
 	assert.Contains(t, state.NetworkAllow, "sentry.io")
 }
 
-// TestBuildInstanceConfig_RejectsNetworkIsolatedWithGvisor verifies that
-// requesting --network-isolated together with --isolation=container-enhanced
-// (gVisor) is rejected at sandbox-creation time with a specific, actionable
-// error rather than producing a sandbox that lies about being isolated.
-//
-// gVisor's userspace netstack does not honor in-sandbox iptables rules, so
-// the current entrypoint-based enforcement is a no-op there. Until the
-// host-side filtering redesign lands (see docs/design/network-isolation.md)
-// this combination must fail loudly.
-func TestBuildInstanceConfig_RejectsNetworkIsolatedWithGvisor(t *testing.T) {
-	mgr := NewEngine(&mockRuntime{}, slog.Default(), strings.NewReader(""), WithLayout(config.NewLayout(t.TempDir())))
-	state := &State{
-		Name:        "test",
-		Workdir:     &DirSpec{Path: "/project", Mode: DirMode("copy")},
-		Agent:       agent.GetAgent("test"),
-		NetworkMode: "isolated",
-		Isolation:   "container-enhanced",
-	}
-
-	_, err := mgr.buildInstanceConfig(state, nil, nil)
-	require.Error(t, err)
-	msg := err.Error()
-	assert.Contains(t, msg, "container-enhanced", "error names the broken isolation mode")
-	assert.Contains(t, msg, "gVisor", "error explains why")
-	assert.Contains(t, msg, "--isolation=container", "error points at the working alternatives")
-}
-
-// TestBuildInstanceConfig_AllowsNetworkIsolatedOnSupportedModes is the
-// counterpart: every isolation mode that yoloai claims to support with
-// --network-isolated must build a config without error. If a future change
-// to IsolationEnforcesInSandboxIptables incorrectly excludes a working mode,
-// this test catches the over-rejection.
-func TestBuildInstanceConfig_AllowsNetworkIsolatedOnSupportedModes(t *testing.T) {
-	supported := []runtime.IsolationMode{"", "container", "container-privileged", "vm", "vm-enhanced"}
-	for _, isolation := range supported {
-		t.Run("isolation="+string(isolation), func(t *testing.T) {
-			mgr := NewEngine(&mockRuntime{}, slog.Default(), strings.NewReader(""), WithLayout(config.NewLayout(t.TempDir())))
-			state := &State{
-				Name:        "test",
-				Workdir:     &DirSpec{Path: "/project", Mode: DirMode("copy")},
-				Agent:       agent.GetAgent("test"),
-				NetworkMode: "isolated",
-				Isolation:   isolation,
-			}
-			_, err := mgr.buildInstanceConfig(state, nil, nil)
-			require.NoError(t, err)
-		})
-	}
-}
-
 // containsLocalhost tests
 
 func TestContainsLocalhost_WithLocalhost(t *testing.T) {
