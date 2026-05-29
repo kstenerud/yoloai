@@ -1611,6 +1611,24 @@ def check_binary_fresh(yoloai_bin: str) -> Optional[str]:
     )
 
 
+def binary_version(yoloai_bin: str) -> str:
+    """Return the binary's embedded build identity as 'version (commit, date)'.
+
+    Reads it from `<bin> version --json` so the recorded sha reflects what was
+    actually compiled and run — the working tree may have moved since the build.
+    Returns 'unknown' if the binary can't be queried.
+    """
+    try:
+        r = subprocess.run(
+            [yoloai_bin, "version", "--json"],
+            capture_output=True, text=True, timeout=10,
+        )
+        info = json.loads(r.stdout)
+        return f"{info.get('version', '?')} ({info.get('commit', '?')}, {info.get('date', '?')})"
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return "unknown"
+
+
 class _Tee:
     """Forward writes to two streams (real stdout + summary file).
 
@@ -1763,6 +1781,7 @@ def main() -> int:
     print(f"yoloai smoke test  run={log_dir.name}")
     print(f"host={'linux' if is_linux else 'macos'}  tier={tier}")
     print(f"binary={yoloai_bin}")
+    print(f"version={binary_version(yoloai_bin)}")
     print(f"logs={log_dir}\n")
 
     preq = check_prerequisites(ctx, all_specs)
