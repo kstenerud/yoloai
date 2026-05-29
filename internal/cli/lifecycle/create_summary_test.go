@@ -1,0 +1,73 @@
+// ABOUTME: Tests for printCreateSummary — the post-create summary the CLI now
+// ABOUTME: formats from the sandbox's metadata (moved out of the library in F8).
+
+package lifecycle
+
+import (
+	"bytes"
+	"testing"
+
+	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/stretchr/testify/assert"
+)
+
+func TestPrintCreateSummary_Basic(t *testing.T) {
+	var buf bytes.Buffer
+	printCreateSummary(&buf, &store.Meta{
+		Name:    "test-sandbox",
+		Agent:   "claude",
+		Workdir: store.WorkdirMeta{HostPath: "/project", Mode: "copy"},
+	})
+	out := buf.String()
+	assert.Contains(t, out, "test-sandbox")
+	assert.Contains(t, out, "claude")
+	assert.Contains(t, out, "/project")
+	assert.Contains(t, out, "copy")
+	assert.Contains(t, out, "attach")
+}
+
+func TestPrintCreateSummary_WithPrompt(t *testing.T) {
+	var buf bytes.Buffer
+	printCreateSummary(&buf, &store.Meta{
+		Name:      "test",
+		Agent:     "test",
+		Workdir:   store.WorkdirMeta{HostPath: "/project", Mode: "copy"},
+		HasPrompt: true,
+	})
+	assert.Contains(t, buf.String(), "diff", "a prompted sandbox's hint mentions 'yoloai diff'")
+}
+
+func TestPrintCreateSummary_NetworkNone(t *testing.T) {
+	var buf bytes.Buffer
+	printCreateSummary(&buf, &store.Meta{
+		Name:        "test",
+		Agent:       "test",
+		Workdir:     store.WorkdirMeta{HostPath: "/project", Mode: "copy"},
+		NetworkMode: "none",
+	})
+	assert.Contains(t, buf.String(), "Network:  none")
+}
+
+func TestPrintCreateSummary_NetworkIsolated(t *testing.T) {
+	var buf bytes.Buffer
+	printCreateSummary(&buf, &store.Meta{
+		Name:         "test",
+		Agent:        "test",
+		Workdir:      store.WorkdirMeta{HostPath: "/project", Mode: "copy"},
+		NetworkMode:  "isolated",
+		NetworkAllow: []string{"api.anthropic.com", "sentry.io"},
+	})
+	assert.Contains(t, buf.String(), "Network:  isolated (2 allowed domains)")
+}
+
+func TestPrintCreateSummary_WithPorts(t *testing.T) {
+	var buf bytes.Buffer
+	printCreateSummary(&buf, &store.Meta{
+		Name:    "test",
+		Agent:   "test",
+		Workdir: store.WorkdirMeta{HostPath: "/project", Mode: "copy"},
+		Ports:   []string{"3000:3000", "8080:80"},
+	})
+	assert.Contains(t, buf.String(), "3000:3000")
+	assert.Contains(t, buf.String(), "8080:80")
+}

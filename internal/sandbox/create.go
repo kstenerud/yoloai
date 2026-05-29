@@ -284,7 +284,6 @@ func (m *Manager) Create(ctx context.Context, opts CreateOptions) (name string, 
 	}
 
 	if opts.NoStart {
-		m.printCreationOutput(state)
 		return "", nil
 	}
 
@@ -306,7 +305,6 @@ func (m *Manager) Create(ctx context.Context, opts CreateOptions) (name string, 
 	}
 
 	slog.Info("sandbox created", "event", "sandbox.create.complete", "sandbox", state.name)
-	m.printCreationOutput(state)
 	return state.name, nil
 }
 
@@ -855,53 +853,6 @@ func (m *Manager) launchContainer(ctx context.Context, state *sandboxState) erro
 	ports = filterAvailablePorts(ports, m.output)
 
 	return m.buildAndStart(ctx, state, mounts, ports, secretsDir != "")
-}
-
-// printCreationOutput prints the context-aware creation summary plus the
-// next-step hint (attach / diff).
-func (m *Manager) printCreationOutput(state *sandboxState) {
-	if state == nil {
-		return
-	}
-
-	fmt.Fprintf(m.output, "Sandbox %s created\n", state.name)   //nolint:errcheck // best-effort output
-	fmt.Fprintf(m.output, "  Agent:    %s\n", state.agent.Name) //nolint:errcheck // best-effort output
-	if state.profile != "" {
-		fmt.Fprintf(m.output, "  Profile:  %s\n", state.profile) //nolint:errcheck // best-effort output
-	}
-	fmt.Fprintf(m.output, "  Workdir:  %s (%s)\n", state.workdir.Path, state.workdir.Mode) //nolint:errcheck // best-effort output
-	for _, ad := range state.auxDirs {
-		mode := ad.Mode
-		if mode == "" {
-			mode = "ro"
-		}
-		if ad.MountPath != "" {
-			fmt.Fprintf(m.output, "  Dir:      %s → %s (%s)\n", ad.Path, ad.MountPath, mode) //nolint:errcheck // best-effort output
-		} else {
-			fmt.Fprintf(m.output, "  Dir:      %s (%s)\n", ad.Path, mode) //nolint:errcheck // best-effort output
-		}
-	}
-	switch state.networkMode {
-	case "none":
-		fmt.Fprintln(m.output, "  Network:  none") //nolint:errcheck // best-effort output
-	case "isolated":
-		fmt.Fprintf(m.output, "  Network:  isolated (%d allowed domains)\n", len(state.networkAllow)) //nolint:errcheck // best-effort output
-	}
-	if len(state.ports) > 0 {
-		fmt.Fprintf(m.output, "  Ports:    %s\n", strings.Join(state.ports, ", ")) //nolint:errcheck // best-effort output
-	}
-	fmt.Fprintln(m.output) //nolint:errcheck // best-effort output
-
-	if state.hasPrompt {
-		fmt.Fprintf(m.output, "Run 'yoloai attach %s' to interact (Ctrl-b d to detach)\n", state.name) //nolint:errcheck // best-effort output
-		fmt.Fprintf(m.output, "    'yoloai diff %s' when done\n", state.name)                          //nolint:errcheck // best-effort output
-	} else {
-		fmt.Fprintf(m.output, "Run 'yoloai attach %s' to start working (Ctrl-b d to detach)\n", state.name) //nolint:errcheck // best-effort output
-	}
-	if state.vscodeTunnel {
-		fmt.Fprintln(m.output, "\nVS Code tunnel starting in the 'vscode-tunnel' tmux window.")          //nolint:errcheck // best-effort output
-		fmt.Fprintln(m.output, "Run 'yoloai help vscode-tunnel' for setup and connection instructions.") //nolint:errcheck // best-effort output
-	}
 }
 
 // resolveModel expands a model alias. User-configured aliases (from

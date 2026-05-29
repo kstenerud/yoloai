@@ -561,87 +561,6 @@ func TestBuildMounts_IncludesSecrets(t *testing.T) {
 	assert.True(t, found, "should include secrets mount")
 }
 
-// printCreationOutput tests
-
-func TestPrintCreationOutput_Basic(t *testing.T) {
-	var buf bytes.Buffer
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), &buf, WithLayout(config.NewLayout(t.TempDir())))
-
-	agentDef := agent.GetAgent("claude")
-	state := &sandboxState{
-		name:    "test-sandbox",
-		workdir: &DirSpec{Path: "/project", Mode: DirMode("copy")},
-		agent:   agentDef,
-	}
-
-	mgr.printCreationOutput(state)
-
-	output := buf.String()
-	assert.Contains(t, output, "test-sandbox")
-	assert.Contains(t, output, "claude")
-	assert.Contains(t, output, "/project")
-	assert.Contains(t, output, "copy")
-	assert.Contains(t, output, "attach")
-}
-
-func TestPrintCreationOutput_WithPrompt(t *testing.T) {
-	var buf bytes.Buffer
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), &buf, WithLayout(config.NewLayout(t.TempDir())))
-
-	state := &sandboxState{
-		name:      "test",
-		workdir:   &DirSpec{Path: "/project", Mode: DirMode("copy")},
-		agent:     agent.GetAgent("test"),
-		hasPrompt: true,
-	}
-
-	mgr.printCreationOutput(state)
-
-	assert.Contains(t, buf.String(), "diff")
-}
-
-func TestPrintCreationOutput_NetworkNone(t *testing.T) {
-	var buf bytes.Buffer
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), &buf, WithLayout(config.NewLayout(t.TempDir())))
-
-	state := &sandboxState{
-		name:        "test",
-		workdir:     &DirSpec{Path: "/project", Mode: DirMode("copy")},
-		agent:       agent.GetAgent("test"),
-		networkMode: "none",
-	}
-
-	mgr.printCreationOutput(state)
-
-	assert.Contains(t, buf.String(), "Network:  none")
-}
-
-func TestPrintCreationOutput_WithPorts(t *testing.T) {
-	var buf bytes.Buffer
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), &buf, WithLayout(config.NewLayout(t.TempDir())))
-
-	state := &sandboxState{
-		name:    "test",
-		workdir: &DirSpec{Path: "/project", Mode: DirMode("copy")},
-		agent:   agent.GetAgent("test"),
-		ports:   []string{"3000:3000", "8080:80"},
-	}
-
-	mgr.printCreationOutput(state)
-
-	assert.Contains(t, buf.String(), "3000:3000")
-	assert.Contains(t, buf.String(), "8080:80")
-}
-
-func TestPrintCreationOutput_NilState(t *testing.T) {
-	var buf bytes.Buffer
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), &buf, WithLayout(config.NewLayout(t.TempDir())))
-
-	mgr.printCreationOutput(nil)
-
-	assert.Empty(t, buf.String())
-}
-
 // prepareSandboxState validation tests
 
 func TestPrepareSandboxState_MissingName(t *testing.T) {
@@ -959,23 +878,6 @@ func TestPrepareSandboxState_MissingAPIKeyErrorWithAuthFiles(t *testing.T) {
 	errMsg := err.Error()
 	assert.Contains(t, errMsg, ".credentials.json", "error should mention .credentials.json from AuthOnly seed files")
 	assert.NotContains(t, errMsg, "local models", "claude has no AuthHintEnvVars, should not mention local models")
-}
-
-func TestPrintCreationOutput_NetworkIsolated(t *testing.T) {
-	var buf bytes.Buffer
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), &buf, WithLayout(config.NewLayout(t.TempDir())))
-
-	state := &sandboxState{
-		name:         "test",
-		workdir:      &DirSpec{Path: "/project", Mode: DirMode("copy")},
-		agent:        agent.GetAgent("test"),
-		networkMode:  "isolated",
-		networkAllow: []string{"api.anthropic.com", "sentry.io"},
-	}
-
-	mgr.printCreationOutput(state)
-
-	assert.Contains(t, buf.String(), "Network:  isolated (2 allowed domains)")
 }
 
 func TestPrepareSandboxState_NetworkIsolatedSetsAllowlist(t *testing.T) {

@@ -342,6 +342,12 @@ func executeNewCreate(cmd *cobra.Command, ctx context.Context, c *yoloai.Client,
 		return cliutil.WriteJSON(cmd.OutOrStdout(), meta)
 	}
 
+	// Print the creation summary (the library no longer formats presentation —
+	// F8). opts.Name is used because Create returns "" for --no-start.
+	if meta, loadErr := store.LoadMeta(cliutil.Layout().SandboxDir(opts.Name)); loadErr == nil {
+		printCreateSummary(cmd.OutOrStdout(), meta)
+	}
+
 	if sandboxName == "" || !attach || opts.NoStart {
 		return nil
 	}
@@ -351,6 +357,50 @@ func executeNewCreate(cmd *cobra.Command, ctx context.Context, c *yoloai.Client,
 		return err
 	}
 	return sb.Attach(ctx, cliutil.IOStreams())
+}
+
+// printCreateSummary renders the post-create summary + next-step hints from the
+// created sandbox's metadata. The library returns the sandbox; the CLI owns this
+// presentation (F8).
+func printCreateSummary(out io.Writer, meta *store.Meta) {
+	fmt.Fprintf(out, "Sandbox %s created\n", meta.Name) //nolint:errcheck // best-effort output
+	fmt.Fprintf(out, "  Agent:    %s\n", meta.Agent)    //nolint:errcheck // best-effort output
+	if meta.Profile != "" {
+		fmt.Fprintf(out, "  Profile:  %s\n", meta.Profile) //nolint:errcheck // best-effort output
+	}
+	fmt.Fprintf(out, "  Workdir:  %s (%s)\n", meta.Workdir.HostPath, meta.Workdir.Mode) //nolint:errcheck // best-effort output
+	for _, d := range meta.Directories {
+		mode := d.Mode
+		if mode == "" {
+			mode = "ro"
+		}
+		if d.MountPath != "" {
+			fmt.Fprintf(out, "  Dir:      %s → %s (%s)\n", d.HostPath, d.MountPath, mode) //nolint:errcheck // best-effort output
+		} else {
+			fmt.Fprintf(out, "  Dir:      %s (%s)\n", d.HostPath, mode) //nolint:errcheck // best-effort output
+		}
+	}
+	switch meta.NetworkMode {
+	case "none":
+		fmt.Fprintln(out, "  Network:  none") //nolint:errcheck // best-effort output
+	case "isolated":
+		fmt.Fprintf(out, "  Network:  isolated (%d allowed domains)\n", len(meta.NetworkAllow)) //nolint:errcheck // best-effort output
+	}
+	if len(meta.Ports) > 0 {
+		fmt.Fprintf(out, "  Ports:    %s\n", strings.Join(meta.Ports, ", ")) //nolint:errcheck // best-effort output
+	}
+	fmt.Fprintln(out) //nolint:errcheck // best-effort output
+
+	if meta.HasPrompt {
+		fmt.Fprintf(out, "Run 'yoloai attach %s' to interact (Ctrl-b d to detach)\n", meta.Name) //nolint:errcheck // best-effort output
+		fmt.Fprintf(out, "    'yoloai diff %s' when done\n", meta.Name)                          //nolint:errcheck // best-effort output
+	} else {
+		fmt.Fprintf(out, "Run 'yoloai attach %s' to start working (Ctrl-b d to detach)\n", meta.Name) //nolint:errcheck // best-effort output
+	}
+	if meta.VscodeTunnel {
+		fmt.Fprintln(out, "\nVS Code tunnel starting in the 'vscode-tunnel' tmux window.")          //nolint:errcheck // best-effort output
+		fmt.Fprintln(out, "Run 'yoloai help vscode-tunnel' for setup and connection instructions.") //nolint:errcheck // best-effort output
+	}
 }
 
 // confirmDirtyWorkdir renders the uncommitted-changes warning and asks the user
