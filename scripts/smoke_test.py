@@ -1493,14 +1493,30 @@ def _prompt(exdir: str, work: str, sentinel: str = SENTINEL) -> str:
          classic instruction-following failure under negation. Couldn't be
          empirically verified without a fresh flake transcript.
 
-    v3 (this) — keep the explicit "Run this shell command" wrapper that
+    v3 — keep the explicit "Run this shell command" wrapper that
          resolved v1's failure mode, drop the negation, add a positive
          tool reference. The "using your shell/bash tool" hint signals
          that a tool call IS expected, reducing the chance the model
          produces a tool-less narrative reply (which would classify as
          idle in monitor.py).
+
+    v4 (this) — bind the exchange dir to a shell variable so the long path
+         appears ONCE instead of three times. Both seatbelt full_workflow
+         and stop_start flaked here (run 20260529-034737): the haiku agent
+         dropped the `mv` *target* — the third occurrence of seatbelt's
+         ~90-char host exchange path — and stalled asking the user to
+         clarify, so `done` was never written. docker/podman passed the same
+         prompt because their exdir is the short `/yoloai/files`; the failure
+         tracked path length/repetition, not the backend. `$d/in-progress`
+         and `$d/done` are short tokens a small model is unlikely to garble.
+         `{work}` still runs in the cwd (it must: test_full_workflow asserts
+         output.txt lands in the work dir after apply), and the two-stage
+         rename-within-dir sentinel is preserved unchanged.
     """
-    cmd = f"touch {exdir}/{IN_PROGRESS} && {work} && mv {exdir}/{IN_PROGRESS} {exdir}/{sentinel}"
+    cmd = (
+        f'd={exdir}; touch "$d/{IN_PROGRESS}" && {work} '
+        f'&& mv "$d/{IN_PROGRESS}" "$d/{sentinel}"'
+    )
     return f"Run this shell command exactly as written, using your shell/bash tool:\n{cmd}"
 
 
