@@ -346,6 +346,48 @@ func TestResolveArchetype_DevcontainerRunArgs_CPUMemory(t *testing.T) {
 	assert.Equal(t, "8g", pr.resources.Memory)
 }
 
+// --- Per-call Output routing (F8) ---
+
+// TestCreateOutput_PerCallWriterOverridesManager verifies that a create-pipeline
+// advisory routes to CreateOptions.Output when set, and not to the Manager's
+// own output writer — proving concurrent Creates can keep their progress
+// streams separate.
+func TestCreateOutput_PerCallWriterOverridesManager(t *testing.T) {
+	dir := makeWorkdir(t)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".yoloai.yaml"),
+		[]byte("archetype: simple\nrequires:\n  foo: \">=1\"\n"), 0600))
+
+	var mgrBuf, callBuf bytes.Buffer
+	m := newTestManager(t, &mgrBuf)
+	opts := &CreateOptions{Workdir: DirSpec{Path: dir}, Output: &callBuf}
+
+	_, _, _, _, err := m.resolveAndApplyArchetype(context.Background(), opts, &profileResult{})
+	require.NoError(t, err)
+
+	assert.Contains(t, callBuf.String(), "version verification not yet implemented",
+		"the requires: advisory must reach the per-call writer")
+	assert.Empty(t, mgrBuf.String(),
+		"nothing should reach the Manager's output when a per-call writer is set")
+}
+
+// TestCreateOutput_NilWriterFallsBackToManager verifies the documented contract:
+// a nil CreateOptions.Output falls back to the Manager's output writer.
+func TestCreateOutput_NilWriterFallsBackToManager(t *testing.T) {
+	dir := makeWorkdir(t)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".yoloai.yaml"),
+		[]byte("archetype: simple\nrequires:\n  foo: \">=1\"\n"), 0600))
+
+	var mgrBuf bytes.Buffer
+	m := newTestManager(t, &mgrBuf)
+	opts := &CreateOptions{Workdir: DirSpec{Path: dir}} // Output left nil
+
+	_, _, _, _, err := m.resolveAndApplyArchetype(context.Background(), opts, &profileResult{})
+	require.NoError(t, err)
+
+	assert.Contains(t, mgrBuf.String(), "version verification not yet implemented",
+		"with no per-call writer, advisories fall back to the Manager's output")
+}
+
 // --- Lifecycle command to JSON ---
 
 func TestLifecycleCmdToJSON_String(t *testing.T) {

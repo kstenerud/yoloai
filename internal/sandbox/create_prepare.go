@@ -84,7 +84,7 @@ func (m *Manager) resolveProfileConfig(ctx context.Context, opts *CreateOptions,
 	pr.imageRef = config.ResolveProfileImage(m.layout, opts.Profile, chain)
 
 	// Build profile image if needed (Docker only)
-	if err := EnsureProfileImage(ctx, m.runtime, m.layout, opts.Profile, AutoBuildSecrets(m.layout.HomeDir), m.output, m.logger, false); err != nil {
+	if err := EnsureProfileImage(ctx, m.runtime, m.layout, opts.Profile, AutoBuildSecrets(m.layout.HomeDir), m.outputFor(opts.Output), m.logger, false); err != nil {
 		return nil, fmt.Errorf("build profile image: %w", err)
 	}
 
@@ -280,7 +280,7 @@ func (m *Manager) parseAndValidateDirs(opts CreateOptions, agentDef *agent.Defin
 		return nil, nil, err
 	}
 
-	if err := checkDirSafety(workdir, auxDirs, m.output, m.layout.HomeDir); err != nil {
+	if err := checkDirSafety(workdir, auxDirs, m.outputFor(opts.Output), m.layout.HomeDir); err != nil {
 		return nil, nil, err
 	}
 
@@ -300,7 +300,7 @@ func (m *Manager) checkAuthAndLocalhostWarnings(agentDef *agent.Definition, merg
 	hasAPIKey := hasAnyAPIKey(agentDef, credOverrides)
 	hasAuth := hasAnyAuthFile(agentDef, m.layout.HomeDir)
 	hasAuthHint := hasAnyAuthHint(agentDef, mergedEnv, credOverrides)
-	if err := checkAgentAuth(agentDef, hasAPIKey, hasAuth, hasAuthHint, m.output); err != nil {
+	if err := checkAgentAuth(agentDef, hasAPIKey, hasAuth, hasAuthHint, m.outputFor(opts.Output)); err != nil {
 		return err
 	}
 
@@ -720,12 +720,12 @@ func (m *Manager) resolveAndApplyArchetype(ctx context.Context, opts *CreateOpti
 	}
 
 	// Step 2: Platform check for apple archetype
-	if err := checkAppleArchetype(m.output, arch, opts.Archetype); err != nil {
+	if err := checkAppleArchetype(m.outputFor(opts.Output), arch, opts.Archetype); err != nil {
 		return "", nil, nil, nil, err
 	}
 
 	// Step 3: requires: validation (warning only — version verification unimplemented)
-	checkRequires(m.output, yamlCfg)
+	checkRequires(m.outputFor(opts.Output), yamlCfg)
 
 	// Step 4: Archetype expansion
 	devcontainerCfg, dcMounts, dcMountWarnings, bullets, err := m.expandArchetype(ctx, opts, pr, arch, yamlCfg)
@@ -734,7 +734,7 @@ func (m *Manager) resolveAndApplyArchetype(ctx context.Context, opts *CreateOpti
 	}
 
 	// Step 5: Transparency output
-	printArchetypeOutput(m.output, arch, source, signals, bullets)
+	printArchetypeOutput(m.outputFor(opts.Output), arch, source, signals, bullets)
 
 	return arch, devcontainerCfg, dcMounts, dcMountWarnings, nil
 }
@@ -856,9 +856,9 @@ func (m *Manager) applyDevcontainerArchetype(ctx context.Context, opts *CreateOp
 				"use a project with devcontainer.json and docker-compose.yaml side by side instead")
 	}
 
-	dc.WarnIgnoredFields(m.output)
+	dc.WarnIgnoredFields(m.outputFor(opts.Output))
 
-	bullets = applyDevcontainerRunArgs(dc, pr, bullets, m.output)
+	bullets = applyDevcontainerRunArgs(dc, pr, bullets, m.outputFor(opts.Output))
 	bullets = applyDevcontainerCompose(dc, opts, pr, bullets)
 	bullets = applyDevcontainerEnv(dc, pr, bullets)
 	bullets = applyDevcontainerPorts(dc, opts, bullets)

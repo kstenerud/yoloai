@@ -6,6 +6,7 @@ package yoloai
 
 import (
 	"fmt"
+	"io"
 
 	"github.com/kstenerud/yoloai/internal/sandbox"
 )
@@ -96,6 +97,12 @@ type CreateOptions struct {
 	// Workdir.AllowDirty. Aux directories are acked individually via their own
 	// DirSpec.AllowDirty.
 	AllowDirtyWorkdir bool
+
+	// Output receives the create pipeline's human-readable progress (profile
+	// image build stream, advisory warnings). Per-call so concurrent Creates on
+	// one Client don't interleave on a shared writer. Nil falls back to the
+	// Client's Options.Output.
+	Output io.Writer
 }
 
 // toInternal maps the public CreateOptions onto the internal sandbox struct.
@@ -134,6 +141,7 @@ func (o CreateOptions) toInternal() sandbox.CreateOptions {
 		Runtimes:     o.Runtimes,
 		VscodeTunnel: o.VscodeTunnel,
 		Archetype:    o.Archetype,
+		Output:       o.Output,
 	}
 }
 

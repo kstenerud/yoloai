@@ -913,6 +913,7 @@ func (m *Manager) recreateContainer(ctx context.Context, name string, meta *stor
 		configJSON:    configData,
 		layout:        m.layout,
 		homeDir:       m.layout.HomeDir,
+		output:        m.output,
 	}
 
 	if resume {

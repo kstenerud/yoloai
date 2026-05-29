@@ -101,13 +101,25 @@ Carve `internal/sandbox/` into:
 Shared `sandboxState` exposed deliberately. Mirrors the W-L13 CLI
 carve. Multi-week effort.
 
-### F8 — Refactor to structured results
+### F8 — Refactor to structured results — DONE (2026-05-29; field-removal tail deferred)
 
-Manager methods return per-method `<Op>Result` types carrying a
-`Notices []Notice` field (each Notice has `Level`, `Code`, `Args`).
-CLI gains a `RenderNotice` helper. Roughly 30 message sites converted
-across `internal/sandbox/*`. The embedded `m.output io.Writer` goes
-away. Multi-week.
+Destroy/Start/Reset return per-method `<Op>Result` types carrying `Notices []Notice`.
+`Notice` is `{Level NoticeLevel; Message string}` — **plain-message, NOT coded**
+(`Level`/`Code`/`Args` was the original sketch; YAGNI won — no i18n need today, and a
+coded form is an additive change later if it ever lands). CLI renders via
+`cliutil.RenderNotices` (warn→stderr, info→stdout, info suppressed under `--json`).
+The post-create summary moved into the CLI (`printCreateSummary` from `store.Meta`).
+
+Create keeps returning `(string, error)`: its build log is a **live stream**, not a
+discrete message, so it can't be a returned Notice. Instead Create's progress (build
+stream + ~12 advisories) routes through a per-call `CreateOptions.Output io.Writer`
+(public + internal + mapping), resolved at every site via `Manager.outputFor(o)`
+(returns `o` if non-nil else `m.output`, never nil). See working-notes **D33**.
+
+**Deferred tail:** the embedded `m.output io.Writer` field + `NewManager`'s output param
+still exist — `EnsureSetup` (first-run setup, also `system setup`), `recreateContainer`,
+and `setup.go` use them. Removing the field (and storing an output on `Client` to seed
+per-call defaults) is the remaining step.
 
 ### F18 — Move to optional interfaces — DONE (2026-05-28; moved 3 of 5)
 
@@ -202,7 +214,7 @@ land in pieces.
 6. **F22** (1 session, post-F1): strict Sandbox(name)
 7. **F18** (1-2 sessions): move 5 methods to optional interfaces
 8. **F23** (multi-session): cross-backend ops into SystemClient
-9. **F8** (multi-session): structured Results
+9. **F8** (multi-session): structured Results — DONE 2026-05-29 (field-removal tail deferred)
 10. **F5** (multi-week): sandbox/ god-package carve
 11. **F24** (ongoing): Python helper carves
 

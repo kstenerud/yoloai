@@ -4,6 +4,7 @@ package sandbox
 
 import (
 	"fmt"
+	"io"
 
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
@@ -14,7 +15,7 @@ import (
 // Returns agentFilesInitialized so the caller can persist it to SandboxState.
 // Extracted from prepareSandboxState().
 // homeDir is used for ~ expansion in seed file host paths.
-func (m *Manager) seedSandbox(agentDef *agent.Definition, sandboxDir string, isolation runtime.IsolationMode, agentFiles *config.AgentFilesConfig, credOverrides map[string]string, homeDir string) (agentFilesInitialized bool, err error) {
+func (m *Manager) seedSandbox(agentDef *agent.Definition, sandboxDir string, isolation runtime.IsolationMode, agentFiles *config.AgentFilesConfig, credOverrides map[string]string, homeDir string, output io.Writer) (agentFilesInitialized bool, err error) {
 	// Copy seed files into agent-state (config, OAuth credentials, etc.)
 	hasAPIKey := hasAnyAPIKey(agentDef, credOverrides)
 	copiedAuth, err := copySeedFiles(agentDef, sandboxDir, hasAPIKey, homeDir)
@@ -24,10 +25,10 @@ func (m *Manager) seedSandbox(agentDef *agent.Definition, sandboxDir string, iso
 
 	// Warn when an agent is using short-lived OAuth credentials instead of a long-lived token.
 	if agentDef.ShortLivedOAuthWarning && copiedAuth {
-		fmt.Fprintln(m.output, "Warning: using OAuth credentials from ~/.claude/.credentials.json")                         //nolint:errcheck // best-effort warning
-		fmt.Fprintln(m.output, "  These tokens expire after ~30 minutes and may fail in long-running sessions.")            //nolint:errcheck // best-effort warning
-		fmt.Fprintln(m.output, "  For reliable auth, run 'claude setup-token' and export CLAUDE_CODE_OAUTH_TOKEN instead.") //nolint:errcheck // best-effort warning
-		fmt.Fprintln(m.output)                                                                                              //nolint:errcheck // best-effort warning
+		fmt.Fprintln(output, "Warning: using OAuth credentials from ~/.claude/.credentials.json")                         //nolint:errcheck // best-effort warning
+		fmt.Fprintln(output, "  These tokens expire after ~30 minutes and may fail in long-running sessions.")            //nolint:errcheck // best-effort warning
+		fmt.Fprintln(output, "  For reliable auth, run 'claude setup-token' and export CLAUDE_CODE_OAUTH_TOKEN instead.") //nolint:errcheck // best-effort warning
+		fmt.Fprintln(output)                                                                                              //nolint:errcheck // best-effort warning
 	}
 
 	// Ensure container-required settings (e.g., skip bypass permissions prompt)

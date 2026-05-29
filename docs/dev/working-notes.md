@@ -697,6 +697,25 @@ Trash is a lightweight quarantine: `os.Rename` into `~/.yoloai/trash/<name>` (`s
 
 ---
 
+## D33 — F8 final phase: Create's progress stream is a per-call `CreateOptions.Output`, not `m.output`
+
+**Date:** 2026-05-29. **Status:** Accepted. **Context:** F8 (decouple the Manager from a long-lived `m.output` writer) had already migrated Destroy/Start/Reset to structured `Notices` and moved the post-create summary into the CLI (`printCreateSummary`). The Create pipeline still streamed ~12 advisories and the profile-image **build log** straight to `m.output` — and a build log is a live stream, so it can't be a returned `Notice` like the lifecycle messages. The owner chose "Targeted decouple": route Create's own output through a per-call writer now, defer removing the `m.output` field (still used by `EnsureSetup`/`recreateContainer`/`setup.go`) to a later phase.
+
+**Decision.** Add `Output io.Writer` to both `sandbox.CreateOptions` and the public `yoloai.CreateOptions` (mapped in `toInternal`). The create pipeline never reads `m.output` directly; every consumption site resolves through `func (m *Manager) outputFor(o io.Writer) io.Writer` — returns `o` when non-nil, else `m.output`, **never nil**. So a per-call writer wins (concurrent Creates on one Manager keep separate streams), nil falls back to the Client's `Options.Output`, and a leaf writer can't panic on a nil `io.Writer` no matter which create helper a caller enters through.
+
+**Why a resolver instead of defaulting `opts.Output` once in `Create`.** `resolveAndApplyArchetype` is an independently unit-tested seam (18 callers in `archetype_resolution_test.go`) that builds `CreateOptions` inline and bypasses `Create`. A single default in `Create` left those helpers panicking on `fmt.Fprintf(nil, …)`. `outputFor` makes *every* entry point safe uniformly rather than relying on "Create defaulted it."
+
+**Consequences.**
+- `sandboxState.output` holds the raw (possibly nil) per-call writer; the sole consumer (`launchContainer` → `filterAvailablePorts`) wraps it in `outputFor`. `recreateContainer`'s restart-path state literal sets `output: m.output` so its behavior is unchanged.
+- CLI behavior is identical: `new` leaves the public `Output` nil, so `outputFor(nil)` resolves to `m.output` = the Client's `mgrOutput` (stderr, or `io.Discard` under `--json`). No `runNewCmd` change needed.
+- New tests `TestCreateOutput_PerCallWriterOverridesManager` / `TestCreateOutput_NilWriterFallsBackToManager` pin the contract.
+
+**Deferred.** The `m.output` field and `NewManager`'s output param stay — `EnsureSetup` (first-run system setup, also reachable via `system setup`), `recreateContainer`, and `setup.go` still use them. Removing the field (and giving `Client` a stored `output` to seed per-call defaults) is the next F8 phase.
+
+**Composition.** Completes F8 alongside the structured-`Notices` work (D-F8 lifecycle migration). The per-call-writer-with-resolver mirrors the optional-interface `XFor` helper idiom (D30) and the thin-CLI / library-owns-I/O boundary (D27).
+
+---
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.

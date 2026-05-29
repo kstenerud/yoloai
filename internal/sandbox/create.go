@@ -142,6 +142,12 @@ type CreateOptions struct {
 	Runtimes     []string              // --runtime flags (Apple simulator runtimes, e.g., ["ios", "tvos:26.1"])
 	VscodeTunnel bool                  // --vscode-tunnel flag
 	Archetype    string                // --archetype flag (empty = auto-detect)
+
+	// Output receives the create pipeline's human-readable progress (profile
+	// image build stream, advisory warnings). Per-call so concurrent Creates on
+	// the same Manager don't interleave on a shared writer. Nil falls back to
+	// the Manager's output writer (the Client's Options.Output). F8.
+	Output io.Writer
 }
 
 // sandboxState holds resolved state computed during preparation.
@@ -182,6 +188,7 @@ type sandboxState struct {
 	workdirMode               string        // resolved workdir mode ("copy", "overlay", "rw")
 	layout                    config.Layout // Q-W.3: DataDir-rooted Layout propagated from the Manager
 	homeDir                   string        // Q-W.6: host home dir (layout.HomeDir); used for ~ expansion
+	output                    io.Writer     // create-pipeline progress writer (CreateOptions.Output); F8
 }
 
 // overlayMountConfig describes a single overlay mount for config.json.
@@ -239,6 +246,17 @@ type containerConfig struct {
 	VscodeTunnel       bool                  `json:"vscode_tunnel,omitempty"`
 	VscodeTunnelName   string                `json:"vscode_tunnel_name,omitempty"`
 	Lifecycle          *lifecycleConfig      `json:"lifecycle,omitempty"`
+}
+
+// outputFor resolves the create-pipeline progress writer: the per-call
+// CreateOptions.Output when set, otherwise the Manager's output (the Client's
+// Options.Output). Never returns nil, so leaf writers can't panic on a nil
+// io.Writer regardless of which create helper a caller enters through. F8.
+func (m *Manager) outputFor(o io.Writer) io.Writer {
+	if o != nil {
+		return o
+	}
+	return m.output
 }
 
 // Create creates and optionally starts a new sandbox.
@@ -361,7 +379,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions, c
 
 	// Phase 2: Create directory structure and seed sandbox.
 	perms := Perms(pr.isolation)
-	agentFilesInitialized, err := m.createAndSeedSandbox(ctx, sandboxDir, agentDef, pr, credOverrides, perms)
+	agentFilesInitialized, err := m.createAndSeedSandbox(ctx, sandboxDir, agentDef, pr, credOverrides, perms, m.outputFor(opts.Output))
 	if err != nil {
 		return nil, err
 	}
@@ -415,7 +433,7 @@ func (m *Manager) resolveProfileAndArchetype(ctx context.Context, opts *CreateOp
 
 	mergeDcMounts(pr, dcMounts)
 	for _, w := range dcMountWarnings {
-		fmt.Fprintln(m.output, w) //nolint:errcheck // best-effort warning
+		fmt.Fprintln(m.outputFor(opts.Output), w) //nolint:errcheck // best-effort warning
 	}
 
 	state_onCreateDone := loadOnCreateDone(m.layout.SandboxDir(opts.Name))
@@ -429,12 +447,12 @@ func (m *Manager) resolveProfileAndArchetype(ctx context.Context, opts *CreateOp
 }
 
 // createAndSeedSandbox creates directory structure and seeds the sandbox with agent files.
-func (m *Manager) createAndSeedSandbox(ctx context.Context, sandboxDir string, agentDef *agent.Definition, pr *profileResult, credOverrides map[string]string, perms IsolationPerms) (bool, error) {
+func (m *Manager) createAndSeedSandbox(ctx context.Context, sandboxDir string, agentDef *agent.Definition, pr *profileResult, credOverrides map[string]string, perms IsolationPerms, output io.Writer) (bool, error) {
 	_ = ctx // reserved for future use
 	if err := createSandboxDirs(sandboxDir, perms); err != nil {
 		return false, err
 	}
-	return m.seedSandbox(agentDef, sandboxDir, pr.isolation, pr.agentFiles, credOverrides, m.layout.HomeDir)
+	return m.seedSandbox(agentDef, sandboxDir, pr.isolation, pr.agentFiles, credOverrides, m.layout.HomeDir, output)
 }
 
 // buildConfigAndMeta builds the container config and sandbox meta structs.
@@ -500,6 +518,7 @@ func buildSandboxStateResult(opts CreateOptions, sandboxDir string, workdir *Dir
 		workdirMode:               string(workdir.Mode),
 		layout:                    layout,
 		homeDir:                   homeDir,
+		output:                    opts.Output,
 	}
 }
 
@@ -559,7 +578,7 @@ func (m *Manager) resolveRuntimeBase(ctx context.Context, opts *CreateOptions, p
 	if err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(m.output, "Using runtime base %s\n", imageRef)
+	_, _ = fmt.Fprintf(m.outputFor(opts.Output), "Using runtime base %s\n", imageRef)
 	pr.imageRef = imageRef
 	return nil
 }
@@ -850,7 +869,7 @@ func (m *Manager) launchContainer(ctx context.Context, state *sandboxState) erro
 	if err != nil {
 		return err
 	}
-	ports = filterAvailablePorts(ports, m.output)
+	ports = filterAvailablePorts(ports, m.outputFor(state.output))
 
 	return m.buildAndStart(ctx, state, mounts, ports, secretsDir != "")
 }
