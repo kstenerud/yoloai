@@ -73,7 +73,7 @@ row to the index.
 | `yoloai new --attach` hangs after "Sandbox created"; Python setup never completes | [Tart: mount_map uses Docker paths, triggering macOS automount](#tart-mount_map-uses-docker-style-paths-triggering-macos-automount-hang) |
 | `FileNotFoundError` at `get_working_dir()` / agent starts in wrong directory | [Tart: workdir setup races Python startup](#tart-vm-workdir-setup-races-python-startup) |
 | `yoloai apply` fails: `git add: git [add -A]: exit status 128: … index.lock: File exists` while agent is running | [Docker/Podman: agent git and apply git race on index.lock](#dockerpodman-agent-git-and-apply-git-race-on-indexlock) |
-| `FileNotFoundError: 'tmux'` in `sandbox-setup.py::setup_tmux_session` on Tart VM | [Tart: transient PATH failure makes tmux unresolvable at call time](#tart-transient-path-failure-makes-tmux-unresolvable-at-call-time) |
+| `FileNotFoundError: 'tmux'` in `sandbox-setup.py::setup_tmux_session` on Tart VM (intermittent) | [Tart: transient FS/PATH failure makes tmux unresolvable during the firstlaunch window](#tart-transient-fspath-failure-makes-tmux-unresolvable-during-the-firstlaunch-window) |
 | Is it safe to delete a `.lock` file while holding its flock? (prune / Destroy) | [Removing a .lock file while holding its flock is safe](#removing-a-lock-file-while-holding-its-flock-is-safe) |
 
 ---
@@ -1343,29 +1343,42 @@ so `tmux set-environment` is skipped; secrets reach the agent via the explicit
 
 ---
 
-### Tart: transient PATH failure makes tmux unresolvable at call time
+### Tart: transient FS/PATH failure makes tmux unresolvable during the firstlaunch window
 
 **Symptom:** `sandbox-setup.py` crashes with `FileNotFoundError: [Errno 2] No such
-file or directory: 'tmux'` inside `setup_tmux_session`. The Tart VM is booted
-and running; tmux is installed; the crash is intermittent and usually follows
-the `xcodebuild -runFirstLaunch` completion log line in `setup.log`.
+file or directory: 'tmux'` inside `setup_tmux_session`. The Tart VM is booted and
+running; tmux **is** installed (`/opt/homebrew/bin/tmux` exists in the base image);
+the crash is intermittent. In `sandbox.jsonl` the `tmux.start` event lands within a
+couple of seconds of `tart.xcode.firstlaunch.started` — i.e. tmux is started while
+`xcodebuild -runFirstLaunch` is still running, not after it completes.
 
-**Explanation:** macOS's security scanning (XPC/Gatekeeper background activity)
-kicks in after `xcodebuild -runFirstLaunch` completes, transiently shadowing or
-blocking executable PATH searches for a short window. During this window,
-`shutil.which("tmux")` returns `None` and `subprocess.run(["tmux", ...])` raises
-`FileNotFoundError`. Because the PATH search happened at call time (not import
-time), the failed run leaves no tmux binary resolved.
+**Explanation:** the security-scan storm that `xcodebuild -runFirstLaunch` triggers
+transiently hides tmux from **both** `shutil.which("tmux")` (PATH lookup) **and**
+`os.path.isfile("/opt/homebrew/bin/tmux")` (a direct stat — so this is not merely a
+PATH-search problem). Any single resolution sampled inside this window misses a tmux
+that is genuinely on disk. The window is timing-dependent, which is why the same
+binary both passes and fails across runs (confirmed: commit `a10ab70` passed run
+171245 and failed runs 202401/204935).
 
-**Fix:** `tmux_io.py` now resolves the tmux absolute path **once at module import
-time** via `shutil.which()` + known Homebrew fallback paths
-(`/opt/homebrew/bin/tmux`, `/usr/local/bin/tmux`, `/usr/bin/tmux`). All tmux
-invocations (in `tmux_io.tmux()` and the `subprocess.run` calls in
-`sandbox-setup.py::setup_tmux_session`) use the pre-resolved `_TMUX_BIN`
-constant. Import happens before xcodebuild runs, so the PATH scan succeeds.
+**Why the earlier "resolve at import time" fix (802ab22) did not hold:** moving
+resolution to module-import time made it *worse* — import is the earliest possible
+moment, landing it squarely in the firstlaunch window and then **freezing** the bad
+`"tmux"` sample for the whole process. The pre-802ab22 call-time resolution
+"accidentally" worked when the call happened to fall after the window cleared.
+Neither *where* you resolve matters; the deciding factor is whether tmux is reachable
+*at the sampled instant*.
 
-**Code:** `internal/runtime/monitor/tmux_io.py` (`_resolve_tmux_bin`,
-`_TMUX_BIN`); `internal/runtime/monitor/sandbox-setup.py::setup_tmux_session`.
+**Fix:** `tmux_io.tmux_bin()` resolves lazily at call time **with bounded retry** —
+re-probing `shutil.which` + the Homebrew/system fallback paths every 1s for up to 30
+attempts, caching the first success and **never** caching the literal `"tmux"`
+fallback (so one transient miss can't poison later calls). The happy path resolves on
+the first probe and never sleeps. Both tmux call sites in `sandbox-setup.py`
+(`setup_tmux_session` and the post-launch `wait-for` block) now go through
+`tmux_io.tmux_bin()`.
+
+**Code:** `internal/runtime/monitor/tmux_io.py` (`tmux_bin`, `_probe_tmux_bin`,
+`_RESOLVE_ATTEMPTS`); `internal/runtime/monitor/sandbox-setup.py::setup_tmux_session`
+and the `main()` `wait-for` block.
 
 ---
 

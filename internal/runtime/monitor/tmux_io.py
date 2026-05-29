@@ -21,31 +21,77 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import time
 from typing import Any, Callable
 
 Runner = Callable[..., "subprocess.CompletedProcess[str]"]
 
 _runner: Runner = subprocess.run
 
+# Well-known locations checked when tmux is not found on PATH (Homebrew on
+# Apple Silicon, Homebrew on Intel, system).
+_TMUX_FALLBACK_PATHS = ("/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux")
 
-def _resolve_tmux_bin() -> str:
-    """Return the absolute path to tmux.
+# Retry budget for resolving tmux. On Tart macOS VMs the security-scan storm
+# triggered by `xcodebuild -runFirstLaunch` transiently hides tmux from BOTH
+# shutil.which (PATH lookup) and os.path.isfile (direct stat) for several
+# seconds — long enough that a single probe at process start can miss a tmux
+# that is genuinely installed. We re-probe with a short backoff before giving
+# up. The happy path resolves on the first attempt and never sleeps.
+_RESOLVE_ATTEMPTS = 30
+_RESOLVE_DELAY_SECONDS = 1.0
 
-    Resolved once at import time so transient PATH-search failures during
-    macOS security scans (observed after xcodebuild -runFirstLaunch on Tart
-    VMs) don't cause FileNotFoundError later when tmux is actually called.
-    Falls back to well-known Homebrew paths if shutil.which returns nothing.
-    """
+# Cached absolute path, set on the first successful probe. The literal "tmux"
+# fallback is never cached, so a transient miss cannot poison later calls.
+_cached_tmux_bin: str | None = None
+
+
+def _probe_tmux_bin() -> str | None:
+    """Single resolution attempt: return tmux's absolute path, or None if it is
+    not currently visible on PATH or at any known fallback location."""
     found = shutil.which("tmux")
     if found:
         return found
-    for p in ("/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux"):
+    for p in _TMUX_FALLBACK_PATHS:
         if os.path.isfile(p):
             return p
-    return "tmux"  # let subprocess produce the error with a clear message
+    return None
 
 
-_TMUX_BIN: str = _resolve_tmux_bin()
+def tmux_bin() -> str:
+    """Resolve the absolute path to the tmux binary, with bounded retry.
+
+    Resolution is deferred to call time (not import time) and retried through
+    the transient post-`xcodebuild -runFirstLaunch` window on Tart VMs, where
+    both PATH lookup and direct stat for tmux briefly fail even though tmux is
+    installed. The first successful probe is cached. If the retry budget is
+    exhausted, returns the literal "tmux" so subprocess raises a clear
+    FileNotFoundError rather than blocking forever.
+    """
+    global _cached_tmux_bin
+    if _cached_tmux_bin is not None:
+        return _cached_tmux_bin
+    for attempt in range(_RESOLVE_ATTEMPTS):
+        found = _probe_tmux_bin()
+        if found:
+            _cached_tmux_bin = found
+            return found
+        if attempt < _RESOLVE_ATTEMPTS - 1:
+            time.sleep(_RESOLVE_DELAY_SECONDS)
+    return "tmux"
+
+
+def set_tmux_bin(path: str) -> None:
+    """Force the cached tmux path. Tests use this to avoid real resolution
+    (and its retry sleeps) on machines where tmux may not be installed."""
+    global _cached_tmux_bin
+    _cached_tmux_bin = path
+
+
+def reset_tmux_bin() -> None:
+    """Clear the cached tmux path (test teardown)."""
+    global _cached_tmux_bin
+    _cached_tmux_bin = None
 
 
 def set_runner(fn: Runner) -> None:
@@ -67,7 +113,7 @@ def run(cmd: list[str], **kwargs: Any) -> "subprocess.CompletedProcess[str]":
 
 def tmux(*args: str, socket: str | None = None) -> "subprocess.CompletedProcess[str]":
     """Run a tmux command, optionally with a per-sandbox socket."""
-    cmd: list[str] = [_TMUX_BIN]
+    cmd: list[str] = [tmux_bin()]
     if socket:
         cmd.extend(["-S", socket])
     cmd.extend(args)

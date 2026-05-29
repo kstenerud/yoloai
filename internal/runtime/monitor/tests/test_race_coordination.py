@@ -72,10 +72,15 @@ def recorder() -> Iterator[CallRecorder]:
     """Install a CallRecorder as the tmux_io runner; reset on teardown."""
     rec = CallRecorder()
     tmux_io.set_runner(rec.runner)
+    # Pin the tmux path so resolution never probes the real machine (which
+    # would sleep through the retry budget when tmux is not installed). The
+    # tests only assert os.path.basename(cmd[0]) == "tmux".
+    tmux_io.set_tmux_bin("tmux")
     try:
         yield rec
     finally:
         tmux_io.reset_runner()
+        tmux_io.reset_tmux_bin()
 
 
 def _noop_log(_msg: str) -> None:
