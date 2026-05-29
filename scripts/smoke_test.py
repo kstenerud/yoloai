@@ -85,6 +85,18 @@ class BackendSpec:
             return self.sentinel_timeout_override
         return VM_TIMEOUT if self.is_vm else DEFAULT_TIMEOUT
 
+    def new_timeout(self) -> int:
+        """Subprocess timeout for the blocking `new`/`restart` calls.
+
+        On VM backends `new` blocks through the full VM clone + boot + guest
+        setup before returning (tart routinely ~118s — see run 20260529-041940,
+        where the flat 120s ceiling tripped on a slightly slower clone and only
+        the retry saved it). VMs need the VM budget; container backends keep the
+        fast ceiling."""
+        if self.is_vm:
+            return self.sentinel_timeout_override or VM_TIMEOUT
+        return 120
+
     def sentinel_stall_grace(self) -> int:
         return self.stall_grace_secs if self.stall_grace_secs else STALL_GRACE_SECS
 
@@ -1500,7 +1512,7 @@ def test_full_workflow(t: Test, spec: BackendSpec) -> None:
         "--yes",
         *spec.new_args(),
         *t.debug_new_flags,
-        timeout=120,
+        timeout=spec.new_timeout(),
     )
     t.assert_ok(r, "new")
 
@@ -1551,7 +1563,7 @@ def test_stop_start(t: Test, spec: BackendSpec) -> None:
         "--yes",
         *spec.new_args(),
         *t.debug_new_flags,
-        timeout=120,
+        timeout=spec.new_timeout(),
     )
     t.assert_ok(r, "new")
     t.wait_for_sentinel(name, timeout=spec.sentinel_timeout(), stall_grace_secs=spec.sentinel_stall_grace())
@@ -1561,7 +1573,7 @@ def test_stop_start(t: Test, spec: BackendSpec) -> None:
     # The prompt writes to the work copy so diff/apply can verify.
     sentinel2 = "done2"
     prompt2 = _prompt(exdir, "echo restarted > output2.txt", sentinel=sentinel2)
-    r = t.run("restart", name, "--prompt", prompt2, timeout=120)
+    r = t.run("restart", name, "--prompt", prompt2, timeout=spec.new_timeout())
     t.assert_ok(r, "restart")
 
     # Restart adds stop+start overhead on top of model inference, so allow extra time.
@@ -1603,7 +1615,7 @@ def test_clone(t: Test, spec: BackendSpec) -> None:
         "--yes",
         *spec.new_args(),
         *t.debug_new_flags,
-        timeout=120,
+        timeout=spec.new_timeout(),
     )
     t.assert_ok(r, "new sandbox A")
     t.wait_for_sentinel(name_a, timeout=spec.sentinel_timeout(), stall_grace_secs=spec.sentinel_stall_grace())
