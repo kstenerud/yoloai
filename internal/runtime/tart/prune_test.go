@@ -17,24 +17,62 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// fakeTart writes a stub `tart` executable that answers `list --quiet` from a
-// static inventory file and records every `delete <name>` to a log. `stop` and
-// anything else succeed silently. Returns a Runtime wired to the stub plus the
-// path of the delete log so tests can assert what was removed.
+// fakeEntry is one row of the stub tart inventory: a VM or OCI image with its
+// source ("local"/"OCI") and whole-GB on-disk size.
+type fakeEntry struct {
+	name   string
+	source string
+	sizeGB int
+}
+
+// fakeTart writes a stub `tart` executable from a plain name list, inferring
+// each entry's source (OCI when the name contains "/", else local) and giving
+// it a 1 GB size. For tests that only assert which names get deleted.
 func fakeTart(t *testing.T, vms []string) (*Runtime, string) {
 	t.Helper()
+	entries := make([]fakeEntry, len(vms))
+	for i, name := range vms {
+		source := "local"
+		if strings.Contains(name, "/") {
+			source = "OCI"
+		}
+		entries[i] = fakeEntry{name: name, source: source, sizeGB: 1}
+	}
+	return fakeTartEntries(t, entries)
+}
+
+// fakeTartEntries writes a stub `tart` executable backed by a mutable inventory
+// file. It answers `list --quiet` (names only) and `list --format json`
+// (Name/Source/Size), records every `delete <name>` to a log AND removes that
+// row from the inventory so a follow-up `list` reflects the deletion (lets the
+// PruneCache before/after reclaim delta be exercised). `stop` is a no-op.
+// Returns a Runtime wired to the stub plus the delete-log path.
+func fakeTartEntries(t *testing.T, entries []fakeEntry) (*Runtime, string) {
+	t.Helper()
 	dir := t.TempDir()
-	listFile := filepath.Join(dir, "inventory")
+	invFile := filepath.Join(dir, "inventory")
 	deleteLog := filepath.Join(dir, "deleted")
-	require.NoError(t, os.WriteFile(listFile, []byte(strings.Join(vms, "\n")+"\n"), 0600))
+
+	var lines []string
+	for _, e := range entries {
+		lines = append(lines, fmt.Sprintf("%s|%s|%d", e.name, e.source, e.sizeGB))
+	}
+	require.NoError(t, os.WriteFile(invFile, []byte(strings.Join(lines, "\n")), 0600))
 
 	script := fmt.Sprintf(`#!/bin/sh
+INV=%q
 case "$1" in
-  list) cat %q ;;
-  delete) echo "$2" >> %q ;;
+  list)
+    case "$*" in
+      *json*) awk -F'|' 'BEGIN{printf"["} $1!=""{if(n++)printf",";printf"{\"Name\":\"%%s\",\"Source\":\"%%s\",\"Size\":%%s}",$1,$2,$3} END{printf"]"}' "$INV" ;;
+      *) awk -F'|' '$1!=""{print $1}' "$INV" ;;
+    esac ;;
+  delete)
+    awk -F'|' -v n="$2" '$1!=n' "$INV" > "$INV.tmp" && mv "$INV.tmp" "$INV"
+    echo "$2" >> %q ;;
   stop) : ;;
 esac
-`, listFile, deleteLog)
+`, invFile, deleteLog)
 	binPath := filepath.Join(dir, "tart")
 	require.NoError(t, os.WriteFile(binPath, []byte(script), 0700)) //nolint:gosec // test stub must be executable
 

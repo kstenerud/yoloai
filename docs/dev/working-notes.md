@@ -790,7 +790,27 @@ Trash is a lightweight quarantine: `os.Rename` into `~/.yoloai/trash/<name>` (`s
 
 **Idiosyncrasies recorded** (`backend-idiosyncrasies.md` + symptom index): Podman docker-compat `ImagesPrune` `SpaceReclaimed` un-dedup inflation; containerd's image-import path inconsistently materializes overlayfs snapshots (some imports unpack, some only link); and a leftover lease (e.g. from a manual `ctr images mount`) GC-roots an orphaned child snapshot, making the base layer un-removable via synchronous `Remove` until the lease is dropped and GC runs — a test-scaffolding artifact, not a yoloai-flow bug.
 
-**macOS still unverified** — see `docs/dev/macos-disk-reporting-checklist.md`, updated to drop the deleted `statfs` references and check the before/after delta instead.
+**macOS still unverified** — see `docs/dev/macos-disk-reporting-checklist.md`, updated to drop the deleted `statfs` references and check the before/after delta instead. **(Verified on macOS 2026-05-29 — see D38.)**
+
+## D38 — macOS disk reporting verified; Tart gains DiskUsageReporter + real reclaim; docker/podman/seatbelt confirmed accurate
+
+**Date:** 2026-05-29. **Status:** Accepted. **Composition:** verifies D36 (sizing) and D37 (before/after reclaim delta) on macOS; closes the "macOS unverified" note on D36. **Context:** the D35–D37 disk-reporting/prune work was Linux-only; this is the macOS pickup (`docs/dev/macos-disk-reporting-checklist.md`). The test Mac runs Docker via **OrbStack** (not Docker Desktop), Podman 5.8.1 (Podman Machine `applehv`), Tart 2.31.0 (Apple Silicon), and Seatbelt.
+
+**What was verified (read-only, against each backend's own tool + `du`).**
+- **Docker (OrbStack).** Classic `overlay2` store on btrfs, containerd-snapshotter **off**. `image_bytes` byte-exact vs `docker system df` (`5023481654` = `5.023GB`); `cached_bytes` matches Local Volumes. The socket/API sizing path is store-/VM-agnostic, so it works unchanged; the containerd-store layer-pinning gap does **not** apply on the classic store. **No code change.** Lesson recorded: check `docker info` context/store — "macOS Docker" ≠ Docker Desktop.
+- **Podman 5.8.1.** Raw `/system/df` returns `LayersSize: 5018303449` — **not 0**. The Linux `LayersSize: 0` bug is **version-specific**; the unconditional `podmanImageBytes` dedup computes the identical value here, so it's harmless redundancy. Matches `podman system df` exactly. **No code change.**
+- **Seatbelt.** Provisions nothing on disk (Setup only checks PATH); runs agents via host tools. Its only footprint is the per-sandbox dir already counted by the `sandboxes` row. No backend cache → `CacheUsage`/`PruneCache` correctly absent (no-op). **No code change** — documented as intentional.
+
+**What was fixed (Tart — the one real gap).** Tart held ~56 GiB (`~/.tart/vms` + `~/.tart/cache/OCIs`) but reported `IMAGES: ?` / `0 B` and pruned with `0` reclaimed: it implemented `PruneCache` but **no `DiskUsageReporter`**, and `PruneCache` returned a hardcoded 0. Two tart idiosyncrasies drove the design (now in `backend-idiosyncrasies.md`): (1) `tart list` shows one pulled OCI image as **two rows** (tag `:latest` + digest `@sha256:…`) over a **single** on-disk copy — naive summing double-counts; (2) `tart delete <tag>` leaves the digest row pinning the copy, so a tag-only prune frees ~0.
+
+**Decision.** Tart now implements `DiskUsageReporter`: `CacheUsage` = provisioned local VM + base-repo OCI rows **deduped to one** (max Size per repo, like the podman "shared once" approach), reported as `ImageBytes` (no no-rebuild cache → `CachedBytes`=0). `PruneCache` deletes the provisioned VM **and all** base-repo OCI rows (tag *and* digest), then reports reclaim as the `CacheUsage` before−after delta — the same self-attributed measure as docker/podman (D37). Scope is intentionally yoloai's base images only, **not** every VM tart tracks nor live sandbox clones: tart is the user's general-purpose VM tool, so the IMAGES column must reconcile with what `prune --images` actually frees and must never imply deletion of unrelated personal VMs. `tart list --format json` Size is whole-GB, so the figure is coarse (±~0.5 GB/image) — accurate enough for a "should I prune?" signal.
+
+**Rejected.**
+- *Measure tart via `du ~/.tart`* — rejected: stay API-only (use `tart list`), consistent with the socket-only principle even though tart files are user-owned. (`du` was used only as the verification ground truth, not in product code.)
+- *Report all VMs tart tracks (docker/podman semantics)* — rejected: would count the user's unrelated VMs as "yoloai reclaimable," implying `prune --images` deletes them. Scoped to the base images yoloai owns.
+- *Add a CacheUsage/prune cache to seatbelt* — rejected: it has no backend store; a no-op is the honest model.
+
+**Validated (2026-05-29).** `system disk` now: docker 4.68 GiB (=`docker system df`), podman 4.67 GiB (=`podman system df` dedup), tart **55.88 GiB** (≈ `du` ~56 GiB), seatbelt no-op. Unit tests added (`tart/diskusage_test.go`). End-to-end reclaim confirmed by a real `system prune --images` (see the run recorded in `macos-disk-reporting-checklist.md`).
 
 ---
 

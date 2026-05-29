@@ -85,6 +85,10 @@ row to the index.
 | Smoke test: `full_workflow`/`stop_start` fails "agent idle"; pane shows `Error: Exit code N` + a clarifying question; other backends pass | [Smoke harness: agent stalls when the sentinel command errors](#agent-stalls-when-the-sentinel-command-errors) |
 | Is it safe to delete a `.lock` file while holding its flock? (prune / Destroy) | [Removing a .lock file while holding its flock is safe](#removing-a-lock-file-while-holding-its-flock-is-safe) |
 | Tart base build / `tart run` fails with `The number of VMs exceeds the system limit` or VM self-stops at boot, but `tart list` shows nothing running | [Tart: orphaned Virtualization VM processes consume the macOS VM limit](#orphaned-virtualization-vm-processes-survive-a-crashed-tart-run-and-silently-consume-the-macos-vm-limit) |
+| `system disk` shows tart `IMAGES: ?` / `CACHE: 0 B` despite GBs in `~/.tart`; `prune --images` reports 0 reclaimed | [Tart: list double-counts OCI tag+digest; sizing/prune must dedup](#tart-list-reports-a-pulled-oci-image-twice-tag--digest-over-one-on-disk-copy-sizing-and-prune-must-dedup-and-remove-both-rows) |
+| macOS `docker` numbers don't match Docker Desktop assumptions (overlay2/btrfs, classic store) | [Docker on macOS may be OrbStack, not Docker Desktop](#docker-on-macos-may-be-orbstack-not-docker-desktop--docker-info-clientinfocontext-tells-you-which) |
+| Podman macOS reports image bytes correctly even though the Linux `LayersSize: 0` workaround exists | [Podman: `/system/df` reports `LayersSize: 0`](#podman-systemdf-reports-layerssize-0) (macOS/version caveat) |
+| `system disk` shows seatbelt `IMAGES: ?` / `CACHE: 0 B` — is it a gap? | [Seatbelt has no backend image/cache store](#seatbelt-has-no-backend-imagecache-store--cacheusageprunecache-are-correctly-absent) |
 
 ---
 
@@ -711,6 +715,16 @@ An empty value disables LXC seccomp for that container entirely. The container m
 
 ---
 
+### Docker on macOS may be OrbStack, not Docker Desktop — `docker info` `.ClientInfo.Context` tells you which
+
+**Symptom:** macOS disk-reporting verification assumed Docker Desktop's LinuxKit VM (classic image store, data root hidden inside the VM). On a dev machine the `docker` CLI was actually talking to **OrbStack** (`docker info` → `Context: orbstack`), which is a different LinuxKit-style VM with `Storage Driver: overlay2` on a `btrfs` backing filesystem, `containerd-snapshotter` **off** (classic store), and `Default Runtime: runc`.
+
+**Why it matters / what we verified (2026-05-29, Docker 29.4.0 via OrbStack):** the socket/API-only sizing path is store- and VM-agnostic, so it Just Works regardless of which macOS Docker you run. `yoloai system disk` reported docker `image_bytes = 5023481654` (4.68 GiB) — **byte-exact** against `docker system df` Images SIZE `5.023GB` — and `cached_bytes = 507954634` (484.4 MiB) matching Local Volumes `508MB`. Because OrbStack uses the **classic** store (not the containerd snapshotter), the [`image rm` frees no disk until build cache pruned](#docker-containerd-image-store-image-rm-frees-no-disk-until-the-build-cache-is-pruned-sdk-spacereclaimed-undercounts) pinning behavior does **not** apply, and the logical-vs-physical reclaim gap collapses (logical ≈ physical). No code change needed; the takeaway is to **check `docker info` for the active context/store before comparing numbers** — "macOS Docker" is not necessarily Docker Desktop.
+
+**Code:** none (verification only). Sizing path: `internal/runtime/docker/prune.go` `CacheUsage`/`splitCacheBytes`.
+
+---
+
 ## Podman
 
 ### Podman: `/system/df` reports `LayersSize: 0`
@@ -722,6 +736,8 @@ An empty value disables LXC seccomp for that container entirely. The container m
 **Fix:** The Podman backend injects a per-image dedup via `docker.Runtime.SetImageBytesFunc`. Summing `img.Size` would multiply-count the shared base (38 build stages sharing one ~5.5 GB base read as ~150 GB — the failure mode of the shared-layers entry above). The deduplicated total is `Σ(img.Size − img.SharedSize) + max(img.SharedSize)`: every image's unique bytes plus the shared layer set counted once. For yoloai's single-base build chain the largest `SharedSize` captures the full shared union exactly; multiple independent bases would slightly underestimate the shared tier.
 
 **Code:** `internal/runtime/podman/podman.go` `podmanImageBytes()` (injected in `New` via `SetImageBytesFunc`); `internal/runtime/docker/prune.go` `splitCacheBytes()` (uses `imageBytesFn` when set, else `du.LayersSize`). Guard tests: `podman_test.go::TestPodmanImageBytes_*`, `docker/prune_test.go::TestSplitCacheBytes_ImageBytesFuncOverride`.
+
+**macOS / version caveat (verified 2026-05-29, Podman 5.8.1 via Podman Machine `applehv`):** `LayersSize` is **NOT 0** on this version — the raw `/system/df` returns `LayersSize: 5018303449`, matching `podman system df` Images SIZE exactly. The `LayersSize: 0` bug above is therefore **Podman-version-specific**, not universal. The `podmanImageBytes` dedup still runs (it's unconditional) and, because every build-stage row shares the one base, it computes the *identical* value (`Σ(unique) + max(shared) == LayersSize` here), so it's harmless redundancy on 5.8.1 — the injected path agrees with the field it was working around. Keep the injection: older Podman (the version the bug was first seen on) still reports 0, and the dedup is correct on both.
 
 ### Podman: `ImagesPrune` `SpaceReclaimed` is the un-deduplicated image-size sum
 
@@ -1042,6 +1058,16 @@ safe because `deleteNetNS` is idempotent (ignores ENOENT). See `cni.go::setupCNI
 
 ## Tart (macOS VMs)
 
+### `tart list` reports a pulled OCI image twice (tag + digest) over one on-disk copy; sizing and prune must dedup and remove both rows
+
+**Symptom:** `yoloai system disk` reported tart as `IMAGES: ?` and `CACHE: 0 B` while `~/.tart` held **~56 GiB**, and `yoloai system prune --images` reported **0 reclaimed** even though it removed the base image. Tart implemented `PruneCache` but **no `DiskUsageReporter`**, so `CacheUsageFor` returned `ImageBytes=-1` ("unknown", rendered `?`) and the reclaim came back hardcoded `0`.
+
+**Explanation (verified 2026-05-29, Tart 2.31.0, Apple Silicon):** a single pulled OCI base (`ghcr.io/cirruslabs/macos-sequoia-base:latest`) appears as **two** `tart list` rows — one by tag (`:latest`) and one by digest (`@sha256:…`) — both reporting the same `Size` (e.g. 31 GB) but backed by **one** on-disk directory under `~/.tart/cache/OCIs/<repo>/sha256:<digest>/`. Naively summing `tart list` Size double-counts the OCI base; and `tart delete <tag>` removes only the tag row, leaving the digest row pinning the on-disk copy, so a tag-only prune frees ~0. The provisioned local VM (`yoloai-base`) is a separate clone under `~/.tart/vms/` with its own footprint (additive, no sharing). `tart list --format json` Size is **whole-GB** (decimal, rounded), so the figure is coarse (±~0.5 GB/image) but reconciles with `du`.
+
+**Fix:** Tart now implements `DiskUsageReporter`. `CacheUsage` sums the provisioned VM + the base-repo OCI rows **deduped to one** (max Size per repo, mirroring the podman "count shared once" approach), reporting it as `ImageBytes` (tart has no no-rebuild cache → `CachedBytes` always 0). `PruneCache` deletes the provisioned VM **and every base-repo OCI row** (tag *and* digest), then reports reclaim as the `CacheUsage` before−after delta (D37), same as docker/podman. Scope is deliberately yoloai's base images only — not every VM tart tracks, nor live sandbox clones — so the IMAGES column reconciles with what `prune --images` actually frees (unlike docker/podman, tart is the user's general VM tool and must not imply it'll delete unrelated personal VMs). Result: tart now reports **55.88 GiB** (matching `du`'s ~56 GiB) and the dry-run estimate includes it.
+
+**Code:** `internal/runtime/tart/diskusage.go` (`CacheUsage`, `ownedImageBytes`, `ownedImageRefs`, `baseImageRepo`); `internal/runtime/tart/prune.go::PruneCache` (before/after delta, deletes all owned refs). Tests: `diskusage_test.go::{TestBaseImageRepo,TestCacheUsageCountsOwnedImagesDedupingOCI,TestPruneCacheReportsReclaimDelta,TestPruneCacheDryRunReturnsEstimate}`.
+
 ### VirtioFS only supports directory mounts, not individual files
 
 `tart run --dir name:path` only accepts directories. Any per-file bind mount
@@ -1335,6 +1361,14 @@ VirtioFS should only be used for:
 ---
 
 ## Seatbelt (macOS sandboxing)
+
+### Seatbelt has no backend image/cache store — `CacheUsage`/`PruneCache` are correctly absent
+
+**Symptom / question:** `yoloai system disk` shows seatbelt as `IMAGES: ?` and `CACHE: 0 B`. Is that a reporting gap like the Tart one was?
+
+**Explanation (verified 2026-05-29):** No. Seatbelt runs agents **directly on the host** via `sandbox-exec` using the host's own tools — its `Setup` only *checks* that required binaries are on `PATH` (`runtime/seatbelt/build.go`); it pulls/builds/caches **nothing**. There is no VM, no image, no layer store. The only on-disk state a seatbelt sandbox accumulates is the per-sandbox directory under `~/.yoloai/sandboxes/<name>/` (work dirs, agent-state, logs) — and that's already reported by the `sandboxes` row of `system disk`, the same for every backend. So seatbelt implements neither `DiskUsageReporter` nor `CachePruner`, and its core `Prune` is a no-op (no central registry of instances). The `?` in the IMAGES column is `CacheUsageFor`'s "unknown" fallback (`ImageBytes=-1`); it's cosmetically imperfect (a true "—"/0 would read better) but functionally correct — there is genuinely nothing for `prune`/`prune --images` to reclaim. **Leave it a no-op; do not invent a cache to measure.**
+
+**Code:** `internal/runtime/seatbelt/build.go::Setup` (PATH check only), `internal/runtime/seatbelt/prune.go` (no-op `Prune`, no `PruneCache`/`CacheUsage`); fallback in `internal/runtime/runtime.go::CacheUsageFor`.
 
 ### swift-wrapper not sourced on restart
 

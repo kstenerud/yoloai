@@ -3,12 +3,20 @@
 
 # macOS disk-reporting & prune verification checklist
 
+> **STATUS: VERIFIED on macOS 2026-05-29 — see working-notes D38.** Docker
+> (OrbStack), Podman 5.8.1, Tart 2.31.0, and Seatbelt all confirmed. Docker /
+> Podman / Seatbelt reporting was already accurate (no code change); Tart had a
+> real gap (invisible footprint, 0-byte reclaim) that is now fixed — it
+> implements `DiskUsageReporter` and reports a real before/after reclaim delta.
+> The per-backend outcomes are inlined below. This file is kept as the record of
+> what was checked and how.
+
 The disk-reporting and prune accuracy work (working-notes **D35** + **D36**,
 `backend-idiosyncrasies.md` entries on Podman `LayersSize: 0`, the containerd
 two-snapshotter copy, and the Docker containerd-store pinning) was developed and
 validated **only on Linux**. macOS has materially different disk semantics, so the
 numbers `yoloai doctor` / `yoloai system disk` / `yoloai system prune` report there
-are **unverified**. This is the pick-up list for a Claude session on a Mac.
+were **unverified**. This was the pick-up list for a Claude session on a Mac.
 
 The goal is the same as on Linux: **(a) `doctor` reports usage accurately, and
 (b) `system prune` actually clears data** — verified by diffing yoloai's reported
@@ -48,31 +56,42 @@ For each backend available on the Mac, compare three sources and confirm they ag
 2. the backend's own tool (below).
 3. the host/VM filesystem (`du`, or `df` inside the VM where reachable).
 
-### Docker (Docker Desktop)
-- [ ] `docker info` — is `containerd-snapshotter` on or off? Note it; it changes everything.
-- [ ] `docker system df -v` vs `yoloai system disk` — do CACHE and IMAGES columns match?
-- [ ] `yoloai system prune --images --dry-run` estimate vs the actual reclaim after a real run.
-- [ ] Confirm the reported reclaim (now `CacheUsage` before − after, not `SpaceReclaimed`)
-      matches `docker system df` before/after. On the classic store the logical figure
-      should track physical closely; on the containerd store expect the logical total to
-      exceed `df`-freed bytes because build cache and image layers share content (the
-      documented logical-vs-physical gap, D37) — that's expected, not a bug.
+### Docker — VERIFIED (was OrbStack, not Docker Desktop)
+- [x] `docker info` store: **OrbStack**, `Storage Driver: overlay2` on btrfs, containerd-snapshotter **off** (classic store), `Default Runtime: runc`. "macOS Docker" ≠ Docker Desktop — always check the context.
+- [x] `docker system df` vs `yoloai system disk`: **byte-exact** — `image_bytes 5023481654` = Images `5.023GB`; `cached_bytes 507954634` ≈ Local Volumes `508MB`.
+- [x] Classic store → no build-cache layer pinning, logical≈physical. Reclaim = `CacheUsage` before−after (D37) works unchanged. **No code change.**
 
-### Podman (Podman Machine)
-- [ ] `curl --unix-socket <machine.sock> http://d/v1.41/system/df` — confirm `LayersSize: 0`
-      still holds (the whole `podmanImageBytes` workaround depends on it).
-- [ ] `podman system df` dedup (`Σ(Size−SharedSize)+max(SharedSize)`) vs `yoloai doctor`'s
-      podman image figure — should match to the byte as it does on Linux.
-- [ ] Real `prune --images` reclaim vs `podman system df` before/after.
+### Podman — VERIFIED (LayersSize is NOT 0 on 5.8.1)
+- [x] Raw `/system/df` via Machine socket returns `LayersSize: 5018303449` — **not 0**. The Linux bug is version-specific; the `podmanImageBytes` dedup computes the identical value here (harmless redundancy). Keep the injection.
+- [x] Dedup figure = `yoloai` podman image figure = `podman system df` Images `5.018GB`, byte-exact (`5018303449`).
+- [x] `prune --images` reclaim confirmed by the real-prune run below. **No code change.**
 
-### Tart (Apple Silicon only) — UNVERIFIED, first-principles
-- [ ] Does Tart's `CacheUsage`/`PruneCache` exist and report anything? (`internal/runtime/tart/`)
-- [ ] `tart list` + `du -sh ~/.tart/vms/*` vs yoloai's report.
-- [ ] Does `yoloai system prune` actually remove Tart VM images, and is the reclaim measured correctly?
+### Tart (Apple Silicon) — VERIFIED + FIXED
+- [x] Before: **no `DiskUsageReporter`** (reported `IMAGES: ?`), and `PruneCache` returned hardcoded `0`, despite ~56 GiB in `~/.tart`.
+- [x] `tart list --format json` Size (whole-GB) + `du -sh ~/.tart/{vms,cache}/*`: yoloai-base ~27 GiB, OCI base ~29 GiB. Two `tart list` OCI rows (tag + digest) share **one** on-disk copy under `cache/OCIs/<repo>/sha256:<digest>/`.
+- [x] **Fix:** Tart now implements `CacheUsage` (provisioned VM + base OCI deduped, → ImageBytes; CachedBytes 0) and `PruneCache` reports the before−after delta and deletes **both** OCI rows (tag-only delete leaks the digest copy). Now reports **55.88 GiB** (≈ `du` ~56 GiB). See `backend-idiosyncrasies.md` + D38.
 
-### Seatbelt (macOS lightweight sandbox) — UNVERIFIED, first-principles
-- [ ] What on-disk state does Seatbelt accumulate, and where? Map it before trusting any report.
-- [ ] Does it participate in `CacheUsage`/`PruneCache` at all, or is it a no-op? Confirm and document.
+### Seatbelt — VERIFIED (correct no-op)
+- [x] On-disk state: **none beyond** the per-sandbox `~/.yoloai/sandboxes/<name>/` dir (already reported by the `sandboxes` row). `Setup` only checks PATH binaries; runs agents via host tools.
+- [x] No backend cache → `CacheUsage`/`PruneCache` correctly absent (`?`/no-op). Documented as intentional, not a gap.
+
+## macOS real-prune validation (2026-05-29)
+
+A single real `yoloai system prune --images` across all backends, before/after
+diffed against each backend's own tool and `du`:
+
+| Backend | yoloai reclaim | Ground truth |
+|---|---|---|
+| docker (OrbStack) | **4.68 GB** | Images `5.023GB → 0`. The 508 MB Local Volumes survived (`VolumesPrune` skips named/in-use volumes — standard Docker behavior); the before/after delta correctly **excluded** them, reporting only the image reclaim. |
+| podman | **4.67 GB** | Images `5.018GB → 0`. (`BuildCachePrune` → "Not Found" — expected on Podman, harmless.) |
+| tart | **55.88 GiB** | `tart list` empty; **`du ~/.tart` 56G → 0**. Deleting *both* OCI rows (tag + digest) freed the on-disk copy — a tag-only delete would have leaked ~29 GiB. |
+| **total** | **65.23 GiB** | = 4.68 + 4.67 + 55.88 GiB; all backends cleared to 0. |
+
+Every backend reported only its own footprint (no cross-contamination), and each
+figure reconciled with the backend's own tool — the D37 before/after-`CacheUsage`
+model holds on macOS exactly as on Linux. (Side effect: the docker/podman/tart
+base images are now gone; the next `yoloai new` rebuilds them, and tart re-pulls
+~30 GB.)
 
 ## How the Linux side was validated (mirror this)
 
