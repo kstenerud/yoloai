@@ -66,6 +66,22 @@ type trashJSON struct {
 	Bytes int64 `json:"bytes"`
 }
 
+// vmSlotJSON is one VM occupying a host VM slot.
+type vmSlotJSON struct {
+	PID     int    `json:"pid"`
+	VMName  string `json:"vm_name,omitempty"`
+	Owned   bool   `json:"owned"`
+	Deleted bool   `json:"deleted,omitempty"`
+}
+
+// vmCensusJSON is the host VM-slot census for a concurrency-limited backend.
+type vmCensusJSON struct {
+	Limit   int          `json:"limit"`
+	InUse   int          `json:"in_use"`
+	Blocked bool         `json:"blocked"`
+	Slots   []vmSlotJSON `json:"slots"`
+}
+
 // doctorReportJSON is the single --json document: backend capability reports
 // plus the read-only repair advisory sections.
 type doctorReportJSON struct {
@@ -74,6 +90,7 @@ type doctorReportJSON struct {
 	ReclaimableSpace []cacheUsageJSON     `json:"reclaimable_space"`
 	UnreviewedWork   []unreviewedWorkJSON `json:"unreviewed_work"`
 	Trash            trashJSON            `json:"trash"`
+	VMCensus         *vmCensusJSON        `json:"vm_census,omitempty"`
 }
 
 // NewCmd builds the top-level `yoloai doctor` command.
@@ -129,20 +146,36 @@ func runDoctor(cmd *cobra.Command, backendFilter, isolationFilter string, isJSON
 	// `yoloai system prune` (with the fix command printed next to each section).
 	prune := dryRunPrune(ctx, sys)
 	disk := cacheUsage(ctx, sys)
+	census := sys.VMCensus(ctx)
 
 	if isJSON {
-		// JSON mode reports NeedsSetup in the document rather than via exit code,
+		// JSON mode reports failures in the document rather than via exit code,
 		// matching the prior `system doctor --json` behavior.
-		return cliutil.WriteJSON(out, buildDoctorJSON(reports, prune, disk))
+		return cliutil.WriteJSON(out, buildDoctorJSON(reports, prune, disk, census))
 	}
 
 	caps.FormatDoctor(out, reports)
+	renderVMCensus(out, census)
 	renderReclaimableNow(out, prune)
 	renderReclaimableSpace(out, disk)
 	renderUnreviewedWork(out, prune)
 	renderTrash(out, prune)
 
-	return needsSetupError(reports)
+	return doctorExitError(reports, census)
+}
+
+// doctorExitError returns a non-nil error (→ exit 1) when the host needs
+// attention: a backend needs setup, or the VM-slot limit is reached (which
+// blocks new sandboxes — a functional failure, unlike the advisory cruft
+// sections, which never affect the exit code).
+func doctorExitError(reports []yoloai.BackendReport, census *yoloai.VMCensus) error {
+	if err := needsSetupError(reports); err != nil {
+		return err
+	}
+	if census != nil && census.Blocked() {
+		return fmt.Errorf("macOS VM limit reached — see 'VM slots' above")
+	}
+	return nil
 }
 
 // dryRunPrune runs a best-effort dry-run prune. Errors are swallowed — doctor
@@ -260,14 +293,87 @@ func renderTrash(w io.Writer, prune *yoloai.PruneResult) {
 	fmt.Fprintln(w, "  Recover with mv, or reclaim with: yoloai system prune")             //nolint:errcheck
 }
 
+// renderVMCensus shows the host VM-slot census when it's notable: the limit is
+// reached (blocking new sandboxes) or a leaked orphan is holding a slot. It
+// enumerates every slot so the user can see exactly what's consuming the limit,
+// then prints how to free a slot. Nothing is killed — the kill command is only
+// printed.
+func renderVMCensus(w io.Writer, census *yoloai.VMCensus) {
+	if census == nil {
+		return
+	}
+	orphans := census.Orphans()
+	if !census.Blocked() && len(orphans) == 0 {
+		return // below limit and nothing leaked — not worth a line
+	}
+
+	fmt.Fprintln(w) //nolint:errcheck
+	if census.Blocked() {
+		fmt.Fprintf(w, "VM slots: %d of %d in use — limit reached, new sandboxes can't start:\n", census.InUse(), census.Limit) //nolint:errcheck
+	} else {
+		fmt.Fprintf(w, "VM slots: %d of %d in use (%d orphaned):\n", census.InUse(), census.Limit, len(orphans)) //nolint:errcheck
+	}
+	for _, s := range census.Slots {
+		fmt.Fprintf(w, "    %s\n", vmSlotLabel(s)) //nolint:errcheck
+	}
+
+	switch {
+	case len(orphans) > 0:
+		fmt.Fprintln(w, "  Free a slot by killing the orphaned VM process(es):") //nolint:errcheck
+		for _, s := range orphans {
+			fmt.Fprintf(w, "    kill %d\n", s.PID) //nolint:errcheck
+		}
+		fmt.Fprintln(w, "  (orphans only clear on kill or reboot — they survive a crashed launcher)") //nolint:errcheck
+	case census.Blocked():
+		// All slots are legitimate running sandboxes.
+		fmt.Fprintln(w, "  All slots are in-use sandboxes. Stop one to free a slot:") //nolint:errcheck
+		fmt.Fprintln(w, "    yoloai stop <name>")                                     //nolint:errcheck
+	}
+}
+
+// vmSlotLabel renders a one-line description of a VM slot.
+func vmSlotLabel(s yoloai.VMSlot) string {
+	if s.Owned {
+		if s.VMName != "" {
+			return fmt.Sprintf("running sandbox '%s' (pid %d) — owned", s.VMName, s.PID)
+		}
+		return fmt.Sprintf("running VM (pid %d) — owned", s.PID)
+	}
+	switch {
+	case s.VMName != "" && s.Deleted:
+		return fmt.Sprintf("orphaned VM '%s' (pid %d, image deleted) — launcher gone, holding a slot", s.VMName, s.PID)
+	case s.VMName != "":
+		return fmt.Sprintf("orphaned VM '%s' (pid %d) — launcher gone, holding a slot", s.VMName, s.PID)
+	default:
+		return fmt.Sprintf("orphaned VM (pid %d) — launcher gone, holding a slot", s.PID)
+	}
+}
+
 // buildDoctorJSON assembles the single --json document.
-func buildDoctorJSON(reports []yoloai.BackendReport, prune *yoloai.PruneResult, disk *yoloai.DiskUsage) doctorReportJSON {
+func buildDoctorJSON(reports []yoloai.BackendReport, prune *yoloai.PruneResult, disk *yoloai.DiskUsage, census *yoloai.VMCensus) doctorReportJSON {
 	return doctorReportJSON{
 		Backends:         convertDoctorReportsToJSON(reports),
 		ReclaimableNow:   reclaimItemsJSON(prune),
 		ReclaimableSpace: cacheUsageJSONList(disk),
 		UnreviewedWork:   unreviewedWorkJSONList(prune),
 		Trash:            trashJSONOf(prune),
+		VMCensus:         vmCensusJSONOf(census),
+	}
+}
+
+func vmCensusJSONOf(census *yoloai.VMCensus) *vmCensusJSON {
+	if census == nil {
+		return nil
+	}
+	slots := make([]vmSlotJSON, 0, len(census.Slots))
+	for _, s := range census.Slots {
+		slots = append(slots, vmSlotJSON{PID: s.PID, VMName: s.VMName, Owned: s.Owned, Deleted: s.Deleted})
+	}
+	return &vmCensusJSON{
+		Limit:   census.Limit,
+		InUse:   census.InUse(),
+		Blocked: census.Blocked(),
+		Slots:   slots,
 	}
 }
 

@@ -76,6 +76,7 @@ row to the index.
 | `FileNotFoundError: 'tmux'` in `sandbox-setup.py::setup_tmux_session` on Tart VM (intermittent) | [Tart: transient FS/PATH failure makes tmux unresolvable during the firstlaunch window](#tart-transient-fspath-failure-makes-tmux-unresolvable-during-the-firstlaunch-window) |
 | Smoke test: `full_workflow`/`stop_start` fails "agent idle"; pane shows `Error: Exit code N` + a clarifying question; other backends pass | [Smoke harness: agent stalls when the sentinel command errors](#agent-stalls-when-the-sentinel-command-errors) |
 | Is it safe to delete a `.lock` file while holding its flock? (prune / Destroy) | [Removing a .lock file while holding its flock is safe](#removing-a-lock-file-while-holding-its-flock-is-safe) |
+| Tart base build / `tart run` fails with `The number of VMs exceeds the system limit` or VM self-stops at boot, but `tart list` shows nothing running | [Tart: orphaned Virtualization VM processes consume the macOS VM limit](#orphaned-virtualization-vm-processes-survive-a-crashed-tart-run-and-silently-consume-the-macos-vm-limit) |
 
 ---
 
@@ -276,6 +277,48 @@ containerd path does.
 it. The same `yoloai system prune` / `yoloai system doctor` surface
 applies (Tart's `Prune()` enumerates `yoloai-*` VMs via `tart list`
 and calls `stopVM + delete` per orphan).
+
+### Orphaned Virtualization VM processes survive a crashed `tart run` and silently consume the macOS VM limit
+
+**Symptom:** `yoloai new` / `yoloai system build` on Tart fails to boot —
+the VM "self-stops" at boot (`tart run` exits cleanly, log shows
+`Stopping VM...`), or you hit `The number of VMs exceeds the system
+limit` — yet `tart list` shows **no VM running**. The host has been up a
+while and/or had a crashed/SIGKILL'd build earlier.
+
+**Why:** each running VM is backed by a `com.apple.Virtualization.VirtualMachine`
+XPC process. When its launcher (`tart run`) is SIGKILL'd or the parent
+process dies, that XPC process can **survive, reparented to launchd
+(PPID 1)**. The VM keeps running at the framework level and keeps holding
+a macOS VM slot — but `tart list` reads tart's own state, which no longer
+knows about it, so the VM is invisible there. Apple's
+Virtualization.framework caps **macOS guests at 2 concurrent VMs**; two
+such orphans exhaust the limit and block all new VMs. The count only
+resets when the orphan is killed or the host reboots (`tart stop` can't
+touch a VM tart no longer tracks).
+
+**Gotcha — the XPC process is shared across apps:** `com.apple.Virtualization.VirtualMachine`
+is used by *every* app built on Virtualization.framework (e.g. **Claude.app**
+runs its own `claudevm.bundle` microVM), not just tart. You cannot assume
+such a process is a tart VM, and you must **never** kill one blindly —
+killing another app's VM breaks that app. The reliable discriminator:
+a tart VM holds a `~/.tart/vms/<name>/disk.img` open (visible via
+`lsof -p <pid>`); foreign VMs don't. Foreign VMs are also typically Linux
+guests, which are **not** subject to the macOS 2-VM limit.
+
+**Fix in code:** `tart/census.go` enumerates the XPC processes
+(`detectVMProcesses`), keeps only those positively identified as tart
+(open `.tart/vms/` disk), and classifies each as an owned sandbox (a live
+`tart run <name>` launcher exists) or a killable orphan. Surfaced through
+`yoloai doctor` as the "VM slots" section: it lists every tart slot,
+exits non-zero when the limit is reached (a functional block on new
+sandboxes), and prints the `kill <pid>` to reclaim an orphan. doctor
+**reports only** — it never kills.
+
+**Fix for the user:** `yoloai doctor` shows which PIDs to kill; `kill
+<pid>` frees the slot, or reboot to reset the count. Killing a tart
+orphan is safe (the VM is already untracked); doctor will not point you
+at a non-tart VM.
 
 ### `hotplug memory error: ENOENT` is normal
 

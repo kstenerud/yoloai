@@ -247,6 +247,66 @@ func RequiredCapabilitiesFor(rt Runtime, isolation IsolationMode) []caps.HostCap
 	return nil
 }
 
+// VMSlot describes one VM currently occupying a host VM slot. Owned is true
+// when a live owner process (e.g. `tart run <name>`) still backs the VM;
+// an un-owned slot is an orphan whose launcher died, leaving the underlying
+// hypervisor process holding the slot. Deleted is true when the VM's disk
+// image has been removed out from under the still-running process (the
+// signature of a crashed temp VM).
+type VMSlot struct {
+	PID     int
+	VMName  string // resolved VM name; "" when it could not be determined
+	Owned   bool
+	Deleted bool
+}
+
+// VMCensus is a point-in-time accounting of host VM slots against the
+// platform's concurrent-VM limit. Backends whose hypervisor caps the number
+// of simultaneous VMs (e.g. tart on macOS) report it so doctor can explain
+// why a new sandbox can't start.
+type VMCensus struct {
+	Limit int      // max concurrent VMs the platform allows (e.g. 2 for macOS)
+	Slots []VMSlot // one per VM process currently occupying a slot
+}
+
+// InUse returns how many slots are currently occupied.
+func (c VMCensus) InUse() int { return len(c.Slots) }
+
+// Blocked reports whether the limit is reached — i.e. a new VM cannot start
+// until an existing one frees its slot.
+func (c VMCensus) Blocked() bool { return c.Limit > 0 && len(c.Slots) >= c.Limit }
+
+// Orphans returns the un-owned slots — leaked VM processes whose launcher
+// died. These are the ones a user can reclaim by killing the PID.
+func (c VMCensus) Orphans() []VMSlot {
+	var out []VMSlot
+	for _, s := range c.Slots {
+		if !s.Owned {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// VMCensusReporter is an optional interface implemented by backends that run
+// VMs under a host concurrency limit. Implementations report the current slot
+// census so callers can detect (and explain) a reached limit.
+type VMCensusReporter interface {
+	VMCensus(ctx context.Context) (VMCensus, error)
+}
+
+// VMCensusFor returns the VM-slot census for the backend, or ok=false when the
+// backend does not run under a VM concurrency limit (does not implement
+// VMCensusReporter).
+func VMCensusFor(ctx context.Context, rt Runtime) (census VMCensus, ok bool, err error) {
+	p, ok := rt.(VMCensusReporter)
+	if !ok {
+		return VMCensus{}, false, nil
+	}
+	census, err = p.VMCensus(ctx)
+	return census, true, err
+}
+
 // Runtime is the sandbox backend interface. Implementations manage the
 // lifecycle of sandbox instances (containers, VMs, etc.) and provide
 // image/environment management.

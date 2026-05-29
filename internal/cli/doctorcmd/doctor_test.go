@@ -90,7 +90,7 @@ func TestRenderTrash(t *testing.T) {
 func TestBuildDoctorJSON(t *testing.T) {
 	rep := buildDoctorJSON(nil, samplePrune(), &yoloai.DiskUsage{
 		PerBackend: []yoloai.BackendDiskUsage{{Name: "docker", Bytes: 2048}},
-	})
+	}, nil)
 	assert.Len(t, rep.ReclaimableNow, 3)
 	assert.Len(t, rep.ReclaimableSpace, 1)
 	assert.Len(t, rep.UnreviewedWork, 1)
@@ -100,7 +100,7 @@ func TestBuildDoctorJSON(t *testing.T) {
 }
 
 func TestBuildDoctorJSON_NilProbesYieldEmptySlices(t *testing.T) {
-	rep := buildDoctorJSON(nil, nil, nil)
+	rep := buildDoctorJSON(nil, nil, nil, nil)
 	// Non-nil empty slices so the JSON document carries [] rather than null.
 	assert.NotNil(t, rep.ReclaimableNow)
 	assert.NotNil(t, rep.ReclaimableSpace)

@@ -181,6 +181,15 @@ func (s *SystemClient) Info(ctx context.Context) (*SystemInfo, error) {
 // Re-exported (type alias) from internal/runtime/caps.
 type BackendReport = caps.BackendReport
 
+// VMCensus is a point-in-time accounting of host VM slots against the
+// platform's concurrent-VM limit. Re-exported (type alias) from
+// internal/runtime.
+type VMCensus = runtime.VMCensus
+
+// VMSlot describes one VM occupying a host VM slot. Re-exported (type alias)
+// from internal/runtime.
+type VMSlot = runtime.VMSlot
+
 // DoctorOptions filters Doctor's per-backend health checks. Empty filters
 // (the zero value) report every backend and every isolation mode.
 type DoctorOptions struct {
@@ -206,6 +215,26 @@ func (s *SystemClient) Doctor(ctx context.Context, opts DoctorOptions) ([]Backen
 		reports = append(reports, s.backendReports(ctx, desc.Name, env, opts.IsolationFilter)...)
 	}
 	return reports, nil
+}
+
+// VMCensus reports the host VM-slot census for whichever backend runs under a
+// concurrent-VM limit (currently only tart on macOS). Returns nil when no such
+// backend is available — e.g. on Linux, or when tart can't be constructed.
+// Best-effort: a backend that errors while reporting is skipped.
+func (s *SystemClient) VMCensus(ctx context.Context) *VMCensus {
+	for _, desc := range runtime.Descriptors() {
+		rt, err := newRuntime(ctx, desc.Name, s.layout)
+		if err != nil {
+			continue
+		}
+		census, ok, censusErr := runtime.VMCensusFor(ctx, rt)
+		_ = rt.Close() //nolint:errcheck // best-effort close after probing
+		if !ok || censusErr != nil {
+			continue
+		}
+		return &census
+	}
+	return nil
 }
 
 // backendReports builds the report rows for a single backend: an init-failure
