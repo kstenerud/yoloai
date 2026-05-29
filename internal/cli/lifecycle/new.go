@@ -343,9 +343,11 @@ func executeNewCreate(cmd *cobra.Command, ctx context.Context, c *yoloai.Client,
 	}
 
 	// Print the creation summary (the library no longer formats presentation —
-	// F8). opts.Name is used because Create returns "" for --no-start.
+	// F8). opts.Name is used because Create returns "" for --no-start. Goes to
+	// stderr — the stream the Manager's creation output used — keeping human
+	// output cohesive there (stdout is reserved for --json).
 	if meta, loadErr := store.LoadMeta(cliutil.Layout().SandboxDir(opts.Name)); loadErr == nil {
-		printCreateSummary(cmd.OutOrStdout(), meta)
+		printCreateSummary(cmd.ErrOrStderr(), meta)
 	}
 
 	if sandboxName == "" || !attach || opts.NoStart {
