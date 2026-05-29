@@ -357,14 +357,37 @@ class TartBackend(Backend):
             # background lets the agent start immediately instead of blocking setup.
             log_debug("tart.xcode.firstlaunch", "starting xcodebuild -runFirstLaunch in background")
             xcodebuild_log = os.path.join(self.yoloai_dir, "xcodebuild-firstlaunch.log")
+            # Markers bracket the firstlaunch window so tmux resolution can wait
+            # out the security-scan storm (which lasts as long as firstlaunch
+            # runs) instead of burning a fixed retry budget that expires
+            # mid-storm. The started marker is created before launch; the done
+            # marker is touched by the backgrounded job on completion.
+            started_marker = os.path.join(self.yoloai_dir, "xcodebuild-firstlaunch.started")
+            done_marker = os.path.join(self.yoloai_dir, "xcodebuild-firstlaunch.done")
+            for stale in (started_marker, done_marker):
+                try:
+                    os.remove(stale)
+                except OSError:
+                    pass
+            try:
+                with open(started_marker, "w"):
+                    pass
+            except OSError:
+                pass
             try:
                 with open(xcodebuild_log, "w") as _xcodebuild_logf:
+                    # Wrap the job in a shell so the done marker is touched no
+                    # matter how xcodebuild exits, closing the window for the
+                    # tmux resolver. The marker path arrives as "$1".
                     subprocess.Popen(
-                        ["sudo", "xcodebuild", "-runFirstLaunch"],
+                        ["/bin/sh", "-c",
+                         'sudo xcodebuild -runFirstLaunch; : > "$1"',
+                         "sh", done_marker],
                         stdout=_xcodebuild_logf,
                         stderr=subprocess.STDOUT,
                         start_new_session=True,
                     )
+                tmux_io.set_firstlaunch_markers(started_marker, done_marker)
             except OSError:
                 pass  # Non-fatal
             log_debug("tart.xcode.firstlaunch.started", "xcodebuild -runFirstLaunch launched")

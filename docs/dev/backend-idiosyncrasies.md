@@ -1369,16 +1369,36 @@ Neither *where* you resolve matters; the deciding factor is whether tmux is reac
 *at the sampled instant*.
 
 **Fix:** `tmux_io.tmux_bin()` resolves lazily at call time **with bounded retry** —
-re-probing `shutil.which` + the Homebrew/system fallback paths every 1s for up to 30
-attempts, caching the first success and **never** caching the literal `"tmux"`
-fallback (so one transient miss can't poison later calls). The happy path resolves on
-the first probe and never sleeps. Both tmux call sites in `sandbox-setup.py`
-(`setup_tmux_session` and the post-launch `wait-for` block) now go through
-`tmux_io.tmux_bin()`.
+re-probing `shutil.which` + the Homebrew/system fallback paths every 1s, caching the
+first success and **never** caching the literal `"tmux"` fallback (so one transient
+miss can't poison later calls). The happy path resolves on the first probe and never
+sleeps. Both tmux call sites in `sandbox-setup.py` (`setup_tmux_session` and the
+post-launch `wait-for` block) go through `tmux_io.tmux_bin()`.
+
+**Why a fixed 30×1s budget was not enough (the recurrence):** the scan storm lasts
+**as long as firstlaunch runs** (60-120s+), not a fixed number of seconds. A 30s
+budget sampled at the start of the window expires *mid-storm* and falls back to the
+literal `"tmux"`, crashing exactly as before (observed: run `20260529-031518` on a
+build that already had the bounded-retry fix — `tmux.start` landed ~32s after
+`firstlaunch.started`, inside the still-open window). The budget was guessing the
+window's duration instead of observing it.
+
+**Refinement — gate on firstlaunch completion, not a guessed budget:** the Tart setup
+path now brackets the window with two marker files in `yoloai_dir`
+(`xcodebuild-firstlaunch.started`, created before launch, and `.done`, touched by the
+backgrounded job on exit via an `sh -c '… ; : > "$1"'` wrapper) and registers them
+with `tmux_io.set_firstlaunch_markers()`. While the started marker exists and the done
+marker does not, `tmux_bin()` keeps re-probing (capped by a 240s hard ceiling so a
+firstlaunch child that dies without signalling can't hang setup forever). Once the
+window closes — or on every non-Tart backend, where no markers are registered — it
+falls back to the bounded 30×1s retry, which now only has to cover the storm's
+short tail. This ties the wait to the actual cause rather than a fixed timeout.
 
 **Code:** `internal/runtime/monitor/tmux_io.py` (`tmux_bin`, `_probe_tmux_bin`,
-`_RESOLVE_ATTEMPTS`); `internal/runtime/monitor/sandbox-setup.py::setup_tmux_session`
-and the `main()` `wait-for` block.
+`_firstlaunch_in_progress`, `set_firstlaunch_markers`, `_RESOLVE_ATTEMPTS`,
+`_FIRSTLAUNCH_MAX_WAIT_SECONDS`); `internal/runtime/monitor/sandbox-setup.py`
+(firstlaunch launch in `TartBackend.setup()`, plus `setup_tmux_session` and the
+`main()` `wait-for` block).
 
 ---
 
