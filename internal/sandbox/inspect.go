@@ -10,13 +10,12 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime"
+	"github.com/kstenerud/yoloai/internal/sandbox/patch"
 	"github.com/kstenerud/yoloai/internal/sandbox/state"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 )
@@ -110,53 +109,6 @@ func FormatSize(bytes int64) string {
 	}
 }
 
-// detectChanges checks if the sandbox work directory has uncommitted changes.
-// Returns "yes" if changes exist, "no" if clean, "-" if not applicable.
-func detectChanges(workDir string) string {
-	if _, err := os.Stat(workDir); err != nil {
-		return "-"
-	}
-	if _, err := os.Stat(filepath.Join(workDir, ".git")); err != nil {
-		return "-"
-	}
-	cmd := exec.Command("git", "-C", workDir, "status", "--porcelain") //nolint:gosec // G204: workDir is sandbox-controlled path
-	output, err := cmd.Output()
-	if err != nil {
-		return "-"
-	}
-	for line := range strings.SplitSeq(strings.TrimSpace(string(output)), "\n") {
-		if len(line) < 3 {
-			continue
-		}
-		name := filepath.Base(line[3:])
-		if strings.HasPrefix(name, "yoloai-bugreport-") &&
-			(strings.HasSuffix(name, ".md") || strings.HasSuffix(name, ".md.tmp")) {
-			continue
-		}
-		return "yes"
-	}
-	return "no"
-}
-
-// hasUnappliedWork checks if a work directory has any unapplied work:
-// uncommitted changes OR commits beyond the baseline SHA.
-// Returns true if work exists that would be lost on destruction.
-func hasUnappliedWork(workDir, baselineSHA string) bool {
-	if detectChanges(workDir) == "yes" {
-		return true
-	}
-	if baselineSHA == "" {
-		return false
-	}
-	// Check for commits beyond the baseline
-	cmd := exec.Command("git", "-C", workDir, "rev-list", "--count", baselineSHA+"..HEAD") //nolint:gosec // G204: workDir and baselineSHA are sandbox-controlled
-	output, err := cmd.Output()
-	if err != nil {
-		return false
-	}
-	return strings.TrimSpace(string(output)) != "0"
-}
-
 // WorkDataState classifies what a sandbox directory holds, determined by
 // filesystem inspection alone — no environment.json required. This is the
 // recoverability signal used when meta is unreadable (broken sandboxes), so
@@ -197,7 +149,7 @@ func ProbeWorkData(sandboxDir string) (WorkDataState, string) {
 
 		// Copy mode: the work dir is the git repo itself.
 		if _, statErr := os.Stat(filepath.Join(workEntry, ".git")); statErr == nil {
-			if detectChanges(workEntry) == "yes" {
+			if patch.DetectChanges(workEntry) == "yes" {
 				return WorkDataPresent, "uncommitted changes in copied work dir"
 			}
 			// Clean tree, but without the baseline SHA from meta we can't
@@ -387,9 +339,9 @@ func InspectSandbox(ctx context.Context, layout config.Layout, rt runtime.Runtim
 	changes := "-"
 	if meta.Workdir.Mode == "copy" || meta.Workdir.Mode == "overlay" {
 		workDir := store.WorkDir(sandboxDir, meta.Workdir.HostPath)
-		if hasUnappliedWork(workDir, meta.Workdir.BaselineSHA) {
+		if patch.HasUnappliedWork(workDir, meta.Workdir.BaselineSHA) {
 			changes = "yes"
-		} else if detectChanges(workDir) != "-" {
+		} else if patch.DetectChanges(workDir) != "-" {
 			changes = "no"
 		}
 	}
@@ -399,7 +351,7 @@ func InspectSandbox(ctx context.Context, layout config.Layout, rt runtime.Runtim
 		for _, d := range meta.Directories {
 			if d.Mode == "copy" || d.Mode == "overlay" {
 				auxWorkDir := store.WorkDir(sandboxDir, d.HostPath)
-				if hasUnappliedWork(auxWorkDir, d.BaselineSHA) {
+				if patch.HasUnappliedWork(auxWorkDir, d.BaselineSHA) {
 					changes = "yes"
 					break
 				}
@@ -426,17 +378,17 @@ func detectWorkdirChanges(sandboxDir string, meta *store.Meta) string {
 		return "-"
 	}
 	workDir := store.WorkDir(sandboxDir, meta.Workdir.HostPath)
-	if hasUnappliedWork(workDir, meta.Workdir.BaselineSHA) {
+	if patch.HasUnappliedWork(workDir, meta.Workdir.BaselineSHA) {
 		return "yes"
 	}
-	if detectChanges(workDir) == "-" {
+	if patch.DetectChanges(workDir) == "-" {
 		return "-"
 	}
 	// workdir has no unapplied work — check aux dirs before reporting "no"
 	for _, d := range meta.Directories {
 		if d.Mode == "copy" || d.Mode == "overlay" {
 			auxWorkDir := store.WorkDir(sandboxDir, d.HostPath)
-			if hasUnappliedWork(auxWorkDir, d.BaselineSHA) {
+			if patch.HasUnappliedWork(auxWorkDir, d.BaselineSHA) {
 				return "yes"
 			}
 		}

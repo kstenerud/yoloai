@@ -24,6 +24,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/sandbox/archetype"
 	"github.com/kstenerud/yoloai/internal/sandbox/invocation"
 	"github.com/kstenerud/yoloai/internal/sandbox/launch"
+	"github.com/kstenerud/yoloai/internal/sandbox/patch"
 	provision "github.com/kstenerud/yoloai/internal/sandbox/provision"
 	"github.com/kstenerud/yoloai/internal/sandbox/state"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
@@ -239,7 +240,7 @@ func (m *Engine) Create(ctx context.Context, opts CreateOptions) (name string, e
 
 	// Execute VM-side work directory setup if baseline was deferred
 	if state.Meta.Workdir.Mode == "copy" && state.Meta.Workdir.BaselineSHA == "" {
-		if err := executeVMWorkDirSetup(ctx, m.runtime, state.Name, state.SandboxDir, state.Meta); err != nil {
+		if err := launch.ExecuteVMWorkDirSetup(ctx, m.runtime, state.Name, state.SandboxDir, state.Meta); err != nil {
 			// Clean up on failure
 			_ = os.RemoveAll(state.SandboxDir)
 			_ = m.runtime.Remove(ctx, store.InstanceName(state.Name))
@@ -262,7 +263,7 @@ func checkUnappliedWork(name string, sandboxDir string) error {
 
 	if meta.Workdir.Mode == "copy" || meta.Workdir.Mode == "overlay" {
 		workDir := store.WorkDir(sandboxDir, meta.Workdir.HostPath)
-		if hasUnappliedWork(workDir, meta.Workdir.BaselineSHA) {
+		if patch.HasUnappliedWork(workDir, meta.Workdir.BaselineSHA) {
 			return fmt.Errorf("sandbox %q has unapplied changes (use --force to replace anyway, or 'yoloai apply' first)", name)
 		}
 	}
@@ -270,7 +271,7 @@ func checkUnappliedWork(name string, sandboxDir string) error {
 	for _, d := range meta.Directories {
 		if d.Mode == "copy" || d.Mode == "overlay" {
 			auxWorkDir := store.WorkDir(sandboxDir, d.HostPath)
-			if hasUnappliedWork(auxWorkDir, d.BaselineSHA) {
+			if patch.HasUnappliedWork(auxWorkDir, d.BaselineSHA) {
 				return fmt.Errorf("sandbox %q has unapplied changes in %s (use --force to replace anyway, or 'yoloai apply' first)", name, d.HostPath)
 			}
 		}

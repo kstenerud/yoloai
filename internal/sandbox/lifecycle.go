@@ -20,6 +20,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox/invocation"
 	"github.com/kstenerud/yoloai/internal/sandbox/launch"
+	"github.com/kstenerud/yoloai/internal/sandbox/patch"
 	provision "github.com/kstenerud/yoloai/internal/sandbox/provision"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/internal/workspace"
@@ -672,7 +673,7 @@ func (m *Engine) prepareResetRestart(ctx context.Context, opts ResetOptions, san
 	// Execute VM-side work directory setup if baseline was deferred (Tart VMs)
 	// For :copy mode, if BaselineSHA is empty, VM setup is needed
 	if meta.Workdir.Mode == "copy" && meta.Workdir.BaselineSHA == "" {
-		if err := executeVMWorkDirSetup(ctx, m.runtime, opts.Name, sandboxDir, meta); err != nil {
+		if err := launch.ExecuteVMWorkDirSetup(ctx, m.runtime, opts.Name, sandboxDir, meta); err != nil {
 			return fmt.Errorf("VM work dir setup: %w", err)
 		}
 	}
@@ -711,7 +712,7 @@ func (m *Engine) NeedsConfirmation(ctx context.Context, name string) (bool, stri
 
 	if meta.Workdir.Mode == "copy" || meta.Workdir.Mode == "overlay" {
 		workDir := store.WorkDir(sandboxDir, meta.Workdir.HostPath)
-		if hasUnappliedWork(workDir, meta.Workdir.BaselineSHA) {
+		if patch.HasUnappliedWork(workDir, meta.Workdir.BaselineSHA) {
 			return true, "unapplied changes exist"
 		}
 	}
@@ -719,7 +720,7 @@ func (m *Engine) NeedsConfirmation(ctx context.Context, name string) (bool, stri
 	for _, d := range meta.Directories {
 		if d.Mode == "copy" || d.Mode == "overlay" {
 			auxWorkDir := store.WorkDir(sandboxDir, d.HostPath)
-			if hasUnappliedWork(auxWorkDir, d.BaselineSHA) {
+			if patch.HasUnappliedWork(auxWorkDir, d.BaselineSHA) {
 				return true, "unapplied changes exist"
 			}
 		}
@@ -910,7 +911,7 @@ func (m *Engine) recreateContainer(ctx context.Context, name string, meta *store
 	// Always re-run when recreating: the old VM was destroyed, so its local
 	// work directory no longer exists even if BaselineSHA is already set.
 	if meta.Workdir.Mode == "copy" {
-		if err := executeVMWorkDirSetup(ctx, m.runtime, name, sandboxDir, meta); err != nil {
+		if err := launch.ExecuteVMWorkDirSetup(ctx, m.runtime, name, sandboxDir, meta); err != nil {
 			return fmt.Errorf("VM work dir setup: %w", err)
 		}
 	}
