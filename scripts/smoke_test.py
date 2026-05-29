@@ -20,6 +20,7 @@ import argparse
 import atexit
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -110,6 +111,11 @@ class TestResult:
     skipped: bool = False
     reason: str = ""
     elapsed_s: float = 0.0
+    # Populated by the failure-autopsy pass (Tier 1). autopsy_path points at the
+    # per-failure FAILURE.md; fingerprints holds the matched diagnostic labels so
+    # print_summary and the run manifest can surface root cause without re-scanning.
+    autopsy_path: Optional[str] = None
+    fingerprints: list[str] = field(default_factory=list)
 
 
 class SkipTest(Exception):
@@ -899,6 +905,395 @@ def _preserve_failed_attempt(
     return None
 
 
+# ---------------------------------------------------------------------------
+# Failure autopsy (Tier 1)
+#
+# When a test fails we already preserve setup.log + logs/*.jsonl under the
+# attempt dir, but nothing reads them — the summary just says "sentinel not
+# seen". This pass scans those artifacts for known fatal fingerprints (seeded
+# from the backend-idiosyncrasies.md symptom index, so a match cites the exact
+# entry to read), builds a key-event timeline from the structured logs, and
+# writes a per-failure FAILURE.md. print_summary then surfaces the top match
+# inline so root cause is visible without log-spelunking.
+# ---------------------------------------------------------------------------
+
+# Where the cited sections live, relative to repo root. Anchors are the GitHub
+# slugs of the headings in that file.
+_IDIO_DOC = "docs/dev/backend-idiosyncrasies.md"
+
+
+@dataclass
+class Fingerprint:
+    label: str
+    pattern: str  # regex, searched case-insensitively against artifact text
+    anchor: str = ""  # backend-idiosyncrasies.md heading slug, or "" if none
+    hint: str = ""  # one-line note on what the match means / what to do
+
+
+# Ordered most-specific first: the first match wins as the headline cause, so a
+# precise "tmux during firstlaunch" fingerprint must precede the generic
+# "Python traceback" / "command timed out" catch-alls.
+FINGERPRINTS: list[Fingerprint] = [
+    Fingerprint(
+        "tmux unresolvable during firstlaunch window (Tart)",
+        r"FileNotFoundError:.*'tmux'",
+        "tart-transient-fspath-failure-makes-tmux-unresolvable-during-the-firstlaunch-window",
+        "tmux_bin() retry budget exhausted; the firstlaunch security-scan storm outlasted it",
+    ),
+    Fingerprint(
+        "get_working_dir race / FileNotFoundError on workdir (Tart)",
+        r"FileNotFoundError.*get_working_dir",
+        "tart-vm-workdir-setup-races-python-startup",
+    ),
+    Fingerprint(
+        "Seatbelt SBPL deny / SIGTRAP (exit 133)",
+        r"trace/bpt trap|\bexit (code )?133\b|\bdeny\(1\)",
+        "agent-dies-silently-sigtrap--sbpl-subpath-rules-must-use-vnode-resolved-paths",
+        "an SBPL subpath rule is missing a vnode-resolved variant",
+    ),
+    Fingerprint(
+        "secrets-consumed marker timeout (Tart/Kata)",
+        r"secrets-consumed marker not observed",
+        "kata-secrets-temp-dir-removed-before-the-guest-reads-it",
+    ),
+    Fingerprint(
+        "git index.lock race (Docker/Podman)",
+        r"index\.lock: file exists",
+        "dockerpodman-agent-git-and-apply-git-race-on-indexlock",
+    ),
+    Fingerprint(
+        "agent idle / API unreachable (DF8)",
+        r"agent idle for \d+s|request timed out|api unreachable",
+        "request-timed-out-in-claude-code--api-unreachable-not-dns-failure",
+    ),
+    Fingerprint(
+        "disk full (ENOSPC)",
+        r"enospc|no space left on device",
+    ),
+    Fingerprint(
+        "Python traceback in guest setup",
+        r"traceback \(most recent call last\):",
+        hint="the guest sandbox-setup.py crashed; see the final exception line below",
+    ),
+    Fingerprint(
+        "FileNotFoundError (generic)",
+        r"filenotfounderror: \[errno 2\]",
+    ),
+    Fingerprint(
+        "harness timeout (sentinel not seen / command timed out)",
+        r"sentinel '.*' not seen|command timed out",
+        hint="nothing fatal found in artifacts — the guest stalled rather than crashed",
+    ),
+]
+
+
+@dataclass
+class FingerprintHit:
+    fp: Fingerprint
+    line: str  # the first artifact line that matched
+    source: str  # filename the match came from
+
+
+def _autopsy_artifact_files(attempt_dir: Path) -> list[Path]:
+    """Files worth scanning for fingerprints, in priority order: the guest
+    traceback (setup.log) first, then the structured logs."""
+    out: list[Path] = []
+    for sandbox_dir in sorted(attempt_dir.glob("*")):
+        if not sandbox_dir.is_dir():
+            continue
+        setup_log = sandbox_dir / "setup.log"
+        if setup_log.is_file():
+            out.append(setup_log)
+        logs = sandbox_dir / "logs"
+        if logs.is_dir():
+            out.extend(sorted(logs.glob("*.jsonl")))
+        diag = sandbox_dir / "network-diag.txt"
+        if diag.is_file():
+            out.append(diag)
+    return out
+
+
+def scan_fingerprints(attempt_dir: Path) -> list[FingerprintHit]:
+    """Scan preserved artifacts for known fatal fingerprints.
+
+    Returns hits in FINGERPRINTS order (most-specific first). At most one hit
+    per fingerprint — the first matching line found across the artifact files.
+    """
+    compiled = [(fp, re.compile(fp.pattern, re.IGNORECASE)) for fp in FINGERPRINTS]
+    files = _autopsy_artifact_files(attempt_dir)
+    hits: list[FingerprintHit] = []
+    seen: set[str] = set()
+    for fp, rx in compiled:
+        if fp.label in seen:
+            continue
+        for f in files:
+            try:
+                text = f.read_text(errors="replace")
+            except OSError:
+                continue
+            for line in text.splitlines():
+                if rx.search(line):
+                    hits.append(FingerprintHit(fp, line.strip()[:200], f.name))
+                    seen.add(fp.label)
+                    break
+            if fp.label in seen:
+                break
+    return hits
+
+
+_TS_RX = re.compile(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?)")
+
+
+def _parse_ts(s: str) -> Optional[float]:
+    """Parse an ISO-8601 'ts' field (trailing Z tolerated) to epoch seconds."""
+    m = _TS_RX.search(s)
+    if not m:
+        return None
+    raw = m.group(1)
+    for fmt in ("%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            return time.mktime(time.strptime(raw, fmt))
+        except ValueError:
+            continue
+    return None
+
+
+def _collect_log_events(logs_dirs: list[Path]) -> list[tuple[float, str, str]]:
+    """Parse every *.jsonl under each logs dir into (epoch, event, msg),
+    sorted chronologically. Lines without a parseable ts are dropped."""
+    events: list[tuple[float, str, str]] = []
+    for logs in logs_dirs:
+        if not logs.is_dir():
+            continue
+        for jf in logs.glob("*.jsonl"):
+            try:
+                text = jf.read_text(errors="replace")
+            except OSError:
+                continue
+            for line in text.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    d = json.loads(line)
+                except ValueError:
+                    continue
+                ts = d.get("ts") or d.get("time") or ""
+                epoch = _parse_ts(ts) if isinstance(ts, str) else None
+                if epoch is None:
+                    continue
+                ev = str(d.get("event") or d.get("level") or "?")
+                msg = str(d.get("msg") or d.get("message") or "")
+                events.append((epoch, ev, msg))
+    events.sort(key=lambda e: e[0])
+    return events
+
+
+def _attempt_logs_dirs(attempt_dir: Path) -> list[Path]:
+    """The logs/ dir under each preserved sandbox inside an attempt dir."""
+    return [sd / "logs" for sd in sorted(attempt_dir.glob("*")) if sd.is_dir()]
+
+
+def build_timeline(attempt_dir: Path, max_lines: int = 40) -> list[str]:
+    """Build a chronological key-event timeline from the structured jsonl logs.
+
+    Each line is `+<delta>s <event>  <msg>`, delta measured from the first
+    event. Gaps over 5s are flagged with `<<< GAP Ns` because a long stall
+    between events (e.g. firstlaunch hiding tmux) is the usual smoking gun.
+    The tail near the crash is the most useful, so when there are more than
+    max_lines events we keep the first few and the last many.
+    """
+    events = _collect_log_events(_attempt_logs_dirs(attempt_dir))
+    if not events:
+        return []
+    # Collapse runs of the same event name (e.g. host sandbox.info polling)
+    # into one line with a count and span, so the noise can't bury the gaps.
+    collapsed: list[tuple[float, str, str, int, float]] = []  # epoch, ev, msg, count, last_epoch
+    for epoch, ev, msg in events:
+        if collapsed and collapsed[-1][1] == ev:
+            first_epoch, e0, m0, count, _ = collapsed[-1]
+            collapsed[-1] = (first_epoch, e0, m0, count + 1, epoch)
+        else:
+            collapsed.append((epoch, ev, msg, 1, epoch))
+    t0 = collapsed[0][0]
+    rendered: list[str] = []
+    prev = t0
+    for epoch, ev, msg, count, last_epoch in collapsed:
+        gap = epoch - prev
+        flag = f"   <<< GAP {gap:.0f}s" if gap > 5 else ""
+        label = ev if count == 1 else f"{ev} (x{count} over {last_epoch - epoch:.0f}s)"
+        rendered.append(f"  +{epoch - t0:6.1f}s  {label:<40}  {msg[:60]}{flag}")
+        prev = last_epoch
+    if len(rendered) > max_lines:
+        head, tail = 6, max_lines - 6
+        rendered = (
+            rendered[:head]
+            + [f"  ... {len(rendered) - max_lines} earlier events elided ..."]
+            + rendered[-tail:]
+        )
+    return rendered
+
+
+# ---------------------------------------------------------------------------
+# Baseline retention (Tier 3)
+#
+# On every pass we snapshot a tiny "last-good" record per (test, backend):
+# the ordered list of structured event names the passing run emitted, plus its
+# environment.json and version. On a later failure, the autopsy diffs the
+# failing run's events against last-good and reports which steps the good run
+# reached that this one never did — i.e. exactly where it stalled. This turns
+# an intermittent failure into "the good run got to agent.ready; this one died
+# at tmux.start", without hunting down a prior passing run by hand.
+# ---------------------------------------------------------------------------
+
+_BASELINE_ROOT = Path.home() / ".yoloai" / "smoke-baselines"
+
+
+def _baseline_path(test_name: str) -> Path:
+    """test_name is like 'full_workflow/tart'; keep the slash as a subdir."""
+    return _BASELINE_ROOT / f"{test_name}.json"
+
+
+def _read_environment(sandbox_dir: Path) -> dict[str, object]:
+    env = sandbox_dir / "environment.json"
+    try:
+        data = json.loads(env.read_text())
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_baseline(ctx: RunContext, test_name: str, sandbox_names: list[str]) -> None:
+    """Snapshot last-good event names + environment for a passing test.
+
+    Reads from the still-live ~/.yoloai/sandboxes/<name>/ dirs (preservation
+    only happens on failure, and cleanup runs at exit). Best-effort: any error
+    just skips the snapshot — a missing baseline only means no diff later."""
+    if not sandbox_names:
+        return
+    sandboxes_root = Path.home() / ".yoloai" / "sandboxes"
+    logs_dirs = [sandboxes_root / n / "logs" for n in sandbox_names]
+    events = _collect_log_events(logs_dirs)
+    if not events:
+        return
+    # Ordered, de-duplicated event names (first occurrence wins).
+    seen: set[str] = set()
+    event_names: list[str] = []
+    for _epoch, ev, _msg in events:
+        if ev not in seen:
+            seen.add(ev)
+            event_names.append(ev)
+    environment = _read_environment(sandboxes_root / sandbox_names[0])
+    record = {
+        "test": test_name,
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "version": binary_version_info(ctx.yoloai_bin),
+        "event_names": event_names,
+        "last_event": event_names[-1] if event_names else None,
+        "environment": environment,
+    }
+    path = _baseline_path(test_name)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(record, indent=2) + "\n")
+    except OSError:
+        pass
+
+
+def baseline_diff_lines(test_name: str, attempt_dir: Path) -> list[str]:
+    """Markdown lines comparing a failing attempt to its last-good baseline.
+
+    Empty if no baseline exists. Otherwise reports the baseline's identity and
+    the steps it reached that the failing run did not — the stall point."""
+    path = _baseline_path(test_name)
+    try:
+        base = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return []
+    base_events: list[str] = list(base.get("event_names") or [])
+    fail_events = {ev for _e, ev, _m in _collect_log_events(_attempt_logs_dirs(attempt_dir))}
+    missing = [ev for ev in base_events if ev not in fail_events]
+    ver = base.get("version") or {}
+    commit = ver.get("commit", "?") if isinstance(ver, dict) else "?"
+    lines = [
+        "## Baseline comparison",
+        "",
+        f"- last-good: {base.get('timestamp', '?')} (commit {commit})",
+        f"- last-good reached: `{base.get('last_event') or '?'}`",
+    ]
+    if missing:
+        lines.append(
+            f"- steps the last-good run reached that this run never did "
+            f"({len(missing)}):"
+        )
+        for ev in missing[:20]:
+            lines.append(f"    - `{ev}`")
+        if len(missing) > 20:
+            lines.append(f"    - ... and {len(missing) - 20} more")
+    else:
+        lines.append("- this run reached every step the last-good run did "
+                     "(failure is later than the captured event surface)")
+    lines.append("")
+    return lines
+
+
+def write_failure_autopsy(
+    ctx: RunContext, result: TestResult, attempt_dir: Path
+) -> Optional[Path]:
+    """Scan + timeline + write FAILURE.md into *attempt_dir*. Records the
+    autopsy path and matched fingerprint labels on *result*. Returns the
+    FAILURE.md path, or None if attempt_dir is unusable."""
+    if not attempt_dir.is_dir():
+        return None
+    hits = scan_fingerprints(attempt_dir)
+    timeline = build_timeline(attempt_dir)
+    result.fingerprints = [h.fp.label for h in hits]
+
+    lines: list[str] = []
+    lines.append(f"# Failure autopsy: {result.name}")
+    lines.append("")
+    lines.append(f"- run: {ctx.log_dir.name}")
+    lines.append(f"- version: {binary_version(ctx.yoloai_bin)}")
+    lines.append(f"- elapsed: {result.elapsed_s:.1f}s")
+    lines.append(f"- reason: {result.reason}")
+    lines.append("")
+    lines.append("## Matched fingerprints")
+    lines.append("")
+    if hits:
+        for h in hits:
+            lines.append(f"### {h.fp.label}")
+            if h.fp.hint:
+                lines.append(f"- {h.fp.hint}")
+            if h.fp.anchor:
+                lines.append(f"- see: {_IDIO_DOC}#{h.fp.anchor}")
+            lines.append(f"- matched ({h.source}): `{h.line}`")
+            lines.append("")
+    else:
+        lines.append("None. No known fatal fingerprint matched — likely a new")
+        lines.append("failure mode. Inspect setup.log and logs/ below, and if the")
+        lines.append(f"root cause is new add a fingerprint + a {_IDIO_DOC} entry.")
+        lines.append("")
+    lines.append("## Key-event timeline")
+    lines.append("")
+    if timeline:
+        lines.append("```")
+        lines.extend(timeline)
+        lines.append("```")
+    else:
+        lines.append("(no structured events found in logs/*.jsonl — the guest may")
+        lines.append("have crashed before its structured logger flushed)")
+    lines.append("")
+    lines.extend(baseline_diff_lines(result.name, attempt_dir))
+
+    out = attempt_dir / "FAILURE.md"
+    try:
+        out.write_text("\n".join(lines) + "\n")
+    except OSError:
+        return None
+    result.autopsy_path = str(out)
+    return out
+
+
 def _destroy_retry_sandboxes(ctx: RunContext, count_before: int) -> None:
     """Destroy sandboxes added since *count_before* so a retry starts clean."""
     stale = ctx.sandboxes[count_before:]
@@ -1018,6 +1413,15 @@ def run_test(
         preserved = _preserve_failed_attempt(ctx, name, t.local_sandboxes, attempt)
         if preserved is not None:
             print(f"      preserved: {preserved}")
+            autopsy = write_failure_autopsy(ctx, result, preserved)
+            if autopsy is not None:
+                if result.fingerprints:
+                    print(f"      autopsy: {result.fingerprints[0]}")
+                print(f"      details: {autopsy}")
+    elif result.passed and t.local_sandboxes:
+        # Snapshot last-good event surface for future failure diffs (Tier 3).
+        # Must read the live sandbox dirs before cleanup destroys them.
+        save_baseline(ctx, name, t.local_sandboxes)
     ctx.results.append(result)
     if ctx.junit:
         ctx.junit.write_testcase(result)
@@ -1284,13 +1688,15 @@ def _run_system_check(ctx: RunContext, daemon: str, isolation: str) -> tuple[boo
         cmd += ["--isolation", isolation]
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        data: dict = json.loads(r.stdout)
-        ok: bool = data.get("ok", False)
+        data: dict[str, object] = json.loads(r.stdout)
+        ok = bool(data.get("ok", False))
         note = ""
-        for check in data.get("checks", []):
-            if not check.get("ok"):
-                note = check.get("message", "check failed")
-                break
+        checks = data.get("checks", [])
+        if isinstance(checks, list):
+            for check in checks:
+                if isinstance(check, dict) and not check.get("ok"):
+                    note = str(check.get("message", "check failed"))
+                    break
         return ok, note
     except subprocess.TimeoutExpired:
         return False, "system check timed out"
@@ -1469,11 +1875,96 @@ def print_summary(results: list[TestResult]) -> None:
             print(f"  FAIL  {r.name}")
             for line in r.reason.splitlines():
                 print(f"        {line}")
+            if r.fingerprints:
+                print(f"        cause: {r.fingerprints[0]}")
+            if r.autopsy_path:
+                print(f"        autopsy: {r.autopsy_path}")
 
     if skipped:
         print("\nSkipped tests:")
         for r in skipped:
             print(f"  SKIP  {r.name}: {r.reason}")
+
+
+# Persistent cross-run index. One JSON object per line, appended after every
+# run, so "when did seatbelt start failing / on which sha?" is a grep instead
+# of mining 2000+ bugreports. Lives outside any single run dir.
+_SMOKE_INDEX = Path.home() / ".yoloai" / "smoke-index.jsonl"
+
+
+def _result_status(r: TestResult) -> str:
+    if r.skipped:
+        return "skip"
+    return "pass" if r.passed else "fail"
+
+
+def write_run_manifest(
+    ctx: RunContext, results: list[TestResult], *, host: str, tier: str
+) -> Optional[Path]:
+    """Write <log_dir>/manifest.json (machine-readable sibling of summary.txt)
+    and append a one-line row to ~/.yoloai/smoke-index.jsonl. Best-effort:
+    returns the manifest path, or None if it couldn't be written."""
+    ver = binary_version_info(ctx.yoloai_bin)
+    failed = [r for r in results if not r.passed and not r.skipped]
+    totals = {
+        "passed": sum(1 for r in results if r.passed),
+        "failed": len(failed),
+        "skipped": sum(1 for r in results if r.skipped),
+    }
+    stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    manifest = {
+        "run_id": ctx.run_id,
+        "run_dir": str(ctx.log_dir),
+        "timestamp": stamp,
+        "host": host,
+        "tier": tier,
+        "version": ver,
+        "totals": totals,
+        "tests": [
+            {
+                "name": r.name,
+                "status": _result_status(r),
+                "elapsed_s": round(r.elapsed_s, 1),
+                "reason": r.reason,
+                "fingerprints": r.fingerprints,
+                "autopsy": r.autopsy_path,
+            }
+            for r in results
+        ],
+    }
+    manifest_path = ctx.log_dir / "manifest.json"
+    try:
+        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+    except OSError:
+        manifest_path = None  # type: ignore[assignment]
+
+    # Index row: compact, one per run, with just enough to triage and locate
+    # the full manifest. Failures carry their headline fingerprint inline.
+    row = {
+        "run_id": ctx.run_id,
+        "timestamp": stamp,
+        "commit": ver["commit"],
+        "version": ver["version"],
+        "host": host,
+        "tier": tier,
+        "totals": totals,
+        "run_dir": str(ctx.log_dir),
+        "failures": [
+            {
+                "name": r.name,
+                "fingerprint": r.fingerprints[0] if r.fingerprints else None,
+            }
+            for r in failed
+        ],
+    }
+    try:
+        _SMOKE_INDEX.parent.mkdir(parents=True, exist_ok=True)
+        with open(_SMOKE_INDEX, "a") as f:
+            f.write(json.dumps(row) + "\n")
+    except OSError:
+        pass
+
+    return manifest_path
 
 
 # ---------------------------------------------------------------------------
@@ -1526,6 +2017,15 @@ def parse_args() -> argparse.Namespace:
             "Skip the check that ./yoloai is newer than the source tree. "
             "Use only when intentionally testing a hand-built binary; "
             "`make smoketest` rebuilds so this is rarely needed."
+        ),
+    )
+    parser.add_argument(
+        "--out-dir",
+        metavar="DIR",
+        help=(
+            "Parent directory for the per-run yoloai-smoketest-<ts>/ log dir. "
+            "Defaults to the current directory. Use e.g. ~/.yoloai/smoke-runs "
+            "to keep run artifacts out of the repo root."
         ),
     )
     return parser.parse_args()
@@ -1611,22 +2111,31 @@ def check_binary_fresh(yoloai_bin: str) -> Optional[str]:
     )
 
 
-def binary_version(yoloai_bin: str) -> str:
-    """Return the binary's embedded build identity as 'version (commit, date)'.
-
-    Reads it from `<bin> version --json` so the recorded sha reflects what was
-    actually compiled and run — the working tree may have moved since the build.
-    Returns 'unknown' if the binary can't be queried.
-    """
+def binary_version_info(yoloai_bin: str) -> dict[str, str]:
+    """Return the binary's embedded build identity as a {version, commit, date}
+    dict, read from `<bin> version --json` so the recorded sha reflects what was
+    actually compiled and run (the working tree may have moved since the build).
+    Missing fields default to '?'; an unqueryable binary yields all '?'."""
+    info: dict[str, str] = {"version": "?", "commit": "?", "date": "?"}
     try:
         r = subprocess.run(
             [yoloai_bin, "version", "--json"],
             capture_output=True, text=True, timeout=10,
         )
-        info = json.loads(r.stdout)
-        return f"{info.get('version', '?')} ({info.get('commit', '?')}, {info.get('date', '?')})"
+        parsed = json.loads(r.stdout)
+        for k in info:
+            info[k] = str(parsed.get(k, "?"))
     except (OSError, ValueError, subprocess.SubprocessError):
+        pass
+    return info
+
+
+def binary_version(yoloai_bin: str) -> str:
+    """Return the build identity as 'version (commit, date)' for header display."""
+    info = binary_version_info(yoloai_bin)
+    if info["commit"] == "?" and info["version"] == "?":
         return "unknown"
+    return f"{info['version']} ({info['commit']}, {info['date']})"
 
 
 class _Tee:
@@ -1665,7 +2174,7 @@ class _Tee:
         # callers that branch on isatty() (e.g. color output) behave
         # the same as without the tee.
         try:
-            return self._streams[0].isatty()  # type: ignore[attr-defined]
+            return bool(self._streams[0].isatty())  # type: ignore[attr-defined]
         except Exception:
             return False
 
@@ -1675,7 +2184,7 @@ def _install_stdout_tee(summary_path: Path) -> None:
     summary_path.parent.mkdir(parents=True, exist_ok=True)
     f = open(summary_path, "w", encoding="utf-8", buffering=1)  # line-buffered
     atexit.register(f.close)
-    sys.stdout = _Tee(sys.stdout, f)  # type: ignore[assignment]
+    sys.stdout = _Tee(sys.stdout, f)
 
 
 def main() -> int:
@@ -1728,7 +2237,8 @@ def main() -> int:
     tmpdir = Path(tempfile.mkdtemp(prefix="yoloai-smoke-"))
     _t = time.time()
     _ms = int(_t * 1000) % 1000
-    log_dir = Path.cwd() / time.strftime(f"yoloai-smoketest-%Y%m%d-%H%M%S.{_ms:03d}", time.gmtime(_t))
+    out_parent = Path(args.out_dir).expanduser() if args.out_dir else Path.cwd()
+    log_dir = out_parent / time.strftime(f"yoloai-smoketest-%Y%m%d-%H%M%S.{_ms:03d}", time.gmtime(_t))
     try:
         log_dir.mkdir(parents=True, exist_ok=True)
     except PermissionError:
@@ -1886,7 +2396,7 @@ def main() -> int:
                 continue
 
             sandbox_count_before = len(ctx.sandboxes)
-            result = run_test(ctx, test_name, lambda t, s=spec: test_fn(t, s), attempt=1)
+            result = run_test(ctx, test_name, lambda t: test_fn(t, spec), attempt=1)
             if not result.passed and not result.skipped and spec.retries > 0:
                 for retry_idx in range(spec.retries):
                     attempt = retry_idx + 2  # attempt 1 was the initial run
@@ -1897,7 +2407,7 @@ def main() -> int:
                     # run_test has already preserved their state under
                     # <log_dir>/sandboxes/<test>/attempt<N>/ before we get here.
                     _destroy_retry_sandboxes(ctx, sandbox_count_before)
-                    result = run_test(ctx, test_name, lambda t, s=spec: test_fn(t, s), attempt=attempt)
+                    result = run_test(ctx, test_name, lambda t: test_fn(t, spec), attempt=attempt)
                     if result.passed:
                         break
             # On VM backends, a failed test can leave a running VM that consumes
@@ -1931,6 +2441,13 @@ def main() -> int:
     run_matrix_test("isolation_check", test_isolation_check)
 
     print_summary(ctx.results)
+
+    manifest = write_run_manifest(
+        ctx, ctx.results, host="linux" if is_linux else "macos", tier=tier
+    )
+    if manifest is not None:
+        print(f"\nmanifest: {manifest}")
+    print(f"index: {_SMOKE_INDEX}")
 
     failed = [r for r in ctx.results if not r.passed and not r.skipped]
     return 1 if failed else 0

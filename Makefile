@@ -64,14 +64,19 @@ check: lint tidy-check hadolint actionlint test python-test
 python-test: python-typecheck
 	@if python3 -m pytest --version >/dev/null 2>&1; then \
 		python3 -m pytest internal/runtime/monitor/tests/ -v; \
+		python3 -m pytest scripts/tests/ -v; \
 	else \
 		echo "Python tests skipped (install pytest + mypy via 'make setup-dev-python' to enable)"; \
 	fi
 
 ## python-typecheck: run mypy --strict on the typed Python surface
+## Two invocations: the monitor surface and the smoke harness each have their
+## own tests/conftest.py, which mypy would otherwise reject as a duplicate
+## top-level "conftest" module if checked in one pass.
 python-typecheck:
 	@if python3 -m mypy --version >/dev/null 2>&1; then \
 		python3 -m mypy --strict internal/runtime/monitor/setup_helpers.py internal/runtime/monitor/tmux_io.py internal/runtime/monitor/tests/; \
+		python3 -m mypy --strict scripts/smoke_test.py scripts/tests/; \
 	else \
 		echo "Python type-check skipped (install mypy via 'make setup-dev-python' to enable)"; \
 	fi
