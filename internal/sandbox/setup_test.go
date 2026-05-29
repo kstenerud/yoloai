@@ -18,7 +18,7 @@ package sandbox
 //     unknown-name, invalid-mode) producing *UsageError vs other errors
 //   - SetupStatus inspection (3 tmux classifications × 3 platforms)
 //
-// Helpers extracted (`setupTestManager`, `setLinuxPlatform`, etc.) are
+// Helpers extracted (`setupTestEngine`, `setLinuxPlatform`, etc.) are
 // shared by ~10 callers; collapsing them would inflate the file, not
 // shrink it. Section headers (`// --- SetupStatus tests ---`, etc.)
 // scope the file for readers. If `setup.go` itself grows past its
@@ -101,14 +101,14 @@ func TestClassifyTmuxConfig_Large(t *testing.T) {
 	assert.Equal(t, tmuxConfigLarge, class)
 }
 
-// setupTestManager creates a Manager with a temp HOME containing
+// setupTestEngine creates a Engine with a temp HOME containing
 // defaults/config.yaml, global config.yaml, and state.yaml. Returns
-// the Manager, output buffer, HOME dir, and the Layout for assertions.
+// the Engine, output buffer, HOME dir, and the Layout for assertions.
 //
 // Q-F: ApplySetup is non-interactive, so input is io.Discard and the
 // returned buffer captures whatever Setup prints (the "Setup complete"
 // line lives in the CLI now, so the buffer is mostly empty here).
-func setupTestManager(t *testing.T) (*Manager, *bytes.Buffer, string, config.Layout) {
+func setupTestEngine(t *testing.T) (*Engine, *bytes.Buffer, string, config.Layout) {
 	t.Helper()
 	tmpDir := t.TempDir()
 
@@ -122,7 +122,7 @@ func setupTestManager(t *testing.T) (*Manager, *bytes.Buffer, string, config.Lay
 
 	var output bytes.Buffer
 	mock := &mockRuntime{}
-	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
+	mgr := NewEngine(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
 	return mgr, &output, tmpDir, layout
 }
 
@@ -169,7 +169,7 @@ func setMacOSIntelPlatform(t *testing.T) {
 
 func TestSetupStatus_NoTmuxConfig(t *testing.T) {
 	setLinuxPlatform(t)
-	mgr, _, _, _ := setupTestManager(t)
+	mgr, _, _, _ := setupTestEngine(t)
 
 	status := mgr.SetupStatus()
 	assert.Equal(t, TmuxConfigNone, status.TmuxClass)
@@ -179,7 +179,7 @@ func TestSetupStatus_NoTmuxConfig(t *testing.T) {
 
 func TestSetupStatus_LargeTmuxConfig(t *testing.T) {
 	setLinuxPlatform(t)
-	mgr, _, tmpDir, _ := setupTestManager(t)
+	mgr, _, tmpDir, _ := setupTestEngine(t)
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, ".tmux.conf"), []byte(strings.Repeat("set -g option value\n", 15)), 0600))
 
 	status := mgr.SetupStatus()
@@ -189,7 +189,7 @@ func TestSetupStatus_LargeTmuxConfig(t *testing.T) {
 
 func TestSetupStatus_ListsBackendsAndAgents(t *testing.T) {
 	setLinuxPlatform(t)
-	mgr, _, _, _ := setupTestManager(t)
+	mgr, _, _, _ := setupTestEngine(t)
 
 	status := mgr.SetupStatus()
 	assert.NotEmpty(t, status.AvailableBackends)
@@ -206,7 +206,7 @@ func TestSetupStatus_ListsBackendsAndAgents(t *testing.T) {
 
 func TestApplySetup_HappyPath_Linux(t *testing.T) {
 	setLinuxPlatform(t)
-	mgr, _, _, layout := setupTestManager(t)
+	mgr, _, _, layout := setupTestEngine(t)
 
 	opts := SetupOptions{TmuxConf: "default", Backend: "docker", Agent: "claude"}
 	require.NoError(t, mgr.ApplySetup(context.Background(), opts))
@@ -227,7 +227,7 @@ func TestApplySetup_HappyPath_Linux(t *testing.T) {
 
 func TestApplySetup_MissingTmuxConf_Error(t *testing.T) {
 	setLinuxPlatform(t)
-	mgr, _, _, layout := setupTestManager(t)
+	mgr, _, _, layout := setupTestEngine(t)
 
 	err := mgr.ApplySetup(context.Background(), SetupOptions{Backend: "docker", Agent: "claude"})
 	require.Error(t, err)
@@ -240,7 +240,7 @@ func TestApplySetup_MissingTmuxConf_Error(t *testing.T) {
 
 func TestApplySetup_InvalidTmuxConf_Error(t *testing.T) {
 	setLinuxPlatform(t)
-	mgr, _, _, _ := setupTestManager(t)
+	mgr, _, _, _ := setupTestEngine(t)
 
 	err := mgr.ApplySetup(context.Background(), SetupOptions{TmuxConf: "badvalue", Backend: "docker", Agent: "claude"})
 	require.Error(t, err)
@@ -249,7 +249,7 @@ func TestApplySetup_InvalidTmuxConf_Error(t *testing.T) {
 
 func TestApplySetup_InvalidBackend_Error(t *testing.T) {
 	setLinuxPlatform(t)
-	mgr, _, _, _ := setupTestManager(t)
+	mgr, _, _, _ := setupTestEngine(t)
 
 	err := mgr.ApplySetup(context.Background(), SetupOptions{TmuxConf: "default", Backend: "tart", Agent: "claude"})
 	require.Error(t, err)
@@ -258,7 +258,7 @@ func TestApplySetup_InvalidBackend_Error(t *testing.T) {
 
 func TestApplySetup_BackendRequired_WhenMultipleAvailable(t *testing.T) {
 	setLinuxPlatform(t) // docker + podman both available
-	mgr, _, _, _ := setupTestManager(t)
+	mgr, _, _, _ := setupTestEngine(t)
 
 	err := mgr.ApplySetup(context.Background(), SetupOptions{TmuxConf: "default", Agent: "claude"})
 	require.Error(t, err)
@@ -269,7 +269,7 @@ func TestApplySetup_BackendRequired_WhenMultipleAvailable(t *testing.T) {
 
 func TestApplySetup_InvalidAgent_Error(t *testing.T) {
 	setLinuxPlatform(t)
-	mgr, _, _, _ := setupTestManager(t)
+	mgr, _, _, _ := setupTestEngine(t)
 
 	err := mgr.ApplySetup(context.Background(), SetupOptions{TmuxConf: "default", Backend: "docker", Agent: "nonexistent"})
 	require.Error(t, err)
@@ -278,7 +278,7 @@ func TestApplySetup_InvalidAgent_Error(t *testing.T) {
 
 func TestApplySetup_AgentRequired_WhenMultipleAvailable(t *testing.T) {
 	setLinuxPlatform(t)
-	mgr, _, _, _ := setupTestManager(t)
+	mgr, _, _, _ := setupTestEngine(t)
 
 	err := mgr.ApplySetup(context.Background(), SetupOptions{TmuxConf: "default", Backend: "docker"})
 	require.Error(t, err)
@@ -289,7 +289,7 @@ func TestApplySetup_AgentRequired_WhenMultipleAvailable(t *testing.T) {
 
 func TestApplySetup_HostTmuxConf(t *testing.T) {
 	setLinuxPlatform(t)
-	mgr, _, _, layout := setupTestManager(t)
+	mgr, _, _, layout := setupTestEngine(t)
 
 	opts := SetupOptions{TmuxConf: "host", Backend: "docker", Agent: "claude"}
 	require.NoError(t, mgr.ApplySetup(context.Background(), opts))
@@ -301,7 +301,7 @@ func TestApplySetup_HostTmuxConf(t *testing.T) {
 
 func TestApplySetup_MacOSAllBackends(t *testing.T) {
 	setMacOSARMPlatform(t)
-	mgr, _, _, layout := setupTestManager(t)
+	mgr, _, _, layout := setupTestEngine(t)
 
 	opts := SetupOptions{TmuxConf: "default", Backend: "tart", Agent: "claude"}
 	require.NoError(t, mgr.ApplySetup(context.Background(), opts))
@@ -350,5 +350,5 @@ func TestAvailableAgents_ExcludesTest(t *testing.T) {
 }
 
 // mockRuntime is defined elsewhere — sanity check that strings.Reader
-// still satisfies io.Reader for setupTestManager.
+// still satisfies io.Reader for setupTestEngine.
 var _ io.Reader = strings.NewReader("")

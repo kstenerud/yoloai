@@ -176,7 +176,7 @@ func TestReadPrompt_MutualExclusion(t *testing.T) {
 }
 
 func TestReadPrompt_StdinDash(t *testing.T) {
-	// stdin is now an explicit reader threaded from the Manager's input,
+	// stdin is now an explicit reader threaded from the Engine's input,
 	// so the test supplies one directly instead of swapping os.Stdin.
 	result, err := ReadPrompt("-", "", "/home/user", nil, strings.NewReader("hello from stdin\n"))
 	require.NoError(t, err)
@@ -311,7 +311,7 @@ func TestCreate_CleansUpIncompleteOnNew(t *testing.T) {
 	// It will fail later (no agent, etc.) but the key assertion is
 	// that it does NOT return ErrSandboxExists.
 	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), WithLayout(layout))
+	mgr := NewEngine(&mockRuntime{}, slog.Default(), strings.NewReader(""), WithLayout(layout))
 	_, err := mgr.Create(context.Background(), CreateOptions{
 		Name:    name,
 		Workdir: DirSpec{Path: tmpDir},
@@ -332,7 +332,7 @@ func TestCreate_CleansUpOnPrepareFail(t *testing.T) {
 	// Use test agent which needs no API key, but provide a nonexistent workdir
 	// so preparation fails after directory creation.
 	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), WithLayout(layout))
+	mgr := NewEngine(&mockRuntime{}, slog.Default(), strings.NewReader(""), WithLayout(layout))
 	_, err := mgr.Create(context.Background(), CreateOptions{
 		Name:    name,
 		Workdir: DirSpec{Path: filepath.Join(tmpDir, "nonexistent")},

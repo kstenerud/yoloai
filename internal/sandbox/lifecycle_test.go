@@ -65,12 +65,12 @@ func (m *lifecycleMockRuntime) Exec(ctx context.Context, name string, cmd []stri
 	return m.mockRuntime.Exec(ctx, name, cmd, user)
 }
 
-// newLifecycleMgr creates a Manager with the given mock runtime and a discard output.
-// tmpDir is the test's t.TempDir(); the Manager's Layout is rooted at tmpDir/.yoloai
+// newLifecycleMgr creates a Engine with the given mock runtime and a discard output.
+// tmpDir is the test's t.TempDir(); the Engine's Layout is rooted at tmpDir/.yoloai
 // so it operates on the same tree as createTestSandbox writes to.
-func newLifecycleMgr(rt *lifecycleMockRuntime, tmpDir string) *Manager {
+func newLifecycleMgr(rt *lifecycleMockRuntime, tmpDir string) *Engine {
 	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
-	return NewManager(rt, slog.Default(), strings.NewReader(""), WithLayout(layout))
+	return NewEngine(rt, slog.Default(), strings.NewReader(""), WithLayout(layout))
 }
 
 // createTestSandbox creates a sandbox directory with environment.json for lifecycle tests.
@@ -170,7 +170,7 @@ func TestStart_AlreadyRunning(t *testing.T) {
 	}
 
 	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
-	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
+	mgr := NewEngine(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
 
 	// DetectStatus will call Inspect (running=true),
 	// then try Exec for tmux. Since our mock returns errMockNotImplemented
@@ -1021,7 +1021,7 @@ func TestReset_UpgradesToRestartWhenNotRunning(t *testing.T) {
 	}
 
 	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
-	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
+	mgr := NewEngine(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
 
 	// Default reset; container not running → auto-upgrades to restart.
 	// Restart path will fail at Start (no runtime-config.json), but re-copy should

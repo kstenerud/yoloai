@@ -176,9 +176,9 @@ func availableAgents() []setupOption {
 
 // SetupStatus inspects the host and returns the data a wizard needs
 // to render its prompts. Pure host inspection — does not touch the
-// layout or config files. Safe to call from a Manager with a nil
+// layout or config files. Safe to call from a Engine with a nil
 // runtime (used by yoloai.SystemClient.SetupStatus).
-func (m *Manager) SetupStatus() *SetupStatus {
+func (m *Engine) SetupStatus() *SetupStatus {
 	class, userConfig := classifyTmuxConfig(m.layout.HomeDir)
 	return &SetupStatus{
 		TmuxClass:         TmuxConfigClass(class),
@@ -203,14 +203,14 @@ func (m *Manager) SetupStatus() *SetupStatus {
 // Always creates the defaults/ directory and writes setup_complete=true
 // on success, so calling ApplySetup is the documented way to redo
 // (or repair) setup state.
-func (m *Manager) ApplySetup(_ context.Context, opts SetupOptions) error {
+func (m *Engine) ApplySetup(_ context.Context, opts SetupOptions) error {
 	if err := validateTmuxConf(opts.TmuxConf); err != nil {
 		return NewUsageError("%v", err)
 	}
 	// Q-F: ApplySetup is config-only; image build is a separate
 	// concern (handled by `yoloai system build` or by EnsureSetup on
 	// first sandbox creation). This is why ApplySetup doesn't need a
-	// runtime: SystemClient.Setup constructs a Manager with rt=nil.
+	// runtime: SystemClient.Setup constructs a Engine with rt=nil.
 	if err := m.ensureLayoutScaffold(); err != nil {
 		return err
 	}
@@ -230,7 +230,7 @@ func (m *Manager) ApplySetup(_ context.Context, opts SetupOptions) error {
 // answer, validating user-supplied values and auto-picking when only
 // one is available. Returns *UsageError for required-but-missing or
 // unknown-backend.
-func (m *Manager) applyBackendChoice(name string) error {
+func (m *Engine) applyBackendChoice(name string) error {
 	backends := availableBackends()
 	switch {
 	case name != "":
@@ -247,7 +247,7 @@ func (m *Manager) applyBackendChoice(name string) error {
 // validating user-supplied values and auto-picking when only one is
 // available. Returns *UsageError for required-but-missing or
 // unknown-agent.
-func (m *Manager) applyAgentChoice(name string) error {
+func (m *Engine) applyAgentChoice(name string) error {
 	agents := availableAgents()
 	switch {
 	case name != "":
@@ -289,7 +289,7 @@ func validateTmuxConf(value string) error {
 }
 
 // setBackendFromFlag validates the backend name against available backends and sets it.
-func (m *Manager) setBackendFromFlag(name string) error {
+func (m *Engine) setBackendFromFlag(name string) error {
 	for _, b := range availableBackends() {
 		if b.name == name {
 			return config.UpdateConfigFields(m.layout, map[string]string{
@@ -305,7 +305,7 @@ func (m *Manager) setBackendFromFlag(name string) error {
 }
 
 // setAgentFromFlag validates the agent name against available agents and sets it.
-func (m *Manager) setAgentFromFlag(name string) error {
+func (m *Engine) setAgentFromFlag(name string) error {
 	for _, a := range availableAgents() {
 		if a.name == name {
 			return config.UpdateConfigFields(m.layout, map[string]string{
@@ -324,7 +324,7 @@ func (m *Manager) setAgentFromFlag(name string) error {
 // When the mode includes "default" (i.e. the baked-in tmux config is active),
 // also writes a copy of the embedded tmux.conf to defaults/tmux.conf so the
 // user can inspect and customize it without rebuilding the image.
-func (m *Manager) setTmuxConf(value string) error {
+func (m *Engine) setTmuxConf(value string) error {
 	if err := config.UpdateGlobalConfigFields(m.layout, map[string]string{
 		"tmux_conf": value,
 	}); err != nil {
@@ -348,6 +348,6 @@ func (m *Manager) setTmuxConf(value string) error {
 // setSetupComplete marks setup as done. The user-facing "Setup complete"
 // message is printed by the CLI (`internal/cli/system/setup.go`) after
 // SystemClient.Setup returns — the library only persists state (F8).
-func (m *Manager) setSetupComplete() error {
+func (m *Engine) setSetupComplete() error {
 	return config.SaveState(m.layout, &config.State{SetupComplete: true})
 }

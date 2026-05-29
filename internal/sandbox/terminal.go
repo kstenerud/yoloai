@@ -36,7 +36,7 @@ import (
 // "what does the agent's screen actually look like right now" capability
 // stays in one place instead of being re-implemented per backend in
 // scripts/smoke_test.py.
-func (m *Manager) CaptureTerminal(ctx context.Context, name string, scrollback int) (plain, ansi []byte, err error) {
+func (m *Engine) CaptureTerminal(ctx context.Context, name string, scrollback int) (plain, ansi []byte, err error) {
 	info, err := m.Inspect(ctx, name)
 	if err != nil {
 		return nil, nil, err
@@ -68,7 +68,7 @@ func (m *Manager) CaptureTerminal(ctx context.Context, name string, scrollback i
 // that auto-inject the socket internally (seatbelt), passing the path
 // is still safe because tmux accepts repeated -S with last-one-wins
 // semantics and both paths resolve to the same socket.
-func (m *Manager) capturePane(ctx context.Context, containerName, socket, user string, scrollback int, ansi bool) ([]byte, error) {
+func (m *Engine) capturePane(ctx context.Context, containerName, socket, user string, scrollback int, ansi bool) ([]byte, error) {
 	args := []string{"tmux"}
 	if socket != "" {
 		args = append(args, "-S", socket)

@@ -56,7 +56,7 @@ func cliSetup(t *testing.T) (projectDir string) {
 
 	// Run EnsureSetup via a quick `new --no-start` then destroy, or just
 	// invoke setup by creating a throwaway sandbox. We use the root command
-	// to trigger EnsureSetup via the Manager.
+	// to trigger EnsureSetup via the Engine.
 	root := NewRootCmd("test", "test", "test")
 	root.SetArgs([]string{"new", "--agent", "test", "--no-start", "cli-setup", projectDir})
 	root.SetOut(&bytes.Buffer{})
@@ -101,7 +101,7 @@ func TestCLI_NewAndDestroy(t *testing.T) {
 	t.Cleanup(func() { destroySandbox(t, "cli-new") })
 
 	assert.DirExists(t, cliutil.Layout().SandboxDir("cli-new"))
-	assert.Contains(t, stderr, "cli-new") // Manager output goes to stderr
+	assert.Contains(t, stderr, "cli-new") // Engine output goes to stderr
 
 	stdout, _, err := runCLI(t, "destroy", "--yes", "cli-new")
 	require.NoError(t, err)

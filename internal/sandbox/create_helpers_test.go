@@ -24,7 +24,7 @@ import (
 )
 
 // layoutForTmpDir builds a Layout rooted at tmpDir/.yoloai for tests
-// that exercise Manager methods which use m.layout. Mirrors what the
+// that exercise Engine methods which use m.layout. Mirrors what the
 // CLI does at startup so tests don't depend on ambient HOME.
 func layoutForTmpDir(tmpDir string) config.Layout {
 	return config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
@@ -566,7 +566,7 @@ func TestPrepareSandboxState_MissingName(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
 
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), WithLayout(config.NewLayout(t.TempDir())))
+	mgr := NewEngine(&mockRuntime{}, slog.Default(), strings.NewReader(""), WithLayout(config.NewLayout(t.TempDir())))
 
 	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
 		Name:    "",
@@ -580,7 +580,7 @@ func TestPrepareSandboxState_MissingName(t *testing.T) {
 func TestPrepareSandboxState_UnknownAgent(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), WithLayout(config.NewLayout(t.TempDir())))
+	mgr := NewEngine(&mockRuntime{}, slog.Default(), strings.NewReader(""), WithLayout(config.NewLayout(t.TempDir())))
 
 	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
 		Name:    "test",
@@ -594,7 +594,7 @@ func TestPrepareSandboxState_UnknownAgent(t *testing.T) {
 func TestPrepareSandboxState_WorkdirMissing(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), WithLayout(layoutForTmpDir(tmpDir)))
+	mgr := NewEngine(&mockRuntime{}, slog.Default(), strings.NewReader(""), WithLayout(layoutForTmpDir(tmpDir)))
 
 	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
 		Name:    "test",
@@ -616,7 +616,7 @@ func TestPrepareSandboxState_SandboxExists(t *testing.T) {
 		Agent: "test",
 	}))
 
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), WithLayout(layoutForTmpDir(tmpDir)))
+	mgr := NewEngine(&mockRuntime{}, slog.Default(), strings.NewReader(""), WithLayout(layoutForTmpDir(tmpDir)))
 
 	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
 		Name:    "existing",
@@ -630,7 +630,7 @@ func TestPrepareSandboxState_SandboxExists(t *testing.T) {
 func TestPrepareSandboxState_ConflictingPromptFlags(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), WithLayout(layoutForTmpDir(tmpDir)))
+	mgr := NewEngine(&mockRuntime{}, slog.Default(), strings.NewReader(""), WithLayout(layoutForTmpDir(tmpDir)))
 
 	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
 		Name:       "test",
@@ -648,7 +648,7 @@ func TestPrepareSandboxState_MissingAPIKey(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), WithLayout(layoutForTmpDir(tmpDir)))
+	mgr := NewEngine(&mockRuntime{}, slog.Default(), strings.NewReader(""), WithLayout(layoutForTmpDir(tmpDir)))
 
 	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
 		Name:    "test",
@@ -663,7 +663,7 @@ func TestPrepareSandboxState_DangerousDir(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
 
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), WithLayout(layoutForTmpDir(tmpDir)))
+	mgr := NewEngine(&mockRuntime{}, slog.Default(), strings.NewReader(""), WithLayout(layoutForTmpDir(tmpDir)))
 
 	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
 		Name:    "test",
@@ -680,7 +680,7 @@ func TestPrepareSandboxState_DangerousDirForce(t *testing.T) {
 
 	// HOME is classified as dangerous. Use :rw:force to avoid copying.
 	var buf bytes.Buffer
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader("y\n"), WithLayout(layoutForTmpDir(tmpDir)))
+	mgr := NewEngine(&mockRuntime{}, slog.Default(), strings.NewReader("y\n"), WithLayout(layoutForTmpDir(tmpDir)))
 
 	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
 		Name:    "test",
@@ -839,7 +839,7 @@ func TestPrepareSandboxState_MissingAPIKeyErrorNoEmptyParens(t *testing.T) {
 		t.Setenv(key, "")
 	}
 
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), WithLayout(layoutForTmpDir(tmpDir)))
+	mgr := NewEngine(&mockRuntime{}, slog.Default(), strings.NewReader(""), WithLayout(layoutForTmpDir(tmpDir)))
 
 	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
 		Name:    "test",
@@ -866,7 +866,7 @@ func TestPrepareSandboxState_MissingAPIKeyErrorWithAuthFiles(t *testing.T) {
 	}
 	defer func() { keychainReader = origReader }()
 
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), WithLayout(layoutForTmpDir(tmpDir)))
+	mgr := NewEngine(&mockRuntime{}, slog.Default(), strings.NewReader(""), WithLayout(layoutForTmpDir(tmpDir)))
 
 	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
 		Name:    "test",
@@ -888,7 +888,7 @@ func TestPrepareSandboxState_NetworkIsolatedSetsAllowlist(t *testing.T) {
 	workDir := filepath.Join(tmpDir, "project")
 	require.NoError(t, os.MkdirAll(workDir, 0750))
 
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader("y\n"), WithLayout(layoutForTmpDir(tmpDir)))
+	mgr := NewEngine(&mockRuntime{}, slog.Default(), strings.NewReader("y\n"), WithLayout(layoutForTmpDir(tmpDir)))
 
 	state, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
 		Name:    "test",
@@ -916,7 +916,7 @@ func TestPrepareSandboxState_NetworkIsolatedSetsAllowlist(t *testing.T) {
 // host-side filtering redesign lands (see docs/design/network-isolation.md)
 // this combination must fail loudly.
 func TestBuildInstanceConfig_RejectsNetworkIsolatedWithGvisor(t *testing.T) {
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), WithLayout(config.NewLayout(t.TempDir())))
+	mgr := NewEngine(&mockRuntime{}, slog.Default(), strings.NewReader(""), WithLayout(config.NewLayout(t.TempDir())))
 	state := &sandboxState{
 		name:        "test",
 		workdir:     &DirSpec{Path: "/project", Mode: DirMode("copy")},
@@ -942,7 +942,7 @@ func TestBuildInstanceConfig_AllowsNetworkIsolatedOnSupportedModes(t *testing.T)
 	supported := []runtime.IsolationMode{"", "container", "container-privileged", "vm", "vm-enhanced"}
 	for _, isolation := range supported {
 		t.Run("isolation="+string(isolation), func(t *testing.T) {
-			mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), WithLayout(config.NewLayout(t.TempDir())))
+			mgr := NewEngine(&mockRuntime{}, slog.Default(), strings.NewReader(""), WithLayout(config.NewLayout(t.TempDir())))
 			state := &sandboxState{
 				name:        "test",
 				workdir:     &DirSpec{Path: "/project", Mode: DirMode("copy")},
@@ -986,7 +986,7 @@ func TestPrepareSandboxState_NetworkAllowAddsExtraDomains(t *testing.T) {
 	workDir := filepath.Join(tmpDir, "project")
 	require.NoError(t, os.MkdirAll(workDir, 0750))
 
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader("y\n"), WithLayout(layoutForTmpDir(tmpDir)))
+	mgr := NewEngine(&mockRuntime{}, slog.Default(), strings.NewReader("y\n"), WithLayout(layoutForTmpDir(tmpDir)))
 
 	state, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
 		Name:         "test",

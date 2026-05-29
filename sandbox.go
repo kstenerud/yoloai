@@ -48,7 +48,7 @@ func (s *Sandbox) Name() string { return s.name }
 // Both fields are best-effort: if the runtime supplied plain output but
 // the ANSI-preserving variant failed, Plain will be populated and ANSI
 // will be nil — that's the documented degraded mode (see
-// sandbox.Manager.CaptureTerminal).
+// sandbox.Engine.CaptureTerminal).
 type TerminalSnapshot struct {
 	Plain []byte // tmux capture-pane -p output, printable characters only
 	ANSI  []byte // same capture with terminal-control escape sequences preserved (-e flag)
@@ -63,7 +63,7 @@ type TerminalSnapshot struct {
 // not fatal); a partial snapshot (Plain set, ANSI nil) on a successful
 // plain capture with a failed ANSI capture.
 //
-// Backed by sandbox.Manager.CaptureTerminal which uses the runtime's
+// Backed by sandbox.Engine.CaptureTerminal which uses the runtime's
 // non-interactive Exec to invoke `tmux capture-pane`; backend-specific
 // socket dispatch is handled inside that primitive. DF3.
 func (s *Sandbox) CaptureTerminal(ctx context.Context, scrollback int) (TerminalSnapshot, error) {

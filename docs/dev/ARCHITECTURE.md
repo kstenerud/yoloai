@@ -24,7 +24,7 @@ internal/runtime/tart/        → Tart (macOS VM) implementation of runtime.Runt
 internal/runtime/seatbelt/    → Seatbelt (macOS sandbox-exec) implementation of runtime.Runtime
 internal/runtime/containerd/  → Containerd implementation of runtime.Runtime (Kata Containers VM isolation)
 internal/runtime/monitor/     → Embedded monitoring scripts shared across all backends (sandbox-setup.py, status-monitor.py, diagnose-idle.sh)
-internal/sandbox/             → Core logic: Manager, create, lifecycle, clone, inspect
+internal/sandbox/             → Core logic: Engine, create, lifecycle, clone, inspect
 internal/sandbox/archetype/   → Project archetype detection (devcontainer, compose, apple, simple) + .yoloai.yaml + VS Code workspace injection
 internal/sandbox/patch/       → Git-format diff/apply machinery for :copy, :overlay, and :rw modes
 internal/sandbox/store/       → On-disk sandbox state: paths, Meta record, SandboxState completion flags
@@ -36,7 +36,7 @@ test/e2e/                → End-to-end tests against the compiled binary (build
 
 Public Go surface is the **`yoloai` package only** (W-L12). Every other Go package lives under `internal/` and is unreachable from external imports by the Go compiler itself. `cmd/yoloai` is the binary entry, not a library.
 
-Dependency direction (W-L8 + W-L12 shape): `cmd/yoloai` → `internal/cli` → `yoloai` (Client + SystemClient) → `internal/sandbox` + `internal/sandbox/patch` + `internal/sandbox/store` + `internal/runtime`; `internal/sandbox` → `internal/sandbox/archetype` + `internal/sandbox/store` + `internal/runtime` + `internal/agent` + `internal/workspace`; `internal/sandbox/patch` → `internal/sandbox` + `internal/sandbox/store`; `internal/sandbox/store` is a leaf (only imports stdlib, `internal/config`, other `internal/*`); `internal/agent` stands alone; `internal/mcpsrv` depends on `yoloai` (not `sandbox.Manager`). The CLI doesn't reach into `internal/sandbox/*` or `internal/runtime/*` for orchestration — every command goes through `yoloai.Client` or `yoloai.SystemClient`. The `withRuntime`/`withManager` helpers were removed in W-L10. Cross-backend enumeration (`ls`, `doctor`, `system info`) goes through `SystemClient.ListAcrossBackends` / `Doctor` / `Info` (F23); the only remaining `cliutil.NewRuntime` callers are `cliutil.CheckBackend` (the availability-probe chokepoint, used by a few read-only displays) and the backend-scoped `system tart` subtree. Depguard (`.golangci.yml`) enforces the boundary going forward.
+Dependency direction (W-L8 + W-L12 shape): `cmd/yoloai` → `internal/cli` → `yoloai` (Client + SystemClient) → `internal/sandbox` + `internal/sandbox/patch` + `internal/sandbox/store` + `internal/runtime`; `internal/sandbox` → `internal/sandbox/archetype` + `internal/sandbox/store` + `internal/runtime` + `internal/agent` + `internal/workspace`; `internal/sandbox/patch` → `internal/sandbox` + `internal/sandbox/store`; `internal/sandbox/store` is a leaf (only imports stdlib, `internal/config`, other `internal/*`); `internal/agent` stands alone; `internal/mcpsrv` depends on `yoloai` (not `sandbox.Engine`). The CLI doesn't reach into `internal/sandbox/*` or `internal/runtime/*` for orchestration — every command goes through `yoloai.Client` or `yoloai.SystemClient`. The `withRuntime`/`withManager` helpers were removed in W-L10. Cross-backend enumeration (`ls`, `doctor`, `system info`) goes through `SystemClient.ListAcrossBackends` / `Doctor` / `Info` (F23); the only remaining `cliutil.NewRuntime` callers are `cliutil.CheckBackend` (the availability-probe chokepoint, used by a few read-only displays) and the backend-scoped `system tart` subtree. Depguard (`.golangci.yml`) enforces the boundary going forward.
 
 ## File Index
 
@@ -164,7 +164,7 @@ MCP server exposing sandbox operations as tools for outer agents driving two-lay
 
 | File | Purpose |
 |------|---------|
-| `server.go` | `Server` struct backed by `sandbox.Manager`. `New()` creates the MCP server with registered tool handlers. |
+| `server.go` | `Server` struct backed by `sandbox.Engine`. `New()` creates the MCP server with registered tool handlers. |
 | `tools.go` | MCP tool definitions: sandbox lifecycle, observation, refinement, and file exchange tools. |
 | `proxy.go` | MCP proxy — forwards MCP protocol between outer agent and inner MCP server running inside a sandbox. |
 
@@ -292,7 +292,7 @@ Dynamic capability detection system. Probes the host, checks backend prerequisit
 
 | File | Purpose |
 |------|---------|
-| `manager.go` | `Manager` struct — central orchestrator. Holds a `runtime.Runtime`. `EnsureSetup()` / `EnsureSetupNonInteractive()` for first-run auto-setup (dirs, resources, image, config). |
+| `engine.go` | `Engine` struct — central orchestrator. Holds a `runtime.Runtime`. `EnsureSetup()` / `EnsureSetupNonInteractive()` for first-run auto-setup (dirs, resources, image, config). |
 | `create.go` | `Create()` — top-level sandbox creation orchestrator. Calls prepare, seed, and instance-building phases. |
 | `create_prepare.go` | `prepareSandboxState()` — profile resolution, directory validation, safety checks, workdir copy, git baseline, meta persistence. |
 | `create_instance.go` | `buildAndStart()` — constructs `runtime.InstanceConfig` from sandbox state, builds mounts, creates and starts the container/VM instance. |
@@ -363,9 +363,9 @@ On-disk sandbox state — paths, metadata, and creation-completion flags. Leaf s
 ## Key Types
 
 ### `yoloai.Client`
-High-level public API for library consumers. Wraps `sandbox.Manager` and `runtime.Runtime`. Provides `Run()`, `Diff()`, `Apply()`, `List()`, `Inspect()`, `Stop()`, `Destroy()`. Configured via `Options` (backend, logger, output, input). `RunOptions` mirrors CLI flags for `yoloai new`.
+High-level public API for library consumers. Wraps `sandbox.Engine` and `runtime.Runtime`. Provides `Run()`, `Diff()`, `Apply()`, `List()`, `Inspect()`, `Stop()`, `Destroy()`. Configured via `Options` (backend, logger, output, input). `RunOptions` mirrors CLI flags for `yoloai new`.
 
-### `sandbox.Manager`
+### `sandbox.Engine`
 Central orchestrator. Holds a `runtime.Runtime`, backend name, logger, and I/O streams. All sandbox operations go through it: `Create()`, `Start()`, `Stop()`, `Destroy()`, `Reset()`, `Clone()`, `Inspect()`, `List()`, `EnsureSetup()`. The backend name is stored so it can be persisted in `Meta` at sandbox creation time.
 
 ### `store.Meta` / `store.WorkdirMeta` / `store.DirMeta`
@@ -375,13 +375,13 @@ Persisted as `environment.json` (legacy: `meta.json`) in each sandbox dir. Recor
 Per-sandbox runtime state persisted as `sandbox-state.json` (legacy: `state.json`). Tracks mutable state like `agent_files_initialized` (boolean). Separate from `Meta` which is immutable after creation. Lives in `sandbox/store`.
 
 ### `sandbox.CreateOptions` / `sandbox.DirSpec`
-Internal parameters for `Manager.Create()`. `DirSpec` specifies a directory path, mount mode (copy/overlay/rw/ro), and per-directory safety acks (`AllowDirty`, `AllowDangerousPath`). `CreateOptions` includes name, workdir `DirSpec`, auxiliary `DirSpec` list, agent, model, prompt, network, ports, profile, replace, passthrough args. The **public** creation surface is `yoloai.CreateOptions` (root `create_options.go`); `Client.Create` maps it onto this internal struct via `toInternal()`. A dirty workdir surfaces as `*yoerrors.DirtyWorkdirError` (never an in-library prompt — D24).
+Internal parameters for `Engine.Create()`. `DirSpec` specifies a directory path, mount mode (copy/overlay/rw/ro), and per-directory safety acks (`AllowDirty`, `AllowDangerousPath`). `CreateOptions` includes name, workdir `DirSpec`, auxiliary `DirSpec` list, agent, model, prompt, network, ports, profile, replace, passthrough args. The **public** creation surface is `yoloai.CreateOptions` (root `create_options.go`); `Client.Create` maps it onto this internal struct via `toInternal()`. A dirty workdir surfaces as `*yoerrors.DirtyWorkdirError` (never an in-library prompt — D24).
 
 ### `patch.DiffOptions` / `patch.DiffResult`
 Input/output for `patch.GenerateDiff()` / `patch.GenerateMultiDiff()`. Supports path filtering and stat-only mode. `DiffResult` carries the diff text, workdir, mode, and empty flag. Lives in `sandbox/patch`.
 
 ### `sandbox.CloneOptions`
-Parameters for `Manager.Clone()`. Source and destination sandbox names, optional overrides.
+Parameters for `Engine.Clone()`. Source and destination sandbox names, optional overrides.
 
 ### `archetype.Archetype` / `archetype.DevcontainerConfig` / `archetype.YoloAIProjectConfig`
 Project-archetype detection types. Lives in `sandbox/archetype`.
@@ -429,7 +429,7 @@ Host context: `IsRoot`, `IsWSL2`, `InContainer`, `KVMGroup`. Detected once per i
 
 | CLI Command | Entry Point | Core Logic |
 |-------------|-------------|------------|
-| `yoloai new` | `cli/lifecycle/new.go:NewNewCmd` | `yoloai.Client.Create()` (→ `sandbox.Manager.Create` in `sandbox/create.go`) |
+| `yoloai new` | `cli/lifecycle/new.go:NewNewCmd` | `yoloai.Client.Create()` (→ `sandbox.Engine.Create` in `sandbox/create.go`) |
 | `yoloai attach` | `cli/workflow/attach.go:NewAttachCmd` | `yoloai.Client.Attach()` (PTY-sized via `cliutil.IOStreams`) |
 | `yoloai diff` | `cli/workflow/diff.go:NewDiffCmd` | `yoloai.Client.GenerateMultiPatch()` (→ `sandbox.GenerateMultiDiff` in `sandbox/diff.go`) |
 | `yoloai apply` | `cli/workflow/apply.go:NewApplyCmd` | `yoloai.Client.GeneratePatch()` / `ApplyPatch()` / `GenerateFormatPatch()` |
@@ -477,7 +477,7 @@ Host context: `IsRoot`, `IsWSL2`, `InContainer`, `KVMGroup`. Detected once per i
 ```
 NewNewCmd (cli/lifecycle/new.go)
   → cliutil.WithClient (cli/cliutil/client.go)
-    → yoloai.Client.Create  (wraps sandbox.Manager.Create in sandbox/create.go)
+    → yoloai.Client.Create  (wraps sandbox.Engine.Create in sandbox/create.go)
       → EnsureSetup: create dirs, seed resources, build image, write config.yaml
       → prepareSandboxState (sandbox/create_prepare.go):
           resolve profile chain → applyConfigDefaults
@@ -577,7 +577,7 @@ lifecycle.go (reset):
 ### Container Start/Restart (`yoloai start`)
 
 ```
-Manager.Start (sandbox/lifecycle.go)
+Engine.Start (sandbox/lifecycle.go)
   → DetectStatus (sandbox/inspect.go): runtime.Inspect + status file read
   → StatusActive: no-op
   → StatusDone/Failed: relaunchAgent via tmux respawn-pane
@@ -697,7 +697,7 @@ with `mv`. The CLI confirms before emptying trash (it may hold wanted data);
    - a brand-new subpackage if the command isn't a natural fit for any of the above
 2. Add an exported constructor (`NewXxxCmd() *cobra.Command`) on that subpackage and tag the returned command with the appropriate `cliutil.Group<Lifecycle|Workflow|SandboxTools|Admin>` ID.
 3. Wire it into `internal/cli/commands.go:registerCommands()` under its help group.
-4. If the command needs a `yoloai.Client`, use `cliutil.WithClient`; for cross-backend admin work use `cliutil.NewSystemClient()`. Do not construct `sandbox.Manager` or raw `runtime.Runtime` directly — `.golangci.yml` enforces this via depguard / forbidigo.
+4. If the command needs a `yoloai.Client`, use `cliutil.WithClient`; for cross-backend admin work use `cliutil.NewSystemClient()`. Do not construct `sandbox.Engine` or raw `runtime.Runtime` directly — `.golangci.yml` enforces this via depguard / forbidigo.
 
 **Add a new agent:**
 1. Add a new entry to the `agents` map in `agent/agent.go`
@@ -770,7 +770,7 @@ with `mv`. The CLI confirms before emptying trash (it may hold wanted data);
 
 **Add MCP tools for outer agents:**
 1. Add tool registration in `internal/mcpsrv/tools.go`
-2. Tool handlers use `sandbox.Manager` for all sandbox operations
+2. Tool handlers use `sandbox.Engine` for all sandbox operations
 
 ## Testing
 

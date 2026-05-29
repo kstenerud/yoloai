@@ -17,10 +17,10 @@ import (
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 )
 
-func newCloneMgr(tmpDir string) *Manager {
+func newCloneMgr(tmpDir string) *Engine {
 	mock := &lifecycleMockRuntime{}
 	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
-	return NewManager(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
+	return NewEngine(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
 }
 
 func createCloneSource(t *testing.T, tmpDir, name string) {

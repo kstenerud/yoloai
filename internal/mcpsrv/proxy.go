@@ -32,7 +32,7 @@ type ProxyOptions struct {
 	// (sleep infinity — keeps the container alive without an AI agent).
 	Agent string
 
-	// Model, Profile are passed to Manager.Create when creating.
+	// Model, Profile are passed to Engine.Create when creating.
 	Model   string
 	Profile string
 

@@ -110,7 +110,7 @@ func TestEnsureSetup_CreatesDirectories(t *testing.T) {
 
 	mock := &mockRuntime{} // image exists (no error)
 	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
-	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
+	mgr := NewEngine(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
 
 	err := mgr.EnsureSetup(context.Background(), io.Discard)
 	require.NoError(t, err)
@@ -130,7 +130,7 @@ func TestEnsureSetup_WritesConfigOnFirstRun(t *testing.T) {
 	mock := &mockRuntime{}
 	var output bytes.Buffer
 	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
-	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
+	mgr := NewEngine(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
 
 	err := mgr.EnsureSetup(context.Background(), &output)
 	require.NoError(t, err)
@@ -150,7 +150,7 @@ func TestEnsureSetup_WritesStateOnFirstRun(t *testing.T) {
 
 	mock := &mockRuntime{}
 	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
-	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
+	mgr := NewEngine(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
 
 	err := mgr.EnsureSetup(context.Background(), io.Discard)
 	require.NoError(t, err)
@@ -175,7 +175,7 @@ func TestEnsureSetup_SkipsConfigOnSubsequentRun(t *testing.T) {
 
 	mock := &mockRuntime{}
 	var output bytes.Buffer
-	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
+	mgr := NewEngine(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
 
 	err := mgr.EnsureSetup(context.Background(), &output)
 	require.NoError(t, err)
@@ -198,7 +198,7 @@ func TestEnsureSetup_AlwaysCallsSetup(t *testing.T) {
 	require.NoError(t, os.MkdirAll(layout.CacheDir(), 0750))
 	dockerrt.RecordBuildChecksum(layout, "")
 	mock := &mockRuntime{}
-	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
+	mgr := NewEngine(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
 
 	err := mgr.EnsureSetup(context.Background(), io.Discard)
 	require.NoError(t, err)
@@ -217,7 +217,7 @@ func TestEnsureSetup_RebuildWhenChecksumStale(t *testing.T) {
 	mock := &mockRuntime{} // Setup returns nil (success)
 	var output bytes.Buffer
 	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
-	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
+	mgr := NewEngine(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
 
 	err := mgr.EnsureSetup(context.Background(), &output)
 	require.NoError(t, err)
@@ -231,7 +231,7 @@ func TestEnsureSetup_BuildsWhenImageMissing(t *testing.T) {
 	mock := &mockRuntime{} // Setup returns nil (success)
 	var output bytes.Buffer
 	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
-	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
+	mgr := NewEngine(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
 
 	err := mgr.EnsureSetup(context.Background(), &output)
 	require.NoError(t, err)

@@ -93,8 +93,8 @@ runtime in the picture.
 
 Every path under `~/.yoloai/` comes from `cliLayout()` (defined in
 `layout_bridge.go`) — that is the ONE place in the CLI that reads `$HOME`.
-A handler that constructs a `sandbox.NewManager` directly must pass
-`sandbox.WithLayout(cliLayout())`; otherwise the Manager panics at
+A handler that constructs a `sandbox.NewEngine` directly must pass
+`sandbox.WithLayout(cliLayout())`; otherwise the Engine panics at
 construction. `withClient` handles this automatically.
 
 Never call `config.YoloaiDir()`, `config.SandboxesDir()`, etc. — those

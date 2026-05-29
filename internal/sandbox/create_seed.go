@@ -15,7 +15,7 @@ import (
 // Returns agentFilesInitialized so the caller can persist it to SandboxState.
 // Extracted from prepareSandboxState().
 // homeDir is used for ~ expansion in seed file host paths.
-func (m *Manager) seedSandbox(agentDef *agent.Definition, sandboxDir string, isolation runtime.IsolationMode, agentFiles *config.AgentFilesConfig, credOverrides map[string]string, homeDir string, output io.Writer) (agentFilesInitialized bool, err error) {
+func (m *Engine) seedSandbox(agentDef *agent.Definition, sandboxDir string, isolation runtime.IsolationMode, agentFiles *config.AgentFilesConfig, credOverrides map[string]string, homeDir string, output io.Writer) (agentFilesInitialized bool, err error) {
 	// Copy seed files into agent-state (config, OAuth credentials, etc.)
 	hasAPIKey := hasAnyAPIKey(agentDef, credOverrides)
 	copiedAuth, err := copySeedFiles(agentDef, sandboxDir, hasAPIKey, homeDir)

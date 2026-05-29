@@ -778,10 +778,10 @@ const (
 // the user. Pure inspection — does not modify any config.
 func (s *SystemClient) SetupStatus(ctx context.Context) (*SetupStatus, error) {
 	_ = ctx
-	// SetupStatus is pure inspection — no prompts — so the Manager never
+	// SetupStatus is pure inspection — no prompts — so the Engine never
 	// reads its input. Pass an empty reader rather than reaching for
 	// os.Stdin (§12: no ambient process state in the library).
-	mgr := sandbox.NewManager(nil, slog.Default(), strings.NewReader(""), sandbox.WithLayout(s.layout))
+	mgr := sandbox.NewEngine(nil, slog.Default(), strings.NewReader(""), sandbox.WithLayout(s.layout))
 	return mgr.SetupStatus(), nil
 }
 
@@ -798,8 +798,8 @@ func (s *SystemClient) SetupStatus(ctx context.Context) (*SetupStatus, error) {
 //   - opts.Backend or opts.Agent names an unknown value.
 func (s *SystemClient) Setup(ctx context.Context, opts SetupOptions) error {
 	// Setup is non-interactive — every answer comes from opts — so the
-	// Manager never reads its input. Empty reader, not os.Stdin (§12).
-	mgr := sandbox.NewManager(nil, slog.Default(), strings.NewReader(""), sandbox.WithLayout(s.layout))
+	// Engine never reads its input. Empty reader, not os.Stdin (§12).
+	mgr := sandbox.NewEngine(nil, slog.Default(), strings.NewReader(""), sandbox.WithLayout(s.layout))
 	return mgr.ApplySetup(ctx, sandbox.SetupOptions{
 		TmuxConf: opts.TmuxConf,
 		Backend:  string(opts.Backend),

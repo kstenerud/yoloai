@@ -145,8 +145,8 @@ type CreateOptions struct {
 
 	// Output receives the create pipeline's human-readable progress (profile
 	// image build stream, advisory warnings). Per-call so concurrent Creates on
-	// the same Manager don't interleave on a shared writer. Nil falls back to
-	// the Manager's output writer (the Client's Options.Output). F8.
+	// the same Engine don't interleave on a shared writer. Nil falls back to
+	// the Engine's output writer (the Client's Options.Output). F8.
 	Output io.Writer
 }
 
@@ -186,7 +186,7 @@ type sandboxState struct {
 	devcontainerMounts        []string
 	devcontainerMountWarnings []string
 	workdirMode               string        // resolved workdir mode ("copy", "overlay", "rw")
-	layout                    config.Layout // Q-W.3: DataDir-rooted Layout propagated from the Manager
+	layout                    config.Layout // Q-W.3: DataDir-rooted Layout propagated from the Engine
 	homeDir                   string        // Q-W.6: host home dir (layout.HomeDir); used for ~ expansion
 	output                    io.Writer     // create-pipeline progress writer (CreateOptions.Output); F8
 }
@@ -253,7 +253,7 @@ type containerConfig struct {
 // leaf writers can't panic on a nil io.Writer regardless of which create helper
 // a caller enters through. The yoloai.Client seeds CreateOptions.Output from its
 // Options.Output, so a nil here means a direct library caller opted out. F8.
-func (m *Manager) outputFor(o io.Writer) io.Writer {
+func (m *Engine) outputFor(o io.Writer) io.Writer {
 	if o != nil {
 		return o
 	}
@@ -262,7 +262,7 @@ func (m *Manager) outputFor(o io.Writer) io.Writer {
 
 // Create creates and optionally starts a new sandbox.
 // Returns the sandbox name on success (empty on no-start).
-func (m *Manager) Create(ctx context.Context, opts CreateOptions) (name string, err error) {
+func (m *Engine) Create(ctx context.Context, opts CreateOptions) (name string, err error) {
 	unlock, lockErr := store.AcquireLock(m.layout, opts.Name)
 	if lockErr != nil {
 		return "", lockErr
@@ -357,7 +357,7 @@ func checkUnappliedWork(name string, sandboxDir string) error {
 
 // prepareSandboxState handles validation, safety checks, directory
 // creation, workdir copy, git baseline, and meta/config writing.
-func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions, credOverrides map[string]string) (*sandboxState, error) {
+func (m *Engine) prepareSandboxState(ctx context.Context, opts CreateOptions, credOverrides map[string]string) (*sandboxState, error) {
 	agentDef, sandboxDir, ycfg, gcfg, err := m.validateAndLoadConfig(opts)
 	if err != nil {
 		return nil, err
@@ -413,7 +413,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions, c
 }
 
 // resolveProfileAndArchetype resolves profile config, runtime base, archetype, mounts, and lifecycle state.
-func (m *Manager) resolveProfileAndArchetype(ctx context.Context, opts *CreateOptions, agentDef *agent.Definition, ycfg *config.YoloaiConfig, gcfg *config.GlobalConfig) (*profileResult, archetype.Archetype, *archetype.DevcontainerConfig, []string, []string, []string, bool, error) {
+func (m *Engine) resolveProfileAndArchetype(ctx context.Context, opts *CreateOptions, agentDef *agent.Definition, ycfg *config.YoloaiConfig, gcfg *config.GlobalConfig) (*profileResult, archetype.Archetype, *archetype.DevcontainerConfig, []string, []string, []string, bool, error) {
 	pr, err := m.resolveProfileConfig(ctx, opts, &agentDef, ycfg, gcfg)
 	if err != nil {
 		return nil, "", nil, nil, nil, nil, false, err
@@ -448,7 +448,7 @@ func (m *Manager) resolveProfileAndArchetype(ctx context.Context, opts *CreateOp
 }
 
 // createAndSeedSandbox creates directory structure and seeds the sandbox with agent files.
-func (m *Manager) createAndSeedSandbox(ctx context.Context, sandboxDir string, agentDef *agent.Definition, pr *profileResult, credOverrides map[string]string, perms IsolationPerms, output io.Writer) (bool, error) {
+func (m *Engine) createAndSeedSandbox(ctx context.Context, sandboxDir string, agentDef *agent.Definition, pr *profileResult, credOverrides map[string]string, perms IsolationPerms, output io.Writer) (bool, error) {
 	_ = ctx // reserved for future use
 	if err := createSandboxDirs(sandboxDir, perms); err != nil {
 		return false, err
@@ -458,7 +458,7 @@ func (m *Manager) createAndSeedSandbox(ctx context.Context, sandboxDir string, a
 
 // buildConfigAndMeta builds the container config and sandbox meta structs.
 // Returns (configData, meta, tmuxConf, promptText, error).
-func (m *Manager) buildConfigAndMeta(ctx context.Context, opts CreateOptions, pr *profileResult, agentDef *agent.Definition, workdir *DirSpec, auxDirs []*DirSpec, gcfg *config.GlobalConfig, dirMetas []store.DirMeta, baselineSHA string, mergedMounts []string, resolvedArchetype archetype.Archetype, devcontainerCfg *archetype.DevcontainerConfig, state_onCreateDone bool, sandboxDir string) ([]byte, *store.Meta, string, string, error) {
+func (m *Engine) buildConfigAndMeta(ctx context.Context, opts CreateOptions, pr *profileResult, agentDef *agent.Definition, workdir *DirSpec, auxDirs []*DirSpec, gcfg *config.GlobalConfig, dirMetas []store.DirMeta, baselineSHA string, mergedMounts []string, resolvedArchetype archetype.Archetype, devcontainerCfg *archetype.DevcontainerConfig, state_onCreateDone bool, sandboxDir string) ([]byte, *store.Meta, string, string, error) {
 	_ = ctx // reserved for future use
 	promptText, hasPrompt, model, agentCommand, tmuxConf, err := resolveAgentParams(agentDef, opts, pr, gcfg, m.layout.HomeDir, m.layout.Env, m.input)
 	if err != nil {
@@ -524,7 +524,7 @@ func buildSandboxStateResult(opts CreateOptions, sandboxDir string, workdir *Dir
 }
 
 // validateAndLoadConfig performs initial validation and loads config files.
-func (m *Manager) validateAndLoadConfig(opts CreateOptions) (*agent.Definition, string, *config.YoloaiConfig, *config.GlobalConfig, error) {
+func (m *Engine) validateAndLoadConfig(opts CreateOptions) (*agent.Definition, string, *config.YoloaiConfig, *config.GlobalConfig, error) {
 	if err := store.ValidateName(opts.Name); err != nil {
 		return nil, "", nil, nil, err
 	}
@@ -567,7 +567,7 @@ func (m *Manager) validateAndLoadConfig(opts CreateOptions) (*agent.Definition, 
 // --runtime flags are provided. Dispatches via the AppleSimulatorRuntimes
 // optional interface so sandbox/ doesn't import any concrete backend; only
 // backends that opt in (currently Tart) handle the request.
-func (m *Manager) resolveRuntimeBase(ctx context.Context, opts *CreateOptions, pr *profileResult) error {
+func (m *Engine) resolveRuntimeBase(ctx context.Context, opts *CreateOptions, pr *profileResult) error {
 	if len(opts.Runtimes) == 0 {
 		return nil
 	}
@@ -608,7 +608,7 @@ func loadOnCreateDone(sandboxDir string) bool {
 }
 
 // replaceSandboxIfNeeded destroys the existing sandbox if --replace is set.
-func (m *Manager) replaceSandboxIfNeeded(ctx context.Context, opts CreateOptions, sandboxDir string) error {
+func (m *Engine) replaceSandboxIfNeeded(ctx context.Context, opts CreateOptions, sandboxDir string) error {
 	if !opts.Replace {
 		return nil
 	}
@@ -653,7 +653,7 @@ func createSandboxDirs(sandboxDir string, perms IsolationPerms) error {
 }
 
 // setupAllWorkdirs sets up the workdir and aux dirs, and resolves copy mount paths.
-func (m *Manager) setupAllWorkdirs(opts CreateOptions, workdir *DirSpec, auxDirs []*DirSpec, resolvedArchetype archetype.Archetype, devcontainerCfg *archetype.DevcontainerConfig) (string, string, []store.DirMeta, error) {
+func (m *Engine) setupAllWorkdirs(opts CreateOptions, workdir *DirSpec, auxDirs []*DirSpec, resolvedArchetype archetype.Archetype, devcontainerCfg *archetype.DevcontainerConfig) (string, string, []store.DirMeta, error) {
 	slog.Debug("setting up workdir", "event", "sandbox.create.workdir", "mode", string(workdir.Mode))
 	sandboxDir := m.layout.SandboxDir(opts.Name)
 	workCopyDir, baselineSHA, err := setupWorkdir(sandboxDir, workdir, m.runtime)
@@ -844,7 +844,7 @@ func writeStatFiles(sandboxDir string, meta *store.Meta, agentDef *agent.Definit
 // launchContainer creates a sandbox instance from sandboxState, starts it,
 // and cleans up credential temp files. Used by both initial creation and
 // recreation from meta.json.
-func (m *Manager) launchContainer(ctx context.Context, state *sandboxState) error {
+func (m *Engine) launchContainer(ctx context.Context, state *sandboxState) error {
 	slog.Info("launching container", "event", "sandbox.create.container.launch", "sandbox", state.name, "image", state.imageRef)
 	// Use pre-merged env from state if available, otherwise load from config.
 	envVars := state.env
@@ -1105,7 +1105,7 @@ func lifecycleCmdToJSON(lc archetype.LifecycleCmd) map[string]any {
 
 // ReadPrompt reads the prompt from --prompt, --prompt-file, or stdin ("-").
 // homeDir is used to expand leading "~" in the promptFile path. stdin is the
-// reader the "-" sentinel pulls from — threaded from the Manager's input
+// reader the "-" sentinel pulls from — threaded from the Engine's input
 // (the CLI wires os.Stdin there; embedders supply their own), so the library
 // never reaches for the process's stdin directly (§12).
 // env is the environment map for ${VAR} expansion; use layout.Env.

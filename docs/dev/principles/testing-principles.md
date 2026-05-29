@@ -288,7 +288,7 @@ Originally established in D21.
 
 Threshold: if the behaviour under test is yoloAI code, give it explicit inputs:
 
-- Build a `config.Layout` (or the package's `testLayout` / `newTestManager` helper) with explicit fields and pass it via `WithLayout`. The library reads the Layout; no `HOME` is involved.
+- Build a `config.Layout` (or the package's `testLayout` / `newTestEngine` helper) with explicit fields and pass it via `WithLayout`. The library reads the Layout; no `HOME` is involved.
 - For stdin-driven paths, pass an `io.Reader` (e.g. `strings.NewReader(...)`); do not swap `os.Stdin`.
 - For `${VAR}` expansion, set `layout.Env`; do not `t.Setenv`.
 

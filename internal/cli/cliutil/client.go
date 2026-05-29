@@ -119,7 +119,7 @@ func ResolveBackendForSandbox(name string) runtime.BackendName {
 // WithClient constructs a yoloai.Client for the given backend, calls fn, and
 // closes the client. Preferred entry point for command handlers that only need
 // orchestration-level operations (Stop, Destroy, List, Inspect, Diff, Apply,
-// Run). The Client wraps a runtime + sandbox.Manager with §12-clean Layout
+// Run). The Client wraps a runtime + sandbox.Engine with §12-clean Layout
 // derived from Layout(). See internal/cli/CONVENTIONS.md.
 func WithClient(cmd *cobra.Command, backend runtime.BackendName, fn func(ctx context.Context, c *yoloai.Client) error) error {
 	ctx := cmd.Context()

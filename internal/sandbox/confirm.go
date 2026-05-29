@@ -19,7 +19,7 @@ import (
 // This standalone function creates a fresh bufio.Scanner on each call, making it
 // suitable for one-shot confirmations (see Confirm below). For multi-step
 // interactive prompts where a shared scanner must persist across reads, see
-// Manager.readLine() in manager.go.
+// Engine.readLine() in manager.go.
 func readLine(ctx context.Context, input io.Reader) (string, error) {
 	ch := make(chan string, 1)
 	go func() {

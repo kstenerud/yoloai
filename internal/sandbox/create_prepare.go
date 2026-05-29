@@ -45,7 +45,7 @@ type profileResult struct {
 
 // resolveProfileConfig resolves the profile chain, merges config, and builds
 // the profile image if needed. Returns a profileResult with all merged values.
-func (m *Manager) resolveProfileConfig(ctx context.Context, opts *CreateOptions, agentDef **agent.Definition, ycfg *config.YoloaiConfig, gcfg *config.GlobalConfig) (*profileResult, error) {
+func (m *Engine) resolveProfileConfig(ctx context.Context, opts *CreateOptions, agentDef **agent.Definition, ycfg *config.YoloaiConfig, gcfg *config.GlobalConfig) (*profileResult, error) {
 	pr := &profileResult{
 		env:                ycfg.Env,
 		agentArgs:          ycfg.AgentArgs,
@@ -256,7 +256,7 @@ func applyCLIOverrides(opts *CreateOptions, pr *profileResult) error {
 // overlap detection, and dirty repo warnings. Returns nil workdir if the user cancelled.
 // cfgModel is the model from config.yaml (needed for local model server check).
 // credOverrides contains sudo-recovered credential defaults for keys absent from os.Environ.
-func (m *Manager) parseAndValidateDirs(opts CreateOptions, agentDef *agent.Definition, mergedEnv map[string]string, cfgModel string, credOverrides map[string]string) (*DirSpec, []*DirSpec, error) {
+func (m *Engine) parseAndValidateDirs(opts CreateOptions, agentDef *agent.Definition, mergedEnv map[string]string, cfgModel string, credOverrides map[string]string) (*DirSpec, []*DirSpec, error) {
 	// Convert workdir DirSpec to DirSpec
 	if opts.Workdir.Path == "" {
 		return nil, nil, NewUsageError("no workdir specified and no default workdir in profile")
@@ -296,7 +296,7 @@ func (m *Manager) parseAndValidateDirs(opts CreateOptions, agentDef *agent.Defin
 }
 
 // checkAuthAndLocalhostWarnings performs auth checks and localhost URL warnings.
-func (m *Manager) checkAuthAndLocalhostWarnings(agentDef *agent.Definition, mergedEnv map[string]string, cfgModel string, opts CreateOptions, credOverrides map[string]string) error {
+func (m *Engine) checkAuthAndLocalhostWarnings(agentDef *agent.Definition, mergedEnv map[string]string, cfgModel string, opts CreateOptions, credOverrides map[string]string) error {
 	hasAPIKey := hasAnyAPIKey(agentDef, credOverrides)
 	hasAuth := hasAnyAuthFile(agentDef, m.layout.HomeDir)
 	hasAuthHint := hasAnyAuthHint(agentDef, mergedEnv, credOverrides)
@@ -334,7 +334,7 @@ func checkAgentAuth(agentDef *agent.Definition, hasAPIKey, hasAuth, hasAuthHint 
 
 // checkLocalhostURLs warns if auth hint env vars contain localhost addresses
 // that won't work inside a container/VM sandbox.
-func (m *Manager) checkLocalhostURLs(agentDef *agent.Definition, mergedEnv map[string]string) error {
+func (m *Engine) checkLocalhostURLs(agentDef *agent.Definition, mergedEnv map[string]string) error {
 	desc := m.runtime.Descriptor()
 	if !desc.AgentProvisionedByBackend {
 		return nil
@@ -705,7 +705,7 @@ func collectCopyDirs(workdir *DirSpec, _ []*DirSpec) []string {
 // requires: prompts, expands archetype effects on opts and pr, and prints transparency output.
 //
 // Returns: (resolved archetype, devcontainer config, safe devcontainer mounts, mount warnings, error).
-func (m *Manager) resolveAndApplyArchetype(ctx context.Context, opts *CreateOptions, pr *profileResult) (archetype.Archetype, *archetype.DevcontainerConfig, []string, []string, error) {
+func (m *Engine) resolveAndApplyArchetype(ctx context.Context, opts *CreateOptions, pr *profileResult) (archetype.Archetype, *archetype.DevcontainerConfig, []string, []string, error) {
 	workdir := opts.Workdir.Path
 
 	// Step 1: Load .yoloai.yaml
@@ -796,7 +796,7 @@ func checkRequires(output io.Writer, yamlCfg *archetype.YoloAIProjectConfig) {
 
 // expandArchetype applies archetype-specific settings to opts and pr.
 // Returns (devcontainerCfg, dcMounts, dcMountWarnings, bullets, error).
-func (m *Manager) expandArchetype(ctx context.Context, opts *CreateOptions, pr *profileResult, arch archetype.Archetype, yamlCfg *archetype.YoloAIProjectConfig) (*archetype.DevcontainerConfig, []string, []string, []string, error) {
+func (m *Engine) expandArchetype(ctx context.Context, opts *CreateOptions, pr *profileResult, arch archetype.Archetype, yamlCfg *archetype.YoloAIProjectConfig) (*archetype.DevcontainerConfig, []string, []string, []string, error) {
 	var bullets []string
 	var devcontainerCfg *archetype.DevcontainerConfig
 	var dcMounts []string
@@ -835,7 +835,7 @@ func applyComposeArchetype(opts *CreateOptions, pr *profileResult) []string {
 }
 
 // applyDevcontainerArchetype loads and applies devcontainer.json settings.
-func (m *Manager) applyDevcontainerArchetype(ctx context.Context, opts *CreateOptions, pr *profileResult) (*archetype.DevcontainerConfig, []string, []string, []string, error) {
+func (m *Engine) applyDevcontainerArchetype(ctx context.Context, opts *CreateOptions, pr *profileResult) (*archetype.DevcontainerConfig, []string, []string, []string, error) {
 	_ = ctx // reserved for future use
 	workdir := opts.Workdir.Path
 	var bullets []string

@@ -25,7 +25,7 @@ const secretsConsumedTimeout = 30 * time.Second
 // starts the instance. hasSecrets indicates whether secrets were injected via
 // a temporary directory that the caller will remove after this call returns.
 // Extracted from launchContainer().
-func (m *Manager) buildAndStart(ctx context.Context, state *sandboxState, mounts []runtime.MountSpec, ports []runtime.PortMapping, hasSecrets bool) error {
+func (m *Engine) buildAndStart(ctx context.Context, state *sandboxState, mounts []runtime.MountSpec, ports []runtime.PortMapping, hasSecrets bool) error {
 	cname := store.InstanceName(state.name)
 	instanceCfg, err := m.buildInstanceConfig(state, mounts, ports)
 	if err != nil {
@@ -96,7 +96,7 @@ func waitForSecretsConsumed(markerPath string, timeout time.Duration) {
 }
 
 // buildInstanceConfig constructs the runtime.InstanceConfig from sandbox state.
-func (m *Manager) buildInstanceConfig(state *sandboxState, mounts []runtime.MountSpec, ports []runtime.PortMapping) (runtime.InstanceConfig, error) {
+func (m *Engine) buildInstanceConfig(state *sandboxState, mounts []runtime.MountSpec, ports []runtime.PortMapping) (runtime.InstanceConfig, error) {
 	cname := store.InstanceName(state.name)
 	desc := m.runtime.Descriptor()
 	caps := desc.Capabilities
@@ -208,7 +208,7 @@ func applyOverlayAndCaps(state *sandboxState, caps runtime.BackendCaps, instance
 
 // verifyInstanceRunning checks that the instance is still running after start,
 // collecting log output for diagnostics if it has exited.
-func (m *Manager) verifyInstanceRunning(ctx context.Context, state *sandboxState, cname string) error {
+func (m *Engine) verifyInstanceRunning(ctx context.Context, state *sandboxState, cname string) error {
 	// Verify instance is still running (catches immediate crashes).
 	time.Sleep(1 * time.Second)
 	info, err := m.runtime.Inspect(ctx, cname)

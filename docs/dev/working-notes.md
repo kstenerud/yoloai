@@ -814,6 +814,18 @@ Trash is a lightweight quarantine: `os.Rename` into `~/.yoloai/trash/<name>` (`s
 
 ---
 
+## D39 — F5 god-package carve: `sandbox.Manager` renamed to `sandbox.Engine`; root stays the façade; behaviour dissolves into subpackages
+
+**Date:** 2026-05-29. **Status:** Accepted (in progress — this entry covers the design + the first slice, the rename). **Closes:** F5, the last open finding of the 31-finding architecture critique (`critique-followup.md`). **Context:** `internal/sandbox/` was a ~16K-line single package with 75 methods on one `Manager` type — both a god-*package* (no internal boundaries) and a god-*object* (one type as the entry point for everything).
+
+**Two design forks resolved (owner, 2026-05-29).**
+1. *Where do the public types live?* **Root stays the façade.** `internal/sandbox/` keeps the externally-used surface (`CreateOptions`, `DirSpec`, `Info`, `Status*`, error types) unchanged; the heavy machinery moves into subpackages beneath it. Rejected: moving everything to `internal/sandbox/manager/`, which would have rippled ~300 external call sites or required a wall of re-export aliases for identical decoupling.
+2. *Do the 75 methods survive as delegators?* **No.** Thin delegators on the façade would relocate the bodies but keep the god-*object*. Instead the behaviour becomes **free functions** distributed by concern across `create/`, `lifecycle/`, `mounts/` (taking primitives: `runtime.Runtime`, `config.Layout`, `*slog.Logger`, `state.State`). The public caller is the already-decomposed `yoloai.Client` + sub-handles (F2/F22/F23), so each handle calls the matching subpackage — no new god-object appears at the Client layer.
+
+**The forced shape (Go's no-foreign-methods rule).** A subpackage cannot define methods on a type it doesn't own, so the resolved per-operation `sandboxState` must move to a shared leaf package both `create/` and `mounts/` import → `internal/sandbox/state/` (with `DirSpec`/`DirMode` moved down too, root keeping `type DirSpec = state.DirSpec` aliases, else `state ↔ sandbox` cycles). Dependency order is therefore: `state/` (leaf) ← `mounts/` ← `create/`; `lifecycle/` ← `state/`; façade on top. The type that survives at root is renamed **`Engine`** (a deps-holder bundling runtime+layout+logger+input, plus cross-cutting `Layout()`/`Runtime()`/`EnsureSetup()`); "Manager" was a vague catch-all smell.
+
+**Landing sequence (each its own green commit):** F5.0a rename `Manager`→`Engine` (this commit); F5.0b extract `state/`; F5.1 `mounts/`; F5.2 `create/` (dissolve ~22 methods); F5.3 `lifecycle/` (dissolve ~29 methods). Interim wart: surviving method receivers stay `m` until the final phase rather than churning bodies that later get deleted.
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.

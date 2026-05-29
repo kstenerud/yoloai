@@ -166,17 +166,17 @@ func TestCaptureTerminal_ZeroScrollbackOmitsHistoryFlag(t *testing.T) {
 
 // newTerminalMgr is a CaptureTerminal-focused helper that mirrors
 // newLifecycleMgr but accepts the wider mock used here.
-func newTerminalMgr(rt *terminalMockRuntime, tmpDir string) *Manager {
+func newTerminalMgr(rt *terminalMockRuntime, tmpDir string) *Engine {
 	return newLifecycleMgr(&lifecycleMockRuntime{mockRuntime: rt.mockRuntime}, tmpDir).
 		WithRuntime(rt)
 }
 
-// WithRuntime is a test-only helper that swaps the Manager's runtime —
+// WithRuntime is a test-only helper that swaps the Engine's runtime —
 // needed because newLifecycleMgr can only construct with a
 // *lifecycleMockRuntime but we want the wider terminalMockRuntime to
 // receive Exec/Inspect calls. The package-internal field is set
 // directly since both manager and test live in the same package.
-func (m *Manager) WithRuntime(rt runtime.Runtime) *Manager {
+func (m *Engine) WithRuntime(rt runtime.Runtime) *Engine {
 	m.runtime = rt
 	return m
 }

@@ -46,7 +46,7 @@ var (
 // source of truth for mutual exclusion). The release function
 // clears the PID bytes and releases the flock.
 //
-// **Lock-acquisition invariant (Q-T).** Every public Manager method
+// **Lock-acquisition invariant (Q-T).** Every public Engine method
 // that mutates a sandbox's state calls AcquireLock (or
 // AcquireMultiLock) at the method entry, before any backend RPC or
 // filesystem op, and releases via defer. Read methods do not

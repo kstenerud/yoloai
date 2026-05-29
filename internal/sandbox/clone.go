@@ -1,4 +1,4 @@
-// ABOUTME: Manager.Clone deep-copies an existing sandbox state directory to a
+// ABOUTME: Engine.Clone deep-copies an existing sandbox state directory to a
 // ABOUTME: new name, preserving agent state and workdir while resetting identity.
 package sandbox
 
@@ -23,7 +23,7 @@ type CloneOptions struct {
 // state directory. The clone gets a fresh name and creation timestamp;
 // everything else (agent, model, profile, workdir, config, work copies,
 // agent state, prompt) is preserved.
-func (m *Manager) Clone(ctx context.Context, opts CloneOptions) error {
+func (m *Engine) Clone(ctx context.Context, opts CloneOptions) error {
 	_ = ctx // reserved for future use
 
 	if err := store.ValidateName(opts.Dest); err != nil {

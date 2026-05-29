@@ -144,9 +144,9 @@ type Options struct {
 // A Client is safe for concurrent use by multiple goroutines.
 // Construct with New or NewWithOptions.
 type Client struct {
-	manager *sandbox.Manager
+	manager *sandbox.Engine
 	rt      runtime.Runtime
-	layout  config.Layout // Q-W: DataDir-rooted path resolver propagated to Manager + apply
+	layout  config.Layout // Q-W: DataDir-rooted path resolver propagated to Engine + apply
 	version string        // yoloAI version stamped into created sandboxes' meta.json
 	output  io.Writer     // Options.Output (defaulted to io.Discard); seeds per-call progress writers (F8)
 }
@@ -187,7 +187,7 @@ func NewWithOptions(ctx context.Context, opts Options) (*Client, error) {
 		return nil, fmt.Errorf("connect to %s backend: %w", backend, err)
 	}
 
-	mgr := sandbox.NewManager(rt, logger, input, sandbox.WithLayout(layout))
+	mgr := sandbox.NewEngine(rt, logger, input, sandbox.WithLayout(layout))
 	return &Client{manager: mgr, rt: rt, layout: layout, version: opts.Version, output: output}, nil
 }
 

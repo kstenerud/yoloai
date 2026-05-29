@@ -21,14 +21,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// newTestManager builds a Manager for resolution tests. Layout is rooted at
-// t.TempDir() so the Manager satisfies Q-W.5's WithLayout-required invariant
+// newTestEngine builds a Engine for resolution tests. Layout is rooted at
+// t.TempDir() so the Engine satisfies Q-W.5's WithLayout-required invariant
 // without test runs leaking sandbox dirs into the repo working copy. The
-// Manager holds no output writer (F8); tests that want to capture create-pipeline
+// Engine holds no output writer (F8); tests that want to capture create-pipeline
 // progress pass a writer via CreateOptions.Output.
-func newTestManager(t *testing.T) *Manager {
+func newTestEngine(t *testing.T) *Engine {
 	t.Helper()
-	return NewManager(&mockDockerRuntime{}, slog.Default(), strings.NewReader("y\n"),
+	return NewEngine(&mockDockerRuntime{}, slog.Default(), strings.NewReader("y\n"),
 		WithLayout(config.NewLayout(t.TempDir())))
 }
 
@@ -47,7 +47,7 @@ func TestResolveArchetype_CLIFlagOverridesAll(t *testing.T) {
 	// Plant a compose file too (auto-detect would pick compose)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "docker-compose.yaml"), []byte("services: {}"), 0600))
 
-	m := newTestManager(t)
+	m := newTestEngine(t)
 	opts := &CreateOptions{
 		Workdir:   DirSpec{Path: dir},
 		Archetype: "simple", // CLI overrides
@@ -67,7 +67,7 @@ func TestResolveArchetype_YamlOverridesAutoDetect(t *testing.T) {
 	// Plant a compose file (auto-detect would pick compose)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "docker-compose.yaml"), []byte("services: {}"), 0600))
 
-	m := newTestManager(t)
+	m := newTestEngine(t)
 	opts := &CreateOptions{
 		Workdir: DirSpec{Path: dir},
 	}
@@ -80,7 +80,7 @@ func TestResolveArchetype_YamlOverridesAutoDetect(t *testing.T) {
 
 func TestResolveArchetype_AutoDetectSimple(t *testing.T) {
 	dir := makeWorkdir(t)
-	m := newTestManager(t)
+	m := newTestEngine(t)
 	opts := &CreateOptions{Workdir: DirSpec{Path: dir}}
 	pr := &profileResult{}
 
@@ -93,7 +93,7 @@ func TestResolveArchetype_AutoDetectCompose(t *testing.T) {
 	dir := makeWorkdir(t)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "docker-compose.yaml"), []byte("services: {}"), 0600))
 
-	m := newTestManager(t)
+	m := newTestEngine(t)
 	opts := &CreateOptions{Workdir: DirSpec{Path: dir}}
 	pr := &profileResult{}
 
@@ -114,7 +114,7 @@ func TestResolveArchetype_AutoDetectDevcontainer(t *testing.T) {
 		"forwardPorts": [3000]
 	}`), 0600))
 
-	m := newTestManager(t)
+	m := newTestEngine(t)
 	opts := &CreateOptions{Workdir: DirSpec{Path: dir}}
 	pr := &profileResult{}
 
@@ -137,7 +137,7 @@ func TestResolveArchetype_DevcontainerMergesEnv(t *testing.T) {
 	}`
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "devcontainer.json"), []byte(dcContent), 0600))
 
-	m := newTestManager(t)
+	m := newTestEngine(t)
 	opts := &CreateOptions{
 		Workdir: DirSpec{Path: dir},
 	}
@@ -156,7 +156,7 @@ func TestResolveArchetype_DevcontainerWorkspaceFolder(t *testing.T) {
 	dcContent := `{"workspaceFolder": "/workspace/myproject"}`
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "devcontainer.json"), []byte(dcContent), 0600))
 
-	m := newTestManager(t)
+	m := newTestEngine(t)
 	opts := &CreateOptions{Workdir: DirSpec{Path: dir}}
 	pr := &profileResult{}
 
@@ -170,7 +170,7 @@ func TestResolveArchetype_DevcontainerDockerComposeFileErrors(t *testing.T) {
 	dcContent := `{"dockerComposeFile": "docker-compose.yml"}`
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "devcontainer.json"), []byte(dcContent), 0600))
 
-	m := newTestManager(t)
+	m := newTestEngine(t)
 	opts := &CreateOptions{Workdir: DirSpec{Path: dir}}
 	pr := &profileResult{}
 
@@ -190,7 +190,7 @@ func TestResolveArchetype_DevcontainerFiltersMounts(t *testing.T) {
 	}`, safePath)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "devcontainer.json"), []byte(dcContent), 0600))
 
-	m := newTestManager(t)
+	m := newTestEngine(t)
 	opts := &CreateOptions{Workdir: DirSpec{Path: dir}}
 	pr := &profileResult{}
 
@@ -208,7 +208,7 @@ func TestResolveArchetype_DevcontainerPostStartCompose(t *testing.T) {
 	dcContent := `{"postStartCommand": "docker compose up -d"}`
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "devcontainer.json"), []byte(dcContent), 0600))
 
-	m := newTestManager(t)
+	m := newTestEngine(t)
 	opts := &CreateOptions{Workdir: DirSpec{Path: dir}}
 	pr := &profileResult{}
 
@@ -223,7 +223,7 @@ func TestResolveArchetype_DevcontainerPostStartCompose(t *testing.T) {
 func TestResolveArchetype_TransparencyOutput_Simple(t *testing.T) {
 	dir := makeWorkdir(t)
 	var buf bytes.Buffer
-	m := newTestManager(t)
+	m := newTestEngine(t)
 	opts := &CreateOptions{Workdir: DirSpec{Path: dir}, Output: &buf}
 	pr := &profileResult{}
 
@@ -237,7 +237,7 @@ func TestResolveArchetype_TransparencyOutput_Simple(t *testing.T) {
 func TestResolveArchetype_TransparencyOutput_CLIFlag(t *testing.T) {
 	dir := makeWorkdir(t)
 	var buf bytes.Buffer
-	m := newTestManager(t)
+	m := newTestEngine(t)
 	opts := &CreateOptions{
 		Workdir:   DirSpec{Path: dir},
 		Archetype: "simple",
@@ -256,7 +256,7 @@ func TestResolveArchetype_TransparencyOutput_Compose(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "docker-compose.yaml"), []byte("services: {}"), 0600))
 
 	var buf bytes.Buffer
-	m := newTestManager(t)
+	m := newTestEngine(t)
 	opts := &CreateOptions{Workdir: DirSpec{Path: dir}, Output: &buf}
 	pr := &profileResult{}
 
@@ -275,7 +275,7 @@ func TestResolveArchetype_YamlMountsMerged(t *testing.T) {
 	content := "mounts:\n  - /data:/container/data:ro\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, ".yoloai.yaml"), []byte(content), 0600))
 
-	m := newTestManager(t)
+	m := newTestEngine(t)
 	opts := &CreateOptions{Workdir: DirSpec{Path: dir}}
 	pr := &profileResult{}
 
@@ -289,7 +289,7 @@ func TestResolveArchetype_YamlMountsDeduped(t *testing.T) {
 	content := "mounts:\n  - /data:/container/data:ro\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, ".yoloai.yaml"), []byte(content), 0600))
 
-	m := newTestManager(t)
+	m := newTestEngine(t)
 	opts := &CreateOptions{Workdir: DirSpec{Path: dir}}
 	// Pre-existing mount already in pr.mounts
 	pr := &profileResult{mounts: []string{"/data:/container/data:ro"}}
@@ -316,7 +316,7 @@ func TestResolveArchetype_Requires_WarnsButDoesNotBlock(t *testing.T) {
 	// requires: version verification is unimplemented, so the constraint is a
 	// non-blocking warning — creation must proceed regardless (no prompt, no error).
 	var buf bytes.Buffer
-	m := newTestManager(t)
+	m := newTestEngine(t)
 	opts := &CreateOptions{Workdir: DirSpec{Path: dir}, Output: &buf}
 	pr := &profileResult{}
 
@@ -332,7 +332,7 @@ func TestResolveArchetype_DevcontainerRunArgs_CPUMemory(t *testing.T) {
 	dcContent := `{"runArgs": ["--cpus", "4", "--memory", "8g"]}`
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "devcontainer.json"), []byte(dcContent), 0600))
 
-	m := newTestManager(t)
+	m := newTestEngine(t)
 	opts := &CreateOptions{Workdir: DirSpec{Path: dir}}
 	pr := &profileResult{}
 
@@ -346,7 +346,7 @@ func TestResolveArchetype_DevcontainerRunArgs_CPUMemory(t *testing.T) {
 // --- Per-call Output routing (F8) ---
 
 // TestCreateOutput_PerCallWriterReceivesAdvisories verifies that a create-pipeline
-// advisory routes to CreateOptions.Output. The Manager holds no output writer of
+// advisory routes to CreateOptions.Output. The Engine holds no output writer of
 // its own (F8), so this per-call writer is the only sink — concurrent Creates can
 // keep their progress streams separate.
 func TestCreateOutput_PerCallWriterReceivesAdvisories(t *testing.T) {
@@ -355,7 +355,7 @@ func TestCreateOutput_PerCallWriterReceivesAdvisories(t *testing.T) {
 		[]byte("archetype: simple\nrequires:\n  foo: \">=1\"\n"), 0600))
 
 	var callBuf bytes.Buffer
-	m := newTestManager(t)
+	m := newTestEngine(t)
 	opts := &CreateOptions{Workdir: DirSpec{Path: dir}, Output: &callBuf}
 
 	_, _, _, _, err := m.resolveAndApplyArchetype(context.Background(), opts, &profileResult{})
@@ -374,7 +374,7 @@ func TestCreateOutput_NilWriterIsDiscarded(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, ".yoloai.yaml"),
 		[]byte("archetype: simple\nrequires:\n  foo: \">=1\"\n"), 0600))
 
-	m := newTestManager(t)
+	m := newTestEngine(t)
 	opts := &CreateOptions{Workdir: DirSpec{Path: dir}} // Output left nil → io.Discard
 
 	_, _, _, _, err := m.resolveAndApplyArchetype(context.Background(), opts, &profileResult{})

@@ -1745,7 +1745,7 @@ const (
 //       orchestration layer; all user interaction lives in the CLI. Same
 //       separation applies (W-L8d) to Run / Apply / Destroy's dirty-repo
 //       / replace / unapplied-changes prompts — they migrate out of
-//       sandbox.Manager into the CLI, with Client returning a UsageError
+//       sandbox.Engine into the CLI, with Client returning a UsageError
 //       or sentinel when a gate is closed.
 //
 // Q-G.  Admin sub-Client / structural grouping?
@@ -1917,7 +1917,7 @@ const (
 //       Audit of the existing CLI revealed --yes on Apply only gates
 //       sandbox.Confirm() stdin prompts in apply_overlay /
 //       apply_selective / apply_squash — there is NO state-bearing
-//       refusal inside Manager.Apply that the field would bypass.
+//       refusal inside Engine.Apply that the field would bypass.
 //       Per Q-F (Client never prompts; CLI is the UI layer), pure-UX
 //       prompts belong in the CLI, not on the API. Embedders just
 //       call Apply; if they want to confirm with their user first,

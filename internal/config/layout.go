@@ -98,7 +98,7 @@ type Layout struct {
 // so empty here is a programming bug (Q-X: bugs panic, user errors return
 // typed errors). F14: this enforces the "Layout existence ⇒ valid DataDir"
 // invariant at the type-construction boundary instead of duplicating the
-// check in every Manager/Client method.
+// check in every Engine/Client method.
 func NewLayout(dataDir string) Layout {
 	if dataDir == "" {
 		panic("config.NewLayout: dataDir is required (empty string is invalid; public boundaries must validate input and return *UsageError before reaching this constructor)")

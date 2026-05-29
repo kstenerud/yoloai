@@ -93,7 +93,7 @@ func runNewCmd(cmd *cobra.Command, args []string, version string) error {
 	backend := cliutil.ResolveBackend(cmd)
 
 	// new.go's one quirk vs other Client-using commands: in JSON mode we
-	// want the Manager's progress output suppressed so it doesn't pollute
+	// want the Engine's progress output suppressed so it doesn't pollute
 	// the JSON document on stdout. WithClient hardcodes cmd.ErrOrStderr,
 	// so we construct the Client by hand here to override Output.
 	mgrOutput := cmd.ErrOrStderr()
@@ -344,7 +344,7 @@ func executeNewCreate(cmd *cobra.Command, ctx context.Context, c *yoloai.Client,
 
 	// Print the creation summary (the library no longer formats presentation —
 	// F8). opts.Name is used because Create returns "" for --no-start. Goes to
-	// stderr — the stream the Manager's creation output used — keeping human
+	// stderr — the stream the Engine's creation output used — keeping human
 	// output cohesive there (stdout is reserved for --json).
 	if meta, loadErr := store.LoadMeta(cliutil.Layout().SandboxDir(opts.Name)); loadErr == nil {
 		printCreateSummary(cmd.ErrOrStderr(), meta)

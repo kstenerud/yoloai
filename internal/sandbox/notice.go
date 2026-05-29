@@ -31,7 +31,7 @@ type Notice struct {
 }
 
 // notices accumulates Notices across an orchestration call and its helpers. A
-// per-call value (not stored on the shared Manager) threaded through helpers
+// per-call value (not stored on the shared Engine) threaded through helpers
 // that would otherwise have written to m.output.
 type notices struct {
 	list []Notice

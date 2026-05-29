@@ -33,7 +33,7 @@ import (
 // Returns nil if Tart is not available (caller should skip test).
 // These tests are currently experimental and disabled by default.
 // Set YOLOAI_TEST_TART=1 to enable them.
-func tartIntegrationSetup(t *testing.T) (*sandbox.Manager, context.Context) {
+func tartIntegrationSetup(t *testing.T) (*sandbox.Engine, context.Context) {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping Tart integration test in short mode")
@@ -60,7 +60,7 @@ func tartIntegrationSetup(t *testing.T) (*sandbox.Manager, context.Context) {
 	}
 	t.Cleanup(func() { rt.Close() }) //nolint:errcheck // test cleanup
 
-	mgr := sandbox.NewManager(rt, slog.Default(), strings.NewReader(""), sandbox.WithLayout(layout))
+	mgr := sandbox.NewEngine(rt, slog.Default(), strings.NewReader(""), sandbox.WithLayout(layout))
 	require.NoError(t, mgr.EnsureSetup(ctx, io.Discard))
 
 	return mgr, ctx

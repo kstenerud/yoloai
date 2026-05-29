@@ -19,9 +19,9 @@ import (
 )
 
 // integrationSetup sets HOME to a temp dir, connects to Docker,
-// builds the base image, and returns a Manager. Uses t.Cleanup
+// builds the base image, and returns a Engine. Uses t.Cleanup
 // for automatic teardown.
-func integrationSetup(t *testing.T) (*sandbox.Manager, context.Context) {
+func integrationSetup(t *testing.T) (*sandbox.Engine, context.Context) {
 	t.Helper()
 	ctx := context.Background()
 
@@ -45,7 +45,7 @@ func integrationSetup(t *testing.T) (*sandbox.Manager, context.Context) {
 	require.NoError(t, err, "Docker must be running for integration tests")
 	t.Cleanup(func() { rt.Close() }) //nolint:errcheck // test cleanup
 
-	mgr := sandbox.NewManager(rt, slog.Default(), strings.NewReader(""), sandbox.WithLayout(layout))
+	mgr := sandbox.NewEngine(rt, slog.Default(), strings.NewReader(""), sandbox.WithLayout(layout))
 	require.NoError(t, mgr.EnsureSetup(ctx, io.Discard))
 
 	return mgr, ctx
