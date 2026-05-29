@@ -411,26 +411,6 @@ func TestEnsureHomeSeedConfig_NoopForTestAgent(t *testing.T) {
 	require.NoError(t, ensureHomeSeedConfig(agentDef, sandboxDir, "npm-global"))
 }
 
-// shellEscapeForDoubleQuotes tests
-
-func TestShellEscapeForDoubleQuotes(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected string
-	}{
-		{`hello`, `hello`},
-		{`say "hello"`, `say \"hello\"`},
-		{"use `backticks`", "use \\`backticks\\`"},
-		{`$HOME`, `\$HOME`},
-		{`back\slash`, `back\\slash`},
-		{`all "special" $chars` + " `here`", `all \"special\" \$chars` + " \\`here\\`"},
-	}
-
-	for _, tt := range tests {
-		assert.Equal(t, tt.expected, shellEscapeForDoubleQuotes(tt.input))
-	}
-}
-
 // prepareSandboxState validation tests
 
 func TestPrepareSandboxState_MissingName(t *testing.T) {

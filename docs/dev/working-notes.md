@@ -826,6 +826,20 @@ Trash is a lightweight quarantine: `os.Rename` into `~/.yoloai/trash/<name>` (`s
 
 **Landing sequence (each its own green commit):** F5.0a rename `Manager`→`Engine` (this commit); F5.0b extract `state/`; F5.1 `mounts/`; F5.2 `create/` (dissolve ~22 methods); F5.3 `lifecycle/` (dissolve ~29 methods). Interim wart: surviving method receivers stay `m` until the final phase rather than churning bodies that later get deleted.
 
+## D40 — F5.2 refinement: the create/lifecycle shared base splits into three purpose-named leaf packages (`invocation`, `provision`, `launch`)
+
+**Date:** 2026-05-29. **Status:** Accepted (owner, 2026-05-29). **Refines** D39's "F5.2 create/, F5.3 lifecycle/" step. **Context:** before carving `create/`, dependency analysis showed `lifecycle.go` already calls a large chunk of create's machinery — `launchContainer` + the whole container-launch stack, `ReadPrompt`, `buildAgentCommand`, `copySeedFiles`, `ensureContainerSettings`, `recoverSudoCredentials`, `hasAnyAPIKey`, etc. `create` reaches into `lifecycle` only once (`replaceSandboxIfNeeded`→`destroy`). So the two are not siblings: there is a shared launch/seed/command **base** that both consume.
+
+**Decision.** Extract that base into three purpose-named leaf packages rather than one `common`/`util` grab-bag (a `common` package is how a god-package quietly reassembles itself; the name must describe *what*, not *where*). The call graph among the shared functions is a clean DAG — `launch → invocation` and `launch → provision`, with `invocation` and `provision` depending on nothing shared — so the split adds no cross-package cycles or back-plumbing.
+
+- **`internal/sandbox/invocation/`** (~200 LOC, leaf): agent command + model resolution — `ResolveModel`, `ApplyModelPrefix`, `ValidateModel`, `BuildAgentCommand`, `SanitizeTunnelName`, `ResolveDetectors`, `ReadPrompt` (+ unexported `shellEscapeForDoubleQuotes`). All were already free funcs (pure move + export). Imports `agent`, `config`, `yoerrors`.
+- **`internal/sandbox/provision/`** (~375 LOC, leaf): credentials + seed files — `CopySeedFiles` (+helpers), `EnsureContainerSettings`, `EnsureHomeSeedConfig`, `CreateSecretsDir`, `RecoverSudoCredentials`, `HasAnyAPIKey`/`AuthFile`/`AuthHint`, `DescribeSeedAuthFiles`, plus dissolving `Engine.seedSandbox`.
+- **`internal/sandbox/launch/`** (~385 LOC): resolved `State` → running container — `LaunchContainer`, `BuildAndStart`, `BuildInstanceConfig`, `BuildContainerConfig`, `VerifyInstanceRunning`, resource/overlay/cap application, port parsing/filtering, plus the launch config types (`containerConfig`, `lifecycleConfig`, `overlayMountConfig`). Dissolves 4 `Engine` methods; takes the shared `Deps` (runtime/layout/logger/input/progress) which lands in the `state/` leaf.
+
+Generic file utils (`mkdirAllPerm`, `writeFilePerm`) go to the existing `internal/fileutil`, not the new packages. Revised layering: `state/`(types+`Deps`) ← {`mounts/`, `invocation/`, `provision/`} ← `launch/` ← {`create/`, `lifecycle/` (siblings)} ← façade. The lone `create→destroy` back-edge is broken when `create/` is carved (extract the teardown primitive so `replaceSandboxIfNeeded` doesn't import `lifecycle/`).
+
+**Revised sequence:** F5.2a `invocation/`; F5.2b `provision/`; F5.2c `launch/` (+`Deps` in `state/`); F5.2d `create/` orchestration (Client.Create → `create.Run`); F5.3 `lifecycle/`. Each its own green commit.
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.

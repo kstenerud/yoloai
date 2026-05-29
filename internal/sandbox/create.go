@@ -24,6 +24,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/runtime/caps"
 	"github.com/kstenerud/yoloai/internal/sandbox/archetype"
+	"github.com/kstenerud/yoloai/internal/sandbox/invocation"
 	mountspkg "github.com/kstenerud/yoloai/internal/sandbox/mounts"
 	"github.com/kstenerud/yoloai/internal/sandbox/state"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
@@ -415,7 +416,7 @@ func (m *Engine) buildConfigAndMeta(ctx context.Context, opts CreateOptions, pr 
 	archetypeDockerDRequired := pr.archetypeDockerDRequired
 	lifecycleCfg := buildLifecycleConfig(resolvedArchetype, archetypeDockerDRequired, state_onCreateDone, devcontainerCfg)
 
-	configData, err := buildContainerConfig(m.layout, agentDef, agentCommand, runtime.PrepareAgentCommandFor(m.runtime, ""), tmuxConf, overlayOrResolvedMountPath(workdir), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, collectOverlayMounts(workdir, auxDirs), pr.setup, pr.autoCommitInterval, collectCopyDirs(workdir, auxDirs), opts.Name, m.runtime.TmuxSocket(sandboxDir), pr.isolation, opts.VscodeTunnel, sanitizeTunnelName(opts.Name), lifecycleCfg)
+	configData, err := buildContainerConfig(m.layout, agentDef, agentCommand, runtime.PrepareAgentCommandFor(m.runtime, ""), tmuxConf, overlayOrResolvedMountPath(workdir), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, collectOverlayMounts(workdir, auxDirs), pr.setup, pr.autoCommitInterval, collectCopyDirs(workdir, auxDirs), opts.Name, m.runtime.TmuxSocket(sandboxDir), pr.isolation, opts.VscodeTunnel, invocation.SanitizeTunnelName(opts.Name), lifecycleCfg)
 	if err != nil {
 		return nil, nil, "", "", fmt.Errorf("build %s: %w", store.RuntimeConfigFile, err)
 	}
@@ -637,20 +638,20 @@ func (m *Engine) setupAllWorkdirs(opts CreateOptions, workdir *DirSpec, auxDirs 
 // homeDir is used to expand leading "~" in the promptFile path.
 // env is the environment map for ${VAR} expansion; use layout.Env.
 func resolveAgentParams(agentDef *agent.Definition, opts CreateOptions, pr *profileResult, gcfg *config.GlobalConfig, homeDir string, env map[string]string, stdin io.Reader) (string, bool, string, string, string, error) {
-	promptText, err := ReadPrompt(opts.Prompt, opts.PromptFile, homeDir, env, stdin)
+	promptText, err := invocation.ReadPrompt(opts.Prompt, opts.PromptFile, homeDir, env, stdin)
 	if err != nil {
 		return "", false, "", "", "", err
 	}
 	hasPrompt := promptText != ""
 
-	model := resolveModel(agentDef, opts.Model, pr.userAliases)
-	model = applyModelPrefix(agentDef, model, pr.env)
-	if err := validateModel(agentDef, model, opts.Model); err != nil {
+	model := invocation.ResolveModel(agentDef, opts.Model, pr.userAliases)
+	model = invocation.ApplyModelPrefix(agentDef, model, pr.env)
+	if err := invocation.ValidateModel(agentDef, model, opts.Model); err != nil {
 		return "", false, "", "", "", err
 	}
 
 	agentArgs := pr.agentArgs[opts.Agent]
-	agentCommand := buildAgentCommand(agentDef, model, promptText, agentArgs, opts.Passthrough)
+	agentCommand := invocation.BuildAgentCommand(agentDef, model, promptText, agentArgs, opts.Passthrough)
 
 	tmuxConf := gcfg.TmuxConf
 	if tmuxConf == "" {
@@ -819,172 +820,6 @@ func (m *Engine) launchContainer(ctx context.Context, state *State) error {
 	return m.buildAndStart(ctx, state, mounts, ports, secretsDir != "")
 }
 
-// resolveModel expands a model alias. User-configured aliases (from
-// config.yaml model_aliases) take priority over agent built-in aliases.
-func resolveModel(agentDef *agent.Definition, model string, userAliases map[string]string) string {
-	if model == "" {
-		return ""
-	}
-	if userAliases != nil {
-		if resolved, ok := userAliases[model]; ok {
-			return resolved
-		}
-	}
-	if agentDef.ModelAliases != nil {
-		if resolved, ok := agentDef.ModelAliases[model]; ok {
-			return resolved
-		}
-	}
-	return model
-}
-
-// applyModelPrefix adds a provider prefix to the model name when needed.
-// For example, when using aider with OLLAMA_API_BASE, the model must be
-// prefixed with "ollama_chat/" for litellm to route it correctly.
-func applyModelPrefix(agentDef *agent.Definition, model string, configEnv map[string]string) string {
-	if model == "" || strings.Contains(model, "/") {
-		return model
-	}
-	if agentDef.ModelPrefixes == nil {
-		return model
-	}
-	for envVar, prefix := range agentDef.ModelPrefixes {
-		if os.Getenv(envVar) != "" || configEnv[envVar] != "" { //nolint:forbidigo // §12: agent credential/env presence check (declared API-key exception)
-			return prefix + model
-		}
-	}
-	return model
-}
-
-// validateModel checks agent-specific model format requirements.
-// Returns an error if the model format is invalid for the given agent.
-func validateModel(agentDef *agent.Definition, resolvedModel string, originalModel string) error {
-	// Skip validation if no model specified
-	if resolvedModel == "" {
-		return nil
-	}
-
-	// OpenCode requires provider/model format (e.g., "openai/gpt-4o", "anthropic/claude-sonnet-4-20250514")
-	if agentDef.Name == "opencode" {
-		if !strings.Contains(resolvedModel, "/") {
-			return fmt.Errorf(
-				"opencode requires models in provider/model format (e.g., \"openai/gpt-4o\", \"anthropic/claude-sonnet-4-20250514\")\n\n"+
-					"You specified: %q\n"+
-					"Resolved to: %q\n\n"+
-					"To fix this:\n"+
-					"  1. Configure providers on your HOST (install opencode, run /connect)\n"+
-					"     OR set API key env vars: export OPENAI_API_KEY=sk-...\n"+
-					"  2. Use --model with provider prefix: --model openai/gpt-4o\n\n"+
-					"Valid examples:\n"+
-					"  openai/gpt-4o\n"+
-					"  openai/gpt-4o-mini\n"+
-					"  anthropic/claude-sonnet-4-20250514\n"+
-					"  opencode/gpt-5.1-codex (OpenCode Zen)\n\n"+
-					"Note: OpenCode config must be set up on your host machine.\n"+
-					"yoloAI will automatically seed it into containers",
-				originalModel,
-				resolvedModel,
-			)
-		}
-	}
-
-	return nil
-}
-
-// buildAgentCommand constructs the full agent command string for config.json.
-// Arg priority (left to right, last flag wins): base cmd → model flag → agentArgs → passthrough.
-func buildAgentCommand(agentDef *agent.Definition, model string, prompt string, agentArgs string, passthrough []string) string {
-	var cmd string
-
-	if agentDef.PromptMode == agent.PromptModeHeadless && prompt != "" {
-		escaped := shellEscapeForDoubleQuotes(prompt)
-		cmd = strings.ReplaceAll(agentDef.HeadlessCmd, "PROMPT", escaped)
-	} else {
-		cmd = agentDef.InteractiveCmd
-		if model != "" && agentDef.ModelFlag != "" {
-			cmd += " " + agentDef.ModelFlag + " " + model
-		}
-	}
-
-	if agentArgs != "" {
-		cmd += " " + agentArgs
-	}
-
-	for _, arg := range passthrough {
-		cmd += " " + arg
-	}
-
-	return cmd
-}
-
-// sanitizeTunnelName converts a sandbox name to a valid VS Code tunnel name.
-// VS Code tunnel names are limited to 20 characters, lowercase alphanumeric
-// and hyphens, with no leading or trailing hyphens.
-func sanitizeTunnelName(name string) string {
-	name = strings.ToLower(name)
-	// Replace underscores and dots with hyphens (sandbox names allow both)
-	name = strings.NewReplacer("_", "-", ".", "-").Replace(name)
-	// Truncate to 20 chars
-	if len(name) > 20 {
-		name = name[:20]
-	}
-	// Strip trailing hyphens introduced by truncation
-	name = strings.TrimRight(name, "-")
-	// Ensure minimum 3 chars (pad with 'x' if needed)
-	for len(name) < 3 {
-		name += "x"
-	}
-	return name
-}
-
-// shellEscapeForDoubleQuotes escapes a string for embedding inside
-// double quotes in a shell command.
-func shellEscapeForDoubleQuotes(s string) string {
-	r := strings.NewReplacer(
-		`\`, `\\`,
-		`"`, `\"`,
-		"`", "\\`",
-		`$`, `\$`,
-	)
-	return r.Replace(s)
-}
-
-// resolveDetectors computes the ordered detector stack based on the agent's
-// idle support capabilities. The returned list is stored in config.json and
-// used by the in-container status monitor to determine which detection
-// strategies to run (in priority order).
-func resolveDetectors(idle agent.IdleSupport) []string {
-	var detectors []string
-
-	// Hook detector: highest priority, agent writes status.json directly.
-	if idle.Hook {
-		detectors = append(detectors, "hook")
-	}
-
-	// Wchan detector: high confidence, works for any process-based agent.
-	if idle.WchanApplicable {
-		detectors = append(detectors, "wchan")
-	}
-
-	// Ready pattern: medium confidence, checks tmux pane for prompt text.
-	if idle.ReadyPattern != "" {
-		detectors = append(detectors, "ready_pattern")
-	}
-
-	// Context signal: medium confidence, checks for agent-emitted markers.
-	if idle.ContextSignal {
-		detectors = append(detectors, "context_signal")
-	}
-
-	// Output stability: low confidence fallback, always added when any
-	// other detector exists (provides a last-resort signal).
-	if len(detectors) > 0 {
-		detectors = append(detectors, "output_stability")
-	}
-
-	return detectors
-}
-
 // buildContainerConfig creates the config.json content.
 // agentLaunchPrefix is the backend-specific wrap prefix that PrepareAgentCommand
 // would prepend (e.g. a 'PATH="..." ' prefix for Tart);
@@ -1019,7 +854,7 @@ func buildContainerConfig(layout config.Layout, agentDef *agent.Definition, agen
 		CopyDirs:           copyDirs,
 		HookIdle:           agentDef.Idle.Hook,
 		Idle:               agentDef.Idle,
-		Detectors:          resolveDetectors(agentDef.Idle),
+		Detectors:          invocation.ResolveDetectors(agentDef.Idle),
 		SandboxName:        sandboxName,
 		TmuxSocket:         tmuxSocket,
 		Isolation:          isolation,
@@ -1045,52 +880,6 @@ func lifecycleCmdToJSON(lc archetype.LifecycleCmd) map[string]any {
 	default:
 		return nil
 	}
-}
-
-// ReadPrompt reads the prompt from --prompt, --prompt-file, or stdin ("-").
-// homeDir is used to expand leading "~" in the promptFile path. stdin is the
-// reader the "-" sentinel pulls from — threaded from the Engine's input
-// (the CLI wires os.Stdin there; embedders supply their own), so the library
-// never reaches for the process's stdin directly (§12).
-// env is the environment map for ${VAR} expansion; use layout.Env.
-func ReadPrompt(prompt, promptFile, homeDir string, env map[string]string, stdin io.Reader) (string, error) {
-	if prompt != "" && promptFile != "" {
-		return "", NewUsageError("--prompt and --prompt-file are mutually exclusive")
-	}
-
-	if prompt == "-" {
-		data, err := io.ReadAll(stdin)
-		if err != nil {
-			return "", fmt.Errorf("read prompt from stdin: %w", err)
-		}
-		return strings.TrimSpace(string(data)), nil
-	}
-
-	if prompt != "" {
-		return prompt, nil
-	}
-
-	if promptFile == "-" {
-		data, err := io.ReadAll(stdin)
-		if err != nil {
-			return "", fmt.Errorf("read prompt from stdin: %w", err)
-		}
-		return strings.TrimSpace(string(data)), nil
-	}
-
-	if promptFile != "" {
-		promptFile, err := ExpandPath(promptFile, homeDir, env)
-		if err != nil {
-			return "", fmt.Errorf("expand prompt file path: %w", err)
-		}
-		data, err := os.ReadFile(promptFile) //nolint:gosec // G304: path is from user-provided --prompt-file flag
-		if err != nil {
-			return "", fmt.Errorf("read prompt file: %w", err)
-		}
-		return strings.TrimSpace(string(data)), nil
-	}
-
-	return "", nil
 }
 
 // parsePortBindings converts ["host:container", ...] to runtime port mappings.

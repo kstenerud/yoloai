@@ -20,6 +20,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/runtime"
+	"github.com/kstenerud/yoloai/internal/sandbox/invocation"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/internal/workspace"
 )
@@ -156,7 +157,7 @@ func preparePromptForStart(opts StartOptions, sandboxDir string, meta *store.Met
 		return "", false, nil
 	}
 
-	promptText, err = ReadPrompt(opts.Prompt, opts.PromptFile, homeDir, env, stdin)
+	promptText, err = invocation.ReadPrompt(opts.Prompt, opts.PromptFile, homeDir, env, stdin)
 	if err != nil {
 		return "", false, err
 	}
@@ -1011,7 +1012,7 @@ func (m *Engine) relaunchAgentWithResume(ctx context.Context, name string, meta 
 	agentArgs := resolveAgentArgs(m.layout, string(meta.Agent), meta.Profile)
 
 	// Build interactive command (no headless prompt baked in)
-	interactiveCmd := buildAgentCommand(agentDef, meta.Model, "", agentArgs, cfg.Passthrough)
+	interactiveCmd := invocation.BuildAgentCommand(agentDef, meta.Model, "", agentArgs, cfg.Passthrough)
 
 	// Respawn with interactive command
 	_, err = ExecInContainer(ctx, m.runtime, name, meta, m.layout.HostUID,
@@ -1099,7 +1100,7 @@ func (m *Engine) relaunchAgentWithCustomPrompt(ctx context.Context, name string,
 	}
 
 	agentArgs := resolveAgentArgs(m.layout, string(meta.Agent), meta.Profile)
-	interactiveCmd := buildAgentCommand(agentDef, meta.Model, "", agentArgs, cfg.Passthrough)
+	interactiveCmd := invocation.BuildAgentCommand(agentDef, meta.Model, "", agentArgs, cfg.Passthrough)
 	// Prefer the stored launch prefix (W1a single-source-of-truth) when the gate
 	// is set; fall back to re-invoking PrepareAgentCommand for sandboxes created
 	// before this field existed. W1b retires the fallback one release later.
@@ -1187,7 +1188,7 @@ func (m *Engine) prepareCustomPromptFiles(name string, meta *store.Meta, promptT
 	}
 
 	agentArgs := resolveAgentArgs(m.layout, string(meta.Agent), meta.Profile)
-	cfg.AgentCommand = buildAgentCommand(agentDef, meta.Model, "", agentArgs, cfg.Passthrough)
+	cfg.AgentCommand = invocation.BuildAgentCommand(agentDef, meta.Model, "", agentArgs, cfg.Passthrough)
 
 	updated, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
@@ -1236,7 +1237,7 @@ func (m *Engine) prepareResumeFiles(name string, meta *store.Meta) error {
 	}
 
 	agentArgs := resolveAgentArgs(m.layout, string(meta.Agent), meta.Profile)
-	cfg.AgentCommand = buildAgentCommand(agentDef, meta.Model, "", agentArgs, cfg.Passthrough)
+	cfg.AgentCommand = invocation.BuildAgentCommand(agentDef, meta.Model, "", agentArgs, cfg.Passthrough)
 
 	updated, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
@@ -1421,7 +1422,7 @@ func patchConfigVscodeTunnel(sandboxDir, sandboxName string) error {
 	}
 
 	cfg.VscodeTunnel = true
-	cfg.VscodeTunnelName = sanitizeTunnelName(sandboxName)
+	cfg.VscodeTunnelName = invocation.SanitizeTunnelName(sandboxName)
 	updated, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal runtime-config.json: %w", err)
