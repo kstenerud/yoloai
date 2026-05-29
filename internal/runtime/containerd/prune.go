@@ -139,26 +139,79 @@ func (r *Runtime) pruneImages(ctx context.Context, dryRun bool, output io.Writer
 	return nil
 }
 
-// snapshotNames returns the names of every snapshot in the given snapshotter
+// snapshotInfos returns the Info of every snapshot in the given snapshotter
 // within the current namespace. present is false when the snapshotter isn't
-// configured on this host (Walk RPC fails) — callers skip it silently.
-func (r *Runtime) snapshotNames(ctx context.Context, snapshotter string) (names []string, present bool) {
+// configured on this host (Walk RPC fails) — callers skip it silently. Info
+// carries each snapshot's Parent, which prune uses to remove children first.
+func (r *Runtime) snapshotInfos(ctx context.Context, snapshotter string) (infos []snapshots.Info, present bool) {
 	snapSvc := r.client.SnapshotService(snapshotter)
 	if err := snapSvc.Walk(ctx, func(_ context.Context, info snapshots.Info) error {
-		names = append(names, info.Name)
+		infos = append(infos, info)
 		return nil
 	}); err != nil {
 		return nil, false
 	}
-	return names, true
+	return infos, true
+}
+
+// orderLeafFirst returns the snapshot names ordered so a snapshot always
+// precedes its parent (children first). Removing in this order means every
+// Remove succeeds synchronously: containerd refuses to remove a snapshot that
+// still has a child (FailedPrecondition), and walking in arbitrary order would
+// hit that for most of a layer chain, leaving the bulk to be reclaimed only by
+// a later GC pass (or not at all, for snapshots GC doesn't root). A Kahn-style
+// topological pass over the in-memory Parent links avoids both. Any snapshot
+// not reached (e.g. a parent outside this set, or a cycle that shouldn't exist)
+// is appended at the end so nothing is silently dropped.
+func orderLeafFirst(infos []snapshots.Info) []string {
+	inSet := make(map[string]bool, len(infos))
+	for _, info := range infos {
+		inSet[info.Name] = true
+	}
+	childCount := make(map[string]int, len(infos))
+	for _, info := range infos {
+		if info.Parent != "" && inSet[info.Parent] {
+			childCount[info.Parent]++
+		}
+	}
+	parentOf := make(map[string]string, len(infos))
+	var queue []string
+	for _, info := range infos {
+		parentOf[info.Name] = info.Parent
+		if childCount[info.Name] == 0 {
+			queue = append(queue, info.Name)
+		}
+	}
+	ordered := make([]string, 0, len(infos))
+	emitted := make(map[string]bool, len(infos))
+	for len(queue) > 0 {
+		name := queue[0]
+		queue = queue[1:]
+		ordered = append(ordered, name)
+		emitted[name] = true
+		if parent := parentOf[name]; parent != "" && inSet[parent] {
+			childCount[parent]--
+			if childCount[parent] == 0 {
+				queue = append(queue, parent)
+			}
+		}
+	}
+	for _, info := range infos {
+		if !emitted[info.Name] {
+			ordered = append(ordered, info.Name)
+		}
+	}
+	return ordered
 }
 
 // pruneSnapshots removes every snapshot in each configured snapshotter (both
 // overlayfs and devmapper) within the namespace, returning the on-disk bytes
-// released (summed from each removed snapshot's Usage, measured before
-// removal). Active snapshots or those with active children return
-// FailedPrecondition and are skipped silently — GC reclaims them once the
-// holding container is gone.
+// actually released (summed from each successfully removed snapshot's Usage,
+// measured just before its removal). Removal is leaf-first (see
+// orderLeafFirst), so the whole chain is freed synchronously and the returned
+// total reflects bytes truly reclaimed — not an optimistic figure that assumes
+// a later GC pass. It therefore matches what CacheUsage reported for the same
+// snapshots, so prune reclaim reconciles with the doctor/disk figures.
 //
 // devmapper caveat: removing a thin snapshot frees blocks back to the
 // thin-pool, but the pool's backing loopback file does not shrink, so host
@@ -168,14 +221,14 @@ func (r *Runtime) pruneSnapshots(ctx context.Context, dryRun bool, output io.Wri
 	var reclaimed int64
 	touchedDevmapper := false
 	for _, snapshotter := range snapshotterNames {
-		names, present := r.snapshotNames(ctx, snapshotter)
-		if !present || len(names) == 0 {
+		infos, present := r.snapshotInfos(ctx, snapshotter)
+		if !present || len(infos) == 0 {
 			continue
 		}
 		if snapshotter == "devmapper" {
 			touchedDevmapper = true
 		}
-		reclaimed += r.pruneSnapshotter(ctx, snapshotter, names, dryRun, output)
+		reclaimed += r.pruneSnapshotter(ctx, snapshotter, orderLeafFirst(infos), dryRun, output)
 	}
 	if touchedDevmapper {
 		verb := "are returned"
@@ -187,10 +240,13 @@ func (r *Runtime) pruneSnapshots(ctx context.Context, dryRun bool, output io.Wri
 	return reclaimed
 }
 
-// pruneSnapshotter removes the named snapshots from one snapshotter, returning
-// the bytes released (each snapshot's Usage, measured before removal). In
-// dry-run it only reports. Snapshots that are active or have active children
-// return FailedPrecondition and are skipped silently.
+// pruneSnapshotter removes the given snapshots (in the leaf-first order the
+// caller supplies) from one snapshotter, returning the bytes released — each
+// snapshot's Usage, measured just before its own removal. In dry-run it only
+// reports. With children removed before parents, every Remove succeeds; a
+// snapshot already gone (NotFound) still counts. Only a genuine Remove error
+// (including a FailedPrecondition that survives correct ordering, e.g. an
+// unexpected external hold) is excluded from the total and warned about.
 func (r *Runtime) pruneSnapshotter(ctx context.Context, snapshotter string, names []string, dryRun bool, output io.Writer) int64 {
 	snapSvc := r.client.SnapshotService(snapshotter)
 	var reclaimed int64
@@ -204,10 +260,8 @@ func (r *Runtime) pruneSnapshotter(ctx context.Context, snapshotter string, name
 			reclaimed += size
 			continue
 		}
-		if err := snapSvc.Remove(ctx, name); err != nil {
-			if !cerrdefs.IsFailedPrecondition(err) && !cerrdefs.IsNotFound(err) {
-				fmt.Fprintf(output, "containerd: failed to remove %s snapshot %s: %v\n", snapshotter, name, err) //nolint:errcheck
-			}
+		if err := snapSvc.Remove(ctx, name); err != nil && !cerrdefs.IsNotFound(err) {
+			fmt.Fprintf(output, "containerd: failed to remove %s snapshot %s: %v\n", snapshotter, name, err) //nolint:errcheck
 			continue
 		}
 		reclaimed += size
@@ -235,19 +289,19 @@ func (r *Runtime) CacheUsage(ctx context.Context) (runtime.CacheUsage, error) {
 	var parts []string
 	hasDevmapper := false
 	for _, snapshotter := range snapshotterNames {
-		names, present := r.snapshotNames(ctx, snapshotter)
-		if !present || len(names) == 0 {
+		infos, present := r.snapshotInfos(ctx, snapshotter)
+		if !present || len(infos) == 0 {
 			continue
 		}
 		snapSvc := r.client.SnapshotService(snapshotter)
 		var bytes int64
-		for _, name := range names {
-			if u, uerr := snapSvc.Usage(ctx, name); uerr == nil {
+		for _, info := range infos {
+			if u, uerr := snapSvc.Usage(ctx, info.Name); uerr == nil {
 				bytes += u.Size
 			}
 		}
 		total += bytes
-		parts = append(parts, fmt.Sprintf("%s: %d snapshots", snapshotter, len(names)))
+		parts = append(parts, fmt.Sprintf("%s: %d snapshots", snapshotter, len(infos)))
 		if snapshotter == "devmapper" {
 			hasDevmapper = true
 		}

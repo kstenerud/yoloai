@@ -50,6 +50,10 @@ row to the index.
 | `doctor`/`disk` reports podman images as 0 B despite a multi-GB base | [Podman: /system/df reports LayersSize 0](#podman-systemdf-reports-layerssize-0) |
 | `doctor` shows containerd image cache as `?`; `prune --images` leaves devmapper pool blocks used / df unchanged | [containerd: both snapshotters hold a copy](#containerd-both-overlayfs-and-devmapper-snapshotters-hold-a-copy-prune-and-sizing-must-cover-both) |
 | Docker base image reads ~33 GiB on Linux vs ~5 GiB on macOS; `image rm` frees ~0; prune undercounts reclaim | [Docker: containerd store pins layers via build cache](#docker-containerd-image-store-image-rm-frees-no-disk-until-the-build-cache-is-pruned-sdk-spacereclaimed-undercounts) |
+| `prune --images` on Podman reports absurd reclaim (e.g. 142 GB freed for a ~5 GiB footprint) | [Podman: `ImagesPrune` `SpaceReclaimed` un-dedup sum](#podman-imagesprune-spacereclaimed-is-the-un-deduplicated-image-size-sum) |
+| `prune --images` leaves a snapshot chain; `Remove` → `cannot remove snapshot with child` | [containerd: remove snapshots leaf-first](#containerd-snapshots-must-be-removed-leaf-first-children-before-parents-or-removal-silently-stalls) |
+| `system disk` reports 0 containerd image bytes right after a successful `system build --backend containerd` | [containerd: import inconsistently materializes snapshots](#containerd-image-import-inconsistently-materializes-overlayfs-snapshots) |
+| Base layer won't prune (`cannot remove snapshot with child`) but no snapshot claims it as parent in any namespace | [containerd: leftover lease GC-roots an orphaned child](#containerd-a-leftover-lease-gc-roots-an-orphaned-child-blocking-base-layer-removal) |
 | Container starts as root / wrong uid under rootless Podman | [Podman: rootless detection uses socket path](#rootless-detection-must-use-socket-path-not-osgetuid) |
 | Wrong uid inside container on macOS Podman | [Podman: macOS keep-id maps VM uid](#macos---usernkeep-id-maps-the-podman-machine-uid-1000-not-the-macos-uid) |
 | Podman rejects per-file bind mounts for secrets | [Podman: per-file bind mounts rejected](#per-file-bind-mounts-rejected-by-podmans-docker-compatible-api) |
@@ -699,9 +703,11 @@ An empty value disables LXC seccomp for that container entirely. The container m
 
 **Explanation:** With the containerd snapshotter, BuildKit's build cache holds references to the image layers it produced. While those cache records exist, the layers are pinned: removing the image record drops the tag but containerd's GC can't reclaim the still-referenced content blobs/snapshots. Pruning the build cache releases the references, and only then does layer removal actually return disk. Separately, the SDK's `SpaceReclaimed` field counts only the content it directly deleted in that call, not the cascading snapshot/blob GC that follows — so it undercounts real reclaim by ~4x. The classic (non-containerd) store on macOS Docker Desktop doesn't exhibit either behavior, which is why the same base image reads ~5 GiB there.
 
-**Fix:** Prune the build cache *before* (or in the same pass as) image removal so layers actually free. yoloai's plain `prune` does `BuildCachePrune(all=true)` + `VolumesPrune` + dangling `ImagesPrune` (no rebuild forced); `--images` adds full image removal. Because `SpaceReclaimed` is unreliable, the reclaimed total is measured as a `statfs` free-space delta around the prune (free-after − free-before on the daemon's data root) when that root is host-visible, falling back to the SDK sum only when it isn't (e.g. Docker Desktop's LinuxKit VM).
+**Fix:** Prune the build cache *before* (or in the same pass as) image removal so layers actually free. yoloai's plain `prune` does `BuildCachePrune(all=true)` + `VolumesPrune` + dangling `ImagesPrune` (no rebuild forced); `--images` adds full image removal. Because `SpaceReclaimed` is unreliable (it undercounts here, and *over*counts on Podman — see [Podman: `ImagesPrune` `SpaceReclaimed` is the un-deduplicated image-size sum](#podman-imagesprune-spacereclaimed-is-the-un-deduplicated-image-size-sum)), the reclaimed total is **not** taken from `SpaceReclaimed`. It is the drop in this backend's own `CacheUsage` across the prune (`before − after`), which reuses the already-accurate sizing and is self-attributed per backend (an earlier `statfs` free-space delta was abandoned because, on a shared `/`, one backend's delta absorbs bytes freed by another's prune — see working-notes D37).
 
-**Code:** `internal/runtime/docker/prune.go` — `PruneCache` (prune order + `measuredReclaim`), `freeBytes`/`daemonDataRoot` (statfs delta), `splitCacheBytes` (build cache counted as no-rebuild `cached`, `LayersSize` as rebuild-forcing `images`).
+**Note on logical vs physical:** because `CacheUsage` counts build cache and image layers separately but they *share* content on the containerd store, the reported reclaim is a *logical* figure that can exceed the physical bytes `df` shows freed. That gap is expected and documented (D37), not a bug.
+
+**Code:** `internal/runtime/docker/prune.go` — `PruneCache` (prune order + before/after delta), `reclaimableBytes` (the `CacheUsage` sample), `splitCacheBytes` (build cache counted as no-rebuild `cached`, `LayersSize` as rebuild-forcing `images`).
 
 ---
 
@@ -716,6 +722,16 @@ An empty value disables LXC seccomp for that container entirely. The container m
 **Fix:** The Podman backend injects a per-image dedup via `docker.Runtime.SetImageBytesFunc`. Summing `img.Size` would multiply-count the shared base (38 build stages sharing one ~5.5 GB base read as ~150 GB — the failure mode of the shared-layers entry above). The deduplicated total is `Σ(img.Size − img.SharedSize) + max(img.SharedSize)`: every image's unique bytes plus the shared layer set counted once. For yoloai's single-base build chain the largest `SharedSize` captures the full shared union exactly; multiple independent bases would slightly underestimate the shared tier.
 
 **Code:** `internal/runtime/podman/podman.go` `podmanImageBytes()` (injected in `New` via `SetImageBytesFunc`); `internal/runtime/docker/prune.go` `splitCacheBytes()` (uses `imageBytesFn` when set, else `du.LayersSize`). Guard tests: `podman_test.go::TestPodmanImageBytes_*`, `docker/prune_test.go::TestSplitCacheBytes_ImageBytesFuncOverride`.
+
+### Podman: `ImagesPrune` `SpaceReclaimed` is the un-deduplicated image-size sum
+
+**Symptom:** `yoloai system prune --images` on Podman reports a wildly inflated reclaim — e.g. **142.27 GB** freed when the actual footprint is ~5.18 GiB. The over-count scales with the number of images, exactly like the reporting-side bug.
+
+**Explanation:** Podman's docker-compat `ImagesPrune` returns `SpaceReclaimed` as the **sum of every removed image's `Size`**, each of which *includes shared layers* — the same multiply-counting as [`DiskUsage().Images[].Size`](#diskusageimagessize-includes-shared-layers-summing-it-multiply-counts-them), but on the prune path instead of the sizing path. 38 build stages sharing one ~5 GiB base sum to ~140 GB. (Docker on the containerd store has the *opposite* problem — `SpaceReclaimed` undercounts.) So raw `SpaceReclaimed` is untrustworthy in both directions and must not be reported.
+
+**Fix:** Don't use `SpaceReclaimed` at all. Report reclaim as the drop in the backend's own `CacheUsage` across the prune (`before − after`); `CacheUsage` already deduplicates correctly for Podman (via `podmanImageBytes`), so the delta is accurate (verified: 5.18 GB, matching the `/system/df` dedup) and self-attributed per backend. See working-notes D37.
+
+**Code:** `internal/runtime/docker/prune.go` `PruneCache` + `reclaimableBytes` (shared by docker + podman). Note `BuildCachePrune` returns "Not Found" on Podman (no BuildKit cache) — warned and harmless; the before/after delta still captures the actual reclaim.
 
 ### Rootless detection must use socket path, not `os.Getuid()`
 
@@ -869,7 +885,33 @@ Sizing must go through the **containerd socket**, not the host filesystem: yoloa
 
 **devmapper caveat:** removing a devmapper thin snapshot returns its blocks to the pool (the `dmsetup` used-block count drops), but the pool's backing loopback file (`/var/lib/containerd/devmapper/data`, host-configured at a fixed size, ~10 GB) **does not shrink** — discards are not punched back to the host file. So host `df` is unchanged by a prune even though the pool regains free blocks. yoloai's prune prints this explicitly so the reported reclaim isn't mistaken for freed host disk. (The pool itself is a host prerequisite, configured by the devmapper setup script + `/etc/containerd/config.toml`, not owned by yoloai — yoloai only prunes the snapshots it created inside it.)
 
-**Code:** `internal/runtime/containerd/prune.go` — `snapshotterNames` (`{overlayfs, devmapper}`), `snapshotNames` (Walk; `present=false` skips an unconfigured snapshotter), `pruneSnapshots` (iterates both, sums removed `Usage`, prints the devmapper caveat), `CacheUsage` (sums `Usage` across both into `ImageBytes`, per-snapshotter breakdown in `Detail`).
+**Code:** `internal/runtime/containerd/prune.go` — `snapshotterNames` (`{overlayfs, devmapper}`), `snapshotInfos` (Walk returning each snapshot's `Info` incl. `Parent`; `present=false` skips an unconfigured snapshotter), `orderLeafFirst` (Kahn topological pass; see below), `pruneSnapshots`/`pruneSnapshotter` (iterate both, remove leaf-first, sum each removed snapshot's `Usage`, print the devmapper caveat), `CacheUsage` (sums `Usage` across both into `ImageBytes`, per-snapshotter breakdown in `Detail`).
+
+### containerd: snapshots must be removed leaf-first (children before parents) or removal silently stalls
+
+**Symptom:** `prune --images` removes some snapshots but leaves a chain behind; `SnapshotService.Remove` returns `cannot remove snapshot with child: failed precondition` for layers that still have descendants. A single arbitrary-order `Walk`+`Remove` pass only deletes the chain's leaves, leaving the bulk to be reclaimed by a later GC (which doesn't always root them).
+
+**Explanation:** Image layers form parent→child snapshot chains. containerd refuses to remove a committed snapshot that still has a child. To free a whole chain synchronously you must remove children before their parents.
+
+**Fix:** Order removals leaf-first via a Kahn topological pass over the in-memory `Parent` links (`orderLeafFirst`): enqueue snapshots with no in-set child, emit each, decrement its parent's child-count, enqueue the parent when it reaches zero. Every `Remove` then succeeds in one pass and the returned reclaim total reflects bytes actually freed — no reliance on a later GC. Any snapshot left un-emitted (cycle, or a parent outside the set) is appended at the end so nothing is silently dropped.
+
+**Code:** `internal/runtime/containerd/prune.go` `orderLeafFirst`, called by `pruneSnapshots`.
+
+### containerd: image import inconsistently materializes overlayfs snapshots
+
+**Symptom:** After `yoloai system build --backend containerd`, sometimes the import unpacks the image into overlayfs snapshots (e.g. 28 snapshots, so `system disk` immediately reports the footprint) and sometimes it only links the image (0 snapshots, `system disk` reports 0 image bytes for the namespace) — with no change in the command.
+
+**Explanation:** The containerd import/link path doesn't deterministically unpack layers into the snapshotter; whether snapshots materialize at import time vs. lazily at first container `run` varies. `client.WithNewSnapshot` likewise does **not** unpack (see [`WithNewSnapshot` does NOT unpack image layers](#withnewsnapshot-does-not-unpack-image-layers)). So a freshly-built containerd image may carry content blobs but zero snapshots until a container is created from it.
+
+**Consequence for testing:** to get a containerd snapshot footprint to size/prune, create a sandbox (the normal `run` path unpacks via `img.Unpack`) rather than relying on the build to materialize snapshots. Avoid `ctr images mount` for this — see the lease entry below.
+
+### containerd: a leftover lease GC-roots an orphaned child, blocking base-layer removal
+
+**Symptom:** `prune --images` removes every layer except the base, which refuses removal with `cannot remove snapshot with child: failed precondition` — yet `ctr -n yoloai snapshots ls` (and every other namespace) shows **no** snapshot claiming it as parent. Retrying `Remove` keeps failing; the snapshot only disappears after the responsible lease is deleted and GC runs.
+
+**Explanation:** A lease with a `containerd.io/gc.expire` label (created automatically by `ctr images mount`, among others) GC-roots the snapshots it pinned, including an active/View child of the base layer. That child keeps the base un-removable, but it isn't a normal committed snapshot so it doesn't appear in `snapshots ls`. The synchronous `Remove` precondition check still sees it. Dropping the lease lets the next GC pass collect both.
+
+**Consequence:** This is a **test-scaffolding artifact** (a leftover `ctr images mount` lease), not something yoloai's own create/destroy/prune flow produces — yoloai never creates such leases. If you manually `ctr images mount` to populate a testbed, `ctr -n yoloai leases rm <id>` afterward, or expect the base layer to linger until the 1-hour `gc.expire` elapses.
 
 ### Kata: orphaned snapshots from crashed runs must be pre-cleared
 

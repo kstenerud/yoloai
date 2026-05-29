@@ -18,12 +18,16 @@ numbers against the backend's own tools and the host filesystem.
 
 - **Docker Desktop runs in a LinuxKit VM.** The daemon's data root
   (`info.DockerRootDir`, e.g. `/var/lib/docker`) lives *inside* that VM, not on the
-  macOS filesystem. The Linux reclaim path measures a `statfs` free-space delta on
-  that data root (`docker/prune.go` `freeBytes`/`daemonDataRoot`/`measuredReclaim`);
-  on macOS `freeBytes` returns `-1` (path not host-visible) and the code **falls
-  back to the SDK's `SpaceReclaimed`** — which `backend-idiosyncrasies.md` documents
-  as undercounting by ~4x on the containerd store. So Docker-on-macOS reclaim totals
-  may be wrong even though the Linux path is right. **Verify the fallback's accuracy.**
+  macOS filesystem. This used to matter because the Linux reclaim path measured a
+  host `statfs` delta on that data root — **that approach is gone** (working-notes
+  D37). Reclaim is now the drop in the backend's own `CacheUsage` across the prune
+  (`before − after`, `docker/prune.go` `reclaimableBytes`), which goes entirely
+  through the daemon API and so works identically whether the data root is on the
+  host or inside the VM. The macOS question is therefore no longer "is the statfs
+  fallback right" but **"is `CacheUsage` accurate on the macOS store?"** — i.e. does
+  the before/after delta match what the backend's own tool reports as freed. The
+  raw SDK `SpaceReclaimed` is **not** used on any platform (it undercounts on the
+  containerd store and *over*counts ~28x on Podman — see `backend-idiosyncrasies.md`).
 - **Docker Desktop on macOS defaults to the _classic_ image store**, not the
   containerd snapshotter. The base image read ~5 GiB there vs ~33 GiB on the Linux
   containerd store. Confirm which store is active (`docker info` →
@@ -48,9 +52,11 @@ For each backend available on the Mac, compare three sources and confirm they ag
 - [ ] `docker info` — is `containerd-snapshotter` on or off? Note it; it changes everything.
 - [ ] `docker system df -v` vs `yoloai system disk` — do CACHE and IMAGES columns match?
 - [ ] `yoloai system prune --images --dry-run` estimate vs the actual reclaim after a real run.
-- [ ] Since `freeBytes` returns `-1` on macOS, confirm `measuredReclaim` falls back to
-      `SpaceReclaimed` and check how far off it is (it undercounts on the containerd store).
-      If Docker Desktop exposes a way to `statfs` the VM data root, consider wiring it.
+- [ ] Confirm the reported reclaim (now `CacheUsage` before − after, not `SpaceReclaimed`)
+      matches `docker system df` before/after. On the classic store the logical figure
+      should track physical closely; on the containerd store expect the logical total to
+      exceed `df`-freed bytes because build cache and image layers share content (the
+      documented logical-vs-physical gap, D37) — that's expected, not a bug.
 
 ### Podman (Podman Machine)
 - [ ] `curl --unix-socket <machine.sock> http://d/v1.41/system/df` — confirm `LayersSize: 0`
