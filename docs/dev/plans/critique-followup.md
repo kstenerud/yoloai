@@ -196,7 +196,8 @@ operator-identity contract, not just paths.
 - **F19** — Add `Architectures []string` to `BackendDescriptor`; Tart declares `["arm64"]`; drop hardcoded check in `setup.go`
 - **F20** — Folds into F11 (typed IsolationMode → `exhaustive` checks the 4 string-switches)
 - **F21** — Move isolation/OS routing into `runtime.SelectContainerBackend`; CLI calls with all three preferences
-- **F24** — Continue W3 pattern: incremental Python helper carves; no single landing.
+- **F24 — DONE 2026-05-29** (high-value pure surface extracted; remaining is the irreducible
+  imperative core — closed by owner's call, not by hitting the soft "90% pure" target).
   **Progress 2026-05-29:** the four candidates from the post-F8 review were assessed against
   the actual code — two were already carved by prior work (`cmd_str`/`lifecycle_preamble` and
   `compose_prompt_content`/`load_secret_files` live in `setup_helpers.py`), and the
@@ -231,7 +232,7 @@ land in pieces.
 8. **F23** (multi-session): cross-backend ops into SystemClient
 9. **F8** (multi-session): structured Results — DONE 2026-05-29
 10. **F5** (multi-week): sandbox/ god-package carve
-11. **F24** (ongoing): Python helper carves
+11. **F24** (ongoing): Python helper carves — DONE 2026-05-29 (high-value pure surface extracted; rest is irreducible imperative core)
 
 ## Out-of-band items
 
