@@ -90,32 +90,32 @@ def test_literal_fallback_is_not_cached(monkeypatch: pytest.MonkeyPatch) -> None
     assert tmux_io.tmux_bin() == "/opt/homebrew/bin/tmux"
 
 
-# --- firstlaunch-window gating -------------------------------------------
+# --- firstlaunch-context gating ------------------------------------------
 
 
-def test_in_progress_predicate_tracks_markers(tmp_path: Path) -> None:
-    """_firstlaunch_in_progress is True only between the started and done
-    markers appearing."""
-    started = tmp_path / "started"
-    done = tmp_path / "done"
-    tmux_io.set_firstlaunch_markers(str(started), str(done))
-    assert tmux_io._firstlaunch_in_progress() is False  # nothing created yet
-    started.write_text("")
-    assert tmux_io._firstlaunch_in_progress() is True
-    done.write_text("")
-    assert tmux_io._firstlaunch_in_progress() is False  # window closed
+def test_context_predicate_tracks_marker(tmp_path: Path) -> None:
+    """_in_firstlaunch_context is True only while a registered marker file
+    exists on disk."""
+    marker = tmp_path / "started"
+    tmux_io.set_firstlaunch_marker(str(marker))
+    assert tmux_io._in_firstlaunch_context() is False  # not created yet
+    marker.write_text("")
+    assert tmux_io._in_firstlaunch_context() is True
+    marker.unlink()
+    assert tmux_io._in_firstlaunch_context() is False  # gone again
 
 
-def test_in_progress_false_without_markers() -> None:
-    """No markers registered (every non-Tart path) ⇒ never in a window."""
-    assert tmux_io._firstlaunch_in_progress() is False
+def test_context_false_without_marker() -> None:
+    """No marker registered (every non-Tart path) ⇒ never in context."""
+    assert tmux_io._in_firstlaunch_context() is False
 
 
-def test_waits_out_window_past_fixed_budget(monkeypatch: pytest.MonkeyPatch) -> None:
-    """While firstlaunch is in progress, resolution must NOT give up at the
-    fixed retry budget — the storm outlasts it. tmux appears only after more
-    probes than the budget would allow."""
-    appear_at = tmux_io._RESOLVE_ATTEMPTS + 20
+def test_firstlaunch_probes_past_fixed_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    """In firstlaunch context, resolution must keep probing well past the fixed
+    retry budget — the scan storm outlasts both the budget and the xcodebuild
+    process. This is the regression guard: the old code stopped at a short
+    grace once xcodebuild finished and crashed when tmux was still hidden."""
+    appear_at = tmux_io._RESOLVE_ATTEMPTS + 40
     state = {"probes": 0}
 
     def probe() -> str | None:
@@ -123,34 +123,16 @@ def test_waits_out_window_past_fixed_budget(monkeypatch: pytest.MonkeyPatch) -> 
         return "/opt/homebrew/bin/tmux" if state["probes"] >= appear_at else None
 
     monkeypatch.setattr(tmux_io, "_probe_tmux_bin", probe)
-    monkeypatch.setattr(tmux_io, "_firstlaunch_in_progress", lambda: True)
+    monkeypatch.setattr(tmux_io, "_in_firstlaunch_context", lambda: True)
     assert tmux_io.tmux_bin() == "/opt/homebrew/bin/tmux"
     assert state["probes"] >= appear_at
 
 
-def test_resolves_in_grace_after_window_closes(
+def test_firstlaunch_hits_ceiling_then_literal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Once firstlaunch finishes, the bounded grace covers the storm's tail."""
-    state = {"probes": 0}
-
-    monkeypatch.setattr(
-        tmux_io, "_firstlaunch_in_progress", lambda: state["probes"] < 3
-    )
-
-    def probe() -> str | None:
-        state["probes"] += 1
-        return "/opt/homebrew/bin/tmux" if state["probes"] >= 5 else None
-
-    monkeypatch.setattr(tmux_io, "_probe_tmux_bin", probe)
-    assert tmux_io.tmux_bin() == "/opt/homebrew/bin/tmux"
-
-
-def test_stuck_window_hits_ceiling_then_literal(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A firstlaunch child that dies without signalling completion must not
-    hang forever: the hard ceiling bounds the wait, then we give up."""
+    """A firstlaunch that never makes tmux resolvable must not hang forever:
+    the hard ceiling bounds the wait, then we fall back to the literal."""
     calls = {"n": 0}
 
     def never() -> None:
@@ -158,8 +140,7 @@ def test_stuck_window_hits_ceiling_then_literal(
         return None
 
     monkeypatch.setattr(tmux_io, "_probe_tmux_bin", never)
-    monkeypatch.setattr(tmux_io, "_firstlaunch_in_progress", lambda: True)
+    monkeypatch.setattr(tmux_io, "_in_firstlaunch_context", lambda: True)
     assert tmux_io.tmux_bin() == "tmux"
-    # window-wait ceiling probes + the bounded grace afterwards
     expected = int(tmux_io._FIRSTLAUNCH_MAX_WAIT_SECONDS / tmux_io._RESOLVE_DELAY_SECONDS)
     assert calls["n"] >= expected

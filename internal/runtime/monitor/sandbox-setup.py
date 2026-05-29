@@ -357,18 +357,17 @@ class TartBackend(Backend):
             # background lets the agent start immediately instead of blocking setup.
             log_debug("tart.xcode.firstlaunch", "starting xcodebuild -runFirstLaunch in background")
             xcodebuild_log = os.path.join(self.yoloai_dir, "xcodebuild-firstlaunch.log")
-            # Markers bracket the firstlaunch window so tmux resolution can wait
-            # out the security-scan storm (which lasts as long as firstlaunch
-            # runs) instead of burning a fixed retry budget that expires
-            # mid-storm. The started marker is created before launch; the done
-            # marker is touched by the backgrounded job on completion.
+            # A marker signals the firstlaunch context to the tmux resolver: the
+            # security-scan storm transiently hides tmux, so while this marker
+            # exists resolution probes to a long ceiling instead of burning a
+            # fixed budget. We do not track completion — the storm outlasts the
+            # xcodebuild process, so its exit is not a useful "tmux is back"
+            # signal.
             started_marker = os.path.join(self.yoloai_dir, "xcodebuild-firstlaunch.started")
-            done_marker = os.path.join(self.yoloai_dir, "xcodebuild-firstlaunch.done")
-            for stale in (started_marker, done_marker):
-                try:
-                    os.remove(stale)
-                except OSError:
-                    pass
+            try:
+                os.remove(started_marker)
+            except OSError:
+                pass
             try:
                 with open(started_marker, "w"):
                     pass
@@ -376,18 +375,13 @@ class TartBackend(Backend):
                 pass
             try:
                 with open(xcodebuild_log, "w") as _xcodebuild_logf:
-                    # Wrap the job in a shell so the done marker is touched no
-                    # matter how xcodebuild exits, closing the window for the
-                    # tmux resolver. The marker path arrives as "$1".
                     subprocess.Popen(
-                        ["/bin/sh", "-c",
-                         'sudo xcodebuild -runFirstLaunch; : > "$1"',
-                         "sh", done_marker],
+                        ["sudo", "xcodebuild", "-runFirstLaunch"],
                         stdout=_xcodebuild_logf,
                         stderr=subprocess.STDOUT,
                         start_new_session=True,
                     )
-                tmux_io.set_firstlaunch_markers(started_marker, done_marker)
+                tmux_io.set_firstlaunch_marker(started_marker)
             except OSError:
                 pass  # Non-fatal
             log_debug("tart.xcode.firstlaunch.started", "xcodebuild -runFirstLaunch launched")

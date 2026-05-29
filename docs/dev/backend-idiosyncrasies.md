@@ -1384,19 +1384,32 @@ build that already had the bounded-retry fix — `tmux.start` landed ~32s after
 `firstlaunch.started`, inside the still-open window). The budget was guessing the
 window's duration instead of observing it.
 
-**Refinement — gate on firstlaunch completion, not a guessed budget:** the Tart setup
-path now brackets the window with two marker files in `yoloai_dir`
-(`xcodebuild-firstlaunch.started`, created before launch, and `.done`, touched by the
-backgrounded job on exit via an `sh -c '… ; : > "$1"'` wrapper) and registers them
-with `tmux_io.set_firstlaunch_markers()`. While the started marker exists and the done
-marker does not, `tmux_bin()` keeps re-probing (capped by a 240s hard ceiling so a
-firstlaunch child that dies without signalling can't hang setup forever). Once the
-window closes — or on every non-Tart backend, where no markers are registered — it
-falls back to the bounded 30×1s retry, which now only has to cover the storm's
-short tail. This ties the wait to the actual cause rather than a fixed timeout.
+**Why gating on firstlaunch *completion* also failed (second recurrence):** an
+intermediate fix bracketed the window with `.started`/`.done` marker files —
+`tmux_bin()` re-probed while `.started` existed and `.done` did not, then dropped to
+the bounded 30×1s retry as a "tail" once `.done` appeared. This still crashed
+(observed: run `20260529-050323` on commit `18117bc`, which already had the marker
+fix — `tmux.start` landed **62.6s** after `firstlaunch.started`, with
+`xcodebuild-firstlaunch.log` showing `Install Succeeded`). The flaw: the `.done`
+marker fires when the **xcodebuild process exits**, but the security scan that hides
+tmux **tails off well after** that. So `.done` closed the window early, the 30s
+"tail" grace ran out while tmux was still hidden, and we fell to the literal `"tmux"`.
+Gating on xcodebuild completion underestimates the storm just like the fixed budget
+did — it was simply a less-wrong guess.
+
+**Fix that holds — probe to a long ceiling, ignore completion:** the Tart setup path
+writes a single `xcodebuild-firstlaunch.started` marker and registers it with
+`tmux_io.set_firstlaunch_marker()`. While that marker exists, `tmux_bin()` probes
+once per second until tmux resolves **or** the 240s hard ceiling is hit — it does
+**not** stop when xcodebuild finishes, because completion is not a reliable "tmux is
+back" signal. On every non-Tart backend (no marker registered) resolution uses the
+bounded 30×1s retry. The early-exit-on-completion was pure downside: when tmux is
+present the very first probe returns it, so dropping the optimisation costs nothing on
+the happy path and removes the premature give-up. The `.done` marker and its
+`sh -c '… ; : > "$1"'` wrapper are gone.
 
 **Code:** `internal/runtime/monitor/tmux_io.py` (`tmux_bin`, `_probe_tmux_bin`,
-`_firstlaunch_in_progress`, `set_firstlaunch_markers`, `_RESOLVE_ATTEMPTS`,
+`_in_firstlaunch_context`, `set_firstlaunch_marker`, `_RESOLVE_ATTEMPTS`,
 `_FIRSTLAUNCH_MAX_WAIT_SECONDS`); `internal/runtime/monitor/sandbox-setup.py`
 (firstlaunch launch in `TartBackend.setup()`, plus `setup_tmux_session` and the
 `main()` `wait-for` block).
