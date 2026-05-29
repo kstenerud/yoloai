@@ -1,7 +1,7 @@
 // ABOUTME: Generates sandbox context file and per-agent reference files.
 // ABOUTME: Context describes the sandbox environment (dirs, network, resources)
 // ABOUTME: so AI agents understand their constraints without trial and error.
-package sandbox
+package create
 
 import (
 	"fmt"

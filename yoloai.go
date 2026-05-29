@@ -61,7 +61,9 @@ import (
 	_ "github.com/kstenerud/yoloai/internal/runtime/seatbelt" // register backend
 	_ "github.com/kstenerud/yoloai/internal/runtime/tart"     // register backend
 	"github.com/kstenerud/yoloai/internal/sandbox"
+	"github.com/kstenerud/yoloai/internal/sandbox/create"
 	"github.com/kstenerud/yoloai/internal/sandbox/patch"
+	"github.com/kstenerud/yoloai/internal/sandbox/state"
 )
 
 // Sentinel errors returned by Client methods. Re-exported from
@@ -149,6 +151,7 @@ type Client struct {
 	layout  config.Layout // Q-W: DataDir-rooted path resolver propagated to Engine + apply
 	version string        // yoloAI version stamped into created sandboxes' meta.json
 	output  io.Writer     // Options.Output (defaulted to io.Discard); seeds per-call progress writers (F8)
+	input   io.Reader     // Options.Input (defaulted to os.Stdin); threaded to create.Run via state.Deps
 }
 
 // NewWithOptions creates a Client with explicit options.
@@ -188,7 +191,7 @@ func NewWithOptions(ctx context.Context, opts Options) (*Client, error) {
 	}
 
 	mgr := sandbox.NewEngine(rt, logger, input, sandbox.WithLayout(layout))
-	return &Client{manager: mgr, rt: rt, layout: layout, version: opts.Version, output: output}, nil
+	return &Client{manager: mgr, rt: rt, layout: layout, version: opts.Version, output: output, input: input}, nil
 }
 
 // Close releases the underlying runtime connection.
@@ -327,7 +330,10 @@ func (c *Client) Create(ctx context.Context, opts CreateOptions) (string, error)
 	if internal.Output == nil {
 		internal.Output = c.output // seed the per-call progress writer from the Client's Output (F8)
 	}
-	return c.manager.Create(ctx, internal)
+	if err := c.manager.EnsureSetup(ctx, c.output); err != nil {
+		return "", err
+	}
+	return create.Run(ctx, state.Deps{Runtime: c.rt, Layout: c.layout, Input: c.input}, internal)
 }
 
 // ListCommits returns the sandbox's commit history beyond baseline (one

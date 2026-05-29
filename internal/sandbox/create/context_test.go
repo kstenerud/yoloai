@@ -1,5 +1,5 @@
 // ABOUTME: Tests for sandbox context file generation and writing.
-package sandbox
+package create
 
 import (
 	"os"

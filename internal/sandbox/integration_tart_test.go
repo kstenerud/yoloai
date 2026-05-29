@@ -78,7 +78,7 @@ func TestIntegrationTart_FullLifecycle(t *testing.T) {
 
 	// Create sandbox (starts VM)
 	sandboxName := "tart-lifecycle"
-	_, err := mgr.Create(ctx, sandbox.CreateOptions{
+	_, err := createSandbox(ctx, mgr, sandbox.CreateOptions{
 		Name:    sandboxName,
 		Workdir: sandbox.DirSpec{Path: projectDir},
 		Agent:   "test",
@@ -228,7 +228,7 @@ func TestIntegrationTart_MultipleAuxDirs(t *testing.T) {
 	auxDir2 := testutil.AuxDir(t, "data")
 
 	sandboxName := "tart-multiaux"
-	_, err := mgr.Create(ctx, sandbox.CreateOptions{
+	_, err := createSandbox(ctx, mgr, sandbox.CreateOptions{
 		Name:    sandboxName,
 		Workdir: sandbox.DirSpec{Path: projectDir},
 		Agent:   "test",
@@ -281,7 +281,7 @@ func TestIntegrationTart_GitCorruption(t *testing.T) {
 	projectDir := testutil.GoProject(t)
 
 	sandboxName := "tart-gitcorruption"
-	_, err := mgr.Create(ctx, sandbox.CreateOptions{
+	_, err := createSandbox(ctx, mgr, sandbox.CreateOptions{
 		Name:    sandboxName,
 		Workdir: sandbox.DirSpec{Path: projectDir},
 		Agent:   "test",
@@ -347,7 +347,7 @@ func TestIntegrationTart_VMLocalStorageVerification(t *testing.T) {
 	projectDir := testutil.GoProject(t)
 
 	sandboxName := "tart-vmlocal"
-	_, err := mgr.Create(ctx, sandbox.CreateOptions{
+	_, err := createSandbox(ctx, mgr, sandbox.CreateOptions{
 		Name:    sandboxName,
 		Workdir: sandbox.DirSpec{Path: projectDir},
 		Agent:   "test",

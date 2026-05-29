@@ -1,10 +1,9 @@
-package sandbox
+package runtimeconfig
 
-// ABOUTME: Cross-language fence: the Go writer's runtimeConfigSchemaVersion
-// ABOUTME: must match the Python reader's RUNTIME_CONFIG_SCHEMA_VERSION.
+// ABOUTME: Cross-language fence: the Go writer's SchemaVersion must match the
+// ABOUTME: Python reader's RUNTIME_CONFIG_SCHEMA_VERSION.
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -16,10 +15,10 @@ import (
 
 // TestSchemaVersion_GoPythonAgreement asserts the runtime-config.json schema
 // version constant in setup_helpers.py and status-monitor.py matches the
-// Go-side runtimeConfigSchemaVersion. F25: with three independent definitions
-// (one Go const + two Python literals), bumping one and forgetting the
-// others is a runtime failure on freshly-created sandboxes. This test fires
-// at every `go test ./...` and surfaces the drift before merge.
+// Go-side SchemaVersion. F25: with three independent definitions (one Go
+// const + two Python literals), bumping one and forgetting the others is a
+// runtime failure on freshly-created sandboxes. This test fires at every
+// `go test ./...` and surfaces the drift before merge.
 //
 // We could collapse to a single source of truth via `go generate` writing
 // a Python file, but the Python files are small and the test is cheaper.
@@ -31,7 +30,7 @@ func TestSchemaVersion_GoPythonAgreement(t *testing.T) {
 	if !ok {
 		t.Fatal("runtime.Caller failed")
 	}
-	repoRoot := filepath.Dir(filepath.Dir(filepath.Dir(thisFile))) // sandbox -> internal -> repo
+	repoRoot := filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(thisFile)))) // runtimeconfig -> sandbox -> internal -> repo
 	monitorDir := filepath.Join(repoRoot, "internal", "runtime", "monitor")
 
 	cases := []struct {
@@ -63,31 +62,26 @@ func TestSchemaVersion_GoPythonAgreement(t *testing.T) {
 			if err != nil {
 				t.Fatalf("parse schema version from %s (%q): %v", tc.file, m[1], err)
 			}
-			if pyVal != runtimeConfigSchemaVersion {
-				t.Errorf("schema version drift: %s reads %d, Go runtimeConfigSchemaVersion is %d.\n"+
-					"Bump both together; see internal/sandbox/create.go:%d.",
-					tc.file, pyVal, runtimeConfigSchemaVersion, findConstLine(repoRoot))
+			if pyVal != SchemaVersion {
+				t.Errorf("schema version drift: %s reads %d, Go SchemaVersion is %d.\n"+
+					"Bump both together; see internal/sandbox/runtimeconfig/runtimeconfig.go:%d.",
+					tc.file, pyVal, SchemaVersion, findConstLine(repoRoot))
 			}
 		})
 	}
 }
 
-// findConstLine returns the file:line for runtimeConfigSchemaVersion's
-// declaration, for the failure message. Best-effort — returns 0 if the
-// const can't be located.
+// findConstLine returns the line number for SchemaVersion's declaration, for
+// the failure message. Best-effort — returns 0 if the const can't be located.
 func findConstLine(repoRoot string) int {
-	data, err := os.ReadFile(filepath.Join(repoRoot, "internal", "sandbox", "create.go")) //nolint:gosec // test asset
+	data, err := os.ReadFile(filepath.Join(repoRoot, "internal", "sandbox", "runtimeconfig", "runtimeconfig.go")) //nolint:gosec // test asset
 	if err != nil {
 		return 0
 	}
 	for i, line := range strings.Split(string(data), "\n") {
-		if strings.Contains(line, "runtimeConfigSchemaVersion =") {
+		if strings.Contains(line, "SchemaVersion =") {
 			return i + 1
 		}
 	}
 	return 0
 }
-
-// Touch a non-exported package symbol so the test file doesn't pull in
-// the whole package unnecessarily. (No-op assertion.)
-var _ = fmt.Sprintf("%d", runtimeConfigSchemaVersion)

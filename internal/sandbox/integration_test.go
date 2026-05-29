@@ -27,7 +27,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 
 	// Create sandbox (starts container)
 	sandboxName := "integ-test"
-	_, err := mgr.Create(ctx, sandbox.CreateOptions{
+	_, err := createSandbox(ctx, mgr, sandbox.CreateOptions{
 		Name:    sandboxName,
 		Workdir: sandbox.DirSpec{Path: projectDir},
 		Agent:   "test",
@@ -131,7 +131,7 @@ func TestIntegration_CreateNoStart(t *testing.T) {
 	mgr, ctx := integrationSetup(t)
 	projectDir := createProjectDir(t)
 
-	_, err := mgr.Create(ctx, sandbox.CreateOptions{
+	_, err := createSandbox(ctx, mgr, sandbox.CreateOptions{
 		Name:    "nostart",
 		Workdir: sandbox.DirSpec{Path: projectDir},
 		Agent:   "test",
@@ -165,7 +165,7 @@ func TestIntegration_CopyMode(t *testing.T) {
 	mgr, ctx := integrationSetup(t)
 	projectDir := createProjectDir(t)
 
-	_, err := mgr.Create(ctx, sandbox.CreateOptions{
+	_, err := createSandbox(ctx, mgr, sandbox.CreateOptions{
 		Name:    "copymode",
 		Workdir: sandbox.DirSpec{Path: projectDir, Mode: sandbox.DirModeCopy},
 		Agent:   "test",
@@ -198,7 +198,7 @@ func TestIntegration_RWMode(t *testing.T) {
 	mgr, ctx := integrationSetup(t)
 	projectDir := createProjectDir(t)
 
-	_, err := mgr.Create(ctx, sandbox.CreateOptions{
+	_, err := createSandbox(ctx, mgr, sandbox.CreateOptions{
 		Name:    "rwmode",
 		Workdir: sandbox.DirSpec{Path: projectDir, Mode: sandbox.DirModeRW},
 		Agent:   "test",
@@ -223,7 +223,7 @@ func TestIntegration_AuxDirCopy_RejectedByLibrary(t *testing.T) {
 	projectDir := createProjectDir(t)
 	auxDir := createAuxDir(t, "libs")
 
-	_, err := mgr.Create(ctx, sandbox.CreateOptions{
+	_, err := createSandbox(ctx, mgr, sandbox.CreateOptions{
 		Name:    "auxcopy-rejected",
 		Workdir: sandbox.DirSpec{Path: projectDir},
 		Agent:   "test",
@@ -247,7 +247,7 @@ func TestIntegration_AuxDirRW(t *testing.T) {
 	projectDir := createProjectDir(t)
 	auxDir := createAuxDir(t, "writable-lib")
 
-	_, err := mgr.Create(ctx, sandbox.CreateOptions{
+	_, err := createSandbox(ctx, mgr, sandbox.CreateOptions{
 		Name:    "auxrw",
 		Workdir: sandbox.DirSpec{Path: projectDir},
 		Agent:   "test",
@@ -269,7 +269,7 @@ func TestIntegration_AuxDirRO(t *testing.T) {
 	projectDir := createProjectDir(t)
 	auxDir := createAuxDir(t, "readonly-lib")
 
-	_, err := mgr.Create(ctx, sandbox.CreateOptions{
+	_, err := createSandbox(ctx, mgr, sandbox.CreateOptions{
 		Name:    "auxro",
 		Workdir: sandbox.DirSpec{Path: projectDir},
 		Agent:   "test",
@@ -291,7 +291,7 @@ func TestIntegration_Replace(t *testing.T) {
 	projectDir := createProjectDir(t)
 
 	// Create first sandbox
-	_, err := mgr.Create(ctx, sandbox.CreateOptions{
+	_, err := createSandbox(ctx, mgr, sandbox.CreateOptions{
 		Name:    "replaceme",
 		Workdir: sandbox.DirSpec{Path: projectDir},
 		Agent:   "test",
@@ -302,7 +302,7 @@ func TestIntegration_Replace(t *testing.T) {
 	t.Cleanup(func() { mgr.Destroy(ctx, "replaceme") }) //nolint:errcheck // test cleanup
 
 	// Replace with new sandbox
-	_, err = mgr.Create(ctx, sandbox.CreateOptions{
+	_, err = createSandbox(ctx, mgr, sandbox.CreateOptions{
 		Name:    "replaceme",
 		Workdir: sandbox.DirSpec{Path: projectDir},
 		Agent:   "test",
@@ -323,7 +323,7 @@ func TestIntegration_Reset(t *testing.T) {
 	projectDir := createProjectDir(t)
 
 	// Create and start the sandbox (Reset requires a restart cycle)
-	_, err := mgr.Create(ctx, sandbox.CreateOptions{
+	_, err := createSandbox(ctx, mgr, sandbox.CreateOptions{
 		Name:    "resettest",
 		Workdir: sandbox.DirSpec{Path: projectDir},
 		Agent:   "test",
@@ -366,7 +366,7 @@ func TestIntegration_Exec(t *testing.T) {
 	projectDir := createProjectDir(t)
 
 	// Create and start the sandbox
-	_, err := mgr.Create(ctx, sandbox.CreateOptions{
+	_, err := createSandbox(ctx, mgr, sandbox.CreateOptions{
 		Name:    "exectest",
 		Workdir: sandbox.DirSpec{Path: projectDir},
 		Agent:   "test",
@@ -389,7 +389,7 @@ func TestIntegration_DiffClean(t *testing.T) {
 	mgr, ctx := integrationSetup(t)
 	projectDir := createProjectDir(t)
 
-	_, err := mgr.Create(ctx, sandbox.CreateOptions{
+	_, err := createSandbox(ctx, mgr, sandbox.CreateOptions{
 		Name:    "diffclean",
 		Workdir: sandbox.DirSpec{Path: projectDir},
 		Agent:   "test",
@@ -408,7 +408,7 @@ func TestIntegration_DiffWithChanges(t *testing.T) {
 	mgr, ctx := integrationSetup(t)
 	projectDir := createProjectDir(t)
 
-	_, err := mgr.Create(ctx, sandbox.CreateOptions{
+	_, err := createSandbox(ctx, mgr, sandbox.CreateOptions{
 		Name:    "diffchanges",
 		Workdir: sandbox.DirSpec{Path: projectDir},
 		Agent:   "test",
@@ -438,7 +438,7 @@ func TestIntegration_ApplyPatch(t *testing.T) {
 	mgr, ctx := integrationSetup(t)
 	projectDir := createProjectDir(t)
 
-	_, err := mgr.Create(ctx, sandbox.CreateOptions{
+	_, err := createSandbox(ctx, mgr, sandbox.CreateOptions{
 		Name:    "applypatch",
 		Workdir: sandbox.DirSpec{Path: projectDir},
 		Agent:   "test",
@@ -484,7 +484,7 @@ func TestIntegration_Prompt(t *testing.T) {
 	mgr, ctx := integrationSetup(t)
 	projectDir := createProjectDir(t)
 
-	_, err := mgr.Create(ctx, sandbox.CreateOptions{
+	_, err := createSandbox(ctx, mgr, sandbox.CreateOptions{
 		Name:    "prompttest",
 		Workdir: sandbox.DirSpec{Path: projectDir},
 		Agent:   "test",
@@ -510,7 +510,7 @@ func TestIntegration_ResourceLimits(t *testing.T) {
 	mgr, ctx := integrationSetup(t)
 	projectDir := createProjectDir(t)
 
-	_, err := mgr.Create(ctx, sandbox.CreateOptions{
+	_, err := createSandbox(ctx, mgr, sandbox.CreateOptions{
 		Name:    "reslimits",
 		Workdir: sandbox.DirSpec{Path: projectDir},
 		Agent:   "test",
@@ -533,7 +533,7 @@ func TestIntegration_PortForwarding(t *testing.T) {
 	mgr, ctx := integrationSetup(t)
 	projectDir := createProjectDir(t)
 
-	_, err := mgr.Create(ctx, sandbox.CreateOptions{
+	_, err := createSandbox(ctx, mgr, sandbox.CreateOptions{
 		Name:    "portfwd",
 		Workdir: sandbox.DirSpec{Path: projectDir},
 		Agent:   "test",
@@ -554,7 +554,7 @@ func TestIntegration_MultiSandbox(t *testing.T) {
 	projectDir := createProjectDir(t)
 
 	for _, name := range []string{"multi-a", "multi-b"} {
-		_, err := mgr.Create(ctx, sandbox.CreateOptions{
+		_, err := createSandbox(ctx, mgr, sandbox.CreateOptions{
 			Name:    name,
 			Workdir: sandbox.DirSpec{Path: projectDir},
 			Agent:   "test",
@@ -588,7 +588,7 @@ func TestIntegration_DestroyCleanup(t *testing.T) {
 	mgr, ctx := integrationSetup(t)
 	projectDir := createProjectDir(t)
 
-	_, err := mgr.Create(ctx, sandbox.CreateOptions{
+	_, err := createSandbox(ctx, mgr, sandbox.CreateOptions{
 		Name:    "destroyme",
 		Workdir: sandbox.DirSpec{Path: projectDir},
 		Agent:   "test",
@@ -617,7 +617,7 @@ func TestIntegration_NetworkIsolation(t *testing.T) {
 	mgr, ctx := integrationSetup(t)
 	projectDir := createProjectDir(t)
 
-	_, err := mgr.Create(ctx, sandbox.CreateOptions{
+	_, err := createSandbox(ctx, mgr, sandbox.CreateOptions{
 		Name:    "netisolated",
 		Workdir: sandbox.DirSpec{Path: projectDir},
 		Agent:   "test",
@@ -669,7 +669,7 @@ func TestIntegration_ReadOnlyMountVerified(t *testing.T) {
 	projectDir := createProjectDir(t)
 	auxDir := createAuxDir(t, "readonly-verify")
 
-	_, err := mgr.Create(ctx, sandbox.CreateOptions{
+	_, err := createSandbox(ctx, mgr, sandbox.CreateOptions{
 		Name:    "romount",
 		Workdir: sandbox.DirSpec{Path: projectDir},
 		Agent:   "test",
@@ -710,7 +710,7 @@ func TestIntegration_CredentialInjection(t *testing.T) {
 	// abnormally terminated run elsewhere can leave a dir we didn't create.
 	secretsBefore := existingSecretsDirs(t)
 
-	meta, err := mgr.Create(ctx, sandbox.CreateOptions{
+	meta, err := createSandbox(ctx, mgr, sandbox.CreateOptions{
 		Name:    "credinject",
 		Workdir: sandbox.DirSpec{Path: projectDir},
 		Agent:   "test",
@@ -776,7 +776,7 @@ func TestIntegration_AgentStubWorkflow(t *testing.T) {
 	mgr, ctx := integrationSetup(t)
 	projectDir := createProjectDir(t)
 
-	_, err := mgr.Create(ctx, sandbox.CreateOptions{
+	_, err := createSandbox(ctx, mgr, sandbox.CreateOptions{
 		Name:    "stubworkflow",
 		Workdir: sandbox.DirSpec{Path: projectDir},
 		Agent:   "test",
@@ -826,7 +826,7 @@ func TestIntegration_Clone(t *testing.T) {
 	mgr, ctx := integrationSetup(t)
 	projectDir := createProjectDir(t)
 
-	_, err := mgr.Create(ctx, sandbox.CreateOptions{
+	_, err := createSandbox(ctx, mgr, sandbox.CreateOptions{
 		Name:    "clone-a",
 		Workdir: sandbox.DirSpec{Path: projectDir},
 		Agent:   "test",
@@ -869,7 +869,7 @@ func TestIntegration_Overlay(t *testing.T) {
 	// and matches the real-world smoke test fixture (no pre-existing git repo).
 	projectDir := testutil.GoProjectNoGit(t)
 
-	_, err := mgr.Create(ctx, sandbox.CreateOptions{
+	_, err := createSandbox(ctx, mgr, sandbox.CreateOptions{
 		Name:    "overlay-integ",
 		Workdir: sandbox.DirSpec{Path: projectDir, Mode: sandbox.DirModeOverlay},
 		Agent:   "test",

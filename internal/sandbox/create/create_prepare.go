@@ -1,6 +1,6 @@
 // ABOUTME: resolveProfileConfig chains profile configs, builds profile images,
 // ABOUTME: and merges all settings into a profileResult for sandbox creation.
-package sandbox
+package create
 
 import (
 	"context"
@@ -19,9 +19,13 @@ import (
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox/archetype"
 	mountspkg "github.com/kstenerud/yoloai/internal/sandbox/mounts"
+	"github.com/kstenerud/yoloai/internal/sandbox/profiles"
 	provision "github.com/kstenerud/yoloai/internal/sandbox/provision"
+	"github.com/kstenerud/yoloai/internal/sandbox/runtimeconfig"
+	"github.com/kstenerud/yoloai/internal/sandbox/state"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/internal/workspace"
+	"github.com/kstenerud/yoloai/internal/yoerrors"
 )
 
 // profileResult holds resolved profile configuration after chain resolution
@@ -47,7 +51,7 @@ type profileResult struct {
 
 // resolveProfileConfig resolves the profile chain, merges config, and builds
 // the profile image if needed. Returns a profileResult with all merged values.
-func (m *Engine) resolveProfileConfig(ctx context.Context, opts *CreateOptions, agentDef **agent.Definition, ycfg *config.YoloaiConfig, gcfg *config.GlobalConfig) (*profileResult, error) {
+func resolveProfileConfig(ctx context.Context, d state.Deps, opts *Options, agentDef **agent.Definition, ycfg *config.YoloaiConfig, gcfg *config.GlobalConfig) (*profileResult, error) {
 	pr := &profileResult{
 		env:                ycfg.Env,
 		agentArgs:          ycfg.AgentArgs,
@@ -65,28 +69,30 @@ func (m *Engine) resolveProfileConfig(ctx context.Context, opts *CreateOptions, 
 	if err := config.ValidateProfileName(opts.Profile); err != nil {
 		return nil, err
 	}
-	chain, err := config.ResolveProfileChain(m.layout, opts.Profile)
+	chain, err := config.ResolveProfileChain(d.Layout, opts.Profile)
 	if err != nil {
 		return nil, err
 	}
-	merged, err := config.MergeProfileChain(m.layout, ycfg, chain)
+	merged, err := config.MergeProfileChain(d.Layout, ycfg, chain)
 	if err != nil {
 		return nil, fmt.Errorf("merge profile chain: %w", err)
 	}
-	if err := config.ValidateProfileBackend(merged.Backend, string(m.backend)); err != nil {
+	backend := d.Runtime.Descriptor().Name
+	if err := config.ValidateProfileBackend(merged.Backend, string(backend)); err != nil {
 		return nil, err
 	}
 
-	homeDir := m.layout.HomeDir
-	if err := applyMergedProfileToOpts(opts, agentDef, merged, pr, ycfg.Agent, homeDir, m.layout.Env); err != nil {
+	homeDir := d.Layout.HomeDir
+	if err := applyMergedProfileToOpts(opts, agentDef, merged, pr, ycfg.Agent, homeDir, d.Layout.Env); err != nil {
 		return nil, err
 	}
 
 	pr.name = opts.Profile
-	pr.imageRef = config.ResolveProfileImage(m.layout, opts.Profile, chain)
+	pr.imageRef = config.ResolveProfileImage(d.Layout, opts.Profile, chain)
 
 	// Build profile image if needed (Docker only)
-	if err := EnsureProfileImage(ctx, m.runtime, m.layout, opts.Profile, AutoBuildSecrets(m.layout.HomeDir), m.outputFor(opts.Output), m.logger, false); err != nil {
+	logger := slog.Default()
+	if err := profiles.EnsureProfileImage(ctx, d.Runtime, d.Layout, opts.Profile, profiles.AutoBuildSecrets(d.Layout.HomeDir), outputFor(opts.Output), logger, false); err != nil {
 		return nil, fmt.Errorf("build profile image: %w", err)
 	}
 
@@ -98,13 +104,13 @@ func (m *Engine) resolveProfileConfig(ctx context.Context, opts *CreateOptions, 
 // env is the environment map for ${VAR} expansion; use layout.Env.
 // baseAgent is the agent name from the base config (ycfg.Agent), used to
 // detect whether the CLI override has been applied.
-func applyMergedProfileToOpts(opts *CreateOptions, agentDef **agent.Definition, merged *config.MergedConfig, pr *profileResult, baseAgent string, homeDir string, env map[string]string) error {
+func applyMergedProfileToOpts(opts *Options, agentDef **agent.Definition, merged *config.MergedConfig, pr *profileResult, baseAgent string, homeDir string, env map[string]string) error {
 	// Apply merged values where CLI didn't override
 	if opts.Agent == baseAgent && merged.Agent != "" {
 		opts.Agent = merged.Agent
 		def := agent.GetAgent(opts.Agent)
 		if def == nil {
-			return NewUsageError("unknown agent from profile: %s", opts.Agent)
+			return yoerrors.NewUsageError("unknown agent from profile: %s", opts.Agent)
 		}
 		*agentDef = def
 	}
@@ -123,7 +129,7 @@ func applyMergedProfileToOpts(opts *CreateOptions, agentDef **agent.Definition, 
 
 	// Profile workdir: use if CLI didn't provide one
 	if opts.Workdir.Path == "" && merged.Workdir != nil {
-		wdPath, err := ExpandPath(merged.Workdir.Path, homeDir, env)
+		wdPath, err := config.ExpandPath(merged.Workdir.Path, homeDir, env)
 		if err != nil {
 			return fmt.Errorf("expand profile workdir path: %w", err)
 		}
@@ -163,10 +169,10 @@ func applyMergedProfileToOpts(opts *CreateOptions, agentDef **agent.Definition, 
 // prependProfileDirs prepends profile directory specs before the CLI aux dirs.
 // homeDir is used for ~ expansion in profile directory paths.
 // env is the environment map for ${VAR} expansion; use layout.Env.
-func prependProfileDirs(opts *CreateOptions, profileDirs []config.ProfileDir, homeDir string, env map[string]string) error {
+func prependProfileDirs(opts *Options, profileDirs []config.ProfileDir, homeDir string, env map[string]string) error {
 	var dirs []DirSpec
 	for _, pd := range profileDirs {
-		dirPath, err := ExpandPath(pd.Path, homeDir, env)
+		dirPath, err := config.ExpandPath(pd.Path, homeDir, env)
 		if err != nil {
 			return fmt.Errorf("expand profile directory path: %w", err)
 		}
@@ -182,7 +188,7 @@ func prependProfileDirs(opts *CreateOptions, profileDirs []config.ProfileDir, ho
 
 // applyConfigDefaults fills in values from base config when the profile didn't
 // set them, and applies CLI overrides for resources.
-func applyConfigDefaults(opts *CreateOptions, ycfg *config.YoloaiConfig, pr *profileResult) error {
+func applyConfigDefaults(opts *Options, ycfg *config.YoloaiConfig, pr *profileResult) error {
 	if opts.Profile == "" {
 		applyBaseConfigDefaults(opts, ycfg, pr)
 	}
@@ -192,7 +198,7 @@ func applyConfigDefaults(opts *CreateOptions, ycfg *config.YoloaiConfig, pr *pro
 
 // applyBaseConfigDefaults applies mounts, ports, caps, and network from base
 // config when no profile is active.
-func applyBaseConfigDefaults(opts *CreateOptions, ycfg *config.YoloaiConfig, pr *profileResult) {
+func applyBaseConfigDefaults(opts *Options, ycfg *config.YoloaiConfig, pr *profileResult) {
 	if len(ycfg.Mounts) > 0 {
 		pr.mounts = ycfg.Mounts
 	}
@@ -222,7 +228,7 @@ func applyBaseResourceDefaults(ycfg *config.YoloaiConfig, pr *profileResult) {
 }
 
 // applyCLIOverrides applies CLI flag overrides for resources, isolation, and env.
-func applyCLIOverrides(opts *CreateOptions, pr *profileResult) error {
+func applyCLIOverrides(opts *Options, pr *profileResult) error {
 	if opts.CPUs != "" {
 		if pr.resources == nil {
 			pr.resources = &config.ResourceLimits{}
@@ -258,10 +264,10 @@ func applyCLIOverrides(opts *CreateOptions, pr *profileResult) error {
 // overlap detection, and dirty repo warnings. Returns nil workdir if the user cancelled.
 // cfgModel is the model from config.yaml (needed for local model server check).
 // credOverrides contains sudo-recovered credential defaults for keys absent from os.Environ.
-func (m *Engine) parseAndValidateDirs(opts CreateOptions, agentDef *agent.Definition, mergedEnv map[string]string, cfgModel string, credOverrides map[string]string) (*DirSpec, []*DirSpec, error) {
+func parseAndValidateDirs(d state.Deps, opts Options, agentDef *agent.Definition, mergedEnv map[string]string, cfgModel string, credOverrides map[string]string) (*DirSpec, []*DirSpec, error) {
 	// Convert workdir DirSpec to DirSpec
 	if opts.Workdir.Path == "" {
-		return nil, nil, NewUsageError("no workdir specified and no default workdir in profile")
+		return nil, nil, yoerrors.NewUsageError("no workdir specified and no default workdir in profile")
 	}
 	wd := opts.Workdir
 	workdir := &wd
@@ -270,10 +276,10 @@ func (m *Engine) parseAndValidateDirs(opts CreateOptions, agentDef *agent.Defini
 	}
 
 	if _, err := os.Stat(workdir.Path); err != nil {
-		return nil, nil, NewUsageError("workdir does not exist: %s", workdir.Path)
+		return nil, nil, yoerrors.NewUsageError("workdir does not exist: %s", workdir.Path)
 	}
 
-	if err := m.checkAuthAndLocalhostWarnings(agentDef, mergedEnv, cfgModel, opts, credOverrides); err != nil {
+	if err := checkAuthAndLocalhostWarnings(d, agentDef, mergedEnv, cfgModel, opts, credOverrides); err != nil {
 		return nil, nil, err
 	}
 
@@ -282,7 +288,7 @@ func (m *Engine) parseAndValidateDirs(opts CreateOptions, agentDef *agent.Defini
 		return nil, nil, err
 	}
 
-	if err := checkDirSafety(workdir, auxDirs, m.outputFor(opts.Output), m.layout.HomeDir); err != nil {
+	if err := checkDirSafety(workdir, auxDirs, outputFor(opts.Output), d.Layout.HomeDir); err != nil {
 		return nil, nil, err
 	}
 
@@ -298,20 +304,20 @@ func (m *Engine) parseAndValidateDirs(opts CreateOptions, agentDef *agent.Defini
 }
 
 // checkAuthAndLocalhostWarnings performs auth checks and localhost URL warnings.
-func (m *Engine) checkAuthAndLocalhostWarnings(agentDef *agent.Definition, mergedEnv map[string]string, cfgModel string, opts CreateOptions, credOverrides map[string]string) error {
+func checkAuthAndLocalhostWarnings(d state.Deps, agentDef *agent.Definition, mergedEnv map[string]string, cfgModel string, opts Options, credOverrides map[string]string) error {
 	hasAPIKey := provision.HasAnyAPIKey(agentDef, credOverrides)
-	hasAuth := provision.HasAnyAuthFile(agentDef, m.layout.HomeDir)
+	hasAuth := provision.HasAnyAuthFile(agentDef, d.Layout.HomeDir)
 	hasAuthHint := provision.HasAnyAuthHint(agentDef, mergedEnv, credOverrides)
-	if err := checkAgentAuth(agentDef, hasAPIKey, hasAuth, hasAuthHint, m.outputFor(opts.Output)); err != nil {
+	if err := checkAgentAuth(agentDef, hasAPIKey, hasAuth, hasAuthHint, outputFor(opts.Output)); err != nil {
 		return err
 	}
 
 	// Local model server requires a model
 	if !hasAPIKey && !hasAuth && hasAuthHint && opts.Model == "" && cfgModel == "" {
-		return NewUsageError("a model is required when using a local model server: use --model or 'yoloai config set model <model>'")
+		return yoerrors.NewUsageError("a model is required when using a local model server: use --model or 'yoloai config set model <model>'")
 	}
 
-	return m.checkLocalhostURLs(agentDef, mergedEnv)
+	return checkLocalhostURLs(d, agentDef, mergedEnv)
 }
 
 // checkAgentAuth verifies that the agent has the necessary authentication configured.
@@ -331,13 +337,13 @@ func checkAgentAuth(agentDef *agent.Definition, hasAPIKey, hasAuth, hasAuthHint 
 	if len(agentDef.AuthHintEnvVars) > 0 {
 		msg += fmt.Sprintf(", or set %s for local models", strings.Join(agentDef.AuthHintEnvVars, "/"))
 	}
-	return NewAuthError("%s: %w", msg, ErrMissingAPIKey)
+	return yoerrors.NewAuthError("%s: %w", msg, ErrMissingAPIKey)
 }
 
 // checkLocalhostURLs warns if auth hint env vars contain localhost addresses
 // that won't work inside a container/VM sandbox.
-func (m *Engine) checkLocalhostURLs(agentDef *agent.Definition, mergedEnv map[string]string) error {
-	desc := m.runtime.Descriptor()
+func checkLocalhostURLs(d state.Deps, agentDef *agent.Definition, mergedEnv map[string]string) error {
+	desc := d.Runtime.Descriptor()
 	if !desc.AgentProvisionedByBackend {
 		return nil
 	}
@@ -350,7 +356,7 @@ func (m *Engine) checkLocalhostURLs(agentDef *agent.Definition, mergedEnv map[st
 			if desc.HostFromContainer != "" {
 				hint = "use " + desc.HostFromContainer + " instead"
 			}
-			return NewUsageError("%s contains a localhost address (%s) which won't work inside a %s sandbox — %s",
+			return yoerrors.NewUsageError("%s contains a localhost address (%s) which won't work inside a %s sandbox — %s",
 				key, val, desc.Name, hint)
 		}
 	}
@@ -370,13 +376,13 @@ func buildAuxDirs(auxSpecs []DirSpec) ([]*DirSpec, error) {
 		auxDir := &auxSpec
 		switch auxDir.Mode {
 		case DirModeCopy:
-			return nil, NewUsageError(
+			return nil, yoerrors.NewUsageError(
 				"aux directories cannot use :copy (diff/apply is workdir-only).\n"+
 					"  - to track changes, make %q the workdir instead\n"+
 					"  - to edit it live, use :rw\n"+
 					"  - for an isolated copy, run a separate sandbox", auxDir.Path)
 		case DirModeOverlay:
-			return nil, NewUsageError(
+			return nil, yoerrors.NewUsageError(
 				"aux directories cannot use :overlay (diff/apply is workdir-only).\n"+
 					"  - to track changes, make %q the workdir instead\n"+
 					"  - to edit it live, use :rw\n"+
@@ -385,7 +391,7 @@ func buildAuxDirs(auxSpecs []DirSpec) ([]*DirSpec, error) {
 			// rw / ro / unset all permitted on aux dirs.
 		}
 		if _, err := os.Stat(auxDir.Path); err != nil {
-			return nil, NewUsageError("directory does not exist: %s", auxDir.Path)
+			return nil, yoerrors.NewUsageError("directory does not exist: %s", auxDir.Path)
 		}
 		auxDirs = append(auxDirs, auxDir)
 	}
@@ -399,7 +405,7 @@ func checkDirSafety(workdir *DirSpec, auxDirs []*DirSpec, output io.Writer, home
 		if workdir.AllowDangerousPath {
 			fmt.Fprintf(output, "WARNING: mounting dangerous directory %s\n", workdir.Path) //nolint:errcheck // best-effort output
 		} else {
-			return NewUsageError("refusing to mount dangerous directory %s (use :force to override)", workdir.Path)
+			return yoerrors.NewUsageError("refusing to mount dangerous directory %s (use :force to override)", workdir.Path)
 		}
 	}
 	for _, ad := range auxDirs {
@@ -407,7 +413,7 @@ func checkDirSafety(workdir *DirSpec, auxDirs []*DirSpec, output io.Writer, home
 			if ad.AllowDangerousPath {
 				fmt.Fprintf(output, "WARNING: mounting dangerous directory %s\n", ad.Path) //nolint:errcheck // best-effort output
 			} else {
-				return NewUsageError("refusing to mount dangerous directory %s (use :force to override)", ad.Path)
+				return yoerrors.NewUsageError("refusing to mount dangerous directory %s (use :force to override)", ad.Path)
 			}
 		}
 	}
@@ -421,14 +427,14 @@ func checkDirOverlaps(workdir *DirSpec, auxDirs []*DirSpec) error {
 		allPaths = append(allPaths, ad.Path)
 	}
 	if err := workspace.CheckPathOverlap(allPaths); err != nil {
-		return NewUsageError("%s", err)
+		return yoerrors.NewUsageError("%s", err)
 	}
 
 	mountPaths := map[string]string{workdir.ResolvedMountPath(): workdir.Path}
 	for _, ad := range auxDirs {
 		mp := ad.ResolvedMountPath()
 		if prev, exists := mountPaths[mp]; exists {
-			return NewUsageError("duplicate container mount path %s (from %s and %s)", mp, prev, ad.Path)
+			return yoerrors.NewUsageError("duplicate container mount path %s (from %s and %s)", mp, prev, ad.Path)
 		}
 		mountPaths[mp] = ad.Path
 	}
@@ -441,7 +447,7 @@ func checkDirOverlaps(workdir *DirSpec, auxDirs []*DirSpec) error {
 // *DirtyWorkdirError the caller must consciously override. The CLI catches it,
 // prompts, and retries with AllowDirty set.
 func checkDirtyRepos(workdir *DirSpec, auxDirs []*DirSpec) error {
-	var dirty []DirtyDir
+	var dirty []yoerrors.DirtyDir
 	check := func(d *DirSpec) error {
 		if d.AllowDirty {
 			return nil
@@ -451,7 +457,7 @@ func checkDirtyRepos(workdir *DirSpec, auxDirs []*DirSpec) error {
 			return fmt.Errorf("check repo status: %w", err)
 		}
 		if msg != "" {
-			dirty = append(dirty, DirtyDir{Path: d.Path, Status: msg})
+			dirty = append(dirty, yoerrors.DirtyDir{Path: d.Path, Status: msg})
 		}
 		return nil
 	}
@@ -466,7 +472,7 @@ func checkDirtyRepos(workdir *DirSpec, auxDirs []*DirSpec) error {
 		}
 	}
 	if len(dirty) > 0 {
-		return &DirtyWorkdirError{Dirs: dirty}
+		return &yoerrors.DirtyWorkdirError{Dirs: dirty}
 	}
 	return nil
 }
@@ -617,7 +623,7 @@ func setupAuxDir(_ string, ad *DirSpec) (store.DirMeta, error) {
 
 // buildNetworkConfig determines the network mode and allowlist from options
 // and agent definition.
-func buildNetworkConfig(opts CreateOptions, agentDef *agent.Definition) (string, []string) {
+func buildNetworkConfig(opts Options, agentDef *agent.Definition) (string, []string) {
 	switch opts.Network {
 	case NetworkModeNone:
 		return "none", nil
@@ -640,12 +646,12 @@ func buildNetworkConfig(opts CreateOptions, agentDef *agent.Definition) (string,
 // The auxDirs parameter is intentionally still threaded through but
 // unused; removing it would churn every call site, and the field is
 // expected to disappear during the Workdir-only API cascade.
-func collectOverlayMounts(workdir *DirSpec, _ []*DirSpec) []overlayMountConfig {
+func collectOverlayMounts(workdir *DirSpec, _ []*DirSpec) []runtimeconfig.OverlayMountConfig {
 	if workdir.Mode != "overlay" {
 		return nil
 	}
 	encoded := store.EncodePath(workdir.Path)
-	return []overlayMountConfig{{
+	return []runtimeconfig.OverlayMountConfig{{
 		Lower:  "/yoloai/overlay/" + encoded + "/lower",
 		Upper:  "/yoloai/overlay/" + encoded + "/upper",
 		Work:   "/yoloai/overlay/" + encoded + "/ovlwork",
@@ -670,11 +676,11 @@ func collectCopyDirs(workdir *DirSpec, _ []*DirSpec) []string {
 // requires: prompts, expands archetype effects on opts and pr, and prints transparency output.
 //
 // Returns: (resolved archetype, devcontainer config, safe devcontainer mounts, mount warnings, error).
-func (m *Engine) resolveAndApplyArchetype(ctx context.Context, opts *CreateOptions, pr *profileResult) (archetype.Archetype, *archetype.DevcontainerConfig, []string, []string, error) {
+func resolveAndApplyArchetype(ctx context.Context, d state.Deps, opts *Options, pr *profileResult) (archetype.Archetype, *archetype.DevcontainerConfig, []string, []string, error) {
 	workdir := opts.Workdir.Path
 
 	// Step 1: Load .yoloai.yaml
-	yamlCfg, _, yamlErr := archetype.LoadYoloAIYaml(workdir, m.layout.HomeDir, m.layout.Env)
+	yamlCfg, _, yamlErr := archetype.LoadYoloAIYaml(workdir, d.Layout.HomeDir, d.Layout.Env)
 	if yamlErr != nil {
 		return "", nil, nil, nil, fmt.Errorf("load .yoloai.yaml: %w", yamlErr)
 	}
@@ -685,27 +691,27 @@ func (m *Engine) resolveAndApplyArchetype(ctx context.Context, opts *CreateOptio
 	}
 
 	// Step 2: Platform check for apple archetype
-	if err := checkAppleArchetype(m.outputFor(opts.Output), arch, opts.Archetype); err != nil {
+	if err := checkAppleArchetype(outputFor(opts.Output), arch, opts.Archetype); err != nil {
 		return "", nil, nil, nil, err
 	}
 
 	// Step 3: requires: validation (warning only — version verification unimplemented)
-	checkRequires(m.outputFor(opts.Output), yamlCfg)
+	checkRequires(outputFor(opts.Output), yamlCfg)
 
 	// Step 4: Archetype expansion
-	devcontainerCfg, dcMounts, dcMountWarnings, bullets, err := m.expandArchetype(ctx, opts, pr, arch, yamlCfg)
+	devcontainerCfg, dcMounts, dcMountWarnings, bullets, err := expandArchetype(ctx, d, opts, pr, arch, yamlCfg)
 	if err != nil {
 		return "", nil, nil, nil, err
 	}
 
 	// Step 5: Transparency output
-	printArchetypeOutput(m.outputFor(opts.Output), arch, source, signals, bullets)
+	printArchetypeOutput(outputFor(opts.Output), arch, source, signals, bullets)
 
 	return arch, devcontainerCfg, dcMounts, dcMountWarnings, nil
 }
 
 // resolveArchetype determines the archetype from CLI, .yoloai.yaml, or auto-detection.
-func resolveArchetype(opts *CreateOptions, yamlCfg *archetype.YoloAIProjectConfig, workdir string) (archetype.Archetype, []string, string, error) {
+func resolveArchetype(opts *Options, yamlCfg *archetype.YoloAIProjectConfig, workdir string) (archetype.Archetype, []string, string, error) {
 	switch {
 	case opts.Archetype != "":
 		a, err := archetype.ParseArchetype(opts.Archetype)
@@ -761,7 +767,7 @@ func checkRequires(output io.Writer, yamlCfg *archetype.YoloAIProjectConfig) {
 
 // expandArchetype applies archetype-specific settings to opts and pr.
 // Returns (devcontainerCfg, dcMounts, dcMountWarnings, bullets, error).
-func (m *Engine) expandArchetype(ctx context.Context, opts *CreateOptions, pr *profileResult, arch archetype.Archetype, yamlCfg *archetype.YoloAIProjectConfig) (*archetype.DevcontainerConfig, []string, []string, []string, error) {
+func expandArchetype(ctx context.Context, d state.Deps, opts *Options, pr *profileResult, arch archetype.Archetype, yamlCfg *archetype.YoloAIProjectConfig) (*archetype.DevcontainerConfig, []string, []string, []string, error) {
 	var bullets []string
 	var devcontainerCfg *archetype.DevcontainerConfig
 	var dcMounts []string
@@ -772,7 +778,7 @@ func (m *Engine) expandArchetype(ctx context.Context, opts *CreateOptions, pr *p
 		bullets = applyComposeArchetype(opts, pr)
 	case archetype.ArchetypeDevcontainer:
 		var err error
-		devcontainerCfg, dcMounts, dcMountWarnings, bullets, err = m.applyDevcontainerArchetype(ctx, opts, pr)
+		devcontainerCfg, dcMounts, dcMountWarnings, bullets, err = applyDevcontainerArchetype(ctx, d, opts, pr)
 		if err != nil {
 			return nil, nil, nil, nil, err
 		}
@@ -787,7 +793,7 @@ func (m *Engine) expandArchetype(ctx context.Context, opts *CreateOptions, pr *p
 }
 
 // applyComposeArchetype applies compose-specific settings to opts and pr.
-func applyComposeArchetype(opts *CreateOptions, pr *profileResult) []string {
+func applyComposeArchetype(opts *Options, pr *profileResult) []string {
 	var bullets []string
 	if opts.Isolation == "" || opts.Isolation == runtime.IsolationModeContainer {
 		opts.Isolation = runtime.IsolationModeContainerPrivileged
@@ -800,7 +806,7 @@ func applyComposeArchetype(opts *CreateOptions, pr *profileResult) []string {
 }
 
 // applyDevcontainerArchetype loads and applies devcontainer.json settings.
-func (m *Engine) applyDevcontainerArchetype(ctx context.Context, opts *CreateOptions, pr *profileResult) (*archetype.DevcontainerConfig, []string, []string, []string, error) {
+func applyDevcontainerArchetype(ctx context.Context, d state.Deps, opts *Options, pr *profileResult) (*archetype.DevcontainerConfig, []string, []string, []string, error) {
 	_ = ctx // reserved for future use
 	workdir := opts.Workdir.Path
 	var bullets []string
@@ -821,9 +827,9 @@ func (m *Engine) applyDevcontainerArchetype(ctx context.Context, opts *CreateOpt
 				"use a project with devcontainer.json and docker-compose.yaml side by side instead")
 	}
 
-	dc.WarnIgnoredFields(m.outputFor(opts.Output))
+	dc.WarnIgnoredFields(outputFor(opts.Output))
 
-	bullets = applyDevcontainerRunArgs(dc, pr, bullets, m.outputFor(opts.Output))
+	bullets = applyDevcontainerRunArgs(dc, pr, bullets, outputFor(opts.Output))
 	bullets = applyDevcontainerCompose(dc, opts, pr, bullets)
 	bullets = applyDevcontainerEnv(dc, pr, bullets)
 	bullets = applyDevcontainerPorts(dc, opts, bullets)
@@ -833,7 +839,7 @@ func (m *Engine) applyDevcontainerArchetype(ctx context.Context, opts *CreateOpt
 	if workdirMountPath == "" {
 		workdirMountPath = opts.Workdir.Path
 	}
-	dcMounts, dcMountWarnings := dc.FilterMounts(workdirMountPath, m.layout.HomeDir)
+	dcMounts, dcMountWarnings := dc.FilterMounts(workdirMountPath, d.Layout.HomeDir)
 	if len(dcMounts) > 0 {
 		bullets = append(bullets, fmt.Sprintf("%d devcontainer mounts passed through", len(dcMounts)))
 	}
@@ -881,7 +887,7 @@ func applyDevcontainerRunArgs(dc *archetype.DevcontainerConfig, pr *profileResul
 }
 
 // applyDevcontainerCompose checks postStartCommand for compose usage and sets isolation.
-func applyDevcontainerCompose(dc *archetype.DevcontainerConfig, opts *CreateOptions, pr *profileResult, bullets []string) []string {
+func applyDevcontainerCompose(dc *archetype.DevcontainerConfig, opts *Options, pr *profileResult, bullets []string) []string {
 	if !dc.PostStartCommandUsesCompose() {
 		return bullets
 	}
@@ -913,7 +919,7 @@ func applyDevcontainerEnv(dc *archetype.DevcontainerConfig, pr *profileResult, b
 }
 
 // applyDevcontainerPorts merges port forwards from devcontainer.json.
-func applyDevcontainerPorts(dc *archetype.DevcontainerConfig, opts *CreateOptions, bullets []string) []string {
+func applyDevcontainerPorts(dc *archetype.DevcontainerConfig, opts *Options, bullets []string) []string {
 	ports := dc.ExtractPorts()
 	if len(ports) == 0 {
 		return bullets
@@ -932,7 +938,7 @@ func applyDevcontainerPorts(dc *archetype.DevcontainerConfig, opts *CreateOption
 }
 
 // applyDevcontainerWorkspaceFolder applies workspaceFolder to the workdir mount path.
-func applyDevcontainerWorkspaceFolder(dc *archetype.DevcontainerConfig, opts *CreateOptions, bullets []string) []string {
+func applyDevcontainerWorkspaceFolder(dc *archetype.DevcontainerConfig, opts *Options, bullets []string) []string {
 	if dc.WorkspaceFolder == "" {
 		return bullets
 	}

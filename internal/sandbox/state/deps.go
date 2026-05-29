@@ -4,15 +4,20 @@
 package state
 
 import (
+	"io"
+
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime"
 )
 
-// Deps holds the runtime backend and path layout shared by the sandbox
-// launch free functions. It is constructed by the Engine (and other callers)
-// and passed by value. New fields may be added as later carve phases dissolve
-// more Engine methods.
+// Deps holds the runtime backend, path layout, and interactive input reader
+// shared by the sandbox launch and create free functions. It is constructed by
+// the Engine (and other callers) and passed by value. Input carries the
+// interactive input reader used by create (prompt reading via invocation.ReadPrompt)
+// and lifecycle (start prompt). New fields may be added as later carve phases
+// dissolve more Engine methods.
 type Deps struct {
 	Runtime runtime.Runtime
 	Layout  config.Layout
+	Input   io.Reader
 }

@@ -1,39 +1,66 @@
-package sandbox
+// ABOUTME: Tests for the create_prepare pipeline: network config, copy/overlay
+// ABOUTME: mount collection, mount validation, config defaults, and workdir setup.
+package create
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime"
+	"github.com/kstenerud/yoloai/internal/sandbox/provision"
+	"github.com/kstenerud/yoloai/internal/sandbox/state"
+	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/internal/testutil"
+	"github.com/kstenerud/yoloai/internal/yoerrors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// storeMeta writes a minimal valid meta.json into sandboxDir for name.
+func storeMeta(sandboxDir, name string) error {
+	return store.SaveMeta(sandboxDir, &store.Meta{
+		Name:  name,
+		Agent: "test",
+	})
+}
+
+// git test helpers (thin wrappers over testutil so test code stays readable)
+func initGitRepo(t *testing.T, dir string)    { t.Helper(); testutil.InitGitRepo(t, dir) }
+func gitAdd(t *testing.T, dir, path string)   { t.Helper(); testutil.GitAdd(t, dir, path) }
+func gitCommit(t *testing.T, dir, msg string) { t.Helper(); testutil.GitCommit(t, dir, msg) }
+func writeTestFile(t *testing.T, dir, name, content string) {
+	t.Helper()
+	testutil.WriteFile(t, dir, name, content)
+}
 
 // --- buildNetworkConfig ---
 
 func TestBuildNetworkConfig_Default(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
-	mode, allow := buildNetworkConfig(CreateOptions{}, agentDef)
+	mode, allow := buildNetworkConfig(Options{}, agentDef)
 	assert.Equal(t, "", mode)
 	assert.Nil(t, allow)
 }
 
 func TestBuildNetworkConfig_None(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
-	mode, allow := buildNetworkConfig(CreateOptions{Network: NetworkModeNone}, agentDef)
+	mode, allow := buildNetworkConfig(Options{Network: NetworkModeNone}, agentDef)
 	assert.Equal(t, "none", mode)
 	assert.Nil(t, allow)
 }
 
 func TestBuildNetworkConfig_Isolated(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
-	mode, allow := buildNetworkConfig(CreateOptions{Network: NetworkModeIsolated}, agentDef)
+	mode, allow := buildNetworkConfig(Options{Network: NetworkModeIsolated}, agentDef)
 	assert.Equal(t, "isolated", mode)
 	// Should include agent's allowlist
 	assert.NotEmpty(t, allow)
@@ -42,7 +69,7 @@ func TestBuildNetworkConfig_Isolated(t *testing.T) {
 
 func TestBuildNetworkConfig_IsolatedWithUserAllow(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
-	opts := CreateOptions{
+	opts := Options{
 		Network:      NetworkModeIsolated,
 		NetworkAllow: []string{"example.com"},
 	}
@@ -55,7 +82,7 @@ func TestBuildNetworkConfig_IsolatedWithUserAllow(t *testing.T) {
 
 func TestBuildNetworkConfig_NoneTakesPriority(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
-	opts := CreateOptions{
+	opts := Options{
 		Network:      NetworkModeNone,
 		NetworkAllow: []string{"example.com"},
 	}
@@ -196,7 +223,7 @@ func TestValidateAndExpandMounts_Empty(t *testing.T) {
 // --- applyConfigDefaults ---
 
 func TestApplyConfigDefaults_ResourcesFromConfig(t *testing.T) {
-	opts := &CreateOptions{}
+	opts := &Options{}
 	ycfg := &config.YoloaiConfig{
 		Resources: &config.ResourceLimits{CPUs: "4", Memory: "8g"},
 	}
@@ -209,7 +236,7 @@ func TestApplyConfigDefaults_ResourcesFromConfig(t *testing.T) {
 }
 
 func TestApplyConfigDefaults_ProfileResourcesTakePriority(t *testing.T) {
-	opts := &CreateOptions{}
+	opts := &Options{}
 	ycfg := &config.YoloaiConfig{
 		Resources: &config.ResourceLimits{CPUs: "4", Memory: "8g"},
 	}
@@ -224,7 +251,7 @@ func TestApplyConfigDefaults_ProfileResourcesTakePriority(t *testing.T) {
 }
 
 func TestApplyConfigDefaults_CLIOverridesResources(t *testing.T) {
-	opts := &CreateOptions{CPUs: "8", Memory: "16g"}
+	opts := &Options{CPUs: "8", Memory: "16g"}
 	ycfg := &config.YoloaiConfig{
 		Resources: &config.ResourceLimits{CPUs: "4", Memory: "8g"},
 	}
@@ -237,7 +264,7 @@ func TestApplyConfigDefaults_CLIOverridesResources(t *testing.T) {
 }
 
 func TestApplyConfigDefaults_CLIOverridesProfileResources(t *testing.T) {
-	opts := &CreateOptions{CPUs: "8"}
+	opts := &Options{CPUs: "8"}
 	ycfg := &config.YoloaiConfig{}
 	pr := &profileResult{
 		resources: &config.ResourceLimits{CPUs: "2", Memory: "4g"},
@@ -249,7 +276,7 @@ func TestApplyConfigDefaults_CLIOverridesProfileResources(t *testing.T) {
 }
 
 func TestApplyConfigDefaults_MountsFromConfigWhenNoProfile(t *testing.T) {
-	opts := &CreateOptions{} // no profile
+	opts := &Options{} // no profile
 	ycfg := &config.YoloaiConfig{
 		Mounts: []string{"/a:/b"},
 	}
@@ -260,7 +287,7 @@ func TestApplyConfigDefaults_MountsFromConfigWhenNoProfile(t *testing.T) {
 }
 
 func TestApplyConfigDefaults_MountsSkippedWithProfile(t *testing.T) {
-	opts := &CreateOptions{Profile: "dev"}
+	opts := &Options{Profile: "dev"}
 	ycfg := &config.YoloaiConfig{
 		Mounts: []string{"/a:/b"},
 	}
@@ -272,7 +299,7 @@ func TestApplyConfigDefaults_MountsSkippedWithProfile(t *testing.T) {
 }
 
 func TestApplyConfigDefaults_PortsFromConfigWhenNoProfile(t *testing.T) {
-	opts := &CreateOptions{Ports: []string{"9090:9090"}}
+	opts := &Options{Ports: []string{"9090:9090"}}
 	ycfg := &config.YoloaiConfig{
 		Ports: []string{"8080:8080"},
 	}
@@ -284,7 +311,7 @@ func TestApplyConfigDefaults_PortsFromConfigWhenNoProfile(t *testing.T) {
 }
 
 func TestApplyConfigDefaults_NetworkFromConfigWhenNoProfile(t *testing.T) {
-	opts := &CreateOptions{}
+	opts := &Options{}
 	ycfg := &config.YoloaiConfig{
 		Network: &config.NetworkConfig{
 			Isolated: true,
@@ -299,7 +326,7 @@ func TestApplyConfigDefaults_NetworkFromConfigWhenNoProfile(t *testing.T) {
 }
 
 func TestApplyConfigDefaults_NetworkSkippedWhenCLIOverrides(t *testing.T) {
-	opts := &CreateOptions{Network: NetworkModeNone}
+	opts := &Options{Network: NetworkModeNone}
 	ycfg := &config.YoloaiConfig{
 		Network: &config.NetworkConfig{
 			Isolated: true,
@@ -315,7 +342,7 @@ func TestApplyConfigDefaults_NetworkSkippedWhenCLIOverrides(t *testing.T) {
 }
 
 func TestApplyConfigDefaults_RecipesFromConfigWhenNoProfile(t *testing.T) {
-	opts := &CreateOptions{}
+	opts := &Options{}
 	ycfg := &config.YoloaiConfig{
 		CapAdd:  []string{"SYS_ADMIN"},
 		Devices: []string{"/dev/fuse"},
@@ -397,7 +424,7 @@ func TestSetupWorkdir_DefersBaselineForWorkDirSetupBackends(t *testing.T) {
 	}
 
 	tempDir := t.TempDir()
-	sandboxDir := filepath.Join(tempDir, "test-sandbox") // setupWorkdir's first arg is sandboxDir post Q-W.4b
+	sandboxDir := filepath.Join(tempDir, "test-sandbox")
 	sourceDir := filepath.Join(tempDir, "source")
 	require.NoError(t, os.MkdirAll(sourceDir, 0755))                                             //nolint:gosec // G301: test directory
 	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, "file.txt"), []byte("test"), 0644)) //nolint:gosec // G306: test file
@@ -423,7 +450,7 @@ func TestSetupWorkdir_CreatesBaselineForDockerBackends(t *testing.T) {
 	}
 
 	tempDir := t.TempDir()
-	sandboxDir := filepath.Join(tempDir, "test-sandbox") // setupWorkdir's first arg is sandboxDir post Q-W.4b
+	sandboxDir := filepath.Join(tempDir, "test-sandbox")
 	sourceDir := filepath.Join(tempDir, "source")
 	require.NoError(t, os.MkdirAll(sourceDir, 0755))                                             //nolint:gosec // G301: test directory
 	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, "file.txt"), []byte("test"), 0644)) //nolint:gosec // G306: test file
@@ -450,7 +477,7 @@ func TestSetupWorkdir_OverlayModeDeferBaseline(t *testing.T) {
 	}
 
 	tempDir := t.TempDir()
-	sandboxDir := filepath.Join(tempDir, "test-sandbox") // setupWorkdir's first arg is sandboxDir post Q-W.4b
+	sandboxDir := filepath.Join(tempDir, "test-sandbox")
 	sourceDir := filepath.Join(tempDir, "source")
 	require.NoError(t, os.MkdirAll(sourceDir, 0755)) //nolint:gosec // G301: test directory
 
@@ -486,7 +513,7 @@ func TestCheckDirtyRepos_RefusesUntilAcked(t *testing.T) {
 
 	// Default: refuse with a typed *DirtyWorkdirError naming the dir — no prompt.
 	err := checkDirtyRepos(wd, nil)
-	var dwe *DirtyWorkdirError
+	var dwe *yoerrors.DirtyWorkdirError
 	require.ErrorAs(t, err, &dwe)
 	require.Len(t, dwe.Dirs, 1)
 	assert.Equal(t, dir, dwe.Dirs[0].Path)
@@ -505,4 +532,314 @@ func TestCheckDirtyRepos_CleanRepoPasses(t *testing.T) {
 	gitCommit(t, dir, "init")
 
 	require.NoError(t, checkDirtyRepos(&DirSpec{Path: dir, Mode: DirModeCopy}, nil))
+}
+
+// prepareSandboxState validation tests (via state.Deps, not Engine)
+
+func TestPrepareSandboxState_MissingName(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
+
+	d := state.Deps{
+		Runtime: &fakeRuntime{},
+		Layout:  config.NewLayout(t.TempDir()),
+		Input:   strings.NewReader(""),
+	}
+
+	_, err := prepareSandboxState(context.TODO(), d, Options{
+		Name:    "",
+		Workdir: DirSpec{Path: tmpDir},
+		Agent:   "test",
+	}, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "name is required")
+}
+
+func TestPrepareSandboxState_UnknownAgent(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	d := state.Deps{
+		Runtime: &fakeRuntime{},
+		Layout:  config.NewLayout(t.TempDir()),
+		Input:   strings.NewReader(""),
+	}
+
+	_, err := prepareSandboxState(context.TODO(), d, Options{
+		Name:    "test",
+		Workdir: DirSpec{Path: tmpDir},
+		Agent:   "nonexistent-agent",
+	}, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown agent")
+}
+
+func TestPrepareSandboxState_WorkdirMissing(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	d := state.Deps{
+		Runtime: &fakeRuntime{},
+		Layout:  layoutForTmpDir(tmpDir),
+		Input:   strings.NewReader(""),
+	}
+
+	_, err := prepareSandboxState(context.TODO(), d, Options{
+		Name:    "test",
+		Workdir: DirSpec{Path: "/nonexistent/path"},
+		Agent:   "test",
+	}, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "workdir does not exist")
+}
+
+func TestPrepareSandboxState_SandboxExists(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create existing sandbox dir with valid environment.json
+	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", "existing")
+	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
+	require.NoError(t, storeMeta(sandboxDir, "existing"))
+
+	d := state.Deps{
+		Runtime: &fakeRuntime{},
+		Layout:  layoutForTmpDir(tmpDir),
+		Input:   strings.NewReader(""),
+	}
+
+	_, err := prepareSandboxState(context.TODO(), d, Options{
+		Name:    "existing",
+		Workdir: DirSpec{Path: tmpDir},
+		Agent:   "test",
+	}, nil)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrSandboxExists)
+}
+
+func TestPrepareSandboxState_ConflictingPromptFlags(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	d := state.Deps{
+		Runtime: &fakeRuntime{},
+		Layout:  layoutForTmpDir(tmpDir),
+		Input:   strings.NewReader(""),
+	}
+
+	_, err := prepareSandboxState(context.TODO(), d, Options{
+		Name:       "test",
+		Workdir:    DirSpec{Path: tmpDir},
+		Agent:      "test",
+		Prompt:     "hello",
+		PromptFile: "/some/file",
+	}, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "mutually exclusive")
+}
+
+func TestPrepareSandboxState_MissingAPIKey(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
+
+	d := state.Deps{
+		Runtime: &fakeRuntime{},
+		Layout:  layoutForTmpDir(tmpDir),
+		Input:   strings.NewReader(""),
+	}
+
+	_, err := prepareSandboxState(context.TODO(), d, Options{
+		Name:    "test",
+		Workdir: DirSpec{Path: tmpDir},
+		Agent:   "claude",
+	}, nil)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrMissingAPIKey)
+}
+
+func TestPrepareSandboxState_DangerousDir(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
+
+	d := state.Deps{
+		Runtime: &fakeRuntime{},
+		Layout:  layoutForTmpDir(tmpDir),
+		Input:   strings.NewReader(""),
+	}
+
+	_, err := prepareSandboxState(context.TODO(), d, Options{
+		Name:    "test",
+		Workdir: DirSpec{Path: "/"},
+		Agent:   "claude",
+	}, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "dangerous directory")
+}
+
+func TestPrepareSandboxState_DangerousDirForce(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
+
+	// HOME is classified as dangerous. Use :rw:force to avoid copying.
+	var buf bytes.Buffer
+	d := state.Deps{
+		Runtime: &fakeRuntime{},
+		Layout:  layoutForTmpDir(tmpDir),
+		Input:   strings.NewReader("y\n"),
+	}
+
+	_, err := prepareSandboxState(context.TODO(), d, Options{
+		Name:    "test",
+		Workdir: DirSpec{Path: tmpDir, Mode: DirModeRW, AllowDangerousPath: true},
+		Agent:   "claude",
+		Output:  &buf,
+	}, nil)
+	// Should NOT fail on "dangerous directory" — :force bypasses it.
+	if err != nil {
+		assert.NotContains(t, err.Error(), "dangerous directory")
+	}
+	assert.Contains(t, buf.String(), "WARNING: mounting dangerous directory")
+}
+
+// Error message tests
+
+func TestPrepareSandboxState_MissingAPIKeyErrorNoEmptyParens(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	agentDef := agent.GetAgent("aider")
+	// Clear all aider API key env vars
+	for _, key := range agentDef.APIKeyEnvVars {
+		t.Setenv(key, "")
+	}
+	// Clear all aider auth hint env vars
+	for _, key := range agentDef.AuthHintEnvVars {
+		t.Setenv(key, "")
+	}
+
+	d := state.Deps{
+		Runtime: &fakeRuntime{},
+		Layout:  layoutForTmpDir(tmpDir),
+		Input:   strings.NewReader(""),
+	}
+
+	_, err := prepareSandboxState(context.TODO(), d, Options{
+		Name:    "test",
+		Workdir: DirSpec{Path: tmpDir},
+		Agent:   "aider",
+	}, nil)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrMissingAPIKey)
+	errMsg := err.Error()
+	assert.NotContains(t, errMsg, "()", "error message should not contain empty parens")
+	assert.Contains(t, errMsg, "local models", "error should mention local models")
+	assert.Contains(t, errMsg, "OLLAMA_API_BASE", "error should mention OLLAMA_API_BASE")
+}
+
+func TestPrepareSandboxState_MissingAPIKeyErrorWithAuthFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
+
+	// Override provision.KeychainReader to fail
+	origReader := provision.KeychainReader
+	provision.KeychainReader = func(_ string) ([]byte, error) {
+		return nil, fmt.Errorf("not found")
+	}
+	defer func() { provision.KeychainReader = origReader }()
+
+	d := state.Deps{
+		Runtime: &fakeRuntime{},
+		Layout:  layoutForTmpDir(tmpDir),
+		Input:   strings.NewReader(""),
+	}
+
+	_, err := prepareSandboxState(context.TODO(), d, Options{
+		Name:    "test",
+		Workdir: DirSpec{Path: tmpDir},
+		Agent:   "claude",
+	}, nil)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrMissingAPIKey)
+	errMsg := err.Error()
+	assert.Contains(t, errMsg, ".credentials.json", "error should mention .credentials.json from AuthOnly seed files")
+	assert.NotContains(t, errMsg, "local models", "claude has no AuthHintEnvVars, should not mention local models")
+}
+
+func TestPrepareSandboxState_NetworkIsolatedSetsAllowlist(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
+
+	// Create a workdir subdirectory to avoid dangerous directory detection
+	workDir := filepath.Join(tmpDir, "project")
+	require.NoError(t, os.MkdirAll(workDir, 0750))
+
+	d := state.Deps{
+		Runtime: &fakeRuntime{},
+		Layout:  layoutForTmpDir(tmpDir),
+		Input:   strings.NewReader("y\n"),
+	}
+
+	st, err := prepareSandboxState(context.TODO(), d, Options{
+		Name:    "test",
+		Workdir: DirSpec{Path: workDir},
+		Agent:   "claude",
+		Network: NetworkModeIsolated,
+		Version: "test",
+	}, nil)
+	require.NoError(t, err)
+	require.NotNil(t, st)
+
+	assert.Equal(t, "isolated", st.NetworkMode)
+	assert.Contains(t, st.NetworkAllow, "api.anthropic.com")
+	assert.Contains(t, st.NetworkAllow, "statsig.anthropic.com")
+	assert.Contains(t, st.NetworkAllow, "sentry.io")
+}
+
+// containsLocalhost tests
+
+func TestContainsLocalhost_WithLocalhost(t *testing.T) {
+	assert.True(t, containsLocalhost("http://localhost:11434"))
+}
+
+func TestContainsLocalhost_With127(t *testing.T) {
+	assert.True(t, containsLocalhost("http://127.0.0.1:8080/api"))
+}
+
+func TestContainsLocalhost_Neither(t *testing.T) {
+	assert.False(t, containsLocalhost("http://api.example.com"))
+}
+
+func TestContainsLocalhost_Empty(t *testing.T) {
+	assert.False(t, containsLocalhost(""))
+}
+
+func TestContainsLocalhost_ExternalURL(t *testing.T) {
+	assert.False(t, containsLocalhost("http://example.com"))
+}
+
+func TestPrepareSandboxState_NetworkAllowAddsExtraDomains(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
+
+	// Create a workdir subdirectory to avoid dangerous directory detection
+	workDir := filepath.Join(tmpDir, "project")
+	require.NoError(t, os.MkdirAll(workDir, 0750))
+
+	d := state.Deps{
+		Runtime: &fakeRuntime{},
+		Layout:  layoutForTmpDir(tmpDir),
+		Input:   strings.NewReader("y\n"),
+	}
+
+	st, err := prepareSandboxState(context.TODO(), d, Options{
+		Name:         "test",
+		Workdir:      DirSpec{Path: workDir},
+		Agent:        "claude",
+		Network:      NetworkModeIsolated,
+		NetworkAllow: []string{"api.example.com"},
+		Version:      "test",
+	}, nil)
+	require.NoError(t, err)
+	require.NotNil(t, st)
+
+	assert.Equal(t, "isolated", st.NetworkMode)
+	assert.Contains(t, st.NetworkAllow, "api.anthropic.com")
+	assert.Contains(t, st.NetworkAllow, "api.example.com")
 }

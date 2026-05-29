@@ -852,6 +852,38 @@ Three deviations from D40's literal grouping, each forced by the dependency fact
 
 Outcome: `create_instance.go`/`_test.go` deleted (fully absorbed), `launch.LaunchContainer(ctx, m.deps(), st)` called from both create.go:233 and lifecycle.go:929, `make check` + `go vet -tags=integration` green.
 
+## D42 — F5.2d: `create/` carve — `Engine.Create` dissolves to `create.Run`, `EnsureSetup` hoisted to the Client
+
+**Date:** 2026-05-29. **Status:** Accepted (owner, 2026-05-29). **Implements** D40's `create/` leaf; **continues** D41's deferral (config.json assembly lands here).
+
+The create pipeline (`create.go` + `create_prepare.go` + `context.go`, ~2060 LOC) moves wholesale into a new `internal/sandbox/create/` leaf (`package create`). The 17 `Engine` methods across those files dissolve into free functions; the ~28 functions that were already receiverless move unchanged. The façade keeps only thin public *aliases* — no create machinery and no `Engine.Create` delegator survives in `package sandbox`.
+
+Decisions forced by the carve:
+
+- **`Engine.Create` is dissolved, not delegated.** New entry point: `create.Run(ctx context.Context, d state.Deps, opts Options) (name string, err error)`. The sole production caller, `yoloai.Client.Create`, now calls `create.Run` directly. The façade `Engine` retains no `Create` method (consistent with the F5 mandate: dissolve the 75 methods, don't keep delegators).
+- **`state.Deps` gains `Input io.Reader`.** Justified because `m.input` is read by *both* the create path (`resolveAgentParams`→`invocation.ReadPrompt`) and the lifecycle path (`preparePromptForStart`) — it is a genuinely shared dependency, not create-only. `Engine.deps()` populates it from `m.input`. (D41 anticipated Deps growing as methods dissolve.)
+- **`m.backend` is *not* threaded** — derived in-leaf as `d.Runtime.Descriptor().Name`, which is exactly how `NewEngine` seeds the field (engine.go:71). Avoids widening `Deps` with a derivable value.
+- **`m.progress` is not threaded** — the create pipeline never reads it (only `WithProgress` sets it). Confirmed by grep.
+- **`EnsureSetup` stays in the façade and is hoisted to `Client.Create`** (called *before* `create.Run`). `EnsureSetup` is name-independent, global first-run scaffolding that does not need the per-sandbox lock. This flips its order relative to `checkIsolationPrerequisites` (previously inside `Create`, before `EnsureSetup`); the reorder is benign — `EnsureSetup` is idempotent and a near-instant no-op after first run, and the MCP entry path already calls `EnsureSetup` before `Create` today, so "setup before isolation check" is already the de-facto order there. `create.Run` therefore assumes setup has run.
+- **`yoloai.Client` gains an `input io.Reader` field** (populated in `NewWithOptions`, where `input` is already computed) so `Client.Create` can build `state.Deps{Runtime, Layout, Input}` without reaching into the `Engine`.
+- **`ErrSandboxExists` relocates to `package create`** (only `create` produces "already exists"); `sandbox.ErrSandboxExists` becomes an alias so the public symbol and its `yoloai.ErrSandboxExists` re-export are unchanged.
+- **`type State = state.State` alias relocates** from create.go to engine.go (still referenced by the staying façade files engine.go/setup.go/lifecycle.go). Inside `create/`, the canonical `state.State` is used directly.
+- **Public option types alias from the façade:** `type CreateOptions = create.Options`, `type NetworkMode = create.NetworkMode`, and the three `NetworkMode*` consts. External callers (`yoloai` root's `create_options.go`, `names.go`) keep compiling through the aliases.
+- **Config.json assembly lands here** (per D41's deferral): `buildContainerConfig`, the `containerConfig`/`lifecycleConfig`/`overlayMountConfig` types, `runtimeConfigSchemaVersion`, `buildLifecycleConfig`, `lifecycleCmdToJSON` all move into `create/`.
+- **Test placement:** white-box tests of create internals (buildContainerConfig, gitBaseline, removeGitDirs, archetype/devcontainer, dir parsing, context) move to `package create` — they pass literal args and need no runtime double (same self-containment as D41's launch tests). The end-to-end `TestCreate_CleansUp*` tests, which need the stateful façade `mockRuntime`, stay in `package sandbox` and call `create.Run` directly. `TestBackendCaps` (a runtime-descriptor test, only incidentally in create_test.go) moves to engine_test.go.
+
+## D43 — F5.2d shared-symbol homing: `runtimeconfig/` + `profiles/` leaves; `Engine.Create` removed cleanly
+
+**Date:** 2026-05-29. **Status:** Accepted (owner, 2026-05-29). **Refines** D42 (supersedes its "config.json assembly lands in create/" and the interim "Engine.Create delegator" / duplicated-profile-build shortcuts taken during implementation).
+
+While carving `create/`, three symbols turned out to be shared across the create/lifecycle sibling boundary (D40's DAG forbids a `lifecycle → create` edge, which a naïve carve introduced). Resolved by homing each in the *lowest leaf both consumers can import* rather than dumping them into `launch/`:
+
+- **`ContainerConfig` → new `internal/sandbox/runtimeconfig/` leaf** (`package runtimeconfig`). This is the Go↔Python `runtime-config.json` *contract*: pure data (`ContainerConfig`, `OverlayMountConfig`, `LifecycleConfig`) plus the versioned `SchemaVersion` const and its cross-language fence test (`schema_version_test.go`, moved here). `create/` *writes* it (the `buildContainerConfig`/`buildLifecycleConfig` assemblers stay in `create/` and now construct `runtimeconfig.ContainerConfig{...}`); `lifecycle.go` *reads* it. Both import `runtimeconfig`; neither imports the other. **This corrects D41/D42's premise that config.json assembly could live wholly in `create/`** — the *type* is shared, so it belongs in a lower leaf even though the *assembler* stays in `create/`.
+- **Profile image building → existing (empty) `internal/sandbox/profiles/` leaf** (`package profiles`): `EnsureProfileImage`, `AutoBuildSecrets`, `ValidateBuildSecret`, `ProfileImageBuilder`. Consumed by both façade `EnsureSetup`/`system_client.go`/CLI and the `create/` pipeline (`create_prepare.go`). The façade keeps thin re-export aliases (`var EnsureProfileImage = profiles.EnsureProfileImage`, `type ProfileImageBuilder = profiles.ProfileImageBuilder`, etc.) so `sandbox.X` stays stable for CLI callers. A verbatim unexported copy that had been duplicated into `create/` is deleted.
+- **`Engine.Create` removed outright** (no delegator). The ~29 integration-test call sites (`integration_test.go`, `integration_tart_test.go`) now go through a `createSandbox(ctx, mgr, opts)` test helper that calls `create.Run` with `state.Deps{Runtime: mgr.Runtime(), Layout: mgr.Layout(), Input: strings.NewReader("")}` — faithfully reproducing the deleted `Engine.deps()`. `EnsureSetup` is still done once in `integrationSetup`.
+- **Rationale for not using `launch/`:** `launch/` is container start/stop/teardown; `provision/` is per-sandbox credential/seed prep. Neither image building (a *profile* concern) nor the config.json contract (its own versioned data shape) is a launch behavior. Single-responsibility placement keeps `launch/` from becoming a grab-bag.
+- **F5.3 follow-up:** `CheckIsolationPrerequisites` still lives in `create/` and is referenced by façade `lifecycle.go` (legal today — `package sandbox` may import `create`). When `lifecycle/` is carved into its own sibling package, that symbol must also relocate to a shared lower leaf (likely `runtimeconfig`-adjacent or a new `caps`-using leaf) to avoid a `lifecycle → create` edge.
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.

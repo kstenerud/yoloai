@@ -18,10 +18,12 @@ import (
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/runtime"
+	"github.com/kstenerud/yoloai/internal/sandbox/create"
 	"github.com/kstenerud/yoloai/internal/sandbox/invocation"
 	"github.com/kstenerud/yoloai/internal/sandbox/launch"
 	"github.com/kstenerud/yoloai/internal/sandbox/patch"
 	provision "github.com/kstenerud/yoloai/internal/sandbox/provision"
+	"github.com/kstenerud/yoloai/internal/sandbox/runtimeconfig"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/internal/workspace"
 )
@@ -114,7 +116,7 @@ func (m *Engine) applyIsolationOverride(ctx context.Context, opts StartOptions, 
 			return NewUsageError("isolation mode %q is not supported by the %s backend", opts.Isolation, desc.Name)
 		}
 	}
-	if err := checkIsolationPrerequisites(ctx, m.runtime, opts.Isolation); err != nil {
+	if err := create.CheckIsolationPrerequisites(ctx, m.runtime, opts.Isolation); err != nil {
 		return err
 	}
 	meta.Isolation = opts.Isolation
@@ -842,7 +844,7 @@ func (m *Engine) recreateContainer(ctx context.Context, name string, meta *store
 	}
 
 	// Extract tmux_conf from runtime-config.json
-	var cfgJSON containerConfig
+	var cfgJSON runtimeconfig.ContainerConfig
 	if err := json.Unmarshal(configData, &cfgJSON); err != nil {
 		return fmt.Errorf("parse runtime-config.json: %w", err)
 	}
@@ -952,7 +954,7 @@ func (m *Engine) relaunchAgent(ctx context.Context, name string, meta *store.Met
 		return fmt.Errorf("read runtime-config.json: %w", err)
 	}
 
-	var cfg containerConfig
+	var cfg runtimeconfig.ContainerConfig
 	if err := json.Unmarshal(configData, &cfg); err != nil {
 		return fmt.Errorf("parse runtime-config.json: %w", err)
 	}
@@ -977,7 +979,7 @@ func (m *Engine) relaunchAgentWithResume(ctx context.Context, name string, meta 
 		return fmt.Errorf("read runtime-config.json: %w", err)
 	}
 
-	var cfg containerConfig
+	var cfg runtimeconfig.ContainerConfig
 	if err := json.Unmarshal(configData, &cfg); err != nil {
 		return fmt.Errorf("parse runtime-config.json: %w", err)
 	}
@@ -1007,7 +1009,7 @@ func (m *Engine) relaunchAgentWithResume(ctx context.Context, name string, meta 
 
 // sendResumePrompt waits for the agent to be ready and delivers the resume
 // prompt (preamble + original prompt) via tmux load-buffer/paste-buffer.
-func (m *Engine) sendResumePrompt(ctx context.Context, name, sandboxDir string, cfg containerConfig, meta *store.Meta) error {
+func (m *Engine) sendResumePrompt(ctx context.Context, name, sandboxDir string, cfg runtimeconfig.ContainerConfig, meta *store.Meta) error {
 	promptData, err := os.ReadFile(filepath.Join(sandboxDir, "prompt.txt")) //nolint:gosec // path is sandbox-controlled
 	if err != nil {
 		return fmt.Errorf("read prompt.txt: %w", err)
@@ -1068,7 +1070,7 @@ func (m *Engine) relaunchAgentWithCustomPrompt(ctx context.Context, name string,
 		return fmt.Errorf("read runtime-config.json: %w", err)
 	}
 
-	var cfg containerConfig
+	var cfg runtimeconfig.ContainerConfig
 	if err := json.Unmarshal(configData, &cfg); err != nil {
 		return fmt.Errorf("parse runtime-config.json: %w", err)
 	}
@@ -1100,7 +1102,7 @@ func (m *Engine) relaunchAgentWithCustomPrompt(ctx context.Context, name string,
 
 // sendCustomPrompt waits for the agent to be ready and delivers the custom
 // prompt directly (without resume preamble) via tmux load-buffer/paste-buffer.
-func (m *Engine) sendCustomPrompt(ctx context.Context, name, sandboxDir string, cfg containerConfig, promptText string, meta *store.Meta) error {
+func (m *Engine) sendCustomPrompt(ctx context.Context, name, sandboxDir string, cfg runtimeconfig.ContainerConfig, promptText string, meta *store.Meta) error {
 	var waitCmd string
 	switch {
 	case cfg.ReadyPattern != "":
@@ -1156,7 +1158,7 @@ func (m *Engine) prepareCustomPromptFiles(name string, meta *store.Meta, promptT
 		return fmt.Errorf("read runtime-config.json: %w", err)
 	}
 
-	var cfg containerConfig
+	var cfg runtimeconfig.ContainerConfig
 	if err := json.Unmarshal(configData, &cfg); err != nil {
 		return fmt.Errorf("parse runtime-config.json: %w", err)
 	}
@@ -1205,7 +1207,7 @@ func (m *Engine) prepareResumeFiles(name string, meta *store.Meta) error {
 		return fmt.Errorf("read runtime-config.json: %w", err)
 	}
 
-	var cfg containerConfig
+	var cfg runtimeconfig.ContainerConfig
 	if err := json.Unmarshal(configData, &cfg); err != nil {
 		return fmt.Errorf("parse runtime-config.json: %w", err)
 	}
@@ -1337,7 +1339,7 @@ func (m *Engine) sendResetNotification(ctx context.Context, name, sandboxDir str
 		return fmt.Errorf("read runtime-config.json: %w", err)
 	}
 
-	var cfg containerConfig
+	var cfg runtimeconfig.ContainerConfig
 	if err := json.Unmarshal(configData, &cfg); err != nil {
 		return fmt.Errorf("parse runtime-config.json: %w", err)
 	}
@@ -1395,7 +1397,7 @@ func patchConfigVscodeTunnel(sandboxDir, sandboxName string) error {
 		return fmt.Errorf("read runtime-config.json: %w", err)
 	}
 
-	var cfg containerConfig
+	var cfg runtimeconfig.ContainerConfig
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return fmt.Errorf("parse runtime-config.json: %w", err)
 	}
@@ -1421,7 +1423,7 @@ func patchConfigDebug(sandboxDir string, debug bool) error {
 		return fmt.Errorf("read runtime-config.json for debug patch: %w", err)
 	}
 
-	var cfg containerConfig
+	var cfg runtimeconfig.ContainerConfig
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return fmt.Errorf("parse runtime-config.json for debug patch: %w", err)
 	}
@@ -1447,7 +1449,7 @@ func PatchConfigAllowedDomains(sandboxDir string, domains []string) error {
 		return fmt.Errorf("read runtime-config.json for domain patch: %w", err)
 	}
 
-	var cfg containerConfig
+	var cfg runtimeconfig.ContainerConfig
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return fmt.Errorf("parse runtime-config.json for domain patch: %w", err)
 	}

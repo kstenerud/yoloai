@@ -17,6 +17,7 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime"
+	"github.com/kstenerud/yoloai/internal/sandbox/runtimeconfig"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 )
 
@@ -291,7 +292,7 @@ func TestStart_Resume_DoneStatus(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "prompt.txt"), []byte("Write hello world"), 0600))
 
 	// Write runtime-config.json
-	cfg := containerConfig{
+	cfg := runtimeconfig.ContainerConfig{
 		AgentCommand:   "claude --dangerously-skip-permissions --print \"Write hello world\"",
 		SubmitSequence: "Enter",
 		ReadyPattern:   "> $",
@@ -365,7 +366,7 @@ func TestStart_Resume_StoppedStatus(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "prompt.txt"), []byte("Write hello world"), 0600))
 
 	// Write runtime-config.json with headless command
-	cfg := containerConfig{
+	cfg := runtimeconfig.ContainerConfig{
 		AgentCommand:   "claude --dangerously-skip-permissions --print \"Write hello world\"",
 		SubmitSequence: "Enter",
 		ReadyPattern:   "> $",
@@ -394,7 +395,7 @@ func TestStart_Resume_StoppedStatus(t *testing.T) {
 	// Verify runtime-config.json was patched to interactive command
 	updatedCfgData, err := os.ReadFile(filepath.Join(sandboxDir, store.RuntimeConfigFile)) //nolint:gosec // test file in controlled temp dir
 	require.NoError(t, err)
-	var updatedCfg containerConfig
+	var updatedCfg runtimeconfig.ContainerConfig
 	require.NoError(t, json.Unmarshal(updatedCfgData, &updatedCfg))
 	assert.NotContains(t, updatedCfg.AgentCommand, "Write hello world",
 		"runtime-config.json should have interactive command after resume prep")
@@ -1048,7 +1049,7 @@ func TestReset_UpgradesToRestartWhenNotRunning(t *testing.T) {
 
 func TestPatchConfigDebug_SetTrue(t *testing.T) {
 	sandboxDir := t.TempDir()
-	cfg := containerConfig{AgentCommand: "claude", WorkingDir: "/project"}
+	cfg := runtimeconfig.ContainerConfig{AgentCommand: "claude", WorkingDir: "/project"}
 	cfgData, err := json.MarshalIndent(cfg, "", "  ")
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, store.RuntimeConfigFile), cfgData, 0600))
@@ -1057,14 +1058,14 @@ func TestPatchConfigDebug_SetTrue(t *testing.T) {
 
 	data, err := os.ReadFile(filepath.Join(sandboxDir, store.RuntimeConfigFile)) //nolint:gosec // test
 	require.NoError(t, err)
-	var result containerConfig
+	var result runtimeconfig.ContainerConfig
 	require.NoError(t, json.Unmarshal(data, &result))
 	assert.True(t, result.Debug)
 }
 
 func TestPatchConfigDebug_SetFalse(t *testing.T) {
 	sandboxDir := t.TempDir()
-	cfg := containerConfig{AgentCommand: "claude", Debug: true}
+	cfg := runtimeconfig.ContainerConfig{AgentCommand: "claude", Debug: true}
 	cfgData, err := json.MarshalIndent(cfg, "", "  ")
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, store.RuntimeConfigFile), cfgData, 0600))
@@ -1073,7 +1074,7 @@ func TestPatchConfigDebug_SetFalse(t *testing.T) {
 
 	data, err := os.ReadFile(filepath.Join(sandboxDir, store.RuntimeConfigFile)) //nolint:gosec // test
 	require.NoError(t, err)
-	var result containerConfig
+	var result runtimeconfig.ContainerConfig
 	require.NoError(t, json.Unmarshal(data, &result))
 	assert.False(t, result.Debug)
 }
@@ -1086,7 +1087,7 @@ func TestPatchConfigDebug_MissingConfig(t *testing.T) {
 
 func TestPatchConfigDebug_PreservesOtherFields(t *testing.T) {
 	sandboxDir := t.TempDir()
-	cfg := containerConfig{AgentCommand: "claude --print", WorkingDir: "/home/user/project"}
+	cfg := runtimeconfig.ContainerConfig{AgentCommand: "claude --print", WorkingDir: "/home/user/project"}
 	cfgData, err := json.MarshalIndent(cfg, "", "  ")
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, store.RuntimeConfigFile), cfgData, 0600))
@@ -1095,7 +1096,7 @@ func TestPatchConfigDebug_PreservesOtherFields(t *testing.T) {
 
 	data, err := os.ReadFile(filepath.Join(sandboxDir, store.RuntimeConfigFile)) //nolint:gosec // test
 	require.NoError(t, err)
-	var result containerConfig
+	var result runtimeconfig.ContainerConfig
 	require.NoError(t, json.Unmarshal(data, &result))
 	assert.Equal(t, "claude --print", result.AgentCommand)
 	assert.Equal(t, "/home/user/project", result.WorkingDir)
@@ -1106,7 +1107,7 @@ func TestPatchConfigDebug_PreservesOtherFields(t *testing.T) {
 
 func TestPatchConfigAllowedDomains_SetDomains(t *testing.T) {
 	sandboxDir := t.TempDir()
-	cfg := containerConfig{AgentCommand: "claude"}
+	cfg := runtimeconfig.ContainerConfig{AgentCommand: "claude"}
 	cfgData, err := json.MarshalIndent(cfg, "", "  ")
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, store.RuntimeConfigFile), cfgData, 0600))
@@ -1115,14 +1116,14 @@ func TestPatchConfigAllowedDomains_SetDomains(t *testing.T) {
 
 	data, err := os.ReadFile(filepath.Join(sandboxDir, store.RuntimeConfigFile)) //nolint:gosec // test
 	require.NoError(t, err)
-	var result containerConfig
+	var result runtimeconfig.ContainerConfig
 	require.NoError(t, json.Unmarshal(data, &result))
 	assert.Equal(t, []string{"api.anthropic.com", "sentry.io"}, result.AllowedDomains)
 }
 
 func TestPatchConfigAllowedDomains_ReplacesExisting(t *testing.T) {
 	sandboxDir := t.TempDir()
-	cfg := containerConfig{AgentCommand: "claude", AllowedDomains: []string{"old.com"}}
+	cfg := runtimeconfig.ContainerConfig{AgentCommand: "claude", AllowedDomains: []string{"old.com"}}
 	cfgData, err := json.MarshalIndent(cfg, "", "  ")
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, store.RuntimeConfigFile), cfgData, 0600))
@@ -1131,14 +1132,14 @@ func TestPatchConfigAllowedDomains_ReplacesExisting(t *testing.T) {
 
 	data, err := os.ReadFile(filepath.Join(sandboxDir, store.RuntimeConfigFile)) //nolint:gosec // test
 	require.NoError(t, err)
-	var result containerConfig
+	var result runtimeconfig.ContainerConfig
 	require.NoError(t, json.Unmarshal(data, &result))
 	assert.Equal(t, []string{"new.com"}, result.AllowedDomains)
 }
 
 func TestPatchConfigAllowedDomains_EmptyListClears(t *testing.T) {
 	sandboxDir := t.TempDir()
-	cfg := containerConfig{AgentCommand: "claude", AllowedDomains: []string{"api.com"}}
+	cfg := runtimeconfig.ContainerConfig{AgentCommand: "claude", AllowedDomains: []string{"api.com"}}
 	cfgData, err := json.MarshalIndent(cfg, "", "  ")
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, store.RuntimeConfigFile), cfgData, 0600))
@@ -1147,7 +1148,7 @@ func TestPatchConfigAllowedDomains_EmptyListClears(t *testing.T) {
 
 	data, err := os.ReadFile(filepath.Join(sandboxDir, store.RuntimeConfigFile)) //nolint:gosec // test
 	require.NoError(t, err)
-	var result containerConfig
+	var result runtimeconfig.ContainerConfig
 	require.NoError(t, json.Unmarshal(data, &result))
 	assert.Empty(t, result.AllowedDomains)
 }
