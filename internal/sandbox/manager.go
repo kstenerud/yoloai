@@ -16,12 +16,16 @@ import (
 )
 
 // Manager is the central orchestrator for sandbox operations.
+//
+// The Manager holds no output writer (F8): operations that emit human-readable
+// progress take an explicit io.Writer per call (e.g. CreateOptions.Output,
+// EnsureSetup's out param) and discrete advisories are returned as structured
+// Notices. The yoloai.Client seeds those per-call writers from its Options.Output.
 type Manager struct {
 	runtime  runtime.Runtime
 	backend  runtime.BackendName
 	logger   *slog.Logger
 	input    io.Reader
-	output   io.Writer
 	progress func(name, msg string) // optional progress callback
 	layout   config.Layout          // DataDir-rooted path resolver (Q-W.2)
 }
@@ -44,9 +48,13 @@ func WithLayout(layout config.Layout) ManagerOption {
 	return func(m *Manager) { m.layout = layout }
 }
 
-// NewManager creates a Manager with the given runtime, logger, input reader
-// for interactive prompts, and output writer for user-facing messages.
-// The backend name is read from rt.Descriptor().Name when rt is non-nil.
+// NewManager creates a Manager with the given runtime, logger, and input reader
+// for interactive prompts. The backend name is read from rt.Descriptor().Name
+// when rt is non-nil.
+//
+// The Manager holds no output writer (F8): per-call progress writers are passed
+// explicitly (CreateOptions.Output, EnsureSetup's out param) and discrete
+// advisories are returned as Notices.
 //
 // A WithLayout option is REQUIRED — Q-W.5 removed the implicit
 // $HOME/.yoloai/ fallback so library code never reads ambient HOME.
@@ -56,7 +64,7 @@ func WithLayout(layout config.Layout) ManagerOption {
 // the CLI command handlers always pass WithLayout; only direct
 // test construction needs to remember it (use config.NewLayout
 // with t.TempDir-based DataDir).
-func NewManager(rt runtime.Runtime, logger *slog.Logger, input io.Reader, output io.Writer, opts ...ManagerOption) *Manager {
+func NewManager(rt runtime.Runtime, logger *slog.Logger, input io.Reader, opts ...ManagerOption) *Manager {
 	var backend runtime.BackendName
 	if rt != nil {
 		backend = rt.Descriptor().Name
@@ -66,7 +74,6 @@ func NewManager(rt runtime.Runtime, logger *slog.Logger, input io.Reader, output
 		backend: backend,
 		logger:  logger,
 		input:   input,
-		output:  output,
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -103,8 +110,8 @@ func (m *Manager) Layout() config.Layout { return m.layout }
 // coupled prompts to library code and contradicted §12's "no ambient
 // IO" principle. Q-F moves the wizard to the CLI; EnsureSetup now
 // behaves as the old non-interactive branch always behaved.
-func (m *Manager) EnsureSetup(ctx context.Context) error {
-	if err := m.EnsureSetupNonInteractive(ctx); err != nil {
+func (m *Manager) EnsureSetup(ctx context.Context, out io.Writer) error {
+	if err := m.EnsureSetupNonInteractive(ctx, out); err != nil {
 		return err
 	}
 	state, err := config.LoadState(m.layout)
@@ -151,7 +158,10 @@ func (m *Manager) ensureDefaultsDir() error {
 // For pure-config setup that does NOT need a runtime (e.g. the
 // `yoloai system setup` wizard's ApplySetup path), use
 // ensureLayoutScaffold instead.
-func (m *Manager) EnsureSetupNonInteractive(ctx context.Context) error {
+func (m *Manager) EnsureSetupNonInteractive(ctx context.Context, out io.Writer) error {
+	if out == nil {
+		out = io.Discard
+	}
 	if err := m.ensureLayoutScaffold(); err != nil {
 		return err
 	}
@@ -161,11 +171,11 @@ func (m *Manager) EnsureSetupNonInteractive(ctx context.Context) error {
 	}
 	// Seed resources and build/rebuild base image as needed
 	baseProfileDir := m.layout.ProfileDir("base")
-	if err := m.runtime.Setup(ctx, m.layout, baseProfileDir, m.output, m.logger, false); err != nil {
+	if err := m.runtime.Setup(ctx, m.layout, baseProfileDir, out, m.logger, false); err != nil {
 		return err
 	}
 	if !state.SetupComplete {
-		fmt.Fprintln(m.output, "Tip: enable shell completions with 'yoloai system completion --help'") //nolint:errcheck // best-effort output
+		fmt.Fprintln(out, "Tip: enable shell completions with 'yoloai system completion --help'") //nolint:errcheck // best-effort output
 	}
 	return nil
 }

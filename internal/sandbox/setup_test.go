@@ -122,7 +122,7 @@ func setupTestManager(t *testing.T) (*Manager, *bytes.Buffer, string, config.Lay
 
 	var output bytes.Buffer
 	mock := &mockRuntime{}
-	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), &output, WithLayout(layout))
+	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
 	return mgr, &output, tmpDir, layout
 }
 

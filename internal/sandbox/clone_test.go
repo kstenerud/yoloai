@@ -2,7 +2,6 @@ package sandbox
 
 import (
 	"context"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -21,7 +20,7 @@ import (
 func newCloneMgr(tmpDir string) *Manager {
 	mock := &lifecycleMockRuntime{}
 	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
-	return NewManager(mock, slog.Default(), strings.NewReader(""), io.Discard, WithLayout(layout))
+	return NewManager(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
 }
 
 func createCloneSource(t *testing.T, tmpDir, name string) {

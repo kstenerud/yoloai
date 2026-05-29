@@ -234,7 +234,7 @@ func (m *Manager) handleStoppedOrRemovedStatus(ctx context.Context, cname, name 
 		}
 		defer m.cleanupResumeFiles(name)
 	}
-	if err := m.recreateContainer(ctx, name, meta, opts.Resume); err != nil {
+	if err := m.recreateContainer(ctx, name, meta, opts.Resume, n); err != nil {
 		return err
 	}
 	n.infof("%s", successMsg)
@@ -814,8 +814,11 @@ func resolveEnvForRestart(layout config.Layout, meta *store.Meta) (map[string]st
 	return envVars, nil
 }
 
-// recreateContainer creates a new Docker container from meta.json.
-func (m *Manager) recreateContainer(ctx context.Context, name string, meta *store.Meta, resume bool) error {
+// recreateContainer creates a new Docker container from meta.json. Incidental
+// progress (e.g. a port-availability warning from filterAvailablePorts) is
+// surfaced through n as Notices rather than a raw writer, since the restart
+// entry points (Start/Reset) return their output as a *Result's Notices (F8).
+func (m *Manager) recreateContainer(ctx context.Context, name string, meta *store.Meta, resume bool, n *notices) error {
 	agentDef := agent.GetAgent(string(meta.Agent))
 	if agentDef == nil {
 		return NewConfigError("unknown agent %q in sandbox state — this sandbox was created with an agent that's not registered in the current yoloai installation; destroy and recreate the sandbox with a registered agent", meta.Agent)
@@ -913,7 +916,7 @@ func (m *Manager) recreateContainer(ctx context.Context, name string, meta *stor
 		configJSON:    configData,
 		layout:        m.layout,
 		homeDir:       m.layout.HomeDir,
-		output:        m.output,
+		output:        &noticeWriter{n: n, level: NoticeWarn},
 	}
 
 	if resume {

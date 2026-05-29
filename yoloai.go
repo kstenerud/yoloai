@@ -148,6 +148,7 @@ type Client struct {
 	rt      runtime.Runtime
 	layout  config.Layout // Q-W: DataDir-rooted path resolver propagated to Manager + apply
 	version string        // yoloAI version stamped into created sandboxes' meta.json
+	output  io.Writer     // Options.Output (defaulted to io.Discard); seeds per-call progress writers (F8)
 }
 
 // NewWithOptions creates a Client with explicit options.
@@ -186,8 +187,8 @@ func NewWithOptions(ctx context.Context, opts Options) (*Client, error) {
 		return nil, fmt.Errorf("connect to %s backend: %w", backend, err)
 	}
 
-	mgr := sandbox.NewManager(rt, logger, input, output, sandbox.WithLayout(layout))
-	return &Client{manager: mgr, rt: rt, layout: layout, version: opts.Version}, nil
+	mgr := sandbox.NewManager(rt, logger, input, sandbox.WithLayout(layout))
+	return &Client{manager: mgr, rt: rt, layout: layout, version: opts.Version, output: output}, nil
 }
 
 // Close releases the underlying runtime connection.
@@ -323,6 +324,9 @@ func (c *Client) Clone(ctx context.Context, opts sandbox.CloneOptions) error {
 func (c *Client) Create(ctx context.Context, opts CreateOptions) (string, error) {
 	internal := opts.toInternal()
 	internal.Version = c.version
+	if internal.Output == nil {
+		internal.Output = c.output // seed the per-call progress writer from the Client's Output (F8)
+	}
 	return c.manager.Create(ctx, internal)
 }
 
@@ -378,7 +382,7 @@ func attachStatusOK(status sandbox.Status, name string) error {
 // setup_complete is true. The interactive setup wizard is a separate
 // flow — see SystemClient.SetupStatus / SystemClient.Setup.
 func (c *Client) EnsureSetup(ctx context.Context) error {
-	return c.manager.EnsureSetup(ctx)
+	return c.manager.EnsureSetup(ctx, c.output)
 }
 
 // --- private helpers ---

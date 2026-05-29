@@ -110,9 +110,9 @@ func TestEnsureSetup_CreatesDirectories(t *testing.T) {
 
 	mock := &mockRuntime{} // image exists (no error)
 	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
-	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), io.Discard, WithLayout(layout))
+	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
 
-	err := mgr.EnsureSetup(context.Background())
+	err := mgr.EnsureSetup(context.Background(), io.Discard)
 	require.NoError(t, err)
 
 	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
@@ -130,9 +130,9 @@ func TestEnsureSetup_WritesConfigOnFirstRun(t *testing.T) {
 	mock := &mockRuntime{}
 	var output bytes.Buffer
 	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
-	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), &output, WithLayout(layout))
+	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
 
-	err := mgr.EnsureSetup(context.Background())
+	err := mgr.EnsureSetup(context.Background(), &output)
 	require.NoError(t, err)
 
 	configPath := filepath.Join(tmpDir, ".yoloai", "defaults", "config.yaml")
@@ -150,9 +150,9 @@ func TestEnsureSetup_WritesStateOnFirstRun(t *testing.T) {
 
 	mock := &mockRuntime{}
 	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
-	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), io.Discard, WithLayout(layout))
+	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
 
-	err := mgr.EnsureSetup(context.Background())
+	err := mgr.EnsureSetup(context.Background(), io.Discard)
 	require.NoError(t, err)
 
 	statePath := filepath.Join(tmpDir, ".yoloai", "state.yaml")
@@ -175,9 +175,9 @@ func TestEnsureSetup_SkipsConfigOnSubsequentRun(t *testing.T) {
 
 	mock := &mockRuntime{}
 	var output bytes.Buffer
-	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), &output, WithLayout(layout))
+	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
 
-	err := mgr.EnsureSetup(context.Background())
+	err := mgr.EnsureSetup(context.Background(), &output)
 	require.NoError(t, err)
 
 	// Config should be preserved
@@ -198,9 +198,9 @@ func TestEnsureSetup_AlwaysCallsSetup(t *testing.T) {
 	require.NoError(t, os.MkdirAll(layout.CacheDir(), 0750))
 	dockerrt.RecordBuildChecksum(layout, "")
 	mock := &mockRuntime{}
-	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), io.Discard, WithLayout(layout))
+	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
 
-	err := mgr.EnsureSetup(context.Background())
+	err := mgr.EnsureSetup(context.Background(), io.Discard)
 	require.NoError(t, err)
 	assert.True(t, mock.setupCalled, "Setup should always be called")
 }
@@ -217,9 +217,9 @@ func TestEnsureSetup_RebuildWhenChecksumStale(t *testing.T) {
 	mock := &mockRuntime{} // Setup returns nil (success)
 	var output bytes.Buffer
 	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
-	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), &output, WithLayout(layout))
+	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
 
-	err := mgr.EnsureSetup(context.Background())
+	err := mgr.EnsureSetup(context.Background(), &output)
 	require.NoError(t, err)
 	assert.True(t, mock.setupCalled, "Setup should be called when checksum is stale")
 }
@@ -231,9 +231,9 @@ func TestEnsureSetup_BuildsWhenImageMissing(t *testing.T) {
 	mock := &mockRuntime{} // Setup returns nil (success)
 	var output bytes.Buffer
 	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
-	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), &output, WithLayout(layout))
+	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
 
-	err := mgr.EnsureSetup(context.Background())
+	err := mgr.EnsureSetup(context.Background(), &output)
 	require.NoError(t, err)
 	assert.True(t, mock.setupCalled, "Setup should be called when image is missing")
 }

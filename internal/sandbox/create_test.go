@@ -3,7 +3,6 @@ package sandbox
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -312,7 +311,7 @@ func TestCreate_CleansUpIncompleteOnNew(t *testing.T) {
 	// It will fail later (no agent, etc.) but the key assertion is
 	// that it does NOT return ErrSandboxExists.
 	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard, WithLayout(layout))
+	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), WithLayout(layout))
 	_, err := mgr.Create(context.Background(), CreateOptions{
 		Name:    name,
 		Workdir: DirSpec{Path: tmpDir},
@@ -333,7 +332,7 @@ func TestCreate_CleansUpOnPrepareFail(t *testing.T) {
 	// Use test agent which needs no API key, but provide a nonexistent workdir
 	// so preparation fails after directory creation.
 	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard, WithLayout(layout))
+	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), WithLayout(layout))
 	_, err := mgr.Create(context.Background(), CreateOptions{
 		Name:    name,
 		Workdir: DirSpec{Path: filepath.Join(tmpDir, "nonexistent")},

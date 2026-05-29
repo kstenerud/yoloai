@@ -4,7 +4,11 @@
 
 package sandbox
 
-import "fmt"
+import (
+	"bytes"
+	"fmt"
+	"strings"
+)
 
 // NoticeLevel classifies a Notice for rendering — informational status vs. a
 // warning the user should heed.
@@ -41,6 +45,38 @@ func (n *notices) infof(format string, args ...any) {
 // warnf appends a warning notice.
 func (n *notices) warnf(format string, args ...any) {
 	n.list = append(n.list, Notice{Level: NoticeWarn, Message: fmt.Sprintf(format, args...)})
+}
+
+// noticeWriter adapts the notices accumulator onto io.Writer: each newline-
+// terminated line written becomes one Notice at the configured level. It lets a
+// streaming helper that only knows how to Fprintf a warning (filterAvailablePorts
+// on the restart path) feed the structured-notice channel instead of a raw
+// stream — so the restart path shares one port-filter implementation with Create
+// (which writes to a real io.Writer) while still surfacing warnings through the
+// Start/Reset result's Notices. F8.
+type noticeWriter struct {
+	n     *notices
+	level NoticeLevel
+	buf   []byte
+}
+
+// Write splits the incoming bytes on newlines and appends each complete,
+// non-blank line as a Notice. A trailing partial line (no newline yet) is held
+// in buf until the next Write completes it; the helpers that write here always
+// newline-terminate, so nothing is lost in practice.
+func (w *noticeWriter) Write(p []byte) (int, error) {
+	w.buf = append(w.buf, p...)
+	for {
+		i := bytes.IndexByte(w.buf, '\n')
+		if i < 0 {
+			break
+		}
+		if line := strings.TrimSpace(string(w.buf[:i])); line != "" {
+			w.n.list = append(w.n.list, Notice{Level: w.level, Message: line})
+		}
+		w.buf = w.buf[i+1:]
+	}
+	return len(p), nil
 }
 
 // DestroyResult reports the outcome of a Destroy: any advisory notices emitted

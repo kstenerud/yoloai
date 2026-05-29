@@ -716,6 +716,26 @@ Trash is a lightweight quarantine: `os.Rename` into `~/.yoloai/trash/<name>` (`s
 
 ---
 
+## D34 — F8 tail: the `Manager.output` field is gone; output is per-call or returned
+
+**Date:** 2026-05-29. **Status:** Accepted. **Context:** D33 routed Create's stream to a per-call writer but left the embedded `m.output io.Writer` for the last holders (`EnsureSetup`, `recreateContainer`, `setSetupComplete`). The field is the F8 anti-pattern: a shared writer on a Manager documented concurrency-safe would interleave concurrent operations.
+
+**Decision.** Remove the `output` field from `Manager` and the `output` param from `NewManager`. Each remaining holder gets its writer explicitly or stops writing:
+- **`EnsureSetup(ctx, out io.Writer)` / `EnsureSetupNonInteractive(ctx, out io.Writer)`** — the base-image build stream + first-run "Tip" go to `out`. `Client.EnsureSetup` passes `c.output`; `Create` passes `m.outputFor(opts.Output)`.
+- **`recreateContainer(ctx, …, n *notices)`** — the restart path's only writer use is `filterAvailablePorts`. Rather than thread a raw writer into Start/Reset (which return Notices, not a stream), a small `noticeWriter` adapter (notice.go) turns each newline-terminated line into a `Notice` at the given level, so the port-availability warning surfaces through the Start/Reset result's Notices. Create keeps using a real `io.Writer` (its `CreateOptions.Output`); `launchContainer` stays shared and writer-based.
+- **`setSetupComplete`** — its "Setup complete" `Fprintln` was already **dead** (SystemClient's Manager used `io.Discard`; the CLI prints the line itself at `internal/cli/system/setup.go`). Deleted; the method now only persists state.
+- **`Client`** gains a stored `output io.Writer` (from `Options.Output`, defaulted to `io.Discard`) that seeds `Create`'s and `EnsureSetup`'s per-call writers.
+- **`Manager.outputFor`** fallback flips from `m.output` to `io.Discard` (a nil per-call writer means a direct library caller opted out; the Client always seeds it).
+
+**Consequences.**
+- `NewManager`'s signature drops one arg — wide but mechanical test ripple (~33 sites). Helper `newTestManager` lost its `output` param; tests that captured create-pipeline output now pass `CreateOptions.Output`.
+- CLI behavior unchanged: `Client.Output` (= `mgrOutput`, stderr or `io.Discard` under `--json`) still feeds the build stream / advisories via the Client-seeded per-call writers.
+- The Manager now holds **no** I/O sink — every operation's human-readable output is either a per-call writer arg or a returned `Notice`.
+
+**Composition.** Finishes F8. Realizes the §12 "no ambient state on library objects" stance at the Manager level and the D27 thin-CLI boundary (library returns data/streams, CLI renders). Sibling to D33.
+
+---
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.

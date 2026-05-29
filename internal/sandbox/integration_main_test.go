@@ -61,10 +61,10 @@ func TestMain(m *testing.M) {
 	}
 	dockerrt.RecordBuildChecksum(integLayout, "")
 
-	mgr := sandbox.NewManager(rt, slog.Default(), strings.NewReader(""), io.Discard, sandbox.WithLayout(integLayout))
+	mgr := sandbox.NewManager(rt, slog.Default(), strings.NewReader(""), sandbox.WithLayout(integLayout))
 	var setupErr error
 	step("ensuring base image is ready", func() {
-		setupErr = mgr.EnsureSetup(ctx)
+		setupErr = mgr.EnsureSetup(ctx, io.Discard)
 	})
 	if setupErr != nil {
 		fmt.Fprintf(os.Stderr, "EnsureSetup failed: %v\n", setupErr)

@@ -60,8 +60,8 @@ func tartIntegrationSetup(t *testing.T) (*sandbox.Manager, context.Context) {
 	}
 	t.Cleanup(func() { rt.Close() }) //nolint:errcheck // test cleanup
 
-	mgr := sandbox.NewManager(rt, slog.Default(), strings.NewReader(""), io.Discard, sandbox.WithLayout(layout))
-	require.NoError(t, mgr.EnsureSetup(ctx))
+	mgr := sandbox.NewManager(rt, slog.Default(), strings.NewReader(""), sandbox.WithLayout(layout))
+	require.NoError(t, mgr.EnsureSetup(ctx, io.Discard))
 
 	return mgr, ctx
 }

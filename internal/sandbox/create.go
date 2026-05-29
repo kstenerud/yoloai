@@ -248,15 +248,16 @@ type containerConfig struct {
 	Lifecycle          *lifecycleConfig      `json:"lifecycle,omitempty"`
 }
 
-// outputFor resolves the create-pipeline progress writer: the per-call
-// CreateOptions.Output when set, otherwise the Manager's output (the Client's
-// Options.Output). Never returns nil, so leaf writers can't panic on a nil
-// io.Writer regardless of which create helper a caller enters through. F8.
+// outputFor resolves a create-pipeline progress writer: the per-call
+// CreateOptions.Output when set, otherwise io.Discard. Never returns nil, so
+// leaf writers can't panic on a nil io.Writer regardless of which create helper
+// a caller enters through. The yoloai.Client seeds CreateOptions.Output from its
+// Options.Output, so a nil here means a direct library caller opted out. F8.
 func (m *Manager) outputFor(o io.Writer) io.Writer {
 	if o != nil {
 		return o
 	}
-	return m.output
+	return io.Discard
 }
 
 // Create creates and optionally starts a new sandbox.
@@ -292,7 +293,7 @@ func (m *Manager) Create(ctx context.Context, opts CreateOptions) (name string, 
 			return "", err
 		}
 	}
-	if err := m.EnsureSetup(ctx); err != nil {
+	if err := m.EnsureSetup(ctx, m.outputFor(opts.Output)); err != nil {
 		return "", err
 	}
 

@@ -345,11 +345,9 @@ func (m *Manager) setTmuxConf(value string) error {
 	return nil
 }
 
-// setSetupComplete marks setup as done and prints the completion message.
+// setSetupComplete marks setup as done. The user-facing "Setup complete"
+// message is printed by the CLI (`internal/cli/system/setup.go`) after
+// SystemClient.Setup returns — the library only persists state (F8).
 func (m *Manager) setSetupComplete() error {
-	if err := config.SaveState(m.layout, &config.State{SetupComplete: true}); err != nil {
-		return err
-	}
-	fmt.Fprintln(m.output, "\nSetup complete. To re-run setup at any time: yoloai system setup") //nolint:errcheck // best-effort output
-	return nil
+	return config.SaveState(m.layout, &config.State{SetupComplete: true})
 }
