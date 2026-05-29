@@ -155,6 +155,15 @@ func (l Layout) CacheDir() string {
 	return filepath.Join(l.DataDir, "cache")
 }
 
+// TrashDir returns DataDir/trash/, the quarantine location for broken
+// sandbox directories that prune cannot confidently classify as junk
+// (e.g. unreadable or version-too-new metadata). Quarantining instead
+// of deleting keeps repair reversible: the user restores with a plain
+// `mv`, and `system prune` only empties trash after explicit consent.
+func (l Layout) TrashDir() string {
+	return filepath.Join(l.DataDir, "trash")
+}
+
 // ExtensionsDir returns DataDir/extensions/.
 func (l Layout) ExtensionsDir() string {
 	return filepath.Join(l.DataDir, "extensions")

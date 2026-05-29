@@ -35,8 +35,8 @@ Full reference for commands, flags, configuration, and internals. For a quick ov
 | `yoloai system build [profile]` | Build or rebuild the base image (`--backend`, `--secret`, `--all`) |
 | `yoloai system check` | Verify prerequisites for CI/CD pipelines |
 | `yoloai system disk` | Report on-disk usage per backend (sandboxes + image cache + snapshots) |
-| `yoloai system doctor` | Show capability status for all backends and isolation modes |
-| `yoloai system prune` | Remove orphaned resources across all backends (`--dry-run`, `--yes`, `--cache`) |
+| `yoloai doctor` | Capability status for all backends + a read-only repair advisory (see [Repair & cleanup](#repair--cleanup)) |
+| `yoloai system prune` | Clean up leftover state across all backends (`--dry-run`, `--yes`, `--cache`) — see [Repair & cleanup](#repair--cleanup) |
 | `yoloai system setup` | Re-run interactive first-run setup |
 | `yoloai sandbox` (alias: `sb`) | Sandbox inspection |
 | `yoloai sandbox list` | List sandboxes and their status |
@@ -658,6 +658,35 @@ Container backends accumulate disk over time — image layers, overlayfs snapsho
 - **`yoloai system prune --cache`** — reclaims the backend image cache, snapshots, volumes, and build cache (in addition to the orphaned-resource cleanup the bare `system prune` already does). Forces yoloai-base to rebuild on the next `yoloai new`, so expect a multi-minute first run afterwards. Prune always runs across every available backend; `--dry-run` previews what would be removed.
 
 The cache prune is intentionally aggressive: backends don't tag their content by who created it, so `--cache` removes ALL unused image/snapshot/volume content the backend tracks, not only yoloai's. On a host dedicated to yoloai (CI, dev VM) that's exactly what you want; on a shared workstation, prefer the backend's own prune (`docker system prune`, `podman system prune`, etc.) so you don't nuke unrelated projects' caches.
+
+## Repair & cleanup
+
+Over time a yoloai install accumulates cruft: orphaned containers/VMs from crashed runs, stale lock files, leftover temp dirs, and the occasional half-created or corrupt sandbox dir. yoloai cleans this up itself — you don't need to know where any of it lives.
+
+**`yoloai doctor`** is the place to start. It's read-only — it never deletes anything — and reports four things alongside the backend capability status:
+
+- **Reclaimable now** — orphaned resources, lock files, temp dirs, and never-initialized sandbox dirs. Fix: `yoloai system prune`.
+- **Reclaimable space** — backend image/build caches. Fix: `yoloai system prune --cache` (forces a base rebuild).
+- **Unreviewed work** — broken sandbox dirs that still hold changes the agent made. yoloai refuses to touch these; review with `yoloai diff <name>` and remove with `yoloai destroy <name>` once you're done.
+- **Trash** — dirs that were quarantined rather than deleted (see below).
+
+**`yoloai system prune`** does the actual cleanup. It classifies every sandbox dir by *how recoverable it is* and never deletes anything that might hold your work:
+
+- **Deleted** — zero-stakes cruft: orphaned backend resources, stale locks, temp dirs, and never-initialized sandbox dirs (no metadata and no work directory).
+- **Refused** — dirs where yoloai can still detect uncommitted work (a dirty git copy, or a non-empty overlay upper layer). These are reported and left untouched; you review and remove them yourself.
+- **Quarantined to trash** — dirs whose metadata is corrupt or too new to read, but with no detectable work. Rather than guess, yoloai moves them to `~/.yoloai/trash/<name>` so nothing is lost.
+
+Use `--dry-run` to preview, and `--yes` to skip confirmation prompts (including the trash-deletion prompt).
+
+### Trash and recovery
+
+Quarantined dirs go to `~/.yoloai/trash/`. There's no dedicated restore command — a quarantined dir is just a normal directory, so recover it with `mv`:
+
+```bash
+mv ~/.yoloai/trash/<name> ~/.yoloai/sandboxes/<name>
+```
+
+`yoloai system prune` reports how much is in the trash and offers to empty it. Because trash may hold something you wanted, it always asks first (answer no to keep it); `--yes` empties it without prompting. Nothing else ever deletes the trash automatically.
 
 ## Security
 

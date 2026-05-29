@@ -24,3 +24,15 @@ func acquireMultiLock(_ config.Layout, _ ...string) (func(), error) {
 func ForceUnlock(_ config.Layout, _ string) (cleared bool, err error) {
 	return false, nil
 }
+
+// RemoveLockFile is a no-op on Windows — AcquireLock never creates a
+// lock file on this platform, so there is nothing to remove.
+func RemoveLockFile(_ config.Layout, _ string) error {
+	return nil
+}
+
+// SweepStaleLocks is a no-op on Windows — AcquireLock never creates lock
+// files on this platform, so there are none to sweep.
+func SweepStaleLocks(_ config.Layout, _ bool) ([]string, error) {
+	return nil, nil
+}

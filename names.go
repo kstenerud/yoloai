@@ -65,10 +65,12 @@ const (
 type PruneItemKind string
 
 const (
-	PruneKindContainer PruneItemKind = "container" // docker / podman / containerd
-	PruneKindImage     PruneItemKind = "image"     // docker / podman / containerd
-	PruneKindVM        PruneItemKind = "vm"        // tart
-	PruneKindTempDir   PruneItemKind = "temp_dir"  // yoloai-side: stale ~/.yoloai temp dirs
+	PruneKindContainer  PruneItemKind = "container"   // docker / podman / containerd
+	PruneKindImage      PruneItemKind = "image"       // docker / podman / containerd
+	PruneKindVM         PruneItemKind = "vm"          // tart
+	PruneKindTempDir    PruneItemKind = "temp_dir"    // yoloai-side: stale ~/.yoloai temp dirs
+	PruneKindSandboxDir PruneItemKind = "sandbox_dir" // yoloai-side: never-initialized sandbox dir (no recoverable work)
+	PruneKindLockFile   PruneItemKind = "lock_file"   // yoloai-side: orphaned per-sandbox .lock file
 )
 
 // LogSource names a structured-log stream emitted by one of yoloai's

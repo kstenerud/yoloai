@@ -4,6 +4,21 @@ Tracks breaking changes made during beta. Each entry should be included in relea
 
 ## Unreleased
 
+### `yoloai system doctor` moves to `yoloai doctor`
+
+The host health-check command is promoted to a top-level verb as part of the
+repair/cleanup surface (see `docs/dev/plans/system-repair-cleanup.md`). It now
+reports reclaimable cruft and sandboxes holding unreviewed work in addition to
+backend capability status, and delegates remediation to `yoloai system prune`
+and `yoloai destroy`.
+
+**Previous behavior:** `yoloai system doctor`.
+
+**New behavior:** `yoloai doctor` (same flags: `--backend`, `--isolation`,
+`--json`). The `system doctor` subcommand is removed.
+
+**Migration:** replace `yoloai system doctor` with `yoloai doctor`.
+
 ### Apply moves under `client.Sandbox(name).Workdir()`
 
 Step 4a of the F2 re-rooting (the first of several apply sub-steps). Go-embedder

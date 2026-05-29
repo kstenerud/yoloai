@@ -36,7 +36,7 @@ test/e2e/                → End-to-end tests against the compiled binary (build
 
 Public Go surface is the **`yoloai` package only** (W-L12). Every other Go package lives under `internal/` and is unreachable from external imports by the Go compiler itself. `cmd/yoloai` is the binary entry, not a library.
 
-Dependency direction (W-L8 + W-L12 shape): `cmd/yoloai` → `internal/cli` → `yoloai` (Client + SystemClient) → `internal/sandbox` + `internal/sandbox/patch` + `internal/sandbox/store` + `internal/runtime`; `internal/sandbox` → `internal/sandbox/archetype` + `internal/sandbox/store` + `internal/runtime` + `internal/agent` + `internal/workspace`; `internal/sandbox/patch` → `internal/sandbox` + `internal/sandbox/store`; `internal/sandbox/store` is a leaf (only imports stdlib, `internal/config`, other `internal/*`); `internal/agent` stands alone; `internal/mcpsrv` depends on `yoloai` (not `sandbox.Manager`). The CLI doesn't reach into `internal/sandbox/*` or `internal/runtime/*` for orchestration — every command goes through `yoloai.Client` or `yoloai.SystemClient`. The `withRuntime`/`withManager` helpers were removed in W-L10. Cross-backend enumeration (`ls`, `system doctor`, `system info`) goes through `SystemClient.ListAcrossBackends` / `Doctor` / `Info` (F23); the only remaining `cliutil.NewRuntime` callers are `cliutil.CheckBackend` (the availability-probe chokepoint, used by a few read-only displays) and the backend-scoped `system tart` subtree. Depguard (`.golangci.yml`) enforces the boundary going forward.
+Dependency direction (W-L8 + W-L12 shape): `cmd/yoloai` → `internal/cli` → `yoloai` (Client + SystemClient) → `internal/sandbox` + `internal/sandbox/patch` + `internal/sandbox/store` + `internal/runtime`; `internal/sandbox` → `internal/sandbox/archetype` + `internal/sandbox/store` + `internal/runtime` + `internal/agent` + `internal/workspace`; `internal/sandbox/patch` → `internal/sandbox` + `internal/sandbox/store`; `internal/sandbox/store` is a leaf (only imports stdlib, `internal/config`, other `internal/*`); `internal/agent` stands alone; `internal/mcpsrv` depends on `yoloai` (not `sandbox.Manager`). The CLI doesn't reach into `internal/sandbox/*` or `internal/runtime/*` for orchestration — every command goes through `yoloai.Client` or `yoloai.SystemClient`. The `withRuntime`/`withManager` helpers were removed in W-L10. Cross-backend enumeration (`ls`, `doctor`, `system info`) goes through `SystemClient.ListAcrossBackends` / `Doctor` / `Info` (F23); the only remaining `cliutil.NewRuntime` callers are `cliutil.CheckBackend` (the availability-probe chokepoint, used by a few read-only displays) and the backend-scoped `system tart` subtree. Depguard (`.golangci.yml`) enforces the boundary going forward.
 
 ## File Index
 
@@ -93,7 +93,7 @@ should import the root cli package back (the few tests that need
 | `lowdisk.go` | `WarnIfLowDisk`, `HumanBytes` — free-space courtesy check used by new/clone/build/disk. |
 | `groups.go` | Exported help group IDs (`GroupLifecycle`, `GroupWorkflow`, `GroupSandboxTools`, `GroupAdmin`) — referenced by every subpackage that registers a top-level command. |
 | `buildinfo.go` | `SetBuildInfo` + `Version`/`Commit`/`Date` globals — set once in `Execute()` so subpackages (bug-report, version) can read build metadata without threading it through cobra calls. |
-| `check.go` | `CheckBackend` — best-effort backend-availability probe used by `ls`, `system doctor`, `system tart` gating. |
+| `check.go` | `CheckBackend` — best-effort backend-availability probe used by `ls`, `doctor`, `system tart` gating. |
 | `logger.go` | Multi-sink slog logger. Fans records to stderr, `cli.jsonl`, and the bug-report temp file. |
 
 #### Lifecycle (`internal/cli/lifecycle/`)
@@ -136,7 +136,7 @@ after sandboxcmd.
 | File | Purpose |
 |------|---------|
 | `system.go` | Parent + `build` + `setup` wiring. |
-| `build`/`prune`/`check`/`disk`/`doctor`/`info`/`setup`/`completion` and `backends_agents.go` | Each system subcommand. |
+| `build`/`prune`/`check`/`disk`/`info`/`setup`/`completion` and `backends_agents.go` | Each system subcommand. |
 | `tart/` | Nested subpackage — the one sanctioned importer of `internal/runtime/tart` (depguard `cli-backend-scope` rule). |
 
 #### Single-command subpackages
@@ -144,6 +144,7 @@ after sandboxcmd.
 | Subpackage | Command | Notes |
 |------------|---------|-------|
 | `mcp/` | `yoloai mcp serve|proxy` | MCP server + proxy. |
+| `doctorcmd/` | `yoloai doctor` | Capability report + read-only repair advisory (reclaimable-now / reclaimable-space / unreviewed-work / trash). Promoted from `system doctor`. |
 | `profile/` | `yoloai profile create/list/info/delete` | Profile management. |
 | `configcmd/` | `yoloai config get/set/reset` | Suffixed to avoid collision with `internal/config`. |
 | `xcmd/` | `yoloai x` | Extension runner (loads user YAML, builds Cobra commands dynamically). |
@@ -444,7 +445,7 @@ Host context: `IsRoot`, `IsWSL2`, `InContainer`, `KVMGroup`. Detected once per i
 | `yoloai system build` | `cli/system/system.go` | `yoloai.SystemClient.Build()` |
 | `yoloai system setup` | `cli/system/system.go` + `cli/system/setup.go` (wizard) | `yoloai.SystemClient.Setup()` |
 | `yoloai system check` | `cli/system/check.go` | `yoloai.SystemClient.Check()` |
-| `yoloai system doctor` | `cli/system/doctor.go` | `caps.RunChecks()` + `caps.FormatDoctor()` in `runtime/caps/` |
+| `yoloai doctor` | `cli/doctorcmd/doctor.go` | `SystemClient.Doctor()` (→ `caps.RunChecks()` + `caps.FormatDoctor()`) + a dry-run `SystemClient.Prune()` and `DiskUsage()` for the advisory sections |
 | `yoloai system prune` | `cli/system/prune.go` | `yoloai.SystemClient.Prune()` |
 | `yoloai system tart` | `cli/system/tart/tart.go` | `tart.RuntimeVersion` / `tart.CopyRuntimeToVM()` / `tart.Runtime.ListVMs` / `tart.Runtime.DeleteVM` |
 | `yoloai system completion` | `cli/system/completion.go` | Cobra's built-in completion generators |
@@ -584,20 +585,56 @@ Manager.Start (sandbox/lifecycle.go)
   → StatusRemoved: recreateContainer (rebuild state from environment.json via runtime.Create + runtime.Start)
 ```
 
-### Capability Detection (`yoloai system doctor`)
+### Capability Detection + Repair Advisory (`yoloai doctor`)
 
 ```
-newSystemDoctorCmd (cli/system_doctor.go)
-  → caps.DetectEnvironment() — probe host (root, WSL2, container, KVM group)
-  → For each registered backend:
-    → runtime.New(ctx, name) — try to connect
-    → rt.RequiredCapabilities(baseMode) — get base checks
-    → For each rt.SupportedIsolationModes():
-      → rt.RequiredCapabilities(mode) — get mode-specific checks
-    → caps.RunChecks(capabilities, env) → []CheckResult
-    → caps.ComputeAvailability(results) → Ready/NeedsSetup/Unavailable
-  → caps.FormatDoctor(reports, output) — render table with fix instructions
+doctorcmd.NewCmd (cli/doctorcmd/doctor.go)
+  → SystemClient.Doctor() — capability report:
+    → caps.DetectEnvironment() — probe host (root, WSL2, container, KVM group)
+    → For each registered backend:
+      → runtime.New(ctx, name) — try to connect
+      → rt.RequiredCapabilities(baseMode) — get base checks
+      → For each rt.SupportedIsolationModes():
+        → rt.RequiredCapabilities(mode) — get mode-specific checks
+      → caps.RunChecks(capabilities, env) → []CheckResult
+      → caps.ComputeAvailability(results) → Ready/NeedsSetup/Unavailable
+    → caps.FormatDoctor(reports, output) — render table with fix instructions
+  → SystemClient.Prune({DryRun:true}) + SystemClient.DiskUsage() — read-only advisory:
+    → Reclaimable now    (RemovedItems)        → "yoloai system prune"
+    → Reclaimable space  (per-backend caches)  → "yoloai system prune --cache"
+    → Unreviewed work    (RefusedDataBearing)  → "yoloai diff / yoloai destroy"
+    → Trash              (TrashContents)       → recover with mv / reclaim via prune
 ```
+
+doctor is **pure read + delegate**: it never deletes or quarantines —
+it only reports and prints the command that does the work. Exit code is 1
+only when a backend NeedsSetup; advisory sections never affect it.
+
+### Sandbox-dir recoverability classification (`SystemClient.Prune`)
+
+Prune classifies every dir under `sandboxes/` by *recoverability*, not by
+"brokenness". The bulk path only ever **removes** zero-stakes items; anything
+that might hold user data is refused-and-reported or quarantined, never
+silently deleted. The classifier (`classifySandboxes` in `system_client.go`)
+crosses the `store.LoadMeta` failure kind with `sandbox.ProbeWorkData`:
+
+```
+meta loads cleanly                                   → known     (untouched; used for backend orphan matching)
+data detected (ProbeWorkData = WorkDataPresent)      → refuse    (RefusedDataBearing — user runs diff/destroy)
+missing meta + no work dir   (never-init)            → delete    (RemovedItems, PruneKindSandboxDir)
+corrupt / version-too-new meta, no detectable data   → trash     (Trashed — quarantined to TrashDir, recover with mv)
+```
+
+`ProbeWorkData(sandboxDir)` (package `sandbox`) detects work **host-side, no
+container needed**: copy-mode dirs via `detectChanges` on `work/<enc>/.git`;
+overlay-mode dirs via a non-empty `work/<enc>/upper/`. It returns
+WorkDataNone / WorkDataPresent / WorkDataAmbiguous so corrupt-meta dirs with
+ambiguous content default to trash (the safe choice), not deletion.
+
+Quarantine is a plain `os.Rename` into `~/.yoloai/trash/<name>`
+(`store.QuarantineSandbox`); there is no dedicated restore command — recover
+with `mv`. The CLI confirms before emptying trash (it may hold wanted data);
+`--yes` skips the prompt.
 
 ## Host Directory Layout
 

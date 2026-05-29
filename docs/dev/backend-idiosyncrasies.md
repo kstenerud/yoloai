@@ -62,6 +62,7 @@ row to the index.
 | `yoloai new` times out / "command timed out" on Tart; sandbox.jsonl stops after xcodebuild firstlaunch; agent never starts | [Tart: signal_secrets_consumed deadlock with get_working_dir](#tart-signal_secrets_consumed-must-run-before-get_working_dir) |
 | Agent silently fails after `yoloai restart` on Tart (node not found) | [Tart: node@24 in .zprofile breaks agent launch](#node24-in-zprofile-breaks-agent-launch-after-restart) |
 | Agent silently fails after `yoloai restart` on Seatbelt (Swift PM sandbox error) | [Seatbelt: swift-wrapper not sourced on restart](#swift-wrapper-not-sourced-on-restart) |
+| Agent dies silently/SIGTRAP (exit 133) on Seatbelt at launch; ICU/timezone deny in unified log | [Seatbelt: SBPL subpaths need vnode-resolved paths](#agent-dies-silently-sigtrap--sbpl-subpath-rules-must-use-vnode-resolved-paths) |
 | VS Code tunnel re-prompts for login on every container restart | [VS Code CLI: hostname-based keychain encryption](#vs-code-cli-file-keychain-uses-hostname-in-encryption-key) |
 | Second sandbox tunnel loops `error access singleton` forever | [VS Code CLI: singleton lock blocks concurrent tunnels](#vs-code-cli-singleton-lock-blocks-concurrent-tunnels) |
 | DNS works but HTTPS to api.anthropic.com times out | [DNS: timeout = API unreachable, not DNS](#request-timed-out-in-claude-code--api-unreachable-not-dns-failure) |
@@ -73,6 +74,7 @@ row to the index.
 | `FileNotFoundError` at `get_working_dir()` / agent starts in wrong directory | [Tart: workdir setup races Python startup](#tart-vm-workdir-setup-races-python-startup) |
 | `yoloai apply` fails: `git add: git [add -A]: exit status 128: … index.lock: File exists` while agent is running | [Docker/Podman: agent git and apply git race on index.lock](#dockerpodman-agent-git-and-apply-git-race-on-indexlock) |
 | `FileNotFoundError: 'tmux'` in `sandbox-setup.py::setup_tmux_session` on Tart VM | [Tart: transient PATH failure makes tmux unresolvable at call time](#tart-transient-path-failure-makes-tmux-unresolvable-at-call-time) |
+| Is it safe to delete a `.lock` file while holding its flock? (prune / Destroy) | [Removing a .lock file while holding its flock is safe](#removing-a-lock-file-while-holding-its-flock-is-safe) |
 
 ---
 
@@ -1203,6 +1205,18 @@ VirtioFS should only be used for:
 
 ---
 
+### Agent dies silently (SIGTRAP) — SBPL subpath rules must use vnode-resolved paths
+
+**Symptom:** Under Seatbelt the agent (claude/Node) dies 0.5–3.5s after launch with no output; the tmux pane is already dead at the post-launch check. `sandbox-exec -f profile.sb claude --version` exits 133 (128+5 = SIGTRAP). A `.ips` crash report in `~/Library/Logs/DiagnosticReports/` shows `EXC_BREAKPOINT`/`SIGTRAP` ("pointer authentication trap IB") on the main thread inside ICU `std::__call_once` / `uenum_count`. The macOS unified log shows `deny file-read-data /private/var/db/timezone/...`.
+
+**Explanation:** macOS firmlinks `/var` → `/private/var` (also `/etc`, `/tmp`), and the sandbox enforces access at the **vnode level — after symlink resolution**. An SBPL rule for `(subpath "/var/db")` does **not** match a read of the resolved `/private/var/db`. ICU loads timezone data from `/private/var/db/timezone/tz/<ver>/zoneinfo/...` at startup; when that read is denied, ICU aborts the process via SIGTRAP before any agent output. `writeProfileSystemPaths` was the only profile section that emitted raw `systemReadPaths()` entries without running them through `resolvePathVariants`, so `/var/db` and `/var/run` rules never covered their `/private/var/...` targets.
+
+**Fix:** Wrap every `systemReadPaths()` entry in `resolvePathVariants()` so the resolved `/private/var/...` variant is emitted alongside the original — matching what every other profile section already does.
+
+**Code:** `runtime/seatbelt/profile.go::writeProfileSystemPaths` (+ `resolvePathVariants`); regression test `seatbelt_test.go::TestGenerateProfile_SystemPathsSymlinkResolved`
+
+---
+
 ### QEMU: slow startup exceeds smoke test stall grace period
 
 **Symptom:** `full_workflow/containerd-vm` fails with `"agent idle for 9s+ without sentinel 'done'"` even though the sandbox and agent are healthy.
@@ -1352,5 +1366,33 @@ constant. Import happens before xcodebuild runs, so the PATH scan succeeds.
 
 **Code:** `internal/runtime/monitor/tmux_io.py` (`_resolve_tmux_bin`,
 `_TMUX_BIN`); `internal/runtime/monitor/sandbox-setup.py::setup_tmux_session`.
+
+---
+
+## yoloai host-side (locks, prune)
+
+### Removing a `.lock` file while holding its flock is safe
+
+**Symptom / concern:** `store.RemoveLockFile` and `SweepStaleLocks` `os.Remove`
+a `<name>.lock` file *while the process still holds the flock on it*. This looks
+like it should break mutual exclusion or error out.
+
+**Explanation:** `flock(2)` is advisory and binds to the **open file
+description (the fd), not the path**. Unlinking the path doesn't release the
+lock — the holder keeps it until the fd closes. A concurrent acquirer that
+re-creates `<name>.lock` gets a **fresh inode** and its own independent lock, so
+removal-while-held can never hand two processes the same lock. The stale-lock
+sweep relies on the inverse: it try-acquires (`locking.AcquireNonBlocking`) and
+**skips on `ErrWouldBlock`**, so a file with a live holder is never removed; only
+genuinely orphaned lock files (no holder) are swept.
+
+**Consequence for design:** lock files can be removed eagerly on the happy path
+(`Destroy`, failed `Create` rollback) without a PID check, and the prune sweep is
+safe to run concurrently with live sandboxes. Lock files therefore don't
+accumulate, and `system prune` only ever removes the truly-orphaned ones.
+
+**Code:** `internal/sandbox/store/lock_unix.go` (`RemoveLockFile`,
+`SweepStaleLocks`); `internal/sandbox/lifecycle.go` (Destroy);
+`internal/sandbox/create.go` (Create rollback).
 
 ---

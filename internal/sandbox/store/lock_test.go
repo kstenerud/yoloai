@@ -322,6 +322,153 @@ func TestForceUnlock_NoLockFileIsNoOp(t *testing.T) {
 	assert.False(t, cleared, "expected cleared=false when no lock file existed")
 }
 
+// TestRemoveLockFile_RemovesWhileHeld verifies a holder can remove its own
+// lock file (no PID check, unlike ForceUnlock) and that the lock file is
+// gone afterward — the Destroy/Create-rollback cleanup path.
+func TestRemoveLockFile_RemovesWhileHeld(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	layout := testLayout(t)
+
+	unlock, err := AcquireLock(layout, "mybox")
+	require.NoError(t, err)
+	defer unlock()
+
+	require.NoError(t, RemoveLockFile(layout, "mybox"))
+
+	_, statErr := os.Stat(layout.SandboxLockPath("mybox"))
+	assert.True(t, os.IsNotExist(statErr), "lock file should be gone after RemoveLockFile")
+}
+
+// TestRemoveLockFile_NoLockFileIsNoOp verifies removing a non-existent lock
+// file is a successful no-op (idempotent).
+func TestRemoveLockFile_NoLockFileIsNoOp(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	assert.NoError(t, RemoveLockFile(testLayout(t), "never-existed"))
+}
+
+// TestRemoveLockFile_ReacquirableAfterRemoval verifies that after a holder
+// removes its lock file (while still holding the flock), a fresh acquire
+// succeeds — the flock on the old, now-unlinked inode does not block a new
+// acquire on a freshly created file.
+func TestRemoveLockFile_ReacquirableAfterRemoval(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	layout := testLayout(t)
+
+	unlock, err := AcquireLock(layout, "mybox")
+	require.NoError(t, err)
+	require.NoError(t, RemoveLockFile(layout, "mybox"))
+
+	unlock2, err := AcquireLock(layout, "mybox")
+	require.NoError(t, err, "should be able to acquire after the held lock file was removed")
+	unlock2()
+	unlock()
+}
+
+// TestSweepStaleLocks_RemovesOrphanedLock verifies a .lock file whose
+// sandbox dir is gone and that no process holds is swept.
+func TestSweepStaleLocks_RemovesOrphanedLock(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	layout := testLayout(t)
+
+	// Create an orphaned lock file (no sandbox dir, not held).
+	unlock, err := AcquireLock(layout, "ghost")
+	require.NoError(t, err)
+	unlock() // releases flock; file remains on disk by design
+
+	removed, err := SweepStaleLocks(layout, false)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"ghost"}, removed)
+	assert.NoFileExists(t, layout.SandboxLockPath("ghost"))
+}
+
+// TestSweepStaleLocks_SkipsHeldLock verifies a lock currently held by a
+// live holder is not swept (try-acquire would block).
+func TestSweepStaleLocks_SkipsHeldLock(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	layout := testLayout(t)
+
+	unlock, err := AcquireLock(layout, "held")
+	require.NoError(t, err)
+	defer unlock()
+
+	removed, err := SweepStaleLocks(layout, false)
+	require.NoError(t, err)
+	assert.NotContains(t, removed, "held")
+	assert.FileExists(t, layout.SandboxLockPath("held"))
+}
+
+// TestSweepStaleLocks_SkipsLockBesideExistingDir verifies a lock file is
+// left alone when its sandbox directory still exists (legitimate companion).
+func TestSweepStaleLocks_SkipsLockBesideExistingDir(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	layout := testLayout(t)
+
+	require.NoError(t, os.MkdirAll(layout.SandboxDir("live"), 0o750))
+	unlock, err := AcquireLock(layout, "live")
+	require.NoError(t, err)
+	unlock()
+
+	removed, err := SweepStaleLocks(layout, false)
+	require.NoError(t, err)
+	assert.NotContains(t, removed, "live")
+	assert.FileExists(t, layout.SandboxLockPath("live"))
+}
+
+// TestSweepStaleLocks_DryRunKeepsFile verifies dry-run reports but does not
+// remove.
+func TestSweepStaleLocks_DryRunKeepsFile(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	layout := testLayout(t)
+
+	unlock, err := AcquireLock(layout, "ghost")
+	require.NoError(t, err)
+	unlock()
+
+	removed, err := SweepStaleLocks(layout, true)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"ghost"}, removed)
+	assert.FileExists(t, layout.SandboxLockPath("ghost"), "dry-run must not remove the file")
+}
+
+// TestQuarantineSandbox_MovesToTrash verifies a sandbox dir is relocated
+// into the trash dir.
+func TestQuarantineSandbox_MovesToTrash(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	layout := testLayout(t)
+
+	src := layout.SandboxDir("broken")
+	require.NoError(t, os.MkdirAll(src, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(src, "marker"), []byte("x"), 0o600))
+
+	dest, err := QuarantineSandbox(layout, "broken")
+	require.NoError(t, err)
+	assert.NoDirExists(t, src)
+	assert.FileExists(t, filepath.Join(dest, "marker"))
+	assert.Equal(t, filepath.Join(layout.TrashDir(), "broken"), dest)
+}
+
+// TestQuarantineSandbox_SuffixesOnCollision verifies a second quarantine of
+// the same name does not clobber the first.
+func TestQuarantineSandbox_SuffixesOnCollision(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	layout := testLayout(t)
+
+	mk := func() {
+		require.NoError(t, os.MkdirAll(layout.SandboxDir("dup"), 0o750))
+	}
+	mk()
+	dest1, err := QuarantineSandbox(layout, "dup")
+	require.NoError(t, err)
+	mk()
+	dest2, err := QuarantineSandbox(layout, "dup")
+	require.NoError(t, err)
+
+	assert.NotEqual(t, dest1, dest2)
+	assert.DirExists(t, dest1)
+	assert.DirExists(t, dest2)
+}
+
 // TestIsProcessAlive verifies the PID-aliveness check returns true for
 // the test process itself and false for sentinel non-PIDs.
 func TestIsProcessAlive(t *testing.T) {

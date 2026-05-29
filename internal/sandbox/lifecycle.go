@@ -365,7 +365,12 @@ func (m *Manager) Destroy(ctx context.Context, name string) (*DestroyResult, err
 		return nil, err
 	}
 	defer unlock()
-	return m.destroy(ctx, name)
+	res, derr := m.destroy(ctx, name)
+	// Remove the per-sandbox lock file while we still hold the flock so
+	// the <name>.lock file doesn't accumulate after the sandbox dir is
+	// gone. Best-effort: a leftover lock file is harmless, not corruption.
+	_ = store.RemoveLockFile(m.layout, name)
+	return res, derr
 }
 
 func (m *Manager) destroy(ctx context.Context, name string) (*DestroyResult, error) {
@@ -714,6 +719,15 @@ func (m *Manager) NeedsConfirmation(ctx context.Context, name string) (bool, str
 
 	meta, err := store.LoadMeta(sandboxDir)
 	if err != nil {
+		// Meta is unreadable (a broken sandbox). Don't assume it's empty —
+		// that silently discards recoverable work. Fall back to a
+		// filesystem-level probe of work/ so destroy still prompts.
+		if state, detail := ProbeWorkData(sandboxDir); state != WorkDataNone {
+			if detail == "" {
+				detail = "work directory present but metadata is unreadable"
+			}
+			return true, detail
+		}
 		return false, ""
 	}
 

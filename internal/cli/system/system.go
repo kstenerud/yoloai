@@ -31,7 +31,6 @@ func NewCmd(version, commit, date string) *cobra.Command {
 		newSystemBuildCmd(),
 		newSystemCheckCmd(),
 		newSystemDiskCmd(),
-		newSystemDoctorCmd(),
 		newSystemPruneCmd(),
 		newSystemSetupCmd(),
 		tart.NewCmd(cliutil.Layout, cliutil.NewRuntime),

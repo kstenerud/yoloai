@@ -7,8 +7,10 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net"
 	"os"
@@ -241,12 +243,25 @@ type containerConfig struct {
 
 // Create creates and optionally starts a new sandbox.
 // Returns the sandbox name on success (empty on no-start).
-func (m *Manager) Create(ctx context.Context, opts CreateOptions) (string, error) {
-	unlock, err := store.AcquireLock(m.layout, opts.Name)
-	if err != nil {
-		return "", err
+func (m *Manager) Create(ctx context.Context, opts CreateOptions) (name string, err error) {
+	unlock, lockErr := store.AcquireLock(m.layout, opts.Name)
+	if lockErr != nil {
+		return "", lockErr
 	}
-	defer unlock()
+	defer func() {
+		// On a failed Create that left no sandbox directory behind, the
+		// lock file created at acquire-time is orphaned cruft — remove it
+		// while we still hold the flock (safe: the flock is bound to our
+		// open fd, not the path). On success, or when a directory remains
+		// (e.g. a partially-replaced sandbox), the lock file is the
+		// sandbox's legitimate companion and stays.
+		if err != nil {
+			if _, statErr := os.Stat(m.layout.SandboxDir(opts.Name)); errors.Is(statErr, fs.ErrNotExist) {
+				_ = store.RemoveLockFile(m.layout, opts.Name)
+			}
+		}
+		unlock()
+	}()
 
 	slog.Info("creating sandbox", "event", "sandbox.create", "sandbox", opts.Name, "agent", opts.Agent, "backend", m.backend)
 	// When running as root under sudo, API key env vars (e.g. CLAUDE_CODE_OAUTH_TOKEN)

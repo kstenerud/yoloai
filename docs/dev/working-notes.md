@@ -667,6 +667,36 @@ Moving DiagHint/TmuxSocket would be pure churn (no backend drops them) and there
 
 ---
 
+## D32 — Self-healing cleanup: classify sandbox dirs by recoverability; promote doctor to top-level
+
+**Date:** 2026-05-28. **Status:** Accepted. **Context:** Broken sandbox dirs, stale lock files, orphaned backend resources, and multi-GB backend caches accumulate over time; an end user has no way to know where any of it lives or how to clean it safely. The design lives in `docs/dev/plans/system-repair-cleanup.md` (phases 0–5).
+
+**Decision.** `SystemClient.Prune` classifies every dir under `sandboxes/` by **recoverability, not brokenness**, and the bulk path only ever *removes* zero-stakes items. The classifier crosses the `store.LoadMeta` failure kind with a meta-independent probe `sandbox.ProbeWorkData` (copy mode: `detectChanges` on `work/<enc>/.git`; overlay mode: non-empty `work/<enc>/upper/` — both host-side, no container):
+
+- meta loads → **known** (untouched);
+- work detected (any failure kind) → **refuse + report** (`RefusedDataBearing`; user runs diff/destroy);
+- missing meta + no work dir → **delete** (never-init, zero-stakes);
+- corrupt / version-too-new meta with no detectable work → **quarantine to trash** (the safe default).
+
+Trash is a lightweight quarantine: `os.Rename` into `~/.yoloai/trash/<name>` (`store.QuarantineSandbox`). **No dedicated restore command** — recover with `mv`. Trash deletion is decoupled from `--cache` and conservative: prune prompts before emptying (it may hold wanted data); `--yes` skips. Lock files are swept only when no live flock holder exists (try-acquire); normal `Destroy` / failed `Create` now remove their own lock file (self-heal on the happy path, not just via prune).
+
+`doctor` is promoted from `yoloai system doctor` to top-level **`yoloai doctor`** and extended into a **pure read + delegate** repair advisory: it runs a dry-run prune + DiskUsage and reports four sections (reclaimable-now → `system prune`; reclaimable-space → `system prune --cache`; unreviewed-work → diff/destroy; trash → mv/prune). doctor never deletes — it only prints the command that does.
+
+**Rejected.**
+- *Silently deleting unreadable-meta dirs.* A corrupt `environment.json` doesn't mean the `work/` tree is worthless. Quarantine-by-default trades a little disk for never destroying unrecoverable data.
+- *A dedicated `restore`/`untrash` command.* Trash entries are plain dirs; `mv` is the obvious, composable recovery. Building a bespoke command would reinvent the filesystem (violates "don't reinvent the wheel").
+- *`doctor --fix`.* Keeping doctor read-only (option a) preserves a clean see/clean/remove verb split: see → `doctor`; clean invisible → `system prune`; remove visible → `destroy`. A `--fix` flag would blur that and put deletion behind a diagnostic.
+- *Folding lock removal into prune only.* Lock files would still accumulate between prunes; removing them on Destroy/Create-rollback keeps the steady state clean.
+
+**Consequences.**
+- New public surface on `SystemClient`: `PruneResult.{Trashed, RefusedDataBearing, TrashContents}`, `EmptyTrash`; `sandbox.ProbeWorkData`; `store.{RemoveLockFile, SweepStaleLocks, QuarantineSandbox}`; `PruneKind{SandboxDir,LockFile}`; layout `TrashDir`.
+- `doctor` moves to its own package `internal/cli/doctorcmd`; removed from `system`'s subcommand set. Breaking change tracked in `docs/BREAKING-CHANGES.md`.
+- flock removal-while-held is safe because flock binds to the fd, not the path — documented in `backend-idiosyncrasies.md`.
+
+**Composition.** Builds on the SystemClient cross-backend idiom (D31) and the thin-CLI / library-owns-logic boundary (D27, D-F layering). Applies the design principles "copy/diff/apply protects originals" and "don't reinvent the wheel" (trash = `mv`).
+
+---
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.

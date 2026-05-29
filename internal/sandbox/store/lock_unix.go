@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -173,6 +174,86 @@ func ForceUnlock(layout config.Layout, name string) (cleared bool, err error) {
 		return false, fmt.Errorf("remove lock file %s: %w", path, err)
 	}
 	return true, nil
+}
+
+// RemoveLockFile removes the per-sandbox lock file unconditionally.
+// Unlike ForceUnlock, it does NOT check the holder PID — it is meant to
+// be called by the lock holder itself (e.g. Destroy, which holds the
+// flock while it tears the sandbox down) so the <name>.lock file does
+// not accumulate after the sandbox directory is gone.
+//
+// Safe to call while holding the flock: on Unix the flock is bound to
+// the open fd, not the path, so unlinking the path leaves the caller's
+// lock valid until its fd closes. A concurrent acquirer in the window
+// between unlink and fd-close simply creates a fresh file and flocks
+// that new inode — it never collides with the inode being removed.
+//
+// Best-effort: a removal failure is returned but callers typically
+// ignore it (the lock file is harmless leftover, not corruption).
+func RemoveLockFile(layout config.Layout, name string) error {
+	path := layout.SandboxLockPath(name)
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("remove lock file %s: %w", path, err)
+	}
+	return nil
+}
+
+// SweepStaleLocks removes orphaned per-sandbox lock files: <name>.lock
+// entries in SandboxesDir whose sandbox directory no longer exists AND
+// that no live process currently holds. It returns the names whose lock
+// files were removed (or, under dryRun, would be removed).
+//
+// Liveness is proven by a non-blocking try-acquire: if the flock succeeds
+// the file has no live holder and is safe to remove; if it would block,
+// an operation is mid-flight (e.g. a `Create` that acquired the lock
+// before creating the directory) and the file is left alone. This is why
+// the sweep tolerates the "dir gone but lock held" window without racing
+// a concurrent create/destroy.
+//
+// dryRun reports without removing.
+func SweepStaleLocks(layout config.Layout, dryRun bool) ([]string, error) {
+	dir := layout.SandboxesDir()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read sandboxes dir %s: %w", dir, err)
+	}
+
+	var removed []string
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".lock") {
+			continue
+		}
+		name := strings.TrimSuffix(entry.Name(), ".lock")
+		// A lock file beside an existing sandbox dir is its legitimate
+		// companion — leave it.
+		if _, statErr := os.Stat(layout.SandboxDir(name)); statErr == nil {
+			continue
+		}
+
+		path := filepath.Join(dir, entry.Name())
+		release, acqErr := locking.AcquireNonBlocking(path)
+		if acqErr != nil {
+			// ErrWouldBlock (live holder) or a genuine open error — skip.
+			continue
+		}
+		if dryRun {
+			release()
+			removed = append(removed, name)
+			continue
+		}
+		// Remove while holding the flock (safe — the flock is bound to our
+		// open fd, not the path), then release.
+		rmErr := os.Remove(path)
+		release()
+		if rmErr != nil && !errors.Is(rmErr, fs.ErrNotExist) {
+			continue
+		}
+		removed = append(removed, name)
+	}
+	return removed, nil
 }
 
 // newLockedError reads the lock file's recorded holder PID,

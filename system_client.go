@@ -5,6 +5,7 @@ package yoloai
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -472,14 +473,29 @@ type PruneOptions struct {
 	Output io.Writer
 }
 
-// PruneResult is what SystemClient.Prune returns. RemovedItems lists
-// every backend resource and temp dir that was (or, under DryRun,
-// would be) removed. BrokenSandboxes is informational: sandbox dirs
-// that exist but can't load metadata; Prune does not touch them.
+// PruneResult is what SystemClient.Prune returns.
+//
+//   - RemovedItems lists everything that was (or, under DryRun, would be)
+//     removed: backend resources, stale temp dirs, never-initialized
+//     sandbox dirs (PruneKindSandboxDir), and orphaned lock files
+//     (PruneKindLockFile).
+//   - Trashed lists sandbox dirs quarantined to the trash dir because
+//     their metadata was unreadable but no recoverable work was detected.
+//   - RefusedDataBearing lists broken sandbox dirs Prune left untouched
+//     because recoverable user data was detected — the user must review
+//     and remove them explicitly.
+//   - TrashContents summarises the current trash dir so callers can tell
+//     the user how much is recoverable (and reclaimable) there.
+//
+// The bulk path (Prune) only ever *removes* zero-stakes items; anything
+// that might hold user data is refused-and-reported or quarantined, never
+// silently deleted.
 type PruneResult struct {
-	RemovedItems    []PruneItem
-	FreedBytes      int64 // best-effort; 0 when no backend reported byte counts
-	BrokenSandboxes []BrokenSandbox
+	RemovedItems       []PruneItem
+	FreedBytes         int64 // best-effort; 0 when no backend reported byte counts
+	Trashed            []TrashedSandbox
+	RefusedDataBearing []RefusedSandbox
+	TrashContents      TrashSummary
 }
 
 // PruneItem describes one removed (or removable) item.
@@ -497,12 +513,31 @@ type PruneItem struct {
 	Bytes int64
 }
 
-// BrokenSandbox is an entry in DataDir/sandboxes/ whose meta.json
-// can't be loaded. Surfaced informationally by Prune so the user can
-// clean it up via `yoloai destroy <name>`.
-type BrokenSandbox struct {
-	Name string
-	Path string
+// TrashedSandbox is a sandbox directory Prune quarantined to the trash
+// dir because its metadata was unreadable/corrupt (or it was incomplete)
+// but no recoverable work was detected. Recoverable with a plain `mv`.
+type TrashedSandbox struct {
+	Name   string
+	From   string // original sandbox dir path
+	Dest   string // path under the trash dir (empty under DryRun)
+	Reason string // why it was quarantined
+}
+
+// RefusedSandbox is a broken sandbox dir Prune deliberately left
+// untouched because ProbeWorkData detected recoverable user data. The
+// user reviews it (yoloai diff) and removes it explicitly (yoloai destroy).
+type RefusedSandbox struct {
+	Name   string
+	Path   string
+	Detail string // what data was detected
+}
+
+// TrashSummary counts the entries currently in the trash dir and their
+// total size. Surfaced by Prune (and Doctor) so the user knows how much
+// is recoverable — and reclaimable — there.
+type TrashSummary struct {
+	Count int
+	Bytes int64
 }
 
 // staleTempFileAge is the threshold for considering yoloai temp dirs
@@ -520,12 +555,28 @@ func (s *SystemClient) Prune(ctx context.Context, opts PruneOptions) (*PruneResu
 	if out == nil {
 		out = io.Discard
 	}
-	known, broken := s.scanSandboxes()
-	result := &PruneResult{BrokenSandboxes: broken}
+	known, broken := s.classifySandboxes()
+	result := &PruneResult{}
 
 	for _, desc := range runtime.Descriptors() {
 		items := s.pruneBackend(ctx, desc.Name, known, opts, out)
 		result.RemovedItems = append(result.RemovedItems, items...)
+	}
+
+	// Apply host-side sandbox-dir classifications.
+	s.applyBrokenClassifications(broken, opts.DryRun, out, result)
+
+	// Sweep orphaned <name>.lock files with no live holder. Runs after the
+	// dir classifications above so locks beside a just-deleted never-init
+	// dir are caught too.
+	swept, err := store.SweepStaleLocks(s.layout, opts.DryRun)
+	if err != nil {
+		fmt.Fprintf(out, "Warning: lock sweep failed: %v\n", err) //nolint:errcheck // best-effort progress
+	}
+	for _, name := range swept {
+		result.RemovedItems = append(result.RemovedItems, PruneItem{
+			Kind: PruneKindLockFile, Name: name,
+		})
 	}
 
 	tempItems, err := s.pruneTempFiles(opts.DryRun)
@@ -533,7 +584,46 @@ func (s *SystemClient) Prune(ctx context.Context, opts PruneOptions) (*PruneResu
 	if err != nil {
 		return result, err
 	}
+
+	result.TrashContents = s.trashSummary()
 	return result, nil
+}
+
+// applyBrokenClassifications carries out (or, under dryRun, records) the
+// disposition for each broken sandbox dir: refuse-and-report, delete, or
+// quarantine to trash. Per-entry failures are logged to out, not fatal.
+func (s *SystemClient) applyBrokenClassifications(broken []classifiedSandbox, dryRun bool, out io.Writer, result *PruneResult) {
+	for _, c := range broken {
+		switch c.action {
+		case actionRefuse:
+			result.RefusedDataBearing = append(result.RefusedDataBearing, RefusedSandbox{
+				Name: c.name, Path: c.path, Detail: c.detail,
+			})
+		case actionDelete:
+			if !dryRun {
+				if err := os.RemoveAll(c.path); err != nil {
+					fmt.Fprintf(out, "Warning: remove %s failed: %v\n", c.path, err) //nolint:errcheck // best-effort progress
+					continue
+				}
+			}
+			result.RemovedItems = append(result.RemovedItems, PruneItem{
+				Kind: PruneKindSandboxDir, Name: c.name,
+			})
+		case actionTrash:
+			dest := c.path
+			if !dryRun {
+				moved, err := store.QuarantineSandbox(s.layout, c.name)
+				if err != nil {
+					fmt.Fprintf(out, "Warning: quarantine %s failed: %v\n", c.name, err) //nolint:errcheck // best-effort progress
+					continue
+				}
+				dest = moved
+			}
+			result.Trashed = append(result.Trashed, TrashedSandbox{
+				Name: c.name, From: c.path, Dest: dest, Reason: c.detail,
+			})
+		}
+	}
 }
 
 // pruneBackend handles one backend's scan + (optionally) execute +
@@ -677,9 +767,43 @@ func (s *SystemClient) Setup(ctx context.Context, opts SetupOptions) error {
 	})
 }
 
-// scanSandboxes reads DataDir/sandboxes/ and classifies entries:
-// loadable meta.json → known instance; load failure → broken sandbox.
-func (s *SystemClient) scanSandboxes() (known []string, broken []BrokenSandbox) {
+// sandboxAction is the disposition classifySandboxes assigns to a broken
+// sandbox dir (one whose metadata fails to load).
+type sandboxAction int
+
+const (
+	// actionDelete: never-initialized dir with no recoverable work — safe
+	// to delete (zero-stakes).
+	actionDelete sandboxAction = iota
+	// actionTrash: unreadable/corrupt metadata (or incomplete dir with
+	// ambiguous content), no detectable work — quarantine to trash so the
+	// user can recover it if it mattered (the decided safe default).
+	actionTrash
+	// actionRefuse: recoverable user data detected — leave untouched and
+	// report so the user reviews + removes it explicitly.
+	actionRefuse
+)
+
+// classifiedSandbox is one broken sandbox dir plus its disposition.
+type classifiedSandbox struct {
+	name   string
+	path   string
+	action sandboxAction
+	detail string
+}
+
+// classifySandboxes reads DataDir/sandboxes/ and splits entries into
+// known instances (meta loads → returned for backend orphan matching)
+// and classified broken dirs (meta fails to load → an action chosen from
+// the LoadMeta failure kind crossed with ProbeWorkData).
+//
+// The disposition matrix (recoverability, not "brokenness"):
+//   - meta loads                                  → known (untouched)
+//   - data detected (any failure kind)            → refuse + report
+//   - missing meta + no work dir                  → delete (never-init)
+//   - corrupt/version-too-new meta, no data,
+//     or incomplete dir w/ ambiguous content      → quarantine to trash
+func (s *SystemClient) classifySandboxes() (known []string, broken []classifiedSandbox) {
 	dir := s.layout.SandboxesDir()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -691,13 +815,68 @@ func (s *SystemClient) scanSandboxes() (known []string, broken []BrokenSandbox) 
 		}
 		name := entry.Name()
 		path := filepath.Join(dir, name)
-		if _, err := store.LoadMeta(path); err != nil {
-			broken = append(broken, BrokenSandbox{Name: name, Path: path})
-		} else {
+
+		if _, loadErr := store.LoadMeta(path); loadErr == nil {
 			known = append(known, store.InstanceName(name))
+			continue
+		} else {
+			state, detail := sandbox.ProbeWorkData(path)
+			c := classifiedSandbox{name: name, path: path, detail: detail}
+			switch {
+			case state == sandbox.WorkDataPresent:
+				c.action = actionRefuse
+			case errors.Is(loadErr, os.ErrNotExist) && state == sandbox.WorkDataNone:
+				c.action = actionDelete
+				c.detail = "never initialized (no metadata, no work directory)"
+			default:
+				c.action = actionTrash
+				if c.detail == "" {
+					if errors.Is(loadErr, os.ErrNotExist) {
+						c.detail = "incomplete sandbox (no metadata; unclassifiable content)"
+					} else {
+						c.detail = "unreadable or corrupt metadata"
+					}
+				}
+			}
+			broken = append(broken, c)
 		}
 	}
 	return known, broken
+}
+
+// trashSummary reports the current trash-dir entry count and total size.
+func (s *SystemClient) trashSummary() TrashSummary {
+	dir := s.layout.TrashDir()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return TrashSummary{}
+	}
+	return TrashSummary{Count: len(entries), Bytes: dirSize(dir)}
+}
+
+// EmptyTrash deletes every entry in the trash dir, returning the number
+// removed and bytes freed (best-effort). Non-interactive (Q-F): the CLI
+// is responsible for confirming with the user before calling, since trash
+// may hold data the user wanted.
+func (s *SystemClient) EmptyTrash() (removed int, freed int64, err error) {
+	dir := s.layout.TrashDir()
+	entries, readErr := os.ReadDir(dir)
+	if readErr != nil {
+		if os.IsNotExist(readErr) {
+			return 0, 0, nil
+		}
+		return 0, 0, fmt.Errorf("read trash dir: %w", readErr)
+	}
+	freed = dirSize(dir)
+	for _, entry := range entries {
+		p := filepath.Join(dir, entry.Name())
+		if rmErr := os.RemoveAll(p); rmErr != nil {
+			err = errors.Join(err, fmt.Errorf("remove %s: %w", p, rmErr))
+			continue
+		}
+		removed++
+	}
+	return removed, freed, err
 }
 
 // profileHasDockerfile returns nil if the named profile or any of its

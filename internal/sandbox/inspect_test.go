@@ -500,3 +500,67 @@ func TestParseStatusJSON(t *testing.T) {
 		})
 	}
 }
+
+// ProbeWorkData tests
+
+func TestProbeWorkData_NoWorkDir(t *testing.T) {
+	state, _ := ProbeWorkData(t.TempDir())
+	assert.Equal(t, WorkDataNone, state)
+}
+
+func TestProbeWorkData_EmptyWorkDir(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(dir, "work"), 0o750))
+	state, _ := ProbeWorkData(dir)
+	assert.Equal(t, WorkDataNone, state)
+}
+
+func TestProbeWorkData_CopyCleanIsAmbiguous(t *testing.T) {
+	dir := t.TempDir()
+	work := filepath.Join(dir, "work", store.EncodePath("/home/u/proj"))
+	require.NoError(t, os.MkdirAll(work, 0o750))
+	initGitRepo(t, work)
+	writeTestFile(t, work, "file.txt", "hello")
+	gitAdd(t, work, ".")
+	gitCommit(t, work, "initial")
+
+	// Clean tree, but baseline is unknown without meta — preserve it.
+	state, _ := ProbeWorkData(dir)
+	assert.Equal(t, WorkDataAmbiguous, state)
+}
+
+func TestProbeWorkData_CopyDirtyIsPresent(t *testing.T) {
+	dir := t.TempDir()
+	work := filepath.Join(dir, "work", store.EncodePath("/home/u/proj"))
+	require.NoError(t, os.MkdirAll(work, 0o750))
+	initGitRepo(t, work)
+	writeTestFile(t, work, "file.txt", "hello")
+	gitAdd(t, work, ".")
+	gitCommit(t, work, "initial")
+	writeTestFile(t, work, "file.txt", "modified")
+
+	state, detail := ProbeWorkData(dir)
+	assert.Equal(t, WorkDataPresent, state)
+	assert.NotEmpty(t, detail)
+}
+
+func TestProbeWorkData_OverlayUpperNonEmptyIsPresent(t *testing.T) {
+	dir := t.TempDir()
+	upper := filepath.Join(dir, "work", store.EncodePath("/home/u/proj"), "upper")
+	require.NoError(t, os.MkdirAll(upper, 0o750))
+	writeTestFile(t, upper, "changed.txt", "diff")
+
+	state, detail := ProbeWorkData(dir)
+	assert.Equal(t, WorkDataPresent, state)
+	assert.NotEmpty(t, detail)
+}
+
+func TestProbeWorkData_OverlayUpperEmptyIsAmbiguous(t *testing.T) {
+	dir := t.TempDir()
+	// Overlay scaffolding present (upper/ exists) but no captured changes.
+	upper := filepath.Join(dir, "work", store.EncodePath("/home/u/proj"), "upper")
+	require.NoError(t, os.MkdirAll(upper, 0o750))
+
+	state, _ := ProbeWorkData(dir)
+	assert.Equal(t, WorkDataAmbiguous, state)
+}

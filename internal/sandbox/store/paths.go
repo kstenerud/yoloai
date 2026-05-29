@@ -16,10 +16,13 @@ package store
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/kstenerud/yoloai/internal/config"
+	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/yoerrors"
 )
 
@@ -219,6 +222,30 @@ func RequireSandboxDir(sandboxDir string) error {
 		return err
 	}
 	return nil
+}
+
+// QuarantineSandbox moves a sandbox directory into the trash dir so it
+// can be recovered later with a plain `mv`. Used by prune for sandboxes
+// it cannot safely classify (unreadable/corrupt metadata) but where no
+// recoverable work was detected — quarantining instead of deleting keeps
+// repair reversible. Returns the destination path under the trash dir.
+//
+// When a trash entry with the same name already exists, a nanosecond
+// timestamp suffix is appended so a repeated quarantine never clobbers an
+// earlier one.
+func QuarantineSandbox(layout config.Layout, name string) (string, error) {
+	src := layout.SandboxDir(name)
+	if err := fileutil.MkdirAll(layout.TrashDir(), 0o700); err != nil {
+		return "", fmt.Errorf("create trash dir: %w", err)
+	}
+	dest := filepath.Join(layout.TrashDir(), name)
+	if _, err := os.Stat(dest); err == nil {
+		dest = fmt.Sprintf("%s.%d", dest, time.Now().UnixNano())
+	}
+	if err := os.Rename(src, dest); err != nil {
+		return "", fmt.Errorf("quarantine sandbox %q to trash: %w", name, err)
+	}
+	return dest, nil
 }
 
 // WorkDir returns the host-side work directory for a specific

@@ -6,6 +6,7 @@ package cli
 import (
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 	"github.com/kstenerud/yoloai/internal/cli/configcmd"
+	"github.com/kstenerud/yoloai/internal/cli/doctorcmd"
 	"github.com/kstenerud/yoloai/internal/cli/helpcmd"
 	"github.com/kstenerud/yoloai/internal/cli/lifecycle"
 	"github.com/kstenerud/yoloai/internal/cli/mcp"
@@ -55,6 +56,7 @@ func registerCommands(root *cobra.Command, version, commit, date string) {
 
 		// Admin
 		system.NewCmd(version, commit, date),
+		doctorcmd.NewCmd(),
 		profile.NewCmd(),
 		helpcmd.NewCmd(),
 		configcmd.NewCmd(),

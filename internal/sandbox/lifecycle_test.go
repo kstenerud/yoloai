@@ -528,6 +528,21 @@ func TestDestroy_RemovesDir(t *testing.T) {
 	assert.NoDirExists(t, sandboxDir)
 }
 
+func TestDestroy_RemovesLockFile(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	createTestSandbox(t, tmpDir, "test-destroy-lock", "/tmp/project", "copy")
+
+	mock := &lifecycleMockRuntime{}
+	mgr := newLifecycleMgr(mock, tmpDir)
+
+	lockPath := mgr.layout.SandboxLockPath("test-destroy-lock")
+
+	_, err := mgr.Destroy(context.Background(), "test-destroy-lock")
+	require.NoError(t, err)
+	assert.NoFileExists(t, lockPath, "destroy should remove the per-sandbox lock file")
+}
+
 func TestDestroy_SandboxNotFound(t *testing.T) {
 	tmpDir := t.TempDir()
 

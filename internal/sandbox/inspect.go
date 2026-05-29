@@ -156,6 +156,82 @@ func hasUnappliedWork(workDir, baselineSHA string) bool {
 	return strings.TrimSpace(string(output)) != "0"
 }
 
+// WorkDataState classifies what a sandbox directory holds, determined by
+// filesystem inspection alone — no environment.json required. This is the
+// recoverability signal used when meta is unreadable (broken sandboxes), so
+// destroy/prune can reason about a sandbox they cannot otherwise load.
+type WorkDataState int
+
+const (
+	// WorkDataNone: no work/ payload — nothing the user could lose.
+	WorkDataNone WorkDataState = iota
+	// WorkDataPresent: detected uncommitted changes (copy: dirty git tree;
+	// overlay: a non-empty host-side upper layer).
+	WorkDataPresent
+	// WorkDataAmbiguous: a work/ payload exists but its state can't be
+	// confirmed without meta (e.g. a clean copy tree whose baseline is
+	// unknown, or a partially-populated work dir). Callers treat this as
+	// "might hold data" and preserve it.
+	WorkDataAmbiguous
+)
+
+// ProbeWorkData inspects a sandbox directory for recoverable user data
+// without loading its metadata. It walks work/* and classifies each
+// payload: copy dirs are probed with `git status`; overlay dirs are probed
+// by checking the host-side upper layer. Returns the strongest signal found
+// (Present > Ambiguous > None) and a human-readable detail for the first
+// payload that carries data.
+func ProbeWorkData(sandboxDir string) (WorkDataState, string) {
+	entries, err := os.ReadDir(filepath.Join(sandboxDir, "work"))
+	if err != nil {
+		return WorkDataNone, ""
+	}
+
+	result := WorkDataNone
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		workEntry := filepath.Join(sandboxDir, "work", entry.Name())
+
+		// Copy mode: the work dir is the git repo itself.
+		if _, statErr := os.Stat(filepath.Join(workEntry, ".git")); statErr == nil {
+			if detectChanges(workEntry) == "yes" {
+				return WorkDataPresent, "uncommitted changes in copied work dir"
+			}
+			// Clean tree, but without the baseline SHA from meta we can't
+			// rule out commits the user hasn't applied — preserve it.
+			result = max(result, WorkDataAmbiguous)
+			continue
+		}
+
+		// Overlay mode: changes persist host-side in the upper layer
+		// regardless of container state.
+		upper := filepath.Join(workEntry, "upper")
+		if dirHasEntries(upper) {
+			return WorkDataPresent, "changes captured in overlay upper layer"
+		}
+
+		// A work payload we can't otherwise classify (no .git, no upper):
+		// treat its mere presence as something to preserve.
+		if dirHasEntries(workEntry) {
+			result = max(result, WorkDataAmbiguous)
+		}
+	}
+	return result, ""
+}
+
+// dirHasEntries reports whether dir exists and contains at least one entry.
+func dirHasEntries(dir string) bool {
+	f, err := os.Open(dir) //nolint:gosec // G304: dir is a sandbox-controlled path
+	if err != nil {
+		return false
+	}
+	defer f.Close() //nolint:errcheck // read-only handle
+	names, err := f.Readdirnames(1)
+	return err == nil && len(names) > 0
+}
+
 // ContainerUser is re-exported from store so existing callers in this
 // package continue to compile. The body lives in store/meta.go now so
 // patch/ can reach it without importing the sandbox parent (F6).

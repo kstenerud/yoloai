@@ -344,6 +344,9 @@ func TestCreate_CleansUpOnPrepareFail(t *testing.T) {
 
 	// Sandbox directory should not exist (cleaned up on failure)
 	assert.NoDirExists(t, sandboxDir)
+	// The lock file created at acquire-time must also be cleaned up so it
+	// doesn't accumulate after a rolled-back Create.
+	assert.NoFileExists(t, layout.SandboxLockPath(name))
 }
 
 func TestBuildContainerConfig_NetworkIsolated(t *testing.T) {
