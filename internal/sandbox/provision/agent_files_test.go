@@ -1,4 +1,4 @@
-package sandbox
+package provision
 
 import (
 	"os"
@@ -14,7 +14,7 @@ import (
 
 func TestCopyAgentFiles_NilConfig(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
-	require.NoError(t, copyAgentFiles(agentDef, t.TempDir(), nil, "", nil))
+	require.NoError(t, CopyAgentFiles(agentDef, t.TempDir(), nil, "", nil))
 }
 
 func TestCopyAgentFiles_StringForm_Normal(t *testing.T) {
@@ -34,7 +34,7 @@ func TestCopyAgentFiles_StringForm_Normal(t *testing.T) {
 	require.NoError(t, os.MkdirAll(agentStateDir, 0750))
 
 	af := &config.AgentFilesConfig{BaseDir: baseDir}
-	require.NoError(t, copyAgentFiles(agentDef, sandboxDir, af, "", nil))
+	require.NoError(t, CopyAgentFiles(agentDef, sandboxDir, af, "", nil))
 
 	// Verify files were copied
 	settingsPath := filepath.Join(agentStateDir, "settings.json")
@@ -56,7 +56,7 @@ func TestCopyAgentFiles_StringForm_MissingSrc(t *testing.T) {
 
 	// Base dir exists but has no .claude/ subdir
 	af := &config.AgentFilesConfig{BaseDir: t.TempDir()}
-	require.NoError(t, copyAgentFiles(agentDef, sandboxDir, af, "", nil))
+	require.NoError(t, CopyAgentFiles(agentDef, sandboxDir, af, "", nil))
 }
 
 func TestCopyAgentFiles_StringForm_Exclusions(t *testing.T) {
@@ -81,7 +81,7 @@ func TestCopyAgentFiles_StringForm_Exclusions(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
 
 	af := &config.AgentFilesConfig{BaseDir: baseDir}
-	require.NoError(t, copyAgentFiles(agentDef, sandboxDir, af, "", nil))
+	require.NoError(t, CopyAgentFiles(agentDef, sandboxDir, af, "", nil))
 
 	agentStateDir := filepath.Join(sandboxDir, store.AgentRuntimeDir)
 
@@ -111,7 +111,7 @@ func TestCopyAgentFiles_StringForm_NoOverwrite(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(agentStateDir, "settings.json"), []byte("from-seed"), 0600))
 
 	af := &config.AgentFilesConfig{BaseDir: baseDir}
-	require.NoError(t, copyAgentFiles(agentDef, sandboxDir, af, "", nil))
+	require.NoError(t, CopyAgentFiles(agentDef, sandboxDir, af, "", nil))
 
 	p := filepath.Join(agentStateDir, "settings.json")
 	data, err := os.ReadFile(p) //nolint:gosec // test code
@@ -126,7 +126,7 @@ func TestCopyAgentFiles_StringForm_NoStateDirAgent(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
 
 	af := &config.AgentFilesConfig{BaseDir: t.TempDir()}
-	require.NoError(t, copyAgentFiles(agentDef, sandboxDir, af, "", nil))
+	require.NoError(t, CopyAgentFiles(agentDef, sandboxDir, af, "", nil))
 }
 
 func TestCopyAgentFiles_ListForm_Files(t *testing.T) {
@@ -146,7 +146,7 @@ func TestCopyAgentFiles_ListForm_Files(t *testing.T) {
 			filepath.Join(srcDir, "other.txt"),
 		},
 	}
-	require.NoError(t, copyAgentFiles(agentDef, sandboxDir, af, "", nil))
+	require.NoError(t, CopyAgentFiles(agentDef, sandboxDir, af, "", nil))
 
 	p1 := filepath.Join(agentStateDir, "custom.json")
 	data, err := os.ReadFile(p1) //nolint:gosec // test code
@@ -173,7 +173,7 @@ func TestCopyAgentFiles_ListForm_Directory(t *testing.T) {
 	af := &config.AgentFilesConfig{
 		Files: []string{subDir},
 	}
-	require.NoError(t, copyAgentFiles(agentDef, sandboxDir, af, "", nil))
+	require.NoError(t, CopyAgentFiles(agentDef, sandboxDir, af, "", nil))
 
 	p := filepath.Join(agentStateDir, "myconfig", "file.txt")
 	data, err := os.ReadFile(p) //nolint:gosec // test code
@@ -189,7 +189,7 @@ func TestCopyAgentFiles_ListForm_MissingEntry(t *testing.T) {
 	af := &config.AgentFilesConfig{
 		Files: []string{"/nonexistent/path/file.json"},
 	}
-	require.NoError(t, copyAgentFiles(agentDef, sandboxDir, af, "", nil))
+	require.NoError(t, CopyAgentFiles(agentDef, sandboxDir, af, "", nil))
 }
 
 func TestCopyAgentFiles_ListForm_NoOverwrite(t *testing.T) {
@@ -205,7 +205,7 @@ func TestCopyAgentFiles_ListForm_NoOverwrite(t *testing.T) {
 	af := &config.AgentFilesConfig{
 		Files: []string{filepath.Join(srcDir, "settings.json")},
 	}
-	require.NoError(t, copyAgentFiles(agentDef, sandboxDir, af, "", nil))
+	require.NoError(t, CopyAgentFiles(agentDef, sandboxDir, af, "", nil))
 
 	p := filepath.Join(agentStateDir, "settings.json")
 	data, err := os.ReadFile(p) //nolint:gosec // test code

@@ -19,6 +19,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox/archetype"
 	mountspkg "github.com/kstenerud/yoloai/internal/sandbox/mounts"
+	provision "github.com/kstenerud/yoloai/internal/sandbox/provision"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/internal/workspace"
 )
@@ -298,9 +299,9 @@ func (m *Engine) parseAndValidateDirs(opts CreateOptions, agentDef *agent.Defini
 
 // checkAuthAndLocalhostWarnings performs auth checks and localhost URL warnings.
 func (m *Engine) checkAuthAndLocalhostWarnings(agentDef *agent.Definition, mergedEnv map[string]string, cfgModel string, opts CreateOptions, credOverrides map[string]string) error {
-	hasAPIKey := hasAnyAPIKey(agentDef, credOverrides)
-	hasAuth := hasAnyAuthFile(agentDef, m.layout.HomeDir)
-	hasAuthHint := hasAnyAuthHint(agentDef, mergedEnv, credOverrides)
+	hasAPIKey := provision.HasAnyAPIKey(agentDef, credOverrides)
+	hasAuth := provision.HasAnyAuthFile(agentDef, m.layout.HomeDir)
+	hasAuthHint := provision.HasAnyAuthHint(agentDef, mergedEnv, credOverrides)
 	if err := checkAgentAuth(agentDef, hasAPIKey, hasAuth, hasAuthHint, m.outputFor(opts.Output)); err != nil {
 		return err
 	}
@@ -324,7 +325,7 @@ func checkAgentAuth(agentDef *agent.Definition, hasAPIKey, hasAuth, hasAuthHint 
 	}
 	msg := fmt.Sprintf("no authentication found for %s: set %s",
 		agentDef.Name, strings.Join(agentDef.APIKeyEnvVars, "/"))
-	if authDesc := describeSeedAuthFiles(agentDef); authDesc != "" {
+	if authDesc := provision.DescribeSeedAuthFiles(agentDef); authDesc != "" {
 		msg += fmt.Sprintf(" or provide OAuth credentials (%s)", authDesc)
 	}
 	if len(agentDef.AuthHintEnvVars) > 0 {

@@ -10,6 +10,7 @@
 package fileutil
 
 import (
+	"encoding/json"
 	"io/fs"
 	"os"
 	"strconv"
@@ -116,4 +117,49 @@ func OpenFile(path string, flag int, perm fs.FileMode) (*os.File, error) {
 		}
 	}
 	return f, nil
+}
+
+// MkdirAllPerm creates a directory (and parents) then explicitly chmods it to
+// bypass the process umask. Use this when the directory will be bind-mounted
+// into a container that may run under a different uid (e.g. gVisor).
+func MkdirAllPerm(path string, perm fs.FileMode) error {
+	if err := MkdirAll(path, perm); err != nil {
+		return err
+	}
+	return os.Chmod(path, perm) //nolint:gosec // G302: caller is responsible for choosing the perm
+}
+
+// WriteFilePerm writes data to a file then explicitly chmods it to bypass the
+// process umask. Use this when the file will be bind-mounted into a container
+// that may run under a different uid (e.g. gVisor).
+func WriteFilePerm(path string, data []byte, perm fs.FileMode) error {
+	if err := WriteFile(path, data, perm); err != nil { //nolint:gosec // G703: path is always a trusted sandbox subpath
+		return err
+	}
+	return os.Chmod(path, perm) //nolint:gosec // G302: caller is responsible for choosing the perm
+}
+
+// ReadJSONMap reads a JSON file into a map, returning an empty map if the file doesn't exist.
+func ReadJSONMap(path string) (map[string]any, error) {
+	data, err := os.ReadFile(path) //nolint:gosec // path is sandbox-controlled
+	if err != nil {
+		if os.IsNotExist(err) {
+			return make(map[string]any), nil
+		}
+		return nil, err
+	}
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+// WriteJSONMap marshals a map and writes it as indented JSON to the given path.
+func WriteJSONMap(path string, m map[string]any) error {
+	out, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return err
+	}
+	return WriteFile(path, out, 0600)
 }

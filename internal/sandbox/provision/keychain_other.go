@@ -2,12 +2,12 @@
 
 //go:build !darwin
 
-package sandbox
+package provision
 
 import "fmt"
 
-// keychainReader is a no-op on non-darwin platforms.
-var keychainReader = readKeychainPassword
+// KeychainReader is a no-op on non-darwin platforms.
+var KeychainReader = readKeychainPassword
 
 func readKeychainPassword(_ string) ([]byte, error) {
 	return nil, fmt.Errorf("keychain not available on this platform")

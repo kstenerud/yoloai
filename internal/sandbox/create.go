@@ -1,5 +1,5 @@
-// ABOUTME: Low-level sandbox create helpers: mkdirAllPerm, machine-id generation,
-// ABOUTME: and directory/file write utilities used by the create pipeline.
+// ABOUTME: Low-level sandbox create helpers: machine-id generation and directory/file
+// ABOUTME: write utilities used by the create pipeline.
 package sandbox
 
 import (
@@ -26,29 +26,10 @@ import (
 	"github.com/kstenerud/yoloai/internal/sandbox/archetype"
 	"github.com/kstenerud/yoloai/internal/sandbox/invocation"
 	mountspkg "github.com/kstenerud/yoloai/internal/sandbox/mounts"
+	provision "github.com/kstenerud/yoloai/internal/sandbox/provision"
 	"github.com/kstenerud/yoloai/internal/sandbox/state"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 )
-
-// mkdirAllPerm creates a directory (and parents) then explicitly chmods it to
-// bypass the process umask. Use this when the directory will be bind-mounted
-// into a container that may run under a different uid (e.g. gVisor).
-func mkdirAllPerm(path string, perm os.FileMode) error {
-	if err := fileutil.MkdirAll(path, perm); err != nil {
-		return err
-	}
-	return os.Chmod(path, perm) //nolint:gosec // G302: caller is responsible for choosing the perm
-}
-
-// writeFilePerm writes data to a file then explicitly chmods it to bypass the
-// process umask. Use this when the file will be bind-mounted into a container
-// that may run under a different uid (e.g. gVisor).
-func writeFilePerm(path string, data []byte, perm os.FileMode) error {
-	if err := fileutil.WriteFile(path, data, perm); err != nil { //nolint:gosec // G703: path is always a trusted sandbox subpath
-		return err
-	}
-	return os.Chmod(path, perm) //nolint:gosec // G302: caller is responsible for choosing the perm
-}
 
 // NetworkMode specifies the sandbox's network access policy.
 type NetworkMode string
@@ -231,7 +212,7 @@ func (m *Engine) Create(ctx context.Context, opts CreateOptions) (name string, e
 	// When running as root under sudo, API key env vars (e.g. CLAUDE_CODE_OAUTH_TOKEN)
 	// are stripped by sudo. Recover them from the parent process's environment into a
 	// local map rather than mutating the process environment.
-	credOverrides := recoverSudoCredentials()
+	credOverrides := provision.RecoverSudoCredentials()
 	// Validate isolation prerequisites before the potentially expensive image build.
 	if opts.Isolation != "" {
 		if err := checkIsolationPrerequisites(ctx, m.runtime, opts.Isolation); err != nil {
@@ -398,7 +379,7 @@ func (m *Engine) createAndSeedSandbox(ctx context.Context, sandboxDir string, ag
 	if err := createSandboxDirs(sandboxDir, perms); err != nil {
 		return false, err
 	}
-	return m.seedSandbox(agentDef, sandboxDir, pr.isolation, pr.agentFiles, credOverrides, m.layout.HomeDir, output)
+	return provision.SeedSandbox(m.runtime, agentDef, sandboxDir, pr.isolation, pr.agentFiles, credOverrides, m.layout.HomeDir, m.layout.Env, output)
 }
 
 // buildConfigAndMeta builds the container config and sandbox meta structs.
@@ -590,7 +571,7 @@ func createSandboxDirs(sandboxDir string, perms IsolationPerms) error {
 		filepath.Join(sandboxDir, "files"),
 		filepath.Join(sandboxDir, "cache"),
 	} {
-		if err := mkdirAllPerm(dir, perms.Dir); err != nil {
+		if err := fileutil.MkdirAllPerm(dir, perms.Dir); err != nil {
 			return fmt.Errorf("create directory %s: %w", dir, err)
 		}
 	}
@@ -765,19 +746,19 @@ func writeStatFiles(sandboxDir string, meta *store.Meta, agentDef *agent.Definit
 
 	configPerm := os.FileMode(0644) // always 0644 (no secrets, read-only in container)
 
-	if err := mkdirAllPerm(filepath.Join(sandboxDir, store.LogsDir), perms.Dir); err != nil {
+	if err := fileutil.MkdirAllPerm(filepath.Join(sandboxDir, store.LogsDir), perms.Dir); err != nil {
 		return fmt.Errorf("create logs dir: %w", err)
 	}
 	for _, logFile := range []string{store.SandboxJSONLFile, store.MonitorJSONLFile, store.HooksJSONLFile} {
 		p := filepath.Join(sandboxDir, logFile)
-		if err := writeFilePerm(p, nil, perms.File); err != nil {
+		if err := fileutil.WriteFilePerm(p, nil, perms.File); err != nil {
 			return fmt.Errorf("create log file %s: %w", logFile, err)
 		}
 	}
-	if err := writeFilePerm(filepath.Join(sandboxDir, store.AgentStatusFile), []byte("{}\n"), perms.File); err != nil {
+	if err := fileutil.WriteFilePerm(filepath.Join(sandboxDir, store.AgentStatusFile), []byte("{}\n"), perms.File); err != nil {
 		return fmt.Errorf("write %s: %w", store.AgentStatusFile, err)
 	}
-	if err := writeFilePerm(filepath.Join(sandboxDir, store.RuntimeConfigFile), configData, configPerm); err != nil {
+	if err := fileutil.WriteFilePerm(filepath.Join(sandboxDir, store.RuntimeConfigFile), configData, configPerm); err != nil {
 		return fmt.Errorf("write %s: %w", store.RuntimeConfigFile, err)
 	}
 	if err := WriteContextFiles(sandboxDir, meta, agentDef); err != nil {
@@ -801,7 +782,7 @@ func (m *Engine) launchContainer(ctx context.Context, state *State) error {
 		envVars = cfg.Env
 	}
 
-	secretsDir, err := createSecretsDir(state.Agent, envVars, state.Isolation, state.CredOverrides)
+	secretsDir, err := provision.CreateSecretsDir(state.Agent, envVars, state.Isolation, state.CredOverrides)
 	if err != nil {
 		return fmt.Errorf("create secrets: %w", err)
 	}
@@ -930,109 +911,9 @@ func parsePortBindings(ports []string) ([]runtime.PortMapping, error) {
 	return result, nil
 }
 
-// createSecretsDir creates a temp directory with one file per env var / API key.
-// Env vars are written first; API keys overwrite on conflict (take precedence).
-// credOverrides contains sudo-recovered credential defaults for keys absent from
-// os.Environ; they are used as a fallback so that creation under sudo sees credentials.
-// Returns empty string if nothing was written.
-func createSecretsDir(agentDef *agent.Definition, envVars map[string]string, security runtime.IsolationMode, credOverrides map[string]string) (string, error) {
-	if len(agentDef.APIKeyEnvVars) == 0 && len(agentDef.AuthHintEnvVars) == 0 && len(envVars) == 0 && len(credOverrides) == 0 {
-		return "", nil
-	}
-
-	tmpDir, err := os.MkdirTemp("", "yoloai-secrets-*")
-	if err != nil {
-		return "", fmt.Errorf("create secrets temp dir: %w", err)
-	}
-
-	// Determine permissions based on security mode.
-	// gVisor gofer runs as remapped uid and needs world-readable/executable.
-	// Standard Docker can use restrictive permissions.
-	// The dir lives in /tmp and is removed within seconds of container startup.
-	perms := Perms(security)
-
-	if err := os.Chmod(tmpDir, perms.SecretsDir); err != nil {
-		_ = os.RemoveAll(tmpDir)
-		return "", fmt.Errorf("chmod secrets dir: %w", err)
-	}
-	// When running via sudo, chown the dir to the real user so the container
-	// process (running as that user via --userns=keep-id) can read it.
-	_ = fileutil.ChownIfSudo(tmpDir) //nolint:errcheck // best-effort; individual files are already chowned by writeFilePerm
-
-	wrote := false
-
-	// Write env vars first
-	for k, v := range envVars {
-		if err := writeFilePerm(filepath.Join(tmpDir, k), []byte(v), perms.SecretsFile); err != nil {
-			_ = os.RemoveAll(tmpDir)
-			return "", fmt.Errorf("write env %s: %w", k, err)
-		}
-		wrote = true
-	}
-
-	// Write host env vars for API keys and auth hints (overwrites config env on conflict).
-	// credOverrides provides sudo-recovered values for keys absent from os.Environ.
-	for _, key := range append(agentDef.APIKeyEnvVars, agentDef.AuthHintEnvVars...) {
-		value := os.Getenv(key) //nolint:forbidigo // §12: agent API key / auth-hint value (declared exception)
-		if value == "" {
-			value = credOverrides[key]
-		}
-		if value == "" {
-			continue
-		}
-		if err := writeFilePerm(filepath.Join(tmpDir, key), []byte(value), perms.SecretsFile); err != nil {
-			_ = os.RemoveAll(tmpDir)
-			return "", fmt.Errorf("write secret %s: %w", key, err)
-		}
-		wrote = true
-	}
-
-	if !wrote {
-		_ = os.RemoveAll(tmpDir)
-		return "", nil
-	}
-
-	return tmpDir, nil
-}
-
-// recoverSudoCredentials returns sudo-recovered credential env vars for keys
-// absent from the current process environment. Under `sudo` (without -E) the
-// API-key / OAuth env vars are stripped from os.Environ; recovering them from
-// the parent sudo process lets both `new` (Create) and `restart`
-// (recreateContainer) inject them. Keys present in os.Environ are skipped so a
-// real host value always wins.
-func recoverSudoCredentials() map[string]string {
-	overrides := make(map[string]string)
-	for k, v := range sudoParentEnv() {
-		if os.Getenv(k) == "" { //nolint:forbidigo // §12: sudo credential recovery — only override keys absent from the live env
-			overrides[k] = v
-		}
-	}
-	return overrides
-}
-
-// sudoParentEnv returns env vars from the parent sudo process when yoloai is
-// run via sudo. sudo strips most env vars before exec'ing the child, but the
-// sudo process itself inherits the full user environment. Reading the parent's
-// /proc/<ppid>/environ recovers vars like CLAUDE_CODE_OAUTH_TOKEN and
-// ANTHROPIC_API_KEY that were stripped. Returns an empty map if not running
-// under sudo or if the parent environ cannot be read.
-func sudoParentEnv() map[string]string {
-	result := make(map[string]string)
-	if fileutil.SudoUID() == -1 {
-		return result
-	}
-	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/environ", os.Getppid())) //nolint:gosec,forbidigo // G304 + §12: read parent's environ to recover sudo-stripped credentials
-	if err != nil {
-		return result
-	}
-	for kv := range strings.SplitSeq(string(data), "\x00") {
-		k, v, ok := strings.Cut(kv, "=")
-		if ok && k != "" {
-			result[k] = v
-		}
-	}
-	return result
+// containsLocalhost returns true if the URL string references localhost or 127.0.0.1.
+func containsLocalhost(url string) bool {
+	return strings.Contains(url, "localhost") || strings.Contains(url, "127.0.0.1")
 }
 
 // overlayOrResolvedMountPath returns the container working directory path for a directory.
@@ -1042,242 +923,6 @@ func overlayOrResolvedMountPath(d *DirSpec) string {
 		return "/yoloai/overlay/" + store.EncodePath(d.Path) + "/merged"
 	}
 	return d.ResolvedMountPath()
-}
-
-// hasAnyAPIKey returns true if any of the agent's required API key env vars are set
-// in the process environment or in credOverrides (sudo-recovered credential defaults).
-func hasAnyAPIKey(agentDef *agent.Definition, credOverrides map[string]string) bool {
-	if len(agentDef.APIKeyEnvVars) == 0 {
-		return true // no API key required
-	}
-	for _, key := range agentDef.APIKeyEnvVars {
-		if os.Getenv(key) != "" || credOverrides[key] != "" { //nolint:forbidigo // §12: agent API-key presence check (declared exception)
-			return true
-		}
-	}
-	return false
-}
-
-// hasAnyAuthFile returns true if any auth-only seed files exist on disk
-// or can be read from the macOS Keychain.
-// homeDir is used for ~ expansion in seed file host paths.
-func hasAnyAuthFile(agentDef *agent.Definition, homeDir string) bool {
-	for _, sf := range agentDef.SeedFiles {
-		if sf.AuthOnly {
-			if _, err := os.Stat(ExpandTilde(sf.HostPath, homeDir)); err == nil {
-				return true
-			}
-			if sf.KeychainService != "" {
-				if _, err := keychainReader(sf.KeychainService); err == nil {
-					return true
-				}
-			}
-		}
-	}
-	return false
-}
-
-// hasAnyAuthHint returns true if any of the agent's auth hint env vars are set
-// in the host environment, in the config env map, or in credOverrides
-// (sudo-recovered credential defaults). This allows agents like aider to work
-// with local model servers (Ollama, LM Studio) without a cloud API key.
-func hasAnyAuthHint(agentDef *agent.Definition, configEnv map[string]string, credOverrides map[string]string) bool {
-	for _, key := range agentDef.AuthHintEnvVars {
-		if os.Getenv(key) != "" || credOverrides[key] != "" { //nolint:forbidigo // §12: agent auth-hint presence check (declared exception)
-			return true
-		}
-		if configEnv[key] != "" {
-			return true
-		}
-	}
-	return false
-}
-
-// containsLocalhost returns true if the URL string references localhost or 127.0.0.1.
-func containsLocalhost(url string) bool {
-	return strings.Contains(url, "localhost") || strings.Contains(url, "127.0.0.1")
-}
-
-// describeSeedAuthFiles returns a human-readable description of expected auth file paths.
-func describeSeedAuthFiles(agentDef *agent.Definition) string {
-	var paths []string
-	for _, sf := range agentDef.SeedFiles {
-		if sf.AuthOnly {
-			paths = append(paths, sf.HostPath)
-		}
-	}
-	return strings.Join(paths, ", ")
-}
-
-// copySeedFiles copies seed files from the host into the sandbox.
-// Files with AuthOnly=true are skipped when hasAPIKey is true.
-// Files with HomeDir=true go to home-seed/ (mounted at /home/yoloai/);
-// others go to agent-runtime/ (mounted at StateDir).
-// Returns true if any files were copied. Skips files that don't exist on the host.
-// homeDir is used for ~ expansion in seed file host paths.
-func copySeedFiles(agentDef *agent.Definition, sandboxDir string, hasAPIKey bool, homeDir string) (bool, error) {
-	copiedAuth := false
-	agentStateDir := filepath.Join(sandboxDir, store.AgentRuntimeDir)
-	homeSeedDir := filepath.Join(sandboxDir, "home-seed")
-
-	for _, sf := range agentDef.SeedFiles {
-		if shouldSkipSeedFile(sf, hasAPIKey) {
-			continue
-		}
-
-		data, ok, err := loadSeedFileData(sf, homeDir)
-		if err != nil {
-			return copiedAuth, err
-		}
-		if !ok {
-			continue
-		}
-
-		baseDir := agentStateDir
-		if sf.HomeDir {
-			baseDir = homeSeedDir
-		}
-		targetPath := filepath.Join(baseDir, sf.TargetPath)
-
-		if err := fileutil.MkdirAll(filepath.Dir(targetPath), 0750); err != nil {
-			return copiedAuth, fmt.Errorf("create dir for %s: %w", sf.TargetPath, err)
-		}
-		if err := fileutil.WriteFile(targetPath, data, 0600); err != nil { //nolint:gosec // G703: targetPath is constructed from internal agent config, not user input
-			return copiedAuth, fmt.Errorf("write %s: %w", targetPath, err)
-		}
-		if sf.AuthOnly {
-			copiedAuth = true
-		}
-	}
-
-	return copiedAuth, nil
-}
-
-// shouldSkipSeedFile returns true if the seed file should be skipped.
-func shouldSkipSeedFile(sf agent.SeedFile, hasAPIKey bool) bool {
-	if !sf.AuthOnly {
-		return false
-	}
-	if len(sf.OwnerAPIKeys) > 0 {
-		// Per-file API key check (used by shell agent): skip if any key is set
-		for _, key := range sf.OwnerAPIKeys {
-			if os.Getenv(key) != "" { //nolint:forbidigo // §12: agent API-key presence check (declared exception)
-				return true
-			}
-		}
-		return false
-	}
-	return hasAPIKey // auth file not needed when API key is set
-}
-
-// loadSeedFileData reads data from the host file or keychain for a seed file.
-// Returns (data, true, nil) if found, (nil, false, nil) if not found, or (nil, false, err) on error.
-// homeDir is used for ~ expansion in seed file host paths.
-func loadSeedFileData(sf agent.SeedFile, homeDir string) ([]byte, bool, error) {
-	hostPath := ExpandTilde(sf.HostPath, homeDir)
-	if _, err := os.Stat(hostPath); err == nil {
-		data, readErr := os.ReadFile(hostPath) //nolint:gosec // G304: path is from agent definition, not user input
-		if readErr != nil {
-			return nil, false, fmt.Errorf("read %s: %w", hostPath, readErr)
-		}
-		return data, true, nil
-	}
-	if sf.KeychainService != "" {
-		data, keychainErr := keychainReader(sf.KeychainService)
-		if keychainErr == nil {
-			return data, true, nil
-		}
-	}
-	return nil, false, nil
-}
-
-// ensureContainerSettings merges required container settings into agent-state/settings.json.
-// Agent-specific adjustments are driven by each agent's ApplySettings field.
-// Shell agents (SeedsAllAgents=true) apply each real agent's settings into
-// home-seed subdirectories instead.
-func ensureContainerSettings(agentDef *agent.Definition, sandboxDir string, isolation runtime.IsolationMode) error {
-	if agentDef.SeedsAllAgents {
-		return ensureShellContainerSettings(sandboxDir, isolation)
-	}
-
-	if agentDef.StateDir == "" || agentDef.ApplySettings == nil {
-		return nil
-	}
-
-	// Use restrictive permissions by default, world-writable only for container-enhanced (gVisor)
-	perms := Perms(isolation)
-
-	agentStateDir := filepath.Join(sandboxDir, store.AgentRuntimeDir)
-	if err := mkdirAllPerm(agentStateDir, perms.Dir); err != nil {
-		return fmt.Errorf("create %s dir: %w", store.AgentRuntimeDir, err)
-	}
-	settingsPath := filepath.Join(agentStateDir, "settings.json")
-
-	settings, err := readJSONMap(settingsPath)
-	if err != nil {
-		return err
-	}
-	agentDef.ApplySettings(settings)
-	return writeJSONMap(settingsPath, settings)
-}
-
-// ensureShellContainerSettings applies each real agent's container settings
-// to its home-seed subdirectory (e.g., home-seed/.claude/settings.json).
-func ensureShellContainerSettings(sandboxDir string, _ runtime.IsolationMode) error {
-	for _, name := range agent.RealAgents() {
-		def := agent.GetAgent(name)
-		if def.StateDir == "" || def.ApplySettings == nil {
-			continue
-		}
-		dirBase := filepath.Base(def.StateDir)
-		dirPath := filepath.Join(sandboxDir, "home-seed", dirBase)
-		settingsPath := filepath.Join(dirPath, "settings.json")
-
-		if err := fileutil.MkdirAll(dirPath, 0750); err != nil {
-			return fmt.Errorf("create %s dir: %w", dirBase, err)
-		}
-		settings, err := readJSONMap(settingsPath)
-		if err != nil {
-			return err
-		}
-		def.ApplySettings(settings)
-		if err := writeJSONMap(settingsPath, settings); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// ensureHomeSeedConfig patches home-seed/.claude.json so its installMethod
-// matches how the backend actually installed Claude Code (installMethod is the
-// backend's AgentInstallMethod — "npm-global" for the container backends,
-// "native" for Tart). The seeded file comes from the host, which usually says
-// "native"; when the backend installs via npm, a mismatch makes Claude Code
-// emit spurious warnings about a missing ~/.local/bin/claude and PATH
-// misconfiguration. Writing the backend's real method keeps them consistent.
-func ensureHomeSeedConfig(agentDef *agent.Definition, sandboxDir, installMethod string) error {
-	// Only relevant for agents that seed .claude.json into HomeDir
-	var hasHomeSeed bool
-	for _, sf := range agentDef.SeedFiles {
-		if sf.HomeDir && sf.TargetPath == ".claude.json" {
-			hasHomeSeed = true
-			break
-		}
-	}
-	if !hasHomeSeed {
-		return nil
-	}
-
-	configPath := filepath.Join(sandboxDir, "home-seed", ".claude.json")
-
-	config, err := readJSONMap(configPath)
-	if err != nil {
-		return err
-	}
-
-	config["installMethod"] = installMethod
-
-	return writeJSONMap(configPath, config)
 }
 
 // readLogTail returns the last n lines of the file at path.

@@ -2,7 +2,7 @@
 
 //go:build darwin
 
-package sandbox
+package provision
 
 import (
 	"fmt"
@@ -10,9 +10,9 @@ import (
 	"strings"
 )
 
-// keychainReader reads a generic password from the macOS Keychain by service name.
+// KeychainReader reads a generic password from the macOS Keychain by service name.
 // Overridden in tests to avoid real Keychain calls.
-var keychainReader = readKeychainPassword
+var KeychainReader = readKeychainPassword
 
 func readKeychainPassword(service string) ([]byte, error) {
 	out, err := exec.Command("security", "find-generic-password", "-s", service, "-w").Output() //nolint:gosec // service name comes from agent definition, not user input

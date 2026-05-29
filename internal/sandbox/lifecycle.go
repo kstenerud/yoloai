@@ -21,6 +21,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox/invocation"
+	provision "github.com/kstenerud/yoloai/internal/sandbox/provision"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/internal/workspace"
 )
@@ -256,11 +257,11 @@ func (m *Engine) handleSuspendedResume(ctx context.Context, cname, name string, 
 	}
 
 	// Refresh credentials and settings from host (handles token refresh between sessions).
-	hasAPIKey := hasAnyAPIKey(agentDef, nil)
-	if _, err := copySeedFiles(agentDef, sandboxDir, hasAPIKey, m.layout.HomeDir); err != nil {
+	hasAPIKey := provision.HasAnyAPIKey(agentDef, nil)
+	if _, err := provision.CopySeedFiles(agentDef, sandboxDir, hasAPIKey, m.layout.HomeDir); err != nil {
 		return fmt.Errorf("refresh seed files: %w", err)
 	}
-	if err := ensureContainerSettings(agentDef, sandboxDir, meta.Isolation); err != nil {
+	if err := provision.EnsureContainerSettings(agentDef, sandboxDir, meta.Isolation); err != nil {
 		return fmt.Errorf("ensure container settings: %w", err)
 	}
 
@@ -519,7 +520,7 @@ func clearAgentState(sandboxDir string, perms IsolationPerms) error {
 	if err := os.RemoveAll(agentStateDir); err != nil {
 		return fmt.Errorf("remove %s: %w", store.AgentRuntimeDir, err)
 	}
-	if err := mkdirAllPerm(agentStateDir, perms.Dir); err != nil {
+	if err := fileutil.MkdirAllPerm(agentStateDir, perms.Dir); err != nil {
 		return fmt.Errorf("recreate %s: %w", store.AgentRuntimeDir, err)
 	}
 	// Reset agent_files flag so files get re-seeded on next start
@@ -595,9 +596,9 @@ func (m *Engine) Reset(ctx context.Context, opts ResetOptions) (*ResetResult, er
 // reinitLogs removes and recreates the sandbox log files with appropriate permissions.
 func reinitLogs(sandboxDir string, perms IsolationPerms) {
 	_ = os.RemoveAll(filepath.Join(sandboxDir, store.LogsDir))
-	_ = mkdirAllPerm(filepath.Join(sandboxDir, store.LogsDir), perms.Dir)
+	_ = fileutil.MkdirAllPerm(filepath.Join(sandboxDir, store.LogsDir), perms.Dir)
 	for _, logFile := range []string{store.SandboxJSONLFile, store.MonitorJSONLFile, store.HooksJSONLFile} {
-		_ = writeFilePerm(filepath.Join(sandboxDir, logFile), nil, perms.File)
+		_ = fileutil.WriteFilePerm(filepath.Join(sandboxDir, logFile), nil, perms.File)
 	}
 }
 
@@ -767,7 +768,7 @@ func initializeAgentFilesIfNeeded(layout config.Layout, agentDef *agent.Definiti
 	if agentFilesConfig == nil {
 		return nil
 	}
-	if err := copyAgentFiles(agentDef, sandboxDir, agentFilesConfig, layout.HomeDir, layout.Env); err != nil {
+	if err := provision.CopyAgentFiles(agentDef, sandboxDir, agentFilesConfig, layout.HomeDir, layout.Env); err != nil {
 		return fmt.Errorf("copy agent files on restart: %w", err)
 	}
 	sbState.AgentFilesInitialized = true
@@ -828,15 +829,15 @@ func (m *Engine) recreateContainer(ctx context.Context, name string, meta *store
 	sandboxDir := m.layout.SandboxDir(name)
 
 	// Refresh seed files from host (handles OAuth token refresh between restarts)
-	hasAPIKey := hasAnyAPIKey(agentDef, nil)
-	if _, err := copySeedFiles(agentDef, sandboxDir, hasAPIKey, m.layout.HomeDir); err != nil {
+	hasAPIKey := provision.HasAnyAPIKey(agentDef, nil)
+	if _, err := provision.CopySeedFiles(agentDef, sandboxDir, hasAPIKey, m.layout.HomeDir); err != nil {
 		return fmt.Errorf("refresh seed files: %w", err)
 	}
 
 	// Re-apply container settings (copySeedFiles overwrites settings.json
 	// with the host version, which lacks sandbox-specific settings like
 	// skipDangerousModePermissionPrompt)
-	if err := ensureContainerSettings(agentDef, sandboxDir, meta.Isolation); err != nil {
+	if err := provision.EnsureContainerSettings(agentDef, sandboxDir, meta.Isolation); err != nil {
 		return fmt.Errorf("ensure container settings: %w", err)
 	}
 
@@ -888,7 +889,7 @@ func (m *Engine) recreateContainer(ctx context.Context, name string, meta *store
 	// `sudo yoloai restart` (without -E) the API-key/OAuth env vars are absent
 	// from os.Environ, so without this the restart would relaunch the agent
 	// unauthenticated even though the original `new` worked.
-	credOverrides := recoverSudoCredentials()
+	credOverrides := provision.RecoverSudoCredentials()
 
 	state := &State{
 		Name:          name,
@@ -1319,7 +1320,7 @@ func (m *Engine) clearCacheAndFiles(opts ResetOptions) error {
 		if err := os.RemoveAll(cacheDir); err != nil {
 			return fmt.Errorf("remove cache: %w", err)
 		}
-		if err := mkdirAllPerm(cacheDir, perms.Dir); err != nil {
+		if err := fileutil.MkdirAllPerm(cacheDir, perms.Dir); err != nil {
 			return fmt.Errorf("recreate cache: %w", err)
 		}
 	}
@@ -1328,7 +1329,7 @@ func (m *Engine) clearCacheAndFiles(opts ResetOptions) error {
 		if err := os.RemoveAll(filesDir); err != nil {
 			return fmt.Errorf("remove files: %w", err)
 		}
-		if err := mkdirAllPerm(filesDir, perms.Dir); err != nil {
+		if err := fileutil.MkdirAllPerm(filesDir, perms.Dir); err != nil {
 			return fmt.Errorf("recreate files: %w", err)
 		}
 	}

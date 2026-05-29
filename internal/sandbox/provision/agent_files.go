@@ -1,4 +1,4 @@
-package sandbox
+package provision
 
 // ABOUTME: Copies user-configured agent files into sandbox agent-runtime directory.
 // ABOUTME: Supports string form (base directory) and list form (explicit paths).
@@ -18,7 +18,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/workspace"
 )
 
-// copyAgentFiles copies user-configured agent files into the sandbox's
+// CopyAgentFiles copies user-configured agent files into the sandbox's
 // agent-runtime directory. Supports two forms:
 //   - String form (BaseDir): copies the agent's state subdir from the base
 //     directory, applying AgentFilesExclude patterns.
@@ -28,7 +28,7 @@ import (
 // Returns nil if agentFiles is nil or the agent has no StateDir.
 // homeDir is used to expand leading "~" in configured paths.
 // env is the environment map for ${VAR} expansion; use layout.Env.
-func copyAgentFiles(agentDef *agent.Definition, sandboxDir string, agentFiles *config.AgentFilesConfig, homeDir string, env map[string]string) error {
+func CopyAgentFiles(agentDef *agent.Definition, sandboxDir string, agentFiles *config.AgentFilesConfig, homeDir string, env map[string]string) error {
 	if agentFiles == nil {
 		return nil
 	}
