@@ -261,7 +261,7 @@ func destroyOne(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, name 
 	if err != nil {
 		return err
 	}
-	res, err := sb.Destroy(ctx, yoloai.DestroyOptions{Force: true})
+	res, err := sb.Destroy(ctx, yoloai.DestroyOptions{AbandonUnappliedWork: true})
 	if res != nil {
 		cliutil.RenderNotices(cmd, res.Notices)
 	}

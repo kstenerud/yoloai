@@ -123,12 +123,12 @@ func (s *Sandbox) HasActiveWork(ctx context.Context) (bool, string) {
 	return lifecycle.NeedsConfirmation(ctx, s.c.deps(), s.name)
 }
 
-// Destroy removes the sandbox and its container. With opts.Force false it
-// refuses a sandbox that HasActiveWork, returning a typed *ActiveWorkError
-// carrying the reason — the caller prompts and retries with Force true. Atomic:
-// no check-then-act gap.
+// Destroy removes the sandbox and its container. With opts.AbandonUnappliedWork
+// false it refuses a sandbox that HasActiveWork, returning a typed
+// *ActiveWorkError carrying the reason — the caller prompts and retries with
+// AbandonUnappliedWork true. Atomic: no check-then-act gap.
 func (s *Sandbox) Destroy(ctx context.Context, opts DestroyOptions) (*DestroyResult, error) {
-	if !opts.Force {
+	if !opts.AbandonUnappliedWork {
 		if active, reason := s.HasActiveWork(ctx); active {
 			return nil, yoerrors.NewActiveWorkError("%s", reason)
 		}

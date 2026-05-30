@@ -173,6 +173,7 @@ options type. Tag listing was reachable only via `internal/sandbox`
 - `sandbox.ListTagsBeyondBaseline(layout, name)` → `…Workdir().Tags(ctx, yoloai.TagsOptions{})`
 - `sandbox.ListUnappliedTags(layout, name)` → `…Workdir().Tags(ctx, yoloai.TagsOptions{UnappliedOnly: true})`
 - `c.Clone(ctx, sandbox.CloneOptions{Source, Dest, Force})` → `c.Clone(ctx, yoloai.CloneOptions{Source, Dest, Overwrite})`
+- `sb.Destroy(ctx, yoloai.DestroyOptions{Force})` → `sb.Destroy(ctx, yoloai.DestroyOptions{AbandonUnappliedWork})` — same Q-J rename; the field name now names the danger (abandoning unapplied work: a running agent, dirty workdir, or unapplied commits). CLI `--force` maps onto it.
 
 **Rationale:** F2 / F1 — commit/tag reads belong on the `Workdir()` sub-handle
 behind mode-agnostic verbs, and re-rooting `Clone`'s options + surfacing

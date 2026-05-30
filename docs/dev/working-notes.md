@@ -964,7 +964,7 @@ Breaking (beta, single branch): `sandbox.Confirm`/`FormatAge`/`FormatSize` and `
 
 Breaking (beta, single branch): `Client.ListCommits*`/`HasUncommittedChanges` and `sandbox.CloneOptions` are gone from the public surface. `patch.CommitInfo*` / `sandbox.List*Tags`/`GetTagMessage` stay internal (still used by the new `Workdir` methods) but are no longer reachable from `internal/cli`.
 
-**Open follow-up (flagged to owner):** `DestroyOptions.Force` still violates Q-J's "no `Force` API fields" — it should become a concern-specific name (e.g. `AcceptActiveWork`) in a later step. Left out of A3 to keep the commit scoped to commits/tags/clone.
+**Follow-up (resolved, same branch):** `DestroyOptions.Force` → **`AbandonUnappliedWork`** (owner-chosen over `AcceptActiveWork`: the name should highlight the dangerous thing — abandoning work — and reuse the "apply" nomenclature, since the overridden conditions are all *unapplied* work: running agent, dirty workdir, unapplied commits). Closes the last `Force` API field (Q-J). CLI `--force` maps onto it at the boundary.
 
 # Convention reminders
 

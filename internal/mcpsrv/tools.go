@@ -268,9 +268,9 @@ func (s *Server) handleSandboxDestroy(ctx context.Context, req mcp.CallToolReque
 		}
 	}
 
-	// Active-work gate-checked above when force was false; force here skips
-	// the typed *ActiveWorkError refusal.
-	if _, err := sb.Destroy(ctx, yoloai.DestroyOptions{Force: true}); err != nil {
+	// Active-work gate-checked above when force was false; this skips the
+	// typed *ActiveWorkError refusal.
+	if _, err := sb.Destroy(ctx, yoloai.DestroyOptions{AbandonUnappliedWork: true}); err != nil {
 		return textResult(errorf("destroy sandbox %q: %v", name, err)), nil
 	}
 

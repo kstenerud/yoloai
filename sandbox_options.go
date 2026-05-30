@@ -80,11 +80,12 @@ func (o ResetOptions) toInternal(name string) sandbox.ResetOptions {
 
 // DestroyOptions configures Sandbox.Destroy.
 type DestroyOptions struct {
-	// Force proceeds even when the sandbox has active work — a running agent,
-	// a dirty workdir, or unapplied commits. With Force false, Destroy refuses
-	// such a sandbox with a typed *ActiveWorkError carrying the reason, so the
-	// caller can prompt and retry with Force true.
-	Force bool
+	// AbandonUnappliedWork proceeds even when the sandbox holds work that was
+	// never applied to the host — a running agent, a dirty workdir, or unapplied
+	// commits. With it false, Destroy refuses such a sandbox with a typed
+	// *ActiveWorkError carrying the reason, so the caller can prompt and retry.
+	// (The CLI's --force flag maps onto this field at the boundary.)
+	AbandonUnappliedWork bool
 }
 
 // CloneOptions configures Client.Clone. Hand-written rather than aliased so the
