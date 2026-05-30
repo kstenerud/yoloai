@@ -1006,6 +1006,20 @@ No change to `f1KnownLeaks` (B4 closed no baseline entries — it removed `inter
 
 **Gate status:** Half B **met** (depguard green; zero `internal/sandbox` façade imports in cli+mcpsrv non-test code). Half A **met modulo** the one documented conscious-defer (`f1KnownLeaks` = `{config.MergedConfig}`). Remaining: C3 doc-polish (ARCHITECTURE/GUIDE rewrites, BREAKING-CHANGES consolidation, §2 stale import paths) + the deferred MergedConfig milestone. No BREAKING-CHANGES entry — all moved/deleted symbols were `internal/`. `make check` green.
 
+## D51 — C3 doc-polish: ARCHITECTURE F9/F10, BREAKING-CHANGES layer-1 consolidation, GUIDE map ruled N/A
+
+**Date:** 2026-05-30. **Status:** Accepted (owner, 2026-05-30). **Implements** layer1-public-api.md C3 (the doc remainder of the Layer-1 spine). Docs-only; no code change, no new BREAKING-CHANGES entry beyond the consolidation below.
+
+- **F10 (ARCHITECTURE dependency paragraph).** The old text claimed "the CLI doesn't reach into `internal/sandbox/*` … every command goes through `yoloai.Client`," which became too strong after C1/C2: the CLI no longer imports the `internal/sandbox` *façade*, but it does import the `store`/`patch`/`archetype` *leaves*. Rewrote the paragraph to draw that façade-vs-leaf line explicitly and to name the new `cli-sandbox-facade-scope` depguard rule (with the longer-prefix allow entries that keep the leaves reachable). This is the now-true contract.
+
+- **F9 (§2 stale import paths).** `internal/yoerrors` was promoted to a top-level `yoerrors/` package in B1; the package-listing entry moved out of the `internal/` block into the top-level section, and the `store/` leaf description's import list was repointed `internal/yoerrors`→`yoerrors`. The `parse.go | ParseDirArg(...)` file-index row was deleted (parse.go moved to `cliutil/dirspec.go` in B4), and the `prepareSandboxState` data-flow note was repointed to "DirSpecs already parsed upstream by `cliutil.ParseDirArg`."
+
+- **BREAKING-CHANGES consolidation (aggressive, per user call).** The six layer-1 reshape entries (NewSystemClient/Apply/Diff/Commits-tags-Clone/Per-sandbox-ops/Create — lines that ran ~300 lines of repeated Previous/New/Migration blocks) collapsed into one condensed "0.x public Go API reshape (layer-1)" section: prose by theme (handle model, workdir verbs, creation, admin client, typed errors, `Force` renames, WIP→uncommitted terminology) + one migration paragraph, with full step detail deferred to this log and the plan. The `doctor`→top-level entry that was interleaved among them is *not* layer-1 (repair/cleanup surface) and was kept verbatim as its own entry. Did the deletion as a contiguous `sed 43,311d` span (Apply→Create were contiguous) then replaced the NewSystemClient entry with the consolidated section; verified no triple-blank lines and every other `###` entry intact. The user chose "aggressive rewrite" over a safe regroup (trimming the repeated migration blocks is acceptable — the detail lives in D-entries + the plan).
+
+- **GUIDE API map ruled N/A.** The plan's "update GUIDE API map" item was moot: `GUIDE.md` is an end-user CLI reference with no Go-library/API section, and the public Go surface is already documented in `ARCHITECTURE.md`. User confirmed skipping rather than bolting a library-usage section onto the user guide (YAGNI; dev-facing content belongs in dev docs).
+
+**Gate status unchanged:** both halves still met modulo the deferred `config.MergedConfig` milestone (the last `f1KnownLeaks` entry, its own "public profile-config API" milestone in plans/TODO.md). With C3 done, the Layer-1 spine is **complete except that one conscious-defer.**
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.

@@ -8,6 +8,7 @@ Code navigation guide for the yoloAI codebase. Focused on the implemented code, 
 yoloai.go                → Orchestration spine: Client (Run, Diff, Apply, Stop, Destroy, ...)
 system_client.go         → Orchestration spine: SystemClient (DiskUsage, Prune, Build, Check)
 runtime_imports_linux.go → Linux-specific backend registration (containerd)
+yoerrors/                → Public typed error sentinels (top-level pkg; re-exported via the yoloai package)
 cmd/yoloai/              → Binary entry point
 internal/agent/          → Agent plugin definitions (Aider, Claude, Codex, Gemini, OpenCode, test, idle)
 internal/cli/            → Cobra command tree and CLI plumbing
@@ -40,13 +41,12 @@ internal/sandbox/state/       → Leaf: shared value types (DirSpec, State, Deps
 internal/sandbox/store/       → On-disk sandbox state: paths, Meta record, SandboxState completion flags
 internal/testutil/            → Shared test helpers (git, fixtures, home isolation, container polling) — test use only
 internal/workspace/           → Workspace utilities (copy, git, safety checks, tags)
-internal/yoerrors/            → Typed error sentinels exported via the yoloai package
 test/e2e/                → End-to-end tests against the compiled binary (build tag: e2e)
 ```
 
 Public Go surface is the **`yoloai` package only** (W-L12). Every other Go package lives under `internal/` and is unreachable from external imports by the Go compiler itself. `cmd/yoloai` is the binary entry, not a library.
 
-Dependency direction (W-L8 + W-L12 shape): `cmd/yoloai` → `internal/cli` → `yoloai` (Client + SystemClient) → `internal/sandbox` + `internal/sandbox/patch` + `internal/sandbox/store` + `internal/runtime`; `internal/sandbox` → `internal/sandbox/archetype` + `internal/sandbox/store` + `internal/runtime` + `internal/agent` + `internal/workspace`; `internal/sandbox/patch` → `internal/sandbox` + `internal/sandbox/store`; `internal/sandbox/store` and `internal/sandbox/state` are leaves (`state` holds the shared `DirSpec`/`State`/`Deps`/`Perms` value types so the F5 subpackages depend on it without importing the `sandbox` façade). Post-F5 the `sandbox` package is a thin **façade**: it re-exports leaf types/functions via `type X = leaf.X` / `var X = leaf.X` aliases and holds the `Engine` deps-holder, while orchestration lives in the leaves. The F5 DAG is `state ← {mounts, invocation, provision, profiles, runtimeconfig} ← launch ← {create, lifecycle}` (create/ and lifecycle/ are siblings — neither imports the other; their one-time shared check `CheckIsolationPrerequisites` lives in `launch/`) `← sandbox` (façade). Methods were **dissolved** into free functions taking `state.Deps`, not left as thin delegators; `yoloai.Client`/`Sandbox` call e.g. `lifecycle.Stop(ctx, deps, name)` and `create.Run(ctx, deps, ...)` directly. `internal/agent` stands alone; `internal/mcpsrv` depends on `yoloai` (not `sandbox.Engine`). The CLI doesn't reach into `internal/sandbox/*` or `internal/runtime/*` for orchestration — every command goes through `yoloai.Client` or `yoloai.SystemClient`. The `withRuntime`/`withManager` helpers were removed in W-L10. Cross-backend enumeration (`ls`, `doctor`, `system info`) goes through `SystemClient.ListAcrossBackends` / `Doctor` / `Info` (F23); the only remaining `cliutil.NewRuntime` callers are `cliutil.CheckBackend` (the availability-probe chokepoint, used by a few read-only displays) and the backend-scoped `system tart` subtree. Depguard (`.golangci.yml`) enforces the boundary going forward.
+Dependency direction (W-L8 + W-L12 shape): `cmd/yoloai` → `internal/cli` → `yoloai` (Client + SystemClient) → `internal/sandbox` + `internal/sandbox/patch` + `internal/sandbox/store` + `internal/runtime`; `internal/sandbox` → `internal/sandbox/archetype` + `internal/sandbox/store` + `internal/runtime` + `internal/agent` + `internal/workspace`; `internal/sandbox/patch` → `internal/sandbox` + `internal/sandbox/store`; `internal/sandbox/store` and `internal/sandbox/state` are leaves (`state` holds the shared `DirSpec`/`State`/`Deps`/`Perms` value types so the F5 subpackages depend on it without importing the `sandbox` façade). Post-F5 the `sandbox` package is a thin **façade**: it re-exports leaf types/functions via `type X = leaf.X` / `var X = leaf.X` aliases and holds the `Engine` deps-holder, while orchestration lives in the leaves. The F5 DAG is `state ← {mounts, invocation, provision, profiles, runtimeconfig} ← launch ← {create, lifecycle}` (create/ and lifecycle/ are siblings — neither imports the other; their one-time shared check `CheckIsolationPrerequisites` lives in `launch/`) `← sandbox` (façade). Methods were **dissolved** into free functions taking `state.Deps`, not left as thin delegators; `yoloai.Client`/`Sandbox` call e.g. `lifecycle.Stop(ctx, deps, name)` and `create.Run(ctx, deps, ...)` directly. `internal/agent` stands alone; `internal/mcpsrv` depends on `yoloai` (not `sandbox.Engine`). The CLI doesn't reach into the `internal/sandbox` **façade** package or `internal/runtime/*` for orchestration — every command goes through `yoloai.Client` or `yoloai.SystemClient`. It still imports a few leaf subpackages directly for value types and data access (`internal/sandbox/store` for the on-disk metadata read-model, `internal/sandbox/patch`, `internal/sandbox/archetype`); these are not orchestration entry points and remain permitted. The `withRuntime`/`withManager` helpers were removed in W-L10. Cross-backend enumeration (`ls`, `doctor`, `system info`) goes through `SystemClient.ListAcrossBackends` / `Doctor` / `Info` (F23); the only remaining `cliutil.NewRuntime` callers are `cliutil.CheckBackend` (the availability-probe chokepoint, used by a few read-only displays) and the backend-scoped `system tart` subtree. Depguard (`.golangci.yml`) enforces the boundary going forward: the `cli-sandbox-facade-scope` rule denies the `internal/sandbox` façade package from non-test `internal/cli/**` and `internal/mcpsrv/**`, while longer-prefix allow entries keep the `store`/`patch`/`archetype` leaves reachable (F1 Half-B).
 
 ## File Index
 
@@ -316,7 +316,6 @@ few helpers not yet carved out (clone, parse, setup, terminal/attach).
 | `notice.go` | Façade re-exports of `Notice`/`NoticeLevel`/`DestroyResult`/`StartResult`/`ResetResult` from `lifecycle/`. |
 | `profile_build.go` | Façade re-exports of profile image-build helpers; implementation in `profiles/`. |
 | `clone.go` | `Engine.Clone()` — deep-copies an existing sandbox state dir to a new name, preserving agent state/workdir, resetting identity. |
-| `parse.go` | `ParseDirArg()` — parses `path[:suffix...]=[mount]` into a `state.DirSpec`. |
 | `terminal.go` | Non-interactive tmux capture-pane wrapper for diagnostics. |
 | `attach.go` | Attach-readiness helpers — polls `sandbox.jsonl` / tmux `has-session`. |
 | `prune.go` | `PruneTempFiles()` — cleans stale `/tmp/yoloai-*` dirs. |
@@ -364,7 +363,7 @@ Git-format diff and apply machinery. Imports `sandbox/` (for exec helpers and lo
 
 ### `sandbox/store/`
 
-On-disk sandbox state — paths, metadata, and creation-completion flags. Leaf subpackage; imports only stdlib, `config`, `internal/fileutil`, `internal/yoerrors`. Imported by `sandbox/`, `sandbox/patch/`, and most external callers.
+On-disk sandbox state — paths, metadata, and creation-completion flags. Leaf subpackage; imports only stdlib, `config`, `internal/fileutil`, `yoerrors`. Imported by `sandbox/`, `sandbox/patch/`, and most external callers.
 
 | File | Purpose |
 |------|---------|
@@ -510,7 +509,7 @@ NewNewCmd (cli/lifecycle/new.go)
               → devcontainer: load devcontainer.json → merge ports/env/mounts, set workspaceFolder
               → compose: set isolation=container-privileged, archetypeDockerDRequired=true
               → transparency output (signals, bullets, suppress hint)
-          → ParseDirArg → validate name/agent/workdir/auxdirs → safety checks
+          → validate name/agent/workdir/auxdirs (DirSpecs already parsed upstream by cliutil.ParseDirArg) → safety checks
           → :copy dirs: copyDir (cp -rp / clonefile on macOS) → removeGitDirs → gitBaseline
           → :overlay dirs: createOverlayDirs (upper/ovlwork in sandbox state)
           → seed phase (provision/ leaf):

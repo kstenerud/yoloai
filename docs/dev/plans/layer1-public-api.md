@@ -193,9 +193,20 @@ collapsed into the A-steps (A1 `Attach`, B2/SystemClient `List`) as planned.
   `yoloai.*` (root aliases already existed); `ExpandPath`/`DirSize` → new
   `cliutil` filesystem helpers (`cliutil/fsutil.go`); `DetectStatus` left only in
   a test (gate-exempt). 10 non-test files shed their façade import.
-- **C3 docs (remaining):** rewrite `ARCHITECTURE.md:49` to the now-true contract
-  (F10); update GUIDE API map; consolidate `BREAKING-CHANGES.md` into one "0.x
-  public API reshape" section. Fix §2 stale import paths (F9). Empty
+- **C3 docs ✅ (except the deferred milestone):** `ARCHITECTURE.md` dependency
+  paragraph rewritten to the now-true contract — CLI imports the `store`/`patch`/
+  `archetype` leaves but NOT the `internal/sandbox` façade, naming the new
+  `cli-sandbox-facade-scope` depguard rule (F10); §2 stale import paths fixed —
+  `internal/yoerrors`→top-level `yoerrors/` (moved to the top-level listing), the
+  `parse.go`/`ParseDirArg` file-index row removed (it moved to
+  `cliutil/dirspec.go` in B4), and the create-flow note repointed to
+  `cliutil.ParseDirArg` (F9); `BREAKING-CHANGES.md` — the six layer-1 reshape
+  entries (NewSystemClient, Apply, Diff, Commits/tags/Clone, Per-sandbox ops,
+  Create) collapsed into one condensed "0.x public Go API reshape (layer-1)"
+  section (aggressive consolidation per user call 2026-05-30; the interleaved
+  non-layer-1 `doctor` entry kept separate). **GUIDE API map: N/A** — `GUIDE.md`
+  is end-user CLI docs with no Go-library section; the public Go surface lives in
+  `ARCHITECTURE.md` (user confirmed skip 2026-05-30). Remaining: empty
   `f1KnownLeaks` (the deferred MergedConfig milestone).
 - **Gate status:** Half B **met** (depguard green, zero façade imports in
   cli+mcpsrv non-test). Half A **met modulo one conscious-defer** (`f1KnownLeaks`
