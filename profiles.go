@@ -121,15 +121,15 @@ func (a *ProfileAdmin) List(_ context.Context) ([]ProfileSummary, error) {
 // resolved inheritance chain and merged configuration.
 type ProfileInfo struct {
 	Name          string
-	Chain         []string             // resolved inheritance chain (1 element since profiles don't currently inherit; kept for forward-compat)
-	Image         string               // backend image name (e.g. "yoloai-myprofile" or "yoloai-base")
-	HasDockerfile bool                 // profile carries its own Dockerfile
-	Merged        *config.MergedConfig // fully merged config
+	Chain         []string               // resolved inheritance chain (1 element since profiles don't currently inherit; kept for forward-compat)
+	Image         string                 // backend image name (e.g. "yoloai-myprofile" or "yoloai-base")
+	HasDockerfile bool                   // profile carries its own Dockerfile
+	Merged        *ResolvedProfileConfig // fully merged config
 	// Parent is the merged config of the parent chain (chain[:-1]).
-	// Non-nil; for "base" this is the zero-value MergedConfig.
+	// Non-nil; for "base" this is the zero-value config.
 	// Used by callers that need to compute the profile's own additions
 	// (the CLI's `profile info --diff` mode).
-	Parent *config.MergedConfig
+	Parent *ResolvedProfileConfig
 }
 
 // Info returns full information for a profile, including the resolved
@@ -174,8 +174,8 @@ func (a *ProfileAdmin) Info(_ context.Context, name string) (*ProfileInfo, error
 		Chain:         chain,
 		Image:         config.ResolveProfileImage(a.s.layout, name, chain),
 		HasDockerfile: config.ProfileHasDockerfile(a.s.layout, name),
-		Merged:        merged,
-		Parent:        parent,
+		Merged:        resolvedProfileConfigFromMerged(merged),
+		Parent:        resolvedProfileConfigFromMerged(parent),
 	}, nil
 }
 
@@ -196,10 +196,10 @@ func (a *ProfileAdmin) infoBase() (*ProfileInfo, error) {
 		Chain:         chain,
 		Image:         "yoloai-base",
 		HasDockerfile: config.ProfileHasDockerfile(a.s.layout, "base"),
-		Merged:        merged,
-		// "base" has no parent; an empty MergedConfig lets diff callers
+		Merged:        resolvedProfileConfigFromMerged(merged),
+		// "base" has no parent; an empty config lets diff callers
 		// treat it the same as any other profile without a nil-check.
-		Parent: &config.MergedConfig{},
+		Parent: resolvedProfileConfigFromMerged(&config.MergedConfig{}),
 	}, nil
 }
 

@@ -165,35 +165,35 @@ func renderProfileInfoDiff(cmd *cobra.Command, info *yoloai.ProfileInfo) error {
 
 // profileInfoJSON is the JSON output structure for `profile info`.
 type profileInfoJSON struct {
-	Profile     string                 `json:"profile"`
-	Chain       []string               `json:"chain"`
-	Image       string                 `json:"image"`
-	Dockerfile  bool                   `json:"dockerfile"`
-	Agent       string                 `json:"agent,omitempty"`
-	Model       string                 `json:"model,omitempty"`
-	Backend     string                 `json:"backend,omitempty"`
-	TartImage   string                 `json:"tart_image,omitempty"`
-	Isolation   string                 `json:"isolation,omitempty"`
-	Env         map[string]string      `json:"env,omitempty"`
-	AgentArgs   map[string]string      `json:"agent_args,omitempty"`
-	Ports       []string               `json:"ports,omitempty"`
-	Workdir     *config.ProfileWorkdir `json:"workdir,omitempty"`
-	Directories []config.ProfileDir    `json:"directories,omitempty"`
-	Resources   *config.ResourceLimits `json:"resources,omitempty"`
-	Network     *config.NetworkConfig  `json:"network,omitempty"`
-	Mounts      []string               `json:"mounts,omitempty"`
+	Profile     string                   `json:"profile"`
+	Chain       []string                 `json:"chain"`
+	Image       string                   `json:"image"`
+	Dockerfile  bool                     `json:"dockerfile"`
+	Agent       string                   `json:"agent,omitempty"`
+	Model       string                   `json:"model,omitempty"`
+	Backend     string                   `json:"backend,omitempty"`
+	TartImage   string                   `json:"tart_image,omitempty"`
+	Isolation   string                   `json:"isolation,omitempty"`
+	Env         map[string]string        `json:"env,omitempty"`
+	AgentArgs   map[string]string        `json:"agent_args,omitempty"`
+	Ports       []string                 `json:"ports,omitempty"`
+	Workdir     *yoloai.ProfileWorkdir   `json:"workdir,omitempty"`
+	Directories []yoloai.ProfileAuxDir   `json:"directories,omitempty"`
+	Resources   *yoloai.ProfileResources `json:"resources,omitempty"`
+	Network     *yoloai.ProfileNetwork   `json:"network,omitempty"`
+	Mounts      []string                 `json:"mounts,omitempty"`
 }
 
 // profileDiffJSON is the JSON output structure for `profile info --diff`.
 type profileDiffJSON struct {
-	Profile   string               `json:"profile"`
-	Chain     []string             `json:"chain"`
-	Inherited *config.MergedConfig `json:"inherited"`
-	Merged    *config.MergedConfig `json:"merged"`
+	Profile   string                        `json:"profile"`
+	Chain     []string                      `json:"chain"`
+	Inherited *yoloai.ResolvedProfileConfig `json:"inherited"`
+	Merged    *yoloai.ResolvedProfileConfig `json:"merged"`
 }
 
 // printProfileInfo renders the human-readable output for `profile info`.
-func printProfileInfo(cmd *cobra.Command, name, extends string, chain []string, image string, hasDockerfile bool, merged *config.MergedConfig) error {
+func printProfileInfo(cmd *cobra.Command, name, extends string, chain []string, image string, hasDockerfile bool, merged *yoloai.ResolvedProfileConfig) error {
 	out := cmd.OutOrStdout()
 
 	fmt.Fprintf(out, "Profile:     %s\n", name) //nolint:errcheck
@@ -219,7 +219,7 @@ func printProfileInfo(cmd *cobra.Command, name, extends string, chain []string, 
 }
 
 // printProfileInfoScalars prints scalar profile fields.
-func printProfileInfoScalars(out io.Writer, merged *config.MergedConfig) {
+func printProfileInfoScalars(out io.Writer, merged *yoloai.ResolvedProfileConfig) {
 	if merged.Agent != "" {
 		fmt.Fprintf(out, "Agent:       %s\n", merged.Agent) //nolint:errcheck
 	}
@@ -238,7 +238,7 @@ func printProfileInfoScalars(out io.Writer, merged *config.MergedConfig) {
 }
 
 // printProfileInfoMaps prints map and list fields (env, agent args, ports, mounts).
-func printProfileInfoMaps(out io.Writer, merged *config.MergedConfig) {
+func printProfileInfoMaps(out io.Writer, merged *yoloai.ResolvedProfileConfig) {
 	if len(merged.Env) > 0 {
 		fmt.Fprintln(out, "Env:") //nolint:errcheck
 		for _, k := range sortedKeys(merged.Env) {
@@ -263,7 +263,7 @@ func printProfileInfoMaps(out io.Writer, merged *config.MergedConfig) {
 }
 
 // printProfileInfoDirs prints workdir and directories fields.
-func printProfileInfoDirs(out io.Writer, merged *config.MergedConfig) {
+func printProfileInfoDirs(out io.Writer, merged *yoloai.ResolvedProfileConfig) {
 	if merged.Workdir != nil {
 		w := merged.Workdir
 		s := w.Path
@@ -291,14 +291,14 @@ func printProfileInfoDirs(out io.Writer, merged *config.MergedConfig) {
 }
 
 // printProfileInfoResources prints resources and network fields.
-func printProfileInfoResources(out io.Writer, merged *config.MergedConfig) {
-	if merged.Resources != nil && (merged.Resources.CPUs != "" || merged.Resources.Memory != "") {
+func printProfileInfoResources(out io.Writer, merged *yoloai.ResolvedProfileConfig) {
+	if merged.Resources != nil && (merged.Resources.CPULimit != "" || merged.Resources.MemoryLimit != "") {
 		var parts []string
-		if merged.Resources.CPUs != "" {
-			parts = append(parts, merged.Resources.CPUs+" cpus")
+		if merged.Resources.CPULimit != "" {
+			parts = append(parts, merged.Resources.CPULimit+" cpus")
 		}
-		if merged.Resources.Memory != "" {
-			parts = append(parts, merged.Resources.Memory+" memory")
+		if merged.Resources.MemoryLimit != "" {
+			parts = append(parts, merged.Resources.MemoryLimit+" memory")
 		}
 		fmt.Fprintf(out, "Resources:   %s\n", strings.Join(parts, ", ")) //nolint:errcheck
 	}
@@ -312,7 +312,7 @@ func printProfileInfoResources(out io.Writer, merged *config.MergedConfig) {
 }
 
 // printProfileDiff renders the human-readable diff output for `profile info --diff`.
-func printProfileDiff(cmd *cobra.Command, name, extends string, chain []string, parent, merged *config.MergedConfig) error {
+func printProfileDiff(cmd *cobra.Command, name, extends string, chain []string, parent, merged *yoloai.ResolvedProfileConfig) error {
 	out := cmd.OutOrStdout()
 
 	fmt.Fprintf(out, "Profile:   %s\n", name) //nolint:errcheck
@@ -423,7 +423,7 @@ func printListAdditions(out io.Writer, label string, old, new []string) bool {
 }
 
 // printWorkdirDiff prints workdir diff. Returns true if printed.
-func printWorkdirDiff(out io.Writer, old, new *config.ProfileWorkdir) bool {
+func printWorkdirDiff(out io.Writer, old, new *yoloai.ProfileWorkdir) bool {
 	if new == nil {
 		return false
 	}
@@ -441,7 +441,7 @@ func printWorkdirDiff(out io.Writer, old, new *config.ProfileWorkdir) bool {
 }
 
 // formatWorkdir formats a ProfileWorkdir for display.
-func formatWorkdir(w *config.ProfileWorkdir) string {
+func formatWorkdir(w *yoloai.ProfileWorkdir) string {
 	s := w.Path
 	if w.Mode != "" {
 		s += " (" + w.Mode + ")"
@@ -453,7 +453,7 @@ func formatWorkdir(w *config.ProfileWorkdir) string {
 }
 
 // printDirAdditions prints directory additions. Returns true if any printed.
-func printDirAdditions(out io.Writer, old, new []config.ProfileDir) bool {
+func printDirAdditions(out io.Writer, old, new []yoloai.ProfileAuxDir) bool {
 	if len(new) <= len(old) {
 		return false
 	}
@@ -478,27 +478,27 @@ func printDirAdditions(out io.Writer, old, new []config.ProfileDir) bool {
 }
 
 // printResourcesDiff prints per-field resources diff. Returns true if any printed.
-func printResourcesDiff(out io.Writer, old, new *config.ResourceLimits) bool {
+func printResourcesDiff(out io.Writer, old, new *yoloai.ProfileResources) bool {
 	if new == nil {
 		return false
 	}
 	if old == nil {
-		old = &config.ResourceLimits{}
+		old = &yoloai.ProfileResources{}
 	}
 
 	var lines []string
-	if new.CPUs != old.CPUs {
-		if old.CPUs == "" {
-			lines = append(lines, fmt.Sprintf("    + %-10s %s", "cpus:", new.CPUs))
+	if new.CPULimit != old.CPULimit {
+		if old.CPULimit == "" {
+			lines = append(lines, fmt.Sprintf("    + %-10s %s", "cpus:", new.CPULimit))
 		} else {
-			lines = append(lines, fmt.Sprintf("    ~ %-10s %s → %s", "cpus:", old.CPUs, new.CPUs))
+			lines = append(lines, fmt.Sprintf("    ~ %-10s %s → %s", "cpus:", old.CPULimit, new.CPULimit))
 		}
 	}
-	if new.Memory != old.Memory {
-		if old.Memory == "" {
-			lines = append(lines, fmt.Sprintf("    + %-10s %s", "memory:", new.Memory))
+	if new.MemoryLimit != old.MemoryLimit {
+		if old.MemoryLimit == "" {
+			lines = append(lines, fmt.Sprintf("    + %-10s %s", "memory:", new.MemoryLimit))
 		} else {
-			lines = append(lines, fmt.Sprintf("    ~ %-10s %s → %s", "memory:", old.Memory, new.Memory))
+			lines = append(lines, fmt.Sprintf("    ~ %-10s %s → %s", "memory:", old.MemoryLimit, new.MemoryLimit))
 		}
 	}
 
@@ -514,12 +514,12 @@ func printResourcesDiff(out io.Writer, old, new *config.ResourceLimits) bool {
 }
 
 // printNetworkDiff prints network config diff. Returns true if any printed.
-func printNetworkDiff(out io.Writer, old, new *config.NetworkConfig) bool {
+func printNetworkDiff(out io.Writer, old, new *yoloai.ProfileNetwork) bool {
 	if new == nil {
 		return false
 	}
 	if old == nil {
-		old = &config.NetworkConfig{}
+		old = &yoloai.ProfileNetwork{}
 	}
 
 	hasDiff := false

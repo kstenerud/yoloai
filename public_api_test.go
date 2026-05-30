@@ -209,30 +209,18 @@ func writeLeakLines(msg *strings.Builder, leaks map[string][]string) {
 }
 
 // f1KnownLeaks is the F1 baseline: internal types the public yoloai
-// surface currently exposes. Each one violates the "external embedders
-// can compile against this API" contract claimed by the package doc,
-// but is grandfathered while CRITIQUE.md F1's multi-week migration
-// progresses. New entries here require a CRITIQUE.md update; entries
-// come off as their types move to the public root or get adapter
-// shims. When this map is empty, F1 is closed.
+// surface is allowed to expose. It is intentionally EMPTY — F1 is closed.
+// The public surface now mirrors every previously-leaked internal type
+// with a hand-written public type (e.g. config.MergedConfig and its nested
+// tree are mirrored by ResolvedProfileConfig and friends in profile_config.go).
+//
+// Keep this empty. Any new entry re-opens F1 and requires a CRITIQUE.md
+// update justifying the regression; the right fix is almost always a
+// public mirror type, not a grandfathered leak.
 //
 // Format: package-path "." TypeName. Match must be exact (the test
 // computes the same key from the type's TypeName).
-var f1KnownLeaks = map[string]struct{}{
-	// config.MergedConfig: exposed by ProfileInfo.Merged / .Parent.
-	// Deliberately deferred — not aliased. A genuine fix means promoting
-	// the whole merged profile-config tree (MergedConfig's 21 fields plus
-	// the nested ProfileWorkdir / ProfileDir / ResourceLimits /
-	// NetworkConfig / AgentFilesConfig types) to hand-written public types
-	// with mapping, so external embedders can read every field — not just
-	// alias the top-level struct and leave the nested fields un-nameable
-	// (a leak the detector can't see, which would make this test lie).
-	// That promotion is its own milestone, tracked in plans/TODO.md as the
-	// "public profile-config API". Until then this stays a documented,
-	// honest deferral. When it lands, this entry comes off and the map is
-	// empty (F1 closed).
-	"github.com/kstenerud/yoloai/internal/config.MergedConfig": {},
-}
+var f1KnownLeaks = map[string]struct{}{}
 
 // internalTypeKey returns a stable identifier for a type IF it's a Named
 // type whose package path contains `marker` ("/internal/"). Returns the
