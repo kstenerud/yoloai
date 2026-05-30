@@ -13,7 +13,6 @@ import (
 
 	"github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/cli/system/tart"
-	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
@@ -119,13 +118,13 @@ func prepareBuildSecrets(secretFlags []string, hasProfile bool) ([]string, error
 	homeDir := cliutil.Layout().HomeDir
 	var secrets []string
 	for _, s := range secretFlags {
-		expanded, err := sandbox.ValidateBuildSecret(s, homeDir)
+		expanded, err := yoloai.ValidateBuildSecret(s, homeDir)
 		if err != nil {
 			return nil, err
 		}
 		secrets = append(secrets, expanded)
 	}
-	return append(sandbox.AutoBuildSecrets(homeDir), secrets...), nil
+	return append(yoloai.AutoBuildSecrets(homeDir), secrets...), nil
 }
 
 // buildOutputFor returns stderr for human mode (build stream is

@@ -982,6 +982,18 @@ Decided per-type; the three baseline entries had three different right answers:
 
 Breaking (beta, single branch): `yoloai.NewSystemClient` signature changed (see BREAKING-CHANGES.md).
 
+## D49 — B4: dir-arg parsers relocated to `cliutil`; build-secrets promoted to public `yoloai`; double `DirSpec` collapsed
+
+**Date:** 2026-05-30. **Status:** Accepted (owner, 2026-05-30). **Implements** layer1-public-api.md B4. **Instance of** the layering thesis (only the CLI parses flag strings; the shared contract is the typed `yoloai.DirSpec`, not the parser) and the no-lying mandate (build-secret validation lives where its real consumers are, not where the plan's first draft guessed).
+
+- **Dir-arg parsers → `cliutil`.** `ParseDirArg`/`ParseAuxDirArg` (+ unexported `knownSuffixes`/`applyDirSuffix`) moved `internal/sandbox/parse.go` → `internal/cli/cliutil/dirspec.go`. Return type `*DirSpec` → `*yoloai.DirSpec`; mode comparisons use `yoloai.DirModeCopy/Overlay/RW/RO`; path expansion calls `config.ExpandPath` directly (the `sandbox.ExpandPath` wrapper is a separate B5 straggler). `parse.go`/`parse_test.go` deleted; tests moved to `dirspec_test.go` (package `cliutil`).
+
+- **Build-secrets → public `yoloai` (deviation from the plan's literal text).** The B4 paragraph listed `ValidateBuildSecret` alongside the flag parsers as `cliutil`-bound. On implementation I placed both `AutoBuildSecrets` and `ValidateBuildSecret` on the **public `yoloai`** surface (new `build_secrets.go`) instead: these aren't CLI-flag parsers — they're a build-input contract (detect host credential files; validate BuildKit `--secret` specs) directly useful to embedders and the future daemon, matching the branch's "real, useful public API" goal. Impl stays canonical in `profiles/`; the `internal/sandbox/profile_build.go` façade vars (`AutoBuildSecrets`/`ValidateBuildSecret`) deleted (kept `ProfileImageBuilder`/`EnsureProfileImage`); tests moved to `profiles/profile_build_test.go`. `yoloai → profiles` is cycle-free.
+
+- **Double `DirSpec` collapsed.** `mcpsrv.ProxyOptions.Workdir`/`AuxDirs` retyped `sandbox.DirSpec` → `yoloai.DirSpec` (same underlying type via the alias chain, so no behavior change). Callers repointed: `mcp.go` + `lifecycle/new.go` shed their `internal/sandbox` import entirely; `system.go` repointed build-secret calls to `yoloai.*` and shed its import. `proxy.go` keeps `sandbox`/`store` for `StartOptions`/`ErrSandboxNotFound`/`store.*` (B5/C2).
+
+No change to `f1KnownLeaks` (B4 closed no baseline entries — it removed `internal/sandbox` imports, the Half-B work, not aliased-type leaks). `make check` green.
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.

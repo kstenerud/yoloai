@@ -23,10 +23,10 @@ import (
 type ProxyOptions struct {
 	// Workdir is the primary working directory. Required when creating a new
 	// sandbox; ignored if the sandbox already exists.
-	Workdir sandbox.DirSpec
+	Workdir yoloai.DirSpec
 
 	// AuxDirs are auxiliary directories to mount. Used only when creating.
-	AuxDirs []sandbox.DirSpec
+	AuxDirs []yoloai.DirSpec
 
 	// Agent is the agent to run in the container. Defaults to "idle"
 	// (sleep infinity — keeps the container alive without an AI agent).

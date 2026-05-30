@@ -11,11 +11,3 @@ type ProfileImageBuilder = profiles.ProfileImageBuilder
 // EnsureProfileImage ensures a profile's Docker image and its inheritance
 // chain are built and up to date. See profiles.EnsureProfileImage.
 var EnsureProfileImage = profiles.EnsureProfileImage
-
-// AutoBuildSecrets detects well-known credential files on the host and returns
-// Docker BuildKit --secret specs. See profiles.AutoBuildSecrets.
-var AutoBuildSecrets = profiles.AutoBuildSecrets
-
-// ValidateBuildSecret validates a Docker BuildKit --secret spec string.
-// See profiles.ValidateBuildSecret.
-var ValidateBuildSecret = profiles.ValidateBuildSecret

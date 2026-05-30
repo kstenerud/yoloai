@@ -65,7 +65,7 @@ complete.
 | Error vocabulary (~75) | `NewUsageError`, `ErrSandboxNotFound`, `NewPlatformError`, `IsDiskSpaceError`, `ExitCoder`, … | **B1** — public `yoerrors` package |
 | Status read-model (~100) | `Info`, `Status`+`Status*` consts, `TagInfo`, `DetectStatus` | **B2** — root re-export + Client method |
 | Presentation/prompt (~17) | `Confirm`, `FormatSize`, `FormatAge`, `DirSize` | **B3** — `cliutil` (F4/F5) |
-| Parse/input (~14) | `DirSpec` (dup w/ `yoloai.DirSpec`), `ParseDirArg`, `ParseAuxDirArg`, `ExpandPath`, `ValidateBuildSecret` | **B4** — `cliutil` parse + single root `DirSpec` |
+| Parse/input (~14) | `DirSpec` (dup w/ `yoloai.DirSpec`), `ParseDirArg`, `ParseAuxDirArg`, `ExpandPath`, `ValidateBuildSecret` | **B4 ✓** — parsers→`cliutil`, build-secrets→public `yoloai`, single root `DirSpec` (`ExpandPath` straggler → B5) |
 | Option stragglers | `CloneOptions` (A3 ✓ → `yoloai.CloneOptions`), `StartOptions`/`ResetOptions` (aliased ✓) | **A1/A3** |
 | Bypass operations (~13) | `ListTagsBeyondBaseline`/`ListUnappliedTags`/`GetTagMessage` (A3 ✓ → `Workdir().Tags`), `WaitForAttachReady`, `ListSandboxesMultiBackend`, `NewEngine` (remain) | **B5** — Client/Sandbox/SystemClient methods |
 
@@ -142,12 +142,26 @@ Decided per-type (no auto-aliasing of internal config structs):
   un-nameable (a leak the detector can't see), which would make the F1 test lie;
   the branch's goal is a real, honest API, so we defer rather than alias.
 
-### B4 — Parse/input at the boundary
+### B4 — Parse/input at the boundary ✅
 Collapse the double `DirSpec` (keep the root alias `yoloai.DirSpec`; repoint
 mcpsrv off `sandbox.DirSpec`). `ParseDirArg`/`ParseAuxDirArg`/`ExpandPath`/
 `ValidateBuildSecret` parse **CLI flag strings** → `cliutil` (only the CLI parses
 flags; the daemon parses its own wire input straight into `yoloai.DirSpec`). The
 shared contract is the typed `yoloai.DirSpec`, not the parser.
+
+**Landed:** `ParseDirArg`/`ParseAuxDirArg` (+ `knownSuffixes`/`applyDirSuffix`)
+moved `internal/sandbox/parse.go` → `internal/cli/cliutil/dirspec.go`, returning
+`*yoloai.DirSpec`; old `parse.go`/`parse_test.go` deleted. Callers repointed:
+`mcp.go`, `lifecycle/new.go` (both shed their `internal/sandbox` import),
+`mcpsrv/proxy.go` `ProxyOptions.Workdir`/`AuxDirs` now `yoloai.DirSpec`.
+**Deviation from the literal text above:** `AutoBuildSecrets`/`ValidateBuildSecret`
+went to the **public `yoloai`** surface (new `build_secrets.go`), not `cliutil` —
+build-secret validation is a build-input contract useful to embedders and the
+future daemon, not a CLI-flag-only parser. Impl stays in `profiles/`; façade vars
+in `internal/sandbox/profile_build.go` deleted; tests moved to `profiles/`.
+`system.go` repointed to `yoloai.*` and shed its `internal/sandbox` import.
+Remaining `sandbox.X` in cli+mcpsrv (`StartOptions`, `ExpandPath`, read-model
+helpers, `ErrSandboxNotFound`) are B5/C2, not B4.
 
 ### C — Enforce + repoint + docs (the gate)
 - **C1 depguard:** new rule denying `internal/cli` + `internal/mcpsrv` →

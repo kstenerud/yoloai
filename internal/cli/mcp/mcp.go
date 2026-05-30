@@ -13,7 +13,6 @@ import (
 	"github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/mcpsrv"
 	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
@@ -144,23 +143,23 @@ func runMCPProxy(cmd *cobra.Command, args []string) error {
 	// Parse workdir if provided
 	layout := cliutil.Layout()
 	homeDir := layout.HomeDir
-	var workdirSpec sandbox.DirSpec
+	var workdirSpec yoloai.DirSpec
 	if rawWorkdir != "" {
-		parsed, err := sandbox.ParseDirArg(rawWorkdir, homeDir, layout.Env)
+		parsed, err := cliutil.ParseDirArg(rawWorkdir, homeDir, layout.Env)
 		if err != nil {
 			return fmt.Errorf("invalid workdir: %w", err)
 		}
 		workdirSpec = *parsed
 		if workdirSpec.Mode == "" {
-			workdirSpec.Mode = sandbox.DirModeCopy
+			workdirSpec.Mode = yoloai.DirModeCopy
 		}
 	}
 
 	// Parse aux dirs. ParseAuxDirArg enforces Q-U: aux dirs cannot
 	// be :copy or :overlay (diff/apply is workdir-only).
-	var auxDirSpecs []sandbox.DirSpec
+	var auxDirSpecs []yoloai.DirSpec
 	for _, rawDir := range rawDirs {
-		parsed, err := sandbox.ParseAuxDirArg(rawDir, homeDir, layout.Env)
+		parsed, err := cliutil.ParseAuxDirArg(rawDir, homeDir, layout.Env)
 		if err != nil {
 			return fmt.Errorf("invalid directory %q: %w", rawDir, err)
 		}

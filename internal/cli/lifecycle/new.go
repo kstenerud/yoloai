@@ -17,7 +17,6 @@ import (
 	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/archetype"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/yoerrors"
@@ -282,27 +281,27 @@ func parseEnvSlice(envSlice []string) (map[string]string, error) {
 }
 
 // resolveNewDirSpecs parses rawWorkdirArg and rawDirs into DirSpec values.
-func resolveNewDirSpecs(rawWorkdirArg string, rawDirs []string) (workdirSpec sandbox.DirSpec, auxDirSpecs []sandbox.DirSpec, err error) {
+func resolveNewDirSpecs(rawWorkdirArg string, rawDirs []string) (workdirSpec yoloai.DirSpec, auxDirSpecs []yoloai.DirSpec, err error) {
 	layout := cliutil.Layout()
 	homeDir := layout.HomeDir
 	if rawWorkdirArg != "" {
-		parsed, parseErr := sandbox.ParseDirArg(rawWorkdirArg, homeDir, layout.Env)
+		parsed, parseErr := cliutil.ParseDirArg(rawWorkdirArg, homeDir, layout.Env)
 		if parseErr != nil {
-			return sandbox.DirSpec{}, nil, yoerrors.NewUsageError("invalid workdir: %s", parseErr)
+			return yoloai.DirSpec{}, nil, yoerrors.NewUsageError("invalid workdir: %s", parseErr)
 		}
 		workdirSpec = *parsed
 	}
 	for _, rawDir := range rawDirs {
-		parsed, parseErr := sandbox.ParseAuxDirArg(rawDir, homeDir, layout.Env)
+		parsed, parseErr := cliutil.ParseAuxDirArg(rawDir, homeDir, layout.Env)
 		if parseErr != nil {
 			// ParseAuxDirArg returns *UsageError for the :copy/:overlay
 			// rejection cases (already user-actionable); pass it through.
 			// Other parse errors get the "invalid directory" prefix.
 			var usage *yoerrors.UsageError
 			if errors.As(parseErr, &usage) {
-				return sandbox.DirSpec{}, nil, parseErr
+				return yoloai.DirSpec{}, nil, parseErr
 			}
-			return sandbox.DirSpec{}, nil, yoerrors.NewUsageError("invalid directory %q: %s", rawDir, parseErr)
+			return yoloai.DirSpec{}, nil, yoerrors.NewUsageError("invalid directory %q: %s", rawDir, parseErr)
 		}
 		auxDirSpecs = append(auxDirSpecs, *parsed)
 	}

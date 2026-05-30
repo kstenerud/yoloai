@@ -1,10 +1,11 @@
-package sandbox
+package cliutil
 
 import (
 	"os"
 	"path/filepath"
 	"testing"
 
+	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -19,20 +20,20 @@ func TestParseDirArg_Modes(t *testing.T) {
 	tests := []struct {
 		name                       string
 		input                      string
-		expectedMode               DirMode
+		expectedMode               yoloai.DirMode
 		expectedAllowDangerousPath bool
 	}{
 		{"bare path", app, "", false},
-		{"copy suffix", app + ":copy", DirModeCopy, false},
-		{"rw suffix", app + ":rw", DirModeRW, false},
+		{"copy suffix", app + ":copy", yoloai.DirModeCopy, false},
+		{"rw suffix", app + ":rw", yoloai.DirModeRW, false},
 		{"force suffix", app + ":force", "", true},
-		{"overlay suffix", app + ":overlay", DirModeOverlay, false},
-		{"rw and force", app + ":rw:force", DirModeRW, true},
-		{"force and copy", app + ":force:copy", DirModeCopy, true},
-		{"copy and force", app + ":copy:force", DirModeCopy, true},
-		{"force and rw", app + ":force:rw", DirModeRW, true},
-		{"overlay and force", app + ":overlay:force", DirModeOverlay, true},
-		{"force and overlay", app + ":force:overlay", DirModeOverlay, true},
+		{"overlay suffix", app + ":overlay", yoloai.DirModeOverlay, false},
+		{"rw and force", app + ":rw:force", yoloai.DirModeRW, true},
+		{"force and copy", app + ":force:copy", yoloai.DirModeCopy, true},
+		{"copy and force", app + ":copy:force", yoloai.DirModeCopy, true},
+		{"force and rw", app + ":force:rw", yoloai.DirModeRW, true},
+		{"overlay and force", app + ":overlay:force", yoloai.DirModeOverlay, true},
+		{"force and overlay", app + ":force:overlay", yoloai.DirModeOverlay, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -90,7 +91,7 @@ func TestParseDirArg_TildeExpansion(t *testing.T) {
 	result, err := ParseDirArg("~/somedir:copy", home, nil)
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join(home, "somedir"), result.Path)
-	assert.Equal(t, DirMode("copy"), result.Mode)
+	assert.Equal(t, yoloai.DirMode("copy"), result.Mode)
 }
 
 func TestParseDirArg_EnvVarExpansion(t *testing.T) {
@@ -101,7 +102,7 @@ func TestParseDirArg_EnvVarExpansion(t *testing.T) {
 	result, err := ParseDirArg("${HOME}/somedir:copy", "/home/user", env)
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join(home, "somedir"), result.Path)
-	assert.Equal(t, DirMode("copy"), result.Mode)
+	assert.Equal(t, yoloai.DirMode("copy"), result.Mode)
 }
 
 func TestParseDirArg_EnvVarUnset(t *testing.T) {
@@ -115,14 +116,14 @@ func TestParseDirArg_PathWithColons(t *testing.T) {
 	result, err := ParseDirArg("/path/to/file:with:colons", "/home/user", nil)
 	require.NoError(t, err)
 	assert.Equal(t, "/path/to/file:with:colons", result.Path)
-	assert.Equal(t, DirMode(""), result.Mode)
+	assert.Equal(t, yoloai.DirMode(""), result.Mode)
 	assert.False(t, result.AllowDangerousPath)
 
 	// Known suffix after unknown colons.
 	result, err = ParseDirArg("/path/to/file:with:copy", "/home/user", nil)
 	require.NoError(t, err)
 	assert.Equal(t, "/path/to/file:with", result.Path)
-	assert.Equal(t, DirMode("copy"), result.Mode)
+	assert.Equal(t, yoloai.DirMode("copy"), result.Mode)
 }
 
 func TestParseDirArg_MountPath(t *testing.T) {
@@ -135,12 +136,12 @@ func TestParseDirArg_MountPath(t *testing.T) {
 		input                      string
 		expectedPath               string
 		expectedMountPath          string
-		expectedMode               DirMode
+		expectedMode               yoloai.DirMode
 		expectedAllowDangerousPath bool
 	}{
 		{"mount path only", app + "=/opt/app", app, "/opt/app", "", false},
-		{"mount path with rw", app + ":rw=/opt/app", app, "/opt/app", DirModeRW, false},
-		{"mount path with copy and force", app + ":copy:force=/opt/app", app, "/opt/app", DirModeCopy, true},
+		{"mount path with rw", app + ":rw=/opt/app", app, "/opt/app", yoloai.DirModeRW, false},
+		{"mount path with copy and force", app + ":copy:force=/opt/app", app, "/opt/app", yoloai.DirModeCopy, true},
 		{"no mount path", app, app, "", "", false},
 	}
 	for _, tt := range tests {
@@ -161,7 +162,7 @@ func TestParseDirArg_DoubleColon(t *testing.T) {
 	result, err := ParseDirArg("/tmp/test::", "/home/user", nil)
 	require.NoError(t, err)
 	assert.Equal(t, "/tmp/test::", result.Path)
-	assert.Equal(t, DirMode(""), result.Mode)
+	assert.Equal(t, yoloai.DirMode(""), result.Mode)
 	assert.False(t, result.AllowDangerousPath)
 }
 
@@ -171,15 +172,15 @@ func TestParseDirArg_TrailingColon(t *testing.T) {
 	result, err := ParseDirArg("/tmp/test:", "/home/user", nil)
 	require.NoError(t, err)
 	assert.Equal(t, "/tmp/test:", result.Path)
-	assert.Equal(t, DirMode(""), result.Mode)
+	assert.Equal(t, yoloai.DirMode(""), result.Mode)
 	assert.False(t, result.AllowDangerousPath)
 }
 
 func TestDirArg_ResolvedMountPath(t *testing.T) {
-	d := &DirSpec{Path: "/host/path", MountPath: "/container/path"}
+	d := &yoloai.DirSpec{Path: "/host/path", MountPath: "/container/path"}
 	assert.Equal(t, "/container/path", d.ResolvedMountPath())
 
-	d2 := &DirSpec{Path: "/host/path"}
+	d2 := &yoloai.DirSpec{Path: "/host/path"}
 	assert.Equal(t, "/host/path", d2.ResolvedMountPath())
 }
 
@@ -207,14 +208,14 @@ func TestParseAuxDirArg_RejectsOverlay(t *testing.T) {
 func TestParseAuxDirArg_AcceptsRW(t *testing.T) {
 	d, err := ParseAuxDirArg("/tmp/aux:rw", "/home/user", nil)
 	require.NoError(t, err)
-	assert.Equal(t, DirMode("rw"), d.Mode)
+	assert.Equal(t, yoloai.DirMode("rw"), d.Mode)
 }
 
 func TestParseAuxDirArg_AcceptsRO_Default(t *testing.T) {
 	// no suffix → empty mode; caller defaults to :ro.
 	d, err := ParseAuxDirArg("/tmp/aux", "/home/user", nil)
 	require.NoError(t, err)
-	assert.Equal(t, DirMode(""), d.Mode)
+	assert.Equal(t, yoloai.DirMode(""), d.Mode)
 }
 
 func TestParseAuxDirArg_ParseErrorsPassThrough(t *testing.T) {

@@ -1,12 +1,14 @@
-// ABOUTME: ParseDirArg parses "path[:suffix...]=[mount]" directory arguments,
-// ABOUTME: producing DirSpec values consumed by CreateOptions workdir/aux fields.
-package sandbox
+// ABOUTME: ParseDirArg parses "path[:suffix...]=[mount]" directory arguments from
+// ABOUTME: CLI flag strings, producing yoloai.DirSpec values for CreateOptions.
+package cliutil
 
 import (
 	"fmt"
 	"path/filepath"
 	"strings"
 
+	yoloai "github.com/kstenerud/yoloai"
+	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
 
@@ -20,23 +22,23 @@ var knownSuffixes = map[string]bool{
 
 // applyDirSuffix applies a single recognized suffix token to result.
 // Returns an error if the suffix conflicts with an already-set mode.
-func applyDirSuffix(result *DirSpec, suffix, arg string) error {
+func applyDirSuffix(result *yoloai.DirSpec, suffix, arg string) error {
 	switch suffix {
 	case "copy":
-		if result.Mode == DirModeRW || result.Mode == DirModeOverlay {
+		if result.Mode == yoloai.DirModeRW || result.Mode == yoloai.DirModeOverlay {
 			return fmt.Errorf("cannot combine :copy and :%s on %q", result.Mode, arg)
 		}
-		result.Mode = DirModeCopy
+		result.Mode = yoloai.DirModeCopy
 	case "overlay":
-		if result.Mode == DirModeCopy || result.Mode == DirModeRW {
+		if result.Mode == yoloai.DirModeCopy || result.Mode == yoloai.DirModeRW {
 			return fmt.Errorf("cannot combine :overlay and :%s on %q", result.Mode, arg)
 		}
-		result.Mode = DirModeOverlay
+		result.Mode = yoloai.DirModeOverlay
 	case "rw":
-		if result.Mode == DirModeCopy || result.Mode == DirModeOverlay {
+		if result.Mode == yoloai.DirModeCopy || result.Mode == yoloai.DirModeOverlay {
 			return fmt.Errorf("cannot combine :rw and :%s on %q", result.Mode, arg)
 		}
-		result.Mode = DirModeRW
+		result.Mode = yoloai.DirModeRW
 	case "force":
 		result.AllowDangerousPath = true
 	}
@@ -52,25 +54,25 @@ func applyDirSuffix(result *DirSpec, suffix, arg string) error {
 // longer supported. Returns *UsageError pointing at the workarounds:
 // make the dir the workdir, mount as `:rw`, or run a separate sandbox.
 // env is the environment map for ${VAR} expansion; use layout.Env.
-func ParseAuxDirArg(arg, homeDir string, env map[string]string) (*DirSpec, error) {
+func ParseAuxDirArg(arg, homeDir string, env map[string]string) (*yoloai.DirSpec, error) {
 	d, err := ParseDirArg(arg, homeDir, env)
 	if err != nil {
 		return nil, err
 	}
 	switch d.Mode {
-	case DirModeCopy:
+	case yoloai.DirModeCopy:
 		return nil, yoerrors.NewUsageError(
 			"aux directories cannot use :copy (diff/apply is workdir-only).\n"+
 				"  - to track changes, make %q the workdir instead\n"+
 				"  - to edit it live, use :rw\n"+
 				"  - for an isolated copy, run a separate sandbox", arg)
-	case DirModeOverlay:
+	case yoloai.DirModeOverlay:
 		return nil, yoerrors.NewUsageError(
 			"aux directories cannot use :overlay (diff/apply is workdir-only).\n"+
 				"  - to track changes, make %q the workdir instead\n"+
 				"  - to edit it live, use :rw\n"+
 				"  - for an isolated copy, run a separate sandbox", arg)
-	case DirModeRW, DirModeRO, "":
+	case yoloai.DirModeRW, yoloai.DirModeRO, "":
 		// rw / ro / unset all permitted on aux dirs; caller applies the
 		// "" → ro default downstream.
 	}
@@ -86,8 +88,8 @@ func ParseAuxDirArg(arg, homeDir string, env map[string]string) (*DirSpec, error
 //
 // Use ParseAuxDirArg for the `-d` flag — it adds the workdir-only
 // validation enforced by Q-U.
-func ParseDirArg(arg, homeDir string, env map[string]string) (*DirSpec, error) {
-	result := &DirSpec{}
+func ParseDirArg(arg, homeDir string, env map[string]string) (*yoloai.DirSpec, error) {
+	result := &yoloai.DirSpec{}
 
 	// Strip =<mount-path> first (before suffix parsing), since suffixes
 	// like :rw appear between the host path and the = sign.
@@ -118,7 +120,7 @@ func ParseDirArg(arg, homeDir string, env map[string]string) (*DirSpec, error) {
 		remaining = remaining[:idx]
 	}
 
-	remaining, err := ExpandPath(remaining, homeDir, env)
+	remaining, err := config.ExpandPath(remaining, homeDir, env)
 	if err != nil {
 		return nil, fmt.Errorf("expand path %q: %w", arg, err)
 	}
@@ -129,7 +131,7 @@ func ParseDirArg(arg, homeDir string, env map[string]string) (*DirSpec, error) {
 	result.Path = absPath
 
 	if mountPart != "" {
-		mountPart, err = ExpandPath(mountPart, homeDir, env)
+		mountPart, err = config.ExpandPath(mountPart, homeDir, env)
 		if err != nil {
 			return nil, fmt.Errorf("expand mount path %q: %w", arg, err)
 		}
