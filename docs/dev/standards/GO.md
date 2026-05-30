@@ -121,7 +121,7 @@ The same "name carries the meaning" rule applies at the struct-field level. For 
 
 The heuristic: read the comment and ask *"could a future-self with no context guess what this field is for from the name alone?"* If yes, the comment is restating; rename. If the comment encodes a rule the name can't carry (a constraint, a side effect, a zero-value semantic), keep it.
 
-A worked example of this audit pass: the W-L8a layering-refactor design checkpoint applied this to the entire proposed `yoloai.Client` surface (`api_surface.go`'s Q-K resolution), producing ~20 renames where the field comment was doing the name's job. The principle generalises: **API field names should be self-describing nouns or verb-objects; comments document things the type system can't encode.**
+A worked example of this audit pass: the W-L8a layering-refactor design checkpoint applied this to the entire proposed `yoloai.Client` surface (working-notes D45, Q-K resolution), producing ~20 renames where the field comment was doing the name's job. The principle generalises: **API field names should be self-describing nouns or verb-objects; comments document things the type system can't encode.**
 
 ### Field types: name the data, not its rendering
 
@@ -147,7 +147,7 @@ The principle: **the field type names the actual data shape; rendering belongs i
 2. **Stringly-typed enums.** Open-set or closed-set categories typed as `string`. Use a typed string (`type Foo string`) with named constants — the parse-don't-validate idiom.
 3. **String-flattened structured values.** Errors as `string`, structured codes as natural-language sentences, multi-field tokens as colon-separated strings. Use the typed shape.
 
-W-L8a's Q-Q resolution applied this sweep to `api_surface.go`, fixing five leaks (BuildInfo.Date, SystemInfo.DiskUsage, two error-as-string fields, and the Recovery English-copy field). When in doubt about a `string` field, ask: *"if this field's data were 17 megabytes of structured detail, would `string` still be the right type?"* If no, the type is rendering, not data — fix it.
+W-L8a's Q-Q resolution (working-notes D45) applied this sweep to the `yoloai.Client` checkpoint, fixing five leaks (BuildInfo.Date, SystemInfo.DiskUsage, two error-as-string fields, and the Recovery English-copy field). When in doubt about a `string` field, ask: *"if this field's data were 17 megabytes of structured detail, would `string` still be the right type?"* If no, the type is rendering, not data — fix it.
 
 ## Imports
 

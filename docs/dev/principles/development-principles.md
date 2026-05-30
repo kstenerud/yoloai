@@ -489,7 +489,7 @@ The single standing exception: API keys read by individual agents (`ANTHROPIC_AP
 
 ### Worked examples
 
-- **`Client.Options.DataDir` is required** (Q-W resolution, 2026-05-25; api_surface.go). Client construction rejects empty DataDir. The CLI fills it from `$HOME/.yoloai/` at startup — its single licensed `os.UserHomeDir()` call. HTTP servers pass an explicit per-tenant path. Tests pass `t.TempDir()`. Eliminates the "daemon silently wrote to /root/.yoloai/" failure mode that the previous implicit-home design exposed.
+- **`Client.Options.DataDir` is required** (Q-W resolution, 2026-05-25; working-notes D45). Client construction rejects empty DataDir. The CLI fills it from `$HOME/.yoloai/` at startup — its single licensed `os.UserHomeDir()` call. HTTP servers pass an explicit per-tenant path. Tests pass `t.TempDir()`. Eliminates the "daemon silently wrote to /root/.yoloai/" failure mode that the previous implicit-home design exposed.
 - **Agents declare env-key dependencies in `agent.Definition.APIKeyEnvVars`** (existing). The library does not call `os.Getenv("ANTHROPIC_API_KEY")` directly; it iterates the agent's declared keys. The dependency is in the agent's published contract, not implicit in deep library code.
 
 ### Cost-vs-benefit
@@ -506,7 +506,7 @@ Damage prevented:
 
 ### Sources
 
-The general pattern is "dependency injection" applied to environment / configuration; it's part of the Twelve-Factor App's factor III (config in the environment, but read once and passed explicitly); it's the engineering side of Zen of Python's "explicit is better than implicit." Project decision: Q-W (api_surface.go, 2026-05-25).
+The general pattern is "dependency injection" applied to environment / configuration; it's part of the Twelve-Factor App's factor III (config in the environment, but read once and passed explicitly); it's the engineering side of Zen of Python's "explicit is better than implicit." Project decision: Q-W (working-notes D45, 2026-05-25).
 
 ---
 

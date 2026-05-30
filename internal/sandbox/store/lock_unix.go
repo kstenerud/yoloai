@@ -152,8 +152,8 @@ func acquireWithRetry(layout config.Layout, name, path string) (func(), error) {
 // exit), so removing the file when the holder is dead has no race
 // against an in-progress operation.
 //
-// CLI: `yoloai sandbox <name> unlock`. See api_surface.go's Q-Z
-// resolution for the rationale.
+// CLI: `yoloai sandbox <name> unlock`. See working-notes D45 (Q-Z)
+// for the rationale.
 func ForceUnlock(layout config.Layout, name string) (cleared bool, err error) {
 	path := layout.SandboxLockPath(name)
 

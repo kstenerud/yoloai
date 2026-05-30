@@ -900,6 +900,43 @@ Decisions / notes:
 - **Integration tests.** `mgr.Stop/Start/Reset/Destroy` call sites route through `stopSandbox`/`startSandbox`/`resetSandbox`/`destroySandbox` helpers that build `state.Deps` from `mgr.Runtime()`/`mgr.Layout()`/`strings.NewReader("")`, mirroring the F5.2d `createSandbox` helper.
 - **F5 done.** With lifecycle/ + status/ carved, `package sandbox` is a thin façade (Engine deps-holder + aliases + a few un-carved helpers: clone, parse, setup, terminal/attach). The full DAG `state ← {mounts, invocation, provision, profiles, runtimeconfig} ← launch ← {create, lifecycle} ← façade` holds, enforced by the absence of import cycles. **This closes F5 and the entire 31-finding layering critique.**
 
+## D45 — `api_surface.go` retired; design-checkpoint hypothesis concluded, Q-resolutions salvaged here
+
+**Date:** 2026-05-30. **Status:** Accepted (owner, 2026-05-30). **Closes** CRITIQUE.md F8. **Instance of** general-principles §12 (a concluded hypothesis is retired into the log, not kept as a husk).
+
+`api_surface.go` was the project's `//go:build never` design checkpoint — the proposed `yoloai.Client` surface, with ~25 resolved design questions (Q-A…Q-Z) accumulated across two critique rounds. The layering refactor *implemented* that surface, so the hypothesis concluded; the file had drifted ~55% from the shipped API (e.g. `Status()`/`Files()`/`Wait`/`ProxyMCP` designed but deferred; `Create` shipped but never in the design). Per §12, a concluded hypothesis at 55% drift is retired into the decision log rather than kept alive only to satisfy doc cross-references (that would let the stale map dictate the territory). The **live godoc of `yoloai` is now the surface of record.**
+
+Salvaged below: the Q-A…Q-Z resolution index (the durable *decisions and their reasons*, compressed from ~1000 lines of comment blocks). The full discussion remains in git history (`git show <pre-retirement-rev>:api_surface.go`).
+
+| Q | Question | Resolution |
+|---|---|---|
+| Q-A | One List method vs separate filter methods? | One `Client.List(ctx, ListOptions)`; CLI/embedder fills the struct. No convenience wrappers in V1. |
+| Q-B | Which error sentinels are stable contract? | Three-category taxonomy: 5 stable sentinels (ErrSandboxExists/NotFound, ErrUnappliedChanges, ErrBackendUnavailable, ErrProfileNotFound), `*UsageError`, `*UnrecoverableError`. No "other". |
+| Q-C | Streaming vs buffered Diff/Apply? | Buffered; defer streaming. Workflow size fits slice-result budget; streaming is non-breaking to add later. (Shapes simplified by Q-U.) |
+| Q-D | `Run(Wait=true)` vs separate `Wait()`? | Keep both. Run(Wait=true) is one-call sync API; Sandbox.Wait() is standalone block-until-terminal (powers `yoloai wait`). Shared polling. |
+| Q-E | Flight-recorder shape? | Two primitives: `BugReport` (one-shot snapshot) and `StartBugReportSession` (buffers events until Stop/Discard). A session primitive, not a CLI wrapper. |
+| Q-F | Setup interactive prompts? | Client never reads stdin; takes populated SetupOptions. All user interaction lives in CLI; wizard moves to internal/cli. |
+| Q-G | Admin sub-Client / structural grouping? | Shape B: name-bound handles (Sandbox→Workdir/Files/Network) + System sub-client. Cross-sandbox ops stay on Client. Sandbox handle is STRICT (validates at construction). |
+| Q-H | Zero-value semantics for required enum fields? | Strict: required enum fields reject empty with `*UsageError`; use `Default*()` constructors. Filter/override fields keep empty-is-meaningful. Tests must not use factories. |
+| Q-I | Where does IsolationOverride live; safe transitions? | Move to RestartOptions. Only within-backend transitions allowed; cross-backend refused with `*UsageError`. container↔enhanced refused with uncommitted :overlay unless AcceptOverlayDataLoss. |
+| Q-J | "Force" naming audit. | No API field named `Force`; rename all 5 to concern-specific names (AcceptOverlayDataLoss, SkipApplyCheck, Overwrite×2, Rebuild). "Force" stays a CLI flag only. |
+| Q-K | Full field-name audit (names not carrying meaning). | Sweep of renames (e.g. Yes→SkipDirtyRepoCheck, IsBase→IsWorkdir, typed MountMode, Build nested struct); ApplyOptions.Yes dropped; IncludeWIP→IncludeUncommitted; Network.Deny→Remove. |
+| Q-L | How many knobs does Prune need? | Reduce 5 fields to 3 (DryRun, IncludeBaseImage, OnProgress). Drop Backend/IncludeStale (no use case), rename PruneCache→IncludeBaseImage. Audit options against real use cases. |
+| Q-M | Does every Options struct need OnProgress? | Keep on Run/Clone/Build/Doctor/Prune (long/multi-event); drop from Setup (ms-fast). OnProgress is liveness/rendering, not async. |
+| Q-N | Async: channels vs blocking + callback? | Stay synchronous + OnProgress; context handles cancellation. Channels leak goroutine ownership; caller does `go client.Op(...)`. Survey of Go SDKs confirms. |
+| Q-O | Info.Meta `any`, duplicate fields, Inspect cost. | Type Meta as SandboxMeta alias; drop 4 fields duplicated in Meta; make Info a named struct (not alias). Correct Inspect docstring (cost is per-dir git forks). |
+| Q-P | ErrNoChanges sentinel — redundant? | Dropped (five sentinels→four). State is encoded in ApplyResult.PerDir; "no changes" is a success no-op, not an error. Don't promote recoverable-from-result sentinels. |
+| Q-Q | Stringly-typed CLI-UI leak sweep. | Field types name actual data, not CLI rendering: BuildInfo.Date→time.Time; drop SystemInfo.DiskUsage and Recovery strings; ErrMessage/Error string→typed error. |
+| Q-R | Critique B-series (consistency, empty options, batch). | Accept Apply-vs-batch result asymmetry (B2); drop empty Stop/Attach option structs (B3); SimulatorRuntimes→[]SimulatorRuntime (B4); BugReportSession interface→struct (B5). |
+| Q-S | Wait return type — exit code or Status? | Return `(Status, error)`, not exit code (no portable cross-agent exit-code contract). Exit code preserved as Info.AgentExitCode `*int` for debug only, not a success signal. |
+| Q-T | Concurrency-safety contract for handles. | Document explicit guarantee: Client/SystemClient/Sandbox safe concurrently and cross-process via per-sandbox flock. Writes acquire lock at method entry and serialize; reads are lock-free. |
+| Q-U | Remove aux `:copy`/`:overlay`? | Remove; aux supports only :rw/:ro, diff/apply is workdir-only. Projected per-dir API complexity exceeded actual use. Diff→`(string,error)`; delete DiffResult/PerDirApplyResult/SkippedDir. |
+| Q-V | Network.Allowed provenance — flat or typed? | Typed: `Allowed()` returns `[]AllowedDomain` with Source enum, derived at read time (agent-required vs user-added). Lets embedders avoid nuking agent-required domains. |
+| Q-W | DataDir explicit param; profiles/config in API; no ambient config. | DataDir REQUIRED (empty=`*UsageError`), zero-arg New removed; SystemClient gains profile/config methods + ErrProfileNotFound; ban os.UserHomeDir/Getenv/Getwd in library (no-ambient-config principle). |
+| Q-X | Expose AgentInfo.NetworkAllowlist; trim Unrecoverable codes. | Add AgentInfo.NetworkAllowlist; drop UnrecoverableNotImplemented and UnrecoverableInternal (no real site needs them; escape hatches invite mis-classification). Five operational codes remain. |
+| Q-Y | Round-2 polish: typed-name enums, structured tokens, redundancies. | Add BackendName/AgentName/LogSource enums; Mounts/Ports→MountSpec/PortMapping, RemovedItems→[]PruneItem; drop DoctorReport.IsDefaultMode; fix stale Force/sentinel-count references. |
+| Q-Z | Stale-lock UX — don't leave the user hanging. | Lock acquire becomes non-blocking retry returning `*SandboxLockedError` (Name/HolderPID/HolderAlive/LockPath); lock file carries PID; add `Sandbox.Unlock` (`yoloai sandbox <name> unlock`), refused for alive holders. |
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.
