@@ -80,6 +80,16 @@ at the boundary (the `:force` mount suffix is unchanged).
 `wip_applied`→`uncommitted_applied`; exported `wip.diff`→`uncommitted.diff`;
 `Client.GenerateWIPDiff`→`GenerateUncommittedDiff`.
 
+**Profile read model is public (closes the last F1 leak).**
+`yoloai.ProfileInfo.Merged` and `.Parent` are now `*yoloai.ResolvedProfileConfig`
+(was the internal `*config.MergedConfig`), so embedders can name every field.
+`ResolvedProfileConfig` mirrors the merged tree with hand-written public types — `ProfileWorkdir`,
+`ProfileAuxDir` (was `config.ProfileDir`), `ProfileResources`
+(`CPULimit`/`MemoryLimit`, was `config.ResourceLimits{CPUs,Memory}`), `ProfileNetwork`,
+and `ProfileAgentFiles`. JSON output of `profile info`/`--diff` is unchanged except
+the `agent_files` object's inner keys, which now carry tags (`base_dir`/`files`)
+instead of emitting the Go field names (`BaseDir`/`Files`).
+
 **Migration (Go embedders):** insert `.Sandbox(name)` and drop the `name` arg from
 per-sandbox calls; route diff/apply/export/commits/tags through `.Workdir()`;
 switch `errors.Is(err, ErrUnappliedChanges)` to

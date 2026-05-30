@@ -1020,6 +1020,22 @@ No change to `f1KnownLeaks` (B4 closed no baseline entries — it removed `inter
 
 **Gate status unchanged:** both halves still met modulo the deferred `config.MergedConfig` milestone (the last `f1KnownLeaks` entry, its own "public profile-config API" milestone in plans/TODO.md). With C3 done, the Layer-1 spine is **complete except that one conscious-defer.**
 
+## D52 — MergedConfig promoted to public `ResolvedProfileConfig`; `f1KnownLeaks` empty (F1 closed, Layer-1 spine complete)
+
+**Date:** 2026-05-30. **Status:** Accepted (owner, 2026-05-30). **Implements** the deferred "public profile-config API" milestone (D48, plans/TODO.md) — the last `f1KnownLeaks` entry.
+
+- **What.** New root file `profile_config.go` (package `yoloai`) holds hand-written public mirrors of the merged profile-config tree: `ResolvedProfileConfig` (mirrors `config.MergedConfig`, 20 fields), plus `ProfileWorkdir`, `ProfileAuxDir` (mirrors `config.ProfileDir`), `ProfileResources`, `ProfileNetwork`, `ProfileAgentFiles`. An unexported one-directional converter `resolvedProfileConfigFromMerged(*config.MergedConfig) *ResolvedProfileConfig` (nil-safe; nested pointers allocated only when non-nil) maps internal→public. `ProfileInfo.Merged`/`.Parent` retyped from `*config.MergedConfig` to `*ResolvedProfileConfig`; `Info()`/`infoBase()` wrap with the converter.
+
+- **Why hand-written, not an alias.** Aliasing only the top-level `MergedConfig` would leave the nested types (`ProfileWorkdir`/`ProfileDir`/`ResourceLimits`/`NetworkConfig`/`AgentFilesConfig`) un-nameable by external embedders — a leak the F1 detector can't see (it walks named types and stops at each), which would make `TestPublicAPI_NoInternalLeaks` lie. Public mirrors whose fields are themselves public let the detector verify the whole tree. Same pattern as `SystemOptions`/`config.Layout` (D48).
+
+- **Naming (user-chosen).** Cohesive `Profile*` family. The top-level type is `ResolvedProfileConfig` (not `ProfileConfig`) — deliberately distinct from the *internal* `config.ProfileConfig`, which is the raw single-file YAML parse, whereas this public type is the fully *resolved/merged* view (mirrors `config.MergedConfig`). `ResourceLimits`→`ProfileResources` with fields `CPULimit`/`MemoryLimit` (not `CPUs`/`Memory`) so the "limit" meta-information survives the rename the bare `ProfileResources` type name lost. `ProfileDir`→`ProfileAuxDir` (disambiguates from the primary `ProfileWorkdir`). Internal `config.MergedConfig` and its nested types are **NOT** renamed — the merge machinery legitimately produces them; only public mirrors + a converter were added.
+
+- **JSON stability.** `ResolvedProfileConfig`/nested json tags mirror `MergedConfig` exactly, so `profile info`/`--diff --json` output is byte-stable — except `agent_files`: the internal `AgentFilesConfig` has no inner json tags (emits `BaseDir`/`Files`), `ProfileAgentFiles` adds `base_dir`/`files`. The single intentional JSON change, noted in BREAKING-CHANGES.
+
+- **CLI consumer.** `internal/cli/profile/profile.go` (the only consumer, info + `--diff`) retyped to the `yoloai.*` public types; `.CPUs`/`.Memory`→`.CPULimit`/`.MemoryLimit`. Its `internal/config` import stays (still used for `config.ListProfiles` in shell-completion). The helper unit tests in `profile_test.go` retyped likewise.
+
+- **Gate.** `f1KnownLeaks` is now `map[string]struct{}{}` (empty); comment rewritten to "F1 is closed — keep this empty." **F1 (Half A) closed; the Layer-1 public-API spine is now COMPLETE with no conscious-defers remaining.** Out of scope (unchanged): `store.Meta` stays internal (future read-model work).
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.
