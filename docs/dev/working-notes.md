@@ -994,6 +994,18 @@ Breaking (beta, single branch): `yoloai.NewSystemClient` signature changed (see 
 
 No change to `f1KnownLeaks` (B4 closed no baseline entries — it removed `internal/sandbox` imports, the Half-B work, not aliased-type leaks). `make check` green.
 
+## D50 — B5 absorbed; C1/C2: `internal/sandbox` façade fenced off from cli+mcpsrv (Half-B gate met)
+
+**Date:** 2026-05-30. **Status:** Accepted (owner, 2026-05-30). **Implements** layer1-public-api.md B5 + C1 + C2. **Closes** the Half-B consumer-honesty gate.
+
+- **B5 was already done.** The "bypass operations" the plan earmarked for B5 (`WaitForAttachReady`, `ListSandboxesMultiBackend`, `NewEngine`) had, by the time C began, no callers in `internal/cli`/`internal/mcpsrv` at all — their only callers are the root `yoloai` package (`sandbox.go` `Attach`, `system_client.go` `List`, Client/Engine construction in `yoloai.go`/`system_client.go`), which is the sanctioned façade consumer. They'd been absorbed into A1/B2 incidentally. So B5 contributed zero new repoints.
+
+- **C2 repoint (10 non-test files).** `sandbox.StartOptions`→`yoloai.StartOptions`, `sandbox.ErrSandboxNotFound`→`yoloai.ErrSandboxNotFound`, `sandbox.ErrContainerNotRunning`→`yoloai.ErrContainerNotRunning` (all three root aliases already existed). `sandbox.ExpandPath`→`cliutil.ExpandPath` and `sandbox.DirSize`→`cliutil.DirSize`, two new thin helpers in `internal/cli/cliutil/fsutil.go`. **Why `cliutil`, not public `yoloai`:** both are generic host-filesystem utilities used purely for CLI flag-path expansion and disk-usage *display* (always paired with `cliutil.FormatSize`); they're not part of the sandbox capability surface an embedder needs, so promoting them to `yoloai.*` would bloat the public API with plumbing. `DirSize` duplicates the ~8-line `status.DirSize` WalkDir rather than coupling the CLI to the `status` leaf — the domain measures per-sandbox `Info.DiskUsageBytes`; the CLI measures the whole data dir. `sandbox.DetectStatus` survives only in `integration_test.go` (test files are gate-exempt) — its public replacement is `Sandbox(name).Status()` when that test is next touched.
+
+- **C1 fence.** New `cli-sandbox-facade-scope` depguard rule (`.golangci.yml`): `list-mode: lax`, `files: [**/internal/cli/**, **/internal/mcpsrv/**, !$test]`, `deny` the `internal/sandbox` façade package, with `allow` entries for `internal/sandbox/{store,patch,archetype}`. **Scope decision:** the gate fences the *façade package only*, not the subtree — depguard resolves by longest-matching prefix, so the deny on `internal/sandbox` is overridden for the three leaf subpackages by their longer allow prefixes. `store` is imported ×35 (the sandbox-metadata read-model `store.Meta`/`InstanceName`/`FilesDir`/…); promoting it to public types is the read-model's own future milestone, out of F1 scope. Verified the rule both ways: negative test (temporarily injecting a façade import into a non-test CLI file → depguard flags it) and the 35 `store` + `patch` + `archetype` imports staying green.
+
+**Gate status:** Half B **met** (depguard green; zero `internal/sandbox` façade imports in cli+mcpsrv non-test code). Half A **met modulo** the one documented conscious-defer (`f1KnownLeaks` = `{config.MergedConfig}`). Remaining: C3 doc-polish (ARCHITECTURE/GUIDE rewrites, BREAKING-CHANGES consolidation, §2 stale import paths) + the deferred MergedConfig milestone. No BREAKING-CHANGES entry — all moved/deleted symbols were `internal/`. `make check` green.
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.

@@ -9,7 +9,6 @@ import (
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
 	yoloai "github.com/kstenerud/yoloai"
-	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/spf13/cobra"
 )
 
@@ -66,7 +65,7 @@ func runAttach(cmd *cobra.Command, args []string, opts *attachOpts) error {
 			if info.Status != yoloai.StatusActive && info.Status != yoloai.StatusIdle {
 				// Auto-start before attaching; the interactive session takes over
 				// immediately, so start notices would be noise — discard them.
-				if _, err := sb.Start(ctx, sandbox.StartOptions{Resume: true}); err != nil {
+				if _, err := sb.Start(ctx, yoloai.StartOptions{Resume: true}); err != nil {
 					return err
 				}
 			}

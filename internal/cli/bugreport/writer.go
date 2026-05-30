@@ -20,7 +20,6 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/config"
 	yoloairuntime "github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/sandbox"
 )
 
 // Filename generates the output filename for a bug report.
@@ -104,7 +103,7 @@ func WriteSystem(w io.Writer) {
 	// yoloai data directory and disk usage
 	dataDir := cliutil.Layout().YoloaiDir()
 	fmt.Fprintf(w, "- **Data dir:** `%s`\n", dataDir) //nolint:errcheck
-	if size, err := sandbox.DirSize(dataDir); err == nil {
+	if size, err := cliutil.DirSize(dataDir); err == nil {
 		fmt.Fprintf(w, "- **Disk usage:** %s\n", cliutil.FormatSize(size)) //nolint:errcheck
 	}
 

@@ -10,7 +10,6 @@ import (
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
 	yoloai "github.com/kstenerud/yoloai"
-	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
@@ -70,7 +69,7 @@ func runStart(cmd *cobra.Command, args []string, opts *startOpts) error {
 		if err != nil {
 			return cliutil.SandboxErrorHint(name, err)
 		}
-		res, startErr := sb.Start(ctx, sandbox.StartOptions{
+		res, startErr := sb.Start(ctx, yoloai.StartOptions{
 			Resume:       opts.resume,
 			Prompt:       opts.prompt,
 			PromptFile:   opts.promptFile,

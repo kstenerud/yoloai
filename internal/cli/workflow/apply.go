@@ -12,7 +12,6 @@ import (
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
 	"github.com/kstenerud/yoloai"
-	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/internal/workspace"
 	"github.com/kstenerud/yoloai/yoerrors"
@@ -100,7 +99,7 @@ func runApplyCmd(cmd *cobra.Command, args []string) error {
 	patchesDir, _ := cmd.Flags().GetString("patches")
 	if patchesDir != "" {
 		var expandErr error
-		patchesDir, expandErr = sandbox.ExpandPath(patchesDir, cliutil.Layout().HomeDir, cliutil.Layout().Env)
+		patchesDir, expandErr = cliutil.ExpandPath(patchesDir, cliutil.Layout().HomeDir, cliutil.Layout().Env)
 		if expandErr != nil {
 			return fmt.Errorf("expand patches path: %w", expandErr)
 		}

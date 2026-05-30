@@ -11,8 +11,8 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
+	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/spf13/cobra"
 )
@@ -30,7 +30,7 @@ func newSandboxVscodeCmd() *cobra.Command {
 
 			sandboxDir := cliutil.Layout().SandboxDir(name)
 			if err := store.RequireSandboxDir(sandboxDir); err != nil {
-				return sandbox.ErrSandboxNotFound
+				return yoloai.ErrSandboxNotFound
 			}
 
 			meta, err := store.LoadMeta(sandboxDir)

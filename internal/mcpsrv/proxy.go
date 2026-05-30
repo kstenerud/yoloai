@@ -15,7 +15,6 @@ import (
 	"sync"
 
 	"github.com/kstenerud/yoloai"
-	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 )
 
@@ -93,7 +92,7 @@ func (p *ProxyServer) ServeStdio(ctx context.Context) error {
 // needed. Returns the sandbox metadata for path template expansion.
 func (p *ProxyServer) ensureRunning(ctx context.Context) (*store.Meta, error) {
 	sb, sbErr := p.c.Sandbox(p.sandboxName)
-	if errors.Is(sbErr, sandbox.ErrSandboxNotFound) {
+	if errors.Is(sbErr, yoloai.ErrSandboxNotFound) {
 		return p.createSandbox(ctx)
 	}
 	if sbErr != nil {
@@ -102,7 +101,7 @@ func (p *ProxyServer) ensureRunning(ctx context.Context) (*store.Meta, error) {
 
 	info, err := sb.Inspect(ctx)
 
-	if errors.Is(err, sandbox.ErrSandboxNotFound) {
+	if errors.Is(err, yoloai.ErrSandboxNotFound) {
 		return p.createSandbox(ctx)
 	}
 	if err != nil {
@@ -117,7 +116,7 @@ func (p *ProxyServer) ensureRunning(ctx context.Context) (*store.Meta, error) {
 
 	case yoloai.StatusStopped, yoloai.StatusRemoved:
 		// Container stopped or removed — restart it (auto-start; notices discarded)
-		if _, err := sb.Start(ctx, sandbox.StartOptions{}); err != nil {
+		if _, err := sb.Start(ctx, yoloai.StartOptions{}); err != nil {
 			return nil, fmt.Errorf("start sandbox %q: %w", p.sandboxName, err)
 		}
 		return info.Meta, nil

@@ -9,7 +9,6 @@ import (
 	"github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
-	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/spf13/cobra"
 )
 
@@ -36,7 +35,7 @@ func newSystemInfoCmd(version, commit, date string) *cobra.Command {
 			fmt.Fprintf(out, "Data dir:    %s\n", info.DataDir)        //nolint:errcheck
 			fmt.Fprintf(out, "Sandboxes:   %s\n", info.SandboxesDir)   //nolint:errcheck
 
-			if size, sizeErr := sandbox.DirSize(info.DataDir); sizeErr != nil {
+			if size, sizeErr := cliutil.DirSize(info.DataDir); sizeErr != nil {
 				fmt.Fprintf(out, "Disk usage:  (unavailable)\n") //nolint:errcheck
 			} else {
 				fmt.Fprintf(out, "Disk usage:  %s\n", cliutil.FormatSize(size)) //nolint:errcheck
@@ -62,7 +61,7 @@ func newSystemInfoCmd(version, commit, date string) *cobra.Command {
 // writeSystemInfoJSON outputs system info as JSON.
 func writeSystemInfoJSON(cmd *cobra.Command, version, commit, date string, info *yoloai.SystemInfo) error {
 	diskUsage := ""
-	if size, err := sandbox.DirSize(info.DataDir); err == nil {
+	if size, err := cliutil.DirSize(info.DataDir); err == nil {
 		diskUsage = cliutil.FormatSize(size)
 	}
 

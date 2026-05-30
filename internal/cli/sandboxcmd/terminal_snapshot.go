@@ -9,7 +9,6 @@ import (
 
 	"github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
-	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
@@ -53,7 +52,7 @@ func runTerminalSnapshot(cmd *cobra.Command, name string, rest []string) error {
 			// ErrContainerNotRunning is the documented "best-effort skip"
 			// signal — let callers see it as a typed error rather than a
 			// generic failure. Other errors propagate verbatim.
-			if errors.Is(err, sandbox.ErrContainerNotRunning) {
+			if errors.Is(err, yoloai.ErrContainerNotRunning) {
 				return err
 			}
 			return fmt.Errorf("terminal-snapshot: %w", err)

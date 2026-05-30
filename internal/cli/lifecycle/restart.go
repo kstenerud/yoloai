@@ -9,7 +9,6 @@ import (
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
 	yoloai "github.com/kstenerud/yoloai"
-	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
@@ -72,7 +71,7 @@ func runRestart(cmd *cobra.Command, args []string, opts *restartOpts) error {
 		if err != nil {
 			return err
 		}
-		res, restartErr := sb.Restart(ctx, sandbox.StartOptions{
+		res, restartErr := sb.Restart(ctx, yoloai.StartOptions{
 			Resume:       opts.resume,
 			Prompt:       opts.prompt,
 			PromptFile:   opts.promptFile,

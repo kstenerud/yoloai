@@ -23,17 +23,23 @@ reachable through `yoloai.*`**, with contract types usable by an external module
    module can't name?* Mechanism already chosen and in use: **alias-at-root** (a
    `type X = internal.X` alias re-exports the type identity so external code can
    construct/use it without importing `internal/`).
-2. **Consumer-honesty gate (Half B) — NOT started.** `internal/cli` *and*
-   `internal/mcpsrv` compile with **zero `internal/sandbox[/...]` imports** (except
-   their own CLI-tier helpers), enforced by depguard. Measures: *does every
-   capability actually HAVE a public home the consumers use* — not just "can an
-   external embedder theoretically compile." `internal/mcpsrv` is the daemon's
-   prototype and the canary.
+2. **Consumer-honesty gate (Half B) — DONE (2026-05-30).** `internal/cli` *and*
+   `internal/mcpsrv` compile with **zero `internal/sandbox` façade imports** in
+   non-test code, enforced by the `cli-sandbox-facade-scope` depguard rule.
+   Measures: *does every capability actually HAVE a public home the consumers use*
+   — not just "can an external embedder theoretically compile." `internal/mcpsrv`
+   is the daemon's prototype and the canary. **Scope clarification reached during
+   implementation:** the gate fences the `internal/sandbox` *façade package*, not
+   the whole subtree. The leaf subpackages that carry shared low-level value types
+   (`store` — the sandbox-metadata read-model, ×35; `patch`; `archetype`) remain
+   permitted; promoting `store.Meta` & friends to public types is out of F1 scope
+   (it would be the read-model's own milestone). Test fixtures are exempt
+   (consistent with `cli-backend-scope`).
 
 The prior plan delivered Half A's mechanism but never aimed at Half B — the CLI
-still reaches into `internal/sandbox` in 42 files, mcpsrv in 2. Half B is the new
-work that makes the honesty claim true and is the real proof the library is
-complete.
+reached into `internal/sandbox` in 42 files, mcpsrv in 2. Half B is the work that
+makes the honesty claim true and is the real proof the library is complete; it is
+now in place (see C below).
 
 ## Current status
 
@@ -54,7 +60,10 @@ complete.
   `*types.Alias` via `types.Unalias`, restoring the intended alias coverage.
 - **Prior 6-step plan (`f2-f1f3-implementation.md`):** Steps 1 (creation),
   4a–4f (Apply), 2 (Sandbox lifecycle handle), 3 (Workdir().Diff), and 5 (Workdir
-  commits/baseline + tags) **DONE**. Step 6 (fence/docs — the C gate) **REMAINS**.
+  commits/baseline + tags) **DONE**. Step 6 / C1+C2 (fence + repoint) **DONE**
+  (2026-05-30, D50). C3 doc-polish (ARCHITECTURE/GUIDE rewrites, BREAKING-CHANGES
+  consolidation, §2 stale import-path cleanup) is the only remainder, plus the
+  deferred MergedConfig milestone (last `f1KnownLeaks` entry).
 
 ## Half-B inventory — what CLI/mcpsrv grab from `internal/sandbox` today
 
@@ -163,17 +172,34 @@ in `internal/sandbox/profile_build.go` deleted; tests moved to `profiles/`.
 Remaining `sandbox.X` in cli+mcpsrv (`StartOptions`, `ExpandPath`, read-model
 helpers, `ErrSandboxNotFound`) are B5/C2, not B4.
 
+### B5 — Bypass operations ✅ *(absorbed; see D50)*
+The named bypass ops (`WaitForAttachReady`, `ListSandboxesMultiBackend`,
+`NewEngine`) turned out to be **already** behind public methods: at the point C
+began, their only callers were the root `yoloai` package itself (`sandbox.go`
+`Attach`, `system_client.go` `List`, `yoloai.go`/`system_client.go` Client/Engine
+construction) — which is the sanctioned façade consumer. No `internal/cli` or
+`internal/mcpsrv` code called them directly. So B5 had no residual CLI work; it
+collapsed into the A-steps (A1 `Attach`, B2/SystemClient `List`) as planned.
+
 ### C — Enforce + repoint + docs (the gate)
-- **C1 depguard:** new rule denying `internal/cli` + `internal/mcpsrv` →
-  `internal/sandbox[/...]`, allowing `yoloai`, `yoerrors`, own `cliutil`. Model on
-  the existing `cli-backend-scope` rule in `.golangci.yml`.
-- **C2 repoint:** migrate every remaining `sandbox.X` → public equivalent
-  (sonnet-subagent territory, driven by compile errors after C1 flips the rule).
-- **C3 docs:** rewrite `ARCHITECTURE.md:49` to the now-true contract (F10); update
-  GUIDE API map; consolidate `BREAKING-CHANGES.md` into one "0.x public API
-  reshape" section. Fix §2 stale import paths (F9). Empty `f1KnownLeaks`.
-- **Gate met when:** `f1KnownLeaks` empty (Half A) **and** depguard green with zero
-  `internal/sandbox` imports in `internal/cli` + `internal/mcpsrv` (Half B).
+- **C1 depguard ✅:** added `cli-sandbox-facade-scope` (`.golangci.yml`) denying
+  the `internal/sandbox` **façade package** from non-test `internal/cli/**` +
+  `internal/mcpsrv/**`, with longer-prefix `allow` entries keeping the leaf
+  subpackages (`store`/`patch`/`archetype`) permitted. Modeled on
+  `cli-backend-scope`; verified with a negative test (injected façade import →
+  flagged) and the leaf imports staying green.
+- **C2 repoint ✅:** every remaining non-test `sandbox.X` migrated to its public
+  home — `StartOptions`/`ErrSandboxNotFound`/`ErrContainerNotRunning` →
+  `yoloai.*` (root aliases already existed); `ExpandPath`/`DirSize` → new
+  `cliutil` filesystem helpers (`cliutil/fsutil.go`); `DetectStatus` left only in
+  a test (gate-exempt). 10 non-test files shed their façade import.
+- **C3 docs (remaining):** rewrite `ARCHITECTURE.md:49` to the now-true contract
+  (F10); update GUIDE API map; consolidate `BREAKING-CHANGES.md` into one "0.x
+  public API reshape" section. Fix §2 stale import paths (F9). Empty
+  `f1KnownLeaks` (the deferred MergedConfig milestone).
+- **Gate status:** Half B **met** (depguard green, zero façade imports in
+  cli+mcpsrv non-test). Half A **met modulo one conscious-defer** (`f1KnownLeaks`
+  = `{config.MergedConfig}`, tracked as its own milestone).
 
 ## Sequencing rationale
 

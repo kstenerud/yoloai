@@ -18,7 +18,6 @@ import (
 	// the blank-import block previously here was redundant. W-L13:
 	// removing it lets depguard scope `internal/runtime/tart` to the
 	// internal/cli/system/tart subpackage exclusively.
-	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/spf13/cobra"
 )
@@ -233,7 +232,7 @@ func ResolveProfile(cmd *cobra.Command) string {
 // to use 'yoloai destroy'. Skips the hint for ErrSandboxNotFound (no directory
 // to point at).
 func SandboxErrorHint(name string, err error) error {
-	if err == nil || errors.Is(err, sandbox.ErrSandboxNotFound) {
+	if err == nil || errors.Is(err, yoloai.ErrSandboxNotFound) {
 		return err
 	}
 	return fmt.Errorf("%w\n  sandbox dir: %s\n  to remove: yoloai destroy %s", err, Layout().SandboxDir(name), name)
