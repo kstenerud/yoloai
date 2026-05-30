@@ -12,7 +12,6 @@ import (
 
 	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
@@ -89,7 +88,7 @@ func resolveStopAll(cmd *cobra.Command, ctx context.Context, c *yoloai.Client) (
 	var names []string
 	for _, info := range infos {
 		switch info.Status {
-		case sandbox.StatusActive, sandbox.StatusIdle, sandbox.StatusDone, sandbox.StatusFailed:
+		case yoloai.StatusActive, yoloai.StatusIdle, yoloai.StatusDone, yoloai.StatusFailed:
 			names = append(names, info.Meta.Name)
 		default:
 			// StatusStopped, StatusRemoved, StatusBroken, StatusUnavailable: skip

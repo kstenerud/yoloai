@@ -169,7 +169,7 @@ func requireOverlayRunning(ctx context.Context, c *yoloai.Client, name string) e
 	if err != nil {
 		return fmt.Errorf(":overlay sandbox %s must be running for this operation — use 'yoloai start %s'", name, name)
 	}
-	if info.Status != sandbox.StatusActive && info.Status != sandbox.StatusIdle {
+	if info.Status != yoloai.StatusActive && info.Status != yoloai.StatusIdle {
 		return fmt.Errorf(":overlay sandbox %s must be running for this operation — use 'yoloai start %s'", name, name)
 	}
 	return nil
@@ -415,7 +415,7 @@ func agentRunningWarning(cmd *cobra.Command, name string) {
 			return nil //nolint:nilerr // best-effort warning; inspection failure should not affect the diff command
 		}
 
-		if info.Status == sandbox.StatusActive || info.Status == sandbox.StatusIdle {
+		if info.Status == yoloai.StatusActive || info.Status == yoloai.StatusIdle {
 			fmt.Fprintln(cmd.ErrOrStderr(), "Note: agent is still running; diff may be incomplete") //nolint:errcheck // best-effort warning
 		}
 		return nil
@@ -450,13 +450,13 @@ func diffLogJSON(cmd *cobra.Command, name string, stat bool) error {
 		hasUncommitted, _ := c.HasUncommittedChanges(ctx, name)
 		tags, _ := sandbox.ListTagsBeyondBaseline(cliutil.Layout(), name)
 		if tags == nil {
-			tags = []sandbox.TagInfo{}
+			tags = []yoloai.TagInfo{}
 		}
 
 		result := struct {
-			Commits               any               `json:"commits"`
-			HasUncommittedChanges bool              `json:"has_uncommitted_changes"`
-			Tags                  []sandbox.TagInfo `json:"tags"`
+			Commits               any              `json:"commits"`
+			HasUncommittedChanges bool             `json:"has_uncommitted_changes"`
+			Tags                  []yoloai.TagInfo `json:"tags"`
 		}{
 			Commits:               commits,
 			HasUncommittedChanges: hasUncommitted,

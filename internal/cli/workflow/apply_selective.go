@@ -130,7 +130,7 @@ func confirmSelectiveApply(cmd *cobra.Command, yes bool, targetDir string) (bool
 }
 
 // finishSelectiveApply prints results, handles tags, and returns any follow-on error.
-func finishSelectiveApply(cmd *cobra.Command, name string, commitsApplied int, shaMap map[string]string, applyErr error, selectedTags []sandbox.TagInfo, sandboxWorkDir, targetDir string, withTags bool) error {
+func finishSelectiveApply(cmd *cobra.Command, name string, commitsApplied int, shaMap map[string]string, applyErr error, selectedTags []yoloai.TagInfo, sandboxWorkDir, targetDir string, withTags bool) error {
 	tagsApplied, tagsSkipped := applyTags(cmd, selectedTags, shaMap, sandboxWorkDir, targetDir, withTags)
 
 	if !cliutil.JSONEnabled(cmd) && !withTags {
@@ -154,13 +154,13 @@ func finishSelectiveApply(cmd *cobra.Command, name string, commitsApplied int, s
 }
 
 // filterTagsForResolved fetches tags beyond baseline and filters to those on the resolved commits.
-func filterTagsForResolved(name string, resolved []patch.CommitInfo) []sandbox.TagInfo {
+func filterTagsForResolved(name string, resolved []patch.CommitInfo) []yoloai.TagInfo {
 	allTags, _ := sandbox.ListTagsBeyondBaseline(cliutil.Layout(), name)
 	resolvedSet := make(map[string]bool, len(resolved))
 	for _, c := range resolved {
 		resolvedSet[strings.ToLower(c.SHA)] = true
 	}
-	var selectedTags []sandbox.TagInfo
+	var selectedTags []yoloai.TagInfo
 	for _, t := range allTags {
 		if resolvedSet[strings.ToLower(t.SHA)] {
 			selectedTags = append(selectedTags, t)
@@ -170,7 +170,7 @@ func filterTagsForResolved(name string, resolved []patch.CommitInfo) []sandbox.T
 }
 
 // printSelectiveApplySummary prints the commit summary for selective apply.
-func printSelectiveApplySummary(cmd *cobra.Command, resolved []patch.CommitInfo, tagsByCommit map[string][]string, selectedTags []sandbox.TagInfo, withTags bool) {
+func printSelectiveApplySummary(cmd *cobra.Command, resolved []patch.CommitInfo, tagsByCommit map[string][]string, selectedTags []yoloai.TagInfo, withTags bool) {
 	out := cmd.OutOrStdout()
 	fmt.Fprintf(out, "Commits to apply (%d):\n", len(resolved)) //nolint:errcheck
 	for _, c := range resolved {

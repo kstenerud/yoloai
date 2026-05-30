@@ -28,6 +28,26 @@ const (
 	StatusUnavailable Status = sandbox.StatusUnavailable // backend not running
 )
 
+// AgentStatus is the agent's activity state inside a running sandbox, carried
+// on Info.AgentStatus. Re-exported (type alias) from internal/sandbox; the
+// constants below are the closed set of values. Distinct from Status, which is
+// the sandbox/container lifecycle state.
+type AgentStatus = sandbox.AgentStatus
+
+const (
+	AgentStatusUnknown AgentStatus = sandbox.AgentStatusUnknown // not yet determined
+	AgentStatusActive  AgentStatus = sandbox.AgentStatusActive  // actively working
+	AgentStatusIdle    AgentStatus = sandbox.AgentStatusIdle    // awaiting input
+	AgentStatusDone    AgentStatus = sandbox.AgentStatusDone    // completed its task
+	AgentStatusFailed  AgentStatus = sandbox.AgentStatusFailed  // exited with an error
+)
+
+// TagInfo identifies a git tag in a sandbox's workdir (its Name and commit
+// SHA). Re-exported (type alias) from internal/sandbox so embedders can hold
+// the tag-listing results without importing internal packages. The operations
+// that return it move onto the Sandbox/Workdir handles in a later step.
+type TagInfo = sandbox.TagInfo
+
 // StartOptions configures Sandbox.Start (and Restart). Re-exported (type alias)
 // from internal/sandbox — its fields (Resume, Prompt, PromptFile, Isolation,
 // VscodeTunnel) are all legitimate start-time knobs, so no field cleanup is

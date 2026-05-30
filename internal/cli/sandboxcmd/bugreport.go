@@ -20,7 +20,6 @@ import (
 	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/buildinfo"
 	"github.com/kstenerud/yoloai/internal/fileutil"
-	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
@@ -156,7 +155,7 @@ func writeBugReportSandboxDetail(ctx context.Context, w io.Writer, c *yoloai.Cli
 	if err != nil {
 		err = fmt.Errorf("sandbox handle: %w", err)
 	}
-	var info *sandbox.Info
+	var info *yoloai.Info
 	if err == nil {
 		info, err = sb.Inspect(ctx)
 	}

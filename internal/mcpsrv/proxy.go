@@ -111,11 +111,11 @@ func (p *ProxyServer) ensureRunning(ctx context.Context) (*store.Meta, error) {
 
 	// Sandbox exists — check container state
 	switch info.Status {
-	case sandbox.StatusActive, sandbox.StatusIdle, sandbox.StatusDone, sandbox.StatusFailed:
+	case yoloai.StatusActive, yoloai.StatusIdle, yoloai.StatusDone, yoloai.StatusFailed:
 		// Container is running — use as-is
 		return info.Meta, nil
 
-	case sandbox.StatusStopped, sandbox.StatusRemoved:
+	case yoloai.StatusStopped, yoloai.StatusRemoved:
 		// Container stopped or removed — restart it (auto-start; notices discarded)
 		if _, err := sb.Start(ctx, sandbox.StartOptions{}); err != nil {
 			return nil, fmt.Errorf("start sandbox %q: %w", p.sandboxName, err)

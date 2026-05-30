@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 	"github.com/kstenerud/yoloai/internal/config"
 	dockerrt "github.com/kstenerud/yoloai/internal/runtime/docker"
@@ -427,7 +428,7 @@ func TestCLI_StartAfterDone(t *testing.T) {
 	testutil.WaitForStatus(context.Background(), t, func(ctx context.Context) (string, error) {
 		s, err := sandbox.DetectStatus(ctx, rt, store.InstanceName("cli-startdone"), cliutil.Layout().SandboxDir("cli-startdone"))
 		return string(s), err
-	}, string(sandbox.StatusDone), 60*time.Second)
+	}, string(yoloai.StatusDone), 60*time.Second)
 
 	// start must succeed on a done sandbox (regression test for baef847)
 	_, _, err = runCLI(t, "start", "cli-startdone")

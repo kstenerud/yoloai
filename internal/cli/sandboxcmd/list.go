@@ -11,6 +11,7 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
+	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/spf13/cobra"
 )
@@ -51,12 +52,12 @@ func addListFlags(cmd *cobra.Command) {
 // filterInfos applies the given filters to a slice of sandbox infos.
 // Multiple filters are ANDed together. Broken sandboxes are excluded by
 // all filters except when no filters are active.
-func filterInfos(infos []*sandbox.Info, f listFilters) []*sandbox.Info {
+func filterInfos(infos []*yoloai.Info, f listFilters) []*yoloai.Info {
 	if !f.active && !f.idle && !f.done && !f.stopped && f.agent == "" && f.profile == "" && !f.changes {
 		return infos
 	}
 
-	var result []*sandbox.Info
+	var result []*yoloai.Info
 	for _, info := range infos {
 		if matchesFilters(info, f) {
 			result = append(result, info)
@@ -68,28 +69,28 @@ func filterInfos(infos []*sandbox.Info, f listFilters) []*sandbox.Info {
 // matchesFilters returns true if info satisfies all active filter criteria.
 // matchesStatusFilter returns false if the sandbox status does not satisfy
 // the status-related flags (active, idle, done, stopped).
-func matchesStatusFilter(info *sandbox.Info, f listFilters) bool {
-	if f.active && info.Status != sandbox.StatusActive && info.Status != sandbox.StatusIdle {
+func matchesStatusFilter(info *yoloai.Info, f listFilters) bool {
+	if f.active && info.Status != yoloai.StatusActive && info.Status != yoloai.StatusIdle {
 		return false
 	}
-	if f.idle && info.Status != sandbox.StatusIdle {
+	if f.idle && info.Status != yoloai.StatusIdle {
 		return false
 	}
-	if f.done && info.Status != sandbox.StatusDone && info.Status != sandbox.StatusFailed {
+	if f.done && info.Status != yoloai.StatusDone && info.Status != yoloai.StatusFailed {
 		return false
 	}
-	if f.stopped && info.Status != sandbox.StatusStopped && info.Status != sandbox.StatusSuspended {
+	if f.stopped && info.Status != yoloai.StatusStopped && info.Status != yoloai.StatusSuspended {
 		return false
 	}
 	return true
 }
 
-func matchesFilters(info *sandbox.Info, f listFilters) bool {
+func matchesFilters(info *yoloai.Info, f listFilters) bool {
 	if !matchesStatusFilter(info, f) {
 		return false
 	}
 	if f.agent != "" {
-		if info.Status == sandbox.StatusBroken || string(info.Meta.Agent) != f.agent {
+		if info.Status == yoloai.StatusBroken || string(info.Meta.Agent) != f.agent {
 			return false
 		}
 	}
@@ -103,8 +104,8 @@ func matchesFilters(info *sandbox.Info, f listFilters) bool {
 }
 
 // matchesProfileFilter returns true if the sandbox matches the profile filter.
-func matchesProfileFilter(info *sandbox.Info, profileFilter string) bool {
-	if info.Status == sandbox.StatusBroken {
+func matchesProfileFilter(info *yoloai.Info, profileFilter string) bool {
+	if info.Status == yoloai.StatusBroken {
 		return false
 	}
 	p := info.Meta.Profile
@@ -159,7 +160,7 @@ func runList(cmd *cobra.Command, _ []string) error {
 
 	if cliutil.JSONEnabled(cmd) {
 		if infos == nil {
-			infos = []*sandbox.Info{}
+			infos = []*yoloai.Info{}
 		}
 		// Create output structure with unavailable_backends field
 		output := map[string]any{
@@ -177,7 +178,7 @@ func runList(cmd *cobra.Command, _ []string) error {
 	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 3, ' ', 0)
 	fmt.Fprintln(w, "NAME\tSTATUS\tBACKEND\tAGENT\tPROFILE\tAGE\tSIZE\tWORKDIR\tCHANGES") //nolint:errcheck
 	for _, info := range infos {
-		if info.Status == sandbox.StatusBroken || info.Status == sandbox.StatusUnavailable {
+		if info.Status == yoloai.StatusBroken || info.Status == yoloai.StatusUnavailable {
 			backend := "-"
 			if info.Meta.Backend != "" {
 				backend = string(info.Meta.Backend)

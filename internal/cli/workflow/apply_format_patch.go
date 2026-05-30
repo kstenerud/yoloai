@@ -248,7 +248,7 @@ func runApplyCommits(cmd *cobra.Command, name string, paths []string, meta *stor
 }
 
 // printApplyCommitsSummary prints the list of commits about to be applied (human-readable only).
-func printApplyCommitsSummary(cmd *cobra.Command, commits []patch.CommitInfo, tags []sandbox.TagInfo, tagsByCommit map[string][]string, hasUncommitted, includeUncommitted, withTags bool) {
+func printApplyCommitsSummary(cmd *cobra.Command, commits []patch.CommitInfo, tags []yoloai.TagInfo, tagsByCommit map[string][]string, hasUncommitted, includeUncommitted, withTags bool) {
 	if cliutil.JSONEnabled(cmd) {
 		return
 	}

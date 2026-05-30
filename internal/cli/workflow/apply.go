@@ -10,6 +10,7 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
+	"github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/internal/workspace"
@@ -173,7 +174,7 @@ func parseApplyArgs(rest []string, cmd *cobra.Command) (refs []string, paths []s
 }
 
 // buildTagsByCommit builds a map of lowercase commit SHA → tag names from a tag list.
-func buildTagsByCommit(tags []sandbox.TagInfo) map[string][]string {
+func buildTagsByCommit(tags []yoloai.TagInfo) map[string][]string {
 	m := make(map[string][]string, len(tags))
 	for _, t := range tags {
 		key := strings.ToLower(t.SHA)
@@ -186,7 +187,7 @@ func buildTagsByCommit(tags []sandbox.TagInfo) map[string][]string {
 // sandboxWorkDir is used to fetch the full tag message (which is not stored
 // in TagInfo to keep tag listing fast and reliable).
 // Returns counts of applied and skipped tags. No-ops if withTags is false.
-func applyTags(cmd *cobra.Command, tags []sandbox.TagInfo, shaMap map[string]string, sandboxWorkDir, targetDir string, withTags bool) (applied, skipped int) {
+func applyTags(cmd *cobra.Command, tags []yoloai.TagInfo, shaMap map[string]string, sandboxWorkDir, targetDir string, withTags bool) (applied, skipped int) {
 	if !withTags || len(tags) == 0 {
 		return 0, 0
 	}

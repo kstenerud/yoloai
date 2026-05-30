@@ -6,14 +6,14 @@ import (
 	"testing"
 	"time"
 
+	yoloai "github.com/kstenerud/yoloai"
 	agentpkg "github.com/kstenerud/yoloai/internal/agent"
-	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/stretchr/testify/assert"
 )
 
-func makeInfo(name string, status sandbox.Status, agent, profile, changes string) *sandbox.Info {
-	return &sandbox.Info{
+func makeInfo(name string, status yoloai.Status, agent, profile, changes string) *yoloai.Info {
+	return &yoloai.Info{
 		Meta: &store.Meta{
 			Name:      name,
 			Agent:     agentpkg.AgentName(agent),
@@ -27,30 +27,30 @@ func makeInfo(name string, status sandbox.Status, agent, profile, changes string
 	}
 }
 
-func makeBrokenInfo(name string) *sandbox.Info {
-	return &sandbox.Info{
+func makeBrokenInfo(name string) *yoloai.Info {
+	return &yoloai.Info{
 		Meta:       &store.Meta{Name: name},
-		Status:     sandbox.StatusBroken,
+		Status:     yoloai.StatusBroken,
 		HasChanges: "-",
 		DiskUsage:  "-",
 	}
 }
 
 func TestFilterInfos_NoFilters(t *testing.T) {
-	infos := []*sandbox.Info{
-		makeInfo("a", sandbox.StatusActive, "claude", "", "no"),
-		makeInfo("b", sandbox.StatusStopped, "gemini", "go-dev", "yes"),
+	infos := []*yoloai.Info{
+		makeInfo("a", yoloai.StatusActive, "claude", "", "no"),
+		makeInfo("b", yoloai.StatusStopped, "gemini", "go-dev", "yes"),
 	}
 	result := filterInfos(infos, listFilters{})
 	assert.Len(t, result, 2)
 }
 
 func TestFilterInfos_Active(t *testing.T) {
-	infos := []*sandbox.Info{
-		makeInfo("a", sandbox.StatusActive, "claude", "", "no"),
-		makeInfo("b", sandbox.StatusStopped, "gemini", "", "no"),
-		makeInfo("c", sandbox.StatusDone, "claude", "", "no"),
-		makeInfo("d", sandbox.StatusIdle, "claude", "", "no"),
+	infos := []*yoloai.Info{
+		makeInfo("a", yoloai.StatusActive, "claude", "", "no"),
+		makeInfo("b", yoloai.StatusStopped, "gemini", "", "no"),
+		makeInfo("c", yoloai.StatusDone, "claude", "", "no"),
+		makeInfo("d", yoloai.StatusIdle, "claude", "", "no"),
 	}
 	result := filterInfos(infos, listFilters{active: true})
 	assert.Len(t, result, 2)
@@ -59,11 +59,11 @@ func TestFilterInfos_Active(t *testing.T) {
 }
 
 func TestFilterInfos_Idle(t *testing.T) {
-	infos := []*sandbox.Info{
-		makeInfo("a", sandbox.StatusActive, "claude", "", "no"),
-		makeInfo("b", sandbox.StatusIdle, "gemini", "", "no"),
-		makeInfo("c", sandbox.StatusDone, "claude", "", "no"),
-		makeInfo("d", sandbox.StatusIdle, "claude", "", "yes"),
+	infos := []*yoloai.Info{
+		makeInfo("a", yoloai.StatusActive, "claude", "", "no"),
+		makeInfo("b", yoloai.StatusIdle, "gemini", "", "no"),
+		makeInfo("c", yoloai.StatusDone, "claude", "", "no"),
+		makeInfo("d", yoloai.StatusIdle, "claude", "", "yes"),
 	}
 	result := filterInfos(infos, listFilters{idle: true})
 	assert.Len(t, result, 2)
@@ -72,11 +72,11 @@ func TestFilterInfos_Idle(t *testing.T) {
 }
 
 func TestFilterInfos_Done(t *testing.T) {
-	infos := []*sandbox.Info{
-		makeInfo("a", sandbox.StatusActive, "claude", "", "no"),
-		makeInfo("b", sandbox.StatusDone, "gemini", "", "no"),
-		makeInfo("c", sandbox.StatusFailed, "claude", "", "no"),
-		makeInfo("d", sandbox.StatusStopped, "claude", "", "no"),
+	infos := []*yoloai.Info{
+		makeInfo("a", yoloai.StatusActive, "claude", "", "no"),
+		makeInfo("b", yoloai.StatusDone, "gemini", "", "no"),
+		makeInfo("c", yoloai.StatusFailed, "claude", "", "no"),
+		makeInfo("d", yoloai.StatusStopped, "claude", "", "no"),
 	}
 	result := filterInfos(infos, listFilters{done: true})
 	assert.Len(t, result, 2)
@@ -85,10 +85,10 @@ func TestFilterInfos_Done(t *testing.T) {
 }
 
 func TestFilterInfos_Stopped(t *testing.T) {
-	infos := []*sandbox.Info{
-		makeInfo("a", sandbox.StatusActive, "claude", "", "no"),
-		makeInfo("b", sandbox.StatusStopped, "gemini", "", "no"),
-		makeInfo("c", sandbox.StatusStopped, "claude", "", "yes"),
+	infos := []*yoloai.Info{
+		makeInfo("a", yoloai.StatusActive, "claude", "", "no"),
+		makeInfo("b", yoloai.StatusStopped, "gemini", "", "no"),
+		makeInfo("c", yoloai.StatusStopped, "claude", "", "yes"),
 	}
 	result := filterInfos(infos, listFilters{stopped: true})
 	assert.Len(t, result, 2)
@@ -97,10 +97,10 @@ func TestFilterInfos_Stopped(t *testing.T) {
 }
 
 func TestFilterInfos_Agent(t *testing.T) {
-	infos := []*sandbox.Info{
-		makeInfo("a", sandbox.StatusActive, "claude", "", "no"),
-		makeInfo("b", sandbox.StatusActive, "gemini", "", "no"),
-		makeInfo("c", sandbox.StatusStopped, "claude", "", "yes"),
+	infos := []*yoloai.Info{
+		makeInfo("a", yoloai.StatusActive, "claude", "", "no"),
+		makeInfo("b", yoloai.StatusActive, "gemini", "", "no"),
+		makeInfo("c", yoloai.StatusStopped, "claude", "", "yes"),
 	}
 	result := filterInfos(infos, listFilters{agent: "claude"})
 	assert.Len(t, result, 2)
@@ -109,8 +109,8 @@ func TestFilterInfos_Agent(t *testing.T) {
 }
 
 func TestFilterInfos_AgentExcludesBroken(t *testing.T) {
-	infos := []*sandbox.Info{
-		makeInfo("a", sandbox.StatusActive, "claude", "", "no"),
+	infos := []*yoloai.Info{
+		makeInfo("a", yoloai.StatusActive, "claude", "", "no"),
 		makeBrokenInfo("b"),
 	}
 	result := filterInfos(infos, listFilters{agent: "claude"})
@@ -119,10 +119,10 @@ func TestFilterInfos_AgentExcludesBroken(t *testing.T) {
 }
 
 func TestFilterInfos_ProfileBase(t *testing.T) {
-	infos := []*sandbox.Info{
-		makeInfo("a", sandbox.StatusActive, "claude", "", "no"),     // empty = base
-		makeInfo("b", sandbox.StatusActive, "claude", "base", "no"), // explicit base
-		makeInfo("c", sandbox.StatusActive, "claude", "go-dev", "no"),
+	infos := []*yoloai.Info{
+		makeInfo("a", yoloai.StatusActive, "claude", "", "no"),     // empty = base
+		makeInfo("b", yoloai.StatusActive, "claude", "base", "no"), // explicit base
+		makeInfo("c", yoloai.StatusActive, "claude", "go-dev", "no"),
 	}
 	result := filterInfos(infos, listFilters{profile: "base"})
 	assert.Len(t, result, 2)
@@ -131,9 +131,9 @@ func TestFilterInfos_ProfileBase(t *testing.T) {
 }
 
 func TestFilterInfos_ProfileNamed(t *testing.T) {
-	infos := []*sandbox.Info{
-		makeInfo("a", sandbox.StatusActive, "claude", "", "no"),
-		makeInfo("b", sandbox.StatusActive, "claude", "go-dev", "no"),
+	infos := []*yoloai.Info{
+		makeInfo("a", yoloai.StatusActive, "claude", "", "no"),
+		makeInfo("b", yoloai.StatusActive, "claude", "go-dev", "no"),
 	}
 	result := filterInfos(infos, listFilters{profile: "go-dev"})
 	assert.Len(t, result, 1)
@@ -141,8 +141,8 @@ func TestFilterInfos_ProfileNamed(t *testing.T) {
 }
 
 func TestFilterInfos_ProfileExcludesBroken(t *testing.T) {
-	infos := []*sandbox.Info{
-		makeInfo("a", sandbox.StatusActive, "claude", "go-dev", "no"),
+	infos := []*yoloai.Info{
+		makeInfo("a", yoloai.StatusActive, "claude", "go-dev", "no"),
 		makeBrokenInfo("b"),
 	}
 	result := filterInfos(infos, listFilters{profile: "go-dev"})
@@ -151,10 +151,10 @@ func TestFilterInfos_ProfileExcludesBroken(t *testing.T) {
 }
 
 func TestFilterInfos_Changes(t *testing.T) {
-	infos := []*sandbox.Info{
-		makeInfo("a", sandbox.StatusActive, "claude", "", "yes"),
-		makeInfo("b", sandbox.StatusActive, "claude", "", "no"),
-		makeInfo("c", sandbox.StatusStopped, "gemini", "", "yes"),
+	infos := []*yoloai.Info{
+		makeInfo("a", yoloai.StatusActive, "claude", "", "yes"),
+		makeInfo("b", yoloai.StatusActive, "claude", "", "no"),
+		makeInfo("c", yoloai.StatusStopped, "gemini", "", "yes"),
 	}
 	result := filterInfos(infos, listFilters{changes: true})
 	assert.Len(t, result, 2)
@@ -163,11 +163,11 @@ func TestFilterInfos_Changes(t *testing.T) {
 }
 
 func TestFilterInfos_Combined(t *testing.T) {
-	infos := []*sandbox.Info{
-		makeInfo("a", sandbox.StatusActive, "claude", "", "yes"),
-		makeInfo("b", sandbox.StatusActive, "claude", "", "no"),
-		makeInfo("c", sandbox.StatusActive, "gemini", "", "yes"),
-		makeInfo("d", sandbox.StatusStopped, "claude", "", "yes"),
+	infos := []*yoloai.Info{
+		makeInfo("a", yoloai.StatusActive, "claude", "", "yes"),
+		makeInfo("b", yoloai.StatusActive, "claude", "", "no"),
+		makeInfo("c", yoloai.StatusActive, "gemini", "", "yes"),
+		makeInfo("d", yoloai.StatusStopped, "claude", "", "yes"),
 	}
 	result := filterInfos(infos, listFilters{active: true, agent: "claude", changes: true})
 	assert.Len(t, result, 1)
@@ -175,8 +175,8 @@ func TestFilterInfos_Combined(t *testing.T) {
 }
 
 func TestFilterInfos_AllFiltered(t *testing.T) {
-	infos := []*sandbox.Info{
-		makeInfo("a", sandbox.StatusStopped, "claude", "", "no"),
+	infos := []*yoloai.Info{
+		makeInfo("a", yoloai.StatusStopped, "claude", "", "no"),
 	}
 	result := filterInfos(infos, listFilters{active: true})
 	assert.Empty(t, result)

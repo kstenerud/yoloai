@@ -37,7 +37,7 @@ func runSandboxInfo(cmd *cobra.Command, name string) error {
 
 		if cliutil.JSONEnabled(cmd) {
 			type infoJSON struct {
-				*sandbox.Info
+				*yoloai.Info
 				ConfigPath    string `json:"config_path"`
 				PromptPreview string `json:"prompt_preview,omitempty"`
 			}
@@ -57,7 +57,7 @@ func runSandboxInfo(cmd *cobra.Command, name string) error {
 }
 
 // printSandboxInfo prints sandbox info in human-readable format.
-func printSandboxInfo(cmd *cobra.Command, name string, info *sandbox.Info) {
+func printSandboxInfo(cmd *cobra.Command, name string, info *yoloai.Info) {
 	w := cmd.OutOrStdout()
 	meta := info.Meta
 
@@ -123,7 +123,7 @@ func printSandboxNetwork(w io.Writer, meta *store.Meta) {
 }
 
 // printSandboxResources prints resource limits and summary information.
-func printSandboxResources(w io.Writer, meta *store.Meta, info *sandbox.Info) {
+func printSandboxResources(w io.Writer, meta *store.Meta, info *yoloai.Info) {
 	if meta.Resources != nil {
 		var parts []string
 		if meta.Resources.CPUs != "" {

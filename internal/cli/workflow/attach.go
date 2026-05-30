@@ -63,7 +63,7 @@ func runAttach(cmd *cobra.Command, args []string, opts *attachOpts) error {
 			if err != nil {
 				return cliutil.SandboxErrorHint(name, err)
 			}
-			if info.Status != sandbox.StatusActive && info.Status != sandbox.StatusIdle {
+			if info.Status != yoloai.StatusActive && info.Status != yoloai.StatusIdle {
 				// Auto-start before attaching; the interactive session takes over
 				// immediately, so start notices would be noise — discard them.
 				if _, err := sb.Start(ctx, sandbox.StartOptions{Resume: true}); err != nil {
