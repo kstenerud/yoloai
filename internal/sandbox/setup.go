@@ -18,6 +18,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	tmuxres "github.com/kstenerud/yoloai/internal/resources/tmux"
 	yoloairuntime "github.com/kstenerud/yoloai/internal/runtime"
+	"github.com/kstenerud/yoloai/yoerrors"
 )
 
 // SetupOptions carries every answer the first-run setup wizard would
@@ -205,7 +206,7 @@ func (m *Engine) SetupStatus() *SetupStatus {
 // (or repair) setup state.
 func (m *Engine) ApplySetup(_ context.Context, opts SetupOptions) error {
 	if err := validateTmuxConf(opts.TmuxConf); err != nil {
-		return NewUsageError("%v", err)
+		return yoerrors.NewUsageError("%v", err)
 	}
 	// Q-F: ApplySetup is config-only; image build is a separate
 	// concern (handled by `yoloai system build` or by EnsureSetup on
@@ -238,7 +239,7 @@ func (m *Engine) applyBackendChoice(name string) error {
 	case len(backends) == 1:
 		return m.setBackendFromFlag(backends[0].name)
 	case len(backends) > 1:
-		return NewUsageError("Backend is required: multiple are available on this host (%s)", joinChoiceNames(backends))
+		return yoerrors.NewUsageError("Backend is required: multiple are available on this host (%s)", joinChoiceNames(backends))
 	}
 	return nil // zero backends — nothing to write
 }
@@ -255,7 +256,7 @@ func (m *Engine) applyAgentChoice(name string) error {
 	case len(agents) == 1:
 		return m.setAgentFromFlag(agents[0].name)
 	case len(agents) > 1:
-		return NewUsageError("Agent is required: multiple are available on this host (%s)", joinChoiceNames(agents))
+		return yoerrors.NewUsageError("Agent is required: multiple are available on this host (%s)", joinChoiceNames(agents))
 	}
 	return nil
 }

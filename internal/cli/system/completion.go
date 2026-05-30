@@ -3,7 +3,7 @@
 package system
 
 import (
-	"github.com/kstenerud/yoloai/internal/sandbox"
+	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
 
@@ -39,7 +39,7 @@ PowerShell:
 			case "powershell":
 				return cmd.Root().GenPowerShellCompletionWithDesc(cmd.OutOrStdout())
 			default:
-				return sandbox.NewUsageError("unsupported shell: %s (valid: bash, zsh, fish, powershell)", args[0])
+				return yoerrors.NewUsageError("unsupported shell: %s (valid: bash, zsh, fish, powershell)", args[0])
 			}
 		},
 	}

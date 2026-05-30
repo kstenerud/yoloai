@@ -10,6 +10,7 @@ import (
 
 	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/sandbox"
+	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
 
@@ -55,7 +56,7 @@ func runRestart(cmd *cobra.Command, args []string, opts *restartOpts) error {
 	defer cliutil.OpenCLIJSONLSink(name, cmd)()
 
 	if cliutil.JSONEnabled(cmd) && opts.attach {
-		return sandbox.NewUsageError("--json and --attach are incompatible")
+		return yoerrors.NewUsageError("--json and --attach are incompatible")
 	}
 
 	// Set terminal title early so it shows the sandbox name during restart.

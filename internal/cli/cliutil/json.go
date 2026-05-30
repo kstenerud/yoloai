@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/kstenerud/yoloai/internal/sandbox"
+	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
 
@@ -51,5 +51,5 @@ func EffectiveYes(cmd *cobra.Command) bool {
 // ErrJSONNotSupported returns an error indicating that --json is not supported
 // for interactive commands like attach and exec.
 func ErrJSONNotSupported(name string) error {
-	return sandbox.NewUsageError("--json is not supported for interactive command %q", name)
+	return yoerrors.NewUsageError("--json is not supported for interactive command %q", name)
 }

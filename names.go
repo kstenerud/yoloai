@@ -9,6 +9,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/yoerrors"
 )
 
 // BackendName names a runtime backend. Open-set typed string —
@@ -141,12 +142,12 @@ const (
 // aux directory — has uncommitted git changes and the caller has not acked it
 // (via CreateOptions.AllowDirtyWorkdir / DirSpec.AllowDirty, or
 // RunOptions.AllowDirtyWorkdir). Catch it with errors.As to render a prompt and
-// retry with the ack set. Re-exported (type alias) from internal/sandbox.
-type DirtyWorkdirError = sandbox.DirtyWorkdirError
+// retry with the ack set. Re-exported (type alias) from yoerrors.
+type DirtyWorkdirError = yoerrors.DirtyWorkdirError
 
 // DirtyDir names one uncommitted directory inside a DirtyWorkdirError: its host
 // Path and a short Status summary (e.g. "3 modified, 1 untracked").
-type DirtyDir = sandbox.DirtyDir
+type DirtyDir = yoerrors.DirtyDir
 
 // DirSpec describes a directory to mount in the sandbox: host Path, mount
 // Mode, optional container MountPath, and the per-directory safety acks

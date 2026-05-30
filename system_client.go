@@ -20,6 +20,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/runtime/caps"
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/yoerrors"
 )
 
 // SystemClient scopes `yoloai system …` operations. Constructed via
@@ -308,20 +309,20 @@ type BuildOptions struct {
 // are skipped.
 func (s *SystemClient) Build(ctx context.Context, opts BuildOptions) error {
 	if opts.AllBackends && opts.Backend != "" {
-		return sandbox.NewUsageError("Backend and AllBackends are mutually exclusive")
+		return yoerrors.NewUsageError("Backend and AllBackends are mutually exclusive")
 	}
 	if opts.Profile != "" {
 		if err := config.ValidateProfileName(opts.Profile); err != nil {
 			return err
 		}
 		if !config.ProfileExists(s.layout, opts.Profile) {
-			return sandbox.NewUsageError("profile %q does not exist", opts.Profile)
+			return yoerrors.NewUsageError("profile %q does not exist", opts.Profile)
 		}
 		if err := s.profileHasDockerfile(opts.Profile); err != nil {
 			return err
 		}
 	} else if len(opts.Secrets) > 0 {
-		return sandbox.NewUsageError("Secrets is only supported with a non-empty Profile")
+		return yoerrors.NewUsageError("Secrets is only supported with a non-empty Profile")
 	}
 
 	out := opts.Output
@@ -400,10 +401,10 @@ type CheckResult struct {
 // report per backend/mode).
 func (s *SystemClient) Check(ctx context.Context, opts CheckOptions) ([]CheckResult, error) {
 	if opts.Backend == "" {
-		return nil, sandbox.NewUsageError("Backend is required")
+		return nil, yoerrors.NewUsageError("Backend is required")
 	}
 	if opts.Agent == "" {
-		return nil, sandbox.NewUsageError("Agent is required")
+		return nil, yoerrors.NewUsageError("Agent is required")
 	}
 
 	var results []CheckResult
@@ -934,7 +935,7 @@ func (s *SystemClient) profileHasDockerfile(profile string) error {
 			return nil
 		}
 	}
-	return sandbox.NewUsageError("profile %q has no Dockerfile (and no ancestor does either)", profile)
+	return yoerrors.NewUsageError("profile %q has no Dockerfile (and no ancestor does either)", profile)
 }
 
 // dirSize sums every regular file under dir. Returns 0 on any

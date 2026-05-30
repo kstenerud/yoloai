@@ -15,7 +15,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
 	"github.com/kstenerud/yoloai/internal/extension"
-	"github.com/kstenerud/yoloai/internal/sandbox"
+	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
 
@@ -90,16 +90,16 @@ func runExtension(cmd *cobra.Command, ext *extension.Extension, args []string) e
 		for _, a := range ext.Args {
 			expected = append(expected, "<"+a.Name+">")
 		}
-		return sandbox.NewUsageError("expected %d argument(s): %s", len(ext.Args), strings.Join(expected, " "))
+		return yoerrors.NewUsageError("expected %d argument(s): %s", len(ext.Args), strings.Join(expected, " "))
 	}
 	if len(args) > len(ext.Args) {
-		return sandbox.NewUsageError("expected %d argument(s) but got %d", len(ext.Args), len(args))
+		return yoerrors.NewUsageError("expected %d argument(s) but got %d", len(ext.Args), len(args))
 	}
 
 	// Resolve and validate agent
 	agentName := cliutil.ResolveAgentFromConfig()
 	if !ext.SupportsAgent(agentName) {
-		return sandbox.NewUsageError("extension %q does not support agent %q (supports: %s)",
+		return yoerrors.NewUsageError("extension %q does not support agent %q (supports: %s)",
 			ext.Name, agentName, strings.Join(ext.Agent.Names, ", "))
 	}
 

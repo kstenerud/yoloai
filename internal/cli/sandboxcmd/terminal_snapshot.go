@@ -10,6 +10,7 @@ import (
 	"github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 	"github.com/kstenerud/yoloai/internal/sandbox"
+	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
 
@@ -37,7 +38,7 @@ func runTerminalSnapshot(cmd *cobra.Command, name string, rest []string) error {
 		case "":
 			// ignore
 		default:
-			return sandbox.NewUsageError("unknown flag %q for terminal-snapshot (valid: --ansi)", arg)
+			return yoerrors.NewUsageError("unknown flag %q for terminal-snapshot (valid: --ansi)", arg)
 		}
 	}
 

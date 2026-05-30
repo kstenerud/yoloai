@@ -13,8 +13,8 @@ import (
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/yoerrors"
 )
 
 // profileScaffold is the commented config.yaml template written for
@@ -73,7 +73,7 @@ func (a *ProfileAdmin) Create(_ context.Context, name string) error {
 		return err
 	}
 	if config.ProfileExists(a.s.layout, name) {
-		return sandbox.NewUsageError("profile %q already exists", name)
+		return yoerrors.NewUsageError("profile %q already exists", name)
 	}
 
 	dir := a.s.layout.ProfileDir(name)
@@ -145,7 +145,7 @@ func (a *ProfileAdmin) Info(_ context.Context, name string) (*ProfileInfo, error
 		return nil, err
 	}
 	if !config.ProfileExists(a.s.layout, name) {
-		return nil, sandbox.NewUsageError("profile %q does not exist", name)
+		return nil, yoerrors.NewUsageError("profile %q does not exist", name)
 	}
 	chain, err := config.ResolveProfileChain(a.s.layout, name)
 	if err != nil {
@@ -272,7 +272,7 @@ func (a *ProfileAdmin) Delete(_ context.Context, name string) (*DeleteProfileRes
 		return nil, err
 	}
 	if !config.ProfileExists(a.s.layout, name) {
-		return nil, sandbox.NewUsageError("profile %q does not exist", name)
+		return nil, yoerrors.NewUsageError("profile %q does not exist", name)
 	}
 
 	dir := a.s.layout.ProfileDir(name)

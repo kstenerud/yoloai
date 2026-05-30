@@ -15,6 +15,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
 
@@ -24,7 +25,7 @@ import (
 // is captured by running git inside it).
 func applyOverlay(cmd *cobra.Command, name string, meta *store.Meta, refs, paths []string, yes, dryRun bool) error {
 	if len(refs) > 0 {
-		return sandbox.NewPlatformError("selective ref apply is not supported for :overlay sandboxes")
+		return yoerrors.NewPlatformError("selective ref apply is not supported for :overlay sandboxes")
 	}
 	backend := cliutil.ResolveBackendForSandbox(name)
 

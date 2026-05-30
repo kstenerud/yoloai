@@ -12,7 +12,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
 	"github.com/kstenerud/yoloai"
-	"github.com/kstenerud/yoloai/internal/sandbox"
+	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
 
@@ -27,7 +27,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 	}
 	defer cliutil.OpenCLIJSONLSink(name, cmd)()
 	if len(rest) == 0 {
-		return sandbox.NewUsageError("command is required")
+		return yoerrors.NewUsageError("command is required")
 	}
 	cmdArgs := rest
 

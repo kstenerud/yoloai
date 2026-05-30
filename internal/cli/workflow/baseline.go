@@ -9,10 +9,10 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
-	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/patch"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/internal/workspace"
+	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
 
@@ -87,9 +87,9 @@ func loadBaselineContext(name string) (*store.Meta, string, error) {
 
 	switch meta.Workdir.Mode {
 	case store.DirModeRW:
-		return nil, "", sandbox.NewUsageError("baseline is not tracked for :rw directories")
+		return nil, "", yoerrors.NewUsageError("baseline is not tracked for :rw directories")
 	case store.DirModeOverlay:
-		return nil, "", sandbox.NewUsageError("use git commands inside the container to manage overlay baselines")
+		return nil, "", yoerrors.NewUsageError("use git commands inside the container to manage overlay baselines")
 	case store.DirModeCopy, store.DirModeRO, "":
 		// fall through to baseline resolution below
 	}

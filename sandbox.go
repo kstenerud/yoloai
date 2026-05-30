@@ -12,6 +12,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/lifecycle"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/yoerrors"
 )
 
 // Sandbox is a name-scoped handle for a single sandbox. The handle is
@@ -129,7 +130,7 @@ func (s *Sandbox) HasActiveWork(ctx context.Context) (bool, string) {
 func (s *Sandbox) Destroy(ctx context.Context, opts DestroyOptions) (*DestroyResult, error) {
 	if !opts.Force {
 		if active, reason := s.HasActiveWork(ctx); active {
-			return nil, sandbox.NewActiveWorkError("%s", reason)
+			return nil, yoerrors.NewActiveWorkError("%s", reason)
 		}
 	}
 	return lifecycle.Destroy(ctx, s.c.deps(), s.name)
@@ -155,7 +156,7 @@ func (s *Sandbox) ContainerLogs(ctx context.Context, tailLines int) string {
 // first. io.TTY=true is required; non-TTY attach returns a *UsageError.
 func (s *Sandbox) Attach(ctx context.Context, io IOStreams) error {
 	if !io.TTY {
-		return sandbox.NewUsageError("attach requires TTY=true")
+		return yoerrors.NewUsageError("attach requires TTY=true")
 	}
 	info, err := s.c.manager.Inspect(ctx, s.name)
 	if err != nil {
@@ -184,7 +185,7 @@ func (s *Sandbox) Exec(ctx context.Context, opts ExecOptions, io IOStreams) erro
 	if !opts.PTY {
 		execer, ok := s.c.rt.(runtime.StdioExecer)
 		if !ok {
-			return sandbox.NewUsageError("backend %s does not support stdio exec", s.c.rt.Descriptor().Name)
+			return yoerrors.NewUsageError("backend %s does not support stdio exec", s.c.rt.Descriptor().Name)
 		}
 		return execer.StdioExec(ctx, store.InstanceName(s.name), opts.Command, io.In, io.Out, io.Err)
 	}

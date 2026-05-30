@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+
+	"github.com/kstenerud/yoloai/yoerrors"
 )
 
 // knownSuffixes are the recognized directory argument suffixes.
@@ -57,13 +59,13 @@ func ParseAuxDirArg(arg, homeDir string, env map[string]string) (*DirSpec, error
 	}
 	switch d.Mode {
 	case DirModeCopy:
-		return nil, NewUsageError(
+		return nil, yoerrors.NewUsageError(
 			"aux directories cannot use :copy (diff/apply is workdir-only).\n"+
 				"  - to track changes, make %q the workdir instead\n"+
 				"  - to edit it live, use :rw\n"+
 				"  - for an isolated copy, run a separate sandbox", arg)
 	case DirModeOverlay:
-		return nil, NewUsageError(
+		return nil, yoerrors.NewUsageError(
 			"aux directories cannot use :overlay (diff/apply is workdir-only).\n"+
 				"  - to track changes, make %q the workdir instead\n"+
 				"  - to edit it live, use :rw\n"+

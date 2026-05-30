@@ -22,6 +22,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
 
@@ -29,7 +30,7 @@ import (
 // Writes sections 1, 3-12 to the report file.
 func runSandboxBugReport(cmd *cobra.Command, name string, reportType string) error {
 	if reportType != "safe" && reportType != "unsafe" {
-		return sandbox.NewUsageError("bugreport type must be safe or unsafe")
+		return yoerrors.NewUsageError("bugreport type must be safe or unsafe")
 	}
 
 	filename, err := bugreport.Filename(time.Now())

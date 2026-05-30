@@ -20,6 +20,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/archetype"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
 
@@ -128,13 +129,13 @@ func parseNewCmdPositional(cmd *cobra.Command, args []string) (name, rawWorkdirA
 	profileFlag = cliutil.ResolveProfile(cmd)
 
 	if len(positional) < 1 {
-		return "", "", nil, "", sandbox.NewUsageError("sandbox name is required")
+		return "", "", nil, "", yoerrors.NewUsageError("sandbox name is required")
 	}
 	if len(positional) < 2 && profileFlag == "" {
-		return "", "", nil, "", sandbox.NewUsageError("workdir is required (or use --profile)\n\nUsage: yoloai new [flags] <name> <workdir> [-- <agent-args>...]\n\nExample: yoloai new %s .", positional[0])
+		return "", "", nil, "", yoerrors.NewUsageError("workdir is required (or use --profile)\n\nUsage: yoloai new [flags] <name> <workdir> [-- <agent-args>...]\n\nExample: yoloai new %s .", positional[0])
 	}
 	if len(positional) > 2 {
-		return "", "", nil, "", sandbox.NewUsageError("too many positional arguments (expected <name> [workdir])")
+		return "", "", nil, "", yoerrors.NewUsageError("too many positional arguments (expected <name> [workdir])")
 	}
 
 	name = positional[0]
@@ -170,10 +171,10 @@ func resolveNewCmdOptions(cmd *cobra.Command, name, rawWorkdirArg string, passth
 	attach, _ := cmd.Flags().GetBool("attach")
 
 	if cliutil.JSONEnabled(cmd) && attach {
-		return yoloai.CreateOptions{}, false, sandbox.NewUsageError("--json and --attach are incompatible")
+		return yoloai.CreateOptions{}, false, yoerrors.NewUsageError("--json and --attach are incompatible")
 	}
 	if networkNone && len(rawPorts) > 0 {
-		return yoloai.CreateOptions{}, false, sandbox.NewUsageError("--port is incompatible with --network-none")
+		return yoloai.CreateOptions{}, false, yoerrors.NewUsageError("--port is incompatible with --network-none")
 	}
 
 	ports, err := parsePortFlags(rawPorts)
@@ -252,15 +253,15 @@ func parsePortFlags(rawPorts []string) ([]yoloai.PortMapping, error) {
 	for _, p := range rawPorts {
 		host, container, ok := strings.Cut(p, ":")
 		if !ok {
-			return nil, sandbox.NewUsageError("invalid port format %q (expected host:container)", p)
+			return nil, yoerrors.NewUsageError("invalid port format %q (expected host:container)", p)
 		}
 		hostPort, err := strconv.Atoi(host)
 		if err != nil {
-			return nil, sandbox.NewUsageError("invalid host port %q in mapping %q", host, p)
+			return nil, yoerrors.NewUsageError("invalid host port %q in mapping %q", host, p)
 		}
 		containerPort, err := strconv.Atoi(container)
 		if err != nil {
-			return nil, sandbox.NewUsageError("invalid container port %q in mapping %q", container, p)
+			return nil, yoerrors.NewUsageError("invalid container port %q in mapping %q", container, p)
 		}
 		ports = append(ports, yoloai.PortMapping{HostPort: hostPort, ContainerPort: containerPort, Protocol: "tcp"})
 	}
@@ -273,7 +274,7 @@ func parseEnvSlice(envSlice []string) (map[string]string, error) {
 	for _, e := range envSlice {
 		k, v, ok := strings.Cut(e, "=")
 		if !ok {
-			return nil, sandbox.NewUsageError("invalid --env value %q: must be KEY=VAL", e)
+			return nil, yoerrors.NewUsageError("invalid --env value %q: must be KEY=VAL", e)
 		}
 		envMap[k] = v
 	}
@@ -287,7 +288,7 @@ func resolveNewDirSpecs(rawWorkdirArg string, rawDirs []string) (workdirSpec san
 	if rawWorkdirArg != "" {
 		parsed, parseErr := sandbox.ParseDirArg(rawWorkdirArg, homeDir, layout.Env)
 		if parseErr != nil {
-			return sandbox.DirSpec{}, nil, sandbox.NewUsageError("invalid workdir: %s", parseErr)
+			return sandbox.DirSpec{}, nil, yoerrors.NewUsageError("invalid workdir: %s", parseErr)
 		}
 		workdirSpec = *parsed
 	}
@@ -297,11 +298,11 @@ func resolveNewDirSpecs(rawWorkdirArg string, rawDirs []string) (workdirSpec san
 			// ParseAuxDirArg returns *UsageError for the :copy/:overlay
 			// rejection cases (already user-actionable); pass it through.
 			// Other parse errors get the "invalid directory" prefix.
-			var usage *sandbox.UsageError
+			var usage *yoerrors.UsageError
 			if errors.As(parseErr, &usage) {
 				return sandbox.DirSpec{}, nil, parseErr
 			}
-			return sandbox.DirSpec{}, nil, sandbox.NewUsageError("invalid directory %q: %s", rawDir, parseErr)
+			return sandbox.DirSpec{}, nil, yoerrors.NewUsageError("invalid directory %q: %s", rawDir, parseErr)
 		}
 		auxDirSpecs = append(auxDirSpecs, *parsed)
 	}
@@ -446,7 +447,7 @@ func validateIsolationOSCombo(isolation runtime.IsolationMode, targetOS string) 
 		return nil
 	}
 	if help != "" {
-		return sandbox.NewUsageError("%s\n%s", reason, help)
+		return yoerrors.NewUsageError("%s\n%s", reason, help)
 	}
-	return sandbox.NewUsageError("%s", reason)
+	return yoerrors.NewUsageError("%s", reason)
 }

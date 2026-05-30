@@ -7,9 +7,9 @@ package yoloai
 import (
 	"context"
 
-	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/patch"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/yoerrors"
 )
 
 // Workdir is a sub-handle for a sandbox's primary working directory — the
@@ -54,7 +54,7 @@ func (w *Workdir) Diff(ctx context.Context, opts DiffOptions) (string, error) {
 
 	if opts.Ref != "" {
 		if overlay {
-			return "", sandbox.NewPlatformError("ref-based diff is not supported for :overlay sandboxes (commits are not individually addressable from the host)")
+			return "", yoerrors.NewPlatformError("ref-based diff is not supported for :overlay sandboxes (commits are not individually addressable from the host)")
 		}
 		return patch.GenerateCommitDiff(patch.CommitDiffOptions{
 			Name:   w.s.name,
@@ -116,7 +116,7 @@ type ExportResult = patch.ExportResult
 // specific Refs from an overlay workdir is likewise refused with a *UsageError.
 func (w *Workdir) Export(ctx context.Context, opts ExportOptions) (*ExportResult, error) {
 	if opts.Dir == "" {
-		return nil, sandbox.NewUsageError("export requires a destination directory: set ExportOptions.Dir")
+		return nil, yoerrors.NewUsageError("export requires a destination directory: set ExportOptions.Dir")
 	}
 	return patch.Export(ctx, w.s.c.layout, w.s.c.rt, w.s.name, patch.ExportOptions{
 		Dir:                opts.Dir,
@@ -197,7 +197,7 @@ type ApplyOptions struct {
 // ApplyModeNoCommit lands the overlay's upper-layer changes (see ApplyOverlay).
 func (w *Workdir) Apply(ctx context.Context, opts ApplyOptions) (*ApplyResult, error) {
 	if opts.Mode != ApplyModeCommits && opts.Mode != ApplyModeNoCommit {
-		return nil, sandbox.NewUsageError("apply mode is required: set ApplyOptions.Mode to yoloai.ApplyModeCommits or yoloai.ApplyModeNoCommit")
+		return nil, yoerrors.NewUsageError("apply mode is required: set ApplyOptions.Mode to yoloai.ApplyModeCommits or yoloai.ApplyModeNoCommit")
 	}
 
 	meta, err := store.LoadMeta(w.s.c.layout.SandboxDir(w.s.name))
@@ -208,7 +208,7 @@ func (w *Workdir) Apply(ctx context.Context, opts ApplyOptions) (*ApplyResult, e
 
 	if opts.Mode == ApplyModeCommits {
 		if overlay {
-			return nil, sandbox.NewUsageError("cannot replay a commit series for an :overlay sandbox — overlay changes have no commit history; apply with ApplyModeNoCommit")
+			return nil, yoerrors.NewUsageError("cannot replay a commit series for an :overlay sandbox — overlay changes have no commit history; apply with ApplyModeNoCommit")
 		}
 		return patch.ApplySeries(ctx, w.s.c.layout, w.s.c.rt, w.s.name, patch.ApplySeriesOptions{
 			Refs:               opts.Refs,

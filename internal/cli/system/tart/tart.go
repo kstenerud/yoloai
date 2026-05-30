@@ -18,7 +18,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/config"
 	rt "github.com/kstenerud/yoloai/internal/runtime"
 	tartrt "github.com/kstenerud/yoloai/internal/runtime/tart"
-	"github.com/kstenerud/yoloai/internal/sandbox"
+	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
 
@@ -93,7 +93,7 @@ func requireTartBackend(cmd *cobra.Command, _ []string) error {
 	}
 
 	if runtime.GOOS != "darwin" {
-		return sandbox.NewUsageError("yoloai system tart commands are only available on macOS")
+		return yoerrors.NewUsageError("yoloai system tart commands are only available on macOS")
 	}
 
 	// Inline of cli's checkBackend: spin up a tart runtime, close it,
@@ -102,7 +102,7 @@ func requireTartBackend(cmd *cobra.Command, _ []string) error {
 	// only 5 lines so inline it.
 	probeRT, err := pkgNewRuntime(cmd.Context(), "tart")
 	if err != nil {
-		return sandbox.NewUsageError("Tart backend not available: %s\n\nInstall Tart: brew install cirruslabs/cli/tart", err.Error())
+		return yoerrors.NewUsageError("Tart backend not available: %s\n\nInstall Tart: brew install cirruslabs/cli/tart", err.Error())
 	}
 	_ = probeRT.Close()
 	return nil
@@ -154,7 +154,7 @@ func runSystemTartAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("check base: %w", err)
 	}
 	if exists {
-		return sandbox.NewUsageError("Runtime base '%s' already exists.\n\nUse 'yoloai system tart list' to see all bases.", baseName)
+		return yoerrors.NewUsageError("Runtime base '%s' already exists.\n\nUse 'yoloai system tart list' to see all bases.", baseName)
 	}
 
 	fmt.Fprintf(cmd.OutOrStdout(), "\nCreating runtime base: %s\n\n", baseName) //nolint:errcheck
@@ -340,7 +340,7 @@ func runSystemTartRemove(cmd *cobra.Command, args []string, opts *runtimeRemoveO
 		return fmt.Errorf("check base: %w", err)
 	}
 	if !exists {
-		return sandbox.NewUsageError("Runtime base '%s' not found.\n\nUse 'yoloai system tart list' to see available bases.", baseName)
+		return yoerrors.NewUsageError("Runtime base '%s' not found.\n\nUse 'yoloai system tart list' to see available bases.", baseName)
 	}
 
 	size, err := runtimeBaseSize(ctx, tartRuntime, baseName)

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -188,7 +189,7 @@ func TestDirArg_ResolvedMountPath(t *testing.T) {
 func TestParseAuxDirArg_RejectsCopy(t *testing.T) {
 	_, err := ParseAuxDirArg("/tmp/aux:copy", "/home/user", nil)
 	require.Error(t, err)
-	var usage *UsageError
+	var usage *yoerrors.UsageError
 	require.ErrorAs(t, err, &usage)
 	assert.Contains(t, err.Error(), "aux directories cannot use :copy")
 	assert.Contains(t, err.Error(), "workdir")
@@ -198,7 +199,7 @@ func TestParseAuxDirArg_RejectsCopy(t *testing.T) {
 func TestParseAuxDirArg_RejectsOverlay(t *testing.T) {
 	_, err := ParseAuxDirArg("/tmp/aux:overlay", "/home/user", nil)
 	require.Error(t, err)
-	var usage *UsageError
+	var usage *yoerrors.UsageError
 	require.ErrorAs(t, err, &usage)
 	assert.Contains(t, err.Error(), "aux directories cannot use :overlay")
 }

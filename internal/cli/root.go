@@ -17,7 +17,6 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/extension"
 	"github.com/kstenerud/yoloai/internal/fileutil"
-	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
@@ -86,7 +85,7 @@ func printRunError(runErr error, rootCmd *cobra.Command, activeCmd *cobra.Comman
 	// user just saw the underlying error without the recovery hint that
 	// *DiskSpaceError carries. Append the same hint here so the message
 	// is actionable regardless of whether the runtime layer wrapped.
-	if _, alreadyWrapped := errors.AsType[*sandbox.DiskSpaceError](runErr); !alreadyWrapped && sandbox.IsDiskSpaceError(runErr) {
+	if _, alreadyWrapped := errors.AsType[*yoerrors.DiskSpaceError](runErr); !alreadyWrapped && yoerrors.IsDiskSpaceError(runErr) {
 		fmt.Fprintln(os.Stderr, "Free space and retry:")                                                       //nolint:errcheck
 		fmt.Fprintln(os.Stderr, "  yoloai system disk             # show what yoloai is using")                //nolint:errcheck
 		fmt.Fprintln(os.Stderr, "  yoloai system prune            # reclaim cache, no rebuild")                //nolint:errcheck
@@ -105,7 +104,7 @@ func initBugReport(cmd *cobra.Command, version, commit, date string) error {
 		return nil
 	}
 	if brType != "safe" && brType != "unsafe" {
-		return sandbox.NewUsageError("--bugreport: must be safe or unsafe")
+		return yoerrors.NewUsageError("--bugreport: must be safe or unsafe")
 	}
 	name, err := bugreport.Filename(time.Now().UTC())
 	if err != nil {
@@ -166,11 +165,11 @@ func errorExitCode(err error) int {
 		return exitErr.Code
 	}
 
-	if coder, ok := errors.AsType[sandbox.ExitCoder](err); ok {
+	if coder, ok := errors.AsType[yoerrors.ExitCoder](err); ok {
 		return coder.ExitCode()
 	}
 
-	if sandbox.IsDiskSpaceError(err) {
+	if yoerrors.IsDiskSpaceError(err) {
 		return yoerrors.ExitDiskSpace
 	}
 

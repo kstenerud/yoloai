@@ -5,8 +5,8 @@ package cliutil
 import (
 	"os"
 
-	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
 
@@ -32,5 +32,5 @@ func ResolveName(_ *cobra.Command, args []string) (string, []string, error) {
 		return envName, nil, nil
 	}
 
-	return "", nil, sandbox.NewUsageError("sandbox name required (or set YOLOAI_SANDBOX)")
+	return "", nil, yoerrors.NewUsageError("sandbox name required (or set YOLOAI_SANDBOX)")
 }

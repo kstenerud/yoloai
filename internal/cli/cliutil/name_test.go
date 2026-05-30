@@ -6,7 +6,7 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
-	"github.com/kstenerud/yoloai/internal/sandbox"
+	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -40,7 +40,7 @@ func TestResolveName_NeitherSet(t *testing.T) {
 	_, _, err := cliutil.ResolveName(nil, nil)
 	require.Error(t, err)
 
-	var usageErr *sandbox.UsageError
+	var usageErr *yoerrors.UsageError
 	assert.True(t, errors.As(err, &usageErr))
 	assert.Contains(t, err.Error(), "YOLOAI_SANDBOX")
 }

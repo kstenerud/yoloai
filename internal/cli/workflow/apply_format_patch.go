@@ -17,6 +17,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/sandbox/patch"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/internal/workspace"
+	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
 
@@ -66,7 +67,7 @@ func runApplyFormatPatch(cmd *cobra.Command, name string, paths []string, meta *
 	// No commits, only uncommitted changes (user opted in) — use the net-diff (no-commit) flow.
 	if len(commits) == 0 && hasUncommitted && includeUncommitted {
 		if withTags {
-			return sandbox.NewUsageError("--tags requires commits — cannot transfer tags with uncommitted-only changes")
+			return yoerrors.NewUsageError("--tags requires commits — cannot transfer tags with uncommitted-only changes")
 		}
 		return applyNoCommit(cmd, name, paths, meta, yes, dryRun, includeUncommitted)
 	}

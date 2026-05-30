@@ -12,7 +12,7 @@ import (
 	"testing"
 
 	"github.com/kstenerud/yoloai/internal/config"
-	"github.com/kstenerud/yoloai/internal/sandbox"
+	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -53,7 +53,7 @@ func TestProfiles_Create_AlreadyExists_UsageError(t *testing.T) {
 
 	err := c.Profiles().Create(context.Background(), "demo")
 	require.Error(t, err)
-	var usage *sandbox.UsageError
+	var usage *yoerrors.UsageError
 	require.ErrorAs(t, err, &usage)
 	assert.Contains(t, err.Error(), "already exists")
 }
@@ -63,7 +63,7 @@ func TestProfiles_Create_InvalidName_UsageError(t *testing.T) {
 	// Slashes are rejected by config.ValidateProfileName.
 	err := c.Profiles().Create(context.Background(), "bad/name")
 	require.Error(t, err)
-	var usage *sandbox.UsageError
+	var usage *yoerrors.UsageError
 	assert.ErrorAs(t, err, &usage)
 }
 
@@ -133,7 +133,7 @@ func TestProfiles_Info_Nonexistent_UsageError(t *testing.T) {
 	c := newTestClient(t)
 	_, err := c.Profiles().Info(context.Background(), "ghost")
 	require.Error(t, err)
-	var usage *sandbox.UsageError
+	var usage *yoerrors.UsageError
 	require.ErrorAs(t, err, &usage)
 	assert.Contains(t, err.Error(), "does not exist")
 }
@@ -254,7 +254,7 @@ func TestProfiles_Delete_Nonexistent_UsageError(t *testing.T) {
 	c := newTestClient(t)
 	_, err := c.Profiles().Delete(context.Background(), "ghost")
 	require.Error(t, err)
-	var usage *sandbox.UsageError
+	var usage *yoerrors.UsageError
 	require.ErrorAs(t, err, &usage)
 	assert.Contains(t, err.Error(), "does not exist")
 }
@@ -263,7 +263,7 @@ func TestProfiles_Delete_InvalidName_UsageError(t *testing.T) {
 	c := newTestClient(t)
 	_, err := c.Profiles().Delete(context.Background(), "bad/name")
 	require.Error(t, err)
-	var usage *sandbox.UsageError
+	var usage *yoerrors.UsageError
 	assert.ErrorAs(t, err, &usage)
 }
 

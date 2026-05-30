@@ -8,8 +8,8 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
-	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
 
@@ -121,7 +121,7 @@ func runSandboxSubcommand(cmd *cobra.Command, subcmd, name string, rest []string
 	case "terminal-snapshot":
 		return runTerminalSnapshot(cmd, name, rest)
 	default:
-		return sandbox.NewUsageError("unknown subcommand %q: valid subcommands are info, log, exec, prompt, allow, allowed, deny, bugreport, vscode, unlock, terminal-snapshot", subcmd)
+		return yoerrors.NewUsageError("unknown subcommand %q: valid subcommands are info, log, exec, prompt, allow, allowed, deny, bugreport, vscode, unlock, terminal-snapshot", subcmd)
 	}
 }
 
@@ -131,7 +131,7 @@ func resolveSandboxDispatchArgs(args []string) (name, subcmd string, rest []stri
 		// args[0] is a subcommand — name must come from YOLOAI_SANDBOX
 		envName := os.Getenv(cliutil.EnvSandboxName) //nolint:forbidigo // §12: documented YOLOAI_SANDBOX feature; CLI boundary
 		if envName == "" {
-			return "", "", nil, sandbox.NewUsageError("sandbox name required before subcommand (or set YOLOAI_SANDBOX)")
+			return "", "", nil, yoerrors.NewUsageError("sandbox name required before subcommand (or set YOLOAI_SANDBOX)")
 		}
 		if err := store.ValidateName(envName); err != nil {
 			return "", "", nil, err
@@ -143,7 +143,7 @@ func resolveSandboxDispatchArgs(args []string) (name, subcmd string, rest []stri
 		return "", "", nil, err
 	}
 	if len(args) < 2 {
-		return "", "", nil, sandbox.NewUsageError("subcommand required: info, log, exec, prompt, allow, allowed, deny, bugreport, vscode, unlock, terminal-snapshot")
+		return "", "", nil, yoerrors.NewUsageError("subcommand required: info, log, exec, prompt, allow, allowed, deny, bugreport, vscode, unlock, terminal-snapshot")
 	}
 	return args[0], args[1], args[2:], nil
 }

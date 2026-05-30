@@ -15,7 +15,7 @@ package sandbox
 //   - 4 tmux-conf modes (default / default+host / host / none) with
 //     side-effects that differ by mode
 //   - per-field validation (required-when-multiple-available,
-//     unknown-name, invalid-mode) producing *UsageError vs other errors
+//     unknown-name, invalid-mode) producing *yoerrors.UsageError vs other errors
 //   - SetupStatus inspection (3 tmux classifications × 3 platforms)
 //
 // Helpers extracted (`setupTestEngine`, `setLinuxPlatform`, etc.) are
@@ -39,6 +39,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kstenerud/yoloai/internal/config"
+	"github.com/kstenerud/yoloai/yoerrors"
 
 	// availableBackends iterates runtime.Descriptors(); register every
 	// backend the platform tests assert on (docker, podman, tart, seatbelt).
@@ -231,8 +232,8 @@ func TestApplySetup_MissingTmuxConf_Error(t *testing.T) {
 
 	err := mgr.ApplySetup(context.Background(), SetupOptions{Backend: "docker", Agent: "claude"})
 	require.Error(t, err)
-	var usageErr *UsageError
-	assert.ErrorAs(t, err, &usageErr, "missing required field should produce *UsageError")
+	var usageErr *yoerrors.UsageError
+	assert.ErrorAs(t, err, &usageErr, "missing required field should produce *yoerrors.UsageError")
 
 	state, _ := config.LoadState(layout)
 	assert.False(t, state.SetupComplete, "Setup must not mark complete on validation failure")
@@ -262,7 +263,7 @@ func TestApplySetup_BackendRequired_WhenMultipleAvailable(t *testing.T) {
 
 	err := mgr.ApplySetup(context.Background(), SetupOptions{TmuxConf: "default", Agent: "claude"})
 	require.Error(t, err)
-	var usageErr *UsageError
+	var usageErr *yoerrors.UsageError
 	assert.ErrorAs(t, err, &usageErr)
 	assert.Contains(t, err.Error(), "Backend is required")
 }
@@ -282,7 +283,7 @@ func TestApplySetup_AgentRequired_WhenMultipleAvailable(t *testing.T) {
 
 	err := mgr.ApplySetup(context.Background(), SetupOptions{TmuxConf: "default", Backend: "docker"})
 	require.Error(t, err)
-	var usageErr *UsageError
+	var usageErr *yoerrors.UsageError
 	assert.ErrorAs(t, err, &usageErr)
 	assert.Contains(t, err.Error(), "Agent is required")
 }

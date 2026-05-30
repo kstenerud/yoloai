@@ -11,6 +11,7 @@ import (
 
 	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/sandbox"
+	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
 
@@ -54,7 +55,7 @@ func runStart(cmd *cobra.Command, args []string, opts *startOpts) error {
 	defer cliutil.OpenCLIJSONLSink(name, cmd)()
 
 	if cliutil.JSONEnabled(cmd) && opts.attach {
-		return sandbox.NewUsageError("--json and --attach are incompatible")
+		return yoerrors.NewUsageError("--json and --attach are incompatible")
 	}
 
 	if opts.attach {

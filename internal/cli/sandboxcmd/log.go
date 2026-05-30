@@ -16,8 +16,8 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
-	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
 
@@ -152,7 +152,7 @@ func parseLogLevel(s string) (int, error) {
 	case "debug", "info", "warn", "warning", "error":
 		return levelOrder(s), nil
 	default:
-		return 0, sandbox.NewUsageError("unknown level %q: must be debug, info, warn, or error", s)
+		return 0, yoerrors.NewUsageError("unknown level %q: must be debug, info, warn, or error", s)
 	}
 }
 
@@ -170,7 +170,7 @@ func parseSince(s string) (time.Time, error) {
 				t.Hour(), t.Minute(), t.Second(), 0, time.Local).UTC(), nil //nolint:forbidigo // §12: same local-tz interpretation of user input, normalized to UTC
 		}
 	}
-	return time.Time{}, sandbox.NewUsageError("unrecognized format: use a duration (e.g. 5m) or local time (e.g. 14:20:00)")
+	return time.Time{}, yoerrors.NewUsageError("unrecognized format: use a duration (e.g. 5m) or local time (e.g. 14:20:00)")
 }
 
 // filterSources returns active sources based on the --source flag.

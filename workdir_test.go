@@ -12,8 +12,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kstenerud/yoloai/internal/config"
-	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/yoerrors"
 )
 
 // newSandboxHandle builds a validated *Sandbox over a temp layout with a
@@ -40,7 +40,7 @@ func TestWorkdir_Apply_RequiresMode(t *testing.T) {
 	})
 	_, err := sb.Workdir().Apply(context.Background(), ApplyOptions{})
 	require.Error(t, err)
-	var ue *sandbox.UsageError
+	var ue *yoerrors.UsageError
 	require.ErrorAs(t, err, &ue, "unset apply mode must be a *UsageError")
 }
 
@@ -55,7 +55,7 @@ func TestWorkdir_Apply_OverlayRefusesCommits(t *testing.T) {
 	})
 	_, err := sb.Workdir().Apply(context.Background(), ApplyOptions{Mode: ApplyModeCommits})
 	require.Error(t, err)
-	var ue *sandbox.UsageError
+	var ue *yoerrors.UsageError
 	require.ErrorAs(t, err, &ue, "ApplyModeCommits on an overlay workdir must be a *UsageError")
 }
 

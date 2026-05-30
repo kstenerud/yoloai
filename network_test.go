@@ -12,6 +12,7 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -229,7 +230,7 @@ func TestNetwork_Allow_NoDomains_UsageError(t *testing.T) {
 
 	_, err := mustSandbox(t, c, "box").Network().Allow(context.Background())
 	require.Error(t, err)
-	var usage *sandbox.UsageError
+	var usage *yoerrors.UsageError
 	assert.ErrorAs(t, err, &usage)
 }
 
@@ -239,7 +240,7 @@ func TestNetwork_Allow_NoneNetworkMode_UsageError(t *testing.T) {
 
 	_, err := mustSandbox(t, c, "box").Network().Allow(context.Background(), "a.example")
 	require.Error(t, err)
-	var usage *sandbox.UsageError
+	var usage *yoerrors.UsageError
 	require.ErrorAs(t, err, &usage)
 	assert.Contains(t, err.Error(), "--network-none")
 }
@@ -258,7 +259,7 @@ func TestNetwork_Allow_NotIsolated_UsageError(t *testing.T) {
 
 	_, err := mustSandbox(t, c, "box").Network().Allow(context.Background(), "a.example")
 	require.Error(t, err)
-	var usage *sandbox.UsageError
+	var usage *yoerrors.UsageError
 	require.ErrorAs(t, err, &usage)
 	assert.Contains(t, err.Error(), "not using network isolation")
 }
@@ -296,7 +297,7 @@ func TestNetwork_Deny_DomainNotInList_UsageError(t *testing.T) {
 
 	_, err := mustSandbox(t, c, "box").Network().Deny(context.Background(), "absent.example")
 	require.Error(t, err)
-	var usage *sandbox.UsageError
+	var usage *yoerrors.UsageError
 	require.ErrorAs(t, err, &usage)
 	assert.Contains(t, err.Error(), "not in the allowlist")
 }
@@ -323,7 +324,7 @@ func TestNetwork_Deny_NoDomains_UsageError(t *testing.T) {
 
 	_, err := mustSandbox(t, c, "box").Network().Deny(context.Background())
 	require.Error(t, err)
-	var usage *sandbox.UsageError
+	var usage *yoerrors.UsageError
 	assert.ErrorAs(t, err, &usage)
 }
 

@@ -16,6 +16,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
 
@@ -70,7 +71,7 @@ func runDestroyCmd(cmd *cobra.Command, args []string) error {
 	yes := cliutil.EffectiveYes(cmd)
 
 	if all && len(args) > 0 {
-		return sandbox.NewUsageError("cannot specify sandbox names with --all")
+		return yoerrors.NewUsageError("cannot specify sandbox names with --all")
 	}
 
 	// Resolve backend: from first named sandbox, or config default for --all/wildcards
@@ -145,7 +146,7 @@ func resolveDestroyAll(cmd *cobra.Command, ctx context.Context, c *yoloai.Client
 func resolveDestroyFromEnv() ([]string, error) {
 	envName := os.Getenv(cliutil.EnvSandboxName) //nolint:forbidigo // §12: documented YOLOAI_SANDBOX feature; CLI boundary
 	if envName == "" {
-		return nil, sandbox.NewUsageError("at least one sandbox name is required (or use --all or set YOLOAI_SANDBOX)")
+		return nil, yoerrors.NewUsageError("at least one sandbox name is required (or use --all or set YOLOAI_SANDBOX)")
 	}
 	if err := store.ValidateName(envName); err != nil {
 		return nil, err
@@ -199,7 +200,7 @@ func confirmDestroy(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, n
 	}
 	// Non-TTY: cannot prompt — return a typed error so CI scripts can detect it.
 	if fi, statErr := os.Stdin.Stat(); statErr == nil && (fi.Mode()&os.ModeCharDevice) == 0 {
-		return false, sandbox.NewActiveWorkError(
+		return false, yoerrors.NewActiveWorkError(
 			"%d sandbox(es) have active work; use --yes to force or run 'yoloai apply' first",
 			len(warnings),
 		)

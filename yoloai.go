@@ -64,6 +64,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/sandbox/create"
 	"github.com/kstenerud/yoloai/internal/sandbox/patch"
 	"github.com/kstenerud/yoloai/internal/sandbox/state"
+	"github.com/kstenerud/yoloai/yoerrors"
 )
 
 // Sentinel errors returned by Client methods. Re-exported from
@@ -161,7 +162,7 @@ func NewWithOptions(ctx context.Context, opts Options) (*Client, error) {
 		return nil, fmt.Errorf("yoloai: Options.DataDir is required (no implicit $HOME fallback; see development-principles.md §12)")
 	}
 	if opts.Backend == "" {
-		return nil, sandbox.NewUsageError("yoloai: Options.Backend is required — empty is not a valid backend (F4). Resolve it at the boundary before constructing the Client, e.g. yoloai.SelectBackend(ctx, preferred, isolation, os). See development-principles.md §4.")
+		return nil, yoerrors.NewUsageError("yoloai: Options.Backend is required — empty is not a valid backend (F4). Resolve it at the boundary before constructing the Client, e.g. yoloai.SelectBackend(ctx, preferred, isolation, os). See development-principles.md §4.")
 	}
 
 	var layout config.Layout

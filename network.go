@@ -9,6 +9,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/yoerrors"
 )
 
 // DomainSource identifies where an allowed domain came from. Used by
@@ -88,7 +89,7 @@ func (n *Network) Allowed(_ context.Context) ([]AllowedDomain, error) {
 // mode (only isolated mode has an enforceable allowlist).
 func (n *Network) Allow(ctx context.Context, domains ...string) (*AllowResult, error) {
 	if len(domains) == 0 {
-		return nil, sandbox.NewUsageError("at least one domain is required")
+		return nil, yoerrors.NewUsageError("at least one domain is required")
 	}
 
 	sandboxDir, meta, err := n.requireIsolated()
@@ -134,7 +135,7 @@ func (n *Network) Allow(ctx context.Context, domains ...string) (*AllowResult, e
 // remaining domains. DenyResult.Live signals whether that succeeded.
 func (n *Network) Deny(ctx context.Context, domains ...string) (*DenyResult, error) {
 	if len(domains) == 0 {
-		return nil, sandbox.NewUsageError("at least one domain is required")
+		return nil, yoerrors.NewUsageError("at least one domain is required")
 	}
 
 	sandboxDir, meta, err := n.requireIsolated()
@@ -148,7 +149,7 @@ func (n *Network) Deny(ctx context.Context, domains ...string) (*DenyResult, err
 	}
 	for _, d := range domains {
 		if !existing[d] {
-			return nil, sandbox.NewUsageError("domain %q is not in the allowlist", d)
+			return nil, yoerrors.NewUsageError("domain %q is not in the allowlist", d)
 		}
 	}
 
@@ -237,9 +238,9 @@ func (n *Network) requireIsolated() (string, *store.Meta, error) {
 	case "isolated":
 		return sandboxDir, meta, nil
 	case "none":
-		return "", nil, sandbox.NewUsageError("sandbox %q uses --network-none; cannot modify network access", n.s.name)
+		return "", nil, yoerrors.NewUsageError("sandbox %q uses --network-none; cannot modify network access", n.s.name)
 	default:
-		return "", nil, sandbox.NewUsageError("sandbox %q is not using network isolation", n.s.name)
+		return "", nil, yoerrors.NewUsageError("sandbox %q is not using network isolation", n.s.name)
 	}
 }
 

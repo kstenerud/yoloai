@@ -14,6 +14,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/mcpsrv"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox"
+	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
 
@@ -122,10 +123,10 @@ func runMCPProxy(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(positional) < 1 {
-		return sandbox.NewUsageError("sandbox name is required")
+		return yoerrors.NewUsageError("sandbox name is required")
 	}
 	if len(innerCmd) == 0 {
-		return sandbox.NewUsageError("inner command required after '--'")
+		return yoerrors.NewUsageError("inner command required after '--'")
 	}
 
 	name := positional[0]

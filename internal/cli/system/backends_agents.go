@@ -13,7 +13,7 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/sandbox"
+	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
 
@@ -128,7 +128,7 @@ func listBackends(cmd *cobra.Command) error {
 func showBackendDetail(cmd *cobra.Command, name string) error {
 	desc, ok := runtime.Descriptor(runtime.BackendName(name))
 	if !ok {
-		return sandbox.NewUsageError("unknown backend %q (valid: %s)", name, strings.Join(backendNames(), ", "))
+		return yoerrors.NewUsageError("unknown backend %q (valid: %s)", name, strings.Join(backendNames(), ", "))
 	}
 	tradeoffs := backendTradeoffs[name]
 
@@ -241,7 +241,7 @@ func listAgents(cmd *cobra.Command) error {
 func showAgentDetail(cmd *cobra.Command, name string) error {
 	def := agent.GetAgent(name)
 	if def == nil {
-		return sandbox.NewUsageError("unknown agent %q (valid: %s)", name, strings.Join(agent.AllAgentNames(), ", "))
+		return yoerrors.NewUsageError("unknown agent %q (valid: %s)", name, strings.Join(agent.AllAgentNames(), ", "))
 	}
 
 	out := cmd.OutOrStdout()

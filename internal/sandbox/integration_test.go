@@ -17,6 +17,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/internal/testutil"
 	"github.com/kstenerud/yoloai/internal/workspace"
+	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -232,7 +233,7 @@ func TestIntegration_AuxDirCopy_RejectedByLibrary(t *testing.T) {
 		Version: "test",
 	})
 	require.Error(t, err)
-	var usage *sandbox.UsageError
+	var usage *yoerrors.UsageError
 	require.ErrorAs(t, err, &usage)
 	assert.Contains(t, err.Error(), "aux directories cannot use :copy")
 	assert.Contains(t, err.Error(), ":rw")

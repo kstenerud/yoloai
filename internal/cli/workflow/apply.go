@@ -13,6 +13,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/internal/workspace"
+	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
 
@@ -92,7 +93,7 @@ func runApplyCmd(cmd *cobra.Command, args []string) error {
 
 	// Validate mutually exclusive options
 	if len(refs) > 0 && noCommit {
-		return sandbox.NewUsageError("--no-commit cannot be used with commit refs — they are mutually exclusive")
+		return yoerrors.NewUsageError("--no-commit cannot be used with commit refs — they are mutually exclusive")
 	}
 	// Load metadata for target directory and mode validation
 	meta, err := store.LoadMeta(cliutil.Layout().SandboxDir(name))
@@ -100,7 +101,7 @@ func runApplyCmd(cmd *cobra.Command, args []string) error {
 		return cliutil.SandboxErrorHint(name, err)
 	}
 	if meta.Workdir.Mode == "rw" {
-		return sandbox.NewUsageError("apply is not needed for :rw directories — changes are already live")
+		return yoerrors.NewUsageError("apply is not needed for :rw directories — changes are already live")
 	}
 
 	// --patches: export patch files instead of applying (handles all mount modes

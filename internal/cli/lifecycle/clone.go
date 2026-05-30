@@ -13,6 +13,7 @@ import (
 
 	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/sandbox"
+	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
 
@@ -25,7 +26,7 @@ func runClone(cmd *cobra.Command, args []string) error {
 	promptFile, _ := cmd.Flags().GetString("prompt-file")
 
 	if cliutil.JSONEnabled(cmd) && attach {
-		return sandbox.NewUsageError("--json and --attach are incompatible")
+		return yoerrors.NewUsageError("--json and --attach are incompatible")
 	}
 
 	// Courtesy free-space check before duplicating the workdir copy +

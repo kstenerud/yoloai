@@ -14,6 +14,7 @@ import (
 	"github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/cli/system/tart"
 	"github.com/kstenerud/yoloai/internal/sandbox"
+	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
 
@@ -50,7 +51,7 @@ func newSystemBuildCmd() *cobra.Command {
 			backendFlag, _ := cmd.Flags().GetString("backend")
 
 			if all && backendFlag != "" {
-				return sandbox.NewUsageError("--all and --backend are mutually exclusive")
+				return yoerrors.NewUsageError("--all and --backend are mutually exclusive")
 			}
 
 			if all {
@@ -110,7 +111,7 @@ func runSystemBuild(cmd *cobra.Command, args []string, backend runtime.BackendNa
 // if --secret was used without a profile.
 func prepareBuildSecrets(secretFlags []string, hasProfile bool) ([]string, error) {
 	if !hasProfile && len(secretFlags) > 0 {
-		return nil, sandbox.NewUsageError("--secret is only supported with profile builds")
+		return nil, yoerrors.NewUsageError("--secret is only supported with profile builds")
 	}
 	if !hasProfile {
 		return nil, nil

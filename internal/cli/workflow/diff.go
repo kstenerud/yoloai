@@ -16,6 +16,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/patch"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
 
@@ -97,7 +98,7 @@ func runDiffCmd(cmd *cobra.Command, args []string) error {
 
 	// Ref-based diff not supported for overlay
 	if ref != "" && overlay {
-		return sandbox.NewPlatformError("ref-based diff is not supported for :overlay sandboxes (commits are not individually addressable from the host)")
+		return yoerrors.NewPlatformError("ref-based diff is not supported for :overlay sandboxes (commits are not individually addressable from the host)")
 	}
 
 	// If ref is set, show that specific commit/range
@@ -197,7 +198,7 @@ func diffOverlay(cmd *cobra.Command, name string, stat, nameOnly bool) error {
 // diffLogOverlay lists commits for overlay sandboxes by executing git log inside the container.
 func diffLogOverlay(cmd *cobra.Command, name string, stat bool) error {
 	if stat {
-		return sandbox.NewPlatformError("--log --stat is not supported for :overlay sandboxes")
+		return yoerrors.NewPlatformError("--log --stat is not supported for :overlay sandboxes")
 	}
 
 	backend := cliutil.ResolveBackendForSandbox(name)

@@ -15,8 +15,8 @@ import (
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
 	"github.com/kstenerud/yoloai/internal/fileutil"
-	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
 
@@ -59,7 +59,7 @@ func filesDispatch(cmd *cobra.Command, args []string) error {
 		// args[0] is a subcommand — name must come from YOLOAI_SANDBOX
 		envName := os.Getenv(cliutil.EnvSandboxName) //nolint:forbidigo // §12: documented YOLOAI_SANDBOX feature; CLI boundary
 		if envName == "" {
-			return sandbox.NewUsageError("sandbox name required before subcommand (or set YOLOAI_SANDBOX)")
+			return yoerrors.NewUsageError("sandbox name required before subcommand (or set YOLOAI_SANDBOX)")
 		}
 		if err := store.ValidateName(envName); err != nil {
 			return err
@@ -73,7 +73,7 @@ func filesDispatch(cmd *cobra.Command, args []string) error {
 		}
 		name = args[0]
 		if len(args) < 2 {
-			return sandbox.NewUsageError("subcommand required: put, get, ls, rm, path")
+			return yoerrors.NewUsageError("subcommand required: put, get, ls, rm, path")
 		}
 		subcmd = args[1]
 		rest = args[2:]
@@ -91,13 +91,13 @@ func filesDispatch(cmd *cobra.Command, args []string) error {
 	case "path":
 		return runFilesPath(cmd, name)
 	default:
-		return sandbox.NewUsageError("unknown subcommand %q: valid subcommands are put, get, ls, rm, path", subcmd)
+		return yoerrors.NewUsageError("unknown subcommand %q: valid subcommands are put, get, ls, rm, path", subcmd)
 	}
 }
 
 func runFilesPut(cmd *cobra.Command, name string, args []string) error {
 	if len(args) == 0 {
-		return sandbox.NewUsageError("at least one file is required")
+		return yoerrors.NewUsageError("at least one file is required")
 	}
 
 	sandboxDir := cliutil.Layout().SandboxDir(name)
@@ -145,7 +145,7 @@ func runFilesPut(cmd *cobra.Command, name string, args []string) error {
 
 func runFilesGet(cmd *cobra.Command, name string, args []string) error {
 	if len(args) == 0 {
-		return sandbox.NewUsageError("file name is required")
+		return yoerrors.NewUsageError("file name is required")
 	}
 
 	sandboxDir := cliutil.Layout().SandboxDir(name)
@@ -228,7 +228,7 @@ func runFilesLs(cmd *cobra.Command, name string, args []string) error {
 
 func runFilesRm(cmd *cobra.Command, name string, args []string) error {
 	if len(args) == 0 {
-		return sandbox.NewUsageError("glob pattern is required")
+		return yoerrors.NewUsageError("glob pattern is required")
 	}
 
 	sandboxDir := cliutil.Layout().SandboxDir(name)
