@@ -224,14 +224,9 @@ var f1KnownLeaks = map[string]struct{}{
 	"github.com/kstenerud/yoloai/internal/config.MergedConfig": {},
 	// internal/sandbox Options + Info types. CLOSED in F1+F3+F2: CreateOptions
 	// (Create takes public yoloai.CreateOptions), StartOptions + Info
-	// (re-exported aliases), ResetOptions (hand-written public type). Remaining
-	// CloneOptions (Clone not yet re-rooted) and TmuxConfigClass.
-	"github.com/kstenerud/yoloai/internal/sandbox.CloneOptions":    {},
+	// (re-exported aliases), ResetOptions (hand-written public type), CloneOptions
+	// (A3: hand-written public yoloai.CloneOptions). Remaining: TmuxConfigClass.
 	"github.com/kstenerud/yoloai/internal/sandbox.TmuxConfigClass": {},
-	// internal/sandbox/patch types. ApplyResult CLOSED (Step 4a: re-exported as
-	// yoloai.ApplyResult; Workdir().Apply returns it). CommitInfoWithStat
-	// remains until the commits/baseline re-rooting (Step 5).
-	"github.com/kstenerud/yoloai/internal/sandbox/patch.CommitInfoWithStat": {},
 }
 
 // internalTypeKey returns a stable identifier for a type IF it's a Named

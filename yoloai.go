@@ -62,7 +62,6 @@ import (
 	_ "github.com/kstenerud/yoloai/internal/runtime/tart"     // register backend
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/create"
-	"github.com/kstenerud/yoloai/internal/sandbox/patch"
 	"github.com/kstenerud/yoloai/internal/sandbox/state"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
@@ -322,8 +321,8 @@ func (c *Client) List(ctx context.Context) ([]*Info, error) {
 // sandbox dir under DataDir/sandboxes/. Embedders still construct the Client
 // with a backend because most clone workflows start the destination right
 // after; the wasted connection for pure --no-start clones is acceptable.
-func (c *Client) Clone(ctx context.Context, opts sandbox.CloneOptions) error {
-	return c.manager.Clone(ctx, opts)
+func (c *Client) Clone(ctx context.Context, opts CloneOptions) error {
+	return c.manager.Clone(ctx, opts.toInternal())
 }
 
 // Create provisions a new sandbox from CreateOptions and (unless
@@ -341,33 +340,6 @@ func (c *Client) Create(ctx context.Context, opts CreateOptions) (string, error)
 		return "", err
 	}
 	return create.Run(ctx, c.deps(), internal)
-}
-
-// ListCommits returns the sandbox's commit history beyond baseline (one
-// entry per commit since the work was started). Used by `yoloai diff --log`.
-func (c *Client) ListCommits(ctx context.Context, name string) ([]patch.CommitInfo, error) {
-	return patch.ListCommitsBeyondBaseline(ctx, c.layout, c.rt, name)
-}
-
-// ListCommitsOverlay is the overlay-mode variant of ListCommits — runs
-// git log inside the running container because the overlay'd workdir
-// only exists there.
-func (c *Client) ListCommitsOverlay(ctx context.Context, name string) ([]patch.CommitInfo, error) {
-	return patch.ListCommitsBeyondBaselineOverlay(ctx, c.layout, c.rt, name)
-}
-
-// ListCommitsWithStats returns the same history as ListCommits but with
-// per-commit `git diff --stat` summaries attached. Used by `yoloai diff
-// --log --stat`.
-func (c *Client) ListCommitsWithStats(ctx context.Context, name string) ([]patch.CommitInfoWithStat, error) {
-	return patch.ListCommitsWithStats(ctx, c.layout, c.rt, name)
-}
-
-// HasUncommittedChanges reports whether the sandbox's workdir has any
-// uncommitted edits beyond its last commit. Used by
-// `yoloai diff --log` to surface a "*" marker.
-func (c *Client) HasUncommittedChanges(ctx context.Context, name string) (bool, error) {
-	return patch.HasUncommittedChanges(ctx, c.layout, c.rt, name)
 }
 
 // IOStreams names the stdio handles for interactive Client methods.

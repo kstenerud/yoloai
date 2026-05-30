@@ -26,6 +26,10 @@ func runExport(cmd *cobra.Command, name string, meta *store.Meta, refs, paths []
 	var result *yoloai.ExportResult
 	var hasUncommitted bool
 	err := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+		sb, sbErr := c.Sandbox(name)
+		if sbErr != nil {
+			return sbErr
+		}
 		if overlay {
 			if runErr := requireOverlayRunning(ctx, c, name); runErr != nil {
 				return runErr
@@ -33,13 +37,9 @@ func runExport(cmd *cobra.Command, name string, meta *store.Meta, refs, paths []
 		} else if !includeUncommitted {
 			// Best-effort: probe so we can hint that uncommitted edits exist but
 			// weren't exported.
-			hasUncommitted, _ = c.HasUncommittedChanges(ctx, name)
+			hasUncommitted, _ = sb.Workdir().HasUncommittedChanges(ctx)
 		}
 		var exportErr error
-		sb, sbErr := c.Sandbox(name)
-		if sbErr != nil {
-			return sbErr
-		}
 		result, exportErr = sb.Workdir().Export(ctx, yoloai.ExportOptions{
 			Dir:                dir,
 			Refs:               refs,

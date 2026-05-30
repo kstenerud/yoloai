@@ -113,8 +113,12 @@ func warnNoCommitSkippedUncommitted(cmd *cobra.Command, name string, backend run
 	}
 	var hasUncommitted bool
 	_ = cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+		sb, sbErr := c.Sandbox(name)
+		if sbErr != nil {
+			return sbErr
+		}
 		var uncommittedErr error
-		hasUncommitted, uncommittedErr = c.HasUncommittedChanges(ctx, name)
+		hasUncommitted, uncommittedErr = sb.Workdir().HasUncommittedChanges(ctx)
 		return uncommittedErr
 	})
 	if hasUncommitted {

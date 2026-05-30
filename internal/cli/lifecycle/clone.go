@@ -12,7 +12,6 @@ import (
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
 	yoloai "github.com/kstenerud/yoloai"
-	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
@@ -56,7 +55,7 @@ func runClone(cmd *cobra.Command, args []string) error {
 	backend := cliutil.ResolveBackendForSandbox(src)
 	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		slog.Info("cloning sandbox", "event", "sandbox.clone", "source", src, "dest", dst) //nolint:gosec // G706: src/dst are validated sandbox names
-		if err := c.Clone(ctx, sandbox.CloneOptions{Source: src, Dest: dst}); err != nil {
+		if err := c.Clone(ctx, yoloai.CloneOptions{Source: src, Dest: dst}); err != nil {
 			return err
 		}
 		slog.Info("clone complete", "event", "sandbox.clone.complete", "source", src, "dest", dst) //nolint:gosec // G706: src/dst are validated sandbox names
@@ -86,7 +85,7 @@ func runCloneStart(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, sr
 	}
 	// Start notices ("Sandbox Y started") are redundant with clone's own
 	// "Cloned X → Y (started)" output below, so they're discarded here.
-	if _, err := sb.Start(ctx, sandbox.StartOptions{
+	if _, err := sb.Start(ctx, yoloai.StartOptions{
 		Prompt:     prompt,
 		PromptFile: promptFile,
 	}); err != nil {

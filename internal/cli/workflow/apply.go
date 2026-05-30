@@ -4,6 +4,7 @@
 package workflow
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -17,6 +18,25 @@ import (
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
+
+// listSandboxTags fetches a sandbox's tags through the public Workdir handle.
+// Best-effort: a failed fetch yields nil (tag annotations are decorative and
+// never fail the apply). When unappliedOnly is true, only tags absent on the
+// host are returned. The returned tags carry their annotated-tag Message.
+func listSandboxTags(cmd *cobra.Command, name string, unappliedOnly bool) []yoloai.TagInfo {
+	backend := cliutil.ResolveBackendForSandbox(name)
+	var tags []yoloai.TagInfo
+	//nolint:errcheck // best-effort: tag listing failure must not fail the apply
+	_ = cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+		sb, err := c.Sandbox(name)
+		if err != nil {
+			return err
+		}
+		tags, _ = sb.Workdir().Tags(ctx, yoloai.TagsOptions{UnappliedOnly: unappliedOnly})
+		return nil
+	})
+	return tags
+}
 
 // applyResult holds JSON output for the apply command.
 type applyResult struct {
@@ -184,10 +204,9 @@ func buildTagsByCommit(tags []yoloai.TagInfo) map[string][]string {
 }
 
 // applyTags transfers tags to the host using the sandbox→host SHA map.
-// sandboxWorkDir is used to fetch the full tag message (which is not stored
-// in TagInfo to keep tag listing fast and reliable).
+// Tag.Message carries the annotated-tag message (populated by Workdir().Tags).
 // Returns counts of applied and skipped tags. No-ops if withTags is false.
-func applyTags(cmd *cobra.Command, tags []yoloai.TagInfo, shaMap map[string]string, sandboxWorkDir, targetDir string, withTags bool) (applied, skipped int) {
+func applyTags(cmd *cobra.Command, tags []yoloai.TagInfo, shaMap map[string]string, targetDir string, withTags bool) (applied, skipped int) {
 	if !withTags || len(tags) == 0 {
 		return 0, 0
 	}
@@ -201,9 +220,7 @@ func applyTags(cmd *cobra.Command, tags []yoloai.TagInfo, shaMap map[string]stri
 			}
 			continue
 		}
-		// Fetch full tag message from sandbox
-		message := sandbox.GetTagMessage(sandboxWorkDir, tag.Name)
-		if createErr := workspace.CreateTag(targetDir, tag.Name, hostSHA, message); createErr != nil {
+		if createErr := workspace.CreateTag(targetDir, tag.Name, hostSHA, tag.Message); createErr != nil {
 			skipped++
 			if !isJSON {
 				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: tag %q: %v\n", tag.Name, createErr) //nolint:errcheck

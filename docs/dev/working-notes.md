@@ -947,6 +947,25 @@ The plan listed **`DirSize` among the presentation symbols to move**, but DirSiz
 
 Breaking (beta, single branch): `sandbox.Confirm`/`FormatAge`/`FormatSize` and `Info.DiskUsage` are gone. Confirmed acceptable by owner — branch lands as one breaking cut.
 
+## D47 — A3: `Workdir()` commits/tags re-rooted; `Clone` re-rooted; `CloneOptions`+`CommitInfoWithStat` leaks closed
+
+**Date:** 2026-05-30. **Status:** Accepted (owner, 2026-05-30). **Implements** layer1-public-api.md A3 (= `f2-f1f3-implementation.md` Step 5 + the tags slice of B5). **Instance of** general-principles §12 (the plan was found materially stale — A1/A2 were already built and their callers already migrated — so A3 was reframed as the real remaining breaking work) and §2 (domain refuses rather than silently degrading).
+
+**Surface added (public root):**
+- `yoloai.CommitInfo{SHA, Subject, Stat}` replaces `patch.CommitInfo`/`patch.CommitInfoWithStat` on the public surface.
+- `Workdir().Commits(ctx, CommitsOptions{Stat})` folds the three stranded `Client.ListCommits`/`ListCommitsOverlay`/`ListCommitsWithStats` variants behind **one verb that resolves copy-vs-overlay internally** (the pattern established by `Workdir().Diff`/`Apply`). Overlay + `Stat` returns a typed `*PlatformError` — an honest §2 refusal, since per-overlay-commit stat isn't host-addressable and the CLI never requests it (YAGNI over a silent degrade).
+- `Workdir().HasUncommittedChanges(ctx)` replaces the root method.
+- `Workdir().Tags(ctx, TagsOptions{UnappliedOnly})` folds `sandbox.ListTagsBeyondBaseline`/`ListUnappliedTags`/`GetTagMessage`. It **auto-populates `TagInfo.Message`** (one git call per tag) so `applyTags` reads `tag.Message` instead of taking a sandbox-workdir path — that param (and its threading through `finishSelectiveApply`/`runApplyCommits`) was deleted as now-dead.
+- `Client.Clone` re-rooted to public `yoloai.CloneOptions{Source, Dest, Overwrite}` (Q-J: **no `Force` API field**; "Force" stays a CLI flag, mapped to `Overwrite` at the boundary).
+
+**Consumers migrated:** `diff.go`, `apply_format_patch.go`, `apply_nocommit.go`, `apply_export.go`, `apply_selective.go`, `apply.go`, `lifecycle/clone.go` — all now reach commits/tags/clone through `c.Sandbox(name).Workdir()`. Best-effort tag fetches that previously called `sandbox.*` outside a client are centralized in a new `listSandboxTags(cmd, name, unappliedOnly)` helper in `apply.go` (wraps `WithClient` + handle). `clone.go`'s `sandbox.StartOptions` also swapped to the `yoloai.StartOptions` alias, dropping its last `internal/sandbox` import.
+
+**`f1KnownLeaks` now 3** (was 5): closed `sandbox.CloneOptions` and `patch.CommitInfoWithStat`. Remaining: `config.Layout`, `config.MergedConfig` (A4), `sandbox.TmuxConfigClass` (A4).
+
+Breaking (beta, single branch): `Client.ListCommits*`/`HasUncommittedChanges` and `sandbox.CloneOptions` are gone from the public surface. `patch.CommitInfo*` / `sandbox.List*Tags`/`GetTagMessage` stay internal (still used by the new `Workdir` methods) but are no longer reachable from `internal/cli`.
+
+**Open follow-up (flagged to owner):** `DestroyOptions.Force` still violates Q-J's "no `Force` API fields" — it should become a concern-specific name (e.g. `AcceptActiveWork`) in a later step. Left out of A3 to keep the commit scoped to commits/tags/clone.
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.

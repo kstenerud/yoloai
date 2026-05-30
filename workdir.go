@@ -7,6 +7,7 @@ package yoloai
 import (
 	"context"
 
+	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/patch"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/yoerrors"
@@ -229,4 +230,113 @@ func (w *Workdir) Apply(ctx context.Context, opts ApplyOptions) (*ApplyResult, e
 		Paths:              opts.Paths,
 		DryRun:             opts.DryRun,
 	})
+}
+
+// CommitInfo describes one commit in a sandbox workdir's history beyond the
+// diff baseline. Stat is populated only when CommitsOptions.Stat was set.
+type CommitInfo struct {
+	SHA     string `json:"sha"`
+	Subject string `json:"subject"`
+	Stat    string `json:"stat,omitempty"` // git diff --stat for the commit; set when CommitsOptions.Stat
+}
+
+// CommitsOptions configures Workdir.Commits.
+type CommitsOptions struct {
+	// Stat attaches a per-commit `git diff --stat` summary to each CommitInfo.
+	// Copy-mode only — requesting Stat on an :overlay workdir is refused with a
+	// *PlatformError, since overlay commits aren't individually stat-addressable
+	// from the host.
+	Stat bool
+}
+
+// Commits returns the workdir's commit history beyond the diff baseline — one
+// entry per commit since the work started. It resolves the workdir's mount
+// mode internally: copy-mode reads the on-disk history, overlay-mode runs git
+// log inside the running container. Returns an empty slice when HEAD equals the
+// baseline. Folds the former ListCommits / ListCommitsOverlay /
+// ListCommitsWithStats methods into one verb.
+func (w *Workdir) Commits(ctx context.Context, opts CommitsOptions) ([]CommitInfo, error) {
+	meta, err := store.LoadMeta(w.s.c.layout.SandboxDir(w.s.name))
+	if err != nil {
+		return nil, err
+	}
+
+	if meta.Workdir.Mode == store.DirModeOverlay {
+		if opts.Stat {
+			return nil, yoerrors.NewPlatformError("per-commit stat is not supported for :overlay sandboxes (overlay commits are not individually addressable from the host)")
+		}
+		cs, err := patch.ListCommitsBeyondBaselineOverlay(ctx, w.s.c.layout, w.s.c.rt, w.s.name)
+		if err != nil {
+			return nil, err
+		}
+		return toCommitInfos(cs), nil
+	}
+
+	if opts.Stat {
+		cs, err := patch.ListCommitsWithStats(ctx, w.s.c.layout, w.s.c.rt, w.s.name)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]CommitInfo, len(cs))
+		for i, c := range cs {
+			out[i] = CommitInfo{SHA: c.SHA, Subject: c.Subject, Stat: c.Stat}
+		}
+		return out, nil
+	}
+
+	cs, err := patch.ListCommitsBeyondBaseline(ctx, w.s.c.layout, w.s.c.rt, w.s.name)
+	if err != nil {
+		return nil, err
+	}
+	return toCommitInfos(cs), nil
+}
+
+func toCommitInfos(cs []patch.CommitInfo) []CommitInfo {
+	out := make([]CommitInfo, len(cs))
+	for i, c := range cs {
+		out[i] = CommitInfo{SHA: c.SHA, Subject: c.Subject}
+	}
+	return out
+}
+
+// HasUncommittedChanges reports whether the workdir has uncommitted edits
+// beyond its last commit. Drives the "*" marker in `yoloai diff --log`.
+func (w *Workdir) HasUncommittedChanges(ctx context.Context) (bool, error) {
+	return patch.HasUncommittedChanges(ctx, w.s.c.layout, w.s.c.rt, w.s.name)
+}
+
+// TagsOptions configures Workdir.Tags.
+type TagsOptions struct {
+	// UnappliedOnly returns only tags present in the sandbox but not yet on the
+	// host (the "unapplied" hint set) instead of all tags beyond baseline.
+	UnappliedOnly bool
+}
+
+// Tags returns the sandbox workdir's checkpoint tags, each with its annotated
+// Message populated. Tagging is copy-mode only — returns nil for :rw and
+// :overlay workdirs. With opts.UnappliedOnly, returns only tags not yet present
+// on the host. Folds ListTagsBeyondBaseline / ListUnappliedTags / GetTagMessage.
+func (w *Workdir) Tags(ctx context.Context, opts TagsOptions) ([]TagInfo, error) {
+	var (
+		tags []TagInfo
+		err  error
+	)
+	if opts.UnappliedOnly {
+		tags, err = sandbox.ListUnappliedTags(w.s.c.layout, w.s.name)
+	} else {
+		tags, err = sandbox.ListTagsBeyondBaseline(w.s.c.layout, w.s.name)
+	}
+	if err != nil || len(tags) == 0 {
+		return tags, err
+	}
+
+	meta, err := store.LoadMeta(w.s.c.layout.SandboxDir(w.s.name))
+	if err != nil {
+		return nil, err
+	}
+	gitDir := store.WorkDir(w.s.c.layout.SandboxDir(w.s.name), meta.Workdir.HostPath)
+	for i := range tags {
+		tags[i].Message = sandbox.GetTagMessage(gitDir, tags[i].Name)
+	}
+	return tags, nil
 }

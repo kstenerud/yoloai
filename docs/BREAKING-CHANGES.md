@@ -138,6 +138,47 @@ patch-generation methods stay on `Client` for now; they fold into `Apply` in a
 later step, since they're apply-plumbing with an overlay shape that doesn't fit a
 single byte-returning `Patch`.)
 
+### Commits, tags, and uncommitted-state move under `client.Sandbox(name).Workdir()`; `Clone` re-rooted
+
+Folds the commit-listing, tag-listing, and uncommitted-state operations onto the
+workdir sub-handle and re-roots `Clone` to a public options type (F2, Step 5 +
+the tags slice of B5). Go-embedder API change; CLI behavior unchanged.
+
+**Previous behavior:** `c.ListCommits(ctx, name)`, `c.ListCommitsOverlay(ctx,
+name)`, `c.ListCommitsWithStats(ctx, name)` — three methods returning internal
+`patch.CommitInfo`/`patch.CommitInfoWithStat`, with the caller choosing the
+copy/overlay/stat variant; `c.HasUncommittedChanges(ctx, name)`; and
+`c.Clone(ctx, sandbox.CloneOptions{Source, Dest, Force})` — taking the internal
+options type. Tag listing was reachable only via `internal/sandbox`
+(`ListTagsBeyondBaseline`/`ListUnappliedTags`/`GetTagMessage`).
+
+**New behavior:**
+- `c.Sandbox(name).Workdir().Commits(ctx, yoloai.CommitsOptions{Stat})
+  ([]yoloai.CommitInfo, error)` — one verb; copy-vs-overlay resolved internally.
+  Overlay + `Stat` returns a typed `*PlatformError` (per-overlay-commit stat is
+  not host-addressable). `yoloai.CommitInfo{SHA, Subject, Stat}` is the public
+  shape.
+- `c.Sandbox(name).Workdir().HasUncommittedChanges(ctx) (bool, error)`.
+- `c.Sandbox(name).Workdir().Tags(ctx, yoloai.TagsOptions{UnappliedOnly})
+  ([]yoloai.TagInfo, error)` — returns tags beyond baseline (or only those not on
+  the host when `UnappliedOnly`), with `TagInfo.Message` populated.
+- `c.Clone(ctx, yoloai.CloneOptions{Source, Dest, Overwrite})` — public options
+  type. The old `Force` field is renamed `Overwrite` (Q-J: no `Force` API
+  fields; the CLI `--force` flag maps to `Overwrite` at the boundary).
+
+**Migration:**
+- `c.ListCommits(ctx, name)` / `c.ListCommitsOverlay(ctx, name)` → `…Workdir().Commits(ctx, yoloai.CommitsOptions{})`
+- `c.ListCommitsWithStats(ctx, name)` → `…Workdir().Commits(ctx, yoloai.CommitsOptions{Stat: true})`
+- `c.HasUncommittedChanges(ctx, name)` → `…Workdir().HasUncommittedChanges(ctx)`
+- `sandbox.ListTagsBeyondBaseline(layout, name)` → `…Workdir().Tags(ctx, yoloai.TagsOptions{})`
+- `sandbox.ListUnappliedTags(layout, name)` → `…Workdir().Tags(ctx, yoloai.TagsOptions{UnappliedOnly: true})`
+- `c.Clone(ctx, sandbox.CloneOptions{Source, Dest, Force})` → `c.Clone(ctx, yoloai.CloneOptions{Source, Dest, Overwrite})`
+
+**Rationale:** F2 / F1 — commit/tag reads belong on the `Workdir()` sub-handle
+behind mode-agnostic verbs, and re-rooting `Clone`'s options + surfacing
+`yoloai.CommitInfo` closes the last two non-config `f1KnownLeaks`
+(`sandbox.CloneOptions`, `patch.CommitInfoWithStat`).
+
 ### Per-sandbox operations move from `Client` to `client.Sandbox(name)`
 
 Re-roots every per-sandbox Go operation onto the resource-bound `*yoloai.Sandbox`

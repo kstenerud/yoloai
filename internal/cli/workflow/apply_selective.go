@@ -13,8 +13,6 @@ import (
 	"github.com/kstenerud/yoloai/internal/runtime"
 
 	"github.com/kstenerud/yoloai"
-	"github.com/kstenerud/yoloai/internal/sandbox"
-	"github.com/kstenerud/yoloai/internal/sandbox/patch"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/internal/workspace"
 	"github.com/spf13/cobra"
@@ -45,7 +43,7 @@ func applySelectedCommits(cmd *cobra.Command, name string, refs, paths []string,
 	}
 
 	resolved := commitInfosFromApplied(preview.Commits)
-	selectedTags := filterTagsForResolved(name, resolved)
+	selectedTags := filterTagsForResolved(cmd, name, resolved)
 	tagsByCommit := buildTagsByCommit(selectedTags)
 
 	if !cliutil.JSONEnabled(cmd) {
@@ -81,8 +79,7 @@ func applySelectedCommits(cmd *cobra.Command, name string, refs, paths []string,
 		shaMap[strings.ToLower(c.SourceSHA)] = c.HostSHA
 	}
 
-	sandboxWorkDir := store.WorkDir(cliutil.Layout().SandboxDir(name), targetDir)
-	return finishSelectiveApply(cmd, name, len(result.Commits), shaMap, applyErr, selectedTags, sandboxWorkDir, targetDir, withTags)
+	return finishSelectiveApply(cmd, name, len(result.Commits), shaMap, applyErr, selectedTags, targetDir, withTags)
 }
 
 // runSeriesApply runs a commit-series apply through the workdir handle — dryRun
@@ -110,10 +107,10 @@ func runSeriesApply(cmd *cobra.Command, name string, backend runtime.BackendName
 
 // commitInfosFromApplied converts previewed/applied commits back to the
 // CommitInfo shape used for the summary and tag filtering.
-func commitInfosFromApplied(applied []yoloai.AppliedCommit) []patch.CommitInfo {
-	out := make([]patch.CommitInfo, len(applied))
+func commitInfosFromApplied(applied []yoloai.AppliedCommit) []yoloai.CommitInfo {
+	out := make([]yoloai.CommitInfo, len(applied))
 	for i, c := range applied {
-		out[i] = patch.CommitInfo{SHA: c.SourceSHA, Subject: c.Subject}
+		out[i] = yoloai.CommitInfo{SHA: c.SourceSHA, Subject: c.Subject}
 	}
 	return out
 }
@@ -130,11 +127,11 @@ func confirmSelectiveApply(cmd *cobra.Command, yes bool, targetDir string) (bool
 }
 
 // finishSelectiveApply prints results, handles tags, and returns any follow-on error.
-func finishSelectiveApply(cmd *cobra.Command, name string, commitsApplied int, shaMap map[string]string, applyErr error, selectedTags []yoloai.TagInfo, sandboxWorkDir, targetDir string, withTags bool) error {
-	tagsApplied, tagsSkipped := applyTags(cmd, selectedTags, shaMap, sandboxWorkDir, targetDir, withTags)
+func finishSelectiveApply(cmd *cobra.Command, name string, commitsApplied int, shaMap map[string]string, applyErr error, selectedTags []yoloai.TagInfo, targetDir string, withTags bool) error {
+	tagsApplied, tagsSkipped := applyTags(cmd, selectedTags, shaMap, targetDir, withTags)
 
 	if !cliutil.JSONEnabled(cmd) && !withTags {
-		unappliedTags, _ := sandbox.ListUnappliedTags(cliutil.Layout(), name)
+		unappliedTags := listSandboxTags(cmd, name, true)
 		if len(unappliedTags) > 0 {
 			fmt.Fprintf(cmd.OutOrStdout(), "\nHint: %d tag(s) available in sandbox but not on host. Run with --tags to transfer them.\n", len(unappliedTags)) //nolint:errcheck
 		}
@@ -154,8 +151,8 @@ func finishSelectiveApply(cmd *cobra.Command, name string, commitsApplied int, s
 }
 
 // filterTagsForResolved fetches tags beyond baseline and filters to those on the resolved commits.
-func filterTagsForResolved(name string, resolved []patch.CommitInfo) []yoloai.TagInfo {
-	allTags, _ := sandbox.ListTagsBeyondBaseline(cliutil.Layout(), name)
+func filterTagsForResolved(cmd *cobra.Command, name string, resolved []yoloai.CommitInfo) []yoloai.TagInfo {
+	allTags := listSandboxTags(cmd, name, false)
 	resolvedSet := make(map[string]bool, len(resolved))
 	for _, c := range resolved {
 		resolvedSet[strings.ToLower(c.SHA)] = true
@@ -170,7 +167,7 @@ func filterTagsForResolved(name string, resolved []patch.CommitInfo) []yoloai.Ta
 }
 
 // printSelectiveApplySummary prints the commit summary for selective apply.
-func printSelectiveApplySummary(cmd *cobra.Command, resolved []patch.CommitInfo, tagsByCommit map[string][]string, selectedTags []yoloai.TagInfo, withTags bool) {
+func printSelectiveApplySummary(cmd *cobra.Command, resolved []yoloai.CommitInfo, tagsByCommit map[string][]string, selectedTags []yoloai.TagInfo, withTags bool) {
 	out := cmd.OutOrStdout()
 	fmt.Fprintf(out, "Commits to apply (%d):\n", len(resolved)) //nolint:errcheck
 	for _, c := range resolved {

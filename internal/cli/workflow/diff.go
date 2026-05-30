@@ -13,8 +13,6 @@ import (
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
 	yoloai "github.com/kstenerud/yoloai"
-	"github.com/kstenerud/yoloai/internal/sandbox"
-	"github.com/kstenerud/yoloai/internal/sandbox/patch"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
@@ -207,14 +205,18 @@ func diffLogOverlay(cmd *cobra.Command, name string, stat bool) error {
 			return err
 		}
 
-		commits, err := c.ListCommitsOverlay(ctx, name)
+		sb, err := c.Sandbox(name)
+		if err != nil {
+			return err
+		}
+		commits, err := sb.Workdir().Commits(ctx, yoloai.CommitsOptions{})
 		if err != nil {
 			return err
 		}
 
 		if cliutil.JSONEnabled(cmd) {
 			if commits == nil {
-				commits = []patch.CommitInfo{}
+				commits = []yoloai.CommitInfo{}
 			}
 			result := struct {
 				Commits               any  `json:"commits"`
@@ -292,7 +294,17 @@ func diffLog(cmd *cobra.Command, name string, stat bool) error {
 	out := cmd.OutOrStdout()
 
 	// Fetch tags for inline display (best-effort).
-	tags, _ := sandbox.ListTagsBeyondBaseline(cliutil.Layout(), name)
+	var tags []yoloai.TagInfo
+	backend := cliutil.ResolveBackendForSandbox(name)
+	//nolint:errcheck // best-effort: tag annotations are decorative
+	_ = cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+		sb, sbErr := c.Sandbox(name)
+		if sbErr != nil {
+			return sbErr
+		}
+		tags, _ = sb.Workdir().Tags(ctx, yoloai.TagsOptions{})
+		return nil
+	})
 	tagsByCommit := buildTagsByCommit(tags)
 
 	if stat {
@@ -312,10 +324,14 @@ func diffLog(cmd *cobra.Command, name string, stat bool) error {
 // diffLogWithStat prints commits with file-change statistics.
 func diffLogWithStat(cmd *cobra.Command, name string, out io.Writer, tagsByCommit map[string][]string) error {
 	backend := cliutil.ResolveBackendForSandbox(name)
-	var commits []patch.CommitInfoWithStat
+	var commits []yoloai.CommitInfo
 	err := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+		sb, sbErr := c.Sandbox(name)
+		if sbErr != nil {
+			return sbErr
+		}
 		var listErr error
-		commits, listErr = c.ListCommitsWithStats(ctx, name)
+		commits, listErr = sb.Workdir().Commits(ctx, yoloai.CommitsOptions{Stat: true})
 		return listErr
 	})
 	if err != nil {
@@ -340,10 +356,14 @@ func diffLogWithStat(cmd *cobra.Command, name string, out io.Writer, tagsByCommi
 // diffLogBasic prints commits without statistics.
 func diffLogBasic(cmd *cobra.Command, name string, out io.Writer, tagsByCommit map[string][]string) error {
 	backend := cliutil.ResolveBackendForSandbox(name)
-	var commits []patch.CommitInfo
+	var commits []yoloai.CommitInfo
 	err := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+		sb, sbErr := c.Sandbox(name)
+		if sbErr != nil {
+			return sbErr
+		}
 		var listErr error
-		commits, listErr = c.ListCommits(ctx, name)
+		commits, listErr = sb.Workdir().Commits(ctx, yoloai.CommitsOptions{})
 		return listErr
 	})
 	if err != nil {
@@ -373,8 +393,12 @@ func diffLogUncommitted(cmd *cobra.Command, name string, out io.Writer) {
 	backend := cliutil.ResolveBackendForSandbox(name)
 	var hasUncommitted bool
 	err := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+		sb, sbErr := c.Sandbox(name)
+		if sbErr != nil {
+			return sbErr
+		}
 		var uncommittedErr error
-		hasUncommitted, uncommittedErr = c.HasUncommittedChanges(ctx, name)
+		hasUncommitted, uncommittedErr = sb.Workdir().HasUncommittedChanges(ctx)
 		return uncommittedErr
 	})
 	if err == nil && hasUncommitted {
@@ -426,39 +450,30 @@ func agentRunningWarning(cmd *cobra.Command, name string) {
 func diffLogJSON(cmd *cobra.Command, name string, stat bool) error {
 	backend := cliutil.ResolveBackendForSandbox(name)
 	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
-		var commits any
-		if stat {
-			cs, err := c.ListCommitsWithStats(ctx, name)
-			if err != nil {
-				return err
-			}
-			if cs == nil {
-				cs = []patch.CommitInfoWithStat{}
-			}
-			commits = cs
-		} else {
-			cs, err := c.ListCommits(ctx, name)
-			if err != nil {
-				return err
-			}
-			if cs == nil {
-				cs = []patch.CommitInfo{}
-			}
-			commits = cs
+		sb, err := c.Sandbox(name)
+		if err != nil {
+			return err
+		}
+		cs, err := sb.Workdir().Commits(ctx, yoloai.CommitsOptions{Stat: stat})
+		if err != nil {
+			return err
+		}
+		if cs == nil {
+			cs = []yoloai.CommitInfo{}
 		}
 
-		hasUncommitted, _ := c.HasUncommittedChanges(ctx, name)
-		tags, _ := sandbox.ListTagsBeyondBaseline(cliutil.Layout(), name)
+		hasUncommitted, _ := sb.Workdir().HasUncommittedChanges(ctx)
+		tags, _ := sb.Workdir().Tags(ctx, yoloai.TagsOptions{})
 		if tags == nil {
 			tags = []yoloai.TagInfo{}
 		}
 
 		result := struct {
-			Commits               any              `json:"commits"`
-			HasUncommittedChanges bool             `json:"has_uncommitted_changes"`
-			Tags                  []yoloai.TagInfo `json:"tags"`
+			Commits               []yoloai.CommitInfo `json:"commits"`
+			HasUncommittedChanges bool                `json:"has_uncommitted_changes"`
+			Tags                  []yoloai.TagInfo    `json:"tags"`
 		}{
-			Commits:               commits,
+			Commits:               cs,
 			HasUncommittedChanges: hasUncommitted,
 			Tags:                  tags,
 		}

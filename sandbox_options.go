@@ -87,6 +87,20 @@ type DestroyOptions struct {
 	Force bool
 }
 
+// CloneOptions configures Client.Clone. Hand-written rather than aliased so the
+// public surface doesn't expose internal/sandbox.CloneOptions. Overwrite (not
+// "Force") is the concern-specific name per the Q-J field audit — "Force" stays
+// a CLI flag only.
+type CloneOptions struct {
+	Source    string // existing sandbox name to copy from; required
+	Dest      string // new sandbox name; required
+	Overwrite bool   // destroy Dest first if it already exists
+}
+
+func (o CloneOptions) toInternal() sandbox.CloneOptions {
+	return sandbox.CloneOptions{Source: o.Source, Dest: o.Dest, Force: o.Overwrite}
+}
+
 // ExecOptions configures Sandbox.Exec. PTY selects between an interactive
 // terminal session (PTY true — allocates a remote pty) and raw stdio piping
 // (PTY false — line-oriented, the shape the MCP proxy bridges JSON-RPC over).

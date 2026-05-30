@@ -37,13 +37,14 @@ complete.
 
 ## Current status
 
-- **`f1KnownLeaks` remaining (5):** `config.Layout`, `config.MergedConfig`
-  (SystemClient construction + ProfileInfo), `sandbox.CloneOptions` (Clone not
-  re-rooted), `sandbox.TmuxConfigClass`, `patch.CommitInfoWithStat` (commits/
-  baseline not re-rooted).
-- **Prior 6-step plan (`f2-f1f3-implementation.md`):** Steps 1 (creation) and
-  4a–4f (Apply) **DONE**. Steps 2 (Sandbox lifecycle handle), 3 (Workdir().Diff),
-  5 (Workdir commits/baseline), 6 (fence/docs) **REMAIN**.
+- **`f1KnownLeaks` remaining (3):** `config.Layout`, `config.MergedConfig`
+  (SystemClient construction + ProfileInfo), `sandbox.TmuxConfigClass`. Closed in
+  A3 (2026-05-30): `sandbox.CloneOptions` (Clone re-rooted to public
+  `yoloai.CloneOptions`) and `patch.CommitInfoWithStat` (commits re-rooted to
+  `yoloai.CommitInfo` via `Workdir().Commits`).
+- **Prior 6-step plan (`f2-f1f3-implementation.md`):** Steps 1 (creation),
+  4a–4f (Apply), 2 (Sandbox lifecycle handle), 3 (Workdir().Diff), and 5 (Workdir
+  commits/baseline + tags) **DONE**. Step 6 (fence/docs — the C gate) **REMAINS**.
 
 ## Half-B inventory — what CLI/mcpsrv grab from `internal/sandbox` today
 
@@ -55,8 +56,8 @@ complete.
 | Status read-model (~100) | `Info`, `Status`+`Status*` consts, `TagInfo`, `DetectStatus` | **B2** — root re-export + Client method |
 | Presentation/prompt (~17) | `Confirm`, `FormatSize`, `FormatAge`, `DirSize` | **B3** — `cliutil` (F4/F5) |
 | Parse/input (~14) | `DirSpec` (dup w/ `yoloai.DirSpec`), `ParseDirArg`, `ParseAuxDirArg`, `ExpandPath`, `ValidateBuildSecret` | **B4** — `cliutil` parse + single root `DirSpec` |
-| Option stragglers | `CloneOptions` (leak), `StartOptions`/`ResetOptions` (aliased ✓) | **A1** (Step 2) |
-| Bypass operations (~13) | `ListTagsBeyondBaseline`, `ListUnappliedTags`, `GetTagMessage`, `WaitForAttachReady`, `ListSandboxesMultiBackend`, `NewEngine` | **B5** — Client/Sandbox/SystemClient methods |
+| Option stragglers | `CloneOptions` (A3 ✓ → `yoloai.CloneOptions`), `StartOptions`/`ResetOptions` (aliased ✓) | **A1/A3** |
+| Bypass operations (~13) | `ListTagsBeyondBaseline`/`ListUnappliedTags`/`GetTagMessage` (A3 ✓ → `Workdir().Tags`), `WaitForAttachReady`, `ListSandboxesMultiBackend`, `NewEngine` (remain) | **B5** — Client/Sandbox/SystemClient methods |
 
 ## Plan (sequenced; every step keeps `make check` green)
 
@@ -90,19 +91,26 @@ not rendering. The plan mis-grouped it. The real fix was **de-rendering `Info`**
 carries the same smell — deferred to a later de-render pass. **Breaking**, not
 additive (drops `Info.DiskUsage` + the three relocated funcs).
 
-### A1 — Step 2: `Sandbox(name)` lifecycle handle *(breaking; closes `CloneOptions`)*
+### A1 — Step 2: `Sandbox(name)` lifecycle handle ✅ *(breaking; closed `CloneOptions`)*
 Per `f2-f1f3-implementation.md` Step 2: `Start/Stop/Restart/Destroy/Reset/Exec/
 SendInput/ContainerLogs/Dir/Status` as `*Sandbox` methods; `WaitForAttachReady`
-behind `Attach`; `NeedsConfirmation` → typed `*ActiveWorkError`. Migrate CLI +
-mcpsrv; delete the old root methods. Fold in F22 (strict `Sandbox(name)`).
+behind `Attach`; `NeedsConfirmation` → typed `*ActiveWorkError`. CLI + mcpsrv
+migrated; old root methods deleted. F22 (strict `Sandbox(name)`) folded in.
 
-### A2 — Step 3: `Workdir().Diff` *(breaking)*
-Per Step 3. Folds `Diff`/`DiffWithOptions`/`DiffRef`/`DiffOverlay`.
+### A2 — Step 3: `Workdir().Diff` ✅ *(breaking)*
+Per Step 3. Folded `Diff`/`DiffWithOptions`/`DiffRef`/`DiffOverlay` into the
+single `Workdir().Diff(ctx, DiffOptions{})` that resolves copy-vs-overlay.
 
-### A3 — Step 5: `Workdir()` commits/baseline *(breaking; closes `CommitInfoWithStat`)*
-Per Step 5, plus the **tags** bypass ops (`ListTagsBeyondBaseline`/
-`ListUnappliedTags`/`GetTagMessage`) surfaced as `Sandbox(name)`/`Workdir()`
-methods (B5).
+### A3 — Step 5: `Workdir()` commits/baseline ✅ *(done 2026-05-30; closed `CommitInfoWithStat`)*
+`Workdir().Commits(ctx, CommitsOptions{Stat})` folds the three copy/overlay/stat
+commit-list variants behind one verb (overlay+Stat → typed `*PlatformError`);
+`Workdir().HasUncommittedChanges` replaces the root method; public
+`yoloai.CommitInfo` replaces `patch.CommitInfo`/`CommitInfoWithStat` on the
+surface. The **tags** bypass ops (`ListTagsBeyondBaseline`/`ListUnappliedTags`/
+`GetTagMessage`) collapse into `Workdir().Tags(ctx, TagsOptions{UnappliedOnly})`,
+which auto-populates `TagInfo.Message` (so `applyTags` drops its sandbox-workdir
+dependency). `Client.Clone` re-rooted to public `yoloai.CloneOptions{Overwrite}`
+(Q-J: no `Force` API field). See working-notes D47.
 
 ### A4 — config leaks
 `config.Layout`/`config.MergedConfig` (SystemClient construction, ProfileInfo) and
