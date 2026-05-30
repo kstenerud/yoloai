@@ -52,22 +52,10 @@ type Info struct {
 	Status      Status      `json:"status"`
 	AgentStatus AgentStatus `json:"agent_status,omitempty"` // agent activity status (may be empty)
 	HasChanges  string      `json:"has_changes"`            // "yes", "no", or "-" (unknown/not applicable)
-	DiskUsage   string      `json:"disk_usage"`             // human-readable size, e.g. "42.0MB"
-}
-
-// FormatAge returns a human-readable duration string (e.g., "2h", "3d", "5m").
-func FormatAge(created time.Time) string {
-	d := time.Since(created)
-	switch {
-	case d < time.Minute:
-		return fmt.Sprintf("%ds", int(d.Seconds()))
-	case d < time.Hour:
-		return fmt.Sprintf("%dm", int(d.Minutes()))
-	case d < 24*time.Hour:
-		return fmt.Sprintf("%dh", int(d.Hours()))
-	default:
-		return fmt.Sprintf("%dd", int(d.Hours()/24))
-	}
+	// DiskUsageBytes is the total size of the sandbox directory in bytes, or
+	// -1 when it could not be measured. Rendering to a human-readable string
+	// is the CLI's responsibility (see cliutil.FormatSize).
+	DiskUsageBytes int64 `json:"disk_usage_bytes"`
 }
 
 // DirSize recursively calculates the total size of all files under path.
@@ -87,25 +75,6 @@ func DirSize(path string) (int64, error) {
 		return nil
 	})
 	return size, err
-}
-
-// FormatSize returns a human-readable size string (e.g., "1.2GB", "340KB").
-func FormatSize(bytes int64) string {
-	const (
-		kb = 1024
-		mb = 1024 * kb
-		gb = 1024 * mb
-	)
-	switch {
-	case bytes >= gb:
-		return fmt.Sprintf("%.1fGB", float64(bytes)/float64(gb))
-	case bytes >= mb:
-		return fmt.Sprintf("%.1fMB", float64(bytes)/float64(mb))
-	case bytes >= kb:
-		return fmt.Sprintf("%dKB", bytes/kb)
-	default:
-		return fmt.Sprintf("%dB", bytes)
-	}
 }
 
 // WorkDataState classifies what a sandbox directory holds, determined by
@@ -351,16 +320,16 @@ func InspectSandbox(ctx context.Context, layout config.Layout, rt runtime.Runtim
 		}
 	}
 
-	diskUsage := "-"
+	diskUsageBytes := int64(-1)
 	if size, err := DirSize(sandboxDir); err == nil {
-		diskUsage = FormatSize(size)
+		diskUsageBytes = size
 	}
 
 	return &Info{
-		Meta:       meta,
-		Status:     status,
-		HasChanges: changes,
-		DiskUsage:  diskUsage,
+		Meta:           meta,
+		Status:         status,
+		HasChanges:     changes,
+		DiskUsageBytes: diskUsageBytes,
 	}, nil
 }
 
@@ -402,18 +371,18 @@ func InspectSandboxWithBackend(ctx context.Context, layout config.Layout, rt run
 		return nil, fmt.Errorf("load metadata: %w", err)
 	}
 
-	diskUsage := "-"
+	diskUsageBytes := int64(-1)
 	if size, err := DirSize(sandboxDir); err == nil {
-		diskUsage = FormatSize(size)
+		diskUsageBytes = size
 	}
 
 	// If runtime is nil, return basic info with unavailable status
 	if rt == nil {
 		return &Info{
-			Meta:       meta,
-			Status:     StatusUnavailable,
-			HasChanges: "-",
-			DiskUsage:  diskUsage,
+			Meta:           meta,
+			Status:         StatusUnavailable,
+			HasChanges:     "-",
+			DiskUsageBytes: diskUsageBytes,
 		}, nil
 	}
 
@@ -424,10 +393,10 @@ func InspectSandboxWithBackend(ctx context.Context, layout config.Layout, rt run
 	}
 
 	return &Info{
-		Meta:       meta,
-		Status:     status,
-		HasChanges: detectWorkdirChanges(sandboxDir, meta),
-		DiskUsage:  diskUsage,
+		Meta:           meta,
+		Status:         status,
+		HasChanges:     detectWorkdirChanges(sandboxDir, meta),
+		DiskUsageBytes: diskUsageBytes,
 	}, nil
 }
 
@@ -452,10 +421,10 @@ func ListSandboxes(ctx context.Context, layout config.Layout, rt runtime.Runtime
 		if err != nil {
 			// Include broken sandboxes with minimal info
 			result = append(result, &Info{
-				Meta:       &store.Meta{Name: entry.Name()},
-				Status:     StatusBroken,
-				HasChanges: "-",
-				DiskUsage:  "-",
+				Meta:           &store.Meta{Name: entry.Name()},
+				Status:         StatusBroken,
+				HasChanges:     "-",
+				DiskUsageBytes: -1,
 			})
 			continue
 		}
@@ -527,10 +496,10 @@ func brokenInfos(names []string) []*Info {
 	infos := make([]*Info, len(names))
 	for i, name := range names {
 		infos[i] = &Info{
-			Meta:       &store.Meta{Name: name},
-			Status:     StatusBroken,
-			HasChanges: "-",
-			DiskUsage:  "-",
+			Meta:           &store.Meta{Name: name},
+			Status:         StatusBroken,
+			HasChanges:     "-",
+			DiskUsageBytes: -1,
 		}
 	}
 	return infos
@@ -555,10 +524,10 @@ func inspectBackendGroup(ctx context.Context, layout config.Layout, newRuntimeFu
 		info, inspectErr := InspectSandboxWithBackend(ctx, layout, effectiveRT, name)
 		if inspectErr != nil {
 			result = append(result, &Info{
-				Meta:       &store.Meta{Name: name},
-				Status:     StatusBroken,
-				HasChanges: "-",
-				DiskUsage:  "-",
+				Meta:           &store.Meta{Name: name},
+				Status:         StatusBroken,
+				HasChanges:     "-",
+				DiskUsageBytes: -1,
 			})
 			continue
 		}

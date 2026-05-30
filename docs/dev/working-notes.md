@@ -937,6 +937,16 @@ Salvaged below: the Q-A…Q-Z resolution index (the durable *decisions and their
 | Q-Y | Round-2 polish: typed-name enums, structured tokens, redundancies. | Add BackendName/AgentName/LogSource enums; Mounts/Ports→MountSpec/PortMapping, RemovedItems→[]PruneItem; drop DoctorReport.IsDefaultMode; fix stale Force/sentinel-count references. |
 | Q-Z | Stale-lock UX — don't leave the user hanging. | Lock acquire becomes non-blocking retry returning `*SandboxLockedError` (Name/HolderPID/HolderAlive/LockPath); lock file carries PID; add `Sandbox.Unlock` (`yoloai sandbox <name> unlock`), refused for alive holders. |
 
+## D46 — B3: presentation (`Confirm`/`FormatAge`/`FormatSize`) relocated to `cliutil`; `Info` de-rendered; `DirSize` stays in the domain
+
+**Date:** 2026-05-30. **Status:** Accepted (owner, 2026-05-30). **Implements** layer1-public-api.md B3 (closes critique F4/F5 §2 violations). **Instance of** general-principles §12 (the plan's grouping was a hypothesis; reality split it).
+
+`Confirm` (interactive stdin prompting) and `FormatAge`/`FormatSize`/`FormatDiskUsage` (human rendering) moved out of `internal/sandbox` to `internal/cli/cliutil`. These were the two §2 "presentation/policy in the domain" violations: the domain already returns typed refusals instead of prompting, and rendering belongs at the CLI tier.
+
+The plan listed **`DirSize` among the presentation symbols to move**, but DirSize is a filesystem measurement (a domain fact), not rendering — it stays in the `status/` leaf. The real entanglement was `Info.DiskUsage string`: the domain was pre-rendering a human string ("1.2GB"/"-") into the read-model. Fixed by **de-rendering `Info`**: `DiskUsage string` → `DiskUsageBytes int64` (`-1` = unknown sentinel). The domain returns the structured byte count; the CLI calls `cliutil.FormatDiskUsage`. mcpsrv (daemon prototype, cannot import CLI-tier `cliutil`) emits the raw `disk_usage_bytes` int in its JSON — machine-readable bytes are correct for the wire API. `Info.HasChanges` ("yes"/"no"/"-") carries the same §2 smell and is left for a later de-render pass.
+
+Breaking (beta, single branch): `sandbox.Confirm`/`FormatAge`/`FormatSize` and `Info.DiskUsage` are gone. Confirmed acceptable by owner — branch lands as one breaking cut.
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.

@@ -1,4 +1,4 @@
-package sandbox
+package cliutil
 
 import (
 	"bytes"

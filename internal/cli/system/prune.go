@@ -11,7 +11,6 @@ import (
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
 	"github.com/kstenerud/yoloai"
-	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/spf13/cobra"
 )
 
@@ -209,7 +208,7 @@ func confirmPrune(cmd *cobra.Command, ctx context.Context, totalItems int, image
 	default:
 		prompt = fmt.Sprintf("Remove %d resource(s) and reclaim cache? [y/N]: ", totalItems)
 	}
-	return sandbox.Confirm(ctx, prompt, cmd.InOrStdin(), cmd.ErrOrStderr())
+	return cliutil.Confirm(ctx, prompt, cmd.InOrStdin(), cmd.ErrOrStderr())
 }
 
 // printRefusedDataBearing warns about broken sandbox dirs that still hold
@@ -267,7 +266,7 @@ func maybeEmptyTrash(cmd *cobra.Command, ctx context.Context, trash yoloai.Trash
 		prompt := fmt.Sprintf(
 			"Trash holds %d item(s) (%s) that may contain data you wanted — delete it? [y/N]: ",
 			trash.Count, cliutil.HumanBytes(trash.Bytes))
-		confirmed, err := sandbox.Confirm(ctx, prompt, cmd.InOrStdin(), cmd.ErrOrStderr())
+		confirmed, err := cliutil.Confirm(ctx, prompt, cmd.InOrStdin(), cmd.ErrOrStderr())
 		if err != nil {
 			return err
 		}

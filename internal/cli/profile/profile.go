@@ -16,7 +16,6 @@ import (
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
 	"github.com/kstenerud/yoloai/internal/config"
-	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/spf13/cobra"
 )
 
@@ -579,7 +578,7 @@ func newProfileDeleteCmd() *cobra.Command {
 			}
 
 			if !cliutil.EffectiveYes(cmd) {
-				confirmed, confirmErr := sandbox.Confirm(ctx, fmt.Sprintf("Delete profile '%s'? [y/N] ", name), os.Stdin, cmd.ErrOrStderr())
+				confirmed, confirmErr := cliutil.Confirm(ctx, fmt.Sprintf("Delete profile '%s'? [y/N] ", name), os.Stdin, cmd.ErrOrStderr())
 				if confirmErr != nil {
 					return confirmErr
 				}

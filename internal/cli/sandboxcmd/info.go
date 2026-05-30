@@ -15,7 +15,6 @@ import (
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
 	yoloai "github.com/kstenerud/yoloai"
-	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/spf13/cobra"
 )
@@ -136,15 +135,15 @@ func printSandboxResources(w io.Writer, meta *store.Meta, info *yoloai.Info) {
 			fmt.Fprintf(w, "Resources:   %s\n", strings.Join(parts, ", ")) //nolint:errcheck
 		}
 	}
-	fmt.Fprintf(w, "Created:     %s (%s)\n", meta.CreatedAt.Format("2006-01-02T15:04:05Z07:00"), sandbox.FormatAge(meta.CreatedAt)) //nolint:errcheck
+	fmt.Fprintf(w, "Created:     %s (%s)\n", meta.CreatedAt.Format("2006-01-02T15:04:05Z07:00"), cliutil.FormatAge(meta.CreatedAt)) //nolint:errcheck
 	if meta.Workdir.BaselineSHA != "" {
 		fmt.Fprintf(w, "Baseline:    %s\n", meta.Workdir.BaselineSHA) //nolint:errcheck
 	}
 	if meta.YoloaiVersion != "" {
 		fmt.Fprintf(w, "Version:     %s\n", meta.YoloaiVersion) //nolint:errcheck
 	}
-	fmt.Fprintf(w, "Disk Usage:  %s\n", info.DiskUsage)  //nolint:errcheck
-	fmt.Fprintf(w, "Changes:     %s\n", info.HasChanges) //nolint:errcheck
+	fmt.Fprintf(w, "Disk Usage:  %s\n", cliutil.FormatDiskUsage(info.DiskUsageBytes)) //nolint:errcheck
+	fmt.Fprintf(w, "Changes:     %s\n", info.HasChanges)                              //nolint:errcheck
 }
 
 // loadPromptPreview reads prompt.txt and returns the first 200 characters.

@@ -13,7 +13,6 @@ import (
 
 	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
@@ -52,7 +51,7 @@ func applyOverlay(cmd *cobra.Command, name string, meta *store.Meta, refs, paths
 	}
 
 	if !yes {
-		confirmed, confirmErr := sandbox.Confirm(cmd.Context(), "Apply these changes? [y/N] ", os.Stdin, cmd.ErrOrStderr())
+		confirmed, confirmErr := cliutil.Confirm(cmd.Context(), "Apply these changes? [y/N] ", os.Stdin, cmd.ErrOrStderr())
 		if confirmErr != nil {
 			return confirmErr
 		}

@@ -78,10 +78,17 @@ Re-export at the `yoloai` root (consistent with the existing `DirMode` consts):
 `Info`/`TagInfo` aliases. `DetectStatus` becomes `Sandbox(name).Status()` (folds
 into A1). `ListSandboxesMultiBackend` → `SystemClient` method (B5).
 
-### B3 — cliutil relocation (F4/F5) *(additive)*
-Move `Confirm`, `FormatSize`, `FormatAge`, `DirSize` → `internal/cli/cliutil`.
-The domain already returns typed refusals instead of prompting (Step-1 pattern),
-so no domain function needs `Confirm`. Removes the two §2 policy violations.
+### B3 — cliutil relocation (F4/F5) ✅ *(done 2026-05-30; see working-notes D46)*
+Moved `Confirm`, `FormatAge`, `FormatSize` → `internal/cli/cliutil`. The domain
+already returns typed refusals instead of prompting (Step-1 pattern), so no domain
+function needs `Confirm`. Removes the two §2 policy violations.
+
+`DirSize` stayed in the domain (`status/` leaf) — it's a filesystem measurement,
+not rendering. The plan mis-grouped it. The real fix was **de-rendering `Info`**:
+`DiskUsage string` → `DiskUsageBytes int64` (-1 = unknown); the CLI renders via
+`cliutil.FormatDiskUsage`, mcpsrv emits raw `disk_usage_bytes`. `Info.HasChanges`
+carries the same smell — deferred to a later de-render pass. **Breaking**, not
+additive (drops `Info.DiskUsage` + the three relocated funcs).
 
 ### A1 — Step 2: `Sandbox(name)` lifecycle handle *(breaking; closes `CloneOptions`)*
 Per `f2-f1f3-implementation.md` Step 2: `Start/Stop/Restart/Destroy/Reset/Exec/
@@ -124,8 +131,10 @@ shared contract is the typed `yoloai.DirSpec`, not the parser.
 
 ## Sequencing rationale
 
-B1+B2+B3 are **additive** (no breaking signature changes) and remove the bulk of
-the CLI's internal imports — do them first; they de-risk everything after. Then
+B1+B2 are **additive** (no breaking signature changes) and remove the bulk of
+the CLI's internal imports — do them first; they de-risk everything after. B3 was
+planned additive but landed **breaking** (de-rendering `Info.DiskUsage`); since the
+whole branch lands as one breaking cut into beta this was accepted (see D46). Then
 the **breaking** re-rooting (A1→A2→A3, the existing plan's remaining steps), each
 self-contained with its callers migrated in the same commit + a BREAKING-CHANGES
 entry. B4/B5 stragglers fold into the A-steps where the operations live. C is last

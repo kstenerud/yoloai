@@ -48,14 +48,8 @@ const (
 	WorkDataAmbiguous = status.WorkDataAmbiguous
 )
 
-// FormatAge returns a human-readable duration string. See status.FormatAge.
-var FormatAge = status.FormatAge
-
 // DirSize recursively calculates the total size under a path. See status.DirSize.
 var DirSize = status.DirSize
-
-// FormatSize returns a human-readable size string. See status.FormatSize.
-var FormatSize = status.FormatSize
 
 // ProbeWorkData inspects a sandbox dir for recoverable data. See status.ProbeWorkData.
 var ProbeWorkData = status.ProbeWorkData

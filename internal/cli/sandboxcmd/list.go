@@ -12,7 +12,6 @@ import (
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
 	yoloai "github.com/kstenerud/yoloai"
-	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/spf13/cobra"
 )
 
@@ -190,7 +189,7 @@ func runList(cmd *cobra.Command, _ []string) error {
 				"-",
 				"-",
 				"-",
-				info.DiskUsage,
+				cliutil.FormatDiskUsage(info.DiskUsageBytes),
 				"-",
 				"-",
 			)
@@ -206,8 +205,8 @@ func runList(cmd *cobra.Command, _ []string) error {
 			backend,
 			info.Meta.Agent,
 			formatProfile(info.Meta.Profile),
-			sandbox.FormatAge(info.Meta.CreatedAt),
-			info.DiskUsage,
+			cliutil.FormatAge(info.Meta.CreatedAt),
+			cliutil.FormatDiskUsage(info.DiskUsageBytes),
 			info.Meta.Workdir.HostPath,
 			info.HasChanges,
 		)

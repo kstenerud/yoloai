@@ -12,7 +12,6 @@ import (
 	"github.com/kstenerud/yoloai/internal/runtime"
 
 	"github.com/kstenerud/yoloai"
-	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/spf13/cobra"
 )
@@ -71,7 +70,7 @@ func applyNoCommit(cmd *cobra.Command, name string, paths []string, meta *store.
 
 	if !yes {
 		prompt := fmt.Sprintf("Apply these changes to %s? [y/N] ", targetDir)
-		confirmed, confirmErr := sandbox.Confirm(cmd.Context(), prompt, os.Stdin, cmd.ErrOrStderr())
+		confirmed, confirmErr := cliutil.Confirm(cmd.Context(), prompt, os.Stdin, cmd.ErrOrStderr())
 		if confirmErr != nil {
 			return confirmErr
 		}

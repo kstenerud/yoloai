@@ -101,6 +101,8 @@ should import the root cli package back (the few tests that need
 | `json.go` | `--json` flag helpers: `JSONEnabled`, `WriteJSON`, `WriteJSONError`, `EffectiveYes`. |
 | `streams.go`, `terminal.go` | `IOStreams()` (PTY-sized terminal binding for Client.Attach) and `SetTerminalTitle` (OSC-0 + tmux window rename). |
 | `lowdisk.go` | `WarnIfLowDisk`, `HumanBytes` — free-space courtesy check used by new/clone/build/disk. |
+| `confirm.go` | `Confirm()` — context-aware y/N prompt with stdin/context racing. Moved here from `internal/sandbox` (B3); prompting is CLI-tier, not domain. |
+| `format.go` | `FormatAge`, `FormatSize`, `FormatDiskUsage` — human-readable age/size rendering for CLI display. Domain returns structured data (`Info.DiskUsageBytes`); the CLI renders it. |
 | `groups.go` | Exported help group IDs (`GroupLifecycle`, `GroupWorkflow`, `GroupSandboxTools`, `GroupAdmin`) — referenced by every subpackage that registers a top-level command. |
 | `buildinfo.go` | `SetBuildInfo` + `Version`/`Commit`/`Date` globals — set once in `Execute()` so subpackages (bug-report, version) can read build metadata without threading it through cobra calls. |
 | `check.go` | `CheckBackend` — best-effort backend-availability probe used by `ls`, `doctor`, `system tart` gating. |
@@ -321,7 +323,6 @@ few helpers not yet carved out (clone, parse, setup, terminal/attach).
 | `tags.go` | Git tag info — `TagInfo`, commit matching, delegates to `workspace`. |
 | `fileutil.go` | Path-expansion + JSON read/write wrappers. |
 | `setup.go` | `RunSetup()`, `runNewUserSetup()` — interactive first-run setup. |
-| `confirm.go` | `Confirm()` — context-aware y/N prompt with stdin/context racing. |
 | `errors.go` | Sentinel errors; `ErrSandboxNotFound` re-exported from `sandbox/store`. |
 | `*_test.go` | Façade + remaining-helper unit tests. `integration_test.go` has the `integration` build tag. |
 
@@ -335,7 +336,7 @@ provision, profiles, runtimeconfig} ← launch ← {create, lifecycle}`.
 |---------|---------|
 | `create/` | `Run()` orchestrates creation (prepare → seed → build) via `create_prepare.go`; `context.go` writes `context.md` + inlines env into the agent instruction file. |
 | `lifecycle/` | `Start/Stop/Destroy/Reset/NeedsConfirmation` free functions. `recreateContainer()`/`relaunchAgent()` for restart; `resetInPlace()` for in-place resets; overlay/cache clearing; `PatchConfigAllowedDomains`. `notice.go` defines the `Notice`/result types. |
-| `status/` | Read-model: `DetectStatus()` (reads `agent-status.json`, falls back to tmux exec), `InspectSandbox()`, `ListSandboxes()`, work-data probing, age/size formatting. |
+| `status/` | Read-model: `DetectStatus()` (reads `agent-status.json`, falls back to tmux exec), `InspectSandbox()`, `ListSandboxes()`, work-data probing, `DirSize()`. Returns structured data (`Info.DiskUsageBytes`); rendering is the CLI's job. |
 | `launch/` | Shared launch primitives both create/ and lifecycle/ use: instance build/start, `Teardown`, vm-workdir resolution, and `CheckIsolationPrerequisites` (host-capability gate, homed here so create/ and lifecycle/ stay siblings). |
 | `mounts/`, `invocation/`, `provision/`, `profiles/`, `runtimeconfig/` | Lower leaves: mount-spec construction, agent invocation assembly, agent-files seeding + keychain sourcing, profile image building, and runtime `ContainerConfig` assembly respectively. |
 

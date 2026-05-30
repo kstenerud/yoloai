@@ -415,7 +415,7 @@ func confirmDirtyWorkdir(cmd *cobra.Command, dirty *yoloai.DirtyWorkdirError) bo
 		fmt.Fprintf(out, "WARNING: %s has uncommitted changes (%s)\n", d.Path, d.Status) //nolint:errcheck // best-effort output
 	}
 	fmt.Fprintln(out, "These changes will be visible to the agent and could be modified or lost.") //nolint:errcheck // best-effort output
-	confirmed, err := sandbox.Confirm(cmd.Context(), "Continue? [y/N] ", cmd.InOrStdin(), out)
+	confirmed, err := cliutil.Confirm(cmd.Context(), "Continue? [y/N] ", cmd.InOrStdin(), out)
 	return err == nil && confirmed
 }
 

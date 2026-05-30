@@ -201,14 +201,14 @@ func (s *Server) handleSandboxStatus(ctx context.Context, req mcp.CallToolReques
 
 	// Format as JSON for easy parsing by the outer agent
 	out, _ := json.MarshalIndent(map[string]any{
-		"name":         info.Meta.Name,
-		"status":       string(info.Status),
-		"agent_status": string(info.AgentStatus),
-		"agent":        info.Meta.Agent,
-		"model":        info.Meta.Model,
-		"has_changes":  info.HasChanges,
-		"disk_usage":   info.DiskUsage,
-		"created":      info.Meta.CreatedAt,
+		"name":             info.Meta.Name,
+		"status":           string(info.Status),
+		"agent_status":     string(info.AgentStatus),
+		"agent":            info.Meta.Agent,
+		"model":            info.Meta.Model,
+		"has_changes":      info.HasChanges,
+		"disk_usage_bytes": info.DiskUsageBytes,
+		"created":          info.Meta.CreatedAt,
 	}, "", "  ")
 
 	return textResult(string(out)), nil
@@ -225,23 +225,23 @@ func (s *Server) handleSandboxList(ctx context.Context, _ mcp.CallToolRequest) (
 	}
 
 	type entry struct {
-		Name        string `json:"name"`
-		Status      string `json:"status"`
-		AgentStatus string `json:"agent_status,omitempty"`
-		Agent       string `json:"agent"`
-		HasChanges  string `json:"has_changes"`
-		DiskUsage   string `json:"disk_usage"`
+		Name           string `json:"name"`
+		Status         string `json:"status"`
+		AgentStatus    string `json:"agent_status,omitempty"`
+		Agent          string `json:"agent"`
+		HasChanges     string `json:"has_changes"`
+		DiskUsageBytes int64  `json:"disk_usage_bytes"`
 	}
 
 	entries := make([]entry, 0, len(infos))
 	for _, info := range infos {
 		entries = append(entries, entry{
-			Name:        info.Meta.Name,
-			Status:      string(info.Status),
-			AgentStatus: string(info.AgentStatus),
-			Agent:       string(info.Meta.Agent),
-			HasChanges:  info.HasChanges,
-			DiskUsage:   info.DiskUsage,
+			Name:           info.Meta.Name,
+			Status:         string(info.Status),
+			AgentStatus:    string(info.AgentStatus),
+			Agent:          string(info.Meta.Agent),
+			HasChanges:     info.HasChanges,
+			DiskUsageBytes: info.DiskUsageBytes,
 		})
 	}
 

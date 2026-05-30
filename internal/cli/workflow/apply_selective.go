@@ -125,7 +125,7 @@ func confirmSelectiveApply(cmd *cobra.Command, yes bool, targetDir string) (bool
 		return true, nil
 	}
 	prompt := fmt.Sprintf("Apply to %s? [y/N] ", targetDir)
-	confirmed, confirmErr := sandbox.Confirm(cmd.Context(), prompt, os.Stdin, cmd.ErrOrStderr())
+	confirmed, confirmErr := cliutil.Confirm(cmd.Context(), prompt, os.Stdin, cmd.ErrOrStderr())
 	return confirmed, confirmErr
 }
 

@@ -39,7 +39,7 @@ func newSystemInfoCmd(version, commit, date string) *cobra.Command {
 			if size, sizeErr := sandbox.DirSize(info.DataDir); sizeErr != nil {
 				fmt.Fprintf(out, "Disk usage:  (unavailable)\n") //nolint:errcheck
 			} else {
-				fmt.Fprintf(out, "Disk usage:  %s\n", sandbox.FormatSize(size)) //nolint:errcheck
+				fmt.Fprintf(out, "Disk usage:  %s\n", cliutil.FormatSize(size)) //nolint:errcheck
 			}
 
 			fmt.Fprintln(out)              //nolint:errcheck
@@ -63,7 +63,7 @@ func newSystemInfoCmd(version, commit, date string) *cobra.Command {
 func writeSystemInfoJSON(cmd *cobra.Command, version, commit, date string, info *yoloai.SystemInfo) error {
 	diskUsage := ""
 	if size, err := sandbox.DirSize(info.DataDir); err == nil {
-		diskUsage = sandbox.FormatSize(size)
+		diskUsage = cliutil.FormatSize(size)
 	}
 
 	type backendStatus struct {

@@ -105,7 +105,7 @@ func WriteSystem(w io.Writer) {
 	dataDir := cliutil.Layout().YoloaiDir()
 	fmt.Fprintf(w, "- **Data dir:** `%s`\n", dataDir) //nolint:errcheck
 	if size, err := sandbox.DirSize(dataDir); err == nil {
-		fmt.Fprintf(w, "- **Disk usage:** %s\n", sandbox.FormatSize(size)) //nolint:errcheck
+		fmt.Fprintf(w, "- **Disk usage:** %s\n", cliutil.FormatSize(size)) //nolint:errcheck
 	}
 
 	fmt.Fprintln(w)               //nolint:errcheck

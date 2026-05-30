@@ -21,18 +21,18 @@ func makeInfo(name string, status yoloai.Status, agent, profile, changes string)
 			CreatedAt: time.Now(),
 			Workdir:   store.WorkdirMeta{HostPath: "/tmp/" + name},
 		},
-		Status:     status,
-		HasChanges: changes,
-		DiskUsage:  "1.0MB",
+		Status:         status,
+		HasChanges:     changes,
+		DiskUsageBytes: 1024 * 1024,
 	}
 }
 
 func makeBrokenInfo(name string) *yoloai.Info {
 	return &yoloai.Info{
-		Meta:       &store.Meta{Name: name},
-		Status:     yoloai.StatusBroken,
-		HasChanges: "-",
-		DiskUsage:  "-",
+		Meta:           &store.Meta{Name: name},
+		Status:         yoloai.StatusBroken,
+		HasChanges:     "-",
+		DiskUsageBytes: -1,
 	}
 }
 

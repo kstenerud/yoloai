@@ -14,7 +14,6 @@ import (
 
 	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
@@ -205,7 +204,7 @@ func confirmDestroy(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, n
 			len(warnings),
 		)
 	}
-	confirmed, confirmErr := sandbox.Confirm(cmd.Context(), "Destroy all listed sandboxes? [y/N] ", os.Stdin, cmd.ErrOrStderr())
+	confirmed, confirmErr := cliutil.Confirm(cmd.Context(), "Destroy all listed sandboxes? [y/N] ", os.Stdin, cmd.ErrOrStderr())
 	if confirmErr != nil {
 		return false, confirmErr
 	}

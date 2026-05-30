@@ -18,28 +18,6 @@ import (
 	"github.com/kstenerud/yoloai/internal/testutil"
 )
 
-// FormatAge tests
-
-func TestFormatAge_Seconds(t *testing.T) {
-	created := time.Now().Add(-30 * time.Second)
-	assert.Equal(t, "30s", FormatAge(created))
-}
-
-func TestFormatAge_Minutes(t *testing.T) {
-	created := time.Now().Add(-5 * time.Minute)
-	assert.Equal(t, "5m", FormatAge(created))
-}
-
-func TestFormatAge_Hours(t *testing.T) {
-	created := time.Now().Add(-2 * time.Hour)
-	assert.Equal(t, "2h", FormatAge(created))
-}
-
-func TestFormatAge_Days(t *testing.T) {
-	created := time.Now().Add(-3 * 24 * time.Hour)
-	assert.Equal(t, "3d", FormatAge(created))
-}
-
 // InspectSandbox tests
 
 func TestInspectSandbox_NotFound(t *testing.T) {
@@ -148,7 +126,7 @@ func TestListSandboxes_IncludesBroken(t *testing.T) {
 	require.NotNil(t, brokenInfo)
 	assert.Equal(t, StatusBroken, brokenInfo.Status)
 	assert.Equal(t, "-", brokenInfo.HasChanges)
-	assert.Equal(t, "-", brokenInfo.DiskUsage)
+	assert.Equal(t, int64(-1), brokenInfo.DiskUsageBytes)
 }
 
 // DetectStatus tests (exec fallback — empty sandboxDir)
