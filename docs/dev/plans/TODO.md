@@ -7,6 +7,10 @@ Create a plan file in this directory before starting implementation.
 
 Cross-cutting refactor work tracked separately from features. See [architecture-remediation.md](architecture-remediation.md), which itself references the audit at [../architecture-audit-2026-05.md](../architecture-audit-2026-05.md). Touches the Go↔Python boundary, the `runtime.Runtime` interface, dependency direction, error patterns, and slog conventions.
 
+## Public API — Layer-1 honest completion
+
+The Layer-1 public Go surface was declared complete (D52) but the F1 leak detector is blind to type aliases, so `store.Meta` leaks via `yoloai.Info` and ~7 consumer capabilities still reach `internal/` with no public verb. Plan: [layer1-completion.md](layer1-completion.md). Governed by CRITIQUE round G1–G7 and working-notes D53. Sequence: fix the detector (truth first) → carved `store.Meta` read-model + missing verbs → tighten depguard → (separately) reshape the agent-interaction surface. Supersedes the now-complete [layer1-public-api.md](layer1-public-api.md).
+
 ## Parallel Agent Workflows
 
 Based on [parallel agents research](../research/parallel-agents.md).

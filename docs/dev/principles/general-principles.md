@@ -1,9 +1,9 @@
-ABOUTME: Cross-cutting strategic principles for yoloAI. Twelve principles
+ABOUTME: Cross-cutting strategic principles for yoloAI. Thirteen principles
 ABOUTME: scoped to a single-author OSS CLI: pragmatism, boring tech, ecosystem
 ABOUTME: composition, reversibility, blast-radius, safe defaults, factual
 ABOUTME: accuracy, document-the-no, surface-failures, cross-platform, default-
-ABOUTME: to-public, design-as-hypothesis. Specialised principles (development,
-ABOUTME: testing, security) cite back here.
+ABOUTME: to-public, design-as-hypothesis, speak-up-against-the-plan. Specialised
+ABOUTME: principles (development, testing, security) cite back here.
 
 # General principles
 
@@ -408,6 +408,34 @@ Originally established in D25.
 
 ---
 
+## §13. No plan survives contact with the enemy — surface divergence and better ideas, even against an agreed plan
+
+**Principle.** No design or plan is perfect. We work with incomplete information, and reality supplies the missing facts only once we act on them — so we *will* make mistakes, and the only question is whether we catch them. The standing obligation: **if something looks off — even if it is agreed upon, in the design, in the spec, planned to the minutest detail — you bring it up and we discuss it. If you discover a better way, you bring it up and we discuss it.** Agreement is a strong prior, not a gag order; a prior decision is a closed question only until new information reopens it. The discipline is to stay flexible when we discover our model of the world is wrong, and to treat that discovery as information to act on, not an inconvenience to suppress. Helmuth von Moltke the Elder: *"No plan survives contact with the enemy."*
+
+This is the operating-discipline corollary of §12. §12 is the *epistemics* — a design is a falsifiable hypothesis; when facts contradict the model, the facts win. §13 is the *duty that follows*: the moment you sense the falsification — mid-plan, mid-implementation, anytime — the obligation is to **raise it**, not to push through to honour the agreement. §12's named failure mode is *silently diverging from a design*; §13's is *silently complying with a plan you have reason to doubt* — finishing the agreed thing while withholding the observation that it's wrong. §13 is also broader: it governs plans and in-flight decisions, not only design docs.
+
+### Pattern
+
+When a fact, an observation, or a cleaner option contradicts an agreed plan: **stop and surface it, with the reason, before continuing** — don't silently comply, and don't silently reroute either (that's the §12 divergence failure). Bring the specific observation, not generic unease. The collaboration loop is *raise → discuss → revise-or-confirm → log the why* (a D-entry when it changes a decision). The trigger is **new information**: a concrete signal that something is off, or a specific better way — not a mood, not a preference, and not a wish to relitigate a settled call. Reopening an agreement requires a reason; absent one, the prior decision stands and you proceed.
+
+### Worked examples
+
+- **The D52 "Layer-1 complete" reversal (CRITIQUE G1).** "Layer-1 spine FULLY COMPLETE / no deferrals" was agreed and logged in D52. A later critique found it false — the F1 leak detector was blind to type aliases, so `store.Meta` leaked through `yoloai.Info` unseen. §13 in action: raise it and reopen the "complete" verdict rather than build further on an agreed-but-wrong claim. Truth before cleanup.
+- **The interaction-surface audit (D53 corrections).** The consumer model had been "written down" as two interaction surfaces (PTY + activity stream). A code audit then found a *third* (structured file exchange via `store.FilesDir()`) and ~7 missing public verbs. Bringing those up *after* the model was agreed — because the audit surfaced new facts — is the duty, not second-guessing.
+- **Contrast with §4 (70% rule).** §13 is not "delay everything to discuss." §4 still says reversible decisions ship at ~70% information. §13 fires when you have a *specific* reason to doubt, not as a standing invitation to re-deliberate; the two compose — move fast by default, speak up the instant a real divergence appears.
+
+### Cost-vs-benefit
+
+Cost of applying: the friction of interrupting forward motion to raise a concern (~minutes), plus the judgement to distinguish a real signal from generic doubt. Damage prevented: shipping an agreed-but-wrong plan to completion because no one wanted to reopen it (the most expensive failure — it's discovered after the work is built on top); and its inverse, a contributor silently rerouting around the plan so the map goes stale (§12). Threshold: any time a fact or a clearly-better option contradicts the agreed path, surface it before proceeding. Guardrail: the trigger is new information, not preference — see the "Speak-up-as-licence-to-relitigate" over-generalisation below.
+
+### Sources
+
+Helmuth von Moltke the Elder, *Über Strategie* (1871) — "no plan of operations extends with any certainty beyond the first contact with the main hostile force," popularly "no plan survives contact with the enemy." Shares the falsifiability lineage of §12 (Popper; George Box, "all models are wrong, some are useful," 1976). Operationalised in this project by the critique discipline and the D-entry reconciliation process (the D52→CRITIQUE-G1 reversal and the D53 audit corrections are the canonical instances).
+
+Originally established in D54.
+
+---
+
 # Common over-generalisations to avoid
 
 The cost-vs-benefit discipline (Framing) explicitly rejects principle-shaped statements that don't pay off at yoloAI's scale. The following are documented so future-yoloAI doesn't drift toward them.
@@ -427,6 +455,7 @@ The cost-vs-benefit discipline (Framing) explicitly rejects principle-shaped sta
 | **Cross-platform-by-default-without-test**   | §10 requires per-platform *verification*, not per-platform *aspiration*. Claiming a platform without testing on it is the failure mode §10 prevents. The Windows/WSL "expected to work, not a primary target" stance (`docs/design/README.md`) is honest scoping, not avoidance of §10.                                                                                                                                                                                                                                          |
 | **Design-doc-as-contract**                   | §12 rejects implementing a design (an API-surface checkpoint, a spec) verbatim before it's verified against the internal facts. The doc is a hypothesis; building what it describes without checking it can be cleanly realised produces speculative behaviour and dead public API (the deferred Restart isolation-policy / `Status()` in F2). Cite a design for *direction*, never as binding.                                                                                                                                                |
 | **Facts-win-as-licence-to-ignore-designs**   | The inverse failure of §12: using "facts beat the model" as cover to skip designs entirely or diverge silently. §12's obligation on divergence is *revise the doc + log the why* (a D-entry), so the map stays honest. Abandoning the design without recording the reconciliation just makes the next implementer re-derive the same collision.                                                                                                                                                                                  |
+| **Speak-up-as-licence-to-relitigate**        | §13 obliges raising a *specific* divergence or a *concrete* better option; it is NOT licence to reopen settled decisions on generic preference, or to stall forward motion on endless what-ifs. That inverts §4 (reversible decisions ship at ~70%; Type-2-with-fast-iteration is the default). The trigger is new information, not a mood; agreement is a strong prior that reopens only with a reason. Bring the observation, not the unease.                                                                            |
 
 The pattern: every entry in this list is a true principle's failure mode at the wrong threshold. Future-yoloAI should re-evaluate only if the project's scale or scope materially changes (e.g., yoloAI gets a maintainer team, goes 1.0, takes on paying customers, or pivots away from the CLI-tool model).
 

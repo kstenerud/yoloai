@@ -1,142 +1,238 @@
-# Critique — 2026-05-30 Post-F5 Façade Pass
+# Critique — 2026-05-30 Post-F1-Close: the leak detector lies
 
 ## Summary
 
-The F5 carve was the right move and it landed cleanly: the `internal/sandbox` god-package's *code* is now split into leaf subpackages along a real DAG (`state ← {mounts, invocation, provision, profiles, runtimeconfig} ← launch ← {create, lifecycle} ← sandbox`), each leaf has a name and an explicit `state.Deps` seam, and the W11/W12 enforcement (forbidigo §12 bans, the cli-backend-scope depguard rule) still holds. The typed-error surface, the runtime-backend abstraction, and the RUNTIME_CONFIG schema-version fence are all in good shape.
+The Layer-1 spine was declared **FULLY COMPLETE** (D52): `f1KnownLeaks` empty, F1 closed,
+`MergedConfig` promoted to public `ResolvedProfileConfig`. That declaration is **false**, and
+the test that certifies it is green for the wrong reason.
 
-But the carve split the *code* without splitting the *coupling*. `internal/sandbox` is now a façade that re-exports 202 exported symbols (59 of them plain `type X = leaf.X` / `var X = leaf.X` aliases) drawn from nine downstream packages — errors, paths, status, config, formatting, parsing, notices, prompts. It is still the single most-imported internal package: 42 of the CLI's files import it directly. So we now carry *two* costs where we used to carry one: the god-package's import gravity (unchanged) *plus* a new indirection layer that the reader has to see through to find where a symbol actually lives. The CLI consumes two parallel "public" surfaces in parallel — `yoloai.*` (36 files) and `internal/sandbox.*` (42 files) — with no rule and no doc explaining which is canonical, and `ARCHITECTURE.md:49` actively claims the second one doesn't happen. Two policy concerns (terminal prompting via `Confirm`, human-readable formatting via `FormatSize`/`FormatAge`) sit in the domain layer in direct contradiction of development-principles §2. The public `yoloai` package reaches back through the internal façade to construct its errors. `lifecycle/lifecycle.go` is a relocated 1474-line god-file. And `api_surface.go` now self-certifies its own deletion condition ("deleted in W-L8b") while sitting at ~55–60% drift from the real surface.
+`TestPublicAPI_NoInternalLeaks` is structurally blind to type aliases. `walkObj` returns
+immediately for any alias TypeName; `walkType` (the signature/field walker) has no
+`*types.Alias` case at all. So when the public surface re-exports an internal type via
+`type X = internal.Y` — the *sanctioned* fix — the detector never descends into `X`'s fields
+to check whether *they* reference other, un-aliased internal types. Aliasing the top of a
+struct silences the detector for the entire tree beneath it.
 
-The through-line: F5 proved the seams exist (the leaves compile and test independently). The façade is now load-bearing scaffolding that should be dismantled, not preserved — let the CLI and the public package import the leaves directly, and the god-package's gravity finally dissipates instead of being re-hosted one indirection up.
+The concrete consequence: `yoloai.Info` (`type Info = sandbox.Info` → `status.Info`) carries
+`Meta *store.Meta`. `store.Meta` is internal and **not** re-exported at the root, and it is an
+iceberg — `WorkdirMeta`, `[]DirMeta`, `DirMode`, `runtime.IsolationMode`, `agent.AgentName`,
+`*config.ResourceLimits` hang off it, none re-exported. `Info` is returned by `Client.Run`,
+`Client.List`, `Sandbox.Inspect`, and `SystemClient.ListAcrossBackends` — the four most central
+entry points on the whole surface. An external embedder can hold a `*yoloai.Info` and **cannot
+name the type of `.Meta`**. This is a bigger leak than the `MergedConfig` one we just spent a
+milestone closing (that one was returned only by the `ProfileAdmin.Info` admin verb).
 
-I also flag two doc/principle divergences the user explicitly asked to hear about: §2's stale module-root import paths, and the false `ARCHITECTURE.md:49` claim.
+The same gap, seen from the import side: the `cli-sandbox-facade-scope` depguard rule denies
+only the `internal/sandbox` façade package while *allowing* `internal/sandbox/store` (plus
+`patch`/`archetype`) and not guarding `internal/runtime`/`internal/config` at all. So the CLI
+legitimately handles `store.Meta` directly — the very type that isn't public. A separate-module
+daemon physically cannot import any of these, so the CLI passes a gate the daemon would fail.
+"The CLI keeps us honest" is therefore only partly realized.
+
+The through-line: we closed the small, visible leak and declared total victory while the
+detector couldn't see the large one. The honest sequence is to make the test tell the truth
+first (descend through aliases → it goes red on `store.Meta`), then decide deliberately whether
+to promote `store.Meta` or park it as an *explicit, eyes-open* deferral. A silent blind spot is
+the worst of the three states.
 
 ## Findings
 
-### The façade and its coupling
+### G1 — The F1 leak detector is blind to type aliases; "F1 closed" is unverified and currently false
 
-#### F1 — `internal/sandbox` is a 202-symbol re-export hub; F5 split the code but the façade preserved the god-package's gravity
+- **Severity:** CRITICAL
+- **Where:** `public_api_test.go` — `walkObj` (lines ~125-128: `if o.IsAlias() { return }`) and
+  `walkType` (lines ~280-322: switch has cases for Named/Pointer/Slice/Array/Chan/Map/Struct/
+  Signature/Interface but **no `*types.Alias` case**). Leak site: `sandbox_options.go:13`
+  (`type Info = sandbox.Info`) → `internal/sandbox/inspect.go:39` (`type Info = status.Info`) →
+  `internal/sandbox/status/status.go:50` (`Meta *store.Meta`). Target: `internal/sandbox/store/meta.go:23`.
+- **Observation:** The detector walks named-type declarations and function signatures but treats an
+  alias as a terminal. From the type-decl path, `walkObj` bails on `IsAlias()`. From the
+  signature path (e.g. `func (c *Client) Run(...) (*Info, error)`), `walkType` unwraps the pointer,
+  reaches the `*types.Alias`, matches none of its switch arms, and silently stops. Either way the
+  alias's fields are never inspected. So `f1KnownLeaks` being empty does not mean "zero internal
+  leaks" — it means "zero internal leaks *that aren't hidden behind an alias*." Every alias in
+  `sandbox_options.go`/`names.go` is an un-audited subtree.
+- **Why it bothers me:** This is precisely the "test that lies" the project's no-lying mandate
+  forbids: green while the public API still leaks. We built the Layer-1 done-ness claim, the D52
+  working-note, and the memory entry ("FULLY COMPLETE, no deferrals remain") on a detector that
+  cannot see the biggest remaining leak. The MergedConfig milestone — real work — was the *easy*
+  half; the alias-hidden `store.Meta` tree is the hard half, and the test let us skip it without
+  noticing.
+- **Greenfield alternative:** Two separable fixes.
+  - **(a) Detector honesty (do first):** add a `*types.Alias` case to `walkType` that unwraps via
+    `types.Unalias` and recurses; in `walkObj`, stop blanket-returning on aliases — descend into
+    the underlying named type's exported fields. The existing `aliased` de-dup in `report` already
+    prevents flagging the sanctioned alias *target*; what we want surfaced is fields that reference
+    *other* un-aliased internal types. Expect the test to go red on `internal/sandbox/store.Meta`
+    (and its sub-tree) the moment this lands. That red is the truth.
+  - **(b) The real leak, once visible:** promote `store.Meta` to a *carved* public read-model — **not**
+    an alias of the storage struct (that publishes pile-3 mechanism and welds disk/wire format
+    together), and **not** a field-for-field mirror. `store.Meta` is three types in one struct
+    (see D53): **identity & posture** (expose), **config echo** (reframe — and it's nearly
+    `ResolvedProfileConfig`'s shape, so *embed a resolved-config view* rather than re-listing knobs),
+    **mechanism** (Version/YoloaiVersion/ImageRef/HasPrompt/Debug/UsernsMode/HostFilesystem/Archetype/
+    BaselineSHA — drop). If deferring the carve, re-add `store.Meta` to `f1KnownLeaks` as an explicit,
+    documented deferral. Not silence.
+- **Migration cost:** (a) is hours — a localized test-helper change plus a baseline update.
+  (b) is the open question for the chat: `store.Meta` is ~25 fields with a nested tree; a faithful
+  public mirror is real work, comparable to or larger than the MergedConfig promotion.
 
-- **Severity:** HIGH
-- **Where:** `internal/sandbox/*.go` — 202 exported symbols (`grep '^(type|var|func|const) [A-Z]'`), of which 59 are pure re-export aliases (`^(type|var) X +=`), aggregating from `yoerrors` (24), `status` (15), `lifecycle` (8), `state` (4), `profiles` (4), `create` (2), `store` (1), `errors` (1) plus ~20 const enums. Importers: 42 files under `internal/cli/`.
-- **Observation:** After F5, the leaf packages (`status`, `config`, `store`, `workspace`, `yoerrors`) are all independently importable — they have no reason to be funneled through `internal/sandbox`. Yet the façade re-exports them, so a CLI file that wants `status.FormatAge` can reach it as `sandbox.FormatAge`, and most do. The façade is the single most-imported internal package, exactly as the pre-F5 god-package was. We split `create.go` (2019 lines) and `lifecycle.go` into leaves, but the *coupling graph* is unchanged: everyone still depends on `internal/sandbox`, which now transitively depends on all nine leaves.
-- **Why it bothers me:** The whole point of a leaf-DAG carve (general-principles §1 pragmatic decomposition; the W12 model) is that a reader follows a symbol to where it lives and a change blast-radius shrinks to one leaf. The façade defeats both: `sandbox.NewUsageError` hides that the symbol lives in `yoerrors`; `sandbox.FormatSize` hides `status`. The reader now sees through *two* layers (façade → leaf) instead of *zero* (direct import). We added indirection and called it decoupling. A re-export façade is justified when it presents a *curated, smaller* surface than the sum of its leaves (a true Facade pattern). 202 symbols re-exporting ~all of nine packages is not curation — it's a passthrough.
-- **Greenfield alternative:** Delete the gratuitous re-exports. Let CLI and the public package import leaves directly (`status.FormatAge`, `yoerrors.NewUsageError`, `store.X`). Keep `internal/sandbox` only if it earns its place as a *thin orchestration façade* — i.e. it holds the handful of cross-leaf entry points (`Create`, `Start`, `Stop`, `Reset`) that genuinely compose multiple leaves, and re-exports *nothing* that callers can import directly. Target: the façade's exported surface drops from 202 to the ~dozen orchestration verbs.
-- **Migration cost:** Multi-week but almost entirely mechanical: each removed alias is a find-and-replace of `sandbox.X` → `leaf.X` across importers, one leaf at a time, each step independently green. Start with the leaves that have zero composition value in the façade (`yoerrors`, `status`, `store`, `workspace`).
+### G2 — The "CLI keeps us honest" depguard gate fences only the façade, not the leaf it leaks through
 
-#### F2 — The CLI consumes two parallel "public" surfaces (`yoloai.*` and `internal/sandbox.*`); no rule or doc says which is canonical, and ARCHITECTURE.md:49 claims the second doesn't happen
+- **Severity:** MAJOR
+- **Where:** `.golangci.yml:89-101` (`cli-sandbox-facade-scope`): denies `internal/sandbox`; allows
+  `internal/sandbox/store`, `internal/sandbox/patch`, `internal/sandbox/archetype`. No rule guards
+  `internal/runtime` or `internal/config` against CLI import. CLI consumers of `store.Meta`:
+  `printCreateSummary(out, meta *store.Meta)`, `store.LoadMeta`, and others.
+- **Observation:** The gate's stated purpose (project memory `project_public_api_direction`) is that
+  the CLI, by being constrained to the public surface, proves the library is complete — the
+  forcing function being a separate-module daemon that physically cannot see `internal/`. But the
+  rule constrains the CLI away from the *façade* only. The leaves it allows (`store` especially)
+  are exactly the un-promoted read-model types from G1. So the CLI is **not** a faithful proxy for
+  the daemon: it passes while importing types the daemon couldn't.
+- **Why it bothers me:** This is G1 from the other direction — the `store` allow-entry and the
+  `Info.Meta` leak are the same un-promoted type. The gate advertises "CLI consumes only the public
+  surface"; the reality is "CLI consumes the public surface plus three leaf packages plus runtime
+  plus config." The claim and the rule disagree, and the disagreement is invisible because the
+  rule is the thing that's supposed to catch it.
+- **Greenfield alternative:** Sequence after G1(b). Once `store.Meta` is a public read-model, drop
+  the `internal/sandbox/store` allow-entry so CLI `store.*` imports fail the lint — *then* the gate
+  means what it claims. Consider whether `internal/runtime`/`internal/config` need analogous fences
+  (they carry types that appear on the public surface: `runtime.BackendName`, `runtime.IsolationMode`,
+  `config.ResourceLimits` — all reachable via `store.Meta`).
+- **Migration cost:** The rule edit is minutes; it's gated on G1(b) being done first (otherwise the
+  CLI doesn't compile). Folds into the same program.
 
-- **Severity:** HIGH
-- **Where:** `internal/cli/` — 36 files import the `yoloai` root package, 42 import `internal/sandbox` directly. `docs/dev/ARCHITECTURE.md:49`. `.golangci.yml` depguard `cli-backend-scope` rule (only blocks CLI→`internal/runtime/tart`).
-- **Observation:** `ARCHITECTURE.md:49` states: "The CLI doesn't reach into `internal/sandbox/*` … for orchestration — every command goes through `yoloai.Client` or `yoloai.SystemClient`." This is false today: 42 CLI files import `internal/sandbox` directly, more than import the `yoloai` package. Nothing in depguard prevents it — the only CLI scoping rule blocks the Tart backend, not the sandbox façade. So the layering claim is aspirational doc, not enforced fact.
-- **Why it bothers me:** Two parallel surfaces with no canonical choice is the worst of both worlds (this is the same anti-pattern the prior round's F2 flagged for the Client/sub-handle mix, recurring one layer down). A reader can't predict whether a given CLI operation goes `yoloai.Client.X` or `sandbox.X`; both are "normal." The principle (§2 boundary discipline) and the doc both assert a single path that the linter doesn't enforce and the code doesn't follow. Either the layering claim is real and must be enforced, or it's false and the doc must stop asserting it.
-- **Greenfield alternative:** Decide the layer contract and enforce it. If `yoloai.Client` is the CLI's only orchestration entry point, add a depguard rule denying `internal/cli` → `internal/sandbox` (allowing only direct leaf imports for pure helpers like `status`/`yoerrors` if those are explicitly "shared utility" tier). If instead the CLI is *allowed* to use the sandbox domain directly (reasonable — it's all `internal/`), then delete the `yoloai.Client` façade's redundant methods and stop claiming single-path layering. Pairs with F1: once the façade stops re-exporting, "import the leaf" becomes the obvious canonical answer.
-- **Migration cost:** The depguard rule + doc fix is a day. The underlying convergence folds into F1.
+### G3 — Public Options field-naming is inconsistent on a surface about to become a versioned contract
 
-#### F3 — The public `yoloai` package constructs its errors through the internal façade (`sandbox.NewUsageError`), not `yoerrors`
+- **Severity:** MINOR
+- **Where:** the public `*Options` structs — `AllowDirtyWorkdir`, `RestartContainer`,
+  `AbandonUnappliedWork`, `Overwrite` (across `yoloai.go`/`sandbox_options.go`/etc.).
+- **Observation:** Mixed mood and specificity. `AbandonUnappliedWork` is the good model — names the
+  *consequence*, per the project's own `feedback_dangerous_option_naming` guidance. `Overwrite` and
+  the more generic toggles don't follow that rule consistently.
+- **Why it bothers me:** Once a separate daemon pins this surface, every rename is a tracked breaking
+  change rippling to a separate consumer. Cheap to harmonize now, expensive later.
+- **Greenfield alternative:** One naming-consistency pass before the daemon work starts; apply the
+  "name after the consequence" rule uniformly, judge `Overwrite`-class toggles against it.
+- **Migration cost:** Hours; all breakage lands at end of branch per the beta policy.
 
-- **Severity:** MED
-- **Where:** `yoloai`-root error construction call sites routing through `internal/sandbox/errors.go:40` (`var NewUsageError = yoerrors.NewUsageError`); `internal/yoerrors/errors.go:60` is the canonical home. `ARCHITECTURE.md` claims yoerrors is "exported via the yoloai package."
-- **Observation:** The error constructors live in `internal/yoerrors`. They're re-exported by the `internal/sandbox` façade. The public `yoloai` package — which is *above* `internal/sandbox` in the layering — reaches back *down and sideways* through the façade alias to build errors, instead of importing `yoerrors` directly. ARCHITECTURE describes the export direction backwards.
-- **Why it bothers me:** The public package depending on the internal façade for a primitive (error construction) is exactly the inverted dependency that makes the façade impossible to remove — F1 can't fully land while `yoloai` itself is a façade consumer. And the doc's "exported via yoloai" is the reverse of what the code does, which will mislead the next person trying to trace the contract.
-- **Greenfield alternative:** `yoloai` imports `internal/yoerrors` directly. Fix the ARCHITECTURE sentence to describe the real direction (yoerrors is the leaf; both `yoloai` and the CLI import it directly).
-- **Migration cost:** Hours. Mechanical import swap + one doc sentence.
+### G4 — Scattered surface inconsistencies (enum homes, dual-residence error, nil-vs-empty slices)
 
-#### F4 — `Confirm` (terminal prompt) lives in the domain layer, violating §2 "the mechanism layer never prompts"
+- **Severity:** MINOR
+- **Where:** enum constants split across `names.go` vs `workdir.go`/`network.go`; `DirtyWorkdirError`
+  lives in both `yoerrors` and a `names.go` alias; `List*` methods vary between returning `nil` and
+  an empty slice on the empty case.
+- **Observation:** Individually trivial; collectively they're the kind of papercuts that make a
+  public surface feel unowned. The nil-vs-empty variance in particular is a JSON-stability hazard
+  (`null` vs `[]`).
+- **Greenfield alternative:** One sweep — co-locate enum constants, pick a single home for
+  `DirtyWorkdirError`, standardize `List*` on empty-non-nil slices (matching `ProfileAdmin.List`'s
+  already-correct behavior).
+- **Migration cost:** Hours, independent of the spine.
 
-- **Severity:** MED
-- **Where:** `internal/sandbox/confirm.go:45` — `func Confirm(ctx, prompt string, input io.Reader, output io.Writer) (bool, error)`. Called by 8+ CLI files (apply_nocommit, new, prune, apply_selective, apply_format_patch, profile, destroy, apply_overlay).
-- **Observation:** development-principles §2 explicitly says the mechanism/domain layer "never prompts" and carries "no human-readable strings." `Confirm` is a terminal y/n prompt — pure interaction policy — sitting in the sandbox domain package. Every caller is a CLI command; none is domain code.
-- **Why it bothers me:** This is the canonical §2 violation: an interaction decision (do we ask the human? what do we ask?) encoded in the layer whose job is to *do the thing*, not to negotiate with a user. It also makes the domain untestable-without-IO for no reason — the policy belongs where the IOStreams already live (the CLI).
-- **Greenfield alternative:** Move `Confirm` to `internal/cli/cliutil` (or `cliutil.Prompt`). The domain functions that currently gate on it should instead take an already-decided `confirmed bool` / `force bool` parameter, or return a typed "needs confirmation" sentinel (`yoerrors`) that the CLI catches and resolves. The latter keeps the domain pure and lets the CLI own the prompt copy.
-- **Migration cost:** Day. 8 call sites, each already at a CLI boundary; the gating predicate moves up one layer.
+### G5 — The agent-interaction surface is bound to the caller's process stdio, not contracted for an embedder
 
-#### F5 — Formatting helpers (`FormatSize`/`FormatAge`/`DirSize`) live in the `status` domain leaf; §2 says formatting is policy
+- **Severity:** MAJOR (it's the conversation half of the product's value, and the daemon can't consume it as-is)
+- **Where:** `IOStreams`, `TerminalSnapshot`, `Sandbox.Attach`/`SendInput`/`CaptureTerminal`, and
+  `preparePromptForStart(... stdin io.Reader ...)` in `internal/sandbox/lifecycle/lifecycle.go`.
+- **Observation:** Talking to the agent is a first-class consumer capability (the "converse" half of
+  the value prop), but the current seam (a) tangles two distinct concerns — live conversation and
+  glanceable observation — into one terminal-flavored surface, and (b) binds it to the *caller's*
+  `io.Reader/Writer` (`IOStreams`). The same caller-stdio coupling appears a third time in the prompt
+  path (`preparePromptForStart`'s `stdin`). The lived symptom: "talk to the agent" today requires
+  VS Code tunnel → in-sandbox shell → `tmux attach` — manual ceremony, because "attach to the agent's
+  terminal" isn't a first-class primitive.
+- **Why it bothers me:** The agent is a TUI, so the terminal is **intrinsic** — this is *not* a
+  shape error to refactor into an event stream (correcting my own earlier framing; see D53). But
+  binding it to caller stdio means a daemon — the stated forcing function — cannot consume it: it
+  can't hand the engine an `io.Writer`; it needs a PTY bridged over a socket. So the most
+  value-bearing interactive capability is exactly the one a daemon must work *around*, not *through*.
+- **Greenfield alternative (D53):** Split into two complementary surfaces.
+  - **PTY bridge** for conversation — contract is "a terminal" (bytes in/out + resize),
+    attachable/multi-client/persistent, decoupled from caller stdio; tmux stays the substrate behind
+    it (persistence + multi-client re-attach). CLI wires it to the local terminal; a daemon wires it
+    to a websocket → xterm.js. `CaptureTerminal`/`TerminalSnapshot` become conveniences on this
+    primitive. VS Code tunnel demotes to optional full-IDE convenience.
+  - **Activity stream** for observation — `AgentStatus` + `LogSource` + monitor/hooks promoted to a
+    subscribable surface. This half genuinely *is* a clean event stream.
+  - **Structured file exchange** (found by audit — a third surface the two-surface model missed):
+    `store.FilesDir()` (`/yoloai/files/`), exposed by the mcpsrv daemon prototype as
+    `sandbox_files_list/read/write` and carrying a Q&A protocol (agent drops `question.json`,
+    consumer writes `answer.json`, then pokes via keystroke). Out-of-band structured side-channel
+    that complements the PTY because large/structured content is impractical to type. Needs a public
+    home (e.g. `Sandbox.Files()` sub-handle), not direct `store.FilesDir()` reach-in.
+  - **Prompt injection stays internal** — the initial task is the one-time `RunOptions.Prompt`; the
+    four injection sites are internal re-delivery across lifecycle events; no `SendPrompt` verb. The
+    file exchange is a distinct structured channel, NOT prompt delivery.
+- **Stdio-coupling confirmed by audit:** prompt reading binds to caller stdio via the `"-"` sentinel
+  (`invocation.ReadPrompt` → engine `input` → `os.Stdin` at the CLI). Same coupling as `Attach`/`SendInput`.
+- **Migration cost:** Real reshape, multi-day, and best decided *before* a wire protocol exists.
+  Independent of the read-model spine but shares the "decouple from caller stdio" theme.
 
-- **Severity:** MED
-- **Where:** `internal/sandbox/status/status.go:59` (`FormatAge`), `:74` (`DirSize`), `:93` (`FormatSize`).
-- **Observation:** §2 reserves human-readable string production for the policy/CLI layer. `FormatAge` ("3 days ago") and `FormatSize` ("1.4 GiB") are presentation concerns embedded in a domain read-model leaf. `DirSize` is fine in the domain (it's a measurement); `Format*` are not (they're rendering).
-- **Why it bothers me:** Same §2 boundary as F4, lower stakes. It's the kind of helper that looks harmless but is exactly why the domain leaf can't be reused by a non-CLI embedder without dragging a presentation opinion (units, "ago" phrasing, locale) along with it.
-- **Greenfield alternative:** Move `FormatAge`/`FormatSize` to `internal/cli/cliutil` (or a `render` helper). `DirSize` stays. The status leaf exposes raw `time.Time` / `int64`; the CLI renders.
-- **Migration cost:** Hours. Two functions, CLI-only callers.
+### G6 — First-run setup UX leaked into the library contract
 
-### Relocated god-files
+- **Severity:** MINOR
+- **Where:** `TmuxConfigClass`, `SetupChoice`, `SetupStatus`, interactive `SetupOptions`.
+- **Observation:** "Which class of tmux config" is pure CLI onboarding mechanism; no embedder
+  decides anything from it. `Doctor`/`Check` (health) are legitimately consumer-facing; the
+  interactive setup wizard types are pile-3 (D53) bleeding into the contract.
+- **Greenfield alternative:** Demote/hide the setup-wizard types; keep `Doctor`/`Check`.
+- **Migration cost:** Hours; folds into the same "hide pile-3 mechanism" sweep as G1(b).
 
-#### F6 — `lifecycle/lifecycle.go` is a relocated 1474-line / 46-function god-file spanning six concerns
+### G7 — The public surface is incomplete: ~7 consumer capabilities reach `internal/` directly with no public verb
 
-- **Severity:** HIGH-MED
-- **Where:** `internal/sandbox/lifecycle/lifecycle.go` (1474 lines, 46 funcs). Sibling: `internal/sandbox/create/create_prepare.go` (1025 lines, 3 pipelines).
-- **Observation:** F5 moved `lifecycle.go` into its own leaf but did not decompose it. One file still holds six distinct concerns: (1) Start/Stop/Destroy, (2) the Reset cluster (`resetOverlayDirs`/`resetCopyWorkdir`/`resetInPlace`/…), (3) Restart/relaunch (`recreateContainer`/`relaunchAgent`/`sendResumePrompt`/…), (4) config-patching (`patchConfigVscodeTunnel`/`patchConfigDebug`/`PatchConfigAllowedDomains` — three near-identical functions), (5) low-level process helpers (`tmuxCmd`/`tmuxShellPrefix`), (6) `rsyncDir`. `create_prepare.go` similarly bundles three pipelines (profile-merge, dir-setup, archetype/devcontainer).
-- **Why it bothers me:** A leaf package is supposed to be the unit of comprehension. A 1474-line leaf with six concerns is a god-package-in-miniature — F5 changed the *address* of the gravity, not its mass. The three near-identical `patchConfig*` functions are a missed dedup that signals the file grew by accretion. This is the same finding as the prior round's F5 (create.go god-file), recurring in the carve's output.
-- **Greenfield alternative:** Within the `lifecycle` leaf, split into `lifecycle.go` (Start/Stop/Destroy core), `reset.go`, `restart.go`, `config_patch.go` (and collapse the three `patchConfig*` into one parameterized helper). These are same-package file splits — no new import edges, no `Deps` plumbing — so the cost is low and the comprehension win is immediate. Same treatment for `create_prepare.go` → `prepare_profile.go` / `prepare_dirs.go` / `prepare_archetype.go`.
-- **Migration cost:** Day per file. Pure intra-package file moves + one dedup; tests unchanged.
+- **Severity:** MAJOR (this is G1/G2's leak seen from the consumption side — the surface isn't done)
+- **Where (capability → what it reaches for, no `yoloai.*` verb):**
+  - **Sandbox metadata / workdir-mode read** — `internal/cli/workflow/{apply,diff,baseline}.go` and
+    mcpsrv call `store.LoadMeta()` directly to branch on copy/overlay/rw mode. *The* load-bearing
+    gap; it's the `store.Meta` carve (G1) from the consumer side. Needs `Sandbox.Metadata()`.
+  - **Agent-log read** — `internal/mcpsrv/tools.go` `sandbox_log` → `store.AgentLogPath()`. Distinct
+    from `Sandbox.ContainerLogs()`. Part of the OBSERVE surface (G5). Needs `Sandbox.AgentLog()`.
+  - **File exchange** — `sandbox_files_*` → `store.FilesDir()`. The third interaction surface (G5).
+  - **Agent/model + backend discovery** — `internal/agent.AllAgentNames()`/`GetAgent()`,
+    `runtime.Descriptors()` (CLI `system agents`/`backends`/`help`). A daemon building a create-UI
+    must enumerate these. Needs `yoloai.Agents()`/`Backends()` discovery verbs.
+  - **Stored-prompt get/set** — `sandbox prompt` → `store.PromptFilePath()`. AGENT-noun read/edit.
+  - **Git tag** — `internal/cli/workflow/apply.go` → `workspace.CreateTag()` (not on `Workdir`).
+  - **Extensions** — CLI `x` → `internal/extension` (experimental; lower priority).
+- **Observation:** The mcpsrv daemon prototype — the canary for a real embedder — reaches into
+  `internal/sandbox/store` for 5+ of its ~13 tools. Every one of these compiles today *only because*
+  the depguard fence allows the leaf packages (G2). A separate-module daemon could not do any of it.
+- **Greenfield alternative:** Add the missing verbs (metadata read-model, agent-log, files sub-handle,
+  discovery, prompt get/set, Workdir tag), then tighten the depguard allow-list so the reach-ins fail
+  the lint. This is the concrete, enumerable definition of "Layer-1 actually complete" — and it is
+  *not* complete today, contra D52.
+- **Migration cost:** Folds into the read-model spine; each verb is small, the metadata one is the
+  same work as G1(b).
 
-### Cross-language and design-checkpoint hygiene
+## Carried forward from the prior round (status unverified — check before next empty)
 
-#### F7 — `AGENT_STATUS_SCHEMA_VERSION` is an unfenced cross-language constant (Go + Python), unlike its RUNTIME_CONFIG sibling which has an automated fence
+The 2026-05-30 Post-F5 Façade round's spine findings (F1/F2/F3/F8/F10) drove the Layer-1 work and
+are substantially actioned (façade fenced, `api_surface.go` retired, ARCHITECTURE rewritten). These
+off-spine items were **not** part of the spine and may still be open:
 
-- **Severity:** MED
-- **Where:** `internal/sandbox/status/status.go:213` (`const agentStatusSchemaVersion = 1`), `internal/runtime/monitor/sandbox-setup.py:129` (`AGENT_STATUS_SCHEMA_VERSION = 1`), referenced in `status-monitor.py:83`. Compare: `internal/sandbox/runtimeconfig/schema_version_test.go` fences `RUNTIME_CONFIG_SCHEMA_VERSION`.
-- **Observation:** The agent-status contract version is duplicated as a literal `1` in Go and Python with only a comment ("Must equal the AGENT_STATUS_SCHEMA_VERSION constants in sandbox-setup.py") binding them. There is no test that fails when they drift. The RUNTIME_CONFIG schema version had exactly this problem and the prior round's F25 fixed it with an automated cross-language check. The fix was applied to one of the two cross-language constants and not the other.
-- **Why it bothers me:** A schema-version constant whose entire job is to detect contract drift, that itself can silently drift, is the contract bug it was meant to prevent. The asymmetry (one fenced, one not) is worse than both-unfenced because it implies the class is handled.
-- **Greenfield alternative:** Extend the `schema_version_test.go` pattern (or a shared fence) to assert `agentStatusSchemaVersion` (Go) == `AGENT_STATUS_SCHEMA_VERSION` (parsed from the Python source) at `make check` time. Same mechanism as F25.
-- **Migration cost:** Hours. The test harness for the runtime-config fence already exists to copy.
-
-#### F8 — `api_surface.go` self-certifies its own deletion condition while sitting at ~55–60% drift; retire it
-
-- **Severity:** MED
-- **Where:** `api_surface.go` (2814 lines, `//go:build never`). Header (~line 38): "Once each is implemented on real types in W-L8b this file is deleted." general-principles §12 (design-is-a-hypothesis: "read it like a header for direction, never cite it as binding"); §8 (document-the-no / no half-finished).
-- **Observation:** The file's own stated lifecycle says it is deleted once the surface is implemented — and the surface *is* implemented (that's what the layering refactor did). Meanwhile it has drifted: `Status()`/`Files()`/`Wait`/`ProxyMCP`/`RestartOptions` appear in the design but not the real code; `Create` exists in real code but not the design; the sub-handle shape (Q-G) is only partly wired. It's a 2814-line uncompiled file that a reader can no longer trust as either spec (drifted) or history (it claims it should be gone).
-- **Why it bothers me:** §12 already warns it's non-binding, but a 2814-line non-binding file at 55% drift is a comprehension tax and a trap — the prior round had to repeatedly caveat "but the implementation didn't catch up." Keeping a design checkpoint past its self-declared expiry is the half-finished state §8 says to avoid. The valuable part — the Q-A…Q-Y resolution rationale — is the part worth preserving, and it's buried in a file flagged for deletion.
-- **Greenfield alternative:** Salvage the Q-block resolutions into `docs/dev/working-notes.md` as dated D-entries (they're design decisions with rationale — exactly what working-notes is for), then delete `api_surface.go`. ARCHITECTURE already documents the real surface; the public package's godoc is the live contract.
-- **Migration cost:** Half-day to extract the Q-blocks into working-notes; deletion is instant. (User explicitly raised api_surface.go — worth a direct decision.)
-
-### Doc / principle divergences (user asked to hear these)
-
-#### F9 — development-principles §2 documents stale module-root import paths
-
-- **Severity:** LOW
-- **Where:** `docs/dev/principles/development-principles.md` §2 (lines ~81–93) — lists layering with module-root paths `agent/`, `config/`, `runtime/`, `sandbox/`, `workspace/`, `extension/`.
-- **Observation:** Those packages all live under `internal/` now (`internal/sandbox`, `internal/runtime`, …). The principle that *governs* boundary discipline cites import paths that no longer exist, so a reader checking their code against §2 can't match the paths.
-- **Why it bothers me:** A principle doc that's stale on the exact thing it governs (import boundaries) undermines its own authority — and the prior round leaned on §2 heavily. Cheap to fix, high trust-cost to leave.
-- **Greenfield alternative:** Update §2's paths to the real `internal/...` layout and confirm the layer ordering still matches the F5 DAG.
-- **Migration cost:** Minutes.
-
-#### F10 — `ARCHITECTURE.md:49` asserts a single-path layering the code doesn't follow (see F2)
-
-- **Severity:** LOW (doc), but it's the load-bearing layering claim
-- **Where:** `docs/dev/ARCHITECTURE.md:49`.
-- **Observation:** Covered in F2 — the "CLI always goes through yoloai.Client/SystemClient" claim is contradicted by 42 direct `internal/sandbox` imports. Listed separately because the *doc* needs fixing regardless of which way F2's enforcement decision goes: either make it true (depguard) or rewrite it to describe reality.
-- **Greenfield alternative:** Resolve F2 first, then make this sentence match the chosen contract.
-- **Migration cost:** Minutes (follows F2).
-
-### Calibration notes (not findings — recorded so the next round doesn't re-flag)
-
-- **Python `sandbox-setup.py` (1332 lines) is still untested / not mypy-strict.** Pure surface (`setup_helpers.py` 204 + `tmux_io.py` 180) is ~28% of the Python. This is a known, accepted state (the imperative setup body resists unit testing). Not re-raising as a finding; noting it persists.
-- **Borderline seams that are fine as-is:** `runtime/tart` (the `tart_base.go` seam reads clean), `config` (`yaml_path.go` seam), `patch/apply.go` (`refs.go`/`baseline.go` seams). These were checked for the F1/F6 god-file pattern and do *not* exhibit it — they're cohesive at their current size.
-
-## Resolved direction (2026-05-30)
-
-The CLI↔sandbox discussion resolved into a committed architecture (see working-notes + `project_public_api_direction` memory):
-
-- **yoloAI is a library first.** The engine runs in-process. The CLI is a proof-of-concept consumer kept around to *keep the library honest* about completeness.
-- **A separate daemon app (own module) will embed the library** to expose REST + MCP; GUIs/agents consume that daemon over the wire. yoloAI itself never becomes a daemon or a thin wire client. ("Layer 3", deferred.)
-- **Committed now: "Layer 1"** — make the public Go surface complete enough that *every capability* is reachable through it, with the contract types lifted out of `internal/`.
-- **Forcing function:** a separate-module daemon physically cannot import `internal/`, so the public surface must be real. The CLI only keeps us honest if it is *constrained* to that surface — today it is not (42 files reach into `internal/sandbox`).
-- **Definition of done:** `internal/cli` *and* `internal/mcpsrv` compile with **zero `internal/sandbox` imports**, enforced by depguard. `internal/mcpsrv` is the closest prototype of the future daemon and is the canary.
-
-This reframes the ordering: F1/F2/F3/F10 are no longer "nice cleanups" — they are the layer-1 spine. The chosen mechanism is **relocate, not twin-and-adapt**: move the contract-owning leaves (`yoerrors`, status read-model, dir/option input types) from `internal/sandbox/*` to public package paths and repoint every importer (engine, CLI, mcpsrv) at the public leaf. That single move makes the types public *and* lets the CLI drop the façade — no adapter boilerplate, no public/private type drift.
+- **F6** — `internal/sandbox/lifecycle/lifecycle.go` (1474-line god-file, six concerns; three
+  near-identical `patchConfig*` to collapse) and `create/create_prepare.go` (three bundled pipelines)
+  — intra-package file splits, no new import edges.
+- **F7** — `AGENT_STATUS_SCHEMA_VERSION` is an unfenced cross-language (Go+Python) constant; its
+  RUNTIME_CONFIG sibling has an automated drift fence. Extend the fence.
+- **F9** — `development-principles.md` §2 lists stale module-root import paths (`sandbox/` etc.) that
+  now live under `internal/`.
 
 ## Recommended ordering
 
-**Spine — Layer 1 (do as a sequenced program; see `docs/dev/plans/`):**
-
-1. **F8** — Retire `api_surface.go`: salvage Q-blocks to working-notes, delete the file. Clears the drifted design checkpoint before reshaping the real surface. (Half-day.)
-2. **F4 + F5** — Move `Confirm` and `Format*` out of the domain into `cliutil`. Removes the two §2 policy violations and shrinks what has to be relocated. (1–2 days.)
-3. **F1 + F3 (relocate)** — Lift the contract leaves out of `internal/`: `yoerrors` → public errors package; status read-model + dir/option input types → public; finish the Option lift (`StartOptions`/`CloneOptions` stragglers) and de-dup the double `DirSpec`; surface the ~6 bypass operations on the Client. Delete the façade re-exports as each leaf moves. (Multi-week, incremental, each step independently green.)
-4. **F2 + F10** — Land the depguard fence (`internal/cli` + `internal/mcpsrv` denied `internal/sandbox`) and rewrite `ARCHITECTURE.md:49` to the now-true contract. This is the acceptance gate, not a prerequisite. (Day.)
-
-**Off-spine (independent, fold in opportunistically):**
-
-5. **F6 + F7** — Split `lifecycle.go`/`create_prepare.go` into intra-package files (collapse the three `patchConfig*`), and extend the schema-version fence to `AGENT_STATUS_SCHEMA_VERSION`. (1–2 days.)
-
-F9 (§2 stale paths) is a minutes-long doc fix to fold in whenever §2 is next touched.
+1. **G1(a)** — Fix the detector to descend through aliases. Watch it go red on `store.Meta`. Truth
+   before cleanup. (Hours.)
+2. **Decision (chat):** promote `store.Meta` to a public read-model now, or park it in
+   `f1KnownLeaks` as an explicit deferral. Correct the D52 note / memory either way — the
+   "FULLY COMPLETE, no deferrals" claim is overstated as it stands.
+3. **G1(b) + G2 + G7** — If promoting: build the carved `store.Meta` read-model AND the rest of the
+   missing verbs G7 enumerates (agent-log, files sub-handle, discovery, prompt get/set, Workdir tag),
+   then tighten the depguard allow-list (drop `store`; weigh `runtime`/`config` fences) so the
+   reach-ins fail the lint. This is the concrete definition of "Layer-1 complete." (Multi-day.)
+4. **G5** — Reshape the agent-interaction surface (PTY bridge + activity stream, decoupled from
+   caller stdio). Independent of the read-model spine, but decide it **before** a wire protocol
+   exists. (Multi-day.) **G6** folds in (hide setup-wizard pile-3) with G1(b)'s mechanism sweep.
+5. **G3 + G4** — Naming/consistency sweeps, independent, fold in opportunistically. (Hours each.)
+6. **Carried-forward F6/F7/F9** — verify status; action if still open.
