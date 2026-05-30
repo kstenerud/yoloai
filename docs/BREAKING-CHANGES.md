@@ -4,6 +4,27 @@ Tracks breaking changes made during beta. Each entry should be included in relea
 
 ## Unreleased
 
+### `yoloai.NewSystemClient` takes `SystemOptions` instead of `config.Layout`
+
+Go-embedder API change (layer-1 public-API work, A4); CLI behavior unchanged. The
+standalone admin-client constructor no longer names the internal `config.Layout`
+type, so external embedders can construct a `SystemClient` without importing
+`internal/` packages.
+
+**Previous behavior:** `yoloai.NewSystemClient(layout config.Layout) *SystemClient`
+— required naming the internal `config.Layout`, which external embedders cannot
+import.
+
+**New behavior:** `yoloai.NewSystemClient(opts yoloai.SystemOptions) (*SystemClient, error)`
+where `SystemOptions{DataDir, HomeDir, Env}`. The Layout is built internally
+(mirroring `NewWithOptions`); host-derived fields (HostUID/HostGID/ProcessIsRoot)
+come from the running process. Returns a `*UsageError` if `DataDir` is empty.
+
+**Migration:**
+- `yoloai.NewSystemClient(config.NewLayout(dir))` → `sc, err := yoloai.NewSystemClient(yoloai.SystemOptions{DataDir: dir})`
+- Pass `HomeDir` when `DataDir` is not directly inside `$HOME`; pass `Env` (e.g. a
+  snapshot of `os.Environ()`) when profile/config values use `${VAR}` interpolation.
+
 ### `yoloai system doctor` moves to `yoloai doctor`
 
 The host health-check command is promoted to a top-level verb as part of the

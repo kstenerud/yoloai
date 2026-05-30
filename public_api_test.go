@@ -219,14 +219,19 @@ func writeLeakLines(msg *strings.Builder, leaks map[string][]string) {
 // Format: package-path "." TypeName. Match must be exact (the test
 // computes the same key from the type's TypeName).
 var f1KnownLeaks = map[string]struct{}{
-	// internal/config types exposed by SystemClient construction and ProfileInfo.
-	"github.com/kstenerud/yoloai/internal/config.Layout":       {},
+	// config.MergedConfig: exposed by ProfileInfo.Merged / .Parent.
+	// Deliberately deferred — not aliased. A genuine fix means promoting
+	// the whole merged profile-config tree (MergedConfig's 21 fields plus
+	// the nested ProfileWorkdir / ProfileDir / ResourceLimits /
+	// NetworkConfig / AgentFilesConfig types) to hand-written public types
+	// with mapping, so external embedders can read every field — not just
+	// alias the top-level struct and leave the nested fields un-nameable
+	// (a leak the detector can't see, which would make this test lie).
+	// That promotion is its own milestone, tracked in plans/TODO.md as the
+	// "public profile-config API". Until then this stays a documented,
+	// honest deferral. When it lands, this entry comes off and the map is
+	// empty (F1 closed).
 	"github.com/kstenerud/yoloai/internal/config.MergedConfig": {},
-	// internal/sandbox Options + Info types. CLOSED in F1+F3+F2: CreateOptions
-	// (Create takes public yoloai.CreateOptions), StartOptions + Info
-	// (re-exported aliases), ResetOptions (hand-written public type), CloneOptions
-	// (A3: hand-written public yoloai.CloneOptions). Remaining: TmuxConfigClass.
-	"github.com/kstenerud/yoloai/internal/sandbox.TmuxConfigClass": {},
 }
 
 // internalTypeKey returns a stable identifier for a type IF it's a Named
@@ -235,6 +240,15 @@ var f1KnownLeaks = map[string]struct{}{
 // leak candidate." Pointers, slices, maps, etc. are unwrapped first.
 func internalTypeKey(t types.Type, marker string) string {
 	switch tt := t.(type) {
+	case *types.Alias:
+		// Go 1.22+ (default since 1.24) materializes `type X = pkg.Y` as a
+		// *types.Alias rather than collapsing it to the aliased *types.Named.
+		// Unwrap so an alias to an internal type keys identically to a direct
+		// reference. Without this, collectAliasedInternalTypes records nothing
+		// (every alias TypeName's Type() is *types.Alias), and any site that
+		// surfaces the underlying Named — e.g. a const whose value type is the
+		// aliased type — is falsely flagged as a leak the alias already covers.
+		return internalTypeKey(types.Unalias(tt), marker)
 	case *types.Named:
 		obj := tt.Obj()
 		if obj.Pkg() == nil { // builtin (error, etc.)

@@ -7,6 +7,20 @@ Create a plan file in this directory before starting implementation.
 
 Cross-cutting refactor work tracked separately from features. See [architecture-remediation.md](architecture-remediation.md), which itself references the audit at [../architecture-audit-2026-05.md](../architecture-audit-2026-05.md). Touches the Go↔Python boundary, the `runtime.Runtime` interface, dependency direction, error patterns, and slog conventions.
 
+### Public profile-config API (closes the last F1 leak)
+
+The final `f1KnownLeaks` entry — `config.MergedConfig`, exposed via
+`yoloai.ProfileInfo.Merged`/`.Parent` — is deliberately deferred (see
+[layer1-public-api.md](layer1-public-api.md) A4, working-notes D48). Closing it
+honestly means promoting the full merged profile-config tree to hand-written
+public types: `MergedConfig`'s 21 fields plus the nested `ProfileWorkdir`,
+`ProfileDir`, `ResourceLimits`, `NetworkConfig`, and `AgentFilesConfig` types,
+with `toPublic()` mapping, so external embedders can read every field (not just a
+top-level alias that leaves nested fields un-nameable). This is its own design
+pass — the public surface for profile configuration deserves intentional shape,
+not a mechanical mirror. When it lands, remove the `MergedConfig` entry from
+`f1KnownLeaks`; the map is then empty and F1 (Half A) is closed.
+
 ## Parallel Agent Workflows
 
 Based on [parallel agents research](../research/parallel-agents.md).

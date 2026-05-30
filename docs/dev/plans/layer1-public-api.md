@@ -37,11 +37,21 @@ complete.
 
 ## Current status
 
-- **`f1KnownLeaks` remaining (3):** `config.Layout`, `config.MergedConfig`
-  (SystemClient construction + ProfileInfo), `sandbox.TmuxConfigClass`. Closed in
-  A3 (2026-05-30): `sandbox.CloneOptions` (Clone re-rooted to public
-  `yoloai.CloneOptions`) and `patch.CommitInfoWithStat` (commits re-rooted to
-  `yoloai.CommitInfo` via `Workdir().Commits`).
+- **`f1KnownLeaks` remaining (1):** `config.MergedConfig` (ProfileInfo.Merged /
+  .Parent) — a documented, conscious deferral (see A4). Closed in A4 (2026-05-30):
+  `config.Layout` (SystemClient now built from public `yoloai.SystemOptions`) and
+  `sandbox.TmuxConfigClass` (was a detector false-positive — it is aliased; the
+  leak detector now unwraps `*types.Alias`, see below). Closed in A3 (2026-05-30):
+  `sandbox.CloneOptions` (Clone re-rooted to public `yoloai.CloneOptions`) and
+  `patch.CommitInfoWithStat` (commits re-rooted to `yoloai.CommitInfo` via
+  `Workdir().Commits`).
+- **Leak-detector fix (2026-05-30):** under Go 1.22+ `gotypesalias=1` (default since
+  1.24), `type X = pkg.Y` materializes as `*types.Alias`, which `internalTypeKey`
+  did not unwrap — so `collectAliasedInternalTypes` silently recorded no aliases.
+  Aliased func params/results passed only because a reference to the alias keyed to
+  `""`; but a `const` whose value type is the *underlying* aliased Named (the
+  `TmuxConfig*` consts) surfaced it as a false leak. `internalTypeKey` now unwraps
+  `*types.Alias` via `types.Unalias`, restoring the intended alias coverage.
 - **Prior 6-step plan (`f2-f1f3-implementation.md`):** Steps 1 (creation),
   4a–4f (Apply), 2 (Sandbox lifecycle handle), 3 (Workdir().Diff), and 5 (Workdir
   commits/baseline + tags) **DONE**. Step 6 (fence/docs — the C gate) **REMAINS**.
@@ -112,11 +122,25 @@ which auto-populates `TagInfo.Message` (so `applyTags` drops its sandbox-workdir
 dependency). `Client.Clone` re-rooted to public `yoloai.CloneOptions{Overwrite}`
 (Q-J: no `Force` API field). See working-notes D47.
 
-### A4 — config leaks
-`config.Layout`/`config.MergedConfig` (SystemClient construction, ProfileInfo) and
-`TmuxConfigClass`: hand-written public types **or** documented conscious-defers in
-`f1KnownLeaks` with a written reason. Decide per-type; don't auto-alias internal
-config structs into the public surface without intent.
+### A4 — config leaks ✅ *(done 2026-05-30; see working-notes D48)*
+Decided per-type (no auto-aliasing of internal config structs):
+- **`config.Layout` → hand-written public type (real fix).** `NewSystemClient` now
+  takes a public `yoloai.SystemOptions{DataDir, HomeDir, Env}` and builds the Layout
+  internally (mirroring `NewWithOptions`); the host-derived fields
+  (HostUID/HostGID/ProcessIsRoot) come from `fileutil` the same way, so embedders
+  never name `config.Layout`. Only `Env` must be threaded explicitly (§12 — the
+  CLI's licensed `os.Environ()` snapshot). One call site changed: the
+  `cliutil.NewSystemClient()` wrapper. **Breaking** (signature change) — see
+  BREAKING-CHANGES.md.
+- **`TmuxConfigClass` → not a real leak.** It is already aliased; the entry was a
+  leak-detector false-positive (the `gotypesalias` gap, fixed above). Removed from
+  the baseline once the detector unwraps `*types.Alias`.
+- **`config.MergedConfig` → documented conscious-defer.** Promoting the full merged
+  profile-config tree (21 fields + 5 nested config types) to hand-written public
+  types is its own milestone — the "public profile-config API" tracked in
+  `plans/TODO.md`. Aliasing only the top-level struct would leave nested fields
+  un-nameable (a leak the detector can't see), which would make the F1 test lie;
+  the branch's goal is a real, honest API, so we defer rather than alias.
 
 ### B4 — Parse/input at the boundary
 Collapse the double `DirSpec` (keep the root alias `yoloai.DirSpec`; repoint

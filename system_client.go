@@ -24,9 +24,9 @@ import (
 )
 
 // SystemClient scopes `yoloai system …` operations. Constructed via
-// Client.System() (for embedders that already have a Client) or
-// directly via NewSystemClient (for the CLI and embedders that
-// only need admin ops). Never errors at construction.
+// Client.System() (for embedders that already have a Client; never
+// errors) or directly via NewSystemClient (for the CLI and embedders
+// that only need admin ops; returns a *UsageError on empty DataDir).
 //
 // Decoupled from a specific backend on purpose: cross-backend
 // methods (DiskUsage, Prune, Build with AllBackends) iterate every
@@ -41,11 +41,54 @@ type SystemClient struct {
 	layout config.Layout
 }
 
-// NewSystemClient constructs a SystemClient from a layout. Used by
-// the CLI's system_* commands (which don't have a backend-specific
-// Client) and by embedders that need only admin operations.
-func NewSystemClient(layout config.Layout) *SystemClient {
-	return &SystemClient{layout: layout}
+// SystemOptions configures a standalone SystemClient. It mirrors the
+// host-rooted subset of Options that admin operations need; the
+// remaining Layout fields (HostUID/HostGID/ProcessIsRoot) are derived
+// from the running process the same way Options does, so embedders
+// never name the internal config.Layout.
+type SystemOptions struct {
+	// DataDir is the root yoloai data directory; all admin paths derive
+	// from it. REQUIRED — empty is rejected with a *UsageError (same
+	// contract as Options.DataDir; no implicit $HOME fallback, §12).
+	DataDir string
+
+	// HomeDir is the host user's home directory, used wherever admin
+	// operations expand "~" or resolve seed files. Optional — if empty,
+	// it is derived as filepath.Dir(DataDir) for the common case where
+	// DataDir lives directly inside $HOME (e.g. $HOME/.yoloai). Set it
+	// explicitly when DataDir lives elsewhere (e.g. /var/lib/yoloai).
+	HomeDir string
+
+	// Env is a snapshot of the process environment used to expand
+	// user-declared ${VAR} references in profile/config values. Optional
+	// — a nil/empty map means any ${VAR} reference is an unset-variable
+	// error, which is fine for the baked-in defaults (they contain none).
+	// The CLI passes its single licensed os.Environ() snapshot here so
+	// user config interpolation keeps working; library code never reads
+	// the live process env (§12).
+	Env map[string]string
+}
+
+// NewSystemClient constructs a standalone SystemClient for admin
+// operations that need no backend-specific Client. Used by the CLI's
+// `system …`/`profile …`/`config …` commands and by embedders that
+// only need admin ops. Embedders that already hold a Client should
+// call Client.System() instead.
+//
+// Returns a *UsageError if opts.DataDir is empty (matching
+// NewWithOptions); otherwise never fails.
+func NewSystemClient(opts SystemOptions) (*SystemClient, error) {
+	if opts.DataDir == "" {
+		return nil, yoerrors.NewUsageError("yoloai: SystemOptions.DataDir is required (no implicit $HOME fallback; see development-principles.md §12)")
+	}
+	var layout config.Layout
+	if opts.HomeDir != "" {
+		layout = config.NewLayoutFor(opts.DataDir, opts.HomeDir)
+	} else {
+		layout = config.NewLayout(opts.DataDir)
+	}
+	layout.Env = opts.Env
+	return &SystemClient{layout: layout}, nil
 }
 
 // System returns the admin sub-client for system-level operations.

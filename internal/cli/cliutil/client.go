@@ -143,7 +143,18 @@ func WithClient(cmd *cobra.Command, backend runtime.BackendName, fn func(ctx con
 // runtime at all (info, agents). For commands tied to one backend,
 // use WithClient instead.
 func NewSystemClient() *yoloai.SystemClient {
-	return yoloai.NewSystemClient(Layout())
+	l := Layout()
+	sc, err := yoloai.NewSystemClient(yoloai.SystemOptions{
+		DataDir: l.DataDir,
+		HomeDir: l.HomeDir,
+		Env:     l.Env,
+	})
+	if err != nil {
+		// Layout() always carries a non-empty DataDir (rootLayout or the
+		// $HOME/.yoloai fallback), so the only error path is unreachable.
+		panic(err)
+	}
+	return sc
 }
 
 // AttachToSandboxByName attaches the calling process's terminal to the

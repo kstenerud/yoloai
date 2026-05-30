@@ -966,6 +966,22 @@ Breaking (beta, single branch): `Client.ListCommits*`/`HasUncommittedChanges` an
 
 **Follow-up (resolved, same branch):** `DestroyOptions.Force` → **`AbandonUnappliedWork`** (owner-chosen over `AcceptActiveWork`: the name should highlight the dangerous thing — abandoning work — and reuse the "apply" nomenclature, since the overridden conditions are all *unapplied* work: running agent, dirty workdir, unapplied commits). Closes the last `Force` API field (Q-J). CLI `--force` maps onto it at the boundary.
 
+## D48 — A4: `config.Layout` leak closed via `SystemOptions`; `TmuxConfigClass` was a detector false-positive; `MergedConfig` consciously deferred
+
+**Date:** 2026-05-30. **Status:** Accepted (owner, 2026-05-30). **Implements** layer1-public-api.md A4. **Instance of** general-principles §12 (the public constructor takes the host-rooted subset and derives the rest; only `Env` — the licensed `os.Environ()` read — is threaded) and the branch's no-lying mandate (an honest deferral over an alias the detector can't fully verify).
+
+Decided per-type; the three baseline entries had three different right answers:
+
+- **`config.Layout` → hand-written public type (real fix).** `NewSystemClient(layout config.Layout)` becomes `NewSystemClient(opts yoloai.SystemOptions) (*SystemClient, error)` with `SystemOptions{DataDir, HomeDir, Env}`, building the Layout internally exactly like `NewWithOptions`. HostUID/HostGID/ProcessIsRoot come from `fileutil` (the §31 chokepoint) inside `config.NewLayout`/`NewLayoutFor`, identical to what the CLI captured before, so no behavior change; only `Env` can't be derived (§12) and is passed explicitly. Returns `*UsageError` on empty `DataDir`, matching `NewWithOptions`. One consumer changed: the `cliutil.NewSystemClient()` wrapper threads `Layout().DataDir/HomeDir/Env` and absorbs the (CLI-unreachable) error with a panic. All ~20 `system`/`profile`/`config` call sites go through that wrapper, untouched.
+
+- **`sandbox.TmuxConfigClass` → not a real leak; leak-detector bug fixed.** The type is aliased (`type TmuxConfigClass = sandbox.TmuxConfigClass`), so it was never an actual leak. Under Go 1.22+ `gotypesalias=1` (default since 1.24) an alias TypeName's `Type()` is `*types.Alias`, which `internalTypeKey` didn't unwrap — so `collectAliasedInternalTypes` recorded *no* aliases at all. Aliased func params/results passed only because a reference to the alias keyed to `""`; but the `TmuxConfig*` **consts** carry the *underlying* `sandbox.TmuxConfigClass` Named type, which surfaced as a false leak. Fix: `internalTypeKey` now unwraps `*types.Alias` via `types.Unalias`, restoring the intended "aliased internal types are covered" semantics. Entry removed from the baseline.
+
+- **`config.MergedConfig` → documented conscious-defer (not aliased).** Exposed via `ProfileInfo.Merged`/`.Parent`. A genuine fix means promoting the whole merged profile-config tree — `MergedConfig`'s 21 fields plus the nested `ProfileWorkdir`/`ProfileDir`/`ResourceLimits`/`NetworkConfig`/`AgentFilesConfig` types — to hand-written public types with mapping, so embedders can read *every* field. Aliasing only the top-level struct would pass the detector while leaving nested fields un-nameable (a leak the detector structurally can't see), making the F1 test lie. The branch's goal is a real, honest API, so this is deferred as its own milestone (the "public profile-config API", tracked in `plans/TODO.md`) rather than aliased. `f1KnownLeaks` carries it with a written rationale until then.
+
+**`f1KnownLeaks` now 1** (was 3): closed `config.Layout` and `sandbox.TmuxConfigClass`. Remaining: `config.MergedConfig` (deferred milestone).
+
+Breaking (beta, single branch): `yoloai.NewSystemClient` signature changed (see BREAKING-CHANGES.md).
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.
