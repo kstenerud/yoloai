@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/config"
-	"github.com/kstenerud/yoloai/internal/yoerrors"
+	"github.com/kstenerud/yoloai/yoerrors"
 )
 
 // PrepareRuntimeBase implements runtime.AppleSimulatorRuntimes. It resolves

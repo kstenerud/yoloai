@@ -20,7 +20,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/sandbox/provision"
 	"github.com/kstenerud/yoloai/internal/sandbox/state"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
-	"github.com/kstenerud/yoloai/internal/yoerrors"
+	"github.com/kstenerud/yoloai/yoerrors"
 )
 
 // secretsConsumedTimeout bounds how long buildAndStart waits for the

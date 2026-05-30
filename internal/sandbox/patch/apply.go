@@ -18,7 +18,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/internal/workspace"
-	"github.com/kstenerud/yoloai/internal/yoerrors"
+	"github.com/kstenerud/yoloai/yoerrors"
 )
 
 // execInSandbox runs cmd inside the sandbox's container and returns

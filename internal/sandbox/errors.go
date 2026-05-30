@@ -1,5 +1,5 @@
 // ABOUTME: Sentinel errors and typed error aliases (UsageError, ConfigError, etc.)
-// ABOUTME: re-exported from internal/yoerrors so callers import only sandbox/.
+// ABOUTME: re-exported from yoerrors so callers import only sandbox/.
 package sandbox
 
 import (
@@ -7,7 +7,7 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/sandbox/create"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
-	"github.com/kstenerud/yoloai/internal/yoerrors"
+	"github.com/kstenerud/yoloai/yoerrors"
 )
 
 // Sentinel errors for sandbox operations.
@@ -29,7 +29,7 @@ var (
 	ErrContainerNotRunning = errors.New("container is not running")
 )
 
-// Typed error aliases. The canonical definitions live in internal/yoerrors;
+// Typed error aliases. The canonical definitions live in yoerrors;
 // these aliases preserve the historical sandbox.XxxError call sites without
 // forcing every caller to import yoerrors directly.
 

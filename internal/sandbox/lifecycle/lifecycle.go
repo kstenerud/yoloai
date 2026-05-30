@@ -28,7 +28,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/sandbox/status"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/internal/workspace"
-	"github.com/kstenerud/yoloai/internal/yoerrors"
+	"github.com/kstenerud/yoloai/yoerrors"
 )
 
 const resumePreamble = "You were previously working on the following task and were interrupted. " +

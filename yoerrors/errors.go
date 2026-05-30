@@ -1,8 +1,9 @@
-// Package yoerrors provides typed errors used across yoloAI packages to drive
-// CLI exit codes. Lives in internal/ rather than config/ because runtime
-// backends (Docker, Podman, Seatbelt, Tart) need to surface these errors —
-// having them in config/ inverted the dependency direction (runtime → config),
-// which W7 of the architecture remediation plan corrects.
+// Package yoerrors provides the typed errors yoloAI surfaces across its
+// public and internal packages to drive CLI exit codes. It is a top-level,
+// dependency-light package (stdlib only, Docker errdefs style) so external
+// consumers — the public yoloai surface, the CLI, and a future daemon that
+// embeds the library — can match these errors without importing internal/
+// or linking the engine.
 package yoerrors
 
 // ABOUTME: Error types for usage and configuration problems.

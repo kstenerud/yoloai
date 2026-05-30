@@ -12,7 +12,7 @@ import (
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/fileutil"
-	"github.com/kstenerud/yoloai/internal/yoerrors"
+	"github.com/kstenerud/yoloai/yoerrors"
 	"gopkg.in/yaml.v3"
 )
 

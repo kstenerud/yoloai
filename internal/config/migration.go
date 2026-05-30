@@ -5,7 +5,7 @@ package config
 import (
 	"os"
 
-	"github.com/kstenerud/yoloai/internal/yoerrors"
+	"github.com/kstenerud/yoloai/yoerrors"
 )
 
 // CheckDefaultsDir verifies that layout.DefaultsDir() exists. If it doesn't,
