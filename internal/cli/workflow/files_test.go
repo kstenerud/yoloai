@@ -502,18 +502,6 @@ func TestFilesPath(t *testing.T) {
 	assert.Equal(t, filesDir+"\n", buf.String())
 }
 
-// --- validateExchangePath ---
-
-func TestValidateExchangePath_Valid(t *testing.T) {
-	assert.NoError(t, validateExchangePath("/a/b/files", "/a/b/files/foo.txt"))
-	assert.NoError(t, validateExchangePath("/a/b/files", "/a/b/files"))
-}
-
-func TestValidateExchangePath_Traversal(t *testing.T) {
-	assert.Error(t, validateExchangePath("/a/b/files", "/a/b/files/../secret"))
-	assert.Error(t, validateExchangePath("/a/b/files", "/etc/passwd"))
-}
-
 // --- helper functions ---
 
 func TestHasGlobMeta(t *testing.T) {
@@ -522,32 +510,6 @@ func TestHasGlobMeta(t *testing.T) {
 	assert.True(t, hasGlobMeta("[abc].txt"))
 	assert.False(t, hasGlobMeta("plain.txt"))
 	assert.False(t, hasGlobMeta("/path/to/file"))
-}
-
-func TestCollectExchangeGlobs_Deduplicates(t *testing.T) {
-	_, filesDir := setupFilesTest(t)
-	require.NoError(t, os.WriteFile(filepath.Join(filesDir, "a.txt"), []byte(""), 0600))
-
-	// Same file matched by two patterns
-	names, err := collectExchangeGlobs(filesDir, []string{"*.txt", "a.*"})
-	require.NoError(t, err)
-	assert.Equal(t, []string{"a.txt"}, names)
-}
-
-func TestCollectExchangeGlobs_EmptyOnNoMatch(t *testing.T) {
-	_, filesDir := setupFilesTest(t)
-
-	names, err := collectExchangeGlobs(filesDir, []string{"*.nope"})
-	require.NoError(t, err)
-	assert.Empty(t, names)
-}
-
-func TestExpandExchangeGlobs_ErrorOnNoMatch(t *testing.T) {
-	_, filesDir := setupFilesTest(t)
-
-	_, err := expandExchangeGlobs(filesDir, []string{"*.nope"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no files match")
 }
 
 func TestExpandHostGlobs_LiteralAndGlob(t *testing.T) {

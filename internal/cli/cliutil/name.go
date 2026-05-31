@@ -13,6 +13,14 @@ import (
 // EnvSandboxName is the environment variable used as default sandbox name.
 const EnvSandboxName = "YOLOAI_SANDBOX"
 
+// ValidateName checks that a sandbox name is well-formed (charset, no path
+// traversal). The CLI boundary owns name-format validation; commands that
+// resolve a name outside ResolveName (e.g. files' subcommand-first dispatch)
+// call this instead of reaching into the store package directly.
+func ValidateName(name string) error {
+	return store.ValidateName(name)
+}
+
 // ResolveName extracts the sandbox name from positional args, falling back
 // to YOLOAI_SANDBOX if no name argument was provided.
 // Returns the name and the remaining args (excluding the name).
