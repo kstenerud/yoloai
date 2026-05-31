@@ -8,18 +8,17 @@ import (
 
 	yoloai "github.com/kstenerud/yoloai"
 	agentpkg "github.com/kstenerud/yoloai/internal/agent"
-	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/stretchr/testify/assert"
 )
 
 func makeInfo(name string, status yoloai.Status, agent, profile, changes string) *yoloai.Info {
 	return &yoloai.Info{
-		Meta: &store.Meta{
+		Meta: &yoloai.Environment{
 			Name:      name,
 			Agent:     agentpkg.AgentName(agent),
 			Profile:   profile,
 			CreatedAt: time.Now(),
-			Workdir:   store.WorkdirMeta{HostPath: "/tmp/" + name},
+			Workdir:   yoloai.WorkdirInfo{HostPath: "/tmp/" + name},
 		},
 		Status:         status,
 		HasChanges:     changes,
@@ -29,7 +28,7 @@ func makeInfo(name string, status yoloai.Status, agent, profile, changes string)
 
 func makeBrokenInfo(name string) *yoloai.Info {
 	return &yoloai.Info{
-		Meta:           &store.Meta{Name: name},
+		Meta:           &yoloai.Environment{Name: name},
 		Status:         yoloai.StatusBroken,
 		HasChanges:     "-",
 		DiskUsageBytes: -1,

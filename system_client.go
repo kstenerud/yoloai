@@ -210,7 +210,7 @@ func (s *SystemClient) ListAcrossBackends(ctx context.Context) ([]*Info, []Backe
 	for i, name := range unavailable {
 		unavailableNames[i] = BackendName(name)
 	}
-	return infos, unavailableNames, nil
+	return infosFromStatus(infos), unavailableNames, nil
 }
 
 // Info returns the installation's paths and per-backend availability in one

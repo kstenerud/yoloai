@@ -75,7 +75,11 @@ func (s *Sandbox) CaptureTerminal(ctx context.Context, scrollback int) (Terminal
 
 // Inspect returns combined metadata and live state for the sandbox.
 func (s *Sandbox) Inspect(ctx context.Context) (*Info, error) {
-	return s.c.manager.Inspect(ctx, s.name)
+	si, err := s.c.manager.Inspect(ctx, s.name)
+	if err != nil {
+		return nil, err
+	}
+	return infoFromStatus(si), nil
 }
 
 // Dir returns the on-host directory holding the sandbox's persisted state

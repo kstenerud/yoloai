@@ -92,7 +92,7 @@ func printSandboxInfo(cmd *cobra.Command, name string, info *yoloai.Info) {
 }
 
 // printSandboxDirs prints workdir and auxiliary directory information.
-func printSandboxDirs(w io.Writer, meta *store.Meta) {
+func printSandboxDirs(w io.Writer, meta *yoloai.Environment) {
 	if meta.Workdir.MountPath != "" && meta.Workdir.MountPath != meta.Workdir.HostPath {
 		fmt.Fprintf(w, "Workdir:     %s → %s (%s)\n", meta.Workdir.HostPath, meta.Workdir.MountPath, meta.Workdir.Mode) //nolint:errcheck
 	} else {
@@ -108,7 +108,7 @@ func printSandboxDirs(w io.Writer, meta *store.Meta) {
 }
 
 // printSandboxNetwork prints network mode and port information.
-func printSandboxNetwork(w io.Writer, meta *store.Meta) {
+func printSandboxNetwork(w io.Writer, meta *yoloai.Environment) {
 	if meta.NetworkMode != "" {
 		if meta.NetworkMode == "isolated" && len(meta.NetworkAllow) > 0 {
 			fmt.Fprintf(w, "Network:     isolated (%s)\n", strings.Join(meta.NetworkAllow, ", ")) //nolint:errcheck
@@ -122,14 +122,14 @@ func printSandboxNetwork(w io.Writer, meta *store.Meta) {
 }
 
 // printSandboxResources prints resource limits and summary information.
-func printSandboxResources(w io.Writer, meta *store.Meta, info *yoloai.Info) {
+func printSandboxResources(w io.Writer, meta *yoloai.Environment, info *yoloai.Info) {
 	if meta.Resources != nil {
 		var parts []string
-		if meta.Resources.CPUs != "" {
-			parts = append(parts, meta.Resources.CPUs+" cpus")
+		if meta.Resources.CPULimit != "" {
+			parts = append(parts, meta.Resources.CPULimit+" cpus")
 		}
-		if meta.Resources.Memory != "" {
-			parts = append(parts, meta.Resources.Memory+" memory")
+		if meta.Resources.MemoryLimit != "" {
+			parts = append(parts, meta.Resources.MemoryLimit+" memory")
 		}
 		if len(parts) > 0 {
 			fmt.Fprintf(w, "Resources:   %s\n", strings.Join(parts, ", ")) //nolint:errcheck

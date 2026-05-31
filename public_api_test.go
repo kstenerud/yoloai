@@ -224,13 +224,13 @@ func writeLeakLines(msg *strings.Builder, leaks map[string][]string) {
 // eyes-open deferral — NOT because the surface is leak-free. F1 is therefore
 // NOT closed; this corrects the D52 "FULLY COMPLETE, no deferrals" claim.
 //
+// G1(b)-1 carved the load-bearing store.Meta leak: yoloai.Info is now a
+// hand-written struct whose Meta is the public Environment read-model (see
+// environment.go), so store.Meta no longer appears here. The remaining
+// entries are the doctor/capability read-model, carved next in G1(b)-2.
+//
 // Each entry is reachable by an external embedder holding the aliased public
 // type:
-//   - store.Meta: exposed via yoloai.Info.Meta, returned by Client.Run/List,
-//     Sandbox.Inspect, and SystemClient.ListAcrossBackends (the four central
-//     entry points). The load-bearing leak; G1(b) carves it into a public
-//     read-model. Iceberg of nested internals: WorkdirMeta, DirMeta, DirMode,
-//     runtime.IsolationMode/BackendName, agent.AgentName, config.ResourceLimits.
 //   - caps.Availability: exposed via yoloai.BackendReport.Availability.
 //   - caps.CheckResult: exposed via yoloai.BackendReport.Results (the
 //     doctor/capability read-model; same carve class).
@@ -242,7 +242,6 @@ func writeLeakLines(msg *strings.Builder, leaks map[string][]string) {
 // Format: package-path "." TypeName. Match must be exact (the test
 // computes the same key from the type's TypeName).
 var f1KnownLeaks = map[string]struct{}{
-	"github.com/kstenerud/yoloai/internal/sandbox/store.Meta":        {},
 	"github.com/kstenerud/yoloai/internal/runtime/caps.Availability": {},
 	"github.com/kstenerud/yoloai/internal/runtime/caps.CheckResult":  {},
 }

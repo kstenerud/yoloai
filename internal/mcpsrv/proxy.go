@@ -90,7 +90,7 @@ func (p *ProxyServer) ServeStdio(ctx context.Context) error {
 
 // ensureRunning guarantees the sandbox container is running, creating it if
 // needed. Returns the sandbox metadata for path template expansion.
-func (p *ProxyServer) ensureRunning(ctx context.Context) (*store.Meta, error) {
+func (p *ProxyServer) ensureRunning(ctx context.Context) (*yoloai.Environment, error) {
 	sb, sbErr := p.c.Sandbox(p.sandboxName)
 	if errors.Is(sbErr, yoloai.ErrSandboxNotFound) {
 		return p.createSandbox(ctx)
@@ -127,7 +127,7 @@ func (p *ProxyServer) ensureRunning(ctx context.Context) (*store.Meta, error) {
 }
 
 // createSandbox creates a new sandbox with the proxy's options.
-func (p *ProxyServer) createSandbox(ctx context.Context) (*store.Meta, error) {
+func (p *ProxyServer) createSandbox(ctx context.Context) (*yoloai.Environment, error) {
 	if p.opts.Workdir.Path == "" {
 		return nil, fmt.Errorf("sandbox %q does not exist — provide --workdir to create it", p.sandboxName)
 	}
@@ -172,7 +172,7 @@ func (p *ProxyServer) createSandbox(ctx context.Context) (*store.Meta, error) {
 // sandboxDir is the on-host parent directory holding the sandbox's state
 // (obtainable from yoloai.Client.SandboxDir(name)). It is used only when
 // meta.HostFilesystem is true to resolve host-side {files}/{cache}.
-func expandCmd(cmd []string, sandboxDir string, meta *store.Meta) ([]string, error) {
+func expandCmd(cmd []string, sandboxDir string, meta *yoloai.Environment) ([]string, error) {
 	filesDir := "/yoloai/files/"
 	cacheDir := "/yoloai/cache/"
 	if meta.HostFilesystem {
@@ -242,7 +242,7 @@ var injectedToolDefs = []map[string]any{
 	},
 }
 
-func (p *ProxyServer) run(ctx context.Context, in io.Reader, out io.Writer, _ *store.Meta, innerCmd []string) error {
+func (p *ProxyServer) run(ctx context.Context, in io.Reader, out io.Writer, _ *yoloai.Environment, innerCmd []string) error {
 	// Run the inner MCP server inside the sandbox via Client.StdioExec.
 	// Backends that don't implement runtime.StdioExecer (Tart, Seatbelt)
 	// surface as a *UsageError from StdioExec.

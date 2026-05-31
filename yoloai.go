@@ -272,11 +272,11 @@ func (c *Client) pollUntilDone(ctx context.Context, name string, progress func(s
 		}
 		switch info.Status {
 		case sandbox.StatusDone, sandbox.StatusFailed, sandbox.StatusStopped, sandbox.StatusRemoved:
-			return info, nil
+			return infoFromStatus(info), nil
 		case sandbox.StatusActive, sandbox.StatusIdle:
 			// still running — continue polling
 		default: // StatusBroken, StatusUnavailable
-			return info, nil
+			return infoFromStatus(info), nil
 		}
 		if progress != nil {
 			progress(name, string(info.Status))
@@ -305,7 +305,11 @@ func (c *Client) Run(ctx context.Context, opts RunOptions) (*Info, error) {
 	}
 
 	if !opts.Wait {
-		return c.manager.Inspect(ctx, opts.Name)
+		si, err := c.manager.Inspect(ctx, opts.Name)
+		if err != nil {
+			return nil, err
+		}
+		return infoFromStatus(si), nil
 	}
 
 	return c.pollUntilDone(ctx, opts.Name, opts.OnProgress)
@@ -313,7 +317,11 @@ func (c *Client) Run(ctx context.Context, opts RunOptions) (*Info, error) {
 
 // List returns info for all sandboxes.
 func (c *Client) List(ctx context.Context) ([]*Info, error) {
-	return c.manager.List(ctx)
+	sis, err := c.manager.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return infosFromStatus(sis), nil
 }
 
 // Clone copies an existing sandbox's state into a new sandbox. The runtime

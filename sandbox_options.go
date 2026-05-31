@@ -7,10 +7,17 @@ package yoloai
 import "github.com/kstenerud/yoloai/internal/sandbox"
 
 // Info is the combined metadata + live state returned by Sandbox.Inspect /
-// Client.List. Re-exported (type alias) from internal/sandbox so embedders can
-// hold the result without importing internal packages. A richer hand-written
-// Info surface (re-exporting Meta / AgentStatus) is a separate follow-up.
-type Info = sandbox.Info
+// Client.List. Hand-written (not a type alias) so its Meta field is the public
+// Environment read-model rather than the internal store.Meta — embedders can
+// hold the full result without naming any internal type. Built from the
+// internal status.Info at the library boundary via infoFromStatus.
+type Info struct {
+	Meta           *Environment `json:"meta"`
+	Status         Status       `json:"status"`
+	AgentStatus    AgentStatus  `json:"agent_status,omitempty"`
+	HasChanges     string       `json:"has_changes"`
+	DiskUsageBytes int64        `json:"disk_usage_bytes"`
+}
 
 // Status is a sandbox's lifecycle state. Re-exported (type alias) from
 // internal/sandbox; the constants below are the closed set of values.
