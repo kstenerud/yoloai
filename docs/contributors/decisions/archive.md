@@ -662,7 +662,7 @@ Moving DiagHint/TmuxSocket would be pure churn (no backend drops them) and there
 
 ## D32 — Self-healing cleanup: classify sandbox dirs by recoverability; promote doctor to top-level
 
-**Date:** 2026-05-28. **Status:** Accepted. **Context:** Broken sandbox dirs, stale lock files, orphaned backend resources, and multi-GB backend caches accumulate over time; an end user has no way to know where any of it lives or how to clean it safely. The design lives in `docs/contributors/design/plans/system-repair-cleanup.md` (phases 0–5).
+**Date:** 2026-05-28. **Status:** Accepted. **Context:** Broken sandbox dirs, stale lock files, orphaned backend resources, and multi-GB backend caches accumulate over time; an end user has no way to know where any of it lives or how to clean it safely. The design lives in `docs/contributors/archive/plans/system-repair-cleanup.md` (phases 0–5).
 
 **Decision.** `SystemClient.Prune` classifies every dir under `sandboxes/` by **recoverability, not brokenness**, and the bulk path only ever *removes* zero-stakes items. The classifier crosses the `store.LoadMeta` failure kind with a meta-independent probe `sandbox.ProbeWorkData` (copy mode: `detectChanges` on `work/<enc>/.git`; overlay mode: non-empty `work/<enc>/upper/` — both host-side, no container):
 

@@ -5,7 +5,7 @@
 
 ## Current State
 
-Design document is complete at `docs/contributors/design/ios-testing.md` with commit history:
+Design document is complete at `docs/contributors/archive/design/ios-testing.md` with commit history:
 - `fc20a92` - Include iOS testing examples directly in CLAUDE.md
 - `32afbeb` - Resolve open questions for iOS testing
 - `178798b` - Clarify VM disk usage vs image size
@@ -83,8 +83,8 @@ Success Metrics:
 ```
 
 **Files to update:**
-- `docs/contributors/design/ios-testing.md` - Goals section (line 14)
-- `docs/contributors/design/ios-testing.md` - Success Metrics section (line 400)
+- `docs/contributors/archive/design/ios-testing.md` - Goals section (line 14)
+- `docs/contributors/archive/design/ios-testing.md` - Success Metrics section (line 400)
 
 #### 2. Mount Timing - DESIGN CHANGE REQUIRED ✅
 
@@ -117,9 +117,9 @@ VM Start (buildRunArgs):
 **Benefit:** Installing Xcode after VM creation works automatically on next VM start!
 
 **Files to update:**
-- `docs/contributors/design/ios-testing.md` - Architecture section (lines 40-49)
-- `docs/contributors/design/ios-testing.md` - Implementation Details for tart.go
-- `docs/contributors/design/ios-testing.md` - Remove all "VM recreation required" notes
+- `docs/contributors/archive/design/ios-testing.md` - Architecture section (lines 40-49)
+- `docs/contributors/archive/design/ios-testing.md` - Implementation Details for tart.go
+- `docs/contributors/archive/design/ios-testing.md` - Remove all "VM recreation required" notes
 
 #### 3. Testing Section Completely Outdated
 
@@ -154,7 +154,7 @@ VM Start (buildRunArgs):
 ```
 
 **Files to update:**
-- `docs/contributors/design/ios-testing.md` - Testing Strategy section (lines 301-326)
+- `docs/contributors/archive/design/ios-testing.md` - Testing Strategy section (lines 301-326)
 
 #### 4. Dangerous `rm -rf` in Setup Script
 
@@ -188,7 +188,7 @@ if os.path.isdir(runtime_mount):
 ```
 
 **Files to update:**
-- `docs/contributors/design/ios-testing.md` - Setup Script section (lines 169-176)
+- `docs/contributors/archive/design/ios-testing.md` - Setup Script section (lines 169-176)
 
 ### Priority 2: Should Fix
 
@@ -212,7 +212,7 @@ for profile in ["~/.zprofile", "~/.bash_profile"]:
 ```
 
 **Files to update:**
-- `docs/contributors/design/ios-testing.md` - Setup Script section (line 165-167)
+- `docs/contributors/archive/design/ios-testing.md` - Setup Script section (line 165-167)
 
 #### 6. Error Handling Missing
 
@@ -234,7 +234,7 @@ if result.returncode != 0:
 ```
 
 **Files to update:**
-- `docs/contributors/design/ios-testing.md` - Setup Script section (lines 160-176)
+- `docs/contributors/archive/design/ios-testing.md` - Setup Script section (lines 160-176)
 - Add note about error logging strategy
 
 #### 7. Document VM Regeneration Behavior ✅ NOT NEEDED
@@ -337,7 +337,7 @@ $ tart exec yoloai-embsdk /Volumes/My\ Shared\ Files/m-Xcode/Contents/Developer/
 
 Investigation and design only - no code changes yet:
 - `docs/contributors/archive/investigations/ios-testing-investigation.md` (new)
-- `docs/contributors/design/ios-testing.md` (new)
+- `docs/contributors/archive/design/ios-testing.md` (new)
 - `runtime/tart/tart.go` (experimental code from investigation, needs cleanup)
 
 ## Key Decisions Made
@@ -352,6 +352,6 @@ Investigation and design only - no code changes yet:
 ## Resources
 
 - Investigation: `docs/contributors/archive/investigations/ios-testing-investigation.md`
-- Design: `docs/contributors/design/ios-testing.md`
+- Design: `docs/contributors/archive/design/ios-testing.md`
 - Tart docs: https://github.com/cirruslabs/tart
 - VirtioFS: https://virtio-fs.gitlab.io/

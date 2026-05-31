@@ -961,5 +961,5 @@ The symlink test moved a **local directory** and symlinked it, proving CoreSimul
 **Impact on design:**
 - `runtime/tart/tart.go`: Remove CoreSimulator/Volumes from auto-mount list
 - `runtime/monitor/sandbox-setup.py`: Add PrivateFrameworks symlink, remove Volumes symlink, add -runFirstLaunch
-- `docs/contributors/design/ios-testing.md`: Update to reflect hybrid approach
+- `docs/contributors/archive/design/ios-testing.md`: Update to reflect hybrid approach
 - `docs/GUIDE.md`: Add runtime copy instructions for users

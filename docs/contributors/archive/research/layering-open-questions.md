@@ -280,7 +280,7 @@ findings policy if encountered during implementation.
 
 #### exit-codes.md Open Questions
 
-**Source:** `docs/contributors/design/plans/exit-codes.md:271–277`
+**Source:** `docs/contributors/archive/plans/exit-codes.md:271–277`
 
 **The questions:** (1) Wrap vs. replace sentinel errors; (2) `--json` error envelope;
 (3) `golang.org/x/term` dependency for non-TTY guard.
@@ -524,7 +524,7 @@ surfaces. The fix is small and self-contained; there's no reason to migrate the 
 - `docs/contributors/design/plans/soc-refactor.md` — W12 detailed design
 - `docs/contributors/design/plans/capability-registry.md` — capability-registry design (implemented)
 - `docs/contributors/design/plans/mcp-server.md` — MCP server plan
-- `docs/contributors/design/plans/exit-codes.md` — exit code taxonomy
+- `docs/contributors/archive/plans/exit-codes.md` — exit code taxonomy
 - `docs/contributors/design/research/runtime-interface-spike.md` — W11 spike (complete; verdict: proceed)
 - `docs/contributors/decisions/README.md` — D-numbered decision log
 - `docs/contributors/principles/development-principles.md` — §2, §4, §5, §8, §9 most relevant

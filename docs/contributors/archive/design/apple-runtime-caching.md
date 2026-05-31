@@ -2,7 +2,7 @@
 
 **Status:** Design Proposal
 **Last updated:** 2026-03-26
-**Related:** `docs/contributors/design/ios-testing.md`
+**Related:** `docs/contributors/archive/design/ios-testing.md`
 
 ## Problem Statement
 
@@ -813,7 +813,7 @@ yoloai new test --runtime ios
 
 ## Implementation
 
-See implementation plan: `docs/contributors/design/plans/apple-runtime-caching.md`
+See implementation plan: `docs/contributors/archive/plans/apple-runtime-caching.md`
 
 ### Integration Points
 
@@ -1053,7 +1053,7 @@ Then: `yoloai new test --profile ios-dev` automatically includes runtimes.
 
 ## References
 
-- Related design: `docs/contributors/design/ios-testing.md`
+- Related design: `docs/contributors/archive/design/ios-testing.md`
 - Runtime investigation: `docs/contributors/archive/investigations/ios-testing-investigation.md`
 - Tart documentation: https://github.com/cirruslabs/tart
 - Apple Simulator runtime management: `man simctl`

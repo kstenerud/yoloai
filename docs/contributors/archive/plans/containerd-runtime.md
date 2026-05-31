@@ -1,6 +1,6 @@
 # Containerd Runtime Implementation Plan
 
-Design spec: [`docs/contributors/design/containerd-runtime.md`](../../design/containerd-runtime.md)
+Design spec: [`docs/contributors/archive/design/containerd-runtime.md`](../design/containerd-runtime.md)
 
 This is an iterative plan — phases are ordered by dependency, not by size. Each phase produces
 working, shippable code. No backwards compatibility handling: this is beta, and existing sandboxes

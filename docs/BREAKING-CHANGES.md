@@ -102,7 +102,7 @@ handle `*DirtyWorkdirError` (or pre-ack with `AllowDirtyWorkdir`); rename the
 ### `yoloai system doctor` moves to `yoloai doctor`
 
 The host health-check command is promoted to a top-level verb as part of the
-repair/cleanup surface (see `docs/contributors/design/plans/system-repair-cleanup.md`). It now
+repair/cleanup surface (see `docs/contributors/archive/plans/system-repair-cleanup.md`). It now
 reports reclaimable cruft and sandboxes holding unreviewed work in addition to
 backend capability status, and delegates remediation to `yoloai system prune`
 and `yoloai destroy`.

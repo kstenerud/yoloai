@@ -11,7 +11,7 @@ We verified that iOS runtime downloading via `xcodebuild -downloadPlatform` work
 - Users explicitly create runtime bases with `yoloai system runtime add`, seeing download progress
 - Users can list existing bases with `yoloai system runtime list`
 
-**Design reference:** `docs/contributors/design/apple-runtime-caching.md` has the complete spec
+**Design reference:** `docs/contributors/archive/design/apple-runtime-caching.md` has the complete spec
 
 ## Changes Required
 
@@ -455,7 +455,7 @@ Users now explicitly create runtime bases with progress visibility:
 Then create sandboxes quickly with cached bases:
   yoloai new test --runtime ios
 
-Implements design from docs/contributors/design/apple-runtime-caching.md
+Implements design from docs/contributors/archive/design/apple-runtime-caching.md
 
 Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
 ```
@@ -492,7 +492,7 @@ A: No. The download is too slow (8GB, several minutes) and gives no indication o
 
 ## References
 
-- Design: `docs/contributors/design/apple-runtime-caching.md`
+- Design: `docs/contributors/archive/design/apple-runtime-caching.md`
 - Verification: `docs/contributors/design/research/ios-runtime-download-verification.md`
 - Idiosyncrasies: `docs/contributors/backend-idiosyncrasies.md` (ditto vs download section)
 - Current runtime code: `runtime/tart/` directory

@@ -50,8 +50,6 @@ Inspection:
   yoloai sandbox <name> allow <domain>...       Allow additional domains in an isolated sandbox
   yoloai sandbox <name> allowed                 Show allowed domains for a sandbox
   yoloai sandbox <name> deny <domain>...        Remove domains from the allowlist
-  yoloai sandbox <name> mount add <host-path> [<container-path>]  Add a bind mount to a running sandbox (Docker/Podman, Linux only)
-  yoloai sandbox <name> mount rm <container-path>                 Remove a live-added bind mount
   yoloai sandbox <name> bugreport <file>        Write a bug report for a sandbox to a file
   yoloai ls                                      List sandboxes (shortcut for 'sandbox list')
   yoloai log <name>                              Show sandbox log (shortcut for 'sandbox log')
@@ -481,7 +479,16 @@ No runtime needed — pure file read from meta.json.
 
 Requires `network_mode == "isolated"`. Errors if a specified domain is not in the allowlist.
 
-### `yoloai sandbox <name> mount`
+### `yoloai sandbox <name> mount` — aspirational, not implemented
+
+> **Status: ASPIRATIONAL / likely infeasible — NOT implemented.** No `mount add`/`mount rm`
+> command exists in `internal/cli`. The design below is retained as a record of the idea and
+> its problems, not as a spec to build against. The `nsenter --mount --bind` mechanism is
+> doubtful in practice: a bind mount injected into a container's private mount namespace does
+> not propagate the way a `docker run -v` mount does, and the whole approach is already
+> unavailable on the two non-Linux/Docker-Desktop paths (Tart, Seatbelt, Docker Desktop on
+> macOS — see below). If live mount management is ever needed, revisit from scratch rather
+> than from this section. The supported path is to recreate the sandbox with the desired mounts.
 
 Commands for adding and removing bind mounts on a running sandbox, without tearing down the container and losing agent context.
 

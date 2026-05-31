@@ -513,7 +513,7 @@ This keeps `runtime/containerd` independent of `runtime/docker` at the Go import
 
 ## Implementation Plan
 
-See [`docs/contributors/design/plans/containerd-runtime.md`](plans/containerd-runtime.md) for the
+See [`docs/contributors/archive/plans/containerd-runtime.md`](../plans/containerd-runtime.md) for the
 detailed step-by-step implementation plan.
 
 ---

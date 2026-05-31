@@ -27,6 +27,7 @@ This is a tentative first cut — the broader greenfield doc reorg may move more
 - Shipped feature plans: `config-revamp`, `capability-registry`, `mcp-server`, `bugreport`, `podman-backend`.
 - The architecture-remediation program: `architecture-remediation` (its one release-gated remnant, W1b, lives in `../plans/release-migration.md`).
 - Other completed: `cli-critique-deferred`, `critique-followup` (the 31-finding critique tracker), `vm-isolation-debug`, `smoke-test-redesign`.
+- Shipped, drained from the live `../design/plans/` dir: `system-repair-cleanup` (prune/doctor surface), `tagging` (sandbox/workspace tags), `exit-codes` (exit-code taxonomy), `environment-archetypes` (the `archetype/` package), `apple-runtime-caching`, `containerd-runtime` (Phases 0–3 incl. devmapper).
 
 ### research/
 - Layering-epic spikes: `layering-cli-surface`, `layering-comparators`, `layering-leak-audit`, `layering-open-questions`, `mcp-sdk-evaluation`.
@@ -36,6 +37,7 @@ This is a tentative first cut — the broader greenfield doc reorg may move more
 
 ### design/
 - `layering`, `layering-greenfield` (superseded layering design specs).
+- Shipped design specs: `ios-testing` (self-marked "Implemented (Hybrid Approach)"), `apple-runtime-caching`, `containerd-runtime`.
 
 ### old/
 - `PLAN`, `devcontainer`, `json-flag`, and `phases/` (PHASE_0 … PHASE_8).

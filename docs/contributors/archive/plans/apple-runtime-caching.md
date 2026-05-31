@@ -1,6 +1,6 @@
 # Apple Runtime Caching Implementation Plan
 
-**Design:** `docs/contributors/design/apple-runtime-caching.md`
+**Design:** `docs/contributors/archive/design/apple-runtime-caching.md`
 **Status:** Not Started
 **Last updated:** 2026-03-26
 
