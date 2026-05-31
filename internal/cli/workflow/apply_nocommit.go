@@ -12,7 +12,6 @@ import (
 	"github.com/kstenerud/yoloai/internal/runtime"
 
 	"github.com/kstenerud/yoloai"
-	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/spf13/cobra"
 )
 
@@ -21,7 +20,7 @@ import (
 // function owns the CLI preview + confirmation + output. It previews via
 // DryRun (so the stat is exact, matching what the real apply lands), then —
 // after confirmation — applies for real.
-func applyNoCommit(cmd *cobra.Command, name string, paths []string, meta *store.Meta, yes, dryRun, includeUncommitted bool) error {
+func applyNoCommit(cmd *cobra.Command, name string, paths []string, env *yoloai.Environment, yes, dryRun, includeUncommitted bool) error {
 	backend := cliutil.ResolveBackendForSandbox(name)
 
 	var preview *yoloai.ApplyResult
@@ -48,7 +47,7 @@ func applyNoCommit(cmd *cobra.Command, name string, paths []string, meta *store.
 	if preview == nil {
 		if cliutil.JSONEnabled(cmd) {
 			return cliutil.WriteJSON(cmd.OutOrStdout(), applyResult{
-				Target: meta.Workdir.HostPath,
+				Target: env.Workdir.HostPath,
 				Method: "no-commit",
 			})
 		}

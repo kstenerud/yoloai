@@ -5,8 +5,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
-
-	"github.com/kstenerud/yoloai/internal/sandbox/store"
 )
 
 // makeDiffCmd creates a cobra command that properly sets ArgsLenAtDash
@@ -145,35 +143,4 @@ func TestParseDiffArgs_RefWithDashNoPaths(t *testing.T) {
 	ref, paths := parseDiffArgs(rest, cmd)
 	assert.Equal(t, "abc123", ref)
 	assert.Nil(t, paths)
-}
-
-// hasOverlayDirs tests
-
-func TestHasOverlayDirs_WorkdirOverlay(t *testing.T) {
-	meta := &store.Meta{
-		Workdir: store.WorkdirMeta{Mode: "overlay"},
-	}
-	assert.True(t, hasOverlayDirs(meta))
-}
-
-func TestHasOverlayDirs_AuxOverlay(t *testing.T) {
-	meta := &store.Meta{
-		Workdir: store.WorkdirMeta{Mode: "copy"},
-		Directories: []store.DirMeta{
-			{Mode: "rw"},
-			{Mode: "overlay"},
-		},
-	}
-	assert.True(t, hasOverlayDirs(meta))
-}
-
-func TestHasOverlayDirs_NoneOverlay(t *testing.T) {
-	meta := &store.Meta{
-		Workdir: store.WorkdirMeta{Mode: "copy"},
-		Directories: []store.DirMeta{
-			{Mode: "copy"},
-			{Mode: "rw"},
-		},
-	}
-	assert.False(t, hasOverlayDirs(meta))
 }

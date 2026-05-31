@@ -382,3 +382,42 @@ func (w *Workdir) Tags(ctx context.Context, opts TagsOptions) ([]TagInfo, error)
 	}
 	return tags, nil
 }
+
+// TagOutcome is the result of transferring one tag to the host target repo.
+// Re-exported (type alias) from internal/sandbox.
+type TagOutcome = sandbox.TagOutcome
+
+// TagTransferResult collects per-tag outcomes plus applied/skipped counts.
+// Re-exported (type alias) from internal/sandbox.
+type TagTransferResult = sandbox.TransferTagsResult
+
+// TransferTagsOptions configures Workdir.TransferTags.
+type TransferTagsOptions struct {
+	// Tags are the sandbox tags to re-create on the host target — typically the
+	// list from Tags(). An empty list is a no-op.
+	Tags []TagInfo
+	// SHAMap maps lowercase sandbox commit SHA → host commit SHA (as returned by
+	// a prior series Apply via ApplyResult.Commits). When empty, the map is built
+	// by matching commits (author/timestamp/subject) between the sandbox work
+	// copy and the host target — used when tags exist but no commits were applied
+	// this run.
+	SHAMap map[string]string
+}
+
+// TransferTags re-creates the agent's sandbox tags on the original host repo,
+// pointing each at the host commit its sandbox commit landed on. The library
+// owns the SHA mapping (or commit-matching when SHAMap is empty) and the git
+// tag plumbing; the caller renders the returned per-tag outcomes. ctx is
+// accepted for API symmetry; the current host-git implementation does not use
+// it (see Tags).
+func (w *Workdir) TransferTags(ctx context.Context, opts TransferTagsOptions) (*TagTransferResult, error) {
+	return sandbox.TransferTags(w.s.c.layout, w.s.name, opts.Tags, opts.SHAMap)
+}
+
+// TargetIsGitRepo reports whether the sandbox's original host work directory is
+// a git repository — the apply target. The CLI uses it to pick the non-git
+// fallback and to gate selective apply. ctx is accepted for API symmetry; the
+// current host-fs implementation does not use it.
+func (w *Workdir) TargetIsGitRepo(ctx context.Context) (bool, error) {
+	return sandbox.TargetIsGitRepo(w.s.c.layout, w.s.name)
+}

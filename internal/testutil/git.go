@@ -52,6 +52,17 @@ func RunGit(t *testing.T, dir string, args ...string) {
 	require.NoError(t, err, "git %v failed: %s", args, out)
 }
 
+// RunGitOutput runs an arbitrary git command in dir and returns its trimmed
+// stdout. Use for read-only queries (rev-list, rev-parse) in assertions.
+func RunGitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...) //nolint:gosec // G204: test helper with known command
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	require.NoError(t, err, "git %v failed", args)
+	return strings.TrimSpace(string(out))
+}
+
 // WriteFile writes content to name inside dir.
 func WriteFile(t *testing.T, dir, name, content string) {
 	t.Helper()

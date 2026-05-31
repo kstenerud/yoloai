@@ -13,7 +13,6 @@ import (
 
 	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
@@ -22,7 +21,7 @@ import (
 // commit history, so this is always a net-diff apply (ApplyModeNoCommit);
 // --include-uncommitted has no effect. The container must be running (the diff
 // is captured by running git inside it).
-func applyOverlay(cmd *cobra.Command, name string, meta *store.Meta, refs, paths []string, yes, dryRun bool) error {
+func applyOverlay(cmd *cobra.Command, name string, env *yoloai.Environment, refs, paths []string, yes, dryRun bool) error {
 	if len(refs) > 0 {
 		return yoerrors.NewPlatformError("selective ref apply is not supported for :overlay sandboxes")
 	}
@@ -34,7 +33,7 @@ func applyOverlay(cmd *cobra.Command, name string, meta *store.Meta, refs, paths
 	}
 	if preview == nil {
 		if cliutil.JSONEnabled(cmd) {
-			return cliutil.WriteJSON(cmd.OutOrStdout(), applyResult{Target: meta.Workdir.HostPath, Method: "overlay"})
+			return cliutil.WriteJSON(cmd.OutOrStdout(), applyResult{Target: env.Workdir.HostPath, Method: "overlay"})
 		}
 		_, e := fmt.Fprintln(cmd.OutOrStdout(), "No changes to apply")
 		return e

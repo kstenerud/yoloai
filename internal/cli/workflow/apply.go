@@ -10,10 +10,9 @@ import (
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+	"github.com/kstenerud/yoloai/internal/runtime"
 
 	"github.com/kstenerud/yoloai"
-	"github.com/kstenerud/yoloai/internal/sandbox/store"
-	"github.com/kstenerud/yoloai/internal/workspace"
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
@@ -115,28 +114,28 @@ func runApplyCmd(cmd *cobra.Command, args []string) error {
 	if len(refs) > 0 && noCommit {
 		return yoerrors.NewUsageError("--no-commit cannot be used with commit refs — they are mutually exclusive")
 	}
-	// Load metadata for target directory and mode validation
-	meta, err := store.LoadMeta(cliutil.Layout().SandboxDir(name))
+	// Load the sandbox read-model for target directory and mode validation.
+	env, err := cliutil.NewSystemClient().SandboxMetadata(name)
 	if err != nil {
 		return cliutil.SandboxErrorHint(name, err)
 	}
-	if meta.Workdir.Mode == "rw" {
+	if env.Workdir.Mode == yoloai.DirModeRW {
 		return yoerrors.NewUsageError("apply is not needed for :rw directories — changes are already live")
 	}
 
 	// --patches: export patch files instead of applying (handles all mount modes
 	// and ref subsets via Workdir().Export). Dispatched before the apply paths.
 	if patchesDir != "" {
-		return runExport(cmd, name, meta, refs, paths, patchesDir, includeUncommitted)
+		return runExport(cmd, name, env, refs, paths, patchesDir, includeUncommitted)
 	}
 
 	slog.Info("applying changes", "event", "sandbox.apply", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
-	if hasOverlayDirs(meta) {
-		return applyOverlay(cmd, name, meta, refs, paths, yes, dryRun)
+	if env.HasOverlayDirs() {
+		return applyOverlay(cmd, name, env, refs, paths, yes, dryRun)
 	}
 
 	if !cliutil.JSONEnabled(cmd) {
-		fmt.Fprintf(cmd.OutOrStdout(), "Target: %s\n\n", meta.Workdir.HostPath) //nolint:errcheck
+		fmt.Fprintf(cmd.OutOrStdout(), "Target: %s\n\n", env.Workdir.HostPath) //nolint:errcheck
 	}
 
 	// Best-effort agent-running warning
@@ -146,15 +145,15 @@ func runApplyCmd(cmd *cobra.Command, args []string) error {
 
 	// Selective apply: specific commit refs
 	if len(refs) > 0 {
-		return applySelectedCommits(cmd, name, refs, paths, meta, yes, dryRun, withTags)
+		return applySelectedCommits(cmd, name, refs, paths, env, yes, dryRun, withTags)
 	}
 
 	// --no-commit: land one unstaged patch (commits only unless --include-uncommitted).
 	if noCommit {
-		return applyNoCommit(cmd, name, paths, meta, yes, dryRun, includeUncommitted)
+		return applyNoCommit(cmd, name, paths, env, yes, dryRun, includeUncommitted)
 	}
 
-	return runApplyFormatPatch(cmd, name, paths, meta, yes, dryRun, includeUncommitted, withTags)
+	return runApplyFormatPatch(cmd, name, paths, env, yes, dryRun, includeUncommitted, withTags)
 }
 
 // parseApplyArgs separates ref arguments from path arguments.
@@ -192,22 +191,6 @@ func parseApplyArgs(rest []string, cmd *cobra.Command) (refs []string, paths []s
 	return nil, rest
 }
 
-// hasOverlayDirs returns true if any directory in the sandbox uses overlay mode.
-// Operates on the internal meta because the apply chain still threads *store.Meta
-// for its git-plumbing helpers; once that orchestration moves into the library
-// this collapses onto the public Environment.HasOverlayDirs.
-func hasOverlayDirs(meta *store.Meta) bool {
-	if meta.Workdir.Mode == "overlay" {
-		return true
-	}
-	for _, d := range meta.Directories {
-		if d.Mode == "overlay" {
-			return true
-		}
-	}
-	return false
-}
-
 // buildTagsByCommit builds a map of lowercase commit SHA → tag names from a tag list.
 func buildTagsByCommit(tags []yoloai.TagInfo) map[string][]string {
 	m := make(map[string][]string, len(tags))
@@ -218,34 +201,76 @@ func buildTagsByCommit(tags []yoloai.TagInfo) map[string][]string {
 	return m
 }
 
-// applyTags transfers tags to the host using the sandbox→host SHA map.
-// Tag.Message carries the annotated-tag message (populated by Workdir().Tags).
-// Returns counts of applied and skipped tags. No-ops if withTags is false.
-func applyTags(cmd *cobra.Command, tags []yoloai.TagInfo, shaMap map[string]string, targetDir string, withTags bool) (applied, skipped int) {
+// applyTags transfers tags to the host via the library's TransferTags verb,
+// using the sandbox→host SHA map. Returns counts of applied and skipped tags.
+// No-ops if withTags is false. Best-effort: a transfer failure is swallowed (a
+// provided SHA map can't trigger the matching path, so this won't error in
+// practice) and reported as zero counts. For the matching path use
+// transferTags directly so its error stays fatal.
+func applyTags(cmd *cobra.Command, name string, tags []yoloai.TagInfo, shaMap map[string]string, withTags bool) (applied, skipped int) {
 	if !withTags || len(tags) == 0 {
 		return 0, 0
 	}
-	isJSON := cliutil.JSONEnabled(cmd)
-	for _, tag := range tags {
-		hostSHA, ok := shaMap[strings.ToLower(tag.SHA)]
-		if !ok {
-			skipped++
-			if !isJSON {
-				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: tag %q skipped (target commit not applied)\n", tag.Name) //nolint:errcheck
-			}
-			continue
+	result, err := transferTags(cmd, name, tags, shaMap)
+	if err != nil || result == nil {
+		return 0, 0
+	}
+	return result.Applied, result.Skipped
+}
+
+// targetIsGitRepo reports whether the sandbox's host work directory is a git
+// repository — the apply target. Opens a client to query the library.
+func targetIsGitRepo(cmd *cobra.Command, name string, backend runtime.BackendName) (bool, error) {
+	var isGit bool
+	err := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+		sb, sbErr := c.Sandbox(name)
+		if sbErr != nil {
+			return sbErr
 		}
-		if createErr := workspace.CreateTag(targetDir, tag.Name, hostSHA, tag.Message); createErr != nil {
-			skipped++
-			if !isJSON {
-				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: tag %q: %v\n", tag.Name, createErr) //nolint:errcheck
-			}
-		} else {
-			applied++
-			if !isJSON {
-				fmt.Fprintf(cmd.OutOrStdout(), "Tag %q applied\n", tag.Name) //nolint:errcheck
-			}
+		var checkErr error
+		isGit, checkErr = sb.Workdir().TargetIsGitRepo(ctx)
+		return checkErr
+	})
+	return isGit, err
+}
+
+// transferTags re-creates the sandbox's tags on the host through
+// Workdir().TransferTags and prints the per-tag outcomes. An empty shaMap makes
+// the library match commits by metadata (the no-commits-applied path). Returns
+// the result so callers can surface counts; the error is fatal only for the
+// matching path (a provided map never matches).
+func transferTags(cmd *cobra.Command, name string, tags []yoloai.TagInfo, shaMap map[string]string) (*yoloai.TagTransferResult, error) {
+	backend := cliutil.ResolveBackendForSandbox(name)
+	var result *yoloai.TagTransferResult
+	err := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+		sb, sbErr := c.Sandbox(name)
+		if sbErr != nil {
+			return sbErr
+		}
+		var transferErr error
+		result, transferErr = sb.Workdir().TransferTags(ctx, yoloai.TransferTagsOptions{Tags: tags, SHAMap: shaMap})
+		return transferErr
+	})
+	if err != nil {
+		return nil, err
+	}
+	printTagOutcomes(cmd, result)
+	return result, nil
+}
+
+// printTagOutcomes renders the per-tag transfer results (human-mode only).
+func printTagOutcomes(cmd *cobra.Command, result *yoloai.TagTransferResult) {
+	if result == nil || cliutil.JSONEnabled(cmd) {
+		return
+	}
+	for _, o := range result.Outcomes {
+		switch {
+		case o.Applied:
+			fmt.Fprintf(cmd.OutOrStdout(), "Tag %q applied\n", o.Name) //nolint:errcheck
+		case o.Unmatched:
+			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: tag %q skipped (target commit not applied)\n", o.Name) //nolint:errcheck
+		default:
+			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: tag %q: %s\n", o.Name, o.Err) //nolint:errcheck
 		}
 	}
-	return applied, skipped
 }

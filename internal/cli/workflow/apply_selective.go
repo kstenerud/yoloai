@@ -13,8 +13,6 @@ import (
 	"github.com/kstenerud/yoloai/internal/runtime"
 
 	"github.com/kstenerud/yoloai"
-	"github.com/kstenerud/yoloai/internal/sandbox/store"
-	"github.com/kstenerud/yoloai/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -22,13 +20,17 @@ import (
 // the resolved commits (DryRun) for the summary/confirm, then replays them via
 // Workdir().Apply — the library resolves refs, replays the series, and advances
 // the baseline across the contiguous applied prefix.
-func applySelectedCommits(cmd *cobra.Command, name string, refs, paths []string, meta *store.Meta, yes, dryRun, withTags bool) error {
-	targetDir := meta.Workdir.HostPath
-	if !workspace.IsGitRepo(targetDir) {
+func applySelectedCommits(cmd *cobra.Command, name string, refs, paths []string, env *yoloai.Environment, yes, dryRun, withTags bool) error {
+	targetDir := env.Workdir.HostPath
+	backend := cliutil.ResolveBackendForSandbox(name)
+
+	isGit, err := targetIsGitRepo(cmd, name, backend)
+	if err != nil {
+		return err
+	}
+	if !isGit {
 		return fmt.Errorf("selective apply requires a git target directory — %s is not a git repository", targetDir)
 	}
-
-	backend := cliutil.ResolveBackendForSandbox(name)
 
 	preview, err := runSeriesApply(cmd, name, backend, refs, paths, true)
 	if err != nil {
@@ -128,7 +130,7 @@ func confirmSelectiveApply(cmd *cobra.Command, yes bool, targetDir string) (bool
 
 // finishSelectiveApply prints results, handles tags, and returns any follow-on error.
 func finishSelectiveApply(cmd *cobra.Command, name string, commitsApplied int, shaMap map[string]string, applyErr error, selectedTags []yoloai.TagInfo, targetDir string, withTags bool) error {
-	tagsApplied, tagsSkipped := applyTags(cmd, selectedTags, shaMap, targetDir, withTags)
+	tagsApplied, tagsSkipped := applyTags(cmd, name, selectedTags, shaMap, withTags)
 
 	if !cliutil.JSONEnabled(cmd) && !withTags {
 		unappliedTags := listSandboxTags(cmd, name, true)

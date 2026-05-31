@@ -12,16 +12,15 @@ import (
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
 	"github.com/kstenerud/yoloai"
-	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/spf13/cobra"
 )
 
 // runExport writes the sandbox's changes as patch files to dir instead of
 // applying them. It resolves copy-vs-overlay inside Workdir().Export; the CLI
 // only enforces the overlay running-precondition and prints the result.
-func runExport(cmd *cobra.Command, name string, meta *store.Meta, refs, paths []string, dir string, includeUncommitted bool) error {
+func runExport(cmd *cobra.Command, name string, env *yoloai.Environment, refs, paths []string, dir string, includeUncommitted bool) error {
 	backend := cliutil.ResolveBackendForSandbox(name)
-	overlay := hasOverlayDirs(meta)
+	overlay := env.HasOverlayDirs()
 
 	var result *yoloai.ExportResult
 	var hasUncommitted bool
