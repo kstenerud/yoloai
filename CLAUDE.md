@@ -28,7 +28,7 @@ Docs are organized by **role** — the layer you're operating in. Pick the tier,
 - `backend-idiosyncrasies.md` — **Read this before diagnosing any backend problem.** Catalogs observed behaviors that contradict official documentation, required non-obvious workarounds, or have caused bugs before. Includes a symptom index for fast lookup.
 - `archive/` — completed/superseded plans, research, investigations, and design specs kept for history (includes the original `old/PLAN.md` and phase notes). Not live references.
 
-**Doc conventions.** Every directory's `README.md` is its index. Filenames are lowercase kebab-case and name the subject, not its status. Three content-retirement patterns: **item-queues** keep active items in `unresolved-<topic>.md` and drain resolved ones to a co-located `resolved-<topic>.md` (critiques, questions, findings); **append-only logs** (`decisions/`) grow and age-split; **file-documents** (plans, specs, research spikes) move whole to `archive/` when complete.
+**Doc conventions.** Every directory's `README.md` is its index. Filenames are lowercase kebab-case and name the subject, not its status. Three content-retirement patterns: **item-queues** keep active items in `unresolved-<topic>.md` and drain each item to one of three co-located sinks — `resolved-<topic>.md` (done: answered/fixed/applied), `deferred-<topic>.md` (parked "not now"; carries a **`Trigger:`** revival condition and can flow back to unresolved), or `abandoned-<topic>.md` (permanently "won't do"; carries a **`Why:`**) — for critiques, questions, and findings; **append-only logs** (`decisions/`) grow and age-split; **file-documents** (plans, specs, research spikes) move whole to `archive/` when complete.
 
 ## Architecture (from design docs)
 
@@ -54,7 +54,7 @@ For Claude Code users, this is enforced automatically: `.claude/settings.json` r
 
 ## Workflow Conventions
 
-- **Critique cycle:** Write a critique in `docs/contributors/design/unresolved-critiques.md`, apply corrections to design docs and research files in `docs/contributors/design/research/`, then move the resolved critique to `docs/contributors/design/resolved-critiques.md` (the item-queue pattern). Findings discovered mid-work follow the same flow via `unresolved-findings.md` → `resolved-findings.md`.
+- **Critique cycle:** Write a critique in `docs/contributors/design/unresolved-critiques.md`, apply corrections to design docs and research files in `docs/contributors/design/research/`, then drain the item to one of the three sinks: `resolved-critiques.md` once applied, `deferred-critiques.md` if parked "not now" (must add a `Trigger:` line stating what revives it), or `abandoned-critiques.md` if dropped (must add a `Why:` line). A deferred item flows back to the unresolved file when its trigger fires. Findings discovered mid-work follow the same flow via `unresolved-findings.md` → `resolved-/deferred-/abandoned-findings.md`; open questions likewise via `unresolved-questions.md`.
 - **Research before design changes:** When a design question comes up (e.g., "should we use overlayfs?"), research it first in the appropriate file under `docs/contributors/design/research/` with verified facts, then update design docs based on findings.
 - **Factual accuracy matters:** Star counts, feature claims, and security assertions must be verified. Don't repeat marketing language or unverifiable numbers.
 - **Cross-platform awareness:** Always consider Linux, macOS (Docker Desktop + VirtioFS), and Windows/WSL. Note platform-specific tradeoffs explicitly.
