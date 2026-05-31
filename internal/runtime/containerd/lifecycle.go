@@ -733,7 +733,7 @@ const shimEscalationTimeout = 5 * time.Second
 // every yoloai cleanup path is resilient to the wedged-Kata-shim
 // pattern (containerd task reports RUNNING but the underlying VM is
 // dead and the shim is hung in vsock I/O ignoring even SIGKILL —
-// see docs/dev/backend-idiosyncrasies.md "Kata shim wedge").
+// see docs/contributors/backend-idiosyncrasies.md "Kata shim wedge").
 //
 // Returns nil on any path that successfully stopped the task. Only
 // returns a non-nil error if the escalation itself failed (couldn't

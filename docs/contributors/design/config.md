@@ -1,0 +1,281 @@
+> **Design documents:** [Overview](README.md) | [Commands](commands.md) | [Setup](setup.md) | [Security](security.md) | [Environments](environments.md) | [Research](research/README.md) | [research/](research/)
+
+## Components
+
+### 1. Docker Images
+
+**Base image (`yoloai-base`):** Based on Debian slim. Development-ready foundation with common tools, rebuilt occasionally. Debian slim over Ubuntu (smaller) or Alpine (musl incompatibilities with Node.js/npm).
+- Common tools: tmux, git, build-essential, cmake, clang, python3, python3-pip, python3-venv, curl, wget, jq, ripgrep, fd-find, less, file, unzip, openssh-client, pkg-config, libssl-dev
+- Go 1.24.1 (from official tarball)
+- Rust via rustup (stable toolchain, system-wide install)
+- golangci-lint
+- **Claude Code:** Node.js 22 LTS + npm installation (`npm i -g @anthropic-ai/claude-code`) — npm required, not native binary (native binary bundles Bun which ignores proxy env vars, segfaults on Debian bookworm AMD64, and auto-updates). npm is deprecated but still published and is the only reliable Docker/proxy path. See [Implementation Research](research/implementation.md) "Claude Code Installation Research"
+- **Codex:** Node.js npm package (`npm i -g @openai/codex`) — shares Node.js runtime already installed for Claude/Gemini
+- **Non-root user** (`yoloai`, UID/GID matching host user via entrypoint). Image builds with a placeholder user (UID 1001). At container start, the entrypoint runs as root: reads `host_uid`/`host_gid` from `/yoloai/config.json` via `jq`, runs `usermod -u <uid> yoloai && groupmod -g <gid> yoloai` (exit code 12 means "can't update /etc/passwd" — if the UID already matches the desired UID, this is a no-op; otherwise log a warning and continue), fixes ownership on container-managed directories, then drops privileges via `gosu yoloai`. Uses `tini` as PID 1 (`--init` or explicit `ENTRYPOINT`). Images are portable across machines since UID/GID are set at run time, not build time. Claude Code refuses `--dangerously-skip-permissions` as root; Codex does not enforce this but convention is non-root
+- **Entrypoint:** The Dockerfile, entrypoint scripts (`entrypoint.sh`, `entrypoint.py`, `sandbox-setup.py`, `status-monitor.py`), and default `tmux.conf` are embedded in the binary via `go:embed`. These are baked-in defaults — they are not written to disk and are not user-editable. The entrypoint reads all configuration from a bind-mounted `/yoloai/config.json` file containing `agent_command`, `startup_delay`, `ready_pattern`, `submit_sequence`, `tmux_conf`, `host_uid`, `host_gid`, and later `overlay_mounts`, `iptables_rules`, `setup_script`. No environment variables are used for configuration passing.
+
+**Profile images (`yoloai-<profile>`):** One per profile. Profile Dockerfiles must use `FROM yoloai-base`. The profile layers additional software and configuration on top while the yoloai runtime (entrypoint scripts, status monitor, sandbox setup) remains the baked-in version. Profiles without a Dockerfile use `yoloai-base` directly.
+
+```
+~/.yoloai/
+├── defaults/
+│   ├── config.yaml      ← user defaults (agent, model, isolation, etc.)
+│   └── tmux.conf        ← optional; overrides baked-in default
+└── profiles/
+    ├── go-dev/
+    │   ├── config.yaml  ← profile settings (merged over baked-in defaults)
+    │   ├── Dockerfile   ← FROM yoloai-base; RUN apt-get install ...
+    │   └── tmux.conf    ← optional
+    └── node-dev/
+        ├── config.yaml
+        └── Dockerfile
+```
+
+**Auto-build on demand:** `yoloai new --profile <name>` automatically builds any missing or stale images before creating the sandbox. If `yoloai-base` doesn't exist, it is built first. If the profile has a Dockerfile and `yoloai-<profile>` doesn't exist or is older than `yoloai-base`, it is rebuilt. Profiles without a Dockerfile skip this step and use `yoloai-base`. Only the images needed for *this* sandbox are built — other profiles are untouched. This eliminates the need for users to manually run `yoloai build` before first use.
+
+**Explicit rebuild:** `yoloai system build` with no arguments rebuilds the base image. `yoloai system build <profile>` rebuilds that profile's image (building base first if stale; error if profile has no Dockerfile). `yoloai system build --all` rebuilds everything (base first, then all profiles with Dockerfiles). Use explicit rebuild after editing a Dockerfile to pick up changes without creating a new sandbox.
+
+### 2. Config Files
+
+There are three layers of configuration, applied in order:
+
+1. **Baked-in defaults** — embedded in the binary. Not user-editable. Every setting has an explicit value here; this is the authoritative source of defaults. Profiles and user defaults override specific fields; everything else falls through to this layer.
+2. **User defaults (`~/.yoloai/defaults/config.yaml`)** — personal settings applied on top of baked-in defaults. Only active when `--profile` is not specified. Managed via `yoloai config get/set`.
+3. **Profile config (`~/.yoloai/profiles/<name>/config.yaml`)** — profile-specific settings, merged over baked-in defaults only. User defaults do not apply when a profile is active. See [Profiles](#3-profiles).
+
+**Generated scaffold:** On first run, `defaults/config.yaml` is written as a commented-out copy of the baked-in defaults — every setting is present, set to its default value, and commented out. Inline comments explain what each setting does and what values are accepted. The file is self-documenting: opening it shows the full set of available settings and their defaults without consulting external documentation. Users can edit the file directly (uncomment and change values) or use `yoloai config set`, which writes the live (uncommented) key alongside the commented example. `yoloai config reset` removes the live key, leaving the commented example intact.
+
+**Implementation note:** The inline documentation comments live in the baked-in defaults YAML (embedded in the binary). Scaffold generation is a simple text transformation: read the baked-in YAML line by line and prepend `# ` to any line that isn't already a comment or blank. The baked-in config is the single source of truth for both default values and field documentation — no separate template required.
+
+**First-run setup:** `EnsureSetup()` creates the `defaults/` directory and writes `defaults/config.yaml` via scaffold generation (above) if the file does not already exist. It does not write a Dockerfile, entrypoint scripts, or tmux.conf to `defaults/` — those are baked-in and not user-editable at this layer. If `defaults/config.yaml` already exists (user has run before, or migrated from `profiles/base/config.yaml`), it is left untouched.
+
+**Two load paths — implementation requirement:** Config loading must implement two distinct paths depending on whether a profile is active:
+
+- **No profile:** baked-in defaults → merge `defaults/config.yaml` → apply CLI flags
+- **Profile active:** baked-in defaults → merge `profiles/<name>/config.yaml` → apply CLI flags
+
+`defaults/config.yaml` must be entirely absent from the profile path — not as a fallback, not for any field. These are separate code paths, not a three-way merge.
+
+**Global config (`~/.yoloai/config.yaml`)** — user preferences that apply regardless of whether a profile is active:
+
+```yaml
+tmux_conf: default+host               # default+host | default | host | none (see setup.md)
+# model_aliases:                       # Custom model alias overrides
+#   fast: claude-haiku-4-latest
+```
+
+**User defaults (`~/.yoloai/defaults/config.yaml`)** — active only when `--profile` is not given:
+
+```yaml
+# os: linux                           # Guest OS: linux (default), mac; CLI --os overrides
+# container_backend: docker           # Container backend preference: docker, podman (applies to --isolation container/container-enhanced only)
+# tart:                               # Tart backend settings
+#   image:                            # Custom base VM image
+
+agent: claude                         # Agent to launch: aider, claude, codex, gemini, opencode; CLI --agent overrides
+# model:                              # Model name or alias; CLI --model overrides
+
+# agent_files: "${HOME}"              # string: base dir (agent subdir appended); list: specific files
+# mounts:                             # bind mounts added at container run time
+#   - ~/.gitconfig:/home/yoloai/.gitconfig:ro
+# auto_commit_interval: 0             # seconds between auto-commits in :copy dirs; 0 = disabled
+# ports: []                           # default port mappings
+env: {}                               # Environment variables forwarded to container via /run/secrets/
+# agent_args:                         # Per-agent default CLI args (inserted before -- passthrough)
+#   aider: "--no-auto-commits --no-pretty"
+#   claude: "--allowedTools '*'"
+# network:                            # Network isolation settings
+#   isolated: false                   # true to enable network isolation by default
+#   allow: []                         # additional domains to allow (additive with agent defaults)
+# resources:                          # Container resource limits
+#   cpus: 4                           # docker --cpus
+#   memory: 8g                        # docker --memory
+```
+
+Settings are managed via `yoloai config get/set` or by editing the file directly. Unknown fields in either config file are an error — `yoloai new` fails with a clear message listing the unrecognized keys.
+
+**Implemented settings:**
+
+- `os` selects the guest OS for all sandboxes. Valid values: `linux` (default), `mac`. Useful on macOS when you always want macOS sandboxes. CLI `--os` overrides config.
+- `container_backend` selects the Linux container backend. Valid values: `docker`, `podman`. Both work on Linux and macOS. Only applies when running Linux containers (`isolation: container` or `container-enhanced`) — `vm` and `vm-enhanced` use containerd, and `os: mac` uses Seatbelt or Tart. CLI `--backend` overrides config.
+- `tart.image` overrides the base VM image for the tart backend.
+- `tmux_conf` (global config) controls how user tmux config interacts with the container. Set by the interactive first-run setup. Values: `default+host`, `default`, `host`, `none` (see [setup.md](setup.md#tmux-configuration)).
+- `agent` selects the agent to launch. Valid values: `aider`, `claude`, `codex`, `gemini`, `opencode`. CLI `--agent` overrides config.
+- `model` sets the model name or alias passed to the agent. Empty means the agent uses its own default. CLI `--model` overrides config.
+- `env` sets environment variables forwarded to the container. Values are written as files in `/run/secrets/` (same mechanism as API keys). API keys take precedence if a name conflicts. Supports `${VAR}` expansion. Set via `yoloai config set env.NAME value`. In profiles, `env` merges with baked-in defaults (profile values win on conflict).
+- `agent_args` sets per-agent default CLI args. Map of agent name → arg string. Args are inserted between the model flag and CLI passthrough (`--` args), so passthrough always wins. Set via `yoloai config set agent_args.aider "--no-auto-commits"`. In profiles, `agent_args` merges with baked-in defaults (profile values win on conflict per agent key).
+- `resources` sets container resource limits. `resources.cpus` (e.g., `"4"`, `"2.5"`) maps to `--cpus`. `resources.memory` (e.g., `"8g"`, `"512m"`) maps to `--memory`. CLI `--cpus` and `--memory` override config. Profile overrides individual values.
+- `network` controls network isolation. `network.isolated: true` enables network isolation for all sandboxes. `network.allow` lists additional allowed domains (additive with agent defaults). Non-empty `network.allow` implies `network.isolated: true`. CLI `--network-isolated` and `--network-allow` override config.
+- `mounts` specifies bind mounts added at container run time (e.g., `~/.gitconfig:/home/yoloai/.gitconfig:ro`). In profiles, mounts are additive (merged with baked-in defaults).
+- `auto_commit_interval` sets the interval in seconds between automatic git commits in `:copy` directories inside the container. Disabled by default (`0`). When enabled, a background loop periodically runs `git add -A && git commit` in each `:copy` directory, providing recovery checkpoints for unattended runs. Only affects `:copy` dirs (`:overlay` has its own mechanism; `:rw` is the user's live repo). Profile overrides baked-in default.
+- `agent_files` controls what files are copied into the sandbox's `agent-state/` directory on first run (see below).
+
+Agents may define `AuthHintEnvVars` — environment variables that indicate authentication is configured through a non-API-key mechanism (e.g. local model server). When any of these vars are set (in host env or `env`), the auth check passes without requiring a cloud API key.
+
+**Use case: local models with Aider.** Aider can use local model servers (Ollama, LM Studio, vLLM) via environment variables. Example:
+
+```yaml
+env:
+  OLLAMA_API_BASE: http://host.docker.internal:11434
+```
+
+A "local-models" profile can bundle env, network config, and Dockerfile additions for a turnkey local-model setup.
+
+**`agent_files`** controls what files are copied into the sandbox's `agent-state/` directory on first run. Two forms: **string** — a base directory from which yoloai derives the agent-specific subdir (e.g. `"${HOME}"` → `~/.claude/` for Claude, `~/.gemini/` for Gemini; `"/shared/team-configs"` → `/shared/team-configs/.claude/` for Claude). **list** — specific files or directories to copy in verbatim (e.g. `["~/.claude/settings.json", "/shared/CLAUDE.md"]`). Omit entirely to copy nothing (safe default). Profile `agent_files` **replaces** the baked-in default entirely (not additive). Files placed by SeedFiles (auth credentials, settings) are never overwritten. Each agent defines exclusion patterns for session data and caches. First-run status is tracked in `state.json` (`agent_files_initialized`); `reset --clean` resets the flag so files are re-seeded on next start.
+
+**Planned settings (not yet parsed from config):**
+- (none currently — all designed config fields are implemented)
+
+#### Recipes (advanced)
+
+For advanced setups like Tailscale inside containers:
+
+```yaml
+# Example: add to defaults/config.yaml or a profile's config.yaml
+cap_add:
+  - NET_ADMIN
+devices:
+  - /dev/net/tun
+setup:                              # runs at container start
+  - tailscale up --authkey=${TAILSCALE_AUTHKEY}
+```
+
+`cap_add`, `devices`, and `setup` are available in both user defaults and profiles but not shown in the default config. `setup` commands run at container start before the agent launches. Within a profile, lists are additive (merged over baked-in defaults).
+
+**Environment variable interpolation in config files:** Config values in all `config.yaml` files (user defaults and profiles) support `${VAR}` interpolation from the host environment. Only the braced syntax `${VAR}` is recognized — bare `$VAR` is **not** interpolated and treated as literal text. This avoids the class of bugs where `$` in passwords, regex patterns, or shell strings is silently misinterpreted (a well-documented pain point with Docker Compose's unbraced `$VAR` support — see [Implementation Research](research/implementation.md)). Interpolation is applied after YAML parsing, so expanded values cannot break YAML syntax. Unset variables produce an error (fail-fast, not silent empty string). CLI path inputs also support `${VAR}` interpolation and `~/` expansion.
+
+**Tilde expansion in config files:** `~/` is expanded to `$HOME` in path-valued fields across all config files (`agent_files`, `mounts`, `workdir.path`, `directories[].path`). CLI path inputs also support `~/` expansion.
+
+### 3. Profiles
+
+Profiles live in `~/.yoloai/profiles/<name>/` and are always selected explicitly via `--profile <name>` on `yoloai new`. There is no default profile setting — omitting `--profile` uses user defaults (`~/.yoloai/defaults/`) instead.
+
+```
+~/.yoloai/profiles/<name>/
+├── config.yaml   ← profile settings (all optional; merged over baked-in defaults)
+├── Dockerfile    ← optional; must use FROM yoloai-base
+└── tmux.conf     ← optional; replaces baked-in default
+```
+
+**Profiles are self-contained.** Profile config merges over baked-in defaults only — user defaults (`~/.yoloai/defaults/config.yaml`) do not apply when a profile is active. This makes profiles fully deterministic: their behavior is the same regardless of who runs them or what their personal defaults are.
+
+**Personal defaults do not carry into profiles — no exceptions.** When a profile is active, settings from `defaults/config.yaml` are completely ignored: personal `mounts` (e.g. `~/.gitconfig`, `~/.ssh`), `agent_files`, `env`, `agent_args`, and everything else. If a profile sandbox needs `~/.gitconfig`, it must be listed in the profile's `mounts`. This is intentional: a profile that silently inherits personal state isn't reproducible. There is no "global mounts" escape hatch.
+
+**File resolution.** For each file (Dockerfile, tmux.conf), the profile directory is checked first; if absent, the baked-in default is used. For `config.yaml`, the baked-in default config is loaded first, then the profile's config.yaml is merged on top.
+
+**Name validation:** Profile names must match `^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`, max 56 characters. Profile names become Docker image tags (`yoloai-<profile>`), so the character restrictions ensure compatibility with Docker's naming rules.
+
+**Implemented profile fields:** `agent`, `model`, `os`, `container_backend`, `tart.image`, `env`, `agent_args`, `agent_files`, `ports`, `workdir`, `directories`, `resources`, `network`, `mounts`, `isolation`, `cap_add`, `devices`, `setup`, `auto_commit_interval`. Unknown fields are an error — `yoloai new` fails with a clear message listing the unrecognized keys. This catches typos and fields that have been renamed.
+
+**Machine-specific fields — fail loudly if prerequisites are absent.** `isolation` and `os` select runtime environments that may not be available on every machine. `isolation: vm` uses Kata Containers on Linux (requires KVM) and Tart on macOS (requires Tart installed). `isolation: vm-enhanced` is Linux-only and additionally requires Firecracker. `isolation: container-privileged` is Linux-only (Docker/Podman) and not supported on macOS. `os: linux` is the default and works everywhere. `os: mac` requires a macOS host; the specific backend depends on `isolation` (`container` → Seatbelt, `vm` → Tart). All other isolation levels may also have prerequisites (e.g. `container-enhanced` requires gVisor). If the required prerequisites are not present, `yoloai new` fails with a clear error — it does not silently fall back to a different mode. A profile that specifies `isolation` or `os` will not work everywhere.
+
+**Backend handling:**
+- `os` — optional. Selects the guest OS for the sandbox. Valid values: `linux` (default), `mac`. `linux` is the default and requires no special hardware. `mac` requires a macOS host; the backend depends on `isolation`: `container` uses Seatbelt, `vm` uses Tart. Fails loudly on non-macOS hosts or if the required backend is not installed. CLI `--os` overrides.
+- `container_backend` — optional preference. Only meaningful for `--isolation container` or `container-enhanced`; ignored for `vm`, `vm-enhanced`, and `--os mac`.
+- `Dockerfile` — optional. Used with Docker and Podman backends to build a `yoloai-<profile>` image. Must use `FROM yoloai-base`. Ignored with Tart and Seatbelt backends. When absent, Docker/Podman backends use `yoloai-base`.
+- `tart.image` — optional. Used only with the Tart backend. Ignored with other backends.
+
+**Sandbox metadata:** When a profile is used, `meta.json` records the profile name and the resolved image ref. Lifecycle commands use the stored image ref — profile changes only take effect on new sandboxes.
+
+**Profile image building:** The sandbox manager calls `Runtime.EnsureImage()` for the base image, then uses container-backend build logic for profile images when Docker or Podman is active and the profile has a Dockerfile. Tart and Seatbelt skip profile image building.
+
+**Profile image staleness:** A profile image is considered stale when: (a) it doesn't exist, (b) the profile's Dockerfile has changed since last build (checksum-tracked), or (c) `yoloai-base` has been rebuilt since the profile image was last built. Stale images are automatically rebuilt during `yoloai new --profile`.
+
+**`config.yaml` format:**
+
+```yaml
+# ~/.yoloai/profiles/my-project/config.yaml
+
+# --- All fields optional; merged over baked-in defaults ---
+# container_backend: docker               # preferred container backend; only applies to container/container-enhanced isolation
+agent: claude                             # override agent
+# model: sonnet                           # override model
+# tart:
+#   image: my-custom-vm                   # custom VM image (tart only)
+ports:
+  - "8080:8080"
+env:
+  GOMODCACHE: /home/yoloai/go/pkg/mod
+# agent_args:
+#   aider: "--no-auto-commits"
+# agent_files: "${HOME}"                  # string: base dir (agent subdir appended)
+# agent_files:                            # list: specific files/dirs
+#   - ~/.claude/settings.json
+#   - /shared/configs/CLAUDE.md
+# mounts:
+#   - ~/.ssh:/home/yoloai/.ssh:ro
+resources:
+  cpus: "4"
+  memory: 16g
+# cap_add:
+#   - NET_ADMIN
+# devices:
+#   - /dev/net/tun
+# setup:
+#   - tailscale up --authkey=${TAILSCALE_AUTHKEY}
+# network:
+#   isolated: true
+#   allow:
+#     - api.example.com
+# auto_commit_interval: 300
+# isolation: vm
+
+# --- Profile-specific fields ---
+workdir:
+  path: /home/user/my-app
+  mode: copy                              # copy, overlay, or rw
+  # mount: /opt/myapp                     # optional custom mount point
+directories:
+  - path: /home/user/shared-lib
+    mode: rw
+    mount: /usr/local/lib/shared
+  - path: /home/user/common-types
+    # default: read-only
+
+# --- Machine-specific fields ---
+# isolation: container                    # os=linux: Docker or Podman; os=mac: Seatbelt
+# isolation: container-enhanced           # os=linux: gVisor required; os=mac: not supported
+# isolation: container-privileged         # os=linux: Docker/Podman (--privileged, all caps; use for Docker-in-Docker); os=mac: not supported
+# isolation: vm                           # os=linux: KVM + Kata required; os=mac: Tart required
+# isolation: vm-enhanced                  # os=linux: KVM + Kata + Firecracker required; os=mac: not supported
+# os: linux                               # explicit default; Linux container/VM
+# os: mac                                 # requires macOS host; isolation determines backend (container→Seatbelt, vm→Tart)
+```
+
+CLI workdir **replaces** profile workdir. CLI `-d` dirs are **additive** with profile dirs.
+
+**WOMM (works-on-my-machine) risks.** Profiles are self-contained and reproducible within the bounds of what they specify. However, certain field values are inherently machine-specific or user-specific:
+
+- **Absolute paths** in `workdir.path` and `directories[].path` (e.g. `/home/alice/my-app`) only work on machines where those paths exist. This is intentional — it supports reproducible deployments where tooling like Ansible has placed files at known, deterministic paths. For personal use, prefer CLI flags to keep profiles shareable.
+- **`${VAR}` expansion** is applied at runtime from the host environment. A profile with `agent_files: "${HOME}"` or `env: {FOO: "${BAR}"}` produces different results on each machine. `isolation` and `os` constraints require specific host capabilities. yoloai provides the tools and reasonable default protections, but cannot guarantee portability of values that are inherently environment-specific. Share profiles knowing their machine-specific values require matching environments.
+
+**Merge rule:** Baked-in defaults → profile config.yaml → CLI flags. See the table below for per-field merge behavior; the general rules (scalars override, lists are additive, maps merge) have exceptions.
+
+| Field                  | Merge behavior                                                                        |
+|------------------------|---------------------------------------------------------------------------------------|
+| `container_backend`    | Profile overrides baked-in. Selects Linux container backend (docker/podman); works on Linux and macOS. Ignored for `vm`, `vm-enhanced`, and `os: mac`. CLI `--backend` overrides. |
+| `agent`                | Profile overrides baked-in. CLI `--agent` overrides.                                 |
+| `model`                | Profile overrides baked-in. CLI `--model` overrides.                                 |
+| `os`                   | Profile overrides baked-in. CLI `--os` overrides. Valid: `linux` (default), `mac`. `mac` requires macOS host; backend depends on `isolation` (`container` → Seatbelt, `vm` → Tart). Fails loudly on non-macOS hosts. |
+| `isolation`            | Profile overrides baked-in. CLI `--isolation` overrides. Valid: `container`, `container-enhanced`, `container-privileged`, `vm`, `vm-enhanced`. Backend is host-dependent (`vm` → Kata on Linux, Tart on macOS; `container-privileged` → Linux Docker/Podman only); fails loudly if prerequisites absent. |
+| `tart.image`           | Profile overrides baked-in.                                                           |
+| `ports`                | Additive                                                                              |
+| `env`                  | Merged (profile wins on conflict)                                                     |
+| `workdir`              | Profile provides default, CLI replaces                                                |
+| `directories`          | Profile provides defaults, CLI `-d` is additive                                       |
+| `agent_files`          | Profile **replaces** baked-in (no merge)                                              |
+| `mounts`               | Additive                                                                              |
+| `resources`            | Profile overrides individual values                                                   |
+| `cap_add`              | Additive                                                                              |
+| `devices`              | Additive                                                                              |
+| `setup`                | Additive                                                                              |
+| `network.isolated`     | Profile overrides baked-in. CLI overrides profile.                                    |
+| `network.allow`        | Additive                                                                              |
+| `auto_commit_interval` | Profile overrides baked-in                                                            |
+
+**`yoloai profile` commands:**
+
+- `yoloai profile create <name>` — Create a profile directory with a scaffold `config.yaml` containing commented-out examples of all supported fields. [DEFERRED] `--template <tpl>` flag with language-specific scaffolds (`go`, `node`, `python`, `rust`).
+- `yoloai profile list` — List all profiles in `~/.yoloai/profiles/`.
+- `yoloai profile delete <name>` — Delete a profile directory. Asks for confirmation if any sandbox references the profile.
+

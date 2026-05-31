@@ -115,7 +115,7 @@ type ExecResult struct {
 
 // BackendDescriptor bundles the static facts each backend declares.
 // Returned by Runtime.Descriptor(). Values are compile-time constants per
-// backend (verified by the W11 spike, docs/dev/research/runtime-interface-spike.md).
+// backend (verified by the W11 spike, docs/contributors/design/research/runtime-interface-spike.md).
 type BackendDescriptor struct {
 	Name                      BackendName     // BackendDocker, BackendPodman, BackendTart, BackendSeatbelt, BackendContainerd
 	Description               string          // one-line user-facing summary ("Linux containers; portable …")

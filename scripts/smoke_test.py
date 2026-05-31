@@ -12,7 +12,7 @@ overlay) have been moved to Go integration tests (sandbox/integration_test.go,
 internal/cli/integration_test.go).
 
 Requires ANTHROPIC_API_KEY and configured backends.
-See docs/dev/plans/smoke-test-v2.md for the full design.
+See docs/contributors/design/plans/smoke-test-v2.md for the full design.
 """
 from __future__ import annotations
 
@@ -901,7 +901,7 @@ def _preserve_failed_attempt(
 
 # Where the cited sections live, relative to repo root. Anchors are the GitHub
 # slugs of the headings in that file.
-_IDIO_DOC = "docs/dev/backend-idiosyncrasies.md"
+_IDIO_DOC = "docs/contributors/backend-idiosyncrasies.md"
 
 
 @dataclass

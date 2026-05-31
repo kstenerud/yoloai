@@ -5,7 +5,7 @@
 These exercise the parts of sandbox-setup.py that coordinate the main
 agent-launch thread with the background lifecycle thread (the code that
 the commit 5a060b9 race fix lives in). Tests use the sequenced-log
-pattern documented in `docs/dev/plans/architecture-remediation.md` (W4):
+pattern documented in `docs/contributors/archive/plans/architecture-remediation.md` (W4):
 each fake-tmux call appends `(seq, thread_label, cmd)` to a shared list,
 and ordering assertions run after both threads have completed via
 `thread.join()`. No `time.sleep` is used as a synchronization primitive.

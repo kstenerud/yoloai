@@ -2,7 +2,7 @@
 
 ## Context
 
-We verified that iOS runtime downloading via `xcodebuild -downloadPlatform` works successfully (see `docs/dev/research/ios-runtime-download-verification.md`). The download is slow (~8GB, takes several minutes), so we want to separate runtime base creation from sandbox creation.
+We verified that iOS runtime downloading via `xcodebuild -downloadPlatform` works successfully (see `docs/contributors/design/research/ios-runtime-download-verification.md`). The download is slow (~8GB, takes several minutes), so we want to separate runtime base creation from sandbox creation.
 
 **Current behavior:** When `yoloai new --runtime ios` is called, it automatically creates the runtime base if missing. This blocks sandbox creation for several minutes with no clear indication of progress.
 
@@ -11,7 +11,7 @@ We verified that iOS runtime downloading via `xcodebuild -downloadPlatform` work
 - Users explicitly create runtime bases with `yoloai system runtime add`, seeing download progress
 - Users can list existing bases with `yoloai system runtime list`
 
-**Design reference:** `docs/design/apple-runtime-caching.md` has the complete spec
+**Design reference:** `docs/contributors/design/apple-runtime-caching.md` has the complete spec
 
 ## Changes Required
 
@@ -455,7 +455,7 @@ Users now explicitly create runtime bases with progress visibility:
 Then create sandboxes quickly with cached bases:
   yoloai new test --runtime ios
 
-Implements design from docs/design/apple-runtime-caching.md
+Implements design from docs/contributors/design/apple-runtime-caching.md
 
 Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
 ```
@@ -479,7 +479,7 @@ Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
 ## Questions Already Answered
 
 **Q: Should we use xcodebuild -downloadPlatform or copy from VirtioFS?**
-A: Use xcodebuild -downloadPlatform. The ditto copy approach produces incomplete runtimes (see docs/dev/backend-idiosyncrasies.md and docs/dev/research/ios-runtime-download-verification.md).
+A: Use xcodebuild -downloadPlatform. The ditto copy approach produces incomplete runtimes (see docs/contributors/backend-idiosyncrasies.md and docs/contributors/design/research/ios-runtime-download-verification.md).
 
 **Q: Does xcodebuild show progress?**
 A: Yes, it outputs percentage and size to stdout/stderr using carriage returns. We just need to stream it to the terminal.
@@ -492,8 +492,8 @@ A: No. The download is too slow (8GB, several minutes) and gives no indication o
 
 ## References
 
-- Design: `docs/design/apple-runtime-caching.md`
-- Verification: `docs/dev/research/ios-runtime-download-verification.md`
-- Idiosyncrasies: `docs/dev/backend-idiosyncrasies.md` (ditto vs download section)
+- Design: `docs/contributors/design/apple-runtime-caching.md`
+- Verification: `docs/contributors/design/research/ios-runtime-download-verification.md`
+- Idiosyncrasies: `docs/contributors/backend-idiosyncrasies.md` (ditto vs download section)
 - Current runtime code: `runtime/tart/` directory
 - Current base creation: `sandbox/create.go` lines 310-357

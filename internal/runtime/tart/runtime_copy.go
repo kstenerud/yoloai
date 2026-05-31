@@ -11,7 +11,7 @@ import (
 )
 
 // CopyRuntimeToVM downloads and installs a runtime using xcodebuild -downloadPlatform.
-// This approach is verified to work correctly (see docs/dev/research/ios-runtime-download-verification.md).
+// This approach is verified to work correctly (see docs/contributors/design/research/ios-runtime-download-verification.md).
 // The ditto copy approach produced incomplete runtimes that failed to boot simulators.
 // VM must be running with Xcode configured.
 func CopyRuntimeToVM(ctx context.Context, vmName string, runtime RuntimeVersion) error {

@@ -181,7 +181,7 @@ Use `yoloai system agents` to list available agents.
 
 - **[Usage Guide](docs/GUIDE.md)** — commands, flags, workdir modes, configuration, security
 - **[Roadmap](docs/ROADMAP.md)** — upcoming features
-- **[Architecture](docs/dev/ARCHITECTURE.md)** — code navigation for contributors
+- **[Architecture](docs/contributors/architecture/README.md)** — code navigation for contributors
 
 Early access. Core workflow works, rough edges expected. [Feedback welcome.](https://github.com/kstenerud/yoloai/issues)
 

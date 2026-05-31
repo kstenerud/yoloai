@@ -61,7 +61,7 @@ func TestTart_RemoveIdempotent_NonexistentVM(t *testing.T) {
 //   - Clone takes minutes and consumes multi-GB of disk.
 //   - It requires the user has run `yoloai build` to produce the base image.
 //   - The current Tart runtime has a known issue with :copy workdir symlinks
-//     for temp directories (see docs/dev/plans/TODO.md §Tart Runtime).
+//     for temp directories (see docs/contributors/design/plans/README.md §Tart Runtime).
 //
 // On an Apple Silicon machine with the base image present, run with:
 //
@@ -75,5 +75,5 @@ func TestTart_FullVMLifecycle(t *testing.T) {
 	// this body should mirror TestSeatbelt_CreateInspectRemove: build an
 	// InstanceConfig, call Create, verify the VM exists in `tart list`,
 	// call Remove, verify it's gone.
-	t.Skip("Tart full lifecycle test pending docs/dev/plans/TODO.md §Tart Runtime fix")
+	t.Skip("Tart full lifecycle test pending docs/contributors/design/plans/README.md §Tart Runtime fix")
 }

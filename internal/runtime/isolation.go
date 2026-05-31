@@ -49,7 +49,7 @@ func IsolationSnapshotter(isolation IsolationMode) string {
 //     installed inside the sandbox. Does NOT work — a sandbox configured
 //     with --network-isolated would be wide open.
 //
-// The redesign in docs/design/network-isolation.md moves enforcement to the
+// The redesign in docs/contributors/design/network-isolation.md moves enforcement to the
 // host netns, which removes the dependency on the in-sandbox kernel. Until
 // that lands, the broken combination must be rejected at sandbox creation.
 func IsolationEnforcesInSandboxIptables(isolation IsolationMode) bool {

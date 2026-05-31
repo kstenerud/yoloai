@@ -2,7 +2,7 @@
 
 Core copy/diff/apply workflow ships today with Claude Code, Gemini CLI, Aider, Codex, and OpenCode agents. Docker, Tart, and Seatbelt backends are implemented. Network isolation, profiles, auxiliary directories, overlay mode, user-defined extensions, list filters, and profile recipes (`cap_add`, `devices`) are shipped.
 
-For the full list of designed-but-unimplemented features, see [dev/plans/TODO.md](dev/plans/TODO.md). For design specs, see [design/](design/).
+For the full list of designed-but-unimplemented features, see [dev/plans/TODO.md](contributors/design/plans/README.md). For design specs, see [design/](contributors/design/).
 
 ## Next up
 
@@ -46,7 +46,7 @@ not apply there. **Upgrade path:** once #14165 is resolved (Bun honors proxy
 env vars), switch the container backends to `curl -fsSL https://claude.ai/install.sh | bash`
 and drop the ~100 MB Node.js dependency from the base image. Until then npm
 remains the only proxy-capable install path. See
-`docs/dev/research/implementation.md` ("Claude Code Installation Research").
+`docs/contributors/design/research/implementation.md` ("Claude Code Installation Research").
 
 ## Future infrastructure
 

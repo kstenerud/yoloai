@@ -41,7 +41,7 @@ func tartIntegrationSetup(t *testing.T) (*sandbox.Engine, context.Context) {
 
 	// Skip Tart tests by default - they're experimental
 	// Known issue: Tart workdir symlink creation fails for temp directories
-	// Tracked: docs/dev/plans/TODO.md §Tart Runtime — "Skip symlink creation
+	// Tracked: docs/contributors/design/plans/README.md §Tart Runtime — "Skip symlink creation
 	// for :copy workdirs". Re-enable with YOLOAI_TEST_TART=1 on Apple Silicon
 	// to reproduce while iterating on the fix.
 	if os.Getenv("YOLOAI_TEST_TART") != "1" {

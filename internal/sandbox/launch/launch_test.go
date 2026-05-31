@@ -207,7 +207,7 @@ func TestParseMemoryString(t *testing.T) {
 //
 // gVisor's userspace netstack does not honor in-sandbox iptables rules, so
 // the current entrypoint-based enforcement is a no-op there. Until the
-// host-side filtering redesign lands (see docs/design/network-isolation.md)
+// host-side filtering redesign lands (see docs/contributors/design/network-isolation.md)
 // this combination must fail loudly.
 func TestBuildInstanceConfig_RejectsNetworkIsolatedWithGvisor(t *testing.T) {
 	st := &state.State{

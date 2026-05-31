@@ -8,32 +8,27 @@ Public beta. Breaking changes are allowed but must be tracked in `docs/BREAKING-
 
 ## Key Files
 
-User-facing docs live in `docs/`:
+Docs are organized by **role** — the layer you're operating in. Pick the tier, then read that dir's `README.md` to route.
+
+`docs/` — **users** (running yoloAI):
 
 - `docs/GUIDE.md` — Full usage reference: commands, flags, workdir modes, agents/models, configuration, sandbox state, security, development.
 - `docs/BREAKING-CHANGES.md` — Tracks breaking changes made during beta. Each entry documents previous behavior, new behavior, rationale, and migration steps. Include in release notes.
 - `docs/ROADMAP.md` — Future plans: agents, network isolation, profiles, overlayfs, etc.
 
-Design specs live in `docs/design/`:
+`docs/integrators/` — **integrators** (building on yoloAI as a library/daemon/API): public API reference and embedding guides. Currently a stub (`docs/integrators/README.md`); populated as the public surface stabilizes.
 
-- `docs/design/README.md` — Goal, value prop, architecture, directory layout, prerequisites, resolved decisions.
-- `docs/design/commands.md` — Command table, agent definitions, all command specs.
-- `docs/design/config.md` — Docker images, config.yaml format, recipes, profiles.
-- `docs/design/setup.md` — First-run experience, tmux configuration.
-- `docs/design/security.md` — Credential management, security considerations.
+`docs/contributors/` — **contributors** (working on yoloAI itself):
 
-Development docs live in `docs/dev/`:
+- `architecture/README.md` — Code navigation guide: package map, file index, key types, command→code map, data flows, "where to change" recipes, testing. (`overview.md` is the conceptual-layering companion.) Keep in sync when architecture changes.
+- `principles/README.md` — Index of principle docs (general / development / testing / security-sandbox). Principles explain **why** — cite the relevant section when you make a non-obvious design or code choice. A principle wins over any conflicting standard.
+- `standards/README.md` — Index of per-technology standards: `go.md`, `cli.md`, `shell.md`, `python.md`, `makefile.md`, `dockerfile.md`, `markdown.md`. Standards explain **what** and **how**.
+- `decisions/README.md` — Append-only decision log (D-numbered entries); `decisions/archive.md` holds the older ones. New non-trivial decisions land here first; principles and standards cite D-entries by number. Retroactive entries are flagged `(retroactive)`.
+- `design/` — the shaping cluster: feature/design specs (`README.md`, `commands.md`, `config.md`, `setup.md`, `security.md`, …), plus `design/plans/` (designed-but-unimplemented features; `plans/README.md` is the index) and `design/research/` (research topics; `research/README.md` is the index, with backing research for principles under `research/principles/`). The review queues `unresolved-{critiques,questions,findings}.md` (each with a `resolved-*.md` history sink) also live here.
+- `backend-idiosyncrasies.md` — **Read this before diagnosing any backend problem.** Catalogs observed behaviors that contradict official documentation, required non-obvious workarounds, or have caused bugs before. Includes a symptom index for fast lookup.
+- `archive/` — completed/superseded plans, research, investigations, and design specs kept for history (includes the original `old/PLAN.md` and phase notes). Not live references.
 
-- `docs/dev/ARCHITECTURE.md` — Code navigation guide: package map, file index, key types, command→code map, data flows, "where to change" recipes, testing. Keep in sync when architecture changes.
-- `docs/dev/principles/README.md` — Index of principle docs (general / development / testing / security-sandbox). Principles explain **why** — cite the relevant section when you make a non-obvious design or code choice. A principle wins over any conflicting standard.
-- `docs/dev/standards/README.md` — Index of per-technology standards: `GO.md`, `CLI.md`, `SHELL.md`, `PYTHON.md`, `MAKEFILE.md`, `DOCKERFILE.md`, `MARKDOWN.md`. Standards explain **what** and **how**.
-- `docs/dev/working-notes.md` — Append-only decision log (D-numbered entries). New non-trivial decisions land here first; principles and standards cite D-entries by number. Retroactive entries are flagged `(retroactive)`.
-- `docs/dev/RESEARCH.md` — Index of research documents. Detailed research split into topic files in `docs/dev/research/`: competitors, agents, security, sandboxing, implementation. Principles also have backing research in `docs/dev/research/principles/`.
-- `docs/dev/CRITIQUE.md` — Rolling critique document. After a critique pass, findings are applied to design docs and research files, then CRITIQUE.md is emptied for the next round.
-- `docs/dev/OPEN_QUESTIONS.md` — Questions encountered during design/implementation that need resolution.
-- `docs/dev/plans/TODO.md` — Consolidated list of designed-but-unimplemented features with design references.
-- `docs/dev/old/PLAN.md` — Historical implementation plan (phases, architecture decisions). Reference for how yoloAI was built.
-- `docs/dev/backend-idiosyncrasies.md` — **Read this before diagnosing any backend problem.** Catalogs observed behaviors that contradict official documentation, required non-obvious workarounds, or have caused bugs before. Includes a symptom index for fast lookup.
+**Doc conventions.** Every directory's `README.md` is its index. Filenames are lowercase kebab-case and name the subject, not its status. Three content-retirement patterns: **item-queues** keep active items in `unresolved-<topic>.md` and drain resolved ones to a co-located `resolved-<topic>.md` (critiques, questions, findings); **append-only logs** (`decisions/`) grow and age-split; **file-documents** (plans, specs, research spikes) move whole to `archive/` when complete.
 
 ## Architecture (from design docs)
 
@@ -59,13 +54,13 @@ For Claude Code users, this is enforced automatically: `.claude/settings.json` r
 
 ## Workflow Conventions
 
-- **Critique cycle:** Write a critique in `docs/dev/CRITIQUE.md`, apply corrections to design docs and research files in `docs/dev/research/`, mark critique as done, empty CRITIQUE.md for the next round.
-- **Research before design changes:** When a design question comes up (e.g., "should we use overlayfs?"), research it first in the appropriate file under `docs/dev/research/` with verified facts, then update design docs based on findings.
+- **Critique cycle:** Write a critique in `docs/contributors/design/unresolved-critiques.md`, apply corrections to design docs and research files in `docs/contributors/design/research/`, then move the resolved critique to `docs/contributors/design/resolved-critiques.md` (the item-queue pattern). Findings discovered mid-work follow the same flow via `unresolved-findings.md` → `resolved-findings.md`.
+- **Research before design changes:** When a design question comes up (e.g., "should we use overlayfs?"), research it first in the appropriate file under `docs/contributors/design/research/` with verified facts, then update design docs based on findings.
 - **Factual accuracy matters:** Star counts, feature claims, and security assertions must be verified. Don't repeat marketing language or unverifiable numbers.
 - **Cross-platform awareness:** Always consider Linux, macOS (Docker Desktop + VirtioFS), and Windows/WSL. Note platform-specific tradeoffs explicitly.
 - **Commit granularity:** One commit per logical change. Research, design updates, and critique application get separate commits.
-- **Backend debugging:** Before diagnosing a backend problem (containerd, Kata, CNI, Docker, Podman, Tart, Seatbelt), read `docs/dev/backend-idiosyncrasies.md`. Use the symptom index to jump directly to the relevant entry. Do not repeat investigation that is already documented there.
-- **Recording new idiosyncrasies:** When you discover a backend behavior that contradicts documentation, required a surprising workaround, or could cause the same bug again — add an entry to `docs/dev/backend-idiosyncrasies.md`. Add a row to the symptom index. Keep entries concise: symptom, explanation, fix, code pointer. Do this before committing the fix.
+- **Backend debugging:** Before diagnosing a backend problem (containerd, Kata, CNI, Docker, Podman, Tart, Seatbelt), read `docs/contributors/backend-idiosyncrasies.md`. Use the symptom index to jump directly to the relevant entry. Do not repeat investigation that is already documented there.
+- **Recording new idiosyncrasies:** When you discover a backend behavior that contradicts documentation, required a surprising workaround, or could cause the same bug again — add an entry to `docs/contributors/backend-idiosyncrasies.md`. Add a row to the symptom index. Keep entries concise: symptom, explanation, fix, code pointer. Do this before committing the fix.
 
 ## Critique Principles
 

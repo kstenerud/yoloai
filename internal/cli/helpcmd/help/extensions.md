@@ -58,4 +58,4 @@ CONSTRAINTS
   - Flag names/shorts must not collide with global flags (-v, -q, -y, -h).
   - The action field is required.
 
-More info: https://github.com/kstenerud/yoloai/blob/main/docs/design/commands.md#yoloai-x-extensions
+More info: https://github.com/kstenerud/yoloai/blob/main/docs/contributors/design/commands.md#yoloai-x-extensions

@@ -118,7 +118,7 @@ func buildInstanceConfig(desc runtime.BackendDescriptor, st *state.State, mnts [
 		// for --isolation=container-enhanced) do not honor iptables rules
 		// applied inside the sandbox, so the in-sandbox enforcement is a
 		// silent no-op. Refuse rather than lie. See
-		// docs/design/network-isolation.md for the redesign that removes this
+		// docs/contributors/design/network-isolation.md for the redesign that removes this
 		// limitation by moving enforcement to the host netns.
 		if !runtime.IsolationEnforcesInSandboxIptables(st.Isolation) {
 			return runtime.InstanceConfig{}, fmt.Errorf(
