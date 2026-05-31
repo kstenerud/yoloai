@@ -438,7 +438,7 @@ Request: `--runtime ios:26.2 --runtime tvos:26.1`
 
 ### Runtime Detection and Copying
 
-**IMPORTANT:** Runtime discovery must happen on the **host**, not inside the VM. CoreSimulator cannot discover runtimes from VirtioFS mounts (see `docs/dev/ios-testing-investigation.md` for details). The host must query available runtimes and coordinate copying them into the VM.
+**IMPORTANT:** Runtime discovery must happen on the **host**, not inside the VM. CoreSimulator cannot discover runtimes from VirtioFS mounts (see `docs/dev/archive/investigations/ios-testing-investigation.md` for details). The host must query available runtimes and coordinate copying them into the VM.
 
 #### Runtime Directory Mapping
 
@@ -1054,6 +1054,6 @@ Then: `yoloai new test --profile ios-dev` automatically includes runtimes.
 ## References
 
 - Related design: `docs/design/ios-testing.md`
-- Runtime investigation: `docs/dev/ios-testing-investigation.md`
+- Runtime investigation: `docs/dev/archive/investigations/ios-testing-investigation.md`
 - Tart documentation: https://github.com/cirruslabs/tart
 - Apple Simulator runtime management: `man simctl`

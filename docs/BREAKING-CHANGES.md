@@ -7,7 +7,7 @@ Tracks breaking changes made during beta. Each entry should be included in relea
 ### 0.x public Go API reshape (layer-1)
 
 Beta reshape of the Go embedding surface (critique findings F1–F4; plan
-`docs/dev/plans/layer1-public-api.md`, step-by-step detail in the `D`-entries of
+`docs/dev/archive/plans/layer1-public-api.md`, step-by-step detail in the `D`-entries of
 `docs/dev/working-notes.md`). Goal: external embedders drive yoloAI entirely
 through the root `yoloai` package, never importing `internal/*`. Per-sandbox
 operations moved onto resource-bound handles, every Options/Result/error became a
@@ -165,7 +165,7 @@ Human-readable output also gains an `" (agent requirement)"` annotation next to 
 - The aux dir was reference material the agent should read but not edit → leave it default (`:ro`); behavior unchanged.
 - If the aux dir was a parent that contained the real project → make the parent the workdir.
 
-**Rationale:** Q-U (`docs/dev/plans/layering-refactor.md` W-L8b; `api_surface.go` Q-U resolution 2026-05-25). The multi-directory diff/apply implementation was real but the user-visible surface was barely used: no per-directory selection, no cross-directory conflict resolution, no `:overlay`-only-not-`:copy` filtering. The API complexity required to do this properly significantly exceeded what the implementation actually did. Removing the surface now while we're in beta keeps `yoloai diff` / `yoloai apply` simple — if a real use case emerges, it can be restored with an API informed by that need.
+**Rationale:** Q-U (`docs/dev/archive/plans/layering-refactor.md` W-L8b; `api_surface.go` Q-U resolution 2026-05-25). The multi-directory diff/apply implementation was real but the user-visible surface was barely used: no per-directory selection, no cross-directory conflict resolution, no `:overlay`-only-not-`:copy` filtering. The API complexity required to do this properly significantly exceeded what the implementation actually did. Removing the surface now while we're in beta keeps `yoloai diff` / `yoloai apply` simple — if a real use case emerges, it can be restored with an API informed by that need.
 
 **Affected Go API (for embedders):**
 
@@ -181,7 +181,7 @@ Human-readable output also gains an `" (agent requirement)"` annotation next to 
 
 **New behavior:** Implicit first-run setup is **always non-interactive**: it writes `tmux_conf=default+host` and marks `setup_complete=true`, then proceeds. The interactive wizard is only run explicitly via `yoloai system setup` (which is also how a user re-runs setup to change their defaults).
 
-**Rationale:** Q-F (`docs/dev/plans/layering-refactor.md` W-L8b) resolved that library entry points must not perform interactive IO — the CLI owns prompts. The previous behavior coupled `sandbox.Manager` to stdin/stdout and made first-run UX unpredictable depending on TTY state. The new shape:
+**Rationale:** Q-F (`docs/dev/archive/plans/layering-refactor.md` W-L8b) resolved that library entry points must not perform interactive IO — the CLI owns prompts. The previous behavior coupled `sandbox.Manager` to stdin/stdout and made first-run UX unpredictable depending on TTY state. The new shape:
 
 - `yoloai.SystemClient.Setup(ctx, opts)` is a pure write — caller supplies every answer (TmuxConf, Backend, Agent) via SetupOptions.
 - `yoloai.SystemClient.SetupStatus(ctx)` returns host inspection (tmux classification + available backends/agents) so external wizards (CLI, future HTTP/MCP) can render their own prompts.
@@ -199,7 +199,7 @@ Human-readable output also gains an `" (agent requirement)"` annotation next to 
 
 **New behavior:** The command always prunes across every backend that's currently available. Both `--all` and `--backend` flags have been removed; passing them now errors.
 
-**Rationale:** Per-backend pruning had no real-world use case — orphan detection is keyed off the sandbox dir on the host, which is shared across all backends. Selecting one backend either matched the same orphan set (if that backend was the only one with state) or missed orphans on other backends (silently). Always-cross-backend matches user expectation and matches the `Client.System().Prune` library shape resolved under Q-L. Tracked in `docs/dev/plans/layering-refactor.md` W-L8b Q-L.
+**Rationale:** Per-backend pruning had no real-world use case — orphan detection is keyed off the sandbox dir on the host, which is shared across all backends. Selecting one backend either matched the same orphan set (if that backend was the only one with state) or missed orphans on other backends (silently). Always-cross-backend matches user expectation and matches the `Client.System().Prune` library shape resolved under Q-L. Tracked in `docs/dev/archive/plans/layering-refactor.md` W-L8b Q-L.
 
 **Migration:**
 - Drop `--all` and `--backend` from scripts and CI invocations.
@@ -227,7 +227,7 @@ Human-readable output also gains an `" (agent requirement)"` annotation next to 
 
 **New behavior:** The subtree is now `yoloai system tart` (Pattern B, mirroring `podman machine`). The old `yoloai system runtime ...` invocations continue to work as a hidden alias and print a deprecation warning to stderr. The alias will be removed in a future breaking-changes window.
 
-**Rationale:** Backend-scoped commands should name the backend explicitly. The new name makes the Tart scope honest and reserves `yoloai system <backend>` as the convention for any future backend-specific surfaces. Tracked in `docs/design/layering.md` D1 and W-L2 of `docs/dev/plans/layering-refactor.md`.
+**Rationale:** Backend-scoped commands should name the backend explicitly. The new name makes the Tart scope honest and reserves `yoloai system <backend>` as the convention for any future backend-specific surfaces. Tracked in `docs/dev/archive/design/layering.md` D1 and W-L2 of `docs/dev/archive/plans/layering-refactor.md`.
 
 **Migration:**
 - Replace `yoloai system runtime ...` with `yoloai system tart ...` in scripts, docs, and CI.
@@ -261,7 +261,7 @@ The flip applies uniformly across the apply surface:
 
 **New behavior:** Both files carry `"schema_version": 1`. Mismatch between writer and reader (e.g., a newer yoloai writes a file an older yoloai reads) causes Go's `parseStatusJSON` to discard the file and Python's `read_config` / status-monitor.py to raise `RuntimeError` with a specific message naming the file and the version mismatch. Missing `schema_version` is tolerated as legacy (pre-W2) and follows the original parsing path; only an explicit non-matching value triggers a failure.
 
-**Rationale:** W2 of the architecture remediation plan ([`dev/plans/architecture-remediation.md`](dev/plans/architecture-remediation.md)). The cross-process boundary needs a tripwire so coordinated Go/Python changes are explicit, not silent. Hard-fail on mismatch trades the inconvenience of re-creating a sandbox for the safety of not misreading a structurally different file.
+**Rationale:** W2 of the architecture remediation plan ([`dev/archive/plans/architecture-remediation.md`](dev/archive/plans/architecture-remediation.md)). The cross-process boundary needs a tripwire so coordinated Go/Python changes are explicit, not silent. Hard-fail on mismatch trades the inconvenience of re-creating a sandbox for the safety of not misreading a structurally different file.
 
 **Bump policy:**
 - **Additive changes** (new optional field with sensible defaults on both sides) do NOT require a version bump.

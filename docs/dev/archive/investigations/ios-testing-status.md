@@ -336,7 +336,7 @@ $ tart exec yoloai-embsdk /Volumes/My\ Shared\ Files/m-Xcode/Contents/Developer/
 ## Files Modified So Far
 
 Investigation and design only - no code changes yet:
-- `docs/dev/ios-testing-investigation.md` (new)
+- `docs/dev/archive/investigations/ios-testing-investigation.md` (new)
 - `docs/design/ios-testing.md` (new)
 - `runtime/tart/tart.go` (experimental code from investigation, needs cleanup)
 
@@ -351,7 +351,7 @@ Investigation and design only - no code changes yet:
 
 ## Resources
 
-- Investigation: `docs/dev/ios-testing-investigation.md`
+- Investigation: `docs/dev/archive/investigations/ios-testing-investigation.md`
 - Design: `docs/design/ios-testing.md`
 - Tart docs: https://github.com/cirruslabs/tart
 - VirtioFS: https://virtio-fs.gitlab.io/

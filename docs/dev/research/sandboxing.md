@@ -164,7 +164,7 @@ On macOS, bind-mounted host directories cross the VM boundary via VirtioFS. With
 - **Linux:** OverlayFS + git. Best case — instant setup, all I/O local.
 - **macOS/Windows:** OverlayFS + git. Instant setup, warm reads near-native. Cold stat-heavy operations ~3x slower than full copy. Acceptable tradeoff for most workflows.
 - **Older Docker/kernels:** Falls back to full copy + git.
-- **Outcome:** `:copy` uses full directory copies (portable, no special capabilities). `:overlay` is an explicit opt-in for overlayfs (instant setup, space-efficient, requires `CAP_SYS_ADMIN`). See the [design docs](../design/commands.md) for the full specification.
+- **Outcome:** `:copy` uses full directory copies (portable, no special capabilities). `:overlay` is an explicit opt-in for overlayfs (instant setup, space-efficient, requires `CAP_SYS_ADMIN`). See the [design docs](../../design/commands.md) for the full specification.
 
 ZFS and Btrfs are too host-dependent to serve as primary mechanisms (require the host filesystem to be ZFS/Btrfs). APFS clones are not instant for directories. FUSE-based overlays on macOS have reliability concerns (Finder issues, FUSE-T maturity). Docker volumes eliminate VirtioFS overhead but don't save setup time.
 

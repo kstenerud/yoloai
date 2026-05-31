@@ -2,7 +2,7 @@
 
 **Status:** Implemented (Hybrid Approach)
 **Last updated:** 2026-03-26
-**Related:** `docs/dev/ios-testing-investigation.md` (investigation and validation)
+**Related:** `docs/dev/archive/investigations/ios-testing-investigation.md` (investigation and validation)
 
 ## Overview
 
@@ -509,7 +509,7 @@ If additional features are needed in the future, they should maintain the curren
 
 ## References
 
-- Investigation: `docs/dev/ios-testing-investigation.md`
+- Investigation: `docs/dev/archive/investigations/ios-testing-investigation.md`
 - Tart documentation: https://github.com/cirruslabs/tart
 - Xcode command-line tools: `man xcodebuild`, `man simctl`
 - VirtioFS: https://virtio-fs.gitlab.io/

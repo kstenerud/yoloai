@@ -187,7 +187,7 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
   - **W-L14 (landed, commit 1f9ebed):** error mapping for `ResourceLimitError`. The user-facing message is "macOS concurrent VM limit reached — only 2 macOS VMs can run simultaneously" + a pointer to `yoloai sandbox stop`.
   - **Smoke-driver pre-run prune (landed 2026-05-27):** `scripts/smoke_test.py::_prerun_prune` runs `yoloai system prune --yes` once before tests start. The underlying prune inherits the wedged-Kata-shim escalation (commit 3c433b0) and the wedged-Tart-VM escalation (commit 0b6d2f9), so it can't hang on the same orphan that caused the leak. The pre-run path catches state left by prior smoke invocations that exited mid-flight (Ctrl-C, OOM, etc.); the existing post-run prune (also in 3c433b0) catches the current run's wedged-destroy timeouts.
 
-- **Pointer:** `docs/dev/plans/layering-refactor.md::W-L14`, `docs/dev/research/tart-limit-detection.md`, `scripts/smoke_test.py::_prerun_prune` and `::cleanup`.
+- **Pointer:** `docs/dev/archive/plans/layering-refactor.md::W-L14`, `docs/dev/research/tart-limit-detection.md`, `scripts/smoke_test.py::_prerun_prune` and `::cleanup`.
 
 ### DF8 (4th data point, 2026-05-26): containerd-vm idle-after-prompt failed once, passed on retry
 
@@ -366,4 +366,4 @@ sound — what was wrong was the path tested.
 
 ## Policy origin
 
-Established in [architecture-remediation.md](plans/architecture-remediation.md) and inherited by [layering-refactor.md](plans/layering-refactor.md).
+Established in [architecture-remediation.md](archive/plans/architecture-remediation.md) and inherited by [layering-refactor.md](archive/plans/layering-refactor.md).

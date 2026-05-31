@@ -279,7 +279,7 @@ docker build --secret id=mytoken,src=./token.txt .
 
 BuildKit secrets are for *build time*, not *run time*. They are relevant when building profile base images that need to pull from private registries or install licensed tools. They are NOT relevant for passing `ANTHROPIC_API_KEY` to running containers.
 
-yoloAI's profile system (`~/.yoloai/profiles/<name>/Dockerfile`) supports BuildKit secrets for handling private dependencies during `docker build`, protecting credentials from leaking into built images (see [commands.md](../design/commands.md) `yoloai build` section).
+yoloAI's profile system (`~/.yoloai/profiles/<name>/Dockerfile`) supports BuildKit secrets for handling private dependencies during `docker build`, protecting credentials from leaking into built images (see [commands.md](../../design/commands.md) `yoloai build` section).
 
 **Cross-platform:** Works everywhere BuildKit works (Docker 18.09+, enabled by default in Docker Desktop and recent Docker Engine).
 
@@ -342,7 +342,7 @@ The Cloud Native Computing Foundation recommends that "secrets should be injecte
 - Credential proxy (Docker Sandbox approach) could be added as an advanced option in a later version.
 - If agents add support for reading API keys from files (e.g., `ANTHROPIC_API_KEY_FILE`), we can skip the env var export entirely and get even stronger isolation.
 - macOS Keychain integration (cco's approach) could be added as a credential source option.
-- BuildKit secrets are supported for profile Dockerfile builds that need private dependencies (see [commands.md](../design/commands.md) `yoloai build` section).
+- BuildKit secrets are supported for profile Dockerfile builds that need private dependencies (see [commands.md](../../design/commands.md) `yoloai build` section).
 
 ---
 
@@ -661,7 +661,7 @@ Custom Go proxy. The modest implementation cost (~200-300 lines) buys independen
 
 ### DNS: Separate Concern
 
-None of the proxy options serve as a DNS resolver. The [security design](../design/security.md) specifies the sandbox uses the proxy sidecar as its DNS resolver with direct outbound DNS blocked by iptables. This requires a lightweight DNS forwarder (e.g., dnsmasq, ~500 KB) running alongside the proxy in the sidecar container. DNS-level domain filtering is not needed — iptables blocks direct DNS and all HTTP/HTTPS must go through the proxy. The DNS forwarder simply resolves queries upstream for the proxy's own outbound connections.
+None of the proxy options serve as a DNS resolver. The [security design](../../design/security.md) specifies the sandbox uses the proxy sidecar as its DNS resolver with direct outbound DNS blocked by iptables. This requires a lightweight DNS forwarder (e.g., dnsmasq, ~500 KB) running alongside the proxy in the sidecar container. DNS-level domain filtering is not needed — iptables blocks direct DNS and all HTTP/HTTPS must go through the proxy. The DNS forwarder simply resolves queries upstream for the proxy's own outbound connections.
 
 ---
 

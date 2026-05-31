@@ -1262,7 +1262,7 @@ $ diskutil apfs list | grep -A5 "iOS 26.4 Simulator"
 
 **Why "symlink test" in investigation was misleading:**
 
-The investigation's symlink test (docs/dev/ios-testing-investigation.md:656-662) moved a **local directory** to another location and symlinked it - this worked because both source and target were on the same local APFS volume. When the symlink points to a **VirtioFS mount**, the filesystem semantics are fundamentally different and CoreSimulator rejects it.
+The investigation's symlink test (docs/dev/archive/investigations/ios-testing-investigation.md:656-662) moved a **local directory** to another location and symlinked it - this worked because both source and target were on the same local APFS volume. When the symlink points to a **VirtioFS mount**, the filesystem semantics are fundamentally different and CoreSimulator rejects it.
 
 **This is a fundamental architectural limitation** - VirtioFS cannot emulate sealed APFS volumes. Runtimes **must** be copied to local VM storage or downloaded fresh inside the VM.
 
@@ -1271,7 +1271,7 @@ The investigation's symlink test (docs/dev/ios-testing-investigation.md:656-662)
 - Mount PrivateFrameworks from host via VirtioFS (saves ~2GB) - works fine
 - **Copy or download runtimes locally** inside VM (~8-16GB per runtime) - required
 
-**Code:** See `docs/dev/ios-testing-investigation.md` lines 844-966 for empirical testing; `runtime/tart/runtime_copy.go` for copy implementation.
+**Code:** See `docs/dev/archive/investigations/ios-testing-investigation.md` lines 844-966 for empirical testing; `runtime/tart/runtime_copy.go` for copy implementation.
 
 ### Ditto'd iOS runtime is incomplete; use `xcodebuild -downloadPlatform`
 

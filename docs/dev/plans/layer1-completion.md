@@ -1,6 +1,6 @@
 # Layer 1 — Honest completion (post-D52/D53)
 
-**Plan only — no code yet.** Supersedes [layer1-public-api.md](layer1-public-api.md),
+**Plan only — no code yet.** Supersedes [layer1-public-api.md](../archive/plans/layer1-public-api.md),
 which delivered the spine but declared completion on a detector that cannot see the
 biggest remaining leak. Governed by the CRITIQUE round **G1–G7** and working-notes
 **D53**.
