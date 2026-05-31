@@ -3,7 +3,6 @@
 package mcpsrv
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -342,12 +341,7 @@ func (s *Server) handleSandboxLog(_ context.Context, req mcp.CallToolRequest) (*
 		lines = 100
 	}
 
-	sb, err := s.c.Sandbox(name)
-	if err != nil {
-		return textResult(errorf("sandbox handle %q: %v", name, err)), nil
-	}
-	logPath := store.AgentLogPath(sb.Dir())
-	output, err := tailFile(logPath, lines)
+	output, err := s.c.System().AgentLog(name, lines)
 	if err != nil {
 		return textResult(errorf("read log for sandbox %q: %v", name, err)), nil
 	}
@@ -519,34 +513,6 @@ func validateFilename(filename string) error {
 		return errors.New("filename must not be '.'")
 	}
 	return nil
-}
-
-// tailFile returns the last n lines of the file at path.
-// Returns empty string if the file is empty or does not exist.
-func tailFile(path string, n int) (string, error) {
-	f, err := os.Open(path) //nolint:gosec // path is constructed from sandbox dir
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "", nil
-		}
-		return "", err
-	}
-	defer f.Close() //nolint:errcheck // read-only file
-
-	var lines []string
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
-	}
-	if err := scanner.Err(); err != nil {
-		return "", fmt.Errorf("scan log file: %w", err)
-	}
-
-	if len(lines) > n {
-		lines = lines[len(lines)-n:]
-	}
-
-	return strings.Join(lines, "\n"), nil
 }
 
 // ── Help tool ─────────────────────────────────────────────────────────────────

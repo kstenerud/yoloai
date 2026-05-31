@@ -449,22 +449,20 @@ func runLogFollow(cmd *cobra.Command, name string, sources []logSource, minLevel
 
 // runLogAgent shows the raw agent terminal output (logs/agent.log).
 func runLogAgent(cmd *cobra.Command, name string, rawMode bool) error {
-	logPath := store.AgentLogPath(cliutil.Layout().SandboxDir(name))
-	f, err := os.Open(logPath) //nolint:gosec // G304: logPath is store.AgentLogPath(name) — yoloAI-owned
+	output, err := cliutil.NewSystemClient().AgentLog(name, 0)
 	if err != nil {
-		if os.IsNotExist(err) {
-			fmt.Fprintln(cmd.OutOrStdout(), "No agent output yet") //nolint:errcheck
-			return nil
-		}
-		return fmt.Errorf("open agent log: %w", err)
-	}
-	defer f.Close() //nolint:errcheck
-
-	if rawMode {
-		_, err = io.Copy(cmd.OutOrStdout(), f)
 		return err
 	}
-	return stripANSI(cmd.OutOrStdout(), f)
+	if output == "" {
+		fmt.Fprintln(cmd.OutOrStdout(), "No agent output yet") //nolint:errcheck
+		return nil
+	}
+
+	if rawMode {
+		_, err = io.WriteString(cmd.OutOrStdout(), output)
+		return err
+	}
+	return stripANSI(cmd.OutOrStdout(), strings.NewReader(output))
 }
 
 // runLog is the shared implementation for `sandbox log` and the `log` alias.

@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/kstenerud/yoloai/internal/cli/bugreport"
@@ -392,9 +393,8 @@ func writeBugReportJSONLFile(w io.Writer, title, path, reportType string, omitEv
 // writeBugReportAgentOutput writes section 11: ANSI-stripped agent output.
 // Only included in unsafe reports.
 func writeBugReportAgentOutput(w io.Writer, name string) {
-	path := store.AgentLogPath(cliutil.Layout().SandboxDir(name))
-	f, err := os.Open(path) //nolint:gosec // G304: path is store.AgentLogPath(name) — yoloAI-owned
-	if err != nil {
+	output, err := cliutil.NewSystemClient().AgentLog(name, 0)
+	if err != nil || output == "" {
 		fmt.Fprintln(w, "<details>")                       //nolint:errcheck
 		fmt.Fprintln(w, "<summary>Agent output</summary>") //nolint:errcheck
 		fmt.Fprintln(w)                                    //nolint:errcheck
@@ -403,13 +403,12 @@ func writeBugReportAgentOutput(w io.Writer, name string) {
 		fmt.Fprintln(w)                                    //nolint:errcheck
 		return
 	}
-	defer f.Close() //nolint:errcheck
 
 	fmt.Fprintln(w, "<details>")                       //nolint:errcheck
 	fmt.Fprintln(w, "<summary>Agent output</summary>") //nolint:errcheck
 	fmt.Fprintln(w)                                    //nolint:errcheck
 	fmt.Fprintln(w, "```")                             //nolint:errcheck
-	_ = stripANSI(w, f)
+	_ = stripANSI(w, strings.NewReader(output))
 	fmt.Fprintln(w, "```")        //nolint:errcheck
 	fmt.Fprintln(w)               //nolint:errcheck
 	fmt.Fprintln(w, "</details>") //nolint:errcheck
