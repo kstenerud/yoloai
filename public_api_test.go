@@ -216,35 +216,22 @@ func writeLeakLines(msg *strings.Builder, leaks map[string][]string) {
 	}
 }
 
-// f1KnownLeaks is the F1 baseline: alias-hidden internal types the public
-// yoloai surface still exposes through the exported fields of root-level
-// aliases. These were INVISIBLE until the alias-descent fix (G1(a)) taught
-// walkObj/walkType to descend through aliases. The test is now
-// green-for-the-right-reason ONLY because each entry below is an explicit,
-// eyes-open deferral — NOT because the surface is leak-free. F1 is therefore
-// NOT closed; this corrects the D52 "FULLY COMPLETE, no deferrals" claim.
+// f1KnownLeaks is the F1 baseline: internal types the public yoloai surface is
+// still permitted to expose. It is intentionally EMPTY — F1 is fully closed.
+// The detector descends through type aliases (the G1(a) fix to walkObj/walkType)
+// so a `type X = internal.Y` re-export can no longer hide a leak; every public
+// declaration is now backed by a hand-written public read-model:
+//   - store.Meta → yoloai.Environment (environment.go), carried on Info.Meta.
+//   - caps.BackendReport/CheckResult/Availability → yoloai.BackendReport /
+//     CapabilityCheck / Availability (doctor_report.go), returned by Doctor.
 //
-// G1(b)-1 carved the load-bearing store.Meta leak: yoloai.Info is now a
-// hand-written struct whose Meta is the public Environment read-model (see
-// environment.go), so store.Meta no longer appears here. The remaining
-// entries are the doctor/capability read-model, carved next in G1(b)-2.
-//
-// Each entry is reachable by an external embedder holding the aliased public
-// type:
-//   - caps.Availability: exposed via yoloai.BackendReport.Availability.
-//   - caps.CheckResult: exposed via yoloai.BackendReport.Results (the
-//     doctor/capability read-model; same carve class).
-//
-// The fix per type is a public mirror/read-model (G1(b)/G7), then delete its
-// entry. Do NOT add a new entry to silence a fresh leak without a CRITIQUE
-// finding — a grandfathered leak must be a deliberate, documented decision.
+// Keep this empty. Do NOT add an entry to silence a fresh leak without a
+// CRITIQUE finding — a grandfathered leak must be a deliberate, documented
+// decision, and the standing direction is to carve a public mirror instead.
 //
 // Format: package-path "." TypeName. Match must be exact (the test
 // computes the same key from the type's TypeName).
-var f1KnownLeaks = map[string]struct{}{
-	"github.com/kstenerud/yoloai/internal/runtime/caps.Availability": {},
-	"github.com/kstenerud/yoloai/internal/runtime/caps.CheckResult":  {},
-}
+var f1KnownLeaks = map[string]struct{}{}
 
 // internalTypeKey returns a stable identifier for a type IF it's a Named
 // type whose package path contains `marker` ("/internal/"). Returns the

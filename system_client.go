@@ -227,11 +227,6 @@ func (s *SystemClient) Info(ctx context.Context) (*SystemInfo, error) {
 	}, nil
 }
 
-// BackendReport is one backend's diagnostic report from Doctor — its base-mode
-// availability plus a per-isolation-mode capability check breakdown.
-// Re-exported (type alias) from internal/runtime/caps.
-type BackendReport = caps.BackendReport
-
 // VMCensus is a point-in-time accounting of host VM slots against the
 // platform's concurrent-VM limit. Re-exported (type alias) from
 // internal/runtime.
@@ -263,7 +258,9 @@ func (s *SystemClient) Doctor(ctx context.Context, opts DoctorOptions) ([]Backen
 		if opts.BackendFilter != "" && string(desc.Name) != opts.BackendFilter {
 			continue
 		}
-		reports = append(reports, s.backendReports(ctx, desc.Name, env, opts.IsolationFilter)...)
+		for _, r := range s.backendReports(ctx, desc.Name, env, opts.IsolationFilter) {
+			reports = append(reports, backendReportFromCaps(r))
+		}
 	}
 	return reports, nil
 }
@@ -291,22 +288,22 @@ func (s *SystemClient) VMCensus(ctx context.Context) *VMCensus {
 // backendReports builds the report rows for a single backend: an init-failure
 // row if it can't be constructed, otherwise a base-mode row (unless filtered)
 // plus one row per matching supported isolation mode.
-func (s *SystemClient) backendReports(ctx context.Context, backend BackendName, env caps.Environment, isolationFilter string) []BackendReport {
+func (s *SystemClient) backendReports(ctx context.Context, backend BackendName, env caps.Environment, isolationFilter string) []caps.BackendReport {
 	rt, err := newRuntime(ctx, backend, s.layout)
 	if err != nil {
 		if isolationFilter != "" {
 			return nil // an unavailable backend has no isolation-mode rows to filter to
 		}
-		return []BackendReport{{
+		return []caps.BackendReport{{
 			Backend: string(backend), Mode: "?", IsBaseMode: true,
 			InitErr: err, Availability: caps.Unavailable,
 		}}
 	}
 	defer rt.Close() //nolint:errcheck // best-effort close after probing
 
-	var reports []BackendReport
+	var reports []caps.BackendReport
 	if isolationFilter == "" {
-		reports = append(reports, BackendReport{
+		reports = append(reports, caps.BackendReport{
 			Backend: string(backend), Mode: string(rt.Descriptor().BaseModeName),
 			IsBaseMode: true, Availability: caps.Ready,
 		})
@@ -316,7 +313,7 @@ func (s *SystemClient) backendReports(ctx context.Context, backend BackendName, 
 			continue
 		}
 		results := caps.RunChecks(ctx, runtime.RequiredCapabilitiesFor(rt, mode), env)
-		reports = append(reports, BackendReport{
+		reports = append(reports, caps.BackendReport{
 			Backend: string(backend), Mode: string(mode), IsBaseMode: false,
 			Results: results, Availability: caps.ComputeAvailability(results),
 		})

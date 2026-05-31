@@ -11,19 +11,18 @@ import (
 
 	"github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
-	"github.com/kstenerud/yoloai/internal/runtime/caps"
 
 	"github.com/spf13/cobra"
 )
 
 // checkResultJSON is the JSON-serializable form of a single capability check result.
 type checkResultJSON struct {
-	CapID       string         `json:"cap_id"`
-	CapSummary  string         `json:"cap_summary"`
-	OK          bool           `json:"ok"`
-	IsPermanent bool           `json:"is_permanent,omitempty"`
-	Error       string         `json:"error,omitempty"`
-	Steps       []caps.FixStep `json:"steps,omitempty"`
+	CapID       string           `json:"cap_id"`
+	CapSummary  string           `json:"cap_summary"`
+	OK          bool             `json:"ok"`
+	IsPermanent bool             `json:"is_permanent,omitempty"`
+	Error       string           `json:"error,omitempty"`
+	Steps       []yoloai.FixStep `json:"steps,omitempty"`
 }
 
 // backendReportJSON is the JSON-serializable form of a BackendReport.
@@ -159,7 +158,7 @@ func runDoctor(cmd *cobra.Command, backendFilter, isolationFilter string, isJSON
 		return cliutil.WriteJSON(out, buildDoctorJSON(reports, prune, disk, census))
 	}
 
-	caps.FormatDoctor(out, reports)
+	formatDoctor(out, reports)
 	renderVMCensus(out, census)
 	renderReclaimableNow(out, prune)
 	renderReclaimableSpace(out, disk)
@@ -207,7 +206,7 @@ func cacheUsage(ctx context.Context, sys *yoloai.SystemClient) *yoloai.DiskUsage
 // setup. Unavailable backends and advisory sections never trigger it.
 func needsSetupError(reports []yoloai.BackendReport) error {
 	for _, r := range reports {
-		if r.Availability == caps.NeedsSetup {
+		if r.Availability == yoloai.NeedsSetup {
 			return fmt.Errorf("one or more backends need setup")
 		}
 	}
@@ -459,7 +458,7 @@ func trashJSONOf(prune *yoloai.PruneResult) trashJSON {
 }
 
 // convertDoctorReportsToJSON converts BackendReport slice to JSON-serializable form.
-func convertDoctorReportsToJSON(reports []caps.BackendReport) []backendReportJSON {
+func convertDoctorReportsToJSON(reports []yoloai.BackendReport) []backendReportJSON {
 	jsonReports := make([]backendReportJSON, 0, len(reports))
 	for _, r := range reports {
 		jr := backendReportJSON{
@@ -468,9 +467,9 @@ func convertDoctorReportsToJSON(reports []caps.BackendReport) []backendReportJSO
 			IsBaseMode: r.IsBaseMode,
 		}
 		switch r.Availability {
-		case caps.Ready:
+		case yoloai.Ready:
 			jr.Availability = "ready"
-		case caps.NeedsSetup:
+		case yoloai.NeedsSetup:
 			jr.Availability = "needs_setup"
 		default:
 			jr.Availability = "unavailable"
@@ -480,8 +479,8 @@ func convertDoctorReportsToJSON(reports []caps.BackendReport) []backendReportJSO
 		}
 		for _, cr := range r.Results {
 			jcr := checkResultJSON{
-				CapID:      cr.Cap.ID,
-				CapSummary: cr.Cap.Summary,
+				CapID:      cr.Capability.ID,
+				CapSummary: cr.Capability.Summary,
 				OK:         cr.Err == nil,
 			}
 			if cr.Err != nil {
