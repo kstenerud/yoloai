@@ -213,6 +213,24 @@ func (s *SystemClient) ListAcrossBackends(ctx context.Context) ([]*Info, []Backe
 	return infosFromStatus(infos), unavailableNames, nil
 }
 
+// SandboxMetadata reads a single sandbox's creation-time environment straight
+// from disk — no runtime connection, no live status query. This is the
+// runtime-free, backend-agnostic read consumers need before they've chosen a
+// backend (the backend itself is recorded in the metadata) or when only the
+// captured configuration is wanted, not live state. For combined metadata +
+// live status on a connected client, use Sandbox.Inspect instead.
+func (s *SystemClient) SandboxMetadata(name string) (*Environment, error) {
+	sandboxDir := s.layout.SandboxDir(name)
+	if err := store.RequireSandboxDir(sandboxDir); err != nil {
+		return nil, err
+	}
+	meta, err := store.LoadMeta(sandboxDir)
+	if err != nil {
+		return nil, err
+	}
+	return environmentFromMeta(meta), nil
+}
+
 // Info returns the installation's paths and per-backend availability in one
 // call. It never returns an error today (per-backend probe failures are
 // captured in BackendStatus.Note); the error return is kept for forward

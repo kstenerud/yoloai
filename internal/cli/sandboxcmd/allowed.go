@@ -8,8 +8,6 @@ import (
 
 	"github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
-
-	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/spf13/cobra"
 )
 
@@ -68,14 +66,10 @@ func runSandboxAllowed(cmd *cobra.Command, name string) error {
 	})
 }
 
-// loadMetaForRead resolves the sandbox directory and loads its meta
-// without enforcing the "isolated mode required" precondition. The
-// `allowed` subcommand needs to print specific messages for the
-// other network modes, so it can't go through requireIsolated.
-func loadMetaForRead(name string) (*store.Meta, error) {
-	sandboxDir := cliutil.Layout().SandboxDir(name)
-	if err := store.RequireSandboxDir(sandboxDir); err != nil {
-		return nil, err
-	}
-	return store.LoadMeta(sandboxDir)
+// loadMetaForRead reads the sandbox's metadata without enforcing the
+// "isolated mode required" precondition. The `allowed` subcommand needs to
+// print specific messages for the other network modes, so it can't go through
+// requireIsolated.
+func loadMetaForRead(name string) (*yoloai.Environment, error) {
+	return cliutil.NewSystemClient().SandboxMetadata(name)
 }

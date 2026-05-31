@@ -13,7 +13,6 @@ import (
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
 	yoloai "github.com/kstenerud/yoloai"
-	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
@@ -67,12 +66,12 @@ func runDiffCmd(cmd *cobra.Command, args []string) error {
 	logFlag, _ := cmd.Flags().GetBool("log")
 
 	// Load meta early to detect overlay dirs
-	meta, metaErr := store.LoadMeta(cliutil.Layout().SandboxDir(name))
+	env, metaErr := cliutil.NewSystemClient().SandboxMetadata(name)
 	if metaErr != nil {
 		return cliutil.SandboxErrorHint(name, metaErr)
 	}
-	overlay := hasOverlayDirs(meta)
-	slog.Debug("generating diff", "event", "sandbox.diff", "sandbox", name, "workdir_mode", meta.Workdir.Mode) //nolint:gosec // G706: name is validated by ValidateName
+	overlay := env.HasOverlayDirs()
+	slog.Debug("generating diff", "event", "sandbox.diff", "sandbox", name, "workdir_mode", env.Workdir.Mode) //nolint:gosec // G706: name is validated by ValidateName
 
 	// Skip agent warning in JSON mode
 	if !cliutil.JSONEnabled(cmd) {
@@ -142,19 +141,6 @@ func writeDiffOutput(cmd *cobra.Command, out string) error {
 	}
 	_, err := fmt.Fprintln(cmd.OutOrStdout(), out)
 	return err
-}
-
-// hasOverlayDirs returns true if any directory in the sandbox uses overlay mode.
-func hasOverlayDirs(meta *store.Meta) bool {
-	if meta.Workdir.Mode == "overlay" {
-		return true
-	}
-	for _, d := range meta.Directories {
-		if d.Mode == "overlay" {
-			return true
-		}
-	}
-	return false
 }
 
 // requireOverlayRunning verifies the sandbox container is running (required for overlay ops).

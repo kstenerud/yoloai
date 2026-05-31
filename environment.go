@@ -50,6 +50,22 @@ type Environment struct {
 	Archetype          string            `json:"archetype,omitempty"`
 }
 
+// HasOverlayDirs reports whether the workdir or any auxiliary directory uses
+// :overlay mode. Overlay sandboxes keep their git state inside the container,
+// so callers route diff/apply through container exec rather than the host work
+// copy.
+func (e *Environment) HasOverlayDirs() bool {
+	if e.Workdir.Mode == DirModeOverlay {
+		return true
+	}
+	for _, d := range e.Directories {
+		if d.Mode == DirModeOverlay {
+			return true
+		}
+	}
+	return false
+}
+
 // WorkdirInfo is the resolved workdir state captured at creation time. Mirror
 // of the internal store.WorkdirMeta.
 type WorkdirInfo struct {

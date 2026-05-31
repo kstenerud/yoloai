@@ -9,16 +9,14 @@ import (
 	"log/slog"
 	"os"
 
+	// Backend registrations live in yoloai.go (the root package);
+	// importing yoloai below pulls in those init() side effects, so a
+	// blank-import block here is redundant. W-L13: dropping it lets
+	// depguard scope `internal/runtime/tart` to the
+	// internal/cli/system/tart subpackage exclusively.
 	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime"
-
-	// Backend registrations live in yoloai.go (the root package);
-	// importing yoloai above pulls in those init() side effects, so
-	// the blank-import block previously here was redundant. W-L13:
-	// removing it lets depguard scope `internal/runtime/tart` to the
-	// internal/cli/system/tart subpackage exclusively.
-	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/spf13/cobra"
 )
 
@@ -102,9 +100,9 @@ func ResolveContainerBackendConfig() runtime.BackendName {
 // Falls back to config default if meta.json can't be read.
 // Used by lifecycle commands that operate on an existing sandbox.
 func ResolveBackendForSandbox(name string) runtime.BackendName {
-	meta, err := store.LoadMeta(Layout().SandboxDir(name))
-	if err == nil && meta.Backend != "" {
-		return meta.Backend
+	env, err := NewSystemClient().SandboxMetadata(name)
+	if err == nil && env.Backend != "" {
+		return env.Backend
 	}
 	// Probe is stat-only so an empty context is fine here; full ctx threading
 	// for the rare "meta corrupt" fallback is out of scope for W-L4.

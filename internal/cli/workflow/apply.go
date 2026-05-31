@@ -192,6 +192,22 @@ func parseApplyArgs(rest []string, cmd *cobra.Command) (refs []string, paths []s
 	return nil, rest
 }
 
+// hasOverlayDirs returns true if any directory in the sandbox uses overlay mode.
+// Operates on the internal meta because the apply chain still threads *store.Meta
+// for its git-plumbing helpers; once that orchestration moves into the library
+// this collapses onto the public Environment.HasOverlayDirs.
+func hasOverlayDirs(meta *store.Meta) bool {
+	if meta.Workdir.Mode == "overlay" {
+		return true
+	}
+	for _, d := range meta.Directories {
+		if d.Mode == "overlay" {
+			return true
+		}
+	}
+	return false
+}
+
 // buildTagsByCommit builds a map of lowercase commit SHA → tag names from a tag list.
 func buildTagsByCommit(tags []yoloai.TagInfo) map[string][]string {
 	m := make(map[string][]string, len(tags))
