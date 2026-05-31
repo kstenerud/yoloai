@@ -84,18 +84,6 @@ yoloai wait <name> [--timeout <duration>]
 
 See [OPEN_QUESTIONS.md](../unresolved-questions.md) §77.
 
-## Sandbox Live Mounts
-
-### `sandbox mount add` / `sandbox mount rm`
-
-Add and remove bind mounts on a running sandbox without tearing it down. Preserves agent context when a mid-conversation need for an additional directory is discovered.
-
-See spec in [commands.md](../../design/commands.md) `### yoloai sandbox <name> mount`.
-
-Mechanism: `nsenter --mount --target <container-pid>` to enter the container's mount namespace and bind mount without restart. Requires root. Docker/Podman on Linux only (Tart and Seatbelt cannot support this structurally).
-
-Persistence: added to `live_mounts` in `meta.json` (new `DirMeta` slice field); applied as regular Docker mounts on next `start`.
-
 ## Idle Detection
 
 ### User-overridable detector config
@@ -103,12 +91,6 @@ Persistence: added to `live_mounts` in `meta.json` (new `DirMeta` slice field); 
 Allow users to override the auto-resolved detector stack via profile-level config. A `detectors` list in profile `config.yaml` would replace the automatically computed stack, letting users disable noisy detectors or change priority order. No CLI flag — config file only.
 
 See [idle detection research](../research/idle-detection.md) §3.9 Q1.
-
-## Workspace
-
-### `yoloai apply` should pull new tags
-
-When applying changes, also fetch any new git tags from the sandbox's copy of the workdir so that tags created by the agent (e.g. version bumps, release tags) land on the host. Currently `apply` syncs file changes but does not transfer tags.
 
 ## Seatbelt Improvements
 
