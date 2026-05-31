@@ -201,6 +201,20 @@ No change to `f1KnownLeaks` (B4 closed no baseline entries — it removed `inter
 
 **Consequences.** `principles/general-principles.md`: new §13 + a "Speak-up-as-licence-to-relitigate" over-generalisation row; ABOUTME count "Twelve"→"Thirteen"; `principles/README.md` index row updated. No research-file section added (mirrors §12, which cites in-project operationalisation + the Moltke/Box/Popper lineage inline).
 
+## D55 — F1 genuinely closed: alias-descent detector + two carved read-models (`Environment`, doctor `BackendReport`)
+
+**Date:** 2026-05-31. **Status:** Accepted (owner, 2026-05-31). **Completes** the F1 work D52 prematurely declared done and D53/CRITIQUE-G1 reopened. **Implements** CRITIQUE G1(a)+G1(b).
+
+**Context.** D52 logged "F1 closed / Layer-1 spine COMPLETE" on an empty `f1KnownLeaks`; D53 (§13 in action) found that verdict false — the F1 detector stopped at named types and never descended through a `type X = internal.Y` alias, so alias-hidden internal types (`store.Meta` via `Info`, the whole `caps.BackendReport` tree via the `BackendReport` alias) leaked unseen. This entry records the honest closure.
+
+- **G1(a) — the detector now descends through aliases.** `walkObj`/`walkType` in `public_api_test.go` unwrap `*types.Alias` (Go 1.22+ materializes `type X = pkg.Y` as `*types.Alias`) and descend into the aliased type's fields. Truth before cleanup: making the detector honest first *revealed* the real leaks (`store.Meta`, `caps.Availability`, `caps.CheckResult`) that the empty baseline had been hiding. The named-type case still reports-but-does-not-descend (an embedder uses a named type as a unit); field-walking happens only at the type's own declaration.
+
+- **G1(b)-1 — `store.Meta` → public `Environment`.** `yoloai.Info` was `type Info = sandbox.Info`; de-aliased into a hand-written struct whose `Meta` is the new public `Environment` read-model (`environment.go`), a field-for-field mirror with byte-identical JSON tags. Converters at the five boundaries (`Inspect`, `Run`, `List`, `pollUntilDone`, `ListAcrossBackends`). `store.Meta` stays internal — it is the pervasive internal working type. Consumers passing `info.Meta` *as a whole struct* (sandboxcmd/info.go, mcpsrv/proxy.go, list_test.go) retyped to `*yoloai.Environment`. (Note: this is the field-for-field mirror; D53's "embed a resolved-config view + drop pile-3 mechanism" reshape is a *later* read-model refinement, not this leak-closure step.)
+
+- **G1(b)-2 — caps doctor tree → public `BackendReport`.** `type BackendReport = caps.BackendReport` removed; `doctor_report.go` adds hand-written mirrors (`Availability` enum, `BackendReport`, `CapabilityCheck`, `Capability`, `FixStep`) + an unexported converter tree. `Capability` drops `HostCapability`'s un-nameable `Check`/`Permanent`/`Fix` func fields (their *results* surface via `CapabilityCheck`), keeping `ID`/`Summary`/`Detail`. `SystemClient.Doctor` converts at the boundary; `backendReports` still builds internal `caps.BackendReport`. The human formatter `FormatDoctor` + 7 helpers + 4 smoke tests **relocated** from `caps` to `doctorcmd` (retyped over the public type) because `caps` cannot import the root `yoloai` package (import cycle); `RunChecks`/`ComputeAvailability`/`FormatError` stay internal in `caps`. JSON + human output byte-unchanged.
+
+- **Gate.** `f1KnownLeaks` is now genuinely `map[string]struct{}{}` — empty *and* honest, because the detector can no longer be fooled by an alias. Comment rewritten to "keep this empty; carve a public mirror, never grandfather a leak." **F1 is closed for real.** This does NOT re-assert D52's broader "Layer-1 spine COMPLETE" verdict — D53's remaining work (the three-noun reshape, PTY/activity-stream split, ~7 verb gaps G7, depguard on leaf packages G2) is still open.
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.
