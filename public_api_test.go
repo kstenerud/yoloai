@@ -124,6 +124,14 @@ func walkObj(obj types.Object, marker string, report func(types.Type, string)) {
 		walkSignature(o.Type().(*types.Signature), "func "+o.Name(), marker, report)
 	case *types.TypeName:
 		if o.IsAlias() {
+			// A root-level alias (`type Info = internal.Y`) re-publishes the
+			// target under a yoloai name, so the target itself is covered by
+			// collectAliasedInternalTypes. But the alias ALSO exposes the
+			// target's exported fields and methods to embedders, and those may
+			// reference other, un-aliased internal types. Descend into the
+			// underlying named type to surface them — without this the detector
+			// is blind to every leak hidden beneath an alias (the G1 finding).
+			walkNamed(types.Unalias(o.Type()), "type "+o.Name(), marker, report, make(map[string]bool))
 			return
 		}
 		walkNamed(o.Type(), "type "+o.Name(), marker, report, make(map[string]bool))
@@ -208,19 +216,36 @@ func writeLeakLines(msg *strings.Builder, leaks map[string][]string) {
 	}
 }
 
-// f1KnownLeaks is the F1 baseline: internal types the public yoloai
-// surface is allowed to expose. It is intentionally EMPTY — F1 is closed.
-// The public surface now mirrors every previously-leaked internal type
-// with a hand-written public type (e.g. config.MergedConfig and its nested
-// tree are mirrored by ResolvedProfileConfig and friends in profile_config.go).
+// f1KnownLeaks is the F1 baseline: alias-hidden internal types the public
+// yoloai surface still exposes through the exported fields of root-level
+// aliases. These were INVISIBLE until the alias-descent fix (G1(a)) taught
+// walkObj/walkType to descend through aliases. The test is now
+// green-for-the-right-reason ONLY because each entry below is an explicit,
+// eyes-open deferral — NOT because the surface is leak-free. F1 is therefore
+// NOT closed; this corrects the D52 "FULLY COMPLETE, no deferrals" claim.
 //
-// Keep this empty. Any new entry re-opens F1 and requires a CRITIQUE.md
-// update justifying the regression; the right fix is almost always a
-// public mirror type, not a grandfathered leak.
+// Each entry is reachable by an external embedder holding the aliased public
+// type:
+//   - store.Meta: exposed via yoloai.Info.Meta, returned by Client.Run/List,
+//     Sandbox.Inspect, and SystemClient.ListAcrossBackends (the four central
+//     entry points). The load-bearing leak; G1(b) carves it into a public
+//     read-model. Iceberg of nested internals: WorkdirMeta, DirMeta, DirMode,
+//     runtime.IsolationMode/BackendName, agent.AgentName, config.ResourceLimits.
+//   - caps.Availability: exposed via yoloai.BackendReport.Availability.
+//   - caps.CheckResult: exposed via yoloai.BackendReport.Results (the
+//     doctor/capability read-model; same carve class).
+//
+// The fix per type is a public mirror/read-model (G1(b)/G7), then delete its
+// entry. Do NOT add a new entry to silence a fresh leak without a CRITIQUE
+// finding — a grandfathered leak must be a deliberate, documented decision.
 //
 // Format: package-path "." TypeName. Match must be exact (the test
 // computes the same key from the type's TypeName).
-var f1KnownLeaks = map[string]struct{}{}
+var f1KnownLeaks = map[string]struct{}{
+	"github.com/kstenerud/yoloai/internal/sandbox/store.Meta":        {},
+	"github.com/kstenerud/yoloai/internal/runtime/caps.Availability": {},
+	"github.com/kstenerud/yoloai/internal/runtime/caps.CheckResult":  {},
+}
 
 // internalTypeKey returns a stable identifier for a type IF it's a Named
 // type whose package path contains `marker` ("/internal/"). Returns the
@@ -278,6 +303,12 @@ func walkTuple(tup *types.Tuple, site, marker string, report func(types.Type, st
 // guards against infinite recursion on self-referential types.
 func walkType(t types.Type, site, marker string, report func(types.Type, string), visited map[string]bool) {
 	switch tt := t.(type) {
+	case *types.Alias:
+		// Go 1.22+ materializes `type X = pkg.Y` as *types.Alias. Unwrap so the
+		// underlying named type is reported/descended like a direct reference;
+		// otherwise an alias surfacing in a signature matches no arm below and
+		// is silently dropped (the signature-path half of the G1 blind spot).
+		walkType(types.Unalias(tt), site, marker, report, visited)
 	case *types.Named:
 		// Report this named type itself; the caller decides if it's a leak.
 		report(tt, site)
