@@ -133,8 +133,6 @@ stays a working set. Newest first.
 
 76. ~~**`yoloai diff` and `yoloai log` should auto-page when stdout is a TTY**~~ — **Resolved:** `yoloai diff` and `yoloai log` should auto-page through `$PAGER` / `less -R` when stdout is a TTY, matching `git diff`/`git log` behavior. Piping (`yoloai diff my-task | less`) already works since both output raw to stdout; auto-paging is the polished default.
 
-77. ~~**No `yoloai wait` command for scripting/CI**~~ — **Resolved 2026-05-23.** Added to `yoloai.Client` as `Wait(ctx, name, opts) (exitCode int, err error)`; CLI command `yoloai wait <name> [--timeout]` lands in W-L8b. See [layering.md §9.2](../archive/design/layering.md#92-yoloai-wait-q77) and [D17](../archive/design/layering.md#7-decisions).
-
 79. ~~**`yoloai apply` auto-starting container for overlay should print a message**~~ — **Resolved:** Print "Starting container for overlay diff..." to stderr when auto-starting a stopped container during `yoloai apply`. Consistent with standards/CLI.md progress-on-stderr convention.
 
 80. ~~**Cannot add `--port` after sandbox creation**~~ — **Resolved:** Docker limitation — port mappings cannot be added to running containers. Document in `--port` help text: "Ports must be specified at creation time. To add ports later, use `yoloai new --replace`." No code change, just documentation.

@@ -15,6 +15,10 @@ Questions encountered during design and implementation that need resolution. Res
 
 75. **Codex follow-up limitation undocumented** — *Reopened (deferral trigger fired).* Was deferred until Codex shipped; Codex is now a first-class agent, so the session-persistence / follow-up limitation needs documenting in the user docs. Original deferral note: "Codex is post-MVP. Document the session persistence limitation when Codex is implemented."
 
+## Workflow Commands
+
+77. **No `yoloai wait` command for scripting/CI** — *Reopened 2026-05-31.* Previously marked resolved (2026-05-23) on the basis that `Client.Wait` plus a `yoloai wait <name> [--timeout]` CLI command would "land in W-L8b" — but verification shows **neither exists today**: no `wait` in the command registry, no `Client.Wait` method (only the unrelated `internal/testutil.Wait` test-polling helper). The capability is still unimplemented. Intended behavior: block until the named sandbox's agent exits, return its exit code (124 on `--timeout`, matching `timeout(1)`); useful for CI/CD and as the substrate for the deferred `yoloai run` (#56). Design: [plans/README.md `### yoloai wait`](plans/README.md). Prior design refs: [layering.md §9.2](../archive/design/layering.md#92-yoloai-wait-q77), [D17](../archive/design/layering.md#7-decisions).
+
 ## macOS Sandbox Backend
 
 94. **macOS VM backend for native development** — yoloAI's Linux Docker containers cannot run xcodebuild, Swift, or Xcode SDKs. Supporting macOS-native development requires a VM-based sandbox backend. Tart (Cirrus Labs) is the leading candidate (see [Sandboxing Research](research/sandboxing.md) "macOS VM Sandbox Research"). **Partially resolved:** The `runtime.Runtime` interface in `internal/runtime/` provides the backend abstraction, with Docker, Tart, and Seatbelt implementations. Remaining open questions:
