@@ -928,6 +928,14 @@ FINGERPRINTS: list[Fingerprint] = [
         "tart-vm-workdir-setup-races-python-startup",
     ),
     Fingerprint(
+        "tart :copy diff after restart shows 'No changes' (baseline race)",
+        r"diff after restart: expected .* in output",
+        "tart-copy-diff-after-restart-shows-no-changes",
+        "the agent wrote into the work dir before the host's baseline commit, so "
+        "git add -A baked the output into the baseline; get_working_dir must gate "
+        "agent launch on a committed HEAD in copy mode",
+    ),
+    Fingerprint(
         "Seatbelt SBPL deny / SIGTRAP (exit 133)",
         r"trace/bpt trap|\bexit (code )?133\b|\bdeny\(1\)",
         "agent-dies-silently-sigtrap--sbpl-subpath-rules-must-use-vnode-resolved-paths",
@@ -1010,27 +1018,38 @@ def _autopsy_artifact_files(attempt_dir: Path) -> list[Path]:
     return out
 
 
-def scan_fingerprints(attempt_dir: Path) -> list[FingerprintHit]:
+def scan_fingerprints(attempt_dir: Path, extra_text: str = "") -> list[FingerprintHit]:
     """Scan preserved artifacts for known fatal fingerprints.
 
     Returns hits in FINGERPRINTS order (most-specific first). At most one hit
     per fingerprint — the first matching line found across the artifact files.
+
+    `extra_text` (the harness failure reason) is scanned as an additional
+    source. Host-side assertion failures — e.g. the tart :copy diff-after-
+    restart race — leave no fatal line in the guest artifacts, so the reason
+    is the only place their signature appears.
     """
     compiled = [(fp, re.compile(fp.pattern, re.IGNORECASE)) for fp in FINGERPRINTS]
     files = _autopsy_artifact_files(attempt_dir)
+    # (source_name, text) pairs; the harness reason scans first so a host-side
+    # signature wins the headline over a generic guest-log catch-all.
+    sources: list[tuple[str, str]] = []
+    if extra_text:
+        sources.append(("harness-reason", extra_text))
+    for f in files:
+        try:
+            sources.append((f.name, f.read_text(errors="replace")))
+        except OSError:
+            continue
     hits: list[FingerprintHit] = []
     seen: set[str] = set()
     for fp, rx in compiled:
         if fp.label in seen:
             continue
-        for f in files:
-            try:
-                text = f.read_text(errors="replace")
-            except OSError:
-                continue
+        for source_name, text in sources:
             for line in text.splitlines():
                 if rx.search(line):
-                    hits.append(FingerprintHit(fp, line.strip()[:200], f.name))
+                    hits.append(FingerprintHit(fp, line.strip()[:200], source_name))
                     seen.add(fp.label)
                     break
             if fp.label in seen:
@@ -1256,7 +1275,7 @@ def write_failure_autopsy(
     FAILURE.md path, or None if attempt_dir is unusable."""
     if not attempt_dir.is_dir():
         return None
-    hits = scan_fingerprints(attempt_dir)
+    hits = scan_fingerprints(attempt_dir, result.reason)
     timeline = build_timeline(attempt_dir)
     result.fingerprints = [h.fp.label for h in hits]
 

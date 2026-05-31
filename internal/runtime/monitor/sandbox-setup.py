@@ -477,8 +477,35 @@ class TartBackend(Backend):
                 return working_dir
             time.sleep(1)
 
+        # For :copy workdirs the host commits the diff baseline (git init/add/
+        # commit, the last step of ExecuteVMWorkDirSetup) AFTER the directory
+        # itself appears. The agent must not write into the work tree before
+        # that commit lands: git add -A would otherwise bake the agent's output
+        # into the baseline and `yoloai diff` would report "No changes". The
+        # directory-exists check above is too weak a gate — wait for a committed
+        # HEAD, which is the exact "baseline ready" signal. Non-copy workdirs
+        # have no git repo, so only wait when this is a copy workdir (copy_dirs
+        # is non-empty iff the workdir is :copy).
+        if self.cfg.get("copy_dirs"):
+            while not self._baseline_committed(working_dir):
+                if time.time() >= deadline:
+                    log_info("tart.baseline.timeout", "git baseline not ready after 120s, continuing anyway",
+                             path=working_dir)
+                    break
+                time.sleep(1)
+
         os.chdir(working_dir)
         return working_dir
+
+    @staticmethod
+    def _baseline_committed(working_dir):
+        """True once a git baseline commit exists in working_dir (HEAD resolves)."""
+        result = tmux_io.run(
+            ["git", "-C", working_dir, "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+        )
+        return result.returncode == 0
 
     def prepare_environment(self):
         """Tart needs the provisioned tool dirs prepended: native Claude Code in

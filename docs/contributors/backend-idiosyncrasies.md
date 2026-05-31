@@ -82,6 +82,7 @@ row to the index.
 | Smoke test: `full_workflow/tart` or `stop_start/tart` fails; exchange dir empty | [Tart: xcodebuild -runFirstLaunch blocks agent startup](#tart-xcodebuild--runfirstlaunch-blocks-agent-startup) |
 | `yoloai new --attach` hangs after "Sandbox created"; Python setup never completes | [Tart: mount_map uses Docker paths, triggering macOS automount](#tart-mount_map-uses-docker-style-paths-triggering-macos-automount-hang) |
 | `FileNotFoundError` at `get_working_dir()` / agent starts in wrong directory | [Tart: workdir setup races Python startup](#tart-vm-workdir-setup-races-python-startup) |
+| Tart `:copy`: `yoloai diff` after `restart` reports "No changes" despite agent edits; smoke `stop_start/tart` fails `expected 'output2.txt' … got: No changes` | [Tart: :copy diff after restart shows 'No changes'](#tart-copy-diff-after-restart-shows-no-changes) |
 | `yoloai apply` fails: `git add: git [add -A]: exit status 128: … index.lock: File exists` while agent is running | [Docker/Podman: agent git and apply git race on index.lock](#dockerpodman-agent-git-and-apply-git-race-on-indexlock) |
 | `FileNotFoundError: 'tmux'` in `sandbox-setup.py::setup_tmux_session` on Tart VM (intermittent) | [Tart: transient FS/PATH failure makes tmux unresolvable during the firstlaunch window](#tart-transient-fspath-failure-makes-tmux-unresolvable-during-the-firstlaunch-window) |
 | Smoke test: `full_workflow`/`stop_start` fails "agent idle"; pane shows `Error: Exit code N` + a clarifying question; other backends pass | [Smoke harness: agent stalls when the sentinel command errors](#agent-stalls-when-the-sentinel-command-errors) |
@@ -1473,6 +1474,20 @@ Previously, Python was delayed 60-120s by the automount hang on `/home/yoloai/.c
 **Fix:** `TartBackend.get_working_dir()` now polls for the directory with a 120s timeout instead of calling `os.chdir` unconditionally. Python waits for Go to finish rsync before proceeding.
 
 **Code:** `runtime/monitor/sandbox-setup.py::TartBackend.get_working_dir`
+
+---
+
+### Tart: `:copy` diff after restart shows 'No changes'
+
+**Symptom:** On the Tart backend with a `:copy` workdir, `yoloai diff` after a `restart --prompt "…writes a file…"` reports "No changes" even though the agent demonstrably created the file. Reproduces in the smoke test as `stop_start/tart` failing with `diff after restart: expected 'output2.txt' in output / got: No changes`. Racy — frequent but not every run; the no-restart `full_workflow/tart` path passes because a cold first boot is slow enough to hide it.
+
+**Explanation:** A baseline/agent ordering race. The diff baseline is the git commit created by `ExecuteVMWorkDirSetup` (host side): `mkdir` → `rsync` (original files only, no `--delete`) → `git init && git add -A && git commit`, run *after* `LaunchContainer` returns. But `LaunchContainer` only boots the VM — it does **not** launch the agent. The VM's own entrypoint (`sandbox-setup.py`) launches the agent and delivers the prompt asynchronously, gated only on `get_working_dir()` returning. The previous gate ([above](#tart-vm-workdir-setup-races-python-startup)) waited for the *directory* to exist, which happens after the host's `mkdir`/`rsync` but **before** the `git commit`. So on a fast clone-boot restart the agent launches, receives the prompt, and writes `output2.txt` before the baseline commit runs; `git add -A` then bakes `output2.txt` into the baseline, and `git diff <baseline>` shows nothing.
+
+Autopsy timeline signature: `hook.idle` (agent finished writing) lands a few seconds *before* `sandbox.restart.complete` (the `ExecuteVMWorkDirSetup` baseline commit), confirming the commit raced behind the agent.
+
+**Fix:** `TartBackend.get_working_dir()` now, for `:copy` workdirs, keeps polling after the directory exists until a committed `HEAD` resolves (`git -C <workdir> rev-parse HEAD` succeeds) — the exact "baseline ready" signal, since the commit is `ExecuteVMWorkDirSetup`'s last step. Gated on copy mode via the `copy_dirs` config key (non-empty iff the workdir is `:copy`); non-copy workdirs have no git repo and must not wait. The secrets-consumed gate ([deadlock entry](#tart-signal_secrets_consumed-must-run-before-get_working_dir)) is unaffected — `signal_secrets_consumed()` still runs before this wait, so the host always reaches and completes the baseline commit regardless of the VM.
+
+**Code:** `runtime/monitor/sandbox-setup.py::TartBackend.get_working_dir` (and `_baseline_committed`)
 
 ---
 

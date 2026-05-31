@@ -241,3 +241,91 @@ def test_no_banner_when_no_lifecycle(tmp_path: Path, recorder: CallRecorder) -> 
     assert not banner_seqs, (
         f"expected no banner tmux calls with no lifecycle config; got {entries}"
     )
+
+
+# --- TartBackend.get_working_dir baseline gate -------------------------
+#
+# Regression guard for the tart :copy "diff after restart: No changes" race.
+# ExecuteVMWorkDirSetup (host side) commits the git baseline AFTER the work
+# dir appears, but the VM entrypoint launches the agent as soon as the dir
+# exists. The agent then writes its output before the baseline commit, which
+# `git add -A` bakes into the baseline, so the later diff shows nothing.
+# get_working_dir must therefore wait for a committed HEAD (the baseline-ready
+# signal) before returning in copy mode.
+
+
+class _BaselineRunner:
+    """Fake tmux_io runner that withholds a git HEAD until `ready_after` polls.
+
+    Records every invocation. `git ... rev-parse HEAD` returns non-zero for
+    the first `ready_after` calls (no baseline yet), then zero (committed),
+    simulating the host's baseline commit landing mid-poll. All other
+    commands succeed.
+    """
+
+    def __init__(self, ready_after: int = 0) -> None:
+        self.ready_after = ready_after
+        self.head_polls = 0
+        self.calls: list[tuple[str, ...]] = []
+
+    def runner(self, cmd: list[str], **_kwargs: Any) -> "subprocess.CompletedProcess[str]":
+        self.calls.append(tuple(cmd))
+        if "rev-parse" in cmd and "HEAD" in cmd:
+            self.head_polls += 1
+            rc = 0 if self.head_polls > self.ready_after else 128
+            return subprocess.CompletedProcess(args=cmd, returncode=rc, stdout="", stderr="")
+        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+
+def test_get_working_dir_waits_for_baseline_in_copy_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """In :copy mode get_working_dir polls git HEAD until the baseline commits.
+
+    The directory exists immediately, but HEAD only resolves after two polls.
+    get_working_dir must keep polling (not return on dir-exists alone) and only
+    chdir once HEAD resolves.
+    """
+    fake = _BaselineRunner(ready_after=2)
+    tmux_io.set_runner(fake.runner)
+    monkeypatch.setattr(sandbox_setup.time, "sleep", lambda _s: None)
+    cwd = os.getcwd()
+    try:
+        backend = sandbox_setup.TartBackend(
+            {"working_dir": str(tmp_path), "copy_dirs": [str(tmp_path)]},
+            str(tmp_path),
+        )
+        result = backend.get_working_dir()
+    finally:
+        os.chdir(cwd)
+        tmux_io.reset_runner()
+
+    assert result == str(tmp_path)
+    assert fake.head_polls >= 3, (
+        f"expected get_working_dir to poll HEAD until it resolved; polls={fake.head_polls}"
+    )
+
+
+def test_get_working_dir_skips_baseline_wait_without_copy_dirs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Non-copy workdirs have no git repo, so get_working_dir must not wait.
+
+    With copy_dirs absent, get_working_dir returns once the dir exists and never
+    polls for a baseline HEAD (which would otherwise hang for the full 120s).
+    """
+    fake = _BaselineRunner(ready_after=10_000)  # HEAD would never resolve
+    tmux_io.set_runner(fake.runner)
+    monkeypatch.setattr(sandbox_setup.time, "sleep", lambda _s: None)
+    cwd = os.getcwd()
+    try:
+        backend = sandbox_setup.TartBackend({"working_dir": str(tmp_path)}, str(tmp_path))
+        result = backend.get_working_dir()
+    finally:
+        os.chdir(cwd)
+        tmux_io.reset_runner()
+
+    assert result == str(tmp_path)
+    assert fake.head_polls == 0, (
+        f"expected no baseline HEAD polling without copy_dirs; polls={fake.head_polls}"
+    )

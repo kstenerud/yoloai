@@ -72,6 +72,21 @@ def test_no_fingerprint_when_artifacts_clean(tmp_path: Path) -> None:
     assert hits == []
 
 
+def test_copy_diff_race_fingerprint_from_reason(tmp_path: Path) -> None:
+    """The tart :copy diff-after-restart race leaves no fatal line in guest
+    artifacts — its only signature is the harness failure reason, which
+    scan_fingerprints picks up via extra_text."""
+    attempt = _make_attempt(tmp_path, setup_log="setup completed\n")
+    reason = "diff after restart: expected 'output2.txt' in output\ngot: No changes"
+    # Without the reason, guest artifacts are clean → no hit.
+    assert smoke_test.scan_fingerprints(attempt) == []
+    hits = smoke_test.scan_fingerprints(attempt, reason)
+    assert hits, "expected the copy-diff-race fingerprint to match the reason"
+    assert hits[0].fp.label.startswith("tart :copy diff after restart")
+    assert hits[0].source == "harness-reason"
+    assert hits[0].fp.anchor == "tart-copy-diff-after-restart-shows-no-changes"
+
+
 def test_agent_stall_fingerprint_from_terminal_snapshot(tmp_path: Path) -> None:
     """An agent that ran the sentinel command but hit a tool error (and then
     stalled) is fingerprinted from terminal-snapshot.txt — the structured logs
