@@ -1,6 +1,6 @@
 # System Overview
 
-Visual guide to how yoloAI's components fit together. For detailed file indexes, type catalogs, and code pointers, see [ARCHITECTURE.md](README.md).
+Visual, conceptual guide to how yoloAI's components fit together — diagrams and mental models only, with **no file paths or symbol catalogs by design** (those drift, and they belong to [README.md](README.md), the code-navigation source of truth). Open this doc to understand *how the pieces fit*; open README.md to find *where the code lives*.
 
 ## Layer Diagram
 
@@ -46,16 +46,14 @@ The codebase follows a strict top-down dependency flow. CLI commands call sandbo
 Backends register themselves via `init()` functions. The registry maps names to factory functions. When the CLI needs a runtime, it calls `runtime.New()` which looks up the factory and creates the backend. Platform-specific backends only register on supported platforms (containerd on Linux; tart and seatbelt on macOS).
 
 ```
-internal/cli/helpers.go            runtime_imports_linux.go
-  import _ "runtime/docker"          import _ "runtime/containerd"
-  import _ "runtime/seatbelt"
-  import _ "runtime/tart"
+Backends are pulled in via blank imports at binary startup
+(all platforms: docker, podman, seatbelt, tart; containerd is Linux-only).
 
 Each backend's init() calls:
   runtime.Register(name, factory)
 
                ┌──────────────────────────────┐
-               │      runtime/registry.go     │
+               │       backend registry       │
                │                              │
                │  backends map[string]Factory │
                │                              │
@@ -72,10 +70,8 @@ Each backend's init() calls:
      ┌─────────────────────────────────────────────────────┐
      │             runtime.Runtime interface               │
      │                                                     │
-     │  Setup · Create · Start · Stop · Remove · Inspect   │
-     │  Exec · GitExec · InteractiveExec                   │
-     │  Capabilities · RequiredCapabilities                │
-     │  Prune · Logs · DiagHint · Close                    │
+     │    lifecycle · exec · capabilities · maintenance    │
+     │    (full method catalog → README.md "Key Types")    │
      └─────────────────────────────────────────────────────┘
 ```
 
@@ -175,7 +171,7 @@ Creating a sandbox happens in three stages: prepare resolves all configuration, 
              └─────────────────┬───────────────────┘
                                │
                                ▼
-┌──────────────── PREPARE (create_prepare.go) ─────────────────┐
+┌────────────────────────── PREPARE ───────────────────────────┐
 │                                                              │
 │  resolve profile chain  →  merge config  →  build image      │
 │  resolve agent (CLI → profile → defaults → "claude")         │
@@ -190,7 +186,7 @@ Creating a sandbox happens in three stages: prepare resolves all configuration, 
 └──────────────────────────────┬───────────────────────────────┘
                                │
                                ▼
-┌─────────────────── SEED (create_seed.go) ────────────────────┐
+┌──────────────────────────── SEED ────────────────────────────┐
 │                                                              │
 │  copy agent seed files from host                             │
 │    (e.g. ~/.claude/.credentials.json → agent-runtime/)       │
@@ -200,7 +196,7 @@ Creating a sandbox happens in three stages: prepare resolves all configuration, 
 └──────────────────────────────┬───────────────────────────────┘
                                │
                                ▼
-┌───────────────── BUILD & START (create.go) ──────────────────┐
+┌─────────────────────── BUILD & START ────────────────────────┐
 │                                                              │
 │  prepare workdir (copy files / create overlay dirs)          │
 │  create git baseline (for :copy mode)                        │
@@ -282,7 +278,7 @@ Configuration merges bottom-up: baked-in defaults are overridden by user default
                      │ overrides
   ┌──────────────────▼──────────────────┐
   │          Baked-in defaults          │  ← lowest priority
-  │  (config/defaults.go)               │
+  │   (compiled in — no file on disk)   │
   └─────────────────────────────────────┘
 
 
