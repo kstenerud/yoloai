@@ -305,6 +305,48 @@ func (w *Workdir) HasUncommittedChanges(ctx context.Context) (bool, error) {
 	return patch.HasUncommittedChanges(ctx, w.s.c.layout, w.s.c.rt, w.s.name)
 }
 
+// BaselineChange reports a baseline move: the new baseline SHA and its commit
+// subject. Re-exported (type alias) from internal/sandbox/patch.
+type BaselineChange = patch.BaselineChange
+
+// BaselineLogEntry is one commit in the workdir's history from sandbox
+// inception to HEAD, with IsBaseline marking the current baseline.
+// Re-exported (type alias) from internal/sandbox/patch.
+type BaselineLogEntry = patch.BaselineLogEntry
+
+// BaselineConflictError is returned by AdvanceBaseline / SetBaseline when the
+// stored baseline no longer matches the caller's expectedCurrentSHA — the
+// compare-and-swap failed because something moved it concurrently. It carries
+// Expected and Actual so the caller can recover. Match it with errors.As.
+// Re-exported (type alias) from internal/sandbox/patch.
+type BaselineConflictError = patch.BaselineConflictError
+
+// AdvanceBaseline moves the diff baseline to the workdir's current HEAD, but
+// only if the stored baseline still equals expectedCurrentSHA (compare-and-swap
+// — see Q-P/CAS). On mismatch it returns a *BaselineConflictError without
+// writing, so a concurrent mover can't be silently clobbered. Pass
+// expectedCurrentSHA == "" to assert "no baseline yet" (valid only when none is
+// set). Refused with a *UsageError for :rw and :overlay workdirs.
+func (w *Workdir) AdvanceBaseline(ctx context.Context, expectedCurrentSHA string) (*BaselineChange, error) {
+	return patch.AdvanceBaselineCAS(ctx, w.s.c.layout, w.s.c.rt, w.s.name, expectedCurrentSHA)
+}
+
+// SetBaseline moves the diff baseline to the commit named by ref (short SHA,
+// full SHA, or any git rev), guarded by the same compare-and-swap as
+// AdvanceBaseline against expectedCurrentSHA.
+func (w *Workdir) SetBaseline(ctx context.Context, expectedCurrentSHA, ref string) (*BaselineChange, error) {
+	return patch.SetBaselineCAS(ctx, w.s.c.layout, w.s.c.rt, w.s.name, expectedCurrentSHA, ref)
+}
+
+// BaselineLog returns the workdir's commit history from sandbox inception to
+// HEAD, newest-first then the inception commit, marking the current baseline.
+// Bounds the output to the sandbox session so it stays useful for recovery even
+// after an accidental baseline advance. Refused with a *UsageError for :rw and
+// :overlay workdirs.
+func (w *Workdir) BaselineLog(ctx context.Context) ([]BaselineLogEntry, error) {
+	return patch.BaselineLog(ctx, w.s.c.layout, w.s.c.rt, w.s.name)
+}
+
 // TagsOptions configures Workdir.Tags.
 type TagsOptions struct {
 	// UnappliedOnly returns only tags present in the sandbox but not yet on the

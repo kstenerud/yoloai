@@ -825,26 +825,9 @@ func GenerateFormatPatchForRefs(ctx context.Context, layout config.Layout, rt ru
 // Unlike AdvanceBaseline (which advances to HEAD), this advances to an
 // arbitrary commit -- used after selective apply.
 func AdvanceBaselineTo(layout config.Layout, name, sha string) error {
-	sandboxDir := layout.SandboxDir(name)
-	if err := store.RequireSandboxDir(sandboxDir); err != nil {
-		return err
-	}
-
-	meta, err := store.LoadMeta(sandboxDir)
-	if err != nil {
-		return err
-	}
-
-	if meta.Workdir.Mode == "rw" {
-		return nil
-	}
-
-	if meta.Workdir.Mode == "overlay" {
-		return nil // baseline managed via UpdateOverlayBaseline
-	}
-
-	meta.Workdir.BaselineSHA = sha
-	return store.SaveMeta(sandboxDir, meta)
+	return advanceBaselineUnlocked(layout, name, func(string) (string, error) {
+		return sha, nil
+	})
 }
 
 // AdvanceBaseline updates the sandbox's baseline SHA to the current HEAD
@@ -852,32 +835,13 @@ func AdvanceBaselineTo(layout config.Layout, name, sha string) error {
 // subsequent diff/apply operations don't re-show already-applied commits.
 // For :rw mode sandboxes, this is a no-op.
 func AdvanceBaseline(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string) error {
-	sandboxDir := layout.SandboxDir(name)
-	if err := store.RequireSandboxDir(sandboxDir); err != nil {
-		return err
-	}
-
-	meta, err := store.LoadMeta(sandboxDir)
-	if err != nil {
-		return err
-	}
-
-	if meta.Workdir.Mode == "rw" {
-		return nil
-	}
-
-	if meta.Workdir.Mode == "overlay" {
-		return nil // baseline managed via UpdateOverlayBaseline
-	}
-
-	workDir := store.WorkDir(sandboxDir, meta.Workdir.HostPath)
-	sha, err := runtime.GitExecFor(ctx, rt, name, workDir, "rev-parse", "HEAD")
-	if err != nil {
-		return fmt.Errorf("git rev-parse: %w", err)
-	}
-
-	meta.Workdir.BaselineSHA = strings.TrimSpace(sha)
-	return store.SaveMeta(sandboxDir, meta)
+	return advanceBaselineUnlocked(layout, name, func(workDir string) (string, error) {
+		sha, err := runtime.GitExecFor(ctx, rt, name, workDir, "rev-parse", "HEAD")
+		if err != nil {
+			return "", fmt.Errorf("git rev-parse: %w", err)
+		}
+		return strings.TrimSpace(sha), nil
+	})
 }
 
 // GenerateFormatPatch creates .patch files (one per commit) for commits
