@@ -48,7 +48,7 @@ Cost of applying: a habit of asking "what does this test prove?" rather than "wh
 
 ### Sources
 
-Kent Beck *TDD: By Example* (2002); Martin Fowler "Test Coverage" (martinfowler.com/bliki/TestCoverage.html). Full citations: `../research/principles/testing-principles-research.md §1`.
+Kent Beck *TDD: By Example*; Martin Fowler "Test Coverage". Full citations: `../research/principles/testing-principles-research.md §1`.
 
 Originally established in global `CLAUDE.md` §Testing and ratified in D22.
 
@@ -75,7 +75,7 @@ Cost of applying: discipline to ask "is this assertion about behaviour or about 
 
 ### Sources
 
-Kent Beck *TDD: By Example* (2002); Martin Fowler "UnitTest" (martinfowler.com/bliki/UnitTest.html); Sandi Metz "The Magic Tricks of Testing" (RailsConf 2013). Full citations: `../research/principles/testing-principles-research.md §2`.
+Kent Beck *TDD: By Example*; Martin Fowler "UnitTest"; Sandi Metz "The Magic Tricks of Testing". Full citations: `../research/principles/testing-principles-research.md §2`.
 
 Originally established alongside D14 (pluggable idle detection — multiple rejected approaches forced behavioural tests).
 
@@ -103,7 +103,7 @@ Cost of applying: write the error-case test alongside the happy-case test. Damag
 
 ### Sources
 
-Michael Feathers *Working Effectively with Legacy Code* (Prentice Hall, 2004) — seams for error-path testing; Kent Beck *TDD: By Example* (2002) — red-bar first. Full citations: `../research/principles/testing-principles-research.md §3`.
+Michael Feathers *Working Effectively with Legacy Code*; Kent Beck *TDD: By Example*. Full citations: `../research/principles/testing-principles-research.md §3`.
 
 Originally established alongside D6 (symlink resolution before safety checks — the error path *is* the security boundary).
 
@@ -131,7 +131,7 @@ Cost of applying: a few extra minutes per fix to write the test. Damage prevente
 
 ### Sources
 
-Kent Beck *TDD: By Example* (2002); Martin Fowler "Eradicating Non-Determinism in Tests" (martinfowler.com/articles/nonDeterminism.html, 2011). Full citations: `../research/principles/testing-principles-research.md §4`.
+Kent Beck *TDD: By Example*; Martin Fowler "Eradicating Non-Determinism in Tests". Full citations: `../research/principles/testing-principles-research.md §4`.
 
 ---
 
@@ -157,7 +157,7 @@ Cost of applying: discipline at test-writing time to pick the right layer. Damag
 
 ### Sources
 
-Mike Cohn *Succeeding with Agile* (2009); Martin Fowler "TestPyramid" (martinfowler.com/bliki/TestPyramid.html); Go `testing` documentation (pkg.go.dev/testing); pytest documentation (docs.pytest.org). Full citations: `../research/principles/testing-principles-research.md §5`.
+Mike Cohn *Succeeding with Agile*; Martin Fowler "TestPyramid". Full citations: `../research/principles/testing-principles-research.md §5`.
 
 Originally established alongside D19 (W3–W6 of the architecture remediation made each layer testable).
 
@@ -184,7 +184,7 @@ Cost of applying: integration tests are slower than unit tests and require backe
 
 ### Sources
 
-J.B. Rainsberger "Integrated Tests Are A Scam" (jbrains.ca, 2009) — read carefully; Rainsberger argues against integration tests as a *replacement* for unit tests, not against them at the integration boundary; Martin Fowler "Mocks Aren't Stubs" (martinfowler.com/articles/mocksArentStubs.html, 2007/2014). Full citations: `../research/principles/testing-principles-research.md §6`.
+J.B. Rainsberger "Integrated Tests Are A Scam"; Martin Fowler "Mocks Aren't Stubs". Full citations: `../research/principles/testing-principles-research.md §6`.
 
 Originally established alongside D7 (pluggable runtime interface required tests at the seam).
 
@@ -219,7 +219,7 @@ Cost of applying: pause to ask the three questions when a test fails. Damage pre
 
 ### Sources
 
-Global `/home/karl/.claude/CLAUDE.md` §Testing; Kent Beck *TDD: By Example* (2002); Martin Fowler refactoring writing. Full citations: `../research/principles/testing-principles-research.md §7`.
+Global `CLAUDE.md` §Testing; Kent Beck *TDD: By Example*; Martin Fowler. Full citations: `../research/principles/testing-principles-research.md §7`.
 
 Originally established in global CLAUDE.md; ratified for yoloAI in D22.
 
@@ -247,7 +247,7 @@ Cost of applying: a few lines of code to write each fake. Damage prevented: gene
 
 ### Sources
 
-Martin Fowler "Mocks Aren't Stubs" (martinfowler.com/articles/mocksArentStubs.html, 2007/2014); Michael Feathers *Working Effectively with Legacy Code* (Prentice Hall, 2004) — the seam model; Go `testing` documentation; Effective Go (go.dev/doc/effective_go) §Interfaces. Full citations: `../research/principles/testing-principles-research.md §8`.
+Martin Fowler "Mocks Aren't Stubs"; Michael Feathers *Working Effectively with Legacy Code*. Full citations: `../research/principles/testing-principles-research.md §8`.
 
 Originally established in `standards/GO.md` §Testing; ratified in D22.
 
@@ -274,7 +274,7 @@ Cost of applying: writing the test alongside the diagnostic. Damage prevented: r
 
 ### Sources
 
-Kent Beck *TDD: By Example* (2002) — bug-then-test discipline; project `CLAUDE.md` §Recording new idiosyncrasies; D21. Full citations: `../research/principles/testing-principles-research.md §9`.
+Kent Beck *TDD: By Example*; project D21. Full citations: `../research/principles/testing-principles-research.md §9`.
 
 Originally established in D21.
 
@@ -307,7 +307,7 @@ Cost: construct an explicit Layout/reader instead of one `t.Setenv` line (usuall
 
 ### Sources
 
-`development-principles.md §12` (no ambient configuration); Go `testing` docs (`t.Setenv` forbids `t.Parallel`). D23.
+`development-principles.md §12` (no ambient configuration); Go `testing` docs (`t.Setenv` forbids `t.Parallel`); D23.
 
 ---
 

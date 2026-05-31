@@ -57,7 +57,7 @@ Cost of applying: a one-page threat-model statement; periodic review. Damage pre
 
 ### Sources
 
-Bruce Schneier on threat-model scoping (*Secrets and Lies*, Wiley 2000; schneier.com); NIST SP 800-190 §4 (container-runtime threats taxonomy); Anthropic + OpenAI + DeepMind, "Attacker Moves Second" (Nov 2025). Full citations: `../research/principles/security-principles-research.md §1`.
+Bruce Schneier; NIST SP 800-190; Anthropic + OpenAI + DeepMind "Attacker Moves Second" (2025). Full citations: `../research/principles/security-principles-research.md §1`.
 
 Originally established alongside D11.
 
@@ -85,7 +85,7 @@ Cost of applying: design-time discipline to keep asking "what's the blast radius
 
 ### Sources
 
-Saltzer & Schroeder "The Protection of Information in Computer Systems" (Proc. IEEE 63(9), 1975); NIST SP 800-190; Anthropic + OpenAI + DeepMind, "Attacker Moves Second" (Nov 2025). Full citations: `../research/principles/security-principles-research.md §2`.
+Saltzer & Schroeder (1975); NIST SP 800-190; Anthropic + OpenAI + DeepMind "Attacker Moves Second". Full citations: `../research/principles/security-principles-research.md §2`.
 
 Originally established alongside D4 (mount-mode taxonomy).
 
@@ -121,7 +121,7 @@ Cost of applying: maintenance of multiple isolation layers (gVisor, Kata, Tart, 
 
 ### Sources
 
-gVisor documentation (gvisor.dev); Tart documentation (github.com/cirruslabs/tart); Apple sandbox-exec / community SBPL guide; Kata Containers documentation (katacontainers.io). NIST SP 800-190 §6 (defense-in-depth). Full citations: `../research/principles/security-principles-research.md §3`.
+gVisor, Tart, Apple sandbox-exec, Kata Containers docs; NIST SP 800-190 §6. Full citations: `../research/principles/security-principles-research.md §3`.
 
 Originally established alongside D17.
 
@@ -150,7 +150,7 @@ Cost of applying: feature-gated capability code paths. Damage prevented: agent c
 
 ### Sources
 
-Saltzer & Schroeder (1975, principle of least privilege); CIS Docker Benchmark §5 (Container Runtime); OWASP Docker Security Cheat Sheet (capabilities); Linux capabilities(7). Full citations: `../research/principles/security-principles-research.md §4`.
+Saltzer & Schroeder (1975); CIS Docker Benchmark; OWASP; Linux capabilities(7). Full citations: `../research/principles/security-principles-research.md §4`.
 
 Originally established alongside D4 (mount modes) and D11 (network isolation).
 
@@ -184,7 +184,7 @@ Cost of applying: a deliberate `yoloai apply` step every time changes need to la
 
 ### Sources
 
-Anthropic + OpenAI + DeepMind "Attacker Moves Second" (Nov 2025); foley's `development-principles.md §LLM output untrusted` (the same principle, applied to a different surface). Full citations: `../research/principles/security-principles-research.md §5`.
+Anthropic + OpenAI + DeepMind "Attacker Moves Second"; `development-principles.md`. Full citations: `../research/principles/security-principles-research.md §5`.
 
 ---
 
@@ -225,7 +225,7 @@ Cost of applying: a slightly more complex entrypoint and a host-side temp file l
 
 ### Sources
 
-OWASP Docker Security Cheat Sheet (Credential Management); CIS Docker Benchmark v1.6 §4 (Container Images and Build File); Docker official-image conventions (postgres, mysql also use file injection). Full citations: `../research/principles/security-principles-research.md §6`.
+OWASP Docker Security Cheat Sheet; CIS Docker Benchmark §4; Docker official-image conventions. Full citations: `../research/principles/security-principles-research.md §6`.
 
 Originally established alongside the v1 design + D15 (Seatbelt) + D17 (`--isolation` flag preserves the same model across backends).
 
@@ -254,7 +254,7 @@ Cost of applying: maintaining the allowlist as the agent's needs evolve. Damage 
 
 ### Sources
 
-Saltzer & Schroeder (1975); OWASP guidance on allowlist vs blocklist; project D15, D11. Full citations: `../research/principles/security-principles-research.md §7`.
+Saltzer & Schroeder (1975); OWASP allowlist guidance. Full citations: `../research/principles/security-principles-research.md §7`.
 
 Originally established alongside D15.
 
@@ -282,7 +282,7 @@ Cost of applying: real verification time per claim. Damage prevented: security c
 
 ### Sources
 
-Project critique principles (`CLAUDE.md` §Critique Principles — security claims need the highest scrutiny); D2 (critique cycle); D5 (factual accuracy). Full citations: `../research/principles/security-principles-research.md §8`.
+Project `CLAUDE.md` §Critique Principles; D2, D5. Full citations: `../research/principles/security-principles-research.md §8`.
 
 Originally established alongside D5.
 
@@ -316,7 +316,7 @@ Cost of applying: a few sentences in each design-doc section. Damage prevented: 
 
 ### Sources
 
-NIST SP 800-190 §3 (risk acceptance); project `CLAUDE.md` §Default to public + factual accuracy. CVEs cited in the research file (CVE-2025-55284, CVE-2023-2640, CVE-2023-32629) inform what residual risks to surface. Full citations: `../research/principles/security-principles-research.md §9`.
+NIST SP 800-190 §3 (risk acceptance); project `CLAUDE.md`. Full citations: `../research/principles/security-principles-research.md §9`.
 
 Originally established alongside D11 and `docs/design/security.md`.
 
@@ -345,7 +345,7 @@ Cost of applying: explicit flag/config naming + documentation. Damage prevented:
 
 ### Sources
 
-Project `docs/design/security.md` §Privilege escalation via recipes; `general-principles.md §6 — safe defaults` (this is the corresponding "explicit opt-out" surface). Full citations: `../research/principles/security-principles-research.md §10`.
+`docs/design/security.md`; `general-principles.md §6`. Full citations: `../research/principles/security-principles-research.md §10`.
 
 ---
 

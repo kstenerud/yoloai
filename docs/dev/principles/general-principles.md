@@ -47,7 +47,7 @@ Cost of applying: discipline at design time (~minutes per decision). Damage prev
 
 ### Sources
 
-Kent Beck (late 1990s, Extreme Programming via Ron Jeffries / C3 project); Martin Fowler "Yagni" (2015, martinfowler.com); 37signals *Getting Real* (2006, basecamp.com/gettingreal). Full citations: `../research/principles/general-principles-research.md §1`.
+Kent Beck, Martin Fowler, 37signals. Full citations: `../research/principles/general-principles-research.md §1`.
 
 Originally established in D22.
 
@@ -98,7 +98,7 @@ Cost of applying: an hour of research per major dependency at selection time. Da
 
 ### Sources
 
-Dan McKinley "Choose Boring Technology" (2015, mcfunley.com); DHH cloud-exit essays (2022–2024, world.hey.com/dhh); post-xz consensus on dependency hygiene (2024–2025). Full citations: `../research/principles/general-principles-research.md §2`.
+Dan McKinley, DHH, post-xz dependency hygiene consensus. Full citations: `../research/principles/general-principles-research.md §2`.
 
 Originally established in D22.
 
@@ -127,7 +127,7 @@ Cost of applying: discipline at design time + research into what exists. Damage 
 
 ### Sources
 
-Unix Philosophy — McIlroy / Thompson / Kernighan (1978 Bell System Technical Journal; Kernighan & Pike, *The Unix Programming Environment*, Prentice-Hall, 1984); git's `format-patch` / `am` man pages; project `CLAUDE.md` §Design Principles. Full citations: `../research/principles/general-principles-research.md §5`.
+Unix Philosophy — McIlroy, Thompson, Kernighan & Pike. Full citations: `../research/principles/general-principles-research.md §5`.
 
 Originally established alongside D8.
 
@@ -154,7 +154,7 @@ Cost of applying: a few seconds at decision time to classify. Damage prevented: 
 
 ### Sources
 
-Jeff Bezos 2015 Amazon shareholder letter — Type 1 / Type 2 decisions; Bezos 2016 — 70% rule; Dave Snowden Cynefin framework (1999–2007). Full citations: `../research/principles/general-principles-research.md §3`.
+Jeff Bezos (Type 1/Type 2, 70% rule); Dave Snowden Cynefin. Full citations: `../research/principles/general-principles-research.md §3`.
 
 Originally established in D22.
 
@@ -186,7 +186,7 @@ Cost of applying: design-time discipline + bound implementation (small one-off c
 
 ### Sources
 
-Principles of Chaos Engineering (principlesofchaos.org, 2017+) — "minimize blast radius"; Michael Nygard *Release It!* (2007 / 2018) — Bulkhead, Circuit Breaker; Martin Fowler Circuit Breaker (2014). Full citations: `../research/principles/general-principles-research.md §4`.
+Chaos Engineering principles; Michael Nygard *Release It!*; Martin Fowler. Full citations: `../research/principles/general-principles-research.md §4`.
 
 Originally established in D22.
 
@@ -218,7 +218,7 @@ Cost of applying: design-time discipline to pick the safe default and verify it.
 
 ### Sources
 
-OWASP Docker Security Cheat Sheet; CIS Docker Benchmark; Saltzer & Schroeder "The Protection of Information in Computer Systems" (1975) — principle of least privilege. Full citations: `../research/principles/general-principles-research.md §6`.
+OWASP, CIS Docker Benchmark; Saltzer & Schroeder (1975). Full citations: `../research/principles/general-principles-research.md §6`.
 
 Originally established alongside D4 + D15 + D16.
 
@@ -247,7 +247,7 @@ Cost of applying: 5–30 minutes per non-trivial claim to verify. Damage prevent
 
 ### Sources
 
-LLM hallucination literature (Maynez et al. 2020); the yoloAI critique discipline itself (D2, D5). Full citations: `../research/principles/general-principles-research.md §7`. This principle has no single canonical external source — it is operationalised in the project's critique workflow.
+LLM hallucination literature (Maynez et al.); project critique discipline (D2, D5). Full citations: `../research/principles/general-principles-research.md §7`.
 
 Originally established in D5.
 
@@ -279,7 +279,7 @@ Cost of applying: ~5–15 minutes per meaningful decision. Damage prevented: mon
 
 ### Sources
 
-Michael Nygard "Documenting Architecture Decisions" (Cognitect, November 2011); community ADR templates (Joel Parker Henderson). Full citations: `../research/principles/general-principles-research.md §8`.
+Michael Nygard, ADR templates (Joel Parker Henderson). Full citations: `../research/principles/general-principles-research.md §8`.
 
 Originally established in D22 (this set).
 
@@ -309,7 +309,7 @@ Cost of applying: a one-off diagnostic cost per failure mode + the discipline to
 
 ### Sources
 
-Charity Majors / Honeycomb on observability and alert quality (2018–2023); Michael Nygard *Release It!* on stability patterns; project `CLAUDE.md` §Recording new idiosyncrasies. Full citations: `../research/principles/general-principles-research.md §9`.
+Charity Majors / Honeycomb on observability; Michael Nygard *Release It!*. Full citations: `../research/principles/general-principles-research.md §9`.
 
 Originally established in D21.
 
@@ -340,7 +340,7 @@ Cost of applying: testing across platforms + documenting platform-specific trade
 
 ### Sources
 
-`docs/dev/research/sandboxing.md`, `docs/dev/research/macos-idle-detection.md`, `docs/dev/research/linux-vm-backends.md`, `docs/dev/backend-idiosyncrasies.md`; project `CLAUDE.md` §Cross-platform awareness. No single external canonical source — operationalised through the research and idiosyncrasies docs.
+Operationalised through project research and idiosyncrasies docs; no single external canonical source.
 
 Originally established in D5 (cross-platform clause in `CLAUDE.md` critique principles).
 
@@ -372,7 +372,7 @@ Cost of applying: a few minutes per document to remove sensitive content (rare).
 
 ### Sources
 
-37signals transparency culture (2006+); OSS norms post-2020; RFC 9116 (`security.txt` — yoloAI does not have one yet but should). Full citations: `../research/principles/general-principles-research.md §11`.
+37signals transparency culture; OSS norms; RFC 9116. Full citations: `../research/principles/general-principles-research.md §11`.
 
 Originally established in D22.
 
@@ -402,7 +402,7 @@ Cost of applying: the discipline to revise the doc on divergence (~minutes) and 
 
 ### Sources
 
-The scientific method (observation → hypothesis → experiment → analysis → conclusion); Karl Popper on falsifiability; George Box "all models are wrong, some are useful" (1976). Operationalised in this project via the `//go:build never` design-checkpoint convention (instanced by `api_surface.go`, retired to D45 once concluded) and the D-entry reconciliation process.
+Karl Popper on falsifiability; George Box ("all models are wrong, some are useful"). Operationalised via the `//go:build never` checkpoint convention and D-entry reconciliation process.
 
 Originally established in D25.
 
@@ -430,7 +430,7 @@ Cost of applying: the friction of interrupting forward motion to raise a concern
 
 ### Sources
 
-Helmuth von Moltke the Elder, *Über Strategie* (1871) — "no plan of operations extends with any certainty beyond the first contact with the main hostile force," popularly "no plan survives contact with the enemy." Shares the falsifiability lineage of §12 (Popper; George Box, "all models are wrong, some are useful," 1976). Operationalised in this project by the critique discipline and the D-entry reconciliation process (the D52→CRITIQUE-G1 reversal and the D53 audit corrections are the canonical instances).
+Helmuth von Moltke the Elder (*Über Strategie*, 1871); Popper; George Box. Operationalised via the critique discipline and D-entry reconciliation (D52→CRITIQUE-G1, D53 audit).
 
 Originally established in D54.
 

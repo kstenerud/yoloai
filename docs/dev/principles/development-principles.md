@@ -64,7 +64,7 @@ A concise reference for the engineering values that shape every code path in yol
 
 ### Sources
 
-Kent Beck (YAGNI); Robert C. Martin (SOLID, *Clean Code*); Sandi Metz ("The Wrong Abstraction", 2016); Eric Raymond *The Art of Unix Programming* (2003); David L. Parnas (modularity, 1972); Bertrand Meyer *OOSC* (Command-Query Separation, 1988); Donald Knuth + Tony Hoare (premature optimization); Jon Postel (RFC 760, robustness); Eric Allman (ACM Queue 2011, robustness reconsidered); 37signals/DHH (Convention over Configuration). Full citations: `../research/principles/development-principles-research.md §1`.
+Kent Beck, Robert C. Martin, Sandi Metz, Parnas, Meyer, Postel, Knuth/Hoare. Full citations: `../research/principles/development-principles-research.md §1`.
 
 ---
 
@@ -127,7 +127,7 @@ Cost of applying: discipline at design time + occasional refactor when a boundar
 
 ### Sources
 
-David L. Parnas "On the Criteria To Be Used in Decomposing Systems Into Modules" (CACM, 1972); Robert C. Martin SOLID (objectmentor.com 1995–2002); Effective Go §Interfaces. The comply-or-complain framing echoes Postel-in-reverse (be strict in what you do) and the Unix "do one thing" mechanism/policy split. Project D7, D12, D13, D19, D24, D26, D27. Full citations: `../research/principles/development-principles-research.md §2`.
+David L. Parnas (CACM, 1972); Robert C. Martin SOLID; Effective Go. Full citations: `../research/principles/development-principles-research.md §2`.
 
 Originally established alongside D7 (pluggable runtime interface); restated two-sided in D27.
 
@@ -156,7 +156,7 @@ Cost of applying: validation function alongside each domain concept; the discipl
 
 ### Sources
 
-David L. Parnas (1972); OWASP secure-coding guidance; project D6 + D10. Full citations: `../research/principles/development-principles-research.md §3`.
+David L. Parnas (1972); OWASP secure-coding guidance. Full citations: `../research/principles/development-principles-research.md §3`.
 
 ---
 
@@ -221,7 +221,7 @@ The same rule covers a consequential *mode* with no good default. `ApplyOptions.
 
 ### Sources
 
-Alexis King "Parse, don't validate" (lexi-lambda.github.io, 2019); David L. Parnas (1972); project D6 + D10. Full citations: `../research/principles/development-principles-research.md §4`.
+Alexis King "Parse, don't validate"; David L. Parnas (1972). Full citations: `../research/principles/development-principles-research.md §4`.
 
 ---
 
@@ -248,7 +248,7 @@ Cost of applying: more error paths to write and test. Damage prevented: silent c
 
 ### Sources
 
-Effective Go §Errors; Bertrand Meyer *Object-Oriented Software Construction* — Design by Contract (1988/1997); project D21 + global `CLAUDE.md` testing principles. Full citations: `../research/principles/development-principles-research.md §5`.
+Effective Go §Errors; Bertrand Meyer *OOSC* (Design by Contract). Full citations: `../research/principles/development-principles-research.md §5`.
 
 ---
 
@@ -283,7 +283,7 @@ Cost of applying: a few extra characters per suppression. Damage prevented: sile
 
 ### Sources
 
-`.golangci.yml` (project config); Effective Go; Uber Go Style Guide §Avoid using lint directives unnecessarily. Full citations: `../research/principles/development-principles-research.md §6`.
+Effective Go; Uber Go Style Guide. Full citations: `../research/principles/development-principles-research.md §6`.
 
 ---
 
@@ -353,7 +353,7 @@ Cost of applying: explicit error handling, occasionally a few lines of plumbing.
 
 ### Sources
 
-Effective Go §Errors; Go Code Review Comments §Don't panic; `.golangci.yml` errcheck. Full citations: `../research/principles/development-principles-research.md §7`.
+Effective Go §Errors; Go Code Review Comments. Full citations: `../research/principles/development-principles-research.md §7`.
 
 ---
 
@@ -381,7 +381,7 @@ Cost of applying: occasionally a slightly-larger change unit. Damage prevented: 
 
 ### Sources
 
-Project `CLAUDE.md` §Project Status; D16; `docs/BREAKING-CHANGES.md` convention. Full citations: `../research/principles/development-principles-research.md §8`.
+Project `CLAUDE.md` §Project Status; D16. Full citations: `../research/principles/development-principles-research.md §8`.
 
 ---
 
@@ -406,7 +406,7 @@ Cost of applying: a few days of audit + plan + numbered execution. Damage preven
 
 ### Sources
 
-D19; commit pattern visible in `git log --grep '^Refactor: W'`. Full citations: `../research/principles/development-principles-research.md §9`.
+Project D19; W-numbered remediation commits. Full citations: `../research/principles/development-principles-research.md §9`.
 
 ---
 
@@ -433,7 +433,7 @@ Cost of applying: occasional friction when `make check` fails. Damage prevented:
 
 ### Sources
 
-Project `CLAUDE.md` §Code Quality Gate; D20; the hook scripts at `.claude/hooks/`. Full citations: `../research/principles/development-principles-research.md §10`.
+Project `CLAUDE.md` §Code Quality Gate; D20. Full citations: `../research/principles/development-principles-research.md §10`.
 
 ---
 
@@ -458,7 +458,7 @@ Cost of applying: the discipline to stop after the third failure and rethink. Da
 
 ### Sources
 
-Global `CLAUDE.md`: "If an approach isn't working or feels overcomplicated, stop and rethink rather than immediately switching tactics." Project D14, D11. Full citations: `../research/principles/development-principles-research.md §11`.
+Global `CLAUDE.md` §Agent operating principles; project D14, D11. Full citations: `../research/principles/development-principles-research.md §11`.
 
 ---
 
@@ -506,7 +506,7 @@ Damage prevented:
 
 ### Sources
 
-The general pattern is "dependency injection" applied to environment / configuration; it's part of the Twelve-Factor App's factor III (config in the environment, but read once and passed explicitly); it's the engineering side of Zen of Python's "explicit is better than implicit." Project decision: Q-W (working-notes D45, 2026-05-25).
+Twelve-Factor App factor III (config read once, passed explicitly); Zen of Python "explicit is better than implicit". Project decision: Q-W (D45).
 
 ---
 
