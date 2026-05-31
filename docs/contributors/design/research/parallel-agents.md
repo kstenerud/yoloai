@@ -78,13 +78,13 @@ yoloAI's sandbox model is a natural fit for parallel agent workflows:
 - `diff`/`apply` allows sequential review and integration
 - tmux session management is already built in
 
-**Gaps to address:**
+**Gaps to address** — still open as of 2026-05:
 1. No batch creation of sandboxes from a task list
-2. No sandbox chaining / pipeline execution
-3. No agent status detection (running/idle/done/error) in `yoloai ls`
-4. `yoloai ls` output is minimal for multi-sandbox management
-5. No ordering/dependency between sandboxes for sequential apply
-6. No cost/token tracking surfaced from agents
+2. No sandbox chaining / pipeline execution (see [Sandbox Chaining](#sandbox-chaining-pipelines) above)
+3. No ordering/dependency between sandboxes for sequential apply
+4. No cost/token tracking surfaced from agents
+
+Addressed since this research (2025-06): agent status detection now drives `yoloai ls`, which shows per-sandbox status (active/idle/done/failed/stopped) and filters by `--active`/`--idle`/`--done`/`--stopped` (plus `--agent`/`--profile`/`--changes`).
 
 **yoloAI advantages over manual tmux approach:**
 - Sandbox isolation eliminates the permission-bypass security concerns the blog author raised

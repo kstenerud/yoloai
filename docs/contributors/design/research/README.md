@@ -9,10 +9,10 @@ Research documents supporting yoloAI's design decisions. Each file covers a broa
 | [Security](security.md) | Credential management, network isolation, proxy sidecar, Claude Code proxy support |
 | [Sandboxing](sandboxing.md) | Alternative filesystem isolation, macOS VM sandbox, macOS process/FS isolation |
 | [Implementation](implementation.md) | Env var interpolation, Claude Code installation, Go libs vs shell commands, tmux defaults |
-| [Parallel Agents](parallel-agents.md) | Multi-agent coordination, idle detection, spec-driven development, batch orchestration |
-| [Orchestration](orchestration.md) | Agent idle/done detection mechanisms, orchestrator ecosystem, agent SDK interfaces, handoffs, user pain points |
-| [Idle Detection](idle-detection.md) | Full audit of current idle detection code, external research on detection approaches, pluggable detector architecture |
-| [macOS Idle Detection](macos-idle-detection.md) | macOS-specific process idle detection: sysctl KERN_PROC, libproc, DTrace, Mach APIs, network monitoring |
+| [Parallel Agents](parallel-agents.md) | Field case study (2025-06): manual tmux parallelism, spec-driven development, **sandbox chaining / pipelines**. Defers idle-detection depth to Orchestration |
+| [Orchestration](orchestration.md) | **External** signals + ecosystem: how each agent emits completion/idle (hooks/bell/SDK events), the orchestrator-tool landscape, git-worktree patterns, handoffs, user pain points |
+| [Idle Detection](idle-detection.md) | **yoloAI's own** idle/done detection — audit of current code + pluggable detector architecture (the canonical internal-design doc) |
+| [macOS Idle Detection](macos-idle-detection.md) | Platform deep-dive *supporting* idle-detection.md: macOS process-idle techniques (sysctl KERN_PROC, libproc, DTrace, Mach APIs, network monitoring) |
 | [Agentic Workflows](agentic-workflows.md) | Community sentiment on autonomous agents, TDD subagent patterns, authority splitting, review gap, skill ecosystem |
 | [Podman](podman.md) | Podman backend: SDK options, Docker-compat socket, rootless file ownership, overlay concerns, implementation scope, open questions |
 | [Linux VM Backends](linux-vm-backends.md) | VM-level isolation beyond Docker: Firecracker, gVisor, Kata Containers, Cloud Hypervisor, Lima, Sysbox; comparison matrix and yoloAI recommendation |
