@@ -70,7 +70,10 @@ type ResetOptions struct {
 	KeepCache        bool // preserve the cache directory
 	KeepFiles        bool // preserve the files directory
 	NoPrompt         bool // skip re-sending the prompt after reset
-	Debug            bool // enable entrypoint debug logging
+	// Prompt, when set, overwrites the sandbox's prompt.txt before resetting so
+	// the new text is re-sent on restart. Empty leaves the existing prompt.
+	Prompt string
+	Debug  bool // enable entrypoint debug logging
 }
 
 func (o ResetOptions) toInternal(name string) sandbox.ResetOptions {
@@ -81,6 +84,7 @@ func (o ResetOptions) toInternal(name string) sandbox.ResetOptions {
 		KeepCache:  o.KeepCache,
 		KeepFiles:  o.KeepFiles,
 		NoPrompt:   o.NoPrompt,
+		Prompt:     o.Prompt,
 		Debug:      o.Debug,
 	}
 }

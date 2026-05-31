@@ -37,12 +37,13 @@ const resumePreamble = "You were previously working on the following task and we
 // ResetOptions holds parameters for the reset command.
 type ResetOptions struct {
 	Name       string
-	Restart    bool // stop and restart container
-	ClearState bool // also wipe agent-runtime directory (replaces Clean)
-	KeepCache  bool // preserve cache directory
-	KeepFiles  bool // preserve files directory
-	NoPrompt   bool // skip re-sending prompt after reset
-	Debug      bool // enable entrypoint debug logging
+	Restart    bool   // stop and restart container
+	ClearState bool   // also wipe agent-runtime directory (replaces Clean)
+	KeepCache  bool   // preserve cache directory
+	KeepFiles  bool   // preserve files directory
+	NoPrompt   bool   // skip re-sending prompt after reset
+	Prompt     string // if set, overwrite prompt.txt before reset (re-sent on restart)
+	Debug      bool   // enable entrypoint debug logging
 }
 
 // Stop stops a sandbox's instance.
@@ -538,6 +539,13 @@ func Reset(ctx context.Context, d state.Deps, opts ResetOptions) (*ResetResult, 
 
 	if meta.Workdir.Mode == "rw" {
 		return nil, fmt.Errorf("reset is not applicable for :rw directories — changes are already in the original")
+	}
+
+	if opts.Prompt != "" {
+		promptPath := filepath.Join(sandboxDir, "prompt.txt")
+		if err := fileutil.WriteFile(promptPath, []byte(opts.Prompt), 0600); err != nil {
+			return nil, fmt.Errorf("write prompt.txt: %w", err)
+		}
 	}
 
 	var n notices

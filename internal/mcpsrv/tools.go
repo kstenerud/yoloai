@@ -388,15 +388,8 @@ func (s *Server) handleSandboxReset(ctx context.Context, req mcp.CallToolRequest
 		return textResult(errorf("sandbox handle %q: %v", name, err)), nil
 	}
 
-	// If a new prompt is provided, write it to prompt.txt before resetting.
-	if prompt != "" {
-		promptPath := store.PromptFilePath(sb.Dir())
-		if err := fileutil.WriteFile(promptPath, []byte(prompt), 0600); err != nil {
-			return textResult(errorf("write prompt for sandbox %q: %v", name, err)), nil
-		}
-	}
-
-	if _, err := sb.Reset(ctx, yoloai.ResetOptions{RestartContainer: true}); err != nil {
+	// A non-empty prompt overwrites prompt.txt before reset (re-sent on restart).
+	if _, err := sb.Reset(ctx, yoloai.ResetOptions{RestartContainer: true, Prompt: prompt}); err != nil {
 		return textResult(errorf("reset sandbox %q: %v", name, err)), nil
 	}
 

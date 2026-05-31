@@ -614,6 +614,45 @@ func TestReset_RecopiesWorkdir(t *testing.T) {
 	assert.DirExists(t, filesDir)
 }
 
+func TestReset_PromptOverwrite(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	origDir := filepath.Join(tmpDir, "original")
+	require.NoError(t, os.MkdirAll(origDir, 0750))
+
+	name := "test-reset-prompt"
+	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
+	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "prompt.txt"), []byte("old prompt"), 0600))
+
+	meta := &store.Meta{
+		Name:      name,
+		Agent:     "claude",
+		CreatedAt: time.Now(),
+		Workdir: store.WorkdirMeta{
+			HostPath:  origDir,
+			MountPath: origDir,
+			Mode:      "copy",
+		},
+	}
+	require.NoError(t, store.SaveMeta(sandboxDir, meta))
+
+	mock := &lifecycleMockRuntime{
+		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
+			return runtime.InstanceInfo{}, fmt.Errorf("not found: %w", runtime.ErrNotFound)
+		},
+	}
+	d := newLifecycleDeps(mock, tmpDir)
+
+	// Reset overwrites prompt.txt before doing anything else; the later restart
+	// fails (no runtime-config.json) but the prompt write already happened.
+	_, _ = Reset(context.Background(), d, ResetOptions{Name: name, Prompt: "new prompt"})
+
+	got, err := os.ReadFile(filepath.Join(sandboxDir, "prompt.txt")) //nolint:gosec // test path
+	require.NoError(t, err)
+	assert.Equal(t, "new prompt", string(got))
+}
+
 func TestReset_State(t *testing.T) {
 	tmpDir := t.TempDir()
 
