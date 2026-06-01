@@ -131,9 +131,12 @@ The 2026-05-30 Post-F5 Façade round's spine findings (F1/F2/F3/F8/F10) drove th
 are substantially actioned (façade fenced, `api_surface.go` retired, ARCHITECTURE rewritten). These
 off-spine items were **not** part of the spine and may still be open:
 
-- **F6** — `internal/sandbox/lifecycle/lifecycle.go` (1474-line god-file, six concerns; three
-  near-identical `patchConfig*` to collapse) and `create/create_prepare.go` (three bundled pipelines)
-  — intra-package file splits, no new import edges. **STILL OPEN.**
+- **F6 — DONE 2026-06-01.** `lifecycle.go` (1482 lines) split into `start.go`/`reset.go`/`restart.go`
+  + a slim `lifecycle.go` (terminal verbs + `resolveAgentArgs`); the three near-identical
+  `patchConfig*` collapsed onto one shared `patchRuntimeConfig(dir, mutate)` helper in
+  `runtimeconfig_patch.go`. `create/create_prepare.go` (1025 lines) split into the three pipelines it
+  bundled (`prepare_profile.go`/`prepare_dirs.go`/`prepare_archetype.go`). Intra-package, no new
+  import edges, no behavior change; `make check` + F1 leak detector green.
 - **F7 — DONE 2026-06-01.** `AGENT_STATUS_SCHEMA_VERSION` had *four* unfenced writers (Go const
   `agentStatusSchemaVersion` in `internal/sandbox/status/status.go`, a named Python constant in
   `sandbox-setup.py`, a bare literal in `status-monitor.py`, and two literals in `agent.go`'s shell
@@ -159,4 +162,4 @@ The spine findings (G1/G2/G7) and the G8 naming sweep are **done** — see
 3. **G3 + G4** — Naming/consistency sweeps, independent, fold in opportunistically. (Hours each.)
 4. **G7 residue** — public verb for extensions (`x` → `internal/extension`) when that surface
    stabilizes.
-5. **Carried-forward F6** — lifecycle.go god-file split (F7 + F9 are now done, 2026-06-01).
+5. **Carried-forward F6/F7/F9** — all done 2026-06-01.
