@@ -1,81 +1,31 @@
-# Critique — 2026-05-30 Post-F1-Close: the leak detector lies
+# Critique — 2026-05-30 Post-F1-Close round (remaining open findings)
 
 ## Summary
 
-The Layer-1 spine was declared **FULLY COMPLETE** (D52): `f1KnownLeaks` empty, F1 closed,
-`MergedConfig` promoted to public `ResolvedProfileConfig`. That declaration is **false**, and
-the test that certifies it is green for the wrong reason.
+This round opened by exposing that the "Layer-1 FULLY COMPLETE / F1 closed" claim (D52) was
+**false** — `TestPublicAPI_NoInternalLeaks` was structurally blind to type aliases, so it ran
+green while `yoloai.Info.Meta` leaked the internal `store.Meta` iceberg. That central finding
+(**G1**) and its consumption-side twins (**G2** import fence, **G7** missing public verbs) are
+now **RESOLVED** — the detector descends through aliases, `f1KnownLeaks` is empty *and* honest,
+`store.Meta` was carved to the public `Environment` read-model, and the depguard fence covers
+the whole `internal/sandbox`+`internal/runtime` subtrees (see
+[resolved-critiques.md](resolved-critiques.md) for G1/G2/G8).
 
-`TestPublicAPI_NoInternalLeaks` is structurally blind to type aliases. `walkObj` returns
-immediately for any alias TypeName; `walkType` (the signature/field walker) has no
-`*types.Alias` case at all. So when the public surface re-exports an internal type via
-`type X = internal.Y` — the *sanctioned* fix — the detector never descends into `X`'s fields
-to check whether *they* reference other, un-aliased internal types. Aliasing the top of a
-struct silences the detector for the entire tree beneath it.
-
-The concrete consequence: `yoloai.Info` (`type Info = sandbox.Info` → `status.Info`) carries
-`Meta *store.Meta`. `store.Meta` is internal and **not** re-exported at the root, and it is an
-iceberg — `WorkdirMeta`, `[]DirMeta`, `DirMode`, `runtime.IsolationMode`, `agent.AgentName`,
-`*config.ResourceLimits` hang off it, none re-exported. `Info` is returned by `Client.Run`,
-`Client.List`, `Sandbox.Inspect`, and `SystemClient.ListAcrossBackends` — the four most central
-entry points on the whole surface. An external embedder can hold a `*yoloai.Info` and **cannot
-name the type of `.Meta`**. This is a bigger leak than the `MergedConfig` one we just spent a
-milestone closing (that one was returned only by the `ProfileAdmin.Info` admin verb).
-
-The same gap, seen from the import side: the `cli-sandbox-facade-scope` depguard rule denies
-only the `internal/sandbox` façade package while *allowing* `internal/sandbox/store` (plus
-`patch`/`archetype`) and not guarding `internal/runtime`/`internal/config` at all. So the CLI
-legitimately handles `store.Meta` directly — the very type that isn't public. A separate-module
-daemon physically cannot import any of these, so the CLI passes a gate the daemon would fail.
-"The CLI keeps us honest" is therefore only partly realized.
-
-The through-line: we closed the small, visible leak and declared total victory while the
-detector couldn't see the large one. The honest sequence is to make the test tell the truth
-first (descend through aliases → it goes red on `store.Meta`), then decide deliberately whether
-to promote `store.Meta` or park it as an *explicit, eyes-open* deferral. A silent blind spot is
-the worst of the three states.
+What remains in this file is the **off-spine** work the round also surfaced: the agent-interaction
+reshape (G5), two naming/consistency sweeps (G3, G4), the setup-wizard pile-3 leak (G6), and the
+unverified carry-forward items (F6/F7/F9). The D53 three-noun read-model reshape — turning the
+field-for-field `Environment` mirror into an identity/posture + embedded-resolved-config view that
+drops pile-3 mechanism — also remains, tracked under D53 rather than as a numbered finding here.
 
 ## Findings
 
-### G1 — The F1 leak detector is blind to type aliases; "F1 closed" is unverified and currently false
+### G1 — RESOLVED 2026-05-31 (D55) → see [resolved-critiques.md](resolved-critiques.md)
 
-- **Severity:** CRITICAL
-- **Where:** `public_api_test.go` — `walkObj` (lines ~125-128: `if o.IsAlias() { return }`) and
-  `walkType` (lines ~280-322: switch has cases for Named/Pointer/Slice/Array/Chan/Map/Struct/
-  Signature/Interface but **no `*types.Alias` case**). Leak site: `sandbox_options.go:13`
-  (`type Info = sandbox.Info`) → `internal/sandbox/inspect.go:39` (`type Info = status.Info`) →
-  `internal/sandbox/status/status.go:50` (`Meta *store.Meta`). Target: `internal/sandbox/store/meta.go:23`.
-- **Observation:** The detector walks named-type declarations and function signatures but treats an
-  alias as a terminal. From the type-decl path, `walkObj` bails on `IsAlias()`. From the
-  signature path (e.g. `func (c *Client) Run(...) (*Info, error)`), `walkType` unwraps the pointer,
-  reaches the `*types.Alias`, matches none of its switch arms, and silently stops. Either way the
-  alias's fields are never inspected. So `f1KnownLeaks` being empty does not mean "zero internal
-  leaks" — it means "zero internal leaks *that aren't hidden behind an alias*." Every alias in
-  `sandbox_options.go`/`names.go` is an un-audited subtree.
-- **Why it bothers me:** This is precisely the "test that lies" the project's no-lying mandate
-  forbids: green while the public API still leaks. We built the Layer-1 done-ness claim, the D52
-  working-note, and the memory entry ("FULLY COMPLETE, no deferrals remain") on a detector that
-  cannot see the biggest remaining leak. The MergedConfig milestone — real work — was the *easy*
-  half; the alias-hidden `store.Meta` tree is the hard half, and the test let us skip it without
-  noticing.
-- **Greenfield alternative:** Two separable fixes.
-  - **(a) Detector honesty (do first):** add a `*types.Alias` case to `walkType` that unwraps via
-    `types.Unalias` and recurses; in `walkObj`, stop blanket-returning on aliases — descend into
-    the underlying named type's exported fields. The existing `aliased` de-dup in `report` already
-    prevents flagging the sanctioned alias *target*; what we want surfaced is fields that reference
-    *other* un-aliased internal types. Expect the test to go red on `internal/sandbox/store.Meta`
-    (and its sub-tree) the moment this lands. That red is the truth.
-  - **(b) The real leak, once visible:** promote `store.Meta` to a *carved* public read-model — **not**
-    an alias of the storage struct (that publishes pile-3 mechanism and welds disk/wire format
-    together), and **not** a field-for-field mirror. `store.Meta` is three types in one struct
-    (see D53): **identity & posture** (expose), **config echo** (reframe — and it's nearly
-    `ResolvedProfileConfig`'s shape, so *embed a resolved-config view* rather than re-listing knobs),
-    **mechanism** (Version/YoloaiVersion/ImageRef/HasPrompt/Debug/UsernsMode/HostFilesystem/Archetype/
-    BaselineSHA — drop). If deferring the carve, re-add `store.Meta` to `f1KnownLeaks` as an explicit,
-    documented deferral. Not silence.
-- **Migration cost:** (a) is hours — a localized test-helper change plus a baseline update.
-  (b) is the open question for the chat: `store.Meta` is ~25 fields with a nested tree; a faithful
-  public mirror is real work, comparable to or larger than the MergedConfig promotion.
+The detector now descends through aliases (`walkType`/`walkObj` unwrap `*types.Alias`),
+`store.Meta` was carved to the public `Environment` read-model, the caps doctor tree to
+public `BackendReport`, and `f1KnownLeaks` is empty *and* honest. The "F1 FULLY COMPLETE"
+claim is now true. Residual structural limit (named-type case reports-but-doesn't-descend)
+and the still-pending D53 reshape are noted in the resolved entry.
 
 ### G2 — RESOLVED 2026-06-01 (D57) → see [resolved-critiques.md](resolved-critiques.md)
 
@@ -161,31 +111,19 @@ prescribed G1(b)-first sequence; details and divergence note in the resolved sin
 - **Greenfield alternative:** Demote/hide the setup-wizard types; keep `Doctor`/`Check`.
 - **Migration cost:** Hours; folds into the same "hide pile-3 mechanism" sweep as G1(b).
 
-### G7 — The public surface is incomplete: ~7 consumer capabilities reach `internal/` directly with no public verb
+### G7 — SUBSTANTIALLY RESOLVED 2026-06-01 (D55–D57, Units 1–15) → see [project memory / working-notes]
 
-- **Severity:** MAJOR (this is G1/G2's leak seen from the consumption side — the surface isn't done)
-- **Where (capability → what it reaches for, no `yoloai.*` verb):**
-  - **Sandbox metadata / workdir-mode read** — `internal/cli/workflow/{apply,diff,baseline}.go` and
-    mcpsrv call `store.LoadMeta()` directly to branch on copy/overlay/rw mode. *The* load-bearing
-    gap; it's the `store.Meta` carve (G1) from the consumer side. Needs `Sandbox.Metadata()`.
-  - **Agent-log read** — `internal/mcpsrv/tools.go` `sandbox_log` → `store.AgentLogPath()`. Distinct
-    from `Sandbox.ContainerLogs()`. Part of the OBSERVE surface (G5). Needs `Sandbox.AgentLog()`.
-  - **File exchange** — `sandbox_files_*` → `store.FilesDir()`. The third interaction surface (G5).
-  - **Agent/model + backend discovery** — `internal/agent.AllAgentNames()`/`GetAgent()`,
-    `runtime.Descriptors()` (CLI `system agents`/`backends`/`help`). A daemon building a create-UI
-    must enumerate these. Needs `yoloai.Agents()`/`Backends()` discovery verbs.
-  - **Stored-prompt get/set** — `sandbox prompt` → `store.PromptFilePath()`. AGENT-noun read/edit.
-  - **Git tag** — `internal/cli/workflow/apply.go` → `workspace.CreateTag()` (not on `Workdir`).
-  - **Extensions** — CLI `x` → `internal/extension` (experimental; lower priority).
-- **Observation:** The mcpsrv daemon prototype — the canary for a real embedder — reaches into
-  `internal/sandbox/store` for 5+ of its ~13 tools. Every one of these compiles today *only because*
-  the depguard fence allows the leaf packages (G2). A separate-module daemon could not do any of it.
-- **Greenfield alternative:** Add the missing verbs (metadata read-model, agent-log, files sub-handle,
-  discovery, prompt get/set, Workdir tag), then tighten the depguard allow-list so the reach-ins fail
-  the lint. This is the concrete, enumerable definition of "Layer-1 actually complete" — and it is
-  *not* complete today, contra D52.
-- **Migration cost:** Folds into the read-model spine; each verb is small, the metadata one is the
-  same work as G1(b).
+The enumerated missing verbs were all added and their consumers de-leafed: `SandboxMetadata`,
+`AgentLog`, `Files`, agent/backend `Agents()`/`Backends()` discovery, `Prompt` read + reset-set,
+`Workdir().TransferTags`, plus VS Code attach, unlock, archetype/runtime-config paths, and the
+mcpsrv file-exchange carve. With G2 (D57) the depguard fence then went prefix-wide over
+`internal/sandbox`+`internal/runtime`, so the reach-ins now fail the lint. Non-test cli+mcpsrv
+import zero sandbox/runtime leaves.
+
+- **Residue (the one deliberately-deferred capability):** **Extensions** — the CLI `x` command
+  still reaches `internal/extension` with no public verb. Left out because the extension surface
+  is experimental; revisit when extensions stabilize. `workspace.CreateTag` was checked and ruled
+  *not* a gap (zero direct CLI/mcpsrv callers — it flows through `Workdir().TransferTags`).
 
 ## Carried forward from the prior round (status unverified — check before next empty)
 
@@ -203,20 +141,16 @@ off-spine items were **not** part of the spine and may still be open:
 
 ## Recommended ordering
 
-1. **G1(a)** — Fix the detector to descend through aliases. Watch it go red on `store.Meta`. Truth
-   before cleanup. (Hours.)
-2. **Decision (chat):** promote `store.Meta` to a public read-model now, or park it in
-   `f1KnownLeaks` as an explicit deferral. Correct the D52 note / memory either way — the
-   "FULLY COMPLETE, no deferrals" claim is overstated as it stands.
-3. **G1(b) + G2 + G7** — If promoting: build the carved `store.Meta` read-model AND the rest of the
-   missing verbs G7 enumerates (agent-log, files sub-handle, discovery, prompt get/set, Workdir tag),
-   then tighten the depguard allow-list (drop `store`; weigh `runtime`/`config` fences) so the
-   reach-ins fail the lint. This is the concrete definition of "Layer-1 complete." (Multi-day.)
-4. **G5** — Reshape the agent-interaction surface (PTY bridge + activity stream, decoupled from
-   caller stdio). Independent of the read-model spine, but decide it **before** a wire protocol
-   exists. (Multi-day.) **G6** folds in (hide setup-wizard pile-3) with G1(b)'s mechanism sweep.
-5. **G3 + G4** — Naming/consistency sweeps, independent, fold in opportunistically. (Hours each.)
-   **G8 is DONE** (see resolved-critiques.md): G8(b) public name landed in G1(b)/D55
-   (`yoloai.Environment`); G8(a) phantom comments + the internal `Meta → Environment` rename
-   (incl. the breaking `Info.Meta`→`Info.Environment` field/JSON-tag change) landed 2026-06-01.
-6. **Carried-forward F6/F7/F9** — verify status; action if still open.
+The spine findings (G1/G2/G7) and the G8 naming sweep are **done** — see
+[resolved-critiques.md](resolved-critiques.md). What remains:
+
+1. **G5** — Reshape the agent-interaction surface (PTY bridge + activity stream + file-exchange
+   sub-handle, decoupled from caller stdio). The most value-bearing remaining work; decide it
+   **before** a wire protocol exists. (Multi-day.) **G6** folds in (hide setup-wizard pile-3).
+2. **D53 read-model reshape** — turn the field-for-field `Environment` mirror into an
+   identity/posture + embedded-resolved-config view that drops pile-3 mechanism. Shares the
+   "hide mechanism" sweep with G6. (Tracked under D53.)
+3. **G3 + G4** — Naming/consistency sweeps, independent, fold in opportunistically. (Hours each.)
+4. **G7 residue** — public verb for extensions (`x` → `internal/extension`) when that surface
+   stabilizes.
+5. **Carried-forward F6/F7/F9** — verify status; action if still open.

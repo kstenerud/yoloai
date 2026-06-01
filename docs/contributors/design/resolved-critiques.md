@@ -56,4 +56,43 @@ a working set. Newest first.
   this *import-fence* finding. `internal/config` still has no analogous CLI fence (7
   cli files import it); that is genuine future work, not part of G2.
 
+## G1 (2026-05-30 critique) — the F1 leak detector was blind to type aliases; "F1 closed" was false
+
+- **Severity:** CRITICAL. **Resolved:** 2026-05-31 (D55), drained 2026-06-01.
+- **The lie.** `TestPublicAPI_NoInternalLeaks` treated every alias as terminal — `walkObj`
+  blanket-returned on `IsAlias()` and `walkType` had no `*types.Alias` arm — so `type X =
+  internal.Y` silenced the detector for the entire field tree beneath `X`. `f1KnownLeaks`
+  empty meant "no leaks *not hidden behind an alias*", not "no leaks". The concrete hidden
+  leak: `yoloai.Info` (`type Info = sandbox.Info` → `status.Info`) carried `Meta *store.Meta`,
+  an internal iceberg (`WorkdirMeta`/`[]DirMeta`/`DirMode`/`IsolationMode`/`AgentName`/
+  `*ResourceLimits`), returned from the four most central entry points (Run/List/Inspect/
+  ListAcrossBackends). Bigger than the `MergedConfig` leak D52 had just closed.
+- **G1(a) — detector made honest (truth first, committed `3e29ac4`).** `walkType` gained a
+  `*types.Alias` case that unwraps via `types.Unalias` and recurses; `walkObj` now descends
+  into an aliased named type's exported fields instead of bailing. The existing `aliased`
+  de-dup still prevents flagging the sanctioned alias *target*; what surfaces is fields that
+  reference *other* un-aliased internal types. Landing this turned the test red on
+  `store.Meta` — that red was the truth, produced *before* any cleanup.
+- **G1(b)-1 — store.Meta → public `Environment` (committed `d5f8787`).** `Info` de-aliased
+  from `sandbox.Info` to a hand-written struct; `Meta` retyped to `*yoloai.Environment`
+  (environment.go), a field-for-field mirror with byte-identical JSON; converters wired at
+  Inspect/Run/List/pollUntilDone/ListAcrossBackends. `store.Meta` stayed internal.
+- **G1(b)-2 — caps doctor tree → public `BackendReport` (committed `d335b10`).** Removed
+  `type BackendReport = caps.BackendReport`; hand-written mirrors (Availability/BackendReport/
+  CapabilityCheck/Capability/FixStep) + converter in doctor_report.go; `Capability` drops the
+  func fields. JSON + human output byte-unchanged.
+- **Outcome (committed `f2c6ba6`).** `f1KnownLeaks` is now empty **and** honest — the detector
+  can no longer be fooled by an alias. The decision from the critique's step 2 (promote vs.
+  park `store.Meta`) was **promote**, not a documented deferral.
+- **Known residual limit (not a lie).** The *named-type* case still reports-but-doesn't-descend:
+  a named type is reported as a unit, and its fields are walked only at its own declaration. A
+  brand-new internal type hung off an already-public named struct would not be auto-flagged.
+  This is a structural bound of the walker, documented here so it stays eyes-open — distinct
+  from the alias blind spot, which was the actual defect and is fixed.
+- **Still open (tracked elsewhere, not G1).** The `store.Meta`→`Environment` carve is the
+  *field-for-field mirror*, not D53's three-noun reshape (expose identity/posture, embed a
+  resolved-config view, drop pile-3 mechanism) — that read-model refinement remains future
+  work. The G7 missing-verb series and G2 depguard fence (both since resolved) were the
+  consumption-side twin of this finding.
+
 _(no older entries)_
