@@ -133,11 +133,17 @@ off-spine items were **not** part of the spine and may still be open:
 
 - **F6** — `internal/sandbox/lifecycle/lifecycle.go` (1474-line god-file, six concerns; three
   near-identical `patchConfig*` to collapse) and `create/create_prepare.go` (three bundled pipelines)
-  — intra-package file splits, no new import edges.
-- **F7** — `AGENT_STATUS_SCHEMA_VERSION` is an unfenced cross-language (Go+Python) constant; its
-  RUNTIME_CONFIG sibling has an automated drift fence. Extend the fence.
-- **F9** — `development-principles.md` §2 lists stale module-root import paths (`sandbox/` etc.) that
-  now live under `internal/`.
+  — intra-package file splits, no new import edges. **STILL OPEN.**
+- **F7 — DONE 2026-06-01.** `AGENT_STATUS_SCHEMA_VERSION` had *four* unfenced writers (Go const
+  `agentStatusSchemaVersion` in `internal/sandbox/status/status.go`, a named Python constant in
+  `sandbox-setup.py`, a bare literal in `status-monitor.py`, and two literals in `agent.go`'s shell
+  hook commands). New cross-language fence `internal/sandbox/status/schema_version_test.go`
+  (`TestAgentStatusSchemaVersion_CrossLanguageAgreement`) asserts every writer equals the Go const at
+  each `go test ./...`, modelled on the existing runtime-config fence; stale `sandbox/inspect.go`
+  pointers in the writer comments corrected to point at the const + fence.
+- **F9 — DONE 2026-06-01.** `development-principles.md` §2 stale module-root import paths (`sandbox/`
+  etc.) rewritten to current `internal/` truth (D57 fence shape); §4 SandboxName/ResolvedPath marked
+  aspirational with a `†` note and parked as DF15 (deferred-findings.md).
 
 ## Recommended ordering
 
@@ -153,4 +159,4 @@ The spine findings (G1/G2/G7) and the G8 naming sweep are **done** — see
 3. **G3 + G4** — Naming/consistency sweeps, independent, fold in opportunistically. (Hours each.)
 4. **G7 residue** — public verb for extensions (`x` → `internal/extension`) when that surface
    stabilizes.
-5. **Carried-forward F6/F7/F9** — verify status; action if still open.
+5. **Carried-forward F6** — lifecycle.go god-file split (F7 + F9 are now done, 2026-06-01).

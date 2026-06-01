@@ -176,9 +176,11 @@ func ExecInContainer(ctx context.Context, rt runtime.Runtime, sandboxName string
 const statusFileStaleness = 10 * time.Second
 
 // agentStatusSchemaVersion is the contract version for agent-status.json. Must
-// equal the AGENT_STATUS_SCHEMA_VERSION constants in sandbox-setup.py and
-// status-monitor.py, and the literal in agent.go's shell hook commands. W2 of
-// the architecture remediation plan.
+// equal the AGENT_STATUS_SCHEMA_VERSION constant in sandbox-setup.py, the
+// literal in status-monitor.py, and the literals in agent.go's shell hook
+// commands. The cross-language fence in schema_version_test.go (F7) asserts
+// this agreement at every `go test ./...`. W2 of the architecture remediation
+// plan.
 const agentStatusSchemaVersion = 1
 
 // statusJSON is the structure written by the in-container status monitor.

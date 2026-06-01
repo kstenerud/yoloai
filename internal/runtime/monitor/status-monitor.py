@@ -80,8 +80,8 @@ def write_status(status_file, status, exit_code=None):
     Sets source="monitor" so the HookDetector can distinguish monitor writes
     from hook writes (which don't set source).
     """
-    # AGENT_STATUS_SCHEMA_VERSION must equal sandbox.agentStatusSchemaVersion
-    # in sandbox/inspect.go and the constant in sandbox-setup.py.
+    # This schema_version must equal agentStatusSchemaVersion in
+    # internal/sandbox/status/status.go (fenced by schema_version_test.go).
     data = {
         "schema_version": 1,
         "status": status,

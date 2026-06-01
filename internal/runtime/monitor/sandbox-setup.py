@@ -124,8 +124,9 @@ def signal_secrets_consumed(yoloai_dir):
         log_info("secrets.consumed_error", f"cannot write secrets-consumed marker: {e}")
 
 
-# AGENT_STATUS_SCHEMA_VERSION must equal sandbox.agentStatusSchemaVersion in
-# sandbox/inspect.go. W2 of the architecture remediation plan.
+# AGENT_STATUS_SCHEMA_VERSION must equal agentStatusSchemaVersion in
+# internal/sandbox/status/status.go. The cross-language fence in
+# internal/sandbox/status/schema_version_test.go asserts the agreement.
 AGENT_STATUS_SCHEMA_VERSION = 1
 
 
