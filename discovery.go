@@ -39,10 +39,12 @@ type BackendInfo struct {
 	Note      string // probe failure reason when Available is false; "" otherwise
 }
 
-// AgentQuery filters the agent catalog. It is currently empty (every shipped
-// agent is returned); it exists as a stable seam so filters can be added without
-// changing the Agents signature.
-type AgentQuery struct{}
+// AgentQuery filters the agent catalog.
+type AgentQuery struct {
+	// RealOnly excludes the pseudo-agents (test, shell, idle) that exist for
+	// internal and testing purposes, returning only user-selectable agents.
+	RealOnly bool
+}
 
 // BackendQuery filters and shapes the backend catalog.
 type BackendQuery struct {
@@ -53,11 +55,15 @@ type BackendQuery struct {
 	ProbeAvailability bool
 }
 
-// Agents returns the static catalog of every shipped agent, in stable
-// (sorted-by-name) order. No host state is consulted; the query has no effect
-// today beyond reserving the filtering seam.
-func (s *SystemClient) Agents(_ AgentQuery) []AgentInfo {
+// Agents returns the static catalog of shipped agents, in stable
+// (sorted-by-name) order. No host state is consulted. With
+// AgentQuery.RealOnly set, the internal/testing pseudo-agents (test, shell,
+// idle) are excluded.
+func (s *SystemClient) Agents(q AgentQuery) []AgentInfo {
 	names := agent.AllAgentNames()
+	if q.RealOnly {
+		names = agent.RealAgents()
+	}
 	out := make([]AgentInfo, 0, len(names))
 	for _, name := range names {
 		out = append(out, agentInfoFromDefinition(agent.GetAgent(name)))

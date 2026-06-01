@@ -29,6 +29,20 @@ func TestSystemClient_Agents_Catalog(t *testing.T) {
 	assert.Contains(t, []string{"interactive", "headless"}, claude.PromptMode)
 }
 
+func TestSystemClient_Agents_RealOnly(t *testing.T) {
+	c := newTestClient(t)
+
+	real := make(map[string]bool)
+	for _, a := range c.Agents(AgentQuery{RealOnly: true}) {
+		real[a.Name] = true
+	}
+	for _, pseudo := range []string{"test", "shell", "idle"} {
+		assert.False(t, real[pseudo], "RealOnly excludes pseudo-agent %q", pseudo)
+	}
+	assert.True(t, real["claude"], "RealOnly keeps real agents")
+	assert.Less(t, len(real), len(c.Agents(AgentQuery{})), "RealOnly returns fewer than the full catalog")
+}
+
 func TestSystemClient_Backends_StaticCatalog(t *testing.T) {
 	c := newTestClient(t)
 

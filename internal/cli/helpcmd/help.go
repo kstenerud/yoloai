@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/kstenerud/yoloai/internal/agent"
+	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/spf13/cobra"
@@ -144,7 +144,7 @@ func unknownTopicError(topic string) error {
 // definitions so it stays in sync with the code.
 func generateAgentsTopic() string {
 	var b strings.Builder
-	realAgents := agent.RealAgents()
+	realAgents := cliutil.NewSystemClient().Agents(yoloai.AgentQuery{RealOnly: true})
 
 	b.WriteString("AGENTS AND MODELS\n")
 	b.WriteString("\n")
@@ -198,26 +198,25 @@ func containerHostExample() string {
 }
 
 // writeAgentList writes the AVAILABLE AGENTS section to b.
-func writeAgentList(b *strings.Builder, realAgents []string) {
+func writeAgentList(b *strings.Builder, realAgents []yoloai.AgentInfo) {
 	maxName := 0
-	for _, name := range realAgents {
-		if len(name) > maxName {
-			maxName = len(name)
+	for _, a := range realAgents {
+		if len(a.Name) > maxName {
+			maxName = len(a.Name)
 		}
 	}
 	labelWidth := maxName + len(" (default)")
 
-	for _, name := range realAgents {
-		def := agent.GetAgent(name)
-		label := name
-		if name == "claude" {
-			label = name + " (default)"
+	for _, a := range realAgents {
+		label := a.Name
+		if a.Name == "claude" {
+			label = a.Name + " (default)"
 		}
 		keys := ""
-		if len(def.APIKeyEnvVars) > 0 {
-			keys = "Requires " + def.APIKeyEnvVars[0]
+		if len(a.APIKeyEnvVars) > 0 {
+			keys = "Requires " + a.APIKeyEnvVars[0]
 		}
-		fmt.Fprintf(b, "  %-*s  %s", labelWidth, label, def.Description)
+		fmt.Fprintf(b, "  %-*s  %s", labelWidth, label, a.Description)
 		if keys != "" {
 			fmt.Fprintf(b, "\n  %-*s  %s", labelWidth, "", keys)
 		}
@@ -226,17 +225,16 @@ func writeAgentList(b *strings.Builder, realAgents []string) {
 }
 
 // writeAgentAliases writes the per-agent model alias tables to b.
-func writeAgentAliases(b *strings.Builder, realAgents []string) {
-	for _, name := range realAgents {
-		def := agent.GetAgent(name)
-		if len(def.ModelAliases) == 0 {
+func writeAgentAliases(b *strings.Builder, realAgents []yoloai.AgentInfo) {
+	for _, a := range realAgents {
+		if len(a.ModelAliases) == 0 {
 			continue
 		}
-		title := strings.ToUpper(name[:1]) + name[1:]
+		title := strings.ToUpper(a.Name[:1]) + a.Name[1:]
 		fmt.Fprintf(b, "\n  %s:\n", title)
 
-		aliases := make([]string, 0, len(def.ModelAliases))
-		for alias := range def.ModelAliases {
+		aliases := make([]string, 0, len(a.ModelAliases))
+		for alias := range a.ModelAliases {
 			aliases = append(aliases, alias)
 		}
 		sort.Strings(aliases)
@@ -248,7 +246,7 @@ func writeAgentAliases(b *strings.Builder, realAgents []string) {
 			}
 		}
 		for _, alias := range aliases {
-			fmt.Fprintf(b, "     %-*s → %s\n", maxAlias, alias, def.ModelAliases[alias])
+			fmt.Fprintf(b, "     %-*s → %s\n", maxAlias, alias, a.ModelAliases[alias])
 		}
 	}
 }
