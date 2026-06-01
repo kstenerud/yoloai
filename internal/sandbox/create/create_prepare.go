@@ -592,15 +592,15 @@ func createBaselineForGitRepo(workCopyDir string) (string, error) {
 
 // setupAuxDirs copies/overlays each auxiliary directory and creates baselines.
 func setupAuxDirs(sandboxDir string, auxDirs []*DirSpec) ([]store.DirEnvironment, error) {
-	var dirMetas []store.DirEnvironment
+	var dirEnvs []store.DirEnvironment
 	for _, ad := range auxDirs {
 		dm, err := setupAuxDir(sandboxDir, ad)
 		if err != nil {
 			return nil, err
 		}
-		dirMetas = append(dirMetas, dm)
+		dirEnvs = append(dirEnvs, dm)
 	}
-	return dirMetas, nil
+	return dirEnvs, nil
 }
 
 // setupAuxDir prepares a single auxiliary directory and returns its

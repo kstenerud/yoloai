@@ -257,13 +257,13 @@ func prepareSandboxState(ctx context.Context, d state.Deps, opts Options, credOv
 		}
 	}()
 
-	workCopyDir, baselineSHA, dirMetas, err := setupAllWorkdirs(d, opts, workdir, auxDirs, resolvedArchetype, devcontainerCfg)
+	workCopyDir, baselineSHA, dirEnvs, err := setupAllWorkdirs(d, opts, workdir, auxDirs, resolvedArchetype, devcontainerCfg)
 	if err != nil {
 		return nil, err
 	}
 
 	// Phase 3: Build config, meta, and state files.
-	configData, meta, tmuxConf, promptText, err := buildConfigAndMeta(ctx, d, opts, pr, agentDef, workdir, auxDirs, gcfg, dirMetas, baselineSHA, mergedMounts, resolvedArchetype, devcontainerCfg, state_onCreateDone, sandboxDir)
+	configData, meta, tmuxConf, promptText, err := buildConfigAndEnvironment(ctx, d, opts, pr, agentDef, workdir, auxDirs, gcfg, dirEnvs, baselineSHA, mergedMounts, resolvedArchetype, devcontainerCfg, state_onCreateDone, sandboxDir)
 	if err != nil {
 		return nil, err
 	}
@@ -320,9 +320,9 @@ func createAndSeedSandbox(ctx context.Context, d state.Deps, sandboxDir string, 
 	return provision.SeedSandbox(d.Runtime, agentDef, sandboxDir, pr.isolation, pr.agentFiles, credOverrides, d.Layout.HomeDir, d.Layout.Env, output)
 }
 
-// buildConfigAndMeta builds the container config and sandbox meta structs.
+// buildConfigAndEnvironment builds the container config and sandbox meta structs.
 // Returns (configData, meta, tmuxConf, promptText, error).
-func buildConfigAndMeta(ctx context.Context, d state.Deps, opts Options, pr *profileResult, agentDef *agent.Definition, workdir *DirSpec, auxDirs []*DirSpec, gcfg *config.GlobalConfig, dirMetas []store.DirEnvironment, baselineSHA string, mergedMounts []string, resolvedArchetype archetype.Archetype, devcontainerCfg *archetype.DevcontainerConfig, state_onCreateDone bool, sandboxDir string) ([]byte, *store.Environment, string, string, error) {
+func buildConfigAndEnvironment(ctx context.Context, d state.Deps, opts Options, pr *profileResult, agentDef *agent.Definition, workdir *DirSpec, auxDirs []*DirSpec, gcfg *config.GlobalConfig, dirEnvs []store.DirEnvironment, baselineSHA string, mergedMounts []string, resolvedArchetype archetype.Archetype, devcontainerCfg *archetype.DevcontainerConfig, state_onCreateDone bool, sandboxDir string) ([]byte, *store.Environment, string, string, error) {
 	_ = ctx // reserved for future use
 	promptText, hasPrompt, model, agentCommand, tmuxConf, err := resolveAgentParams(agentDef, opts, pr, gcfg, d.Layout.HomeDir, d.Layout.Env, d.Input)
 	if err != nil {
@@ -342,7 +342,7 @@ func buildConfigAndMeta(ctx context.Context, d state.Deps, opts Options, pr *pro
 	}
 
 	usernsMode := resolveUsernsMode(d.Runtime, workdir, auxDirs, pr.capAdd)
-	meta := buildMeta(opts, pr, workdir, baselineSHA, dirMetas, hasPrompt, networkMode, networkAllow, usernsMode, d.Runtime.Descriptor().Capabilities.HostFilesystem, string(resolvedArchetype), backend, model, mergedMounts)
+	meta := buildEnvironment(opts, pr, workdir, baselineSHA, dirEnvs, hasPrompt, networkMode, networkAllow, usernsMode, d.Runtime.Descriptor().Capabilities.HostFilesystem, string(resolvedArchetype), backend, model, mergedMounts)
 
 	return configData, meta, tmuxConf, promptText, nil
 }
@@ -535,7 +535,7 @@ func setupAllWorkdirs(d state.Deps, opts Options, workdir *DirSpec, auxDirs []*D
 	}
 
 	slog.Debug("setting up aux dirs", "event", "sandbox.create.aux_dirs", "count", len(auxDirs))
-	dirMetas, err := setupAuxDirs(sandboxDir, auxDirs)
+	dirEnvs, err := setupAuxDirs(sandboxDir, auxDirs)
 	if err != nil {
 		return "", "", nil, err
 	}
@@ -551,7 +551,7 @@ func setupAllWorkdirs(d state.Deps, opts Options, workdir *DirSpec, auxDirs []*D
 		}
 	}
 
-	return workCopyDir, baselineSHA, dirMetas, nil
+	return workCopyDir, baselineSHA, dirEnvs, nil
 }
 
 // resolveAgentParams resolves prompt, model, agent command, and tmux config.
@@ -628,8 +628,8 @@ func resolveUsernsMode(rt runtime.Runtime, workdir *DirSpec, auxDirs []*DirSpec,
 	return up.UsernsMode(hasSysAdmin)
 }
 
-// buildMeta constructs the Environment struct for a new sandbox.
-func buildMeta(opts Options, pr *profileResult, workdir *DirSpec, baselineSHA string, dirMetas []store.DirEnvironment, hasPrompt bool, networkMode string, networkAllow []string, usernsMode string, hostFilesystem bool, archetypeStr string, backend runtime.BackendName, model string, mergedMounts []string) *store.Environment {
+// buildEnvironment constructs the Environment struct for a new sandbox.
+func buildEnvironment(opts Options, pr *profileResult, workdir *DirSpec, baselineSHA string, dirEnvs []store.DirEnvironment, hasPrompt bool, networkMode string, networkAllow []string, usernsMode string, hostFilesystem bool, archetypeStr string, backend runtime.BackendName, model string, mergedMounts []string) *store.Environment {
 	return &store.Environment{
 		YoloaiVersion: opts.Version,
 		Name:          opts.Name,
@@ -646,7 +646,7 @@ func buildMeta(opts Options, pr *profileResult, workdir *DirSpec, baselineSHA st
 			BaselineSHA:  baselineSHA,
 			InceptionSHA: baselineSHA,
 		},
-		Directories:        dirMetas,
+		Directories:        dirEnvs,
 		HasPrompt:          hasPrompt,
 		NetworkMode:        networkMode,
 		NetworkAllow:       networkAllow,

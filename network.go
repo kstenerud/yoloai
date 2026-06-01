@@ -68,7 +68,7 @@ func (s *Sandbox) Network() *Network {
 // in :isolated network mode or has no entries, so JSON callers
 // render `[]` rather than `null`.
 func (n *Network) Allowed(_ context.Context) ([]AllowedDomain, error) {
-	meta, err := n.loadMeta()
+	meta, err := n.loadEnvironment()
 	if err != nil {
 		return nil, err
 	}
@@ -212,9 +212,9 @@ type DenyResult struct {
 
 // --- helpers ---
 
-// loadMeta reads the sandbox's environment.json. The Network handle's
+// loadEnvironment reads the sandbox's environment.json. The Network handle's
 // methods all start with this read, so it's centralized here.
-func (n *Network) loadMeta() (*store.Environment, error) {
+func (n *Network) loadEnvironment() (*store.Environment, error) {
 	sandboxDir := n.s.c.layout.SandboxDir(n.s.name)
 	if err := store.RequireSandboxDir(sandboxDir); err != nil {
 		return nil, err

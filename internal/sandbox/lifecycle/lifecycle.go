@@ -730,10 +730,10 @@ func NeedsConfirmation(ctx context.Context, d state.Deps, name string) (bool, st
 		}
 	}
 
-	for _, dirMeta := range meta.Directories {
-		if dirMeta.Mode == "copy" || dirMeta.Mode == "overlay" {
-			auxWorkDir := store.WorkDir(sandboxDir, dirMeta.HostPath)
-			if patch.HasUnappliedWork(auxWorkDir, dirMeta.BaselineSHA) {
+	for _, dirEnv := range meta.Directories {
+		if dirEnv.Mode == "copy" || dirEnv.Mode == "overlay" {
+			auxWorkDir := store.WorkDir(sandboxDir, dirEnv.HostPath)
+			if patch.HasUnappliedWork(auxWorkDir, dirEnv.BaselineSHA) {
 				return true, "unapplied changes exist"
 			}
 		}
@@ -866,11 +866,11 @@ func recreateContainer(ctx context.Context, d state.Deps, name string, meta *sto
 
 	// Rebuild aux dir args from meta
 	var auxDirs []*state.DirSpec
-	for _, dirMeta := range meta.Directories {
+	for _, dirEnv := range meta.Directories {
 		auxDirs = append(auxDirs, &state.DirSpec{
-			Path:      dirMeta.HostPath,
-			MountPath: dirMeta.MountPath,
-			Mode:      store.DirMode(dirMeta.Mode),
+			Path:      dirEnv.HostPath,
+			MountPath: dirEnv.MountPath,
+			Mode:      store.DirMode(dirEnv.Mode),
 		})
 	}
 

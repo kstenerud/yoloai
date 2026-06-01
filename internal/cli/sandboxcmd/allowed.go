@@ -19,7 +19,7 @@ func runSandboxAllowed(cmd *cobra.Command, name string) error {
 	// cases render their static messages without making the library
 	// load the allowlist. Network.Allowed() doesn't reject those
 	// states (read-only never errors) — we surface them here.
-	meta, err := loadMetaForRead(name)
+	meta, err := loadEnvironmentForRead(name)
 	if err != nil {
 		return err
 	}
@@ -66,10 +66,10 @@ func runSandboxAllowed(cmd *cobra.Command, name string) error {
 	})
 }
 
-// loadMetaForRead reads the sandbox's metadata without enforcing the
+// loadEnvironmentForRead reads the sandbox's metadata without enforcing the
 // "isolated mode required" precondition. The `allowed` subcommand needs to
 // print specific messages for the other network modes, so it can't go through
 // requireIsolated.
-func loadMetaForRead(name string) (*yoloai.Environment, error) {
+func loadEnvironmentForRead(name string) (*yoloai.Environment, error) {
 	return cliutil.NewSystemClient().SandboxMetadata(name)
 }
