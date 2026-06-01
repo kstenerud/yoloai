@@ -54,18 +54,9 @@ func runSandboxBugReport(cmd *cobra.Command, name string, reportType string) err
 	// Section 1: Header
 	bugreport.WriteHeader(f, buildinfo.Version, buildinfo.Commit, buildinfo.Date, reportType)
 
-	// Section 3: System
-	bugreport.WriteSystem(f)
-
-	// Section 4: Backends
-	bugreport.WriteBackends(cmd.Context(), f)
-
-	// Section 4.5: VM slots (macOS Virtualization.framework concurrency).
-	// Omitted on platforms/backends without a census.
-	bugreport.WriteVMCensus(cmd.Context(), f)
-
-	// Section 5: Configuration
-	bugreport.WriteConfig(f, reportType)
+	// Sections 3-5: System, Backends, VM slots, Configuration — gathered as a
+	// structured snapshot by the library and rendered here.
+	bugreport.WriteDiagnostics(f, cliutil.NewSystemClient().Diagnostics(cmd.Context()), reportType)
 
 	// Sections 6-12: Sandbox-specific
 	backend := cliutil.ResolveBackendForSandbox(name)

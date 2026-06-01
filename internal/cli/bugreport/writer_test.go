@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	yoloairuntime "github.com/kstenerud/yoloai/internal/runtime"
+	"github.com/kstenerud/yoloai"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -18,13 +18,13 @@ import (
 func TestVMSlotLine(t *testing.T) {
 	tests := []struct {
 		name string
-		slot yoloairuntime.VMSlot
+		slot yoloai.VMSlot
 		want string
 	}{
-		{"owned", yoloairuntime.VMSlot{PID: 100, VMName: "alpha", Owned: true}, "pid 100  alpha — owned sandbox"},
-		{"orphan", yoloairuntime.VMSlot{PID: 200, VMName: "ghost"}, "pid 200  ghost — orphan (launcher gone), holding a slot"},
-		{"orphan deleted", yoloairuntime.VMSlot{PID: 300, VMName: "tmp", Deleted: true}, "pid 300  tmp — orphan (image deleted), holding a slot"},
-		{"unknown name", yoloairuntime.VMSlot{PID: 400}, "pid 400  (unknown) — orphan (launcher gone), holding a slot"},
+		{"owned", yoloai.VMSlot{PID: 100, VMName: "alpha", Owned: true}, "pid 100  alpha — owned sandbox"},
+		{"orphan", yoloai.VMSlot{PID: 200, VMName: "ghost"}, "pid 200  ghost — orphan (launcher gone), holding a slot"},
+		{"orphan deleted", yoloai.VMSlot{PID: 300, VMName: "tmp", Deleted: true}, "pid 300  tmp — orphan (image deleted), holding a slot"},
+		{"unknown name", yoloai.VMSlot{PID: 400}, "pid 400  (unknown) — orphan (launcher gone), holding a slot"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

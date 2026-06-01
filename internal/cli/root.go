@@ -119,10 +119,7 @@ func initBugReport(cmd *cobra.Command, version, commit, date string) error {
 	cliutil.BugReportFile = f
 	bugreport.WriteHeader(f, version, commit, date, brType)
 	bugreport.WriteCommandInvocation(f, brType)
-	bugreport.WriteSystem(f)
-	bugreport.WriteBackends(cmd.Context(), f)
-	bugreport.WriteVMCensus(cmd.Context(), f)
-	bugreport.WriteConfig(f, brType)
+	bugreport.WriteDiagnostics(f, cliutil.NewSystemClient().Diagnostics(cmd.Context()), brType)
 	cliutil.AddLogSink(&cliutil.LiveLogBuf, slog.LevelDebug)
 	return nil
 }

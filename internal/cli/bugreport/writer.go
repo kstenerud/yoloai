@@ -5,21 +5,16 @@ package bugreport
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"regexp"
-	"runtime"
 	"strings"
 	"time"
 
+	"github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
-
-	"github.com/kstenerud/yoloai/internal/config"
-	yoloairuntime "github.com/kstenerud/yoloai/internal/runtime"
 )
 
 // Filename generates the output filename for a bug report.
@@ -78,33 +73,37 @@ func redactPromptArgs(args []string) []string {
 	return result
 }
 
-// WriteSystem writes section 3: system information.
-func WriteSystem(w io.Writer) {
+// WriteDiagnostics renders sections 3–5 (System, Backends, VM slots, Config)
+// from a structured snapshot gathered by the library. The library is the
+// mechanism (it gathers the facts); this renderer is the policy (it shapes the
+// markdown and, in "safe" reports, redacts the raw config) — see
+// development-principles.md §2.
+func WriteDiagnostics(w io.Writer, d yoloai.Diagnostics, reportType string) {
+	writeSystemSection(w, d.System)
+	writeBackendsSection(w, d.Backends)
+	writeVMCensusSection(w, d.VMSlots)
+	writeConfigSection(w, d.Config, reportType)
+}
+
+// writeSystemSection writes section 3: system information.
+func writeSystemSection(w io.Writer, sys yoloai.SystemDiagnostics) {
 	fmt.Fprintln(w, "<details>")                 //nolint:errcheck
 	fmt.Fprintln(w, "<summary>System</summary>") //nolint:errcheck
 	fmt.Fprintln(w)                              //nolint:errcheck
 
-	fmt.Fprintf(w, "- **OS/Arch:** %s/%s\n", runtime.GOOS, runtime.GOARCH) //nolint:errcheck
+	fmt.Fprintf(w, "- **OS/Arch:** %s/%s\n", sys.OS, sys.Arch) //nolint:errcheck
 
-	// Kernel string
-	uname, err := exec.Command("uname", "-a").Output()
-	if err == nil {
-		fmt.Fprintf(w, "- **Kernel:** %s\n", strings.TrimSpace(string(uname))) //nolint:errcheck
+	if sys.Kernel != "" {
+		fmt.Fprintf(w, "- **Kernel:** %s\n", sys.Kernel) //nolint:errcheck
 	}
 
-	// Relevant environment variables
-	envVars := []string{"DOCKER_HOST", "CONTAINER_HOST", "XDG_RUNTIME_DIR", "YOLOAI_SANDBOX", "HOME", "TMUX"}
-	for _, key := range envVars {
-		if val := os.Getenv(key); val != "" { //nolint:forbidigo // §12: CLI bug-report captures an allowlisted set of diagnostic env vars
-			fmt.Fprintf(w, "- **%s:** `%s`\n", key, val) //nolint:errcheck
-		}
+	for _, ev := range sys.Env {
+		fmt.Fprintf(w, "- **%s:** `%s`\n", ev.Key, ev.Value) //nolint:errcheck
 	}
 
-	// yoloai data directory and disk usage
-	dataDir := cliutil.Layout().YoloaiDir()
-	fmt.Fprintf(w, "- **Data dir:** `%s`\n", dataDir) //nolint:errcheck
-	if size, err := cliutil.DirSize(dataDir); err == nil {
-		fmt.Fprintf(w, "- **Disk usage:** %s\n", cliutil.FormatSize(size)) //nolint:errcheck
+	fmt.Fprintf(w, "- **Data dir:** `%s`\n", sys.DataDir) //nolint:errcheck
+	if sys.DiskUsageBytes >= 0 {
+		fmt.Fprintf(w, "- **Disk usage:** %s\n", cliutil.FormatSize(sys.DiskUsageBytes)) //nolint:errcheck
 	}
 
 	fmt.Fprintln(w)               //nolint:errcheck
@@ -112,37 +111,33 @@ func WriteSystem(w io.Writer) {
 	fmt.Fprintln(w)               //nolint:errcheck
 }
 
-// WriteBackends writes section 4: backend availability and versions.
-// Iterates runtime.Descriptors() so any newly-registered backend appears in
-// bug reports automatically; the version string comes from each descriptor's
-// VersionString hook so per-backend exec invocations no longer live here.
-func WriteBackends(ctx context.Context, w io.Writer) {
+// writeBackendsSection writes section 4: backend availability and versions.
+func writeBackendsSection(w io.Writer, backends []yoloai.BackendDiagnostic) {
 	fmt.Fprintln(w, "<details>")                   //nolint:errcheck
 	fmt.Fprintln(w, "<summary>Backends</summary>") //nolint:errcheck
 	fmt.Fprintln(w)                                //nolint:errcheck
 
-	for _, desc := range yoloairuntime.Descriptors() {
-		available, note := cliutil.CheckBackend(ctx, desc.Name)
+	for _, b := range backends {
 		status := "available"
-		if !available {
+		if !b.Available {
 			status = "unavailable"
 		}
 
 		var versionStr string
-		if available && desc.VersionString != nil {
-			versionStr = desc.VersionString(ctx)
+		if b.Available {
+			versionStr = b.Version
 			if versionStr == "" {
 				versionStr = "(version check failed)"
 			}
 		}
 
 		switch {
-		case note != "":
-			fmt.Fprintf(w, "- **%s:** %s — %s\n", desc.Name, status, note) //nolint:errcheck
+		case b.Note != "":
+			fmt.Fprintf(w, "- **%s:** %s — %s\n", b.Name, status, b.Note) //nolint:errcheck
 		case versionStr != "":
-			fmt.Fprintf(w, "- **%s:** %s — %s\n", desc.Name, status, versionStr) //nolint:errcheck
+			fmt.Fprintf(w, "- **%s:** %s — %s\n", b.Name, status, versionStr) //nolint:errcheck
 		default:
-			fmt.Fprintf(w, "- **%s:** %s\n", desc.Name, status) //nolint:errcheck
+			fmt.Fprintf(w, "- **%s:** %s\n", b.Name, status) //nolint:errcheck
 		}
 	}
 
@@ -151,14 +146,13 @@ func WriteBackends(ctx context.Context, w io.Writer) {
 	fmt.Fprintln(w)               //nolint:errcheck
 }
 
-// WriteVMCensus writes the host VM-slot census (macOS Virtualization.framework
-// concurrency). It is omitted entirely on platforms/backends without a census
-// (e.g. Linux, or when tart can't be constructed) so the report stays brief.
-// When present, the slot occupancy is high-value: a reached limit is a common,
-// hard-to-diagnose cause of "VM won't start" failures in the wild — see the
-// doctor "VM slots" section and the orphaned-VM idiosyncrasy.
-func WriteVMCensus(ctx context.Context, w io.Writer) {
-	census := cliutil.NewSystemClient().VMCensus(ctx)
+// writeVMCensusSection writes the host VM-slot census (macOS
+// Virtualization.framework concurrency). It is omitted entirely on
+// platforms/backends without a census (census == nil) so the report stays
+// brief. When present, the slot occupancy is high-value: a reached limit is a
+// common, hard-to-diagnose cause of "VM won't start" failures in the wild — see
+// the doctor "VM slots" section and the orphaned-VM idiosyncrasy.
+func writeVMCensusSection(w io.Writer, census *yoloai.VMCensus) {
 	if census == nil {
 		return
 	}
@@ -181,32 +175,16 @@ func WriteVMCensus(ctx context.Context, w io.Writer) {
 	fmt.Fprintln(w)               //nolint:errcheck
 }
 
-// vmSlotLine renders one VM slot as a compact bug-report line.
-func vmSlotLine(s yoloairuntime.VMSlot) string {
-	name := s.VMName
-	if name == "" {
-		name = "(unknown)"
-	}
-	switch {
-	case s.Owned:
-		return fmt.Sprintf("pid %d  %s — owned sandbox", s.PID, name)
-	case s.Deleted:
-		return fmt.Sprintf("pid %d  %s — orphan (image deleted), holding a slot", s.PID, name)
-	default:
-		return fmt.Sprintf("pid %d  %s — orphan (launcher gone), holding a slot", s.PID, name)
-	}
-}
-
-// WriteConfig writes section 5: configuration files.
-func WriteConfig(w io.Writer, reportType string) {
+// writeConfigSection writes section 5: configuration files. In "safe" reports,
+// the raw config bytes are redacted before rendering.
+func writeConfigSection(w io.Writer, cfg yoloai.ConfigDiagnostics, reportType string) {
 	fmt.Fprintln(w, "<details>")                        //nolint:errcheck
 	fmt.Fprintln(w, "<summary>Configuration</summary>") //nolint:errcheck
 	fmt.Fprintln(w)                                     //nolint:errcheck
 
-	writeConfigBlock := func(label, path string, readFn func() ([]byte, error)) {
+	writeConfigBlock := func(label, path string, data []byte) {
 		fmt.Fprintf(w, "**%s** (`%s`):\n\n", label, path) //nolint:errcheck
-		data, err := readFn()
-		if err != nil || len(data) == 0 {
+		if len(data) == 0 {
 			fmt.Fprintln(w, "*(not found)*") //nolint:errcheck
 		} else {
 			if reportType == "safe" {
@@ -219,11 +197,27 @@ func WriteConfig(w io.Writer, reportType string) {
 		fmt.Fprintln(w) //nolint:errcheck
 	}
 
-	writeConfigBlock("Global config", cliutil.Layout().GlobalConfigPath(), func() ([]byte, error) { return config.ReadGlobalConfigRaw(cliutil.Layout()) })
-	writeConfigBlock("Profile config", cliutil.Layout().DefaultsConfigPath(), func() ([]byte, error) { return config.ReadConfigRaw(cliutil.Layout()) })
+	writeConfigBlock("Global config", cfg.GlobalPath, cfg.GlobalRaw)
+	writeConfigBlock("Profile config", cfg.ProfilePath, cfg.ProfileRaw)
 
 	fmt.Fprintln(w, "</details>") //nolint:errcheck
 	fmt.Fprintln(w)               //nolint:errcheck
+}
+
+// vmSlotLine renders one VM slot as a compact bug-report line.
+func vmSlotLine(s yoloai.VMSlot) string {
+	name := s.VMName
+	if name == "" {
+		name = "(unknown)"
+	}
+	switch {
+	case s.Owned:
+		return fmt.Sprintf("pid %d  %s — owned sandbox", s.PID, name)
+	case s.Deleted:
+		return fmt.Sprintf("pid %d  %s — orphan (image deleted), holding a slot", s.PID, name)
+	default:
+		return fmt.Sprintf("pid %d  %s — orphan (launcher gone), holding a slot", s.PID, name)
+	}
 }
 
 // WriteLiveLog writes section 13: live log captured during the run.
