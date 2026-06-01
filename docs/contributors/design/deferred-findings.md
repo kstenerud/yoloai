@@ -34,7 +34,8 @@ it must exist so the item can be evaluated for eviction later. Newest first.
   "forgot to validate the name/path" bug surfaces, or if any *new* security guard is added that
   would otherwise introduce a third validation convention (do it consistently instead).
 - **Pointer:** `internal/sandbox/store/paths.go` (`ValidateName`); `internal/config/pathutil.go`
-  (`ExpandPath`); `development-principles.md` §4 (the `†` note); decisions D58/D59.
+  (`ExpandPath`); `development-principles.md` §4 (the `†` note); `security-principles.md` §11
+  (one-convention-per-mechanism — DF15 is its canonical live instance); decisions D58/D59.
 
 ### DF2 — Smoke test prompt may provoke a clarifying-question idle on Haiku (containerd-vm)
 

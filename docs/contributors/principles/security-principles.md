@@ -349,6 +349,34 @@ Cost of applying: explicit flag/config naming + documentation. Damage prevented:
 
 ---
 
+## §11. One convention per security mechanism — no ad-hoc divergence
+
+**Principle.** A security-relevant mechanism (input guarding, path confinement, capability grants, credential handling) follows **one** convention across the whole codebase. Do not introduce a one-off guard that follows a *different* convention than its peers, even when the one-off is locally correct. The drift between conventions is itself the vulnerability surface — independent of any single missing check.
+
+### Pattern
+
+When you add or touch a security guard, the question is not only "is this guard correct?" but "does this guard follow the *same* convention as its peers?" If a class of values is guarded one way (e.g. parsed into a type that carries proof, per `development-principles.md §4`), every member of that class is guarded that way. A value guarded by a *different* convention is treated as a finding in its own right — not a stylistic nit, a hygiene defect — because:
+
+- A reviewer auditing for "the convention" scans for the established shape and skips over the value that's guarded differently. The straggler is exactly what a code audit misses.
+- Each divergent one-off invites the next. Three conventions for the same concern means no reviewer can hold "the rule" in their head, and coverage gaps stop being visible.
+
+The remedy is never to half-fix ad-hoc (that adds a *third* convention). Either convert the straggler to the established convention, or **park it explicitly** with a revival trigger (a deferred finding) so it converts as part of the right pass — but never leave it silently divergent.
+
+### Worked examples
+
+- **`SandboxName` / resolved-path stragglers (DF15).** `development-principles.md §4` holds up parse-don't-validate as *the* convention for security-relevant boundary values, and most are genuine parsed types (`MountMode`, `AllowedDomain`, `AgentName`, `NetworkMode`/`IsolationMode`/`ApplyMode`, `Patch`, `BackendDescriptor`). Two are not: sandbox name is guarded by `store.ValidateName(string) error` (`internal/sandbox/store/paths.go`) and workdir path by `config.ExpandPath(...) (string, error)` (`internal/config/pathutil.go`) — both *validate*-style, so the type system carries no proof and any new call site can pass an unvalidated value. The finding is the **convention drift**, not a missing check today. Parked (not half-converted ad-hoc) in `docs/contributors/design/deferred-findings.md` DF15, sequenced to convert to parsed types as part of the D58/D59 path-confinement work. This is the canonical live instance of this principle.
+- **Power-user escapes (§10) all share one shape.** `cap_add`, `--isolation container-privileged`, `:force`, `--network host` are deliberately *one* convention — discrete, named, documented opt-in with stated residual risk. A new isolation-undermining feature must reuse that convention (explicit + documented), not invent a quieter one.
+
+### Cost-vs-benefit
+
+Cost of applying: when adding a guard, find and match the existing convention (a grep + a moment's judgement), or write a one-line deferred-finding trigger if conversion belongs in a later pass. Damage prevented: the slow accumulation of divergent guards that no audit can survey — the failure mode where a value is "validated, just differently" and everyone's eye slides past it until an incident proves the gap was there all along.
+
+### Sources
+
+`development-principles.md §4` (parse, don't validate — the convention this principle protects); `docs/contributors/design/deferred-findings.md` DF15 (canonical live instance). Decisions D58/D59 (the pass that revives DF15).
+
+---
+
 # Common over-generalisations to avoid
 
 | Over-generalisation                                | Why yoloAI rejects                                                                                                                                                                                                                                                              |
@@ -363,6 +391,7 @@ Cost of applying: explicit flag/config naming + documentation. Damage prevented:
 | **Hide-residual-risk**                             | Users decide based on knowing the limits. Hiding them produces the trust-eroding "I thought this was safe" failure mode. §9 — surface residual risk explicitly.                                                                                                                  |
 | **Network-isolation-as-data-loss-prevention**      | `--network-isolated` bounds destinations, not capabilities. DNS UDP must be open; CDN IP rotation; domain fronting on shared CDNs. Documented as residual risk (§9). Treating it as DLP is a category error.                                                                       |
 | **Threat-model-as-static-document**                | The threat model evolves as the AI agent landscape evolves. Prompt-injection success rates change; new exfiltration routes emerge; new backends ship. The threat model is reviewed periodically — currently after each architecture audit (D19).                                  |
+| **Each-guard-just-has-to-be-correct**              | A locally-correct one-off guard that follows a *different* convention than its peers is still a defect — the convention drift is what a code audit skips over. One convention per security mechanism; convert the straggler or park it with a trigger, never leave it silently divergent. §11. |
 
 ---
 
