@@ -13,7 +13,6 @@ import (
 
 	"github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/fileutil"
-	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -402,11 +401,10 @@ func (s *Server) handleSandboxFilesList(_ context.Context, req mcp.CallToolReque
 		return textResult(errorf("name is required")), nil
 	}
 
-	sb, err := s.c.Sandbox(name)
-	if err != nil {
-		return textResult(errorf("sandbox handle %q: %v", name, err)), nil
+	if _, err := s.c.System().SandboxMetadata(name); err != nil {
+		return textResult(errorf("sandbox %q: %v", name, err)), nil
 	}
-	filesDir := store.FilesDir(sb.Dir())
+	filesDir := s.c.System().FilesDir(name)
 	entries, err := os.ReadDir(filesDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -441,11 +439,10 @@ func (s *Server) handleSandboxFilesRead(_ context.Context, req mcp.CallToolReque
 		return textResult(errorf("%v", err)), nil
 	}
 
-	sb, err := s.c.Sandbox(name)
-	if err != nil {
-		return textResult(errorf("sandbox handle %q: %v", name, err)), nil
+	if _, err := s.c.System().SandboxMetadata(name); err != nil {
+		return textResult(errorf("sandbox %q: %v", name, err)), nil
 	}
-	path := filepath.Join(store.FilesDir(sb.Dir()), filename)
+	path := filepath.Join(s.c.System().FilesDir(name), filename)
 	data, err := os.ReadFile(path) //nolint:gosec // path validated by validateFilename
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -472,11 +469,10 @@ func (s *Server) handleSandboxFilesWrite(_ context.Context, req mcp.CallToolRequ
 		return textResult(errorf("%v", err)), nil
 	}
 
-	sb, err := s.c.Sandbox(name)
-	if err != nil {
-		return textResult(errorf("sandbox handle %q: %v", name, err)), nil
+	if _, err := s.c.System().SandboxMetadata(name); err != nil {
+		return textResult(errorf("sandbox %q: %v", name, err)), nil
 	}
-	filesDir := store.FilesDir(sb.Dir())
+	filesDir := s.c.System().FilesDir(name)
 	if err := fileutil.MkdirAll(filesDir, 0750); err != nil {
 		return textResult(errorf("create files dir for sandbox %q: %v", name, err)), nil
 	}

@@ -15,7 +15,6 @@ import (
 	"sync"
 
 	"github.com/kstenerud/yoloai"
-	"github.com/kstenerud/yoloai/internal/sandbox/store"
 )
 
 // ProxyOptions controls how the proxy server creates or reuses a sandbox.
@@ -76,11 +75,8 @@ func (p *ProxyServer) ServeStdio(ctx context.Context) error {
 		return err
 	}
 
-	sb, err := p.c.Sandbox(meta.Name)
-	if err != nil {
-		return fmt.Errorf("sandbox handle %q: %w", meta.Name, err)
-	}
-	innerCmd, err := expandCmd(p.innerCmd, sb.Dir(), meta)
+	sys := p.c.System()
+	innerCmd, err := expandCmd(p.innerCmd, sys.FilesDir(meta.Name), sys.CacheDir(meta.Name), meta)
 	if err != nil {
 		return fmt.Errorf("expand inner command: %w", err)
 	}
@@ -169,15 +165,16 @@ func (p *ProxyServer) createSandbox(ctx context.Context) (*yoloai.Environment, e
 //	{cache}    — the cache directory (/yoloai/cache/)
 //	{dir:N}    — meta.Directories[N].MountPath (Nth auxiliary directory, 0-indexed)
 //
-// sandboxDir is the on-host parent directory holding the sandbox's state
-// (obtainable from yoloai.Client.SandboxDir(name)). It is used only when
-// meta.HostFilesystem is true to resolve host-side {files}/{cache}.
-func expandCmd(cmd []string, sandboxDir string, meta *yoloai.Environment) ([]string, error) {
+// hostFilesDir/hostCacheDir are the on-host file-exchange and cache
+// directories (from SystemClient.FilesDir/CacheDir). They are used only when
+// meta.HostFilesystem is true; for container backends the fixed in-container
+// paths are used instead and these arguments are ignored.
+func expandCmd(cmd []string, hostFilesDir, hostCacheDir string, meta *yoloai.Environment) ([]string, error) {
 	filesDir := "/yoloai/files/"
 	cacheDir := "/yoloai/cache/"
 	if meta.HostFilesystem {
-		filesDir = store.FilesDir(sandboxDir)
-		cacheDir = store.CacheDir(sandboxDir)
+		filesDir = hostFilesDir
+		cacheDir = hostCacheDir
 	}
 
 	expanded := make([]string, len(cmd))
