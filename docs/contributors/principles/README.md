@@ -5,7 +5,7 @@ ABOUTME: ../research/principles/ and D-entries in ../working-notes.md.
 
 # Principles
 
-The four principles docs that govern yoloAI's engineering disposition. Principles explain **why**; the per-language standards under `../standards/` explain **what** and **how**.
+The five principles docs that govern yoloAI's engineering disposition. Principles explain **why**; the per-language standards under `../standards/` explain **what** and **how**.
 
 ## Layout
 
@@ -13,11 +13,12 @@ The four principles docs that govern yoloAI's engineering disposition. Principle
 principles/
 ├── general-principles.md         ← meta: strategic + decision-making (applies to everything)
 │   ├── development-principles.md     ← engineering surface: code structure + practices
+│   ├── architecture-principles.md    ← architecture surface: module stance + public-surface contract
 │   ├── testing-principles.md         ← engineering surface: testing philosophy + discipline
 │   └── security-principles.md        ← security surface: sandbox containment + defense
 ```
 
-The three specialised docs reference back to the general parent; the general doc does not duplicate specialised content. When a new cross-cutting pattern is identified, the question is "is this specific to one surface (engineering / testing / security) or does it apply across all three?" — if cross-cutting, it lands in `general-principles.md`; otherwise in the relevant specialised doc.
+The four specialised docs reference back to the general parent; the general doc does not duplicate specialised content. When a new cross-cutting pattern is identified, the question is "is this specific to one surface (engineering / architecture / testing / security) or does it apply across all of them?" — if cross-cutting, it lands in `general-principles.md`; otherwise in the relevant specialised doc.
 
 ## Index
 
@@ -25,6 +26,7 @@ The three specialised docs reference back to the general parent; the general doc
 | ------------------------------------------------------ | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [general-principles.md](general-principles.md)         | D22         | Cross-cutting principles for a single-author OSS CLI: boring tech, innovation-tokens, ecosystem-first, reversibility, blast-radius, safe defaults, factual accuracy, document the no, default to public, design-as-hypothesis (§12, D25), speak-up-against-the-plan (§13, D54). |
 | [development-principles.md](development-principles.md) | D22         | Engineering practice: YAGNI / KISS / DRY / SOLID, boundary discipline ("none of your business" — comply-or-complain, both halves: policy owns what/why, mechanism owns how — §2, D27, D56), validate-at-every-layer, parse-don't-validate, no-half-finished, plan-then-execute on cleanup, code quality gate, warnings-are-signal. |
+| [architecture-principles.md](architecture-principles.md) | D58         | Module stance + public-surface contract: library-first / CLI-as-honesty-keeper (§1, D55/D57), public surface as a contract with mechanical teeth (F1 detector + depguard twins — §2, D55/D57), and the *emerging* binding-lifetime frame (deployment vs principal scope; library never resolves ambient `~`/`${VAR}` — §3, D58, not yet enforced). The stance behind development §2/§12. |
 | [testing-principles.md](testing-principles.md)         | D22         | Testing philosophy: confidence over coverage, behavior over implementation, test at the right layer, integration tests hit real backends, regression-by-default. |
 | [security-principles.md](security-principles.md)       | D22         | Sandbox security: threat model is bounded, containment not prevention, default-deny credential access, least privilege by mode, agent output untrusted, defense in depth as opt-in layers. |
 
