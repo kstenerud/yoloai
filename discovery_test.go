@@ -43,6 +43,16 @@ func TestSystemClient_Agents_RealOnly(t *testing.T) {
 	assert.Less(t, len(real), len(c.Agents(AgentQuery{})), "RealOnly returns fewer than the full catalog")
 }
 
+func TestSystemClient_Archetypes(t *testing.T) {
+	c := newTestClient(t)
+
+	names := c.Archetypes()
+	require.NotEmpty(t, names, "at least one shipped archetype")
+	for i := 1; i < len(names); i++ {
+		assert.LessOrEqual(t, names[i-1], names[i], "archetype names are sorted")
+	}
+}
+
 func TestSystemClient_Backends_StaticCatalog(t *testing.T) {
 	c := newTestClient(t)
 

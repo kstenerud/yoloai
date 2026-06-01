@@ -1,5 +1,5 @@
-// ABOUTME: Public discovery surface — static catalogs of the agents and backends
-// ABOUTME: yoloai ships, with an opt-in per-host availability probe for backends.
+// ABOUTME: Public discovery surface — static catalogs of the agents, backends,
+// ABOUTME: and archetypes yoloai ships, plus an opt-in backend availability probe.
 
 package yoloai
 
@@ -8,6 +8,7 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/runtime"
+	"github.com/kstenerud/yoloai/internal/sandbox/archetype"
 )
 
 // AgentInfo is the public, serializable view of a shipped agent definition. It
@@ -96,6 +97,13 @@ func (s *SystemClient) Backends(ctx context.Context, q BackendQuery) []BackendIn
 		out = append(out, info)
 	}
 	return out
+}
+
+// Archetypes returns the sorted list of valid environment-archetype names
+// yoloai ships (used to auto-shape a sandbox's setup). Static metadata; no host
+// state is consulted.
+func (s *SystemClient) Archetypes() []string {
+	return archetype.ValidArchetypes()
 }
 
 func agentInfoFromDefinition(def *agent.Definition) AgentInfo {
