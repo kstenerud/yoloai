@@ -99,6 +99,20 @@ func (s *SystemClient) Backends(ctx context.Context, q BackendQuery) []BackendIn
 	return out
 }
 
+// CheckBackend probes a single backend for availability by constructing a
+// runtime and closing it. Returns whether the backend is reachable and a short
+// note explaining the failure when it is not. This is the single-backend
+// counterpart to Backends(ctx, BackendQuery{ProbeAvailability: true}); both use
+// the identical construct-and-close probe.
+func (s *SystemClient) CheckBackend(ctx context.Context, name BackendName) (available bool, note string) {
+	rt, err := newRuntime(ctx, name, s.layout)
+	if err != nil {
+		return false, err.Error()
+	}
+	_ = rt.Close() //nolint:errcheck // best-effort close after a probe
+	return true, ""
+}
+
 // Archetypes returns the sorted list of valid environment-archetype names
 // yoloai ships (used to auto-shape a sandbox's setup). Static metadata; no host
 // state is consulted.

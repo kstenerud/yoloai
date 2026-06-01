@@ -12,7 +12,6 @@ import (
 
 	"github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/mcpsrv"
-	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
@@ -57,7 +56,7 @@ Add to ~/.claude.json to use with Claude Desktop:
 }
 
 func runMCPServe(cmd *cobra.Command, _ []string) error {
-	backend, warn := runtime.SelectContainerBackend(cmd.Context(), cliutil.ResolveContainerBackendConfig())
+	backend, warn := yoloai.SelectContainerBackend(cmd.Context(), cliutil.ResolveContainerBackendConfig())
 	if warn != "" {
 		fmt.Fprintln(os.Stderr, warn)
 	}

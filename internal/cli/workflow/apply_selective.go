@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
-	"github.com/kstenerud/yoloai/internal/runtime"
 
 	"github.com/kstenerud/yoloai"
 	"github.com/spf13/cobra"
@@ -88,7 +87,7 @@ func applySelectedCommits(cmd *cobra.Command, name string, refs, paths []string,
 // previews the commits that would land; otherwise it replays them. A non-nil
 // result with a non-nil error means the commits landed but a follow-on step
 // (git am stash, uncommitted changes) had a non-fatal issue.
-func runSeriesApply(cmd *cobra.Command, name string, backend runtime.BackendName, refs, paths []string, dryRun bool) (*yoloai.ApplyResult, error) {
+func runSeriesApply(cmd *cobra.Command, name string, backend yoloai.BackendName, refs, paths []string, dryRun bool) (*yoloai.ApplyResult, error) {
 	var result *yoloai.ApplyResult
 	err := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		var applyErr error

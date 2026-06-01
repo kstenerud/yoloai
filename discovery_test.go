@@ -80,3 +80,11 @@ func TestSystemClient_Backends_Probed(t *testing.T) {
 		}
 	}
 }
+
+func TestSystemClient_CheckBackend_Unknown(t *testing.T) {
+	c := newTestClient(t)
+
+	available, note := c.CheckBackend(context.Background(), "does-not-exist")
+	assert.False(t, available, "an unregistered backend is never available")
+	assert.NotEmpty(t, note, "an unavailable backend explains why")
+}

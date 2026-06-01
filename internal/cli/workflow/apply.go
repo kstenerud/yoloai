@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
-	"github.com/kstenerud/yoloai/internal/runtime"
 
 	"github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/yoerrors"
@@ -220,7 +219,7 @@ func applyTags(cmd *cobra.Command, name string, tags []yoloai.TagInfo, shaMap ma
 
 // targetIsGitRepo reports whether the sandbox's host work directory is a git
 // repository — the apply target. Opens a client to query the library.
-func targetIsGitRepo(cmd *cobra.Command, name string, backend runtime.BackendName) (bool, error) {
+func targetIsGitRepo(cmd *cobra.Command, name string, backend yoloai.BackendName) (bool, error) {
 	var isGit bool
 	err := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		sb, sbErr := c.Sandbox(name)

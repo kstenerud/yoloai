@@ -16,7 +16,6 @@ import (
 
 	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/config"
-	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
@@ -418,14 +417,14 @@ func confirmDirtyWorkdir(cmd *cobra.Command, dirty *yoloai.DirtyWorkdirError) bo
 
 // resolveNewIsolationOS resolves the --isolation and --os flags with config fallback
 // and validates their combinations, returning an error for unsupported combos.
-func resolveNewIsolationOS(cmd *cobra.Command) (isolation runtime.IsolationMode, targetOS string, err error) {
+func resolveNewIsolationOS(cmd *cobra.Command) (isolation yoloai.IsolationMode, targetOS string, err error) {
 	cfg, _ := config.LoadDefaultsConfig(cliutil.Layout())
 	var cfgIsolation, cfgOS string
 	if cfg != nil {
 		cfgIsolation = cfg.Isolation
 		cfgOS = cfg.OS
 	}
-	isolation = runtime.IsolationMode(cliutil.Coalesce(cliutil.FlagStr(cmd, "isolation"), cfgIsolation))
+	isolation = yoloai.IsolationMode(cliutil.Coalesce(cliutil.FlagStr(cmd, "isolation"), cfgIsolation))
 	targetOS = cliutil.Coalesce(cliutil.FlagStr(cmd, "os"), cfgOS)
 
 	if err := validateIsolationOSCombo(isolation, targetOS); err != nil {
@@ -438,8 +437,8 @@ func resolveNewIsolationOS(cmd *cobra.Command) (isolation runtime.IsolationMode,
 // combinations. Thin wrapper over runtime.IsolationAvailability: the runtime
 // package owns the rules and their messages, the CLI just turns the verdict
 // into a UsageError.
-func validateIsolationOSCombo(isolation runtime.IsolationMode, targetOS string) error {
-	available, reason, help := runtime.IsolationAvailability(isolation, targetOS, goruntime.GOOS)
+func validateIsolationOSCombo(isolation yoloai.IsolationMode, targetOS string) error {
+	available, reason, help := yoloai.IsolationAvailability(isolation, targetOS, goruntime.GOOS)
 	if available {
 		return nil
 	}

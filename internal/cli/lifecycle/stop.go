@@ -11,7 +11,6 @@ import (
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
 	yoloai "github.com/kstenerud/yoloai"
-	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
@@ -38,7 +37,7 @@ func runStopCmd(cmd *cobra.Command, args []string) error {
 	}
 
 	// Resolve backend: from first named sandbox, or config default for --all.
-	backend, warn := runtime.SelectContainerBackend(cmd.Context(), cliutil.ResolveContainerBackendConfig())
+	backend, warn := yoloai.SelectContainerBackend(cmd.Context(), cliutil.ResolveContainerBackendConfig())
 	if warn != "" {
 		fmt.Fprintln(os.Stderr, warn)
 	}

@@ -22,26 +22,23 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// pkgLayout and pkgNewRuntime are set by NewCmd at command-tree
-// construction time. They reference the cli root chokepoint helpers
-// without creating an import cycle (cli root imports this subpackage
-// to register the command; this subpackage cannot import cli back).
-var (
-	pkgLayout     func() config.Layout
-	pkgNewRuntime func(ctx context.Context, backend rt.BackendName) (rt.Runtime, error)
-)
+// pkgLayout is set by NewCmd at command-tree construction time. It
+// references the cli root layout chokepoint without creating an import
+// cycle (cli root imports this subpackage to register the command;
+// this subpackage cannot import cli back). Tart runtime construction
+// is done locally via rt.New — this is the one cli subpackage allowed
+// to import internal/runtime/tart (W-L13).
+var pkgLayout func() config.Layout
 
 // NewCmd defines `yoloai system tart` (formerly `yoloai system runtime`).
 // The old `runtime` name remains a hidden alias that emits a deprecation warning.
 //
-// layoutFn and newRuntimeFn inject the cli root's chokepoint helpers
-// (Layout / NewRuntime) so this subpackage doesn't need to import
-// internal/cli back (which would create a cycle). NewCmd stores them
-// in package-level vars; subcommand RunE handlers read those vars at
-// invocation time.
-func NewCmd(layoutFn func() config.Layout, newRuntimeFn func(ctx context.Context, backend rt.BackendName) (rt.Runtime, error)) *cobra.Command {
+// layoutFn injects the cli root's Layout chokepoint so this subpackage
+// doesn't need to import internal/cli back (which would create a
+// cycle). NewCmd stores it in a package-level var; subcommand RunE
+// handlers read that var at invocation time.
+func NewCmd(layoutFn func() config.Layout) *cobra.Command {
 	pkgLayout = layoutFn
-	pkgNewRuntime = newRuntimeFn
 	cmd := &cobra.Command{
 		Use:     "tart",
 		Aliases: []string{"runtime"},
@@ -96,11 +93,11 @@ func requireTartBackend(cmd *cobra.Command, _ []string) error {
 		return yoerrors.NewUsageError("yoloai system tart commands are only available on macOS")
 	}
 
-	// Inline of cli's checkBackend: spin up a tart runtime, close it,
-	// and report availability + the failure reason. checkBackend lives
-	// in internal/cli but importing back would cycle; the check is
-	// only 5 lines so inline it.
-	probeRT, err := pkgNewRuntime(cmd.Context(), "tart")
+	// Probe the tart backend: spin up a runtime, close it, and report
+	// availability + the failure reason. This subpackage constructs the
+	// runtime directly (rt.New) — it is the sanctioned importer of
+	// internal/runtime/tart (W-L13).
+	probeRT, err := rt.New(cmd.Context(), "tart", pkgLayout())
 	if err != nil {
 		return yoerrors.NewUsageError("Tart backend not available: %s\n\nInstall Tart: brew install cirruslabs/cli/tart", err.Error())
 	}
@@ -188,13 +185,13 @@ func printResolvedVersions(cmd *cobra.Command, args []string, resolved []tartrt.
 
 // openTartRuntime opens the tart backend and returns the typed runtime and a close func.
 func openTartRuntime(ctx context.Context) (*tartrt.Runtime, func(), error) {
-	rt, err := pkgNewRuntime(ctx, "tart")
+	r, err := rt.New(ctx, "tart", pkgLayout())
 	if err != nil {
 		return nil, nil, fmt.Errorf("create tart runtime: %w", err)
 	}
-	tartRuntime, ok := rt.(*tartrt.Runtime)
+	tartRuntime, ok := r.(*tartrt.Runtime)
 	if !ok {
-		// This is structurally impossible: pkgNewRuntime(ctx, "tart") returns a
+		// This is structurally impossible: rt.New(ctx, "tart", …) returns a
 		// *tartrt.Runtime by construction (the registry's factory for "tart"
 		// produces exactly that type). Reaching here means the registry has
 		// been wired with the wrong factory under the "tart" key — a
@@ -202,10 +199,10 @@ func openTartRuntime(ctx context.Context) (*tartrt.Runtime, func(), error) {
 		// surfaces immediately with a stack trace; root.go's recover() will
 		// finalize the bug report and re-panic for the default Go handler
 		// to render. Q-X principle: programming bugs panic, not returns.
-		_ = rt.Close()
-		panic(fmt.Sprintf("yoloai bug: pkgNewRuntime(\"tart\") returned %T, not *tartrt.Runtime; check runtime/tart registry wiring", rt))
+		_ = r.Close()
+		panic(fmt.Sprintf("yoloai bug: rt.New(\"tart\") returned %T, not *tartrt.Runtime; check runtime/tart registry wiring", r))
 	}
-	return tartRuntime, func() { _ = rt.Close() }, nil
+	return tartRuntime, func() { _ = r.Close() }, nil
 }
 
 func newSystemTartListCmd() *cobra.Command {

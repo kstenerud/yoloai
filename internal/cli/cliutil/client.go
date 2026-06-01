@@ -16,19 +16,8 @@ import (
 	// internal/cli/system/tart subpackage exclusively.
 	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/config"
-	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/spf13/cobra"
 )
-
-// NewRuntime creates a runtime.Runtime for the given backend name.
-// Returns an error if the backend is not available on this platform.
-func NewRuntime(ctx context.Context, backend runtime.BackendName) (runtime.Runtime, error) {
-	// Default to docker if no backend specified
-	if backend == "" {
-		backend = runtime.BackendDocker
-	}
-	return runtime.New(ctx, backend, Layout())
-}
 
 // Flag resolution pattern: each resolve* pair follows the same priority:
 //   flag → config → default
@@ -58,10 +47,10 @@ func Coalesce(a, b string) string {
 // The flag/config reads (the CLI's job) stay here; the routing decision itself
 // is delegated to runtime.SelectBackend so the CLI and library embedders share
 // one routing implementation (F21).
-func ResolveBackend(cmd *cobra.Command) runtime.BackendName {
+func ResolveBackend(cmd *cobra.Command) yoloai.BackendName {
 	// Explicit --backend always wins.
 	if b, _ := cmd.Flags().GetString("backend"); b != "" {
-		return runtime.BackendName(b)
+		return yoloai.BackendName(b)
 	}
 
 	// Read isolation and os from flags, falling back to config.
@@ -71,10 +60,10 @@ func ResolveBackend(cmd *cobra.Command) runtime.BackendName {
 		cfgIsolation = cfg.Isolation
 		cfgOS = cfg.OS
 	}
-	isolation := runtime.IsolationMode(Coalesce(FlagStr(cmd, "isolation"), cfgIsolation))
+	isolation := yoloai.IsolationMode(Coalesce(FlagStr(cmd, "isolation"), cfgIsolation))
 	targetOS := Coalesce(FlagStr(cmd, "os"), cfgOS)
 
-	backend, warn := runtime.SelectBackend(cmd.Context(), ResolveContainerBackendConfig(), isolation, targetOS)
+	backend, warn := yoloai.SelectBackend(cmd.Context(), ResolveContainerBackendConfig(), isolation, targetOS)
 	if warn != "" {
 		fmt.Fprintln(os.Stderr, warn)
 	}
@@ -88,10 +77,10 @@ func FlagStr(cmd *cobra.Command, name string) string {
 }
 
 // ResolveContainerBackendConfig reads the container_backend config preference.
-func ResolveContainerBackendConfig() runtime.BackendName {
+func ResolveContainerBackendConfig() yoloai.BackendName {
 	cfg, err := config.LoadDefaultsConfig(Layout())
 	if err == nil {
-		return runtime.BackendName(cfg.ContainerBackend)
+		return yoloai.BackendName(cfg.ContainerBackend)
 	}
 	return ""
 }
@@ -99,14 +88,14 @@ func ResolveContainerBackendConfig() runtime.BackendName {
 // ResolveBackendForSandbox reads the backend from a sandbox's meta.json.
 // Falls back to config default if meta.json can't be read.
 // Used by lifecycle commands that operate on an existing sandbox.
-func ResolveBackendForSandbox(name string) runtime.BackendName {
+func ResolveBackendForSandbox(name string) yoloai.BackendName {
 	env, err := NewSystemClient().SandboxMetadata(name)
 	if err == nil && env.Backend != "" {
 		return env.Backend
 	}
 	// Probe is stat-only so an empty context is fine here; full ctx threading
 	// for the rare "meta corrupt" fallback is out of scope for W-L4.
-	backend, warn := runtime.SelectContainerBackend(context.Background(), ResolveContainerBackendConfig())
+	backend, warn := yoloai.SelectContainerBackend(context.Background(), ResolveContainerBackendConfig())
 	if warn != "" {
 		fmt.Fprintln(os.Stderr, warn)
 	}
@@ -118,11 +107,11 @@ func ResolveBackendForSandbox(name string) runtime.BackendName {
 // orchestration-level operations (Stop, Destroy, List, Inspect, Diff, Apply,
 // Run). The Client wraps a runtime + sandbox.Engine with §12-clean Layout
 // derived from Layout(). See internal/cli/CONVENTIONS.md.
-func WithClient(cmd *cobra.Command, backend runtime.BackendName, fn func(ctx context.Context, c *yoloai.Client) error) error {
+func WithClient(cmd *cobra.Command, backend yoloai.BackendName, fn func(ctx context.Context, c *yoloai.Client) error) error {
 	ctx := cmd.Context()
 	c, err := yoloai.NewWithOptions(ctx, yoloai.Options{
 		DataDir: Layout().DataDir,
-		Backend: yoloai.BackendName(backend),
+		Backend: backend,
 		Logger:  slog.Default(),
 		Input:   cmd.InOrStdin(),
 		Output:  cmd.ErrOrStderr(),

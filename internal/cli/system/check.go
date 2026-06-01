@@ -7,7 +7,6 @@ import (
 	"fmt"
 
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
-	"github.com/kstenerud/yoloai/internal/runtime"
 
 	"github.com/kstenerud/yoloai"
 	"github.com/spf13/cobra"
@@ -41,7 +40,7 @@ Checks performed:
 	return cmd
 }
 
-func runSystemCheck(cmd *cobra.Command, backend runtime.BackendName, agentName, isolation string) error {
+func runSystemCheck(cmd *cobra.Command, backend yoloai.BackendName, agentName, isolation string) error {
 	out := cmd.OutOrStdout()
 	if agentName == "" {
 		agentName = cliutil.ResolveAgent(cmd)

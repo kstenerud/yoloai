@@ -394,6 +394,25 @@ func SelectBackend(ctx context.Context, preferred BackendName, isolation Isolati
 	return runtime.SelectBackend(ctx, preferred, isolation, targetOS)
 }
 
+// SelectContainerBackend resolves a concrete container backend from a preferred
+// backend, probing which container daemons are installed and falling back
+// accordingly. It is the container-only counterpart to SelectBackend (no
+// isolation/OS routing), mirroring what lifecycle commands do when resolving a
+// backend for an existing sandbox. Returns the chosen backend and a
+// human-readable warning ("" when none).
+func SelectContainerBackend(ctx context.Context, preferred BackendName) (BackendName, string) {
+	return runtime.SelectContainerBackend(ctx, preferred)
+}
+
+// IsolationAvailability reports whether the given isolation mode is usable for a
+// target OS on the given host OS, returning a human-readable reason and a
+// remediation hint when it is not. Embedders validate a requested isolation
+// mode at their boundary before constructing a Client (the CLI does this for
+// its --isolation / --os flags).
+func IsolationAvailability(isolation IsolationMode, targetOS, hostOS string) (available bool, reason, help string) {
+	return runtime.IsolationAvailability(isolation, targetOS, hostOS)
+}
+
 // resolveBackendFromConfig picks a default backend for SystemClient admin
 // operations that aren't bound to a specific backend. Reads the user's
 // container_backend preference from config and routes it through

@@ -9,7 +9,6 @@ import (
 	"os"
 
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
-	"github.com/kstenerud/yoloai/internal/runtime"
 
 	"github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/cli/system/tart"
@@ -33,7 +32,7 @@ func NewCmd(version, commit, date string) *cobra.Command {
 		newSystemDiskCmd(),
 		newSystemPruneCmd(),
 		newSystemSetupCmd(),
-		tart.NewCmd(cliutil.Layout, cliutil.NewRuntime),
+		tart.NewCmd(cliutil.Layout),
 		newCompletionCmd(),
 	)
 
@@ -69,7 +68,7 @@ func newSystemBuildCmd() *cobra.Command {
 	return cmd
 }
 
-func runSystemBuild(cmd *cobra.Command, args []string, backend runtime.BackendName) error {
+func runSystemBuild(cmd *cobra.Command, args []string, backend yoloai.BackendName) error {
 	secretFlags, _ := cmd.Flags().GetStringSlice("secret")
 	force, _ := cmd.Flags().GetBool("force")
 
