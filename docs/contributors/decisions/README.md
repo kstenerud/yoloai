@@ -276,7 +276,37 @@ No change to `f1KnownLeaks` (B4 closed no baseline entries — it removed `inter
 
 **Why.** Security — a multi-principal process resolving caller-influenced ambient references against its own identity is a confused-deputy / cross-tenant credential-exfiltration surface, and the kernel won't catch it. Honesty — a library-first contract must serve web/daemon/MCP, not just the CLI whose "process == principal, bound once at boot" assumptions are invisible until something else embeds it.
 
-**Open / next.** (i) Map each `Layout` field to deployment-vs-principal scope to measure the gap concretely. (ii) A plan doc for the scope split + the principal-scope handle shape. (iii) The daemon path-confinement design and whether `${VAR}`-in-config survives long-term — these touch security and so warrant dedicated treatment (and likely a research file) per the project's security-research rule, not free design. (iv) Possible later principle entry once the shape is proven; for now §2 + this D-entry hold it. F1/G2/G7 stand unaffected; this is *new scope beyond* the layer-1 fence work, not a correction to it.
+**Open / next.** (i) Map each `Layout` field to deployment-vs-principal scope to measure the gap concretely. — **DONE in D59** (the seam runs *through* `DataDir`, not just between fields). (ii) A plan doc for the scope split + the principal-scope handle shape. (iii) The daemon path-confinement design and whether `${VAR}`-in-config survives long-term — these touch security and so warrant dedicated treatment (and likely a research file) per the project's security-research rule, not free design. (iv) Possible later principle entry once the shape is proven; for now §2 + this D-entry hold it. F1/G2/G7 stand unaffected; this is *new scope beyond* the layer-1 fence work, not a correction to it. **D59 extends this entry** with the second (isolation) axis and settles the three open mechanisms.
+
+## D59 — Multi-principal has a second axis (isolation), orthogonal to D58's binding axis; the deployment/principal seam runs *through* `DataDir`; physical sandbox partition, HomeDir dissolved into a credential bundle, embedder-lifetime principal handle
+
+**Date:** 2026-06-01. **Status:** Direction accepted (owner, 2026-06-01); three mechanisms settled (below), but **gated on a dedicated security-research pass before any plan doc** — sequence is *capture → research → re-decide next steps*. **Not yet implemented.** **Composition:** extends D58 (binding-lifetime frame) with a second, orthogonal concern; completes D58 decision-4 (credential what/where split) and confirms D58 decision-3's lean (handle over per-verb arg); builds on §12 + library-first.
+
+**The two axes are orthogonal.** D58 named one consequence of principal-multiplicity; this entry names the other, and they don't imply each other:
+- **Binding (D58):** does the library resolve an *ambient reference* against the wrong identity? (confused deputy). Fixed by: library never synthesizes principal scope; caller supplies it.
+- **Isolation (D59):** can principal A reach principal B's *resources*? (cross-tenant leak via namespace/path). Fixed by: partition storage + confine filesystem paths per principal.
+
+You can get binding right and still leak via a flat namespace (A enumerates B's sandboxes); you can partition storage and still confused-deputy a credential. Multi-principal (Axis-1 `many`) needs **both**.
+
+**The seam runs *through* `DataDir`, not just between `Layout` fields (D58 open-item i, measured).** The field-level map is clean — principal scope is exactly `{HomeDir, HostUID, HostGID, Env}`; `DataDir` + all ~20 path methods + `ProcessIsRoot` are deployment. But `DataDir`'s *subtree* splits again:
+- **Deployment, shared (on purpose):** `profiles/`, `cache/`, `*-base-locks/`, `tart-base-metadata/`, `cni/`, `defaults/`, `state.yaml`, `extensions/`. N principals must *not* fork these (no per-principal base-image rebuilds or profile forks).
+- **Per-principal, stored under `DataDir`:** `sandboxes/<name>/` (incl. its `files/`), `trash/`, `vscode-cli/` (token seed). Flat `<name>` today lets A name/enumerate B's sandbox.
+- **`config.yaml`** straddles (operational config = deployment; user prefs like `model_aliases`/`tmux_conf` = principal) — flagged for the research pass.
+
+So "data lives under `DataDir`" holds; `sandboxes/` just needs a principal partition.
+
+**Filesystem-concern taxonomy (owner's enumeration).** DataDir-general (deployment) · DataDir-sandboxes (per-principal, partition) · workdir (principal's own FS; apply writes back) · aux dirs (principal's own FS) · HomeDir-sourced seeds (entitlements/api-keys/git+tmux prefs) · shared `files/` (inside sandbox, needs a caller-facing surfacing verb). Workdir + aux dirs are the **daemon path-confinement** point — the CLI's EACCES net (process==principal) is gone, so a daemon must confine these to the principal's authorized roots, and apply must write back only there.
+
+**Decisions (settled directions; mechanism detail still owed to research).**
+1. **Sandbox isolation = physical partition**, `sandboxes/<principal>/<name>/`. **Fails closed** — you cannot construct a path to another principal's sandbox without forging the id (vs. flat-namespace + metadata-stamp + per-verb ACL, which *fails open*: one missed check leaks). Single-principal CLI uses a default/empty segment so its on-disk layout is unchanged. Matches `security-principles` "containment not prevention." Owed to research: the stable, **unforgeable** principal-id form.
+2. **HomeDir dissolves into a typed credential/preferences bundle.** No `HomeDir` field reaches the library; the caller supplies each entitlement (agent creds, git identity, tmux conf) explicitly — the library declares the *what* (agent definition already lists `APIKeyEnvVars` + state dirs), the caller supplies the *where*/content. CLI builds the bundle from the invoking user's `$HOME` *at the boundary*; daemon supplies it per request; library never rummages a host home. This is the **last ambient-shaped input**, so its removal completes the §12/D58 no-ambient invariant.
+3. **Principal scope = embedder-lifetime handle** (confirms D58 decision-3's lean), composed against the shared deployment context. CLI mints one in its boot preamble (discarded at exit); MCP-local once per process; web per session (+expiry); daemon per request (+path confinement). Rejected: per-verb context argument — threads context through every call including the simple single-principal cases.
+
+**Rejected.** (a) Flat-namespace + metadata ACL for isolation — fails open, scatters checks across many read paths. (b) Keeping a per-principal `HomeDir` field — smaller, but the library still rummages a host home, awkward/unsafe for a daemon principal with no developer-shaped `$HOME`. (c) Per-verb principal-context arg (see decision 3).
+
+**Why.** Isolation is a distinct failure mode the binding fix doesn't cover; physical partition and explicit credential supply both *fail closed*, which is the right disposition for a cross-tenant boundary. Dissolving HomeDir also retires the one remaining ambient-shaped input.
+
+**Open / next (the gated sequence).** (i) **Security-research file first** — path confinement (workdir/aux roots), principal-id unforgeability, enumeration leaks (`List` across the partition), and the credential-bundle shape; per the project rule these are not free-designed. (ii) Then **re-decide next steps** (plan doc shape depends on research outcomes). (iii) The shared `files/` surfacing verb (`Sandbox.Files()`) is the D53/Phase-2 item, pulled in here as the caller-facing half. (iv) Architecture-principles §3 stays "emerging / not yet enforced"; it now cites D59 alongside D58.
 
 # Convention reminders
 

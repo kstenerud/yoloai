@@ -135,7 +135,7 @@ tightening + rename). See also `development-principles.md §2`.
 
 ---
 
-## §3. Host knowledge binds at a lifetime; the library never synthesizes it *(emerging — D58, not yet enforced)*
+## §3. Host knowledge binds at a lifetime; the library never synthesizes it *(emerging — D58/D59, not yet enforced)*
 
 **Principle (direction accepted 2026-06-01, D58 — not yet implemented).** Host knowledge
 — filesystem paths, the home directory, environment values, the requesting principal's
@@ -175,20 +175,32 @@ kernel safety net; lifetime adds only staleness (expiry / revocation). A library
 synthesizes host knowledge is safe in the CLI by accident and unsafe in a daemon by
 construction — so the library must never do it.
 
+### A second axis — isolation (D59)
+
+Binding is only half of multi-principal. The orthogonal half is **isolation**: can one
+principal reach another's resources? D59 settles three directions (still pre-implementation,
+gated on security research): sandbox storage gets a **physical partition**
+(`sandboxes/<principal>/<name>/`, fails closed) rather than a flat namespace with per-verb
+ACL checks (fails open); **`HomeDir` dissolves** into a typed credential/preferences bundle
+the caller supplies (retiring the last ambient-shaped input); and the principal scope is an
+**embedder-lifetime handle**. The deployment/principal seam was found to run *through*
+`DataDir` itself — `sandboxes/` is per-principal storage rooted in an otherwise
+deployment-shared tree.
+
 ### Status & what's still open
 
 This is **direction, not yet enforced.** No depguard/forbidigo rule expresses it beyond
-§12's existing ambient-read bans, and the principal-scope handle is undesigned. Open work
-(D58): a field-by-field deployment-vs-principal mapping of `config.Layout`; whether the
-principal scope is an embedder-lifetime handle vs a per-verb argument; whether `${VAR}`-
-in-config survives at all for a daemon; and a **dedicated security-research pass** before
-any wire protocol exists (per the project rule that security is never finalized ad-hoc).
-Treat this section as the frame to build against, not settled law.
+§12's existing ambient-read bans; the principal-scope handle and the partition scheme are
+undesigned. The settled directions above (D58/D59) are gated on a **dedicated
+security-research pass** — path confinement, principal-id unforgeability, enumeration
+leaks, credential-bundle shape — before any plan doc, per the project rule that security is
+never finalized ad-hoc. Treat this section as the frame to build against, not settled law.
 
 ### Sources
 
-Project decision D58 (binding-lifetime frame: deployment vs principal scope; library never
-resolves ambient references; the raw-load / boundary-resolve split). Extends
+Project decisions D58 (binding-lifetime frame: deployment vs principal scope; library never
+resolves ambient references; raw-load / boundary-resolve split) and D59 (the orthogonal
+isolation axis; physical partition; HomeDir dissolution; embedder-lifetime handle). Extends
 `development-principles.md §12`. Security details deferred to dedicated research.
 
 ---
