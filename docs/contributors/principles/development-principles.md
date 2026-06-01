@@ -50,7 +50,7 @@ A concise reference for the engineering values that shape every code path in yol
 
 **Principle of Least Astonishment.** Code should behave the way a reader expects. A function named `Resolve` should resolve, not mutate. A middleware named `RequireAuth` should reject unauthenticated requests. An error named `ErrNotFound` should mean not-found, not a transient failure.
 
-**Encapsulation and Information Hiding.** Internal implementation details should not leak to callers. Unexported struct fields, package-private constructors, and narrow interfaces all serve this goal. Backend-specific types (Docker SDK structs, Tart VM handles, Seatbelt SBPL profiles) never leak past their `runtime/<backend>/` package boundary.
+**Encapsulation and Information Hiding.** Internal implementation details should not leak to callers. Unexported struct fields, package-private constructors, and narrow interfaces all serve this goal. Backend-specific types (Docker SDK structs, Tart VM handles, Seatbelt SBPL profiles) never leak past their `internal/runtime/<backend>/` package boundary.
 
 **Convention over Configuration.** Established Go conventions and project standards are followed by default. Diverging from a convention requires a documented reason. Convention reduces cognitive load — a developer reading unfamiliar code in a familiar structure spends mental energy on the logic, not the layout.
 
@@ -78,19 +78,20 @@ The **mechanism layer** — the domain/library — does exactly what it is asked
 
 ### Pattern
 
-Import direction is strict. Public packages live at the module root (`agent/`, `config/`, `runtime/`, `sandbox/`, `workspace/`, `extension/`); private support packages live under `internal/` (`internal/cli/`, `internal/mcpsrv/`, `internal/yoerrors/`, `internal/fileutil/`, `internal/testutil/`). The layering:
+Import direction is strict. The **public surface** lives at the module root: the `yoloai` package itself (the Layer-1/2 contract) and the `yoerrors/` error-sentinel package. Everything else is private under `internal/` — the embedders (`internal/cli/`, `internal/mcpsrv/`), the engine (`internal/sandbox/` and its `store`/`patch`/`archetype`/`lifecycle`/`launch`/`status`/`create` subpackages), the runtime backends (`internal/runtime/` + `docker`/`tart`/`seatbelt`/`containerd`/`podman`/`caps`), and the support packages (`internal/agent/`, `internal/config/`, `internal/workspace/`, `internal/fileutil/`, `internal/testutil/`). The layering:
 
 ```
-cmd/yoloai/main.go     → internal/cli/  + sandbox/  + runtime/
-internal/cli/          → sandbox/  + agent/  + config/  + workspace/
-sandbox/               → runtime/  + agent/  + config/  + workspace/
-workspace/             → config/  (uses git via os/exec; no runtime dep)
-runtime/<backend>/     → backend SDK + runtime/  (interfaces only)  + config/  (leaf types)
-agent/                 → config/  (agent definitions reference config types)
-config/                → (leaf — nothing internal)
+cmd/yoloai/main.go         → internal/cli
+internal/cli/, mcpsrv/     → yoloai (root) + yoerrors    (fenced OFF internal/sandbox + internal/runtime — D57)
+yoloai (root)              → internal/sandbox + internal/runtime + internal/config + yoerrors
+internal/sandbox/          → internal/runtime + internal/agent + internal/config + internal/workspace
+internal/workspace/        → internal/config   (git via os/exec; no runtime dep)
+internal/runtime/<backend> → backend SDK + internal/runtime (interfaces only) + internal/config (leaf types)
+internal/agent/            → internal/config   (agent definitions reference config types)
+internal/config/           → (leaf — nothing internal)
 ```
 
-No reverse imports. No circular imports. Backend types do not appear outside `runtime/<backend>/`. Backend name strings do not appear in the dispatch (W10). `config/` is depended on by everyone but depends on nothing internal — it carries the leaf types (paths, profile names, mount specs) that compose the rest.
+No reverse imports. No circular imports. Backend types do not appear outside `internal/runtime/<backend>/`. Backend name strings do not appear in the dispatch (W10). The embedders reach the engine **only** through the root `yoloai` package — the depguard fences (`cli-sandbox-scope`, `cli-runtime-scope`, D57) forbid `internal/cli`/`internal/mcpsrv` from importing the engine or runtime subtrees directly, which is what makes the CLI a faithful proxy for a future separate-module daemon. `internal/config/` is depended on by everyone but depends on nothing internal — it carries the leaf types (paths, profile names, mount specs) that compose the rest.
 
 ### What does NOT live in the policy (interface) layer
 
@@ -110,8 +111,8 @@ The flip side — the comply-or-complain contract spelled out:
 
 ### Worked examples
 
-- `yoloai apply` (CLI) → `sandbox/patch.Apply` (domain) → `runtime.Runtime.GitExec` (backend boundary). The CLI parses flags, the domain assembles the patch, the runtime executes git. None of those three reach across.
-- The W12 architecture remediation (commits `a3207eb`, `e100e4d`, `ccde491`, 2026-05-20) carved `sandbox/archetype/`, `sandbox/patch/`, `sandbox/store/` as subpackages. Each has a clean import boundary; subsequent changes to one don't ripple.
+- `yoloai apply` (CLI) → `internal/sandbox/patch.Apply` (domain) → `runtime.Runtime.GitExec` (backend boundary). The CLI parses flags, the domain assembles the patch, the runtime executes git. None of those three reach across.
+- The W12 architecture remediation (commits `a3207eb`, `e100e4d`, `ccde491`, 2026-05-20) carved `internal/sandbox/archetype/`, `internal/sandbox/patch/`, `internal/sandbox/store/` as subpackages. Each has a clean import boundary; subsequent changes to one don't ripple.
 - W10 (commit `5f91cdf`, 2026-05-20) closed three backend-name leaks — `if backend == "docker"` branches that had crept into CLI / domain code. Replaced with capability checks or registry queries.
 - W11 (commits `3b4a9ae`, `d525d60`, `c00d367`, `1f4457c`, 2026-05-20) introduced `BackendDescriptor` and a `(factory, descriptor)` registry. Adding a backend is now purely additive — register the descriptor, no dispatch edits.
 
@@ -146,7 +147,7 @@ This isn't paranoid; it's the same reason server-side validation matters when th
 
 ### Pattern
 
-A validation function lives with each domain concept (sandbox name, mount mode, path safety). Every boundary calls it. Errors are typed (`internal/yoerrors` per W7) so callers can branch on cause, not error-message-matching (W8).
+A validation function lives with each domain concept (sandbox name, mount mode, path safety). Every boundary calls it. Errors are typed (top-level `yoerrors` package, per W7/B1) so callers can branch on cause, not error-message-matching (W8).
 
 ### Worked examples
 
@@ -193,7 +194,7 @@ For every domain concept yoloAI cares about:
 | Network allowlist domain          | `string`          | `AllowedDomain`         | Valid hostname, not localhost (commit `4d9f7f6`)  |
 | Agent name                        | `string`          | `AgentName`             | Known agent in the registry                       |
 | Backend descriptor (W11)          | (factory return)  | `BackendDescriptor`     | Capabilities enumerated                           |
-| Patch (D9)                        | `[]byte`          | `Patch` (`patch/`)      | Valid `git format-patch` output                   |
+| Patch (D9)                        | `[]byte`          | `Patch` (`internal/sandbox/patch/`) | Valid `git format-patch` output                   |
 | Network policy (W-L8a)            | `(bool, bool)`    | `yoloai.NetworkMode`    | "Open / isolated / none" — invalid combo unrepresentable |
 | Isolation mode (W-L8a)            | `string`          | `yoloai.IsolationMode`  | One of the five known modes; typo = compile error |
 | Apply mode (W-L8a)                | `(bool, string)`  | `yoloai.ApplyMode`      | Default / squash / export; mutex enforced by type |
@@ -205,7 +206,7 @@ Go limits (named in the research file): same-package construction is unrestricte
 
 - `internal/sandbox/name.go` — `SandboxName` type with `Parse` constructor (D10).
 - `internal/config/path.go` — resolved-path types after tilde expansion + env-var interpolation (commits `25fcb82`, `a57d765`, 2026-02-27).
-- `internal/runtime/registry/descriptor.go` — `BackendDescriptor` constructed only by registered factories (W11 step 4).
+- `internal/runtime/registry.go` — `BackendDescriptor` constructed only by registered factories (W11 step 4).
 - Reject-don't-strip: invalid input fails parsing; we never silently sanitise. Stripping is what attackers (and confused users) count on.
 
 ### Cost-vs-benefit
@@ -401,7 +402,7 @@ When the architecture has drifted enough that a single contributor (or AI agent)
 ### Worked examples
 
 - **Architecture audit, 2026-05** (`868a5b0`, 2026-05-20) → W1–W14 (commits `4fa683f` … `1f4457c`, 2026-05-20). Each W is a tight, single-responsibility commit with `make check` passing.
-- W7 (commit `a22878d`) moved typed errors to `internal/yoerrors` — single source for error categorisation, no more `errors.Is(err, fmt.Errorf("not running"))` text-match anti-patterns.
+- W7 (commit `a22878d`) introduced typed errors as a single source for error categorisation — no more `errors.Is(err, fmt.Errorf("not running"))` text-match anti-patterns; later promoted to the top-level `yoerrors` package (B1).
 - W11 progressed in four steps (`3b4a9ae`, `d525d60`, `c00d367`, `1f4457c`): additive descriptor → migrate callers → optional interfaces → registry tuples. Each step independently shippable.
 - W12 carved subpackages (`a3207eb`, `e100e4d`, `ccde491`). Each carve produced a cleaner import graph with `make check` passing.
 
