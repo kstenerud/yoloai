@@ -231,6 +231,20 @@ No change to `f1KnownLeaks` (B4 closed no baseline entries — it removed `inter
 
 **Consequences.** `principles/development-principles.md` §2: retitled "None of your business — boundary discipline, comply-or-complain"; named-lead paragraph added; downward clause added to the policy paragraph; a worked-example block (F1/G7 carve + enforcement teeth); Sources note extended; ABOUTME line updated. `principles/general-principles.md`: "None-of-your-business-as-silent-failure" over-generalisation row added. `principles/README.md` index row updated. No new section, no research-file section (the Parnas/SOLID backing already cited in §2 covers it).
 
+## D57 — G2: depguard fences the whole `internal/sandbox` subtree from cli+mcpsrv (allow-list dropped); `cli-sandbox-facade-scope` → `cli-sandbox-scope`
+
+**Date:** 2026-06-01. **Status:** Accepted (owner request "Move on to G2", 2026-06-01). **Closes** CRITIQUE G2. **Composition:** completes the fence begun at D50 (C1, façade-only), enabled by the G7 verb series; the enforcement-teeth half of D56 §2.
+
+**Context.** D50's `cli-sandbox-facade-scope` rule denied only the `internal/sandbox` *façade* package and allow-listed the three leaf subpackages (`store`/`patch`/`archetype`) because the CLI still read them directly — most heavily `store.Meta` (the on-disk metadata read-model, then imported ×35). G2 (CRITIQUE, severity MAJOR) flagged this as the fence "fencing only the façade, not the leaf it leaks through": the same gap the F1 leak detector saw as `store.Meta` leaking *out*, seen from the *import* side. The G7 series then gave every leaf reach-in a public verb (sandbox-metadata reads, agent-log/file paths, agent/model/backend discovery, stored-prompt get/set, git-tag-on-apply), so the allow-list no longer protected any live import.
+
+**Decision.** Dropped all three `allow` entries; the `deny` on `github.com/kstenerud/yoloai/internal/sandbox` now matches the **entire subtree by prefix** (façade *and* every leaf: store/patch/archetype/status/…). Renamed the rule `cli-sandbox-facade-scope` → `cli-sandbox-scope` (it no longer fences "the façade" — it fences the whole internal seam). It is now the structural twin of `cli-runtime-scope` (G7): same `files` scope (`**/internal/cli/**` + `**/internal/mcpsrv/**`, `!$test`), same lax/deny-by-prefix shape.
+
+**Rejected.** (a) Keeping `store` allow-listed "until the read-model carve" (D53) — rejected: G7 already routes every non-test CLI/mcpsrv store read through a verb, so the allow-list guarded nothing and only weakened the fence. (b) Splitting per-leaf deny rules — unnecessary; one prefix deny covers the subtree, and the root `yoloai` package (the sole sanctioned consumer) lives outside the cli/mcpsrv globs and stays unmatched.
+
+**Verification.** Probe injecting 3 leaf imports into a non-test CLI file → 3 `cli-sandbox-scope` denials; full lint of cli+mcpsrv non-test = 0 issues; confirmed zero non-test leaf imports remain (only `*_test.go` fixtures import the leaves, and tests are exempt). `make check` green.
+
+**Consequences.** `.golangci.yml`: rule renamed, allow-list removed, comment + deny `desc` rewritten to "façade OR any leaf subpackage — F1 Half-B + G2"; `cli-runtime-scope`'s "twin of" reference updated. ARCHITECTURE README F10 paragraph rewritten (CLI reaches neither façade nor leaves; both twin rules named). With G2 closed, the CLI-honesty contract is now mechanically total over the `internal/sandbox` + `internal/runtime` subtrees: a separate-module daemon embedding `yoloai` could do everything the CLI does through the public surface alone.
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.

@@ -75,15 +75,19 @@ is small; the metadata one *is* Phase 1b.
 | Git tag create | `workspace.CreateTag()` in `cli/workflow/apply.go` | `Workdir().CreateTag()` (sibling of `Tags`) |
 | Extensions | `internal/extension` (CLI `x`) | experimental — lowest priority, may stay deferred |
 
-### Phase 3 — Tighten the gate (G2)
+### Phase 3 — Tighten the gate (G2) — ✅ DONE 2026-06-01 (D57)
 
-Once Phases 1b+2 give every reach-in a public home:
-- Drop the `internal/sandbox/store` allow-entry from `cli-sandbox-facade-scope` so CLI/
-  mcpsrv `store.*` imports fail the lint. Weigh dropping `patch`/`archetype` too.
-- Weigh analogous fences for `internal/runtime`/`internal/config` (they carry types that
-  appeared on the surface via `store.Meta`: `runtime.BackendName`/`IsolationMode`,
-  `config.ResourceLimits`).
-- **Now** the gate means what it claims: the CLI is a faithful proxy for the daemon.
+Phase 2's verb series gave every reach-in a public home, so:
+- **Done:** dropped all three leaf allow-entries (`store`/`patch`/`archetype`) from the
+  former `cli-sandbox-facade-scope`; the `deny` on `internal/sandbox` now covers the
+  whole subtree by prefix. Rule renamed `cli-sandbox-scope`.
+- **Done (G7, separately):** the analogous `internal/runtime` fence shipped as the twin
+  `cli-runtime-scope` rule (only `internal/cli/system/tart/` exempt).
+- **Deferred:** an `internal/config` CLI fence — 7 cli files still import it; genuine
+  future work, not blocking F1/G2.
+- **Now** the gate means what it claims: a separate-module daemon could do everything the
+  CLI does over the `internal/sandbox` + `internal/runtime` subtrees through the public
+  surface alone.
 
 ### Phase 4 — Agent-interaction reshape (G5 + G6) *(SEPARATE later effort — own plan)*
 

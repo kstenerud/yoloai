@@ -77,31 +77,12 @@ the worst of the three states.
   (b) is the open question for the chat: `store.Meta` is ~25 fields with a nested tree; a faithful
   public mirror is real work, comparable to or larger than the MergedConfig promotion.
 
-### G2 — The "CLI keeps us honest" depguard gate fences only the façade, not the leaf it leaks through
+### G2 — RESOLVED 2026-06-01 (D57) → see [resolved-critiques.md](resolved-critiques.md)
 
-- **Severity:** MAJOR
-- **Where:** `.golangci.yml:89-101` (`cli-sandbox-facade-scope`): denies `internal/sandbox`; allows
-  `internal/sandbox/store`, `internal/sandbox/patch`, `internal/sandbox/archetype`. No rule guards
-  `internal/runtime` or `internal/config` against CLI import. CLI consumers of `store.Meta`:
-  `printCreateSummary(out, meta *store.Meta)`, `store.LoadMeta`, and others.
-- **Observation:** The gate's stated purpose (project memory `project_public_api_direction`) is that
-  the CLI, by being constrained to the public surface, proves the library is complete — the
-  forcing function being a separate-module daemon that physically cannot see `internal/`. But the
-  rule constrains the CLI away from the *façade* only. The leaves it allows (`store` especially)
-  are exactly the un-promoted read-model types from G1. So the CLI is **not** a faithful proxy for
-  the daemon: it passes while importing types the daemon couldn't.
-- **Why it bothers me:** This is G1 from the other direction — the `store` allow-entry and the
-  `Info.Meta` leak are the same un-promoted type. The gate advertises "CLI consumes only the public
-  surface"; the reality is "CLI consumes the public surface plus three leaf packages plus runtime
-  plus config." The claim and the rule disagree, and the disagreement is invisible because the
-  rule is the thing that's supposed to catch it.
-- **Greenfield alternative:** Sequence after G1(b). Once `store.Meta` is a public read-model, drop
-  the `internal/sandbox/store` allow-entry so CLI `store.*` imports fail the lint — *then* the gate
-  means what it claims. Consider whether `internal/runtime`/`internal/config` need analogous fences
-  (they carry types that appear on the public surface: `runtime.BackendName`, `runtime.IsolationMode`,
-  `config.ResourceLimits` — all reachable via `store.Meta`).
-- **Migration cost:** The rule edit is minutes; it's gated on G1(b) being done first (otherwise the
-  CLI doesn't compile). Folds into the same program.
+The depguard fence now denies the whole `internal/sandbox` subtree (façade + leaves)
+to cli+mcpsrv (rule renamed `cli-sandbox-scope`), with the twin `cli-runtime-scope`
+covering `internal/runtime`. Closed via the G7 verb series rather than the critique's
+prescribed G1(b)-first sequence; details and divergence note in the resolved sink.
 
 ### G3 — Public Options field-naming is inconsistent on a surface about to become a versioned contract
 
