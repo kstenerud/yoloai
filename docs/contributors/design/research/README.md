@@ -7,6 +7,7 @@ Research documents supporting yoloAI's design decisions. Each file covers a broa
 | [Competitors](competitors.md) | Existing tools, community pain points, feature comparison |
 | [Agents](agents.md) | AI coding CLI agents, shell mode, Aider local-model integration |
 | [Security](security.md) | Credential management, network isolation, proxy sidecar, Claude Code proxy support |
+| [Principal isolation](principal-isolation.md) | **Multi-tenant (D59).** Current single-principal baseline + what breaks when a daemon serves many principals: physical partition + id unforgeability, workdir/aux path confinement (symlink/TOCTOU), enumeration, credential bundle; plus blind spots beyond the brief — container escape as cross-tenant boundary, runtime-daemon confused deputy, shared-resource poisoning, log secrets, handle revocation. Pre-design. |
 | [Sandboxing](sandboxing.md) | Alternative filesystem isolation, macOS VM sandbox, macOS process/FS isolation |
 | [Implementation](implementation.md) | Env var interpolation, Claude Code installation, Go libs vs shell commands, tmux defaults |
 | [Parallel Agents](parallel-agents.md) | Field case study (2025-06): manual tmux parallelism, spec-driven development, **sandbox chaining / pipelines**. Defers idle-detection depth to Orchestration |
