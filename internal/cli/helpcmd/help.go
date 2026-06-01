@@ -4,6 +4,7 @@ package helpcmd
 // ABOUTME: via embedded markdown files with fuzzy suggestion for unknown topics.
 
 import (
+	"context"
 	"embed"
 	"fmt"
 	"os"
@@ -12,7 +13,6 @@ import (
 
 	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
-	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/spf13/cobra"
 )
 
@@ -189,9 +189,9 @@ func generateAgentsTopic() string {
 // keeps the example honest if a new container backend ships without
 // docker's host.docker.internal convention.
 func containerHostExample() string {
-	for _, desc := range runtime.Descriptors() {
-		if desc.HostFromContainer != "" {
-			return desc.HostFromContainer
+	for _, b := range cliutil.NewSystemClient().Backends(context.Background(), yoloai.BackendQuery{}) {
+		if b.HostFromContainer != "" {
+			return b.HostFromContainer
 		}
 	}
 	return "<your-host-ip>"

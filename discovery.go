@@ -34,6 +34,10 @@ type BackendInfo struct {
 	Platforms   []string // host GOOS values this backend runs on ("linux", "darwin", …)
 	Requires    string   // human-readable prerequisites
 	InstallHint string   // install URL or command; "" when nothing to install
+	// HostFromContainer is the hostname inside the sandbox that resolves to the
+	// host's network stack ("host.docker.internal" for docker/podman); "" for
+	// backends without a special hostname.
+	HostFromContainer string
 
 	Available bool   // set only when probed; whether the backend is usable on this host now
 	Note      string // probe failure reason when Available is false; "" otherwise
@@ -108,10 +112,11 @@ func agentInfoFromDefinition(def *agent.Definition) AgentInfo {
 
 func backendInfoFromDescriptor(desc runtime.BackendDescriptor) BackendInfo {
 	return BackendInfo{
-		Name:        desc.Name,
-		Description: desc.Description,
-		Platforms:   desc.Platforms,
-		Requires:    desc.Requires,
-		InstallHint: desc.InstallHint,
+		Name:              desc.Name,
+		Description:       desc.Description,
+		Platforms:         desc.Platforms,
+		Requires:          desc.Requires,
+		InstallHint:       desc.InstallHint,
+		HostFromContainer: desc.HostFromContainer,
 	}
 }
