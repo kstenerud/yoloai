@@ -12,7 +12,6 @@ import (
 
 	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
@@ -72,7 +71,7 @@ func resolveStopNames(cmd *cobra.Command, ctx context.Context, c *yoloai.Client,
 		return resolveStopFromEnv()
 	}
 	for _, name := range args {
-		if err := store.ValidateName(name); err != nil {
+		if err := cliutil.ValidateName(name); err != nil {
 			return nil, err
 		}
 	}
@@ -110,7 +109,7 @@ func resolveStopFromEnv() ([]string, error) {
 	if envName == "" {
 		return nil, yoerrors.NewUsageError("at least one sandbox name is required (or use --all or set YOLOAI_SANDBOX)")
 	}
-	if err := store.ValidateName(envName); err != nil {
+	if err := cliutil.ValidateName(envName); err != nil {
 		return nil, err
 	}
 	return []string{envName}, nil

@@ -5,7 +5,6 @@ package cliutil
 import (
 	"os"
 
-	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
@@ -18,7 +17,7 @@ const EnvSandboxName = "YOLOAI_SANDBOX"
 // resolve a name outside ResolveName (e.g. files' subcommand-first dispatch)
 // call this instead of reaching into the store package directly.
 func ValidateName(name string) error {
-	return store.ValidateName(name)
+	return NewSystemClient().ValidateSandboxName(name)
 }
 
 // ResolveName extracts the sandbox name from positional args, falling back
@@ -27,14 +26,14 @@ func ValidateName(name string) error {
 // Returns a UsageError if no name is available from either source.
 func ResolveName(_ *cobra.Command, args []string) (string, []string, error) {
 	if len(args) >= 1 {
-		if err := store.ValidateName(args[0]); err != nil {
+		if err := ValidateName(args[0]); err != nil {
 			return "", nil, err
 		}
 		return args[0], args[1:], nil
 	}
 
 	if envName := os.Getenv(EnvSandboxName); envName != "" { //nolint:forbidigo // §12: documented YOLOAI_SANDBOX feature; CLI boundary resolves it to an explicit name
-		if err := store.ValidateName(envName); err != nil {
+		if err := ValidateName(envName); err != nil {
 			return "", nil, err
 		}
 		return envName, nil, nil

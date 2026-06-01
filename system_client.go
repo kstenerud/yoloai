@@ -202,6 +202,21 @@ func (s *SystemClient) SandboxMetadata(name string) (*Environment, error) {
 	return environmentFromMeta(meta), nil
 }
 
+// ValidateSandboxName reports whether name is a well-formed sandbox name
+// (allowed charset, no path-traversal). It consults no host state, so a daemon
+// or CLI can pre-validate a name before any other verb is called.
+func (s *SystemClient) ValidateSandboxName(name string) error {
+	return store.ValidateName(name)
+}
+
+// RequireSandbox reports whether a sandbox directory exists on disk, returning
+// ErrSandboxNotFound when it does not. It checks only for the directory — not
+// for readable metadata — so callers that must act on a sandbox with corrupt
+// or missing metadata (e.g. destroy) can still proceed.
+func (s *SystemClient) RequireSandbox(name string) error {
+	return store.RequireSandboxDir(s.layout.SandboxDir(name))
+}
+
 // Info returns the installation's paths and per-backend availability in one
 // call. It never returns an error today (per-backend probe failures are
 // captured in BackendInfo.Note); the error return is kept for forward

@@ -36,6 +36,21 @@ func TestSystemClient_Info(t *testing.T) {
 	}
 }
 
+// TestSystemClient_ValidateSandboxName accepts a well-formed name and rejects
+// path-traversal, with no host state consulted.
+func TestSystemClient_ValidateSandboxName(t *testing.T) {
+	c := newTestClient(t)
+	assert.NoError(t, c.ValidateSandboxName("my-box"))
+	assert.Error(t, c.ValidateSandboxName("../escape"))
+}
+
+// TestSystemClient_RequireSandbox returns ErrSandboxNotFound for a sandbox whose
+// directory does not exist.
+func TestSystemClient_RequireSandbox(t *testing.T) {
+	c := newTestClient(t)
+	assert.ErrorIs(t, c.RequireSandbox("nope"), ErrSandboxNotFound)
+}
+
 // TestSystemClient_ListAcrossBackends_Empty verifies a fresh install (no sandbox
 // dirs) lists nothing and probes no backends — no enumeration, no error.
 func TestSystemClient_ListAcrossBackends_Empty(t *testing.T) {

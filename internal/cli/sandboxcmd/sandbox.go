@@ -8,7 +8,6 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
-	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
@@ -133,13 +132,13 @@ func resolveSandboxDispatchArgs(args []string) (name, subcmd string, rest []stri
 		if envName == "" {
 			return "", "", nil, yoerrors.NewUsageError("sandbox name required before subcommand (or set YOLOAI_SANDBOX)")
 		}
-		if err := store.ValidateName(envName); err != nil {
+		if err := cliutil.ValidateName(envName); err != nil {
 			return "", "", nil, err
 		}
 		return envName, args[0], args[1:], nil
 	}
 
-	if err := store.ValidateName(args[0]); err != nil {
+	if err := cliutil.ValidateName(args[0]); err != nil {
 		return "", "", nil, err
 	}
 	if len(args) < 2 {
