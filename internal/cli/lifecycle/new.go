@@ -17,7 +17,6 @@ import (
 	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
@@ -334,7 +333,7 @@ func executeNewCreate(cmd *cobra.Command, ctx context.Context, c *yoloai.Client,
 		if sandboxName == "" {
 			return nil
 		}
-		meta, loadErr := store.LoadMeta(cliutil.Layout().SandboxDir(sandboxName))
+		meta, loadErr := cliutil.NewSystemClient().SandboxMetadata(sandboxName)
 		if loadErr != nil {
 			return loadErr
 		}
@@ -345,7 +344,7 @@ func executeNewCreate(cmd *cobra.Command, ctx context.Context, c *yoloai.Client,
 	// F8). opts.Name is used because Create returns "" for --no-start. Goes to
 	// stderr — the stream the Engine's creation output used — keeping human
 	// output cohesive there (stdout is reserved for --json).
-	if meta, loadErr := store.LoadMeta(cliutil.Layout().SandboxDir(opts.Name)); loadErr == nil {
+	if meta, loadErr := cliutil.NewSystemClient().SandboxMetadata(opts.Name); loadErr == nil {
 		printCreateSummary(cmd.ErrOrStderr(), meta)
 	}
 
@@ -363,7 +362,7 @@ func executeNewCreate(cmd *cobra.Command, ctx context.Context, c *yoloai.Client,
 // printCreateSummary renders the post-create summary + next-step hints from the
 // created sandbox's metadata. The library returns the sandbox; the CLI owns this
 // presentation (F8).
-func printCreateSummary(out io.Writer, meta *store.Meta) {
+func printCreateSummary(out io.Writer, meta *yoloai.Environment) {
 	fmt.Fprintf(out, "Sandbox %s created\n", meta.Name) //nolint:errcheck // best-effort output
 	fmt.Fprintf(out, "  Agent:    %s\n", meta.Agent)    //nolint:errcheck // best-effort output
 	if meta.Profile != "" {
