@@ -43,6 +43,8 @@ func CheckPatch(patch []byte, targetDir string, isGit bool) error {
 		return fmt.Errorf("resolve target dir: %w", err)
 	}
 
+	// --unsafe-paths invariant: see ApplyPatch. Patches must originate from
+	// our own git diff of the target tree, never an external raw patch.
 	return withTempGitDir(func(tmpDir string) error {
 		if err := runGitApply(tmpDir, patch, "--check", "--unsafe-paths", "--directory="+realTarget); err != nil {
 			return formatApplyError(err, targetDir)
@@ -70,6 +72,15 @@ func ApplyPatch(patch []byte, targetDir string, isGit bool) error {
 		return fmt.Errorf("resolve target dir: %w", err)
 	}
 
+	// --unsafe-paths lets git apply write to a target that isn't a git
+	// worktree (these :copy dirs aren't repos) AND disables git's
+	// reject-outside-the-tree check. That is only safe because every patch
+	// reaching here is produced by our own `git diff`/`format-patch` over
+	// the target tree, so it can only name repo-relative paths — never a
+	// caller- or agent-supplied raw patch that could carry `../` traversal.
+	// Do not route externally-sourced patches through this path without
+	// adding containment. git's separate "beyond a symbolic link" check
+	// still fires and blocks the create-symlink-then-write-through escape.
 	return withTempGitDir(func(tmpDir string) error {
 		if err := runGitApply(tmpDir, patch, "--unsafe-paths", "--directory="+realTarget); err != nil {
 			return formatApplyError(err, targetDir)
