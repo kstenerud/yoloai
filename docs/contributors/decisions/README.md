@@ -245,6 +245,39 @@ No change to `f1KnownLeaks` (B4 closed no baseline entries — it removed `inter
 
 **Consequences.** `.golangci.yml`: rule renamed, allow-list removed, comment + deny `desc` rewritten to "façade OR any leaf subpackage — F1 Half-B + G2"; `cli-runtime-scope`'s "twin of" reference updated. ARCHITECTURE README F10 paragraph rewritten (CLI reaches neither façade nor leaves; both twin rules named). With G2 closed, the CLI-honesty contract is now mechanically total over the `internal/sandbox` + `internal/runtime` subtrees: a separate-module daemon embedding `yoloai` could do everything the CLI does through the public surface alone.
 
+## D58 — Host-environment injection is a binding-lifetime problem: deployment scope vs principal scope; the library never resolves ambient references
+
+**Date:** 2026-06-01. **Status:** Direction accepted (owner, 2026-06-01); the boundary *invariant* and the deployment-vs-principal scope split are decided, the final binding *mechanism* (principal-scope handle vs per-verb arg) is leaning handle but open. **Composition:** extends D56 §2 ("None of your business") into the *ambient-host-state* dimension; builds on the §12 ambient-read discipline (single licensed `$HOME`/`os.Environ()` read at the boundary) and the library-first direction (see memory `project-public-api-direction`). **Not yet implemented** — captured before code moves.
+
+**How it surfaced.** Started as "should `internal/config` / `config.Layout` be fenced off the CLI the way `internal/sandbox` (G2) and `internal/runtime` (G7) were?" Investigation showed **`config.Layout` does *not* leak on the public surface**: `yoloai.Options`/`SystemOptions` take a plain `DataDir string`, build the `Layout` internally, and hold it unexported; the CLI passes `Layout().DataDir` (a string) into `NewWithOptions`. So a fence is the wrong tool — it would have to allow-list the legitimate data-dir boundary and the pure `ExpandPath` util, **reintroducing the very allow-list smell G2 just removed**. Pulling the thread on `ExpandPath` (`~` + `${VAR}` expansion) instead exposed a deeper, security-relevant design question.
+
+**The reframe.** "How do we inject host paths so the library can do its job?" is not a construction question — it is a **binding-lifetime** question, and the embedding context answers it differently. Two *independent* axes:
+
+| | single principal | many principals |
+|---|---|---|
+| **short-lived** | CLI (per-invocation) | (n/a) |
+| **long-lived** | MCP-local (per-process, one local user) | web (per-session) / daemon (per-request) |
+
+- **`~` is just `$HOME`** — there is no "universal tilde"; both `~` and `${VAR}` are *ambient host-environment* references.
+- **The CLI's safety is the kernel's, for free**, because process identity == the requesting principal: spoof `HOME=/root` as user `karl` and `~/.ssh` → `open()` returns EACCES. Expansion can never grant access the process didn't already have; the filesystem ACLs are the real bound and they're already the *caller's*.
+- **That safety net depends on Axis 1, not Axis 2.** MCP-local is long-lived yet just as safe (still one principal who owns the process). What erodes the net is *many principals*: a daemon running as its own service account that resolves a caller-supplied `HOME=/var/lib/yoloai` (or `/etc`, or another tenant's dir) succeeds — the kernel enforces the *daemon's* entitlements, not the caller's. Classic confused-deputy / cross-tenant credential leak. Axis 2 (lifetime) adds only *staleness* (a long-lived binding can outlive the principal's right to it → expiry/revocation).
+
+**What this exposes in `Layout`.** It fuses two different lifetime scopes, and the CLI hides the seam because for the CLI they coincide:
+- **Deployment scope** — `DataDir` (where yoloai keeps *its own* state). Operator-owned, process-stable, genuinely *configure-once* for every surface.
+- **Principal scope** — `HomeDir`, `Env`, `HostUID/GID`, and library-initiated credential seeding (`~/.claude`, `~/.gitconfig`, `~/.npmrc`, `~/.tmux.conf`). "Who is this work acting as, and what is their environment." Must be **embedder-lifetime-controlled**, never inherited from process boot ambient.
+
+**Decisions.**
+1. **`${VAR}` expansion → option B (raw-in, boundary resolves).** The library loads config *raw / un-expanded* and resolution becomes the boundary's policy; a `nil` environment means `${VAR}` does not resolve (daemon-safe). This is the §2 split again — mechanism returns raw, policy decides. (Today `expandEnvBraced` fires ~20× inside `config.go`/`profile.go` and across `sandbox/{create,invocation,mounts,archetype}`, all threading `layout.Env`; that internal resolution is what moves out.)
+2. **Library invariant (the load-bearing rule):** *the library acts only against an explicitly-supplied principal scope and never synthesizes one from process ambient.* No `os.UserHomeDir`, no `~`/`${VAR}` resolution, no autonomous `~/.X` credential reach inside the library. It receives concrete, already-authorized absolute paths (or content).
+3. **Principal scope is embedder-lifetime, composed against shared deployment context.** CLI mints one in its boot preamble (kernel-backed, discarded at exit); MCP-local mints one for the process; web mints one per session (+ expiry); daemon mints one per request (+ path confinement, since it has lost the EACCES net). Leaning toward a **principal-scope handle** over a per-verb context argument — the latter forces threading on every call including the simple single-principal cases.
+4. **Credential seeding splits what/where.** The *what* (agents need their credential dirs) stays in the library; the *where* becomes caller-supplied input. The CLI fills it from the invoking user's home; a daemon supplies explicit per-request sources or the agent runs without. The library stops reaching a host home it discovered itself — the highest-stakes piece (real secrets, not path strings).
+
+**Rejected.** (a) A `cli-config-scope` depguard fence mirroring G2/G7 — `Layout` isn't a public leak; a fence would allow-list the legitimate boundary and the pure util, the smell G2 removed. (b) Treating `~`/tilde as universal, safe mechanism — it is ambient env, safe only under single-principal-on-own-machine. (c) Option A (drop `${VAR}` from the persisted config schema entirely) — cleaner layering but a larger beta breaking change; B preserves the feature while making resolution safe. Revisit if raw-config + boundary-resolution proves too invasive. (d) Per-verb principal-context argument — leaning against (threads context everywhere), not finally closed.
+
+**Why.** Security — a multi-principal process resolving caller-influenced ambient references against its own identity is a confused-deputy / cross-tenant credential-exfiltration surface, and the kernel won't catch it. Honesty — a library-first contract must serve web/daemon/MCP, not just the CLI whose "process == principal, bound once at boot" assumptions are invisible until something else embeds it.
+
+**Open / next.** (i) Map each `Layout` field to deployment-vs-principal scope to measure the gap concretely. (ii) A plan doc for the scope split + the principal-scope handle shape. (iii) The daemon path-confinement design and whether `${VAR}`-in-config survives long-term — these touch security and so warrant dedicated treatment (and likely a research file) per the project's security-research rule, not free design. (iv) Possible later principle entry once the shape is proven; for now §2 + this D-entry hold it. F1/G2/G7 stand unaffected; this is *new scope beyond* the layer-1 fence work, not a correction to it.
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.
