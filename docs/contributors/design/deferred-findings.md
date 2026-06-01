@@ -9,6 +9,33 @@ potentially actionable and carries a **`Trigger:`** line — the condition that 
 back into [`unresolved-findings.md`](unresolved-findings.md). The trigger may be unlikely, but
 it must exist so the item can be evaluated for eviction later. Newest first.
 
+### DF15 — Sandbox name + workdir path validate by a different convention than their parse-don't-validate peers
+
+- **Discovered:** 2026-06-01 · **Workstream:** W-L1 (F9 doc-truth fix)
+- **Severity:** LOW (correctness today) / **security-hygiene** (the real reason it's tracked)
+- **Disposition:** PARKED — deliberately not half-converted ad-hoc; sequenced with D58/D59.
+- **Description:** `development-principles.md` §4 holds up parse-don't-validate as the convention
+  for security-relevant boundary values, and most are genuine parsed types (`MountMode`,
+  `AllowedDomain`, `AgentName`, the W-L8a `yoloai.NetworkMode/IsolationMode/ApplyMode/LogFormat`,
+  `Patch`, `BackendDescriptor`). **Two are not:** sandbox name is guarded by
+  `store.ValidateName(string) error` (`internal/sandbox/store/paths.go`) and workdir path by
+  `config.ExpandPath(...)` returning a bare `string` (`internal/config/pathutil.go`). Both are
+  *validate*-style — the type system carries no proof, so any new call site can pass an
+  unvalidated value. These are exactly the path-construction inputs (`SandboxDir(name)`, tilde/
+  env resolution) on which the D58/D59 multi-principal path-confinement work hinges. **The hazard
+  is the convention drift itself**, not any single missing check: a security-relevant value that
+  validates by a *different convention* than its peers is what a code audit skips over, and
+  ad-hoc one-off guards following divergent conventions compound that. Converting these to
+  parsed types (a `SandboxName` with a `Parse` constructor; a resolved-path type after symlink/
+  tilde/env resolution) restores the single convention. Not done now to avoid surface-wide churn
+  (name/path flow as `string` through many signatures) whose payoff lands in the D58/D59 work.
+- **Trigger:** the start of D58/D59 path-confinement / principal-isolation implementation —
+  convert `SandboxName` + resolved-path to parsed types as part of that pass. Revive sooner if a
+  "forgot to validate the name/path" bug surfaces, or if any *new* security guard is added that
+  would otherwise introduce a third validation convention (do it consistently instead).
+- **Pointer:** `internal/sandbox/store/paths.go` (`ValidateName`); `internal/config/pathutil.go`
+  (`ExpandPath`); `development-principles.md` §4 (the `†` note); decisions D58/D59.
+
 ### DF2 — Smoke test prompt may provoke a clarifying-question idle on Haiku (containerd-vm)
 
 - **Discovered:** 2026-05-24 · **Workstream:** observed during W-L4 validation

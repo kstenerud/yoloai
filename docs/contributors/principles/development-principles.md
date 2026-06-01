@@ -188,8 +188,8 @@ For every domain concept yoloAI cares about:
 
 | Concept                           | Raw form          | Parsed type             | Parser proves                                     |
 | --------------------------------- | ----------------- | ----------------------- | ------------------------------------------------- |
-| Sandbox name (D10)                | `string`          | `SandboxName`           | Regex, length, reserved-name                      |
-| Workdir path                      | `string`          | `ResolvedPath`          | Symlink-resolved (D6), not a dangerous-dir       |
+| Sandbox name (D10)                | `string`          | `SandboxName` †         | Regex, length, reserved-name                      |
+| Workdir path                      | `string`          | `ResolvedPath` †        | Symlink-resolved (D6), not a dangerous-dir       |
 | Mount mode (`copy`/`overlay`/...) | `string`          | `MountMode`             | Enum value validated                              |
 | Network allowlist domain          | `string`          | `AllowedDomain`         | Valid hostname, not localhost (commit `4d9f7f6`)  |
 | Agent name                        | `string`          | `AgentName`             | Known agent in the registry                       |
@@ -202,10 +202,12 @@ For every domain concept yoloAI cares about:
 
 Go limits (named in the research file): same-package construction is unrestricted; no compile-time proof; `any`-typed maps and reflection can bypass. Mitigation: parser and type live in a small dedicated package so accidental bypass is hard.
 
+† **Not yet converted.** Sandbox name and workdir path are the two stragglers from this convention — they are still guarded *validate*-style (`store.ValidateName(string) error`; `config.ExpandPath(...)` returns a bare `string`), not parsed into a type. The conversion is tracked as a finding ([deferred-findings.md](../design/deferred-findings.md), DF15) and sequenced with the D58/D59 path-confinement work, where a typed `SandboxName`/resolved-path earns its keep. The inconsistency is itself the hazard: a security-relevant boundary value that validates by a *different convention* than its peers is exactly what a code audit skips over. Ad-hoc, one-off security guards must not accumulate — they get missed.
+
 ### Worked examples
 
-- `internal/sandbox/name.go` — `SandboxName` type with `Parse` constructor (D10).
-- `internal/config/path.go` — resolved-path types after tilde expansion + env-var interpolation (commits `25fcb82`, `a57d765`, 2026-02-27).
+- Sandbox name (D10) — **target:** a `SandboxName` parsed type. **Today:** `store.ValidateName(string) error` in `internal/sandbox/store/paths.go` (validate-style, not yet parsed — see † above).
+- Workdir path — **target:** a resolved-path type after tilde expansion + env-var interpolation (commits `25fcb82`, `a57d765`, 2026-02-27). **Today:** `config.ExpandPath(...)` in `internal/config/pathutil.go` returns a bare `string` (see † above).
 - `internal/runtime/registry.go` — `BackendDescriptor` constructed only by registered factories (W11 step 4).
 - Reject-don't-strip: invalid input fails parsing; we never silently sanitise. Stripping is what attackers (and confused users) count on.
 
