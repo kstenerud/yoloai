@@ -21,7 +21,6 @@ import (
 	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/buildinfo"
 	"github.com/kstenerud/yoloai/internal/fileutil"
-	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
@@ -84,28 +83,29 @@ func writeSandboxSections(ctx context.Context, w io.Writer, c *yoloai.Client, na
 	writeBugReportSandboxDetail(ctx, w, c, name, reportType)
 
 	sandboxDir := cliutil.Layout().SandboxDir(name)
+	logs := cliutil.NewSystemClient().LogPaths(name)
 
 	// Section 7: cli.jsonl
-	writeBugReportJSONLFile(w, "logs/cli.jsonl", store.CLIJSONLPath(sandboxDir), reportType, nil)
+	writeBugReportJSONLFile(w, "logs/cli.jsonl", logs.CLI, reportType, nil)
 
 	// Section 8: sandbox.jsonl (omit setup_cmd.* and network.allow in safe mode)
 	var omitEvents []string
 	if reportType == "safe" {
 		omitEvents = []string{"setup_cmd.*", "network.allow"}
 	}
-	writeBugReportJSONLFile(w, "logs/sandbox.jsonl", store.SandboxJSONLPath(sandboxDir), reportType, omitEvents)
+	writeBugReportJSONLFile(w, "logs/sandbox.jsonl", logs.Sandbox, reportType, omitEvents)
 
 	// Section 8.5: monitor detector tail (DF4) — last N detector.result
 	// entries from monitor.jsonl, surfaced before the full stream so readers
 	// see the decisive signal (wchan + connection-count) without scrolling
 	// through the raw log.
-	writeBugReportMonitorTail(w, store.MonitorJSONLPath(sandboxDir))
+	writeBugReportMonitorTail(w, logs.Monitor)
 
 	// Section 9: monitor.jsonl (full in both modes)
-	writeBugReportJSONLFile(w, "logs/monitor.jsonl", store.MonitorJSONLPath(sandboxDir), reportType, nil)
+	writeBugReportJSONLFile(w, "logs/monitor.jsonl", logs.Monitor, reportType, nil)
 
 	// Section 10: agent-hooks.jsonl (full in both modes)
-	writeBugReportJSONLFile(w, "logs/agent-hooks.jsonl", store.HooksJSONLPath(sandboxDir), reportType, nil)
+	writeBugReportJSONLFile(w, "logs/agent-hooks.jsonl", logs.Hooks, reportType, nil)
 
 	// Section 10.5: network-diag.txt (DF9). Written only when the
 	// containerd backend's waitForNetworkReady probe exhausts its
@@ -178,19 +178,20 @@ func writeBugReportSandboxDetail(ctx context.Context, w io.Writer, c *yoloai.Cli
 	}
 
 	sandboxDir := cliutil.Layout().SandboxDir(name)
+	sys := cliutil.NewSystemClient()
 
 	// environment.json
 	writeJSONFileSection(w, "environment.json",
-		fmt.Sprintf("%s/%s", sandboxDir, store.EnvironmentFile),
+		sys.EnvironmentPath(name),
 		reportType, []string{"network_allow", "setup"})
 
 	// agent-status.json (full contents in both modes)
 	writePlainFileSection(w, "agent-status.json",
-		fmt.Sprintf("%s/%s", sandboxDir, store.AgentStatusFile))
+		sys.LogPaths(name).AgentStatus)
 
 	// runtime-config.json
 	writeJSONFileSection(w, "runtime-config.json",
-		fmt.Sprintf("%s/%s", sandboxDir, store.RuntimeConfigFile),
+		sys.RuntimeConfigPath(name),
 		reportType, []string{"setup_commands", "allowed_domains"})
 
 	// prompt.txt (unsafe only; omitted in safe mode — may contain sensitive task descriptions)
@@ -491,7 +492,7 @@ func writeBugReportTmuxCapture(w io.Writer, name string) {
 // for the named sandbox. Returns empty string if the file is missing or has no
 // socket configured.
 func readTmuxSocketFromConfig(name string) string {
-	cfgPath := fmt.Sprintf("%s/%s", cliutil.Layout().SandboxDir(name), store.RuntimeConfigFile)
+	cfgPath := cliutil.NewSystemClient().RuntimeConfigPath(name)
 	data, err := os.ReadFile(cfgPath) //nolint:gosec // G304: path derived from trusted sandbox dir
 	if err != nil {
 		return ""

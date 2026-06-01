@@ -16,7 +16,6 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
-	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
@@ -29,10 +28,10 @@ type logSource struct {
 }
 
 var allLogSources = []logSource{
-	{"cli", "cli    ", func(name string) string { return store.CLIJSONLPath(cliutil.Layout().SandboxDir(name)) }},
-	{"sandbox", "sandbox", func(name string) string { return store.SandboxJSONLPath(cliutil.Layout().SandboxDir(name)) }},
-	{"monitor", "monitor", func(name string) string { return store.MonitorJSONLPath(cliutil.Layout().SandboxDir(name)) }},
-	{"hooks", "hooks  ", func(name string) string { return store.HooksJSONLPath(cliutil.Layout().SandboxDir(name)) }},
+	{"cli", "cli    ", func(name string) string { return cliutil.NewSystemClient().LogPaths(name).CLI }},
+	{"sandbox", "sandbox", func(name string) string { return cliutil.NewSystemClient().LogPaths(name).Sandbox }},
+	{"monitor", "monitor", func(name string) string { return cliutil.NewSystemClient().LogPaths(name).Monitor }},
+	{"hooks", "hooks  ", func(name string) string { return cliutil.NewSystemClient().LogPaths(name).Hooks }},
 }
 
 // logRecord is a parsed JSONL log entry.
@@ -381,8 +380,8 @@ func tailFilePoll(
 
 // sandboxIsDone returns true if the sandbox's agent-status.json shows the agent has exited.
 func sandboxIsDone(name string) bool {
-	statusPath := store.AgentStatusFilePath(cliutil.Layout().SandboxDir(name))
-	data, err := os.ReadFile(statusPath) //nolint:gosec // G304: statusPath is store.AgentStatusFilePath(name) — yoloAI-owned
+	statusPath := cliutil.NewSystemClient().LogPaths(name).AgentStatus
+	data, err := os.ReadFile(statusPath) //nolint:gosec // G304: statusPath is the yoloAI-owned agent-status.json path
 	if err != nil {
 		return false
 	}
