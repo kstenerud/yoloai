@@ -27,7 +27,7 @@ func TestSystemClient_Info(t *testing.T) {
 	assert.Equal(t, c.layout.DefaultsConfigPath(), info.DefaultsConfig)
 
 	descs := runtime.Descriptors()
-	require.Len(t, info.Backends, len(descs), "one BackendStatus per registered backend")
+	require.Len(t, info.Backends, len(descs), "one BackendInfo per registered backend")
 	for i, b := range info.Backends {
 		assert.Equal(t, descs[i].Name, b.Name, "backend statuses preserve registration order")
 		if !b.Available {

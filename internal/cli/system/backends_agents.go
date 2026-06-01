@@ -9,10 +9,9 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
-	"github.com/kstenerud/yoloai/internal/agent"
-	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
@@ -63,13 +62,8 @@ func newSystemBackendsCmd() *cobra.Command {
 		Use:   "backends [name]",
 		Short: "List available runtime backends",
 		Args:  cobra.MaximumNArgs(1),
-		ValidArgsFunction: func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
-			descs := runtime.Descriptors()
-			names := make([]string, len(descs))
-			for i, d := range descs {
-				names[i] = string(d.Name)
-			}
-			return names, cobra.ShellCompDirectiveNoFileComp
+		ValidArgsFunction: func(cmd *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
+			return backendNames(cmd), cobra.ShellCompDirectiveNoFileComp
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 1 {
@@ -84,8 +78,7 @@ func newSystemBackendsCmd() *cobra.Command {
 // runtime.Descriptors() rather than a CLI-local list — new backends
 // register themselves and auto-appear in this listing.
 func listBackends(cmd *cobra.Command) error {
-	ctx := cmd.Context()
-	descs := runtime.Descriptors()
+	backends := cliutil.NewSystemClient().Backends(cmd.Context(), yoloai.BackendQuery{ProbeAvailability: true})
 
 	if cliutil.JSONEnabled(cmd) {
 		type backendJSON struct {
@@ -94,14 +87,13 @@ func listBackends(cmd *cobra.Command) error {
 			Available   bool   `json:"available"`
 			Note        string `json:"note,omitempty"`
 		}
-		items := make([]backendJSON, 0, len(descs))
-		for _, d := range descs {
-			available, note := cliutil.CheckBackend(ctx, d.Name)
+		items := make([]backendJSON, 0, len(backends))
+		for _, b := range backends {
 			items = append(items, backendJSON{
-				Name:        string(d.Name),
-				Description: d.Description,
-				Available:   available,
-				Note:        note,
+				Name:        string(b.Name),
+				Description: b.Description,
+				Available:   b.Available,
+				Note:        b.Note,
 			})
 		}
 		return cliutil.WriteJSON(cmd.OutOrStdout(), items)
@@ -110,13 +102,12 @@ func listBackends(cmd *cobra.Command) error {
 	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 3, ' ', 0)
 	fmt.Fprintln(w, "BACKEND\tDESCRIPTION\tAVAILABLE\tNOTE") //nolint:errcheck // best-effort output
 
-	for _, d := range descs {
-		available, note := cliutil.CheckBackend(ctx, d.Name)
+	for _, b := range backends {
 		avail := "yes"
-		if !available {
+		if !b.Available {
 			avail = "no"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", d.Name, d.Description, avail, note) //nolint:errcheck // best-effort output
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", b.Name, b.Description, avail, b.Note) //nolint:errcheck // best-effort output
 	}
 
 	return w.Flush()
@@ -126,21 +117,26 @@ func listBackends(cmd *cobra.Command) error {
 // Descriptor fields supply the operational metadata; backendTradeoffs is
 // the CLI-only selling-pitch bullet list (kept separate per round-7 critique).
 func showBackendDetail(cmd *cobra.Command, name string) error {
-	desc, ok := runtime.Descriptor(runtime.BackendName(name))
-	if !ok {
-		return yoerrors.NewUsageError("unknown backend %q (valid: %s)", name, strings.Join(backendNames(), ", "))
+	var desc yoloai.BackendInfo
+	found := false
+	for _, b := range cliutil.NewSystemClient().Backends(cmd.Context(), yoloai.BackendQuery{ProbeAvailability: true}) {
+		if string(b.Name) == name {
+			desc = b
+			found = true
+			break
+		}
+	}
+	if !found {
+		return yoerrors.NewUsageError("unknown backend %q (valid: %s)", name, strings.Join(backendNames(cmd), ", "))
 	}
 	tradeoffs := backendTradeoffs[name]
 
-	ctx := cmd.Context()
-
 	if cliutil.JSONEnabled(cmd) {
-		available, note := cliutil.CheckBackend(ctx, desc.Name)
 		return cliutil.WriteJSON(cmd.OutOrStdout(), map[string]any{
 			"name":         desc.Name,
 			"description":  desc.Description,
-			"available":    available,
-			"note":         note,
+			"available":    desc.Available,
+			"note":         desc.Note,
 			"platforms":    desc.Platforms,
 			"requires":     desc.Requires,
 			"install_hint": desc.InstallHint,
@@ -150,12 +146,11 @@ func showBackendDetail(cmd *cobra.Command, name string) error {
 
 	out := cmd.OutOrStdout()
 
-	available, note := cliutil.CheckBackend(ctx, runtime.BackendName(name))
 	avail := "yes"
-	if !available {
+	if !desc.Available {
 		avail = "no"
-		if note != "" {
-			avail += " (" + note + ")"
+		if desc.Note != "" {
+			avail += " (" + desc.Note + ")"
 		}
 	}
 
@@ -178,13 +173,13 @@ func showBackendDetail(cmd *cobra.Command, name string) error {
 	return nil
 }
 
-// backendNames returns sorted names of all registered backends; used in
-// usage-error messages enumerating valid choices.
-func backendNames() []string {
-	descs := runtime.Descriptors()
-	names := make([]string, len(descs))
-	for i, d := range descs {
-		names[i] = string(d.Name)
+// backendNames returns the names of all registered backends in registration
+// order; used in usage-error messages enumerating valid choices.
+func backendNames(cmd *cobra.Command) []string {
+	backends := cliutil.NewSystemClient().Backends(cmd.Context(), yoloai.BackendQuery{})
+	names := make([]string, len(backends))
+	for i, b := range backends {
+		names[i] = string(b.Name)
 	}
 	return names
 }
@@ -194,8 +189,8 @@ func newSystemAgentsCmd() *cobra.Command {
 		Use:   "agents [name]",
 		Short: "List available agents",
 		Args:  cobra.MaximumNArgs(1),
-		ValidArgsFunction: func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
-			return agent.AllAgentNames(), cobra.ShellCompDirectiveNoFileComp
+		ValidArgsFunction: func(cmd *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
+			return agentNames(cmd), cobra.ShellCompDirectiveNoFileComp
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 1 {
@@ -208,6 +203,8 @@ func newSystemAgentsCmd() *cobra.Command {
 
 // listAgents displays the summary table of all agents.
 func listAgents(cmd *cobra.Command) error {
+	agents := cliutil.NewSystemClient().Agents(yoloai.AgentQuery{})
+
 	if cliutil.JSONEnabled(cmd) {
 		type agentJSON struct {
 			Name        string `json:"name"`
@@ -215,12 +212,11 @@ func listAgents(cmd *cobra.Command) error {
 			PromptMode  string `json:"prompt_mode"`
 		}
 		var items []agentJSON
-		for _, name := range agent.AllAgentNames() {
-			def := agent.GetAgent(name)
+		for _, a := range agents {
 			items = append(items, agentJSON{
-				Name:        def.Name,
-				Description: def.Description,
-				PromptMode:  string(def.PromptMode),
+				Name:        a.Name,
+				Description: a.Description,
+				PromptMode:  a.PromptMode,
 			})
 		}
 		return cliutil.WriteJSON(cmd.OutOrStdout(), items)
@@ -229,19 +225,37 @@ func listAgents(cmd *cobra.Command) error {
 	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 3, ' ', 0)
 	fmt.Fprintln(w, "AGENT\tDESCRIPTION\tPROMPT MODE") //nolint:errcheck
 
-	for _, name := range agent.AllAgentNames() {
-		def := agent.GetAgent(name)
-		fmt.Fprintf(w, "%s\t%s\t%s\n", def.Name, def.Description, def.PromptMode) //nolint:errcheck
+	for _, a := range agents {
+		fmt.Fprintf(w, "%s\t%s\t%s\n", a.Name, a.Description, a.PromptMode) //nolint:errcheck
 	}
 
 	return w.Flush()
 }
 
+// agentNames returns the sorted names of all shipped agents; used for
+// shell completion and usage-error enumerations.
+func agentNames(cmd *cobra.Command) []string {
+	agents := cliutil.NewSystemClient().Agents(yoloai.AgentQuery{})
+	names := make([]string, len(agents))
+	for i, a := range agents {
+		names[i] = a.Name
+	}
+	return names
+}
+
 // showAgentDetail displays detailed information about a single agent.
 func showAgentDetail(cmd *cobra.Command, name string) error {
-	def := agent.GetAgent(name)
-	if def == nil {
-		return yoerrors.NewUsageError("unknown agent %q (valid: %s)", name, strings.Join(agent.AllAgentNames(), ", "))
+	var def yoloai.AgentInfo
+	found := false
+	for _, a := range cliutil.NewSystemClient().Agents(yoloai.AgentQuery{}) {
+		if a.Name == name {
+			def = a
+			found = true
+			break
+		}
+	}
+	if !found {
+		return yoerrors.NewUsageError("unknown agent %q (valid: %s)", name, strings.Join(agentNames(cmd), ", "))
 	}
 
 	out := cmd.OutOrStdout()
