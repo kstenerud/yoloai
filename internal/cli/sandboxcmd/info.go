@@ -15,7 +15,6 @@ import (
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
 	yoloai "github.com/kstenerud/yoloai"
-	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/spf13/cobra"
 )
 
@@ -43,7 +42,7 @@ func runSandboxInfo(cmd *cobra.Command, name string) error {
 			sandboxDir := cliutil.Layout().SandboxDir(name)
 			result := infoJSON{
 				Info:          info,
-				ConfigPath:    filepath.Join(sandboxDir, store.RuntimeConfigFile),
+				ConfigPath:    c.System().RuntimeConfigPath(name),
 				PromptPreview: loadPromptPreview(sandboxDir),
 			}
 			return cliutil.WriteJSON(cmd.OutOrStdout(), result)
@@ -79,8 +78,8 @@ func printSandboxInfo(cmd *cobra.Command, name string, info *yoloai.Info) {
 	}
 
 	sandboxDir := cliutil.Layout().SandboxDir(name)
-	fmt.Fprintf(w, "Sandbox dir: %s\n", sandboxDir)                                         //nolint:errcheck
-	fmt.Fprintf(w, "Config:      %s\n", filepath.Join(sandboxDir, store.RuntimeConfigFile)) //nolint:errcheck
+	fmt.Fprintf(w, "Sandbox dir: %s\n", sandboxDir)                                        //nolint:errcheck
+	fmt.Fprintf(w, "Config:      %s\n", cliutil.NewSystemClient().RuntimeConfigPath(name)) //nolint:errcheck
 
 	if preview := loadPromptPreview(sandboxDir); preview != "" {
 		fmt.Fprintf(w, "Prompt:      %s\n", preview) //nolint:errcheck

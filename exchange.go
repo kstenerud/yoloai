@@ -19,3 +19,11 @@ func (s *SystemClient) FilesDir(name string) string {
 func (s *SystemClient) CacheDir(name string) string {
 	return store.CacheDir(s.layout.SandboxDir(name))
 }
+
+// RuntimeConfigPath returns the host path of the sandbox's runtime-config.json
+// (<state>/runtime-config.json), the entrypoint/infrastructure config the
+// backend reads at launch. Pure path computation: no backend contact, no
+// existence check.
+func (s *SystemClient) RuntimeConfigPath(name string) string {
+	return store.RuntimeConfigFilePath(s.layout.SandboxDir(name))
+}

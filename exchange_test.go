@@ -19,4 +19,5 @@ func TestSystemClient_ExchangePaths(t *testing.T) {
 	state := sc.layout.SandboxDir("box")
 	assert.Equal(t, filepath.Join(state, "files"), sc.FilesDir("box"))
 	assert.Equal(t, filepath.Join(state, "cache"), sc.CacheDir("box"))
+	assert.Equal(t, filepath.Join(state, "runtime-config.json"), sc.RuntimeConfigPath("box"))
 }
