@@ -41,34 +41,7 @@ linters:
         - name: redefines-builtin-id
           disabled: true
     depguard:
-      # W-L13 backend-scope enforcement: only internal/cli/system/tart/
-      # may import internal/runtime/tart. The rest of internal/cli/
-      # must go through yoloai.Client / yoloai.SystemClient.
-      #
-      # Scoping note: the rule's `files` glob targets only internal/cli/
-      # (everything outside it is unaffected — yoloai.go and the runtime
-      # packages naturally aren't matched). Within internal/cli/, the
-      # internal/cli/system/tart/ subpackage is excluded as the one
-      # sanctioned importer.
-      #
-      # Other backend packages (docker, podman, containerd, seatbelt)
-      # don't need analogous rules because they aren't referenced by
-      # CLI command code directly — they're loaded via blank imports
-      # in yoloai.go for backend registration.
       rules:
-        cli-backend-scope:
-          list-mode: lax
-          files:
-            - "$all"
-            - "!$test"
-            - "!**/system/tart/**"
-            - "!**/runtime/**"
-            - "!**/sandbox/**"
-            - "!**/yoloai.go"
-            - "!**/system_client.go"
-          deny:
-            - pkg: "github.com/kstenerud/yoloai/internal/runtime/tart"
-              desc: "only internal/cli/system/tart/ may import internal/runtime/tart — other CLI code must go through yoloai.Client / SystemClient (W-L13)"
         # G7 runtime-abstraction fence: internal/cli and internal/mcpsrv must
         # reach the runtime layer through the public yoloai spine (the
         # BackendName / IsolationMode / VMCensus re-exports and the
@@ -78,20 +51,20 @@ linters:
         # what a separate-module daemon could do through the public surface.
         #
         # Scope: internal/cli/** and internal/mcpsrv/** (non-test). The root
-        # yoloai package legitimately wraps internal/runtime and lives outside
-        # these globs, so it is naturally unmatched. internal/cli/system/tart/
-        # is the one sanctioned importer (it drives `yoloai system tart` and
-        # needs both the abstraction and the tart backend), excluded below.
+        # yoloai package legitimately wraps internal/runtime (including the tart
+        # backend, via the public SystemClient.TartBases handle) and lives
+        # outside these globs, so it is naturally unmatched. No CLI/MCP
+        # exemption remains: `yoloai system tart` now drives the backend through
+        # TartBases, so the former system/tart carve-out (W-L13) is gone.
         cli-runtime-scope:
           list-mode: lax
           files:
             - "**/internal/cli/**"
             - "**/internal/mcpsrv/**"
             - "!$test"
-            - "!**/system/tart/**"
           deny:
             - pkg: "github.com/kstenerud/yoloai/internal/runtime"
-              desc: "internal/cli and internal/mcpsrv must not import the internal/runtime abstraction directly — use the public yoloai types (BackendName/IsolationMode/VMCensus/…) and SystemClient/Client verbs. Only internal/cli/system/tart/ is exempt (W-L13/G7)."
+              desc: "internal/cli and internal/mcpsrv must not import the internal/runtime abstraction directly (the deny is prefix-wide, so it also covers every backend subpackage like internal/runtime/tart) — use the public yoloai types (BackendName/IsolationMode/VMCensus/…) and SystemClient/Client verbs (G7)."
         # F1 Half-B + G2 layering gate: internal/cli and internal/mcpsrv must
         # reach sandbox behavior through the public spine (yoloai.Client /
         # Sandbox / Workdir / SystemClient + yoloai.* re-exports), never by

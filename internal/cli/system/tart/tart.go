@@ -1,44 +1,39 @@
 // ABOUTME: `yoloai system tart` commands for managing Apple simulator runtime base images.
 // ABOUTME: Pre-create, list, and remove runtime bases (iOS, tvOS, watchOS, visionOS).
 //
-// This is the backend-scoped subpackage `tart`. It is the ONLY package
-// in internal/cli/ that may import internal/runtime/tart — enforced
-// by depguard in .golangci.yml. The cli root injects layout and
-// runtime-construction helpers via NewCmd so this package stays free
-// of any import dependency on internal/cli (W-L13).
+// This package is pure presentation over the public yoloai.SystemClient
+// TartBases admin handle: it parses flags, prompts, and formats output, but
+// performs no runtime work itself. The cli root injects a SystemClient factory
+// via NewCmd so this package depends only on the public yoloai surface (no
+// internal/runtime, internal/runtime/tart, or internal/cli imports).
 package tart
 
 import (
-	"context"
+	"errors"
 	"fmt"
 	"os"
 	"runtime"
 	"strings"
 
-	"github.com/kstenerud/yoloai/internal/config"
-	rt "github.com/kstenerud/yoloai/internal/runtime"
-	tartrt "github.com/kstenerud/yoloai/internal/runtime/tart"
+	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
 
-// pkgLayout is set by NewCmd at command-tree construction time. It
-// references the cli root layout chokepoint without creating an import
-// cycle (cli root imports this subpackage to register the command;
-// this subpackage cannot import cli back). Tart runtime construction
-// is done locally via rt.New — this is the one cli subpackage allowed
-// to import internal/runtime/tart (W-L13).
-var pkgLayout func() config.Layout
+// pkgClient is set by NewCmd at command-tree construction time. It returns the
+// cli root's public SystemClient so this subpackage never imports internal/cli
+// back (which would create a cycle). Subcommand handlers read it at invocation.
+var pkgClient func() *yoloai.SystemClient
 
 // NewCmd defines `yoloai system tart` (formerly `yoloai system runtime`).
 // The old `runtime` name remains a hidden alias that emits a deprecation warning.
 //
-// layoutFn injects the cli root's Layout chokepoint so this subpackage
-// doesn't need to import internal/cli back (which would create a
-// cycle). NewCmd stores it in a package-level var; subcommand RunE
-// handlers read that var at invocation time.
-func NewCmd(layoutFn func() config.Layout) *cobra.Command {
-	pkgLayout = layoutFn
+// clientFn injects the cli root's public SystemClient factory so this
+// subpackage doesn't need to import internal/cli back (which would create a
+// cycle). NewCmd stores it in a package-level var; subcommand RunE handlers
+// read that var at invocation time.
+func NewCmd(clientFn func() *yoloai.SystemClient) *cobra.Command {
+	pkgClient = clientFn
 	cmd := &cobra.Command{
 		Use:     "tart",
 		Aliases: []string{"runtime"},
@@ -93,15 +88,14 @@ func requireTartBackend(cmd *cobra.Command, _ []string) error {
 		return yoerrors.NewUsageError("yoloai system tart commands are only available on macOS")
 	}
 
-	// Probe the tart backend: spin up a runtime, close it, and report
-	// availability + the failure reason. This subpackage constructs the
-	// runtime directly (rt.New) — it is the sanctioned importer of
-	// internal/runtime/tart (W-L13).
-	probeRT, err := rt.New(cmd.Context(), "tart", pkgLayout())
-	if err != nil {
-		return yoerrors.NewUsageError("Tart backend not available: %s\n\nInstall Tart: brew install cirruslabs/cli/tart", err.Error())
+	available, err := pkgClient().TartBases().Available(cmd.Context())
+	if err != nil || !available {
+		reason := "backend probe failed"
+		if err != nil {
+			reason = err.Error()
+		}
+		return yoerrors.NewUsageError("Tart backend not available: %s\n\nInstall Tart: brew install cirruslabs/cli/tart", reason)
 	}
-	_ = probeRT.Close()
 	return nil
 }
 
@@ -129,41 +123,24 @@ Examples:
 // runSystemTartAdd implements the `system tart add` command body.
 func runSystemTartAdd(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
-	tartRuntime, closeRT, err := openTartRuntime(ctx)
-	if err != nil {
-		return err
-	}
-	defer closeRT()
+	h := pkgClient().TartBases()
 
 	fmt.Fprintf(cmd.OutOrStdout(), "\nResolving runtime versions...\n") //nolint:errcheck
-	resolved, err := tartrt.ResolveRuntimeVersions(args)
+	plan, err := h.PlanBase(args)
 	if err != nil {
 		return fmt.Errorf("resolve runtimes: %w", err)
 	}
 
-	printResolvedVersions(cmd, args, resolved)
+	printResolvedVersions(cmd, args, plan.Runtimes)
 
-	cacheKey := tartrt.GenerateCacheKey(resolved)
-	baseName := "yoloai-base-" + cacheKey
+	fmt.Fprintf(cmd.OutOrStdout(), "\nCreating runtime base: %s\n\n", plan.Name) //nolint:errcheck
 
-	exists, err := tartRuntime.BaseExists(ctx, baseName)
-	if err != nil {
-		return fmt.Errorf("check base: %w", err)
-	}
-	if exists {
-		return yoerrors.NewUsageError("Runtime base '%s' already exists.\n\nUse 'yoloai system tart list' to see all bases.", baseName)
-	}
-
-	fmt.Fprintf(cmd.OutOrStdout(), "\nCreating runtime base: %s\n\n", baseName) //nolint:errcheck
-
-	release, err := tartrt.AcquireBaseLock(pkgLayout(), baseName)
-	if err != nil {
-		return fmt.Errorf("acquire base lock: %w", err)
-	}
-	defer release()
-
-	if err := tartRuntime.CreateBase(ctx, baseName, resolved); err != nil {
-		return fmt.Errorf("create base: %w", err)
+	if _, err := h.Add(ctx, plan); err != nil {
+		var exists *yoloai.TartBaseExistsError
+		if errors.As(err, &exists) {
+			return yoerrors.NewUsageError("Runtime base '%s' already exists.\n\nUse 'yoloai system tart list' to see all bases.", plan.Name)
+		}
+		return err
 	}
 
 	fmt.Fprintf(cmd.OutOrStdout(), "\nRuntime base created successfully\n") //nolint:errcheck
@@ -171,7 +148,7 @@ func runSystemTartAdd(cmd *cobra.Command, args []string) error {
 }
 
 // printResolvedVersions prints the resolved platform versions to stdout.
-func printResolvedVersions(cmd *cobra.Command, args []string, resolved []tartrt.RuntimeVersion) {
+func printResolvedVersions(cmd *cobra.Command, args []string, resolved []yoloai.TartRuntimeVersion) {
 	for i, rv := range resolved {
 		inputParts := strings.SplitN(args[i], ":", 2)
 		platformCap := strings.ToUpper(rv.Platform[:1]) + rv.Platform[1:]
@@ -181,28 +158,6 @@ func printResolvedVersions(cmd *cobra.Command, args []string, resolved []tartrt.
 			fmt.Fprintf(cmd.OutOrStdout(), "  %s:%s → %s %s\n", rv.Platform, rv.Version, platformCap, rv.Version) //nolint:errcheck
 		}
 	}
-}
-
-// openTartRuntime opens the tart backend and returns the typed runtime and a close func.
-func openTartRuntime(ctx context.Context) (*tartrt.Runtime, func(), error) {
-	r, err := rt.New(ctx, "tart", pkgLayout())
-	if err != nil {
-		return nil, nil, fmt.Errorf("create tart runtime: %w", err)
-	}
-	tartRuntime, ok := r.(*tartrt.Runtime)
-	if !ok {
-		// This is structurally impossible: rt.New(ctx, "tart", …) returns a
-		// *tartrt.Runtime by construction (the registry's factory for "tart"
-		// produces exactly that type). Reaching here means the registry has
-		// been wired with the wrong factory under the "tart" key — a
-		// programming bug, not an operational failure. Panic so the bug
-		// surfaces immediately with a stack trace; root.go's recover() will
-		// finalize the bug report and re-panic for the default Go handler
-		// to render. Q-X principle: programming bugs panic, not returns.
-		_ = r.Close()
-		panic(fmt.Sprintf("yoloai bug: rt.New(\"tart\") returned %T, not *tartrt.Runtime; check runtime/tart registry wiring", r))
-	}
-	return tartRuntime, func() { _ = r.Close() }, nil
 }
 
 func newSystemTartListCmd() *cobra.Command {
@@ -224,20 +179,16 @@ Examples:
 
 func runSystemTartList(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
-	tartRuntime, closeRT, err := openTartRuntime(ctx)
-	if err != nil {
-		return err
-	}
-	defer closeRT()
+	h := pkgClient().TartBases()
 
-	bases, err := listRuntimeBases(ctx, tartRuntime)
+	bases, err := h.List(ctx)
 	if err != nil {
 		return fmt.Errorf("list bases: %w", err)
 	}
 
 	bases = filterRuntimeBases(bases, args)
 
-	availableRuntimes, err := tartrt.QueryAvailableRuntimes()
+	availableRuntimes, err := h.AvailableRuntimes()
 	if err != nil {
 		availableRuntimes = nil
 	}
@@ -246,11 +197,11 @@ func runSystemTartList(cmd *cobra.Command, args []string) error {
 }
 
 // filterRuntimeBases filters bases by platform name filters (case-insensitive substring match).
-func filterRuntimeBases(bases []runtimeBase, filters []string) []runtimeBase {
+func filterRuntimeBases(bases []yoloai.TartBaseInfo, filters []string) []yoloai.TartBaseInfo {
 	if len(filters) == 0 {
 		return bases
 	}
-	filtered := []runtimeBase{}
+	filtered := []yoloai.TartBaseInfo{}
 	for _, base := range bases {
 		for _, filter := range filters {
 			if strings.Contains(base.CacheKey, strings.ToLower(filter)) {
@@ -263,7 +214,7 @@ func filterRuntimeBases(bases []runtimeBase, filters []string) []runtimeBase {
 }
 
 // printRuntimeBaseList displays runtime base images to stdout.
-func printRuntimeBaseList(cmd *cobra.Command, bases []runtimeBase, availableRuntimes []tartrt.RuntimeVersion) error {
+func printRuntimeBaseList(cmd *cobra.Command, bases []yoloai.TartBaseInfo, availableRuntimes []yoloai.TartRuntimeVersion) error {
 	out := cmd.OutOrStdout()
 	fmt.Fprintln(out) //nolint:errcheck
 	if len(bases) == 0 {
@@ -324,25 +275,25 @@ Example:
 // runSystemTartRemove implements the `system tart remove` command body.
 func runSystemTartRemove(cmd *cobra.Command, args []string, opts *runtimeRemoveOpts) error {
 	baseName := args[0]
-
 	ctx := cmd.Context()
-	tartRuntime, closeRT, err := openTartRuntime(ctx)
-	if err != nil {
-		return err
-	}
-	defer closeRT()
+	h := pkgClient().TartBases()
 
-	exists, err := tartRuntime.BaseExists(ctx, baseName)
+	// Look up the size up front so the confirmation prompt can show it. This
+	// also gives the clean "not found" message before any delete is attempted.
+	bases, err := h.List(ctx)
 	if err != nil {
-		return fmt.Errorf("check base: %w", err)
+		return fmt.Errorf("list bases: %w", err)
 	}
-	if !exists {
+	var size int64
+	found := false
+	for _, base := range bases {
+		if base.Name == baseName {
+			size, found = base.Size, true
+			break
+		}
+	}
+	if !found {
 		return yoerrors.NewUsageError("Runtime base '%s' not found.\n\nUse 'yoloai system tart list' to see available bases.", baseName)
-	}
-
-	size, err := runtimeBaseSize(ctx, tartRuntime, baseName)
-	if err != nil {
-		return err
 	}
 
 	if !opts.yes {
@@ -352,26 +303,17 @@ func runSystemTartRemove(cmd *cobra.Command, args []string, opts *runtimeRemoveO
 	}
 
 	fmt.Fprintf(cmd.OutOrStdout(), "\nDeleting %s...\n", baseName) //nolint:errcheck
-	if err := tartRuntime.DeleteVM(ctx, baseName); err != nil {
+	freed, err := h.Remove(ctx, baseName)
+	if err != nil {
+		var notFound *yoloai.TartBaseNotFoundError
+		if errors.As(err, &notFound) {
+			return yoerrors.NewUsageError("Runtime base '%s' not found.\n\nUse 'yoloai system tart list' to see available bases.", baseName)
+		}
 		return fmt.Errorf("delete base: %w", err)
 	}
 
-	fmt.Fprintf(cmd.OutOrStdout(), "Freed %s\n", formatSize(size)) //nolint:errcheck
+	fmt.Fprintf(cmd.OutOrStdout(), "Freed %s\n", formatSize(freed)) //nolint:errcheck
 	return nil
-}
-
-// runtimeBaseSize returns the disk size of the named runtime base.
-func runtimeBaseSize(ctx context.Context, tartRuntime *tartrt.Runtime, baseName string) (int64, error) {
-	bases, err := listRuntimeBases(ctx, tartRuntime)
-	if err != nil {
-		return 0, fmt.Errorf("list bases: %w", err)
-	}
-	for _, base := range bases {
-		if base.Name == baseName {
-			return base.Size, nil
-		}
-	}
-	return 0, nil
 }
 
 // confirmRuntimeRemove prompts the user to confirm deletion. Returns (true, nil) if cancelled.
@@ -385,38 +327,6 @@ func confirmRuntimeRemove(cmd *cobra.Command, baseName string, size int64) (canc
 		return true, nil
 	}
 	return false, nil
-}
-
-// runtimeBase represents a runtime base image as shown to the user.
-type runtimeBase struct {
-	Name     string
-	CacheKey string // e.g., "ios-26.4-tvos-26.1" (extracted from name)
-	Size     int64
-}
-
-// listRuntimeBases lists all yoloai-base-* VMs via the typed tartrt.Runtime API.
-func listRuntimeBases(ctx context.Context, tartRuntime *tartrt.Runtime) ([]runtimeBase, error) {
-	entries, err := tartRuntime.ListVMs(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	var bases []runtimeBase
-	for _, entry := range entries {
-		if !strings.HasPrefix(entry.Name, "yoloai-base") {
-			continue
-		}
-		var cacheKey string
-		if entry.Name != "yoloai-base" {
-			cacheKey = strings.TrimPrefix(entry.Name, "yoloai-base-")
-		}
-		bases = append(bases, runtimeBase{
-			Name:     entry.Name,
-			CacheKey: cacheKey,
-			Size:     entry.Size,
-		})
-	}
-	return bases, nil
 }
 
 // formatCacheKey converts "ios-26.4-tvos-26.1" to "iOS 26.4, tvOS 26.1".
@@ -434,9 +344,9 @@ func formatCacheKey(cacheKey string) string {
 }
 
 // formatAvailableRuntimes formats available runtimes as "iOS 26.4, tvOS 26.2, ...".
-func formatAvailableRuntimes(runtimes []tartrt.RuntimeVersion) string {
+func formatAvailableRuntimes(runtimes []yoloai.TartRuntimeVersion) string {
 	// Group by platform, pick latest of each
-	latest := make(map[string]tartrt.RuntimeVersion)
+	latest := make(map[string]yoloai.TartRuntimeVersion)
 	for _, rt := range runtimes {
 		existing, ok := latest[rt.Platform]
 		if !ok {

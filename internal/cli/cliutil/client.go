@@ -11,9 +11,10 @@ import (
 
 	// Backend registrations live in yoloai.go (the root package);
 	// importing yoloai below pulls in those init() side effects, so a
-	// blank-import block here is redundant. W-L13: dropping it lets
-	// depguard scope `internal/runtime/tart` to the
-	// internal/cli/system/tart subpackage exclusively.
+	// blank-import block here is redundant. Keeping this package free of
+	// any internal/runtime import is what lets cli-runtime-scope fence the
+	// whole CLI off the runtime layer (tart now goes through the public
+	// SystemClient.TartBases handle, so there is no backend exemption).
 	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/spf13/cobra"
