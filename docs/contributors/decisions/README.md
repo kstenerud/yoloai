@@ -215,6 +215,22 @@ No change to `f1KnownLeaks` (B4 closed no baseline entries — it removed `inter
 
 - **Gate.** `f1KnownLeaks` is now genuinely `map[string]struct{}{}` — empty *and* honest, because the detector can no longer be fooled by an alias. Comment rewritten to "keep this empty; carve a public mirror, never grandfather a leak." **F1 is closed for real.** This does NOT re-assert D52's broader "Layer-1 spine COMPLETE" verdict — D53's remaining work (the three-noun reshape, PTY/activity-stream split, ~7 verb gaps G7, depguard on leaf packages G2) is still open.
 
+## D56 — "None of your business" — naming §2 and making its downward half explicit
+
+**Date:** 2026-06-01. **Status:** Established (owner request, 2026-06-01). **Names and sharpens** `development-principles.md §2` (boundary discipline, D7/D27). Not a new section — §2 already *was* this principle, unnamed and one-sided.
+
+**Context.** The G7 series had just fenced the CLI off `internal/runtime` (route through public verbs; `SystemClient.CheckBackend` instead of a `runtime.New` reach-through; `system/tart` as the lone depguard-scoped exception). Owner asked to codify the disposition behind all of it: *"None of your business. The upper layers handle the what and the why. The lower layers handle the how. Neither should question or know the reasons of the other, beyond 'you've asked for the impossible, and here's why.'"*
+
+**The principle (full text lives in §2).** The boundary has two sides under one contract, each deliberately ignorant of the other. Policy (upper) owns the *what* and *why*; mechanism (lower) owns the *how*. Neither questions or depends on the other's reasons. The sole reverse-direction signal is a typed refusal carrying its reason — "you've asked for the impossible, and here's why." Everything else is none of the other's business.
+
+**What was new vs. restated.** §2 already stated the *upward* half strongly (comply-or-complain: the mechanism does what it's asked or refuses with a typed error, never reinterprets intent — D24/D26/F4). D56 adds the explicit **downward** half: the policy layer must not know the *how* — it names a verb and consumes a result-or-typed-error, never importing/inspecting/reconstructing the mechanism's internals. When policy needs something not yet exposed, the fix is a *new public verb*, not a reach-through. The F1/Layer-1 carve (D55, G7) is this half's embodiment; the F1 leak detector + depguard are its enforcement teeth (mechanically checked, fails at CI).
+
+**Placement rationale (why §2, not a new general §14).** Considered standing it up as a cross-cutting general principle (mirroring §13/D54). Rejected on *agent-stickiness*: a memorable name is a retrieval handle for its mechanism, so splitting the name (general) from the mechanism (development §2 — import rules, comply-or-complain contract, typed-error examples) makes an agent take two hops and risks getting the slogan without the rules. §13 needed a new section because no pre-existing one fit; §2 already *is* this principle. Fusing the name onto the canonical section is the stickiest, lowest-duplication, lowest-token arrangement.
+
+**Guardrail (recorded as an over-generalisation row).** "None of your business" is **not** licence for silent failure. Mutual ignorance of *reasons* does not waive the *refusal*: the complaint is mandatory and must be diagnostic (§9). Using "not my business" to justify a swallowed error or unexplained failure inverts the principle.
+
+**Consequences.** `principles/development-principles.md` §2: retitled "None of your business — boundary discipline, comply-or-complain"; named-lead paragraph added; downward clause added to the policy paragraph; a worked-example block (F1/G7 carve + enforcement teeth); Sources note extended; ABOUTME line updated. `principles/general-principles.md`: "None-of-your-business-as-silent-failure" over-generalisation row added. `principles/README.md` index row updated. No new section, no research-file section (the Parnas/SOLID backing already cited in §2 covers it).
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.

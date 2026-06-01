@@ -1,5 +1,5 @@
 ABOUTME: Engineering practice for yoloAI. YAGNI/KISS/DRY/SOLID vocabulary,
-ABOUTME: boundary discipline (thin policy layer, comply-or-complain mechanism),
+ABOUTME: boundary discipline ("none of your business" — comply-or-complain),
 ABOUTME: validate-at-every-layer, parse-don't-validate, fail-fast,
 ABOUTME: warnings-are-signal, justify-every-discard, no-half-finished,
 ABOUTME: plan-then-execute cleanup, make-check gate, iterate-when-first-approach
@@ -68,13 +68,13 @@ Kent Beck, Robert C. Martin, Sandi Metz, Parnas, Meyer, Postel, Knuth/Hoare. Ful
 
 ---
 
-## §2. Boundary discipline — thin policy layer, comply-or-complain mechanism
+## §2. None of your business — boundary discipline, comply-or-complain
 
-**Principle.** The boundary has two sides under one contract.
+**Principle. None of your business.** The boundary has two sides under one contract, and each is deliberately ignorant of the other. The **upper (policy) layer** owns the *what* and the *why*; the **lower (mechanism) layer** owns the *how*. Neither questions or depends on the other's reasons. The *only* thing that crosses in the reverse direction is a typed refusal — *"you've asked for the impossible, and here's why."* Everything else — the upper layer's motives, the lower layer's implementation — is none of the other's business.
 
-The **policy layer** — CLI commands, the public Go API entry points, embedders — decides *what* to do and *how to react*: which domain operation to call, whether to prompt, whether to fall back, how to format output. It stays thin: parse arguments → call one or two domain methods → format output. No business logic; no backend types past the runtime boundary. The same domain function is invoked from every surface, so behaviour is consistent by construction.
+The **policy layer** — CLI commands, the public Go API entry points, embedders — decides *what* to do and *how to react*: which domain operation to call, whether to prompt, whether to fall back, how to format output. It stays thin: parse arguments → call one or two domain methods → format output. No business logic; no backend types past the runtime boundary. The same domain function is invoked from every surface, so behaviour is consistent by construction. And it is forbidden to reach into the *how*: it names a domain verb and consumes its result-or-typed-error; it never imports, inspects, or reconstructs the mechanism's internals. When the policy layer needs something the mechanism doesn't yet expose, the fix is a new public verb on the lower layer — not a reach-through (D56).
 
-The **mechanism layer** — the domain/library — does exactly what it is asked, or **complains** with a typed error. *Comply-or-complain: never a silent third thing.* It does not prompt, reinterpret intent, switch modes, fall back, or make UX choices — those are all policy, owned by the caller. "Can't comply" is always a typed refusal the caller handles; it is never papered over with a guess.
+The **mechanism layer** — the domain/library — does exactly what it is asked, or **complains** with a typed error. *Comply-or-complain: never a silent third thing.* It does not prompt, reinterpret intent, switch modes, fall back, or make UX choices — those are all policy, owned by the caller. "Can't comply" is always a typed refusal the caller handles; it is never papered over with a guess. It also never asks *why*: the caller's motive is none of its business, so it cannot make a decision that depends on one.
 
 ### Pattern
 
@@ -115,6 +115,11 @@ The flip side — the comply-or-complain contract spelled out:
 - W10 (commit `5f91cdf`, 2026-05-20) closed three backend-name leaks — `if backend == "docker"` branches that had crept into CLI / domain code. Replaced with capability checks or registry queries.
 - W11 (commits `3b4a9ae`, `d525d60`, `c00d367`, `1f4457c`, 2026-05-20) introduced `BackendDescriptor` and a `(factory, descriptor)` registry. Adding a backend is now purely additive — register the descriptor, no dispatch edits.
 
+The downward half — policy must not know the *how*:
+
+- **The F1 / Layer-1 carve** (D55, the G7 series) fenced the CLI off `internal/runtime` entirely: handlers speak only the public `yoloai.*` surface (`BackendName`, `IsolationMode`, `SelectBackend`, `SystemClient.CheckBackend`), and runtime construction lives behind public verbs. When the CLI needed a backend probe it gained `SystemClient.CheckBackend` rather than reaching for `runtime.New` — a reach-through becomes a new public verb. The one sanctioned exception (`internal/cli/system/tart` importing `internal/runtime/tart`) is depguard-scoped to that single package.
+- **Enforcement teeth, not just convention:** the F1 leak detector (`TestPublicAPI_NoInternalLeaks`, alias-descent aware) fails the build if a public type exposes an internal one, and depguard fails the build if a leaf package imports across a forbidden boundary. The principle is mechanically checked, so drift surfaces at CI time, not review time.
+
 Comply-or-complain (the mechanism side):
 
 - **Create refuses, never prompts** (D24): a dirty workdir → `*DirtyWorkdirError`, unverified `requires:` → a warning, an active sandbox on destroy → `*ActiveWorkError`. The CLI catches each, prompts, and retries with the named ack (`AllowDirtyWorkdir`, `Force`). The library has no terminal.
@@ -129,7 +134,7 @@ Cost of applying: discipline at design time + occasional refactor when a boundar
 
 David L. Parnas (CACM, 1972); Robert C. Martin SOLID; Effective Go. Full citations: `../research/principles/development-principles-research.md §2`.
 
-Originally established alongside D7 (pluggable runtime interface); restated two-sided in D27.
+Originally established alongside D7 (pluggable runtime interface); restated two-sided in D27; named "None of your business" and given its explicit downward half (policy must not know the *how*) in D56.
 
 ---
 
