@@ -129,14 +129,14 @@ func TestResolveBackendForSandbox_MetaHasBackend(t *testing.T) {
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 
-	meta := &store.Meta{
+	meta := &store.Environment{
 		Name:      name,
 		Backend:   "tart",
 		Agent:     "claude",
 		CreatedAt: time.Now(),
-		Workdir:   store.WorkdirMeta{HostPath: "/tmp/test", Mode: "copy"},
+		Workdir:   store.WorkdirEnvironment{HostPath: "/tmp/test", Mode: "copy"},
 	}
-	require.NoError(t, store.SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
 	assert.Equal(t, runtime.BackendName("tart"), cliutil.ResolveBackendForSandbox(name))
 }
@@ -157,13 +157,13 @@ func TestResolveBackendForSandbox_MetaEmptyBackend(t *testing.T) {
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 
-	meta := &store.Meta{
+	meta := &store.Environment{
 		Name:      name,
 		Agent:     "claude",
 		CreatedAt: time.Now(),
-		Workdir:   store.WorkdirMeta{HostPath: "/tmp/test", Mode: "copy"},
+		Workdir:   store.WorkdirEnvironment{HostPath: "/tmp/test", Mode: "copy"},
 	}
-	require.NoError(t, store.SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
 	assert.Equal(t, runtime.BackendName("docker"), cliutil.ResolveBackendForSandbox(name))
 }

@@ -16,23 +16,23 @@ import (
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 )
 
-func vscodeSystemClient(t *testing.T, meta *store.Meta) *SystemClient {
+func vscodeSystemClient(t *testing.T, meta *store.Environment) *SystemClient {
 	t.Helper()
 	tmpDir := t.TempDir()
 	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
 	if meta != nil {
 		require.NoError(t, os.MkdirAll(layout.SandboxDir(meta.Name), 0750))
-		require.NoError(t, store.SaveMeta(layout.SandboxDir(meta.Name), meta))
+		require.NoError(t, store.SaveEnvironment(layout.SandboxDir(meta.Name), meta))
 	}
 	return &SystemClient{layout: layout}
 }
 
 func TestVscodeAttach_Supported(t *testing.T) {
-	sc := vscodeSystemClient(t, &store.Meta{
+	sc := vscodeSystemClient(t, &store.Environment{
 		Name:    "box",
 		Agent:   "test",
 		Backend: BackendDocker,
-		Workdir: store.WorkdirMeta{HostPath: "/proj", MountPath: "/proj", Mode: store.DirModeCopy},
+		Workdir: store.WorkdirEnvironment{HostPath: "/proj", MountPath: "/proj", Mode: store.DirModeCopy},
 	})
 
 	attach, err := sc.VscodeAttach("box")
@@ -45,11 +45,11 @@ func TestVscodeAttach_Supported(t *testing.T) {
 }
 
 func TestVscodeAttach_Unsupported(t *testing.T) {
-	sc := vscodeSystemClient(t, &store.Meta{
+	sc := vscodeSystemClient(t, &store.Environment{
 		Name:    "box",
 		Agent:   "test",
 		Backend: BackendSeatbelt,
-		Workdir: store.WorkdirMeta{HostPath: "/proj", MountPath: "/proj", Mode: store.DirModeCopy},
+		Workdir: store.WorkdirEnvironment{HostPath: "/proj", MountPath: "/proj", Mode: store.DirModeCopy},
 	})
 
 	attach, err := sc.VscodeAttach("box")

@@ -31,7 +31,7 @@ const (
 	StatusStopped     Status = "stopped"     // container stopped (docker stop)
 	StatusSuspended   Status = "suspended"   // VM suspended (state on disk, quota slot free; Tart only)
 	StatusRemoved     Status = "removed"     // container removed but sandbox dir exists
-	StatusBroken      Status = "broken"      // sandbox dir exists but meta.json missing/invalid
+	StatusBroken      Status = "broken"      // sandbox dir exists but environment.json missing/invalid
 	StatusUnavailable Status = "unavailable" // backend not running (container state unknown)
 )
 
@@ -48,10 +48,10 @@ const (
 
 // Info holds the combined metadata and live state for a sandbox.
 type Info struct {
-	Meta        *store.Meta `json:"meta"`
-	Status      Status      `json:"status"`
-	AgentStatus AgentStatus `json:"agent_status,omitempty"` // agent activity status (may be empty)
-	HasChanges  string      `json:"has_changes"`            // "yes", "no", or "-" (unknown/not applicable)
+	Environment *store.Environment `json:"environment"`
+	Status      Status             `json:"status"`
+	AgentStatus AgentStatus        `json:"agent_status,omitempty"` // agent activity status (may be empty)
+	HasChanges  string             `json:"has_changes"`            // "yes", "no", or "-" (unknown/not applicable)
 	// DiskUsageBytes is the total size of the sandbox directory in bytes, or
 	// -1 when it could not be measured. Rendering to a human-readable string
 	// is the CLI's responsibility (see cliutil.FormatSize).
@@ -154,16 +154,16 @@ func dirHasEntries(dir string) bool {
 }
 
 // ContainerUser is re-exported from store so existing callers in this
-// package continue to compile. The body lives in store/meta.go now so
+// package continue to compile. The body lives in store/environment.go now so
 // patch/ can reach it without importing the sandbox parent (F6).
-func ContainerUser(meta *store.Meta, hostUID int) string {
+func ContainerUser(meta *store.Environment, hostUID int) string {
 	return store.ContainerUser(meta, hostUID)
 }
 
 // ExecInContainer runs a command inside a sandbox instance and returns stdout.
 // hostUID is layout.HostUID at the boundary (F31); it precedes cmd so
 // multi-line cmd literals at call sites stay readable.
-func ExecInContainer(ctx context.Context, rt runtime.Runtime, sandboxName string, meta *store.Meta, hostUID int, cmd []string) (string, error) {
+func ExecInContainer(ctx context.Context, rt runtime.Runtime, sandboxName string, meta *store.Environment, hostUID int, cmd []string) (string, error) {
 	result, err := rt.Exec(ctx, store.InstanceName(sandboxName), cmd, ContainerUser(meta, hostUID))
 	if err != nil {
 		return "", err
@@ -287,7 +287,7 @@ func InspectSandbox(ctx context.Context, layout config.Layout, rt runtime.Runtim
 		return nil, err
 	}
 
-	meta, err := store.LoadMeta(sandboxDir)
+	meta, err := store.LoadEnvironment(sandboxDir)
 	if err != nil {
 		return nil, fmt.Errorf("load metadata: %w", err)
 	}
@@ -326,7 +326,7 @@ func InspectSandbox(ctx context.Context, layout config.Layout, rt runtime.Runtim
 	}
 
 	return &Info{
-		Meta:           meta,
+		Environment:    meta,
 		Status:         status,
 		HasChanges:     changes,
 		DiskUsageBytes: diskUsageBytes,
@@ -334,7 +334,7 @@ func InspectSandbox(ctx context.Context, layout config.Layout, rt runtime.Runtim
 }
 
 // detectWorkdirChanges returns "yes", "no", or "-" for a sandbox's workdir and aux dirs.
-func detectWorkdirChanges(sandboxDir string, meta *store.Meta) string {
+func detectWorkdirChanges(sandboxDir string, meta *store.Environment) string {
 	if meta.Workdir.Mode != "copy" && meta.Workdir.Mode != "overlay" {
 		return "-"
 	}
@@ -358,7 +358,7 @@ func detectWorkdirChanges(sandboxDir string, meta *store.Meta) string {
 }
 
 // InspectSandboxWithBackend loads metadata and optionally queries the runtime.
-// If rt is nil, returns basic info (from meta.json and filesystem) with StatusUnavailable.
+// If rt is nil, returns basic info (from environment.json and filesystem) with StatusUnavailable.
 // If rt is available, performs full inspection including container state.
 func InspectSandboxWithBackend(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string) (*Info, error) {
 	sandboxDir := layout.SandboxDir(name)
@@ -366,7 +366,7 @@ func InspectSandboxWithBackend(ctx context.Context, layout config.Layout, rt run
 		return nil, err
 	}
 
-	meta, err := store.LoadMeta(sandboxDir)
+	meta, err := store.LoadEnvironment(sandboxDir)
 	if err != nil {
 		return nil, fmt.Errorf("load metadata: %w", err)
 	}
@@ -379,7 +379,7 @@ func InspectSandboxWithBackend(ctx context.Context, layout config.Layout, rt run
 	// If runtime is nil, return basic info with unavailable status
 	if rt == nil {
 		return &Info{
-			Meta:           meta,
+			Environment:    meta,
 			Status:         StatusUnavailable,
 			HasChanges:     "-",
 			DiskUsageBytes: diskUsageBytes,
@@ -393,7 +393,7 @@ func InspectSandboxWithBackend(ctx context.Context, layout config.Layout, rt run
 	}
 
 	return &Info{
-		Meta:           meta,
+		Environment:    meta,
 		Status:         status,
 		HasChanges:     detectWorkdirChanges(sandboxDir, meta),
 		DiskUsageBytes: diskUsageBytes,
@@ -421,7 +421,7 @@ func ListSandboxes(ctx context.Context, layout config.Layout, rt runtime.Runtime
 		if err != nil {
 			// Include broken sandboxes with minimal info
 			result = append(result, &Info{
-				Meta:           &store.Meta{Name: entry.Name()},
+				Environment:    &store.Environment{Name: entry.Name()},
 				Status:         StatusBroken,
 				HasChanges:     "-",
 				DiskUsageBytes: -1,
@@ -477,7 +477,7 @@ func groupSandboxesByBackend(entries []os.DirEntry, sandboxesDir string) map[run
 			continue
 		}
 		sandboxDir := filepath.Join(sandboxesDir, entry.Name())
-		meta, err := store.LoadMeta(sandboxDir)
+		meta, err := store.LoadEnvironment(sandboxDir)
 		if err != nil {
 			byBackend[""] = append(byBackend[""], entry.Name())
 			continue
@@ -496,7 +496,7 @@ func brokenInfos(names []string) []*Info {
 	infos := make([]*Info, len(names))
 	for i, name := range names {
 		infos[i] = &Info{
-			Meta:           &store.Meta{Name: name},
+			Environment:    &store.Environment{Name: name},
 			Status:         StatusBroken,
 			HasChanges:     "-",
 			DiskUsageBytes: -1,
@@ -524,7 +524,7 @@ func inspectBackendGroup(ctx context.Context, layout config.Layout, newRuntimeFu
 		info, inspectErr := InspectSandboxWithBackend(ctx, layout, effectiveRT, name)
 		if inspectErr != nil {
 			result = append(result, &Info{
-				Meta:           &store.Meta{Name: name},
+				Environment:    &store.Environment{Name: name},
 				Status:         StatusBroken,
 				HasChanges:     "-",
 				DiskUsageBytes: -1,

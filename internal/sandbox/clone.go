@@ -52,7 +52,7 @@ func (m *Engine) Clone(ctx context.Context, opts CloneOptions) error {
 		return fmt.Errorf("copy sandbox directory: %w", err)
 	}
 
-	meta, err := store.LoadMeta(dstDir)
+	meta, err := store.LoadEnvironment(dstDir)
 	if err != nil {
 		os.RemoveAll(dstDir) //nolint:errcheck,gosec // best-effort cleanup
 		return fmt.Errorf("load cloned meta: %w", err)
@@ -61,7 +61,7 @@ func (m *Engine) Clone(ctx context.Context, opts CloneOptions) error {
 	meta.Name = opts.Dest
 	meta.CreatedAt = time.Now()
 
-	if err := store.SaveMeta(dstDir, meta); err != nil {
+	if err := store.SaveEnvironment(dstDir, meta); err != nil {
 		os.RemoveAll(dstDir) //nolint:errcheck,gosec // best-effort cleanup
 		return fmt.Errorf("update cloned meta: %w", err)
 	}

@@ -203,12 +203,12 @@ func (a *ProfileAdmin) infoBase() (*ProfileInfo, error) {
 	}, nil
 }
 
-// ReferencingSandboxes returns the names of sandboxes whose meta.json
+// ReferencingSandboxes returns the names of sandboxes whose environment.json
 // records this profile. Used by the CLI's `profile delete` flow to
 // warn the user before removing a profile that's still in use.
 //
 // Errors during meta scanning are silently dropped per-entry — a
-// corrupt meta.json shouldn't block the caller's profile-management
+// corrupt environment.json shouldn't block the caller's profile-management
 // operation. Returns an empty (non-nil) slice when no references exist.
 func (a *ProfileAdmin) ReferencingSandboxes(_ context.Context, profileName string) ([]string, error) {
 	sandboxesDir := a.s.layout.SandboxesDir()

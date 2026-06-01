@@ -14,13 +14,13 @@ import (
 )
 
 func TestGenerateContext_AllFields(t *testing.T) {
-	meta := &store.Meta{
-		Workdir: store.WorkdirMeta{
+	meta := &store.Environment{
+		Workdir: store.WorkdirEnvironment{
 			HostPath:  "/home/user/project",
 			MountPath: "/home/user/project",
 			Mode:      "copy",
 		},
-		Directories: []store.DirMeta{
+		Directories: []store.DirEnvironment{
 			{HostPath: "/opt/lib", MountPath: "/home/user/lib", Mode: "ro"},
 			{HostPath: "/data/shared", MountPath: "/data/shared", Mode: "rw"},
 		},
@@ -64,8 +64,8 @@ func assertContextContains(t *testing.T, result string) {
 }
 
 func TestGenerateContext_MinimalFields(t *testing.T) {
-	meta := &store.Meta{
-		Workdir: store.WorkdirMeta{
+	meta := &store.Environment{
+		Workdir: store.WorkdirEnvironment{
 			HostPath:  "/home/user/project",
 			MountPath: "/home/user/project",
 			Mode:      "copy",
@@ -86,8 +86,8 @@ func TestGenerateContext_MinimalFields(t *testing.T) {
 }
 
 func TestGenerateContext_NetworkNone(t *testing.T) {
-	meta := &store.Meta{
-		Workdir: store.WorkdirMeta{
+	meta := &store.Environment{
+		Workdir: store.WorkdirEnvironment{
 			HostPath:  "/project",
 			MountPath: "/project",
 			Mode:      "copy",
@@ -103,8 +103,8 @@ func TestGenerateContext_NetworkNone(t *testing.T) {
 }
 
 func TestGenerateContext_WorkdirMountPath(t *testing.T) {
-	meta := &store.Meta{
-		Workdir: store.WorkdirMeta{
+	meta := &store.Environment{
+		Workdir: store.WorkdirEnvironment{
 			HostPath:  "/host/project",
 			MountPath: "/container/project",
 			Mode:      "copy",
@@ -119,11 +119,11 @@ func TestGenerateContext_WorkdirMountPath(t *testing.T) {
 }
 
 func TestGenerateContext_SeatbeltFilesPath(t *testing.T) {
-	meta := &store.Meta{
+	meta := &store.Environment{
 		Name:           "test-sb",
 		Backend:        "seatbelt",
 		HostFilesystem: true,
-		Workdir: store.WorkdirMeta{
+		Workdir: store.WorkdirEnvironment{
 			HostPath:  "/home/user/project",
 			MountPath: "/home/user/project",
 			Mode:      "copy",
@@ -150,10 +150,10 @@ func TestGenerateContext_SeatbeltFilesPath(t *testing.T) {
 }
 
 func TestGenerateContext_DockerFilesPath(t *testing.T) {
-	meta := &store.Meta{
+	meta := &store.Environment{
 		Name:    "test-sb",
 		Backend: "docker",
-		Workdir: store.WorkdirMeta{
+		Workdir: store.WorkdirEnvironment{
 			HostPath:  "/home/user/project",
 			MountPath: "/home/user/project",
 			Mode:      "copy",
@@ -171,10 +171,10 @@ func TestGenerateContext_DockerFilesPath(t *testing.T) {
 }
 
 func TestGenerateContext_TartFilesPath(t *testing.T) {
-	meta := &store.Meta{
+	meta := &store.Environment{
 		Name:    "test-sb",
 		Backend: "tart",
-		Workdir: store.WorkdirMeta{
+		Workdir: store.WorkdirEnvironment{
 			HostPath:  "/Users/admin/project",
 			MountPath: "/Users/admin/project",
 			Mode:      "copy",
@@ -203,8 +203,8 @@ func TestWriteContextFiles_WritesContextAndRef(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	meta := &store.Meta{
-		Workdir: store.WorkdirMeta{
+	meta := &store.Environment{
+		Workdir: store.WorkdirEnvironment{
 			HostPath:  "/project",
 			MountPath: "/project",
 			Mode:      "copy",
@@ -245,8 +245,8 @@ func TestWriteContextFiles_NoRefWhenEmpty(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	meta := &store.Meta{
-		Workdir: store.WorkdirMeta{
+	meta := &store.Environment{
+		Workdir: store.WorkdirEnvironment{
 			HostPath:  "/project",
 			MountPath: "/project",
 			Mode:      "copy",

@@ -221,7 +221,7 @@ func writeLeakLines(msg *strings.Builder, leaks map[string][]string) {
 // The detector descends through type aliases (the G1(a) fix to walkObj/walkType)
 // so a `type X = internal.Y` re-export can no longer hide a leak; every public
 // declaration is now backed by a hand-written public read-model:
-//   - store.Meta → yoloai.Environment (environment.go), carried on Info.Meta.
+//   - store.Environment → yoloai.Environment (environment.go), carried on Info.Environment.
 //   - caps.BackendReport/CheckResult/Availability → yoloai.BackendReport /
 //     CapabilityCheck / Availability (doctor_report.go), returned by Doctor.
 //

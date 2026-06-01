@@ -108,14 +108,14 @@ func (p *ProxyServer) ensureRunning(ctx context.Context) (*yoloai.Environment, e
 	switch info.Status {
 	case yoloai.StatusActive, yoloai.StatusIdle, yoloai.StatusDone, yoloai.StatusFailed:
 		// Container is running — use as-is
-		return info.Meta, nil
+		return info.Environment, nil
 
 	case yoloai.StatusStopped, yoloai.StatusRemoved:
 		// Container stopped or removed — restart it (auto-start; notices discarded)
 		if _, err := sb.Start(ctx, yoloai.StartOptions{}); err != nil {
 			return nil, fmt.Errorf("start sandbox %q: %w", p.sandboxName, err)
 		}
-		return info.Meta, nil
+		return info.Environment, nil
 
 	default:
 		return nil, fmt.Errorf("sandbox %q is in unexpected state %q", p.sandboxName, info.Status)
@@ -152,7 +152,7 @@ func (p *ProxyServer) createSandbox(ctx context.Context) (*yoloai.Environment, e
 	if err != nil {
 		return nil, fmt.Errorf("inspect sandbox %q after create: %w", p.sandboxName, err)
 	}
-	return info.Meta, nil
+	return info.Environment, nil
 }
 
 // expandCmd substitutes path placeholders in the inner command args using

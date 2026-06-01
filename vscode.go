@@ -33,7 +33,7 @@ func (s *SystemClient) VscodeAttach(name string) (*VscodeAttach, error) {
 	if err := store.RequireSandboxDir(sandboxDir); err != nil {
 		return nil, sandbox.ErrSandboxNotFound
 	}
-	meta, err := store.LoadMeta(sandboxDir)
+	meta, err := store.LoadEnvironment(sandboxDir)
 	if err != nil {
 		return nil, fmt.Errorf("load sandbox metadata: %w", err)
 	}

@@ -19,7 +19,7 @@ func loadDiffContext(layout config.Layout, name string) (workDir string, baselin
 		return "", "", "", dirErr
 	}
 
-	meta, loadErr := store.LoadMeta(sandboxDir)
+	meta, loadErr := store.LoadEnvironment(sandboxDir)
 	if loadErr != nil {
 		return "", "", "", loadErr
 	}
@@ -111,7 +111,7 @@ func ListTagsBeyondBaseline(layout config.Layout, name string) ([]TagInfo, error
 // even if their commits have already been applied.
 func ListUnappliedTags(layout config.Layout, name string) ([]TagInfo, error) {
 	sandboxDir := layout.SandboxDir(name)
-	meta, err := store.LoadMeta(sandboxDir)
+	meta, err := store.LoadEnvironment(sandboxDir)
 	if err != nil {
 		return nil, err
 	}

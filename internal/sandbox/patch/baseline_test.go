@@ -23,7 +23,7 @@ type commitSpec = struct {
 
 func currentBaseline(t *testing.T, tmpDir, name string) string {
 	t.Helper()
-	meta, err := store.LoadMeta(testLayout(tmpDir).SandboxDir(name))
+	meta, err := store.LoadEnvironment(testLayout(tmpDir).SandboxDir(name))
 	require.NoError(t, err)
 	return meta.Workdir.BaselineSHA
 }

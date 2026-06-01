@@ -36,16 +36,16 @@ func TestInspectSandbox_Removed(t *testing.T) {
 	name := "test-removed"
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
-	meta := &store.Meta{
+	meta := &store.Environment{
 		Name:  name,
 		Agent: "claude",
-		Workdir: store.WorkdirMeta{
+		Workdir: store.WorkdirEnvironment{
 			HostPath: "/tmp/test",
 			Mode:     "copy",
 		},
 		CreatedAt: time.Now(),
 	}
-	require.NoError(t, store.SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
 	mock := &fakeRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
@@ -83,16 +83,16 @@ func TestListSandboxes_IncludesBroken(t *testing.T) {
 	// Create a valid sandbox
 	validDir := filepath.Join(sandboxesDir, "valid")
 	require.NoError(t, os.MkdirAll(validDir, 0750))
-	meta := &store.Meta{
+	meta := &store.Environment{
 		Name:  "valid",
 		Agent: "claude",
-		Workdir: store.WorkdirMeta{
+		Workdir: store.WorkdirEnvironment{
 			HostPath: "/tmp/test",
 			Mode:     "copy",
 		},
 		CreatedAt: time.Now(),
 	}
-	require.NoError(t, store.SaveMeta(validDir, meta))
+	require.NoError(t, store.SaveEnvironment(validDir, meta))
 
 	// Create a broken sandbox (dir exists but no environment.json)
 	brokenDir := filepath.Join(sandboxesDir, "broken")
@@ -112,7 +112,7 @@ func TestListSandboxes_IncludesBroken(t *testing.T) {
 	// Find valid and broken sandboxes (order depends on ReadDir)
 	var validInfo, brokenInfo *Info
 	for _, info := range result {
-		switch info.Meta.Name {
+		switch info.Environment.Name {
 		case "valid":
 			validInfo = info
 		case "broken":

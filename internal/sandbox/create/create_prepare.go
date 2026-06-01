@@ -591,8 +591,8 @@ func createBaselineForGitRepo(workCopyDir string) (string, error) {
 }
 
 // setupAuxDirs copies/overlays each auxiliary directory and creates baselines.
-func setupAuxDirs(sandboxDir string, auxDirs []*DirSpec) ([]store.DirMeta, error) {
-	var dirMetas []store.DirMeta
+func setupAuxDirs(sandboxDir string, auxDirs []*DirSpec) ([]store.DirEnvironment, error) {
+	var dirMetas []store.DirEnvironment
 	for _, ad := range auxDirs {
 		dm, err := setupAuxDir(sandboxDir, ad)
 		if err != nil {
@@ -604,17 +604,17 @@ func setupAuxDirs(sandboxDir string, auxDirs []*DirSpec) ([]store.DirMeta, error
 }
 
 // setupAuxDir prepares a single auxiliary directory and returns its
-// DirMeta. After Q-U (2026-05-25) aux dirs only support :rw and the
+// DirEnvironment. After Q-U (2026-05-25) aux dirs only support :rw and the
 // default :ro, both of which are pure mounts with no host-side
 // preparation — the function just normalises mode and packs the meta.
 // The CLI / MCP boundary rejects :copy and :overlay via
 // sandbox.ParseAuxDirArg, so they can't reach here.
-func setupAuxDir(_ string, ad *DirSpec) (store.DirMeta, error) {
+func setupAuxDir(_ string, ad *DirSpec) (store.DirEnvironment, error) {
 	mode := ad.Mode
 	if mode == "" {
 		mode = DirModeRO
 	}
-	return store.DirMeta{
+	return store.DirEnvironment{
 		HostPath:  ad.Path,
 		MountPath: ad.ResolvedMountPath(),
 		Mode:      mode,

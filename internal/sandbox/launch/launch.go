@@ -31,7 +31,7 @@ const secretsConsumedTimeout = 30 * time.Second
 
 // LaunchContainer creates a sandbox instance from State, starts it,
 // and cleans up credential temp files. Used by both initial creation and
-// recreation from meta.json.
+// recreation from environment.json.
 func LaunchContainer(ctx context.Context, d state.Deps, st *state.State) error {
 	slog.Info("launching container", "event", "sandbox.create.container.launch", "sandbox", st.Name, "image", st.ImageRef)
 	// Use pre-merged env from state if available, otherwise load from config.

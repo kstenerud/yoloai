@@ -87,7 +87,7 @@ func resolveStopAll(cmd *cobra.Command, ctx context.Context, c *yoloai.Client) (
 	for _, info := range infos {
 		switch info.Status {
 		case yoloai.StatusActive, yoloai.StatusIdle, yoloai.StatusDone, yoloai.StatusFailed:
-			names = append(names, info.Meta.Name)
+			names = append(names, info.Environment.Name)
 		default:
 			// StatusStopped, StatusRemoved, StatusBroken, StatusUnavailable: skip
 		}

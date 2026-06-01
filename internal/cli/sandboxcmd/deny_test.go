@@ -21,7 +21,7 @@ func TestNetworkRemove_SingleDomain(t *testing.T) {
 	cmd.SetArgs([]string{"nr-single", "deny", "drop.com"})
 	require.NoError(t, cmd.Execute())
 
-	meta, err := store.LoadMeta(sandboxDir)
+	meta, err := store.LoadEnvironment(sandboxDir)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"keep.com"}, meta.NetworkAllow)
 	assert.Contains(t, out.String(), "drop.com")
@@ -37,7 +37,7 @@ func TestNetworkRemove_MultipleDomains(t *testing.T) {
 	cmd.SetArgs([]string{"nr-multi", "deny", "b.com", "d.com"})
 	require.NoError(t, cmd.Execute())
 
-	meta, err := store.LoadMeta(sandboxDir)
+	meta, err := store.LoadEnvironment(sandboxDir)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"a.com", "c.com"}, meta.NetworkAllow)
 }
@@ -51,7 +51,7 @@ func TestNetworkRemove_AllDomains(t *testing.T) {
 	cmd.SetArgs([]string{"nr-all", "deny", "only.com"})
 	require.NoError(t, cmd.Execute())
 
-	meta, err := store.LoadMeta(sandboxDir)
+	meta, err := store.LoadEnvironment(sandboxDir)
 	require.NoError(t, err)
 	assert.Nil(t, meta.NetworkAllow)
 }
@@ -109,7 +109,7 @@ func TestNetworkRemove_PreservesOrder(t *testing.T) {
 	cmd.SetArgs([]string{"nr-order", "deny", "middle.com"})
 	require.NoError(t, cmd.Execute())
 
-	meta, err := store.LoadMeta(sandboxDir)
+	meta, err := store.LoadEnvironment(sandboxDir)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"first.com", "last.com"}, meta.NetworkAllow)
 }

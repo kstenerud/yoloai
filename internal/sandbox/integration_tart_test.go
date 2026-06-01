@@ -94,7 +94,7 @@ func TestIntegrationTart_FullLifecycle(t *testing.T) {
 	sandboxDir := mgr.Layout().SandboxDir(sandboxName)
 	assert.DirExists(t, sandboxDir)
 
-	meta, err := store.LoadMeta(sandboxDir)
+	meta, err := store.LoadEnvironment(sandboxDir)
 	require.NoError(t, err)
 	assert.Equal(t, sandboxName, meta.Name)
 	assert.Equal(t, agent.AgentTest, meta.Agent)
@@ -244,7 +244,7 @@ func TestIntegrationTart_MultipleAuxDirs(t *testing.T) {
 	// Wait for VM to become active
 	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName(sandboxName), 90*time.Second)
 
-	meta, err := store.LoadMeta(mgr.Layout().SandboxDir(sandboxName))
+	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir(sandboxName))
 	require.NoError(t, err)
 	require.Len(t, meta.Directories, 2, "should have two aux directories")
 
@@ -292,7 +292,7 @@ func TestIntegrationTart_GitCorruption(t *testing.T) {
 
 	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName(sandboxName), 90*time.Second)
 
-	meta, err := store.LoadMeta(mgr.Layout().SandboxDir(sandboxName))
+	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir(sandboxName))
 	require.NoError(t, err)
 	vmLocalPath := meta.Workdir.MountPath
 
@@ -357,7 +357,7 @@ func TestIntegrationTart_VMLocalStorageVerification(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { destroySandbox(ctx, mgr, sandboxName) }) //nolint:errcheck // test cleanup
 
-	meta, err := store.LoadMeta(mgr.Layout().SandboxDir(sandboxName))
+	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir(sandboxName))
 	require.NoError(t, err)
 
 	// Verify mount path is VM-local, not VirtioFS
@@ -372,7 +372,7 @@ func TestIntegrationTart_VMLocalStorageVerification(t *testing.T) {
 	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName(sandboxName), 90*time.Second)
 
 	// Reload meta — Start() populates BaselineSHA (VM work dir setup runs inside VM)
-	meta, err = store.LoadMeta(mgr.Layout().SandboxDir(sandboxName))
+	meta, err = store.LoadEnvironment(mgr.Layout().SandboxDir(sandboxName))
 	require.NoError(t, err)
 
 	// Check that work directory is a real directory (not a symlink to VirtioFS)

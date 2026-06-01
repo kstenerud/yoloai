@@ -54,7 +54,7 @@ const (
 )
 
 // DirMode is re-exported from store. The canonical type definition
-// lives there because the persisted WorkdirMeta / DirMeta types hold
+// lives there because the persisted WorkdirEnvironment / DirEnvironment types hold
 // Mode values; keeping the alias here means existing in-package
 // callers (`Mode: DirModeCopy`, `m.Mode == DirModeRW`) continue to
 // work without churn.
@@ -96,7 +96,7 @@ type Options struct {
 	Force        bool                  // --force flag (unconditional replace, skips safety check)
 	NoStart      bool                  // --no-start flag
 	Passthrough  []string              // args after -- passed to agent
-	Version      string                // yoloAI version for meta.json
+	Version      string                // yoloAI version for environment.json
 	Debug        bool                  // --debug flag (enable entrypoint debug logging)
 	CPUs         string                // --cpus flag (e.g., "4", "2.5")
 	Memory       string                // --memory flag (e.g., "8g", "512m")
@@ -178,8 +178,8 @@ func Run(ctx context.Context, d state.Deps, opts Options) (name string, err erro
 	}
 
 	// Execute VM-side work directory setup if baseline was deferred
-	if sandboxState.Meta.Workdir.Mode == "copy" && sandboxState.Meta.Workdir.BaselineSHA == "" {
-		if err := launch.ExecuteVMWorkDirSetup(ctx, d.Runtime, sandboxState.Name, sandboxState.SandboxDir, sandboxState.Meta); err != nil {
+	if sandboxState.Environment.Workdir.Mode == "copy" && sandboxState.Environment.Workdir.BaselineSHA == "" {
+		if err := launch.ExecuteVMWorkDirSetup(ctx, d.Runtime, sandboxState.Name, sandboxState.SandboxDir, sandboxState.Environment); err != nil {
 			// Clean up on failure
 			_ = os.RemoveAll(sandboxState.SandboxDir)
 			_ = d.Runtime.Remove(ctx, store.InstanceName(sandboxState.Name))
@@ -195,7 +195,7 @@ func Run(ctx context.Context, d state.Deps, opts Options) (name string, err erro
 // (uncommitted changes or commits beyond the baseline). Returns an error
 // if work would be lost.
 func checkUnappliedWork(name string, sandboxDir string) error {
-	meta, err := store.LoadMeta(sandboxDir)
+	meta, err := store.LoadEnvironment(sandboxDir)
 	if err != nil {
 		return nil //nolint:nilerr // can't load meta — nothing to protect
 	}
@@ -322,7 +322,7 @@ func createAndSeedSandbox(ctx context.Context, d state.Deps, sandboxDir string, 
 
 // buildConfigAndMeta builds the container config and sandbox meta structs.
 // Returns (configData, meta, tmuxConf, promptText, error).
-func buildConfigAndMeta(ctx context.Context, d state.Deps, opts Options, pr *profileResult, agentDef *agent.Definition, workdir *DirSpec, auxDirs []*DirSpec, gcfg *config.GlobalConfig, dirMetas []store.DirMeta, baselineSHA string, mergedMounts []string, resolvedArchetype archetype.Archetype, devcontainerCfg *archetype.DevcontainerConfig, state_onCreateDone bool, sandboxDir string) ([]byte, *store.Meta, string, string, error) {
+func buildConfigAndMeta(ctx context.Context, d state.Deps, opts Options, pr *profileResult, agentDef *agent.Definition, workdir *DirSpec, auxDirs []*DirSpec, gcfg *config.GlobalConfig, dirMetas []store.DirEnvironment, baselineSHA string, mergedMounts []string, resolvedArchetype archetype.Archetype, devcontainerCfg *archetype.DevcontainerConfig, state_onCreateDone bool, sandboxDir string) ([]byte, *store.Environment, string, string, error) {
 	_ = ctx // reserved for future use
 	promptText, hasPrompt, model, agentCommand, tmuxConf, err := resolveAgentParams(agentDef, opts, pr, gcfg, d.Layout.HomeDir, d.Layout.Env, d.Input)
 	if err != nil {
@@ -348,7 +348,7 @@ func buildConfigAndMeta(ctx context.Context, d state.Deps, opts Options, pr *pro
 }
 
 // buildSandboxStateResult constructs the State from all resolved values.
-func buildSandboxStateResult(opts Options, sandboxDir string, workdir *DirSpec, workCopyDir string, auxDirs []*DirSpec, agentDef *agent.Definition, meta *store.Meta, pr *profileResult, mergedMounts []string, configData []byte, tmuxConf string, resolvedArchetype archetype.Archetype, archetypeDockerDRequired bool, devcontainerCfg *archetype.DevcontainerConfig, dcMounts []string, dcMountWarnings []string, credOverrides map[string]string, layout config.Layout, homeDir string) *state.State {
+func buildSandboxStateResult(opts Options, sandboxDir string, workdir *DirSpec, workCopyDir string, auxDirs []*DirSpec, agentDef *agent.Definition, meta *store.Environment, pr *profileResult, mergedMounts []string, configData []byte, tmuxConf string, resolvedArchetype archetype.Archetype, archetypeDockerDRequired bool, devcontainerCfg *archetype.DevcontainerConfig, dcMounts []string, dcMountWarnings []string, credOverrides map[string]string, layout config.Layout, homeDir string) *state.State {
 	return &state.State{
 		Name:                      opts.Name,
 		SandboxDir:                sandboxDir,
@@ -374,7 +374,7 @@ func buildSandboxStateResult(opts Options, sandboxDir string, workdir *DirSpec, 
 		Isolation:                 pr.isolation,
 		IsolationExplicit:         pr.isolationExplicit,
 		VscodeTunnel:              opts.VscodeTunnel,
-		Meta:                      meta,
+		Environment:               meta,
 		ConfigJSON:                configData,
 		Archetype:                 resolvedArchetype,
 		DockerdRequired:           archetypeDockerDRequired,
@@ -405,7 +405,7 @@ func validateAndLoadConfig(d state.Deps, opts Options) (*agent.Definition, strin
 
 	sandboxDir := d.Layout.SandboxDir(opts.Name)
 	if _, err := os.Stat(sandboxDir); err == nil && !opts.Replace {
-		if _, metaErr := store.LoadMeta(sandboxDir); metaErr != nil {
+		if _, metaErr := store.LoadEnvironment(sandboxDir); metaErr != nil {
 			_ = os.RemoveAll(sandboxDir)
 		} else {
 			return nil, "", nil, nil, fmt.Errorf("sandbox %q already exists (use --replace to recreate): %w", opts.Name, ErrSandboxExists)
@@ -518,7 +518,7 @@ func createSandboxDirs(sandboxDir string, perms state.IsolationPerms) error {
 }
 
 // setupAllWorkdirs sets up the workdir and aux dirs, and resolves copy mount paths.
-func setupAllWorkdirs(d state.Deps, opts Options, workdir *DirSpec, auxDirs []*DirSpec, resolvedArchetype archetype.Archetype, devcontainerCfg *archetype.DevcontainerConfig) (string, string, []store.DirMeta, error) {
+func setupAllWorkdirs(d state.Deps, opts Options, workdir *DirSpec, auxDirs []*DirSpec, resolvedArchetype archetype.Archetype, devcontainerCfg *archetype.DevcontainerConfig) (string, string, []store.DirEnvironment, error) {
 	slog.Debug("setting up workdir", "event", "sandbox.create.workdir", "mode", string(workdir.Mode))
 	sandboxDir := d.Layout.SandboxDir(opts.Name)
 	workCopyDir, baselineSHA, err := setupWorkdir(sandboxDir, workdir, d.Runtime)
@@ -628,9 +628,9 @@ func resolveUsernsMode(rt runtime.Runtime, workdir *DirSpec, auxDirs []*DirSpec,
 	return up.UsernsMode(hasSysAdmin)
 }
 
-// buildMeta constructs the Meta struct for a new sandbox.
-func buildMeta(opts Options, pr *profileResult, workdir *DirSpec, baselineSHA string, dirMetas []store.DirMeta, hasPrompt bool, networkMode string, networkAllow []string, usernsMode string, hostFilesystem bool, archetypeStr string, backend runtime.BackendName, model string, mergedMounts []string) *store.Meta {
-	return &store.Meta{
+// buildMeta constructs the Environment struct for a new sandbox.
+func buildMeta(opts Options, pr *profileResult, workdir *DirSpec, baselineSHA string, dirMetas []store.DirEnvironment, hasPrompt bool, networkMode string, networkAllow []string, usernsMode string, hostFilesystem bool, archetypeStr string, backend runtime.BackendName, model string, mergedMounts []string) *store.Environment {
+	return &store.Environment{
 		YoloaiVersion: opts.Version,
 		Name:          opts.Name,
 		CreatedAt:     time.Now(),
@@ -639,7 +639,7 @@ func buildMeta(opts Options, pr *profileResult, workdir *DirSpec, baselineSHA st
 		ImageRef:      pr.imageRef,
 		Agent:         agent.AgentName(opts.Agent),
 		Model:         model,
-		Workdir: store.WorkdirMeta{
+		Workdir: store.WorkdirEnvironment{
 			HostPath:     workdir.Path,
 			MountPath:    launch.OverlayOrResolvedMountPath(workdir),
 			Mode:         workdir.Mode,
@@ -668,8 +668,8 @@ func buildMeta(opts Options, pr *profileResult, workdir *DirSpec, baselineSHA st
 
 // writeStatFiles writes all state files for the new sandbox (meta, sandbox-state,
 // prompt, logs, agent-status, runtime-config, context).
-func writeStatFiles(sandboxDir string, meta *store.Meta, agentDef *agent.Definition, agentFilesInitialized bool, hasPrompt bool, promptText string, configData []byte, perms state.IsolationPerms) error {
-	if err := store.SaveMeta(sandboxDir, meta); err != nil {
+func writeStatFiles(sandboxDir string, meta *store.Environment, agentDef *agent.Definition, agentFilesInitialized bool, hasPrompt bool, promptText string, configData []byte, perms state.IsolationPerms) error {
+	if err := store.SaveEnvironment(sandboxDir, meta); err != nil {
 		return err
 	}
 	if err := store.SaveSandboxState(sandboxDir, &store.SandboxState{

@@ -161,7 +161,7 @@ func TestCLI_Diff(t *testing.T) {
 	t.Cleanup(func() { destroySandbox(t, "cli-diff") })
 
 	// Modify work copy
-	meta, err := store.LoadMeta(cliutil.Layout().SandboxDir("cli-diff"))
+	meta, err := store.LoadEnvironment(cliutil.Layout().SandboxDir("cli-diff"))
 	require.NoError(t, err)
 	workDir := store.WorkDir(cliutil.Layout().SandboxDir("cli-diff"), meta.Workdir.HostPath)
 	require.NoError(t, os.WriteFile(
@@ -251,7 +251,7 @@ func TestCLI_NetworkLifecycle(t *testing.T) {
 	t.Cleanup(func() { destroySandbox(t, "cli-net") })
 
 	// Verify meta has network isolation
-	meta, err := store.LoadMeta(cliutil.Layout().SandboxDir("cli-net"))
+	meta, err := store.LoadEnvironment(cliutil.Layout().SandboxDir("cli-net"))
 	require.NoError(t, err)
 	assert.Equal(t, "isolated", meta.NetworkMode)
 	initialDomains := len(meta.NetworkAllow)
@@ -269,7 +269,7 @@ func TestCLI_NetworkLifecycle(t *testing.T) {
 	assert.Contains(t, stdout, "extra.example.com")
 
 	// Verify persisted
-	meta, err = store.LoadMeta(cliutil.Layout().SandboxDir("cli-net"))
+	meta, err = store.LoadEnvironment(cliutil.Layout().SandboxDir("cli-net"))
 	require.NoError(t, err)
 	assert.Contains(t, meta.NetworkAllow, "extra.example.com")
 	assert.Contains(t, meta.NetworkAllow, "api.test.com")
@@ -294,7 +294,7 @@ func TestCLI_NetworkLifecycle(t *testing.T) {
 	assert.Contains(t, stdout, "api.test.com")
 
 	// Verify removal persisted
-	meta, err = store.LoadMeta(cliutil.Layout().SandboxDir("cli-net"))
+	meta, err = store.LoadEnvironment(cliutil.Layout().SandboxDir("cli-net"))
 	require.NoError(t, err)
 	assert.Contains(t, meta.NetworkAllow, "extra.example.com")
 	assert.NotContains(t, meta.NetworkAllow, "api.test.com")
@@ -470,7 +470,7 @@ func TestCLI_Apply(t *testing.T) {
 	t.Cleanup(func() { destroySandbox(t, "cli-apply") })
 
 	// Seed work copy with a distinctive change
-	meta, err := store.LoadMeta(cliutil.Layout().SandboxDir("cli-apply"))
+	meta, err := store.LoadEnvironment(cliutil.Layout().SandboxDir("cli-apply"))
 	require.NoError(t, err)
 	workDir := store.WorkDir(cliutil.Layout().SandboxDir("cli-apply"), meta.Workdir.HostPath)
 	require.NoError(t, os.WriteFile(
@@ -497,7 +497,7 @@ func TestCLI_ApplyExport(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { destroySandbox(t, "cli-export") })
 
-	meta, err := store.LoadMeta(cliutil.Layout().SandboxDir("cli-export"))
+	meta, err := store.LoadEnvironment(cliutil.Layout().SandboxDir("cli-export"))
 	require.NoError(t, err)
 	workDir := store.WorkDir(cliutil.Layout().SandboxDir("cli-export"), meta.Workdir.HostPath)
 	require.NoError(t, os.WriteFile(

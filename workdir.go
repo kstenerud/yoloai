@@ -47,7 +47,7 @@ type DiffOptions struct {
 // read the on-disk commit history. Folds the former Diff / DiffWithOptions /
 // DiffRef / DiffOverlay methods into one verb.
 func (w *Workdir) Diff(ctx context.Context, opts DiffOptions) (string, error) {
-	meta, err := store.LoadMeta(w.s.c.layout.SandboxDir(w.s.name))
+	meta, err := store.LoadEnvironment(w.s.c.layout.SandboxDir(w.s.name))
 	if err != nil {
 		return "", err
 	}
@@ -201,7 +201,7 @@ func (w *Workdir) Apply(ctx context.Context, opts ApplyOptions) (*ApplyResult, e
 		return nil, yoerrors.NewUsageError("apply mode is required: set ApplyOptions.Mode to yoloai.ApplyModeCommits or yoloai.ApplyModeNoCommit")
 	}
 
-	meta, err := store.LoadMeta(w.s.c.layout.SandboxDir(w.s.name))
+	meta, err := store.LoadEnvironment(w.s.c.layout.SandboxDir(w.s.name))
 	if err != nil {
 		return nil, err
 	}
@@ -256,7 +256,7 @@ type CommitsOptions struct {
 // baseline. Folds the former ListCommits / ListCommitsOverlay /
 // ListCommitsWithStats methods into one verb.
 func (w *Workdir) Commits(ctx context.Context, opts CommitsOptions) ([]CommitInfo, error) {
-	meta, err := store.LoadMeta(w.s.c.layout.SandboxDir(w.s.name))
+	meta, err := store.LoadEnvironment(w.s.c.layout.SandboxDir(w.s.name))
 	if err != nil {
 		return nil, err
 	}
@@ -372,7 +372,7 @@ func (w *Workdir) Tags(ctx context.Context, opts TagsOptions) ([]TagInfo, error)
 		return tags, err
 	}
 
-	meta, err := store.LoadMeta(w.s.c.layout.SandboxDir(w.s.name))
+	meta, err := store.LoadEnvironment(w.s.c.layout.SandboxDir(w.s.name))
 	if err != nil {
 		return nil, err
 	}

@@ -7,12 +7,12 @@ package yoloai
 import "github.com/kstenerud/yoloai/internal/sandbox"
 
 // Info is the combined metadata + live state returned by Sandbox.Inspect /
-// Client.List. Hand-written (not a type alias) so its Meta field is the public
-// Environment read-model rather than the internal store.Meta — embedders can
+// Client.List. Hand-written (not a type alias) so its Environment field is the public
+// Environment read-model rather than the internal store.Environment — embedders can
 // hold the full result without naming any internal type. Built from the
 // internal status.Info at the library boundary via infoFromStatus.
 type Info struct {
-	Meta           *Environment `json:"meta"`
+	Environment    *Environment `json:"environment"`
 	Status         Status       `json:"status"`
 	AgentStatus    AgentStatus  `json:"agent_status,omitempty"`
 	HasChanges     string       `json:"has_changes"`
@@ -31,7 +31,7 @@ const (
 	StatusStopped     Status = sandbox.StatusStopped     // container stopped
 	StatusSuspended   Status = sandbox.StatusSuspended   // VM suspended (Tart only)
 	StatusRemoved     Status = sandbox.StatusRemoved     // container removed, sandbox dir remains
-	StatusBroken      Status = sandbox.StatusBroken      // sandbox dir exists but meta.json missing/invalid
+	StatusBroken      Status = sandbox.StatusBroken      // sandbox dir exists but environment.json missing/invalid
 	StatusUnavailable Status = sandbox.StatusUnavailable // backend not running
 )
 

@@ -195,11 +195,11 @@ func (s *SystemClient) SandboxMetadata(name string) (*Environment, error) {
 	if err := store.RequireSandboxDir(sandboxDir); err != nil {
 		return nil, err
 	}
-	meta, err := store.LoadMeta(sandboxDir)
+	meta, err := store.LoadEnvironment(sandboxDir)
 	if err != nil {
 		return nil, err
 	}
-	return environmentFromMeta(meta), nil
+	return environmentFromStore(meta), nil
 }
 
 // ValidateSandboxName reports whether name is a well-formed sandbox name
@@ -901,7 +901,7 @@ func (s *SystemClient) classifySandboxes() (known []string, broken []classifiedS
 		name := entry.Name()
 		path := filepath.Join(dir, name)
 
-		if _, loadErr := store.LoadMeta(path); loadErr == nil {
+		if _, loadErr := store.LoadEnvironment(path); loadErr == nil {
 			known = append(known, store.InstanceName(name))
 			continue
 		} else {

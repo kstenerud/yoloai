@@ -43,7 +43,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	sandboxDir := mgr.Layout().SandboxDir(sandboxName)
 	assert.DirExists(t, sandboxDir)
 
-	meta, err := store.LoadMeta(sandboxDir)
+	meta, err := store.LoadEnvironment(sandboxDir)
 	require.NoError(t, err)
 	assert.Equal(t, sandboxName, meta.Name)
 	assert.Equal(t, agent.AgentTest, meta.Agent)
@@ -145,7 +145,7 @@ func TestIntegration_CreateNoStart(t *testing.T) {
 	sandboxDir := mgr.Layout().SandboxDir("nostart")
 	assert.DirExists(t, sandboxDir)
 
-	meta, err := store.LoadMeta(sandboxDir)
+	meta, err := store.LoadEnvironment(sandboxDir)
 	require.NoError(t, err)
 	assert.Equal(t, "nostart", meta.Name)
 	assert.Equal(t, agent.AgentTest, meta.Agent)
@@ -176,7 +176,7 @@ func TestIntegration_CopyMode(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { destroySandbox(ctx, mgr, "copymode") }) //nolint:errcheck // test cleanup
 
-	meta, err := store.LoadMeta(mgr.Layout().SandboxDir("copymode"))
+	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir("copymode"))
 	require.NoError(t, err)
 	assert.Equal(t, store.DirModeCopy, meta.Workdir.Mode)
 
@@ -209,7 +209,7 @@ func TestIntegration_RWMode(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { destroySandbox(ctx, mgr, "rwmode") }) //nolint:errcheck // test cleanup
 
-	meta, err := store.LoadMeta(mgr.Layout().SandboxDir("rwmode"))
+	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir("rwmode"))
 	require.NoError(t, err)
 	assert.Equal(t, store.DirModeRW, meta.Workdir.Mode)
 }
@@ -259,7 +259,7 @@ func TestIntegration_AuxDirRW(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { destroySandbox(ctx, mgr, "auxrw") }) //nolint:errcheck // test cleanup
 
-	meta, err := store.LoadMeta(mgr.Layout().SandboxDir("auxrw"))
+	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir("auxrw"))
 	require.NoError(t, err)
 	require.Len(t, meta.Directories, 1)
 	assert.Equal(t, store.DirModeRW, meta.Directories[0].Mode)
@@ -281,7 +281,7 @@ func TestIntegration_AuxDirRO(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { destroySandbox(ctx, mgr, "auxro") }) //nolint:errcheck // test cleanup
 
-	meta, err := store.LoadMeta(mgr.Layout().SandboxDir("auxro"))
+	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir("auxro"))
 	require.NoError(t, err)
 	require.Len(t, meta.Directories, 1)
 	assert.Equal(t, store.DirModeRO, meta.Directories[0].Mode)
@@ -314,7 +314,7 @@ func TestIntegration_Replace(t *testing.T) {
 	require.NoError(t, err)
 
 	// Should still exist with valid meta
-	meta, err := store.LoadMeta(mgr.Layout().SandboxDir("replaceme"))
+	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir("replaceme"))
 	require.NoError(t, err)
 	assert.Equal(t, "replaceme", meta.Name)
 }
@@ -336,7 +336,7 @@ func TestIntegration_Reset(t *testing.T) {
 	// Wait for container to become active
 	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName("resettest"), 15*time.Second)
 
-	meta, err := store.LoadMeta(mgr.Layout().SandboxDir("resettest"))
+	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir("resettest"))
 	require.NoError(t, err)
 	workDir := store.WorkDir(mgr.Layout().SandboxDir("resettest"), meta.Workdir.HostPath)
 
@@ -419,7 +419,7 @@ func TestIntegration_DiffWithChanges(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { destroySandbox(ctx, mgr, "diffchanges") }) //nolint:errcheck // test cleanup
 
-	meta, err := store.LoadMeta(mgr.Layout().SandboxDir("diffchanges"))
+	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir("diffchanges"))
 	require.NoError(t, err)
 	workDir := store.WorkDir(mgr.Layout().SandboxDir("diffchanges"), meta.Workdir.HostPath)
 
@@ -449,7 +449,7 @@ func TestIntegration_ApplyPatch(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { destroySandbox(ctx, mgr, "applypatch") }) //nolint:errcheck // test cleanup
 
-	meta, err := store.LoadMeta(mgr.Layout().SandboxDir("applypatch"))
+	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir("applypatch"))
 	require.NoError(t, err)
 	workDir := store.WorkDir(mgr.Layout().SandboxDir("applypatch"), meta.Workdir.HostPath)
 
@@ -497,7 +497,7 @@ func TestIntegration_Prompt(t *testing.T) {
 	t.Cleanup(func() { destroySandbox(ctx, mgr, "prompttest") }) //nolint:errcheck // test cleanup
 
 	sandboxDir := mgr.Layout().SandboxDir("prompttest")
-	meta, err := store.LoadMeta(sandboxDir)
+	meta, err := store.LoadEnvironment(sandboxDir)
 	require.NoError(t, err)
 	assert.True(t, meta.HasPrompt)
 
@@ -523,7 +523,7 @@ func TestIntegration_ResourceLimits(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { destroySandbox(ctx, mgr, "reslimits") }) //nolint:errcheck // test cleanup
 
-	meta, err := store.LoadMeta(mgr.Layout().SandboxDir("reslimits"))
+	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir("reslimits"))
 	require.NoError(t, err)
 	require.NotNil(t, meta.Resources)
 	assert.Equal(t, "2", meta.Resources.CPUs)
@@ -545,7 +545,7 @@ func TestIntegration_PortForwarding(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { destroySandbox(ctx, mgr, "portfwd") }) //nolint:errcheck // test cleanup
 
-	meta, err := store.LoadMeta(mgr.Layout().SandboxDir("portfwd"))
+	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir("portfwd"))
 	require.NoError(t, err)
 	assert.Contains(t, meta.Ports, "3000:3000")
 }
@@ -579,7 +579,7 @@ func TestIntegration_MultiSandbox(t *testing.T) {
 
 	names := make(map[string]bool)
 	for _, info := range infos {
-		names[info.Meta.Name] = true
+		names[info.Environment.Name] = true
 	}
 	assert.True(t, names["multi-a"], "multi-a should be listed")
 	assert.True(t, names["multi-b"], "multi-b should be listed")
@@ -662,7 +662,7 @@ func TestIntegration_NetworkIsolation(t *testing.T) {
 }
 
 // TestIntegration_ReadOnlyMountVerified verifies that a read-only aux directory
-// mount is actually enforced inside the container, not just recorded in meta.json.
+// mount is actually enforced inside the container, not just recorded in environment.json.
 // TestIntegration_AuxDirRO only checks the meta; this test proves the kernel
 // enforces the mount flag.
 func TestIntegration_ReadOnlyMountVerified(t *testing.T) {
@@ -796,7 +796,7 @@ func TestIntegration_AgentStubWorkflow(t *testing.T) {
 	assert.Equal(t, 0, result.ExitCode)
 
 	// Verify the file is visible in the work copy on the host
-	meta, err := store.LoadMeta(mgr.Layout().SandboxDir("stubworkflow"))
+	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir("stubworkflow"))
 	require.NoError(t, err)
 	workDir := store.WorkDir(mgr.Layout().SandboxDir("stubworkflow"), meta.Workdir.HostPath)
 	assert.FileExists(t, filepath.Join(workDir, "agent-output.txt"))
@@ -841,7 +841,7 @@ func TestIntegration_Clone(t *testing.T) {
 	})
 
 	// Seed a change in A's work copy
-	meta, err := store.LoadMeta(mgr.Layout().SandboxDir("clone-a"))
+	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir("clone-a"))
 	require.NoError(t, err)
 	workDir := store.WorkDir(mgr.Layout().SandboxDir("clone-a"), meta.Workdir.HostPath)
 	require.NoError(t, os.WriteFile(
@@ -896,7 +896,7 @@ func TestIntegration_Overlay(t *testing.T) {
 	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName("overlay-integ"), 15*time.Second)
 
 	// For overlay mode, MountPath is /yoloai/overlay/<encoded>/merged — not the host path.
-	meta, err := store.LoadMeta(mgr.Layout().SandboxDir("overlay-integ"))
+	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir("overlay-integ"))
 	require.NoError(t, err)
 	containerPath := meta.Workdir.MountPath
 

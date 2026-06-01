@@ -15,12 +15,12 @@ import (
 	"github.com/kstenerud/yoloai/internal/runtime"
 )
 
-// metaVersion is the current schema version for Meta. Bump when adding or
+// metaVersion is the current schema version for Environment. Bump when adding or
 // changing fields that require migration from older sandboxes.
 const metaVersion = 1
 
-// Meta holds sandbox configuration captured at creation time.
-type Meta struct {
+// Environment holds sandbox configuration captured at creation time.
+type Environment struct {
 	Version       int                 `json:"version"` // schema version; 0 = legacy (pre-versioning)
 	YoloaiVersion string              `json:"yoloai_version"`
 	Name          string              `json:"name"`
@@ -32,8 +32,8 @@ type Meta struct {
 	Agent agent.AgentName `json:"agent"`
 	Model string          `json:"model,omitempty"`
 
-	Workdir     WorkdirMeta `json:"workdir"`
-	Directories []DirMeta   `json:"directories,omitempty"`
+	Workdir     WorkdirEnvironment `json:"workdir"`
+	Directories []DirEnvironment   `json:"directories,omitempty"`
 
 	HasPrompt          bool                   `json:"has_prompt"`
 	NetworkMode        string                 `json:"network_mode,omitempty"`
@@ -53,8 +53,8 @@ type Meta struct {
 	Archetype          string                 `json:"archetype,omitempty"`       // resolved environment archetype (simple, compose, devcontainer, apple)
 }
 
-// WorkdirMeta stores the resolved workdir state at creation time.
-type WorkdirMeta struct {
+// WorkdirEnvironment stores the resolved workdir state at creation time.
+type WorkdirEnvironment struct {
 	HostPath     string  `json:"host_path"`
 	MountPath    string  `json:"mount_path"`
 	Mode         DirMode `json:"mode"` // typed; serializes as "copy"/"overlay"/"rw"/"ro"
@@ -62,9 +62,9 @@ type WorkdirMeta struct {
 	InceptionSHA string  `json:"inception_sha,omitempty"`
 }
 
-// DirMeta stores resolved directory state at creation time.
+// DirEnvironment stores resolved directory state at creation time.
 // Used for both workdir and auxiliary directories.
-type DirMeta struct {
+type DirEnvironment struct {
 	HostPath    string  `json:"host_path"`
 	MountPath   string  `json:"mount_path"`
 	Mode        DirMode `json:"mode"`
@@ -75,7 +75,7 @@ type DirMeta struct {
 // Missing Version (old files) deserialises as 0 and is migrated to current.
 // A version higher than the binary knows is a hard error — the user should not
 // silently run an old binary against a sandbox created by a newer one.
-func migrate(meta *Meta) error {
+func migrate(meta *Environment) error {
 	if meta.Version > metaVersion {
 		return fmt.Errorf("sandbox was created with a newer version of yoloai "+
 			"(meta version %d, this binary knows %d); upgrade yoloai to use it",
@@ -97,8 +97,8 @@ func migrate(meta *Meta) error {
 	return nil
 }
 
-// SaveMeta writes environment.json to the given directory path.
-func SaveMeta(dir string, meta *Meta) error {
+// SaveEnvironment writes environment.json to the given directory path.
+func SaveEnvironment(dir string, meta *Environment) error {
 	meta.Version = metaVersion
 	data, err := json.MarshalIndent(meta, "", "  ")
 	if err != nil {
@@ -121,7 +121,7 @@ func SaveMeta(dir string, meta *Meta) error {
 // numeric host UID instead to match the remapped container user.
 // hostUID is layout.HostUID at the boundary; F31's "library never
 // reads os.Getuid()" discipline.
-func ContainerUser(meta *Meta, hostUID int) string {
+func ContainerUser(meta *Environment, hostUID int) string {
 	if meta == nil {
 		return "yoloai"
 	}
@@ -134,8 +134,8 @@ func ContainerUser(meta *Meta, hostUID int) string {
 	return "yoloai"
 }
 
-// LoadMeta reads environment.json from the given directory path.
-func LoadMeta(dir string) (*Meta, error) {
+// LoadEnvironment reads environment.json from the given directory path.
+func LoadEnvironment(dir string) (*Environment, error) {
 	path := filepath.Join(dir, EnvironmentFile)
 
 	data, err := os.ReadFile(path) //nolint:gosec // path is constructed from sandbox dir, not user input
@@ -143,7 +143,7 @@ func LoadMeta(dir string) (*Meta, error) {
 		return nil, fmt.Errorf("read %s: %w", EnvironmentFile, err)
 	}
 
-	var meta Meta
+	var meta Environment
 	if err := json.Unmarshal(data, &meta); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", EnvironmentFile, err)
 	}

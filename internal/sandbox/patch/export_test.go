@@ -100,12 +100,12 @@ func TestExport_RWRefused(t *testing.T) {
 	name := "export-rw"
 	layout := testLayout(tmpDir)
 	require.NoError(t, os.MkdirAll(layout.SandboxDir(name), 0750))
-	meta := &store.Meta{
+	meta := &store.Environment{
 		Name:    name,
 		Agent:   "test",
-		Workdir: store.WorkdirMeta{HostPath: filepath.Join(tmpDir, "p"), MountPath: filepath.Join(tmpDir, "p"), Mode: store.DirModeRW},
+		Workdir: store.WorkdirEnvironment{HostPath: filepath.Join(tmpDir, "p"), MountPath: filepath.Join(tmpDir, "p"), Mode: store.DirModeRW},
 	}
-	require.NoError(t, store.SaveMeta(layout.SandboxDir(name), meta))
+	require.NoError(t, store.SaveEnvironment(layout.SandboxDir(name), meta))
 
 	_, err := Export(context.Background(), layout, nil, name, ExportOptions{Dir: filepath.Join(tmpDir, "out")})
 	require.Error(t, err)
@@ -121,12 +121,12 @@ func TestExport_OverlayRefsRefused(t *testing.T) {
 	name := "export-overlay-refs"
 	layout := testLayout(tmpDir)
 	require.NoError(t, os.MkdirAll(layout.SandboxDir(name), 0750))
-	meta := &store.Meta{
+	meta := &store.Environment{
 		Name:    name,
 		Agent:   "test",
-		Workdir: store.WorkdirMeta{HostPath: filepath.Join(tmpDir, "p"), MountPath: filepath.Join(tmpDir, "p"), Mode: store.DirModeOverlay, BaselineSHA: "abc"},
+		Workdir: store.WorkdirEnvironment{HostPath: filepath.Join(tmpDir, "p"), MountPath: filepath.Join(tmpDir, "p"), Mode: store.DirModeOverlay, BaselineSHA: "abc"},
 	}
-	require.NoError(t, store.SaveMeta(layout.SandboxDir(name), meta))
+	require.NoError(t, store.SaveEnvironment(layout.SandboxDir(name), meta))
 
 	_, err := Export(context.Background(), layout, nil, name, ExportOptions{Dir: filepath.Join(tmpDir, "out"), Refs: []string{"abc"}})
 	require.Error(t, err)

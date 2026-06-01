@@ -36,17 +36,17 @@ func createTestSandbox(t *testing.T, tmpDir, name, hostPath string, mode store.D
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 
-	meta := &store.Meta{
+	meta := &store.Environment{
 		Name:      name,
 		Agent:     "claude",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirMeta{
+		Workdir: store.WorkdirEnvironment{
 			HostPath:  hostPath,
 			MountPath: hostPath,
 			Mode:      mode,
 		},
 	}
-	require.NoError(t, store.SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 }
 
 // createRWSandbox creates a minimal :rw mode sandbox directory structure for tests.
@@ -54,17 +54,17 @@ func createRWSandbox(t *testing.T, tmpDir, name, hostPath string) {
 	t.Helper()
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
-	meta := &store.Meta{
+	meta := &store.Environment{
 		Name:      name,
 		Agent:     "test",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirMeta{
+		Workdir: store.WorkdirEnvironment{
 			HostPath:  hostPath,
 			MountPath: hostPath,
 			Mode:      "rw",
 		},
 	}
-	require.NoError(t, store.SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 }
 
 // gitHEAD returns the HEAD commit SHA for the git repo at dir.
@@ -256,18 +256,18 @@ func TestStart_Resume_DoneStatus(t *testing.T) {
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 
 	// Create meta with HasPrompt=true
-	meta := &store.Meta{
+	meta := &store.Environment{
 		Name:      name,
 		Agent:     "claude",
 		HasPrompt: true,
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirMeta{
+		Workdir: store.WorkdirEnvironment{
 			HostPath:  "/tmp/project",
 			MountPath: "/tmp/project",
 			Mode:      "copy",
 		},
 	}
-	require.NoError(t, store.SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
 	// Write prompt.txt
 	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "prompt.txt"), []byte("Write hello world"), 0600))
@@ -330,18 +330,18 @@ func TestStart_Resume_StoppedStatus(t *testing.T) {
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 
-	meta := &store.Meta{
+	meta := &store.Environment{
 		Name:      name,
 		Agent:     "claude",
 		HasPrompt: true,
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirMeta{
+		Workdir: store.WorkdirEnvironment{
 			HostPath:  "/tmp/project",
 			MountPath: "/tmp/project",
 			Mode:      "copy",
 		},
 	}
-	require.NoError(t, store.SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
 	// Write prompt.txt
 	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "prompt.txt"), []byte("Write hello world"), 0600))
@@ -422,17 +422,17 @@ func TestNeedsConfirmation_ChangesExist(t *testing.T) {
 	testutil.GitAdd(t, workDir, ".")
 	testutil.GitCommit(t, workDir, "initial")
 
-	meta := &store.Meta{
+	meta := &store.Environment{
 		Name:      name,
 		Agent:     "claude",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirMeta{
+		Workdir: store.WorkdirEnvironment{
 			HostPath:  hostPath,
 			MountPath: hostPath,
 			Mode:      "copy",
 		},
 	}
-	require.NoError(t, store.SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
 	// Make changes in work dir
 	testutil.WriteFile(t, workDir, "file.txt", "modified")
@@ -465,17 +465,17 @@ func TestNeedsConfirmation_NoChanges(t *testing.T) {
 	testutil.GitAdd(t, workDir, ".")
 	testutil.GitCommit(t, workDir, "initial")
 
-	meta := &store.Meta{
+	meta := &store.Environment{
 		Name:      name,
 		Agent:     "claude",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirMeta{
+		Workdir: store.WorkdirEnvironment{
 			HostPath:  hostPath,
 			MountPath: hostPath,
 			Mode:      "copy",
 		},
 	}
-	require.NoError(t, store.SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
 	mock := &lifecycleMockRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
@@ -562,18 +562,18 @@ func TestReset_RecopiesWorkdir(t *testing.T) {
 	testutil.GitCommit(t, workDir, "yoloai baseline")
 	sha := gitHEAD(t, workDir)
 
-	meta := &store.Meta{
+	meta := &store.Environment{
 		Name:      name,
 		Agent:     "claude",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirMeta{
+		Workdir: store.WorkdirEnvironment{
 			HostPath:    origDir,
 			MountPath:   origDir,
 			Mode:        "copy",
 			BaselineSHA: sha,
 		},
 	}
-	require.NoError(t, store.SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
 	// Modify work copy
 	testutil.WriteFile(t, workDir, "file.txt", "modified by agent\n")
@@ -602,7 +602,7 @@ func TestReset_RecopiesWorkdir(t *testing.T) {
 	assert.Equal(t, "original content\n", string(content))
 
 	// Verify new baseline SHA in meta
-	updatedMeta, err := store.LoadMeta(sandboxDir)
+	updatedMeta, err := store.LoadEnvironment(sandboxDir)
 	require.NoError(t, err)
 	assert.NotEmpty(t, updatedMeta.Workdir.BaselineSHA)
 	assert.NotEqual(t, sha, updatedMeta.Workdir.BaselineSHA) // new baseline
@@ -625,17 +625,17 @@ func TestReset_PromptOverwrite(t *testing.T) {
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "prompt.txt"), []byte("old prompt"), 0600))
 
-	meta := &store.Meta{
+	meta := &store.Environment{
 		Name:      name,
 		Agent:     "claude",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirMeta{
+		Workdir: store.WorkdirEnvironment{
 			HostPath:  origDir,
 			MountPath: origDir,
 			Mode:      "copy",
 		},
 	}
-	require.NoError(t, store.SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
 	mock := &lifecycleMockRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
@@ -676,18 +676,18 @@ func TestReset_State(t *testing.T) {
 	testutil.GitCommit(t, workDir, "yoloai baseline")
 	sha := gitHEAD(t, workDir)
 
-	meta := &store.Meta{
+	meta := &store.Environment{
 		Name:      name,
 		Agent:     "claude",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirMeta{
+		Workdir: store.WorkdirEnvironment{
 			HostPath:    origDir,
 			MountPath:   origDir,
 			Mode:        "copy",
 			BaselineSHA: sha,
 		},
 	}
-	require.NoError(t, store.SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
 	mock := &lifecycleMockRuntime{
 		stopFn: func(_ context.Context, _ string) error {
@@ -748,18 +748,18 @@ func TestReset_OriginalMissing(t *testing.T) {
 	testutil.GitCommit(t, workDir, "yoloai baseline")
 	sha := gitHEAD(t, workDir)
 
-	meta := &store.Meta{
+	meta := &store.Environment{
 		Name:      name,
 		Agent:     "claude",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirMeta{
+		Workdir: store.WorkdirEnvironment{
 			HostPath:    origDir,
 			MountPath:   origDir,
 			Mode:        "copy",
 			BaselineSHA: sha,
 		},
 	}
-	require.NoError(t, store.SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
 	// Delete the original
 	require.NoError(t, os.RemoveAll(origDir))
@@ -815,19 +815,19 @@ func TestReset_InPlace_SyncsWorkdir(t *testing.T) {
 	testutil.GitCommit(t, workDir, "yoloai baseline")
 	sha := gitHEAD(t, workDir)
 
-	meta := &store.Meta{
+	meta := &store.Environment{
 		Name:      name,
 		Agent:     "claude",
 		HasPrompt: true,
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirMeta{
+		Workdir: store.WorkdirEnvironment{
 			HostPath:    origDir,
 			MountPath:   origDir,
 			Mode:        "copy",
 			BaselineSHA: sha,
 		},
 	}
-	require.NoError(t, store.SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
 	// Simulate agent changes in work copy
 	testutil.WriteFile(t, workDir, "file.txt", "modified by agent\n")
@@ -864,7 +864,7 @@ func TestReset_InPlace_SyncsWorkdir(t *testing.T) {
 	assert.NoFileExists(t, filepath.Join(workDir, "agent-new.txt"))
 
 	// Verify new baseline SHA in meta
-	updatedMeta, err := store.LoadMeta(sandboxDir)
+	updatedMeta, err := store.LoadEnvironment(sandboxDir)
 	require.NoError(t, err)
 	assert.NotEmpty(t, updatedMeta.Workdir.BaselineSHA)
 	assert.NotEqual(t, sha, updatedMeta.Workdir.BaselineSHA)
@@ -907,18 +907,18 @@ func TestReset_InPlace_KeepCache(t *testing.T) {
 	testutil.GitCommit(t, workDir, "yoloai baseline")
 	sha := gitHEAD(t, workDir)
 
-	meta := &store.Meta{
+	meta := &store.Environment{
 		Name:      name,
 		Agent:     "claude",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirMeta{
+		Workdir: store.WorkdirEnvironment{
 			HostPath:    origDir,
 			MountPath:   origDir,
 			Mode:        "copy",
 			BaselineSHA: sha,
 		},
 	}
-	require.NoError(t, store.SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
 	mock := &lifecycleMockRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
@@ -966,18 +966,18 @@ func TestReset_InPlace_KeepFiles(t *testing.T) {
 	testutil.GitCommit(t, workDir, "yoloai baseline")
 	sha := gitHEAD(t, workDir)
 
-	meta := &store.Meta{
+	meta := &store.Environment{
 		Name:      name,
 		Agent:     "claude",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirMeta{
+		Workdir: store.WorkdirEnvironment{
 			HostPath:    origDir,
 			MountPath:   origDir,
 			Mode:        "copy",
 			BaselineSHA: sha,
 		},
 	}
-	require.NoError(t, store.SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
 	mock := &lifecycleMockRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
@@ -1015,18 +1015,18 @@ func TestReset_UpgradesToRestartWhenNotRunning(t *testing.T) {
 	testutil.GitCommit(t, workDir, "yoloai baseline")
 	sha := gitHEAD(t, workDir)
 
-	meta := &store.Meta{
+	meta := &store.Environment{
 		Name:      name,
 		Agent:     "claude",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirMeta{
+		Workdir: store.WorkdirEnvironment{
 			HostPath:    origDir,
 			MountPath:   origDir,
 			Mode:        "copy",
 			BaselineSHA: sha,
 		},
 	}
-	require.NoError(t, store.SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
 	// Modify work copy
 	testutil.WriteFile(t, workDir, "file.txt", "modified by agent\n")
@@ -1058,7 +1058,7 @@ func TestReset_UpgradesToRestartWhenNotRunning(t *testing.T) {
 	assert.Equal(t, "original content\n", string(content))
 
 	// Verify new baseline SHA in meta
-	updatedMeta, err := store.LoadMeta(sandboxDir)
+	updatedMeta, err := store.LoadEnvironment(sandboxDir)
 	require.NoError(t, err)
 	assert.NotEmpty(t, updatedMeta.Workdir.BaselineSHA)
 	assert.NotEqual(t, sha, updatedMeta.Workdir.BaselineSHA)
@@ -1208,13 +1208,13 @@ func TestDestroy_ReadOnlyFiles(t *testing.T) {
 	require.NoError(t, os.Chmod(readonlyDir, 0o555))               //nolint:gosec // intentionally read-only for test
 	require.NoError(t, os.Chmod(filepath.Dir(readonlyDir), 0o555)) //nolint:gosec // intentionally read-only for test
 
-	meta := &store.Meta{
+	meta := &store.Environment{
 		Name:      name,
 		Agent:     "claude",
 		CreatedAt: time.Now(),
-		Workdir:   store.WorkdirMeta{HostPath: "/tmp/project", Mode: "copy"},
+		Workdir:   store.WorkdirEnvironment{HostPath: "/tmp/project", Mode: "copy"},
 	}
-	require.NoError(t, store.SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
 	mock := &lifecycleMockRuntime{}
 	d := newLifecycleDeps(mock, tmpDir)

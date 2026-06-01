@@ -32,12 +32,12 @@ func expandWildcard(ctx context.Context, c *yoloai.Client, pattern string) ([]st
 
 	var matches []string
 	for _, info := range infos {
-		matched, err := filepath.Match(pattern, info.Meta.Name)
+		matched, err := filepath.Match(pattern, info.Environment.Name)
 		if err != nil {
 			return nil, fmt.Errorf("invalid pattern %q: %w", pattern, err)
 		}
 		if matched {
-			matches = append(matches, info.Meta.Name)
+			matches = append(matches, info.Environment.Name)
 		}
 	}
 
@@ -134,7 +134,7 @@ func resolveDestroyAll(cmd *cobra.Command, ctx context.Context, c *yoloai.Client
 	}
 	names := make([]string, 0, len(infos))
 	for _, info := range infos {
-		names = append(names, info.Meta.Name)
+		names = append(names, info.Environment.Name)
 	}
 	return names, nil
 }

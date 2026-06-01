@@ -70,7 +70,7 @@ type StartOptions struct {
 	Resume       bool                  // re-feed original prompt with continuation preamble
 	Prompt       string                // if set, overwrite prompt.txt and send directly (no preamble)
 	PromptFile   string                // if set, read from file, overwrite prompt.txt, send directly
-	Isolation    runtime.IsolationMode // if set, override the isolation mode stored in meta.json
+	Isolation    runtime.IsolationMode // if set, override the isolation mode stored in environment.json
 	VscodeTunnel bool                  // if true, enable VS Code Remote Tunnel (persisted to meta)
 }
 
@@ -105,7 +105,7 @@ func syncLifecycleMarker(sandboxDir string) {
 // applyIsolationOverride applies the isolation mode override from opts to meta
 // if it differs from the current value. Validates mode, checks backend support,
 // and saves meta. No-op when opts.Isolation is empty or unchanged.
-func applyIsolationOverride(ctx context.Context, d state.Deps, opts StartOptions, sandboxDir string, meta *store.Meta, n *notices) error {
+func applyIsolationOverride(ctx context.Context, d state.Deps, opts StartOptions, sandboxDir string, meta *store.Environment, n *notices) error {
 	if opts.Isolation == "" || opts.Isolation == meta.Isolation {
 		return nil
 	}
@@ -124,7 +124,7 @@ func applyIsolationOverride(ctx context.Context, d state.Deps, opts StartOptions
 		return err
 	}
 	meta.Isolation = opts.Isolation
-	if err := store.SaveMeta(sandboxDir, meta); err != nil {
+	if err := store.SaveEnvironment(sandboxDir, meta); err != nil {
 		return fmt.Errorf("save meta: %w", err)
 	}
 	n.infof("Isolation mode updated to %s", opts.Isolation)
@@ -133,12 +133,12 @@ func applyIsolationOverride(ctx context.Context, d state.Deps, opts StartOptions
 
 // applyVscodeTunnelOption enables the VS Code Remote Tunnel in meta and
 // runtime-config.json when opts.VscodeTunnel is true and not already enabled.
-func applyVscodeTunnelOption(d state.Deps, opts StartOptions, sandboxDir, name string, meta *store.Meta, n *notices) error {
+func applyVscodeTunnelOption(d state.Deps, opts StartOptions, sandboxDir, name string, meta *store.Environment, n *notices) error {
 	if !opts.VscodeTunnel || meta.VscodeTunnel {
 		return nil
 	}
 	meta.VscodeTunnel = true
-	if err := store.SaveMeta(sandboxDir, meta); err != nil {
+	if err := store.SaveEnvironment(sandboxDir, meta); err != nil {
 		return fmt.Errorf("save meta: %w", err)
 	}
 	if err := patchConfigVscodeTunnel(sandboxDir, name); err != nil {
@@ -152,7 +152,7 @@ func applyVscodeTunnelOption(d state.Deps, opts StartOptions, sandboxDir, name s
 // if provided, and persists it to prompt.txt + meta. Returns the prompt text
 // and whether a custom prompt is in use.
 // homeDir is used to expand leading "~" in the promptFile path.
-func preparePromptForStart(opts StartOptions, sandboxDir string, meta *store.Meta, homeDir string, env map[string]string, stdin io.Reader) (promptText string, customPrompt bool, err error) {
+func preparePromptForStart(opts StartOptions, sandboxDir string, meta *store.Environment, homeDir string, env map[string]string, stdin io.Reader) (promptText string, customPrompt bool, err error) {
 	customPrompt = opts.Prompt != "" || opts.PromptFile != ""
 	if opts.Resume && customPrompt {
 		return "", false, fmt.Errorf("--resume and --prompt/--prompt-file are mutually exclusive")
@@ -179,7 +179,7 @@ func preparePromptForStart(opts StartOptions, sandboxDir string, meta *store.Met
 		return "", false, fmt.Errorf("write prompt.txt: %w", writeErr)
 	}
 	meta.HasPrompt = true
-	if saveErr := store.SaveMeta(sandboxDir, meta); saveErr != nil {
+	if saveErr := store.SaveEnvironment(sandboxDir, meta); saveErr != nil {
 		// Roll back prompt.txt so disk state remains consistent with environment.json.
 		if oldPrompt != nil {
 			_ = fileutil.WriteFile(promptPath, oldPrompt, 0600)
@@ -192,7 +192,7 @@ func preparePromptForStart(opts StartOptions, sandboxDir string, meta *store.Met
 }
 
 // handleTerminalStatus relaunches the agent after it has exited (Done/Failed).
-func handleTerminalStatus(ctx context.Context, d state.Deps, name string, meta *store.Meta, opts StartOptions, promptText string, customPrompt bool, n *notices) error {
+func handleTerminalStatus(ctx context.Context, d state.Deps, name string, meta *store.Environment, opts StartOptions, promptText string, customPrompt bool, n *notices) error {
 	slog.Info("relaunching agent", "event", "sandbox.start.agent.relaunch", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
 	switch {
 	case customPrompt:
@@ -215,7 +215,7 @@ func handleTerminalStatus(ctx context.Context, d state.Deps, name string, meta *
 // handleStoppedOrRemovedStatus recreates the container for a sandbox whose
 // container is stopped or removed. removeStopped indicates the container still
 // exists and must be removed first. successMsg is printed on success.
-func handleStoppedOrRemovedStatus(ctx context.Context, d state.Deps, cname, name string, meta *store.Meta, opts StartOptions, promptText string, customPrompt, removeStopped bool, successMsg string, n *notices) error {
+func handleStoppedOrRemovedStatus(ctx context.Context, d state.Deps, cname, name string, meta *store.Environment, opts StartOptions, promptText string, customPrompt, removeStopped bool, successMsg string, n *notices) error {
 	if removeStopped && !d.Runtime.Descriptor().Capabilities.HostFilesystem {
 		// Container backends (Docker, Podman, containerd): the sandbox directory
 		// lives on the host separately from the container, so Remove only deletes
@@ -253,7 +253,7 @@ func handleStoppedOrRemovedStatus(ctx context.Context, d state.Deps, cname, name
 // Credentials are refreshed, the VM is resumed via runtime.Start (which kills
 // the stale tmux session and runs the setup script), and executeVMWorkDirSetup
 // is skipped because the work directory is already present from the suspend.
-func handleSuspendedResume(ctx context.Context, d state.Deps, cname, name string, meta *store.Meta, opts StartOptions, promptText string, customPrompt bool, n *notices) error {
+func handleSuspendedResume(ctx context.Context, d state.Deps, cname, name string, meta *store.Environment, opts StartOptions, promptText string, customPrompt bool, n *notices) error {
 	slog.Info("resuming suspended sandbox", "event", "sandbox.start.resume", "sandbox", name)
 	sandboxDir := d.Layout.SandboxDir(name)
 
@@ -309,7 +309,7 @@ func start(ctx context.Context, d state.Deps, name string, opts StartOptions, n 
 		return err
 	}
 
-	meta, err := store.LoadMeta(sandboxDir)
+	meta, err := store.LoadEnvironment(sandboxDir)
 	if err != nil {
 		return err
 	}
@@ -414,7 +414,7 @@ func resetOverlayDirs(sandboxDir, hostPath string) error {
 
 // resetCopyWorkdir removes the work copy, re-copies from the host path, and
 // records the git baseline. Returns the new baseline SHA (empty if deferred).
-func resetCopyWorkdir(d state.Deps, sandboxName, sandboxDir string, meta *store.Meta) (string, error) {
+func resetCopyWorkdir(d state.Deps, sandboxName, sandboxDir string, meta *store.Environment) (string, error) {
 	workDir := store.WorkDir(sandboxDir, meta.Workdir.HostPath)
 
 	if err := os.RemoveAll(workDir); err != nil {
@@ -449,7 +449,7 @@ func resetCopyWorkdir(d state.Deps, sandboxName, sandboxDir string, meta *store.
 }
 
 // resetAuxCopyDir resets a single aux :copy dir and returns the new baseline SHA.
-func resetAuxCopyDir(sandboxDir string, d store.DirMeta) (string, error) {
+func resetAuxCopyDir(sandboxDir string, d store.DirEnvironment) (string, error) {
 	auxWorkDir := store.WorkDir(sandboxDir, d.HostPath)
 	if err := os.RemoveAll(auxWorkDir); err != nil {
 		return "", fmt.Errorf("remove aux work copy %s: %w", d.HostPath, err)
@@ -476,7 +476,7 @@ func resetAuxCopyDir(sandboxDir string, d store.DirMeta) (string, error) {
 
 // resetAuxDirs resets all aux :copy and :overlay directories in meta,
 // updating BaselineSHA in-place.
-func resetAuxDirs(sandboxDir string, meta *store.Meta) error {
+func resetAuxDirs(sandboxDir string, meta *store.Environment) error {
 	for i, d := range meta.Directories {
 		switch d.Mode {
 		case store.DirModeCopy:
@@ -532,7 +532,7 @@ func Reset(ctx context.Context, d state.Deps, opts ResetOptions) (*ResetResult, 
 		return nil, err
 	}
 
-	meta, err := store.LoadMeta(sandboxDir)
+	meta, err := store.LoadEnvironment(sandboxDir)
 	if err != nil {
 		return nil, err
 	}
@@ -594,7 +594,7 @@ func reinitLogs(sandboxDir string, perms state.IsolationPerms) {
 }
 
 // resetWorkdir resets the main workdir (overlay or copy) and returns the new baseline SHA.
-func resetWorkdir(d state.Deps, sandboxName, sandboxDir string, meta *store.Meta) (string, error) {
+func resetWorkdir(d state.Deps, sandboxName, sandboxDir string, meta *store.Environment) (string, error) {
 	if meta.Workdir.Mode == "overlay" {
 		if err := resetOverlayDirs(sandboxDir, meta.Workdir.HostPath); err != nil {
 			return "", err
@@ -639,7 +639,7 @@ func applyPostResetOptions(d state.Deps, opts ResetOptions, sandboxDir string, p
 
 // prepareResetRestart performs the full stop → wipe → recopy → start flow for
 // reset --restart. Extracted from Reset to reduce its cyclomatic complexity.
-func prepareResetRestart(ctx context.Context, d state.Deps, opts ResetOptions, sandboxDir string, meta *store.Meta, n *notices) error {
+func prepareResetRestart(ctx context.Context, d state.Deps, opts ResetOptions, sandboxDir string, meta *store.Environment, n *notices) error {
 	// Destroy the container so start() sees StatusRemoved and does a clean
 	// recreate. Using Remove (not Stop) avoids suspending a VM we're about
 	// to rebuild — the suspend state would be stale after the host workdir
@@ -664,9 +664,9 @@ func prepareResetRestart(ctx context.Context, d state.Deps, opts ResetOptions, s
 		return err
 	}
 
-	// Update meta.json
+	// Update environment.json
 	meta.Workdir.BaselineSHA = newSHA
-	if err := store.SaveMeta(sandboxDir, meta); err != nil {
+	if err := store.SaveEnvironment(sandboxDir, meta); err != nil {
 		return err
 	}
 
@@ -709,9 +709,9 @@ func NeedsConfirmation(ctx context.Context, d state.Deps, name string) (bool, st
 		return true, "agent is still running"
 	}
 
-	meta, err := store.LoadMeta(sandboxDir)
+	meta, err := store.LoadEnvironment(sandboxDir)
 	if err != nil {
-		// Meta is unreadable (a broken sandbox). Don't assume it's empty —
+		// Environment is unreadable (a broken sandbox). Don't assume it's empty —
 		// that silently discards recoverable work. Fall back to a
 		// filesystem-level probe of work/ so destroy still prompts.
 		if workState, detail := status.ProbeWorkData(sandboxDir); workState != status.WorkDataNone {
@@ -745,7 +745,7 @@ func NeedsConfirmation(ctx context.Context, d state.Deps, name string) (bool, st
 // initializeAgentFilesIfNeeded copies agent_files into the sandbox when they
 // have not yet been initialized (e.g., sandbox predates the feature or
 // ClearState was used). No-op if already initialized or no StateDir configured.
-func initializeAgentFilesIfNeeded(layout config.Layout, agentDef *agent.Definition, sandboxDir string, meta *store.Meta, sbState *store.SandboxState) error {
+func initializeAgentFilesIfNeeded(layout config.Layout, agentDef *agent.Definition, sandboxDir string, meta *store.Environment, sbState *store.SandboxState) error {
 	if sbState.AgentFilesInitialized || agentDef.StateDir == "" {
 		return nil
 	}
@@ -771,7 +771,7 @@ func initializeAgentFilesIfNeeded(layout config.Layout, agentDef *agent.Definiti
 
 // resolvedAgentFiles returns the effective AgentFiles config after merging the
 // profile chain if a profile is set. Returns nil if no AgentFiles are configured.
-func resolvedAgentFiles(layout config.Layout, cfg *config.YoloaiConfig, meta *store.Meta) *config.AgentFilesConfig {
+func resolvedAgentFiles(layout config.Layout, cfg *config.YoloaiConfig, meta *store.Environment) *config.AgentFilesConfig {
 	agentFilesConfig := cfg.AgentFiles
 	if meta.Profile == "" {
 		return agentFilesConfig
@@ -789,7 +789,7 @@ func resolvedAgentFiles(layout config.Layout, cfg *config.YoloaiConfig, meta *st
 
 // resolveEnvForRestart loads the global config env and merges the profile
 // chain if a profile is set. Returns the resolved environment map.
-func resolveEnvForRestart(layout config.Layout, meta *store.Meta) (map[string]string, error) {
+func resolveEnvForRestart(layout config.Layout, meta *store.Environment) (map[string]string, error) {
 	cfg, err := config.LoadConfig(layout)
 	if err != nil {
 		return nil, fmt.Errorf("load config: %w", err)
@@ -807,11 +807,11 @@ func resolveEnvForRestart(layout config.Layout, meta *store.Meta) (map[string]st
 	return envVars, nil
 }
 
-// recreateContainer creates a new Docker container from meta.json. Incidental
+// recreateContainer creates a new Docker container from environment.json. Incidental
 // progress (e.g. a port-availability warning from filterAvailablePorts) is
 // surfaced through n as Notices rather than a raw writer, since the restart
 // entry points (Start/Reset) return their output as a *Result's Notices (F8).
-func recreateContainer(ctx context.Context, d state.Deps, name string, meta *store.Meta, resume bool, n *notices) error {
+func recreateContainer(ctx context.Context, d state.Deps, name string, meta *store.Environment, resume bool, n *notices) error {
 	agentDef := agent.GetAgent(string(meta.Agent))
 	if agentDef == nil {
 		return yoerrors.NewConfigError("unknown agent %q in sandbox state — this sandbox was created with an agent that's not registered in the current yoloai installation; destroy and recreate the sandbox with a registered agent", meta.Agent)
@@ -960,7 +960,7 @@ func tmuxShellPrefix(socket string) string {
 }
 
 // relaunchAgent relaunches the agent in the existing tmux session.
-func relaunchAgent(ctx context.Context, d state.Deps, name string, meta *store.Meta) error {
+func relaunchAgent(ctx context.Context, d state.Deps, name string, meta *store.Environment) error {
 	sandboxDir := d.Layout.SandboxDir(name)
 
 	// Read runtime-config.json to get agent_command
@@ -986,7 +986,7 @@ func relaunchAgent(ctx context.Context, d state.Deps, name string, meta *store.M
 
 // relaunchAgentWithResume relaunches the agent in interactive mode and sends
 // the resume prompt (preamble + original prompt) via tmux.
-func relaunchAgentWithResume(ctx context.Context, d state.Deps, name string, meta *store.Meta) error {
+func relaunchAgentWithResume(ctx context.Context, d state.Deps, name string, meta *store.Environment) error {
 	sandboxDir := d.Layout.SandboxDir(name)
 
 	configData, err := os.ReadFile(filepath.Join(sandboxDir, store.RuntimeConfigFile)) //nolint:gosec // path is sandbox-controlled
@@ -1024,7 +1024,7 @@ func relaunchAgentWithResume(ctx context.Context, d state.Deps, name string, met
 
 // sendResumePrompt waits for the agent to be ready and delivers the resume
 // prompt (preamble + original prompt) via tmux load-buffer/paste-buffer.
-func sendResumePrompt(ctx context.Context, d state.Deps, name, sandboxDir string, cfg runtimeconfig.ContainerConfig, meta *store.Meta) error {
+func sendResumePrompt(ctx context.Context, d state.Deps, name, sandboxDir string, cfg runtimeconfig.ContainerConfig, meta *store.Environment) error {
 	promptData, err := os.ReadFile(filepath.Join(sandboxDir, "prompt.txt")) //nolint:gosec // path is sandbox-controlled
 	if err != nil {
 		return fmt.Errorf("read prompt.txt: %w", err)
@@ -1077,7 +1077,7 @@ rm -f /tmp/yoloai-resume.txt
 
 // relaunchAgentWithCustomPrompt relaunches the agent in interactive mode and sends
 // the custom prompt directly (no resume preamble) via tmux.
-func relaunchAgentWithCustomPrompt(ctx context.Context, d state.Deps, name string, meta *store.Meta, promptText string) error {
+func relaunchAgentWithCustomPrompt(ctx context.Context, d state.Deps, name string, meta *store.Environment, promptText string) error {
 	sandboxDir := d.Layout.SandboxDir(name)
 
 	configData, err := os.ReadFile(filepath.Join(sandboxDir, store.RuntimeConfigFile)) //nolint:gosec // path is sandbox-controlled
@@ -1117,7 +1117,7 @@ func relaunchAgentWithCustomPrompt(ctx context.Context, d state.Deps, name strin
 
 // sendCustomPrompt waits for the agent to be ready and delivers the custom
 // prompt directly (without resume preamble) via tmux load-buffer/paste-buffer.
-func sendCustomPrompt(ctx context.Context, d state.Deps, name, sandboxDir string, cfg runtimeconfig.ContainerConfig, promptText string, meta *store.Meta) error {
+func sendCustomPrompt(ctx context.Context, d state.Deps, name, sandboxDir string, cfg runtimeconfig.ContainerConfig, promptText string, meta *store.Environment) error {
 	var waitCmd string
 	switch {
 	case cfg.ReadyPattern != "":
@@ -1158,7 +1158,7 @@ rm -f /tmp/yoloai-custom-prompt.txt
 
 // prepareCustomPromptFiles writes the resume-prompt.txt (custom prompt, no preamble)
 // and patches runtime-config.json for interactive command mode.
-func prepareCustomPromptFiles(d state.Deps, name string, meta *store.Meta, promptText string) error {
+func prepareCustomPromptFiles(d state.Deps, name string, meta *store.Environment, promptText string) error {
 	sandboxDir := d.Layout.SandboxDir(name)
 
 	// Write resume-prompt.txt (custom prompt, no preamble)
@@ -1200,7 +1200,7 @@ func prepareCustomPromptFiles(d state.Deps, name string, meta *store.Meta, promp
 
 // prepareResumeFiles writes the resume-prompt.txt and patches runtime-config.json
 // for resume mode (interactive command).
-func prepareResumeFiles(d state.Deps, name string, meta *store.Meta) error {
+func prepareResumeFiles(d state.Deps, name string, meta *store.Environment) error {
 	sandboxDir := d.Layout.SandboxDir(name)
 
 	// Read original prompt
@@ -1254,7 +1254,7 @@ func cleanupResumeFiles(d state.Deps, name string) {
 
 // resetInPlace resets the workspace while the agent is still running.
 // Syncs files from host, recreates git baseline, and notifies the agent via tmux.
-func resetInPlace(ctx context.Context, d state.Deps, opts ResetOptions, meta *store.Meta, sandboxDir string) error {
+func resetInPlace(ctx context.Context, d state.Deps, opts ResetOptions, meta *store.Environment, sandboxDir string) error {
 	// Tart VMs store the work directory inside the VM, not on the host.
 	// In-place reset requires direct host access to the work directory.
 	if _, ok := d.Runtime.(runtime.WorkDirSetup); ok {
@@ -1284,9 +1284,9 @@ func resetInPlace(ctx context.Context, d state.Deps, opts ResetOptions, meta *st
 		newSHA = sha
 	}
 
-	// Update meta.json
+	// Update environment.json
 	meta.Workdir.BaselineSHA = newSHA
-	if err := store.SaveMeta(sandboxDir, meta); err != nil {
+	if err := store.SaveEnvironment(sandboxDir, meta); err != nil {
 		return err
 	}
 
@@ -1303,7 +1303,7 @@ func resetInPlace(ctx context.Context, d state.Deps, opts ResetOptions, meta *st
 func clearCacheAndFiles(d state.Deps, opts ResetOptions) error {
 	sandboxDir := d.Layout.SandboxDir(opts.Name)
 	// Load metadata to check security mode for permissions
-	meta, err := store.LoadMeta(sandboxDir)
+	meta, err := store.LoadEnvironment(sandboxDir)
 	if err != nil {
 		return fmt.Errorf("load metadata: %w", err)
 	}
@@ -1347,7 +1347,7 @@ const resetNotification = "[yoloai] Workspace has been reset to match the curren
 
 // sendResetNotification delivers a notification (and optionally the prompt)
 // to the running agent via tmux load-buffer + paste-buffer + send-keys.
-func sendResetNotification(ctx context.Context, d state.Deps, name, sandboxDir string, noPrompt, hasPrompt bool, meta *store.Meta) error {
+func sendResetNotification(ctx context.Context, d state.Deps, name, sandboxDir string, noPrompt, hasPrompt bool, meta *store.Environment) error {
 	// Read runtime-config.json for submit_sequence
 	configData, err := os.ReadFile(filepath.Join(sandboxDir, store.RuntimeConfigFile)) //nolint:gosec // path is sandbox-controlled
 	if err != nil {

@@ -57,7 +57,7 @@ func runSandboxInfo(cmd *cobra.Command, name string) error {
 // printSandboxInfo prints sandbox info in human-readable format.
 func printSandboxInfo(cmd *cobra.Command, name string, info *yoloai.Info) {
 	w := cmd.OutOrStdout()
-	meta := info.Meta
+	meta := info.Environment
 
 	fmt.Fprintf(w, "Name:        %s\n", meta.Name)   //nolint:errcheck
 	fmt.Fprintf(w, "Status:      %s\n", info.Status) //nolint:errcheck

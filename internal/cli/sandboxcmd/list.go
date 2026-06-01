@@ -89,7 +89,7 @@ func matchesFilters(info *yoloai.Info, f listFilters) bool {
 		return false
 	}
 	if f.agent != "" {
-		if info.Status == yoloai.StatusBroken || string(info.Meta.Agent) != f.agent {
+		if info.Status == yoloai.StatusBroken || string(info.Environment.Agent) != f.agent {
 			return false
 		}
 	}
@@ -107,7 +107,7 @@ func matchesProfileFilter(info *yoloai.Info, profileFilter string) bool {
 	if info.Status == yoloai.StatusBroken {
 		return false
 	}
-	p := info.Meta.Profile
+	p := info.Environment.Profile
 	if profileFilter == "base" {
 		return p == "" || p == "base"
 	}
@@ -179,11 +179,11 @@ func runList(cmd *cobra.Command, _ []string) error {
 	for _, info := range infos {
 		if info.Status == yoloai.StatusBroken || info.Status == yoloai.StatusUnavailable {
 			backend := "-"
-			if info.Meta.Backend != "" {
-				backend = string(info.Meta.Backend)
+			if info.Environment.Backend != "" {
+				backend = string(info.Environment.Backend)
 			}
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", //nolint:errcheck
-				info.Meta.Name,
+				info.Environment.Name,
 				info.Status,
 				backend,
 				"-",
@@ -195,19 +195,19 @@ func runList(cmd *cobra.Command, _ []string) error {
 			)
 			continue
 		}
-		backend := info.Meta.Backend
+		backend := info.Environment.Backend
 		if backend == "" {
 			backend = "docker" // fallback for old sandboxes without backend field
 		}
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", //nolint:errcheck
-			info.Meta.Name,
+			info.Environment.Name,
 			info.Status,
 			backend,
-			info.Meta.Agent,
-			formatProfile(info.Meta.Profile),
-			cliutil.FormatAge(info.Meta.CreatedAt),
+			info.Environment.Agent,
+			formatProfile(info.Environment.Profile),
+			cliutil.FormatAge(info.Environment.CreatedAt),
 			cliutil.FormatDiskUsage(info.DiskUsageBytes),
-			info.Meta.Workdir.HostPath,
+			info.Environment.Workdir.HostPath,
 			info.HasChanges,
 		)
 	}

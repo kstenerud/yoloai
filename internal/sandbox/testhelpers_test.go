@@ -78,17 +78,17 @@ func createTestSandbox(t *testing.T, tmpDir, name, hostPath string, mode store.D
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 
-	meta := &store.Meta{
+	meta := &store.Environment{
 		Name:      name,
 		Agent:     "claude",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirMeta{
+		Workdir: store.WorkdirEnvironment{
 			HostPath:  hostPath,
 			MountPath: hostPath,
 			Mode:      mode,
 		},
 	}
-	require.NoError(t, store.SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 }
 
 func writeTestFile(t *testing.T, dir, name, content string) {

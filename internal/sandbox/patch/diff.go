@@ -178,7 +178,7 @@ func loadDiffContext(layout config.Layout, name string) (workDir string, baselin
 		return "", "", "", dirErr
 	}
 
-	meta, loadErr := store.LoadMeta(sandboxDir)
+	meta, loadErr := store.LoadEnvironment(sandboxDir)
 	if loadErr != nil {
 		return "", "", "", loadErr
 	}
@@ -232,7 +232,7 @@ func LoadAllDiffContexts(layout config.Layout, name string) ([]DiffContext, erro
 		return nil, err
 	}
 
-	meta, err := store.LoadMeta(sandboxDir)
+	meta, err := store.LoadEnvironment(sandboxDir)
 	if err != nil {
 		return nil, err
 	}
@@ -283,7 +283,7 @@ func copyGitWorkDir(sandboxDir, hostPath, mountPath string) string {
 // ListCommitsBeyondBaselineOverlay returns commits beyond the baseline for
 // an overlay-mode workdir by executing git log inside the running container.
 func ListCommitsBeyondBaselineOverlay(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string) ([]CommitInfo, error) {
-	meta, err := store.LoadMeta(layout.SandboxDir(name))
+	meta, err := store.LoadEnvironment(layout.SandboxDir(name))
 	if err != nil {
 		return nil, fmt.Errorf("load metadata: %w", err)
 	}
@@ -324,7 +324,7 @@ func ListCommitsBeyondBaselineOverlay(ctx context.Context, layout config.Layout,
 // Use opts.Stat for a summary, opts.NameOnly for a file list only.
 // Returns the diff text (empty string if there are no changes).
 func GenerateOverlayDiff(ctx context.Context, rt runtime.Runtime, opts DiffOptions) (string, error) {
-	meta, err := store.LoadMeta(opts.Layout.SandboxDir(opts.Name))
+	meta, err := store.LoadEnvironment(opts.Layout.SandboxDir(opts.Name))
 	if err != nil {
 		return "", fmt.Errorf("load metadata: %w", err)
 	}

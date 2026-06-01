@@ -19,7 +19,7 @@ const (
 	StatusStopped     = status.StatusStopped     // container stopped
 	StatusSuspended   = status.StatusSuspended   // VM suspended (Tart only)
 	StatusRemoved     = status.StatusRemoved     // container removed but sandbox dir exists
-	StatusBroken      = status.StatusBroken      // sandbox dir exists but meta.json missing/invalid
+	StatusBroken      = status.StatusBroken      // sandbox dir exists but environment.json missing/invalid
 	StatusUnavailable = status.StatusUnavailable // backend not running
 )
 

@@ -36,7 +36,7 @@ func ApplyOverlay(ctx context.Context, layout config.Layout, rt runtime.Runtime,
 	}
 	defer unlock()
 
-	meta, err := store.LoadMeta(layout.SandboxDir(name))
+	meta, err := store.LoadEnvironment(layout.SandboxDir(name))
 	if err != nil {
 		return nil, err
 	}

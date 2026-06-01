@@ -16,9 +16,9 @@ import (
 // ExecuteVMWorkDirSetup runs VM-side work directory setup for backends that
 // implement WorkDirSetup (e.g., Tart). It copies the work directory from
 // VirtioFS staging to local VM storage, creates the git baseline inside the VM,
-// retrieves the baseline SHA, and updates meta.json with the SHA.
+// retrieves the baseline SHA, and updates environment.json with the SHA.
 // Returns nil if the runtime does not implement WorkDirSetup (Docker/containerd).
-func ExecuteVMWorkDirSetup(ctx context.Context, rt runtime.Runtime, name, sandboxDir string, meta *store.Meta) error {
+func ExecuteVMWorkDirSetup(ctx context.Context, rt runtime.Runtime, name, sandboxDir string, meta *store.Environment) error {
 	setupIntf, ok := rt.(runtime.WorkDirSetup)
 	if !ok {
 		return nil // Docker/containerd - no VM setup needed
@@ -42,10 +42,10 @@ func ExecuteVMWorkDirSetup(ctx context.Context, rt runtime.Runtime, name, sandbo
 		return fmt.Errorf("get baseline SHA: %w", err)
 	}
 
-	// Update meta.json
+	// Update environment.json
 	meta.Workdir.BaselineSHA = strings.TrimSpace(result.Stdout)
 	if meta.Workdir.InceptionSHA == "" {
 		meta.Workdir.InceptionSHA = meta.Workdir.BaselineSHA
 	}
-	return store.SaveMeta(sandboxDir, meta)
+	return store.SaveEnvironment(sandboxDir, meta)
 }

@@ -18,7 +18,7 @@ import (
 )
 
 // writeIsolatedSandbox creates a fake :isolated sandbox dir with a
-// meta.json carrying the given allowlist. Avoids spinning up an
+// environment.json carrying the given allowlist. Avoids spinning up an
 // actual sandbox + runtime, which Network read/derivation tests
 // don't need.
 //
@@ -28,14 +28,14 @@ func writeIsolatedSandbox(t *testing.T, c *SystemClient, name, agentName string,
 	t.Helper()
 	sandboxDir := c.layout.SandboxDir(name)
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
-	meta := &store.Meta{
+	meta := &store.Environment{
 		Name:         name,
 		Agent:        AgentName(agentName),
 		CreatedAt:    time.Now(),
 		NetworkMode:  "isolated",
 		NetworkAllow: allow,
 	}
-	require.NoError(t, store.SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
 	// PatchConfigAllowedDomains reads + writes runtime-config.json.
 	// A minimal `{}` is enough — the patch helper inserts the
@@ -52,13 +52,13 @@ func writeNoNetworkSandbox(t *testing.T, c *SystemClient, name string) {
 	t.Helper()
 	sandboxDir := c.layout.SandboxDir(name)
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
-	meta := &store.Meta{
+	meta := &store.Environment{
 		Name:        name,
 		Agent:       "test",
 		CreatedAt:   time.Now(),
 		NetworkMode: "none",
 	}
-	require.NoError(t, store.SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 }
 
 // clientWithSandbox returns a yoloai.Client wired up against a
@@ -94,7 +94,7 @@ func TestNetwork_Allowed_NoIsolation_Empty(t *testing.T) {
 	// Sandbox with no network mode at all.
 	sandboxDir := sys.layout.SandboxDir("box")
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
-	require.NoError(t, store.SaveMeta(sandboxDir, &store.Meta{
+	require.NoError(t, store.SaveEnvironment(sandboxDir, &store.Environment{
 		Name:      "box",
 		Agent:     "claude",
 		CreatedAt: time.Now(),
@@ -250,7 +250,7 @@ func TestNetwork_Allow_NotIsolated_UsageError(t *testing.T) {
 
 	sandboxDir := sys.layout.SandboxDir("box")
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
-	require.NoError(t, store.SaveMeta(sandboxDir, &store.Meta{
+	require.NoError(t, store.SaveEnvironment(sandboxDir, &store.Environment{
 		Name:      "box",
 		Agent:     "claude",
 		CreatedAt: time.Now(),
@@ -286,7 +286,7 @@ func TestNetwork_Deny_RemovesAndTagsSource(t *testing.T) {
 	assert.Equal(t, AllowedFromUser, bySource["example.com"])
 
 	// Allowlist is empty now on disk.
-	meta, err := store.LoadMeta(sys.layout.SandboxDir("box"))
+	meta, err := store.LoadEnvironment(sys.layout.SandboxDir("box"))
 	require.NoError(t, err)
 	assert.Empty(t, meta.NetworkAllow)
 }
@@ -312,7 +312,7 @@ func TestNetwork_Deny_PartialFailureRollsBack(t *testing.T) {
 	_, err := mustSandbox(t, c, "box").Network().Deny(context.Background(), "a.example", "absent.example")
 	require.Error(t, err)
 
-	meta, err := store.LoadMeta(sys.layout.SandboxDir("box"))
+	meta, err := store.LoadEnvironment(sys.layout.SandboxDir("box"))
 	require.NoError(t, err)
 	assert.Equal(t, []string{"a.example", "b.example"}, meta.NetworkAllow,
 		"validation failure must leave the allowlist untouched")
@@ -333,7 +333,7 @@ func TestNetwork_Deny_NoDomains_UsageError(t *testing.T) {
 // can't break provenance computation without a loud test.)
 
 func TestComputeAllowedDomains_ClaudeAgent(t *testing.T) {
-	meta := &store.Meta{
+	meta := &store.Environment{
 		Agent:        "claude",
 		NetworkAllow: []string{"api.anthropic.com", "extra.example"},
 	}
@@ -346,7 +346,7 @@ func TestComputeAllowedDomains_ClaudeAgent(t *testing.T) {
 }
 
 func TestComputeAllowedDomains_EmptyAllow(t *testing.T) {
-	meta := &store.Meta{Agent: "claude"}
+	meta := &store.Environment{Agent: "claude"}
 	out := computeAllowedDomains(meta)
 	assert.NotNil(t, out)
 	assert.Empty(t, out)

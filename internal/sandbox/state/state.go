@@ -60,7 +60,7 @@ type State struct {
 	Isolation         runtime.IsolationMode // isolation mode from config/profile
 	IsolationExplicit bool                  // true when isolation was set via --isolation flag
 	VscodeTunnel      bool                  // true when VS Code Remote Tunnel is enabled
-	Meta              *store.Meta
+	Environment       *store.Environment
 	ConfigJSON        []byte
 	// Archetype fields
 	Archetype                 archetype.Archetype

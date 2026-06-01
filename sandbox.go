@@ -33,7 +33,7 @@ type Sandbox struct {
 // the point the caller typed the name — rather than lazily deep inside a
 // later operation (F22 / §4 parse-don't-validate; the Q-G design rejected
 // the GCS-style lazy handle since validation is local, not a network
-// round-trip). Existence is a sandbox-directory check; a corrupt meta.json
+// round-trip). Existence is a sandbox-directory check; a corrupt environment.json
 // surfaces from the individual operation that reads it.
 func (c *Client) Sandbox(name string) (*Sandbox, error) {
 	if err := store.RequireSandboxDir(c.layout.SandboxDir(name)); err != nil {
@@ -83,7 +83,7 @@ func (s *Sandbox) Inspect(ctx context.Context) (*Info, error) {
 }
 
 // Dir returns the on-host directory holding the sandbox's persisted state
-// (meta.json, work copies, files/, cache/, logs, prompt). Computed from the
+// (environment.json, work copies, files/, cache/, logs, prompt). Computed from the
 // Client's DataDir; returns a path even for unknown names (caller checks
 // existence). Embedders that read/write sandbox files resolve paths under it.
 func (s *Sandbox) Dir() string {
@@ -170,12 +170,12 @@ func (s *Sandbox) Attach(ctx context.Context, io IOStreams) error {
 		return err
 	}
 	containerName := store.InstanceName(s.name)
-	user := sandbox.ContainerUser(info.Meta, s.c.layout.HostUID)
+	user := sandbox.ContainerUser(info.Environment, s.c.layout.HostUID)
 	if err := sandbox.WaitForAttachReady(ctx, s.c.rt, s.c.layout, s.name, user, 300*time.Second); err != nil {
 		return fmt.Errorf("waiting for tmux session: %w", err)
 	}
 	sock := sandbox.ReadTmuxSocket(s.c.layout, s.name)
-	cmd := s.c.rt.AttachCommand(sock, io.Rows, io.Cols, info.Meta.Isolation)
+	cmd := s.c.rt.AttachCommand(sock, io.Rows, io.Cols, info.Environment.Isolation)
 	return s.c.rt.InteractiveExec(ctx, containerName, cmd, user, "", io)
 }
 
@@ -200,6 +200,6 @@ func (s *Sandbox) Exec(ctx context.Context, opts ExecOptions, io IOStreams) erro
 	if info.Status != sandbox.StatusActive && info.Status != sandbox.StatusIdle {
 		return fmt.Errorf("sandbox %q: %w", s.name, sandbox.ErrContainerNotRunning)
 	}
-	user := sandbox.ContainerUser(info.Meta, s.c.layout.HostUID)
-	return s.c.rt.InteractiveExec(ctx, store.InstanceName(s.name), opts.Command, user, info.Meta.Workdir.MountPath, io)
+	user := sandbox.ContainerUser(info.Environment, s.c.layout.HostUID)
+	return s.c.rt.InteractiveExec(ctx, store.InstanceName(s.name), opts.Command, user, info.Environment.Workdir.MountPath, io)
 }

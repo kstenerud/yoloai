@@ -25,9 +25,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// storeMeta writes a minimal valid meta.json into sandboxDir for name.
+// storeMeta writes a minimal valid environment.json into sandboxDir for name.
 func storeMeta(sandboxDir, name string) error {
-	return store.SaveMeta(sandboxDir, &store.Meta{
+	return store.SaveEnvironment(sandboxDir, &store.Environment{
 		Name:  name,
 		Agent: "test",
 	})

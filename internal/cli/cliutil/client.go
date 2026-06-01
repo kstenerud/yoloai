@@ -26,7 +26,7 @@ import (
 // The pattern is intentionally not abstracted into a generic helper because
 // each pair has domain-specific variations:
 //   - ResolveBackend: accepts a --backend flag; used by new/build/setup.
-//   - ResolveBackendForSandbox: reads from meta.json, not a flag; used by
+//   - ResolveBackendForSandbox: reads from environment.json, not a flag; used by
 //     lifecycle commands (start, stop, attach, diff, apply, destroy).
 //   - ResolveAgent: similar flag→config→default; new command only.
 //   - ResolveProfile: has a --no-profile bypass that the others don't have.
@@ -86,8 +86,8 @@ func ResolveContainerBackendConfig() yoloai.BackendName {
 	return ""
 }
 
-// ResolveBackendForSandbox reads the backend from a sandbox's meta.json.
-// Falls back to config default if meta.json can't be read.
+// ResolveBackendForSandbox reads the backend from a sandbox's environment.json.
+// Falls back to config default if environment.json can't be read.
 // Used by lifecycle commands that operate on an existing sandbox.
 func ResolveBackendForSandbox(name string) yoloai.BackendName {
 	env, err := NewSystemClient().SandboxMetadata(name)

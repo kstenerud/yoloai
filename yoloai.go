@@ -40,7 +40,7 @@
 //	})
 //	if err != nil { log.Fatal(err) }
 //	if info.Status == yoloai.StatusDone {
-//	    sb, err := client.Sandbox(info.Meta.Name)
+//	    sb, err := client.Sandbox(info.Environment.Name)
 //	    if err != nil { log.Fatal(err) }
 //	    sb.Workdir().Apply(ctx, yoloai.ApplyOptions{Mode: yoloai.ApplyModeCommits})
 //	}
@@ -136,7 +136,7 @@ type Options struct {
 	Input io.Reader
 
 	// Version is the yoloAI version string stamped into each created
-	// sandbox's meta.json. The CLI fills it from build info; embedders may
+	// sandbox's environment.json. The CLI fills it from build info; embedders may
 	// leave it empty. Not a per-create input — it lives here so Create
 	// callers don't repeat it.
 	Version string
@@ -149,7 +149,7 @@ type Client struct {
 	manager *sandbox.Engine
 	rt      runtime.Runtime
 	layout  config.Layout // Q-W: DataDir-rooted path resolver propagated to Engine + apply
-	version string        // yoloAI version stamped into created sandboxes' meta.json
+	version string        // yoloAI version stamped into created sandboxes' environment.json
 	output  io.Writer     // Options.Output (defaulted to io.Discard); seeds per-call progress writers (F8)
 	input   io.Reader     // Options.Input (defaulted to os.Stdin); threaded to create.Run via state.Deps
 }

@@ -244,17 +244,17 @@ func TestApplyPatch_DeleteFile(t *testing.T) {
 	gitCommit(t, workDir, "yoloai baseline")
 	sha := gitHEAD(t, workDir)
 
-	meta := &store.Meta{
+	meta := &store.Environment{
 		Name:  name,
 		Agent: "test",
-		Workdir: store.WorkdirMeta{
+		Workdir: store.WorkdirEnvironment{
 			HostPath:    hostPath,
 			MountPath:   hostPath,
 			Mode:        "copy",
 			BaselineSHA: sha,
 		},
 	}
-	require.NoError(t, store.SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
 	// Delete the file in work copy
 	require.NoError(t, os.Remove(filepath.Join(workDir, "remove.txt")))
@@ -793,8 +793,8 @@ func TestAdvanceBaseline_UpdatesMeta(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, commits)
 
-	// Verify meta.json has new SHA
-	meta, err := store.LoadMeta(testLayout(tmpDir).SandboxDir(name))
+	// Verify environment.json has new SHA
+	meta, err := store.LoadEnvironment(testLayout(tmpDir).SandboxDir(name))
 	require.NoError(t, err)
 	workDir := store.WorkDir(testLayout(tmpDir).SandboxDir(name), meta.Workdir.HostPath)
 	headSHA := gitHEAD(t, workDir)
@@ -1146,7 +1146,7 @@ func TestAdvanceBaselineTo_UpdatesMeta(t *testing.T) {
 	require.NoError(t, AdvanceBaselineTo(testLayout(tmpDir), name, commits[1].SHA))
 
 	// Verify meta has the second commit's SHA
-	meta, err := store.LoadMeta(testLayout(tmpDir).SandboxDir(name))
+	meta, err := store.LoadEnvironment(testLayout(tmpDir).SandboxDir(name))
 	require.NoError(t, err)
 	assert.Equal(t, commits[1].SHA, meta.Workdir.BaselineSHA)
 
@@ -1416,17 +1416,17 @@ func TestApplySeries_NonGitTargetRefuses(t *testing.T) {
 	hostPath := filepath.Join(tmpDir, "plain-project")
 	require.NoError(t, os.MkdirAll(hostPath, 0750)) // exists but not a git repo
 
-	meta := &store.Meta{
+	meta := &store.Environment{
 		Name:  name,
 		Agent: "test",
-		Workdir: store.WorkdirMeta{
+		Workdir: store.WorkdirEnvironment{
 			HostPath:    hostPath,
 			MountPath:   hostPath,
 			Mode:        "copy",
 			BaselineSHA: "abc",
 		},
 	}
-	require.NoError(t, store.SaveMeta(layout.SandboxDir(name), meta))
+	require.NoError(t, store.SaveEnvironment(layout.SandboxDir(name), meta))
 
 	_, err := ApplySeries(context.Background(), layout, nil, name, ApplySeriesOptions{})
 	require.Error(t, err)

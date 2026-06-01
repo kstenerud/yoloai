@@ -51,7 +51,7 @@ func runClone(cmd *cobra.Command, args []string) error {
 	}
 
 	// Source's backend governs the rest of the flow: after clone, dst inherits
-	// src's backend (copied via meta.json), so Start needs the same backend.
+	// src's backend (copied via environment.json), so Start needs the same backend.
 	backend := cliutil.ResolveBackendForSandbox(src)
 	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		slog.Info("cloning sandbox", "event", "sandbox.clone", "source", src, "dest", dst) //nolint:gosec // G706: src/dst are validated sandbox names

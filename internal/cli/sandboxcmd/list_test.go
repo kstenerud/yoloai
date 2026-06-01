@@ -13,7 +13,7 @@ import (
 
 func makeInfo(name string, status yoloai.Status, agent, profile, changes string) *yoloai.Info {
 	return &yoloai.Info{
-		Meta: &yoloai.Environment{
+		Environment: &yoloai.Environment{
 			Name:      name,
 			Agent:     agentpkg.AgentName(agent),
 			Profile:   profile,
@@ -28,7 +28,7 @@ func makeInfo(name string, status yoloai.Status, agent, profile, changes string)
 
 func makeBrokenInfo(name string) *yoloai.Info {
 	return &yoloai.Info{
-		Meta:           &yoloai.Environment{Name: name},
+		Environment:    &yoloai.Environment{Name: name},
 		Status:         yoloai.StatusBroken,
 		HasChanges:     "-",
 		DiskUsageBytes: -1,
@@ -53,8 +53,8 @@ func TestFilterInfos_Active(t *testing.T) {
 	}
 	result := filterInfos(infos, listFilters{active: true})
 	assert.Len(t, result, 2)
-	assert.Equal(t, "a", result[0].Meta.Name)
-	assert.Equal(t, "d", result[1].Meta.Name)
+	assert.Equal(t, "a", result[0].Environment.Name)
+	assert.Equal(t, "d", result[1].Environment.Name)
 }
 
 func TestFilterInfos_Idle(t *testing.T) {
@@ -66,8 +66,8 @@ func TestFilterInfos_Idle(t *testing.T) {
 	}
 	result := filterInfos(infos, listFilters{idle: true})
 	assert.Len(t, result, 2)
-	assert.Equal(t, "b", result[0].Meta.Name)
-	assert.Equal(t, "d", result[1].Meta.Name)
+	assert.Equal(t, "b", result[0].Environment.Name)
+	assert.Equal(t, "d", result[1].Environment.Name)
 }
 
 func TestFilterInfos_Done(t *testing.T) {
@@ -79,8 +79,8 @@ func TestFilterInfos_Done(t *testing.T) {
 	}
 	result := filterInfos(infos, listFilters{done: true})
 	assert.Len(t, result, 2)
-	assert.Equal(t, "b", result[0].Meta.Name)
-	assert.Equal(t, "c", result[1].Meta.Name)
+	assert.Equal(t, "b", result[0].Environment.Name)
+	assert.Equal(t, "c", result[1].Environment.Name)
 }
 
 func TestFilterInfos_Stopped(t *testing.T) {
@@ -91,8 +91,8 @@ func TestFilterInfos_Stopped(t *testing.T) {
 	}
 	result := filterInfos(infos, listFilters{stopped: true})
 	assert.Len(t, result, 2)
-	assert.Equal(t, "b", result[0].Meta.Name)
-	assert.Equal(t, "c", result[1].Meta.Name)
+	assert.Equal(t, "b", result[0].Environment.Name)
+	assert.Equal(t, "c", result[1].Environment.Name)
 }
 
 func TestFilterInfos_Agent(t *testing.T) {
@@ -103,8 +103,8 @@ func TestFilterInfos_Agent(t *testing.T) {
 	}
 	result := filterInfos(infos, listFilters{agent: "claude"})
 	assert.Len(t, result, 2)
-	assert.Equal(t, "a", result[0].Meta.Name)
-	assert.Equal(t, "c", result[1].Meta.Name)
+	assert.Equal(t, "a", result[0].Environment.Name)
+	assert.Equal(t, "c", result[1].Environment.Name)
 }
 
 func TestFilterInfos_AgentExcludesBroken(t *testing.T) {
@@ -114,7 +114,7 @@ func TestFilterInfos_AgentExcludesBroken(t *testing.T) {
 	}
 	result := filterInfos(infos, listFilters{agent: "claude"})
 	assert.Len(t, result, 1)
-	assert.Equal(t, "a", result[0].Meta.Name)
+	assert.Equal(t, "a", result[0].Environment.Name)
 }
 
 func TestFilterInfos_ProfileBase(t *testing.T) {
@@ -125,8 +125,8 @@ func TestFilterInfos_ProfileBase(t *testing.T) {
 	}
 	result := filterInfos(infos, listFilters{profile: "base"})
 	assert.Len(t, result, 2)
-	assert.Equal(t, "a", result[0].Meta.Name)
-	assert.Equal(t, "b", result[1].Meta.Name)
+	assert.Equal(t, "a", result[0].Environment.Name)
+	assert.Equal(t, "b", result[1].Environment.Name)
 }
 
 func TestFilterInfos_ProfileNamed(t *testing.T) {
@@ -136,7 +136,7 @@ func TestFilterInfos_ProfileNamed(t *testing.T) {
 	}
 	result := filterInfos(infos, listFilters{profile: "go-dev"})
 	assert.Len(t, result, 1)
-	assert.Equal(t, "b", result[0].Meta.Name)
+	assert.Equal(t, "b", result[0].Environment.Name)
 }
 
 func TestFilterInfos_ProfileExcludesBroken(t *testing.T) {
@@ -146,7 +146,7 @@ func TestFilterInfos_ProfileExcludesBroken(t *testing.T) {
 	}
 	result := filterInfos(infos, listFilters{profile: "go-dev"})
 	assert.Len(t, result, 1)
-	assert.Equal(t, "a", result[0].Meta.Name)
+	assert.Equal(t, "a", result[0].Environment.Name)
 }
 
 func TestFilterInfos_Changes(t *testing.T) {
@@ -157,8 +157,8 @@ func TestFilterInfos_Changes(t *testing.T) {
 	}
 	result := filterInfos(infos, listFilters{changes: true})
 	assert.Len(t, result, 2)
-	assert.Equal(t, "a", result[0].Meta.Name)
-	assert.Equal(t, "c", result[1].Meta.Name)
+	assert.Equal(t, "a", result[0].Environment.Name)
+	assert.Equal(t, "c", result[1].Environment.Name)
 }
 
 func TestFilterInfos_Combined(t *testing.T) {
@@ -170,7 +170,7 @@ func TestFilterInfos_Combined(t *testing.T) {
 	}
 	result := filterInfos(infos, listFilters{active: true, agent: "claude", changes: true})
 	assert.Len(t, result, 1)
-	assert.Equal(t, "a", result[0].Meta.Name)
+	assert.Equal(t, "a", result[0].Environment.Name)
 }
 
 func TestFilterInfos_AllFiltered(t *testing.T) {

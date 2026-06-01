@@ -36,19 +36,19 @@ func createCopySandbox(t *testing.T, tmpDir, name, hostPath string) string {
 	// Get baseline SHA
 	sha := gitHEAD(t, workDir)
 
-	// Write meta.json
-	meta := &store.Meta{
+	// Write environment.json
+	meta := &store.Environment{
 		Name:      name,
 		Agent:     "test",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirMeta{
+		Workdir: store.WorkdirEnvironment{
 			HostPath:    hostPath,
 			MountPath:   hostPath,
 			Mode:        "copy",
 			BaselineSHA: sha,
 		},
 	}
-	require.NoError(t, store.SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
 	return workDir
 }
@@ -59,17 +59,17 @@ func createRWSandbox(t *testing.T, tmpDir, name, hostPath string) {
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 
-	meta := &store.Meta{
+	meta := &store.Environment{
 		Name:      name,
 		Agent:     "test",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirMeta{
+		Workdir: store.WorkdirEnvironment{
 			HostPath:  hostPath,
 			MountPath: hostPath,
 			Mode:      "rw",
 		},
 	}
-	require.NoError(t, store.SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 }
 
 func gitHEAD(t *testing.T, dir string) string {
@@ -393,17 +393,17 @@ func TestLoadDiffContext_NoBaseline(t *testing.T) {
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", "no-baseline")
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 
-	meta := &store.Meta{
+	meta := &store.Environment{
 		Name:      "no-baseline",
 		Agent:     "test",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirMeta{
+		Workdir: store.WorkdirEnvironment{
 			HostPath: "/tmp/test",
 			Mode:     "copy",
 			// BaselineSHA intentionally empty
 		},
 	}
-	require.NoError(t, store.SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
 	_, _, _, err := loadDiffContext(testLayout(tmpDir), "no-baseline")
 	assert.Error(t, err)
@@ -421,18 +421,18 @@ func TestLoadDiffContext_CopyMode(t *testing.T) {
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 
-	meta := &store.Meta{
+	meta := &store.Environment{
 		Name:      name,
 		Agent:     "test",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirMeta{
+		Workdir: store.WorkdirEnvironment{
 			HostPath:    hostPath,
 			MountPath:   hostPath,
 			Mode:        "copy",
 			BaselineSHA: "abc123",
 		},
 	}
-	require.NoError(t, store.SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
 	workDir, baselineSHA, mode, err := loadDiffContext(testLayout(tmpDir), name)
 	require.NoError(t, err)
@@ -449,18 +449,18 @@ func TestLoadDiffContext_OverlayMode(t *testing.T) {
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 
-	meta := &store.Meta{
+	meta := &store.Environment{
 		Name:      name,
 		Agent:     "test",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirMeta{
+		Workdir: store.WorkdirEnvironment{
 			HostPath:    "/tmp/project",
 			MountPath:   "/container/project",
 			Mode:        "overlay",
 			BaselineSHA: "overlay-sha",
 		},
 	}
-	require.NoError(t, store.SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
 	workDir, baselineSHA, mode, err := loadDiffContext(testLayout(tmpDir), name)
 	require.NoError(t, err)
@@ -477,17 +477,17 @@ func TestLoadDiffContext_OverlayMode_FallbackToHostPath(t *testing.T) {
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 
-	meta := &store.Meta{
+	meta := &store.Environment{
 		Name:      name,
 		Agent:     "test",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirMeta{
+		Workdir: store.WorkdirEnvironment{
 			HostPath: "/tmp/project",
 			Mode:     "overlay",
 			// MountPath intentionally empty
 		},
 	}
-	require.NoError(t, store.SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
 	workDir, _, mode, err := loadDiffContext(testLayout(tmpDir), name)
 	require.NoError(t, err)
@@ -503,16 +503,16 @@ func TestLoadDiffContext_RWMode(t *testing.T) {
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 
-	meta := &store.Meta{
+	meta := &store.Environment{
 		Name:      name,
 		Agent:     "test",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirMeta{
+		Workdir: store.WorkdirEnvironment{
 			HostPath: "/tmp/project",
 			Mode:     "rw",
 		},
 	}
-	require.NoError(t, store.SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
 	workDir, baselineSHA, mode, err := loadDiffContext(testLayout(tmpDir), name)
 	require.NoError(t, err)
@@ -529,16 +529,16 @@ func TestLoadDiffContext_UnsupportedMode(t *testing.T) {
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 
-	meta := &store.Meta{
+	meta := &store.Environment{
 		Name:      name,
 		Agent:     "test",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirMeta{
+		Workdir: store.WorkdirEnvironment{
 			HostPath: "/tmp/project",
 			Mode:     "bogus",
 		},
 	}
-	require.NoError(t, store.SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
 	_, _, _, err := loadDiffContext(testLayout(tmpDir), name)
 	assert.Error(t, err)
@@ -555,18 +555,18 @@ func TestLoadAllDiffContexts_SingleCopyWorkdir(t *testing.T) {
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 
-	meta := &store.Meta{
+	meta := &store.Environment{
 		Name:      name,
 		Agent:     "test",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirMeta{
+		Workdir: store.WorkdirEnvironment{
 			HostPath:    "/tmp/project",
 			MountPath:   "/tmp/project",
 			Mode:        "copy",
 			BaselineSHA: "sha1",
 		},
 	}
-	require.NoError(t, store.SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
 	contexts, err := LoadAllDiffContexts(testLayout(tmpDir), name)
 	require.NoError(t, err)
@@ -590,23 +590,23 @@ func TestLoadAllDiffContexts_WorkdirOnly_IgnoresAuxEntries(t *testing.T) {
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 
-	meta := &store.Meta{
+	meta := &store.Environment{
 		Name:      name,
 		Agent:     "test",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirMeta{
+		Workdir: store.WorkdirEnvironment{
 			HostPath:    "/tmp/project",
 			Mode:        "copy",
 			BaselineSHA: "sha-main",
 		},
-		Directories: []store.DirMeta{
+		Directories: []store.DirEnvironment{
 			// Pre-Q-U sandboxes may have these on disk. We must ignore
 			// them rather than fault.
 			{HostPath: "/tmp/aux-rw", Mode: "rw"},
 			{HostPath: "/tmp/aux-ro", Mode: "ro"},
 		},
 	}
-	require.NoError(t, store.SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
 	contexts, err := LoadAllDiffContexts(testLayout(tmpDir), name)
 	require.NoError(t, err)
@@ -624,17 +624,17 @@ func TestLoadAllDiffContexts_NoAuxDirs(t *testing.T) {
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 
-	meta := &store.Meta{
+	meta := &store.Environment{
 		Name:      name,
 		Agent:     "test",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirMeta{
+		Workdir: store.WorkdirEnvironment{
 			HostPath:    "/tmp/project",
 			Mode:        "copy",
 			BaselineSHA: "sha-only",
 		},
 	}
-	require.NoError(t, store.SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
 	contexts, err := LoadAllDiffContexts(testLayout(tmpDir), name)
 	require.NoError(t, err)
@@ -650,18 +650,18 @@ func TestLoadAllDiffContexts_OverlayWorkdirWithMountPath(t *testing.T) {
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 
-	meta := &store.Meta{
+	meta := &store.Environment{
 		Name:      name,
 		Agent:     "test",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirMeta{
+		Workdir: store.WorkdirEnvironment{
 			HostPath:    "/host/project",
 			MountPath:   "/container/project",
 			Mode:        "overlay",
 			BaselineSHA: "sha-ovl",
 		},
 	}
-	require.NoError(t, store.SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
 	contexts, err := LoadAllDiffContexts(testLayout(tmpDir), name)
 	require.NoError(t, err)

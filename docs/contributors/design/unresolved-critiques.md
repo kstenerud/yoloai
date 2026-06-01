@@ -187,36 +187,6 @@ prescribed G1(b)-first sequence; details and divergence note in the resolved sin
 - **Migration cost:** Folds into the read-model spine; each verb is small, the metadata one is the
   same work as G1(b).
 
-### G8 — `store.Meta` is a vague name, and code comments reference a phantom `meta.json` that is never written
-
-- **Severity:** MINOR (the name) — but the phantom-filename comments are an active inaccuracy, the
-  same "asserts something untrue" class as G1's lying test.
-- **Where:** type `store.Meta`/`WorkdirMeta`/`DirMeta` in `internal/sandbox/store/meta.go`; the
-  real on-disk constant `internal/sandbox/store/paths.go:36` (`EnvironmentFile = "environment.json"`);
-  stale `meta.json` comments in `internal/sandbox/lifecycle/lifecycle.go` (several),
-  `launch/launch.go:34`, `launch/vmworkdir.go:19,45`, `create/create.go:99`, `inspect.go:22`.
-- **Observation:** Three names for one concept. (1) The Go type is `Meta` — "metadata about *what*?"
-  is unanswered; the thing is the sandbox's creation-time descriptor (the same identity / config-echo /
-  mechanism piles D53 splits in G1). (2) ~8 comments call the file `meta.json`, but no such file is
-  ever written — the serialized filename is `environment.json`. A reader greps `meta.json` and finds
-  nothing on disk, or sees `store.Meta` and infers the wrong filename. (3) It pairs with
-  `store.SandboxState` (→ `state.json`), so a name aligned to its artifact (`Environment` →
-  `environment.json`) would make the type / file / comment trio consistent.
-- **Why it bothers me:** The phantom `meta.json` is the same defect class as G1's "test that lies" —
-  comments asserting a file that doesn't exist. And the vague `Meta` name is exactly what we'd want
-  to fix at the moment we carve it public (G1(b)): renaming an internal-only type is cheap now and a
-  tracked breaking change once it's pinned on the public surface.
-- **Greenfield alternative:** Two separable fixes.
-  - **(a) Kill the phantom (do anytime):** replace the `meta.json` comments with `environment.json`.
-    Comment-only; removes the inaccuracy independent of any rename.
-  - **(b) Name the carve well (rides G1(b)):** when promoting `store.Meta` to a public read-model,
-    give the public type an artifact-aligned, intent-revealing name (e.g. `Environment` /
-    `SandboxEnvironment`, paired with `State`), not `Meta`. Decide the internal `Meta → Environment`
-    rename in the same pass to close the type/file/comment mismatch end-to-end.
-- **Migration cost:** (a) is minutes (comment-only). The internal rename is mechanical churn
-  (`Meta`/`WorkdirMeta`/`DirMeta` are referenced widely). The public-name choice is free if made when
-  the carved type is created in G1(b).
-
 ## Carried forward from the prior round (status unverified — check before next empty)
 
 The 2026-05-30 Post-F5 Façade round's spine findings (F1/F2/F3/F8/F10) drove the Layer-1 work and
@@ -245,7 +215,8 @@ off-spine items were **not** part of the spine and may still be open:
 4. **G5** — Reshape the agent-interaction surface (PTY bridge + activity stream, decoupled from
    caller stdio). Independent of the read-model spine, but decide it **before** a wire protocol
    exists. (Multi-day.) **G6** folds in (hide setup-wizard pile-3) with G1(b)'s mechanism sweep.
-5. **G3 + G4 + G8(a)** — Naming/consistency sweeps, independent, fold in opportunistically. G8(a)
-   (replace the phantom `meta.json` comments with `environment.json`) is comment-only and can land
-   immediately; G8(b) (name the carved type `Environment`, not `Meta`) rides G1(b) in step 3. (Hours each.)
+5. **G3 + G4** — Naming/consistency sweeps, independent, fold in opportunistically. (Hours each.)
+   **G8 is DONE** (see resolved-critiques.md): G8(b) public name landed in G1(b)/D55
+   (`yoloai.Environment`); G8(a) phantom comments + the internal `Meta → Environment` rename
+   (incl. the breaking `Info.Meta`→`Info.Environment` field/JSON-tag change) landed 2026-06-01.
 6. **Carried-forward F6/F7/F9** — verify status; action if still open.

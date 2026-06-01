@@ -23,12 +23,12 @@ func TestApplyOverlay_NonOverlayNoop(t *testing.T) {
 	name := "apply-overlay-copy"
 	layout := testLayout(tmpDir)
 	require.NoError(t, os.MkdirAll(layout.SandboxDir(name), 0750))
-	meta := &store.Meta{
+	meta := &store.Environment{
 		Name:    name,
 		Agent:   "test",
-		Workdir: store.WorkdirMeta{HostPath: filepath.Join(tmpDir, "p"), MountPath: filepath.Join(tmpDir, "p"), Mode: store.DirModeCopy, BaselineSHA: "abc"},
+		Workdir: store.WorkdirEnvironment{HostPath: filepath.Join(tmpDir, "p"), MountPath: filepath.Join(tmpDir, "p"), Mode: store.DirModeCopy, BaselineSHA: "abc"},
 	}
-	require.NoError(t, store.SaveMeta(layout.SandboxDir(name), meta))
+	require.NoError(t, store.SaveEnvironment(layout.SandboxDir(name), meta))
 
 	result, err := ApplyOverlay(context.Background(), layout, nil, name, ApplyOverlayOptions{})
 	require.NoError(t, err)

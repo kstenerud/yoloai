@@ -17,11 +17,11 @@ import (
 )
 
 // GenerateContext builds a markdown description of the sandbox environment
-// from Meta fields. Sections are omitted when they have no content.
+// from Environment fields. Sections are omitted when they have no content.
 // sandboxDir is the per-sandbox state directory (used to compute
 // host-filesystem file/cache paths for backends that don't have a
 // runtime mount).
-func GenerateContext(sandboxDir string, meta *store.Meta) string {
+func GenerateContext(sandboxDir string, meta *store.Environment) string {
 	var b strings.Builder
 
 	b.WriteString("# Sandbox Environment\n\n")
@@ -124,7 +124,7 @@ func GenerateContext(sandboxDir string, meta *store.Meta) string {
 // Container backends use /yoloai; host-filesystem backends (seatbelt) use the
 // host sandbox dir; VM backends that declare VMRuntimeDir use that path
 // (e.g. Tart uses /Users/admin/.yoloai, the symlinked path with no spaces).
-func runtimeDir(sandboxDir string, meta *store.Meta) string {
+func runtimeDir(sandboxDir string, meta *store.Environment) string {
 	if meta.HostFilesystem {
 		return sandboxDir
 	}
@@ -156,7 +156,7 @@ func writeDir(b *strings.Builder, mountPath, hostPath string, mode store.DirMode
 
 // WriteContextFiles writes the sandbox context file and optional per-agent
 // instruction file into the sandbox directory.
-func WriteContextFiles(sandboxDir string, meta *store.Meta, agentDef *agent.Definition) error {
+func WriteContextFiles(sandboxDir string, meta *store.Environment, agentDef *agent.Definition) error {
 	content := GenerateContext(sandboxDir, meta)
 
 	// Write context.md at sandbox root (reference copy)

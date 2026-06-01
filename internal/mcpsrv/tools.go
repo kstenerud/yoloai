@@ -199,14 +199,14 @@ func (s *Server) handleSandboxStatus(ctx context.Context, req mcp.CallToolReques
 
 	// Format as JSON for easy parsing by the outer agent
 	out, _ := json.MarshalIndent(map[string]any{
-		"name":             info.Meta.Name,
+		"name":             info.Environment.Name,
 		"status":           string(info.Status),
 		"agent_status":     string(info.AgentStatus),
-		"agent":            info.Meta.Agent,
-		"model":            info.Meta.Model,
+		"agent":            info.Environment.Agent,
+		"model":            info.Environment.Model,
 		"has_changes":      info.HasChanges,
 		"disk_usage_bytes": info.DiskUsageBytes,
-		"created":          info.Meta.CreatedAt,
+		"created":          info.Environment.CreatedAt,
 	}, "", "  ")
 
 	return textResult(string(out)), nil
@@ -234,10 +234,10 @@ func (s *Server) handleSandboxList(ctx context.Context, _ mcp.CallToolRequest) (
 	entries := make([]entry, 0, len(infos))
 	for _, info := range infos {
 		entries = append(entries, entry{
-			Name:           info.Meta.Name,
+			Name:           info.Environment.Name,
 			Status:         string(info.Status),
 			AgentStatus:    string(info.AgentStatus),
-			Agent:          string(info.Meta.Agent),
+			Agent:          string(info.Environment.Agent),
 			HasChanges:     info.HasChanges,
 			DiskUsageBytes: info.DiskUsageBytes,
 		})

@@ -99,7 +99,7 @@ func mutateBaseline(ctx context.Context, layout config.Layout, rt runtime.Runtim
 	}
 	defer unlock()
 
-	meta, err := store.LoadMeta(sandboxDir)
+	meta, err := store.LoadEnvironment(sandboxDir)
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +128,7 @@ func mutateBaseline(ctx context.Context, layout config.Layout, rt runtime.Runtim
 // (compare-and-swap), returning *BaselineConflictError without writing on
 // mismatch; resolve computes the target SHA from the work dir and runs only
 // after the CAS passes. Returns the written SHA.
-func commitBaseline(sandboxDir string, meta *store.Meta, expected *string, resolve func(workDir string) (string, error)) (string, error) {
+func commitBaseline(sandboxDir string, meta *store.Environment, expected *string, resolve func(workDir string) (string, error)) (string, error) {
 	if expected != nil && meta.Workdir.BaselineSHA != *expected {
 		return "", &BaselineConflictError{Expected: *expected, Actual: meta.Workdir.BaselineSHA}
 	}
@@ -138,7 +138,7 @@ func commitBaseline(sandboxDir string, meta *store.Meta, expected *string, resol
 		return "", err
 	}
 	meta.Workdir.BaselineSHA = sha
-	if err := store.SaveMeta(sandboxDir, meta); err != nil {
+	if err := store.SaveEnvironment(sandboxDir, meta); err != nil {
 		return "", err
 	}
 	return sha, nil
@@ -154,7 +154,7 @@ func advanceBaselineUnlocked(layout config.Layout, name string, resolve func(wor
 	if err := store.RequireSandboxDir(sandboxDir); err != nil {
 		return err
 	}
-	meta, err := store.LoadMeta(sandboxDir)
+	meta, err := store.LoadEnvironment(sandboxDir)
 	if err != nil {
 		return err
 	}
@@ -193,7 +193,7 @@ func BaselineLog(ctx context.Context, layout config.Layout, rt runtime.Runtime, 
 	if err := store.RequireSandboxDir(sandboxDir); err != nil {
 		return nil, err
 	}
-	meta, err := store.LoadMeta(sandboxDir)
+	meta, err := store.LoadEnvironment(sandboxDir)
 	if err != nil {
 		return nil, err
 	}

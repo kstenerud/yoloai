@@ -212,25 +212,25 @@ type DenyResult struct {
 
 // --- helpers ---
 
-// loadMeta reads the sandbox's meta.json. The Network handle's
+// loadMeta reads the sandbox's environment.json. The Network handle's
 // methods all start with this read, so it's centralized here.
-func (n *Network) loadMeta() (*store.Meta, error) {
+func (n *Network) loadMeta() (*store.Environment, error) {
 	sandboxDir := n.s.c.layout.SandboxDir(n.s.name)
 	if err := store.RequireSandboxDir(sandboxDir); err != nil {
 		return nil, err
 	}
-	return store.LoadMeta(sandboxDir)
+	return store.LoadEnvironment(sandboxDir)
 }
 
 // requireIsolated loads meta and rejects sandboxes that aren't in
 // :isolated network mode. Returns the sandbox directory path along
 // with the loaded meta so callers don't redo path resolution.
-func (n *Network) requireIsolated() (string, *store.Meta, error) {
+func (n *Network) requireIsolated() (string, *store.Environment, error) {
 	sandboxDir := n.s.c.layout.SandboxDir(n.s.name)
 	if err := store.RequireSandboxDir(sandboxDir); err != nil {
 		return "", nil, err
 	}
-	meta, err := store.LoadMeta(sandboxDir)
+	meta, err := store.LoadEnvironment(sandboxDir)
 	if err != nil {
 		return "", nil, err
 	}
@@ -281,8 +281,8 @@ func (n *Network) tryLivePatch(ctx context.Context, script string, scriptArgs []
 // saveNetworkAllowlist persists meta + the matching runtime-config
 // patch. Lives outside Network so per-handle tests can stub it; it's
 // a thin wrapper over the existing sandbox-side primitives.
-func saveNetworkAllowlist(sandboxDir string, meta *store.Meta) error {
-	if err := store.SaveMeta(sandboxDir, meta); err != nil {
+func saveNetworkAllowlist(sandboxDir string, meta *store.Environment) error {
+	if err := store.SaveEnvironment(sandboxDir, meta); err != nil {
 		return err
 	}
 	return sandbox.PatchConfigAllowedDomains(sandboxDir, meta.NetworkAllow)
@@ -292,7 +292,7 @@ func saveNetworkAllowlist(sandboxDir string, meta *store.Meta) error {
 // entries with provenance computed from the bound agent's
 // definition. Order matches meta order; unknown agent name produces
 // all-user entries (no agent → no known requirements).
-func computeAllowedDomains(meta *store.Meta) []AllowedDomain {
+func computeAllowedDomains(meta *store.Environment) []AllowedDomain {
 	agentSet := agentDomainSet(string(meta.Agent))
 	out := make([]AllowedDomain, 0, len(meta.NetworkAllow))
 	for _, d := range meta.NetworkAllow {

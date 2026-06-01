@@ -31,15 +31,15 @@ func createNetworkSandbox(t *testing.T, name, networkMode string, domains []stri
 	sandboxDir := filepath.Join(tmpHome, ".yoloai", "sandboxes", name)
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 
-	meta := &store.Meta{
+	meta := &store.Environment{
 		Name:         name,
 		Agent:        "test",
 		Backend:      "docker",
 		NetworkMode:  networkMode,
 		NetworkAllow: domains,
-		Workdir:      store.WorkdirMeta{HostPath: "/tmp/test", MountPath: "/tmp/test", Mode: "copy"},
+		Workdir:      store.WorkdirEnvironment{HostPath: "/tmp/test", MountPath: "/tmp/test", Mode: "copy"},
 	}
-	require.NoError(t, store.SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
 	// Minimal runtime-config.json so the library's
 	// PatchConfigAllowedDomains has a target to update.

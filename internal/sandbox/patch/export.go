@@ -48,7 +48,7 @@ type ExportResult struct {
 // upper-layer diff(s) captured by running git inside the container (which must
 // be running). Never advances the baseline.
 func Export(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, opts ExportOptions) (*ExportResult, error) {
-	meta, err := store.LoadMeta(layout.SandboxDir(name))
+	meta, err := store.LoadEnvironment(layout.SandboxDir(name))
 	if err != nil {
 		return nil, err
 	}

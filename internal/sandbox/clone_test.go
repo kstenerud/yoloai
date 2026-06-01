@@ -28,19 +28,19 @@ func createCloneSource(t *testing.T, tmpDir, name string) {
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "work"), 0750))
 
-	meta := &store.Meta{
+	meta := &store.Environment{
 		Name:      name,
 		Agent:     "claude",
 		Backend:   "docker",
 		CreatedAt: time.Now().Add(-time.Hour), // created an hour ago
-		Workdir: store.WorkdirMeta{
+		Workdir: store.WorkdirEnvironment{
 			HostPath:    "/tmp/project",
 			MountPath:   "/tmp/project",
 			Mode:        "copy",
 			BaselineSHA: "abc123",
 		},
 	}
-	require.NoError(t, store.SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
 	// Add some content to clone
 	writeTestFile(t, sandboxDir, "log.txt", "session log content")
@@ -60,7 +60,7 @@ func TestClone_Success(t *testing.T) {
 	assert.DirExists(t, dstDir)
 
 	// Verify meta was updated
-	meta, err := store.LoadMeta(dstDir)
+	meta, err := store.LoadEnvironment(dstDir)
 	require.NoError(t, err)
 	assert.Equal(t, "dest", meta.Name)
 	assert.Equal(t, agent.AgentClaude, meta.Agent)
@@ -113,7 +113,7 @@ func TestClone_MetaNameAndTimestamp(t *testing.T) {
 	require.NoError(t, err)
 
 	dstDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", "dst4")
-	meta, err := store.LoadMeta(dstDir)
+	meta, err := store.LoadEnvironment(dstDir)
 	require.NoError(t, err)
 	assert.Equal(t, "dst4", meta.Name)
 	assert.False(t, meta.CreatedAt.Before(before))

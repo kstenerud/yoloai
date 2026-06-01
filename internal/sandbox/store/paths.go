@@ -1,7 +1,7 @@
 // ABOUTME: Per-sandbox subdirectory path helpers and on-disk file name constants.
 // ABOUTME: All path-construction takes a sandboxDir (from config.Layout.SandboxDir).
 // Package store manages on-disk sandbox state: directory paths, the
-// per-sandbox Meta record, and the SandboxState completion flags. All
+// per-sandbox Environment record, and the SandboxState completion flags. All
 // other sandbox/ subpackages consume types from here; this package
 // imports only the standard library, config, and internal helpers.
 //

@@ -55,7 +55,7 @@ type Layout struct {
 	//
 	// Library code that previously called os.Getuid() / os.Getgid()
 	// directly (effectiveUID in sandbox/create.go, ContainerUser in
-	// store/meta.go, the uid 0 check in containerd/containerd.go,
+	// store/environment.go, the uid 0 check in containerd/containerd.go,
 	// the caps registry's IsRoot detection) now reads these. F31
 	// (2026-05-27): same "no ambient state" discipline as HomeDir
 	// — the CLI's single licensed read (via fileutil.HostUID /

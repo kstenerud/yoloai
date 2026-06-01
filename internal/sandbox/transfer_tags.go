@@ -33,7 +33,7 @@ type TransferTagsResult struct {
 // a git repository — the apply target. Drives the CLI's non-git fallback and
 // the selective-apply precondition.
 func TargetIsGitRepo(layout config.Layout, name string) (bool, error) {
-	meta, err := store.LoadMeta(layout.SandboxDir(name))
+	meta, err := store.LoadEnvironment(layout.SandboxDir(name))
 	if err != nil {
 		return false, err
 	}
@@ -56,7 +56,7 @@ func TransferTags(layout config.Layout, name string, tags []TagInfo, shaMap map[
 	}
 
 	sandboxDir := layout.SandboxDir(name)
-	meta, err := store.LoadMeta(sandboxDir)
+	meta, err := store.LoadEnvironment(sandboxDir)
 	if err != nil {
 		return nil, err
 	}

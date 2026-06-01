@@ -159,7 +159,7 @@ func writeBugReportSandboxDetail(ctx context.Context, w io.Writer, c *yoloai.Cli
 	if err != nil {
 		fmt.Fprintf(w, "*(error inspecting sandbox: %s)*\n\n", err) //nolint:errcheck
 	} else {
-		meta := info.Meta
+		meta := info.Environment
 		fmt.Fprintf(w, "- **Name:** %s\n", meta.Name)       //nolint:errcheck
 		fmt.Fprintf(w, "- **Status:** %s\n", info.Status)   //nolint:errcheck
 		fmt.Fprintf(w, "- **Agent:** %s\n", meta.Agent)     //nolint:errcheck

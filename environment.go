@@ -1,5 +1,5 @@
-// ABOUTME: Public read-model for a sandbox's creation-time environment — a
-// ABOUTME: hand-written mirror of internal/sandbox/store.Meta that decouples the
+// ABOUTME: Public read-model for a sandbox's creation-time environment: a
+// ABOUTME: hand-written mirror of internal store.Environment, decoupling the
 // ABOUTME: public API from the on-disk environment.json schema.
 
 package yoloai
@@ -12,7 +12,7 @@ import (
 )
 
 // Environment is the configuration captured for a sandbox at creation time,
-// carried on Info.Meta. It mirrors the internal store.Meta (the on-disk
+// carried on Info.Environment. It mirrors the internal store.Environment (the on-disk
 // environment.json schema) field-for-field so embedders can read a sandbox's
 // settings without importing internal packages; the JSON tags match the
 // on-disk schema exactly, so serialized output is byte-stable. Typed fields
@@ -67,7 +67,7 @@ func (e *Environment) HasOverlayDirs() bool {
 }
 
 // WorkdirInfo is the resolved workdir state captured at creation time. Mirror
-// of the internal store.WorkdirMeta.
+// of the internal store.WorkdirEnvironment.
 type WorkdirInfo struct {
 	HostPath     string  `json:"host_path"`
 	MountPath    string  `json:"mount_path"`
@@ -77,7 +77,7 @@ type WorkdirInfo struct {
 }
 
 // DirInfo is the resolved state of an auxiliary directory captured at creation
-// time. Mirror of the internal store.DirMeta.
+// time. Mirror of the internal store.DirEnvironment.
 type DirInfo struct {
 	HostPath    string  `json:"host_path"`
 	MountPath   string  `json:"mount_path"`
@@ -85,10 +85,10 @@ type DirInfo struct {
 	BaselineSHA string  `json:"baseline_sha,omitempty"`
 }
 
-// environmentFromMeta builds the public read-model from the internal metadata.
+// environmentFromStore builds the public read-model from the internal metadata.
 // Nil-safe (returns nil for nil input); nested pointers are allocated only when
 // the source pointer is non-nil so omitempty JSON output is preserved.
-func environmentFromMeta(m *store.Meta) *Environment {
+func environmentFromStore(m *store.Environment) *Environment {
 	if m == nil {
 		return nil
 	}
@@ -102,7 +102,7 @@ func environmentFromMeta(m *store.Meta) *Environment {
 		ImageRef:           m.ImageRef,
 		Agent:              m.Agent,
 		Model:              m.Model,
-		Workdir:            workdirInfoFromMeta(m.Workdir),
+		Workdir:            workdirInfoFromStore(m.Workdir),
 		HasPrompt:          m.HasPrompt,
 		NetworkMode:        m.NetworkMode,
 		NetworkAllow:       m.NetworkAllow,
@@ -139,7 +139,7 @@ func environmentFromMeta(m *store.Meta) *Environment {
 	return env
 }
 
-func workdirInfoFromMeta(w store.WorkdirMeta) WorkdirInfo {
+func workdirInfoFromStore(w store.WorkdirEnvironment) WorkdirInfo {
 	return WorkdirInfo{
 		HostPath:     w.HostPath,
 		MountPath:    w.MountPath,
@@ -156,7 +156,7 @@ func infoFromStatus(si *sandbox.Info) *Info {
 		return nil
 	}
 	return &Info{
-		Meta:           environmentFromMeta(si.Meta),
+		Environment:    environmentFromStore(si.Environment),
 		Status:         si.Status,
 		AgentStatus:    si.AgentStatus,
 		HasChanges:     si.HasChanges,

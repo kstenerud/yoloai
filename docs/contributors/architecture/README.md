@@ -368,8 +368,8 @@ On-disk sandbox state — paths, metadata, and creation-completion flags. Leaf s
 | File | Purpose |
 |------|---------|
 | `paths.go` | `EncodePath()` / `DecodePath()` — caret encoding for filesystem-safe names. `InstanceName()`, `Dir()`, `WorkDir()`, `RequireSandboxDir()`. `OverlayUpperDir()` / `OverlayOvlworkDir()` for `:overlay` mount paths. Centralized filename constants (`EnvironmentFile`, `RuntimeConfigFile`, `AgentStatusFile`, `SandboxStateFile`, etc.) and `ErrSandboxNotFound`. |
-| `meta.go` | `Meta` / `WorkdirMeta` / `DirMeta` structs, `SaveMeta()` / `LoadMeta()` — sandbox metadata persistence as `environment.json` (legacy: `meta.json`). `Meta.Backend` records which runtime backend was used. |
-| `sandbox_state.go` | `SandboxState` struct, `LoadSandboxState()`, `SaveSandboxState()` — per-sandbox runtime state (`sandbox-state.json`, legacy: `state.json`). Tracks `agent_files_initialized` and `on_create_commands_done`. Separate from `Meta` which is immutable after creation. |
+| `environment.go` | `Environment` / `WorkdirEnvironment` / `DirEnvironment` structs, `SaveEnvironment()` / `LoadEnvironment()` — sandbox metadata persistence as `environment.json`. `Environment.Backend` records which runtime backend was used. |
+| `sandbox_state.go` | `SandboxState` struct, `LoadSandboxState()`, `SaveSandboxState()` — per-sandbox runtime state (`sandbox-state.json`, legacy: `state.json`). Tracks `agent_files_initialized` and `on_create_commands_done`. Separate from `Environment` which is immutable after creation. |
 
 ### `workspace/`
 
@@ -390,10 +390,10 @@ On-disk sandbox state — paths, metadata, and creation-completion flags. Leaf s
 High-level public API for library consumers. Wraps `sandbox.Engine` and `runtime.Runtime`. Provides `Run()`, `Diff()`, `Apply()`, `List()`, `Inspect()`, `Stop()`, `Destroy()`. Configured via `Options` (backend, logger, output, input). `RunOptions` mirrors CLI flags for `yoloai new`.
 
 ### `sandbox.Engine`
-Central orchestrator. Holds a `runtime.Runtime`, backend name, logger, and I/O streams. All sandbox operations go through it: `Create()`, `Start()`, `Stop()`, `Destroy()`, `Reset()`, `Clone()`, `Inspect()`, `List()`, `EnsureSetup()`. The backend name is stored so it can be persisted in `Meta` at sandbox creation time.
+Central orchestrator. Holds a `runtime.Runtime`, backend name, logger, and I/O streams. All sandbox operations go through it: `Create()`, `Start()`, `Stop()`, `Destroy()`, `Reset()`, `Clone()`, `Inspect()`, `List()`, `EnsureSetup()`. The backend name is stored so it can be persisted in `Environment` at sandbox creation time.
 
-### `store.Meta` / `store.WorkdirMeta` / `store.DirMeta`
-Persisted as `environment.json` (legacy: `meta.json`) in each sandbox dir. Records creation-time state: agent, model, profile, workdir path/mode/baseline SHA, auxiliary directories (via `Directories` field), network mode/allow, ports, resources, mounts, backend. Each directory (workdir and aux dirs) has its own `DirMeta` with host path, mount path, mode, and baseline SHA. Lives in `sandbox/store`.
+### `store.Environment` / `store.WorkdirEnvironment` / `store.DirEnvironment`
+Persisted as `environment.json` in each sandbox dir. Records creation-time state: agent, model, profile, workdir path/mode/baseline SHA, auxiliary directories (via `Directories` field), network mode/allow, ports, resources, mounts, backend. Each directory (workdir and aux dirs) has its own `DirEnvironment` with host path, mount path, mode, and baseline SHA. Lives in `sandbox/store`. The public `yoloai.Environment` read-model (carried on `Info.Environment`) is a hand-written field-for-field mirror.
 
 ### `store.SandboxState`
 Per-sandbox runtime state persisted as `sandbox-state.json` (legacy: `state.json`). Tracks mutable state like `agent_files_initialized` (boolean). Separate from `Meta` which is immutable after creation. Lives in `sandbox/store`.
@@ -751,9 +751,10 @@ with `mv`. The CLI confirms before emptying trash (it may hold wanted data);
 3. Imported by `runtime/docker/resources.go` and other backend resource files
 
 **Change how sandbox state is persisted:**
-1. Modify `Meta` / `DirMeta` in `sandbox/meta.go`
-2. Update `prepareSandboxState()` in `sandbox/create_prepare.go` where meta is populated
-3. Update any consumers that `LoadMeta()` and use the changed fields (e.g., diff, apply, inspect, reset)
+1. Modify `Environment` / `DirEnvironment` in `sandbox/store/environment.go`
+2. Update `prepareSandboxState()` in `sandbox/create_prepare.go` where the environment is populated
+3. Update any consumers that `LoadEnvironment()` and use the changed fields (e.g., diff, apply, inspect, reset)
+4. If the field is public, mirror it onto `yoloai.Environment` in `environment.go` and update `environmentFromStore`
 
 **Change diff/apply behavior:**
 1. Diff generation: `sandbox/diff.go`

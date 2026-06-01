@@ -90,14 +90,27 @@ and `ProfileAgentFiles`. JSON output of `profile info`/`--diff` is unchanged exc
 the `agent_files` object's inner keys, which now carry tags (`base_dir`/`files`)
 instead of emitting the Go field names (`BaseDir`/`Files`).
 
+**Sandbox read model: `Info.Meta` → `Info.Environment`.** The public `yoloai.Info`'s
+creation-time-settings field is renamed `Meta` → `Environment`, and its JSON tag
+`"meta"` → `"environment"` — aligning the Go field with the on-disk `environment.json`
+artifact it has always mirrored (the type was already `yoloai.Environment`; only the
+field name lagged). `--json` output of `sandbox info` and `list` now nests those
+settings under `"environment"` instead of `"meta"`. Go embedders rename `info.Meta`
+→ `info.Environment`. Internal-only in the same pass (no external effect):
+`store.Meta`/`WorkdirMeta`/`DirMeta` → `store.Environment`/`WorkdirEnvironment`/
+`DirEnvironment`, `LoadMeta`/`SaveMeta` → `LoadEnvironment`/`SaveEnvironment`, and the
+source file `store/meta.go` → `store/environment.go`.
+
 **Migration (Go embedders):** insert `.Sandbox(name)` and drop the `name` arg from
 per-sandbox calls; route diff/apply/export/commits/tags through `.Workdir()`;
 switch `errors.Is(err, ErrUnappliedChanges)` to
 `errors.As(err, new(*yoloai.ActiveWorkError))`; build the `Client` with an
 explicit `Backend` (`yoloai.SelectBackend(…)` or e.g. `yoloai.BackendDocker`);
 handle `*DirtyWorkdirError` (or pre-ack with `AllowDirtyWorkdir`); rename the
-`Force`/`WIP` fields as above. **CLI users:** `--include-wip`→`--include-uncommitted`,
-`--squash`→`--no-commit` (JSON `method` `"squash"`→`"no-commit"`).
+`Force`/`WIP` fields as above; rename `info.Meta`→`info.Environment`. **CLI users:**
+`--include-wip`→`--include-uncommitted`, `--squash`→`--no-commit` (JSON `method`
+`"squash"`→`"no-commit"`); `sandbox info`/`list` `--json` nest settings under
+`"environment"` (was `"meta"`).
 
 ### `yoloai system doctor` moves to `yoloai doctor`
 
