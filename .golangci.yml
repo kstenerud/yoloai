@@ -74,7 +74,7 @@ linters:
         # BackendName / IsolationMode / VMCensus re-exports and the
         # SystemClient / Client verbs), never by importing the internal/runtime
         # abstraction (or any backend subpackage) directly. This is the runtime
-        # twin of cli-sandbox-facade-scope: it keeps the CLI/MCP honest about
+        # twin of cli-sandbox-scope: it keeps the CLI/MCP honest about
         # what a separate-module daemon could do through the public surface.
         #
         # Scope: internal/cli/** and internal/mcpsrv/** (non-test). The root
@@ -92,36 +92,32 @@ linters:
           deny:
             - pkg: "github.com/kstenerud/yoloai/internal/runtime"
               desc: "internal/cli and internal/mcpsrv must not import the internal/runtime abstraction directly — use the public yoloai types (BackendName/IsolationMode/VMCensus/…) and SystemClient/Client verbs. Only internal/cli/system/tart/ is exempt (W-L13/G7)."
-        # F1 Half-B layering gate: internal/cli and internal/mcpsrv must reach
-        # sandbox behavior through the public spine (yoloai.Client / Sandbox /
-        # Workdir / SystemClient + yoloai.* re-exports), never through the
-        # internal/sandbox façade package. The façade is an internal seam, not
-        # a consumer surface; routing the CLI/MCP through it would reintroduce
-        # the layering inversion the layering-refactor branch removed.
+        # F1 Half-B + G2 layering gate: internal/cli and internal/mcpsrv must
+        # reach sandbox behavior through the public spine (yoloai.Client /
+        # Sandbox / Workdir / SystemClient + yoloai.* re-exports), never by
+        # importing the internal/sandbox façade OR any of its leaf subpackages
+        # (store / patch / archetype / status / …). The whole subtree is an
+        # internal seam, not a consumer surface; reaching into it would
+        # reintroduce the layering inversion the layering-refactor branch
+        # removed. (Half-B originally fenced only the façade and allow-listed
+        # the store/patch/archetype leaves while the CLI still read them
+        # directly; G7 gave every reach-in a public verb, so G2 drops the
+        # allow-list and the deny now covers the entire subtree by prefix.)
         #
         # Scope: the rule targets only internal/cli/** and internal/mcpsrv/**
         # (non-test). The root yoloai package (yoloai.go, sandbox.go, …) is the
-        # one sanctioned façade consumer and lives outside those globs, so it
-        # is naturally unmatched. Test files are exempt (consistent with
+        # one sanctioned consumer and lives outside those globs, so it is
+        # naturally unmatched. Test files are exempt (consistent with
         # cli-backend-scope) — fixtures may construct internal state directly.
-        #
-        # Only the façade *package* is denied. The leaf subpackages that carry
-        # shared low-level value types (store — sandbox metadata read-model;
-        # patch; archetype) stay permitted via the longer-prefix allow entries
-        # below (depguard resolves by longest-matching prefix).
-        cli-sandbox-facade-scope:
+        cli-sandbox-scope:
           list-mode: lax
           files:
             - "**/internal/cli/**"
             - "**/internal/mcpsrv/**"
             - "!$test"
-          allow:
-            - "github.com/kstenerud/yoloai/internal/sandbox/store"
-            - "github.com/kstenerud/yoloai/internal/sandbox/patch"
-            - "github.com/kstenerud/yoloai/internal/sandbox/archetype"
           deny:
             - pkg: "github.com/kstenerud/yoloai/internal/sandbox"
-              desc: "internal/cli and internal/mcpsrv must reach sandbox behavior through the public yoloai spine (Client / Sandbox / Workdir / SystemClient and yoloai.* re-exports), not the internal/sandbox façade (F1 Half-B). Leaf subpackages (store/patch/archetype) remain permitted."
+              desc: "internal/cli and internal/mcpsrv must reach sandbox behavior through the public yoloai spine (Client / Sandbox / Workdir / SystemClient and yoloai.* re-exports), not the internal/sandbox façade or any leaf subpackage (store/patch/archetype/…) — F1 Half-B + G2."
     forbidigo:
       # Ban raw os file-creation calls. Use internal/fileutil wrappers instead
       # so files are chowned to the real user when yoloai runs under sudo.
