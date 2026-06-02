@@ -28,11 +28,11 @@ func TestE2E_JSONLs(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(stdout), &result), "output should be valid JSON object")
 	assert.GreaterOrEqual(t, len(result.Sandboxes), 1)
 
-	// Each entry has shape {"meta": {"name": "..."}, ...}
+	// Each entry has shape {"environment": {"name": "..."}, ...}
 	found := false
 	for _, entry := range result.Sandboxes {
-		if meta, ok := entry["meta"].(map[string]any); ok {
-			if meta["name"] == "e2e-jsonls" {
+		if env, ok := entry["environment"].(map[string]any); ok {
+			if env["name"] == "e2e-jsonls" {
 				found = true
 				break
 			}

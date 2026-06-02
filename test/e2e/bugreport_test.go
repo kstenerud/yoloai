@@ -38,14 +38,14 @@ func runYoloaiInDir(t *testing.T, dir string, args ...string) (stdout, stderr st
 func sandboxLogsDir(t *testing.T, name string) string {
 	t.Helper()
 	home := os.Getenv("HOME")
-	return filepath.Join(home, ".yoloai", "sandboxes", name, "logs")
+	return filepath.Join(home, ".yoloai", "library", "sandboxes", name, "logs")
 }
 
 // sandboxDir returns the sandbox state directory for a sandbox using the current HOME env var.
 func sandboxStateDir(t *testing.T, name string) string {
 	t.Helper()
 	home := os.Getenv("HOME")
-	return filepath.Join(home, ".yoloai", "sandboxes", name)
+	return filepath.Join(home, ".yoloai", "library", "sandboxes", name)
 }
 
 // TestE2E_Debug_WritesCLIJSONL verifies that --debug causes debug-level entries in cli.jsonl.

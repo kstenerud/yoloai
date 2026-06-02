@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 	"github.com/kstenerud/yoloai/internal/config"
 	dockerrt "github.com/kstenerud/yoloai/internal/runtime/docker"
 	"github.com/stretchr/testify/require"
@@ -99,7 +100,15 @@ func e2eSetup(t *testing.T) string {
 	// the Docker SDK HTTP transport on the delete-then-recreate race.
 	// The subprocess inherits HOME from this process via t.Setenv, so
 	// writing the checksum here is visible to the binary we'll launch.
-	layout := config.NewLayout(filepath.Join(tmpHome, ".yoloai"))
+	// D60 bifurcates the data dir: the library realm roots at
+	// TOP/library and the CLI realm at TOP/cli. The binary's gate (D61,
+	// no auto-migrate) requires both realms to present a consistent,
+	// current install — otherwise it would route to "run yoloai system
+	// migrate" or flag an inconsistent data dir. Seed library state under
+	// TOP/library and stamp both realms at their current versions so the
+	// gate reads both OK and proceeds.
+	top := filepath.Join(tmpHome, ".yoloai")
+	layout := config.NewLayout(filepath.Join(top, "library"))
 	require.NoError(t, os.MkdirAll(layout.CacheDir(), 0750))
 	dockerrt.RecordBuildChecksum(layout, "")
 
@@ -111,6 +120,15 @@ func e2eSetup(t *testing.T) string {
 	require.NoError(t, os.MkdirAll(layout.DefaultsDir(), 0750))
 	require.NoError(t, os.WriteFile(layout.DefaultsConfigPath(),
 		[]byte("container_backend: docker\n"), 0600))
+
+	// Stamp both realms current so the startup gate proceeds.
+	require.NoError(t, config.WriteSchemaVersion(
+		config.SchemaVersionPathFor(filepath.Join(top, "library")),
+		config.LibrarySchemaVersion))
+	cliDir := filepath.Join(top, "cli")
+	require.NoError(t, os.MkdirAll(cliDir, 0750))
+	require.NoError(t, config.WriteSchemaVersion(
+		config.SchemaVersionPathFor(cliDir), cliutil.CLISchemaVersion))
 
 	projectDir := filepath.Join(t.TempDir(), "project")
 	require.NoError(t, os.MkdirAll(projectDir, 0750))

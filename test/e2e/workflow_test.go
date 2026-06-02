@@ -30,7 +30,7 @@ func TestE2E_NewDiffApplyDestroy(t *testing.T) {
 
 	// Write to the work copy. We need the sandbox dir; construct it from HOME.
 	home := os.Getenv("HOME")
-	sandboxDir := filepath.Join(home, ".yoloai", "sandboxes", "e2e-workflow")
+	sandboxDir := filepath.Join(home, ".yoloai", "library", "sandboxes", "e2e-workflow")
 	assert.DirExists(t, sandboxDir)
 
 	// Sandbox metadata is stored in environment.json.
