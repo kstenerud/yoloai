@@ -98,7 +98,7 @@ should import the root cli package back (the few tests that need
 | `client.go` | `NewRuntime`, `WithClient`, `NewSystemClient`, `AttachToSandboxByName`, `ResolveBackend`/`ResolveBackendForSandbox`, `ResolveAgent`, `ResolveModel`, `ResolveProfile`, `Coalesce`, `FlagStr`, `SandboxErrorHint`. The chokepoint that turns CLI flags into a `yoloai.Client` / `SystemClient`. |
 | `layout.go` | `Layout()` / `SetRootLayout` / `LayoutForDataDir` — points the library `config.Layout` at `$HOME/.yoloai/library` (or `DIR/library` under `--data-dir`) and threads it downward. The only sanctioned `os.UserHomeDir` call site (allowlisted in `.golangci.yml`). |
 | `clipaths.go` | `TopDir()`, `CLIDir()`, `CLIExtensionsDir()`, `CLIStatePath()`, `CLISchemaVersionPath()` + the `library`/`cli` namespace constants — the CLI-side `TOP/cli` paths that sit beside the library namespace (D60). |
-| `clischema.go` | `MigrateCLI()` — CLI layout versioning + the one-shot flat→namespaced bootstrap that relocates a pre-namespace `~/.yoloai` into `TOP/library` + `TOP/cli`, then stamps `TOP/cli/.schema-version`. |
+| `clischema.go` | CLI realm versioning: `CLIStatus()` (read-only realm check via `config.RealmStatus`), `CreateFreshCLI()` (fresh-init + stamp), and `MigrateCLI()` — the mutation-only, one-shot flat→namespaced relocation invoked **only** by `yoloai system migrate`. Errors on an unrecognized `TOP` rather than mangling it. See D60/D61. |
 | `clistate.go` | `CLIState` (`first_run_tip_shown`), `LoadCLIState()`/`SaveCLIState()`, `MaybeShowFirstRunTip()` — CLI app state under `TOP/cli/state.yaml` (replaces the library's removed `setup_complete`). |
 | `name.go` | `ResolveName` and `EnvSandboxName` — sandbox-name resolution from args / `YOLOAI_SANDBOX`. |
 | `json.go` | `--json` flag helpers: `JSONEnabled`, `WriteJSON`, `WriteJSONError`, `EffectiveYes`. |
@@ -202,7 +202,7 @@ Shared test helpers — a non-`_test.go` package importable by test files across
 | `defaults.go` | `DefaultConfigYAML` — baked-in defaults YAML (authoritative source of truth for all defaults). `DefaultGlobalConfigYAML` — default global config content. `GenerateScaffoldConfig()` — generates commented-out scaffold from baked-in YAML. |
 | `dirs.go` | Shared sandbox subdirectory name constants (`BackendDirName`, `BinDirName`, `TmuxDirName`, `AgentRuntimeDirName`). The DataDir-rooted path helpers (`SandboxesDir()`, `ProfilesDir()`, `CacheDir()`, `DefaultsDir()`, …) are `Layout` methods in `layout.go`. |
 | `profile.go` | `ProfileConfig`, `LoadProfile()`, `MergedConfig` — profile loading, inheritance chain resolution, config merging. |
-| `schema.go` | `ReadSchemaVersion()` / `WriteSchemaVersion()` — generic JSON layout stamp (`schemaStamp{Version int}`). `MigrateLibrary(layout)` brings the library DataDir up to its schema version and stamps `<DataDir>/.schema-version` (v0→v1 no-op today). The CLI's flat→namespaced bootstrap + its own stamp live in `cli/cliutil/clischema.go` (see D60). |
+| `schema.go` | `ReadSchemaVersion()` / `WriteSchemaVersion()` — plain-text-integer layout stamp. `LayoutStatus` + `RealmStatus(dataDir, version)` — the pure read-only realm check (absent/empty→Fresh, `<`→Migrate, `==`→OK, `>`→error) shared by both realms. `CreateFreshLibrary(layout)` fresh-inits + stamps; `MigrateLibrary(layout)` brings the library DataDir up to version (v0→v1 no-op today). The engine no longer auto-migrates — the startup gate + `yoloai system migrate` drive these (see D60/D61). |
 | `pathutil.go` | `ExpandPath()` — tilde and `${VAR}` expansion for config paths. |
 | `errors.go` | `UsageError` (exit 2), `ConfigError` (exit 3), sentinel errors. |
 | `names.go` | Name validation constants and regex (`ValidNameRe`, `MaxNameLength`). |
@@ -669,13 +669,23 @@ The CLI splits `~/.yoloai/` into two namespaces: `library/` (everything the
 embeddable engine owns — what the library `Layout` is pointed at) and `cli/`
 (CLI-only app state). The split is a CLI convention; an embedder that passes an
 explicit `DataDir` gets the engine subtree directly under that path, with no
-`library/` segment (see D60). Each namespace carries its own JSON
+`library/` segment (see D60). Each namespace carries its own plain-text-integer
 `.schema-version` stamp.
+
+**Startup gate (D61).** The root `PersistentPreRunE` runs a read-only migration
+gate (`internal/cli/gate.go`) before any command touches the data dir. It
+create-freshes a genuinely new install (absent/empty `TOP`), fails fast with
+"run `yoloai system migrate`" when a realm is out of date, surfaces an
+inconsistent-data-dir error when exactly one realm is uninitialized, or proceeds.
+It never migrates silently — all mutation of an existing dir lives in the
+explicit `yoloai system migrate` command (`internal/cli/system/migrate.go`).
+`version`, `help`, `completion`, and `migrate` are gate-exempt via the
+`cliutil.AnnotationSkipMigrationGate` annotation.
 
 ```
 ~/.yoloai/
 ├── cli/                     # CLI-only app state (not the library's)
-│   ├── .schema-version      # CLI layout stamp (cliutil.MigrateCLI)
+│   ├── .schema-version      # CLI realm stamp (plain int; cliutil CLIStatus/MigrateCLI)
 │   ├── state.yaml           # CLI state (first_run_tip_shown)
 │   └── extensions/
 │       └── <name>.yaml      # User-defined extension commands
@@ -687,7 +697,7 @@ explicit `DataDir` gets the engine subtree directly under that path, with no
 
 ```
 library/
-├── .schema-version      # Library layout stamp (config.MigrateLibrary)
+├── .schema-version      # Library realm stamp (plain int; config.RealmStatus/MigrateLibrary)
 ├── config.yaml              # Global config (tmux_conf, model_aliases)
 ├── defaults/
 │   ├── config.yaml          # User defaults (agent, model, isolation, etc.; active when no --profile)

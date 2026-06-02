@@ -314,7 +314,7 @@ So "data lives under `DataDir`" holds; `sandboxes/` just needs a principal parti
 
 ## D60 — Data dir bifurcation: `TOP/library` (engine) + `TOP/cli` (app); two-stamp deterministic migration; `setup_complete` killed
 
-**Date:** 2026-06-02. **Status:** Implemented (branch `layering-refactor`). **Composition:** applies §2 ("none of your business") + library-first to the on-disk layout; **refines D59's filesystem-concern taxonomy** (two entries D59 listed as "deployment, shared under `DataDir`" — `extensions/` and `state.yaml` — turn out to be *CLI-app* concerns and move *out* of the engine's `DataDir` entirely).
+**Date:** 2026-06-02. **Status:** Implemented (branch `layering-refactor`); migration *mechanism* superseded by [[#d61--startup-migration-gate-status-driven-no-auto-migrate-plain-int-stamp-explicit-yoloai-system-migrate]] (the `library/`+`cli/` layout itself stands). **Composition:** applies §2 ("none of your business") + library-first to the on-disk layout; **refines D59's filesystem-concern taxonomy** (two entries D59 listed as "deployment, shared under `DataDir`" — `extensions/` and `state.yaml` — turn out to be *CLI-app* concerns and move *out* of the engine's `DataDir` entirely).
 
 **What.** The CLI's `~/.yoloai/` splits into two sibling namespaces under one top dir:
 - `TOP/library/` — everything the embeddable engine owns: `sandboxes/`, `profiles/`, `cache/`, `trash/`, `defaults/`, `config.yaml`, `tart-base-metadata/`, `tart-base-locks/`, `docker-base-locks/`, `cni/`, `vscode-cli/`.
@@ -335,6 +335,31 @@ After the bootstrap the stamp is the **only** signal consulted — a stamped lay
 **Rejected.** (a) A single flat stamp at `TOP` — couldn't distinguish library-layout changes (which embedders also need) from CLI-app-layout changes. (b) Making the library aware of the `library/`/`cli` split — violates library-first; the engine would have to know it's nested. (c) Eagerly stamping on every run — materializes dirs for read-only commands.
 
 **Code.** `internal/cli/cliutil/clischema.go` (`MigrateCLI`, relocation), `clistate.go` (`CLIState`, `MaybeShowFirstRunTip`), `clipaths.go` (`TopDir`/`CLIDir`/namespaces), wired in `internal/cli/root.go` `PersistentPreRunE` + `internal/cli/lifecycle/new.go`. Library stamp in `internal/config/schema.go`.
+
+## D61 — Startup migration gate: status-driven, no auto-migrate; plain-int stamp; explicit `yoloai system migrate`
+
+**Date:** 2026-06-02. **Status:** Implemented (branch `layering-refactor`). **Composition:** refines D60's migration *mechanism* — the `TOP/library`+`TOP/cli` bifurcation and the flat→namespaced relocation itself are unchanged; what changes is **when** and **how** migration runs.
+
+**What.** D60's migration ran **automatically and silently** on every command (the relocation in `MigrateCLI`, plus `config.MigrateLibrary` inside the engine's `ensureLayoutScaffold`). That is gone. Startup now runs a **read-only gate** that only ever *creates a genuinely fresh install* or *reads status*; all mutation of an existing dir lives in the new explicit **`yoloai system migrate`** command.
+
+**Two symmetric realms, one shared check.** `cli` and `library` are symmetric "realms", each owning a `DataDir` (`TOP/cli`, `TOP/library`) and its own independent integer version (`cliutil.CLISchemaVersion`, `config.LibrarySchemaVersion`). A single pure check — `config.RealmStatus(dataDir, currentVersion)` — looks only at a realm's own `DataDir` + its version file, never at `TOP`, never sniffing siblings: absent/empty → **Fresh**; version `<` current → **Migrate**; `>` current → **error** (the user ran an older binary; migrate can't fix it — upgrade); `==` → **OK**.
+
+**The gate** (`internal/cli/gate.go`, run in the root `PersistentPreRunE` after `--data-dir`):
+- `TOP` absent or empty → the **only** fresh cases → create-fresh both realms, proceed.
+- `TOP` non-empty → run both realm checks: any too-new → upgrade error; **both** Fresh → `MigrationRequiredError` (a v0 flat install — `TOP` holds prior state but no realm dirs); **exactly one** Fresh → `InconsistentDataDirError` (a realm went missing; loud, does **not** point at migrate); any Migrate → `MigrationRequiredError`; else proceed. The gate **never** sniffs flat markers and never mutates except create-fresh.
+- **Exempt** (run on an un-migrated dir): `version`, `help`, `completion` (+ Cobra's `__complete*`), and `system migrate` itself — via the `cliutil.AnnotationSkipMigrationGate` annotation (not path matching). Bare `yoloai` is **not** exempt (it create-freshes an empty dir like any command).
+
+**`yoloai system migrate`** owns the messy parts: it runs `cliutil.MigrateCLI()` (the v0→v1 flat→namespaced relocation, CLI-side because the flat data sits *above* each realm's `DataDir`), then brings the library realm current (`CreateFresh` if Fresh after relocation, else `Migrate`). It **validates** that `TOP` is recognizable and **errors on garbage** rather than mangling. Idempotent ("already up to date"); partial failure is fixed by **re-running** (an OK realm is a no-op), never auto-reconciled. `--json`-aware (`{"action":"migrated"|"already-current"}`).
+
+**Plain-int version file.** The `.schema-version` stamp is now a plain-text integer (e.g. the bytes `1`), not D60's JSON `schemaStamp{Version int}`. `ReadSchemaVersion`→`strconv.Atoi(strings.TrimSpace(...))`, `WriteSchemaVersion`→`strconv.Itoa`.
+
+**Engine stops auto-migrating.** The `config.MigrateLibrary` call is removed from `internal/sandbox/engine.go`'s `ensureLayoutScaffold` (now a no-op). Fresh-create is the gate's job; migration is `system migrate`'s job; direct embedders (daemon/HTTP, who own a clean dedicated `DataDir` with no `TOP/cli` realm) call the library realm's status + create-fresh/migrate verbs on `SystemClient` themselves (`DataDirStatus`/`CreateFresh`/`Migrate`).
+
+**Why.** Silent auto-migration of user data on every run is risky and surprising — a botched relocation or a too-new binary would mutate before the user could react. A cheap read-only check that *fails fast and tells the user to run one explicit command* keeps mutation opt-in and auditable, and matches the library-first principle: the engine no longer migrates behind the embedder's back.
+
+**Rejected.** (a) Keep auto-migration but back it up first — still surprising, still mutates on a path the user didn't ask to mutate. (b) Auto-reconcile the one-realm-Fresh inconsistent case — too ambiguous to do safely; surface it loudly instead. (c) Annotate the root command to exempt bare `yoloai` — the root is an ancestor of every command, so its annotation would exempt the whole tree.
+
+**Code.** `internal/cli/gate.go` (gate + `gateExempt`), `internal/cli/root.go` (wires the gate, drops auto-`MigrateCLI`), `internal/config/schema.go` (`LayoutStatus`, `RealmStatus`, plain-int stamp, `CreateFreshLibrary`), `internal/cli/cliutil/clischema.go` (`CLIStatus`, `CreateFreshCLI`, mutation-only `MigrateCLI`), `internal/cli/system/migrate.go` (the command), `system_client.go` (`DataDirStatus`/`CreateFresh`/`Migrate`), `yoerrors` (`MigrationRequiredError`, `InconsistentDataDirError`).
 
 # Convention reminders
 

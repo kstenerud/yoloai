@@ -28,6 +28,7 @@ This is a tentative first cut — the broader greenfield doc reorg may move more
 - The architecture-remediation program: `architecture-remediation` (its one release-gated remnant, W1b, lives in `../plans/release-migration.md`).
 - Other completed: `cli-critique-deferred`, `critique-followup` (the 31-finding critique tracker), `vm-isolation-debug`, `smoke-test-redesign`.
 - Shipped, drained from the live `../design/plans/` dir: `system-repair-cleanup` (prune/doctor surface), `tagging` (sandbox/workspace tags), `exit-codes` (exit-code taxonomy), `environment-archetypes` (the `archetype/` package), `apple-runtime-caching`, `containerd-runtime` (Phases 0–3 incl. devmapper).
+- `migration-gate` — status-driven startup gate + explicit `yoloai system migrate` (D61; builds on D60's data-dir bifurcation).
 
 ### research/
 - Layering-epic spikes: `layering-cli-surface`, `layering-comparators`, `layering-leak-audit`, `layering-open-questions`, `mcp-sdk-evaluation`.

@@ -129,7 +129,7 @@ handle `*DirtyWorkdirError` (or pre-ack with `AllowDirtyWorkdir`); rename the
 `"squash"`→`"no-commit"`); `sandbox info`/`list` `--json` nest settings under
 `"environment"` (was `"meta"`).
 
-### Data directory bifurcated into `library/` (engine) + `cli/` (app); one-time automatic migration
+### Data directory bifurcated into `library/` (engine) + `cli/` (app); one-time migration via `yoloai system migrate`
 
 The CLI's `~/.yoloai/` is now split into two namespaces under the same top dir:
 
@@ -144,18 +144,23 @@ The CLI's `~/.yoloai/` is now split into two namespaces under the same top dir:
 library at `~/.yoloai/library/` and keeps its own app state in `~/.yoloai/cli/`.
 This is purely a CLI convention — **embedders that pass an explicit `--data-dir`
 (or `Options.DataDir`) still get every engine directory directly under that path,
-with no `/library` subdir.** Each namespace carries its own JSON `.schema-version`
-stamp (`<DataDir>/.schema-version` for the library, `~/.yoloai/cli/.schema-version`
-for the CLI), so future layout changes migrate independently.
+with no `/library` subdir.** Each namespace carries its own plain-text-integer
+`.schema-version` stamp (`<DataDir>/.schema-version` for the library,
+`~/.yoloai/cli/.schema-version` for the CLI), so future layout changes migrate
+independently.
 
-**Migration.** On the first run of this build against a pre-split `~/.yoloai/`
-(detected once, deterministically, by a flat `~/.yoloai/config.yaml` with no
-`~/.yoloai/library/` beside it), the CLI relocates the engine dirs into
-`library/` and `extensions/` into `cli/`, then stamps both namespaces. The moves
-are in-place renames within one filesystem (atomic, no copying). Once stamped the
-flat-detection heuristic never runs again. A brand-new install defers stamping
-until real work materializes the layout, so read-only commands like
-`yoloai version` don't create directories.
+**Migration is explicit — run `yoloai system migrate` once after upgrading.**
+yoloAI no longer migrates your data directory automatically. On startup a
+read-only check inspects each namespace's version stamp and, if your `~/.yoloai/`
+predates this layout (a flat `config.yaml` with no `library/` beside it, or an
+out-of-date stamp), the binary **fails fast** and tells you to run
+`yoloai system migrate` — it will not touch your data until you do. That one
+command relocates the engine dirs into `library/` and `extensions/` into `cli/`
+(in-place renames within one filesystem — atomic, no copying), then stamps both
+namespaces. It is idempotent and safe to re-run if it is interrupted. A brand-new
+install (absent or empty `~/.yoloai/`) is created fresh automatically on first
+use; read-only commands like `yoloai version` and `yoloai help` work regardless
+of the directory's state.
 
 **`--data-dir`.** When supplied, the CLI roots the library at `DIR/library` and
 its own state at `DIR/cli` (same split as the default). Embedders calling the Go
