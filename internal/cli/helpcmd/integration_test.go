@@ -14,6 +14,7 @@ import (
 )
 
 func TestHelpCmd_NoArgs_ShowsQuickstart(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	cmd := helpcmd.NewCmd()
 	// Give it a parent with the group so GroupID validation passes.
 	root := cli.NewRootCmd("test", "abc", "now")
@@ -29,6 +30,9 @@ func TestHelpCmd_NoArgs_ShowsQuickstart(t *testing.T) {
 }
 
 func TestBareInvocation_ShowsIntro(t *testing.T) {
+	// Bare `yoloai` is not gate-exempt; an empty HOME lets the gate
+	// create-fresh and proceed to the intro banner.
+	t.Setenv("HOME", t.TempDir())
 	root := cli.NewRootCmd("test", "abc", "now")
 	buf := new(bytes.Buffer)
 	root.SetOut(buf)

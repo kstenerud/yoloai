@@ -47,6 +47,11 @@ func cliSetup(t *testing.T) (projectDir string) {
 		dockerrt.RecordBuildChecksum(layout, "")
 	}
 
+	// Stamp both realms so the startup gate (D61) sees a consistent, current
+	// install and proceeds rather than flagging an inconsistent data dir (the
+	// seeding above populates TOP/library; see stampRealms).
+	require.NoError(t, stampRealms(tmpHome))
+
 	projectDir = filepath.Join(tmpHome, "project")
 	require.NoError(t, os.MkdirAll(projectDir, 0750))
 	require.NoError(t, os.WriteFile(

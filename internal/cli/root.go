@@ -32,8 +32,19 @@ func Execute(ctx context.Context, version, commit, date string) (exitCode int) {
 	// Track which command was active when the error occurred so we can
 	// show a context-aware help hint (e.g. "Run 'yoloai system prune -h' for help").
 	var activeCmd *cobra.Command
-	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
+	// NewRootCmd installs a PersistentPreRunE that applies --data-dir and runs
+	// the startup migration gate. Cobra runs only the most specific
+	// PersistentPreRunE, so preserve that one and run it first — both InitLogger
+	// and initBugReport touch the data dir, so they must come after the layout
+	// is resolved and the gate has created/validated it.
+	bootstrap := rootCmd.PersistentPreRunE
+	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
 		activeCmd = cmd
+		if bootstrap != nil {
+			if err := bootstrap(cmd, args); err != nil {
+				return err
+			}
+		}
 		cliutil.InitLogger(cmd)
 		return initBugReport(cmd, version, commit, date)
 	}
@@ -219,11 +230,13 @@ diff and apply what you want to keep.`,
 		if dataDir, _ := cmd.Flags().GetString("data-dir"); dataDir != "" {
 			cliutil.SetRootLayout(cliutil.LayoutForDataDir(dataDir))
 		}
-		// Run the CLI's flat -> namespaced bootstrap before any command
-		// touches the data dir. It is a no-op once the layout is stamped (and
-		// on a brand-new install), so it is cheap to run for every command;
-		// the relocation only fires once, against a pre-namespace install.
-		if err := cliutil.MigrateCLI(); err != nil {
+		// Run the read-only migration gate before any command touches the data
+		// dir: it create-freshes a genuinely new install, fails fast telling
+		// the user to run `yoloai system migrate` when the dir is out of date,
+		// or proceeds. It never migrates silently — that lives in the explicit
+		// migrate command. Exempt commands (version, help, completion, the
+		// migrate command itself) skip it.
+		if err := runMigrationGate(cmd); err != nil {
 			return err
 		}
 		if prevPersistentPreRunE != nil {

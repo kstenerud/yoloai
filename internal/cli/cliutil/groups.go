@@ -18,3 +18,15 @@ const (
 	GroupSandboxTools = "sandbox-tools"
 	GroupAdmin        = "admin"
 )
+
+// AnnotationSkipMigrationGate marks a command as exempt from the startup
+// migration gate (see internal/cli/root.go). Commands carrying this annotation
+// must run even on an un-migrated or empty data directory: `version`, `help`,
+// shell `completion`, and `system migrate` itself (which performs the
+// migration). Set it as a key in a command's Annotations map with any value.
+// The gate checks the flag on the invoked command and every ancestor.
+const AnnotationSkipMigrationGate = "yoloai_skip_migration_gate"
+
+// SkipMigrationGateAnnotations is the ready-made map to drop into a command's
+// Annotations field to exempt it from the gate.
+var SkipMigrationGateAnnotations = map[string]string{AnnotationSkipMigrationGate: "true"}

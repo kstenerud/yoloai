@@ -51,10 +51,11 @@ var topicFunc = map[string]func() string{
 
 func NewCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:     "help [topic]",
-		Short:   "Show help guides (run 'help topics' to list all)",
-		GroupID: cliutil.GroupAdmin,
-		Args:    cobra.MaximumNArgs(1),
+		Use:         "help [topic]",
+		Short:       "Show help guides (run 'help topics' to list all)",
+		GroupID:     cliutil.GroupAdmin,
+		Args:        cobra.MaximumNArgs(1),
+		Annotations: cliutil.SkipMigrationGateAnnotations,
 		RunE: func(_ *cobra.Command, args []string) error {
 			topic := ""
 			if len(args) > 0 {

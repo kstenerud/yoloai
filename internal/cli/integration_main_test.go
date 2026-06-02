@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 	"github.com/kstenerud/yoloai/internal/config"
 	dockerrt "github.com/kstenerud/yoloai/internal/runtime/docker"
 	"github.com/kstenerud/yoloai/internal/testutil"
@@ -40,6 +41,32 @@ func writeTestBackendConfig(home string) error {
 		[]byte(fmt.Sprintf("container_backend: %s\n", backend)),
 		0600,
 	)
+}
+
+// stampRealms writes the current plain-int version stamps for both the library
+// and cli realms under home/.yoloai, creating the cli realm dir. The integration
+// harnesses seed TOP/library (build checksum and/or backend config) before
+// invoking commands through the startup gate (D61); the gate then runs its
+// read-only realm checks rather than create-fresh. Without both realms stamped
+// it would flag an inconsistent data dir (library present, cli uninitialized).
+// Stamping presents a consistent, current install so the gate proceeds — it no
+// longer auto-migrates.
+func stampRealms(home string) error {
+	top := filepath.Join(home, ".yoloai")
+	if err := config.WriteSchemaVersion(
+		config.SchemaVersionPathFor(filepath.Join(top, "library")),
+		config.LibrarySchemaVersion); err != nil {
+		return fmt.Errorf("stamp library realm: %w", err)
+	}
+	cliDir := filepath.Join(top, "cli")
+	if err := os.MkdirAll(cliDir, 0750); err != nil {
+		return fmt.Errorf("create cli realm dir: %w", err)
+	}
+	if err := config.WriteSchemaVersion(
+		config.SchemaVersionPathFor(cliDir), cliutil.CLISchemaVersion); err != nil {
+		return fmt.Errorf("stamp cli realm: %w", err)
+	}
+	return nil
 }
 
 // pinPodmanSocket discovers the Podman Machine socket path using the real HOME
@@ -103,6 +130,15 @@ func TestMain(m *testing.M) {
 			os.Exit(1)
 		}
 		dockerrt.RecordBuildChecksum(integLayout, "")
+	}
+
+	// The seeding above (backend config and/or build checksum) populates
+	// TOP/library, so the startup gate (D61) sees a non-empty top dir and runs
+	// its read-only realm checks instead of create-fresh. Stamp both realms so
+	// the gate reads a consistent, current install and proceeds.
+	if err := stampRealms(tmpHome); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to stamp realms: %v\n", err)
+		os.Exit(1)
 	}
 
 	// Bootstrap: create a throwaway sandbox to trigger EnsureSetup (image build).

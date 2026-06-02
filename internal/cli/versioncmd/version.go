@@ -12,10 +12,11 @@ import (
 
 func NewCmd(version, commit, date string) *cobra.Command {
 	return &cobra.Command{
-		Use:     "version",
-		Short:   "Show version information",
-		GroupID: cliutil.GroupAdmin,
-		Args:    cobra.NoArgs,
+		Use:         "version",
+		Short:       "Show version information",
+		GroupID:     cliutil.GroupAdmin,
+		Args:        cobra.NoArgs,
+		Annotations: cliutil.SkipMigrationGateAnnotations,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if cliutil.JSONEnabled(cmd) {
 				return cliutil.WriteJSON(cmd.OutOrStdout(), map[string]string{

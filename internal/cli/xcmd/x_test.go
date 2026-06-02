@@ -11,7 +11,9 @@ import (
 	"testing"
 
 	"github.com/kstenerud/yoloai/internal/cli"
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 	"github.com/kstenerud/yoloai/internal/cli/xcmd"
+	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/extension"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -25,8 +27,17 @@ func setupExtTest(t *testing.T) string {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	extDir := filepath.Join(tmpDir, ".yoloai", "cli", "extensions")
+	top := filepath.Join(tmpDir, ".yoloai")
+	extDir := filepath.Join(top, "cli", "extensions")
 	require.NoError(t, os.MkdirAll(extDir, 0750))
+
+	// Stamp both realms at the current version so the startup migration gate
+	// proceeds for the tests that drive the command through cli.NewRootCmd
+	// (the --json cases). An unstamped cli realm + absent library realm would
+	// otherwise read as an inconsistent data dir.
+	require.NoError(t, os.MkdirAll(filepath.Join(top, "library"), 0750))
+	require.NoError(t, config.WriteSchemaVersion(config.SchemaVersionPathFor(filepath.Join(top, "cli")), cliutil.CLISchemaVersion))
+	require.NoError(t, config.WriteSchemaVersion(config.SchemaVersionPathFor(filepath.Join(top, "library")), config.LibrarySchemaVersion))
 
 	return extDir
 }
