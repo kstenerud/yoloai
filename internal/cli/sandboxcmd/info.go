@@ -73,9 +73,6 @@ func printSandboxInfo(cmd *cobra.Command, name string, info *yoloai.Info) {
 	if meta.Profile != "" {
 		fmt.Fprintf(w, "Profile:     %s\n", meta.Profile) //nolint:errcheck
 	}
-	if meta.ImageRef != "" && meta.ImageRef != "yoloai-base" {
-		fmt.Fprintf(w, "Image:       %s\n", meta.ImageRef) //nolint:errcheck
-	}
 
 	sandboxDir := cliutil.Layout().SandboxDir(name)
 	fmt.Fprintf(w, "Sandbox dir: %s\n", sandboxDir)                                        //nolint:errcheck
@@ -137,9 +134,6 @@ func printSandboxResources(w io.Writer, meta *yoloai.Environment, info *yoloai.I
 	fmt.Fprintf(w, "Created:     %s (%s)\n", meta.CreatedAt.Format("2006-01-02T15:04:05Z07:00"), cliutil.FormatAge(meta.CreatedAt)) //nolint:errcheck
 	if meta.Workdir.BaselineSHA != "" {
 		fmt.Fprintf(w, "Baseline:    %s\n", meta.Workdir.BaselineSHA) //nolint:errcheck
-	}
-	if meta.YoloaiVersion != "" {
-		fmt.Fprintf(w, "Version:     %s\n", meta.YoloaiVersion) //nolint:errcheck
 	}
 	fmt.Fprintf(w, "Disk Usage:  %s\n", cliutil.FormatDiskUsage(info.DiskUsageBytes)) //nolint:errcheck
 	fmt.Fprintf(w, "Changes:     %s\n", info.HasChanges)                              //nolint:errcheck

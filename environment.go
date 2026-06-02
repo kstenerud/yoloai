@@ -1,6 +1,5 @@
 // ABOUTME: Public read-model for a sandbox's creation-time environment: a
-// ABOUTME: hand-written mirror of internal store.Environment, decoupling the
-// ABOUTME: public API from the on-disk environment.json schema.
+// ABOUTME: curated view of the sandbox's identity, posture, and resolved config.
 
 package yoloai
 
@@ -11,43 +10,39 @@ import (
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 )
 
-// Environment is the configuration captured for a sandbox at creation time,
-// carried on Info.Environment. It mirrors the internal store.Environment (the on-disk
-// environment.json schema) field-for-field so embedders can read a sandbox's
-// settings without importing internal packages; the JSON tags match the
-// on-disk schema exactly, so serialized output is byte-stable. Typed fields
-// reuse the public aliases (BackendName, AgentName, IsolationMode, DirMode).
+// Environment is the curated read-model of a sandbox captured at creation time,
+// carried on Info.Environment. It exposes the sandbox's identity and security
+// posture, its as-built workdir/aux-dir provenance, and an echo of the resolved
+// configuration an embedder would render or decide from. Internal mechanism
+// fields (on-disk schema version, image ref, prompt/debug/userns/vscode flags)
+// are deliberately omitted — they describe *how* containment is achieved, not
+// the sandbox a consumer reasons about. Typed fields reuse the public aliases
+// (BackendName, AgentName, IsolationMode, DirMode, NetworkMode).
 type Environment struct {
-	Version       int         `json:"version"`
-	YoloaiVersion string      `json:"yoloai_version"`
-	Name          string      `json:"name"`
-	CreatedAt     time.Time   `json:"created_at"`
-	Backend       BackendName `json:"backend"`
-	Profile       string      `json:"profile,omitempty"`
-	ImageRef      string      `json:"image_ref,omitempty"`
+	// Identity & posture.
+	Name           string        `json:"name"`
+	CreatedAt      time.Time     `json:"created_at"`
+	Backend        BackendName   `json:"backend"`
+	Profile        string        `json:"profile,omitempty"`
+	Agent          AgentName     `json:"agent"`
+	Model          string        `json:"model,omitempty"`
+	Isolation      IsolationMode `json:"isolation,omitempty"`
+	HostFilesystem bool          `json:"host_filesystem,omitempty"`
 
-	Agent AgentName `json:"agent"`
-	Model string    `json:"model,omitempty"`
-
+	// As-built provenance.
 	Workdir     WorkdirInfo `json:"workdir"`
 	Directories []DirInfo   `json:"directories,omitempty"`
 
-	HasPrompt          bool              `json:"has_prompt"`
-	NetworkMode        string            `json:"network_mode,omitempty"`
+	// Resolved-config echo.
+	NetworkMode        NetworkMode       `json:"network_mode,omitempty"`
 	NetworkAllow       []string          `json:"network_allow,omitempty"`
 	Ports              []string          `json:"ports,omitempty"`
 	Resources          *ProfileResources `json:"resources,omitempty"`
 	Mounts             []string          `json:"mounts,omitempty"`
+	Setup              []string          `json:"setup,omitempty"`
 	CapAdd             []string          `json:"cap_add,omitempty"`
 	Devices            []string          `json:"devices,omitempty"`
-	Setup              []string          `json:"setup,omitempty"`
 	AutoCommitInterval int               `json:"auto_commit_interval,omitempty"`
-	Debug              bool              `json:"debug,omitempty"`
-	UsernsMode         string            `json:"userns_mode,omitempty"`
-	Isolation          IsolationMode     `json:"isolation,omitempty"`
-	HostFilesystem     bool              `json:"host_filesystem,omitempty"`
-	VscodeTunnel       bool              `json:"vscode_tunnel,omitempty"`
-	Archetype          string            `json:"archetype,omitempty"`
 }
 
 // HasOverlayDirs reports whether the workdir or any auxiliary directory uses
@@ -69,11 +64,10 @@ func (e *Environment) HasOverlayDirs() bool {
 // WorkdirInfo is the resolved workdir state captured at creation time. Mirror
 // of the internal store.WorkdirEnvironment.
 type WorkdirInfo struct {
-	HostPath     string  `json:"host_path"`
-	MountPath    string  `json:"mount_path"`
-	Mode         DirMode `json:"mode"`
-	BaselineSHA  string  `json:"baseline_sha,omitempty"`
-	InceptionSHA string  `json:"inception_sha,omitempty"`
+	HostPath    string  `json:"host_path"`
+	MountPath   string  `json:"mount_path"`
+	Mode        DirMode `json:"mode"`
+	BaselineSHA string  `json:"baseline_sha,omitempty"`
 }
 
 // DirInfo is the resolved state of an auxiliary directory captured at creation
@@ -87,37 +81,30 @@ type DirInfo struct {
 
 // environmentFromStore builds the public read-model from the internal metadata.
 // Nil-safe (returns nil for nil input); nested pointers are allocated only when
-// the source pointer is non-nil so omitempty JSON output is preserved.
+// the source pointer is non-nil so omitempty JSON output is preserved. Internal
+// mechanism fields on store.Environment are intentionally not copied across.
 func environmentFromStore(m *store.Environment) *Environment {
 	if m == nil {
 		return nil
 	}
 	env := &Environment{
-		Version:            m.Version,
-		YoloaiVersion:      m.YoloaiVersion,
 		Name:               m.Name,
 		CreatedAt:          m.CreatedAt,
 		Backend:            m.Backend,
 		Profile:            m.Profile,
-		ImageRef:           m.ImageRef,
 		Agent:              m.Agent,
 		Model:              m.Model,
+		Isolation:          m.Isolation,
+		HostFilesystem:     m.HostFilesystem,
 		Workdir:            workdirInfoFromStore(m.Workdir),
-		HasPrompt:          m.HasPrompt,
-		NetworkMode:        m.NetworkMode,
+		NetworkMode:        NetworkMode(m.NetworkMode),
 		NetworkAllow:       m.NetworkAllow,
 		Ports:              m.Ports,
 		Mounts:             m.Mounts,
+		Setup:              m.Setup,
 		CapAdd:             m.CapAdd,
 		Devices:            m.Devices,
-		Setup:              m.Setup,
 		AutoCommitInterval: m.AutoCommitInterval,
-		Debug:              m.Debug,
-		UsernsMode:         m.UsernsMode,
-		Isolation:          m.Isolation,
-		HostFilesystem:     m.HostFilesystem,
-		VscodeTunnel:       m.VscodeTunnel,
-		Archetype:          m.Archetype,
 	}
 	if len(m.Directories) > 0 {
 		env.Directories = make([]DirInfo, len(m.Directories))
@@ -141,11 +128,10 @@ func environmentFromStore(m *store.Environment) *Environment {
 
 func workdirInfoFromStore(w store.WorkdirEnvironment) WorkdirInfo {
 	return WorkdirInfo{
-		HostPath:     w.HostPath,
-		MountPath:    w.MountPath,
-		Mode:         w.Mode,
-		BaselineSHA:  w.BaselineSHA,
-		InceptionSHA: w.InceptionSHA,
+		HostPath:    w.HostPath,
+		MountPath:   w.MountPath,
+		Mode:        w.Mode,
+		BaselineSHA: w.BaselineSHA,
 	}
 }
 

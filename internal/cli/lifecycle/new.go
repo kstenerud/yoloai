@@ -344,7 +344,7 @@ func executeNewCreate(cmd *cobra.Command, ctx context.Context, c *yoloai.Client,
 	// stderr — the stream the Engine's creation output used — keeping human
 	// output cohesive there (stdout is reserved for --json).
 	if meta, loadErr := cliutil.NewSystemClient().SandboxMetadata(opts.Name); loadErr == nil {
-		printCreateSummary(cmd.ErrOrStderr(), meta)
+		printCreateSummary(cmd.ErrOrStderr(), meta, opts.Prompt != "", opts.VscodeTunnel)
 	}
 
 	if sandboxName == "" || !attach || opts.NoStart {
@@ -361,7 +361,7 @@ func executeNewCreate(cmd *cobra.Command, ctx context.Context, c *yoloai.Client,
 // printCreateSummary renders the post-create summary + next-step hints from the
 // created sandbox's metadata. The library returns the sandbox; the CLI owns this
 // presentation (F8).
-func printCreateSummary(out io.Writer, meta *yoloai.Environment) {
+func printCreateSummary(out io.Writer, meta *yoloai.Environment, hasPrompt, vscodeTunnel bool) {
 	fmt.Fprintf(out, "Sandbox %s created\n", meta.Name) //nolint:errcheck // best-effort output
 	fmt.Fprintf(out, "  Agent:    %s\n", meta.Agent)    //nolint:errcheck // best-effort output
 	if meta.Profile != "" {
@@ -390,13 +390,13 @@ func printCreateSummary(out io.Writer, meta *yoloai.Environment) {
 	}
 	fmt.Fprintln(out) //nolint:errcheck // best-effort output
 
-	if meta.HasPrompt {
+	if hasPrompt {
 		fmt.Fprintf(out, "Run 'yoloai attach %s' to interact (Ctrl-b d to detach)\n", meta.Name) //nolint:errcheck // best-effort output
 		fmt.Fprintf(out, "    'yoloai diff %s' when done\n", meta.Name)                          //nolint:errcheck // best-effort output
 	} else {
 		fmt.Fprintf(out, "Run 'yoloai attach %s' to start working (Ctrl-b d to detach)\n", meta.Name) //nolint:errcheck // best-effort output
 	}
-	if meta.VscodeTunnel {
+	if vscodeTunnel {
 		fmt.Fprintln(out, "\nVS Code tunnel starting in the 'vscode-tunnel' tmux window.")          //nolint:errcheck // best-effort output
 		fmt.Fprintln(out, "Run 'yoloai help vscode-tunnel' for setup and connection instructions.") //nolint:errcheck // best-effort output
 	}

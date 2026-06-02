@@ -101,6 +101,23 @@ settings under `"environment"` instead of `"meta"`. Go embedders rename `info.Me
 `DirEnvironment`, `LoadMeta`/`SaveMeta` → `LoadEnvironment`/`SaveEnvironment`, and the
 source file `store/meta.go` → `store/environment.go`.
 
+**Sandbox read model curated (D53): `Environment` no longer mirrors `environment.json`
+field-for-field.** The public `yoloai.Environment` was a 1:1 mirror of the internal
+on-disk schema; it is now a curated view of the sandbox a consumer reasons about —
+identity & posture, as-built workdir/aux-dir provenance, and an echo of the resolved
+config. Pure-mechanism fields are dropped from the public type (and its `--json`):
+`version`, `yoloai_version`, `image_ref`, `has_prompt`, `debug`, `userns_mode`,
+`archetype`, `vscode_tunnel`, and `WorkdirInfo.inception_sha`. The internal
+`store.Environment` keeps all of them; only the public read-model is trimmed.
+`Environment.NetworkMode` is now the typed `yoloai.NetworkMode` enum (was a bare
+`string`); it marshals to the same JSON string, so `--json` network output is
+byte-stable. `sandbox info` human output drops the `Image:` and `Version:` lines.
+
+**Migration (Go embedders):** if you read any dropped field off `Info.Environment`,
+source it elsewhere — the create-time options you passed, or (for diagnostics) a
+future dedicated surface; none of the dropped fields described the sandbox a
+consumer renders or decides from.
+
 **Migration (Go embedders):** insert `.Sandbox(name)` and drop the `name` arg from
 per-sandbox calls; route diff/apply/export/commits/tags through `.Workdir()`;
 switch `errors.Is(err, ErrUnappliedChanges)` to
