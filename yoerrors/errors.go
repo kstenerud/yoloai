@@ -35,6 +35,9 @@ const (
 	ExitDiskSpace     = 10
 	ExitResourceLimit = 11
 	ExitDirtyWorkdir  = 12
+
+	ExitMigrationRequired   = 13
+	ExitInconsistentDataDir = 14
 )
 
 // ExitCoder is implemented by typed errors that map to a specific
@@ -114,6 +117,49 @@ func (e *DirtyWorkdirError) Error() string {
 	return b.String()
 }
 func (e *DirtyWorkdirError) ExitCode() int { return ExitDirtyWorkdir }
+
+// MigrationRequiredError indicates the on-disk data directory predates the
+// current build's layout and must be migrated before yoloai can run (exit
+// code 13). The binary fails fast rather than migrating silently; the user
+// brings the directory current with an explicit command. Namespace names the
+// realm that triggered the verdict ("cli", "library", or "" for a whole-dir
+// v0 install) purely for the diagnostic; the recovery is the same regardless.
+type MigrationRequiredError struct {
+	Namespace string
+}
+
+func (e *MigrationRequiredError) Error() string {
+	if e.Namespace != "" {
+		return fmt.Sprintf("%s data directory is out of date; run 'yoloai system migrate'", e.Namespace)
+	}
+	return "data directory is out of date; run 'yoloai system migrate'"
+}
+func (e *MigrationRequiredError) ExitCode() int { return ExitMigrationRequired }
+
+// NewMigrationRequiredError reports that the given realm (or the whole data
+// directory, when namespace is "") needs migration.
+func NewMigrationRequiredError(namespace string) *MigrationRequiredError {
+	return &MigrationRequiredError{Namespace: namespace}
+}
+
+// InconsistentDataDirError indicates the data directory is in a state the
+// gate cannot reconcile: some realms look fresh while others are already
+// populated (exit code 14). This should not happen in normal use — a realm
+// went missing from an otherwise-present install — so the message is loud
+// and deliberately does NOT point at 'system migrate', which cannot safely
+// sort out a half-present directory.
+type InconsistentDataDirError struct {
+	Err error
+}
+
+func (e *InconsistentDataDirError) Error() string { return e.Err.Error() }
+func (e *InconsistentDataDirError) Unwrap() error { return e.Err }
+func (e *InconsistentDataDirError) ExitCode() int { return ExitInconsistentDataDir }
+
+// NewInconsistentDataDirError wraps a message as an InconsistentDataDirError.
+func NewInconsistentDataDirError(format string, args ...any) *InconsistentDataDirError {
+	return &InconsistentDataDirError{Err: fmt.Errorf(format, args...)}
+}
 
 // DependencyError indicates required software is not installed or not running (exit code 5).
 type DependencyError struct{ Err error }
