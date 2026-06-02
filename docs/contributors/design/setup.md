@@ -2,33 +2,35 @@
 
 ## First-Run Experience
 
-### Setup tracking
+There is no `setup_complete` flag and no interactive prompt on `yoloai new`. First-run readiness is split into a non-interactive library step and an opt-in CLI wizard.
 
-`state.yaml` includes a `setup_complete` field (boolean, default `false`). This is the sole signal for whether the first-run experience has been completed. The field is explicitly set to `true` only after setup finishes successfully. This decouples first-run detection from config file existence — we can create/modify config files at any point without accidentally suppressing the new-user prompts.
+### `EnsureSetup` (library, non-interactive)
 
-### `EnsureSetup` (runs on every `yoloai new`)
+`EnsureSetup` runs at the start of `Client.Create` (and from the MCP server). It is idempotent, safe to call on every run, and **never prompts** — "wizard-has-run" ceremony is the app's concern, not the library's. It:
 
-`EnsureSetup` is called at the start of `yoloai new`. It is idempotent and safe to call repeatedly:
+1. Scaffolds the data directory if absent (the library owns everything under its `DataDir`; under the CLI that root is `~/.yoloai/library/`).
+2. Writes a default `config.yaml` with opinionated declarative defaults if missing — notably `tmux_conf: default+host`, so the common case "just works" with no question asked.
+3. Seeds `Dockerfile.base` and `entrypoint.sh` (overwriting only when the embedded version changed).
+4. Builds the base image if missing or outdated.
 
-1. Create `~/.yoloai/` directory structure if absent.
-2. Write a default `config.yaml` with sensible defaults if missing.
-3. Seed Dockerfile.base and entrypoint.sh (overwrite if embedded version changed).
-4. Build the base image if missing or outdated.
-5. **If `setup_complete` is false:** run the new-user experience (see below).
-6. Print shell completion instructions (first run only).
+The data directory itself is *created/validated* by the startup gate, not by setup — see the migration-gate design ([`archive/plans/migration-gate.md`](../archive/plans/migration-gate.md)). On an un-migrated install the gate fails fast and tells the user to run `yoloai system migrate`; it never auto-migrates.
 
-Steps 1-4 are non-interactive and always run. Step 5 is interactive and only runs during `yoloai new` (not `start`, `attach`, etc.) because `new` is the most likely first command and has access to stdin.
+### One-time CLI tip (app-side)
 
-### New-user experience (step 5)
+After the first successful `yoloai new`, the CLI prints a single onboarding nudge ("enable shell completions"). This is app state, keyed off `first_run_tip_shown` in `~/.yoloai/cli/state.yaml` (the CLI realm) — *not* library state. Migration carries a legacy `setup_complete: true` forward to `first_run_tip_shown: true`, so upgraders don't see the tip again.
 
-When `setup_complete` is false, `EnsureSetup` runs an interactive prompt sequence. Currently the only prompt is tmux configuration, but the framework supports adding future prompts without changing the detection mechanism.
+### `yoloai system setup` (the only interactive path)
+
+The dedicated, opt-in wizard. It is the sole place that prompts the user. It inspects the host via `SystemClient.SetupStatus`, prompts for tmux config / default backend / default agent, then writes the answers via the non-interactive `SystemClient.Setup` (Q-F: prompts live in the CLI; the library `Setup` takes resolved options and never reads stdin). Re-runnable at any time to redo choices.
+
+**`--agent`, `--backend`, `--tmux-conf` flags** skip the matching prompt by supplying the choice directly (for automation: Ansible, dotfiles scripts, CI). Backend/agent prompts are also skipped automatically when only one option is available.
 
 **Tmux configuration prompt:**
 
 Detect the user's `~/.tmux.conf` and classify:
-- **No config exists:** New user. Show yoloai's defaults and prompt.
+- **No config exists:** Show yoloai's defaults and prompt.
 - **Small config (≤10 significant lines):** Likely a new user who cobbled together just enough to make tmux work. Show their config, show ours, prompt.
-- **Large config (>10 significant lines):** Power user. Skip the prompt, use `host` mode (their config sourced after ours).
+- **Large config (>10 significant lines):** Power user. Skip the prompt and auto-pick `default+host` (their config sourced after ours).
 
 "Significant lines" = non-blank, non-comment lines (after stripping leading whitespace and `#`-prefixed lines).
 
@@ -47,27 +49,15 @@ Your config (~/.tmux.conf):
   [p] Print merged config and exit (for manual review)
 ```
 
-- **`Y` (default):** Set `tmux_conf: default+host` in config. yoloai defaults sourced first, user config sourced second. User settings win on conflict (tmux is purely last-write-wins, no subtle ordering issues). Set `setup_complete: true`.
-- **`n`:** Set `tmux_conf: host`. Only user's config is used, no yoloai defaults. Set `setup_complete: true`.
-- **`p`:** Print the concatenated config (yoloai defaults + user config) to stdout and exit. Do **not** set `setup_complete: true`. User can review, hand-edit their `~/.tmux.conf`, and run `yoloai new` again — the prompt re-fires because `setup_complete` is still false.
+- **`Y` (default):** `tmux_conf: default+host` — yoloai defaults sourced first, user config second; user settings win on conflict (tmux is last-write-wins, no subtle ordering issues).
+- **`n`:** `tmux_conf: host` (no-config case: `none`, raw tmux). Only the user's config is used.
+- **`p`:** Print the concatenated config to stdout and exit **without writing** anything. The user can review, hand-edit their `~/.tmux.conf`, and re-run `yoloai system setup`.
 
-For the no-config case, `[n]` means raw tmux defaults (equivalent to `tmux_conf: none`), and `[p]` prints only yoloai's defaults.
-
-After all prompts complete successfully, set `setup_complete: true` in `state.yaml` and print:
+On completion the wizard prints:
 
 ```
 Setup complete. To re-run setup at any time: yoloai system setup
 ```
-
-### `yoloai system setup`
-
-Dedicated interactive setup command. Always runs the full new-user experience regardless of `setup_complete` — treats it as if `setup_complete` is false. This lets users redo their choices if they regret something. Shows current settings as defaults in prompts (e.g., if `tmux_conf` is already `host`, the `[n]` option is pre-selected).
-
-**`--agent`, `--backend`, `--tmux-conf` flags:** Skip interactive prompts by specifying choices directly. For automation (Ansible, dotfiles scripts, CI):
-- No `~/.tmux.conf` exists → set `tmux_conf: default` (yoloai defaults only).
-- `~/.tmux.conf` exists → set `tmux_conf: default+host` (yoloai defaults + user config, no questions asked — assume they know what they want). Power users who want *only* their config can set `tmux_conf: host` in `config.yaml` directly. Power users who want *only* yoloai defaults can supply an empty `~/.tmux.conf`.
-- Perform non-interactive steps (directory creation, image build).
-- Set `setup_complete: true` and exit.
 
 ## Tmux Configuration
 

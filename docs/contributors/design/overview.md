@@ -57,7 +57,7 @@ Run AI coding CLI agents (Claude Code, Codex, and others) with their sandbox-byp
 │    ├─ docker run ──► sandbox-2                             │
 │    └─ ...                                                  │
 │                                                            │
-│  ~/.yoloai/sandboxes/<name>/  ← persistent state           │
+│  ~/.yoloai/library/sandboxes/<name>/  ← persistent state   │
 │    ├── work/          (overlay upper dirs or full copies)  │
 │    ├── agent-state/  (agent's state directory)             │
 │    ├── log.txt        (session output)                     │
@@ -71,7 +71,7 @@ Run AI coding CLI agents (Claude Code, Codex, and others) with their sandbox-byp
 - Works natively on Linux/macOS, inside LXC with Proxmox nesting enabled, etc.
 - Provides process, filesystem, and network namespace isolation
 - Ephemeral by default — `docker rm` and it's gone
-- All persistent state lives on the host in `~/.yoloai/sandboxes/`
+- All persistent state lives on the host in `~/.yoloai/library/sandboxes/`
 
 ### Key Principle: Containers are ephemeral, state is not
 
@@ -139,39 +139,50 @@ Field notes:
 
 ## Directory Layout
 
+The data directory is bifurcated (D60) into two realms under the top-level
+`~/.yoloai/`: `library/` holds everything the engine owns (the library's
+`Layout.DataDir` roots here), and `cli/` holds CLI-only application state.
+Each realm carries its own plain-int `.schema-version` stamp. An embedder
+that passes an explicit `DataDir` gets the `library/` subtree directly — no
+`/library` segment is inserted.
+
 ```
-~/.yoloai/
-├── state.yaml                   ← global state (setup_complete)
-├── cache/
-│   └── overlay-support          ← cached overlay detection result
-├── extensions/
-│   ├── lint.yaml                ← user-defined extension (one file per command)
-│   └── review.yaml
-├── defaults/
-│   ├── config.yaml              ← user defaults (agent, model, isolation, etc.; active when no --profile)
-│   └── tmux.conf                ← optional tmux config (overrides baked-in default)
-├── profiles/
-│   ├── go-dev/
-│   │   ├── Dockerfile           ← FROM yoloai base image
-│   │   ├── config.yaml          ← profile settings (merged over baked-in defaults, not over defaults/)
-│   │   └── tmux.conf            ← optional
-│   └── node-dev/
-│       ├── Dockerfile
-│       └── config.yaml
-├── config.yaml                  ← global config (tmux_conf, model_aliases; always active)
-└── sandboxes/
-    └── <name>/
-        ├── environment.json     ← original paths, mode, profile, timestamps
-        ├── config.json          ← entrypoint configuration (bind-mounted into container)
-        ├── state.json           ← runtime state (agent files initialized, etc.)
-        ├── prompt.txt           ← initial prompt (if provided)
-        ├── log.txt              ← tmux session log
-        ├── agent-state/         ← agent's state directory (per-sandbox, read-write)
-        ├── files/               ← bidirectional file exchange (mounted at /yoloai/files/)
-        ├── cache/               ← agent cache (HTTP responses, cloned repos; mounted at /yoloai/cache/)
-        └── work/                ← overlay upper dirs (deltas) or full copies, for :copy dirs only
-            ├── ^2Fhome^2Fuser^2Fmy-app/    ← caret-encoded host path
-            └── ^2Fhome^2Fuser^2Fshared/    ← (one subdir per :copy directory)
+~/.yoloai/                       ← top-level (TOP); the gate keys off this
+├── library/                     ← engine realm (library Layout.DataDir)
+│   ├── .schema-version          ← plain-int on-disk schema version
+│   ├── config.yaml              ← global config (tmux_conf, model_aliases; always active)
+│   ├── cache/
+│   │   └── overlay-support      ← cached overlay detection result
+│   ├── defaults/
+│   │   ├── config.yaml          ← user defaults (agent, model, isolation, etc.; active when no --profile)
+│   │   └── tmux.conf            ← optional tmux config (overrides baked-in default)
+│   ├── profiles/
+│   │   ├── go-dev/
+│   │   │   ├── Dockerfile       ← FROM yoloai base image
+│   │   │   ├── config.yaml      ← profile settings (merged over baked-in defaults, not over defaults/)
+│   │   │   └── tmux.conf        ← optional
+│   │   └── node-dev/
+│   │       ├── Dockerfile
+│   │       └── config.yaml
+│   └── sandboxes/
+│       └── <name>/
+│           ├── environment.json ← original paths, mode, profile, timestamps
+│           ├── config.json      ← entrypoint configuration (bind-mounted into container)
+│           ├── state.json       ← runtime state (agent files initialized, etc.)
+│           ├── prompt.txt       ← initial prompt (if provided)
+│           ├── log.txt          ← tmux session log
+│           ├── agent-state/     ← agent's state directory (per-sandbox, read-write)
+│           ├── files/           ← bidirectional file exchange (mounted at /yoloai/files/)
+│           ├── cache/           ← agent cache (HTTP responses, cloned repos; mounted at /yoloai/cache/)
+│           └── work/            ← overlay upper dirs (deltas) or full copies, for :copy dirs only
+│               ├── ^2Fhome^2Fuser^2Fmy-app/    ← caret-encoded host path
+│               └── ^2Fhome^2Fuser^2Fshared/    ← (one subdir per :copy directory)
+└── cli/                         ← CLI realm (application-only state)
+    ├── .schema-version          ← plain-int on-disk schema version
+    ├── state.yaml               ← CLI state (first_run_tip_shown)
+    └── extensions/
+        ├── lint.yaml            ← user-defined extension (one file per command)
+        └── review.yaml
 ```
 
 ## Prerequisites

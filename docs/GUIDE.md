@@ -132,11 +132,11 @@ For large projects where copy speed is a concern, use `:overlay` mode — it pro
 
 When creating sandboxes in `:copy` mode, yoloAI automatically excludes common build artifacts that would cause compilation failures inside the container. Build tools like Swift, Xcode, and npm embed hardcoded absolute paths in their build artifacts. When copied to the sandbox, these mismatched paths break builds.
 
-**Example:** Swift Package Manager creates precompiled header (PCH) files in `.build/` containing paths like `/Users/user/project/.build/...`. When this directory is copied to the sandbox at `/Users/user/.yoloai/sandboxes/name/work/...`, Swift rejects the PCH files:
+**Example:** Swift Package Manager creates precompiled header (PCH) files in `.build/` containing paths like `/Users/user/project/.build/...`. When this directory is copied to the sandbox at `/Users/user/.yoloai/library/sandboxes/name/work/...`, Swift rejects the PCH files:
 
 ```
 error: PCH was compiled with module cache path '/Users/user/project/.build/...'
-but the path is currently '/Users/user/.yoloai/sandboxes/name/work/.build/...'
+but the path is currently '/Users/user/.yoloai/library/sandboxes/name/work/.build/...'
 ```
 
 **Excluded artifacts:**
@@ -224,7 +224,7 @@ yoloai new task ./my-project --agent opencode --model openai/gpt-4o # explicit p
 
 ### Custom Model Aliases
 
-You can define custom model aliases or pin versions in your global config (`~/.yoloai/config.yaml`):
+You can define custom model aliases or pin versions in your global config (`~/.yoloai/library/config.yaml`):
 
 ```bash
 # Pin sonnet to a specific version
@@ -496,7 +496,7 @@ yoloai apply task --force
 
 ## How It Works
 
-1. **`yoloai new`** copies your project into `~/.yoloai/sandboxes/<name>/work/`, creates a git baseline commit, and launches a Docker container running the agent.
+1. **`yoloai new`** copies your project into `~/.yoloai/library/sandboxes/<name>/work/`, creates a git baseline commit, and launches a Docker container running the agent.
 
 2. **The agent works inside the container** on the copy. Your original files are never touched.
 
@@ -508,9 +508,13 @@ yoloai apply task --force
 
 ## Configuration
 
-On first run, yoloAI creates two config files:
-- `~/.yoloai/config.yaml` — global settings (tmux_conf, model_aliases)
-- `~/.yoloai/defaults/config.yaml` — user defaults (agent, model, isolation, env, etc.)
+On first run, yoloAI creates its data directory at `~/.yoloai/`, split into two areas:
+- `~/.yoloai/library/` — engine state: sandboxes, profiles, caches, and your config files
+  - `~/.yoloai/library/config.yaml` — global settings (tmux_conf, model_aliases)
+  - `~/.yoloai/library/defaults/config.yaml` — user defaults (agent, model, isolation, env, etc.)
+- `~/.yoloai/cli/` — CLI application state (extensions, first-run flag)
+
+> **Upgrading from an older layout:** yoloAI no longer migrates your data directory automatically. If you upgrade from a pre-bifurcation install (a flat `~/.yoloai/` with `config.yaml` and `sandboxes/` directly inside it), the binary stops and tells you to run `yoloai system migrate` once — it relocates your existing data into the `library/` + `cli/` layout. The command is idempotent, so re-run it if it's interrupted.
 
 Use `yoloai config` to view and change settings (keys are automatically routed to the correct file):
 
@@ -553,10 +557,8 @@ yoloai config reset env.OLLAMA_API_BASE
 | `cap_add` | (empty) | Additional Linux capabilities (list, e.g. `SYS_PTRACE`) |
 | `devices` | (empty) | Device mappings (list of `/dev/` paths) |
 | `setup` | (empty) | Shell commands to run inside the container on first start (list) |
-| `tmux_conf` | (set by setup) | Tmux config mode (global config) |
+| `tmux_conf` | `default+host` | Tmux config mode (global config): `default+host` sources yoloAI defaults then your `~/.tmux.conf`; `host` uses only yours |
 | `model_aliases.<alias>` | (empty) | Custom model alias (global config) |
-
-Operational state (`setup_complete`) is stored in `~/.yoloai/state.yaml`, separate from config.
 
 Agent resolution: `new` uses `--agent` flag > `agent` in config > `"claude"`.
 
@@ -575,7 +577,7 @@ Two forms are supported:
 **String form** — a base directory. yoloAI derives the agent-specific subdirectory automatically:
 
 ```yaml
-# In ~/.yoloai/defaults/config.yaml
+# In ~/.yoloai/library/defaults/config.yaml
 agent_files: "${HOME}"
 # Claude sandbox → copies from ~/.claude/ (minus excluded files)
 # Gemini sandbox → copies from ~/.gemini/
@@ -584,7 +586,7 @@ agent_files: "${HOME}"
 **List form** — explicit file/directory paths copied into `agent-state/`:
 
 ```yaml
-# In ~/.yoloai/defaults/config.yaml
+# In ~/.yoloai/library/defaults/config.yaml
 agent_files:
   - ~/.claude/settings.json
   - /shared/team-configs/CLAUDE.md
@@ -601,10 +603,10 @@ You can also edit the config files directly — `config set` preserves comments 
 
 ## Sandbox State
 
-All sandbox state lives on the host at `~/.yoloai/sandboxes/<name>/`:
+All sandbox state lives on the host at `~/.yoloai/library/sandboxes/<name>/`:
 
 ```
-~/.yoloai/sandboxes/<name>/
+~/.yoloai/library/sandboxes/<name>/
   environment.json   # sandbox config (paths, mode, baseline SHA, backend)
   sandbox-state.json # per-sandbox state (agent_files_initialized, etc.)
   runtime-config.json # container entrypoint config
@@ -654,7 +656,7 @@ The cache directory persists across agent restarts (`yoloai stop` / `yoloai star
 
 Container backends accumulate disk over time — image layers, overlayfs snapshots, BuildKit cache, retired volumes. yoloai exposes two commands for this:
 
-- **`yoloai system disk`** — read-only report of what each available backend is consuming, plus the size of `~/.yoloai/sandboxes/`. The `CACHE` column is reclaimable with no rebuild; the `IMAGES` column needs `--images` and forces a rebuild. Run this when `df` looks unhappy to identify which backend is the culprit.
+- **`yoloai system disk`** — read-only report of what each available backend is consuming, plus the size of `~/.yoloai/library/sandboxes/`. The `CACHE` column is reclaimable with no rebuild; the `IMAGES` column needs `--images` and forces a rebuild. Run this when `df` looks unhappy to identify which backend is the culprit.
 - **`yoloai system prune`** — always reclaims each backend's *no-rebuild* cache: build cache, retired volumes, and dangling images. Crucially, this does **not** force a rebuild — the base image is kept, so the next `yoloai new` still runs without rebuilding. This is the safe default.
 - **`yoloai system prune --images`** — additionally removes each backend's base/profile images. This forces yoloai-base to rebuild on the next `yoloai new`, so expect a multi-minute first run afterwards. Prune always runs across every available backend; `--dry-run` previews what would be removed.
 
@@ -675,16 +677,16 @@ Over time a yoloai install accumulates cruft: orphaned containers/VMs from crash
 
 - **Deleted** — zero-stakes cruft: orphaned backend resources, stale locks, temp dirs, and never-initialized sandbox dirs (no metadata and no work directory).
 - **Refused** — dirs where yoloai can still detect uncommitted work (a dirty git copy, or a non-empty overlay upper layer). These are reported and left untouched; you review and remove them yourself.
-- **Quarantined to trash** — dirs whose metadata is corrupt or too new to read, but with no detectable work. Rather than guess, yoloai moves them to `~/.yoloai/trash/<name>` so nothing is lost.
+- **Quarantined to trash** — dirs whose metadata is corrupt or too new to read, but with no detectable work. Rather than guess, yoloai moves them to `~/.yoloai/library/trash/<name>` so nothing is lost.
 
 Use `--dry-run` to preview, and `--yes` to skip confirmation prompts (including the trash-deletion prompt).
 
 ### Trash and recovery
 
-Quarantined dirs go to `~/.yoloai/trash/`. There's no dedicated restore command — a quarantined dir is just a normal directory, so recover it with `mv`:
+Quarantined dirs go to `~/.yoloai/library/trash/`. There's no dedicated restore command — a quarantined dir is just a normal directory, so recover it with `mv`:
 
 ```bash
-mv ~/.yoloai/trash/<name> ~/.yoloai/sandboxes/<name>
+mv ~/.yoloai/library/trash/<name> ~/.yoloai/library/sandboxes/<name>
 ```
 
 `yoloai system prune` reports how much is in the trash and offers to empty it. Because trash may hold something you wanted, it always asks first (answer no to keep it); `--yes` empties it without prompting. Nothing else ever deletes the trash automatically.
