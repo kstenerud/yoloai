@@ -53,10 +53,10 @@ type SystemOptions struct {
 	DataDir string
 
 	// HomeDir is the host user's home directory, used wherever admin
-	// operations expand "~" or resolve seed files. Optional — if empty,
-	// it is derived as filepath.Dir(DataDir) for the common case where
-	// DataDir lives directly inside $HOME (e.g. $HOME/.yoloai). Set it
-	// explicitly when DataDir lives elsewhere (e.g. /var/lib/yoloai).
+	// operations expand "~" or resolve seed files. REQUIRED — empty is
+	// rejected with a *UsageError (same contract as Options.HomeDir). No
+	// implicit filepath.Dir(DataDir) derivation: under the D60 bifurcation
+	// DataDir is $HOME/.yoloai/library, so its parent is not $HOME.
 	HomeDir string
 
 	// Env is a snapshot of the process environment used to expand
@@ -81,12 +81,10 @@ func NewSystemClient(opts SystemOptions) (*SystemClient, error) {
 	if opts.DataDir == "" {
 		return nil, yoerrors.NewUsageError("yoloai: SystemOptions.DataDir is required (no implicit $HOME fallback; see development-principles.md §12)")
 	}
-	var layout config.Layout
-	if opts.HomeDir != "" {
-		layout = config.NewLayoutFor(opts.DataDir, opts.HomeDir)
-	} else {
-		layout = config.NewLayout(opts.DataDir)
+	if opts.HomeDir == "" {
+		return nil, yoerrors.NewUsageError("yoloai: SystemOptions.HomeDir is required (no implicit filepath.Dir(DataDir) derivation; under the D60 bifurcation DataDir is $HOME/.yoloai/library, so its parent is not $HOME). Pass the host user's home explicitly; the CLI uses cliutil.Layout().HomeDir. See development-principles.md §12.")
 	}
+	layout := config.NewLayoutFor(opts.DataDir, opts.HomeDir)
 	layout.Env = opts.Env
 	return &SystemClient{layout: layout}, nil
 }
@@ -95,6 +93,51 @@ func NewSystemClient(opts SystemOptions) (*SystemClient, error) {
 // Always non-nil; never errors. See SystemClient for the surface.
 func (c *Client) System() *SystemClient {
 	return &SystemClient{layout: c.layout}
+}
+
+// LayoutStatus is the verdict of a realm status check — see DataDirStatus.
+// Re-exported (type alias) from internal/config so embedders never name it.
+type LayoutStatus = config.LayoutStatus
+
+// Re-export the LayoutStatus values so embedders can switch on DataDirStatus
+// without importing internal/config.
+const (
+	// LayoutFresh: the DataDir is absent or empty — create it fresh.
+	LayoutFresh = config.LayoutFresh
+	// LayoutMigrate: the DataDir exists at an older version — migrate it.
+	LayoutMigrate = config.LayoutMigrate
+	// LayoutOK: the DataDir is at the current version — ready to use.
+	LayoutOK = config.LayoutOK
+)
+
+// DataDirStatus reports what the library realm's DataDir needs before use:
+// LayoutFresh (create), LayoutMigrate (run Migrate), or LayoutOK (proceed). A
+// too-new on-disk version returns an error (the binary is older than the data;
+// the user must upgrade yoloai). It is a cheap, read-only check that inspects
+// only the DataDir and its plain-int .schema-version stamp.
+//
+// Direct embedders that own a dedicated DataDir use this to decide between
+// CreateFresh and Migrate; the CLI's startup gate calls it as one of its two
+// realm checks.
+func (s *SystemClient) DataDirStatus() (LayoutStatus, error) {
+	return config.RealmStatus(s.layout.DataDir, config.LibrarySchemaVersion)
+}
+
+// CreateFresh initializes the library realm's DataDir at the current schema
+// version (directory + version stamp). Call it only when DataDirStatus reports
+// LayoutFresh; operational scaffolding is still materialized lazily by the
+// engine's setup path.
+func (s *SystemClient) CreateFresh() error {
+	return config.CreateFreshLibrary(s.layout)
+}
+
+// Migrate brings the library realm's DataDir up to the current schema version.
+// Idempotent: a DataDir already at the current version is a no-op. This is the
+// only entry point that mutates on-disk schema state for the library realm;
+// the engine no longer migrates as a side effect of setup.
+func (s *SystemClient) Migrate(ctx context.Context) error {
+	_ = ctx
+	return config.MigrateLibrary(s.layout)
 }
 
 // DiskUsage reports total on-disk usage by yoloai and each available

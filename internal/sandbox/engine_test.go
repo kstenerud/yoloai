@@ -140,7 +140,12 @@ func TestEnsureSetup_WritesConfigOnFirstRun(t *testing.T) {
 	assert.Contains(t, string(content), "agent")
 }
 
-func TestEnsureSetup_StampsSchemaVersionOnFirstRun(t *testing.T) {
+// TestEnsureSetup_DoesNotStampSchemaVersion guards the no-silent-migration
+// invariant: stamping/migrating the schema version is the startup gate's
+// (fresh-create) or the explicit `system migrate` command's job, never a side
+// effect of EnsureSetup. A regression that re-adds an auto-stamp here would
+// reintroduce the silent auto-migration this design removed.
+func TestEnsureSetup_DoesNotStampSchemaVersion(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
@@ -151,10 +156,9 @@ func TestEnsureSetup_StampsSchemaVersionOnFirstRun(t *testing.T) {
 	err := mgr.EnsureSetup(context.Background(), io.Discard)
 	require.NoError(t, err)
 
-	version, exists, err := config.ReadSchemaVersion(layout.SchemaVersionPath())
+	_, exists, err := config.ReadSchemaVersion(layout.SchemaVersionPath())
 	require.NoError(t, err)
-	require.True(t, exists, ".schema-version should be stamped after setup")
-	assert.Equal(t, config.LibrarySchemaVersion, version)
+	assert.False(t, exists, "EnsureSetup must not stamp .schema-version (gate/migrate owns that)")
 }
 
 func TestEnsureSetup_PreservesConfigOnSubsequentRun(t *testing.T) {

@@ -153,11 +153,14 @@ func (m *Engine) ensureDefaultsDir() error {
 	return nil
 }
 
-// ensureLayoutScaffold creates the DataDir directory structure, writes the
-// default global config.yaml and declarative defaults/ when missing, then
-// runs the library schema migration (which stamps DataDir/.schema-version).
-// Pure filesystem work — no runtime required. Shared between EnsureSetup
-// (which adds image build on top) and ApplySetup (config-write only).
+// ensureLayoutScaffold creates the DataDir directory structure and writes the
+// default global config.yaml and declarative defaults/ when missing. Pure
+// filesystem work — no runtime required. Shared between EnsureSetup (which adds
+// image build on top) and ApplySetup (config-write only).
+//
+// It does NOT migrate or stamp the schema version: bringing the DataDir to the
+// current on-disk version is the startup gate's (fresh-create) or the explicit
+// migrate command's job, never a silent side effect of setup.
 func (m *Engine) ensureLayoutScaffold() error {
 	for _, dir := range []string{m.layout.SandboxesDir(), m.layout.ProfilesDir(), m.layout.CacheDir()} {
 		if err := fileutil.MkdirAll(dir, 0750); err != nil {
@@ -173,7 +176,7 @@ func (m *Engine) ensureLayoutScaffold() error {
 			return fmt.Errorf("write global config.yaml: %w", err)
 		}
 	}
-	return config.MigrateLibrary(m.layout)
+	return nil
 }
 
 // List returns info for all sandboxes.
