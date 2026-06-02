@@ -347,6 +347,10 @@ func executeNewCreate(cmd *cobra.Command, ctx context.Context, c *yoloai.Client,
 		printCreateSummary(cmd.ErrOrStderr(), meta, opts.Prompt != "", opts.VscodeTunnel)
 	}
 
+	// First successful create runs EnsureSetup; show the one-time onboarding
+	// tip here (the library no longer prints it — F8/setup_complete removal).
+	cliutil.MaybeShowFirstRunTip(cmd.ErrOrStderr())
+
 	if sandboxName == "" || !attach || opts.NoStart {
 		return nil
 	}

@@ -89,7 +89,7 @@ func TestConfigSet_NoFile(t *testing.T) {
 	cmd.SetArgs([]string{"container_backend", "tart"})
 	require.NoError(t, cmd.Execute())
 
-	configPath := filepath.Join(tmpDir, ".yoloai", "defaults", "config.yaml")
+	configPath := filepath.Join(tmpDir, ".yoloai", "library", "defaults", "config.yaml")
 	data, err := os.ReadFile(configPath) //nolint:gosec // G304: test code with temp dir path
 	require.NoError(t, err)
 	assert.Contains(t, string(data), "container_backend: tart")

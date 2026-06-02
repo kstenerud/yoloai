@@ -141,14 +141,13 @@ func TestConfig_Reset_GlobalKey(t *testing.T) {
 	require.NoError(t, c.Config().Reset(ctx, "tmux_conf"))
 
 	// After reset the user override is gone; tmux_conf has a known
-	// default of "" in globalKnownSettings, so Get returns the
-	// baked-in default rather than ErrConfigKeyNotFound. Either
-	// outcome is fine in principle, but we lock in the existing
-	// "reset returns the user to the baked-in default" semantics so
+	// default of "default+host" in globalKnownSettings, so Get returns
+	// the baked-in default rather than ErrConfigKeyNotFound. We lock in
+	// the "reset returns the user to the baked-in default" semantics so
 	// embedders can predict it.
 	value, err = c.Config().Get(ctx, "tmux_conf")
 	require.NoError(t, err)
-	assert.Equal(t, "", value)
+	assert.Equal(t, "default+host", value)
 }
 
 func TestConfig_Reset_NonexistentKey_NoError(t *testing.T) {

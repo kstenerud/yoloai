@@ -126,7 +126,7 @@ func TestResolveBackendForSandbox_MetaHasBackend(t *testing.T) {
 	t.Setenv("HOME", tmpDir)
 
 	name := "test-backend"
-	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
+	sandboxDir := filepath.Join(tmpDir, ".yoloai", "library", "sandboxes", name)
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 
 	meta := &store.Environment{
@@ -154,7 +154,7 @@ func TestResolveBackendForSandbox_MetaEmptyBackend(t *testing.T) {
 	t.Setenv("HOME", tmpDir)
 
 	name := "test-empty-backend"
-	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
+	sandboxDir := filepath.Join(tmpDir, ".yoloai", "library", "sandboxes", name)
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 
 	meta := &store.Environment{

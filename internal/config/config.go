@@ -121,8 +121,11 @@ var knownCollectionSettings = []knownCollectionSetting{
 }
 
 // globalKnownSettings lists scalar config keys belonging to the global config.
+// tmux_conf defaults declaratively to "default+host" (the baked-in tmux config
+// merged with the host's ~/.tmux.conf when present): a fresh install is usable
+// with no imperative first-run write, so no setup-ceremony state is needed.
 var globalKnownSettings = []knownSetting{
-	{"tmux_conf", ""},
+	{"tmux_conf", "default+host"},
 }
 
 // globalKnownCollectionSettings lists non-scalar config keys belonging to global config.

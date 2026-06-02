@@ -14,7 +14,6 @@ import (
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/agent"
-	"github.com/kstenerud/yoloai/internal/config"
 	"gopkg.in/yaml.v3"
 )
 
@@ -84,13 +83,6 @@ func (e *ExitError) Error() string {
 	return fmt.Sprintf("extension exited with code %d", e.Code)
 }
 
-// ExtensionsDir returns the path to the extensions directory (DataDir/extensions/).
-// layout.ExtensionsDir() is preferred for new callers; this function is kept
-// so x.go can call it after Q-W.6 without reaching into Layout directly.
-func ExtensionsDir(layout config.Layout) string {
-	return layout.ExtensionsDir()
-}
-
 // Load parses a single YAML extension file. The extension name is derived
 // from the filename stem (e.g., "from-issue.yaml" -> "from-issue").
 func Load(path string) (*Extension, error) {
@@ -110,11 +102,10 @@ func Load(path string) (*Extension, error) {
 	return &ext, nil
 }
 
-// LoadAll scans the extensions directory for *.yaml and *.yml files, loads
-// each one, and returns them sorted by name. Returns an empty slice (not error)
-// if the directory doesn't exist.
-func LoadAll(layout config.Layout) ([]*Extension, error) {
-	dir := ExtensionsDir(layout)
+// LoadAll scans the extensions directory dir for *.yaml and *.yml files,
+// loads each one, and returns them sorted by name. Returns an empty slice
+// (not error) if the directory doesn't exist.
+func LoadAll(dir string) ([]*Extension, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {

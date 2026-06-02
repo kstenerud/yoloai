@@ -34,7 +34,7 @@ func NewIntegrationRuntime(ctx context.Context, t *testing.T) yrt.Runtime {
 	t.Helper()
 	name := IntegrationBackendName()
 	home, _ := os.UserHomeDir()
-	layout := config.NewLayout(filepath.Join(home, ".yoloai"))
+	layout := config.NewLayoutFor(filepath.Join(home, ".yoloai", "library"), home)
 	rt, err := yrt.New(ctx, yrt.BackendName(name), layout)
 	if err != nil {
 		t.Fatalf("create %q runtime: %v", name, err)

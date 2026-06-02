@@ -42,7 +42,7 @@ func cliSetup(t *testing.T) (projectDir string) {
 	// on AlreadyExists when rebuilding an existing tag with identical
 	// content".
 	if testutil.IntegrationBackendName() == "" || testutil.IntegrationBackendName() == "docker" {
-		layout := config.NewLayout(filepath.Join(tmpHome, ".yoloai"))
+		layout := config.NewLayoutFor(filepath.Join(tmpHome, ".yoloai", "library"), tmpHome)
 		require.NoError(t, os.MkdirAll(layout.CacheDir(), 0750))
 		dockerrt.RecordBuildChecksum(layout, "")
 	}

@@ -21,7 +21,7 @@ func setupFilesTest(t *testing.T) (string, string) {
 	t.Setenv("HOME", tmpDir)
 
 	name := "testbox"
-	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
+	sandboxDir := filepath.Join(tmpDir, ".yoloai", "library", "sandboxes", name)
 	filesDir := filepath.Join(sandboxDir, "files")
 	require.NoError(t, os.MkdirAll(filesDir, 0750))
 
@@ -38,7 +38,7 @@ func TestFilesPut_CreatesFilesDirIfMissing(t *testing.T) {
 	t.Setenv("HOME", tmpDir)
 
 	name := "testbox"
-	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
+	sandboxDir := filepath.Join(tmpDir, ".yoloai", "library", "sandboxes", name)
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750)) // sandbox exists but no files/ subdir
 
 	src := filepath.Join(t.TempDir(), "hello.txt")

@@ -31,7 +31,7 @@ func writeTestBackendConfig(home string) error {
 	}
 	// container_backend is a defaults-level key — it lives in defaults/config.yaml,
 	// not the global config.yaml. Writing to the wrong file silently has no effect.
-	defaultsDir := filepath.Join(home, ".yoloai", "defaults")
+	defaultsDir := filepath.Join(home, ".yoloai", "library", "defaults")
 	if err := os.MkdirAll(defaultsDir, 0700); err != nil {
 		return fmt.Errorf("mkdir %s: %w", defaultsDir, err)
 	}
@@ -97,7 +97,7 @@ func TestMain(m *testing.M) {
 	// See backend-idiosyncrasies.md "Docker daemon races on AlreadyExists when
 	// rebuilding an existing tag with identical content".
 	if testutil.IntegrationBackendName() == "" || testutil.IntegrationBackendName() == "docker" {
-		integLayout := config.NewLayout(filepath.Join(tmpHome, ".yoloai"))
+		integLayout := config.NewLayoutFor(filepath.Join(tmpHome, ".yoloai", "library"), tmpHome)
 		if err := os.MkdirAll(integLayout.CacheDir(), 0750); err != nil {
 			fmt.Fprintf(os.Stderr, "failed to create cache dir: %v\n", err)
 			os.Exit(1)

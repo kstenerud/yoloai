@@ -8,9 +8,11 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
+	tmuxres "github.com/kstenerud/yoloai/internal/resources/tmux"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 )
@@ -100,40 +102,32 @@ func NewEngine(rt runtime.Runtime, logger *slog.Logger, input io.Reader, opts ..
 func (m *Engine) Layout() config.Layout { return m.layout }
 
 // EnsureSetup performs first-run auto-setup. Idempotent — safe to call
-// before every sandbox operation. Non-interactive: writes safe defaults
-// (tmux_conf=default+host, setup_complete=true) and returns. The
-// interactive wizard for customizing tmux/backend/agent lives in the
-// CLI layer and is invoked explicitly via `yoloai system setup` (which
-// calls Engine.ApplySetup with the user's answers).
+// before every sandbox operation. Non-interactive: scaffolds the data
+// dir, materializes declarative safe defaults, runs the library schema
+// migration, and builds/refreshes the base image. Requires a non-nil
+// runtime (the image build calls rt.Setup).
 //
-// Pre-Q-F, this method ran the wizard when stdin was a TTY. That
-// coupled prompts to library code and contradicted §12's "no ambient
-// IO" principle. Q-F moves the wizard to the CLI; EnsureSetup now
-// behaves as the old non-interactive branch always behaved.
+// The library just-works from declarative config-layer defaults; it
+// keeps no setup-ceremony state. Any interactive wizard or first-run
+// UX lives in the app layer (the CLI's `yoloai system setup`), which
+// records its own "wizard has run" bookkeeping — none of the library's
+// business.
 func (m *Engine) EnsureSetup(ctx context.Context, out io.Writer) error {
-	if err := m.EnsureSetupNonInteractive(ctx, out); err != nil {
+	if out == nil {
+		out = io.Discard
+	}
+	if err := m.ensureLayoutScaffold(); err != nil {
 		return err
 	}
-	state, err := config.LoadState(m.layout)
-	if err != nil {
-		return fmt.Errorf("load state: %w", err)
-	}
-	if state.SetupComplete {
-		return nil
-	}
-	if err := m.setTmuxConf("default+host"); err != nil {
-		return fmt.Errorf("set tmux_conf: %w", err)
-	}
-	if err := config.SaveState(m.layout, &config.State{SetupComplete: true}); err != nil {
-		return fmt.Errorf("save state: %w", err)
-	}
-	return nil
+	baseProfileDir := m.layout.ProfileDir("base")
+	return m.runtime.Setup(ctx, m.layout, baseProfileDir, out, m.logger, false)
 }
 
-// ensureDefaultsDir creates DataDir/defaults/ and writes defaults/config.yaml
-// scaffold if it doesn't exist. Method on Engine so it can use m.layout's
-// DefaultsDir() / DefaultsConfigPath() — Q-W requires path resolution
-// through Layout, never via ambient $HOME.
+// ensureDefaultsDir creates DataDir/defaults/ and materializes the
+// declarative default artifacts (defaults/config.yaml, defaults/tmux.conf)
+// when missing. Method on Engine so it can use m.layout's DefaultsDir() /
+// DefaultsConfigPath() — Q-W requires path resolution through Layout,
+// never via ambient $HOME.
 func (m *Engine) ensureDefaultsDir() error {
 	defaultsDir := m.layout.DefaultsDir()
 	if err := fileutil.MkdirAll(defaultsDir, 0750); err != nil {
@@ -146,60 +140,28 @@ func (m *Engine) ensureDefaultsDir() error {
 			return fmt.Errorf("write defaults/config.yaml: %w", err)
 		}
 	}
-	return nil
-}
-
-// EnsureSetupNonInteractive performs the non-interactive portion of
-// first-run setup: layout scaffolding, default config writing, AND
-// base-image build. Requires a non-nil runtime (the image build calls
-// rt.Setup). Called by EnsureSetup, which runs before every sandbox
-// operation.
-//
-// For pure-config setup that does NOT need a runtime (e.g. the
-// `yoloai system setup` wizard's ApplySetup path), use
-// ensureLayoutScaffold instead.
-func (m *Engine) EnsureSetupNonInteractive(ctx context.Context, out io.Writer) error {
-	if out == nil {
-		out = io.Discard
-	}
-	if err := m.ensureLayoutScaffold(); err != nil {
-		return err
-	}
-	state, err := config.LoadState(m.layout)
-	if err != nil {
-		return fmt.Errorf("load state: %w", err)
-	}
-	// Seed resources and build/rebuild base image as needed
-	baseProfileDir := m.layout.ProfileDir("base")
-	if err := m.runtime.Setup(ctx, m.layout, baseProfileDir, out, m.logger, false); err != nil {
-		return err
-	}
-	if !state.SetupComplete {
-		fmt.Fprintln(out, "Tip: enable shell completions with 'yoloai system completion --help'") //nolint:errcheck // best-effort output
+	// Materialize the reference tmux.conf declaratively (was previously an
+	// imperative, setup_complete-guarded write). The in-sandbox tmux mount
+	// binds this under the tmux_conf=default/default+host default; users may
+	// inspect/customize it. 0644 so uid 1001 inside Kata VMs can read it.
+	tmuxConfPath := filepath.Join(defaultsDir, "tmux.conf")
+	if _, err := os.Stat(tmuxConfPath); os.IsNotExist(err) {
+		if err := fileutil.WriteFile(tmuxConfPath, tmuxres.Embedded(), 0644); err != nil { //nolint:gosec // G306: tmux.conf contains no secrets; 0644 required for uid 1001 in Kata VMs
+			return fmt.Errorf("write defaults/tmux.conf: %w", err)
+		}
 	}
 	return nil
 }
 
-// ensureLayoutScaffold creates the DataDir directory structure and
-// writes default global config.yaml / state.yaml / defaults/ if
-// missing. Pure filesystem work — no runtime required. Shared between
-// EnsureSetupNonInteractive (which adds image build on top) and
-// ApplySetup (config-write only).
+// ensureLayoutScaffold creates the DataDir directory structure, writes the
+// default global config.yaml and declarative defaults/ when missing, then
+// runs the library schema migration (which stamps DataDir/.schema-version).
+// Pure filesystem work — no runtime required. Shared between EnsureSetup
+// (which adds image build on top) and ApplySetup (config-write only).
 func (m *Engine) ensureLayoutScaffold() error {
 	for _, dir := range []string{m.layout.SandboxesDir(), m.layout.ProfilesDir(), m.layout.CacheDir()} {
 		if err := fileutil.MkdirAll(dir, 0750); err != nil {
 			return fmt.Errorf("create %s: %w", dir, err)
-		}
-	}
-	state, err := config.LoadState(m.layout)
-	if err != nil {
-		return fmt.Errorf("load state: %w", err)
-	}
-	// Upgrading user: defaults/ should exist. If it doesn't, surface
-	// the migration error before doing anything else.
-	if state.SetupComplete {
-		if err := config.CheckDefaultsDir(m.layout); err != nil {
-			return err
 		}
 	}
 	if err := m.ensureDefaultsDir(); err != nil {
@@ -211,13 +173,7 @@ func (m *Engine) ensureLayoutScaffold() error {
 			return fmt.Errorf("write global config.yaml: %w", err)
 		}
 	}
-	statePath := m.layout.StatePath()
-	if _, err := os.Stat(statePath); os.IsNotExist(err) {
-		if err := config.SaveState(m.layout, &config.State{}); err != nil {
-			return fmt.Errorf("write state.yaml: %w", err)
-		}
-	}
-	return nil
+	return config.MigrateLibrary(m.layout)
 }
 
 // List returns info for all sandboxes.

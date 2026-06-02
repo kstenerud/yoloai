@@ -17,14 +17,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// setupExtTest creates a fake ~/.yoloai/extensions/ directory.
-// Returns the extensions directory path.
+// setupExtTest creates a fake ~/.yoloai/cli/extensions/ directory.
+// Returns the extensions directory path. The "cli" namespace mirrors
+// where the CLI app keeps its own state (TOP/cli); see cliutil.CLIExtensionsDir.
 func setupExtTest(t *testing.T) string {
 	t.Helper()
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	extDir := filepath.Join(tmpDir, ".yoloai", "extensions")
+	extDir := filepath.Join(tmpDir, ".yoloai", "cli", "extensions")
 	require.NoError(t, os.MkdirAll(extDir, 0750))
 
 	return extDir

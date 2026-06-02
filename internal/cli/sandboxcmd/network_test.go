@@ -28,7 +28,7 @@ func createNetworkSandbox(t *testing.T, name, networkMode string, domains []stri
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 
-	sandboxDir := filepath.Join(tmpHome, ".yoloai", "sandboxes", name)
+	sandboxDir := filepath.Join(tmpHome, ".yoloai", "library", "sandboxes", name)
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 
 	meta := &store.Environment{

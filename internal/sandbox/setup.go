@@ -201,9 +201,9 @@ func (m *Engine) SetupStatus() *SetupStatus {
 //     auto-picks when exactly one is available; ignored when zero.
 //   - opts.Agent follows the same rule.
 //
-// Always creates the defaults/ directory and writes setup_complete=true
-// on success, so calling ApplySetup is the documented way to redo
-// (or repair) setup state.
+// Always creates the defaults/ directory, so calling ApplySetup is the
+// documented way to (re)apply or repair the configured defaults. It keeps
+// no setup-ceremony state: any "wizard has run" bookkeeping is the app's.
 func (m *Engine) ApplySetup(_ context.Context, opts SetupOptions) error {
 	if err := validateTmuxConf(opts.TmuxConf); err != nil {
 		return yoerrors.NewUsageError("%v", err)
@@ -221,10 +221,7 @@ func (m *Engine) ApplySetup(_ context.Context, opts SetupOptions) error {
 	if err := m.applyBackendChoice(opts.Backend); err != nil {
 		return err
 	}
-	if err := m.applyAgentChoice(opts.Agent); err != nil {
-		return err
-	}
-	return m.setSetupComplete()
+	return m.applyAgentChoice(opts.Agent)
 }
 
 // applyBackendChoice writes the default backend from the wizard's
@@ -344,11 +341,4 @@ func (m *Engine) setTmuxConf(value string) error {
 	}
 
 	return nil
-}
-
-// setSetupComplete marks setup as done. The user-facing "Setup complete"
-// message is printed by the CLI (`internal/cli/system/setup.go`) after
-// SystemClient.Setup returns — the library only persists state (F8).
-func (m *Engine) setSetupComplete() error {
-	return config.SaveState(m.layout, &config.State{SetupComplete: true})
 }

@@ -19,7 +19,7 @@ func setupLogTest(t *testing.T, name string) string {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
+	sandboxDir := filepath.Join(tmpDir, ".yoloai", "library", "sandboxes", name)
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "logs"), 0750))
 
 	meta := &store.Environment{

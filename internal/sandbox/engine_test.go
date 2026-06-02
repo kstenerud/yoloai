@@ -128,23 +128,19 @@ func TestEnsureSetup_WritesConfigOnFirstRun(t *testing.T) {
 	t.Setenv("HOME", tmpDir)
 
 	mock := &mockRuntime{}
-	var output bytes.Buffer
 	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
 	mgr := NewEngine(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
 
-	err := mgr.EnsureSetup(context.Background(), &output)
+	err := mgr.EnsureSetup(context.Background(), io.Discard)
 	require.NoError(t, err)
 
 	configPath := filepath.Join(tmpDir, ".yoloai", "defaults", "config.yaml")
 	content, err := os.ReadFile(configPath) //nolint:gosec // G304: test code with temp dir
 	require.NoError(t, err)
 	assert.Contains(t, string(content), "agent")
-
-	// Check completion hint was printed
-	assert.Contains(t, output.String(), "completion")
 }
 
-func TestEnsureSetup_WritesStateOnFirstRun(t *testing.T) {
+func TestEnsureSetup_StampsSchemaVersionOnFirstRun(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
@@ -155,38 +151,34 @@ func TestEnsureSetup_WritesStateOnFirstRun(t *testing.T) {
 	err := mgr.EnsureSetup(context.Background(), io.Discard)
 	require.NoError(t, err)
 
-	statePath := filepath.Join(tmpDir, ".yoloai", "state.yaml")
-	_, err = os.Stat(statePath)
-	require.NoError(t, err, "state.yaml should exist")
+	version, exists, err := config.ReadSchemaVersion(layout.SchemaVersionPath())
+	require.NoError(t, err)
+	require.True(t, exists, ".schema-version should be stamped after setup")
+	assert.Equal(t, config.LibrarySchemaVersion, version)
 }
 
-func TestEnsureSetup_SkipsConfigOnSubsequentRun(t *testing.T) {
+func TestEnsureSetup_PreservesConfigOnSubsequentRun(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	// Pre-create defaults/config.yaml and state.yaml
+	// Pre-create defaults/config.yaml simulating an existing install.
 	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
 	defaultsDir := filepath.Join(yoloaiDir, "defaults")
 	require.NoError(t, os.MkdirAll(defaultsDir, 0750))
 	customContent := []byte("# custom config\n# agent: claude\n")
 	require.NoError(t, os.WriteFile(filepath.Join(defaultsDir, "config.yaml"), customContent, 0600))
 	layout := config.NewLayout(yoloaiDir)
-	require.NoError(t, config.SaveState(layout, &config.State{SetupComplete: true}))
 
 	mock := &mockRuntime{}
-	var output bytes.Buffer
 	mgr := NewEngine(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
 
-	err := mgr.EnsureSetup(context.Background(), &output)
+	err := mgr.EnsureSetup(context.Background(), io.Discard)
 	require.NoError(t, err)
 
-	// Config should be preserved
+	// Existing config should be preserved, not stomped.
 	content, err := os.ReadFile(filepath.Join(defaultsDir, "config.yaml")) //nolint:gosec // G304: test code with temp dir
 	require.NoError(t, err)
 	assert.Equal(t, customContent, content)
-
-	// Completion hint should NOT be printed
-	assert.NotContains(t, output.String(), "completion")
 }
 
 func TestEnsureSetup_AlwaysCallsSetup(t *testing.T) {

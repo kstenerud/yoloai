@@ -48,21 +48,21 @@ func SetRootLayout(l config.Layout) {
 func Layout() config.Layout {
 	if rootLayout.DataDir == "" {
 		home := resolveHome()
-		l := config.NewLayoutFor(filepath.Join(home, ".yoloai"), home)
+		l := config.NewLayoutFor(filepath.Join(home, ".yoloai", libraryNamespace), home)
 		l.Env = processEnv()
 		return l
 	}
 	return rootLayout
 }
 
-// LayoutForDataDir constructs a Layout for an explicit --data-dir
-// value, pairing the supplied dataDir with the user's actual $HOME.
-// Used by the root command's PersistentPreRunE when --data-dir is
-// non-empty — the user's home stays bound to the real $HOME even
-// when DataDir is rerooted (e.g. /var/lib/yoloai under a service
-// install).
+// LayoutForDataDir constructs a library Layout for an explicit --data-dir
+// value, pairing the supplied top dir with the user's actual $HOME. The
+// --data-dir value names the shared top directory (TOP); the library is
+// rooted at TOP/library so the CLI's own state (TOP/cli) can sit beside it
+// without clashing. The user's home stays bound to the real $HOME even when
+// TOP is rerooted (e.g. /var/lib/yoloai under a service install).
 func LayoutForDataDir(dataDir string) config.Layout {
-	l := config.NewLayoutFor(dataDir, resolveHome())
+	l := config.NewLayoutFor(filepath.Join(dataDir, libraryNamespace), resolveHome())
 	l.Env = processEnv()
 	return l
 }

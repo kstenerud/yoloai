@@ -37,7 +37,7 @@ func NewCmd() *cobra.Command {
 // registerExtensionSubcommands loads all extensions and adds them as
 // dynamic subcommands of the parent command.
 func registerExtensionSubcommands(parent *cobra.Command) {
-	exts, err := extension.LoadAll(cliutil.Layout())
+	exts, err := extension.LoadAll(cliutil.CLIExtensionsDir())
 	if err != nil {
 		slog.Debug("failed to load extensions", "event", "extension.load_error", "err", err)
 		return
@@ -136,7 +136,7 @@ func runExtension(cmd *cobra.Command, ext *extension.Extension, args []string) e
 
 // runExtensionList prints available extensions as a table or JSON.
 func runExtensionList(cmd *cobra.Command, _ []string) error {
-	exts, err := extension.LoadAll(cliutil.Layout())
+	exts, err := extension.LoadAll(cliutil.CLIExtensionsDir())
 	if err != nil {
 		return err
 	}
@@ -145,10 +145,10 @@ func runExtensionList(cmd *cobra.Command, _ []string) error {
 		if cliutil.JSONEnabled(cmd) {
 			return cliutil.WriteJSON(cmd.OutOrStdout(), []any{})
 		}
-		fmt.Fprintln(cmd.OutOrStdout(), "No extensions found.")                                                                   //nolint:errcheck
-		fmt.Fprintln(cmd.OutOrStdout())                                                                                           //nolint:errcheck
-		fmt.Fprintf(cmd.OutOrStdout(), "Add YAML files to %s to create extensions.\n", extension.ExtensionsDir(cliutil.Layout())) //nolint:errcheck
-		fmt.Fprintln(cmd.OutOrStdout(), "See 'yoloai help extensions' for how to create and install extensions.")                 //nolint:errcheck
+		fmt.Fprintln(cmd.OutOrStdout(), "No extensions found.")                                                    //nolint:errcheck
+		fmt.Fprintln(cmd.OutOrStdout())                                                                            //nolint:errcheck
+		fmt.Fprintf(cmd.OutOrStdout(), "Add YAML files to %s to create extensions.\n", cliutil.CLIExtensionsDir()) //nolint:errcheck
+		fmt.Fprintln(cmd.OutOrStdout(), "See 'yoloai help extensions' for how to create and install extensions.")  //nolint:errcheck
 		return nil
 	}
 

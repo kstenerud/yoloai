@@ -119,7 +119,6 @@ func setupTestEngine(t *testing.T) (*Engine, *bytes.Buffer, string, config.Layou
 	require.NoError(t, os.WriteFile(filepath.Join(defaultsDir, "config.yaml"), []byte(config.DefaultConfigYAML), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(config.DefaultGlobalConfigYAML), 0600))
 	layout := config.NewLayout(yoloaiDir)
-	require.NoError(t, config.SaveState(layout, &config.State{}))
 
 	var output bytes.Buffer
 	mock := &mockRuntime{}
@@ -212,10 +211,6 @@ func TestApplySetup_HappyPath_Linux(t *testing.T) {
 	opts := SetupOptions{TmuxConf: "default", Backend: "docker", Agent: "claude"}
 	require.NoError(t, mgr.ApplySetup(context.Background(), opts))
 
-	state, err := config.LoadState(layout)
-	require.NoError(t, err)
-	assert.True(t, state.SetupComplete)
-
 	gcfg, err := config.LoadGlobalConfig(layout)
 	require.NoError(t, err)
 	assert.Equal(t, "default", gcfg.TmuxConf)
@@ -228,15 +223,12 @@ func TestApplySetup_HappyPath_Linux(t *testing.T) {
 
 func TestApplySetup_MissingTmuxConf_Error(t *testing.T) {
 	setLinuxPlatform(t)
-	mgr, _, _, layout := setupTestEngine(t)
+	mgr, _, _, _ := setupTestEngine(t)
 
 	err := mgr.ApplySetup(context.Background(), SetupOptions{Backend: "docker", Agent: "claude"})
 	require.Error(t, err)
 	var usageErr *yoerrors.UsageError
 	assert.ErrorAs(t, err, &usageErr, "missing required field should produce *yoerrors.UsageError")
-
-	state, _ := config.LoadState(layout)
-	assert.False(t, state.SetupComplete, "Setup must not mark complete on validation failure")
 }
 
 func TestApplySetup_InvalidTmuxConf_Error(t *testing.T) {

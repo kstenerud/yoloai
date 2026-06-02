@@ -368,12 +368,12 @@ func attachStatusOK(status sandbox.Status, name string) error {
 	}
 }
 
-// EnsureSetup performs idempotent first-run setup: writes safe
-// defaults (tmux_conf=default+host, setup_complete=true) plus the
-// non-interactive layout scaffolding and base image build.
-// Safe to call before any sandbox operation; a no-op once
-// setup_complete is true. The interactive setup wizard is a separate
-// flow — see SystemClient.SetupStatus / SystemClient.Setup.
+// EnsureSetup performs idempotent first-run setup: scaffolds the DataDir,
+// materializes safe declarative defaults (defaults/config.yaml,
+// defaults/tmux.conf), builds the base image if needed, and stamps the
+// library schema version. Safe to call before every sandbox operation —
+// each step is a no-op once its artifact exists. The interactive setup
+// wizard is a separate flow — see SystemClient.SetupStatus / SystemClient.Setup.
 func (c *Client) EnsureSetup(ctx context.Context) error {
 	return c.manager.EnsureSetup(ctx, c.output)
 }

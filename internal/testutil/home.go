@@ -19,13 +19,15 @@ func IsolatedHome(t *testing.T) string {
 	return tmpHome
 }
 
-// CLIConfigDir creates the ~/.yoloai/defaults/ directory under an isolated
-// HOME and returns its absolute path. Used by CLI config tests that need
-// a writable defaults dir without touching the real user home.
+// CLIConfigDir creates the ~/.yoloai/library/defaults/ directory under an
+// isolated HOME and returns its absolute path. Used by CLI config tests that
+// need a writable defaults dir without touching the real user home. The
+// "library" namespace mirrors where the CLI roots the library Layout
+// (TOP/library); see cliutil.Layout / clipaths.go.
 func CLIConfigDir(t *testing.T) string {
 	t.Helper()
 	tmpHome := IsolatedHome(t)
-	dir := filepath.Join(tmpHome, ".yoloai", "defaults")
+	dir := filepath.Join(tmpHome, ".yoloai", "library", "defaults")
 	require.NoError(t, os.MkdirAll(dir, 0750))
 	return dir
 }

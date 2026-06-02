@@ -219,6 +219,13 @@ diff and apply what you want to keep.`,
 		if dataDir, _ := cmd.Flags().GetString("data-dir"); dataDir != "" {
 			cliutil.SetRootLayout(cliutil.LayoutForDataDir(dataDir))
 		}
+		// Run the CLI's flat -> namespaced bootstrap before any command
+		// touches the data dir. It is a no-op once the layout is stamped (and
+		// on a brand-new install), so it is cheap to run for every command;
+		// the relocation only fires once, against a pre-namespace install.
+		if err := cliutil.MigrateCLI(); err != nil {
+			return err
+		}
 		if prevPersistentPreRunE != nil {
 			return prevPersistentPreRunE(cmd, args)
 		}

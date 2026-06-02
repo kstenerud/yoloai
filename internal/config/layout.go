@@ -164,11 +164,6 @@ func (l Layout) TrashDir() string {
 	return filepath.Join(l.DataDir, "trash")
 }
 
-// ExtensionsDir returns DataDir/extensions/.
-func (l Layout) ExtensionsDir() string {
-	return filepath.Join(l.DataDir, "extensions")
-}
-
 // DefaultsDir returns DataDir/defaults/.
 func (l Layout) DefaultsDir() string {
 	return filepath.Join(l.DataDir, "defaults")
@@ -241,13 +236,6 @@ func (l Layout) GlobalConfigPath() string {
 	return filepath.Join(l.DataDir, "config.yaml")
 }
 
-// StatePath returns DataDir/state.yaml — the operational state file
-// (setup_complete, etc.). Migration target for the package-level
-// StatePath() helper.
-func (l Layout) StatePath() string {
-	return filepath.Join(l.DataDir, "state.yaml")
-}
-
 // ProfileDir returns DataDir/profiles/<name>/. Migration target for
 // the package-level ProfileDirPath(name) helper.
 func (l Layout) ProfileDir(name string) string {
@@ -258,4 +246,12 @@ func (l Layout) ProfileDir(name string) string {
 // CNI configuration directory.
 func (l Layout) CniDir() string {
 	return filepath.Join(l.DataDir, "cni")
+}
+
+// SchemaVersionPath returns DataDir/.schema-version — the stamp that
+// records which on-disk schema version the library's DataDir was last
+// migrated to. Its presence (and value) is the deterministic signal
+// the library's migration runner keys off; see MigrateLibrary.
+func (l Layout) SchemaVersionPath() string {
+	return filepath.Join(l.DataDir, ".schema-version")
 }
