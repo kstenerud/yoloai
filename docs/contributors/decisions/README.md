@@ -312,6 +312,30 @@ So "data lives under `DataDir`" holds; `sandboxes/` just needs a principal parti
 
 **Open / next (the gated sequence).** (i) **Security-research file first** — path confinement (workdir/aux roots), principal-id unforgeability, enumeration leaks (`List` across the partition), and the credential-bundle shape; per the project rule these are not free-designed. (ii) Then **re-decide next steps** (plan doc shape depends on research outcomes). (iii) The shared `files/` surfacing verb (`Sandbox.Files()`) is the D53/Phase-2 item, pulled in here as the caller-facing half. (iv) Architecture-principles §3 stays "emerging / not yet enforced"; it now cites D59 alongside D58.
 
+## D60 — Data dir bifurcation: `TOP/library` (engine) + `TOP/cli` (app); two-stamp deterministic migration; `setup_complete` killed
+
+**Date:** 2026-06-02. **Status:** Implemented (branch `layering-refactor`). **Composition:** applies §2 ("none of your business") + library-first to the on-disk layout; **refines D59's filesystem-concern taxonomy** (two entries D59 listed as "deployment, shared under `DataDir`" — `extensions/` and `state.yaml` — turn out to be *CLI-app* concerns and move *out* of the engine's `DataDir` entirely).
+
+**What.** The CLI's `~/.yoloai/` splits into two sibling namespaces under one top dir:
+- `TOP/library/` — everything the embeddable engine owns: `sandboxes/`, `profiles/`, `cache/`, `trash/`, `defaults/`, `config.yaml`, `tart-base-metadata/`, `tart-base-locks/`, `docker-base-locks/`, `cni/`, `vscode-cli/`.
+- `TOP/cli/` — CLI-only app state: `extensions/` and `state.yaml` (first-run-tip bookkeeping).
+
+**Why.** Library-first means the engine owns *everything* under whatever `DataDir` it is handed and never reaches above it. So namespacing is a **CLI concern, not a library one**: the CLI points the library `Layout` at `TOP/library` and keeps its own `TOP/cli` beside it. An embedder that passes an explicit `DataDir` gets every engine dir directly under it — **no `/library` subdir**; the split is purely a `cliutil` convention. This is why the flat→namespaced relocation lives in `cliutil.MigrateCLI` (it restructures the dir *above* the library root, which the library — rooted at and confined to its `DataDir` — cannot and must not do itself).
+
+**Two-stamp deterministic migration.** Each namespace carries its own JSON `.schema-version` (`config.ReadSchemaVersion`/`WriteSchemaVersion`, `schemaStamp{Version int}`):
+- Library: `<DataDir>/.schema-version` via `config.MigrateLibrary` (v0→v1 no-op; embedders get versioning for free).
+- CLI: `TOP/cli/.schema-version` via `cliutil.MigrateCLI`, which owns the one-shot flat→namespaced relocation.
+
+After the bootstrap the stamp is the **only** signal consulted — a stamped layout short-circuits immediately, and the flat-detection heuristic (`isFlatV0Install`: a flat `TOP/config.yaml` *file* with no `TOP/library` dir beside it) runs at most once per top dir. Relocation is in-place `os.Rename` (atomic within one filesystem since `TOP` and `TOP/library` share a parent). A brand-new install **defers** stamping until real work materializes the layout, so read-only commands (`yoloai version`) don't create dirs; once any data exists it stamps deterministically. A stamp newer than the build supports is a hard error (forward-compat guard).
+
+**`setup_complete` killed (folds into the migration).** "Has the setup wizard run?" is **app ceremony, not library state** (§2 + [[feedback_library_sets_defaults_app_owns_setup_state]]). The library stopped owning `state.yaml`/`setup_complete`; `EnsureSetup` runs idempotently inside `Client.Create`. The CLI's one-time onboarding tip moved out of the library (where it keyed off the deleted flag) into the CLI, keyed off `TOP/cli/state.yaml` `first_run_tip_shown` and fired from the `new` command (the canonical first command that triggers `EnsureSetup`). The migration carries a legacy `setup_complete: true` forward as `first_run_tip_shown: true` so upgraders don't see the tip resurface; a corrupt legacy file is tolerated (tip simply fires).
+
+**Declarative default.** `tmux_conf` now defaults to `default+host` (was `""`) — the library "just works" via opinionated declarative defaults rather than depending on a completed ceremony to populate config.
+
+**Rejected.** (a) A single flat stamp at `TOP` — couldn't distinguish library-layout changes (which embedders also need) from CLI-app-layout changes. (b) Making the library aware of the `library/`/`cli` split — violates library-first; the engine would have to know it's nested. (c) Eagerly stamping on every run — materializes dirs for read-only commands.
+
+**Code.** `internal/cli/cliutil/clischema.go` (`MigrateCLI`, relocation), `clistate.go` (`CLIState`, `MaybeShowFirstRunTip`), `clipaths.go` (`TopDir`/`CLIDir`/namespaces), wired in `internal/cli/root.go` `PersistentPreRunE` + `internal/cli/lifecycle/new.go`. Library stamp in `internal/config/schema.go`.
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.

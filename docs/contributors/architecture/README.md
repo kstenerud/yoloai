@@ -96,7 +96,10 @@ should import the root cli package back (the few tests that need
 | File | Purpose |
 |------|---------|
 | `client.go` | `NewRuntime`, `WithClient`, `NewSystemClient`, `AttachToSandboxByName`, `ResolveBackend`/`ResolveBackendForSandbox`, `ResolveAgent`, `ResolveModel`, `ResolveProfile`, `Coalesce`, `FlagStr`, `SandboxErrorHint`. The chokepoint that turns CLI flags into a `yoloai.Client` / `SystemClient`. |
-| `layout.go` | `Layout()` / `SetRootLayout` — resolves `$HOME/.yoloai` once at process startup and threads the `config.Layout` downward. The only sanctioned `os.UserHomeDir` call site (allowlisted in `.golangci.yml`). |
+| `layout.go` | `Layout()` / `SetRootLayout` / `LayoutForDataDir` — points the library `config.Layout` at `$HOME/.yoloai/library` (or `DIR/library` under `--data-dir`) and threads it downward. The only sanctioned `os.UserHomeDir` call site (allowlisted in `.golangci.yml`). |
+| `clipaths.go` | `TopDir()`, `CLIDir()`, `CLIExtensionsDir()`, `CLIStatePath()`, `CLISchemaVersionPath()` + the `library`/`cli` namespace constants — the CLI-side `TOP/cli` paths that sit beside the library namespace (D60). |
+| `clischema.go` | `MigrateCLI()` — CLI layout versioning + the one-shot flat→namespaced bootstrap that relocates a pre-namespace `~/.yoloai` into `TOP/library` + `TOP/cli`, then stamps `TOP/cli/.schema-version`. |
+| `clistate.go` | `CLIState` (`first_run_tip_shown`), `LoadCLIState()`/`SaveCLIState()`, `MaybeShowFirstRunTip()` — CLI app state under `TOP/cli/state.yaml` (replaces the library's removed `setup_complete`). |
 | `name.go` | `ResolveName` and `EnvSandboxName` — sandbox-name resolution from args / `YOLOAI_SANDBOX`. |
 | `json.go` | `--json` flag helpers: `JSONEnabled`, `WriteJSON`, `WriteJSONError`, `EffectiveYes`. |
 | `streams.go`, `terminal.go` | `IOStreams()` (PTY-sized terminal binding for Client.Attach) and `SetTerminalTitle` (OSC-0 + tmux window rename). |
@@ -197,10 +200,9 @@ Shared test helpers — a non-`_test.go` package importable by test files across
 |------|---------|
 | `config.go` | `YoloaiConfig` struct, `LoadBakedInDefaults()`, `LoadDefaultsConfig()`, `mergeConfigs()`, `LoadGlobalConfig()`, `UpdateConfigFields()`, `DeleteConfigField()`, `UpdateGlobalConfigFields()`, `DeleteGlobalConfigField()`, `GetEffectiveConfig()`, `GetConfigValue()`, `IsGlobalKey()`. Two load paths: profile path (baked-in + profile config.yaml) and defaults path (baked-in + defaults/config.yaml). YAML comment-preserving via `yaml.Node`. |
 | `defaults.go` | `DefaultConfigYAML` — baked-in defaults YAML (authoritative source of truth for all defaults). `DefaultGlobalConfigYAML` — default global config content. `GenerateScaffoldConfig()` — generates commented-out scaffold from baked-in YAML. |
-| `dirs.go` | `YoloaiDir()`, `SandboxesDir()`, `ProfilesDir()`, `CacheDir()`, `DefaultsDir()`, `DefaultsConfigPath()`, `ExtensionsDir()` — centralized path helpers. Shared sandbox subdirectory name constants (`BackendDirName`, `BinDirName`, `TmuxDirName`, `AgentRuntimeDirName`). |
+| `dirs.go` | Shared sandbox subdirectory name constants (`BackendDirName`, `BinDirName`, `TmuxDirName`, `AgentRuntimeDirName`). The DataDir-rooted path helpers (`SandboxesDir()`, `ProfilesDir()`, `CacheDir()`, `DefaultsDir()`, …) are `Layout` methods in `layout.go`. |
 | `profile.go` | `ProfileConfig`, `LoadProfile()`, `MergedConfig` — profile loading, inheritance chain resolution, config merging. |
-| `migration.go` | `CheckDefaultsDir()` — verifies `~/.yoloai/defaults/` exists; returns migration instructions if not. |
-| `state.go` | `LoadState()`, `SaveState()` — read/write `~/.yoloai/state.yaml` containing global state like `setup_complete`. |
+| `schema.go` | `ReadSchemaVersion()` / `WriteSchemaVersion()` — generic JSON layout stamp (`schemaStamp{Version int}`). `MigrateLibrary(layout)` brings the library DataDir up to its schema version and stamps `<DataDir>/.schema-version` (v0→v1 no-op today). The CLI's flat→namespaced bootstrap + its own stamp live in `cli/cliutil/clischema.go` (see D60). |
 | `pathutil.go` | `ExpandPath()` — tilde and `${VAR}` expansion for config paths. |
 | `errors.go` | `UsageError` (exit 2), `ConfigError` (exit 3), sentinel errors. |
 | `names.go` | Name validation constants and regex (`ValidNameRe`, `MaxNameLength`). |
@@ -211,7 +213,7 @@ Shared test helpers — a non-`_test.go` package importable by test files across
 
 | File | Purpose |
 |------|---------|
-| `extension.go` | Loading, validation, and types for user-defined custom commands stored as YAML files in `~/.yoloai/extensions/`. |
+| `extension.go` | Loading, validation, and types for user-defined custom commands stored as YAML files in `~/.yoloai/cli/extensions/` (the dir path is supplied by the CLI via `cliutil.CLIExtensionsDir()`; extensions are CLI app state, not library state — see D60). |
 
 ### `runtime/`
 
@@ -485,13 +487,13 @@ Host context: `IsRoot`, `IsWSL2`, `InContainer`, `KVMGroup`. Detected once per i
 | `yoloai sandbox <name> allowed` | `cli/sandboxcmd/allowed.go` | `sandbox.LoadMeta()` — pure file read |
 | `yoloai sandbox <name> deny` | `cli/sandboxcmd/deny.go` | `sandbox.PatchConfigAllowedDomains()` + `tryLivePatchNetwork` ipset removal |
 | `yoloai sandbox <name> vscode` | `cli/sandboxcmd/vscode.go` | Builds `vscode-remote://attached-container+<hex>/<path>` URI and launches `code --folder-uri` |
-| `yoloai files` | `cli/workflow/files.go:NewFilesCmd` | File exchange via `~/.yoloai/sandboxes/<name>/files/` |
+| `yoloai files` | `cli/workflow/files.go:NewFilesCmd` | File exchange via `~/.yoloai/library/sandboxes/<name>/files/` |
 | `yoloai baseline` | `cli/workflow/baseline.go:NewBaselineCmd` | `yoloai.Client.AdvanceBaseline()` / `ResolveCommitRefs()` |
 | `yoloai profile` | `cli/profile/profile.go:NewCmd` | Profile create/list/info/delete |
 | `yoloai help` | `cli/helpcmd/help.go:NewCmd` | Topic-based help with embedded markdown |
 | `yoloai config get/set/reset` | `cli/configcmd/config.go:NewCmd` | `config.{Get,Update,Delete}…Config…` routed via `config.IsGlobalKey()` |
 | `yoloai ls` / `log` / `exec` / `vscode` | `cli/sandboxcmd/aliases.go` | Shortcuts that delegate to the matching `sandbox <verb>` impl in the same subpackage |
-| `yoloai x` | `cli/xcmd/x.go:NewCmd` | User-defined extensions from `~/.yoloai/extensions/` |
+| `yoloai x` | `cli/xcmd/x.go:NewCmd` | User-defined extensions from `~/.yoloai/cli/extensions/` |
 | `yoloai version` | `cli/versioncmd/version.go:NewCmd` | Prints build-time version info (reads `cliutil.Version` etc.) |
 
 ## Data Flow
@@ -656,17 +658,37 @@ overlay-mode dirs via a non-empty `work/<enc>/upper/`. It returns
 WorkDataNone / WorkDataPresent / WorkDataAmbiguous so corrupt-meta dirs with
 ambiguous content default to trash (the safe choice), not deletion.
 
-Quarantine is a plain `os.Rename` into `~/.yoloai/trash/<name>`
+Quarantine is a plain `os.Rename` into `~/.yoloai/library/trash/<name>`
 (`store.QuarantineSandbox`); there is no dedicated restore command — recover
 with `mv`. The CLI confirms before emptying trash (it may hold wanted data);
 `--yes` skips the prompt.
 
 ## Host Directory Layout
 
+The CLI splits `~/.yoloai/` into two namespaces: `library/` (everything the
+embeddable engine owns — what the library `Layout` is pointed at) and `cli/`
+(CLI-only app state). The split is a CLI convention; an embedder that passes an
+explicit `DataDir` gets the engine subtree directly under that path, with no
+`library/` segment (see D60). Each namespace carries its own JSON
+`.schema-version` stamp.
+
 ```
 ~/.yoloai/
+├── cli/                     # CLI-only app state (not the library's)
+│   ├── .schema-version      # CLI layout stamp (cliutil.MigrateCLI)
+│   ├── state.yaml           # CLI state (first_run_tip_shown)
+│   └── extensions/
+│       └── <name>.yaml      # User-defined extension commands
+└── library/                 # Engine-owned — see "library/ contents" below
+```
+
+`library/` is what the library `Layout` resolves to (or the embedder's explicit
+`DataDir`):
+
+```
+library/
+├── .schema-version      # Library layout stamp (config.MigrateLibrary)
 ├── config.yaml              # Global config (tmux_conf, model_aliases)
-├── state.yaml               # Global state (setup_complete)
 ├── defaults/
 │   ├── config.yaml          # User defaults (agent, model, isolation, etc.; active when no --profile)
 │   └── tmux.conf            # Optional; written by setup when baked-in tmux config is in use
@@ -675,8 +697,6 @@ with `mv`. The CLI confirms before emptying trash (it may hold wanted data);
 │       ├── config.yaml      # Profile settings (merged over baked-in defaults, not over defaults/)
 │       ├── Dockerfile       # Optional; FROM yoloai-base
 │       └── tmux.conf        # Optional tmux config override
-├── extensions/
-│   └── <name>.yaml          # User-defined extension commands
 ├── sandboxes/
 │   └── <name>/
 │       ├── environment.json   # Sandbox metadata (agent, workdir, baseline SHA)
@@ -778,8 +798,8 @@ with `mv`. The CLI confirms before emptying trash (it may hold wanted data);
 4. `IsGlobalKey()` determines routing — add new global keys to `globalKnownSettings` or `globalKnownCollectionSettings`
 5. Add new profile/defaults fields to `YoloaiConfig` struct and the YAML node walker in `config/config.go`
 6. CLI `config get/set/reset` commands in `internal/cli/config.go` route via `config.IsGlobalKey()`
-7. Defaults config at `~/.yoloai/defaults/config.yaml`, global config at `~/.yoloai/config.yaml`
-8. Global state like `setup_complete` is stored in `~/.yoloai/state.yaml` via `LoadState()`/`SaveState()` in `config/state.go`
+7. Defaults config at `~/.yoloai/library/defaults/config.yaml`, global config at `~/.yoloai/library/config.yaml`
+8. The library no longer tracks setup ceremony (`setup_complete` removed, D60); the CLI's first-run-tip flag lives in `~/.yoloai/cli/state.yaml` via `cliutil.LoadCLIState()`/`SaveCLIState()`
 
 **Add a new runtime backend:**
 1. Create `runtime/<name>/` package

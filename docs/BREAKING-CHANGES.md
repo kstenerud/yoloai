@@ -129,6 +129,50 @@ handle `*DirtyWorkdirError` (or pre-ack with `AllowDirtyWorkdir`); rename the
 `"squash"`→`"no-commit"`); `sandbox info`/`list` `--json` nest settings under
 `"environment"` (was `"meta"`).
 
+### Data directory bifurcated into `library/` (engine) + `cli/` (app); one-time automatic migration
+
+The CLI's `~/.yoloai/` is now split into two namespaces under the same top dir:
+
+- `~/.yoloai/library/` holds everything the embeddable engine owns — `sandboxes/`,
+  `profiles/`, `cache/`, `trash/`, `defaults/`, `config.yaml`, the tart/docker
+  base-image locks + metadata, `cni/`, and `vscode-cli/`.
+- `~/.yoloai/cli/` holds CLI-only application state — `extensions/` and the new
+  `state.yaml` (first-run-tip bookkeeping).
+
+**Why.** yoloAI is library-first: the engine owns everything under whatever
+`DataDir` it is handed and never reaches above it, so the CLI now points the
+library at `~/.yoloai/library/` and keeps its own app state in `~/.yoloai/cli/`.
+This is purely a CLI convention — **embedders that pass an explicit `--data-dir`
+(or `Options.DataDir`) still get every engine directory directly under that path,
+with no `/library` subdir.** Each namespace carries its own JSON `.schema-version`
+stamp (`<DataDir>/.schema-version` for the library, `~/.yoloai/cli/.schema-version`
+for the CLI), so future layout changes migrate independently.
+
+**Migration.** On the first run of this build against a pre-split `~/.yoloai/`
+(detected once, deterministically, by a flat `~/.yoloai/config.yaml` with no
+`~/.yoloai/library/` beside it), the CLI relocates the engine dirs into
+`library/` and `extensions/` into `cli/`, then stamps both namespaces. The moves
+are in-place renames within one filesystem (atomic, no copying). Once stamped the
+flat-detection heuristic never runs again. A brand-new install defers stamping
+until real work materializes the layout, so read-only commands like
+`yoloai version` don't create directories.
+
+**`--data-dir`.** When supplied, the CLI roots the library at `DIR/library` and
+its own state at `DIR/cli` (same split as the default). Embedders calling the Go
+API directly are unaffected — they own the path they pass.
+
+**`setup_complete` removed.** The legacy `~/.yoloai/state.yaml` `setup_complete`
+flag is gone. "Has the setup wizard run?" is application ceremony, not library
+state, so the library no longer tracks it — `EnsureSetup` runs idempotently
+inside `Create`, and the CLI's one-time onboarding tip is now keyed off
+`~/.yoloai/cli/state.yaml` (`first_run_tip_shown`). The migration carries a legacy
+`setup_complete: true` forward as `first_run_tip_shown: true` so upgraders don't
+see the tip resurface.
+
+**`tmux_conf` default.** Now defaults to `default+host` (was empty). The library
+"just works" via opinionated declarative defaults rather than depending on a
+completed setup ceremony to populate config.
+
 ### `yoloai system doctor` moves to `yoloai doctor`
 
 The host health-check command is promoted to a top-level verb as part of the
