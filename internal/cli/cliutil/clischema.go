@@ -40,18 +40,43 @@ var libraryOwnedEntries = []string{
 	"vscode-cli",
 }
 
+// CLIStatus reports what the CLI realm's DataDir (TOP/cli) needs before use,
+// using the same dumb, read-only check the library realm uses: LayoutFresh
+// (absent/empty), LayoutMigrate (older version), or LayoutOK (current). A
+// too-new on-disk version returns an error. The startup gate calls this; it
+// never mutates anything.
+func CLIStatus() (config.LayoutStatus, error) {
+	return config.RealmStatus(CLIDir(), CLISchemaVersion)
+}
+
+// CreateFreshCLI initializes the CLI realm at the current version: it creates
+// TOP/cli and writes the plain-int version stamp. Called on a genuinely fresh
+// install (by the gate) and as the terminal step of the flat -> namespaced
+// migration.
+func CreateFreshCLI() error {
+	if err := fileutil.MkdirAll(CLIDir(), 0750); err != nil {
+		return fmt.Errorf("create cli data dir: %w", err)
+	}
+	return config.WriteSchemaVersion(CLISchemaVersionPath(), CLISchemaVersion)
+}
+
 // MigrateCLI brings the shared top dir's CLI-owned layout up to
-// CLISchemaVersion and stamps TOP/cli/.schema-version. The stamp is the only
-// signal consulted once present: a stamped layout short-circuits immediately.
+// CLISchemaVersion. It is the CLI realm's mutation — invoked only by the
+// explicit `yoloai system migrate` command, never on the normal startup path
+// (the gate uses the read-only CLIStatus instead).
 //
-// On the first run of a namespace-aware binary against a pre-namespace (v0)
-// flat install — detected once, deterministically, by a flat TOP/config.yaml
-// with no TOP/library beside it — it relocates the library-owned dirs into
-// TOP/library and the CLI-owned dirs into TOP/cli, carries the legacy
-// setup_complete flag forward as first-run-tip suppression, drops the old flat
-// state file, then stamps. The flat -> namespaced move is a CLI concern: it
-// restructures the dir *above* the library's root, which the library (rooted
-// at and confined to its DataDir) cannot and must not do itself.
+// On a pre-namespace (v0) flat install — detected deterministically by a flat
+// TOP/config.yaml with no TOP/library beside it — it relocates the
+// library-owned dirs into TOP/library and the CLI-owned dirs into TOP/cli,
+// carries the legacy setup_complete flag forward as first-run-tip suppression,
+// drops the old flat state file, then stamps. The flat -> namespaced move is a
+// CLI concern: it restructures the dir *above* the library's root, which the
+// library (rooted at and confined to its DataDir) cannot and must not do
+// itself.
+//
+// Idempotent: an already-stamped layout is a no-op. It validates that TOP is
+// something it recognizes and errors on unrecognized content rather than
+// relocating arbitrary files (e.g. when --data-dir points at the wrong path).
 func MigrateCLI() error {
 	stampPath := CLISchemaVersionPath()
 	current, exists, err := config.ReadSchemaVersion(stampPath)
@@ -62,36 +87,29 @@ func MigrateCLI() error {
 		if current > CLISchemaVersion {
 			return fmt.Errorf("cli data dir schema version %d is newer than this build supports (%d); upgrade yoloai", current, CLISchemaVersion)
 		}
+		// Already at the current version (v1 has no further CLI steps yet).
 		return nil
 	}
 
 	top := TopDir()
-	if isFlatV0Install(top) {
+	switch {
+	case isFlatV0Install(top):
 		if err := relocateFlatToNamespaced(top); err != nil {
 			return err
 		}
-		return stampCLI(stampPath)
+		return CreateFreshCLI()
+	case dirExists(filepath.Join(top, libraryNamespace)) || dirExists(CLIDir()):
+		// A namespaced layout that predates the stamp (an interim build):
+		// record the stamp without relocating anything.
+		return CreateFreshCLI()
+	case dirAbsentOrEmpty(top):
+		// Nothing on disk yet: initialize the CLI realm fresh.
+		return CreateFreshCLI()
+	default:
+		// A non-empty TOP that is neither a flat v0 install nor a namespaced
+		// layout — we don't recognize it. Refuse rather than mangle it.
+		return fmt.Errorf("cannot migrate %q: not a recognized yoloai data directory (expected a flat v0 install or a library/cli layout)", top)
 	}
-
-	// No stamp and no flat install to migrate. On a brand-new install
-	// (nothing on disk yet) defer stamping so read-only commands like
-	// `yoloai version` don't materialize directories; the stamp lands once
-	// real work has created the layout. If the namespaced layout already
-	// exists (e.g. created by an interim build before the stamp existed),
-	// record the stamp now so future runs short-circuit.
-	if dirExists(filepath.Join(top, libraryNamespace)) || dirExists(CLIDir()) {
-		return stampCLI(stampPath)
-	}
-	return nil
-}
-
-// stampCLI records CLISchemaVersion at stampPath, creating TOP/cli first
-// (WriteSchemaVersion does not create parent dirs).
-func stampCLI(stampPath string) error {
-	if err := fileutil.MkdirAll(CLIDir(), 0750); err != nil {
-		return fmt.Errorf("create cli namespace: %w", err)
-	}
-	return config.WriteSchemaVersion(stampPath, CLISchemaVersion)
 }
 
 // isFlatV0Install reports whether top looks like a pre-namespace install: a
@@ -184,4 +202,15 @@ func migrateFlatSetupState(top string) error {
 func dirExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
+}
+
+// dirAbsentOrEmpty reports whether dir does not exist or exists but contains no
+// entries. A read error other than "not exist" (e.g. dir is a plain file) reads
+// as non-empty so MigrateCLI's garbage branch can reject it.
+func dirAbsentOrEmpty(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return errors.Is(err, fs.ErrNotExist)
+	}
+	return len(entries) == 0
 }

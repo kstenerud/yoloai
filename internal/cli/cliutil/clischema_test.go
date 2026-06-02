@@ -84,16 +84,56 @@ func TestMigrateCLI_SetupIncomplete_TipNotSuppressed(t *testing.T) {
 	assert.False(t, st.FirstRunTipShown, "no prior setup_complete → onboarding tip must still fire")
 }
 
-func TestMigrateCLI_FreshInstall_DefersStamp(t *testing.T) {
-	top := isolatedTop(t)
+func TestMigrateCLI_FreshInstall_StampsFresh(t *testing.T) {
+	_ = isolatedTop(t)
 
+	// On a genuinely empty TOP, an explicit migrate initializes the CLI realm
+	// at the current version (the gate normally create-freshes, but running
+	// migrate directly on a fresh dir is a harmless, idempotent init).
 	require.NoError(t, cliutil.MigrateCLI())
 
-	// Nothing on disk yet → no directories materialized, stamp deferred.
-	assert.NoDirExists(t, top)
-	_, exists, err := config.ReadSchemaVersion(cliutil.CLISchemaVersionPath())
+	version, exists, err := config.ReadSchemaVersion(cliutil.CLISchemaVersionPath())
 	require.NoError(t, err)
-	assert.False(t, exists)
+	require.True(t, exists)
+	assert.Equal(t, cliutil.CLISchemaVersion, version)
+}
+
+func TestMigrateCLI_UnrecognizedTop_Errors(t *testing.T) {
+	top := isolatedTop(t)
+	// A non-empty TOP that is neither flat v0 (no flat config.yaml) nor a
+	// namespaced layout (no library/ or cli/). MigrateCLI must refuse rather
+	// than relocate arbitrary files.
+	require.NoError(t, os.MkdirAll(filepath.Join(top, "random-stuff"), 0750))
+	require.NoError(t, os.WriteFile(filepath.Join(top, "random-stuff", "x"), []byte("y"), 0600))
+
+	err := cliutil.MigrateCLI()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not a recognized yoloai data directory")
+
+	// Nothing was relocated.
+	assert.NoDirExists(t, filepath.Join(top, "library"))
+	assert.FileExists(t, filepath.Join(top, "random-stuff", "x"))
+}
+
+func TestCLIStatus(t *testing.T) {
+	_ = isolatedTop(t)
+
+	// Absent TOP/cli → fresh.
+	st, err := cliutil.CLIStatus()
+	require.NoError(t, err)
+	assert.Equal(t, config.LayoutFresh, st)
+
+	// After CreateFreshCLI → OK.
+	require.NoError(t, cliutil.CreateFreshCLI())
+	st, err = cliutil.CLIStatus()
+	require.NoError(t, err)
+	assert.Equal(t, config.LayoutOK, st)
+
+	// Older stamp → migrate.
+	require.NoError(t, config.WriteSchemaVersion(cliutil.CLISchemaVersionPath(), cliutil.CLISchemaVersion-1))
+	st, err = cliutil.CLIStatus()
+	require.NoError(t, err)
+	assert.Equal(t, config.LayoutMigrate, st)
 }
 
 func TestMigrateCLI_NamespacedNoStamp_Stamps(t *testing.T) {
