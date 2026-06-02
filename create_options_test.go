@@ -69,7 +69,7 @@ func TestRunOptions_materialize(t *testing.T) {
 // F4: Backend is required — empty rejected at construction with a *UsageError,
 // before any backend connection is attempted.
 func TestNewWithOptions_BackendRequired(t *testing.T) {
-	_, err := NewWithOptions(context.Background(), Options{DataDir: t.TempDir()})
+	_, err := NewWithOptions(context.Background(), Options{DataDir: t.TempDir(), HomeDir: t.TempDir()})
 	require.Error(t, err)
 	var ue *yoerrors.UsageError
 	require.ErrorAs(t, err, &ue, "empty Backend must yield a *UsageError")
@@ -78,4 +78,21 @@ func TestNewWithOptions_BackendRequired(t *testing.T) {
 func TestNewWithOptions_DataDirRequired(t *testing.T) {
 	_, err := NewWithOptions(context.Background(), Options{Backend: BackendDocker})
 	require.Error(t, err, "empty DataDir must be rejected")
+}
+
+// HomeDir is required — empty rejected with a *UsageError, so the old silent
+// filepath.Dir(DataDir) derivation (wrong under the D60 $HOME/.yoloai/library
+// bifurcation) can never resolve seed/credential lookups to the wrong home.
+func TestNewWithOptions_HomeDirRequired(t *testing.T) {
+	_, err := NewWithOptions(context.Background(), Options{DataDir: t.TempDir(), Backend: BackendDocker})
+	require.Error(t, err)
+	var ue *yoerrors.UsageError
+	require.ErrorAs(t, err, &ue, "empty HomeDir must yield a *UsageError")
+}
+
+func TestNewSystemClient_HomeDirRequired(t *testing.T) {
+	_, err := NewSystemClient(SystemOptions{DataDir: t.TempDir()})
+	require.Error(t, err)
+	var ue *yoerrors.UsageError
+	require.ErrorAs(t, err, &ue, "empty HomeDir must yield a *UsageError")
 }

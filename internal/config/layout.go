@@ -90,15 +90,21 @@ type Layout struct {
 }
 
 // NewLayout constructs a Layout rooted at dataDir with HomeDir
-// derived as the conventional parent of dataDir. Use NewLayoutFor
-// (below) when DataDir and HomeDir differ.
+// derived as the conventional parent of dataDir. This derivation is
+// only correct when dataDir lives directly inside $HOME (e.g.
+// $HOME/.yoloai) — the convention used by internal tests. It is NOT
+// valid for the D60-bifurcated public DataDir ($HOME/.yoloai/library,
+// whose parent is $HOME/.yoloai, not $HOME); the public boundaries
+// (yoloai.NewWithOptions / NewSystemClient) therefore require an
+// explicit HomeDir and always call NewLayoutFor. Use NewLayoutFor
+// directly whenever DataDir and HomeDir differ.
 //
-// Panics if dataDir is empty. Public-entry callers (yoloai.NewWithOptions
-// et al.) pre-validate against *UsageError before constructing a Layout,
-// so empty here is a programming bug (Q-X: bugs panic, user errors return
-// typed errors). F14: this enforces the "Layout existence ⇒ valid DataDir"
-// invariant at the type-construction boundary instead of duplicating the
-// check in every Engine/Client method.
+// Panics if dataDir is empty. Callers pre-validate against *UsageError
+// before constructing a Layout, so empty here is a programming bug
+// (Q-X: bugs panic, user errors return typed errors). F14: this enforces
+// the "Layout existence ⇒ valid DataDir" invariant at the type-
+// construction boundary instead of duplicating the check in every
+// Engine/Client method.
 func NewLayout(dataDir string) Layout {
 	if dataDir == "" {
 		panic("config.NewLayout: dataDir is required (empty string is invalid; public boundaries must validate input and return *UsageError before reaching this constructor)")

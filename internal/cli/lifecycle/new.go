@@ -97,8 +97,10 @@ func runNewCmd(cmd *cobra.Command, args []string, version string) error {
 	if cliutil.JSONEnabled(cmd) {
 		mgrOutput = io.Discard
 	}
+	l := cliutil.Layout()
 	c, err := yoloai.NewWithOptions(cmd.Context(), yoloai.Options{
-		DataDir: cliutil.Layout().DataDir,
+		DataDir: l.DataDir,
+		HomeDir: l.HomeDir,
 		Backend: yoloai.BackendName(backend),
 		Input:   cmd.InOrStdin(),
 		Output:  mgrOutput,

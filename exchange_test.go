@@ -13,7 +13,7 @@ import (
 
 func TestSystemClient_ExchangePaths(t *testing.T) {
 	dir := t.TempDir()
-	sc, err := NewSystemClient(SystemOptions{DataDir: dir})
+	sc, err := NewSystemClient(SystemOptions{DataDir: dir, HomeDir: dir})
 	require.NoError(t, err)
 
 	state := sc.layout.SandboxDir("box")
@@ -25,7 +25,7 @@ func TestSystemClient_ExchangePaths(t *testing.T) {
 
 func TestSystemClient_LogPaths(t *testing.T) {
 	dir := t.TempDir()
-	sc, err := NewSystemClient(SystemOptions{DataDir: dir})
+	sc, err := NewSystemClient(SystemOptions{DataDir: dir, HomeDir: dir})
 	require.NoError(t, err)
 
 	state := sc.layout.SandboxDir("box")

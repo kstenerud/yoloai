@@ -128,8 +128,10 @@ func writeSandboxSections(ctx context.Context, w io.Writer, c *yoloai.Client, na
 func WriteSandboxSectionsForFlag(w io.Writer, name, reportType string) {
 	backend := cliutil.ResolveBackendForSandbox(name)
 	ctx := context.Background()
+	l := cliutil.Layout()
 	c, err := yoloai.NewWithOptions(ctx, yoloai.Options{
-		DataDir: cliutil.Layout().DataDir,
+		DataDir: l.DataDir,
+		HomeDir: l.HomeDir,
 		Backend: yoloai.BackendName(backend),
 		Input:   os.Stdin,
 		Output:  io.Discard, // best-effort path; don't write to the in-progress bug report

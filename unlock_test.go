@@ -12,7 +12,7 @@ import (
 // file present reports cleared=false without error. The stale-lock and
 // live-holder paths are covered by store/lock_test.go.
 func TestSystemClient_Unlock_Noop(t *testing.T) {
-	sc, err := NewSystemClient(SystemOptions{DataDir: t.TempDir()})
+	sc, err := NewSystemClient(SystemOptions{DataDir: t.TempDir(), HomeDir: t.TempDir()})
 	require.NoError(t, err)
 
 	cleared, err := sc.Unlock("ghost")

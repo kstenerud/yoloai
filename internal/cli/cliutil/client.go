@@ -110,8 +110,10 @@ func ResolveBackendForSandbox(name string) yoloai.BackendName {
 // derived from Layout(). See internal/cli/CONVENTIONS.md.
 func WithClient(cmd *cobra.Command, backend yoloai.BackendName, fn func(ctx context.Context, c *yoloai.Client) error) error {
 	ctx := cmd.Context()
+	l := Layout()
 	c, err := yoloai.NewWithOptions(ctx, yoloai.Options{
-		DataDir: Layout().DataDir,
+		DataDir: l.DataDir,
+		HomeDir: l.HomeDir,
 		Backend: backend,
 		Logger:  slog.Default(),
 		Input:   cmd.InOrStdin(),

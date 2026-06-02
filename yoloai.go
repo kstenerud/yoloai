@@ -26,7 +26,8 @@
 // Typical usage:
 //
 //	client, err := yoloai.NewWithOptions(ctx, yoloai.Options{
-//	    DataDir: filepath.Join(os.Getenv("HOME"), ".yoloai"),
+//	    DataDir: filepath.Join(os.Getenv("HOME"), ".yoloai", "library"),
+//	    HomeDir: os.Getenv("HOME"), // required; where ~/.claude etc. resolve
 //	    Backend: yoloai.BackendDocker, // required; or yoloai.SelectBackend(...)
 //	})
 //	if err != nil { log.Fatal(err) }
@@ -102,15 +103,18 @@ type Options struct {
 	// explicit path. See development-principles.md §12.
 	DataDir string
 
-	// HomeDir is the host user's home directory. Optional — if empty,
-	// the Client derives it as filepath.Dir(DataDir) for the common
-	// case where DataDir lives directly inside $HOME (e.g.
-	// $HOME/.yoloai). Embedders whose DataDir lives elsewhere
-	// (/var/lib/yoloai, multi-tenant per-user roots) must pass this
-	// explicitly — otherwise ~-expansion in user-supplied paths,
-	// seed-file lookups (~/.claude, ~/.codex), and auth-file discovery
-	// resolve to filepath.Dir(DataDir) instead of the user's actual
-	// $HOME. F13 (2026-05-27).
+	// HomeDir is the host user's home directory. REQUIRED — empty is
+	// rejected at construction with a *UsageError. It is where ~-expansion
+	// in user-supplied paths, seed-file lookups (~/.claude, ~/.codex), and
+	// auth-file discovery resolve.
+	//
+	// There is no implicit filepath.Dir(DataDir) derivation: under the D60
+	// data-dir bifurcation DataDir is $HOME/.yoloai/library, so its parent
+	// is $HOME/.yoloai — not $HOME. Silently deriving it there sent every
+	// seed/credential lookup to the wrong home and launched agents
+	// unconfigured, so the boundary now demands an explicit value. The CLI
+	// passes cliutil.Layout().HomeDir (its single licensed os.UserHomeDir()
+	// site); embedders pass the host user's home. F13 (2026-05-27).
 	HomeDir string
 
 	// Backend selects the runtime backend (yoloai.BackendDocker,
@@ -160,16 +164,14 @@ func NewWithOptions(ctx context.Context, opts Options) (*Client, error) {
 	if opts.DataDir == "" {
 		return nil, fmt.Errorf("yoloai: Options.DataDir is required (no implicit $HOME fallback; see development-principles.md §12)")
 	}
+	if opts.HomeDir == "" {
+		return nil, yoerrors.NewUsageError("yoloai: Options.HomeDir is required (no implicit filepath.Dir(DataDir) derivation; under the D60 bifurcation DataDir is $HOME/.yoloai/library, so its parent is not $HOME). Pass the host user's home explicitly; the CLI uses cliutil.Layout().HomeDir. See development-principles.md §12.")
+	}
 	if opts.Backend == "" {
 		return nil, yoerrors.NewUsageError("yoloai: Options.Backend is required — empty is not a valid backend (F4). Resolve it at the boundary before constructing the Client, e.g. yoloai.SelectBackend(ctx, preferred, isolation, os). See development-principles.md §4.")
 	}
 
-	var layout config.Layout
-	if opts.HomeDir != "" {
-		layout = config.NewLayoutFor(opts.DataDir, opts.HomeDir)
-	} else {
-		layout = config.NewLayout(opts.DataDir)
-	}
+	layout := config.NewLayoutFor(opts.DataDir, opts.HomeDir)
 
 	backend := opts.Backend
 	logger := opts.Logger
