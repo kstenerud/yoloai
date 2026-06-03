@@ -30,11 +30,16 @@ type AgentInfo struct {
 // (see BackendQuery.ProbeAvailability); otherwise Available is false and Note is
 // empty regardless of whether the backend would actually run.
 type BackendInfo struct {
-	Name        BackendName
-	Description string
-	Platforms   []string // host GOOS values this backend runs on ("linux", "darwin", …)
-	Requires    string   // human-readable prerequisites
-	InstallHint string   // install URL or command; "" when nothing to install
+	Name          BackendName
+	Description   string
+	Platforms     []string // host GOOS values this backend runs on ("linux", "darwin", …)
+	Architectures []string // host GOARCH values this backend supports ("amd64", "arm64"); nil/empty = any arch
+	// IsolationTargetOnly is true when the backend is reached only via isolation
+	// routing (e.g. --isolation vm), never picked directly as a user default. A
+	// setup wizard or default picker should skip these.
+	IsolationTargetOnly bool
+	Requires            string // human-readable prerequisites
+	InstallHint         string // install URL or command; "" when nothing to install
 	// HostFromContainer is the hostname inside the sandbox that resolves to the
 	// host's network stack ("host.docker.internal" for docker/podman); "" for
 	// backends without a special hostname.
@@ -134,11 +139,13 @@ func agentInfoFromDefinition(def *agent.Definition) AgentInfo {
 
 func backendInfoFromDescriptor(desc runtime.BackendDescriptor) BackendInfo {
 	return BackendInfo{
-		Name:              desc.Name,
-		Description:       desc.Description,
-		Platforms:         desc.Platforms,
-		Requires:          desc.Requires,
-		InstallHint:       desc.InstallHint,
-		HostFromContainer: desc.HostFromContainer,
+		Name:                desc.Name,
+		Description:         desc.Description,
+		Platforms:           desc.Platforms,
+		Architectures:       desc.Architectures,
+		IsolationTargetOnly: desc.IsolationTargetOnly,
+		Requires:            desc.Requires,
+		InstallHint:         desc.InstallHint,
+		HostFromContainer:   desc.HostFromContainer,
 	}
 }

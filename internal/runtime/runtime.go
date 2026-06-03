@@ -136,6 +136,7 @@ type BackendDescriptor struct {
 	Description               string          // one-line user-facing summary ("Linux containers; portable …")
 	Platforms                 []string        // host OSes this backend can run on; GOOS-style ("linux", "darwin", "windows")
 	Architectures             []string        // host architectures this backend supports; GOARCH-style ("amd64", "arm64"). nil/empty = any arch.
+	IsolationTargetOnly       bool            // true when the backend is reached only via isolation routing (e.g. --isolation vm), never selected directly as a user default; setup/default pickers should skip it.
 	Requires                  string          // human-readable prerequisites ("Docker Engine installed and running")
 	InstallHint               string          // install URL or shell command; "" when no install is needed
 	BaseModeName              IsolationMode   // typed label for the backend's default (no-isolation) mode

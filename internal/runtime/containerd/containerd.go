@@ -31,6 +31,7 @@ var descriptor = runtime.BackendDescriptor{
 	Name:                      "containerd",
 	Description:               "Linux VMs via Kata Containers (--isolation vm/vm-enhanced)",
 	Platforms:                 []string{"linux"},
+	IsolationTargetOnly:       true,
 	Requires:                  "containerd, Kata Containers shim, CNI plugins, /dev/kvm",
 	InstallHint:               "sudo apt install containerd kata-containers containernetworking-plugins",
 	BaseModeName:              runtime.IsolationModeVM,
