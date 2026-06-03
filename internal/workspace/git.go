@@ -5,8 +5,11 @@ package workspace
 import (
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/kstenerud/yoloai/internal/fileutil"
 )
 
 // NewGitCmd builds an exec.Cmd for git with hooks disabled.
@@ -56,8 +59,22 @@ func Baseline(workDir string) (string, error) {
 			return "", err
 		}
 	}
+	if err := chownGitDir(workDir); err != nil {
+		return "", err
+	}
 
 	return HeadSHA(workDir)
+}
+
+// chownGitDir hands the .git tree back to the invoking user when yoloai runs
+// under sudo. git ran as root, so every object it wrote is root-owned; without
+// this the user cannot remove or repair the sandbox without sudo. No-op when
+// not running under sudo.
+func chownGitDir(workDir string) error {
+	if err := fileutil.ChownRecursiveIfSudo(filepath.Join(workDir, ".git")); err != nil {
+		return fmt.Errorf("fix .git ownership: %w", err)
+	}
+	return nil
 }
 
 // BaselineUncommittedChanges commits any pre-existing uncommitted changes in
@@ -79,6 +96,9 @@ func BaselineUncommittedChanges(workDir string) (string, error) {
 		"commit", "-m", "yoloai: pre-session state",
 	); err != nil {
 		return "", fmt.Errorf("commit pre-session state: %w", err)
+	}
+	if err := chownGitDir(workDir); err != nil {
+		return "", err
 	}
 	return HeadSHA(workDir)
 }

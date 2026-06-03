@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -109,6 +110,26 @@ func ChownIfSudo(path string) error {
 		return nil
 	}
 	return os.Lchown(path, uid, SudoGID())
+}
+
+// ChownRecursiveIfSudo transfers ownership of path and everything beneath it to
+// the real user when running under sudo. Use it after a subprocess (e.g. git)
+// creates a tree as root that would otherwise be unremovable by the invoking
+// user. No-op (returns nil without walking) when not running under sudo, so
+// callers may invoke it unconditionally. Uses os.Lchown so symlinks are chowned
+// without being followed.
+func ChownRecursiveIfSudo(path string) error {
+	uid := SudoUID()
+	if uid == -1 {
+		return nil
+	}
+	gid := SudoGID()
+	return filepath.WalkDir(path, func(p string, _ fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		return os.Lchown(p, uid, gid) //nolint:gosec // G122: chowning a freshly-created yoloai-owned tree, not an attacker-controlled path
+	})
 }
 
 // MkdirAll wraps os.MkdirAll and fixes ownership when running under sudo.

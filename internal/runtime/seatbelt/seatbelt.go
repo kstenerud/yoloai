@@ -503,6 +503,9 @@ func mountSymlinks(mounts []runtime.MountSpec) ([]string, error) {
 		if err := os.Symlink(m.HostPath, m.ContainerPath); err != nil {
 			return created, fmt.Errorf("create symlink %s -> %s: %w", m.ContainerPath, m.HostPath, err)
 		}
+		if err := fileutil.ChownIfSudo(m.ContainerPath); err != nil {
+			return created, fmt.Errorf("chown symlink %s: %w", m.ContainerPath, err)
+		}
 		created = append(created, m.ContainerPath)
 	}
 	return created, nil
