@@ -21,7 +21,7 @@ func TestMain(m *testing.M) {
 	var rt *Runtime
 	var dockerErr error
 	step("connecting to docker", func() {
-		rt, dockerErr = New(ctx)
+		rt, dockerErr = New(ctx, envFromOS())
 	})
 	if dockerErr != nil {
 		fmt.Fprintf(os.Stderr, "Docker unavailable, skipping integration tests: %v\n", dockerErr)

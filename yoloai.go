@@ -159,6 +159,17 @@ type Options struct {
 	// sudo-stripped-credential recovery). A multi-principal embedder MUST pass
 	// each principal's own environment here — never the daemon's process env —
 	// so credentials stay principal-scoped (D58/D59).
+	//
+	// Env is also where the selected backend reads its daemon-connection
+	// settings (the library never reads them from the process env, §12). Include
+	// whichever apply to your Backend:
+	//   - docker:  DOCKER_HOST, DOCKER_CERT_PATH, DOCKER_TLS_VERIFY,
+	//              DOCKER_API_VERSION. All optional — absent/blank means the
+	//              default local socket with no TLS (same as the docker CLI).
+	//   - podman:  CONTAINER_HOST, DOCKER_HOST, XDG_RUNTIME_DIR for socket
+	//              discovery. Absent falls back to the well-known socket paths.
+	//   - seatbelt: locale/terminal vars (PATH, HOME, TERM, LANG, LC_*) are
+	//              forwarded to the on-host agent from this snapshot.
 	Env map[string]string
 
 	// Principal namespaces this Client's sandboxes under an owning principal

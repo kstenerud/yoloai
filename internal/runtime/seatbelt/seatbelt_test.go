@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime"
 )
 
@@ -817,13 +818,15 @@ func TestGenerateProfile_ToolchainPaths(t *testing.T) {
 }
 
 func TestSandboxEnv_Whitelist(t *testing.T) {
-	// Set some env vars that should be stripped
-	t.Setenv("SSH_AUTH_SOCK", "/tmp/ssh-agent.sock")
-	t.Setenv("AWS_SECRET_ACCESS_KEY", "super-secret")
-	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
-	t.Setenv("GIT_AUTHOR_EMAIL", "test@example.com")
+	// Env vars that should be stripped, supplied via the threaded snapshot.
+	r := &Runtime{layout: config.Layout{Env: map[string]string{
+		"SSH_AUTH_SOCK":         "/tmp/ssh-agent.sock",
+		"AWS_SECRET_ACCESS_KEY": "super-secret",
+		"ANTHROPIC_API_KEY":     "sk-ant-test",
+		"GIT_AUTHOR_EMAIL":      "test@example.com",
+	}}}
 
-	env := sandboxEnv()
+	env := r.sandboxEnv()
 	envMap := make(map[string]string)
 	for _, entry := range env {
 		k, v, _ := strings.Cut(entry, "=")
@@ -839,13 +842,15 @@ func TestSandboxEnv_Whitelist(t *testing.T) {
 }
 
 func TestSandboxEnv_PreservesWhitelisted(t *testing.T) {
-	t.Setenv("PATH", "/usr/bin:/bin")
-	t.Setenv("HOME", "/Users/testuser")
-	t.Setenv("TERM", "xterm-256color")
-	t.Setenv("LANG", "en_US.UTF-8")
-	t.Setenv("LC_CTYPE", "UTF-8")
+	r := &Runtime{layout: config.Layout{Env: map[string]string{
+		"PATH":     "/usr/bin:/bin",
+		"HOME":     "/Users/testuser",
+		"TERM":     "xterm-256color",
+		"LANG":     "en_US.UTF-8",
+		"LC_CTYPE": "UTF-8",
+	}}}
 
-	env := sandboxEnv()
+	env := r.sandboxEnv()
 	envMap := make(map[string]string)
 	for _, entry := range env {
 		k, v, _ := strings.Cut(entry, "=")

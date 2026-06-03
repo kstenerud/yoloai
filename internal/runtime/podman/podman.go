@@ -61,15 +61,29 @@ func versionString(ctx context.Context) string {
 // the known socket paths plus CONTAINER_HOST/DOCKER_HOST/podman machine; no
 // dial, matching docker's probe contract.
 func probe(_ context.Context) (bool, string) {
-	if _, err := discoverSocket(); err == nil {
+	if _, err := discoverSocket(probeEnv()); err == nil {
 		return true, ""
 	}
 	return false, "podman socket not found (start podman.socket or 'podman machine start')"
 }
 
+// probeEnv reads the host env vars podman's socket discovery consults. This
+// is the auto-detect boundary's licensed ambient read: the stat-only probe
+// takes no Layout (the descriptor's Probe contract), so unlike New it cannot
+// receive a threaded env. The real connection in New uses layout.Env (§12).
+func probeEnv() map[string]string {
+	m := make(map[string]string)
+	for _, k := range []string{"CONTAINER_HOST", "DOCKER_HOST", "XDG_RUNTIME_DIR"} {
+		if v := os.Getenv(k); v != "" { //nolint:forbidigo // §12: auto-detect probe boundary; see probeEnv doc
+			m[k] = v
+		}
+	}
+	return m
+}
+
 func init() {
-	runtime.Register("podman", func(ctx context.Context, _ config.Layout) (runtime.Runtime, error) {
-		return New(ctx)
+	runtime.Register("podman", func(ctx context.Context, layout config.Layout) (runtime.Runtime, error) {
+		return New(ctx, layout.Env)
 	}, descriptor)
 }
 
@@ -93,17 +107,17 @@ var _ runtime.DiskUsageReporter = (*Runtime)(nil) // inherited; image bytes via 
 
 // New creates a Podman Runtime by discovering the Podman socket and
 // connecting via the Docker SDK.
-func New(ctx context.Context) (*Runtime, error) {
+func New(ctx context.Context, env map[string]string) (*Runtime, error) {
 	if _, err := exec.LookPath("podman"); err != nil {
 		return nil, yoerrors.NewDependencyError("podman is not installed, install it from https://podman.io/docs/installation")
 	}
 
-	sock, err := discoverSocket()
+	sock, err := discoverSocket(env)
 	if err != nil {
 		return nil, yoerrors.NewDependencyError("podman socket not found: %w\nhint: run 'systemctl --user start podman.socket' or 'podman machine start'", err)
 	}
 
-	dockerRT, err := docker.NewWithSocket(ctx, sock, "podman")
+	dockerRT, err := docker.NewWithSocket(ctx, sock, "podman", env)
 	if err != nil {
 		return nil, fmt.Errorf("connect to podman: %w", err)
 	}
@@ -173,17 +187,19 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 //  3. $XDG_RUNTIME_DIR/podman/podman.sock (rootless)
 //  4. /run/podman/podman.sock (system-wide)
 //  5. macOS: `podman machine inspect` (Podman Machine)
-func discoverSocket() (string, error) {
-	// Check env vars first
-	if host := os.Getenv("CONTAINER_HOST"); host != "" { //nolint:forbidigo // §12: standard podman daemon-socket discovery (podman's own convention)
+func discoverSocket(env map[string]string) (string, error) {
+	// Check the caller's env snapshot first (§12: the daemon-socket location
+	// is threaded data, not a live os.Getenv — see New's layout.Env / the
+	// probe's probeEnv boundary).
+	if host := env["CONTAINER_HOST"]; host != "" {
 		return host, nil
 	}
-	if host := os.Getenv("DOCKER_HOST"); host != "" { //nolint:forbidigo // §12: standard daemon-socket discovery fallback
+	if host := env["DOCKER_HOST"]; host != "" {
 		return host, nil
 	}
 
 	// Rootless socket via XDG_RUNTIME_DIR
-	if xdg := os.Getenv("XDG_RUNTIME_DIR"); xdg != "" { //nolint:forbidigo // §12: rootless podman socket location (XDG convention)
+	if xdg := env["XDG_RUNTIME_DIR"]; xdg != "" {
 		sock := filepath.Join(xdg, "podman", "podman.sock")
 		if _, err := os.Stat(sock); err == nil { //nolint:gosec // G703: path is from trusted env var
 			return "unix://" + sock, nil

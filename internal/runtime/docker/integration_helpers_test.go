@@ -4,6 +4,8 @@ package docker
 
 import (
 	"context"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/docker/docker/api/types/container"
@@ -12,13 +14,26 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// envFromOS snapshots the process environment as a map. Integration tests are
+// the test-side boundary (equivalent to the CLI's licensed os.Environ read),
+// so they thread the real host env into New just as the CLI would.
+func envFromOS() map[string]string {
+	m := make(map[string]string)
+	for _, e := range os.Environ() {
+		if k, v, ok := strings.Cut(e, "="); ok {
+			m[k] = v
+		}
+	}
+	return m
+}
+
 // dockerSetup connects to Docker, ensures the base image exists,
 // and returns a *Runtime. Uses t.Cleanup for Close().
 func dockerSetup(t *testing.T) (*Runtime, context.Context) {
 	t.Helper()
 	ctx := context.Background()
 
-	rt, err := New(ctx)
+	rt, err := New(ctx, envFromOS())
 	require.NoError(t, err, "Docker must be running for integration tests")
 	t.Cleanup(func() { rt.Close() }) //nolint:errcheck // test cleanup
 

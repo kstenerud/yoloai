@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -23,6 +25,7 @@ import (
 	dockerclient "github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-connections/nat"
+	"github.com/docker/go-connections/tlsconfig"
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime"
@@ -83,8 +86,8 @@ func versionString(ctx context.Context) string {
 }
 
 func init() {
-	runtime.Register("docker", func(ctx context.Context, _ config.Layout) (runtime.Runtime, error) {
-		return New(ctx)
+	runtime.Register("docker", func(ctx context.Context, layout config.Layout) (runtime.Runtime, error) {
+		return New(ctx, layout.Env)
 	}, descriptor)
 }
 
@@ -110,26 +113,36 @@ var _ runtime.IsolationCapabilityProvider = (*Runtime)(nil)
 var _ runtime.CachePruner = (*Runtime)(nil)
 var _ runtime.DiskUsageReporter = (*Runtime)(nil)
 
-// New creates a Runtime and verifies the Docker daemon is reachable.
-func New(ctx context.Context) (*Runtime, error) {
+// New creates a Runtime and verifies the Docker daemon is reachable. env is
+// the caller's threaded environment snapshot (layout.Env); the daemon socket
+// and TLS settings are read from it rather than os.Environ (§12). A nil/empty
+// env means "default socket, no TLS" — exactly the SDK's behavior when the
+// DOCKER_* vars are unset.
+func New(ctx context.Context, env map[string]string) (*Runtime, error) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		return nil, yoerrors.NewDependencyError("docker is not installed, install it from https://docs.docker.com/get-docker/")
 	}
-	return NewWithSocket(ctx, "", "docker")
+	return NewWithSocket(ctx, "", "docker", env)
 }
 
 // NewWithSocket creates a Runtime connected to a specific Docker-compatible socket.
-// If host is empty, the client uses the default Docker environment variables.
-// binaryName is the CLI binary to use for interactive exec and image builds
-// (e.g., "docker" or "podman").
-func NewWithSocket(ctx context.Context, host string, binaryName string) (*Runtime, error) {
+// If host is non-empty it pins the connection to that socket. If host is empty,
+// the client is configured from env (DOCKER_HOST / DOCKER_CERT_PATH /
+// DOCKER_TLS_VERIFY / DOCKER_API_VERSION) — the threaded snapshot, not
+// os.Environ (§12). binaryName is the CLI binary to use for interactive exec
+// and image builds (e.g., "docker" or "podman").
+func NewWithSocket(ctx context.Context, host string, binaryName string, env map[string]string) (*Runtime, error) {
 	opts := []dockerclient.Opt{
 		dockerclient.WithAPIVersionNegotiation(),
 	}
 	if host != "" {
 		opts = append(opts, dockerclient.WithHost(host))
 	} else {
-		opts = append(opts, dockerclient.FromEnv)
+		envOpts, err := optsFromEnv(env)
+		if err != nil {
+			return nil, fmt.Errorf("configure docker client from env: %w", err)
+		}
+		opts = append(opts, envOpts...)
 	}
 
 	cli, err := dockerclient.NewClientWithOpts(opts...)
@@ -157,6 +170,41 @@ func NewWithSocket(ctx context.Context, host string, binaryName string) (*Runtim
 	r.gvisorRunsc = caps.NewGVisorRunsc(exec.LookPath)
 	r.gvisorRegistered = buildGVisorRegisteredCap(binaryName)
 	return r, nil
+}
+
+// optsFromEnv reproduces dockerclient.FromEnv, but sources the DOCKER_*
+// settings from the caller's threaded env snapshot rather than os.Environ
+// (§12). Behavior matches the SDK exactly: an empty DOCKER_CERT_PATH means no
+// TLS, an empty DOCKER_HOST means the default socket, an empty
+// DOCKER_API_VERSION means version negotiation. So a nil/blank env degrades to
+// a plain local connection — present-but-blank is the same code path as absent.
+func optsFromEnv(env map[string]string) ([]dockerclient.Opt, error) {
+	var opts []dockerclient.Opt
+
+	// TLS first, mirroring FromEnv's WithTLSClientConfigFromEnv: only engaged
+	// when DOCKER_CERT_PATH is set; DOCKER_TLS_VERIFY toggles verification.
+	if certPath := env["DOCKER_CERT_PATH"]; certPath != "" {
+		tlsc, err := tlsconfig.Client(tlsconfig.Options{
+			CAFile:             filepath.Join(certPath, "ca.pem"),
+			CertFile:           filepath.Join(certPath, "cert.pem"),
+			KeyFile:            filepath.Join(certPath, "key.pem"),
+			InsecureSkipVerify: env["DOCKER_TLS_VERIFY"] == "",
+		})
+		if err != nil {
+			return nil, err
+		}
+		opts = append(opts, dockerclient.WithHTTPClient(&http.Client{
+			Transport:     &http.Transport{TLSClientConfig: tlsc},
+			CheckRedirect: dockerclient.CheckRedirect,
+		}))
+	}
+	if host := env["DOCKER_HOST"]; host != "" {
+		opts = append(opts, dockerclient.WithHost(host))
+	}
+	if v := env["DOCKER_API_VERSION"]; v != "" {
+		opts = append(opts, dockerclient.WithVersion(v))
+	}
+	return opts, nil
 }
 
 // Client returns the underlying Docker SDK client.

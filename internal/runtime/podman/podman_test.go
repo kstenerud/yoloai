@@ -49,30 +49,22 @@ func TestPodmanImageBytes_SkipsNilEntries(t *testing.T) {
 }
 
 func TestDiscoverSocket_ContainerHost(t *testing.T) {
-	t.Setenv("CONTAINER_HOST", "unix:///custom/podman.sock")
-	t.Setenv("DOCKER_HOST", "")
-	t.Setenv("XDG_RUNTIME_DIR", "")
-
-	sock, err := discoverSocket()
+	sock, err := discoverSocket(map[string]string{"CONTAINER_HOST": "unix:///custom/podman.sock"})
 	require.NoError(t, err)
 	assert.Equal(t, "unix:///custom/podman.sock", sock)
 }
 
 func TestDiscoverSocket_DockerHost(t *testing.T) {
-	t.Setenv("CONTAINER_HOST", "")
-	t.Setenv("DOCKER_HOST", "unix:///custom/docker.sock")
-	t.Setenv("XDG_RUNTIME_DIR", "")
-
-	sock, err := discoverSocket()
+	sock, err := discoverSocket(map[string]string{"DOCKER_HOST": "unix:///custom/docker.sock"})
 	require.NoError(t, err)
 	assert.Equal(t, "unix:///custom/docker.sock", sock)
 }
 
 func TestDiscoverSocket_ContainerHostTakesPrecedence(t *testing.T) {
-	t.Setenv("CONTAINER_HOST", "unix:///container.sock")
-	t.Setenv("DOCKER_HOST", "unix:///docker.sock")
-
-	sock, err := discoverSocket()
+	sock, err := discoverSocket(map[string]string{
+		"CONTAINER_HOST": "unix:///container.sock",
+		"DOCKER_HOST":    "unix:///docker.sock",
+	})
 	require.NoError(t, err)
 	assert.Equal(t, "unix:///container.sock", sock)
 }
@@ -85,11 +77,7 @@ func TestDiscoverSocket_XDGRuntimeDir(t *testing.T) {
 	sockPath := filepath.Join(sockDir, "podman.sock")
 	require.NoError(t, os.WriteFile(sockPath, nil, 0o600))
 
-	t.Setenv("CONTAINER_HOST", "")
-	t.Setenv("DOCKER_HOST", "")
-	t.Setenv("XDG_RUNTIME_DIR", tmpDir)
-
-	sock, err := discoverSocket()
+	sock, err := discoverSocket(map[string]string{"XDG_RUNTIME_DIR": tmpDir})
 	require.NoError(t, err)
 	assert.Equal(t, "unix://"+sockPath, sock)
 }
@@ -107,11 +95,7 @@ func TestDiscoverSocket_NoSocket(t *testing.T) {
 	defer func() { systemSockPath = origSystemSockPath }()
 	systemSockPath = filepath.Join(t.TempDir(), "nonexistent.sock")
 
-	t.Setenv("CONTAINER_HOST", "")
-	t.Setenv("DOCKER_HOST", "")
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
-
-	_, err := discoverSocket()
+	_, err := discoverSocket(map[string]string{"XDG_RUNTIME_DIR": t.TempDir()})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no podman socket found")
 }
@@ -152,11 +136,7 @@ func TestDiscoverSocket_WSL2(t *testing.T) {
 	defer func() { systemSockPath = origSystem }()
 	systemSockPath = filepath.Join(tmpDir, "system.sock")
 
-	t.Setenv("CONTAINER_HOST", "")
-	t.Setenv("DOCKER_HOST", "")
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
-
-	sock, err := discoverSocket()
+	sock, err := discoverSocket(map[string]string{"XDG_RUNTIME_DIR": t.TempDir()})
 	require.NoError(t, err)
 	assert.Equal(t, "unix://"+sockPath, sock)
 }
@@ -180,11 +160,7 @@ func TestDiscoverSocket_WSL2_FirstPathWins(t *testing.T) {
 	defer func() { systemSockPath = origSystem }()
 	systemSockPath = filepath.Join(tmpDir, "system.sock")
 
-	t.Setenv("CONTAINER_HOST", "")
-	t.Setenv("DOCKER_HOST", "")
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
-
-	sock, err := discoverSocket()
+	sock, err := discoverSocket(map[string]string{"XDG_RUNTIME_DIR": t.TempDir()})
 	require.NoError(t, err)
 	assert.Equal(t, "unix://"+first, sock)
 }

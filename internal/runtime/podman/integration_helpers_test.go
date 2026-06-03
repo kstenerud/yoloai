@@ -19,7 +19,7 @@ func podmanSetup(t *testing.T) (*Runtime, context.Context) {
 	t.Helper()
 	ctx := context.Background()
 
-	rt, err := New(ctx)
+	rt, err := New(ctx, probeEnv())
 	require.NoError(t, err, "Podman must be running with socket activated for integration tests")
 	t.Cleanup(func() { rt.Close() }) //nolint:errcheck // test cleanup
 

@@ -301,7 +301,7 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 	setupScriptPath := filepath.Join(sandboxPath, binDir, "sandbox-setup.py")
 
 	cmd := exec.Command(r.sandboxExecBin, "-f", profilePath, "python3", setupScriptPath, "seatbelt", sandboxPath) //nolint:gosec // G204: paths are constructed from validated config
-	cmd.Env = sandboxEnv()
+	cmd.Env = r.sandboxEnv()
 	cmd.Stderr = logFile
 	cmd.Stdout = logFile
 	cmd.SysProcAttr = &syscall.SysProcAttr{
@@ -583,12 +583,14 @@ func (r *Runtime) killByPID(sandboxPath string) {
 	_ = os.Remove(pidPath)
 }
 
-// sandboxEnv returns a filtered subset of the parent environment, passing
-// only safe OS/locale variables. Credentials like SSH_AUTH_SOCK,
-// AWS_SECRET_ACCESS_KEY, etc. are excluded. The entrypoint injects agent
-// API keys from the secrets directory; users can opt in to additional env
-// vars via the config env: section.
-func sandboxEnv() []string {
+// sandboxEnv returns a filtered subset of the caller's threaded environment
+// snapshot (layout.Env), passing only safe OS/locale variables. Credentials
+// like SSH_AUTH_SOCK, AWS_SECRET_ACCESS_KEY, etc. are excluded. The entrypoint
+// injects agent API keys from the secrets directory; users can opt in to
+// additional env vars via the config env: section. The library reads
+// layout.Env, never os.Environ (§12) — the CLI captures the host env once at
+// its boundary and threads it in.
+func (r *Runtime) sandboxEnv() []string {
 	allowed := map[string]bool{
 		"PATH": true, "HOME": true, "USER": true, "LOGNAME": true,
 		"SHELL": true, "TERM": true, "TMPDIR": true,
@@ -597,9 +599,9 @@ func sandboxEnv() []string {
 		"LC_NUMERIC": true, "LC_TIME": true,
 	}
 	var filtered []string
-	for _, entry := range os.Environ() { //nolint:forbidigo // §12: seatbelt runs the agent on the host, so it forwards an allowlisted subset of the caller's env (locale only)
-		if k, _, ok := strings.Cut(entry, "="); ok && allowed[k] {
-			filtered = append(filtered, entry)
+	for k, v := range r.layout.Env {
+		if allowed[k] {
+			filtered = append(filtered, k+"="+v)
 		}
 	}
 	return filtered
