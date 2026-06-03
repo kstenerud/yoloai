@@ -251,6 +251,31 @@ func ResolveCopyMountFor(rt Runtime, sandboxName, hostPath string) string {
 	return hostPath
 }
 
+// GuestMountResolver is an optional interface implemented by backends that
+// expose bind/share mounts at a translated guest path rather than the
+// container mount target. Tart, for example, re-roots host directories under
+// /Users/admin/host/<host-path> inside the VM. Backends that don't implement
+// it (the default) see mounts at the original container path.
+//
+// Implementations must be idempotent: applying the translation to an
+// already-translated guest path must return it unchanged, so the path can be
+// stored in metadata and safely re-resolved on restart/reset.
+type GuestMountResolver interface {
+	// ResolveGuestMountPath translates a container-side mount target to the
+	// path where the mount is actually reachable inside the guest.
+	ResolveGuestMountPath(containerPath string) string
+}
+
+// ResolveGuestMountPathFor returns the guest-visible path for a mount target.
+// Falls back to containerPath when the backend doesn't implement
+// GuestMountResolver.
+func ResolveGuestMountPathFor(rt Runtime, containerPath string) string {
+	if p, ok := rt.(GuestMountResolver); ok {
+		return p.ResolveGuestMountPath(containerPath)
+	}
+	return containerPath
+}
+
 // IsolationCapabilityProvider is an optional interface implemented by
 // backends that need specific host capabilities (binaries present, kernel
 // features, etc.) for non-default isolation modes. Backends that don't

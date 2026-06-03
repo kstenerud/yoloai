@@ -362,6 +362,20 @@ func TestRemapTargetPath(t *testing.T) {
 	}
 }
 
+// TestResolveGuestMountPath verifies the GuestMountResolver wraps remapTargetPath
+// and is idempotent on already-translated guest paths (safe for restart/reset).
+func TestResolveGuestMountPath(t *testing.T) {
+	r := &Runtime{}
+
+	hostMirror := "/Users/karl/work/embrace"
+	guest := r.ResolveGuestMountPath(hostMirror)
+	assert.Equal(t, "/Users/admin/host/Users/karl/work/embrace", guest)
+
+	// Re-resolving the guest path (as happens on restart, where the stored
+	// MountPath is fed back as the mount target) must be a no-op.
+	assert.Equal(t, guest, r.ResolveGuestMountPath(guest))
+}
+
 // patchConfigWorkingDir tests
 
 func TestPatchConfigWorkingDir_RemapsDockerPath(t *testing.T) {

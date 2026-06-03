@@ -115,6 +115,35 @@ func TestBuildNetworkConfig_NoneTakesPriority(t *testing.T) {
 
 // --- collectCopyDirs ---
 
+// setupAuxDir must record the guest-visible mount path so CLAUDE.md/info/MCP
+// advertise where the mount is actually reachable. For backends that translate
+// mounts inside the guest, the stored MountPath differs from the host path.
+func TestSetupAuxDirs_GuestMountTranslation(t *testing.T) {
+	auxDirs := []*DirSpec{
+		{Path: "/Users/karl/work/embrace", Mode: "ro"},
+		{Path: "/Users/karl/lib", Mode: DirModeRW},
+	}
+
+	dirEnvs, err := setupAuxDirs(&fakeGuestMountRuntime{}, auxDirs)
+	require.NoError(t, err)
+	require.Len(t, dirEnvs, 2)
+
+	assert.Equal(t, "/Users/karl/work/embrace", dirEnvs[0].HostPath)
+	assert.Equal(t, "/guest/Users/karl/work/embrace", dirEnvs[0].MountPath)
+	assert.Equal(t, "/guest/Users/karl/lib", dirEnvs[1].MountPath)
+}
+
+// Backends without guest translation store the container path verbatim, so
+// MountPath equals HostPath and the display layers render a single path.
+func TestSetupAuxDirs_NoTranslationIsIdentity(t *testing.T) {
+	auxDirs := []*DirSpec{{Path: "/Users/karl/work/embrace", Mode: "ro"}}
+
+	dirEnvs, err := setupAuxDirs(&fakeRuntime{}, auxDirs)
+	require.NoError(t, err)
+	require.Len(t, dirEnvs, 1)
+	assert.Equal(t, dirEnvs[0].HostPath, dirEnvs[0].MountPath)
+}
+
 func TestCollectCopyDirs_NoCopy(t *testing.T) {
 	workdir := &DirSpec{Path: "/home/user/project", Mode: DirMode("rw")}
 	result := collectCopyDirs(workdir, nil)

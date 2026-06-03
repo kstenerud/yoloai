@@ -534,12 +534,6 @@ func setupAllWorkdirs(d state.Deps, opts Options, workdir *DirSpec, auxDirs []*D
 		}
 	}
 
-	slog.Debug("setting up aux dirs", "event", "sandbox.create.aux_dirs", "count", len(auxDirs))
-	dirEnvs, err := setupAuxDirs(sandboxDir, auxDirs)
-	if err != nil {
-		return "", "", nil, err
-	}
-
 	// For backends that run agents directly on the host (seatbelt), :copy mount paths
 	// must point to the sandbox copy location rather than the original host path.
 	if workdir.Mode == "copy" && workdir.MountPath == "" {
@@ -549,6 +543,12 @@ func setupAllWorkdirs(d state.Deps, opts Options, workdir *DirSpec, auxDirs []*D
 		if ad.Mode == "copy" && ad.MountPath == "" {
 			ad.MountPath = runtime.ResolveCopyMountFor(d.Runtime, opts.Name, ad.Path)
 		}
+	}
+
+	slog.Debug("setting up aux dirs", "event", "sandbox.create.aux_dirs", "count", len(auxDirs))
+	dirEnvs, err := setupAuxDirs(d.Runtime, auxDirs)
+	if err != nil {
+		return "", "", nil, err
 	}
 
 	return workCopyDir, baselineSHA, dirEnvs, nil

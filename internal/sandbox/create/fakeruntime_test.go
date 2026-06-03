@@ -67,6 +67,19 @@ func (f *fakeRuntime) Descriptor() runtime.BackendDescriptor {
 	}
 }
 
+// fakeGuestMountRuntime is a fakeRuntime that also implements
+// runtime.GuestMountResolver, re-rooting host dirs under /guest (mirroring how
+// tart maps them under /Users/admin/host/...).
+type fakeGuestMountRuntime struct {
+	fakeRuntime
+}
+
+var _ runtime.GuestMountResolver = (*fakeGuestMountRuntime)(nil)
+
+func (f *fakeGuestMountRuntime) ResolveGuestMountPath(containerPath string) string {
+	return "/guest" + containerPath
+}
+
 var errFakeNotImplemented = &fakeNotImplError{}
 
 type fakeNotImplError struct{}

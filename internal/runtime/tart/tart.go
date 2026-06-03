@@ -159,6 +159,15 @@ func (r *Runtime) ResolveCopyMount(sandboxName, hostPath string) string {
 	return filepath.Join("/Users/admin/yoloai-work", encoded)
 }
 
+// ResolveGuestMountPath translates a container-side mount target to the path
+// where the mount is actually reachable inside the VM guest (e.g. host dirs are
+// re-rooted under /Users/admin/host/...). Idempotent: already-translated guest
+// paths are returned unchanged, so the result is safe to store in metadata and
+// re-resolve on restart/reset.
+func (r *Runtime) ResolveGuestMountPath(containerPath string) string {
+	return remapTargetPath(containerPath)
+}
+
 // SetupWorkDirInVM returns shell commands to copy from VirtioFS staging
 // to local VM storage and create git baseline. Called during Create/Reset.
 func (r *Runtime) SetupWorkDirInVM(virtiofsStagingPath, vmLocalPath string) []string {

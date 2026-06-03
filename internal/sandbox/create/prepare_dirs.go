@@ -351,10 +351,10 @@ func createBaselineForGitRepo(workCopyDir string) (string, error) {
 }
 
 // setupAuxDirs copies/overlays each auxiliary directory and creates baselines.
-func setupAuxDirs(sandboxDir string, auxDirs []*DirSpec) ([]store.DirEnvironment, error) {
+func setupAuxDirs(rt runtime.Runtime, auxDirs []*DirSpec) ([]store.DirEnvironment, error) {
 	var dirEnvs []store.DirEnvironment
 	for _, ad := range auxDirs {
-		dm, err := setupAuxDir(sandboxDir, ad)
+		dm, err := setupAuxDir(rt, ad)
 		if err != nil {
 			return nil, err
 		}
@@ -369,14 +369,20 @@ func setupAuxDirs(sandboxDir string, auxDirs []*DirSpec) ([]store.DirEnvironment
 // preparation — the function just normalises mode and packs the meta.
 // The CLI / MCP boundary rejects :copy and :overlay via
 // sandbox.ParseAuxDirArg, so they can't reach here.
-func setupAuxDir(_ string, ad *DirSpec) (store.DirEnvironment, error) {
+//
+// MountPath is recorded as the guest-visible path: backends that re-root
+// mounts inside the guest (tart maps host dirs under /Users/admin/host/...)
+// must advertise where the mount is actually reachable, so the generated
+// CLAUDE.md, `info`, and MCP {dir:N} placeholders don't point at a path that
+// doesn't exist in the guest. Identity for backends without translation.
+func setupAuxDir(rt runtime.Runtime, ad *DirSpec) (store.DirEnvironment, error) {
 	mode := ad.Mode
 	if mode == "" {
 		mode = DirModeRO
 	}
 	return store.DirEnvironment{
 		HostPath:  ad.Path,
-		MountPath: ad.ResolvedMountPath(),
+		MountPath: runtime.ResolveGuestMountPathFor(rt, ad.ResolvedMountPath()),
 		Mode:      mode,
 	}, nil
 }
