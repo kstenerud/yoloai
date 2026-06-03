@@ -135,7 +135,7 @@ func runSystemTartAdd(cmd *cobra.Command, args []string) error {
 
 	fmt.Fprintf(cmd.OutOrStdout(), "\nCreating runtime base: %s\n\n", plan.Name) //nolint:errcheck
 
-	if _, err := h.Add(ctx, plan); err != nil {
+	if _, err := h.Add(ctx, plan, cmd.OutOrStdout()); err != nil {
 		var exists *yoloai.TartBaseExistsError
 		if errors.As(err, &exists) {
 			return yoerrors.NewUsageError("Runtime base '%s' already exists.\n\nUse 'yoloai system tart list' to see all bases.", plan.Name)

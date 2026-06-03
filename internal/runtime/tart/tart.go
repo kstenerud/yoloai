@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -1255,7 +1256,9 @@ func (r *Runtime) BaseExists(ctx context.Context, baseName string) (bool, error)
 }
 
 // CreateBase creates a new runtime base image with specified runtimes.
-func (r *Runtime) CreateBase(ctx context.Context, baseName string, runtimes []RuntimeVersion) error {
+// Progress is written to progress (the caller's writer); the library never
+// touches the process's os.Stdout/Stderr (§12).
+func (r *Runtime) CreateBase(ctx context.Context, baseName string, runtimes []RuntimeVersion, progress io.Writer) error {
 	tempVM := generateTempVMName(baseName)
 	defer r.cleanupTempVM(ctx, tempVM) // Always cleanup temp VM
 
@@ -1271,15 +1274,15 @@ func (r *Runtime) CreateBase(ctx context.Context, baseName string, runtimes []Ru
 	defer r.stopVM(ctx, tempVM) // Ensure VM stopped before snapshot
 
 	// Configure Xcode in VM (required for xcodebuild)
-	fmt.Printf("Configuring Xcode...\n")
+	fmt.Fprintf(progress, "Configuring Xcode...\n") //nolint:errcheck // best-effort progress
 	if err := r.configureXcodeInVM(ctx, tempVM); err != nil {
 		return fmt.Errorf("configure Xcode: %w", err)
 	}
 
 	// Copy each runtime into the VM
 	for _, rt := range runtimes {
-		fmt.Printf("Copying %s %s runtime (this may take several minutes)...\n", rt.Platform, rt.Version)
-		if err := CopyRuntimeToVM(ctx, tempVM, rt); err != nil {
+		fmt.Fprintf(progress, "Copying %s %s runtime (this may take several minutes)...\n", rt.Platform, rt.Version) //nolint:errcheck // best-effort progress
+		if err := CopyRuntimeToVM(ctx, tempVM, rt, progress); err != nil {
 			return fmt.Errorf("copy %s %s: %w", rt.Platform, rt.Version, err)
 		}
 	}

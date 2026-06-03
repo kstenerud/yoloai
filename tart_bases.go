@@ -5,6 +5,7 @@ package yoloai
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/config"
@@ -120,7 +121,13 @@ func (a *TartBaseAdmin) List(ctx context.Context) ([]TartBaseInfo, error) {
 // Add builds the runtime base described by plan. It is atomic with respect to
 // the create: it re-checks existence under the base lock before building.
 // Returns *TartBaseExistsError if a base with plan.Name already exists.
-func (a *TartBaseAdmin) Add(ctx context.Context, plan TartBasePlan) (TartBaseInfo, error) {
+// Build progress (a slow, minutes-long operation) is written to progress; pass
+// nil to discard it. The library never writes to the process's os.Stdout (§12)
+// — the CLI passes cmd.OutOrStdout(), a daemon passes its own writer.
+func (a *TartBaseAdmin) Add(ctx context.Context, plan TartBasePlan, progress io.Writer) (TartBaseInfo, error) {
+	if progress == nil {
+		progress = io.Discard
+	}
 	r, closeRT, err := a.open(ctx)
 	if err != nil {
 		return TartBaseInfo{}, err
@@ -141,7 +148,7 @@ func (a *TartBaseAdmin) Add(ctx context.Context, plan TartBasePlan) (TartBaseInf
 		return TartBaseInfo{}, &TartBaseExistsError{Name: plan.Name}
 	}
 
-	if err := r.CreateBase(ctx, plan.Name, tartVersionsToInternal(plan.Runtimes)); err != nil {
+	if err := r.CreateBase(ctx, plan.Name, tartVersionsToInternal(plan.Runtimes), progress); err != nil {
 		return TartBaseInfo{}, fmt.Errorf("create base: %w", err)
 	}
 

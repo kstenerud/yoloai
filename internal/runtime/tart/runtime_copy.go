@@ -6,7 +6,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
+	"io"
 	"os/exec"
 )
 
@@ -14,7 +14,9 @@ import (
 // This approach is verified to work correctly (see docs/contributors/design/research/ios-runtime-download-verification.md).
 // The ditto copy approach produced incomplete runtimes that failed to boot simulators.
 // VM must be running with Xcode configured.
-func CopyRuntimeToVM(ctx context.Context, vmName string, runtime RuntimeVersion) error {
+// Progress is written to progress (the caller's writer); the library never
+// touches the process's os.Stdout/Stderr (§12).
+func CopyRuntimeToVM(ctx context.Context, vmName string, runtime RuntimeVersion, progress io.Writer) error {
 	// Capitalize platform for xcodebuild (iOS, tvOS, watchOS, visionOS)
 	platformCap := CapitalizePlatform(runtime.Platform)
 
@@ -22,23 +24,23 @@ func CopyRuntimeToVM(ctx context.Context, vmName string, runtime RuntimeVersion)
 	// Note: xcodebuild -downloadPlatform doesn't support specific version selection;
 	// it always downloads the latest available. The runtime is resolved on the host
 	// before this function is called, so we know what version should be available.
-	fmt.Printf("Downloading %s %s runtime...\n", platformCap, runtime.Version)
+	fmt.Fprintf(progress, "Downloading %s %s runtime...\n", platformCap, runtime.Version) //nolint:errcheck // best-effort progress
 	downloadCmd := fmt.Sprintf("xcodebuild -downloadPlatform %s", platformCap)
 	args := execArgs(vmName, "bash", "-c", downloadCmd)
 	cmd := exec.CommandContext(ctx, "tart", args...) //nolint:gosec // G204: vmName from validated state
 
-	// Stream stdout and stderr to show download progress
-	// xcodebuild outputs progress updates with carriage returns (\r)
-	// The terminal will handle the updates automatically
-	cmd.Stdout = os.Stdout //nolint:forbidigo // §12: stream the runtime-download subprocess's live progress to the user's terminal
-	cmd.Stderr = os.Stderr //nolint:forbidigo // §12: stream the runtime-download subprocess's live progress to the user's terminal
+	// Stream the subprocess's live progress to the caller's writer.
+	// xcodebuild outputs progress updates with carriage returns (\r); a TTY
+	// writer animates them, a non-TTY one just scrolls.
+	cmd.Stdout = progress
+	cmd.Stderr = progress
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("download runtime: %w", err)
 	}
 
 	// Verify runtime is recognized by simctl
-	fmt.Printf("Verifying runtime...\n")
+	fmt.Fprintf(progress, "Verifying runtime...\n") //nolint:errcheck // best-effort progress
 	verifyCmd := fmt.Sprintf("xcrun simctl list runtimes 2>&1 | grep '%s %s'",
 		platformCap, runtime.Version)
 	args = execArgs(vmName, "bash", "-c", verifyCmd)
@@ -52,6 +54,6 @@ func CopyRuntimeToVM(ctx context.Context, vmName string, runtime RuntimeVersion)
 		return fmt.Errorf("verify runtime: %w", err)
 	}
 
-	fmt.Printf("Runtime verified successfully\n")
+	fmt.Fprintf(progress, "Runtime verified successfully\n") //nolint:errcheck // best-effort progress
 	return nil
 }
