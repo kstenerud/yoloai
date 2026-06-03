@@ -91,7 +91,7 @@ func ResolveContainerBackendConfig() yoloai.BackendType {
 // Used by lifecycle commands that operate on an existing sandbox.
 func ResolveBackendForSandbox(name string) yoloai.BackendType {
 	l := Layout()
-	c, err := yoloai.NewClient(context.Background(), yoloai.ClientConfiguration{DataDir: l.DataDir, HomeDir: l.HomeDir, Env: l.Env})
+	c, err := yoloai.NewClient(context.Background(), yoloai.ClientCreateOptions{DataDir: l.DataDir, HomeDir: l.HomeDir, Env: l.Env})
 	if err == nil {
 		defer c.Close() //nolint:errcheck // backend-less close is a no-op
 		if sb, sbErr := c.Sandbox(name); sbErr == nil {
@@ -117,7 +117,7 @@ func ResolveBackendForSandbox(name string) yoloai.BackendType {
 func WithClient(cmd *cobra.Command, backend yoloai.BackendType, fn func(ctx context.Context, c *yoloai.Client) error) error {
 	ctx := cmd.Context()
 	l := Layout()
-	c, err := yoloai.NewClient(ctx, yoloai.ClientConfiguration{
+	c, err := yoloai.NewClient(ctx, yoloai.ClientCreateOptions{
 		DataDir:     l.DataDir,
 		HomeDir:     l.HomeDir,
 		BackendType: backend,
@@ -143,7 +143,7 @@ func WithClient(cmd *cobra.Command, backend yoloai.BackendType, fn func(ctx cont
 // The caller is responsible for Close() (a no-op on a backend-less Client).
 func Client(cmd *cobra.Command) (*yoloai.Client, error) {
 	l := Layout()
-	return yoloai.NewClient(cmd.Context(), yoloai.ClientConfiguration{
+	return yoloai.NewClient(cmd.Context(), yoloai.ClientCreateOptions{
 		DataDir: l.DataDir,
 		HomeDir: l.HomeDir,
 		Logger:  slog.Default(),
@@ -162,7 +162,7 @@ func Client(cmd *cobra.Command) (*yoloai.Client, error) {
 // sub-handle. The caller need not Close — a backend-less Client's Close is a no-op.
 func System() *yoloai.System {
 	l := Layout()
-	c, err := yoloai.NewClient(context.Background(), yoloai.ClientConfiguration{
+	c, err := yoloai.NewClient(context.Background(), yoloai.ClientCreateOptions{
 		DataDir: l.DataDir,
 		HomeDir: l.HomeDir,
 		Env:     l.Env,

@@ -73,7 +73,7 @@ func runReset(cmd *cobra.Command, args []string, opts *resetOpts) error {
 		if err != nil {
 			return cliutil.SandboxErrorHint(name, err)
 		}
-		res, resetErr := sb.Reset(ctx, yoloai.ResetOptions{
+		res, resetErr := sb.Reset(ctx, yoloai.SandboxResetOptions{
 			RestartContainer: opts.restart,
 			ClearState:       opts.clearState,
 			KeepCache:        opts.keepCache,

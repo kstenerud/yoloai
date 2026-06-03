@@ -32,7 +32,7 @@ func drainEvents(t *testing.T, ch <-chan LogEvent) []LogEvent {
 
 func TestAgentLogs_ForwardsFrames(t *testing.T) {
 	dir := t.TempDir()
-	c, err := NewClient(context.Background(), ClientConfiguration{DataDir: dir, HomeDir: dir})
+	c, err := NewClient(context.Background(), ClientCreateOptions{DataDir: dir, HomeDir: dir})
 	require.NoError(t, err)
 	defer c.Close() //nolint:errcheck
 
@@ -45,7 +45,7 @@ func TestAgentLogs_ForwardsFrames(t *testing.T) {
 	line := `{"ts":"2026-03-15T10:00:00.000Z","level":"info","event":"hello"}`
 	require.NoError(t, os.WriteFile(cliPath, []byte(line+"\n"), 0600))
 
-	ch, err := sb.Agent().Logs(context.Background(), LogOptions{})
+	ch, err := sb.Agent().Logs(context.Background(), AgentLogsOptions{})
 	require.NoError(t, err)
 	events := drainEvents(t, ch)
 
@@ -57,7 +57,7 @@ func TestAgentLogs_ForwardsFrames(t *testing.T) {
 
 func TestAgentLogs_MissingSandbox(t *testing.T) {
 	dir := t.TempDir()
-	c, err := NewClient(context.Background(), ClientConfiguration{DataDir: dir, HomeDir: dir})
+	c, err := NewClient(context.Background(), ClientCreateOptions{DataDir: dir, HomeDir: dir})
 	require.NoError(t, err)
 	defer c.Close() //nolint:errcheck
 

@@ -4,30 +4,44 @@ Tracks breaking changes made during beta. Each entry should be included in relea
 
 ## Unreleased
 
-### Public option types renamed; constructor is now `NewClient`
+### Public option types follow `<Noun><Verb>Options`; constructor is now `NewClient`
 
-The root-package option types were renamed so each name says which noun it
-configures, and the constructor matches the type it takes:
+Every public params struct now says which noun it configures and which operation
+(verb) it parameterizes — `SandboxCreateOptions`, `SandboxRunOptions`,
+`SandboxCloneOptions`, `SandboxStartOptions`, `SandboxResetOptions`,
+`SandboxDestroyOptions`, `SandboxExecOptions`, `WorkdirDiffOptions`,
+`WorkdirApplyOptions`, `WorkdirExportOptions`, `WorkdirCommitsOptions`,
+`WorkdirTagsOptions`, `WorkdirTransferTagsOptions`, `SystemDoctorOptions`,
+`SystemBuildOptions`, `SystemCheckOptions`, `SystemPruneOptions`,
+`AgentLogsOptions`. The Client's construction-time config is `ClientCreateOptions`
+(parallel to `SandboxCreateOptions`: it configures *creating a Client*, the way
+`SandboxCreateOptions` configures *creating a Sandbox*).
 
-- **`Options` → `ClientConfiguration`.** The Client's construction-time
-  configuration; the generic `Options` undersold it and collided (at a glance)
-  with the per-operation option structs.
-- **`CreateOptions` → `SandboxCreateOptions`** and **`RunOptions` →
-  `SandboxRunOptions`.** Both configure a *sandbox* operation; the bare names
-  were generic enough to be mistaken for client configuration.
-- **`NewWithOptions(ctx, Options)` → `NewClient(ctx, ClientConfiguration)`.**
+Most of these structs — and the `Sandbox`/`Workdir`/`System`/`Agent` handles they
+belong to — are **new in this release** and never existed on the prior stable
+surface, so they are new API, not a migration. The only names that change relative
+to the last release are the four that shipped before:
 
-The fields, semantics, and zero values of all three structs are unchanged — only
-the type names move. (The field rename `Options.Backend` → `.BackendType` from the
-kind-enums entry below still applies, now on `ClientConfiguration`.)
+- **`Options` → `ClientCreateOptions`** (the Client's construction config; the
+  generic `Options` undersold it and collided at a glance with per-operation
+  structs).
+- **`RunOptions` → `SandboxRunOptions`** (configures a *sandbox* run).
+- **`ApplyOptions` → `WorkdirApplyOptions`**, now reached via
+  `sandbox.Workdir().Apply(…)` (see the Workdir-handle entry below).
+- **`NewWithOptions(ctx, Options)` → `NewClient(ctx, ClientCreateOptions)`.**
 
-**Migration:** rename the types at call sites (`yoloai.Options{…}` →
-`yoloai.ClientConfiguration{…}`, `yoloai.CreateOptions{…}` →
-`yoloai.SandboxCreateOptions{…}`, `yoloai.RunOptions{…}` →
-`yoloai.SandboxRunOptions{…}`) and `yoloai.NewWithOptions(…)` →
+Fields, semantics, and zero values are unchanged — only the type names move. (The
+field rename `Options.Backend` → `.BackendType` from the kind-enums entry below
+still applies, now on `ClientCreateOptions`.)
+
+**Migration:** rename at call sites — `yoloai.Options{…}` →
+`yoloai.ClientCreateOptions{…}`, `yoloai.RunOptions{…}` →
+`yoloai.SandboxRunOptions{…}`, `yoloai.ApplyOptions{…}` →
+`yoloai.WorkdirApplyOptions{…}`, and `yoloai.NewWithOptions(…)` →
 `yoloai.NewClient(…)`. Earlier entries in this changelog that name `Options`,
-`CreateOptions`, `RunOptions`, or `NewWithOptions` refer to the same surface under
-its new name.
+`CreateOptions`, `RunOptions`, `ApplyOptions`, `ClientConfiguration`, or any bare
+`<Verb>Options` (e.g. `DestroyOptions`, `DiffOptions`, `CheckOptions`) refer to the
+same surface under its final `<Noun><Verb>Options` name.
 
 ### Kind enums renamed: `AgentName`/`BackendName` → `AgentType`/`BackendType`
 

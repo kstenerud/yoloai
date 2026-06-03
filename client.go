@@ -9,7 +9,7 @@
 // Sandbox(name); per-sandbox operations (Inspect, Start, Stop, Restart, Reset,
 // Destroy, Exec, and the Workdir/Network/Agent sub-handles) live on that
 // *Sandbox handle, not the Client root (F2). The backend connection is opened
-// lazily on the first backend-bound operation, so ClientConfiguration.BackendType
+// lazily on the first backend-bound operation, so ClientCreateOptions.BackendType
 // is optional: a backend-less Client still serves host-only reads (Sandbox.Metadata,
 // Workdir diffs, the on-disk allowlist) and, via Client.System(), cross-backend
 // admin — a backend-bound op on such a Client returns ErrBackendRequired.
@@ -25,7 +25,7 @@
 //
 // Typical usage:
 //
-//	client, err := yoloai.NewClient(ctx, yoloai.ClientConfiguration{
+//	client, err := yoloai.NewClient(ctx, yoloai.ClientCreateOptions{
 //	    DataDir:     filepath.Join(os.Getenv("HOME"), ".yoloai", "library"),
 //	    HomeDir:     os.Getenv("HOME"),     // required; where ~/.claude etc. resolve
 //	    BackendType: yoloai.BackendDocker,  // optional; backend-bound ops open it lazily
@@ -43,7 +43,7 @@
 //	if info.Status == yoloai.StatusDone {
 //	    sb, err := client.Sandbox(info.Environment.Name)
 //	    if err != nil { log.Fatal(err) }
-//	    sb.Workdir().Apply(ctx, yoloai.ApplyOptions{Mode: yoloai.ApplyModeCommits})
+//	    sb.Workdir().Apply(ctx, yoloai.WorkdirApplyOptions{Mode: yoloai.ApplyModeCommits})
 //	}
 package yoloai
 
@@ -102,8 +102,8 @@ type Client struct {
 	backend runtime.BackendType // selected backend; "" = backend-less (host-only reads/admin), backend-bound ops return ErrBackendRequired
 	logger  *slog.Logger        // for the lazily-built Engine
 	version string              // yoloAI version stamped into created sandboxes' environment.json
-	output  io.Writer           // ClientConfiguration.Output (defaulted to io.Discard); seeds per-call progress writers (F8)
-	input   io.Reader           // ClientConfiguration.Input (defaulted to an empty reader, never os.Stdin — §12); threaded to create.Run via state.Deps
+	output  io.Writer           // ClientCreateOptions.Output (defaulted to io.Discard); seeds per-call progress writers (F8)
+	input   io.Reader           // ClientCreateOptions.Input (defaulted to an empty reader, never os.Stdin — §12); threaded to create.Run via state.Deps
 
 	// Lazy backend connection. The runtime is opened once, on the first
 	// backend-bound operation, via ensure/tryEnsure — host-only reads
@@ -117,17 +117,17 @@ type Client struct {
 }
 
 // NewClient creates a Client with explicit options.
-// ClientConfiguration.DataDir is REQUIRED (Q-W.5); empty is rejected.
-func NewClient(ctx context.Context, opts ClientConfiguration) (*Client, error) {
+// ClientCreateOptions.DataDir is REQUIRED (Q-W.5); empty is rejected.
+func NewClient(ctx context.Context, opts ClientCreateOptions) (*Client, error) {
 	if opts.DataDir == "" {
-		return nil, fmt.Errorf("yoloai: ClientConfiguration.DataDir is required (no implicit $HOME fallback; see development-principles.md §12)")
+		return nil, fmt.Errorf("yoloai: ClientCreateOptions.DataDir is required (no implicit $HOME fallback; see development-principles.md §12)")
 	}
 	if opts.HomeDir == "" {
-		return nil, yoerrors.NewUsageError("yoloai: ClientConfiguration.HomeDir is required (no implicit filepath.Dir(DataDir) derivation; under the D60 bifurcation DataDir is $HOME/.yoloai/library, so its parent is not $HOME). Pass the host user's home explicitly; the CLI uses cliutil.Layout().HomeDir. See development-principles.md §12.")
+		return nil, yoerrors.NewUsageError("yoloai: ClientCreateOptions.HomeDir is required (no implicit filepath.Dir(DataDir) derivation; under the D60 bifurcation DataDir is $HOME/.yoloai/library, so its parent is not $HOME). Pass the host user's home explicitly; the CLI uses cliutil.Layout().HomeDir. See development-principles.md §12.")
 	}
 	principal, err := config.ParsePrincipalSegment(opts.Principal)
 	if err != nil {
-		return nil, yoerrors.NewUsageError("yoloai: invalid ClientConfiguration.Principal: %v", err)
+		return nil, yoerrors.NewUsageError("yoloai: invalid ClientCreateOptions.Principal: %v", err)
 	}
 
 	layout := config.NewLayoutFor(opts.DataDir, opts.HomeDir).WithPrincipal(principal)
@@ -148,7 +148,7 @@ func NewClient(ctx context.Context, opts ClientConfiguration) (*Client, error) {
 	}
 
 	// The backend connection is NOT opened here (A2/A3).
-	// ClientConfiguration.BackendType is optional: a backend-less Client serves
+	// ClientCreateOptions.BackendType is optional: a backend-less Client serves
 	// host-only reads and admin without ever connecting; backend-bound ops open
 	// the runtime lazily on first use (ensure) or return ErrBackendRequired when
 	// BackendType is "".
@@ -164,12 +164,12 @@ func NewClient(ctx context.Context, opts ClientConfiguration) (*Client, error) {
 
 // ErrBackendRequired is returned by backend-bound operations (Exec, Attach,
 // Start, Stop, lifecycle, Create, List, Clone, …) when the Client was
-// constructed without ClientConfiguration.BackendType. A backend-less Client
+// constructed without ClientCreateOptions.BackendType. A backend-less Client
 // still serves host-only reads (Workdir host-git, on-disk allowlist, filesystem
 // readers) and, via System(), cross-backend admin. Set
-// ClientConfiguration.BackendType — resolve it at the boundary with
+// ClientCreateOptions.BackendType — resolve it at the boundary with
 // yoloai.SelectBackend — to enable backend-bound ops.
-var ErrBackendRequired = yoerrors.NewUsageError("yoloai: this operation requires a backend, but the Client was constructed without ClientConfiguration.BackendType (backend-less). Set ClientConfiguration.BackendType (e.g. via yoloai.SelectBackend) to enable backend-bound operations. See development-principles.md §4.")
+var ErrBackendRequired = yoerrors.NewUsageError("yoloai: this operation requires a backend, but the Client was constructed without ClientCreateOptions.BackendType (backend-less). Set ClientCreateOptions.BackendType (e.g. via yoloai.SelectBackend) to enable backend-bound operations. See development-principles.md §4.")
 
 // ensure lazily opens the backend connection and builds the Engine on first
 // use, caching both for the Client's lifetime. It is the gate for every
@@ -328,21 +328,21 @@ func (c *Client) List(ctx context.Context) ([]*Info, error) {
 //
 // With opts.Overwrite set, an existing destination is destroyed before the
 // copy; without it, an existing destination is a hard error.
-// CloneOptions configures Client.Clone. Hand-written rather than aliased so the
-// public surface doesn't expose internal/sandbox.CloneOptions. Overwrite (not
+// SandboxCloneOptions configures Client.Clone. Hand-written rather than aliased so the
+// public surface doesn't expose internal/sandbox.SandboxCloneOptions. Overwrite (not
 // "Force") is the concern-specific name per the Q-J field audit — "Force" stays
 // a CLI flag only.
-type CloneOptions struct {
+type SandboxCloneOptions struct {
 	Source    string // existing sandbox name to copy from; required
 	Dest      string // new sandbox name; required
 	Overwrite bool   // destroy Dest first if it already exists
 }
 
-func (o CloneOptions) toInternal() sandbox.CloneOptions {
+func (o SandboxCloneOptions) toInternal() sandbox.CloneOptions {
 	return sandbox.CloneOptions{Source: o.Source, Dest: o.Dest}
 }
 
-func (c *Client) Clone(ctx context.Context, opts CloneOptions) error {
+func (c *Client) Clone(ctx context.Context, opts SandboxCloneOptions) error {
 	if err := c.ensure(ctx); err != nil {
 		return err
 	}

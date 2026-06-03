@@ -92,7 +92,7 @@ func runSystemBuild(cmd *cobra.Command, args []string, backend yoloai.BackendTyp
 		return err
 	}
 
-	opts := yoloai.BuildOptions{
+	opts := yoloai.SystemBuildOptions{
 		Profile:     profile,
 		BackendType: yoloai.BackendType(backend),
 		Rebuild:     force,
@@ -173,7 +173,7 @@ func runSystemBuildAll(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	opts := yoloai.BuildOptions{
+	opts := yoloai.SystemBuildOptions{
 		Profile:     profile,
 		AllBackends: true,
 		Rebuild:     force,

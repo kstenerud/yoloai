@@ -18,8 +18,8 @@ import (
 //
 // Re-exported (type alias) from internal/runtime so embedders can use
 // the type without importing internal packages. Q-Y resolution
-// (2026-05-25): public API fields like ClientConfiguration.BackendType and
-// CheckOptions.Backend take this typed name rather than plain string,
+// (2026-05-25): public API fields like ClientCreateOptions.BackendType and
+// SystemCheckOptions.Backend take this typed name rather than plain string,
 // catching typo-style bugs at the call site rather than at the
 // "unknown backend" error.
 type BackendType = runtime.BackendType
@@ -43,7 +43,7 @@ const (
 // extension agents supply their own name via the agent registry.
 //
 // Re-exported from internal/agent. Same Q-Y rationale as BackendType:
-// public fields like SandboxRunOptions.AgentType and CheckOptions.Agent take this
+// public fields like SandboxRunOptions.AgentType and SystemCheckOptions.Agent take this
 // typed name.
 type AgentType = agent.AgentType
 
@@ -79,7 +79,7 @@ const (
 // constant here and a producer in the implementation.
 //
 // Re-exported (type alias) from internal/sandbox/store. Q-Y design
-// promised this exposure at the yoloai root so future LogOptions.Sources
+// promised this exposure at the yoloai root so future AgentLogsOptions.Sources
 // callers don't need to reach into internal packages to construct or
 // switch over a typed source list.
 type LogSource = store.LogSource
@@ -124,7 +124,7 @@ type PortMapping = runtime.PortMapping
 //
 // Re-exported (type alias) from internal/runtime. F11 (2026-05-27)
 // established this typing so public fields like
-// CheckOptions.Isolation and (future) SandboxRunOptions.Isolation take a
+// SystemCheckOptions.Isolation and (future) SandboxRunOptions.Isolation take a
 // closed-set typed value, exhaustive-checked at every switch.
 type IsolationMode = runtime.IsolationMode
 

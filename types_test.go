@@ -112,11 +112,11 @@ func TestPruneItem_TypedFields(t *testing.T) {
 	assert.Equal(t, int64(1024), item.Bytes)
 }
 
-// ClientConfiguration.BackendType takes a typed BackendType — the compiler
+// ClientCreateOptions.BackendType takes a typed BackendType — the compiler
 // enforces it, but a switch over the typed value in a test catches accidental
 // "go back to plain string" regressions.
-func TestClientConfiguration_BackendIsTyped(t *testing.T) {
-	opts := ClientConfiguration{BackendType: BackendDocker}
+func TestClientCreateOptions_BackendIsTyped(t *testing.T) {
+	opts := ClientCreateOptions{BackendType: BackendDocker}
 	switch opts.BackendType {
 	case BackendDocker:
 		// ok

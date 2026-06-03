@@ -60,8 +60,8 @@ type LogEvent struct {
 	Raw []byte
 }
 
-// LogOptions selects and filters the LogEvents that Logs emits.
-type LogOptions struct {
+// AgentLogsOptions selects and filters the LogEvents that Logs emits.
+type AgentLogsOptions struct {
 	// Sources limits the streamed sources; empty (nil) means all of them.
 	Sources []LogSource
 	// MinLevel drops events below this level ("debug" < "info" < "warn" <
@@ -85,7 +85,7 @@ type LogOptions struct {
 // This is a host-filesystem read: no backend connection is required, matching
 // AgentLog. Cancel ctx to stop a Follow stream early. A missing sandbox returns
 // ErrSandboxNotFound; an invalid MinLevel returns a *UsageError.
-func (a *Agent) Logs(ctx context.Context, opts LogOptions) (<-chan LogEvent, error) {
+func (a *Agent) Logs(ctx context.Context, opts AgentLogsOptions) (<-chan LogEvent, error) {
 	frames, err := sandbox.StreamLogs(ctx, a.s.c.layout, a.s.name, sandbox.LogStreamOptions{
 		Sources:  opts.Sources,
 		MinLevel: opts.MinLevel,

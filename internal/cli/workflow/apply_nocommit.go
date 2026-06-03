@@ -29,7 +29,7 @@ func applyNoCommit(cmd *cobra.Command, name string, paths []string, env *yoloai.
 		if sbErr != nil {
 			return sbErr
 		}
-		preview, e = sb.Workdir().Apply(ctx, yoloai.ApplyOptions{
+		preview, e = sb.Workdir().Apply(ctx, yoloai.WorkdirApplyOptions{
 			Mode: yoloai.ApplyModeNoCommit, IncludeUncommitted: includeUncommitted, Paths: paths, DryRun: true,
 		})
 		return e
@@ -82,7 +82,7 @@ func applyNoCommit(cmd *cobra.Command, name string, paths []string, env *yoloai.
 		if e != nil {
 			return e
 		}
-		_, e = sb.Workdir().Apply(ctx, yoloai.ApplyOptions{
+		_, e = sb.Workdir().Apply(ctx, yoloai.WorkdirApplyOptions{
 			Mode: yoloai.ApplyModeNoCommit, IncludeUncommitted: includeUncommitted, Paths: paths, DryRun: false,
 		})
 		return e

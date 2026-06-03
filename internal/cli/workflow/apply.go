@@ -29,7 +29,7 @@ func listSandboxTags(cmd *cobra.Command, name string, unappliedOnly bool) []yolo
 		if err != nil {
 			return err
 		}
-		tags, _ = sb.Workdir().Tags(ctx, yoloai.TagsOptions{UnappliedOnly: unappliedOnly})
+		tags, _ = sb.Workdir().Tags(ctx, yoloai.WorkdirTagsOptions{UnappliedOnly: unappliedOnly})
 		return nil
 	})
 	return tags
@@ -247,7 +247,7 @@ func transferTags(cmd *cobra.Command, name string, tags []yoloai.TagInfo, shaMap
 			return sbErr
 		}
 		var transferErr error
-		result, transferErr = sb.Workdir().TransferTags(ctx, yoloai.TransferTagsOptions{Tags: tags, SHAMap: shaMap})
+		result, transferErr = sb.Workdir().TransferTags(ctx, yoloai.WorkdirTransferTagsOptions{Tags: tags, SHAMap: shaMap})
 		return transferErr
 	})
 	if err != nil {

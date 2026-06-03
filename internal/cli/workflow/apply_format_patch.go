@@ -32,7 +32,7 @@ func runApplyFormatPatch(cmd *cobra.Command, name string, paths []string, env *y
 			return sbErr
 		}
 		var listErr error
-		if commits, listErr = sb.Workdir().Commits(ctx, yoloai.CommitsOptions{}); listErr != nil {
+		if commits, listErr = sb.Workdir().Commits(ctx, yoloai.WorkdirCommitsOptions{}); listErr != nil {
 			return listErr
 		}
 		if hasUncommitted, listErr = sb.Workdir().HasUncommittedChanges(ctx); listErr != nil {
@@ -189,7 +189,7 @@ func runApplyCommits(cmd *cobra.Command, name string, paths []string, env *yoloa
 		if sbErr != nil {
 			return sbErr
 		}
-		result, e = sb.Workdir().Apply(ctx, yoloai.ApplyOptions{
+		result, e = sb.Workdir().Apply(ctx, yoloai.WorkdirApplyOptions{
 			Mode: yoloai.ApplyModeCommits, IncludeUncommitted: includeUncommitted, Paths: paths,
 		})
 		return e

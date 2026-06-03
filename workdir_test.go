@@ -38,7 +38,7 @@ func TestWorkdir_Apply_RequiresMode(t *testing.T) {
 		AgentType: "test",
 		Workdir:   store.WorkdirEnvironment{HostPath: "/x", MountPath: "/x", Mode: store.DirModeCopy, BaselineSHA: "abc"},
 	})
-	_, err := sb.Workdir().Apply(context.Background(), ApplyOptions{})
+	_, err := sb.Workdir().Apply(context.Background(), WorkdirApplyOptions{})
 	require.Error(t, err)
 	var ue *yoerrors.UsageError
 	require.ErrorAs(t, err, &ue, "unset apply mode must be a *UsageError")
@@ -53,7 +53,7 @@ func TestWorkdir_Apply_OverlayRefusesCommits(t *testing.T) {
 		AgentType: "test",
 		Workdir:   store.WorkdirEnvironment{HostPath: "/x", MountPath: "/x", Mode: store.DirModeOverlay, BaselineSHA: "abc"},
 	})
-	_, err := sb.Workdir().Apply(context.Background(), ApplyOptions{Mode: ApplyModeCommits})
+	_, err := sb.Workdir().Apply(context.Background(), WorkdirApplyOptions{Mode: ApplyModeCommits})
 	require.Error(t, err)
 	var ue *yoerrors.UsageError
 	require.ErrorAs(t, err, &ue, "ApplyModeCommits on an overlay workdir must be a *UsageError")

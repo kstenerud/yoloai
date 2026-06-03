@@ -227,9 +227,9 @@ type VMCensus = runtime.VMCensus
 // from internal/runtime.
 type VMSlot = runtime.VMSlot
 
-// DoctorOptions filters Doctor's per-backend health checks. Empty filters
+// SystemDoctorOptions filters Doctor's per-backend health checks. Empty filters
 // (the zero value) report every backend and every isolation mode.
-type DoctorOptions struct {
+type SystemDoctorOptions struct {
 	// BackendFilter limits the report to a single backend by name ("" = all).
 	BackendFilter string
 	// IsolationFilter limits the report to a single isolation mode ("" = all,
@@ -242,7 +242,7 @@ type DoctorOptions struct {
 // per supported isolation mode, the host capabilities required and whether they
 // are satisfied. It detects the host environment once and constructs an
 // ephemeral runtime per backend (unavailable backends are reported, not fatal).
-func (s *System) Doctor(ctx context.Context, opts DoctorOptions) ([]BackendReport, error) {
+func (s *System) Doctor(ctx context.Context, opts SystemDoctorOptions) ([]BackendReport, error) {
 	env := caps.DetectEnvironment()
 	reports := make([]BackendReport, 0)
 	for _, desc := range runtime.Descriptors() {
@@ -312,8 +312,8 @@ func (s *System) backendReports(ctx context.Context, backend BackendType, env ca
 	return reports
 }
 
-// BuildOptions configures System.Build.
-type BuildOptions struct {
+// SystemBuildOptions configures System.Build.
+type SystemBuildOptions struct {
 	// Profile is the profile name to build. Empty = base image only.
 	// "base" is reserved and rejected (use Profile="" for the base image).
 	Profile string
@@ -338,7 +338,7 @@ type BuildOptions struct {
 // (Profile != "") for one backend or all available backends. Returns
 // the first error from any backend; later backends in the iteration
 // are skipped.
-func (s *System) Build(ctx context.Context, opts BuildOptions) error {
+func (s *System) Build(ctx context.Context, opts SystemBuildOptions) error {
 	if opts.AllBackends && opts.BackendType != "" {
 		return yoerrors.NewUsageError("Backend and AllBackends are mutually exclusive")
 	}
@@ -388,7 +388,7 @@ func (s *System) Build(ctx context.Context, opts BuildOptions) error {
 
 // buildOne runs one backend's build (base or profile) using a freshly
 // constructed runtime that's closed before return.
-func (s *System) buildOne(ctx context.Context, backend BackendType, opts BuildOptions, out io.Writer) error {
+func (s *System) buildOne(ctx context.Context, backend BackendType, opts SystemBuildOptions, out io.Writer) error {
 	rt, err := newRuntime(ctx, backend, s.layout)
 	if err != nil {
 		return err
@@ -400,8 +400,8 @@ func (s *System) buildOne(ctx context.Context, backend BackendType, opts BuildOp
 	return rt.Setup(ctx, s.layout, s.layout.ProfileDir("base"), out, slog.Default(), opts.Rebuild)
 }
 
-// CheckOptions configures System.Check.
-type CheckOptions struct {
+// SystemCheckOptions configures System.Check.
+type SystemCheckOptions struct {
 	// Backend is the backend to verify. Required.
 	BackendType BackendType
 	// AgentType is the agent name whose credentials are checked. Required;
@@ -430,7 +430,7 @@ type CheckResult struct {
 //
 // CLI: `yoloai system check`. Distinct from Doctor (full capability
 // report per backend/mode).
-func (s *System) Check(ctx context.Context, opts CheckOptions) ([]CheckResult, error) {
+func (s *System) Check(ctx context.Context, opts SystemCheckOptions) ([]CheckResult, error) {
 	if opts.BackendType == "" {
 		return nil, yoerrors.NewUsageError("Backend is required")
 	}
@@ -481,7 +481,7 @@ func (s *System) checkImage(ctx context.Context, rt runtime.Runtime, backend str
 
 // checkAgent verifies that at least one of the agent's API-key env vars is
 // present in the client's host-environment snapshot (s.layout.Env). The library
-// never reads os.Environ; credentials arrive as data via ClientConfiguration.Env (§12).
+// never reads os.Environ; credentials arrive as data via ClientCreateOptions.Env (§12).
 func (s *System) checkAgent(name string) CheckResult {
 	def := agent.GetAgent(name)
 	switch {
@@ -525,10 +525,10 @@ func (s *System) checkIsolation(ctx context.Context, rt runtime.Runtime, isolati
 	return CheckResult{Name: "isolation", OK: true}
 }
 
-// PruneOptions configures System.Prune. Always operates across
+// SystemPruneOptions configures System.Prune. Always operates across
 // every backend that's currently available — per-backend pruning was
 // dropped under Q-L as having no real-world use case.
-type PruneOptions struct {
+type SystemPruneOptions struct {
 	// DryRun reports what would be removed without removing it.
 	DryRun bool
 	// IncludeBaseImage additionally removes the backend's base/profile
@@ -620,7 +620,7 @@ const staleTempFileAge = 1 * time.Hour
 // (build cache, volumes, dangling images); with IncludeBaseImage, also removes
 // base/profile images (forces yoloai-base to rebuild). DryRun reports what
 // would be removed without removing.
-func (s *System) Prune(ctx context.Context, opts PruneOptions) (*PruneResult, error) {
+func (s *System) Prune(ctx context.Context, opts SystemPruneOptions) (*PruneResult, error) {
 	out := opts.Output
 	if out == nil {
 		out = io.Discard
@@ -703,7 +703,7 @@ func (s *System) applyBrokenClassifications(broken []classifiedSandbox, dryRun b
 // prune reclaims the build cache (no rebuild forced), and IncludeBaseImage also
 // drops the base images. Per-backend failures are logged to opts.Output rather
 // than aborting the whole prune.
-func (s *System) pruneBackend(ctx context.Context, backend BackendType, known []string, opts PruneOptions, out io.Writer) ([]PruneItem, int64) {
+func (s *System) pruneBackend(ctx context.Context, backend BackendType, known []string, opts SystemPruneOptions, out io.Writer) ([]PruneItem, int64) {
 	rt, err := newRuntime(ctx, backend, s.layout)
 	if err != nil {
 		return nil, 0

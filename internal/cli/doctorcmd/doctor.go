@@ -137,7 +137,7 @@ func runDoctor(cmd *cobra.Command, backendFilter, isolationFilter string, isJSON
 	out := cmd.OutOrStdout()
 	sys := cliutil.System()
 
-	reports, err := sys.Doctor(ctx, yoloai.DoctorOptions{
+	reports, err := sys.Doctor(ctx, yoloai.SystemDoctorOptions{
 		BackendFilter:   backendFilter,
 		IsolationFilter: isolationFilter,
 	})
@@ -185,7 +185,7 @@ func doctorExitError(reports []yoloai.BackendReport, census *yoloai.VMCensus) er
 // dryRunPrune runs a best-effort dry-run prune. Errors are swallowed — doctor
 // is advisory; a failed probe just omits the section rather than aborting.
 func dryRunPrune(ctx context.Context, sys *yoloai.System) *yoloai.PruneResult {
-	result, err := sys.Prune(ctx, yoloai.PruneOptions{DryRun: true})
+	result, err := sys.Prune(ctx, yoloai.SystemPruneOptions{DryRun: true})
 	if err != nil {
 		return nil
 	}

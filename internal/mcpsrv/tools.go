@@ -268,7 +268,7 @@ func (s *Server) handleSandboxDestroy(ctx context.Context, req mcp.CallToolReque
 
 	// Active-work gate-checked above when force was false; this skips the
 	// typed *ActiveWorkError refusal.
-	if _, err := sb.Destroy(ctx, yoloai.DestroyOptions{AbandonUnappliedWork: true}); err != nil {
+	if _, err := sb.Destroy(ctx, yoloai.SandboxDestroyOptions{AbandonUnappliedWork: true}); err != nil {
 		return textResult(errorf("destroy sandbox %q: %v", name, err)), nil
 	}
 
@@ -287,7 +287,7 @@ func (s *Server) handleSandboxDiff(_ context.Context, req mcp.CallToolRequest) (
 	if err != nil {
 		return textResult(errorf("sandbox handle %q: %v", name, err)), nil
 	}
-	diff, err := sb.Workdir().Diff(context.Background(), yoloai.DiffOptions{Stat: stat})
+	diff, err := sb.Workdir().Diff(context.Background(), yoloai.WorkdirDiffOptions{Stat: stat})
 	if err != nil {
 		return textResult(errorf("diff sandbox %q: %v", name, err)), nil
 	}
@@ -316,7 +316,7 @@ func (s *Server) handleSandboxDiffFile(ctx context.Context, req mcp.CallToolRequ
 	if err != nil {
 		return textResult(errorf("sandbox handle %q: %v", name, err)), nil
 	}
-	diff, err := sb.Workdir().Diff(ctx, yoloai.DiffOptions{Paths: []string{path}})
+	diff, err := sb.Workdir().Diff(ctx, yoloai.WorkdirDiffOptions{Paths: []string{path}})
 	if err != nil {
 		return textResult(errorf("diff file %q in sandbox %q: %v", path, name, err)), nil
 	}
@@ -392,7 +392,7 @@ func (s *Server) handleSandboxReset(ctx context.Context, req mcp.CallToolRequest
 	}
 
 	// A non-empty prompt overwrites prompt.txt before reset (re-sent on restart).
-	if _, err := sb.Reset(ctx, yoloai.ResetOptions{RestartContainer: true, Prompt: prompt}); err != nil {
+	if _, err := sb.Reset(ctx, yoloai.SandboxResetOptions{RestartContainer: true, Prompt: prompt}); err != nil {
 		return textResult(errorf("reset sandbox %q: %v", name, err)), nil
 	}
 

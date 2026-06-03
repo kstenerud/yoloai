@@ -19,7 +19,7 @@ import (
 )
 
 func TestCloneOptions_toInternal(t *testing.T) {
-	in := CloneOptions{Source: "src", Dest: "dst", Overwrite: true}.toInternal()
+	in := SandboxCloneOptions{Source: "src", Dest: "dst", Overwrite: true}.toInternal()
 	assert.Equal(t, sandbox.CloneOptions{Source: "src", Dest: "dst"}, in,
 		"Overwrite is an orchestration-layer concern, not carried into the Engine clone")
 }
@@ -32,7 +32,7 @@ func TestClient_destroyForOverwrite_MissingDestIsNoop(t *testing.T) {
 }
 
 func TestResetOptions_toInternal(t *testing.T) {
-	in := ResetOptions{
+	in := SandboxResetOptions{
 		RestartContainer: true,
 		ClearState:       true,
 		KeepCache:        true,
@@ -51,7 +51,7 @@ func TestResetOptions_toInternal(t *testing.T) {
 }
 
 func TestResetOptions_toInternal_Defaults(t *testing.T) {
-	in := ResetOptions{}.toInternal("mybox")
+	in := SandboxResetOptions{}.toInternal("mybox")
 	assert.Equal(t, "mybox", in.Name)
 	assert.False(t, in.Restart)
 	assert.False(t, in.ClearState)
@@ -73,7 +73,7 @@ func TestClient_Sandbox_NotFound(t *testing.T) {
 
 func TestSandbox_ExchangePaths(t *testing.T) {
 	dir := t.TempDir()
-	c, err := NewClient(context.Background(), ClientConfiguration{DataDir: dir, HomeDir: dir})
+	c, err := NewClient(context.Background(), ClientCreateOptions{DataDir: dir, HomeDir: dir})
 	require.NoError(t, err)
 	defer c.Close() //nolint:errcheck
 
@@ -90,7 +90,7 @@ func TestSandbox_ExchangePaths(t *testing.T) {
 
 func TestSandbox_LogPaths(t *testing.T) {
 	dir := t.TempDir()
-	c, err := NewClient(context.Background(), ClientConfiguration{DataDir: dir, HomeDir: dir})
+	c, err := NewClient(context.Background(), ClientCreateOptions{DataDir: dir, HomeDir: dir})
 	require.NoError(t, err)
 	defer c.Close() //nolint:errcheck
 
@@ -112,7 +112,7 @@ func TestSandbox_LogPaths(t *testing.T) {
 // live-holder paths are covered by store/lock_test.go.
 func TestSandbox_Unlock_Noop(t *testing.T) {
 	dir := t.TempDir()
-	c, err := NewClient(context.Background(), ClientConfiguration{DataDir: dir, HomeDir: dir})
+	c, err := NewClient(context.Background(), ClientCreateOptions{DataDir: dir, HomeDir: dir})
 	require.NoError(t, err)
 	defer c.Close() //nolint:errcheck
 
@@ -130,7 +130,7 @@ func TestSandbox_Unlock_Noop(t *testing.T) {
 func vscodeClient(t *testing.T, meta *store.Environment) *Client {
 	t.Helper()
 	dir := t.TempDir()
-	c, err := NewClient(context.Background(), ClientConfiguration{DataDir: dir, HomeDir: dir})
+	c, err := NewClient(context.Background(), ClientCreateOptions{DataDir: dir, HomeDir: dir})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = c.Close() })
 	if meta != nil {

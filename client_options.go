@@ -1,4 +1,4 @@
-// ABOUTME: ClientConfiguration — the construction-time configuration for a
+// ABOUTME: ClientCreateOptions — the construction-time configuration for a
 // ABOUTME: Client (data/home dirs, optional backend, IO, env snapshot, principal).
 // ABOUTME: Passed to NewClient; the library never reads ambient process state.
 
@@ -9,8 +9,8 @@ import (
 	"log/slog"
 )
 
-// ClientConfiguration configures a Client.
-type ClientConfiguration struct {
+// ClientCreateOptions configures a Client.
+type ClientCreateOptions struct {
 	// DataDir is the root yoloai data directory; all per-Client state
 	// lives below it (sandboxes/, profiles/, config.yaml, state.yaml,
 	// credentials/). REQUIRED — empty is rejected at construction.

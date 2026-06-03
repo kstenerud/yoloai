@@ -119,7 +119,7 @@ func diffSingle(cmd *cobra.Command, name string, paths []string, stat, nameOnly 
 		if err != nil {
 			return err
 		}
-		out, err := sb.Workdir().Diff(ctx, yoloai.DiffOptions{Paths: paths, Stat: stat, NameOnly: nameOnly})
+		out, err := sb.Workdir().Diff(ctx, yoloai.WorkdirDiffOptions{Paths: paths, Stat: stat, NameOnly: nameOnly})
 		if err != nil {
 			return err
 		}
@@ -171,7 +171,7 @@ func diffOverlay(cmd *cobra.Command, name string, stat, nameOnly bool) error {
 		if err != nil {
 			return err
 		}
-		out, err := sb.Workdir().Diff(ctx, yoloai.DiffOptions{Stat: stat, NameOnly: nameOnly})
+		out, err := sb.Workdir().Diff(ctx, yoloai.WorkdirDiffOptions{Stat: stat, NameOnly: nameOnly})
 		if err != nil {
 			return err
 		}
@@ -195,7 +195,7 @@ func diffLogOverlay(cmd *cobra.Command, name string, stat bool) error {
 		if err != nil {
 			return err
 		}
-		commits, err := sb.Workdir().Commits(ctx, yoloai.CommitsOptions{})
+		commits, err := sb.Workdir().Commits(ctx, yoloai.WorkdirCommitsOptions{})
 		if err != nil {
 			return err
 		}
@@ -288,7 +288,7 @@ func diffLog(cmd *cobra.Command, name string, stat bool) error {
 		if sbErr != nil {
 			return sbErr
 		}
-		tags, _ = sb.Workdir().Tags(ctx, yoloai.TagsOptions{})
+		tags, _ = sb.Workdir().Tags(ctx, yoloai.WorkdirTagsOptions{})
 		return nil
 	})
 	tagsByCommit := buildTagsByCommit(tags)
@@ -317,7 +317,7 @@ func diffLogWithStat(cmd *cobra.Command, name string, out io.Writer, tagsByCommi
 			return sbErr
 		}
 		var listErr error
-		commits, listErr = sb.Workdir().Commits(ctx, yoloai.CommitsOptions{Stat: true})
+		commits, listErr = sb.Workdir().Commits(ctx, yoloai.WorkdirCommitsOptions{Stat: true})
 		return listErr
 	})
 	if err != nil {
@@ -349,7 +349,7 @@ func diffLogBasic(cmd *cobra.Command, name string, out io.Writer, tagsByCommit m
 			return sbErr
 		}
 		var listErr error
-		commits, listErr = sb.Workdir().Commits(ctx, yoloai.CommitsOptions{})
+		commits, listErr = sb.Workdir().Commits(ctx, yoloai.WorkdirCommitsOptions{})
 		return listErr
 	})
 	if err != nil {
@@ -402,7 +402,7 @@ func diffRef(cmd *cobra.Command, name, ref string, stat bool) error {
 		if err != nil {
 			return err
 		}
-		out, err := sb.Workdir().Diff(ctx, yoloai.DiffOptions{Ref: ref, Stat: stat})
+		out, err := sb.Workdir().Diff(ctx, yoloai.WorkdirDiffOptions{Ref: ref, Stat: stat})
 		if err != nil {
 			return err
 		}
@@ -440,7 +440,7 @@ func diffLogJSON(cmd *cobra.Command, name string, stat bool) error {
 		if err != nil {
 			return err
 		}
-		cs, err := sb.Workdir().Commits(ctx, yoloai.CommitsOptions{Stat: stat})
+		cs, err := sb.Workdir().Commits(ctx, yoloai.WorkdirCommitsOptions{Stat: stat})
 		if err != nil {
 			return err
 		}
@@ -449,7 +449,7 @@ func diffLogJSON(cmd *cobra.Command, name string, stat bool) error {
 		}
 
 		hasUncommitted, _ := sb.Workdir().HasUncommittedChanges(ctx)
-		tags, _ := sb.Workdir().Tags(ctx, yoloai.TagsOptions{})
+		tags, _ := sb.Workdir().Tags(ctx, yoloai.WorkdirTagsOptions{})
 		if tags == nil {
 			tags = []yoloai.TagInfo{}
 		}

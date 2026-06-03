@@ -42,21 +42,21 @@ func TestSystemClient_Info(t *testing.T) {
 	}
 }
 
-// TestClient_Principal threads ClientConfiguration.Principal into the layout
+// TestClient_Principal threads ClientCreateOptions.Principal into the layout
 // (default "" stays default; a valid segment parses; an invalid one is a
 // *UsageError).
 func TestClient_Principal(t *testing.T) {
 	root := t.TempDir()
 
-	def, err := NewClient(context.Background(), ClientConfiguration{DataDir: root, HomeDir: root})
+	def, err := NewClient(context.Background(), ClientCreateOptions{DataDir: root, HomeDir: root})
 	require.NoError(t, err)
 	assert.Equal(t, config.PrincipalSegment(""), def.layout.Principal)
 
-	acme, err := NewClient(context.Background(), ClientConfiguration{DataDir: root, HomeDir: root, Principal: "acme"})
+	acme, err := NewClient(context.Background(), ClientCreateOptions{DataDir: root, HomeDir: root, Principal: "acme"})
 	require.NoError(t, err)
 	assert.Equal(t, config.PrincipalSegment("acme"), acme.layout.Principal)
 
-	_, err = NewClient(context.Background(), ClientConfiguration{DataDir: root, HomeDir: root, Principal: "way-too-long-and-invalid"})
+	_, err = NewClient(context.Background(), ClientCreateOptions{DataDir: root, HomeDir: root, Principal: "way-too-long-and-invalid"})
 	require.Error(t, err)
 	var usageErr *yoerrors.UsageError
 	assert.ErrorAs(t, err, &usageErr)
@@ -74,7 +74,7 @@ func TestSystemClient_ValidateSandboxName(t *testing.T) {
 // whose directory does not exist — obtaining the handle IS the existence check.
 func TestSandbox_MissingReturnsNotFound(t *testing.T) {
 	dir := t.TempDir()
-	c, err := NewClient(context.Background(), ClientConfiguration{DataDir: dir, HomeDir: dir})
+	c, err := NewClient(context.Background(), ClientCreateOptions{DataDir: dir, HomeDir: dir})
 	require.NoError(t, err)
 	defer c.Close() //nolint:errcheck
 	_, err = c.Sandbox("nope")
@@ -97,14 +97,14 @@ func TestSystemClient_ListAcrossBackends_Empty(t *testing.T) {
 func TestSystemClient_Doctor(t *testing.T) {
 	c := newTestClient(t)
 
-	reports, err := c.Doctor(context.Background(), DoctorOptions{})
+	reports, err := c.Doctor(context.Background(), SystemDoctorOptions{})
 	require.NoError(t, err)
 	require.NotEmpty(t, reports, "every registered backend produces at least one report row")
 	for _, r := range reports {
 		assert.NotEmpty(t, r.Backend, "each report names its backend")
 	}
 
-	none, err := c.Doctor(context.Background(), DoctorOptions{BackendFilter: "does-not-exist"})
+	none, err := c.Doctor(context.Background(), SystemDoctorOptions{BackendFilter: "does-not-exist"})
 	require.NoError(t, err)
 	assert.Empty(t, none, "a non-matching backend filter reports nothing")
 }
@@ -176,7 +176,7 @@ func TestPrune_ClassifiesSandboxDirs(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(dirty, "work", "proj", "upper"), 0o750))
 	require.NoError(t, os.WriteFile(filepath.Join(dirty, "work", "proj", "upper", "f"), []byte("x"), 0o600))
 
-	res, err := c.Prune(context.Background(), PruneOptions{DryRun: true})
+	res, err := c.Prune(context.Background(), SystemPruneOptions{DryRun: true})
 	require.NoError(t, err)
 
 	assert.True(t, findItem(res.RemovedItems, PruneKindSandboxDir, "neverinit"), "never-init dir should be slated for delete")
@@ -207,7 +207,7 @@ func TestPrune_ExecutesClassifications(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(dirty, "work", "proj", "upper"), 0o750))
 	require.NoError(t, os.WriteFile(filepath.Join(dirty, "work", "proj", "upper", "f"), []byte("x"), 0o600))
 
-	res, err := c.Prune(context.Background(), PruneOptions{DryRun: false})
+	res, err := c.Prune(context.Background(), SystemPruneOptions{DryRun: false})
 	require.NoError(t, err)
 
 	assert.NoDirExists(t, c.layout.SandboxDir("neverinit"), "never-init dir removed")

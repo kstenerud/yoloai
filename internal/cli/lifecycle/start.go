@@ -69,7 +69,7 @@ func runStart(cmd *cobra.Command, args []string, opts *startOpts) error {
 		if err != nil {
 			return cliutil.SandboxErrorHint(name, err)
 		}
-		res, startErr := sb.Start(ctx, yoloai.StartOptions{
+		res, startErr := sb.Start(ctx, yoloai.SandboxStartOptions{
 			Resume:       opts.resume,
 			Prompt:       opts.prompt,
 			PromptFile:   opts.promptFile,

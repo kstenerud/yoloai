@@ -39,7 +39,7 @@ func runExport(cmd *cobra.Command, name string, env *yoloai.Environment, refs, p
 			hasUncommitted, _ = sb.Workdir().HasUncommittedChanges(ctx)
 		}
 		var exportErr error
-		result, exportErr = sb.Workdir().Export(ctx, yoloai.ExportOptions{
+		result, exportErr = sb.Workdir().Export(ctx, yoloai.WorkdirExportOptions{
 			Dir:                dir,
 			Refs:               refs,
 			Paths:              paths,

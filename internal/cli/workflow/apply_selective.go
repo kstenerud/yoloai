@@ -95,7 +95,7 @@ func runSeriesApply(cmd *cobra.Command, name string, backend yoloai.BackendType,
 		if sbErr != nil {
 			return sbErr
 		}
-		result, applyErr = sb.Workdir().Apply(ctx, yoloai.ApplyOptions{
+		result, applyErr = sb.Workdir().Apply(ctx, yoloai.WorkdirApplyOptions{
 			Mode:   yoloai.ApplyModeCommits,
 			Refs:   refs,
 			Paths:  paths,

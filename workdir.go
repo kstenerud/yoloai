@@ -20,9 +20,9 @@ type Workdir struct {
 	s *Sandbox
 }
 
-// DiffOptions configures Workdir.Diff. All fields are optional; the zero value
+// WorkdirDiffOptions configures Workdir.Diff. All fields are optional; the zero value
 // produces the full working diff (committed changes since baseline).
-type DiffOptions struct {
+type WorkdirDiffOptions struct {
 	// Paths narrows the diff to specific files (relative to the workdir).
 	// Ignored for overlay-mode workdirs and for Ref diffs.
 	Paths []string
@@ -41,7 +41,7 @@ type DiffOptions struct {
 // by running git inside the container (which must be running), and Ref diffs
 // read the on-disk commit history. Folds the former Diff / DiffWithOptions /
 // DiffRef / DiffOverlay methods into one verb.
-func (w *Workdir) Diff(ctx context.Context, opts DiffOptions) (string, error) {
+func (w *Workdir) Diff(ctx context.Context, opts WorkdirDiffOptions) (string, error) {
 	w.s.c.tryEnsure(ctx) // overlay diffs run git inside the container; copy-mode reads disk (rt unused)
 	meta, err := store.LoadEnvironment(w.s.c.layout.SandboxDir(w.s.name))
 	if err != nil {
@@ -80,8 +80,8 @@ func (w *Workdir) Diff(ctx context.Context, opts DiffOptions) (string, error) {
 	})
 }
 
-// ExportOptions configures Workdir.Export. Dir is required.
-type ExportOptions struct {
+// WorkdirExportOptions configures Workdir.Export. Dir is required.
+type WorkdirExportOptions struct {
 	// Dir is the destination directory for the patch files (created if absent).
 	// Required; empty is rejected with a *UsageError.
 	Dir string
@@ -111,9 +111,9 @@ type ExportResult = patch.ExportResult
 //
 // Comply-or-complain (§2): Dir is required — empty is a *UsageError. Exporting
 // specific Refs from an overlay workdir is likewise refused with a *UsageError.
-func (w *Workdir) Export(ctx context.Context, opts ExportOptions) (*ExportResult, error) {
+func (w *Workdir) Export(ctx context.Context, opts WorkdirExportOptions) (*ExportResult, error) {
 	if opts.Dir == "" {
-		return nil, yoerrors.NewUsageError("export requires a destination directory: set ExportOptions.Dir")
+		return nil, yoerrors.NewUsageError("export requires a destination directory: set WorkdirExportOptions.Dir")
 	}
 	w.s.c.tryEnsure(ctx) // overlay export needs the running container; copy-mode reads disk (rt unused)
 	return patch.Export(ctx, w.s.c.layout, w.s.c.rt, w.s.name, patch.ExportOptions{
@@ -154,8 +154,8 @@ const (
 	ApplyModeNoCommit ApplyMode = "no-commit"
 )
 
-// ApplyOptions configures Workdir.Apply. Mode is required.
-type ApplyOptions struct {
+// WorkdirApplyOptions configures Workdir.Apply. Mode is required.
+type WorkdirApplyOptions struct {
 	// Mode selects commit-series replay vs. net-diff. Required; the zero value
 	// is rejected with a *UsageError.
 	Mode ApplyMode
@@ -193,9 +193,9 @@ type ApplyOptions struct {
 // Mount mode is resolved internally (like Diff). For an :overlay workdir there
 // is no commit history, so ApplyModeCommits is refused with a *UsageError and
 // ApplyModeNoCommit lands the overlay's upper-layer changes (see ApplyOverlay).
-func (w *Workdir) Apply(ctx context.Context, opts ApplyOptions) (*ApplyResult, error) {
+func (w *Workdir) Apply(ctx context.Context, opts WorkdirApplyOptions) (*ApplyResult, error) {
 	if opts.Mode != ApplyModeCommits && opts.Mode != ApplyModeNoCommit {
-		return nil, yoerrors.NewUsageError("apply mode is required: set ApplyOptions.Mode to yoloai.ApplyModeCommits or yoloai.ApplyModeNoCommit")
+		return nil, yoerrors.NewUsageError("apply mode is required: set WorkdirApplyOptions.Mode to yoloai.ApplyModeCommits or yoloai.ApplyModeNoCommit")
 	}
 	w.s.c.tryEnsure(ctx) // overlay apply needs the running container; copy-mode reads disk (rt unused)
 
@@ -231,15 +231,15 @@ func (w *Workdir) Apply(ctx context.Context, opts ApplyOptions) (*ApplyResult, e
 }
 
 // CommitInfo describes one commit in a sandbox workdir's history beyond the
-// diff baseline. Stat is populated only when CommitsOptions.Stat was set.
+// diff baseline. Stat is populated only when WorkdirCommitsOptions.Stat was set.
 type CommitInfo struct {
 	SHA     string `json:"sha"`
 	Subject string `json:"subject"`
-	Stat    string `json:"stat,omitempty"` // git diff --stat for the commit; set when CommitsOptions.Stat
+	Stat    string `json:"stat,omitempty"` // git diff --stat for the commit; set when WorkdirCommitsOptions.Stat
 }
 
-// CommitsOptions configures Workdir.Commits.
-type CommitsOptions struct {
+// WorkdirCommitsOptions configures Workdir.Commits.
+type WorkdirCommitsOptions struct {
 	// Stat attaches a per-commit `git diff --stat` summary to each CommitInfo.
 	// Copy-mode only — requesting Stat on an :overlay workdir is refused with a
 	// *PlatformError, since overlay commits aren't individually stat-addressable
@@ -253,7 +253,7 @@ type CommitsOptions struct {
 // log inside the running container. Returns an empty slice when HEAD equals the
 // baseline. Folds the former ListCommits / ListCommitsOverlay /
 // ListCommitsWithStats methods into one verb.
-func (w *Workdir) Commits(ctx context.Context, opts CommitsOptions) ([]CommitInfo, error) {
+func (w *Workdir) Commits(ctx context.Context, opts WorkdirCommitsOptions) ([]CommitInfo, error) {
 	w.s.c.tryEnsure(ctx) // overlay history runs git log inside the container; copy-mode reads disk (rt unused)
 	meta, err := store.LoadEnvironment(w.s.c.layout.SandboxDir(w.s.name))
 	if err != nil {
@@ -355,8 +355,8 @@ func (w *Workdir) BaselineLog(ctx context.Context) ([]BaselineLogEntry, error) {
 // the tag-listing results without importing internal packages.
 type TagInfo = sandbox.TagInfo
 
-// TagsOptions configures Workdir.Tags.
-type TagsOptions struct {
+// WorkdirTagsOptions configures Workdir.Tags.
+type WorkdirTagsOptions struct {
 	// UnappliedOnly returns only tags present in the sandbox but not yet on the
 	// host (the "unapplied" hint set) instead of all tags beyond baseline.
 	UnappliedOnly bool
@@ -367,7 +367,7 @@ type TagsOptions struct {
 // and :overlay workdirs. With opts.UnappliedOnly, returns only tags not yet
 // present on the host. Folds ListTagsBeyondBaseline / ListUnappliedTags /
 // GetTagMessage.
-func (w *Workdir) Tags(ctx context.Context, opts TagsOptions) ([]TagInfo, error) {
+func (w *Workdir) Tags(ctx context.Context, opts WorkdirTagsOptions) ([]TagInfo, error) {
 	var (
 		tags []TagInfo
 		err  error
@@ -403,8 +403,8 @@ type TagOutcome = sandbox.TagOutcome
 // Re-exported (type alias) from internal/sandbox.
 type TagTransferResult = sandbox.TransferTagsResult
 
-// TransferTagsOptions configures Workdir.TransferTags.
-type TransferTagsOptions struct {
+// WorkdirTransferTagsOptions configures Workdir.TransferTags.
+type WorkdirTransferTagsOptions struct {
 	// Tags are the sandbox tags to re-create on the host target — typically the
 	// list from Tags(). An empty list is a no-op.
 	Tags []TagInfo
@@ -422,7 +422,7 @@ type TransferTagsOptions struct {
 // tag plumbing; the caller renders the returned per-tag outcomes. ctx is
 // accepted for API symmetry; the current host-git implementation does not use
 // it (see Tags).
-func (w *Workdir) TransferTags(ctx context.Context, opts TransferTagsOptions) (*TagTransferResult, error) {
+func (w *Workdir) TransferTags(ctx context.Context, opts WorkdirTransferTagsOptions) (*TagTransferResult, error) {
 	return sandbox.TransferTags(w.s.c.layout, w.s.name, opts.Tags, opts.SHAMap)
 }
 

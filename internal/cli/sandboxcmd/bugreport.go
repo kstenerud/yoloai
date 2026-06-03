@@ -134,7 +134,7 @@ func WriteSandboxSectionsForFlag(w io.Writer, name, reportType string) {
 	backend := cliutil.ResolveBackendForSandbox(name)
 	ctx := context.Background()
 	l := cliutil.Layout()
-	c, err := yoloai.NewClient(ctx, yoloai.ClientConfiguration{
+	c, err := yoloai.NewClient(ctx, yoloai.ClientCreateOptions{
 		DataDir:     l.DataDir,
 		HomeDir:     l.HomeDir,
 		BackendType: yoloai.BackendType(backend),

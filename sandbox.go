@@ -95,7 +95,7 @@ func (s *Sandbox) Stop(ctx context.Context) error {
 
 // Start launches (or relaunches) the container for the existing sandbox.
 // The sandbox must exist on disk; use Client.Run/Create for a new one.
-func (s *Sandbox) Start(ctx context.Context, opts StartOptions) (*StartResult, error) {
+func (s *Sandbox) Start(ctx context.Context, opts SandboxStartOptions) (*StartResult, error) {
 	if err := s.c.ensure(ctx); err != nil {
 		return nil, err
 	}
@@ -105,7 +105,7 @@ func (s *Sandbox) Start(ctx context.Context, opts StartOptions) (*StartResult, e
 // Restart stops then starts the sandbox, applying opts on the way back up
 // (e.g. StartOptions.Isolation to bring it up under a different isolation
 // mode, StartOptions.Resume to re-feed the prompt).
-func (s *Sandbox) Restart(ctx context.Context, opts StartOptions) (*StartResult, error) {
+func (s *Sandbox) Restart(ctx context.Context, opts SandboxStartOptions) (*StartResult, error) {
 	if err := s.c.ensure(ctx); err != nil {
 		return nil, err
 	}
@@ -118,7 +118,7 @@ func (s *Sandbox) Restart(ctx context.Context, opts StartOptions) (*StartResult,
 // Reset re-copies the workdir into the sandbox, resets the diff baseline, and
 // (per opts) optionally restarts the container and wipes agent state. Use for
 // "start over" workflows that abandon the agent's current changes.
-func (s *Sandbox) Reset(ctx context.Context, opts ResetOptions) (*ResetResult, error) {
+func (s *Sandbox) Reset(ctx context.Context, opts SandboxResetOptions) (*ResetResult, error) {
 	if err := s.c.ensure(ctx); err != nil {
 		return nil, err
 	}
@@ -139,7 +139,7 @@ func (s *Sandbox) HasActiveWork(ctx context.Context) (bool, string) {
 // false it refuses a sandbox that HasActiveWork, returning a typed
 // *ActiveWorkError carrying the reason — the caller prompts and retries with
 // AbandonUnappliedWork true. Atomic: no check-then-act gap.
-func (s *Sandbox) Destroy(ctx context.Context, opts DestroyOptions) (*DestroyResult, error) {
+func (s *Sandbox) Destroy(ctx context.Context, opts SandboxDestroyOptions) (*DestroyResult, error) {
 	if err := s.c.ensure(ctx); err != nil {
 		return nil, err
 	}
@@ -157,7 +157,7 @@ func (s *Sandbox) Destroy(ctx context.Context, opts DestroyOptions) (*DestroyRes
 // raw stdio via io.In/Out/Err (no PTY) — the right shape for line-oriented
 // protocols like the MCP proxy's JSON-RPC bridge; returns *UsageError when the
 // backend doesn't implement stdio exec (Tart/Seatbelt don't).
-func (s *Sandbox) Exec(ctx context.Context, opts ExecOptions, io IOStreams) error {
+func (s *Sandbox) Exec(ctx context.Context, opts SandboxExecOptions, io IOStreams) error {
 	if err := s.c.ensure(ctx); err != nil {
 		return err
 	}
@@ -222,16 +222,16 @@ const (
 	AgentStatusFailed  AgentStatus = sandbox.AgentStatusFailed  // exited with an error
 )
 
-// StartOptions configures Sandbox.Start (and Restart). Re-exported (type alias)
+// SandboxStartOptions configures Sandbox.Start (and Restart). Re-exported (type alias)
 // from internal/sandbox — its fields (Resume, Prompt, PromptFile, Isolation,
 // VscodeTunnel) are all legitimate start-time knobs, so no field cleanup is
 // needed.
-type StartOptions = sandbox.StartOptions
+type SandboxStartOptions = sandbox.StartOptions
 
-// ResetOptions configures Sandbox.Reset. Hand-written rather than aliased: the
+// SandboxResetOptions configures Sandbox.Reset. Hand-written rather than aliased: the
 // internal struct carries a Name field that the handle now supplies, so it's
 // dropped here.
-type ResetOptions struct {
+type SandboxResetOptions struct {
 	RestartContainer bool // also stop+start the container after resetting (in-place by default)
 	ClearState       bool // wipe the agent-runtime directory
 	KeepCache        bool // preserve the cache directory
@@ -243,7 +243,7 @@ type ResetOptions struct {
 	Debug  bool // enable entrypoint debug logging
 }
 
-func (o ResetOptions) toInternal(name string) sandbox.ResetOptions {
+func (o SandboxResetOptions) toInternal(name string) sandbox.ResetOptions {
 	return sandbox.ResetOptions{
 		Name:       name,
 		Restart:    o.RestartContainer,
@@ -256,8 +256,8 @@ func (o ResetOptions) toInternal(name string) sandbox.ResetOptions {
 	}
 }
 
-// DestroyOptions configures Sandbox.Destroy.
-type DestroyOptions struct {
+// SandboxDestroyOptions configures Sandbox.Destroy.
+type SandboxDestroyOptions struct {
 	// AbandonUnappliedWork proceeds even when the sandbox holds work that was
 	// never applied to the host — a running agent, a dirty workdir, or unapplied
 	// commits. With it false, Destroy refuses such a sandbox with a typed
@@ -266,10 +266,10 @@ type DestroyOptions struct {
 	AbandonUnappliedWork bool
 }
 
-// ExecOptions configures Sandbox.Exec. PTY selects between an interactive
+// SandboxExecOptions configures Sandbox.Exec. PTY selects between an interactive
 // terminal session (PTY true — allocates a remote pty) and raw stdio piping
 // (PTY false — line-oriented, the shape the MCP proxy bridges JSON-RPC over).
-type ExecOptions struct {
+type SandboxExecOptions struct {
 	Command []string // command + args to run inside the container; required
 	PTY     bool     // allocate a terminal (true) vs pipe raw stdio (false)
 }

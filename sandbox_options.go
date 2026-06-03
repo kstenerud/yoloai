@@ -64,7 +64,7 @@ type SandboxCreateOptions struct {
 	// AbandonUnappliedWork lets Replace destroy the existing sandbox even when it
 	// holds work never applied to the host — a running agent, a dirty workdir, or
 	// unapplied commits — skipping that safety check. Mirrors
-	// DestroyOptions.AbandonUnappliedWork. (The CLI's --force flag maps here.)
+	// SandboxDestroyOptions.AbandonUnappliedWork. (The CLI's --force flag maps here.)
 	AbandonUnappliedWork bool
 
 	// NoStart creates the sandbox without launching the agent.
@@ -104,7 +104,7 @@ type SandboxCreateOptions struct {
 	// Output receives the create pipeline's human-readable progress (profile
 	// image build stream, advisory warnings). Per-call so concurrent Creates on
 	// one Client don't interleave on a shared writer. Nil falls back to the
-	// Client's ClientConfiguration.Output.
+	// Client's ClientCreateOptions.Output.
 	Output io.Writer
 }
 

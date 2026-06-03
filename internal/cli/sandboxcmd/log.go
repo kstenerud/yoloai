@@ -199,7 +199,7 @@ func formatRecord(rec logRecord, width int) string {
 }
 
 // runLogStructured consumes the library activity stream and renders it.
-func runLogStructured(cmd *cobra.Command, name string, opts yoloai.LogOptions, rawMode bool) error {
+func runLogStructured(cmd *cobra.Command, name string, opts yoloai.AgentLogsOptions, rawMode bool) error {
 	c, err := cliutil.Client(cmd)
 	if err != nil {
 		return err
@@ -292,7 +292,7 @@ func runLog(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	opts := yoloai.LogOptions{
+	opts := yoloai.AgentLogsOptions{
 		Sources:  parseSourceFlag(sourceFlag),
 		MinLevel: levelFlag,
 		Since:    sinceTime,

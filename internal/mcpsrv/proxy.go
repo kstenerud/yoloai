@@ -115,7 +115,7 @@ func (p *ProxyServer) ensureRunning(ctx context.Context) (*yoloai.Environment, e
 
 	case yoloai.StatusStopped, yoloai.StatusRemoved:
 		// Container stopped or removed — restart it (auto-start; notices discarded)
-		if _, err := sb.Start(ctx, yoloai.StartOptions{}); err != nil {
+		if _, err := sb.Start(ctx, yoloai.SandboxStartOptions{}); err != nil {
 			return nil, fmt.Errorf("start sandbox %q: %w", p.sandboxName, err)
 		}
 		return info.Environment, nil
@@ -255,7 +255,7 @@ func (p *ProxyServer) run(ctx context.Context, in io.Reader, out io.Writer, _ *y
 	go func() {
 		sb, err := p.c.Sandbox(p.sandboxName)
 		if err == nil {
-			err = sb.Exec(ctx, yoloai.ExecOptions{Command: innerCmd}, yoloai.IOStreams{In: innerInRead, Out: innerOutWrite, Err: os.Stderr})
+			err = sb.Exec(ctx, yoloai.SandboxExecOptions{Command: innerCmd}, yoloai.IOStreams{In: innerInRead, Out: innerOutWrite, Err: os.Stderr})
 		}
 		_ = innerOutWrite.Close()
 		_ = innerInRead.Close()
@@ -456,7 +456,7 @@ func (p *ProxyServer) handleProxyDiff(args map[string]any) map[string]any {
 	if err != nil {
 		return mcpTextContent(errorf("sandbox handle %q: %v", p.sandboxName, err))
 	}
-	diff, err := sb.Workdir().Diff(context.Background(), yoloai.DiffOptions{Stat: stat})
+	diff, err := sb.Workdir().Diff(context.Background(), yoloai.WorkdirDiffOptions{Stat: stat})
 	if err != nil {
 		return mcpTextContent(errorf("diff sandbox %q: %v", p.sandboxName, err))
 	}
