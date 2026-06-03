@@ -94,7 +94,9 @@ func runRestart(cmd *cobra.Command, args []string, opts *restartOpts) error {
 		}
 
 		if opts.attach {
-			return sb.Attach(ctx, cliutil.IOStreams())
+			return cliutil.WithTerminal(func(io yoloai.IOStreams) error {
+				return sb.Attach(ctx, io)
+			})
 		}
 
 		_, err = fmt.Fprintf(cmd.OutOrStdout(), "Sandbox %s restarted\nRun 'yoloai attach %s' to reconnect\n", name, name)

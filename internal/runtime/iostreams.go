@@ -22,11 +22,23 @@ import "io"
 // When TTY=false the backend treats the streams as plain pipes; no
 // PTY is allocated on the remote side.
 //
-// **Sizing.** Rows / Cols, when non-zero, are the terminal dimensions
-// the caller wants the remote PTY to start at. A backend that supports
-// resize can set the initial geometry without round-tripping through an
-// ioctl on In's FD. Zero means "let the backend detect from In's FD or
-// pick a default."
+// **Sizing.** Rows / Cols, when non-zero, are the terminal dimensions the
+// caller wants the remote PTY to start at. Zero means "let the backend pick a
+// default." The library never inspects In's FD to discover a size (§12: that
+// reads live host-terminal state — in a daemon that's the daemon's terminal,
+// not the principal's). The caller supplies the size as data.
+//
+// **Resize.** Resize, when non-nil, delivers post-start geometry updates the
+// caller wants applied to a running interactive exec. The caller owns the
+// source of these events (a SIGWINCH handler on its own terminal, a websocket
+// resize message, …) and converts them to TermSize values; the library only
+// forwards them to the backend's resize call. Backends that delegate terminal
+// management to a subprocess (docker/tart/seatbelt shell out to `… -it`, which
+// handles resize itself) ignore this channel.
+type TermSize struct {
+	Rows, Cols int
+}
+
 type IOStreams struct {
 	In  io.Reader // stdin (must be a terminal when TTY=true)
 	Out io.Writer // stdout
@@ -37,7 +49,7 @@ type IOStreams struct {
 	TTY bool
 
 	// Rows and Cols are the initial PTY geometry when TTY=true. Zero
-	// means "detect from In's FD if possible, else backend default."
+	// means "backend default" — the library never reads In's FD to detect it.
 	Rows, Cols int
 
 	// Term is the terminal type ($TERM) the interactive exec should
@@ -46,4 +58,10 @@ type IOStreams struct {
 	// daemon's terminal, not the principal's) — the caller supplies it.
 	// Empty means "xterm-256color", a safe modern default.
 	Term string
+
+	// Resize, when non-nil, delivers live terminal-geometry updates for a
+	// running interactive exec. The caller owns the event source; the library
+	// only forwards to the backend. Backends that delegate to an `… -it`
+	// subprocess ignore it.
+	Resize <-chan TermSize
 }

@@ -4,6 +4,34 @@ Tracks breaking changes made during beta. Each entry should be included in relea
 
 ## Unreleased
 
+### Interactive exec no longer manages the host terminal; `IOStreams` gains `Resize`
+
+`IOStreams` (used by `Sandbox.Attach` / `Sandbox.Exec`) gained a
+`Resize <-chan TermSize` field, and the library stopped reading host-terminal
+state.
+
+**Previous behavior:** for the containerd backend, the library inspected
+`IOStreams.In`'s file descriptor — putting it in raw mode, detecting the
+terminal size when `Rows`/`Cols` were zero, and installing a process-global
+`SIGWINCH` handler to forward live resizes. In a daemon that read the *daemon's*
+terminal, not the principal's (§12 "no ambient configuration").
+
+**New behavior:** the library treats `In`/`Out`/`Err` as opaque byte streams. It
+never touches a stream's FD, sets raw mode, or installs signal handlers. Initial
+PTY geometry comes only from `Rows`/`Cols` (zero → backend default). Live
+resizes are delivered by the caller as `TermSize` values on the new `Resize`
+channel; `nil` means "no live resize." Backends that delegate to an `… -it`
+subprocess (docker/tart/seatbelt) ignore `Resize` and manage the terminal
+themselves, as before.
+
+**Migration:** embedders driving an interactive exec from a real terminal must
+now (1) put their own terminal in raw mode, (2) pass `Rows`/`Cols`, and (3)
+supply a `Resize` channel they feed from their own event source (a `SIGWINCH`
+handler, a websocket resize message, …). The CLI does this at its boundary in
+`cliutil.WithTerminal`; embedders not driving a real terminal (HTTP/MCP bridges
+over virtual PTYs) were already supplying size as data and need no change beyond
+optionally wiring `Resize`.
+
 ### `SelectBackend` / `SelectContainerBackend` take a host-env snapshot
 
 The two public backend-selection helpers gained a trailing `env map[string]string`

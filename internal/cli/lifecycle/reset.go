@@ -97,7 +97,9 @@ func runReset(cmd *cobra.Command, args []string, opts *resetOpts) error {
 		}
 
 		if opts.attach {
-			return sb.Attach(ctx, cliutil.IOStreams())
+			return cliutil.WithTerminal(func(io yoloai.IOStreams) error {
+				return sb.Attach(ctx, io)
+			})
 		}
 
 		if opts.restart {

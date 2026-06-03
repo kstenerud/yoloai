@@ -9,29 +9,14 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/signal"
-	"syscall"
 
 	"github.com/containerd/containerd/v2/client"
 	"github.com/containerd/containerd/v2/pkg/cio"
 	"github.com/containerd/errdefs"
-	"github.com/creack/pty"
 	specs "github.com/opencontainers/runtime-spec/specs-go"
-	"golang.org/x/term"
 
 	"github.com/kstenerud/yoloai/internal/runtime"
 )
-
-// termSizeOf returns the terminal size of *f* as (rows, cols), or
-// (0, 0) if it can't be determined. pty.Getsize returns (rows, cols, err)
-// — named accordingly to prevent swapping.
-func termSizeOf(f *os.File) (rows, cols int) {
-	r, c, err := pty.Getsize(f)
-	if err != nil {
-		return 0, 0
-	}
-	return r, c
-}
 
 // AttachCommand returns the command to attach to the tmux session.
 // For containerd/kata, stty is run first to set terminal dimensions on the PTY
@@ -127,15 +112,14 @@ func (r *Runtime) Exec(ctx context.Context, name string, cmd []string, user stri
 // For io.TTY=false we still bridge through FIFOs but with no PTY on
 // the remote side; stderr stays separate.
 //
-// When io.In is a real terminal *os.File, we set the host fd to raw mode
-// so escape sequences (Ctrl-B, arrow keys) reach the remote PTY rather
-// than being intercepted by the host's line discipline. Non-PTY io.In
-// (typically *os.Pipe from an HTTP/MCP bridge) gets no raw-mode handling.
+// io.In/Out/Err are treated as opaque byte streams — the library never
+// inspects io.In's FD, sets raw mode, or installs signal handlers (§12:
+// that reads live host-terminal state). The caller manages its own terminal
+// (raw mode, etc.) before handing the streams in.
 //
-// Initial PTY geometry comes from io.Rows/io.Cols. Zero means "detect
-// from io.In's FD if possible, else let the backend pick a default."
-// SIGWINCH forwarding only fires when io.In is a real terminal — for
-// virtual PTYs the embedder is responsible for resize forwarding.
+// Initial PTY geometry comes from io.Rows/io.Cols (zero → backend default).
+// Live resizes arrive as TermSize values on io.Resize, which the caller
+// drives from its own event source (SIGWINCH, a websocket message, …).
 func (r *Runtime) InteractiveExec(ctx context.Context, name string, cmd []string, user string, workDir string, io runtime.IOStreams) error {
 	ctx = r.withNamespace(ctx)
 
@@ -144,47 +128,40 @@ func (r *Runtime) InteractiveExec(ctx context.Context, name string, cmd []string
 		return err
 	}
 
-	// Raw mode is only meaningful when io.In is a real terminal FD on
-	// the host. Skip silently for piped/virtual streams.
-	if hostFile, ok := io.In.(*os.File); ok && term.IsTerminal(int(hostFile.Fd())) && io.TTY { //nolint:gosec // G115: fd is small int range
-		oldState, terr := term.MakeRaw(int(hostFile.Fd())) //nolint:gosec // G115
-		if terr != nil {
-			return fmt.Errorf("set raw mode: %w", terr)
-		}
-		defer term.Restore(int(hostFile.Fd()), oldState) //nolint:errcheck,gosec // G115/G104: best-effort restore
-	}
-
 	process, exitCh, err := startInteractiveExec(ctx, task, ctr, cmd, user, workDir, io)
 	if err != nil {
 		return err
 	}
 	defer func() { _, _ = process.Delete(ctx) }()
 
-	rows, cols := resolveTermSize(io)
-	if rows > 0 {
-		_ = process.Resize(ctx, uint32(cols), uint32(rows)) //nolint:gosec // G115: terminal dimensions fit uint32
+	if io.Rows > 0 && io.Cols > 0 {
+		_ = process.Resize(ctx, uint32(io.Cols), uint32(io.Rows)) //nolint:gosec // G115: terminal dimensions fit uint32
 	}
-
-	if hostFile, ok := io.In.(*os.File); ok && term.IsTerminal(int(hostFile.Fd())) { //nolint:gosec // G115
-		forwardSIGWINCH(ctx, process, hostFile)
+	if io.Resize != nil {
+		go forwardResizes(ctx, process, io.Resize)
 	}
 
 	<-exitCh
 	return nil
 }
 
-// resolveTermSize returns the PTY geometry to send to the remote. If
-// the caller supplied Rows/Cols, those win. Otherwise we detect from
-// io.In if it's an *os.File. If neither, return (0,0) and let the
-// backend pick its default.
-func resolveTermSize(io runtime.IOStreams) (rows, cols int) {
-	if io.Rows > 0 && io.Cols > 0 {
-		return io.Rows, io.Cols
+// forwardResizes applies caller-supplied geometry updates to the remote PTY
+// until the channel closes or ctx is cancelled (the latter fires when
+// InteractiveExec returns and its derived context is torn down).
+func forwardResizes(ctx context.Context, process client.Process, resize <-chan runtime.TermSize) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case sz, ok := <-resize:
+			if !ok {
+				return
+			}
+			if sz.Rows > 0 && sz.Cols > 0 {
+				_ = process.Resize(ctx, uint32(sz.Cols), uint32(sz.Rows)) //nolint:gosec // G115: terminal dimensions fit uint32
+			}
+		}
 	}
-	if hostFile, ok := io.In.(*os.File); ok {
-		return termSizeOf(hostFile)
-	}
-	return 0, 0
 }
 
 // loadContainerAndTask loads a container and its task from containerd, returning
@@ -205,21 +182,6 @@ func (r *Runtime) loadContainerAndTask(ctx context.Context, name string) (client
 		return nil, nil, fmt.Errorf("load task: %w", err)
 	}
 	return ctr, task, nil
-}
-
-// forwardSIGWINCH starts a goroutine that forwards SIGWINCH to the
-// container process, sourcing the new size from the supplied host
-// terminal file. Caller must have already verified hostFile is a TTY.
-func forwardSIGWINCH(ctx context.Context, process client.Process, hostFile *os.File) {
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGWINCH)
-	go func() {
-		for range sigCh {
-			if rows, cols := termSizeOf(hostFile); rows > 0 {
-				_ = process.Resize(ctx, uint32(cols), uint32(rows)) //nolint:gosec // G115: int->uint32 conversion is safe for terminal dimensions
-			}
-		}
-	}()
 }
 
 // startInteractiveExec creates the FIFO set, builds the process spec, and starts the exec.
@@ -288,8 +250,8 @@ func startInteractiveExec(ctx context.Context, task client.Task, ctr client.Cont
 }
 
 // buildInteractiveProcessSpec constructs the OCI process spec for an exec.
-// io.TTY drives Terminal; io.Rows/io.Cols (with fallback to detecting from
-// io.In's FD if it's a host terminal) drive ConsoleSize.
+// io.TTY drives Terminal; io.Rows/io.Cols (when both non-zero) drive the
+// initial ConsoleSize.
 func buildInteractiveProcessSpec(cmd []string, user, workDir string, env []string, io runtime.IOStreams) *specs.Process {
 	processSpec := &specs.Process{
 		Args:     cmd,
@@ -303,15 +265,13 @@ func buildInteractiveProcessSpec(cmd []string, user, workDir string, env []strin
 	if user != "" {
 		processSpec.User = specs.User{Username: user}
 	}
-	// Set initial PTY size when known. Without this the PTY starts at
-	// the shim default (e.g. 0×0) and tmux reads that size before our
-	// post-start Resize call arrives.
-	if io.TTY {
-		if rows, cols := resolveTermSize(io); rows > 0 {
-			processSpec.ConsoleSize = &specs.Box{
-				Width:  uint(cols), //nolint:gosec // G115: terminal dimensions fit in uint
-				Height: uint(rows), //nolint:gosec // G115
-			}
+	// Set initial PTY size when the caller supplied one. Without this the
+	// PTY starts at the shim default (e.g. 0×0) and tmux reads that size
+	// before our post-start Resize call arrives.
+	if io.TTY && io.Rows > 0 && io.Cols > 0 {
+		processSpec.ConsoleSize = &specs.Box{
+			Width:  uint(io.Cols), //nolint:gosec // G115: terminal dimensions fit in uint
+			Height: uint(io.Rows), //nolint:gosec // G115
 		}
 	}
 	return processSpec

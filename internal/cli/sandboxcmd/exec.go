@@ -39,7 +39,9 @@ func runExec(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return cliutil.SandboxErrorHint(name, err)
 		}
-		if err := sb.Exec(ctx, yoloai.ExecOptions{Command: cmdArgs, PTY: true}, cliutil.IOStreams()); err != nil {
+		if err := cliutil.WithTerminal(func(io yoloai.IOStreams) error {
+			return sb.Exec(ctx, yoloai.ExecOptions{Command: cmdArgs, PTY: true}, io)
+		}); err != nil {
 			if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 				os.Exit(exitErr.ExitCode())
 			}

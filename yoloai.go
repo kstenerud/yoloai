@@ -414,6 +414,11 @@ func (c *Client) Create(ctx context.Context, opts CreateOptions) (string, error)
 // runtime.IOStreams for the field documentation.
 type IOStreams = runtime.IOStreams
 
+// TermSize is a terminal-geometry update an embedder pushes through
+// IOStreams.Resize to resize a running interactive exec. Alias for
+// runtime.TermSize so embedders need not import runtime directly.
+type TermSize = runtime.TermSize
+
 // attachStatusOK returns nil if the sandbox status permits attach,
 // otherwise a typed error suitable for the CLI exit-code mapping.
 func attachStatusOK(status sandbox.Status, name string) error {

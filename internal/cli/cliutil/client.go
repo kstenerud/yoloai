@@ -165,7 +165,9 @@ func AttachToSandboxByName(cmd *cobra.Command, name string) error {
 		if err != nil {
 			return err
 		}
-		return sb.Attach(ctx, IOStreams())
+		return WithTerminal(func(io yoloai.IOStreams) error {
+			return sb.Attach(ctx, io)
+		})
 	})
 }
 

@@ -362,7 +362,9 @@ func executeNewCreate(cmd *cobra.Command, ctx context.Context, c *yoloai.Client,
 	if err != nil {
 		return err
 	}
-	return sb.Attach(ctx, cliutil.IOStreams())
+	return cliutil.WithTerminal(func(io yoloai.IOStreams) error {
+		return sb.Attach(ctx, io)
+	})
 }
 
 // printCreateSummary renders the post-create summary + next-step hints from the
