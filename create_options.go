@@ -58,11 +58,14 @@ type CreateOptions struct {
 	Ports []PortMapping
 
 	// Replace destroys an existing same-named sandbox first; it must have no
-	// unapplied changes (use Force to override that safety check).
+	// unapplied changes (set AbandonUnappliedWork to override that safety check).
 	Replace bool
 
-	// Force replaces unconditionally, skipping the unapplied-work safety check.
-	Force bool
+	// AbandonUnappliedWork lets Replace destroy the existing sandbox even when it
+	// holds work never applied to the host — a running agent, a dirty workdir, or
+	// unapplied commits — skipping that safety check. Mirrors
+	// DestroyOptions.AbandonUnappliedWork. (The CLI's --force flag maps here.)
+	AbandonUnappliedWork bool
 
 	// NoStart creates the sandbox without launching the agent.
 	NoStart bool
@@ -130,7 +133,7 @@ func (o CreateOptions) toInternal() sandbox.CreateOptions {
 		NetworkAllow: o.NetworkAllow,
 		Ports:        formatPorts(o.Ports),
 		Replace:      o.Replace,
-		Force:        o.Force,
+		Force:        o.AbandonUnappliedWork,
 		NoStart:      o.NoStart,
 		Passthrough:  o.Passthrough,
 		Debug:        o.Debug,

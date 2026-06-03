@@ -25,17 +25,19 @@ func TestFormatPorts(t *testing.T) {
 
 func TestCreateOptions_toInternal_DefaultsModeAndFoldsAck(t *testing.T) {
 	o := CreateOptions{
-		Name:              "box",
-		Workdir:           DirSpec{Path: "/p"}, // Mode empty → defaults to copy
-		Agent:             AgentClaude,
-		Ports:             []PortMapping{{HostPort: 3000, ContainerPort: 80}},
-		AllowDirtyWorkdir: true,
+		Name:                 "box",
+		Workdir:              DirSpec{Path: "/p"}, // Mode empty → defaults to copy
+		Agent:                AgentClaude,
+		Ports:                []PortMapping{{HostPort: 3000, ContainerPort: 80}},
+		AllowDirtyWorkdir:    true,
+		AbandonUnappliedWork: true,
 	}
 	in := o.toInternal()
 
 	assert.Equal(t, "box", in.Name)
 	assert.Equal(t, DirModeCopy, in.Workdir.Mode, "empty workdir mode defaults to copy")
 	assert.True(t, in.Workdir.AllowDirty, "AllowDirtyWorkdir folds into Workdir.AllowDirty")
+	assert.True(t, in.Force, "AbandonUnappliedWork maps onto the internal Force safety override")
 	assert.Equal(t, "claude", in.Agent, "AgentName converts to string")
 	assert.Equal(t, []string{"3000:80"}, in.Ports, "PortMappings render to host:container")
 }

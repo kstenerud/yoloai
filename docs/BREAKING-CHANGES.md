@@ -4,6 +4,24 @@ Tracks breaking changes made during beta. Each entry should be included in relea
 
 ## Unreleased
 
+### `CreateOptions.Force` renamed to `AbandonUnappliedWork`
+
+The public `CreateOptions.Force bool` field was renamed to `AbandonUnappliedWork
+bool`.
+
+**Previous behavior:** `Force` toggled whether `Replace` could destroy an
+existing same-named sandbox that still held unapplied work.
+
+**New behavior:** the field is `AbandonUnappliedWork`, naming the consequence
+rather than using a generic `Force` toggle. This matches
+`DestroyOptions.AbandonUnappliedWork`, which already governed the identical
+"skip the unapplied-work safety check" decision — the public Go surface now
+names that consequence consistently in both places. The CLI's `--force` flag is
+unchanged; only the Go API field moved.
+
+**Migration:** rename the field in any `yoloai.CreateOptions{…}` literal:
+`Force: true` → `AbandonUnappliedWork: true`.
+
 ### Interactive exec no longer manages the host terminal; `IOStreams` gains `Resize`
 
 `IOStreams` (used by `Sandbox.Attach` / `Sandbox.Exec`) gained a
