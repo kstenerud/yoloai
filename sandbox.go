@@ -151,7 +151,7 @@ func (s *Sandbox) SendInput(ctx context.Context, text string) error {
 // fetched. This is backend container stdout/stderr for diagnostics — distinct
 // from the structured agent log stream.
 func (s *Sandbox) ContainerLogs(ctx context.Context, tailLines int) string {
-	return runtime.LogsFor(ctx, s.c.rt, store.InstanceName(s.name), tailLines)
+	return runtime.LogsFor(ctx, s.c.rt, store.InstanceName(s.c.layout.Principal, s.name), tailLines)
 }
 
 // Attach connects the supplied IOStreams to the sandbox's tmux session.
@@ -169,7 +169,7 @@ func (s *Sandbox) Attach(ctx context.Context, io IOStreams) error {
 	if err := attachStatusOK(info.Status, s.name); err != nil {
 		return err
 	}
-	containerName := store.InstanceName(s.name)
+	containerName := store.InstanceName(s.c.layout.Principal, s.name)
 	user := sandbox.ContainerUser(info.Environment, s.c.layout.HostUID)
 	if err := sandbox.WaitForAttachReady(ctx, s.c.rt, s.c.layout, s.name, user, 300*time.Second); err != nil {
 		return fmt.Errorf("waiting for tmux session: %w", err)
@@ -191,7 +191,7 @@ func (s *Sandbox) Exec(ctx context.Context, opts ExecOptions, io IOStreams) erro
 		if !ok {
 			return yoerrors.NewUsageError("backend %s does not support stdio exec", s.c.rt.Descriptor().Name)
 		}
-		return execer.StdioExec(ctx, store.InstanceName(s.name), opts.Command, io.In, io.Out, io.Err)
+		return execer.StdioExec(ctx, store.InstanceName(s.c.layout.Principal, s.name), opts.Command, io.In, io.Out, io.Err)
 	}
 	info, err := s.c.manager.Inspect(ctx, s.name)
 	if err != nil {
@@ -201,5 +201,5 @@ func (s *Sandbox) Exec(ctx context.Context, opts ExecOptions, io IOStreams) erro
 		return fmt.Errorf("sandbox %q: %w", s.name, sandbox.ErrContainerNotRunning)
 	}
 	user := sandbox.ContainerUser(info.Environment, s.c.layout.HostUID)
-	return s.c.rt.InteractiveExec(ctx, store.InstanceName(s.name), opts.Command, user, info.Environment.Workdir.MountPath, io)
+	return s.c.rt.InteractiveExec(ctx, store.InstanceName(s.c.layout.Principal, s.name), opts.Command, user, info.Environment.Workdir.MountPath, io)
 }

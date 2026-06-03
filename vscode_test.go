@@ -38,7 +38,7 @@ func TestVscodeAttach_Supported(t *testing.T) {
 	attach, err := sc.VscodeAttach("box")
 	require.NoError(t, err)
 	assert.True(t, attach.Supported)
-	assert.Equal(t, store.InstanceName("box"), attach.ContainerName)
+	assert.Equal(t, store.InstanceName("", "box"), attach.ContainerName)
 	assert.Equal(t, "/proj", attach.WorkdirPath)
 	assert.True(t, strings.HasPrefix(attach.FolderURI, "vscode-remote://attached-container+"))
 	assert.True(t, strings.HasSuffix(attach.FolderURI, "/proj"))

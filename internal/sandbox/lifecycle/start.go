@@ -277,7 +277,7 @@ func start(ctx context.Context, d state.Deps, name string, opts StartOptions, n 
 		return err
 	}
 
-	cname := store.InstanceName(name)
+	cname := store.InstanceName(d.Layout.Principal, name)
 	st, err := status.DetectStatus(ctx, d.Runtime, cname, sandboxDir)
 	if err != nil {
 		return fmt.Errorf("detect status: %w", err)

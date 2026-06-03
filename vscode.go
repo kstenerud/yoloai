@@ -46,7 +46,7 @@ func (s *SystemClient) VscodeAttach(name string) (*VscodeAttach, error) {
 	}
 
 	res.Supported = true
-	res.ContainerName = store.InstanceName(meta.Name)
+	res.ContainerName = store.InstanceName(meta.Principal, meta.Name)
 	res.WorkdirPath = meta.Workdir.MountPath
 
 	payload, err := json.Marshal(map[string]string{"containerName": res.ContainerName})

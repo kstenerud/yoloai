@@ -45,7 +45,7 @@ func (m *Engine) CaptureTerminal(ctx context.Context, name string, scrollback in
 		return nil, nil, fmt.Errorf("sandbox %q: %w", name, ErrContainerNotRunning)
 	}
 
-	containerName := store.InstanceName(name)
+	containerName := store.InstanceName(m.layout.Principal, name)
 	socket := m.runtime.TmuxSocket(m.layout.SandboxDir(name))
 	user := ContainerUser(info.Environment, m.layout.HostUID)
 

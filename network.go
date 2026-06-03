@@ -272,7 +272,7 @@ func (n *Network) tryLivePatch(ctx context.Context, script string, scriptArgs []
 
 	execArgs := []string{"sh", "-c", script, "_"}
 	execArgs = append(execArgs, scriptArgs...)
-	if _, err := n.s.c.rt.Exec(ctx, store.InstanceName(n.s.name), execArgs, "0"); err != nil {
+	if _, err := n.s.c.rt.Exec(ctx, store.InstanceName(n.s.c.layout.Principal, n.s.name), execArgs, "0"); err != nil {
 		return false, err
 	}
 	return true, nil

@@ -88,7 +88,7 @@ func Reset(ctx context.Context, d state.Deps, opts ResetOptions) (*ResetResult, 
 
 	// Auto-upgrade to restart: container not running
 	if !opts.Restart {
-		st, err := status.DetectStatus(ctx, d.Runtime, store.InstanceName(opts.Name), sandboxDir)
+		st, err := status.DetectStatus(ctx, d.Runtime, store.InstanceName(d.Layout.Principal, opts.Name), sandboxDir)
 		if err != nil || (st != status.StatusActive && st != status.StatusIdle) {
 			n.infof("Container is not running, upgrading to restart")
 			opts.Restart = true
@@ -110,7 +110,7 @@ func Reset(ctx context.Context, d state.Deps, opts ResetOptions) (*ResetResult, 
 // Returns a reason string for the confirmation prompt.
 func NeedsConfirmation(ctx context.Context, d state.Deps, name string) (bool, string) {
 	sandboxDir := d.Layout.SandboxDir(name)
-	st, err := status.DetectStatus(ctx, d.Runtime, store.InstanceName(name), sandboxDir)
+	st, err := status.DetectStatus(ctx, d.Runtime, store.InstanceName(d.Layout.Principal, name), sandboxDir)
 	if err != nil {
 		return false, ""
 	}
@@ -335,7 +335,7 @@ func prepareResetRestart(ctx context.Context, d state.Deps, opts ResetOptions, s
 	// recreate. Using Remove (not Stop) avoids suspending a VM we're about
 	// to rebuild — the suspend state would be stale after the host workdir
 	// is re-copied, and handleSuspendedResume would resume the wrong files.
-	cname := store.InstanceName(opts.Name)
+	cname := store.InstanceName(d.Layout.Principal, opts.Name)
 	_ = d.Runtime.Remove(ctx, cname)
 
 	perms := state.Perms(meta.Isolation)

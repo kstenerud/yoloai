@@ -32,7 +32,7 @@ func Teardown(ctx context.Context, d state.Deps, name string) (warnings []string
 		return nil, rerr
 	}
 
-	cname := store.InstanceName(name)
+	cname := store.InstanceName(d.Layout.Principal, name)
 
 	// Stop instance (ignore errors — may not be running)
 	_ = d.Runtime.Stop(ctx, cname)

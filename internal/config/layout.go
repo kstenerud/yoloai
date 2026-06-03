@@ -87,6 +87,25 @@ type Layout struct {
 	// ${VAR} reference is an unset-variable error — fine for the baked-in
 	// default config, which contains none.
 	Env map[string]string
+
+	// Principal namespaces this Layout's runtime instances so multiple
+	// principals (tenants) served from one process don't collide on the
+	// runtime container name. The zero value is the reserved default
+	// ("no principal"): InstanceName elides it, so a single-principal
+	// embedder (the CLI) produces the same "yoloai-<name>" ids as before.
+	// A daemon scopes each client to a principal by setting this once via
+	// WithPrincipal. The Layout *is* the principal-scoped handle (D58/D59);
+	// the principal is client-scoped, never per-call. See D62.
+	Principal PrincipalSegment
+}
+
+// WithPrincipal returns a copy of the Layout scoped to the given principal.
+// The empty segment is the default (no-principal) scope. The principal is set
+// in exactly one place per client, so every InstanceName derived from this
+// Layout shares the same scope.
+func (l Layout) WithPrincipal(p PrincipalSegment) Layout {
+	l.Principal = p
+	return l
 }
 
 // NewLayout constructs a Layout rooted at dataDir with HomeDir

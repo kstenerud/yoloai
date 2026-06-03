@@ -191,7 +191,7 @@ func TestCLI_StartStop(t *testing.T) {
 	// Wait for container to become active
 	rt := testutil.NewIntegrationRuntime(context.Background(), t)
 	defer rt.Close() //nolint:errcheck // test cleanup
-	testutil.WaitForActive(context.Background(), t, rt, store.InstanceName("cli-startstop"), 15*time.Second)
+	testutil.WaitForActive(context.Background(), t, rt, store.InstanceName("", "cli-startstop"), 15*time.Second)
 
 	_, _, err = runCLI(t, "stop", "cli-startstop")
 	require.NoError(t, err)
@@ -431,7 +431,7 @@ func TestCLI_StartAfterDone(t *testing.T) {
 	defer rt.Close() //nolint:errcheck // test cleanup
 
 	testutil.WaitForStatus(context.Background(), t, func(ctx context.Context) (string, error) {
-		s, err := sandbox.DetectStatus(ctx, rt, store.InstanceName("cli-startdone"), cliutil.Layout().SandboxDir("cli-startdone"))
+		s, err := sandbox.DetectStatus(ctx, rt, store.InstanceName("", "cli-startdone"), cliutil.Layout().SandboxDir("cli-startdone"))
 		return string(s), err
 	}, string(yoloai.StatusDone), 60*time.Second)
 

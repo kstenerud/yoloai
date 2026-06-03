@@ -58,7 +58,7 @@ func WaitForAttachReady(
 	sandboxName, user string,
 	timeout time.Duration,
 ) error {
-	containerName := store.InstanceName(sandboxName)
+	containerName := store.InstanceName(layout.Principal, sandboxName)
 	jsonlPath := store.SandboxJSONLPath(layout.SandboxDir(sandboxName))
 	tmuxSocket := ReadTmuxSocket(layout, sandboxName)
 	deadline := time.Now().Add(timeout)

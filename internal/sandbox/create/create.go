@@ -173,7 +173,7 @@ func Run(ctx context.Context, d state.Deps, opts Options) (name string, err erro
 	if err := launch.LaunchContainer(ctx, d, sandboxState); err != nil {
 		// Clean up sandbox directory and attempt container removal.
 		_ = os.RemoveAll(sandboxState.SandboxDir)
-		_ = d.Runtime.Remove(ctx, store.InstanceName(sandboxState.Name))
+		_ = d.Runtime.Remove(ctx, store.InstanceName(sandboxState.Layout.Principal, sandboxState.Name))
 		return "", err
 	}
 
@@ -182,7 +182,7 @@ func Run(ctx context.Context, d state.Deps, opts Options) (name string, err erro
 		if err := launch.ExecuteVMWorkDirSetup(ctx, d.Runtime, sandboxState.Name, sandboxState.SandboxDir, sandboxState.Environment); err != nil {
 			// Clean up on failure
 			_ = os.RemoveAll(sandboxState.SandboxDir)
-			_ = d.Runtime.Remove(ctx, store.InstanceName(sandboxState.Name))
+			_ = d.Runtime.Remove(ctx, store.InstanceName(sandboxState.Layout.Principal, sandboxState.Name))
 			return "", fmt.Errorf("execute VM work dir setup: %w", err)
 		}
 	}
@@ -343,6 +343,7 @@ func buildConfigAndEnvironment(ctx context.Context, d state.Deps, opts Options, 
 
 	usernsMode := resolveUsernsMode(d.Runtime, workdir, auxDirs, pr.capAdd)
 	meta := buildEnvironment(opts, pr, workdir, baselineSHA, dirEnvs, hasPrompt, networkMode, networkAllow, usernsMode, d.Runtime.Descriptor().Capabilities.HostFilesystem, string(resolvedArchetype), backend, model, mergedMounts)
+	meta.Principal = d.Layout.Principal // record the owning principal for attribution + runtime namespace (D62)
 
 	return configData, meta, tmuxConf, promptText, nil
 }

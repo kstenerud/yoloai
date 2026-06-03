@@ -21,13 +21,14 @@ const metaVersion = 1
 
 // Environment holds sandbox configuration captured at creation time.
 type Environment struct {
-	Version       int                 `json:"version"` // schema version; 0 = legacy (pre-versioning)
-	YoloaiVersion string              `json:"yoloai_version"`
-	Name          string              `json:"name"`
-	CreatedAt     time.Time           `json:"created_at"`
-	Backend       runtime.BackendName `json:"backend"` // typed string; serializes as "docker"/"tart"/etc.
-	Profile       string              `json:"profile,omitempty"`
-	ImageRef      string              `json:"image_ref,omitempty"`
+	Version       int                     `json:"version"` // schema version; 0 = legacy (pre-versioning)
+	YoloaiVersion string                  `json:"yoloai_version"`
+	Name          string                  `json:"name"`
+	Principal     config.PrincipalSegment `json:"principal,omitempty"` // owning principal; "" = default (no-principal). Attribution + runtime namespace (D62).
+	CreatedAt     time.Time               `json:"created_at"`
+	Backend       runtime.BackendName     `json:"backend"` // typed string; serializes as "docker"/"tart"/etc.
+	Profile       string                  `json:"profile,omitempty"`
+	ImageRef      string                  `json:"image_ref,omitempty"`
 
 	Agent agent.AgentName `json:"agent"`
 	Model string          `json:"model,omitempty"`

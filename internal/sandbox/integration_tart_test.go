@@ -88,7 +88,7 @@ func TestIntegrationTart_FullLifecycle(t *testing.T) {
 	t.Cleanup(func() { destroySandbox(ctx, mgr, sandboxName) }) //nolint:errcheck // test cleanup
 
 	// Wait for VM to become active
-	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName(sandboxName), 90*time.Second)
+	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName("", sandboxName), 90*time.Second)
 
 	// Verify sandbox directory structure
 	sandboxDir := mgr.Layout().SandboxDir(sandboxName)
@@ -108,18 +108,18 @@ func TestIntegrationTart_FullLifecycle(t *testing.T) {
 	assert.Equal(t, vmLocalPath, meta.Workdir.MountPath)
 
 	// Verify VM is running
-	status, err := sandbox.DetectStatus(ctx, mgr.Runtime(), store.InstanceName(sandboxName), mgr.Layout().SandboxDir(sandboxName))
+	status, err := sandbox.DetectStatus(ctx, mgr.Runtime(), store.InstanceName("", sandboxName), mgr.Layout().SandboxDir(sandboxName))
 	require.NoError(t, err)
 	assert.Equal(t, sandbox.StatusActive, status)
 
 	// Exec inside running VM to verify it's functional
-	result, err := mgr.Runtime().Exec(ctx, store.InstanceName(sandboxName), []string{"echo", "vm-test"}, "admin")
+	result, err := mgr.Runtime().Exec(ctx, store.InstanceName("", sandboxName), []string{"echo", "vm-test"}, "admin")
 	require.NoError(t, err)
 	assert.Equal(t, "vm-test", result.Stdout)
 	assert.Equal(t, 0, result.ExitCode)
 
 	// Verify git is functional inside VM work directory
-	result, err = mgr.Runtime().Exec(ctx, store.InstanceName(sandboxName),
+	result, err = mgr.Runtime().Exec(ctx, store.InstanceName("", sandboxName),
 		[]string{"git", "-C", vmLocalPath, "status", "--short"}, "admin")
 	require.NoError(t, err)
 	assert.Empty(t, result.Stdout, "work dir should be clean after setup")
@@ -128,12 +128,12 @@ func TestIntegrationTart_FullLifecycle(t *testing.T) {
 	// Modify a file inside the VM (simulating agent work)
 	modifyCmd := []string{"bash", "-c",
 		"cd " + vmLocalPath + " && echo 'package main\n\nimport \"fmt\"\n\nfunc main() { fmt.Println(\"modified\") }' > main.go"}
-	result, err = mgr.Runtime().Exec(ctx, store.InstanceName(sandboxName), modifyCmd, "admin")
+	result, err = mgr.Runtime().Exec(ctx, store.InstanceName("", sandboxName), modifyCmd, "admin")
 	require.NoError(t, err)
 	assert.Equal(t, 0, result.ExitCode)
 
 	// Verify git detects the change
-	result, err = mgr.Runtime().Exec(ctx, store.InstanceName(sandboxName),
+	result, err = mgr.Runtime().Exec(ctx, store.InstanceName("", sandboxName),
 		[]string{"git", "-C", vmLocalPath, "status", "--short"}, "admin")
 	require.NoError(t, err)
 	assert.Contains(t, result.Stdout, "main.go", "git should detect modified file")
@@ -166,7 +166,7 @@ func TestIntegrationTart_FullLifecycle(t *testing.T) {
 	// Stop VM: suspends the VM, freeing the quota slot.
 	require.NoError(t, stopSandbox(ctx, mgr, sandboxName))
 
-	status, err = sandbox.DetectStatus(ctx, mgr.Runtime(), store.InstanceName(sandboxName), mgr.Layout().SandboxDir(sandboxName))
+	status, err = sandbox.DetectStatus(ctx, mgr.Runtime(), store.InstanceName("", sandboxName), mgr.Layout().SandboxDir(sandboxName))
 	require.NoError(t, err)
 	assert.Equal(t, sandbox.StatusSuspended, status)
 
@@ -175,15 +175,15 @@ func TestIntegrationTart_FullLifecycle(t *testing.T) {
 	// lifecycle falls back to destroy + recreate from staging. VM is fresh on start.
 	_, startErr := startSandbox(ctx, mgr, sandboxName, sandbox.StartOptions{})
 	require.NoError(t, startErr)
-	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName(sandboxName), 90*time.Second)
+	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName("", sandboxName), 90*time.Second)
 
-	status, err = sandbox.DetectStatus(ctx, mgr.Runtime(), store.InstanceName(sandboxName), mgr.Layout().SandboxDir(sandboxName))
+	status, err = sandbox.DetectStatus(ctx, mgr.Runtime(), store.InstanceName("", sandboxName), mgr.Layout().SandboxDir(sandboxName))
 	require.NoError(t, err)
 	assert.True(t, status == sandbox.StatusIdle || status == sandbox.StatusActive,
 		"VM should be running after start, got %s", status)
 
 	// Reload vmLocalPath for the recreated VM (same path, but VM is fresh)
-	result, err = mgr.Runtime().Exec(ctx, store.InstanceName(sandboxName),
+	result, err = mgr.Runtime().Exec(ctx, store.InstanceName("", sandboxName),
 		[]string{"git", "-C", vmLocalPath, "status", "--short"}, "admin")
 	require.NoError(t, err)
 	assert.Empty(t, result.Stdout, "work dir should be clean after recreate from staging")
@@ -193,10 +193,10 @@ func TestIntegrationTart_FullLifecycle(t *testing.T) {
 	require.NoError(t, resetErr)
 
 	// Wait for VM to be active again after reset
-	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName(sandboxName), 90*time.Second)
+	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName("", sandboxName), 90*time.Second)
 
 	// Verify work directory is clean after reset
-	result, err = mgr.Runtime().Exec(ctx, store.InstanceName(sandboxName),
+	result, err = mgr.Runtime().Exec(ctx, store.InstanceName("", sandboxName),
 		[]string{"git", "-C", vmLocalPath, "status", "--short"}, "admin")
 	require.NoError(t, err)
 	assert.Empty(t, result.Stdout, "work dir should be clean after reset")
@@ -207,7 +207,7 @@ func TestIntegrationTart_FullLifecycle(t *testing.T) {
 	assert.NoDirExists(t, sandboxDir)
 
 	// VM should be gone
-	status, err = sandbox.DetectStatus(ctx, mgr.Runtime(), store.InstanceName(sandboxName), mgr.Layout().SandboxDir(sandboxName))
+	status, err = sandbox.DetectStatus(ctx, mgr.Runtime(), store.InstanceName("", sandboxName), mgr.Layout().SandboxDir(sandboxName))
 	require.NoError(t, err)
 	assert.Equal(t, sandbox.StatusRemoved, status)
 }
@@ -242,7 +242,7 @@ func TestIntegrationTart_MultipleAuxDirs(t *testing.T) {
 	t.Cleanup(func() { destroySandbox(ctx, mgr, sandboxName) }) //nolint:errcheck // test cleanup
 
 	// Wait for VM to become active
-	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName(sandboxName), 90*time.Second)
+	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName("", sandboxName), 90*time.Second)
 
 	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir(sandboxName))
 	require.NoError(t, err)
@@ -254,7 +254,7 @@ func TestIntegrationTart_MultipleAuxDirs(t *testing.T) {
 		assert.Empty(t, dir.BaselineSHA, "aux dir %d should have no baseline (rw)", i)
 
 		// Verify aux directory is accessible in VM
-		result, err := mgr.Runtime().Exec(ctx, store.InstanceName(sandboxName),
+		result, err := mgr.Runtime().Exec(ctx, store.InstanceName("", sandboxName),
 			[]string{"test", "-f", filepath.Join(dir.MountPath, "data.txt")}, "admin")
 		require.NoError(t, err)
 		assert.Equal(t, 0, result.ExitCode, "aux dir %d should be accessible in VM", i)
@@ -265,7 +265,7 @@ func TestIntegrationTart_MultipleAuxDirs(t *testing.T) {
 	for i, dir := range meta.Directories {
 		modifyCmd := []string{"bash", "-c",
 			"echo 'modified' >> " + filepath.Join(dir.MountPath, "data.txt")}
-		result, err := mgr.Runtime().Exec(ctx, store.InstanceName(sandboxName), modifyCmd, "admin")
+		result, err := mgr.Runtime().Exec(ctx, store.InstanceName("", sandboxName), modifyCmd, "admin")
 		require.NoError(t, err)
 		assert.Equal(t, 0, result.ExitCode, "should modify aux dir %d", i)
 	}
@@ -290,7 +290,7 @@ func TestIntegrationTart_GitCorruption(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { destroySandbox(ctx, mgr, sandboxName) }) //nolint:errcheck // test cleanup
 
-	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName(sandboxName), 90*time.Second)
+	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName("", sandboxName), 90*time.Second)
 
 	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir(sandboxName))
 	require.NoError(t, err)
@@ -299,14 +299,14 @@ func TestIntegrationTart_GitCorruption(t *testing.T) {
 	// Run git status/diff multiple times to detect corruption
 	for i := 0; i < 10; i++ {
 		// git status
-		result, err := mgr.Runtime().Exec(ctx, store.InstanceName(sandboxName),
+		result, err := mgr.Runtime().Exec(ctx, store.InstanceName("", sandboxName),
 			[]string{"git", "-C", vmLocalPath, "status"}, "admin")
 		require.NoError(t, err, "git status iteration %d", i)
 		assert.Equal(t, 0, result.ExitCode, "git status should succeed iteration %d", i)
 		assert.NotContains(t, result.Stdout, "corrupt", "git should not detect corruption iteration %d", i)
 
 		// git diff
-		result, err = mgr.Runtime().Exec(ctx, store.InstanceName(sandboxName),
+		result, err = mgr.Runtime().Exec(ctx, store.InstanceName("", sandboxName),
 			[]string{"git", "-C", vmLocalPath, "diff"}, "admin")
 		require.NoError(t, err, "git diff iteration %d", i)
 		assert.Equal(t, 0, result.ExitCode, "git diff should succeed iteration %d", i)
@@ -315,10 +315,10 @@ func TestIntegrationTart_GitCorruption(t *testing.T) {
 	// Reset and verify git still works
 	_, resetErr := resetSandbox(ctx, mgr, sandbox.ResetOptions{Name: sandboxName})
 	require.NoError(t, resetErr)
-	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName(sandboxName), 90*time.Second)
+	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName("", sandboxName), 90*time.Second)
 
 	// Verify git operations work after reset
-	result, err := mgr.Runtime().Exec(ctx, store.InstanceName(sandboxName),
+	result, err := mgr.Runtime().Exec(ctx, store.InstanceName("", sandboxName),
 		[]string{"git", "-C", vmLocalPath, "status"}, "admin")
 	require.NoError(t, err)
 	assert.Equal(t, 0, result.ExitCode)
@@ -327,7 +327,7 @@ func TestIntegrationTart_GitCorruption(t *testing.T) {
 	// Run diff/apply cycle after reset
 	modifyCmd := []string{"bash", "-c",
 		"cd " + vmLocalPath + " && echo 'new content' > test.txt && git add test.txt"}
-	result, err = mgr.Runtime().Exec(ctx, store.InstanceName(sandboxName), modifyCmd, "admin")
+	result, err = mgr.Runtime().Exec(ctx, store.InstanceName("", sandboxName), modifyCmd, "admin")
 	require.NoError(t, err)
 	assert.Equal(t, 0, result.ExitCode)
 
@@ -369,21 +369,21 @@ func TestIntegrationTart_VMLocalStorageVerification(t *testing.T) {
 	// Start VM and verify directory exists on local storage
 	_, startErr := startSandbox(ctx, mgr, sandboxName, sandbox.StartOptions{})
 	require.NoError(t, startErr)
-	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName(sandboxName), 90*time.Second)
+	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName("", sandboxName), 90*time.Second)
 
 	// Reload meta — Start() populates BaselineSHA (VM work dir setup runs inside VM)
 	meta, err = store.LoadEnvironment(mgr.Layout().SandboxDir(sandboxName))
 	require.NoError(t, err)
 
 	// Check that work directory is a real directory (not a symlink to VirtioFS)
-	result, err := mgr.Runtime().Exec(ctx, store.InstanceName(sandboxName),
+	result, err := mgr.Runtime().Exec(ctx, store.InstanceName("", sandboxName),
 		[]string{"test", "-d", meta.Workdir.MountPath}, "admin")
 	require.NoError(t, err)
 	assert.Equal(t, 0, result.ExitCode, "work dir should exist on VM")
 
 	// Verify it's not a symlink. test -L exits 1 when path is not a symlink,
 	// so err is an *ExecError here — use the exit code directly.
-	result, _ = mgr.Runtime().Exec(ctx, store.InstanceName(sandboxName),
+	result, _ = mgr.Runtime().Exec(ctx, store.InstanceName("", sandboxName),
 		[]string{"test", "-L", meta.Workdir.MountPath}, "admin")
 	assert.NotEqual(t, 0, result.ExitCode, "work dir should not be a symlink")
 
@@ -391,7 +391,7 @@ func TestIntegrationTart_VMLocalStorageVerification(t *testing.T) {
 	assert.NotEmpty(t, meta.Workdir.BaselineSHA, "baseline SHA should be set after VM setup")
 
 	// Verify the baseline commit exists in git history
-	result, err = mgr.Runtime().Exec(ctx, store.InstanceName(sandboxName),
+	result, err = mgr.Runtime().Exec(ctx, store.InstanceName("", sandboxName),
 		[]string{"git", "-C", meta.Workdir.MountPath, "log", "--oneline"}, "admin")
 	require.NoError(t, err)
 	assert.Contains(t, result.Stdout, "baseline", "git history should contain baseline commit")

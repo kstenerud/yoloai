@@ -68,7 +68,7 @@ func LaunchContainer(ctx context.Context, d state.Deps, st *state.State) error {
 // a temporary directory that the caller will remove after this call returns.
 // Extracted from launchContainer().
 func buildAndStart(ctx context.Context, rt runtime.Runtime, st *state.State, mnts []runtime.MountSpec, ports []runtime.PortMapping, hasSecrets bool) error {
-	cname := store.InstanceName(st.Name)
+	cname := store.InstanceName(st.Layout.Principal, st.Name)
 	instanceCfg, err := buildInstanceConfig(rt.Descriptor(), st, mnts, ports)
 	if err != nil {
 		return err
@@ -107,7 +107,7 @@ func buildAndStart(ctx context.Context, rt runtime.Runtime, st *state.State, mnt
 
 // buildInstanceConfig constructs the runtime.InstanceConfig from sandbox state.
 func buildInstanceConfig(desc runtime.BackendDescriptor, st *state.State, mnts []runtime.MountSpec, ports []runtime.PortMapping) (runtime.InstanceConfig, error) {
-	cname := store.InstanceName(st.Name)
+	cname := store.InstanceName(st.Layout.Principal, st.Name)
 	caps := desc.Capabilities
 
 	if st.NetworkMode == "isolated" {

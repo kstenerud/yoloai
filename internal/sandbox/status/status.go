@@ -164,7 +164,7 @@ func ContainerUser(meta *store.Environment, hostUID int) string {
 // hostUID is layout.HostUID at the boundary (F31); it precedes cmd so
 // multi-line cmd literals at call sites stay readable.
 func ExecInContainer(ctx context.Context, rt runtime.Runtime, sandboxName string, meta *store.Environment, hostUID int, cmd []string) (string, error) {
-	result, err := rt.Exec(ctx, store.InstanceName(sandboxName), cmd, ContainerUser(meta, hostUID))
+	result, err := rt.Exec(ctx, store.InstanceName(meta.Principal, sandboxName), cmd, ContainerUser(meta, hostUID))
 	if err != nil {
 		return "", err
 	}
@@ -294,7 +294,7 @@ func InspectSandbox(ctx context.Context, layout config.Layout, rt runtime.Runtim
 		return nil, fmt.Errorf("load metadata: %w", err)
 	}
 
-	status, err := DetectStatus(ctx, rt, store.InstanceName(name), sandboxDir)
+	status, err := DetectStatus(ctx, rt, store.InstanceName(layout.Principal, name), sandboxDir)
 	if err != nil {
 		return nil, err
 	}
@@ -389,7 +389,7 @@ func InspectSandboxWithBackend(ctx context.Context, layout config.Layout, rt run
 	}
 
 	// Runtime available - perform full inspection
-	status, err := DetectStatus(ctx, rt, store.InstanceName(name), sandboxDir)
+	status, err := DetectStatus(ctx, rt, store.InstanceName(layout.Principal, name), sandboxDir)
 	if err != nil {
 		return nil, err
 	}

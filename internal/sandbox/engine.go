@@ -196,7 +196,7 @@ func (m *Engine) Runtime() runtime.Runtime { return m.runtime }
 
 // Status returns the current lifecycle status of a sandbox.
 func (m *Engine) Status(ctx context.Context, name string) (Status, error) {
-	return DetectStatus(ctx, m.runtime, store.InstanceName(name), m.layout.SandboxDir(name))
+	return DetectStatus(ctx, m.runtime, store.InstanceName(m.layout.Principal, name), m.layout.SandboxDir(name))
 }
 
 // SandboxFiles returns the path to the per-sandbox file exchange directory.
@@ -226,7 +226,7 @@ func (m *Engine) SendInput(ctx context.Context, name string, text string) error 
 	}
 	defer unlock()
 
-	containerName := store.InstanceName(name)
+	containerName := store.InstanceName(m.layout.Principal, name)
 	_, err = m.runtime.Exec(ctx, containerName,
 		[]string{"tmux", "send-keys", "-t", "main", text, "Enter"},
 		"yoloai",

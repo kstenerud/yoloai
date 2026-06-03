@@ -29,14 +29,14 @@ func ExecuteVMWorkDirSetup(ctx context.Context, rt runtime.Runtime, name, sandbo
 
 	cmds := setupIntf.SetupWorkDirInVM(vfsPath, vmLocalPath)
 	for _, cmd := range cmds {
-		_, err := rt.Exec(ctx, store.InstanceName(name), []string{"bash", "-c", cmd}, "admin")
+		_, err := rt.Exec(ctx, store.InstanceName(meta.Principal, name), []string{"bash", "-c", cmd}, "admin")
 		if err != nil {
 			return fmt.Errorf("setup work dir in VM: %w", err)
 		}
 	}
 
 	// Retrieve baseline SHA
-	result, err := rt.Exec(ctx, store.InstanceName(name),
+	result, err := rt.Exec(ctx, store.InstanceName(meta.Principal, name),
 		[]string{"git", "-C", vmLocalPath, "rev-parse", "HEAD"}, "admin")
 	if err != nil {
 		return fmt.Errorf("get baseline SHA: %w", err)

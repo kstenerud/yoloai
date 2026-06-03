@@ -945,7 +945,7 @@ func (s *SystemClient) classifySandboxes() (known []string, broken []classifiedS
 		path := filepath.Join(dir, name)
 
 		if _, loadErr := store.LoadEnvironment(path); loadErr == nil {
-			known = append(known, store.InstanceName(name))
+			known = append(known, store.InstanceName(s.layout.Principal, name))
 			continue
 		} else {
 			state, detail := sandbox.ProbeWorkData(path)

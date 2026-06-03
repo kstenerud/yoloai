@@ -26,7 +26,7 @@ import (
 // (F6: previously called execInSandbox). hostUID is layout.HostUID
 // at the boundary (F31).
 func execInSandbox(ctx context.Context, rt runtime.Runtime, name string, meta *store.Environment, hostUID int, cmd []string) (string, error) {
-	result, err := rt.Exec(ctx, store.InstanceName(name), cmd, store.ContainerUser(meta, hostUID))
+	result, err := rt.Exec(ctx, store.InstanceName(meta.Principal, name), cmd, store.ContainerUser(meta, hostUID))
 	if err != nil {
 		return "", err
 	}

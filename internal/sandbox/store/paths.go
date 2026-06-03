@@ -115,9 +115,16 @@ func ValidateName(name string) error {
 	return err
 }
 
-// InstanceName returns the runtime instance name for a sandbox.
-func InstanceName(name string) string {
-	return "yoloai-" + name
+// InstanceName returns the runtime instance name (container id) for a sandbox
+// owned by the given principal. The default (empty) principal elides, yielding
+// the historical "yoloai-<name>"; a non-empty principal namespaces the id as
+// "yoloai-<principal>-<name>" so two principals' same-named sandboxes never
+// collide on the runtime backend. See D62.
+func InstanceName(principal config.PrincipalSegment, name string) string {
+	if principal == "" {
+		return "yoloai-" + name
+	}
+	return "yoloai-" + string(principal) + "-" + name
 }
 
 // Per-sandbox subdirectory helpers. Each takes a sandboxDir (typically

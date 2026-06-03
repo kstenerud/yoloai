@@ -263,7 +263,8 @@ func TestWorkDir(t *testing.T) {
 }
 
 func TestInstanceName(t *testing.T) {
-	assert.Equal(t, "yoloai-mybox", InstanceName("mybox"))
+	assert.Equal(t, "yoloai-mybox", InstanceName("", "mybox"))
+	assert.Equal(t, "yoloai-acme-mybox", InstanceName("acme", "mybox"))
 }
 
 func TestOverlayUpperDir(t *testing.T) {

@@ -30,8 +30,8 @@ func stop(ctx context.Context, d state.Deps, name string) error {
 	if err := store.RequireSandboxDir(d.Layout.SandboxDir(name)); err != nil {
 		return err
 	}
-	slog.Info("stopping sandbox", "event", "sandbox.stop", "container", store.InstanceName(name))
-	return d.Runtime.Stop(ctx, store.InstanceName(name))
+	slog.Info("stopping sandbox", "event", "sandbox.stop", "container", store.InstanceName(d.Layout.Principal, name))
+	return d.Runtime.Stop(ctx, store.InstanceName(d.Layout.Principal, name))
 }
 
 // Destroy stops the container, removes it, and deletes the sandbox directory.

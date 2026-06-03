@@ -73,6 +73,32 @@ func TestMeta_OmitEmptyFields(t *testing.T) {
 	assert.NotContains(t, raw, "model")
 	assert.NotContains(t, raw, "network_mode")
 	assert.NotContains(t, raw, "ports")
+	// Default (no-principal) sandboxes omit the field, so existing
+	// environment.json files load as the default principal unchanged.
+	assert.NotContains(t, raw, "principal")
+}
+
+func TestMeta_PrincipalRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+
+	original := &Environment{
+		YoloaiVersion: "1.0.0",
+		Name:          "tenant-box",
+		Principal:     "acme",
+		CreatedAt:     time.Date(2026, 6, 3, 12, 0, 0, 0, time.UTC),
+		Agent:         "claude",
+		Workdir: WorkdirEnvironment{
+			HostPath:  "/home/user/app",
+			MountPath: "/home/user/app",
+			Mode:      "copy",
+		},
+	}
+
+	require.NoError(t, SaveEnvironment(dir, original))
+
+	loaded, err := LoadEnvironment(dir)
+	require.NoError(t, err)
+	assert.Equal(t, config.PrincipalSegment("acme"), loaded.Principal)
 }
 
 func TestMeta_WithPortsAndNetwork(t *testing.T) {
