@@ -1,4 +1,4 @@
-// ABOUTME: Tests for SystemClient.Profiles() sub-handle: Create / List / Info /
+// ABOUTME: Tests for System.Profiles() sub-handle: Create / List / Info /
 // ABOUTME: Delete / ReferencingSandboxes. Filesystem-backed; uses t.TempDir.
 
 package yoloai
@@ -17,17 +17,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// newTestClient returns a SystemClient bound to a temp DataDir.
+// newTestClient returns a System bound to a temp DataDir.
 // Layout points at t.TempDir/.yoloai so each subtest gets a clean
 // state without touching the real user home.
-func newTestClient(t *testing.T) *SystemClient {
+func newTestClient(t *testing.T) *System {
 	t.Helper()
 	root := t.TempDir()
 	dataDir := filepath.Join(root, ".yoloai")
 	require.NoError(t, os.MkdirAll(dataDir, 0750))
-	sc, err := NewSystemClient(SystemOptions{DataDir: dataDir, HomeDir: root})
+	c, err := NewWithOptions(context.Background(), Options{DataDir: dataDir, HomeDir: root})
 	require.NoError(t, err)
-	return sc
+	return c.System()
 }
 
 // --- Create ---

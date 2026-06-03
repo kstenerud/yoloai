@@ -56,7 +56,7 @@ func runSandboxBugReport(cmd *cobra.Command, name string, reportType string) err
 
 	// Sections 3-5: System, Backends, VM slots, Configuration — gathered as a
 	// structured snapshot by the library and rendered here.
-	bugreport.WriteDiagnostics(f, cliutil.NewSystemClient().Diagnostics(cmd.Context()), reportType)
+	bugreport.WriteDiagnostics(f, cliutil.System().Diagnostics(cmd.Context()), reportType)
 
 	// Sections 6-12: Sandbox-specific
 	backend := cliutil.ResolveBackendForSandbox(name)

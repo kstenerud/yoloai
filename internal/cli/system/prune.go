@@ -62,7 +62,7 @@ func runSystemPrune(cmd *cobra.Command, dryRun, explicitYes, images bool) error 
 	skipPruneConfirm := cliutil.EffectiveYes(cmd)
 
 	// First, a dry-run scan to find what's there.
-	scanResult, err := cliutil.NewSystemClient().Prune(ctx, yoloai.PruneOptions{
+	scanResult, err := cliutil.System().Prune(ctx, yoloai.PruneOptions{
 		DryRun:           true,
 		IncludeBaseImage: images,
 		Output:           output,
@@ -86,7 +86,7 @@ func runSystemPrune(cmd *cobra.Command, dryRun, explicitYes, images bool) error 
 	}
 
 	// Actual removal. The library does the work; we just report.
-	actualResult, err := cliutil.NewSystemClient().Prune(ctx, yoloai.PruneOptions{
+	actualResult, err := cliutil.System().Prune(ctx, yoloai.PruneOptions{
 		DryRun:           false,
 		IncludeBaseImage: images,
 		Output:           output,
@@ -277,7 +277,7 @@ func maybeEmptyTrash(cmd *cobra.Command, ctx context.Context, trash yoloai.Trash
 		}
 	}
 
-	removed, freed, err := cliutil.NewSystemClient().EmptyTrash()
+	removed, freed, err := cliutil.System().EmptyTrash()
 	if err != nil {
 		return err
 	}

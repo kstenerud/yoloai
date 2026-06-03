@@ -17,7 +17,7 @@ const EnvSandboxName = "YOLOAI_SANDBOX"
 // resolve a name outside ResolveName (e.g. files' subcommand-first dispatch)
 // call this instead of reaching into the store package directly.
 func ValidateName(name string) error {
-	return NewSystemClient().ValidateSandboxName(name)
+	return System().ValidateSandboxName(name)
 }
 
 // ResolveName extracts the sandbox name from positional args, falling back

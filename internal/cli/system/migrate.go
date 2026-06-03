@@ -33,7 +33,7 @@ is skipped).`,
 }
 
 func runSystemMigrate(cmd *cobra.Command) error {
-	sys := cliutil.NewSystemClient()
+	sys := cliutil.System()
 
 	cliSt, err := cliutil.CLIStatus()
 	if err != nil {

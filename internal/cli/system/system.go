@@ -33,7 +33,7 @@ func NewCmd(version, commit, date string) *cobra.Command {
 		newSystemMigrateCmd(),
 		newSystemPruneCmd(),
 		newSystemSetupCmd(),
-		tart.NewCmd(cliutil.NewSystemClient),
+		tart.NewCmd(cliutil.System),
 		newCompletionCmd(),
 	)
 
@@ -99,7 +99,7 @@ func runSystemBuild(cmd *cobra.Command, args []string, backend yoloai.BackendNam
 		Secrets: secrets,
 		Output:  buildOutputFor(cmd),
 	}
-	if err := cliutil.NewSystemClient().Build(cmd.Context(), opts); err != nil {
+	if err := cliutil.System().Build(cmd.Context(), opts); err != nil {
 		return err
 	}
 	return reportBuildOK(cmd, profile)
@@ -180,8 +180,8 @@ func runSystemBuildAll(cmd *cobra.Command, args []string) error {
 		Secrets:     secrets,
 		Output:      buildOutputFor(cmd),
 	}
-	if err := cliutil.NewSystemClient().Build(cmd.Context(), opts); err != nil {
-		// SystemClient.Build returns "no available backends to build
+	if err := cliutil.System().Build(cmd.Context(), opts); err != nil {
+		// System.Build returns "no available backends to build
 		// for" — preserve the original CLI behavior of printing the
 		// message and exiting 0 in that case.
 		if err.Error() == "no available backends to build for" {

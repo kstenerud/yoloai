@@ -1,9 +1,9 @@
 // ABOUTME: `yoloai system tart` commands for managing Apple simulator runtime base images.
 // ABOUTME: Pre-create, list, and remove runtime bases (iOS, tvOS, watchOS, visionOS).
 //
-// This package is pure presentation over the public yoloai.SystemClient
+// This package is pure presentation over the public yoloai.System
 // TartBases admin handle: it parses flags, prompts, and formats output, but
-// performs no runtime work itself. The cli root injects a SystemClient factory
+// performs no runtime work itself. The cli root injects a System factory
 // via NewCmd so this package depends only on the public yoloai surface (no
 // internal/runtime, internal/runtime/tart, or internal/cli imports).
 package tart
@@ -21,18 +21,18 @@ import (
 )
 
 // pkgClient is set by NewCmd at command-tree construction time. It returns the
-// cli root's public SystemClient so this subpackage never imports internal/cli
+// cli root's public System so this subpackage never imports internal/cli
 // back (which would create a cycle). Subcommand handlers read it at invocation.
-var pkgClient func() *yoloai.SystemClient
+var pkgClient func() *yoloai.System
 
 // NewCmd defines `yoloai system tart` (formerly `yoloai system runtime`).
 // The old `runtime` name remains a hidden alias that emits a deprecation warning.
 //
-// clientFn injects the cli root's public SystemClient factory so this
+// clientFn injects the cli root's public System factory so this
 // subpackage doesn't need to import internal/cli back (which would create a
 // cycle). NewCmd stores it in a package-level var; subcommand RunE handlers
 // read that var at invocation time.
-func NewCmd(clientFn func() *yoloai.SystemClient) *cobra.Command {
+func NewCmd(clientFn func() *yoloai.System) *cobra.Command {
 	pkgClient = clientFn
 	cmd := &cobra.Command{
 		Use:     "tart",

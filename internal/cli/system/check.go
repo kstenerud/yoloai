@@ -46,7 +46,7 @@ func runSystemCheck(cmd *cobra.Command, backend yoloai.BackendName, agentName, i
 		agentName = cliutil.ResolveAgent(cmd)
 	}
 
-	results, err := cliutil.NewSystemClient().Check(cmd.Context(), yoloai.CheckOptions{
+	results, err := cliutil.System().Check(cmd.Context(), yoloai.CheckOptions{
 		Backend:   yoloai.BackendName(backend),
 		Agent:     yoloai.AgentName(agentName),
 		Isolation: yoloai.IsolationMode(isolation),

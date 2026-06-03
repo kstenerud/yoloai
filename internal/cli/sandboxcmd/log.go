@@ -1,7 +1,7 @@
 package sandboxcmd
 
 // ABOUTME: Sandbox log display: pretty-prints the structured JSONL frames the
-// ABOUTME: library's activity stream (SystemClient.Logs) delivers, with optional
+// ABOUTME: library's activity stream (System.Logs) delivers, with optional
 // ABOUTME: follow, level/source/since filtering, raw passthrough, and agent output.
 
 import (

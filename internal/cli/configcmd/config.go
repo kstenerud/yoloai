@@ -1,7 +1,7 @@
 package configcmd
 
 // ABOUTME: CLI commands for reading and writing yoloai configuration settings.
-// ABOUTME: Routes through yoloai.SystemClient.Config(); rendering only lives here.
+// ABOUTME: Routes through yoloai.System.Config(); rendering only lives here.
 
 import (
 	"errors"
@@ -57,7 +57,7 @@ func runConfigGet(cmd *cobra.Command, args []string) error {
 
 // configGetAll prints all effective configuration values.
 func configGetAll(cmd *cobra.Command) error {
-	out, err := cliutil.NewSystemClient().Config().Effective(cmd.Context())
+	out, err := cliutil.System().Config().Effective(cmd.Context())
 	if err != nil {
 		return err
 	}
@@ -79,7 +79,7 @@ func configGetAll(cmd *cobra.Command) error {
 // loud error in --json mode so machine-readable callers always get
 // structured failure.
 func configGetKey(cmd *cobra.Command, key string) error {
-	value, err := cliutil.NewSystemClient().Config().Get(cmd.Context(), key)
+	value, err := cliutil.System().Config().Get(cmd.Context(), key)
 	if err != nil {
 		if errors.Is(err, yoloai.ErrConfigKeyNotFound) {
 			if cliutil.JSONEnabled(cmd) {
@@ -119,7 +119,7 @@ Default settings are stored in ~/.yoloai/defaults/config.yaml.`,
 // runConfigSet implements the config set command body.
 func runConfigSet(cmd *cobra.Command, args []string) error {
 	key, value := args[0], args[1]
-	if err := cliutil.NewSystemClient().Config().Set(cmd.Context(), key, value); err != nil {
+	if err := cliutil.System().Config().Set(cmd.Context(), key, value); err != nil {
 		return err
 	}
 	if cliutil.JSONEnabled(cmd) {
@@ -145,7 +145,7 @@ Global settings (tmux_conf, model_aliases) are stored in ~/.yoloai/config.yaml.
 Default settings are stored in ~/.yoloai/defaults/config.yaml.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := cliutil.NewSystemClient().Config().Reset(cmd.Context(), args[0]); err != nil {
+			if err := cliutil.System().Config().Reset(cmd.Context(), args[0]); err != nil {
 				return err
 			}
 			if cliutil.JSONEnabled(cmd) {

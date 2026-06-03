@@ -50,7 +50,7 @@ func runMigrationGate(cmd *cobra.Command) error {
 		if err := cliutil.CreateFreshCLI(); err != nil {
 			return fmt.Errorf("initialize cli data dir: %w", err)
 		}
-		if err := cliutil.NewSystemClient().CreateFresh(); err != nil {
+		if err := cliutil.System().CreateFresh(); err != nil {
 			return fmt.Errorf("initialize library data dir: %w", err)
 		}
 		return nil
@@ -60,7 +60,7 @@ func runMigrationGate(cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
-	libSt, err := cliutil.NewSystemClient().DataDirStatus()
+	libSt, err := cliutil.System().DataDirStatus()
 	if err != nil {
 		return err
 	}

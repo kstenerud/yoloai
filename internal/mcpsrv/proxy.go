@@ -169,7 +169,7 @@ func (p *ProxyServer) createSandbox(ctx context.Context) (*yoloai.Environment, e
 //	{dir:N}    — meta.Directories[N].MountPath (Nth auxiliary directory, 0-indexed)
 //
 // hostFilesDir/hostCacheDir are the on-host file-exchange and cache
-// directories (from SystemClient.FilesDir/CacheDir). They are used only when
+// directories (from System.FilesDir/CacheDir). They are used only when
 // meta.HostFilesystem is true; for container backends the fixed in-container
 // paths are used instead and these arguments are ignored.
 func expandCmd(cmd []string, hostFilesDir, hostCacheDir string, meta *yoloai.Environment) ([]string, error) {

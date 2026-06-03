@@ -1,4 +1,4 @@
-// ABOUTME: SystemClient.Profiles() sub-handle: profile create/list/info/delete
+// ABOUTME: System.Profiles() sub-handle: profile create/list/info/delete
 // ABOUTME: as library orchestration; CLI consumes the typed results.
 
 package yoloai
@@ -47,18 +47,18 @@ const profileScaffold = `# agent: claude
 #     mount: /usr/local/lib/shared
 `
 
-// ProfileAdmin is the SystemClient sub-handle for profile-management
+// ProfileAdmin is the System sub-handle for profile-management
 // operations (`yoloai profile create/list/info/delete`).
 type ProfileAdmin struct {
-	s *SystemClient
+	s *System
 }
 
 // Profiles returns the profile-management sub-handle.
 //
 // Q-W resolution (Shape B, sub-handles): profile admin is grouped
-// behind one accessor so the SystemClient root stays uncluttered as
+// behind one accessor so the System root stays uncluttered as
 // admin verbs grow. Mirrors the same pattern Config() uses.
-func (s *SystemClient) Profiles() *ProfileAdmin {
+func (s *System) Profiles() *ProfileAdmin {
 	return &ProfileAdmin{s: s}
 }
 

@@ -24,7 +24,7 @@ import (
 //
 // Also writes a minimal runtime-config.json so the Allow/Deny
 // PatchConfigAllowedDomains call has a target file to patch.
-func writeIsolatedSandbox(t *testing.T, c *SystemClient, name, agentName string, allow []string) {
+func writeIsolatedSandbox(t *testing.T, c *System, name, agentName string, allow []string) {
 	t.Helper()
 	sandboxDir := c.layout.SandboxDir(name)
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
@@ -48,7 +48,7 @@ func writeIsolatedSandbox(t *testing.T, c *SystemClient, name, agentName string,
 
 // writeNoNetworkSandbox creates a sandbox dir with NetworkMode:"none"
 // — used to assert UsageError handling.
-func writeNoNetworkSandbox(t *testing.T, c *SystemClient, name string) {
+func writeNoNetworkSandbox(t *testing.T, c *System, name string) {
 	t.Helper()
 	sandboxDir := c.layout.SandboxDir(name)
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
@@ -62,9 +62,9 @@ func writeNoNetworkSandbox(t *testing.T, c *SystemClient, name string) {
 }
 
 // clientWithSandbox returns a yoloai.Client wired up against a
-// tempdir layout. SystemClient and Client share the layout so test
-// fixtures written via SystemClient appear to Client reads.
-func clientWithSandbox(t *testing.T) (*Client, *SystemClient) {
+// tempdir layout. System and Client share the layout so test
+// fixtures written via System appear to Client reads.
+func clientWithSandbox(t *testing.T) (*Client, *System) {
 	t.Helper()
 	sys := newTestClient(t)
 	// Don't construct a real backend runtime — Network.Allowed and

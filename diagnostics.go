@@ -79,7 +79,7 @@ var diagnosticEnvVars = []string{"DOCKER_HOST", "CONTAINER_HOST", "XDG_RUNTIME_D
 // probes every registered backend (constructing and closing each), reads the
 // VM-slot census, and reads both config files raw. Best-effort throughout:
 // unreadable pieces are reported as zero/empty values rather than failing.
-func (s *SystemClient) Diagnostics(ctx context.Context) Diagnostics {
+func (s *System) Diagnostics(ctx context.Context) Diagnostics {
 	return Diagnostics{
 		System:   s.systemDiagnostics(),
 		Backends: s.backendDiagnostics(ctx),
@@ -88,7 +88,7 @@ func (s *SystemClient) Diagnostics(ctx context.Context) Diagnostics {
 	}
 }
 
-func (s *SystemClient) systemDiagnostics() SystemDiagnostics {
+func (s *System) systemDiagnostics() SystemDiagnostics {
 	sys := SystemDiagnostics{
 		OS:             goruntime.GOOS,
 		Arch:           goruntime.GOARCH,
@@ -113,7 +113,7 @@ func (s *SystemClient) systemDiagnostics() SystemDiagnostics {
 	return sys
 }
 
-func (s *SystemClient) backendDiagnostics(ctx context.Context) []BackendDiagnostic {
+func (s *System) backendDiagnostics(ctx context.Context) []BackendDiagnostic {
 	descs := runtime.Descriptors()
 	out := make([]BackendDiagnostic, 0, len(descs))
 	for _, desc := range descs {
@@ -127,7 +127,7 @@ func (s *SystemClient) backendDiagnostics(ctx context.Context) []BackendDiagnost
 	return out
 }
 
-func (s *SystemClient) configDiagnostics() ConfigDiagnostics {
+func (s *System) configDiagnostics() ConfigDiagnostics {
 	cfg := ConfigDiagnostics{
 		GlobalPath:  s.layout.GlobalConfigPath(),
 		ProfilePath: s.layout.DefaultsConfigPath(),

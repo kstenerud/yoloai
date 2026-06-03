@@ -69,7 +69,7 @@ type BackendQuery struct {
 // (sorted-by-name) order. No host state is consulted. With
 // AgentQuery.RealOnly set, the internal/testing pseudo-agents (test, shell,
 // idle) are excluded.
-func (s *SystemClient) Agents(q AgentQuery) []AgentInfo {
+func (s *System) Agents(q AgentQuery) []AgentInfo {
 	names := agent.AllAgentNames()
 	if q.RealOnly {
 		names = agent.RealAgents()
@@ -85,7 +85,7 @@ func (s *SystemClient) Agents(q AgentQuery) []AgentInfo {
 // order. With BackendQuery.ProbeAvailability set, each entry's Available/Note
 // reflects whether the backend can run on this host now; otherwise only static
 // descriptor metadata is filled in.
-func (s *SystemClient) Backends(ctx context.Context, q BackendQuery) []BackendInfo {
+func (s *System) Backends(ctx context.Context, q BackendQuery) []BackendInfo {
 	descs := runtime.Descriptors()
 	out := make([]BackendInfo, 0, len(descs))
 	for _, desc := range descs {
@@ -109,7 +109,7 @@ func (s *SystemClient) Backends(ctx context.Context, q BackendQuery) []BackendIn
 // note explaining the failure when it is not. This is the single-backend
 // counterpart to Backends(ctx, BackendQuery{ProbeAvailability: true}); both use
 // the identical construct-and-close probe.
-func (s *SystemClient) CheckBackend(ctx context.Context, name BackendName) (available bool, note string) {
+func (s *System) CheckBackend(ctx context.Context, name BackendName) (available bool, note string) {
 	rt, err := newRuntime(ctx, name, s.layout)
 	if err != nil {
 		return false, err.Error()
@@ -121,7 +121,7 @@ func (s *SystemClient) CheckBackend(ctx context.Context, name BackendName) (avai
 // Archetypes returns the sorted list of valid environment-archetype names
 // yoloai ships (used to auto-shape a sandbox's setup). Static metadata; no host
 // state is consulted.
-func (s *SystemClient) Archetypes() []string {
+func (s *System) Archetypes() []string {
 	return archetype.ValidArchetypes()
 }
 

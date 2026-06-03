@@ -1,4 +1,4 @@
-// ABOUTME: SystemClient.Config() sub-handle: config get/set/reset/effective as
+// ABOUTME: System.Config() sub-handle: config get/set/reset/effective as
 // ABOUTME: library orchestration; CLI consumes the typed results.
 
 package yoloai
@@ -19,7 +19,7 @@ import (
 // profile defaults). Use errors.Is to detect.
 var ErrConfigKeyNotFound = errors.New("config key not found")
 
-// ConfigAdmin is the SystemClient sub-handle for global and
+// ConfigAdmin is the System sub-handle for global and
 // profile-default configuration values (`yoloai config get/set/reset`).
 //
 // Two storage layers, routed by config.IsGlobalKey:
@@ -29,14 +29,14 @@ var ErrConfigKeyNotFound = errors.New("config key not found")
 // Set and Reset hide this routing from callers; embedders pass a
 // dotted key and the handle picks the right file.
 type ConfigAdmin struct {
-	s *SystemClient
+	s *System
 }
 
 // Config returns the configuration-management sub-handle.
 //
 // Q-W resolution (Shape B, sub-handles): config get/set/reset
 // cluster under one accessor, matching Profiles().
-func (s *SystemClient) Config() *ConfigAdmin {
+func (s *System) Config() *ConfigAdmin {
 	return &ConfigAdmin{s: s}
 }
 

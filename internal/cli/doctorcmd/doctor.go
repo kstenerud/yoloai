@@ -135,7 +135,7 @@ Unavailable entries and advisory sections do not affect the exit code.`,
 func runDoctor(cmd *cobra.Command, backendFilter, isolationFilter string, isJSON bool) error {
 	ctx := cmd.Context()
 	out := cmd.OutOrStdout()
-	sys := cliutil.NewSystemClient()
+	sys := cliutil.System()
 
 	reports, err := sys.Doctor(ctx, yoloai.DoctorOptions{
 		BackendFilter:   backendFilter,
@@ -184,7 +184,7 @@ func doctorExitError(reports []yoloai.BackendReport, census *yoloai.VMCensus) er
 
 // dryRunPrune runs a best-effort dry-run prune. Errors are swallowed — doctor
 // is advisory; a failed probe just omits the section rather than aborting.
-func dryRunPrune(ctx context.Context, sys *yoloai.SystemClient) *yoloai.PruneResult {
+func dryRunPrune(ctx context.Context, sys *yoloai.System) *yoloai.PruneResult {
 	result, err := sys.Prune(ctx, yoloai.PruneOptions{DryRun: true})
 	if err != nil {
 		return nil
@@ -194,7 +194,7 @@ func dryRunPrune(ctx context.Context, sys *yoloai.SystemClient) *yoloai.PruneRes
 
 // cacheUsage runs a best-effort per-backend disk-usage probe. Errors are
 // swallowed for the same reason as dryRunPrune.
-func cacheUsage(ctx context.Context, sys *yoloai.SystemClient) *yoloai.DiskUsage {
+func cacheUsage(ctx context.Context, sys *yoloai.System) *yoloai.DiskUsage {
 	du, err := sys.DiskUsage(ctx)
 	if err != nil {
 		return nil

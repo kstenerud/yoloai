@@ -124,10 +124,3 @@ func TestNewWithOptions_HomeDirRequired(t *testing.T) {
 	var ue *yoerrors.UsageError
 	require.ErrorAs(t, err, &ue, "empty HomeDir must yield a *UsageError")
 }
-
-func TestNewSystemClient_HomeDirRequired(t *testing.T) {
-	_, err := NewSystemClient(SystemOptions{DataDir: t.TempDir()})
-	require.Error(t, err)
-	var ue *yoerrors.UsageError
-	require.ErrorAs(t, err, &ue, "empty HomeDir must yield a *UsageError")
-}

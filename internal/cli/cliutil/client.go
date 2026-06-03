@@ -14,7 +14,7 @@ import (
 	// blank-import block here is redundant. Keeping this package free of
 	// any internal/runtime import is what lets cli-runtime-scope fence the
 	// whole CLI off the runtime layer (tart now goes through the public
-	// SystemClient.TartBases handle, so there is no backend exemption).
+	// System.TartBases handle, so there is no backend exemption).
 	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/spf13/cobra"
@@ -153,14 +153,16 @@ func Client(cmd *cobra.Command) (*yoloai.Client, error) {
 	})
 }
 
-// NewSystemClient constructs a backend-agnostic yoloai.SystemClient from
-// the CLI's layout. Use for `yoloai system …` command handlers that
-// operate across all backends (disk, prune, build --all) or need no
-// runtime at all (info, agents). For commands tied to one backend,
-// use WithClient instead.
-func NewSystemClient() *yoloai.SystemClient {
+// System constructs a backend-agnostic yoloai.System from the CLI's layout. Use
+// for `yoloai system …` command handlers that operate across all backends (disk,
+// prune, build --all) or need no runtime at all (info, agents). For commands tied
+// to one backend, use WithClient instead.
+//
+// It builds a backend-less Client (no runtime opened) and returns its System
+// sub-handle. The caller need not Close — a backend-less Client's Close is a no-op.
+func System() *yoloai.System {
 	l := Layout()
-	sc, err := yoloai.NewSystemClient(yoloai.SystemOptions{
+	c, err := yoloai.NewWithOptions(context.Background(), yoloai.Options{
 		DataDir: l.DataDir,
 		HomeDir: l.HomeDir,
 		Env:     l.Env,
@@ -170,7 +172,7 @@ func NewSystemClient() *yoloai.SystemClient {
 		// $HOME/.yoloai fallback), so the only error path is unreachable.
 		panic(err)
 	}
-	return sc
+	return c.System()
 }
 
 // SandboxMetadata reads a sandbox's persisted read-model (environment.json)

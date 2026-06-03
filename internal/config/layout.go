@@ -126,7 +126,7 @@ func (l Layout) WithPrincipal(p PrincipalSegment) Layout {
 // $HOME/.yoloai) — the convention used by internal tests. It is NOT
 // valid for the D60-bifurcated public DataDir ($HOME/.yoloai/library,
 // whose parent is $HOME/.yoloai, not $HOME); the public boundaries
-// (yoloai.NewWithOptions / NewSystemClient) therefore require an
+// (yoloai.NewWithOptions / Client.System) therefore require an
 // explicit HomeDir and always call NewLayoutFor. Use NewLayoutFor
 // directly whenever DataDir and HomeDir differ.
 //

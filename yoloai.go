@@ -13,14 +13,14 @@
 //     Constructed via NewWithOptions; holds a single backend connection.
 //     Use one Client per backend.
 //
-//   - SystemClient — admin/cross-backend operations: DiskUsage, Prune,
+//   - System — admin/cross-backend operations: DiskUsage, Prune,
 //     Build, Check. Reached via Client.System() or constructed directly
 //     via NewSystemClient (when no backend Client is needed). Decoupled
 //     from a single backend — iterates registered backends internally.
 //
 // Following the W-L8 layering refactor, the CLI is a thin shell over
-// Client + SystemClient; orchestration logic lives here, not in
-// internal/cli. New CLI commands should call Client/SystemClient
+// Client + System; orchestration logic lives here, not in
+// internal/cli. New CLI commands should call Client/System
 // methods rather than reaching into sandbox/* or runtime/* directly.
 //
 // Typical usage:
@@ -549,7 +549,7 @@ func attachStatusOK(status sandbox.Status, name string) error {
 // library schema version. Safe to call before every sandbox operation —
 // each step is a no-op once its artifact exists. Choosing non-default values
 // (default backend/agent, tmux mode) is a separate concern handled by writing
-// config via SystemClient.Config().Set — the library has no setup-wizard verb.
+// config via System.Config().Set — the library has no setup-wizard verb.
 func (c *Client) EnsureSetup(ctx context.Context) error {
 	if err := c.ensure(ctx); err != nil {
 		return err
@@ -600,7 +600,7 @@ func IsolationAvailability(isolation IsolationMode, targetOS, hostOS string) (av
 	return runtime.IsolationAvailability(isolation, targetOS, hostOS)
 }
 
-// resolveBackendFromConfig picks a default backend for SystemClient admin
+// resolveBackendFromConfig picks a default backend for System admin
 // operations that aren't bound to a specific backend. Reads the user's
 // container_backend preference from config and routes it through
 // runtime.SelectBackend; if that backend isn't available, SelectBackend falls

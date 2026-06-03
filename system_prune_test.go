@@ -1,4 +1,4 @@
-// ABOUTME: Tests for SystemClient.Prune host-side classification (known /
+// ABOUTME: Tests for System.Prune host-side classification (known /
 // ABOUTME: never-init / corrupt-trash / data-bearing-refuse), trash quarantine,
 // ABOUTME: and EmptyTrash.
 
@@ -15,7 +15,7 @@ import (
 )
 
 // mkSandboxDir creates DataDir/sandboxes/<name>/ and returns its path.
-func mkSandboxDir(t *testing.T, c *SystemClient, name string) string {
+func mkSandboxDir(t *testing.T, c *System, name string) string {
 	t.Helper()
 	dir := c.layout.SandboxDir(name)
 	require.NoError(t, os.MkdirAll(dir, 0o750))

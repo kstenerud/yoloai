@@ -128,7 +128,7 @@ func runList(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
 
 	// Use multi-backend listing
-	infos, unavailableBackends, err := cliutil.NewSystemClient().ListAcrossBackends(ctx)
+	infos, unavailableBackends, err := cliutil.System().ListAcrossBackends(ctx)
 	if err != nil {
 		return err
 	}

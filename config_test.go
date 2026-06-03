@@ -1,4 +1,4 @@
-// ABOUTME: Tests for SystemClient.Config() sub-handle: Effective / Get / Set /
+// ABOUTME: Tests for System.Config() sub-handle: Effective / Get / Set /
 // ABOUTME: Reset. Filesystem-backed; uses t.TempDir.
 
 package yoloai

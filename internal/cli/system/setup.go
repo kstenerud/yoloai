@@ -1,6 +1,6 @@
 // ABOUTME: `yoloai system setup` — interactive setup wizard. Inspects the host
 // ABOUTME: (tmux config, available backends/agents), prompts the user, then
-// ABOUTME: writes the three answers via the public yoloai.SystemClient.Config()
+// ABOUTME: writes the three answers via the public yoloai.System.Config()
 // ABOUTME: set verb. All host-inspection / prompting / auto-pick is CLI policy.
 package system
 
@@ -49,12 +49,12 @@ type setupChoice struct {
 
 // runSystemSetup is `yoloai system setup`'s entry point. It inspects the host
 // itself, resolves each of the three answers (from a flag, an auto-pick, or an
-// interactive prompt), then persists them via SystemClient.Config().Set.
+// interactive prompt), then persists them via System.Config().Set.
 //
 // Returns nil and writes nothing if the user chooses [p] at the tmux prompt
 // (preview-then-exit, intentional).
 func runSystemSetup(cmd *cobra.Command) error {
-	sc := cliutil.NewSystemClient()
+	sc := cliutil.System()
 	ctx := cmd.Context()
 
 	reader := bufio.NewReader(cmd.InOrStdin())
@@ -104,7 +104,7 @@ func runSystemSetup(cmd *cobra.Command) error {
 // the public catalog by (a) Platforms ∋ host GOOS, (b) Architectures ∋ host
 // GOARCH (empty = any arch), (c) not isolation-target-only (containerd is
 // reached via --isolation vm, never picked directly).
-func availableBackends(ctx context.Context, sc *yoloai.SystemClient) []setupChoice {
+func availableBackends(ctx context.Context, sc *yoloai.System) []setupChoice {
 	hostOS := runtime.GOOS
 	hostArch := runtime.GOARCH
 	var opts []setupChoice
@@ -125,7 +125,7 @@ func availableBackends(ctx context.Context, sc *yoloai.SystemClient) []setupChoi
 
 // availableAgents returns the user-selectable agents (RealOnly excludes the
 // test/shell/idle pseudo-agents).
-func availableAgents(sc *yoloai.SystemClient) []setupChoice {
+func availableAgents(sc *yoloai.System) []setupChoice {
 	var opts []setupChoice
 	for _, a := range sc.Agents(yoloai.AgentQuery{RealOnly: true}) {
 		opts = append(opts, setupChoice{Name: a.Name, Blurb: a.Description})

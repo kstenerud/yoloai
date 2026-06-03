@@ -1,4 +1,4 @@
-// ABOUTME: Tests for the SystemClient discovery verbs — static agent/backend
+// ABOUTME: Tests for the System discovery verbs — static agent/backend
 // ABOUTME: catalogs and the opt-in backend availability probe.
 
 package yoloai

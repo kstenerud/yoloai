@@ -1,4 +1,4 @@
-// ABOUTME: SystemClient — admin sub-client off Client. Hosts cross-backend
+// ABOUTME: System — admin sub-handle off Client. Hosts cross-backend
 // ABOUTME: operations (disk usage, prune, build, check) that are scoped to the
 // ABOUTME: host rather than to a specific sandbox.
 package yoloai
@@ -23,10 +23,9 @@ import (
 	"github.com/kstenerud/yoloai/yoerrors"
 )
 
-// SystemClient scopes `yoloai system …` operations. Constructed via
-// Client.System() (for embedders that already have a Client; never
-// errors) or directly via NewSystemClient (for the CLI and embedders
-// that only need admin ops; returns a *UsageError on empty DataDir).
+// System scopes `yoloai system …` operations. It is a sub-handle off a
+// Client, obtained via Client.System() — always non-nil, never errors, and
+// pure namespace expansion off the Client's layout (no IO at construction).
 //
 // Decoupled from a specific backend on purpose: cross-backend
 // methods (DiskUsage, Prune, Build with AllBackends) iterate every
@@ -37,72 +36,14 @@ import (
 // Safe for concurrent use by multiple goroutines. Read-only methods
 // (DiskUsage, Check) run in parallel. Write methods (Build, Prune)
 // acquire backend-internal locks where applicable.
-type SystemClient struct {
+type System struct {
 	layout config.Layout
 }
 
-// SystemOptions configures a standalone SystemClient. It mirrors the
-// host-rooted subset of Options that admin operations need; the
-// remaining Layout fields (HostUID/HostGID/ProcessIsRoot) are derived
-// from the running process the same way Options does, so embedders
-// never name the internal config.Layout.
-type SystemOptions struct {
-	// DataDir is the root yoloai data directory; all admin paths derive
-	// from it. REQUIRED — empty is rejected with a *UsageError (same
-	// contract as Options.DataDir; no implicit $HOME fallback, §12).
-	DataDir string
-
-	// HomeDir is the host user's home directory, used wherever admin
-	// operations expand "~" or resolve seed files. REQUIRED — empty is
-	// rejected with a *UsageError (same contract as Options.HomeDir). No
-	// implicit filepath.Dir(DataDir) derivation: under the D60 bifurcation
-	// DataDir is $HOME/.yoloai/library, so its parent is not $HOME.
-	HomeDir string
-
-	// Env is a snapshot of the process environment used to expand
-	// user-declared ${VAR} references in profile/config values. Optional
-	// — a nil/empty map means any ${VAR} reference is an unset-variable
-	// error, which is fine for the baked-in defaults (they contain none).
-	// The CLI passes its single licensed os.Environ() snapshot here so
-	// user config interpolation keeps working; library code never reads
-	// the live process env (§12).
-	Env map[string]string
-
-	// Principal namespaces admin operations under an owning principal, the
-	// same contract as Options.Principal. Empty ("") is the default
-	// no-principal sentinel. Non-empty must be ≤8 alphanumeric chars (parsed
-	// at construction; invalid is rejected with a *UsageError). See D62.
-	Principal string
-}
-
-// NewSystemClient constructs a standalone SystemClient for admin
-// operations that need no backend-specific Client. Used by the CLI's
-// `system …`/`profile …`/`config …` commands and by embedders that
-// only need admin ops. Embedders that already hold a Client should
-// call Client.System() instead.
-//
-// Returns a *UsageError if opts.DataDir is empty (matching
-// NewWithOptions); otherwise never fails.
-func NewSystemClient(opts SystemOptions) (*SystemClient, error) {
-	if opts.DataDir == "" {
-		return nil, yoerrors.NewUsageError("yoloai: SystemOptions.DataDir is required (no implicit $HOME fallback; see development-principles.md §12)")
-	}
-	if opts.HomeDir == "" {
-		return nil, yoerrors.NewUsageError("yoloai: SystemOptions.HomeDir is required (no implicit filepath.Dir(DataDir) derivation; under the D60 bifurcation DataDir is $HOME/.yoloai/library, so its parent is not $HOME). Pass the host user's home explicitly; the CLI uses cliutil.Layout().HomeDir. See development-principles.md §12.")
-	}
-	principal, err := config.ParsePrincipalSegment(opts.Principal)
-	if err != nil {
-		return nil, yoerrors.NewUsageError("yoloai: invalid SystemOptions.Principal: %v", err)
-	}
-	layout := config.NewLayoutFor(opts.DataDir, opts.HomeDir).WithPrincipal(principal)
-	layout.Env = opts.Env
-	return &SystemClient{layout: layout}, nil
-}
-
-// System returns the admin sub-client for system-level operations.
-// Always non-nil; never errors. See SystemClient for the surface.
-func (c *Client) System() *SystemClient {
-	return &SystemClient{layout: c.layout}
+// System returns the admin sub-handle for system-level operations.
+// Always non-nil; never errors. See System for the surface.
+func (c *Client) System() *System {
+	return &System{layout: c.layout}
 }
 
 // LayoutStatus is the verdict of a realm status check — see DataDirStatus.
@@ -129,7 +70,7 @@ const (
 // Direct embedders that own a dedicated DataDir use this to decide between
 // CreateFresh and Migrate; the CLI's startup gate calls it as one of its two
 // realm checks.
-func (s *SystemClient) DataDirStatus() (LayoutStatus, error) {
+func (s *System) DataDirStatus() (LayoutStatus, error) {
 	return config.RealmStatus(s.layout.DataDir, config.LibrarySchemaVersion)
 }
 
@@ -137,7 +78,7 @@ func (s *SystemClient) DataDirStatus() (LayoutStatus, error) {
 // version (directory + version stamp). Call it only when DataDirStatus reports
 // LayoutFresh; operational scaffolding is still materialized lazily by the
 // engine's setup path.
-func (s *SystemClient) CreateFresh() error {
+func (s *System) CreateFresh() error {
 	return config.CreateFreshLibrary(s.layout)
 }
 
@@ -145,7 +86,7 @@ func (s *SystemClient) CreateFresh() error {
 // Idempotent: a DataDir already at the current version is a no-op. This is the
 // only entry point that mutates on-disk schema state for the library realm;
 // the engine no longer migrates as a side effect of setup.
-func (s *SystemClient) Migrate(ctx context.Context) error {
+func (s *System) Migrate(ctx context.Context) error {
 	_ = ctx
 	return config.MigrateLibrary(s.layout)
 }
@@ -181,7 +122,7 @@ type BackendDiskUsage struct {
 
 // DiskUsage returns a per-backend disk-usage snapshot plus yoloai's
 // own sandboxes-directory size. Unavailable backends are skipped.
-func (s *SystemClient) DiskUsage(ctx context.Context) (*DiskUsage, error) {
+func (s *System) DiskUsage(ctx context.Context) (*DiskUsage, error) {
 	du := &DiskUsage{
 		Sandboxes: dirSize(s.layout.SandboxesDir()),
 	}
@@ -222,7 +163,7 @@ type SystemInfo struct {
 // has sandbox state, inspecting each via its own backend. Returns the sandbox
 // infos plus the names of backends that have sandbox dirs but couldn't be
 // reached (e.g. their daemon is down) so callers can warn without failing.
-func (s *SystemClient) ListAcrossBackends(ctx context.Context) ([]*Info, []BackendName, error) {
+func (s *System) ListAcrossBackends(ctx context.Context) ([]*Info, []BackendName, error) {
 	infos, unavailable, err := sandbox.ListSandboxesMultiBackend(ctx, s.layout,
 		func(ctx context.Context, backend runtime.BackendName) (runtime.Runtime, error) {
 			return newRuntime(ctx, backend, s.layout)
@@ -240,7 +181,7 @@ func (s *SystemClient) ListAcrossBackends(ctx context.Context) ([]*Info, []Backe
 // ValidateSandboxName reports whether name is a well-formed sandbox name
 // (allowed charset, no path-traversal). It consults no host state, so a daemon
 // or CLI can pre-validate a name before any other verb is called.
-func (s *SystemClient) ValidateSandboxName(name string) error {
+func (s *System) ValidateSandboxName(name string) error {
 	return store.ValidateName(name)
 }
 
@@ -248,7 +189,7 @@ func (s *SystemClient) ValidateSandboxName(name string) error {
 // call. It never returns an error today (per-backend probe failures are
 // captured in BackendInfo.Note); the error return is kept for forward
 // compatibility, mirroring DiskUsage.
-func (s *SystemClient) Info(ctx context.Context) (*SystemInfo, error) {
+func (s *System) Info(ctx context.Context) (*SystemInfo, error) {
 	return &SystemInfo{
 		DataDir:        s.layout.YoloaiDir(),
 		SandboxesDir:   s.layout.SandboxesDir(),
@@ -282,7 +223,7 @@ type DoctorOptions struct {
 // per supported isolation mode, the host capabilities required and whether they
 // are satisfied. It detects the host environment once and constructs an
 // ephemeral runtime per backend (unavailable backends are reported, not fatal).
-func (s *SystemClient) Doctor(ctx context.Context, opts DoctorOptions) ([]BackendReport, error) {
+func (s *System) Doctor(ctx context.Context, opts DoctorOptions) ([]BackendReport, error) {
 	env := caps.DetectEnvironment()
 	reports := make([]BackendReport, 0)
 	for _, desc := range runtime.Descriptors() {
@@ -300,7 +241,7 @@ func (s *SystemClient) Doctor(ctx context.Context, opts DoctorOptions) ([]Backen
 // concurrent-VM limit (currently only tart on macOS). Returns nil when no such
 // backend is available — e.g. on Linux, or when tart can't be constructed.
 // Best-effort: a backend that errors while reporting is skipped.
-func (s *SystemClient) VMCensus(ctx context.Context) *VMCensus {
+func (s *System) VMCensus(ctx context.Context) *VMCensus {
 	for _, desc := range runtime.Descriptors() {
 		rt, err := newRuntime(ctx, desc.Name, s.layout)
 		if err != nil {
@@ -319,7 +260,7 @@ func (s *SystemClient) VMCensus(ctx context.Context) *VMCensus {
 // backendReports builds the report rows for a single backend: an init-failure
 // row if it can't be constructed, otherwise a base-mode row (unless filtered)
 // plus one row per matching supported isolation mode.
-func (s *SystemClient) backendReports(ctx context.Context, backend BackendName, env caps.Environment, isolationFilter string) []caps.BackendReport {
+func (s *System) backendReports(ctx context.Context, backend BackendName, env caps.Environment, isolationFilter string) []caps.BackendReport {
 	rt, err := newRuntime(ctx, backend, s.layout)
 	if err != nil {
 		if isolationFilter != "" {
@@ -352,7 +293,7 @@ func (s *SystemClient) backendReports(ctx context.Context, backend BackendName, 
 	return reports
 }
 
-// BuildOptions configures SystemClient.Build.
+// BuildOptions configures System.Build.
 type BuildOptions struct {
 	// Profile is the profile name to build. Empty = base image only.
 	// "base" is reserved and rejected (use Profile="" for the base image).
@@ -378,7 +319,7 @@ type BuildOptions struct {
 // (Profile != "") for one backend or all available backends. Returns
 // the first error from any backend; later backends in the iteration
 // are skipped.
-func (s *SystemClient) Build(ctx context.Context, opts BuildOptions) error {
+func (s *System) Build(ctx context.Context, opts BuildOptions) error {
 	if opts.AllBackends && opts.Backend != "" {
 		return yoerrors.NewUsageError("Backend and AllBackends are mutually exclusive")
 	}
@@ -428,7 +369,7 @@ func (s *SystemClient) Build(ctx context.Context, opts BuildOptions) error {
 
 // buildOne runs one backend's build (base or profile) using a freshly
 // constructed runtime that's closed before return.
-func (s *SystemClient) buildOne(ctx context.Context, backend BackendName, opts BuildOptions, out io.Writer) error {
+func (s *System) buildOne(ctx context.Context, backend BackendName, opts BuildOptions, out io.Writer) error {
 	rt, err := newRuntime(ctx, backend, s.layout)
 	if err != nil {
 		return err
@@ -440,7 +381,7 @@ func (s *SystemClient) buildOne(ctx context.Context, backend BackendName, opts B
 	return rt.Setup(ctx, s.layout, s.layout.ProfileDir("base"), out, slog.Default(), opts.Rebuild)
 }
 
-// CheckOptions configures SystemClient.Check.
+// CheckOptions configures System.Check.
 type CheckOptions struct {
 	// Backend is the backend to verify. Required.
 	Backend BackendName
@@ -470,7 +411,7 @@ type CheckResult struct {
 //
 // CLI: `yoloai system check`. Distinct from Doctor (full capability
 // report per backend/mode).
-func (s *SystemClient) Check(ctx context.Context, opts CheckOptions) ([]CheckResult, error) {
+func (s *System) Check(ctx context.Context, opts CheckOptions) ([]CheckResult, error) {
 	if opts.Backend == "" {
 		return nil, yoerrors.NewUsageError("Backend is required")
 	}
@@ -508,7 +449,7 @@ func (s *SystemClient) Check(ctx context.Context, opts CheckOptions) ([]CheckRes
 }
 
 // checkImage verifies the yoloai-base image is available on rt.
-func (s *SystemClient) checkImage(ctx context.Context, rt runtime.Runtime, backend string) CheckResult {
+func (s *System) checkImage(ctx context.Context, rt runtime.Runtime, backend string) CheckResult {
 	exists, err := rt.IsReady(ctx)
 	switch {
 	case err != nil:
@@ -522,7 +463,7 @@ func (s *SystemClient) checkImage(ctx context.Context, rt runtime.Runtime, backe
 // checkAgent verifies that at least one of the agent's API-key env vars is
 // present in the client's host-environment snapshot (s.layout.Env). The library
 // never reads os.Environ; credentials arrive as data via SystemOptions.Env (§12).
-func (s *SystemClient) checkAgent(name string) CheckResult {
+func (s *System) checkAgent(name string) CheckResult {
 	def := agent.GetAgent(name)
 	switch {
 	case def == nil:
@@ -549,7 +490,7 @@ func (s *SystemClient) checkAgent(name string) CheckResult {
 // checkIsolation runs the capability checks declared by the backend
 // for the requested isolation mode. Returns OK when the backend has
 // no requirements for the mode.
-func (s *SystemClient) checkIsolation(ctx context.Context, rt runtime.Runtime, isolation runtime.IsolationMode) CheckResult {
+func (s *System) checkIsolation(ctx context.Context, rt runtime.Runtime, isolation runtime.IsolationMode) CheckResult {
 	if rt == nil {
 		return CheckResult{Name: "isolation", OK: false, Message: "backend unavailable; isolation check skipped"}
 	}
@@ -565,7 +506,7 @@ func (s *SystemClient) checkIsolation(ctx context.Context, rt runtime.Runtime, i
 	return CheckResult{Name: "isolation", OK: true}
 }
 
-// PruneOptions configures SystemClient.Prune. Always operates across
+// PruneOptions configures System.Prune. Always operates across
 // every backend that's currently available — per-backend pruning was
 // dropped under Q-L as having no real-world use case.
 type PruneOptions struct {
@@ -582,7 +523,7 @@ type PruneOptions struct {
 	Output io.Writer
 }
 
-// PruneResult is what SystemClient.Prune returns.
+// PruneResult is what System.Prune returns.
 //
 //   - RemovedItems lists everything that was (or, under DryRun, would be)
 //     removed: backend resources, stale temp dirs, never-initialized
@@ -660,7 +601,7 @@ const staleTempFileAge = 1 * time.Hour
 // (build cache, volumes, dangling images); with IncludeBaseImage, also removes
 // base/profile images (forces yoloai-base to rebuild). DryRun reports what
 // would be removed without removing.
-func (s *SystemClient) Prune(ctx context.Context, opts PruneOptions) (*PruneResult, error) {
+func (s *System) Prune(ctx context.Context, opts PruneOptions) (*PruneResult, error) {
 	out := opts.Output
 	if out == nil {
 		out = io.Discard
@@ -703,7 +644,7 @@ func (s *SystemClient) Prune(ctx context.Context, opts PruneOptions) (*PruneResu
 // applyBrokenClassifications carries out (or, under dryRun, records) the
 // disposition for each broken sandbox dir: refuse-and-report, delete, or
 // quarantine to trash. Per-entry failures are logged to out, not fatal.
-func (s *SystemClient) applyBrokenClassifications(broken []classifiedSandbox, dryRun bool, out io.Writer, result *PruneResult) {
+func (s *System) applyBrokenClassifications(broken []classifiedSandbox, dryRun bool, out io.Writer, result *PruneResult) {
 	for _, c := range broken {
 		switch c.action {
 		case actionRefuse:
@@ -743,7 +684,7 @@ func (s *SystemClient) applyBrokenClassifications(broken []classifiedSandbox, dr
 // prune reclaims the build cache (no rebuild forced), and IncludeBaseImage also
 // drops the base images. Per-backend failures are logged to opts.Output rather
 // than aborting the whole prune.
-func (s *SystemClient) pruneBackend(ctx context.Context, backend BackendName, known []string, opts PruneOptions, out io.Writer) ([]PruneItem, int64) {
+func (s *System) pruneBackend(ctx context.Context, backend BackendName, known []string, opts PruneOptions, out io.Writer) ([]PruneItem, int64) {
 	rt, err := newRuntime(ctx, backend, s.layout)
 	if err != nil {
 		return nil, 0
@@ -789,7 +730,7 @@ func (s *SystemClient) pruneBackend(ctx context.Context, backend BackendName, kn
 
 // pruneTempFiles scans (and, when !dryRun, removes) stale yoloai
 // temp dirs. Returns the list of stale dirs as PruneItem entries.
-func (s *SystemClient) pruneTempFiles(dryRun bool) ([]PruneItem, error) {
+func (s *System) pruneTempFiles(dryRun bool) ([]PruneItem, error) {
 	stale, err := sandbox.PruneTempFiles(true, staleTempFileAge)
 	if err != nil {
 		return nil, fmt.Errorf("scan temp files: %w", err)
@@ -842,7 +783,7 @@ type classifiedSandbox struct {
 //   - missing meta + no work dir                  → delete (never-init)
 //   - corrupt/version-too-new meta, no data,
 //     or incomplete dir w/ ambiguous content      → quarantine to trash
-func (s *SystemClient) classifySandboxes() (known []string, broken []classifiedSandbox) {
+func (s *System) classifySandboxes() (known []string, broken []classifiedSandbox) {
 	dir := s.layout.SandboxesDir()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -884,7 +825,7 @@ func (s *SystemClient) classifySandboxes() (known []string, broken []classifiedS
 }
 
 // trashSummary reports the current trash-dir entry count and total size.
-func (s *SystemClient) trashSummary() TrashSummary {
+func (s *System) trashSummary() TrashSummary {
 	dir := s.layout.TrashDir()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -897,7 +838,7 @@ func (s *SystemClient) trashSummary() TrashSummary {
 // removed and bytes freed (best-effort). Non-interactive (Q-F): the CLI
 // is responsible for confirming with the user before calling, since trash
 // may hold data the user wanted.
-func (s *SystemClient) EmptyTrash() (removed int, freed int64, err error) {
+func (s *System) EmptyTrash() (removed int, freed int64, err error) {
 	dir := s.layout.TrashDir()
 	entries, readErr := os.ReadDir(dir)
 	if readErr != nil {
@@ -920,7 +861,7 @@ func (s *SystemClient) EmptyTrash() (removed int, freed int64, err error) {
 
 // profileHasDockerfile returns nil if the named profile or any of its
 // ancestors carries a Dockerfile; *UsageError otherwise.
-func (s *SystemClient) profileHasDockerfile(profile string) error {
+func (s *System) profileHasDockerfile(profile string) error {
 	if config.ProfileHasDockerfile(s.layout, profile) {
 		return nil
 	}

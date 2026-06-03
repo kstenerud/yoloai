@@ -1,4 +1,4 @@
-// ABOUTME: Tests for SystemClient cross-backend introspection (Info / Backends).
+// ABOUTME: Tests for System cross-backend introspection (Info / Backends).
 
 package yoloai
 
@@ -38,21 +38,21 @@ func TestSystemClient_Info(t *testing.T) {
 	}
 }
 
-// TestSystemClient_Principal threads SystemOptions.Principal into the layout
+// TestSystemClient_Principal threads Options.Principal into the layout
 // (default "" stays default; a valid segment parses; an invalid one is a
 // *UsageError).
 func TestSystemClient_Principal(t *testing.T) {
 	root := t.TempDir()
 
-	def, err := NewSystemClient(SystemOptions{DataDir: root, HomeDir: root})
+	def, err := NewWithOptions(context.Background(), Options{DataDir: root, HomeDir: root})
 	require.NoError(t, err)
 	assert.Equal(t, config.PrincipalSegment(""), def.layout.Principal)
 
-	acme, err := NewSystemClient(SystemOptions{DataDir: root, HomeDir: root, Principal: "acme"})
+	acme, err := NewWithOptions(context.Background(), Options{DataDir: root, HomeDir: root, Principal: "acme"})
 	require.NoError(t, err)
 	assert.Equal(t, config.PrincipalSegment("acme"), acme.layout.Principal)
 
-	_, err = NewSystemClient(SystemOptions{DataDir: root, HomeDir: root, Principal: "way-too-long-and-invalid"})
+	_, err = NewWithOptions(context.Background(), Options{DataDir: root, HomeDir: root, Principal: "way-too-long-and-invalid"})
 	require.Error(t, err)
 	var usageErr *yoerrors.UsageError
 	assert.ErrorAs(t, err, &usageErr)
