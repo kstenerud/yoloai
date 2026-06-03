@@ -144,6 +144,17 @@ type Options struct {
 	// leave it empty. Not a per-create input — it lives here so Create
 	// callers don't repeat it.
 	Version string
+
+	// Principal namespaces this Client's sandboxes under an owning principal
+	// (tenant/user), so two principals can each own a sandbox of the same name
+	// without colliding on the runtime backend. Client-scoped, not per-call —
+	// the Client is the principal-scoped handle (D58/D59).
+	//
+	// Empty ("") is the default no-principal sentinel: instance names elide the
+	// segment (yoloai-<name>) and behavior is identical to today. Non-empty
+	// must be ≤8 alphanumeric chars (parsed at construction; invalid is
+	// rejected with a *UsageError). See D62.
+	Principal string
 }
 
 // Client is the simple entry point for yoloAI operations.
@@ -171,7 +182,12 @@ func NewWithOptions(ctx context.Context, opts Options) (*Client, error) {
 		return nil, yoerrors.NewUsageError("yoloai: Options.Backend is required — empty is not a valid backend (F4). Resolve it at the boundary before constructing the Client, e.g. yoloai.SelectBackend(ctx, preferred, isolation, os). See development-principles.md §4.")
 	}
 
-	layout := config.NewLayoutFor(opts.DataDir, opts.HomeDir)
+	principal, err := config.ParsePrincipalSegment(opts.Principal)
+	if err != nil {
+		return nil, yoerrors.NewUsageError("yoloai: invalid Options.Principal: %v", err)
+	}
+
+	layout := config.NewLayoutFor(opts.DataDir, opts.HomeDir).WithPrincipal(principal)
 
 	backend := opts.Backend
 	logger := opts.Logger

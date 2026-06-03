@@ -6,7 +6,9 @@ import (
 	"context"
 	"testing"
 
+	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime"
+	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -34,6 +36,26 @@ func TestSystemClient_Info(t *testing.T) {
 			assert.NotEmpty(t, b.Note, "an unavailable backend must explain why")
 		}
 	}
+}
+
+// TestSystemClient_Principal threads SystemOptions.Principal into the layout
+// (default "" stays default; a valid segment parses; an invalid one is a
+// *UsageError).
+func TestSystemClient_Principal(t *testing.T) {
+	root := t.TempDir()
+
+	def, err := NewSystemClient(SystemOptions{DataDir: root, HomeDir: root})
+	require.NoError(t, err)
+	assert.Equal(t, config.PrincipalSegment(""), def.layout.Principal)
+
+	acme, err := NewSystemClient(SystemOptions{DataDir: root, HomeDir: root, Principal: "acme"})
+	require.NoError(t, err)
+	assert.Equal(t, config.PrincipalSegment("acme"), acme.layout.Principal)
+
+	_, err = NewSystemClient(SystemOptions{DataDir: root, HomeDir: root, Principal: "way-too-long-and-invalid"})
+	require.Error(t, err)
+	var usageErr *yoerrors.UsageError
+	assert.ErrorAs(t, err, &usageErr)
 }
 
 // TestSystemClient_ValidateSandboxName accepts a well-formed name and rejects

@@ -67,6 +67,12 @@ type SystemOptions struct {
 	// user config interpolation keeps working; library code never reads
 	// the live process env (§12).
 	Env map[string]string
+
+	// Principal namespaces admin operations under an owning principal, the
+	// same contract as Options.Principal. Empty ("") is the default
+	// no-principal sentinel. Non-empty must be ≤8 alphanumeric chars (parsed
+	// at construction; invalid is rejected with a *UsageError). See D62.
+	Principal string
 }
 
 // NewSystemClient constructs a standalone SystemClient for admin
@@ -84,7 +90,11 @@ func NewSystemClient(opts SystemOptions) (*SystemClient, error) {
 	if opts.HomeDir == "" {
 		return nil, yoerrors.NewUsageError("yoloai: SystemOptions.HomeDir is required (no implicit filepath.Dir(DataDir) derivation; under the D60 bifurcation DataDir is $HOME/.yoloai/library, so its parent is not $HOME). Pass the host user's home explicitly; the CLI uses cliutil.Layout().HomeDir. See development-principles.md §12.")
 	}
-	layout := config.NewLayoutFor(opts.DataDir, opts.HomeDir)
+	principal, err := config.ParsePrincipalSegment(opts.Principal)
+	if err != nil {
+		return nil, yoerrors.NewUsageError("yoloai: invalid SystemOptions.Principal: %v", err)
+	}
+	layout := config.NewLayoutFor(opts.DataDir, opts.HomeDir).WithPrincipal(principal)
 	layout.Env = opts.Env
 	return &SystemClient{layout: layout}, nil
 }
