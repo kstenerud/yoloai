@@ -11,13 +11,22 @@ import (
 )
 
 // runSandboxUnlock force-clears a stale lock file for the named sandbox.
-// Surfaces SystemClient.Unlock's *UsageError verbatim when the holder
+// Surfaces Sandbox.Unlock's *UsageError verbatim when the holder
 // is alive. Distinguishes "cleared a stale lock" from "no lock file
 // present" so the user gets an honest report — relevant when the
 // command is run defensively (in a recovery script, etc.) and there
 // was nothing actually stale.
 func runSandboxUnlock(cmd *cobra.Command, name string) error {
-	cleared, err := cliutil.NewSystemClient().Unlock(name)
+	c, err := cliutil.Client(cmd)
+	if err != nil {
+		return err
+	}
+	defer c.Close() //nolint:errcheck // best-effort cleanup
+	sb, err := c.Sandbox(name)
+	if err != nil {
+		return err
+	}
+	cleared, err := sb.Unlock()
 	if err != nil {
 		return err
 	}

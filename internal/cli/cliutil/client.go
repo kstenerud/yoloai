@@ -90,9 +90,15 @@ func ResolveContainerBackendConfig() yoloai.BackendName {
 // Falls back to config default if environment.json can't be read.
 // Used by lifecycle commands that operate on an existing sandbox.
 func ResolveBackendForSandbox(name string) yoloai.BackendName {
-	env, err := NewSystemClient().SandboxMetadata(name)
-	if err == nil && env.Backend != "" {
-		return env.Backend
+	l := Layout()
+	c, err := yoloai.NewWithOptions(context.Background(), yoloai.Options{DataDir: l.DataDir, HomeDir: l.HomeDir, Env: l.Env})
+	if err == nil {
+		defer c.Close() //nolint:errcheck // backend-less close is a no-op
+		if sb, sbErr := c.Sandbox(name); sbErr == nil {
+			if env, mErr := sb.Metadata(); mErr == nil && env.Backend != "" {
+				return env.Backend
+			}
+		}
 	}
 	// Probe is stat-only so an empty context is fine here; full ctx threading
 	// for the rare "meta corrupt" fallback is out of scope for W-L4.
@@ -165,6 +171,23 @@ func NewSystemClient() *yoloai.SystemClient {
 		panic(err)
 	}
 	return sc
+}
+
+// SandboxMetadata reads a sandbox's persisted read-model (environment.json)
+// using a backend-less Client, so no runtime is opened. Command handlers use it
+// for the early "load meta to branch on mount mode / overlay / baseline" reads
+// that precede the backend-driving WithClient call.
+func SandboxMetadata(cmd *cobra.Command, name string) (*yoloai.Environment, error) {
+	c, err := Client(cmd)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close() //nolint:errcheck // backend-less close is a no-op
+	sb, err := c.Sandbox(name)
+	if err != nil {
+		return nil, SandboxErrorHint(name, err)
+	}
+	return sb.Metadata()
 }
 
 // AttachToSandboxByName attaches the calling process's terminal to the

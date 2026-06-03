@@ -166,7 +166,7 @@ func resolveDestroyArgs(ctx context.Context, c *yoloai.Client, args []string) ([
 		if err := cliutil.ValidateName(arg); err != nil {
 			return nil, err
 		}
-		if err := cliutil.NewSystemClient().RequireSandbox(arg); err != nil {
+		if _, err := c.Sandbox(arg); err != nil {
 			return nil, fmt.Errorf("%s: %w", arg, err)
 		}
 		names = append(names, arg)

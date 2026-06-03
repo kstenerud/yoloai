@@ -1,9 +1,11 @@
-// ABOUTME: Tests for the runtime-free SystemClient file-exchange / cache path
-// ABOUTME: verbs.
+// ABOUTME: Tests for the runtime-free per-sandbox file-exchange / cache path
+// ABOUTME: verbs on *Sandbox.
 
 package yoloai
 
 import (
+	"context"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -11,25 +13,35 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSystemClient_ExchangePaths(t *testing.T) {
+func TestSandbox_ExchangePaths(t *testing.T) {
 	dir := t.TempDir()
-	sc, err := NewSystemClient(SystemOptions{DataDir: dir, HomeDir: dir})
+	c, err := NewWithOptions(context.Background(), Options{DataDir: dir, HomeDir: dir})
+	require.NoError(t, err)
+	defer c.Close() //nolint:errcheck
+
+	state := c.layout.SandboxDir("box")
+	require.NoError(t, os.MkdirAll(state, 0750))
+	sb, err := c.Sandbox("box")
 	require.NoError(t, err)
 
-	state := sc.layout.SandboxDir("box")
-	assert.Equal(t, filepath.Join(state, "files"), sc.FilesDir("box"))
-	assert.Equal(t, filepath.Join(state, "cache"), sc.CacheDir("box"))
-	assert.Equal(t, filepath.Join(state, "runtime-config.json"), sc.RuntimeConfigPath("box"))
-	assert.Equal(t, filepath.Join(state, "environment.json"), sc.EnvironmentPath("box"))
+	assert.Equal(t, filepath.Join(state, "files"), sb.FilesDir())
+	assert.Equal(t, filepath.Join(state, "cache"), sb.CacheDir())
+	assert.Equal(t, filepath.Join(state, "runtime-config.json"), sb.RuntimeConfigPath())
+	assert.Equal(t, filepath.Join(state, "environment.json"), sb.EnvironmentPath())
 }
 
-func TestSystemClient_LogPaths(t *testing.T) {
+func TestSandbox_LogPaths(t *testing.T) {
 	dir := t.TempDir()
-	sc, err := NewSystemClient(SystemOptions{DataDir: dir, HomeDir: dir})
+	c, err := NewWithOptions(context.Background(), Options{DataDir: dir, HomeDir: dir})
+	require.NoError(t, err)
+	defer c.Close() //nolint:errcheck
+
+	state := c.layout.SandboxDir("box")
+	require.NoError(t, os.MkdirAll(state, 0750))
+	sb, err := c.Sandbox("box")
 	require.NoError(t, err)
 
-	state := sc.layout.SandboxDir("box")
-	logs := sc.LogPaths("box")
+	logs := sb.LogPaths()
 	assert.Equal(t, filepath.Join(state, "logs", "cli.jsonl"), logs.CLI)
 	assert.Equal(t, filepath.Join(state, "logs", "sandbox.jsonl"), logs.Sandbox)
 	assert.Equal(t, filepath.Join(state, "logs", "monitor.jsonl"), logs.Monitor)

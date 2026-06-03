@@ -75,10 +75,16 @@ func filesDispatch(cmd *cobra.Command, args []string) error {
 		rest = args[2:]
 	}
 
-	files, err := cliutil.NewSystemClient().Files(name)
+	c, err := cliutil.Client(cmd)
+	if err != nil {
+		return err
+	}
+	defer c.Close() //nolint:errcheck // best-effort cleanup
+	sb, err := c.Sandbox(name)
 	if err != nil {
 		return cliutil.SandboxErrorHint(name, err)
 	}
+	files := sb.Files()
 
 	switch subcmd {
 	case "put":

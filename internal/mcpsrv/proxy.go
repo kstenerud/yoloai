@@ -75,8 +75,11 @@ func (p *ProxyServer) ServeStdio(ctx context.Context) error {
 		return err
 	}
 
-	sys := p.c.System()
-	innerCmd, err := expandCmd(p.innerCmd, sys.FilesDir(meta.Name), sys.CacheDir(meta.Name), meta)
+	sb, err := p.c.Sandbox(p.sandboxName)
+	if err != nil {
+		return fmt.Errorf("sandbox handle %q: %w", p.sandboxName, err)
+	}
+	innerCmd, err := expandCmd(p.innerCmd, sb.FilesDir(), sb.CacheDir(), meta)
 	if err != nil {
 		return fmt.Errorf("expand inner command: %w", err)
 	}

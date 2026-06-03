@@ -32,20 +32,18 @@ func drainEvents(t *testing.T, ch <-chan LogEvent) []LogEvent {
 
 func TestAgentLogs_ForwardsFrames(t *testing.T) {
 	dir := t.TempDir()
-	sc, err := NewSystemClient(SystemOptions{DataDir: dir, HomeDir: dir})
-	require.NoError(t, err)
-
-	require.NoError(t, os.MkdirAll(sc.layout.SandboxDir("box"), 0750))
-	cliPath := sc.LogPaths("box").CLI
-	require.NoError(t, os.MkdirAll(filepath.Dir(cliPath), 0750))
-	line := `{"ts":"2026-03-15T10:00:00.000Z","level":"info","event":"hello"}`
-	require.NoError(t, os.WriteFile(cliPath, []byte(line+"\n"), 0600))
-
 	c, err := NewWithOptions(context.Background(), Options{DataDir: dir, HomeDir: dir})
 	require.NoError(t, err)
 	defer c.Close() //nolint:errcheck
+
+	require.NoError(t, os.MkdirAll(c.layout.SandboxDir("box"), 0750))
 	sb, err := c.Sandbox("box")
 	require.NoError(t, err)
+
+	cliPath := sb.LogPaths().CLI
+	require.NoError(t, os.MkdirAll(filepath.Dir(cliPath), 0750))
+	line := `{"ts":"2026-03-15T10:00:00.000Z","level":"info","event":"hello"}`
+	require.NoError(t, os.WriteFile(cliPath, []byte(line+"\n"), 0600))
 
 	ch, err := sb.Agent().Logs(context.Background(), LogOptions{})
 	require.NoError(t, err)

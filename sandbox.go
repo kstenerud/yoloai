@@ -45,6 +45,19 @@ func (c *Client) Sandbox(name string) (*Sandbox, error) {
 // embedders threading the handle through multiple call sites.
 func (s *Sandbox) Name() string { return s.name }
 
+// Metadata reads the sandbox's creation-time environment straight from disk —
+// no runtime connection, no live status query. This is the runtime-free,
+// backend-agnostic read consumers need when only the captured configuration is
+// wanted, not live state. For combined metadata + live status on a connected
+// client, use Inspect instead.
+func (s *Sandbox) Metadata() (*Environment, error) {
+	meta, err := store.LoadEnvironment(s.c.layout.SandboxDir(s.name))
+	if err != nil {
+		return nil, err
+	}
+	return environmentFromStore(meta), nil
+}
+
 // Inspect returns combined metadata and live state for the sandbox.
 func (s *Sandbox) Inspect(ctx context.Context) (*Info, error) {
 	if err := s.c.ensure(ctx); err != nil {

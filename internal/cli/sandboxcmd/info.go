@@ -39,7 +39,7 @@ func runSandboxInfo(cmd *cobra.Command, name string) error {
 			}
 			result := infoJSON{
 				Info:          info,
-				ConfigPath:    c.System().RuntimeConfigPath(name),
+				ConfigPath:    sb.RuntimeConfigPath(),
 				PromptPreview: loadPromptPreview(sb),
 			}
 			return cliutil.WriteJSON(cmd.OutOrStdout(), result)
@@ -72,8 +72,8 @@ func printSandboxInfo(cmd *cobra.Command, sb *yoloai.Sandbox, name string, info 
 	}
 
 	sandboxDir := cliutil.Layout().SandboxDir(name)
-	fmt.Fprintf(w, "Sandbox dir: %s\n", sandboxDir)                                        //nolint:errcheck
-	fmt.Fprintf(w, "Config:      %s\n", cliutil.NewSystemClient().RuntimeConfigPath(name)) //nolint:errcheck
+	fmt.Fprintf(w, "Sandbox dir: %s\n", sandboxDir)             //nolint:errcheck
+	fmt.Fprintf(w, "Config:      %s\n", sb.RuntimeConfigPath()) //nolint:errcheck
 
 	if preview := loadPromptPreview(sb); preview != "" {
 		fmt.Fprintf(w, "Prompt:      %s\n", preview) //nolint:errcheck

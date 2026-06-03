@@ -1,4 +1,4 @@
-// ABOUTME: SystemClient.VscodeAttach — resolve the VS Code attach-to-container
+// ABOUTME: Sandbox.VscodeAttach — resolve the VS Code attach-to-container
 // ABOUTME: details (container name, workdir, folder URI) for a sandbox.
 package yoloai
 
@@ -27,9 +27,9 @@ type VscodeAttach struct {
 
 // VscodeAttach resolves the VS Code attach details for a sandbox. It reads the
 // sandbox metadata and the backend's declared capabilities — no running backend
-// is required. A missing sandbox yields ErrSandboxNotFound.
-func (s *SystemClient) VscodeAttach(name string) (*VscodeAttach, error) {
-	sandboxDir := s.layout.SandboxDir(name)
+// is required.
+func (s *Sandbox) VscodeAttach() (*VscodeAttach, error) {
+	sandboxDir := s.c.layout.SandboxDir(s.name)
 	if err := store.RequireSandboxDir(sandboxDir); err != nil {
 		return nil, sandbox.ErrSandboxNotFound
 	}

@@ -237,37 +237,11 @@ func (s *SystemClient) ListAcrossBackends(ctx context.Context) ([]*Info, []Backe
 	return infosFromStatus(infos), unavailableNames, nil
 }
 
-// SandboxMetadata reads a single sandbox's creation-time environment straight
-// from disk — no runtime connection, no live status query. This is the
-// runtime-free, backend-agnostic read consumers need before they've chosen a
-// backend (the backend itself is recorded in the metadata) or when only the
-// captured configuration is wanted, not live state. For combined metadata +
-// live status on a connected client, use Sandbox.Inspect instead.
-func (s *SystemClient) SandboxMetadata(name string) (*Environment, error) {
-	sandboxDir := s.layout.SandboxDir(name)
-	if err := store.RequireSandboxDir(sandboxDir); err != nil {
-		return nil, err
-	}
-	meta, err := store.LoadEnvironment(sandboxDir)
-	if err != nil {
-		return nil, err
-	}
-	return environmentFromStore(meta), nil
-}
-
 // ValidateSandboxName reports whether name is a well-formed sandbox name
 // (allowed charset, no path-traversal). It consults no host state, so a daemon
 // or CLI can pre-validate a name before any other verb is called.
 func (s *SystemClient) ValidateSandboxName(name string) error {
 	return store.ValidateName(name)
-}
-
-// RequireSandbox reports whether a sandbox directory exists on disk, returning
-// ErrSandboxNotFound when it does not. It checks only for the directory — not
-// for readable metadata — so callers that must act on a sandbox with corrupt
-// or missing metadata (e.g. destroy) can still proceed.
-func (s *SystemClient) RequireSandbox(name string) error {
-	return store.RequireSandboxDir(s.layout.SandboxDir(name))
 }
 
 // Info returns the installation's paths and per-backend availability in one

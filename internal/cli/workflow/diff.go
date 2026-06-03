@@ -66,9 +66,9 @@ func runDiffCmd(cmd *cobra.Command, args []string) error {
 	logFlag, _ := cmd.Flags().GetBool("log")
 
 	// Load meta early to detect overlay dirs
-	env, metaErr := cliutil.NewSystemClient().SandboxMetadata(name)
+	env, metaErr := cliutil.SandboxMetadata(cmd, name)
 	if metaErr != nil {
-		return cliutil.SandboxErrorHint(name, metaErr)
+		return metaErr
 	}
 	overlay := env.HasOverlayDirs()
 	slog.Debug("generating diff", "event", "sandbox.diff", "sandbox", name, "workdir_mode", env.Workdir.Mode) //nolint:gosec // G706: name is validated by ValidateName

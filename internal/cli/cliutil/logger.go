@@ -153,7 +153,17 @@ func newJSONLHandler(w io.Writer, minLevel slog.Level) slog.Handler {
 // as a JSONL sink on the global logger. Returns a cleanup func (call with defer).
 // No-op (returns empty func) if the sandbox logs directory doesn't exist yet.
 func OpenCLIJSONLSink(name string, cmd *cobra.Command) func() {
-	path := NewSystemClient().LogPaths(name).CLI
+	c, err := Client(cmd)
+	if err != nil {
+		return func() {}
+	}
+	sb, err := c.Sandbox(name)
+	if err != nil {
+		_ = c.Close()
+		return func() {}
+	}
+	path := sb.LogPaths().CLI
+	_ = c.Close()                                                                // backend-less close is a no-op; path is just a string
 	f, err := fileutil.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600) //nolint:gosec // G304: path derived from trusted sandbox dir
 	if err != nil {
 		return func() {}

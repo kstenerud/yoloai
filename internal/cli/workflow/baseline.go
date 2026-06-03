@@ -69,9 +69,9 @@ func newBaselineSetCmd() *cobra.Command {
 // baseline, so the verb fails loudly with a *BaselineConflictError only if
 // something moved the baseline between this read and the locked swap.
 func withBaselineSandbox(cmd *cobra.Command, name string, fn func(ctx context.Context, sb *yoloai.Sandbox, expected string) error) error {
-	env, err := cliutil.NewSystemClient().SandboxMetadata(name)
+	env, err := cliutil.SandboxMetadata(cmd, name)
 	if err != nil {
-		return cliutil.SandboxErrorHint(name, err)
+		return err
 	}
 	expected := env.Workdir.BaselineSHA
 

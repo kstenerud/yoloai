@@ -335,7 +335,7 @@ func executeNewCreate(cmd *cobra.Command, ctx context.Context, c *yoloai.Client,
 		if sandboxName == "" {
 			return nil
 		}
-		meta, loadErr := cliutil.NewSystemClient().SandboxMetadata(sandboxName)
+		meta, loadErr := loadCreatedMeta(c, sandboxName)
 		if loadErr != nil {
 			return loadErr
 		}
@@ -346,7 +346,7 @@ func executeNewCreate(cmd *cobra.Command, ctx context.Context, c *yoloai.Client,
 	// F8). opts.Name is used because Create returns "" for --no-start. Goes to
 	// stderr — the stream the Engine's creation output used — keeping human
 	// output cohesive there (stdout is reserved for --json).
-	if meta, loadErr := cliutil.NewSystemClient().SandboxMetadata(opts.Name); loadErr == nil {
+	if meta, loadErr := loadCreatedMeta(c, opts.Name); loadErr == nil {
 		printCreateSummary(cmd.ErrOrStderr(), meta, opts.Prompt != "", opts.VscodeTunnel)
 	}
 
@@ -365,6 +365,17 @@ func executeNewCreate(cmd *cobra.Command, ctx context.Context, c *yoloai.Client,
 	return cliutil.WithTerminal(func(io yoloai.IOStreams) error {
 		return sb.Agent().Attach(ctx, io)
 	})
+}
+
+// loadCreatedMeta reads a just-created sandbox's metadata through the in-scope
+// client. Factored out so executeNewCreate's JSON and human-summary branches
+// share one resolve-handle-then-read step.
+func loadCreatedMeta(c *yoloai.Client, name string) (*yoloai.Environment, error) {
+	sb, err := c.Sandbox(name)
+	if err != nil {
+		return nil, err
+	}
+	return sb.Metadata()
 }
 
 // printCreateSummary renders the post-create summary + next-step hints from the

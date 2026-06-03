@@ -405,10 +405,11 @@ func (s *Server) handleSandboxFilesList(_ context.Context, req mcp.CallToolReque
 		return textResult(errorf("name is required")), nil
 	}
 
-	if _, err := s.c.System().SandboxMetadata(name); err != nil {
+	sb, err := s.c.Sandbox(name)
+	if err != nil {
 		return textResult(errorf("sandbox %q: %v", name, err)), nil
 	}
-	filesDir := s.c.System().FilesDir(name)
+	filesDir := sb.FilesDir()
 	entries, err := os.ReadDir(filesDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -443,10 +444,11 @@ func (s *Server) handleSandboxFilesRead(_ context.Context, req mcp.CallToolReque
 		return textResult(errorf("%v", err)), nil
 	}
 
-	if _, err := s.c.System().SandboxMetadata(name); err != nil {
+	sb, err := s.c.Sandbox(name)
+	if err != nil {
 		return textResult(errorf("sandbox %q: %v", name, err)), nil
 	}
-	path := filepath.Join(s.c.System().FilesDir(name), filename)
+	path := filepath.Join(sb.FilesDir(), filename)
 	data, err := os.ReadFile(path) //nolint:gosec // path validated by validateFilename
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -473,10 +475,11 @@ func (s *Server) handleSandboxFilesWrite(_ context.Context, req mcp.CallToolRequ
 		return textResult(errorf("%v", err)), nil
 	}
 
-	if _, err := s.c.System().SandboxMetadata(name); err != nil {
+	sb, err := s.c.Sandbox(name)
+	if err != nil {
 		return textResult(errorf("sandbox %q: %v", name, err)), nil
 	}
-	filesDir := s.c.System().FilesDir(name)
+	filesDir := sb.FilesDir()
 	if err := fileutil.MkdirAll(filesDir, 0750); err != nil {
 		return textResult(errorf("create files dir for sandbox %q: %v", name, err)), nil
 	}

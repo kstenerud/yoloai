@@ -74,7 +74,12 @@ func writeSandboxSections(ctx context.Context, w io.Writer, c *yoloai.Client, na
 	writeBugReportSandboxDetail(ctx, w, c, name, reportType)
 
 	sandboxDir := cliutil.Layout().SandboxDir(name)
-	logs := cliutil.NewSystemClient().LogPaths(name)
+	sb, err := c.Sandbox(name)
+	if err != nil {
+		fmt.Fprintf(w, "(sandbox %q unavailable: %v)\n", name, err) //nolint:errcheck
+		return
+	}
+	logs := sb.LogPaths()
 
 	// Section 7: cli.jsonl
 	writeBugReportJSONLFile(w, "logs/cli.jsonl", logs.CLI, reportType, nil)
@@ -117,7 +122,7 @@ func writeSandboxSections(ctx context.Context, w io.Writer, c *yoloai.Client, na
 		// skipped when not applicable; including both lets one bug
 		// report cover every backend without the writer caring which
 		// one is in use.
-		writeBugReportTmuxCapture(w, name)
+		writeBugReportTmuxCapture(w, sb)
 		writeBugReportTerminalSnapshot(ctx, w, c, name)
 	}
 }
@@ -172,26 +177,26 @@ func writeBugReportSandboxDetail(ctx context.Context, w io.Writer, c *yoloai.Cli
 	}
 
 	sandboxDir := cliutil.Layout().SandboxDir(name)
-	sys := cliutil.NewSystemClient()
+	if sb != nil {
+		// environment.json
+		writeJSONFileSection(w, "environment.json",
+			sb.EnvironmentPath(),
+			reportType, []string{"network_allow", "setup"})
 
-	// environment.json
-	writeJSONFileSection(w, "environment.json",
-		sys.EnvironmentPath(name),
-		reportType, []string{"network_allow", "setup"})
+		// agent-status.json (full contents in both modes)
+		writePlainFileSection(w, "agent-status.json",
+			sb.LogPaths().AgentStatus)
 
-	// agent-status.json (full contents in both modes)
-	writePlainFileSection(w, "agent-status.json",
-		sys.LogPaths(name).AgentStatus)
+		// runtime-config.json
+		writeJSONFileSection(w, "runtime-config.json",
+			sb.RuntimeConfigPath(),
+			reportType, []string{"setup_commands", "allowed_domains"})
 
-	// runtime-config.json
-	writeJSONFileSection(w, "runtime-config.json",
-		sys.RuntimeConfigPath(name),
-		reportType, []string{"setup_commands", "allowed_domains"})
-
-	// prompt.txt (unsafe only; omitted in safe mode — may contain sensitive task descriptions)
-	if reportType == "unsafe" {
-		writePlainFileSection(w, "prompt.txt",
-			fmt.Sprintf("%s/prompt.txt", sandboxDir))
+		// prompt.txt (unsafe only; omitted in safe mode — may contain sensitive task descriptions)
+		if reportType == "unsafe" {
+			writePlainFileSection(w, "prompt.txt",
+				fmt.Sprintf("%s/prompt.txt", sandboxDir))
+		}
 	}
 
 	// Container log
@@ -459,8 +464,8 @@ func writeBugReportTerminalSnapshot(ctx context.Context, w io.Writer, c *yoloai.
 
 // writeBugReportTmuxCapture writes section 12: tmux screen capture.
 // Only included in unsafe reports. Silently omitted if sandbox is not running.
-func writeBugReportTmuxCapture(w io.Writer, name string) {
-	tmuxSock := readTmuxSocketFromConfig(name)
+func writeBugReportTmuxCapture(w io.Writer, sb *yoloai.Sandbox) {
+	tmuxSock := readTmuxSocketFromConfig(sb)
 	var cmd *exec.Cmd
 	if tmuxSock != "" {
 		cmd = exec.Command("tmux", "-S", tmuxSock, "capture-pane", "-p", "-t", "main") //nolint:gosec // G204: tmuxSock is read from a yoloAI-owned config and validated as a path
@@ -488,8 +493,11 @@ func writeBugReportTmuxCapture(w io.Writer, name string) {
 // readTmuxSocketFromConfig reads the tmux_socket field from runtime-config.json
 // for the named sandbox. Returns empty string if the file is missing or has no
 // socket configured.
-func readTmuxSocketFromConfig(name string) string {
-	cfgPath := cliutil.NewSystemClient().RuntimeConfigPath(name)
+func readTmuxSocketFromConfig(sb *yoloai.Sandbox) string {
+	if sb == nil {
+		return ""
+	}
+	cfgPath := sb.RuntimeConfigPath()
 	data, err := os.ReadFile(cfgPath) //nolint:gosec // G304: path derived from trusted sandbox dir
 	if err != nil {
 		return ""

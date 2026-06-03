@@ -114,9 +114,9 @@ func runApplyCmd(cmd *cobra.Command, args []string) error {
 		return yoerrors.NewUsageError("--no-commit cannot be used with commit refs — they are mutually exclusive")
 	}
 	// Load the sandbox read-model for target directory and mode validation.
-	env, err := cliutil.NewSystemClient().SandboxMetadata(name)
+	env, err := cliutil.SandboxMetadata(cmd, name)
 	if err != nil {
-		return cliutil.SandboxErrorHint(name, err)
+		return err
 	}
 	if env.Workdir.Mode == yoloai.DirModeRW {
 		return yoerrors.NewUsageError("apply is not needed for :rw directories — changes are already live")

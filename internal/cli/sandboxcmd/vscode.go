@@ -23,7 +23,16 @@ func newSandboxVscodeCmd() *cobra.Command {
 				return err
 			}
 
-			attach, err := cliutil.NewSystemClient().VscodeAttach(name)
+			c, err := cliutil.Client(cmd)
+			if err != nil {
+				return err
+			}
+			defer c.Close() //nolint:errcheck // best-effort cleanup
+			sb, err := c.Sandbox(name)
+			if err != nil {
+				return err
+			}
+			attach, err := sb.VscodeAttach()
 			if err != nil {
 				return err
 			}
