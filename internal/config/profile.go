@@ -509,17 +509,22 @@ type legacyProfileConfig struct {
 }
 
 // loadProfileLegacy reads the extends field from a profile config.yaml (for legacy chain support).
-// Errors are treated as "no extends field" — the profile defaults to extending "base".
+// A missing config.yaml is a legitimate default (the profile extends "base"), but a config.yaml
+// that exists yet fails to parse is a hard error: silently treating the user's malformed profile
+// as "extends base" would discard what they configured without telling them.
 func loadProfileLegacy(layout Layout, name string) (legacyProfileConfig, error) {
 	path := filepath.Join(layout.ProfileDir(name), "config.yaml")
 	data, err := os.ReadFile(path) //nolint:gosec // G304: path is from profile directory
 	if err != nil {
-		return legacyProfileConfig{extends: "base"}, nil //nolint:nilerr // missing file = default
+		if os.IsNotExist(err) {
+			return legacyProfileConfig{extends: "base"}, nil
+		}
+		return legacyProfileConfig{}, fmt.Errorf("read profile %q config: %w", name, err)
 	}
 
 	var doc yaml.Node
 	if err := yaml.Unmarshal(data, &doc); err != nil {
-		return legacyProfileConfig{extends: "base"}, nil //nolint:nilerr // invalid YAML = default
+		return legacyProfileConfig{}, fmt.Errorf("parse profile %q config.yaml: %w", name, err)
 	}
 
 	if doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 {

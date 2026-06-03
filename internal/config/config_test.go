@@ -447,6 +447,17 @@ func TestGetEffectiveConfig_WithOverrides(t *testing.T) {
 	assert.Contains(t, out, "tmux_conf:") // from global defaults
 }
 
+func TestGetEffectiveConfig_MalformedYAMLIsError(t *testing.T) {
+	dir, layout := configDir(t)
+	// A config file the user wrote but that fails to parse must surface as an
+	// error, not be silently dropped from the effective view.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("container_backend: [unterminated\n"), 0600))
+
+	_, err := GetEffectiveConfig(layout)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "parse config YAML")
+}
+
 func TestGetEffectiveConfig_ExtraKeys(t *testing.T) {
 	dir, layout := configDir(t)
 	content := "custom_key: myvalue\n"

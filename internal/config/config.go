@@ -703,8 +703,9 @@ func setCollectionDefault(root *yaml.Node, cs knownCollectionSetting) {
 }
 
 // overlayConfigFile reads raw YAML from readFn and merges it into root.
-// Errors from readFn are returned; YAML parse errors are silently ignored
-// (best-effort overlay, matching original GetEffectiveConfig behaviour).
+// Errors from readFn and YAML parse errors are both returned — a config file
+// the user wrote but that fails to parse must surface, not be silently dropped
+// from the effective view.
 func overlayConfigFile(root *yaml.Node, readFn func() ([]byte, error)) error {
 	data, err := readFn()
 	if err != nil {
@@ -713,22 +714,22 @@ func overlayConfigFile(root *yaml.Node, readFn func() ([]byte, error)) error {
 	if data == nil {
 		return nil
 	}
-	mergeRawYAMLInto(root, data)
-	return nil
+	return mergeRawYAMLInto(root, data)
 }
 
 // mergeRawYAMLInto parses data as YAML and merges its top-level mapping into root.
-// Parse errors are silently ignored (best-effort overlay).
-func mergeRawYAMLInto(root *yaml.Node, data []byte) {
+// A parse error is returned so the caller can report the malformed file.
+func mergeRawYAMLInto(root *yaml.Node, data []byte) error {
 	var doc yaml.Node
 	if err := yaml.Unmarshal(data, &doc); err != nil {
-		return //nolint:nilerr // best-effort: ignore YAML parse errors in effective-config overlay
+		return fmt.Errorf("parse config YAML: %w", err)
 	}
 	if doc.Kind == yaml.DocumentNode && len(doc.Content) > 0 {
 		if src := doc.Content[0]; src.Kind == yaml.MappingNode {
 			mergeNodes(root, src)
 		}
 	}
+	return nil
 }
 
 // GetEffectiveConfig returns YAML showing all known settings with their

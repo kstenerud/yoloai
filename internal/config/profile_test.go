@@ -265,6 +265,20 @@ func TestResolveProfileChain_SingleProfile(t *testing.T) {
 	}
 }
 
+func TestResolveProfileChain_MalformedConfigIsError(t *testing.T) {
+	// A profile config.yaml that exists but fails to parse must be a hard error:
+	// silently treating it as "extends base" would discard what the user wrote.
+	_, layout := setupProfileDir(t, "broken", "extends: [unterminated\n")
+
+	_, err := ResolveProfileChain(layout, "broken")
+	if err == nil {
+		t.Fatal("expected an error for a malformed profile config.yaml, got nil")
+	}
+	if !strings.Contains(err.Error(), "parse profile") {
+		t.Errorf("error = %q, want it to mention %q", err, "parse profile")
+	}
+}
+
 func TestResolveProfileChain_TwoLevelChain(t *testing.T) {
 	home, layout := setupProfileDir(t, "go-dev", "agent: claude\n")
 
