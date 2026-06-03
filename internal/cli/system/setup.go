@@ -108,7 +108,7 @@ func availableBackends(ctx context.Context, sc *yoloai.System) []setupChoice {
 	hostOS := runtime.GOOS
 	hostArch := runtime.GOARCH
 	var opts []setupChoice
-	for _, b := range sc.Backends(ctx, yoloai.BackendQuery{}) {
+	for _, b := range sc.BackendTypes(ctx, yoloai.BackendQuery{}) {
 		if b.IsolationTargetOnly {
 			continue
 		}
@@ -127,7 +127,7 @@ func availableBackends(ctx context.Context, sc *yoloai.System) []setupChoice {
 // test/shell/idle pseudo-agents).
 func availableAgents(sc *yoloai.System) []setupChoice {
 	var opts []setupChoice
-	for _, a := range sc.Agents(yoloai.AgentQuery{RealOnly: true}) {
+	for _, a := range sc.AgentTypes(yoloai.AgentQuery{RealOnly: true}) {
 		opts = append(opts, setupChoice{Name: string(a.Type), Blurb: a.Description})
 	}
 	return opts

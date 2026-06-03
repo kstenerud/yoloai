@@ -65,11 +65,12 @@ type BackendQuery struct {
 	ProbeAvailability bool
 }
 
-// Agents returns the static catalog of shipped agents, in stable
-// (sorted-by-name) order. No host state is consulted. With
-// AgentQuery.RealOnly set, the internal/testing pseudo-agents (test, shell,
-// idle) are excluded.
-func (s *System) Agents(q AgentQuery) []AgentInfo {
+// AgentTypes returns the static catalog of agent types yoloai ships, in stable
+// (sorted-by-name) order. These are descriptions to choose from, not runnable
+// handles — to drive an agent, name its type when creating a sandbox and use
+// Sandbox.Agent(). No host state is consulted. With AgentQuery.RealOnly set,
+// the internal/testing pseudo-agents (test, shell, idle) are excluded.
+func (s *System) AgentTypes(q AgentQuery) []AgentInfo {
 	names := agent.AllAgentTypes()
 	if q.RealOnly {
 		names = agent.RealAgents()
@@ -81,11 +82,13 @@ func (s *System) Agents(q AgentQuery) []AgentInfo {
 	return out
 }
 
-// Backends returns the catalog of every registered backend in registration
-// order. With BackendQuery.ProbeAvailability set, each entry's Available/Note
-// reflects whether the backend can run on this host now; otherwise only static
+// BackendTypes returns the catalog of every registered backend type, in
+// registration order. These are descriptions to choose from, not runnable
+// handles — select one by setting Options.BackendType. With
+// BackendQuery.ProbeAvailability set, each entry's Available/Note reflects
+// whether the backend can run on this host now; otherwise only static
 // descriptor metadata is filled in.
-func (s *System) Backends(ctx context.Context, q BackendQuery) []BackendInfo {
+func (s *System) BackendTypes(ctx context.Context, q BackendQuery) []BackendInfo {
 	descs := runtime.Descriptors()
 	out := make([]BackendInfo, 0, len(descs))
 	for _, desc := range descs {

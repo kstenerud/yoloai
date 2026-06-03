@@ -78,7 +78,7 @@ func newSystemBackendsCmd() *cobra.Command {
 // runtime.Descriptors() rather than a CLI-local list — new backends
 // register themselves and auto-appear in this listing.
 func listBackends(cmd *cobra.Command) error {
-	backends := cliutil.System().Backends(cmd.Context(), yoloai.BackendQuery{ProbeAvailability: true})
+	backends := cliutil.System().BackendTypes(cmd.Context(), yoloai.BackendQuery{ProbeAvailability: true})
 
 	if cliutil.JSONEnabled(cmd) {
 		type backendJSON struct {
@@ -119,7 +119,7 @@ func listBackends(cmd *cobra.Command) error {
 func showBackendDetail(cmd *cobra.Command, name string) error {
 	var desc yoloai.BackendInfo
 	found := false
-	for _, b := range cliutil.System().Backends(cmd.Context(), yoloai.BackendQuery{ProbeAvailability: true}) {
+	for _, b := range cliutil.System().BackendTypes(cmd.Context(), yoloai.BackendQuery{ProbeAvailability: true}) {
 		if string(b.Type) == name {
 			desc = b
 			found = true
@@ -176,7 +176,7 @@ func showBackendDetail(cmd *cobra.Command, name string) error {
 // backendNames returns the names of all registered backends in registration
 // order; used in usage-error messages enumerating valid choices.
 func backendNames(cmd *cobra.Command) []string {
-	backends := cliutil.System().Backends(cmd.Context(), yoloai.BackendQuery{})
+	backends := cliutil.System().BackendTypes(cmd.Context(), yoloai.BackendQuery{})
 	names := make([]string, len(backends))
 	for i, b := range backends {
 		names[i] = string(b.Type)
@@ -203,7 +203,7 @@ func newSystemAgentsCmd() *cobra.Command {
 
 // listAgents displays the summary table of all agents.
 func listAgents(cmd *cobra.Command) error {
-	agents := cliutil.System().Agents(yoloai.AgentQuery{})
+	agents := cliutil.System().AgentTypes(yoloai.AgentQuery{})
 
 	if cliutil.JSONEnabled(cmd) {
 		type agentJSON struct {
@@ -235,7 +235,7 @@ func listAgents(cmd *cobra.Command) error {
 // agentNames returns the sorted names of all shipped agents; used for
 // shell completion and usage-error enumerations.
 func agentNames(cmd *cobra.Command) []string {
-	agents := cliutil.System().Agents(yoloai.AgentQuery{})
+	agents := cliutil.System().AgentTypes(yoloai.AgentQuery{})
 	names := make([]string, len(agents))
 	for i, a := range agents {
 		names[i] = string(a.Type)
@@ -247,7 +247,7 @@ func agentNames(cmd *cobra.Command) []string {
 func showAgentDetail(cmd *cobra.Command, name string) error {
 	var def yoloai.AgentInfo
 	found := false
-	for _, a := range cliutil.System().Agents(yoloai.AgentQuery{}) {
+	for _, a := range cliutil.System().AgentTypes(yoloai.AgentQuery{}) {
 		if string(a.Type) == name {
 			def = a
 			found = true

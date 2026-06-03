@@ -195,7 +195,7 @@ func (s *System) Info(ctx context.Context) (*SystemInfo, error) {
 		SandboxesDir:   s.layout.SandboxesDir(),
 		GlobalConfig:   s.layout.GlobalConfigPath(),
 		DefaultsConfig: s.layout.DefaultsConfigPath(),
-		Backends:       s.Backends(ctx, BackendQuery{ProbeAvailability: true}),
+		Backends:       s.BackendTypes(ctx, BackendQuery{ProbeAvailability: true}),
 	}, nil
 }
 

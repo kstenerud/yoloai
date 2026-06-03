@@ -16,7 +16,7 @@ import (
 func TestSystemClient_Agents_Catalog(t *testing.T) {
 	c := newTestClient(t)
 
-	agents := c.Agents(AgentQuery{})
+	agents := c.AgentTypes(AgentQuery{})
 	require.Len(t, agents, len(agent.AllAgentTypes()), "one AgentInfo per shipped agent")
 
 	byName := make(map[string]AgentInfo, len(agents))
@@ -33,14 +33,14 @@ func TestSystemClient_Agents_RealOnly(t *testing.T) {
 	c := newTestClient(t)
 
 	real := make(map[string]bool)
-	for _, a := range c.Agents(AgentQuery{RealOnly: true}) {
+	for _, a := range c.AgentTypes(AgentQuery{RealOnly: true}) {
 		real[string(a.Type)] = true
 	}
 	for _, pseudo := range []string{"test", "shell", "idle"} {
 		assert.False(t, real[pseudo], "RealOnly excludes pseudo-agent %q", pseudo)
 	}
 	assert.True(t, real["claude"], "RealOnly keeps real agents")
-	assert.Less(t, len(real), len(c.Agents(AgentQuery{})), "RealOnly returns fewer than the full catalog")
+	assert.Less(t, len(real), len(c.AgentTypes(AgentQuery{})), "RealOnly returns fewer than the full catalog")
 }
 
 func TestSystemClient_Archetypes(t *testing.T) {
@@ -56,7 +56,7 @@ func TestSystemClient_Archetypes(t *testing.T) {
 func TestSystemClient_Backends_StaticCatalog(t *testing.T) {
 	c := newTestClient(t)
 
-	backends := c.Backends(context.Background(), BackendQuery{})
+	backends := c.BackendTypes(context.Background(), BackendQuery{})
 	descs := runtime.Descriptors()
 	require.Len(t, backends, len(descs), "one BackendInfo per registered backend")
 
@@ -72,7 +72,7 @@ func TestSystemClient_Backends_StaticCatalog(t *testing.T) {
 func TestSystemClient_Backends_Probed(t *testing.T) {
 	c := newTestClient(t)
 
-	backends := c.Backends(context.Background(), BackendQuery{ProbeAvailability: true})
+	backends := c.BackendTypes(context.Background(), BackendQuery{ProbeAvailability: true})
 	require.Len(t, backends, len(runtime.Descriptors()))
 	for _, b := range backends {
 		if !b.Available {
