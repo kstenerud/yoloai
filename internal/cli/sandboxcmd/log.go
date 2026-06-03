@@ -1,59 +1,52 @@
 package sandboxcmd
 
-// ABOUTME: Sandbox log display: pretty-prints structured JSONL from all four log
-// ABOUTME: sources (cli, sandbox, monitor, hooks), with optional follow mode,
-// ABOUTME: level/source/since filtering, raw JSONL output, and agent terminal output.
+// ABOUTME: Sandbox log display: pretty-prints the structured JSONL frames the
+// ABOUTME: library's activity stream (SystemClient.Logs) delivers, with optional
+// ABOUTME: follow, level/source/since filtering, raw passthrough, and agent output.
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
-	"sort"
 	"strings"
 	"time"
 
+	"github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
 
-// logSource describes one JSONL log source.
-type logSource struct {
-	key   string
-	label string // 7 chars, right-padded
-	path  func(name string) string
+// sourceLabels gives each log source its 7-char, right-padded display label.
+var sourceLabels = map[yoloai.LogSource]string{
+	yoloai.LogSourceCLI:     "cli    ",
+	yoloai.LogSourceSandbox: "sandbox",
+	yoloai.LogSourceMonitor: "monitor",
+	yoloai.LogSourceHooks:   "hooks  ",
 }
 
-var allLogSources = []logSource{
-	{"cli", "cli    ", func(name string) string { return cliutil.NewSystemClient().LogPaths(name).CLI }},
-	{"sandbox", "sandbox", func(name string) string { return cliutil.NewSystemClient().LogPaths(name).Sandbox }},
-	{"monitor", "monitor", func(name string) string { return cliutil.NewSystemClient().LogPaths(name).Monitor }},
-	{"hooks", "hooks  ", func(name string) string { return cliutil.NewSystemClient().LogPaths(name).Hooks }},
-}
-
-// logRecord is a parsed JSONL log entry.
+// logRecord is a parsed JSONL log entry, decomposed for pretty-printing. The
+// library hands us the raw line; turning it into display fields is CLI work.
 type logRecord struct {
-	ts     time.Time
-	level  string
-	event  string
-	msg    string
-	source logSource
-	extra  [][2]string // ordered key=val pairs (excluding ts, level, event, msg)
-	raw    string      // original line for --raw mode
+	ts          time.Time
+	level       string
+	event       string
+	msg         string
+	sourceLabel string
+	extra       [][2]string // ordered key=val pairs (excluding ts, level, event, msg)
 }
 
-// parseLogRecord parses one JSONL line. Returns false if not valid JSONL.
-func parseLogRecord(line string, src logSource) (logRecord, bool) {
-	// Use a raw map to extract known fields then collect the rest.
+// parseLogRecord parses one JSONL line for display. Returns false if not valid
+// JSONL (the caller falls back to printing the raw line).
+func parseLogRecord(line string, sourceLabel string) (logRecord, bool) {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(line), &raw); err != nil {
 		return logRecord{}, false
 	}
 
-	rec := logRecord{source: src, raw: line}
+	rec := logRecord{sourceLabel: sourceLabel}
 	rec.ts = parseLogTimestamp(raw)
 	rec.level = rawJSONString(raw, "level")
 	rec.event = rawJSONString(raw, "event")
@@ -109,22 +102,6 @@ func collectLogExtras(raw map[string]json.RawMessage) [][2]string {
 	return extra
 }
 
-// levelOrder returns numeric order for log level comparisons.
-func levelOrder(level string) int {
-	switch strings.ToLower(level) {
-	case "debug":
-		return 0
-	case "info":
-		return 1
-	case "warn", "warning":
-		return 2
-	case "error":
-		return 3
-	default:
-		return 1 // treat unknown as info
-	}
-}
-
 // levelCode returns a 4-char uppercase level code.
 func levelCode(level string) string {
 	switch strings.ToLower(level) {
@@ -145,16 +122,6 @@ func levelCode(level string) string {
 	}
 }
 
-// parseLogLevel parses a level name into its numeric order.
-func parseLogLevel(s string) (int, error) {
-	switch strings.ToLower(s) {
-	case "debug", "info", "warn", "warning", "error":
-		return levelOrder(s), nil
-	default:
-		return 0, yoerrors.NewUsageError("unknown level %q: must be debug, info, warn, or error", s)
-	}
-}
-
 // parseSince parses a --since value into a UTC time.
 // Accepts Go durations ("5m") or local time strings ("14:20:00").
 func parseSince(s string) (time.Time, error) {
@@ -172,20 +139,17 @@ func parseSince(s string) (time.Time, error) {
 	return time.Time{}, yoerrors.NewUsageError("unrecognized format: use a duration (e.g. 5m) or local time (e.g. 14:20:00)")
 }
 
-// filterSources returns active sources based on the --source flag.
-// If sourceFlag is empty, all sources are returned.
-func filterSources(sourceFlag string) []logSource {
+// parseSourceFlag turns the --source value into a LogSource list. Empty means
+// all sources (nil). Unknown keys are silently dropped, matching prior behavior.
+func parseSourceFlag(sourceFlag string) []yoloai.LogSource {
 	if sourceFlag == "" {
-		return allLogSources
+		return nil
 	}
-	keySet := make(map[string]bool)
+	var result []yoloai.LogSource
 	for k := range strings.SplitSeq(sourceFlag, ",") {
-		keySet[strings.TrimSpace(k)] = true
-	}
-	var result []logSource
-	for _, src := range allLogSources {
-		if keySet[src.key] {
-			result = append(result, src)
+		key := strings.TrimSpace(k)
+		if _, ok := sourceLabels[yoloai.LogSource(key)]; ok {
+			result = append(result, yoloai.LogSource(key))
 		}
 	}
 	return result
@@ -217,7 +181,7 @@ func formatRecord(rec logRecord, width int) string {
 		event = fmt.Sprintf("%-24s", event)
 	}
 
-	prefix := fmt.Sprintf("%s %s %s  %s ", timeStr, rec.source.label, lvl, event)
+	prefix := fmt.Sprintf("%s %s %s  %s ", timeStr, rec.sourceLabel, lvl, event)
 	rest := rec.msg
 	for _, kv := range rec.extra {
 		rest += "  " + kv[0] + "=" + kv[1]
@@ -234,216 +198,34 @@ func formatRecord(rec logRecord, width int) string {
 	return prefix + rest
 }
 
-// readLogFile reads all logRecords from a JSONL file, applying level and time filters.
-func readLogFile(path string, src logSource, minLevel int, sinceTime time.Time) []logRecord {
-	f, err := os.Open(path) //nolint:gosec // G304: path derived from trusted sandbox dir
+// runLogStructured consumes the library activity stream and renders it.
+func runLogStructured(cmd *cobra.Command, name string, opts yoloai.LogOptions, rawMode bool) error {
+	events, err := cliutil.NewSystemClient().Logs(cmd.Context(), name, opts)
 	if err != nil {
-		return nil
-	}
-	defer f.Close() //nolint:errcheck
-
-	var records []logRecord
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		rec, ok := parseLogRecord(line, src)
-		if !ok {
-			continue
-		}
-		if levelOrder(rec.level) < minLevel {
-			continue
-		}
-		if !sinceTime.IsZero() && rec.ts.Before(sinceTime) {
-			continue
-		}
-		records = append(records, rec)
-	}
-	return records
-}
-
-// runLogStatic reads all JSONL sources, merge-sorts by timestamp, and emits.
-func runLogStatic(cmd *cobra.Command, name string, sources []logSource, minLevel int, sinceTime time.Time, rawMode bool) error {
-	var all []logRecord
-	for _, src := range sources {
-		recs := readLogFile(src.path(name), src, minLevel, sinceTime)
-		all = append(all, recs...)
-	}
-
-	sort.SliceStable(all, func(i, j int) bool {
-		return all[i].ts.Before(all[j].ts)
-	})
-
-	if len(all) == 0 {
-		fmt.Fprintln(cmd.OutOrStdout(), "No log entries found.") //nolint:errcheck
-		return nil
+		return err
 	}
 
 	width := terminalWidth()
 	out := cmd.OutOrStdout()
-	for _, rec := range all {
+	printed := 0
+	for ev := range events {
+		printed++
 		if rawMode {
-			fmt.Fprintln(out, rec.raw) //nolint:errcheck
-		} else {
-			fmt.Fprintln(out, formatRecord(rec, width)) //nolint:errcheck
+			fmt.Fprintln(out, string(ev.Raw)) //nolint:errcheck
+			continue
 		}
+		rec, ok := parseLogRecord(string(ev.Raw), sourceLabels[ev.Source])
+		if !ok {
+			fmt.Fprintln(out, string(ev.Raw)) //nolint:errcheck
+			continue
+		}
+		fmt.Fprintln(out, formatRecord(rec, width)) //nolint:errcheck
+	}
+
+	if printed == 0 && !opts.Follow {
+		fmt.Fprintln(out, "No log entries found.") //nolint:errcheck
 	}
 	return nil
-}
-
-// tailFile polls a JSONL file for new lines, sending parsed records to ch.
-// Signals done by sending a tailEntry{done: true} when ctx is cancelled.
-func tailFile(
-	cmd *cobra.Command,
-	src logSource,
-	offset int64,
-	minLevel int,
-	sinceTime time.Time,
-	rawMode bool,
-	ch chan<- string,
-	done <-chan struct{},
-) {
-	ticker := time.NewTicker(500 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-done:
-			return
-		case <-ticker.C:
-		}
-
-		newOffset, aborted := tailFilePoll(src, offset, minLevel, sinceTime, rawMode, ch, done)
-		offset = newOffset
-		if aborted {
-			return
-		}
-	}
-}
-
-// tailFilePoll opens the file, reads new lines from offset, and sends them to ch.
-// Returns the new offset and whether the done channel was signalled.
-func tailFilePoll(
-	src logSource,
-	offset int64,
-	minLevel int,
-	sinceTime time.Time,
-	rawMode bool,
-	ch chan<- string,
-	done <-chan struct{},
-) (newOffset int64, aborted bool) {
-	f, err := os.Open(src.path("")) //nolint:gosec // path is trusted
-	if err != nil {
-		return offset, false
-	}
-	if _, err := f.Seek(offset, io.SeekStart); err != nil {
-		_ = f.Close()
-		return offset, false
-	}
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		rec, ok := parseLogRecord(line, src)
-		if !ok {
-			continue
-		}
-		if levelOrder(rec.level) < minLevel {
-			continue
-		}
-		if !sinceTime.IsZero() && rec.ts.Before(sinceTime) {
-			continue
-		}
-		offset += int64(len(scanner.Bytes()) + 1) // +1 for newline
-		var toSend string
-		if rawMode {
-			toSend = line
-		} else {
-			toSend = formatRecord(rec, terminalWidth())
-		}
-		select {
-		case ch <- toSend:
-		case <-done:
-			_ = f.Close()
-			return offset, true
-		}
-	}
-	_ = f.Close()
-	return offset, false
-}
-
-// sandboxIsDone returns true if the sandbox's agent-status.json shows the agent has exited.
-func sandboxIsDone(name string) bool {
-	statusPath := cliutil.NewSystemClient().LogPaths(name).AgentStatus
-	data, err := os.ReadFile(statusPath) //nolint:gosec // G304: statusPath is the yoloAI-owned agent-status.json path
-	if err != nil {
-		return false
-	}
-	var status struct {
-		Status   string `json:"status"`
-		ExitCode *int   `json:"exit_code"`
-	}
-	if err := json.Unmarshal(data, &status); err != nil {
-		return false
-	}
-	return status.Status == "done" || status.Status == "failed" ||
-		(status.Status == "idle" && status.ExitCode != nil)
-}
-
-// runLogFollow tails all sources concurrently and emits as lines arrive.
-func runLogFollow(cmd *cobra.Command, name string, sources []logSource, minLevel int, sinceTime time.Time, rawMode bool) error {
-	// First emit static backlog
-	if err := runLogStatic(cmd, name, sources, minLevel, sinceTime, rawMode); err != nil {
-		return err
-	}
-
-	ch := make(chan string, 64)
-	done := make(chan struct{})
-
-	for _, src := range sources {
-		// Calculate initial offset (end of file)
-		var offset int64
-		if f, err := os.Open(src.path(name)); err == nil { //nolint:gosec // G304: src.path is a known yoloAI log path (logs/<source>.jsonl)
-			offset, _ = f.Seek(0, io.SeekEnd)
-			_ = f.Close()
-		}
-		srcCopy2 := logSource{
-			key:   src.key,
-			label: src.label,
-			path:  func(_ string) string { return src.path(name) },
-		}
-		go tailFile(cmd, srcCopy2, offset, minLevel, sinceTime, rawMode, ch, done)
-	}
-
-	out := cmd.OutOrStdout()
-	exitCheck := time.NewTicker(2 * time.Second)
-	defer exitCheck.Stop()
-
-	for {
-		select {
-		case line := <-ch:
-			fmt.Fprintln(out, line) //nolint:errcheck
-		case <-exitCheck.C:
-			if sandboxIsDone(name) {
-				// Drain remaining buffered lines
-				for {
-					select {
-					case line := <-ch:
-						fmt.Fprintln(out, line) //nolint:errcheck
-					default:
-						close(done)
-						return nil
-					}
-				}
-			}
-		}
-	}
 }
 
 // runLogAgent shows the raw agent terminal output (logs/agent.log).
@@ -484,14 +266,6 @@ func runLog(cmd *cobra.Command, args []string) error {
 		return runLogAgent(cmd, name, agentRawFlag)
 	}
 
-	if levelFlag == "" {
-		levelFlag = "info"
-	}
-	minLevel, err := parseLogLevel(levelFlag)
-	if err != nil {
-		return err
-	}
-
 	var sinceTime time.Time
 	if sinceFlag != "" {
 		sinceTime, err = parseSince(sinceFlag)
@@ -500,10 +274,11 @@ func runLog(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	activeSources := filterSources(sourceFlag)
-
-	if followFlag {
-		return runLogFollow(cmd, name, activeSources, minLevel, sinceTime, rawFlag)
+	opts := yoloai.LogOptions{
+		Sources:  parseSourceFlag(sourceFlag),
+		MinLevel: levelFlag,
+		Since:    sinceTime,
+		Follow:   followFlag,
 	}
-	return runLogStatic(cmd, name, activeSources, minLevel, sinceTime, rawFlag)
+	return runLogStructured(cmd, name, opts, rawFlag)
 }

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kstenerud/yoloai"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -75,43 +76,44 @@ func TestLevelCode_UnknownShort(t *testing.T) {
 	assert.Contains(t, got, "OK")
 }
 
-// --- filterSources tests ---
+// --- parseSourceFlag tests ---
 
-func TestFilterSources_Empty_ReturnsAll(t *testing.T) {
-	sources := filterSources("")
-	assert.Equal(t, allLogSources, sources)
+func TestParseSourceFlag_Empty_ReturnsNilMeaningAll(t *testing.T) {
+	// Empty flag yields nil; the library treats nil Sources as "all sources".
+	assert.Nil(t, parseSourceFlag(""))
 }
 
-func TestFilterSources_SingleKey(t *testing.T) {
-	sources := filterSources("cli")
+func TestParseSourceFlag_SingleKey(t *testing.T) {
+	sources := parseSourceFlag("cli")
 	require.Len(t, sources, 1)
-	assert.Equal(t, "cli", sources[0].key)
+	assert.Equal(t, yoloai.LogSourceCLI, sources[0])
 }
 
-func TestFilterSources_MultipleKeys(t *testing.T) {
-	sources := filterSources("cli,sandbox")
+func TestParseSourceFlag_MultipleKeys(t *testing.T) {
+	sources := parseSourceFlag("cli,sandbox")
 	require.Len(t, sources, 2)
-	keys := []string{sources[0].key, sources[1].key}
-	assert.ElementsMatch(t, []string{"cli", "sandbox"}, keys)
+	assert.ElementsMatch(t, []yoloai.LogSource{yoloai.LogSourceCLI, yoloai.LogSourceSandbox}, sources)
 }
 
-func TestFilterSources_WithSpaces(t *testing.T) {
-	sources := filterSources("cli, hooks")
+func TestParseSourceFlag_WithSpaces(t *testing.T) {
+	sources := parseSourceFlag("cli, hooks")
 	require.Len(t, sources, 2)
 }
 
-func TestFilterSources_UnknownKeyIgnored(t *testing.T) {
-	sources := filterSources("cli,nonexistent")
+func TestParseSourceFlag_UnknownKeyIgnored(t *testing.T) {
+	sources := parseSourceFlag("cli,nonexistent")
 	require.Len(t, sources, 1)
-	assert.Equal(t, "cli", sources[0].key)
+	assert.Equal(t, yoloai.LogSourceCLI, sources[0])
 }
 
 // --- parseLogRecord edge-case tests ---
 
+// cliLabel is the display label parseLogRecord stamps onto records in tests.
+var cliLabel = sourceLabels[yoloai.LogSourceCLI]
+
 func TestParseLogRecord_RFC3339Timestamp(t *testing.T) {
-	src := allLogSources[0]
 	line := `{"ts":"2026-03-15T14:23:01Z","level":"info","event":"e","msg":"m"}`
-	rec, ok := parseLogRecord(line, src)
+	rec, ok := parseLogRecord(line, cliLabel)
 	require.True(t, ok)
 	assert.Equal(t, 2026, rec.ts.Year())
 	assert.Equal(t, time.March, rec.ts.Month())
@@ -119,10 +121,9 @@ func TestParseLogRecord_RFC3339Timestamp(t *testing.T) {
 }
 
 func TestParseLogRecord_MissingTimestamp(t *testing.T) {
-	src := allLogSources[0]
 	before := time.Now().UTC()
 	line := `{"level":"info","event":"e","msg":"no ts field"}`
-	rec, ok := parseLogRecord(line, src)
+	rec, ok := parseLogRecord(line, cliLabel)
 	after := time.Now().UTC()
 	require.True(t, ok)
 	// Fallback: ts is set to time.Now() during parsing.
@@ -131,10 +132,9 @@ func TestParseLogRecord_MissingTimestamp(t *testing.T) {
 }
 
 func TestParseLogRecord_InvalidTimestamp(t *testing.T) {
-	src := allLogSources[0]
 	before := time.Now().UTC()
 	line := `{"ts":"not-a-time","level":"info","event":"e","msg":"m"}`
-	rec, ok := parseLogRecord(line, src)
+	rec, ok := parseLogRecord(line, cliLabel)
 	after := time.Now().UTC()
 	require.True(t, ok)
 	// Unparseable ts also falls back to time.Now().
@@ -143,9 +143,8 @@ func TestParseLogRecord_InvalidTimestamp(t *testing.T) {
 }
 
 func TestParseLogRecord_NonStringExtraFields(t *testing.T) {
-	src := allLogSources[0]
 	line := `{"ts":"2026-03-15T14:23:01.000Z","level":"info","event":"e","msg":"m","count":42,"ok":true}`
-	rec, ok := parseLogRecord(line, src)
+	rec, ok := parseLogRecord(line, cliLabel)
 	require.True(t, ok)
 
 	extraMap := make(map[string]string)
@@ -157,32 +156,22 @@ func TestParseLogRecord_NonStringExtraFields(t *testing.T) {
 }
 
 func TestParseLogRecord_InvalidJSON(t *testing.T) {
-	src := allLogSources[0]
-	_, ok := parseLogRecord("not json at all", src)
+	_, ok := parseLogRecord("not json at all", cliLabel)
 	assert.False(t, ok)
 
-	_, ok = parseLogRecord("{incomplete", src)
+	_, ok = parseLogRecord("{incomplete", cliLabel)
 	assert.False(t, ok)
-}
-
-func TestParseLogRecord_PreservesRaw(t *testing.T) {
-	src := allLogSources[0]
-	line := `{"ts":"2026-03-15T14:23:01.000Z","level":"info","event":"e","msg":"m"}`
-	rec, ok := parseLogRecord(line, src)
-	require.True(t, ok)
-	assert.Equal(t, line, rec.raw)
 }
 
 // --- formatRecord tests ---
 
 func TestFormatRecord_ContainsExpectedParts(t *testing.T) {
-	src := allLogSources[0] // cli
 	rec := logRecord{
-		ts:     time.Date(2026, 3, 15, 14, 23, 1, 0, time.UTC),
-		level:  "info",
-		event:  "sandbox.create",
-		msg:    "creating sandbox",
-		source: src,
+		ts:          time.Date(2026, 3, 15, 14, 23, 1, 0, time.UTC),
+		level:       "info",
+		event:       "sandbox.create",
+		msg:         "creating sandbox",
+		sourceLabel: cliLabel,
 	}
 	out := formatRecord(rec, 0) // width=0 disables truncation
 	assert.Contains(t, out, "INFO")
@@ -192,14 +181,13 @@ func TestFormatRecord_ContainsExpectedParts(t *testing.T) {
 }
 
 func TestFormatRecord_ExtraFieldsAppended(t *testing.T) {
-	src := allLogSources[0]
 	rec := logRecord{
-		ts:     time.Now(),
-		level:  "info",
-		event:  "e",
-		msg:    "msg",
-		source: src,
-		extra:  [][2]string{{"sandbox", "my-box"}, {"agent", "claude"}},
+		ts:          time.Now(),
+		level:       "info",
+		event:       "e",
+		msg:         "msg",
+		sourceLabel: cliLabel,
+		extra:       [][2]string{{"sandbox", "my-box"}, {"agent", "claude"}},
 	}
 	out := formatRecord(rec, 0)
 	assert.Contains(t, out, "sandbox=my-box")
@@ -207,26 +195,24 @@ func TestFormatRecord_ExtraFieldsAppended(t *testing.T) {
 }
 
 func TestFormatRecord_TruncatesAtWidth(t *testing.T) {
-	src := allLogSources[0]
 	rec := logRecord{
-		ts:     time.Now(),
-		level:  "info",
-		event:  "e",
-		msg:    strings.Repeat("x", 200),
-		source: src,
+		ts:          time.Now(),
+		level:       "info",
+		event:       "e",
+		msg:         strings.Repeat("x", 200),
+		sourceLabel: cliLabel,
 	}
 	out := formatRecord(rec, 80)
 	assert.LessOrEqual(t, len(out), 80)
 }
 
 func TestFormatRecord_EventPaddedTo24(t *testing.T) {
-	src := allLogSources[0]
 	rec := logRecord{
-		ts:     time.Now(),
-		level:  "info",
-		event:  "short",
-		msg:    "msg",
-		source: src,
+		ts:          time.Now(),
+		level:       "info",
+		event:       "short",
+		msg:         "msg",
+		sourceLabel: cliLabel,
 	}
 	out := formatRecord(rec, 0)
 	// The event column is padded to 24 chars; "short" + 19 spaces should appear.

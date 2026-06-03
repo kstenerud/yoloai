@@ -11,9 +11,12 @@ now **RESOLVED** — the detector descends through aliases, `f1KnownLeaks` is em
 the whole `internal/sandbox`+`internal/runtime` subtrees (see
 [resolved-critiques.md](resolved-critiques.md) for G1/G2/G8).
 
-What remains in this file is the **off-spine** work the round also surfaced: the agent-interaction
-reshape (G5), the setup-wizard pile-3 leak (G6), and the unverified carry-forward items (F6/F7/F9).
-The two naming/consistency sweeps (G3, G4) are now **RESOLVED** (see
+What remains in this file is the **off-spine** work the round also surfaced: the setup-wizard pile-3
+leak (G6) and the unverified carry-forward items (F6/F7/F9). The agent-interaction reshape (G5) is now
+**RESOLVED** — the PTY bridge was already daemon-consumable, the activity stream became the public
+`SystemClient.Logs` verb, and the file exchange landed under G7 (see
+[resolved-critiques.md](resolved-critiques.md)). The two naming/consistency sweeps (G3, G4) are now
+**RESOLVED** (see
 [resolved-critiques.md](resolved-critiques.md)). The D53 three-noun read-model reshape — turning the
 field-for-field `Environment` mirror into an identity/posture + embedded-resolved-config view that
 drops pile-3 mechanism — also remains, tracked under D53 rather than as a numbered finding here.
@@ -48,44 +51,16 @@ List/slice surfaces normalized to non-nil empty on success (JSON `[]` not `null`
 `CloneOptions.Overwrite` field wired into `Client.Clone` (cross-backend destroy of a pre-existing
 destination) and the internal `Force` field removed. Enum homes assessed as already-principled.
 
-### G5 — The agent-interaction surface is bound to the caller's process stdio, not contracted for an embedder
+### G5 — RESOLVED 2026-06-03 → see [resolved-critiques.md](resolved-critiques.md)
 
-- **Severity:** MAJOR (it's the conversation half of the product's value, and the daemon can't consume it as-is)
-- **Where:** `IOStreams`, `TerminalSnapshot`, `Sandbox.Attach`/`SendInput`/`CaptureTerminal`, and
-  `preparePromptForStart(... stdin io.Reader ...)` in `internal/sandbox/lifecycle/lifecycle.go`.
-- **Observation:** Talking to the agent is a first-class consumer capability (the "converse" half of
-  the value prop), but the current seam (a) tangles two distinct concerns — live conversation and
-  glanceable observation — into one terminal-flavored surface, and (b) binds it to the *caller's*
-  `io.Reader/Writer` (`IOStreams`). The same caller-stdio coupling appears a third time in the prompt
-  path (`preparePromptForStart`'s `stdin`). The lived symptom: "talk to the agent" today requires
-  VS Code tunnel → in-sandbox shell → `tmux attach` — manual ceremony, because "attach to the agent's
-  terminal" isn't a first-class primitive.
-- **Why it bothers me:** The agent is a TUI, so the terminal is **intrinsic** — this is *not* a
-  shape error to refactor into an event stream (correcting my own earlier framing; see D53). But
-  binding it to caller stdio means a daemon — the stated forcing function — cannot consume it: it
-  can't hand the engine an `io.Writer`; it needs a PTY bridged over a socket. So the most
-  value-bearing interactive capability is exactly the one a daemon must work *around*, not *through*.
-- **Greenfield alternative (D53):** Split into two complementary surfaces.
-  - **PTY bridge** for conversation — contract is "a terminal" (bytes in/out + resize),
-    attachable/multi-client/persistent, decoupled from caller stdio; tmux stays the substrate behind
-    it (persistence + multi-client re-attach). CLI wires it to the local terminal; a daemon wires it
-    to a websocket → xterm.js. `CaptureTerminal`/`TerminalSnapshot` become conveniences on this
-    primitive. VS Code tunnel demotes to optional full-IDE convenience.
-  - **Activity stream** for observation — `AgentStatus` + `LogSource` + monitor/hooks promoted to a
-    subscribable surface. This half genuinely *is* a clean event stream.
-  - **Structured file exchange** (found by audit — a third surface the two-surface model missed):
-    `store.FilesDir()` (`/yoloai/files/`), exposed by the mcpsrv daemon prototype as
-    `sandbox_files_list/read/write` and carrying a Q&A protocol (agent drops `question.json`,
-    consumer writes `answer.json`, then pokes via keystroke). Out-of-band structured side-channel
-    that complements the PTY because large/structured content is impractical to type. Needs a public
-    home (e.g. `Sandbox.Files()` sub-handle), not direct `store.FilesDir()` reach-in.
-  - **Prompt injection stays internal** — the initial task is the one-time `RunOptions.Prompt`; the
-    four injection sites are internal re-delivery across lifecycle events; no `SendPrompt` verb. The
-    file exchange is a distinct structured channel, NOT prompt delivery.
-- **Stdio-coupling confirmed by audit:** prompt reading binds to caller stdio via the `"-"` sentinel
-  (`invocation.ReadPrompt` → engine `input` → `os.Stdin` at the CLI). Same coupling as `Attach`/`SendInput`.
-- **Migration cost:** Real reshape, multi-day, and best decided *before* a wire protocol exists.
-  Independent of the read-model spine but shares the "decouple from caller stdio" theme.
+Split into three surfaces, all now resolved: (a) the **PTY bridge** was already daemon-consumable —
+`IOStreams` is stdio-decoupled and `Sandbox.Attach` is tmux-backed/multi-client, so the critique's
+"daemon can't hand the engine an `io.Writer`" premise was stale (no code change); (b) the **activity
+stream** transport was carved out of `internal/cli/sandboxcmd/log.go` into
+`internal/sandbox/logstream.go` and exposed as the public verb `SystemClient.Logs(...) (<-chan
+LogEvent, error)` — verbatim `Raw` JSONL frames plus `Time`/`Level` projections, no payload reshaping;
+(c) the **file exchange** already had a public home via G7. Details + the decision shape in the
+resolved sink.
 
 ### G6 — First-run setup UX leaked into the library contract
 
@@ -136,12 +111,12 @@ off-spine items were **not** part of the spine and may still be open:
 
 ## Recommended ordering
 
-The spine findings (G1/G2/G7), the G8 naming sweep, and the G3/G4 consistency sweeps are
-**done** — see [resolved-critiques.md](resolved-critiques.md). What remains:
+The spine findings (G1/G2/G7), the G8 naming sweep, the G3/G4 consistency sweeps, and the G5
+agent-interaction reshape are **done** — see [resolved-critiques.md](resolved-critiques.md). What
+remains:
 
-1. **G5** — Reshape the agent-interaction surface (PTY bridge + activity stream + file-exchange
-   sub-handle, decoupled from caller stdio). The most value-bearing remaining work; decide it
-   **before** a wire protocol exists. (Multi-day.) **G6** folds in (hide setup-wizard pile-3).
+1. **G6** — Hide the setup-wizard pile-3 types (`TmuxConfigClass`/`SetupChoice`/`SetupStatus`/
+   interactive `SetupOptions`); keep `Doctor`/`Check`. (Hours.)
 2. **D53 read-model reshape** — turn the field-for-field `Environment` mirror into an
    identity/posture + embedded-resolved-config view that drops pile-3 mechanism. Shares the
    "hide mechanism" sweep with G6. (Tracked under D53.)

@@ -7,6 +7,37 @@ History of critiques that have been addressed and applied. Items are moved here 
 [`unresolved-critiques.md`](unresolved-critiques.md) once resolved, so the active file stays
 a working set. Newest first.
 
+## G5 (2026-05-30 critique) — The agent-interaction surface was bound to caller stdio, not contracted for an embedder
+
+- **Severity:** MAJOR. **Resolved:** 2026-06-03.
+- **The finding split into three surfaces; each is now resolved:**
+  - **PTY bridge (conversation) — already decoupled (no code change).** The critique's
+    central claim ("a daemon can't hand the engine an `io.Writer`; it needs a PTY bridged over a
+    socket") was **stale**. `IOStreams` (aliased at `yoloai.go` as `runtime.IOStreams`) already
+    carries `In io.Reader`/`Out io.Writer`/`Err io.Writer`/`TTY`/`Rows,Cols`/`Term`/`Resize
+    <-chan TermSize` — the library never touches the process stdin FD or `$TERM`. `Sandbox.Attach`
+    is tmux-backed (persistent, multi-client re-attach), so a daemon wires `IOStreams` to a
+    websocket→xterm.js exactly as the CLI wires it to the local terminal. The prompt path's `"-"`
+    stdin sentinel is likewise already injectable via `Options.Input`. So the PTY half was a faithful
+    embedder contract before this round; the finding's premise no longer held.
+  - **Activity stream (observation) — carved into the library (this round).** The transport that
+    lived in `internal/cli/sandboxcmd/log.go` (open the four JSONL sources, backlog read,
+    merge-sort, follow tail-poll, terminal done-detection via `agent-status.json`) moved down to
+    `internal/sandbox/logstream.go` (`StreamLogs`) and is exposed as the public verb
+    **`SystemClient.Logs(ctx, name, LogOptions) (<-chan LogEvent, error)`** — a subscribable,
+    time-ordered stream, sibling to `AgentLog`. `LogEvent` carries the **verbatim** JSONL line
+    (`Raw`) plus the two projections the transport must parse to order/filter (`Time`, `Level`);
+    the library does **not** reshape the payload — a consumer that wants a richer view parses `Raw`
+    itself (the user's "raw until it has to change" principle). The CLI keeps only rendering
+    (`parseLogRecord`/`formatRecord`/`levelCode`/`terminalWidth`/`stripANSI`) and `--since`
+    local-tz input parsing. No speculative daemon-side converter helpers (YAGNI).
+  - **Structured file exchange — already done (G7).** `Sandbox.Files()` + the mcpsrv file-exchange
+    carve gave this surface a public home; tracked under G7's verb series, not re-done here.
+- **Decision shape (per the user).** Two complementary surfaces (PTY bridge + activity stream) plus
+  the file-exchange sub-handle — *not* a single terminal-flavored seam, and *not* an event-union
+  reshape of the log payload. Prompt injection stays internal (the one-time `RunOptions.Prompt`;
+  re-delivery is internal lifecycle), so there is no `SendPrompt` verb.
+
 ## G3 (2026-05-30 critique) — Public Options field-naming inconsistent on a soon-to-be-versioned contract
 
 - **Severity:** MINOR. **Resolved:** 2026-06-03.
