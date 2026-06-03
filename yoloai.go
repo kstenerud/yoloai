@@ -168,6 +168,17 @@ type Options struct {
 	// must be ≤8 alphanumeric chars (parsed at construction; invalid is
 	// rejected with a *UsageError). See D62.
 	Principal string
+
+	// SecretsStagingDir is the host directory under which the library stages a
+	// per-sandbox temp dir of plaintext agent credentials before bind-mounting
+	// it in. Optional; empty ("") means the OS default temp dir (os.TempDir()),
+	// which is what the single-principal CLI uses.
+	//
+	// The library decides WHAT to stage and WHEN to delete it; the embedder
+	// supplies WHERE (D59 refinement). A multi-principal daemon points each
+	// principal's Client at that principal's own tmpfs so plaintext
+	// credentials never share a staging root across principals.
+	SecretsStagingDir string
 }
 
 // Client is the simple entry point for yoloAI operations.
@@ -202,6 +213,7 @@ func NewWithOptions(ctx context.Context, opts Options) (*Client, error) {
 
 	layout := config.NewLayoutFor(opts.DataDir, opts.HomeDir).WithPrincipal(principal)
 	layout.Env = opts.Env
+	layout.SecretsStagingDir = opts.SecretsStagingDir
 
 	backend := opts.Backend
 	logger := opts.Logger

@@ -21,14 +21,16 @@ import (
 // configEnv (the ${VAR}-expanded profile env) is written first; the agent's API-key
 // and auth-hint values are then resolved from hostEnv (the caller-supplied host
 // environment snapshot) and overwrite on conflict (take precedence). hostEnv is the
-// sole credential source — the library never reads os.Environ (§12). Returns empty
-// string if nothing was written.
-func CreateSecretsDir(agentDef *agent.Definition, configEnv, hostEnv map[string]string, security runtime.IsolationMode) (string, error) {
+// sole credential source — the library never reads os.Environ (§12). The directory
+// is created under stagingRoot; "" means the OS default temp dir (os.TempDir()), so
+// an embedder can stage a principal's plaintext credentials on a per-principal tmpfs.
+// Returns empty string if nothing was written.
+func CreateSecretsDir(agentDef *agent.Definition, configEnv, hostEnv map[string]string, security runtime.IsolationMode, stagingRoot string) (string, error) {
 	if len(agentDef.APIKeyEnvVars) == 0 && len(agentDef.AuthHintEnvVars) == 0 && len(configEnv) == 0 {
 		return "", nil
 	}
 
-	tmpDir, err := os.MkdirTemp("", "yoloai-secrets-*")
+	tmpDir, err := os.MkdirTemp(stagingRoot, "yoloai-secrets-*")
 	if err != nil {
 		return "", fmt.Errorf("create secrets temp dir: %w", err)
 	}

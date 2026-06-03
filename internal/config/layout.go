@@ -97,6 +97,18 @@ type Layout struct {
 	// WithPrincipal. The Layout *is* the principal-scoped handle (D58/D59);
 	// the principal is client-scoped, never per-call. See D62.
 	Principal PrincipalSegment
+
+	// SecretsStagingDir is the parent directory under which the short-lived
+	// per-sandbox secrets directory is created (one file per credential,
+	// bind-mounted into the container and removed seconds after startup). The
+	// zero value "" means "use the OS default temp dir" (os.TempDir()), which
+	// is what the CLI uses. A daemon embedder serving multiple principals can
+	// point this at a per-principal tmpfs so one principal's plaintext
+	// credentials are never staged on a path another principal can read. This
+	// is the "the *what* stays in the library, the *where* becomes caller-
+	// supplied" refinement of D59 — the library still decides what to stage and
+	// when to delete it; the embedder decides where.
+	SecretsStagingDir string
 }
 
 // WithPrincipal returns a copy of the Layout scoped to the given principal.

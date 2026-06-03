@@ -44,7 +44,7 @@ func LaunchContainer(ctx context.Context, d state.Deps, st *state.State) error {
 		envVars = cfg.Env
 	}
 
-	secretsDir, err := provision.CreateSecretsDir(st.Agent, envVars, st.Layout.Env, st.Isolation)
+	secretsDir, err := provision.CreateSecretsDir(st.Agent, envVars, st.Layout.Env, st.Isolation, st.Layout.SecretsStagingDir)
 	if err != nil {
 		return fmt.Errorf("create secrets: %w", err)
 	}
