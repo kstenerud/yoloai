@@ -12,9 +12,9 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/cli"
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+	"github.com/kstenerud/yoloai/internal/cli/extension"
 	"github.com/kstenerud/yoloai/internal/cli/xcmd"
 	"github.com/kstenerud/yoloai/internal/config"
-	"github.com/kstenerud/yoloai/internal/extension"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

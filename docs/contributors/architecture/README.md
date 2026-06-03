@@ -12,8 +12,8 @@ yoerrors/                → Public typed error sentinels (top-level pkg; re-exp
 cmd/yoloai/              → Binary entry point
 internal/agent/          → Agent plugin definitions (Aider, Claude, Codex, Gemini, OpenCode, test, idle)
 internal/cli/            → Cobra command tree and CLI plumbing
+internal/cli/extension/  → User-defined custom commands (YAML-based extensions, the 'x' command) — CLI-private
 internal/config/         → Configuration loading, profiles, migration, state, path utilities
-internal/extension/      → User-defined custom commands (YAML-based extensions)
 internal/fileutil/       → os.MkdirAll / os.WriteFile wrappers for sudo ownership fix
 internal/locking/        → Per-sandbox advisory locks (Q-T)
 internal/mcpsrv/         → MCP server exposing sandbox operations as tools for outer agents
