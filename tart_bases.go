@@ -56,14 +56,6 @@ func (e *TartBaseNotFoundError) Error() string {
 	return fmt.Sprintf("tart runtime base %q not found", e.Name)
 }
 
-// TartBases returns the admin handle for Tart simulator runtime base images.
-// The Tart backend is macOS-only; runtime-touching methods (List/Add/Remove)
-// return the backend-construction error when it is unavailable. Call Available
-// to probe first, or inspect the returned error.
-func (c *System) TartBases() *TartBaseAdmin {
-	return &TartBaseAdmin{layout: c.layout}
-}
-
 // TartBaseAdmin manages Tart runtime base images. Obtain one via
 // System.TartBases. The mechanism reports facts (availability, runtimes,
 // bases) and performs the create/delete; deciding whether the Tart backend is

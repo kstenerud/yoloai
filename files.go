@@ -16,11 +16,6 @@ type Files struct {
 	s *Sandbox
 }
 
-// Files returns a file-exchange handle for the sandbox.
-func (s *Sandbox) Files() *Files {
-	return &Files{s: s}
-}
-
 // Path returns the host path of the exchange directory. The directory may not
 // exist yet (Import creates it on demand).
 func (f *Files) Path() string {

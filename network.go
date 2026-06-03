@@ -57,11 +57,6 @@ type Network struct {
 	s *Sandbox
 }
 
-// Network returns the sandbox's network-management sub-handle.
-func (s *Sandbox) Network() *Network {
-	return &Network{s: s}
-}
-
 // Allowed returns the sandbox's network allowlist with each entry
 // tagged by its source. Order matches meta.NetworkAllow's on-disk
 // order. Returns an empty (non-nil) slice when the sandbox is not

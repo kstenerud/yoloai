@@ -25,9 +25,6 @@ type Agent struct {
 	s *Sandbox
 }
 
-// Agent returns the agent-interaction sub-handle for this sandbox.
-func (s *Sandbox) Agent() *Agent { return &Agent{s: s} }
-
 // Prompt returns the prompt text persisted for the sandbox. The bool reports
 // whether a prompt was configured: a sandbox with no prompt yields
 // ("", false, nil); a present-but-empty prompt yields ("", true, nil). This is

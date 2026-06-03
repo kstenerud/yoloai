@@ -32,14 +32,6 @@ type ConfigAdmin struct {
 	s *System
 }
 
-// Config returns the configuration-management sub-handle.
-//
-// Q-W resolution (Shape B, sub-handles): config get/set/reset
-// cluster under one accessor, matching Profiles().
-func (s *System) Config() *ConfigAdmin {
-	return &ConfigAdmin{s: s}
-}
-
 // Effective returns the merged effective configuration as formatted
 // YAML text (baked-in defaults overlaid with the user's
 // ~/.yoloai/config.yaml and ~/.yoloai/defaults/config.yaml). This is

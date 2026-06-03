@@ -30,23 +30,27 @@ type Sandbox struct {
 	name string
 }
 
-// Sandbox returns a sandbox-scoped handle, validating that the sandbox
-// exists. A missing name is rejected with ErrSandboxNotFound here — at
-// the point the caller typed the name — rather than lazily deep inside a
-// later operation (F22 / §4 parse-don't-validate; the Q-G design rejected
-// the GCS-style lazy handle since validation is local, not a network
-// round-trip). Existence is a sandbox-directory check; a corrupt environment.json
-// surfaces from the individual operation that reads it.
-func (c *Client) Sandbox(name string) (*Sandbox, error) {
-	if err := store.RequireSandboxDir(c.layout.SandboxDir(name)); err != nil {
-		return nil, err
-	}
-	return &Sandbox{c: c, name: name}, nil
-}
-
 // Name returns the sandbox name this handle is bound to. Useful for
 // embedders threading the handle through multiple call sites.
 func (s *Sandbox) Name() string { return s.name }
+
+// Workdir returns the workdir sub-handle for diff/apply operations.
+func (s *Sandbox) Workdir() *Workdir {
+	return &Workdir{s: s}
+}
+
+// Agent returns the agent-interaction sub-handle for this sandbox.
+func (s *Sandbox) Agent() *Agent { return &Agent{s: s} }
+
+// Files returns a file-exchange handle for the sandbox.
+func (s *Sandbox) Files() *Files {
+	return &Files{s: s}
+}
+
+// Network returns the sandbox's network-management sub-handle.
+func (s *Sandbox) Network() *Network {
+	return &Network{s: s}
+}
 
 // Metadata reads the sandbox's creation-time environment straight from disk —
 // no runtime connection, no live status query. This is the runtime-free,

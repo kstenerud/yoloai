@@ -53,15 +53,6 @@ type ProfileAdmin struct {
 	s *System
 }
 
-// Profiles returns the profile-management sub-handle.
-//
-// Q-W resolution (Shape B, sub-handles): profile admin is grouped
-// behind one accessor so the System root stays uncluttered as
-// admin verbs grow. Mirrors the same pattern Config() uses.
-func (s *System) Profiles() *ProfileAdmin {
-	return &ProfileAdmin{s: s}
-}
-
 // Create scaffolds a new profile directory under ~/.yoloai/profiles/<name>/
 // with a commented config.yaml template.
 //

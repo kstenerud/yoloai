@@ -20,11 +20,6 @@ type Workdir struct {
 	s *Sandbox
 }
 
-// Workdir returns the workdir sub-handle for diff/apply operations.
-func (s *Sandbox) Workdir() *Workdir {
-	return &Workdir{s: s}
-}
-
 // DiffOptions configures Workdir.Diff. All fields are optional; the zero value
 // produces the full working diff (committed changes since baseline).
 type DiffOptions struct {

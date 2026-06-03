@@ -40,10 +40,29 @@ type System struct {
 	layout config.Layout
 }
 
-// System returns the admin sub-handle for system-level operations.
-// Always non-nil; never errors. See System for the surface.
-func (c *Client) System() *System {
-	return &System{layout: c.layout}
+// Config returns the configuration-management sub-handle.
+//
+// Q-W resolution (Shape B, sub-handles): config get/set/reset
+// cluster under one accessor, matching Profiles().
+func (s *System) Config() *ConfigAdmin {
+	return &ConfigAdmin{s: s}
+}
+
+// Profiles returns the profile-management sub-handle.
+//
+// Q-W resolution (Shape B, sub-handles): profile admin is grouped
+// behind one accessor so the System root stays uncluttered as
+// admin verbs grow. Mirrors the same pattern Config() uses.
+func (s *System) Profiles() *ProfileAdmin {
+	return &ProfileAdmin{s: s}
+}
+
+// TartBases returns the admin handle for Tart simulator runtime base images.
+// The Tart backend is macOS-only; runtime-touching methods (List/Add/Remove)
+// return the backend-construction error when it is unavailable. Call Available
+// to probe first, or inspect the returned error.
+func (s *System) TartBases() *TartBaseAdmin {
+	return &TartBaseAdmin{layout: s.layout}
 }
 
 // LayoutStatus is the verdict of a realm status check — see DataDirStatus.

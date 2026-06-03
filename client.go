@@ -322,6 +322,26 @@ func (c *Client) Close() error {
 	return c.rt.Close()
 }
 
+// Sandbox returns a sandbox-scoped handle, validating that the sandbox
+// exists. A missing name is rejected with ErrSandboxNotFound here — at
+// the point the caller typed the name — rather than lazily deep inside a
+// later operation (F22 / §4 parse-don't-validate; the Q-G design rejected
+// the GCS-style lazy handle since validation is local, not a network
+// round-trip). Existence is a sandbox-directory check; a corrupt environment.json
+// surfaces from the individual operation that reads it.
+func (c *Client) Sandbox(name string) (*Sandbox, error) {
+	if err := store.RequireSandboxDir(c.layout.SandboxDir(name)); err != nil {
+		return nil, err
+	}
+	return &Sandbox{c: c, name: name}, nil
+}
+
+// System returns the admin sub-handle for system-level operations.
+// Always non-nil; never errors. See System for the surface.
+func (c *Client) System() *System {
+	return &System{layout: c.layout}
+}
+
 // deps bundles the Client's runtime, layout, and input into state.Deps for
 // use with lifecycle and create free functions. Callers must ensure the
 // runtime is open (via ensure) before calling deps for a backend-bound op.
