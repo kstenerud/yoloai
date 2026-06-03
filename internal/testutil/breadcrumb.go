@@ -18,7 +18,7 @@ import (
 // prints start + duration around the call.
 //
 //	step := TestMainBreadcrumb("sandbox")
-//	step("connecting to docker", func() { rt, _ = dockerrt.New(ctx) })
+//	step("connecting to docker", func() { rt, _ = dockerrt.New(ctx, env) })
 //	step("verifying base image", func() { err = mgr.EnsureSetup(ctx) })
 //
 // The pkg label distinguishes which package's TestMain is talking when
