@@ -469,7 +469,7 @@ Host context: `IsRoot`, `IsWSL2`, `InContainer`, `KVMGroup`. Detected once per i
 | `yoloai system agents` | `cli/system/backends_agents.go` | Lists agent definitions from `agent` package |
 | `yoloai system backends` | `cli/system/backends_agents.go` | Probes each backend via `cliutil.CheckBackend` |
 | `yoloai system build` | `cli/system/system.go` | `yoloai.SystemClient.Build()` |
-| `yoloai system setup` | `cli/system/system.go` + `cli/system/setup.go` (wizard) | `yoloai.SystemClient.Setup()` |
+| `yoloai system setup` | `cli/system/system.go` + `cli/system/setup.go` (the wizard owns host inspection, prompts, auto-pick) | `yoloai.SystemClient.Config().Set()` (writes `tmux_conf`/`container_backend`/`agent`); `Backends()`/`Agents()` for choices — no library setup verb |
 | `yoloai system check` | `cli/system/check.go` | `yoloai.SystemClient.Check()` |
 | `yoloai doctor` | `cli/doctorcmd/doctor.go` | `SystemClient.Doctor()` (→ `caps.RunChecks()` + `caps.FormatDoctor()`) + a dry-run `SystemClient.Prune()` and `DiskUsage()` for the advisory sections |
 | `yoloai system prune` | `cli/system/prune.go` | `yoloai.SystemClient.Prune()` |

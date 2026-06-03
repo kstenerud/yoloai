@@ -412,6 +412,20 @@ After the bootstrap the stamp is the **only** signal consulted — a stamped lay
 
 **Consequences.** Stated as development-principles §13 with the G5 carve as its worked example. The boundary rule from §2 gains a data-shape corollary: when a conversion is unavoidable, the layer that *owns* it is the one with the consumer that needs it — the seam (e.g. library vs. daemon) is decided by where the justifying need lives, not by which layer happens to touch the data first. The standing caution: don't read this as license to skip §4's boundary parse — proving an invariant at a trust boundary *is* a justified conversion. §13 forbids the *unjustified* extra ones, not the load-bearing one.
 
+## D65 — Setup-wizard full collapse: the library has no setup verb; onboarding is CLI policy written through `Config().Set`
+
+**Date:** 2026-06-03. **Status:** Accepted (owner, 2026-06-03). **Resolves** critique G6 (see `design/resolved-critiques.md`). **Applies** development-principles §2 (none-of-your-business: policy owns what/why; mechanism complies) and the [[feedback_library_sets_defaults_app_owns_setup_state]] stance. **Implemented** on `layering-refactor`.
+
+**The decision.** The entire first-run-setup vocabulary leaves the public contract — `SystemClient.Setup`, `SystemClient.SetupStatus`, and the types `SetupOptions`/`SetupStatus`/`SetupChoice`/`TmuxConfigClass`(+consts) are removed, and `internal/sandbox/setup.go` (`Engine.SetupStatus`/`Engine.ApplySetup`) is deleted. Not demoted/hidden — collapsed. The library contract is left orthogonal: **discovery** (`Agents`/`Backends`) + **config** (`Config().Get/Set/Reset`) + **just-works defaults** (`EnsureSetup`).
+
+**Why a full collapse and not demotion (G6 proposed "hide the types").** Reading the code showed `Setup`/`ApplySetup` did only two things, both already owned elsewhere: (a) writing the three answers — exactly what `Config().Set` does, routing `tmux_conf`→global, `container_backend`/`agent`→profile defaults; and (b) materializing `defaults/tmux.conf`/`defaults/config.yaml` — which `Engine.ensureDefaultsDir` already does **unconditionally** via `EnsureSetup`, independent of any setup verb. What was left — tmux-config classification, choice enumeration, auto-pick, prompt copy, validation — is onboarding *policy*: §2 says that's the CLI's, not the library's. So the wizard moved wholesale into `internal/cli/system/setup.go`; nothing of value was lost by deleting the verb.
+
+**Supporting catalog fact (W10: no hardcoded backend names in dispatch).** The wizard must exclude containerd from the user's default-backend choices (it's reached only via `--isolation vm`/`vm-enhanced`). Rather than hardcode `"containerd"` in the CLI, a descriptor fact was added: `BackendDescriptor.IsolationTargetOnly` (true on containerd), surfaced on public `BackendInfo` alongside the now-also-surfaced `Architectures`. The CLI filters on facts (`Platforms ∋ GOOS && (Architectures empty || ∋ GOARCH) && !IsolationTargetOnly`).
+
+**Accepted behavior change.** `defaults/tmux.conf` now materializes lazily at the first sandbox op (via `EnsureSetup`) instead of at `yoloai system setup` time. Consistent with the declarative-defaults stance; the file still exists before any sandbox runs.
+
+**Consequences.** Closes the last Layer-1 public-contract finding from the post-F1 round (G6). Logged in `docs/BREAKING-CHANGES.md` (removal of `Setup`/`SetupStatus` + types; `BackendInfo` gains `Architectures`/`IsolationTargetOnly`). `command→code` map in `architecture/README.md` updated. F1 leak detector + `make check` green.
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.

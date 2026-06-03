@@ -11,8 +11,12 @@ now **RESOLVED** — the detector descends through aliases, `f1KnownLeaks` is em
 the whole `internal/sandbox`+`internal/runtime` subtrees (see
 [resolved-critiques.md](resolved-critiques.md) for G1/G2/G8).
 
-What remains in this file is the **off-spine** work the round also surfaced: the setup-wizard pile-3
-leak (G6) and the unverified carry-forward items (F6/F7/F9). The agent-interaction reshape (G5) is now
+What remains in this file is the **off-spine** work the round also surfaced: the unverified
+carry-forward items (F6/F7/F9, all since done). The setup-wizard pile-3 leak (G6) is now
+**RESOLVED** — the whole setup vocabulary (`Setup`/`SetupStatus`/`SetupOptions`/`SetupStatus`/
+`SetupChoice`/`TmuxConfigClass`) left the contract and the wizard collapsed entirely into the CLI,
+writing via `Config().Set` (see [resolved-critiques.md](resolved-critiques.md)). The
+agent-interaction reshape (G5) is now
 **RESOLVED** — the PTY bridge was already daemon-consumable, the activity stream became the public
 `SystemClient.Logs` verb, and the file exchange landed under G7 (see
 [resolved-critiques.md](resolved-critiques.md)). The two naming/consistency sweeps (G3, G4) are now
@@ -62,15 +66,15 @@ LogEvent, error)` — verbatim `Raw` JSONL frames plus `Time`/`Level` projection
 (c) the **file exchange** already had a public home via G7. Details + the decision shape in the
 resolved sink.
 
-### G6 — First-run setup UX leaked into the library contract
+### G6 — RESOLVED 2026-06-03 → see [resolved-critiques.md](resolved-critiques.md)
 
-- **Severity:** MINOR
-- **Where:** `TmuxConfigClass`, `SetupChoice`, `SetupStatus`, interactive `SetupOptions`.
-- **Observation:** "Which class of tmux config" is pure CLI onboarding mechanism; no embedder
-  decides anything from it. `Doctor`/`Check` (health) are legitimately consumer-facing; the
-  interactive setup wizard types are pile-3 (D53) bleeding into the contract.
-- **Greenfield alternative:** Demote/hide the setup-wizard types; keep `Doctor`/`Check`.
-- **Migration cost:** Hours; folds into the same "hide pile-3 mechanism" sweep as G1(b).
+Full collapse rather than demotion: the entire setup vocabulary
+(`SystemClient.Setup`/`SetupStatus` + `SetupOptions`/`SetupStatus`/`SetupChoice`/`TmuxConfigClass`)
+left the contract, `internal/sandbox/setup.go` was deleted, and the wizard moved wholesale into
+`internal/cli/system/setup.go` (host inspection + prompts + auto-pick), writing the three answers
+via the public `Config().Set` verb. A `BackendDescriptor.IsolationTargetOnly` catalog fact (+
+`Architectures` on public `BackendInfo`) lets the CLI filter backends without hardcoding names
+(W10). Details in the resolved sink.
 
 ### G7 — SUBSTANTIALLY RESOLVED 2026-06-01 (D55–D57, Units 1–15) → see [project memory / working-notes]
 
@@ -111,16 +115,13 @@ off-spine items were **not** part of the spine and may still be open:
 
 ## Recommended ordering
 
-The spine findings (G1/G2/G7), the G8 naming sweep, the G3/G4 consistency sweeps, and the G5
-agent-interaction reshape are **done** — see [resolved-critiques.md](resolved-critiques.md). What
-remains:
+The spine findings (G1/G2/G7), the G8 naming sweep, the G3/G4 consistency sweeps, the G5
+agent-interaction reshape, and the G6 setup-wizard collapse are **done** — see
+[resolved-critiques.md](resolved-critiques.md). What remains:
 
-1. **G6** — Hide the setup-wizard pile-3 types (`TmuxConfigClass`/`SetupChoice`/`SetupStatus`/
-   interactive `SetupOptions`); keep `Doctor`/`Check`. (Hours.)
-2. **D53 read-model reshape** — turn the field-for-field `Environment` mirror into an
-   identity/posture + embedded-resolved-config view that drops pile-3 mechanism. Shares the
-   "hide mechanism" sweep with G6. (Tracked under D53.)
-3. **G3 + G4** — Naming/consistency sweeps — **DONE 2026-06-03** (see resolved sink).
-4. **G7 residue** — public verb for extensions (`x` → `internal/extension`) when that surface
+1. **D53 read-model reshape** — turn the field-for-field `Environment` mirror into an
+   identity/posture + embedded-resolved-config view that drops pile-3 mechanism. (Tracked under D53.)
+2. **G3 + G4** — Naming/consistency sweeps — **DONE 2026-06-03** (see resolved sink).
+3. **G7 residue** — public verb for extensions (`x` → `internal/extension`) when that surface
    stabilizes.
-5. **Carried-forward F6/F7/F9** — all done 2026-06-01.
+4. **Carried-forward F6/F7/F9** — all done 2026-06-01.

@@ -4,6 +4,39 @@ Tracks breaking changes made during beta. Each entry should be included in relea
 
 ## Unreleased
 
+### `SystemClient.Setup` / `SetupStatus` and the setup-wizard types removed
+
+The entire first-run-setup vocabulary left the public library contract:
+`SystemClient.Setup`, `SystemClient.SetupStatus`, and the types `SetupOptions`,
+`SetupStatus`, `SetupChoice`, `TmuxConfigClass` (with `TmuxConfigNone` /
+`TmuxConfigSmall` / `TmuxConfigLarge`) no longer exist.
+
+**Previous behavior:** an embedder rendered a setup wizard by calling
+`SystemClient.SetupStatus` (host inspection: tmux classification + available
+backends/agents) and then `SystemClient.Setup(opts)` (a non-interactive write
+of the three answers).
+
+**New behavior:** the library is orthogonal — discovery (`Agents`/`Backends`),
+config (`Config().Get/Set/Reset`), and just-works defaults (`EnsureSetup`) — with
+no setup-wizard verb. The two things `Setup` actually did are already covered:
+config writes are `Config().Set` (`tmux_conf` / `container_backend` / `agent`),
+and the `defaults/` materialization (`defaults/tmux.conf`, `defaults/config.yaml`)
+happens unconditionally inside `EnsureSetup`. All onboarding *policy* — tmux-config
+classification, choice enumeration, auto-pick, prompt copy — now lives in the CLI
+wizard (`internal/cli/system/setup.go`).
+
+**New supporting surface:** public `BackendInfo` gained `Architectures []string`
+and `IsolationTargetOnly bool` (mirrors of the `BackendDescriptor` fields), so a
+wizard or default-picker can filter the backend catalog on facts rather than
+hardcoding names.
+
+**Migration:** to write defaults programmatically, call
+`SystemClient.Config().Set(ctx, key, value)` for `tmux_conf`, `container_backend`,
+and `agent`; discover the valid choices via `SystemClient.Backends(...)` and
+`SystemClient.Agents(...)`. To build the on-disk defaults, call `EnsureSetup`
+(invoked implicitly before every sandbox op). There is no longer a single
+`Setup(opts)` call; supply the answers your own UI collects via `Config().Set`.
+
 ### `CreateOptions.Force` renamed to `AbandonUnappliedWork`
 
 The public `CreateOptions.Force bool` field was renamed to `AbandonUnappliedWork
@@ -324,6 +357,11 @@ Human-readable output also gains an `" (agent requirement)"` annotation next to 
 - `sandbox/patch.LoadAllDiffContexts` — still exists, still returns a slice, but the slice now has at most one entry (the workdir). Loop callers don't need to change.
 
 ### First-run setup is non-interactive when triggered implicitly; `yoloai system setup` is the explicit wizard
+
+> **Superseded** by "`SystemClient.Setup` / `SetupStatus` and the setup-wizard types removed"
+> (above): the `Setup` / `SetupStatus` library verbs this entry introduced were later removed
+> entirely; the wizard now collapses into the CLI and writes via `Config().Set`. The
+> implicit-setup-is-non-interactive behavior described here still holds.
 
 **Previous behavior:** On the first `yoloai new` / `yoloai run` of a fresh install (when `setup_complete=false`), if stdin was a TTY the user was dropped into the interactive setup wizard before the sandbox could be created — three prompts (tmux config, default backend on macOS, default agent). When stdin wasn't a TTY, the same code path auto-configured silently with `tmux_conf=default+host`.
 

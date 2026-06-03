@@ -7,6 +7,36 @@ History of critiques that have been addressed and applied. Items are moved here 
 [`unresolved-critiques.md`](unresolved-critiques.md) once resolved, so the active file stays
 a working set. Newest first.
 
+## G6 (2026-05-30 critique) — First-run setup UX leaked into the library contract
+
+- **Severity:** MINOR. **Resolved:** 2026-06-03.
+- **Resolution — full collapse, not demotion.** The entire setup vocabulary left the public
+  contract: `SystemClient.Setup`, `SystemClient.SetupStatus`, and the types `SetupOptions`,
+  `SetupStatus`, `SetupChoice`, `TmuxConfigClass` (+ `TmuxConfigNone/Small/Large`) are gone, and
+  `internal/sandbox/setup.go` (`Engine.SetupStatus`/`Engine.ApplySetup` and helpers) was deleted.
+  The decisive fact: the two things `Setup`/`ApplySetup` actually did were already covered
+  elsewhere — config-writing duplicates `Config().Set`, and defaults materialization
+  (`defaults/tmux.conf`, `defaults/config.yaml`) is done unconditionally by
+  `Engine.ensureDefaultsDir` via `EnsureSetup`. What remained — tmux-config classification,
+  available-backend/agent enumeration, auto-pick, prompt copy — is **CLI onboarding policy**
+  (development-principles §2: policy owns what/why), so it moved wholesale into
+  `internal/cli/system/setup.go`. The CLI wizard now inspects the host itself
+  (`classifyTmuxConfig` reads `cliutil.Layout().HomeDir`, `tmuxres.Embedded()` for the `[p]`
+  preview), enumerates choices through the existing public discovery verbs
+  (`SystemClient.Backends`/`Agents`), and writes the three answers via `Config().Set`
+  (`tmux_conf` / `container_backend` / `agent`).
+- **Left the library orthogonal.** The contract is now discovery (`Agents`/`Backends`) + config
+  (`Config().Get/Set/Reset`) + just-works defaults (`EnsureSetup`) — no setup-wizard verb.
+- **W10 (no hardcoded backend names in dispatch).** Rather than hardcode the containerd exclusion
+  in the CLI, a catalog fact was added: `BackendDescriptor.IsolationTargetOnly` (set `true` on
+  containerd — reached only via `--isolation vm`/`vm-enhanced`), surfaced on public `BackendInfo`
+  alongside the now-also-surfaced `Architectures`. The wizard filters on those facts
+  (`Platforms ∋ GOOS && (Architectures empty || ∋ GOARCH) && !IsolationTargetOnly`).
+- **Accepted behavior change.** `defaults/tmux.conf` now materializes lazily at first sandbox op
+  (via `EnsureSetup`) rather than at `yoloai system setup` time — more aligned with the
+  declarative-defaults stance ([[feedback_library_sets_defaults_app_owns_setup_state]]).
+- This closes the last Layer-1 public-contract finding from the round.
+
 ## G5 (2026-05-30 critique) — The agent-interaction surface was bound to caller stdio, not contracted for an embedder
 
 - **Severity:** MAJOR. **Resolved:** 2026-06-03.
