@@ -228,6 +228,18 @@ Exceptions exist — `Profile == ""` legitimately means "no profile" because the
 
 The same rule covers a consequential *mode* with no good default. `ApplyOptions.Mode` (commit-series replay vs. net-diff) is **required** — the zero value is a `*UsageError`, not a silently-chosen mode (D26). The proof it earns the rule: a movable default flipped apply behavior out from under an existing caller (4c-i1: `Workdir().Apply`'s default moved from net-diff to series, silently breaking `apply_squash`), and only an integration test caught it. The CLI, as the policy layer, picks the mode for the user; the library requires it. F4 (`../CRITIQUE.md`, required `Backend`) is the originating worked example.
 
+### Re-exporting contract types: alias by default, mirror on demand
+
+A public contract type (one an embedder holds — an Options struct, a result struct, an enum) can be exposed two ways: a **type alias** to the internal definition (`type ApplyResult = patch.ApplyResult`) or a **hand-written mirror** in the public package with a converter at the boundary. The choice must be made on contract grounds, not on whether the internal struct *happened* to need a field dropped — that effort-driven discrimination is how the surface drifts into an inconsistent mix (A1, 2026-06-03 public-API round).
+
+**Default: alias.** Aliasing exposes the real shape for free, with zero duplication and no boundary converter. It is the YAGNI-correct starting point — start with the interface you are comfortable exposing, and tighten only when a concrete need appears.
+
+**Swap to a hand-written mirror the moment a field must be hidden, renamed, or retyped** for the public surface. The swap is clean for external embedders: they only ever named `yoloai.X` (they cannot name the internal type — it's in `internal/`), so changing `yoloai.X` from an alias to a distinct struct is invisible to them as long as the field *set they use* survives. The only thing that breaks is the field you are deliberately removing — which is the point. The cost paid at swap time is localized: one converter, at the one boundary method that returns the type (which until then could `return result` directly).
+
+**The swap trigger is only partly automatic.** The F1 leak detector (`TestPublicAPI_NoInternalLeaks`) fails the build when a field whose type lives in `internal/…` appears on the public surface — that is the forcing function that catches an internal-*typed* field added to an aliased struct. But it does **not** catch a field of a primitive or already-public type (e.g. a stray `DebugTraceID string`): that publishes silently through the alias. So reviewers must still catch primitive *mechanism* fields by eye, or consciously accept that a stray primitive is low-harm (embedders ignore unknown fields). Aliasing is "start permissive, tighten on demand" with the detector as a *partial* tripwire — not a complete one.
+
+**Always-alias exemption: pure enums / typed strings** (`BackendName`, `IsolationMode`, `DirMode`, `Status`, `LogSource`, …). The underlying type is `string` with no hidden fields, so there is nothing to leak and a mirror would only force conversion churn at every call site. These alias permanently.
+
 ### Sources
 
 Alexis King "Parse, don't validate"; David L. Parnas (1972). Full citations: `../research/principles/development-principles-research.md §4`.
