@@ -48,11 +48,11 @@
 package yoloai
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"time"
 
 	"github.com/kstenerud/yoloai/internal/config"
@@ -136,7 +136,10 @@ type Options struct {
 	// Output receives human-readable progress messages. Default: io.Discard.
 	Output io.Writer
 
-	// Input provides interactive input. Default: os.Stdin.
+	// Input provides interactive input. Default: an empty reader (immediate
+	// EOF) — the library never reads the embedding process's os.Stdin (§12: no
+	// ambient configuration). Embedders that want interactive input pass it
+	// explicitly; the CLI passes cmd.InOrStdin() at its boundary.
 	Input io.Reader
 
 	// Version is the yoloAI version string stamped into each created
@@ -190,7 +193,7 @@ type Client struct {
 	layout  config.Layout // Q-W: DataDir-rooted path resolver propagated to Engine + apply
 	version string        // yoloAI version stamped into created sandboxes' environment.json
 	output  io.Writer     // Options.Output (defaulted to io.Discard); seeds per-call progress writers (F8)
-	input   io.Reader     // Options.Input (defaulted to os.Stdin); threaded to create.Run via state.Deps
+	input   io.Reader     // Options.Input (defaulted to an empty reader, never os.Stdin — §12); threaded to create.Run via state.Deps
 }
 
 // NewWithOptions creates a Client with explicit options.
@@ -226,7 +229,7 @@ func NewWithOptions(ctx context.Context, opts Options) (*Client, error) {
 	}
 	input := opts.Input
 	if input == nil {
-		input = os.Stdin //nolint:forbidigo // §12: documented Options.Input default at the library entry; embedders override, the CLI passes IOStreams
+		input = bytes.NewReader(nil) // §12: empty reader, never the process's os.Stdin; embedders override, the CLI passes IOStreams
 	}
 
 	rt, err := newRuntime(ctx, backend, layout)
