@@ -78,7 +78,7 @@ linters:
         # allow-list and the deny now covers the entire subtree by prefix.)
         #
         # Scope: the rule targets only internal/cli/** and internal/mcpsrv/**
-        # (non-test). The root yoloai package (yoloai.go, sandbox.go, …) is the
+        # (non-test). The root yoloai package (client.go, sandbox.go, …) is the
         # one sanctioned consumer and lives outside those globs, so it is
         # naturally unmatched. Test files are exempt (consistent with
         # cli-backend-scope) — fixtures may construct internal state directly.
@@ -309,7 +309,7 @@ linters:
         text: "os\\.(Stdin|Stdout|Stderr)"
 
       # W-L10 spine-layering allowlist. The orchestration spine itself
-      # (yoloai.go, system_client.go) and the runtime/sandbox packages
+      # (client.go, system.go) and the runtime/sandbox packages
       # naturally use these symbols — only the CLI is constrained.
       # After W-L8d completed, no internal/cli/ file has callers of
       # sandbox.Manager / sandbox.NewManager left, including
@@ -318,7 +318,7 @@ linters:
       # unused). internal/mcpsrv/ doesn't need an exemption either —
       # it migrated to *yoloai.Client and references only sandbox
       # value types (DirSpec, Status constants, CreateOptions).
-      - path: "^yoloai\\.go$|^system_client\\.go$|^internal/runtime/|^internal/sandbox/"
+      - path: "^client\\.go$|^system\\.go$|^internal/runtime/|^internal/sandbox/"
         linters:
           - forbidigo
         text: "sandbox\\.(NewManager|Manager)|runtime\\.(Runtime|New)"

@@ -355,6 +355,11 @@ func (w *Workdir) BaselineLog(ctx context.Context) ([]BaselineLogEntry, error) {
 	return patch.BaselineLog(ctx, w.s.c.layout, w.s.c.rt, w.s.name)
 }
 
+// TagInfo identifies a git tag in a sandbox's workdir (its Name and commit
+// SHA). Re-exported (type alias) from internal/sandbox so embedders can hold
+// the tag-listing results without importing internal packages.
+type TagInfo = sandbox.TagInfo
+
 // TagsOptions configures Workdir.Tags.
 type TagsOptions struct {
 	// UnappliedOnly returns only tags present in the sandbox but not yet on the

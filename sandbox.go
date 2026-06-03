@@ -5,7 +5,10 @@ package yoloai
 
 import (
 	"context"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"path/filepath"
 
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox"
@@ -170,4 +173,198 @@ func (s *Sandbox) Exec(ctx context.Context, opts ExecOptions, io IOStreams) erro
 	}
 	user := sandbox.ContainerUser(info.Environment, s.c.layout.HostUID)
 	return s.c.rt.InteractiveExec(ctx, store.InstanceName(s.c.layout.Principal, s.name), opts.Command, user, info.Environment.Workdir.MountPath, io)
+}
+
+// Info is the combined metadata + live state returned by Sandbox.Inspect /
+// Client.List. Hand-written (not a type alias) so its Environment field is the public
+// Environment read-model rather than the internal store.Environment — embedders can
+// hold the full result without naming any internal type. Built from the
+// internal status.Info at the library boundary via infoFromStatus.
+type Info struct {
+	Environment    *Environment `json:"environment"`
+	Status         Status       `json:"status"`
+	AgentStatus    AgentStatus  `json:"agent_status,omitempty"`
+	HasChanges     string       `json:"has_changes"`
+	DiskUsageBytes int64        `json:"disk_usage_bytes"`
+}
+
+// Status is a sandbox's lifecycle state. Re-exported (type alias) from
+// internal/sandbox; the constants below are the closed set of values.
+type Status = sandbox.Status
+
+const (
+	StatusActive      Status = sandbox.StatusActive      // container running, agent working
+	StatusIdle        Status = sandbox.StatusIdle        // container running, agent awaiting input
+	StatusDone        Status = sandbox.StatusDone        // agent exited cleanly (exit 0)
+	StatusFailed      Status = sandbox.StatusFailed      // agent exited non-zero
+	StatusStopped     Status = sandbox.StatusStopped     // container stopped
+	StatusSuspended   Status = sandbox.StatusSuspended   // VM suspended (Tart only)
+	StatusRemoved     Status = sandbox.StatusRemoved     // container removed, sandbox dir remains
+	StatusBroken      Status = sandbox.StatusBroken      // sandbox dir exists but environment.json missing/invalid
+	StatusUnavailable Status = sandbox.StatusUnavailable // backend not running
+)
+
+// AgentStatus is the agent's activity state inside a running sandbox, carried
+// on Info.AgentStatus. Re-exported (type alias) from internal/sandbox; the
+// constants below are the closed set of values. Distinct from Status, which is
+// the sandbox/container lifecycle state.
+type AgentStatus = sandbox.AgentStatus
+
+const (
+	AgentStatusUnknown AgentStatus = sandbox.AgentStatusUnknown // not yet determined
+	AgentStatusActive  AgentStatus = sandbox.AgentStatusActive  // actively working
+	AgentStatusIdle    AgentStatus = sandbox.AgentStatusIdle    // awaiting input
+	AgentStatusDone    AgentStatus = sandbox.AgentStatusDone    // completed its task
+	AgentStatusFailed  AgentStatus = sandbox.AgentStatusFailed  // exited with an error
+)
+
+// StartOptions configures Sandbox.Start (and Restart). Re-exported (type alias)
+// from internal/sandbox — its fields (Resume, Prompt, PromptFile, Isolation,
+// VscodeTunnel) are all legitimate start-time knobs, so no field cleanup is
+// needed.
+type StartOptions = sandbox.StartOptions
+
+// ResetOptions configures Sandbox.Reset. Hand-written rather than aliased: the
+// internal struct carries a Name field that the handle now supplies, so it's
+// dropped here.
+type ResetOptions struct {
+	RestartContainer bool // also stop+start the container after resetting (in-place by default)
+	ClearState       bool // wipe the agent-runtime directory
+	KeepCache        bool // preserve the cache directory
+	KeepFiles        bool // preserve the files directory
+	NoPrompt         bool // skip re-sending the prompt after reset
+	// Prompt, when set, overwrites the sandbox's prompt.txt before resetting so
+	// the new text is re-sent on restart. Empty leaves the existing prompt.
+	Prompt string
+	Debug  bool // enable entrypoint debug logging
+}
+
+func (o ResetOptions) toInternal(name string) sandbox.ResetOptions {
+	return sandbox.ResetOptions{
+		Name:       name,
+		Restart:    o.RestartContainer,
+		ClearState: o.ClearState,
+		KeepCache:  o.KeepCache,
+		KeepFiles:  o.KeepFiles,
+		NoPrompt:   o.NoPrompt,
+		Prompt:     o.Prompt,
+		Debug:      o.Debug,
+	}
+}
+
+// DestroyOptions configures Sandbox.Destroy.
+type DestroyOptions struct {
+	// AbandonUnappliedWork proceeds even when the sandbox holds work that was
+	// never applied to the host — a running agent, a dirty workdir, or unapplied
+	// commits. With it false, Destroy refuses such a sandbox with a typed
+	// *ActiveWorkError carrying the reason, so the caller can prompt and retry.
+	// (The CLI's --force flag maps onto this field at the boundary.)
+	AbandonUnappliedWork bool
+}
+
+// ExecOptions configures Sandbox.Exec. PTY selects between an interactive
+// terminal session (PTY true — allocates a remote pty) and raw stdio piping
+// (PTY false — line-oriented, the shape the MCP proxy bridges JSON-RPC over).
+type ExecOptions struct {
+	Command []string // command + args to run inside the container; required
+	PTY     bool     // allocate a terminal (true) vs pipe raw stdio (false)
+}
+
+// CacheDir returns the host path of the sandbox's cache directory
+// (<state>/cache). Like FilesDir, it is pure path computation with no backend
+// contact.
+func (s *Sandbox) CacheDir() string {
+	return store.CacheDir(s.c.layout.SandboxDir(s.name))
+}
+
+// RuntimeConfigPath returns the host path of the sandbox's runtime-config.json
+// (<state>/runtime-config.json), the entrypoint/infrastructure config the
+// backend reads at launch. Pure path computation: no backend contact.
+func (s *Sandbox) RuntimeConfigPath() string {
+	return store.RuntimeConfigFilePath(s.c.layout.SandboxDir(s.name))
+}
+
+// EnvironmentPath returns the host path of the sandbox's environment.json
+// (<state>/environment.json), the captured creation-time metadata. Pure path
+// computation; the file need not exist.
+func (s *Sandbox) EnvironmentPath() string {
+	return filepath.Join(s.c.layout.SandboxDir(s.name), store.EnvironmentFile)
+}
+
+// LogPaths holds the host paths of a sandbox's diagnostic JSONL streams and the
+// agent-status snapshot — the files the CLI tails and the bug-report bundle
+// collects. Pure path computation; the files need not exist.
+type LogPaths struct {
+	CLI         string // <state>/logs/cli.jsonl
+	Sandbox     string // <state>/logs/sandbox.jsonl
+	Monitor     string // <state>/logs/monitor.jsonl
+	Hooks       string // <state>/logs/agent-hooks.jsonl
+	AgentStatus string // <state>/agent-status.json
+}
+
+// LogPaths returns the diagnostic file paths for the sandbox. No backend
+// is contacted.
+func (s *Sandbox) LogPaths() LogPaths {
+	dir := s.c.layout.SandboxDir(s.name)
+	return LogPaths{
+		CLI:         store.CLIJSONLPath(dir),
+		Sandbox:     store.SandboxJSONLPath(dir),
+		Monitor:     store.MonitorJSONLPath(dir),
+		Hooks:       store.HooksJSONLPath(dir),
+		AgentStatus: store.AgentStatusFilePath(dir),
+	}
+}
+
+// Unlock force-clears a stale lock file for the sandbox. It returns whether a
+// lock was actually cleared (false means there was no lock file present) and
+// surfaces a *UsageError when the recorded holder process is still alive. This
+// is a host-filesystem operation and does not require a running backend.
+func (s *Sandbox) Unlock() (cleared bool, err error) {
+	return store.ForceUnlock(s.c.layout, s.name)
+}
+
+// VscodeAttach describes how to open a sandbox in VS Code via its
+// attach-to-running-container support. Supported reports whether the sandbox's
+// backend exposes a docker-compatible container surface; when false, the
+// container fields and FolderURI are empty and the caller should fall back to a
+// VS Code Remote Tunnel.
+type VscodeAttach struct {
+	BackendType   BackendType
+	Supported     bool
+	ContainerName string
+	WorkdirPath   string
+	FolderURI     string // vscode-remote://attached-container+<hex>... ; empty when unsupported
+}
+
+// VscodeAttach resolves the VS Code attach details for a sandbox. It reads the
+// sandbox metadata and the backend's declared capabilities — no running backend
+// is required.
+func (s *Sandbox) VscodeAttach() (*VscodeAttach, error) {
+	sandboxDir := s.c.layout.SandboxDir(s.name)
+	if err := store.RequireSandboxDir(sandboxDir); err != nil {
+		return nil, sandbox.ErrSandboxNotFound
+	}
+	meta, err := store.LoadEnvironment(sandboxDir)
+	if err != nil {
+		return nil, fmt.Errorf("load sandbox metadata: %w", err)
+	}
+
+	res := &VscodeAttach{BackendType: meta.BackendType}
+
+	desc, ok := runtime.Descriptor(meta.BackendType)
+	if !ok || !desc.Capabilities.ContainerAttach {
+		return res, nil
+	}
+
+	res.Supported = true
+	res.ContainerName = store.InstanceName(meta.Principal, meta.Name)
+	res.WorkdirPath = meta.Workdir.MountPath
+
+	payload, err := json.Marshal(map[string]string{"containerName": res.ContainerName})
+	if err != nil {
+		return nil, fmt.Errorf("marshal container payload: %w", err)
+	}
+	res.FolderURI = fmt.Sprintf("vscode-remote://attached-container+%s%s",
+		hex.EncodeToString(payload), res.WorkdirPath)
+	return res, nil
 }

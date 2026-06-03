@@ -9,7 +9,7 @@ import (
 	"log/slog"
 	"os"
 
-	// Backend registrations live in yoloai.go (the root package);
+	// Backend registrations live in client.go (the root package);
 	// importing yoloai below pulls in those init() side effects, so a
 	// blank-import block here is redundant. Keeping this package free of
 	// any internal/runtime import is what lets cli-runtime-scope fence the
