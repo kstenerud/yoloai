@@ -79,7 +79,7 @@ func (p *ProxyServer) ServeStdio(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("sandbox handle %q: %w", p.sandboxName, err)
 	}
-	innerCmd, err := expandCmd(p.innerCmd, sb.FilesDir(), sb.CacheDir(), meta)
+	innerCmd, err := expandCmd(p.innerCmd, sb.Files().Path(), sb.CacheDir(), meta)
 	if err != nil {
 		return fmt.Errorf("expand inner command: %w", err)
 	}
@@ -169,7 +169,7 @@ func (p *ProxyServer) createSandbox(ctx context.Context) (*yoloai.Environment, e
 //	{dir:N}    — meta.Directories[N].MountPath (Nth auxiliary directory, 0-indexed)
 //
 // hostFilesDir/hostCacheDir are the on-host file-exchange and cache
-// directories (from System.FilesDir/CacheDir). They are used only when
+// directories (from Sandbox.Files().Path()/Sandbox.CacheDir()). They are used only when
 // meta.HostFilesystem is true; for container backends the fixed in-container
 // paths are used instead and these arguments are ignored.
 func expandCmd(cmd []string, hostFilesDir, hostCacheDir string, meta *yoloai.Environment) ([]string, error) {

@@ -4,19 +4,19 @@
 // (internal/cli) and external embedders use it as the entry point for
 // running AI coding agents in isolated sandboxes.
 //
-// Two clients live here:
+// One Client is the entry point (A2/A3). It owns creation and cross-sandbox
+// operations (Run, Create, Clone, List) plus the per-sandbox handle accessor
+// Sandbox(name); per-sandbox operations (Inspect, Start, Stop, Restart, Reset,
+// Destroy, Exec, and the Workdir/Network/Agent sub-handles) live on that
+// *Sandbox handle, not the Client root (F2). The backend connection is opened
+// lazily on the first backend-bound operation, so Options.Backend is optional:
+// a backend-less Client still serves host-only reads (Sandbox.Metadata,
+// Workdir diffs, the on-disk allowlist) and, via Client.System(), cross-backend
+// admin — a backend-bound op on such a Client returns ErrBackendRequired.
 //
-//   - Client — creation and cross-sandbox operations: Run, Create, Clone,
-//     List, plus the per-sandbox handle accessor Sandbox(name). Per-sandbox
-//     operations (Inspect, Start, Stop, Restart, Reset, Destroy, Attach,
-//     Exec, …) live on that *Sandbox handle, not the Client root (F2).
-//     Constructed via NewWithOptions; holds a single backend connection.
-//     Use one Client per backend.
-//
-//   - System — admin/cross-backend operations: DiskUsage, Prune,
-//     Build, Check. Reached via Client.System() or constructed directly
-//     via NewSystemClient (when no backend Client is needed). Decoupled
-//     from a single backend — iterates registered backends internally.
+//   - System — the admin/cross-backend sub-handle (DiskUsage, Prune, Build,
+//     Check, …), reached only via Client.System(). Decoupled from a single
+//     backend: it iterates the registered backends internally.
 //
 // Following the W-L8 layering refactor, the CLI is a thin shell over
 // Client + System; orchestration logic lives here, not in
@@ -28,7 +28,7 @@
 //	client, err := yoloai.NewWithOptions(ctx, yoloai.Options{
 //	    DataDir: filepath.Join(os.Getenv("HOME"), ".yoloai", "library"),
 //	    HomeDir: os.Getenv("HOME"), // required; where ~/.claude etc. resolve
-//	    Backend: yoloai.BackendDocker, // required; or yoloai.SelectBackend(...)
+//	    Backend: yoloai.BackendDocker, // optional; backend-bound ops open it lazily
 //	})
 //	if err != nil { log.Fatal(err) }
 //	defer client.Close()
@@ -205,7 +205,7 @@ type Options struct {
 
 // Client is the simple entry point for yoloAI operations.
 // A Client is safe for concurrent use by multiple goroutines.
-// Construct with New or NewWithOptions.
+// Construct with NewWithOptions.
 type Client struct {
 	layout  config.Layout       // Q-W: DataDir-rooted path resolver propagated to Engine + apply
 	backend runtime.BackendName // selected backend; "" = backend-less (host-only reads/admin), backend-bound ops return ErrBackendRequired
@@ -375,12 +375,6 @@ type RunOptions struct {
 	OnProgress func(name, msg string)
 }
 
-// Run creates a sandbox with the given options and starts the agent.
-// Equivalent to 'yoloai new <name> <workdir> --prompt <prompt>'.
-//
-// If opts.Wait is true, Run blocks until the agent finishes and returns the
-// final sandbox Info. If opts.Wait is false, Run returns immediately after
-// the agent is launched; the Info reflects the initial state.
 // pollUntilDone polls the sandbox status until it reaches a terminal state.
 func (c *Client) pollUntilDone(ctx context.Context, name string, progress func(string, string)) (*Info, error) {
 	for {
@@ -408,6 +402,12 @@ func (c *Client) pollUntilDone(ctx context.Context, name string, progress func(s
 	}
 }
 
+// Run creates a sandbox with the given options and starts the agent.
+// Equivalent to 'yoloai new <name> <workdir> --prompt <prompt>'.
+//
+// If opts.Wait is true, Run blocks until the agent finishes and returns the
+// final sandbox Info. If opts.Wait is false, Run returns immediately after
+// the agent is launched; the Info reflects the initial state.
 func (c *Client) Run(ctx context.Context, opts RunOptions) (*Info, error) {
 	createOpts := opts.materialize()
 	if createOpts.Agent == "" {
@@ -451,12 +451,13 @@ func (c *Client) List(ctx context.Context) ([]*Info, error) {
 	return infosFromStatus(sis), nil
 }
 
-// Clone copies an existing sandbox's state into a new sandbox. The copy itself
-// is a disk-only operation (the source sandbox dir under DataDir/sandboxes/ is
-// deep-copied); the runtime is consulted only when opts.Overwrite must tear
-// down a pre-existing destination first. Embedders still construct the Client
-// with a backend because most clone workflows start the destination right
-// after; the wasted connection for pure --no-start clones is acceptable.
+// Clone copies an existing sandbox's state into a new sandbox. Although the
+// copy itself is a disk-only deep-copy of the source sandbox dir under
+// DataDir/sandboxes/, Clone is backend-bound: it goes through the Engine (and,
+// under opts.Overwrite, tears the destination down through the runtime), so a
+// backend-less Client returns ErrBackendRequired. This matches real clone
+// workflows, which almost always start the destination right after. Embedders
+// wanting a pure offline copy should copy the sandbox dir themselves.
 //
 // With opts.Overwrite set, an existing destination is destroyed before the
 // copy; without it, an existing destination is a hard error.
@@ -565,10 +566,11 @@ func (c *Client) EnsureSetup(ctx context.Context) error {
 // installed and falls back accordingly, returning the chosen backend and a
 // human-readable warning ("" when none).
 //
-// Because Options.Backend is required (F4), embedders that want the CLI's
-// auto-detection call this at their boundary and pass the result into
-// NewWithOptions — keeping the ambient probe explicit rather than hidden in
-// Client construction (§4 / §12).
+// Backend selection is inherently ambient (it probes which container daemons
+// are installed), so it belongs at the outermost boundary, not hidden inside
+// Client construction (§4 / §12). Embedders that want the CLI's auto-detection
+// call this at their boundary and pass the result as Options.Backend; those
+// that leave Backend empty get a backend-less Client (host-only reads + admin).
 //
 // env is the caller's host-env snapshot (the same map passed as Options.Env):
 // container-slot probes read DOCKER_HOST / CONTAINER_HOST / XDG_RUNTIME_DIR

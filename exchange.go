@@ -1,5 +1,5 @@
-// ABOUTME: Runtime-free host paths for a sandbox's file-exchange and cache
-// ABOUTME: directories — derivable and readable without the backend running.
+// ABOUTME: Runtime-free host path getters for a sandbox's cache, runtime-config,
+// ABOUTME: environment, and log files — derivable without the backend running.
 
 package yoloai
 
@@ -8,13 +8,6 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 )
-
-// FilesDir returns the host path of the sandbox's file-exchange directory
-// (<state>/files), where agent-produced files surface for the host to read.
-// This is pure path computation and no backend is contacted.
-func (s *Sandbox) FilesDir() string {
-	return store.FilesDir(s.c.layout.SandboxDir(s.name))
-}
 
 // CacheDir returns the host path of the sandbox's cache directory
 // (<state>/cache). Like FilesDir, it is pure path computation with no backend

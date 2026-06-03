@@ -409,7 +409,7 @@ func (s *Server) handleSandboxFilesList(_ context.Context, req mcp.CallToolReque
 	if err != nil {
 		return textResult(errorf("sandbox %q: %v", name, err)), nil
 	}
-	filesDir := sb.FilesDir()
+	filesDir := sb.Files().Path()
 	entries, err := os.ReadDir(filesDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -448,7 +448,7 @@ func (s *Server) handleSandboxFilesRead(_ context.Context, req mcp.CallToolReque
 	if err != nil {
 		return textResult(errorf("sandbox %q: %v", name, err)), nil
 	}
-	path := filepath.Join(sb.FilesDir(), filename)
+	path := filepath.Join(sb.Files().Path(), filename)
 	data, err := os.ReadFile(path) //nolint:gosec // path validated by validateFilename
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -479,7 +479,7 @@ func (s *Server) handleSandboxFilesWrite(_ context.Context, req mcp.CallToolRequ
 	if err != nil {
 		return textResult(errorf("sandbox %q: %v", name, err)), nil
 	}
-	filesDir := sb.FilesDir()
+	filesDir := sb.Files().Path()
 	if err := fileutil.MkdirAll(filesDir, 0750); err != nil {
 		return textResult(errorf("create files dir for sandbox %q: %v", name, err)), nil
 	}

@@ -20,8 +20,8 @@ import (
 //
 // Q-G resolution (Shape B): name-bound handles group per-sandbox
 // operations behind one accessor so the Client root stays uncluttered.
-// Sub-handles (Workdir, Network) are pure namespace expansion off a
-// validated *Sandbox — no IO, no error.
+// Sub-handles (Workdir, Network, Agent) are pure namespace expansion off
+// a validated *Sandbox — no IO, no error.
 type Sandbox struct {
 	c    *Client
 	name string

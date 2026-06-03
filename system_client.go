@@ -462,7 +462,7 @@ func (s *System) checkImage(ctx context.Context, rt runtime.Runtime, backend str
 
 // checkAgent verifies that at least one of the agent's API-key env vars is
 // present in the client's host-environment snapshot (s.layout.Env). The library
-// never reads os.Environ; credentials arrive as data via SystemOptions.Env (§12).
+// never reads os.Environ; credentials arrive as data via Options.Env (§12).
 func (s *System) checkAgent(name string) CheckResult {
 	def := agent.GetAgent(name)
 	switch {

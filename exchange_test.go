@@ -24,7 +24,7 @@ func TestSandbox_ExchangePaths(t *testing.T) {
 	sb, err := c.Sandbox("box")
 	require.NoError(t, err)
 
-	assert.Equal(t, filepath.Join(state, "files"), sb.FilesDir())
+	assert.Equal(t, filepath.Join(state, "files"), sb.Files().Path())
 	assert.Equal(t, filepath.Join(state, "cache"), sb.CacheDir())
 	assert.Equal(t, filepath.Join(state, "runtime-config.json"), sb.RuntimeConfigPath())
 	assert.Equal(t, filepath.Join(state, "environment.json"), sb.EnvironmentPath())
