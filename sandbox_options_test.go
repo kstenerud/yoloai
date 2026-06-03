@@ -1,6 +1,6 @@
-// ABOUTME: Unit tests for the public creation surface (F1/F3): toInternal
-// ABOUTME: mapping, SandboxRunOptions.materialize sugar, port formatting, and the
-// ABOUTME: A2/A3 lazy-backend / optional-BackendType contract at construction.
+// ABOUTME: Unit tests for the public sandbox option types (F1/F3):
+// ABOUTME: SandboxCreateOptions.toInternal mapping, SandboxRunOptions.materialize sugar,
+// ABOUTME: port formatting, and the A2/A3 lazy-backend / optional-BackendType contract.
 
 package yoloai
 

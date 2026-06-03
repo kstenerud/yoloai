@@ -242,52 +242,6 @@ func (c *Client) deps() state.Deps {
 	return state.Deps{Runtime: c.rt, Layout: c.layout, Input: c.input}
 }
 
-// SandboxRunOptions configures a sandbox run.
-type SandboxRunOptions struct {
-	// Name is the sandbox identifier. Required.
-	Name string
-
-	// WorkDir is the host directory to work in. Required.
-	// Mounted as :copy by default — the original is protected.
-	WorkDir string
-
-	// Prompt is the task description sent to the agent.
-	// If empty, the sandbox starts without a prompt (interactive mode).
-	Prompt string
-
-	// Agent selects the AI agent (yoloai.AgentClaude, yoloai.AgentGemini,
-	// yoloai.AgentCodex, …). Default: read from config.yaml, then
-	// yoloai.AgentClaude.
-	AgentType AgentType
-
-	// Model selects the model. Default: read from config.yaml, then agent default.
-	Model string
-
-	// Profile applies a named profile for environment, image, and settings.
-	// Default: read from config.yaml, then no profile.
-	Profile string
-
-	// Replace destroys any existing sandbox with the same name before creating
-	// a new one. The existing sandbox must have no unapplied changes.
-	Replace bool
-
-	// AllowDirtyWorkdir proceeds even when WorkDir has uncommitted git changes.
-	// Default false: Run refuses with *DirtyWorkdirError rather than letting the
-	// agent see — and possibly clobber — uncommitted work. Set true to
-	// consciously proceed (the non-interactive equivalent of answering the CLI's
-	// dirty-repo prompt).
-	AllowDirtyWorkdir bool
-
-	// Wait blocks until the agent reaches StatusDone, StatusFailed, or
-	// StatusStopped, polling every 5 seconds. Default: false.
-	Wait bool
-
-	// OnProgress receives status updates during the run. The first argument
-	// is the sandbox name; the second is a human-readable message.
-	// Safe to call concurrently from multiple goroutines (e.g., batch runs).
-	OnProgress func(name, msg string)
-}
-
 // pollUntilDone polls the sandbox status until it reaches a terminal state.
 func (c *Client) pollUntilDone(ctx context.Context, name string, progress func(string, string)) (*Info, error) {
 	for {
