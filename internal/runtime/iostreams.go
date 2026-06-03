@@ -39,4 +39,11 @@ type IOStreams struct {
 	// Rows and Cols are the initial PTY geometry when TTY=true. Zero
 	// means "detect from In's FD if possible, else backend default."
 	Rows, Cols int
+
+	// Term is the terminal type ($TERM) the interactive exec should
+	// advertise to ncurses/tmux inside the instance. The library never
+	// reads the process's own $TERM (§12: that would be the embedding
+	// daemon's terminal, not the principal's) — the caller supplies it.
+	// Empty means "xterm-256color", a safe modern default.
+	Term string
 }

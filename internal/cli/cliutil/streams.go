@@ -23,5 +23,6 @@ func IOStreams() yoloai.IOStreams {
 		TTY:  true,
 		Rows: rows,
 		Cols: cols,
+		Term: os.Getenv("TERM"), //nolint:forbidigo // §12: CLI boundary captures the user's terminal type; library never reads it
 	}
 }
