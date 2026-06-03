@@ -145,6 +145,19 @@ type Options struct {
 	// callers don't repeat it.
 	Version string
 
+	// Env is the authorized host-environment snapshot for this Client. It is
+	// the ONLY source from which the library resolves user-declared ${VAR}
+	// references in config/profile values AND the agent's API-key / auth-hint
+	// credential values injected into the sandbox — the library never reads
+	// the live process environment for them (§12). Optional; nil/empty means
+	// no ${VAR} resolution and no env-sourced credentials.
+	//
+	// The CLI fills this from its single licensed os.Environ() snapshot (plus
+	// sudo-stripped-credential recovery). A multi-principal embedder MUST pass
+	// each principal's own environment here — never the daemon's process env —
+	// so credentials stay principal-scoped (D58/D59).
+	Env map[string]string
+
 	// Principal namespaces this Client's sandboxes under an owning principal
 	// (tenant/user), so two principals can each own a sandbox of the same name
 	// without colliding on the runtime backend. Client-scoped, not per-call —
@@ -188,6 +201,7 @@ func NewWithOptions(ctx context.Context, opts Options) (*Client, error) {
 	}
 
 	layout := config.NewLayoutFor(opts.DataDir, opts.HomeDir).WithPrincipal(principal)
+	layout.Env = opts.Env
 
 	backend := opts.Backend
 	logger := opts.Logger

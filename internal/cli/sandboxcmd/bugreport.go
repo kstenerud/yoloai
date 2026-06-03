@@ -135,6 +135,7 @@ func WriteSandboxSectionsForFlag(w io.Writer, name, reportType string) {
 		Backend: yoloai.BackendName(backend),
 		Input:   os.Stdin,
 		Output:  io.Discard, // best-effort path; don't write to the in-progress bug report
+		Env:     l.Env,
 	})
 	if err != nil {
 		return

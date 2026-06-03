@@ -118,6 +118,7 @@ func WithClient(cmd *cobra.Command, backend yoloai.BackendName, fn func(ctx cont
 		Logger:  slog.Default(),
 		Input:   cmd.InOrStdin(),
 		Output:  cmd.ErrOrStderr(),
+		Env:     l.Env,
 	})
 	if err != nil {
 		return fmt.Errorf("connect to runtime: %w", err)
