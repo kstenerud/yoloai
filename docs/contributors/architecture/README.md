@@ -369,8 +369,8 @@ On-disk sandbox state — paths, metadata, and creation-completion flags. Leaf s
 
 | File | Purpose |
 |------|---------|
-| `paths.go` | `EncodePath()` / `DecodePath()` — caret encoding for filesystem-safe names. `InstanceName()`, `Dir()`, `WorkDir()`, `RequireSandboxDir()`. `OverlayUpperDir()` / `OverlayOvlworkDir()` for `:overlay` mount paths. Centralized filename constants (`EnvironmentFile`, `RuntimeConfigFile`, `AgentStatusFile`, `SandboxStateFile`, etc.) and `ErrSandboxNotFound`. |
-| `environment.go` | `Environment` / `WorkdirEnvironment` / `DirEnvironment` structs, `SaveEnvironment()` / `LoadEnvironment()` — sandbox metadata persistence as `environment.json`. `Environment.Backend` records which runtime backend was used. |
+| `paths.go` | `EncodePath()` / `DecodePath()` — caret encoding for filesystem-safe names. `InstanceName(principal, name)` — principal-aware runtime handle: `yoloai-<name>` for the default `""` principal, `yoloai-<principal>-<name>` otherwise (D62). `Dir()`, `WorkDir()`, `RequireSandboxDir()`. `OverlayUpperDir()` / `OverlayOvlworkDir()` for `:overlay` mount paths. `ValidateName()` delegates to `config.ParseSandboxName` (containerd-conformant grammar). Centralized filename constants (`EnvironmentFile`, `RuntimeConfigFile`, `AgentStatusFile`, `SandboxStateFile`, etc.) and `ErrSandboxNotFound`. |
+| `environment.go` | `Environment` / `WorkdirEnvironment` / `DirEnvironment` structs, `SaveEnvironment()` / `LoadEnvironment()` — sandbox metadata persistence as `environment.json`. `Environment.Backend` records which runtime backend was used; `Environment.Principal` records the owning principal (D62). |
 | `sandbox_state.go` | `SandboxState` struct, `LoadSandboxState()`, `SaveSandboxState()` — per-sandbox runtime state (`sandbox-state.json`, legacy: `state.json`). Tracks `agent_files_initialized` and `on_create_commands_done`. Separate from `Environment` which is immutable after creation. |
 
 ### `workspace/`
@@ -440,7 +440,7 @@ Optional interfaces extend the core Runtime with backend-specific capabilities. 
 - `GitExecer` (`GitExecFor`, default = run git on the host) — Tart runs git inside the VM and translates host work paths; the host-git backends (Docker/Podman/containerd/Seatbelt) use the default.
 
 ### `runtime.InstanceConfig`
-Configuration for `Runtime.Create()`. Describes image, working directory, mounts, ports, network mode, resource limits, capabilities, devices, user namespace mode, and container runtime (OCI/Kata).
+Configuration for `Runtime.Create()`. Describes image, working directory, mounts, ports, network mode, resource limits, capabilities, devices, user namespace mode, and container runtime (OCI/Kata). `Labels` carries `com.yoloai.sandbox` (always) and `com.yoloai.principal` (non-default principals only) so an embedder can attribute and enumerate instances by owner — Docker/containerd apply them natively, Tart/Seatbelt persist them in their JSON config (D62).
 
 ### `caps.HostCapability`
 Describes one system prerequisite: check function, permanence assessment, and remediation steps. Used by `system doctor` and `system check`.

@@ -363,7 +363,7 @@ After the bootstrap the stamp is the **only** signal consulted — a stamped lay
 
 ## D62 — Principal namespacing: deterministic `yoloai-<principal>-<name>`, `P≤8`/`N≤56`, no library hashing
 
-**Date:** 2026-06-03. **Status:** Decided (design; multi-principal not yet implemented — this fixes the *shape*, not the code). **Composition:** resolves [`research/principal-namespacing.md`](../design/research/principal-namespacing.md), commissioned to study B1 (the runtime-namespace confused-deputy) from [`research/principal-isolation.md`](../design/research/principal-isolation.md). Applies D58's "the library never synthesizes principal scope" to the **length axis**.
+**Date:** 2026-06-03. **Status:** Implemented (runtime-namespace scope; commits C1–C6 on the `layering-refactor` branch, 2026-06-03). The library is no longer the multi-principal blocker; isolation-grade enforcement remains the embedder's job per D58/D59. **Composition:** resolves [`research/principal-namespacing.md`](../design/research/principal-namespacing.md), commissioned to study B1 (the runtime-namespace confused-deputy) from [`research/principal-isolation.md`](../design/research/principal-isolation.md). Applies D58's "the library never synthesizes principal scope" to the **length axis**.
 
 **The blocker.** `store.InstanceName(name) = "yoloai-" + name` is principal-blind, so two principals each owning a sandbox named `my-app` collide on the runtime instance handle `yoloai-my-app` (research B1). The filesystem layout is *not* a library-side blocker (a daemon hands each principal a distinct `DataDir`); the runtime namespace **is**.
 
@@ -382,7 +382,7 @@ After the bootstrap the stamp is the **only** signal consulted — a stamped lay
 
 **Rejected.** (a) Library hashing / the first-draft hybrid `yoloai-<sha-trunc>-<name>` — trades the daemon's *uniqueness guarantee* for a birthday-bound *probability* and makes `docker ps` unreadable, for no length benefit once the ceiling is 76 and the segment is daemon-bounded. (b) Pure label-only with a random/stored name — needs a new stored runtime-id field + converting all 24 compute-sites to reads, unnecessary because nothing searches by name; we still adopt its *labels*. (c) Plain concat of a *raw* principal id — only fails (forced `MaxNameLength` to ~19) under the discarded premises (raw 36-char UUID, 63 budget).
 
-**Not yet implemented.** This is the agreed *shape*; the implementing plan (when multi-principal is built) threads `PrincipalSegment` through `InstanceName` + the 24 sites, introduces the two parsed types, and sets the labels. Open/unverified items (Docker label length caps, Tart name grammar) are catalogued in the research file.
+**Implemented (2026-06-03).** `config.ParseSandboxName` / `config.ParsePrincipalSegment` are the two parsed boundary types (`names.go`); `Layout` carries a `Principal` field set via `WithPrincipal`; `store.InstanceName(principal, name)` elides the segment for the default `""` principal and threads through every call site; `runtime.InstanceConfig.Labels` stamps `com.yoloai.principal` / `com.yoloai.sandbox` (Docker + containerd natively, Tart/Seatbelt via persisted JSON); `store.Environment.Principal` records the owner; `yoloai.Options` / `SystemOptions` expose `Principal string`. The CLI passes nothing → default `""` → byte-identical single-principal behavior. Open/unverified items (Docker label length caps, Tart name grammar) remain catalogued in the research file.
 
 # Convention reminders
 
