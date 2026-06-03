@@ -39,7 +39,7 @@ func getXcodeSelectPath() string {
 // descriptor holds the static facts for the tart backend; shared by the
 // registry registration and the Runtime.Descriptor() method.
 var descriptor = runtime.BackendDescriptor{
-	Name:                      "tart",
+	Type:                      "tart",
 	Description:               "macOS VMs; native macOS env, strong isolation, heavier",
 	Platforms:                 []string{"darwin"},
 	Architectures:             []string{"arm64"}, // Apple Silicon only

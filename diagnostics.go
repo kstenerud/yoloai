@@ -117,8 +117,8 @@ func (s *System) backendDiagnostics(ctx context.Context) []BackendDiagnostic {
 	descs := runtime.Descriptors()
 	out := make([]BackendDiagnostic, 0, len(descs))
 	for _, desc := range descs {
-		available, note := s.CheckBackend(ctx, desc.Name)
-		bd := BackendDiagnostic{Name: desc.Name, Available: available, Note: note}
+		available, note := s.CheckBackend(ctx, desc.Type)
+		bd := BackendDiagnostic{Name: desc.Type, Available: available, Note: note}
 		if available && desc.VersionString != nil {
 			bd.Version = desc.VersionString(ctx)
 		}

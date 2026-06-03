@@ -112,7 +112,7 @@ func buildInstanceConfig(desc runtime.BackendDescriptor, st *state.State, mnts [
 
 	if st.NetworkMode == "isolated" {
 		if !caps.NetworkIsolation {
-			return runtime.InstanceConfig{}, fmt.Errorf("--network=isolated is not supported by the %s backend", desc.Name)
+			return runtime.InstanceConfig{}, fmt.Errorf("--network=isolated is not supported by the %s backend", desc.Type)
 		}
 		// Per-isolation-mode check: some OCI runtimes (notably gVisor / runsc
 		// for --isolation=container-enhanced) do not honor iptables rules
@@ -157,7 +157,7 @@ func buildInstanceConfig(desc runtime.BackendDescriptor, st *state.State, mnts [
 		instanceCfg.CapAdd = append(instanceCfg.CapAdd, "NET_ADMIN")
 	}
 
-	if err := applyOverlayAndCaps(st, caps, &instanceCfg, desc.Name); err != nil {
+	if err := applyOverlayAndCaps(st, caps, &instanceCfg, desc.Type); err != nil {
 		return runtime.InstanceConfig{}, err
 	}
 

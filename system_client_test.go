@@ -31,7 +31,7 @@ func TestSystemClient_Info(t *testing.T) {
 	descs := runtime.Descriptors()
 	require.Len(t, info.Backends, len(descs), "one BackendInfo per registered backend")
 	for i, b := range info.Backends {
-		assert.Equal(t, descs[i].Name, b.Name, "backend statuses preserve registration order")
+		assert.Equal(t, descs[i].Type, b.Type, "backend statuses preserve registration order")
 		if !b.Available {
 			assert.NotEmpty(t, b.Note, "an unavailable backend must explain why")
 		}

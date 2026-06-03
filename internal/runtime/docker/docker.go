@@ -36,7 +36,7 @@ import (
 // descriptor holds the static facts for the docker backend; shared by the
 // registry registration and the Runtime.Descriptor() method.
 var descriptor = runtime.BackendDescriptor{
-	Name:                      "docker",
+	Type:                      "docker",
 	Description:               "Linux containers; portable, lightweight, fast",
 	Platforms:                 []string{"linux", "darwin", "windows"},
 	Requires:                  "Docker Engine or Docker Desktop installed and running",

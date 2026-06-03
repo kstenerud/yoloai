@@ -202,16 +202,16 @@ func containerHostExample() string {
 func writeAgentList(b *strings.Builder, realAgents []yoloai.AgentInfo) {
 	maxName := 0
 	for _, a := range realAgents {
-		if len(a.Name) > maxName {
-			maxName = len(a.Name)
+		if len(a.Type) > maxName {
+			maxName = len(a.Type)
 		}
 	}
 	labelWidth := maxName + len(" (default)")
 
 	for _, a := range realAgents {
-		label := a.Name
-		if a.Name == "claude" {
-			label = a.Name + " (default)"
+		label := string(a.Type)
+		if a.Type == "claude" {
+			label = string(a.Type) + " (default)"
 		}
 		keys := ""
 		if len(a.APIKeyEnvVars) > 0 {
@@ -231,7 +231,7 @@ func writeAgentAliases(b *strings.Builder, realAgents []yoloai.AgentInfo) {
 		if len(a.ModelAliases) == 0 {
 			continue
 		}
-		title := strings.ToUpper(a.Name[:1]) + a.Name[1:]
+		title := strings.ToUpper(string(a.Type[:1])) + string(a.Type[1:])
 		fmt.Fprintf(b, "\n  %s:\n", title)
 
 		aliases := make([]string, 0, len(a.ModelAliases))

@@ -66,7 +66,7 @@ func resolveProfileConfig(ctx context.Context, d state.Deps, opts *Options, agen
 	if err != nil {
 		return nil, fmt.Errorf("merge profile chain: %w", err)
 	}
-	backend := d.Runtime.Descriptor().Name
+	backend := d.Runtime.Descriptor().Type
 	if err := config.ValidateProfileBackend(merged.Backend, string(backend)); err != nil {
 		return nil, err
 	}

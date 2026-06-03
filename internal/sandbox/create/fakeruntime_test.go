@@ -57,7 +57,7 @@ func (f *fakeRuntime) AttachCommand(_ string, _, _ int, _ runtime.IsolationMode)
 func (f *fakeRuntime) PrepareAgentCommand(cmd string) string { return cmd }
 func (f *fakeRuntime) Descriptor() runtime.BackendDescriptor {
 	return runtime.BackendDescriptor{
-		Name:         "mock",
+		Type:         "mock",
 		BaseModeName: runtime.IsolationModeContainer,
 		Capabilities: runtime.BackendCaps{
 			NetworkIsolation: true,

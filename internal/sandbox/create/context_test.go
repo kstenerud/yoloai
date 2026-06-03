@@ -211,7 +211,7 @@ func TestWriteContextFiles_WritesContextAndRef(t *testing.T) {
 		},
 	}
 	agentDef := &agent.Definition{
-		Name:        "claude",
+		Type:        "claude",
 		StateDir:    "/home/yoloai/.claude/",
 		ContextFile: "CLAUDE.md",
 	}
@@ -253,7 +253,7 @@ func TestWriteContextFiles_NoRefWhenEmpty(t *testing.T) {
 		},
 	}
 	agentDef := &agent.Definition{
-		Name:     "test",
+		Type:     "test",
 		StateDir: "",
 	}
 

@@ -51,7 +51,7 @@ func WithLayout(layout config.Layout) EngineOption {
 }
 
 // NewEngine creates a Engine with the given runtime, logger, and input reader
-// for interactive prompts. The backend name is read from rt.Descriptor().Name
+// for interactive prompts. The backend name is read from rt.Descriptor().Type
 // when rt is non-nil.
 //
 // The Engine holds no output writer (F8): per-call progress writers are passed
@@ -69,7 +69,7 @@ func WithLayout(layout config.Layout) EngineOption {
 func NewEngine(rt runtime.Runtime, logger *slog.Logger, input io.Reader, opts ...EngineOption) *Engine {
 	var backend runtime.BackendType
 	if rt != nil {
-		backend = rt.Descriptor().Name
+		backend = rt.Descriptor().Type
 	}
 	m := &Engine{
 		runtime: rt,

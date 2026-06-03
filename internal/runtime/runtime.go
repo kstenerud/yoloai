@@ -132,7 +132,7 @@ type ExecResult struct {
 // Returned by Runtime.Descriptor(). Values are compile-time constants per
 // backend (verified by the W11 spike, docs/contributors/design/research/runtime-interface-spike.md).
 type BackendDescriptor struct {
-	Name                      BackendType     // BackendDocker, BackendPodman, BackendTart, BackendSeatbelt, BackendContainerd
+	Type                      BackendType     // BackendDocker, BackendPodman, BackendTart, BackendSeatbelt, BackendContainerd
 	Description               string          // one-line user-facing summary ("Linux containers; portable …")
 	Platforms                 []string        // host OSes this backend can run on; GOOS-style ("linux", "darwin", "windows")
 	Architectures             []string        // host architectures this backend supports; GOARCH-style ("amd64", "arm64"). nil/empty = any arch.

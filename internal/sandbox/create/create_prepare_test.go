@@ -449,7 +449,7 @@ func (m *mockDockerRuntime) AttachCommand(tmuxSocket string, rows, cols int, ter
 }
 func (m *mockDockerRuntime) Descriptor() runtime.BackendDescriptor {
 	return runtime.BackendDescriptor{
-		Name:         "mock",
+		Type:         "mock",
 		BaseModeName: runtime.IsolationModeContainer,
 	}
 }

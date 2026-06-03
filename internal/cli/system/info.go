@@ -51,7 +51,7 @@ func newSystemInfoCmd(version, commit, date string) *cobra.Command {
 						status += " (" + b.Note + ")"
 					}
 				}
-				fmt.Fprintf(out, "  %-12s %s\n", b.Name, status) //nolint:errcheck
+				fmt.Fprintf(out, "  %-12s %s\n", b.Type, status) //nolint:errcheck
 			}
 			return nil
 		},
@@ -74,7 +74,7 @@ func writeSystemInfoJSON(cmd *cobra.Command, version, commit, date string, info 
 	backends := make([]backendStatus, 0, len(info.Backends))
 	for _, b := range info.Backends {
 		backends = append(backends, backendStatus{
-			Name:      string(b.Name),
+			Name:      string(b.Type),
 			Available: b.Available,
 			Note:      b.Note,
 		})

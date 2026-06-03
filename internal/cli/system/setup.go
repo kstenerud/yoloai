@@ -118,7 +118,7 @@ func availableBackends(ctx context.Context, sc *yoloai.System) []setupChoice {
 		if len(b.Architectures) > 0 && !slices.Contains(b.Architectures, hostArch) {
 			continue
 		}
-		opts = append(opts, setupChoice{Name: string(b.Name), Blurb: b.Description})
+		opts = append(opts, setupChoice{Name: string(b.Type), Blurb: b.Description})
 	}
 	return opts
 }
@@ -128,7 +128,7 @@ func availableBackends(ctx context.Context, sc *yoloai.System) []setupChoice {
 func availableAgents(sc *yoloai.System) []setupChoice {
 	var opts []setupChoice
 	for _, a := range sc.Agents(yoloai.AgentQuery{RealOnly: true}) {
-		opts = append(opts, setupChoice{Name: a.Name, Blurb: a.Description})
+		opts = append(opts, setupChoice{Name: string(a.Type), Blurb: a.Description})
 	}
 	return opts
 }

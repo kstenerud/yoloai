@@ -94,7 +94,7 @@ func (m *mockRuntime) PrepareAgentCommand(cmd string) string { return cmd }
 
 func (m *mockRuntime) Descriptor() runtime.BackendDescriptor {
 	return runtime.BackendDescriptor{
-		Name:         "mock",
+		Type:         "mock",
 		BaseModeName: runtime.IsolationModeContainer,
 		Capabilities: runtime.BackendCaps{
 			NetworkIsolation: true,

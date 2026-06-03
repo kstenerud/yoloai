@@ -59,7 +59,7 @@ type IdleSupport struct {
 
 // Definition describes an agent's install, launch, and behavioral characteristics.
 type Definition struct {
-	Name              string
+	Type              AgentType
 	Description       string
 	InteractiveCmd    string
 	HeadlessCmd       string
@@ -95,7 +95,7 @@ type Definition struct {
 
 var agents = map[string]*Definition{
 	"aider": {
-		Name:            "aider",
+		Type:            "aider",
 		Description:     "Aider — AI pair programming in your terminal",
 		InteractiveCmd:  "aider --yes-always",
 		HeadlessCmd:     `aider --message "PROMPT" --yes-always --no-pretty --no-fancy-input`,
@@ -127,7 +127,7 @@ var agents = map[string]*Definition{
 		},
 	},
 	"claude": {
-		Name:           "claude",
+		Type:           "claude",
 		Description:    "Anthropic Claude Code — AI coding assistant",
 		InteractiveCmd: "claude --dangerously-skip-permissions",
 		HeadlessCmd:    `claude -p "PROMPT" --dangerously-skip-permissions`,
@@ -171,7 +171,7 @@ var agents = map[string]*Definition{
 		ShortLivedOAuthWarning: true,
 	},
 	"gemini": {
-		Name:           "gemini",
+		Type:           "gemini",
 		Description:    "Google Gemini CLI — AI coding assistant",
 		InteractiveCmd: "gemini --yolo",
 		HeadlessCmd:    `gemini -p "PROMPT" --yolo`,
@@ -212,7 +212,7 @@ var agents = map[string]*Definition{
 		},
 	},
 	"opencode": {
-		Name:            "opencode",
+		Type:            "opencode",
 		Description:     "OpenCode — open-source AI coding agent",
 		InteractiveCmd:  "opencode",
 		HeadlessCmd:     `opencode run "PROMPT"`,
@@ -247,7 +247,7 @@ var agents = map[string]*Definition{
 		AgentFilesExclude: []string{"auth.json", "sessions/"},
 	},
 	"codex": {
-		Name:           "codex",
+		Type:           "codex",
 		Description:    "OpenAI Codex — AI coding agent",
 		InteractiveCmd: "codex --dangerously-bypass-approvals-and-sandbox",
 		HeadlessCmd:    `codex exec --dangerously-bypass-approvals-and-sandbox "PROMPT"`,
@@ -275,7 +275,7 @@ var agents = map[string]*Definition{
 		AgentFilesExclude: []string{"auth.json", "sessions/"},
 	},
 	"test": {
-		Name:           "test",
+		Type:           "test",
 		Description:    "Bash shell for testing and development",
 		InteractiveCmd: "bash",
 		HeadlessCmd:    `sh -c "PROMPT"`,
@@ -288,7 +288,7 @@ var agents = map[string]*Definition{
 		ModelAliases:   nil,
 	},
 	"idle": {
-		Name:           "idle",
+		Type:           "idle",
 		Description:    "No-op container — keeps the sandbox running without an AI agent. Default for mcp-proxy.",
 		InteractiveCmd: "sleep infinity",
 		HeadlessCmd:    "sleep infinity",
@@ -382,7 +382,7 @@ func buildShellAgent() *Definition {
 	}
 
 	return &Definition{
-		Name:             "shell",
+		Type:             "shell",
 		Description:      "Bash shell with all agents' credentials seeded",
 		InteractiveCmd:   `bash -c 'printf "\n  yoloai shell — launch any agent with yolo-<name>\n  Available: yolo-aider  yolo-claude  yolo-codex  yolo-gemini  yolo-opencode\n\n"; exec bash'`,
 		HeadlessCmd:      `sh -c "PROMPT"`,

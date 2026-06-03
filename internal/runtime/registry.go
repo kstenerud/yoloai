@@ -31,10 +31,10 @@ var (
 
 // Register adds a backend factory and its static descriptor to the registry.
 // Called by each backend's init() function on supported platforms. Panics if
-// name does not match descriptor.Name or the backend is already registered.
+// name does not match descriptor.Type or the backend is already registered.
 func Register(name BackendType, factory Factory, descriptor BackendDescriptor) {
-	if name != descriptor.Name {
-		panic(fmt.Sprintf("runtime backend register: name %q != descriptor.Name %q", name, descriptor.Name))
+	if name != descriptor.Type {
+		panic(fmt.Sprintf("runtime backend register: name %q != descriptor.Type %q", name, descriptor.Type))
 	}
 	mu.Lock()
 	defer mu.Unlock()
@@ -99,6 +99,6 @@ func Descriptors() []BackendDescriptor {
 	for _, e := range backends {
 		out = append(out, e.descriptor)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	sort.Slice(out, func(i, j int) bool { return out[i].Type < out[j].Type })
 	return out
 }

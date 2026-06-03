@@ -57,7 +57,7 @@ func (f *fakeRuntime) AttachCommand(_ string, _, _ int, _ runtime.IsolationMode)
 }
 func (f *fakeRuntime) PrepareAgentCommand(cmd string) string { return cmd }
 func (f *fakeRuntime) Descriptor() runtime.BackendDescriptor {
-	return runtime.BackendDescriptor{Name: "mock", BaseModeName: runtime.IsolationModeContainer}
+	return runtime.BackendDescriptor{Type: "mock", BaseModeName: runtime.IsolationModeContainer}
 }
 
 var errFakeNotImplemented = fmt.Errorf("fake runtime: not implemented")

@@ -140,7 +140,7 @@ func containerBackends() []BackendType {
 	var out []BackendType
 	for _, d := range Descriptors() {
 		if d.BaseModeName == IsolationModeContainer {
-			out = append(out, d.Name)
+			out = append(out, d.Type)
 		}
 	}
 	return out

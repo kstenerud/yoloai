@@ -127,7 +127,7 @@ func (s *System) DiskUsage(ctx context.Context) (*DiskUsage, error) {
 		Sandboxes: dirSize(s.layout.SandboxesDir()),
 	}
 	for _, desc := range runtime.Descriptors() {
-		rt, err := newRuntime(ctx, desc.Name, s.layout)
+		rt, err := newRuntime(ctx, desc.Type, s.layout)
 		if err != nil {
 			// Backend not available in this environment — skip silently.
 			// The CLI's `yoloai system disk` does the same filtering via
@@ -137,7 +137,7 @@ func (s *System) DiskUsage(ctx context.Context) (*DiskUsage, error) {
 		usage, usageErr := runtime.CacheUsageFor(ctx, rt)
 		_ = rt.Close()
 		du.PerBackend = append(du.PerBackend, BackendDiskUsage{
-			Name:        desc.Name,
+			Name:        desc.Type,
 			CachedBytes: usage.CachedBytes,
 			ImageBytes:  usage.ImageBytes,
 			Detail:      usage.Detail,
@@ -227,10 +227,10 @@ func (s *System) Doctor(ctx context.Context, opts DoctorOptions) ([]BackendRepor
 	env := caps.DetectEnvironment()
 	reports := make([]BackendReport, 0)
 	for _, desc := range runtime.Descriptors() {
-		if opts.BackendFilter != "" && string(desc.Name) != opts.BackendFilter {
+		if opts.BackendFilter != "" && string(desc.Type) != opts.BackendFilter {
 			continue
 		}
-		for _, r := range s.backendReports(ctx, desc.Name, env, opts.IsolationFilter) {
+		for _, r := range s.backendReports(ctx, desc.Type, env, opts.IsolationFilter) {
 			reports = append(reports, backendReportFromCaps(r))
 		}
 	}
@@ -243,7 +243,7 @@ func (s *System) Doctor(ctx context.Context, opts DoctorOptions) ([]BackendRepor
 // Best-effort: a backend that errors while reporting is skipped.
 func (s *System) VMCensus(ctx context.Context) *VMCensus {
 	for _, desc := range runtime.Descriptors() {
-		rt, err := newRuntime(ctx, desc.Name, s.layout)
+		rt, err := newRuntime(ctx, desc.Type, s.layout)
 		if err != nil {
 			continue
 		}
@@ -345,11 +345,11 @@ func (s *System) Build(ctx context.Context, opts BuildOptions) error {
 	if opts.AllBackends {
 		var built int
 		for _, desc := range runtime.Descriptors() {
-			if err := s.buildOne(ctx, desc.Name, opts, out); err != nil {
+			if err := s.buildOne(ctx, desc.Type, opts, out); err != nil {
 				// Stop on first failure — matches the CLI's existing
 				// behavior. A more permissive policy can be added if
 				// users want best-effort multi-backend builds.
-				return fmt.Errorf("build %s: %w", desc.Name, err)
+				return fmt.Errorf("build %s: %w", desc.Type, err)
 			}
 			built++
 		}
@@ -610,7 +610,7 @@ func (s *System) Prune(ctx context.Context, opts PruneOptions) (*PruneResult, er
 	result := &PruneResult{}
 
 	for _, desc := range runtime.Descriptors() {
-		items, reclaimed := s.pruneBackend(ctx, desc.Name, known, opts, out)
+		items, reclaimed := s.pruneBackend(ctx, desc.Type, known, opts, out)
 		result.RemovedItems = append(result.RemovedItems, items...)
 		result.FreedBytes += reclaimed
 	}

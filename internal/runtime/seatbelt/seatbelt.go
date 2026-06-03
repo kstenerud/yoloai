@@ -24,7 +24,7 @@ import (
 // descriptor holds the static facts for the seatbelt backend; shared by the
 // registry registration and the Runtime.Descriptor() method.
 var descriptor = runtime.BackendDescriptor{
-	Name:                      "seatbelt",
+	Type:                      "seatbelt",
 	Description:               "macOS sandbox; near-instant, uses host tools, less isolation",
 	Platforms:                 []string{"darwin"},
 	Requires:                  "macOS (sandbox-exec is built-in)",

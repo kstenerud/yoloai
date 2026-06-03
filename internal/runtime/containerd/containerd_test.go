@@ -23,7 +23,7 @@ import (
 // TestDescriptor_Name verifies the backend name reported by Descriptor().
 func TestDescriptor_Name(t *testing.T) {
 	r := &Runtime{namespace: "yoloai"}
-	assert.Equal(t, runtime.BackendType("containerd"), r.Descriptor().Name)
+	assert.Equal(t, runtime.BackendType("containerd"), r.Descriptor().Type)
 }
 
 // TestWithNamespace verifies that withNamespace injects the correct namespace.

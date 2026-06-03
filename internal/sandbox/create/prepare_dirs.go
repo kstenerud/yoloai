@@ -86,11 +86,11 @@ func checkAgentAuth(agentDef *agent.Definition, hasAPIKey, hasAuth, hasAuthHint 
 		return nil
 	}
 	if agentDef.AuthOptional {
-		fmt.Fprintf(output, "Warning: no authentication detected for %s (it may use credentials yoloai cannot check)\n", agentDef.Name) //nolint:errcheck // best-effort warning
+		fmt.Fprintf(output, "Warning: no authentication detected for %s (it may use credentials yoloai cannot check)\n", agentDef.Type) //nolint:errcheck // best-effort warning
 		return nil
 	}
 	msg := fmt.Sprintf("no authentication found for %s: set %s",
-		agentDef.Name, strings.Join(agentDef.APIKeyEnvVars, "/"))
+		agentDef.Type, strings.Join(agentDef.APIKeyEnvVars, "/"))
 	if authDesc := provision.DescribeSeedAuthFiles(agentDef); authDesc != "" {
 		msg += fmt.Sprintf(" or provide OAuth credentials (%s)", authDesc)
 	}
@@ -117,7 +117,7 @@ func checkLocalhostURLs(d state.Deps, agentDef *agent.Definition, mergedEnv map[
 				hint = "use " + desc.HostFromContainer + " instead"
 			}
 			return yoerrors.NewUsageError("%s contains a localhost address (%s) which won't work inside a %s sandbox — %s",
-				key, val, desc.Name, hint)
+				key, val, desc.Type, hint)
 		}
 	}
 	return nil
@@ -307,11 +307,11 @@ func createCopyBaseline(workCopyDir string, rt runtime.Runtime) (string, error) 
 		// Tart: baseline will be created in VM after container start.
 		// Return empty SHA to signal deferred baseline creation.
 		slog.Debug("setupWorkdir: runtime implements WorkDirSetup, deferring baseline to VM",
-			"backend", rt.Descriptor().Name)
+			"backend", rt.Descriptor().Type)
 		return "", nil
 	}
 	slog.Debug("setupWorkdir: runtime does NOT implement WorkDirSetup, creating baseline on host",
-		"backend", rt.Descriptor().Name)
+		"backend", rt.Descriptor().Type)
 
 	// Docker: preserve original git history so the agent (and user) can
 	// git log, git show, git blame, etc. inside the sandbox.

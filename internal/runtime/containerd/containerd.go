@@ -28,7 +28,7 @@ import (
 // descriptor holds the static facts for the containerd backend; shared by the
 // registry registration and the Runtime.Descriptor() method.
 var descriptor = runtime.BackendDescriptor{
-	Name:                      "containerd",
+	Type:                      "containerd",
 	Description:               "Linux VMs via Kata Containers (--isolation vm/vm-enhanced)",
 	Platforms:                 []string{"linux"},
 	IsolationTargetOnly:       true,

@@ -64,7 +64,7 @@ func applyIsolationOverride(ctx context.Context, d state.Deps, opts StartOptions
 	if opts.Isolation != runtime.IsolationModeContainer && len(supported) > 0 {
 		ok := slices.Contains(supported, opts.Isolation)
 		if !ok {
-			return yoerrors.NewUsageError("isolation mode %q is not supported by the %s backend", opts.Isolation, desc.Name)
+			return yoerrors.NewUsageError("isolation mode %q is not supported by the %s backend", opts.Isolation, desc.Type)
 		}
 	}
 	if err := launch.CheckIsolationPrerequisites(ctx, d.Runtime, opts.Isolation); err != nil {

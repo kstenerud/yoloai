@@ -157,7 +157,7 @@ func (s *Sandbox) Exec(ctx context.Context, opts ExecOptions, io IOStreams) erro
 	if !opts.PTY {
 		execer, ok := s.c.rt.(runtime.StdioExecer)
 		if !ok {
-			return yoerrors.NewUsageError("backend %s does not support stdio exec", s.c.rt.Descriptor().Name)
+			return yoerrors.NewUsageError("backend %s does not support stdio exec", s.c.rt.Descriptor().Type)
 		}
 		return execer.StdioExec(ctx, store.InstanceName(s.c.layout.Principal, s.name), opts.Command, io.In, io.Out, io.Err)
 	}

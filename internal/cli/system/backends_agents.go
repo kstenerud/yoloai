@@ -90,7 +90,7 @@ func listBackends(cmd *cobra.Command) error {
 		items := make([]backendJSON, 0, len(backends))
 		for _, b := range backends {
 			items = append(items, backendJSON{
-				Name:        string(b.Name),
+				Name:        string(b.Type),
 				Description: b.Description,
 				Available:   b.Available,
 				Note:        b.Note,
@@ -107,7 +107,7 @@ func listBackends(cmd *cobra.Command) error {
 		if !b.Available {
 			avail = "no"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", b.Name, b.Description, avail, b.Note) //nolint:errcheck // best-effort output
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", b.Type, b.Description, avail, b.Note) //nolint:errcheck // best-effort output
 	}
 
 	return w.Flush()
@@ -120,7 +120,7 @@ func showBackendDetail(cmd *cobra.Command, name string) error {
 	var desc yoloai.BackendInfo
 	found := false
 	for _, b := range cliutil.System().Backends(cmd.Context(), yoloai.BackendQuery{ProbeAvailability: true}) {
-		if string(b.Name) == name {
+		if string(b.Type) == name {
 			desc = b
 			found = true
 			break
@@ -133,7 +133,7 @@ func showBackendDetail(cmd *cobra.Command, name string) error {
 
 	if cliutil.JSONEnabled(cmd) {
 		return cliutil.WriteJSON(cmd.OutOrStdout(), map[string]any{
-			"name":         desc.Name,
+			"name":         desc.Type,
 			"description":  desc.Description,
 			"available":    desc.Available,
 			"note":         desc.Note,
@@ -154,7 +154,7 @@ func showBackendDetail(cmd *cobra.Command, name string) error {
 		}
 	}
 
-	fmt.Fprintf(out, "Backend:     %s\n", desc.Name)                          //nolint:errcheck
+	fmt.Fprintf(out, "Backend:     %s\n", desc.Type)                          //nolint:errcheck
 	fmt.Fprintf(out, "Description: %s\n", desc.Description)                   //nolint:errcheck
 	fmt.Fprintf(out, "Available:   %s\n", avail)                              //nolint:errcheck
 	fmt.Fprintf(out, "Platforms:   %s\n", strings.Join(desc.Platforms, ", ")) //nolint:errcheck
@@ -179,7 +179,7 @@ func backendNames(cmd *cobra.Command) []string {
 	backends := cliutil.System().Backends(cmd.Context(), yoloai.BackendQuery{})
 	names := make([]string, len(backends))
 	for i, b := range backends {
-		names[i] = string(b.Name)
+		names[i] = string(b.Type)
 	}
 	return names
 }
@@ -214,7 +214,7 @@ func listAgents(cmd *cobra.Command) error {
 		var items []agentJSON
 		for _, a := range agents {
 			items = append(items, agentJSON{
-				Name:        a.Name,
+				Name:        string(a.Type),
 				Description: a.Description,
 				PromptMode:  a.PromptMode,
 			})
@@ -226,7 +226,7 @@ func listAgents(cmd *cobra.Command) error {
 	fmt.Fprintln(w, "AGENT\tDESCRIPTION\tPROMPT MODE") //nolint:errcheck
 
 	for _, a := range agents {
-		fmt.Fprintf(w, "%s\t%s\t%s\n", a.Name, a.Description, a.PromptMode) //nolint:errcheck
+		fmt.Fprintf(w, "%s\t%s\t%s\n", a.Type, a.Description, a.PromptMode) //nolint:errcheck
 	}
 
 	return w.Flush()
@@ -238,7 +238,7 @@ func agentNames(cmd *cobra.Command) []string {
 	agents := cliutil.System().Agents(yoloai.AgentQuery{})
 	names := make([]string, len(agents))
 	for i, a := range agents {
-		names[i] = a.Name
+		names[i] = string(a.Type)
 	}
 	return names
 }
@@ -248,7 +248,7 @@ func showAgentDetail(cmd *cobra.Command, name string) error {
 	var def yoloai.AgentInfo
 	found := false
 	for _, a := range cliutil.System().Agents(yoloai.AgentQuery{}) {
-		if a.Name == name {
+		if string(a.Type) == name {
 			def = a
 			found = true
 			break
@@ -260,7 +260,7 @@ func showAgentDetail(cmd *cobra.Command, name string) error {
 
 	out := cmd.OutOrStdout()
 
-	fmt.Fprintf(out, "Agent:       %s\n", def.Name)        //nolint:errcheck
+	fmt.Fprintf(out, "Agent:       %s\n", def.Type)        //nolint:errcheck
 	fmt.Fprintf(out, "Description: %s\n", def.Description) //nolint:errcheck
 	fmt.Fprintf(out, "Prompt mode: %s\n", def.PromptMode)  //nolint:errcheck
 

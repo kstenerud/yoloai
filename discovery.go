@@ -15,7 +15,7 @@ import (
 // exposes only the user-facing fields; the agent's internal launch machinery
 // (commands, seed files, idle handling, settings patches) stays internal.
 type AgentInfo struct {
-	Name          string
+	Type          AgentType
 	Description   string
 	PromptMode    string // "interactive" or "headless"
 	APIKeyEnvVars []string
@@ -30,7 +30,7 @@ type AgentInfo struct {
 // (see BackendQuery.ProbeAvailability); otherwise Available is false and Note is
 // empty regardless of whether the backend would actually run.
 type BackendInfo struct {
-	Name          BackendType
+	Type          BackendType
 	Description   string
 	Platforms     []string // host GOOS values this backend runs on ("linux", "darwin", …)
 	Architectures []string // host GOARCH values this backend supports ("amd64", "arm64"); nil/empty = any arch
@@ -91,7 +91,7 @@ func (s *System) Backends(ctx context.Context, q BackendQuery) []BackendInfo {
 	for _, desc := range descs {
 		info := backendInfoFromDescriptor(desc)
 		if q.ProbeAvailability {
-			rt, err := newRuntime(ctx, desc.Name, s.layout)
+			rt, err := newRuntime(ctx, desc.Type, s.layout)
 			if err != nil {
 				info.Note = err.Error()
 			} else {
@@ -127,7 +127,7 @@ func (s *System) Archetypes() []string {
 
 func agentInfoFromDefinition(def *agent.Definition) AgentInfo {
 	return AgentInfo{
-		Name:          def.Name,
+		Type:          def.Type,
 		Description:   def.Description,
 		PromptMode:    string(def.PromptMode),
 		APIKeyEnvVars: def.APIKeyEnvVars,
@@ -139,7 +139,7 @@ func agentInfoFromDefinition(def *agent.Definition) AgentInfo {
 
 func backendInfoFromDescriptor(desc runtime.BackendDescriptor) BackendInfo {
 	return BackendInfo{
-		Name:                desc.Name,
+		Type:                desc.Type,
 		Description:         desc.Description,
 		Platforms:           desc.Platforms,
 		Architectures:       desc.Architectures,

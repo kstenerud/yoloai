@@ -148,7 +148,7 @@ func Run(ctx context.Context, d state.Deps, opts Options) (name string, err erro
 		unlock()
 	}()
 
-	backend := d.Runtime.Descriptor().Name
+	backend := d.Runtime.Descriptor().Type
 	slog.Info("creating sandbox", "event", "sandbox.create", "sandbox", opts.Name, "agent", opts.Agent, "backend", backend)
 	// Validate isolation prerequisites before the potentially expensive image build.
 	if opts.Isolation != "" {
@@ -335,7 +335,7 @@ func buildConfigAndEnvironment(ctx context.Context, d state.Deps, opts Options, 
 	archetypeDockerDRequired := pr.archetypeDockerDRequired
 	lifecycleCfg := buildLifecycleConfig(resolvedArchetype, archetypeDockerDRequired, state_onCreateDone, devcontainerCfg)
 
-	backend := d.Runtime.Descriptor().Name
+	backend := d.Runtime.Descriptor().Type
 	configData, err := buildContainerConfig(d.Layout, agentDef, agentCommand, runtime.PrepareAgentCommandFor(d.Runtime, ""), tmuxConf, launch.OverlayOrResolvedMountPath(workdir), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, collectOverlayMounts(workdir, auxDirs), pr.setup, pr.autoCommitInterval, collectCopyDirs(workdir, auxDirs), opts.Name, d.Runtime.TmuxSocket(sandboxDir), pr.isolation, opts.VscodeTunnel, invocation.SanitizeTunnelName(opts.Name), lifecycleCfg)
 	if err != nil {
 		return nil, nil, "", "", fmt.Errorf("build %s: %w", store.RuntimeConfigFile, err)

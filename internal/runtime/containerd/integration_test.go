@@ -49,7 +49,7 @@ func TestIntegration_New(t *testing.T) {
 	require.NoError(t, err)
 	defer rt.Close() //nolint:errcheck // best-effort close
 
-	assert.Equal(t, runtime.BackendContainerd, rt.Descriptor().Name)
+	assert.Equal(t, runtime.BackendContainerd, rt.Descriptor().Type)
 }
 
 // TestIntegration_IsReady_False verifies IsReady returns false when yoloai-base is not imported.

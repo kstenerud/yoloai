@@ -21,7 +21,7 @@ func TestSystemClient_Agents_Catalog(t *testing.T) {
 
 	byName := make(map[string]AgentInfo, len(agents))
 	for _, a := range agents {
-		byName[a.Name] = a
+		byName[string(a.Type)] = a
 	}
 	claude, ok := byName["claude"]
 	require.True(t, ok, "claude agent present in catalog")
@@ -34,7 +34,7 @@ func TestSystemClient_Agents_RealOnly(t *testing.T) {
 
 	real := make(map[string]bool)
 	for _, a := range c.Agents(AgentQuery{RealOnly: true}) {
-		real[a.Name] = true
+		real[string(a.Type)] = true
 	}
 	for _, pseudo := range []string{"test", "shell", "idle"} {
 		assert.False(t, real[pseudo], "RealOnly excludes pseudo-agent %q", pseudo)
@@ -61,7 +61,7 @@ func TestSystemClient_Backends_StaticCatalog(t *testing.T) {
 	require.Len(t, backends, len(descs), "one BackendInfo per registered backend")
 
 	for i, b := range backends {
-		assert.Equal(t, descs[i].Name, b.Name, "registration order preserved")
+		assert.Equal(t, descs[i].Type, b.Type, "registration order preserved")
 		assert.NotEmpty(t, b.Description)
 		// Without a probe, availability is never asserted.
 		assert.False(t, b.Available)

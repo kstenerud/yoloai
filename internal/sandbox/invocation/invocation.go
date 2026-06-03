@@ -61,7 +61,7 @@ func ValidateModel(agentDef *agent.Definition, resolvedModel string, originalMod
 	}
 
 	// OpenCode requires provider/model format (e.g., "openai/gpt-4o", "anthropic/claude-sonnet-4-20250514")
-	if agentDef.Name == "opencode" {
+	if agentDef.Type == "opencode" {
 		if !strings.Contains(resolvedModel, "/") {
 			return fmt.Errorf(
 				"opencode requires models in provider/model format (e.g., \"openai/gpt-4o\", \"anthropic/claude-sonnet-4-20250514\")\n\n"+

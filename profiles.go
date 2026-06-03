@@ -287,7 +287,7 @@ func (a *ProfileAdmin) Delete(_ context.Context, name string) (*DeleteProfileRes
 			continue
 		}
 		hints = append(hints, ImageCleanupHint{
-			Backend: BackendType(desc.Name),
+			Backend: BackendType(desc.Type),
 			Image:   image,
 			Command: desc.CleanupHint(image),
 		})

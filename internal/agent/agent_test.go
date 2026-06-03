@@ -12,7 +12,7 @@ func TestGetAgent_Aider(t *testing.T) {
 	def := GetAgent("aider")
 	require.NotNil(t, def)
 
-	assert.Equal(t, "aider", def.Name)
+	assert.Equal(t, AgentType("aider"), def.Type)
 	assert.NotEmpty(t, def.Description)
 	assert.Equal(t, "aider --yes-always", def.InteractiveCmd)
 	assert.Contains(t, def.HeadlessCmd, "aider --message")
@@ -40,7 +40,7 @@ func TestGetAgent_Claude(t *testing.T) {
 	def := GetAgent("claude")
 	require.NotNil(t, def)
 
-	assert.Equal(t, "claude", def.Name)
+	assert.Equal(t, AgentType("claude"), def.Type)
 	assert.NotEmpty(t, def.Description)
 	assert.Equal(t, "claude --dangerously-skip-permissions", def.InteractiveCmd)
 	assert.Contains(t, def.HeadlessCmd, "claude -p")
@@ -71,7 +71,7 @@ func TestGetAgent_Gemini(t *testing.T) {
 	def := GetAgent("gemini")
 	require.NotNil(t, def)
 
-	assert.Equal(t, "gemini", def.Name)
+	assert.Equal(t, AgentType("gemini"), def.Type)
 	assert.NotEmpty(t, def.Description)
 	assert.Equal(t, "gemini --yolo", def.InteractiveCmd)
 	assert.Contains(t, def.HeadlessCmd, "gemini -p")
@@ -103,7 +103,7 @@ func TestGetAgent_OpenCode(t *testing.T) {
 	def := GetAgent("opencode")
 	require.NotNil(t, def)
 
-	assert.Equal(t, "opencode", def.Name)
+	assert.Equal(t, AgentType("opencode"), def.Type)
 	assert.NotEmpty(t, def.Description)
 	assert.Equal(t, "opencode", def.InteractiveCmd)
 	assert.Contains(t, def.HeadlessCmd, "opencode run")
@@ -146,7 +146,7 @@ func TestGetAgent_Codex(t *testing.T) {
 	def := GetAgent("codex")
 	require.NotNil(t, def)
 
-	assert.Equal(t, "codex", def.Name)
+	assert.Equal(t, AgentType("codex"), def.Type)
 	assert.NotEmpty(t, def.Description)
 	assert.Equal(t, "codex --dangerously-bypass-approvals-and-sandbox", def.InteractiveCmd)
 	assert.Contains(t, def.HeadlessCmd, "codex exec")
@@ -179,7 +179,7 @@ func TestGetAgent_Test(t *testing.T) {
 	def := GetAgent("test")
 	require.NotNil(t, def)
 
-	assert.Equal(t, "test", def.Name)
+	assert.Equal(t, AgentType("test"), def.Type)
 	assert.NotEmpty(t, def.Description)
 	assert.Equal(t, "bash", def.InteractiveCmd)
 	assert.Contains(t, def.HeadlessCmd, "sh -c")
@@ -204,7 +204,7 @@ func TestGetAgent_Shell(t *testing.T) {
 	def := GetAgent("shell")
 	require.NotNil(t, def)
 
-	assert.Equal(t, "shell", def.Name)
+	assert.Equal(t, AgentType("shell"), def.Type)
 	assert.NotEmpty(t, def.Description)
 	assert.Contains(t, def.InteractiveCmd, "yolo-claude")
 	assert.Contains(t, def.InteractiveCmd, "yolo-codex")

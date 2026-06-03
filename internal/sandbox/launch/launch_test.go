@@ -218,7 +218,7 @@ func TestBuildInstanceConfig_RejectsNetworkIsolatedWithGvisor(t *testing.T) {
 		Isolation:   "container-enhanced",
 	}
 
-	_, err := buildInstanceConfig(runtime.BackendDescriptor{Name: "mock", Capabilities: runtime.BackendCaps{NetworkIsolation: true}}, st, nil, nil)
+	_, err := buildInstanceConfig(runtime.BackendDescriptor{Type: "mock", Capabilities: runtime.BackendCaps{NetworkIsolation: true}}, st, nil, nil)
 	require.Error(t, err)
 	msg := err.Error()
 	assert.Contains(t, msg, "container-enhanced", "error names the broken isolation mode")
@@ -242,7 +242,7 @@ func TestBuildInstanceConfig_AllowsNetworkIsolatedOnSupportedModes(t *testing.T)
 				NetworkMode: "isolated",
 				Isolation:   isolation,
 			}
-			_, err := buildInstanceConfig(runtime.BackendDescriptor{Name: "mock", Capabilities: runtime.BackendCaps{NetworkIsolation: true, OverlayDirs: true, CapAdd: true}}, st, nil, nil)
+			_, err := buildInstanceConfig(runtime.BackendDescriptor{Type: "mock", Capabilities: runtime.BackendCaps{NetworkIsolation: true, OverlayDirs: true, CapAdd: true}}, st, nil, nil)
 			require.NoError(t, err)
 		})
 	}
