@@ -237,6 +237,23 @@ func TestValidateName(t *testing.T) {
 			assert.Error(t, err, "expected %q to be invalid", name)
 		}
 	})
+
+	// DF16: the old loose regex accepted trailing/leading/doubled separators
+	// that containerd's container-id grammar rejects at create time. The
+	// tightened grammar (via config.ParseSandboxName) now rejects them.
+	t.Run("trailing/doubled separators (DF16)", func(t *testing.T) {
+		for _, name := range []string{
+			"my-app-",
+			"my.app.",
+			"my_app_",
+			"a..b",
+			"x__y",
+			"a--b",
+		} {
+			err := ValidateName(name)
+			assert.Error(t, err, "expected %q to be invalid", name)
+		}
+	})
 }
 
 func TestWorkDir(t *testing.T) {

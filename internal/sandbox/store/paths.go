@@ -23,7 +23,6 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
-	"github.com/kstenerud/yoloai/yoerrors"
 )
 
 // ErrSandboxNotFound is returned when a sandbox directory does not exist.
@@ -109,21 +108,11 @@ func DecodePath(encoded string) (string, error) {
 }
 
 // ValidateName checks that a sandbox name is safe for use in filesystem paths
-// and Docker container names.
+// and runtime instance names. It delegates to config.ParseSandboxName so the
+// containerd identifier grammar is enforced in exactly one place (DF16/DF15).
 func ValidateName(name string) error {
-	if name == "" {
-		return yoerrors.NewUsageError("sandbox name is required")
-	}
-	if len(name) > config.MaxNameLength {
-		return yoerrors.NewUsageError("invalid sandbox name: must be at most %d characters (got %d)", config.MaxNameLength, len(name))
-	}
-	if name[0] == '/' || name[0] == '\\' {
-		return yoerrors.NewUsageError("invalid sandbox name %q: looks like a path (did you swap the arguments?)", name)
-	}
-	if !config.ValidNameRe.MatchString(name) {
-		return yoerrors.NewUsageError("invalid sandbox name %q: must start with a letter or digit and contain only letters, digits, underscores, dots, or hyphens", name)
-	}
-	return nil
+	_, err := config.ParseSandboxName(name)
+	return err
 }
 
 // InstanceName returns the runtime instance name for a sandbox.
