@@ -38,8 +38,10 @@ no, the surface has a gap.
 
 ### Pattern
 
-- The public surface is the root `yoloai` package (`Client`, `SystemClient`, `Sandbox`,
-  `Workdir`, the public option/result types). Everything under `internal/` is sealed.
+- The public surface is the root `yoloai` package: one top-level `Client` noun with
+  `System()` / `Sandbox()` sub-handles (`Sandbox` in turn exposes `Workdir()` /
+  `Network()` / `Agent()`), plus the public option/result types. Everything under
+  `internal/` is sealed.
 - A capability the CLI reaches `internal/` for becomes a public verb on the lower layer,
   not a retype of the CLI to wrap an internal value. (This is the D56 downward half of
   §2: *policy must not know the how*; a reach-through is converted to a verb.)

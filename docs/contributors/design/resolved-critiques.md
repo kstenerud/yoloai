@@ -7,6 +7,45 @@ History of critiques that have been addressed and applied. Items are moved here 
 [`unresolved-critiques.md`](unresolved-critiques.md) once resolved, so the active file stays
 a working set. Newest first.
 
+## A2/A3 (2026-06-03 Public-API round) — surface split on backend-liveness; `SystemClient` junk drawer; agent noun homeless
+
+- **Severity:** MAJOR (contract shape). **Resolved:** 2026-06-03 (commits `d636297` C1 → `bb41cbe` C4 on `layering-refactor`).
+- **Root cause.** `NewWithOptions` eagerly opened the backend, so a `Client` was always backend-bound;
+  the layout-only `SystemClient` carried the backend-free per-sandbox readers. Same noun (sandbox X)
+  was split across two handles by an implementation property, and the agent-interaction verbs were
+  smeared across both by the same axis. D53's third noun (**agent**) had no handle.
+- **Resolution — one lazy `Client`, sub-handles by concern.**
+  - **Lazy backend init (C1).** `NewWithOptions` no longer opens a runtime; it stores the resolved
+    backend and opens once, mutex-guarded, on the first backend-bound op (`ensure`/`tryEnsure` in
+    `yoloai.go`). `Options.Backend` is now optional — a backend-less `Client` serves every
+    backend-free op without connecting; a backend-bound op on one returns the typed sentinel
+    `ErrBackendRequired` instead of the old panic-footgun. `Close()` is a no-op when nothing opened.
+  - **Agent noun gets a home (C2).** New `Sandbox(name).Agent()` sub-handle (pure, no IO, mirrors
+    `Workdir()`) homes `Prompt`, `AgentLog`, `Logs`, `SendInput`, `Attach`, `CaptureTerminal`,
+    `ContainerLogs` — `Prompt`/`AgentLog`/`Logs` relocated off `SystemClient`.
+  - **Per-sandbox readers consolidate (C3).** `Metadata` (was `SandboxMetadata(name)`),
+    `VscodeAttach`, `Unlock`, `Files`, and the path getters become flat `Sandbox` methods.
+    `RequireSandbox` dropped — `Client.Sandbox(name)` already validates existence
+    (`ErrSandboxNotFound`).
+  - **`SystemClient` collapses (C4).** Renamed to `System`, reached only via `Client.System()`;
+    `NewSystemClient` + `SystemOptions` removed. It now holds honest host/fleet/admin only
+    (`DiskUsage`/`Doctor`/`Build`/`Check`/`Prune`/`EmptyTrash`/`Config`/`Profiles`/discovery/migration).
+- **CLI.** `cliutil.Client(cmd)` builds a backend-less `Client` for reads; `cliutil.System()` returns
+  its admin sub-handle; `cliutil.WithClient(cmd, backend, fn)` stays for container-driving commands.
+  Backend now opens lazily exactly when the first backend-bound CLI op runs, not at process start.
+- **Tracked in** [`BREAKING-CHANGES.md`](../../BREAKING-CHANGES.md) ("`SystemClient` collapsed into
+  `Client.System()`") and decision **D67**.
+
+## A1 (2026-06-03 Public-API round) — mirror-vs-alias decided by implementation convenience
+
+- **Severity:** MINOR. **Resolved:** 2026-06-03 (no code; principle).
+- **Resolution.** Settled by the "alias by default, mirror on demand" principle in
+  [`development-principles.md`](../principles/development-principles.md) §4: flat embedder-held
+  structs are consciously aliased (the F1 detector guards leaks; mirroring would be duplication),
+  and a hand-written mirror is introduced only when a field must be dropped/renamed or a nested
+  internal type would otherwise become un-nameable. The prior inconsistency was accidental, not a
+  contract decision; the principle makes the rule explicit rather than per-type effort-driven.
+
 ## G6 (2026-05-30 critique) — First-run setup UX leaked into the library contract
 
 - **Severity:** MINOR. **Resolved:** 2026-06-03.

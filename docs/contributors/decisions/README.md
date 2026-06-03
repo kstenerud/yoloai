@@ -436,6 +436,22 @@ After the bootstrap the stamp is the **only** signal consulted — a stamped lay
 
 **Consequences.** Closes the last open item from the 2026-05-30 Post-F1 critique round; the round's active queue (`design/unresolved-critiques.md`) is now empty. `internal/cli/extension` is fenced from `internal/runtime`/`internal/sandbox` like the rest of the CLI (it imports only `internal/agent`, for agent-name validation). `architecture/README.md` package map and the `plans/layer1-completion.md` capability table updated. `make check` green.
 
+## D67 — One lazy `Client`: collapse `SystemClient` into `Client.System()`; `Options.Backend` optional; consolidate the per-sandbox noun
+
+**Date:** 2026-06-03. **Status:** Accepted (owner, 2026-06-03). **Resolves** critiques A2/A3 (see `design/resolved-critiques.md`). **Applies** architecture-principles "one noun, sub-handles by concern" and development-principles §2. **Implemented** on `layering-refactor` (commits `d636297` C1 → `bb41cbe` C4).
+
+**The decision.** The public surface had split operations on the *same noun* (sandbox X) across two top-level handles by an implementation property — "does this op hold a persistent backend connection." `NewWithOptions` eagerly opened the backend, so `Client` was backend-bound; the layout-only `SystemClient` carried the backend-free per-sandbox readers and the host/fleet admin. Collapse it: **one top-level `Client` noun**, backend opened lazily, with `System()` / `Sandbox()` sub-handles (and `Sandbox` exposing `Workdir()` / `Network()` / `Agent()`).
+
+**What changed.**
+- **Lazy runtime (C1).** `NewWithOptions` stops opening the backend; the `Client` holds a once-guarded lazy opener (`ensure`/`tryEnsure`). Backend-free ops never trigger it. `Options.Backend` is optional — empty means no persistent backend selected; a backend-bound op on such a `Client` returns the typed sentinel `ErrBackendRequired` (not the old panic-footgun). `Close()` is a no-op when nothing opened.
+- **Agent noun homed (C2).** New pure `Sandbox(name).Agent()` sub-handle (mirrors `Workdir()`) carries `Prompt`/`AgentLog`/`Logs`/`SendInput`/`Attach`/`CaptureTerminal`/`ContainerLogs`. This is D53's long-promised third noun (sandbox / changes / agent) finally given a handle.
+- **Readers consolidated (C3).** `Metadata` (was `SandboxMetadata(name)`), `VscodeAttach`, `Unlock`, `Files`, and the path getters become flat `Sandbox` methods. `RequireSandbox` dropped — `Client.Sandbox(name)` already validates existence (`ErrSandboxNotFound`).
+- **`SystemClient` collapsed (C4).** Type renamed to `System`, reached only via `Client.System()`; `NewSystemClient` + `SystemOptions` removed. It now holds honest host/fleet/admin only.
+
+**Why.** The embedder no longer needs to know which per-sandbox op needs a live backend, nor to pick between two constructors. A backend-less `Client` (no `Options.Backend`) serves all admin + read-only work without ever opening a runtime; a backend opens lazily exactly when the first container-driving op runs. The CLI mirrors this: `cliutil.Client(cmd)` for backend-less reads, `cliutil.System()` for admin, `cliutil.WithClient(cmd, backend, fn)` for container-driving commands.
+
+**Consequences.** Breaking (beta) — tracked in `BREAKING-CHANGES.md` ("`SystemClient` collapsed into `Client.System()`"). Drains the 2026-06-03 Public-API round (A1 by principle, A2/A3 here, A4 abandoned). `make check` green after each of C1–C4.
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.

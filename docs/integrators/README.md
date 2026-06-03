@@ -17,7 +17,7 @@ the layering *contract*, but not the plans, research, or decision log under
 
 yoloAI never reads the embedding process's live environment (§12 "no ambient
 configuration"). Everything the selected backend needs to reach its daemon is read from the
-environment snapshot you pass as `Options.Env` / `SystemOptions.Env` — a `map[string]string`.
+environment snapshot you pass as `Options.Env` — a `map[string]string`.
 The CLI fills this from its one licensed `os.Environ()` read; an embedder passes each
 principal's own environment (never the daemon's process env, so credentials stay
 principal-scoped).

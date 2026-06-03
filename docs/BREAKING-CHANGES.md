@@ -4,6 +4,58 @@ Tracks breaking changes made during beta. Each entry should be included in relea
 
 ## Unreleased
 
+### `SystemClient` collapsed into `Client.System()`; `Options.Backend` now optional
+
+The standalone `SystemClient` type, its constructor `NewSystemClient`, and the
+`SystemOptions` struct were removed. The host/fleet/admin surface they carried
+(`DiskUsage`, `Prune`, `Doctor`, `Build`, `Check`, `Backends`, `Agents`, `Config`,
+`Profiles`, `Info`, `Migrate`, …) now lives on a `System` sub-handle reached only
+via `Client.System()`. There is one top-level noun — `Client` — with
+`System()` / `Sandbox()` sub-handles.
+
+**Previous behavior:** an embedder built two parallel handles. `NewWithOptions`
+eagerly opened the backend, so a `Client` was always backend-bound; admin and
+backend-free per-sandbox reads went through a separate `NewSystemClient(SystemOptions{…})`.
+Per-sandbox operations were split across the two handles by whether they needed a
+live backend.
+
+**New behavior:** `NewWithOptions` no longer opens a backend eagerly — it stores
+the resolved backend and opens the runtime lazily on the first backend-bound
+operation. `Options.Backend` is therefore optional: a `Client` constructed without
+it serves every backend-free operation (admin via `System()`, per-sandbox reads
+via `Sandbox(name)` and `Sandbox(name).Agent()`) without ever opening a runtime. A
+backend-bound operation on such a `Client` returns the typed sentinel
+`ErrBackendRequired` instead of failing late.
+
+**Migration:** replace `NewSystemClient(SystemOptions{DataDir, HomeDir, Env})` with
+`NewWithOptions(ctx, Options{DataDir, HomeDir, Env})` and call `.System()` on the
+result. Pass `Options.Backend` only for commands that drive a container
+(start/stop/exec/attach/diff/apply); omit it for admin and read-only work. Earlier
+entries in this changelog that name `SystemClient` refer to the same surface, now
+reached via `Client.System()`.
+
+**Per-sandbox operations consolidated under one noun.** The per-sandbox readers
+and agent-interaction verbs that used to hang off `SystemClient` (keyed by a `name`
+argument) now hang off the `Sandbox` handle returned by `Client.Sandbox(name)`:
+
+- Agent-interaction verbs move to a new `Sandbox(name).Agent()` sub-handle (homes
+  the third D53 noun, mirroring `Workdir()`): `Prompt`, `AgentLog`, `Logs`,
+  `SendInput`, `Attach`, `CaptureTerminal`, `ContainerLogs`.
+- Per-sandbox readers become flat `Sandbox` methods: `SandboxMetadata(name)` →
+  `Sandbox(name).Metadata()`, plus `VscodeAttach`, `Unlock`, `Files`, and the path
+  getters (`RuntimeConfigPath` / `EnvironmentPath` / `LogPaths` / `FilesDir` /
+  `CacheDir`).
+
+`Client.Sandbox(name)` validates the sandbox directory at construction (returning
+`ErrSandboxNotFound`), so the former `SystemClient.RequireSandbox(name)` was
+removed as redundant.
+
+**Migration:** replace `client.System().Prompt(name)` with
+`client.Sandbox(name).Agent().Prompt()`, `client.System().SandboxMetadata(name)`
+with `client.Sandbox(name).Metadata()`, and so on. Lifecycle/state verbs
+(`Start`/`Stop`/`Restart`/`Reset`/`Destroy`/`Inspect`/`Exec`/`HasActiveWork`)
+were already flat on `Sandbox` and are unchanged.
+
 ### `SystemClient.Setup` / `SetupStatus` and the setup-wizard types removed
 
 The entire first-run-setup vocabulary left the public library contract:
@@ -98,7 +150,7 @@ to locate the daemon socket. In a multi-principal daemon this leaked the
 configuration").
 
 **New behavior:** callers pass the same host-env snapshot they feed to
-`Options.Env` / `SystemOptions.Env`; probes read socket-discovery vars from that
+`Options.Env`; probes read socket-discovery vars from that
 map. Pass `nil` to probe only the default socket paths. The CLI threads its one
 licensed `os.Environ()` snapshot (`Layout().Env`), so CLI behavior is unchanged.
 
@@ -159,10 +211,9 @@ a typed `*yoloai.DirtyWorkdirError` (the library never prompts); ack it with
 (`Version` moved to `Options.Version`; attach is a separate post-create step).
 `Ports` is `[]yoloai.PortMapping`; `requires:` is now a non-blocking warning.
 
-**Admin client.** `yoloai.NewSystemClient(opts yoloai.SystemOptions)
-(*SystemClient, error)` replaces `NewSystemClient(config.Layout)` so embedders
-need not name the internal `config.Layout`; `SystemOptions{DataDir, HomeDir, Env}`
-(empty `DataDir` → `*UsageError`).
+**Admin client.** The admin surface is reached via `Client.System()` (see the
+"`SystemClient` collapsed into `Client.System()`" entry above); the standalone
+`NewSystemClient` / `SystemOptions` constructor was removed before release.
 
 **Typed errors / public shapes replace sentinels and internal results.**
 `ErrUnappliedChanges` → `*ActiveWorkError` (carries the reason); diff/apply/commits

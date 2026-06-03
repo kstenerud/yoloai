@@ -6,7 +6,7 @@ Code navigation guide for the yoloAI codebase — the source of truth for **wher
 
 ```
 yoloai.go                → Orchestration spine: Client (Run, Diff, Apply, Stop, Destroy, ...)
-system_client.go         → Orchestration spine: SystemClient (DiskUsage, Prune, Build, Check)
+system_client.go         → Orchestration spine: System (DiskUsage, Prune, Build, Check)
 runtime_imports_linux.go → Linux-specific backend registration (containerd)
 yoerrors/                → Public typed error sentinels (top-level pkg; re-exported via the yoloai package)
 cmd/yoloai/              → Binary entry point
@@ -46,7 +46,7 @@ test/e2e/                → End-to-end tests against the compiled binary (build
 
 Public Go surface is the **`yoloai` package only** (W-L12). Every other Go package lives under `internal/` and is unreachable from external imports by the Go compiler itself. `cmd/yoloai` is the binary entry, not a library.
 
-Dependency direction (W-L8 + W-L12 shape): `cmd/yoloai` → `internal/cli` → `yoloai` (Client + SystemClient) → `internal/sandbox` + `internal/sandbox/patch` + `internal/sandbox/store` + `internal/runtime`; `internal/sandbox` → `internal/sandbox/archetype` + `internal/sandbox/store` + `internal/runtime` + `internal/agent` + `internal/workspace`; `internal/sandbox/patch` → `internal/sandbox` + `internal/sandbox/store`; `internal/sandbox/store` and `internal/sandbox/state` are leaves (`state` holds the shared `DirSpec`/`State`/`Deps`/`Perms` value types so the F5 subpackages depend on it without importing the `sandbox` façade). Post-F5 the `sandbox` package is a thin **façade**: it re-exports leaf types/functions via `type X = leaf.X` / `var X = leaf.X` aliases and holds the `Engine` deps-holder, while orchestration lives in the leaves. The F5 DAG is `state ← {mounts, invocation, provision, profiles, runtimeconfig} ← launch ← {create, lifecycle}` (create/ and lifecycle/ are siblings — neither imports the other; their one-time shared check `CheckIsolationPrerequisites` lives in `launch/`) `← sandbox` (façade). Methods were **dissolved** into free functions taking `state.Deps`, not left as thin delegators; `yoloai.Client`/`Sandbox` call e.g. `lifecycle.Stop(ctx, deps, name)` and `create.Run(ctx, deps, ...)` directly. `internal/agent` stands alone; `internal/mcpsrv` depends on `yoloai` (not `sandbox.Engine`). The CLI reaches into neither the `internal/sandbox` **façade** package nor any of its leaf subpackages (`store`/`patch`/`archetype`/`status`/…) nor `internal/runtime/*` — every command goes through `yoloai.Client`, `yoloai.SystemClient`, and the `yoloai.*` re-exports. (G7 gave every former leaf reach-in a public verb — sandbox-metadata reads, agent-log/file paths, agent/model/backend discovery, stored-prompt get/set, the git-tag-on-apply — so the leaves are no longer consumer surfaces.) The `withRuntime`/`withManager` helpers were removed in W-L10. Cross-backend enumeration (`ls`, `doctor`, `system info`) goes through `SystemClient.ListAcrossBackends` / `Doctor` / `Info` (F23); the only remaining `cliutil.NewRuntime` callers are `cliutil.CheckBackend` (the availability-probe chokepoint, used by a few read-only displays) and the backend-scoped `system tart` subtree. Depguard (`.golangci.yml`) enforces the boundary going forward with two twin rules over non-test `internal/cli/**` and `internal/mcpsrv/**`: `cli-sandbox-scope` denies the `internal/sandbox` subtree by prefix — façade *and* all leaves, no allow-list (F1 Half-B + G2) — and `cli-runtime-scope` denies `internal/runtime` (only `internal/cli/system/tart/` is exempt, W-L13/G7).
+Dependency direction (W-L8 + W-L12 shape): `cmd/yoloai` → `internal/cli` → `yoloai` (Client + System) → `internal/sandbox` + `internal/sandbox/patch` + `internal/sandbox/store` + `internal/runtime`; `internal/sandbox` → `internal/sandbox/archetype` + `internal/sandbox/store` + `internal/runtime` + `internal/agent` + `internal/workspace`; `internal/sandbox/patch` → `internal/sandbox` + `internal/sandbox/store`; `internal/sandbox/store` and `internal/sandbox/state` are leaves (`state` holds the shared `DirSpec`/`State`/`Deps`/`Perms` value types so the F5 subpackages depend on it without importing the `sandbox` façade). Post-F5 the `sandbox` package is a thin **façade**: it re-exports leaf types/functions via `type X = leaf.X` / `var X = leaf.X` aliases and holds the `Engine` deps-holder, while orchestration lives in the leaves. The F5 DAG is `state ← {mounts, invocation, provision, profiles, runtimeconfig} ← launch ← {create, lifecycle}` (create/ and lifecycle/ are siblings — neither imports the other; their one-time shared check `CheckIsolationPrerequisites` lives in `launch/`) `← sandbox` (façade). Methods were **dissolved** into free functions taking `state.Deps`, not left as thin delegators; `yoloai.Client`/`Sandbox` call e.g. `lifecycle.Stop(ctx, deps, name)` and `create.Run(ctx, deps, ...)` directly. `internal/agent` stands alone; `internal/mcpsrv` depends on `yoloai` (not `sandbox.Engine`). The CLI reaches into neither the `internal/sandbox` **façade** package nor any of its leaf subpackages (`store`/`patch`/`archetype`/`status`/…) nor `internal/runtime/*` — every command goes through `yoloai.Client`, `yoloai.System`, and the `yoloai.*` re-exports. (G7 gave every former leaf reach-in a public verb — sandbox-metadata reads, agent-log/file paths, agent/model/backend discovery, stored-prompt get/set, the git-tag-on-apply — so the leaves are no longer consumer surfaces.) The `withRuntime`/`withManager` helpers were removed in W-L10. Cross-backend enumeration (`ls`, `doctor`, `system info`) goes through `System.ListAcrossBackends` / `Doctor` / `Info` (F23); the only remaining `cliutil.NewRuntime` callers are `cliutil.CheckBackend` (the availability-probe chokepoint, used by a few read-only displays) and the backend-scoped `system tart` subtree. Depguard (`.golangci.yml`) enforces the boundary going forward with two twin rules over non-test `internal/cli/**` and `internal/mcpsrv/**`: `cli-sandbox-scope` denies the `internal/sandbox` subtree by prefix — façade *and* all leaves, no allow-list (F1 Half-B + G2) — and `cli-runtime-scope` denies `internal/runtime` (only `internal/cli/system/tart/` is exempt, W-L13/G7).
 
 ## File Index
 
@@ -55,7 +55,7 @@ Dependency direction (W-L8 + W-L12 shape): `cmd/yoloai` → `internal/cli` → `
 | File | Purpose |
 |------|---------|
 | `yoloai.go` | Orchestration spine — `Client` and its sandbox-scoped methods (`Run`, `Diff`, `Apply`, `Stop`, `Destroy`, `List`, `Inspect`, `Attach`, `Exec`, `Clone`, `Reset`, `Restart`, `Create`, `Start`, plus the diff/apply variants). Registers Docker, Podman, Seatbelt, and Tart backends via blank imports. |
-| `system_client.go` | Orchestration spine — `SystemClient` for admin/cross-backend operations (`DiskUsage`, `Prune`, `Build`, `Check`). Reached via `Client.System()` or `NewSystemClient(layout)`. Iterates registered backends internally. |
+| `system_client.go` | Orchestration spine — `System` for admin/cross-backend operations (`DiskUsage`, `Prune`, `Build`, `Check`). Reached only via `Client.System()` (no standalone constructor). Iterates registered backends internally. |
 | `runtime_imports_linux.go` | Linux-only blank import of `runtime/containerd` to register the containerd backend. |
 
 ### `cmd/yoloai/`
@@ -95,7 +95,7 @@ should import the root cli package back (the few tests that need
 
 | File | Purpose |
 |------|---------|
-| `client.go` | `NewRuntime`, `WithClient`, `NewSystemClient`, `AttachToSandboxByName`, `ResolveBackend`/`ResolveBackendForSandbox`, `ResolveAgent`, `ResolveModel`, `ResolveProfile`, `Coalesce`, `FlagStr`, `SandboxErrorHint`. The chokepoint that turns CLI flags into a `yoloai.Client` / `SystemClient`. |
+| `client.go` | `NewRuntime`, `WithClient`, `Client` (backend-less), `System`, `AttachToSandboxByName`, `ResolveBackend`/`ResolveBackendForSandbox`, `ResolveAgent`, `ResolveModel`, `ResolveProfile`, `Coalesce`, `FlagStr`, `SandboxErrorHint`. The chokepoint that turns CLI flags into a `yoloai.Client` (use `cliutil.Client(cmd)` for backend-less reads, `cliutil.System()` for the admin sub-handle). |
 | `layout.go` | `Layout()` / `SetRootLayout` / `LayoutForDataDir` — points the library `config.Layout` at `$HOME/.yoloai/library` (or `DIR/library` under `--data-dir`) and threads it downward. The only sanctioned `os.UserHomeDir` call site (allowlisted in `.golangci.yml`). |
 | `clipaths.go` | `TopDir()`, `CLIDir()`, `CLIExtensionsDir()`, `CLIStatePath()`, `CLISchemaVersionPath()` + the `library`/`cli` namespace constants — the CLI-side `TOP/cli` paths that sit beside the library namespace (D60). |
 | `clischema.go` | CLI realm versioning: `CLIStatus()` (read-only realm check via `config.RealmStatus`), `CreateFreshCLI()` (fresh-init + stamp), and `MigrateCLI()` — the mutation-only, one-shot flat→namespaced relocation invoked **only** by `yoloai system migrate`. Errors on an unrecognized `TOP` rather than mangling it. See D60/D61. |
@@ -138,7 +138,7 @@ top-level shortcuts that delegate to it (`yoloai ls`, `yoloai log`,
 |------|---------|
 | `sandbox.go` | `yoloai sandbox` parent with name-first dispatch. |
 | `aliases.go` | Top-level shortcut commands (`ls`, `log`, `exec`, `vscode`) that delegate to the corresponding sandbox subcommand impl. |
-| `list.go`, `log.go`, `exec.go` | The actual `sandbox list`/`log`/`exec` implementations. `log.go` is rendering-only: it consumes the `yoloai.SystemClient.Logs` activity stream (transport lives in `internal/sandbox/logstream.go`) and pretty-prints the verbatim JSONL frames. |
+| `list.go`, `log.go`, `exec.go` | The actual `sandbox list`/`log`/`exec` implementations. `log.go` is rendering-only: it consumes the `yoloai.System.Logs` activity stream (transport lives in `internal/sandbox/logstream.go`) and pretty-prints the verbatim JSONL frames. |
 | `info.go`, `prompt.go`, `vscode.go`, `unlock.go`, `bugreport.go` | Other per-sandbox subcommands. `bugreport.go` exports `WriteSandboxSectionsForFlag` so `root.go`'s `--bugreport` finalizer can include sandbox sections. |
 | `allow.go`, `allowed.go`, `deny.go`, `network.go` | Network allowlist commands and their shared helpers (`loadIsolatedMeta`, `saveNetworkAllowlist`, `tryLivePatchNetwork`). |
 | `ansi.go` | `stripANSI` — used by `log.go` and `bugreport.go` for readable terminal output. |
@@ -468,18 +468,18 @@ Host context: `IsRoot`, `IsWSL2`, `InContainer`, `KVMGroup`. Detected once per i
 | `yoloai system info` | `cli/system/info.go` | Version, paths, disk usage, backend availability |
 | `yoloai system agents` | `cli/system/backends_agents.go` | Lists agent definitions from `agent` package |
 | `yoloai system backends` | `cli/system/backends_agents.go` | Probes each backend via `cliutil.CheckBackend` |
-| `yoloai system build` | `cli/system/system.go` | `yoloai.SystemClient.Build()` |
-| `yoloai system setup` | `cli/system/system.go` + `cli/system/setup.go` (the wizard owns host inspection, prompts, auto-pick) | `yoloai.SystemClient.Config().Set()` (writes `tmux_conf`/`container_backend`/`agent`); `Backends()`/`Agents()` for choices — no library setup verb |
-| `yoloai system check` | `cli/system/check.go` | `yoloai.SystemClient.Check()` |
-| `yoloai doctor` | `cli/doctorcmd/doctor.go` | `SystemClient.Doctor()` (→ `caps.RunChecks()` + `caps.FormatDoctor()`) + a dry-run `SystemClient.Prune()` and `DiskUsage()` for the advisory sections |
-| `yoloai system prune` | `cli/system/prune.go` | `yoloai.SystemClient.Prune()` |
+| `yoloai system build` | `cli/system/system.go` | `yoloai.System.Build()` |
+| `yoloai system setup` | `cli/system/system.go` + `cli/system/setup.go` (the wizard owns host inspection, prompts, auto-pick) | `yoloai.System.Config().Set()` (writes `tmux_conf`/`container_backend`/`agent`); `Backends()`/`Agents()` for choices — no library setup verb |
+| `yoloai system check` | `cli/system/check.go` | `yoloai.System.Check()` |
+| `yoloai doctor` | `cli/doctorcmd/doctor.go` | `System.Doctor()` (→ `caps.RunChecks()` + `caps.FormatDoctor()`) + a dry-run `System.Prune()` and `DiskUsage()` for the advisory sections |
+| `yoloai system prune` | `cli/system/prune.go` | `yoloai.System.Prune()` |
 | `yoloai system tart` | `cli/system/tart/tart.go` | `tart.RuntimeVersion` / `tart.CopyRuntimeToVM()` / `tart.Runtime.ListVMs` / `tart.Runtime.DeleteVM` |
 | `yoloai system completion` | `cli/system/completion.go` | Cobra's built-in completion generators |
 | `yoloai mcp serve` | `cli/mcp/mcp.go` | `mcpsrv.New()` — MCP server on stdio |
 | `yoloai mcp proxy` | `cli/mcp/mcp.go` | MCP proxy through sandbox |
 | `yoloai sandbox list` | `cli/sandboxcmd/list.go` | `yoloai.Client.List()` (→ `status.ListSandboxes` in `sandbox/status/`, re-exported via the façade) |
 | `yoloai sandbox <name> info` | `cli/sandboxcmd/info.go` | `yoloai.Client.Inspect()` |
-| `yoloai sandbox <name> log` | `cli/sandboxcmd/log.go` | `yoloai.SystemClient.Logs()` (→ `sandbox.StreamLogs` in `logstream.go`) for the structured activity stream; `SystemClient.AgentLog()` for `--agent`. CLI keeps only rendering + `--since` parsing. |
+| `yoloai sandbox <name> log` | `cli/sandboxcmd/log.go` | `yoloai.System.Logs()` (→ `sandbox.StreamLogs` in `logstream.go`) for the structured activity stream; `System.AgentLog()` for `--agent`. CLI keeps only rendering + `--since` parsing. |
 | `yoloai sandbox <name> exec` | `cli/sandboxcmd/exec.go` | `yoloai.Client.Exec()` |
 | `yoloai sandbox <name> prompt` | `cli/sandboxcmd/prompt.go` | Reads `prompt.txt` from sandbox dir |
 | `yoloai sandbox <name> bugreport` | `cli/sandboxcmd/bugreport.go` | Forensic diagnostic collection (calls `bugreport.Write*`) |
@@ -615,7 +615,7 @@ lifecycle.Start(ctx, deps, name, opts) (sandbox/lifecycle/lifecycle.go)
 
 ```
 doctorcmd.NewCmd (cli/doctorcmd/doctor.go)
-  → SystemClient.Doctor() — capability report:
+  → System.Doctor() — capability report:
     → caps.DetectEnvironment() — probe host (root, WSL2, container, KVM group)
     → For each registered backend:
       → runtime.New(ctx, name) — try to connect
@@ -625,7 +625,7 @@ doctorcmd.NewCmd (cli/doctorcmd/doctor.go)
       → caps.RunChecks(capabilities, env) → []CheckResult
       → caps.ComputeAvailability(results) → Ready/NeedsSetup/Unavailable
     → caps.FormatDoctor(reports, output) — render table with fix instructions
-  → SystemClient.Prune({DryRun:true}) + SystemClient.DiskUsage() — read-only advisory:
+  → System.Prune({DryRun:true}) + System.DiskUsage() — read-only advisory:
     → Reclaimable now    (RemovedItems)              → "yoloai system prune"
     → Reclaimable cached (CachedBytes, no rebuild)   → "yoloai system prune"
     → Reclaimable images (ImageBytes, forces build)  → "yoloai system prune --images"
@@ -637,7 +637,7 @@ doctor is **pure read + delegate**: it never deletes or quarantines —
 it only reports and prints the command that does the work. Exit code is 1
 only when a backend NeedsSetup; advisory sections never affect it.
 
-### Sandbox-dir recoverability classification (`SystemClient.Prune`)
+### Sandbox-dir recoverability classification (`System.Prune`)
 
 Prune classifies every dir under `sandboxes/` by *recoverability*, not by
 "brokenness". The bulk path only ever **removes** zero-stakes items; anything
@@ -751,7 +751,7 @@ library/
    - a brand-new subpackage if the command isn't a natural fit for any of the above
 2. Add an exported constructor (`NewXxxCmd() *cobra.Command`) on that subpackage and tag the returned command with the appropriate `cliutil.Group<Lifecycle|Workflow|SandboxTools|Admin>` ID.
 3. Wire it into `internal/cli/commands.go:registerCommands()` under its help group.
-4. If the command needs a `yoloai.Client`, use `cliutil.WithClient`; for cross-backend admin work use `cliutil.NewSystemClient()`. Do not construct `sandbox.Engine` or raw `runtime.Runtime` directly — `.golangci.yml` enforces this via depguard / forbidigo.
+4. If the command needs a `yoloai.Client`, use `cliutil.WithClient`; for cross-backend admin work use `cliutil.System()`. Do not construct `sandbox.Engine` or raw `runtime.Runtime` directly — `.golangci.yml` enforces this via depguard / forbidigo.
 
 **Add a new agent:**
 1. Add a new entry to the `agents` map in `agent/agent.go`
