@@ -40,19 +40,19 @@ func runSandboxInfo(cmd *cobra.Command, name string) error {
 			result := infoJSON{
 				Info:          info,
 				ConfigPath:    c.System().RuntimeConfigPath(name),
-				PromptPreview: loadPromptPreview(name),
+				PromptPreview: loadPromptPreview(sb),
 			}
 			return cliutil.WriteJSON(cmd.OutOrStdout(), result)
 		}
 
-		printSandboxInfo(cmd, name, info)
+		printSandboxInfo(cmd, sb, name, info)
 		slog.Debug("show complete", "event", "sandbox.info", "sandbox", name) //nolint:gosec // G706: name is an internal sandbox name, not user-injected log data
 		return nil
 	})
 }
 
 // printSandboxInfo prints sandbox info in human-readable format.
-func printSandboxInfo(cmd *cobra.Command, name string, info *yoloai.Info) {
+func printSandboxInfo(cmd *cobra.Command, sb *yoloai.Sandbox, name string, info *yoloai.Info) {
 	w := cmd.OutOrStdout()
 	meta := info.Environment
 
@@ -75,7 +75,7 @@ func printSandboxInfo(cmd *cobra.Command, name string, info *yoloai.Info) {
 	fmt.Fprintf(w, "Sandbox dir: %s\n", sandboxDir)                                        //nolint:errcheck
 	fmt.Fprintf(w, "Config:      %s\n", cliutil.NewSystemClient().RuntimeConfigPath(name)) //nolint:errcheck
 
-	if preview := loadPromptPreview(name); preview != "" {
+	if preview := loadPromptPreview(sb); preview != "" {
 		fmt.Fprintf(w, "Prompt:      %s\n", preview) //nolint:errcheck
 	}
 
@@ -138,8 +138,8 @@ func printSandboxResources(w io.Writer, meta *yoloai.Environment, info *yoloai.I
 
 // loadPromptPreview reads the stored prompt via the public verb and returns a
 // single-line preview for display ("" when no prompt is set).
-func loadPromptPreview(name string) string {
-	prompt, ok, err := cliutil.NewSystemClient().Prompt(name)
+func loadPromptPreview(sb *yoloai.Sandbox) string {
+	prompt, ok, err := sb.Agent().Prompt()
 	if err != nil || !ok {
 		return ""
 	}

@@ -363,7 +363,7 @@ func executeNewCreate(cmd *cobra.Command, ctx context.Context, c *yoloai.Client,
 		return err
 	}
 	return cliutil.WithTerminal(func(io yoloai.IOStreams) error {
-		return sb.Attach(ctx, io)
+		return sb.Agent().Attach(ctx, io)
 	})
 }
 

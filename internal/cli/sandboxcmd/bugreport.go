@@ -107,7 +107,7 @@ func writeSandboxSections(ctx context.Context, w io.Writer, c *yoloai.Client, na
 
 	if reportType == "unsafe" {
 		// Section 11: Agent output (unsafe only)
-		writeBugReportAgentOutput(w, name)
+		writeBugReportAgentOutput(w, c, name)
 
 		// Section 12: tmux screen capture (unsafe only).
 		// Two variants: the historical host-side capture (works for
@@ -257,7 +257,7 @@ func writeContainerLog(ctx context.Context, w io.Writer, c *yoloai.Client, name 
 	sb, sbErr := c.Sandbox(name)
 	var logs string
 	if sbErr == nil {
-		logs = sb.ContainerLogs(ctx, containerLogTailLines)
+		logs = sb.Agent().ContainerLogs(ctx, containerLogTailLines)
 	}
 	fmt.Fprintln(w, "```") //nolint:errcheck
 	if logs == "" {
@@ -387,9 +387,12 @@ func writeBugReportJSONLFile(w io.Writer, title, path, reportType string, omitEv
 
 // writeBugReportAgentOutput writes section 11: ANSI-stripped agent output.
 // Only included in unsafe reports.
-func writeBugReportAgentOutput(w io.Writer, name string) {
-	output, err := cliutil.NewSystemClient().AgentLog(name, 0)
-	if err != nil || output == "" {
+func writeBugReportAgentOutput(w io.Writer, c *yoloai.Client, name string) {
+	output := ""
+	if sb, err := c.Sandbox(name); err == nil {
+		output, _ = sb.Agent().AgentLog(0)
+	}
+	if output == "" {
 		fmt.Fprintln(w, "<details>")                       //nolint:errcheck
 		fmt.Fprintln(w, "<summary>Agent output</summary>") //nolint:errcheck
 		fmt.Fprintln(w)                                    //nolint:errcheck
@@ -422,7 +425,7 @@ func writeBugReportTerminalSnapshot(ctx context.Context, w io.Writer, c *yoloai.
 	if err != nil {
 		return
 	}
-	snap, err := sb.CaptureTerminal(ctx, terminalSnapshotScrollback)
+	snap, err := sb.Agent().CaptureTerminal(ctx, terminalSnapshotScrollback)
 	if err != nil {
 		// Sandbox not running, runtime error, etc. — silently skip.
 		return

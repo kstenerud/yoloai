@@ -340,7 +340,11 @@ func (s *Server) handleSandboxLog(_ context.Context, req mcp.CallToolRequest) (*
 		lines = 100
 	}
 
-	output, err := s.c.System().AgentLog(name, lines)
+	sb, err := s.c.Sandbox(name)
+	if err != nil {
+		return textResult(errorf("sandbox handle %q: %v", name, err)), nil
+	}
+	output, err := sb.Agent().AgentLog(lines)
 	if err != nil {
 		return textResult(errorf("read log for sandbox %q: %v", name, err)), nil
 	}
@@ -367,7 +371,7 @@ func (s *Server) handleSandboxInput(ctx context.Context, req mcp.CallToolRequest
 	if err != nil {
 		return textResult(errorf("sandbox handle %q: %v", name, err)), nil
 	}
-	if err := sb.SendInput(ctx, text); err != nil {
+	if err := sb.Agent().SendInput(ctx, text); err != nil {
 		return textResult(errorf("send input to sandbox %q: %v", name, err)), nil
 	}
 

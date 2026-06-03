@@ -200,7 +200,16 @@ func formatRecord(rec logRecord, width int) string {
 
 // runLogStructured consumes the library activity stream and renders it.
 func runLogStructured(cmd *cobra.Command, name string, opts yoloai.LogOptions, rawMode bool) error {
-	events, err := cliutil.NewSystemClient().Logs(cmd.Context(), name, opts)
+	c, err := cliutil.Client(cmd)
+	if err != nil {
+		return err
+	}
+	defer c.Close() //nolint:errcheck // best-effort cleanup
+	sb, err := c.Sandbox(name)
+	if err != nil {
+		return err
+	}
+	events, err := sb.Agent().Logs(cmd.Context(), opts)
 	if err != nil {
 		return err
 	}
@@ -230,7 +239,16 @@ func runLogStructured(cmd *cobra.Command, name string, opts yoloai.LogOptions, r
 
 // runLogAgent shows the raw agent terminal output (logs/agent.log).
 func runLogAgent(cmd *cobra.Command, name string, rawMode bool) error {
-	output, err := cliutil.NewSystemClient().AgentLog(name, 0)
+	c, err := cliutil.Client(cmd)
+	if err != nil {
+		return err
+	}
+	defer c.Close() //nolint:errcheck // best-effort cleanup
+	sb, err := c.Sandbox(name)
+	if err != nil {
+		return err
+	}
+	output, err := sb.Agent().AgentLog(0)
 	if err != nil {
 		return err
 	}

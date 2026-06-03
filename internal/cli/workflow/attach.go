@@ -73,7 +73,7 @@ func runAttach(cmd *cobra.Command, args []string, opts *attachOpts) error {
 
 		slog.Debug("attaching to sandbox", "event", "sandbox.attach", "sandbox", name) //nolint:gosec // G706: name is validated
 		return cliutil.WithTerminal(func(io yoloai.IOStreams) error {
-			return sb.Attach(ctx, io)
+			return sb.Agent().Attach(ctx, io)
 		})
 	})
 }

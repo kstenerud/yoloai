@@ -127,6 +127,26 @@ func WithClient(cmd *cobra.Command, backend yoloai.BackendName, fn func(ctx cont
 	return fn(ctx, c)
 }
 
+// Client constructs a backend-less yoloai.Client from the CLI's layout —
+// no backend is selected, so the runtime is never opened. Use it for command
+// handlers that only need host-only per-sandbox reads (prompt, agent-log,
+// activity stream, terminal snapshot) reached via Client.Sandbox(name).Agent().
+// For commands that drive the container (start/stop/exec/attach) use WithClient,
+// which passes a resolved backend; for cross-backend admin use System().
+//
+// The caller is responsible for Close() (a no-op on a backend-less Client).
+func Client(cmd *cobra.Command) (*yoloai.Client, error) {
+	l := Layout()
+	return yoloai.NewWithOptions(cmd.Context(), yoloai.Options{
+		DataDir: l.DataDir,
+		HomeDir: l.HomeDir,
+		Logger:  slog.Default(),
+		Input:   cmd.InOrStdin(),
+		Output:  cmd.ErrOrStderr(),
+		Env:     l.Env,
+	})
+}
+
 // NewSystemClient constructs a backend-agnostic yoloai.SystemClient from
 // the CLI's layout. Use for `yoloai system …` command handlers that
 // operate across all backends (disk, prune, build --all) or need no
@@ -166,7 +186,7 @@ func AttachToSandboxByName(cmd *cobra.Command, name string) error {
 			return err
 		}
 		return WithTerminal(func(io yoloai.IOStreams) error {
-			return sb.Attach(ctx, io)
+			return sb.Agent().Attach(ctx, io)
 		})
 	})
 }

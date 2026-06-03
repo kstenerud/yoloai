@@ -1,5 +1,5 @@
-// ABOUTME: Tests for SystemClient.Logs — the public activity stream forwards
-// ABOUTME: library frames verbatim and reports a missing sandbox as an error.
+// ABOUTME: Tests for Agent.Logs — the public activity stream forwards library
+// ABOUTME: frames verbatim and reports a missing sandbox as an error.
 package yoloai
 
 import (
@@ -30,7 +30,7 @@ func drainEvents(t *testing.T, ch <-chan LogEvent) []LogEvent {
 	}
 }
 
-func TestSystemClient_Logs_ForwardsFrames(t *testing.T) {
+func TestAgentLogs_ForwardsFrames(t *testing.T) {
 	dir := t.TempDir()
 	sc, err := NewSystemClient(SystemOptions{DataDir: dir, HomeDir: dir})
 	require.NoError(t, err)
@@ -41,7 +41,13 @@ func TestSystemClient_Logs_ForwardsFrames(t *testing.T) {
 	line := `{"ts":"2026-03-15T10:00:00.000Z","level":"info","event":"hello"}`
 	require.NoError(t, os.WriteFile(cliPath, []byte(line+"\n"), 0600))
 
-	ch, err := sc.Logs(context.Background(), "box", LogOptions{})
+	c, err := NewWithOptions(context.Background(), Options{DataDir: dir, HomeDir: dir})
+	require.NoError(t, err)
+	defer c.Close() //nolint:errcheck
+	sb, err := c.Sandbox("box")
+	require.NoError(t, err)
+
+	ch, err := sb.Agent().Logs(context.Background(), LogOptions{})
 	require.NoError(t, err)
 	events := drainEvents(t, ch)
 
@@ -51,11 +57,12 @@ func TestSystemClient_Logs_ForwardsFrames(t *testing.T) {
 	assert.Equal(t, line, string(events[0].Raw))
 }
 
-func TestSystemClient_Logs_MissingSandbox(t *testing.T) {
+func TestAgentLogs_MissingSandbox(t *testing.T) {
 	dir := t.TempDir()
-	sc, err := NewSystemClient(SystemOptions{DataDir: dir, HomeDir: dir})
+	c, err := NewWithOptions(context.Background(), Options{DataDir: dir, HomeDir: dir})
 	require.NoError(t, err)
+	defer c.Close() //nolint:errcheck
 
-	_, err = sc.Logs(context.Background(), "ghost", LogOptions{})
+	_, err = c.Sandbox("ghost")
 	assert.ErrorIs(t, err, ErrSandboxNotFound)
 }

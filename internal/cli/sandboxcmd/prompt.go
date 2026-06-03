@@ -10,7 +10,16 @@ import (
 )
 
 func runSandboxPrompt(cmd *cobra.Command, name string) error {
-	text, configured, err := cliutil.NewSystemClient().Prompt(name)
+	c, err := cliutil.Client(cmd)
+	if err != nil {
+		return err
+	}
+	defer c.Close() //nolint:errcheck // best-effort cleanup
+	sb, err := c.Sandbox(name)
+	if err != nil {
+		return err
+	}
+	text, configured, err := sb.Agent().Prompt()
 	if err != nil {
 		return err
 	}

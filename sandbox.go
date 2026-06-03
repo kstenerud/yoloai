@@ -1,12 +1,11 @@
 // ABOUTME: Sandbox is the per-sandbox handle returned by Client.Sandbox(name).
-// ABOUTME: Provides scoped sub-handles (currently Network; more to come).
+// ABOUTME: Provides scoped sub-handles (Workdir, Network, Agent).
 
 package yoloai
 
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox"
@@ -45,36 +44,6 @@ func (c *Client) Sandbox(name string) (*Sandbox, error) {
 // Name returns the sandbox name this handle is bound to. Useful for
 // embedders threading the handle through multiple call sites.
 func (s *Sandbox) Name() string { return s.name }
-
-// TerminalSnapshot is a captured view of the sandbox's agent tmux pane.
-// Both fields are best-effort: if the runtime supplied plain output but
-// the ANSI-preserving variant failed, Plain will be populated and ANSI
-// will be nil — that's the documented degraded mode (see
-// sandbox.Engine.CaptureTerminal).
-type TerminalSnapshot struct {
-	Plain []byte // tmux capture-pane -p output, printable characters only
-	ANSI  []byte // same capture with terminal-control escape sequences preserved (-e flag)
-}
-
-// CaptureTerminal grabs the rendered agent tmux pane for diagnostics —
-// what `yoloai attach <name>` would show right now, frozen at one
-// moment. scrollback is the number of history lines above the visible
-// pane to include (DF3's diagnostic depth is 200; pass 0 for just the
-// current screen). Returns an error when the sandbox isn't running
-// (callers preserving bug reports should treat as best-effort skip,
-// not fatal); a partial snapshot (Plain set, ANSI nil) on a successful
-// plain capture with a failed ANSI capture.
-//
-// Backed by sandbox.Engine.CaptureTerminal which uses the runtime's
-// non-interactive Exec to invoke `tmux capture-pane`; backend-specific
-// socket dispatch is handled inside that primitive. DF3.
-func (s *Sandbox) CaptureTerminal(ctx context.Context, scrollback int) (TerminalSnapshot, error) {
-	if err := s.c.ensure(ctx); err != nil {
-		return TerminalSnapshot{}, err
-	}
-	plain, ansi, err := s.c.manager.CaptureTerminal(ctx, s.name, scrollback)
-	return TerminalSnapshot{Plain: plain, ANSI: ansi}, err
-}
 
 // Inspect returns combined metadata and live state for the sandbox.
 func (s *Sandbox) Inspect(ctx context.Context) (*Info, error) {
@@ -160,55 +129,6 @@ func (s *Sandbox) Destroy(ctx context.Context, opts DestroyOptions) (*DestroyRes
 		}
 	}
 	return lifecycle.Destroy(ctx, s.c.deps(), s.name)
-}
-
-// SendInput appends text to the running sandbox's tmux session as if the user
-// typed it. Returns ErrContainerNotRunning when the sandbox is stopped.
-func (s *Sandbox) SendInput(ctx context.Context, text string) error {
-	if err := s.c.ensure(ctx); err != nil {
-		return err
-	}
-	return s.c.manager.SendInput(ctx, s.name, text)
-}
-
-// ContainerLogs returns the tail of the sandbox's raw container log (roughly
-// tailLines lines). Returns "" when the container is gone or logs can't be
-// fetched. This is backend container stdout/stderr for diagnostics — distinct
-// from the structured agent log stream.
-func (s *Sandbox) ContainerLogs(ctx context.Context, tailLines int) string {
-	s.c.tryEnsure(ctx) // best-effort: no backend → no container logs to fetch
-	if s.c.rt == nil {
-		return ""
-	}
-	return runtime.LogsFor(ctx, s.c.rt, store.InstanceName(s.c.layout.Principal, s.name), tailLines)
-}
-
-// Attach connects the supplied IOStreams to the sandbox's tmux session.
-// Blocks until the user detaches (Ctrl-B d) or the agent exits. The sandbox
-// must be running (Active/Idle/Done/Failed); for stopped sandboxes call Start
-// first. io.TTY=true is required; non-TTY attach returns a *UsageError.
-func (s *Sandbox) Attach(ctx context.Context, io IOStreams) error {
-	if !io.TTY {
-		return yoerrors.NewUsageError("attach requires TTY=true")
-	}
-	if err := s.c.ensure(ctx); err != nil {
-		return err
-	}
-	info, err := s.c.manager.Inspect(ctx, s.name)
-	if err != nil {
-		return err
-	}
-	if err := attachStatusOK(info.Status, s.name); err != nil {
-		return err
-	}
-	containerName := store.InstanceName(s.c.layout.Principal, s.name)
-	user := sandbox.ContainerUser(info.Environment, s.c.layout.HostUID)
-	if err := sandbox.WaitForAttachReady(ctx, s.c.rt, s.c.layout, s.name, user, 300*time.Second); err != nil {
-		return fmt.Errorf("waiting for tmux session: %w", err)
-	}
-	sock := sandbox.ReadTmuxSocket(s.c.layout, s.name)
-	cmd := s.c.rt.AttachCommand(sock, io.Rows, io.Cols, info.Environment.Isolation)
-	return s.c.rt.InteractiveExec(ctx, containerName, cmd, user, "", io)
 }
 
 // Exec runs opts.Command inside the sandbox's container. With opts.PTY true it
