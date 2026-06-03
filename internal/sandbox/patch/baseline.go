@@ -237,7 +237,7 @@ func BaselineLog(ctx context.Context, layout config.Layout, rt runtime.Runtime, 
 // parseBaselineLog turns "%H %s" log output (one commit per line) into entries,
 // marking the commit whose full SHA equals baselineSHA.
 func parseBaselineLog(output, baselineSHA string) []BaselineLogEntry {
-	var entries []BaselineLogEntry
+	entries := make([]BaselineLogEntry, 0)
 	for _, line := range strings.Split(strings.TrimRight(output, "\n"), "\n") {
 		if line == "" {
 			continue

@@ -47,9 +47,16 @@ func TestTartVersionConversionRoundTrip(t *testing.T) {
 }
 
 func TestTartVersionConversionNil(t *testing.T) {
-	if tartVersionsToPublic(nil) != nil {
-		t.Error("tartVersionsToPublic(nil) should be nil")
+	// Public output is normalized to a non-nil empty slice so it marshals to
+	// JSON [] rather than null (consistent with the other List/slice surfaces).
+	got := tartVersionsToPublic(nil)
+	if got == nil {
+		t.Error("tartVersionsToPublic(nil) should be a non-nil empty slice")
 	}
+	if len(got) != 0 {
+		t.Errorf("tartVersionsToPublic(nil) should be empty, got %d", len(got))
+	}
+	// The internal conversion feeds the backend, not a JSON surface — nil stays nil.
 	if tartVersionsToInternal(nil) != nil {
 		t.Error("tartVersionsToInternal(nil) should be nil")
 	}

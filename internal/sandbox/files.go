@@ -120,7 +120,7 @@ func validateExchangePath(filesDir, resolved string) error {
 // (not an error) when nothing matches.
 func collectExchangeGlobs(filesDir string, patterns []string) ([]string, error) {
 	seen := make(map[string]bool)
-	var names []string
+	names := make([]string, 0)
 
 	for _, pat := range patterns {
 		fullPattern := filepath.Join(filesDir, pat)

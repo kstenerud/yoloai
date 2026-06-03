@@ -355,9 +355,10 @@ type TagsOptions struct {
 }
 
 // Tags returns the sandbox workdir's checkpoint tags, each with its annotated
-// Message populated. Tagging is copy-mode only — returns nil for :rw and
-// :overlay workdirs. With opts.UnappliedOnly, returns only tags not yet present
-// on the host. Folds ListTagsBeyondBaseline / ListUnappliedTags / GetTagMessage.
+// Message populated. Tagging is copy-mode only — returns an empty list for :rw
+// and :overlay workdirs. With opts.UnappliedOnly, returns only tags not yet
+// present on the host. Folds ListTagsBeyondBaseline / ListUnappliedTags /
+// GetTagMessage.
 func (w *Workdir) Tags(ctx context.Context, opts TagsOptions) ([]TagInfo, error) {
 	var (
 		tags []TagInfo
@@ -368,8 +369,11 @@ func (w *Workdir) Tags(ctx context.Context, opts TagsOptions) ([]TagInfo, error)
 	} else {
 		tags, err = sandbox.ListTagsBeyondBaseline(w.s.c.layout, w.s.name)
 	}
-	if err != nil || len(tags) == 0 {
-		return tags, err
+	if err != nil {
+		return nil, err
+	}
+	if len(tags) == 0 {
+		return []TagInfo{}, nil
 	}
 
 	meta, err := store.LoadEnvironment(w.s.c.layout.SandboxDir(w.s.name))

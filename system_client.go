@@ -310,7 +310,7 @@ type DoctorOptions struct {
 // ephemeral runtime per backend (unavailable backends are reported, not fatal).
 func (s *SystemClient) Doctor(ctx context.Context, opts DoctorOptions) ([]BackendReport, error) {
 	env := caps.DetectEnvironment()
-	var reports []BackendReport
+	reports := make([]BackendReport, 0)
 	for _, desc := range runtime.Descriptors() {
 		if opts.BackendFilter != "" && string(desc.Name) != opts.BackendFilter {
 			continue

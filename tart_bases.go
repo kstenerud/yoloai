@@ -209,7 +209,7 @@ func listTartBases(ctx context.Context, r *tartrt.Runtime) ([]TartBaseInfo, erro
 	if err != nil {
 		return nil, err
 	}
-	var bases []TartBaseInfo
+	bases := make([]TartBaseInfo, 0)
 	for _, e := range entries {
 		if !strings.HasPrefix(e.Name, baseNamePrefix) {
 			continue
@@ -233,9 +233,6 @@ func cacheKeyFromBaseName(name string) string {
 }
 
 func tartVersionsToPublic(in []tartrt.RuntimeVersion) []TartRuntimeVersion {
-	if in == nil {
-		return nil
-	}
 	out := make([]TartRuntimeVersion, len(in))
 	for i, rv := range in {
 		out[i] = TartRuntimeVersion{Platform: rv.Platform, Version: rv.Version, Build: rv.Build}
