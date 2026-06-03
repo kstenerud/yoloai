@@ -12,8 +12,9 @@ the whole `internal/sandbox`+`internal/runtime` subtrees (see
 [resolved-critiques.md](resolved-critiques.md) for G1/G2/G8).
 
 What remains in this file is the **off-spine** work the round also surfaced: the agent-interaction
-reshape (G5), two naming/consistency sweeps (G3, G4), the setup-wizard pile-3 leak (G6), and the
-unverified carry-forward items (F6/F7/F9). The D53 three-noun read-model reshape — turning the
+reshape (G5), the setup-wizard pile-3 leak (G6), and the unverified carry-forward items (F6/F7/F9).
+The two naming/consistency sweeps (G3, G4) are now **RESOLVED** (see
+[resolved-critiques.md](resolved-critiques.md)). The D53 three-noun read-model reshape — turning the
 field-for-field `Environment` mirror into an identity/posture + embedded-resolved-config view that
 drops pile-3 mechanism — also remains, tracked under D53 rather than as a numbered finding here.
 
@@ -34,33 +35,18 @@ to cli+mcpsrv (rule renamed `cli-sandbox-scope`), with the twin `cli-runtime-sco
 covering `internal/runtime`. Closed via the G7 verb series rather than the critique's
 prescribed G1(b)-first sequence; details and divergence note in the resolved sink.
 
-### G3 — Public Options field-naming is inconsistent on a surface about to become a versioned contract
+### G3 — RESOLVED 2026-06-03 → see [resolved-critiques.md](resolved-critiques.md)
 
-- **Severity:** MINOR
-- **Where:** the public `*Options` structs — `AllowDirtyWorkdir`, `RestartContainer`,
-  `AbandonUnappliedWork`, `Overwrite` (across `yoloai.go`/`sandbox_options.go`/etc.).
-- **Observation:** Mixed mood and specificity. `AbandonUnappliedWork` is the good model — names the
-  *consequence*, per the project's own `feedback_dangerous_option_naming` guidance. `Overwrite` and
-  the more generic toggles don't follow that rule consistently.
-- **Why it bothers me:** Once a separate daemon pins this surface, every rename is a tracked breaking
-  change rippling to a separate consumer. Cheap to harmonize now, expensive later.
-- **Greenfield alternative:** One naming-consistency pass before the daemon work starts; apply the
-  "name after the consequence" rule uniformly, judge `Overwrite`-class toggles against it.
-- **Migration cost:** Hours; all breakage lands at end of branch per the beta policy.
+The only generic safety-override misnomer was `CreateOptions.Force` → renamed `AbandonUnappliedWork`
+(and propagated inward to `internal/sandbox/create.Options`); all other toggles already named the
+consequence. Details in the resolved sink.
 
-### G4 — Scattered surface inconsistencies (enum homes, dual-residence error, nil-vs-empty slices)
+### G4 — RESOLVED 2026-06-03 → see [resolved-critiques.md](resolved-critiques.md)
 
-- **Severity:** MINOR
-- **Where:** enum constants split across `names.go` vs `workdir.go`/`network.go`; `DirtyWorkdirError`
-  lives in both `yoerrors` and a `names.go` alias; `List*` methods vary between returning `nil` and
-  an empty slice on the empty case.
-- **Observation:** Individually trivial; collectively they're the kind of papercuts that make a
-  public surface feel unowned. The nil-vs-empty variance in particular is a JSON-stability hazard
-  (`null` vs `[]`).
-- **Greenfield alternative:** One sweep — co-locate enum constants, pick a single home for
-  `DirtyWorkdirError`, standardize `List*` on empty-non-nil slices (matching `ProfileAdmin.List`'s
-  already-correct behavior).
-- **Migration cost:** Hours, independent of the spine.
+Three sub-items: (a) all catchable errors re-exported into a dedicated root `errors.go`; (b) public
+List/slice surfaces normalized to non-nil empty on success (JSON `[]` not `null`); (c) the dead
+`CloneOptions.Overwrite` field wired into `Client.Clone` (cross-backend destroy of a pre-existing
+destination) and the internal `Force` field removed. Enum homes assessed as already-principled.
 
 ### G5 — The agent-interaction surface is bound to the caller's process stdio, not contracted for an embedder
 
@@ -150,8 +136,8 @@ off-spine items were **not** part of the spine and may still be open:
 
 ## Recommended ordering
 
-The spine findings (G1/G2/G7) and the G8 naming sweep are **done** — see
-[resolved-critiques.md](resolved-critiques.md). What remains:
+The spine findings (G1/G2/G7), the G8 naming sweep, and the G3/G4 consistency sweeps are
+**done** — see [resolved-critiques.md](resolved-critiques.md). What remains:
 
 1. **G5** — Reshape the agent-interaction surface (PTY bridge + activity stream + file-exchange
    sub-handle, decoupled from caller stdio). The most value-bearing remaining work; decide it
@@ -159,7 +145,7 @@ The spine findings (G1/G2/G7) and the G8 naming sweep are **done** — see
 2. **D53 read-model reshape** — turn the field-for-field `Environment` mirror into an
    identity/posture + embedded-resolved-config view that drops pile-3 mechanism. Shares the
    "hide mechanism" sweep with G6. (Tracked under D53.)
-3. **G3 + G4** — Naming/consistency sweeps, independent, fold in opportunistically. (Hours each.)
+3. **G3 + G4** — Naming/consistency sweeps — **DONE 2026-06-03** (see resolved sink).
 4. **G7 residue** — public verb for extensions (`x` → `internal/extension`) when that surface
    stabilizes.
 5. **Carried-forward F6/F7/F9** — all done 2026-06-01.

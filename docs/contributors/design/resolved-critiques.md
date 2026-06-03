@@ -7,6 +7,38 @@ History of critiques that have been addressed and applied. Items are moved here 
 [`unresolved-critiques.md`](unresolved-critiques.md) once resolved, so the active file stays
 a working set. Newest first.
 
+## G3 (2026-05-30 critique) — Public Options field-naming inconsistent on a soon-to-be-versioned contract
+
+- **Severity:** MINOR. **Resolved:** 2026-06-03.
+- **Resolution.** Audited the public `*Options` structs against the `feedback_dangerous_option_naming`
+  rule (name the *consequence*, like `AbandonUnappliedWork`). The only generic safety-override misnomer
+  was `CreateOptions.Force` → renamed `AbandonUnappliedWork` (mirrors `DestroyOptions.AbandonUnappliedWork`;
+  the CLI `--force` flag maps to it). All other toggles (`Replace`, `Overwrite`, `AllowDirtyWorkdir`,
+  `RestartContainer`, and the benign behavioral flags) already comply.
+- **Propagation (per user feedback).** Naming clarity must not stop at the public boundary — the rename
+  was carried inward through `internal/sandbox/create.Options.Force` → `AbandonUnappliedWork` and its
+  call sites, so the "force" misnomer is gone from the guts too. Tracked in BREAKING-CHANGES.md.
+
+## G4 (2026-05-30 critique) — Scattered surface inconsistencies (enum homes, dual-residence error, nil-vs-empty slices)
+
+- **Severity:** MINOR. **Resolved:** 2026-06-03 (three sub-items).
+- **G4a — error re-export.** Added a dedicated root `errors.go` aliasing every catchable `yoerrors`
+  type plus `ExitCoder` into `yoloai.*`, so embedders match errors with `errors.As`/`Is` against
+  `yoloai.*` alone and never import `yoerrors`. The canonical defs stay in `yoerrors` (internal packages
+  construct them without an import cycle); `DirtyWorkdirError`/`DirtyDir` aliases moved out of `names.go`.
+- **G4b — nil-vs-empty slices.** Normalized the public List/slice surfaces to return `[]T{}` (not `nil`)
+  on the empty-*success* path, for JSON `[]` rather than `null`: `tartVersionsToPublic`, `listTartBases`,
+  `Workdir.Tags`, `SystemClient.Doctor`, and the `collectExchangeGlobs`/`parseBaselineLog` helpers.
+  Error paths still return `nil`; the internal `tartVersionsToInternal` (feeds the backend, not a JSON
+  surface) stays `nil`-for-`nil`.
+- **G4c — dead clone Overwrite field.** `CloneOptions.Overwrite` was inert. Wired it into `Client.Clone`,
+  which now destroys a pre-existing destination (resolving that destination's *own* recorded backend,
+  which may differ from the source's) before the disk-only copy. Removed the dead internal
+  `sandbox.CloneOptions.Force`; the CLI dropped its hand-rolled `forceDestroyIfExists` and passes
+  `Overwrite: force`.
+- **Enum homes (assessed, no change).** Shared enums in `names.go` vs handle-local `DomainSource`/
+  `ApplyMode` beside their handles was judged already-principled; left as-is.
+
 ## G8 (2026-05-30 critique) — `store.Meta` is a vague name; comments reference a phantom `meta.json`
 
 - **Severity:** MINOR. **Resolved:** 2026-06-01 (two passes).

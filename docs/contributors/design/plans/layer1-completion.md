@@ -115,13 +115,15 @@ surfaces (D53):
 (`TmuxConfigClass`, `SetupChoice`, `SetupStatus`, interactive `SetupOptions`); keep
 `Doctor`/`Check` (legitimately consumer-facing).
 
-### Phase 5 — Consistency sweeps (G3 + G4) *(hours each; opportunistic)*
+### Phase 5 — Consistency sweeps (G3 + G4) — **DONE 2026-06-03**
 
-- **G3:** apply "name dangerous options after the consequence" uniformly across public
-  `*Options` (judge `Overwrite`-class toggles against `AbandonUnappliedWork`'s model).
-- **G4:** co-locate enum constants (`names.go` vs `workdir.go`/`network.go`); pick a
-  single home for `DirtyWorkdirError` (dual-resident in `yoerrors` + `names.go` alias);
-  standardize `List*` on empty-non-nil slices (JSON `[]` not `null`).
+- **G3:** done — only `CreateOptions.Force` violated "name after the consequence"; renamed
+  `AbandonUnappliedWork` and propagated inward to `internal/sandbox/create.Options`.
+- **G4:** done — (a) all catchable errors re-exported into a dedicated root `errors.go`
+  (`DirtyWorkdirError` no longer dual-resident in `names.go`); (b) public List/slice surfaces
+  standardized on empty-non-nil (JSON `[]` not `null`); (c) dead `CloneOptions.Overwrite` wired
+  into `Client.Clone` (cross-backend destroy), internal `Force` removed. Enum homes left as-is
+  (already principled). See `resolved-critiques.md`.
 
 ### Phase 6 — Carried-forward (F6/F7/F9) *(verify before next critique-empty)*
 
