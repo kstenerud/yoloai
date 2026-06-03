@@ -17,8 +17,14 @@ import (
 
 // ProfileImageBuilder is optionally implemented by backends that support
 // building custom images from profile Dockerfiles.
+//
+// buildEnv is the curated host-environment snapshot the build subprocess runs
+// with (sourced from the caller's Layout.Env, never the live process env — §12).
+// The backend selects the keys its build CLI actually needs; it does not inherit
+// os.Environ. A multi-principal embedder thus controls exactly which env each
+// principal's profile build sees.
 type ProfileImageBuilder interface {
-	BuildProfileImage(ctx context.Context, sourceDir string, tag string, secrets []string, output io.Writer, logger *slog.Logger) error
+	BuildProfileImage(ctx context.Context, sourceDir string, tag string, secrets []string, buildEnv map[string]string, output io.Writer, logger *slog.Logger) error
 	ProfileImageNeedsBuild(profileDir string, parentDir string) bool
 	RecordProfileBuildChecksum(profileDir string)
 }
@@ -68,7 +74,7 @@ func EnsureProfileImage(ctx context.Context, rt runtime.Runtime, layout config.L
 		tag := "yoloai-" + name
 		if force || builder.ProfileImageNeedsBuild(profileDir, prevDir) {
 			fmt.Fprintf(output, "Building profile image %s...\n", tag) //nolint:errcheck // best-effort output
-			if err := builder.BuildProfileImage(ctx, profileDir, tag, secrets, output, logger); err != nil {
+			if err := builder.BuildProfileImage(ctx, profileDir, tag, secrets, layout.Env, output, logger); err != nil {
 				return fmt.Errorf("build profile image %s: %w", tag, err)
 			}
 			builder.RecordProfileBuildChecksum(profileDir)

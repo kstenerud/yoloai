@@ -176,9 +176,9 @@ type buildMessage struct {
 // When secrets are provided, the build uses the Docker CLI with BuildKit
 // --secret flags instead of the SDK, since BuildKit secret sessions require
 // heavy dependencies.
-func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir string, tag string, secrets []string, output io.Writer, logger *slog.Logger) error {
+func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir string, tag string, secrets []string, buildEnv map[string]string, output io.Writer, logger *slog.Logger) error {
 	if len(secrets) > 0 {
-		return r.buildProfileImageCLI(ctx, sourceDir, tag, secrets, output, logger)
+		return r.buildProfileImageCLI(ctx, sourceDir, tag, secrets, buildEnv, output, logger)
 	}
 
 	buildCtx, err := createProfileBuildContext(sourceDir)
@@ -203,7 +203,7 @@ func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir string, tag s
 
 // buildProfileImageCLI builds a profile image by shelling out to `docker build`
 // with BuildKit --secret flags. Used when build secrets are needed.
-func (r *Runtime) buildProfileImageCLI(ctx context.Context, sourceDir string, tag string, secrets []string, output io.Writer, logger *slog.Logger) error {
+func (r *Runtime) buildProfileImageCLI(ctx context.Context, sourceDir string, tag string, secrets []string, buildEnv map[string]string, output io.Writer, logger *slog.Logger) error {
 	args := []string{"build", "-t", tag, "-f", "Dockerfile"}
 	for _, s := range secrets {
 		args = append(args, "--secret", s)
@@ -214,7 +214,7 @@ func (r *Runtime) buildProfileImageCLI(ctx context.Context, sourceDir string, ta
 
 	cmd := exec.CommandContext(ctx, r.binaryName, args...) //nolint:gosec // args are validated by caller
 	cmd.Dir = sourceDir
-	cmd.Env = append(os.Environ(), "DOCKER_BUILDKIT=1") //nolint:forbidigo // §12: the docker-build child inherits the caller's env (DOCKER_HOST, proxies, registry auth) plus BuildKit
+	cmd.Env = curatedBuildEnv(buildEnv)
 	cmd.Stdout = output
 	cmd.Stderr = output
 
@@ -225,6 +225,42 @@ func (r *Runtime) buildProfileImageCLI(ctx context.Context, sourceDir string, ta
 		return fmt.Errorf("%s build: %w", r.binaryName, err)
 	}
 	return nil
+}
+
+// buildEnvAllowlist names the host-environment keys the docker/podman build
+// subprocess legitimately needs: daemon connection, registry/credential-helper
+// config (HOME + DOCKER/CONTAINER config), proxy settings for base-image pulls,
+// SSH-agent forwarding, and the rootless/buildx XDG locations. The build child
+// receives ONLY these keys (plus DOCKER_BUILDKIT), drawn from the caller's
+// threaded env snapshot — never the live process env (§12). A multi-principal
+// embedder that omits a needed key (e.g. PATH for credential helpers) will see
+// the build fail loudly rather than silently inherit the host's value.
+var buildEnvAllowlist = []string{
+	"HOME", "PATH",
+	"DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG",
+	"DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH", "DOCKER_API_VERSION",
+	"CONTAINER_HOST", "CONTAINERS_CONF", "REGISTRY_AUTH_FILE",
+	"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "FTP_PROXY", "ALL_PROXY",
+	"http_proxy", "https_proxy", "no_proxy", "ftp_proxy", "all_proxy",
+	"SSH_AUTH_SOCK",
+	"XDG_RUNTIME_DIR", "XDG_CONFIG_HOME", "XDG_CACHE_HOME",
+	"BUILDX_CONFIG", "BUILDX_BUILDER",
+}
+
+// curatedBuildEnv assembles the build subprocess's environment from the caller's
+// threaded host-env snapshot, keeping only the allowlisted keys and always
+// forcing BuildKit on. A nil/empty snapshot yields just DOCKER_BUILDKIT=1 — the
+// binary is still found (exec resolves it from the parent PATH at construction),
+// but the build runs with no inherited host config, which is the intended
+// fail-closed behavior for an embedder that supplied no env.
+func curatedBuildEnv(snapshot map[string]string) []string {
+	env := make([]string, 0, len(buildEnvAllowlist)+1)
+	for _, key := range buildEnvAllowlist {
+		if v, ok := snapshot[key]; ok && v != "" {
+			env = append(env, key+"="+v)
+		}
+	}
+	return append(env, "DOCKER_BUILDKIT=1")
 }
 
 // ProfileImageNeedsBuild returns true if the profile image needs to be

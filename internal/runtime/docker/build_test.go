@@ -158,3 +158,33 @@ func TestProfileBuildChecksum_MissingDockerfile(t *testing.T) {
 	sum := profileBuildChecksum(dir)
 	assert.Empty(t, sum)
 }
+
+func TestCuratedBuildEnv_FiltersToAllowlistAndForcesBuildKit(t *testing.T) {
+	snapshot := map[string]string{
+		"DOCKER_HOST":         "tcp://10.0.0.1:2375",
+		"HTTP_PROXY":          "http://proxy:8080",
+		"HOME":                "/home/principal",
+		"ANTHROPIC_API_KEY":   "sk-secret-should-not-leak",
+		"SOME_OTHER_SECRET":   "nope",
+		"XDG_RUNTIME_DIR":     "/run/user/1000",
+		"DOCKER_CONFIG_EMPTY": "",
+	}
+
+	env := curatedBuildEnv(snapshot)
+
+	assert.Contains(t, env, "DOCKER_HOST=tcp://10.0.0.1:2375")
+	assert.Contains(t, env, "HTTP_PROXY=http://proxy:8080")
+	assert.Contains(t, env, "HOME=/home/principal")
+	assert.Contains(t, env, "XDG_RUNTIME_DIR=/run/user/1000")
+	assert.Contains(t, env, "DOCKER_BUILDKIT=1")
+
+	for _, e := range env {
+		assert.NotContains(t, e, "ANTHROPIC_API_KEY", "non-allowlisted credential must not reach the build child")
+		assert.NotContains(t, e, "SOME_OTHER_SECRET", "non-allowlisted key must not reach the build child")
+	}
+}
+
+func TestCuratedBuildEnv_NilSnapshotStillForcesBuildKit(t *testing.T) {
+	env := curatedBuildEnv(nil)
+	assert.Equal(t, []string{"DOCKER_BUILDKIT=1"}, env)
+}
