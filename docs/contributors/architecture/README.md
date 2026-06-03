@@ -521,7 +521,7 @@ NewNewCmd (cli/lifecycle/new.go)
           → write prompt.txt, log.txt, runtime-config.json
           → WriteContextFiles (context.md + agent instruction file — sandbox/create/context.go)
       → buildAndStart (sandbox/launch/launch.go):
-          createSecretsDir (config env vars + API keys from host env)
+          createSecretsDir (config env vars + API keys from layout.Env host snapshot; staged under layout.SecretsStagingDir, "" = os.TempDir — D63)
           → buildMounts (workdir + aux dirs, overlay mount configs for :overlay dirs)
           → runtime.Create (with CAP_SYS_ADMIN for :overlay) → runtime.Start
           → runtime.Inspect (verify running) → cleanup secrets

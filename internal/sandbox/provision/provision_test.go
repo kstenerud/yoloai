@@ -193,6 +193,24 @@ func TestCreateSecretsDir_EmptyBoth(t *testing.T) {
 	assert.Empty(t, dir)
 }
 
+func TestCreateSecretsDir_HonorsStagingRoot(t *testing.T) {
+	agentDef := agent.GetAgent("claude")
+	hostEnv := map[string]string{"ANTHROPIC_API_KEY": "sk-test-secret"}
+	stagingRoot := t.TempDir()
+
+	dir, err := CreateSecretsDir(agentDef, nil, hostEnv, "", stagingRoot)
+	require.NoError(t, err)
+	require.NotEmpty(t, dir)
+	defer os.RemoveAll(dir) //nolint:errcheck
+
+	rootResolved, err := filepath.EvalSymlinks(stagingRoot)
+	require.NoError(t, err)
+	dirResolved, err := filepath.EvalSymlinks(dir)
+	require.NoError(t, err)
+	assert.Equal(t, rootResolved, filepath.Dir(dirResolved),
+		"secrets dir must be created under the injected staging root")
+}
+
 // CopySeedFiles tests
 
 func TestCopySeedFiles_CopiesExistingFiles(t *testing.T) {
