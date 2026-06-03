@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -112,10 +113,14 @@ func TestDetectKVMGroup_InGroup(t *testing.T) {
 	tmpDir, restore := injectPaths(t)
 	defer restore()
 
-	// Write group file with the current USER in kvm group.
-	username := os.Getenv("USER")
+	// detectKVMGroup resolves the username from /etc/passwd via the host UID,
+	// not $USER. Mirror that here so the seeded group line names the identity
+	// the production path will actually search for. On systems where the UID
+	// isn't listed in /etc/passwd (e.g. macOS, where users live in Directory
+	// Services) there's nothing to match, so the scenario isn't exercisable.
+	username := usernameFromPasswd(fileutil.HostUID())
 	if username == "" {
-		t.Skip("USER not set")
+		t.Skip("host UID not resolvable via /etc/passwd")
 	}
 	groupContent := "kvm:x:136:" + username + "\n"
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "group"), []byte(groupContent), 0o600)) //nolint:gosec // G703: test code with temp dir
