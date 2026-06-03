@@ -361,6 +361,29 @@ After the bootstrap the stamp is the **only** signal consulted — a stamped lay
 
 **Code.** `internal/cli/gate.go` (gate + `gateExempt`), `internal/cli/root.go` (wires the gate, drops auto-`MigrateCLI`), `internal/config/schema.go` (`LayoutStatus`, `RealmStatus`, plain-int stamp, `CreateFreshLibrary`), `internal/cli/cliutil/clischema.go` (`CLIStatus`, `CreateFreshCLI`, mutation-only `MigrateCLI`), `internal/cli/system/migrate.go` (the command), `system_client.go` (`DataDirStatus`/`CreateFresh`/`Migrate`), `yoerrors` (`MigrationRequiredError`, `InconsistentDataDirError`).
 
+## D62 — Principal namespacing: deterministic `yoloai-<principal>-<name>`, `P≤8`/`N≤56`, no library hashing
+
+**Date:** 2026-06-03. **Status:** Decided (design; multi-principal not yet implemented — this fixes the *shape*, not the code). **Composition:** resolves [`research/principal-namespacing.md`](../design/research/principal-namespacing.md), commissioned to study B1 (the runtime-namespace confused-deputy) from [`research/principal-isolation.md`](../design/research/principal-isolation.md). Applies D58's "the library never synthesizes principal scope" to the **length axis**.
+
+**The blocker.** `store.InstanceName(name) = "yoloai-" + name` is principal-blind, so two principals each owning a sandbox named `my-app` collide on the runtime instance handle `yoloai-my-app` (research B1). The filesystem layout is *not* a library-side blocker (a daemon hands each principal a distinct `DataDir`); the runtime namespace **is**.
+
+**Verified ceiling: containerd `maxLength=76`, not Docker's 63.** The 63 figure is the RFC-1034/1123 DNS-label limit, which binds **only if the instance name is used as a DNS label or hostname.** It is not — verified across every backend: Docker sets no `Hostname` and creates with an empty `NetworkingConfig` (no alias), assigning the *container ID* (not the name) as hostname; containerd's OCI spec has no `WithHostname`; Tart/Seatbelt never register the name as a host. So the DNS-label limit never applied, and the `names.go:8-9` comment deriving 56 from "Docker … limited to 63" reasons from a non-binding constraint. The real MIN is containerd's hard, daemon-enforced `maxLength=76` (the name is both container id and snapshot key) — `validate.go:34-42`, pinned `containerd/v2@v2.2.2`.
+
+**Decision (scheme (a) concat + (c) labels).** Instance name = the **deterministic concatenation** `yoloai-<principal>-<name>`:
+- **`P_max = 8`, `N_max = 56`** → `7 + 8 + 1 + 56 = 72 ≤ 76`, a 4-char margin. **`MaxNameLength` stays 56 — no breaking change** (the first draft's "shrink to 19" was an artifact of hashing a 36-char UUID against a 63 budget; neither premise survived verification).
+- **No library hashing, no fallback.** The daemon supplies a bounded, charset-safe, **unique** `PrincipalSegment` (it owns the principal registry, so uniqueness is *deterministic*, not gambled on a birthday bound). The library only **validates** the segment; it never derives, hashes, or truncates one. D58's invariant on the length axis.
+- **Two parsed boundary types** make the handle valid-by-construction: `SandboxName` (`≤56`, **containerd-conformant grammar** `^[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*$`) and `PrincipalSegment` (`≤8`, alphanumeric, non-empty, non-sentinel, daemon-supplied).
+- **Labels carry identity** for fail-closed enumeration: `com.yoloai.principal` / `com.yoloai.sandbox` on every instance; runtime enumeration filters by label, not by name-string splitting (Tart has no native label → store the map in the sandbox dir).
+- **CLI/single-principal compatibility:** a reserved default principal **elides** its segment → names stay exactly `yoloai-<name>`; the default value is forbidden as a real `PrincipalSegment`, so a real principal can never collide with the elided form.
+
+**Why deterministic concat preserves the code.** The audit found **no `InstanceName` call site searches the runtime by name** — all 24 recompute a deterministic handle from the on-disk sandbox name. So concatenation keeps every lookup working with **zero new stored state**; `InstanceName` just gains a `PrincipalSegment` parameter the 24 sites thread through.
+
+**Closes DF16 (and the DF15 straggler for names).** The `SandboxName` parsed type *is* the fix: a yoloAI-valid name can no longer be an invalid containerd identifier (today `my-app-` passes the loose `ValidateName` regex but fails containerd's grammar), because the sole constructor enforces the containerd grammar — replacing validate-style `ValidateName` with parse-into-`SandboxName` (development-principles parse-don't-validate).
+
+**Rejected.** (a) Library hashing / the first-draft hybrid `yoloai-<sha-trunc>-<name>` — trades the daemon's *uniqueness guarantee* for a birthday-bound *probability* and makes `docker ps` unreadable, for no length benefit once the ceiling is 76 and the segment is daemon-bounded. (b) Pure label-only with a random/stored name — needs a new stored runtime-id field + converting all 24 compute-sites to reads, unnecessary because nothing searches by name; we still adopt its *labels*. (c) Plain concat of a *raw* principal id — only fails (forced `MaxNameLength` to ~19) under the discarded premises (raw 36-char UUID, 63 budget).
+
+**Not yet implemented.** This is the agreed *shape*; the implementing plan (when multi-principal is built) threads `PrincipalSegment` through `InstanceName` + the 24 sites, introduces the two parsed types, and sets the labels. Open/unverified items (Docker label length caps, Tart name grammar) are catalogued in the research file.
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.
