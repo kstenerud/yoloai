@@ -63,12 +63,10 @@ func detectKVMGroup() bool {
 		return false
 	}
 
-	// Determine current username.
-	username := os.Getenv("USER") //nolint:forbidigo // §12: diagnostic only (kvm-group doctor check); falls back to /etc/passwd by UID
-	if username == "" {
-		// Fall back to parsing /etc/passwd by UID.
-		username = usernameFromPasswd(fileutil.HostUID())
-	}
+	// Resolve the username deterministically from the host UID. This is more
+	// reliable than $USER (which sudo/su can leave naming the wrong user) and
+	// keys on the same /etc/passwd identity that /etc/group lists below.
+	username := usernameFromPasswd(fileutil.HostUID())
 	if username == "" {
 		return false
 	}
