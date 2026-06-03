@@ -163,6 +163,10 @@ linters:
           msg: "mutating the process environment is forbidden; §12"
         - pattern: "^os\\.Clearenv$"
           msg: "mutating the process environment is forbidden; §12"
+        - pattern: "^os\\.Chdir$"
+          msg: "mutating the process working directory is forbidden — pass explicit paths and resolve relative to them; §12 (companion to the os.Getwd read ban)"
+        - pattern: "^os\\.Args$"
+          msg: "ambient command-line args — the CLI (cobra) owns argv and threads explicit values down; library code must not read os.Args; §12"
         - pattern: "^os\\.Geteuid$"
           msg: "ambient identity — use layout.HostUID / fileutil; §12"
         - pattern: "^os\\.Getegid$"
@@ -185,12 +189,28 @@ linters:
           msg: "mutating the process environment is forbidden; §12"
         - pattern: "^syscall\\.Environ$"
           msg: "ambient env backdoor below os — forbidden; §12"
+        - pattern: "^syscall\\.Getuid$"
+          msg: "identity backdoor below os.Getuid — use layout.HostUID / fileutil; §12"
+        - pattern: "^syscall\\.Getgid$"
+          msg: "identity backdoor below os.Getgid — use layout.HostGID / fileutil; §12"
+        - pattern: "^syscall\\.Geteuid$"
+          msg: "identity backdoor below os.Geteuid — use layout.HostUID / fileutil; §12"
+        - pattern: "^syscall\\.Getegid$"
+          msg: "identity backdoor below os.Getegid — use layout.HostGID / fileutil; §12"
+        - pattern: "^syscall\\.Getgroups$"
+          msg: "identity backdoor below os.Getgroups — resolve at the boundary; §12"
+        - pattern: "^syscall\\.Getppid$"
+          msg: "process-state backdoor below os.Getppid — only fileutil's sudo recovery legitimately reads it; §12"
         - pattern: "^user\\.Current$"
           msg: "ambient user identity — resolve at the CLI boundary; §12"
         - pattern: "^user\\.Lookup$"
           msg: "ambient user lookup — only the CLI HOME-resolution boundary may use it; §12"
         - pattern: "^user\\.LookupId$"
           msg: "ambient user lookup — resolve at the boundary; §12"
+        - pattern: "^user\\.LookupGroup$"
+          msg: "ambient group lookup — resolve at the CLI boundary; §12"
+        - pattern: "^user\\.LookupGroupId$"
+          msg: "ambient group lookup — resolve at the boundary; §12"
         - pattern: "^time\\.Local$"
           msg: "ambient timezone — only intentional local-time parsing of user input may use it; justify inline; §12"
 
@@ -230,16 +250,17 @@ linters:
           - forbidigo
         text: "os\\.UserHomeDir|os\\.Getenv|os\\.Environ|user\\.Lookup"
 
-      # §12 I/O-stream boundary: the CLI layer owns the process's
-      # stdin/stdout/stderr — it wires them into IOStreams and writes
-      # command output/warnings. Library packages must instead take an
-      # explicit io.Reader/Writer (justified inline where they legitimately
-      # can't). Scoped to the stream symbols so env/identity reads in
+      # §12 process-boundary symbols the CLI layer legitimately owns: the
+      # process's stdin/stdout/stderr (wired into IOStreams; command output
+      # and warnings) and argv (os.Args — bugreport command capture and the
+      # runtime-alias sniff). Library packages must instead take explicit
+      # io.Reader/Writer / threaded values (justified inline where they
+      # legitimately can't). Scoped to these symbols so env/identity reads in
       # cli/ are still individually justified.
       - path: "^internal/cli/"
         linters:
           - forbidigo
-        text: "os\\.(Stdin|Stdout|Stderr)"
+        text: "os\\.(Stdin|Stdout|Stderr|Args)"
 
       # The MCP stdio proxy is a transport boundary: it bridges the MCP
       # client's stdin/stdout to the in-sandbox process, so owning the
