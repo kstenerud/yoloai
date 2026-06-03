@@ -18,7 +18,7 @@ import (
 // container fields and FolderURI are empty and the caller should fall back to a
 // VS Code Remote Tunnel.
 type VscodeAttach struct {
-	Backend       BackendName
+	Backend       BackendType
 	Supported     bool
 	ContainerName string
 	WorkdirPath   string

@@ -32,7 +32,7 @@ type CreateOptions struct {
 	AuxDirs []DirSpec
 
 	// Agent selects the AI agent. Empty resolves from config, then AgentClaude.
-	Agent AgentName
+	Agent AgentType
 
 	// Model selects the model/alias. Empty resolves from config, then the
 	// agent default.

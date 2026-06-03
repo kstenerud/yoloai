@@ -15,7 +15,7 @@ func makeInfo(name string, status yoloai.Status, agent, profile, changes string)
 	return &yoloai.Info{
 		Environment: &yoloai.Environment{
 			Name:      name,
-			Agent:     agentpkg.AgentName(agent),
+			Agent:     agentpkg.AgentType(agent),
 			Profile:   profile,
 			CreatedAt: time.Now(),
 			Workdir:   yoloai.WorkdirInfo{HostPath: "/tmp/" + name},

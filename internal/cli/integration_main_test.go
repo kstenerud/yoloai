@@ -25,7 +25,7 @@ import (
 // testutil.NewIntegrationRuntime on a host where both Docker and Podman are
 // installed (e.g. the ubuntu-24.04 GitHub runner).
 func writeTestBackendConfig(home string) error {
-	backend := testutil.IntegrationBackendName()
+	backend := testutil.IntegrationBackendType()
 	if backend == "" || backend == "docker" {
 		// Autodetect already prefers docker; nothing to pin.
 		return nil
@@ -75,7 +75,7 @@ func stampRealms(home string) error {
 // we override HOME for test isolation, the subprocess fails and socket discovery
 // falls through to "no podman socket found".
 func pinPodmanSocket() {
-	if testutil.IntegrationBackendName() != "podman" {
+	if testutil.IntegrationBackendType() != "podman" {
 		return
 	}
 	out, err := exec.Command("podman", "machine", "inspect", "--format", "{{.ConnectionInfo.PodmanSocket.Path}}").Output() //nolint:gosec // trusted binary path
@@ -123,7 +123,7 @@ func TestMain(m *testing.M) {
 	// "AlreadyExists after deleting the existing one".
 	// See backend-idiosyncrasies.md "Docker daemon races on AlreadyExists when
 	// rebuilding an existing tag with identical content".
-	if testutil.IntegrationBackendName() == "" || testutil.IntegrationBackendName() == "docker" {
+	if testutil.IntegrationBackendType() == "" || testutil.IntegrationBackendType() == "docker" {
 		integLayout := config.NewLayoutFor(filepath.Join(tmpHome, ".yoloai", "library"), tmpHome)
 		if err := os.MkdirAll(integLayout.CacheDir(), 0750); err != nil {
 			fmt.Fprintf(os.Stderr, "failed to create cache dir: %v\n", err)

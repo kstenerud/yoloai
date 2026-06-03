@@ -629,7 +629,7 @@ func resolveUsernsMode(rt runtime.Runtime, workdir *DirSpec, auxDirs []*DirSpec,
 }
 
 // buildEnvironment constructs the Environment struct for a new sandbox.
-func buildEnvironment(opts Options, pr *profileResult, workdir *DirSpec, baselineSHA string, dirEnvs []store.DirEnvironment, hasPrompt bool, networkMode string, networkAllow []string, usernsMode string, hostFilesystem bool, archetypeStr string, backend runtime.BackendName, model string, mergedMounts []string) *store.Environment {
+func buildEnvironment(opts Options, pr *profileResult, workdir *DirSpec, baselineSHA string, dirEnvs []store.DirEnvironment, hasPrompt bool, networkMode string, networkAllow []string, usernsMode string, hostFilesystem bool, archetypeStr string, backend runtime.BackendType, model string, mergedMounts []string) *store.Environment {
 	return &store.Environment{
 		YoloaiVersion: opts.Version,
 		Name:          opts.Name,
@@ -637,7 +637,7 @@ func buildEnvironment(opts Options, pr *profileResult, workdir *DirSpec, baselin
 		Backend:       backend,
 		Profile:       pr.name,
 		ImageRef:      pr.imageRef,
-		Agent:         agent.AgentName(opts.Agent),
+		Agent:         agent.AgentType(opts.Agent),
 		Model:         model,
 		Workdir: store.WorkdirEnvironment{
 			HostPath:     workdir.Path,

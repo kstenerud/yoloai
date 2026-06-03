@@ -18,7 +18,7 @@ import (
 func TestDescriptor_Found(t *testing.T) {
 	desc, ok := runtime.Descriptor("docker")
 	require.True(t, ok)
-	assert.Equal(t, runtime.BackendName("docker"), desc.Name)
+	assert.Equal(t, runtime.BackendType("docker"), desc.Name)
 	assert.Equal(t, runtime.IsolationModeContainer, desc.BaseModeName)
 	assert.True(t, desc.Capabilities.CapAdd)
 }

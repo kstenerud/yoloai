@@ -1,5 +1,5 @@
 // ABOUTME: Tests for the Q-Y typed-name aliases at the yoloai root package.
-// ABOUTME: Verifies that BackendName, AgentName, PruneItemKind, and LogSource
+// ABOUTME: Verifies that BackendType, AgentType, PruneItemKind, and LogSource
 // ABOUTME: preserve the internal type identity and interoperate cleanly at the boundary.
 
 package yoloai
@@ -13,18 +13,18 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// BackendName is a type alias of runtime.BackendName, so values flow
+// BackendType is a type alias of runtime.BackendType, so values flow
 // through both names without explicit conversion. Catches a regression
-// where a fresh-type (`type BackendName string`, not `=`) gets used
+// where a fresh-type (`type BackendType string`, not `=`) gets used
 // instead of an alias.
-func TestBackendName_AliasIdentity(t *testing.T) {
+func TestBackendType_AliasIdentity(t *testing.T) {
 	// Explicit type annotations are deliberate here even though
 	// staticcheck flags them as inferrable. The point of the test
 	// IS to exercise the cross-package assignability that an alias
 	// provides — eliding the types would make the assertion
 	// vacuously hold for a fresh-type definition.
-	var public BackendName = BackendDocker //nolint:staticcheck // ST1023: type pins alias identity
-	var internal runtime.BackendName       //nolint:staticcheck // ST1023: ditto
+	var public BackendType = BackendDocker //nolint:staticcheck // ST1023: type pins alias identity
+	var internal runtime.BackendType       //nolint:staticcheck // ST1023: ditto
 	internal = public
 	assert.Equal(t, "docker", string(internal))
 
@@ -36,9 +36,9 @@ func TestBackendName_AliasIdentity(t *testing.T) {
 // Every shipped backend constant matches its internal counterpart's
 // string. Regress-guards future divergence (e.g. someone adds a new
 // internal constant but forgets the re-export).
-func TestBackendName_ShippedConstants(t *testing.T) {
+func TestBackendType_ShippedConstants(t *testing.T) {
 	cases := []struct {
-		public BackendName
+		public BackendType
 		want   string
 	}{
 		{BackendDocker, "docker"},
@@ -54,12 +54,12 @@ func TestBackendName_ShippedConstants(t *testing.T) {
 	}
 }
 
-// AgentName parallels BackendName.
-func TestAgentName_AliasIdentity(t *testing.T) {
-	// See TestBackendName_AliasIdentity for why the type annotations
+// AgentType parallels BackendType.
+func TestAgentType_AliasIdentity(t *testing.T) {
+	// See TestBackendType_AliasIdentity for why the type annotations
 	// are kept explicit even though staticcheck flags them.
-	var public AgentName = AgentClaude //nolint:staticcheck // ST1023: type pins alias identity
-	var internal agent.AgentName       //nolint:staticcheck // ST1023: ditto
+	var public AgentType = AgentClaude //nolint:staticcheck // ST1023: type pins alias identity
+	var internal agent.AgentType       //nolint:staticcheck // ST1023: ditto
 	internal = public
 	assert.Equal(t, "claude", string(internal))
 
@@ -67,9 +67,9 @@ func TestAgentName_AliasIdentity(t *testing.T) {
 	assert.Equal(t, AgentGemini, public)
 }
 
-func TestAgentName_ShippedConstants(t *testing.T) {
+func TestAgentType_ShippedConstants(t *testing.T) {
 	cases := []struct {
-		public AgentName
+		public AgentType
 		want   string
 	}{
 		{AgentClaude, "claude"},
@@ -112,7 +112,7 @@ func TestPruneItem_TypedFields(t *testing.T) {
 	assert.Equal(t, int64(1024), item.Bytes)
 }
 
-// Options.Backend takes a typed BackendName — the compiler enforces it,
+// Options.Backend takes a typed BackendType — the compiler enforces it,
 // but a switch over the typed value in a test catches accidental
 // "go back to plain string" regressions.
 func TestOptions_BackendIsTyped(t *testing.T) {
@@ -133,16 +133,16 @@ func TestRunOptions_AgentIsTyped(t *testing.T) {
 	case AgentClaude:
 		// ok
 	default:
-		t.Fatalf("AgentClaude didn't match itself in switch over typed AgentName: %s", opts.Agent)
+		t.Fatalf("AgentClaude didn't match itself in switch over typed AgentType: %s", opts.Agent)
 	}
 }
 
-// LogSource is a type alias of store.LogSource, parallel to BackendName /
-// AgentName. The same alias-identity test catches a regression where a
+// LogSource is a type alias of store.LogSource, parallel to BackendType /
+// AgentType. The same alias-identity test catches a regression where a
 // fresh type slips in.
 func TestLogSource_AliasIdentity(t *testing.T) {
 	// Explicit type annotations are deliberate — they pin the alias
-	// identity. See TestBackendName_AliasIdentity for the rationale.
+	// identity. See TestBackendType_AliasIdentity for the rationale.
 	var public LogSource = LogSourceCLI //nolint:staticcheck // ST1023: type pins alias identity
 	var internal store.LogSource        //nolint:staticcheck // ST1023: ditto
 	internal = public
@@ -175,7 +175,7 @@ func TestLogSource_ShippedConstants(t *testing.T) {
 // inference in view (Go doesn't surface the type at every reference).
 func TestMountSpec_AliasIdentity(t *testing.T) {
 	// Explicit type annotation pins the alias identity. See
-	// TestBackendName_AliasIdentity for why this isn't redundant.
+	// TestBackendType_AliasIdentity for why this isn't redundant.
 	var public MountSpec = MountSpec{HostPath: "/h", ContainerPath: "/c", ReadOnly: true} //nolint:staticcheck // ST1023: type pins alias identity
 	var internal runtime.MountSpec
 	internal = public

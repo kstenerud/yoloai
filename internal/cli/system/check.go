@@ -40,15 +40,15 @@ Checks performed:
 	return cmd
 }
 
-func runSystemCheck(cmd *cobra.Command, backend yoloai.BackendName, agentName, isolation string) error {
+func runSystemCheck(cmd *cobra.Command, backend yoloai.BackendType, agentName, isolation string) error {
 	out := cmd.OutOrStdout()
 	if agentName == "" {
 		agentName = cliutil.ResolveAgent(cmd)
 	}
 
 	results, err := cliutil.System().Check(cmd.Context(), yoloai.CheckOptions{
-		Backend:   yoloai.BackendName(backend),
-		Agent:     yoloai.AgentName(agentName),
+		Backend:   yoloai.BackendType(backend),
+		Agent:     yoloai.AgentType(agentName),
 		Isolation: yoloai.IsolationMode(isolation),
 	})
 	if err != nil {

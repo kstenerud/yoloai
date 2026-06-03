@@ -26,9 +26,9 @@ import (
 // external embedders are a supported audience; this test enforces
 // that claim. CRITIQUE.md §F1 is the motivating finding.
 //
-// Type aliases (`type BackendName = runtime.BackendName`) ARE allowed
+// Type aliases (`type BackendType = runtime.BackendType`) ARE allowed
 // here — they re-publish the internal type under a yoloai-root name,
-// so an embedder writing `var b yoloai.BackendName` compiles even
+// so an embedder writing `var b yoloai.BackendType` compiles even
 // though the type's home is `internal/runtime`. Direct references to
 // an internal type that has no public alias are not allowed.
 func TestPublicAPI_NoInternalLeaks(t *testing.T) {
@@ -169,7 +169,7 @@ func formatLeakReport(unexpected map[string][]string, stale map[string]bool) str
 	if len(unexpected) > 0 {
 		msg.WriteString("NEW public-API leak (not on the CRITIQUE.md F1 baseline):\n")
 		msg.WriteString("external embedders cannot import internal/ packages. Either re-export\n")
-		msg.WriteString("each type as a yoloai-root alias (the BackendName pattern in names.go)\n")
+		msg.WriteString("each type as a yoloai-root alias (the BackendType pattern in names.go)\n")
 		msg.WriteString("or promote it to a new public yoloai-root type. If this is intentional\n")
 		msg.WriteString("for now, add the type's key to f1KnownLeaks at the bottom of this file.\n\n")
 		writeLeakLines(&msg, unexpected)

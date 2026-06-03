@@ -30,7 +30,7 @@ type AgentInfo struct {
 // (see BackendQuery.ProbeAvailability); otherwise Available is false and Note is
 // empty regardless of whether the backend would actually run.
 type BackendInfo struct {
-	Name          BackendName
+	Name          BackendType
 	Description   string
 	Platforms     []string // host GOOS values this backend runs on ("linux", "darwin", …)
 	Architectures []string // host GOARCH values this backend supports ("amd64", "arm64"); nil/empty = any arch
@@ -70,7 +70,7 @@ type BackendQuery struct {
 // AgentQuery.RealOnly set, the internal/testing pseudo-agents (test, shell,
 // idle) are excluded.
 func (s *System) Agents(q AgentQuery) []AgentInfo {
-	names := agent.AllAgentNames()
+	names := agent.AllAgentTypes()
 	if q.RealOnly {
 		names = agent.RealAgents()
 	}
@@ -109,7 +109,7 @@ func (s *System) Backends(ctx context.Context, q BackendQuery) []BackendInfo {
 // note explaining the failure when it is not. This is the single-backend
 // counterpart to Backends(ctx, BackendQuery{ProbeAvailability: true}); both use
 // the identical construct-and-close probe.
-func (s *System) CheckBackend(ctx context.Context, name BackendName) (available bool, note string) {
+func (s *System) CheckBackend(ctx context.Context, name BackendType) (available bool, note string) {
 	rt, err := newRuntime(ctx, name, s.layout)
 	if err != nil {
 		return false, err.Error()

@@ -76,7 +76,7 @@ func applyOverlay(cmd *cobra.Command, name string, env *yoloai.Environment, refs
 // overlayApplyViaClient runs the overlay apply through the workdir handle after
 // enforcing the running-container precondition. dryRun captures the diff stat
 // without applying.
-func overlayApplyViaClient(cmd *cobra.Command, name string, backend yoloai.BackendName, paths []string, dryRun bool) (*yoloai.ApplyResult, error) {
+func overlayApplyViaClient(cmd *cobra.Command, name string, backend yoloai.BackendType, paths []string, dryRun bool) (*yoloai.ApplyResult, error) {
 	var result *yoloai.ApplyResult
 	err := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		if runErr := requireOverlayRunning(ctx, c, name); runErr != nil {

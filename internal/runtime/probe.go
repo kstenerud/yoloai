@@ -20,7 +20,7 @@ import (
 //
 // env is the caller's threaded host-env snapshot, forwarded to the backend's
 // probe so socket discovery stays principal-scoped (§12). May be nil.
-func Probe(ctx context.Context, name BackendName, env map[string]string) (available bool, reason string) {
+func Probe(ctx context.Context, name BackendType, env map[string]string) (available bool, reason string) {
 	desc, ok := Descriptor(name)
 	if !ok {
 		return false, fmt.Sprintf("backend %q is not available on this platform", name)
@@ -62,7 +62,7 @@ func Probe(ctx context.Context, name BackendName, env map[string]string) (availa
 //
 // env is the caller's threaded host-env snapshot, forwarded to container-slot
 // probes for principal-scoped socket discovery (§12). May be nil.
-func SelectBackend(ctx context.Context, preferred BackendName, isolation IsolationMode, targetOS string, env map[string]string) (backend BackendName, warning string) {
+func SelectBackend(ctx context.Context, preferred BackendType, isolation IsolationMode, targetOS string, env map[string]string) (backend BackendType, warning string) {
 	// OS-based routing: macOS-native backends. Checked before isolation
 	// so "--os mac --isolation vm" routes to tart rather than containerd.
 	if targetOS == "mac" {
@@ -97,7 +97,7 @@ func SelectBackend(ctx context.Context, preferred BackendName, isolation Isolati
 //
 // env is the caller's threaded host-env snapshot, forwarded to each backend's
 // probe so socket discovery stays principal-scoped (§12). May be nil.
-func SelectContainerBackend(ctx context.Context, preferred BackendName, env map[string]string) (backend BackendName, warning string) {
+func SelectContainerBackend(ctx context.Context, preferred BackendType, env map[string]string) (backend BackendType, warning string) {
 	candidates := containerBackends()
 	if len(candidates) == 0 {
 		// No container backends registered on this platform (e.g. macOS without
@@ -136,8 +136,8 @@ func SelectContainerBackend(ctx context.Context, preferred BackendName, env map[
 
 // containerBackends returns the names of all registered backends whose
 // BaseModeName is "container" (docker, podman; not containerd's vm mode).
-func containerBackends() []BackendName {
-	var out []BackendName
+func containerBackends() []BackendType {
+	var out []BackendType
 	for _, d := range Descriptors() {
 		if d.BaseModeName == IsolationModeContainer {
 			out = append(out, d.Name)
@@ -149,11 +149,11 @@ func containerBackends() []BackendName {
 // orderCandidates returns candidates with preferred moved to the front when
 // it's in the list. candidates is already sorted alphabetically by
 // Descriptors(), preserved for the non-preferred tail.
-func orderCandidates(candidates []BackendName, preferred BackendName) []BackendName {
+func orderCandidates(candidates []BackendType, preferred BackendType) []BackendType {
 	if preferred == "" || !contains(candidates, preferred) {
 		return candidates
 	}
-	out := make([]BackendName, 0, len(candidates))
+	out := make([]BackendType, 0, len(candidates))
 	out = append(out, preferred)
 	for _, c := range candidates {
 		if c != preferred {
@@ -163,7 +163,7 @@ func orderCandidates(candidates []BackendName, preferred BackendName) []BackendN
 	return out
 }
 
-func contains(s []BackendName, v BackendName) bool {
+func contains(s []BackendType, v BackendType) bool {
 	for _, x := range s {
 		if x == v {
 			return true

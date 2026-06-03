@@ -18,7 +18,7 @@ func TestSelectBackend_MacRouting(t *testing.T) {
 	cases := []struct {
 		name      string
 		isolation IsolationMode
-		want      BackendName
+		want      BackendType
 	}{
 		{"mac+vm routes to tart", IsolationModeVM, BackendTart},
 		{"mac+default routes to seatbelt", IsolationModeDefault, BackendSeatbelt},

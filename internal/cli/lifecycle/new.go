@@ -101,7 +101,7 @@ func runNewCmd(cmd *cobra.Command, args []string, version string) error {
 	c, err := yoloai.NewWithOptions(cmd.Context(), yoloai.Options{
 		DataDir: l.DataDir,
 		HomeDir: l.HomeDir,
-		Backend: yoloai.BackendName(backend),
+		Backend: yoloai.BackendType(backend),
 		Input:   cmd.InOrStdin(),
 		Output:  mgrOutput,
 		Version: version,
@@ -215,7 +215,7 @@ func resolveNewCmdOptions(cmd *cobra.Command, name, rawWorkdirArg string, passth
 		Name:                 name,
 		Workdir:              workdirSpec,
 		AuxDirs:              auxDirSpecs,
-		Agent:                yoloai.AgentName(agentName),
+		Agent:                yoloai.AgentType(agentName),
 		Model:                model,
 		Profile:              profileFlag,
 		Prompt:               prompt,

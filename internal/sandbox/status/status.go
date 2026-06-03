@@ -440,7 +440,7 @@ func ListSandboxes(ctx context.Context, layout config.Layout, rt runtime.Runtime
 // Takes a newRuntimeFunc parameter for creating runtimes (enables testing).
 // Returns (infos, unavailableBackends, error).
 // Sandboxes whose backends are unavailable get StatusUnavailable.
-func ListSandboxesMultiBackend(ctx context.Context, layout config.Layout, newRuntimeFunc func(context.Context, runtime.BackendName) (runtime.Runtime, error)) ([]*Info, []string, error) {
+func ListSandboxesMultiBackend(ctx context.Context, layout config.Layout, newRuntimeFunc func(context.Context, runtime.BackendType) (runtime.Runtime, error)) ([]*Info, []string, error) {
 	sandboxesDir := layout.SandboxesDir()
 
 	entries, err := os.ReadDir(sandboxesDir)
@@ -455,7 +455,7 @@ func ListSandboxesMultiBackend(ctx context.Context, layout config.Layout, newRun
 
 	var result []*Info
 	var unavailableBackends []string
-	unavailableSet := make(map[runtime.BackendName]bool)
+	unavailableSet := make(map[runtime.BackendType]bool)
 
 	for backend, names := range backendSandboxes {
 		if backend == "" {
@@ -472,8 +472,8 @@ func ListSandboxesMultiBackend(ctx context.Context, layout config.Layout, newRun
 
 // groupSandboxesByBackend maps backend name → sandbox names from the sandbox directory entries.
 // Broken sandboxes (unreadable meta) are keyed to "".
-func groupSandboxesByBackend(entries []os.DirEntry, sandboxesDir string) map[runtime.BackendName][]string {
-	byBackend := make(map[runtime.BackendName][]string)
+func groupSandboxesByBackend(entries []os.DirEntry, sandboxesDir string) map[runtime.BackendType][]string {
+	byBackend := make(map[runtime.BackendType][]string)
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -509,7 +509,7 @@ func brokenInfos(names []string) []*Info {
 
 // inspectBackendGroup inspects all sandboxes for a single backend, returning
 // their Info entries and any newly discovered unavailable backend names.
-func inspectBackendGroup(ctx context.Context, layout config.Layout, newRuntimeFunc func(context.Context, runtime.BackendName) (runtime.Runtime, error), backend runtime.BackendName, names []string, unavailableSet map[runtime.BackendName]bool) ([]*Info, []string) {
+func inspectBackendGroup(ctx context.Context, layout config.Layout, newRuntimeFunc func(context.Context, runtime.BackendType) (runtime.Runtime, error), backend runtime.BackendType, names []string, unavailableSet map[runtime.BackendType]bool) ([]*Info, []string) {
 	var unavailableBackends []string
 	rt, err := newRuntimeFunc(ctx, backend)
 	var effectiveRT runtime.Runtime

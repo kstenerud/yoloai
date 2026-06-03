@@ -220,7 +220,7 @@ func TestRequiredCapabilities_Podman_RootWithRunsc(t *testing.T) {
 func TestDescriptor_Podman(t *testing.T) {
 	r := &Runtime{}
 	d := r.Descriptor()
-	assert.Equal(t, runtime.BackendName("podman"), d.Name)
+	assert.Equal(t, runtime.BackendType("podman"), d.Name)
 	assert.Equal(t, runtime.IsolationModeContainer, d.BaseModeName)
 	assert.Contains(t, d.SupportedIsolationModes, runtime.IsolationModeContainerEnhanced)
 }

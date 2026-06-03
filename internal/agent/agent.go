@@ -308,8 +308,8 @@ func GetAgent(name string) *Definition {
 	return agents[name]
 }
 
-// AllAgentNames returns sorted agent names for stable iteration.
-func AllAgentNames() []string {
+// AllAgentTypes returns sorted agent names for stable iteration.
+func AllAgentTypes() []string {
 	names := make([]string, 0, len(agents))
 	for name := range agents {
 		names = append(names, name)

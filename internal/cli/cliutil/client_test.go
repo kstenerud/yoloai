@@ -25,7 +25,7 @@ func TestResolveBackend_FlagSet(t *testing.T) {
 	cmd.Flags().String("backend", "", "")
 	require.NoError(t, cmd.Flags().Set("backend", "tart"))
 
-	assert.Equal(t, runtime.BackendName("tart"), cliutil.ResolveBackend(cmd))
+	assert.Equal(t, runtime.BackendType("tart"), cliutil.ResolveBackend(cmd))
 }
 
 func TestResolveBackend_IsolationVM(t *testing.T) {
@@ -59,7 +59,7 @@ func TestResolveBackend_OsMac(t *testing.T) {
 	cmd.Flags().String("os", "", "")
 	require.NoError(t, cmd.Flags().Set("os", "mac"))
 
-	assert.Equal(t, runtime.BackendName("seatbelt"), cliutil.ResolveBackend(cmd))
+	assert.Equal(t, runtime.BackendType("seatbelt"), cliutil.ResolveBackend(cmd))
 }
 
 func TestResolveBackend_OsMacIsolationVM(t *testing.T) {
@@ -70,7 +70,7 @@ func TestResolveBackend_OsMacIsolationVM(t *testing.T) {
 	require.NoError(t, cmd.Flags().Set("os", "mac"))
 	require.NoError(t, cmd.Flags().Set("isolation", "vm"))
 
-	assert.Equal(t, runtime.BackendName("tart"), cliutil.ResolveBackend(cmd))
+	assert.Equal(t, runtime.BackendType("tart"), cliutil.ResolveBackend(cmd))
 }
 
 func TestResolveBackend_ConfigOsMacFlagIsolationVM(t *testing.T) {
@@ -83,7 +83,7 @@ func TestResolveBackend_ConfigOsMacFlagIsolationVM(t *testing.T) {
 	cmd.Flags().String("os", "", "")
 	require.NoError(t, cmd.Flags().Set("isolation", "vm"))
 
-	assert.Equal(t, runtime.BackendName("tart"), cliutil.ResolveBackend(cmd))
+	assert.Equal(t, runtime.BackendType("tart"), cliutil.ResolveBackend(cmd))
 }
 
 func TestResolveBackend_FlagEmptyNoConfig(t *testing.T) {
@@ -93,7 +93,7 @@ func TestResolveBackend_FlagEmptyNoConfig(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.Flags().String("backend", "", "")
 
-	assert.Equal(t, runtime.BackendName("docker"), cliutil.ResolveBackend(cmd))
+	assert.Equal(t, runtime.BackendType("docker"), cliutil.ResolveBackend(cmd))
 }
 
 // --- ResolveContainerBackendConfig ---
@@ -102,21 +102,21 @@ func TestResolveContainerBackendConfig_HasBackend(t *testing.T) {
 	dir := testutil.CLIConfigDir(t)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("container_backend: tart\n"), 0600))
 
-	assert.Equal(t, runtime.BackendName("tart"), cliutil.ResolveContainerBackendConfig())
+	assert.Equal(t, runtime.BackendType("tart"), cliutil.ResolveContainerBackendConfig())
 }
 
 func TestResolveContainerBackendConfig_Empty(t *testing.T) {
 	dir := testutil.CLIConfigDir(t)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("agent: claude\n"), 0600))
 
-	assert.Equal(t, runtime.BackendName(""), cliutil.ResolveContainerBackendConfig())
+	assert.Equal(t, runtime.BackendType(""), cliutil.ResolveContainerBackendConfig())
 }
 
 func TestResolveContainerBackendConfig_NoFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	assert.Equal(t, runtime.BackendName(""), cliutil.ResolveContainerBackendConfig())
+	assert.Equal(t, runtime.BackendType(""), cliutil.ResolveContainerBackendConfig())
 }
 
 // --- ResolveBackendForSandbox ---
@@ -138,7 +138,7 @@ func TestResolveBackendForSandbox_MetaHasBackend(t *testing.T) {
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
-	assert.Equal(t, runtime.BackendName("tart"), cliutil.ResolveBackendForSandbox(name))
+	assert.Equal(t, runtime.BackendType("tart"), cliutil.ResolveBackendForSandbox(name))
 }
 
 func TestResolveBackendForSandbox_MetaMissing(t *testing.T) {
@@ -146,7 +146,7 @@ func TestResolveBackendForSandbox_MetaMissing(t *testing.T) {
 	t.Setenv("HOME", tmpDir)
 
 	// No sandbox dir exists → falls back to config default
-	assert.Equal(t, runtime.BackendName("docker"), cliutil.ResolveBackendForSandbox("nonexistent"))
+	assert.Equal(t, runtime.BackendType("docker"), cliutil.ResolveBackendForSandbox("nonexistent"))
 }
 
 func TestResolveBackendForSandbox_MetaEmptyBackend(t *testing.T) {
@@ -165,7 +165,7 @@ func TestResolveBackendForSandbox_MetaEmptyBackend(t *testing.T) {
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
-	assert.Equal(t, runtime.BackendName("docker"), cliutil.ResolveBackendForSandbox(name))
+	assert.Equal(t, runtime.BackendType("docker"), cliutil.ResolveBackendForSandbox(name))
 }
 
 // --- ResolveAgent ---

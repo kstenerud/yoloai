@@ -52,7 +52,7 @@ type EnvVar struct {
 // BackendDiagnostic is one backend's availability and version, in registration
 // order.
 type BackendDiagnostic struct {
-	Name      BackendName
+	Name      BackendType
 	Available bool
 	// Note carries the probe-failure reason when Available is false; "" otherwise.
 	Note string

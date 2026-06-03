@@ -48,10 +48,10 @@ func Coalesce(a, b string) string {
 // The flag/config reads (the CLI's job) stay here; the routing decision itself
 // is delegated to runtime.SelectBackend so the CLI and library embedders share
 // one routing implementation (F21).
-func ResolveBackend(cmd *cobra.Command) yoloai.BackendName {
+func ResolveBackend(cmd *cobra.Command) yoloai.BackendType {
 	// Explicit --backend always wins.
 	if b, _ := cmd.Flags().GetString("backend"); b != "" {
-		return yoloai.BackendName(b)
+		return yoloai.BackendType(b)
 	}
 
 	// Read isolation and os from flags, falling back to config.
@@ -78,10 +78,10 @@ func FlagStr(cmd *cobra.Command, name string) string {
 }
 
 // ResolveContainerBackendConfig reads the container_backend config preference.
-func ResolveContainerBackendConfig() yoloai.BackendName {
+func ResolveContainerBackendConfig() yoloai.BackendType {
 	cfg, err := config.LoadDefaultsConfig(Layout())
 	if err == nil {
-		return yoloai.BackendName(cfg.ContainerBackend)
+		return yoloai.BackendType(cfg.ContainerBackend)
 	}
 	return ""
 }
@@ -89,7 +89,7 @@ func ResolveContainerBackendConfig() yoloai.BackendName {
 // ResolveBackendForSandbox reads the backend from a sandbox's environment.json.
 // Falls back to config default if environment.json can't be read.
 // Used by lifecycle commands that operate on an existing sandbox.
-func ResolveBackendForSandbox(name string) yoloai.BackendName {
+func ResolveBackendForSandbox(name string) yoloai.BackendType {
 	l := Layout()
 	c, err := yoloai.NewWithOptions(context.Background(), yoloai.Options{DataDir: l.DataDir, HomeDir: l.HomeDir, Env: l.Env})
 	if err == nil {
@@ -114,7 +114,7 @@ func ResolveBackendForSandbox(name string) yoloai.BackendName {
 // orchestration-level operations (Stop, Destroy, List, Inspect, Diff, Apply,
 // Run). The Client wraps a runtime + sandbox.Engine with §12-clean Layout
 // derived from Layout(). See internal/cli/CONVENTIONS.md.
-func WithClient(cmd *cobra.Command, backend yoloai.BackendName, fn func(ctx context.Context, c *yoloai.Client) error) error {
+func WithClient(cmd *cobra.Command, backend yoloai.BackendType, fn func(ctx context.Context, c *yoloai.Client) error) error {
 	ctx := cmd.Context()
 	l := Layout()
 	c, err := yoloai.NewWithOptions(ctx, yoloai.Options{

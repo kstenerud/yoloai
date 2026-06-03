@@ -25,7 +25,7 @@ import (
 // Notices. The yoloai.Client seeds those per-call writers from its Options.Output.
 type Engine struct {
 	runtime  runtime.Runtime
-	backend  runtime.BackendName
+	backend  runtime.BackendType
 	logger   *slog.Logger
 	input    io.Reader
 	progress func(name, msg string) // optional progress callback
@@ -67,7 +67,7 @@ func WithLayout(layout config.Layout) EngineOption {
 // test construction needs to remember it (use config.NewLayout
 // with t.TempDir-based DataDir).
 func NewEngine(rt runtime.Runtime, logger *slog.Logger, input io.Reader, opts ...EngineOption) *Engine {
-	var backend runtime.BackendName
+	var backend runtime.BackendType
 	if rt != nil {
 		backend = rt.Descriptor().Name
 	}

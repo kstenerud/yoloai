@@ -17,14 +17,14 @@ import (
 // fields (on-disk schema version, image ref, prompt/debug/userns/vscode flags)
 // are deliberately omitted — they describe *how* containment is achieved, not
 // the sandbox a consumer reasons about. Typed fields reuse the public aliases
-// (BackendName, AgentName, IsolationMode, DirMode, NetworkMode).
+// (BackendType, AgentType, IsolationMode, DirMode, NetworkMode).
 type Environment struct {
 	// Identity & posture.
 	Name           string        `json:"name"`
 	CreatedAt      time.Time     `json:"created_at"`
-	Backend        BackendName   `json:"backend"`
+	Backend        BackendType   `json:"backend"`
 	Profile        string        `json:"profile,omitempty"`
-	Agent          AgentName     `json:"agent"`
+	Agent          AgentType     `json:"agent"`
 	Model          string        `json:"model,omitempty"`
 	Isolation      IsolationMode `json:"isolation,omitempty"`
 	HostFilesystem bool          `json:"host_filesystem,omitempty"`

@@ -167,7 +167,7 @@ func (s *Server) handleSandboxCreate(ctx context.Context, req mcp.CallToolReques
 			Path: workdir,
 			Mode: yoloai.DirModeCopy,
 		},
-		Agent:   yoloai.AgentName(agent),
+		Agent:   yoloai.AgentType(agent),
 		Model:   model,
 		Profile: profile,
 		Prompt:  prompt,

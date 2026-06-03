@@ -170,8 +170,8 @@ func TestGetAgent_Codex(t *testing.T) {
 	assert.Equal(t, []string{"api.openai.com"}, def.NetworkAllowlist)
 }
 
-func TestAllAgentNames(t *testing.T) {
-	names := AllAgentNames()
+func TestAllAgentTypes(t *testing.T) {
+	names := AllAgentTypes()
 	assert.Equal(t, []string{"aider", "claude", "codex", "gemini", "idle", "opencode", "shell", "test"}, names)
 }
 

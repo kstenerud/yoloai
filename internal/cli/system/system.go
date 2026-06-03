@@ -69,7 +69,7 @@ func newSystemBuildCmd() *cobra.Command {
 	return cmd
 }
 
-func runSystemBuild(cmd *cobra.Command, args []string, backend yoloai.BackendName) error {
+func runSystemBuild(cmd *cobra.Command, args []string, backend yoloai.BackendType) error {
 	secretFlags, _ := cmd.Flags().GetStringSlice("secret")
 	force, _ := cmd.Flags().GetBool("force")
 
@@ -94,7 +94,7 @@ func runSystemBuild(cmd *cobra.Command, args []string, backend yoloai.BackendNam
 
 	opts := yoloai.BuildOptions{
 		Profile: profile,
-		Backend: yoloai.BackendName(backend),
+		Backend: yoloai.BackendType(backend),
 		Rebuild: force,
 		Secrets: secrets,
 		Output:  buildOutputFor(cmd),

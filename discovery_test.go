@@ -17,7 +17,7 @@ func TestSystemClient_Agents_Catalog(t *testing.T) {
 	c := newTestClient(t)
 
 	agents := c.Agents(AgentQuery{})
-	require.Len(t, agents, len(agent.AllAgentNames()), "one AgentInfo per shipped agent")
+	require.Len(t, agents, len(agent.AllAgentTypes()), "one AgentInfo per shipped agent")
 
 	byName := make(map[string]AgentInfo, len(agents))
 	for _, a := range agents {

@@ -31,7 +31,7 @@ import (
 // methods (DiskUsage, Prune, Build with AllBackends) iterate every
 // registered backend that's available in the current environment
 // and spin up an ephemeral runtime per backend. Single-backend
-// methods (Check, single-backend Build) take a BackendName parameter.
+// methods (Check, single-backend Build) take a BackendType parameter.
 //
 // Safe for concurrent use by multiple goroutines. Read-only methods
 // (DiskUsage, Check) run in parallel. Write methods (Build, Prune)
@@ -109,7 +109,7 @@ type DiskUsage struct {
 // non-nil, the byte counts are 0 and Detail carries any partial progress info
 // from the backend.
 type BackendDiskUsage struct {
-	Name BackendName
+	Name BackendType
 	// CachedBytes is reclaimable by plain `prune` without a rebuild (build
 	// cache, volumes). Always >= 0.
 	CachedBytes int64
@@ -163,17 +163,17 @@ type SystemInfo struct {
 // has sandbox state, inspecting each via its own backend. Returns the sandbox
 // infos plus the names of backends that have sandbox dirs but couldn't be
 // reached (e.g. their daemon is down) so callers can warn without failing.
-func (s *System) ListAcrossBackends(ctx context.Context) ([]*Info, []BackendName, error) {
+func (s *System) ListAcrossBackends(ctx context.Context) ([]*Info, []BackendType, error) {
 	infos, unavailable, err := sandbox.ListSandboxesMultiBackend(ctx, s.layout,
-		func(ctx context.Context, backend runtime.BackendName) (runtime.Runtime, error) {
+		func(ctx context.Context, backend runtime.BackendType) (runtime.Runtime, error) {
 			return newRuntime(ctx, backend, s.layout)
 		})
 	if err != nil {
 		return nil, nil, err
 	}
-	unavailableNames := make([]BackendName, len(unavailable))
+	unavailableNames := make([]BackendType, len(unavailable))
 	for i, name := range unavailable {
-		unavailableNames[i] = BackendName(name)
+		unavailableNames[i] = BackendType(name)
 	}
 	return infosFromStatus(infos), unavailableNames, nil
 }
@@ -260,7 +260,7 @@ func (s *System) VMCensus(ctx context.Context) *VMCensus {
 // backendReports builds the report rows for a single backend: an init-failure
 // row if it can't be constructed, otherwise a base-mode row (unless filtered)
 // plus one row per matching supported isolation mode.
-func (s *System) backendReports(ctx context.Context, backend BackendName, env caps.Environment, isolationFilter string) []caps.BackendReport {
+func (s *System) backendReports(ctx context.Context, backend BackendType, env caps.Environment, isolationFilter string) []caps.BackendReport {
 	rt, err := newRuntime(ctx, backend, s.layout)
 	if err != nil {
 		if isolationFilter != "" {
@@ -300,7 +300,7 @@ type BuildOptions struct {
 	Profile string
 	// Backend selects the backend to build for. Empty = default
 	// backend. Ignored when AllBackends is true.
-	Backend BackendName
+	Backend BackendType
 	// AllBackends builds across every backend that's currently
 	// available. Mutually exclusive with Backend.
 	AllBackends bool
@@ -369,7 +369,7 @@ func (s *System) Build(ctx context.Context, opts BuildOptions) error {
 
 // buildOne runs one backend's build (base or profile) using a freshly
 // constructed runtime that's closed before return.
-func (s *System) buildOne(ctx context.Context, backend BackendName, opts BuildOptions, out io.Writer) error {
+func (s *System) buildOne(ctx context.Context, backend BackendType, opts BuildOptions, out io.Writer) error {
 	rt, err := newRuntime(ctx, backend, s.layout)
 	if err != nil {
 		return err
@@ -384,10 +384,10 @@ func (s *System) buildOne(ctx context.Context, backend BackendName, opts BuildOp
 // CheckOptions configures System.Check.
 type CheckOptions struct {
 	// Backend is the backend to verify. Required.
-	Backend BackendName
+	Backend BackendType
 	// Agent is the agent name whose credentials are checked. Required;
 	// caller resolves the default before calling.
-	Agent AgentName
+	Agent AgentType
 	// Isolation, when non-empty, triggers an isolation-mode capability
 	// check via runtime.RequiredCapabilitiesFor + caps.RunChecks.
 	Isolation IsolationMode
@@ -552,7 +552,7 @@ type PruneResult struct {
 type PruneItem struct {
 	// Backend is the backend that owns the item, or empty for non-backend
 	// items like temp dirs (Kind == PruneKindTempDir).
-	Backend BackendName
+	Backend BackendType
 	// Kind classifies the resource type — see PruneKind* constants for
 	// the shipping set. Open-set: backends can introduce new kinds.
 	Kind PruneItemKind
@@ -684,7 +684,7 @@ func (s *System) applyBrokenClassifications(broken []classifiedSandbox, dryRun b
 // prune reclaims the build cache (no rebuild forced), and IncludeBaseImage also
 // drops the base images. Per-backend failures are logged to opts.Output rather
 // than aborting the whole prune.
-func (s *System) pruneBackend(ctx context.Context, backend BackendName, known []string, opts PruneOptions, out io.Writer) ([]PruneItem, int64) {
+func (s *System) pruneBackend(ctx context.Context, backend BackendType, known []string, opts PruneOptions, out io.Writer) ([]PruneItem, int64) {
 	rt, err := newRuntime(ctx, backend, s.layout)
 	if err != nil {
 		return nil, 0
@@ -706,7 +706,7 @@ func (s *System) pruneBackend(ctx context.Context, backend BackendName, known []
 		}
 		for _, item := range actual.Items {
 			items = append(items, PruneItem{
-				Backend: BackendName(backend),
+				Backend: BackendType(backend),
 				Kind:    PruneItemKind(item.Kind),
 				Name:    item.Name,
 			})
@@ -714,7 +714,7 @@ func (s *System) pruneBackend(ctx context.Context, backend BackendName, known []
 	} else {
 		for _, item := range scan.Items {
 			items = append(items, PruneItem{
-				Backend: BackendName(backend),
+				Backend: BackendType(backend),
 				Kind:    PruneItemKind(item.Kind),
 				Name:    item.Name,
 			})

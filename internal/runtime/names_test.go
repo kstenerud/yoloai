@@ -1,13 +1,13 @@
-// ABOUTME: Tests for BackendName typed-enum constants — values match the
+// ABOUTME: Tests for BackendType typed-enum constants — values match the
 // ABOUTME: strings used by the registry today.
 
 package runtime
 
 import "testing"
 
-func TestBackendNameConstants(t *testing.T) {
+func TestBackendTypeConstants(t *testing.T) {
 	cases := []struct {
-		got  BackendName
+		got  BackendType
 		want string
 	}{
 		{BackendDocker, "docker"},
@@ -18,7 +18,7 @@ func TestBackendNameConstants(t *testing.T) {
 	}
 	for _, c := range cases {
 		if string(c.got) != c.want {
-			t.Errorf("BackendName(%v) = %q, want %q", c.got, string(c.got), c.want)
+			t.Errorf("BackendType(%v) = %q, want %q", c.got, string(c.got), c.want)
 		}
 	}
 }

@@ -231,7 +231,7 @@ func applyResourceLimits(st *state.State, instanceCfg *runtime.InstanceConfig) e
 }
 
 // applyOverlayAndCaps validates and applies overlay/capability requirements to the instance config.
-func applyOverlayAndCaps(st *state.State, caps runtime.BackendCaps, instanceCfg *runtime.InstanceConfig, runtimeName runtime.BackendName) error {
+func applyOverlayAndCaps(st *state.State, caps runtime.BackendCaps, instanceCfg *runtime.InstanceConfig, runtimeName runtime.BackendType) error {
 	// Catch isolation-mode/overlay conflicts early before Docker fails with
 	// an opaque error. runtime.SupportsOverlayDirs encodes the policy
 	// (container-enhanced / gVisor is the rejection case); the message stays

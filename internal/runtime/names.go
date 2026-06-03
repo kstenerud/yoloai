@@ -3,7 +3,7 @@
 
 package runtime
 
-// BackendName names a runtime backend. Open-set typed string — the
+// BackendType names a runtime backend. Open-set typed string — the
 // constants document the backends that ship with yoloai; future
 // backends (registered via Register) supply their own name. The
 // registry is the source of truth for which names are recognised at
@@ -13,16 +13,16 @@ package runtime
 // W-L8b/c/d) can take a typed parameter rather than `string`,
 // preventing typo-style bugs at call sites. Internal code that
 // already uses plain string keys to look up backends keeps working;
-// callers convert with `BackendName(s)` / `string(b)` at the
+// callers convert with `BackendType(s)` / `string(b)` at the
 // boundary as they migrate.
 //
 // Established by W-L8a Q-Y.
-type BackendName string
+type BackendType string
 
 const (
-	BackendDocker     BackendName = "docker"
-	BackendPodman     BackendName = "podman"
-	BackendTart       BackendName = "tart"
-	BackendSeatbelt   BackendName = "seatbelt"
-	BackendContainerd BackendName = "containerd"
+	BackendDocker     BackendType = "docker"
+	BackendPodman     BackendType = "podman"
+	BackendTart       BackendType = "tart"
+	BackendSeatbelt   BackendType = "seatbelt"
+	BackendContainerd BackendType = "containerd"
 )

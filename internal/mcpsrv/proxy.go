@@ -135,7 +135,7 @@ func (p *ProxyServer) createSandbox(ctx context.Context) (*yoloai.Environment, e
 		Name:    p.sandboxName,
 		Workdir: p.opts.Workdir,
 		AuxDirs: p.opts.AuxDirs,
-		Agent:   yoloai.AgentName(p.opts.Agent),
+		Agent:   yoloai.AgentType(p.opts.Agent),
 		Model:   p.opts.Model,
 		Profile: p.opts.Profile,
 		Replace: p.opts.Replace,

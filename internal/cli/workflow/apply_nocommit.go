@@ -105,7 +105,7 @@ func applyNoCommit(cmd *cobra.Command, name string, paths []string, env *yoloai.
 // warnNoCommitSkippedUncommitted prints the --include-uncommitted hint when
 // --no-commit excludes uncommitted work. Best-effort: a failed check is silently
 // swallowed because the net-diff apply can still succeed on the committed delta.
-func warnNoCommitSkippedUncommitted(cmd *cobra.Command, name string, backend yoloai.BackendName) {
+func warnNoCommitSkippedUncommitted(cmd *cobra.Command, name string, backend yoloai.BackendType) {
 	if cliutil.JSONEnabled(cmd) {
 		return
 	}

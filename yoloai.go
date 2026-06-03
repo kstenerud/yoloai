@@ -136,7 +136,7 @@ type Options struct {
 	// Embedders that want that same auto-detection call the public
 	// yoloai.SelectBackend helper and pass its result. When set, the backend
 	// is opened lazily on the first backend-bound op, not at construction.
-	Backend BackendName
+	Backend BackendType
 
 	// Logger receives structured log output. Default: slog.Default().
 	Logger *slog.Logger
@@ -208,7 +208,7 @@ type Options struct {
 // Construct with NewWithOptions.
 type Client struct {
 	layout  config.Layout       // Q-W: DataDir-rooted path resolver propagated to Engine + apply
-	backend runtime.BackendName // selected backend; "" = backend-less (host-only reads/admin), backend-bound ops return ErrBackendRequired
+	backend runtime.BackendType // selected backend; "" = backend-less (host-only reads/admin), backend-bound ops return ErrBackendRequired
 	logger  *slog.Logger        // for the lazily-built Engine
 	version string              // yoloAI version stamped into created sandboxes' environment.json
 	output  io.Writer           // Options.Output (defaulted to io.Discard); seeds per-call progress writers (F8)
@@ -345,7 +345,7 @@ type RunOptions struct {
 	// Agent selects the AI agent (yoloai.AgentClaude, yoloai.AgentGemini,
 	// yoloai.AgentCodex, …). Default: read from config.yaml, then
 	// yoloai.AgentClaude.
-	Agent AgentName
+	Agent AgentType
 
 	// Model selects the model. Default: read from config.yaml, then agent default.
 	Model string
@@ -411,7 +411,7 @@ func (c *Client) pollUntilDone(ctx context.Context, name string, progress func(s
 func (c *Client) Run(ctx context.Context, opts RunOptions) (*Info, error) {
 	createOpts := opts.materialize()
 	if createOpts.Agent == "" {
-		createOpts.Agent = AgentName(resolveAgentFromConfig(c.layout))
+		createOpts.Agent = AgentType(resolveAgentFromConfig(c.layout))
 	}
 	if createOpts.Model == "" {
 		createOpts.Model = resolveModelFromConfig(c.layout)
@@ -576,7 +576,7 @@ func (c *Client) EnsureSetup(ctx context.Context) error {
 // container-slot probes read DOCKER_HOST / CONTAINER_HOST / XDG_RUNTIME_DIR
 // from it rather than the process environment, so selection stays
 // principal-scoped (§12). May be nil to probe default socket paths only.
-func SelectBackend(ctx context.Context, preferred BackendName, isolation IsolationMode, targetOS string, env map[string]string) (BackendName, string) {
+func SelectBackend(ctx context.Context, preferred BackendType, isolation IsolationMode, targetOS string, env map[string]string) (BackendType, string) {
 	return runtime.SelectBackend(ctx, preferred, isolation, targetOS, env)
 }
 
@@ -589,7 +589,7 @@ func SelectBackend(ctx context.Context, preferred BackendName, isolation Isolati
 //
 // env is the caller's host-env snapshot (the same map passed as Options.Env);
 // see SelectBackend. May be nil to probe default socket paths only.
-func SelectContainerBackend(ctx context.Context, preferred BackendName, env map[string]string) (BackendName, string) {
+func SelectContainerBackend(ctx context.Context, preferred BackendType, env map[string]string) (BackendType, string) {
 	return runtime.SelectContainerBackend(ctx, preferred, env)
 }
 
@@ -608,10 +608,10 @@ func IsolationAvailability(isolation IsolationMode, targetOS, hostOS string) (av
 // runtime.SelectBackend; if that backend isn't available, SelectBackend falls
 // back to any other registered container backend (the warning is discarded —
 // admin callers don't surface it).
-func resolveBackendFromConfig(ctx context.Context, layout config.Layout) runtime.BackendName {
-	var preferred runtime.BackendName
+func resolveBackendFromConfig(ctx context.Context, layout config.Layout) runtime.BackendType {
+	var preferred runtime.BackendType
 	if cfg, err := config.LoadDefaultsConfig(layout); err == nil {
-		preferred = runtime.BackendName(cfg.ContainerBackend)
+		preferred = runtime.BackendType(cfg.ContainerBackend)
 	}
 	backend, _ := runtime.SelectBackend(ctx, preferred, "", "", layout.Env)
 	return backend
@@ -637,7 +637,7 @@ func resolveProfileFromConfig() string {
 	return ""
 }
 
-func newRuntime(ctx context.Context, backend runtime.BackendName, layout config.Layout) (runtime.Runtime, error) {
+func newRuntime(ctx context.Context, backend runtime.BackendType, layout config.Layout) (runtime.Runtime, error) {
 	if backend == "" {
 		backend = runtime.BackendDocker
 	}

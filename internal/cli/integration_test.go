@@ -41,7 +41,7 @@ func cliSetup(t *testing.T) (projectDir string) {
 	// documented in backend-idiosyncrasies.md "Docker daemon races
 	// on AlreadyExists when rebuilding an existing tag with identical
 	// content".
-	if testutil.IntegrationBackendName() == "" || testutil.IntegrationBackendName() == "docker" {
+	if testutil.IntegrationBackendType() == "" || testutil.IntegrationBackendType() == "docker" {
 		layout := config.NewLayoutFor(filepath.Join(tmpHome, ".yoloai", "library"), tmpHome)
 		require.NoError(t, os.MkdirAll(layout.CacheDir(), 0750))
 		dockerrt.RecordBuildChecksum(layout, "")

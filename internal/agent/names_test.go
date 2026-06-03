@@ -1,13 +1,13 @@
-// ABOUTME: Tests for AgentName typed-enum constants — values match the
+// ABOUTME: Tests for AgentType typed-enum constants — values match the
 // ABOUTME: strings used by the agent registry today.
 
 package agent
 
 import "testing"
 
-func TestAgentNameConstants(t *testing.T) {
+func TestAgentTypeConstants(t *testing.T) {
 	cases := []struct {
-		got  AgentName
+		got  AgentType
 		want string
 	}{
 		{AgentClaude, "claude"},
@@ -19,20 +19,20 @@ func TestAgentNameConstants(t *testing.T) {
 	}
 	for _, c := range cases {
 		if string(c.got) != c.want {
-			t.Errorf("AgentName(%v) = %q, want %q", c.got, string(c.got), c.want)
+			t.Errorf("AgentType(%v) = %q, want %q", c.got, string(c.got), c.want)
 		}
 	}
 }
 
-// TestAgentNameMatchesRegistry verifies each named constant corresponds to
+// TestAgentTypeMatchesRegistry verifies each named constant corresponds to
 // a real agent definition registered today — guards against the constant
 // list drifting from the actual shipped agents.
-func TestAgentNameMatchesRegistry(t *testing.T) {
-	for _, name := range []AgentName{
+func TestAgentTypeMatchesRegistry(t *testing.T) {
+	for _, name := range []AgentType{
 		AgentClaude, AgentCodex, AgentGemini, AgentOpenCode, AgentAider, AgentTest,
 	} {
 		if def := GetAgent(string(name)); def == nil {
-			t.Errorf("AgentName constant %q has no matching agent definition", name)
+			t.Errorf("AgentType constant %q has no matching agent definition", name)
 		}
 	}
 }

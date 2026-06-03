@@ -17,10 +17,10 @@ import (
 // tests. Default is "docker"; CI's podman job sets it to "podman".
 const integrationBackendEnv = "YOLOAI_TEST_BACKEND"
 
-// IntegrationBackendName returns the backend name driven by
+// IntegrationBackendType returns the backend name driven by
 // YOLOAI_TEST_BACKEND, defaulting to "docker". Callers must ensure the
 // backend has been registered (via blank-import of its runtime package).
-func IntegrationBackendName() string {
+func IntegrationBackendType() string {
 	if name := os.Getenv(integrationBackendEnv); name != "" {
 		return name
 	}
@@ -45,14 +45,14 @@ func envSnapshot() map[string]string {
 // closed by the caller.
 func NewIntegrationRuntime(ctx context.Context, t *testing.T) yrt.Runtime {
 	t.Helper()
-	name := IntegrationBackendName()
+	name := IntegrationBackendType()
 	home, _ := os.UserHomeDir()
 	layout := config.NewLayoutFor(filepath.Join(home, ".yoloai", "library"), home)
 	// Tests are the boundary equivalent of the CLI's licensed os.Environ read:
 	// thread the host env so backend socket discovery (e.g. podman's
 	// XDG_RUNTIME_DIR) sees the real environment, not an empty map.
 	layout.Env = envSnapshot()
-	rt, err := yrt.New(ctx, yrt.BackendName(name), layout)
+	rt, err := yrt.New(ctx, yrt.BackendType(name), layout)
 	if err != nil {
 		t.Fatalf("create %q runtime: %v", name, err)
 	}

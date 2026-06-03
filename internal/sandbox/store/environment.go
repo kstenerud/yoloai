@@ -26,11 +26,11 @@ type Environment struct {
 	Name          string                  `json:"name"`
 	Principal     config.PrincipalSegment `json:"principal,omitempty"` // owning principal; "" = default (no-principal). Attribution + runtime namespace (D62).
 	CreatedAt     time.Time               `json:"created_at"`
-	Backend       runtime.BackendName     `json:"backend"` // typed string; serializes as "docker"/"tart"/etc.
+	Backend       runtime.BackendType     `json:"backend"` // typed string; serializes as "docker"/"tart"/etc.
 	Profile       string                  `json:"profile,omitempty"`
 	ImageRef      string                  `json:"image_ref,omitempty"`
 
-	Agent agent.AgentName `json:"agent"`
+	Agent agent.AgentType `json:"agent"`
 	Model string          `json:"model,omitempty"`
 
 	Workdir     WorkdirEnvironment `json:"workdir"`
