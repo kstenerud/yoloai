@@ -3,7 +3,8 @@ ABOUTME: boundary discipline ("none of your business" — comply-or-complain),
 ABOUTME: validate-at-every-layer, parse-don't-validate, fail-fast,
 ABOUTME: warnings-are-signal, justify-every-discard, no-half-finished,
 ABOUTME: plan-then-execute cleanup, make-check gate, iterate-when-first-approach
-ABOUTME: -fails. How to write yoloAI code so future-you can change it safely.
+ABOUTME: -fails, raw-until-it-has-to-change. How to write yoloAI code so
+ABOUTME: future-you can change it safely.
 
 # Development principles
 
@@ -518,6 +519,37 @@ Twelve-Factor App factor III (config read once, passed explicitly); Zen of Pytho
 
 ---
 
+## §13. Raw until it has to change
+
+**Principle.** Data keeps the representation it already has until a consumer actually requires a different one. Don't pre-emptively transform a value into another shape when downstream code may have to transform it back, or when the "right" target shape isn't yet forced by a real consumer. Every conversion that *does* happen must be justifiable at the point where it happens — there is a concrete consumer right there whose need the new representation serves.
+
+This is the complement to §4 (parse, don't validate). §4 is the *one justified conversion* at a trust boundary — raw input becomes a typed value whose existence proves an invariant. §13 governs every *other* candidate conversion: a transform that proves nothing and serves no present consumer is speculative, and speculative conversions are lossy, often reversed, and they relocate a decision into the wrong layer. Where §4 says "convert here, because the invariant matters downstream," §13 says "don't convert here, because nothing downstream needs it yet."
+
+### Pattern
+
+A conversion is justified when, *at the point it happens*, there is a consumer whose need the new representation serves and that need won't simply be undone downstream. Threshold questions before reshaping data:
+
+1. *Is there a consumer at this point that needs the new shape?* If the only consumer is hypothetical, keep the data raw (YAGNI).
+2. *Will a downstream consumer want the original?* If a likely consumer needs the source form, converting here forces a reverse round-trip — keep it raw and let the consumer that needs the change own it.
+3. *Which layer owns the conversion?* The boundary-discipline corollary (§2): the layer that owns a conversion is the one with the consumer that needs it — the seam (e.g. library vs. daemon) is decided by where the justifying need lives, not by which layer happens to touch the data first.
+
+When a conversion is genuinely shared by a second consumer later, a helper can be added *then*, at the point the need is concrete — not pre-built against a guess.
+
+### Worked examples
+
+- **The G5 activity-stream carve** (commit `a22ea04`, 2026-06-03; D64). `SystemClient.Logs` emits `LogEvent.Raw` — the **verbatim on-disk JSONL line** — plus only the two fields the transport itself must understand (`Time`, `Level`, for ordering and level-filtering). The library owns *transport* (open / merge-sort across the four log sources / follow-tail / done-detect) but **not payload reshaping**: it does not decompose the JSON into typed event structs, because no library-side consumer needs that and a daemon forwarding the frames onward would only re-serialize it (a reversed round-trip). The CLI — the actual rendering consumer — parses `Raw` at the point it renders. The conversion is justified where it happens; the library does none it can't justify.
+- **The justified counter-case is §4 itself.** `ParseSandboxName(string) (SandboxName, error)` *is* a conversion, and a load-bearing one — it proves the containerd-grammar invariant at the boundary so downstream code never re-checks. §13 doesn't forbid it; §13 forbids the *unjustified extras* layered on top of a value that's already in the shape its consumer needs.
+
+### Cost-vs-benefit
+
+Cost of applying: occasionally a consumer does its own parse at the point of use instead of receiving a pre-chewed struct, and the "rich" convenience type doesn't exist until something needs it. Damage prevented: lossy reshape-then-reshape-back round-trips; the library deciding — on an absent consumer's behalf — what the canonical form is, then being wrong when a second consumer wants the original; conversions stranded in the wrong layer, far from the need that would justify them, which turns "who converts, and when" into an awkward cross-layer negotiation instead of a local decision.
+
+### Sources
+
+Project decision: D64. Complements §4 (parse, don't validate) and §2 (none-of-your-business — the conversion-ownership corollary). Carried-over design conversation: "data from underneath should remain unchanged until it has to change … we could offer helpers, but I'd do that YAGNI."
+
+---
+
 # Common over-generalisations to avoid
 
 | Over-generalisation                          | Why yoloAI rejects                                                                                                                                                                                                                                          |
@@ -533,6 +565,7 @@ Twelve-Factor App factor III (config read once, passed explicitly); Zen of Pytho
 | **`make check`-everywhere-no-exceptions**    | §10 — `make check` is the gate for code changes. Docs-only changes (this file) don't strictly need it. The hook system stamps the project when source files are edited; doc edits don't stamp.                                                              |
 | **Iterate-forever**                          | §11 says rethink after three failed attempts, not "keep trying new tactics indefinitely." Sometimes the right answer is to acknowledge the problem is upstream (gVisor on macOS) and stop.                                                                  |
 | **No-env-vars-ever**                         | §12 bans env reads in *library code* as silent defaults. The CLI startup layer reads `YOLOAI_DATA_DIR` and similar; agents declare API-key env vars in their definitions. The rule is "read env once, at the outermost boundary, with the read documented" — not "env vars are forbidden everywhere."                  |
+| **Never-convert / always-pass-raw**          | §13 forbids *unjustified* conversions, not all of them. §4's boundary parse is a justified conversion (it proves an invariant); rendering a value for a human is a justified conversion (the human is the consumer). The rule is "convert where a present consumer needs it," not "never reshape data."                       |
 
 ---
 

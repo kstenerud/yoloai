@@ -398,6 +398,20 @@ After the bootstrap the stamp is the **only** signal consulted — a stamped lay
 
 **Why reuse over a new field.** A second credential-only map would have been a parallel ambient channel to keep in sync — exactly the kind of ad-hoc one-off the security-consistency feedback warns against. `Env` is already the §12 boundary snapshot; making it the sole credential source keeps one consistent convention and dissolves the old sudo-recovered `credOverrides` channel (`state.State.CredOverrides` removed).
 
+## D64 — Raw until it has to change: data keeps its source representation until a consumer forces a conversion; every conversion is justifiable at its point
+
+**Date:** 2026-06-03. **Status:** Accepted (owner, 2026-06-03). **Establishes** development-principles §13. **Composition:** complements §4 (parse, don't validate) — §4 is the *one justified conversion at a trust boundary*; this names the rule that governs every *other* candidate conversion. Sits under §2 (none-of-your-business) when the question is *who* converts across a layer seam. First surfaced by the G5 activity-stream carve (memory `project-public-api-direction`; commit `a22ea04`).
+
+**The principle.** Data should keep the representation it already has until a consumer actually requires a different one. Don't pre-emptively transform a value into another shape when downstream code may need to transform it back, or when the "right" target shape isn't yet forced by a real consumer. Every conversion that *does* happen must be justifiable at the point where it happens — there is a concrete consumer at that point whose need the new representation serves.
+
+**Why.** A speculative conversion is a lossy, often-reversed round-trip that also *relocates a decision*. Once the library reshapes a payload, it has decided — on the consumer's behalf, before the consumer exists — what fields matter and what the canonical form is. If a second consumer wants the original, someone must convert back, and now the "who owns the conversion and when" question is answered badly: the conversion sits in the wrong layer, far from the need that would justify it. Keeping data raw pushes that decision to the boundary where the need is concrete, which is also where it's cheapest to get right.
+
+**The G5 worked example.** The activity-stream carve (`SystemClient.Logs`) emits `LogEvent.Raw` — the **verbatim on-disk JSONL line** — plus only the two fields the transport itself must understand to do its job (`Time`, `Level`, for ordering and filtering). The library owns *transport* (open / merge-sort across sources / follow-tail / done-detect) but **not payload reshaping**: it does not decompose the JSON into typed event structs, because no library-side consumer needs that and a daemon serving the frames onward would only have to re-serialize. The CLI, the actual rendering consumer, parses `Raw` at the point it renders. The conversion is justified where it happens; the library does none it can't justify.
+
+**Rejected.** (a) *Reshape early "to be helpful"* — produce a rich typed `LogEntry` with decomposed `event`/`msg`/`extra` fields in the library. Rejected: it's a YAGNI conversion serving no current consumer, and a frame-forwarding daemon would re-serialize it (a reversed round-trip). (b) *Offer conversion helpers alongside the raw frames* — rejected for now under YAGNI; if a second consumer genuinely shares a target representation, a helper can be added then, at the point the need is concrete.
+
+**Consequences.** Stated as development-principles §13 with the G5 carve as its worked example. The boundary rule from §2 gains a data-shape corollary: when a conversion is unavoidable, the layer that *owns* it is the one with the consumer that needs it — the seam (e.g. library vs. daemon) is decided by where the justifying need lives, not by which layer happens to touch the data first. The standing caution: don't read this as license to skip §4's boundary parse — proving an invariant at a trust boundary *is* a justified conversion. §13 forbids the *unjustified* extra ones, not the load-bearing one.
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.
