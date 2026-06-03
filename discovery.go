@@ -84,7 +84,7 @@ func (s *System) AgentTypes(q AgentQuery) []AgentInfo {
 
 // BackendTypes returns the catalog of every registered backend type, in
 // registration order. These are descriptions to choose from, not runnable
-// handles — select one by setting Options.BackendType. With
+// handles — select one by setting ClientConfiguration.BackendType. With
 // BackendQuery.ProbeAvailability set, each entry's Available/Note reflects
 // whether the backend can run on this host now; otherwise only static
 // descriptor metadata is filled in.

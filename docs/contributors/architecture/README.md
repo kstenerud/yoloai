@@ -56,7 +56,11 @@ Dependency direction (W-L8 + W-L12 shape): `cmd/yoloai` → `internal/cli` → `
 
 | File | Purpose |
 |------|---------|
-| `client.go` | Orchestration spine — `Client` and its root methods (`Run`, `List`, `Clone`, `Create`, `EnsureSetup`) plus `Options`/`CloneOptions`/`RunOptions` and the lazy-runtime construction helpers (`NewWithOptions`, `ensure`, `newRuntime`). Registers Docker, Podman, Seatbelt, and Tart backends via blank imports. |
+| `client.go` | Orchestration spine — `Client` and its root methods (`Run`, `List`, `Clone`, `Create`, `EnsureSetup`) plus `CloneOptions`/`SandboxRunOptions` and the lazy-runtime construction helpers (`NewClient`, `ensure`, `newRuntime`). Registers Docker, Podman, Seatbelt, and Tart backends via blank imports. |
+| `client_config.go` | `ClientConfiguration` — the construction-time config `NewClient` takes (data/home dirs, optional `BackendType`, IO, env snapshot, principal). |
+| `create_options.go` | `SandboxCreateOptions` (the advanced public creation surface `Client.Create` takes) + `SandboxRunOptions.materialize` sugar and port formatting. |
+| `system_config.go` | `ConfigAdmin` sub-handle (`Client.System().Config()`): `Effective`/`Get`/`Set`/`Reset` over the config files. |
+| `types.go` | Public type surface: re-exports of internal enums (`BackendType`, `AgentType`, `PruneItemKind`, `LogSource`), spec types (`DirSpec`, `MountSpec`, `PortMapping`), and orchestration result types (`Notice`, `DestroyResult`, `StartResult`, `ResetResult`). |
 | `backend.go` | Package-level backend-selection functions (`SelectBackend`, `SelectContainerBackend`, `IsolationAvailability`). Backend has no handle — its catalog metadata lives in `discovery.go` and its reports in `doctor_report.go`. |
 | `sandbox.go` | The `Sandbox` handle (returned by `Client.Sandbox(name)`) — lifecycle (`Start`/`Stop`/`Restart`/`Reset`/`Destroy`/`Inspect`/`Exec`/`HasActiveWork`) and flat readers (`Metadata`, `Unlock`, `VscodeAttach`, the runtime-free path getters) plus its option/read-model types (`Info`/`Status`/`AgentStatus`, `Start`/`Reset`/`Destroy`/`ExecOptions`). Sub-handle accessors (`Agent()`/`Workdir()`/`Network()`/`Files()`) live here, colocated with their `Sandbox` receiver per Go convention (a method belongs in its receiver's file, not its return type's); the sub-handle *types* and their own methods live in their respective files (`agent.go`/`workdir.go`/`network.go`/`files.go`). |
 | `system.go` | Orchestration spine — `System` for admin/cross-backend operations (`DiskUsage`, `Prune`, `Build`, `Check`). Reached only via `Client.System()` (no standalone constructor). Iterates registered backends internally. |
@@ -393,7 +397,7 @@ On-disk sandbox state — paths, metadata, and creation-completion flags. Leaf s
 ## Key Types
 
 ### `yoloai.Client`
-High-level public API for library consumers. Wraps `sandbox.Engine` and `runtime.Runtime`. Provides `Run()`, `Diff()`, `Apply()`, `List()`, `Inspect()`, `Stop()`, `Destroy()`. Configured via `Options` (backend, logger, output, input). `RunOptions` mirrors CLI flags for `yoloai new`.
+High-level public API for library consumers. Wraps `sandbox.Engine` and `runtime.Runtime`. Provides `Run()`, `Diff()`, `Apply()`, `List()`, `Inspect()`, `Stop()`, `Destroy()`. Configured via `ClientConfiguration` (backend, logger, output, input). `SandboxRunOptions` mirrors CLI flags for `yoloai new`.
 
 ### `sandbox.Engine`
 Central orchestrator. Holds a `runtime.Runtime`, backend name, logger, and I/O streams. All sandbox operations go through it: `Create()`, `Start()`, `Stop()`, `Destroy()`, `Reset()`, `Clone()`, `Inspect()`, `List()`, `EnsureSetup()`. The backend name is stored so it can be persisted in `Environment` at sandbox creation time.
@@ -405,7 +409,7 @@ Persisted as `environment.json` in each sandbox dir. Records creation-time state
 Per-sandbox runtime state persisted as `sandbox-state.json` (legacy: `state.json`). Tracks mutable state like `agent_files_initialized` (boolean). Separate from `Meta` which is immutable after creation. Lives in `sandbox/store`.
 
 ### `sandbox.CreateOptions` / `sandbox.DirSpec`
-Internal parameters for `Engine.Create()`. `DirSpec` specifies a directory path, mount mode (copy/overlay/rw/ro), and per-directory safety acks (`AllowDirty`, `AllowDangerousPath`). `CreateOptions` includes name, workdir `DirSpec`, auxiliary `DirSpec` list, agent, model, prompt, network, ports, profile, replace, passthrough args. The **public** creation surface is `yoloai.CreateOptions` (root `create_options.go`); `Client.Create` maps it onto this internal struct via `toInternal()`. A dirty workdir surfaces as `*yoerrors.DirtyWorkdirError` (never an in-library prompt — D24).
+Internal parameters for `Engine.Create()`. `DirSpec` specifies a directory path, mount mode (copy/overlay/rw/ro), and per-directory safety acks (`AllowDirty`, `AllowDangerousPath`). `CreateOptions` includes name, workdir `DirSpec`, auxiliary `DirSpec` list, agent, model, prompt, network, ports, profile, replace, passthrough args. The **public** creation surface is `yoloai.SandboxCreateOptions` (root `create_options.go`); `Client.Create` maps it onto this internal struct via `toInternal()`. A dirty workdir surfaces as `*yoerrors.DirtyWorkdirError` (never an in-library prompt — D24).
 
 ### `patch.DiffOptions` / `patch.DiffResult`
 Input/output for `patch.GenerateDiff()` / `patch.GenerateMultiDiff()`. Supports path filtering and stat-only mode. `DiffResult` carries the diff text, workdir, mode, and empty flag. Lives in `sandbox/patch`.

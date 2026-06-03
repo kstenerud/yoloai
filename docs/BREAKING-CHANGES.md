@@ -4,6 +4,31 @@ Tracks breaking changes made during beta. Each entry should be included in relea
 
 ## Unreleased
 
+### Public option types renamed; constructor is now `NewClient`
+
+The root-package option types were renamed so each name says which noun it
+configures, and the constructor matches the type it takes:
+
+- **`Options` → `ClientConfiguration`.** The Client's construction-time
+  configuration; the generic `Options` undersold it and collided (at a glance)
+  with the per-operation option structs.
+- **`CreateOptions` → `SandboxCreateOptions`** and **`RunOptions` →
+  `SandboxRunOptions`.** Both configure a *sandbox* operation; the bare names
+  were generic enough to be mistaken for client configuration.
+- **`NewWithOptions(ctx, Options)` → `NewClient(ctx, ClientConfiguration)`.**
+
+The fields, semantics, and zero values of all three structs are unchanged — only
+the type names move. (The field rename `Options.Backend` → `.BackendType` from the
+kind-enums entry below still applies, now on `ClientConfiguration`.)
+
+**Migration:** rename the types at call sites (`yoloai.Options{…}` →
+`yoloai.ClientConfiguration{…}`, `yoloai.CreateOptions{…}` →
+`yoloai.SandboxCreateOptions{…}`, `yoloai.RunOptions{…}` →
+`yoloai.SandboxRunOptions{…}`) and `yoloai.NewWithOptions(…)` →
+`yoloai.NewClient(…)`. Earlier entries in this changelog that name `Options`,
+`CreateOptions`, `RunOptions`, or `NewWithOptions` refer to the same surface under
+its new name.
+
 ### Kind enums renamed: `AgentName`/`BackendName` → `AgentType`/`BackendType`
 
 The two kind enums and every field/accessor typed by them now read as "type"

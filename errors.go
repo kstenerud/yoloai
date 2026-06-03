@@ -30,8 +30,8 @@ type ActiveWorkError = yoerrors.ActiveWorkError
 
 // DirtyWorkdirError is returned by Create (and Run) when the workdir — or an
 // aux directory — has uncommitted git changes and the caller has not acked it
-// (via CreateOptions.AllowDirtyWorkdir / DirSpec.AllowDirty, or
-// RunOptions.AllowDirtyWorkdir). Catch it with errors.As to render a prompt and
+// (via SandboxCreateOptions.AllowDirtyWorkdir / DirSpec.AllowDirty, or
+// SandboxRunOptions.AllowDirtyWorkdir). Catch it with errors.As to render a prompt and
 // retry with the ack set.
 type DirtyWorkdirError = yoerrors.DirtyWorkdirError
 

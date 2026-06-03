@@ -131,7 +131,7 @@ func (p *ProxyServer) createSandbox(ctx context.Context) (*yoloai.Environment, e
 		return nil, fmt.Errorf("sandbox %q does not exist — provide --workdir to create it", p.sandboxName)
 	}
 
-	opts := yoloai.CreateOptions{
+	opts := yoloai.SandboxCreateOptions{
 		Name:      p.sandboxName,
 		Workdir:   p.opts.Workdir,
 		AuxDirs:   p.opts.AuxDirs,

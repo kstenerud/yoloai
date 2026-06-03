@@ -20,10 +20,11 @@ import (
 // Backend selection is inherently ambient (it probes which container daemons
 // are installed), so it belongs at the outermost boundary, not hidden inside
 // Client construction (§4 / §12). Embedders that want the CLI's auto-detection
-// call this at their boundary and pass the result as Options.Backend; those
-// that leave Backend empty get a backend-less Client (host-only reads + admin).
+// call this at their boundary and pass the result as
+// ClientConfiguration.BackendType; those that leave BackendType empty get a
+// backend-less Client (host-only reads + admin).
 //
-// env is the caller's host-env snapshot (the same map passed as Options.Env):
+// env is the caller's host-env snapshot (the same map passed as ClientConfiguration.Env):
 // container-slot probes read DOCKER_HOST / CONTAINER_HOST / XDG_RUNTIME_DIR
 // from it rather than the process environment, so selection stays
 // principal-scoped (§12). May be nil to probe default socket paths only.
@@ -38,7 +39,7 @@ func SelectBackend(ctx context.Context, preferred BackendType, isolation Isolati
 // backend for an existing sandbox. Returns the chosen backend and a
 // human-readable warning ("" when none).
 //
-// env is the caller's host-env snapshot (the same map passed as Options.Env);
+// env is the caller's host-env snapshot (the same map passed as ClientConfiguration.Env);
 // see SelectBackend. May be nil to probe default socket paths only.
 func SelectContainerBackend(ctx context.Context, preferred BackendType, env map[string]string) (BackendType, string) {
 	return runtime.SelectContainerBackend(ctx, preferred, env)

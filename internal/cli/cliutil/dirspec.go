@@ -1,5 +1,5 @@
 // ABOUTME: ParseDirArg parses "path[:suffix...]=[mount]" directory arguments from
-// ABOUTME: CLI flag strings, producing yoloai.DirSpec values for CreateOptions.
+// ABOUTME: CLI flag strings, producing yoloai.DirSpec values for SandboxCreateOptions.
 package cliutil
 
 import (

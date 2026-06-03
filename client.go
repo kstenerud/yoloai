@@ -9,8 +9,8 @@
 // Sandbox(name); per-sandbox operations (Inspect, Start, Stop, Restart, Reset,
 // Destroy, Exec, and the Workdir/Network/Agent sub-handles) live on that
 // *Sandbox handle, not the Client root (F2). The backend connection is opened
-// lazily on the first backend-bound operation, so Options.Backend is optional:
-// a backend-less Client still serves host-only reads (Sandbox.Metadata,
+// lazily on the first backend-bound operation, so ClientConfiguration.BackendType
+// is optional: a backend-less Client still serves host-only reads (Sandbox.Metadata,
 // Workdir diffs, the on-disk allowlist) and, via Client.System(), cross-backend
 // admin — a backend-bound op on such a Client returns ErrBackendRequired.
 //
@@ -25,15 +25,15 @@
 //
 // Typical usage:
 //
-//	client, err := yoloai.NewWithOptions(ctx, yoloai.Options{
-//	    DataDir: filepath.Join(os.Getenv("HOME"), ".yoloai", "library"),
-//	    HomeDir: os.Getenv("HOME"), // required; where ~/.claude etc. resolve
-//	    Backend: yoloai.BackendDocker, // optional; backend-bound ops open it lazily
+//	client, err := yoloai.NewClient(ctx, yoloai.ClientConfiguration{
+//	    DataDir:     filepath.Join(os.Getenv("HOME"), ".yoloai", "library"),
+//	    HomeDir:     os.Getenv("HOME"),     // required; where ~/.claude etc. resolve
+//	    BackendType: yoloai.BackendDocker,  // optional; backend-bound ops open it lazily
 //	})
 //	if err != nil { log.Fatal(err) }
 //	defer client.Close()
 //
-//	info, err := client.Run(ctx, yoloai.RunOptions{
+//	info, err := client.Run(ctx, yoloai.SandboxRunOptions{
 //	    Name:    "myproject",
 //	    WorkDir: "/path/to/project",
 //	    Prompt:  "Fix the login bug",
@@ -94,125 +94,16 @@ var (
 	ErrMissingAPIKey = sandbox.ErrMissingAPIKey
 )
 
-// Options configures a Client.
-type Options struct {
-	// DataDir is the root yoloai data directory; all per-Client state
-	// lives below it (sandboxes/, profiles/, config.yaml, state.yaml,
-	// credentials/). REQUIRED — empty is rejected at construction.
-	//
-	// No implicit default. yoloai library code never reads $HOME or any
-	// other ambient process state. The CLI fills this from $HOME/.yoloai/
-	// at startup (its single licensed os.UserHomeDir() call). HTTP
-	// servers, daemons, multi-tenant processes, and tests pass an
-	// explicit path. See development-principles.md §12.
-	DataDir string
-
-	// HomeDir is the host user's home directory. REQUIRED — empty is
-	// rejected at construction with a *UsageError. It is where ~-expansion
-	// in user-supplied paths, seed-file lookups (~/.claude, ~/.codex), and
-	// auth-file discovery resolve.
-	//
-	// There is no implicit filepath.Dir(DataDir) derivation: under the D60
-	// data-dir bifurcation DataDir is $HOME/.yoloai/library, so its parent
-	// is $HOME/.yoloai — not $HOME. Silently deriving it there sent every
-	// seed/credential lookup to the wrong home and launched agents
-	// unconfigured, so the boundary now demands an explicit value. The CLI
-	// passes cliutil.Layout().HomeDir (its single licensed os.UserHomeDir()
-	// site); embedders pass the host user's home. F13 (2026-05-27).
-	HomeDir string
-
-	// Backend selects the runtime backend (yoloai.BackendDocker,
-	// yoloai.BackendTart, etc.). OPTIONAL — empty constructs a backend-less
-	// Client (A2/A3) that serves host-only reads and, via System(),
-	// cross-backend admin without ever opening a connection. A backend-bound
-	// operation (Exec, Attach, Start, lifecycle, Create, List, Clone, …) on a
-	// backend-less Client returns ErrBackendRequired.
-	//
-	// No implicit default. Backend selection is inherently ambient (it
-	// probes which container daemons are installed), so it belongs at the
-	// outermost boundary, not silently inside Client construction (§4 /
-	// §12). The CLI resolves it from its --backend / --isolation / --os
-	// flags via runtime.SelectBackend and passes the concrete result here.
-	// Embedders that want that same auto-detection call the public
-	// yoloai.SelectBackend helper and pass its result. When set, the backend
-	// is opened lazily on the first backend-bound op, not at construction.
-	BackendType BackendType
-
-	// Logger receives structured log output. Default: slog.Default().
-	Logger *slog.Logger
-
-	// Output receives human-readable progress messages. Default: io.Discard.
-	Output io.Writer
-
-	// Input provides interactive input. Default: an empty reader (immediate
-	// EOF) — the library never reads the embedding process's os.Stdin (§12: no
-	// ambient configuration). Embedders that want interactive input pass it
-	// explicitly; the CLI passes cmd.InOrStdin() at its boundary.
-	Input io.Reader
-
-	// Version is the yoloAI version string stamped into each created
-	// sandbox's environment.json. The CLI fills it from build info; embedders may
-	// leave it empty. Not a per-create input — it lives here so Create
-	// callers don't repeat it.
-	Version string
-
-	// Env is the authorized host-environment snapshot for this Client. It is
-	// the ONLY source from which the library resolves user-declared ${VAR}
-	// references in config/profile values AND the agent's API-key / auth-hint
-	// credential values injected into the sandbox — the library never reads
-	// the live process environment for them (§12). Optional; nil/empty means
-	// no ${VAR} resolution and no env-sourced credentials.
-	//
-	// The CLI fills this from its single licensed os.Environ() snapshot (plus
-	// sudo-stripped-credential recovery). A multi-principal embedder MUST pass
-	// each principal's own environment here — never the daemon's process env —
-	// so credentials stay principal-scoped (D58/D59).
-	//
-	// Env is also where the selected backend reads its daemon-connection
-	// settings (the library never reads them from the process env, §12). Include
-	// whichever apply to your Backend:
-	//   - docker:  DOCKER_HOST, DOCKER_CERT_PATH, DOCKER_TLS_VERIFY,
-	//              DOCKER_API_VERSION. All optional — absent/blank means the
-	//              default local socket with no TLS (same as the docker CLI).
-	//   - podman:  CONTAINER_HOST, DOCKER_HOST, XDG_RUNTIME_DIR for socket
-	//              discovery. Absent falls back to the well-known socket paths.
-	//   - seatbelt: locale/terminal vars (PATH, HOME, TERM, LANG, LC_*) are
-	//              forwarded to the on-host agent from this snapshot.
-	Env map[string]string
-
-	// Principal namespaces this Client's sandboxes under an owning principal
-	// (tenant/user), so two principals can each own a sandbox of the same name
-	// without colliding on the runtime backend. Client-scoped, not per-call —
-	// the Client is the principal-scoped handle (D58/D59).
-	//
-	// Empty ("") is the default no-principal sentinel: instance names elide the
-	// segment (yoloai-<name>) and behavior is identical to today. Non-empty
-	// must be ≤8 alphanumeric chars (parsed at construction; invalid is
-	// rejected with a *UsageError). See D62.
-	Principal string
-
-	// SecretsStagingDir is the host directory under which the library stages a
-	// per-sandbox temp dir of plaintext agent credentials before bind-mounting
-	// it in. Optional; empty ("") means the OS default temp dir (os.TempDir()),
-	// which is what the single-principal CLI uses.
-	//
-	// The library decides WHAT to stage and WHEN to delete it; the embedder
-	// supplies WHERE (D59 refinement). A multi-principal daemon points each
-	// principal's Client at that principal's own tmpfs so plaintext
-	// credentials never share a staging root across principals.
-	SecretsStagingDir string
-}
-
 // Client is the simple entry point for yoloAI operations.
 // A Client is safe for concurrent use by multiple goroutines.
-// Construct with NewWithOptions.
+// Construct with NewClient.
 type Client struct {
 	layout  config.Layout       // Q-W: DataDir-rooted path resolver propagated to Engine + apply
 	backend runtime.BackendType // selected backend; "" = backend-less (host-only reads/admin), backend-bound ops return ErrBackendRequired
 	logger  *slog.Logger        // for the lazily-built Engine
 	version string              // yoloAI version stamped into created sandboxes' environment.json
-	output  io.Writer           // Options.Output (defaulted to io.Discard); seeds per-call progress writers (F8)
-	input   io.Reader           // Options.Input (defaulted to an empty reader, never os.Stdin — §12); threaded to create.Run via state.Deps
+	output  io.Writer           // ClientConfiguration.Output (defaulted to io.Discard); seeds per-call progress writers (F8)
+	input   io.Reader           // ClientConfiguration.Input (defaulted to an empty reader, never os.Stdin — §12); threaded to create.Run via state.Deps
 
 	// Lazy backend connection. The runtime is opened once, on the first
 	// backend-bound operation, via ensure/tryEnsure — host-only reads
@@ -225,18 +116,18 @@ type Client struct {
 	manager *sandbox.Engine
 }
 
-// NewWithOptions creates a Client with explicit options.
-// Options.DataDir is REQUIRED (Q-W.5); empty is rejected.
-func NewWithOptions(ctx context.Context, opts Options) (*Client, error) {
+// NewClient creates a Client with explicit options.
+// ClientConfiguration.DataDir is REQUIRED (Q-W.5); empty is rejected.
+func NewClient(ctx context.Context, opts ClientConfiguration) (*Client, error) {
 	if opts.DataDir == "" {
-		return nil, fmt.Errorf("yoloai: Options.DataDir is required (no implicit $HOME fallback; see development-principles.md §12)")
+		return nil, fmt.Errorf("yoloai: ClientConfiguration.DataDir is required (no implicit $HOME fallback; see development-principles.md §12)")
 	}
 	if opts.HomeDir == "" {
-		return nil, yoerrors.NewUsageError("yoloai: Options.HomeDir is required (no implicit filepath.Dir(DataDir) derivation; under the D60 bifurcation DataDir is $HOME/.yoloai/library, so its parent is not $HOME). Pass the host user's home explicitly; the CLI uses cliutil.Layout().HomeDir. See development-principles.md §12.")
+		return nil, yoerrors.NewUsageError("yoloai: ClientConfiguration.HomeDir is required (no implicit filepath.Dir(DataDir) derivation; under the D60 bifurcation DataDir is $HOME/.yoloai/library, so its parent is not $HOME). Pass the host user's home explicitly; the CLI uses cliutil.Layout().HomeDir. See development-principles.md §12.")
 	}
 	principal, err := config.ParsePrincipalSegment(opts.Principal)
 	if err != nil {
-		return nil, yoerrors.NewUsageError("yoloai: invalid Options.Principal: %v", err)
+		return nil, yoerrors.NewUsageError("yoloai: invalid ClientConfiguration.Principal: %v", err)
 	}
 
 	layout := config.NewLayoutFor(opts.DataDir, opts.HomeDir).WithPrincipal(principal)
@@ -256,10 +147,11 @@ func NewWithOptions(ctx context.Context, opts Options) (*Client, error) {
 		input = bytes.NewReader(nil) // §12: empty reader, never the process's os.Stdin; embedders override, the CLI passes IOStreams
 	}
 
-	// The backend connection is NOT opened here (A2/A3). Options.Backend is
-	// optional: a backend-less Client serves host-only reads and admin without
-	// ever connecting; backend-bound ops open the runtime lazily on first use
-	// (ensure) or return ErrBackendRequired when Backend is "".
+	// The backend connection is NOT opened here (A2/A3).
+	// ClientConfiguration.BackendType is optional: a backend-less Client serves
+	// host-only reads and admin without ever connecting; backend-bound ops open
+	// the runtime lazily on first use (ensure) or return ErrBackendRequired when
+	// BackendType is "".
 	return &Client{
 		layout:  layout,
 		backend: opts.BackendType,
@@ -272,11 +164,12 @@ func NewWithOptions(ctx context.Context, opts Options) (*Client, error) {
 
 // ErrBackendRequired is returned by backend-bound operations (Exec, Attach,
 // Start, Stop, lifecycle, Create, List, Clone, …) when the Client was
-// constructed without Options.Backend. A backend-less Client still serves
-// host-only reads (Workdir host-git, on-disk allowlist, filesystem readers)
-// and, via System(), cross-backend admin. Set Options.Backend — resolve it at
-// the boundary with yoloai.SelectBackend — to enable backend-bound ops.
-var ErrBackendRequired = yoerrors.NewUsageError("yoloai: this operation requires a backend, but the Client was constructed without Options.Backend (backend-less). Set Options.Backend (e.g. via yoloai.SelectBackend) to enable backend-bound operations. See development-principles.md §4.")
+// constructed without ClientConfiguration.BackendType. A backend-less Client
+// still serves host-only reads (Workdir host-git, on-disk allowlist, filesystem
+// readers) and, via System(), cross-backend admin. Set
+// ClientConfiguration.BackendType — resolve it at the boundary with
+// yoloai.SelectBackend — to enable backend-bound ops.
+var ErrBackendRequired = yoerrors.NewUsageError("yoloai: this operation requires a backend, but the Client was constructed without ClientConfiguration.BackendType (backend-less). Set ClientConfiguration.BackendType (e.g. via yoloai.SelectBackend) to enable backend-bound operations. See development-principles.md §4.")
 
 // ensure lazily opens the backend connection and builds the Engine on first
 // use, caching both for the Client's lifetime. It is the gate for every
@@ -349,8 +242,8 @@ func (c *Client) deps() state.Deps {
 	return state.Deps{Runtime: c.rt, Layout: c.layout, Input: c.input}
 }
 
-// RunOptions configures a sandbox run.
-type RunOptions struct {
+// SandboxRunOptions configures a sandbox run.
+type SandboxRunOptions struct {
 	// Name is the sandbox identifier. Required.
 	Name string
 
@@ -428,7 +321,7 @@ func (c *Client) pollUntilDone(ctx context.Context, name string, progress func(s
 // If opts.Wait is true, Run blocks until the agent finishes and returns the
 // final sandbox Info. If opts.Wait is false, Run returns immediately after
 // the agent is launched; the Info reflects the initial state.
-func (c *Client) Run(ctx context.Context, opts RunOptions) (*Info, error) {
+func (c *Client) Run(ctx context.Context, opts SandboxRunOptions) (*Info, error) {
 	createOpts := opts.materialize()
 	if createOpts.AgentType == "" {
 		createOpts.AgentType = AgentType(resolveAgentFromConfig(c.layout))
@@ -535,12 +428,12 @@ func (c *Client) destroyForOverwrite(ctx context.Context, dest string) error {
 	return nil
 }
 
-// Create provisions a new sandbox from CreateOptions and (unless
+// Create provisions a new sandbox from SandboxCreateOptions and (unless
 // opts.NoStart) starts the container with the agent. Returns the sandbox
 // name on success — currently always opts.Name, since name is required
 // (no auto-generation). Use Run for the higher-level "create + wait for
 // terminal status" convenience.
-func (c *Client) Create(ctx context.Context, opts CreateOptions) (string, error) {
+func (c *Client) Create(ctx context.Context, opts SandboxCreateOptions) (string, error) {
 	if err := c.ensure(ctx); err != nil {
 		return "", err
 	}

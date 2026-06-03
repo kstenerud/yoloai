@@ -1,6 +1,7 @@
-// ABOUTME: Public typed-name aliases (Q-Y): BackendType, AgentType, PruneItemKind,
-// ABOUTME: LogSource. Re-export the internal enum types so embedders importing yoloai
-// ABOUTME: don't need to (and cannot) reach into internal/ packages.
+// ABOUTME: Public type surface for the yoloai root package: re-exports of the
+// ABOUTME: internal enums (BackendType, AgentType, …), spec types (DirSpec,
+// ABOUTME: MountSpec, PortMapping), and orchestration result types (Notice,
+// ABOUTME: DestroyResult, …) so embedders never reach into internal/ packages.
 
 package yoloai
 
@@ -17,7 +18,7 @@ import (
 //
 // Re-exported (type alias) from internal/runtime so embedders can use
 // the type without importing internal packages. Q-Y resolution
-// (2026-05-25): public API fields like Options.Backend and
+// (2026-05-25): public API fields like ClientConfiguration.BackendType and
 // CheckOptions.Backend take this typed name rather than plain string,
 // catching typo-style bugs at the call site rather than at the
 // "unknown backend" error.
@@ -42,7 +43,7 @@ const (
 // extension agents supply their own name via the agent registry.
 //
 // Re-exported from internal/agent. Same Q-Y rationale as BackendType:
-// public fields like RunOptions.Agent and CheckOptions.Agent take this
+// public fields like SandboxRunOptions.AgentType and CheckOptions.Agent take this
 // typed name.
 type AgentType = agent.AgentType
 
@@ -94,7 +95,7 @@ const (
 // sandbox. HostPath is the path on the host, ContainerPath is the path
 // inside the sandbox, ReadOnly controls write access. Re-exported
 // (type alias) from internal/runtime so embedders constructing
-// RunOptions.Mounts (when that field lands) don't need to reach into
+// SandboxRunOptions.Mounts (when that field lands) don't need to reach into
 // internal packages. Q-Y.
 //
 // The "Path" suffix matches PortMapping's "Port" suffix: Go doesn't
@@ -123,7 +124,7 @@ type PortMapping = runtime.PortMapping
 //
 // Re-exported (type alias) from internal/runtime. F11 (2026-05-27)
 // established this typing so public fields like
-// CheckOptions.Isolation and (future) RunOptions.Isolation take a
+// CheckOptions.Isolation and (future) SandboxRunOptions.Isolation take a
 // closed-set typed value, exhaustive-checked at every switch.
 type IsolationMode = runtime.IsolationMode
 
@@ -141,7 +142,7 @@ const (
 // Mode, optional container MountPath, and the per-directory safety acks
 // (AllowDirty for uncommitted git changes, AllowDangerousPath for the :force
 // dangerous-path override). Re-exported (type alias) from internal/sandbox so
-// embedders populate CreateOptions.Workdir / AuxDirs without importing
+// embedders populate SandboxCreateOptions.Workdir / AuxDirs without importing
 // internal packages. F1.
 type DirSpec = sandbox.DirSpec
 
@@ -165,3 +166,32 @@ const (
 	NetworkModeNone     NetworkMode = sandbox.NetworkModeNone     // no network access
 	NetworkModeIsolated NetworkMode = sandbox.NetworkModeIsolated // allowlist only
 )
+
+// Notice is a user-facing advisory message returned on an orchestration
+// result. Re-exported (type alias) from internal/sandbox.
+type Notice = sandbox.Notice
+
+// NoticeLevel classifies a Notice (info vs warning) for rendering.
+// Re-exported (type alias) from internal/sandbox.
+type NoticeLevel = sandbox.NoticeLevel
+
+const (
+	// NoticeInfo is an informational status message.
+	NoticeInfo NoticeLevel = sandbox.NoticeInfo
+	// NoticeWarn is a warning the user should heed.
+	NoticeWarn NoticeLevel = sandbox.NoticeWarn
+)
+
+// DestroyResult reports the outcome of a Destroy — any advisory notices emitted
+// (e.g. a directory that couldn't be fully removed). Re-exported (type alias)
+// from internal/sandbox.
+type DestroyResult = sandbox.DestroyResult
+
+// StartResult reports the outcome of a Start/Restart — the advisory/status
+// notices emitted (e.g. "Sandbox X started"). Re-exported (type alias) from
+// internal/sandbox.
+type StartResult = sandbox.StartResult
+
+// ResetResult reports the outcome of a Reset — the advisory/status notices
+// emitted. Re-exported (type alias) from internal/sandbox.
+type ResetResult = sandbox.ResetResult

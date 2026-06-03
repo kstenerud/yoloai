@@ -1,6 +1,6 @@
-// ABOUTME: Public advanced creation surface (F1/F3): the CreateOptions struct
-// ABOUTME: Client.Create takes, its mapping to the internal struct, and the
-// ABOUTME: RunOptions.materialize sugar that routes Run through Create.
+// ABOUTME: Public advanced creation surface (F1/F3): the SandboxCreateOptions
+// ABOUTME: struct Client.Create takes, its mapping to the internal struct, and the
+// ABOUTME: SandboxRunOptions.materialize sugar that routes Run through Create.
 
 package yoloai
 
@@ -11,16 +11,16 @@ import (
 	"github.com/kstenerud/yoloai/internal/sandbox"
 )
 
-// CreateOptions is the advanced, public creation surface for Client.Create —
+// SandboxCreateOptions is the advanced, public creation surface for Client.Create —
 // the deep entry point mirroring every creation capability the CLI exposes,
 // built from public re-exported types so external embedders can construct it
-// without reaching into internal packages. Run (RunOptions) is the curated
+// without reaching into internal packages. Run (SandboxRunOptions) is the curated
 // convenience that materializes into this. F1/F3.
 //
 // Confirmation is never interactive here: Create does not prompt. A dirty
 // workdir yields *DirtyWorkdirError unless acked via AllowDirtyWorkdir (or the
 // per-directory Workdir.AllowDirty); the CLI catches that, prompts, and retries.
-type CreateOptions struct {
+type SandboxCreateOptions struct {
 	// Name is the sandbox identifier. Required (no auto-generation).
 	Name string
 
@@ -104,15 +104,15 @@ type CreateOptions struct {
 	// Output receives the create pipeline's human-readable progress (profile
 	// image build stream, advisory warnings). Per-call so concurrent Creates on
 	// one Client don't interleave on a shared writer. Nil falls back to the
-	// Client's Options.Output.
+	// Client's ClientConfiguration.Output.
 	Output io.Writer
 }
 
-// toInternal maps the public CreateOptions onto the internal sandbox struct.
+// toInternal maps the public SandboxCreateOptions onto the internal sandbox struct.
 // It folds AllowDirtyWorkdir into the workdir's per-directory AllowDirty and
 // defaults an unset workdir Mode to copy. Version and the interactive flags are
 // not caller inputs — Client.Create stamps Version from the Client.
-func (o CreateOptions) toInternal() sandbox.CreateOptions {
+func (o SandboxCreateOptions) toInternal() sandbox.CreateOptions {
 	workdir := o.Workdir
 	if workdir.Mode == "" {
 		workdir.Mode = DirModeCopy
@@ -161,11 +161,12 @@ func formatPorts(ports []PortMapping) []string {
 	return out
 }
 
-// materialize expands the curated RunOptions into the advanced CreateOptions
-// (F3: Run is sugar over Create). The run-flow extras (Wait/OnProgress) are not
-// creation params and stay on RunOptions, handled by Run after Create.
-func (o RunOptions) materialize() CreateOptions {
-	return CreateOptions{
+// materialize expands the curated SandboxRunOptions into the advanced
+// SandboxCreateOptions (F3: Run is sugar over Create). The run-flow extras
+// (Wait/OnProgress) are not creation params and stay on SandboxRunOptions,
+// handled by Run after Create.
+func (o SandboxRunOptions) materialize() SandboxCreateOptions {
+	return SandboxCreateOptions{
 		Name:              o.Name,
 		Workdir:           DirSpec{Path: o.WorkDir, Mode: DirModeCopy},
 		AgentType:         o.AgentType,

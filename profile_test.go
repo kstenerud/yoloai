@@ -25,7 +25,7 @@ func newTestClient(t *testing.T) *System {
 	root := t.TempDir()
 	dataDir := filepath.Join(root, ".yoloai")
 	require.NoError(t, os.MkdirAll(dataDir, 0750))
-	c, err := NewWithOptions(context.Background(), Options{DataDir: dataDir, HomeDir: root})
+	c, err := NewClient(context.Background(), ClientConfiguration{DataDir: dataDir, HomeDir: root})
 	require.NoError(t, err)
 	return c.System()
 }

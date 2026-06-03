@@ -1,6 +1,6 @@
 // ABOUTME: Unit tests for the public creation surface (F1/F3): toInternal
-// ABOUTME: mapping, RunOptions.materialize sugar, port formatting, and the
-// ABOUTME: A2/A3 lazy-backend / optional-Backend contract at construction.
+// ABOUTME: mapping, SandboxRunOptions.materialize sugar, port formatting, and the
+// ABOUTME: A2/A3 lazy-backend / optional-BackendType contract at construction.
 
 package yoloai
 
@@ -24,8 +24,8 @@ func TestFormatPorts(t *testing.T) {
 	assert.Equal(t, []string{"3000:3000", "8080:80"}, got)
 }
 
-func TestCreateOptions_toInternal_DefaultsModeAndFoldsAck(t *testing.T) {
-	o := CreateOptions{
+func TestSandboxCreateOptions_toInternal_DefaultsModeAndFoldsAck(t *testing.T) {
+	o := SandboxCreateOptions{
 		Name:                 "box",
 		Workdir:              DirSpec{Path: "/p"}, // Mode empty → defaults to copy
 		AgentType:            AgentClaude,
@@ -43,15 +43,15 @@ func TestCreateOptions_toInternal_DefaultsModeAndFoldsAck(t *testing.T) {
 	assert.Equal(t, []string{"3000:80"}, in.Ports, "PortMappings render to host:container")
 }
 
-func TestCreateOptions_toInternal_PreservesExplicitWorkdir(t *testing.T) {
-	o := CreateOptions{Workdir: DirSpec{Path: "/p", Mode: DirModeRW, AllowDirty: true}}
+func TestSandboxCreateOptions_toInternal_PreservesExplicitWorkdir(t *testing.T) {
+	o := SandboxCreateOptions{Workdir: DirSpec{Path: "/p", Mode: DirModeRW, AllowDirty: true}}
 	in := o.toInternal()
 	assert.Equal(t, DirModeRW, in.Workdir.Mode, "explicit mode is preserved")
 	assert.True(t, in.Workdir.AllowDirty, "per-directory AllowDirty is preserved")
 }
 
-func TestRunOptions_materialize(t *testing.T) {
-	c := RunOptions{
+func TestSandboxRunOptions_materialize(t *testing.T) {
+	c := SandboxRunOptions{
 		Name:              "b",
 		WorkDir:           "/w",
 		Prompt:            "do the thing",
@@ -72,8 +72,8 @@ func TestRunOptions_materialize(t *testing.T) {
 // A2/A3: Backend is OPTIONAL. A backend-less Client constructs cleanly (it
 // serves host-only reads and, via System(), cross-backend admin) and never
 // opens a connection at construction.
-func TestNewWithOptions_BackendOptional(t *testing.T) {
-	c, err := NewWithOptions(context.Background(), Options{DataDir: t.TempDir(), HomeDir: t.TempDir()})
+func TestNewClient_BackendOptional(t *testing.T) {
+	c, err := NewClient(context.Background(), ClientConfiguration{DataDir: t.TempDir(), HomeDir: t.TempDir()})
 	require.NoError(t, err, "empty Backend is allowed — the Client is backend-less")
 	require.NotNil(t, c)
 	assert.False(t, c.opened, "construction must not open the backend")
@@ -84,7 +84,7 @@ func TestNewWithOptions_BackendOptional(t *testing.T) {
 // (a *UsageError) instead of the old panic footgun — and does not latch, so a
 // later op can still succeed once a backend is supplied.
 func TestBackendBoundOp_OnBackendlessClient_ReturnsErrBackendRequired(t *testing.T) {
-	c, err := NewWithOptions(context.Background(), Options{DataDir: t.TempDir(), HomeDir: t.TempDir()})
+	c, err := NewClient(context.Background(), ClientConfiguration{DataDir: t.TempDir(), HomeDir: t.TempDir()})
 	require.NoError(t, err)
 
 	_, err = c.List(context.Background())
@@ -97,7 +97,7 @@ func TestBackendBoundOp_OnBackendlessClient_ReturnsErrBackendRequired(t *testing
 
 // ErrBackendRequired is a stable sentinel: errors.Is matches it directly.
 func TestErrBackendRequired_IsSentinel(t *testing.T) {
-	c, err := NewWithOptions(context.Background(), Options{DataDir: t.TempDir(), HomeDir: t.TempDir()})
+	c, err := NewClient(context.Background(), ClientConfiguration{DataDir: t.TempDir(), HomeDir: t.TempDir()})
 	require.NoError(t, err)
 	assert.True(t, errors.Is(c.ensure(context.Background()), ErrBackendRequired))
 }
@@ -105,21 +105,21 @@ func TestErrBackendRequired_IsSentinel(t *testing.T) {
 // Close on a Client whose backend was never opened is a no-op (no panic, no
 // error) — the lazy core must not dereference a nil runtime.
 func TestClose_OnUnopenedClient_IsNoop(t *testing.T) {
-	c, err := NewWithOptions(context.Background(), Options{DataDir: t.TempDir(), HomeDir: t.TempDir()})
+	c, err := NewClient(context.Background(), ClientConfiguration{DataDir: t.TempDir(), HomeDir: t.TempDir()})
 	require.NoError(t, err)
 	require.NoError(t, c.Close(), "Close on an unopened Client must be a no-op")
 }
 
-func TestNewWithOptions_DataDirRequired(t *testing.T) {
-	_, err := NewWithOptions(context.Background(), Options{BackendType: BackendDocker})
+func TestNewClient_DataDirRequired(t *testing.T) {
+	_, err := NewClient(context.Background(), ClientConfiguration{BackendType: BackendDocker})
 	require.Error(t, err, "empty DataDir must be rejected")
 }
 
 // HomeDir is required — empty rejected with a *UsageError, so the old silent
 // filepath.Dir(DataDir) derivation (wrong under the D60 $HOME/.yoloai/library
 // bifurcation) can never resolve seed/credential lookups to the wrong home.
-func TestNewWithOptions_HomeDirRequired(t *testing.T) {
-	_, err := NewWithOptions(context.Background(), Options{DataDir: t.TempDir(), BackendType: BackendDocker})
+func TestNewClient_HomeDirRequired(t *testing.T) {
+	_, err := NewClient(context.Background(), ClientConfiguration{DataDir: t.TempDir(), BackendType: BackendDocker})
 	require.Error(t, err)
 	var ue *yoerrors.UsageError
 	require.ErrorAs(t, err, &ue, "empty HomeDir must yield a *UsageError")

@@ -161,7 +161,7 @@ func (s *Server) handleSandboxCreate(ctx context.Context, req mcp.CallToolReques
 		return textResult(errorf("setup: %v", err)), nil
 	}
 
-	opts := yoloai.CreateOptions{
+	opts := yoloai.SandboxCreateOptions{
 		Name: name,
 		Workdir: yoloai.DirSpec{
 			Path: workdir,

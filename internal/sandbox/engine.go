@@ -22,7 +22,7 @@ import (
 // The Engine holds no output writer (F8): operations that emit human-readable
 // progress take an explicit io.Writer per call (e.g. CreateOptions.Output,
 // EnsureSetup's out param) and discrete advisories are returned as structured
-// Notices. The yoloai.Client seeds those per-call writers from its Options.Output.
+// Notices. The yoloai.Client seeds those per-call writers from its ClientConfiguration.Output.
 type Engine struct {
 	runtime  runtime.Runtime
 	backend  runtime.BackendType

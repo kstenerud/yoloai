@@ -1,5 +1,5 @@
 // ABOUTME: 'new' command — create and start a sandbox in one step. Wires CLI
-// ABOUTME: flags to yoloai.CreateOptions, validates isolation/OS combos, prompts
+// ABOUTME: flags to yoloai.SandboxCreateOptions, validates isolation/OS combos, prompts
 // ABOUTME: on a dirty workdir, and handles the optional auto-attach after creation.
 package lifecycle
 
@@ -98,7 +98,7 @@ func runNewCmd(cmd *cobra.Command, args []string, version string) error {
 		mgrOutput = io.Discard
 	}
 	l := cliutil.Layout()
-	c, err := yoloai.NewWithOptions(cmd.Context(), yoloai.Options{
+	c, err := yoloai.NewClient(cmd.Context(), yoloai.ClientConfiguration{
 		DataDir:     l.DataDir,
 		HomeDir:     l.HomeDir,
 		BackendType: yoloai.BackendType(backend),
@@ -144,9 +144,9 @@ func parseNewCmdPositional(cmd *cobra.Command, args []string) (name, rawWorkdirA
 	return name, rawWorkdirArg, passthrough, profileFlag, nil
 }
 
-// resolveNewCmdOptions reads all flags and builds the public yoloai.CreateOptions.
+// resolveNewCmdOptions reads all flags and builds the public yoloai.SandboxCreateOptions.
 // attach is returned separately — it gates the post-create handoff, not creation.
-func resolveNewCmdOptions(cmd *cobra.Command, name, rawWorkdirArg string, passthrough []string, profileFlag string) (yoloai.CreateOptions, bool, error) {
+func resolveNewCmdOptions(cmd *cobra.Command, name, rawWorkdirArg string, passthrough []string, profileFlag string) (yoloai.SandboxCreateOptions, bool, error) {
 	prompt, _ := cmd.Flags().GetString("prompt")
 	promptFile, _ := cmd.Flags().GetString("prompt-file")
 	model := cliutil.ResolveModel(cmd)
@@ -170,15 +170,15 @@ func resolveNewCmdOptions(cmd *cobra.Command, name, rawWorkdirArg string, passth
 	attach, _ := cmd.Flags().GetBool("attach")
 
 	if cliutil.JSONEnabled(cmd) && attach {
-		return yoloai.CreateOptions{}, false, yoerrors.NewUsageError("--json and --attach are incompatible")
+		return yoloai.SandboxCreateOptions{}, false, yoerrors.NewUsageError("--json and --attach are incompatible")
 	}
 	if networkNone && len(rawPorts) > 0 {
-		return yoloai.CreateOptions{}, false, yoerrors.NewUsageError("--port is incompatible with --network-none")
+		return yoloai.SandboxCreateOptions{}, false, yoerrors.NewUsageError("--port is incompatible with --network-none")
 	}
 
 	ports, err := parsePortFlags(rawPorts)
 	if err != nil {
-		return yoloai.CreateOptions{}, false, err
+		return yoloai.SandboxCreateOptions{}, false, err
 	}
 
 	cpus, _ := cmd.Flags().GetString("cpus")
@@ -191,17 +191,17 @@ func resolveNewCmdOptions(cmd *cobra.Command, name, rawWorkdirArg string, passth
 
 	isolation, _, err := resolveNewIsolationOS(cmd)
 	if err != nil {
-		return yoloai.CreateOptions{}, false, err
+		return yoloai.SandboxCreateOptions{}, false, err
 	}
 
 	envMap, err := parseEnvSlice(envSlice)
 	if err != nil {
-		return yoloai.CreateOptions{}, false, err
+		return yoloai.SandboxCreateOptions{}, false, err
 	}
 
 	workdirSpec, auxDirSpecs, err := resolveNewDirSpecs(rawWorkdirArg, rawDirs)
 	if err != nil {
-		return yoloai.CreateOptions{}, false, err
+		return yoloai.SandboxCreateOptions{}, false, err
 	}
 
 	networkMode := yoloai.NetworkModeDefault
@@ -211,7 +211,7 @@ func resolveNewCmdOptions(cmd *cobra.Command, name, rawWorkdirArg string, passth
 		networkMode = yoloai.NetworkModeIsolated
 	}
 
-	return yoloai.CreateOptions{
+	return yoloai.SandboxCreateOptions{
 		Name:                 name,
 		Workdir:              workdirSpec,
 		AuxDirs:              auxDirSpecs,
@@ -312,7 +312,7 @@ func resolveNewDirSpecs(rawWorkdirArg string, rawDirs []string) (workdirSpec yol
 // hands off to Sandbox.Attach for the interactive session. If Create refuses a
 // dirty workdir (*DirtyWorkdirError) and we're interactive, it warns, prompts,
 // and retries with the workdir acked — the library never prompts itself.
-func executeNewCreate(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, opts yoloai.CreateOptions, attach bool) error {
+func executeNewCreate(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, opts yoloai.SandboxCreateOptions, attach bool) error {
 	sandboxName, err := c.Create(ctx, opts)
 
 	var dirty *yoloai.DirtyWorkdirError

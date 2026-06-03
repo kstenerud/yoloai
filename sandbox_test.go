@@ -73,7 +73,7 @@ func TestClient_Sandbox_NotFound(t *testing.T) {
 
 func TestSandbox_ExchangePaths(t *testing.T) {
 	dir := t.TempDir()
-	c, err := NewWithOptions(context.Background(), Options{DataDir: dir, HomeDir: dir})
+	c, err := NewClient(context.Background(), ClientConfiguration{DataDir: dir, HomeDir: dir})
 	require.NoError(t, err)
 	defer c.Close() //nolint:errcheck
 
@@ -90,7 +90,7 @@ func TestSandbox_ExchangePaths(t *testing.T) {
 
 func TestSandbox_LogPaths(t *testing.T) {
 	dir := t.TempDir()
-	c, err := NewWithOptions(context.Background(), Options{DataDir: dir, HomeDir: dir})
+	c, err := NewClient(context.Background(), ClientConfiguration{DataDir: dir, HomeDir: dir})
 	require.NoError(t, err)
 	defer c.Close() //nolint:errcheck
 
@@ -112,7 +112,7 @@ func TestSandbox_LogPaths(t *testing.T) {
 // live-holder paths are covered by store/lock_test.go.
 func TestSandbox_Unlock_Noop(t *testing.T) {
 	dir := t.TempDir()
-	c, err := NewWithOptions(context.Background(), Options{DataDir: dir, HomeDir: dir})
+	c, err := NewClient(context.Background(), ClientConfiguration{DataDir: dir, HomeDir: dir})
 	require.NoError(t, err)
 	defer c.Close() //nolint:errcheck
 
@@ -130,7 +130,7 @@ func TestSandbox_Unlock_Noop(t *testing.T) {
 func vscodeClient(t *testing.T, meta *store.Environment) *Client {
 	t.Helper()
 	dir := t.TempDir()
-	c, err := NewWithOptions(context.Background(), Options{DataDir: dir, HomeDir: dir})
+	c, err := NewClient(context.Background(), ClientConfiguration{DataDir: dir, HomeDir: dir})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = c.Close() })
 	if meta != nil {

@@ -42,7 +42,7 @@ func TestLayout_PathsRootUnderDataDir(t *testing.T) {
 
 // TestLayout_EmptyDataDirPanics asserts F14's invariant: NewLayout
 // rejects empty DataDir at construction. Public-boundary callers
-// (yoloai.NewWithOptions et al.) pre-validate input and return
+// (yoloai.NewClient et al.) pre-validate input and return
 // *UsageError before reaching NewLayout, so this panic only fires
 // on a genuine programming bug — internal code constructing Layout
 // from an unvalidated source.

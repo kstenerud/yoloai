@@ -38,21 +38,21 @@ func TestSystemClient_Info(t *testing.T) {
 	}
 }
 
-// TestSystemClient_Principal threads Options.Principal into the layout
+// TestClient_Principal threads ClientConfiguration.Principal into the layout
 // (default "" stays default; a valid segment parses; an invalid one is a
 // *UsageError).
-func TestSystemClient_Principal(t *testing.T) {
+func TestClient_Principal(t *testing.T) {
 	root := t.TempDir()
 
-	def, err := NewWithOptions(context.Background(), Options{DataDir: root, HomeDir: root})
+	def, err := NewClient(context.Background(), ClientConfiguration{DataDir: root, HomeDir: root})
 	require.NoError(t, err)
 	assert.Equal(t, config.PrincipalSegment(""), def.layout.Principal)
 
-	acme, err := NewWithOptions(context.Background(), Options{DataDir: root, HomeDir: root, Principal: "acme"})
+	acme, err := NewClient(context.Background(), ClientConfiguration{DataDir: root, HomeDir: root, Principal: "acme"})
 	require.NoError(t, err)
 	assert.Equal(t, config.PrincipalSegment("acme"), acme.layout.Principal)
 
-	_, err = NewWithOptions(context.Background(), Options{DataDir: root, HomeDir: root, Principal: "way-too-long-and-invalid"})
+	_, err = NewClient(context.Background(), ClientConfiguration{DataDir: root, HomeDir: root, Principal: "way-too-long-and-invalid"})
 	require.Error(t, err)
 	var usageErr *yoerrors.UsageError
 	assert.ErrorAs(t, err, &usageErr)
@@ -70,7 +70,7 @@ func TestSystemClient_ValidateSandboxName(t *testing.T) {
 // whose directory does not exist — obtaining the handle IS the existence check.
 func TestSandbox_MissingReturnsNotFound(t *testing.T) {
 	dir := t.TempDir()
-	c, err := NewWithOptions(context.Background(), Options{DataDir: dir, HomeDir: dir})
+	c, err := NewClient(context.Background(), ClientConfiguration{DataDir: dir, HomeDir: dir})
 	require.NoError(t, err)
 	defer c.Close() //nolint:errcheck
 	_, err = c.Sandbox("nope")

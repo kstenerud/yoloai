@@ -103,7 +103,7 @@ type DirtyDir struct {
 // default rather than prompting: the agent would see — and could modify or
 // lose — that uncommitted work, and on :copy a later apply conflicts with the
 // still-dirty host. The caller consciously overrides per-directory via
-// DirSpec.AllowDirty (or CreateOptions.AllowDirtyWorkdir for the workdir).
+// DirSpec.AllowDirty (or SandboxCreateOptions.AllowDirtyWorkdir for the workdir).
 type DirtyWorkdirError struct {
 	Dirs []DirtyDir
 }

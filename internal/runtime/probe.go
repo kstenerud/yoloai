@@ -34,7 +34,7 @@ func Probe(ctx context.Context, name BackendType, env map[string]string) (availa
 // SelectBackend resolves the backend to use from an isolation mode, a
 // target OS, and a container-slot preference. It is the single source of
 // truth for backend routing — both the CLI (which reads --isolation /
-// --os flags + config) and library embedders (via yoloai.Options) call
+// --os flags + config) and library embedders (via yoloai.ClientConfiguration) call
 // it, so the routing rules live in one place rather than being
 // duplicated across cli/cliutil and the yoloai package (F21).
 //
