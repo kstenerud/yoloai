@@ -22,9 +22,9 @@ type Environment struct {
 	// Identity & posture.
 	Name           string        `json:"name"`
 	CreatedAt      time.Time     `json:"created_at"`
-	Backend        BackendType   `json:"backend"`
+	BackendType    BackendType   `json:"backend"`
 	Profile        string        `json:"profile,omitempty"`
-	Agent          AgentType     `json:"agent"`
+	AgentType      AgentType     `json:"agent"`
 	Model          string        `json:"model,omitempty"`
 	Isolation      IsolationMode `json:"isolation,omitempty"`
 	HostFilesystem bool          `json:"host_filesystem,omitempty"`
@@ -90,9 +90,9 @@ func environmentFromStore(m *store.Environment) *Environment {
 	env := &Environment{
 		Name:               m.Name,
 		CreatedAt:          m.CreatedAt,
-		Backend:            m.Backend,
+		BackendType:        m.BackendType,
 		Profile:            m.Profile,
-		Agent:              m.Agent,
+		AgentType:          m.AgentType,
 		Model:              m.Model,
 		Isolation:          m.Isolation,
 		HostFilesystem:     m.HostFilesystem,

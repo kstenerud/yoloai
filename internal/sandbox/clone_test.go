@@ -29,10 +29,10 @@ func createCloneSource(t *testing.T, tmpDir, name string) {
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "work"), 0750))
 
 	meta := &store.Environment{
-		Name:      name,
-		Agent:     "claude",
-		Backend:   "docker",
-		CreatedAt: time.Now().Add(-time.Hour), // created an hour ago
+		Name:        name,
+		AgentType:   "claude",
+		BackendType: "docker",
+		CreatedAt:   time.Now().Add(-time.Hour), // created an hour ago
 		Workdir: store.WorkdirEnvironment{
 			HostPath:    "/tmp/project",
 			MountPath:   "/tmp/project",
@@ -63,7 +63,7 @@ func TestClone_Success(t *testing.T) {
 	meta, err := store.LoadEnvironment(dstDir)
 	require.NoError(t, err)
 	assert.Equal(t, "dest", meta.Name)
-	assert.Equal(t, agent.AgentClaude, meta.Agent)
+	assert.Equal(t, agent.AgentClaude, meta.AgentType)
 	assert.Equal(t, "abc123", meta.Workdir.BaselineSHA)
 	// CreatedAt should be refreshed (newer than source)
 	assert.True(t, meta.CreatedAt.After(time.Now().Add(-time.Minute)))

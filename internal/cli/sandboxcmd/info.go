@@ -56,14 +56,14 @@ func printSandboxInfo(cmd *cobra.Command, sb *yoloai.Sandbox, name string, info 
 	w := cmd.OutOrStdout()
 	meta := info.Environment
 
-	fmt.Fprintf(w, "Name:        %s\n", meta.Name)   //nolint:errcheck
-	fmt.Fprintf(w, "Status:      %s\n", info.Status) //nolint:errcheck
-	fmt.Fprintf(w, "Agent:       %s\n", meta.Agent)  //nolint:errcheck
+	fmt.Fprintf(w, "Name:        %s\n", meta.Name)      //nolint:errcheck
+	fmt.Fprintf(w, "Status:      %s\n", info.Status)    //nolint:errcheck
+	fmt.Fprintf(w, "Agent:       %s\n", meta.AgentType) //nolint:errcheck
 
 	if meta.Model != "" {
 		fmt.Fprintf(w, "Model:       %s\n", meta.Model) //nolint:errcheck
 	}
-	fmt.Fprintf(w, "Backend:     %s\n", meta.Backend) //nolint:errcheck
+	fmt.Fprintf(w, "Backend:     %s\n", meta.BackendType) //nolint:errcheck
 	if meta.Isolation != "" {
 		fmt.Fprintf(w, "Isolation:   %s\n", meta.Isolation) //nolint:errcheck
 	}

@@ -37,8 +37,8 @@ func TestInspectSandbox_Removed(t *testing.T) {
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 	meta := &store.Environment{
-		Name:  name,
-		Agent: "claude",
+		Name:      name,
+		AgentType: "claude",
 		Workdir: store.WorkdirEnvironment{
 			HostPath: "/tmp/test",
 			Mode:     "copy",
@@ -84,8 +84,8 @@ func TestListSandboxes_IncludesBroken(t *testing.T) {
 	validDir := filepath.Join(sandboxesDir, "valid")
 	require.NoError(t, os.MkdirAll(validDir, 0750))
 	meta := &store.Environment{
-		Name:  "valid",
-		Agent: "claude",
+		Name:      "valid",
+		AgentType: "claude",
 		Workdir: store.WorkdirEnvironment{
 			HostPath: "/tmp/test",
 			Mode:     "copy",

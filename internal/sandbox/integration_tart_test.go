@@ -97,8 +97,8 @@ func TestIntegrationTart_FullLifecycle(t *testing.T) {
 	meta, err := store.LoadEnvironment(sandboxDir)
 	require.NoError(t, err)
 	assert.Equal(t, sandboxName, meta.Name)
-	assert.Equal(t, agent.AgentTest, meta.Agent)
-	assert.Equal(t, runtime.BackendTart, meta.Backend)
+	assert.Equal(t, agent.AgentTest, meta.AgentType)
+	assert.Equal(t, runtime.BackendTart, meta.BackendType)
 	assert.Equal(t, store.DirModeCopy, meta.Workdir.Mode)
 	assert.NotEmpty(t, meta.Workdir.BaselineSHA, "baseline SHA should be set after VM work dir setup")
 

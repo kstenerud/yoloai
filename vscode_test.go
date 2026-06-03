@@ -32,10 +32,10 @@ func vscodeClient(t *testing.T, meta *store.Environment) *Client {
 
 func TestVscodeAttach_Supported(t *testing.T) {
 	c := vscodeClient(t, &store.Environment{
-		Name:    "box",
-		Agent:   "test",
-		Backend: BackendDocker,
-		Workdir: store.WorkdirEnvironment{HostPath: "/proj", MountPath: "/proj", Mode: store.DirModeCopy},
+		Name:        "box",
+		AgentType:   "test",
+		BackendType: BackendDocker,
+		Workdir:     store.WorkdirEnvironment{HostPath: "/proj", MountPath: "/proj", Mode: store.DirModeCopy},
 	})
 	sb, err := c.Sandbox("box")
 	require.NoError(t, err)
@@ -51,10 +51,10 @@ func TestVscodeAttach_Supported(t *testing.T) {
 
 func TestVscodeAttach_Unsupported(t *testing.T) {
 	c := vscodeClient(t, &store.Environment{
-		Name:    "box",
-		Agent:   "test",
-		Backend: BackendSeatbelt,
-		Workdir: store.WorkdirEnvironment{HostPath: "/proj", MountPath: "/proj", Mode: store.DirModeCopy},
+		Name:        "box",
+		AgentType:   "test",
+		BackendType: BackendSeatbelt,
+		Workdir:     store.WorkdirEnvironment{HostPath: "/proj", MountPath: "/proj", Mode: store.DirModeCopy},
 	})
 	sb, err := c.Sandbox("box")
 	require.NoError(t, err)
@@ -63,7 +63,7 @@ func TestVscodeAttach_Unsupported(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, attach.Supported)
 	assert.Empty(t, attach.FolderURI)
-	assert.Equal(t, BackendSeatbelt, attach.Backend)
+	assert.Equal(t, BackendSeatbelt, attach.BackendType)
 }
 
 func TestVscodeAttach_NotFound(t *testing.T) {

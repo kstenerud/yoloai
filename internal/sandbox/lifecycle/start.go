@@ -204,9 +204,9 @@ func handleSuspendedResume(ctx context.Context, d state.Deps, cname, name string
 	slog.Info("resuming suspended sandbox", "event", "sandbox.start.resume", "sandbox", name)
 	sandboxDir := d.Layout.SandboxDir(name)
 
-	agentDef := agent.GetAgent(string(meta.Agent))
+	agentDef := agent.GetAgent(string(meta.AgentType))
 	if agentDef == nil {
-		return yoerrors.NewConfigError("unknown agent %q in sandbox state — this sandbox was created with an agent that's not registered in the current yoloai installation; destroy and recreate the sandbox with a registered agent", meta.Agent)
+		return yoerrors.NewConfigError("unknown agent %q in sandbox state — this sandbox was created with an agent that's not registered in the current yoloai installation; destroy and recreate the sandbox with a registered agent", meta.AgentType)
 	}
 
 	// Refresh credentials and settings from host (handles token refresh between sessions).

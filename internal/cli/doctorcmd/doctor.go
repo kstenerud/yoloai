@@ -238,8 +238,8 @@ func renderReclaimableNow(w io.Writer, prune *yoloai.PruneResult) {
 }
 
 func renderReclaimItem(w io.Writer, it yoloai.PruneItem) {
-	if it.Backend != "" {
-		fmt.Fprintf(w, "    %s/%s: %s\n", it.Backend, it.Kind, it.Name) //nolint:errcheck
+	if it.BackendType != "" {
+		fmt.Fprintf(w, "    %s/%s: %s\n", it.BackendType, it.Kind, it.Name) //nolint:errcheck
 		return
 	}
 	fmt.Fprintf(w, "    %s: %s\n", it.Kind, it.Name) //nolint:errcheck
@@ -401,7 +401,7 @@ func reclaimItemsJSON(prune *yoloai.PruneResult) []reclaimItemJSON {
 	out := make([]reclaimItemJSON, 0, len(prune.RemovedItems))
 	for _, it := range prune.RemovedItems {
 		out = append(out, reclaimItemJSON{
-			Backend: string(it.Backend),
+			Backend: string(it.BackendType),
 			Kind:    string(it.Kind),
 			Name:    it.Name,
 		})

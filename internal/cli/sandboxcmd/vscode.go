@@ -41,7 +41,7 @@ func newSandboxVscodeCmd() *cobra.Command {
 				fmt.Fprintf(cmd.OutOrStdout(), //nolint:errcheck // best-effort output
 					"Container attach is not supported for the %s backend.\n"+
 						"Use --vscode-tunnel when creating the sandbox instead.\n",
-					attach.Backend)
+					attach.BackendType)
 				return nil
 			}
 

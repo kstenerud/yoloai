@@ -246,7 +246,7 @@ func TestProfiles_Delete_RemovesDirAndReturnsHints(t *testing.T) {
 	// we only assert the contract.
 	assert.NotNil(t, result.ImageCleanupHints)
 	for _, h := range result.ImageCleanupHints {
-		assert.NotEmpty(t, h.Backend, "hint must name its backend")
+		assert.NotEmpty(t, h.BackendType, "hint must name its backend")
 		assert.Equal(t, "yoloai-demo", h.Image)
 		assert.NotEmpty(t, h.Command, "hint must carry a removal command")
 	}

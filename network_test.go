@@ -30,7 +30,7 @@ func writeIsolatedSandbox(t *testing.T, c *System, name, agentName string, allow
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 	meta := &store.Environment{
 		Name:         name,
-		Agent:        AgentType(agentName),
+		AgentType:    AgentType(agentName),
 		CreatedAt:    time.Now(),
 		NetworkMode:  "isolated",
 		NetworkAllow: allow,
@@ -54,7 +54,7 @@ func writeNoNetworkSandbox(t *testing.T, c *System, name string) {
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 	meta := &store.Environment{
 		Name:        name,
-		Agent:       "test",
+		AgentType:   "test",
 		CreatedAt:   time.Now(),
 		NetworkMode: "none",
 	}
@@ -96,7 +96,7 @@ func TestNetwork_Allowed_NoIsolation_Empty(t *testing.T) {
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 	require.NoError(t, store.SaveEnvironment(sandboxDir, &store.Environment{
 		Name:      "box",
-		Agent:     "claude",
+		AgentType: "claude",
 		CreatedAt: time.Now(),
 	}))
 
@@ -252,7 +252,7 @@ func TestNetwork_Allow_NotIsolated_UsageError(t *testing.T) {
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 	require.NoError(t, store.SaveEnvironment(sandboxDir, &store.Environment{
 		Name:      "box",
-		Agent:     "claude",
+		AgentType: "claude",
 		CreatedAt: time.Now(),
 		// no NetworkMode set
 	}))
@@ -334,7 +334,7 @@ func TestNetwork_Deny_NoDomains_UsageError(t *testing.T) {
 
 func TestComputeAllowedDomains_ClaudeAgent(t *testing.T) {
 	meta := &store.Environment{
-		Agent:        "claude",
+		AgentType:    "claude",
 		NetworkAllow: []string{"api.anthropic.com", "extra.example"},
 	}
 	out := computeAllowedDomains(meta)
@@ -346,7 +346,7 @@ func TestComputeAllowedDomains_ClaudeAgent(t *testing.T) {
 }
 
 func TestComputeAllowedDomains_EmptyAllow(t *testing.T) {
-	meta := &store.Environment{Agent: "claude"}
+	meta := &store.Environment{AgentType: "claude"}
 	out := computeAllowedDomains(meta)
 	assert.NotNil(t, out)
 	assert.Empty(t, out)

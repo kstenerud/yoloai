@@ -24,7 +24,7 @@ func TestMeta_SaveLoadRoundTrip(t *testing.T) {
 		YoloaiVersion: "1.0.0",
 		Name:          "fix-build",
 		CreatedAt:     time.Date(2025, 1, 15, 10, 30, 0, 0, time.UTC),
-		Agent:         "claude",
+		AgentType:     "claude",
 		Model:         "claude-sonnet-4-latest",
 		Workdir: WorkdirEnvironment{
 			HostPath:    "/home/user/projects/my-app",
@@ -53,7 +53,7 @@ func TestMeta_OmitEmptyFields(t *testing.T) {
 		YoloaiVersion: "1.0.0",
 		Name:          "test-sandbox",
 		CreatedAt:     time.Date(2025, 1, 15, 10, 30, 0, 0, time.UTC),
-		Agent:         "claude",
+		AgentType:     "claude",
 		Workdir: WorkdirEnvironment{
 			HostPath:  "/tmp/project",
 			MountPath: "/tmp/project",
@@ -86,7 +86,7 @@ func TestMeta_PrincipalRoundTrip(t *testing.T) {
 		Name:          "tenant-box",
 		Principal:     "acme",
 		CreatedAt:     time.Date(2026, 6, 3, 12, 0, 0, 0, time.UTC),
-		Agent:         "claude",
+		AgentType:     "claude",
 		Workdir: WorkdirEnvironment{
 			HostPath:  "/home/user/app",
 			MountPath: "/home/user/app",
@@ -108,7 +108,7 @@ func TestMeta_WithPortsAndNetwork(t *testing.T) {
 		YoloaiVersion: "1.0.0",
 		Name:          "web-dev",
 		CreatedAt:     time.Date(2025, 6, 1, 12, 0, 0, 0, time.UTC),
-		Agent:         "claude",
+		AgentType:     "claude",
 		Workdir: WorkdirEnvironment{
 			HostPath:    "/home/user/web-app",
 			MountPath:   "/home/user/web-app",
@@ -136,7 +136,7 @@ func TestMeta_NetworkAllowRoundTrip(t *testing.T) {
 		YoloaiVersion: "1.0.0",
 		Name:          "iso-test",
 		CreatedAt:     time.Date(2025, 6, 1, 12, 0, 0, 0, time.UTC),
-		Agent:         "claude",
+		AgentType:     "claude",
 		Workdir: WorkdirEnvironment{
 			HostPath:  "/tmp/project",
 			MountPath: "/tmp/project",
@@ -163,7 +163,7 @@ func TestMeta_ResourcesRoundTrip(t *testing.T) {
 		YoloaiVersion: "1.0.0",
 		Name:          "resource-test",
 		CreatedAt:     time.Date(2025, 6, 1, 12, 0, 0, 0, time.UTC),
-		Agent:         "claude",
+		AgentType:     "claude",
 		Workdir: WorkdirEnvironment{
 			HostPath:  "/tmp/project",
 			MountPath: "/tmp/project",
@@ -190,8 +190,8 @@ func TestMeta_VersionSetOnSave(t *testing.T) {
 	dir := t.TempDir()
 
 	meta := &Environment{
-		Name:  "test-version",
-		Agent: "claude",
+		Name:      "test-version",
+		AgentType: "claude",
 		Workdir: WorkdirEnvironment{
 			HostPath:  "/tmp/project",
 			MountPath: "/tmp/project",
@@ -288,7 +288,7 @@ func TestMeta_ResourcesOmittedWhenNil(t *testing.T) {
 		YoloaiVersion: "1.0.0",
 		Name:          "no-resources",
 		CreatedAt:     time.Date(2025, 6, 1, 12, 0, 0, 0, time.UTC),
-		Agent:         "claude",
+		AgentType:     "claude",
 		Workdir: WorkdirEnvironment{
 			HostPath:  "/tmp/project",
 			MountPath: "/tmp/project",

@@ -34,9 +34,9 @@ func newSandboxHandle(t *testing.T, meta *store.Environment) *Sandbox {
 // behavior that could change out from under callers.
 func TestWorkdir_Apply_RequiresMode(t *testing.T) {
 	sb := newSandboxHandle(t, &store.Environment{
-		Name:    "box",
-		Agent:   "test",
-		Workdir: store.WorkdirEnvironment{HostPath: "/x", MountPath: "/x", Mode: store.DirModeCopy, BaselineSHA: "abc"},
+		Name:      "box",
+		AgentType: "test",
+		Workdir:   store.WorkdirEnvironment{HostPath: "/x", MountPath: "/x", Mode: store.DirModeCopy, BaselineSHA: "abc"},
 	})
 	_, err := sb.Workdir().Apply(context.Background(), ApplyOptions{})
 	require.Error(t, err)
@@ -49,9 +49,9 @@ func TestWorkdir_Apply_RequiresMode(t *testing.T) {
 // *UsageError rather than silently doing something else.
 func TestWorkdir_Apply_OverlayRefusesCommits(t *testing.T) {
 	sb := newSandboxHandle(t, &store.Environment{
-		Name:    "box",
-		Agent:   "test",
-		Workdir: store.WorkdirEnvironment{HostPath: "/x", MountPath: "/x", Mode: store.DirModeOverlay, BaselineSHA: "abc"},
+		Name:      "box",
+		AgentType: "test",
+		Workdir:   store.WorkdirEnvironment{HostPath: "/x", MountPath: "/x", Mode: store.DirModeOverlay, BaselineSHA: "abc"},
 	})
 	_, err := sb.Workdir().Apply(context.Background(), ApplyOptions{Mode: ApplyModeCommits})
 	require.Error(t, err)

@@ -89,7 +89,7 @@ func matchesFilters(info *yoloai.Info, f listFilters) bool {
 		return false
 	}
 	if f.agent != "" {
-		if info.Status == yoloai.StatusBroken || string(info.Environment.Agent) != f.agent {
+		if info.Status == yoloai.StatusBroken || string(info.Environment.AgentType) != f.agent {
 			return false
 		}
 	}
@@ -179,8 +179,8 @@ func runList(cmd *cobra.Command, _ []string) error {
 	for _, info := range infos {
 		if info.Status == yoloai.StatusBroken || info.Status == yoloai.StatusUnavailable {
 			backend := "-"
-			if info.Environment.Backend != "" {
-				backend = string(info.Environment.Backend)
+			if info.Environment.BackendType != "" {
+				backend = string(info.Environment.BackendType)
 			}
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", //nolint:errcheck
 				info.Environment.Name,
@@ -195,7 +195,7 @@ func runList(cmd *cobra.Command, _ []string) error {
 			)
 			continue
 		}
-		backend := info.Environment.Backend
+		backend := info.Environment.BackendType
 		if backend == "" {
 			backend = "docker" // fallback for old sandboxes without backend field
 		}
@@ -203,7 +203,7 @@ func runList(cmd *cobra.Command, _ []string) error {
 			info.Environment.Name,
 			info.Status,
 			backend,
-			info.Environment.Agent,
+			info.Environment.AgentType,
 			formatProfile(info.Environment.Profile),
 			cliutil.FormatAge(info.Environment.CreatedAt),
 			cliutil.FormatDiskUsage(info.DiskUsageBytes),

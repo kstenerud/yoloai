@@ -132,13 +132,13 @@ func (p *ProxyServer) createSandbox(ctx context.Context) (*yoloai.Environment, e
 	}
 
 	opts := yoloai.CreateOptions{
-		Name:    p.sandboxName,
-		Workdir: p.opts.Workdir,
-		AuxDirs: p.opts.AuxDirs,
-		Agent:   yoloai.AgentType(p.opts.Agent),
-		Model:   p.opts.Model,
-		Profile: p.opts.Profile,
-		Replace: p.opts.Replace,
+		Name:      p.sandboxName,
+		Workdir:   p.opts.Workdir,
+		AuxDirs:   p.opts.AuxDirs,
+		AgentType: yoloai.AgentType(p.opts.Agent),
+		Model:     p.opts.Model,
+		Profile:   p.opts.Profile,
+		Replace:   p.opts.Replace,
 		// Proxy auto-create is non-interactive: proceed on a dirty workdir.
 		AllowDirtyWorkdir: true,
 	}

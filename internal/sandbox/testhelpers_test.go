@@ -80,7 +80,7 @@ func createTestSandbox(t *testing.T, tmpDir, name, hostPath string, mode store.D
 
 	meta := &store.Environment{
 		Name:      name,
-		Agent:     "claude",
+		AgentType: "claude",
 		CreatedAt: time.Now(),
 		Workdir: store.WorkdirEnvironment{
 			HostPath:  hostPath,

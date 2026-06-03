@@ -26,12 +26,12 @@ type Environment struct {
 	Name          string                  `json:"name"`
 	Principal     config.PrincipalSegment `json:"principal,omitempty"` // owning principal; "" = default (no-principal). Attribution + runtime namespace (D62).
 	CreatedAt     time.Time               `json:"created_at"`
-	Backend       runtime.BackendType     `json:"backend"` // typed string; serializes as "docker"/"tart"/etc.
+	BackendType   runtime.BackendType     `json:"backend"` // typed string; serializes as "docker"/"tart"/etc.
 	Profile       string                  `json:"profile,omitempty"`
 	ImageRef      string                  `json:"image_ref,omitempty"`
 
-	Agent agent.AgentType `json:"agent"`
-	Model string          `json:"model,omitempty"`
+	AgentType agent.AgentType `json:"agent"`
+	Model     string          `json:"model,omitempty"`
 
 	Workdir     WorkdirEnvironment `json:"workdir"`
 	Directories []DirEnvironment   `json:"directories,omitempty"`
@@ -90,7 +90,7 @@ func migrate(meta *Environment) error {
 		// If the named backend isn't registered on this platform we default
 		// to false — a meta whose backend can't be instantiated here will
 		// fail downstream anyway, and false is the conservative answer.
-		if desc, ok := runtime.Descriptor(meta.Backend); ok {
+		if desc, ok := runtime.Descriptor(meta.BackendType); ok {
 			meta.HostFilesystem = desc.Capabilities.HostFilesystem
 		}
 		meta.Version = 1

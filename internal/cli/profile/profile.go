@@ -82,7 +82,7 @@ func newProfileListCmd() *cobra.Command {
 				if s.HasDockerfile {
 					image = "yes"
 				}
-				fmt.Fprintf(w, "%s\t%s\t%s\n", s.Name, image, s.Agent) //nolint:errcheck
+				fmt.Fprintf(w, "%s\t%s\t%s\n", s.Name, image, s.AgentType) //nolint:errcheck
 			}
 			return w.Flush()
 		},
@@ -615,6 +615,6 @@ func newProfileDeleteCmd() *cobra.Command {
 // only formats it.
 func renderImageCleanupHints(w io.Writer, hints []yoloai.ImageCleanupHint) {
 	for _, h := range hints {
-		fmt.Fprintf(w, "Note: if a %s image '%s' exists, remove it with: %s\n", h.Backend, h.Image, h.Command) //nolint:errcheck
+		fmt.Fprintf(w, "Note: if a %s image '%s' exists, remove it with: %s\n", h.BackendType, h.Image, h.Command) //nolint:errcheck
 	}
 }

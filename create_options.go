@@ -31,8 +31,8 @@ type CreateOptions struct {
 	// AuxDirs are additional directories mounted alongside the workdir.
 	AuxDirs []DirSpec
 
-	// Agent selects the AI agent. Empty resolves from config, then AgentClaude.
-	Agent AgentType
+	// AgentType selects the AI agent. Empty resolves from config, then AgentClaude.
+	AgentType AgentType
 
 	// Model selects the model/alias. Empty resolves from config, then the
 	// agent default.
@@ -124,7 +124,7 @@ func (o CreateOptions) toInternal() sandbox.CreateOptions {
 		Name:                 o.Name,
 		Workdir:              workdir,
 		AuxDirs:              o.AuxDirs,
-		Agent:                string(o.Agent),
+		Agent:                string(o.AgentType),
 		Model:                o.Model,
 		Profile:              o.Profile,
 		Prompt:               o.Prompt,
@@ -168,7 +168,7 @@ func (o RunOptions) materialize() CreateOptions {
 	return CreateOptions{
 		Name:              o.Name,
 		Workdir:           DirSpec{Path: o.WorkDir, Mode: DirModeCopy},
-		Agent:             o.Agent,
+		AgentType:         o.AgentType,
 		Model:             o.Model,
 		Profile:           o.Profile,
 		Prompt:            o.Prompt,

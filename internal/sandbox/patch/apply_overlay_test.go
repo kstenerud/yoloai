@@ -24,9 +24,9 @@ func TestApplyOverlay_NonOverlayNoop(t *testing.T) {
 	layout := testLayout(tmpDir)
 	require.NoError(t, os.MkdirAll(layout.SandboxDir(name), 0750))
 	meta := &store.Environment{
-		Name:    name,
-		Agent:   "test",
-		Workdir: store.WorkdirEnvironment{HostPath: filepath.Join(tmpDir, "p"), MountPath: filepath.Join(tmpDir, "p"), Mode: store.DirModeCopy, BaselineSHA: "abc"},
+		Name:      name,
+		AgentType: "test",
+		Workdir:   store.WorkdirEnvironment{HostPath: filepath.Join(tmpDir, "p"), MountPath: filepath.Join(tmpDir, "p"), Mode: store.DirModeCopy, BaselineSHA: "abc"},
 	}
 	require.NoError(t, store.SaveEnvironment(layout.SandboxDir(name), meta))
 

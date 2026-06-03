@@ -24,7 +24,7 @@ func setupSandboxCmdTest(t *testing.T, name string) {
 
 	meta := &store.Environment{
 		Name:      name,
-		Agent:     "claude",
+		AgentType: "claude",
 		CreatedAt: time.Now(),
 		Workdir:   store.WorkdirEnvironment{HostPath: "/tmp/test", Mode: "copy"},
 	}

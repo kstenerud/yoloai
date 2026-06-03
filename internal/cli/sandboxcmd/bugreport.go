@@ -135,12 +135,12 @@ func WriteSandboxSectionsForFlag(w io.Writer, name, reportType string) {
 	ctx := context.Background()
 	l := cliutil.Layout()
 	c, err := yoloai.NewWithOptions(ctx, yoloai.Options{
-		DataDir: l.DataDir,
-		HomeDir: l.HomeDir,
-		Backend: yoloai.BackendType(backend),
-		Input:   os.Stdin,
-		Output:  io.Discard, // best-effort path; don't write to the in-progress bug report
-		Env:     l.Env,
+		DataDir:     l.DataDir,
+		HomeDir:     l.HomeDir,
+		BackendType: yoloai.BackendType(backend),
+		Input:       os.Stdin,
+		Output:      io.Discard, // best-effort path; don't write to the in-progress bug report
+		Env:         l.Env,
 	})
 	if err != nil {
 		return
@@ -168,12 +168,12 @@ func writeBugReportSandboxDetail(ctx context.Context, w io.Writer, c *yoloai.Cli
 		fmt.Fprintf(w, "*(error inspecting sandbox: %s)*\n\n", err) //nolint:errcheck
 	} else {
 		meta := info.Environment
-		fmt.Fprintf(w, "- **Name:** %s\n", meta.Name)       //nolint:errcheck
-		fmt.Fprintf(w, "- **Status:** %s\n", info.Status)   //nolint:errcheck
-		fmt.Fprintf(w, "- **Agent:** %s\n", meta.Agent)     //nolint:errcheck
-		fmt.Fprintf(w, "- **Model:** %s\n", meta.Model)     //nolint:errcheck
-		fmt.Fprintf(w, "- **Backend:** %s\n", meta.Backend) //nolint:errcheck
-		fmt.Fprintln(w)                                     //nolint:errcheck
+		fmt.Fprintf(w, "- **Name:** %s\n", meta.Name)           //nolint:errcheck
+		fmt.Fprintf(w, "- **Status:** %s\n", info.Status)       //nolint:errcheck
+		fmt.Fprintf(w, "- **Agent:** %s\n", meta.AgentType)     //nolint:errcheck
+		fmt.Fprintf(w, "- **Model:** %s\n", meta.Model)         //nolint:errcheck
+		fmt.Fprintf(w, "- **Backend:** %s\n", meta.BackendType) //nolint:errcheck
+		fmt.Fprintln(w)                                         //nolint:errcheck
 	}
 
 	sandboxDir := cliutil.Layout().SandboxDir(name)

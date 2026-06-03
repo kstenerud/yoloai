@@ -99,13 +99,13 @@ func runNewCmd(cmd *cobra.Command, args []string, version string) error {
 	}
 	l := cliutil.Layout()
 	c, err := yoloai.NewWithOptions(cmd.Context(), yoloai.Options{
-		DataDir: l.DataDir,
-		HomeDir: l.HomeDir,
-		Backend: yoloai.BackendType(backend),
-		Input:   cmd.InOrStdin(),
-		Output:  mgrOutput,
-		Version: version,
-		Env:     l.Env,
+		DataDir:     l.DataDir,
+		HomeDir:     l.HomeDir,
+		BackendType: yoloai.BackendType(backend),
+		Input:       cmd.InOrStdin(),
+		Output:      mgrOutput,
+		Version:     version,
+		Env:         l.Env,
 	})
 	if err != nil {
 		return fmt.Errorf("connect to runtime: %w", err)
@@ -215,7 +215,7 @@ func resolveNewCmdOptions(cmd *cobra.Command, name, rawWorkdirArg string, passth
 		Name:                 name,
 		Workdir:              workdirSpec,
 		AuxDirs:              auxDirSpecs,
-		Agent:                yoloai.AgentType(agentName),
+		AgentType:            yoloai.AgentType(agentName),
 		Model:                model,
 		Profile:              profileFlag,
 		Prompt:               prompt,
@@ -382,8 +382,8 @@ func loadCreatedMeta(c *yoloai.Client, name string) (*yoloai.Environment, error)
 // created sandbox's metadata. The library returns the sandbox; the CLI owns this
 // presentation (F8).
 func printCreateSummary(out io.Writer, meta *yoloai.Environment, hasPrompt, vscodeTunnel bool) {
-	fmt.Fprintf(out, "Sandbox %s created\n", meta.Name) //nolint:errcheck // best-effort output
-	fmt.Fprintf(out, "  Agent:    %s\n", meta.Agent)    //nolint:errcheck // best-effort output
+	fmt.Fprintf(out, "Sandbox %s created\n", meta.Name)  //nolint:errcheck // best-effort output
+	fmt.Fprintf(out, "  Agent:    %s\n", meta.AgentType) //nolint:errcheck // best-effort output
 	if meta.Profile != "" {
 		fmt.Fprintf(out, "  Profile:  %s\n", meta.Profile) //nolint:errcheck // best-effort output
 	}

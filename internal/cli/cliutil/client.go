@@ -95,8 +95,8 @@ func ResolveBackendForSandbox(name string) yoloai.BackendType {
 	if err == nil {
 		defer c.Close() //nolint:errcheck // backend-less close is a no-op
 		if sb, sbErr := c.Sandbox(name); sbErr == nil {
-			if env, mErr := sb.Metadata(); mErr == nil && env.Backend != "" {
-				return env.Backend
+			if env, mErr := sb.Metadata(); mErr == nil && env.BackendType != "" {
+				return env.BackendType
 			}
 		}
 	}
@@ -118,13 +118,13 @@ func WithClient(cmd *cobra.Command, backend yoloai.BackendType, fn func(ctx cont
 	ctx := cmd.Context()
 	l := Layout()
 	c, err := yoloai.NewWithOptions(ctx, yoloai.Options{
-		DataDir: l.DataDir,
-		HomeDir: l.HomeDir,
-		Backend: backend,
-		Logger:  slog.Default(),
-		Input:   cmd.InOrStdin(),
-		Output:  cmd.ErrOrStderr(),
-		Env:     l.Env,
+		DataDir:     l.DataDir,
+		HomeDir:     l.HomeDir,
+		BackendType: backend,
+		Logger:      slog.Default(),
+		Input:       cmd.InOrStdin(),
+		Output:      cmd.ErrOrStderr(),
+		Env:         l.Env,
 	})
 	if err != nil {
 		return fmt.Errorf("connect to runtime: %w", err)

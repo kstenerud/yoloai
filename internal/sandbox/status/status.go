@@ -484,7 +484,7 @@ func groupSandboxesByBackend(entries []os.DirEntry, sandboxesDir string) map[run
 			byBackend[""] = append(byBackend[""], entry.Name())
 			continue
 		}
-		backend := meta.Backend
+		backend := meta.BackendType
 		if backend == "" {
 			backend = "docker"
 		}

@@ -121,7 +121,7 @@ func TestGenerateContext_WorkdirMountPath(t *testing.T) {
 func TestGenerateContext_SeatbeltFilesPath(t *testing.T) {
 	meta := &store.Environment{
 		Name:           "test-sb",
-		Backend:        "seatbelt",
+		BackendType:    "seatbelt",
 		HostFilesystem: true,
 		Workdir: store.WorkdirEnvironment{
 			HostPath:  "/home/user/project",
@@ -151,8 +151,8 @@ func TestGenerateContext_SeatbeltFilesPath(t *testing.T) {
 
 func TestGenerateContext_DockerFilesPath(t *testing.T) {
 	meta := &store.Environment{
-		Name:    "test-sb",
-		Backend: "docker",
+		Name:        "test-sb",
+		BackendType: "docker",
 		Workdir: store.WorkdirEnvironment{
 			HostPath:  "/home/user/project",
 			MountPath: "/home/user/project",
@@ -172,8 +172,8 @@ func TestGenerateContext_DockerFilesPath(t *testing.T) {
 
 func TestGenerateContext_TartFilesPath(t *testing.T) {
 	meta := &store.Environment{
-		Name:    "test-sb",
-		Backend: "tart",
+		Name:        "test-sb",
+		BackendType: "tart",
 		Workdir: store.WorkdirEnvironment{
 			HostPath:  "/Users/admin/project",
 			MountPath: "/Users/admin/project",

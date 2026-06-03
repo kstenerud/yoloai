@@ -101,12 +101,12 @@ func TestPruneItemKind_Values(t *testing.T) {
 // fields ever stop being string-shaped.
 func TestPruneItem_TypedFields(t *testing.T) {
 	item := PruneItem{
-		Backend: BackendDocker,
-		Kind:    PruneKindContainer,
-		Name:    "yoloai-mybox",
-		Bytes:   1024,
+		BackendType: BackendDocker,
+		Kind:        PruneKindContainer,
+		Name:        "yoloai-mybox",
+		Bytes:       1024,
 	}
-	assert.Equal(t, BackendDocker, item.Backend)
+	assert.Equal(t, BackendDocker, item.BackendType)
 	assert.Equal(t, PruneKindContainer, item.Kind)
 	assert.Equal(t, "yoloai-mybox", item.Name)
 	assert.Equal(t, int64(1024), item.Bytes)
@@ -116,24 +116,24 @@ func TestPruneItem_TypedFields(t *testing.T) {
 // but a switch over the typed value in a test catches accidental
 // "go back to plain string" regressions.
 func TestOptions_BackendIsTyped(t *testing.T) {
-	opts := Options{Backend: BackendDocker}
-	switch opts.Backend {
+	opts := Options{BackendType: BackendDocker}
+	switch opts.BackendType {
 	case BackendDocker:
 		// ok
 	case BackendTart, BackendPodman, BackendSeatbelt, BackendContainerd:
-		t.Fatalf("unexpected backend matched: %s", opts.Backend)
+		t.Fatalf("unexpected backend matched: %s", opts.BackendType)
 	default:
-		t.Fatalf("backend constant didn't match any shipped value: %s", opts.Backend)
+		t.Fatalf("backend constant didn't match any shipped value: %s", opts.BackendType)
 	}
 }
 
 func TestRunOptions_AgentIsTyped(t *testing.T) {
-	opts := RunOptions{Agent: AgentClaude}
-	switch opts.Agent {
+	opts := RunOptions{AgentType: AgentClaude}
+	switch opts.AgentType {
 	case AgentClaude:
 		// ok
 	default:
-		t.Fatalf("AgentClaude didn't match itself in switch over typed AgentType: %s", opts.Agent)
+		t.Fatalf("AgentClaude didn't match itself in switch over typed AgentType: %s", opts.AgentType)
 	}
 }
 

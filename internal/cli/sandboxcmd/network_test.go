@@ -33,8 +33,8 @@ func createNetworkSandbox(t *testing.T, name, networkMode string, domains []stri
 
 	meta := &store.Environment{
 		Name:         name,
-		Agent:        "test",
-		Backend:      "docker",
+		AgentType:    "test",
+		BackendType:  "docker",
 		NetworkMode:  networkMode,
 		NetworkAllow: domains,
 		Workdir:      store.WorkdirEnvironment{HostPath: "/tmp/test", MountPath: "/tmp/test", Mode: "copy"},

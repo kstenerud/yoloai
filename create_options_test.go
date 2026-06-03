@@ -28,7 +28,7 @@ func TestCreateOptions_toInternal_DefaultsModeAndFoldsAck(t *testing.T) {
 	o := CreateOptions{
 		Name:                 "box",
 		Workdir:              DirSpec{Path: "/p"}, // Mode empty → defaults to copy
-		Agent:                AgentClaude,
+		AgentType:            AgentClaude,
 		Ports:                []PortMapping{{HostPort: 3000, ContainerPort: 80}},
 		AllowDirtyWorkdir:    true,
 		AbandonUnappliedWork: true,
@@ -55,7 +55,7 @@ func TestRunOptions_materialize(t *testing.T) {
 		Name:              "b",
 		WorkDir:           "/w",
 		Prompt:            "do the thing",
-		Agent:             AgentClaude,
+		AgentType:         AgentClaude,
 		Replace:           true,
 		AllowDirtyWorkdir: true,
 	}.materialize()
@@ -63,7 +63,7 @@ func TestRunOptions_materialize(t *testing.T) {
 	assert.Equal(t, "b", c.Name)
 	assert.Equal(t, "/w", c.Workdir.Path)
 	assert.Equal(t, DirModeCopy, c.Workdir.Mode, "Run always copies the workdir")
-	assert.Equal(t, AgentClaude, c.Agent)
+	assert.Equal(t, AgentClaude, c.AgentType)
 	assert.Equal(t, "do the thing", c.Prompt)
 	assert.True(t, c.Replace)
 	assert.True(t, c.AllowDirtyWorkdir)
@@ -111,7 +111,7 @@ func TestClose_OnUnopenedClient_IsNoop(t *testing.T) {
 }
 
 func TestNewWithOptions_DataDirRequired(t *testing.T) {
-	_, err := NewWithOptions(context.Background(), Options{Backend: BackendDocker})
+	_, err := NewWithOptions(context.Background(), Options{BackendType: BackendDocker})
 	require.Error(t, err, "empty DataDir must be rejected")
 }
 
@@ -119,7 +119,7 @@ func TestNewWithOptions_DataDirRequired(t *testing.T) {
 // filepath.Dir(DataDir) derivation (wrong under the D60 $HOME/.yoloai/library
 // bifurcation) can never resolve seed/credential lookups to the wrong home.
 func TestNewWithOptions_HomeDirRequired(t *testing.T) {
-	_, err := NewWithOptions(context.Background(), Options{DataDir: t.TempDir(), Backend: BackendDocker})
+	_, err := NewWithOptions(context.Background(), Options{DataDir: t.TempDir(), BackendType: BackendDocker})
 	require.Error(t, err)
 	var ue *yoerrors.UsageError
 	require.ErrorAs(t, err, &ue, "empty HomeDir must yield a *UsageError")

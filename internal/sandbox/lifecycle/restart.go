@@ -95,9 +95,9 @@ func resolveEnvForRestart(layout config.Layout, meta *store.Environment) (map[st
 // surfaced through n as Notices rather than a raw writer, since the restart
 // entry points (Start/Reset) return their output as a *Result's Notices (F8).
 func recreateContainer(ctx context.Context, d state.Deps, name string, meta *store.Environment, resume bool, n *notices) error {
-	agentDef := agent.GetAgent(string(meta.Agent))
+	agentDef := agent.GetAgent(string(meta.AgentType))
 	if agentDef == nil {
-		return yoerrors.NewConfigError("unknown agent %q in sandbox state — this sandbox was created with an agent that's not registered in the current yoloai installation; destroy and recreate the sandbox with a registered agent", meta.Agent)
+		return yoerrors.NewConfigError("unknown agent %q in sandbox state — this sandbox was created with an agent that's not registered in the current yoloai installation; destroy and recreate the sandbox with a registered agent", meta.AgentType)
 	}
 
 	sandboxDir := d.Layout.SandboxDir(name)
@@ -275,13 +275,13 @@ func relaunchAgentWithResume(ctx context.Context, d state.Deps, name string, met
 		return fmt.Errorf("parse runtime-config.json: %w", err)
 	}
 
-	agentDef := agent.GetAgent(string(meta.Agent))
+	agentDef := agent.GetAgent(string(meta.AgentType))
 	if agentDef == nil {
-		return yoerrors.NewConfigError("unknown agent %q in sandbox state — this sandbox was created with an agent that's not registered in the current yoloai installation; destroy and recreate the sandbox with a registered agent", meta.Agent)
+		return yoerrors.NewConfigError("unknown agent %q in sandbox state — this sandbox was created with an agent that's not registered in the current yoloai installation; destroy and recreate the sandbox with a registered agent", meta.AgentType)
 	}
 
 	// Resolve agent_args from config/profile
-	agentArgs := resolveAgentArgs(d.Layout, string(meta.Agent), meta.Profile)
+	agentArgs := resolveAgentArgs(d.Layout, string(meta.AgentType), meta.Profile)
 
 	// Build interactive command (no headless prompt baked in)
 	interactiveCmd := invocation.BuildAgentCommand(agentDef, meta.Model, "", agentArgs, cfg.Passthrough)
@@ -366,12 +366,12 @@ func relaunchAgentWithCustomPrompt(ctx context.Context, d state.Deps, name strin
 		return fmt.Errorf("parse runtime-config.json: %w", err)
 	}
 
-	agentDef := agent.GetAgent(string(meta.Agent))
+	agentDef := agent.GetAgent(string(meta.AgentType))
 	if agentDef == nil {
-		return yoerrors.NewConfigError("unknown agent %q in sandbox state — this sandbox was created with an agent that's not registered in the current yoloai installation; destroy and recreate the sandbox with a registered agent", meta.Agent)
+		return yoerrors.NewConfigError("unknown agent %q in sandbox state — this sandbox was created with an agent that's not registered in the current yoloai installation; destroy and recreate the sandbox with a registered agent", meta.AgentType)
 	}
 
-	agentArgs := resolveAgentArgs(d.Layout, string(meta.Agent), meta.Profile)
+	agentArgs := resolveAgentArgs(d.Layout, string(meta.AgentType), meta.Profile)
 	interactiveCmd := invocation.BuildAgentCommand(agentDef, meta.Model, "", agentArgs, cfg.Passthrough)
 	// Prefer the stored launch prefix (W1a single-source-of-truth) when the gate
 	// is set; fall back to re-invoking PrepareAgentCommand for sandboxes created
@@ -454,12 +454,12 @@ func prepareCustomPromptFiles(d state.Deps, name string, meta *store.Environment
 		return fmt.Errorf("parse runtime-config.json: %w", err)
 	}
 
-	agentDef := agent.GetAgent(string(meta.Agent))
+	agentDef := agent.GetAgent(string(meta.AgentType))
 	if agentDef == nil {
-		return yoerrors.NewConfigError("unknown agent %q in sandbox state — this sandbox was created with an agent that's not registered in the current yoloai installation; destroy and recreate the sandbox with a registered agent", meta.Agent)
+		return yoerrors.NewConfigError("unknown agent %q in sandbox state — this sandbox was created with an agent that's not registered in the current yoloai installation; destroy and recreate the sandbox with a registered agent", meta.AgentType)
 	}
 
-	agentArgs := resolveAgentArgs(d.Layout, string(meta.Agent), meta.Profile)
+	agentArgs := resolveAgentArgs(d.Layout, string(meta.AgentType), meta.Profile)
 	cfg.AgentCommand = invocation.BuildAgentCommand(agentDef, meta.Model, "", agentArgs, cfg.Passthrough)
 
 	updated, err := json.MarshalIndent(cfg, "", "  ")
@@ -503,12 +503,12 @@ func prepareResumeFiles(d state.Deps, name string, meta *store.Environment) erro
 		return fmt.Errorf("parse runtime-config.json: %w", err)
 	}
 
-	agentDef := agent.GetAgent(string(meta.Agent))
+	agentDef := agent.GetAgent(string(meta.AgentType))
 	if agentDef == nil {
-		return yoerrors.NewConfigError("unknown agent %q in sandbox state — this sandbox was created with an agent that's not registered in the current yoloai installation; destroy and recreate the sandbox with a registered agent", meta.Agent)
+		return yoerrors.NewConfigError("unknown agent %q in sandbox state — this sandbox was created with an agent that's not registered in the current yoloai installation; destroy and recreate the sandbox with a registered agent", meta.AgentType)
 	}
 
-	agentArgs := resolveAgentArgs(d.Layout, string(meta.Agent), meta.Profile)
+	agentArgs := resolveAgentArgs(d.Layout, string(meta.AgentType), meta.Profile)
 	cfg.AgentCommand = invocation.BuildAgentCommand(agentDef, meta.Model, "", agentArgs, cfg.Passthrough)
 
 	updated, err := json.MarshalIndent(cfg, "", "  ")

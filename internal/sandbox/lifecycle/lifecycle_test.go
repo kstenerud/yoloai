@@ -38,7 +38,7 @@ func createTestSandbox(t *testing.T, tmpDir, name, hostPath string, mode store.D
 
 	meta := &store.Environment{
 		Name:      name,
-		Agent:     "claude",
+		AgentType: "claude",
 		CreatedAt: time.Now(),
 		Workdir: store.WorkdirEnvironment{
 			HostPath:  hostPath,
@@ -56,7 +56,7 @@ func createRWSandbox(t *testing.T, tmpDir, name, hostPath string) {
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 	meta := &store.Environment{
 		Name:      name,
-		Agent:     "test",
+		AgentType: "test",
 		CreatedAt: time.Now(),
 		Workdir: store.WorkdirEnvironment{
 			HostPath:  hostPath,
@@ -258,7 +258,7 @@ func TestStart_Resume_DoneStatus(t *testing.T) {
 	// Create meta with HasPrompt=true
 	meta := &store.Environment{
 		Name:      name,
-		Agent:     "claude",
+		AgentType: "claude",
 		HasPrompt: true,
 		CreatedAt: time.Now(),
 		Workdir: store.WorkdirEnvironment{
@@ -332,7 +332,7 @@ func TestStart_Resume_StoppedStatus(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
-		Agent:     "claude",
+		AgentType: "claude",
 		HasPrompt: true,
 		CreatedAt: time.Now(),
 		Workdir: store.WorkdirEnvironment{
@@ -424,7 +424,7 @@ func TestNeedsConfirmation_ChangesExist(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
-		Agent:     "claude",
+		AgentType: "claude",
 		CreatedAt: time.Now(),
 		Workdir: store.WorkdirEnvironment{
 			HostPath:  hostPath,
@@ -467,7 +467,7 @@ func TestNeedsConfirmation_NoChanges(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
-		Agent:     "claude",
+		AgentType: "claude",
 		CreatedAt: time.Now(),
 		Workdir: store.WorkdirEnvironment{
 			HostPath:  hostPath,
@@ -564,7 +564,7 @@ func TestReset_RecopiesWorkdir(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
-		Agent:     "claude",
+		AgentType: "claude",
 		CreatedAt: time.Now(),
 		Workdir: store.WorkdirEnvironment{
 			HostPath:    origDir,
@@ -627,7 +627,7 @@ func TestReset_PromptOverwrite(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
-		Agent:     "claude",
+		AgentType: "claude",
 		CreatedAt: time.Now(),
 		Workdir: store.WorkdirEnvironment{
 			HostPath:  origDir,
@@ -678,7 +678,7 @@ func TestReset_State(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
-		Agent:     "claude",
+		AgentType: "claude",
 		CreatedAt: time.Now(),
 		Workdir: store.WorkdirEnvironment{
 			HostPath:    origDir,
@@ -750,7 +750,7 @@ func TestReset_OriginalMissing(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
-		Agent:     "claude",
+		AgentType: "claude",
 		CreatedAt: time.Now(),
 		Workdir: store.WorkdirEnvironment{
 			HostPath:    origDir,
@@ -817,7 +817,7 @@ func TestReset_InPlace_SyncsWorkdir(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
-		Agent:     "claude",
+		AgentType: "claude",
 		HasPrompt: true,
 		CreatedAt: time.Now(),
 		Workdir: store.WorkdirEnvironment{
@@ -909,7 +909,7 @@ func TestReset_InPlace_KeepCache(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
-		Agent:     "claude",
+		AgentType: "claude",
 		CreatedAt: time.Now(),
 		Workdir: store.WorkdirEnvironment{
 			HostPath:    origDir,
@@ -968,7 +968,7 @@ func TestReset_InPlace_KeepFiles(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
-		Agent:     "claude",
+		AgentType: "claude",
 		CreatedAt: time.Now(),
 		Workdir: store.WorkdirEnvironment{
 			HostPath:    origDir,
@@ -1017,7 +1017,7 @@ func TestReset_UpgradesToRestartWhenNotRunning(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
-		Agent:     "claude",
+		AgentType: "claude",
 		CreatedAt: time.Now(),
 		Workdir: store.WorkdirEnvironment{
 			HostPath:    origDir,
@@ -1210,7 +1210,7 @@ func TestDestroy_ReadOnlyFiles(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
-		Agent:     "claude",
+		AgentType: "claude",
 		CreatedAt: time.Now(),
 		Workdir:   store.WorkdirEnvironment{HostPath: "/tmp/project", Mode: "copy"},
 	}

@@ -300,7 +300,7 @@ type BuildOptions struct {
 	Profile string
 	// Backend selects the backend to build for. Empty = default
 	// backend. Ignored when AllBackends is true.
-	Backend BackendType
+	BackendType BackendType
 	// AllBackends builds across every backend that's currently
 	// available. Mutually exclusive with Backend.
 	AllBackends bool
@@ -320,7 +320,7 @@ type BuildOptions struct {
 // the first error from any backend; later backends in the iteration
 // are skipped.
 func (s *System) Build(ctx context.Context, opts BuildOptions) error {
-	if opts.AllBackends && opts.Backend != "" {
+	if opts.AllBackends && opts.BackendType != "" {
 		return yoerrors.NewUsageError("Backend and AllBackends are mutually exclusive")
 	}
 	if opts.Profile != "" {
@@ -359,7 +359,7 @@ func (s *System) Build(ctx context.Context, opts BuildOptions) error {
 		return nil
 	}
 
-	backend := opts.Backend
+	backend := opts.BackendType
 	if backend == "" {
 		// Build targets the container slot — no isolation/OS routing.
 		backend = resolveBackendFromConfig(ctx, s.layout)
@@ -384,10 +384,10 @@ func (s *System) buildOne(ctx context.Context, backend BackendType, opts BuildOp
 // CheckOptions configures System.Check.
 type CheckOptions struct {
 	// Backend is the backend to verify. Required.
-	Backend BackendType
-	// Agent is the agent name whose credentials are checked. Required;
+	BackendType BackendType
+	// AgentType is the agent name whose credentials are checked. Required;
 	// caller resolves the default before calling.
-	Agent AgentType
+	AgentType AgentType
 	// Isolation, when non-empty, triggers an isolation-mode capability
 	// check via runtime.RequiredCapabilitiesFor + caps.RunChecks.
 	Isolation IsolationMode
@@ -412,17 +412,17 @@ type CheckResult struct {
 // CLI: `yoloai system check`. Distinct from Doctor (full capability
 // report per backend/mode).
 func (s *System) Check(ctx context.Context, opts CheckOptions) ([]CheckResult, error) {
-	if opts.Backend == "" {
+	if opts.BackendType == "" {
 		return nil, yoerrors.NewUsageError("Backend is required")
 	}
-	if opts.Agent == "" {
+	if opts.AgentType == "" {
 		return nil, yoerrors.NewUsageError("Agent is required")
 	}
 
 	var results []CheckResult
 
 	// 1. Backend connectivity.
-	rt, backendErr := newRuntime(ctx, opts.Backend, s.layout)
+	rt, backendErr := newRuntime(ctx, opts.BackendType, s.layout)
 	if backendErr != nil {
 		results = append(results,
 			CheckResult{Name: "backend", OK: false, Message: backendErr.Error()},
@@ -431,11 +431,11 @@ func (s *System) Check(ctx context.Context, opts CheckOptions) ([]CheckResult, e
 	} else {
 		results = append(results, CheckResult{Name: "backend", OK: true})
 		// 2. Base image exists.
-		results = append(results, s.checkImage(ctx, rt, string(opts.Backend)))
+		results = append(results, s.checkImage(ctx, rt, string(opts.BackendType)))
 	}
 
 	// 3. Agent credentials.
-	results = append(results, s.checkAgent(string(opts.Agent)))
+	results = append(results, s.checkAgent(string(opts.AgentType)))
 
 	// 4. Isolation prerequisites (only when --isolation is specified).
 	if opts.Isolation != "" {
@@ -552,7 +552,7 @@ type PruneResult struct {
 type PruneItem struct {
 	// Backend is the backend that owns the item, or empty for non-backend
 	// items like temp dirs (Kind == PruneKindTempDir).
-	Backend BackendType
+	BackendType BackendType
 	// Kind classifies the resource type — see PruneKind* constants for
 	// the shipping set. Open-set: backends can introduce new kinds.
 	Kind PruneItemKind
@@ -706,17 +706,17 @@ func (s *System) pruneBackend(ctx context.Context, backend BackendType, known []
 		}
 		for _, item := range actual.Items {
 			items = append(items, PruneItem{
-				Backend: BackendType(backend),
-				Kind:    PruneItemKind(item.Kind),
-				Name:    item.Name,
+				BackendType: BackendType(backend),
+				Kind:        PruneItemKind(item.Kind),
+				Name:        item.Name,
 			})
 		}
 	} else {
 		for _, item := range scan.Items {
 			items = append(items, PruneItem{
-				Backend: BackendType(backend),
-				Kind:    PruneItemKind(item.Kind),
-				Name:    item.Name,
+				BackendType: BackendType(backend),
+				Kind:        PruneItemKind(item.Kind),
+				Name:        item.Name,
 			})
 		}
 	}

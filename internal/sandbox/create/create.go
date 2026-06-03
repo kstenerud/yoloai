@@ -634,10 +634,10 @@ func buildEnvironment(opts Options, pr *profileResult, workdir *DirSpec, baselin
 		YoloaiVersion: opts.Version,
 		Name:          opts.Name,
 		CreatedAt:     time.Now(),
-		Backend:       backend,
+		BackendType:   backend,
 		Profile:       pr.name,
 		ImageRef:      pr.imageRef,
-		Agent:         agent.AgentType(opts.Agent),
+		AgentType:     agent.AgentType(opts.Agent),
 		Model:         model,
 		Workdir: store.WorkdirEnvironment{
 			HostPath:     workdir.Path,

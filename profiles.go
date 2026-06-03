@@ -90,7 +90,7 @@ func (a *ProfileAdmin) Create(_ context.Context, name string) error {
 // ProfileSummary is a row in ProfileAdmin.List output.
 type ProfileSummary struct {
 	Name          string    // profile name
-	Agent         AgentType // configured agent, empty if not set
+	AgentType     AgentType // configured agent, empty if not set
 	HasDockerfile bool      // profile carries its own Dockerfile
 }
 
@@ -110,7 +110,7 @@ func (a *ProfileAdmin) List(_ context.Context) ([]ProfileSummary, error) {
 			HasDockerfile: config.ProfileHasDockerfile(a.s.layout, name),
 		}
 		if profile, loadErr := config.LoadProfile(a.s.layout, name); loadErr == nil {
-			summary.Agent = AgentType(profile.Agent)
+			summary.AgentType = AgentType(profile.Agent)
 		}
 		out = append(out, summary)
 	}
@@ -244,9 +244,9 @@ func (a *ProfileAdmin) ReferencingSandboxes(_ context.Context, profileName strin
 // profile's built image. Returned by ProfileAdmin.Delete so the CLI
 // can surface them after the profile directory is gone.
 type ImageCleanupHint struct {
-	Backend BackendType // backend descriptor name (yoloai.BackendDocker, etc.)
-	Image   string      // e.g. "yoloai-myprofile"
-	Command string      // suggested shell command
+	BackendType BackendType // backend descriptor name (yoloai.BackendDocker, etc.)
+	Image       string      // e.g. "yoloai-myprofile"
+	Command     string      // suggested shell command
 }
 
 // DeleteProfileResult is the structured return from ProfileAdmin.Delete.
@@ -287,9 +287,9 @@ func (a *ProfileAdmin) Delete(_ context.Context, name string) (*DeleteProfileRes
 			continue
 		}
 		hints = append(hints, ImageCleanupHint{
-			Backend: BackendType(desc.Type),
-			Image:   image,
-			Command: desc.CleanupHint(image),
+			BackendType: BackendType(desc.Type),
+			Image:       image,
+			Command:     desc.CleanupHint(image),
 		})
 	}
 	return &DeleteProfileResult{ImageCleanupHints: hints}, nil

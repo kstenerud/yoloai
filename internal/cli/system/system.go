@@ -93,11 +93,11 @@ func runSystemBuild(cmd *cobra.Command, args []string, backend yoloai.BackendTyp
 	}
 
 	opts := yoloai.BuildOptions{
-		Profile: profile,
-		Backend: yoloai.BackendType(backend),
-		Rebuild: force,
-		Secrets: secrets,
-		Output:  buildOutputFor(cmd),
+		Profile:     profile,
+		BackendType: yoloai.BackendType(backend),
+		Rebuild:     force,
+		Secrets:     secrets,
+		Output:      buildOutputFor(cmd),
 	}
 	if err := cliutil.System().Build(cmd.Context(), opts); err != nil {
 		return err

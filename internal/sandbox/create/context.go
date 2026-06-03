@@ -128,7 +128,7 @@ func runtimeDir(sandboxDir string, meta *store.Environment) string {
 	if meta.HostFilesystem {
 		return sandboxDir
 	}
-	if desc, ok := runtime.Descriptor(meta.Backend); ok && desc.Capabilities.VMRuntimeDir != "" {
+	if desc, ok := runtime.Descriptor(meta.BackendType); ok && desc.Capabilities.VMRuntimeDir != "" {
 		return desc.Capabilities.VMRuntimeDir
 	}
 	return "/yoloai"

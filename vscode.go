@@ -18,7 +18,7 @@ import (
 // container fields and FolderURI are empty and the caller should fall back to a
 // VS Code Remote Tunnel.
 type VscodeAttach struct {
-	Backend       BackendType
+	BackendType   BackendType
 	Supported     bool
 	ContainerName string
 	WorkdirPath   string
@@ -38,9 +38,9 @@ func (s *Sandbox) VscodeAttach() (*VscodeAttach, error) {
 		return nil, fmt.Errorf("load sandbox metadata: %w", err)
 	}
 
-	res := &VscodeAttach{Backend: meta.Backend}
+	res := &VscodeAttach{BackendType: meta.BackendType}
 
-	desc, ok := runtime.Descriptor(meta.Backend)
+	desc, ok := runtime.Descriptor(meta.BackendType)
 	if !ok || !desc.Capabilities.ContainerAttach {
 		return res, nil
 	}

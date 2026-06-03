@@ -130,11 +130,11 @@ func TestResolveBackendForSandbox_MetaHasBackend(t *testing.T) {
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 
 	meta := &store.Environment{
-		Name:      name,
-		Backend:   "tart",
-		Agent:     "claude",
-		CreatedAt: time.Now(),
-		Workdir:   store.WorkdirEnvironment{HostPath: "/tmp/test", Mode: "copy"},
+		Name:        name,
+		BackendType: "tart",
+		AgentType:   "claude",
+		CreatedAt:   time.Now(),
+		Workdir:     store.WorkdirEnvironment{HostPath: "/tmp/test", Mode: "copy"},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
@@ -159,7 +159,7 @@ func TestResolveBackendForSandbox_MetaEmptyBackend(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
-		Agent:     "claude",
+		AgentType: "claude",
 		CreatedAt: time.Now(),
 		Workdir:   store.WorkdirEnvironment{HostPath: "/tmp/test", Mode: "copy"},
 	}

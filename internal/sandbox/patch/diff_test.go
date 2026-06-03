@@ -39,7 +39,7 @@ func createCopySandbox(t *testing.T, tmpDir, name, hostPath string) string {
 	// Write environment.json
 	meta := &store.Environment{
 		Name:      name,
-		Agent:     "test",
+		AgentType: "test",
 		CreatedAt: time.Now(),
 		Workdir: store.WorkdirEnvironment{
 			HostPath:    hostPath,
@@ -61,7 +61,7 @@ func createRWSandbox(t *testing.T, tmpDir, name, hostPath string) {
 
 	meta := &store.Environment{
 		Name:      name,
-		Agent:     "test",
+		AgentType: "test",
 		CreatedAt: time.Now(),
 		Workdir: store.WorkdirEnvironment{
 			HostPath:  hostPath,
@@ -395,7 +395,7 @@ func TestLoadDiffContext_NoBaseline(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      "no-baseline",
-		Agent:     "test",
+		AgentType: "test",
 		CreatedAt: time.Now(),
 		Workdir: store.WorkdirEnvironment{
 			HostPath: "/tmp/test",
@@ -423,7 +423,7 @@ func TestLoadDiffContext_CopyMode(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
-		Agent:     "test",
+		AgentType: "test",
 		CreatedAt: time.Now(),
 		Workdir: store.WorkdirEnvironment{
 			HostPath:    hostPath,
@@ -451,7 +451,7 @@ func TestLoadDiffContext_OverlayMode(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
-		Agent:     "test",
+		AgentType: "test",
 		CreatedAt: time.Now(),
 		Workdir: store.WorkdirEnvironment{
 			HostPath:    "/tmp/project",
@@ -479,7 +479,7 @@ func TestLoadDiffContext_OverlayMode_FallbackToHostPath(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
-		Agent:     "test",
+		AgentType: "test",
 		CreatedAt: time.Now(),
 		Workdir: store.WorkdirEnvironment{
 			HostPath: "/tmp/project",
@@ -505,7 +505,7 @@ func TestLoadDiffContext_RWMode(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
-		Agent:     "test",
+		AgentType: "test",
 		CreatedAt: time.Now(),
 		Workdir: store.WorkdirEnvironment{
 			HostPath: "/tmp/project",
@@ -531,7 +531,7 @@ func TestLoadDiffContext_UnsupportedMode(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
-		Agent:     "test",
+		AgentType: "test",
 		CreatedAt: time.Now(),
 		Workdir: store.WorkdirEnvironment{
 			HostPath: "/tmp/project",
@@ -557,7 +557,7 @@ func TestLoadAllDiffContexts_SingleCopyWorkdir(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
-		Agent:     "test",
+		AgentType: "test",
 		CreatedAt: time.Now(),
 		Workdir: store.WorkdirEnvironment{
 			HostPath:    "/tmp/project",
@@ -592,7 +592,7 @@ func TestLoadAllDiffContexts_WorkdirOnly_IgnoresAuxEntries(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
-		Agent:     "test",
+		AgentType: "test",
 		CreatedAt: time.Now(),
 		Workdir: store.WorkdirEnvironment{
 			HostPath:    "/tmp/project",
@@ -626,7 +626,7 @@ func TestLoadAllDiffContexts_NoAuxDirs(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
-		Agent:     "test",
+		AgentType: "test",
 		CreatedAt: time.Now(),
 		Workdir: store.WorkdirEnvironment{
 			HostPath:    "/tmp/project",
@@ -652,7 +652,7 @@ func TestLoadAllDiffContexts_OverlayWorkdirWithMountPath(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
-		Agent:     "test",
+		AgentType: "test",
 		CreatedAt: time.Now(),
 		Workdir: store.WorkdirEnvironment{
 			HostPath:    "/host/project",

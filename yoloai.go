@@ -136,7 +136,7 @@ type Options struct {
 	// Embedders that want that same auto-detection call the public
 	// yoloai.SelectBackend helper and pass its result. When set, the backend
 	// is opened lazily on the first backend-bound op, not at construction.
-	Backend BackendType
+	BackendType BackendType
 
 	// Logger receives structured log output. Default: slog.Default().
 	Logger *slog.Logger
@@ -262,7 +262,7 @@ func NewWithOptions(ctx context.Context, opts Options) (*Client, error) {
 	// (ensure) or return ErrBackendRequired when Backend is "".
 	return &Client{
 		layout:  layout,
-		backend: opts.Backend,
+		backend: opts.BackendType,
 		logger:  logger,
 		version: opts.Version,
 		output:  output,
@@ -345,7 +345,7 @@ type RunOptions struct {
 	// Agent selects the AI agent (yoloai.AgentClaude, yoloai.AgentGemini,
 	// yoloai.AgentCodex, …). Default: read from config.yaml, then
 	// yoloai.AgentClaude.
-	Agent AgentType
+	AgentType AgentType
 
 	// Model selects the model. Default: read from config.yaml, then agent default.
 	Model string
@@ -410,8 +410,8 @@ func (c *Client) pollUntilDone(ctx context.Context, name string, progress func(s
 // the agent is launched; the Info reflects the initial state.
 func (c *Client) Run(ctx context.Context, opts RunOptions) (*Info, error) {
 	createOpts := opts.materialize()
-	if createOpts.Agent == "" {
-		createOpts.Agent = AgentType(resolveAgentFromConfig(c.layout))
+	if createOpts.AgentType == "" {
+		createOpts.AgentType = AgentType(resolveAgentFromConfig(c.layout))
 	}
 	if createOpts.Model == "" {
 		createOpts.Model = resolveModelFromConfig(c.layout)
@@ -486,10 +486,10 @@ func (c *Client) destroyForOverwrite(ctx context.Context, dest string) error {
 	}
 
 	deps := c.deps()
-	if meta, err := store.LoadEnvironment(dstDir); err == nil && meta.Backend != "" {
-		rt, rtErr := newRuntime(ctx, meta.Backend, c.layout)
+	if meta, err := store.LoadEnvironment(dstDir); err == nil && meta.BackendType != "" {
+		rt, rtErr := newRuntime(ctx, meta.BackendType, c.layout)
 		if rtErr != nil {
-			return fmt.Errorf("connect to %s backend to overwrite %q: %w", meta.Backend, dest, rtErr)
+			return fmt.Errorf("connect to %s backend to overwrite %q: %w", meta.BackendType, dest, rtErr)
 		}
 		defer rt.Close() //nolint:errcheck // best-effort close after teardown
 		deps = state.Deps{Runtime: rt, Layout: c.layout, Input: c.input}

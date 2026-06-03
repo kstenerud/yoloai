@@ -47,9 +47,9 @@ func runSystemCheck(cmd *cobra.Command, backend yoloai.BackendType, agentName, i
 	}
 
 	results, err := cliutil.System().Check(cmd.Context(), yoloai.CheckOptions{
-		Backend:   yoloai.BackendType(backend),
-		Agent:     yoloai.AgentType(agentName),
-		Isolation: yoloai.IsolationMode(isolation),
+		BackendType: yoloai.BackendType(backend),
+		AgentType:   yoloai.AgentType(agentName),
+		Isolation:   yoloai.IsolationMode(isolation),
 	})
 	if err != nil {
 		return err

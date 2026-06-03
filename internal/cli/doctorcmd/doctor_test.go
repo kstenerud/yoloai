@@ -15,7 +15,7 @@ import (
 func samplePrune() *yoloai.PruneResult {
 	return &yoloai.PruneResult{
 		RemovedItems: []yoloai.PruneItem{
-			{Backend: "docker", Kind: yoloai.PruneItemKind("container"), Name: "yoloai-old"},
+			{BackendType: "docker", Kind: yoloai.PruneItemKind("container"), Name: "yoloai-old"},
 			{Kind: yoloai.PruneKindLockFile, Name: "stale"},
 			{Kind: yoloai.PruneKindSandboxDir, Name: "neverinit"},
 		},

@@ -167,10 +167,10 @@ func (s *Server) handleSandboxCreate(ctx context.Context, req mcp.CallToolReques
 			Path: workdir,
 			Mode: yoloai.DirModeCopy,
 		},
-		Agent:   yoloai.AgentType(agent),
-		Model:   model,
-		Profile: profile,
-		Prompt:  prompt,
+		AgentType: yoloai.AgentType(agent),
+		Model:     model,
+		Profile:   profile,
+		Prompt:    prompt,
 		// MCP sandbox_create is non-interactive: proceed on a dirty workdir.
 		AllowDirtyWorkdir: true,
 	}
@@ -202,7 +202,7 @@ func (s *Server) handleSandboxStatus(ctx context.Context, req mcp.CallToolReques
 		"name":             info.Environment.Name,
 		"status":           string(info.Status),
 		"agent_status":     string(info.AgentStatus),
-		"agent":            info.Environment.Agent,
+		"agent":            info.Environment.AgentType,
 		"model":            info.Environment.Model,
 		"has_changes":      info.HasChanges,
 		"disk_usage_bytes": info.DiskUsageBytes,
@@ -237,7 +237,7 @@ func (s *Server) handleSandboxList(ctx context.Context, _ mcp.CallToolRequest) (
 			Name:           info.Environment.Name,
 			Status:         string(info.Status),
 			AgentStatus:    string(info.AgentStatus),
-			Agent:          string(info.Environment.Agent),
+			Agent:          string(info.Environment.AgentType),
 			HasChanges:     info.HasChanges,
 			DiskUsageBytes: info.DiskUsageBytes,
 		})
