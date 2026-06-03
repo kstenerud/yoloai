@@ -5,8 +5,10 @@ Code navigation guide for the yoloAI codebase — the source of truth for **wher
 ## Package Map
 
 ```
-yoloai.go                → Orchestration spine: Client (Run, Diff, Apply, Stop, Destroy, ...)
-system_client.go         → Orchestration spine: System (DiskUsage, Prune, Build, Check)
+client.go                → Orchestration spine: Client (Run, List, Clone, Create, EnsureSetup)
+backend.go               → Package-level backend selection (SelectBackend, IsolationAvailability)
+sandbox.go               → Sandbox handle: lifecycle + flat readers (Inspect, Unlock, VscodeAttach, paths) + its option/read-model types
+system.go                → Orchestration spine: System (DiskUsage, Prune, Build, Check)
 runtime_imports_linux.go → Linux-specific backend registration (containerd)
 yoerrors/                → Public typed error sentinels (top-level pkg; re-exported via the yoloai package)
 cmd/yoloai/              → Binary entry point
@@ -50,12 +52,14 @@ Dependency direction (W-L8 + W-L12 shape): `cmd/yoloai` → `internal/cli` → `
 
 ## File Index
 
-### `yoloai.go` / `system_client.go` / `runtime_imports_linux.go`
+### `client.go` / `backend.go` / `sandbox.go` / `system.go` / `runtime_imports_linux.go`
 
 | File | Purpose |
 |------|---------|
-| `yoloai.go` | Orchestration spine — `Client` and its sandbox-scoped methods (`Run`, `Diff`, `Apply`, `Stop`, `Destroy`, `List`, `Inspect`, `Attach`, `Exec`, `Clone`, `Reset`, `Restart`, `Create`, `Start`, plus the diff/apply variants). Registers Docker, Podman, Seatbelt, and Tart backends via blank imports. |
-| `system_client.go` | Orchestration spine — `System` for admin/cross-backend operations (`DiskUsage`, `Prune`, `Build`, `Check`). Reached only via `Client.System()` (no standalone constructor). Iterates registered backends internally. |
+| `client.go` | Orchestration spine — `Client` and its root methods (`Run`, `List`, `Clone`, `Create`, `EnsureSetup`) plus `Options`/`CloneOptions`/`RunOptions` and the lazy-runtime construction helpers (`NewWithOptions`, `ensure`, `newRuntime`). Registers Docker, Podman, Seatbelt, and Tart backends via blank imports. |
+| `backend.go` | Package-level backend-selection functions (`SelectBackend`, `SelectContainerBackend`, `IsolationAvailability`). Backend has no handle — its catalog metadata lives in `discovery.go` and its reports in `doctor_report.go`. |
+| `sandbox.go` | The `Sandbox` handle (returned by `Client.Sandbox(name)`) — lifecycle (`Start`/`Stop`/`Restart`/`Reset`/`Destroy`/`Inspect`/`Exec`/`HasActiveWork`) and flat readers (`Metadata`, `Unlock`, `VscodeAttach`, the runtime-free path getters) plus its option/read-model types (`Info`/`Status`/`AgentStatus`, `Start`/`Reset`/`Destroy`/`ExecOptions`). Sub-handles `Agent`/`Workdir`/`Network`/`Files` live in their own files. |
+| `system.go` | Orchestration spine — `System` for admin/cross-backend operations (`DiskUsage`, `Prune`, `Build`, `Check`). Reached only via `Client.System()` (no standalone constructor). Iterates registered backends internally. |
 | `runtime_imports_linux.go` | Linux-only blank import of `runtime/containerd` to register the containerd backend. |
 
 ### `cmd/yoloai/`
@@ -536,7 +540,7 @@ runtime.New(ctx, "docker")  (runtime/registry.go)
 ```
 
 Backends register themselves at import time via blank imports:
-- `yoloai.go`: imports docker, podman, seatbelt, tart
+- `client.go`: imports docker, podman, seatbelt, tart
 - `runtime_imports_linux.go`: imports containerd (Linux only)
 - `internal/cli/runtime_imports_linux.go`: same for CLI binary
 
@@ -642,7 +646,7 @@ only when a backend NeedsSetup; advisory sections never affect it.
 Prune classifies every dir under `sandboxes/` by *recoverability*, not by
 "brokenness". The bulk path only ever **removes** zero-stakes items; anything
 that might hold user data is refused-and-reported or quarantined, never
-silently deleted. The classifier (`classifySandboxes` in `system_client.go`)
+silently deleted. The classifier (`classifySandboxes` in `system.go`)
 crosses the `store.LoadMeta` failure kind with `sandbox.ProbeWorkData`:
 
 ```
@@ -814,8 +818,8 @@ library/
 **Add a new runtime backend:**
 1. Create `runtime/<name>/` package
 2. Implement the `runtime.Runtime` interface (see `runtime/podman/` for an example that embeds an existing backend and overrides only what differs)
-3. Declare a package-level `var descriptor = runtime.BackendDescriptor{...}` and call `runtime.Register(name, factory, descriptor)` in your package's `init()` function. The descriptor's `Name` must match the registration name. Return the same `descriptor` from your `Descriptor()` method.
-4. Add a blank import in the appropriate platform file (`yoloai.go` for all platforms, or a `_linux.go` / `_darwin.go` file for platform-specific backends)
+3. Declare a package-level `var descriptor = runtime.BackendDescriptor{...}` and call `runtime.Register(name, factory, descriptor)` in your package's `init()` function. The descriptor's `Type` must match the registration name. Return the same `descriptor` from your `Descriptor()` method.
+4. Add a blank import in the appropriate platform file (`client.go` for all platforms, or a `_linux.go` / `_darwin.go` file for platform-specific backends)
 5. Backend is selectable via `--backend` flag (on new/build/setup) or `backend` config. Lifecycle commands read backend from sandbox `environment.json`
 
 **Add capability checks for a backend:**
