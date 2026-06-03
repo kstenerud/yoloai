@@ -452,6 +452,22 @@ After the bootstrap the stamp is the **only** signal consulted — a stamped lay
 
 **Consequences.** Breaking (beta) — tracked in `BREAKING-CHANGES.md` ("`SystemClient` collapsed into `Client.System()`"). Drains the 2026-06-03 Public-API round (A1 by principle, A2/A3 here, A4 abandoned). `make check` green after each of C1–C4.
 
+## D68 — Kind enums read as "type", not "name": `AgentType` / `BackendType` all the way down
+
+**Date:** 2026-06-03. **Status:** Accepted (owner, 2026-06-03). **Applies** development-principles §4 (parse-don't-validate / typed boundary values). **Implemented** on `layering-refactor` (commits C1 `054a52e` → C4 `fa106dc`), following D67.
+
+**The decision.** The word "agent" was overloaded across the public surface: `Agent` the running-agent handle (`Sandbox.Agent()`), `AgentName` the kind enum, and fields named `Agent` typed as that enum — a reader could not tell an *instance label* from a *finite kind*. Resolve it with one rule: **Type = one of a fixed set; Name = an arbitrary instance label.** Apply it to both kind enums (agent and backend) and go all the way down through the internal packages.
+
+**What changed.**
+- **Enum types (C1).** `AgentName` → `AgentType`, `BackendName` → `BackendType` (public aliases + internal `internal/agent`, `internal/runtime` definitions); `AllAgentNames()` → `AllAgentTypes()`. Value consts keep their bare-concept prefix (`AgentClaude`, `BackendDocker`) — the prefix already reads as the concept, and `AgentTypeClaude` would stutter.
+- **Catalog/descriptor `.Name` fields (C2).** `AgentInfo`, `BackendInfo`, `agent.Definition`, and `runtime.BackendDescriptor` carried a `Name` field that actually held the kind; renamed to `Type` and typed as the enum (`AgentInfo.Name string` → `Type AgentType`).
+- **Enum-typed fields (C3).** Every field whose type is the enum now carries the type word: `CreateOptions.Agent` → `AgentType`, `Options.Backend` → `BackendType`, and the same on `RunOptions`/`CheckOptions`/`BuildOptions`/`Environment`/`ProfileSummary`/`VscodeAttach`/`ImageCleanupHint`/`PruneItem` and the internal store `Environment`. JSON/YAML tags (`agent`, `backend`) are unchanged, so wire formats are unaffected.
+- **Catalog accessors (C4).** `System.Agents()` / `Backends()` → `System.AgentTypes()` / `BackendTypes()`. They return `AgentInfo`/`BackendInfo` *descriptions of the types to choose from*, not runnable handles; the old names invited the misread "give me the agents/backends to use." The `SystemInfo.Backends` report field is data, not an accessor, and is left as-is.
+
+**What did not change.** Genuine instance labels keep `Name` (`Sandbox.Name()`, `Environment.Name`, profile names, display structs). Free-form selectors that are not finite enums keep natural names (`Model string`, `Profile string`). The `Sandbox.Agent()` running-agent handle and the string-typed `config.Config.Agent` field are untouched; CLI `--agent`/`--backend` flags are untouched.
+
+**Consequences.** Breaking (beta) — tracked in `BREAKING-CHANGES.md`. The surface is unreleased (`layering-refactor` not pushed), so this rides the same release as D67. `make check` green after each of C1–C4.
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.

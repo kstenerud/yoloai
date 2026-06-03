@@ -16,8 +16,8 @@ are wrong:
    *entire tree* beneath `X`. `f1KnownLeaks` being empty means "no leaks *not hidden
    behind an alias*," not "no leaks." Confirmed live leak: `yoloai.Info`
    (`= sandbox.Info` → `status.Info`) carries `Meta *store.Meta`, an internal iceberg
-   (`WorkdirMeta`, `[]DirMeta`, `DirMode`, `runtime.IsolationMode`, `runtime.BackendName`,
-   `agent.AgentName`, `*config.ResourceLimits`) returned by `Client.Run`/`List`,
+   (`WorkdirMeta`, `[]DirMeta`, `DirMode`, `runtime.IsolationMode`, `runtime.BackendType`,
+   `agent.AgentType`, `*config.ResourceLimits`) returned by `Client.Run`/`List`,
    `Sandbox.Inspect`, `SystemClient.ListAcrossBackends` — the four most central entry
    points. An embedder holding a `*yoloai.Info` cannot name `.Meta`.
 
@@ -70,7 +70,7 @@ is small; the metadata one *is* Phase 1b.
 | Sandbox metadata / workdir-mode read | `store.LoadMeta()` in `cli/workflow/{apply,diff,baseline}.go` + mcpsrv | `Sandbox.Metadata()` (= Phase 1b) |
 | Agent-log read | `store.AgentLogPath()` (mcpsrv `sandbox_log`) | `Sandbox.AgentLog()` (distinct from `ContainerLogs`) |
 | File exchange (Q&A side-channel) | `store.FilesDir()` (mcpsrv `sandbox_files_*`) | `Sandbox.Files()` sub-handle (list/read/write) |
-| Agent/model + backend discovery | `agent.AllAgentNames()`/`GetAgent()`, `runtime.Descriptors()` | `yoloai.Agents()` / `yoloai.Backends()` |
+| Agent/model + backend discovery | `agent.AllAgentTypes()`/`GetAgent()`, `runtime.Descriptors()` | `System.AgentTypes()` / `System.BackendTypes()` |
 | Stored-prompt get/set | `store.PromptFilePath()` (`sandbox prompt`) | prompt get/set verb (AGENT noun) |
 | Git tag create | `workspace.CreateTag()` in `cli/workflow/apply.go` | `Workdir().CreateTag()` (sibling of `Tags`) |
 | Extensions | `internal/cli/extension` (CLI `x`) | ✅ resolved — CLI-private, no verb (D66); package relocated `390f83f` |

@@ -4,6 +4,37 @@ Tracks breaking changes made during beta. Each entry should be included in relea
 
 ## Unreleased
 
+### Kind enums renamed: `AgentName`/`BackendName` → `AgentType`/`BackendType`
+
+The two kind enums and every field/accessor typed by them now read as "type"
+rather than "name", because they name one of a fixed set of kinds — not an
+arbitrary instance label.
+
+- **Types:** `AgentName` → `AgentType`, `BackendName` → `BackendType`. Value
+  constants are unchanged (`AgentClaude`, `BackendDocker`, …).
+- **Fields:** the enum-typed field on every public struct gains the type word —
+  `CreateOptions.Agent` → `AgentType`, `Options.Backend` → `BackendType`, and the
+  same on `RunOptions`, `CheckOptions`, `BuildOptions`, `Environment`,
+  `ProfileSummary`, `VscodeAttach`, `ImageCleanupHint`, and `PruneItem`. The
+  catalog/descriptor structs `AgentInfo` and `BackendInfo` rename their `Name`
+  field to `Type` (now typed `AgentType`/`BackendType`).
+- **Accessors:** `System.Agents(...)` → `System.AgentTypes(...)` and
+  `System.Backends(...)` → `System.BackendTypes(...)`. They return the catalog of
+  *types to choose from* (`AgentInfo`/`BackendInfo`), not runnable handles.
+
+**Unchanged:** genuine instance labels keep `Name` (`Sandbox.Name()`,
+`Environment.Name`, profile names). The `Sandbox.Agent()` running-agent handle,
+free-form selectors (`Model`, `Profile`), JSON/YAML wire keys (`agent`,
+`backend`), and the CLI `--agent`/`--backend` flags are all unchanged.
+
+**Migration:** rename the types and fields at call sites
+(`Options{Backend: …}` → `Options{BackendType: …}`, `CreateOptions{Agent: …}` →
+`CreateOptions{AgentType: …}`, `info.Name` → `info.Type` on `AgentInfo`/
+`BackendInfo`) and switch `System.Agents`/`Backends` calls to
+`System.AgentTypes`/`BackendTypes`. Earlier entries in this changelog that name
+`AgentName`/`BackendName`, the `Agent`/`Backend` fields, or `Agents()`/`Backends()`
+refer to the same surface under its new name.
+
 ### `SystemClient` collapsed into `Client.System()`; `Options.Backend` now optional
 
 The standalone `SystemClient` type, its constructor `NewSystemClient`, and the

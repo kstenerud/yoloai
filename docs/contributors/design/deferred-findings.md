@@ -16,7 +16,7 @@ it must exist so the item can be evaluated for eviction later. Newest first.
 - **Disposition:** PARKED — deliberately not half-converted ad-hoc; sequenced with D58/D59.
 - **Description:** `development-principles.md` §4 holds up parse-don't-validate as the convention
   for security-relevant boundary values, and most are genuine parsed types (`MountMode`,
-  `AllowedDomain`, `AgentName`, the W-L8a `yoloai.NetworkMode/IsolationMode/ApplyMode/LogFormat`,
+  `AllowedDomain`, `AgentType`, the W-L8a `yoloai.NetworkMode/IsolationMode/ApplyMode/LogFormat`,
   `Patch`, `BackendDescriptor`). **Two are not:** sandbox name is guarded by
   `store.ValidateName(string) error` (`internal/sandbox/store/paths.go`) and workdir path by
   `config.ExpandPath(...)` returning a bare `string` (`internal/config/pathutil.go`). Both are

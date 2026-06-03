@@ -119,14 +119,14 @@ The flip side — the comply-or-complain contract spelled out:
 
 The downward half — policy must not know the *how*:
 
-- **The F1 / Layer-1 carve** (D55, the G7 series) fenced the CLI off `internal/runtime` entirely: handlers speak only the public `yoloai.*` surface (`BackendName`, `IsolationMode`, `SelectBackend`, `SystemClient.CheckBackend`), and runtime construction lives behind public verbs. When the CLI needed a backend probe it gained `SystemClient.CheckBackend` rather than reaching for `runtime.New` — a reach-through becomes a new public verb. The one sanctioned exception (`internal/cli/system/tart` importing `internal/runtime/tart`) is depguard-scoped to that single package.
+- **The F1 / Layer-1 carve** (D55, the G7 series) fenced the CLI off `internal/runtime` entirely: handlers speak only the public `yoloai.*` surface (`BackendType`, `IsolationMode`, `SelectBackend`, `System.CheckBackend`), and runtime construction lives behind public verbs. When the CLI needed a backend probe it gained `System.CheckBackend` rather than reaching for `runtime.New` — a reach-through becomes a new public verb. The one sanctioned exception (`internal/cli/system/tart` importing `internal/runtime/tart`) is depguard-scoped to that single package.
 - **Enforcement teeth, not just convention:** the F1 leak detector (`TestPublicAPI_NoInternalLeaks`, alias-descent aware) fails the build if a public type exposes an internal one, and depguard fails the build if a leaf package imports across a forbidden boundary. The principle is mechanically checked, so drift surfaces at CI time, not review time.
 
 Comply-or-complain (the mechanism side):
 
 - **Create refuses, never prompts** (D24): a dirty workdir → `*DirtyWorkdirError`, unverified `requires:` → a warning, an active sandbox on destroy → `*ActiveWorkError`. The CLI catches each, prompts, and retries with the named ack (`AllowDirtyWorkdir`, `Force`). The library has no terminal.
 - **Apply complains on a non-git target** (D26): `Workdir().Apply` with the default (series replay) on a non-git host path returns a `*UsageError` instead of silently degrading to a net-diff apply; the CLI checks `IsGitRepo` and selects `NoCommit` itself.
-- **No ambient backend default** (F4): empty `Options.Backend` is a `*UsageError`, not a silent docker fallback — backend selection (which probes installed daemons) is policy, resolved at the boundary via the explicit `SelectBackend` helper.
+- **No ambient backend default** (F4): an empty `Options.BackendType` selects no persistent backend rather than silently falling back to docker — a backend-bound op then returns the typed `ErrBackendRequired`. Backend selection (which probes installed daemons) is policy, resolved at the boundary via the explicit `SelectBackend` helper.
 
 ### Cost-vs-benefit
 
@@ -193,7 +193,7 @@ For every domain concept yoloAI cares about:
 | Workdir path                      | `string`          | `ResolvedPath` †        | Symlink-resolved (D6), not a dangerous-dir       |
 | Mount mode (`copy`/`overlay`/...) | `string`          | `MountMode`             | Enum value validated                              |
 | Network allowlist domain          | `string`          | `AllowedDomain`         | Valid hostname, not localhost (commit `4d9f7f6`)  |
-| Agent name                        | `string`          | `AgentName`             | Known agent in the registry                       |
+| Agent type                        | `string`          | `AgentType`             | Known agent in the registry                       |
 | Backend descriptor (W11)          | (factory return)  | `BackendDescriptor`     | Capabilities enumerated                           |
 | Patch (D9)                        | `[]byte`          | `Patch` (`internal/sandbox/patch/`) | Valid `git format-patch` output                   |
 | Network policy (W-L8a)            | `(bool, bool)`    | `yoloai.NetworkMode`    | "Open / isolated / none" — invalid combo unrepresentable |
@@ -218,7 +218,7 @@ Cost of applying: more types, more parser functions, more import boundaries. Dam
 
 ### Empty string isn't a free default
 
-A corollary worth calling out: `""` is **not** a valid value for typed-name / config / identity fields unless we can demonstrate a clear benefit to admitting it. The "valid combinations" framing above explicitly includes the empty value — an `Options.Backend BackendName` field with `""` accepted as "use the default" is the same pathology as `(NetworkIsolated bool, NetworkNone bool)` admitting both true.
+A corollary worth calling out: `""` is **not** a valid value for typed-name / config / identity fields unless we can demonstrate a clear benefit to admitting it. The "valid combinations" framing above explicitly includes the empty value — an `Options.BackendType BackendType` field with `""` accepted as "use the default" is the same pathology as `(NetworkIsolated bool, NetworkNone bool)` admitting both true.
 
 Concrete failure mode: an embedder constructs `Options{}` and gets *whatever* the library decides "default backend" means today. That decision flows through `runtime.SelectContainerBackend` and ends up depending on which daemons are installed on the host. The caller's Client now silently carries a backend the caller never named. Same shape as ambient HOME (§12): implicit resolution happens in library code, the answer depends on environmental state, the caller can't reason about behavior from inputs alone.
 
@@ -238,7 +238,7 @@ A public contract type (one an embedder holds — an Options struct, a result st
 
 **The swap trigger is only partly automatic.** The F1 leak detector (`TestPublicAPI_NoInternalLeaks`) fails the build when a field whose type lives in `internal/…` appears on the public surface — that is the forcing function that catches an internal-*typed* field added to an aliased struct. But it does **not** catch a field of a primitive or already-public type (e.g. a stray `DebugTraceID string`): that publishes silently through the alias. So reviewers must still catch primitive *mechanism* fields by eye, or consciously accept that a stray primitive is low-harm (embedders ignore unknown fields). Aliasing is "start permissive, tighten on demand" with the detector as a *partial* tripwire — not a complete one.
 
-**Always-alias exemption: pure enums / typed strings** (`BackendName`, `IsolationMode`, `DirMode`, `Status`, `LogSource`, …). The underlying type is `string` with no hidden fields, so there is nothing to leak and a mirror would only force conversion churn at every call site. These alias permanently.
+**Always-alias exemption: pure enums / typed strings** (`BackendType`, `AgentType`, `IsolationMode`, `DirMode`, `Status`, `LogSource`, …). The underlying type is `string` with no hidden fields, so there is nothing to leak and a mirror would only force conversion churn at every call site. These alias permanently.
 
 ### Sources
 

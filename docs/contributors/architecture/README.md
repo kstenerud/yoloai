@@ -370,7 +370,7 @@ On-disk sandbox state — paths, metadata, and creation-completion flags. Leaf s
 | File | Purpose |
 |------|---------|
 | `paths.go` | `EncodePath()` / `DecodePath()` — caret encoding for filesystem-safe names. `InstanceName(principal, name)` — principal-aware runtime handle: `yoloai-<name>` for the default `""` principal, `yoloai-<principal>-<name>` otherwise (D62). `Dir()`, `WorkDir()`, `RequireSandboxDir()`. `OverlayUpperDir()` / `OverlayOvlworkDir()` for `:overlay` mount paths. `ValidateName()` delegates to `config.ParseSandboxName` (containerd-conformant grammar). Centralized filename constants (`EnvironmentFile`, `RuntimeConfigFile`, `AgentStatusFile`, `SandboxStateFile`, etc.) and `ErrSandboxNotFound`. |
-| `environment.go` | `Environment` / `WorkdirEnvironment` / `DirEnvironment` structs, `SaveEnvironment()` / `LoadEnvironment()` — sandbox metadata persistence as `environment.json`. `Environment.Backend` records which runtime backend was used; `Environment.Principal` records the owning principal (D62). |
+| `environment.go` | `Environment` / `WorkdirEnvironment` / `DirEnvironment` structs, `SaveEnvironment()` / `LoadEnvironment()` — sandbox metadata persistence as `environment.json`. `Environment.BackendType` records which runtime backend was used; `Environment.Principal` records the owning principal (D62). |
 | `sandbox_state.go` | `SandboxState` struct, `LoadSandboxState()`, `SaveSandboxState()` — per-sandbox runtime state (`sandbox-state.json`, legacy: `state.json`). Tracks `agent_files_initialized` and `on_create_commands_done`. Separate from `Environment` which is immutable after creation. |
 
 ### `workspace/`
