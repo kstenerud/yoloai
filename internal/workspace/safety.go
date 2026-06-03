@@ -96,7 +96,7 @@ func CheckDirtyRepo(path string) (string, error) {
 	cmd := exec.Command("git", "-C", path, "status", "--porcelain") //nolint:gosec // G204: args are not user-controlled
 	output, err := cmd.Output()
 	if err != nil {
-		return "", nil //nolint:nilerr // git command failed; don't block sandbox creation
+		return "", fmt.Errorf("git status in %q: %w", path, err)
 	}
 
 	if len(output) == 0 {

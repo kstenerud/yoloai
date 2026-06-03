@@ -188,12 +188,16 @@ func Run(ctx context.Context, d state.Deps, opts Options) (name string, err erro
 }
 
 // checkUnappliedWork checks if the named sandbox has any unapplied work
-// (uncommitted changes or commits beyond the baseline). Returns an error
-// if work would be lost.
+// (uncommitted changes or commits beyond the baseline). Returns an error if
+// work would be lost, or if a present-but-unreadable environment.json means
+// unapplied work cannot be ruled out (callers bypass with --force).
 func checkUnappliedWork(name string, sandboxDir string) error {
 	meta, err := store.LoadEnvironment(sandboxDir)
 	if err != nil {
-		return nil //nolint:nilerr // can't load meta — nothing to protect
+		if errors.Is(err, os.ErrNotExist) {
+			return nil // no environment.json (e.g. interrupted creation) — genuinely nothing to protect
+		}
+		return fmt.Errorf("cannot verify unapplied work in sandbox %q: %w (pass --force to replace without this check)", name, err)
 	}
 
 	if meta.Workdir.Mode == "copy" || meta.Workdir.Mode == "overlay" {

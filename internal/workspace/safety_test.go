@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -92,6 +93,18 @@ func TestCheckDirtyRepo_NotGitRepo(t *testing.T) {
 
 	warning, err := CheckDirtyRepo(dir)
 	require.NoError(t, err)
+	assert.Empty(t, warning)
+}
+
+func TestCheckDirtyRepo_GitStatusFailureIsError(t *testing.T) {
+	dir := t.TempDir()
+	// A present-but-invalid .git (empty dir) makes `git status` fail. The
+	// guard must surface the failure, not silently report "clean".
+	require.NoError(t, os.Mkdir(filepath.Join(dir, ".git"), 0o750))
+
+	warning, err := CheckDirtyRepo(dir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "git status")
 	assert.Empty(t, warning)
 }
 

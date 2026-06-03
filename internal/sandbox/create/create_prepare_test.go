@@ -42,6 +42,28 @@ func writeTestFile(t *testing.T, dir, name, content string) {
 	testutil.WriteFile(t, dir, name, content)
 }
 
+// --- checkUnappliedWork ---
+
+// A corrupt-but-present environment.json must NOT be treated as "nothing to
+// protect": replace runs Teardown next, so silently returning nil could
+// destroy unapplied work. It must fail loud instead.
+func TestCheckUnappliedWork_CorruptEnvironmentIsError(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, store.EnvironmentFile), []byte("{not valid json"), 0o600))
+
+	err := checkUnappliedWork("box", dir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot verify unapplied work")
+}
+
+// A genuinely absent environment.json (e.g. interrupted creation) has nothing
+// to protect, so the guard passes.
+func TestCheckUnappliedWork_AbsentEnvironmentIsNil(t *testing.T) {
+	dir := t.TempDir()
+
+	require.NoError(t, checkUnappliedWork("box", dir))
+}
+
 // --- buildNetworkConfig ---
 
 func TestBuildNetworkConfig_Default(t *testing.T) {
