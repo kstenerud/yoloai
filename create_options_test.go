@@ -37,7 +37,7 @@ func TestCreateOptions_toInternal_DefaultsModeAndFoldsAck(t *testing.T) {
 	assert.Equal(t, "box", in.Name)
 	assert.Equal(t, DirModeCopy, in.Workdir.Mode, "empty workdir mode defaults to copy")
 	assert.True(t, in.Workdir.AllowDirty, "AllowDirtyWorkdir folds into Workdir.AllowDirty")
-	assert.True(t, in.Force, "AbandonUnappliedWork maps onto the internal Force safety override")
+	assert.True(t, in.AbandonUnappliedWork, "AbandonUnappliedWork carries through to the internal create options")
 	assert.Equal(t, "claude", in.Agent, "AgentName converts to string")
 	assert.Equal(t, []string{"3000:80"}, in.Ports, "PortMappings render to host:container")
 }

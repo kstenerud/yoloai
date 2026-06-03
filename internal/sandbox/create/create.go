@@ -81,30 +81,30 @@ type DirSpec = state.DirSpec
 
 // Options holds all parameters for sandbox creation.
 type Options struct {
-	Name         string
-	Workdir      DirSpec               // primary working directory
-	AuxDirs      []DirSpec             // auxiliary directories
-	Agent        string                // agent name (e.g., "claude", "test")
-	Model        string                // model name or alias (e.g., "sonnet", "claude-sonnet-4-latest")
-	Profile      string                // profile name (from --profile flag)
-	Prompt       string                // prompt text (from --prompt)
-	PromptFile   string                // prompt file path (from --prompt-file)
-	Network      NetworkMode           // network access policy
-	NetworkAllow []string              // --network-allow flags
-	Ports        []string              // --port flags (e.g., ["3000:3000"])
-	Replace      bool                  // --replace flag (safe: errors if unapplied work exists)
-	Force        bool                  // --force flag (unconditional replace, skips safety check)
-	NoStart      bool                  // --no-start flag
-	Passthrough  []string              // args after -- passed to agent
-	Version      string                // yoloAI version for environment.json
-	Debug        bool                  // --debug flag (enable entrypoint debug logging)
-	CPUs         string                // --cpus flag (e.g., "4", "2.5")
-	Memory       string                // --memory flag (e.g., "8g", "512m")
-	Env          map[string]string     // --env flags (KEY=VAL pairs)
-	Isolation    runtime.IsolationMode // --isolation flag (e.g., IsolationModeContainerEnhanced, IsolationModeVM)
-	Runtimes     []string              // --runtime flags (Apple simulator runtimes, e.g., ["ios", "tvos:26.1"])
-	VscodeTunnel bool                  // --vscode-tunnel flag
-	Archetype    string                // --archetype flag (empty = auto-detect)
+	Name                 string
+	Workdir              DirSpec               // primary working directory
+	AuxDirs              []DirSpec             // auxiliary directories
+	Agent                string                // agent name (e.g., "claude", "test")
+	Model                string                // model name or alias (e.g., "sonnet", "claude-sonnet-4-latest")
+	Profile              string                // profile name (from --profile flag)
+	Prompt               string                // prompt text (from --prompt)
+	PromptFile           string                // prompt file path (from --prompt-file)
+	Network              NetworkMode           // network access policy
+	NetworkAllow         []string              // --network-allow flags
+	Ports                []string              // --port flags (e.g., ["3000:3000"])
+	Replace              bool                  // --replace flag (safe: errors if unapplied work exists)
+	AbandonUnappliedWork bool                  // let Replace destroy a sandbox holding unapplied work (skips the safety check; CLI --force)
+	NoStart              bool                  // --no-start flag
+	Passthrough          []string              // args after -- passed to agent
+	Version              string                // yoloAI version for environment.json
+	Debug                bool                  // --debug flag (enable entrypoint debug logging)
+	CPUs                 string                // --cpus flag (e.g., "4", "2.5")
+	Memory               string                // --memory flag (e.g., "8g", "512m")
+	Env                  map[string]string     // --env flags (KEY=VAL pairs)
+	Isolation            runtime.IsolationMode // --isolation flag (e.g., IsolationModeContainerEnhanced, IsolationModeVM)
+	Runtimes             []string              // --runtime flags (Apple simulator runtimes, e.g., ["ios", "tvos:26.1"])
+	VscodeTunnel         bool                  // --vscode-tunnel flag
+	Archetype            string                // --archetype flag (empty = auto-detect)
 
 	// Output receives the create pipeline's human-readable progress (profile
 	// image build stream, advisory warnings). Per-call so concurrent Creates on
@@ -399,7 +399,7 @@ func validateAndLoadConfig(d state.Deps, opts Options) (*agent.Definition, strin
 		return nil, "", nil, nil, yoerrors.NewUsageError("unknown agent: %s", opts.Agent)
 	}
 
-	if opts.Force {
+	if opts.AbandonUnappliedWork {
 		opts.Replace = true
 	}
 
@@ -480,7 +480,7 @@ func replaceSandboxIfNeeded(ctx context.Context, d state.Deps, opts Options, san
 	if _, err := os.Stat(sandboxDir); os.IsNotExist(err) {
 		return nil // nothing to replace
 	}
-	if !opts.Force {
+	if !opts.AbandonUnappliedWork {
 		if err := checkUnappliedWork(opts.Name, sandboxDir); err != nil {
 			return err
 		}
