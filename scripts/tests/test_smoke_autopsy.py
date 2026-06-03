@@ -157,13 +157,13 @@ def test_baseline_save_and_diff_reports_stall(
     monkeypatch.setattr(smoke_test, "_BASELINE_ROOT", tmp_path / "baselines")
 
     # A live, passing sandbox that got all the way to agent.ready.
-    sb_logs = tmp_path / ".yoloai" / "sandboxes" / "sb-good" / "logs"
-    _write_jsonl(sb_logs / "monitor.jsonl", [
+    sb_dir = tmp_path / ".yoloai" / "library" / "sandboxes" / "sb-good"
+    _write_jsonl(sb_dir / "logs" / "monitor.jsonl", [
         ("2026-05-29T03:19:50", "tmux.start", "x"),
         ("2026-05-29T03:19:52", "sandbox.tmux_new_session", "x"),
         ("2026-05-29T03:19:55", "agent.ready", "x"),
     ])
-    (tmp_path / ".yoloai" / "sandboxes" / "sb-good" / "environment.json").write_text("{}")
+    (sb_dir / "environment.json").write_text("{}")
 
     ctx = _make_ctx(tmp_path)
     smoke_test.save_baseline(ctx, "full_workflow/tart", ["sb-good"])

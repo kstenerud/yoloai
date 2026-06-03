@@ -53,6 +53,21 @@ STALL_IDLE_COUNT = 3    # consecutive idle polls before declaring a stall (3×3s
 # Terminal sandbox statuses that mean the agent will never write the sentinel.
 STALL_TERMINAL = {"done", "failed", "stopped", "removed", "broken", "unavailable"}
 
+# Host data-dir layout (D60 bifurcation): the top dir defaults to ~/.yoloai and
+# splits into ~/.yoloai/library (sandboxes, profiles, config, ...) and
+# ~/.yoloai/cli (CLI app state). Sandbox state lives under the library namespace.
+# Resolve Path.home() lazily on each call so tests can monkeypatch the home dir.
+
+
+def library_dir() -> Path:
+    """TOP/library — the library data dir holding sandboxes, config, etc."""
+    return Path.home() / ".yoloai" / "library"
+
+
+def sandbox_state_dir(name: str) -> Path:
+    """Host path to a sandbox's state dir (TOP/library/sandboxes/<name>)."""
+    return library_dir() / "sandboxes" / name
+
 
 # ---------------------------------------------------------------------------
 # Data structures
@@ -81,7 +96,7 @@ class BackendSpec:
     def exchange_dir(self, sandbox_name: str) -> str:
         """Return the exchange dir path as seen from inside the sandbox."""
         if self.is_seatbelt:
-            return str(Path.home() / ".yoloai" / "sandboxes" / sandbox_name / "files")
+            return str(sandbox_state_dir(sandbox_name) / "files")
         if self.is_vm and self.os == "mac":  # Tart VMs
             # Tart setup creates /Users/admin/.yoloai → /Volumes/My Shared Files/yoloai
             # (virtiofs path has spaces; the symlink is space-free).
@@ -452,7 +467,7 @@ class Test:
 # Test runner
 # ---------------------------------------------------------------------------
 
-# Files and directories copied out of ~/.yoloai/sandboxes/<name>/ when a test
+# Files and directories copied out of TOP/library/sandboxes/<name>/ when a test
 # fails. Kept intentionally narrow: enough to answer "did the prompt arrive,
 # did the agent launch, what status did it land in, what files did it touch"
 # without dragging in credentials (agent-state/) or build caches (cache/).
@@ -495,7 +510,7 @@ def _sudo_uid_gid() -> tuple[Optional[int], Optional[int]]:
 def _fix_preserved_perms(target: Path) -> None:
     """Chown to the sudo invoker (if any) and widen perms to 755/644.
 
-    Sandbox source files under ~/.yoloai/sandboxes/ are often mode 600/700 and
+    Sandbox source files under TOP/library/sandboxes/ are often mode 600/700 and
     root-owned when the smoke test ran under sudo. shutil.copy2/copytree
     preserve those perms, which then trips `golangci-lint ./...` during the
     next `make check` (the user's shell can't traverse root:700 dirs). Open
@@ -643,7 +658,7 @@ def _probe_network(sandbox_name: str) -> Optional[str]:
         "unreachable [tcp failed | dns=ok route=ok tcp=fail https=exit 28]"
         "unreachable [https failed | dns=ok route=ok tcp=ok https=exit 35]"
     """
-    env_path = Path.home() / ".yoloai" / "sandboxes" / sandbox_name / "environment.json"
+    env_path = sandbox_state_dir(sandbox_name) / "environment.json"
     if not env_path.is_file():
         return None
     try:
@@ -695,7 +710,7 @@ def _write_monitor_tail(sandbox_name: str, dest_dir: Path) -> bool:
     Best-effort — returns False if monitor.jsonl is missing/empty/malformed,
     True if anything was written.
     """
-    src = Path.home() / ".yoloai" / "sandboxes" / sandbox_name / "logs" / "monitor.jsonl"
+    src = sandbox_state_dir(sandbox_name) / "logs" / "monitor.jsonl"
     if not src.is_file():
         return False
     try:
@@ -803,7 +818,7 @@ def _summarize_network_probe_events(sandbox_name: str) -> Optional[str]:
     warm-up race. Silent absence means the probe didn't fire at all (e.g.
     non-containerd backends).
     """
-    cli_jsonl = Path.home() / ".yoloai" / "sandboxes" / sandbox_name / "logs" / "cli.jsonl"
+    cli_jsonl = sandbox_state_dir(sandbox_name) / "logs" / "cli.jsonl"
     if not cli_jsonl.is_file():
         return None
     try:
@@ -832,11 +847,11 @@ def _summarize_network_probe_events(sandbox_name: str) -> Optional[str]:
 
 
 def _preserve_sandbox(yoloai_bin: str, sandbox_name: str, dest_parent: Path) -> Optional[Path]:
-    """Copy diagnostic state from ~/.yoloai/sandboxes/<sandbox_name>/ to
+    """Copy diagnostic state from TOP/library/sandboxes/<sandbox_name>/ to
     dest_parent/<sandbox_name>/. Returns the target dir, or None if the source
     doesn't exist (e.g. the test failed before the sandbox was created).
     """
-    src = Path.home() / ".yoloai" / "sandboxes" / sandbox_name
+    src = sandbox_state_dir(sandbox_name)
     if not src.is_dir():
         return None
     target = dest_parent / sandbox_name
@@ -1196,13 +1211,12 @@ def _read_environment(sandbox_dir: Path) -> dict[str, object]:
 def save_baseline(ctx: RunContext, test_name: str, sandbox_names: list[str]) -> None:
     """Snapshot last-good event names + environment for a passing test.
 
-    Reads from the still-live ~/.yoloai/sandboxes/<name>/ dirs (preservation
+    Reads from the still-live TOP/library/sandboxes/<name>/ dirs (preservation
     only happens on failure, and cleanup runs at exit). Best-effort: any error
     just skips the snapshot — a missing baseline only means no diff later."""
     if not sandbox_names:
         return
-    sandboxes_root = Path.home() / ".yoloai" / "sandboxes"
-    logs_dirs = [sandboxes_root / n / "logs" for n in sandbox_names]
+    logs_dirs = [sandbox_state_dir(n) / "logs" for n in sandbox_names]
     events = _collect_log_events(logs_dirs)
     if not events:
         return
@@ -1213,7 +1227,7 @@ def save_baseline(ctx: RunContext, test_name: str, sandbox_names: list[str]) -> 
         if ev not in seen:
             seen.add(ev)
             event_names.append(ev)
-    environment = _read_environment(sandboxes_root / sandbox_names[0])
+    environment = _read_environment(sandbox_state_dir(sandbox_names[0]))
     record = {
         "test": test_name,
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
