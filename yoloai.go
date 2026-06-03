@@ -475,8 +475,9 @@ func attachStatusOK(status sandbox.Status, name string) error {
 // materializes safe declarative defaults (defaults/config.yaml,
 // defaults/tmux.conf), builds the base image if needed, and stamps the
 // library schema version. Safe to call before every sandbox operation —
-// each step is a no-op once its artifact exists. The interactive setup
-// wizard is a separate flow — see SystemClient.SetupStatus / SystemClient.Setup.
+// each step is a no-op once its artifact exists. Choosing non-default values
+// (default backend/agent, tmux mode) is a separate concern handled by writing
+// config via SystemClient.Config().Set — the library has no setup-wizard verb.
 func (c *Client) EnsureSetup(ctx context.Context) error {
 	return c.manager.EnsureSetup(ctx, c.output)
 }

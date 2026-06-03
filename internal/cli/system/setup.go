@@ -1,7 +1,7 @@
-// ABOUTME: `yoloai system setup` — interactive setup wizard. Asks the user
-// ABOUTME: about tmux config / default backend / default agent, then writes
-// ABOUTME: the answers via yoloai.SystemClient.Setup. Q-F: prompts live in
-// ABOUTME: this CLI file so the library Setup is non-interactive.
+// ABOUTME: `yoloai system setup` — interactive setup wizard. Inspects the host
+// ABOUTME: (tmux config, available backends/agents), prompts the user, then
+// ABOUTME: writes the three answers via the public yoloai.SystemClient.Config()
+// ABOUTME: set verb. All host-inspection / prompting / auto-pick is CLI policy.
 package system
 
 import (
@@ -9,91 +9,205 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
+	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+	tmuxres "github.com/kstenerud/yoloai/internal/resources/tmux"
 
 	"github.com/kstenerud/yoloai"
 	"github.com/spf13/cobra"
 )
 
-// runSystemSetup is `yoloai system setup`'s entry point. Inspects the
-// host via SystemClient.SetupStatus, then fills SetupOptions from
-// flags or interactive prompts, then calls SystemClient.Setup.
+// validTmuxConf lists the accepted values for the --tmux-conf flag and the
+// values the wizard writes for tmux_conf.
+var validTmuxConf = []string{"default", "default+host", "host", "none"}
+
+// significantLineThreshold separates a "minimal" ~/.tmux.conf (the wizard
+// offers to merge yoloai defaults) from a "power-user" one (auto-configured to
+// default+host without a prompt).
+const significantLineThreshold = 10
+
+// tmuxClass classifies the user's existing ~/.tmux.conf.
+type tmuxClass int
+
+const (
+	tmuxNone  tmuxClass = iota // no ~/.tmux.conf on disk
+	tmuxSmall                  // ≤ significantLineThreshold significant lines
+	tmuxLarge                  // > significantLineThreshold significant lines
+)
+
+// setupChoice is one numbered option (a backend or an agent) in a wizard prompt.
+type setupChoice struct {
+	Name  string
+	Blurb string
+}
+
+// runSystemSetup is `yoloai system setup`'s entry point. It inspects the host
+// itself, resolves each of the three answers (from a flag, an auto-pick, or an
+// interactive prompt), then persists them via SystemClient.Config().Set.
 //
-// Returns nil and writes nothing if the user chooses [p] at the tmux
-// prompt (preview-then-exit, intentional).
+// Returns nil and writes nothing if the user chooses [p] at the tmux prompt
+// (preview-then-exit, intentional).
 func runSystemSetup(cmd *cobra.Command) error {
 	sc := cliutil.NewSystemClient()
 	ctx := cmd.Context()
 
-	status, err := sc.SetupStatus(ctx)
+	reader := bufio.NewReader(cmd.InOrStdin())
+	out := cmd.ErrOrStderr()
+
+	backends := availableBackends(ctx, sc)
+	agents := availableAgents(sc)
+
+	tmuxConf, previewed, err := resolveTmuxConf(ctx, cmd, reader, out)
+	if err != nil {
+		return err
+	}
+	if previewed {
+		// User chose [p] — they wanted to inspect, not commit.
+		return nil
+	}
+
+	backendName, err := resolveChoice(ctx, reader, out, "backend", cliutil.FlagStr(cmd, "backend"), backends, "Default runtime backend:", 0)
 	if err != nil {
 		return err
 	}
 
-	agentFlag, _ := cmd.Flags().GetString("agent")
-	backendFlag, _ := cmd.Flags().GetString("backend")
-	tmuxConfFlag, _ := cmd.Flags().GetString("tmux-conf")
-
-	reader := bufio.NewReader(cmd.InOrStdin())
-	out := cmd.ErrOrStderr()
-
-	opts := yoloai.SetupOptions{
-		Agent:    yoloai.AgentName(agentFlag),
-		Backend:  yoloai.BackendName(backendFlag),
-		TmuxConf: tmuxConfFlag,
-	}
-
-	if opts.TmuxConf == "" {
-		var previewed bool
-		opts.TmuxConf, previewed, err = wizardTmuxConf(ctx, reader, out, status)
-		if err != nil {
-			return err
-		}
-		if previewed {
-			// User chose [p] — they wanted to inspect, not commit.
-			// Exit cleanly without touching config.
-			return nil
-		}
-	}
-
-	if opts.Backend == "" && len(status.AvailableBackends) > 1 {
-		choice, err := wizardChoice(ctx, reader, out, "Default runtime backend:", status.AvailableBackends, defaultBackendIdx(status.AvailableBackends))
-		if err != nil {
-			return err
-		}
-		opts.Backend = yoloai.BackendName(choice)
-	}
-
-	if opts.Agent == "" && len(status.AvailableAgents) > 1 {
-		choice, err := wizardChoice(ctx, reader, out, "Default agent:", status.AvailableAgents, defaultAgentIdx(status.AvailableAgents))
-		if err != nil {
-			return err
-		}
-		opts.Agent = yoloai.AgentName(choice)
-	}
-
-	if err := sc.Setup(ctx, opts); err != nil {
+	agentName, err := resolveChoice(ctx, reader, out, "agent", cliutil.FlagStr(cmd, "agent"), agents, "Default agent:", defaultAgentIdx(agents))
+	if err != nil {
 		return err
 	}
+
+	if err := sc.Config().Set(ctx, "tmux_conf", tmuxConf); err != nil {
+		return err
+	}
+	if backendName != "" {
+		if err := sc.Config().Set(ctx, "container_backend", backendName); err != nil {
+			return err
+		}
+	}
+	if agentName != "" {
+		if err := sc.Config().Set(ctx, "agent", agentName); err != nil {
+			return err
+		}
+	}
+
 	fmt.Fprintln(cmd.OutOrStdout(), "\nSetup complete. To re-run setup at any time: yoloai system setup") //nolint:errcheck
 	return nil
 }
 
-// wizardTmuxConf runs the tmux-config step of the wizard. Returns
-// (chosen mode, previewed, error). When previewed is true the caller
-// should exit without writing config.
+// availableBackends returns the backends offered as the user's default. Filters
+// the public catalog by (a) Platforms ∋ host GOOS, (b) Architectures ∋ host
+// GOARCH (empty = any arch), (c) not isolation-target-only (containerd is
+// reached via --isolation vm, never picked directly).
+func availableBackends(ctx context.Context, sc *yoloai.SystemClient) []setupChoice {
+	hostOS := runtime.GOOS
+	hostArch := runtime.GOARCH
+	var opts []setupChoice
+	for _, b := range sc.Backends(ctx, yoloai.BackendQuery{}) {
+		if b.IsolationTargetOnly {
+			continue
+		}
+		if !slices.Contains(b.Platforms, hostOS) {
+			continue
+		}
+		if len(b.Architectures) > 0 && !slices.Contains(b.Architectures, hostArch) {
+			continue
+		}
+		opts = append(opts, setupChoice{Name: string(b.Name), Blurb: b.Description})
+	}
+	return opts
+}
+
+// availableAgents returns the user-selectable agents (RealOnly excludes the
+// test/shell/idle pseudo-agents).
+func availableAgents(sc *yoloai.SystemClient) []setupChoice {
+	var opts []setupChoice
+	for _, a := range sc.Agents(yoloai.AgentQuery{RealOnly: true}) {
+		opts = append(opts, setupChoice{Name: a.Name, Blurb: a.Description})
+	}
+	return opts
+}
+
+// resolveTmuxConf returns the tmux_conf answer. With --tmux-conf set it
+// validates and returns it; otherwise it classifies ~/.tmux.conf and runs the
+// interactive prompt. The bool is true when the user chose [p] (preview-only).
+func resolveTmuxConf(ctx context.Context, cmd *cobra.Command, reader *bufio.Reader, out io.Writer) (string, bool, error) {
+	if flag := cliutil.FlagStr(cmd, "tmux-conf"); flag != "" {
+		if !slices.Contains(validTmuxConf, flag) {
+			return "", false, fmt.Errorf("invalid --tmux-conf value %q (valid: %s)", flag, strings.Join(validTmuxConf, ", "))
+		}
+		return flag, false, nil
+	}
+	class, userConfig := classifyTmuxConfig(cliutil.Layout().HomeDir)
+	return wizardTmuxConf(ctx, reader, out, class, userConfig)
+}
+
+// resolveChoice returns the chosen name for a backend/agent step. A non-empty
+// flag is validated against the available list; otherwise it auto-picks when
+// exactly one is available, prompts when several are, and returns "" (nothing
+// to write) when none are.
+func resolveChoice(ctx context.Context, reader *bufio.Reader, out io.Writer, kind, flag string, choices []setupChoice, heading string, defaultIdx int) (string, error) {
+	if flag != "" {
+		if !containsChoice(choices, flag) {
+			return "", fmt.Errorf("invalid --%s value %q (available: %s)", kind, flag, joinChoiceNames(choices))
+		}
+		return flag, nil
+	}
+	switch len(choices) {
+	case 0:
+		return "", nil
+	case 1:
+		return choices[0].Name, nil
+	default:
+		return wizardChoice(ctx, reader, out, heading, choices, defaultIdx)
+	}
+}
+
+// classifyTmuxConfig reads ~/.tmux.conf and returns its classification and
+// content. Returns tmuxNone with empty content if the file doesn't exist.
+func classifyTmuxConfig(homeDir string) (tmuxClass, string) {
+	data, err := os.ReadFile(filepath.Join(homeDir, ".tmux.conf")) //nolint:gosec // G304: standard config path
+	if err != nil {
+		return tmuxNone, ""
+	}
+	content := string(data)
+	if countSignificantLines(content) > significantLineThreshold {
+		return tmuxLarge, content
+	}
+	return tmuxSmall, content
+}
+
+// countSignificantLines counts non-blank, non-comment lines.
+// Note: scanner.Err() is not checked because strings.Reader never returns an
+// I/O error — Scan only returns false on EOF.
+func countSignificantLines(content string) int {
+	count := 0
+	scanner := bufio.NewScanner(strings.NewReader(content))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		count++
+	}
+	return count
+}
+
+// wizardTmuxConf runs the tmux-config step. Returns (chosen mode, previewed,
+// error). When previewed is true the caller should exit without writing config.
 //
-// Power-user shortcut: TmuxConfigLarge auto-picks "default+host"
-// without a prompt (the user has a substantial config they presumably
-// want to keep).
-func wizardTmuxConf(ctx context.Context, reader *bufio.Reader, out io.Writer, status *yoloai.SetupStatus) (string, bool, error) {
-	if status.TmuxClass == yoloai.TmuxConfigLarge {
+// Power-user shortcut: tmuxLarge auto-picks "default+host" without a prompt
+// (the user has a substantial config they presumably want to keep).
+func wizardTmuxConf(ctx context.Context, reader *bufio.Reader, out io.Writer, class tmuxClass, userConfig string) (string, bool, error) {
+	if class == tmuxLarge {
 		return "default+host", false, nil
 	}
-	noConfig := status.TmuxClass == yoloai.TmuxConfigNone
+	noConfig := class == tmuxNone
 
 	fmt.Fprintln(out) //nolint:errcheck
 	if noConfig {
@@ -104,7 +218,7 @@ func wizardTmuxConf(ctx context.Context, reader *bufio.Reader, out io.Writer, st
 		fmt.Fprintln(out, "include sensible defaults (mouse scroll, colors, vim-friendly settings).") //nolint:errcheck
 		fmt.Fprintln(out)                                                                             //nolint:errcheck
 		fmt.Fprintln(out, "Your config (~/.tmux.conf):")                                              //nolint:errcheck
-		for _, line := range strings.Split(strings.TrimRight(status.UserTmuxConfig, "\n"), "\n") {
+		for _, line := range strings.Split(strings.TrimRight(userConfig, "\n"), "\n") {
 			fmt.Fprintf(out, "  %s\n", line) //nolint:errcheck
 		}
 	}
@@ -131,11 +245,11 @@ func wizardTmuxConf(ctx context.Context, reader *bufio.Reader, out io.Writer, st
 	case "p":
 		fmt.Fprintln(out)                            //nolint:errcheck
 		fmt.Fprintln(out, "--- yoloai defaults ---") //nolint:errcheck
-		fmt.Fprint(out, status.DefaultTmuxConfig)    //nolint:errcheck
-		if !noConfig && status.UserTmuxConfig != "" {
+		fmt.Fprint(out, string(tmuxres.Embedded()))  //nolint:errcheck
+		if !noConfig && userConfig != "" {
 			fmt.Fprintln(out)                        //nolint:errcheck
 			fmt.Fprintln(out, "--- your config ---") //nolint:errcheck
-			fmt.Fprint(out, status.UserTmuxConfig)   //nolint:errcheck
+			fmt.Fprint(out, userConfig)              //nolint:errcheck
 		}
 		fmt.Fprintln(out) //nolint:errcheck
 		return "", true, nil
@@ -152,10 +266,9 @@ func wizardTmuxConf(ctx context.Context, reader *bufio.Reader, out io.Writer, st
 	}
 }
 
-// wizardChoice prompts for one of `choices` (1-indexed in the UI),
-// defaulting to `defaultIdx`. Returns the chosen name. Used for both
-// backend and agent picks.
-func wizardChoice(ctx context.Context, reader *bufio.Reader, out io.Writer, heading string, choices []yoloai.SetupChoice, defaultIdx int) (string, error) {
+// wizardChoice prompts for one of `choices` (1-indexed in the UI), defaulting
+// to `defaultIdx`. Returns the chosen name. Used for both backend and agent.
+func wizardChoice(ctx context.Context, reader *bufio.Reader, out io.Writer, heading string, choices []setupChoice, defaultIdx int) (string, error) {
 	fmt.Fprintln(out)          //nolint:errcheck
 	fmt.Fprintln(out, heading) //nolint:errcheck
 	fmt.Fprintln(out)          //nolint:errcheck
@@ -178,14 +291,8 @@ func wizardChoice(ctx context.Context, reader *bufio.Reader, out io.Writer, head
 	return choices[idx].Name, nil
 }
 
-// defaultBackendIdx returns the index of the preferred default
-// backend in choices (currently always 0 — the registry order does
-// the ranking).
-func defaultBackendIdx(_ []yoloai.SetupChoice) int { return 0 }
-
-// defaultAgentIdx returns the index of "claude" in choices when
-// present, else 0.
-func defaultAgentIdx(choices []yoloai.SetupChoice) int {
+// defaultAgentIdx returns the index of "claude" in choices when present, else 0.
+func defaultAgentIdx(choices []setupChoice) int {
 	for i, c := range choices {
 		if c.Name == "claude" {
 			return i
@@ -194,9 +301,28 @@ func defaultAgentIdx(choices []yoloai.SetupChoice) int {
 	return 0
 }
 
-// readLineCtx reads a line from reader, returning early if ctx is
-// cancelled. On EOF, returns ("", nil) so callers can treat it as a
-// default answer.
+// containsChoice reports whether name matches one of the choices.
+func containsChoice(choices []setupChoice, name string) bool {
+	for _, c := range choices {
+		if c.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// joinChoiceNames renders the choice names for an error message:
+// "docker, podman, tart".
+func joinChoiceNames(choices []setupChoice) string {
+	names := make([]string, len(choices))
+	for i, c := range choices {
+		names[i] = c.Name
+	}
+	return strings.Join(names, ", ")
+}
+
+// readLineCtx reads a line from reader, returning early if ctx is cancelled. On
+// EOF, returns ("", nil) so callers can treat it as a default answer.
 func readLineCtx(ctx context.Context, reader *bufio.Reader) (string, error) {
 	ch := make(chan string, 1)
 	errCh := make(chan error, 1)

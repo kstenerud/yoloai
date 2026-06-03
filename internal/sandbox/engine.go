@@ -155,8 +155,8 @@ func (m *Engine) ensureDefaultsDir() error {
 
 // ensureLayoutScaffold creates the DataDir directory structure and writes the
 // default global config.yaml and declarative defaults/ when missing. Pure
-// filesystem work — no runtime required. Shared between EnsureSetup (which adds
-// image build on top) and ApplySetup (config-write only).
+// filesystem work — no runtime required. Used by EnsureSetup (which adds the
+// image build on top).
 //
 // It does NOT migrate or stamp the schema version: bringing the DataDir to the
 // current on-disk version is the startup gate's (fresh-create) or the explicit
