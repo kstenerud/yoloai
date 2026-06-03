@@ -74,6 +74,14 @@ type ResourceLimits struct {
 	Memory   int64 // Memory limit in bytes
 }
 
+// Instance label keys. Backends that support labels stamp these so an
+// embedder can attribute and enumerate instances by owning principal and
+// sandbox name. See D62.
+const (
+	LabelPrincipal = "com.yoloai.principal"
+	LabelSandbox   = "com.yoloai.sandbox"
+)
+
 // InstanceConfig holds the parameters for creating a sandbox instance.
 type InstanceConfig struct {
 	// Universal — all backends.
@@ -83,6 +91,13 @@ type InstanceConfig struct {
 	Ports       []PortMapping
 	NetworkMode string // "" = default, "none" = no network, "isolated" = allowlist only
 	Resources   *ResourceLimits
+
+	// Labels are key/value metadata attached to the instance (e.g.
+	// com.yoloai.principal / com.yoloai.sandbox). Backends with native
+	// label support (Docker, containerd) apply them directly; backends
+	// that persist their config as JSON (Tart, Seatbelt) carry them in
+	// that record so an embedder can enumerate instances by owner.
+	Labels map[string]string
 
 	// Container/VM backends (Docker, Podman, containerd, Tart).
 	// Ignored by process-based and remote backends.

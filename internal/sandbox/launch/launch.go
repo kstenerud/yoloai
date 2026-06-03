@@ -144,6 +144,7 @@ func buildInstanceConfig(desc runtime.BackendDescriptor, st *state.State, mnts [
 		Ports:       ports,
 		NetworkMode: st.NetworkMode,
 		UseInit:     true,
+		Labels:      instanceLabels(st.Layout.Principal, st.Name),
 		// C.UTF-8 is always present without locale-gen; without it apps like Claude Code render ASCII-only.
 		ContainerEnv: []string{"LANG=C.UTF-8"},
 	}
@@ -170,6 +171,18 @@ func buildInstanceConfig(desc runtime.BackendDescriptor, st *state.State, mnts [
 	instanceCfg.Snapshotter = runtime.IsolationSnapshotter(st.Isolation)
 
 	return instanceCfg, nil
+}
+
+// instanceLabels builds the runtime instance labels recording sandbox identity
+// and (when non-default) the owning principal. The sandbox label is always set;
+// the principal label is omitted for the default ("") principal so single-
+// principal instances carry no principal metadata (D62).
+func instanceLabels(principal config.PrincipalSegment, name string) map[string]string {
+	labels := map[string]string{runtime.LabelSandbox: name}
+	if principal != "" {
+		labels[runtime.LabelPrincipal] = string(principal)
+	}
+	return labels
 }
 
 // effectiveSecretsConsumedTimeout is the host's cap on waiting for the

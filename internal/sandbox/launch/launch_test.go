@@ -247,3 +247,17 @@ func TestBuildInstanceConfig_AllowsNetworkIsolatedOnSupportedModes(t *testing.T)
 		})
 	}
 }
+
+func TestInstanceLabels(t *testing.T) {
+	t.Run("default principal omits principal label", func(t *testing.T) {
+		labels := instanceLabels("", "mybox")
+		assert.Equal(t, "mybox", labels[runtime.LabelSandbox])
+		assert.NotContains(t, labels, runtime.LabelPrincipal)
+	})
+
+	t.Run("non-default principal stamps both labels", func(t *testing.T) {
+		labels := instanceLabels("acme", "mybox")
+		assert.Equal(t, "mybox", labels[runtime.LabelSandbox])
+		assert.Equal(t, "acme", labels[runtime.LabelPrincipal])
+	})
+}

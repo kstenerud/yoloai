@@ -236,6 +236,9 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 		client.WithNewSpec(specOpts...),
 		client.WithRuntime(cfg.ContainerRuntime, kataOpts),
 	}
+	if len(cfg.Labels) > 0 {
+		ctrOpts = append(ctrOpts, client.WithContainerLabels(cfg.Labels))
+	}
 
 	// Pre-clear stale container, snapshot, and Kata shim state.
 	if err := r.clearStaleContainerState(ctx, cfg.Name, snapshotter); err != nil {

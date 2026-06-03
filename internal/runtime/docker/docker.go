@@ -232,6 +232,7 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 		Image:        cfg.ImageRef,
 		WorkingDir:   cfg.WorkingDir,
 		ExposedPorts: exposedPorts,
+		Labels:       cfg.Labels,
 	}
 
 	if len(cfg.ContainerEnv) > 0 {
