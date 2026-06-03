@@ -8,8 +8,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
@@ -39,11 +37,10 @@ func runSandboxInfo(cmd *cobra.Command, name string) error {
 				ConfigPath    string `json:"config_path"`
 				PromptPreview string `json:"prompt_preview,omitempty"`
 			}
-			sandboxDir := cliutil.Layout().SandboxDir(name)
 			result := infoJSON{
 				Info:          info,
 				ConfigPath:    c.System().RuntimeConfigPath(name),
-				PromptPreview: loadPromptPreview(sandboxDir),
+				PromptPreview: loadPromptPreview(name),
 			}
 			return cliutil.WriteJSON(cmd.OutOrStdout(), result)
 		}
@@ -78,7 +75,7 @@ func printSandboxInfo(cmd *cobra.Command, name string, info *yoloai.Info) {
 	fmt.Fprintf(w, "Sandbox dir: %s\n", sandboxDir)                                        //nolint:errcheck
 	fmt.Fprintf(w, "Config:      %s\n", cliutil.NewSystemClient().RuntimeConfigPath(name)) //nolint:errcheck
 
-	if preview := loadPromptPreview(sandboxDir); preview != "" {
+	if preview := loadPromptPreview(name); preview != "" {
 		fmt.Fprintf(w, "Prompt:      %s\n", preview) //nolint:errcheck
 	}
 
@@ -139,15 +136,19 @@ func printSandboxResources(w io.Writer, meta *yoloai.Environment, info *yoloai.I
 	fmt.Fprintf(w, "Changes:     %s\n", info.HasChanges)                              //nolint:errcheck
 }
 
-// loadPromptPreview reads prompt.txt and returns the first 200 characters.
-func loadPromptPreview(sandboxDir string) string {
-	data, err := os.ReadFile(filepath.Join(sandboxDir, "prompt.txt")) //nolint:gosec // G304: sandboxDir is the yoloAI-owned ~/.yoloai/sandboxes/<name>/ path resolved upstream
-	if err != nil {
+// loadPromptPreview reads the stored prompt via the public verb and returns a
+// single-line preview for display ("" when no prompt is set).
+func loadPromptPreview(name string) string {
+	prompt, ok, err := cliutil.NewSystemClient().Prompt(name)
+	if err != nil || !ok {
 		return ""
 	}
+	return formatPromptPreview(prompt)
+}
 
-	content := string(data)
-	content = strings.ReplaceAll(content, "\n", " ")
+// formatPromptPreview collapses newlines to spaces and truncates to 200 runes.
+func formatPromptPreview(raw string) string {
+	content := strings.ReplaceAll(raw, "\n", " ")
 	content = strings.ReplaceAll(content, "\r", " ")
 
 	runes := []rune(content)
