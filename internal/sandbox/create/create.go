@@ -150,10 +150,6 @@ func Run(ctx context.Context, d state.Deps, opts Options) (name string, err erro
 
 	backend := d.Runtime.Descriptor().Name
 	slog.Info("creating sandbox", "event", "sandbox.create", "sandbox", opts.Name, "agent", opts.Agent, "backend", backend)
-	// When running as root under sudo, API key env vars (e.g. CLAUDE_CODE_OAUTH_TOKEN)
-	// are stripped by sudo. Recover them from the parent process's environment into a
-	// local map rather than mutating the process environment.
-	credOverrides := provision.RecoverSudoCredentials()
 	// Validate isolation prerequisites before the potentially expensive image build.
 	if opts.Isolation != "" {
 		if err := launch.CheckIsolationPrerequisites(ctx, d.Runtime, opts.Isolation); err != nil {
@@ -161,7 +157,7 @@ func Run(ctx context.Context, d state.Deps, opts Options) (name string, err erro
 		}
 	}
 
-	sandboxState, err := prepareSandboxState(ctx, d, opts, credOverrides)
+	sandboxState, err := prepareSandboxState(ctx, d, opts)
 	if err != nil {
 		return "", err
 	}
@@ -221,7 +217,7 @@ func checkUnappliedWork(name string, sandboxDir string) error {
 
 // prepareSandboxState handles validation, safety checks, directory
 // creation, workdir copy, git baseline, and meta/config writing.
-func prepareSandboxState(ctx context.Context, d state.Deps, opts Options, credOverrides map[string]string) (*state.State, error) {
+func prepareSandboxState(ctx context.Context, d state.Deps, opts Options) (*state.State, error) {
 	agentDef, sandboxDir, ycfg, gcfg, err := validateAndLoadConfig(d, opts)
 	if err != nil {
 		return nil, err
@@ -237,14 +233,14 @@ func prepareSandboxState(ctx context.Context, d state.Deps, opts Options, credOv
 		return nil, err
 	}
 
-	workdir, auxDirs, err := parseAndValidateDirs(d, opts, agentDef, pr.env, ycfg.Model, credOverrides)
+	workdir, auxDirs, err := parseAndValidateDirs(d, opts, agentDef, pr.env, ycfg.Model)
 	if err != nil {
 		return nil, err
 	}
 
 	// Phase 2: Create directory structure and seed sandbox.
 	perms := state.Perms(pr.isolation)
-	agentFilesInitialized, err := createAndSeedSandbox(ctx, d, sandboxDir, agentDef, pr, credOverrides, perms, outputFor(opts.Output))
+	agentFilesInitialized, err := createAndSeedSandbox(ctx, d, sandboxDir, agentDef, pr, perms, outputFor(opts.Output))
 	if err != nil {
 		return nil, err
 	}
@@ -273,7 +269,7 @@ func prepareSandboxState(ctx context.Context, d state.Deps, opts Options, credOv
 	}
 
 	success = true
-	return buildSandboxStateResult(opts, sandboxDir, workdir, workCopyDir, auxDirs, agentDef, meta, pr, mergedMounts, configData, tmuxConf, resolvedArchetype, pr.archetypeDockerDRequired, devcontainerCfg, dcMounts, dcMountWarnings, credOverrides, d.Layout, d.Layout.HomeDir), nil
+	return buildSandboxStateResult(opts, sandboxDir, workdir, workCopyDir, auxDirs, agentDef, meta, pr, mergedMounts, configData, tmuxConf, resolvedArchetype, pr.archetypeDockerDRequired, devcontainerCfg, dcMounts, dcMountWarnings, d.Layout, d.Layout.HomeDir), nil
 }
 
 // resolveProfileAndArchetype resolves profile config, runtime base, archetype, mounts, and lifecycle state.
@@ -312,12 +308,12 @@ func resolveProfileAndArchetype(ctx context.Context, d state.Deps, opts *Options
 }
 
 // createAndSeedSandbox creates directory structure and seeds the sandbox with agent files.
-func createAndSeedSandbox(ctx context.Context, d state.Deps, sandboxDir string, agentDef *agent.Definition, pr *profileResult, credOverrides map[string]string, perms state.IsolationPerms, output io.Writer) (bool, error) {
+func createAndSeedSandbox(ctx context.Context, d state.Deps, sandboxDir string, agentDef *agent.Definition, pr *profileResult, perms state.IsolationPerms, output io.Writer) (bool, error) {
 	_ = ctx // reserved for future use
 	if err := createSandboxDirs(sandboxDir, perms); err != nil {
 		return false, err
 	}
-	return provision.SeedSandbox(d.Runtime, agentDef, sandboxDir, pr.isolation, pr.agentFiles, credOverrides, d.Layout.HomeDir, d.Layout.Env, output)
+	return provision.SeedSandbox(d.Runtime, agentDef, sandboxDir, pr.isolation, pr.agentFiles, d.Layout.HomeDir, d.Layout.Env, output)
 }
 
 // buildConfigAndEnvironment builds the container config and sandbox meta structs.
@@ -349,7 +345,7 @@ func buildConfigAndEnvironment(ctx context.Context, d state.Deps, opts Options, 
 }
 
 // buildSandboxStateResult constructs the State from all resolved values.
-func buildSandboxStateResult(opts Options, sandboxDir string, workdir *DirSpec, workCopyDir string, auxDirs []*DirSpec, agentDef *agent.Definition, meta *store.Environment, pr *profileResult, mergedMounts []string, configData []byte, tmuxConf string, resolvedArchetype archetype.Archetype, archetypeDockerDRequired bool, devcontainerCfg *archetype.DevcontainerConfig, dcMounts []string, dcMountWarnings []string, credOverrides map[string]string, layout config.Layout, homeDir string) *state.State {
+func buildSandboxStateResult(opts Options, sandboxDir string, workdir *DirSpec, workCopyDir string, auxDirs []*DirSpec, agentDef *agent.Definition, meta *store.Environment, pr *profileResult, mergedMounts []string, configData []byte, tmuxConf string, resolvedArchetype archetype.Archetype, archetypeDockerDRequired bool, devcontainerCfg *archetype.DevcontainerConfig, dcMounts []string, dcMountWarnings []string, layout config.Layout, homeDir string) *state.State {
 	return &state.State{
 		Name:                      opts.Name,
 		SandboxDir:                sandboxDir,
@@ -361,7 +357,6 @@ func buildSandboxStateResult(opts Options, sandboxDir string, workdir *DirSpec, 
 		Profile:                   pr.name,
 		ImageRef:                  pr.imageRef,
 		Env:                       pr.env,
-		CredOverrides:             credOverrides,
 		HasPrompt:                 meta.HasPrompt,
 		NetworkMode:               meta.NetworkMode,
 		NetworkAllow:              meta.NetworkAllow,
@@ -566,7 +561,7 @@ func resolveAgentParams(agentDef *agent.Definition, opts Options, pr *profileRes
 	hasPrompt := promptText != ""
 
 	model := invocation.ResolveModel(agentDef, opts.Model, pr.userAliases)
-	model = invocation.ApplyModelPrefix(agentDef, model, pr.env)
+	model = invocation.ApplyModelPrefix(agentDef, model, pr.env, env)
 	if err := invocation.ValidateModel(agentDef, model, opts.Model); err != nil {
 		return "", false, "", "", "", err
 	}

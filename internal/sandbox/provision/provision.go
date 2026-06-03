@@ -1,5 +1,5 @@
 // ABOUTME: Seed-file and credential provisioning for a sandbox before first launch:
-// ABOUTME: secret-dir creation, sudo recovery, auth checks, and settings injection.
+// ABOUTME: secret-dir creation, auth checks, and settings injection.
 package provision
 
 import (
@@ -18,12 +18,13 @@ import (
 )
 
 // CreateSecretsDir creates a temp directory with one file per env var / API key.
-// Env vars are written first; API keys overwrite on conflict (take precedence).
-// credOverrides contains sudo-recovered credential defaults for keys absent from
-// os.Environ; they are used as a fallback so that creation under sudo sees credentials.
-// Returns empty string if nothing was written.
-func CreateSecretsDir(agentDef *agent.Definition, envVars map[string]string, security runtime.IsolationMode, credOverrides map[string]string) (string, error) {
-	if len(agentDef.APIKeyEnvVars) == 0 && len(agentDef.AuthHintEnvVars) == 0 && len(envVars) == 0 && len(credOverrides) == 0 {
+// configEnv (the ${VAR}-expanded profile env) is written first; the agent's API-key
+// and auth-hint values are then resolved from hostEnv (the caller-supplied host
+// environment snapshot) and overwrite on conflict (take precedence). hostEnv is the
+// sole credential source — the library never reads os.Environ (§12). Returns empty
+// string if nothing was written.
+func CreateSecretsDir(agentDef *agent.Definition, configEnv, hostEnv map[string]string, security runtime.IsolationMode) (string, error) {
+	if len(agentDef.APIKeyEnvVars) == 0 && len(agentDef.AuthHintEnvVars) == 0 && len(configEnv) == 0 {
 		return "", nil
 	}
 
@@ -48,8 +49,8 @@ func CreateSecretsDir(agentDef *agent.Definition, envVars map[string]string, sec
 
 	wrote := false
 
-	// Write env vars first
-	for k, v := range envVars {
+	// Write config (profile) env vars first.
+	for k, v := range configEnv {
 		if err := fileutil.WriteFilePerm(filepath.Join(tmpDir, k), []byte(v), perms.SecretsFile); err != nil {
 			_ = os.RemoveAll(tmpDir)
 			return "", fmt.Errorf("write env %s: %w", k, err)
@@ -57,13 +58,10 @@ func CreateSecretsDir(agentDef *agent.Definition, envVars map[string]string, sec
 		wrote = true
 	}
 
-	// Write host env vars for API keys and auth hints (overwrites config env on conflict).
-	// credOverrides provides sudo-recovered values for keys absent from os.Environ.
+	// Write host env values for API keys and auth hints (overwrites config env on
+	// conflict). hostEnv is the caller's authorized host-environment snapshot.
 	for _, key := range append(agentDef.APIKeyEnvVars, agentDef.AuthHintEnvVars...) {
-		value := os.Getenv(key) //nolint:forbidigo // §12: agent API key / auth-hint value (declared exception)
-		if value == "" {
-			value = credOverrides[key]
-		}
+		value := hostEnv[key]
 		if value == "" {
 			continue
 		}
@@ -82,54 +80,14 @@ func CreateSecretsDir(agentDef *agent.Definition, envVars map[string]string, sec
 	return tmpDir, nil
 }
 
-// RecoverSudoCredentials returns sudo-recovered credential env vars for keys
-// absent from the current process environment. Under `sudo` (without -E) the
-// API-key / OAuth env vars are stripped from os.Environ; recovering them from
-// the parent sudo process lets both `new` (Create) and `restart`
-// (recreateContainer) inject them. Keys present in os.Environ are skipped so a
-// real host value always wins.
-func RecoverSudoCredentials() map[string]string {
-	overrides := make(map[string]string)
-	for k, v := range sudoParentEnv() {
-		if os.Getenv(k) == "" { //nolint:forbidigo // §12: sudo credential recovery — only override keys absent from the live env
-			overrides[k] = v
-		}
-	}
-	return overrides
-}
-
-// sudoParentEnv returns env vars from the parent sudo process when yoloai is
-// run via sudo. sudo strips most env vars before exec'ing the child, but the
-// sudo process itself inherits the full user environment. Reading the parent's
-// /proc/<ppid>/environ recovers vars like CLAUDE_CODE_OAUTH_TOKEN and
-// ANTHROPIC_API_KEY that were stripped. Returns an empty map if not running
-// under sudo or if the parent environ cannot be read.
-func sudoParentEnv() map[string]string {
-	result := make(map[string]string)
-	if fileutil.SudoUID() == -1 {
-		return result
-	}
-	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/environ", os.Getppid())) //nolint:gosec,forbidigo // G304 + §12: read parent's environ to recover sudo-stripped credentials
-	if err != nil {
-		return result
-	}
-	for kv := range strings.SplitSeq(string(data), "\x00") {
-		k, v, ok := strings.Cut(kv, "=")
-		if ok && k != "" {
-			result[k] = v
-		}
-	}
-	return result
-}
-
-// HasAnyAPIKey returns true if any of the agent's required API key env vars are set
-// in the process environment or in credOverrides (sudo-recovered credential defaults).
-func HasAnyAPIKey(agentDef *agent.Definition, credOverrides map[string]string) bool {
+// HasAnyAPIKey returns true if any of the agent's required API key env vars are
+// present in hostEnv (the caller-supplied host-environment snapshot).
+func HasAnyAPIKey(agentDef *agent.Definition, hostEnv map[string]string) bool {
 	if len(agentDef.APIKeyEnvVars) == 0 {
 		return true // no API key required
 	}
 	for _, key := range agentDef.APIKeyEnvVars {
-		if os.Getenv(key) != "" || credOverrides[key] != "" { //nolint:forbidigo // §12: agent API-key presence check (declared exception)
+		if hostEnv[key] != "" {
 			return true
 		}
 	}
@@ -156,12 +114,12 @@ func HasAnyAuthFile(agentDef *agent.Definition, homeDir string) bool {
 }
 
 // HasAnyAuthHint returns true if any of the agent's auth hint env vars are set
-// in the host environment, in the config env map, or in credOverrides
-// (sudo-recovered credential defaults). This allows agents like aider to work
-// with local model servers (Ollama, LM Studio) without a cloud API key.
-func HasAnyAuthHint(agentDef *agent.Definition, configEnv map[string]string, credOverrides map[string]string) bool {
+// in hostEnv (the caller-supplied host-environment snapshot) or in the config
+// env map. This allows agents like aider to work with local model servers
+// (Ollama, LM Studio) without a cloud API key.
+func HasAnyAuthHint(agentDef *agent.Definition, configEnv, hostEnv map[string]string) bool {
 	for _, key := range agentDef.AuthHintEnvVars {
-		if os.Getenv(key) != "" || credOverrides[key] != "" { //nolint:forbidigo // §12: agent auth-hint presence check (declared exception)
+		if hostEnv[key] != "" {
 			return true
 		}
 		if configEnv[key] != "" {
@@ -188,13 +146,13 @@ func DescribeSeedAuthFiles(agentDef *agent.Definition) string {
 // others go to agent-runtime/ (mounted at StateDir).
 // Returns true if any files were copied. Skips files that don't exist on the host.
 // homeDir is used for ~ expansion in seed file host paths.
-func CopySeedFiles(agentDef *agent.Definition, sandboxDir string, hasAPIKey bool, homeDir string) (bool, error) {
+func CopySeedFiles(agentDef *agent.Definition, sandboxDir string, hasAPIKey bool, homeDir string, hostEnv map[string]string) (bool, error) {
 	copiedAuth := false
 	agentStateDir := filepath.Join(sandboxDir, store.AgentRuntimeDir)
 	homeSeedDir := filepath.Join(sandboxDir, "home-seed")
 
 	for _, sf := range agentDef.SeedFiles {
-		if shouldSkipSeedFile(sf, hasAPIKey) {
+		if shouldSkipSeedFile(sf, hasAPIKey, hostEnv) {
 			continue
 		}
 
@@ -227,14 +185,14 @@ func CopySeedFiles(agentDef *agent.Definition, sandboxDir string, hasAPIKey bool
 }
 
 // shouldSkipSeedFile returns true if the seed file should be skipped.
-func shouldSkipSeedFile(sf agent.SeedFile, hasAPIKey bool) bool {
+func shouldSkipSeedFile(sf agent.SeedFile, hasAPIKey bool, hostEnv map[string]string) bool {
 	if !sf.AuthOnly {
 		return false
 	}
 	if len(sf.OwnerAPIKeys) > 0 {
 		// Per-file API key check (used by shell agent): skip if any key is set
 		for _, key := range sf.OwnerAPIKeys {
-			if os.Getenv(key) != "" { //nolint:forbidigo // §12: agent API-key presence check (declared exception)
+			if hostEnv[key] != "" {
 				return true
 			}
 		}
@@ -356,10 +314,10 @@ func ensureHomeSeedConfig(agentDef *agent.Definition, sandboxDir, installMethod 
 // SeedSandbox copies seed files, agent config files, and seeds the home config.
 // Returns agentFilesInitialized so the caller can persist it to SandboxState.
 // homeDir is used for ~ expansion in seed file host paths.
-func SeedSandbox(rt runtime.Runtime, agentDef *agent.Definition, sandboxDir string, isolation runtime.IsolationMode, agentFiles *config.AgentFilesConfig, credOverrides map[string]string, homeDir string, env map[string]string, output io.Writer) (agentFilesInitialized bool, err error) {
+func SeedSandbox(rt runtime.Runtime, agentDef *agent.Definition, sandboxDir string, isolation runtime.IsolationMode, agentFiles *config.AgentFilesConfig, homeDir string, hostEnv map[string]string, output io.Writer) (agentFilesInitialized bool, err error) {
 	// Copy seed files into agent-state (config, OAuth credentials, etc.)
-	hasAPIKey := HasAnyAPIKey(agentDef, credOverrides)
-	copiedAuth, err := CopySeedFiles(agentDef, sandboxDir, hasAPIKey, homeDir)
+	hasAPIKey := HasAnyAPIKey(agentDef, hostEnv)
+	copiedAuth, err := CopySeedFiles(agentDef, sandboxDir, hasAPIKey, homeDir, hostEnv)
 	if err != nil {
 		return false, fmt.Errorf("copy seed files: %w", err)
 	}
@@ -379,7 +337,7 @@ func SeedSandbox(rt runtime.Runtime, agentDef *agent.Definition, sandboxDir stri
 
 	// Copy agent_files (user-configured agent config files)
 	if agentFiles != nil && agentDef.StateDir != "" {
-		if err := CopyAgentFiles(agentDef, sandboxDir, agentFiles, homeDir, env); err != nil {
+		if err := CopyAgentFiles(agentDef, sandboxDir, agentFiles, homeDir, hostEnv); err != nil {
 			return false, fmt.Errorf("copy agent files: %w", err)
 		}
 		agentFilesInitialized = true

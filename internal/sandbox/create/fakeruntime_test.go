@@ -7,7 +7,9 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime"
@@ -75,5 +77,16 @@ func (e *fakeNotImplError) Error() string { return "fake runtime: not implemente
 // that exercise functions which use a Layout. Mirrors what the
 // CLI does at startup so tests don't depend on ambient HOME.
 func layoutForTmpDir(tmpDir string) config.Layout {
-	return config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
+	l := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
+	// Mirror the CLI boundary: capture the process env as the Layout's host-env
+	// snapshot so credential checks (which read Layout.Env, not os.Getenv) see
+	// any keys the test set via t.Setenv.
+	env := make(map[string]string)
+	for _, e := range os.Environ() {
+		if k, v, ok := strings.Cut(e, "="); ok {
+			env[k] = v
+		}
+	}
+	l.Env = env
+	return l
 }

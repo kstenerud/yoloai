@@ -11,9 +11,11 @@ package fileutil
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"os"
 	"strconv"
+	"strings"
 )
 
 // SudoUID returns the invoking user's UID when running under sudo (uid 0 +
@@ -40,6 +42,30 @@ func SudoGID() int {
 		}
 	}
 	return -1
+}
+
+// SudoParentEnv returns the environment of the parent sudo process when yoloai
+// is run via sudo. sudo strips most env vars before exec'ing the child, but the
+// sudo process itself inherits the full user environment, so reading the
+// parent's /proc/<ppid>/environ recovers vars like CLAUDE_CODE_OAUTH_TOKEN and
+// ANTHROPIC_API_KEY that sudo stripped. Returns an empty map when not running
+// under sudo or if the parent environ cannot be read. This is the one licensed
+// /proc/<ppid>/environ reader; the §12 ambient-env boundary lives here.
+func SudoParentEnv() map[string]string {
+	result := make(map[string]string)
+	if SudoUID() == -1 {
+		return result
+	}
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/environ", os.Getppid())) //nolint:gosec // G304: read parent's environ to recover sudo-stripped credentials
+	if err != nil {
+		return result
+	}
+	for kv := range strings.SplitSeq(string(data), "\x00") {
+		if k, v, ok := strings.Cut(kv, "="); ok && k != "" {
+			result[k] = v
+		}
+	}
+	return result
 }
 
 // HostUID returns the invoking user's UID, accounting for sudo. Under

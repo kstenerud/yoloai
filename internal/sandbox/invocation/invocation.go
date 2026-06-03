@@ -34,8 +34,10 @@ func ResolveModel(agentDef *agent.Definition, model string, userAliases map[stri
 
 // ApplyModelPrefix adds a provider prefix to the model name when needed.
 // For example, when using aider with OLLAMA_API_BASE, the model must be
-// prefixed with "ollama_chat/" for litellm to route it correctly.
-func ApplyModelPrefix(agentDef *agent.Definition, model string, configEnv map[string]string) string {
+// prefixed with "ollama_chat/" for litellm to route it correctly. The trigger
+// env var is looked up in hostEnv (the caller's host-environment snapshot) and
+// in configEnv (the profile env); the library never reads os.Environ (§12).
+func ApplyModelPrefix(agentDef *agent.Definition, model string, configEnv, hostEnv map[string]string) string {
 	if model == "" || strings.Contains(model, "/") {
 		return model
 	}
@@ -43,7 +45,7 @@ func ApplyModelPrefix(agentDef *agent.Definition, model string, configEnv map[st
 		return model
 	}
 	for envVar, prefix := range agentDef.ModelPrefixes {
-		if os.Getenv(envVar) != "" || configEnv[envVar] != "" { //nolint:forbidigo // §12: agent credential/env presence check (declared API-key exception)
+		if hostEnv[envVar] != "" || configEnv[envVar] != "" {
 			return prefix + model
 		}
 	}

@@ -210,8 +210,8 @@ func handleSuspendedResume(ctx context.Context, d state.Deps, cname, name string
 	}
 
 	// Refresh credentials and settings from host (handles token refresh between sessions).
-	hasAPIKey := provision.HasAnyAPIKey(agentDef, nil)
-	if _, err := provision.CopySeedFiles(agentDef, sandboxDir, hasAPIKey, d.Layout.HomeDir); err != nil {
+	hasAPIKey := provision.HasAnyAPIKey(agentDef, d.Layout.Env)
+	if _, err := provision.CopySeedFiles(agentDef, sandboxDir, hasAPIKey, d.Layout.HomeDir, d.Layout.Env); err != nil {
 		return fmt.Errorf("refresh seed files: %w", err)
 	}
 	if err := provision.EnsureContainerSettings(agentDef, sandboxDir, meta.Isolation); err != nil {

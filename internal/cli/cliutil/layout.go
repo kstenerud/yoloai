@@ -70,13 +70,25 @@ func LayoutForDataDir(dataDir string) config.Layout {
 // processEnv snapshots the process environment into a map for the
 // Layout. This is the single licensed os.Environ() read — the §12
 // boundary that captures ambient env once so library code can expand
-// user-declared ${VAR} references against threaded data instead of
-// the live process env.
+// user-declared ${VAR} references and resolve agent credentials against
+// threaded data instead of the live process env.
+//
+// Under `sudo` (without -E) the API-key / OAuth env vars are stripped
+// from os.Environ; sudoRecoveredEnv recovers them from the parent sudo
+// process so a sudo-launched `new`/`restart` still injects credentials.
+// Live env values always win — recovery only fills keys absent from the
+// snapshot. Sudo is a host/CLI concern; a daemon embedder never runs
+// under sudo, so this recovery lives at the CLI boundary, not the library.
 func processEnv() map[string]string {
 	entries := os.Environ()
 	m := make(map[string]string, len(entries))
 	for _, e := range entries {
 		if k, v, ok := strings.Cut(e, "="); ok {
+			m[k] = v
+		}
+	}
+	for k, v := range fileutil.SudoParentEnv() {
+		if m[k] == "" {
 			m[k] = v
 		}
 	}

@@ -103,8 +103,8 @@ func recreateContainer(ctx context.Context, d state.Deps, name string, meta *sto
 	sandboxDir := d.Layout.SandboxDir(name)
 
 	// Refresh seed files from host (handles OAuth token refresh between restarts)
-	hasAPIKey := provision.HasAnyAPIKey(agentDef, nil)
-	if _, err := provision.CopySeedFiles(agentDef, sandboxDir, hasAPIKey, d.Layout.HomeDir); err != nil {
+	hasAPIKey := provision.HasAnyAPIKey(agentDef, d.Layout.Env)
+	if _, err := provision.CopySeedFiles(agentDef, sandboxDir, hasAPIKey, d.Layout.HomeDir, d.Layout.Env); err != nil {
 		return fmt.Errorf("refresh seed files: %w", err)
 	}
 
@@ -163,40 +163,33 @@ func recreateContainer(ctx context.Context, d state.Deps, name string, meta *sto
 		return err
 	}
 
-	// Recover sudo-stripped credentials, mirroring Create: under
-	// `sudo yoloai restart` (without -E) the API-key/OAuth env vars are absent
-	// from os.Environ, so without this the restart would relaunch the agent
-	// unauthenticated even though the original `new` worked.
-	credOverrides := provision.RecoverSudoCredentials()
-
 	sbState2 := &state.State{
-		Name:          name,
-		SandboxDir:    sandboxDir,
-		Workdir:       workdir,
-		WorkCopyDir:   store.WorkDir(sandboxDir, meta.Workdir.HostPath),
-		AuxDirs:       auxDirs,
-		Agent:         agentDef,
-		Model:         meta.Model,
-		Profile:       meta.Profile,
-		ImageRef:      meta.ImageRef,
-		Env:           envVars,
-		HasPrompt:     meta.HasPrompt,
-		NetworkMode:   meta.NetworkMode,
-		NetworkAllow:  meta.NetworkAllow,
-		Ports:         meta.Ports,
-		ConfigMounts:  meta.Mounts,
-		TmuxConf:      cfgJSON.TmuxConf,
-		Resources:     meta.Resources,
-		CapAdd:        meta.CapAdd,
-		Devices:       meta.Devices,
-		Setup:         meta.Setup,
-		Isolation:     meta.Isolation,
-		VscodeTunnel:  meta.VscodeTunnel,
-		CredOverrides: credOverrides,
-		ConfigJSON:    configData,
-		Layout:        d.Layout,
-		HomeDir:       d.Layout.HomeDir,
-		Output:        &noticeWriter{n: n, level: NoticeWarn},
+		Name:         name,
+		SandboxDir:   sandboxDir,
+		Workdir:      workdir,
+		WorkCopyDir:  store.WorkDir(sandboxDir, meta.Workdir.HostPath),
+		AuxDirs:      auxDirs,
+		Agent:        agentDef,
+		Model:        meta.Model,
+		Profile:      meta.Profile,
+		ImageRef:     meta.ImageRef,
+		Env:          envVars,
+		HasPrompt:    meta.HasPrompt,
+		NetworkMode:  meta.NetworkMode,
+		NetworkAllow: meta.NetworkAllow,
+		Ports:        meta.Ports,
+		ConfigMounts: meta.Mounts,
+		TmuxConf:     cfgJSON.TmuxConf,
+		Resources:    meta.Resources,
+		CapAdd:       meta.CapAdd,
+		Devices:      meta.Devices,
+		Setup:        meta.Setup,
+		Isolation:    meta.Isolation,
+		VscodeTunnel: meta.VscodeTunnel,
+		ConfigJSON:   configData,
+		Layout:       d.Layout,
+		HomeDir:      d.Layout.HomeDir,
+		Output:       &noticeWriter{n: n, level: NoticeWarn},
 	}
 
 	if resume {

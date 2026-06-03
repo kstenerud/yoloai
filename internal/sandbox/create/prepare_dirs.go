@@ -24,8 +24,7 @@ import (
 // parseAndValidateDirs converts DirSpec values to DirSpec, runs safety checks,
 // overlap detection, and dirty repo warnings. Returns nil workdir if the user cancelled.
 // cfgModel is the model from config.yaml (needed for local model server check).
-// credOverrides contains sudo-recovered credential defaults for keys absent from os.Environ.
-func parseAndValidateDirs(d state.Deps, opts Options, agentDef *agent.Definition, mergedEnv map[string]string, cfgModel string, credOverrides map[string]string) (*DirSpec, []*DirSpec, error) {
+func parseAndValidateDirs(d state.Deps, opts Options, agentDef *agent.Definition, mergedEnv map[string]string, cfgModel string) (*DirSpec, []*DirSpec, error) {
 	// Convert workdir DirSpec to DirSpec
 	if opts.Workdir.Path == "" {
 		return nil, nil, yoerrors.NewUsageError("no workdir specified and no default workdir in profile")
@@ -40,7 +39,7 @@ func parseAndValidateDirs(d state.Deps, opts Options, agentDef *agent.Definition
 		return nil, nil, yoerrors.NewUsageError("workdir does not exist: %s", workdir.Path)
 	}
 
-	if err := checkAuthAndLocalhostWarnings(d, agentDef, mergedEnv, cfgModel, opts, credOverrides); err != nil {
+	if err := checkAuthAndLocalhostWarnings(d, agentDef, mergedEnv, cfgModel, opts); err != nil {
 		return nil, nil, err
 	}
 
@@ -65,10 +64,10 @@ func parseAndValidateDirs(d state.Deps, opts Options, agentDef *agent.Definition
 }
 
 // checkAuthAndLocalhostWarnings performs auth checks and localhost URL warnings.
-func checkAuthAndLocalhostWarnings(d state.Deps, agentDef *agent.Definition, mergedEnv map[string]string, cfgModel string, opts Options, credOverrides map[string]string) error {
-	hasAPIKey := provision.HasAnyAPIKey(agentDef, credOverrides)
+func checkAuthAndLocalhostWarnings(d state.Deps, agentDef *agent.Definition, mergedEnv map[string]string, cfgModel string, opts Options) error {
+	hasAPIKey := provision.HasAnyAPIKey(agentDef, d.Layout.Env)
 	hasAuth := provision.HasAnyAuthFile(agentDef, d.Layout.HomeDir)
-	hasAuthHint := provision.HasAnyAuthHint(agentDef, mergedEnv, credOverrides)
+	hasAuthHint := provision.HasAnyAuthHint(agentDef, mergedEnv, d.Layout.Env)
 	if err := checkAgentAuth(agentDef, hasAPIKey, hasAuth, hasAuthHint, outputFor(opts.Output)); err != nil {
 		return err
 	}
@@ -109,7 +108,7 @@ func checkLocalhostURLs(d state.Deps, agentDef *agent.Definition, mergedEnv map[
 		return nil
 	}
 	for _, key := range agentDef.AuthHintEnvVars {
-		for _, val := range []string{os.Getenv(key), mergedEnv[key]} { //nolint:forbidigo // §12: agent auth-hint localhost check (declared exception)
+		for _, val := range []string{d.Layout.Env[key], mergedEnv[key]} {
 			if val == "" || !containsLocalhost(val) {
 				continue
 			}

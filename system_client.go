@@ -545,9 +545,9 @@ func (s *SystemClient) checkImage(ctx context.Context, rt runtime.Runtime, backe
 	return CheckResult{Name: "image", OK: true}
 }
 
-// checkAgent verifies that at least one of the agent's API-key env
-// vars is set. Uses os.Getenv on agent.Definition.APIKeyEnvVars —
-// the documented §12 exception (development-principles.md §12).
+// checkAgent verifies that at least one of the agent's API-key env vars is
+// present in the client's host-environment snapshot (s.layout.Env). The library
+// never reads os.Environ; credentials arrive as data via SystemOptions.Env (§12).
 func (s *SystemClient) checkAgent(name string) CheckResult {
 	def := agent.GetAgent(name)
 	switch {
@@ -558,7 +558,7 @@ func (s *SystemClient) checkAgent(name string) CheckResult {
 	}
 	var found []string
 	for _, key := range def.APIKeyEnvVars {
-		if os.Getenv(key) != "" { //nolint:forbidigo // §12: agent API-key presence check (declared exception)
+		if s.layout.Env[key] != "" {
 			found = append(found, key)
 		}
 	}

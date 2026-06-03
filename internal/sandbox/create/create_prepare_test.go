@@ -550,7 +550,7 @@ func TestPrepareSandboxState_MissingName(t *testing.T) {
 		Name:    "",
 		Workdir: DirSpec{Path: tmpDir},
 		Agent:   "test",
-	}, nil)
+	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "name is required")
 }
@@ -568,7 +568,7 @@ func TestPrepareSandboxState_UnknownAgent(t *testing.T) {
 		Name:    "test",
 		Workdir: DirSpec{Path: tmpDir},
 		Agent:   "nonexistent-agent",
-	}, nil)
+	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown agent")
 }
@@ -586,7 +586,7 @@ func TestPrepareSandboxState_WorkdirMissing(t *testing.T) {
 		Name:    "test",
 		Workdir: DirSpec{Path: "/nonexistent/path"},
 		Agent:   "test",
-	}, nil)
+	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "workdir does not exist")
 }
@@ -609,7 +609,7 @@ func TestPrepareSandboxState_SandboxExists(t *testing.T) {
 		Name:    "existing",
 		Workdir: DirSpec{Path: tmpDir},
 		Agent:   "test",
-	}, nil)
+	})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrSandboxExists)
 }
@@ -629,7 +629,7 @@ func TestPrepareSandboxState_ConflictingPromptFlags(t *testing.T) {
 		Agent:      "test",
 		Prompt:     "hello",
 		PromptFile: "/some/file",
-	}, nil)
+	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "mutually exclusive")
 }
@@ -649,7 +649,7 @@ func TestPrepareSandboxState_MissingAPIKey(t *testing.T) {
 		Name:    "test",
 		Workdir: DirSpec{Path: tmpDir},
 		Agent:   "claude",
-	}, nil)
+	})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrMissingAPIKey)
 }
@@ -668,7 +668,7 @@ func TestPrepareSandboxState_DangerousDir(t *testing.T) {
 		Name:    "test",
 		Workdir: DirSpec{Path: "/"},
 		Agent:   "claude",
-	}, nil)
+	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "dangerous directory")
 }
@@ -690,7 +690,7 @@ func TestPrepareSandboxState_DangerousDirForce(t *testing.T) {
 		Workdir: DirSpec{Path: tmpDir, Mode: DirModeRW, AllowDangerousPath: true},
 		Agent:   "claude",
 		Output:  &buf,
-	}, nil)
+	})
 	// Should NOT fail on "dangerous directory" — :force bypasses it.
 	if err != nil {
 		assert.NotContains(t, err.Error(), "dangerous directory")
@@ -723,7 +723,7 @@ func TestPrepareSandboxState_MissingAPIKeyErrorNoEmptyParens(t *testing.T) {
 		Name:    "test",
 		Workdir: DirSpec{Path: tmpDir},
 		Agent:   "aider",
-	}, nil)
+	})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrMissingAPIKey)
 	errMsg := err.Error()
@@ -754,7 +754,7 @@ func TestPrepareSandboxState_MissingAPIKeyErrorWithAuthFiles(t *testing.T) {
 		Name:    "test",
 		Workdir: DirSpec{Path: tmpDir},
 		Agent:   "claude",
-	}, nil)
+	})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrMissingAPIKey)
 	errMsg := err.Error()
@@ -782,7 +782,7 @@ func TestPrepareSandboxState_NetworkIsolatedSetsAllowlist(t *testing.T) {
 		Agent:   "claude",
 		Network: NetworkModeIsolated,
 		Version: "test",
-	}, nil)
+	})
 	require.NoError(t, err)
 	require.NotNil(t, st)
 
@@ -835,7 +835,7 @@ func TestPrepareSandboxState_NetworkAllowAddsExtraDomains(t *testing.T) {
 		Network:      NetworkModeIsolated,
 		NetworkAllow: []string{"api.example.com"},
 		Version:      "test",
-	}, nil)
+	})
 	require.NoError(t, err)
 	require.NotNil(t, st)
 

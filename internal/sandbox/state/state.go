@@ -45,7 +45,6 @@ type State struct {
 	Profile           string
 	ImageRef          string
 	Env               map[string]string // merged env (base + profile chain)
-	CredOverrides     map[string]string // sudo-recovered credential defaults (keys absent from os.Environ)
 	HasPrompt         bool
 	PromptSourcePath  string // overrides default prompt.txt path for /yoloai/prompt.txt mount
 	NetworkMode       string
