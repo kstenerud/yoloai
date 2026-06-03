@@ -73,7 +73,7 @@ is small; the metadata one *is* Phase 1b.
 | Agent/model + backend discovery | `agent.AllAgentNames()`/`GetAgent()`, `runtime.Descriptors()` | `yoloai.Agents()` / `yoloai.Backends()` |
 | Stored-prompt get/set | `store.PromptFilePath()` (`sandbox prompt`) | prompt get/set verb (AGENT noun) |
 | Git tag create | `workspace.CreateTag()` in `cli/workflow/apply.go` | `Workdir().CreateTag()` (sibling of `Tags`) |
-| Extensions | `internal/extension` (CLI `x`) | experimental — lowest priority, may stay deferred |
+| Extensions | `internal/cli/extension` (CLI `x`) | ✅ resolved — CLI-private, no verb (D66); package relocated `390f83f` |
 
 ### Phase 3 — Tighten the gate (G2) — ✅ DONE 2026-06-01 (D57)
 

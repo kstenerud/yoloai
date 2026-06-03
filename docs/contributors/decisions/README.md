@@ -426,6 +426,16 @@ After the bootstrap the stamp is the **only** signal consulted — a stamped lay
 
 **Consequences.** Closes the last Layer-1 public-contract finding from the post-F1 round (G6). Logged in `docs/BREAKING-CHANGES.md` (removal of `Setup`/`SetupStatus` + types; `BackendInfo` gains `Architectures`/`IsolationTargetOnly`). `command→code` map in `architecture/README.md` updated. F1 leak detector + `make check` green.
 
+## D66 — Extensions are CLI-private: the G7 "needs a public verb" residue is reclassified, not filled
+
+**Date:** 2026-06-03. **Status:** Accepted (owner, 2026-06-03). **Resolves** the G7 residue (see `design/abandoned-critiques.md`). **Applies** development-principles §2 (policy/mechanism boundary). **Implemented** on `layering-refactor` (commit `390f83f`).
+
+**The decision.** The `yoloai x` extension feature stays out of the public library contract, and `internal/extension` moves to `internal/cli/extension` so its CLI-private status is structural. G7's framing of this item — "the `x` command reaches `internal/extension` with no public verb" — is **reversed**: there is no verb to add.
+
+**Why not a verb.** Extensions are a CLI macro system: user-authored YAML (`~/.yoloai/extensions/*.yaml`) wrapping a shell `action`, run as `sh -c` with args/flags injected as env vars. The scripts compose the `yoloai` **binary** with host tools (`gh`, `jq`, `git`) — they invoke the CLI, not library verbs. Unlike the genuine G7 gaps (`SandboxMetadata`/`AgentLog`/`Files`/discovery), no library capability is being wrapped, and a daemon embedding the library has no use for "load arbitrary per-user scripts and exec them" — that would be a security liability per principal. So the package is CLI-private by design; a public verb would invent a library surface for a feature with no library/daemon consumer.
+
+**Consequences.** Closes the last open item from the 2026-05-30 Post-F1 critique round; the round's active queue (`design/unresolved-critiques.md`) is now empty. `internal/cli/extension` is fenced from `internal/runtime`/`internal/sandbox` like the rest of the CLI (it imports only `internal/agent`, for agent-name validation). `architecture/README.md` package map and the `plans/layer1-completion.md` capability table updated. `make check` green.
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.
