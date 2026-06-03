@@ -60,25 +60,11 @@ func versionString(ctx context.Context) string {
 // probe reports whether Podman is usable. discoverSocket is stat-only across
 // the known socket paths plus CONTAINER_HOST/DOCKER_HOST/podman machine; no
 // dial, matching docker's probe contract.
-func probe(_ context.Context) (bool, string) {
-	if _, err := discoverSocket(probeEnv()); err == nil {
+func probe(_ context.Context, env map[string]string) (bool, string) {
+	if _, err := discoverSocket(env); err == nil {
 		return true, ""
 	}
 	return false, "podman socket not found (start podman.socket or 'podman machine start')"
-}
-
-// probeEnv reads the host env vars podman's socket discovery consults. This
-// is the auto-detect boundary's licensed ambient read: the stat-only probe
-// takes no Layout (the descriptor's Probe contract), so unlike New it cannot
-// receive a threaded env. The real connection in New uses layout.Env (§12).
-func probeEnv() map[string]string {
-	m := make(map[string]string)
-	for _, k := range []string{"CONTAINER_HOST", "DOCKER_HOST", "XDG_RUNTIME_DIR"} {
-		if v := os.Getenv(k); v != "" { //nolint:forbidigo // §12: auto-detect probe boundary; see probeEnv doc
-			m[k] = v
-		}
-	}
-	return m
 }
 
 func init() {

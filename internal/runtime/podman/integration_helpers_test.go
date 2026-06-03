@@ -4,6 +4,8 @@ package podman
 
 import (
 	"context"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/docker/docker/api/types/container"
@@ -13,13 +15,28 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// envFromOS snapshots the process environment as a map. Integration tests are
+// the test-side boundary (equivalent to the CLI's licensed os.Environ read),
+// so they thread the real host env into New / discoverSocket just as the CLI
+// would. Replaces the former production probeEnv now that the probe receives a
+// threaded env (§12).
+func envFromOS() map[string]string {
+	m := make(map[string]string)
+	for _, e := range os.Environ() {
+		if k, v, ok := strings.Cut(e, "="); ok {
+			m[k] = v
+		}
+	}
+	return m
+}
+
 // podmanSetup connects to Podman, ensures the base image exists,
 // and returns a *Runtime. Uses t.Cleanup for Close().
 func podmanSetup(t *testing.T) (*Runtime, context.Context) {
 	t.Helper()
 	ctx := context.Background()
 
-	rt, err := New(ctx, probeEnv())
+	rt, err := New(ctx, envFromOS())
 	require.NoError(t, err, "Podman must be running with socket activated for integration tests")
 	t.Cleanup(func() { rt.Close() }) //nolint:errcheck // test cleanup
 

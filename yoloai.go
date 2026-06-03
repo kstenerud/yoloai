@@ -217,7 +217,7 @@ func NewWithOptions(ctx context.Context, opts Options) (*Client, error) {
 		return nil, yoerrors.NewUsageError("yoloai: Options.HomeDir is required (no implicit filepath.Dir(DataDir) derivation; under the D60 bifurcation DataDir is $HOME/.yoloai/library, so its parent is not $HOME). Pass the host user's home explicitly; the CLI uses cliutil.Layout().HomeDir. See development-principles.md §12.")
 	}
 	if opts.Backend == "" {
-		return nil, yoerrors.NewUsageError("yoloai: Options.Backend is required — empty is not a valid backend (F4). Resolve it at the boundary before constructing the Client, e.g. yoloai.SelectBackend(ctx, preferred, isolation, os). See development-principles.md §4.")
+		return nil, yoerrors.NewUsageError("yoloai: Options.Backend is required — empty is not a valid backend (F4). Resolve it at the boundary before constructing the Client, e.g. yoloai.SelectBackend(ctx, preferred, isolation, os, env). See development-principles.md §4.")
 	}
 
 	principal, err := config.ParsePrincipalSegment(opts.Principal)
@@ -448,8 +448,13 @@ func (c *Client) EnsureSetup(ctx context.Context) error {
 // auto-detection call this at their boundary and pass the result into
 // NewWithOptions — keeping the ambient probe explicit rather than hidden in
 // Client construction (§4 / §12).
-func SelectBackend(ctx context.Context, preferred BackendName, isolation IsolationMode, targetOS string) (BackendName, string) {
-	return runtime.SelectBackend(ctx, preferred, isolation, targetOS)
+//
+// env is the caller's host-env snapshot (the same map passed as Options.Env):
+// container-slot probes read DOCKER_HOST / CONTAINER_HOST / XDG_RUNTIME_DIR
+// from it rather than the process environment, so selection stays
+// principal-scoped (§12). May be nil to probe default socket paths only.
+func SelectBackend(ctx context.Context, preferred BackendName, isolation IsolationMode, targetOS string, env map[string]string) (BackendName, string) {
+	return runtime.SelectBackend(ctx, preferred, isolation, targetOS, env)
 }
 
 // SelectContainerBackend resolves a concrete container backend from a preferred
@@ -458,8 +463,11 @@ func SelectBackend(ctx context.Context, preferred BackendName, isolation Isolati
 // isolation/OS routing), mirroring what lifecycle commands do when resolving a
 // backend for an existing sandbox. Returns the chosen backend and a
 // human-readable warning ("" when none).
-func SelectContainerBackend(ctx context.Context, preferred BackendName) (BackendName, string) {
-	return runtime.SelectContainerBackend(ctx, preferred)
+//
+// env is the caller's host-env snapshot (the same map passed as Options.Env);
+// see SelectBackend. May be nil to probe default socket paths only.
+func SelectContainerBackend(ctx context.Context, preferred BackendName, env map[string]string) (BackendName, string) {
+	return runtime.SelectContainerBackend(ctx, preferred, env)
 }
 
 // IsolationAvailability reports whether the given isolation mode is usable for a
@@ -482,7 +490,7 @@ func resolveBackendFromConfig(ctx context.Context, layout config.Layout) runtime
 	if cfg, err := config.LoadDefaultsConfig(layout); err == nil {
 		preferred = runtime.BackendName(cfg.ContainerBackend)
 	}
-	backend, _ := runtime.SelectBackend(ctx, preferred, "", "")
+	backend, _ := runtime.SelectBackend(ctx, preferred, "", "", layout.Env)
 	return backend
 }
 

@@ -44,7 +44,7 @@ var descriptor = runtime.BackendDescriptor{
 
 // probe reports whether Seatbelt is usable. sandbox-exec ships with every
 // macOS install, so a positive macOS check + LookPath suffices.
-func probe(_ context.Context) (bool, string) {
+func probe(_ context.Context, _ map[string]string) (bool, string) {
 	if !isMacOS() {
 		return false, "seatbelt requires macOS"
 	}

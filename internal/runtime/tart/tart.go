@@ -83,7 +83,7 @@ func versionString(ctx context.Context) string {
 // probe reports whether Tart is usable. Tart requires macOS on Apple Silicon
 // and the `tart` binary on PATH. We don't run `tart --version` here — that's a
 // fork+exec on every dispatch; LookPath suffices for "is it installed".
-func probe(_ context.Context) (bool, string) {
+func probe(_ context.Context, _ map[string]string) (bool, string) {
 	if !isMacOS() {
 		return false, "tart requires macOS"
 	}

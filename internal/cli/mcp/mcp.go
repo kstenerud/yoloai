@@ -56,7 +56,7 @@ Add to ~/.claude.json to use with Claude Desktop:
 }
 
 func runMCPServe(cmd *cobra.Command, _ []string) error {
-	backend, warn := yoloai.SelectContainerBackend(cmd.Context(), cliutil.ResolveContainerBackendConfig())
+	backend, warn := yoloai.SelectContainerBackend(cmd.Context(), cliutil.ResolveContainerBackendConfig(), cliutil.Layout().Env)
 	if warn != "" {
 		fmt.Fprintln(os.Stderr, warn)
 	}

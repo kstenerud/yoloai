@@ -64,7 +64,7 @@ func ResolveBackend(cmd *cobra.Command) yoloai.BackendName {
 	isolation := yoloai.IsolationMode(Coalesce(FlagStr(cmd, "isolation"), cfgIsolation))
 	targetOS := Coalesce(FlagStr(cmd, "os"), cfgOS)
 
-	backend, warn := yoloai.SelectBackend(cmd.Context(), ResolveContainerBackendConfig(), isolation, targetOS)
+	backend, warn := yoloai.SelectBackend(cmd.Context(), ResolveContainerBackendConfig(), isolation, targetOS, Layout().Env)
 	if warn != "" {
 		fmt.Fprintln(os.Stderr, warn)
 	}
@@ -96,7 +96,7 @@ func ResolveBackendForSandbox(name string) yoloai.BackendName {
 	}
 	// Probe is stat-only so an empty context is fine here; full ctx threading
 	// for the rare "meta corrupt" fallback is out of scope for W-L4.
-	backend, warn := yoloai.SelectContainerBackend(context.Background(), ResolveContainerBackendConfig())
+	backend, warn := yoloai.SelectContainerBackend(context.Background(), ResolveContainerBackendConfig(), Layout().Env)
 	if warn != "" {
 		fmt.Fprintln(os.Stderr, warn)
 	}

@@ -17,7 +17,10 @@ import (
 // Distinct from IsAvailable: IsAvailable is static — "compiled in for this
 // platform" — while Probe is dynamic — "the daemon/socket/binary it needs
 // is actually present right now".
-func Probe(ctx context.Context, name BackendName) (available bool, reason string) {
+//
+// env is the caller's threaded host-env snapshot, forwarded to the backend's
+// probe so socket discovery stays principal-scoped (§12). May be nil.
+func Probe(ctx context.Context, name BackendName, env map[string]string) (available bool, reason string) {
 	desc, ok := Descriptor(name)
 	if !ok {
 		return false, fmt.Sprintf("backend %q is not available on this platform", name)
@@ -25,7 +28,7 @@ func Probe(ctx context.Context, name BackendName) (available bool, reason string
 	if desc.Probe == nil {
 		return true, ""
 	}
-	return desc.Probe(ctx)
+	return desc.Probe(ctx, env)
 }
 
 // SelectBackend resolves the backend to use from an isolation mode, a
@@ -56,7 +59,10 @@ func Probe(ctx context.Context, name BackendName) (available bool, reason string
 // container-slot preference was named but unavailable. OS/isolation
 // routing itself emits no warning — the CLI validates those combos
 // up-front via IsolationAvailability.
-func SelectBackend(ctx context.Context, preferred BackendName, isolation IsolationMode, targetOS string) (backend BackendName, warning string) {
+//
+// env is the caller's threaded host-env snapshot, forwarded to container-slot
+// probes for principal-scoped socket discovery (§12). May be nil.
+func SelectBackend(ctx context.Context, preferred BackendName, isolation IsolationMode, targetOS string, env map[string]string) (backend BackendName, warning string) {
 	// OS-based routing: macOS-native backends. Checked before isolation
 	// so "--os mac --isolation vm" routes to tart rather than containerd.
 	if targetOS == "mac" {
@@ -75,7 +81,7 @@ func SelectBackend(ctx context.Context, preferred BackendName, isolation Isolati
 		}
 	}
 
-	return SelectContainerBackend(ctx, preferred)
+	return SelectContainerBackend(ctx, preferred, env)
 }
 
 // SelectContainerBackend picks the best available container backend
@@ -88,7 +94,10 @@ func SelectBackend(ctx context.Context, preferred BackendName, isolation Isolati
 // at all, the returned name is the preferred one (or the first candidate
 // alphabetically), so the caller fails downstream in `runtime.New` with a
 // clear backend-specific error rather than a generic "no backend" message.
-func SelectContainerBackend(ctx context.Context, preferred BackendName) (backend BackendName, warning string) {
+//
+// env is the caller's threaded host-env snapshot, forwarded to each backend's
+// probe so socket discovery stays principal-scoped (§12). May be nil.
+func SelectContainerBackend(ctx context.Context, preferred BackendName, env map[string]string) (backend BackendName, warning string) {
 	candidates := containerBackends()
 	if len(candidates) == 0 {
 		// No container backends registered on this platform (e.g. macOS without
@@ -108,7 +117,7 @@ func SelectContainerBackend(ctx context.Context, preferred BackendName) (backend
 
 	// Try each candidate in order.
 	for _, name := range ordered {
-		ok, _ := Probe(ctx, name)
+		ok, _ := Probe(ctx, name, env)
 		if ok {
 			if preferred != "" && name != preferred {
 				warning = fmt.Sprintf("Warning: container_backend=%s not available; falling back to %s", preferred, name)

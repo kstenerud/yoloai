@@ -162,7 +162,13 @@ type BackendDescriptor struct {
 	// run on `yoloai info`, setup wizards, and detect-backend dispatch, so
 	// stat the socket / LookPath the binary; do not dial. nil is permitted but
 	// every shipped backend supplies a real probe.
-	Probe func(ctx context.Context) (available bool, reason string)
+	//
+	// env is the caller's threaded host-env snapshot (the same map fed to the
+	// factory). Backends that locate their daemon socket via env vars
+	// (DOCKER_HOST, CONTAINER_HOST, XDG_RUNTIME_DIR) read them from this map
+	// rather than os.Getenv, so probing stays principal-scoped (§12). Backends
+	// that probe by stat/LookPath ignore it.
+	Probe func(ctx context.Context, env map[string]string) (available bool, reason string)
 
 	// CleanupHint returns a user-facing command that removes the named image
 	// from this backend's local store (e.g. "docker rmi yoloai-myprofile").

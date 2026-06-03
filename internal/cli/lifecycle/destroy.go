@@ -72,7 +72,7 @@ func runDestroyCmd(cmd *cobra.Command, args []string) error {
 	}
 
 	// Resolve backend: from first named sandbox, or config default for --all/wildcards
-	backend, warn := yoloai.SelectContainerBackend(cmd.Context(), cliutil.ResolveContainerBackendConfig())
+	backend, warn := yoloai.SelectContainerBackend(cmd.Context(), cliutil.ResolveContainerBackendConfig(), cliutil.Layout().Env)
 	if warn != "" {
 		fmt.Fprintln(os.Stderr, warn)
 	}

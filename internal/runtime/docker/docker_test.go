@@ -178,3 +178,13 @@ func TestDescriptor_Docker(t *testing.T) {
 	assert.True(t, d.AgentProvisionedByBackend)
 	assert.Contains(t, d.SupportedIsolationModes, runtime.IsolationModeContainerEnhanced)
 }
+
+// TestProbe_ReadsThreadedDockerHost verifies the probe treats DOCKER_HOST from
+// the threaded env snapshot as a positive signal, never reading the process
+// environment (§12). A non-empty DOCKER_HOST short-circuits to available
+// regardless of whether the default socket exists.
+func TestProbe_ReadsThreadedDockerHost(t *testing.T) {
+	ok, reason := probe(context.Background(), map[string]string{"DOCKER_HOST": "tcp://example:2375"})
+	assert.True(t, ok)
+	assert.Empty(t, reason)
+}

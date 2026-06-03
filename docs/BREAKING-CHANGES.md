@@ -4,6 +4,29 @@ Tracks breaking changes made during beta. Each entry should be included in relea
 
 ## Unreleased
 
+### `SelectBackend` / `SelectContainerBackend` take a host-env snapshot
+
+The two public backend-selection helpers gained a trailing `env map[string]string`
+parameter:
+
+- `yoloai.SelectBackend(ctx, preferred, isolation, targetOS, env)`
+- `yoloai.SelectContainerBackend(ctx, preferred, env)`
+
+**Previous behavior:** the container-backend probes read `DOCKER_HOST` /
+`CONTAINER_HOST` / `XDG_RUNTIME_DIR` from the process environment via `os.Getenv`
+to locate the daemon socket. In a multi-principal daemon this leaked the
+*daemon's* environment into a principal's backend selection (§12 "no ambient
+configuration").
+
+**New behavior:** callers pass the same host-env snapshot they feed to
+`Options.Env` / `SystemOptions.Env`; probes read socket-discovery vars from that
+map. Pass `nil` to probe only the default socket paths. The CLI threads its one
+licensed `os.Environ()` snapshot (`Layout().Env`), so CLI behavior is unchanged.
+
+**Migration:** add the `env` argument to both calls — pass your principal's env
+snapshot (the map you already build for `Options.Env`), or `nil` for default
+socket discovery.
+
 ### 0.x public Go API reshape (layer-1)
 
 Beta reshape of the Go embedding surface (critique findings F1–F4; plan
@@ -50,7 +73,7 @@ only via `internal/sandbox`):
 struct (built from re-exported `yoloai.DirSpec`/`DirMode`/`NetworkMode`/
 `PortMapping`/…); `Run` is sugar over it. `CreateOptions.Backend` is
 **required** — empty returns a `*UsageError`; do the old auto-detect explicitly
-with `yoloai.SelectBackend(ctx, preferred, isolation, os)`. A dirty workdir yields
+with `yoloai.SelectBackend(ctx, preferred, isolation, os, env)`. A dirty workdir yields
 a typed `*yoloai.DirtyWorkdirError` (the library never prompts); ack it with
 `CreateOptions.AllowDirtyWorkdir` / `DirSpec.AllowDirty` /
 `RunOptions.AllowDirtyWorkdir`. Removed: `CreateOptions.Yes/Attach/Isolation/OS`

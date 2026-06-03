@@ -15,7 +15,7 @@ import (
 func TestMain(m *testing.M) {
 	ctx := context.Background()
 
-	rt, err := New(ctx, probeEnv())
+	rt, err := New(ctx, envFromOS())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Podman unavailable, skipping integration tests: %v\n", err)
 		os.Exit(0)
