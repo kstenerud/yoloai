@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
 
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
@@ -41,21 +40,14 @@ func runClone(cmd *cobra.Command, args []string) error {
 		defer cliutil.SetTerminalTitle("")
 	}
 
-	// Force-destroy existing destination before cloning. The existing dst's
-	// backend may differ from src's, so this opens its own Client tied to
-	// dst's current backend.
-	if force {
-		if err := forceDestroyIfExists(cmd, dst); err != nil {
-			return err
-		}
-	}
-
 	// Source's backend governs the rest of the flow: after clone, dst inherits
 	// src's backend (copied via environment.json), so Start needs the same backend.
+	// Overwriting a pre-existing destination (which may live on a different
+	// backend) is handled inside Client.Clone via the Overwrite option.
 	backend := cliutil.ResolveBackendForSandbox(src)
 	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		slog.Info("cloning sandbox", "event", "sandbox.clone", "source", src, "dest", dst) //nolint:gosec // G706: src/dst are validated sandbox names
-		if err := c.Clone(ctx, yoloai.CloneOptions{Source: src, Dest: dst}); err != nil {
+		if err := c.Clone(ctx, yoloai.CloneOptions{Source: src, Dest: dst, Overwrite: force}); err != nil {
 			return err
 		}
 		slog.Info("clone complete", "event", "sandbox.clone.complete", "source", src, "dest", dst) //nolint:gosec // G706: src/dst are validated sandbox names
@@ -106,23 +98,6 @@ func runCloneStart(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, sr
 		return nil
 	}
 	return cliutil.AttachToSandboxByName(cmd, dst)
-}
-
-// forceDestroyIfExists destroys the sandbox at dst if it already exists on disk.
-// The existing dst's backend may differ from src's, so this opens its own Client.
-func forceDestroyIfExists(cmd *cobra.Command, dst string) error {
-	if _, statErr := os.Stat(cliutil.Layout().SandboxDir(dst)); os.IsNotExist(statErr) { //nolint:gosec // G703: dst is validated sandbox name
-		return nil // does not exist — nothing to destroy
-	}
-	destBackend := cliutil.ResolveBackendForSandbox(dst)
-	return cliutil.WithClient(cmd, destBackend, func(ctx context.Context, c *yoloai.Client) error {
-		sb, err := c.Sandbox(dst)
-		if err != nil {
-			return err
-		}
-		_, destroyErr := sb.Destroy(ctx, yoloai.DestroyOptions{AbandonUnappliedWork: true})
-		return destroyErr
-	})
 }
 
 // addCloneFlags registers the shared flags for clone commands.

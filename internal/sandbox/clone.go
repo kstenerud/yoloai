@@ -12,11 +12,12 @@ import (
 	"github.com/kstenerud/yoloai/internal/workspace"
 )
 
-// CloneOptions configures a sandbox clone operation.
+// CloneOptions configures a sandbox clone operation. Overwriting a pre-existing
+// destination is the orchestration layer's job (yoloai.Client.Clone tears the
+// old one down first); Engine.Clone itself refuses an existing destination.
 type CloneOptions struct {
 	Source string // existing sandbox name
 	Dest   string // new sandbox name
-	Force  bool   // destroy destination if it already exists
 }
 
 // Clone creates a new stopped sandbox by deep-copying an existing one's

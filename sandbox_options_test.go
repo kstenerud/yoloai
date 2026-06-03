@@ -5,12 +5,28 @@
 package yoloai
 
 import (
+	"context"
 	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/kstenerud/yoloai/internal/sandbox"
 )
+
+func TestCloneOptions_toInternal(t *testing.T) {
+	in := CloneOptions{Source: "src", Dest: "dst", Overwrite: true}.toInternal()
+	assert.Equal(t, sandbox.CloneOptions{Source: "src", Dest: "dst"}, in,
+		"Overwrite is an orchestration-layer concern, not carried into the Engine clone")
+}
+
+// destroyForOverwrite must short-circuit (and never touch the runtime) when the
+// destination doesn't exist — Overwrite on a fresh name is a plain clone.
+func TestClient_destroyForOverwrite_MissingDestIsNoop(t *testing.T) {
+	c, _ := clientWithSandbox(t) // nil runtime; the no-op path must not reach it
+	require.NoError(t, c.destroyForOverwrite(context.Background(), "ghost"))
+}
 
 func TestResetOptions_toInternal(t *testing.T) {
 	in := ResetOptions{

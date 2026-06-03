@@ -53,6 +53,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"time"
 
 	"github.com/kstenerud/yoloai/internal/config"
@@ -63,7 +64,9 @@ import (
 	_ "github.com/kstenerud/yoloai/internal/runtime/tart"     // register backend
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/create"
+	"github.com/kstenerud/yoloai/internal/sandbox/lifecycle"
 	"github.com/kstenerud/yoloai/internal/sandbox/state"
+	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
 
@@ -382,13 +385,50 @@ func (c *Client) List(ctx context.Context) ([]*Info, error) {
 	return infosFromStatus(sis), nil
 }
 
-// Clone copies an existing sandbox's state into a new sandbox. The runtime
-// is not consulted — clone is a disk-only operation that copies the source
-// sandbox dir under DataDir/sandboxes/. Embedders still construct the Client
+// Clone copies an existing sandbox's state into a new sandbox. The copy itself
+// is a disk-only operation (the source sandbox dir under DataDir/sandboxes/ is
+// deep-copied); the runtime is consulted only when opts.Overwrite must tear
+// down a pre-existing destination first. Embedders still construct the Client
 // with a backend because most clone workflows start the destination right
 // after; the wasted connection for pure --no-start clones is acceptable.
+//
+// With opts.Overwrite set, an existing destination is destroyed before the
+// copy; without it, an existing destination is a hard error.
 func (c *Client) Clone(ctx context.Context, opts CloneOptions) error {
+	if opts.Overwrite {
+		if err := c.destroyForOverwrite(ctx, opts.Dest); err != nil {
+			return err
+		}
+	}
 	return c.manager.Clone(ctx, opts.toInternal())
+}
+
+// destroyForOverwrite tears down a pre-existing destination sandbox so a clone
+// can take its place. A missing destination is a no-op. The destination may
+// have been created on a different backend than this Client's, so it destroys
+// through the backend recorded in the destination's environment.json (falling
+// back to the Client's own runtime when that metadata is unreadable). Work is
+// abandoned unconditionally — an Overwrite clone is an explicit replace.
+func (c *Client) destroyForOverwrite(ctx context.Context, dest string) error {
+	dstDir := c.layout.SandboxDir(dest)
+	if _, err := os.Stat(dstDir); os.IsNotExist(err) {
+		return nil
+	}
+
+	deps := c.deps()
+	if meta, err := store.LoadEnvironment(dstDir); err == nil && meta.Backend != "" {
+		rt, rtErr := newRuntime(ctx, meta.Backend, c.layout)
+		if rtErr != nil {
+			return fmt.Errorf("connect to %s backend to overwrite %q: %w", meta.Backend, dest, rtErr)
+		}
+		defer rt.Close() //nolint:errcheck // best-effort close after teardown
+		deps = state.Deps{Runtime: rt, Layout: c.layout, Input: c.input}
+	}
+
+	if _, err := lifecycle.Destroy(ctx, deps, dest); err != nil {
+		return fmt.Errorf("overwrite existing destination %q: %w", dest, err)
+	}
+	return nil
 }
 
 // Create provisions a new sandbox from CreateOptions and (unless

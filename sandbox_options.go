@@ -110,7 +110,7 @@ type CloneOptions struct {
 }
 
 func (o CloneOptions) toInternal() sandbox.CloneOptions {
-	return sandbox.CloneOptions{Source: o.Source, Dest: o.Dest, Force: o.Overwrite}
+	return sandbox.CloneOptions{Source: o.Source, Dest: o.Dest}
 }
 
 // ExecOptions configures Sandbox.Exec. PTY selects between an interactive
