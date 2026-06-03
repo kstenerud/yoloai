@@ -183,6 +183,33 @@ linters:
           msg: "ambient I/O — take an io.Writer / IOStreams; the CLI layer owns process streams; §12"
         - pattern: "^os\\.Stderr$"
           msg: "ambient I/O — take an io.Writer / IOStreams; the CLI layer owns process streams; §12"
+
+        # §12 stdio by ANY mechanism. The os.Stdin/Stdout/Stderr bans above
+        # cover the symbols; these cover the package-level wrappers and
+        # builtins that hit the SAME process streams without naming them, so a
+        # regression can't reach process I/O through fmt/log/print to leak data
+        # from the process rather than the principal (and vice versa). Library
+        # code takes an explicit io.Reader/Writer (or the threaded slog.Logger
+        # for diagnostics); the CLI and cmd/ entrypoint — the stdio-owning
+        # boundary — are excluded below.
+        - pattern: "^fmt\\.Print$"
+          msg: "ambient stdout — write to an injected io.Writer, e.g. fmt.Fprint(w, …); §12"
+        - pattern: "^fmt\\.Printf$"
+          msg: "ambient stdout — write to an injected io.Writer, e.g. fmt.Fprintf(w, …); §12"
+        - pattern: "^fmt\\.Println$"
+          msg: "ambient stdout — write to an injected io.Writer, e.g. fmt.Fprintln(w, …); §12"
+        - pattern: "^fmt\\.Scan$"
+          msg: "ambient stdin — read from an injected io.Reader, e.g. fmt.Fscan(r, …); §12"
+        - pattern: "^fmt\\.Scanf$"
+          msg: "ambient stdin — read from an injected io.Reader, e.g. fmt.Fscanf(r, …); §12"
+        - pattern: "^fmt\\.Scanln$"
+          msg: "ambient stdin — read from an injected io.Reader, e.g. fmt.Fscanln(r, …); §12"
+        - pattern: "^print$"
+          msg: "builtin print writes to stderr — use an injected io.Writer or the threaded slog.Logger; §12"
+        - pattern: "^println$"
+          msg: "builtin println writes to stderr — use an injected io.Writer or the threaded slog.Logger; §12"
+        - pattern: "^log\\.(Print|Printf|Println|Fatal|Fatalf|Fatalln|Panic|Panicf|Panicln)$"
+          msg: "the log default logger writes to stderr — use the threaded slog.Logger; §12"
         - pattern: "^syscall\\.Getenv$"
           msg: "ambient env backdoor below os — forbidden; §12"
         - pattern: "^syscall\\.Setenv$"
@@ -261,6 +288,17 @@ linters:
         linters:
           - forbidigo
         text: "os\\.(Stdin|Stdout|Stderr|Args)"
+
+      # §12 stdio-by-mechanism boundary: the CLI and the cmd/ entrypoint own
+      # the process's stdin/stdout/stderr, so they may print/scan through fmt,
+      # the builtins, or the log default logger. Library packages take explicit
+      # io.Reader/Writer instead (justified inline where they legitimately
+      # can't). The CLI in practice uses fmt.Fprintf(cmd.OutOrStdout()); this
+      # exclusion just keeps the boundary unconstrained.
+      - path: "^(internal/cli/|cmd/)"
+        linters:
+          - forbidigo
+        text: "fmt\\.(Print|Printf|Println|Scan|Scanf|Scanln)|^print(ln)?$|log\\.(Print|Printf|Println|Fatal|Fatalf|Fatalln|Panic|Panicf|Panicln)"
 
       # The MCP stdio proxy is a transport boundary: it bridges the MCP
       # client's stdin/stdout to the in-sandbox process, so owning the
