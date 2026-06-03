@@ -54,6 +54,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/kstenerud/yoloai/internal/config"
@@ -121,8 +122,11 @@ type Options struct {
 	HomeDir string
 
 	// Backend selects the runtime backend (yoloai.BackendDocker,
-	// yoloai.BackendTart, etc.). REQUIRED — empty is rejected at
-	// construction with a *UsageError (F4).
+	// yoloai.BackendTart, etc.). OPTIONAL — empty constructs a backend-less
+	// Client (A2/A3) that serves host-only reads and, via System(),
+	// cross-backend admin without ever opening a connection. A backend-bound
+	// operation (Exec, Attach, Start, lifecycle, Create, List, Clone, …) on a
+	// backend-less Client returns ErrBackendRequired.
 	//
 	// No implicit default. Backend selection is inherently ambient (it
 	// probes which container daemons are installed), so it belongs at the
@@ -130,7 +134,8 @@ type Options struct {
 	// §12). The CLI resolves it from its --backend / --isolation / --os
 	// flags via runtime.SelectBackend and passes the concrete result here.
 	// Embedders that want that same auto-detection call the public
-	// yoloai.SelectBackend helper and pass its result.
+	// yoloai.SelectBackend helper and pass its result. When set, the backend
+	// is opened lazily on the first backend-bound op, not at construction.
 	Backend BackendName
 
 	// Logger receives structured log output. Default: slog.Default().
@@ -202,12 +207,22 @@ type Options struct {
 // A Client is safe for concurrent use by multiple goroutines.
 // Construct with New or NewWithOptions.
 type Client struct {
-	manager *sandbox.Engine
+	layout  config.Layout       // Q-W: DataDir-rooted path resolver propagated to Engine + apply
+	backend runtime.BackendName // selected backend; "" = backend-less (host-only reads/admin), backend-bound ops return ErrBackendRequired
+	logger  *slog.Logger        // for the lazily-built Engine
+	version string              // yoloAI version stamped into created sandboxes' environment.json
+	output  io.Writer           // Options.Output (defaulted to io.Discard); seeds per-call progress writers (F8)
+	input   io.Reader           // Options.Input (defaulted to an empty reader, never os.Stdin — §12); threaded to create.Run via state.Deps
+
+	// Lazy backend connection. The runtime is opened once, on the first
+	// backend-bound operation, via ensure/tryEnsure — host-only reads
+	// (Workdir host-git, on-disk allowlist, filesystem readers) never trigger
+	// it. Guarded by mu; opened latches true on success and rt/manager are then
+	// stable for the Client's lifetime.
+	mu      sync.Mutex
+	opened  bool
 	rt      runtime.Runtime
-	layout  config.Layout // Q-W: DataDir-rooted path resolver propagated to Engine + apply
-	version string        // yoloAI version stamped into created sandboxes' environment.json
-	output  io.Writer     // Options.Output (defaulted to io.Discard); seeds per-call progress writers (F8)
-	input   io.Reader     // Options.Input (defaulted to an empty reader, never os.Stdin — §12); threaded to create.Run via state.Deps
+	manager *sandbox.Engine
 }
 
 // NewWithOptions creates a Client with explicit options.
@@ -219,10 +234,6 @@ func NewWithOptions(ctx context.Context, opts Options) (*Client, error) {
 	if opts.HomeDir == "" {
 		return nil, yoerrors.NewUsageError("yoloai: Options.HomeDir is required (no implicit filepath.Dir(DataDir) derivation; under the D60 bifurcation DataDir is $HOME/.yoloai/library, so its parent is not $HOME). Pass the host user's home explicitly; the CLI uses cliutil.Layout().HomeDir. See development-principles.md §12.")
 	}
-	if opts.Backend == "" {
-		return nil, yoerrors.NewUsageError("yoloai: Options.Backend is required — empty is not a valid backend (F4). Resolve it at the boundary before constructing the Client, e.g. yoloai.SelectBackend(ctx, preferred, isolation, os, env). See development-principles.md §4.")
-	}
-
 	principal, err := config.ParsePrincipalSegment(opts.Principal)
 	if err != nil {
 		return nil, yoerrors.NewUsageError("yoloai: invalid Options.Principal: %v", err)
@@ -232,7 +243,6 @@ func NewWithOptions(ctx context.Context, opts Options) (*Client, error) {
 	layout.Env = opts.Env
 	layout.SecretsStagingDir = opts.SecretsStagingDir
 
-	backend := opts.Backend
 	logger := opts.Logger
 	if logger == nil {
 		logger = slog.Default()
@@ -246,22 +256,75 @@ func NewWithOptions(ctx context.Context, opts Options) (*Client, error) {
 		input = bytes.NewReader(nil) // §12: empty reader, never the process's os.Stdin; embedders override, the CLI passes IOStreams
 	}
 
-	rt, err := newRuntime(ctx, backend, layout)
-	if err != nil {
-		return nil, fmt.Errorf("connect to %s backend: %w", backend, err)
-	}
-
-	mgr := sandbox.NewEngine(rt, logger, input, sandbox.WithLayout(layout))
-	return &Client{manager: mgr, rt: rt, layout: layout, version: opts.Version, output: output, input: input}, nil
+	// The backend connection is NOT opened here (A2/A3). Options.Backend is
+	// optional: a backend-less Client serves host-only reads and admin without
+	// ever connecting; backend-bound ops open the runtime lazily on first use
+	// (ensure) or return ErrBackendRequired when Backend is "".
+	return &Client{
+		layout:  layout,
+		backend: opts.Backend,
+		logger:  logger,
+		version: opts.Version,
+		output:  output,
+		input:   input,
+	}, nil
 }
 
-// Close releases the underlying runtime connection.
+// ErrBackendRequired is returned by backend-bound operations (Exec, Attach,
+// Start, Stop, lifecycle, Create, List, Clone, …) when the Client was
+// constructed without Options.Backend. A backend-less Client still serves
+// host-only reads (Workdir host-git, on-disk allowlist, filesystem readers)
+// and, via System(), cross-backend admin. Set Options.Backend — resolve it at
+// the boundary with yoloai.SelectBackend — to enable backend-bound ops.
+var ErrBackendRequired = yoerrors.NewUsageError("yoloai: this operation requires a backend, but the Client was constructed without Options.Backend (backend-less). Set Options.Backend (e.g. via yoloai.SelectBackend) to enable backend-bound operations. See development-principles.md §4.")
+
+// ensure lazily opens the backend connection and builds the Engine on first
+// use, caching both for the Client's lifetime. It is the gate for every
+// backend-bound operation. Returns ErrBackendRequired for a backend-less
+// Client; a failed open is NOT cached (the next call retries). Safe for
+// concurrent use.
+func (c *Client) ensure(ctx context.Context) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.opened {
+		return nil
+	}
+	if c.backend == "" {
+		return ErrBackendRequired
+	}
+	rt, err := newRuntime(ctx, c.backend, c.layout)
+	if err != nil {
+		return fmt.Errorf("connect to %s backend: %w", c.backend, err)
+	}
+	c.rt = rt
+	c.manager = sandbox.NewEngine(rt, c.logger, c.input, sandbox.WithLayout(c.layout))
+	c.opened = true
+	return nil
+}
+
+// tryEnsure opens the backend connection best-effort for operations that have a
+// host-only fallback (Workdir host-git, on-disk allowlist live-patch,
+// ContainerLogs, HasActiveWork): on success rt/manager are populated; on
+// failure (including a backend-less Client) they stay nil and the caller falls
+// back to its disk-only path. The error is intentionally discarded.
+func (c *Client) tryEnsure(ctx context.Context) {
+	_ = c.ensure(ctx) //nolint:errcheck // best-effort: callers fall back to a host-only path when rt stays nil
+}
+
+// Close releases the underlying runtime connection, if one was ever opened.
+// A no-op on a Client whose backend was never used.
 func (c *Client) Close() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.opened {
+		return nil
+	}
 	return c.rt.Close()
 }
 
 // deps bundles the Client's runtime, layout, and input into state.Deps for
-// use with lifecycle and create free functions.
+// use with lifecycle and create free functions. Callers must ensure the
+// runtime is open (via ensure) before calling deps for a backend-bound op.
 func (c *Client) deps() state.Deps {
 	return state.Deps{Runtime: c.rt, Layout: c.layout, Input: c.input}
 }
@@ -378,6 +441,9 @@ func (c *Client) Run(ctx context.Context, opts RunOptions) (*Info, error) {
 
 // List returns info for all sandboxes.
 func (c *Client) List(ctx context.Context) ([]*Info, error) {
+	if err := c.ensure(ctx); err != nil {
+		return nil, err
+	}
 	sis, err := c.manager.List(ctx)
 	if err != nil {
 		return nil, err
@@ -395,6 +461,9 @@ func (c *Client) List(ctx context.Context) ([]*Info, error) {
 // With opts.Overwrite set, an existing destination is destroyed before the
 // copy; without it, an existing destination is a hard error.
 func (c *Client) Clone(ctx context.Context, opts CloneOptions) error {
+	if err := c.ensure(ctx); err != nil {
+		return err
+	}
 	if opts.Overwrite {
 		if err := c.destroyForOverwrite(ctx, opts.Dest); err != nil {
 			return err
@@ -437,6 +506,9 @@ func (c *Client) destroyForOverwrite(ctx context.Context, dest string) error {
 // (no auto-generation). Use Run for the higher-level "create + wait for
 // terminal status" convenience.
 func (c *Client) Create(ctx context.Context, opts CreateOptions) (string, error) {
+	if err := c.ensure(ctx); err != nil {
+		return "", err
+	}
 	internal := opts.toInternal()
 	internal.Version = c.version
 	if internal.Output == nil {
@@ -479,6 +551,9 @@ func attachStatusOK(status sandbox.Status, name string) error {
 // (default backend/agent, tmux mode) is a separate concern handled by writing
 // config via SystemClient.Config().Set — the library has no setup-wizard verb.
 func (c *Client) EnsureSetup(ctx context.Context) error {
+	if err := c.ensure(ctx); err != nil {
+		return err
+	}
 	return c.manager.EnsureSetup(ctx, c.output)
 }
 

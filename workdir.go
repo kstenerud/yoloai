@@ -47,6 +47,7 @@ type DiffOptions struct {
 // read the on-disk commit history. Folds the former Diff / DiffWithOptions /
 // DiffRef / DiffOverlay methods into one verb.
 func (w *Workdir) Diff(ctx context.Context, opts DiffOptions) (string, error) {
+	w.s.c.tryEnsure(ctx) // overlay diffs run git inside the container; copy-mode reads disk (rt unused)
 	meta, err := store.LoadEnvironment(w.s.c.layout.SandboxDir(w.s.name))
 	if err != nil {
 		return "", err
@@ -119,6 +120,7 @@ func (w *Workdir) Export(ctx context.Context, opts ExportOptions) (*ExportResult
 	if opts.Dir == "" {
 		return nil, yoerrors.NewUsageError("export requires a destination directory: set ExportOptions.Dir")
 	}
+	w.s.c.tryEnsure(ctx) // overlay export needs the running container; copy-mode reads disk (rt unused)
 	return patch.Export(ctx, w.s.c.layout, w.s.c.rt, w.s.name, patch.ExportOptions{
 		Dir:                opts.Dir,
 		Refs:               opts.Refs,
@@ -200,6 +202,7 @@ func (w *Workdir) Apply(ctx context.Context, opts ApplyOptions) (*ApplyResult, e
 	if opts.Mode != ApplyModeCommits && opts.Mode != ApplyModeNoCommit {
 		return nil, yoerrors.NewUsageError("apply mode is required: set ApplyOptions.Mode to yoloai.ApplyModeCommits or yoloai.ApplyModeNoCommit")
 	}
+	w.s.c.tryEnsure(ctx) // overlay apply needs the running container; copy-mode reads disk (rt unused)
 
 	meta, err := store.LoadEnvironment(w.s.c.layout.SandboxDir(w.s.name))
 	if err != nil {
@@ -256,6 +259,7 @@ type CommitsOptions struct {
 // baseline. Folds the former ListCommits / ListCommitsOverlay /
 // ListCommitsWithStats methods into one verb.
 func (w *Workdir) Commits(ctx context.Context, opts CommitsOptions) ([]CommitInfo, error) {
+	w.s.c.tryEnsure(ctx) // overlay history runs git log inside the container; copy-mode reads disk (rt unused)
 	meta, err := store.LoadEnvironment(w.s.c.layout.SandboxDir(w.s.name))
 	if err != nil {
 		return nil, err
@@ -302,6 +306,7 @@ func toCommitInfos(cs []patch.CommitInfo) []CommitInfo {
 // HasUncommittedChanges reports whether the workdir has uncommitted edits
 // beyond its last commit. Drives the "*" marker in `yoloai diff --log`.
 func (w *Workdir) HasUncommittedChanges(ctx context.Context) (bool, error) {
+	w.s.c.tryEnsure(ctx)
 	return patch.HasUncommittedChanges(ctx, w.s.c.layout, w.s.c.rt, w.s.name)
 }
 
@@ -328,6 +333,7 @@ type BaselineConflictError = patch.BaselineConflictError
 // expectedCurrentSHA == "" to assert "no baseline yet" (valid only when none is
 // set). Refused with a *UsageError for :rw and :overlay workdirs.
 func (w *Workdir) AdvanceBaseline(ctx context.Context, expectedCurrentSHA string) (*BaselineChange, error) {
+	w.s.c.tryEnsure(ctx)
 	return patch.AdvanceBaselineCAS(ctx, w.s.c.layout, w.s.c.rt, w.s.name, expectedCurrentSHA)
 }
 
@@ -335,6 +341,7 @@ func (w *Workdir) AdvanceBaseline(ctx context.Context, expectedCurrentSHA string
 // full SHA, or any git rev), guarded by the same compare-and-swap as
 // AdvanceBaseline against expectedCurrentSHA.
 func (w *Workdir) SetBaseline(ctx context.Context, expectedCurrentSHA, ref string) (*BaselineChange, error) {
+	w.s.c.tryEnsure(ctx)
 	return patch.SetBaselineCAS(ctx, w.s.c.layout, w.s.c.rt, w.s.name, expectedCurrentSHA, ref)
 }
 
@@ -344,6 +351,7 @@ func (w *Workdir) SetBaseline(ctx context.Context, expectedCurrentSHA, ref strin
 // after an accidental baseline advance. Refused with a *UsageError for :rw and
 // :overlay workdirs.
 func (w *Workdir) BaselineLog(ctx context.Context) ([]BaselineLogEntry, error) {
+	w.s.c.tryEnsure(ctx)
 	return patch.BaselineLog(ctx, w.s.c.layout, w.s.c.rt, w.s.name)
 }
 

@@ -69,12 +69,18 @@ type TerminalSnapshot struct {
 // non-interactive Exec to invoke `tmux capture-pane`; backend-specific
 // socket dispatch is handled inside that primitive. DF3.
 func (s *Sandbox) CaptureTerminal(ctx context.Context, scrollback int) (TerminalSnapshot, error) {
+	if err := s.c.ensure(ctx); err != nil {
+		return TerminalSnapshot{}, err
+	}
 	plain, ansi, err := s.c.manager.CaptureTerminal(ctx, s.name, scrollback)
 	return TerminalSnapshot{Plain: plain, ANSI: ansi}, err
 }
 
 // Inspect returns combined metadata and live state for the sandbox.
 func (s *Sandbox) Inspect(ctx context.Context) (*Info, error) {
+	if err := s.c.ensure(ctx); err != nil {
+		return nil, err
+	}
 	si, err := s.c.manager.Inspect(ctx, s.name)
 	if err != nil {
 		return nil, err
@@ -92,12 +98,18 @@ func (s *Sandbox) Dir() string {
 
 // Stop stops the running container without destroying the sandbox.
 func (s *Sandbox) Stop(ctx context.Context) error {
+	if err := s.c.ensure(ctx); err != nil {
+		return err
+	}
 	return lifecycle.Stop(ctx, s.c.deps(), s.name)
 }
 
 // Start launches (or relaunches) the container for the existing sandbox.
 // The sandbox must exist on disk; use Client.Run/Create for a new one.
 func (s *Sandbox) Start(ctx context.Context, opts StartOptions) (*StartResult, error) {
+	if err := s.c.ensure(ctx); err != nil {
+		return nil, err
+	}
 	return lifecycle.Start(ctx, s.c.deps(), s.name, opts)
 }
 
@@ -105,6 +117,9 @@ func (s *Sandbox) Start(ctx context.Context, opts StartOptions) (*StartResult, e
 // (e.g. StartOptions.Isolation to bring it up under a different isolation
 // mode, StartOptions.Resume to re-feed the prompt).
 func (s *Sandbox) Restart(ctx context.Context, opts StartOptions) (*StartResult, error) {
+	if err := s.c.ensure(ctx); err != nil {
+		return nil, err
+	}
 	if err := lifecycle.Stop(ctx, s.c.deps(), s.name); err != nil {
 		return nil, err
 	}
@@ -115,6 +130,9 @@ func (s *Sandbox) Restart(ctx context.Context, opts StartOptions) (*StartResult,
 // (per opts) optionally restarts the container and wipes agent state. Use for
 // "start over" workflows that abandon the agent's current changes.
 func (s *Sandbox) Reset(ctx context.Context, opts ResetOptions) (*ResetResult, error) {
+	if err := s.c.ensure(ctx); err != nil {
+		return nil, err
+	}
 	return lifecycle.Reset(ctx, s.c.deps(), opts.toInternal(s.name))
 }
 
@@ -124,6 +142,7 @@ func (s *Sandbox) Reset(ctx context.Context, opts ResetOptions) (*ResetResult, e
 // use it to pre-flight a batch of sandboxes before prompting once. For the
 // single-sandbox case prefer Destroy's atomic typed refusal.
 func (s *Sandbox) HasActiveWork(ctx context.Context) (bool, string) {
+	s.c.tryEnsure(ctx) // best-effort: with no backend we still detect on-disk unapplied work
 	return lifecycle.NeedsConfirmation(ctx, s.c.deps(), s.name)
 }
 
@@ -132,6 +151,9 @@ func (s *Sandbox) HasActiveWork(ctx context.Context) (bool, string) {
 // *ActiveWorkError carrying the reason — the caller prompts and retries with
 // AbandonUnappliedWork true. Atomic: no check-then-act gap.
 func (s *Sandbox) Destroy(ctx context.Context, opts DestroyOptions) (*DestroyResult, error) {
+	if err := s.c.ensure(ctx); err != nil {
+		return nil, err
+	}
 	if !opts.AbandonUnappliedWork {
 		if active, reason := s.HasActiveWork(ctx); active {
 			return nil, yoerrors.NewActiveWorkError("%s", reason)
@@ -143,6 +165,9 @@ func (s *Sandbox) Destroy(ctx context.Context, opts DestroyOptions) (*DestroyRes
 // SendInput appends text to the running sandbox's tmux session as if the user
 // typed it. Returns ErrContainerNotRunning when the sandbox is stopped.
 func (s *Sandbox) SendInput(ctx context.Context, text string) error {
+	if err := s.c.ensure(ctx); err != nil {
+		return err
+	}
 	return s.c.manager.SendInput(ctx, s.name, text)
 }
 
@@ -151,6 +176,10 @@ func (s *Sandbox) SendInput(ctx context.Context, text string) error {
 // fetched. This is backend container stdout/stderr for diagnostics — distinct
 // from the structured agent log stream.
 func (s *Sandbox) ContainerLogs(ctx context.Context, tailLines int) string {
+	s.c.tryEnsure(ctx) // best-effort: no backend → no container logs to fetch
+	if s.c.rt == nil {
+		return ""
+	}
 	return runtime.LogsFor(ctx, s.c.rt, store.InstanceName(s.c.layout.Principal, s.name), tailLines)
 }
 
@@ -161,6 +190,9 @@ func (s *Sandbox) ContainerLogs(ctx context.Context, tailLines int) string {
 func (s *Sandbox) Attach(ctx context.Context, io IOStreams) error {
 	if !io.TTY {
 		return yoerrors.NewUsageError("attach requires TTY=true")
+	}
+	if err := s.c.ensure(ctx); err != nil {
+		return err
 	}
 	info, err := s.c.manager.Inspect(ctx, s.name)
 	if err != nil {
@@ -186,6 +218,9 @@ func (s *Sandbox) Attach(ctx context.Context, io IOStreams) error {
 // protocols like the MCP proxy's JSON-RPC bridge; returns *UsageError when the
 // backend doesn't implement stdio exec (Tart/Seatbelt don't).
 func (s *Sandbox) Exec(ctx context.Context, opts ExecOptions, io IOStreams) error {
+	if err := s.c.ensure(ctx); err != nil {
+		return err
+	}
 	if !opts.PTY {
 		execer, ok := s.c.rt.(runtime.StdioExecer)
 		if !ok {

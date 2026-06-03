@@ -255,9 +255,10 @@ func (n *Network) requireIsolated() (string, *store.Environment, error) {
 // (false, nil) so the caller treats them the same as a successful
 // "no-op": the change is queued for the next start.
 func (n *Network) tryLivePatch(ctx context.Context, script string, scriptArgs []string) (bool, error) {
-	// A Client constructed without a runtime (e.g. for tests that
-	// only exercise the on-disk allowlist) has no way to live-patch.
-	// Treat that as "soft-fail; persisted-only" rather than panicking.
+	// Open the backend lazily; a backend-less Client (or a failed open)
+	// leaves rt/manager nil. Treat that as "soft-fail; persisted-only"
+	// rather than panicking — the on-disk allowlist is the source of truth.
+	n.s.c.tryEnsure(ctx)
 	if n.s.c.manager == nil || n.s.c.rt == nil {
 		return false, nil
 	}

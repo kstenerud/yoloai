@@ -1,11 +1,12 @@
-// ABOUTME: Unit tests for the public creation surface (F1/F3/F4): toInternal
-// ABOUTME: mapping, RunOptions.materialize sugar, port formatting, and the F4
-// ABOUTME: required-Backend guard at construction.
+// ABOUTME: Unit tests for the public creation surface (F1/F3): toInternal
+// ABOUTME: mapping, RunOptions.materialize sugar, port formatting, and the
+// ABOUTME: A2/A3 lazy-backend / optional-Backend contract at construction.
 
 package yoloai
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -68,13 +69,45 @@ func TestRunOptions_materialize(t *testing.T) {
 	assert.True(t, c.AllowDirtyWorkdir)
 }
 
-// F4: Backend is required — empty rejected at construction with a *UsageError,
-// before any backend connection is attempted.
-func TestNewWithOptions_BackendRequired(t *testing.T) {
-	_, err := NewWithOptions(context.Background(), Options{DataDir: t.TempDir(), HomeDir: t.TempDir()})
-	require.Error(t, err)
+// A2/A3: Backend is OPTIONAL. A backend-less Client constructs cleanly (it
+// serves host-only reads and, via System(), cross-backend admin) and never
+// opens a connection at construction.
+func TestNewWithOptions_BackendOptional(t *testing.T) {
+	c, err := NewWithOptions(context.Background(), Options{DataDir: t.TempDir(), HomeDir: t.TempDir()})
+	require.NoError(t, err, "empty Backend is allowed — the Client is backend-less")
+	require.NotNil(t, c)
+	assert.False(t, c.opened, "construction must not open the backend")
+	assert.Equal(t, BackendName(""), c.backend)
+}
+
+// A backend-bound operation on a backend-less Client returns ErrBackendRequired
+// (a *UsageError) instead of the old panic footgun — and does not latch, so a
+// later op can still succeed once a backend is supplied.
+func TestBackendBoundOp_OnBackendlessClient_ReturnsErrBackendRequired(t *testing.T) {
+	c, err := NewWithOptions(context.Background(), Options{DataDir: t.TempDir(), HomeDir: t.TempDir()})
+	require.NoError(t, err)
+
+	_, err = c.List(context.Background())
+	require.Error(t, err, "a backend-bound op on a backend-less Client must error")
+	require.ErrorIs(t, err, ErrBackendRequired)
 	var ue *yoerrors.UsageError
-	require.ErrorAs(t, err, &ue, "empty Backend must yield a *UsageError")
+	require.ErrorAs(t, err, &ue, "ErrBackendRequired is a *UsageError for CLI exit-code mapping")
+	assert.False(t, c.opened, "a failed/short-circuited ensure must not latch opened")
+}
+
+// ErrBackendRequired is a stable sentinel: errors.Is matches it directly.
+func TestErrBackendRequired_IsSentinel(t *testing.T) {
+	c, err := NewWithOptions(context.Background(), Options{DataDir: t.TempDir(), HomeDir: t.TempDir()})
+	require.NoError(t, err)
+	assert.True(t, errors.Is(c.ensure(context.Background()), ErrBackendRequired))
+}
+
+// Close on a Client whose backend was never opened is a no-op (no panic, no
+// error) — the lazy core must not dereference a nil runtime.
+func TestClose_OnUnopenedClient_IsNoop(t *testing.T) {
+	c, err := NewWithOptions(context.Background(), Options{DataDir: t.TempDir(), HomeDir: t.TempDir()})
+	require.NoError(t, err)
+	require.NoError(t, c.Close(), "Close on an unopened Client must be a no-op")
 }
 
 func TestNewWithOptions_DataDirRequired(t *testing.T) {

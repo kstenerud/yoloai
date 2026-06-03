@@ -110,15 +110,28 @@ func Reset(ctx context.Context, d state.Deps, opts ResetOptions) (*ResetResult, 
 // Returns a reason string for the confirmation prompt.
 func NeedsConfirmation(ctx context.Context, d state.Deps, name string) (bool, string) {
 	sandboxDir := d.Layout.SandboxDir(name)
-	st, err := status.DetectStatus(ctx, d.Runtime, store.InstanceName(d.Layout.Principal, name), sandboxDir)
-	if err != nil {
-		return false, ""
+
+	// A backend-less caller (no runtime connection) can't probe whether the
+	// agent is live; skip the running check and rely on the on-disk
+	// unapplied-work probes. When a runtime is present and inspection itself
+	// fails, abort (return false) just as the original behavior did.
+	if d.Runtime != nil {
+		st, err := status.DetectStatus(ctx, d.Runtime, store.InstanceName(d.Layout.Principal, name), sandboxDir)
+		if err != nil {
+			return false, ""
+		}
+		if st == status.StatusActive || st == status.StatusIdle {
+			return true, "agent is still running"
+		}
 	}
 
-	if st == status.StatusActive || st == status.StatusIdle {
-		return true, "agent is still running"
-	}
+	return unappliedWorkReason(sandboxDir)
+}
 
+// unappliedWorkReason reports whether a sandbox's on-disk state holds work that
+// destruction would lose — uncommitted/beyond-baseline changes in the workdir
+// or any aux directory — independent of whether the agent is running.
+func unappliedWorkReason(sandboxDir string) (bool, string) {
 	meta, err := store.LoadEnvironment(sandboxDir)
 	if err != nil {
 		// Environment is unreadable (a broken sandbox). Don't assume it's empty —
