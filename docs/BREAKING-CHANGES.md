@@ -4,356 +4,81 @@ Tracks breaking changes made during beta. Each entry should be included in relea
 
 ## Unreleased
 
-### Public option types follow `<Noun><Verb>Options`; constructor is now `NewClient`
+### Public Go embedding surface reshaped (0.x layer-1)
 
-Every public params struct now says which noun it configures and which operation
-(verb) it parameterizes — `SandboxCreateOptions`, `SandboxRunOptions`,
-`SandboxCloneOptions`, `SandboxStartOptions`, `SandboxResetOptions`,
-`SandboxDestroyOptions`, `SandboxExecOptions`, `WorkdirDiffOptions`,
-`WorkdirApplyOptions`, `WorkdirExportOptions`, `WorkdirCommitsOptions`,
-`WorkdirTagsOptions`, `WorkdirTransferTagsOptions`, `SystemDoctorOptions`,
-`SystemBuildOptions`, `SystemCheckOptions`, `SystemPruneOptions`,
-`AgentLogsOptions`. The Client's construction-time config is `ClientCreateOptions`
-(parallel to `SandboxCreateOptions`: it configures *creating a Client*, the way
-`SandboxCreateOptions` configures *creating a Sandbox*).
+The root `yoloai` package was reshaped so external embedders drive yoloAI entirely
+through it (never importing `internal/*`): per-sandbox operations moved onto
+resource-bound handles, creation and backend-selection became explicit, and every
+Options/result/error is now a public `yoloai.*` type. **The overwhelming majority of
+this surface is new in this release** — the handles, the `<Noun><Verb>Options`
+family (`SandboxCreateOptions`, `SandboxRunOptions`, `WorkdirDiffOptions`, …), the
+typed errors, the kind enums, and the `System()` / `Sandbox()` / `Agent()` /
+`Workdir()` accessors all describe new API with no prior name to migrate from. CLI
+behavior is unchanged except for the wire-format renames called out at the end.
 
-Most of these structs — and the `Sandbox`/`Workdir`/`System`/`Agent` handles they
-belong to — are **new in this release** and never existed on the prior stable
-surface, so they are new API, not a migration. The only names that change relative
-to the last release are the four that shipped before:
+**What actually breaks relative to the last release.** Only the handful of names
+that shipped on the prior stable surface change; this is the entire Go migration:
 
-- **`Options` → `ClientCreateOptions`** (the Client's construction config; the
-  generic `Options` undersold it and collided at a glance with per-operation
-  structs).
-- **`RunOptions` → `SandboxRunOptions`** (configures a *sandbox* run).
-- **`ApplyOptions` → `WorkdirApplyOptions`**, now reached via
-  `sandbox.Workdir().Apply(…)` (see the Workdir-handle entry below).
-- **`NewWithOptions(ctx, Options)` → `NewClient(ctx, ClientCreateOptions)`.**
+- `Options` → `ClientCreateOptions` (its `Backend` field is now `BackendType`,
+  typed `yoloai.BackendType`).
+- `RunOptions` → `SandboxRunOptions`.
+- `ApplyOptions` → `WorkdirApplyOptions`, now reached via
+  `client.Sandbox(name).Workdir().Apply(…)`.
+- `NewWithOptions(ctx, Options)` → `NewClient(ctx, ClientCreateOptions)`.
+- `New(ctx)` (the no-argument constructor) was removed — use
+  `NewClient(ctx, ClientCreateOptions{})`.
+- The per-`name` `Client` methods that shipped before — `Inspect`, `Stop`,
+  `Destroy`, `Diff`, `Apply`, `ApplyWithOptions` — are no longer flat on `Client`.
+  Call them on the handle returned by `client.Sandbox(name)` (`.Inspect(ctx)`,
+  `.Stop(ctx)`, `.Destroy(ctx, …)`), and route diff/apply through
+  `.Sandbox(name).Workdir()`. `Run`, `List`, and `Close` remain on `Client`.
 
-Fields, semantics, and zero values are unchanged — only the type names move. (The
-field rename `Options.Backend` → `.BackendType` from the kind-enums entry below
-still applies, now on `ClientCreateOptions`.)
+Field semantics and zero values are otherwise unchanged — only the names and
+receivers move.
 
-**Migration:** rename at call sites — `yoloai.Options{…}` →
-`yoloai.ClientCreateOptions{…}`, `yoloai.RunOptions{…}` →
-`yoloai.SandboxRunOptions{…}`, `yoloai.ApplyOptions{…}` →
-`yoloai.WorkdirApplyOptions{…}`, and `yoloai.NewWithOptions(…)` →
-`yoloai.NewClient(…)`. Earlier entries in this changelog that name `Options`,
-`CreateOptions`, `RunOptions`, `ApplyOptions`, `ClientConfiguration`, or any bare
-`<Verb>Options` (e.g. `DestroyOptions`, `DiffOptions`, `CheckOptions`) refer to the
-same surface under its final `<Noun><Verb>Options` name.
+**Migration (Go embedders):** rename the four type/constructor names at call sites;
+insert `.Sandbox(name)` and drop the `name` argument from per-sandbox calls; route
+diff/apply/export/commits/tags through `.Workdir()`; replace `New(ctx)` with
+`NewClient(ctx, ClientCreateOptions{})`.
 
-### Kind enums renamed: `AgentName`/`BackendName` → `AgentType`/`BackendType`
+**Orientation — the new shape (all new API, no prior name to migrate from).**
+`Client.Sandbox(name)` returns `(*Sandbox, error)` and rejects a missing sandbox
+with `ErrSandboxNotFound` at construction; its `.Workdir()` / `.Network()` /
+`.Agent()` accessors are pure namespace expansion (no IO, no error). Admin/fleet
+operations are reached via `Client.System()`. A `Client` built without
+`ClientCreateOptions.BackendType` serves every backend-free operation (admin,
+per-sandbox reads) without ever opening a runtime; a backend-bound call on such a
+`Client` returns the typed sentinel `ErrBackendRequired`. Diff/apply/export and the
+commit/tag/uncommitted reads live on `Workdir()`, each mode-agnostic;
+`WorkdirApplyOptions.Mode` is required (`ApplyModeCommits` replays the commit series,
+`ApplyModeNoCommit` lands a net diff). Errors are typed public shapes
+(`*ActiveWorkError`, `*DirtyWorkdirError`, `*UsageError`, …) — use `errors.As`. The
+kind enums read as `AgentType` / `BackendType` (value constants like `BackendDocker`
+unchanged). Interactive `Exec` / `Attach` take an `IOStreams` of opaque byte streams
+— the library never touches a stream FD, sets raw mode, or installs signal handlers;
+initial geometry comes from `Rows`/`Cols` and live resizes arrive on
+`IOStreams.Resize`. Backend selection is explicit via
+`yoloai.SelectBackend(ctx, preferred, isolation, targetOS, env)` /
+`SelectContainerBackend(ctx, preferred, env)`, both taking a host-env snapshot
+rather than reading the process environment.
 
-The two kind enums and every field/accessor typed by them now read as "type"
-rather than "name", because they name one of a fixed set of kinds — not an
-arbitrary instance label.
+**Wire-format / CLI breakage (genuine vs the last release).**
 
-- **Types:** `AgentName` → `AgentType`, `BackendName` → `BackendType`. Value
-  constants are unchanged (`AgentClaude`, `BackendDocker`, …).
-- **Fields:** the enum-typed field on every public struct gains the type word —
-  `CreateOptions.Agent` → `AgentType`, `Options.Backend` → `BackendType`, and the
-  same on `RunOptions`, `CheckOptions`, `BuildOptions`, `Environment`,
-  `ProfileSummary`, `VscodeAttach`, `ImageCleanupHint`, and `PruneItem`. The
-  catalog/descriptor structs `AgentInfo` and `BackendInfo` rename their `Name`
-  field to `Type` (now typed `AgentType`/`BackendType`).
-- **Accessors:** `System.Agents(...)` → `System.AgentTypes(...)` and
-  `System.Backends(...)` → `System.BackendTypes(...)`. They return the catalog of
-  *types to choose from* (`AgentInfo`/`BackendInfo`), not runnable handles.
-
-**Unchanged:** genuine instance labels keep `Name` (`Sandbox.Name()`,
-`Environment.Name`, profile names). The `Sandbox.Agent()` running-agent handle,
-free-form selectors (`Model`, `Profile`), JSON/YAML wire keys (`agent`,
-`backend`), and the CLI `--agent`/`--backend` flags are all unchanged.
-
-**Migration:** rename the types and fields at call sites
-(`Options{Backend: …}` → `Options{BackendType: …}`, `CreateOptions{Agent: …}` →
-`CreateOptions{AgentType: …}`, `info.Name` → `info.Type` on `AgentInfo`/
-`BackendInfo`) and switch `System.Agents`/`Backends` calls to
-`System.AgentTypes`/`BackendTypes`. Earlier entries in this changelog that name
-`AgentName`/`BackendName`, the `Agent`/`Backend` fields, or `Agents()`/`Backends()`
-refer to the same surface under its new name.
-
-### `SystemClient` collapsed into `Client.System()`; `Options.Backend` now optional
-
-The standalone `SystemClient` type, its constructor `NewSystemClient`, and the
-`SystemOptions` struct were removed. The host/fleet/admin surface they carried
-(`DiskUsage`, `Prune`, `Doctor`, `Build`, `Check`, `Backends`, `Agents`, `Config`,
-`Profiles`, `Info`, `Migrate`, …) now lives on a `System` sub-handle reached only
-via `Client.System()`. There is one top-level noun — `Client` — with
-`System()` / `Sandbox()` sub-handles.
-
-**Previous behavior:** an embedder built two parallel handles. `NewWithOptions`
-eagerly opened the backend, so a `Client` was always backend-bound; admin and
-backend-free per-sandbox reads went through a separate `NewSystemClient(SystemOptions{…})`.
-Per-sandbox operations were split across the two handles by whether they needed a
-live backend.
-
-**New behavior:** `NewWithOptions` no longer opens a backend eagerly — it stores
-the resolved backend and opens the runtime lazily on the first backend-bound
-operation. `Options.Backend` is therefore optional: a `Client` constructed without
-it serves every backend-free operation (admin via `System()`, per-sandbox reads
-via `Sandbox(name)` and `Sandbox(name).Agent()`) without ever opening a runtime. A
-backend-bound operation on such a `Client` returns the typed sentinel
-`ErrBackendRequired` instead of failing late.
-
-**Migration:** replace `NewSystemClient(SystemOptions{DataDir, HomeDir, Env})` with
-`NewWithOptions(ctx, Options{DataDir, HomeDir, Env})` and call `.System()` on the
-result. Pass `Options.Backend` only for commands that drive a container
-(start/stop/exec/attach/diff/apply); omit it for admin and read-only work. Earlier
-entries in this changelog that name `SystemClient` refer to the same surface, now
-reached via `Client.System()`.
-
-**Per-sandbox operations consolidated under one noun.** The per-sandbox readers
-and agent-interaction verbs that used to hang off `SystemClient` (keyed by a `name`
-argument) now hang off the `Sandbox` handle returned by `Client.Sandbox(name)`:
-
-- Agent-interaction verbs move to a new `Sandbox(name).Agent()` sub-handle (homes
-  the third D53 noun, mirroring `Workdir()`): `Prompt`, `TerminalLog`, `Logs`,
-  `SendInput`, `Attach`, `CaptureTerminal`, `ContainerLogs`.
-- Per-sandbox readers become flat `Sandbox` methods: `SandboxMetadata(name)` →
-  `Sandbox(name).Metadata()`, plus `VscodeAttach`, `Unlock`, `Files`, and the path
-  getters (`RuntimeConfigPath` / `EnvironmentPath` / `LogPaths` / `FilesDir` /
-  `CacheDir`).
-
-`Client.Sandbox(name)` validates the sandbox directory at construction (returning
-`ErrSandboxNotFound`), so the former `SystemClient.RequireSandbox(name)` was
-removed as redundant.
-
-**Migration:** replace `client.System().Prompt(name)` with
-`client.Sandbox(name).Agent().Prompt()`, `client.System().SandboxMetadata(name)`
-with `client.Sandbox(name).Metadata()`, and so on. Lifecycle/state verbs
-(`Start`/`Stop`/`Restart`/`Reset`/`Destroy`/`Inspect`/`Exec`/`HasActiveWork`)
-were already flat on `Sandbox` and are unchanged.
-
-### `SystemClient.Setup` / `SetupStatus` and the setup-wizard types removed
-
-The entire first-run-setup vocabulary left the public library contract:
-`SystemClient.Setup`, `SystemClient.SetupStatus`, and the types `SetupOptions`,
-`SetupStatus`, `SetupChoice`, `TmuxConfigClass` (with `TmuxConfigNone` /
-`TmuxConfigSmall` / `TmuxConfigLarge`) no longer exist.
-
-**Previous behavior:** an embedder rendered a setup wizard by calling
-`SystemClient.SetupStatus` (host inspection: tmux classification + available
-backends/agents) and then `SystemClient.Setup(opts)` (a non-interactive write
-of the three answers).
-
-**New behavior:** the library is orthogonal — discovery (`Agents`/`Backends`),
-config (`Config().Get/Set/Reset`), and just-works defaults (`EnsureSetup`) — with
-no setup-wizard verb. The two things `Setup` actually did are already covered:
-config writes are `Config().Set` (`tmux_conf` / `container_backend` / `agent`),
-and the `defaults/` materialization (`defaults/tmux.conf`, `defaults/config.yaml`)
-happens unconditionally inside `EnsureSetup`. All onboarding *policy* — tmux-config
-classification, choice enumeration, auto-pick, prompt copy — now lives in the CLI
-wizard (`internal/cli/system/setup.go`).
-
-**New supporting surface:** public `BackendInfo` gained `Architectures []string`
-and `IsolationTargetOnly bool` (mirrors of the `BackendDescriptor` fields), so a
-wizard or default-picker can filter the backend catalog on facts rather than
-hardcoding names.
-
-**Migration:** to write defaults programmatically, call
-`SystemClient.Config().Set(ctx, key, value)` for `tmux_conf`, `container_backend`,
-and `agent`; discover the valid choices via `SystemClient.Backends(...)` and
-`SystemClient.Agents(...)`. To build the on-disk defaults, call `EnsureSetup`
-(invoked implicitly before every sandbox op). There is no longer a single
-`Setup(opts)` call; supply the answers your own UI collects via `Config().Set`.
-
-### `CreateOptions.Force` renamed to `AbandonUnappliedWork`
-
-The public `CreateOptions.Force bool` field was renamed to `AbandonUnappliedWork
-bool`.
-
-**Previous behavior:** `Force` toggled whether `Replace` could destroy an
-existing same-named sandbox that still held unapplied work.
-
-**New behavior:** the field is `AbandonUnappliedWork`, naming the consequence
-rather than using a generic `Force` toggle. This matches
-`DestroyOptions.AbandonUnappliedWork`, which already governed the identical
-"skip the unapplied-work safety check" decision — the public Go surface now
-names that consequence consistently in both places. The CLI's `--force` flag is
-unchanged; only the Go API field moved.
-
-**Migration:** rename the field in any `yoloai.CreateOptions{…}` literal:
-`Force: true` → `AbandonUnappliedWork: true`.
-
-### Interactive exec no longer manages the host terminal; `IOStreams` gains `Resize`
-
-`IOStreams` (used by `Sandbox.Attach` / `Sandbox.Exec`) gained a
-`Resize <-chan TermSize` field, and the library stopped reading host-terminal
-state.
-
-**Previous behavior:** for the containerd backend, the library inspected
-`IOStreams.In`'s file descriptor — putting it in raw mode, detecting the
-terminal size when `Rows`/`Cols` were zero, and installing a process-global
-`SIGWINCH` handler to forward live resizes. In a daemon that read the *daemon's*
-terminal, not the principal's (§12 "no ambient configuration").
-
-**New behavior:** the library treats `In`/`Out`/`Err` as opaque byte streams. It
-never touches a stream's FD, sets raw mode, or installs signal handlers. Initial
-PTY geometry comes only from `Rows`/`Cols` (zero → backend default). Live
-resizes are delivered by the caller as `TermSize` values on the new `Resize`
-channel; `nil` means "no live resize." Backends that delegate to an `… -it`
-subprocess (docker/tart/seatbelt) ignore `Resize` and manage the terminal
-themselves, as before.
-
-**Migration:** embedders driving an interactive exec from a real terminal must
-now (1) put their own terminal in raw mode, (2) pass `Rows`/`Cols`, and (3)
-supply a `Resize` channel they feed from their own event source (a `SIGWINCH`
-handler, a websocket resize message, …). The CLI does this at its boundary in
-`cliutil.WithTerminal`; embedders not driving a real terminal (HTTP/MCP bridges
-over virtual PTYs) were already supplying size as data and need no change beyond
-optionally wiring `Resize`.
-
-### `SelectBackend` / `SelectContainerBackend` take a host-env snapshot
-
-The two public backend-selection helpers gained a trailing `env map[string]string`
-parameter:
-
-- `yoloai.SelectBackend(ctx, preferred, isolation, targetOS, env)`
-- `yoloai.SelectContainerBackend(ctx, preferred, env)`
-
-**Previous behavior:** the container-backend probes read `DOCKER_HOST` /
-`CONTAINER_HOST` / `XDG_RUNTIME_DIR` from the process environment via `os.Getenv`
-to locate the daemon socket. In a multi-principal daemon this leaked the
-*daemon's* environment into a principal's backend selection (§12 "no ambient
-configuration").
-
-**New behavior:** callers pass the same host-env snapshot they feed to
-`Options.Env`; probes read socket-discovery vars from that
-map. Pass `nil` to probe only the default socket paths. The CLI threads its one
-licensed `os.Environ()` snapshot (`Layout().Env`), so CLI behavior is unchanged.
-
-**Migration:** add the `env` argument to both calls — pass your principal's env
-snapshot (the map you already build for `Options.Env`), or `nil` for default
-socket discovery.
-
-### 0.x public Go API reshape (layer-1)
-
-Beta reshape of the Go embedding surface (critique findings F1–F4; plan
-`docs/contributors/archive/plans/layer1-public-api.md`, step-by-step detail in the `D`-entries of
-`docs/contributors/decisions/README.md`). Goal: external embedders drive yoloAI entirely
-through the root `yoloai` package, never importing `internal/*`. Per-sandbox
-operations moved onto resource-bound handles, every Options/Result/error became a
-public `yoloai.*` type, and creation/backend-selection became explicit. **CLI
-behavior is unchanged except for the flag renames called out below.**
-
-**Handle model.** Per-sandbox ops are no longer `Client` methods taking a `name`
-string — call them on `c.Sandbox(name)`, which now returns `(*Sandbox, error)`
-and rejects a missing sandbox with `ErrSandboxNotFound` at construction (F22). Its
-sub-accessors `.Workdir()` and `.Network()` are pure namespace expansion (no IO,
-no error). Lifecycle/exec move onto the handle with `name` dropped from each
-signature: `.Inspect(ctx)` / `.Stop(ctx)` / `.Start(ctx, opts)` / `.Restart(ctx,
-opts)` / `.SendInput(ctx, text)` / `.ContainerLogs(ctx, n)` / `.Dir()` (replaces
-`SandboxDir`); `.Reset(ctx, yoloai.ResetOptions{…})`; `.Destroy(ctx,
-yoloai.DestroyOptions{…})`; `.Exec(ctx, yoloai.ExecOptions{Command, PTY}, io)`
-(folds the old `Exec`=PTY and `StdioExec`=pipes). `Client.NeedsConfirmation` is
-gone; the pure pre-check is `c.Sandbox(name).HasActiveWork(ctx) (bool, reason)`.
-
-**Workdir verbs.** Diff/apply/export plus the commit/tag/uncommitted reads moved
-onto `c.Sandbox(name).Workdir()`, each one mode-agnostic (copy-vs-overlay
-resolved internally), replacing the old per-variant `Client` methods
-(`Diff/DiffWithOptions/DiffOverlay/DiffRef`, `Apply/ApplyWithOptions`,
-`GeneratePatch/AdvanceBaseline/OverlayPatch/UpdateOverlayBaseline`,
-`ListCommits*`, `HasUncommittedChanges`, and tag listing previously reachable
-only via `internal/sandbox`):
-
-- `.Diff(ctx, yoloai.DiffOptions{Paths, Stat, NameOnly, Ref})` — `""` means no changes.
-- `.Apply(ctx, yoloai.ApplyOptions{Mode, Refs, Paths, IncludeUncommitted, DryRun})`
-  — `Mode` is **required** (`ApplyModeCommits` replays the commit series,
-  `ApplyModeNoCommit` lands a net unstaged diff); the zero value is a `*UsageError`.
-  `ApplyModeCommits` on a non-git/overlay target is refused. `DryRun` previews
-  (generate+validate, no apply) so the library never prompts.
-- `.Export(ctx, yoloai.ExportOptions{Dir, Refs, Paths, IncludeUncommitted})` —
-  `--patches` is now its own verb (`Dir` required).
-- `.Commits(ctx, yoloai.CommitsOptions{Stat}) []yoloai.CommitInfo`,
-  `.Tags(ctx, yoloai.TagsOptions{UnappliedOnly}) []yoloai.TagInfo`,
-  `.HasUncommittedChanges(ctx)`.
-
-**Creation.** `Client.Create(ctx, yoloai.CreateOptions)` now takes a **public**
-struct (built from re-exported `yoloai.DirSpec`/`DirMode`/`NetworkMode`/
-`PortMapping`/…); `Run` is sugar over it. `CreateOptions.Backend` is
-**required** — empty returns a `*UsageError`; do the old auto-detect explicitly
-with `yoloai.SelectBackend(ctx, preferred, isolation, os, env)`. A dirty workdir yields
-a typed `*yoloai.DirtyWorkdirError` (the library never prompts); ack it with
-`CreateOptions.AllowDirtyWorkdir` / `DirSpec.AllowDirty` /
-`RunOptions.AllowDirtyWorkdir`. Removed: `CreateOptions.Yes/Attach/Isolation/OS`
-(`Version` moved to `Options.Version`; attach is a separate post-create step).
-`Ports` is `[]yoloai.PortMapping`; `requires:` is now a non-blocking warning.
-
-**Admin client.** The admin surface is reached via `Client.System()` (see the
-"`SystemClient` collapsed into `Client.System()`" entry above); the standalone
-`NewSystemClient` / `SystemOptions` constructor was removed before release.
-
-**Typed errors / public shapes replace sentinels and internal results.**
-`ErrUnappliedChanges` → `*ActiveWorkError` (carries the reason); diff/apply/commits
-return public `yoloai.*` shapes (`ApplyResult`, `CommitInfo`, `TagInfo`, `SandboxInfo`)
-instead of `internal/patch` / `internal/sandbox` types. Use `errors.As` for the
-typed errors.
-
-**`Force` fields renamed after the consequence (Q-J — no generic `Force` in the
-API).** `CloneOptions.Force`→`Overwrite`, `DestroyOptions.Force`→
-`AbandonUnappliedWork`, `DirSpec.Force`→`AllowDangerousPath`,
-`ResetOptions.Restart`→`RestartContainer`. The CLI `--force` flags map onto these
-at the boundary (the `:force` mount suffix is unchanged).
-
-**Terminology: "uncommitted", not "WIP" (everywhere).** CLI flag
-`--include-wip`→`--include-uncommitted`; Go `ApplyOptions.IncludeWIP`→
-`IncludeUncommitted`, `ApplyResult.WIPApplied`→`UncommittedApplied`; JSON
-`wip_applied`→`uncommitted_applied`; exported `wip.diff`→`uncommitted.diff`;
-`Client.GenerateWIPDiff`→`GenerateUncommittedDiff`.
-
-**Profile read model is public (closes the last F1 leak).**
-`yoloai.ProfileInfo.Merged` and `.Parent` are now `*yoloai.ResolvedProfileConfig`
-(was the internal `*config.MergedConfig`), so embedders can name every field.
-`ResolvedProfileConfig` mirrors the merged tree with hand-written public types — `ProfileWorkdir`,
-`ProfileAuxDir` (was `config.ProfileDir`), `ProfileResources`
-(`CPULimit`/`MemoryLimit`, was `config.ResourceLimits{CPUs,Memory}`), `ProfileNetwork`,
-and `ProfileAgentFiles`. JSON output of `profile info`/`--diff` is unchanged except
-the `agent_files` object's inner keys, which now carry tags (`base_dir`/`files`)
-instead of emitting the Go field names (`BaseDir`/`Files`).
-
-**Sandbox read model: type `Info` → `SandboxInfo`; field `Meta` → `Environment`.** The
-combined inspect/list result type is named `yoloai.SandboxInfo` (renamed from the
-ambiguous top-level `Info` for symmetry with `SystemInfo`; the type is new in this
-release, so this is naming, not a migration off a shipped name). Its
-creation-time-settings field is renamed `Meta` → `Environment`, and its JSON tag
-`"meta"` → `"environment"` — aligning the Go field with the on-disk `environment.json`
-artifact it has always mirrored (the type was already `yoloai.Environment`; only the
-field name lagged). `--json` output of `sandbox info` and `list` now nests those
-settings under `"environment"` instead of `"meta"`. Go embedders name the type
-`yoloai.SandboxInfo` and read `info.Environment`. Internal-only in the same pass (no external effect):
-`store.Meta`/`WorkdirMeta`/`DirMeta` → `store.Environment`/`WorkdirEnvironment`/
-`DirEnvironment`, `LoadMeta`/`SaveMeta` → `LoadEnvironment`/`SaveEnvironment`, and the
-source file `store/meta.go` → `store/environment.go`.
-
-**Sandbox read model curated (D53): `Environment` no longer mirrors `environment.json`
-field-for-field.** The public `yoloai.Environment` was a 1:1 mirror of the internal
-on-disk schema; it is now a curated view of the sandbox a consumer reasons about —
-identity & posture, as-built workdir/aux-dir provenance, and an echo of the resolved
-config. Pure-mechanism fields are dropped from the public type (and its `--json`):
-`version`, `yoloai_version`, `image_ref`, `has_prompt`, `debug`, `userns_mode`,
-`archetype`, `vscode_tunnel`, and `WorkdirInfo.inception_sha`. The internal
-`store.Environment` keeps all of them; only the public read-model is trimmed.
-`Environment.NetworkMode` is now the typed `yoloai.NetworkMode` enum (was a bare
-`string`); it marshals to the same JSON string, so `--json` network output is
-byte-stable. `sandbox info` human output drops the `Image:` and `Version:` lines.
-
-**Migration (Go embedders):** if you read any dropped field off `SandboxInfo.Environment`,
-source it elsewhere — the create-time options you passed, or (for diagnostics) a
-future dedicated surface; none of the dropped fields described the sandbox a
-consumer renders or decides from.
-
-**Migration (Go embedders):** insert `.Sandbox(name)` and drop the `name` arg from
-per-sandbox calls; route diff/apply/export/commits/tags through `.Workdir()`;
-switch `errors.Is(err, ErrUnappliedChanges)` to
-`errors.As(err, new(*yoloai.ActiveWorkError))`; build the `Client` with an
-explicit `Backend` (`yoloai.SelectBackend(…)` or e.g. `yoloai.BackendDocker`);
-handle `*DirtyWorkdirError` (or pre-ack with `AllowDirtyWorkdir`); rename the
-`Force`/`WIP` fields as above; rename `info.Meta`→`info.Environment`. **CLI users:**
-`--include-wip`→`--include-uncommitted`, `--squash`→`--no-commit` (JSON `method`
-`"squash"`→`"no-commit"`); `sandbox info`/`list` `--json` nest settings under
-`"environment"` (was `"meta"`).
+- `sandbox info` / `list` `--json` nest the creation-time settings under
+  `"environment"` (was `"meta"`), aligning with the on-disk `environment.json`
+  artifact they mirror.
+- The `sandbox info` / `list` read-model is curated: pure-mechanism fields
+  (`version`, `yoloai_version`, `image_ref`, `has_prompt`, `debug`, `userns_mode`,
+  `archetype`, `vscode_tunnel`, `inception_sha`) are dropped from both `--json` and
+  the human output (the `Image:` and `Version:` lines are gone). `network_mode` now
+  marshals from the typed `yoloai.NetworkMode` enum but to the same JSON string, so
+  network output is byte-stable.
+- `profile info` / `--diff` `--json`: the `agent_files` object's inner keys now
+  carry tags (`base_dir` / `files`) instead of the Go field names (`BaseDir` /
+  `Files`).
+- `yoloai apply`: `--squash` → `--no-commit` (JSON `method` `"squash"` →
+  `"no-commit"`). See the `yoloai apply` entry below for the commits-only default and
+  `--include-uncommitted`.
 
 ### Data directory bifurcated into `library/` (engine) + `cli/` (app); one-time migration via `yoloai system migrate`
 
@@ -472,36 +197,21 @@ Human-readable output also gains an `" (agent requirement)"` annotation next to 
 
 **Rationale:** Q-U (`docs/contributors/archive/plans/layering-refactor.md` W-L8b; `api_surface.go` Q-U resolution 2026-05-25). The multi-directory diff/apply implementation was real but the user-visible surface was barely used: no per-directory selection, no cross-directory conflict resolution, no `:overlay`-only-not-`:copy` filtering. The API complexity required to do this properly significantly exceeded what the implementation actually did. Removing the surface now while we're in beta keeps `yoloai diff` / `yoloai apply` simple — if a real use case emerges, it can be restored with an API informed by that need.
 
-**Affected Go API (for embedders):**
-
-- `yoloai.Client.GenerateMultiPatch` — removed. The single-dir replacement is `yoloai.Client.GeneratePatch`.
-- `yoloai.Client.Apply` / `Client.ApplyWithOptions` — return shape narrows from `([]*patch.ApplyResult, error)` to `(*patch.ApplyResult, error)`. A `nil` result is the no-op signal.
-- `sandbox/patch.ApplyAll` — same return shape change.
-- `sandbox/patch.GenerateMultiPatch` — removed.
-- `sandbox/patch.LoadAllDiffContexts` — still exists, still returns a slice, but the slice now has at most one entry (the workdir). Loop callers don't need to change.
+**Affected Go API (for embedders):** diff/apply operate on the workdir only, via `client.Sandbox(name).Workdir()` (see the layer-1 reshape entry above). There is no multi-directory patch surface; `Workdir().Apply` returns a single `*yoloai.ApplyResult` (a `nil` result is the no-op signal).
 
 ### First-run setup is non-interactive when triggered implicitly; `yoloai system setup` is the explicit wizard
-
-> **Superseded** by "`SystemClient.Setup` / `SetupStatus` and the setup-wizard types removed"
-> (above): the `Setup` / `SetupStatus` library verbs this entry introduced were later removed
-> entirely; the wizard now collapses into the CLI and writes via `Config().Set`. The
-> implicit-setup-is-non-interactive behavior described here still holds.
 
 **Previous behavior:** On the first `yoloai new` / `yoloai run` of a fresh install (when `setup_complete=false`), if stdin was a TTY the user was dropped into the interactive setup wizard before the sandbox could be created — three prompts (tmux config, default backend on macOS, default agent). When stdin wasn't a TTY, the same code path auto-configured silently with `tmux_conf=default+host`.
 
 **New behavior:** Implicit first-run setup is **always non-interactive**: it writes `tmux_conf=default+host` and marks `setup_complete=true`, then proceeds. The interactive wizard is only run explicitly via `yoloai system setup` (which is also how a user re-runs setup to change their defaults).
 
-**Rationale:** Q-F (`docs/contributors/archive/plans/layering-refactor.md` W-L8b) resolved that library entry points must not perform interactive IO — the CLI owns prompts. The previous behavior coupled `sandbox.Manager` to stdin/stdout and made first-run UX unpredictable depending on TTY state. The new shape:
-
-- `yoloai.SystemClient.Setup(ctx, opts)` is a pure write — caller supplies every answer (TmuxConf, Backend, Agent) via SetupOptions.
-- `yoloai.SystemClient.SetupStatus(ctx)` returns host inspection (tmux classification + available backends/agents) so external wizards (CLI, future HTTP/MCP) can render their own prompts.
-- The CLI wizard (`internal/cli/system_setup.go`) reads SetupStatus, prompts the user where flags aren't supplied, and calls Setup.
+**Rationale:** Q-F (`docs/contributors/archive/plans/layering-refactor.md` W-L8b) resolved that library entry points must not perform interactive IO — the CLI owns prompts. The previous behavior coupled `sandbox.Manager` to stdin/stdout and made first-run UX unpredictable depending on TTY state. The library exposes no setup verb at all: all onboarding policy (tmux classification, choice enumeration, prompt copy) lives in the CLI wizard (`internal/cli/system/setup.go`), which writes the collected answers via `Config().Set` and discovers the valid choices via `System().AgentTypes` / `System().BackendTypes`. Implicit first-run materializes the `defaults/` tree inside `EnsureSetup` and proceeds non-interactively.
 
 **Migration:**
 - If you relied on `yoloai new` prompting on first run, run `yoloai system setup` once after install (or before your first `yoloai new`). Subsequent runs are unaffected.
 - CI / scripted installs already running on non-TTY stdin see no behavior change.
 - Embedders calling `Client.Run` before configuring defaults still auto-get `default+host` — no code change needed.
-- Embedders that want the interactive wizard's behavior should call `SystemClient.SetupStatus` + their own prompt UI + `SystemClient.Setup(opts)`.
+- Embedders that want a wizard supply their own prompt UI and write the collected answers via `Config().Set`.
 
 ### `yoloai system prune` always operates across all backends; `--all` and `--backend` removed
 
@@ -552,9 +262,9 @@ Human-readable output also gains an `" (agent requirement)"` annotation next to 
 The flip applies uniformly across the apply surface:
 
 - Default format-patch path: applies commits; prints `Note: sandbox has uncommitted changes …` when uncommitted edits are present and excluded.
-- `--squash`: flattens commits only (`git diff baselineSHA HEAD`). With `--include-uncommitted`, flattens everything including uncommitted (`git diff baselineSHA`, after `git add -A`).
+- `--no-commit`: lands a single net diff only (`git diff baselineSHA HEAD`). With `--include-uncommitted`, the net diff includes uncommitted edits (`git diff baselineSHA`, after `git add -A`).
 - `--patches`: writes `*.patch` for commits; writes `uncommitted.diff` only when `--include-uncommitted` is set.
-- `--squash` and `--include-uncommitted` are no longer mutually exclusive — `--squash` controls patch shape, `--include-uncommitted` controls scope.
+- `--no-commit` and `--include-uncommitted` are no longer mutually exclusive — `--no-commit` controls patch shape, `--include-uncommitted` controls scope.
 - `:overlay` sandboxes have no commit/uncommitted distinction; the flag has no effect there and is silently accepted (previously `--no-wip` errored on overlay).
 
 **Rationale:** "Apply commits the agent made" is what users typically want; uncommitted edits are by definition unsettled work the agent didn't finalize. Defaulting to including them surprised users who weren't expecting the agent's scratch state in their tree. Making `--include-uncommitted` opt-in matches the project's `--X-to-enable-non-default-behavior` CLI convention ([`dev/standards/CLI.md`](contributors/standards/cli.md)) and surfaces the uncommitted state explicitly so users can choose.
@@ -562,8 +272,7 @@ The flip applies uniformly across the apply surface:
 **Migration:**
 - Drop `--no-wip` (it was a no-op for the new behavior anyway).
 - If you relied on `yoloai apply` bringing across uncommitted edits, add `--include-uncommitted` to the command.
-- The Go library API `Client.Apply(ctx, name)` is now commits-only; use the new `Client.ApplyWithOptions(ctx, name, ApplyOptions{IncludeUncommitted: true})` for the old behavior.
-- Internal `patch.GeneratePatch`, `patch.GenerateMultiPatch`, and `patch.ApplyAll` gain an `includeUncommitted bool` parameter at the end of their signatures.
+- The Go library API `client.Sandbox(name).Workdir().Apply(ctx, WorkdirApplyOptions{Mode: ApplyModeCommits})` is now commits-only; add `IncludeUncommitted: true` for the old behavior.
 
 ### Cross-process JSON files gain `schema_version` field with mismatch-fails-loudly policy
 
