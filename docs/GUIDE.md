@@ -475,8 +475,8 @@ yoloai diff task -- src/handler.go
 # Default: preserve individual commits (git am --3way)
 yoloai apply task
 
-# Squash all changes into a single unstaged patch
-yoloai apply task --squash
+# Apply as a single unstaged patch instead of replaying commits
+yoloai apply task --no-commit
 
 # Export .patch files for manual curation
 yoloai apply task --patches ./my-patches
@@ -490,8 +490,11 @@ yoloai apply task abc123 def456
 # Dry-run: check what would be applied without making changes
 yoloai apply task --dry-run
 
-# Force apply even if host repo has uncommitted changes
-yoloai apply task --force
+# Also transfer git tags the agent created
+yoloai apply task --tags
+
+# Skip the confirmation prompt
+yoloai apply task --yes
 ```
 
 ## How It Works
@@ -788,7 +791,7 @@ Swift PM works transparently in Seatbelt sandboxes. yoloAI automatically adds th
 Run Swift commands normally inside Seatbelt sandboxes:
 
 ```bash
-yoloai shell --backend seatbelt my-project ~/path/to/swift-project:rw
+yoloai new my-project ~/path/to/swift-project:rw --backend seatbelt --agent shell --attach
 # Inside the sandbox:
 swift build
 swift test
