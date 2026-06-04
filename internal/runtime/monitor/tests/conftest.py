@@ -39,3 +39,20 @@ def load_sandbox_setup() -> ModuleType:
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
+
+
+def load_status_monitor() -> ModuleType:
+    """Load status-monitor.py as a Python module.
+
+    The hyphen in the filename prevents a plain `import`. Tests that need to
+    exercise the detector classes (e.g. HookDetector) call this helper.
+    """
+    spec = importlib.util.spec_from_file_location(
+        "status_monitor",
+        str(_MONITOR_DIR / "status-monitor.py"),
+    )
+    if spec is None or spec.loader is None:
+        raise RuntimeError("could not locate status-monitor.py for tests")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod

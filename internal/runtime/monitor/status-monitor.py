@@ -72,13 +72,11 @@ def write_status(status_file, status, exit_code=None):
 
     Writes directly to the status file rather than using atomic rename, because
     status.json is a file-level bind mount in Docker. os.replace() fails with
-    EBUSY on bind-mounted files, so we truncate-and-write instead. This is safe
-    because we're the only structured writer (hooks use shell redirection) and
-    a partial read by the host would just fail JSON parsing and trigger the
-    exec fallback.
+    EBUSY on bind-mounted files, so we truncate-and-write instead.
 
-    Sets source="monitor" so the HookDetector can distinguish monitor writes
-    from hook writes (which don't set source).
+    status.json is purely the monitor's output channel for the host; the
+    HookDetector reads hook events from the append-only logs/agent-hooks.jsonl
+    log instead, so the monitor never reads back its own writes here.
     """
     # This schema_version must equal agentStatusSchemaVersion in
     # internal/sandbox/status/status.go (fenced by schema_version_test.go).
@@ -87,7 +85,6 @@ def write_status(status_file, status, exit_code=None):
         "status": status,
         "exit_code": exit_code,
         "timestamp": int(time.time()),
-        "source": "monitor",
     }
     try:
         with open(status_file, "w") as f:
@@ -187,94 +184,107 @@ class DetectorResult:
 
 
 class HookDetector:
-    """Reads status from status.json written by agent hooks.
+    """Reads agent status from the append-only hook event log.
 
-    Returns "idle" when:
-    - The file says "idle" (Stop hook fired) AND idle has persisted for at
-      least HOOK_IDLE_GRACE seconds. The Stop hook fires once per turn, not
-      between individual tool calls, so the grace period only needs to cover
-      filesystem write latency (2s).
-    - The file says "active" but the write is stale (age > HOOK_IDLE_AGE).
-      A stale "active" means PreToolUse/UserPromptSubmit hasn't fired
-      recently, implying the agent stopped working. This provides idle
-      detection if the Stop hook fails to fire.
+    The agent's Stop / PreToolUse / UserPromptSubmit hooks each append one
+    JSON line to logs/agent-hooks.jsonl ({"event": "hook.idle"|"hook.active",
+    "status": "idle"|"active", ...}). Nothing else writes that file, so — unlike
+    the monitor's own status.json output — no hook event can be clobbered before
+    the detector observes it. This removes the feedback loop that previously
+    left the detector unable to confirm idle when the only fresh writes were
+    the monitor's own echoes.
 
-    Returns "active" when:
-    - The file says "active" and the last hook write is recent (< HOOK_IDLE_AGE).
-      This prevents lower-priority detectors (e.g. wchan) from reporting
-      spurious idle during brief gaps between tool calls.
+    State machine (last appended event wins), driven by the monotonic time at
+    which each event is *observed* (avoids depending on the hook's wall clock):
+    - last event is hook.idle: report "idle" once it has persisted for
+      HOOK_IDLE_GRACE seconds. The Stop hook fires once per turn, so the grace
+      only needs to smooth a same-cycle active→idle flip.
+    - last event is hook.active observed < HOOK_IDLE_AGE ago: report "active"
+      so lower-priority detectors (e.g. wchan) can't flip to a spurious idle
+      during brief gaps between tool calls.
+    - last event is hook.active observed >= HOOK_IDLE_AGE ago: report "idle".
+      A stale "active" means no hook has fired recently, implying the agent
+      stopped working even if the Stop hook failed to fire.
+    - no events observed yet: "unknown".
 
-    The grace period is started only by actual hook writes (no "source"
-    field), not by the monitor's own echoed writes. An "active" hook write
-    (PreToolUse) immediately clears the grace timer.
+    The detector seeks to end-of-file at construction so a monitor restarted by
+    stop/start ignores the previous session's events instead of replaying them.
     """
     name = "hook"
     confidence = "high"
 
-    def __init__(self, status_file):
-        self.status_file = status_file
-        self._hook_ts = 0  # last timestamp written by a hook (not by monitor)
-        self._idle_since = 0  # monotonic time when idle was first seen from hook
+    def __init__(self, log_path):
+        self.log_path = log_path
+        self._state = None  # "idle" | "active" | None: last observed hook event
+        self._idle_since = 0.0  # monotonic time the idle event was first observed
+        self._active_since = 0.0  # monotonic time the latest active event was observed
+        # Skip a prior session's events: start reading at the current EOF.
+        try:
+            self._offset = os.path.getsize(log_path)
+        except OSError:
+            self._offset = 0
+
+    def _consume_new_events(self):
+        """Read newly appended whole lines and fold them into the state."""
+        try:
+            size = os.path.getsize(self.log_path)
+        except OSError:
+            return
+        if size < self._offset:
+            self._offset = 0  # file truncated/rotated — restart from the top
+        if size <= self._offset:
+            return
+        start = self._offset
+        try:
+            with open(self.log_path, "rb") as f:
+                f.seek(start)
+                chunk = f.read()
+        except OSError:
+            return
+        # Only consume up to the last newline so a half-written final line
+        # (a hook appending concurrently) is re-read whole on the next poll.
+        last_nl = chunk.rfind(b"\n")
+        if last_nl == -1:
+            return
+        self._offset = start + last_nl + 1
+        now = time.monotonic()
+        for raw in chunk[: last_nl + 1].splitlines():
+            line = raw.strip()
+            if not line:
+                continue
+            try:
+                evt = json.loads(line.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+                continue
+            status = evt.get("status", "")
+            if status == "idle":
+                if self._state != "idle":
+                    self._idle_since = now
+                self._state = "idle"
+            elif status == "active":
+                self._state = "active"
+                self._active_since = now
 
     def check(self, _agent_pid):
-        try:
-            with open(self.status_file) as f:
-                data = json.load(f)
-            s = data.get("status", "")
-            ts = data.get("timestamp", 0)
-            source = data.get("source", "")
-            now = int(time.time())
-            age = now - ts if ts else -1
+        self._consume_new_events()
+        if self._state is None:
+            return DetectorResult("unknown")
 
-            if s == "idle":
-                # Only start/continue the grace period from actual hook writes.
-                # Monitor writes (source="monitor") echo the current state and
-                # should not reset or extend the grace timer.
-                if not source:
-                    self._hook_ts = ts
-                    if not self._idle_since:
-                        self._idle_since = time.monotonic()
+        now = time.monotonic()
+        if self._state == "idle":
+            elapsed = now - self._idle_since
+            if elapsed >= HOOK_IDLE_GRACE:
+                debug(f"  hook: idle confirmed (grace {elapsed:.1f}s >= {HOOK_IDLE_GRACE}s)")
+                return DetectorResult("idle", self.confidence)
+            debug(f"  hook: idle grace period ({elapsed:.1f}s/{HOOK_IDLE_GRACE}s)")
+            return DetectorResult("unknown")
 
-                if self._idle_since:
-                    elapsed = time.monotonic() - self._idle_since
-                    if elapsed >= HOOK_IDLE_GRACE:
-                        debug(f"  hook: idle confirmed (grace {elapsed:.1f}s >= {HOOK_IDLE_GRACE}s)")
-                        return DetectorResult("idle", self.confidence)
-                    debug(f"  hook: idle grace period ({elapsed:.1f}s/{HOOK_IDLE_GRACE}s)")
-                    return DetectorResult("unknown")
-
-                debug(f"  hook: file says idle (age={age}s) but source={source!r}, waiting")
-                return DetectorResult("unknown")
-
-            if s == "active":
-                # Active signal clears the idle grace period.
-                self._idle_since = 0
-
-                # Only update _hook_ts from actual hook writes (no "source"
-                # field). The monitor sets source="monitor" on its writes.
-                if not source and ts > self._hook_ts:
-                    self._hook_ts = ts
-
-                hook_age = now - self._hook_ts if self._hook_ts else -1
-
-                if self._hook_ts and hook_age >= HOOK_IDLE_AGE:
-                    debug(f"  hook: last hook write {hook_age}s ago (>{HOOK_IDLE_AGE}s) -> idle")
-                    return DetectorResult("idle", self.confidence)
-
-                # Recent hook write says active — report it so lower-priority
-                # detectors (e.g. wchan) can't override with a spurious idle
-                # during brief gaps between tool calls.
-                if self._hook_ts and hook_age >= 0:
-                    debug(f"  hook: active (hook_age={hook_age}s)")
-                    return DetectorResult("active", self.confidence)
-
-                debug(f"  hook: file says 'active' (hook_age={hook_age}s), waiting")
-                return DetectorResult("unknown")
-
-            debug(f"  hook: file says {s!r} (age={age}s), ignoring")
-        except (OSError, json.JSONDecodeError, ValueError) as e:
-            debug(f"  hook: read error: {e}")
-        return DetectorResult("unknown")
+        active_age = now - self._active_since
+        if active_age >= HOOK_IDLE_AGE:
+            debug(f"  hook: last active hook {active_age:.0f}s ago (>{HOOK_IDLE_AGE}s) -> idle")
+            return DetectorResult("idle", self.confidence)
+        debug(f"  hook: active (active_age={active_age:.0f}s)")
+        return DetectorResult("active", self.confidence)
 
 
 class WchanDetector:
@@ -424,16 +434,18 @@ STABILITY_THRESHOLDS = {
 }
 
 
-def build_detectors(config, status_file, tmux_sock=None, yoloai_dir=None):
+def build_detectors(config, tmux_sock=None, yoloai_dir=None):
     """Instantiate detectors based on runtime-config.json detector list."""
     detector_names = config.get("detectors", [])
     idle = config.get("idle", {})
-    log_path = os.path.join(yoloai_dir, "logs", "agent.log") if yoloai_dir else "/yoloai/logs/agent.log"
+    logs_dir = os.path.join(yoloai_dir, "logs") if yoloai_dir else "/yoloai/logs"
+    log_path = os.path.join(logs_dir, "agent.log")
+    hook_log_path = os.path.join(logs_dir, "agent-hooks.jsonl")
     detectors = []
 
     for name in detector_names:
         if name == "hook":
-            detectors.append(HookDetector(status_file))
+            detectors.append(HookDetector(hook_log_path))
         elif name == "wchan":
             detectors.append(WchanDetector())
         elif name == "ready_pattern":
@@ -576,7 +588,7 @@ def run_monitor(config_path, status_file, tmux_sock=None):
         pass
 
     sandbox_name = config.get("sandbox_name", "sandbox")
-    detectors = build_detectors(config, status_file, tmux_sock, yoloai_dir)
+    detectors = build_detectors(config, tmux_sock, yoloai_dir)
 
     detector_names = [d.name for d in detectors]
     _log_jsonl("info", "monitor.start", "monitor started",

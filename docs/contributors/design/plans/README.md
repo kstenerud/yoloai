@@ -29,7 +29,7 @@ Design considerations:
 
 ### Per-mechanism status files
 
-Currently all status writers (agent hooks, status-monitor.py, sandbox-setup.py) share a single `agent-status.json`, using the `source` field to distinguish writes. A cleaner approach: each mechanism writes to its own status file (`hook-status.json`, `monitor-status.json`, etc.), and the status getter reads them in priority order, preferring the most recently updated. This eliminates the `source` field hack and makes the IPC contract explicit per writer. Not part of the structured logging change — tracked separately.
+~~Currently all status writers (agent hooks, status-monitor.py, sandbox-setup.py) share a single `agent-status.json`, using the `source` field to distinguish writes. A cleaner approach: each mechanism writes to its own status file.~~ **Largely resolved.** The `source` field existed only because `HookDetector` read hook signals back out of the monitor's own `agent-status.json` output — a feedback loop that could leave it unable to confirm idle. `HookDetector` now reads the append-only hook event log (`logs/agent-hooks.jsonl`, written exclusively by the agent's hooks) instead, and the `source` field has been removed. `agent-status.json` is now purely the monitor's output channel for the host; its remaining multi-writer "last write wins" behavior is benign (every writer just expresses the current host-facing status). A full per-writer file split is no longer needed.
 
 ### Agent status detection (rework planned)
 
