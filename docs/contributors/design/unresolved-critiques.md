@@ -40,16 +40,11 @@ here — resolved entries belong in the sink, not as stubs.
 > The T13 backend run-coverage residue (live-daemon error paths + zero Seatbelt/Tart run coverage) is
 > tracked as [`unresolved-findings.md`](unresolved-findings.md) DF18.
 
+> **T7** (broad `t.Parallel()` adoption) was parked to
+> [`deferred-critiques.md`](deferred-critiques.md) on 2026-06-04: it only speeds the Go unit tier
+> (already the cheapest part of the suite), while the disproportionate test cost is the Python smoke
+> harness, which `t.Parallel()` cannot touch. Smoke-harness perf is being pursued first.
+
 ---
 
-## 2026-06-04 Testing-critique round — carryover
-
-- **T7 — Zero `t.Parallel()` across all (then) 168 test files.** testing-principles §10/§12 (injected
-  seams, no ambient process state) specifically *enable* parallelism, yet nothing uses it. The pure-
-  logic unit tier — store round-trips, patch/diff git plumbing, name parsing, config routing, the
-  `yoerrors` mapping table — is embarrassingly parallel and would shave wall-clock off every `go test`
-  and `make check`. *Fix:* adopt `t.Parallel()` on the pure-logic unit tier (skip tests that mutate
-  process-global state like `t.Setenv`, or that share a daemon); run the suite under `-race` while
-  doing so to also exercise the D67 `ensureRuntime` once-guard under concurrency. Lower priority than
-  T1–T15 (a speed/hygiene win, not a correctness or placement defect), deliberately deferred out of
-  the T1–T15 implementation pass.
+_(no open critiques)_
