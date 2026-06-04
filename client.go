@@ -243,7 +243,7 @@ func (c *Client) deps() state.Deps {
 }
 
 // pollUntilDone polls the sandbox status until it reaches a terminal state.
-func (c *Client) pollUntilDone(ctx context.Context, name string, progress func(string, string)) (*Info, error) {
+func (c *Client) pollUntilDone(ctx context.Context, name string, progress func(string, string)) (*SandboxInfo, error) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -257,11 +257,11 @@ func (c *Client) pollUntilDone(ctx context.Context, name string, progress func(s
 		}
 		switch info.Status {
 		case sandbox.StatusDone, sandbox.StatusFailed, sandbox.StatusStopped, sandbox.StatusRemoved:
-			return infoFromStatus(info), nil
+			return sandboxInfoFromStatus(info), nil
 		case sandbox.StatusActive, sandbox.StatusIdle:
 			// still running — continue polling
 		default: // StatusBroken, StatusUnavailable
-			return infoFromStatus(info), nil
+			return sandboxInfoFromStatus(info), nil
 		}
 		if progress != nil {
 			progress(name, string(info.Status))
@@ -273,9 +273,9 @@ func (c *Client) pollUntilDone(ctx context.Context, name string, progress func(s
 // Equivalent to 'yoloai new <name> <workdir> --prompt <prompt>'.
 //
 // If opts.Wait is true, Run blocks until the agent finishes and returns the
-// final sandbox Info. If opts.Wait is false, Run returns immediately after
-// the agent is launched; the Info reflects the initial state.
-func (c *Client) Run(ctx context.Context, opts SandboxRunOptions) (*Info, error) {
+// final sandbox SandboxInfo. If opts.Wait is false, Run returns immediately after
+// the agent is launched; the SandboxInfo reflects the initial state.
+func (c *Client) Run(ctx context.Context, opts SandboxRunOptions) (*SandboxInfo, error) {
 	createOpts := opts.materialize()
 	if createOpts.AgentType == "" {
 		createOpts.AgentType = AgentType(resolveAgentFromConfig(c.layout))
@@ -297,14 +297,14 @@ func (c *Client) Run(ctx context.Context, opts SandboxRunOptions) (*Info, error)
 		if err != nil {
 			return nil, err
 		}
-		return infoFromStatus(si), nil
+		return sandboxInfoFromStatus(si), nil
 	}
 
 	return c.pollUntilDone(ctx, opts.Name, opts.OnProgress)
 }
 
 // List returns info for all sandboxes.
-func (c *Client) List(ctx context.Context) ([]*Info, error) {
+func (c *Client) List(ctx context.Context) ([]*SandboxInfo, error) {
 	if err := c.ensure(ctx); err != nil {
 		return nil, err
 	}
@@ -312,7 +312,7 @@ func (c *Client) List(ctx context.Context) ([]*Info, error) {
 	if err != nil {
 		return nil, err
 	}
-	return infosFromStatus(sis), nil
+	return sandboxInfosFromStatus(sis), nil
 }
 
 // Clone copies an existing sandbox's state into a new sandbox. Although the

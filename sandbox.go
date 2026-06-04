@@ -66,7 +66,7 @@ func (s *Sandbox) Metadata() (*Environment, error) {
 }
 
 // Inspect returns combined metadata and live state for the sandbox.
-func (s *Sandbox) Inspect(ctx context.Context) (*Info, error) {
+func (s *Sandbox) Inspect(ctx context.Context) (*SandboxInfo, error) {
 	if err := s.c.ensure(ctx); err != nil {
 		return nil, err
 	}
@@ -74,7 +74,7 @@ func (s *Sandbox) Inspect(ctx context.Context) (*Info, error) {
 	if err != nil {
 		return nil, err
 	}
-	return infoFromStatus(si), nil
+	return sandboxInfoFromStatus(si), nil
 }
 
 // Dir returns the on-host directory holding the sandbox's persisted state
@@ -179,12 +179,12 @@ func (s *Sandbox) Exec(ctx context.Context, opts SandboxExecOptions, io IOStream
 	return s.c.rt.InteractiveExec(ctx, store.InstanceName(s.c.layout.Principal, s.name), opts.Command, user, info.Environment.Workdir.MountPath, io)
 }
 
-// Info is the combined metadata + live state returned by Sandbox.Inspect /
+// SandboxInfo is the combined metadata + live state returned by Sandbox.Inspect /
 // Client.List. Hand-written (not a type alias) so its Environment field is the public
 // Environment read-model rather than the internal store.Environment — embedders can
 // hold the full result without naming any internal type. Built from the
-// internal status.Info at the library boundary via infoFromStatus.
-type Info struct {
+// internal status.Info at the library boundary via sandboxInfoFromStatus.
+type SandboxInfo struct {
 	Environment    *Environment `json:"environment"`
 	Status         Status       `json:"status"`
 	AgentStatus    AgentStatus  `json:"agent_status,omitempty"`
@@ -209,7 +209,7 @@ const (
 )
 
 // AgentStatus is the agent's activity state inside a running sandbox, carried
-// on Info.AgentStatus. Re-exported (type alias) from internal/sandbox; the
+// on SandboxInfo.AgentStatus. Re-exported (type alias) from internal/sandbox; the
 // constants below are the closed set of values. Distinct from Status, which is
 // the sandbox/container lifecycle state.
 type AgentStatus = sandbox.AgentStatus

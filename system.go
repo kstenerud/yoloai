@@ -182,7 +182,7 @@ type SystemInfo struct {
 // has sandbox state, inspecting each via its own backend. Returns the sandbox
 // infos plus the names of backends that have sandbox dirs but couldn't be
 // reached (e.g. their daemon is down) so callers can warn without failing.
-func (s *System) ListAcrossBackends(ctx context.Context) ([]*Info, []BackendType, error) {
+func (s *System) ListAcrossBackends(ctx context.Context) ([]*SandboxInfo, []BackendType, error) {
 	infos, unavailable, err := sandbox.ListSandboxesMultiBackend(ctx, s.layout,
 		func(ctx context.Context, backend runtime.BackendType) (runtime.Runtime, error) {
 			return newRuntime(ctx, backend, s.layout)
@@ -194,7 +194,7 @@ func (s *System) ListAcrossBackends(ctx context.Context) ([]*Info, []BackendType
 	for i, name := range unavailable {
 		unavailableNames[i] = BackendType(name)
 	}
-	return infosFromStatus(infos), unavailableNames, nil
+	return sandboxInfosFromStatus(infos), unavailableNames, nil
 }
 
 // ValidateSandboxName reports whether name is a well-formed sandbox name

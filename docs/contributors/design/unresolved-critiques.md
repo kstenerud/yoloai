@@ -21,12 +21,11 @@ here — resolved entries belong in the sink, not as stubs.
 > `--json` residual tracked as [`unresolved-findings.md`](unresolved-findings.md) DF17.
 
 > The **2026-06-03 Internal-code round (IC1–IC16)** is fully drained (2026-06-04, one commit per
-> item on `layering-refactor`): IC1–IC13 + IC15 + the applied parts of IC14 →
-> [`resolved-critiques.md`](resolved-critiques.md); IC14's `Info`→`SandboxInfo` rename →
-> [`deferred-critiques.md`](deferred-critiques.md) (breaking, awaits the next public-API breaking
-> batch); IC16 (host-git wrappers) plus the IC14/IC15 won't-do sub-points →
-> [`abandoned-critiques.md`](abandoned-critiques.md). Recurring lesson: IC12/IC15/IC16 were all
-> "looks dead/dup" findings that proved load-bearing on a closer read.
+> item on `layering-refactor`): IC1–IC15 (incl. IC14's `Info`→`SandboxInfo` rename, applied once the
+> branch was confirmed to be a cumulative breaking delta vs `main` already) →
+> [`resolved-critiques.md`](resolved-critiques.md); IC16 (host-git wrappers) plus the IC14/IC15
+> won't-do sub-points → [`abandoned-critiques.md`](abandoned-critiques.md). Recurring lesson:
+> IC12/IC15/IC16 were all "looks dead/dup" findings that proved load-bearing on a closer read.
 
 ---
 

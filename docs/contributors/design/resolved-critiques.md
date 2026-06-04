@@ -54,19 +54,25 @@ a working set. Newest first.
   `CLAUDE.md`; added a *why* comment at `rsyncDir` (differential `--delete` avoids the wipe-then-copy
   window the restart path has).
 - **IC13** (`8b9a44a`) — corrected four stale ABOUTME/doc comments.
-- **IC14** (`8b9a44a`) — naming nits: `Engine` receiver `m`→`e`; `BackendDiskUsage`/`BackendDiagnostic`
-  `.Name`→`.Type` (D68 rule); `DeleteProfileResult`→`ProfileDeleteResult`. (See deferred/abandoned
-  for the two sub-points not applied.)
+- **IC14** (`8b9a44a` + the `Info`→`SandboxInfo` follow-up) — naming nits: `Engine` receiver
+  `m`→`e`; `BackendDiskUsage`/`BackendDiagnostic` `.Name`→`.Type` (D68 rule);
+  `DeleteProfileResult`→`ProfileDeleteResult`. The top-level inspect/list result type
+  `Info`→`SandboxInfo` (disambiguates from `SystemInfo`) was first deferred as "breaking, needs its
+  own batch," then revived and applied once the user noted the branch is already a cumulative
+  breaking delta vs `main` until merge. On verification the type is **branch-new** (the root API on
+  `main` is only `Options`/`RunOptions`/`ApplyOptions`/`NewWithOptions`), so the rename is new-API
+  naming, **not** a migration off a shipped name — `BREAKING-CHANGES.md` updated for living-doc
+  consistency only, no new migration entry. (See abandoned for the one sub-point not applied.)
 - **IC15** (`8b9a44a`) — removed the no-op `resolveProfileFromConfig()`; six `prune.go` signatures
   now take `io.Writer` instead of an anonymous writer interface. (`ResolveProfileChain` reframed as
   live, load-bearing — NOT dead; `NewEngine` panic kept — see abandoned.)
 - **IC16** (`37cf399`, spun off IC12) — see abandoned: the two host-git wrappers are deliberately
   distinct, not a dedup target.
 
-**Sub-points not applied** drained alongside: IC14 `Info`→`SandboxInfo` →
-[`deferred-critiques.md`](deferred-critiques.md) (breaking, needs its own batch); IC14 single-primitive
-`Options` wrapping, IC15 `NewEngine` panic, and IC16 host-git unification →
-[`abandoned-critiques.md`](abandoned-critiques.md).
+**Sub-points not applied** drained to [`abandoned-critiques.md`](abandoned-critiques.md): IC14
+single-primitive `Options` wrapping, IC15 `NewEngine` panic, and IC16 host-git unification. (IC14's
+`Info`→`SandboxInfo` rename was initially deferred but has since been applied — see the IC14 bullet
+above.)
 
 ## A2/A3 (2026-06-03 Public-API round) — surface split on backend-liveness; `SystemClient` junk drawer; agent noun homeless
 

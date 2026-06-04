@@ -159,7 +159,7 @@ func writeBugReportSandboxDetail(ctx context.Context, w io.Writer, c *yoloai.Cli
 	if err != nil {
 		err = fmt.Errorf("sandbox handle: %w", err)
 	}
-	var info *yoloai.Info
+	var info *yoloai.SandboxInfo
 	if err == nil {
 		info, err = sb.Inspect(ctx)
 	}

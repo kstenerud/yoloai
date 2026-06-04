@@ -28,12 +28,12 @@ func runSandboxInfo(cmd *cobra.Command, name string) error {
 
 		if cliutil.JSONEnabled(cmd) {
 			type infoJSON struct {
-				*yoloai.Info
+				*yoloai.SandboxInfo
 				ConfigPath    string `json:"config_path"`
 				PromptPreview string `json:"prompt_preview,omitempty"`
 			}
 			result := infoJSON{
-				Info:          info,
+				SandboxInfo:   info,
 				ConfigPath:    sb.RuntimeConfigPath(),
 				PromptPreview: loadPromptPreview(sb),
 			}
@@ -47,7 +47,7 @@ func runSandboxInfo(cmd *cobra.Command, name string) error {
 }
 
 // printSandboxInfo prints sandbox info in human-readable format.
-func printSandboxInfo(cmd *cobra.Command, sb *yoloai.Sandbox, name string, info *yoloai.Info) {
+func printSandboxInfo(cmd *cobra.Command, sb *yoloai.Sandbox, name string, info *yoloai.SandboxInfo) {
 	w := cmd.OutOrStdout()
 	meta := info.Environment
 
@@ -110,7 +110,7 @@ func printSandboxNetwork(w io.Writer, meta *yoloai.Environment) {
 }
 
 // printSandboxResources prints resource limits and summary information.
-func printSandboxResources(w io.Writer, meta *yoloai.Environment, info *yoloai.Info) {
+func printSandboxResources(w io.Writer, meta *yoloai.Environment, info *yoloai.SandboxInfo) {
 	if meta.Resources != nil {
 		var parts []string
 		if meta.Resources.CPULimit != "" {

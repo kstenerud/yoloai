@@ -11,7 +11,7 @@ import (
 )
 
 // Environment is the curated read-model of a sandbox captured at creation time,
-// carried on Info.Environment. It exposes the sandbox's identity and security
+// carried on SandboxInfo.Environment. It exposes the sandbox's identity and security
 // posture, its as-built workdir/aux-dir provenance, and an echo of the resolved
 // configuration an embedder would render or decide from. Internal mechanism
 // fields (on-disk schema version, image ref, prompt/debug/userns/vscode flags)
@@ -135,13 +135,13 @@ func workdirInfoFromStore(w store.WorkdirEnvironment) WorkdirInfo {
 	}
 }
 
-// infoFromStatus converts the internal read-model (sandbox.Info, an alias of
-// status.Info) into the public Info at the library boundary. Nil-safe.
-func infoFromStatus(si *sandbox.Info) *Info {
+// sandboxInfoFromStatus converts the internal read-model (sandbox.Info, an alias
+// of status.Info) into the public SandboxInfo at the library boundary. Nil-safe.
+func sandboxInfoFromStatus(si *sandbox.Info) *SandboxInfo {
 	if si == nil {
 		return nil
 	}
-	return &Info{
+	return &SandboxInfo{
 		Environment:    environmentFromStore(si.Environment),
 		Status:         si.Status,
 		AgentStatus:    si.AgentStatus,
@@ -150,11 +150,12 @@ func infoFromStatus(si *sandbox.Info) *Info {
 	}
 }
 
-// infosFromStatus maps a slice of internal read-models to public Info values.
-func infosFromStatus(sis []*sandbox.Info) []*Info {
-	out := make([]*Info, len(sis))
+// sandboxInfosFromStatus maps a slice of internal read-models to public
+// SandboxInfo values.
+func sandboxInfosFromStatus(sis []*sandbox.Info) []*SandboxInfo {
+	out := make([]*SandboxInfo, len(sis))
 	for i, si := range sis {
-		out[i] = infoFromStatus(si)
+		out[i] = sandboxInfoFromStatus(si)
 	}
 	return out
 }

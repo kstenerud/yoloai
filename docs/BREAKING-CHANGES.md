@@ -287,7 +287,7 @@ a typed `*yoloai.DirtyWorkdirError` (the library never prompts); ack it with
 
 **Typed errors / public shapes replace sentinels and internal results.**
 `ErrUnappliedChanges` → `*ActiveWorkError` (carries the reason); diff/apply/commits
-return public `yoloai.*` shapes (`ApplyResult`, `CommitInfo`, `TagInfo`, `Info`)
+return public `yoloai.*` shapes (`ApplyResult`, `CommitInfo`, `TagInfo`, `SandboxInfo`)
 instead of `internal/patch` / `internal/sandbox` types. Use `errors.As` for the
 typed errors.
 
@@ -313,13 +313,16 @@ and `ProfileAgentFiles`. JSON output of `profile info`/`--diff` is unchanged exc
 the `agent_files` object's inner keys, which now carry tags (`base_dir`/`files`)
 instead of emitting the Go field names (`BaseDir`/`Files`).
 
-**Sandbox read model: `Info.Meta` → `Info.Environment`.** The public `yoloai.Info`'s
+**Sandbox read model: type `Info` → `SandboxInfo`; field `Meta` → `Environment`.** The
+combined inspect/list result type is named `yoloai.SandboxInfo` (renamed from the
+ambiguous top-level `Info` for symmetry with `SystemInfo`; the type is new in this
+release, so this is naming, not a migration off a shipped name). Its
 creation-time-settings field is renamed `Meta` → `Environment`, and its JSON tag
 `"meta"` → `"environment"` — aligning the Go field with the on-disk `environment.json`
 artifact it has always mirrored (the type was already `yoloai.Environment`; only the
 field name lagged). `--json` output of `sandbox info` and `list` now nests those
-settings under `"environment"` instead of `"meta"`. Go embedders rename `info.Meta`
-→ `info.Environment`. Internal-only in the same pass (no external effect):
+settings under `"environment"` instead of `"meta"`. Go embedders name the type
+`yoloai.SandboxInfo` and read `info.Environment`. Internal-only in the same pass (no external effect):
 `store.Meta`/`WorkdirMeta`/`DirMeta` → `store.Environment`/`WorkdirEnvironment`/
 `DirEnvironment`, `LoadMeta`/`SaveMeta` → `LoadEnvironment`/`SaveEnvironment`, and the
 source file `store/meta.go` → `store/environment.go`.
@@ -336,7 +339,7 @@ config. Pure-mechanism fields are dropped from the public type (and its `--json`
 `string`); it marshals to the same JSON string, so `--json` network output is
 byte-stable. `sandbox info` human output drops the `Image:` and `Version:` lines.
 
-**Migration (Go embedders):** if you read any dropped field off `Info.Environment`,
+**Migration (Go embedders):** if you read any dropped field off `SandboxInfo.Environment`,
 source it elsewhere — the create-time options you passed, or (for diagnostics) a
 future dedicated surface; none of the dropped fields described the sandbox a
 consumer renders or decides from.

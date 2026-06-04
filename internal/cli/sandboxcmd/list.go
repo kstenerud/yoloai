@@ -51,12 +51,12 @@ func addListFlags(cmd *cobra.Command) {
 // filterInfos applies the given filters to a slice of sandbox infos.
 // Multiple filters are ANDed together. Broken sandboxes are excluded by
 // all filters except when no filters are active.
-func filterInfos(infos []*yoloai.Info, f listFilters) []*yoloai.Info {
+func filterInfos(infos []*yoloai.SandboxInfo, f listFilters) []*yoloai.SandboxInfo {
 	if !f.active && !f.idle && !f.done && !f.stopped && f.agent == "" && f.profile == "" && !f.changes {
 		return infos
 	}
 
-	var result []*yoloai.Info
+	var result []*yoloai.SandboxInfo
 	for _, info := range infos {
 		if matchesFilters(info, f) {
 			result = append(result, info)
@@ -68,7 +68,7 @@ func filterInfos(infos []*yoloai.Info, f listFilters) []*yoloai.Info {
 // matchesFilters returns true if info satisfies all active filter criteria.
 // matchesStatusFilter returns false if the sandbox status does not satisfy
 // the status-related flags (active, idle, done, stopped).
-func matchesStatusFilter(info *yoloai.Info, f listFilters) bool {
+func matchesStatusFilter(info *yoloai.SandboxInfo, f listFilters) bool {
 	if f.active && info.Status != yoloai.StatusActive && info.Status != yoloai.StatusIdle {
 		return false
 	}
@@ -84,7 +84,7 @@ func matchesStatusFilter(info *yoloai.Info, f listFilters) bool {
 	return true
 }
 
-func matchesFilters(info *yoloai.Info, f listFilters) bool {
+func matchesFilters(info *yoloai.SandboxInfo, f listFilters) bool {
 	if !matchesStatusFilter(info, f) {
 		return false
 	}
@@ -103,7 +103,7 @@ func matchesFilters(info *yoloai.Info, f listFilters) bool {
 }
 
 // matchesProfileFilter returns true if the sandbox matches the profile filter.
-func matchesProfileFilter(info *yoloai.Info, profileFilter string) bool {
+func matchesProfileFilter(info *yoloai.SandboxInfo, profileFilter string) bool {
 	if info.Status == yoloai.StatusBroken {
 		return false
 	}
@@ -163,7 +163,7 @@ func runList(cmd *cobra.Command, _ []string) error {
 
 	if cliutil.JSONEnabled(cmd) {
 		if infos == nil {
-			infos = []*yoloai.Info{}
+			infos = []*yoloai.SandboxInfo{}
 		}
 		// Create output structure with unavailable_backends field
 		output := map[string]any{
