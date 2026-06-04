@@ -46,10 +46,31 @@ const dockerImageRef = "docker.io/library/yoloai-base:latest"
 // The layout parameter is currently unused by the containerd Setup path —
 // it's accepted to satisfy the runtime.Runtime interface (Q-W.5) and remains
 // available for any future host-path needs without a further signature change.
-func (r *Runtime) Setup(ctx context.Context, _ config.Layout, sourceDir string, output io.Writer, logger *slog.Logger, force bool) error {
+func (r *Runtime) Setup(ctx context.Context, layout config.Layout, sourceDir string, output io.Writer, logger *slog.Logger, force bool) error {
 	ctx = r.withNamespace(ctx)
 
+	// Serialize against every other yoloai-base builder. Both containerd
+	// isolation variants (vm / vm-enhanced) and the docker backend build the
+	// same underlying docker image and share the yoloai-namespace link. Without
+	// this lock two concurrent `new` calls race on the link: the loser's
+	// readiness check fails and it re-runs a full cold `docker build` in-band,
+	// blowing a sandbox-create timeout. The lock blocks until the other build
+	// finishes, after which the re-check below sees a ready image and skips.
+	unlock, err := dockerrt.AcquireBaseLock(layout, imageRef)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
 	if r.imageAlreadyReady(ctx, force) {
+		return nil
+	}
+
+	// Relink without rebuilding: containerd GC can evict the namespace link
+	// while Docker still holds a current yoloai-base image. When the build
+	// inputs are unchanged, re-linking is near-instant — a full rebuild here is
+	// the cold-build footgun we are eliminating.
+	if !force && !dockerrt.NeedsBuild(layout, sourceDir) && r.tryLink(ctx, output) {
 		return nil
 	}
 
@@ -57,6 +78,10 @@ func (r *Runtime) Setup(ctx context.Context, _ config.Layout, sourceDir string, 
 	if err != nil {
 		return err
 	}
+	// buildDockerImage shells out to `docker build`, which (unlike the docker
+	// backend's SDK build) does not record the build-inputs checksum. Record it
+	// here so the relink-without-rebuild fast path above can fire next time.
+	dockerrt.RecordBuildChecksum(layout, sourceDir)
 
 	// Fast path: Docker running in containerd-snapshotter mode stores images
 	// directly in containerd (namespace "moby"). Mark that namespace as
@@ -64,9 +89,7 @@ func (r *Runtime) Setup(ctx context.Context, _ config.Layout, sourceDir string, 
 	// blob in the yoloai namespace via a pure bolt metadata write. GC ref
 	// labels are set on each parent blob so the garbage collector can trace
 	// the full manifest tree and keep all blobs reachable.
-	fmt.Fprintln(output, "Linking image into containerd namespace yoloai...") //nolint:errcheck // best-effort output
-	if err := r.linkFromDockerNamespace(ctx); err == nil {
-		fmt.Fprintln(output, "Image ready.") //nolint:errcheck // best-effort output
+	if r.tryLink(ctx, output) {
 		return nil
 	}
 
@@ -74,6 +97,19 @@ func (r *Runtime) Setup(ctx context.Context, _ config.Layout, sourceDir string, 
 	// Used when Docker is not in containerd-snapshotter mode, or when the
 	// fast path fails verification.
 	return r.slowPathImport(ctx, dockerBin, output)
+}
+
+// tryLink attempts the fast containerd-snapshotter link path, returning true
+// only when the image is fully linked into the yoloai namespace. A false return
+// is expected when Docker is not in containerd-snapshotter mode; the caller then
+// falls back to a build and/or the slow `docker save | ctr import` path.
+func (r *Runtime) tryLink(ctx context.Context, output io.Writer) bool {
+	fmt.Fprintln(output, "Linking image into containerd namespace yoloai...") //nolint:errcheck // best-effort output
+	if err := r.linkFromDockerNamespace(ctx); err != nil {
+		return false
+	}
+	fmt.Fprintln(output, "Image ready.") //nolint:errcheck // best-effort output
+	return true
 }
 
 // imageAlreadyReady returns true if force is false and the full image descriptor
