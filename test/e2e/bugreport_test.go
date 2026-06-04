@@ -41,13 +41,6 @@ func sandboxLogsDir(t *testing.T, name string) string {
 	return filepath.Join(home, ".yoloai", "library", "sandboxes", name, "logs")
 }
 
-// sandboxDir returns the sandbox state directory for a sandbox using the current HOME env var.
-func sandboxStateDir(t *testing.T, name string) string {
-	t.Helper()
-	home := os.Getenv("HOME")
-	return filepath.Join(home, ".yoloai", "library", "sandboxes", name)
-}
-
 // TestE2E_Debug_WritesCLIJSONL verifies that --debug causes debug-level entries in cli.jsonl.
 func TestE2E_Debug_WritesCLIJSONL(t *testing.T) {
 	projectDir := e2eSetup(t)
@@ -65,27 +58,26 @@ func TestE2E_Debug_WritesCLIJSONL(t *testing.T) {
 	assert.Contains(t, string(data), `"level":"debug"`, "cli.jsonl should contain debug entries")
 }
 
-// TestE2E_BugreportFlag_Unsafe verifies --bugreport unsafe writes a complete report.
-func TestE2E_BugreportFlag_Unsafe(t *testing.T) {
+// TestE2E_BugreportFlag is the flag-path smoke: it verifies that the
+// --bugreport global flag, routed through the real Execute() entrypoint on the
+// compiled binary, writes a report containing the flag-only sections (Live log
+// + Exit code) that the in-process subcommand path cannot exercise. The
+// safe/unsafe section-redaction matrix is owned by the bugreport unit tests
+// (internal/cli/bugreport/writer_test.go) and the in-process subcommand pair
+// (internal/cli/integration_test.go); re-asserting it through the slow
+// compiled-binary tier would be ice-cream-cone duplication, so this only checks
+// the wiring unique to the flag entrypoint.
+func TestE2E_BugreportFlag(t *testing.T) {
 	projectDir := e2eSetup(t)
 
-	_, _, code := runYoloai(t, "new", "--agent", "test", "--no-start", "--prompt", "test task", "e2e-br-unsafe", projectDir)
+	_, _, code := runYoloai(t, "new", "--agent", "test", "--no-start", "e2e-br", projectDir)
 	require.Equal(t, 0, code)
-	t.Cleanup(func() { destroySandbox(t, "e2e-br-unsafe") })
+	t.Cleanup(func() { destroySandbox(t, "e2e-br") })
 
-	// Write fake JSONL entries to the sandbox log files
-	logsDir := sandboxLogsDir(t, "e2e-br-unsafe")
-	require.NoError(t, os.MkdirAll(logsDir, 0700))
-	entry := `{"ts":"2026-03-16T10:00:00.000Z","level":"info","event":"test.event","msg":"fake log entry"}` + "\n"
-	require.NoError(t, os.WriteFile(filepath.Join(logsDir, "cli.jsonl"), []byte(entry), 0600))
-	require.NoError(t, os.WriteFile(filepath.Join(logsDir, "sandbox.jsonl"), []byte(entry), 0600))
-	require.NoError(t, os.WriteFile(filepath.Join(logsDir, "monitor.jsonl"), []byte(entry), 0600))
-	require.NoError(t, os.WriteFile(filepath.Join(logsDir, "agent-hooks.jsonl"), []byte(entry), 0600))
-
-	// Run with --bugreport unsafe from a temp dir so we can find the report
+	// Run with --bugreport from a temp dir so we can find the report.
 	reportDir := t.TempDir()
-	_, _, code = runYoloaiInDir(t, reportDir, "--bugreport", "unsafe", "sandbox", "e2e-br-unsafe", "info")
-	// Exit code may be non-zero if sandbox is not running; that's fine — report is still written
+	_, _, code = runYoloaiInDir(t, reportDir, "--bugreport", "unsafe", "sandbox", "e2e-br", "info")
+	// Exit code may be non-zero if sandbox is not running; that's fine — report is still written.
 	_ = code
 
 	matches, err := filepath.Glob(filepath.Join(reportDir, "yoloai-bugreport-*.md"))
@@ -97,55 +89,7 @@ func TestE2E_BugreportFlag_Unsafe(t *testing.T) {
 	out := string(content)
 
 	assert.Contains(t, out, "Sandbox detail")
-	assert.Contains(t, out, "logs/cli.jsonl")
-	assert.Contains(t, out, "logs/sandbox.jsonl")
-	assert.Contains(t, out, "logs/monitor.jsonl")
-	assert.Contains(t, out, "logs/agent-hooks.jsonl")
-	assert.Contains(t, out, "Agent output")
+	// Flag-only sections written by finalizeBugReport in the Execute() wrapper.
 	assert.Contains(t, out, "Live log")
-	assert.Contains(t, out, "Exit code:") // **Exit code:** section from flag path
-	assert.Contains(t, out, "test task")  // prompt.txt included in unsafe
-}
-
-// TestE2E_BugreportFlag_Safe verifies --bugreport safe writes a sanitized report.
-func TestE2E_BugreportFlag_Safe(t *testing.T) {
-	projectDir := e2eSetup(t)
-
-	_, _, code := runYoloai(t, "new", "--agent", "test", "--no-start", "--prompt", "test task", "e2e-br-safe", projectDir)
-	require.Equal(t, 0, code)
-	t.Cleanup(func() { destroySandbox(t, "e2e-br-safe") })
-
-	// Write fake JSONL entries to the sandbox log files
-	logsDir := sandboxLogsDir(t, "e2e-br-safe")
-	require.NoError(t, os.MkdirAll(logsDir, 0700))
-	entry := `{"ts":"2026-03-16T10:00:00.000Z","level":"info","event":"test.event","msg":"fake log entry"}` + "\n"
-	require.NoError(t, os.WriteFile(filepath.Join(logsDir, "cli.jsonl"), []byte(entry), 0600))
-	require.NoError(t, os.WriteFile(filepath.Join(logsDir, "sandbox.jsonl"), []byte(entry), 0600))
-	require.NoError(t, os.WriteFile(filepath.Join(logsDir, "monitor.jsonl"), []byte(entry), 0600))
-	require.NoError(t, os.WriteFile(filepath.Join(logsDir, "agent-hooks.jsonl"), []byte(entry), 0600))
-
-	// Run with --bugreport safe from a temp dir
-	reportDir := t.TempDir()
-	_, _, code = runYoloaiInDir(t, reportDir, "--bugreport", "safe", "sandbox", "e2e-br-safe", "info")
-	_ = code
-
-	matches, err := filepath.Glob(filepath.Join(reportDir, "yoloai-bugreport-*.md"))
-	require.NoError(t, err)
-	require.Len(t, matches, 1, "expected exactly one bug report file")
-
-	content, err := os.ReadFile(matches[0]) //nolint:gosec // test path
-	require.NoError(t, err)
-	out := string(content)
-
-	// Safe mode includes log sections
-	assert.Contains(t, out, "Sandbox detail")
-	assert.Contains(t, out, "logs/cli.jsonl")
-	assert.Contains(t, out, "logs/sandbox.jsonl")
-	assert.Contains(t, out, "logs/monitor.jsonl")
-	assert.Contains(t, out, "logs/agent-hooks.jsonl")
-
-	// Safe mode omits sensitive sections
-	assert.NotContains(t, out, "Agent output")
-	assert.NotContains(t, out, "prompt.txt") // prompt.txt section omitted in safe mode
-	assert.NotContains(t, out, "tmux screen capture")
+	assert.Contains(t, out, "Exit code:")
 }

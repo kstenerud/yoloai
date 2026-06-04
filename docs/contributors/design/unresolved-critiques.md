@@ -75,8 +75,15 @@ toward an ice-cream cone.
   to the JSON-output-contract tests it uniquely justifies; let the cli integration tier own workflow
   coverage.
 - **T5 — Bugreport tested at 3 tiers** (unit `writer_test.go` + integration `:318,366` + e2e
-  `:69,111`) plus e2e self-duplication (workflow vs error files). *Fix:* keep unit + one integration
-  smoke; drop the e2e copies.
+  `:69,111`) plus e2e self-duplication (unsafe vs safe). *Refined on inspection:* the e2e tests are
+  NOT pure copies — they drive the `--bugreport` global flag through the real `Execute()` wrapper
+  (which writes the flag-only Live-log/Exit-code sections via `finalizeBugReport`, root.go:68),
+  whereas the integration pair drives the in-process `sandbox … bugreport` subcommand (which the
+  `runCLI` helper routes around `Execute()`, so it cannot exercise those sections). The genuine
+  redundancy is the safe/unsafe section-redaction matrix — owned by the ~50 unit tests and
+  re-covered by the integration subcommand pair. *Fix (applied):* collapse the two e2e tests into a
+  single flag-path smoke asserting only the flag-unique markers (Live log / Exit code); keep the
+  integration subcommand pair as the command-path coverage; the matrix stays unit-owned.
 - **T6 — "Sandbox not found" tested 3× in the root package:** `TestClient_Sandbox_NotFound`
   (sandbox_test.go), `TestClient_Sandbox_NotFoundHandle` (workdir_test.go),
   `TestSandbox_MissingReturnsNotFound` (system_test.go). *Fix:* keep one canonical case.
@@ -135,5 +142,8 @@ T4 (e2e trim) → T13 (error-path coverage).
 - ✅ **T12** — added new.go usage-error unit tests (parse positional / flag conflicts / port / env)
   (d36c04c).
 - ✅ **T14** — `public_api_test.go`→`internal_leak_fence_test.go` (b9ab232).
-- ⏳ Remaining: T8, T6, T5, T10, T9, T11 (mechanical dedup/cleanup); T2, T4, T13 (large/judgement);
+- ✅ **T8** — inject layout directly instead of steering it through `$HOME` (1541d37).
+- ✅ **T6** — collapse three duplicate sandbox-not-found tests to one (743e23a).
+- ✅ **T5** — collapse two e2e bugreport tests to one flag-path smoke; matrix stays unit-owned.
+- ⏳ Remaining: T10, T9, T11 (mechanical dedup/cleanup); T2, T4, T13 (large/judgement);
   T7 (broad `t.Parallel` adoption — partially seeded in new_test.go).
