@@ -46,6 +46,9 @@ func TestBugReportFilename_Format(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, strings.HasPrefix(name, "yoloai-bugreport-"), "name should start with yoloai-bugreport-")
 	assert.True(t, strings.HasSuffix(name, ".md"), "name should end with .md")
+	// The PID is embedded so concurrent invocations never collide; locking it
+	// here guards the parallel-safety property against an accidental revert.
+	assert.Contains(t, name, fmt.Sprintf("-%d.md", os.Getpid()), "name should embed the PID")
 }
 
 func TestBugReportFilename_Collision(t *testing.T) {

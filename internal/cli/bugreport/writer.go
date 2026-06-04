@@ -19,9 +19,15 @@ import (
 
 // Filename generates the output filename for a bug report.
 // Returns an error if a file with the same name already exists.
+//
+// The PID disambiguates concurrent or rapid-sequential invocations: the
+// millisecond timestamp alone collides when two yoloai processes start in the
+// same dir within the same millisecond (e.g. a parallel test matrix, or a user
+// scripting concurrent --bugreport runs). Each invocation is its own process,
+// so its PID is a stable per-invocation discriminator.
 func Filename(t time.Time) (string, error) {
-	name := fmt.Sprintf("yoloai-bugreport-%s.md",
-		t.UTC().Format("20060102-150405.000"))
+	name := fmt.Sprintf("yoloai-bugreport-%s-%d.md",
+		t.UTC().Format("20060102-150405.000"), os.Getpid())
 	if _, err := os.Stat(name); err == nil {
 		return "", fmt.Errorf("file already exists: %s", name)
 	}
