@@ -36,7 +36,7 @@ import (
 // descriptor holds the static facts for the docker backend; shared by the
 // registry registration and the Runtime.Descriptor() method.
 var descriptor = runtime.BackendDescriptor{
-	Type:                      "docker",
+	Type:                      runtime.BackendDocker,
 	Description:               "Linux containers; portable, lightweight, fast",
 	Platforms:                 []string{"linux", "darwin", "windows"},
 	Requires:                  "Docker Engine or Docker Desktop installed and running",
@@ -86,7 +86,7 @@ func versionString(ctx context.Context) string {
 }
 
 func init() {
-	runtime.Register("docker", func(ctx context.Context, layout config.Layout) (runtime.Runtime, error) {
+	runtime.Register(func(ctx context.Context, layout config.Layout) (runtime.Runtime, error) {
 		return New(ctx, layout.Env)
 	}, descriptor)
 }

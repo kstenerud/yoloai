@@ -24,7 +24,7 @@ import (
 // descriptor holds the static facts for the seatbelt backend; shared by the
 // registry registration and the Runtime.Descriptor() method.
 var descriptor = runtime.BackendDescriptor{
-	Type:                      "seatbelt",
+	Type:                      runtime.BackendSeatbelt,
 	Description:               "macOS sandbox; near-instant, uses host tools, less isolation",
 	Platforms:                 []string{"darwin"},
 	Requires:                  "macOS (sandbox-exec is built-in)",
@@ -58,7 +58,7 @@ func init() {
 	// The registry factory derives homeDir from layout via the conventional
 	// $HOME/.yoloai DataDir: homeDir = layout.HomeDir.
 	// Direct callers (CLI, tests) may call New(ctx, layout, homeDir) explicitly.
-	runtime.Register("seatbelt", func(ctx context.Context, layout config.Layout) (runtime.Runtime, error) {
+	runtime.Register(func(ctx context.Context, layout config.Layout) (runtime.Runtime, error) {
 		return New(ctx, layout, layout.HomeDir)
 	}, descriptor)
 }

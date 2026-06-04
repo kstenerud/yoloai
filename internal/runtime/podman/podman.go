@@ -26,7 +26,7 @@ import (
 // descriptor holds the static facts for the podman backend; shared by the
 // registry registration and the Runtime.Descriptor() method.
 var descriptor = runtime.BackendDescriptor{
-	Type:                      "podman",
+	Type:                      runtime.BackendPodman,
 	Description:               "Linux containers; daemonless, rootless by default",
 	Platforms:                 []string{"linux", "darwin"},
 	Requires:                  "Podman installed with API socket activated",
@@ -68,7 +68,7 @@ func probe(_ context.Context, env map[string]string) (bool, string) {
 }
 
 func init() {
-	runtime.Register("podman", func(ctx context.Context, layout config.Layout) (runtime.Runtime, error) {
+	runtime.Register(func(ctx context.Context, layout config.Layout) (runtime.Runtime, error) {
 		return New(ctx, layout.Env)
 	}, descriptor)
 }

@@ -29,13 +29,11 @@ var (
 	backends = make(map[BackendType]entry)
 )
 
-// Register adds a backend factory and its static descriptor to the registry.
-// Called by each backend's init() function on supported platforms. Panics if
-// name does not match descriptor.Type or the backend is already registered.
-func Register(name BackendType, factory Factory, descriptor BackendDescriptor) {
-	if name != descriptor.Type {
-		panic(fmt.Sprintf("runtime backend register: name %q != descriptor.Type %q", name, descriptor.Type))
-	}
+// Register adds a backend factory and its static descriptor to the registry,
+// keyed on descriptor.Type. Called by each backend's init() function on
+// supported platforms. Panics if the backend is already registered.
+func Register(factory Factory, descriptor BackendDescriptor) {
+	name := descriptor.Type
 	mu.Lock()
 	defer mu.Unlock()
 	if _, exists := backends[name]; exists {

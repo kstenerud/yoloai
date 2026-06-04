@@ -28,7 +28,7 @@ import (
 // descriptor holds the static facts for the containerd backend; shared by the
 // registry registration and the Runtime.Descriptor() method.
 var descriptor = runtime.BackendDescriptor{
-	Type:                      "containerd",
+	Type:                      runtime.BackendContainerd,
 	Description:               "Linux VMs via Kata Containers (--isolation vm/vm-enhanced)",
 	Platforms:                 []string{"linux"},
 	IsolationTargetOnly:       true,
@@ -68,7 +68,7 @@ func probe(_ context.Context, _ map[string]string) (bool, string) {
 }
 
 func init() {
-	runtime.Register("containerd", func(ctx context.Context, layout config.Layout) (runtime.Runtime, error) {
+	runtime.Register(func(ctx context.Context, layout config.Layout) (runtime.Runtime, error) {
 		return New(ctx, layout)
 	}, descriptor)
 }

@@ -92,6 +92,10 @@ contract rounds above. Found via a whole-file read pass; `file:line` anchors are
   literal is hand-duplicated.
 - **Direction.** Use the typed consts (`BackendDocker`/`BackendTart`/…); the mismatch panic then
   becomes structurally impossible.
+- **Done (2026-06-04).** All five descriptors + `Register` calls use the `runtime.Backend*` consts.
+  Took the simplification one step further: since the registry key was always `== descriptor.Type`,
+  dropped `Register`'s redundant `name` parameter (now keys on `descriptor.Type`) and deleted the
+  now-impossible mismatch panic entirely.
 
 **IC7 — option→internal mapping convention is incoherent.**
 - **Evidence.** `SandboxRunOptions.materialize()`, several `*.toInternal()`, and inline
