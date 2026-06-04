@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"slices"
 
-	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/runtime"
@@ -179,7 +178,7 @@ func handleStoppedOrRemovedStatus(ctx context.Context, d state.Deps, cname, name
 	slog.Info("recreating container", "event", "sandbox.start.container.recreate", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
 	switch {
 	case customPrompt:
-		if err := prepareCustomPromptFiles(d, name, meta, promptText); err != nil {
+		if err := prepareRelaunchFiles(d, name, meta, promptText); err != nil {
 			return err
 		}
 		defer cleanupResumeFiles(d, name)
@@ -204,9 +203,9 @@ func handleSuspendedResume(ctx context.Context, d state.Deps, cname, name string
 	slog.Info("resuming suspended sandbox", "event", "sandbox.start.resume", "sandbox", name)
 	sandboxDir := d.Layout.SandboxDir(name)
 
-	agentDef := agent.GetAgent(string(meta.AgentType))
-	if agentDef == nil {
-		return yoerrors.NewConfigError("unknown agent %q in sandbox state — this sandbox was created with an agent that's not registered in the current yoloai installation; destroy and recreate the sandbox with a registered agent", meta.AgentType)
+	agentDef, err := requireAgent(meta)
+	if err != nil {
+		return err
 	}
 
 	// Refresh credentials and settings from host (handles token refresh between sessions).
@@ -220,7 +219,7 @@ func handleSuspendedResume(ctx context.Context, d state.Deps, cname, name string
 
 	switch {
 	case customPrompt:
-		if err := prepareCustomPromptFiles(d, name, meta, promptText); err != nil {
+		if err := prepareRelaunchFiles(d, name, meta, promptText); err != nil {
 			return err
 		}
 		defer cleanupResumeFiles(d, name)

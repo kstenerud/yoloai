@@ -235,28 +235,39 @@ func tmuxShellPrefix(socket string) string {
 	return "_tmux() { tmux \"$@\"; }"
 }
 
+// requireAgent resolves the agent definition named in a sandbox's stored
+// metadata, returning a typed config error when that agent is no longer
+// registered in the current yoloai installation.
+func requireAgent(meta *store.Environment) (*agent.Definition, error) {
+	agentDef := agent.GetAgent(string(meta.AgentType))
+	if agentDef == nil {
+		return nil, yoerrors.NewConfigError("unknown agent %q in sandbox state — this sandbox was created with an agent that's not registered in the current yoloai installation; destroy and recreate the sandbox with a registered agent", meta.AgentType)
+	}
+	return agentDef, nil
+}
+
+// readResumeText reads a sandbox's original prompt.txt and prepends the resume
+// preamble, producing the text re-sent to the agent on a resume restart.
+func readResumeText(sandboxDir string) (string, error) {
+	data, err := os.ReadFile(filepath.Join(sandboxDir, "prompt.txt")) //nolint:gosec // path is sandbox-controlled
+	if err != nil {
+		return "", fmt.Errorf("read prompt.txt: %w", err)
+	}
+	return resumePreamble + string(data), nil
+}
+
 // relaunchAgent relaunches the agent in the existing tmux session.
 func relaunchAgent(ctx context.Context, d state.Deps, name string, meta *store.Environment) error {
-	sandboxDir := d.Layout.SandboxDir(name)
-
-	// Read runtime-config.json to get agent_command
-	configData, err := os.ReadFile(filepath.Join(sandboxDir, store.RuntimeConfigFile)) //nolint:gosec // path is sandbox-controlled
+	cfg, err := loadContainerConfig(d.Layout.SandboxDir(name))
 	if err != nil {
-		return fmt.Errorf("read runtime-config.json: %w", err)
+		return err
 	}
 
-	var cfg runtimeconfig.ContainerConfig
-	if err := json.Unmarshal(configData, &cfg); err != nil {
-		return fmt.Errorf("parse runtime-config.json: %w", err)
-	}
-
-	_, err = status.ExecInContainer(ctx, d.Runtime, name, meta, d.Layout.HostUID,
+	if _, err := status.ExecInContainer(ctx, d.Runtime, name, meta, d.Layout.HostUID,
 		tmuxCmd(cfg.TmuxSocket, "respawn-pane", "-t", "main", "-k", cfg.AgentCommand),
-	)
-	if err != nil {
+	); err != nil {
 		return fmt.Errorf("relaunch agent: %w", err)
 	}
-
 	return nil
 }
 
@@ -264,111 +275,40 @@ func relaunchAgent(ctx context.Context, d state.Deps, name string, meta *store.E
 // the resume prompt (preamble + original prompt) via tmux.
 func relaunchAgentWithResume(ctx context.Context, d state.Deps, name string, meta *store.Environment) error {
 	sandboxDir := d.Layout.SandboxDir(name)
-
-	configData, err := os.ReadFile(filepath.Join(sandboxDir, store.RuntimeConfigFile)) //nolint:gosec // path is sandbox-controlled
+	cfg, err := loadContainerConfig(sandboxDir)
 	if err != nil {
-		return fmt.Errorf("read runtime-config.json: %w", err)
+		return err
+	}
+	agentDef, err := requireAgent(meta)
+	if err != nil {
+		return err
 	}
 
-	var cfg runtimeconfig.ContainerConfig
-	if err := json.Unmarshal(configData, &cfg); err != nil {
-		return fmt.Errorf("parse runtime-config.json: %w", err)
-	}
-
-	agentDef := agent.GetAgent(string(meta.AgentType))
-	if agentDef == nil {
-		return yoerrors.NewConfigError("unknown agent %q in sandbox state — this sandbox was created with an agent that's not registered in the current yoloai installation; destroy and recreate the sandbox with a registered agent", meta.AgentType)
-	}
-
-	// Resolve agent_args from config/profile
 	agentArgs := resolveAgentArgs(d.Layout, string(meta.AgentType), meta.Profile)
-
-	// Build interactive command (no headless prompt baked in)
 	interactiveCmd := invocation.BuildAgentCommand(agentDef, meta.Model, "", agentArgs, cfg.Passthrough)
-
-	// Respawn with interactive command
-	_, err = status.ExecInContainer(ctx, d.Runtime, name, meta, d.Layout.HostUID,
+	if _, err := status.ExecInContainer(ctx, d.Runtime, name, meta, d.Layout.HostUID,
 		tmuxCmd(cfg.TmuxSocket, "respawn-pane", "-t", "main", "-k", interactiveCmd),
-	)
-	if err != nil {
+	); err != nil {
 		return fmt.Errorf("relaunch agent: %w", err)
 	}
 
-	// Deliver resume prompt after agent is ready
-	return sendResumePrompt(ctx, d, name, sandboxDir, cfg, meta)
-}
-
-// sendResumePrompt waits for the agent to be ready and delivers the resume
-// prompt (preamble + original prompt) via tmux load-buffer/paste-buffer.
-func sendResumePrompt(ctx context.Context, d state.Deps, name, sandboxDir string, cfg runtimeconfig.ContainerConfig, meta *store.Environment) error {
-	promptData, err := os.ReadFile(filepath.Join(sandboxDir, "prompt.txt")) //nolint:gosec // path is sandbox-controlled
+	resumeText, err := readResumeText(sandboxDir)
 	if err != nil {
-		return fmt.Errorf("read prompt.txt: %w", err)
+		return err
 	}
-
-	resumeText := resumePreamble + string(promptData)
-
-	// Build a wait-for-ready + deliver script.
-	// Uses ready_pattern or startup_delay from runtime-config.json, following
-	// the same logic as the entrypoint.
-	var waitCmd string
-	switch {
-	case cfg.ReadyPattern != "":
-		// Poll tmux capture-pane output for the ready pattern
-		waitCmd = fmt.Sprintf(`for i in $(seq 1 60); do
-    if _tmux capture-pane -t main -p 2>/dev/null | grep -q '%s'; then
-        break
-    fi
-    sleep 1
-done`, cfg.ReadyPattern)
-	case cfg.StartupDelay > 0:
-		delaySec := max(cfg.StartupDelay/1000, 1)
-		waitCmd = fmt.Sprintf("sleep %d", delaySec)
-	default:
-		waitCmd = "sleep 3"
-	}
-
-	// Write active status to status.json AFTER prompt delivery, not before.
-	// This fixes the race where status shows "active" during the readiness wait.
-	statusWrite := `printf '{"status":"active","timestamp":%d}' "$(date +%%s)" > "${YOLOAI_DIR:-/yoloai}/agent-status.json"`
-
-	script := fmt.Sprintf(`%s
-%s
-printf '%%s' "$1" > /tmp/yoloai-resume.txt
-_tmux load-buffer /tmp/yoloai-resume.txt
-_tmux paste-buffer -t main
-sleep 0.5
-for key in %s; do
-    _tmux send-keys -t main "$key"
-    sleep 0.2
-done
-rm -f /tmp/yoloai-resume.txt
-%s`, tmuxShellPrefix(cfg.TmuxSocket), waitCmd, cfg.SubmitSequence, statusWrite)
-
-	_, err = status.ExecInContainer(ctx, d.Runtime, name, meta, d.Layout.HostUID, []string{
-		"bash", "-c", "nohup bash -c '" + strings.ReplaceAll(script, "'", "'\"'\"'") + "' _ \"$1\" >/dev/null 2>&1 &", "_", resumeText,
-	})
-	return err
+	return deliverPromptViaTmux(ctx, d, name, cfg, meta, resumeText, "/tmp/yoloai-resume.txt")
 }
 
 // relaunchAgentWithCustomPrompt relaunches the agent in interactive mode and sends
 // the custom prompt directly (no resume preamble) via tmux.
 func relaunchAgentWithCustomPrompt(ctx context.Context, d state.Deps, name string, meta *store.Environment, promptText string) error {
-	sandboxDir := d.Layout.SandboxDir(name)
-
-	configData, err := os.ReadFile(filepath.Join(sandboxDir, store.RuntimeConfigFile)) //nolint:gosec // path is sandbox-controlled
+	cfg, err := loadContainerConfig(d.Layout.SandboxDir(name))
 	if err != nil {
-		return fmt.Errorf("read runtime-config.json: %w", err)
+		return err
 	}
-
-	var cfg runtimeconfig.ContainerConfig
-	if err := json.Unmarshal(configData, &cfg); err != nil {
-		return fmt.Errorf("parse runtime-config.json: %w", err)
-	}
-
-	agentDef := agent.GetAgent(string(meta.AgentType))
-	if agentDef == nil {
-		return yoerrors.NewConfigError("unknown agent %q in sandbox state — this sandbox was created with an agent that's not registered in the current yoloai installation; destroy and recreate the sandbox with a registered agent", meta.AgentType)
+	agentDef, err := requireAgent(meta)
+	if err != nil {
+		return err
 	}
 
 	agentArgs := resolveAgentArgs(d.Layout, string(meta.AgentType), meta.Profile)
@@ -381,50 +321,54 @@ func relaunchAgentWithCustomPrompt(ctx context.Context, d state.Deps, name strin
 	} else {
 		interactiveCmd = runtime.PrepareAgentCommandFor(d.Runtime, interactiveCmd)
 	}
-	_, err = status.ExecInContainer(ctx, d.Runtime, name, meta, d.Layout.HostUID,
+	if _, err := status.ExecInContainer(ctx, d.Runtime, name, meta, d.Layout.HostUID,
 		tmuxCmd(cfg.TmuxSocket, "respawn-pane", "-t", "main", "-k", interactiveCmd),
-	)
-	if err != nil {
+	); err != nil {
 		return fmt.Errorf("relaunch agent: %w", err)
 	}
 
-	return sendCustomPrompt(ctx, d, name, sandboxDir, cfg, promptText, meta)
+	return deliverPromptViaTmux(ctx, d, name, cfg, meta, promptText, "/tmp/yoloai-custom-prompt.txt")
 }
 
-// sendCustomPrompt waits for the agent to be ready and delivers the custom
-// prompt directly (without resume preamble) via tmux load-buffer/paste-buffer.
-func sendCustomPrompt(ctx context.Context, d state.Deps, name, sandboxDir string, cfg runtimeconfig.ContainerConfig, promptText string, meta *store.Environment) error {
-	var waitCmd string
+// buildReadyWaitScript returns a shell snippet that blocks until the agent is
+// ready, following ready_pattern / startup_delay from runtime-config.json (the
+// same logic the entrypoint uses).
+func buildReadyWaitScript(cfg runtimeconfig.ContainerConfig) string {
 	switch {
 	case cfg.ReadyPattern != "":
-		waitCmd = fmt.Sprintf(`for i in $(seq 1 60); do
+		// Poll tmux capture-pane output for the ready pattern.
+		return fmt.Sprintf(`for i in $(seq 1 60); do
     if _tmux capture-pane -t main -p 2>/dev/null | grep -q '%s'; then
         break
     fi
     sleep 1
 done`, cfg.ReadyPattern)
 	case cfg.StartupDelay > 0:
-		delaySec := max(cfg.StartupDelay/1000, 1)
-		waitCmd = fmt.Sprintf("sleep %d", delaySec)
+		return fmt.Sprintf("sleep %d", max(cfg.StartupDelay/1000, 1))
 	default:
-		waitCmd = "sleep 3"
+		return "sleep 3"
 	}
+}
 
-	// Write active status to status.json AFTER prompt delivery, not before.
+// deliverPromptViaTmux waits for the agent to be ready, then stages promptText in
+// the in-container scratch file tmpFile and pastes it into the main tmux pane.
+// The "active" status is written only after delivery, avoiding the race where
+// status reads "active" during the readiness wait.
+func deliverPromptViaTmux(ctx context.Context, d state.Deps, name string, cfg runtimeconfig.ContainerConfig, meta *store.Environment, promptText, tmpFile string) error {
 	statusWrite := `printf '{"status":"active","timestamp":%d}' "$(date +%%s)" > "${YOLOAI_DIR:-/yoloai}/agent-status.json"`
 
 	script := fmt.Sprintf(`%s
 %s
-printf '%%s' "$1" > /tmp/yoloai-custom-prompt.txt
-_tmux load-buffer /tmp/yoloai-custom-prompt.txt
+printf '%%s' "$1" > %s
+_tmux load-buffer %s
 _tmux paste-buffer -t main
 sleep 0.5
 for key in %s; do
     _tmux send-keys -t main "$key"
     sleep 0.2
 done
-rm -f /tmp/yoloai-custom-prompt.txt
-%s`, tmuxShellPrefix(cfg.TmuxSocket), waitCmd, cfg.SubmitSequence, statusWrite)
+rm -f %s
+%s`, tmuxShellPrefix(cfg.TmuxSocket), buildReadyWaitScript(cfg), tmpFile, tmpFile, cfg.SubmitSequence, tmpFile, statusWrite)
 
 	_, err := status.ExecInContainer(ctx, d.Runtime, name, meta, d.Layout.HostUID, []string{
 		"bash", "-c", "nohup bash -c '" + strings.ReplaceAll(script, "'", "'\"'\"'") + "' _ \"$1\" >/dev/null 2>&1 &", "_", promptText,
@@ -432,95 +376,32 @@ rm -f /tmp/yoloai-custom-prompt.txt
 	return err
 }
 
-// prepareCustomPromptFiles writes the resume-prompt.txt (custom prompt, no preamble)
-// and patches runtime-config.json for interactive command mode.
-func prepareCustomPromptFiles(d state.Deps, name string, meta *store.Environment, promptText string) error {
+// prepareRelaunchFiles writes resume-prompt.txt with the given text and patches
+// runtime-config.json's agent_command to the interactive form, so a recreated
+// container relaunches the agent interactively and re-delivers the prompt.
+func prepareRelaunchFiles(d state.Deps, name string, meta *store.Environment, promptText string) error {
 	sandboxDir := d.Layout.SandboxDir(name)
-
-	// Write resume-prompt.txt (custom prompt, no preamble)
 	if err := fileutil.WriteFile(filepath.Join(sandboxDir, "resume-prompt.txt"), []byte(promptText), 0600); err != nil {
 		return fmt.Errorf("write resume-prompt.txt: %w", err)
 	}
-
-	// Patch runtime-config.json: replace agent_command with interactive version
-	configPath := filepath.Join(sandboxDir, store.RuntimeConfigFile)
-	configData, err := os.ReadFile(configPath) //nolint:gosec // path is sandbox-controlled
+	agentDef, err := requireAgent(meta)
 	if err != nil {
-		return fmt.Errorf("read runtime-config.json: %w", err)
+		return err
 	}
-
-	var cfg runtimeconfig.ContainerConfig
-	if err := json.Unmarshal(configData, &cfg); err != nil {
-		return fmt.Errorf("parse runtime-config.json: %w", err)
-	}
-
-	agentDef := agent.GetAgent(string(meta.AgentType))
-	if agentDef == nil {
-		return yoerrors.NewConfigError("unknown agent %q in sandbox state — this sandbox was created with an agent that's not registered in the current yoloai installation; destroy and recreate the sandbox with a registered agent", meta.AgentType)
-	}
-
 	agentArgs := resolveAgentArgs(d.Layout, string(meta.AgentType), meta.Profile)
-	cfg.AgentCommand = invocation.BuildAgentCommand(agentDef, meta.Model, "", agentArgs, cfg.Passthrough)
-
-	updated, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal runtime-config.json: %w", err)
-	}
-
-	if err := fileutil.WriteFile(configPath, updated, 0600); err != nil {
-		return fmt.Errorf("write runtime-config.json: %w", err)
-	}
-
-	return nil
+	return patchRuntimeConfig(sandboxDir, func(cfg *runtimeconfig.ContainerConfig) {
+		cfg.AgentCommand = invocation.BuildAgentCommand(agentDef, meta.Model, "", agentArgs, cfg.Passthrough)
+	})
 }
 
-// prepareResumeFiles writes the resume-prompt.txt and patches runtime-config.json
-// for resume mode (interactive command).
+// prepareResumeFiles writes the resume prompt (preamble + original prompt) and
+// patches runtime-config.json for resume mode.
 func prepareResumeFiles(d state.Deps, name string, meta *store.Environment) error {
-	sandboxDir := d.Layout.SandboxDir(name)
-
-	// Read original prompt
-	promptData, err := os.ReadFile(filepath.Join(sandboxDir, "prompt.txt")) //nolint:gosec // path is sandbox-controlled
+	resumeText, err := readResumeText(d.Layout.SandboxDir(name))
 	if err != nil {
-		return fmt.Errorf("read prompt.txt: %w", err)
+		return err
 	}
-
-	// Write resume-prompt.txt (preamble + original prompt)
-	resumeText := resumePreamble + string(promptData)
-	if err := fileutil.WriteFile(filepath.Join(sandboxDir, "resume-prompt.txt"), []byte(resumeText), 0600); err != nil {
-		return fmt.Errorf("write resume-prompt.txt: %w", err)
-	}
-
-	// Patch runtime-config.json: replace agent_command with interactive version
-	configPath := filepath.Join(sandboxDir, store.RuntimeConfigFile)
-	configData, err := os.ReadFile(configPath) //nolint:gosec // path is sandbox-controlled
-	if err != nil {
-		return fmt.Errorf("read runtime-config.json: %w", err)
-	}
-
-	var cfg runtimeconfig.ContainerConfig
-	if err := json.Unmarshal(configData, &cfg); err != nil {
-		return fmt.Errorf("parse runtime-config.json: %w", err)
-	}
-
-	agentDef := agent.GetAgent(string(meta.AgentType))
-	if agentDef == nil {
-		return yoerrors.NewConfigError("unknown agent %q in sandbox state — this sandbox was created with an agent that's not registered in the current yoloai installation; destroy and recreate the sandbox with a registered agent", meta.AgentType)
-	}
-
-	agentArgs := resolveAgentArgs(d.Layout, string(meta.AgentType), meta.Profile)
-	cfg.AgentCommand = invocation.BuildAgentCommand(agentDef, meta.Model, "", agentArgs, cfg.Passthrough)
-
-	updated, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal runtime-config.json: %w", err)
-	}
-
-	if err := fileutil.WriteFile(configPath, updated, 0600); err != nil {
-		return fmt.Errorf("write runtime-config.json: %w", err)
-	}
-
-	return nil
+	return prepareRelaunchFiles(d, name, meta, resumeText)
 }
 
 // cleanupResumeFiles removes the temporary resume-prompt.txt file.

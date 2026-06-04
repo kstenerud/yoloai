@@ -15,6 +15,21 @@ import (
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 )
 
+// loadContainerConfig reads and parses runtime-config.json from a sandbox dir.
+// Callers that also need the raw bytes (e.g. to store ConfigJSON verbatim) read
+// the file directly instead.
+func loadContainerConfig(sandboxDir string) (runtimeconfig.ContainerConfig, error) {
+	var cfg runtimeconfig.ContainerConfig
+	data, err := os.ReadFile(filepath.Join(sandboxDir, store.RuntimeConfigFile)) //nolint:gosec // path is sandbox-controlled
+	if err != nil {
+		return cfg, fmt.Errorf("read runtime-config.json: %w", err)
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return cfg, fmt.Errorf("parse runtime-config.json: %w", err)
+	}
+	return cfg, nil
+}
+
 func patchRuntimeConfig(sandboxDir string, mutate func(*runtimeconfig.ContainerConfig)) error {
 	configPath := filepath.Join(sandboxDir, store.RuntimeConfigFile)
 	data, err := os.ReadFile(configPath) //nolint:gosec // path is sandbox-controlled

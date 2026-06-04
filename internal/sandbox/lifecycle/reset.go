@@ -5,7 +5,6 @@ package lifecycle
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -17,7 +16,6 @@ import (
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox/launch"
 	"github.com/kstenerud/yoloai/internal/sandbox/patch"
-	"github.com/kstenerud/yoloai/internal/sandbox/runtimeconfig"
 	"github.com/kstenerud/yoloai/internal/sandbox/state"
 	"github.com/kstenerud/yoloai/internal/sandbox/status"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
@@ -495,14 +493,9 @@ const resetNotification = "[yoloai] Workspace has been reset to match the curren
 // to the running agent via tmux load-buffer + paste-buffer + send-keys.
 func sendResetNotification(ctx context.Context, d state.Deps, name, sandboxDir string, noPrompt, hasPrompt bool, meta *store.Environment) error {
 	// Read runtime-config.json for submit_sequence
-	configData, err := os.ReadFile(filepath.Join(sandboxDir, store.RuntimeConfigFile)) //nolint:gosec // path is sandbox-controlled
+	cfg, err := loadContainerConfig(sandboxDir)
 	if err != nil {
-		return fmt.Errorf("read runtime-config.json: %w", err)
-	}
-
-	var cfg runtimeconfig.ContainerConfig
-	if err := json.Unmarshal(configData, &cfg); err != nil {
-		return fmt.Errorf("parse runtime-config.json: %w", err)
+		return err
 	}
 
 	// Build script to deliver notification via tmux.
