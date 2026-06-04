@@ -68,6 +68,18 @@ toward an ice-cream cone.
   `docker/integration_test.go` and `podman/integration_test.go` are line-for-line twins (~15
   identical tests); containerd is a third copy; Seatbelt/Tart partial 4th/5th. *Fix:* one
   parametrized integration suite keyed on a backend table.
+  *(applied — scope corrected)* The premise was over-claimed: only **docker + podman** are genuine
+  twins (podman embeds `*docker.Runtime` and reuses its SDK + `ConvertMounts/ConvertPorts`, so all
+  ~15 tests were identical). containerd/seatbelt/tart are **not** copies — different constructors
+  (`New(ctx, layout)`), different creation models (containerd `rt.Create()`; seatbelt host-process
+  asserting SBPL profile files; tart VM), and mostly backend-specific suites. Force-fitting them into
+  one table would distort dissimilar backends. Extracted the docker-compatible behavioral table into
+  `internal/runtime/runtimetest` (`RunConformance`, build-tag `integration`), keyed on a
+  `DockerCompatRuntime` (`runtime.Runtime` + exported `Client()`); docker/podman integration tests
+  became thin external (`_test`) packages that supply a setup closure. Backend identity kept as a
+  podman-local `TestPodman_Descriptor`. Verified: `go build -tags integration ./...` and
+  `go vet -tags integration` green; the suite needs real daemons + `yoloai-base` to *run* (not
+  available in this env) — compile-checked only, run-verification deferred to a daemon host.
 - **T4 — E2E ice-cream-cone.** `test/e2e/{workflow,error,json}_test.go` re-run what
   `internal/cli/integration_test.go` already covers (`TestE2E_NewDiffApplyDestroy` ≈
   `TestCLI_NewAndDestroy`+`TestCLI_Diff`; `TestE2E_JSONLs` ≈ `TestCLI_LsJSON`). Exit-code/help e2e
@@ -181,5 +193,9 @@ T4 (e2e trim) → T13 (error-path coverage).
   bare-`assert.Error` sites to pin specific errors: `StreamLogs`/`ReadStoredPrompt`/`Clone` →
   `ErrorIs(ErrSandboxNotFound)` / `ErrorAs(*yoerrors.UsageError)`; three `patchConfig*_MissingConfig`
   → `ErrorIs(fs.ErrNotExist)`.
-- ⏳ Remaining: T2, T4, T13 (large/judgement);
+- ✅ **T2** — scope corrected (only docker+podman are twins; containerd/seatbelt/tart are not).
+  Extracted shared `runtimetest.RunConformance` (docker-compatible behavioral table) keyed on
+  `DockerCompatRuntime`; docker/podman tests are now thin `_test`-package setup closures.
+  Compile-checked under `-tags integration`; run-verification needs a daemon host.
+- ⏳ Remaining: T4, T13 (large/judgement);
   T7 (broad `t.Parallel` adoption — partially seeded in new_test.go).

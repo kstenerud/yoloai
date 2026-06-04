@@ -3,23 +3,15 @@
 package podman
 
 import (
-	"context"
 	"os"
 	"strings"
-	"testing"
-
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/network"
-	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/runtime/docker"
-	"github.com/stretchr/testify/require"
 )
 
-// envFromOS snapshots the process environment as a map. Integration tests are
-// the test-side boundary (equivalent to the CLI's licensed os.Environ read),
-// so they thread the real host env into New / discoverSocket just as the CLI
-// would. Replaces the former production probeEnv now that the probe receives a
-// threaded env (§12).
+// envFromOS snapshots the process environment as a map for TestMain's one-time
+// daemon probe. Integration tests are the test-side boundary (equivalent to the
+// CLI's licensed os.Environ read), so they thread the real host env into New /
+// discoverSocket just as the CLI would (§12). The conformance suite uses
+// runtimetest.EnvFromOS for the per-test connections.
 func envFromOS() map[string]string {
 	m := make(map[string]string)
 	for _, e := range os.Environ() {
@@ -28,82 +20,4 @@ func envFromOS() map[string]string {
 		}
 	}
 	return m
-}
-
-// podmanSetup connects to Podman, ensures the base image exists,
-// and returns a *Runtime. Uses t.Cleanup for Close().
-func podmanSetup(t *testing.T) (*Runtime, context.Context) {
-	t.Helper()
-	ctx := context.Background()
-
-	rt, err := New(ctx, envFromOS())
-	require.NoError(t, err, "Podman must be running with socket activated for integration tests")
-	t.Cleanup(func() { rt.Close() }) //nolint:errcheck // test cleanup
-
-	exists, err := rt.IsReady(ctx)
-	require.NoError(t, err)
-	require.True(t, exists, "yoloai-base image must exist — run 'make build && ./yoloai system setup' first")
-
-	return rt, ctx
-}
-
-// createTestContainer creates a container using the yoloai-base image with
-// entrypoint overridden to "sleep infinity" so it stays alive for exec tests.
-// Uses the Docker SDK directly to set Entrypoint/Cmd since InstanceConfig
-// doesn't expose those fields (they're normally baked into the image).
-// Returns the container name. Uses t.Cleanup for removal.
-func createTestContainer(t *testing.T, rt *Runtime, ctx context.Context, cfg runtime.InstanceConfig) string {
-	t.Helper()
-
-	if cfg.Name == "" {
-		cfg.Name = "yoloai-test-" + t.Name()
-	}
-	if cfg.ImageRef == "" {
-		cfg.ImageRef = "yoloai-base"
-	}
-
-	// Use docker package helpers for conversions since they're not exported
-	mounts := docker.ConvertMounts(cfg.Mounts)
-	portBindings, exposedPorts := docker.ConvertPorts(cfg.Ports)
-
-	containerConfig := &container.Config{
-		Image:        cfg.ImageRef,
-		Entrypoint:   []string{"sleep"},
-		Cmd:          []string{"infinity"},
-		WorkingDir:   cfg.WorkingDir,
-		ExposedPorts: exposedPorts,
-	}
-
-	hostConfig := &container.HostConfig{
-		Init:         &cfg.UseInit,
-		NetworkMode:  container.NetworkMode(cfg.NetworkMode),
-		PortBindings: portBindings,
-		Mounts:       mounts,
-		CapAdd:       cfg.CapAdd,
-	}
-
-	if cfg.Resources != nil {
-		if cfg.Resources.NanoCPUs > 0 {
-			hostConfig.NanoCPUs = cfg.Resources.NanoCPUs
-		}
-		if cfg.Resources.Memory > 0 {
-			hostConfig.Memory = cfg.Resources.Memory
-		}
-	}
-
-	// Apply UsernsMode if set (Podman-specific)
-	if cfg.UsernsMode != "" {
-		hostConfig.UsernsMode = container.UsernsMode(cfg.UsernsMode)
-	}
-
-	// Access the embedded Docker runtime's client
-	_, err := rt.Runtime.Client().ContainerCreate(ctx, containerConfig, hostConfig, &network.NetworkingConfig{}, nil, cfg.Name)
-	require.NoError(t, err)
-
-	t.Cleanup(func() {
-		_ = rt.Stop(ctx, cfg.Name)
-		_ = rt.Remove(ctx, cfg.Name)
-	})
-
-	return cfg.Name
 }
