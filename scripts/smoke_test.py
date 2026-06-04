@@ -1972,7 +1972,55 @@ def check_prerequisites(
         print(f"  {label:<{col_w}} {status:<6}  {pr.note}")
     print()
 
+    _warm_up_vm_backends(ctx, backends, results)
+
     return results
+
+
+def _warm_up_vm_backends(
+    ctx: RunContext,
+    backends: list[BackendSpec],
+    results: dict[str, PrereqResult],
+) -> None:
+    """Pay each VM backend's cold create cost once, outside the timed matrix.
+
+    Building the image upfront (above) keeps a cold `docker build` out of the
+    timed `new`, but a VM backend's *first* create does more cold work than the
+    build: kernel/initrd staging, devmapper pool init (vm-enhanced), and the
+    page-cache-cold first QEMU boot. On a slightly slow host that lands a real
+    `new` near its timeout and trips a spurious flake (see run 20260604-133534).
+    A throwaway create+destroy per available VM backend moves that one-time cost
+    here, where the budget is build-sized rather than boot-sized, so the first
+    timed `new` always runs warm. Failures here only warn: the matrix run remains
+    the source of truth, and a genuine breakage will resurface there.
+    """
+    seen: set[tuple[str, str, Optional[str]]] = set()
+    for spec in backends:
+        if not spec.is_vm:
+            continue
+        pr = results.get(spec.label)
+        if pr is None or not pr.available:
+            continue
+        key = (spec.os, spec.isolation, spec.backend)
+        if key in seen:
+            continue
+        seen.add(key)
+
+        name = f"{ctx.run_id}-warmup-{spec.label}"
+        print(f"  Warming up {spec.label} (cold create, outside the timed run)...")
+        new_cmd = [
+            ctx.yoloai_bin, "new", name, str(ctx.fixture_dir),
+            "--agent", "idle", "--yes", *spec.new_args(),
+        ]
+        try:
+            r = subprocess.run(new_cmd, capture_output=True, text=True, timeout=BASE_BUILD_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            print(f"  WARNING: {spec.label} warm-up create timed out; matrix run will retry cold.")
+            _destroy_named_sandboxes(ctx, [name])
+            continue
+        if r.returncode != 0:
+            print(f"  WARNING: {spec.label} warm-up create failed (exit {r.returncode}); matrix run will retry cold.")
+        _destroy_named_sandboxes(ctx, [name])
 
 
 # ---------------------------------------------------------------------------
