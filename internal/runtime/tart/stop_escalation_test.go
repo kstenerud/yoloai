@@ -1,6 +1,6 @@
-// ABOUTME: Integration test for the SIGTERM→SIGKILL escalation ladder in stopVM.
-// ABOUTME: Uses a fake tart binary and a SIGTERM-ignoring child to validate that
-// ABOUTME: stopVM kills wedged processes without requiring a real Tart VM.
+// ABOUTME: Unit test for the SIGTERM→SIGKILL escalation ladder in stopVM. Uses a
+// ABOUTME: fake tart binary and a SIGTERM-ignoring child to validate that stopVM
+// ABOUTME: kills wedged processes without requiring a real Tart VM or daemon.
 package tart
 
 import (
