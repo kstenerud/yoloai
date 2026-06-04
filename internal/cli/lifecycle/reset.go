@@ -66,13 +66,8 @@ func runReset(cmd *cobra.Command, args []string, opts *resetOpts) error {
 		defer cliutil.SetTerminalTitle("")
 	}
 
-	backend := cliutil.ResolveBackendForSandbox(name)
-	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+	return cliutil.WithSandbox(cmd, name, func(ctx context.Context, sb *yoloai.Sandbox) error {
 		slog.Info("resetting sandbox", "event", "sandbox.reset", "sandbox", name, "restart", opts.restart, "clear_state", opts.clearState) //nolint:gosec // G706: name is validated by ValidateName
-		sb, err := c.Sandbox(name)
-		if err != nil {
-			return cliutil.SandboxErrorHint(name, err)
-		}
 		res, resetErr := sb.Reset(ctx, yoloai.SandboxResetOptions{
 			RestartContainer: opts.restart,
 			ClearState:       opts.clearState,

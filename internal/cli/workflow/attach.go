@@ -48,15 +48,10 @@ func runAttach(cmd *cobra.Command, args []string, opts *attachOpts) error {
 	cliutil.SetTerminalTitle(name)
 	defer cliutil.SetTerminalTitle("")
 
-	backend := cliutil.ResolveBackendForSandbox(name)
-	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+	return cliutil.WithSandbox(cmd, name, func(ctx context.Context, sb *yoloai.Sandbox) error {
 		// --resume restarts the agent before attaching when the sandbox is
 		// stopped or in a terminal state. Active/Idle sandboxes get an
 		// in-place attach.
-		sb, err := c.Sandbox(name)
-		if err != nil {
-			return cliutil.SandboxErrorHint(name, err)
-		}
 		if opts.resume {
 			info, err := sb.Inspect(ctx)
 			if err != nil {

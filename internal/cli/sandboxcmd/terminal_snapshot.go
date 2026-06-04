@@ -41,12 +41,7 @@ func runTerminalSnapshot(cmd *cobra.Command, name string, rest []string) error {
 		}
 	}
 
-	backend := cliutil.ResolveBackendForSandbox(name)
-	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
-		sb, err := c.Sandbox(name)
-		if err != nil {
-			return err
-		}
+	return cliutil.WithSandbox(cmd, name, func(ctx context.Context, sb *yoloai.Sandbox) error {
 		snap, err := sb.Agent().CaptureTerminal(ctx, terminalSnapshotScrollback)
 		if err != nil {
 			// ErrContainerNotRunning is the documented "best-effort skip"

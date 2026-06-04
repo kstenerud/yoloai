@@ -118,6 +118,14 @@ contract rounds above. Found via a whole-file read pass; `file:line` anchors are
   `sb, err := c.Sandbox(name); if err != nil { return err }` prologue recurs 22× across `cli/`.
 - **Direction.** Add `cliutil.WithWorkdir(cmd, name, fn)` / `WithSandbox` folding
   backend-resolve + Client + Sandbox + Workdir into one call.
+- **Done (2026-06-04).** Added `cliutil.WithSandbox(cmd, name, fn(ctx, *Sandbox))` and the narrower
+  `cliutil.WithWorkdir(cmd, name, fn(ctx, *Workdir))`. Migrated the matching prologue across
+  `workflow/` (diff/apply*/baseline/attach), `sandboxcmd/` (info/exec/allow/deny/allowed/
+  terminal_snapshot), and `lifecycle/` (reset/restart/start) — net ~−127 lines. Sites where the
+  `*Client` itself is needed (clone/destroy/stop/mcp, cross-sandbox loops) or that use the
+  backend-less `cliutil.Client(cmd)` reader path were intentionally left. `WithSandbox` also folds
+  in `SandboxErrorHint` on the lookup error, so the dir/`destroy`-hint is now consistent across all
+  per-sandbox commands (previously only `attach` did it).
 
 **IC10 — `cliutil.System()` panics on a should-be-impossible error.**
 - **Evidence.** `cliutil/client.go:163` returns no error and `panic`s if `NewClient` fails; every

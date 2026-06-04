@@ -21,15 +21,10 @@ import (
 // never fail the apply). When unappliedOnly is true, only tags absent on the
 // host are returned. The returned tags carry their annotated-tag Message.
 func listSandboxTags(cmd *cobra.Command, name string, unappliedOnly bool) []yoloai.TagInfo {
-	backend := cliutil.ResolveBackendForSandbox(name)
 	var tags []yoloai.TagInfo
 	//nolint:errcheck // best-effort: tag listing failure must not fail the apply
-	_ = cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
-		sb, err := c.Sandbox(name)
-		if err != nil {
-			return err
-		}
-		tags, _ = sb.Workdir().Tags(ctx, yoloai.WorkdirTagsOptions{UnappliedOnly: unappliedOnly})
+	_ = cliutil.WithWorkdir(cmd, name, func(ctx context.Context, wd *yoloai.Workdir) error {
+		tags, _ = wd.Tags(ctx, yoloai.WorkdirTagsOptions{UnappliedOnly: unappliedOnly})
 		return nil
 	})
 	return tags
@@ -239,15 +234,10 @@ func targetIsGitRepo(cmd *cobra.Command, name string, backend yoloai.BackendType
 // the result so callers can surface counts; the error is fatal only for the
 // matching path (a provided map never matches).
 func transferTags(cmd *cobra.Command, name string, tags []yoloai.TagInfo, shaMap map[string]string) (*yoloai.TagTransferResult, error) {
-	backend := cliutil.ResolveBackendForSandbox(name)
 	var result *yoloai.TagTransferResult
-	err := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
-		sb, sbErr := c.Sandbox(name)
-		if sbErr != nil {
-			return sbErr
-		}
+	err := cliutil.WithWorkdir(cmd, name, func(ctx context.Context, wd *yoloai.Workdir) error {
 		var transferErr error
-		result, transferErr = sb.Workdir().TransferTags(ctx, yoloai.WorkdirTransferTagsOptions{Tags: tags, SHAMap: shaMap})
+		result, transferErr = wd.TransferTags(ctx, yoloai.WorkdirTransferTagsOptions{Tags: tags, SHAMap: shaMap})
 		return transferErr
 	})
 	if err != nil {

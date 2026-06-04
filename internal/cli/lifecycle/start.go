@@ -63,12 +63,7 @@ func runStart(cmd *cobra.Command, args []string, opts *startOpts) error {
 	}
 
 	slog.Info("starting sandbox", "event", "sandbox.start", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
-	backend := cliutil.ResolveBackendForSandbox(name)
-	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
-		sb, err := c.Sandbox(name)
-		if err != nil {
-			return cliutil.SandboxErrorHint(name, err)
-		}
+	return cliutil.WithSandbox(cmd, name, func(ctx context.Context, sb *yoloai.Sandbox) error {
 		res, startErr := sb.Start(ctx, yoloai.SandboxStartOptions{
 			Resume:       opts.resume,
 			Prompt:       opts.prompt,

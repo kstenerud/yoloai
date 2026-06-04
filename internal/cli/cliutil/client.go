@@ -133,6 +133,31 @@ func WithClient(cmd *cobra.Command, backend yoloai.BackendType, fn func(ctx cont
 	return fn(ctx, c)
 }
 
+// WithSandbox folds the per-sandbox command prologue that recurs across the
+// workflow/lifecycle/sandbox commands: resolve the sandbox's backend from its
+// environment.json, open a Client on it, look up the named Sandbox, and invoke
+// fn. Use it instead of hand-rolling ResolveBackendForSandbox + WithClient +
+// Client.Sandbox(name). For commands that only touch the changes view, prefer
+// the narrower WithWorkdir.
+func WithSandbox(cmd *cobra.Command, name string, fn func(ctx context.Context, sb *yoloai.Sandbox) error) error {
+	backend := ResolveBackendForSandbox(name)
+	return WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+		sb, err := c.Sandbox(name)
+		if err != nil {
+			return SandboxErrorHint(name, err)
+		}
+		return fn(ctx, sb)
+	})
+}
+
+// WithWorkdir is WithSandbox narrowed to the sandbox's Workdir sub-handle, for
+// the diff/apply/baseline commands that only operate on the changes view.
+func WithWorkdir(cmd *cobra.Command, name string, fn func(ctx context.Context, wd *yoloai.Workdir) error) error {
+	return WithSandbox(cmd, name, func(ctx context.Context, sb *yoloai.Sandbox) error {
+		return fn(ctx, sb.Workdir())
+	})
+}
+
 // Client constructs a backend-less yoloai.Client from the CLI's layout —
 // no backend is selected, so the runtime is never opened. Use it for command
 // handlers that only need host-only per-sandbox reads (prompt, agent-log,

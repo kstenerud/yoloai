@@ -31,14 +31,9 @@ func runExec(cmd *cobra.Command, args []string) error {
 	}
 	cmdArgs := rest
 
-	backend := cliutil.ResolveBackendForSandbox(name)
-	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+	return cliutil.WithSandbox(cmd, name, func(ctx context.Context, sb *yoloai.Sandbox) error {
 		slog.Debug("exec in container", "event", "sandbox.exec", "sandbox", name, "cmd", cmdArgs) //nolint:gosec // G706: values are internal, not user-controlled log injection
 
-		sb, err := c.Sandbox(name)
-		if err != nil {
-			return cliutil.SandboxErrorHint(name, err)
-		}
 		if err := cliutil.WithTerminal(func(io yoloai.IOStreams) error {
 			return sb.Exec(ctx, yoloai.SandboxExecOptions{Command: cmdArgs, PTY: true}, io)
 		}); err != nil {

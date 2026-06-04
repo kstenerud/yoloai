@@ -23,13 +23,9 @@ func applyNoCommit(cmd *cobra.Command, name string, paths []string, env *yoloai.
 	backend := cliutil.ResolveBackendForSandbox(name)
 
 	var preview *yoloai.ApplyResult
-	err := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+	err := cliutil.WithWorkdir(cmd, name, func(ctx context.Context, wd *yoloai.Workdir) error {
 		var e error
-		sb, sbErr := c.Sandbox(name)
-		if sbErr != nil {
-			return sbErr
-		}
-		preview, e = sb.Workdir().Apply(ctx, yoloai.WorkdirApplyOptions{
+		preview, e = wd.Apply(ctx, yoloai.WorkdirApplyOptions{
 			Mode: yoloai.ApplyModeNoCommit, IncludeUncommitted: includeUncommitted, Paths: paths, DryRun: true,
 		})
 		return e
@@ -77,12 +73,8 @@ func applyNoCommit(cmd *cobra.Command, name string, paths []string, env *yoloai.
 		}
 	}
 
-	err = cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
-		sb, e := c.Sandbox(name)
-		if e != nil {
-			return e
-		}
-		_, e = sb.Workdir().Apply(ctx, yoloai.WorkdirApplyOptions{
+	err = cliutil.WithWorkdir(cmd, name, func(ctx context.Context, wd *yoloai.Workdir) error {
+		_, e := wd.Apply(ctx, yoloai.WorkdirApplyOptions{
 			Mode: yoloai.ApplyModeNoCommit, IncludeUncommitted: includeUncommitted, Paths: paths, DryRun: false,
 		})
 		return e

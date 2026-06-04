@@ -19,18 +19,13 @@ import (
 // applying them. It resolves copy-vs-overlay inside Workdir().Export; the CLI
 // only enforces the overlay running-precondition and prints the result.
 func runExport(cmd *cobra.Command, name string, env *yoloai.Environment, refs, paths []string, dir string, includeUncommitted bool) error {
-	backend := cliutil.ResolveBackendForSandbox(name)
 	overlay := env.HasOverlayDirs()
 
 	var result *yoloai.ExportResult
 	var hasUncommitted bool
-	err := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
-		sb, sbErr := c.Sandbox(name)
-		if sbErr != nil {
-			return sbErr
-		}
+	err := cliutil.WithSandbox(cmd, name, func(ctx context.Context, sb *yoloai.Sandbox) error {
 		if overlay {
-			if runErr := requireOverlayRunning(ctx, c, name); runErr != nil {
+			if runErr := requireOverlayRunning(ctx, sb, name); runErr != nil {
 				return runErr
 			}
 		} else if !includeUncommitted {

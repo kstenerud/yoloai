@@ -24,9 +24,8 @@ func applyOverlay(cmd *cobra.Command, name string, env *yoloai.Environment, refs
 	if len(refs) > 0 {
 		return yoerrors.NewPlatformError("selective ref apply is not supported for :overlay sandboxes")
 	}
-	backend := cliutil.ResolveBackendForSandbox(name)
 
-	preview, err := overlayApplyViaClient(cmd, name, backend, paths, true)
+	preview, err := overlayApplyViaClient(cmd, name, paths, true)
 	if err != nil {
 		return err
 	}
@@ -58,7 +57,7 @@ func applyOverlay(cmd *cobra.Command, name string, env *yoloai.Environment, refs
 		}
 	}
 
-	result, err := overlayApplyViaClient(cmd, name, backend, paths, false)
+	result, err := overlayApplyViaClient(cmd, name, paths, false)
 	if result == nil {
 		return err
 	}
@@ -76,17 +75,13 @@ func applyOverlay(cmd *cobra.Command, name string, env *yoloai.Environment, refs
 // overlayApplyViaClient runs the overlay apply through the workdir handle after
 // enforcing the running-container precondition. dryRun captures the diff stat
 // without applying.
-func overlayApplyViaClient(cmd *cobra.Command, name string, backend yoloai.BackendType, paths []string, dryRun bool) (*yoloai.ApplyResult, error) {
+func overlayApplyViaClient(cmd *cobra.Command, name string, paths []string, dryRun bool) (*yoloai.ApplyResult, error) {
 	var result *yoloai.ApplyResult
-	err := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
-		if runErr := requireOverlayRunning(ctx, c, name); runErr != nil {
+	err := cliutil.WithSandbox(cmd, name, func(ctx context.Context, sb *yoloai.Sandbox) error {
+		if runErr := requireOverlayRunning(ctx, sb, name); runErr != nil {
 			return runErr
 		}
 		var applyErr error
-		sb, sbErr := c.Sandbox(name)
-		if sbErr != nil {
-			return sbErr
-		}
 		result, applyErr = sb.Workdir().Apply(ctx, yoloai.WorkdirApplyOptions{
 			Mode:   yoloai.ApplyModeNoCommit,
 			Paths:  paths,

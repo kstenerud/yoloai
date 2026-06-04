@@ -24,12 +24,7 @@ func runSandboxAllowed(cmd *cobra.Command, name string) error {
 		return err
 	}
 
-	backend := cliutil.ResolveBackendForSandbox(name)
-	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
-		sb, err := c.Sandbox(name)
-		if err != nil {
-			return err
-		}
+	return cliutil.WithSandbox(cmd, name, func(ctx context.Context, sb *yoloai.Sandbox) error {
 		allowed, err := sb.Network().Allowed(ctx)
 		if err != nil {
 			return err

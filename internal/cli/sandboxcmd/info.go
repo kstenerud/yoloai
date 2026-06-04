@@ -20,12 +20,7 @@ func runSandboxInfo(cmd *cobra.Command, name string) error {
 	closeSink := cliutil.OpenCLIJSONLSink(name, cmd)
 	defer closeSink()
 	slog.Info("collecting sandbox info", "event", "sandbox.info", "sandbox", name) //nolint:gosec // G706: name is an internal sandbox name, not user-injected log data
-	backend := cliutil.ResolveBackendForSandbox(name)
-	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
-		sb, err := c.Sandbox(name)
-		if err != nil {
-			return cliutil.SandboxErrorHint(name, err)
-		}
+	return cliutil.WithSandbox(cmd, name, func(ctx context.Context, sb *yoloai.Sandbox) error {
 		info, err := sb.Inspect(ctx)
 		if err != nil {
 			return cliutil.SandboxErrorHint(name, err)

@@ -113,13 +113,8 @@ func runDiffCmd(cmd *cobra.Command, args []string) error {
 
 // diffSingle runs a diff for the sandbox's workdir.
 func diffSingle(cmd *cobra.Command, name string, paths []string, stat, nameOnly bool) error {
-	backend := cliutil.ResolveBackendForSandbox(name)
-	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
-		sb, err := c.Sandbox(name)
-		if err != nil {
-			return err
-		}
-		out, err := sb.Workdir().Diff(ctx, yoloai.WorkdirDiffOptions{Paths: paths, Stat: stat, NameOnly: nameOnly})
+	return cliutil.WithWorkdir(cmd, name, func(ctx context.Context, wd *yoloai.Workdir) error {
+		out, err := wd.Diff(ctx, yoloai.WorkdirDiffOptions{Paths: paths, Stat: stat, NameOnly: nameOnly})
 		if err != nil {
 			return err
 		}
@@ -144,11 +139,7 @@ func writeDiffOutput(cmd *cobra.Command, out string) error {
 }
 
 // requireOverlayRunning verifies the sandbox container is running (required for overlay ops).
-func requireOverlayRunning(ctx context.Context, c *yoloai.Client, name string) error {
-	sb, err := c.Sandbox(name)
-	if err != nil {
-		return fmt.Errorf(":overlay sandbox %s must be running for this operation — use 'yoloai start %s'", name, name)
-	}
+func requireOverlayRunning(ctx context.Context, sb *yoloai.Sandbox, name string) error {
 	info, err := sb.Inspect(ctx)
 	if err != nil {
 		return fmt.Errorf(":overlay sandbox %s must be running for this operation — use 'yoloai start %s'", name, name)
@@ -162,13 +153,8 @@ func requireOverlayRunning(ctx context.Context, c *yoloai.Client, name string) e
 // diffOverlay runs the diff for an :overlay-mode workdir. Routes
 // through container exec since git lives inside the container.
 func diffOverlay(cmd *cobra.Command, name string, stat, nameOnly bool) error {
-	backend := cliutil.ResolveBackendForSandbox(name)
-	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
-		if err := requireOverlayRunning(ctx, c, name); err != nil {
-			return err
-		}
-		sb, err := c.Sandbox(name)
-		if err != nil {
+	return cliutil.WithSandbox(cmd, name, func(ctx context.Context, sb *yoloai.Sandbox) error {
+		if err := requireOverlayRunning(ctx, sb, name); err != nil {
 			return err
 		}
 		out, err := sb.Workdir().Diff(ctx, yoloai.WorkdirDiffOptions{Stat: stat, NameOnly: nameOnly})
@@ -185,16 +171,11 @@ func diffLogOverlay(cmd *cobra.Command, name string, stat bool) error {
 		return yoerrors.NewPlatformError("--log --stat is not supported for :overlay sandboxes")
 	}
 
-	backend := cliutil.ResolveBackendForSandbox(name)
-	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
-		if err := requireOverlayRunning(ctx, c, name); err != nil {
+	return cliutil.WithSandbox(cmd, name, func(ctx context.Context, sb *yoloai.Sandbox) error {
+		if err := requireOverlayRunning(ctx, sb, name); err != nil {
 			return err
 		}
 
-		sb, err := c.Sandbox(name)
-		if err != nil {
-			return err
-		}
 		commits, err := sb.Workdir().Commits(ctx, yoloai.WorkdirCommitsOptions{})
 		if err != nil {
 			return err
@@ -281,14 +262,9 @@ func diffLog(cmd *cobra.Command, name string, stat bool) error {
 
 	// Fetch tags for inline display (best-effort).
 	var tags []yoloai.TagInfo
-	backend := cliutil.ResolveBackendForSandbox(name)
 	//nolint:errcheck // best-effort: tag annotations are decorative
-	_ = cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
-		sb, sbErr := c.Sandbox(name)
-		if sbErr != nil {
-			return sbErr
-		}
-		tags, _ = sb.Workdir().Tags(ctx, yoloai.WorkdirTagsOptions{})
+	_ = cliutil.WithWorkdir(cmd, name, func(ctx context.Context, wd *yoloai.Workdir) error {
+		tags, _ = wd.Tags(ctx, yoloai.WorkdirTagsOptions{})
 		return nil
 	})
 	tagsByCommit := buildTagsByCommit(tags)
@@ -309,15 +285,10 @@ func diffLog(cmd *cobra.Command, name string, stat bool) error {
 
 // diffLogWithStat prints commits with file-change statistics.
 func diffLogWithStat(cmd *cobra.Command, name string, out io.Writer, tagsByCommit map[string][]string) error {
-	backend := cliutil.ResolveBackendForSandbox(name)
 	var commits []yoloai.CommitInfo
-	err := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
-		sb, sbErr := c.Sandbox(name)
-		if sbErr != nil {
-			return sbErr
-		}
+	err := cliutil.WithWorkdir(cmd, name, func(ctx context.Context, wd *yoloai.Workdir) error {
 		var listErr error
-		commits, listErr = sb.Workdir().Commits(ctx, yoloai.WorkdirCommitsOptions{Stat: true})
+		commits, listErr = wd.Commits(ctx, yoloai.WorkdirCommitsOptions{Stat: true})
 		return listErr
 	})
 	if err != nil {
@@ -341,15 +312,10 @@ func diffLogWithStat(cmd *cobra.Command, name string, out io.Writer, tagsByCommi
 
 // diffLogBasic prints commits without statistics.
 func diffLogBasic(cmd *cobra.Command, name string, out io.Writer, tagsByCommit map[string][]string) error {
-	backend := cliutil.ResolveBackendForSandbox(name)
 	var commits []yoloai.CommitInfo
-	err := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
-		sb, sbErr := c.Sandbox(name)
-		if sbErr != nil {
-			return sbErr
-		}
+	err := cliutil.WithWorkdir(cmd, name, func(ctx context.Context, wd *yoloai.Workdir) error {
 		var listErr error
-		commits, listErr = sb.Workdir().Commits(ctx, yoloai.WorkdirCommitsOptions{})
+		commits, listErr = wd.Commits(ctx, yoloai.WorkdirCommitsOptions{})
 		return listErr
 	})
 	if err != nil {
@@ -376,15 +342,10 @@ func formatCommitLine(n int, sha, subject string, tagsByCommit map[string][]stri
 
 // diffLogUncommitted appends an uncommitted-changes indicator when present (best-effort).
 func diffLogUncommitted(cmd *cobra.Command, name string, out io.Writer) {
-	backend := cliutil.ResolveBackendForSandbox(name)
 	var hasUncommitted bool
-	err := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
-		sb, sbErr := c.Sandbox(name)
-		if sbErr != nil {
-			return sbErr
-		}
+	err := cliutil.WithWorkdir(cmd, name, func(ctx context.Context, wd *yoloai.Workdir) error {
 		var uncommittedErr error
-		hasUncommitted, uncommittedErr = sb.Workdir().HasUncommittedChanges(ctx)
+		hasUncommitted, uncommittedErr = wd.HasUncommittedChanges(ctx)
 		return uncommittedErr
 	})
 	if err == nil && hasUncommitted {
@@ -396,13 +357,8 @@ func diffLogUncommitted(cmd *cobra.Command, name string, out io.Writer) {
 // runtime needed, but routed through WithClient for symmetry with the
 // other diff handlers.
 func diffRef(cmd *cobra.Command, name, ref string, stat bool) error {
-	backend := cliutil.ResolveBackendForSandbox(name)
-	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
-		sb, err := c.Sandbox(name)
-		if err != nil {
-			return err
-		}
-		out, err := sb.Workdir().Diff(ctx, yoloai.WorkdirDiffOptions{Ref: ref, Stat: stat})
+	return cliutil.WithWorkdir(cmd, name, func(ctx context.Context, wd *yoloai.Workdir) error {
+		out, err := wd.Diff(ctx, yoloai.WorkdirDiffOptions{Ref: ref, Stat: stat})
 		if err != nil {
 			return err
 		}
@@ -413,13 +369,8 @@ func diffRef(cmd *cobra.Command, name, ref string, stat bool) error {
 // agentRunningWarning prints a warning to stderr if the agent is still running.
 // Silently skips if Docker is unavailable or inspection fails.
 func agentRunningWarning(cmd *cobra.Command, name string) {
-	backend := cliutil.ResolveBackendForSandbox(name)
 	//nolint:errcheck // intentional: best-effort warning, failure here should not affect the diff command
-	_ = cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
-		sb, err := c.Sandbox(name)
-		if err != nil {
-			return nil //nolint:nilerr // best-effort warning; inspection failure should not affect the diff command
-		}
+	_ = cliutil.WithSandbox(cmd, name, func(ctx context.Context, sb *yoloai.Sandbox) error {
 		info, err := sb.Inspect(ctx)
 		if err != nil {
 			return nil //nolint:nilerr // best-effort warning; inspection failure should not affect the diff command
@@ -434,13 +385,8 @@ func agentRunningWarning(cmd *cobra.Command, name string) {
 
 // diffLogJSON outputs commit log as JSON.
 func diffLogJSON(cmd *cobra.Command, name string, stat bool) error {
-	backend := cliutil.ResolveBackendForSandbox(name)
-	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
-		sb, err := c.Sandbox(name)
-		if err != nil {
-			return err
-		}
-		cs, err := sb.Workdir().Commits(ctx, yoloai.WorkdirCommitsOptions{Stat: stat})
+	return cliutil.WithWorkdir(cmd, name, func(ctx context.Context, wd *yoloai.Workdir) error {
+		cs, err := wd.Commits(ctx, yoloai.WorkdirCommitsOptions{Stat: stat})
 		if err != nil {
 			return err
 		}
@@ -448,8 +394,8 @@ func diffLogJSON(cmd *cobra.Command, name string, stat bool) error {
 			cs = []yoloai.CommitInfo{}
 		}
 
-		hasUncommitted, _ := sb.Workdir().HasUncommittedChanges(ctx)
-		tags, _ := sb.Workdir().Tags(ctx, yoloai.WorkdirTagsOptions{})
+		hasUncommitted, _ := wd.HasUncommittedChanges(ctx)
+		tags, _ := wd.Tags(ctx, yoloai.WorkdirTagsOptions{})
 		if tags == nil {
 			tags = []yoloai.TagInfo{}
 		}

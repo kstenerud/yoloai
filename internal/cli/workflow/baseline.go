@@ -75,12 +75,7 @@ func withBaselineSandbox(cmd *cobra.Command, name string, fn func(ctx context.Co
 	}
 	expected := env.Workdir.BaselineSHA
 
-	backend := cliutil.ResolveBackendForSandbox(name)
-	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
-		sb, err := c.Sandbox(name)
-		if err != nil {
-			return err
-		}
+	return cliutil.WithSandbox(cmd, name, func(ctx context.Context, sb *yoloai.Sandbox) error {
 		return fn(ctx, sb, expected)
 	})
 }
@@ -118,13 +113,8 @@ func newBaselineLogCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
-			backend := cliutil.ResolveBackendForSandbox(name)
-			return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
-				sb, err := c.Sandbox(name)
-				if err != nil {
-					return err
-				}
-				entries, err := sb.Workdir().BaselineLog(ctx)
+			return cliutil.WithWorkdir(cmd, name, func(ctx context.Context, wd *yoloai.Workdir) error {
+				entries, err := wd.BaselineLog(ctx)
 				if err != nil {
 					return cliutil.SandboxErrorHint(name, err)
 				}

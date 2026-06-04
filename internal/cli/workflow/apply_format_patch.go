@@ -23,22 +23,17 @@ func runApplyFormatPatch(cmd *cobra.Command, name string, paths []string, env *y
 	// always probed (even when includeUncommitted is false) so we can report them
 	// to the user as a hint. The host target's git-repo status decides the
 	// non-git fallback below.
-	backend := cliutil.ResolveBackendForSandbox(name)
 	var commits []yoloai.CommitInfo
 	var hasUncommitted, isGit bool
-	err := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
-		sb, sbErr := c.Sandbox(name)
-		if sbErr != nil {
-			return sbErr
-		}
+	err := cliutil.WithWorkdir(cmd, name, func(ctx context.Context, wd *yoloai.Workdir) error {
 		var listErr error
-		if commits, listErr = sb.Workdir().Commits(ctx, yoloai.WorkdirCommitsOptions{}); listErr != nil {
+		if commits, listErr = wd.Commits(ctx, yoloai.WorkdirCommitsOptions{}); listErr != nil {
 			return listErr
 		}
-		if hasUncommitted, listErr = sb.Workdir().HasUncommittedChanges(ctx); listErr != nil {
+		if hasUncommitted, listErr = wd.HasUncommittedChanges(ctx); listErr != nil {
 			return listErr
 		}
-		isGit, listErr = sb.Workdir().TargetIsGitRepo(ctx)
+		isGit, listErr = wd.TargetIsGitRepo(ctx)
 		return listErr
 	})
 	if err != nil {
@@ -158,7 +153,6 @@ func runApplyNoChanges(cmd *cobra.Command, name string, env *yoloai.Environment,
 // this function owns the CLI summary, confirmation, tag transfer, and output.
 func runApplyCommits(cmd *cobra.Command, name string, paths []string, env *yoloai.Environment, commits []yoloai.CommitInfo, hasUncommitted, yes, dryRun, includeUncommitted, withTags bool) error {
 	targetDir := env.Workdir.HostPath
-	backend := cliutil.ResolveBackendForSandbox(name)
 
 	// Fetch tags beyond baseline (best-effort; errors don't fail the apply).
 	tags := listSandboxTags(cmd, name, false)
@@ -183,13 +177,9 @@ func runApplyCommits(cmd *cobra.Command, name string, paths []string, env *yoloa
 	}
 
 	var result *yoloai.ApplyResult
-	applyErr := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+	applyErr := cliutil.WithWorkdir(cmd, name, func(ctx context.Context, wd *yoloai.Workdir) error {
 		var e error
-		sb, sbErr := c.Sandbox(name)
-		if sbErr != nil {
-			return sbErr
-		}
-		result, e = sb.Workdir().Apply(ctx, yoloai.WorkdirApplyOptions{
+		result, e = wd.Apply(ctx, yoloai.WorkdirApplyOptions{
 			Mode: yoloai.ApplyModeCommits, IncludeUncommitted: includeUncommitted, Paths: paths,
 		})
 		return e
