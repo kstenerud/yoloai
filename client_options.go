@@ -33,13 +33,13 @@ type ClientCreateOptions struct {
 	// seed/credential lookup to the wrong home and launched agents
 	// unconfigured, so the boundary now demands an explicit value. The CLI
 	// passes cliutil.Layout().HomeDir (its single licensed os.UserHomeDir()
-	// site); embedders pass the host user's home. F13 (2026-05-27).
+	// site); embedders pass the host user's home.
 	HomeDir string
 
 	// BackendType selects the runtime backend (yoloai.BackendDocker,
 	// yoloai.BackendTart, etc.). OPTIONAL — empty constructs a backend-less
-	// Client (A2/A3) that serves host-only reads and, via System(),
-	// cross-backend admin without ever opening a connection. A backend-bound
+	// Client that serves host-only reads and, via System(), cross-backend
+	// admin without ever opening a connection. A backend-bound
 	// operation (Exec, Attach, Start, lifecycle, Create, List, Clone, …) on a
 	// backend-less Client returns ErrBackendRequired.
 	//

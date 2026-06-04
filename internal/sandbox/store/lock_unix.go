@@ -59,8 +59,7 @@ var (
 //	SendInput                                → sandbox/manager.go
 //	ApplyAll                                 → sandbox/patch/apply.go
 //
-// The W-L10 layering linter (planned) will verify that new write
-// methods on the future Client surface include AcquireLock at their
+// New write methods on the Client surface must include AcquireLock at their
 // public entry point.
 func AcquireLock(layout config.Layout, name string) (func(), error) {
 	path := layout.SandboxLockPath(name)

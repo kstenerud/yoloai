@@ -4,11 +4,11 @@
 // (internal/cli) and external embedders use it as the entry point for
 // running AI coding agents in isolated sandboxes.
 //
-// One Client is the entry point (A2/A3). It owns creation and cross-sandbox
+// One Client is the entry point. It owns creation and cross-sandbox
 // operations (Run, Create, Clone, List) plus the per-sandbox handle accessor
 // Sandbox(name); per-sandbox operations (Inspect, Start, Stop, Restart, Reset,
 // Destroy, Exec, and the Workdir/Network/Agent sub-handles) live on that
-// *Sandbox handle, not the Client root (F2). The backend connection is opened
+// *Sandbox handle, not the Client root. The backend connection is opened
 // lazily on the first backend-bound operation, so ClientCreateOptions.BackendType
 // is optional: a backend-less Client still serves host-only reads (Sandbox.Metadata,
 // Workdir diffs, the on-disk allowlist) and, via Client.System(), cross-backend
@@ -18,9 +18,8 @@
 //     Check, …), reached only via Client.System(). Decoupled from a single
 //     backend: it iterates the registered backends internally.
 //
-// Following the W-L8 layering refactor, the CLI is a thin shell over
-// Client + System; orchestration logic lives here, not in
-// internal/cli. New CLI commands should call Client/System
+// The CLI is a thin shell over Client + System; orchestration logic lives
+// here, not in internal/cli. New CLI commands should call Client/System
 // methods rather than reaching into sandbox/* or runtime/* directly.
 //
 // Typical usage:
@@ -147,7 +146,7 @@ func NewClient(ctx context.Context, opts ClientCreateOptions) (*Client, error) {
 		input = bytes.NewReader(nil) // §12: empty reader, never the process's os.Stdin; embedders override, the CLI passes IOStreams
 	}
 
-	// The backend connection is NOT opened here (A2/A3).
+	// The backend connection is NOT opened here.
 	// ClientCreateOptions.BackendType is optional: a backend-less Client serves
 	// host-only reads and admin without ever connecting; backend-bound ops open
 	// the runtime lazily on first use (ensure) or return ErrBackendRequired when

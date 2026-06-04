@@ -14,8 +14,7 @@ import (
 // shared by the sandbox launch and create free functions. It is constructed by
 // the Engine (and other callers) and passed by value. Input carries the
 // interactive input reader used by create (prompt reading via invocation.ReadPrompt)
-// and lifecycle (start prompt). New fields may be added as later carve phases
-// dissolve more Engine methods.
+// and lifecycle (start prompt).
 type Deps struct {
 	Runtime runtime.Runtime
 	Layout  config.Layout

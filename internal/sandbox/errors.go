@@ -10,8 +10,7 @@ import (
 
 // Sentinel errors for sandbox operations.
 var (
-	// ErrSandboxNotFound is forwarded from store so callers that imported
-	// sandbox.ErrSandboxNotFound before the store carve continue to work.
+	// ErrSandboxNotFound is forwarded from store. See store.ErrSandboxNotFound.
 	ErrSandboxNotFound = store.ErrSandboxNotFound
 
 	// ErrSandboxExists is the canonical sentinel for "sandbox already exists";

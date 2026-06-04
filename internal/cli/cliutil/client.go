@@ -100,8 +100,7 @@ func ResolveBackendForSandbox(name string) yoloai.BackendType {
 			}
 		}
 	}
-	// Probe is stat-only so an empty context is fine here; full ctx threading
-	// for the rare "meta corrupt" fallback is out of scope for W-L4.
+	// Probe is stat-only so an empty context is fine here.
 	backend, warn := yoloai.SelectContainerBackend(context.Background(), ResolveContainerBackendConfig(), Layout().Env)
 	if warn != "" {
 		fmt.Fprintln(os.Stderr, warn)
@@ -220,9 +219,9 @@ func SandboxMetadata(cmd *cobra.Command, name string) (*yoloai.Environment, erro
 // (clone, reset, restart, new with --attach) that have already performed
 // their lifecycle action and now need to attach.
 //
-// W-L8d: now routes through yoloai.Client.Attach so all attach paths go
-// through one library implementation. Terminal title remains here because
-// it's CLI UI; Client.Attach handles status check / wait-for-tmux / PTY.
+// Routes through yoloai.Client.Attach so all attach paths share one library
+// implementation. Terminal title remains here because it's CLI UI;
+// Client.Attach handles status check / wait-for-tmux / PTY.
 func AttachToSandboxByName(cmd *cobra.Command, name string) error {
 	SetTerminalTitle(name)
 	defer SetTerminalTitle("")

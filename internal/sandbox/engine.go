@@ -140,10 +140,9 @@ func (e *Engine) ensureDefaultsDir() error {
 			return fmt.Errorf("write defaults/config.yaml: %w", err)
 		}
 	}
-	// Materialize the reference tmux.conf declaratively (was previously an
-	// imperative, setup_complete-guarded write). The in-sandbox tmux mount
-	// binds this under the tmux_conf=default/default+host default; users may
-	// inspect/customize it. 0644 so uid 1001 inside Kata VMs can read it.
+	// Materialize the reference tmux.conf declaratively. The in-sandbox tmux
+	// mount binds this under the tmux_conf=default/default+host default; users
+	// may inspect/customize it. 0644 so uid 1001 inside Kata VMs can read it.
 	tmuxConfPath := filepath.Join(defaultsDir, "tmux.conf")
 	if _, err := os.Stat(tmuxConfPath); os.IsNotExist(err) {
 		if err := fileutil.WriteFile(tmuxConfPath, tmuxres.Embedded(), 0644); err != nil { //nolint:gosec // G306: tmux.conf contains no secrets; 0644 required for uid 1001 in Kata VMs

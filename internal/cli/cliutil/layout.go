@@ -41,10 +41,8 @@ func SetRootLayout(l config.Layout) {
 // root command). The fallback is recomputed on every call so tests
 // that change HOME between cases see fresh paths.
 //
-// W-L10-allowlist: this function is the single permitted caller of
-// os.UserHomeDir() in CLI code (via resolveHome below). Future
-// CLI handlers reading a Layout must go through here; the W-L10
-// layering linter will eventually verify this.
+// This function is the single permitted caller of os.UserHomeDir() in CLI
+// code (via resolveHome below); CLI handlers reading a Layout go through here.
 func Layout() config.Layout {
 	if rootLayout.DataDir == "" {
 		home := resolveHome()
@@ -96,10 +94,9 @@ func processEnv() map[string]string {
 }
 
 // resolveHome returns the user's $HOME, honoring SUDO_USER under
-// sudo so "sudo yoloai ..." doesn't reroot to /root. This is the
-// ONE permitted os.UserHomeDir() call site in the yoloai library
-// code (W-L10-allowlist). The Q-W discipline forbids any other
-// library code from reading $HOME directly.
+// sudo so "sudo yoloai ..." doesn't reroot to /root. This is the one
+// permitted os.UserHomeDir() call site in CLI code; no other code
+// reads $HOME directly.
 func resolveHome() string {
 	if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" && fileutil.ProcessIsRoot() {
 		u, err := user.Lookup(sudoUser)

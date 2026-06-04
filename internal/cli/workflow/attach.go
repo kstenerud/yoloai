@@ -31,9 +31,9 @@ func NewAttachCmd() *cobra.Command {
 	return cmd
 }
 
-// runAttach implements the attach command body. After W-L8d's Sandbox.Attach
-// landing, the heavy lifting (status check, waitForTmux, PTY-attach) lives in
-// yoloai.Client.Attach; the CLI handles terminal title + IOStreams wiring.
+// runAttach implements the attach command body. The heavy lifting (status
+// check, waitForTmux, PTY-attach) lives in yoloai.Client.Attach; the CLI
+// handles terminal title + IOStreams wiring.
 func runAttach(cmd *cobra.Command, args []string, opts *attachOpts) error {
 	if cliutil.JSONEnabled(cmd) {
 		return cliutil.ErrJSONNotSupported("attach")

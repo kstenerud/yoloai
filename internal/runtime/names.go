@@ -9,14 +9,11 @@ package runtime
 // registry is the source of truth for which names are recognised at
 // runtime.
 //
-// This type exists so the public Client API surface (added in
-// W-L8b/c/d) can take a typed parameter rather than `string`,
-// preventing typo-style bugs at call sites. Internal code that
-// already uses plain string keys to look up backends keeps working;
-// callers convert with `BackendType(s)` / `string(b)` at the
-// boundary as they migrate.
-//
-// Established by W-L8a Q-Y.
+// This type exists so the public Client API surface can take a typed
+// parameter rather than `string`, preventing typo-style bugs at call
+// sites. Internal code that uses plain string keys to look up backends
+// keeps working; callers convert with `BackendType(s)` / `string(b)` at
+// the boundary.
 type BackendType string
 
 const (

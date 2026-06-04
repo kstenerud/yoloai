@@ -228,7 +228,7 @@ diff and apply what you want to keep.`,
 	// process-wide rootLayout. Otherwise leave rootLayout empty so
 	// cliutil.Layout() resolves $HOME/.yoloai/ freshly on each call (important
 	// for tests that t.Setenv("HOME", ...) between cases). The HOME read
-	// goes through homeBasedDataDir(), the W-L10-allowlisted site.
+	// goes through the single allowlisted site (cliutil.resolveHome).
 	prevPersistentPreRunE := rootCmd.PersistentPreRunE
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
 		if dataDir, _ := cmd.Flags().GetString("data-dir"); dataDir != "" {

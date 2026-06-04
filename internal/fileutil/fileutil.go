@@ -71,10 +71,10 @@ func SudoParentEnv() map[string]string {
 
 // HostUID returns the invoking user's UID, accounting for sudo. Under
 // sudo (uid 0 + SUDO_UID set) it returns the SUDO_UID; otherwise it
-// returns the process uid. This is the F31 chokepoint for "what UID
-// owns the work the user is doing" — every library caller that
-// previously called os.Getuid() directly now reads it from
-// config.Layout.HostUID, which is populated here.
+// returns the process uid. This is the single chokepoint for "what UID
+// owns the work the user is doing": library callers read it from
+// config.Layout.HostUID, which is populated here, rather than calling
+// os.Getuid() directly.
 func HostUID() int {
 	if uid := SudoUID(); uid != -1 {
 		return uid

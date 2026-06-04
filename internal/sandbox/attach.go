@@ -47,10 +47,8 @@ func ReadTmuxSocket(layout config.Layout, sandboxName string) string {
 //  2. Fallback: `tmux has-session -t main` via runtime.Exec. Only reached
 //     when sandbox.jsonl is unreadable (very old container images).
 //
-// Moved from internal/cli/attach.go to this package as W-L8d's Sandbox.Attach
-// preparation — Client.Attach needs the same orchestration that the CLI used
-// to do directly. Embedders calling Client.Attach get readiness polling
-// transparently.
+// Client.Attach needs the same readiness orchestration the CLI performs, so
+// embedders calling Client.Attach get the polling transparently.
 func WaitForAttachReady(
 	ctx context.Context,
 	rt runtime.Runtime,

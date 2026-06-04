@@ -18,9 +18,8 @@ import (
 // the name. Returns a UsageError when the resolved base does not exist
 // locally — yoloai system tart add is then the expected next step.
 //
-// Previously lived in sandbox/create.go's resolveRuntimeBase via an explicit
-// type assertion to *tart.Runtime; relocated here as part of W-L7 so that
-// sandbox/ no longer imports runtime/tart.
+// This lives on the tart Runtime, rather than in sandbox/create, so that
+// sandbox/ does not import runtime/tart.
 func (r *Runtime) PrepareRuntimeBase(ctx context.Context, layout config.Layout, runtimeSpecs []string) (string, error) {
 	resolved, err := ResolveRuntimeVersions(runtimeSpecs)
 	if err != nil {

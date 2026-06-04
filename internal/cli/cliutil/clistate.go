@@ -58,9 +58,8 @@ func SaveCLIState(s *CLIState) error {
 }
 
 // firstRunTip is the one-time onboarding nudge shown after the CLI first does
-// real work. It previously lived in the library's EnsureSetup (keyed off the
-// now-removed setup_complete flag); it is presentation/ceremony, so it moved
-// to the app, keyed off CLIState.FirstRunTipShown.
+// real work. It is presentation/ceremony, so it lives in the app, keyed off
+// CLIState.FirstRunTipShown.
 const firstRunTip = "Tip: enable shell completions with 'yoloai system completion --help'"
 
 // MaybeShowFirstRunTip prints the one-time onboarding tip the first time the

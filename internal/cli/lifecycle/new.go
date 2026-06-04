@@ -342,16 +342,16 @@ func executeNewCreate(cmd *cobra.Command, ctx context.Context, c *yoloai.Client,
 		return cliutil.WriteJSON(cmd.OutOrStdout(), meta)
 	}
 
-	// Print the creation summary (the library no longer formats presentation —
-	// F8). opts.Name is used because Create returns "" for --no-start. Goes to
-	// stderr — the stream the Engine's creation output used — keeping human
-	// output cohesive there (stdout is reserved for --json).
+	// Print the creation summary (presentation is the CLI's job, not the
+	// library's). opts.Name is used because Create returns "" for --no-start.
+	// Goes to stderr — the stream the Engine's creation output used — keeping
+	// human output cohesive there (stdout is reserved for --json).
 	if meta, loadErr := loadCreatedMeta(c, opts.Name); loadErr == nil {
 		printCreateSummary(cmd.ErrOrStderr(), meta, opts.Prompt != "", opts.VscodeTunnel)
 	}
 
 	// First successful create runs EnsureSetup; show the one-time onboarding
-	// tip here (the library no longer prints it — F8/setup_complete removal).
+	// tip here (the tip is CLI presentation, not the library's concern).
 	cliutil.MaybeShowFirstRunTip(cmd.ErrOrStderr())
 
 	if sandboxName == "" || !attach || opts.NoStart {

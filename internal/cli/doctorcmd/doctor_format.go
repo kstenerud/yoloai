@@ -2,7 +2,7 @@ package doctorcmd
 
 // ABOUTME: Human-readable formatter for `yoloai doctor` capability reports — the
 // ABOUTME: three-tier summary table plus per-failure fix detail. Consumes the
-// ABOUTME: public yoloai.BackendReport read-model (relocated here from caps).
+// ABOUTME: public yoloai.BackendReport read-model.
 
 import (
 	"fmt"

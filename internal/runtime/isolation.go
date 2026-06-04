@@ -75,15 +75,13 @@ func SupportsOverlayDirs(isolation IsolationMode) bool {
 // in an error message.
 //
 // hostOS is runtime.GOOS-style ("darwin", "linux", "windows"); targetOS is
-// the --os flag value ("mac", "linux", or ""). Encodes the rules previously
-// repeated across `validateIsolationOSCombo` in internal/cli/new.go.
+// the --os flag value ("mac", "linux", or "").
 func IsolationAvailability(isolation IsolationMode, targetOS, hostOS string) (available bool, reason string, help string) {
 	macAlternatives := "Available isolation modes with --os mac:\n" +
 		"  container   macOS sandbox-exec (seatbelt)\n" +
 		"  vm          Full macOS VM (Tart)"
 
-	// Cases ordered to match the original validateIsolationOSCombo precedence
-	// so error messages are byte-for-byte identical to the pre-refactor output.
+	// Cases are ordered by precedence: the first matching rule wins.
 	switch {
 	case hostOS == "darwin" && targetOS != "mac" && (isolation == IsolationModeVM || isolation == IsolationModeVMEnhanced):
 		return false,

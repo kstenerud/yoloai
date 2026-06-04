@@ -404,14 +404,13 @@ func buildNetworkConfig(opts Options, agentDef *agent.Definition) (string, []str
 }
 
 // collectOverlayMounts builds overlay mount configs for config.json
-// from the workdir. After Q-U aux dirs no longer support :overlay,
-// so this is a workdir-only check — kept as a function (returning a
-// slice) so callers don't need to special-case overlay-vs-no-overlay
-// at every config.json assembly site.
+// from the workdir. Aux dirs don't support :overlay, so this is a
+// workdir-only check — kept as a function (returning a slice) so callers
+// don't need to special-case overlay-vs-no-overlay at every config.json
+// assembly site.
 //
-// The auxDirs parameter is intentionally still threaded through but
-// unused; removing it would churn every call site, and the field is
-// expected to disappear during the Workdir-only API cascade.
+// The auxDirs parameter is intentionally threaded through but unused;
+// removing it would churn every call site.
 func collectOverlayMounts(workdir *DirSpec, _ []*DirSpec) []runtimeconfig.OverlayMountConfig {
 	if workdir.Mode != "overlay" {
 		return nil
@@ -426,10 +425,10 @@ func collectOverlayMounts(workdir *DirSpec, _ []*DirSpec) []runtimeconfig.Overla
 }
 
 // collectCopyDirs returns the mount paths of the workdir if it is
-// :copy. After Q-U aux dirs can no longer be :copy, so this is a
-// workdir-only check. The function shape (returning a slice) is
-// preserved so the entrypoint auto-commit loop config doesn't need
-// to special-case the no-copy and copy cases at every assembly site.
+// :copy. Aux dirs can't be :copy, so this is a workdir-only check.
+// The function shape (returning a slice) is preserved so the entrypoint
+// auto-commit loop config doesn't need to special-case the no-copy and
+// copy cases at every assembly site.
 func collectCopyDirs(workdir *DirSpec, _ []*DirSpec) []string {
 	if workdir.Mode != "copy" {
 		return nil

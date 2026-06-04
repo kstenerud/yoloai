@@ -22,9 +22,8 @@ import (
 )
 
 // execInSandbox runs cmd inside the sandbox's container and returns
-// stdout. Local helper so this subpackage doesn't import its parent
-// (F6: previously called execInSandbox). hostUID is layout.HostUID
-// at the boundary (F31).
+// stdout. Local helper so this subpackage doesn't import its parent.
+// hostUID is layout.HostUID, resolved at the boundary.
 func execInSandbox(ctx context.Context, rt runtime.Runtime, name string, meta *store.Environment, hostUID int, cmd []string) (string, error) {
 	result, err := rt.Exec(ctx, store.InstanceName(meta.Principal, name), cmd, store.ContainerUser(meta, hostUID))
 	if err != nil {
@@ -67,14 +66,14 @@ type ApplyAllOptions struct {
 // equivalent of 'yoloai apply <name> --no-commit'.
 //
 // Returns (nil, nil) when there is nothing to apply. Callers branch on
-// result == nil rather than a sentinel error (Q-P). On opts.DryRun the patch is
+// result == nil rather than a sentinel error. On opts.DryRun the patch is
 // generated and validated (so the caller can preview the stat and confirm) but
 // not applied — the returned ApplyResult describes what *would* apply.
 //
-// After Q-U (aux :copy/:overlay removed) the surface is workdir-only — the name
+// With aux :copy/:overlay dirs removed the surface is workdir-only — the name
 // "ApplyAll" is preserved for stability but the iteration is gone.
 //
-// layout determines where the per-sandbox lock file lives (Q-W.4a); callers
+// layout determines where the per-sandbox lock file lives; callers
 // thread their own Layout in (yoloai.Client supplies c.layout).
 func ApplyAll(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, opts ApplyAllOptions) (*ApplyResult, error) {
 	unlock, err := store.AcquireLock(layout, name)

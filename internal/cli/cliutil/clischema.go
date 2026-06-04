@@ -163,9 +163,9 @@ func moveIfExists(from, to string) error {
 }
 
 // flatState mirrors the legacy TOP/state.yaml shape (pre-namespace), whose only
-// field was setup_complete. The config package no longer defines this type
-// (the library stopped owning setup ceremony), so this one-shot migration
-// parses it locally.
+// field was setup_complete. The config package doesn't define this type (the
+// library doesn't own setup ceremony), so this one-shot migration parses it
+// locally.
 type flatState struct {
 	SetupComplete bool `yaml:"setup_complete"`
 }

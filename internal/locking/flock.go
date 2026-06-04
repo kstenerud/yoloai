@@ -10,11 +10,8 @@
 // (retry budgets, PID files, recovery UX) but never call
 // unix.Flock directly.
 //
-// Established by Q-W.4a: "all locking logic in one utility" — the
-// principle owner stated this explicitly. The flock-dance code
-// previously lived duplicated in sandbox/lock_unix.go,
-// runtime/tart/base_lock.go, and runtime/docker/base_lock.go;
-// this package centralises it.
+// This package centralises all flock logic so the dance isn't duplicated
+// across the sandbox store and the per-backend base-image locks.
 package locking
 
 import (

@@ -10,16 +10,12 @@ import (
 )
 
 // Layout names every yoloai data path rooted at a given DataDir.
-// Threading a Layout through library functions — instead of relying on
-// the package-level helpers (YoloaiDir, SandboxesDir, ...) which read
-// $HOME implicitly via HomeDir() — is Q-W's no-ambient-configuration
-// discipline (development-principles.md §12) applied to paths.
+// Threading a Layout through library functions, rather than reading $HOME
+// implicitly, applies the no-ambient-configuration discipline
+// (development-principles.md §12) to paths.
 //
 // Embedders construct a Layout once via NewLayout and pass it down;
-// library code uses Layout methods, not the package-level helpers.
-// The legacy package-level helpers continue to work during the W-L8b
-// migration but read HomeDir() and so violate §12 — they will be
-// removed (or restricted) once threading is complete in Q-W.4/.5.
+// library code uses Layout methods.
 type Layout struct {
 	// DataDir is the root yoloai data directory; all per-Layout paths
 	// derive from this. The CLI sets this to $HOME/.yoloai/ at startup
@@ -39,27 +35,20 @@ type Layout struct {
 	// resolve seed files (~/.claude, ~/.codex, ...), or compute
 	// auth-file locations.
 	//
-	// F13 (2026-05-27): previously every site derived this with
-	// filepath.Dir(DataDir), encoding the "DataDir is always
-	// $HOME/.yoloai" assumption into 35+ call sites. Embedders
-	// with a custom DataDir (e.g. /var/lib/yoloai) couldn't tell
-	// library code where the user's $HOME actually was, so seed
-	// lookups silently looked in /var/lib instead. The CLI's
-	// single os.UserHomeDir() call now feeds HomeDir; library
-	// code uses layout.HomeDir directly.
+	// HomeDir is explicit rather than derived as filepath.Dir(DataDir):
+	// an embedder with a custom DataDir (e.g. /var/lib/yoloai) would
+	// otherwise send seed/auth-file lookups to the wrong place. The CLI's
+	// single os.UserHomeDir() call feeds this field.
 	HomeDir string
 
 	// HostUID and HostGID are the invoking user's host-side UID/GID,
 	// honoring sudo (SUDO_UID / SUDO_GID when running under sudo so
 	// "sudo yoloai ..." doesn't reroot to uid 0).
 	//
-	// Library code that previously called os.Getuid() / os.Getgid()
-	// directly (effectiveUID in sandbox/create.go, ContainerUser in
-	// store/environment.go, the uid 0 check in containerd/containerd.go,
-	// the caps registry's IsRoot detection) now reads these. F31
-	// (2026-05-27): same "no ambient state" discipline as HomeDir
-	// — the CLI's single licensed read (via fileutil.HostUID /
-	// HostGID) feeds Layout, library never re-reads.
+	// Library code reads these rather than calling os.Getuid() /
+	// os.Getgid() directly — the same "no ambient state" discipline as
+	// HomeDir. The CLI's single licensed read (via fileutil.HostUID /
+	// HostGID) feeds Layout; library never re-reads.
 	HostUID int
 	HostGID int
 
@@ -172,9 +161,7 @@ func NewLayoutFor(dataDir, homeDir string) Layout {
 	}
 }
 
-// YoloaiDir returns the root data directory (an alias for DataDir,
-// kept for parity with the package-level helper's name during the
-// W-L8b migration).
+// YoloaiDir returns the root data directory (an alias for DataDir).
 func (l Layout) YoloaiDir() string { return l.DataDir }
 
 // SandboxesDir returns DataDir/sandboxes/.

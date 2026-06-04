@@ -7,12 +7,9 @@ package agent
 // constants document the agents that ship with yoloai; user-defined
 // or future agents supply their own name via the agent registry.
 //
-// This type exists so the public Client API surface (added in
-// W-L8b/c/d) can take a typed parameter rather than `string`. The
-// existing agent registry continues to use string keys internally;
-// callers convert at the public boundary as they migrate.
-//
-// Established by W-L8a Q-Y.
+// This type exists so the public Client API surface can take a typed
+// parameter rather than `string`. The agent registry uses string keys
+// internally; callers convert at the public boundary.
 type AgentType string
 
 const (

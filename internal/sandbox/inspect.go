@@ -75,8 +75,7 @@ var ListSandboxes = status.ListSandboxes
 // ListSandboxesMultiBackend inspects sandboxes per their backends. See status.ListSandboxesMultiBackend.
 var ListSandboxesMultiBackend = status.ListSandboxesMultiBackend
 
-// IsolationPerms is re-exported from state so existing façade callers keep
-// compiling after F5.2b moved the body to the state leaf.
+// IsolationPerms is re-exported from state. See state.IsolationPerms.
 type IsolationPerms = state.IsolationPerms
 
 // Perms is re-exported from state. See state.Perms.

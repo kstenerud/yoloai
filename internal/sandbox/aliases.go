@@ -1,7 +1,5 @@
-// ABOUTME: Type and constant aliases that re-export the create/ leaf's public
-// ABOUTME: symbols into package sandbox so external callers and staying façade
-// ABOUTME: files (engine.go, setup.go, lifecycle.go, inspect.go) keep compiling
-// ABOUTME: without change after the create/ carve (F5.2d).
+// ABOUTME: Type and constant aliases that re-export the create/ and state/ leaf
+// ABOUTME: symbols into package sandbox, keeping the public sandbox API stable.
 package sandbox
 
 import (
@@ -25,8 +23,7 @@ const (
 	NetworkModeIsolated NetworkMode = create.NetworkModeIsolated // allowlist only
 )
 
-// State re-exports state.State so staying façade files (engine.go, setup.go,
-// lifecycle.go) that previously got the alias from create.go keep compiling.
+// State re-exports state.State for callers referencing sandbox.State.
 type State = state.State
 
 // DirSpec re-exports state.DirSpec for the same reason.

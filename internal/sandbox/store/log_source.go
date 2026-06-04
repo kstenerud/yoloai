@@ -12,9 +12,8 @@ package store
 // SandboxJSONLPath, MonitorJSONLPath, HooksJSONLPath) defined in this
 // package; see those for the on-disk paths.
 //
-// Established by W-L8a Q-Y. The public Client API surface (added in
-// W-L8b/c/d) uses []LogSource for LogOptions.Sources rather than
-// []string.
+// The public Client API surface uses []LogSource for LogOptions.Sources
+// rather than []string.
 type LogSource string
 
 const (
