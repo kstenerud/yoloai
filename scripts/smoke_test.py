@@ -235,9 +235,13 @@ class RunContext:
     # container specs run unthrottled.
     jobs: int = 0
     vm_concurrency: int = 2
-    # Guards mutation of the shared sandboxes/results lists + the single JUnit
-    # file handle; print_lock serializes each test's output block so concurrent
-    # backends don't interleave their PASS/FAIL lines.
+    # Monotonic sandbox-name counter (allocated under state_lock). Appended to
+    # every sandbox name so no two are string prefixes of one another — see
+    # Test.sandbox() for why the containerd-vm (Kata) backend requires this.
+    name_seq: int = 0
+    # Guards mutation of the shared sandboxes/results lists, the name counter,
+    # and the single JUnit file handle; print_lock serializes each test's output
+    # block so concurrent backends don't interleave their PASS/FAIL lines.
     state_lock: threading.Lock = field(default_factory=threading.Lock)
     print_lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -349,9 +353,24 @@ class Test:
         return result
 
     def sandbox(self, label: str) -> str:
-        """Allocate a sandbox name and register it for cleanup."""
-        name = f"{self.ctx.run_id}-{label}"
+        """Allocate a globally-unique sandbox name and register it for cleanup.
+
+        The trailing sequence number guarantees no sandbox name is a string
+        prefix of another within a run. This is load-bearing on the
+        containerd-vm (Kata) backend: the Kata shim resolves a sandbox from the
+        container ID by *prefix*, so two coexisting sandboxes whose names are
+        prefix-related (e.g. ...-containerd-vm vs ...-containerd-vmenhanced)
+        make its lookup ambiguous and `create task` fails with "more than one
+        sandbox exists with the provided prefix". Serial runs never had both
+        backends alive at once; the parallel matrix does. The "-NNN" suffix
+        breaks the prefix relationship (the plain name continues with "-" where
+        the enhanced one continues with "e"). See
+        docs/contributors/backend-idiosyncrasies.md.
+        """
         with self.ctx.state_lock:
+            seq = self.ctx.name_seq
+            self.ctx.name_seq += 1
+            name = f"{self.ctx.run_id}-{label}-{seq:03d}"
             self.ctx.sandboxes.append(name)
         self.local_sandboxes.append(name)
         return name
@@ -2545,9 +2564,11 @@ def main() -> int:
                 for retry_idx in range(spec.retries):
                     attempt = retry_idx + 2  # attempt 1 was the initial run
                     _emit(ctx, f"      Retrying {test_name} (attempt {retry_idx + 1}/{spec.retries})...")
-                    # Destroy sandboxes created during the failed attempt so the
-                    # retry can reuse the same names. run_test already preserved
-                    # their state under <log_dir>/sandboxes/<test>/attempt<N>/.
+                    # Destroy the failed attempt's sandboxes so they don't leak
+                    # or hold a VM slot; the retry allocates fresh names (each
+                    # Test.sandbox() call draws a new sequence number). run_test
+                    # already preserved their state under
+                    # <log_dir>/sandboxes/<test>/attempt<N>/.
                     _destroy_named_sandboxes(ctx, result.sandboxes)
                     result = run_test(ctx, test_name, lambda t: test_fn(t, spec), attempt=attempt)
                     if result.passed:

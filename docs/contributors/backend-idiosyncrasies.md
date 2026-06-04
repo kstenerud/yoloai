@@ -86,6 +86,7 @@ row to the index.
 | `yoloai apply` fails: `git add: git [add -A]: exit status 128: … index.lock: File exists` while agent is running | [Docker/Podman: agent git and apply git race on index.lock](#dockerpodman-agent-git-and-apply-git-race-on-indexlock) |
 | `FileNotFoundError: 'tmux'` in `sandbox-setup.py::setup_tmux_session` on Tart VM (intermittent) | [Tart: transient FS/PATH failure makes tmux unresolvable during the firstlaunch window](#tart-transient-fspath-failure-makes-tmux-unresolvable-during-the-firstlaunch-window) |
 | Smoke test: `stop_start` fails "agent idle"; pane shows `Error: Exit code N` + a clarifying question; other backends pass | [Smoke harness: agent stalls when the sentinel command errors](#agent-stalls-when-the-sentinel-command-errors) |
+| `create task: ... more than one sandbox exists with the provided prefix "..."` (containerd-vm, under concurrency) | [Kata: shim resolves sandboxes by name prefix](#kata-shim-resolves-a-sandbox-from-the-container-id-by-prefix-prefix-related-names-collide) |
 | Is it safe to delete a `.lock` file while holding its flock? (prune / Destroy) | [Removing a .lock file while holding its flock is safe](#removing-a-lock-file-while-holding-its-flock-is-safe) |
 | Tart base build / `tart run` fails with `The number of VMs exceeds the system limit` or VM self-stops at boot, but `tart list` shows nothing running | [Tart: orphaned Virtualization VM processes consume the macOS VM limit](#orphaned-virtualization-vm-processes-survive-a-crashed-tart-run-and-silently-consume-the-macos-vm-limit) |
 | `system disk` shows tart `IMAGES: ?` / `CACHE: 0 B` despite GBs in `~/.tart`; `prune --images` reports 0 reclaimed | [Tart: list double-counts OCI tag+digest; sizing/prune must dedup](#tart-list-reports-a-pulled-oci-image-twice-tag--digest-over-one-on-disk-copy-sizing-and-prune-must-dedup-and-remove-both-rows) |
@@ -1674,6 +1675,52 @@ long absolute paths on one line.
 **Code:** `scripts/smoke_test.py` (`FINGERPRINTS` entry "agent's sentinel command
 failed; agent stalled", and `_autopsy_artifact_files` now includes
 `terminal-snapshot.txt`).
+
+---
+
+### Kata: shim resolves a sandbox from the container ID by *prefix*; prefix-related names collide
+
+**Symptom:** under the parallel smoke matrix, `stop_start/containerd-vm` (or any
+containerd-vm op) fails at task creation with:
+
+```
+start instance: create task: failed to create shim task: Others("failed to handle
+message try init runtime instance ... Failed to create shim management server ...
+more than one sandbox exists with the provided prefix
+"yoloai-smoke-…-stop-start-containerd-vm", please provide a unique prefix")
+```
+
+The same op passes when run serially. The trigger is that the failing sandbox's
+name is a **string prefix of another sandbox that is alive at the same time** —
+here `…-containerd-vm` is a prefix of `…-containerd-vmenhanced`, and the parallel
+matrix runs both Kata backends concurrently.
+
+**Explanation:** yoloAI passes the instance name (`InstanceName`,
+`internal/sandbox/store/paths.go`) verbatim as the containerd container ID and does
+**no** prefix matching of its own. The prefix lookup is **entirely inside the
+external Kata shim** (`containerd-shim-kata-v2` / runtime-rs): given a full
+container ID it scans its sandbox store for entries that *start with* that ID and
+refuses to proceed if more than one matches. Two coexisting sandboxes where one
+name is a prefix of the other are therefore indistinguishable to the shim. Docker
+and containerd's own container lookup are exact-match, so `docker` /
+`docker-cenhanced` (also prefix-related) do **not** trip this — only the Kata VM
+backends do.
+
+**Fix (smoke harness):** sandbox names now carry a monotonic per-run sequence
+suffix (`…-containerd-vm-007`), so no name is a prefix of another. The suffix
+breaks the relationship because the plain name continues with `-` exactly where
+the enhanced name continues with `e`. See `Test.sandbox()` in
+`scripts/smoke_test.py`.
+
+**Implication for real users:** this is a genuine containerd-vm limitation, not
+just a test artifact — two *running* containerd-vm sandboxes whose names are
+prefix-related (e.g. `app` and `app-v2`) will collide the same way. yoloAI does
+not currently guard against this at create time; if it becomes a real-world papercut,
+the fix would be a create-time check that rejects or warns on a prefix-related
+live sandbox name for the Kata backend.
+
+**Code:** `scripts/smoke_test.py` (`RunContext.name_seq`, `Test.sandbox()`);
+ID construction in `internal/sandbox/store/paths.go` (`InstanceName`).
 
 ---
 
