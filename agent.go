@@ -33,12 +33,13 @@ func (a *Agent) Prompt() (string, bool, error) {
 	return sandbox.ReadStoredPrompt(a.s.c.layout, a.s.name)
 }
 
-// AgentLog returns the raw agent terminal output for the sandbox. tailLines <= 0
+// TerminalLog returns the raw agent terminal output for the sandbox. tailLines <= 0
 // returns the full log; otherwise the last tailLines lines. A missing log is
 // not an error — it returns ("", nil). ANSI escape sequences are left intact;
 // the caller decides whether to strip them. This is a host-filesystem read and
-// does not require a running backend.
-func (a *Agent) AgentLog(tailLines int) (string, error) {
+// does not require a running backend. It is the recorded counterpart to
+// CaptureTerminal's live snapshot.
+func (a *Agent) TerminalLog(tailLines int) (string, error) {
 	return sandbox.ReadAgentLog(a.s.c.layout, a.s.name, tailLines)
 }
 
@@ -94,7 +95,7 @@ func (o AgentLogsOptions) toInternal() sandbox.LogStreamOptions {
 // stream ends, so a plain range over it terminates cleanly.
 //
 // This is a host-filesystem read: no backend connection is required, matching
-// AgentLog. Cancel ctx to stop a Follow stream early. A missing sandbox returns
+// TerminalLog. Cancel ctx to stop a Follow stream early. A missing sandbox returns
 // ErrSandboxNotFound; an invalid MinLevel returns a *UsageError.
 func (a *Agent) Logs(ctx context.Context, opts AgentLogsOptions) (<-chan LogEvent, error) {
 	frames, err := sandbox.StreamLogs(ctx, a.s.c.layout, a.s.name, opts.toInternal())

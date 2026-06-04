@@ -19,7 +19,7 @@ import (
 // Re-exported (type alias) from internal/runtime so embedders can use
 // the type without importing internal packages. Q-Y resolution
 // (2026-05-25): public API fields like ClientCreateOptions.BackendType and
-// SystemCheckOptions.Backend take this typed name rather than plain string,
+// SystemCheckOptions.BackendType take this typed name rather than plain string,
 // catching typo-style bugs at the call site rather than at the
 // "unknown backend" error.
 type BackendType = runtime.BackendType
@@ -43,7 +43,7 @@ const (
 // extension agents supply their own name via the agent registry.
 //
 // Re-exported from internal/agent. Same Q-Y rationale as BackendType:
-// public fields like SandboxRunOptions.AgentType and SystemCheckOptions.Agent take this
+// public fields like SandboxRunOptions.AgentType and SystemCheckOptions.AgentType take this
 // typed name.
 type AgentType = agent.AgentType
 

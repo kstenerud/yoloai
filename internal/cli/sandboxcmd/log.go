@@ -248,7 +248,7 @@ func runLogAgent(cmd *cobra.Command, name string, rawMode bool) error {
 	if err != nil {
 		return err
 	}
-	output, err := sb.Agent().AgentLog(0)
+	output, err := sb.Agent().TerminalLog(0)
 	if err != nil {
 		return err
 	}

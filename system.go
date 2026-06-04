@@ -725,7 +725,7 @@ func (s *System) pruneBackend(ctx context.Context, backend BackendType, known []
 		}
 		for _, item := range actual.Items {
 			items = append(items, PruneItem{
-				BackendType: BackendType(backend),
+				BackendType: backend,
 				Kind:        PruneItemKind(item.Kind),
 				Name:        item.Name,
 			})
@@ -733,7 +733,7 @@ func (s *System) pruneBackend(ctx context.Context, backend BackendType, known []
 	} else {
 		for _, item := range scan.Items {
 			items = append(items, PruneItem{
-				BackendType: BackendType(backend),
+				BackendType: backend,
 				Kind:        PruneItemKind(item.Kind),
 				Name:        item.Name,
 			})

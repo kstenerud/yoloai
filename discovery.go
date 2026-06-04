@@ -25,7 +25,7 @@ type AgentInfo struct {
 }
 
 // BackendInfo is the public, serializable view of a registered runtime backend.
-// The descriptor fields (Name…InstallHint) are static metadata, always
+// The descriptor fields (Type…InstallHint) are static metadata, always
 // populated. Available/Note are populated only when the query requested a probe
 // (see BackendQuery.ProbeAvailability); otherwise Available is false and Note is
 // empty regardless of whether the backend would actually run.

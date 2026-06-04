@@ -1,5 +1,5 @@
 // ABOUTME: Sandbox is the per-sandbox handle returned by Client.Sandbox(name).
-// ABOUTME: Provides scoped sub-handles (Workdir, Network, Agent).
+// ABOUTME: Provides scoped sub-handles (Workdir, Network, Agent, Files).
 
 package yoloai
 
@@ -23,7 +23,7 @@ import (
 //
 // Q-G resolution (Shape B): name-bound handles group per-sandbox
 // operations behind one accessor so the Client root stays uncluttered.
-// Sub-handles (Workdir, Network, Agent) are pure namespace expansion off
+// Sub-handles (Workdir, Network, Agent, Files) are pure namespace expansion off
 // a validated *Sandbox — no IO, no error.
 type Sandbox struct {
 	c    *Client

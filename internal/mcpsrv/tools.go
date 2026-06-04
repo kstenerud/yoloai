@@ -344,7 +344,7 @@ func (s *Server) handleSandboxLog(_ context.Context, req mcp.CallToolRequest) (*
 	if err != nil {
 		return textResult(errorf("sandbox handle %q: %v", name, err)), nil
 	}
-	output, err := sb.Agent().AgentLog(lines)
+	output, err := sb.Agent().TerminalLog(lines)
 	if err != nil {
 		return textResult(errorf("read log for sandbox %q: %v", name, err)), nil
 	}

@@ -315,16 +315,6 @@ func (c *Client) List(ctx context.Context) ([]*SandboxInfo, error) {
 	return sandboxInfosFromStatus(sis), nil
 }
 
-// Clone copies an existing sandbox's state into a new sandbox. Although the
-// copy itself is a disk-only deep-copy of the source sandbox dir under
-// DataDir/sandboxes/, Clone is backend-bound: it goes through the Engine (and,
-// under opts.Overwrite, tears the destination down through the runtime), so a
-// backend-less Client returns ErrBackendRequired. This matches real clone
-// workflows, which almost always start the destination right after. Embedders
-// wanting a pure offline copy should copy the sandbox dir themselves.
-//
-// With opts.Overwrite set, an existing destination is destroyed before the
-// copy; without it, an existing destination is a hard error.
 // SandboxCloneOptions configures Client.Clone. Hand-written rather than aliased so the
 // public surface doesn't expose internal/sandbox.SandboxCloneOptions. Overwrite (not
 // "Force") is the concern-specific name per the Q-J field audit — "Force" stays
@@ -339,6 +329,16 @@ func (o SandboxCloneOptions) toInternal() sandbox.CloneOptions {
 	return sandbox.CloneOptions{Source: o.Source, Dest: o.Dest}
 }
 
+// Clone copies an existing sandbox's state into a new sandbox. Although the
+// copy itself is a disk-only deep-copy of the source sandbox dir under
+// DataDir/sandboxes/, Clone is backend-bound: it goes through the Engine (and,
+// under opts.Overwrite, tears the destination down through the runtime), so a
+// backend-less Client returns ErrBackendRequired. This matches real clone
+// workflows, which almost always start the destination right after. Embedders
+// wanting a pure offline copy should copy the sandbox dir themselves.
+//
+// With opts.Overwrite set, an existing destination is destroyed before the
+// copy; without it, an existing destination is a hard error.
 func (c *Client) Clone(ctx context.Context, opts SandboxCloneOptions) error {
 	if err := c.ensure(ctx); err != nil {
 		return err

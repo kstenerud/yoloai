@@ -399,7 +399,7 @@ func writeBugReportJSONLFile(w io.Writer, title, path, reportType string, omitEv
 func writeBugReportAgentOutput(w io.Writer, c *yoloai.Client, name string) {
 	output := ""
 	if sb, err := c.Sandbox(name); err == nil {
-		output, _ = sb.Agent().AgentLog(0)
+		output, _ = sb.Agent().TerminalLog(0)
 	}
 	if output == "" {
 		fmt.Fprintln(w, "<details>")                       //nolint:errcheck
