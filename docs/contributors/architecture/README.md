@@ -487,7 +487,7 @@ Host context: `IsRoot`, `IsWSL2`, `InContainer`, `KVMGroup`. Detected once per i
 | `yoloai mcp proxy` | `cli/mcp/mcp.go` | MCP proxy through sandbox |
 | `yoloai sandbox list` | `cli/sandboxcmd/list.go` | `yoloai.Client.List()` (→ `status.ListSandboxes` in `sandbox/status/`, re-exported via the façade) |
 | `yoloai sandbox <name> info` | `cli/sandboxcmd/info.go` | `yoloai.Client.Inspect()` |
-| `yoloai sandbox <name> log` | `cli/sandboxcmd/log.go` | `yoloai.System.Logs()` (→ `sandbox.StreamLogs` in `logstream.go`) for the structured activity stream; `System.AgentLog()` for `--agent`. CLI keeps only rendering + `--since` parsing. |
+| `yoloai sandbox <name> log` | `cli/sandboxcmd/log.go` | `yoloai.Sandbox.Agent().Logs()` (→ `sandbox.StreamLogs` in `logstream.go`) for the structured activity stream; `Sandbox.Agent().TerminalLog()` for `--agent`. CLI keeps only rendering + `--since` parsing. |
 | `yoloai sandbox <name> exec` | `cli/sandboxcmd/exec.go` | `yoloai.Client.Exec()` |
 | `yoloai sandbox <name> prompt` | `cli/sandboxcmd/prompt.go` | Reads `prompt.txt` from sandbox dir |
 | `yoloai sandbox <name> bugreport` | `cli/sandboxcmd/bugreport.go` | Forensic diagnostic collection (calls `bugreport.Write*`) |

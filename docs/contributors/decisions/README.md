@@ -466,6 +466,8 @@ After the bootstrap the stamp is the **only** signal consulted — a stamped lay
 
 **What did not change.** Genuine instance labels keep `Name` (`Sandbox.Name()`, `Environment.Name`, profile names, display structs). Free-form selectors that are not finite enums keep natural names (`Model string`, `Profile string`). The `Sandbox.Agent()` running-agent handle and the string-typed `config.Config.Agent` field are untouched; CLI `--agent`/`--backend` flags are untouched.
 
+**`.Type` vs `.BackendType` field-name split (clarification, R6 2026-06-04).** When the field *is* the enum's bare identity — i.e. the struct's whole purpose is to describe one member of the kind — the field is named `Type` (`BackendInfo.Type`, `AgentInfo.Type`, and the per-backend disk row `BackendDiskUsage.Type`). When the enum is merely *one attribute among several* on a struct that is about something else, the field carries the type word so it reads unambiguously at the use site (`PruneItem.BackendType` — the item is identified by `Name`/`Kind`, the backend is a tag; likewise `VscodeAttach.BackendType` and every `*Options.BackendType`/`AgentType`). Rule of thumb: descriptor/identity struct → `Type`; reference-among-data → `<Kind>Type`.
+
 **Consequences.** Breaking (beta) — tracked in `BREAKING-CHANGES.md`. The surface is unreleased (`layering-refactor` not pushed), so this rides the same release as D67. `make check` green after each of C1–C4.
 
 # Convention reminders

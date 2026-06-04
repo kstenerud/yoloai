@@ -27,6 +27,13 @@ here — resolved entries belong in the sink, not as stubs.
 > won't-do sub-points → [`abandoned-critiques.md`](abandoned-critiques.md). Recurring lesson:
 > IC12/IC15/IC16 were all "looks dead/dup" findings that proved load-bearing on a closer read.
 
+> The **2026-06-04 Post-D67/D68 public-surface residue round (R1–R6)** is fully drained to
+> [`resolved-critiques.md`](resolved-critiques.md): R1 (stranded `Clone` godoc), R2 (stale pre-D68
+> field names in doc comments), R3 (redundant `BackendType` identity casts), R4 (`Files()` missing
+> from the `Sandbox` sub-handle list), R5 (`Agent().AgentLog()`→`TerminalLog()` de-stutter) all
+> applied on `layering-refactor`; R6 (`.Type` vs `.BackendType` field-name convention) documented as a
+> clarification under D68. `make check` green.
+
 ---
 
 _No active critiques._

@@ -7,6 +7,28 @@ History of critiques that have been addressed and applied. Items are moved here 
 [`unresolved-critiques.md`](unresolved-critiques.md) once resolved, so the active file stays
 a working set. Newest first.
 
+## R1–R6 (2026-06-04 Post-D67/D68 public-surface residue round) — rename-residue + doc-rot on the root package
+
+- **Severity:** doc/cosmetic, one correctness-of-godoc (R1). **Resolved:** 2026-06-04 on
+  `layering-refactor`. Found via a whole-file read pass of the root `yoloai` package (the surface most
+  churned by A2/A3, D67, D68). `internal/` not re-swept (IC1–IC16 covered it). `make check` green.
+- **R1** — `Clone`'s godoc was stranded above `SandboxCloneOptions` (the options struct had been
+  inserted between the doc and `func Clone`, leaving the method undocumented and the type-doc opening
+  with a method paragraph). Split the block: type-doc stays on the struct, behavior paragraph moved
+  down to `func (c *Client) Clone` (`client.go`).
+- **R2** — stale pre-D68 field names in doc comments fixed: `SystemCheckOptions.Backend`→`.BackendType`
+  and `.Agent`→`.AgentType` (`types.go`), "descriptor fields (`Name`…)"→`Type` (`discovery.go`).
+- **R3** — dropped redundant identity casts `BackendType(backend)` where the param was already
+  `BackendType` (`system.go`, 2 sites).
+- **R4** — added the `Files()` sub-handle to the `Sandbox` sub-handle lists (ABOUTME + struct doc),
+  which enumerated only Workdir/Network/Agent (`sandbox.go`).
+- **R5** — renamed the stuttering `Agent().AgentLog()` → `Agent().TerminalLog()` (follows the sibling
+  convention — `Logs`/`ContainerLogs`/`Prompt` don't repeat the handle noun; reads as the recorded
+  counterpart to `CaptureTerminal`). Updated 3 callers (mcpsrv, `log.go`, `bugreport.go`) and the live
+  docs (BREAKING-CHANGES, architecture nav). Internal `ReadAgentLog` unchanged (different layer).
+- **R6** — documented the `.Type` vs `.BackendType` field-name split as a clarification under D68:
+  descriptor/identity struct → `Type`; reference-among-data → `<Kind>Type`.
+
 ## IC1–IC16 (2026-06-03 Internal-code round) — maintainability/correctness cleanup of the internal layers
 
 - **Severity:** maintainability/correctness (not contract shape). **Resolved:** 2026-06-04 on

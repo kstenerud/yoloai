@@ -109,7 +109,7 @@ and agent-interaction verbs that used to hang off `SystemClient` (keyed by a `na
 argument) now hang off the `Sandbox` handle returned by `Client.Sandbox(name)`:
 
 - Agent-interaction verbs move to a new `Sandbox(name).Agent()` sub-handle (homes
-  the third D53 noun, mirroring `Workdir()`): `Prompt`, `AgentLog`, `Logs`,
+  the third D53 noun, mirroring `Workdir()`): `Prompt`, `TerminalLog`, `Logs`,
   `SendInput`, `Attach`, `CaptureTerminal`, `ContainerLogs`.
 - Per-sandbox readers become flat `Sandbox` methods: `SandboxMetadata(name)` →
   `Sandbox(name).Metadata()`, plus `VscodeAttach`, `Unlock`, `Files`, and the path
