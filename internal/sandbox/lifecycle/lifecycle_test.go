@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1101,7 +1102,8 @@ func TestPatchConfigDebug_SetFalse(t *testing.T) {
 func TestPatchConfigDebug_MissingConfig(t *testing.T) {
 	sandboxDir := t.TempDir()
 	err := patchConfigDebug(sandboxDir, true)
-	assert.Error(t, err)
+	require.ErrorIs(t, err, fs.ErrNotExist,
+		"a missing runtime-config.json must surface as fs.ErrNotExist, distinct from a parse failure")
 }
 
 func TestPatchConfigDebug_PreservesOtherFields(t *testing.T) {
@@ -1175,7 +1177,8 @@ func TestPatchConfigAllowedDomains_EmptyListClears(t *testing.T) {
 func TestPatchConfigAllowedDomains_MissingConfig(t *testing.T) {
 	sandboxDir := t.TempDir()
 	err := PatchConfigAllowedDomains(sandboxDir, []string{"api.com"})
-	assert.Error(t, err)
+	require.ErrorIs(t, err, fs.ErrNotExist,
+		"a missing runtime-config.json must surface as fs.ErrNotExist, distinct from a parse failure")
 }
 
 func TestDestroy_BrokenSandbox(t *testing.T) {

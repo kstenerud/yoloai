@@ -79,29 +79,6 @@ func TestSandboxDirForName(t *testing.T) {
 	assert.NotContains(t, dir, "yoloai-mybox") // prefix stripped
 }
 
-// isWSL2 tests
-//
-// isWSL2() itself reads the real /proc/version and so can't be steered in a
-// unit test; the testable logic is the pure classifier procVersionIsWSL2, which
-// we exercise directly with controlled /proc/version contents.
-
-func TestProcVersionIsWSL2(t *testing.T) {
-	cases := []struct {
-		name        string
-		procVersion string
-		want        bool
-	}{
-		{"wsl2 kernel", "Linux version 5.15.0-microsoft-standard-WSL2", true},
-		{"generic kernel", "Linux version 6.8.0-106-generic (buildd@lcy02-amd64-059)", false},
-		{"empty (unreadable /proc/version)", "", false},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			assert.Equal(t, c.want, procVersionIsWSL2([]byte(c.procVersion)))
-		})
-	}
-}
-
 // RequiredCapabilities tests
 
 // buildTestRuntime constructs a Runtime with injected cap fields for unit testing.

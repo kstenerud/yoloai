@@ -132,6 +132,13 @@ toward an ice-cream cone.
 - **T11 — Assert-only-error tests** that can't distinguish "feature works" from "daemon absent":
   `e2e/destroy_test.go:22,39`, the tart stop tests. They pass whether or not the thing works. *Fix:*
   gate on a backend probe and assert real post-conditions, or drop.
+  *(applied)* The original three citations were stale: `e2e/destroy_test.go` and the tart stop tests
+  already assert real post-conditions (NoDirExists/"Destroyed"/exit codes; ESRCH dead-process probe +
+  escalation-log assertion). The live anti-pattern was bare `assert.Error` on error-path unit tests
+  that any failure would satisfy. Strengthened to pin the *specific* error: `StreamLogs` missing-sandbox
+  / invalid-level and `ReadStoredPrompt` / `Clone` missing-source now `ErrorIs(ErrSandboxNotFound)` or
+  `ErrorAs(*yoerrors.UsageError)` + message check; the three `patchConfig*_MissingConfig` tests now
+  `ErrorIs(fs.ErrNotExist)`, distinguishing "config missing" from a parse failure.
 
 ### Cosmetic / hygiene
 
@@ -165,8 +172,14 @@ T4 (e2e trim) → T13 (error-path coverage).
 - ✅ **T5** — collapse two e2e bugreport tests to one flag-path smoke; matrix stays unit-owned.
 - ✅ **T10** — enrich `SaveLoadRoundTrip` + delete 4 subset round-trips; delete `SandboxState_FalseValue`
   + `HasAnyAPIKey_HostEnv` literal dups; keep CLI-diff smoke (legit tier separation).
-- ✅ **T9** — extract `procVersionIsWSL2` + table-test it (replaces the 3 reimpl/no-assert isWSL2
-  tests); strengthen `TestWithNamespace`; delete misleading `TestKataConfigPath`; keep+reframe
-  `names_test.go` as a wire-format guard.
-- ⏳ Remaining: T11 (low-value); T2, T4, T13 (large/judgement);
+- ✅ **T9** — strengthen `TestWithNamespace`; delete misleading `TestKataConfigPath`; keep+reframe
+  `names_test.go` as a wire-format guard. *Follow-up:* removing the 3 weak isWSL2 tests exposed that
+  `isWSL2` had **no production caller** — it was dead code kept compiling-clean only by those tests.
+  Deleted the whole WSL2 detection (`isWSL2` + the extracted `procVersionIsWSL2` + its table-test);
+  if WSL2 handling is needed later it's a one-line re-add.
+- ✅ **T11** — original citations stale (destroy/tart-stop already strong); strengthened the real
+  bare-`assert.Error` sites to pin specific errors: `StreamLogs`/`ReadStoredPrompt`/`Clone` →
+  `ErrorIs(ErrSandboxNotFound)` / `ErrorAs(*yoerrors.UsageError)`; three `patchConfig*_MissingConfig`
+  → `ErrorIs(fs.ErrNotExist)`.
+- ⏳ Remaining: T2, T4, T13 (large/judgement);
   T7 (broad `t.Parallel` adoption — partially seeded in new_test.go).

@@ -15,6 +15,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/yoerrors"
 )
 
 func newCloneMgr(tmpDir string) *Engine {
@@ -76,7 +77,9 @@ func TestClone_InvalidDestName(t *testing.T) {
 	mgr := newCloneMgr(tmpDir)
 
 	err := mgr.Clone(context.Background(), CloneOptions{Source: "source2", Dest: "INVALID!"})
-	assert.Error(t, err)
+	var ue *yoerrors.UsageError
+	require.ErrorAs(t, err, &ue, "an invalid dest name must be a *UsageError, not a generic failure")
+	assert.Contains(t, ue.Error(), "INVALID!", "the error should name the rejected dest")
 }
 
 func TestClone_SourceNotFound(t *testing.T) {
@@ -84,7 +87,8 @@ func TestClone_SourceNotFound(t *testing.T) {
 
 	mgr := newCloneMgr(tmpDir)
 	err := mgr.Clone(context.Background(), CloneOptions{Source: "nonexistent", Dest: "dest2"})
-	assert.Error(t, err)
+	require.ErrorIs(t, err, store.ErrSandboxNotFound,
+		"a missing source must surface ErrSandboxNotFound, distinct from a dest-name rejection")
 	assert.ErrorIs(t, err, ErrSandboxNotFound)
 }
 

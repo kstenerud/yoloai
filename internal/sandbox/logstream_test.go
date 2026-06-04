@@ -14,6 +14,7 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/yoerrors"
 )
 
 func logStreamLayout(t *testing.T) (config.Layout, string) {
@@ -54,13 +55,16 @@ func TestStreamLogs_MissingSandbox(t *testing.T) {
 	tmp := t.TempDir()
 	layout := config.NewLayout(filepath.Join(tmp, ".yoloai"))
 	_, err := StreamLogs(context.Background(), layout, "ghost", LogStreamOptions{})
-	require.Error(t, err)
+	require.ErrorIs(t, err, store.ErrSandboxNotFound,
+		"a missing sandbox must surface ErrSandboxNotFound, not a generic error")
 }
 
 func TestStreamLogs_InvalidLevel(t *testing.T) {
 	layout, name := logStreamLayout(t)
 	_, err := StreamLogs(context.Background(), layout, name, LogStreamOptions{MinLevel: "loud"})
-	require.Error(t, err)
+	var ue *yoerrors.UsageError
+	require.ErrorAs(t, err, &ue, "an unknown level must be a *UsageError owned by the library")
+	assert.Contains(t, ue.Error(), "loud", "the error should name the rejected level")
 }
 
 func TestStreamLogs_BacklogMergeSorted(t *testing.T) {

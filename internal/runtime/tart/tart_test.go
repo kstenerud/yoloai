@@ -4,6 +4,7 @@ package tart
 import (
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -422,7 +423,8 @@ func TestPatchConfigWorkingDir_MissingConfig(t *testing.T) {
 	sandboxDir := t.TempDir()
 	r := &Runtime{}
 	err := r.patchConfigWorkingDir(sandboxDir)
-	assert.Error(t, err)
+	require.ErrorIs(t, err, fs.ErrNotExist,
+		"a missing runtime-config.json must surface as fs.ErrNotExist, distinct from a parse failure")
 }
 
 func TestPatchConfigWorkingDir_NoWorkingDirKey(t *testing.T) {

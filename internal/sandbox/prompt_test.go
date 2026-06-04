@@ -54,5 +54,6 @@ func TestReadStoredPrompt_NoSandbox(t *testing.T) {
 	tmp := t.TempDir()
 	layout := config.NewLayout(filepath.Join(tmp, ".yoloai"))
 	_, _, err := ReadStoredPrompt(layout, "ghost")
-	require.Error(t, err)
+	require.ErrorIs(t, err, store.ErrSandboxNotFound,
+		"a missing sandbox must surface ErrSandboxNotFound, distinct from the missing-prompt no-op")
 }
