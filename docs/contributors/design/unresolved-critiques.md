@@ -90,8 +90,16 @@ toward an ice-cream cone.
 - **T10 — Round-trip / literal-dup tests.** `store/sandbox_state_test.go:31`/`:23`,
   `store/environment_test.go` field-subset variants redundant with `SaveLoadRoundTrip:20`,
   `provision_test.go:19`/`:37`, diff covered in both `diff_test.go` and `integration_test.go:74`.
-  Round-trips prove `encoding/json` works, not our state logic. *Fix:* fold to the full round-trip;
-  delete subset variants.
+  Round-trips prove `encoding/json` works, not our state logic. *Fix (applied):* enriched
+  `TestMeta_SaveLoadRoundTrip` to cover every persisted field (Resources/Principal/NetworkAllow/Ports)
+  and deleted the four subset round-trips (`WithPortsAndNetwork`/`NetworkAllowRoundTrip`/
+  `ResourcesRoundTrip`/`PrincipalRoundTrip`) — a full-struct `assert.Equal` subsumes them; deleted
+  `TestSandboxState_FalseValue` (a flipped-bool re-run of `_Roundtrip`; `_MissingFile`/`_InvalidJSON`
+  keep the real branch coverage); deleted `TestHasAnyAPIKey_HostEnv` (a literal dup of `_Set` — both
+  pass an `ANTHROPIC_API_KEY` host-env map to the claude agent and expect true). Kept the distinct-logic
+  tests (omitempty, version stamping, migration, version-too-new). The diff "double-coverage" was
+  assessed and KEPT: `TestCLI_Diff` is the CLI command-wiring smoke (integration tier), the
+  `patch/diff_test.go` cases are algorithm branch coverage (unit tier) — legitimate pyramid, not dup.
 
 ### Coverage gaps (behind ~100% line coverage)
 
@@ -145,5 +153,7 @@ T4 (e2e trim) → T13 (error-path coverage).
 - ✅ **T8** — inject layout directly instead of steering it through `$HOME` (1541d37).
 - ✅ **T6** — collapse three duplicate sandbox-not-found tests to one (743e23a).
 - ✅ **T5** — collapse two e2e bugreport tests to one flag-path smoke; matrix stays unit-owned.
-- ⏳ Remaining: T10, T9, T11 (mechanical dedup/cleanup); T2, T4, T13 (large/judgement);
+- ✅ **T10** — enrich `SaveLoadRoundTrip` + delete 4 subset round-trips; delete `SandboxState_FalseValue`
+  + `HasAnyAPIKey_HostEnv` literal dups; keep CLI-diff smoke (legit tier separation).
+- ⏳ Remaining: T9, T11 (low-value); T2, T4, T13 (large/judgement);
   T7 (broad `t.Parallel` adoption — partially seeded in new_test.go).

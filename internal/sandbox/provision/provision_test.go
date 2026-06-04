@@ -34,13 +34,6 @@ func TestHasAnyAPIKey_EmptyList(t *testing.T) {
 	assert.True(t, HasAnyAPIKey(agentDef, nil)) // no API key required = always true
 }
 
-func TestHasAnyAPIKey_HostEnv(t *testing.T) {
-	agentDef := agent.GetAgent("claude")
-
-	hostEnv := map[string]string{"ANTHROPIC_API_KEY": "sk-from-sudo"}
-	assert.True(t, HasAnyAPIKey(agentDef, hostEnv))
-}
-
 // HasAnyAuthFile tests
 
 func TestHasAnyAuthFile_Exists(t *testing.T) {

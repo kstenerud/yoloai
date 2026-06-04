@@ -17,12 +17,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestMeta_SaveLoadRoundTrip is the comprehensive serialization round-trip: it
+// populates every persisted field (including the pointer-typed Resources, the
+// typed-segment Principal, and the slice fields Ports/NetworkAllow) and asserts
+// the loaded value equals the original byte-for-byte. A full-struct assert.Equal
+// subsumes every per-field round-trip, so there are deliberately no per-field
+// round-trip variants — only tests for distinct logic (omitempty, version
+// stamping, migration, version-too-new) live alongside.
 func TestMeta_SaveLoadRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 
 	original := &Environment{
 		YoloaiVersion: "1.0.0",
 		Name:          "fix-build",
+		Principal:     "acme",
 		CreatedAt:     time.Date(2025, 1, 15, 10, 30, 0, 0, time.UTC),
 		AgentType:     "claude",
 		Model:         "claude-sonnet-4-latest",
@@ -32,9 +40,14 @@ func TestMeta_SaveLoadRoundTrip(t *testing.T) {
 			Mode:        "copy",
 			BaselineSHA: "a1b2c3d4e5f6",
 		},
-		HasPrompt:   true,
-		NetworkMode: "none",
-		Ports:       []string{"3000:3000"},
+		HasPrompt:    true,
+		NetworkMode:  "isolated",
+		NetworkAllow: []string{"api.anthropic.com", "sentry.io"},
+		Ports:        []string{"3000:3000", "8080:8080"},
+		Resources: &config.ResourceLimits{
+			CPUs:   "4",
+			Memory: "8g",
+		},
 	}
 
 	err := SaveEnvironment(dir, original)
@@ -76,114 +89,6 @@ func TestMeta_OmitEmptyFields(t *testing.T) {
 	// Default (no-principal) sandboxes omit the field, so existing
 	// environment.json files load as the default principal unchanged.
 	assert.NotContains(t, raw, "principal")
-}
-
-func TestMeta_PrincipalRoundTrip(t *testing.T) {
-	dir := t.TempDir()
-
-	original := &Environment{
-		YoloaiVersion: "1.0.0",
-		Name:          "tenant-box",
-		Principal:     "acme",
-		CreatedAt:     time.Date(2026, 6, 3, 12, 0, 0, 0, time.UTC),
-		AgentType:     "claude",
-		Workdir: WorkdirEnvironment{
-			HostPath:  "/home/user/app",
-			MountPath: "/home/user/app",
-			Mode:      "copy",
-		},
-	}
-
-	require.NoError(t, SaveEnvironment(dir, original))
-
-	loaded, err := LoadEnvironment(dir)
-	require.NoError(t, err)
-	assert.Equal(t, config.PrincipalSegment("acme"), loaded.Principal)
-}
-
-func TestMeta_WithPortsAndNetwork(t *testing.T) {
-	dir := t.TempDir()
-
-	original := &Environment{
-		YoloaiVersion: "1.0.0",
-		Name:          "web-dev",
-		CreatedAt:     time.Date(2025, 6, 1, 12, 0, 0, 0, time.UTC),
-		AgentType:     "claude",
-		Workdir: WorkdirEnvironment{
-			HostPath:    "/home/user/web-app",
-			MountPath:   "/home/user/web-app",
-			Mode:        "copy",
-			BaselineSHA: "deadbeef",
-		},
-		NetworkMode: "none",
-		Ports:       []string{"3000:3000", "8080:8080"},
-	}
-
-	err := SaveEnvironment(dir, original)
-	require.NoError(t, err)
-
-	loaded, err := LoadEnvironment(dir)
-	require.NoError(t, err)
-
-	assert.Equal(t, "none", loaded.NetworkMode)
-	assert.Equal(t, []string{"3000:3000", "8080:8080"}, loaded.Ports)
-}
-
-func TestMeta_NetworkAllowRoundTrip(t *testing.T) {
-	dir := t.TempDir()
-
-	original := &Environment{
-		YoloaiVersion: "1.0.0",
-		Name:          "iso-test",
-		CreatedAt:     time.Date(2025, 6, 1, 12, 0, 0, 0, time.UTC),
-		AgentType:     "claude",
-		Workdir: WorkdirEnvironment{
-			HostPath:  "/tmp/project",
-			MountPath: "/tmp/project",
-			Mode:      "copy",
-		},
-		NetworkMode:  "isolated",
-		NetworkAllow: []string{"api.anthropic.com", "sentry.io"},
-	}
-
-	err := SaveEnvironment(dir, original)
-	require.NoError(t, err)
-
-	loaded, err := LoadEnvironment(dir)
-	require.NoError(t, err)
-
-	assert.Equal(t, "isolated", loaded.NetworkMode)
-	assert.Equal(t, []string{"api.anthropic.com", "sentry.io"}, loaded.NetworkAllow)
-}
-
-func TestMeta_ResourcesRoundTrip(t *testing.T) {
-	dir := t.TempDir()
-
-	original := &Environment{
-		YoloaiVersion: "1.0.0",
-		Name:          "resource-test",
-		CreatedAt:     time.Date(2025, 6, 1, 12, 0, 0, 0, time.UTC),
-		AgentType:     "claude",
-		Workdir: WorkdirEnvironment{
-			HostPath:  "/tmp/project",
-			MountPath: "/tmp/project",
-			Mode:      "copy",
-		},
-		Resources: &config.ResourceLimits{
-			CPUs:   "4",
-			Memory: "8g",
-		},
-	}
-
-	err := SaveEnvironment(dir, original)
-	require.NoError(t, err)
-
-	loaded, err := LoadEnvironment(dir)
-	require.NoError(t, err)
-
-	require.NotNil(t, loaded.Resources)
-	assert.Equal(t, "4", loaded.Resources.CPUs)
-	assert.Equal(t, "8g", loaded.Resources.Memory)
 }
 
 func TestMeta_VersionSetOnSave(t *testing.T) {
