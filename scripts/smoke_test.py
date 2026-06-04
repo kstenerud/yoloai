@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import atexit
+import contextlib
 import json
 import os
 import re
@@ -25,7 +26,9 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
@@ -33,6 +36,10 @@ from typing import Callable, Optional
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
+
+# A reusable no-op gate for container backends (no host-wide VM cap to honor).
+# nullcontext does nothing on enter/exit, so it is safe to share across threads.
+_NULL_GATE = contextlib.nullcontext()
 
 SENTINEL = "done"  # touched in the exchange dir when the agent finishes its prompt
 DEFAULT_TIMEOUT = 90    # seconds: container + agent startup for non-VM backends
@@ -150,6 +157,11 @@ class TestResult:
     # print_summary and the run manifest can surface root cause without re-scanning.
     autopsy_path: Optional[str] = None
     fingerprints: list[str] = field(default_factory=list)
+    # Sandbox names this attempt created (copied from the Test's local_sandboxes).
+    # Used by the parallel runner to destroy exactly this attempt's sandboxes
+    # before a retry, instead of slicing the shared ctx.sandboxes list (which is
+    # unsafe when other backends are running concurrently).
+    sandboxes: list[str] = field(default_factory=list)
 
 
 class SkipTest(Exception):
@@ -216,6 +228,18 @@ class RunContext:
     sandboxes: list[str] = field(default_factory=list)
     results: list[TestResult] = field(default_factory=list)
     junit: Optional[JUnitWriter] = None
+    # Concurrency (Phase 2). jobs=0 → auto (one worker per matrix spec); jobs=1
+    # forces the original serial behavior. vm_concurrency caps how many VM-backed
+    # backends run at once — Tart enforces a hard 2-VM macOS limit and concurrent
+    # containerd QEMU VMs raise peak disk, so VM specs share a semaphore while
+    # container specs run unthrottled.
+    jobs: int = 0
+    vm_concurrency: int = 2
+    # Guards mutation of the shared sandboxes/results lists + the single JUnit
+    # file handle; print_lock serializes each test's output block so concurrent
+    # backends don't interleave their PASS/FAIL lines.
+    state_lock: threading.Lock = field(default_factory=threading.Lock)
+    print_lock: threading.Lock = field(default_factory=threading.Lock)
 
 
 # ---------------------------------------------------------------------------
@@ -327,7 +351,8 @@ class Test:
     def sandbox(self, label: str) -> str:
         """Allocate a sandbox name and register it for cleanup."""
         name = f"{self.ctx.run_id}-{label}"
-        self.ctx.sandboxes.append(name)
+        with self.ctx.state_lock:
+            self.ctx.sandboxes.append(name)
         self.local_sandboxes.append(name)
         return name
 
@@ -1338,16 +1363,39 @@ def write_failure_autopsy(
     return out
 
 
-def _destroy_retry_sandboxes(ctx: RunContext, count_before: int) -> None:
-    """Destroy sandboxes added since *count_before* so a retry starts clean."""
-    stale = ctx.sandboxes[count_before:]
-    for name in stale:
+def _destroy_named_sandboxes(ctx: RunContext, names: list[str]) -> None:
+    """Destroy the given sandboxes and drop them from the shared cleanup list.
+
+    Thread-safe: a backend's retry/VM cleanup destroys exactly the names its own
+    attempt created (TestResult.sandboxes), never a positional slice of the
+    shared ctx.sandboxes — concurrent backends append to that list, so slicing
+    would delete a sibling's sandbox.
+    """
+    for name in names:
         subprocess.run(
             [ctx.yoloai_bin, "destroy", "--yes", name],
             capture_output=True,
             timeout=30,
         )
-    del ctx.sandboxes[count_before:]
+    with ctx.state_lock:
+        ctx.sandboxes = [n for n in ctx.sandboxes if n not in names]
+
+
+def _emit(ctx: RunContext, text: str) -> None:
+    """Print a block atomically so concurrent backends don't interleave output."""
+    with ctx.print_lock:
+        print(text)
+
+
+def _record_result(ctx: RunContext, result: TestResult) -> None:
+    """Append a terminal result to the shared list + JUnit, under the state lock.
+
+    Only the *final* result of a test (after any retries) is recorded — run_test
+    no longer records, so intermediate failed attempts never reach the summary."""
+    with ctx.state_lock:
+        ctx.results.append(result)
+        if ctx.junit:
+            ctx.junit.write_testcase(result)
 
 
 def _prerun_prune(ctx: RunContext) -> None:
@@ -1415,7 +1463,12 @@ def run_test(
     attempt: int = 1,
 ) -> TestResult:
     t = Test(ctx, name, attempt=attempt)
-    print(f"  {name} ...", end="", flush=True)
+    # Output is buffered into `out` and emitted as one atomic block at the end
+    # (see _emit). Under parallel matrix execution, multiple backends run their
+    # tests concurrently; streaming `print(..., end="")` would interleave their
+    # partial lines into garble. A single block per test keeps the transcript
+    # readable regardless of how many backends are in flight.
+    out: list[str] = []
     start = time.monotonic()
     try:
         fn(t)
@@ -1429,26 +1482,30 @@ def run_test(
             if summary := _summarize_network_probe_events(sb):
                 probe_notes.append(f"{sb}: {summary}")
         if probe_notes:
-            print(f" PASS  [probe: {' | '.join(probe_notes)}]")
+            out.append(f"  {name} ... PASS  [probe: {' | '.join(probe_notes)}]")
         else:
-            print(" PASS")
+            out.append(f"  {name} ... PASS")
     except SkipTest as e:
         result = TestResult(name=name, skipped=True, reason=str(e), elapsed_s=time.monotonic() - start)
-        print(f"\n  *** SKIP [{name}]: {e}")
+        out.append(f"  *** SKIP [{name}]: {e}")
     except AssertionError as e:
         result = TestResult(name=name, passed=False, reason=str(e), elapsed_s=time.monotonic() - start)
-        print(f"\n  *** FAIL [{name}]")
+        out.append(f"  *** FAIL [{name}]")
         for line in str(e).splitlines():
-            print(f"      {line}")
-        print(f"      log: {t.log_file}")
+            out.append(f"      {line}")
+        out.append(f"      log: {t.log_file}")
     except subprocess.TimeoutExpired as e:
         result = TestResult(name=name, passed=False, reason=f"command timed out: {e}", elapsed_s=time.monotonic() - start)
-        print(f"\n  *** FAIL [{name}]: command timed out")
-        print(f"      log: {t.log_file}")
+        out.append(f"  *** FAIL [{name}]: command timed out")
+        out.append(f"      log: {t.log_file}")
     except Exception as e:
         result = TestResult(name=name, passed=False, reason=f"{type(e).__name__}: {e}", elapsed_s=time.monotonic() - start)
-        print(f"\n  *** ERROR [{name}]: {type(e).__name__}: {e}")
-        print(f"      log: {t.log_file}")
+        out.append(f"  *** ERROR [{name}]: {type(e).__name__}: {e}")
+        out.append(f"      log: {t.log_file}")
+    # Record the sandbox names this attempt created so the caller can destroy
+    # exactly them on retry/VM-cleanup, without slicing the shared ctx.sandboxes
+    # list (unsafe when sibling backends append concurrently).
+    result.sandboxes = list(t.local_sandboxes)
     # Preserve sandbox state on failure so the user can diagnose later.
     # cleanup() destroys all sandboxes at exit, so this must happen before
     # we return — and retries destroy the prior attempt's sandboxes, so the
@@ -1456,28 +1513,26 @@ def run_test(
     if not result.passed and not result.skipped and t.local_sandboxes:
         preserved = _preserve_failed_attempt(ctx, name, t.local_sandboxes, attempt)
         if preserved is not None:
-            print(f"      preserved: {preserved}")
+            out.append(f"      preserved: {preserved}")
             autopsy = write_failure_autopsy(ctx, result, preserved)
             if autopsy is not None:
                 if result.fingerprints:
-                    print(f"      autopsy: {result.fingerprints[0]}")
-                print(f"      details: {autopsy}")
+                    out.append(f"      autopsy: {result.fingerprints[0]}")
+                out.append(f"      details: {autopsy}")
     elif result.passed and t.local_sandboxes:
         # Snapshot last-good event surface for future failure diffs (Tier 3).
         # Must read the live sandbox dirs before cleanup destroys them.
         save_baseline(ctx, name, t.local_sandboxes)
-    ctx.results.append(result)
-    if ctx.junit:
-        ctx.junit.write_testcase(result)
+    _emit(ctx, "\n".join(out))
+    # Recording (ctx.results + JUnit) is the caller's job via _record_result,
+    # so only the final attempt of a retried test reaches the summary.
     return result
 
 
 def skip_test(ctx: RunContext, name: str, reason: str) -> TestResult:
     result = TestResult(name=name, skipped=True, reason=reason)
-    print(f"  *** SKIP [{name}]: {reason}")
-    ctx.results.append(result)
-    if ctx.junit:
-        ctx.junit.write_testcase(result)
+    _emit(ctx, f"  *** SKIP [{name}]: {reason}")
+    _record_result(ctx, result)
     return result
 
 
@@ -1651,7 +1706,9 @@ def test_clone(t: Test, spec: BackendSpec) -> None:
     r = t.run("clone", name_a, name_b, timeout=CMD_TIMEOUT)
     t.assert_ok(r, "clone")
     # Register B after clone succeeds, before assertions, so it is always destroyed.
-    t.ctx.sandboxes.append(name_b)
+    with t.ctx.state_lock:
+        t.ctx.sandboxes.append(name_b)
+    t.local_sandboxes.append(name_b)
 
     r = t.run("diff", name_b)
     t.assert_ok(r, "diff on clone")
@@ -2079,6 +2136,28 @@ def parse_args() -> argparse.Namespace:
             "run artifacts elsewhere; see also YOLOAI_SMOKE_CACHE."
         ),
     )
+    parser.add_argument(
+        "--jobs",
+        type=int,
+        default=0,
+        metavar="N",
+        help=(
+            "Max backends to run concurrently within a matrix phase. "
+            "0 (default) = auto (all backends at once). 1 = strictly serial "
+            "(reproduces the historical one-backend-at-a-time behavior)."
+        ),
+    )
+    parser.add_argument(
+        "--vm-concurrency",
+        type=int,
+        default=int(os.environ.get("YOLOAI_SMOKE_VM_CONCURRENCY", "2")),
+        metavar="N",
+        help=(
+            "Max VM-backed backends to run concurrently (macOS allows 2 Tart VMs; "
+            "concurrent containerd QEMU VMs raise peak disk). Default 2, or "
+            "$YOLOAI_SMOKE_VM_CONCURRENCY. Container backends are unaffected."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -2311,6 +2390,8 @@ def main() -> int:
         debug=args.debug,
         test_filter=args.test,
         backend_filter=args.backend,
+        jobs=args.jobs,
+        vm_concurrency=args.vm_concurrency,
     )
     if args.junit:
         ctx.junit = JUnitWriter(args.junit)
@@ -2427,46 +2508,80 @@ def main() -> int:
             return True
         return test_name in ctx.test_filter
 
-    def run_matrix_test(
+    def _run_backend_test(
         test_label: str,
+        spec: BackendSpec,
         test_fn: Callable[[Test, BackendSpec], None],
+        vm_sema: "threading.Semaphore",
     ) -> None:
-        """Run a test across the backend matrix with prereq checks and retries."""
-        for spec in matrix:
-            test_name = f"{test_label}/{spec.label}"
+        """Run one backend's slot of a matrix test, with prereq/skip + retries.
 
-            if not should_run_test(test_name):
-                continue
-            if ctx.backend_filter and spec.label not in ctx.backend_filter:
-                continue
+        Self-contained per backend so it can run on its own thread: it filters
+        (should_run/backend_filter), skips unavailable backends, then runs the
+        test under a VM-concurrency gate. Each attempt destroys exactly the
+        sandboxes its own attempt created (result.sandboxes) — never a slice of
+        the shared ctx.sandboxes, which sibling backends mutate concurrently.
+        Only the terminal result is recorded, via _record_result.
+        """
+        test_name = f"{test_label}/{spec.label}"
+        if not should_run_test(test_name):
+            return
+        if ctx.backend_filter and spec.label not in ctx.backend_filter:
+            return
 
-            pr = preq.get(spec.label)
-            if pr is None or not pr.available:
-                reason = pr.note if pr else "not in prereq results"
-                skip_test(ctx, test_name, reason)
-                continue
+        pr = preq.get(spec.label)
+        if pr is None or not pr.available:
+            reason = pr.note if pr else "not in prereq results"
+            skip_test(ctx, test_name, reason)
+            return
 
-            sandbox_count_before = len(ctx.sandboxes)
+        # VM backends share a host-wide concurrency cap (macOS allows 2 Tart VMs;
+        # concurrent containerd QEMU VMs raise peak disk). Container backends run
+        # unthrottled. Hold the slot for the test's full lifetime incl. retries.
+        gate = vm_sema if spec.is_vm else _NULL_GATE
+        with gate:
             result = run_test(ctx, test_name, lambda t: test_fn(t, spec), attempt=1)
             if not result.passed and not result.skipped and spec.retries > 0:
                 for retry_idx in range(spec.retries):
                     attempt = retry_idx + 2  # attempt 1 was the initial run
-                    print(f"      Retrying {test_name} (attempt {retry_idx + 1}/{spec.retries})...")
-                    ctx.results.pop()
-                    # Destroy sandboxes created during the failed attempt so
-                    # the retry can create fresh ones with the same names.
-                    # run_test has already preserved their state under
-                    # <log_dir>/sandboxes/<test>/attempt<N>/ before we get here.
-                    _destroy_retry_sandboxes(ctx, sandbox_count_before)
+                    _emit(ctx, f"      Retrying {test_name} (attempt {retry_idx + 1}/{spec.retries})...")
+                    # Destroy sandboxes created during the failed attempt so the
+                    # retry can reuse the same names. run_test already preserved
+                    # their state under <log_dir>/sandboxes/<test>/attempt<N>/.
+                    _destroy_named_sandboxes(ctx, result.sandboxes)
                     result = run_test(ctx, test_name, lambda t: test_fn(t, spec), attempt=attempt)
                     if result.passed:
                         break
-            # On VM backends, a failed test can leave a running VM that consumes
-            # one of the macOS 2-VM slots and blocks subsequent VM tests. Destroy
-            # sandboxes immediately after all retries are exhausted (state is
-            # already preserved under log_dir/sandboxes/ at this point).
+            # On VM backends, a failed test can leave a running VM that consumes a
+            # host VM slot and blocks subsequent VM tests. Destroy immediately
+            # after retries are exhausted (state already preserved at this point).
             if not result.passed and spec.is_vm:
-                _destroy_retry_sandboxes(ctx, sandbox_count_before)
+                _destroy_named_sandboxes(ctx, result.sandboxes)
+        _record_result(ctx, result)
+
+    def run_matrix_test(
+        test_label: str,
+        test_fn: Callable[[Test, BackendSpec], None],
+    ) -> None:
+        """Run a test across the backend matrix, one slot per backend.
+
+        Backends fan out concurrently (bounded by --jobs and, for VM backends, by
+        --vm-concurrency); the phase joins before the caller moves on. --jobs 1
+        reproduces the historical strictly-serial behavior exactly.
+        """
+        vm_sema = threading.Semaphore(max(1, ctx.vm_concurrency))
+        workers = ctx.jobs if ctx.jobs > 0 else len(matrix)
+        if workers <= 1:
+            for spec in matrix:
+                _run_backend_test(test_label, spec, test_fn, vm_sema)
+            return
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = [
+                pool.submit(_run_backend_test, test_label, spec, test_fn, vm_sema)
+                for spec in matrix
+            ]
+            for f in futures:
+                f.result()  # surface worker exceptions to the main thread
 
     # -------------------------------------------------------------------------
     # Non-matrix tests (full tier only)
@@ -2474,7 +2589,7 @@ def main() -> int:
 
     if should_run_test("clone"):
         if ctx.full:
-            run_test(ctx, "clone", lambda t: test_clone(t, DEFAULT_BACKEND))
+            _record_result(ctx, run_test(ctx, "clone", lambda t: test_clone(t, DEFAULT_BACKEND)))
         else:
             skip_test(ctx, "clone", "full tier only (use --full)")
 
@@ -2487,6 +2602,10 @@ def main() -> int:
 
     print("\nBackend matrix (isolation_check):")
     run_matrix_test("isolation_check", test_isolation_check)
+
+    # Parallel execution records results in completion order; sort by test name
+    # so the summary and manifest are deterministic regardless of --jobs.
+    ctx.results.sort(key=lambda r: r.name)
 
     print_summary(ctx.results)
 
