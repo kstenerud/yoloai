@@ -1,9 +1,10 @@
-// ABOUTME: Tests for plain-int schema versioning, the shared RealmStatus
-// ABOUTME: check, and CreateFreshLibrary initialization.
+// ABOUTME: Tests for plain-int schema versioning, the shared RealmStatus check,
+// ABOUTME: CreateFreshLibrary init, and the MigrateLibrary step engine.
 
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -129,4 +130,80 @@ func TestCreateFreshLibrary(t *testing.T) {
 	v, _, err = ReadSchemaVersion(layout.SchemaVersionPath())
 	require.NoError(t, err)
 	assert.Equal(t, LibrarySchemaVersion, v)
+}
+
+// An unstamped but populated DataDir reads as version 0: MigrateLibrary walks it
+// up to the current version, records the stamp, and must not destroy existing
+// content. v0 -> v1 is a no-op transform today; locking the preserve-and-stamp
+// guarantee here means a future real transform inherits the expectation.
+func TestMigrateLibrary_UnstampedV0_StampsAndPreservesData(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "library")
+	require.NoError(t, os.MkdirAll(dir, 0750))
+	// Pre-existing sandbox data with no stamp — this is what a pre-versioning
+	// install looks like on disk.
+	marker := filepath.Join(dir, "sandboxes", "keep.txt")
+	require.NoError(t, os.MkdirAll(filepath.Dir(marker), 0750))
+	require.NoError(t, os.WriteFile(marker, []byte("data"), 0600))
+
+	layout := NewLayout(dir)
+	require.NoError(t, MigrateLibrary(layout))
+
+	v, exists, err := ReadSchemaVersion(layout.SchemaVersionPath())
+	require.NoError(t, err)
+	assert.True(t, exists)
+	assert.Equal(t, LibrarySchemaVersion, v)
+
+	st, err := RealmStatus(dir, LibrarySchemaVersion)
+	require.NoError(t, err)
+	assert.Equal(t, LayoutOK, st)
+
+	assert.FileExists(t, marker, "existing content must survive the migration")
+}
+
+func TestMigrateLibrary_AlreadyCurrent_Idempotent(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "library")
+	layout := NewLayout(dir)
+	require.NoError(t, CreateFreshLibrary(layout)) // stamped at current
+
+	require.NoError(t, MigrateLibrary(layout))
+	require.NoError(t, MigrateLibrary(layout))
+
+	v, _, err := ReadSchemaVersion(layout.SchemaVersionPath())
+	require.NoError(t, err)
+	assert.Equal(t, LibrarySchemaVersion, v)
+}
+
+func TestMigrateLibrary_NewerThanBuild_Errors(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "library")
+	require.NoError(t, os.MkdirAll(dir, 0750))
+	layout := NewLayout(dir)
+	require.NoError(t, WriteSchemaVersion(layout.SchemaVersionPath(), LibrarySchemaVersion+1))
+
+	err := MigrateLibrary(layout)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "upgrade yoloai")
+}
+
+// TestMigrateLibraryStep locks the per-version transform contract so a future
+// bump has a pattern to extend: every version in the registered range
+// [0, LibrarySchemaVersion) must apply cleanly, and the first unregistered
+// version must be refused rather than silently skipped. When you add a
+// vN -> vN+1 step, bump LibrarySchemaVersion and add the matching `case N:` to
+// migrateLibraryStep — the registered loop then covers the new step
+// automatically and the unregistered guard moves up with the constant.
+func TestMigrateLibraryStep(t *testing.T) {
+	layout := NewLayout(t.TempDir())
+
+	for from := range LibrarySchemaVersion {
+		t.Run(fmt.Sprintf("registered_v%d", from), func(t *testing.T) {
+			require.NoError(t, migrateLibraryStep(layout, from),
+				"every registered step on the path MigrateLibrary walks must succeed")
+		})
+	}
+
+	t.Run("unregistered_version_errors", func(t *testing.T) {
+		err := migrateLibraryStep(layout, LibrarySchemaVersion)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no migration registered")
+	})
 }
