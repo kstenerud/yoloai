@@ -34,7 +34,11 @@ func runSystemDisk(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
 	out := cmd.OutOrStdout()
 
-	du, err := cliutil.System().DiskUsage(ctx)
+	sys, err := cliutil.System()
+	if err != nil {
+		return err
+	}
+	du, err := sys.DiskUsage(ctx)
 	if err != nil {
 		return err
 	}

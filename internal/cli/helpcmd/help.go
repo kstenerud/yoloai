@@ -4,7 +4,6 @@ package helpcmd
 // ABOUTME: via embedded markdown files with fuzzy suggestion for unknown topics.
 
 import (
-	"context"
 	"embed"
 	"fmt"
 	"os"
@@ -145,7 +144,7 @@ func unknownTopicError(topic string) error {
 // definitions so it stays in sync with the code.
 func generateAgentsTopic() string {
 	var b strings.Builder
-	realAgents := cliutil.System().AgentTypes(yoloai.AgentQuery{RealOnly: true})
+	realAgents := yoloai.AgentTypes(yoloai.AgentQuery{RealOnly: true})
 
 	b.WriteString("AGENTS AND MODELS\n")
 	b.WriteString("\n")
@@ -190,7 +189,7 @@ func generateAgentsTopic() string {
 // keeps the example honest if a new container backend ships without
 // docker's host.docker.internal convention.
 func containerHostExample() string {
-	for _, b := range cliutil.System().BackendTypes(context.Background(), yoloai.BackendQuery{}) {
+	for _, b := range yoloai.BackendTypes() {
 		if b.HostFromContainer != "" {
 			return b.HostFromContainer
 		}

@@ -55,7 +55,7 @@ func NewNewCmd(version string) *cobra.Command {
 	cmd.Flags().StringSlice("env", nil, "Environment variable (KEY=VAL, repeatable)")
 	cmd.Flags().StringArray("runtime", []string{}, "Apple simulator runtime (ios, tvos, watchos, visionos). Repeatable. Example: --runtime ios --runtime tvos:26.1")
 	cmd.Flags().Bool("vscode-tunnel", false, "Launch a VS Code Remote Tunnel alongside the agent (connect from VS Code on any machine)")
-	cmd.Flags().String("archetype", "", fmt.Sprintf("Environment archetype (%s)", strings.Join(cliutil.System().Archetypes(), "|")))
+	cmd.Flags().String("archetype", "", fmt.Sprintf("Environment archetype (%s)", strings.Join(yoloai.Archetypes(), "|")))
 
 	cmd.MarkFlagsMutuallyExclusive("network-none", "network-isolated")
 	cmd.MarkFlagsMutuallyExclusive("profile", "no-profile")

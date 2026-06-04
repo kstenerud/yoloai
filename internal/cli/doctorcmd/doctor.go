@@ -135,7 +135,10 @@ Unavailable entries and advisory sections do not affect the exit code.`,
 func runDoctor(cmd *cobra.Command, backendFilter, isolationFilter string, isJSON bool) error {
 	ctx := cmd.Context()
 	out := cmd.OutOrStdout()
-	sys := cliutil.System()
+	sys, err := cliutil.System()
+	if err != nil {
+		return err
+	}
 
 	reports, err := sys.Doctor(ctx, yoloai.SystemDoctorOptions{
 		BackendFilter:   backendFilter,

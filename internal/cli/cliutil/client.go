@@ -160,7 +160,7 @@ func Client(cmd *cobra.Command) (*yoloai.Client, error) {
 //
 // It builds a backend-less Client (no runtime opened) and returns its System
 // sub-handle. The caller need not Close — a backend-less Client's Close is a no-op.
-func System() *yoloai.System {
+func System() (*yoloai.System, error) {
 	l := Layout()
 	c, err := yoloai.NewClient(context.Background(), yoloai.ClientCreateOptions{
 		DataDir: l.DataDir,
@@ -168,11 +168,9 @@ func System() *yoloai.System {
 		Env:     l.Env,
 	})
 	if err != nil {
-		// Layout() always carries a non-empty DataDir (rootLayout or the
-		// $HOME/.yoloai fallback), so the only error path is unreachable.
-		panic(err)
+		return nil, err
 	}
-	return c.System()
+	return c.System(), nil
 }
 
 // SandboxMetadata reads a sandbox's persisted read-model (environment.json)

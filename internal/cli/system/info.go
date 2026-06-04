@@ -18,7 +18,11 @@ func newSystemInfoCmd(version, commit, date string) *cobra.Command {
 		Short: "Show system information",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			info, err := cliutil.System().Info(cmd.Context())
+			sys, err := cliutil.System()
+			if err != nil {
+				return err
+			}
+			info, err := sys.Info(cmd.Context())
 			if err != nil {
 				return err
 			}

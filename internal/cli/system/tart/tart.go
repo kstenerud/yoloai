@@ -23,7 +23,7 @@ import (
 // pkgClient is set by NewCmd at command-tree construction time. It returns the
 // cli root's public System so this subpackage never imports internal/cli
 // back (which would create a cycle). Subcommand handlers read it at invocation.
-var pkgClient func() *yoloai.System
+var pkgClient func() (*yoloai.System, error)
 
 // NewCmd defines `yoloai system tart` (formerly `yoloai system runtime`).
 // The old `runtime` name remains a hidden alias that emits a deprecation warning.
@@ -32,7 +32,7 @@ var pkgClient func() *yoloai.System
 // subpackage doesn't need to import internal/cli back (which would create a
 // cycle). NewCmd stores it in a package-level var; subcommand RunE handlers
 // read that var at invocation time.
-func NewCmd(clientFn func() *yoloai.System) *cobra.Command {
+func NewCmd(clientFn func() (*yoloai.System, error)) *cobra.Command {
 	pkgClient = clientFn
 	cmd := &cobra.Command{
 		Use:     "tart",
@@ -88,7 +88,11 @@ func requireTartBackend(cmd *cobra.Command, _ []string) error {
 		return yoerrors.NewUsageError("yoloai system tart commands are only available on macOS")
 	}
 
-	available, err := pkgClient().TartBases().Available(cmd.Context())
+	sys, err := pkgClient()
+	if err != nil {
+		return err
+	}
+	available, err := sys.TartBases().Available(cmd.Context())
 	if err != nil || !available {
 		reason := "backend probe failed"
 		if err != nil {
@@ -123,7 +127,11 @@ Examples:
 // runSystemTartAdd implements the `system tart add` command body.
 func runSystemTartAdd(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
-	h := pkgClient().TartBases()
+	sys, err := pkgClient()
+	if err != nil {
+		return err
+	}
+	h := sys.TartBases()
 
 	fmt.Fprintf(cmd.OutOrStdout(), "\nResolving runtime versions...\n") //nolint:errcheck
 	plan, err := h.PlanBase(args)
@@ -179,7 +187,11 @@ Examples:
 
 func runSystemTartList(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
-	h := pkgClient().TartBases()
+	sys, err := pkgClient()
+	if err != nil {
+		return err
+	}
+	h := sys.TartBases()
 
 	bases, err := h.List(ctx)
 	if err != nil {
@@ -276,7 +288,11 @@ Example:
 func runSystemTartRemove(cmd *cobra.Command, args []string, opts *runtimeRemoveOpts) error {
 	baseName := args[0]
 	ctx := cmd.Context()
-	h := pkgClient().TartBases()
+	sys, err := pkgClient()
+	if err != nil {
+		return err
+	}
+	h := sys.TartBases()
 
 	// Look up the size up front so the confirmation prompt can show it. This
 	// also gives the clean "not found" message before any delete is attempted.

@@ -78,7 +78,11 @@ func newSystemBackendsCmd() *cobra.Command {
 // runtime.Descriptors() rather than a CLI-local list — new backends
 // register themselves and auto-appear in this listing.
 func listBackends(cmd *cobra.Command) error {
-	backends := cliutil.System().BackendTypes(cmd.Context(), yoloai.BackendQuery{ProbeAvailability: true})
+	sys, err := cliutil.System()
+	if err != nil {
+		return err
+	}
+	backends := sys.BackendTypes(cmd.Context(), yoloai.BackendQuery{ProbeAvailability: true})
 
 	if cliutil.JSONEnabled(cmd) {
 		type backendJSON struct {
@@ -117,9 +121,13 @@ func listBackends(cmd *cobra.Command) error {
 // Descriptor fields supply the operational metadata; backendTradeoffs is
 // the CLI-only selling-pitch bullet list (kept separate per round-7 critique).
 func showBackendDetail(cmd *cobra.Command, name string) error {
+	sys, err := cliutil.System()
+	if err != nil {
+		return err
+	}
 	var desc yoloai.BackendInfo
 	found := false
-	for _, b := range cliutil.System().BackendTypes(cmd.Context(), yoloai.BackendQuery{ProbeAvailability: true}) {
+	for _, b := range sys.BackendTypes(cmd.Context(), yoloai.BackendQuery{ProbeAvailability: true}) {
 		if string(b.Type) == name {
 			desc = b
 			found = true
@@ -175,8 +183,8 @@ func showBackendDetail(cmd *cobra.Command, name string) error {
 
 // backendNames returns the names of all registered backends in registration
 // order; used in usage-error messages enumerating valid choices.
-func backendNames(cmd *cobra.Command) []string {
-	backends := cliutil.System().BackendTypes(cmd.Context(), yoloai.BackendQuery{})
+func backendNames(_ *cobra.Command) []string {
+	backends := yoloai.BackendTypes()
 	names := make([]string, len(backends))
 	for i, b := range backends {
 		names[i] = string(b.Type)
@@ -203,7 +211,7 @@ func newSystemAgentsCmd() *cobra.Command {
 
 // listAgents displays the summary table of all agents.
 func listAgents(cmd *cobra.Command) error {
-	agents := cliutil.System().AgentTypes(yoloai.AgentQuery{})
+	agents := yoloai.AgentTypes(yoloai.AgentQuery{})
 
 	if cliutil.JSONEnabled(cmd) {
 		type agentJSON struct {
@@ -234,8 +242,8 @@ func listAgents(cmd *cobra.Command) error {
 
 // agentNames returns the sorted names of all shipped agents; used for
 // shell completion and usage-error enumerations.
-func agentNames(cmd *cobra.Command) []string {
-	agents := cliutil.System().AgentTypes(yoloai.AgentQuery{})
+func agentNames(_ *cobra.Command) []string {
+	agents := yoloai.AgentTypes(yoloai.AgentQuery{})
 	names := make([]string, len(agents))
 	for i, a := range agents {
 		names[i] = string(a.Type)
@@ -247,7 +255,7 @@ func agentNames(cmd *cobra.Command) []string {
 func showAgentDetail(cmd *cobra.Command, name string) error {
 	var def yoloai.AgentInfo
 	found := false
-	for _, a := range cliutil.System().AgentTypes(yoloai.AgentQuery{}) {
+	for _, a := range yoloai.AgentTypes(yoloai.AgentQuery{}) {
 		if string(a.Type) == name {
 			def = a
 			found = true

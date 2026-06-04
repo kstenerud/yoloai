@@ -99,7 +99,11 @@ func runSystemBuild(cmd *cobra.Command, args []string, backend yoloai.BackendTyp
 		Secrets:     secrets,
 		Output:      buildOutputFor(cmd),
 	}
-	if err := cliutil.System().Build(cmd.Context(), opts); err != nil {
+	sys, err := cliutil.System()
+	if err != nil {
+		return err
+	}
+	if err := sys.Build(cmd.Context(), opts); err != nil {
 		return err
 	}
 	return reportBuildOK(cmd, profile)
@@ -180,7 +184,11 @@ func runSystemBuildAll(cmd *cobra.Command, args []string) error {
 		Secrets:     secrets,
 		Output:      buildOutputFor(cmd),
 	}
-	if err := cliutil.System().Build(cmd.Context(), opts); err != nil {
+	sys, err := cliutil.System()
+	if err != nil {
+		return err
+	}
+	if err := sys.Build(cmd.Context(), opts); err != nil {
 		// System.Build returns "no available backends to build
 		// for" — preserve the original CLI behavior of printing the
 		// message and exiting 0 in that case.

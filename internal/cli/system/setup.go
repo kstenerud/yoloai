@@ -54,7 +54,10 @@ type setupChoice struct {
 // Returns nil and writes nothing if the user chooses [p] at the tmux prompt
 // (preview-then-exit, intentional).
 func runSystemSetup(cmd *cobra.Command) error {
-	sc := cliutil.System()
+	sc, err := cliutil.System()
+	if err != nil {
+		return err
+	}
 	ctx := cmd.Context()
 
 	reader := bufio.NewReader(cmd.InOrStdin())

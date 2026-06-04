@@ -43,7 +43,11 @@ func newProfileCreateCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
-			if err := cliutil.System().Profiles().Create(cmd.Context(), name); err != nil {
+			sys, err := cliutil.System()
+			if err != nil {
+				return err
+			}
+			if err := sys.Profiles().Create(cmd.Context(), name); err != nil {
 				return err
 			}
 			yamlPath := filepath.Join(cliutil.Layout().ProfileDir(name), "config.yaml")
@@ -66,7 +70,11 @@ func newProfileListCmd() *cobra.Command {
 		Short: "List profiles",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			summaries, err := cliutil.System().Profiles().List(cmd.Context())
+			sys, err := cliutil.System()
+			if err != nil {
+				return err
+			}
+			summaries, err := sys.Profiles().List(cmd.Context())
 			if err != nil {
 				return err
 			}
@@ -113,7 +121,11 @@ func newProfileInfoCmd() *cobra.Command {
 }
 
 func runProfileInfoCmd(cmd *cobra.Command, name string, diffMode bool) error {
-	info, err := cliutil.System().Profiles().Info(cmd.Context(), name)
+	sys, err := cliutil.System()
+	if err != nil {
+		return err
+	}
+	info, err := sys.Profiles().Info(cmd.Context(), name)
 	if err != nil {
 		return err
 	}
@@ -560,7 +572,10 @@ func newProfileDeleteCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
 			ctx := cmd.Context()
-			sysClient := cliutil.System()
+			sysClient, err := cliutil.System()
+			if err != nil {
+				return err
+			}
 			profiles := sysClient.Profiles()
 
 			// Profiles no longer support inheritance — no dependency check needed.

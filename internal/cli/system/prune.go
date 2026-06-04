@@ -62,8 +62,13 @@ func runSystemPrune(cmd *cobra.Command, dryRun, explicitYes, images bool) error 
 	// plain --json never empties trash on its own.
 	skipPruneConfirm := cliutil.EffectiveYes(cmd)
 
+	sys, err := cliutil.System()
+	if err != nil {
+		return err
+	}
+
 	// First, a dry-run scan to find what's there.
-	scanResult, err := cliutil.System().Prune(ctx, yoloai.SystemPruneOptions{
+	scanResult, err := sys.Prune(ctx, yoloai.SystemPruneOptions{
 		DryRun:           true,
 		IncludeBaseImage: images,
 		Output:           output,
@@ -87,7 +92,7 @@ func runSystemPrune(cmd *cobra.Command, dryRun, explicitYes, images bool) error 
 	}
 
 	// Actual removal. The library does the work; we just report.
-	actualResult, err := cliutil.System().Prune(ctx, yoloai.SystemPruneOptions{
+	actualResult, err := sys.Prune(ctx, yoloai.SystemPruneOptions{
 		DryRun:           false,
 		IncludeBaseImage: images,
 		Output:           output,
@@ -278,7 +283,11 @@ func maybeEmptyTrash(cmd *cobra.Command, ctx context.Context, trash yoloai.Trash
 		}
 	}
 
-	removed, freed, err := cliutil.System().EmptyTrash()
+	sys, err := cliutil.System()
+	if err != nil {
+		return err
+	}
+	removed, freed, err := sys.EmptyTrash()
 	if err != nil {
 		return err
 	}

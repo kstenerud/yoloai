@@ -124,6 +124,13 @@ contract rounds above. Found via a whole-file read pass; `file:line` anchors are
   `system` subcommand routes through it, so a future DataDir-validation change turns a user error
   into a crash.
 - **Direction.** Return `(*yoloai.System, error)` like `cliutil.Client()` already does.
+- **Done (2026-06-04).** `cliutil.System()` now returns `(*yoloai.System, error)`; all ~30 handler
+  call sites extract-and-error-check. Three stateless verbs that some non-error-returning callers
+  needed (`Archetypes`, `AgentTypes`, no-probe `BackendTypes`) were also exposed as package-level
+  free functions in `discovery.go` (precedent: `yoloai.Archetypes()`), so help-text generators and
+  the `new` flag-description avoid the fallible handle entirely. `gate.go` extracted
+  `initFreshDataDir`/`checkDataDirStatus` to stay under the cyclop limit; the `tart` subpackage's
+  `pkgClient func() (*yoloai.System, error)` propagated the signature change.
 
 **IC11 — `status.InspectSandbox` hand-rolls change-detection that `detectWorkdirChanges` owns.**
 - **Evidence.** `status/status.go:302–323` inlines the workdir+aux change logic while

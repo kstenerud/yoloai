@@ -47,20 +47,39 @@ func runMigrationGate(cmd *cobra.Command) error {
 		return err
 	}
 	if empty {
-		if err := cliutil.CreateFreshCLI(); err != nil {
-			return fmt.Errorf("initialize cli data dir: %w", err)
-		}
-		if err := cliutil.System().CreateFresh(); err != nil {
-			return fmt.Errorf("initialize library data dir: %w", err)
-		}
-		return nil
+		return initFreshDataDir()
 	}
+	return checkDataDirStatus(top)
+}
 
+// initFreshDataDir initializes both the CLI and library data directories for a
+// fresh install where TOP is absent or empty.
+func initFreshDataDir() error {
+	if err := cliutil.CreateFreshCLI(); err != nil {
+		return fmt.Errorf("initialize cli data dir: %w", err)
+	}
+	sys, err := cliutil.System()
+	if err != nil {
+		return err
+	}
+	if err := sys.CreateFresh(); err != nil {
+		return fmt.Errorf("initialize library data dir: %w", err)
+	}
+	return nil
+}
+
+// checkDataDirStatus reads both realm statuses on a non-empty TOP and decides
+// whether to proceed, require migration, or surface an inconsistency error.
+func checkDataDirStatus(top string) error {
 	cliSt, err := cliutil.CLIStatus()
 	if err != nil {
 		return err
 	}
-	libSt, err := cliutil.System().DataDirStatus()
+	sys, err := cliutil.System()
+	if err != nil {
+		return err
+	}
+	libSt, err := sys.DataDirStatus()
 	if err != nil {
 		return err
 	}

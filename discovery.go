@@ -71,6 +71,13 @@ type BackendQuery struct {
 // Sandbox.Agent(). No host state is consulted. With AgentQuery.RealOnly set,
 // the internal/testing pseudo-agents (test, shell, idle) are excluded.
 func (s *System) AgentTypes(q AgentQuery) []AgentInfo {
+	return AgentTypes(q)
+}
+
+// AgentTypes returns the catalog of shipped agent types. Static metadata with
+// no host state, so it needs no System handle — callers that only want the
+// catalog (e.g. CLI help text) can use it without constructing anything fallible.
+func AgentTypes(q AgentQuery) []AgentInfo {
 	names := agent.AllAgentTypes()
 	if q.RealOnly {
 		names = agent.RealAgents()
@@ -89,20 +96,30 @@ func (s *System) AgentTypes(q AgentQuery) []AgentInfo {
 // whether the backend can run on this host now; otherwise only static
 // descriptor metadata is filled in.
 func (s *System) BackendTypes(ctx context.Context, q BackendQuery) []BackendInfo {
-	descs := runtime.Descriptors()
-	out := make([]BackendInfo, 0, len(descs))
-	for _, desc := range descs {
-		info := backendInfoFromDescriptor(desc)
-		if q.ProbeAvailability {
-			rt, err := newRuntime(ctx, desc.Type, s.layout)
+	out := BackendTypes()
+	if q.ProbeAvailability {
+		for i := range out {
+			rt, err := newRuntime(ctx, out[i].Type, s.layout)
 			if err != nil {
-				info.Note = err.Error()
+				out[i].Note = err.Error()
 			} else {
-				info.Available = true
+				out[i].Available = true
 				_ = rt.Close() //nolint:errcheck // best-effort close after a probe
 			}
 		}
-		out = append(out, info)
+	}
+	return out
+}
+
+// BackendTypes returns the static catalog of every registered backend type, in
+// registration order, with no availability probe. Pure descriptor metadata and
+// no host state, so it needs no System handle. Use the System method when you
+// also want each entry's live availability (BackendQuery.ProbeAvailability).
+func BackendTypes() []BackendInfo {
+	descs := runtime.Descriptors()
+	out := make([]BackendInfo, 0, len(descs))
+	for _, desc := range descs {
+		out = append(out, backendInfoFromDescriptor(desc))
 	}
 	return out
 }
@@ -125,6 +142,14 @@ func (s *System) CheckBackend(ctx context.Context, name BackendType) (available 
 // yoloai ships (used to auto-shape a sandbox's setup). Static metadata; no host
 // state is consulted.
 func (s *System) Archetypes() []string {
+	return Archetypes()
+}
+
+// Archetypes returns the sorted list of valid environment-archetype names
+// yoloai ships. Static metadata with no host state, so it needs no Client or
+// System handle — callers that only want the catalog (e.g. CLI flag help) can
+// use it without constructing anything that can fail.
+func Archetypes() []string {
 	return archetype.ValidArchetypes()
 }
 
