@@ -7,6 +7,67 @@ History of critiques that have been addressed and applied. Items are moved here 
 [`unresolved-critiques.md`](unresolved-critiques.md) once resolved, so the active file stays
 a working set. Newest first.
 
+## IC1–IC16 (2026-06-03 Internal-code round) — maintainability/correctness cleanup of the internal layers
+
+- **Severity:** maintainability/correctness (not contract shape). **Resolved:** 2026-06-04 on
+  `layering-refactor`, one commit per item. Found via a whole-file read pass of the root public
+  package + `internal/{sandbox,runtime,config,cli}`. `file:line` anchors in the original entries
+  were as of `c122151` and have drifted.
+- **A recurring lesson (IC12 / IC15 / IC16): apparent duplication kept being benign.** Three separate
+  "this looks like dead/dup code" findings turned out to be load-bearing on closer reading — the
+  proposed dedup/removal would each have been a regression. Verify role before merging seams.
+
+**Resolved (applied):**
+- **IC1** (`d8d29e0`) — deduped `lifecycle` restart/reset prompt-delivery: extracted the shared
+  tmux-deliver + prepare-files + `loadContainerConfig` + `requireAgent` helpers (was 4 blocks ×6).
+- **IC2** (`b5c44e1`) — folded `ProfileConfig` onto `YoloaiConfig` by embedding; `LoadProfile`
+  dispatches common keys through `yoloaiConfigHandlers` + 3 profile-only handlers, deleting the
+  mirrored handler set. Leniency (ignore-unknown-keys) and `isGlobalKey` routing preserved. −160 LOC.
+- **IC3** (`efe6800`) — split `config.go`'s dotted-path YAML-node CRUD engine into `yamlnode.go`;
+  typed model + handlers stay in `config.go`.
+- **IC4** (`82f52fc`) — regrouped ~13 runtime optional interfaces + `*For` helpers into
+  `runtime_optional.go` under a 3-section taxonomy. **Collapse of the 3 tart path-translators
+  declined**: `CopyMountResolver` is also implemented by Seatbelt, so a single `GuestPathTranslator`
+  would force no-op stubs — defeating the optional-interface pattern. (Per user: regroup, keep all 3.)
+- **IC5** (`7f6da43`) — threaded create-pipeline state through a `resolvedCreateInputs` struct:
+  `resolveProfileAndArchetype` 8-tuple → `(*resolvedCreateInputs, error)`; `buildConfigAndEnvironment`
+  14→11 params; `buildSandboxStateResult` 18→12.
+- **IC6** (`7593315`) — backend descriptors use the typed `runtime.Backend*` consts; registry now
+  keys on `descriptor.Type` (dropped the redundant `name` param and the now-impossible mismatch panic).
+- **IC7** (`5ee9530`) — documented the option→internal mapping convention at the top of
+  `sandbox_options.go` and made code follow it: `toInternal()` when one internal counterpart exists
+  (added for `AgentLogsOptions`, `WorkdirExportOptions`); inline only on fan-out/field-spread;
+  `materialize` stays for the public→public fold.
+- **IC8** (`8f12b71`) — carved `tart.go` base-image provisioning into `build.go` and the VirtioFS
+  mount/symlink subsystem into `mounts.go` (pure move).
+- **IC9** (`a226b98`) — added `cliutil.WithSandbox`/`WithWorkdir`, folding the
+  resolve→Client→Sandbox→Workdir prologue (~22×) into one call; net ~−127 LOC and consistent
+  `SandboxErrorHint` on lookup failure.
+- **IC10** (`74542bf`) — `cliutil.System()` returns `(*yoloai.System, error)` instead of panicking;
+  exposed `Archetypes`/`AgentTypes`/`BackendTypes` as package-level free funcs for the
+  non-error-returning help-text callers.
+- **IC11** (`26ff9b3`) — `status.InspectSandbox` now calls the shared `detectWorkdirChanges` (the
+  inline and helper forms were already behaviorally identical — pure DRY).
+- **IC12** (`37cf399`) — original "bypasses the runtime exec seam" premise **abandoned** (the host
+  rsync is deliberate: a host→host resync of the bind-mounted `:copy` while the container stays live,
+  Tart excluded upstream). Two residuals applied: documented the narrow host-`rsync` dependency in
+  `CLAUDE.md`; added a *why* comment at `rsyncDir` (differential `--delete` avoids the wipe-then-copy
+  window the restart path has).
+- **IC13** (`8b9a44a`) — corrected four stale ABOUTME/doc comments.
+- **IC14** (`8b9a44a`) — naming nits: `Engine` receiver `m`→`e`; `BackendDiskUsage`/`BackendDiagnostic`
+  `.Name`→`.Type` (D68 rule); `DeleteProfileResult`→`ProfileDeleteResult`. (See deferred/abandoned
+  for the two sub-points not applied.)
+- **IC15** (`8b9a44a`) — removed the no-op `resolveProfileFromConfig()`; six `prune.go` signatures
+  now take `io.Writer` instead of an anonymous writer interface. (`ResolveProfileChain` reframed as
+  live, load-bearing — NOT dead; `NewEngine` panic kept — see abandoned.)
+- **IC16** (`37cf399`, spun off IC12) — see abandoned: the two host-git wrappers are deliberately
+  distinct, not a dedup target.
+
+**Sub-points not applied** drained alongside: IC14 `Info`→`SandboxInfo` →
+[`deferred-critiques.md`](deferred-critiques.md) (breaking, needs its own batch); IC14 single-primitive
+`Options` wrapping, IC15 `NewEngine` panic, and IC16 host-git unification →
+[`abandoned-critiques.md`](abandoned-critiques.md).
+
 ## A2/A3 (2026-06-03 Public-API round) — surface split on backend-liveness; `SystemClient` junk drawer; agent noun homeless
 
 - **Severity:** MAJOR (contract shape). **Resolved:** 2026-06-03 (commits `d636297` C1 → `bb41cbe` C4 on `layering-refactor`).

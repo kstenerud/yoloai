@@ -9,4 +9,13 @@ carries a **`Trigger:`** line — the condition that should pull it back into
 [`unresolved-critiques.md`](unresolved-critiques.md). The trigger may be unlikely, but it must
 exist so the item can be evaluated for eviction later. Newest first.
 
-_(empty)_
+## IC14 (sub-point) — rename top-level `Info` → `SandboxInfo` — 2026-06-04
+
+The top-level public output type `Info` (sandbox inspect result) reads ambiguously next to
+`SystemInfo`; `SandboxInfo` would disambiguate. Deferred from the IC14 naming sweep because, unlike
+the receiver/field renames applied in `8b9a44a`, this is a **61-site rename of a public type that
+ships on `main`** — a real breaking change requiring a `BREAKING-CHANGES.md` entry. Folding it into a
+LOW cleanup commit would smuggle a breaking change into a non-breaking sweep.
+
+**Trigger:** the next intentional public-API breaking batch (do it there, with the BREAKING-CHANGES
+entry, not as a standalone LOW item).

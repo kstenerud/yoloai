@@ -9,6 +9,37 @@ Critiques permanently dropped — decided **"won't act on."** Distinct from
 are terminal and not expected to come back. Each carries a short **`Why:`** line recording the
 reason for abandonment. Newest first.
 
+## IC16 — 2026-06-04 — two host-git wrappers are deliberately distinct, not a dedup target
+
+Filed (spun off IC12) as "two near-identical host-git wrappers coexist — consider one chokepoint."
+Digging deeper showed the resemblance is superficial. `workspace.NewGitCmd`/`RunGitCmd` trims output
+and returns plain errors; it builds the create-time git baseline **host-side, before any container
+exists**. `runtime.hostGitExec` is the **host arm of the `GitExecFor` dispatch seam**: it does NOT
+trim (patches are whitespace-sensitive), returns a `*ExecError` carrying the exit code (so
+`git diff --quiet` exit 1 reads as "diffs present"), and Tart overrides it via `GitExecer` to run git
+**in-container**. The only real overlap is the one-line `core.hooksPath=/dev/null`.
+
+**Why:** the proposed unification would be a regression, not a dedup. Routing `workspace` through
+`GitExecFor` would push pre-container baseline git into a container that may not exist; routing
+`hostGitExec` through `workspace` would drop the exit-code typing diff/apply depends on. Same
+benign-duplication mis-diagnosis as IC12/IC15 in the same round.
+
+## IC14 / IC15 (sub-points) — 2026-06-04 — YAGNI-arg-wrapping and the `NewEngine` invariant panic
+
+Two sub-recommendations from the IC14/IC15 cleanup sweep, declined while the rest of each item was
+applied (`8b9a44a`):
+- **IC14 — wrap single-primitive args (`force bool`, `name string`) in `<Noun><Verb>Options` structs.**
+  The convention is for multi-field params, not a struct per lone bool/string; the bare named args
+  read fine.
+- **IC15 — make `NewEngine` return `(*Engine, error)` instead of panicking on missing `WithLayout`.**
+  The panic mirrors `config.NewLayout`'s panic on empty input — an internal constructor guarding a
+  programmer invariant (`sandbox` is `internal/`; embedders go through `yoloai.Client`). Converting it
+  would make it *inconsistent* with `NewLayout` and force 13 call sites to handle an error that can't
+  occur in correct code.
+
+**Why:** both are churn against a guarantee that already holds — YAGNI for the arg wrapping, and a
+deliberate, consistent invariant-panic convention for `NewEngine`.
+
 ## A4 (original premise) — 2026-06-03 — public Go struct tags are not the live contract
 
 A4 was filed as "the public output structs are not a serialization contract (split-brain JSON
