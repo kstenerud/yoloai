@@ -240,8 +240,8 @@ type ImageCleanupHint struct {
 	Command     string      // suggested shell command
 }
 
-// DeleteProfileResult is the structured return from ProfileAdmin.Delete.
-type DeleteProfileResult struct {
+// ProfileDeleteResult is the structured return from ProfileAdmin.Delete.
+type ProfileDeleteResult struct {
 	// ImageCleanupHints — one entry per registered backend that builds
 	// per-profile images. The CLI prints these as "Note: if a docker
 	// image 'yoloai-myprofile' exists, remove it with: docker rmi …".
@@ -258,7 +258,7 @@ type DeleteProfileResult struct {
 // prompt → call Delete. Library callers wiring up automation can skip
 // the prompt and accept the consequence (the referenced sandboxes
 // still work; they just lose their profile reference).
-func (a *ProfileAdmin) Delete(_ context.Context, name string) (*DeleteProfileResult, error) {
+func (a *ProfileAdmin) Delete(_ context.Context, name string) (*ProfileDeleteResult, error) {
 	if err := config.ValidateProfileName(name); err != nil {
 		return nil, err
 	}
@@ -283,5 +283,5 @@ func (a *ProfileAdmin) Delete(_ context.Context, name string) (*DeleteProfileRes
 			Command:     desc.CleanupHint(image),
 		})
 	}
-	return &DeleteProfileResult{ImageCleanupHints: hints}, nil
+	return &ProfileDeleteResult{ImageCleanupHints: hints}, nil
 }

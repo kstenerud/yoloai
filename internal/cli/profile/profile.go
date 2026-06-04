@@ -611,7 +611,7 @@ func newProfileDeleteCmd() *cobra.Command {
 
 // renderImageCleanupHints prints the per-backend "image may exist;
 // remove it with: …" suggestions. The data (which backends, what
-// command) comes from the library via DeleteProfileResult; the CLI
+// command) comes from the library via ProfileDeleteResult; the CLI
 // only formats it.
 func renderImageCleanupHints(w io.Writer, hints []yoloai.ImageCleanupHint) {
 	for _, h := range hints {

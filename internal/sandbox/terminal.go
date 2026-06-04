@@ -36,8 +36,8 @@ import (
 // "what does the agent's screen actually look like right now" capability
 // stays in one place instead of being re-implemented per backend in
 // scripts/smoke_test.py.
-func (m *Engine) CaptureTerminal(ctx context.Context, name string, scrollback int) (plain, ansi []byte, err error) {
-	info, err := m.Inspect(ctx, name)
+func (e *Engine) CaptureTerminal(ctx context.Context, name string, scrollback int) (plain, ansi []byte, err error) {
+	info, err := e.Inspect(ctx, name)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -45,15 +45,15 @@ func (m *Engine) CaptureTerminal(ctx context.Context, name string, scrollback in
 		return nil, nil, fmt.Errorf("sandbox %q: %w", name, ErrContainerNotRunning)
 	}
 
-	containerName := store.InstanceName(m.layout.Principal, name)
-	socket := m.runtime.TmuxSocket(m.layout.SandboxDir(name))
-	user := ContainerUser(info.Environment, m.layout.HostUID)
+	containerName := store.InstanceName(e.layout.Principal, name)
+	socket := e.runtime.TmuxSocket(e.layout.SandboxDir(name))
+	user := ContainerUser(info.Environment, e.layout.HostUID)
 
-	plain, err = m.capturePane(ctx, containerName, socket, user, scrollback, false)
+	plain, err = e.capturePane(ctx, containerName, socket, user, scrollback, false)
 	if err != nil {
 		return nil, nil, fmt.Errorf("capture-pane plain: %w", err)
 	}
-	ansi, err = m.capturePane(ctx, containerName, socket, user, scrollback, true)
+	ansi, err = e.capturePane(ctx, containerName, socket, user, scrollback, true)
 	if err != nil {
 		// The plain capture worked — return what we have rather than failing
 		// the whole call. Callers see ansi==nil and degrade gracefully.
@@ -68,7 +68,7 @@ func (m *Engine) CaptureTerminal(ctx context.Context, name string, scrollback in
 // that auto-inject the socket internally (seatbelt), passing the path
 // is still safe because tmux accepts repeated -S with last-one-wins
 // semantics and both paths resolve to the same socket.
-func (m *Engine) capturePane(ctx context.Context, containerName, socket, user string, scrollback int, ansi bool) ([]byte, error) {
+func (e *Engine) capturePane(ctx context.Context, containerName, socket, user string, scrollback int, ansi bool) ([]byte, error) {
 	args := []string{"tmux"}
 	if socket != "" {
 		args = append(args, "-S", socket)
@@ -81,7 +81,7 @@ func (m *Engine) capturePane(ctx context.Context, containerName, socket, user st
 		args = append(args, "-e")
 	}
 
-	result, err := m.runtime.Exec(ctx, containerName, args, user)
+	result, err := e.runtime.Exec(ctx, containerName, args, user)
 	if err != nil {
 		return nil, err
 	}

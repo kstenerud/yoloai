@@ -24,30 +24,30 @@ type CloneOptions struct {
 // state directory. The clone gets a fresh name and creation timestamp;
 // everything else (agent, model, profile, workdir, config, work copies,
 // agent state, prompt) is preserved.
-func (m *Engine) Clone(ctx context.Context, opts CloneOptions) error {
+func (e *Engine) Clone(ctx context.Context, opts CloneOptions) error {
 	_ = ctx // reserved for future use
 
 	if err := store.ValidateName(opts.Dest); err != nil {
 		return err
 	}
 
-	unlock, err := store.AcquireMultiLock(m.layout, opts.Source, opts.Dest)
+	unlock, err := store.AcquireMultiLock(e.layout, opts.Source, opts.Dest)
 	if err != nil {
 		return err
 	}
 	defer unlock()
 
-	srcDir := m.layout.SandboxDir(opts.Source)
+	srcDir := e.layout.SandboxDir(opts.Source)
 	if err := store.RequireSandboxDir(srcDir); err != nil {
 		return fmt.Errorf("source sandbox %q: %w", opts.Source, err)
 	}
 
-	dstDir := m.layout.SandboxDir(opts.Dest)
+	dstDir := e.layout.SandboxDir(opts.Dest)
 	if _, err := os.Stat(dstDir); err == nil {
 		return fmt.Errorf("destination sandbox %q already exists", opts.Dest)
 	}
 
-	m.logger.Debug("cloning sandbox", "source", opts.Source, "dest", opts.Dest)
+	e.logger.Debug("cloning sandbox", "source", opts.Source, "dest", opts.Dest)
 
 	if err := workspace.CopyDir(srcDir, dstDir); err != nil {
 		return fmt.Errorf("copy sandbox directory: %w", err)
@@ -67,6 +67,6 @@ func (m *Engine) Clone(ctx context.Context, opts CloneOptions) error {
 		return fmt.Errorf("update cloned meta: %w", err)
 	}
 
-	m.logger.Info("cloned sandbox", "source", opts.Source, "dest", opts.Dest)
+	e.logger.Info("cloned sandbox", "source", opts.Source, "dest", opts.Dest)
 	return nil
 }

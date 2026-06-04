@@ -667,7 +667,8 @@ func isGlobalKey(path string) bool {
 	return false
 }
 
-// IsGlobalKey is the exported version for use by CLI commands.
+// IsGlobalKey is the exported wrapper used by the library's config layer
+// (system_config.go) to route a key to global vs profile storage.
 func IsGlobalKey(path string) bool {
 	return isGlobalKey(path)
 }

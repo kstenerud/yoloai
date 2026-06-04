@@ -49,10 +49,10 @@ func TestRenderReclaimableSpace(t *testing.T) {
 	var b bytes.Buffer
 	renderReclaimableSpace(&b, &yoloai.DiskUsage{
 		PerBackend: []yoloai.BackendDiskUsage{
-			{Name: "docker", CachedBytes: 2 << 30, ImageBytes: 1 << 30},
-			{Name: "tart", CachedBytes: 0, ImageBytes: 0},    // skipped: nothing in either tier
-			{Name: "podman", CachedBytes: 0, ImageBytes: -1}, // skipped: unknown image sentinel, no cache
-			{Name: "seatbelt", Err: assert.AnError},          // skipped: error
+			{Type: "docker", CachedBytes: 2 << 30, ImageBytes: 1 << 30},
+			{Type: "tart", CachedBytes: 0, ImageBytes: 0},    // skipped: nothing in either tier
+			{Type: "podman", CachedBytes: 0, ImageBytes: -1}, // skipped: unknown image sentinel, no cache
+			{Type: "seatbelt", Err: assert.AnError},          // skipped: error
 		},
 	})
 	out := b.String()
@@ -73,7 +73,7 @@ func TestRenderReclaimableSpace_OnlyCacheTier(t *testing.T) {
 	var b bytes.Buffer
 	renderReclaimableSpace(&b, &yoloai.DiskUsage{
 		PerBackend: []yoloai.BackendDiskUsage{
-			{Name: "docker", CachedBytes: 1 << 30, ImageBytes: 0},
+			{Type: "docker", CachedBytes: 1 << 30, ImageBytes: 0},
 		},
 	})
 	out := b.String()
@@ -87,7 +87,7 @@ func TestRenderReclaimableSpace_OnlyCacheTier(t *testing.T) {
 func TestRenderReclaimableSpace_AllZeroIsSilent(t *testing.T) {
 	var b bytes.Buffer
 	renderReclaimableSpace(&b, &yoloai.DiskUsage{
-		PerBackend: []yoloai.BackendDiskUsage{{Name: "docker", CachedBytes: 0, ImageBytes: 0}},
+		PerBackend: []yoloai.BackendDiskUsage{{Type: "docker", CachedBytes: 0, ImageBytes: 0}},
 	})
 	assert.Empty(t, b.String())
 }
@@ -111,7 +111,7 @@ func TestRenderTrash(t *testing.T) {
 
 func TestBuildDoctorJSON(t *testing.T) {
 	rep := buildDoctorJSON(nil, samplePrune(), &yoloai.DiskUsage{
-		PerBackend: []yoloai.BackendDiskUsage{{Name: "docker", CachedBytes: 2048, ImageBytes: 4096}},
+		PerBackend: []yoloai.BackendDiskUsage{{Type: "docker", CachedBytes: 2048, ImageBytes: 4096}},
 	}, nil)
 	assert.Len(t, rep.ReclaimableNow, 3)
 	assert.Len(t, rep.ReclaimableSpace, 1)

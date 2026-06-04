@@ -48,10 +48,10 @@ func runSystemDisk(cmd *cobra.Command, _ []string) error {
 	fmt.Fprintf(w, "sandboxes\t-\t%s\t%s\n", cliutil.HumanBytes(du.Sandboxes), cliutil.Layout().SandboxesDir()) //nolint:errcheck
 	for _, b := range du.PerBackend {
 		if b.Err != nil {
-			fmt.Fprintf(w, "%s\t-\t-\t%v\n", b.Name, b.Err) //nolint:errcheck
+			fmt.Fprintf(w, "%s\t-\t-\t%v\n", b.Type, b.Err) //nolint:errcheck
 			continue
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", b.Name, cliutil.HumanBytes(b.CachedBytes), imageBytesCell(b.ImageBytes), b.Detail) //nolint:errcheck
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", b.Type, cliutil.HumanBytes(b.CachedBytes), imageBytesCell(b.ImageBytes), b.Detail) //nolint:errcheck
 	}
 	if err := w.Flush(); err != nil {
 		return err
@@ -79,7 +79,7 @@ func formatDiskJSON(du *yoloai.DiskUsage, sandboxesDir string) map[string]any {
 		{"source": "sandboxes", "bytes": du.Sandboxes, "detail": sandboxesDir},
 	}
 	for _, b := range du.PerBackend {
-		entry := map[string]any{"source": b.Name}
+		entry := map[string]any{"source": b.Type}
 		if b.Err != nil {
 			entry["error"] = b.Err.Error()
 		} else {

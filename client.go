@@ -1,5 +1,5 @@
-// ABOUTME: Public high-level Client API (Run, Apply, Diff, Destroy) for embedding
-// ABOUTME: yoloAI in Go programs without interacting with the CLI or sandbox package.
+// ABOUTME: Public high-level Client API (Run, List, Clone, Create, plus the
+// ABOUTME: Sandbox/System sub-handles) for embedding yoloAI in Go programs.
 // Package yoloai is the orchestration layer for yoloAI. Both the CLI
 // (internal/cli) and external embedders use it as the entry point for
 // running AI coding agents in isolated sandboxes.
@@ -283,9 +283,6 @@ func (c *Client) Run(ctx context.Context, opts SandboxRunOptions) (*Info, error)
 	if createOpts.Model == "" {
 		createOpts.Model = resolveModelFromConfig(c.layout)
 	}
-	if createOpts.Profile == "" {
-		createOpts.Profile = resolveProfileFromConfig()
-	}
 
 	if _, err := c.Create(ctx, createOpts); err != nil {
 		return nil, fmt.Errorf("create sandbox: %w", err)
@@ -469,10 +466,6 @@ func resolveModelFromConfig(layout config.Layout) string {
 	if err == nil && cfg.Model != "" {
 		return cfg.Model
 	}
-	return ""
-}
-
-func resolveProfileFromConfig() string {
 	return ""
 }
 

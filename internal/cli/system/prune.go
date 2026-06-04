@@ -7,6 +7,7 @@ package system
 import (
 	"context"
 	"fmt"
+	"io"
 
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
@@ -147,7 +148,7 @@ func previewPrune(cmd *cobra.Command, scan *yoloai.PruneResult, dryRun, images, 
 
 // printActualRemoval reports what the non-dry-run prune actually removed
 // and quarantined (human-mode only).
-func printActualRemoval(output interface{ Write([]byte) (int, error) }, result *yoloai.PruneResult, images, isJSON bool) {
+func printActualRemoval(output io.Writer, result *yoloai.PruneResult, images, isJSON bool) {
 	if isJSON {
 		return
 	}
@@ -178,7 +179,7 @@ func printActualRemoval(output interface{ Write([]byte) (int, error) }, result *
 // announceReclaim previews the cache that will be reclaimed (best-effort
 // estimate) and, when --images is set, warns that base images will be removed
 // (forcing a rebuild). Human-mode only.
-func announceReclaim(output interface{ Write([]byte) (int, error) }, reclaimBytes int64, images, isJSON bool) {
+func announceReclaim(output io.Writer, reclaimBytes int64, images, isJSON bool) {
 	if isJSON {
 		return
 	}
@@ -213,7 +214,7 @@ func confirmPrune(cmd *cobra.Command, ctx context.Context, totalItems int, image
 
 // printRefusedDataBearing warns about broken sandbox dirs that still hold
 // unreviewed work — prune leaves them alone; the user must act.
-func printRefusedDataBearing(output interface{ Write([]byte) (int, error) }, refused []yoloai.RefusedSandbox, isJSON bool) {
+func printRefusedDataBearing(output io.Writer, refused []yoloai.RefusedSandbox, isJSON bool) {
 	if isJSON || len(refused) == 0 {
 		return
 	}
@@ -227,7 +228,7 @@ func printRefusedDataBearing(output interface{ Write([]byte) (int, error) }, ref
 
 // printTrashedPreview reports broken dirs that will be quarantined to trash
 // (dry-run preview — Dest is not yet populated).
-func printTrashedPreview(output interface{ Write([]byte) (int, error) }, trashed []yoloai.TrashedSandbox, isJSON bool) {
+func printTrashedPreview(output io.Writer, trashed []yoloai.TrashedSandbox, isJSON bool) {
 	if isJSON || len(trashed) == 0 {
 		return
 	}
@@ -240,7 +241,7 @@ func printTrashedPreview(output interface{ Write([]byte) (int, error) }, trashed
 
 // printTrashStatus reports the current trash dir contents (count + size)
 // and how to recover or reclaim it.
-func printTrashStatus(output interface{ Write([]byte) (int, error) }, trash yoloai.TrashSummary, isJSON bool) {
+func printTrashStatus(output io.Writer, trash yoloai.TrashSummary, isJSON bool) {
 	if isJSON || trash.Count == 0 {
 		return
 	}
@@ -289,7 +290,7 @@ func maybeEmptyTrash(cmd *cobra.Command, ctx context.Context, trash yoloai.Trash
 
 // printPruneFoundItems reports what was found to prune
 // (human-readable only).
-func printPruneFoundItems(output interface{ Write([]byte) (int, error) }, items []yoloai.PruneItem, isJSON bool) {
+func printPruneFoundItems(output io.Writer, items []yoloai.PruneItem, isJSON bool) {
 	if isJSON {
 		return
 	}

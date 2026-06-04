@@ -164,6 +164,7 @@ contract rounds above. Found via a whole-file read pass; `file:line` anchors are
   `Workdir`); `discovery.go:113` references `Backends(...)` (renamed `BackendTypes` in D68);
   `config.go:671` "for use by CLI commands" (the only non-test caller is the library's own
   `system_config.go`, not CLI).
+- **Done (2026-06-04).** All four comments corrected.
 
 **IC14 — naming nits.**
 - `Engine` receiver is still `m` (leftover from `Manager`); its doc reads "configures a Engine"
@@ -172,6 +173,15 @@ contract rounds above. Found via a whole-file read pass; `file:line` anchors are
   → consider `SandboxInfo`. `DeleteProfileResult` is verb-first → `ProfileDeleteResult`.
   `Files.Import/Export` take bare `force bool` and `ProfileAdmin.*` take bare `name string`,
   breaking the `<Noun><Verb>Options` convention just established.
+- **Done (2026-06-04).** `Engine` receiver `m`→`e` + "an Engine" grammar; `BackendDiskUsage.Name`
+  and `BackendDiagnostic.Name` → `.Type` (D68 rule); `DeleteProfileResult`→`ProfileDeleteResult`.
+- **Deferred (2026-06-04).** `Info`→`SandboxInfo` is a 61-site rename of a public type that ships
+  on `main` — a real breaking change needing a BREAKING-CHANGES entry; parked as its own item, not
+  folded into a LOW sweep. **Trigger:** next intentional public-API breaking batch.
+- **Won't do (2026-06-04).** Wrapping single-primitive args (`force bool`, `name string`) in
+  `<Noun><Verb>Options` structs is YAGNI — the convention is for multi-field params, not a struct
+  per lone bool/string. The bare named args read fine; consequence-naming the bool is the only
+  latent nit and not worth the churn.
 
 **IC15 — dead / no-op code.**
 - `client.go:475 resolveProfileFromConfig()` hardcodes `return ""`; `profile.go:464–545` legacy
@@ -181,3 +191,16 @@ contract rounds above. Found via a whole-file read pass; `file:line` anchors are
   `WithLayout` is omitted (the one panic in an otherwise error-returning package — a fallible
   constructor would surface it to embedders); six `prune.go` functions redeclare an anonymous
   `interface{ Write([]byte)(int,error) }` instead of `io.Writer`.
+- **Done (2026-06-04).** Removed the no-op `resolveProfileFromConfig()` + its call (the create
+  pipeline already resolves an empty `Profile`); six `prune.go` signatures now take `io.Writer`.
+- **Reframed — not dead (2026-06-04, verified).** `ResolveProfileChain` is *live, load-bearing*
+  code: 5+ production callers (`create/prepare_profile.go`, `profiles/profile_build.go`,
+  `lifecycle/lifecycle.go`+`restart.go`, `system.go`, `profile.go`) plus a passing multi-level +
+  cycle-detection test suite. Even with inheritance "legacy only", it performs profile-existence
+  validation and produces the `["base", name]` chain every load path consumes — removing it breaks
+  the build and tests. Same mis-diagnosis pattern as IC12.
+- **Won't do — consistent convention (2026-06-04).** `NewEngine`'s panic on missing `WithLayout`
+  mirrors `config.NewLayout`'s panic on empty input (engine.go's own comment cites it): an internal
+  constructor guarding a programmer invariant, not embedder-facing (`sandbox` is `internal/`;
+  embedders go through `yoloai.Client`). Converting to `(*Engine, error)` would make it *inconsistent*
+  with `NewLayout` and force 13 call sites to handle an error that can't occur in correct code.

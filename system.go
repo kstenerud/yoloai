@@ -128,7 +128,7 @@ type DiskUsage struct {
 // non-nil, the byte counts are 0 and Detail carries any partial progress info
 // from the backend.
 type BackendDiskUsage struct {
-	Name BackendType
+	Type BackendType
 	// CachedBytes is reclaimable by plain `prune` without a rebuild (build
 	// cache, volumes). Always >= 0.
 	CachedBytes int64
@@ -156,7 +156,7 @@ func (s *System) DiskUsage(ctx context.Context) (*DiskUsage, error) {
 		usage, usageErr := runtime.CacheUsageFor(ctx, rt)
 		_ = rt.Close()
 		du.PerBackend = append(du.PerBackend, BackendDiskUsage{
-			Name:        desc.Type,
+			Type:        desc.Type,
 			CachedBytes: usage.CachedBytes,
 			ImageBytes:  usage.ImageBytes,
 			Detail:      usage.Detail,

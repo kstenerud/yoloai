@@ -1,5 +1,5 @@
-// ABOUTME: Low-level sandbox create helpers: machine-id generation and directory/file
-// ABOUTME: write utilities used by the create pipeline.
+// ABOUTME: Sandbox create-pipeline orchestrator: validates options, resolves the
+// ABOUTME: profile/archetype, builds config+environment, and seeds the sandbox dir.
 package create
 
 import (

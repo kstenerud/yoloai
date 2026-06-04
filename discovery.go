@@ -110,7 +110,7 @@ func (s *System) BackendTypes(ctx context.Context, q BackendQuery) []BackendInfo
 // CheckBackend probes a single backend for availability by constructing a
 // runtime and closing it. Returns whether the backend is reachable and a short
 // note explaining the failure when it is not. This is the single-backend
-// counterpart to Backends(ctx, BackendQuery{ProbeAvailability: true}); both use
+// counterpart to BackendTypes(ctx, BackendQuery{ProbeAvailability: true}); both use
 // the identical construct-and-close probe.
 func (s *System) CheckBackend(ctx context.Context, name BackendType) (available bool, note string) {
 	rt, err := newRuntime(ctx, name, s.layout)

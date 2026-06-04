@@ -280,7 +280,7 @@ func renderReclaimTier(w io.Writer, disk *yoloai.DiskUsage, header, label, comma
 	fmt.Fprintln(w)         //nolint:errcheck
 	fmt.Fprintln(w, header) //nolint:errcheck
 	for _, b := range rows {
-		fmt.Fprintf(w, "    %s: %s %s\n", b.Name, cliutil.HumanBytes(bytesOf(b)), label) //nolint:errcheck
+		fmt.Fprintf(w, "    %s: %s %s\n", b.Type, cliutil.HumanBytes(bytesOf(b)), label) //nolint:errcheck
 	}
 	fmt.Fprintf(w, "  Reclaim with: %s\n", command) //nolint:errcheck
 }
@@ -430,7 +430,7 @@ func cacheUsageJSONList(disk *yoloai.DiskUsage) []cacheUsageJSON {
 			continue
 		}
 		out = append(out, cacheUsageJSON{
-			Backend:     string(b.Name),
+			Backend:     string(b.Type),
 			CachedBytes: b.CachedBytes,
 			ImageBytes:  imageBytes,
 			Detail:      b.Detail,

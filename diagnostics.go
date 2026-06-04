@@ -52,7 +52,7 @@ type EnvVar struct {
 // BackendDiagnostic is one backend's availability and version, in registration
 // order.
 type BackendDiagnostic struct {
-	Name      BackendType
+	Type      BackendType
 	Available bool
 	// Note carries the probe-failure reason when Available is false; "" otherwise.
 	Note string
@@ -118,7 +118,7 @@ func (s *System) backendDiagnostics(ctx context.Context) []BackendDiagnostic {
 	out := make([]BackendDiagnostic, 0, len(descs))
 	for _, desc := range descs {
 		available, note := s.CheckBackend(ctx, desc.Type)
-		bd := BackendDiagnostic{Name: desc.Type, Available: available, Note: note}
+		bd := BackendDiagnostic{Type: desc.Type, Available: available, Note: note}
 		if available && desc.VersionString != nil {
 			bd.Version = desc.VersionString(ctx)
 		}

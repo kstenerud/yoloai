@@ -133,11 +133,11 @@ func writeBackendsSection(w io.Writer, backends []yoloai.BackendDiagnostic) {
 
 		switch {
 		case b.Note != "":
-			fmt.Fprintf(w, "- **%s:** %s — %s\n", b.Name, status, b.Note) //nolint:errcheck
+			fmt.Fprintf(w, "- **%s:** %s — %s\n", b.Type, status, b.Note) //nolint:errcheck
 		case versionStr != "":
-			fmt.Fprintf(w, "- **%s:** %s — %s\n", b.Name, status, versionStr) //nolint:errcheck
+			fmt.Fprintf(w, "- **%s:** %s — %s\n", b.Type, status, versionStr) //nolint:errcheck
 		default:
-			fmt.Fprintf(w, "- **%s:** %s\n", b.Name, status) //nolint:errcheck
+			fmt.Fprintf(w, "- **%s:** %s\n", b.Type, status) //nolint:errcheck
 		}
 	}
 

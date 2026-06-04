@@ -32,13 +32,13 @@ type Engine struct {
 	layout   config.Layout          // DataDir-rooted path resolver (Q-W.2)
 }
 
-// EngineOption configures a Engine.
+// EngineOption configures an Engine.
 type EngineOption func(*Engine)
 
 // WithProgress sets a callback that receives human-readable progress messages
 // during long operations. The callback receives the sandbox name and message.
 func WithProgress(fn func(name, msg string)) EngineOption {
-	return func(m *Engine) { m.progress = fn }
+	return func(e *Engine) { e.progress = fn }
 }
 
 // WithLayout sets the path-resolution Layout. REQUIRED at
@@ -47,10 +47,10 @@ func WithProgress(fn func(name, msg string)) EngineOption {
 // the CLI constructs it once from --data-dir or $HOME/.yoloai/ at
 // startup. See development-principles.md §12.
 func WithLayout(layout config.Layout) EngineOption {
-	return func(m *Engine) { m.layout = layout }
+	return func(e *Engine) { e.layout = layout }
 }
 
-// NewEngine creates a Engine with the given runtime, logger, and input reader
+// NewEngine creates an Engine with the given runtime, logger, and input reader
 // for interactive prompts. The backend name is read from rt.Descriptor().Type
 // when rt is non-nil.
 //
@@ -60,7 +60,7 @@ func WithLayout(layout config.Layout) EngineOption {
 //
 // A WithLayout option is REQUIRED — Q-W.5 removed the implicit
 // $HOME/.yoloai/ fallback so library code never reads ambient HOME.
-// Callers that omit WithLayout get a Engine whose Layout.DataDir is
+// Callers that omit WithLayout get an Engine whose Layout.DataDir is
 // "", which produces relative paths at every store helper call
 // site (failures surface quickly). The yoloai.Client adapter and
 // the CLI command handlers always pass WithLayout; only direct
@@ -71,18 +71,18 @@ func NewEngine(rt runtime.Runtime, logger *slog.Logger, input io.Reader, opts ..
 	if rt != nil {
 		backend = rt.Descriptor().Type
 	}
-	m := &Engine{
+	e := &Engine{
 		runtime: rt,
 		backend: backend,
 		logger:  logger,
 		input:   input,
 	}
 	for _, opt := range opts {
-		opt(m)
+		opt(e)
 	}
-	if m.layout.DataDir == "" {
+	if e.layout.DataDir == "" {
 		// Q-W.5 / §12 invariant: every Engine method that touches disk
-		// derives its path from m.layout. A zero-value Layout silently
+		// derives its path from e.layout. A zero-value Layout silently
 		// produces relative paths under CWD, which test runs were
 		// leaking into the repo. Panic here so missing WithLayout is
 		// caught at construction instead of corrupting the working
@@ -90,16 +90,16 @@ func NewEngine(rt runtime.Runtime, logger *slog.Logger, input io.Reader, opts ..
 		//
 		// F14 / config.NewLayout panics on empty input, so the only
 		// way to reach this branch is a caller that never invoked
-		// WithLayout (m.layout is the zero value).
+		// WithLayout (e.layout is the zero value).
 		panic("sandbox.NewEngine: WithLayout is required; pass sandbox.WithLayout(config.NewLayout(...))")
 	}
-	return m
+	return e
 }
 
 // Layout returns the Engine's path-resolution Layout. Read-only —
 // callers that need a different layout construct a new Engine with
 // WithLayout.
-func (m *Engine) Layout() config.Layout { return m.layout }
+func (e *Engine) Layout() config.Layout { return e.layout }
 
 // EnsureSetup performs first-run auto-setup. Idempotent — safe to call
 // before every sandbox operation. Non-interactive: scaffolds the data
@@ -112,28 +112,28 @@ func (m *Engine) Layout() config.Layout { return m.layout }
 // UX lives in the app layer (the CLI's `yoloai system setup`), which
 // records its own "wizard has run" bookkeeping — none of the library's
 // business.
-func (m *Engine) EnsureSetup(ctx context.Context, out io.Writer) error {
+func (e *Engine) EnsureSetup(ctx context.Context, out io.Writer) error {
 	if out == nil {
 		out = io.Discard
 	}
-	if err := m.ensureLayoutScaffold(); err != nil {
+	if err := e.ensureLayoutScaffold(); err != nil {
 		return err
 	}
-	baseProfileDir := m.layout.ProfileDir("base")
-	return m.runtime.Setup(ctx, m.layout, baseProfileDir, out, m.logger, false)
+	baseProfileDir := e.layout.ProfileDir("base")
+	return e.runtime.Setup(ctx, e.layout, baseProfileDir, out, e.logger, false)
 }
 
 // ensureDefaultsDir creates DataDir/defaults/ and materializes the
 // declarative default artifacts (defaults/config.yaml, defaults/tmux.conf)
-// when missing. Method on Engine so it can use m.layout's DefaultsDir() /
+// when missing. Method on Engine so it can use e.layout's DefaultsDir() /
 // DefaultsConfigPath() — Q-W requires path resolution through Layout,
 // never via ambient $HOME.
-func (m *Engine) ensureDefaultsDir() error {
-	defaultsDir := m.layout.DefaultsDir()
+func (e *Engine) ensureDefaultsDir() error {
+	defaultsDir := e.layout.DefaultsDir()
 	if err := fileutil.MkdirAll(defaultsDir, 0750); err != nil {
 		return fmt.Errorf("create defaults dir: %w", err)
 	}
-	configPath := m.layout.DefaultsConfigPath()
+	configPath := e.layout.DefaultsConfigPath()
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		scaffold := config.GenerateScaffoldConfig(config.DefaultConfigYAML)
 		if err := fileutil.WriteFile(configPath, []byte(scaffold), 0600); err != nil {
@@ -161,16 +161,16 @@ func (m *Engine) ensureDefaultsDir() error {
 // It does NOT migrate or stamp the schema version: bringing the DataDir to the
 // current on-disk version is the startup gate's (fresh-create) or the explicit
 // migrate command's job, never a silent side effect of setup.
-func (m *Engine) ensureLayoutScaffold() error {
-	for _, dir := range []string{m.layout.SandboxesDir(), m.layout.ProfilesDir(), m.layout.CacheDir()} {
+func (e *Engine) ensureLayoutScaffold() error {
+	for _, dir := range []string{e.layout.SandboxesDir(), e.layout.ProfilesDir(), e.layout.CacheDir()} {
 		if err := fileutil.MkdirAll(dir, 0750); err != nil {
 			return fmt.Errorf("create %s: %w", dir, err)
 		}
 	}
-	if err := m.ensureDefaultsDir(); err != nil {
+	if err := e.ensureDefaultsDir(); err != nil {
 		return err
 	}
-	globalConfigPath := m.layout.GlobalConfigPath()
+	globalConfigPath := e.layout.GlobalConfigPath()
 	if _, err := os.Stat(globalConfigPath); os.IsNotExist(err) {
 		if err := fileutil.WriteFile(globalConfigPath, []byte(config.DefaultGlobalConfigYAML), 0600); err != nil {
 			return fmt.Errorf("write global config.yaml: %w", err)
@@ -180,33 +180,33 @@ func (m *Engine) ensureLayoutScaffold() error {
 }
 
 // List returns info for all sandboxes.
-func (m *Engine) List(ctx context.Context) ([]*Info, error) {
-	return ListSandboxes(ctx, m.layout, m.runtime)
+func (e *Engine) List(ctx context.Context) ([]*Info, error) {
+	return ListSandboxes(ctx, e.layout, e.runtime)
 }
 
 // Inspect returns combined metadata and live state for a single sandbox.
-func (m *Engine) Inspect(ctx context.Context, name string) (*Info, error) {
-	return InspectSandbox(ctx, m.layout, m.runtime, name)
+func (e *Engine) Inspect(ctx context.Context, name string) (*Info, error) {
+	return InspectSandbox(ctx, e.layout, e.runtime, name)
 }
 
 // Runtime returns the active runtime backend. Exposed so callers (e.g. the MCP
 // proxy) can type-assert against optional interfaces like runtime.StdioExecer
 // without going behind Engine's back via shell invocations.
-func (m *Engine) Runtime() runtime.Runtime { return m.runtime }
+func (e *Engine) Runtime() runtime.Runtime { return e.runtime }
 
 // Status returns the current lifecycle status of a sandbox.
-func (m *Engine) Status(ctx context.Context, name string) (Status, error) {
-	return DetectStatus(ctx, m.runtime, store.InstanceName(m.layout.Principal, name), m.layout.SandboxDir(name))
+func (e *Engine) Status(ctx context.Context, name string) (Status, error) {
+	return DetectStatus(ctx, e.runtime, store.InstanceName(e.layout.Principal, name), e.layout.SandboxDir(name))
 }
 
 // SandboxFiles returns the path to the per-sandbox file exchange directory.
-func (m *Engine) SandboxFiles(name string) string {
-	return store.FilesDir(m.layout.SandboxDir(name))
+func (e *Engine) SandboxFiles(name string) string {
+	return store.FilesDir(e.layout.SandboxDir(name))
 }
 
 // SandboxCache returns the path to the per-sandbox cache directory.
-func (m *Engine) SandboxCache(name string) string {
-	return store.CacheDir(m.layout.SandboxDir(name))
+func (e *Engine) SandboxCache(name string) string {
+	return store.CacheDir(e.layout.SandboxDir(name))
 }
 
 // SendInput sends text to the sandbox agent's terminal via tmux send-keys.
@@ -219,15 +219,15 @@ func (m *Engine) SandboxCache(name string) string {
 // serialises against concurrent Stop / Destroy / Reset / Apply for the
 // same sandbox. Each call is brief (one exec), so the lock-hold time
 // is small even under interactive use.
-func (m *Engine) SendInput(ctx context.Context, name string, text string) error {
-	unlock, err := store.AcquireLock(m.layout, name)
+func (e *Engine) SendInput(ctx context.Context, name string, text string) error {
+	unlock, err := store.AcquireLock(e.layout, name)
 	if err != nil {
 		return err
 	}
 	defer unlock()
 
-	containerName := store.InstanceName(m.layout.Principal, name)
-	_, err = m.runtime.Exec(ctx, containerName,
+	containerName := store.InstanceName(e.layout.Principal, name)
+	_, err = e.runtime.Exec(ctx, containerName,
 		[]string{"tmux", "send-keys", "-t", "main", text, "Enter"},
 		"yoloai",
 	)
