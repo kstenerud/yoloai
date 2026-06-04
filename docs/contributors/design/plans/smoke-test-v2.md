@@ -54,10 +54,17 @@ running/stopped state, and importing `sandbox` from `testutil` would create an i
 - Add `--full` flag to select backend matrix width and test depth
 - Remove: `start_done_agent`, `files_exchange`, `reset`, `overlay` (moved to integration tier)
 - Restrict `clone` to full tier only (stays in smoke as T3)
-- Base tier: `full_workflow` (docker + one VM) + `stop_start`
-- Full tier: `full_workflow` on full matrix + `stop_start` on full matrix + `clone`
+- Base tier: `stop_start` (docker + one VM)
+- Full tier: `stop_start` on full matrix + `clone`
   (kept in full because it confirms agent-written changes survive a clone, not just
   mechanical clone behavior)
+
+> **Update (2026-06-04):** the standalone `full_workflow` test (T1) was folded into
+> `stop_start` and deleted. `stop_start` was already a superset (it does new→wait→diff→apply
+> and adds the restart leg); it now also carries T1's only unique asserts — the `log` and
+> `sandbox info` read commands. This halves the per-backend boot+inference cost (one workflow
+> test per backend instead of two) at near-zero coverage loss. References to `full_workflow`
+> below are retained as historical design rationale; the live test is `stop_start`.
 
 ### Makefile
 
@@ -93,7 +100,7 @@ Intended for developer local runs and nightly CI.
 - Linux: docker, containerd-vm
 - macOS: docker, tart
 
-**Tests**: `full_workflow`, `stop_start`, and `isolation_check` on each matrix backend.
+**Tests**: `stop_start` (end-to-end workflow + restart) and `isolation_check` on each matrix backend.
 
 Target wall-clock time: under 30 minutes on a warm machine with pre-pulled images. Docker
 tests finish in ~5 minutes; containerd-vm (QEMU) dominates with 5–10 min per sentinel
@@ -112,7 +119,7 @@ Intended for pre-release runs on the dedicated test machine.
 - Linux: docker, podman, docker-cenhanced, containerd-vm, containerd-vmenhanced
 - macOS: docker, podman, seatbelt, tart
 
-**Tests**: `full_workflow`, `stop_start`, and `clone` on the full matrix;
+**Tests**: `stop_start` (end-to-end workflow + restart) and `clone` on the full matrix;
 `isolation_check` on container backends only (Docker, Podman, containerd-vm).
 
 ---

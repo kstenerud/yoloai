@@ -78,14 +78,14 @@ row to the index.
 | DNS works but HTTPS to api.anthropic.com times out | [DNS: timeout = API unreachable, not DNS](#request-timed-out-in-claude-code--api-unreachable-not-dns-failure) |
 | `iptables` warnings about legacy tables | [iptables-nft: legacy tables warning](#iptables--iptables-nft-both-iptables-legacy-and-iptables-nft-can-coexist) |
 | `Can't open socket to ipset` / network isolation fails on Podman macOS | [Podman macOS: iptables-nft lacks xt_set module](#podman-macos-iptables-nft-lacks-xt_set-module-ipset-unusable) |
-| Smoke test: `full_workflow/containerd-vm` fails with "agent idle for 9s+" | [QEMU: slow startup exceeds stall grace](#qemu-slow-startup-exceeds-smoke-test-stall-grace-period) |
-| Smoke test: `full_workflow/tart` or `stop_start/tart` fails; exchange dir empty | [Tart: xcodebuild -runFirstLaunch blocks agent startup](#tart-xcodebuild--runfirstlaunch-blocks-agent-startup) |
+| Smoke test: `stop_start/containerd-vm` fails with "agent idle for 9s+" | [QEMU: slow startup exceeds stall grace](#qemu-slow-startup-exceeds-smoke-test-stall-grace-period) |
+| Smoke test: `stop_start/tart` fails; exchange dir empty | [Tart: xcodebuild -runFirstLaunch blocks agent startup](#tart-xcodebuild--runfirstlaunch-blocks-agent-startup) |
 | `yoloai new --attach` hangs after "Sandbox created"; Python setup never completes | [Tart: mount_map uses Docker paths, triggering macOS automount](#tart-mount_map-uses-docker-style-paths-triggering-macos-automount-hang) |
 | `FileNotFoundError` at `get_working_dir()` / agent starts in wrong directory | [Tart: workdir setup races Python startup](#tart-vm-workdir-setup-races-python-startup) |
 | Tart `:copy`: `yoloai diff` after `restart` reports "No changes" despite agent edits; smoke `stop_start/tart` fails `expected 'output2.txt' … got: No changes` | [Tart: :copy diff after restart shows 'No changes'](#tart-copy-diff-after-restart-shows-no-changes) |
 | `yoloai apply` fails: `git add: git [add -A]: exit status 128: … index.lock: File exists` while agent is running | [Docker/Podman: agent git and apply git race on index.lock](#dockerpodman-agent-git-and-apply-git-race-on-indexlock) |
 | `FileNotFoundError: 'tmux'` in `sandbox-setup.py::setup_tmux_session` on Tart VM (intermittent) | [Tart: transient FS/PATH failure makes tmux unresolvable during the firstlaunch window](#tart-transient-fspath-failure-makes-tmux-unresolvable-during-the-firstlaunch-window) |
-| Smoke test: `full_workflow`/`stop_start` fails "agent idle"; pane shows `Error: Exit code N` + a clarifying question; other backends pass | [Smoke harness: agent stalls when the sentinel command errors](#agent-stalls-when-the-sentinel-command-errors) |
+| Smoke test: `stop_start` fails "agent idle"; pane shows `Error: Exit code N` + a clarifying question; other backends pass | [Smoke harness: agent stalls when the sentinel command errors](#agent-stalls-when-the-sentinel-command-errors) |
 | Is it safe to delete a `.lock` file while holding its flock? (prune / Destroy) | [Removing a .lock file while holding its flock is safe](#removing-a-lock-file-while-holding-its-flock-is-safe) |
 | Tart base build / `tart run` fails with `The number of VMs exceeds the system limit` or VM self-stops at boot, but `tart list` shows nothing running | [Tart: orphaned Virtualization VM processes consume the macOS VM limit](#orphaned-virtualization-vm-processes-survive-a-crashed-tart-run-and-silently-consume-the-macos-vm-limit) |
 | `system disk` shows tart `IMAGES: ?` / `CACHE: 0 B` despite GBs in `~/.tart`; `prune --images` reports 0 reclaimed | [Tart: list double-counts OCI tag+digest; sizing/prune must dedup](#tart-list-reports-a-pulled-oci-image-twice-tag--digest-over-one-on-disk-copy-sizing-and-prune-must-dedup-and-remove-both-rows) |
@@ -1423,7 +1423,7 @@ VirtioFS should only be used for:
 
 ### QEMU: slow startup exceeds smoke test stall grace period
 
-**Symptom:** `full_workflow/containerd-vm` fails with `"agent idle for 9s+ without sentinel 'done'"` even though the sandbox and agent are healthy.
+**Symptom:** `stop_start/containerd-vm` fails with `"agent idle for 9s+ without sentinel 'done'"` even though the sandbox and agent are healthy.
 
 **Explanation:** The smoke test's `wait_for_sentinel` has a stall detection mechanism: after a 30s grace period, if the sandbox status is "idle" for 3 consecutive 3-second polls (9s), the test fails early. For QEMU-backed Kata VMs, QEMU boots slower than Firecracker. By the time the QEMU VM starts, Claude loads, and Haiku model inference runs for the prompt command, the 30s grace period has already expired. The status becomes "idle" (Claude ready at `❯` or model inference in progress without a tool hook firing) and the stall detection triggers before the `done` file is created.
 
@@ -1437,7 +1437,7 @@ Firecracker (`containerd-vmenhanced`) starts faster and completes the task well 
 
 ### Tart: `xcodebuild -runFirstLaunch` blocks agent startup
 
-**Symptom:** Smoke tests `full_workflow/tart` and `stop_start/tart` fail consistently on first attempt, with the exchange dir empty (agent never ran any commands). Stall detection fires before the `done` sentinel appears. On retries, the tests pass — typically after 3+ failed attempts, subsequent attempts succeed quickly.
+**Symptom:** Smoke test `stop_start/tart` fails consistently on first attempt, with the exchange dir empty (agent never ran any commands). Stall detection fires before the `done` sentinel appears. On retries, the tests pass — typically after 3+ failed attempts, subsequent attempts succeed quickly.
 
 **Explanation:** When an Xcode.app is mounted via VirtioFS (`/Volumes/My Shared Files/m-Xcode*.app`), `TartBackend.setup()` runs `xcodebuild -runFirstLaunch` to initialize Xcode components (device types, SDKs, etc.). On first run, this takes 60-120+ seconds. Because `setup()` runs synchronously before the tmux session and agent are started, the agent cannot start until xcodebuild finishes. The smoke test's stall detection fires at ~45s of polling (30s grace + ~15s), before the agent has a chance to run the bash prompt.
 
@@ -1637,7 +1637,7 @@ the happy path and removes the premature give-up. The `.done` marker and its
 
 ### Agent stalls when the sentinel command errors
 
-**Symptom:** a `full_workflow` or `stop_start` smoke test fails with "agent idle
+**Symptom:** a `stop_start` smoke test fails with "agent idle
 for Ns+ … no progress past sentinel 'done'", and `fingerprint: null` (before this
 entry existed). The same test passes on other backends in the same run. The
 preserved `terminal-snapshot.txt` shows the agent *did* receive the prompt and *did*

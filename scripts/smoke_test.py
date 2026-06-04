@@ -1195,7 +1195,7 @@ _BASELINE_ROOT = _TESTCACHE_ROOT / "baselines"
 
 
 def _baseline_path(test_name: str) -> Path:
-    """test_name is like 'full_workflow/tart'; keep the slash as a subdir."""
+    """test_name is like 'stop_start/tart'; keep the slash as a subdir."""
     return _BASELINE_ROOT / f"{test_name}.json"
 
 
@@ -1529,8 +1529,9 @@ def _prompt(exdir: str, work: str, sentinel: str = SENTINEL) -> str:
          idle in monitor.py).
 
     v4 — bind the exchange dir to a shell variable so the long path appears
-         once instead of three times. Both seatbelt full_workflow and
-         stop_start flaked (run 20260529-034737): the haiku agent dropped the
+         once instead of three times. Both seatbelt workflow legs (then the
+         separate full_workflow + stop_start tests) flaked (run
+         20260529-034737): the haiku agent dropped the
          `mv` *target* — the third occurrence of seatbelt's ~90-char host
          exchange path — and stalled asking the user to clarify, so `done`
          was never written. docker/podman passed because their exdir is the
@@ -1546,65 +1547,24 @@ def _prompt(exdir: str, work: str, sentinel: str = SENTINEL) -> str:
          (_idle_phase, removed with this change) is now covered by the
          preserved terminal-snapshot.txt + its `Error: Exit code N`
          fingerprint, which show directly whether the agent ran anything.
-         `{work}` still runs in the cwd (test_full_workflow asserts output.txt
+         `{work}` still runs in the cwd (test_stop_start asserts output.txt
          lands in the work dir after apply).
     """
     cmd = f"{work} && touch {exdir}/{sentinel}"
     return f"Run this shell command exactly as written, using your shell/bash tool:\n{cmd}"
 
 
-def test_full_workflow(t: Test, spec: BackendSpec) -> None:
-    """new → wait → diff → apply (assert content) → log → info."""
-    project = t.project(f"workflow-{spec.label}")
-    name = t.sandbox(f"workflow-{spec.label}")
-    exdir = spec.exchange_dir(name)
-    prompt = _prompt(exdir, "echo smoke > output.txt")
-
-    r = t.run(
-        "new", name, str(project),
-        "--model", "haiku",
-        "--prompt", prompt,
-        "--yes",
-        *spec.new_args(),
-        *t.debug_new_flags,
-        timeout=spec.new_timeout(),
-    )
-    t.assert_ok(r, "new")
-
-    t.wait_for_sentinel(name, timeout=spec.sentinel_timeout(), stall_grace_secs=spec.sentinel_stall_grace())
-
-    r = t.run("diff", name)
-    t.assert_ok(r, "diff")
-    t.assert_in("output.txt", r.stdout, "diff output")
-
-    r = t.run("apply", name, "--yes", "--include-uncommitted")
-    t.assert_ok(r, "apply")
-
-    output_file = project / "output.txt"
-    if not output_file.exists():
-        raise AssertionError("output.txt not found in project dir after apply")
-    if "smoke" not in output_file.read_text():
-        raise AssertionError(
-            f"output.txt does not contain 'smoke': {output_file.read_text()!r}"
-        )
-
-    r = t.run("log", name)
-    t.assert_ok(r, "log")
-    if not r.stdout.strip():
-        raise AssertionError("log is empty after agent run")
-
-    r = t.run("sandbox", name, "info")
-    t.assert_ok(r, "sandbox info")
-    t.assert_in(name, r.stdout, "sandbox info (name)")
-    t.assert_in("claude", r.stdout, "sandbox info (agent)")
-
-
 def test_stop_start(t: Test, spec: BackendSpec) -> None:
-    """new → wait → restart with new prompt → wait → diff → apply → verify.
+    """new → wait → restart with new prompt → wait → diff → apply → log → info.
 
     Uses `yoloai restart --prompt` (= stop + start internally) to verify
     credential re-injection after a container restart. The second prompt
     writes to the work copy so we can verify diff/apply end-to-end.
+
+    This is the matrix's single end-to-end workflow test: the restart leg is
+    its unique coverage, and it also folds in the basic new→diff→apply→log→info
+    path that the old standalone `full_workflow` test asserted (dropped to halve
+    the per-backend boot+inference cost — stop_start was already a superset).
     """
     project = t.project(f"stop-start-{spec.label}")
     name = t.sandbox(f"stop-start-{spec.label}")
@@ -1650,6 +1610,18 @@ def test_stop_start(t: Test, spec: BackendSpec) -> None:
         raise AssertionError(
             f"output2.txt does not contain 'restarted': {output2.read_text()!r}"
         )
+
+    # Folded-in full_workflow coverage: the agent-log and sandbox-info read
+    # commands work against a sandbox that has actually run an agent.
+    r = t.run("log", name)
+    t.assert_ok(r, "log")
+    if not r.stdout.strip():
+        raise AssertionError("log is empty after agent run")
+
+    r = t.run("sandbox", name, "info")
+    t.assert_ok(r, "sandbox info")
+    t.assert_in(name, r.stdout, "sandbox info (name)")
+    t.assert_in("claude", r.stdout, "sandbox info (agent)")
 
 
 def test_clone(t: Test, spec: BackendSpec) -> None:
@@ -2068,14 +2040,14 @@ def parse_args() -> argparse.Namespace:
         action="append",
         help=(
             "Run only specific test(s). Can be specified multiple times. "
-            "Examples: --test stop_start --test full_workflow/seatbelt"
+            "Examples: --test stop_start --test stop_start/seatbelt"
         ),
     )
     parser.add_argument(
         "--backend",
         action="append",
         help=(
-            "Run full_workflow test only for specific backend(s). "
+            "Run the matrix tests only for specific backend(s). "
             "Can be specified multiple times. Examples: --backend seatbelt --backend tart"
         ),
     )
@@ -2373,7 +2345,7 @@ def main() -> int:
         if ctx.backend_filter and spec.label in ctx.backend_filter:
             return True
         if ctx.test_filter:
-            for test_prefix in ("full_workflow", "stop_start", "isolation_check"):
+            for test_prefix in ("stop_start", "isolation_check"):
                 if f"{test_prefix}/{spec.label}" in ctx.test_filter:
                     return True
         return False
@@ -2507,11 +2479,8 @@ def main() -> int:
             skip_test(ctx, "clone", "full tier only (use --full)")
 
     # -------------------------------------------------------------------------
-    # Matrix tests: full_workflow, stop_start, isolation_check
+    # Matrix tests: stop_start (end-to-end workflow + restart), isolation_check
     # -------------------------------------------------------------------------
-
-    print("\nBackend matrix (full_workflow):")
-    run_matrix_test("full_workflow", test_full_workflow)
 
     print("\nBackend matrix (stop_start):")
     run_matrix_test("stop_start", test_stop_start)
