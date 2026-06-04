@@ -37,7 +37,7 @@ func TestAdvanceBaselineCAS_HappyPath(t *testing.T) {
 		{"add feature", "feature.txt", "feature\n"},
 	})
 
-	rt := getTestRuntime(t)
+	rt := hostGitRuntime()
 	expected := currentBaseline(t, tmpDir, name)
 
 	change, err := AdvanceBaselineCAS(context.Background(), testLayout(tmpDir), rt, name, expected)
@@ -56,7 +56,7 @@ func TestAdvanceBaselineCAS_ConflictDoesNotWrite(t *testing.T) {
 		{"add feature", "feature.txt", "feature\n"},
 	})
 
-	rt := getTestRuntime(t)
+	rt := hostGitRuntime()
 	before := currentBaseline(t, tmpDir, name)
 
 	_, err := AdvanceBaselineCAS(context.Background(), testLayout(tmpDir), rt, name, "deadbeefdeadbeef")
@@ -74,7 +74,7 @@ func TestAdvanceBaselineCAS_EmptyExpectedConflictsWhenSet(t *testing.T) {
 	name := "cas-advance-empty"
 	createCopySandbox(t, tmpDir, name, "/tmp/project")
 
-	rt := getTestRuntime(t)
+	rt := hostGitRuntime()
 	_, err := AdvanceBaselineCAS(context.Background(), testLayout(tmpDir), rt, name, "")
 	var conflict *BaselineConflictError
 	require.ErrorAs(t, err, &conflict)
@@ -91,7 +91,7 @@ func TestSetBaselineCAS_HappyPath(t *testing.T) {
 		{"second", "b.txt", "b\n"},
 	})
 
-	rt := getTestRuntime(t)
+	rt := hostGitRuntime()
 	commits, err := ListCommitsBeyondBaseline(context.Background(), testLayout(tmpDir), rt, name)
 	require.NoError(t, err)
 	require.Len(t, commits, 2)
@@ -114,7 +114,7 @@ func TestSetBaselineCAS_Conflict(t *testing.T) {
 		{"first", "a.txt", "a\n"},
 	})
 
-	rt := getTestRuntime(t)
+	rt := hostGitRuntime()
 	before := currentBaseline(t, tmpDir, name)
 	_, err := SetBaselineCAS(context.Background(), testLayout(tmpDir), rt, name, "notthecurrentsha", gitHEAD(t, workDir))
 	var conflict *BaselineConflictError
@@ -131,7 +131,7 @@ func TestBaselineCAS_RWUsageError(t *testing.T) {
 	name := "cas-rw"
 	createRWSandbox(t, tmpDir, name, hostDir)
 
-	rt := getTestRuntime(t)
+	rt := hostGitRuntime()
 	_, err := AdvanceBaselineCAS(context.Background(), testLayout(tmpDir), rt, name, "")
 	require.Error(t, err)
 	var usage *yoerrors.UsageError
@@ -149,7 +149,7 @@ func TestBaselineLog_MarksBaseline(t *testing.T) {
 		{"second", "b.txt", "b\n"},
 	})
 
-	rt := getTestRuntime(t)
+	rt := hostGitRuntime()
 	baseline := currentBaseline(t, tmpDir, name)
 
 	entries, err := BaselineLog(context.Background(), testLayout(tmpDir), rt, name)

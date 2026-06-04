@@ -33,7 +33,7 @@ func TestExport_CopyAllCommits(t *testing.T) {
 	t.Setenv("HOME", tmpDir)
 	name := "export-all"
 	createCopySandboxWithCommits(t, tmpDir, name, "/tmp/project", exportThreeCommits)
-	rt := getTestRuntime(t)
+	rt := hostGitRuntime()
 
 	dir := filepath.Join(tmpDir, "out")
 	result, err := Export(context.Background(), testLayout(tmpDir), rt, name, ExportOptions{Dir: dir})
@@ -58,7 +58,7 @@ func TestExport_CopyWithRefs(t *testing.T) {
 	t.Setenv("HOME", tmpDir)
 	name := "export-refs"
 	createCopySandboxWithCommits(t, tmpDir, name, "/tmp/project", exportThreeCommits)
-	rt := getTestRuntime(t)
+	rt := hostGitRuntime()
 
 	commits, err := ListCommitsBeyondBaseline(context.Background(), testLayout(tmpDir), rt, name)
 	require.NoError(t, err)
@@ -80,7 +80,7 @@ func TestExport_IncludeUncommitted(t *testing.T) {
 	name := "export-uncommitted"
 	workDir := createCopySandboxWithCommits(t, tmpDir, name, "/tmp/project", exportThreeCommits)
 	writeTestFile(t, workDir, "scratch.txt", "uncommitted edit\n")
-	rt := getTestRuntime(t)
+	rt := hostGitRuntime()
 
 	dir := filepath.Join(tmpDir, "out")
 	result, err := Export(context.Background(), testLayout(tmpDir), rt, name, ExportOptions{

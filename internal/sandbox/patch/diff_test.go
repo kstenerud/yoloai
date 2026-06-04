@@ -88,7 +88,7 @@ func TestGenerateDiff_CopyMode_ModifiedFile(t *testing.T) {
 	workDir := createCopySandbox(t, tmpDir, "test-mod", "/tmp/project")
 	writeTestFile(t, workDir, "file.txt", "modified content\n")
 
-	rt := getTestRuntime(t)
+	rt := hostGitRuntime()
 	result, err := GenerateDiff(context.Background(), DiffOptions{Name: "test-mod", Layout: testLayout(tmpDir), Runtime: rt})
 	require.NoError(t, err)
 	assert.NotEmpty(t, result)
@@ -103,7 +103,7 @@ func TestGenerateDiff_CopyMode_UntrackedFile(t *testing.T) {
 	workDir := createCopySandbox(t, tmpDir, "test-new", "/tmp/project")
 	writeTestFile(t, workDir, "created.txt", "new file content\n")
 
-	rt := getTestRuntime(t)
+	rt := hostGitRuntime()
 	result, err := GenerateDiff(context.Background(), DiffOptions{Name: "test-new", Layout: testLayout(tmpDir), Runtime: rt})
 	require.NoError(t, err)
 	assert.NotEmpty(t, result)
@@ -123,7 +123,7 @@ func TestGenerateDiff_CopyMode_BinaryFile(t *testing.T) {
 		0600,
 	))
 
-	rt := getTestRuntime(t)
+	rt := hostGitRuntime()
 	result, err := GenerateDiff(context.Background(), DiffOptions{Name: "test-bin", Layout: testLayout(tmpDir), Runtime: rt})
 	require.NoError(t, err)
 	assert.NotEmpty(t, result)
@@ -138,7 +138,7 @@ func TestGenerateDiff_CopyMode_Empty(t *testing.T) {
 	createCopySandbox(t, tmpDir, "test-empty", "/tmp/project")
 	// No modifications
 
-	rt := getTestRuntime(t)
+	rt := hostGitRuntime()
 	result, err := GenerateDiff(context.Background(), DiffOptions{Name: "test-empty", Layout: testLayout(tmpDir), Runtime: rt})
 	require.NoError(t, err)
 	assert.Empty(t, result)
@@ -152,7 +152,7 @@ func TestGenerateDiff_CopyMode_PathFilter(t *testing.T) {
 	writeTestFile(t, workDir, "file.txt", "modified\n")
 	writeTestFile(t, workDir, "other.txt", "also new\n")
 
-	rt := getTestRuntime(t)
+	rt := hostGitRuntime()
 	result, err := GenerateDiff(context.Background(), DiffOptions{
 		Name:    "test-filter",
 		Layout:  testLayout(tmpDir),
@@ -182,7 +182,7 @@ func TestGenerateDiff_RWMode_GitRepo(t *testing.T) {
 	// Modify the live file
 	writeTestFile(t, hostDir, "file.txt", "modified\n")
 
-	rt := getTestRuntime(t)
+	rt := hostGitRuntime()
 	result, err := GenerateDiff(context.Background(), DiffOptions{Name: "test-rw", Layout: testLayout(tmpDir), Runtime: rt})
 	require.NoError(t, err)
 	assert.NotEmpty(t, result)
@@ -198,7 +198,7 @@ func TestGenerateDiff_RWMode_NotGitRepo(t *testing.T) {
 
 	createRWSandbox(t, tmpDir, "test-rw-nogit", hostDir)
 
-	rt := getTestRuntime(t)
+	rt := hostGitRuntime()
 	result, err := GenerateDiff(context.Background(), DiffOptions{Name: "test-rw-nogit", Layout: testLayout(tmpDir), Runtime: rt})
 	require.NoError(t, err)
 	// Q-U: non-git :rw collapses to "no changes" (empty string)
@@ -216,7 +216,7 @@ func TestGenerateDiffStat_CopyMode(t *testing.T) {
 	writeTestFile(t, workDir, "file.txt", "modified content\n")
 	writeTestFile(t, workDir, "new.txt", "added file\n")
 
-	rt := getTestRuntime(t)
+	rt := hostGitRuntime()
 	result, err := GenerateDiff(context.Background(), DiffOptions{Name: "test-stat", Layout: testLayout(tmpDir), Stat: true, Runtime: rt})
 	require.NoError(t, err)
 	assert.NotEmpty(t, result)
@@ -252,7 +252,7 @@ func TestGenerateCommitDiff_SingleCommit(t *testing.T) {
 	})
 
 	// Get SHA of first commit
-	rt := getTestRuntime(t)
+	rt := hostGitRuntime()
 	commits, err := ListCommitsBeyondBaseline(context.Background(), testLayout(tmpDir), rt, "test-cdiff-single")
 	require.NoError(t, err)
 	require.Len(t, commits, 2)
@@ -283,7 +283,7 @@ func TestGenerateCommitDiff_Range(t *testing.T) {
 		{"third", "c.txt", "c\n"},
 	})
 
-	rt := getTestRuntime(t)
+	rt := hostGitRuntime()
 	commits, err := ListCommitsBeyondBaseline(context.Background(), testLayout(tmpDir), rt, "test-cdiff-range")
 	require.NoError(t, err)
 	require.Len(t, commits, 3)
@@ -313,7 +313,7 @@ func TestGenerateCommitDiff_Stat(t *testing.T) {
 		{"add feature", "feature.txt", "feature content\n"},
 	})
 
-	rt := getTestRuntime(t)
+	rt := hostGitRuntime()
 	commits, err := ListCommitsBeyondBaseline(context.Background(), testLayout(tmpDir), rt, "test-cdiff-stat")
 	require.NoError(t, err)
 	require.Len(t, commits, 1)
@@ -355,7 +355,7 @@ func TestListCommitsWithStats_NoCommits(t *testing.T) {
 
 	createCopySandbox(t, tmpDir, "test-lcws-none", "/tmp/project")
 
-	rt := getTestRuntime(t)
+	rt := hostGitRuntime()
 	commits, err := ListCommitsWithStats(context.Background(), testLayout(tmpDir), rt, "test-lcws-none")
 	require.NoError(t, err)
 	assert.Empty(t, commits)
@@ -374,7 +374,7 @@ func TestListCommitsWithStats_HasStats(t *testing.T) {
 		{"add other", "other.txt", "other content\n"},
 	})
 
-	rt := getTestRuntime(t)
+	rt := hostGitRuntime()
 	commits, err := ListCommitsWithStats(context.Background(), testLayout(tmpDir), rt, "test-lcws-stats")
 	require.NoError(t, err)
 	require.Len(t, commits, 2)
