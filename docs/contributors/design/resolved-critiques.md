@@ -7,6 +7,55 @@ History of critiques that have been addressed and applied. Items are moved here 
 [`unresolved-critiques.md`](unresolved-critiques.md) once resolved, so the active file stays
 a working set. Newest first.
 
+## T1–T15 (2026-06-04 Testing-critique round) — test-suite placement, dedup, and error-path coverage
+
+- **Severity:** test-health (no production behavior change). **Resolved:** 2026-06-04 on
+  `layering-refactor`, one commit per item, `make check` green throughout. Critique of 168 Go test
+  files (~33.6k LOC) across the 4 tiers. The suite was healthy on §6/§7/§8 (real backends, no daemon
+  mocks, manual fakes); weaknesses clustered in cross-backend/e2e **duplication**, lagging
+  **error-path coverage**, and a few **mis-placed/over-gated** tests. **T7 (broad `t.Parallel`
+  adoption) carried over** — it remains the sole live item in
+  [`unresolved-critiques.md`](unresolved-critiques.md).
+- **Recurring lesson:** several citations were *stale on inspection* — the named anti-pattern had
+  already been fixed (T3 was correctly a unit test, not mis-gated; T11's destroy/tart-stop tests
+  already asserted real post-conditions; T2's "5 identical backends" was really only 2 twins). Verify
+  the test's current state before "fixing" it.
+- **T1** — dropped the gratuitous Docker gate on `patch/{apply,diff}_test.go` `:copy` paths
+  (`getTestRuntime`→`hostGitRuntime()` nil); ~67 tests moved to the unit suite (30d50e7).
+- **T3** — `tart/stop_integration_test.go`→`stop_escalation_test.go` + ABOUTME corrected (it uses a
+  fake tart binary, no VM — belongs in the unit suite) (827bfa5).
+- **T2** — scope corrected: only docker+podman are genuine twins (podman embeds `*docker.Runtime`).
+  Extracted the docker-compatible behavioral table into `runtimetest.RunConformance` (keyed on
+  `DockerCompatRuntime`); docker/podman tests became thin `_test`-package setup closures. containerd/
+  seatbelt/tart left distinct (different constructors/creation models). Compile-checked under
+  `-tags integration`; run needs daemons + `yoloai-base`.
+- **T4** — trimmed the e2e ice-cream-cone: pushed error→exit-code mapping to a unit test
+  (`TestErrorExitCode`), deleted `workflow_test.go` (integration owns it), collapsed `error_test.go`
+  to one binary error-contract smoke, dropped help/version e2e (covered by `TestExecute_RunsGate`).
+- **T5** — collapsed the two e2e bugreport tests to one flag-path smoke (asserts the `--bugreport`
+  flag-unique Live-log/Exit-code sections); integration subcommand pair kept; redaction matrix stays
+  unit-owned.
+- **T6** — collapsed three duplicate "sandbox not found" tests to one canonical case (743e23a).
+- **T8** — removed ~30 vestigial `t.Setenv("HOME")` sites; inject the layout directly (1541d37).
+- **T9** — strengthened `TestWithNamespace`; deleted misleading `TestKataConfigPath`; kept+reframed
+  `names_test.go` as a wire-format golden guard. Follow-up: the weak isWSL2 tests were the only thing
+  keeping dead `isWSL2`/`procVersionIsWSL2` compiling — deleted the whole WSL2 detection.
+- **T10** — enriched `TestMeta_SaveLoadRoundTrip` to cover every persisted field; deleted four subset
+  round-trips + two literal-dup tests; kept distinct-logic (omitempty/version/migration) and the
+  legit unit-vs-integration diff split.
+- **T11** — strengthened the real bare-`assert.Error` sites to pin specific errors:
+  `StreamLogs`/`ReadStoredPrompt`/`Clone`→`ErrorIs(ErrSandboxNotFound)`/`ErrorAs(*UsageError)`; three
+  `patchConfig*_MissingConfig`→`ErrorIs(fs.ErrNotExist)`.
+- **T12** — added `new.go` usage-error unit tests (parse positional / flag conflicts / port / env)
+  (d36c04c).
+- **T13** — promoted cheap error paths: six `Reset` `_, _ =` discards→`require.Error` on the
+  propagated downstream failure; `HasUncommittedChanges` `*runtime.ExecError` branch covered (exit-1
+  = dirty, non-1 = surfaced error) via a GitExecer fake (19a3c0c). Live-backend error paths +
+  Seatbelt/Tart run coverage split to [`unresolved-findings.md`](unresolved-findings.md) DF18.
+- **T14** — `public_api_test.go`→`internal_leak_fence_test.go` (it's a go/packages static fence, not
+  behavioral API tests) (b9ab232).
+- **T15** — `TestSystemClient_*`→`TestSystem_*` post-D67 rename (9addc32).
+
 ## R1–R6 (2026-06-04 Post-D67/D68 public-surface residue round) — rename-residue + doc-rot on the root package
 
 - **Severity:** doc/cosmetic, one correctness-of-godoc (R1). **Resolved:** 2026-06-04 on

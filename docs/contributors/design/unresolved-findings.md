@@ -72,6 +72,30 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
   (`{"sandboxes"}` envelope), `internal/cli/system/backends_agents.go` (bare array),
   `internal/cli/lifecycle/stop.go` / `destroy.go` (bare array, per-item `error`).
 
+### DF18 — Backend run-coverage gap: live-daemon error paths + zero Seatbelt/Tart run coverage
+
+- **Discovered:** 2026-06-04 · **Workstream:** testing-critique (T13 split-out)
+- **Severity:** MEDIUM
+- **Disposition:** PARKED
+- **Description:** T13 promoted the *cheap* (host-only, fakeable) error paths to first-class
+  assertions, but a class of error branches is reachable only against a live backend and stays
+  unhit: dead-daemon-mid-op, image-missing, exec-on-stopped-container, prune-failure, and the
+  overlay diff/apply error paths (overlay requires a running container for the in-container git
+  exec). More structurally, **Seatbelt and Tart have no real run coverage at all** — no integration
+  tier exercises a real Seatbelt host-process sandbox or a real Tart VM, so their happy *and* error
+  paths are unverified except by the Python smoke harness. The conformance suite extracted in T2
+  (`runtimetest.RunConformance`) is docker-compatible only; Seatbelt and Tart need their own
+  behavioral tables. Not absorbed into the testing-critique scope because it needs live-daemon /
+  VM / macOS infrastructure, not a test rewrite.
+- **Trigger:** when CI (or a contributor host) gains a reachable Seatbelt (macOS) and Tart (macOS
+  VM) environment, stand up per-backend integration tables mirroring the docker conformance shape;
+  separately, add live-daemon error-injection cases (kill the daemon mid-op, reference a missing
+  image, exec into a stopped container, force a prune failure) to the docker/podman integration
+  tier where the daemon is already required.
+- **Pointer:** `internal/runtime/runtimetest/conformance.go` (docker-compat table to mirror);
+  `internal/runtime/seatbelt/`, `internal/runtime/tart/` (no integration tier); overlay error paths
+  in `internal/sandbox/patch/apply.go` (`generateOverlayPatchForContext`, `ensureOverlayBaseline`).
+
 ## Policy origin
 
 Established in [architecture-remediation.md](../archive/plans/architecture-remediation.md) and inherited by [layering-refactor.md](../archive/plans/layering-refactor.md).
