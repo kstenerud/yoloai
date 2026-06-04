@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSystemClient_Agents_Catalog(t *testing.T) {
+func TestSystem_Agents_Catalog(t *testing.T) {
 	c := newTestClient(t)
 
 	agents := c.AgentTypes(AgentQuery{})
@@ -29,7 +29,7 @@ func TestSystemClient_Agents_Catalog(t *testing.T) {
 	assert.Contains(t, []string{"interactive", "headless"}, claude.PromptMode)
 }
 
-func TestSystemClient_Agents_RealOnly(t *testing.T) {
+func TestSystem_Agents_RealOnly(t *testing.T) {
 	c := newTestClient(t)
 
 	real := make(map[string]bool)
@@ -43,7 +43,7 @@ func TestSystemClient_Agents_RealOnly(t *testing.T) {
 	assert.Less(t, len(real), len(c.AgentTypes(AgentQuery{})), "RealOnly returns fewer than the full catalog")
 }
 
-func TestSystemClient_Archetypes(t *testing.T) {
+func TestSystem_Archetypes(t *testing.T) {
 	c := newTestClient(t)
 
 	names := c.Archetypes()
@@ -53,7 +53,7 @@ func TestSystemClient_Archetypes(t *testing.T) {
 	}
 }
 
-func TestSystemClient_Backends_StaticCatalog(t *testing.T) {
+func TestSystem_Backends_StaticCatalog(t *testing.T) {
 	c := newTestClient(t)
 
 	backends := c.BackendTypes(context.Background(), BackendQuery{})
@@ -69,7 +69,7 @@ func TestSystemClient_Backends_StaticCatalog(t *testing.T) {
 	}
 }
 
-func TestSystemClient_Backends_Probed(t *testing.T) {
+func TestSystem_Backends_Probed(t *testing.T) {
 	c := newTestClient(t)
 
 	backends := c.BackendTypes(context.Background(), BackendQuery{ProbeAvailability: true})
@@ -81,7 +81,7 @@ func TestSystemClient_Backends_Probed(t *testing.T) {
 	}
 }
 
-func TestSystemClient_CheckBackend_Unknown(t *testing.T) {
+func TestSystem_CheckBackend_Unknown(t *testing.T) {
 	c := newTestClient(t)
 
 	available, note := c.CheckBackend(context.Background(), "does-not-exist")

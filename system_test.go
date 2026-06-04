@@ -17,10 +17,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestSystemClient_Info verifies paths are derived from the layout and that the
+// TestSystem_Info verifies paths are derived from the layout and that the
 // backend probe returns exactly one status per registered backend (names in
 // registration order; unavailable backends carry a reason).
-func TestSystemClient_Info(t *testing.T) {
+func TestSystem_Info(t *testing.T) {
 	c := newTestClient(t)
 
 	info, err := c.Info(context.Background())
@@ -62,9 +62,9 @@ func TestClient_Principal(t *testing.T) {
 	assert.ErrorAs(t, err, &usageErr)
 }
 
-// TestSystemClient_ValidateSandboxName accepts a well-formed name and rejects
+// TestSystem_ValidateSandboxName accepts a well-formed name and rejects
 // path-traversal, with no host state consulted.
-func TestSystemClient_ValidateSandboxName(t *testing.T) {
+func TestSystem_ValidateSandboxName(t *testing.T) {
 	c := newTestClient(t)
 	assert.NoError(t, c.ValidateSandboxName("my-box"))
 	assert.Error(t, c.ValidateSandboxName("../escape"))
@@ -81,9 +81,9 @@ func TestSandbox_MissingReturnsNotFound(t *testing.T) {
 	assert.ErrorIs(t, err, ErrSandboxNotFound)
 }
 
-// TestSystemClient_ListAcrossBackends_Empty verifies a fresh install (no sandbox
+// TestSystem_ListAcrossBackends_Empty verifies a fresh install (no sandbox
 // dirs) lists nothing and probes no backends — no enumeration, no error.
-func TestSystemClient_ListAcrossBackends_Empty(t *testing.T) {
+func TestSystem_ListAcrossBackends_Empty(t *testing.T) {
 	c := newTestClient(t)
 	infos, unavailable, err := c.ListAcrossBackends(context.Background())
 	require.NoError(t, err)
@@ -91,10 +91,10 @@ func TestSystemClient_ListAcrossBackends_Empty(t *testing.T) {
 	assert.Empty(t, unavailable)
 }
 
-// TestSystemClient_Doctor verifies every registered backend produces at least
+// TestSystem_Doctor verifies every registered backend produces at least
 // one report row (base-mode or init-failure), and that a non-matching backend
 // filter yields nothing.
-func TestSystemClient_Doctor(t *testing.T) {
+func TestSystem_Doctor(t *testing.T) {
 	c := newTestClient(t)
 
 	reports, err := c.Doctor(context.Background(), SystemDoctorOptions{})
