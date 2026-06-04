@@ -460,6 +460,51 @@ func TestHasUncommittedChanges_OnlyCommits(t *testing.T) {
 	assert.False(t, has)
 }
 
+// gitExecRuntime is a GitExecer fake (the Tart/containerd seam) that lets the
+// HasUncommittedChanges exit-code discrimination be tested deterministically.
+// `git add -A` always succeeds; `git diff --quiet` returns the configured error.
+// The host-git tests above only ever exercise the *exec.ExitError branch — this
+// fake reaches the *runtime.ExecError branch that non-host backends actually hit.
+type gitExecRuntime struct {
+	runtime.Runtime // embedded: only GitExec is invoked here, rest stay nil
+	diffErr         error
+}
+
+func (g *gitExecRuntime) GitExec(_ context.Context, _, _ string, args ...string) (string, error) {
+	if len(args) > 0 && args[0] == "diff" {
+		return "", g.diffErr
+	}
+	return "", nil // git add -A
+}
+
+// TestHasUncommittedChanges_ExecErrorExit1 pins the backend (Tart/containerd)
+// path: a *runtime.ExecError with code 1 from `git diff --quiet` means "dirty",
+// not a failure. No host-git test can reach this branch.
+func TestHasUncommittedChanges_ExecErrorExit1(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	createCopySandbox(t, tmpDir, "test-wip-execerr1", "/tmp/project")
+
+	rt := &gitExecRuntime{diffErr: &runtime.ExecError{ExitCode: 1}}
+	has, err := HasUncommittedChanges(context.Background(), testLayout(tmpDir), rt, "test-wip-execerr1")
+	require.NoError(t, err)
+	assert.True(t, has, "exit code 1 from git diff --quiet means uncommitted changes exist")
+}
+
+// TestHasUncommittedChanges_ExecErrorOther guards the discrimination: a non-1
+// exit (a genuine git failure) must surface as an error, never be misreported
+// as clean or dirty.
+func TestHasUncommittedChanges_ExecErrorOther(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	createCopySandbox(t, tmpDir, "test-wip-execerr128", "/tmp/project")
+
+	rt := &gitExecRuntime{diffErr: &runtime.ExecError{ExitCode: 128, Stderr: "fatal: not a git repository"}}
+	_, err := HasUncommittedChanges(context.Background(), testLayout(tmpDir), rt, "test-wip-execerr128")
+	require.Error(t, err, "a non-1 git failure must surface, not be swallowed as clean/dirty")
+	assert.Contains(t, err.Error(), "git diff --quiet")
+}
+
 // GenerateFormatPatch tests
 
 func TestGenerateFormatPatch_Single(t *testing.T) {

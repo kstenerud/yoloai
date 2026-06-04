@@ -594,8 +594,10 @@ func TestReset_RecopiesWorkdir(t *testing.T) {
 	d := newLifecycleDeps(mock, tmpDir)
 
 	// Reset will re-copy and re-baseline, then fail at Start (recreateContainer
-	// needs runtime-config.json). That's OK — we verify the re-copy happened.
-	_, _ = Reset(context.Background(), d, ResetOptions{Name: name})
+	// needs runtime-config.json). The re-copy must happen AND the downstream
+	// Start failure must propagate — Reset never swallows it.
+	_, resetErr := Reset(context.Background(), d, ResetOptions{Name: name})
+	require.Error(t, resetErr, "Reset must surface the Start failure, not swallow it")
 
 	// Verify work copy was re-copied from original
 	content, err := os.ReadFile(filepath.Join(workDir, "file.txt")) //nolint:gosec // G304: test file path
@@ -646,8 +648,10 @@ func TestReset_PromptOverwrite(t *testing.T) {
 	d := newLifecycleDeps(mock, tmpDir)
 
 	// Reset overwrites prompt.txt before doing anything else; the later restart
-	// fails (no runtime-config.json) but the prompt write already happened.
-	_, _ = Reset(context.Background(), d, ResetOptions{Name: name, Prompt: "new prompt"})
+	// fails (no runtime-config.json) but the prompt write already happened. The
+	// restart failure must propagate.
+	_, resetErr := Reset(context.Background(), d, ResetOptions{Name: name, Prompt: "new prompt"})
+	require.Error(t, resetErr, "Reset must surface the restart failure, not swallow it")
 
 	got, err := os.ReadFile(filepath.Join(sandboxDir, "prompt.txt")) //nolint:gosec // test path
 	require.NoError(t, err)
@@ -700,8 +704,10 @@ func TestReset_State(t *testing.T) {
 	}
 
 	d := newLifecycleDeps(mock, tmpDir)
-	// --state implies --restart
-	_, _ = Reset(context.Background(), d, ResetOptions{Name: name, ClearState: true})
+	// --state implies --restart; the restart fails (no runtime-config.json) but
+	// the state wipe already happened. The failure must propagate.
+	_, resetErr := Reset(context.Background(), d, ResetOptions{Name: name, ClearState: true})
+	require.Error(t, resetErr, "Reset must surface the restart failure, not swallow it")
 
 	// agent-runtime dir should exist with only settings.json (re-applied by
 	// ensureContainerSettings after clean wipe)
@@ -849,7 +855,9 @@ func TestReset_InPlace_SyncsWorkdir(t *testing.T) {
 
 	// Default reset (in-place). sendResetNotification will fail (no runtime-config.json
 	// and exec mock not wired), but workspace sync and baseline should succeed.
-	_, _ = Reset(context.Background(), d, ResetOptions{Name: name})
+	// The notification failure must propagate.
+	_, resetErr := Reset(context.Background(), d, ResetOptions{Name: name})
+	require.Error(t, resetErr, "Reset must surface the notification failure, not swallow it")
 
 	// Verify work copy was synced from updated original
 	content, err := os.ReadFile(filepath.Join(workDir, "file.txt")) //nolint:gosec // test
@@ -928,7 +936,10 @@ func TestReset_InPlace_KeepCache(t *testing.T) {
 	}
 
 	d := newLifecycleDeps(mock, tmpDir)
-	_, _ = Reset(context.Background(), d, ResetOptions{Name: name, KeepCache: true})
+	// In-place reset; sendResetNotification fails (no runtime-config.json) but
+	// the cache/files handling already ran. The failure must propagate.
+	_, resetErr := Reset(context.Background(), d, ResetOptions{Name: name, KeepCache: true})
+	require.Error(t, resetErr, "Reset must surface the notification failure, not swallow it")
 
 	// Cache should be preserved
 	assert.FileExists(t, filepath.Join(cacheDir, "cached.txt"))
@@ -987,7 +998,10 @@ func TestReset_InPlace_KeepFiles(t *testing.T) {
 	}
 
 	d := newLifecycleDeps(mock, tmpDir)
-	_, _ = Reset(context.Background(), d, ResetOptions{Name: name, KeepFiles: true})
+	// In-place reset; sendResetNotification fails (no runtime-config.json) but
+	// the cache/files handling already ran. The failure must propagate.
+	_, resetErr := Reset(context.Background(), d, ResetOptions{Name: name, KeepFiles: true})
+	require.Error(t, resetErr, "Reset must surface the notification failure, not swallow it")
 
 	// Cache should be cleared
 	assert.NoFileExists(t, filepath.Join(cacheDir, "cached.txt"))
