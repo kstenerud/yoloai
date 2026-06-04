@@ -23,7 +23,6 @@ func TestBackendCaps(t *testing.T) {
 
 func TestCreate_CleansUpIncompleteOnNew(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	// Create sandbox dir without environment.json (incomplete from prior failure)
 	name := "incomplete"
@@ -52,7 +51,6 @@ func TestCreate_CleansUpIncompleteOnNew(t *testing.T) {
 
 func TestCreate_CleansUpOnPrepareFail(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	name := "cleanup-test"
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)

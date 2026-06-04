@@ -106,7 +106,6 @@ func (m *mockRuntime) Descriptor() runtime.BackendDescriptor {
 
 func TestEnsureSetup_CreatesDirectories(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	mock := &mockRuntime{} // image exists (no error)
 	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
@@ -125,7 +124,6 @@ func TestEnsureSetup_CreatesDirectories(t *testing.T) {
 
 func TestEnsureSetup_WritesConfigOnFirstRun(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	mock := &mockRuntime{}
 	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
@@ -147,7 +145,6 @@ func TestEnsureSetup_WritesConfigOnFirstRun(t *testing.T) {
 // reintroduce the silent auto-migration this design removed.
 func TestEnsureSetup_DoesNotStampSchemaVersion(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	mock := &mockRuntime{}
 	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
@@ -163,7 +160,6 @@ func TestEnsureSetup_DoesNotStampSchemaVersion(t *testing.T) {
 
 func TestEnsureSetup_PreservesConfigOnSubsequentRun(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	// Pre-create defaults/config.yaml simulating an existing install.
 	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
@@ -187,7 +183,6 @@ func TestEnsureSetup_PreservesConfigOnSubsequentRun(t *testing.T) {
 
 func TestEnsureSetup_AlwaysCallsSetup(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	// Simulate a prior successful build by recording the current checksum.
 	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
@@ -203,7 +198,6 @@ func TestEnsureSetup_AlwaysCallsSetup(t *testing.T) {
 
 func TestEnsureSetup_RebuildWhenChecksumStale(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	// Simulate a stale build: write a different checksum to defaults/
 	defaultsDir := filepath.Join(tmpDir, ".yoloai", "defaults")
@@ -222,7 +216,6 @@ func TestEnsureSetup_RebuildWhenChecksumStale(t *testing.T) {
 
 func TestEnsureSetup_BuildsWhenImageMissing(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	mock := &mockRuntime{} // Setup returns nil (success)
 	var output bytes.Buffer

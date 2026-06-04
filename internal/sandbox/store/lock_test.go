@@ -35,23 +35,17 @@ func withFastRetry(t *testing.T) {
 	})
 }
 
-// testLayout returns a Layout rooted at the test's current HOME.
-// Each test sets t.Setenv("HOME", t.TempDir()) before calling this,
-// so the lock files land in an isolated dir.
+// testLayout returns a Layout rooted at an isolated per-test temp dir. The
+// layout is injected directly (not steered through $HOME) so the locking code
+// reads it from the value, not from the process environment.
 func testLayout(t *testing.T) config.Layout {
 	t.Helper()
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Fatal("os.UserHomeDir():", err)
-	}
-	return config.NewLayout(filepath.Join(home, ".yoloai"))
+	return config.NewLayout(filepath.Join(t.TempDir(), ".yoloai"))
 }
 
 // TestAcquireLock_CreatesDir verifies acquireLock succeeds when the sandboxes
 // directory does not yet exist (e.g. first run with an empty HOME).
 func TestAcquireLock_CreatesDir(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-
 	unlock, err := AcquireLock(testLayout(t), "mybox")
 	require.NoError(t, err)
 	unlock()
@@ -60,7 +54,6 @@ func TestAcquireLock_CreatesDir(t *testing.T) {
 // TestAcquireLock_MutualExclusion verifies that a second goroutine blocks on
 // acquireLock until the first releases it.
 func TestAcquireLock_MutualExclusion(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
 	layout := testLayout(t)
 
 	unlock1, err := AcquireLock(layout, "mybox")
@@ -96,7 +89,6 @@ func TestAcquireLock_MutualExclusion(t *testing.T) {
 // TestAcquireLock_IndependentSandboxes verifies locks on different names
 // do not block each other.
 func TestAcquireLock_IndependentSandboxes(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
 	layout := testLayout(t)
 
 	unlock1, err := AcquireLock(layout, "box-a")
@@ -111,7 +103,6 @@ func TestAcquireLock_IndependentSandboxes(t *testing.T) {
 // TestAcquireLock_Reacquirable verifies the lock can be re-acquired after
 // the release function is called.
 func TestAcquireLock_Reacquirable(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
 	layout := testLayout(t)
 
 	for range 3 {
@@ -124,7 +115,6 @@ func TestAcquireLock_Reacquirable(t *testing.T) {
 // TestAcquireLock_LockfileLeftOnDisk verifies the lockfile persists after
 // release — it is a harmless advisory file that the next caller reuses.
 func TestAcquireLock_LockfileLeftOnDisk(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
 	layout := testLayout(t)
 
 	unlock, err := AcquireLock(layout, "mybox")
@@ -139,7 +129,6 @@ func TestAcquireLock_LockfileLeftOnDisk(t *testing.T) {
 // the same pair of names in opposite order do not deadlock. Both complete
 // within the timeout because AcquireMultiLock sorts names before locking.
 func TestAcquireMultiLock_DeadlockPrevention(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
 	layout := testLayout(t)
 
 	var wg sync.WaitGroup
@@ -178,7 +167,6 @@ func TestAcquireMultiLock_DeadlockPrevention(t *testing.T) {
 // TestAcquireMultiLock_MutualExclusion verifies only one holder of a
 // multi-lock can proceed at a time for the same set of names.
 func TestAcquireMultiLock_MutualExclusion(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
 	layout := testLayout(t)
 
 	unlock1, err := AcquireMultiLock(layout, "alpha", "beta")
@@ -211,7 +199,6 @@ func TestAcquireMultiLock_MutualExclusion(t *testing.T) {
 // TestAcquireLock_WritesHolderPID verifies the lock file content is the
 // acquiring process's PID while the lock is held.
 func TestAcquireLock_WritesHolderPID(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
 	layout := testLayout(t)
 
 	unlock, err := AcquireLock(layout, "mybox")
@@ -229,7 +216,6 @@ func TestAcquireLock_WritesHolderPID(t *testing.T) {
 // truncated when the lock is released, so a future reader of a stale
 // file doesn't see a misleading PID.
 func TestAcquireLock_ClearsHolderPIDOnRelease(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
 	layout := testLayout(t)
 
 	unlock, err := AcquireLock(layout, "mybox")
@@ -245,7 +231,6 @@ func TestAcquireLock_ClearsHolderPIDOnRelease(t *testing.T) {
 // the retry budget while a holder is alive surfaces *SandboxLockedError
 // with HolderAlive=true and the holder's PID.
 func TestAcquireLock_ContentionReturnsTypedError(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
 	layout := testLayout(t)
 	withFastRetry(t)
 
@@ -268,7 +253,6 @@ func TestAcquireLock_ContentionReturnsTypedError(t *testing.T) {
 // lock file whose recorded holder PID is not alive and reports
 // cleared=true.
 func TestForceUnlock_ClearsStaleLockfile(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
 	layout := testLayout(t)
 	lockPath := layout.SandboxLockPath("mybox")
 
@@ -291,7 +275,6 @@ func TestForceUnlock_ClearsStaleLockfile(t *testing.T) {
 // *UsageError when the recorded holder PID names a live process, and
 // reports cleared=false.
 func TestForceUnlock_RefusesAliveHolder(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
 	layout := testLayout(t)
 
 	// Acquire a real lock so the file has our own (alive) PID.
@@ -315,7 +298,6 @@ func TestForceUnlock_RefusesAliveHolder(t *testing.T) {
 // caller can distinguish "removed a real stale lock" from "nothing
 // was there to remove."
 func TestForceUnlock_NoLockFileIsNoOp(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
 
 	cleared, err := ForceUnlock(testLayout(t), "never-existed")
 	assert.NoError(t, err)
@@ -326,7 +308,6 @@ func TestForceUnlock_NoLockFileIsNoOp(t *testing.T) {
 // lock file (no PID check, unlike ForceUnlock) and that the lock file is
 // gone afterward — the Destroy/Create-rollback cleanup path.
 func TestRemoveLockFile_RemovesWhileHeld(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
 	layout := testLayout(t)
 
 	unlock, err := AcquireLock(layout, "mybox")
@@ -342,7 +323,6 @@ func TestRemoveLockFile_RemovesWhileHeld(t *testing.T) {
 // TestRemoveLockFile_NoLockFileIsNoOp verifies removing a non-existent lock
 // file is a successful no-op (idempotent).
 func TestRemoveLockFile_NoLockFileIsNoOp(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
 
 	assert.NoError(t, RemoveLockFile(testLayout(t), "never-existed"))
 }
@@ -352,7 +332,6 @@ func TestRemoveLockFile_NoLockFileIsNoOp(t *testing.T) {
 // succeeds — the flock on the old, now-unlinked inode does not block a new
 // acquire on a freshly created file.
 func TestRemoveLockFile_ReacquirableAfterRemoval(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
 	layout := testLayout(t)
 
 	unlock, err := AcquireLock(layout, "mybox")
@@ -368,7 +347,6 @@ func TestRemoveLockFile_ReacquirableAfterRemoval(t *testing.T) {
 // TestSweepStaleLocks_RemovesOrphanedLock verifies a .lock file whose
 // sandbox dir is gone and that no process holds is swept.
 func TestSweepStaleLocks_RemovesOrphanedLock(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
 	layout := testLayout(t)
 
 	// Create an orphaned lock file (no sandbox dir, not held).
@@ -385,7 +363,6 @@ func TestSweepStaleLocks_RemovesOrphanedLock(t *testing.T) {
 // TestSweepStaleLocks_SkipsHeldLock verifies a lock currently held by a
 // live holder is not swept (try-acquire would block).
 func TestSweepStaleLocks_SkipsHeldLock(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
 	layout := testLayout(t)
 
 	unlock, err := AcquireLock(layout, "held")
@@ -401,7 +378,6 @@ func TestSweepStaleLocks_SkipsHeldLock(t *testing.T) {
 // TestSweepStaleLocks_SkipsLockBesideExistingDir verifies a lock file is
 // left alone when its sandbox directory still exists (legitimate companion).
 func TestSweepStaleLocks_SkipsLockBesideExistingDir(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
 	layout := testLayout(t)
 
 	require.NoError(t, os.MkdirAll(layout.SandboxDir("live"), 0o750))
@@ -418,7 +394,6 @@ func TestSweepStaleLocks_SkipsLockBesideExistingDir(t *testing.T) {
 // TestSweepStaleLocks_DryRunKeepsFile verifies dry-run reports but does not
 // remove.
 func TestSweepStaleLocks_DryRunKeepsFile(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
 	layout := testLayout(t)
 
 	unlock, err := AcquireLock(layout, "ghost")
@@ -434,7 +409,6 @@ func TestSweepStaleLocks_DryRunKeepsFile(t *testing.T) {
 // TestQuarantineSandbox_MovesToTrash verifies a sandbox dir is relocated
 // into the trash dir.
 func TestQuarantineSandbox_MovesToTrash(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
 	layout := testLayout(t)
 
 	src := layout.SandboxDir("broken")
@@ -451,7 +425,6 @@ func TestQuarantineSandbox_MovesToTrash(t *testing.T) {
 // TestQuarantineSandbox_SuffixesOnCollision verifies a second quarantine of
 // the same name does not clobber the first.
 func TestQuarantineSandbox_SuffixesOnCollision(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
 	layout := testLayout(t)
 
 	mk := func() {

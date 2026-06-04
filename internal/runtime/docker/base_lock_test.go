@@ -5,7 +5,7 @@
 package docker
 
 import (
-	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -14,15 +14,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// testLayout returns a Layout rooted at the current test HOME (set via
-// t.Setenv("HOME", ...) by the caller). Lock files land in an isolated dir.
-func testLayout(t *testing.T) config.Layout {
-	t.Helper()
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Fatal("os.UserHomeDir():", err)
-	}
-	return config.NewLayout(home + "/.yoloai")
+// testLayout returns a Layout rooted at the given dir. The layout is injected
+// directly (not steered through $HOME) so the locking code reads it from the
+// value, not from the process environment.
+func testLayout(dir string) config.Layout {
+	return config.NewLayout(filepath.Join(dir, ".yoloai"))
 }
 
 // TestAcquireBaseLock_MutualExclusion verifies that a second goroutine
@@ -30,14 +26,14 @@ func testLayout(t *testing.T) config.Layout {
 // invariant that prevents two Setup() callers from racing on the
 // docker base image build/tag.
 func TestAcquireBaseLock_MutualExclusion(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
 
-	unlock1, err := AcquireBaseLock(testLayout(t), "yoloai-base")
+	unlock1, err := AcquireBaseLock(testLayout(dir), "yoloai-base")
 	require.NoError(t, err)
 
 	acquired := make(chan struct{})
 	go func() {
-		unlock2, err2 := AcquireBaseLock(testLayout(t), "yoloai-base")
+		unlock2, err2 := AcquireBaseLock(testLayout(dir), "yoloai-base")
 		if err2 == nil {
 			close(acquired)
 			unlock2()
@@ -64,13 +60,13 @@ func TestAcquireBaseLock_MutualExclusion(t *testing.T) {
 // different base names (a hypothetical future extension to per-profile
 // base images) do not block each other.
 func TestAcquireBaseLock_IndependentBaseNames(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
 
-	unlock1, err := AcquireBaseLock(testLayout(t), "yoloai-base")
+	unlock1, err := AcquireBaseLock(testLayout(dir), "yoloai-base")
 	require.NoError(t, err)
 	defer unlock1()
 
-	unlock2, err := AcquireBaseLock(testLayout(t), "yoloai-base-alt")
+	unlock2, err := AcquireBaseLock(testLayout(dir), "yoloai-base-alt")
 	require.NoError(t, err)
 	unlock2()
 }
@@ -78,10 +74,10 @@ func TestAcquireBaseLock_IndependentBaseNames(t *testing.T) {
 // TestAcquireBaseLock_Reacquirable verifies the lock can be acquired
 // repeatedly after release.
 func TestAcquireBaseLock_Reacquirable(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
 
 	for range 3 {
-		unlock, err := AcquireBaseLock(testLayout(t), "yoloai-base")
+		unlock, err := AcquireBaseLock(testLayout(dir), "yoloai-base")
 		require.NoError(t, err)
 		unlock()
 	}
@@ -92,7 +88,7 @@ func TestAcquireBaseLock_Reacquirable(t *testing.T) {
 // This is the integration-style test that mirrors the production race
 // (multiple `yoloai new` processes hitting Setup() at once).
 func TestAcquireBaseLock_ConcurrentCallers(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
 
 	const N = 8
 	var (
@@ -106,7 +102,7 @@ func TestAcquireBaseLock_ConcurrentCallers(t *testing.T) {
 	for range N {
 		go func() {
 			defer wg.Done()
-			unlock, err := AcquireBaseLock(testLayout(t), "yoloai-base")
+			unlock, err := AcquireBaseLock(testLayout(dir), "yoloai-base")
 			if err != nil {
 				t.Errorf("acquire failed: %v", err)
 				return
