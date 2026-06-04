@@ -477,6 +477,15 @@ func clearCacheAndFiles(d state.Deps, opts ResetOptions) error {
 
 // rsyncDir syncs contents of src into dst using rsync.
 // Trailing slashes ensure rsync copies contents, not the directory itself.
+//
+// Why rsync and not RemoveAll+CopyDir (as the restart path does): in-place
+// reset runs while the agent's container is live with dst bind-mounted in. A
+// differential sync (rsync --delete) never leaves a window where the tree has
+// vanished out from under the running container; a wipe-then-copy would. rsync
+// is therefore a deliberate runtime dependency on container backends (see
+// CLAUDE.md "Runtime dependencies"); the one backend where host-side access is
+// impossible — Tart, whose workdir lives inside the VM — is excluded by
+// resetInPlace before reaching here.
 func rsyncDir(src, dst string) error {
 	cmd := exec.Command("rsync", "-a", "--delete", src+"/", dst+"/") //nolint:gosec // src and dst are internal paths, not user-controlled
 	if output, err := cmd.CombinedOutput(); err != nil {

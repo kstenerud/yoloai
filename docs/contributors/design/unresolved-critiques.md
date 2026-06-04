@@ -207,6 +207,13 @@ contract rounds above. Found via a whole-file read pass; `file:line` anchors are
   in-place must do a differential update with no window where the tree vanishes under the live
   container (vs the restart path's `RemoveAll`+`CopyDir`); add a one-line *why* at `rsyncDir`.
 - **Spun off as IC16 (tangential):** see below.
+- **Done (2026-06-04).** Both residuals addressed without changing behavior. (a) The undeclared
+  host `rsync` dependency is now documented in `CLAUDE.md` (the "no runtime deps" bullet carries the
+  narrow in-place-reset exception). (b) `rsyncDir` carries a *why* comment: rsync `--delete` is a
+  differential resync that never opens a window where dst vanishes under the live container (unlike
+  the restart path's `RemoveAll`+`CopyDir`), and the one host-inaccessible backend (Tart) is
+  excluded upstream. The "replace rsync with in-process sync" alternative was left for a future call
+  — the dependency is now honest, which was the actual defect.
 
 **IC16 — two near-identical host-git wrappers coexist (LOW, dedup-only).**
 - **Verified 2026-06-04.** `workspace/git.go:18` and `runtime.hostGitExec` (`runtime.go:576`) are
@@ -216,6 +223,17 @@ contract rounds above. Found via a whole-file read pass; `file:line` anchors are
   diff/apply via `GitExecFor`'s host fallback.
 - **Direction.** Low priority — consider routing `workspace`'s git wrapper through `hostGitExec`
   (or vice versa) so there is one host-git chokepoint, but the duplication is benign as-is.
+- **Won't do — unification is unsound (2026-06-04, dug deeper).** The two wrappers only *look* alike;
+  their behavior and lifecycle role differ deliberately. `workspace.NewGitCmd`/`RunGitCmd` trims
+  output and returns plain errors — it builds the git baseline during **create**, host-side, before
+  any container exists. `runtime.hostGitExec` is the **host arm of the `GitExecFor` dispatch seam**:
+  it does NOT trim (patches are whitespace-sensitive) and returns a `*ExecError` carrying the exit
+  code (so `git diff --quiet` exit 1 reads as "diffs present"), and Tart overrides it via `GitExecer`
+  to run git **in-container**. Routing `workspace`'s wrapper through `GitExecFor` would push pre-
+  container baseline git into a container that may not exist yet, and routing `hostGitExec` through
+  `workspace` would drop the exit-code typing diff/apply depends on. The shared `core.hooksPath=
+  /dev/null` is the only real overlap, and it is one line. Same mis-diagnosis pattern as IC12/IC15:
+  the apparent dup is benign, and the proposed dedup would be a regression. Closed.
 
 ### LOW — cleanup sweep
 
