@@ -70,17 +70,6 @@ func TestSystem_ValidateSandboxName(t *testing.T) {
 	assert.Error(t, c.ValidateSandboxName("../escape"))
 }
 
-// TestSandbox_MissingReturnsNotFound returns ErrSandboxNotFound for a sandbox
-// whose directory does not exist — obtaining the handle IS the existence check.
-func TestSandbox_MissingReturnsNotFound(t *testing.T) {
-	dir := t.TempDir()
-	c, err := NewClient(context.Background(), ClientCreateOptions{DataDir: dir, HomeDir: dir})
-	require.NoError(t, err)
-	defer c.Close() //nolint:errcheck
-	_, err = c.Sandbox("nope")
-	assert.ErrorIs(t, err, ErrSandboxNotFound)
-}
-
 // TestSystem_ListAcrossBackends_Empty verifies a fresh install (no sandbox
 // dirs) lists nothing and probes no backends — no enumeration, no error.
 func TestSystem_ListAcrossBackends_Empty(t *testing.T) {

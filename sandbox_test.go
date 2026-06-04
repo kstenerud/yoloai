@@ -65,6 +65,9 @@ func TestClient_Sandbox_BindsName(t *testing.T) {
 	assert.Equal(t, "mybox", sb.Name())
 }
 
+// TestClient_Sandbox_NotFound verifies the handle constructor itself refuses an
+// unknown name (F22): obtaining the handle IS the existence check, so the error
+// surfaces eagerly here, not lazily inside a later operation.
 func TestClient_Sandbox_NotFound(t *testing.T) {
 	c, _ := clientWithSandbox(t)
 	_, err := c.Sandbox("ghost")

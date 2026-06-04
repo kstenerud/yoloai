@@ -58,13 +58,3 @@ func TestWorkdir_Apply_OverlayRefusesCommits(t *testing.T) {
 	var ue *yoerrors.UsageError
 	require.ErrorAs(t, err, &ue, "ApplyModeCommits on an overlay workdir must be a *UsageError")
 }
-
-// TestClient_Sandbox_NotFoundHandle verifies the handle constructor itself
-// refuses an unknown name (F22) — the error surfaces here, not lazily inside a
-// later operation.
-func TestClient_Sandbox_NotFoundHandle(t *testing.T) {
-	tmpDir := t.TempDir()
-	c := &Client{layout: config.NewLayout(filepath.Join(tmpDir, ".yoloai"))}
-	_, err := c.Sandbox("ghost")
-	require.ErrorIs(t, err, ErrSandboxNotFound)
-}
