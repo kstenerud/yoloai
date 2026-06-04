@@ -299,29 +299,6 @@ func InspectSandbox(ctx context.Context, layout config.Layout, rt runtime.Runtim
 		return nil, err
 	}
 
-	changes := "-"
-	if meta.Workdir.Mode == "copy" || meta.Workdir.Mode == "overlay" {
-		workDir := store.WorkDir(sandboxDir, meta.Workdir.HostPath)
-		if patch.HasUnappliedWork(workDir, meta.Workdir.BaselineSHA) {
-			changes = "yes"
-		} else if patch.DetectChanges(workDir) != "-" {
-			changes = "no"
-		}
-	}
-
-	// Also check aux :copy/:overlay dirs for changes
-	if changes == "no" {
-		for _, d := range meta.Directories {
-			if d.Mode == "copy" || d.Mode == "overlay" {
-				auxWorkDir := store.WorkDir(sandboxDir, d.HostPath)
-				if patch.HasUnappliedWork(auxWorkDir, d.BaselineSHA) {
-					changes = "yes"
-					break
-				}
-			}
-		}
-	}
-
 	diskUsageBytes := int64(-1)
 	if size, err := DirSize(sandboxDir); err == nil {
 		diskUsageBytes = size
@@ -330,7 +307,7 @@ func InspectSandbox(ctx context.Context, layout config.Layout, rt runtime.Runtim
 	return &Info{
 		Environment:    meta,
 		Status:         status,
-		HasChanges:     changes,
+		HasChanges:     detectWorkdirChanges(sandboxDir, meta),
 		DiskUsageBytes: diskUsageBytes,
 	}, nil
 }

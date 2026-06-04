@@ -130,6 +130,11 @@ contract rounds above. Found via a whole-file read pass; `file:line` anchors are
   `InspectSandboxWithBackend` calls the extracted `detectWorkdirChanges`; the two diverge subtly
   (`InspectSandbox` can report "no"; the helper short-circuits on "-").
 - **Direction.** Have `InspectSandbox` call the shared helper.
+- **Done (2026-06-04).** `InspectSandbox` now calls `detectWorkdirChanges`. On trace the inline and
+  helper forms were already behaviorally identical (both can return "yes"/"no"/"-"), so this is a
+  pure DRY collapse, no behavior change. (Aside: `InspectSandbox` and `InspectSandboxWithBackend`
+  are now near-duplicates differing only in nil-`rt` handling — a possible future unify, out of
+  scope here.)
 
 **IC12 — reset's in-place path uses host `rsync`/`git`. (original "bypasses runtime seam" premise ABANDONED).**
 - **Investigated 2026-06-04 (read of `reset.go` + `runtime.go` GitExecFor).** The original framing
