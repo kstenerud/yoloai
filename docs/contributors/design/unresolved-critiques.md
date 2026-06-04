@@ -117,8 +117,18 @@ toward an ice-cream cone.
 
 - **T9 — Tautologies / no-assert tests.** `runtime/.../names_test.go:8-24` (`BackendDocker ==
   "docker"`); containerd tests that call a method and assert nothing (`:73-105`, `:186-198`);
-  `containerd_test.go` re-implements `context`/`isWSL2` and tests the re-implementation. *Fix:*
-  delete or convert to real behavioral assertions.
+  `containerd_test.go` re-implements `context`/`isWSL2` and tests the re-implementation. *Fix
+  (applied):* converted to real behavioral assertions rather than blanket deletion.
+  `names_test.go` was KEPT and reframed — the `BackendType` constants are the on-disk wire format
+  (environment.json `backend`, config `backend:`), so the test is a deliberate golden-value
+  serialization guard, not a tautology; comment now says so. `TestWithNamespace` strengthened from
+  "ctx != background" to assert `namespaces.Namespace(ctx) == "yoloai"`. The `isWSL2` trio
+  (no-assert smoke + two inline reimplementations that asserted on stdlib `strings.Contains`, not
+  production) was replaced: extracted a pure `procVersionIsWSL2([]byte) bool` classifier from
+  `isWSL2` and table-test it directly (wsl2 / generic / empty), giving real branch coverage of the
+  production logic. `TestKataConfigPath` deleted — `kataConfigPath(_ string)` ignores its argument
+  and always returns `""`, so a three-input parametrized test implied a non-existent
+  input-dependence; the rationale already lives in the function's doc comment.
 - **T11 — Assert-only-error tests** that can't distinguish "feature works" from "daemon absent":
   `e2e/destroy_test.go:22,39`, the tart stop tests. They pass whether or not the thing works. *Fix:*
   gate on a backend probe and assert real post-conditions, or drop.
@@ -155,5 +165,8 @@ T4 (e2e trim) → T13 (error-path coverage).
 - ✅ **T5** — collapse two e2e bugreport tests to one flag-path smoke; matrix stays unit-owned.
 - ✅ **T10** — enrich `SaveLoadRoundTrip` + delete 4 subset round-trips; delete `SandboxState_FalseValue`
   + `HasAnyAPIKey_HostEnv` literal dups; keep CLI-diff smoke (legit tier separation).
-- ⏳ Remaining: T9, T11 (low-value); T2, T4, T13 (large/judgement);
+- ✅ **T9** — extract `procVersionIsWSL2` + table-test it (replaces the 3 reimpl/no-assert isWSL2
+  tests); strengthen `TestWithNamespace`; delete misleading `TestKataConfigPath`; keep+reframe
+  `names_test.go` as a wire-format guard.
+- ⏳ Remaining: T11 (low-value); T2, T4, T13 (large/judgement);
   T7 (broad `t.Parallel` adoption — partially seeded in new_test.go).

@@ -290,5 +290,11 @@ func bridgeBinaryHasCNICaps(path string) bool {
 // isWSL2 returns true if running inside a WSL2 environment.
 func isWSL2() bool {
 	data, _ := os.ReadFile("/proc/version")
-	return strings.Contains(strings.ToLower(string(data)), "microsoft")
+	return procVersionIsWSL2(data)
+}
+
+// procVersionIsWSL2 is the pure classifier over /proc/version contents, split
+// out so the WSL2 detection branch is unit-testable without a real /proc.
+func procVersionIsWSL2(procVersion []byte) bool {
+	return strings.Contains(strings.ToLower(string(procVersion)), "microsoft")
 }

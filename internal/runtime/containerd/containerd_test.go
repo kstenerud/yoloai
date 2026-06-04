@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/containerd/containerd/v2/pkg/namespaces"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -26,15 +27,15 @@ func TestDescriptor_Name(t *testing.T) {
 	assert.Equal(t, runtime.BackendType("containerd"), r.Descriptor().Type)
 }
 
-// TestWithNamespace verifies that withNamespace injects the correct namespace.
+// TestWithNamespace verifies that withNamespace embeds the runtime's namespace
+// into the context so containerd client calls are scoped to it.
 func TestWithNamespace(t *testing.T) {
 	r := &Runtime{namespace: "yoloai"}
 	ctx := r.withNamespace(context.Background())
-	require.NotNil(t, ctx)
-	// The namespace is embedded in the context value — verify we can round-trip it.
-	// We don't import namespaces package here to keep the test minimal, so just
-	// verify the context is distinct from the input.
-	assert.NotEqual(t, context.Background(), ctx)
+
+	ns, ok := namespaces.Namespace(ctx)
+	require.True(t, ok, "withNamespace must set a containerd namespace on the context")
+	assert.Equal(t, "yoloai", ns)
 }
 
 // TestGitExec_ExitOneReturnsExecError verifies that non-zero git exit returns
@@ -70,43 +71,6 @@ func TestGitExec_ExitOneReturnsExecError(t *testing.T) {
 	assert.Equal(t, 1, execErr.ExitCode)
 }
 
-// TestIsWSL2_Linux verifies isWSL2 doesn't panic in a regular Linux environment.
-func TestIsWSL2_Linux(t *testing.T) {
-	// On a non-WSL2 machine, isWSL2() should return false without panic.
-	// On a WSL2 machine it may return true — either is acceptable.
-	result := isWSL2()
-	// No assertion on value — only testing that it doesn't panic.
-	_ = result
-}
-
-// TestKataConfigPath verifies the correct config path is returned for each runtime.
-func TestKataConfigPath(t *testing.T) {
-	tests := []struct {
-		runtime  string
-		wantPath string
-	}{
-		{
-			runtime:  "io.containerd.kata.v2",
-			wantPath: "", // use shim default (Dragonball VMM)
-		},
-		{
-			runtime:  "io.containerd.kata-fc.v2",
-			wantPath: "", // use shim built-in default (no explicit config path needed)
-		},
-		{
-			runtime:  "",
-			wantPath: "", // use shim default (Dragonball VMM)
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.runtime, func(t *testing.T) {
-			got := kataConfigPath(tt.runtime)
-			assert.Equal(t, tt.wantPath, got)
-		})
-	}
-}
-
 // TestSandboxDirForName verifies the sandbox directory path derivation.
 func TestSandboxDirForName(t *testing.T) {
 	r := &Runtime{layout: config.NewLayout("/home/testuser/.yoloai")}
@@ -116,25 +80,26 @@ func TestSandboxDirForName(t *testing.T) {
 }
 
 // isWSL2 tests
+//
+// isWSL2() itself reads the real /proc/version and so can't be steered in a
+// unit test; the testable logic is the pure classifier procVersionIsWSL2, which
+// we exercise directly with controlled /proc/version contents.
 
-func TestIsWSL2_Microsoft(t *testing.T) {
-	tmp := filepath.Join(t.TempDir(), "version")
-	require.NoError(t, os.WriteFile(tmp, []byte("Linux version 5.15.0-microsoft-standard-WSL2"), 0o600))
-
-	// isWSL2 reads /proc/version directly; just call the real isWSL2 to
-	// confirm it doesn't panic, and unit-test the logic inline.
-	_ = isWSL2() // smoke: no panic
-
-	// Inline the same logic with a temp file to test the "microsoft" branch.
-	data, _ := os.ReadFile(tmp) //nolint:gosec // G304: test code with temp dir
-	assert.True(t, strings.Contains(strings.ToLower(string(data)), "microsoft"))
-}
-
-func TestIsWSL2_NonWSL(t *testing.T) {
-	tmp := filepath.Join(t.TempDir(), "version")
-	require.NoError(t, os.WriteFile(tmp, []byte("Linux version 6.8.0-106-generic (buildd@lcy02-amd64-059)"), 0o600))
-	data, _ := os.ReadFile(tmp) //nolint:gosec // G304: test code with temp dir
-	assert.False(t, strings.Contains(strings.ToLower(string(data)), "microsoft"))
+func TestProcVersionIsWSL2(t *testing.T) {
+	cases := []struct {
+		name        string
+		procVersion string
+		want        bool
+	}{
+		{"wsl2 kernel", "Linux version 5.15.0-microsoft-standard-WSL2", true},
+		{"generic kernel", "Linux version 6.8.0-106-generic (buildd@lcy02-amd64-059)", false},
+		{"empty (unreadable /proc/version)", "", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, procVersionIsWSL2([]byte(c.procVersion)))
+		})
+	}
 }
 
 // RequiredCapabilities tests
