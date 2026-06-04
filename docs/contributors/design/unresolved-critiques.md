@@ -112,6 +112,13 @@ contract rounds above. Found via a whole-file read pass; `file:line` anchors are
   (735–1027) are independently testable concerns sitting in the lifecycle file.
 - **Direction.** Move provisioning to `build.go`, mount/symlink to `tart/mounts.go`; ~700 lines of
   genuine lifecycle remain.
+- **Done (2026-06-04).** The base-provisioning verbs (`BaseExists`/`CreateBase`/`startTempVM`/
+  `configureXcodeInVM`/`snapshotAsBase`/`cleanupTempVM`/`generateTempVMName`) moved into the
+  pre-existing `build.go`; the VirtioFS mount/symlink subsystem (`BuildMountSymlinkCmds`/
+  `runSetupScript`/`createVMMountSymlinks`/`resolveMountVFSPath`/`createSingleVMSymlink`/
+  `writeVMSetupScripts`/`remapTargetPath`) carved into a new `mounts.go`. Pure move, no behavior
+  change; `tart.go` drops to 1170 lines. (Anchors in this entry were stale — the package had already
+  been split into runtime*.go/census.go/etc., so the figures differ.)
 
 **IC9 — CLI `WithClient → Sandbox(name) → Workdir()` boilerplate repeats ~22×.**
 - **Evidence.** `workflow/diff.go` opens the full prologue 10× across its five log helpers; the

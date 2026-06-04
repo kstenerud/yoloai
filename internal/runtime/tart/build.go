@@ -4,6 +4,7 @@ package tart
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -396,4 +397,216 @@ func (r *Runtime) bootForProvisioning(ctx context.Context, vmName, baseImage str
 	}
 
 	return nil
+}
+
+// BaseExists checks if a base VM exists.
+func (r *Runtime) BaseExists(ctx context.Context, baseName string) (bool, error) {
+	return r.vmExists(ctx, baseName), nil
+}
+
+// CreateBase creates a new runtime base image with specified runtimes.
+// Progress is written to progress (the caller's writer); the library never
+// touches the process's os.Stdout/Stderr (§12).
+func (r *Runtime) CreateBase(ctx context.Context, baseName string, runtimes []RuntimeVersion, progress io.Writer) error {
+	tempVM := generateTempVMName(baseName)
+	defer r.cleanupTempVM(ctx, tempVM) // Always cleanup temp VM
+
+	// Clone yoloai-base to temp VM
+	if _, err := r.runTart(ctx, "clone", "yoloai-base", tempVM); err != nil {
+		return fmt.Errorf("clone base: %w", err)
+	}
+
+	// Start temp VM for runtime installation
+	if err := r.startTempVM(ctx, tempVM); err != nil {
+		return fmt.Errorf("start temp VM: %w", err)
+	}
+	defer r.stopVM(ctx, tempVM) // Ensure VM stopped before snapshot
+
+	// Configure Xcode in VM (required for xcodebuild)
+	fmt.Fprintf(progress, "Configuring Xcode...\n") //nolint:errcheck // best-effort progress
+	if err := r.configureXcodeInVM(ctx, tempVM); err != nil {
+		return fmt.Errorf("configure Xcode: %w", err)
+	}
+
+	// Copy each runtime into the VM
+	for _, rt := range runtimes {
+		fmt.Fprintf(progress, "Copying %s %s runtime (this may take several minutes)...\n", rt.Platform, rt.Version) //nolint:errcheck // best-effort progress
+		if err := CopyRuntimeToVM(ctx, tempVM, rt, progress); err != nil {
+			return fmt.Errorf("copy %s %s: %w", rt.Platform, rt.Version, err)
+		}
+	}
+
+	// Stop VM to flush all changes to disk
+	r.stopVM(ctx, tempVM)
+
+	// Wait for VM to fully stop
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		if !r.isRunning(ctx, tempVM) {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	// Snapshot temp VM as new base
+	if err := r.snapshotAsBase(ctx, tempVM, baseName); err != nil {
+		return fmt.Errorf("snapshot base: %w", err)
+	}
+
+	return nil
+}
+
+// generateTempVMName generates a unique temporary VM name.
+func generateTempVMName(baseName string) string {
+	// Generate 6 random hex chars
+	b := make([]byte, 3)
+	_, _ = rand.Read(b)
+	random := fmt.Sprintf("%x", b)
+	return fmt.Sprintf("%s-tmp-%s", baseName, random)
+}
+
+// startTempVM starts a temporary VM for runtime installation.
+func (r *Runtime) startTempVM(ctx context.Context, vmName string) error {
+	// Build arguments for tart run
+	args := []string{"run", "--no-graphics"}
+
+	// Mount Xcode (required for xcodebuild to work)
+	if xcodeDevPath := getXcodeSelectPath(); xcodeDevPath != "" {
+		// xcode-select returns: /Applications/Xcode.app/Contents/Developer
+		// We need: /Applications/Xcode.app
+		xcodePath := filepath.Dir(filepath.Dir(xcodeDevPath))
+		mountName := "m-" + filepath.Base(xcodePath)
+		args = append(args, "--dir", fmt.Sprintf("%s:%s:ro", mountName, xcodePath))
+
+		// Also mount PrivateFrameworks from the same Xcode installation
+		privateFrameworks := filepath.Join(filepath.Dir(xcodeDevPath), "PrivateFrameworks")
+		if info, err := os.Stat(privateFrameworks); err == nil && info.IsDir() {
+			args = append(args, "--dir", "m-PrivateFrameworks:"+privateFrameworks+":ro")
+		}
+	}
+
+	// Mount /Library/Developer/CoreSimulator/Volumes/ (not needed for xcodebuild, but kept for consistency)
+	volumesPath := "/Library/Developer/CoreSimulator/Volumes"
+	args = append(args, "--dir", "m-Volumes:"+volumesPath+":ro")
+
+	// Mount /tmp
+	args = append(args, "--dir", "m-tmp:/tmp:ro")
+
+	// Add VM name
+	args = append(args, vmName)
+
+	// Start VM in background, capturing output to a temp log so a failed boot
+	// can be diagnosed (notably Apple's concurrent-VM cap, where tart run exits
+	// immediately). A file — not a bytes.Buffer — because os/exec's output-copy
+	// goroutine may still be writing when waitForBoot times out; reading the
+	// buffer concurrently would be a data race, but a file read is not.
+	runLog, err := os.CreateTemp("", "yoloai-tart-tmp-*.log")
+	if err != nil {
+		return fmt.Errorf("create VM log: %w", err)
+	}
+	runLogPath := runLog.Name()
+	defer os.Remove(runLogPath) //nolint:errcheck // best-effort cleanup
+
+	cmd := exec.CommandContext(ctx, r.tartBin, args...) //nolint:gosec // G204: args are constructed internally
+	cmd.Stdout = runLog
+	cmd.Stderr = runLog
+	if err := cmd.Start(); err != nil {
+		_ = runLog.Close()
+		return fmt.Errorf("start VM: %w", err)
+	}
+
+	// Wait for boot
+	procDone := make(chan error, 1)
+	go func() {
+		procDone <- cmd.Wait()
+		_ = runLog.Close()
+	}()
+
+	if err := r.waitForBoot(ctx, vmName, procDone); err != nil {
+		if logData, readErr := os.ReadFile(runLogPath); readErr == nil { //nolint:gosec // G304: temp file we created
+			if limitErr := checkVMLimitError(string(logData)); limitErr != nil {
+				return limitErr
+			}
+		}
+		return err
+	}
+	return nil
+}
+
+// configureXcodeInVM sets up Xcode symlinks and configuration inside the VM.
+func (r *Runtime) configureXcodeInVM(ctx context.Context, vmName string) error {
+	// Get active Xcode path on host
+	xcodeDevPath := getXcodeSelectPath()
+	if xcodeDevPath == "" {
+		return fmt.Errorf("no active Xcode found (run xcode-select on host)")
+	}
+
+	// xcode-select returns: /Applications/Xcode.app/Contents/Developer
+	// We need: /Applications/Xcode.app
+	xcodePath := filepath.Dir(filepath.Dir(xcodeDevPath))
+	xcodeName := filepath.Base(xcodePath)
+
+	// VirtioFS mount point inside VM
+	vfsMountPoint := filepath.Join(sharedDirVMPath, "m-"+xcodeName)
+
+	// Create symlink from VirtioFS mount to expected location
+	symlinkCmd := fmt.Sprintf("sudo rm -rf '%s' && sudo ln -sf '%s' '%s'", xcodePath, vfsMountPoint, xcodePath)
+	args := execArgs(vmName, "bash", "-c", symlinkCmd)
+	if _, err := r.runTart(ctx, args...); err != nil {
+		return fmt.Errorf("create Xcode symlink: %w", err)
+	}
+
+	// Also symlink PrivateFrameworks if it's mounted
+	privateFrameworks := filepath.Join(filepath.Dir(xcodeDevPath), "PrivateFrameworks")
+	if info, err := os.Stat(privateFrameworks); err == nil && info.IsDir() {
+		vfsPrivate := filepath.Join(sharedDirVMPath, "m-PrivateFrameworks")
+		symlinkPrivateCmd := fmt.Sprintf("sudo rm -rf '%s' && sudo ln -sf '%s' '%s'", privateFrameworks, vfsPrivate, privateFrameworks)
+		args = execArgs(vmName, "bash", "-c", symlinkPrivateCmd)
+		if _, err := r.runTart(ctx, args...); err != nil {
+			// Non-fatal: PrivateFrameworks might not be critical
+			slog.Debug("failed to symlink PrivateFrameworks", "err", err)
+		}
+	}
+
+	// Set active developer directory
+	xcodeSelectCmd := fmt.Sprintf("sudo xcode-select -s '%s/Contents/Developer'", xcodePath)
+	args = execArgs(vmName, "bash", "-c", xcodeSelectCmd)
+	if _, err := r.runTart(ctx, args...); err != nil {
+		return fmt.Errorf("run xcode-select: %w", err)
+	}
+
+	// Accept Xcode license (non-interactive)
+	acceptLicenseCmd := "sudo xcodebuild -license accept"
+	args = execArgs(vmName, "bash", "-c", acceptLicenseCmd)
+	if _, err := r.runTart(ctx, args...); err != nil {
+		// Non-fatal: license might already be accepted or not required
+		slog.Debug("xcodebuild -license accept failed (might already be accepted)", "err", err)
+	}
+
+	// Run xcodebuild -runFirstLaunch to complete setup
+	firstLaunchCmd := "sudo xcodebuild -runFirstLaunch"
+	args = execArgs(vmName, "bash", "-c", firstLaunchCmd)
+	if _, err := r.runTart(ctx, args...); err != nil {
+		// Non-fatal: might not be needed
+		slog.Debug("xcodebuild -runFirstLaunch failed (might not be needed)", "err", err)
+	}
+
+	return nil
+}
+
+// snapshotAsBase creates a new base image by cloning a temp VM.
+func (r *Runtime) snapshotAsBase(ctx context.Context, tempVM, baseName string) error {
+	// Clone temp VM to new base name
+	if _, err := r.runTart(ctx, "clone", tempVM, baseName); err != nil {
+		// If clone fails and partial base exists, delete it
+		_, _ = r.runTart(ctx, "delete", baseName)
+		return fmt.Errorf("clone to base: %w", err)
+	}
+	return nil
+}
+
+// cleanupTempVM removes a temporary VM (best-effort, never fails).
+func (r *Runtime) cleanupTempVM(ctx context.Context, vmName string) {
+	r.stopVM(ctx, vmName)
+	_, _ = r.runTart(ctx, "delete", vmName)
 }
