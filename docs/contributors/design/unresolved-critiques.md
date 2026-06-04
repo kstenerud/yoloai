@@ -53,6 +53,15 @@ contract rounds above. Found via a whole-file read pass; `file:line` anchors are
   (profile is the superset + workdir/directories/backend), eliminating the mirrored handler set and
   one of the three struct field-lists. Higher-risk because it touches the global-vs-profile routing
   `isGlobalKey` guards; do it as an isolated commit with the existing config tests green before/after.
+- **Done (2026-06-04).** `ProfileConfig` now embeds `YoloaiConfig` and keeps only the three
+  profile-only fields (`Backend`/`Workdir`/`Directories`). `LoadProfile` dispatches common keys
+  through the shared `yoloaiConfigHandlers` (onto `&cfg.YoloaiConfig`) and the profile-only keys
+  through a new 3-entry `profileOnlyHandlers`, deleting the entire mirrored handler set
+  (`profileScalar/ExpandedSeq/RawSeq/StringMapHandler` + `handleProfileTart/Resources/Network/
+  AgentFiles/AutoCommitInterval/Isolation`). Leniency preserved (unknown keys still silently
+  ignored, unlike the strict `LoadProfileConfig` path). `isGlobalKey`/global-vs-profile routing
+  untouched — it keys off path strings, not these structs. profile.go 739→579 lines; config +
+  sandbox tests green before/after. (Line anchors in this entry were stale post-IC3 split.)
 
 **IC3 — `config.go` is two files in one (1210 lines).**
 - **Smell.** A typed config domain model bolted to a generic dotted-path YAML-node CRUD engine that

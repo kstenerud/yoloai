@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -19,27 +18,15 @@ import (
 )
 
 // ProfileConfig holds the parsed fields from a profile's config.yaml file.
+// A profile is the YoloaiConfig superset plus three profile-only keys (a backend
+// constraint, workdir, and directories). The common fields are shared via the
+// embedded YoloaiConfig and parsed by the same yoloaiConfigHandlers, so the
+// profile parser only adds handlers for the profile-only keys (IC2 fold).
 type ProfileConfig struct {
-	Agent              string            // agent override
-	Model              string            // model override
-	OS                 string            // os override
-	Backend            string            // optional backend constraint (different from container_backend)
-	ContainerBackend   string            // container_backend override
-	TartImage          string            // from tart.image nested key
-	Env                map[string]string // environment variables
-	Ports              []string          // port mappings
-	Workdir            *ProfileWorkdir   // nil if not specified
-	Directories        []ProfileDir      // empty if not specified
-	Resources          *ResourceLimits   // resource limits (cpus, memory)
-	Network            *NetworkConfig    // network isolation settings
-	Mounts             []string          // extra bind mounts (host:container[:ro])
-	AgentArgs          map[string]string // per-agent default CLI args
-	AgentFiles         *AgentFilesConfig // agent_files — extra files to seed into agent-state
-	CapAdd             []string          // cap_add — Linux capabilities to add (Docker only)
-	Devices            []string          // devices — host devices to expose (Docker only)
-	Setup              []string          // setup — commands to run before agent launch (Docker only)
-	AutoCommitInterval int               // auto_commit_interval — seconds between auto-commits in :copy dirs; 0 = disabled
-	Isolation          string            // isolation — sandbox isolation mode: container, container-enhanced, vm, vm-enhanced
+	YoloaiConfig
+	Backend     string          // optional backend constraint (different from container_backend)
+	Workdir     *ProfileWorkdir // nil if not specified
+	Directories []ProfileDir    // empty if not specified
 }
 
 // ProfileWorkdir defines a workdir from a profile.
@@ -141,151 +128,24 @@ func ListProfiles(layout Layout) ([]string, error) {
 	return names, nil
 }
 
-// profileConfigHandler is a function that handles a single YAML key in a ProfileConfig.
-type profileConfigHandler func(cfg *ProfileConfig, val *yaml.Node, env map[string]string) error
+// profileOnlyHandler handles a profile-only YAML key (backend/workdir/directories)
+// — the keys ProfileConfig adds on top of the embedded YoloaiConfig. The common
+// keys are dispatched through yoloaiConfigHandlers in LoadProfile (IC2 fold).
+type profileOnlyHandler func(cfg *ProfileConfig, val *yaml.Node, env map[string]string) error
 
-// profileConfigHandlers maps top-level YAML keys to their handler functions.
-var profileConfigHandlers = map[string]profileConfigHandler{
-	"agent":                profileScalarHandler(func(c *ProfileConfig) *string { return &c.Agent }),
-	"model":                profileScalarHandler(func(c *ProfileConfig) *string { return &c.Model }),
-	"os":                   profileScalarHandler(func(c *ProfileConfig) *string { return &c.OS }),
-	"backend":              profileScalarHandler(func(c *ProfileConfig) *string { return &c.Backend }),
-	"container_backend":    profileScalarHandler(func(c *ProfileConfig) *string { return &c.ContainerBackend }),
-	"mounts":               profileExpandedSeqHandler(func(c *ProfileConfig) *[]string { return &c.Mounts }, "mounts[]"),
-	"ports":                profileRawSeqHandler(func(c *ProfileConfig) *[]string { return &c.Ports }),
-	"cap_add":              profileExpandedSeqHandler(func(c *ProfileConfig) *[]string { return &c.CapAdd }, "cap_add[]"),
-	"devices":              profileExpandedSeqHandler(func(c *ProfileConfig) *[]string { return &c.Devices }, "devices[]"),
-	"setup":                profileExpandedSeqHandler(func(c *ProfileConfig) *[]string { return &c.Setup }, "setup[]"),
-	"env":                  profileStringMapHandler(func(c *ProfileConfig) *map[string]string { return &c.Env }, "env"),
-	"agent_args":           profileStringMapHandler(func(c *ProfileConfig) *map[string]string { return &c.AgentArgs }, "agent_args"),
-	"tart":                 handleProfileTart,
-	"resources":            handleProfileResources,
-	"network":              handleProfileNetwork,
-	"workdir":              handleProfileWorkdir,
-	"directories":          handleProfileDirectories,
-	"agent_files":          handleProfileAgentFiles,
-	"auto_commit_interval": handleProfileAutoCommitInterval,
-	"isolation":            handleProfileIsolation,
+// profileOnlyHandlers maps the three profile-only top-level keys to their handlers.
+var profileOnlyHandlers = map[string]profileOnlyHandler{
+	"backend":     handleProfileBackend,
+	"workdir":     handleProfileWorkdir,
+	"directories": handleProfileDirectories,
 }
 
-// profileScalarHandler returns a handler that expands env vars and stores the result in the field pointed to by ptr.
-func profileScalarHandler(ptr func(*ProfileConfig) *string) profileConfigHandler {
-	return func(cfg *ProfileConfig, val *yaml.Node, env map[string]string) error {
-		expanded, err := expandEnvBraced(val.Value, env)
-		if err != nil {
-			return err
-		}
-		*ptr(cfg) = expanded
-		return nil
+func handleProfileBackend(cfg *ProfileConfig, val *yaml.Node, env map[string]string) error {
+	expanded, err := expandEnvBraced(val.Value, env)
+	if err != nil {
+		return err
 	}
-}
-
-// profileExpandedSeqHandler returns a handler that appends expanded sequence items to the slice pointed to by ptr.
-func profileExpandedSeqHandler(ptr func(*ProfileConfig) *[]string, label string) profileConfigHandler {
-	return func(cfg *ProfileConfig, val *yaml.Node, env map[string]string) error {
-		if val.Kind != yaml.SequenceNode {
-			return nil
-		}
-		for _, item := range val.Content {
-			expanded, err := expandEnvBraced(item.Value, env)
-			if err != nil {
-				return fmt.Errorf("%s: %w", label, err)
-			}
-			*ptr(cfg) = append(*ptr(cfg), expanded)
-		}
-		return nil
-	}
-}
-
-// profileRawSeqHandler returns a handler that appends raw (unexpanded) sequence items to the slice pointed to by ptr.
-func profileRawSeqHandler(ptr func(*ProfileConfig) *[]string) profileConfigHandler {
-	return func(cfg *ProfileConfig, val *yaml.Node, _ map[string]string) error {
-		if val.Kind != yaml.SequenceNode {
-			return nil
-		}
-		for _, item := range val.Content {
-			*ptr(cfg) = append(*ptr(cfg), item.Value)
-		}
-		return nil
-	}
-}
-
-// profileStringMapHandler returns a handler that populates a map[string]string field with expanded values.
-func profileStringMapHandler(ptr func(*ProfileConfig) *map[string]string, prefix string) profileConfigHandler {
-	return func(cfg *ProfileConfig, val *yaml.Node, env map[string]string) error {
-		if val.Kind != yaml.MappingNode {
-			return nil
-		}
-		m := make(map[string]string, len(val.Content)/2)
-		for k := 0; k < len(val.Content)-1; k += 2 {
-			key := val.Content[k].Value
-			expanded, err := expandEnvBraced(val.Content[k+1].Value, env)
-			if err != nil {
-				return fmt.Errorf("%s.%s: %w", prefix, key, err)
-			}
-			m[key] = expanded
-		}
-		*ptr(cfg) = m
-		return nil
-	}
-}
-
-func handleProfileTart(cfg *ProfileConfig, val *yaml.Node, env map[string]string) error {
-	if val.Kind != yaml.MappingNode {
-		return nil
-	}
-	for k := 0; k < len(val.Content)-1; k += 2 {
-		subKey := val.Content[k].Value
-		subExpanded, err := expandEnvBraced(val.Content[k+1].Value, env)
-		if err != nil {
-			return fmt.Errorf("tart.%s: %w", subKey, err)
-		}
-		if subKey == "image" {
-			cfg.TartImage = subExpanded
-		}
-	}
-	return nil
-}
-
-func handleProfileResources(cfg *ProfileConfig, val *yaml.Node, env map[string]string) error {
-	if val.Kind != yaml.MappingNode {
-		return nil
-	}
-	cfg.Resources = &ResourceLimits{}
-	for k := 0; k < len(val.Content)-1; k += 2 {
-		subKey := val.Content[k].Value
-		subExpanded, err := expandEnvBraced(val.Content[k+1].Value, env)
-		if err != nil {
-			return fmt.Errorf("resources.%s: %w", subKey, err)
-		}
-		switch subKey {
-		case "cpus":
-			cfg.Resources.CPUs = subExpanded
-		case "memory":
-			cfg.Resources.Memory = subExpanded
-		}
-	}
-	return nil
-}
-
-func handleProfileNetwork(cfg *ProfileConfig, val *yaml.Node, _ map[string]string) error {
-	if val.Kind != yaml.MappingNode {
-		return nil
-	}
-	cfg.Network = &NetworkConfig{}
-	for k := 0; k < len(val.Content)-1; k += 2 {
-		subKey := val.Content[k].Value
-		switch subKey {
-		case "isolated":
-			cfg.Network.Isolated = val.Content[k+1].Value == "true"
-		case "allow":
-			if val.Content[k+1].Kind == yaml.SequenceNode {
-				for _, item := range val.Content[k+1].Content {
-					cfg.Network.Allow = append(cfg.Network.Allow, item.Value)
-				}
-			}
-		}
-	}
+	cfg.Backend = expanded
 	return nil
 }
 
@@ -342,38 +202,13 @@ func handleProfileDirectories(cfg *ProfileConfig, val *yaml.Node, env map[string
 	return nil
 }
 
-func handleProfileAgentFiles(cfg *ProfileConfig, val *yaml.Node, _ map[string]string) error {
-	af, err := parseAgentFilesNode(val)
-	if err != nil {
-		return fmt.Errorf("agent_files: %w", err)
-	}
-	cfg.AgentFiles = af
-	return nil
-}
-
-func handleProfileAutoCommitInterval(cfg *ProfileConfig, val *yaml.Node, _ map[string]string) error {
-	n, err := strconv.Atoi(val.Value)
-	if err != nil {
-		return fmt.Errorf("auto_commit_interval: %w", err)
-	}
-	cfg.AutoCommitInterval = n
-	return nil
-}
-
-func handleProfileIsolation(cfg *ProfileConfig, val *yaml.Node, env map[string]string) error {
-	expanded, err := expandEnvBraced(val.Value, env)
-	if err != nil {
-		return fmt.Errorf("isolation: %w", err)
-	}
-	if err := ValidateIsolationMode(expanded); err != nil {
-		return fmt.Errorf("isolation: %w", err)
-	}
-	cfg.Isolation = expanded
-	return nil
-}
-
 // LoadProfile reads and parses a profile's config.yaml file.
 // layout.Env is used for ${VAR} expansion in config values.
+//
+// Common keys are dispatched through the shared yoloaiConfigHandlers (onto the
+// embedded YoloaiConfig); the three profile-only keys go through
+// profileOnlyHandlers (IC2 fold). Unknown keys are silently ignored — unlike
+// LoadProfileConfig, LoadProfile does not validate against knownProfileKeys.
 func LoadProfile(layout Layout, name string) (*ProfileConfig, error) {
 	dir := layout.ProfileDir(name)
 	path := filepath.Join(dir, "config.yaml")
@@ -405,13 +240,18 @@ func LoadProfile(layout Layout, name string) (*ProfileConfig, error) {
 	for i := 0; i < len(root.Content)-1; i += 2 {
 		key := root.Content[i].Value
 		val := root.Content[i+1]
-		handler, ok := profileConfigHandlers[key]
-		if !ok {
-			continue // unknown fields are silently ignored
+		if handler, ok := yoloaiConfigHandlers[key]; ok {
+			if err := handler(&cfg.YoloaiConfig, val, layout.Env); err != nil {
+				return nil, err
+			}
+			continue
 		}
-		if err := handler(cfg, val, layout.Env); err != nil {
-			return nil, err
+		if handler, ok := profileOnlyHandlers[key]; ok {
+			if err := handler(cfg, val, layout.Env); err != nil {
+				return nil, err
+			}
 		}
+		// unknown fields are silently ignored
 	}
 
 	return cfg, nil
