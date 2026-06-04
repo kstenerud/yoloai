@@ -5,16 +5,47 @@ package cli
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+	"github.com/kstenerud/yoloai/internal/cli/extension"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// TestErrorExitCode pins the error→exit-code mapping that main() hands to
+// os.Exit. The e2e suite used to build the whole binary just to observe these
+// codes; the mapping is a pure function, so it belongs here. Each branch of
+// errorExitCode is exercised: the extension.ExitError passthrough, the
+// ExitCoder interface (typed yoloai errors), the untyped disk-space string
+// fallback, wrap-chain walking, and the generic default.
+func TestErrorExitCode(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want int
+	}{
+		{"extension exit error carries its own code", &extension.ExitError{Code: 42}, 42},
+		{"usage error maps to ExitUsage", yoerrors.NewUsageError("bad flag"), yoerrors.ExitUsage},
+		{"config error maps to ExitConfig", &yoerrors.ConfigError{Err: errors.New("x")}, yoerrors.ExitConfig},
+		{"wrapped usage error still maps via the chain",
+			fmt.Errorf("context: %w", yoerrors.NewUsageError("bad flag")), yoerrors.ExitUsage},
+		{"untyped disk-space string hits the fallback",
+			errors.New("write failed: no space left on device"), yoerrors.ExitDiskSpace},
+		{"generic error defaults to 1", errors.New("boom"), 1},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, errorExitCode(c.err))
+		})
+	}
+}
 
 // seedFlatV0 lays down a pre-namespace (v0) flat install directly under top: a
 // flat config.yaml plus a library-owned dir and a CLI-owned extensions file.

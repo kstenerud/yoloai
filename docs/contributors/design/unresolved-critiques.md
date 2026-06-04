@@ -86,6 +86,18 @@ toward an ice-cream cone.
   tests (`error_test.go:43,49`) build the whole binary for what a unit test covers. *Fix:* trim e2e
   to the JSON-output-contract tests it uniquely justifies; let the cli integration tier own workflow
   coverage.
+  *(applied)* Pushed the error→exit-code mapping down to a pure unit test (`TestErrorExitCode`,
+  covering the extension-passthrough / ExitCoder / disk-space-string-fallback / wrap-chain / default
+  branches) — that is the "what a unit test covers" the critique named. Deleted `workflow_test.go`
+  wholesale (every case is owned by the in-process integration tier: NewDiffApplyDestroy →
+  NewAndDestroy+Diff, NewDuplicate → NewDuplicate, NewForce → NewReplace, Ls → Ls). Collapsed
+  `error_test.go` to one binary-contract smoke (`TestE2E_ErrorExitCodeAndMessage`: real exit 1 +
+  stderr names the sandbox) — the only thing a subprocess uniquely proves (main()/Execute() wiring
+  the mapping to os.Exit). Dropped the help/version e2e smokes: `TestExecute_RunsGate` already drives
+  the real `Execute()` and asserts version→exit 0, and the JSON tests already run the binary on the
+  exit-0 path. e2e now: `json_test.go` (2 output-contract), `bugreport_test.go` (T5 flag-path),
+  `error_test.go` (1 error-contract). Compile-checked under `-tags e2e`; running needs Docker +
+  base image (not available here).
 - **T5 — Bugreport tested at 3 tiers** (unit `writer_test.go` + integration `:318,366` + e2e
   `:69,111`) plus e2e self-duplication (unsafe vs safe). *Refined on inspection:* the e2e tests are
   NOT pure copies — they drive the `--bugreport` global flag through the real `Execute()` wrapper
@@ -197,5 +209,9 @@ T4 (e2e trim) → T13 (error-path coverage).
   Extracted shared `runtimetest.RunConformance` (docker-compatible behavioral table) keyed on
   `DockerCompatRuntime`; docker/podman tests are now thin `_test`-package setup closures.
   Compile-checked under `-tags integration`; run-verification needs a daemon host.
-- ⏳ Remaining: T4, T13 (large/judgement);
+- ✅ **T4** — pushed error→exit-code mapping to a unit test (`TestErrorExitCode`); deleted
+  `workflow_test.go` (integration owns it); collapsed `error_test.go` to one binary error-contract
+  smoke; dropped help/version e2e (already covered by `TestExecute_RunsGate` + json binary runs).
+  Compile-checked under `-tags e2e`.
+- ⏳ Remaining: T13 (large/judgement);
   T7 (broad `t.Parallel` adoption — partially seeded in new_test.go).
