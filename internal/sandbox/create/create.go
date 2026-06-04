@@ -228,7 +228,7 @@ func prepareSandboxState(ctx context.Context, d state.Deps, opts Options) (*stat
 	}
 
 	// Phase 1: Resolve profile, runtime base, archetype, and mounts.
-	pr, resolvedArchetype, devcontainerCfg, dcMounts, dcMountWarnings, mergedMounts, state_onCreateDone, err := resolveProfileAndArchetype(ctx, d, &opts, agentDef, ycfg, gcfg)
+	ri, err := resolveProfileAndArchetype(ctx, d, &opts, agentDef, ycfg, gcfg)
 	if err != nil {
 		return nil, err
 	}
@@ -237,14 +237,14 @@ func prepareSandboxState(ctx context.Context, d state.Deps, opts Options) (*stat
 		return nil, err
 	}
 
-	workdir, auxDirs, err := parseAndValidateDirs(d, opts, agentDef, pr.env, ycfg.Model)
+	workdir, auxDirs, err := parseAndValidateDirs(d, opts, agentDef, ri.pr.env, ycfg.Model)
 	if err != nil {
 		return nil, err
 	}
 
 	// Phase 2: Create directory structure and seed sandbox.
-	perms := state.Perms(pr.isolation)
-	agentFilesInitialized, err := createAndSeedSandbox(ctx, d, sandboxDir, agentDef, pr, perms, outputFor(opts.Output))
+	perms := state.Perms(ri.pr.isolation)
+	agentFilesInitialized, err := createAndSeedSandbox(ctx, d, sandboxDir, agentDef, ri.pr, perms, outputFor(opts.Output))
 	if err != nil {
 		return nil, err
 	}
@@ -257,13 +257,13 @@ func prepareSandboxState(ctx context.Context, d state.Deps, opts Options) (*stat
 		}
 	}()
 
-	workCopyDir, baselineSHA, dirEnvs, err := setupAllWorkdirs(d, opts, workdir, auxDirs, resolvedArchetype, devcontainerCfg)
+	workCopyDir, baselineSHA, dirEnvs, err := setupAllWorkdirs(d, opts, workdir, auxDirs, ri.archetype, ri.devcontainerCfg)
 	if err != nil {
 		return nil, err
 	}
 
 	// Phase 3: Build config, meta, and state files.
-	configData, meta, tmuxConf, promptText, err := buildConfigAndEnvironment(ctx, d, opts, pr, agentDef, workdir, auxDirs, gcfg, dirEnvs, baselineSHA, mergedMounts, resolvedArchetype, devcontainerCfg, state_onCreateDone, sandboxDir)
+	configData, meta, tmuxConf, promptText, err := buildConfigAndEnvironment(ctx, d, opts, ri, agentDef, workdir, auxDirs, gcfg, dirEnvs, baselineSHA, sandboxDir)
 	if err != nil {
 		return nil, err
 	}
@@ -273,27 +273,40 @@ func prepareSandboxState(ctx context.Context, d state.Deps, opts Options) (*stat
 	}
 
 	success = true
-	return buildSandboxStateResult(opts, sandboxDir, workdir, workCopyDir, auxDirs, agentDef, meta, pr, mergedMounts, configData, tmuxConf, resolvedArchetype, pr.archetypeDockerDRequired, devcontainerCfg, dcMounts, dcMountWarnings, d.Layout, d.Layout.HomeDir), nil
+	return buildSandboxStateResult(opts, sandboxDir, workdir, workCopyDir, auxDirs, agentDef, meta, ri, configData, tmuxConf, d.Layout, d.Layout.HomeDir), nil
+}
+
+// resolvedCreateInputs carries the Phase-1 resolution outputs (profile, archetype,
+// devcontainer config, mounts, lifecycle state) threaded into the later config/meta/
+// state build phases, so those builders take one struct instead of long scalar lists.
+type resolvedCreateInputs struct {
+	pr              *profileResult
+	archetype       archetype.Archetype
+	devcontainerCfg *archetype.DevcontainerConfig
+	dcMounts        []string
+	dcMountWarnings []string
+	mergedMounts    []string
+	onCreateDone    bool
 }
 
 // resolveProfileAndArchetype resolves profile config, runtime base, archetype, mounts, and lifecycle state.
-func resolveProfileAndArchetype(ctx context.Context, d state.Deps, opts *Options, agentDef *agent.Definition, ycfg *config.YoloaiConfig, gcfg *config.GlobalConfig) (*profileResult, archetype.Archetype, *archetype.DevcontainerConfig, []string, []string, []string, bool, error) {
+func resolveProfileAndArchetype(ctx context.Context, d state.Deps, opts *Options, agentDef *agent.Definition, ycfg *config.YoloaiConfig, gcfg *config.GlobalConfig) (*resolvedCreateInputs, error) {
 	pr, err := resolveProfileConfig(ctx, d, opts, &agentDef, ycfg, gcfg)
 	if err != nil {
-		return nil, "", nil, nil, nil, nil, false, err
+		return nil, err
 	}
 
 	if err := resolveRuntimeBase(ctx, d, opts, pr); err != nil {
-		return nil, "", nil, nil, nil, nil, false, err
+		return nil, err
 	}
 
 	if err := applyConfigDefaults(opts, ycfg, pr); err != nil {
-		return nil, "", nil, nil, nil, nil, false, err
+		return nil, err
 	}
 
 	resolvedArchetype, devcontainerCfg, dcMounts, dcMountWarnings, err := resolveAndApplyArchetype(ctx, d, opts, pr)
 	if err != nil {
-		return nil, "", nil, nil, nil, nil, false, err
+		return nil, err
 	}
 
 	mergeDcMounts(pr, dcMounts)
@@ -301,14 +314,20 @@ func resolveProfileAndArchetype(ctx context.Context, d state.Deps, opts *Options
 		fmt.Fprintln(outputFor(opts.Output), w) //nolint:errcheck // best-effort warning
 	}
 
-	state_onCreateDone := loadOnCreateDone(d.Layout.SandboxDir(opts.Name))
-
 	mergedMounts, err := validateAndExpandMounts(pr.mounts, d.Layout.HomeDir, d.Layout.Env)
 	if err != nil {
-		return nil, "", nil, nil, nil, nil, false, err
+		return nil, err
 	}
 
-	return pr, resolvedArchetype, devcontainerCfg, dcMounts, dcMountWarnings, mergedMounts, state_onCreateDone, nil
+	return &resolvedCreateInputs{
+		pr:              pr,
+		archetype:       resolvedArchetype,
+		devcontainerCfg: devcontainerCfg,
+		dcMounts:        dcMounts,
+		dcMountWarnings: dcMountWarnings,
+		mergedMounts:    mergedMounts,
+		onCreateDone:    loadOnCreateDone(d.Layout.SandboxDir(opts.Name)),
+	}, nil
 }
 
 // createAndSeedSandbox creates directory structure and seeds the sandbox with agent files.
@@ -322,8 +341,9 @@ func createAndSeedSandbox(ctx context.Context, d state.Deps, sandboxDir string, 
 
 // buildConfigAndEnvironment builds the container config and sandbox meta structs.
 // Returns (configData, meta, tmuxConf, promptText, error).
-func buildConfigAndEnvironment(ctx context.Context, d state.Deps, opts Options, pr *profileResult, agentDef *agent.Definition, workdir *DirSpec, auxDirs []*DirSpec, gcfg *config.GlobalConfig, dirEnvs []store.DirEnvironment, baselineSHA string, mergedMounts []string, resolvedArchetype archetype.Archetype, devcontainerCfg *archetype.DevcontainerConfig, state_onCreateDone bool, sandboxDir string) ([]byte, *store.Environment, string, string, error) {
+func buildConfigAndEnvironment(ctx context.Context, d state.Deps, opts Options, ri *resolvedCreateInputs, agentDef *agent.Definition, workdir *DirSpec, auxDirs []*DirSpec, gcfg *config.GlobalConfig, dirEnvs []store.DirEnvironment, baselineSHA string, sandboxDir string) ([]byte, *store.Environment, string, string, error) {
 	_ = ctx // reserved for future use
+	pr := ri.pr
 	promptText, hasPrompt, model, agentCommand, tmuxConf, err := resolveAgentParams(agentDef, opts, pr, gcfg, d.Layout.HomeDir, d.Layout.Env, d.Input)
 	if err != nil {
 		return nil, nil, "", "", err
@@ -332,8 +352,7 @@ func buildConfigAndEnvironment(ctx context.Context, d state.Deps, opts Options, 
 	networkMode, networkAllow := buildNetworkConfig(opts, agentDef)
 	slog.Debug("building runtime config", "event", "sandbox.create.config", "network_mode", networkMode)
 
-	archetypeDockerDRequired := pr.archetypeDockerDRequired
-	lifecycleCfg := buildLifecycleConfig(resolvedArchetype, archetypeDockerDRequired, state_onCreateDone, devcontainerCfg)
+	lifecycleCfg := buildLifecycleConfig(ri.archetype, pr.archetypeDockerDRequired, ri.onCreateDone, ri.devcontainerCfg)
 
 	backend := d.Runtime.Descriptor().Type
 	configData, err := buildContainerConfig(d.Layout, agentDef, agentCommand, runtime.PrepareAgentCommandFor(d.Runtime, ""), tmuxConf, launch.OverlayOrResolvedMountPath(workdir), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, collectOverlayMounts(workdir, auxDirs), pr.setup, pr.autoCommitInterval, collectCopyDirs(workdir, auxDirs), opts.Name, d.Runtime.TmuxSocket(sandboxDir), pr.isolation, opts.VscodeTunnel, invocation.SanitizeTunnelName(opts.Name), lifecycleCfg)
@@ -342,14 +361,15 @@ func buildConfigAndEnvironment(ctx context.Context, d state.Deps, opts Options, 
 	}
 
 	usernsMode := resolveUsernsMode(d.Runtime, workdir, auxDirs, pr.capAdd)
-	meta := buildEnvironment(opts, pr, workdir, baselineSHA, dirEnvs, hasPrompt, networkMode, networkAllow, usernsMode, d.Runtime.Descriptor().Capabilities.HostFilesystem, string(resolvedArchetype), backend, model, mergedMounts)
+	meta := buildEnvironment(opts, pr, workdir, baselineSHA, dirEnvs, hasPrompt, networkMode, networkAllow, usernsMode, d.Runtime.Descriptor().Capabilities.HostFilesystem, string(ri.archetype), backend, model, ri.mergedMounts)
 	meta.Principal = d.Layout.Principal // record the owning principal for attribution + runtime namespace (D62)
 
 	return configData, meta, tmuxConf, promptText, nil
 }
 
 // buildSandboxStateResult constructs the State from all resolved values.
-func buildSandboxStateResult(opts Options, sandboxDir string, workdir *DirSpec, workCopyDir string, auxDirs []*DirSpec, agentDef *agent.Definition, meta *store.Environment, pr *profileResult, mergedMounts []string, configData []byte, tmuxConf string, resolvedArchetype archetype.Archetype, archetypeDockerDRequired bool, devcontainerCfg *archetype.DevcontainerConfig, dcMounts []string, dcMountWarnings []string, layout config.Layout, homeDir string) *state.State {
+func buildSandboxStateResult(opts Options, sandboxDir string, workdir *DirSpec, workCopyDir string, auxDirs []*DirSpec, agentDef *agent.Definition, meta *store.Environment, ri *resolvedCreateInputs, configData []byte, tmuxConf string, layout config.Layout, homeDir string) *state.State {
+	pr := ri.pr
 	return &state.State{
 		Name:                      opts.Name,
 		SandboxDir:                sandboxDir,
@@ -365,7 +385,7 @@ func buildSandboxStateResult(opts Options, sandboxDir string, workdir *DirSpec, 
 		NetworkMode:               meta.NetworkMode,
 		NetworkAllow:              meta.NetworkAllow,
 		Ports:                     opts.Ports,
-		ConfigMounts:              mergedMounts,
+		ConfigMounts:              ri.mergedMounts,
 		TmuxConf:                  tmuxConf,
 		Resources:                 pr.resources,
 		CapAdd:                    pr.capAdd,
@@ -376,11 +396,11 @@ func buildSandboxStateResult(opts Options, sandboxDir string, workdir *DirSpec, 
 		VscodeTunnel:              opts.VscodeTunnel,
 		Environment:               meta,
 		ConfigJSON:                configData,
-		Archetype:                 resolvedArchetype,
-		DockerdRequired:           archetypeDockerDRequired,
-		Devcontainer:              devcontainerCfg,
-		DevcontainerMounts:        dcMounts,
-		DevcontainerMountWarnings: dcMountWarnings,
+		Archetype:                 ri.archetype,
+		DockerdRequired:           pr.archetypeDockerDRequired,
+		Devcontainer:              ri.devcontainerCfg,
+		DevcontainerMounts:        ri.dcMounts,
+		DevcontainerMountWarnings: ri.dcMountWarnings,
 		WorkdirMode:               string(workdir.Mode),
 		Layout:                    layout,
 		HomeDir:                   homeDir,

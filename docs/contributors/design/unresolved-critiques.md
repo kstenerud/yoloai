@@ -92,6 +92,10 @@ contract rounds above. Found via a whole-file read pass; `file:line` anchors are
 - **Evidence.** `buildConfigAndEnvironment` (14 params), `buildSandboxStateResult` (18 params),
   `resolveProfileAndArchetype` returns an 8-value tuple with two bare `bool`s.
 - **Direction.** Carry pipeline state in an intermediate struct (e.g. `resolvedCreateInputs`).
+- **Done (2026-06-04).** Added `resolvedCreateInputs` (pr/archetype/devcontainerCfg/dcMounts/
+  dcMountWarnings/mergedMounts/onCreateDone) returned by `resolveProfileAndArchetype` (8-tuple→
+  `(*resolvedCreateInputs, error)`) and threaded into `buildConfigAndEnvironment` (14→11 params)
+  and `buildSandboxStateResult` (18→12 params). `make check` green.
 
 ### MEDIUM
 
