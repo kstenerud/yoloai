@@ -127,3 +127,13 @@ toward an ice-cream cone.
 **Fix order:** T3 (tag-fix) → T1 (un-gate patch) → T15 (stale names) → T12 (new.go usage errors) →
 T8/T14 (hygiene) → T6/T5/T10 (dedup) → T9/T11 (low-value) → T2 (parametrize triplets, largest) →
 T4 (e2e trim) → T13 (error-path coverage).
+
+**Progress (2026-06-04, `layering-refactor`, `make check` green):**
+- ✅ **T3** — renamed `stop_integration_test.go`→`stop_escalation_test.go` + ABOUTME (827bfa5).
+- ✅ **T1** — `getTestRuntime`→`hostGitRuntime()` (nil); ~67 patch tests off Docker (30d50e7).
+- ✅ **T15** — `TestSystemClient_*`→`TestSystem_*` in system_test.go + discovery_test.go (9addc32).
+- ✅ **T12** — added new.go usage-error unit tests (parse positional / flag conflicts / port / env)
+  (d36c04c).
+- ✅ **T14** — `public_api_test.go`→`internal_leak_fence_test.go` (b9ab232).
+- ⏳ Remaining: T8, T6, T5, T10, T9, T11 (mechanical dedup/cleanup); T2, T4, T13 (large/judgement);
+  T7 (broad `t.Parallel` adoption — partially seeded in new_test.go).
