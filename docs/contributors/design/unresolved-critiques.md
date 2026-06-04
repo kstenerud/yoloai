@@ -77,6 +77,15 @@ contract rounds above. Found via a whole-file read pass; `file:line` anchors are
   (`GuestMountResolver`+`CopyMountResolver`+`WorkDirSetup`) into one `GuestPathTranslator`. This
   changes the interface contract, so confirm the three are genuinely one concern (host↔guest path
   translation) and that only Tart implements them before merging.
+- **Done (2026-06-04).** Regroup only — collapse **declined**. The "only Tart implements them"
+  precondition fails: `CopyMountResolver` is also implemented by Seatbelt
+  (`seatbelt.go:104` `var _ runtime.CopyMountResolver`, load-bearing `ResolveCopyMount`), so
+  collapsing into one `GuestPathTranslator` would force Seatbelt to carry no-op stubs for the two
+  Tart-only verbs — defeating the optional-interface pattern. Per user decision (regroup, keep all
+  3). Moved ~13 optional interfaces + their `*For` helpers + the VM-census cluster + `CacheUsage`
+  into new `internal/runtime/runtime_optional.go` under a 3-section taxonomy (1. Path & exec
+  translators; 2. Capability probes & reporters; 3. Optional operations). `runtime.go` 627→319;
+  `runtime_optional.go` 344. `make check` green.
 
 **IC5 — `create.go` pipeline threads giant positional parameter lists.**
 - **Smell.** Long scalar param lists invite transposition bugs.
