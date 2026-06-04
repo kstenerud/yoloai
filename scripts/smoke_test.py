@@ -4,7 +4,8 @@
 Run with: python3 scripts/smoke_test.py [--full]
 Or via:   make smoketest / make smoketest-full
 
-Base tier (default): docker + containerd-vm on Linux, docker + tart on macOS.
+Base tier (default): docker + container-privileged + containerd-vm on Linux,
+                     docker + tart on macOS.
 Full tier (--full):  all backends including podman, gVisor, vm-enhanced.
 
 Tests that don't need a real agent (files exchange, reset, start-after-done,
@@ -254,6 +255,8 @@ class RunContext:
 BASE_LINUX_BACKENDS: list[BackendSpec] = [
     BackendSpec("linux", "container",          "docker", "docker",
                 check_backend="docker", retries=1),
+    BackendSpec("linux", "container-privileged", "docker", "docker-priv",
+                check_backend="docker", retries=1),
     BackendSpec("linux", "vm",                 None,     "containerd-vm",
                 check_backend="containerd", is_vm=True, check_isolation="vm",
                 sentinel_timeout_override=QEMU_TIMEOUT, stall_grace_secs=120,
@@ -275,6 +278,8 @@ FULL_LINUX_BACKENDS: list[BackendSpec] = [
                 check_backend="podman"),
     BackendSpec("linux", "container-enhanced", "docker", "docker-cenhanced",
                 check_backend="docker"),
+    BackendSpec("linux", "container-privileged", "docker", "docker-priv",
+                check_backend="docker", retries=1),
     BackendSpec("linux", "vm",                 None,     "containerd-vm",
                 check_backend="containerd", is_vm=True, check_isolation="vm",
                 sentinel_timeout_override=QEMU_TIMEOUT, stall_grace_secs=120,
@@ -1789,6 +1794,60 @@ def test_isolation_check(t: Test, spec: BackendSpec) -> None:
         )
 
 
+def test_dind(t: Test, spec: BackendSpec) -> None:
+    """Docker-in-Docker under container-privileged.
+
+    Starts a nested dockerd inside the sandbox and runs `docker run hello-world`,
+    exercising the privileged mode's headline use case end-to-end: the
+    --privileged caps, the shared mount propagation the entrypoint sets, and the
+    fuse-overlayfs storage driver the base image configures for nested daemons.
+
+    Only runs on container-privileged; plain/enhanced/vm backends lack the caps
+    to start a nested daemon, so they skip.
+    """
+    if spec.isolation != "container-privileged":
+        raise SkipTest(
+            f"dind only runs on container-privileged (got {spec.label}); "
+            "nested Docker needs --privileged and shared mount propagation"
+        )
+
+    project = t.project(f"dind-{spec.label}")
+    name = t.sandbox(f"dind-{spec.label}")
+
+    # idle agent: a running container to exec into, with no model inference.
+    r = t.run(
+        "new", name, str(project),
+        "--no-start", "--yes",
+        "--agent", "idle",
+        *spec.new_args(),
+        *t.debug_new_flags,
+        timeout=60,
+    )
+    t.assert_ok(r, "new (idle, privileged)")
+
+    r = t.run("start", name, timeout=CMD_TIMEOUT)
+    t.assert_ok(r, "start")
+
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        status = t._sandbox_status(name)
+        if status == "active" or status == "idle":
+            break
+        time.sleep(1)
+
+    # One exec keeps the backgrounded dockerd alive through the docker run. On
+    # failure, dump the daemon log so the autopsy has something to chew on.
+    script = (
+        "sudo dockerd >/tmp/dockerd.log 2>&1 & "
+        "for i in $(seq 1 30); do sudo docker info >/dev/null 2>&1 && break; sleep 1; done; "
+        "sudo docker run --rm hello-world "
+        "|| { echo '--- dockerd.log ---'; cat /tmp/dockerd.log; exit 1; }"
+    )
+    r = t.run("exec", name, "--", "bash", "-lc", script, timeout=120)
+    t.assert_ok(r, "dind: dockerd + docker run hello-world")
+    t.assert_in("Hello from Docker", r.stdout, "dind hello-world output")
+
+
 # ---------------------------------------------------------------------------
 # Prerequisites check
 # ---------------------------------------------------------------------------
@@ -2623,6 +2682,9 @@ def main() -> int:
 
     print("\nBackend matrix (isolation_check):")
     run_matrix_test("isolation_check", test_isolation_check)
+
+    print("\nBackend matrix (dind):")
+    run_matrix_test("dind", test_dind)
 
     # Parallel execution records results in completion order; sort by test name
     # so the summary and manifest are deterministic regardless of --jobs.
