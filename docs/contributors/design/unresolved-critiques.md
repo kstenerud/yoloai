@@ -36,4 +36,88 @@ here — resolved entries belong in the sink, not as stubs.
 
 ---
 
-_No active critiques._
+## 2026-06-04 Testing-critique round (T1–T15)
+
+Critique of the test suite (168 Go test files, ~33.6k LOC across the 4 tiers: untagged unit,
+`//go:build integration`, `//go:build e2e`, Python smoke). Healthy on the §6/§7/§8 axes (real
+backends, no daemon mocks, no mock libraries, manual fakes). Weaknesses cluster in three areas:
+cross-backend/e2e **duplication** instead of parametrization, **error-path coverage** lagging behind
+the by-design ~100% line coverage, and a few **mis-placed/over-gated** tests dragging the unit tier
+toward an ice-cream cone.
+
+### Placement / gating
+
+- **T1 — `patch/{apply,diff}_test.go` gratuitously Docker-gated.** `getTestRuntime(t)`
+  (`apply_test.go:27`) forces a Docker daemon, but in `:copy` mode the runtime is never used —
+  diff/apply shell out to host git via `hostGitExec`. ~40 tests should run in the **unit** suite
+  with no daemon. (Real git here is correctly *not* faked — they test git plumbing, §6/§8.)
+  *Fix:* drop the gate for the `:copy` paths; keep it only where a live runtime is genuinely
+  exercised (overlay).
+- **T3 — `tart/stop_integration_test.go` missing `//go:build integration`.** It runs in the *unit*
+  suite and spawns real subprocesses + SIGTERM/SIGKILL. *Fix:* add the build tag.
+
+### Duplication
+
+- **T2 — Runtime backend triplets not parametrized (W5 violation).**
+  `docker/integration_test.go` and `podman/integration_test.go` are line-for-line twins (~15
+  identical tests); containerd is a third copy; Seatbelt/Tart partial 4th/5th. *Fix:* one
+  parametrized integration suite keyed on a backend table.
+- **T4 — E2E ice-cream-cone.** `test/e2e/{workflow,error,json}_test.go` re-run what
+  `internal/cli/integration_test.go` already covers (`TestE2E_NewDiffApplyDestroy` ≈
+  `TestCLI_NewAndDestroy`+`TestCLI_Diff`; `TestE2E_JSONLs` ≈ `TestCLI_LsJSON`). Exit-code/help e2e
+  tests (`error_test.go:43,49`) build the whole binary for what a unit test covers. *Fix:* trim e2e
+  to the JSON-output-contract tests it uniquely justifies; let the cli integration tier own workflow
+  coverage.
+- **T5 — Bugreport tested at 3 tiers** (unit `writer_test.go` + integration `:318,366` + e2e
+  `:69,111`) plus e2e self-duplication (workflow vs error files). *Fix:* keep unit + one integration
+  smoke; drop the e2e copies.
+- **T6 — "Sandbox not found" tested 3× in the root package:** `TestClient_Sandbox_NotFound`
+  (sandbox_test.go), `TestClient_Sandbox_NotFoundHandle` (workdir_test.go),
+  `TestSandbox_MissingReturnsNotFound` (system_test.go). *Fix:* keep one canonical case.
+- **T10 — Round-trip / literal-dup tests.** `store/sandbox_state_test.go:31`/`:23`,
+  `store/environment_test.go` field-subset variants redundant with `SaveLoadRoundTrip:20`,
+  `provision_test.go:19`/`:37`, diff covered in both `diff_test.go` and `integration_test.go:74`.
+  Round-trips prove `encoding/json` works, not our state logic. *Fix:* fold to the full round-trip;
+  delete subset variants.
+
+### Coverage gaps (behind ~100% line coverage)
+
+- **T12 — `new.go:118-204` usage-error paths untested at any tier.**
+  `parseNewCmdPositional`/`resolveNewCmdOptions`: name required, workdir required, `--json`+`--attach`
+  conflict, `--port`+`--network-none` incompatible, invalid port/env. Richest untested surface; pure
+  table-driven unit tests, no binary build. *Fix:* add them.
+- **T13 — Error branches second-class despite §3.** Overlay diff/apply error paths only at
+  integration tier; `Reset` asserted as `_, _ = Reset(...)`; `HasUncommittedChanges` ExecError
+  branch untested; dead-daemon-mid-op, image-missing, exec-on-stopped-container, prune-failure
+  unhit; **Seatbelt and Tart have no real run coverage at all.** *Fix:* promote error paths to
+  first-class assertions where cheap; track the backend run-coverage gaps separately.
+
+### Low-value / misleading tests
+
+- **T9 — Tautologies / no-assert tests.** `runtime/.../names_test.go:8-24` (`BackendDocker ==
+  "docker"`); containerd tests that call a method and assert nothing (`:73-105`, `:186-198`);
+  `containerd_test.go` re-implements `context`/`isWSL2` and tests the re-implementation. *Fix:*
+  delete or convert to real behavioral assertions.
+- **T11 — Assert-only-error tests** that can't distinguish "feature works" from "daemon absent":
+  `e2e/destroy_test.go:22,39`, the tart stop tests. They pass whether or not the thing works. *Fix:*
+  gate on a backend probe and assert real post-conditions, or drop.
+
+### Cosmetic / hygiene
+
+- **T7 — Zero `t.Parallel()` across all 168 files.** §10/§12 (injected seams, no ambient process
+  state) specifically *enable* parallelism; nothing uses it. *Fix:* adopt on the pure-logic unit
+  tier; run under `-race` to also exercise the D67 `ensureRuntime` once-guard.
+- **T8 — ~30 vestigial `t.Setenv("HOME")` sites** (create_test.go:26,55; engine_test.go:109-225;
+  store/lock_test.go). Not the §12-dangerous variant (lib uses injected layout) but dead ceremony;
+  `status_test.go:26` shows the correct no-HOME pattern. *Fix:* remove.
+- **T14 — `public_api_test.go` misnamed.** It is a go/packages static fence against internal-type
+  leaks (`TestPublicAPI_NoInternalLeaks`), not behavioral API tests. *Fix:* rename to reflect the
+  fence (e.g. `internal_leak_fence_test.go`).
+- **T15 — Stale `SystemClient` test names post-D67.** `system_test.go`:
+  `TestSystemClient_Info`, `TestSystemClient_ValidateSandboxName`,
+  `TestSystemClient_ListAcrossBackends_Empty` — production renamed `SystemClient`→`System`, tests
+  didn't. *Fix:* rename to `TestSystem_*`.
+
+**Fix order:** T3 (tag-fix) → T1 (un-gate patch) → T15 (stale names) → T12 (new.go usage errors) →
+T8/T14 (hygiene) → T6/T5/T10 (dedup) → T9/T11 (low-value) → T2 (parametrize triplets, largest) →
+T4 (e2e trim) → T13 (error-path coverage).
