@@ -53,8 +53,14 @@ toward an ice-cream cone.
   with no daemon. (Real git here is correctly *not* faked — they test git plumbing, §6/§8.)
   *Fix:* drop the gate for the `:copy` paths; keep it only where a live runtime is genuinely
   exercised (overlay).
-- **T3 — `tart/stop_integration_test.go` missing `//go:build integration`.** It runs in the *unit*
-  suite and spawns real subprocesses + SIGTERM/SIGKILL. *Fix:* add the build tag.
+- **T3 — `tart/stop_integration_test.go` misleadingly named.** Flagged as "missing
+  `//go:build integration`", but a closer read shows the opposite: it uses a *fake* tart binary, no
+  real VM/daemon, bounded 200ms timeouts, and explicitly reasons about the *unit* suite budget
+  (line 75). Gating it behind `integration` would wrongly force macOS+AppleSilicon+tart for a test
+  that needs none. The package is already unix-only (production `build.go`/`tart.go` use
+  unconstrained unix syscalls), so Windows portability is moot. *Fix (applied):* rename file to
+  `stop_escalation_test.go` and correct its ABOUTME from "Integration test" → "Unit test"; keep it
+  in the unit suite where it belongs.
 
 ### Duplication
 
