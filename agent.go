@@ -76,6 +76,17 @@ type AgentLogsOptions struct {
 	Follow bool
 }
 
+// toInternal maps the public AgentLogsOptions onto sandbox.LogStreamOptions (IC7:
+// one internal counterpart, so a value→value method rather than inline mapping).
+func (o AgentLogsOptions) toInternal() sandbox.LogStreamOptions {
+	return sandbox.LogStreamOptions{
+		Sources:  o.Sources,
+		MinLevel: o.MinLevel,
+		Since:    o.Since,
+		Follow:   o.Follow,
+	}
+}
+
 // Logs streams the sandbox's structured-log events in time order. The on-disk
 // backlog is delivered first (merged across the requested sources); with
 // Follow the channel then stays open, tailing each source until the agent
@@ -86,12 +97,7 @@ type AgentLogsOptions struct {
 // AgentLog. Cancel ctx to stop a Follow stream early. A missing sandbox returns
 // ErrSandboxNotFound; an invalid MinLevel returns a *UsageError.
 func (a *Agent) Logs(ctx context.Context, opts AgentLogsOptions) (<-chan LogEvent, error) {
-	frames, err := sandbox.StreamLogs(ctx, a.s.c.layout, a.s.name, sandbox.LogStreamOptions{
-		Sources:  opts.Sources,
-		MinLevel: opts.MinLevel,
-		Since:    opts.Since,
-		Follow:   opts.Follow,
-	})
+	frames, err := sandbox.StreamLogs(ctx, a.s.c.layout, a.s.name, opts.toInternal())
 	if err != nil {
 		return nil, err
 	}

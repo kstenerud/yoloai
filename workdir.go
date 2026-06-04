@@ -97,6 +97,17 @@ type WorkdirExportOptions struct {
 	IncludeUncommitted bool
 }
 
+// toInternal maps the public WorkdirExportOptions onto patch.ExportOptions (IC7:
+// one internal counterpart, so a value→value method rather than inline mapping).
+func (o WorkdirExportOptions) toInternal() patch.ExportOptions {
+	return patch.ExportOptions{
+		Dir:                o.Dir,
+		Refs:               o.Refs,
+		Paths:              o.Paths,
+		IncludeUncommitted: o.IncludeUncommitted,
+	}
+}
+
 // ExportResult reports what Export wrote: the destination Dir, the patch/diff
 // Files (absolute paths), and whether an uncommitted.diff was written.
 // Re-exported (type alias) from internal/sandbox/patch.
@@ -116,12 +127,7 @@ func (w *Workdir) Export(ctx context.Context, opts WorkdirExportOptions) (*Expor
 		return nil, yoerrors.NewUsageError("export requires a destination directory: set WorkdirExportOptions.Dir")
 	}
 	w.s.c.tryEnsure(ctx) // overlay export needs the running container; copy-mode reads disk (rt unused)
-	return patch.Export(ctx, w.s.c.layout, w.s.c.rt, w.s.name, patch.ExportOptions{
-		Dir:                opts.Dir,
-		Refs:               opts.Refs,
-		Paths:              opts.Paths,
-		IncludeUncommitted: opts.IncludeUncommitted,
-	})
+	return patch.Export(ctx, w.s.c.layout, w.s.c.rt, w.s.name, opts.toInternal())
 }
 
 // ApplyResult describes the outcome of an Apply: the host directory patched,

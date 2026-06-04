@@ -11,6 +11,25 @@ import (
 	"github.com/kstenerud/yoloai/internal/sandbox"
 )
 
+// Option-mapping convention (IC7).
+//
+// Public *Options structs translate to internal calls in one of two forms;
+// which one applies is decided by a single rule:
+//
+//   - toInternal(): use it whenever the public struct maps onto exactly one
+//     internal counterpart struct. The mapping is a pure value→value method
+//     (e.g. SandboxCreateOptions→sandbox.CreateOptions, AgentLogsOptions→
+//     sandbox.LogStreamOptions, WorkdirExportOptions→patch.ExportOptions).
+//   - inline field-by-field at the call site: only when there is NO single
+//     internal struct to map to — either because the verb fans out to several
+//     internal structs chosen by runtime state (WorkdirApplyOptions →
+//     ApplySeries/ApplyOverlay/ApplyAll; WorkdirDiffOptions → Diff/CommitDiff),
+//     or because the fields spread across distinct internal calls
+//     (SystemBuildOptions).
+//
+// A public→public fold (Run sugar expanding into Create) is neither: it keeps a
+// descriptive name (materialize), since it never reaches an internal type.
+
 // SandboxCreateOptions is the advanced, public creation surface for Client.Create —
 // the deep entry point mirroring every creation capability the CLI exposes,
 // built from public re-exported types so external embedders can construct it

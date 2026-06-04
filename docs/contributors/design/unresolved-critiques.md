@@ -119,6 +119,14 @@ contract rounds above. Found via a whole-file read pass; `file:line` anchors are
 - **Decision (2026-06-04).** Standardize on **`toInternal()` whenever an internal counterpart type
   exists**; inline mapping only when there is no internal struct to map to. Record the rule next to
   the option types so future additions follow it.
+- **Done (2026-06-04).** Recorded the convention as a doc block at the top of `sandbox_options.go`
+  (the canonical options file) and made the code follow it: converted the two single-counterpart
+  inline mappings to methods — `AgentLogsOptions.toInternal() → sandbox.LogStreamOptions` and
+  `WorkdirExportOptions.toInternal() → patch.ExportOptions`. Left as inline (no single counterpart):
+  `WorkdirApplyOptions` (fans to ApplySeries/ApplyOverlay/ApplyAll by mode+overlay),
+  `WorkdirDiffOptions` (Diff/CommitDiff by Ref), `SystemBuildOptions` (fields spread across distinct
+  calls). `SandboxRunOptions.materialize()` keeps its name — it's a public→public fold, never an
+  internal type. `make check` green.
 
 **IC8 — `tart.go` (1568 lines) has clean extraction seams left unsplit.**
 - **Evidence.** Base-image/Xcode provisioning (1267–1472) and the VirtioFS mount/symlink subsystem
