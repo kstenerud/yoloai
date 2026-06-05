@@ -6,9 +6,11 @@ package docker
 import (
 	"context"
 	"fmt"
+	"os/exec"
 	goruntime "runtime"
 	"strings"
 
+	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/runtime/caps"
 )
 
@@ -54,4 +56,62 @@ func buildGVisorRegisteredCap(binaryName string) caps.HostCapability {
 			}}
 		},
 	}
+}
+
+// daemonOperatingSystem returns the daemon's reported OperatingSystem
+// ("Docker Desktop", "OrbStack", a Linux distro, …), or "" if unavailable.
+// Injectable for tests.
+var daemonOperatingSystem = func(ctx context.Context, binaryName string) string {
+	out, err := exec.CommandContext(ctx, binaryName, "info", "--format", "{{.OperatingSystem}}").Output() //nolint:gosec // G204: binaryName is "docker" or "podman"
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// DindAdvisory implements runtime.DindAdvisor: a non-fatal heads-up when
+// docker-in-docker won't work under container-privileged on this host. The
+// privileged mode itself is fine — only nesting a daemon fails.
+func (r *Runtime) DindAdvisory(ctx context.Context, isolation runtime.IsolationMode) string {
+	if isolation != runtime.IsolationModeContainerPrivileged {
+		return ""
+	}
+	// On Linux the daemon shares the host kernel, which nests dind fine. Off
+	// Linux the daemon runs in a VM; only its OperatingSystem (docker) tells us
+	// the provider — podman always means Podman Machine on macOS.
+	var os string
+	if goruntime.GOOS != "linux" && r.binaryName != "podman" {
+		os = daemonOperatingSystem(ctx, r.binaryName)
+	}
+	return dindAdvisory(goruntime.GOOS, r.binaryName, os)
+}
+
+// dindAdvisory is the pure provider→capability logic. Returns a heads-up string
+// when nested docker-in-docker won't work, or "" when it should.
+//
+// dind needs the nested daemon's fuse-overlayfs graph driver (native overlay2
+// can't nest here) to be exec-able. That depends on the host VM kernel: OrbStack
+// and native Linux can exec from fuse-overlayfs; macOS Docker Desktop and Podman
+// Machine can't — every nested execve returns EINVAL. See
+// docs/contributors/backend-idiosyncrasies.md.
+func dindAdvisory(goos, binaryName, operatingSystem string) string {
+	if goos == "linux" {
+		return "" // native overlay2 nests; dind works
+	}
+	var provider string
+	switch {
+	case binaryName == "podman":
+		provider = "Podman Machine"
+	case strings.Contains(strings.ToLower(operatingSystem), "orbstack"):
+		return "" // OrbStack's kernel execs the nested fuse-overlayfs driver fine
+	case operatingSystem != "":
+		provider = operatingSystem // "Docker Desktop", and any other VM provider
+	default:
+		provider = "this Docker provider"
+	}
+	return fmt.Sprintf(
+		"docker-in-docker likely won't work on %s: its VM kernel can't exec from "+
+			"the nested fuse-overlayfs driver (EINVAL). dind works on OrbStack or a "+
+			"Linux host; as a slower workaround run the nested daemon with "+
+			"--storage-driver=vfs.", provider)
 }

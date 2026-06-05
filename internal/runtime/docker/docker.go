@@ -120,6 +120,7 @@ var _ runtime.Runtime = (*Runtime)(nil)
 var _ runtime.IsolationCapabilityProvider = (*Runtime)(nil)
 var _ runtime.CachePruner = (*Runtime)(nil)
 var _ runtime.DiskUsageReporter = (*Runtime)(nil)
+var _ runtime.DindAdvisor = (*Runtime)(nil)
 
 // New creates a Runtime and verifies the Docker daemon is reachable. env is
 // the caller's threaded environment snapshot (layout.Env); the daemon socket
