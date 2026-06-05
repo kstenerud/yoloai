@@ -44,8 +44,11 @@ tidy-check:
 	fi
 	@rm -f go.mod.bak go.sum.bak
 
+## govulncheck: scan for known vulnerabilities, applying a self-policing
+## allowlist of unfixable-today findings that auto-fails once a fix ships
+## (see scripts/govulncheck.py).
 govulncheck:
-	GOTOOLCHAIN=$(shell go env GOVERSION) go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+	python3 scripts/govulncheck.py
 
 ## hadolint: lint the Dockerfile (skip when neither hadolint CLI nor Docker is available)
 ## Prefers a local hadolint install; falls back to Docker; skips if neither is usable.
@@ -93,7 +96,7 @@ python-test: python-typecheck
 python-typecheck: ensure-python-venv
 	@if [ -x $(MYPY) ]; then \
 		$(MYPY) --strict internal/runtime/monitor/setup_helpers.py internal/runtime/monitor/tmux_io.py internal/runtime/monitor/tests/; \
-		$(MYPY) --strict scripts/smoke_test.py scripts/tests/; \
+		$(MYPY) --strict scripts/smoke_test.py scripts/govulncheck.py scripts/tests/; \
 	else \
 		echo "Python type-check skipped (install uv to enable: https://docs.astral.sh/uv/)"; \
 	fi
