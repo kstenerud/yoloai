@@ -84,11 +84,11 @@ func buildAndStart(ctx context.Context, rt runtime.Runtime, st *state.State, mnt
 	}
 
 	if err := rt.Create(ctx, instanceCfg); err != nil {
-		return err
+		return gvisorStartHint(st.Isolation, err)
 	}
 
 	if err := rt.Start(ctx, cname); err != nil {
-		return fmt.Errorf("start instance: %w", err)
+		return fmt.Errorf("start instance: %w", gvisorStartHint(st.Isolation, err))
 	}
 
 	// Wait for the entrypoint to signal it has read /run/secrets before the
@@ -259,6 +259,37 @@ func applyOverlayAndCaps(st *state.State, caps runtime.BackendCaps, instanceCfg 
 	instanceCfg.Devices = st.Devices
 
 	return nil
+}
+
+// gvisorStartHint augments an opaque gVisor sandbox-start failure with an
+// actionable pointer. Only fires for container-enhanced; other errors pass
+// through unchanged. Two common macOS failure modes get distinct advice:
+//   - runsc is registered with the daemon but the binary isn't actually in the
+//     VM ("looking up the specified runtime path ... no such file").
+//   - the OrbStack /tmp -> /private/tmp virtiofs symlink collides with gVisor's
+//     hard-coded /tmp chroot ("cannot read client sync file: EOF").
+func gvisorStartHint(isolation runtime.IsolationMode, err error) error {
+	if isolation != runtime.IsolationModeContainerEnhanced || err == nil {
+		return err
+	}
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "looking up the specified runtime path"),
+		strings.Contains(msg, "runsc") && strings.Contains(msg, "no such file"):
+		return fmt.Errorf("%w\n\ngVisor (container-enhanced): runsc is registered with the "+
+			"daemon but the binary isn't present where the daemon runs. On macOS that's inside "+
+			"the Docker VM (Docker Desktop / OrbStack) — install runsc there, not on the host. "+
+			"See the gVisor setup notes in docs/GUIDE.md", err)
+	case strings.Contains(msg, "cannot read client sync file"),
+		strings.Contains(msg, "OCI runtime create"):
+		return fmt.Errorf("%w\n\ngVisor (container-enhanced) failed to start the sandbox. "+
+			"On macOS this is usually the OrbStack /tmp->/private/tmp symlink colliding with "+
+			"gVisor's /tmp chroot; Docker Desktop is unaffected. See "+
+			"docs/contributors/backend-idiosyncrasies.md (\"OrbStack: gVisor ... /tmp\") and the "+
+			"gVisor setup notes in docs/GUIDE.md", err)
+	default:
+		return err
+	}
 }
 
 // verifyInstanceRunning checks that the instance is still running after start,

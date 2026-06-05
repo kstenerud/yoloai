@@ -3,6 +3,8 @@
 package launch
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -17,6 +19,35 @@ import (
 	"github.com/kstenerud/yoloai/internal/sandbox/state"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 )
+
+func TestGvisorStartHint(t *testing.T) {
+	base := errors.New("create container: Error response from daemon: " +
+		"error while looking up the specified runtime path: exec: \"/usr/local/bin/runsc\": no such file or directory")
+	tmpErr := errors.New("OCI runtime create failed: cannot read client sync file: EOF")
+
+	// Non-enhanced isolation: passes through untouched, preserving the chain.
+	got := gvisorStartHint(runtime.IsolationModeContainer, base)
+	assert.Equal(t, base, got, "non-enhanced must not be augmented")
+
+	// Enhanced + runsc-missing signature: install-in-VM hint, wraps the original.
+	got = gvisorStartHint(runtime.IsolationModeContainerEnhanced, base)
+	assert.ErrorIs(t, got, base)
+	assert.Contains(t, got.Error(), "install runsc")
+	assert.Contains(t, got.Error(), "Docker VM")
+
+	// Enhanced + /tmp-chroot signature: OrbStack /tmp hint.
+	got = gvisorStartHint(runtime.IsolationModeContainerEnhanced, tmpErr)
+	assert.ErrorIs(t, got, tmpErr)
+	assert.Contains(t, got.Error(), "/tmp")
+	assert.Contains(t, got.Error(), "OrbStack")
+
+	// Enhanced but an unrelated error: untouched.
+	other := fmt.Errorf("some unrelated failure")
+	assert.Equal(t, other, gvisorStartHint(runtime.IsolationModeContainerEnhanced, other))
+
+	// nil stays nil.
+	assert.NoError(t, gvisorStartHint(runtime.IsolationModeContainerEnhanced, nil))
+}
 
 // TestEffectiveSecretsConsumedTimeout verifies the host honors a backend's
 // declared wait budget (slow-booting backends raise it so the secrets dir

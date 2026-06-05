@@ -6,6 +6,7 @@ package docker
 import (
 	"context"
 	"fmt"
+	goruntime "runtime"
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/runtime/caps"
@@ -34,6 +35,18 @@ func buildGVisorRegisteredCap(binaryName string) caps.HostCapability {
 			return env.InContainer // can't modify daemon.json inside a container
 		},
 		Fix: func(_ caps.Environment) []caps.FixStep {
+			// runsc must live and be registered wherever the daemon runs. On
+			// macOS/Windows the daemon is in a VM (Docker Desktop / OrbStack), so
+			// the Linux "/etc/docker/daemon.json + systemctl" recipe is wrong —
+			// point users at the in-VM setup instead.
+			if goruntime.GOOS != "linux" {
+				return []caps.FixStep{{
+					Description: "Install and register runsc inside the Docker VM (not the macOS host). " +
+						"See the gVisor macOS setup notes — `runsc` goes in the VM's daemon runtimes, " +
+						"not /etc/docker/daemon.json on the host.",
+					URL: "https://gvisor.dev/docs/user_guide/install/",
+				}}
+			}
 			return []caps.FixStep{{
 				Description: "Register runsc in /etc/docker/daemon.json and restart Docker",
 				Command:     `echo '{"runtimes":{"runsc":{"path":"/usr/local/sbin/runsc"}}}' | sudo tee /etc/docker/daemon.json` + "\nsudo systemctl restart docker",
