@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	goruntime "runtime"
 
@@ -61,14 +62,21 @@ var descriptor = runtime.BackendDescriptor{
 
 // probe reports whether Docker is usable. Stat-only — never dials the socket —
 // because it runs on every `yoloai info` call and inside auto-detect dispatch.
-// An explicit DOCKER_HOST is treated as a positive signal (caller knows where
-// the daemon is); otherwise the default /var/run/docker.sock must exist.
+// It mirrors the connection priority: an explicit DOCKER_HOST or a resolvable
+// active-context endpoint is a positive signal; otherwise any well-known local
+// socket existing on disk counts (the default socket may be a stale symlink, so
+// a sibling provider's socket is an equally valid signal).
 func probe(_ context.Context, env map[string]string) (bool, string) {
 	if env["DOCKER_HOST"] != "" {
 		return true, ""
 	}
-	if _, err := os.Stat("/var/run/docker.sock"); err == nil {
+	if host := resolveDockerHost(env); sockExists(host) {
 		return true, ""
+	}
+	for _, cand := range wellKnownDockerSockets(env) {
+		if sockExists(cand) {
+			return true, ""
+		}
 	}
 	return false, "docker socket not found (set DOCKER_HOST or start the docker daemon)"
 }
@@ -133,53 +141,106 @@ func New(ctx context.Context, env map[string]string) (*Runtime, error) {
 // os.Environ (§12). binaryName is the CLI binary to use for interactive exec
 // and image builds (e.g., "docker" or "podman").
 func NewWithSocket(ctx context.Context, host string, binaryName string, env map[string]string) (*Runtime, error) {
-	opts := []dockerclient.Opt{
-		dockerclient.WithAPIVersionNegotiation(),
+	baseOpts := []dockerclient.Opt{dockerclient.WithAPIVersionNegotiation()}
+	tlsOpts, err := tlsOptsFromEnv(env)
+	if err != nil {
+		return nil, fmt.Errorf("configure docker client from env: %w", err)
 	}
-	if host != "" {
-		opts = append(opts, dockerclient.WithHost(host))
-	} else {
-		envOpts, err := optsFromEnv(env)
-		if err != nil {
-			return nil, fmt.Errorf("configure docker client from env: %w", err)
-		}
-		opts = append(opts, envOpts...)
+	baseOpts = append(baseOpts, tlsOpts...)
+
+	// An explicit host (e.g. the podman backend pinning its discovered socket)
+	// is used verbatim. Otherwise resolve the endpoint the way the docker CLI
+	// does — honoring the active context, not just the default socket.
+	explicit := host != ""
+	if !explicit {
+		host = resolveDockerHost(env)
 	}
 
+	cli, pingErr := dialDocker(ctx, baseOpts, host)
+	if pingErr == nil {
+		return newDockerRuntime(cli, binaryName), nil
+	}
+
+	// Self-heal the auto path only: if the resolved socket is dead, adopt the
+	// first well-known daemon that answers. Covers the stale
+	// /var/run/docker.sock symlink left behind when switching Docker providers
+	// (e.g. OrbStack ⇄ Docker Desktop) without a `docker context use`.
+	if !explicit {
+		if cli, used := dialFirstAlive(ctx, baseOpts, env, host); cli != nil {
+			fmt.Fprintf(os.Stderr, "yoloai: %s at %s is not responding; using %s instead\n", //nolint:errcheck // best-effort notice
+				binaryName, displayHost(host), used)
+			return newDockerRuntime(cli, binaryName), nil
+		}
+	}
+
+	return nil, pingFailureError(pingErr, binaryName)
+}
+
+// dialDocker builds a client for host ("" = SDK default socket) and verifies
+// the daemon answers Ping. On failure it closes the client and returns the
+// error so the caller can try an alternative.
+func dialDocker(ctx context.Context, baseOpts []dockerclient.Opt, host string) (*dockerclient.Client, error) {
+	opts := baseOpts
+	if host != "" {
+		opts = append(slices.Clone(baseOpts), dockerclient.WithHost(host))
+	}
 	cli, err := dockerclient.NewClientWithOpts(opts...)
 	if err != nil {
-		return nil, fmt.Errorf("create Docker client: %w", err)
+		return nil, err
 	}
-
-	_, err = cli.Ping(ctx)
-	if err != nil {
+	if _, err := cli.Ping(ctx); err != nil {
 		_ = cli.Close()
-		if runtime.IsPermissionDenied(err) {
-			return nil, yoerrors.NewPermissionError("%s socket permission denied: add your user to the %s group or run with sudo", binaryName, binaryName)
-		}
-		var hint string
-		switch binaryName {
-		case "podman":
-			hint = "start Podman Desktop or run 'systemctl --user start podman.socket'"
-		default:
-			hint = "start Docker Desktop or run 'sudo systemctl start docker'"
-		}
-		return nil, yoerrors.NewDependencyError("%s daemon is not responding, %s", binaryName, hint)
+		return nil, err
 	}
+	return cli, nil
+}
 
+// dialFirstAlive probes the well-known local sockets (skipping skip and any
+// that don't exist on disk) under a short per-candidate timeout, returning the
+// first live client and the host it used. Returns nil if none answer.
+func dialFirstAlive(ctx context.Context, baseOpts []dockerclient.Opt, env map[string]string, skip string) (*dockerclient.Client, string) {
+	for _, cand := range wellKnownDockerSockets(env) {
+		if cand == skip || !sockExists(cand) {
+			continue
+		}
+		cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		cli, err := dialDocker(cctx, baseOpts, cand)
+		cancel()
+		if err == nil {
+			return cli, cand
+		}
+	}
+	return nil, ""
+}
+
+func newDockerRuntime(cli *dockerclient.Client, binaryName string) *Runtime {
 	r := &Runtime{client: cli, binaryName: binaryName}
 	r.gvisorRunsc = caps.NewGVisorRunsc(exec.LookPath)
 	r.gvisorRegistered = buildGVisorRegisteredCap(binaryName)
-	return r, nil
+	return r
 }
 
-// optsFromEnv reproduces dockerclient.FromEnv, but sources the DOCKER_*
-// settings from the caller's threaded env snapshot rather than os.Environ
-// (§12). Behavior matches the SDK exactly: an empty DOCKER_CERT_PATH means no
-// TLS, an empty DOCKER_HOST means the default socket, an empty
-// DOCKER_API_VERSION means version negotiation. So a nil/blank env degrades to
-// a plain local connection — present-but-blank is the same code path as absent.
-func optsFromEnv(env map[string]string) ([]dockerclient.Opt, error) {
+func pingFailureError(err error, binaryName string) error {
+	if runtime.IsPermissionDenied(err) {
+		return yoerrors.NewPermissionError("%s socket permission denied: add your user to the %s group or run with sudo", binaryName, binaryName)
+	}
+	var hint string
+	switch binaryName {
+	case "podman":
+		hint = "start Podman Desktop or run 'systemctl --user start podman.socket'"
+	default:
+		hint = "start Docker Desktop or run 'sudo systemctl start docker'"
+	}
+	return yoerrors.NewDependencyError("%s daemon is not responding, %s", binaryName, hint)
+}
+
+// tlsOptsFromEnv reproduces the TLS and API-version halves of
+// dockerclient.FromEnv, sourced from the threaded env snapshot rather than
+// os.Environ (§12). The host/socket selection is handled separately by
+// resolveDockerHost. An empty DOCKER_CERT_PATH means no TLS and an empty
+// DOCKER_API_VERSION means version negotiation, so a nil/blank env degrades to
+// a plain local connection.
+func tlsOptsFromEnv(env map[string]string) ([]dockerclient.Opt, error) {
 	var opts []dockerclient.Opt
 
 	// TLS first, mirroring FromEnv's WithTLSClientConfigFromEnv: only engaged
@@ -198,9 +259,6 @@ func optsFromEnv(env map[string]string) ([]dockerclient.Opt, error) {
 			Transport:     &http.Transport{TLSClientConfig: tlsc},
 			CheckRedirect: dockerclient.CheckRedirect,
 		}))
-	}
-	if host := env["DOCKER_HOST"]; host != "" {
-		opts = append(opts, dockerclient.WithHost(host))
 	}
 	if v := env["DOCKER_API_VERSION"]; v != "" {
 		opts = append(opts, dockerclient.WithVersion(v))
