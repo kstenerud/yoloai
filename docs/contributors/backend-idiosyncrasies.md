@@ -62,7 +62,6 @@ row to the index.
 | Container starts as root / wrong uid under rootless Podman | [Podman: rootless detection uses socket path](#rootless-detection-must-use-socket-path-not-osgetuid) |
 | `yoloai exec`/`attach` on Podman returns exit 125 `no such container` under concurrent load though `info`/`Inspect` shows active | [Docker/Podman: interactive exec must use the API socket](#dockerpodman-interactive-execattach-must-use-the-api-socket-not-the-bare-cli-dual-control-plane-divergence) |
 | Wrong uid inside container on macOS Podman | [Podman: macOS keep-id maps VM uid](#macos---usernkeep-id-maps-the-podman-machine-uid-1000-not-the-macos-uid) |
-| `sudo: a password is required` running `dockerd` in a rootless-Podman `container-privileged` sandbox | [Podman: rootless privileged keep-id breaks dind](#podman-rootless-privileged---usernkeep-id-breaks-docker-in-docker-no-sudo--docker-group) |
 | Podman rejects per-file bind mounts for secrets | [Podman: per-file bind mounts rejected](#per-file-bind-mounts-rejected-by-podmans-docker-compatible-api) |
 | Secrets / files missing inside Tart VM | [Tart: VirtioFS directories only](#virtiofs-only-supports-directory-mounts-not-individual-files) |
 | Shell command fails with "no such file" on VirtioFS path | [Tart: VirtioFS path has spaces](#virtiofs-mount-path-inside-the-vm-contains-spaces) |
@@ -842,29 +841,6 @@ the VM user's uid (1000) into the container — not the macOS user's uid (e.g.
 Workaround: skip `keep-id` on macOS (`runtime.GOOS == "darwin"`). The
 entrypoint uses `gosu` to remap `yoloai` to the correct uid, which is the same
 path Docker takes. See `podman.go::Create`.
-
-### Podman rootless privileged: `--userns=keep-id` breaks docker-in-docker (no sudo / docker group)
-
-On Linux, rootless Podman normally gets `--userns=keep-id`, which maps the
-invoking host user 1:1 into the container so bind-mounted files keep correct
-ownership. But keep-id runs the container process as that *host* uid (e.g.
-1000), while the image's passwordless-sudo grant (`/etc/sudoers.d/yoloai`) and
-`docker`-group membership belong to the `yoloai` user (uid 1001). So inside a
-keep-id container `whoami` is the host user, `sudo -n true` fails, and
-`container-privileged` docker-in-docker breaks: `sudo dockerd` →
-`sudo: a password is required`.
-
-This is the rootless-Podman analogue of the macOS keep-id entry above, but the
-trigger is privileged dind rather than home-dir ownership. Rootful Docker (runs
-as `yoloai`) and macOS Podman (keep-id skipped) both avoid it.
-
-Fix: skip `keep-id` for privileged isolation, exactly as overlay (CAP_SYS_ADMIN)
-already does — privileged needs real root in the container anyway. With keep-id
-off, `entrypoint.py` takes the rootful remap+gosu path: it runs as container
-root, `usermod`s `yoloai` to the host uid, reads `/run/secrets` as root (DAC
-override, so credential injection still works), then drops to `yoloai` — which
-has sudo + docker group. See `podman.go::Create` (the `cfg.Privileged` branch)
-and `create.go::resolveUsernsMode`.
 
 ### Podman macOS: iptables-nft lacks `xt_set` module; ipset unusable
 

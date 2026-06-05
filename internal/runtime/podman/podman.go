@@ -145,13 +145,8 @@ func podmanImageBytes(du types.DiskUsage) int64 {
 }
 
 // Create wraps the Docker Create to inject --userns=keep-id for rootless mode.
-// Exception: overlay and privileged modes both need real root inside the
-// container, so we skip keep-id for them. Overlay mounts require CAP_SYS_ADMIN
-// (signalled by SYS_ADMIN in CapAdd); privileged docker-in-docker needs the
-// image's yoloai user with its passwordless-sudo + docker-group grant, which
-// keep-id defeats by running the container as the unprivileged host UID. With
-// keep-id skipped, entrypoint.py takes the rootful remap+gosu path and the
-// agent runs as yoloai — the same path Docker takes.
+// Exception: overlay mode requires CAP_SYS_ADMIN and root privileges inside the
+// container, so we skip keep-id when SYS_ADMIN is in CapAdd.
 //
 // keep-id is also skipped on macOS. Podman on macOS runs via Podman Machine (a
 // Linux VM): keep-id maps the VM user (UID 1000) into the container, not the
@@ -161,10 +156,10 @@ func podmanImageBytes(du types.DiskUsage) int64 {
 // remaps yoloai to the macOS user's UID via gosu — the same path Docker takes.
 func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error {
 	if r.rootless && cfg.UsernsMode == "" && goruntime.GOOS != "darwin" {
-		// overlay (SYS_ADMIN) and privileged both need real root in the
-		// container; only normal mounts get keep-id.
-		needsRootInContainer := slices.Contains(cfg.CapAdd, "SYS_ADMIN") || cfg.Privileged
-		if !needsRootInContainer {
+		// Check if overlay mode is active (indicated by SYS_ADMIN capability)
+		hasOverlay := slices.Contains(cfg.CapAdd, "SYS_ADMIN")
+		// Only use keep-id for normal mounts; overlay needs root in container
+		if !hasOverlay {
 			cfg.UsernsMode = "keep-id"
 		}
 	}
@@ -272,14 +267,13 @@ func (r *Runtime) RequiredCapabilities(isolation runtime.IsolationMode) []caps.H
 // UsernsMode returns the user namespace mode for a new container.
 // Rootless Podman on Linux uses "keep-id" to map container uid to the host
 // user, which is required for correct file ownership. Exceptions:
-//   - needsRootInContainer=true: overlay mounts (CAP_SYS_ADMIN) and privileged
-//     docker-in-docker both require real root in the container.
+//   - hasSysAdmin=true: overlay mounts require real root in the container
 //   - macOS: Podman Machine maps the VM user (uid 1000) into the container,
 //     not the macOS user. Without keep-id, entrypoint.py remaps yoloai to
 //     the correct uid via gosu — the same path Docker takes.
 //   - root: keep-id is irrelevant when already running as root.
-func (r *Runtime) UsernsMode(needsRootInContainer bool) string {
-	if !r.rootless || needsRootInContainer || goruntime.GOOS == "darwin" {
+func (r *Runtime) UsernsMode(hasSysAdmin bool) string {
+	if !r.rootless || hasSysAdmin || goruntime.GOOS == "darwin" {
 		return ""
 	}
 	return "keep-id"

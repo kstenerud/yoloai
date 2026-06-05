@@ -360,7 +360,7 @@ func buildConfigAndEnvironment(ctx context.Context, d state.Deps, opts Options, 
 		return nil, nil, "", "", fmt.Errorf("build %s: %w", store.RuntimeConfigFile, err)
 	}
 
-	usernsMode := resolveUsernsMode(d.Runtime, workdir, auxDirs, pr.capAdd, pr.isolation)
+	usernsMode := resolveUsernsMode(d.Runtime, workdir, auxDirs, pr.capAdd)
 	meta := buildEnvironment(opts, pr, workdir, baselineSHA, dirEnvs, hasPrompt, networkMode, networkAllow, usernsMode, d.Runtime.Descriptor().Capabilities.HostFilesystem, string(ri.archetype), backend, model, ri.mergedMounts)
 	meta.Principal = d.Layout.Principal // record the owning principal for attribution + runtime namespace (D62)
 
@@ -628,27 +628,24 @@ func buildLifecycleConfig(resolvedArchetype archetype.Archetype, archetypeDocker
 }
 
 // resolveUsernsMode determines the effective user namespace mode for the runtime.
-func resolveUsernsMode(rt runtime.Runtime, workdir *DirSpec, auxDirs []*DirSpec, capAdd []string, isolation runtime.IsolationMode) string {
+func resolveUsernsMode(rt runtime.Runtime, workdir *DirSpec, auxDirs []*DirSpec, capAdd []string) string {
 	up, ok := rt.(runtime.UsernsProvider)
 	if !ok {
 		return ""
 	}
-	// overlay (CAP_SYS_ADMIN) and privileged docker-in-docker both need real
-	// root in the container, which keep-id cannot provide.
-	needsRootInContainer := workdir.Mode == "overlay"
+	hasSysAdmin := workdir.Mode == "overlay"
 	for _, ad := range auxDirs {
 		if ad.Mode == "overlay" {
-			needsRootInContainer = true
+			hasSysAdmin = true
 			break
 		}
 	}
-	if !needsRootInContainer && slices.Contains(capAdd, "SYS_ADMIN") {
-		needsRootInContainer = true
+	if !hasSysAdmin {
+		if slices.Contains(capAdd, "SYS_ADMIN") {
+			hasSysAdmin = true
+		}
 	}
-	if !needsRootInContainer && isolation == runtime.IsolationModeContainerPrivileged {
-		needsRootInContainer = true
-	}
-	return up.UsernsMode(needsRootInContainer)
+	return up.UsernsMode(hasSysAdmin)
 }
 
 // buildEnvironment constructs the Environment struct for a new sandbox.

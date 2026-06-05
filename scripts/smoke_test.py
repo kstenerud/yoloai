@@ -285,14 +285,6 @@ FULL_LINUX_BACKENDS: list[BackendSpec] = [
                 check_backend="docker"),
     BackendSpec("linux", "container-privileged", "docker", "docker-priv",
                 check_backend="docker", retries=1),
-    # Podman privileged on Linux: rootless Podman normally maps the host user in
-    # via --userns=keep-id, which runs the agent as the unprivileged host UID
-    # (no passwordless sudo / docker group) and so breaks dind. yoloai skips
-    # keep-id for privileged (as it already does for overlay), taking the rootful
-    # remap+gosu path so the agent runs as yoloai. Verified: new + dind +
-    # --network-isolated all pass.
-    BackendSpec("linux", "container-privileged", "podman", "podman-priv",
-                check_backend="podman", retries=1),
     BackendSpec("linux", "vm",                 None,     "containerd-vm",
                 check_backend="containerd", is_vm=True, check_isolation="vm",
                 sentinel_timeout_override=QEMU_TIMEOUT, stall_grace_secs=120,
@@ -322,8 +314,8 @@ FULL_MACOS_BACKENDS: list[BackendSpec] = [
                 check_backend="docker", retries=1),
     # Podman privileged also works on macOS — verified on a rootless Podman
     # Machine (Apple Silicon): new + docker-in-docker + --network-isolated all
-    # pass. (Also in FULL_LINUX_BACKENDS: keep-id is skipped for privileged so
-    # the rootful path runs — see that spec's note.)
+    # pass. (Not in the Linux matrix yet: unverified there — see podman-gvisor
+    # plan's "every working combo gets tested" note.)
     BackendSpec("linux", "container-privileged", "podman", "podman-priv",
                 check_backend="podman", retries=1),
 ]
