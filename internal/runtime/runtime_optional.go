@@ -132,11 +132,11 @@ func hostGitExec(ctx context.Context, workDir string, args ...string) (string, e
 // (keep-id containers run as the host user, not as "yoloai").
 type UsernsProvider interface {
 	// UsernsMode returns the user namespace mode for a new container.
-	// hasSysAdmin is true when the container will receive CAP_SYS_ADMIN
-	// (overlay mounts or recipe cap_add), which requires real root in the
-	// container and therefore cannot use keep-id.
+	// needsRootInContainer is true when the container needs real root inside
+	// it — overlay mounts / recipe cap_add (CAP_SYS_ADMIN) or privileged
+	// docker-in-docker — and therefore cannot use keep-id.
 	// Returns "" for the default mode.
-	UsernsMode(hasSysAdmin bool) string
+	UsernsMode(needsRootInContainer bool) string
 }
 
 // IsolationCapabilityProvider is an optional interface implemented by
