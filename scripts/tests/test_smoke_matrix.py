@@ -26,8 +26,9 @@ def _labels(predicate: Callable[[BackendSpec], bool]) -> set[str]:
 
 
 def test_dind_applies_only_to_container_privileged() -> None:
-    # dind needs nested-dockerd caps; only the container-privileged spec grants them.
-    assert _labels(dind_applies) == {"docker-priv"}
+    # dind needs nested-dockerd caps; only the container-privileged specs grant them
+    # (docker on both hosts; podman on macOS, verified on a rootless Podman Machine).
+    assert _labels(dind_applies) == {"docker-priv", "podman-priv"}
 
 
 def test_isolation_check_applies_to_capable_backends_only() -> None:
@@ -37,6 +38,7 @@ def test_isolation_check_applies_to_capable_backends_only() -> None:
         "docker",
         "podman",
         "docker-priv",
+        "podman-priv",
         "containerd-vm",
     }
 
@@ -74,9 +76,11 @@ def test_predicates_partition_cleanly_over_base_matrix() -> None:
 
 def test_uncovered_on_linux_full_lists_mac_only_backends() -> None:
     # On a Linux host (this=FULL_LINUX), the macOS matrix contributes the mac-only
-    # backends; docker/podman run here so they're excluded.
+    # backends; docker/podman run here so they're excluded. podman-priv is currently
+    # only in the mac matrix (verified there; unverified on Linux), so it surfaces as
+    # uncovered here — the honest "not tested on this host" signal.
     labels = {s.label for s in uncovered_backends(FULL_MACOS_BACKENDS, FULL_LINUX_BACKENDS)}
-    assert labels == {"seatbelt", "tart"}
+    assert labels == {"seatbelt", "tart", "podman-priv"}
 
 
 def test_uncovered_on_mac_full_includes_linux_isolation_variants() -> None:

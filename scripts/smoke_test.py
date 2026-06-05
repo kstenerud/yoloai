@@ -312,6 +312,12 @@ FULL_MACOS_BACKENDS: list[BackendSpec] = [
     # / Apple Silicon: new + docker-in-docker + --network-isolated all pass.
     BackendSpec("linux", "container-privileged", "docker", "docker-priv",
                 check_backend="docker", retries=1),
+    # Podman privileged also works on macOS — verified on a rootless Podman
+    # Machine (Apple Silicon): new + docker-in-docker + --network-isolated all
+    # pass. (Not in the Linux matrix yet: unverified there — see podman-gvisor
+    # plan's "every working combo gets tested" note.)
+    BackendSpec("linux", "container-privileged", "podman", "podman-priv",
+                check_backend="podman", retries=1),
 ]
 
 # Required for non-matrix tests. Must be available on both platforms.
