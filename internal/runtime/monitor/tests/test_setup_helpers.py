@@ -258,3 +258,17 @@ def test_build_agent_launch_command_applies_launch_prefix() -> None:
     out = setup_helpers.build_agent_launch_command(
         "claude", "/w", {"T": "x"}, launch_prefix='PATH="/opt/bin:$PATH" ')
     assert out == "PATH=\"/opt/bin:$PATH\" export T='x'; cd '/w' && exec claude"
+
+
+def test_dockerd_storage_args_overlay_backing_uses_fuse() -> None:
+    # No real-fs volume (backing is the overlay rootfs): overlay2 can't nest, so
+    # force fuse-overlayfs as the fallback driver.
+    assert setup_helpers.dockerd_storage_args("overlay") == ["--storage-driver=fuse-overlayfs"]
+    assert setup_helpers.dockerd_storage_args("  overlay  ") == ["--storage-driver=fuse-overlayfs"]
+
+
+def test_dockerd_storage_args_realfs_backing_auto_selects() -> None:
+    # Real-fs volume present: return no flag and let dockerd auto-select the
+    # native overlay driver (fast, exec-safe on every provider).
+    for fs in ("ext4", "xfs", "btrfs", ""):
+        assert setup_helpers.dockerd_storage_args(fs) == []

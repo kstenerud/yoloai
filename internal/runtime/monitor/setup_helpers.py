@@ -202,3 +202,23 @@ def load_secret_files(secrets_dir: str) -> dict[str, str]:
         except OSError:
             continue
     return secrets
+
+
+def dockerd_storage_args(var_lib_docker_fstype: str) -> list[str]:
+    """Pick the nested dockerd `--storage-driver` args from the /var/lib/docker
+    backing filesystem type.
+
+    yoloAI mounts a real-filesystem volume at /var/lib/docker for privileged
+    sandboxes, so the backing is normally ext4/xfs/btrfs and the native overlay
+    driver auto-selects — return no flag and let dockerd choose it (fast,
+    low-disk, exec-safe on every provider).
+
+    Only when the backing is still `overlay` (no volume — overlay2 can't nest on
+    overlay) do we force fuse-overlayfs. That works on Linux/OrbStack/Podman
+    Machine; Docker Desktop's LinuxKit kernel can't exec off fuse-overlayfs, but
+    that path shouldn't be hit because yoloAI always provides the volume. See
+    docs/contributors/design/research/dind-storage-drivers.md.
+    """
+    if var_lib_docker_fstype.strip() == "overlay":
+        return ["--storage-driver=fuse-overlayfs"]
+    return []

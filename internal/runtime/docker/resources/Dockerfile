@@ -153,11 +153,13 @@ RUN curl -fsSL "https://github.com/tianon/gosu/releases/download/${GOSU_VERSION}
     && chmod +x /usr/local/bin/gosu \
     && gosu --version
 
-# Docker daemon config: use fuse-overlayfs storage driver.
-# overlay2 requires an unprivileged user namespace mount that is blocked by the
-# outer Docker layer (EPERM); fuse-overlayfs works in all nesting configurations.
-RUN mkdir -p /etc/docker \
-    && printf '{"storage-driver":"fuse-overlayfs"}\n' > /etc/docker/daemon.json
+# Docker daemon storage driver is intentionally NOT pinned (no /etc/docker/daemon.json).
+# yoloAI mounts a real-filesystem volume at /var/lib/docker for privileged sandboxes
+# (see docker.go Create), so the nested dockerd auto-selects the native overlay driver —
+# fast, low-disk, and exec-safe on every provider (Linux + all macOS VMs). fuse-overlayfs
+# stays installed (above) as a fallback for an overlay backing; sandbox-setup.py's
+# start_dockerd selects it only then. A static pin can't express that and conflicts with a
+# --storage-driver flag.
 
 # Add /sbin and /usr/sbin to PATH so tools like sysctl are found by subprocesses
 # (rootlesskit child scripts, dockerd hooks) that don't inherit a full login PATH.

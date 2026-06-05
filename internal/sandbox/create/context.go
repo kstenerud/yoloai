@@ -98,9 +98,10 @@ func GenerateContext(sandboxDir string, meta *store.Environment) string {
 	if meta.Isolation == "container-privileged" {
 		b.WriteString("\n## Nested Containers (Docker-in-Docker)\n\n")
 		b.WriteString("This sandbox runs in privileged mode. Docker CE and the Compose plugin are pre-installed.\n")
-		b.WriteString("`fuse-overlayfs` is the configured storage driver (set in `/etc/docker/daemon.json`).\n\n")
+		b.WriteString("`/var/lib/docker` is backed by a real filesystem, so the daemon auto-selects the\n")
+		b.WriteString("native overlay storage driver — no configuration needed.\n\n")
 		b.WriteString("```bash\n")
-		b.WriteString("sudo dockerd &   # daemon.json sets fuse-overlayfs automatically\n")
+		b.WriteString("sudo dockerd &   # auto-selects the overlay2 storage driver\n")
 		b.WriteString("docker run <image>\n")
 		b.WriteString("docker compose up\n")
 		b.WriteString("```\n")

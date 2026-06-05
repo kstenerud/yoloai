@@ -25,6 +25,7 @@ from pathlib import Path
 from setup_helpers import (
     build_agent_launch_command,
     compose_prompt_content,
+    dockerd_storage_args,
     lifecycle_on_create_marker,
     lifecycle_preamble,
     load_secret_files,
@@ -1059,6 +1060,22 @@ def deliver_prompt(cfg, yoloai_dir, socket=None, preamble=None):
     return has_prompt  # True only when a real user task was submitted
 
 
+def _var_lib_docker_fstype():
+    """Backing filesystem type of /var/lib/docker ('overlay', 'ext4', 'xfs', …),
+    or '' if it can't be determined. `-T` resolves the containing mount so a
+    non-mountpoint path reports the rootfs (overlay) rather than nothing."""
+    try:
+        r = subprocess.run(
+            ["findmnt", "-T", "/var/lib/docker", "-no", "FSTYPE"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if r.returncode == 0:
+            return r.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return ""
+
+
 def start_dockerd(log):
     """Start the Docker daemon and wait for it to be ready."""
     import shutil as _shutil
@@ -1072,8 +1089,11 @@ def start_dockerd(log):
         log("dockerd: already running")
         return
     log("dockerd: starting...")
+    fstype = _var_lib_docker_fstype()
+    storage_args = dockerd_storage_args(fstype)
+    log(f"dockerd: /var/lib/docker backing={fstype or 'unknown'} args={storage_args or 'auto (overlay)'}")
     subprocess.Popen(
-        ["sudo", "dockerd", "--storage-driver=fuse-overlayfs"],
+        ["sudo", "dockerd", *storage_args],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
     # Poll socket until ready (30s timeout)

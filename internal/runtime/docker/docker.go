@@ -23,6 +23,7 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/api/types/network"
+	"github.com/docker/docker/api/types/volume"
 	dockerclient "github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-connections/nat"
@@ -335,6 +336,17 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 	mounts := ConvertMounts(cfg.Mounts)
 	portBindings, exposedPorts := ConvertPorts(cfg.Ports)
 
+	// Docker-in-Docker (privileged): give the nested daemon a real-filesystem
+	// /var/lib/docker via a managed named volume so it can use the native overlay
+	// driver (see ensureDindVolumeMount).
+	if cfg.Privileged {
+		m, err := r.ensureDindVolumeMount(ctx, cfg)
+		if err != nil {
+			return err
+		}
+		mounts = append(mounts, m)
+	}
+
 	containerConfig := &container.Config{
 		Image:        cfg.ImageRef,
 		WorkingDir:   cfg.WorkingDir,
@@ -445,12 +457,41 @@ func (r *Runtime) Stop(ctx context.Context, name string) error {
 // Remove removes a Docker container. Returns nil if already removed.
 func (r *Runtime) Remove(ctx context.Context, name string) error {
 	if err := r.client.ContainerRemove(ctx, name, container.RemoveOptions{Force: true}); err != nil {
-		if cerrdefs.IsNotFound(err) {
-			return nil
+		if !cerrdefs.IsNotFound(err) {
+			return fmt.Errorf("remove container: %w", err)
 		}
-		return fmt.Errorf("remove container: %w", err)
 	}
+	// Best-effort cleanup of the per-sandbox docker-in-docker storage volume
+	// (privileged sandboxes only; a no-op otherwise). It carries the
+	// com.yoloai.managed label, so `yoloai system prune` reclaims any leak.
+	_ = r.client.VolumeRemove(ctx, dockerLibVolumeName(name), false)
 	return nil
+}
+
+// dockerLibVolumeName derives the managed /var/lib/docker volume name for a
+// privileged sandbox from its instance name. Deterministic so Remove can find
+// it without extra state.
+func dockerLibVolumeName(instanceName string) string {
+	return instanceName + "-varlibdocker"
+}
+
+// ensureDindVolumeMount creates (idempotently) the managed named volume that
+// backs the nested daemon's /var/lib/docker and returns the mount to attach.
+// The container rootfs is overlay, and overlay2 can't nest on overlay (and
+// fuse-overlayfs can't exec on Docker Desktop's LinuxKit kernel) — a real-fs
+// volume sidesteps both, working on Linux + all macOS VMs. The volume carries
+// com.yoloai.managed (plus the instance's labels) so Remove/prune can reclaim
+// it. See docs/contributors/design/research/dind-storage-drivers.md.
+func (r *Runtime) ensureDindVolumeMount(ctx context.Context, cfg runtime.InstanceConfig) (mount.Mount, error) {
+	volName := dockerLibVolumeName(cfg.Name)
+	labels := map[string]string{managedLabel: "true"}
+	for k, v := range cfg.Labels {
+		labels[k] = v
+	}
+	if _, err := r.client.VolumeCreate(ctx, volume.CreateOptions{Name: volName, Labels: labels}); err != nil {
+		return mount.Mount{}, fmt.Errorf("create docker-in-docker storage volume: %w", err)
+	}
+	return mount.Mount{Type: mount.TypeVolume, Source: volName, Target: "/var/lib/docker"}, nil
 }
 
 // Inspect returns the state of a Docker container.
