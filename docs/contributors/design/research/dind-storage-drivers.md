@@ -11,16 +11,18 @@ Today yoloAI pins `fuse-overlayfs` in two places — `internal/runtime/docker/re
 but **breaks on Docker Desktop and Podman Machine**, where every nested `execve` off the
 fuse-overlayfs mount returns `EINVAL`.
 
-> **Status:** Linux empirics are **verified** (2026-06-05, host kernel 6.8.0-117, Ubuntu 24.04.4,
-> outer driver overlayfs). The macOS columns and the O1 EINVAL root-cause are **hypotheses pending a
-> Mac host** — see [Completing the research on macOS](#completing-the-research-on-macos).
+> **Status:** **Complete.** Linux empirics verified 2026-06-05 (host kernel 6.8.0-117, Ubuntu
+> 24.04.4, outer driver overlayfs). macOS empirics verified 2026-06-05 across all three providers
+> (Docker Desktop, OrbStack, Podman Machine) on Apple Silicon — see
+> [Verified macOS results](#verified-macos-results). **O3 holds on every platform**, so the
+> recommended strategy (overlay2 on a real-fs `/var/lib/docker`) is confirmed cross-platform.
 
 ## The three candidate drivers
 
 | driver | how it stores layers | nests on overlay rootfs? | disk | speed |
 |---|---|---|---|---|
 | **overlay2** | native kernel overlayfs | **No** — refuses on an overlay backing | low (shared layers) | fast |
-| **fuse-overlayfs** | userspace FUSE overlay | Yes | low (shared layers) | fast on Linux/OrbStack; **exec EINVAL on Docker Desktop / Podman Machine** |
+| **fuse-overlayfs** | userspace FUSE overlay | Yes | low (shared layers) | fast on Linux / OrbStack / Podman Machine; **exec EINVAL on Docker Desktop only** (its LinuxKit kernel) |
 | **vfs** | full per-layer directory copy | Yes (always) | **high** (no sharing) | slow, scales badly with layer depth |
 
 ## Verified Linux results
@@ -61,22 +63,99 @@ ideal answer: fast, low-disk, and — because overlay2 uses no FUSE — it shoul
 Docker Desktop / Podman Machine `execve` EINVAL, which is specifically a FUSE-exec limitation. That
 last clause is the untested-on-Mac hypothesis.
 
+## Verified macOS results
+
+All on one Apple Silicon Mac (2026-06-05), `yoloai-base` arm64, switching the active provider
+between runs. Each provider tested on **both** backings: the container's default **overlay** rootfs,
+and a **named volume** (real fs in the provider's VM — fstype shown). Outer launcher was `docker` for
+Docker Desktop/OrbStack and `podman run --privileged` (rootless machine) for Podman Machine.
+
+| provider (VM kernel) | driver | backing | starts? | nested exec? |
+|---|---|---|---|---|
+| **Docker Desktop** (LinuxKit 6.10.14) | overlay2 | overlay (default) | **NO** — `driver not supported` | — |
+| | **overlay2** | **ext4 (volume, O3)** | **YES** | **YES** |
+| | fuse-overlayfs | overlay | YES | **NO — EINVAL** |
+| | fuse-overlayfs | ext4 (volume) | YES | **NO — EINVAL** |
+| | vfs | either | YES | YES |
+| **OrbStack** (7.0.5-orbstack) | overlay2 | overlay (default) | **NO** — `driver not supported` | — |
+| | **overlay2** | **btrfs (volume, O3)** | **YES** | **YES** |
+| | fuse-overlayfs | overlay / btrfs | YES | **YES** |
+| | vfs | either | YES | YES |
+| **Podman Machine** (Fedora 43, 6.18.10, rootless) | overlay2 | overlay (default) | **NO** — `driver not supported` | — |
+| | **overlay2** | **xfs (volume, O3)** | **YES** | **YES** |
+| | fuse-overlayfs | overlay / xfs | YES | **YES** |
+| | vfs | either | YES | YES |
+
+Takeaways:
+
+- **O3 holds on all three macOS providers.** overlay2 refuses on the overlay rootfs everywhere
+  (same `driver not supported: overlay2` as Linux), but on a **named volume** (ext4 / btrfs / xfs —
+  all real, non-overlay) it starts and execs cleanly on every provider. Combined with the Linux
+  result, **overlay2 + real-fs `/var/lib/docker` is now verified on Linux + all three Mac VMs.**
+- **The fuse-overlayfs exec EINVAL is Docker-Desktop-only**, not a general macOS-VM trait. OrbStack
+  (kernel 7.0.5) and Podman Machine (Fedora 6.18) both exec fine off fuse-overlayfs; only Docker
+  Desktop's **LinuxKit 6.10** kernel returns EINVAL — and it does so **regardless of backing** (fails
+  on both overlay and ext4), confirming it's the FUSE-exec path, not the graph store's backing fs.
+- **`--storage-driver` flag vs daemon.json pin:** every run cleared `/etc/docker/daemon.json` to
+  `{}` first; leaving the fuse pin in place while also passing `--storage-driver` makes dockerd refuse
+  to start ("specified both as a flag and in the configuration file"). Implementations must not set
+  both.
+
+### Reconciling the smoke `dind/podman-priv` failure
+
+yoloAI's smoke `dind/podman-priv` tier **failed** with the EINVAL signature, yet plain
+`podman run --privileged yoloai-base` + nested fuse-overlayfs on the **same** Podman Machine execs
+fine here. So Podman Machine's kernel is *not* the cause — the smoke failure comes from **how yoloAI
+launches the podman-privileged sandbox** (almost certainly the rootless `--userns=keep-id` mapping
+interacting with FUSE exec; see the keep-id/dind entry in `backend-idiosyncrasies.md`), not the
+storage driver. Action: when implementing the overlay2+volume strategy, re-test podman-priv dind —
+overlay2 (no FUSE) is expected to sidestep this too, but confirm, and if keep-id is the culprit
+track it as a separate finding.
+
+### O1 — why fuse-overlayfs exec = EINVAL (root cause, now moot)
+
+Narrowed to **Docker Desktop's LinuxKit kernel (6.10.14) specifically**: the two other Mac VMs
+(OrbStack 7.0.5, Podman Fedora 6.18) and native Linux 6.8 all exec binaries off a fuse-overlayfs
+mount without error; only LinuxKit returns EINVAL, on both overlay and real-fs backings. The precise
+mechanism (LinuxKit FUSE config / a missing `exec` capability on the FUSE mount) was **not** drilled
+further because **O3 routes around it** — overlay2 uses no FUSE, so the strategy never depends on
+fixing LinuxKit. Marked deferred-moot; revisit only if a future direction reintroduces a FUSE driver
+on Docker Desktop.
+
+### Podman id-mapped-volume caveat — checked
+
+The open caveat (rootless Podman keeping a chowned per-userns copy of named-volume content) did **not**
+block here: a **fresh, empty** named volume mounted as xfs and overlay2 initialized on it immediately,
+no observable id-map copy delay. That's the case that matters for yoloAI (a new volume per sandbox
+starts empty). A *populated* volume re-entered under a different mapping could still incur the copy;
+not profiled, but not on yoloAI's path.
+
+### Note on the test run
+
+A few nested image pulls (some `vfs` `alpine` cells, a couple `hello-world` cells) timed out on a bad
+network / laptop-lid-close, not on any driver fault — `vfs` is confirmed working (its `hello-world`
+cells that did complete printed `Hello from Docker!` on every provider). The starts/exec verdicts
+above are taken only from cells where the pull completed.
+
 ## Recommended strategy
 
 **Give the nested daemon a real-filesystem `/var/lib/docker` and run overlay2; fall back to
 fuse-overlayfs / vfs only when the backing is still overlay.** This is the fastest, lowest-disk
-config and the single most likely one to also un-break the Mac VMs.
+config and — now verified — the single config that works unmodified on Linux, Docker Desktop,
+OrbStack, and Podman Machine.
 
 Selection at daemon start, by probing the backing fstype (`findmnt -no FSTYPE /var/lib/docker`):
 
 | `/var/lib/docker` backing | provider | driver |
 |---|---|---|
-| non-overlay (ext4/xfs) | any | **overlay2** |
-| overlay | Linux / OrbStack | fuse-overlayfs |
-| overlay | Docker Desktop / Podman Machine | **vfs** (+ keep the `DindAdvisory` heads-up) |
+| non-overlay (ext4/btrfs/xfs) | any | **overlay2** |
+| overlay | Linux / OrbStack / Podman Machine | fuse-overlayfs (exec works on these kernels) |
+| overlay | Docker Desktop | **vfs** (the only kernel where fuse-overlayfs exec is broken; + keep the `DindAdvisory` heads-up) |
 
 If yoloAI always provides the real-fs volume, the backing is always non-overlay and overlay2 always
-wins — the provider matrix collapses to a fallback that only matters if the volume can't be created.
+wins on every platform — the fallback rows only matter if the volume can't be created. (Corrected from
+the pre-Mac-data version: fuse-overlayfs is fine on Podman Machine; Docker Desktop is the lone
+overlay-backed case that needs vfs.)
 
 ### Code-placement sketch
 
@@ -92,20 +171,25 @@ Runtime selection over a baked-image constant:
   fallback. The current Linux comment ("native overlay2 nests; dind works") is **misleading**:
   overlay2 does *not* nest on the default overlay rootfs, only on a real-fs backing.
 
-### Open caveat (verify before implementing)
+### Open caveat — resolved
 
-A volume at `/var/lib/docker` interacts with rootless Podman's userns id-mapping. Rootless Podman
-keeps a separate chowned copy of mapped content per userns mapping (see
-`backend-idiosyncrasies.md`), so a privileged-podman volume may get id-map-copied too, costing disk
-and time. Check this on a Podman Machine before committing to the volume approach there.
+A volume at `/var/lib/docker` interacts with rootless Podman's userns id-mapping (Podman keeps a
+chowned per-userns copy of mapped content). **Checked on a Podman Machine:** a fresh empty named
+volume incurs no observable id-map copy and overlay2 inits on it immediately (details under
+[Verified macOS results](#verified-macos-results)). yoloAI uses a fresh volume per sandbox, so this
+is not on the hot path. A *populated* volume re-entered under a different mapping could still copy —
+unprofiled but irrelevant here.
 
-## Completing the research on macOS
+## macOS test protocol (executed 2026-06-05)
 
-The Linux half is done. A teammate (or agent) on a Mac must fill the three VM columns and resolve
-O1. **Key gotcha:** on macOS every provider runs the daemon inside a **Linux VM**. To give the
-nested daemon a *real-fs* `/var/lib/docker`, use a **Docker named volume** — it lives on the VM's
-real ext4. Do **not** bind-mount a macOS host directory (`-v /Users/...:/var/lib/docker`): that path
-is the VirtioFS / gRPC-FUSE share and is the *wrong* filesystem for an overlay2 backing.
+Results are folded into [Verified macOS results](#verified-macos-results) above; the protocol is kept
+here for reproducibility. **Key gotcha:** on macOS every provider runs the daemon inside a **Linux
+VM**. To give the nested daemon a *real-fs* `/var/lib/docker`, use a **named volume** — it lives on
+the VM's real fs (ext4 on Docker Desktop, btrfs on OrbStack, xfs on Podman Machine). Do **not**
+bind-mount a macOS host directory (`-v /Users/...:/var/lib/docker`): that path is the VirtioFS /
+gRPC-FUSE share and is the *wrong* filesystem for an overlay2 backing. Also note **Podman Machine
+shares only `$HOME`** into its VM, not `/tmp` — put the test script under `$HOME` when mounting it
+into a podman container.
 
 ### Setup (per provider)
 
@@ -150,9 +234,9 @@ test_driver overlay2; test_driver fuse-overlayfs; test_driver vfs
 docker run --rm --privileged --entrypoint bash -v /path/to/drv.sh:/drv.sh:ro yoloai-base /drv.sh
 ```
 
-Expected: `fuse-overlayfs` STARTS=YES but `EXEC … invalid argument` (EINVAL) on Docker Desktop and
-Podman Machine; STARTS=YES + clean exec on OrbStack. `overlay2` STARTS=NO everywhere (overlay
-backing). `vfs` works everywhere.
+Actual (verified): `fuse-overlayfs` STARTS=YES + `EXEC … invalid argument` (EINVAL) **only on Docker
+Desktop**; STARTS=YES + clean exec on OrbStack **and Podman Machine**. `overlay2` STARTS=NO everywhere
+(overlay backing). `vfs` works everywhere.
 
 ### Test 2 — O3 on a real-fs VM volume (the decisive test)
 
@@ -190,11 +274,16 @@ Machine VM, at the moment of the EINVAL:
   FUSE mount (no `FUSE_ALLOW_EXEC` / mount lacks `exec`, or a binfmt/`MNT_NOEXEC` interaction),
   whereas OrbStack's and native Linux's kernels do.
 
-### Deliverables to fold back here
+### Deliverables — done
 
-1. Fill the three Mac provider columns into the results matrix (starts / nested exec / disk per
-   driver on both the default and named-volume backings).
-2. Mark the O3 cell for each Mac provider — this is the go/no-go for "overlay2 + real-fs volume" as
-   the single cross-platform default.
-3. Record the O1 EINVAL root cause (or mark it deferred if the strategy makes it moot).
-4. Confirm or refute the Podman-Machine id-mapped-volume-copy caveat.
+1. ✅ Three Mac provider columns filled — see [Verified macOS results](#verified-macos-results).
+2. ✅ O3 marked per provider: **GO on all three** (Docker Desktop/ext4, OrbStack/btrfs,
+   Podman Machine/xfs). overlay2 + real-fs volume is the confirmed single cross-platform default.
+3. ✅ O1 narrowed to Docker Desktop's LinuxKit 6.10 kernel and marked **deferred-moot** (O3 avoids
+   FUSE entirely). The precise LinuxKit FUSE mechanism wasn't drilled — not needed for the decision.
+4. ✅ Podman id-map caveat checked — no copy on a fresh empty volume; not on yoloAI's path.
+
+Residual follow-up (implementation-time, not research): reconcile yoloAI's smoke `dind/podman-priv`
+EINVAL — it's a podman launch-config (userns/keep-id) interaction, not a storage-driver issue, since
+plain `podman run --privileged` execs fuse-overlayfs fine on the same machine. See
+[Reconciling the smoke dind/podman-priv failure](#reconciling-the-smoke-dindpodman-priv-failure).
