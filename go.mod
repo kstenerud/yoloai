@@ -9,7 +9,7 @@ require (
 	github.com/containerd/go-cni v1.1.13
 	github.com/creack/pty v1.1.24
 	github.com/docker/docker v28.5.2+incompatible
-	github.com/docker/go-connections v0.6.0
+	github.com/docker/go-connections v0.7.0
 	github.com/hashicorp/go-version v1.9.0
 	github.com/mark3labs/mcp-go v0.54.1
 	github.com/opencontainers/image-spec v1.1.1
