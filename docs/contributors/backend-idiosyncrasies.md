@@ -670,25 +670,23 @@ failed to safely mount: expected to open /tmp, but found /private/tmp
 
 **Code pointer:** the macOS prerequisite check now relies on daemon registration (`docker.go::RequiredCapabilities` returns `gvisorRegistered` only off-Linux); the chroot collision is purely a VM filesystem-layout issue, surfaced at `runtime.New`/`Start`, not something yoloai's checks can detect ahead of time.
 
-### Docker-in-Docker: nested `fuse-overlayfs` can't exec on Docker Desktop / Podman Machine (macOS)
+### Docker-in-Docker: nested `fuse-overlayfs` can't exec on Docker Desktop / Podman Machine (macOS) — RESOLVED via overlay2 + real-fs volume
 
-**Symptom:** under `--isolation container-privileged` on macOS, a nested `dockerd` + `docker run hello-world` pulls the image fine then dies with:
+**Symptom (pre-fix):** under `--isolation container-privileged` on macOS Docker Desktop, a nested `dockerd` configured for `fuse-overlayfs` + `docker run hello-world` pulled the image fine then died with:
 
 ```
 exec /hello: invalid argument
 ```
 
-Every nested container hits it — `alpine echo`, `busybox uname`, `hello-world` all fail identically with `EINVAL` on `execve`. It is **not** arch-related (arm64-on-arm64; fails even with `--platform linux/arm64`).
+Every nested container hit it — `alpine echo`, `busybox uname`, `hello-world` all failed identically with `EINVAL` on `execve`. **Not** arch-related (arm64-on-arm64; failed even with `--platform linux/arm64`).
 
-**Explanation:** the yoloai base image configures the nested daemon to use the `fuse-overlayfs` graph driver (native `overlay2` can't nest here — the nested daemon dies with `driver not supported: overlay2`). Whether a process can *exec* a binary that lives on a `fuse-overlayfs` mount depends on the **host VM's kernel/FUSE support**: **OrbStack** and native **Linux** can; **macOS Docker Desktop** (LinuxKit) and **Podman Machine** (applehv) cannot — their kernels return `EINVAL` from `execve` against the fuse-backed file. Host-VM capability boundary, not a yoloai or arch defect (arm64-on-arm64; fails even with `--platform linux/arm64`).
+**Explanation:** native `overlay2` can't nest on the container's overlay rootfs (`driver not supported: overlay2`), so yoloai used to pin `fuse-overlayfs`. But whether a process can *exec* a binary on a `fuse-overlayfs` mount depends on the **host VM's kernel**: **OrbStack**, **Podman Machine** (Fedora), and native **Linux** can; **macOS Docker Desktop**'s **LinuxKit** kernel cannot — `execve` returns `EINVAL`, on both overlay and real-fs backings (so the backing fs isn't the issue; the FUSE-exec path is). Verified cross-platform in `docs/contributors/design/research/dind-storage-drivers.md`.
 
-**Workaround — `--storage-driver=vfs`:** verified to make dind work on Docker Desktop (`sudo dockerd --storage-driver=vfs` after clearing the daemon.json that pins fuse-overlayfs). `vfs` does plain per-layer directory copies — no overlay, no FUSE — sidestepping both the overlay2-nesting failure and the fuse-overlayfs exec failure. Cost is real: no layer sharing, so every pull/build/run duplicates all layers (slow, disk-heavy). A workaround, not a default — fuse-overlayfs stays default because it's fast and works on OrbStack/Linux. (My earlier "vfs doesn't help" note was wrong: that test passed `--storage-driver` *and* left the daemon.json pin, so dockerd refused the conflict and never started.)
+**Fix (current):** yoloai mounts a managed **real-filesystem named volume at `/var/lib/docker`** for every privileged sandbox (`docker.go` `ensureDindVolumeMount`). On a real-fs backing the nested daemon **auto-selects the native overlay driver** — no FUSE, so the LinuxKit exec limitation never applies — and the daemon.json pin is gone, so both `start_dockerd` and a manual `sudo dockerd &` get it. Verified working end-to-end on Docker Desktop (ext4 → overlay2), OrbStack (btrfs), Podman Machine (xfs → fuse-overlayfs, which execs fine there), and Linux. `start_dockerd` keeps a fuse-overlayfs fallback only when the backing is still `overlay` (i.e. the volume is somehow absent). `vfs` also works as a manual escape hatch but is slow/disk-heavy; not used.
 
-**How yoloai handles it:**
-- `yoloai system check --isolation container-privileged` emits a non-fatal heads-up (`dind … note: …`) on macOS Docker Desktop / Podman Machine, pointing at OrbStack/Linux and the `vfs` workaround. The privileged mode itself still passes — only nested dind is affected. See `runtime.DindAdvisor` / `docker.dindAdvisory`.
-- The smoke harness reclassifies this signature as **N/A (skipped), not FAIL**: `dind_nested_exec_unsupported()` matches `exec <bin>: invalid argument` and `test_dind` raises `SkipTest` naming the detected provider, so a two-run macOS matrix (OrbStack + Docker Desktop) covers dind on the run where it's possible. A genuine dind regression (daemon won't start, network error) doesn't match and still FAILs.
+The earlier stopgaps — a `system check` advisory and a smoke `dind` N/A-reclassification — were **removed** once the real fix landed (dind now works on every provider, so they'd be misleading).
 
-**Code pointer:** `internal/runtime/docker/caps.go` — `dindAdvisory`, `DindAdvisory`, `daemonOperatingSystem`; `system.go::Check` (advisory row). `scripts/smoke_test.py` — `dind_nested_exec_unsupported`, `classify_docker_provider`, `detect_docker_provider`, `test_dind`. Reproduce outside yoloai with `docker run --rm --privileged --entrypoint bash yoloai-base -c 'sudo dockerd & … sudo docker run --rm hello-world'`.
+**Code pointer:** `internal/runtime/docker/docker.go` — `ensureDindVolumeMount` / `dockerLibVolumeName` (Create mounts it, Remove reclaims it). `internal/runtime/docker/resources/Dockerfile` — daemon.json pin removed. `internal/runtime/monitor/setup_helpers.py` `dockerd_storage_args` + `sandbox-setup.py` `start_dockerd` (fstype probe). Reproduce the *old* failure with `docker run --rm --privileged --entrypoint bash yoloai-base -c 'echo {} | sudo tee /etc/docker/daemon.json; sudo dockerd --storage-driver=fuse-overlayfs & … sudo docker run --rm hello-world'` on Docker Desktop.
 
 ### gVisor netstack ignores in-sandbox iptables rules
 

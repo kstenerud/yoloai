@@ -206,32 +206,3 @@ func TestProbe_ReadsThreadedDockerHost(t *testing.T) {
 	assert.True(t, ok)
 	assert.Empty(t, reason)
 }
-
-func TestDindAdvisory_PureLogic(t *testing.T) {
-	// Linux: native overlay2 nests, so dind works — no warning.
-	assert.Empty(t, dindAdvisory("linux", "docker", ""))
-	assert.Empty(t, dindAdvisory("linux", "podman", ""))
-
-	// OrbStack's VM kernel can exec the nested fuse-overlayfs driver — no warning.
-	assert.Empty(t, dindAdvisory("darwin", "docker", "OrbStack"))
-	assert.Empty(t, dindAdvisory("darwin", "docker", "orbstack")) // case-insensitive
-
-	// Docker Desktop can't: warn, naming the provider and the vfs workaround.
-	dd := dindAdvisory("darwin", "docker", "Docker Desktop")
-	assert.Contains(t, dd, "Docker Desktop")
-	assert.Contains(t, dd, "vfs")
-
-	// podman on macOS is always Podman Machine — warn regardless of reported OS.
-	assert.Contains(t, dindAdvisory("darwin", "podman", ""), "Podman Machine")
-
-	// Unknown/unreported macOS provider still warns conservatively.
-	assert.Contains(t, dindAdvisory("darwin", "docker", ""), "this Docker provider")
-}
-
-func TestDindAdvisory_OnlyForPrivileged(t *testing.T) {
-	// Non-privileged modes short-circuit before any provider detection, so this
-	// is safe to call without a daemon regardless of host OS.
-	r := &Runtime{binaryName: "docker"}
-	assert.Empty(t, r.DindAdvisory(context.Background(), runtime.IsolationModeContainer))
-	assert.Empty(t, r.DindAdvisory(context.Background(), runtime.IsolationModeContainerEnhanced))
-}

@@ -459,16 +459,6 @@ func (s *System) Check(ctx context.Context, opts SystemCheckOptions) ([]CheckRes
 	// 4. Isolation prerequisites (only when --isolation is specified).
 	if opts.Isolation != "" {
 		results = append(results, s.checkIsolation(ctx, rt, opts.Isolation))
-		// Non-fatal heads-up: container-privileged works, but docker-in-docker
-		// inside it can't run on host VMs that can't exec the nested
-		// fuse-overlayfs driver (macOS Docker Desktop / Podman Machine). Emitted
-		// as an OK advisory so it never fails the check — it's a warning, not a
-		// blocked prerequisite.
-		if rt != nil {
-			if msg := runtime.DindAdvisoryFor(ctx, rt, opts.Isolation); msg != "" {
-				results = append(results, CheckResult{Name: "dind", OK: true, Message: "note: " + msg})
-			}
-		}
 	}
 
 	if rt != nil {

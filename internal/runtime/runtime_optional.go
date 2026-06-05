@@ -156,27 +156,6 @@ func RequiredCapabilitiesFor(rt Runtime, isolation IsolationMode) []caps.HostCap
 	return nil
 }
 
-// DindAdvisor is an optional interface implemented by backends that can detect,
-// for an isolation mode, a non-fatal limitation worth warning about — distinct
-// from a capability failure (the mode still works for everything else). The only
-// case today: container-privileged docker-in-docker can't run on host VMs whose
-// kernel can't exec from the nested fuse-overlayfs driver (macOS Docker Desktop,
-// Podman Machine). The mode itself is fine; only nesting a daemon fails.
-type DindAdvisor interface {
-	// DindAdvisory returns a heads-up string when dind won't work for isolation
-	// on this host, or "" when there's nothing to warn about.
-	DindAdvisory(ctx context.Context, isolation IsolationMode) string
-}
-
-// DindAdvisoryFor returns the backend's dind heads-up for the isolation mode,
-// or "" when the backend doesn't implement DindAdvisor or has no warning.
-func DindAdvisoryFor(ctx context.Context, rt Runtime, isolation IsolationMode) string {
-	if a, ok := rt.(DindAdvisor); ok {
-		return a.DindAdvisory(ctx, isolation)
-	}
-	return ""
-}
-
 // AppleSimulatorRuntimes is an optional interface implemented by backends
 // that manage Apple simulator (iOS/tvOS/watchOS/visionOS) runtime base
 // images. Currently only Tart implements it, but the interface lets the

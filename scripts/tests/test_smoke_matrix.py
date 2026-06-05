@@ -12,9 +12,7 @@ from smoke_test import (
     BackendSpec,
     FULL_LINUX_BACKENDS,
     FULL_MACOS_BACKENDS,
-    classify_docker_provider,
     dind_applies,
-    dind_nested_exec_unsupported,
     isolation_check_applies,
     uncovered_backends,
     uncovered_reason,
@@ -127,24 +125,3 @@ def test_uncovered_reason_distinguishes_os_lock_from_isolation() -> None:
     assert uncovered_reason(by_label["containerd-vm"], "Linux") == "requires a Linux host"
     enhanced = uncovered_reason(by_label["docker-cenhanced"], "Linux")
     assert "gVisor" in enhanced and "macOS" in enhanced
-
-
-def test_classify_docker_provider_known_and_passthrough() -> None:
-    # `docker info` OperatingSystem maps to a friendly provider name; unknown
-    # strings (Linux distros) pass through; empty -> "unknown".
-    assert classify_docker_provider("Docker Desktop") == "Docker Desktop"
-    assert classify_docker_provider("OrbStack") == "OrbStack"
-    assert classify_docker_provider("  orbstack  ") == "OrbStack"
-    assert classify_docker_provider("Ubuntu 24.04.1 LTS") == "Ubuntu 24.04.1 LTS"
-    assert classify_docker_provider("") == "unknown"
-
-
-def test_dind_nested_exec_unsupported_matches_einval_signature() -> None:
-    # The fuse-overlayfs nested-exec limitation (Docker Desktop / Podman Machine)
-    # surfaces as "exec <bin>: invalid argument" — reclassified N/A, not FAIL.
-    assert dind_nested_exec_unsupported("Status: Downloaded\nexec /hello: invalid argument\n")
-    assert dind_nested_exec_unsupported("exec /bin/echo: invalid argument")
-    # A genuine dind regression must NOT match (stays a FAIL).
-    assert not dind_nested_exec_unsupported("Cannot connect to the Docker daemon")
-    assert not dind_nested_exec_unsupported("hello-world: invalid argument")  # not an exec error
-    assert not dind_nested_exec_unsupported("")
