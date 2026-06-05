@@ -76,11 +76,11 @@ def test_predicates_partition_cleanly_over_base_matrix() -> None:
 
 def test_uncovered_on_linux_full_lists_mac_only_backends() -> None:
     # On a Linux host (this=FULL_LINUX), the macOS matrix contributes the mac-only
-    # backends; docker/podman run here so they're excluded. podman-priv is currently
-    # only in the mac matrix (verified there; unverified on Linux), so it surfaces as
-    # uncovered here — the honest "not tested on this host" signal.
+    # backends; docker/podman run here so they're excluded. podman-priv now runs on
+    # Linux too (keep-id:uid=1001), so only the seatbelt/tart mac backends surface
+    # as uncovered.
     labels = {s.label for s in uncovered_backends(FULL_MACOS_BACKENDS, FULL_LINUX_BACKENDS)}
-    assert labels == {"seatbelt", "tart", "podman-priv"}
+    assert labels == {"seatbelt", "tart"}
 
 
 def test_uncovered_on_mac_full_includes_linux_isolation_variants() -> None:

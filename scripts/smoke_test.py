@@ -285,6 +285,12 @@ FULL_LINUX_BACKENDS: list[BackendSpec] = [
                 check_backend="docker"),
     BackendSpec("linux", "container-privileged", "docker", "docker-priv",
                 check_backend="docker", retries=1),
+    # Rootless Podman privileged maps the host user onto yoloai via
+    # keep-id:uid=1001 (see podman.go Create): the agent gets sudo + docker for
+    # dind, and host-written 0600 files stay readable. Verified on this Linux host:
+    # new + docker-in-docker + --network-isolated all pass.
+    BackendSpec("linux", "container-privileged", "podman", "podman-priv",
+                check_backend="podman", retries=1),
     BackendSpec("linux", "vm",                 None,     "containerd-vm",
                 check_backend="containerd", is_vm=True, check_isolation="vm",
                 sentinel_timeout_override=QEMU_TIMEOUT, stall_grace_secs=120,
@@ -314,8 +320,7 @@ FULL_MACOS_BACKENDS: list[BackendSpec] = [
                 check_backend="docker", retries=1),
     # Podman privileged also works on macOS — verified on a rootless Podman
     # Machine (Apple Silicon): new + docker-in-docker + --network-isolated all
-    # pass. (Not in the Linux matrix yet: unverified there — see podman-gvisor
-    # plan's "every working combo gets tested" note.)
+    # pass. (Also in the Linux matrix, via keep-id:uid=1001.)
     BackendSpec("linux", "container-privileged", "podman", "podman-priv",
                 check_backend="podman", retries=1),
 ]

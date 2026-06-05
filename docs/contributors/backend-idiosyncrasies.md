@@ -62,6 +62,8 @@ row to the index.
 | Container starts as root / wrong uid under rootless Podman | [Podman: rootless detection uses socket path](#rootless-detection-must-use-socket-path-not-osgetuid) |
 | `yoloai exec`/`attach` on Podman returns exit 125 `no such container` under concurrent load though `info`/`Inspect` shows active | [Docker/Podman: interactive exec must use the API socket](#dockerpodman-interactive-execattach-must-use-the-api-socket-not-the-bare-cli-dual-control-plane-divergence) |
 | Wrong uid inside container on macOS Podman | [Podman: macOS keep-id maps VM uid](#macos---usernkeep-id-maps-the-podman-machine-uid-1000-not-the-macos-uid) |
+| Rootless Podman privileged: `sudo dockerd` fails, or agent crashes on `prompt.txt` | [Podman: Linux rootless privileged needs keep-id:uid=1001](#linux-rootless-privileged-dind-plain-keep-id-fails-both-ways-use-keep-iduid1001) |
+| `creating an ID-mapped copy of layer … no space left on device` on rootless Podman | [Podman: separate ID-mapped image copy per userns mapping](#rootless-podman-keeps-a-separate-id-mapped-image-copy-per-userns-mapping) |
 | Podman rejects per-file bind mounts for secrets | [Podman: per-file bind mounts rejected](#per-file-bind-mounts-rejected-by-podmans-docker-compatible-api) |
 | Secrets / files missing inside Tart VM | [Tart: VirtioFS directories only](#virtiofs-only-supports-directory-mounts-not-individual-files) |
 | Shell command fails with "no such file" on VirtioFS path | [Tart: VirtioFS path has spaces](#virtiofs-mount-path-inside-the-vm-contains-spaces) |
@@ -841,6 +843,61 @@ the VM user's uid (1000) into the container — not the macOS user's uid (e.g.
 Workaround: skip `keep-id` on macOS (`runtime.GOOS == "darwin"`). The
 entrypoint uses `gosu` to remap `yoloai` to the correct uid, which is the same
 path Docker takes. See `podman.go::Create`.
+
+### Linux rootless privileged (dind): plain `keep-id` fails both ways; use `keep-id:uid=1001`
+
+**Symptom:** On a Linux rootless Podman host, a `container-privileged` sandbox
+either can't start a nested `dockerd` (`sudo: a password is required`) or, if you
+strip `keep-id` to dodge that, the agent crashes reading its own prompt
+(`PermissionError: /yoloai/prompt.txt`). Neither plain `keep-id` nor no-`keep-id`
+works for privileged.
+
+**Explanation:** The userns mode decides the container's starting uid, which
+drives everything:
+
+- **plain `keep-id`** maps the host user 1:1, so the container runs as that user
+  (e.g. 1000). Host-written 0600 files map to a uid it owns (readable ✓), but that
+  user is *not* `yoloai` — it has no passwordless sudo and no `docker` group, so
+  `sudo dockerd` fails.
+- **no `keep-id`** starts the container as root (mapped to a host subuid). The
+  entrypoint can sudo, but host-written 0600 files (prompt, credentials) map to
+  container-root while the agent is remapped `yoloai` — so they're unreadable and
+  `deliver_prompt` crashes.
+- **`keep-id:uid=1001,gid=1001`** maps the host user onto `yoloai` (1001). The
+  agent runs as `yoloai`: it has sudo + docker (dind works) *and* host 0600 files
+  map to a uid it owns (readable). This is the only mode that satisfies both.
+
+**Fix:** For rootless privileged on Linux, `podman.go::Create` injects
+`keep-id:uid=1001,gid=1001` (non-privileged stays plain `keep-id`; overlay and
+macOS unchanged). Because the agent now runs non-root, the entrypoint's
+`mount --make-shared /` (needed for dind mount propagation) runs via `sudo -n`
+when not root — `yoloai` has passwordless sudo. See
+`internal/runtime/docker/resources/entrypoint.py` `main()`. Docker-priv and macOS
+podman-priv still run the entrypoint as root, so they take the direct (no-sudo)
+path unchanged.
+
+### Rootless Podman keeps a separate ID-mapped image copy per userns mapping
+
+**Symptom:** `create container … creating an ID-mapped copy of layer … lchown …:
+no space left on device`. Disk fills up faster than the `podman system df` image
+total (~5.6 GB) suggests — running both the `podman` and `podman-priv` smoke
+phases on one host roughly *doubles* the rootless-podman image footprint.
+
+**Explanation:** When the `--userns` mapping doesn't line up with the layers'
+on-disk ownership and the kernel/storage driver can't do a native idmapped mount,
+rootless Podman falls back to `storage-chown-by-maps`: it materializes a full
+**chowned copy** of the image layers for that mapping. Each *distinct* mapping
+gets its own copy. Non-privileged podman maps host→1000 (plain `keep-id`);
+privileged maps host→1001 (`keep-id:uid=1001`) — two different mappings, so two
+~5.6 GB copies coexist. These copies live outside what `podman system df` counts,
+so the disk shrinks without an obvious culprit.
+
+**Fix / mitigation:** Not a yoloai bug — it's the price of the dual mapping that
+makes privileged dind work (see the entry above). On a tight disk, ensure
+headroom before a full smoke run (`df -h /`); the copies are reclaimed when the
+underlying images are pruned. The Go build cache (`go clean -cache`, often
+multi-GB) is usually the fastest unrelated reclaim if the host is already near
+full.
 
 ### Podman macOS: iptables-nft lacks `xt_set` module; ipset unusable
 

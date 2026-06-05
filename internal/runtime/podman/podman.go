@@ -148,6 +148,13 @@ func podmanImageBytes(du types.DiskUsage) int64 {
 // Exception: overlay mode requires CAP_SYS_ADMIN and root privileges inside the
 // container, so we skip keep-id when SYS_ADMIN is in CapAdd.
 //
+// Privileged mode (dind) maps to the yoloai UID (1001) rather than the host
+// user. Plain keep-id maps the host user 1:1, so the container runs as that user
+// (e.g. UID 1000) — which lacks yoloai's passwordless sudo and docker-group
+// membership, so `sudo dockerd` fails. keep-id:uid=1001,gid=1001 instead maps the
+// host user onto yoloai: the agent gets sudo+docker AND host-written 0600 files
+// (prompt, credentials) still map to a UID the agent owns, so they stay readable.
+//
 // keep-id is also skipped on macOS. Podman on macOS runs via Podman Machine (a
 // Linux VM): keep-id maps the VM user (UID 1000) into the container, not the
 // macOS user (e.g. UID 501). The container then runs as UID 1000, but
@@ -160,7 +167,11 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 		hasOverlay := slices.Contains(cfg.CapAdd, "SYS_ADMIN")
 		// Only use keep-id for normal mounts; overlay needs root in container
 		if !hasOverlay {
-			cfg.UsernsMode = "keep-id"
+			if cfg.Privileged {
+				cfg.UsernsMode = "keep-id:uid=1001,gid=1001"
+			} else {
+				cfg.UsernsMode = "keep-id"
+			}
 		}
 	}
 	return r.Runtime.Create(ctx, cfg)

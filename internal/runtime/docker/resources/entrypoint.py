@@ -405,9 +405,15 @@ def main():
 
     running_as_root = (os.geteuid() == 0)
 
-    if running_as_root and cfg.get("isolation") == "container-privileged":
+    if cfg.get("isolation") == "container-privileged":
+        # Under rootless Podman privileged (keep-id:uid=1001) the entrypoint runs
+        # as the non-root yoloai user, so elevate via sudo; yoloai has passwordless
+        # sudo. Running directly as root (Docker, macOS Podman) needs no sudo.
+        cmd = ["mount", "--make-shared", "/"]
+        if not running_as_root:
+            cmd = ["sudo", "-n", *cmd]
         try:
-            subprocess.run(["mount", "--make-shared", "/"], check=True, capture_output=True)
+            subprocess.run(cmd, check=True, capture_output=True)
             log_info("mount.shared", "root mount set to shared propagation")
         except subprocess.CalledProcessError as e:
             log_error("mount.shared_error", "mount --make-shared / failed",
