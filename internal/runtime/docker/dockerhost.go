@@ -39,24 +39,14 @@ func resolveDockerHost(env map[string]string) string {
 }
 
 // dockerConfigDir resolves the docker config directory: DOCKER_CONFIG if set,
-// else <HOME>/.docker. HOME is read from the threaded env first (§12), falling
-// back to os.UserHomeDir only when the snapshot lacks it.
+// else <HOME>/.docker. HOME comes from the threaded env snapshot, never
+// os.Environ/os.UserHomeDir (§12: only cliutil owns home resolution).
 func dockerConfigDir(env map[string]string) string {
 	if d := env["DOCKER_CONFIG"]; d != "" {
 		return d
 	}
-	if home := homeDir(env); home != "" {
-		return filepath.Join(home, ".docker")
-	}
-	return ""
-}
-
-func homeDir(env map[string]string) string {
 	if home := env["HOME"]; home != "" {
-		return home
-	}
-	if home, err := os.UserHomeDir(); err == nil {
-		return home
+		return filepath.Join(home, ".docker")
 	}
 	return ""
 }
@@ -70,7 +60,7 @@ func activeContextName(configDir string, env map[string]string) string {
 	if configDir == "" {
 		return ""
 	}
-	data, err := os.ReadFile(filepath.Join(configDir, "config.json"))
+	data, err := os.ReadFile(filepath.Join(configDir, "config.json")) //nolint:gosec // reads the caller's own docker config (DOCKER_CONFIG/HOME), not attacker input
 	if err != nil {
 		return ""
 	}
@@ -93,7 +83,7 @@ func contextEndpointHost(configDir, name string) string {
 	}
 	sum := sha256.Sum256([]byte(name))
 	metaPath := filepath.Join(configDir, "contexts", "meta", hex.EncodeToString(sum[:]), "meta.json")
-	data, err := os.ReadFile(metaPath)
+	data, err := os.ReadFile(metaPath) //nolint:gosec // reads the caller's own docker context store, not attacker input
 	if err != nil {
 		return ""
 	}
@@ -115,7 +105,7 @@ func contextEndpointHost(configDir, name string) string {
 // paths that don't exist. HOME is sourced from the threaded env (§12).
 func wellKnownDockerSockets(env map[string]string) []string {
 	out := []string{unixScheme + "/var/run/docker.sock"}
-	if home := homeDir(env); home != "" {
+	if home := env["HOME"]; home != "" {
 		out = append(out,
 			unixScheme+filepath.Join(home, ".docker/run/docker.sock"),     // Docker Desktop
 			unixScheme+filepath.Join(home, ".orbstack/run/docker.sock"),   // OrbStack

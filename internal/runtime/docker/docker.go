@@ -9,7 +9,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
@@ -167,8 +166,8 @@ func NewWithSocket(ctx context.Context, host string, binaryName string, env map[
 	// (e.g. OrbStack ⇄ Docker Desktop) without a `docker context use`.
 	if !explicit {
 		if cli, used := dialFirstAlive(ctx, baseOpts, env, host); cli != nil {
-			fmt.Fprintf(os.Stderr, "yoloai: %s at %s is not responding; using %s instead\n", //nolint:errcheck // best-effort notice
-				binaryName, displayHost(host), used)
+			slog.Warn("docker daemon unreachable at resolved socket; using a live fallback",
+				"binary", binaryName, "resolved", displayHost(host), "using", used)
 			return newDockerRuntime(cli, binaryName), nil
 		}
 	}

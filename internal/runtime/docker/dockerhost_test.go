@@ -24,7 +24,7 @@ func writeContextStore(t *testing.T, currentContext string, contexts map[string]
 	for name, host := range contexts {
 		sum := sha256.Sum256([]byte(name))
 		metaDir := filepath.Join(dir, "contexts", "meta", hex.EncodeToString(sum[:]))
-		require.NoError(t, os.MkdirAll(metaDir, 0o755))
+		require.NoError(t, os.MkdirAll(metaDir, 0o750))
 		meta := `{"Name":"` + name + `","Endpoints":{"docker":{"Host":"` + host + `"}}}`
 		require.NoError(t, os.WriteFile(filepath.Join(metaDir, "meta.json"), []byte(meta), 0o600))
 	}
