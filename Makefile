@@ -195,13 +195,15 @@ smoketest: build
 	python3 scripts/smoke_test.py --debug $(SMOKE_ARGS)
 
 ## smoketest-full: run full-tier smoke tests (all backends including podman, gVisor)
-## Automatically escalates to root on Linux (preserving PATH and env).
+## across every installed docker provider (macOS: OrbStack + Docker Desktop;
+## errors if an installed provider isn't running). Single-provider hosts (Linux)
+## run once. Automatically escalates to root on Linux (preserving PATH and env).
 smoketest-full: build
 	@if [ "$$(uname)" = "Linux" ] && [ "$$(id -u)" != "0" ]; then \
 		echo "==> Escalating to root for full smoke tests..."; \
 		exec sudo -E PATH="$$PATH" $(MAKE) smoketest-full SMOKE_ARGS="$(SMOKE_ARGS)"; \
 	else \
-		python3 scripts/smoke_test.py --full --debug $(SMOKE_ARGS); \
+		python3 scripts/smoke_test.py --full --debug --all-docker-providers $(SMOKE_ARGS); \
 	fi
 
 ## releasetest: run every test tier, fastest first

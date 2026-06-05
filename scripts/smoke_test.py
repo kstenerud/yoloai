@@ -380,6 +380,28 @@ def dind_applies(spec: BackendSpec) -> bool:
     return spec.isolation == "container-privileged"
 
 
+# Docker contexts that map to a distinct local daemon worth cycling under
+# --all-docker-providers. Each has its own image store and VM kernel, so the
+# docker-backed tiers behave differently across them (see dind-storage-drivers).
+KNOWN_DOCKER_PROVIDERS = ("orbstack", "desktop-linux")
+
+
+def docker_provider_candidates(context_names: list[str], active: str) -> list[str]:
+    """Pick and order the docker provider contexts to cycle, active-first.
+
+    From the contexts that exist on the machine, keep the known multi-daemon
+    providers (OrbStack, Docker Desktop). If none are present (e.g. a Linux host
+    with only `default`), fall back to the single active context — so the
+    --all-docker-providers path collapses to one run. Active-first avoids an
+    unnecessary context switch and tests the daemon the user is already on."""
+    known = [c for c in KNOWN_DOCKER_PROVIDERS if c in context_names]
+    if not known:
+        return [active] if active else []
+    if active in known:
+        return [active] + [c for c in known if c != active]
+    return known
+
+
 def isolation_check_applies(spec: BackendSpec) -> bool:
     """--network-isolated blocks egress via iptables rules in the container netns —
     a capability of the container daemons (docker/podman/containerd). gVisor's
@@ -2436,6 +2458,18 @@ def parse_args() -> argparse.Namespace:
             "$YOLOAI_SMOKE_VM_CONCURRENCY. Container backends are unaffected."
         ),
     )
+    parser.add_argument(
+        "--all-docker-providers",
+        action="store_true",
+        help=(
+            "Run the suite against every installed docker provider (macOS: OrbStack "
+            "and Docker Desktop), not just the active one. The first (active) provider "
+            "runs the full matrix; the rest run only the docker-backed tiers (the only "
+            "ones that depend on the docker daemon). Errors out if an installed "
+            "provider's daemon isn't running — start it and retry. No app is launched "
+            "or stopped. On a single-provider host (e.g. Linux) this is one run."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -2595,8 +2629,84 @@ def _install_stdout_tee(summary_path: Path) -> None:
     sys.stdout = _Tee(sys.stdout, f)
 
 
+def _docker(*cmd: str, host: str = "") -> subprocess.CompletedProcess[str]:
+    """Run a `docker` CLI command, optionally pinned to a specific daemon host."""
+    argv = ["docker"]
+    if host:
+        argv += ["--host", host]
+    argv += list(cmd)
+    return subprocess.run(argv, capture_output=True, text=True, timeout=30)
+
+
+def _docker_context_endpoint(name: str) -> str:
+    """Resolve a docker context's daemon endpoint, or '' if it can't be read."""
+    r = _docker("context", "inspect", name, "--format", "{{.Endpoints.docker.Host}}")
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def _resolve_docker_providers() -> list[tuple[str, str]]:
+    """Return [(context-name, endpoint)] for the docker providers to cycle,
+    active-first. Empty if docker is unusable."""
+    ls = _docker("context", "ls", "--format", "{{.Name}}")
+    if ls.returncode != 0:
+        return []
+    names = [n.strip() for n in ls.stdout.splitlines() if n.strip()]
+    active = _docker("context", "show").stdout.strip()
+    out: list[tuple[str, str]] = []
+    for name in docker_provider_candidates(names, active):
+        endpoint = _docker_context_endpoint(name)
+        if endpoint:
+            out.append((name, endpoint))
+    return out
+
+
+def run_all_providers(args: argparse.Namespace) -> int:
+    """Orchestrate one smoke run per installed docker provider (re-exec model).
+
+    Each provider runs as an isolated child process with DOCKER_HOST pinned to it,
+    so contexts are never mutated. The active provider runs the full suite; the
+    rest run only the docker-backed tiers (the only ones whose daemon differs).
+    Errors out if any detected provider's daemon isn't running."""
+    providers = _resolve_docker_providers()
+    if not providers:
+        print("ERROR: no usable docker provider (is docker installed and a context set?)", file=sys.stderr)
+        return 1
+
+    unreachable = [(n, ep) for n, ep in providers if _docker("info", host=ep).returncode != 0]
+    if unreachable:
+        print("ERROR: these docker providers are installed but not running — start them and retry:", file=sys.stderr)
+        for n, ep in unreachable:
+            print(f"  {n} ({ep})", file=sys.stderr)
+        return 1
+
+    print(f"Cycling docker providers: {', '.join(n for n, _ in providers)}")
+    base_argv = [a for a in sys.argv[1:] if a != "--all-docker-providers"]
+    rollup: list[tuple[str, int]] = []
+    for i, (name, endpoint) in enumerate(providers):
+        child_argv = list(base_argv)
+        scope = "full matrix"
+        if i > 0:
+            # Only the docker-daemon-dependent tiers differ per provider; podman/
+            # seatbelt/tart are daemon-independent and already ran on the first.
+            child_argv += ["--backend", "docker", "--backend", "docker-priv"]
+            scope = "docker tiers only"
+        print(f"\n{'=' * 70}\n=== docker provider: {name} ({endpoint}) — {scope}\n{'=' * 70}")
+        env = dict(os.environ)
+        env["DOCKER_HOST"] = endpoint
+        cp = subprocess.run([sys.executable, __file__, *child_argv], env=env)
+        rollup.append((name, cp.returncode))
+
+    print(f"\n{'=' * 70}\nAll-docker-providers rollup:")
+    for name, rc in rollup:
+        print(f"  {name:<16} {'PASS' if rc == 0 else 'FAIL'}")
+    return 0 if all(rc == 0 for _, rc in rollup) else 1
+
+
 def main() -> int:
     args = parse_args()
+
+    if args.all_docker_providers:
+        return run_all_providers(args)
 
     yoloai_bin = find_yoloai()
     if not yoloai_bin:

@@ -13,6 +13,7 @@ from smoke_test import (
     FULL_LINUX_BACKENDS,
     FULL_MACOS_BACKENDS,
     dind_applies,
+    docker_provider_candidates,
     isolation_check_applies,
     uncovered_backends,
     uncovered_reason,
@@ -125,3 +126,31 @@ def test_uncovered_reason_distinguishes_os_lock_from_isolation() -> None:
     assert uncovered_reason(by_label["containerd-vm"], "Linux") == "requires a Linux host"
     enhanced = uncovered_reason(by_label["docker-cenhanced"], "Linux")
     assert "gVisor" in enhanced and "macOS" in enhanced
+
+
+def test_docker_provider_candidates_active_first() -> None:
+    # Both providers installed: keep both, active listed first to avoid a needless
+    # context switch.
+    assert docker_provider_candidates(
+        ["default", "desktop-linux", "orbstack"], "orbstack"
+    ) == ["orbstack", "desktop-linux"]
+    assert docker_provider_candidates(
+        ["default", "desktop-linux", "orbstack"], "desktop-linux"
+    ) == ["desktop-linux", "orbstack"]
+
+
+def test_docker_provider_candidates_active_not_a_known_provider() -> None:
+    # Active is some other context (e.g. default): cycle the known providers in
+    # their canonical order.
+    assert docker_provider_candidates(
+        ["default", "orbstack", "desktop-linux"], "default"
+    ) == ["orbstack", "desktop-linux"]
+
+
+def test_docker_provider_candidates_single_or_none_known() -> None:
+    # Only one known provider installed -> just it.
+    assert docker_provider_candidates(["default", "orbstack"], "orbstack") == ["orbstack"]
+    # No known providers (e.g. Linux native) -> fall back to the single active
+    # context so --all-docker-providers collapses to one run.
+    assert docker_provider_candidates(["default"], "default") == ["default"]
+    assert docker_provider_candidates([], "") == []
