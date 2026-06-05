@@ -19,6 +19,7 @@ import (
 	goruntime "runtime"
 
 	cerrdefs "github.com/containerd/errdefs"
+	dockertypes "github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/api/types/network"
@@ -449,46 +450,145 @@ func (r *Runtime) Exec(ctx context.Context, name string, cmd []string, user stri
 	return result, nil
 }
 
-// InteractiveExec runs an interactive command inside a Docker container
-// by shelling out to `docker exec`. The IOStreams determine PTY allocation
-// (-it vs -i) and where stdio is wired. Caller-supplied non-PTY streams
-// (TTY=false) get plain pipes; TTY=true requires the streams to BE
-// terminals on the host side for the docker -t flag to work end-to-end.
-func (r *Runtime) InteractiveExec(ctx context.Context, name string, cmd []string, user string, workDir string, io runtime.IOStreams) error {
-	args := []string{"exec"}
-	if io.TTY {
-		args = append(args, "-it")
-	} else {
-		args = append(args, "-i")
-	}
-	if user != "" {
-		args = append(args, "-u", user)
-	}
-	if workDir != "" {
-		args = append(args, "-w", workDir)
-	}
-	args = append(args, name)
-	args = append(args, cmd...)
-
-	c := exec.CommandContext(ctx, r.binaryName, args...) //nolint:gosec // G204: name and cmd are from validated sandbox state
-	c.Stdin = io.In
-	c.Stdout = io.Out
-	c.Stderr = io.Err
-	return runtime.InteractiveExitError(c.Run())
+// InteractiveExec runs a command inside a Docker container over the SDK's
+// exec-attach socket — the same control plane as Create/Inspect/Exec — rather
+// than shelling out to `docker exec`. Routing through the API socket keeps the
+// exec's view of the container identical to Inspect's: a name that Inspect
+// resolves to a running container can always be exec'd, even under concurrent
+// load where a freshly-spawned bare CLI process can race the rootless-Podman
+// store and report "no such container" for a container the socket sees running.
+//
+// streams.In/Out/Err are treated as opaque byte streams — the library never
+// inspects In's FD, sets raw mode, or installs signal handlers (§12). The caller
+// owns terminal management (raw mode, SIGWINCH → streams.Resize) before handing
+// the streams in. Initial PTY geometry comes from streams.Rows/streams.Cols
+// (zero → daemon default); live resizes arrive as TermSize on streams.Resize.
+func (r *Runtime) InteractiveExec(ctx context.Context, name string, cmd []string, user string, workDir string, streams runtime.IOStreams) error {
+	return r.execAttach(ctx, name, cmd, user, workDir, streams)
 }
 
 // StdioExec runs cmd inside the container with stdio connected to the
 // caller-supplied reader and writers. Implements runtime.StdioExecer; used by
 // the MCP proxy to bridge stdio between an outer agent and an inner MCP server
-// running in the sandbox.
+// running in the sandbox. Like InteractiveExec it goes through the SDK socket,
+// not a `docker exec` subprocess, so the MCP bridge shares the same container
+// view as the rest of the runtime.
 func (r *Runtime) StdioExec(ctx context.Context, name string, cmd []string, stdin io.Reader, stdout, stderr io.Writer) error {
-	args := []string{"exec", "-i", name}
-	args = append(args, cmd...)
-	c := exec.CommandContext(ctx, r.binaryName, args...) //nolint:gosec // G204: name and cmd are from validated sandbox state
-	c.Stdin = stdin
-	c.Stdout = stdout
-	c.Stderr = stderr
-	return c.Run()
+	return r.execAttach(ctx, name, cmd, "", "", runtime.IOStreams{In: stdin, Out: stdout, Err: stderr})
+}
+
+// execAttach creates an exec on the container, attaches over the hijacked
+// socket, bridges the caller's streams, and reports the inner exit code as a
+// *runtime.ExecError (nil on exit 0). It is the shared core of InteractiveExec
+// (TTY) and StdioExec (raw stdio).
+func (r *Runtime) execAttach(ctx context.Context, name string, cmd []string, user, workDir string, streams runtime.IOStreams) error {
+	execID, err := r.createExec(ctx, name, cmd, user, workDir, streams)
+	if err != nil {
+		return err
+	}
+
+	resp, err := r.client.ContainerExecAttach(ctx, execID, container.ExecAttachOptions{Tty: streams.TTY})
+	if err != nil {
+		return fmt.Errorf("exec attach: %w", err)
+	}
+	defer resp.Close()
+
+	if streams.TTY && streams.Rows > 0 && streams.Cols > 0 {
+		_ = r.resizeExec(ctx, execID, streams.Rows, streams.Cols)
+	}
+	if streams.Resize != nil {
+		go r.forwardExecResizes(ctx, execID, streams.Resize)
+	}
+
+	bridgeExecStreams(resp, streams)
+
+	inspect, err := r.client.ContainerExecInspect(ctx, execID)
+	if err != nil {
+		return fmt.Errorf("exec inspect: %w", err)
+	}
+	if inspect.ExitCode != 0 {
+		return &runtime.ExecError{ExitCode: inspect.ExitCode}
+	}
+	return nil
+}
+
+// createExec builds the exec configuration and returns its ID. A TTY exec
+// advertises TERM (caller-supplied via streams.Term, defaulting to a safe
+// modern terminal — §12: the library never reads the process's own $TERM) and
+// seeds the initial console size so ncurses/tmux read the right dimensions
+// before the post-attach resize lands.
+func (r *Runtime) createExec(ctx context.Context, name string, cmd []string, user, workDir string, streams runtime.IOStreams) (string, error) {
+	opts := container.ExecOptions{
+		Cmd:          cmd,
+		User:         user,
+		WorkingDir:   workDir,
+		Tty:          streams.TTY,
+		AttachStdin:  streams.In != nil,
+		AttachStdout: true,
+		AttachStderr: true,
+	}
+	if streams.TTY {
+		term := streams.Term
+		if term == "" {
+			term = "xterm-256color"
+		}
+		opts.Env = []string{"TERM=" + term}
+		if streams.Rows > 0 && streams.Cols > 0 {
+			opts.ConsoleSize = &[2]uint{uint(streams.Rows), uint(streams.Cols)} //nolint:gosec // G115: terminal dimensions fit uint
+		}
+	}
+	resp, err := r.client.ContainerExecCreate(ctx, name, opts)
+	if err != nil {
+		return "", fmt.Errorf("exec create: %w", err)
+	}
+	return resp.ID, nil
+}
+
+// bridgeExecStreams wires the hijacked connection to the caller's streams:
+// stdin is copied in a goroutine (closing the write half when it drains), and
+// the container's output is copied on the calling goroutine until the daemon
+// closes the stream on process exit. TTY output is a single raw stream; non-TTY
+// output is demultiplexed into Out/Err. Copy errors are ignored — the
+// authoritative exit signal is ContainerExecInspect, matching the docker CLI.
+func bridgeExecStreams(resp dockertypes.HijackedResponse, streams runtime.IOStreams) {
+	if streams.In != nil {
+		go func() {
+			_, _ = io.Copy(resp.Conn, streams.In)
+			_ = resp.CloseWrite()
+		}()
+	}
+	if streams.TTY {
+		_, _ = io.Copy(streams.Out, resp.Reader)
+	} else {
+		_, _ = stdcopy.StdCopy(streams.Out, streams.Err, resp.Reader)
+	}
+}
+
+// resizeExec applies a terminal geometry to the running exec's PTY.
+func (r *Runtime) resizeExec(ctx context.Context, execID string, rows, cols int) error {
+	return r.client.ContainerExecResize(ctx, execID, container.ResizeOptions{
+		Height: uint(rows), //nolint:gosec // G115: terminal dimensions fit uint
+		Width:  uint(cols), //nolint:gosec // G115: terminal dimensions fit uint
+	})
+}
+
+// forwardExecResizes applies caller-supplied geometry updates to the exec's PTY
+// until the channel closes or ctx is cancelled (the latter fires when execAttach
+// returns and its context is torn down).
+func (r *Runtime) forwardExecResizes(ctx context.Context, execID string, resize <-chan runtime.TermSize) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case sz, ok := <-resize:
+			if !ok {
+				return
+			}
+			if sz.Rows > 0 && sz.Cols > 0 {
+				_ = r.resizeExec(ctx, execID, sz.Rows, sz.Cols)
+			}
+		}
+	}
 }
 
 // Close releases the Docker client connection.

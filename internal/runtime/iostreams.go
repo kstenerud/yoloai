@@ -32,9 +32,10 @@ import "io"
 // caller wants applied to a running interactive exec. The caller owns the
 // source of these events (a SIGWINCH handler on its own terminal, a websocket
 // resize message, …) and converts them to TermSize values; the library only
-// forwards them to the backend's resize call. Backends that delegate terminal
-// management to a subprocess (docker/tart/seatbelt shell out to `… -it`, which
-// handles resize itself) ignore this channel.
+// forwards them to the backend's resize call. The docker/podman and containerd
+// backends honor this over their API sockets (ContainerExecResize / the shim
+// resize RPC); tart/seatbelt still delegate terminal management to a `… -it`
+// subprocess that handles resize itself, so they ignore this channel.
 type TermSize struct {
 	Rows, Cols int
 }
@@ -61,7 +62,8 @@ type IOStreams struct {
 
 	// Resize, when non-nil, delivers live terminal-geometry updates for a
 	// running interactive exec. The caller owns the event source; the library
-	// only forwards to the backend. Backends that delegate to an `… -it`
-	// subprocess ignore it.
+	// only forwards to the backend. Socket-driven backends (docker/podman,
+	// containerd) honor it; tart/seatbelt delegate to an `… -it` subprocess
+	// and ignore it.
 	Resize <-chan TermSize
 }

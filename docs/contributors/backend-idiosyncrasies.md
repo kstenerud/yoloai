@@ -58,6 +58,7 @@ row to the index.
 | `system disk` reports 0 containerd image bytes right after a successful `system build --backend containerd` | [containerd: import inconsistently materializes snapshots](#containerd-image-import-inconsistently-materializes-overlayfs-snapshots) |
 | Base layer won't prune (`cannot remove snapshot with child`) but no snapshot claims it as parent in any namespace | [containerd: leftover lease GC-roots an orphaned child](#containerd-a-leftover-lease-gc-roots-an-orphaned-child-blocking-base-layer-removal) |
 | Container starts as root / wrong uid under rootless Podman | [Podman: rootless detection uses socket path](#rootless-detection-must-use-socket-path-not-osgetuid) |
+| `yoloai exec`/`attach` on Podman returns exit 125 `no such container` under concurrent load though `info`/`Inspect` shows active | [Docker/Podman: interactive exec must use the API socket](#dockerpodman-interactive-execattach-must-use-the-api-socket-not-the-bare-cli-dual-control-plane-divergence) |
 | Wrong uid inside container on macOS Podman | [Podman: macOS keep-id maps VM uid](#macos---usernkeep-id-maps-the-podman-machine-uid-1000-not-the-macos-uid) |
 | Podman rejects per-file bind mounts for secrets | [Podman: per-file bind mounts rejected](#per-file-bind-mounts-rejected-by-podmans-docker-compatible-api) |
 | Secrets / files missing inside Tart VM | [Tart: VirtioFS directories only](#virtiofs-only-supports-directory-mounts-not-individual-files) |
@@ -846,6 +847,18 @@ The lock is held for only milliseconds, making this a transient flake rather tha
 
 ---
 
+### Docker/Podman: interactive exec/attach must use the API socket, not the bare CLI (dual control-plane divergence)
+
+**Symptom:** `yoloai exec`/`attach` on Podman intermittently fails with `Error: no such container <name>` (exit 125) for a container the daemon clearly has running — `yoloai info`/`DetectStatus` (which call `Inspect` over the socket) report it `active` the entire time. Surfaced in the `isolation_check` smoke test under the concurrent multi-backend load: the container was created+started at T+0, stayed alive ~42 s, yet a `yoloai exec` issued in that window could not resolve the name for ~30 s.
+
+**Explanation:** The docker/podman backend had **two control planes for the same container**. Lifecycle and status (`Create`/`Inspect`/`Exec`/`Remove`) go through the Docker SDK over the discovered API socket; but `InteractiveExec` and `StdioExec` shelled out to the bare `docker`/`podman` CLI binary (`r.binaryName … exec -it`). The bare CLI re-opens the rootless-Podman container store independently of the long-lived socket connection, and under concurrent load it can fail to resolve a container name that the socket connection sees as `Running:true`. Same container, two resolvers, divergent answers — a classic split-brain. The podman event journal was the smoking gun: create/start logged at the start of the window, the container `died` 42 s later, and the *first* exec event only appeared 32 s in — i.e. the bare CLI never reached the live container during the failing window though the socket did.
+
+**Fix:** Route interactive exec/attach through the same SDK socket as every other op. `InteractiveExec` and `StdioExec` now share one `execAttach` core: `ContainerExecCreate` → `ContainerExecAttach` (hijacked conn) → `bridgeExecStreams` (TTY: raw `io.Copy`; non-TTY: `stdcopy.StdCopy`) → `ContainerExecInspect` for the exit code, returning `&runtime.ExecError{ExitCode}` on non-zero. TTY sizing/resize go over `ContainerExecResize`. One connection, one control plane — no bare-CLI store race. (`r.binaryName` survives only for `build`/`prune`/log helpers.)
+
+**Code:** `internal/runtime/docker/docker.go` `execAttach`/`createExec`/`bridgeExecStreams`/`resizeExec`/`forwardExecResizes`. Conformance guards (run for docker AND podman): `runtime/runtimetest/conformance.go` `StdioExec*`/`InteractiveExec*ExitCode` subtests.
+
+---
+
 ## Containerd
 
 ### `WithNewSnapshot` does NOT unpack image layers
@@ -896,8 +909,8 @@ Containerd's `InteractiveExec` (`runtime/containerd/exec.go`) drained the task's
 exit channel but threw the status away — `<-exitCh; return nil`. Every
 interactive exec therefore reported success regardless of the inner command's
 exit code, so `yoloai exec <box> -- false` exited 0 on this backend (Docker
-propagates the code for free: its `InteractiveExec` shells out and `exec.Cmd.Run`
-returns an `*exec.ExitError`). The non-interactive `Exec` on the same backend was
+propagates the code for free: its `InteractiveExec` reads the exit code from
+`ContainerExecInspect` over the socket). The non-interactive `Exec` on the same backend was
 always correct — it reads `exitStatus.ExitCode()` — which made the gap easy to
 miss.
 
@@ -910,8 +923,9 @@ fail-open that did not exist.
 
 Fix: capture `exitStatus := <-exitCh` and return `&runtime.ExecError{ExitCode:
 code}` on non-zero, mirroring the non-interactive `Exec`. The shared
-`runtime.InteractiveExitError` helper normalizes the shelled-out backends
-(docker/tart/seatbelt) to the same `*runtime.ExecError` contract, so every
+`runtime.InteractiveExitError` helper normalizes the still-shelled-out backends
+(tart/seatbelt) to the same `*runtime.ExecError` contract (docker/podman now read
+the code from `ContainerExecInspect` over the socket), so every
 backend's `InteractiveExec` surfaces a non-zero inner exit identically. The
 public `Sandbox.Exec` boundary then translates that internal error into the
 public `*yoloai.ExecExitError` (carrying the inner code) — the CLI can't import

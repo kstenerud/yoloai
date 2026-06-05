@@ -191,6 +191,57 @@ func RunConformance(t *testing.T, setup SetupFunc) {
 		assert.Error(t, err)
 	})
 
+	// InteractiveExec and StdioExec must drive the container over the SDK socket
+	// (the same control plane as Inspect/Exec), not a `docker exec` subprocess —
+	// otherwise a bare-CLI invocation can race the rootless-Podman store under
+	// load and report "no such container" for a container Inspect sees running.
+	t.Run("StdioExecPipesOutput", func(t *testing.T) {
+		rt, ctx := setup(t)
+		execer, ok := rt.(runtime.StdioExecer)
+		require.True(t, ok, "docker-compat backend must implement StdioExecer")
+		name := createContainer(t, rt, ctx, runtime.InstanceConfig{UseInit: true})
+		require.NoError(t, rt.Start(ctx, name))
+
+		var stdout, stderr strings.Builder
+		err := execer.StdioExec(ctx, name, []string{"echo", "hello"}, nil, &stdout, &stderr)
+		require.NoError(t, err)
+		assert.Equal(t, "hello", strings.TrimSpace(stdout.String()))
+	})
+
+	t.Run("StdioExecNonZeroExit", func(t *testing.T) {
+		rt, ctx := setup(t)
+		execer, ok := rt.(runtime.StdioExecer)
+		require.True(t, ok, "docker-compat backend must implement StdioExecer")
+		name := createContainer(t, rt, ctx, runtime.InstanceConfig{UseInit: true})
+		require.NoError(t, rt.Start(ctx, name))
+
+		err := execer.StdioExec(ctx, name, []string{"sh", "-c", "exit 7"}, nil, nil, nil)
+		var execErr *runtime.ExecError
+		require.ErrorAs(t, err, &execErr, "non-zero exit must surface as *runtime.ExecError")
+		assert.Equal(t, 7, execErr.ExitCode)
+	})
+
+	t.Run("InteractiveExecNonZeroExit", func(t *testing.T) {
+		rt, ctx := setup(t)
+		name := createContainer(t, rt, ctx, runtime.InstanceConfig{UseInit: true})
+		require.NoError(t, rt.Start(ctx, name))
+
+		err := rt.InteractiveExec(ctx, name, []string{"sh", "-c", "exit 9"}, "", "", runtime.IOStreams{TTY: true})
+		var execErr *runtime.ExecError
+		require.ErrorAs(t, err, &execErr, "TTY exec non-zero exit must surface as *runtime.ExecError")
+		assert.Equal(t, 9, execErr.ExitCode)
+	})
+
+	t.Run("InteractiveExecZeroExit", func(t *testing.T) {
+		rt, ctx := setup(t)
+		name := createContainer(t, rt, ctx, runtime.InstanceConfig{UseInit: true})
+		require.NoError(t, rt.Start(ctx, name))
+
+		var out strings.Builder
+		err := rt.InteractiveExec(ctx, name, []string{"true"}, "", "", runtime.IOStreams{Out: &out, TTY: true})
+		assert.NoError(t, err, "exit 0 stays nil")
+	})
+
 	t.Run("BindMountReadWrite", func(t *testing.T) {
 		rt, ctx := setup(t)
 		hostDir := t.TempDir()
