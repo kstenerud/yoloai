@@ -4,6 +4,7 @@ package launch
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -263,10 +264,24 @@ func applyOverlayAndCaps(st *state.State, caps runtime.BackendCaps, instanceCfg 
 // verifyInstanceRunning checks that the instance is still running after start,
 // collecting log output for diagnostics if it has exited.
 func verifyInstanceRunning(ctx context.Context, rt runtime.Runtime, st *state.State, cname string) error {
-	// Verify instance is still running (catches immediate crashes).
-	time.Sleep(1 * time.Second)
-	info, err := rt.Inspect(ctx, cname)
-	if err != nil {
+	// Verify instance is still running (catches immediate crashes). A real crash
+	// leaves the container inspectable with Running=false (handled below). A
+	// transient ErrNotFound right after start is different: under load the daemon
+	// API can briefly fail to resolve a just-started container, so retry the
+	// inspect for a few seconds before treating not-found as a hard failure.
+	// Other inspect errors are returned immediately.
+	var info runtime.InstanceInfo
+	deadline := time.Now().Add(4 * time.Second)
+	for {
+		time.Sleep(1 * time.Second)
+		var err error
+		info, err = rt.Inspect(ctx, cname)
+		if err == nil {
+			break
+		}
+		if errors.Is(err, runtime.ErrNotFound) && time.Now().Before(deadline) {
+			continue
+		}
 		return fmt.Errorf("inspect instance after start: %w", err)
 	}
 	if info.Running {
