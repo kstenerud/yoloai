@@ -188,6 +188,12 @@ The main binary retains ownership of sandbox directories (written as the calling
 
 See [linux-vm-backends research](../research/linux-vm-backends.md) for full analysis.
 
+## Isolation Modes
+
+### Podman + gVisor (`container-enhanced`)
+
+gVisor `container-enhanced` works on the docker backend (Linux + macOS, per D69/D70) but not yet on podman. Plan: [podman-gvisor.md](podman-gvisor.md). Central research question is whether **rootless** podman can run gVisor (and how) — rootless is a first-class goal since it's a main reason users pick podman, not something to route around with "use rootful." Also fixes the host-`$PATH` runsc check for VM-backed Podman Machine (mirroring the docker daemon-location fix) and adds a `containers.conf` "runsc registered" check.
+
 ## Architecture Cleanup
 
 ### Backend and agent extensibility refactor
