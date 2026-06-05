@@ -723,7 +723,7 @@ On Docker and Podman backends, you can select isolation modes that trade securit
 |------|----------|-------------|
 | `container-privileged` | nothing (standard Docker) | Docker `--privileged` — all capabilities, seccomp=unconfined, AppArmor=unconfined. Use for Docker-in-Docker and Compose stacks. |
 | `container` | nothing | Default `runc` — Linux namespaces and cgroups |
-| `container-enhanced` | `runsc` in PATH + Docker runtime registered | gVisor userspace kernel — intercepts syscalls in userspace, no KVM needed |
+| `container-enhanced` | `runsc` registered with the daemon (and on the daemon's filesystem) | gVisor userspace kernel — intercepts syscalls in userspace, no KVM needed; works on Linux and macOS hosts (runs in the backend's Linux VM) |
 | `vm` | KVM + Kata Containers | Kata Containers with QEMU VM |
 | `vm-enhanced` | KVM + Kata Containers + Firecracker | Kata Containers with Firecracker microVM |
 
@@ -748,9 +748,13 @@ Docker CE and the Compose plugin are pre-installed. `fuse-overlayfs` is configur
 
 **Security stance:** `--privileged` grants the agent near-full host kernel access. A rogue agent could escape the container. Use this mode only with agents and prompts you trust. It protects against accidental damage (copy/diff/apply workflow, clean teardown) but not against deliberate malicious behavior.
 
-Not supported on macOS (Seatbelt/Tart). No additional host prerequisites are needed on a standard Linux machine. On Proxmox LXC hosts, ensure `features: nesting=1` is set on the LXC container.
+Works on macOS too, via the Docker/Podman backend's Linux VM (Docker Desktop, OrbStack, or Podman Machine all run `--privileged` containers): use `--os linux --isolation container-privileged`. It is only unavailable with `--os mac`, where the native Seatbelt/Tart backends have no privileged mode. No additional host prerequisites are needed on a standard Linux machine. On Proxmox LXC hosts, ensure `features: nesting=1` is set on the LXC container.
 
 **Setup — gVisor (`container-enhanced`):**
+
+`runsc` must live wherever the Docker daemon runs and be registered as a runtime in that daemon's `daemon.json`. yoloai's system check adapts to the daemon location: on a Linux host it verifies the binary on `PATH` **and** the registration; on a macOS/Windows host (where the daemon runs in a VM) it can only verify registration — the daemon checks the binary itself at container-create time.
+
+*Linux host (local daemon):*
 
 1. Install the `runsc` binary: see [gVisor installation docs](https://gvisor.dev/docs/user_guide/install/)
 2. Register it with Docker in `/etc/docker/daemon.json`:
@@ -759,7 +763,9 @@ Not supported on macOS (Seatbelt/Tart). No additional host prerequisites are nee
    ```
 3. Restart the Docker daemon: `sudo systemctl restart docker`
 
-Installing the binary alone is not enough — Docker must also have the runtime registered. yoloai checks both.
+*macOS host (Docker Desktop / OrbStack — daemon in a Linux VM):* gVisor runs on macOS, including Apple Silicon (the `systrap` platform needs no nested virtualization). `runsc` must be installed **inside the VM** (not on the macOS host) and registered there. Use `--os linux --isolation container-enhanced`; `--os mac` (Seatbelt/Tart) has no gVisor.
+
+> **OrbStack caveat:** OrbStack symlinks the VM's `/tmp` to the macOS `/private/tmp` over virtiofs, which collides with gVisor's hard-coded `/tmp` sandbox chroot and fails with `cannot read client sync file: EOF` (chroot: `expected to open /tmp, but found /private/tmp`). Docker Desktop's LinuxKit VM has a normal `/tmp` and is unaffected. See `docs/contributors/backend-idiosyncrasies.md`.
 
 **Setup — Kata Containers (`vm`, `vm-enhanced`):**
 
@@ -771,7 +777,7 @@ Installing the binary alone is not enough — Docker must also have the runtime 
 
 - **`container-enhanced` + `:overlay` directories:** gVisor's VFS2 kernel does not support overlayfs mounts inside the container. Use `:copy` or `:rw` instead — yoloai will error if you combine them.
 - **`vm` and `vm-enhanced`:** Use the containerd backend, not Docker or Podman. Selected automatically when `--isolation vm` or `vm-enhanced` is used on Linux.
-- **`container-privileged`:** Linux-only (Docker/Podman backends). Not supported on macOS (Seatbelt/Tart).
+- **`container-privileged`:** Requires a container backend (Docker/Podman). Available on both Linux and macOS hosts via that backend's Linux VM; only unavailable with `--os mac` (Seatbelt/Tart have no privileged mode).
 
 ## Toolchain Support
 

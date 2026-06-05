@@ -3,6 +3,7 @@ package docker
 import (
 	"context"
 	"fmt"
+	goruntime "runtime"
 	"testing"
 
 	"github.com/docker/docker/api/types/mount"
@@ -150,6 +151,23 @@ func TestRequiredCapabilities_Docker_RunscMissing(t *testing.T) {
 	err := caps.FormatError(results)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "gVisor registered")
+}
+
+// TestRequiredCapabilities_Docker_Enhanced_DaemonModel locks the daemon-location
+// model: the host-PATH runsc check only applies when the daemon is local (Linux).
+// On macOS/Windows the daemon runs in a VM, so registration is the only signal.
+func TestRequiredCapabilities_Docker_Enhanced_DaemonModel(t *testing.T) {
+	r := buildDockerTestRuntime("docker")
+	var ids []string
+	for _, c := range r.RequiredCapabilities("container-enhanced") {
+		ids = append(ids, c.ID)
+	}
+	assert.Contains(t, ids, "gvisor-registered", "registration is always required")
+	if goruntime.GOOS == "linux" {
+		assert.Contains(t, ids, "gvisor-runsc", "local (Linux) daemon: host PATH is checked")
+	} else {
+		assert.NotContains(t, ids, "gvisor-runsc", "VM-backed daemon: host PATH says nothing about the daemon")
+	}
 }
 
 func TestRequiredCapabilities_Docker_InfoFails(t *testing.T) {

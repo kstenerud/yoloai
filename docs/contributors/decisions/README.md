@@ -470,6 +470,36 @@ After the bootstrap the stamp is the **only** signal consulted — a stamped lay
 
 **Consequences.** Breaking (beta) — tracked in `BREAKING-CHANGES.md`. The surface is unreleased (`layering-refactor` not pushed), so this rides the same release as D67. `make check` green after each of C1–C4.
 
+## D69 — `container-privileged` is allowed on macOS hosts; the gate keys on backend capability (via `--os mac`), not host OS
+
+**Date:** 2026-06-05. **Status:** Accepted (owner, 2026-06-05). **Corrects** a prior assumption baked into `IsolationAvailability` and `docs/GUIDE.md` that container-privileged was "Linux-only / not supported on macOS."
+
+**The decision.** `runtime.IsolationAvailability` previously rejected `container-privileged` whenever `hostOS == "darwin"`, regardless of backend. That conflated two different things: the macOS-*native* backends (Seatbelt/Tart), which genuinely have no privileged mode, and a macOS *host* running the Docker/Podman backend, which executes containers inside a Linux VM (Docker Desktop / OrbStack / Podman Machine) that supports `--privileged` exactly like bare-metal Linux. Drop the `hostOS == "darwin"` case; keep only the `targetOS == "mac"` case (which correctly rejects the native backends). Backends that can't do privileged are already rejected by their empty `SupportedIsolationModes`.
+
+**Verified empirically (not assumed).** On OrbStack / Apple Silicon, with the gate lifted: `yoloai new --os linux --isolation container-privileged --backend docker` succeeds; docker-in-docker (inner `dockerd` + `docker run hello-world`) works; `--network-isolated` blocks egress (`curl` `http_code 000`) while a non-isolated sandbox reaches the network. So all three privileged matrix tests (new, dind, isolation_check) pass on macOS.
+
+**Rejected.** (a) Keeping the host-OS block — it was factually wrong and denied a working capability. (b) Making `IsolationAvailability` backend-aware — unnecessary: `--os mac` already expresses "native backend," and the per-backend `SupportedIsolationModes` check catches the contrived `--backend seatbelt --isolation container-privileged` case.
+
+**Why the old belief persisted.** macOS users default to `os: mac` (Seatbelt), where privileged truly is unavailable, so the failure looked host-shaped rather than target-shaped.
+
+**Consequences.** Not breaking (a restriction is lifted; nothing that worked stops working). `docker-priv` is added to the smoke harness `BASE_MACOS_BACKENDS` / `FULL_MACOS_BACKENDS` (it's no longer an "uncovered" backend on macOS). GUIDE.md updated. The sibling `container-enhanced` (gVisor) macOS gate is **not** touched here — its rationale (runsc absent from the VM; Claude Code ARM64 hang, claude-code#35454) is under separate empirical review.
+
+## D70 — `container-enhanced` (gVisor) is allowed on macOS hosts; the runsc prerequisite check follows the daemon, not the host
+
+**Date:** 2026-06-05. **Status:** Accepted (owner, 2026-06-05). **Follows** D69 (same "gate on backend capability, not host OS" correction). **Retires** the macOS `container-enhanced` block that cited claude-code#35454. **Resolves** the "separate empirical review" deferred in D69.
+
+**Empirical findings (this machine: OrbStack / Apple Silicon).** gVisor's `runsc` (release-20260601.0) **runs on macOS arm64** inside the OrbStack Linux VM via the `systrap` platform (no nested KVM): a container booted reporting `Linux version 4.19.0-gvisor`. The claude-code#35454 hang (zero output / `epoll_pwait` loop) **does not reproduce** on current Claude Code (2.1.156): `--version` is instant, `--print` returns a clean auth error in <1s, and `--print` with a fake key reaches API-key validation in 1s. That issue was filed by us and **auto-closed as stale**, never fixed by Anthropic on paper — but the behavior is gone. The only real blocker is environmental and OrbStack-specific: `/tmp → /private/tmp` (the macOS host over virtiofs) collides with gVisor's hard-coded `/tmp` chroot (see `backend-idiosyncrasies.md`); Docker Desktop's LinuxKit `/tmp` is unaffected.
+
+**The decision.**
+1. **Gate (`IsolationAvailability`).** Drop the `hostOS == "darwin"` `container-enhanced` rejection (the stale-hang reason). Keep only `targetOS == "mac"` (Seatbelt/Tart have no gVisor). Same shape as D69.
+2. **Prerequisite check follows the daemon's location.** `docker.go::RequiredCapabilities` previously always required `runsc` on the **host** `$PATH` (`gvisorRunsc`) plus daemon registration (`gvisorRegistered`). That's wrong for a VM-backed daemon: the host `$PATH` says nothing about the VM's runtimes. Now: on Linux (local daemon) check both; on macOS/Windows (VM-backed daemon) check **registration only** — the daemon verifies the binary itself at container-create time.
+
+**Rejected.** (a) Keeping the host-OS block — its premise (Claude hangs under gVisor on macOS) is empirically false now. (b) Scheduling `docker-cenhanced` in the smoke `FULL_MACOS_BACKENDS` — gVisor isn't turn-key on macOS CI (runsc isn't shipped in the VM; OrbStack's `/tmp` needs a workaround), so it stays "uncovered" with an honest reason rather than introducing a flaky/failing CI backend. (c) Patching the OrbStack `/tmp` collision in yoloai — it's a VM filesystem-layout issue, not ours to paper over; documented instead.
+
+**Not addressed.** The podman gVisor path (`podman.go::RequiredCapabilities`) still uses the host-PATH `gvisorRunsc` check and was **not** changed — Podman Machine wasn't tested here and rootless Podman has its own hard gVisor blocker (cgroup v2 delegation). Revisit if podman+gVisor on macOS is needed.
+
+**Consequences.** Not breaking (a restriction is lifted). `yoloai new --os linux --isolation container-enhanced` now passes the gate and prereq check on macOS when runsc is registered; on OrbStack it then fails at the daemon with the documented `/tmp` error until worked around. GUIDE.md, `backend-idiosyncrasies.md`, and the smoke `ISOLATION_HOST_NOTE` updated; `TestIsolationAvailability` and `TestRequiredCapabilities_Docker_Enhanced_DaemonModel` lock the new rules.
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.

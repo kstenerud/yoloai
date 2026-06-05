@@ -95,21 +95,12 @@ func IsolationAvailability(isolation IsolationMode, targetOS, hostOS string) (av
 			fmt.Sprintf("--isolation %s is not available with --os mac.", isolation),
 			macAlternatives
 
-	case isolation == IsolationModeContainerEnhanced && targetOS != "mac" && hostOS == "darwin":
-		return false,
-			"--isolation container-enhanced (gVisor) is not supported on macOS due to a bug\n" +
-				"that causes Claude Code to hang indefinitely during initialization.",
-			"Workaround: Omit --isolation (use default container isolation) or use\n" +
-				"--os mac for lightweight macOS sandboxing.\n\n" +
-				"For details, see: https://github.com/anthropics/claude-code/issues/35454"
-
-	case isolation == IsolationModeContainerPrivileged && hostOS == "darwin":
-		return false,
-			fmt.Sprintf("--isolation %s is Linux-only (Docker or Podman required).", isolation),
-			"macOS backends (Seatbelt, Tart) do not support this mode.\n" +
-				"Use a Linux host or omit --isolation for the default mode."
-
 	case isolation == IsolationModeContainerPrivileged && targetOS == "mac":
+		// Only the macOS-native target is unsupported: seatbelt/tart have no
+		// privileged mode. A darwin *host* is fine — Docker Desktop / OrbStack /
+		// Podman Machine run --privileged inside their Linux VM, so the container
+		// backends accept it there exactly as on Linux. Backends that genuinely
+		// can't (seatbelt/tart) are rejected by their SupportedIsolationModes.
 		return false,
 			fmt.Sprintf("--isolation %s is not available with --os mac.", isolation),
 			macAlternatives

@@ -266,6 +266,11 @@ BASE_LINUX_BACKENDS: list[BackendSpec] = [
 BASE_MACOS_BACKENDS: list[BackendSpec] = [
     BackendSpec("linux", "container", "docker", "docker",
                 check_backend="docker", retries=1),
+    # Docker Desktop / OrbStack / Podman Machine run --privileged inside their
+    # Linux VM, so privileged + dind work on macOS exactly as on Linux (verified
+    # on OrbStack / Apple Silicon). Mirrors the Linux base tier.
+    BackendSpec("linux", "container-privileged", "docker", "docker-priv",
+                check_backend="docker", retries=1),
     BackendSpec("mac",   "vm",        None,     "tart",
                 check_backend="tart",   is_vm=True, retries=1, stall_grace_secs=120),
 ]
@@ -301,6 +306,12 @@ FULL_MACOS_BACKENDS: list[BackendSpec] = [
                 check_backend="seatbelt"),
     BackendSpec("mac",   "vm",        None,     "tart",
                 check_backend="tart",   is_vm=True, retries=1, stall_grace_secs=120),
+    # container-privileged runs on macOS via the container backend's Linux VM
+    # (Docker Desktop / OrbStack / Podman Machine). Mirrors the Linux spec so
+    # the dind + isolation_check matrix tests run here too. Verified on OrbStack
+    # / Apple Silicon: new + docker-in-docker + --network-isolated all pass.
+    BackendSpec("linux", "container-privileged", "docker", "docker-priv",
+                check_backend="docker", retries=1),
 ]
 
 # Required for non-matrix tests. Must be available on both platforms.
@@ -319,13 +330,22 @@ HOST_OS_LOCKED: dict[str, str] = {
 }
 
 # A backend's daemon may run on both hosts while its *isolation mode* is host-
-# specific, so the cross-host matrix schedules it on only one side. These notes
-# explain such omissions (keyed by isolation) so a backend that's silently absent
-# from this host's matrix still gets a reason in the end-of-run summary. Both
-# current entries are Linux isolation concepts (gVisor, privileged caps).
+# specific, so the cross-host matrix schedules it on only one side. This note
+# explains such an omission (keyed by isolation) so a backend that's silently
+# absent from this host's matrix still gets a reason in the end-of-run summary.
+#
+# Only container-enhanced (gVisor) remains here. yoloai allows it on macOS hosts
+# (it runs in the backend's Linux VM), but it's not *scheduled* in the mac matrix
+# because it isn't turn-key in CI: runsc must be installed inside the daemon's VM
+# (Docker Desktop / OrbStack don't ship it), and OrbStack additionally needs a
+# workaround for its /tmp->/private/tmp symlink (see backend-idiosyncrasies.md).
+# The old "Claude Code hangs under gVisor" reason is obsolete — verified not to
+# reproduce on current Claude Code + gVisor. container-privileged is NOT listed:
+# it runs on macOS via the Linux VM and is now scheduled in the mac matrices.
 ISOLATION_HOST_NOTE: dict[str, str] = {
-    "container-enhanced": "gVisor (container-enhanced) isolation is Linux-only",
-    "container-privileged": "container-privileged coverage runs on the Linux matrix",
+    "container-enhanced": "gVisor (container-enhanced) is supported on macOS but "
+    "not scheduled in CI: runsc must be installed in the daemon's Linux VM "
+    "(and OrbStack needs a /tmp workaround)",
 }
 
 # Tests restricted to --full tier.
@@ -368,9 +388,10 @@ def uncovered_backends(
     These can't be covered by the current run — some are OS-locked daemons
     (seatbelt/tart/containerd), others are daemons that run on both hosts but whose
     isolation mode the matrix only schedules on the other side (docker-cenhanced,
-    docker-priv). Either way the omission must not be silent, so they're reported as
-    a distinct end-of-run group with a per-backend reason (see uncovered_reason).
-    Deduped by label; backends scheduled here (docker/podman) never appear."""
+    whose gVisor runtime yoloai blocks on macOS). Either way the omission must not
+    be silent, so they're reported as a distinct end-of-run group with a per-backend
+    reason (see uncovered_reason). Deduped by label; backends scheduled here
+    (docker/podman, and now docker-priv on both hosts) never appear."""
     here = {s.label for s in this_os_matrix}
     out: list[BackendSpec] = []
     seen: set[str] = set()

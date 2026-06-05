@@ -635,8 +635,18 @@ var dockerInfoOutput = func(ctx context.Context, binaryName string) ([]byte, err
 func (r *Runtime) RequiredCapabilities(isolation runtime.IsolationMode) []caps.HostCapability {
 	switch isolation {
 	case runtime.IsolationModeContainerEnhanced:
-		// gvisorRunsc first: if the binary isn't present, registration can't work.
-		return []caps.HostCapability{r.gvisorRunsc, r.gvisorRegistered}
+		// runsc must live wherever the daemon runs. On Linux the daemon shares
+		// the host filesystem, so verify the binary on PATH (gvisorRunsc first:
+		// if it's missing, registration can't work) and that it's registered.
+		// On macOS/Windows the daemon runs in a VM (Docker Desktop / OrbStack /
+		// Podman Machine); the host PATH says nothing about the daemon's
+		// runtimes, so registration with the daemon is the authoritative — and
+		// only host-checkable — signal. The daemon verifies the binary itself at
+		// container-create time.
+		if goruntime.GOOS == "linux" {
+			return []caps.HostCapability{r.gvisorRunsc, r.gvisorRegistered}
+		}
+		return []caps.HostCapability{r.gvisorRegistered}
 	default:
 		return nil
 	}

@@ -80,13 +80,13 @@ def test_uncovered_on_linux_full_lists_mac_only_backends() -> None:
 
 
 def test_uncovered_on_mac_full_includes_linux_isolation_variants() -> None:
-    # On a macOS host (this=FULL_MACOS), the Linux matrix contributes both the
-    # OS-locked containerd VMs AND the docker isolation variants that the mac matrix
-    # never schedules — the gap this fix closes. docker/podman are excluded.
+    # On a macOS host (this=FULL_MACOS), the Linux matrix contributes the OS-locked
+    # containerd VMs and the gVisor variant yoloai blocks on macOS. docker/podman
+    # are scheduled here; docker-priv is too (privileged runs via the container
+    # backend's Linux VM on macOS), so neither is "uncovered".
     labels = {s.label for s in uncovered_backends(FULL_LINUX_BACKENDS, FULL_MACOS_BACKENDS)}
     assert labels == {
         "docker-cenhanced",
-        "docker-priv",
         "containerd-vm",
         "containerd-vmenhanced",
     }
@@ -104,20 +104,20 @@ def test_uncovered_never_lists_backends_scheduled_here() -> None:
 
 
 def test_uncovered_base_tier_set_difference() -> None:
-    # Base tier: on Linux only tart is uncovered; on macOS docker-priv (isolation
-    # variant) and containerd-vm (OS-locked) are.
+    # Base tier: on Linux only tart is uncovered; on macOS only containerd-vm
+    # (OS-locked) is. docker-priv now runs in both base tiers (privileged via the
+    # container backend's Linux VM on macOS), so it's no longer uncovered.
     assert {s.label for s in uncovered_backends(BASE_MACOS_BACKENDS, BASE_LINUX_BACKENDS)} == {"tart"}
     assert {s.label for s in uncovered_backends(BASE_LINUX_BACKENDS, BASE_MACOS_BACKENDS)} == {
-        "docker-priv",
         "containerd-vm",
     }
 
 
 def test_uncovered_reason_distinguishes_os_lock_from_isolation() -> None:
     # On a macOS run, uncovered Linux backends get specific reasons: OS-locked
-    # containerd points at the other host; the docker isolation variants explain
-    # the isolation mode rather than claiming the daemon can't run here.
+    # containerd points at the other host; gVisor (-enhanced) explains its
+    # macOS block. docker-priv is no longer here — it runs on macOS now.
     by_label = {s.label: s for s in FULL_LINUX_BACKENDS}
     assert uncovered_reason(by_label["containerd-vm"], "Linux") == "requires a Linux host"
-    assert "gVisor" in uncovered_reason(by_label["docker-cenhanced"], "Linux")
-    assert "privileged" in uncovered_reason(by_label["docker-priv"], "Linux")
+    enhanced = uncovered_reason(by_label["docker-cenhanced"], "Linux")
+    assert "gVisor" in enhanced and "macOS" in enhanced

@@ -46,6 +46,7 @@ row to the index.
 | `Seccomp_filters: 1` inside sandbox despite `container-privileged`; proc mount in userns fails | [Docker: Proxmox LXC seccomp survives seccomp=unconfined](#proxmox-lxc-seccomp-survives-secompunconfined-at-the-docker-layer) |
 | `git apply` silently fails on overlay patch | [Docker: Exec strips trailing newline](#docker-sdk-exec-strips-the-trailing-newline) |
 | `tmux attach` exits with `EACCES` on `/dev/tty` (gVisor ARM64) | [Docker: gVisor ARM64 TIOCSCTTY](#gvisor-on-arm64-docker-exec--it-does-not-call-tiocsctty) |
+| gVisor `container-enhanced` fails on macOS/OrbStack: `cannot read client sync file: EOF` (boot log: `expected to open /tmp, but found /private/tmp`) | [OrbStack: gVisor /tmp virtiofs symlink](#orbstack-gvisor-runsc-fails-to-start-because-tmp-is-a-virtiofs-symlink-to-the-macos-privatetmp) |
 | `failed to create an image ... after deleting the existing one: AlreadyExists` (intermittent) | [Docker: AlreadyExists race on rebuild of identical tag](#docker-daemon-races-on-alreadyexists-when-rebuilding-an-existing-tag-with-identical-content) |
 | `yoloai system disk`/`doctor` reports absurd reclaimable cache (e.g. podman 129 GiB vs ~5 GiB from `system df`) | [Docker/Podman: Images[].Size includes shared layers](#diskusageimagessize-includes-shared-layers-summing-it-multiply-counts-them) |
 | `doctor`/`disk` reports podman images as 0 B despite a multi-GB base | [Podman: /system/df reports LayersSize 0](#podman-systemdf-reports-layerssize-0) |
@@ -639,6 +640,31 @@ exec -it`). See `docker.go::AttachCommand`.
 
 Note: this is ARM64-specific. On AMD64, `script` creates a fresh PTY and CTY
 cleanly without this issue.
+
+### OrbStack: gVisor (`runsc`) fails to start because `/tmp` is a virtiofs symlink to the macOS `/private/tmp`
+
+**Symptom:** `--isolation container-enhanced` on macOS under **OrbStack** fails at container start with the opaque:
+
+```
+OCI runtime create failed: creating container: cannot create sandbox:
+cannot read client sync file: waiting for sandbox to start: EOF
+```
+
+The real cause is only in the runsc boot log (`/tmp/runsc/runsc.log.*.boot.txt`):
+
+```
+FATAL ERROR: error setting up chroot: error mounting tmpfs in chroot:
+failed to safely mount: expected to open /tmp, but found /private/tmp
+```
+
+**Explanation:** gVisor's sentry sets up its sandbox chroot under a hard-coded `/tmp` and runs a mount-safety check that the resolved path matches. In the OrbStack Linux VM, `/tmp` is a **symlink to `/private/tmp`**, and `/private` is the **macOS host mounted into the VM over virtiofs** (`mac on /private type virtiofs`). The symlink makes the safety check see `/private/tmp`, so runsc aborts before the sandbox starts. This is **OrbStack-specific** — Docker Desktop's LinuxKit VM has a normal tmpfs `/tmp` and is unaffected. It is *not* an arm64 or macOS limitation: with the chroot bypassed, gVisor boots fine on Apple Silicon (`Linux version 4.19.0-gvisor`, `systrap` platform) and Claude Code runs without the old #35454 hang.
+
+**Fix / workarounds (none wired into yoloai yet):**
+- **Docker Desktop instead of OrbStack** — normal `/tmp`, works once `runsc` is installed in the VM.
+- Make `/tmp` a real directory in the OrbStack VM (replacing the `/private/tmp` symlink) — but that breaks OrbStack's macOS `/tmp` sharing, so it's not a safe default.
+- `--TESTONLY-unsafe-nonroot` in the runtime's `runtimeArgs` skips the chroot (disables a security boundary; debugging only).
+
+**Code pointer:** the macOS prerequisite check now relies on daemon registration (`docker.go::RequiredCapabilities` returns `gvisorRegistered` only off-Linux); the chroot collision is purely a VM filesystem-layout issue, surfaced at `runtime.New`/`Start`, not something yoloai's checks can detect ahead of time.
 
 ### gVisor netstack ignores in-sandbox iptables rules
 

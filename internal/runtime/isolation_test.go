@@ -56,3 +56,43 @@ func TestIsolationEnforcesInSandboxIptables(t *testing.T) {
 		}
 	}
 }
+
+// TestIsolationAvailability locks in the host/target-OS rules, with emphasis on
+// container-privileged: a darwin *host* is fine (Docker Desktop / OrbStack /
+// Podman Machine run --privileged inside their Linux VM), so the only privileged
+// rejection is the macOS-native target (--os mac → seatbelt/tart).
+func TestIsolationAvailability(t *testing.T) {
+	cases := []struct {
+		name      string
+		isolation IsolationMode
+		targetOS  string
+		hostOS    string
+		want      bool
+	}{
+		// container-privileged: allowed on a darwin host targeting Linux
+		// containers (the regression this guards — it used to be blocked).
+		{"priv darwin host, linux target", IsolationModeContainerPrivileged, "linux", "darwin", true},
+		{"priv darwin host, default target", IsolationModeContainerPrivileged, "", "darwin", true},
+		{"priv linux host", IsolationModeContainerPrivileged, "", "linux", true},
+		// ...but not when explicitly targeting macOS-native backends.
+		{"priv os=mac rejected", IsolationModeContainerPrivileged, "mac", "darwin", false},
+		// VM modes still require containerd, unavailable on a darwin host.
+		{"vm darwin host rejected", IsolationModeVM, "linux", "darwin", false},
+		{"vm linux host ok", IsolationModeVM, "", "linux", true},
+		// container-enhanced (gVisor): allowed on a darwin host targeting Linux
+		// containers (gVisor runs in the backend's Linux VM; runsc registration
+		// is checked separately as a prerequisite). Only --os mac is rejected.
+		{"enhanced darwin host, linux target", IsolationModeContainerEnhanced, "linux", "darwin", true},
+		{"enhanced os=mac rejected", IsolationModeContainerEnhanced, "mac", "darwin", false},
+		{"enhanced linux host ok", IsolationModeContainerEnhanced, "", "linux", true},
+		// Plain container is always fine.
+		{"container darwin host", IsolationModeContainer, "", "darwin", true},
+	}
+	for _, c := range cases {
+		got, _, _ := IsolationAvailability(c.isolation, c.targetOS, c.hostOS)
+		if got != c.want {
+			t.Errorf("%s: IsolationAvailability(%q, %q, %q) = %v, want %v",
+				c.name, c.isolation, c.targetOS, c.hostOS, got, c.want)
+		}
+	}
+}
