@@ -31,16 +31,21 @@ import (
 // the embedder's job, and for the CLI the embedder is right here.
 func WithTerminal(fn func(yoloai.IOStreams) error) error {
 	in := os.Stdin
+	fd := int(in.Fd()) //nolint:gosec // G115: a file descriptor is a small non-negative int
+	isTTY := term.IsTerminal(fd)
 	streams := yoloai.IOStreams{
 		In:   in,
 		Out:  os.Stdout,
 		Err:  os.Stderr,
-		TTY:  true,
+		TTY:  isTTY,
 		Term: os.Getenv("TERM"), //nolint:forbidigo // §12: CLI boundary captures the user's terminal type; library never reads it
 	}
 
-	fd := int(in.Fd()) //nolint:gosec // G115: a file descriptor is a small non-negative int
-	if !term.IsTerminal(fd) {
+	// TTY=true is a contract that the streams ARE a tty (the backend runs the
+	// inner exec with `-it`); claiming it over piped/redirected stdin makes
+	// `docker exec -it` fail with "the input device is not a TTY". When stdin
+	// is not a terminal, hand fn plain streams (TTY=false) and skip raw mode.
+	if !isTTY {
 		return fn(streams)
 	}
 

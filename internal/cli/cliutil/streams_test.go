@@ -16,8 +16,9 @@ import (
 
 // When stdin is not a terminal (the usual `go test` case), WithTerminal must
 // skip all terminal management — no raw mode, no resize pump — and hand fn the
-// process streams with no Resize channel. It must invoke fn exactly once and
-// propagate its error verbatim.
+// process streams with TTY=false (claiming TTY over non-tty stdin makes the
+// backend's `… -it` exec fail) and no Resize channel. It must invoke fn exactly
+// once and propagate its error verbatim.
 func TestWithTerminal_NonTTY(t *testing.T) {
 	if term.IsTerminal(int(os.Stdin.Fd())) { //nolint:gosec // G115: fd is a small int
 		t.Skip("stdin is a terminal; this test pins the non-tty branch")
@@ -37,6 +38,6 @@ func TestWithTerminal_NonTTY(t *testing.T) {
 	assert.Equal(t, 1, calls)
 	assert.Equal(t, os.Stdin, got.In)
 	assert.Equal(t, os.Stdout, got.Out)
-	assert.True(t, got.TTY)
+	assert.False(t, got.TTY, "TTY must be false when stdin is not a terminal")
 	assert.Nil(t, got.Resize, "no resize pump when stdin is not a terminal")
 }
