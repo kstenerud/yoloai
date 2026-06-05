@@ -14,7 +14,8 @@ from smoke_test import (
     FULL_MACOS_BACKENDS,
     dind_applies,
     isolation_check_applies,
-    wrong_os_backends,
+    uncovered_backends,
+    uncovered_reason,
 )
 
 ALL_SPECS = FULL_LINUX_BACKENDS + FULL_MACOS_BACKENDS
@@ -71,30 +72,52 @@ def test_predicates_partition_cleanly_over_base_matrix() -> None:
     assert any(isolation_check_applies(s) for s in smoke_test.FULL_LINUX_BACKENDS)
 
 
-def test_wrong_os_on_linux_full_lists_mac_locked_backends() -> None:
-    # On a Linux host, the macOS matrix's OS-locked backends (seatbelt, tart)
-    # can't run here regardless of install — they're the wrong-OS group.
-    labels = {s.label for s in wrong_os_backends(FULL_MACOS_BACKENDS, "mac")}
+def test_uncovered_on_linux_full_lists_mac_only_backends() -> None:
+    # On a Linux host (this=FULL_LINUX), the macOS matrix contributes the mac-only
+    # backends; docker/podman run here so they're excluded.
+    labels = {s.label for s in uncovered_backends(FULL_MACOS_BACKENDS, FULL_LINUX_BACKENDS)}
     assert labels == {"seatbelt", "tart"}
 
 
-def test_wrong_os_on_mac_full_lists_linux_locked_backends() -> None:
-    # On a macOS host, containerd (Kata) is Linux-only; both VM variants surface.
-    labels = {s.label for s in wrong_os_backends(FULL_LINUX_BACKENDS, "linux")}
-    assert labels == {"containerd-vm", "containerd-vmenhanced"}
+def test_uncovered_on_mac_full_includes_linux_isolation_variants() -> None:
+    # On a macOS host (this=FULL_MACOS), the Linux matrix contributes both the
+    # OS-locked containerd VMs AND the docker isolation variants that the mac matrix
+    # never schedules — the gap this fix closes. docker/podman are excluded.
+    labels = {s.label for s in uncovered_backends(FULL_LINUX_BACKENDS, FULL_MACOS_BACKENDS)}
+    assert labels == {
+        "docker-cenhanced",
+        "docker-priv",
+        "containerd-vm",
+        "containerd-vmenhanced",
+    }
 
 
-def test_wrong_os_never_lists_docker_or_podman() -> None:
-    # docker/podman bridge to both hosts (Docker Desktop / Podman Machine), so they
-    # are never wrong-OS — only genuinely OS-locked tech is reported.
-    for matrix, other in ((FULL_LINUX_BACKENDS, "linux"), (FULL_MACOS_BACKENDS, "mac")):
-        labels = {s.label for s in wrong_os_backends(matrix, other)}
+def test_uncovered_never_lists_backends_scheduled_here() -> None:
+    # docker/podman are in both matrices, so they're never "uncovered" either way.
+    for other, here in (
+        (FULL_LINUX_BACKENDS, FULL_MACOS_BACKENDS),
+        (FULL_MACOS_BACKENDS, FULL_LINUX_BACKENDS),
+    ):
+        labels = {s.label for s in uncovered_backends(other, here)}
         assert "docker" not in labels
         assert "podman" not in labels
 
 
-def test_wrong_os_base_tier_lists_only_other_host_vm() -> None:
-    # Base tier: on Linux the macOS base matrix contributes just tart; on macOS the
-    # Linux base matrix contributes just containerd-vm.
-    assert {s.label for s in wrong_os_backends(BASE_MACOS_BACKENDS, "mac")} == {"tart"}
-    assert {s.label for s in wrong_os_backends(BASE_LINUX_BACKENDS, "linux")} == {"containerd-vm"}
+def test_uncovered_base_tier_set_difference() -> None:
+    # Base tier: on Linux only tart is uncovered; on macOS docker-priv (isolation
+    # variant) and containerd-vm (OS-locked) are.
+    assert {s.label for s in uncovered_backends(BASE_MACOS_BACKENDS, BASE_LINUX_BACKENDS)} == {"tart"}
+    assert {s.label for s in uncovered_backends(BASE_LINUX_BACKENDS, BASE_MACOS_BACKENDS)} == {
+        "docker-priv",
+        "containerd-vm",
+    }
+
+
+def test_uncovered_reason_distinguishes_os_lock_from_isolation() -> None:
+    # On a macOS run, uncovered Linux backends get specific reasons: OS-locked
+    # containerd points at the other host; the docker isolation variants explain
+    # the isolation mode rather than claiming the daemon can't run here.
+    by_label = {s.label: s for s in FULL_LINUX_BACKENDS}
+    assert uncovered_reason(by_label["containerd-vm"], "Linux") == "requires a Linux host"
+    assert "gVisor" in uncovered_reason(by_label["docker-cenhanced"], "Linux")
+    assert "privileged" in uncovered_reason(by_label["docker-priv"], "Linux")
