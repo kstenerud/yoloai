@@ -194,6 +194,10 @@ See [linux-vm-backends research](../research/linux-vm-backends.md) for full anal
 
 gVisor `container-enhanced` works on the docker backend (Linux + macOS, per D69/D70) but not yet on podman. Plan: [podman-gvisor.md](podman-gvisor.md). Central research question is whether **rootless** podman can run gVisor (and how) — rootless is a first-class goal since it's a main reason users pick podman, not something to route around with "use rootful." Also fixes the host-`$PATH` runsc check for VM-backed Podman Machine (mirroring the docker daemon-location fix) and adds a `containers.conf` "runsc registered" check.
 
+### `yoloai system setup-gvisor` (macOS)
+
+An opt-in command to install + register `runsc` in the macOS Docker VM so `container-enhanced` works without manual VM surgery. Plan: [setup-gvisor.md](setup-gvisor.md). Blocking decision: the OrbStack `/tmp → /private/tmp` collision has no clean per-process fix, so the command must either replace the VM's `/tmp` (breaks OrbStack's `/tmp` sharing) behind explicit confirmation, or steer to Docker Desktop. Open research: whether runsc is installable in Docker Desktop's read-only LinuxKit VM at all.
+
 ## Architecture Cleanup
 
 ### Backend and agent extensibility refactor
