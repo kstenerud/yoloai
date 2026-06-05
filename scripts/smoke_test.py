@@ -308,6 +308,20 @@ DEFAULT_BACKEND = BackendSpec(
     "linux", "container", "docker", "docker", check_backend="docker"
 )
 
+# Backends whose host OS is fixed by the underlying technology: seatbelt/tart are
+# macOS-only, containerd (Kata) is Linux-only. docker/podman bridge to a VM on the
+# foreign host (Docker Desktop / Podman Machine), so they run on both and are
+# absent here. A backend locked to the OS we are NOT on can never run regardless
+# of what software is installed — it needs different hardware. That is a distinct
+# situation from a fixable missing-prereq skip (install software / grant perms),
+# and is reported as its own end-of-run skip group telling you to re-run on the
+# other host. Keyed by check_backend.
+HOST_OS_LOCKED: dict[str, str] = {
+    "seatbelt": "mac",
+    "tart": "mac",
+    "containerd": "linux",
+}
+
 # Tests restricted to --full tier.
 FULL_ONLY_TESTS = {"clone"}
 
@@ -338,6 +352,22 @@ def isolation_check_applies(spec: BackendSpec) -> bool:
         spec.check_backend in {"docker", "podman", "containerd"}
         and not spec.isolation.endswith("-enhanced")
     )
+
+
+def wrong_os_backends(other_os_matrix: list[BackendSpec], other_host: str) -> list[BackendSpec]:
+    """Backends from the other host's tier matrix that are OS-locked to that host.
+
+    These are reported as their own end-of-run skip group: unlike a missing-prereq
+    skip, no software install makes them runnable here — the operator must re-run
+    on the other host. Deduped by label; docker/podman never appear (they bridge to
+    both hosts and aren't in HOST_OS_LOCKED)."""
+    out: list[BackendSpec] = []
+    seen: set[str] = set()
+    for spec in other_os_matrix:
+        if HOST_OS_LOCKED.get(spec.check_backend) == other_host and spec.label not in seen:
+            seen.add(spec.label)
+            out.append(spec)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -2143,7 +2173,11 @@ def cleanup(ctx: RunContext) -> None:
 # Summary
 # ---------------------------------------------------------------------------
 
-def print_summary(results: list[TestResult]) -> None:
+def print_summary(
+    results: list[TestResult],
+    wrong_os: Optional[list[BackendSpec]] = None,
+    other_host_label: str = "",
+) -> None:
     passed = [r for r in results if r.passed]
     failed = [r for r in results if not r.passed and not r.skipped]
     skipped = [r for r in results if r.skipped]
@@ -2170,6 +2204,14 @@ def print_summary(results: list[TestResult]) -> None:
         print("\nSkipped tests:")
         for r in skipped:
             print(f"  SKIP  {r.name}: {r.reason}")
+
+    # Wrong-host-OS backends are kept in their own group: unlike the skips above,
+    # no host change makes them runnable here — they need different hardware. The
+    # note tells the operator that a complete matrix requires a second run there.
+    if wrong_os:
+        print(f"\nNot covered here — needs a {other_host_label} host (re-run there to complete the matrix):")
+        for spec in wrong_os:
+            print(f"  SKIP  {spec.label}: requires a {other_host_label} host")
 
 
 # Persistent cross-run index. One JSON object per line, appended after every
@@ -2587,12 +2629,23 @@ def main() -> int:
     atexit.register(cleanup, ctx)
 
     is_linux = sys.platform.startswith("linux")
+    host_os = "linux" if is_linux else "mac"
+    other_host = "mac" if is_linux else "linux"
+    other_host_label = "macOS" if is_linux else "Linux"
     # When filters are active, use the full matrix so --test / --backend can
     # reach backends (e.g. seatbelt) that live outside the base tier.
     if ctx.full or ctx.test_filter or ctx.backend_filter:
         matrix = FULL_LINUX_BACKENDS if is_linux else FULL_MACOS_BACKENDS
+        other_os_matrix = FULL_MACOS_BACKENDS if is_linux else FULL_LINUX_BACKENDS
     else:
         matrix = BASE_LINUX_BACKENDS if is_linux else BASE_MACOS_BACKENDS
+        other_os_matrix = BASE_MACOS_BACKENDS if is_linux else BASE_LINUX_BACKENDS
+
+    # Backends that exist in this tier but are pinned to the other host's OS — they
+    # can't run here no matter what we install (situation 2). Surfaced as a distinct
+    # end-of-run skip group so the operator knows what re-running on the other host
+    # would add.
+    wrong_os = wrong_os_backends(other_os_matrix, other_host)
 
     # Build the list of specs to prereq-check.  When explicit filters narrow
     # the run, restrict prereq checking (and image builds) to only the backends
@@ -2659,9 +2712,14 @@ def main() -> int:
                 "Run the smoke test as root to include vm/vmenhanced backends:\n"
                 "  sudo make smoketest-full"
             )
-        # Always warn+skip for unavailable backends (base tier is designed to
-        # be runnable with partial backends; full tier warns but doesn't abort).
-        print("WARNING: some backends unavailable (will skip their tests):")
+        # Base tier is designed to be runnable with partial backends, so it
+        # warns and skips. Full tier is the release gate: an unprovisioned
+        # backend that *could* run on this host is an environment defect, so
+        # its tests fail loudly (see _run_backend_test). The notice mirrors that.
+        if ctx.full:
+            print("ERROR: some backends unavailable on this host; full tier will FAIL their tests:")
+        else:
+            print("WARNING: some backends unavailable (will skip their tests):")
         for label in unavailable_labels:
             print(f"  {label}: {preq[label].note}")
         if setup_tip:
@@ -2711,7 +2769,17 @@ def main() -> int:
         pr = preq.get(spec.label)
         if pr is None or not pr.available:
             reason = pr.note if pr else "not in prereq results"
-            skip_test(ctx, test_name, reason)
+            # This backend runs on this host but its prereqs aren't satisfied
+            # (daemon down, missing perms, etc.) — fixable here. Base tier tolerates
+            # a partial run and skips; full tier is the release gate, so an
+            # unprovisioned backend is an environment defect that must fail loudly.
+            if ctx.full:
+                _record_result(ctx, TestResult(
+                    name=test_name, passed=False,
+                    reason=f"prerequisite unavailable (full tier requires it): {reason}",
+                ))
+            else:
+                skip_test(ctx, test_name, reason)
             return
 
         # VM backends share a host-wide concurrency cap (macOS allows 2 Tart VMs;
@@ -2812,7 +2880,7 @@ def main() -> int:
     # so the summary and manifest are deterministic regardless of --jobs.
     ctx.results.sort(key=lambda r: r.name)
 
-    print_summary(ctx.results)
+    print_summary(ctx.results, wrong_os, other_host_label)
 
     manifest = write_run_manifest(
         ctx, ctx.results, host="linux" if is_linux else "macos", tier=tier

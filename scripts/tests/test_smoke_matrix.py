@@ -7,11 +7,14 @@ from typing import Callable
 
 import smoke_test
 from smoke_test import (
+    BASE_LINUX_BACKENDS,
+    BASE_MACOS_BACKENDS,
     BackendSpec,
     FULL_LINUX_BACKENDS,
     FULL_MACOS_BACKENDS,
     dind_applies,
     isolation_check_applies,
+    wrong_os_backends,
 )
 
 ALL_SPECS = FULL_LINUX_BACKENDS + FULL_MACOS_BACKENDS
@@ -66,3 +69,32 @@ def test_predicates_partition_cleanly_over_base_matrix() -> None:
     # raising, and at least one spec is applicable for each (the phase isn't dead).
     assert any(dind_applies(s) for s in smoke_test.FULL_LINUX_BACKENDS)
     assert any(isolation_check_applies(s) for s in smoke_test.FULL_LINUX_BACKENDS)
+
+
+def test_wrong_os_on_linux_full_lists_mac_locked_backends() -> None:
+    # On a Linux host, the macOS matrix's OS-locked backends (seatbelt, tart)
+    # can't run here regardless of install — they're the wrong-OS group.
+    labels = {s.label for s in wrong_os_backends(FULL_MACOS_BACKENDS, "mac")}
+    assert labels == {"seatbelt", "tart"}
+
+
+def test_wrong_os_on_mac_full_lists_linux_locked_backends() -> None:
+    # On a macOS host, containerd (Kata) is Linux-only; both VM variants surface.
+    labels = {s.label for s in wrong_os_backends(FULL_LINUX_BACKENDS, "linux")}
+    assert labels == {"containerd-vm", "containerd-vmenhanced"}
+
+
+def test_wrong_os_never_lists_docker_or_podman() -> None:
+    # docker/podman bridge to both hosts (Docker Desktop / Podman Machine), so they
+    # are never wrong-OS — only genuinely OS-locked tech is reported.
+    for matrix, other in ((FULL_LINUX_BACKENDS, "linux"), (FULL_MACOS_BACKENDS, "mac")):
+        labels = {s.label for s in wrong_os_backends(matrix, other)}
+        assert "docker" not in labels
+        assert "podman" not in labels
+
+
+def test_wrong_os_base_tier_lists_only_other_host_vm() -> None:
+    # Base tier: on Linux the macOS base matrix contributes just tart; on macOS the
+    # Linux base matrix contributes just containerd-vm.
+    assert {s.label for s in wrong_os_backends(BASE_MACOS_BACKENDS, "mac")} == {"tart"}
+    assert {s.label for s in wrong_os_backends(BASE_LINUX_BACKENDS, "linux")} == {"containerd-vm"}
