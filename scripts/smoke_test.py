@@ -2269,7 +2269,7 @@ def print_summary(
     if uncovered_notes:
         print("\nNot covered on this host (re-run on the other host to complete the matrix):")
         for label, reason in uncovered_notes:
-            print(f"  SKIP  {label}: {reason}")
+            print(f"  N/A  {label}: {reason}")
 
 
 # Persistent cross-run index. One JSON object per line, appended after every
