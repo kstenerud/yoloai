@@ -41,6 +41,7 @@ row to the index.
 | Two concurrent `yoloai new` with same name corrupts networking | [CNI: concurrent creation race](#two-yoloai-new-invocations-for-the-same-container-name-within-1s-will-corrupt-networking) |
 | `--network-isolated` silently unenforced under `--isolation container-enhanced` | [gVisor netstack ignores iptables](#gvisor-netstack-ignores-in-sandbox-iptables-rules) |
 | `docker daemon is not responding` after `docker context use`; stale `/var/run/docker.sock` symlink to a stopped provider | [Docker: Go SDK ignores docker context](#the-docker-go-sdk-ignores-docker-context-clientfromenv-honors-only-docker_host) |
+| dind `exec /hello: invalid argument` (any nested container) under container-privileged on macOS | [Docker: nested fuse-overlayfs can't exec on Docker Desktop / Podman Machine](#docker-in-docker-nested-fuse-overlayfs-cant-exec-on-docker-desktop--podman-machine-macos) |
 | `overlayfs mount` fails with `EPERM` inside Docker | [Docker: AppArmor blocks mount](#apparmor-blocks-mount2-even-with-cap_sys_admin) |
 | `sysctl: permission denied on key "net.ipv4.ip_forward"` starting inner Docker daemon | [Docker: /proc/sys and /sys/fs/cgroup read-only without systempaths=unconfined](#procsys-and-sysfsgroup-are-read-only-without-systempathsunconfined) |
 | `mkdir /sys/fs/cgroup/docker: read-only file system` when inner Docker runs containers | [Docker: /proc/sys and /sys/fs/cgroup read-only without systempaths=unconfined](#procsys-and-sysfsgroup-are-read-only-without-systempathsunconfined) |
@@ -668,6 +669,22 @@ failed to safely mount: expected to open /tmp, but found /private/tmp
 - `--TESTONLY-unsafe-nonroot` in the runtime's `runtimeArgs` skips the chroot (disables a security boundary; debugging only).
 
 **Code pointer:** the macOS prerequisite check now relies on daemon registration (`docker.go::RequiredCapabilities` returns `gvisorRegistered` only off-Linux); the chroot collision is purely a VM filesystem-layout issue, surfaced at `runtime.New`/`Start`, not something yoloai's checks can detect ahead of time.
+
+### Docker-in-Docker: nested `fuse-overlayfs` can't exec on Docker Desktop / Podman Machine (macOS)
+
+**Symptom:** under `--isolation container-privileged` on macOS, a nested `dockerd` + `docker run hello-world` pulls the image fine then dies with:
+
+```
+exec /hello: invalid argument
+```
+
+Every nested container hits it — `alpine echo`, `busybox uname`, `hello-world` all fail identically with `EINVAL` on `execve`. It is **not** arch-related (arm64-on-arm64; fails even with `--platform linux/arm64`).
+
+**Explanation:** the yoloai base image configures the nested daemon to use the `fuse-overlayfs` graph driver (native `overlay2` can't nest in this container setup). Whether a process can *exec* a binary that lives on a `fuse-overlayfs` mount depends on the **host VM's kernel/FUSE support**: **OrbStack** and native **Linux** can; **macOS Docker Desktop** (LinuxKit) and **Podman Machine** (applehv) cannot — their kernels return `EINVAL` from `execve` against the fuse-backed file. A `/var/lib/docker` volume and `--storage-driver vfs` were both tried and do **not** help (the daemon stays on fuse-overlayfs / fails to start). This is a host-VM capability boundary, not a yoloai or arch defect.
+
+**Fix:** none at the runtime layer — it's a kernel limitation of those VMs. dind works on OrbStack and Linux. The smoke harness reclassifies this specific signature as **N/A (skipped), not FAIL**: `dind_nested_exec_unsupported()` matches `exec <bin>: invalid argument`, and `test_dind` raises `SkipTest` naming the detected provider (`detect_docker_provider`) so a two-run macOS matrix (OrbStack + Docker Desktop) covers dind on the run where it's possible. A genuine dind regression (daemon won't start, network error) does not match the signature and still FAILs.
+
+**Code pointer:** `scripts/smoke_test.py` — `dind_nested_exec_unsupported`, `classify_docker_provider`, `detect_docker_provider`, `test_dind`. Reproduce outside yoloai with `docker run --rm --privileged --entrypoint bash yoloai-base -c 'sudo dockerd & ... sudo docker run --rm hello-world'`.
 
 ### gVisor netstack ignores in-sandbox iptables rules
 

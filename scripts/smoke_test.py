@@ -380,6 +380,51 @@ def dind_applies(spec: BackendSpec) -> bool:
     return spec.isolation == "container-privileged"
 
 
+# dind's nested daemon runs on the fuse-overlayfs graph driver the base image
+# configures (native overlay2 can't nest in this container setup). Whether a
+# nested process can *exec* from fuse-overlayfs depends on the host VM's kernel:
+# OrbStack and Linux can; macOS Docker Desktop and Podman Machine can't — every
+# nested execve returns EINVAL, surfacing as "exec <bin>: invalid argument". That
+# is a host-VM capability boundary, not a yoloai or test defect, so the dind tier
+# reports N/A there (re-run under a capable provider) instead of FAIL. See
+# docs/contributors/backend-idiosyncrasies.md.
+_DIND_EXEC_EINVAL_RE = re.compile(r"exec\s+\S+:\s+invalid argument")
+
+
+def dind_nested_exec_unsupported(output: str) -> bool:
+    """True if dind output carries the fuse-overlayfs nested-exec EINVAL signature.
+
+    Matching this exact signature (not any failure) keeps a genuine dind
+    regression — daemon won't start, network error — reported as FAIL; only the
+    host-VM exec limitation is reclassified as N/A."""
+    return bool(_DIND_EXEC_EINVAL_RE.search(output))
+
+
+def classify_docker_provider(operating_system: str) -> str:
+    """Human-facing provider name from `docker info` OperatingSystem.
+
+    Docker Desktop reports 'Docker Desktop', OrbStack reports 'OrbStack'; a Linux
+    engine reports its distro string, which we pass through."""
+    os_l = operating_system.strip().lower()
+    if "orbstack" in os_l:
+        return "OrbStack"
+    if "docker desktop" in os_l:
+        return "Docker Desktop"
+    return operating_system.strip() or "unknown"
+
+
+def detect_docker_provider() -> str:
+    """Active docker daemon provider name, '' if docker is unreachable."""
+    try:
+        r = subprocess.run(
+            ["docker", "info", "--format", "{{.OperatingSystem}}"],
+            capture_output=True, text=True, timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return classify_docker_provider(r.stdout) if r.returncode == 0 else ""
+
+
 def isolation_check_applies(spec: BackendSpec) -> bool:
     """--network-isolated blocks egress via iptables rules in the container netns —
     a capability of the container daemons (docker/podman/containerd). gVisor's
@@ -1947,7 +1992,9 @@ def test_dind(t: Test, spec: BackendSpec) -> None:
     fuse-overlayfs storage driver the base image configures for nested daemons.
 
     Scheduled only on container-privileged — see dind_applies; the other backends
-    lack the caps to start a nested daemon and are never scheduled.
+    lack the caps to start a nested daemon and are never scheduled. When the host
+    VM can't exec from fuse-overlayfs (macOS Docker Desktop / Podman Machine) the
+    tier reports N/A (skipped), not FAIL — see dind_nested_exec_unsupported.
     """
     project = t.project(f"dind-{spec.label}")
     name = t.sandbox(f"dind-{spec.label}")
@@ -1982,6 +2029,15 @@ def test_dind(t: Test, spec: BackendSpec) -> None:
         "|| { echo '--- dockerd.log ---'; cat /tmp/dockerd.log; exit 1; }"
     )
     r = t.run("exec", name, "--", "bash", "-lc", script, timeout=120)
+    if r.returncode != 0 and dind_nested_exec_unsupported(r.stdout + "\n" + r.stderr):
+        if spec.check_backend == "docker":
+            host_vm = detect_docker_provider() or "this docker host VM"
+        else:
+            host_vm = "Podman Machine"
+        raise SkipTest(
+            f"docker-in-docker unsupported on {host_vm}: nested fuse-overlayfs "
+            "can't exec (EINVAL) — re-run under OrbStack or a Linux host to cover dind"
+        )
     t.assert_ok(r, "dind: dockerd + docker run hello-world")
     t.assert_in("Hello from Docker", r.stdout, "dind hello-world output")
 
