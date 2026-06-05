@@ -316,6 +316,30 @@ def is_full_test(name: str) -> bool:
     return name.split("/")[0] in FULL_ONLY_TESTS
 
 
+# Structural applicability of matrix tests. Some (test × backend) pairings are
+# impossible by construction — no host change makes them runnable — so the runner
+# excludes them from scheduling instead of emitting a misleading SKIP, mirroring
+# how the Linux matrix simply never lists tart/seatbelt. Conditional gating (host
+# prereqs, --full tier) stays a runtime skip; only capability-level impossibility
+# belongs here.
+
+def dind_applies(spec: BackendSpec) -> bool:
+    """dind needs a nested dockerd, which requires the --privileged caps and shared
+    mount propagation that only the container-privileged isolation mode grants."""
+    return spec.isolation == "container-privileged"
+
+
+def isolation_check_applies(spec: BackendSpec) -> bool:
+    """--network-isolated blocks egress via iptables rules in the container netns —
+    a capability of the container daemons (docker/podman/containerd). gVisor's
+    (-enhanced) netstack doesn't honor those rules and the seatbelt/tart backends
+    have no iptables netns at all, so those pairings can never enforce isolation."""
+    return (
+        spec.check_backend in {"docker", "podman", "containerd"}
+        and not spec.isolation.endswith("-enhanced")
+    )
+
+
 # ---------------------------------------------------------------------------
 # Test helper
 # ---------------------------------------------------------------------------
@@ -346,7 +370,15 @@ class Test:
         if self.ctx.debug:
             cmd.extend(["--bugreport", "unsafe"])
         cmd.extend(args)
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        # Detach stdin from the controlling terminal: interactive subcommands
+        # (notably `exec`) put the inherited tty into raw mode via WithTerminal,
+        # and the VM `-it` exec path doesn't fully restore it — leaving the
+        # harness's own terminal stair-stepping. These invocations are never
+        # interactive, so DEVNULL makes WithTerminal skip all terminal handling.
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=timeout,
+            stdin=subprocess.DEVNULL,
+        )
         with self.log_file.open("a") as f:
             f.write(f"$ {' '.join(cmd)}\n")
             f.write(f"exit: {result.returncode}\n")
@@ -1746,14 +1778,9 @@ def test_isolation_check(t: Test, spec: BackendSpec) -> None:
     then execs curl to an external address (should be blocked) and to localhost
     (should not timeout — proves networking stack is functional, not just broken).
 
-    Only runs on container backends where iptables rules are applied by entrypoint.
+    Scheduled only where iptables-based isolation can be enforced — see
+    isolation_check_applies; inapplicable backends are never scheduled.
     """
-    if spec.isolation != "container" or spec.is_seatbelt:
-        raise SkipTest(
-            f"isolation_check only runs on plain container backends (got {spec.label}); "
-            "seatbelt and container-enhanced (gVisor) don't support iptables-based network isolation"
-        )
-
     project = t.project(f"isolation-{spec.label}")
     name = t.sandbox(f"isolation-{spec.label}")
 
@@ -1778,11 +1805,27 @@ def test_isolation_check(t: Test, spec: BackendSpec) -> None:
             break
         time.sleep(1)
 
-    # Outbound to external address should be blocked by iptables rules
-    r = t.run("exec", name, "--", "curl", "-s", "--max-time", "5", "http://1.1.1.1", timeout=30)
-    if r.returncode == 0:
+    # Outbound to external address should be blocked by iptables rules.
+    #
+    # "Active" status only means the sentinel is up; on VM backends the guest's
+    # iptables/ipset default-deny chain can still be a beat behind installing,
+    # so a single egress probe fired the instant we see "active" races the rule
+    # setup and reports a false un-blocked result (standalone the same sandbox
+    # blocks 5/5). Poll instead: the rules are permanent once installed, so we
+    # wait for the first confirmed block. A genuine isolation gap never blocks
+    # and trips the deadline below.
+    blocked = False
+    enforce_deadline = time.monotonic() + 30
+    while time.monotonic() < enforce_deadline:
+        r = t.run("exec", name, "--", "curl", "-s", "--max-time", "5", "http://1.1.1.1", timeout=30)
+        if r.returncode != 0:
+            blocked = True
+            break
+        time.sleep(2)
+    if not blocked:
         raise AssertionError(
-            "curl to 1.1.1.1 succeeded but should be blocked by network isolation"
+            "curl to 1.1.1.1 kept succeeding for 30s but should be blocked by "
+            "network isolation"
         )
 
     # Localhost should not get exit code 28 (timeout) — proves the networking
@@ -1802,15 +1845,9 @@ def test_dind(t: Test, spec: BackendSpec) -> None:
     --privileged caps, the shared mount propagation the entrypoint sets, and the
     fuse-overlayfs storage driver the base image configures for nested daemons.
 
-    Only runs on container-privileged; plain/enhanced/vm backends lack the caps
-    to start a nested daemon, so they skip.
+    Scheduled only on container-privileged — see dind_applies; the other backends
+    lack the caps to start a nested daemon and are never scheduled.
     """
-    if spec.isolation != "container-privileged":
-        raise SkipTest(
-            f"dind only runs on container-privileged (got {spec.label}); "
-            "nested Docker needs --privileged and shared mount propagation"
-        )
-
     project = t.project(f"dind-{spec.label}")
     name = t.sandbox(f"dind-{spec.label}")
 
@@ -2690,23 +2727,41 @@ def main() -> int:
     def run_matrix_test(
         test_label: str,
         test_fn: Callable[[Test, BackendSpec], None],
+        applies_to: Optional[Callable[[BackendSpec], bool]] = None,
+        vm_serial: bool = False,
     ) -> None:
         """Run a test across the backend matrix, one slot per backend.
 
+        When applies_to is given, structurally inapplicable specs (the test could
+        never run there regardless of host — e.g. dind without privileged caps) are
+        excluded from scheduling and reported once, rather than each emitting a
+        misleading per-backend SKIP. Conditional gating (host prereqs, --full) is
+        handled downstream as a genuine runtime skip.
+
         Backends fan out concurrently (bounded by --jobs and, for VM backends, by
         --vm-concurrency); the phase joins before the caller moves on. --jobs 1
-        reproduces the historical strictly-serial behavior exactly.
+        reproduces the historical strictly-serial behavior exactly. vm_serial pins
+        the VM cap to 1 for this phase regardless of --vm-concurrency: used by
+        isolation_check, where concurrent guest-rule setup under VM load was racing
+        the egress probe (the isolation itself is sound — see test_isolation_check).
         """
-        vm_sema = threading.Semaphore(max(1, ctx.vm_concurrency))
-        workers = ctx.jobs if ctx.jobs > 0 else len(matrix)
+        specs = matrix if applies_to is None else [s for s in matrix if applies_to(s)]
+        if applies_to is not None:
+            excluded = [s for s in matrix if not applies_to(s)]
+            if excluded:
+                labels = ", ".join(s.label for s in excluded)
+                print(f"  ({len(excluded)} not applicable, not scheduled: {labels})")
+        vm_cap = 1 if vm_serial else max(1, ctx.vm_concurrency)
+        vm_sema = threading.Semaphore(vm_cap)
+        workers = ctx.jobs if ctx.jobs > 0 else max(1, len(specs))
         if workers <= 1:
-            for spec in matrix:
+            for spec in specs:
                 _run_backend_test(test_label, spec, test_fn, vm_sema)
             return
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = [
                 pool.submit(_run_backend_test, test_label, spec, test_fn, vm_sema)
-                for spec in matrix
+                for spec in specs
             ]
             for f in futures:
                 f.result()  # surface worker exceptions to the main thread
@@ -2729,10 +2784,13 @@ def main() -> int:
     run_matrix_test("stop_start", test_stop_start)
 
     print("\nBackend matrix (isolation_check):")
-    run_matrix_test("isolation_check", test_isolation_check)
+    run_matrix_test(
+        "isolation_check", test_isolation_check,
+        applies_to=isolation_check_applies, vm_serial=True,
+    )
 
     print("\nBackend matrix (dind):")
-    run_matrix_test("dind", test_dind)
+    run_matrix_test("dind", test_dind, applies_to=dind_applies)
 
     # Parallel execution records results in completion order; sort by test name
     # so the summary and manifest are deterministic regardless of --jobs.
