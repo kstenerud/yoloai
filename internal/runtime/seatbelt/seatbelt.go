@@ -431,7 +431,7 @@ func (r *Runtime) InteractiveExec(_ context.Context, name string, cmd []string, 
 	execCmd.Stdout = io.Out
 	execCmd.Stderr = io.Err
 
-	return execCmd.Run()
+	return runtime.InteractiveExitError(execCmd.Run())
 }
 
 // Close is a no-op for seatbelt (no persistent connection).

@@ -345,3 +345,20 @@ func (e *SandboxLockedError) Error() string {
 }
 
 func (e *SandboxLockedError) ExitCode() int { return ExitSandboxLocked }
+
+// ExecExitError reports that an interactive exec ran to completion but the inner
+// command returned a non-zero status. Unlike every other typed error here it
+// carries an ARBITRARY exit code — the inner command's own, not a fixed
+// per-category code — so `yoloai exec <box> -- cmd` propagates cmd's status
+// transparently the way a shell would. Code is in [1,255]. The library
+// translates each backend's exec error to this type at the Sandbox.Exec
+// boundary, giving embedders one public type to match (errors.As) across all
+// backends.
+type ExecExitError struct {
+	Code int
+}
+
+func (e *ExecExitError) Error() string {
+	return fmt.Sprintf("command exited with status %d", e.Code)
+}
+func (e *ExecExitError) ExitCode() int { return e.Code }

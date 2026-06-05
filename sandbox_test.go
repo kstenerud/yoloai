@@ -6,6 +6,8 @@ package yoloai
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,9 +16,38 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 )
+
+// execExitError is the Sandbox.Exec boundary that gives embedders one public
+// type to match across all backends: a non-zero inner exit (internally a
+// *runtime.ExecError, whatever the backend) must surface as the public
+// *ExecExitError carrying the same code; every other error passes through.
+func TestExecExitError_TranslatesRuntimeExecError(t *testing.T) {
+	out := execExitError(&runtime.ExecError{ExitCode: 42, Stderr: "boom"})
+
+	var public *ExecExitError
+	require.ErrorAs(t, out, &public, "runtime.ExecError must become the public ExecExitError")
+	assert.Equal(t, 42, public.Code)
+	assert.Equal(t, 42, public.ExitCode(), "ExecExitError is an ExitCoder carrying the inner code")
+}
+
+func TestExecExitError_WrappedRuntimeExecError(t *testing.T) {
+	wrapped := fmt.Errorf("attach failed: %w", &runtime.ExecError{ExitCode: 7})
+	out := execExitError(wrapped)
+
+	var public *ExecExitError
+	require.ErrorAs(t, out, &public, "errors.As must unwrap to the runtime.ExecError")
+	assert.Equal(t, 7, public.Code)
+}
+
+func TestExecExitError_PassesThroughOtherErrors(t *testing.T) {
+	sentinel := errors.New("not an exit error")
+	assert.Same(t, sentinel, execExitError(sentinel), "non-exec errors are returned unchanged")
+	assert.NoError(t, execExitError(nil), "nil stays nil")
+}
 
 func TestCloneOptions_toInternal(t *testing.T) {
 	in := SandboxCloneOptions{Source: "src", Dest: "dst", Overwrite: true}.toInternal()

@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 
@@ -152,15 +153,20 @@ func (s *Sandbox) Destroy(ctx context.Context, opts SandboxDestroyOptions) (*Des
 }
 
 // Exec runs opts.Command inside the sandbox's container. With opts.PTY true it
-// allocates an interactive terminal (the sandbox must be Active or Idle);
-// non-zero inner exit surfaces as *exec.ExitError. With opts.PTY false it pipes
-// raw stdio via io.In/Out/Err (no PTY) — the right shape for line-oriented
-// protocols like the MCP proxy's JSON-RPC bridge; returns *UsageError when the
-// backend doesn't implement stdio exec (Tart/Seatbelt don't).
+// allocates an interactive terminal (the sandbox must be Active or Idle).
+// With opts.PTY false it pipes raw stdio via io.In/Out/Err (no PTY) — the right
+// shape for line-oriented protocols like the MCP proxy's JSON-RPC bridge;
+// returns *UsageError when the backend doesn't implement stdio exec
+// (Tart/Seatbelt don't). A non-zero inner exit surfaces uniformly across
+// backends as *ExecExitError carrying the inner command's status code.
 func (s *Sandbox) Exec(ctx context.Context, opts SandboxExecOptions, io IOStreams) error {
 	if err := s.c.ensure(ctx); err != nil {
 		return err
 	}
+	return execExitError(s.exec(ctx, opts, io))
+}
+
+func (s *Sandbox) exec(ctx context.Context, opts SandboxExecOptions, io IOStreams) error {
 	if !opts.PTY {
 		execer, ok := s.c.rt.(runtime.StdioExecer)
 		if !ok {
@@ -177,6 +183,17 @@ func (s *Sandbox) Exec(ctx context.Context, opts SandboxExecOptions, io IOStream
 	}
 	user := sandbox.ContainerUser(info.Environment, s.c.layout.HostUID)
 	return s.c.rt.InteractiveExec(ctx, store.InstanceName(s.c.layout.Principal, s.name), opts.Command, user, info.Environment.Workdir.MountPath, io)
+}
+
+// execExitError translates the runtime's internal *runtime.ExecError (a
+// non-zero inner exit) into the public *ExecExitError, so embedders match one
+// public type regardless of backend. Any other error passes through unchanged.
+func execExitError(err error) error {
+	var ee *runtime.ExecError
+	if errors.As(err, &ee) {
+		return &yoerrors.ExecExitError{Code: ee.ExitCode}
+	}
+	return err
 }
 
 // SandboxInfo is the combined metadata + live state returned by Sandbox.Inspect /

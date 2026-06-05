@@ -193,5 +193,5 @@ func (a *Agent) Attach(ctx context.Context, io IOStreams) error {
 	}
 	sock := sandbox.ReadTmuxSocket(a.s.c.layout, a.s.name)
 	cmd := a.s.c.rt.AttachCommand(sock, io.Rows, io.Cols, info.Environment.Isolation)
-	return a.s.c.rt.InteractiveExec(ctx, containerName, cmd, user, "", io)
+	return execExitError(a.s.c.rt.InteractiveExec(ctx, containerName, cmd, user, "", io))
 }

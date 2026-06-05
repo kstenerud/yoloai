@@ -4,6 +4,7 @@ package runtime
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -20,6 +21,24 @@ type ExecError struct {
 
 func (e *ExecError) Error() string {
 	return fmt.Sprintf("exec exited with code %d: %s", e.ExitCode, e.Stderr)
+}
+
+// InteractiveExitError normalizes the error from an interactive exec into the
+// runtime's uniform contract: a clean non-zero exit becomes an *ExecError
+// carrying the code (Stderr empty — the streams were wired to the caller, not
+// captured), any other failure passes through, and nil stays nil. Backends that
+// shell out hand it exec.Cmd.Run's result; the result is that every backend's
+// InteractiveExec surfaces a non-zero inner exit the same way, so the CLI can
+// extract the code with one errors.As regardless of backend.
+func InteractiveExitError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return &ExecError{ExitCode: exitErr.ExitCode()}
+	}
+	return err
 }
 
 // RunCmdExec runs an exec.Cmd, captures stdout/stderr, and returns an

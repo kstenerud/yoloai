@@ -4,6 +4,7 @@ package containerdrt
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -155,6 +156,19 @@ func TestIntegration_ContainerLifecycle(t *testing.T) {
 	result, err := rt.Exec(ctx, name, []string{"echo", "hello"}, "")
 	require.NoError(t, err)
 	assert.Contains(t, result.Stdout, "hello")
+
+	// InteractiveExec must propagate a non-zero inner exit as *runtime.ExecError
+	// carrying the code (regression: it used to discard the exit status and
+	// always return nil, so `yoloai exec -- false` exited 0 on this backend).
+	ierr := rt.InteractiveExec(ctx, name, []string{"false"}, "", "",
+		runtime.IOStreams{In: nil, Out: io.Discard, Err: io.Discard})
+	var execErr *runtime.ExecError
+	require.ErrorAs(t, ierr, &execErr, "non-zero interactive exit must surface as *runtime.ExecError")
+	assert.Equal(t, 1, execErr.ExitCode)
+
+	// InteractiveExec with a zero exit returns nil.
+	require.NoError(t, rt.InteractiveExec(ctx, name, []string{"true"}, "", "",
+		runtime.IOStreams{In: nil, Out: io.Discard, Err: io.Discard}))
 
 	// Stop.
 	err = rt.Stop(ctx, name)

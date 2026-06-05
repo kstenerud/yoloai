@@ -141,7 +141,10 @@ func (r *Runtime) InteractiveExec(ctx context.Context, name string, cmd []string
 		go forwardResizes(ctx, process, io.Resize)
 	}
 
-	<-exitCh
+	exitStatus := <-exitCh
+	if code := int(exitStatus.ExitCode()); code != 0 {
+		return &runtime.ExecError{ExitCode: code}
+	}
 	return nil
 }
 

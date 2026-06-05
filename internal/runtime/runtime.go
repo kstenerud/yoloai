@@ -243,7 +243,9 @@ type Runtime interface {
 	// wiring the supplied IOStreams to the remote stdio. The caller
 	// chooses whether to allocate a PTY (io.TTY) and at what size
 	// (io.Rows / io.Cols). If workDir is non-empty, the command runs in
-	// that directory.
+	// that directory. A clean non-zero exit of the inner command is
+	// reported as an *ExecError carrying the code (use InteractiveExitError
+	// to normalize a shelled-out backend's exec.Cmd result to this contract).
 	InteractiveExec(ctx context.Context, name string, cmd []string, user string, workDir string, io IOStreams) error
 
 	// Prune removes orphaned backend resources. knownInstances lists instance

@@ -474,7 +474,7 @@ func (r *Runtime) InteractiveExec(ctx context.Context, name string, cmd []string
 	c.Stdin = io.In
 	c.Stdout = io.Out
 	c.Stderr = io.Err
-	return c.Run()
+	return runtime.InteractiveExitError(c.Run())
 }
 
 // StdioExec runs cmd inside the container with stdio connected to the

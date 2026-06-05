@@ -7,7 +7,6 @@ import (
 	"errors"
 	"log/slog"
 	"os"
-	"os/exec"
 
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
@@ -37,7 +36,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 		if err := cliutil.WithTerminal(func(io yoloai.IOStreams) error {
 			return sb.Exec(ctx, yoloai.SandboxExecOptions{Command: cmdArgs, PTY: true}, io)
 		}); err != nil {
-			if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
+			if exitErr, ok := errors.AsType[*yoloai.ExecExitError](err); ok {
 				os.Exit(exitErr.ExitCode())
 			}
 			return cliutil.SandboxErrorHint(name, err)

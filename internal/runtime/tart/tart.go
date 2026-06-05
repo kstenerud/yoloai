@@ -550,7 +550,7 @@ func (r *Runtime) InteractiveExec(ctx context.Context, name string, cmd []string
 	c.Stdin = io.In
 	c.Stdout = io.Out
 	c.Stderr = io.Err
-	return c.Run()
+	return runtime.InteractiveExitError(c.Run())
 }
 
 // Close is a no-op for Tart (no persistent client connection).

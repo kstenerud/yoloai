@@ -31,6 +31,7 @@ row to the index.
 | Containerd socket: no error from `os.Stat` despite permission denied | [Containerd: Stat can't detect EPERM](#osstat-on-the-containerd-socket-does-not-detect-permission-denied) |
 | Containerd GC removes blobs; image becomes unrunnable | [Containerd: GC removes child blobs](#containerd-gc-removes-child-blobs-while-leaving-the-root-manifest-intact) |
 | `yoloai apply` fails on containerd with `git diff --quiet: exec exited with code 1` | [Containerd: GitExec must return *runtime.ExecError](#gitexec-must-return-runtimeexecerror-not-a-plain-fmterrorf-on-non-zero-exit) |
+| `yoloai exec <box> -- false` exits 0 on containerd-vm; isolation_check smoke flaps | [Containerd: InteractiveExec discarded the exit code](#interactiveexec-discarded-the-inner-exit-code-so-yoloai-exec-always-exited-0) |
 | `already exists` on snapshot create after crash | [Containerd: orphaned snapshots](#kata-orphaned-snapshots-from-crashed-runs-must-be-pre-cleared) |
 | CNI bridge plugin: "netns and CNI_NETNS should not be the same" | [CNI: netns.NewNamed switches OS thread](#netnsnewnamed-switches-the-os-thread-via-unshare-and-never-restores-it) |
 | `createNetNS` fails with "file exists" (EEXIST) | [CNI: stale netns file](#stale-named-netns-files-at-varrunnetnsname-persist-after-failed-runs) |
@@ -888,6 +889,36 @@ Fix: construct `&runtime.ExecError{ExitCode, Stderr}` directly so callers can
 match exit codes through `errors.As`. Regression test at
 `runtime/containerd/containerd_test.go::TestGitExec_ExitOneReturnsExecError`.
 See `runtime/containerd/containerd.go::GitExec`.
+
+### `InteractiveExec` discarded the inner exit code, so `yoloai exec` always exited 0
+
+Containerd's `InteractiveExec` (`runtime/containerd/exec.go`) drained the task's
+exit channel but threw the status away — `<-exitCh; return nil`. Every
+interactive exec therefore reported success regardless of the inner command's
+exit code, so `yoloai exec <box> -- false` exited 0 on this backend (Docker
+propagates the code for free: its `InteractiveExec` shells out and `exec.Cmd.Run`
+returns an `*exec.ExitError`). The non-interactive `Exec` on the same backend was
+always correct — it reads `exitStatus.ExitCode()` — which made the gap easy to
+miss.
+
+This silently turned the smoke harness's `isolation_check` egress probe (which
+keyed off the `yoloai exec` exit code) into a no-op: the inner `curl` was being
+blocked correctly, but the swallowed exit code made the test alternately
+"pass for the wrong reason" or trip its blocked-by-timeout deadline depending on
+incidental exec-machinery errors — presenting as an intermittent isolation
+fail-open that did not exist.
+
+Fix: capture `exitStatus := <-exitCh` and return `&runtime.ExecError{ExitCode:
+code}` on non-zero, mirroring the non-interactive `Exec`. The shared
+`runtime.InteractiveExitError` helper normalizes the shelled-out backends
+(docker/tart/seatbelt) to the same `*runtime.ExecError` contract, so every
+backend's `InteractiveExec` surfaces a non-zero inner exit identically. The
+public `Sandbox.Exec` boundary then translates that internal error into the
+public `*yoloai.ExecExitError` (carrying the inner code) — the CLI can't import
+`internal/runtime` (G7), so it matches the public type with one `errors.As` and
+`os.Exit`s the code (`cli/sandboxcmd/exec.go`). Regression test:
+`runtime/containerd/integration_test.go` (the `TestIntegration_ContainerLifecycle`
+exec assertions).
 
 ### `os.Stat` on the containerd socket does not detect permission denied
 

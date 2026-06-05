@@ -71,3 +71,9 @@ type ResourceLimitError = yoerrors.ResourceLimitError
 // It carries structured fields (HolderAlive, HolderPID, LockPath) so embedders
 // can distinguish a live holder from a stale lock and branch accordingly.
 type SandboxLockedError = yoerrors.SandboxLockedError
+
+// ExecExitError reports that Sandbox.Exec ran the inner command to completion
+// but it returned a non-zero status. It carries the inner command's own exit
+// code (Code, in [1,255]); the CLI propagates it as the process exit status so
+// `yoloai exec … -- cmd` behaves like a shell. Match it with errors.As.
+type ExecExitError = yoerrors.ExecExitError
