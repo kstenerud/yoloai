@@ -15,6 +15,23 @@ PY_REQ_LOCK := internal/runtime/monitor/tests/requirements-dev.lock
 GOFILES := $(shell find . -name '*.go' -not -path './vendor/*')
 EMBEDFILES := $(shell find internal -type f \( -name 'Dockerfile' -o -name '*.sh' -o -name '*.py' -o -name '*.conf' -o -name '*.md' \) -not -path './vendor/*' -not -path '*/__pycache__/*' -not -path '*/tests/*')
 
+# Resolve the Docker endpoint from the active docker context when DOCKER_HOST is
+# not already set. `docker context use` retargets the docker CLI, but the Go SDK
+# and the HOME-isolating integration harness only honor DOCKER_HOST — so a stale
+# /var/run/docker.sock symlink (e.g. after switching OrbStack <-> Docker Desktop)
+# would otherwise break the docker test tiers. Empty (docker absent / no context)
+# degrades harmlessly to the SDK default socket. Exported only for the targets
+# that actually talk to Docker, so `build`/`check`/`integration-podman` are
+# unaffected and pay no `docker` invocation cost. Recursive `=` defers the shell
+# call until one of these targets runs.
+# DOCKER_HOST_ENV snapshots any caller-provided DOCKER_HOST at parse time (`:=`)
+# so DOCKER_HOST_RESOLVED can reference it without the target-specific DOCKER_HOST
+# referencing itself. Recursive `=` on RESOLVED defers the `docker` call until a
+# listed target actually runs.
+DOCKER_HOST_ENV := $(DOCKER_HOST)
+DOCKER_HOST_RESOLVED = $(if $(DOCKER_HOST_ENV),$(DOCKER_HOST_ENV),$(shell docker context inspect --format '{{.Endpoints.docker.Host}}' 2>/dev/null))
+integration e2e base-image smoketest smoketest-full: export DOCKER_HOST = $(DOCKER_HOST_RESOLVED)
+
 .PHONY: build test fmt lint tidy-check govulncheck hadolint actionlint check cover integration e2e integration-podman integration-seatbelt integration-tart python-test python-typecheck ensure-python-venv setup-dev-python smoketest smoketest-full releasetest setcap clean
 
 build: $(BINARY)
