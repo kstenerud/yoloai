@@ -1807,6 +1807,15 @@ def test_isolation_check(t: Test, spec: BackendSpec) -> None:
 
     # Outbound to external address should be blocked by iptables rules.
     #
+    # The egress verdict comes from curl's OWN output, not the `yoloai exec`
+    # exit code: curl with `-w %{http_code}` prints "000" when it never gets a
+    # response (connection blocked/timed out) and a real status ("200", "301",
+    # …) when it reaches the host. This is transport-independent — it does not
+    # depend on the backend's exec machinery propagating the inner exit code
+    # (containerd's InteractiveExec historically discarded it, which silently
+    # turned an exit-code probe into a no-op false-pass; see
+    # backend-idiosyncrasies.md).
+    #
     # "Active" status only means the sentinel is up; on VM backends the guest's
     # iptables/ipset default-deny chain can still be a beat behind installing,
     # so a single egress probe fired the instant we see "active" races the rule
@@ -1815,17 +1824,24 @@ def test_isolation_check(t: Test, spec: BackendSpec) -> None:
     # wait for the first confirmed block. A genuine isolation gap never blocks
     # and trips the deadline below.
     blocked = False
+    last_code = ""
     enforce_deadline = time.monotonic() + 30
     while time.monotonic() < enforce_deadline:
-        r = t.run("exec", name, "--", "curl", "-s", "--max-time", "5", "http://1.1.1.1", timeout=30)
-        if r.returncode != 0:
+        r = t.run(
+            "exec", name, "--",
+            "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
+            "--max-time", "5", "http://1.1.1.1",
+            timeout=30,
+        )
+        last_code = r.stdout.strip().splitlines()[-1].strip() if r.stdout.strip() else ""
+        if last_code == "000":
             blocked = True
             break
         time.sleep(2)
     if not blocked:
         raise AssertionError(
-            "curl to 1.1.1.1 kept succeeding for 30s but should be blocked by "
-            "network isolation"
+            f"curl to 1.1.1.1 returned http_code {last_code!r} for 30s but "
+            "should be blocked (http_code 000) by network isolation"
         )
 
     # Localhost should not get exit code 28 (timeout) — proves the networking
