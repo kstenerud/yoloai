@@ -4,7 +4,7 @@
 # Plan: Replace auto-migration with a status-driven gate + explicit `yoloai system migrate`
 
 > **Status: implemented** on branch `layering-refactor` (2026-06-02). Recorded in decision
-> [D61](../../decisions/README.md). The D60 data-dir bifurcation it builds on is unchanged; this
+> [D61](../../decisions/working-notes.md). The D60 data-dir bifurcation it builds on is unchanged; this
 > plan changed *when/how* migration runs (read-only gate + one explicit command), the version-stamp
 > format (JSON → plain int), and removed the engine's silent auto-migrate.
 
@@ -78,7 +78,7 @@ This plan also folded in the fix to `internal/cli/root.go` (`Execute()` must cha
 - Tests: `internal/config/schema_test.go`, `internal/cli/cliutil/clischema_test.go`,
   `internal/cli/gate_test.go`, `internal/cli/root_test.go` (reworked),
   `internal/cli/system/migrate_test.go`.
-- Docs: `docs/BREAKING-CHANGES.md` (D60 entry), `docs/contributors/decisions/README.md` (D61),
+- Docs: `docs/BREAKING-CHANGES.md` (D60 entry), `docs/contributors/decisions/working-notes.md` (D61),
   `docs/contributors/architecture/README.md`.
 
 ## Commit plan (one logical change each)

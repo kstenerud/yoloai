@@ -487,7 +487,7 @@ the specific post URL was not confirmed at time of writing.]
 
 ### yoloAI working-notes.md — D-entries as proto-ADRs
 
-Internal source: `docs/contributors/decisions/README.md`. The D-numbered entries (D1 onward)
+Internal source: `docs/contributors/decisions/working-notes.md`. The D-numbered entries (D1 onward)
 follow the Nygard shape: Decision / Rejected / Why / Consequences / Composition.
 The "Rejected" field is the yoloAI implementation of "document the no." Notable
 examples: D1 (Go over Python/Rust — Python rejected for distribution reasons, Rust
@@ -564,7 +564,7 @@ honest, specific, actionable diagnostics builds trust and reduces debugging time
 For yoloAI, this shapes the disk pre-flight design (commit `8749864`): rather than
 surfacing a confusing "agent idle 9s+" message when ENOSPC prevents container
 creation, the tool proactively checks disk availability and reports `ENOSPC` with
-context before the operation begins. The `docs/contributors/decisions/README.md` memory file
+context before the operation begins. The `docs/contributors/decisions/working-notes.md` memory file
 (`project_smoke_disk_pressure.md`) documents this exact failure mode: "Smoke fails
 on containerd-vm but not docker → check `df -h /` first; ENOSPC manifests as
 'agent idle 9s+' not a clear error."

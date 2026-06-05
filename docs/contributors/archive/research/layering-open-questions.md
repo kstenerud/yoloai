@@ -318,7 +318,7 @@ Issues 8 and 10 are cleanup that parallelizes well.
 
 ### Theme 1: Runtime interface design (capabilities, descriptor, optional interfaces)
 
-**D7 — Pluggable `runtime.Runtime` interface** (`docs/contributors/decisions/README.md:145`)
+**D7 — Pluggable `runtime.Runtime` interface** (`docs/contributors/decisions/working-notes-archive.md`)
 > "No backend-specific types leak outside their package."
 Directly establishes the foundational rule that W-L2–L7 enforce more rigorously.
 
@@ -440,7 +440,7 @@ dedicated `discovered-findings.md` yet; it will be created on first mid-workstre
 
 ### Theme 5: Backend abstraction
 
-**D7 — Backend registry evolution** (`docs/contributors/decisions/README.md:158`)
+**D7 — Backend registry evolution** (`docs/contributors/decisions/working-notes-archive.md`)
 > "W11 of the 2026-05 architecture remediation registers `(factory, descriptor)` tuples
 > so adding a backend is purely additive."
 The registry (`runtime.Register`, `runtime.Descriptors()`) is the model W-L3 builds on
@@ -526,6 +526,6 @@ surfaces. The fix is small and self-contained; there's no reason to migrate the 
 - `docs/contributors/design/plans/mcp-server.md` — MCP server plan
 - `docs/contributors/archive/plans/exit-codes.md` — exit code taxonomy
 - `docs/contributors/design/research/runtime-interface-spike.md` — W11 spike (complete; verdict: proceed)
-- `docs/contributors/decisions/README.md` — D-numbered decision log
+- `docs/contributors/decisions/working-notes.md` — D-numbered decision log
 - `docs/contributors/principles/development-principles.md` — §2, §4, §5, §8, §9 most relevant
 - `docs/contributors/architecture/README.md` — code navigation guide

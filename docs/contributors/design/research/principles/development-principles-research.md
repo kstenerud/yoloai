@@ -189,7 +189,7 @@ context of UI design in Apple's human interface guidelines and in Raymond's *The
 of Unix Programming* (2003). The principle: a program should behave in the way that
 least surprises the user.
 
-For yoloAI, D3 in `docs/contributors/decisions/README.md` is the worked example: directories
+For yoloAI, D3 in `docs/contributors/decisions/working-notes-archive.md` is the worked example: directories
 mount at mirrored host paths because a user reading an error trace inside the
 sandbox should see the same path they see outside. Remapping paths to `/work/`
 would have been astonishing. The POLA argument is explicit in D3: "Principle of
@@ -293,7 +293,7 @@ traversals ("be liberal" does not mean "skip the check").
 
 ## §2 — Boundary discipline: domain packages don't leak runtime/backend types
 
-### Internal source — D7 (`docs/contributors/decisions/README.md`)
+### Internal source — D7 (`docs/contributors/decisions/working-notes-archive.md`)
 
 The design decision is D7: "No backend-specific types leak outside their package."
 The registry design (W11, commit `1f4457c`) formalizes this: `runtime.New()` takes
@@ -366,7 +366,7 @@ Applied to yoloAI: `sandbox/parse.go` validates sandbox names at the CLI boundar
 attempting creates. Each layer validates because the layer above may be bypassed
 (tests call sandbox functions directly; future callers may not go through the CLI).
 
-### D6 — Symlink resolution before safety checks (`docs/contributors/decisions/README.md`)
+### D6 — Symlink resolution before safety checks (`docs/contributors/decisions/working-notes-archive.md`)
 
 D6 is the worked example the principle cites. The decision: path safety checks
 operate on `filepath.EvalSymlinks(path)` results, not on the path as typed.
@@ -419,7 +419,7 @@ King's blog post acknowledges that statically typed languages with sum types
 them (Java, Go). Go lacks sum types and has limited type aliases. The principle
 still applies, with Go-specific adaptations.
 
-D10 (`docs/contributors/decisions/README.md`): sandbox name validation happens at the CLI
+D10 (`docs/contributors/decisions/working-notes-archive.md`): sandbox name validation happens at the CLI
 boundary against a regex. The "parse" step is `parse.SandboxName(s string)` in
 `sandbox/parse.go`, which returns a validated name value (or error). All downstream
 code receives the validated name. No downstream code re-validates it; they trust
@@ -476,7 +476,7 @@ In Go, this aligns with the "accept interfaces, return structs" principle
 from a constructor communicates "this is the thing, fully initialized." An
 unexported zero value is an invalid state by convention.
 
-### Network isolation "fail loudly" — D11 (`docs/contributors/decisions/README.md`)
+### Network isolation "fail loudly" — D11 (`docs/contributors/decisions/working-notes-archive.md`)
 
 D11 documents the network-isolation implementation: iptables + ipset, default-deny
 with an allowlist. The "fail loudly" behavior: if iptables setup fails (missing
@@ -604,7 +604,7 @@ yoloAI-specific discipline derived from the project's public-beta posture
 (`CLAUDE.md` §Project Status: "Breaking changes are allowed but must be tracked in
 `docs/BREAKING-CHANGES.md`"). The intellectual backing comes from several directions.
 
-### D16 — Remove legacy shims promptly (`docs/contributors/decisions/README.md`)
+### D16 — Remove legacy shims promptly (`docs/contributors/decisions/working-notes-archive.md`)
 
 D16 is the worked example. The `runtime-config.json` fallback for the older
 `config.json` name was added in commit `fdfe0c3` and removed seven minutes later
@@ -646,7 +646,7 @@ vestigial shims) while preserving user trust (changes are announced and explaine
 
 ## §9 — Plan-then-execute on cleanup: avoid opportunistic refactors that don't compose
 
-### D19 — Architecture remediation cycles (`docs/contributors/decisions/README.md`)
+### D19 — Architecture remediation cycles (`docs/contributors/decisions/working-notes-archive.md`)
 
 D19 is the primary internal source. The architecture remediation process:
 "Periodic architecture audits produce a numbered remediation plan (W1, W2, …).
@@ -688,7 +688,7 @@ intermediate broken state.
 
 ## §10 — Code quality gate: `make check` is the mandatory final step
 
-### D20 — `make check` enforcement via Claude Code Stop hook (`docs/contributors/decisions/README.md`)
+### D20 — `make check` enforcement via Claude Code Stop hook (`docs/contributors/decisions/working-notes-archive.md`)
 
 D20 is the primary internal source. The Stop hook (``.claude/hooks/on-stop.sh``)
 runs `make check` before any AI-assisted edit can complete. If `make check` fails,
@@ -734,7 +734,7 @@ Convention over Configuration for the quality gate: sensible default behavior
 
 ## §11 — Iterate when the first approach doesn't work
 
-### D14 — Pluggable idle detection (`docs/contributors/decisions/README.md`)
+### D14 — Pluggable idle detection (`docs/contributors/decisions/working-notes-archive.md`)
 
 D14 is the primary worked example. The decision log documents four rejected
 approaches before the pluggable design:

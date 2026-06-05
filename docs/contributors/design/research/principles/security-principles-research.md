@@ -758,7 +758,7 @@ Concrete yoloAI implementations:
   `$HOME`, `/`, `/etc`, `/usr`, `/var`, `/boot`, `/bin`, `/sbin`, `/lib`, macOS
   system directories unless `:force` is appended. The `:force` suffix is an
   explicit, visible override, not a config flag.
-- **`:rw` is explicit:** D4 in `docs/contributors/decisions/README.md` — "Implicit upgrade
+- **`:rw` is explicit:** D4 in `docs/contributors/decisions/working-notes-archive.md` — "Implicit upgrade
   from `:ro` to `:rw` on first write rejected as the kind of magic that produces
   incidents." The user must explicitly specify `:rw`; it is not inferred.
 - **`--isolation container-privileged`:** An explicit isolation level name, not a

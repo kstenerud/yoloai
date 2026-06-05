@@ -423,7 +423,7 @@ Operational state (`setup_complete`) lives in `~/.yoloai/state.yaml`.
 
 **Date:** 2026-05-21. **Status:** Accepted.
 
-**Decision.** Adopt a `docs/contributors/principles/` + `docs/contributors/standards/` split, modelled on the foley project but adapted for yoloAI's single-author OSS CLI scope. Four principle docs (general, development, testing, security-sandbox); standards file per language / surface. `docs/contributors/decisions/README.md` (this file) holds D-numbered decisions.
+**Decision.** Adopt a `docs/contributors/principles/` + `docs/contributors/standards/` split, modelled on the foley project but adapted for yoloAI's single-author OSS CLI scope. Four principle docs (general, development, testing, security-sandbox); standards file per language / surface. `docs/contributors/decisions/working-notes.md` holds D-numbered decisions.
 
 **Rejected.**
 - *Keep `standards/GO.md` and `standards/CLI.md` as the entire surface* — rejected because they answer *how* but not *why*; principles questions ("should this be a feature flag?", "should this validate at this layer?") had no canonical home.

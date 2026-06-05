@@ -464,7 +464,7 @@ Project `CLAUDE.md` §Code Quality Gate; D20. Full citations: `../research/princ
 
 ### Pattern
 
-Threshold: three failed attempts at the same approach is the trigger. Stop, write down what didn't work and why, and look for the structural insight the failures share. The failure trail is data, not waste; preserve it in `docs/contributors/design/research/` or `docs/contributors/decisions/README.md` so the lesson survives.
+Threshold: three failed attempts at the same approach is the trigger. Stop, write down what didn't work and why, and look for the structural insight the failures share. The failure trail is data, not waste; preserve it in `docs/contributors/design/research/` or `docs/contributors/decisions/working-notes.md` so the lesson survives.
 
 ### Worked examples
 

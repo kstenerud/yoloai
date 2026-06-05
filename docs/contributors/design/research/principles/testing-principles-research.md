@@ -538,7 +538,7 @@ test written for a real bug was made to fail; it earned its entry into the suite
 
 ### D21 — two-stage smoke sentinel + disk pre-flight (working-notes.md)
 
-The canonical yoloAI example is D21 (`docs/contributors/decisions/README.md`):
+The canonical yoloAI example is D21 (`docs/contributors/decisions/working-notes-archive.md`):
 
 > **Date:** 2026-05-21 (commit `0d8d650`). A disk-pressure failure on
 > containerd-vm manifested as "agent idle 9s+" with no useful diagnostic. The
@@ -654,5 +654,5 @@ marked [verify] where they appear in the document:
   or page; treat as [verify] if quoting directly.
 
 All Go commits referenced are present in the yoloAI repository as of 2026-05-21.
-All internal D-entries are sourced from `docs/contributors/decisions/README.md` as of
+All internal D-entries are sourced from `docs/contributors/decisions/working-notes.md` as of
 2026-05-21.

@@ -4,8 +4,8 @@
 
 # Principal isolation (multi-tenant) — security research
 
-**Status: research, pre-design.** Commissioned by [D59](../../decisions/README.md) (which
-extends [D58](../../decisions/README.md)) to settle the *isolation* axis of multi-principal
+**Status: research, pre-design.** Commissioned by [D59](../../decisions/working-notes.md) (which
+extends [D58](../../decisions/working-notes.md)) to settle the *isolation* axis of multi-principal
 embedding before any plan doc. This file is the dedicated security pass the project's
 security-research rule requires; it does **not** decide — it establishes facts and frames
 the decisions the plan will make. Mechanisms named here as "recommended direction" still
@@ -284,7 +284,7 @@ hook as future daemon work.
 
 ## Cross-references
 
-- Decisions: [D58](../../decisions/README.md) (binding axis), [D59](../../decisions/README.md)
+- Decisions: [D58](../../decisions/working-notes.md) (binding axis), [D59](../../decisions/working-notes.md)
   (isolation axis).
 - Principles: [`architecture-principles.md §3`](../../principles/architecture-principles.md)
   (the emerging frame), [`security-principles.md`](../../principles/security-principles.md)

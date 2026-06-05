@@ -137,7 +137,7 @@ verdict), then 3 (the rootless rework, which depends on R1), then 4–6.
 
 ## References
 
-- D69, D70 — `docs/contributors/decisions/README.md` (the docker gate + daemon-location fix this mirrors).
+- D69, D70 — `docs/contributors/decisions/working-notes.md` (the docker gate + daemon-location fix this mirrors).
 - `docs/contributors/backend-idiosyncrasies.md` — OrbStack `/tmp` gVisor chroot collision; gVisor netstack ignores in-sandbox iptables.
 - `internal/runtime/podman/` — `podman.go`, `caps.go` (current rootless block + host-PATH check).
 - `internal/runtime/docker/docker.go` — `RequiredCapabilities` (the daemon-location pattern to mirror).

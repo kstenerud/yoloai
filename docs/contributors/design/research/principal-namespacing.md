@@ -15,7 +15,7 @@ blocker. This file establishes the verified naming constraints across every surf
 principal id would touch, frames the schemes for combining principal + sandbox name into a
 runtime instance name, and records the decision the owner made from that framing.
 Commissioned in the spirit of
-[D58](../../decisions/README.md)/[D59](../../decisions/README.md) (binding + isolation
+[D58](../../decisions/working-notes.md)/[D59](../../decisions/working-notes.md) (binding + isolation
 axes of multi-principal embedding).
 
 > **Decision (2026-06-03).** The binding ceiling is containerd's enforced **`maxLength=76`**,
@@ -26,7 +26,7 @@ axes of multi-principal embedding).
 > margin, so `MaxNameLength` **stays 56 (no breaking change)**. **No library-side hashing
 > and no fallback** — the daemon supplies a bounded, unique, charset-safe `PrincipalSegment`
 > (it owns the principal registry, so uniqueness is deterministic, not gambled on a
-> birthday bound). This is [D58](../../decisions/README.md)'s "library never synthesizes
+> birthday bound). This is [D58](../../decisions/working-notes.md)'s "library never synthesizes
 > principal scope" applied to *length*. The schema is **two parsed boundary types** —
 > `SandboxName` (≤56, containerd-conformant grammar, also closing DF16) and
 > `PrincipalSegment` (≤8, alphanumeric, non-empty, daemon-supplied/validated, never
@@ -174,7 +174,7 @@ repeated here. The *naming-specific* concern is **length × charset**:
 the principal registry, so it can mint a short unique segment deterministically; library
 hashing would spend budget *gambling* (birthday bound) on the very cross-tenant-uniqueness
 property the daemon can simply *guarantee*. This is the length-axis reading of
-[D58](../../decisions/README.md)'s "library never synthesizes principal scope": the library
+[D58](../../decisions/working-notes.md)'s "library never synthesizes principal scope": the library
 receives a `PrincipalSegment` it only *validates* (≤8, alphanumeric, non-empty,
 non-sentinel) and never derives. The unbounded shapes below (UUID, email) are therefore the
 **daemon's** problem to compress into ≤8 chars before handing the segment down — not the
@@ -341,7 +341,7 @@ The reserved sentinel must be excluded from the legal principal-id charset (mirr
     also **closes DF16** — `ValidNameRe`'s looseness (`my-app-` accepted) disappears once the
     name is a parsed type instead of a regex-validated string. `MaxNameLength` stays **56**.
   - **`PrincipalSegment`** — `≤ 8` chars, alphanumeric, non-empty, **daemon-supplied and
-    library-*validated*, never synthesized** (the [D58](../../decisions/README.md) invariant
+    library-*validated*, never synthesized** (the [D58](../../decisions/working-notes.md) invariant
     on the length axis). The library rejects an out-of-spec segment; it never hashes or
     truncates to rescue one (the "no fallback" decision).
 - **Budget check:** `7 (yoloai-) + 8 (P) + 1 (sep) + 56 (N) = 72 ≤ 76` (containerd ceiling),
@@ -405,9 +405,9 @@ not — stays 56). The following remain open and feed the implementing plan:
   deputy, the parent of this study), **Q1** (principal-id unforgeability/sanitization, the
   charset/forgery half not repeated here), **Q3** (enumeration leaks — labels here are the
   runtime mirror of the filesystem partition there).
-- Decisions: [D58](../../decisions/README.md) (binding axis — library never synthesizes
-  principal scope), [D59](../../decisions/README.md) (isolation axis — physical partition),
-  [D62](../../decisions/README.md) (**the namespacing decision recorded from this study** —
+- Decisions: [D58](../../decisions/working-notes.md) (binding axis — library never synthesizes
+  principal scope), [D59](../../decisions/working-notes.md) (isolation axis — physical partition),
+  [D62](../../decisions/working-notes.md) (**the namespacing decision recorded from this study** —
   deterministic `yoloai-<principal>-<name>`, `P≤8`/`N≤56`, no library hashing).
 - Code ground truth: `internal/sandbox/store/paths.go:113-132` (`ValidateName`,
   `InstanceName`); `internal/config/names.go:10,14` (`MaxNameLength`, `ValidNameRe`);

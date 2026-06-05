@@ -103,7 +103,7 @@ What IS enforced:
 
 ## Cross-references
 
-- **Relative paths from the current file.** A doc at `docs/contributors/principles/foo.md` linking to `docs/contributors/decisions/README.md` uses `../working-notes.md`, not the absolute path. Relative links survive when files move.
+- **Relative paths from the current file.** A doc at `docs/contributors/principles/foo.md` linking to `docs/contributors/decisions/working-notes.md` uses `../decisions/working-notes.md`, not the absolute path. Relative links survive when files move.
 - **For files outside the current subtree**, use the path relative to repo root for clarity (e.g., from `docs/contributors/design/research/principles/x.md` referencing `internal/runtime/registry/descriptor.go`, write `internal/runtime/registry/descriptor.go`, not `../../../../internal/runtime/registry/descriptor.go`).
 - **External links**: standard Markdown `[text](url)` form. URLs should be permalinks (commit SHA, dated archive link) for sources that can change.
 
