@@ -476,7 +476,7 @@ Host context: `IsRoot`, `IsWSL2`, `InContainer`, `KVMGroup`. Detected once per i
 | `yoloai system info` | `cli/system/info.go` | Version, paths, disk usage, backend availability |
 | `yoloai system agents` | `cli/system/backends_agents.go` | Lists agent definitions from `agent` package |
 | `yoloai system backends` | `cli/system/backends_agents.go` | Probes each backend via `cliutil.CheckBackend` |
-| `yoloai system build` | `cli/system/system.go` | `yoloai.System.Build()` |
+| `yoloai system build` | `cli/system/system.go` | `yoloai.System.BuildImage()` |
 | `yoloai system setup` | `cli/system/system.go` + `cli/system/setup.go` (the wizard owns host inspection, prompts, auto-pick) | `yoloai.System.Config().Set()` (writes `tmux_conf`/`container_backend`/`agent`); `Backends()`/`Agents()` for choices — no library setup verb |
 | `yoloai system check` | `cli/system/check.go` | `yoloai.System.Check()` |
 | `yoloai doctor` | `cli/doctorcmd/doctor.go` | `System.Doctor()` (→ `caps.RunChecks()` + `caps.FormatDoctor()`) + a dry-run `System.Prune()` and `DiskUsage()` for the advisory sections |

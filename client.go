@@ -15,7 +15,7 @@
 // Workdir diffs, the on-disk allowlist) and, via Client.System(), cross-backend
 // admin — a backend-bound op on such a Client returns ErrBackendRequired.
 //
-//   - System — the admin/cross-backend sub-handle (DiskUsage, Prune, Build,
+//   - System — the admin/cross-backend sub-handle (DiskUsage, Prune, BuildImage,
 //     Check, …), reached only via Client.System(). Decoupled from a single
 //     backend: it iterates the registered backends internally.
 //

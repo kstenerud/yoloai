@@ -1,5 +1,5 @@
 // ABOUTME: System — admin sub-handle off Client. Hosts cross-backend
-// ABOUTME: operations (disk usage, prune, build, check) that are scoped to the
+// ABOUTME: operations (disk usage, prune, image build, check) that are scoped to the
 // ABOUTME: host rather than to a specific sandbox.
 package yoloai
 
@@ -28,13 +28,13 @@ import (
 // pure namespace expansion off the Client's layout (no IO at construction).
 //
 // Decoupled from a specific backend on purpose: cross-backend
-// methods (DiskUsage, Prune, Build with AllBackends) iterate every
+// methods (DiskUsage, Prune, BuildImage with AllBackends) iterate every
 // registered backend that's available in the current environment
 // and spin up an ephemeral runtime per backend. Single-backend
-// methods (Check, single-backend Build) take a BackendType parameter.
+// methods (Check, single-backend BuildImage) take a BackendType parameter.
 //
 // Safe for concurrent use by multiple goroutines. Read-only methods
-// (DiskUsage, Check) run in parallel. Write methods (Build, Prune)
+// (DiskUsage, Check) run in parallel. Write methods (BuildImage, Prune)
 // acquire backend-internal locks where applicable.
 type System struct {
 	layout config.Layout
@@ -312,8 +312,8 @@ func (s *System) backendReports(ctx context.Context, backend BackendType, env ca
 	return reports
 }
 
-// SystemBuildOptions configures System.Build.
-type SystemBuildOptions struct {
+// BuildImageOptions configures System.BuildImage.
+type BuildImageOptions struct {
 	// Profile is the profile name to build. Empty = base image only.
 	// "base" is reserved and rejected (use Profile="" for the base image).
 	Profile string
@@ -334,11 +334,11 @@ type SystemBuildOptions struct {
 	Output io.Writer
 }
 
-// Build builds the base image (Profile == "") or a profile image
+// BuildImage builds the base image (Profile == "") or a profile image
 // (Profile != "") for one backend or all available backends. Returns
 // the first error from any backend; later backends in the iteration
 // are skipped.
-func (s *System) Build(ctx context.Context, opts SystemBuildOptions) error {
+func (s *System) BuildImage(ctx context.Context, opts BuildImageOptions) error {
 	if opts.AllBackends && opts.BackendType != "" {
 		return yoerrors.NewUsageError("Backend and AllBackends are mutually exclusive")
 	}
@@ -388,7 +388,7 @@ func (s *System) Build(ctx context.Context, opts SystemBuildOptions) error {
 
 // buildOne runs one backend's build (base or profile) using a freshly
 // constructed runtime that's closed before return.
-func (s *System) buildOne(ctx context.Context, backend BackendType, opts SystemBuildOptions, out io.Writer) error {
+func (s *System) buildOne(ctx context.Context, backend BackendType, opts BuildImageOptions, out io.Writer) error {
 	rt, err := newRuntime(ctx, backend, s.layout)
 	if err != nil {
 		return err

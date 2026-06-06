@@ -25,9 +25,9 @@ import (
 //     internal structs chosen by runtime state (WorkdirApplyOptions →
 //     ApplySeries/ApplyOverlay/ApplyAll; WorkdirDiffOptions → Diff/CommitDiff),
 //     or because the fields spread across distinct internal calls
-//     (SystemBuildOptions).
+//     (BuildImageOptions).
 //
-// A public→public fold (Run sugar expanding into Create) is neither: it keeps a
+// A public→public fold (Run sugar expanding into CreateSandbox) is neither: it keeps a
 // descriptive name (materialize), since it never reaches an internal type.
 
 // SandboxCreateOptions is the advanced, public creation surface for Client.Create —

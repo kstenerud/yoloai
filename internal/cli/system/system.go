@@ -92,7 +92,7 @@ func runSystemBuild(cmd *cobra.Command, args []string, backend yoloai.BackendTyp
 		return err
 	}
 
-	opts := yoloai.SystemBuildOptions{
+	opts := yoloai.BuildImageOptions{
 		Profile:     profile,
 		BackendType: yoloai.BackendType(backend),
 		Rebuild:     force,
@@ -103,7 +103,7 @@ func runSystemBuild(cmd *cobra.Command, args []string, backend yoloai.BackendTyp
 	if err != nil {
 		return err
 	}
-	if err := sys.Build(cmd.Context(), opts); err != nil {
+	if err := sys.BuildImage(cmd.Context(), opts); err != nil {
 		return err
 	}
 	return reportBuildOK(cmd, profile)
@@ -177,7 +177,7 @@ func runSystemBuildAll(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	opts := yoloai.SystemBuildOptions{
+	opts := yoloai.BuildImageOptions{
 		Profile:     profile,
 		AllBackends: true,
 		Rebuild:     force,
@@ -188,8 +188,8 @@ func runSystemBuildAll(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := sys.Build(cmd.Context(), opts); err != nil {
-		// System.Build returns "no available backends to build
+	if err := sys.BuildImage(cmd.Context(), opts); err != nil {
+		// System.BuildImage returns "no available backends to build
 		// for" — preserve the original CLI behavior of printing the
 		// message and exiting 0 in that case.
 		if err.Error() == "no available backends to build for" {
