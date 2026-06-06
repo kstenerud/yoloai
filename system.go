@@ -28,7 +28,7 @@ import (
 // pure namespace expansion off the Client's layout (no IO at construction).
 //
 // Decoupled from a specific backend on purpose: cross-backend
-// methods (DiskUsage, Prune, BuildImage with AllBackends) iterate every
+// methods (DiskUsage, Prune, BuildImage with BackendsAll) iterate every
 // registered backend that's available in the current environment
 // and spin up an ephemeral runtime per backend. Single-backend
 // methods (CheckPrerequisites, single-backend BuildImage) take a BackendType parameter.
@@ -317,12 +317,11 @@ type BuildImageOptions struct {
 	// Profile is the profile name to build. Empty = base image only.
 	// "base" is reserved and rejected (use Profile="" for the base image).
 	Profile string
-	// Backend selects the backend to build for. Empty = default
-	// backend. Ignored when AllBackends is true.
+	// BackendType selects which backend(s) to build for. Required — pass a
+	// specific backend (BackendDocker, …), or a reserved selector: BackendsAll
+	// (every registered backend) or BackendDefault (the config-resolved
+	// container backend). Empty is rejected; there is no implicit default.
 	BackendType BackendType
-	// AllBackends builds across every backend that's currently
-	// available. Mutually exclusive with Backend.
-	AllBackends bool
 	// Rebuild forces a build even when the checksum says the existing
 	// image is current.
 	Rebuild bool
@@ -339,9 +338,6 @@ type BuildImageOptions struct {
 // the first error from any backend; later backends in the iteration
 // are skipped.
 func (s *System) BuildImage(ctx context.Context, opts BuildImageOptions) error {
-	if opts.AllBackends && opts.BackendType != "" {
-		return yoerrors.NewUsageError("Backend and AllBackends are mutually exclusive")
-	}
 	if opts.Profile != "" {
 		if err := config.ValidateProfileName(opts.Profile); err != nil {
 			return err
@@ -361,29 +357,34 @@ func (s *System) BuildImage(ctx context.Context, opts BuildImageOptions) error {
 		out = io.Discard
 	}
 
-	if opts.AllBackends {
-		var built int
-		for _, desc := range runtime.Descriptors() {
-			if err := s.buildOne(ctx, desc.Type, opts, out); err != nil {
-				// Stop on first failure — matches the CLI's existing
-				// behavior. A more permissive policy can be added if
-				// users want best-effort multi-backend builds.
-				return fmt.Errorf("build %s: %w", desc.Type, err)
-			}
-			built++
-		}
-		if built == 0 {
-			return fmt.Errorf("no available backends to build for")
-		}
-		return nil
-	}
-
-	backend := opts.BackendType
-	if backend == "" {
+	switch opts.BackendType {
+	case "":
+		return yoerrors.NewUsageError("BuildImageOptions.BackendType is required; pass a backend, BackendDefault, or BackendsAll")
+	case BackendsAll:
+		return s.buildAllBackends(ctx, opts, out)
+	case BackendDefault:
 		// Build targets the container slot — no isolation/OS routing.
-		backend = resolveBackendFromConfig(ctx, s.layout)
+		return s.buildOne(ctx, resolveBackendFromConfig(ctx, s.layout), opts, out)
+	default:
+		return s.buildOne(ctx, opts.BackendType, opts, out)
 	}
-	return s.buildOne(ctx, backend, opts, out)
+}
+
+// buildAllBackends builds for every registered backend, stopping on the first
+// failure (matches the CLI's existing behavior). A more permissive best-effort
+// policy can be added if users want it.
+func (s *System) buildAllBackends(ctx context.Context, opts BuildImageOptions, out io.Writer) error {
+	var built int
+	for _, desc := range runtime.Descriptors() {
+		if err := s.buildOne(ctx, desc.Type, opts, out); err != nil {
+			return fmt.Errorf("build %s: %w", desc.Type, err)
+		}
+		built++
+	}
+	if built == 0 {
+		return fmt.Errorf("no available backends to build for")
+	}
+	return nil
 }
 
 // buildOne runs one backend's build (base or profile) using a freshly

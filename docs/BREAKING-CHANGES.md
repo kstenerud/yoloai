@@ -106,6 +106,26 @@ only; field semantics and zero values are unchanged.
 strings `"yes"`/`"no"`/`"-"`; for `BackendReport.Type`, the value is now `BackendType`
 (convert with `string(r.Type)` where a plain string is needed).
 
+### `BuildImageOptions` backend selection collapsed to one required field
+
+`BuildImageOptions` previously carried a `BackendType` field *and* a mutually-exclusive
+`AllBackends bool`, with an empty `BackendType` implicitly meaning "the default
+backend". The boolean is removed and `BackendType` is now required, selecting the
+backend(s) via a single value:
+
+- a specific backend (`BackendDocker`, …) builds for that backend,
+- the new reserved selector `BackendsAll` builds for every registered backend,
+- the new reserved selector `BackendDefault` builds for the config-resolved
+  container backend.
+
+An empty `BackendType` is now rejected with a usage error — there is no implicit
+default. `BackendsAll` (`"all"`) and `BackendDefault` (`"default"`) are reserved names
+that can never be real backends; they are only meaningful for
+`BuildImageOptions.BackendType`.
+
+**Migration (Go embedders):** `AllBackends: true` → `BackendType: BackendsAll`; a
+previously-empty `BackendType` (the old implicit default) → `BackendType: BackendDefault`.
+
 ### Data directory bifurcated into `library/` (engine) + `cli/` (app); one-time migration via `yoloai system migrate`
 
 The CLI's `~/.yoloai/` is now split into two namespaces under the same top dir:

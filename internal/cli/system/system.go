@@ -92,9 +92,13 @@ func runSystemBuild(cmd *cobra.Command, args []string, backend yoloai.BackendTyp
 		return err
 	}
 
+	bt := yoloai.BackendDefault
+	if backend != "" {
+		bt = yoloai.BackendType(backend)
+	}
 	opts := yoloai.BuildImageOptions{
 		Profile:     profile,
-		BackendType: yoloai.BackendType(backend),
+		BackendType: bt,
 		Rebuild:     force,
 		Secrets:     secrets,
 		Output:      buildOutputFor(cmd),
@@ -179,7 +183,7 @@ func runSystemBuildAll(cmd *cobra.Command, args []string) error {
 
 	opts := yoloai.BuildImageOptions{
 		Profile:     profile,
-		AllBackends: true,
+		BackendType: yoloai.BackendsAll,
 		Rebuild:     force,
 		Secrets:     secrets,
 		Output:      buildOutputFor(cmd),

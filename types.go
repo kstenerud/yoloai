@@ -38,6 +38,16 @@ const (
 	BackendContainerd BackendType = runtime.BackendContainerd
 )
 
+// Reserved backend selectors. These are not real backends and can never be
+// registered as one; they are only meaningful for BuildImageOptions.BackendType,
+// where they select a set rather than a single backend.
+const (
+	// BackendDefault selects the config-resolved container backend.
+	BackendDefault BackendType = "default"
+	// BackendsAll selects every registered backend.
+	BackendsAll BackendType = "all"
+)
+
 // AgentType names a coding agent. Open-set typed string — the
 // constants document the agents that ship with yoloai; user-defined
 // extension agents supply their own name via the agent registry.
