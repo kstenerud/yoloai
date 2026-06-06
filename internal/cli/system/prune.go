@@ -170,7 +170,7 @@ func printActualRemoval(output io.Writer, result *yoloai.PruneResult, images, is
 		}
 	}
 	for _, t := range result.Trashed {
-		fmt.Fprintf(output, "Quarantined broken sandbox %s to trash (%s)\n", t.Name, t.Dest) //nolint:errcheck
+		fmt.Fprintf(output, "Quarantined broken sandbox %s to trash (%s)\n", t.Name, t.TrashPath) //nolint:errcheck
 	}
 	if result.FreedBytes > 0 {
 		what := "backend cache"
@@ -363,7 +363,7 @@ func writePruneJSON(cmd *cobra.Command, result *yoloai.PruneResult, dryRun bool)
 	}
 	trashed := make([]trashedItem, 0, len(result.Trashed))
 	for _, t := range result.Trashed {
-		trashed = append(trashed, trashedItem{Name: t.Name, Dest: t.Dest, Reason: t.Reason})
+		trashed = append(trashed, trashedItem{Name: t.Name, Dest: t.TrashPath, Reason: t.Reason})
 	}
 	return cliutil.WriteJSON(cmd.OutOrStdout(), map[string]any{
 		"items":       items,

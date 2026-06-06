@@ -588,10 +588,10 @@ type PruneItem struct {
 // dir because its metadata was unreadable/corrupt (or it was incomplete)
 // but no recoverable work was detected. Recoverable with a plain `mv`.
 type TrashedSandbox struct {
-	Name   string
-	From   string // original sandbox dir path
-	Dest   string // path under the trash dir (empty under DryRun)
-	Reason string // why it was quarantined
+	Name         string
+	OriginalPath string // original sandbox dir path
+	TrashPath    string // path under the trash dir (empty under DryRun)
+	Reason       string // why it was quarantined
 }
 
 // RefusedSandbox is a broken sandbox dir Prune deliberately left
@@ -693,7 +693,7 @@ func (s *System) applyBrokenClassifications(broken []classifiedSandbox, dryRun b
 				dest = moved
 			}
 			result.Trashed = append(result.Trashed, TrashedSandbox{
-				Name: c.name, From: c.path, Dest: dest, Reason: c.detail,
+				Name: c.name, OriginalPath: c.path, TrashPath: dest, Reason: c.detail,
 			})
 		}
 	}
