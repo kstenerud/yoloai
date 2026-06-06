@@ -56,7 +56,7 @@ var (
 //
 //	Create, Stop, Start, Destroy, Reset      → sandbox/{create,lifecycle}.go
 //	Clone                                    → sandbox/clone.go (multi-lock)
-//	SendInput                                → sandbox/manager.go
+//	SendInput                                → sandbox/engine.go
 //	ApplyAll                                 → sandbox/patch/apply.go
 //
 // New write methods on the Client surface must include AcquireLock at their

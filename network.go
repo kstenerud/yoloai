@@ -246,19 +246,19 @@ func (n *Network) requireIsolated() (string, *store.Environment, error) {
 // the on-disk update is the source of truth).
 //
 // Soft-fails (sandbox not running, runtime not constructible, or a
-// Client that wasn't built with a runtime+manager at all) return
+// Client that wasn't built with a runtime+engine at all) return
 // (false, nil) so the caller treats them the same as a successful
 // "no-op": the change is queued for the next start.
 func (n *Network) tryLivePatch(ctx context.Context, script string, scriptArgs []string) (bool, error) {
 	// Open the backend lazily; a backend-less Client (or a failed open)
-	// leaves rt/manager nil. Treat that as "soft-fail; persisted-only"
+	// leaves rt/engine nil. Treat that as "soft-fail; persisted-only"
 	// rather than panicking — the on-disk allowlist is the source of truth.
 	n.s.c.tryEnsure(ctx)
-	if n.s.c.manager == nil || n.s.c.rt == nil {
+	if n.s.c.engine == nil || n.s.c.rt == nil {
 		return false, nil
 	}
 
-	info, err := n.s.c.manager.Inspect(ctx, n.s.name)
+	info, err := n.s.c.engine.Inspect(ctx, n.s.name)
 	if err != nil {
 		return false, nil //nolint:nilerr // soft-fail: not running, can't live-patch
 	}

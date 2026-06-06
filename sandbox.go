@@ -71,7 +71,7 @@ func (s *Sandbox) Inspect(ctx context.Context) (*SandboxInfo, error) {
 	if err := s.c.ensure(ctx); err != nil {
 		return nil, err
 	}
-	si, err := s.c.manager.Inspect(ctx, s.name)
+	si, err := s.c.engine.Inspect(ctx, s.name)
 	if err != nil {
 		return nil, err
 	}
@@ -174,7 +174,7 @@ func (s *Sandbox) exec(ctx context.Context, opts SandboxExecOptions, io IOStream
 		}
 		return execer.StdioExec(ctx, store.InstanceName(s.c.layout.Principal, s.name), opts.Command, io.In, io.Out, io.Err)
 	}
-	info, err := s.c.manager.Inspect(ctx, s.name)
+	info, err := s.c.engine.Inspect(ctx, s.name)
 	if err != nil {
 		return err
 	}

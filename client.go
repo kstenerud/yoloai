@@ -107,12 +107,12 @@ type Client struct {
 	// Lazy backend connection. The runtime is opened once, on the first
 	// backend-bound operation, via ensure/tryEnsure — host-only reads
 	// (Workdir host-git, on-disk allowlist, filesystem readers) never trigger
-	// it. Guarded by mu; opened latches true on success and rt/manager are then
+	// it. Guarded by mu; opened latches true on success and rt/engine are then
 	// stable for the Client's lifetime.
 	mu      sync.Mutex
 	opened  bool
 	rt      runtime.Runtime
-	manager *sandbox.Engine
+	engine *sandbox.Engine
 }
 
 // NewClient creates a Client with explicit options.
@@ -189,14 +189,14 @@ func (c *Client) ensure(ctx context.Context) error {
 		return fmt.Errorf("connect to %s backend: %w", c.backend, err)
 	}
 	c.rt = rt
-	c.manager = sandbox.NewEngine(rt, c.logger, c.input, sandbox.WithLayout(c.layout))
+	c.engine = sandbox.NewEngine(rt, c.logger, c.input, sandbox.WithLayout(c.layout))
 	c.opened = true
 	return nil
 }
 
 // tryEnsure opens the backend connection best-effort for operations that have a
 // host-only fallback (Workdir host-git, on-disk allowlist live-patch,
-// ContainerLogs, HasActiveWork): on success rt/manager are populated; on
+// ContainerLogs, HasActiveWork): on success rt/engine are populated; on
 // failure (including a backend-less Client) they stay nil and the caller falls
 // back to its disk-only path. The error is intentionally discarded.
 func (c *Client) tryEnsure(ctx context.Context) {
@@ -250,7 +250,7 @@ func (c *Client) pollUntilDone(ctx context.Context, name string, progress func(s
 		case <-time.After(5 * time.Second):
 		}
 
-		info, err := c.manager.Inspect(ctx, name)
+		info, err := c.engine.Inspect(ctx, name)
 		if err != nil {
 			return nil, fmt.Errorf("inspect sandbox: %w", err)
 		}
@@ -292,7 +292,7 @@ func (c *Client) Run(ctx context.Context, opts SandboxRunOptions) (*SandboxInfo,
 	}
 
 	if !opts.Wait {
-		si, err := c.manager.Inspect(ctx, opts.Name)
+		si, err := c.engine.Inspect(ctx, opts.Name)
 		if err != nil {
 			return nil, err
 		}
@@ -307,7 +307,7 @@ func (c *Client) List(ctx context.Context) ([]*SandboxInfo, error) {
 	if err := c.ensure(ctx); err != nil {
 		return nil, err
 	}
-	sis, err := c.manager.List(ctx)
+	sis, err := c.engine.List(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -347,7 +347,7 @@ func (c *Client) Clone(ctx context.Context, opts SandboxCloneOptions) error {
 			return err
 		}
 	}
-	return c.manager.Clone(ctx, opts.toInternal())
+	return c.engine.Clone(ctx, opts.toInternal())
 }
 
 // destroyForOverwrite tears down a pre-existing destination sandbox so a clone
@@ -392,7 +392,7 @@ func (c *Client) Create(ctx context.Context, opts SandboxCreateOptions) (string,
 	if internal.Output == nil {
 		internal.Output = c.output // seed the per-call progress writer from the Client's Output (F8)
 	}
-	if err := c.manager.EnsureSetup(ctx, c.output); err != nil {
+	if err := c.engine.EnsureSetup(ctx, c.output); err != nil {
 		return "", err
 	}
 	return create.Run(ctx, c.deps(), internal)
@@ -432,7 +432,7 @@ func (c *Client) EnsureSetup(ctx context.Context) error {
 	if err := c.ensure(ctx); err != nil {
 		return err
 	}
-	return c.manager.EnsureSetup(ctx, c.output)
+	return c.engine.EnsureSetup(ctx, c.output)
 }
 
 // --- private helpers ---

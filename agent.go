@@ -143,7 +143,7 @@ func (a *Agent) CaptureTerminal(ctx context.Context, scrollback int) (TerminalSn
 	if err := a.s.c.ensure(ctx); err != nil {
 		return TerminalSnapshot{}, err
 	}
-	plain, ansi, err := a.s.c.manager.CaptureTerminal(ctx, a.s.name, scrollback)
+	plain, ansi, err := a.s.c.engine.CaptureTerminal(ctx, a.s.name, scrollback)
 	return TerminalSnapshot{Plain: plain, ANSI: ansi}, err
 }
 
@@ -153,7 +153,7 @@ func (a *Agent) SendInput(ctx context.Context, text string) error {
 	if err := a.s.c.ensure(ctx); err != nil {
 		return err
 	}
-	return a.s.c.manager.SendInput(ctx, a.s.name, text)
+	return a.s.c.engine.SendInput(ctx, a.s.name, text)
 }
 
 // ContainerLogs returns the tail of the sandbox's raw container log (roughly
@@ -179,7 +179,7 @@ func (a *Agent) Attach(ctx context.Context, io IOStreams) error {
 	if err := a.s.c.ensure(ctx); err != nil {
 		return err
 	}
-	info, err := a.s.c.manager.Inspect(ctx, a.s.name)
+	info, err := a.s.c.engine.Inspect(ctx, a.s.name)
 	if err != nil {
 		return err
 	}
