@@ -128,7 +128,7 @@ func printSandboxResources(w io.Writer, meta *yoloai.Environment, info *yoloai.S
 		fmt.Fprintf(w, "Baseline:    %s\n", meta.Workdir.BaselineSHA) //nolint:errcheck
 	}
 	fmt.Fprintf(w, "Disk Usage:  %s\n", cliutil.FormatDiskUsage(info.DiskUsageBytes)) //nolint:errcheck
-	fmt.Fprintf(w, "Changes:     %s\n", info.HasChanges)                              //nolint:errcheck
+	fmt.Fprintf(w, "Changes:     %s\n", info.Changes)                                 //nolint:errcheck
 }
 
 // loadPromptPreview reads the stored prompt via the public verb and returns a

@@ -40,21 +40,21 @@ func formatDoctor(w io.Writer, reports []yoloai.BackendReport) {
 	if len(ready) > 0 {
 		fmt.Fprintln(w, "\nReady to use:") //nolint:errcheck
 		for _, r := range ready {
-			fmt.Fprintf(w, "  %-16s %s\n", r.Backend, modeLabel(r)) //nolint:errcheck
+			fmt.Fprintf(w, "  %-16s %s\n", r.Type, modeLabel(r)) //nolint:errcheck
 		}
 	}
 
 	if len(needsSetup) > 0 {
 		fmt.Fprintln(w, "\nNeeds setup:") //nolint:errcheck
 		for _, r := range needsSetup {
-			fmt.Fprintf(w, "  %-16s %-24s %d of %d checks failing\n", r.Backend, modeLabel(r), countFailing(r.Results), len(r.Results)) //nolint:errcheck
+			fmt.Fprintf(w, "  %-16s %-24s %d of %d checks failing\n", r.Type, modeLabel(r), countFailing(r.Results), len(r.Results)) //nolint:errcheck
 		}
 	}
 
 	if len(unavailable) > 0 {
 		fmt.Fprintln(w, "\nNot available on this machine:") //nolint:errcheck
 		for _, r := range unavailable {
-			fmt.Fprintf(w, "  %-16s %-24s %s\n", r.Backend, modeLabel(r), unavailableReason(r)) //nolint:errcheck
+			fmt.Fprintf(w, "  %-16s %-24s %s\n", r.Type, modeLabel(r), unavailableReason(r)) //nolint:errcheck
 		}
 	}
 
@@ -127,8 +127,8 @@ func countFailing(results []yoloai.CapabilityCheck) int {
 
 // printFixSection prints the detailed check list and fix steps for one report.
 func printFixSection(w io.Writer, r yoloai.BackendReport) {
-	fmt.Fprintf(w, "\n%s\n", strings.Repeat("─", 52))             //nolint:errcheck
-	fmt.Fprintf(w, "Needs setup: %s / %s\n\n", r.Backend, r.Mode) //nolint:errcheck
+	fmt.Fprintf(w, "\n%s\n", strings.Repeat("─", 52))          //nolint:errcheck
+	fmt.Fprintf(w, "Needs setup: %s / %s\n\n", r.Type, r.Mode) //nolint:errcheck
 
 	for _, result := range r.Results {
 		if result.Err == nil {

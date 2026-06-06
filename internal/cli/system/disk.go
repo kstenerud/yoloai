@@ -48,8 +48,8 @@ func runSystemDisk(cmd *cobra.Command, _ []string) error {
 	}
 
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "SOURCE\tCACHE\tIMAGES\tDETAIL")                                                            //nolint:errcheck
-	fmt.Fprintf(w, "sandboxes\t-\t%s\t%s\n", cliutil.HumanBytes(du.Sandboxes), cliutil.Layout().SandboxesDir()) //nolint:errcheck
+	fmt.Fprintln(w, "SOURCE\tCACHE\tIMAGES\tDETAIL")                                                                 //nolint:errcheck
+	fmt.Fprintf(w, "sandboxes\t-\t%s\t%s\n", cliutil.HumanBytes(du.SandboxesBytes), cliutil.Layout().SandboxesDir()) //nolint:errcheck
 	for _, b := range du.PerBackend {
 		if b.Err != nil {
 			fmt.Fprintf(w, "%s\t-\t-\t%v\n", b.Type, b.Err) //nolint:errcheck
@@ -80,7 +80,7 @@ func imageBytesCell(n int64) string {
 // the public CLI contract is unchanged.
 func formatDiskJSON(du *yoloai.DiskUsage, sandboxesDir string) map[string]any {
 	entries := []map[string]any{
-		{"source": "sandboxes", "bytes": du.Sandboxes, "detail": sandboxesDir},
+		{"source": "sandboxes", "bytes": du.SandboxesBytes, "detail": sandboxesDir},
 	}
 	for _, b := range du.PerBackend {
 		entry := map[string]any{"source": b.Type}

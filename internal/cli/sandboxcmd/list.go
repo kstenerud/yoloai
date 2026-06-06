@@ -96,7 +96,7 @@ func matchesFilters(info *yoloai.SandboxInfo, f listFilters) bool {
 	if f.profile != "" && !matchesProfileFilter(info, f.profile) {
 		return false
 	}
-	if f.changes && info.HasChanges != "yes" {
+	if f.changes && info.Changes != yoloai.ChangesPresent {
 		return false
 	}
 	return true
@@ -212,7 +212,7 @@ func runList(cmd *cobra.Command, _ []string) error {
 			cliutil.FormatAge(info.Environment.CreatedAt),
 			cliutil.FormatDiskUsage(info.DiskUsageBytes),
 			info.Environment.Workdir.HostPath,
-			info.HasChanges,
+			info.Changes,
 		)
 	}
 	if err := w.Flush(); err != nil {

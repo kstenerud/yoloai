@@ -196,8 +196,21 @@ func execExitError(err error) error {
 	return err
 }
 
+// ChangeState is the tri-state answer to "does this sandbox's workdir hold
+// changes beyond its baseline" — carried on SandboxInfo.Changes. It is a string
+// (not a bool) precisely because the question has three answers, not two: a
+// sandbox whose state can't be read yet reports ChangesUnknown rather than a
+// misleading "no".
+type ChangeState string
+
+const (
+	ChangesPresent ChangeState = "yes" // workdir has changes beyond baseline
+	ChangesAbsent  ChangeState = "no"  // workdir is unchanged from baseline
+	ChangesUnknown ChangeState = "-"   // not yet determined / not applicable (e.g. a broken sandbox)
+)
+
 // SandboxInfo is the combined metadata + live state returned by Sandbox.Inspect /
-// Client.List. Hand-written (not a type alias) so its Environment field is the public
+// Client.ListSandboxes. Hand-written (not a type alias) so its Environment field is the public
 // Environment read-model rather than the internal store.Environment — embedders can
 // hold the full result without naming any internal type. Built from the
 // internal status.Info at the library boundary via sandboxInfoFromStatus.
@@ -205,7 +218,7 @@ type SandboxInfo struct {
 	Environment    *Environment `json:"environment"`
 	Status         Status       `json:"status"`
 	AgentStatus    AgentStatus  `json:"agent_status,omitempty"`
-	HasChanges     string       `json:"has_changes"`
+	Changes        ChangeState  `json:"has_changes"`
 	DiskUsageBytes int64        `json:"disk_usage_bytes"`
 }
 

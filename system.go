@@ -116,8 +116,8 @@ func (s *System) MigrateDataDir(ctx context.Context) error {
 // surface their error in the per-backend entry rather than aborting
 // the whole call.
 type DiskUsage struct {
-	// Sandboxes is the total byte count under DataDir/sandboxes/.
-	Sandboxes int64
+	// SandboxesBytes is the total size under DataDir/sandboxes/.
+	SandboxesBytes int64
 	// PerBackend has one entry per backend that was probed available.
 	// Order matches runtime.Descriptors() (registration order).
 	PerBackend []BackendDiskUsage
@@ -143,7 +143,7 @@ type BackendDiskUsage struct {
 // own sandboxes-directory size. Unavailable backends are skipped.
 func (s *System) DiskUsage(ctx context.Context) (*DiskUsage, error) {
 	du := &DiskUsage{
-		Sandboxes: dirSize(s.layout.SandboxesDir()),
+		SandboxesBytes: dirSize(s.layout.SandboxesDir()),
 	}
 	for _, desc := range runtime.Descriptors() {
 		rt, err := newRuntime(ctx, desc.Type, s.layout)
@@ -171,11 +171,11 @@ func (s *System) DiskUsage(ctx context.Context) (*DiskUsage, error) {
 // concern and is intentionally not included. Disk usage is a separate (slower)
 // call — see DiskUsage.
 type SystemInfo struct {
-	DataDir        string
-	SandboxesDir   string
-	GlobalConfig   string // path to the global config.yaml
-	DefaultsConfig string // path to the defaults config.yaml
-	Backends       []BackendInfo
+	DataDir            string
+	SandboxesDir       string
+	GlobalConfigPath   string
+	DefaultsConfigPath string
+	Backends           []BackendInfo
 }
 
 // AllSandboxes enumerates sandboxes across every backend that currently
@@ -210,11 +210,11 @@ func (s *System) ValidateSandboxName(name string) error {
 // compatibility, mirroring DiskUsage.
 func (s *System) Info(ctx context.Context) (*SystemInfo, error) {
 	return &SystemInfo{
-		DataDir:        s.layout.YoloaiDir(),
-		SandboxesDir:   s.layout.SandboxesDir(),
-		GlobalConfig:   s.layout.GlobalConfigPath(),
-		DefaultsConfig: s.layout.DefaultsConfigPath(),
-		Backends:       s.BackendTypes(ctx, BackendQuery{ProbeAvailability: true}),
+		DataDir:            s.layout.YoloaiDir(),
+		SandboxesDir:       s.layout.SandboxesDir(),
+		GlobalConfigPath:   s.layout.GlobalConfigPath(),
+		DefaultsConfigPath: s.layout.DefaultsConfigPath(),
+		Backends:           s.BackendTypes(ctx, BackendQuery{ProbeAvailability: true}),
 	}, nil
 }
 

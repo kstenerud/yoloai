@@ -21,7 +21,7 @@ func makeInfo(name string, status yoloai.Status, agent, profile, changes string)
 			Workdir:   yoloai.WorkdirInfo{HostPath: "/tmp/" + name},
 		},
 		Status:         status,
-		HasChanges:     changes,
+		Changes:        yoloai.ChangeState(changes),
 		DiskUsageBytes: 1024 * 1024,
 	}
 }
@@ -30,7 +30,7 @@ func makeBrokenInfo(name string) *yoloai.SandboxInfo {
 	return &yoloai.SandboxInfo{
 		Environment:    &yoloai.Environment{Name: name},
 		Status:         yoloai.StatusBroken,
-		HasChanges:     "-",
+		Changes:        yoloai.ChangesUnknown,
 		DiskUsageBytes: -1,
 	}
 }

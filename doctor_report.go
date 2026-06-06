@@ -25,8 +25,8 @@ const (
 // caps.BackendReport, so embedders can read doctor results without importing
 // internal packages.
 type BackendReport struct {
-	// Backend is the backend name, e.g. "docker", "containerd".
-	Backend string
+	// Type is the backend type, e.g. "docker", "containerd".
+	Type BackendType
 	// Mode is the isolation-mode label, or the base-mode name for the base row.
 	Mode string
 	// IsBaseMode is true when Mode is the no-isolation base mode.
@@ -84,7 +84,7 @@ type FixStep struct {
 // public mirror.
 func backendReportFromCaps(r caps.BackendReport) BackendReport {
 	out := BackendReport{
-		Backend:      r.Backend,
+		Type:         BackendType(r.Backend),
 		Mode:         r.Mode,
 		IsBaseMode:   r.IsBaseMode,
 		InitErr:      r.InitErr,

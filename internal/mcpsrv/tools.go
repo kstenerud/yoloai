@@ -204,7 +204,7 @@ func (s *Server) handleSandboxStatus(ctx context.Context, req mcp.CallToolReques
 		"agent_status":     string(info.AgentStatus),
 		"agent":            info.Environment.AgentType,
 		"model":            info.Environment.Model,
-		"has_changes":      info.HasChanges,
+		"has_changes":      string(info.Changes),
 		"disk_usage_bytes": info.DiskUsageBytes,
 		"created":          info.Environment.CreatedAt,
 	}, "", "  ")
@@ -238,7 +238,7 @@ func (s *Server) handleSandboxList(ctx context.Context, _ mcp.CallToolRequest) (
 			Status:         string(info.Status),
 			AgentStatus:    string(info.AgentStatus),
 			Agent:          string(info.Environment.AgentType),
-			HasChanges:     info.HasChanges,
+			HasChanges:     string(info.Changes),
 			DiskUsageBytes: info.DiskUsageBytes,
 		})
 	}

@@ -10,10 +10,14 @@ import "github.com/kstenerud/yoloai/internal/config"
 // future, its inheritance chain). It is an output-only read model produced
 // by ProfileAdmin.Info(); no public API consumes it as input.
 type ResolvedProfileConfig struct {
-	Agent              string             `json:"agent,omitempty"`
-	Model              string             `json:"model,omitempty"`
-	OS                 string             `json:"os,omitempty"`
-	Backend            string             `json:"backend,omitempty"`
+	Agent string `json:"agent,omitempty"`
+	Model string `json:"model,omitempty"`
+	OS    string `json:"os,omitempty"`
+	// Backend is the optional backend constraint a profile pins (config key
+	// "backend"); empty means unconstrained. Distinct from ContainerBackend.
+	Backend string `json:"backend,omitempty"`
+	// ContainerBackend names the runtime engine — "docker", "podman", or
+	// "containerd" (config key "container_backend").
 	ContainerBackend   string             `json:"container_backend,omitempty"`
 	TartImage          string             `json:"tart_image,omitempty"`
 	Env                map[string]string  `json:"env,omitempty"`

@@ -315,8 +315,8 @@ func (c *Client) ListSandboxes(ctx context.Context) ([]*SandboxInfo, error) {
 	return sandboxInfosFromStatus(sis), nil
 }
 
-// SandboxCloneOptions configures Client.Clone. Hand-written rather than aliased so the
-// public surface doesn't expose internal/sandbox.SandboxCloneOptions. Overwrite (not
+// SandboxCloneOptions configures Client.CloneSandbox. Hand-written rather than aliased so the
+// public surface doesn't expose internal/sandbox.CloneOptions. Overwrite (not
 // "Force") is the concern-specific name per the Q-J field audit — "Force" stays
 // a CLI flag only.
 type SandboxCloneOptions struct {

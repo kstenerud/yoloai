@@ -145,7 +145,7 @@ func sandboxInfoFromStatus(si *sandbox.Info) *SandboxInfo {
 		Environment:    environmentFromStore(si.Environment),
 		Status:         si.Status,
 		AgentStatus:    si.AgentStatus,
-		HasChanges:     si.HasChanges,
+		Changes:        ChangeState(si.HasChanges),
 		DiskUsageBytes: si.DiskUsageBytes,
 	}
 }

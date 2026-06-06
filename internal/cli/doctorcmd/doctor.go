@@ -465,7 +465,7 @@ func convertDoctorReportsToJSON(reports []yoloai.BackendReport) []backendReportJ
 	jsonReports := make([]backendReportJSON, 0, len(reports))
 	for _, r := range reports {
 		jr := backendReportJSON{
-			Backend:    r.Backend,
+			Backend:    string(r.Type),
 			Mode:       r.Mode,
 			IsBaseMode: r.IsBaseMode,
 		}

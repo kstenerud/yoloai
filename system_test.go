@@ -29,8 +29,8 @@ func TestSystem_Info(t *testing.T) {
 
 	assert.Equal(t, c.layout.YoloaiDir(), info.DataDir)
 	assert.Equal(t, c.layout.SandboxesDir(), info.SandboxesDir)
-	assert.Equal(t, c.layout.GlobalConfigPath(), info.GlobalConfig)
-	assert.Equal(t, c.layout.DefaultsConfigPath(), info.DefaultsConfig)
+	assert.Equal(t, c.layout.GlobalConfigPath(), info.GlobalConfigPath)
+	assert.Equal(t, c.layout.DefaultsConfigPath(), info.DefaultsConfigPath)
 
 	descs := runtime.Descriptors()
 	require.Len(t, info.Backends, len(descs), "one BackendInfo per registered backend")
@@ -90,7 +90,7 @@ func TestSystem_Doctor(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, reports, "every registered backend produces at least one report row")
 	for _, r := range reports {
-		assert.NotEmpty(t, r.Backend, "each report names its backend")
+		assert.NotEmpty(t, r.Type, "each report names its backend type")
 	}
 
 	none, err := c.Doctor(context.Background(), SystemDoctorOptions{BackendFilter: "does-not-exist"})

@@ -21,7 +21,7 @@ func TestFormatDoctor_EmptyReports(t *testing.T) {
 func TestFormatDoctor_ReadyBackend(t *testing.T) {
 	reports := []yoloai.BackendReport{
 		{
-			Backend:      "docker",
+			Type:         "docker",
 			Mode:         "container",
 			IsBaseMode:   true,
 			Availability: yoloai.Ready,
@@ -38,7 +38,7 @@ func TestFormatDoctor_ReadyBackend(t *testing.T) {
 func TestFormatDoctor_NeedsSetup(t *testing.T) {
 	reports := []yoloai.BackendReport{
 		{
-			Backend:    "containerd",
+			Type:       "containerd",
 			Mode:       "vm",
 			IsBaseMode: false,
 			Results: []yoloai.CapabilityCheck{
@@ -61,7 +61,7 @@ func TestFormatDoctor_NeedsSetup(t *testing.T) {
 func TestFormatDoctor_Unavailable(t *testing.T) {
 	reports := []yoloai.BackendReport{
 		{
-			Backend:      "tart",
+			Type:         "tart",
 			Mode:         "vm",
 			IsBaseMode:   true,
 			InitErr:      errors.New("requires macOS with Apple Silicon"),

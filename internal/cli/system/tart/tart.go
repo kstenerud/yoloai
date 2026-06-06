@@ -240,12 +240,12 @@ func printRuntimeBaseList(cmd *cobra.Command, bases []yoloai.TartBaseInfo, avail
 	totalSize := int64(0)
 	for _, base := range bases {
 		if base.CacheKey == "" {
-			fmt.Fprintf(out, "  %-32s (no runtimes, %s)\n", base.Name, formatSize(base.Size)) //nolint:errcheck
+			fmt.Fprintf(out, "  %-32s (no runtimes, %s)\n", base.Name, formatSize(base.SizeBytes)) //nolint:errcheck
 		} else {
 			runtimes := formatCacheKey(base.CacheKey)
-			fmt.Fprintf(out, "  %-32s (%s, %s)\n", base.Name, runtimes, formatSize(base.Size)) //nolint:errcheck
+			fmt.Fprintf(out, "  %-32s (%s, %s)\n", base.Name, runtimes, formatSize(base.SizeBytes)) //nolint:errcheck
 		}
-		totalSize += base.Size
+		totalSize += base.SizeBytes
 	}
 
 	if len(availableRuntimes) > 0 {
@@ -304,7 +304,7 @@ func runSystemTartRemove(cmd *cobra.Command, args []string, opts *runtimeRemoveO
 	found := false
 	for _, base := range bases {
 		if base.Name == baseName {
-			size, found = base.Size, true
+			size, found = base.SizeBytes, true
 			break
 		}
 	}

@@ -31,13 +31,13 @@ func newSystemInfoCmd(version, commit, date string) *cobra.Command {
 			}
 
 			out := cmd.OutOrStdout()
-			fmt.Fprintf(out, "Version:     %s\n", version)             //nolint:errcheck
-			fmt.Fprintf(out, "Commit:      %s\n", commit)              //nolint:errcheck
-			fmt.Fprintf(out, "Built:       %s\n", date)                //nolint:errcheck
-			fmt.Fprintf(out, "Config:      %s\n", info.GlobalConfig)   //nolint:errcheck
-			fmt.Fprintf(out, "Profile:     %s\n", info.DefaultsConfig) //nolint:errcheck
-			fmt.Fprintf(out, "Data dir:    %s\n", info.DataDir)        //nolint:errcheck
-			fmt.Fprintf(out, "Sandboxes:   %s\n", info.SandboxesDir)   //nolint:errcheck
+			fmt.Fprintf(out, "Version:     %s\n", version)                 //nolint:errcheck
+			fmt.Fprintf(out, "Commit:      %s\n", commit)                  //nolint:errcheck
+			fmt.Fprintf(out, "Built:       %s\n", date)                    //nolint:errcheck
+			fmt.Fprintf(out, "Config:      %s\n", info.GlobalConfigPath)   //nolint:errcheck
+			fmt.Fprintf(out, "Profile:     %s\n", info.DefaultsConfigPath) //nolint:errcheck
+			fmt.Fprintf(out, "Data dir:    %s\n", info.DataDir)            //nolint:errcheck
+			fmt.Fprintf(out, "Sandboxes:   %s\n", info.SandboxesDir)       //nolint:errcheck
 
 			if size, sizeErr := cliutil.DirSize(info.DataDir); sizeErr != nil {
 				fmt.Fprintf(out, "Disk usage:  (unavailable)\n") //nolint:errcheck
@@ -98,8 +98,8 @@ func writeSystemInfoJSON(cmd *cobra.Command, version, commit, date string, info 
 		Version:           version,
 		Commit:            commit,
 		Date:              date,
-		ConfigPath:        info.GlobalConfig,
-		ProfileConfigPath: info.DefaultsConfig,
+		ConfigPath:        info.GlobalConfigPath,
+		ProfileConfigPath: info.DefaultsConfigPath,
 		DataDir:           info.DataDir,
 		SandboxesDir:      info.SandboxesDir,
 		DiskUsage:         diskUsage,

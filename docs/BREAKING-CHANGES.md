@@ -85,6 +85,27 @@ rather than reading the process environment.
   `"no-commit"`). See the `yoloai apply` entry below for the commits-only default and
   `--include-uncommitted`.
 
+### Public read-model field renames (Go embedding surface)
+
+A naming-audit pass renamed read-model fields whose old names leaned on a comment to
+supply a qualifier the name itself should have carried. These are Go-surface renames
+only; field semantics and zero values are unchanged.
+
+- `SandboxInfo.HasChanges string` → `Changes ChangeState`. The old string-typed field
+  read like a boolean but carried three values; it is now the typed tri-state
+  `ChangeState` (`ChangesPresent` / `ChangesAbsent` / `ChangesUnknown`). The `--json`
+  wire tag stays `"has_changes"`, so JSON output is byte-stable.
+- `SystemInfo.GlobalConfig` → `GlobalConfigPath`; `SystemInfo.DefaultsConfig` →
+  `DefaultsConfigPath` (both are filesystem paths).
+- `DiskUsage.Sandboxes` → `SandboxesBytes` (a byte count).
+- `TartBaseInfo.Size` → `SizeBytes` (a byte count).
+- `BackendReport.Backend string` → `Type BackendType` (a backend kind, now typed).
+
+**Migration (Go embedders):** rename the field accessors at call sites; for
+`SandboxInfo.Changes`, compare against the `ChangeState` constants instead of the bare
+strings `"yes"`/`"no"`/`"-"`; for `BackendReport.Type`, the value is now `BackendType`
+(convert with `string(r.Type)` where a plain string is needed).
+
 ### Data directory bifurcated into `library/` (engine) + `cli/` (app); one-time migration via `yoloai system migrate`
 
 The CLI's `~/.yoloai/` is now split into two namespaces under the same top dir:

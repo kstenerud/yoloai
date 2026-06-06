@@ -27,9 +27,9 @@ type TartRuntimeVersion struct {
 
 // TartBaseInfo describes one Tart runtime base image (a yoloai-base-* VM).
 type TartBaseInfo struct {
-	Name     string // full VM name, e.g. "yoloai-base-ios-26.4"
-	CacheKey string // platform/version key from Name; "" for the bare base
-	Size     int64  // on-disk bytes (0 when not yet known, e.g. just created)
+	Name      string // full VM name, e.g. "yoloai-base-ios-26.4"
+	CacheKey  string // platform/version key from Name; "" for the bare base
+	SizeBytes int64  // on-disk size (0 when not yet known, e.g. just created)
 }
 
 // TartBasePlan is what Add will build: the resolved runtimes and the VM name
@@ -164,7 +164,7 @@ func (a *TartBaseAdmin) Remove(ctx context.Context, name string) (freed int64, e
 	found := false
 	for _, b := range bases {
 		if b.Name == name {
-			size, found = b.Size, true
+			size, found = b.SizeBytes, true
 			break
 		}
 	}
@@ -207,9 +207,9 @@ func listTartBases(ctx context.Context, r *tartrt.Runtime) ([]TartBaseInfo, erro
 			continue
 		}
 		bases = append(bases, TartBaseInfo{
-			Name:     e.Name,
-			CacheKey: cacheKeyFromBaseName(e.Name),
-			Size:     e.Size,
+			Name:      e.Name,
+			CacheKey:  cacheKeyFromBaseName(e.Name),
+			SizeBytes: e.Size,
 		})
 	}
 	return bases, nil
