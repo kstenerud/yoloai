@@ -1,11 +1,12 @@
-// ABOUTME: Public high-level Client API (Run, List, Clone, Create, plus the
+// ABOUTME: Public high-level Client API (Run, CreateSandbox, CloneSandbox, ListSandboxes, plus the
 // ABOUTME: Sandbox/System sub-handles) for embedding yoloAI in Go programs.
 // Package yoloai is the orchestration layer for yoloAI. Both the CLI
 // (internal/cli) and external embedders use it as the entry point for
 // running AI coding agents in isolated sandboxes.
 //
 // One Client is the entry point. It owns creation and cross-sandbox
-// operations (Run, Create, Clone, List) plus the per-sandbox handle accessor
+// operations (Run, CreateSandbox, CloneSandbox, ListSandboxes) plus the
+// per-sandbox handle accessor
 // Sandbox(name); per-sandbox operations (Inspect, Start, Stop, Restart, Reset,
 // Destroy, Exec, and the Workdir/Network/Agent sub-handles) live on that
 // *Sandbox handle, not the Client root. The backend connection is opened
@@ -88,7 +89,7 @@ var (
 	// recreated since the host last booted.
 	ErrContainerNotRunning = sandbox.ErrContainerNotRunning
 
-	// ErrMissingAPIKey is returned by Run/Create when the selected agent
+	// ErrMissingAPIKey is returned by Run/CreateSandbox when the selected agent
 	// requires an API key (via Definition.APIKeyEnvVars) but none is set.
 	ErrMissingAPIKey = sandbox.ErrMissingAPIKey
 )
@@ -109,9 +110,9 @@ type Client struct {
 	// (Workdir host-git, on-disk allowlist, filesystem readers) never trigger
 	// it. Guarded by mu; opened latches true on success and rt/engine are then
 	// stable for the Client's lifetime.
-	mu      sync.Mutex
-	opened  bool
-	rt      runtime.Runtime
+	mu     sync.Mutex
+	opened bool
+	rt     runtime.Runtime
 	engine *sandbox.Engine
 }
 
@@ -162,7 +163,7 @@ func NewClient(ctx context.Context, opts ClientCreateOptions) (*Client, error) {
 }
 
 // ErrBackendRequired is returned by backend-bound operations (Exec, Attach,
-// Start, Stop, lifecycle, Create, List, Clone, …) when the Client was
+// Start, Stop, lifecycle, CreateSandbox, ListSandboxes, CloneSandbox, …) when the Client was
 // constructed without ClientCreateOptions.BackendType. A backend-less Client
 // still serves host-only reads (Workdir host-git, on-disk allowlist, filesystem
 // readers) and, via System(), cross-backend admin. Set
@@ -283,7 +284,7 @@ func (c *Client) Run(ctx context.Context, opts SandboxRunOptions) (*SandboxInfo,
 		createOpts.Model = resolveModelFromConfig(c.layout)
 	}
 
-	if _, err := c.Create(ctx, createOpts); err != nil {
+	if _, err := c.CreateSandbox(ctx, createOpts); err != nil {
 		return nil, fmt.Errorf("create sandbox: %w", err)
 	}
 
@@ -302,8 +303,8 @@ func (c *Client) Run(ctx context.Context, opts SandboxRunOptions) (*SandboxInfo,
 	return c.pollUntilDone(ctx, opts.Name, opts.OnProgress)
 }
 
-// List returns info for all sandboxes.
-func (c *Client) List(ctx context.Context) ([]*SandboxInfo, error) {
+// ListSandboxes returns info for all sandboxes.
+func (c *Client) ListSandboxes(ctx context.Context) ([]*SandboxInfo, error) {
 	if err := c.ensure(ctx); err != nil {
 		return nil, err
 	}
@@ -338,7 +339,7 @@ func (o SandboxCloneOptions) toInternal() sandbox.CloneOptions {
 //
 // With opts.Overwrite set, an existing destination is destroyed before the
 // copy; without it, an existing destination is a hard error.
-func (c *Client) Clone(ctx context.Context, opts SandboxCloneOptions) error {
+func (c *Client) CloneSandbox(ctx context.Context, opts SandboxCloneOptions) error {
 	if err := c.ensure(ctx); err != nil {
 		return err
 	}
@@ -383,7 +384,7 @@ func (c *Client) destroyForOverwrite(ctx context.Context, dest string) error {
 // name on success — currently always opts.Name, since name is required
 // (no auto-generation). Use Run for the higher-level "create + wait for
 // terminal status" convenience.
-func (c *Client) Create(ctx context.Context, opts SandboxCreateOptions) (string, error) {
+func (c *Client) CreateSandbox(ctx context.Context, opts SandboxCreateOptions) (string, error) {
 	if err := c.ensure(ctx); err != nil {
 		return "", err
 	}

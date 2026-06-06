@@ -25,7 +25,7 @@ func hasWildcard(s string) bool {
 // expandWildcard matches a wildcard pattern against all sandbox names.
 // Returns matching sandbox names, or an error if no matches found.
 func expandWildcard(ctx context.Context, c *yoloai.Client, pattern string) ([]string, error) {
-	infos, err := c.List(ctx)
+	infos, err := c.ListSandboxes(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list sandboxes: %w", err)
 	}
@@ -121,7 +121,7 @@ func resolveDestroyNames(cmd *cobra.Command, ctx context.Context, c *yoloai.Clie
 
 // resolveDestroyAll resolves names when --all is set, returning nil if none exist.
 func resolveDestroyAll(cmd *cobra.Command, ctx context.Context, c *yoloai.Client) ([]string, error) {
-	infos, err := c.List(ctx)
+	infos, err := c.ListSandboxes(ctx)
 	if err != nil {
 		return nil, err
 	}

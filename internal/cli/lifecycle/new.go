@@ -313,7 +313,7 @@ func resolveNewDirSpecs(rawWorkdirArg string, rawDirs []string) (workdirSpec yol
 // dirty workdir (*DirtyWorkdirError) and we're interactive, it warns, prompts,
 // and retries with the workdir acked — the library never prompts itself.
 func executeNewCreate(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, opts yoloai.SandboxCreateOptions, attach bool) error {
-	sandboxName, err := c.Create(ctx, opts)
+	sandboxName, err := c.CreateSandbox(ctx, opts)
 
 	var dirty *yoloai.DirtyWorkdirError
 	if errors.As(err, &dirty) && !cliutil.JSONEnabled(cmd) {
@@ -321,7 +321,7 @@ func executeNewCreate(cmd *cobra.Command, ctx context.Context, c *yoloai.Client,
 			return nil // user declined — cancel cleanly
 		}
 		opts.AllowDirtyWorkdir = true
-		sandboxName, err = c.Create(ctx, opts)
+		sandboxName, err = c.CreateSandbox(ctx, opts)
 	}
 	if err != nil {
 		return err

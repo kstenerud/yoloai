@@ -58,7 +58,7 @@ Dependency direction (W-L8 + W-L12 shape): `cmd/yoloai` → `internal/cli` → `
 |------|---------|
 | `client.go` | Orchestration spine — `Client` and its root methods (`Run`, `List`, `Clone`, `Create`, `EnsureSetup`) plus `SandboxCloneOptions` and the lazy-runtime construction helpers (`NewClient`, `ensure`, `newRuntime`). Registers Docker, Podman, Seatbelt, and Tart backends via blank imports. |
 | `client_options.go` | `ClientCreateOptions` — the construction-time config `NewClient` takes (data/home dirs, optional `BackendType`, IO, env snapshot, principal). |
-| `sandbox_options.go` | The public sandbox option types: `SandboxCreateOptions` (the advanced surface `Client.Create` takes) and `SandboxRunOptions` (the curated `Client.Run` sugar), plus `toInternal`/`materialize` mapping and port formatting. |
+| `sandbox_options.go` | The public sandbox option types: `SandboxCreateOptions` (the advanced surface `Client.CreateSandbox` takes) and `SandboxRunOptions` (the curated `Client.Run` sugar), plus `toInternal`/`materialize` mapping and port formatting. |
 | `system_config.go` | `ConfigAdmin` sub-handle (`Client.System().Config()`): `Effective`/`Get`/`Set`/`Reset` over the config files. |
 | `types.go` | Public type surface: re-exports of internal enums (`BackendType`, `AgentType`, `PruneItemKind`, `LogSource`), spec types (`DirSpec`, `MountSpec`, `PortMapping`), and orchestration result types (`Notice`, `DestroyResult`, `StartResult`, `ResetResult`). |
 | `backend.go` | Package-level backend-selection functions (`SelectBackend`, `SelectContainerBackend`, `IsolationAvailability`). Backend has no handle — its catalog metadata lives in `discovery.go` and its reports in `doctor_report.go`. |
@@ -409,7 +409,7 @@ Persisted as `environment.json` in each sandbox dir. Records creation-time state
 Per-sandbox runtime state persisted as `sandbox-state.json` (legacy: `state.json`). Tracks mutable state like `agent_files_initialized` (boolean). Separate from `Meta` which is immutable after creation. Lives in `sandbox/store`.
 
 ### `sandbox.CreateOptions` / `sandbox.DirSpec`
-Internal parameters for `Engine.Create()`. `DirSpec` specifies a directory path, mount mode (copy/overlay/rw/ro), and per-directory safety acks (`AllowDirty`, `AllowDangerousPath`). `CreateOptions` includes name, workdir `DirSpec`, auxiliary `DirSpec` list, agent, model, prompt, network, ports, profile, replace, passthrough args. The **public** creation surface is `yoloai.SandboxCreateOptions` (root `sandbox_options.go`); `Client.Create` maps it onto this internal struct via `toInternal()`. A dirty workdir surfaces as `*yoerrors.DirtyWorkdirError` (never an in-library prompt — D24).
+Internal parameters for `Engine.Create()`. `DirSpec` specifies a directory path, mount mode (copy/overlay/rw/ro), and per-directory safety acks (`AllowDirty`, `AllowDangerousPath`). `CreateOptions` includes name, workdir `DirSpec`, auxiliary `DirSpec` list, agent, model, prompt, network, ports, profile, replace, passthrough args. The **public** creation surface is `yoloai.SandboxCreateOptions` (root `sandbox_options.go`); `Client.CreateSandbox` maps it onto this internal struct via `toInternal()`. A dirty workdir surfaces as `*yoerrors.DirtyWorkdirError` (never an in-library prompt — D24).
 
 ### `patch.DiffOptions` / `patch.DiffResult`
 Input/output for `patch.GenerateDiff()` / `patch.GenerateMultiDiff()`. Supports path filtering and stat-only mode. `DiffResult` carries the diff text, workdir, mode, and empty flag. Lives in `sandbox/patch`.
@@ -463,7 +463,7 @@ Host context: `IsRoot`, `IsWSL2`, `InContainer`, `KVMGroup`. Detected once per i
 
 | CLI Command | Entry Point | Core Logic |
 |-------------|-------------|------------|
-| `yoloai new` | `cli/lifecycle/new.go:NewNewCmd` | `yoloai.Client.Create()` (→ `create.Run` in `sandbox/create/create.go`) |
+| `yoloai new` | `cli/lifecycle/new.go:NewNewCmd` | `yoloai.Client.CreateSandbox()` (→ `create.Run` in `sandbox/create/create.go`) |
 | `yoloai attach` | `cli/workflow/attach.go:NewAttachCmd` | `yoloai.Client.Attach()` (PTY-sized via `cliutil.IOStreams`) |
 | `yoloai diff` | `cli/workflow/diff.go:NewDiffCmd` | `yoloai.Client.GenerateMultiPatch()` (→ `sandbox.GenerateMultiDiff` in `sandbox/diff.go`) |
 | `yoloai apply` | `cli/workflow/apply.go:NewApplyCmd` | `yoloai.Client.GeneratePatch()` / `ApplyPatch()` / `GenerateFormatPatch()` |
@@ -472,7 +472,7 @@ Host context: `IsRoot`, `IsWSL2`, `InContainer`, `KVMGroup`. Detected once per i
 | `yoloai destroy` | `cli/lifecycle/destroy.go:NewDestroyCmd` | `yoloai.Client.Destroy()` |
 | `yoloai reset` | `cli/lifecycle/reset.go:NewResetCmd` | `yoloai.Client.Reset()` |
 | `yoloai restart` | `cli/lifecycle/restart.go:NewRestartCmd` | `yoloai.Client.Restart()` |
-| `yoloai clone` | `cli/lifecycle/clone.go:NewCloneCmd` | `yoloai.Client.Clone()` |
+| `yoloai clone` | `cli/lifecycle/clone.go:NewCloneCmd` | `yoloai.Client.CloneSandbox()` |
 | `yoloai system info` | `cli/system/info.go` | Version, paths, disk usage, backend availability |
 | `yoloai system agents` | `cli/system/backends_agents.go` | Lists agent definitions from `agent` package |
 | `yoloai system backends` | `cli/system/backends_agents.go` | Probes each backend via `cliutil.CheckBackend` |
@@ -485,7 +485,7 @@ Host context: `IsRoot`, `IsWSL2`, `InContainer`, `KVMGroup`. Detected once per i
 | `yoloai system completion` | `cli/system/completion.go` | Cobra's built-in completion generators |
 | `yoloai mcp serve` | `cli/mcp/mcp.go` | `mcpsrv.New()` — MCP server on stdio |
 | `yoloai mcp proxy` | `cli/mcp/mcp.go` | MCP proxy through sandbox |
-| `yoloai sandbox list` | `cli/sandboxcmd/list.go` | `yoloai.Client.List()` (→ `status.ListSandboxes` in `sandbox/status/`, re-exported via the façade) |
+| `yoloai sandbox list` | `cli/sandboxcmd/list.go` | `yoloai.Client.ListSandboxes()` (→ `status.ListSandboxes` in `sandbox/status/`, re-exported via the façade) |
 | `yoloai sandbox <name> info` | `cli/sandboxcmd/info.go` | `yoloai.Client.Inspect()` |
 | `yoloai sandbox <name> log` | `cli/sandboxcmd/log.go` | `yoloai.Sandbox.Agent().Logs()` (→ `sandbox.StreamLogs` in `logstream.go`) for the structured activity stream; `Sandbox.Agent().TerminalLog()` for `--agent`. CLI keeps only rendering + `--since` parsing. |
 | `yoloai sandbox <name> exec` | `cli/sandboxcmd/exec.go` | `yoloai.Client.Exec()` |
@@ -511,7 +511,7 @@ Host context: `IsRoot`, `IsWSL2`, `InContainer`, `KVMGroup`. Detected once per i
 ```
 NewNewCmd (cli/lifecycle/new.go)
   → cliutil.WithClient (cli/cliutil/client.go)
-    → yoloai.Client.Create  (calls create.Run(ctx, deps, opts) in sandbox/create/create.go)
+    → yoloai.Client.CreateSandbox  (calls create.Run(ctx, deps, opts) in sandbox/create/create.go)
       → EnsureSetup: create dirs, seed resources, build image, write config.yaml
       → prepareSandboxState (sandbox/create/create.go):
           resolve profile chain → applyConfigDefaults

@@ -122,7 +122,7 @@ surfaces (D53):
 - **G4:** done — (a) all catchable errors re-exported into a dedicated root `errors.go`
   (`DirtyWorkdirError` no longer dual-resident in `names.go`); (b) public List/slice surfaces
   standardized on empty-non-nil (JSON `[]` not `null`); (c) dead `CloneOptions.Overwrite` wired
-  into `Client.Clone` (cross-backend destroy), internal `Force` removed. Enum homes left as-is
+  into `Client.CloneSandbox` (cross-backend destroy), internal `Force` removed. Enum homes left as-is
   (already principled). See `critiques-resolved.md`.
 
 ### Phase 6 — Carried-forward (F6/F7/F9) *(verify before next critique-empty)*

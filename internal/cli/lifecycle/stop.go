@@ -79,7 +79,7 @@ func resolveStopNames(cmd *cobra.Command, ctx context.Context, c *yoloai.Client,
 
 // resolveStopAll collects running sandbox names when --all is set.
 func resolveStopAll(cmd *cobra.Command, ctx context.Context, c *yoloai.Client) ([]string, error) {
-	infos, err := c.List(ctx)
+	infos, err := c.ListSandboxes(ctx)
 	if err != nil {
 		return nil, err
 	}

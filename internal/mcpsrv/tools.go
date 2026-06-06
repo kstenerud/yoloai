@@ -175,7 +175,7 @@ func (s *Server) handleSandboxCreate(ctx context.Context, req mcp.CallToolReques
 		AllowDirtyWorkdir: true,
 	}
 
-	if _, err := s.c.Create(ctx, opts); err != nil {
+	if _, err := s.c.CreateSandbox(ctx, opts); err != nil {
 		return textResult(errorf("create sandbox: %v", err)), nil
 	}
 
@@ -213,7 +213,7 @@ func (s *Server) handleSandboxStatus(ctx context.Context, req mcp.CallToolReques
 }
 
 func (s *Server) handleSandboxList(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	infos, err := s.c.List(ctx)
+	infos, err := s.c.ListSandboxes(ctx)
 	if err != nil {
 		return textResult(errorf("list sandboxes: %v", err)), nil
 	}

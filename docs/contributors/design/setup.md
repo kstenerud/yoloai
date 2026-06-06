@@ -6,7 +6,7 @@ There is no `setup_complete` flag and no interactive prompt on `yoloai new`. Fir
 
 ### `EnsureSetup` (library, non-interactive)
 
-`EnsureSetup` runs at the start of `Client.Create` (and from the MCP server). It is idempotent, safe to call on every run, and **never prompts** — "wizard-has-run" ceremony is the app's concern, not the library's. It:
+`EnsureSetup` runs at the start of `Client.CreateSandbox` (and from the MCP server). It is idempotent, safe to call on every run, and **never prompts** — "wizard-has-run" ceremony is the app's concern, not the library's. It:
 
 1. Scaffolds the data directory if absent (the library owns everything under its `DataDir`; under the CLI that root is `~/.yoloai/library/`).
 2. Writes a default `config.yaml` with opinionated declarative defaults if missing — notably `tmux_conf: default+host`, so the common case "just works" with no question asked.

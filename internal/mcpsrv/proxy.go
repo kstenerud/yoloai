@@ -143,7 +143,7 @@ func (p *ProxyServer) createSandbox(ctx context.Context) (*yoloai.Environment, e
 		AllowDirtyWorkdir: true,
 	}
 
-	if _, err := p.c.Create(ctx, opts); err != nil {
+	if _, err := p.c.CreateSandbox(ctx, opts); err != nil {
 		return nil, fmt.Errorf("create sandbox %q: %w", p.sandboxName, err)
 	}
 

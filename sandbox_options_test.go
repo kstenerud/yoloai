@@ -87,7 +87,7 @@ func TestBackendBoundOp_OnBackendlessClient_ReturnsErrBackendRequired(t *testing
 	c, err := NewClient(context.Background(), ClientCreateOptions{DataDir: t.TempDir(), HomeDir: t.TempDir()})
 	require.NoError(t, err)
 
-	_, err = c.List(context.Background())
+	_, err = c.ListSandboxes(context.Background())
 	require.Error(t, err, "a backend-bound op on a backend-less Client must error")
 	require.ErrorIs(t, err, ErrBackendRequired)
 	var ue *yoerrors.UsageError

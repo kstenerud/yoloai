@@ -31,7 +31,11 @@ that shipped on the prior stable surface change; this is the entire Go migration
   `Destroy`, `Diff`, `Apply`, `ApplyWithOptions` — are no longer flat on `Client`.
   Call them on the handle returned by `client.Sandbox(name)` (`.Inspect(ctx)`,
   `.Stop(ctx)`, `.Destroy(ctx, …)`), and route diff/apply through
-  `.Sandbox(name).Workdir()`. `Run`, `List`, and `Close` remain on `Client`.
+  `.Sandbox(name).Workdir()`. `Run` and `Close` remain on `Client`.
+- `List` → `ListSandboxes`. The collection-level sandbox verbs now name their
+  noun: `ListSandboxes`, `CreateSandbox`, and `CloneSandbox` (the latter two were
+  introduced in this same reshape). `Run` is unchanged — it stays the headline
+  convenience entry point.
 
 Field semantics and zero values are otherwise unchanged — only the names and
 receivers move.
