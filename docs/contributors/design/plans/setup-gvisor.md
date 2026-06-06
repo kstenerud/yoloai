@@ -12,9 +12,10 @@ path. This doc designs an **opt-in** `yoloai system setup-gvisor` command that d
 setup explicitly, captures the motivation (is gVisor on macOS even worth it?), and lays out
 a phased implementation plan.
 
-Status: **design.** Not implemented. The gating unknown is R-DD (can runsc be installed
-persistently in Docker Desktop's read-only VM?) — Phase 0 below resolves it before any
-command is built.
+Status: **paused (2026-06-06).** Phase 0 (the R-DD spike) ran and came back negative on both
+macOS providers — see [Phase 0 verdict](#phase-0-verdict-gvisor-on-macos-is-not-turn-key--pause-recommended).
+gVisor on macOS is not turn-key; the recommendation is to keep `container-enhanced`
+Linux-primary and defer the macOS command. This doc is retained as the record + revival plan.
 
 ## Motivation — is gVisor on macOS worth it?
 
@@ -146,10 +147,44 @@ registers fine, but the `/tmp` chroot blocks *execution*), **neither macOS provi
 has a clean path** — Docker Desktop breaks at *registration*, OrbStack at *run*. This
 materially weakens the build-it-now case (decision point).
 
-Next options (each needs another controlled break + log capture): (1) read the engine startup
-log to learn *why* registration fails; (2) register via Docker Desktop's Settings-managed
-config instead of `~/.docker/daemon.json`; (3) a non-volume persistent path; (4) no
-`runtimeArgs` (let runsc auto-pick platform).
+Second cycle (deeper, 2026-06-06) — narrowed but not fully root-caused:
+
+- **Vanilla nested dockerd starts fine with runsc registered.** Running a plain `dockerd` in a
+  privileged container on Docker Desktop's *same VM kernel*, with the identical runsc runtime
+  in its `daemon.json`, started cleanly. So it is **not** "dockerd can't load runsc" — the
+  failure is specific to **Docker Desktop's engine/supervisor config-apply**, not dockerd or
+  runsc.
+- **Docker Desktop did read the staged binary** — the VM console log shows it enumerating the
+  volume and finding `runsc` (`-rwxr-xr-x`, correct size). So the volume-path mechanism works;
+  the engine still "service failed" at startup. The precise cause stays **opaque** (not clearly
+  logged in `dockerd.log`; would need detailed `com.docker.backend.log` spelunking around the
+  failure timestamp — and the likely culprit is Docker Desktop regenerating/validating its
+  Settings-managed engine config, which hand-editing `~/.docker/daemon.json` conflicts with).
+- **Even when runsc *runs* (nested), it hits a cgroup-v2 error:**
+  `cgroup.subtree_control: device or resource busy` — a second, separate blocker (at least
+  under nesting). gVisor's `--ignore-cgroups` is the known lever but trades resource limits.
+
+### Phase 0 verdict: gVisor on macOS is NOT turn-key — pause recommended
+
+Across both cycles: the **runsc binary works**, but **Docker Desktop breaks at registration**
+(opaque supervisor failure, twice; reverting always restores), **OrbStack breaks at run**
+(`/tmp` chroot), and there's a **cgroup-v2 hazard** on top. A robust `setup-gvisor` would be a
+significant, fragile, Docker-Desktop-internal-dependent effort fighting multiple independent
+blockers. Meanwhile the **primary value (production parity) is Linux-anchored and already
+works on Linux**, and on macOS gVisor is only defense-in-depth atop the existing VM.
+
+**Recommendation: pause gVisor-on-macOS.** Keep `container-enhanced` **Linux-primary**; treat
+macOS as not-currently-supported for gVisor (manual setup only, unsupported). Revisit if (a)
+there's real user demand, or (b) Docker Desktop gains a sanctioned runtime-install path
+(extension) that doesn't fight the Settings-managed engine config. The gate (D70) can stay
+permissive, but `new`/`system check` should say "gVisor on macOS needs manual runsc setup and
+is unsupported" rather than imply it works out of the box — a small honesty fix, separate from
+building the command.
+
+Deferred next options if revived (each needs another controlled DD break + backend-log
+capture): read `com.docker.backend.log` to pin the supervisor failure; register via Docker
+Desktop's Settings-store instead of `~/.docker/daemon.json`; test runsc on the *real* engine
+(single-nested) for the cgroup behavior; add `--ignore-cgroups`.
 
 ### Phase 1 — the command, Docker Desktop first
 
