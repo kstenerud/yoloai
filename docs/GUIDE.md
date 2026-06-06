@@ -723,7 +723,7 @@ On Docker and Podman backends, you can select isolation modes that trade securit
 |------|----------|-------------|
 | `container-privileged` | nothing (standard Docker) | Docker `--privileged` — all capabilities, seccomp=unconfined, AppArmor=unconfined. Use for Docker-in-Docker and Compose stacks. |
 | `container` | nothing | Default `runc` — Linux namespaces and cgroups |
-| `container-enhanced` | `runsc` registered with the daemon (and on the daemon's filesystem) | gVisor userspace kernel — intercepts syscalls in userspace, no KVM needed; works on Linux and macOS hosts (runs in the backend's Linux VM) |
+| `container-enhanced` | Linux host + `runsc` registered with the daemon | gVisor userspace kernel — intercepts syscalls in userspace, no KVM needed. **Linux-only — not supported on macOS** (D71) |
 | `vm` | KVM + Kata Containers | Kata Containers with QEMU VM |
 | `vm-enhanced` | KVM + Kata Containers + Firecracker | Kata Containers with Firecracker microVM |
 
@@ -750,11 +750,11 @@ Docker CE and the Compose plugin are pre-installed. `fuse-overlayfs` is configur
 
 Works on macOS too, via the Docker/Podman backend's Linux VM (Docker Desktop, OrbStack, or Podman Machine all run `--privileged` containers): use `--os linux --isolation container-privileged`. It is only unavailable with `--os mac`, where the native Seatbelt/Tart backends have no privileged mode. No additional host prerequisites are needed on a standard Linux machine. On Proxmox LXC hosts, ensure `features: nesting=1` is set on the LXC container.
 
-**Setup — gVisor (`container-enhanced`):**
+**Setup — gVisor (`container-enhanced`), Linux only:**
 
-`runsc` must live wherever the Docker daemon runs and be registered as a runtime in that daemon's `daemon.json`. yoloai's system check adapts to the daemon location: on a Linux host it verifies the binary on `PATH` **and** the registration; on a macOS/Windows host (where the daemon runs in a VM) it can only verify registration — the daemon checks the binary itself at container-create time.
+`container-enhanced` requires a **Linux host**. On macOS it is rejected up front (D71): the Docker daemon runs inside a Linux VM (Docker Desktop / OrbStack / Podman Machine) and none can run `runsc` turn-key — Docker Desktop's engine fails when runsc is registered, OrbStack's `/tmp→/private/tmp` virtiofs symlink breaks runsc's chroot, plus a nested cgroup-v2 hazard. Use a Linux host for gVisor, or `container` / `container-privileged` on macOS. See `docs/contributors/design/plans/setup-gvisor.md` for the full investigation.
 
-*Linux host (local daemon):*
+On a Linux host, `runsc` must be installed and registered as a Docker runtime:
 
 1. Install the `runsc` binary: see [gVisor installation docs](https://gvisor.dev/docs/user_guide/install/)
 2. Register it with Docker in `/etc/docker/daemon.json`:
@@ -763,9 +763,7 @@ Works on macOS too, via the Docker/Podman backend's Linux VM (Docker Desktop, Or
    ```
 3. Restart the Docker daemon: `sudo systemctl restart docker`
 
-*macOS host (Docker Desktop / OrbStack — daemon in a Linux VM):* gVisor runs on macOS, including Apple Silicon (the `systrap` platform needs no nested virtualization). `runsc` must be installed **inside the VM** (not on the macOS host) and registered there. Use `--os linux --isolation container-enhanced`; `--os mac` (Seatbelt/Tart) has no gVisor.
-
-> **OrbStack caveat:** OrbStack symlinks the VM's `/tmp` to the macOS `/private/tmp` over virtiofs, which collides with gVisor's hard-coded `/tmp` sandbox chroot and fails with `cannot read client sync file: EOF` (chroot: `expected to open /tmp, but found /private/tmp`). Docker Desktop's LinuxKit VM has a normal `/tmp` and is unaffected. See `docs/contributors/backend-idiosyncrasies.md`.
+yoloai's system check then verifies the `runsc` binary on `PATH` and its registration with the daemon.
 
 **Setup — Kata Containers (`vm`, `vm-enhanced`):**
 

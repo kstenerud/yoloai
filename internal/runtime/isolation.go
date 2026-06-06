@@ -95,6 +95,20 @@ func IsolationAvailability(isolation IsolationMode, targetOS, hostOS string) (av
 			fmt.Sprintf("--isolation %s is not available with --os mac.", isolation),
 			macAlternatives
 
+	case hostOS == "darwin" && isolation == IsolationModeContainerEnhanced:
+		// gVisor (runsc) is not supported on a macOS host. The Docker daemon runs
+		// inside a Linux VM (Docker Desktop / OrbStack / Podman Machine), and none
+		// of them can run runsc turn-key: Docker Desktop's engine fails when runsc
+		// is registered, OrbStack's /tmp→/private/tmp virtiofs symlink breaks
+		// runsc's chroot, and there's a nested cgroup-v2 hazard on top. gVisor is
+		// Linux-primary; see docs/contributors/design/plans/setup-gvisor.md (D71).
+		return false,
+			"--isolation container-enhanced (gVisor) is not supported on macOS.",
+			"gVisor requires a Linux host. The macOS Docker VMs can't run runsc without\n" +
+				"manual, unsupported setup. Use a Linux host for gVisor isolation, or on macOS:\n" +
+				"  container             container sandbox (runc)\n" +
+				"  container-privileged  privileged container (docker-in-docker, etc.)"
+
 	case isolation == IsolationModeContainerPrivileged && targetOS == "mac":
 		// Only the macOS-native target is unsupported: seatbelt/tart have no
 		// privileged mode. A darwin *host* is fine — Docker Desktop / OrbStack /

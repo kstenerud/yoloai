@@ -486,7 +486,7 @@ After the bootstrap the stamp is the **only** signal consulted — a stamped lay
 
 ## D70 — `container-enhanced` (gVisor) is allowed on macOS hosts; the runsc prerequisite check follows the daemon, not the host
 
-**Date:** 2026-06-05. **Status:** Accepted (owner, 2026-06-05). **Follows** D69 (same "gate on backend capability, not host OS" correction). **Retires** the macOS `container-enhanced` block that cited claude-code#35454. **Resolves** the "separate empirical review" deferred in D69.
+**Date:** 2026-06-05. **Status:** Superseded in part by [D71](#d71--container-enhanced-gvisor-is-re-blocked-on-macos-hosts-not-turn-key) (2026-06-06) — the macOS gate lift (point 1) is **reverted**; the daemon-location runsc prerequisite check (point 2) **still stands** for Linux/Windows. **Follows** D69 (same "gate on backend capability, not host OS" correction). **Retires** the macOS `container-enhanced` block that cited claude-code#35454. **Resolves** the "separate empirical review" deferred in D69.
 
 **Empirical findings (this machine: OrbStack / Apple Silicon).** gVisor's `runsc` (release-20260601.0) **runs on macOS arm64** inside the OrbStack Linux VM via the `systrap` platform (no nested KVM): a container booted reporting `Linux version 4.19.0-gvisor`. The claude-code#35454 hang (zero output / `epoll_pwait` loop) **does not reproduce** on current Claude Code (2.1.156): `--version` is instant, `--print` returns a clean auth error in <1s, and `--print` with a fake key reaches API-key validation in 1s. That issue was filed by us and **auto-closed as stale**, never fixed by Anthropic on paper — but the behavior is gone. The only real blocker is environmental and OrbStack-specific: `/tmp → /private/tmp` (the macOS host over virtiofs) collides with gVisor's hard-coded `/tmp` chroot (see `backend-idiosyncrasies.md`); Docker Desktop's LinuxKit `/tmp` is unaffected.
 
@@ -499,6 +499,23 @@ After the bootstrap the stamp is the **only** signal consulted — a stamped lay
 **Not addressed.** The podman gVisor path (`podman.go::RequiredCapabilities`) still uses the host-PATH `gvisorRunsc` check and was **not** changed — Podman Machine wasn't tested here and rootless Podman has its own hard gVisor blocker (cgroup v2 delegation). Revisit if podman+gVisor on macOS is needed.
 
 **Consequences.** Not breaking (a restriction is lifted). `yoloai new --os linux --isolation container-enhanced` now passes the gate and prereq check on macOS when runsc is registered; on OrbStack it then fails at the daemon with the documented `/tmp` error until worked around. GUIDE.md, `backend-idiosyncrasies.md`, and the smoke `ISOLATION_HOST_NOTE` updated; `TestIsolationAvailability` and `TestRequiredCapabilities_Docker_Enhanced_DaemonModel` lock the new rules.
+
+## D71 — `container-enhanced` (gVisor) is re-blocked on macOS hosts (not turn-key)
+
+**Date:** 2026-06-06. **Status:** Accepted (owner, 2026-06-06). **Supersedes in part** D70 (reverts its point 1, the macOS gate lift; D70 point 2 — the daemon-location runsc prereq check — stays for Linux/Windows).
+
+**Why.** A dedicated R-DD spike (see `docs/contributors/design/plans/setup-gvisor.md`) tried to make gVisor work turn-key on the macOS Docker VMs and found it isn't, on either provider:
+- **Docker Desktop breaks at *registration*.** Registering `runsc` in the VM daemon (runtime in `~/.docker/daemon.json`, binary staged in a volume the engine can read — confirmed in the VM console log) makes the engine "running engine: service failed" to start. Reproduced twice; reverting always restored. A vanilla nested dockerd on the same VM kernel starts fine with the same registration, so it's Docker Desktop's Settings-managed engine config-apply that fails — opaque without deep backend-log spelunking.
+- **OrbStack breaks at *run*.** runsc registers fine, but the `/tmp → /private/tmp` virtiofs symlink collides with runsc's hard-coded `/tmp` chroot (D70 / `backend-idiosyncrasies.md`).
+- **Plus a nested cgroup-v2 hazard** (`cgroup.subtree_control: device or resource busy`).
+
+The primary value of `container-enhanced` (production parity with Cloud Run / GKE Sandbox, which run under gVisor) is **Linux-anchored and already works on Linux**; on macOS gVisor is only defense-in-depth atop the existing Docker VM. So the cost/fragility isn't justified.
+
+**The decision.** Re-add the `hostOS == "darwin"` rejection for `container-enhanced` in `IsolationAvailability` (covers host=darwin targeting linux/default; the `--os mac` case was already rejected). gVisor is **Linux-primary**; macOS is unsupported (manual runsc setup only, and even that hits the blockers above). The error message points users at a Linux host or the macOS container/`container-privileged` modes.
+
+**Rejected.** (a) Building `yoloai system setup-gvisor` anyway — it would fight Docker Desktop's engine-config mechanism and OrbStack's `/tmp` and a cgroup hazard; high effort, fragile, low macOS-specific value. (b) Leaving the gate permissive with only a friendly warning — a launch that always fails at the daemon is worse UX than an up-front "not supported on macOS." (c) Keeping digging the Docker Desktop supervisor failure — diminishing returns; parked in the plan doc with revival steps.
+
+**Consequences.** `yoloai new --isolation container-enhanced` on a macOS host now fails fast at the gate with a clear message (previously it passed the gate and failed deep in the daemon). `setup-gvisor.md` marked **paused**; `TestIsolationAvailability` updated to lock the rejection. The smoke `ISOLATION_HOST_NOTE` and GUIDE updated to say gVisor is Linux-only. The podman gVisor path (D70 "not addressed") is likewise out of scope on macOS.
 
 # Convention reminders
 

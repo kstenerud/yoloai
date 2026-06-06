@@ -345,18 +345,16 @@ HOST_OS_LOCKED: dict[str, str] = {
 # explains such an omission (keyed by isolation) so a backend that's silently
 # absent from this host's matrix still gets a reason in the end-of-run summary.
 #
-# Only container-enhanced (gVisor) remains here. yoloai allows it on macOS hosts
-# (it runs in the backend's Linux VM), but it's not *scheduled* in the mac matrix
-# because it isn't turn-key in CI: runsc must be installed inside the daemon's VM
-# (Docker Desktop / OrbStack don't ship it), and OrbStack additionally needs a
-# workaround for its /tmp->/private/tmp symlink (see backend-idiosyncrasies.md).
-# The old "Claude Code hangs under gVisor" reason is obsolete — verified not to
-# reproduce on current Claude Code + gVisor. container-privileged is NOT listed:
-# it runs on macOS via the Linux VM and is now scheduled in the mac matrices.
+# Only container-enhanced (gVisor) remains here. As of D71 yoloai *rejects* it on
+# macOS hosts entirely — the R-DD spike found it isn't turn-key on either provider
+# (Docker Desktop's engine fails when runsc is registered; OrbStack's /tmp chroot
+# collision; a nested cgroup-v2 hazard). gVisor is Linux-primary; see
+# docs/contributors/design/plans/setup-gvisor.md. So on a macOS run the Linux-only
+# docker-cenhanced backend is uncovered with that reason. container-privileged is
+# NOT listed: it runs on macOS via the Linux VM and is scheduled in the mac matrices.
 ISOLATION_HOST_NOTE: dict[str, str] = {
-    "container-enhanced": "gVisor (container-enhanced) is supported on macOS but "
-    "not scheduled in CI: runsc must be installed in the daemon's Linux VM "
-    "(and OrbStack needs a /tmp workaround)",
+    "container-enhanced": "gVisor (container-enhanced) is Linux-only — not supported "
+    "on macOS (the macOS Docker VMs can't run runsc turn-key; D71). Use a Linux host.",
 }
 
 # Tests restricted to --full tier.

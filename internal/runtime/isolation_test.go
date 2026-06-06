@@ -79,10 +79,12 @@ func TestIsolationAvailability(t *testing.T) {
 		// VM modes still require containerd, unavailable on a darwin host.
 		{"vm darwin host rejected", IsolationModeVM, "linux", "darwin", false},
 		{"vm linux host ok", IsolationModeVM, "", "linux", true},
-		// container-enhanced (gVisor): allowed on a darwin host targeting Linux
-		// containers (gVisor runs in the backend's Linux VM; runsc registration
-		// is checked separately as a prerequisite). Only --os mac is rejected.
-		{"enhanced darwin host, linux target", IsolationModeContainerEnhanced, "linux", "darwin", true},
+		// container-enhanced (gVisor): rejected on a darwin host entirely (D71) —
+		// the macOS Docker VMs can't run runsc turn-key (Docker Desktop engine
+		// fails on registration; OrbStack /tmp chroot; cgroup hazard). gVisor is
+		// Linux-primary. Both --os mac and the host-darwin/linux-target case fail.
+		{"enhanced darwin host, linux target rejected", IsolationModeContainerEnhanced, "linux", "darwin", false},
+		{"enhanced darwin host, default target rejected", IsolationModeContainerEnhanced, "", "darwin", false},
 		{"enhanced os=mac rejected", IsolationModeContainerEnhanced, "mac", "darwin", false},
 		{"enhanced linux host ok", IsolationModeContainerEnhanced, "", "linux", true},
 		// Plain container is always fine.
