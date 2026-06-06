@@ -122,6 +122,35 @@ a `/var/lib`-backed path, the Docker Desktop settings-managed `daemon.json`, or 
 Desktop extension. **Output: go/no-go on Docker Desktop as the primary target.** If no-go,
 re-scope to OrbStack-with-`/tmp`-tradeoff as primary.
 
+#### Phase 0 result (2026-06-06): naive registration breaks the engine ❌
+
+First attempt (the dev.to recipe): runsc downloaded + checksum-verified into a Docker
+**volume** (`/var/lib/docker/volumes/runsc-runtime-binaries/_data/runsc`; it ran —
+`runsc version release-20260601.0`), registered in `~/.docker/daemon.json` as
+`runtimes.runsc.path` with `runtimeArgs: ["--platform=systrap"]`, then quit+restart Docker
+Desktop. **Docker Desktop's engine failed to start** — "running engine: service failed",
+stuck on diagnostics, had to force-quit. Reverting `daemon.json` + restart restored it
+cleanly (verified byte-identical to the pre-spike backup; containers run). The **runsc binary
+is fine**; the **registration** takes the engine down. Unlike bare-Linux dockerd (which logs a
+bad runtime and continues), Docker Desktop's supervisor treats the daemon error as a hard
+failure.
+
+Root cause not yet captured (would need the engine log at
+`~/Library/Containers/com.docker.docker/Data/log/`). Hypotheses: dockerd probes the runtime at
+startup (e.g. `runsc features`) and that exec fails in the early init context; or the
+volume-backed path isn't valid/exec-able when dockerd validates `runtimes`.
+
+**Implication:** the Docker-Desktop "favorable target" advantage (normal `/tmp`) is undercut if
+we can't register runsc without killing the engine. Combined with OrbStack (runsc installs +
+registers fine, but the `/tmp` chroot blocks *execution*), **neither macOS provider currently
+has a clean path** — Docker Desktop breaks at *registration*, OrbStack at *run*. This
+materially weakens the build-it-now case (decision point).
+
+Next options (each needs another controlled break + log capture): (1) read the engine startup
+log to learn *why* registration fails; (2) register via Docker Desktop's Settings-managed
+config instead of `~/.docker/daemon.json`; (3) a non-volume persistent path; (4) no
+`runtimeArgs` (let runsc auto-pick platform).
+
 ### Phase 1 — the command, Docker Desktop first
 
 Build `yoloai system setup-gvisor` (`internal/cli/system/`): detect → download+checksum-verify
