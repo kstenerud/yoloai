@@ -31,11 +31,12 @@ that shipped on the prior stable surface change; this is the entire Go migration
   `Destroy`, `Diff`, `Apply`, `ApplyWithOptions` — are no longer flat on `Client`.
   Call them on the handle returned by `client.Sandbox(name)` (`.Inspect(ctx)`,
   `.Stop(ctx)`, `.Destroy(ctx, …)`), and route diff/apply through
-  `.Sandbox(name).Workdir()`. `Run` and `Close` remain on `Client`.
-- `List` → `ListSandboxes`. The collection-level sandbox verbs now name their
-  noun: `ListSandboxes`, `CreateSandbox`, and `CloneSandbox` (the latter two were
-  introduced in this same reshape). `Run` is unchanged — it stays the headline
-  convenience entry point.
+  `.Sandbox(name).Workdir()`. `Close` remains on `Client`.
+- `List` → `ListSandboxes` and `Run` → `RunSandbox`. The sandbox verbs on the
+  root `Client` now name their noun: `RunSandbox`, `ListSandboxes`,
+  `CreateSandbox`, and `CloneSandbox` (the latter two were introduced in this
+  same reshape). `Client` is a multi-noun root — the bare verbs didn't say what
+  they acted on.
 
 Field semantics and zero values are otherwise unchanged — only the names and
 receivers move.
@@ -214,7 +215,7 @@ Human-readable output also gains an `" (agent requirement)"` annotation next to 
 **Migration:**
 - If you relied on `yoloai new` prompting on first run, run `yoloai system setup` once after install (or before your first `yoloai new`). Subsequent runs are unaffected.
 - CI / scripted installs already running on non-TTY stdin see no behavior change.
-- Embedders calling `Client.Run` before configuring defaults still auto-get `default+host` — no code change needed.
+- Embedders calling `Client.RunSandbox` before configuring defaults still auto-get `default+host` — no code change needed.
 - Embedders that want a wizard supply their own prompt UI and write the collected answers via `Config().Set`.
 
 ### `yoloai system prune` always operates across all backends; `--all` and `--backend` removed

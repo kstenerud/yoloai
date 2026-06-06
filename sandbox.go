@@ -95,7 +95,7 @@ func (s *Sandbox) Stop(ctx context.Context) error {
 }
 
 // Start launches (or relaunches) the container for the existing sandbox.
-// The sandbox must exist on disk; use Client.Run/Create for a new one.
+// The sandbox must exist on disk; use Client.RunSandbox/CreateSandbox for a new one.
 func (s *Sandbox) Start(ctx context.Context, opts SandboxStartOptions) (*StartResult, error) {
 	if err := s.c.ensure(ctx); err != nil {
 		return nil, err

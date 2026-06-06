@@ -56,9 +56,9 @@ Dependency direction (W-L8 + W-L12 shape): `cmd/yoloai` → `internal/cli` → `
 
 | File | Purpose |
 |------|---------|
-| `client.go` | Orchestration spine — `Client` and its root methods (`Run`, `List`, `Clone`, `Create`, `EnsureSetup`) plus `SandboxCloneOptions` and the lazy-runtime construction helpers (`NewClient`, `ensure`, `newRuntime`). Registers Docker, Podman, Seatbelt, and Tart backends via blank imports. |
+| `client.go` | Orchestration spine — `Client` and its root methods (`RunSandbox`, `ListSandboxes`, `CloneSandbox`, `CreateSandbox`, `EnsureSetup`) plus `SandboxCloneOptions` and the lazy-runtime construction helpers (`NewClient`, `ensure`, `newRuntime`). Registers Docker, Podman, Seatbelt, and Tart backends via blank imports. |
 | `client_options.go` | `ClientCreateOptions` — the construction-time config `NewClient` takes (data/home dirs, optional `BackendType`, IO, env snapshot, principal). |
-| `sandbox_options.go` | The public sandbox option types: `SandboxCreateOptions` (the advanced surface `Client.CreateSandbox` takes) and `SandboxRunOptions` (the curated `Client.Run` sugar), plus `toInternal`/`materialize` mapping and port formatting. |
+| `sandbox_options.go` | The public sandbox option types: `SandboxCreateOptions` (the advanced surface `Client.CreateSandbox` takes) and `SandboxRunOptions` (the curated `Client.RunSandbox` sugar), plus `toInternal`/`materialize` mapping and port formatting. |
 | `system_config.go` | `ConfigAdmin` sub-handle (`Client.System().Config()`): `Effective`/`Get`/`Set`/`Reset` over the config files. |
 | `types.go` | Public type surface: re-exports of internal enums (`BackendType`, `AgentType`, `PruneItemKind`, `LogSource`), spec types (`DirSpec`, `MountSpec`, `PortMapping`), and orchestration result types (`Notice`, `DestroyResult`, `StartResult`, `ResetResult`). |
 | `backend.go` | Package-level backend-selection functions (`SelectBackend`, `SelectContainerBackend`, `IsolationAvailability`). Backend has no handle — its catalog metadata lives in `discovery.go` and its reports in `doctor_report.go`. |

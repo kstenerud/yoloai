@@ -1,11 +1,11 @@
-// ABOUTME: Public high-level Client API (Run, CreateSandbox, CloneSandbox, ListSandboxes, plus the
+// ABOUTME: Public high-level Client API (RunSandbox, CreateSandbox, CloneSandbox, ListSandboxes, plus the
 // ABOUTME: Sandbox/System sub-handles) for embedding yoloAI in Go programs.
 // Package yoloai is the orchestration layer for yoloAI. Both the CLI
 // (internal/cli) and external embedders use it as the entry point for
 // running AI coding agents in isolated sandboxes.
 //
 // One Client is the entry point. It owns creation and cross-sandbox
-// operations (Run, CreateSandbox, CloneSandbox, ListSandboxes) plus the
+// operations (RunSandbox, CreateSandbox, CloneSandbox, ListSandboxes) plus the
 // per-sandbox handle accessor
 // Sandbox(name); per-sandbox operations (Inspect, Start, Stop, Restart, Reset,
 // Destroy, Exec, and the Workdir/Network/Agent sub-handles) live on that
@@ -33,7 +33,7 @@
 //	if err != nil { log.Fatal(err) }
 //	defer client.Close()
 //
-//	info, err := client.Run(ctx, yoloai.SandboxRunOptions{
+//	info, err := client.RunSandbox(ctx, yoloai.SandboxRunOptions{
 //	    Name:    "myproject",
 //	    WorkDir: "/path/to/project",
 //	    Prompt:  "Fix the login bug",
@@ -75,7 +75,7 @@ import (
 // internal/sandbox so embedders can `errors.Is` against them without
 // reaching into internal packages.
 var (
-	// ErrSandboxExists is returned by Run when a sandbox with the given name
+	// ErrSandboxExists is returned by RunSandbox when a sandbox with the given name
 	// already exists and Replace is false.
 	ErrSandboxExists = sandbox.ErrSandboxExists
 
@@ -89,7 +89,7 @@ var (
 	// recreated since the host last booted.
 	ErrContainerNotRunning = sandbox.ErrContainerNotRunning
 
-	// ErrMissingAPIKey is returned by Run/CreateSandbox when the selected agent
+	// ErrMissingAPIKey is returned by RunSandbox/CreateSandbox when the selected agent
 	// requires an API key (via Definition.APIKeyEnvVars) but none is set.
 	ErrMissingAPIKey = sandbox.ErrMissingAPIKey
 )
@@ -269,13 +269,13 @@ func (c *Client) pollUntilDone(ctx context.Context, name string, progress func(s
 	}
 }
 
-// Run creates a sandbox with the given options and starts the agent.
+// RunSandbox creates a sandbox with the given options and starts the agent.
 // Equivalent to 'yoloai new <name> <workdir> --prompt <prompt>'.
 //
-// If opts.Wait is true, Run blocks until the agent finishes and returns the
-// final sandbox SandboxInfo. If opts.Wait is false, Run returns immediately after
+// If opts.Wait is true, RunSandbox blocks until the agent finishes and returns the
+// final sandbox SandboxInfo. If opts.Wait is false, RunSandbox returns immediately after
 // the agent is launched; the SandboxInfo reflects the initial state.
-func (c *Client) Run(ctx context.Context, opts SandboxRunOptions) (*SandboxInfo, error) {
+func (c *Client) RunSandbox(ctx context.Context, opts SandboxRunOptions) (*SandboxInfo, error) {
 	createOpts := opts.materialize()
 	if createOpts.AgentType == "" {
 		createOpts.AgentType = AgentType(resolveAgentFromConfig(c.layout))
@@ -382,7 +382,7 @@ func (c *Client) destroyForOverwrite(ctx context.Context, dest string) error {
 // Create provisions a new sandbox from SandboxCreateOptions and (unless
 // opts.NoStart) starts the container with the agent. Returns the sandbox
 // name on success — currently always opts.Name, since name is required
-// (no auto-generation). Use Run for the higher-level "create + wait for
+// (no auto-generation). Use RunSandbox for the higher-level "create + wait for
 // terminal status" convenience.
 func (c *Client) CreateSandbox(ctx context.Context, opts SandboxCreateOptions) (string, error) {
 	if err := c.ensure(ctx); err != nil {

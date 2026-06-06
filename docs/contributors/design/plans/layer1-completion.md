@@ -17,8 +17,8 @@ are wrong:
    behind an alias*," not "no leaks." Confirmed live leak: `yoloai.Info`
    (`= sandbox.Info` → `status.Info`) carries `Meta *store.Meta`, an internal iceberg
    (`WorkdirMeta`, `[]DirMeta`, `DirMode`, `runtime.IsolationMode`, `runtime.BackendType`,
-   `agent.AgentType`, `*config.ResourceLimits`) returned by `Client.Run`/`List`,
-   `Sandbox.Inspect`, `SystemClient.ListAcrossBackends` — the four most central entry
+   `agent.AgentType`, `*config.ResourceLimits`) returned by `Client.RunSandbox`/`ListSandboxes`,
+   `Sandbox.Inspect`, `System.AllSandboxes` — the four most central entry
    points. An embedder holding a `*yoloai.Info` cannot name `.Meta`.
 
 2. **The surface is incomplete.** ~7 consumer capabilities reach `internal/` directly
