@@ -132,7 +132,7 @@ func runList(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	infos, unavailableBackends, err := sys.ListAcrossBackends(ctx)
+	infos, unavailableBackends, err := sys.AllSandboxes(ctx)
 	if err != nil {
 		return err
 	}

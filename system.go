@@ -31,10 +31,10 @@ import (
 // methods (DiskUsage, Prune, BuildImage with AllBackends) iterate every
 // registered backend that's available in the current environment
 // and spin up an ephemeral runtime per backend. Single-backend
-// methods (Check, single-backend BuildImage) take a BackendType parameter.
+// methods (CheckPrerequisites, single-backend BuildImage) take a BackendType parameter.
 //
 // Safe for concurrent use by multiple goroutines. Read-only methods
-// (DiskUsage, Check) run in parallel. Write methods (BuildImage, Prune)
+// (DiskUsage, CheckPrerequisites) run in parallel. Write methods (BuildImage, Prune)
 // acquire backend-internal locks where applicable.
 type System struct {
 	layout config.Layout
@@ -81,31 +81,31 @@ const (
 )
 
 // DataDirStatus reports what the library realm's DataDir needs before use:
-// LayoutFresh (create), LayoutMigrate (run Migrate), or LayoutOK (proceed). A
+// LayoutFresh (create), LayoutMigrate (run MigrateDataDir), or LayoutOK (proceed). A
 // too-new on-disk version returns an error (the binary is older than the data;
 // the user must upgrade yoloai). It is a cheap, read-only check that inspects
 // only the DataDir and its plain-int .schema-version stamp.
 //
 // Direct embedders that own a dedicated DataDir use this to decide between
-// CreateFresh and Migrate; the CLI's startup gate calls it as one of its two
+// CreateDataDir and MigrateDataDir; the CLI's startup gate calls it as one of its two
 // realm checks.
 func (s *System) DataDirStatus() (LayoutStatus, error) {
 	return config.RealmStatus(s.layout.DataDir, config.LibrarySchemaVersion)
 }
 
-// CreateFresh initializes the library realm's DataDir at the current schema
+// CreateDataDir initializes the library realm's DataDir at the current schema
 // version (directory + version stamp). Call it only when DataDirStatus reports
 // LayoutFresh; operational scaffolding is still materialized lazily by the
 // engine's setup path.
-func (s *System) CreateFresh() error {
+func (s *System) CreateDataDir() error {
 	return config.CreateFreshLibrary(s.layout)
 }
 
-// Migrate brings the library realm's DataDir up to the current schema version.
+// MigrateDataDir brings the library realm's DataDir up to the current schema version.
 // Idempotent: a DataDir already at the current version is a no-op. This is the
 // only entry point that mutates on-disk schema state for the library realm;
 // the engine no longer migrates as a side effect of setup.
-func (s *System) Migrate(ctx context.Context) error {
+func (s *System) MigrateDataDir(ctx context.Context) error {
 	_ = ctx
 	return config.MigrateLibrary(s.layout)
 }
@@ -178,11 +178,11 @@ type SystemInfo struct {
 	Backends       []BackendInfo
 }
 
-// ListAcrossBackends enumerates sandboxes across every backend that currently
+// AllSandboxes enumerates sandboxes across every backend that currently
 // has sandbox state, inspecting each via its own backend. Returns the sandbox
 // infos plus the names of backends that have sandbox dirs but couldn't be
 // reached (e.g. their daemon is down) so callers can warn without failing.
-func (s *System) ListAcrossBackends(ctx context.Context) ([]*SandboxInfo, []BackendType, error) {
+func (s *System) AllSandboxes(ctx context.Context) ([]*SandboxInfo, []BackendType, error) {
 	infos, unavailable, err := sandbox.ListSandboxesMultiBackend(ctx, s.layout,
 		func(ctx context.Context, backend runtime.BackendType) (runtime.Runtime, error) {
 			return newRuntime(ctx, backend, s.layout)
@@ -400,8 +400,8 @@ func (s *System) buildOne(ctx context.Context, backend BackendType, opts BuildIm
 	return rt.Setup(ctx, s.layout, s.layout.ProfileDir("base"), out, slog.Default(), opts.Rebuild)
 }
 
-// SystemCheckOptions configures System.Check.
-type SystemCheckOptions struct {
+// CheckPrerequisitesOptions configures System.Check.
+type CheckPrerequisitesOptions struct {
 	// Backend is the backend to verify. Required.
 	BackendType BackendType
 	// AgentType is the agent name whose credentials are checked. Required;
@@ -422,7 +422,7 @@ type CheckResult struct {
 	Message string
 }
 
-// Check verifies that yoloai's prerequisites are satisfied. Runs all
+// CheckPrerequisites verifies that yoloai's prerequisites are satisfied. Runs all
 // configured checks (always returns a result per check) and returns
 // the result list. The error return is non-nil only for system-level
 // failures (e.g. unknown backend); per-check failures are reflected
@@ -430,7 +430,7 @@ type CheckResult struct {
 //
 // CLI: `yoloai system check`. Distinct from Doctor (full capability
 // report per backend/mode).
-func (s *System) Check(ctx context.Context, opts SystemCheckOptions) ([]CheckResult, error) {
+func (s *System) CheckPrerequisites(ctx context.Context, opts CheckPrerequisitesOptions) ([]CheckResult, error) {
 	if opts.BackendType == "" {
 		return nil, yoerrors.NewUsageError("Backend is required")
 	}

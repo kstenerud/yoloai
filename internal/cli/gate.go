@@ -62,7 +62,7 @@ func initFreshDataDir() error {
 	if err != nil {
 		return err
 	}
-	if err := sys.CreateFresh(); err != nil {
+	if err := sys.CreateDataDir(); err != nil {
 		return fmt.Errorf("initialize library data dir: %w", err)
 	}
 	return nil

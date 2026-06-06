@@ -50,7 +50,7 @@ func runSystemCheck(cmd *cobra.Command, backend yoloai.BackendType, agentName, i
 	if err != nil {
 		return err
 	}
-	results, err := sys.Check(cmd.Context(), yoloai.SystemCheckOptions{
+	results, err := sys.CheckPrerequisites(cmd.Context(), yoloai.CheckPrerequisitesOptions{
 		BackendType: yoloai.BackendType(backend),
 		AgentType:   yoloai.AgentType(agentName),
 		Isolation:   yoloai.IsolationMode(isolation),

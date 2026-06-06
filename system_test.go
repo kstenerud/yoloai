@@ -74,7 +74,7 @@ func TestSystem_ValidateSandboxName(t *testing.T) {
 // dirs) lists nothing and probes no backends — no enumeration, no error.
 func TestSystem_ListAcrossBackends_Empty(t *testing.T) {
 	c := newTestClient(t)
-	infos, unavailable, err := c.ListAcrossBackends(context.Background())
+	infos, unavailable, err := c.AllSandboxes(context.Background())
 	require.NoError(t, err)
 	assert.Empty(t, infos)
 	assert.Empty(t, unavailable)

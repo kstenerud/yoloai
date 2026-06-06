@@ -67,11 +67,11 @@ func runSystemMigrate(cmd *cobra.Command) error {
 	}
 	switch libSt {
 	case config.LayoutFresh:
-		if err := sys.CreateFresh(); err != nil {
+		if err := sys.CreateDataDir(); err != nil {
 			return err
 		}
 	case config.LayoutMigrate:
-		if err := sys.Migrate(cmd.Context()); err != nil {
+		if err := sys.MigrateDataDir(cmd.Context()); err != nil {
 			return err
 		}
 	}
