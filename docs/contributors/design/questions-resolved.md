@@ -1,10 +1,10 @@
-<!-- ABOUTME: History sink for resolved open questions drained from unresolved-questions.md. -->
+<!-- ABOUTME: History sink for resolved open questions drained from questions-unresolved.md. -->
 <!-- ABOUTME: Item-queue pattern: active items live in the unresolved- file, done ones land here. -->
 
 # Resolved questions
 
 History of design/implementation questions that have been answered. Items are moved here
-from [`unresolved-questions.md`](unresolved-questions.md) once resolved, so the active file
+from [`questions-unresolved.md`](questions-unresolved.md) once resolved, so the active file
 stays a working set. Newest first.
 
 1. ~~**Go module path**~~ — **Resolved:** `github.com/kstenerud/yoloai`.

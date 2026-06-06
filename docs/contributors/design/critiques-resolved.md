@@ -1,10 +1,10 @@
-<!-- ABOUTME: History sink for resolved critiques drained from unresolved-critiques.md. -->
+<!-- ABOUTME: History sink for resolved critiques drained from critiques-unresolved.md. -->
 <!-- ABOUTME: Item-queue pattern: active items live in the unresolved- file, done ones land here. -->
 
 # Resolved critiques
 
 History of critiques that have been addressed and applied. Items are moved here from
-[`unresolved-critiques.md`](unresolved-critiques.md) once resolved, so the active file stays
+[`critiques-unresolved.md`](critiques-unresolved.md) once resolved, so the active file stays
 a working set. Newest first.
 
 ## T1–T15 (2026-06-04 Testing-critique round) — test-suite placement, dedup, and error-path coverage
@@ -15,7 +15,7 @@ a working set. Newest first.
   mocks, manual fakes); weaknesses clustered in cross-backend/e2e **duplication**, lagging
   **error-path coverage**, and a few **mis-placed/over-gated** tests. **T7 (broad `t.Parallel`
   adoption) carried over** — it remains the sole live item in
-  [`unresolved-critiques.md`](unresolved-critiques.md).
+  [`critiques-unresolved.md`](critiques-unresolved.md).
 - **Recurring lesson:** several citations were *stale on inspection* — the named anti-pattern had
   already been fixed (T3 was correctly a unit test, not mis-gated; T11's destroy/tart-stop tests
   already asserted real post-conditions; T2's "5 identical backends" was really only 2 twins). Verify
@@ -51,7 +51,7 @@ a working set. Newest first.
 - **T13** — promoted cheap error paths: six `Reset` `_, _ =` discards→`require.Error` on the
   propagated downstream failure; `HasUncommittedChanges` `*runtime.ExecError` branch covered (exit-1
   = dirty, non-1 = surfaced error) via a GitExecer fake (19a3c0c). Live-backend error paths +
-  Seatbelt/Tart run coverage split to [`unresolved-findings.md`](unresolved-findings.md) DF18.
+  Seatbelt/Tart run coverage split to [`findings-unresolved.md`](findings-unresolved.md) DF18.
 - **T14** — `public_api_test.go`→`internal_leak_fence_test.go` (it's a go/packages static fence, not
   behavioral API tests) (b9ab232).
 - **T15** — `TestSystemClient_*`→`TestSystem_*` post-D67 rename (9addc32).
@@ -140,7 +140,7 @@ a working set. Newest first.
 - **IC16** (`37cf399`, spun off IC12) — see abandoned: the two host-git wrappers are deliberately
   distinct, not a dedup target.
 
-**Sub-points not applied** drained to [`abandoned-critiques.md`](abandoned-critiques.md): IC14
+**Sub-points not applied** drained to [`critiques-abandoned.md`](critiques-abandoned.md): IC14
 single-primitive `Options` wrapping, IC15 `NewEngine` panic, and IC16 host-git unification. (IC14's
 `Info`→`SandboxInfo` rename was initially deferred but has since been applied — see the IC14 bullet
 above.)

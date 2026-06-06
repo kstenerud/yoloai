@@ -1,5 +1,5 @@
 <!-- ABOUTME: Active queue of open design/implementation questions for the yoloAI project. -->
-<!-- ABOUTME: Resolved items drain to resolved-questions.md; deferred to deferred-questions.md; abandoned to abandoned-questions.md. -->
+<!-- ABOUTME: Resolved items drain to questions-resolved.md; deferred to questions-deferred.md; abandoned to questions-abandoned.md. -->
 
 # Open Questions
 

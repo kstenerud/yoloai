@@ -203,7 +203,7 @@ For every domain concept yoloAI cares about:
 
 Go limits (named in the research file): same-package construction is unrestricted; no compile-time proof; `any`-typed maps and reflection can bypass. Mitigation: parser and type live in a small dedicated package so accidental bypass is hard.
 
-† **Not yet converted.** Sandbox name and workdir path are the two stragglers from this convention — they are still guarded *validate*-style (`store.ValidateName(string) error`; `config.ExpandPath(...)` returns a bare `string`), not parsed into a type. The conversion is tracked as a finding ([deferred-findings.md](../design/deferred-findings.md), DF15) and sequenced with the D58/D59 path-confinement work, where a typed `SandboxName`/resolved-path earns its keep. The inconsistency is itself the hazard: a security-relevant boundary value that validates by a *different convention* than its peers is exactly what a code audit skips over. Ad-hoc, one-off security guards must not accumulate — they get missed.
+† **Not yet converted.** Sandbox name and workdir path are the two stragglers from this convention — they are still guarded *validate*-style (`store.ValidateName(string) error`; `config.ExpandPath(...)` returns a bare `string`), not parsed into a type. The conversion is tracked as a finding ([findings-deferred.md](../design/findings-deferred.md), DF15) and sequenced with the D58/D59 path-confinement work, where a typed `SandboxName`/resolved-path earns its keep. The inconsistency is itself the hazard: a security-relevant boundary value that validates by a *different convention* than its peers is exactly what a code audit skips over. Ad-hoc, one-off security guards must not accumulate — they get missed.
 
 ### Worked examples
 

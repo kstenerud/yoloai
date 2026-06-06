@@ -123,7 +123,7 @@ surfaces (D53):
   (`DirtyWorkdirError` no longer dual-resident in `names.go`); (b) public List/slice surfaces
   standardized on empty-non-nil (JSON `[]` not `null`); (c) dead `CloneOptions.Overwrite` wired
   into `Client.Clone` (cross-backend destroy), internal `Force` removed. Enum homes left as-is
-  (already principled). See `resolved-critiques.md`.
+  (already principled). See `critiques-resolved.md`.
 
 ### Phase 6 — Carried-forward (F6/F7/F9) *(verify before next critique-empty)*
 

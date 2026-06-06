@@ -82,7 +82,7 @@ yoloai wait <name> [--timeout <duration>]
 - `--timeout`: fail with exit code 124 (matching `timeout(1)`) if the agent hasn't exited within the duration
 - Related to the deferred `yoloai run` (#56 in OPEN_QUESTIONS) — `run` would be sugar on top of `wait`
 
-See [OPEN_QUESTIONS.md](../unresolved-questions.md) §77.
+See [OPEN_QUESTIONS.md](../questions-unresolved.md) §77.
 
 ## Idle Detection
 
@@ -233,7 +233,7 @@ All agents need a systematic audit of actual network traffic: capture traffic du
 
 Most important for `--network-isolated` mode where missing domains cause silent failures.
 
-See [OPEN_QUESTIONS.md](../unresolved-questions.md) §97.
+See [OPEN_QUESTIONS.md](../questions-unresolved.md) §97.
 
 ## Agent and Model Maintenance
 
@@ -241,7 +241,7 @@ See [OPEN_QUESTIONS.md](../unresolved-questions.md) §97.
 
 Model aliases drift as providers release new models. Gemini's aliases already drifted once. Need a process to stay current: periodic manual review cadence, automated checks against provider APIs/docs, or pinning to stable `-latest` identifiers where available.
 
-See [OPEN_QUESTIONS.md](../unresolved-questions.md) §98.
+See [OPEN_QUESTIONS.md](../questions-unresolved.md) §98.
 
 ### Codex research items
 
@@ -251,4 +251,4 @@ Three unresolved questions needed before Codex network isolation is production-r
 - **Required network domains (#38):** Only `api.openai.com` is confirmed. Additional domains (telemetry, model downloads) may be required. Needs traffic capture during a full Codex session.
 - **TUI behavior in tmux (#39):** Interactive mode (`codex --yolo` without `exec`) behavior inside tmux is unverified. May affect idle detection and prompt delivery.
 
-See [OPEN_QUESTIONS.md](../unresolved-questions.md) §37–39.
+See [OPEN_QUESTIONS.md](../questions-unresolved.md) §37–39.

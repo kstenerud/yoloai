@@ -1,12 +1,12 @@
-<!-- ABOUTME: Holding pen for deferred findings parked from unresolved-findings.md. -->
+<!-- ABOUTME: Holding pen for deferred findings parked from findings-unresolved.md. -->
 <!-- ABOUTME: Each item carries a revival trigger; when it fires the item flows back to unresolved. -->
 
 # Deferred findings
 
 Findings (issues discovered mid-work) parked as "not now." Unlike
-[`resolved-findings.md`](resolved-findings.md) (terminal history), every item here is still
+[`findings-resolved.md`](findings-resolved.md) (terminal history), every item here is still
 potentially actionable and carries a **`Trigger:`** line — the condition that should pull it
-back into [`unresolved-findings.md`](unresolved-findings.md). The trigger may be unlikely, but
+back into [`findings-unresolved.md`](findings-unresolved.md). The trigger may be unlikely, but
 it must exist so the item can be evaluated for eviction later. Newest first.
 
 ### DF15 — Sandbox name + workdir path validate by a different convention than their parse-don't-validate peers

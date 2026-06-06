@@ -43,7 +43,7 @@ Historical decision log. Principles (`principles/`) and standards (`standards/`)
 **Why.** AI-assisted design generates plausible-sounding but unverified claims at scale. The critique cycle is the explicit factual-accuracy gate. The cost is cheap (an hour per round); the damage prevented (architectural drift, security claims that don't hold, vendor-feature claims that aren't true) is structural.
 
 **Consequences.**
-- `docs/contributors/design/unresolved-critiques.md` is the rolling document; entries are applied and the file is emptied after each pass.
+- `docs/contributors/design/critiques-unresolved.md` is the rolling document; entries are applied and the file is emptied after each pass.
 - The 12-round pre-implementation pass shaped most of the v1 design.
 - Captured in project `CLAUDE.md` §Critique Principles.
 
@@ -110,7 +110,7 @@ Historical decision log. Principles (`principles/`) and standards (`standards/`)
 
 **Why.** Defends against the failure mode where plausibility passes for verification.
 
-**Consequences.** Every research file under `docs/contributors/design/research/` is expected to cite primary sources. Star counts, feature claims, and security assertions are verifiable. See `docs/contributors/design/unresolved-critiques.md` workflow.
+**Consequences.** Every research file under `docs/contributors/design/research/` is expected to cite primary sources. Star counts, feature claims, and security assertions are verifiable. See `docs/contributors/design/critiques-unresolved.md` workflow.
 
 **Composition.** Cited by `principles/general-principles.md §Factual accuracy`.
 

@@ -414,7 +414,7 @@ After the bootstrap the stamp is the **only** signal consulted — a stamped lay
 
 ## D65 — Setup-wizard full collapse: the library has no setup verb; onboarding is CLI policy written through `Config().Set`
 
-**Date:** 2026-06-03. **Status:** Accepted (owner, 2026-06-03). **Resolves** critique G6 (see `design/resolved-critiques.md`). **Applies** development-principles §2 (none-of-your-business: policy owns what/why; mechanism complies) and the [[feedback_library_sets_defaults_app_owns_setup_state]] stance. **Implemented** on `layering-refactor`.
+**Date:** 2026-06-03. **Status:** Accepted (owner, 2026-06-03). **Resolves** critique G6 (see `design/critiques-resolved.md`). **Applies** development-principles §2 (none-of-your-business: policy owns what/why; mechanism complies) and the [[feedback_library_sets_defaults_app_owns_setup_state]] stance. **Implemented** on `layering-refactor`.
 
 **The decision.** The entire first-run-setup vocabulary leaves the public contract — `SystemClient.Setup`, `SystemClient.SetupStatus`, and the types `SetupOptions`/`SetupStatus`/`SetupChoice`/`TmuxConfigClass`(+consts) are removed, and `internal/sandbox/setup.go` (`Engine.SetupStatus`/`Engine.ApplySetup`) is deleted. Not demoted/hidden — collapsed. The library contract is left orthogonal: **discovery** (`Agents`/`Backends`) + **config** (`Config().Get/Set/Reset`) + **just-works defaults** (`EnsureSetup`).
 
@@ -428,17 +428,17 @@ After the bootstrap the stamp is the **only** signal consulted — a stamped lay
 
 ## D66 — Extensions are CLI-private: the G7 "needs a public verb" residue is reclassified, not filled
 
-**Date:** 2026-06-03. **Status:** Accepted (owner, 2026-06-03). **Resolves** the G7 residue (see `design/abandoned-critiques.md`). **Applies** development-principles §2 (policy/mechanism boundary). **Implemented** on `layering-refactor` (commit `390f83f`).
+**Date:** 2026-06-03. **Status:** Accepted (owner, 2026-06-03). **Resolves** the G7 residue (see `design/critiques-abandoned.md`). **Applies** development-principles §2 (policy/mechanism boundary). **Implemented** on `layering-refactor` (commit `390f83f`).
 
 **The decision.** The `yoloai x` extension feature stays out of the public library contract, and `internal/extension` moves to `internal/cli/extension` so its CLI-private status is structural. G7's framing of this item — "the `x` command reaches `internal/extension` with no public verb" — is **reversed**: there is no verb to add.
 
 **Why not a verb.** Extensions are a CLI macro system: user-authored YAML (`~/.yoloai/extensions/*.yaml`) wrapping a shell `action`, run as `sh -c` with args/flags injected as env vars. The scripts compose the `yoloai` **binary** with host tools (`gh`, `jq`, `git`) — they invoke the CLI, not library verbs. Unlike the genuine G7 gaps (`SandboxMetadata`/`AgentLog`/`Files`/discovery), no library capability is being wrapped, and a daemon embedding the library has no use for "load arbitrary per-user scripts and exec them" — that would be a security liability per principal. So the package is CLI-private by design; a public verb would invent a library surface for a feature with no library/daemon consumer.
 
-**Consequences.** Closes the last open item from the 2026-05-30 Post-F1 critique round; the round's active queue (`design/unresolved-critiques.md`) is now empty. `internal/cli/extension` is fenced from `internal/runtime`/`internal/sandbox` like the rest of the CLI (it imports only `internal/agent`, for agent-name validation). `architecture/README.md` package map and the `plans/layer1-completion.md` capability table updated. `make check` green.
+**Consequences.** Closes the last open item from the 2026-05-30 Post-F1 critique round; the round's active queue (`design/critiques-unresolved.md`) is now empty. `internal/cli/extension` is fenced from `internal/runtime`/`internal/sandbox` like the rest of the CLI (it imports only `internal/agent`, for agent-name validation). `architecture/README.md` package map and the `plans/layer1-completion.md` capability table updated. `make check` green.
 
 ## D67 — One lazy `Client`: collapse `SystemClient` into `Client.System()`; `Options.Backend` optional; consolidate the per-sandbox noun
 
-**Date:** 2026-06-03. **Status:** Accepted (owner, 2026-06-03). **Resolves** critiques A2/A3 (see `design/resolved-critiques.md`). **Applies** architecture-principles "one noun, sub-handles by concern" and development-principles §2. **Implemented** on `layering-refactor` (commits `d636297` C1 → `bb41cbe` C4).
+**Date:** 2026-06-03. **Status:** Accepted (owner, 2026-06-03). **Resolves** critiques A2/A3 (see `design/critiques-resolved.md`). **Applies** architecture-principles "one noun, sub-handles by concern" and development-principles §2. **Implemented** on `layering-refactor` (commits `d636297` C1 → `bb41cbe` C4).
 
 **The decision.** The public surface had split operations on the *same noun* (sandbox X) across two top-level handles by an implementation property — "does this op hold a persistent backend connection." `NewWithOptions` eagerly opened the backend, so `Client` was backend-bound; the layout-only `SystemClient` carried the backend-free per-sandbox readers and the host/fleet admin. Collapse it: **one top-level `Client` noun**, backend opened lazily, with `System()` / `Sandbox()` sub-handles (and `Sandbox` exposing `Workdir()` / `Network()` / `Agent()`).
 

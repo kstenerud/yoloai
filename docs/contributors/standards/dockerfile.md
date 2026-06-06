@@ -26,7 +26,7 @@ Debian bookworm-slim is the base. Reasons:
 
 - **Boring** (`../principles/general-principles.md §2`). Wide Debian familiarity in the developer community; apt is well-documented; package availability is broad.
 - **Slim variant** drops docs, locale data, and other bulk that the sandbox doesn't need.
-- **Rejected alternatives**: Alpine (musl libc → glibc-specific tools fail; the Bun-bundled Claude Code installer had documented issues per `docs/contributors/design/unresolved-questions.md` #2), Ubuntu (no advantage over Debian; larger), distroless (can't apt install at runtime, doesn't compose with profile system).
+- **Rejected alternatives**: Alpine (musl libc → glibc-specific tools fail; the Bun-bundled Claude Code installer had documented issues per `docs/contributors/design/questions-unresolved.md` #2), Ubuntu (no advantage over Debian; larger), distroless (can't apt install at runtime, doesn't compose with profile system).
 
 ### Shell: bash with pipefail
 
@@ -58,7 +58,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 Pin versions when the package's behaviour can change in ways that break us. Don't pin when the package's behaviour is stable across versions (apt-installed dev tools, system libraries).
 
 - `golang-go` — *not* pinned in apt; Go is installed separately by tag (see "Go install" pattern below).
-- `nodejs` — pinned via NodeSource repository to Node 22 LTS (rationale: `docs/contributors/design/unresolved-questions.md` #2).
+- `nodejs` — pinned via NodeSource repository to Node 22 LTS (rationale: `docs/contributors/design/questions-unresolved.md` #2).
 - Downloaded binaries (gosu, ko, etc.) — pinned by version + checksum where possible.
 - apt packages without a moving-target risk — left unpinned (hadolint DL3008 is suppressed for those `RUN` lines with `# hadolint ignore=DL3008` and a comment explaining the unpinned choice).
 

@@ -35,9 +35,9 @@ note for the full model.
 
 | Topic | Active | Sinks |
 | --- | --- | --- |
-| Critiques | [unresolved-critiques.md](unresolved-critiques.md) | [resolved](resolved-critiques.md) · [deferred](deferred-critiques.md) · [abandoned](abandoned-critiques.md) |
-| Questions | [unresolved-questions.md](unresolved-questions.md) | [resolved](resolved-questions.md) · [deferred](deferred-questions.md) · [abandoned](abandoned-questions.md) |
-| Findings | [unresolved-findings.md](unresolved-findings.md) | [resolved](resolved-findings.md) · [deferred](deferred-findings.md) · [abandoned](abandoned-findings.md) |
+| Critiques | [critiques-unresolved.md](critiques-unresolved.md) | [resolved](critiques-resolved.md) · [deferred](critiques-deferred.md) · [abandoned](critiques-abandoned.md) |
+| Questions | [questions-unresolved.md](questions-unresolved.md) | [resolved](questions-resolved.md) · [deferred](questions-deferred.md) · [abandoned](questions-abandoned.md) |
+| Findings | [findings-unresolved.md](findings-unresolved.md) | [resolved](findings-resolved.md) · [deferred](findings-deferred.md) · [abandoned](findings-abandoned.md) |
 
 ## Sub-clusters
 

@@ -352,7 +352,7 @@ The flip applies uniformly across the apply surface:
 
 **Migration:** Rename `backend:` to `container_backend:` in any `~/.yoloai/config.yaml` written by v0.1.x. No auto-migration; v0.2+ ignores the old key.
 
-**History note:** Earlier revisions of this entry described a `--security` → `--isolation` flag rename and a `gvisor`/`kata`/`kata-firecracker` → `container-enhanced`/`vm`/`vm-enhanced` value rename. Verified via `git tag` audit that **none of those names ever appeared in a tagged release** — `--isolation` and the `container`/`vm` value spellings have been the public surface since `v0.2.0`. See `docs/contributors/design/unresolved-findings.md` DF1 for the audit. The flag/value text was removed in this revision to avoid misleading migrations.
+**History note:** Earlier revisions of this entry described a `--security` → `--isolation` flag rename and a `gvisor`/`kata`/`kata-firecracker` → `container-enhanced`/`vm`/`vm-enhanced` value rename. Verified via `git tag` audit that **none of those names ever appeared in a tagged release** — `--isolation` and the `container`/`vm` value spellings have been the public surface since `v0.2.0`. See `docs/contributors/design/findings-unresolved.md` DF1 for the audit. The flag/value text was removed in this revision to avoid misleading migrations.
 
 ### `sandbox <name> log` redesigned around structured JSONL
 

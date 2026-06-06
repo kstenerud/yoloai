@@ -88,7 +88,7 @@ Declined per §2:
 
 - *Custom Go proxy sidecar for network isolation* — originally planned (commit `5e5cca3`, 2026-02-23); rejected in favour of iptables + ipset (D11) because the consensus implementation covers the threat model at a fraction of the operational complexity.
 - *Custom diff/patch format* — rejected; `git format-patch` is the established mechanism.
-- *Bun / `curl | bash` Claude installer* — rejected for proxy + AMD64 instability (`docs/contributors/design/unresolved-questions.md` #2).
+- *Bun / `curl | bash` Claude installer* — rejected for proxy + AMD64 instability (`docs/contributors/design/questions-unresolved.md` #2).
 - *Viper for configuration* — evaluated, not adopted (`standards/GO.md` §CLI Framework).
 - *Mockgen / mockery for tests* — manual fakes + table-driven tests are the convention (`standards/GO.md`).
 
