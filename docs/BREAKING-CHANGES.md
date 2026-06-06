@@ -100,6 +100,7 @@ only; field semantics and zero values are unchanged.
 - `DiskUsage.Sandboxes` → `SandboxesBytes` (a byte count).
 - `TartBaseInfo.Size` → `SizeBytes` (a byte count).
 - `BackendReport.Backend string` → `Type BackendType` (a backend kind, now typed).
+- `PruneItem.Bytes` → `BytesReclaimed` (the space freed by removing the item).
 
 **Migration (Go embedders):** rename the field accessors at call sites; for
 `SandboxInfo.Changes`, compare against the `ChangeState` constants instead of the bare

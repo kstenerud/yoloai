@@ -579,8 +579,9 @@ type PruneItem struct {
 	// Name is the resource identifier (e.g. "yoloai-mybox" for a
 	// container, the Tart VM name for a VM, the temp-dir path).
 	Name string
-	// Bytes reclaimed; 0 when the backend can't report.
-	Bytes int64
+	// BytesReclaimed is the space freed by removing this item; 0 when the
+	// backend can't report it.
+	BytesReclaimed int64
 }
 
 // TrashedSandbox is a sandbox directory Prune quarantined to the trash

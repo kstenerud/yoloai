@@ -101,15 +101,15 @@ func TestPruneItemKind_Values(t *testing.T) {
 // fields ever stop being string-shaped.
 func TestPruneItem_TypedFields(t *testing.T) {
 	item := PruneItem{
-		BackendType: BackendDocker,
-		Kind:        PruneKindContainer,
-		Name:        "yoloai-mybox",
-		Bytes:       1024,
+		BackendType:    BackendDocker,
+		Kind:           PruneKindContainer,
+		Name:           "yoloai-mybox",
+		BytesReclaimed: 1024,
 	}
 	assert.Equal(t, BackendDocker, item.BackendType)
 	assert.Equal(t, PruneKindContainer, item.Kind)
 	assert.Equal(t, "yoloai-mybox", item.Name)
-	assert.Equal(t, int64(1024), item.Bytes)
+	assert.Equal(t, int64(1024), item.BytesReclaimed)
 }
 
 // ClientCreateOptions.BackendType takes a typed BackendType — the compiler
