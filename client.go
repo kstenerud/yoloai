@@ -185,7 +185,7 @@ func (c *Client) ensure(ctx context.Context) error {
 	if c.backend == "" {
 		return ErrBackendRequired
 	}
-	rt, err := newRuntime(ctx, c.backend, c.layout)
+	rt, err := runtime.New(ctx, c.backend, c.layout)
 	if err != nil {
 		return fmt.Errorf("connect to %s backend: %w", c.backend, err)
 	}
@@ -268,7 +268,7 @@ func (c *Client) destroyForOverwrite(ctx context.Context, dest string) error {
 
 	deps := c.deps()
 	if meta, err := store.LoadEnvironment(dstDir); err == nil && meta.BackendType != "" {
-		rt, rtErr := newRuntime(ctx, meta.BackendType, c.layout)
+		rt, rtErr := runtime.New(ctx, meta.BackendType, c.layout)
 		if rtErr != nil {
 			return fmt.Errorf("connect to %s backend to overwrite %q: %w", meta.BackendType, dest, rtErr)
 		}
@@ -345,11 +345,4 @@ func resolveBackendFromConfig(ctx context.Context, layout config.Layout) runtime
 	}
 	backend, _ := runtime.SelectBackend(ctx, preferred, "", "", layout.Env)
 	return backend
-}
-
-func newRuntime(ctx context.Context, backend runtime.BackendType, layout config.Layout) (runtime.Runtime, error) {
-	if backend == "" {
-		backend = runtime.BackendDocker
-	}
-	return runtime.New(ctx, backend, layout)
 }

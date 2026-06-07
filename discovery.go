@@ -99,7 +99,7 @@ func (s *System) BackendTypes(ctx context.Context, q BackendQuery) []BackendInfo
 	out := BackendTypes()
 	if q.ProbeAvailability {
 		for i := range out {
-			rt, err := newRuntime(ctx, out[i].Type, s.layout)
+			rt, err := runtime.New(ctx, out[i].Type, s.layout)
 			if err != nil {
 				out[i].Note = err.Error()
 			} else {
@@ -130,7 +130,7 @@ func BackendTypes() []BackendInfo {
 // counterpart to BackendTypes(ctx, BackendQuery{ProbeAvailability: true}); both use
 // the identical construct-and-close probe.
 func (s *System) CheckBackend(ctx context.Context, name BackendType) (available bool, note string) {
-	rt, err := newRuntime(ctx, name, s.layout)
+	rt, err := runtime.New(ctx, name, s.layout)
 	if err != nil {
 		return false, err.Error()
 	}

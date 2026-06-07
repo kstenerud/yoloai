@@ -68,7 +68,7 @@ type TartBaseAdmin struct {
 // environment. Returns (true, nil) when it can; (false, err) with the
 // construction failure otherwise (e.g. non-macOS host, tart not installed).
 func (a *TartBaseAdmin) Available(ctx context.Context) (bool, error) {
-	r, err := newRuntime(ctx, runtime.BackendTart, a.layout)
+	r, err := runtime.New(ctx, runtime.BackendTart, a.layout)
 	if err != nil {
 		return false, err
 	}
@@ -180,7 +180,7 @@ func (a *TartBaseAdmin) Remove(ctx context.Context, name string) (freed int64, e
 
 // open constructs the Tart runtime and returns it with a close func.
 func (a *TartBaseAdmin) open(ctx context.Context) (*tartrt.Runtime, func(), error) {
-	r, err := newRuntime(ctx, runtime.BackendTart, a.layout)
+	r, err := runtime.New(ctx, runtime.BackendTart, a.layout)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -146,7 +146,7 @@ func (s *System) DiskUsage(ctx context.Context) (*DiskUsage, error) {
 		SandboxesBytes: dirSize(s.layout.SandboxesDir()),
 	}
 	for _, desc := range runtime.Descriptors() {
-		rt, err := newRuntime(ctx, desc.Type, s.layout)
+		rt, err := runtime.New(ctx, desc.Type, s.layout)
 		if err != nil {
 			// Backend not available in this environment — skip silently.
 			// The CLI's `yoloai system disk` does the same filtering via
@@ -185,7 +185,7 @@ type SystemInfo struct {
 func (s *System) AllSandboxes(ctx context.Context) ([]*SandboxInfo, []BackendType, error) {
 	infos, unavailable, err := sandbox.ListSandboxesMultiBackend(ctx, s.layout,
 		func(ctx context.Context, backend runtime.BackendType) (runtime.Runtime, error) {
-			return newRuntime(ctx, backend, s.layout)
+			return runtime.New(ctx, backend, s.layout)
 		})
 	if err != nil {
 		return nil, nil, err
@@ -262,7 +262,7 @@ func (s *System) Doctor(ctx context.Context, opts SystemDoctorOptions) ([]Backen
 // Best-effort: a backend that errors while reporting is skipped.
 func (s *System) VMCensus(ctx context.Context) *VMCensus {
 	for _, desc := range runtime.Descriptors() {
-		rt, err := newRuntime(ctx, desc.Type, s.layout)
+		rt, err := runtime.New(ctx, desc.Type, s.layout)
 		if err != nil {
 			continue
 		}
@@ -280,7 +280,7 @@ func (s *System) VMCensus(ctx context.Context) *VMCensus {
 // row if it can't be constructed, otherwise a base-mode row (unless filtered)
 // plus one row per matching supported isolation mode.
 func (s *System) backendReports(ctx context.Context, backend BackendType, env caps.Environment, isolationFilter string) []caps.BackendReport {
-	rt, err := newRuntime(ctx, backend, s.layout)
+	rt, err := runtime.New(ctx, backend, s.layout)
 	if err != nil {
 		if isolationFilter != "" {
 			return nil // an unavailable backend has no isolation-mode rows to filter to
@@ -390,7 +390,7 @@ func (s *System) buildAllBackends(ctx context.Context, opts BuildImageOptions, o
 // buildOne runs one backend's build (base or profile) using a freshly
 // constructed runtime that's closed before return.
 func (s *System) buildOne(ctx context.Context, backend BackendType, opts BuildImageOptions, out io.Writer) error {
-	rt, err := newRuntime(ctx, backend, s.layout)
+	rt, err := runtime.New(ctx, backend, s.layout)
 	if err != nil {
 		return err
 	}
@@ -442,7 +442,7 @@ func (s *System) CheckPrerequisites(ctx context.Context, opts CheckPrerequisites
 	var results []CheckResult
 
 	// 1. Backend connectivity.
-	rt, backendErr := newRuntime(ctx, opts.BackendType, s.layout)
+	rt, backendErr := runtime.New(ctx, opts.BackendType, s.layout)
 	if backendErr != nil {
 		results = append(results,
 			CheckResult{Name: "backend", OK: false, Message: backendErr.Error()},
@@ -706,7 +706,7 @@ func (s *System) applyBrokenClassifications(broken []classifiedSandbox, dryRun b
 // drops the base images. Per-backend failures are logged to opts.Output rather
 // than aborting the whole prune.
 func (s *System) pruneBackend(ctx context.Context, backend BackendType, known []string, opts SystemPruneOptions, out io.Writer) ([]PruneItem, int64) {
-	rt, err := newRuntime(ctx, backend, s.layout)
+	rt, err := runtime.New(ctx, backend, s.layout)
 	if err != nil {
 		return nil, 0
 	}

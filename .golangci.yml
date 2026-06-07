@@ -309,8 +309,14 @@ linters:
         text: "os\\.(Stdin|Stdout|Stderr)"
 
       # W-L10 spine-layering allowlist. The orchestration spine itself
-      # (client.go, system.go) and the runtime/sandbox packages
-      # naturally use these symbols — only the CLI is constrained.
+      # (the root yoloai package — client.go, system.go, discovery.go,
+      # tart_bases.go) and the runtime/sandbox packages naturally use
+      # these symbols — only the CLI is constrained. discovery.go and
+      # tart_bases.go formerly funneled through a private newRuntime
+      # wrapper in client.go; that wrapper was a pure pass-through to
+      # runtime.New (its old "" → docker default was removed when we
+      # made an explicit backend mandatory), so it was dropped and these
+      # spine files now call runtime.New directly like system.go.
       # After W-L8d completed, no internal/cli/ file has callers of
       # sandbox.Manager / sandbox.NewManager left, including
       # system_mcp.go (which now uses yoloai.Client) and helpers.go
@@ -318,7 +324,7 @@ linters:
       # unused). internal/mcpsrv/ doesn't need an exemption either —
       # it migrated to *yoloai.Client and references only sandbox
       # value types (DirSpec, Status constants, CreateOptions).
-      - path: "^client\\.go$|^system\\.go$|^internal/runtime/|^internal/sandbox/"
+      - path: "^client\\.go$|^system\\.go$|^discovery\\.go$|^tart_bases\\.go$|^internal/runtime/|^internal/sandbox/"
         linters:
           - forbidigo
         text: "sandbox\\.(NewManager|Manager)|runtime\\.(Runtime|New)"

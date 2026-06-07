@@ -56,7 +56,7 @@ Dependency direction (W-L8 + W-L12 shape): `cmd/yoloai` → `internal/cli` → `
 
 | File | Purpose |
 |------|---------|
-| `client.go` | Orchestration spine — `Client` and its root methods (`ListSandboxes`, `CreateSandbox`, `EnsureSetup`) plus the lazy-runtime construction helpers (`NewClient`, `ensure`, `newRuntime`) and `destroyForOverwrite` (shared by `Sandbox.Clone`). `CreateSandbox` provisions a dormant `*Sandbox` handle (no launch); cloning lives on `Sandbox.Clone`. Registers Docker, Podman, Seatbelt, and Tart backends via blank imports. |
+| `client.go` | Orchestration spine — `Client` and its root methods (`ListSandboxes`, `CreateSandbox`, `EnsureSetup`) plus the lazy-runtime construction helpers (`NewClient`, `ensure`) and `destroyForOverwrite` (shared by `Sandbox.Clone`). `CreateSandbox` provisions a dormant `*Sandbox` handle (no launch); cloning lives on `Sandbox.Clone`. Registers Docker, Podman, Seatbelt, and Tart backends via blank imports. |
 | `client_options.go` | `ClientCreateOptions` — the construction-time config `NewClient` takes (data/home dirs, optional `BackendType`, IO, env snapshot, principal). |
 | `sandbox_options.go` | The public sandbox option types: `SandboxCreateOptions` (the surface `Client.CreateSandbox` takes), plus `toInternal` mapping and port formatting. |
 | `system_config.go` | `ConfigAdmin` sub-handle (`Client.System().Config()`): `Effective`/`Get`/`Set`/`Reset` over the config files. |
