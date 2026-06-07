@@ -517,6 +517,23 @@ The primary value of `container-enhanced` (production parity with Cloud Run / GK
 
 **Consequences.** `yoloai new --isolation container-enhanced` on a macOS host now fails fast at the gate with a clear message (previously it passed the gate and failed deep in the daemon). `setup-gvisor.md` marked **paused**; `TestIsolationAvailability` updated to lock the rejection. The smoke `ISOLATION_HOST_NOTE` and GUIDE updated to say gVisor is Linux-only. The podman gVisor path (D70 "not addressed") is likewise out of scope on macOS.
 
+## D72 — Resolve-at-edge implies a pure accessor (no lazy ambient fallback)
+
+**Date:** 2026-06-07. **Status:** Accepted (owner, 2026-06-07).
+
+**Why.** A long-running driver of the recent refactorings is eliminating implicit behaviors and fallback defaults — especially any that reach into the environment (ambient config). The CLI legitimately HAS implicit behaviors by design (e.g. `--data-dir` defaults to `$HOME/.yoloai`), but the implicit→explicit conversion and validation belong at the **edge** (CLI arg parsing / `PersistentPreRunE`), after which the rest of the library trusts the parsed value and never re-checks. This is "parse, don't validate" (§4) applied to §12's ambient-config surface.
+
+The concrete trigger: `cliutil.Layout()` used to lazily re-derive `$HOME/.yoloai` from ambient `HOME` on every call whenever the root Layout was unset. That lazy fallback did double duty — production default-resolution AND test convenience — and was a "hole": it re-read ambient state per call, masked startup-ordering bugs, and let any code path silently work without going through the edge. ~30 leaf-command tests leaned on it (they `Execute()` a subcommand standalone, bypassing `PersistentPreRunE`).
+
+**The decision.** Resolve the default ONCE at the edge and store it explicitly; make the downstream accessor pure.
+- `SetRootLayoutFromFlag(dataDir)` resolves the default (`$HOME/.yoloai` when the flag is empty) in the root command's `PersistentPreRunE` — the single licensed `os.UserHomeDir()` site (`cliutil/layout.go`). It also runs eagerly once in `NewRootCmd` before `registerCommands`, because dynamic `yoloai x` extension subcommands register at construction time (before flag parsing) and read `CLIExtensionsDir()`; `--data-dir` can't influence which extensions load, so the default is correct there.
+- `cliutil.Layout()` becomes a **pure accessor that panics** if read before the edge ran — it does not fabricate a fallback. The panic surfaces the bypass.
+- Tests stand in for the edge via a new `internal/cli/clitest` package (`clitest.Home` / `clitest.ConfigDir`) that establishes the Layout explicitly. (`clitest` is a separate package, not `testutil`, to avoid the `cliutil → yoloai → sandbox → testutil` import cycle.) The trap helper `testutil.CLIConfigDir` (isolated HOME without setting the Layout) was removed.
+
+**Rejected.** (a) Keeping a narrowed "tests-only" lazy fallback — that's the same hole renamed; the one-time mechanical churn of migrating ~30 tests is worth removing it. (b) Leaving `Layout()` to re-derive on demand — masks ordering bugs and re-reads ambient state repeatedly.
+
+**Consequences.** Not breaking (CLI-internal). `Layout()` is now total and side-effect-free given a run edge. A pure accessor read before the edge is a programming error that panics loudly rather than silently following ambient `HOME`. Committed as one refactor (`refactor(cli): make Layout() a pure accessor, resolve the default at the edge`). §12 gained a worked example; §4 ("parse, don't validate") is the governing principle.
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.
