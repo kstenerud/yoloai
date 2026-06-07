@@ -28,6 +28,7 @@ This file is small on purpose: load all of it at the start of a task. It carries
 | DEV §11 | After three failed attempts at the same approach, stop and rethink the architecture rather than grinding another workaround; record the failure trail. | Reaching for "one more workaround" on a problem that has already resisted several.           |
 | DEV §12 | Resolve ambient state (env, `$HOME`, cwd, terminal, identity) once at the outermost edge; library takes explicit args. An edge-resolved default implies a *pure accessor* — panic if read pre-edge, never a lazy fallback. | Calling `os.Getenv` / `os.UserHomeDir` / `os.Getwd` below the CLI, or adding a "just for tests" fallback default. |
 | DEV §13 | Keep data in the shape it already has until a *present* consumer needs a different one; every conversion must serve a concrete consumer right where it happens. | Pre-emptively reshaping into a "rich" struct no current consumer needs, or a transform downstream just reverses. |
+| DEV §14 | A library default is legitimate only to keep a caller off an *unsafe* path (safety-sensitive field, safe default, applied after the real sources resolve). No safety dimension → no default: accept unset, resolve, error if still unset. Convenience defaults live in a layer on top of the API. | Adding a library default for ergonomics / "it should just work," or to spare the caller from typing a value with no safety consequence. |
 
 ## general-principles.md
 

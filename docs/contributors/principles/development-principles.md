@@ -3,8 +3,8 @@ ABOUTME: boundary discipline ("none of your business" — comply-or-complain),
 ABOUTME: validate-at-every-layer, parse-don't-validate, fail-fast,
 ABOUTME: warnings-are-signal, justify-every-discard, no-half-finished,
 ABOUTME: plan-then-execute cleanup, make-check gate, iterate-when-first-approach
-ABOUTME: -fails, raw-until-it-has-to-change. How to write yoloAI code so
-ABOUTME: future-you can change it safely.
+ABOUTME: -fails, raw-until-it-has-to-change, library-defaults-are-safety-only.
+ABOUTME: How to write yoloAI code so future-you can change it safely.
 
 # Development principles
 
@@ -241,6 +241,8 @@ Concrete failure mode: an embedder constructs `Options{}` and gets *whatever* th
 Default rule: **reject empty at the public boundary** (`*UsageError`). The caller picks a value or asks for a sentinel constant. If empty really is meaningful (e.g., "all backends" for a filter), document it explicitly and prefer a typed sentinel (`BackendAll`, `IsolationModeAny`) over the empty string.
 
 Exceptions exist — `Profile == ""` legitimately means "no profile" because there's no other way to say it, and the no-profile case is the common path. The bar is: prove the empty-as-meaningful semantics is the cleanest shape before adopting it. Implicit default behavior tends to become evil — silent fallbacks compound across releases and turn into Hyrum's law magnets.
+
+The one case where the library *may* fill an unset value rather than reject it is a **safety** default — see §14 for the test that bounds it (safety-sensitive field + safe default), and why every *convenience* default belongs in a layer on top instead.
 
 The same rule covers a consequential *mode* with no good default. `ApplyOptions.Mode` (commit-series replay vs. net-diff) is **required** — the zero value is a `*UsageError`, not a silently-chosen mode (D26). The proof it earns the rule: a movable default flipped apply behavior out from under an existing caller (4c-i1: `Workdir().Apply`'s default moved from net-diff to series, silently breaking `apply_squash`), and only an integration test caught it. The CLI, as the policy layer, picks the mode for the user; the library requires it. F4 (`../CRITIQUE.md`, required `Backend`) is the originating worked example.
 
@@ -615,6 +617,34 @@ Project decision: D64. Complements §4 (parse, don't validate) and §2 (none-of-
 
 ---
 
+## §14. Library defaults are safety-only; convenience lives in a layer on top
+
+> **Rule.** A default in library code is legitimate **only to keep a caller off an *unsafe* path** — when omitting the value would force a choice between a safe and an unsafe option and some callers will pick blindly. For any value with no safety dimension the library has *no* default: accept unset, resolve through the real sources, and error if it is still unset. Convenience defaults belong in an opinionated layer built *on top of* the API, never inside it.
+>
+> **Bites when:** adding a library default for ergonomics / "it should just work", or to spare a caller from typing a value that carries no safety consequence. · **See also:** §4 (empty-string isn't a free default), §5 (no silent fallback), §12 (ambient), §2; `general-principles.md §6` (the safe setting is the default).
+
+**Principle.** §4 and §5 say the library rejects an unset required value rather than inventing one. §14 carves out the *one* exception and bounds it: a library may substitute a default **when, and only when, the field is safety-sensitive and the default is the safe choice**. The reasoning is about callers, not ergonomics — if requiring the caller to choose would force them to pick between a safe and an unsafe alternative, you must assume some callers will choose arbitrarily because they don't understand the implications. **Documentation does not fix this** — they won't read it. So the safe value is supplied for them. This is the library-API form of `general-principles.md §6` ("the safe setting is the default; the user types the dangerous one").
+
+**The test, in order:**
+
+1. Does omitting the value force the caller toward a *safe-vs-unsafe* fork? If no → the library has no default (go to step 3). If yes → continue.
+2. Is the default the *safe* option? If yes → supply it, at one named step, after the value's real sources have been consulted. Here "resist defaults" (§4/§5) and "apply the safe default" point the **same way**, so there is no tension: you look to the real source first, then fall to the safe value.
+3. **No safety dimension → no library default.** Accept unset at the top, resolve through every legitimate source, and if it is *still* unset, **error** — "you must specify this somewhere." The library never fabricates a value to be helpful.
+
+**Worked example — dir mode (2026-06-07 audit).** Workdir/aux `Mode` is safety-sensitive: `:copy` protects the original via copy/diff/apply, aux `:ro` is read-only. A blind caller who left it unset must not silently land on a live read-write mount of their source tree. So unset resolves to the safe default — but *only after* the real source (the profile merge) has had its say, at a single named step (`create.defaultDirModes`), not scattered or duplicated at the public boundary. **Had `Mode` *not* been a safety issue**, the correct shape would instead have been: accept `""` through the top layer, apply the profile, and if it were *still* `""`, error out — no default at all.
+
+**The convenience corollary (80/20).** Convenience is real and worth serving — but its home is a layer *on top of* the API, with opinionated defaults pre-filled, not the API itself. ~80% of users ride the convenience layer; the ~20% who need the extra power learn and drive the lower layers directly. In yoloAI the **CLI is exactly this layer**: it resolves `--agent` / config / `"claude"`, selects a backend, reads `YOLOAI_SANDBOX` — all convenience defaults that the library proper refuses (it returns `ErrBackendRequired`, "agent is required", etc.). Pushing those defaults down into the library would rob the power-user (the embedder/daemon) of the explicit, no-magic surface that is the whole point of library-first (`architecture-principles.md §1`).
+
+### Cost-vs-benefit
+
+Cost of applying: the library surface is less "friendly" — an embedder must name values the CLI user never sees, and convenience lives in a second layer someone has to build. Damage prevented: a blind caller silently landing on an unsafe configuration (the failure documentation can't prevent); convenience defaults compounding into Hyrum's-law magnets deep in the library (§4); and the power-surface losing the explicitness that makes embedding auditable.
+
+### Sources
+
+Audit conversation, 2026-06-07 (the dir-mode / tmux / agent-default round). Refines §4's "Empty string isn't a free default" and §5's no-silent-fallback rule; the safety-net framing is the library-API echo of `general-principles.md §6`.
+
+---
+
 # Common over-generalisations to avoid
 
 | Over-generalisation                          | Why yoloAI rejects                                                                                                                                                                                                                                          |
@@ -631,6 +661,7 @@ Project decision: D64. Complements §4 (parse, don't validate) and §2 (none-of-
 | **Iterate-forever**                          | §11 says rethink after three failed attempts, not "keep trying new tactics indefinitely." Sometimes the right answer is to acknowledge the problem is upstream (gVisor on macOS) and stop.                                                                  |
 | **No-env-vars-ever**                         | §12 bans env reads in *library code* as silent defaults. The CLI startup layer reads `YOLOAI_DATA_DIR` and similar; agents declare API-key env vars in their definitions. The rule is "read env once, at the outermost boundary, with the read documented" — not "env vars are forbidden everywhere."                  |
 | **Never-convert / always-pass-raw**          | §13 forbids *unjustified* conversions, not all of them. §4's boundary parse is a justified conversion (it proves an invariant); rendering a value for a human is a justified conversion (the human is the consumer). The rule is "convert where a present consumer needs it," not "never reshape data."                       |
+| **No-defaults-in-the-library-ever**          | §14 bans *convenience* defaults in the library, not *safety* ones. A safety-sensitive field whose default is the safe choice may be defaulted (at one named step, after its real sources resolve); a value with no safety dimension gets no default — accept unset, resolve, and error if still unset. The rule is "library defaults are safety-only," not "the library never supplies a value."                       |
 
 ---
 
