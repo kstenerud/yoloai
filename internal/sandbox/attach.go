@@ -17,6 +17,47 @@ import (
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 )
 
+// attachReadyTimeout bounds how long Attach waits for the agent's tmux session
+// to come up before giving up. Human-scale: a started agent normally launches
+// its session within seconds; 5 minutes covers a cold image pull/build.
+const attachReadyTimeout = 300 * time.Second
+
+// Attach connects io to the sandbox's tmux session and blocks until the user
+// detaches (Ctrl-B d) or the agent exits. It owns the full interactive-attach
+// orchestration — status gate, container/user resolution, attach-readiness
+// poll, and the runtime attach exec — so the public Agent.Attach reduces to a
+// TTY check plus this one call (mirroring CaptureTerminal/SendInput). The
+// sandbox must be running (Active/Idle/Done/Failed); stopped sandboxes return
+// ErrContainerNotRunning.
+func (e *Engine) Attach(ctx context.Context, name string, io runtime.IOStreams) error {
+	info, err := e.Inspect(ctx, name)
+	if err != nil {
+		return err
+	}
+	if err := attachStatusOK(info.Status, name); err != nil {
+		return err
+	}
+	user := ContainerUser(info.Environment, e.layout.HostUID)
+	if err := WaitForAttachReady(ctx, e.runtime, e.layout, name, user, attachReadyTimeout); err != nil {
+		return fmt.Errorf("waiting for tmux session: %w", err)
+	}
+	socket := ReadTmuxSocket(e.layout, name)
+	cmd := e.runtime.AttachCommand(socket, io.Rows, io.Cols, info.Environment.Isolation)
+	return e.runtime.InteractiveExec(ctx, store.InstanceName(e.layout.Principal, name), cmd, user, "", io)
+}
+
+// attachStatusOK returns nil if the sandbox status permits attach, otherwise a
+// typed error suitable for the CLI exit-code mapping.
+func attachStatusOK(status Status, name string) error {
+	switch status {
+	case StatusActive, StatusIdle, StatusDone, StatusFailed:
+		return nil
+	default:
+		// StatusStopped, StatusRemoved, StatusBroken, StatusUnavailable
+		return fmt.Errorf("sandbox %q: %w", name, ErrContainerNotRunning)
+	}
+}
+
 // ReadTmuxSocket returns the tmux socket path recorded in the sandbox's
 // runtime-config.json, or "" if the backend uses tmux's default per-user
 // socket. Exposed for embedders that need to read the same socket as

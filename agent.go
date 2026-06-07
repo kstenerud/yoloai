@@ -5,12 +5,9 @@ package yoloai
 
 import (
 	"context"
-	"fmt"
 	"time"
 
-	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox"
-	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
 
@@ -163,10 +160,10 @@ func (a *Agent) SendInput(ctx context.Context, text string) error {
 // from the structured agent log stream.
 func (a *Agent) ContainerLogs(ctx context.Context, tailLines int) string {
 	a.client.tryEnsure(ctx) // best-effort: no backend → no container logs to fetch
-	if a.client.runtime == nil {
+	if a.client.engine == nil {
 		return ""
 	}
-	return runtime.LogsFor(ctx, a.client.runtime, store.InstanceName(a.client.layout.Principal, a.name), tailLines)
+	return a.client.engine.ContainerLogs(ctx, a.name, tailLines)
 }
 
 // Attach connects the supplied IOStreams to the sandbox's tmux session.
@@ -180,31 +177,5 @@ func (a *Agent) Attach(ctx context.Context, io IOStreams) error {
 	if err := a.client.ensure(ctx); err != nil {
 		return err
 	}
-	info, err := a.client.engine.Inspect(ctx, a.name)
-	if err != nil {
-		return err
-	}
-	if err := attachStatusOK(info.Status, a.name); err != nil {
-		return err
-	}
-	containerName := store.InstanceName(a.client.layout.Principal, a.name)
-	user := sandbox.ContainerUser(info.Environment, a.client.layout.HostUID)
-	if err := sandbox.WaitForAttachReady(ctx, a.client.runtime, a.client.layout, a.name, user, 300*time.Second); err != nil {
-		return fmt.Errorf("waiting for tmux session: %w", err)
-	}
-	sock := sandbox.ReadTmuxSocket(a.client.layout, a.name)
-	cmd := a.client.runtime.AttachCommand(sock, io.Rows, io.Cols, info.Environment.Isolation)
-	return execExitError(a.client.runtime.InteractiveExec(ctx, containerName, cmd, user, "", io))
-}
-
-// attachStatusOK returns nil if the sandbox status permits attach,
-// otherwise a typed error suitable for the CLI exit-code mapping.
-func attachStatusOK(status sandbox.Status, name string) error {
-	switch status {
-	case sandbox.StatusActive, sandbox.StatusIdle, sandbox.StatusDone, sandbox.StatusFailed:
-		return nil
-	default:
-		// StatusStopped, StatusRemoved, StatusBroken, StatusUnavailable
-		return fmt.Errorf("sandbox %q: %w", name, sandbox.ErrContainerNotRunning)
-	}
+	return execExitError(a.client.engine.Attach(ctx, a.name, io))
 }

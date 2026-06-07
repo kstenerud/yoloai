@@ -354,26 +354,10 @@ func (s *Sandbox) Exec(ctx context.Context, opts SandboxExecOptions, io IOStream
 	if err := s.client.ensure(ctx); err != nil {
 		return err
 	}
-	return execExitError(s.exec(ctx, opts, io))
-}
-
-func (s *Sandbox) exec(ctx context.Context, opts SandboxExecOptions, io IOStreams) error {
 	if !opts.PTY {
-		execer, ok := s.client.runtime.(runtime.StdioExecer)
-		if !ok {
-			return yoerrors.NewUsageError("backend %s does not support stdio exec", s.client.runtime.Descriptor().Type)
-		}
-		return execer.StdioExec(ctx, store.InstanceName(s.client.layout.Principal, s.name), opts.Command, io.In, io.Out, io.Err)
+		return execExitError(s.client.engine.StdioExec(ctx, s.name, opts.Command, io.In, io.Out, io.Err))
 	}
-	info, err := s.client.engine.Inspect(ctx, s.name)
-	if err != nil {
-		return err
-	}
-	if info.Status != sandbox.StatusActive && info.Status != sandbox.StatusIdle {
-		return fmt.Errorf("sandbox %q: %w", s.name, sandbox.ErrContainerNotRunning)
-	}
-	user := sandbox.ContainerUser(info.Environment, s.client.layout.HostUID)
-	return s.client.runtime.InteractiveExec(ctx, store.InstanceName(s.client.layout.Principal, s.name), opts.Command, user, info.Environment.Workdir.MountPath, io)
+	return execExitError(s.client.engine.InteractiveExec(ctx, s.name, opts.Command, io))
 }
 
 // execExitError translates the runtime's internal *runtime.ExecError (a
