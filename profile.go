@@ -50,7 +50,7 @@ const profileScaffold = `# agent: claude
 // ProfileAdmin is the System sub-handle for profile-management
 // operations (`yoloai profile create/list/info/delete`).
 type ProfileAdmin struct {
-	s *System
+	layout config.Layout
 }
 
 // Create scaffolds a new profile directory under ~/.yoloai/profiles/<name>/
@@ -63,11 +63,11 @@ func (a *ProfileAdmin) Create(_ context.Context, name string) error {
 	if err := config.ValidateProfileName(name); err != nil {
 		return err
 	}
-	if config.ProfileExists(a.s.layout, name) {
+	if config.ProfileExists(a.layout, name) {
 		return yoerrors.NewUsageError("profile %q already exists", name)
 	}
 
-	dir := a.s.layout.ProfileDir(name)
+	dir := a.layout.ProfileDir(name)
 	if err := fileutil.MkdirAll(dir, 0750); err != nil {
 		return fmt.Errorf("create profile directory: %w", err)
 	}
@@ -90,7 +90,7 @@ type ProfileSummary struct {
 // (not nil) when no profiles are configured, so JSON output renders
 // `[]` rather than `null`.
 func (a *ProfileAdmin) List(_ context.Context) ([]ProfileSummary, error) {
-	names, err := config.ListProfiles(a.s.layout)
+	names, err := config.ListProfiles(a.layout)
 	if err != nil {
 		return nil, err
 	}
@@ -98,9 +98,9 @@ func (a *ProfileAdmin) List(_ context.Context) ([]ProfileSummary, error) {
 	for _, name := range names {
 		summary := ProfileSummary{
 			Name:          name,
-			HasDockerfile: config.ProfileHasDockerfile(a.s.layout, name),
+			HasDockerfile: config.ProfileHasDockerfile(a.layout, name),
 		}
-		if profile, loadErr := config.LoadProfile(a.s.layout, name); loadErr == nil {
+		if profile, loadErr := config.LoadProfile(a.layout, name); loadErr == nil {
 			summary.AgentType = AgentType(profile.Agent)
 		}
 		out = append(out, summary)
@@ -135,10 +135,10 @@ func (a *ProfileAdmin) Info(_ context.Context, name string) (*ProfileInfo, error
 	if err := config.ValidateProfileName(name); err != nil {
 		return nil, err
 	}
-	if !config.ProfileExists(a.s.layout, name) {
+	if !config.ProfileExists(a.layout, name) {
 		return nil, yoerrors.NewUsageError("profile %q does not exist", name)
 	}
-	chain, err := config.ResolveProfileChain(a.s.layout, name)
+	chain, err := config.ResolveProfileChain(a.layout, name)
 	if err != nil {
 		return nil, err
 	}
@@ -146,7 +146,7 @@ func (a *ProfileAdmin) Info(_ context.Context, name string) (*ProfileInfo, error
 	if err != nil {
 		return nil, err
 	}
-	merged, err := config.MergeProfileChain(a.s.layout, baseCfg, chain)
+	merged, err := config.MergeProfileChain(a.layout, baseCfg, chain)
 	if err != nil {
 		return nil, err
 	}
@@ -155,7 +155,7 @@ func (a *ProfileAdmin) Info(_ context.Context, name string) (*ProfileInfo, error
 	// For a single-element chain (no inheritance), that's the baked-in
 	// defaults alone.
 	parentChain := chain[:len(chain)-1]
-	parent, err := config.MergeProfileChain(a.s.layout, baseCfg, parentChain)
+	parent, err := config.MergeProfileChain(a.layout, baseCfg, parentChain)
 	if err != nil {
 		return nil, err
 	}
@@ -163,8 +163,8 @@ func (a *ProfileAdmin) Info(_ context.Context, name string) (*ProfileInfo, error
 	return &ProfileInfo{
 		Name:          name,
 		Chain:         chain,
-		Image:         config.ResolveProfileImage(a.s.layout, name, chain),
-		HasDockerfile: config.ProfileHasDockerfile(a.s.layout, name),
+		Image:         config.ResolveProfileImage(a.layout, name, chain),
+		HasDockerfile: config.ProfileHasDockerfile(a.layout, name),
 		Merged:        resolvedProfileConfigFromMerged(merged),
 		Parent:        resolvedProfileConfigFromMerged(parent),
 	}, nil
@@ -178,7 +178,7 @@ func (a *ProfileAdmin) infoBase() (*ProfileInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	merged, err := config.MergeProfileChain(a.s.layout, baseCfg, chain)
+	merged, err := config.MergeProfileChain(a.layout, baseCfg, chain)
 	if err != nil {
 		return nil, err
 	}
@@ -186,7 +186,7 @@ func (a *ProfileAdmin) infoBase() (*ProfileInfo, error) {
 		Name:          "base",
 		Chain:         chain,
 		Image:         "yoloai-base",
-		HasDockerfile: config.ProfileHasDockerfile(a.s.layout, "base"),
+		HasDockerfile: config.ProfileHasDockerfile(a.layout, "base"),
 		Merged:        resolvedProfileConfigFromMerged(merged),
 		// "base" has no parent; an empty config lets diff callers
 		// treat it the same as any other profile without a nil-check.
@@ -202,7 +202,7 @@ func (a *ProfileAdmin) infoBase() (*ProfileInfo, error) {
 // corrupt environment.json shouldn't block the caller's profile-management
 // operation. Returns an empty (non-nil) slice when no references exist.
 func (a *ProfileAdmin) ReferencingSandboxes(_ context.Context, profileName string) ([]string, error) {
-	sandboxesDir := a.s.layout.SandboxesDir()
+	sandboxesDir := a.layout.SandboxesDir()
 	entries, err := os.ReadDir(sandboxesDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -262,11 +262,11 @@ func (a *ProfileAdmin) Delete(_ context.Context, name string) (*ProfileDeleteRes
 	if err := config.ValidateProfileName(name); err != nil {
 		return nil, err
 	}
-	if !config.ProfileExists(a.s.layout, name) {
+	if !config.ProfileExists(a.layout, name) {
 		return nil, yoerrors.NewUsageError("profile %q does not exist", name)
 	}
 
-	dir := a.s.layout.ProfileDir(name)
+	dir := a.layout.ProfileDir(name)
 	if err := os.RemoveAll(dir); err != nil { //nolint:gosec // G703: dir derived from validated name
 		return nil, fmt.Errorf("remove profile directory: %w", err)
 	}

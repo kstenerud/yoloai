@@ -45,7 +45,7 @@ type System struct {
 // Q-W resolution (Shape B, sub-handles): config get/set/reset
 // cluster under one accessor, matching Profiles().
 func (s *System) Config() *ConfigAdmin {
-	return &ConfigAdmin{s: s}
+	return &ConfigAdmin{layout: s.layout}
 }
 
 // Profiles returns the profile-management sub-handle.
@@ -54,7 +54,7 @@ func (s *System) Config() *ConfigAdmin {
 // behind one accessor so the System root stays uncluttered as
 // admin verbs grow. Mirrors the same pattern Config() uses.
 func (s *System) Profiles() *ProfileAdmin {
-	return &ProfileAdmin{s: s}
+	return &ProfileAdmin{layout: s.layout}
 }
 
 // TartBases returns the admin handle for Tart simulator runtime base images.

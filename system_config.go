@@ -29,7 +29,7 @@ var ErrConfigKeyNotFound = errors.New("config key not found")
 // Set and Reset hide this routing from callers; embedders pass a
 // dotted key and the handle picks the right file.
 type ConfigAdmin struct {
-	s *System
+	layout config.Layout
 }
 
 // Effective returns the merged effective configuration as formatted
@@ -42,7 +42,7 @@ type ConfigAdmin struct {
 // output relies on. Callers that want structured data can yaml-parse
 // the result themselves.
 func (a *ConfigAdmin) Effective(_ context.Context) (string, error) {
-	return config.GetEffectiveConfig(a.s.layout)
+	return config.GetEffectiveConfig(a.layout)
 }
 
 // Get returns a single configuration value by dotted key (e.g.
@@ -53,7 +53,7 @@ func (a *ConfigAdmin) Effective(_ context.Context) (string, error) {
 // (value, found, err) tuple so embedder code looks the same as for
 // other "missing thing" cases (errors.Is(err, ErrConfigKeyNotFound)).
 func (a *ConfigAdmin) Get(_ context.Context, key string) (string, error) {
-	value, found, err := config.GetConfigValue(a.s.layout, key)
+	value, found, err := config.GetConfigValue(a.layout, key)
 	if err != nil {
 		return "", err
 	}
@@ -71,12 +71,12 @@ func (a *ConfigAdmin) Set(_ context.Context, key, value string) error {
 		if err := a.ensureGlobalConfig(); err != nil {
 			return err
 		}
-		return config.UpdateGlobalConfigFields(a.s.layout, map[string]string{key: value})
+		return config.UpdateGlobalConfigFields(a.layout, map[string]string{key: value})
 	}
 	if err := a.ensureProfileConfig(); err != nil {
 		return err
 	}
-	return config.UpdateConfigFields(a.s.layout, map[string]string{key: value})
+	return config.UpdateConfigFields(a.layout, map[string]string{key: value})
 }
 
 // Reset deletes a key from configuration, reverting it to the
@@ -87,9 +87,9 @@ func (a *ConfigAdmin) Set(_ context.Context, key, value string) error {
 // idempotent.
 func (a *ConfigAdmin) Reset(_ context.Context, key string) error {
 	if config.IsGlobalKey(key) {
-		return config.DeleteGlobalConfigField(a.s.layout, key)
+		return config.DeleteGlobalConfigField(a.layout, key)
 	}
-	return config.DeleteConfigField(a.s.layout, key)
+	return config.DeleteConfigField(a.layout, key)
 }
 
 // ensureGlobalConfig creates ~/.yoloai/config.yaml with an empty
@@ -97,7 +97,7 @@ func (a *ConfigAdmin) Reset(_ context.Context, key string) error {
 // subsequent UpdateGlobalConfigFields parse the file without dealing
 // with the "file missing" branch.
 func (a *ConfigAdmin) ensureGlobalConfig() error {
-	configPath := a.s.layout.GlobalConfigPath()
+	configPath := a.layout.GlobalConfigPath()
 	if _, err := os.Stat(configPath); !os.IsNotExist(err) {
 		return nil
 	}
@@ -110,7 +110,7 @@ func (a *ConfigAdmin) ensureGlobalConfig() error {
 // ensureProfileConfig creates ~/.yoloai/defaults/config.yaml with the
 // commented scaffold if it doesn't yet exist.
 func (a *ConfigAdmin) ensureProfileConfig() error {
-	configPath := a.s.layout.DefaultsConfigPath()
+	configPath := a.layout.DefaultsConfigPath()
 	if _, err := os.Stat(configPath); !os.IsNotExist(err) {
 		return nil
 	}
