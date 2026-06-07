@@ -34,6 +34,11 @@ type StartOptions struct {
 	PromptFile   string                // if set, read from file, overwrite prompt.txt, send directly
 	Isolation    runtime.IsolationMode // if set, override the isolation mode stored in environment.json
 	VscodeTunnel bool                  // if true, enable VS Code Remote Tunnel (persisted to meta)
+	// Env is the per-sandbox environment overlay, merged over the resolved
+	// config+profile env at container (re)creation. It is never persisted —
+	// the caller must re-supply it on each launch that needs it (secrets are
+	// the caller's concern).
+	Env map[string]string
 }
 
 // Start ensures a sandbox is running — idempotent.
@@ -188,7 +193,7 @@ func handleStoppedOrRemovedStatus(ctx context.Context, d state.Deps, cname, name
 		}
 		defer cleanupResumeFiles(d, name)
 	}
-	if err := recreateContainer(ctx, d, name, meta, opts.Resume, n); err != nil {
+	if err := recreateContainer(ctx, d, name, meta, opts.Resume, opts.Env, n); err != nil {
 		return err
 	}
 	n.infof("%s", successMsg)

@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -90,11 +91,28 @@ func resolveEnvForRestart(layout config.Layout, meta *store.Environment) (map[st
 	return envVars, nil
 }
 
+// mergeLaunchEnv resolves the declarative config+profile env (resolveEnvForRestart)
+// and merges the caller-injected per-sandbox overlay on top, which wins on conflict.
+// The overlay is never persisted — secrets are the caller's concern.
+func mergeLaunchEnv(layout config.Layout, meta *store.Environment, extraEnv map[string]string) (map[string]string, error) {
+	envVars, err := resolveEnvForRestart(layout, meta)
+	if err != nil {
+		return nil, err
+	}
+	if len(extraEnv) > 0 {
+		if envVars == nil {
+			envVars = make(map[string]string, len(extraEnv))
+		}
+		maps.Copy(envVars, extraEnv)
+	}
+	return envVars, nil
+}
+
 // recreateContainer creates a new Docker container from environment.json. Incidental
 // progress (e.g. a port-availability warning from filterAvailablePorts) is
 // surfaced through n as Notices rather than a raw writer, since the restart
 // entry points (Start/Reset) return their output as a *Result's Notices (F8).
-func recreateContainer(ctx context.Context, d state.Deps, name string, meta *store.Environment, resume bool, n *notices) error {
+func recreateContainer(ctx context.Context, d state.Deps, name string, meta *store.Environment, resume bool, extraEnv map[string]string, n *notices) error {
 	agentDef := agent.GetAgent(string(meta.AgentType))
 	if agentDef == nil {
 		return yoerrors.NewConfigError("unknown agent %q in sandbox state — this sandbox was created with an agent that's not registered in the current yoloai installation; destroy and recreate the sandbox with a registered agent", meta.AgentType)
@@ -157,8 +175,7 @@ func recreateContainer(ctx context.Context, d state.Deps, name string, meta *sto
 		})
 	}
 
-	// Resolve env: load config, then merge profile chain if profile was used.
-	envVars, err := resolveEnvForRestart(d.Layout, meta)
+	envVars, err := mergeLaunchEnv(d.Layout, meta, extraEnv)
 	if err != nil {
 		return err
 	}

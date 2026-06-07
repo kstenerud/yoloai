@@ -336,7 +336,7 @@ func executeNewCreate(cmd *cobra.Command, ctx context.Context, c *yoloai.Client,
 	// The launch output (on stderr, or discarded in --json mode) precedes the
 	// creation summary, matching the old create-starts-by-default flow.
 	if !noStart {
-		if _, err := sb.Start(ctx, yoloai.SandboxStartOptions{}); err != nil {
+		if _, err := sb.Start(ctx, yoloai.SandboxStartOptions{Env: opts.Env}); err != nil {
 			return err
 		}
 	}

@@ -22,6 +22,7 @@ type resetOpts struct {
 	keepFiles  bool
 	attach     bool
 	debug      bool
+	env        []string
 }
 
 func NewResetCmd() *cobra.Command {
@@ -40,6 +41,7 @@ func NewResetCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&opts.keepCache, "keep-cache", false, "Preserve cache directory")
 	cmd.Flags().BoolVar(&opts.keepFiles, "keep-files", false, "Preserve files directory")
 	cmd.Flags().BoolVarP(&opts.attach, "attach", "a", false, "Auto-attach after restart (implies --restart)")
+	cmd.Flags().StringArrayVar(&opts.env, "env", nil, "Per-sandbox env var KEY=VAL applied on --restart (not persisted)")
 
 	return cmd
 }
@@ -66,6 +68,11 @@ func runReset(cmd *cobra.Command, args []string, opts *resetOpts) error {
 		defer cliutil.SetTerminalTitle("")
 	}
 
+	envMap, err := parseEnvSlice(opts.env)
+	if err != nil {
+		return err
+	}
+
 	return cliutil.WithSandbox(cmd, name, func(ctx context.Context, sb *yoloai.Sandbox) error {
 		slog.Info("resetting sandbox", "event", "sandbox.reset", "sandbox", name, "restart", opts.restart, "clear_state", opts.clearState) //nolint:gosec // G706: name is validated by ValidateName
 		res, resetErr := sb.Reset(ctx, yoloai.SandboxResetOptions{
@@ -75,6 +82,7 @@ func runReset(cmd *cobra.Command, args []string, opts *resetOpts) error {
 			KeepFiles:        opts.keepFiles,
 			NoPrompt:         opts.noPrompt,
 			Debug:            opts.debug,
+			Env:              envMap,
 		})
 		if res != nil {
 			cliutil.RenderNotices(cmd, res.Notices)

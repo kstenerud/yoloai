@@ -427,6 +427,10 @@ type SandboxResetOptions struct {
 	// the new text is re-sent on restart. Empty leaves the existing prompt.
 	Prompt string
 	Debug  bool // enable entrypoint debug logging
+	// Env is the per-sandbox environment overlay applied when the container is
+	// recreated (RestartContainer). Merged over the resolved config+profile env,
+	// never persisted — re-supply it on each restart that needs it.
+	Env map[string]string
 }
 
 func (o SandboxResetOptions) toInternal(name string) sandbox.ResetOptions {
@@ -439,6 +443,7 @@ func (o SandboxResetOptions) toInternal(name string) sandbox.ResetOptions {
 		NoPrompt:   o.NoPrompt,
 		Prompt:     o.Prompt,
 		Debug:      o.Debug,
+		Env:        o.Env,
 	}
 }
 

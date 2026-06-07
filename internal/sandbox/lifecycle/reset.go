@@ -32,6 +32,10 @@ type ResetOptions struct {
 	NoPrompt   bool   // skip re-sending prompt after reset
 	Prompt     string // if set, overwrite prompt.txt before reset (re-sent on restart)
 	Debug      bool   // enable entrypoint debug logging
+	// Env is the per-sandbox environment overlay applied when the container is
+	// recreated (Restart). Merged over the resolved config+profile env, never
+	// persisted — the caller re-supplies it (secrets are the caller's concern).
+	Env map[string]string
 }
 
 // Reset re-copies the workdir from the original host directory and resets
@@ -381,7 +385,7 @@ func prepareResetRestart(ctx context.Context, d state.Deps, opts ResetOptions, s
 
 	slog.Info("reset complete", "event", "sandbox.reset.complete", "sandbox", opts.Name)
 	// Start the container; its status notices flow into the reset's notices.
-	if err := start(ctx, d, opts.Name, StartOptions{}, n); err != nil {
+	if err := start(ctx, d, opts.Name, StartOptions{Env: opts.Env}, n); err != nil {
 		return err
 	}
 

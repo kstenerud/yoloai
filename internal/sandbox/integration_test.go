@@ -716,12 +716,18 @@ func TestIntegration_CredentialInjection(t *testing.T) {
 		Workdir: sandbox.DirSpec{Path: projectDir},
 		Agent:   "test",
 		Prompt:  "printenv TEST_CREDENTIAL > /tmp/cred-check; sleep 5",
-		Env:     map[string]string{"TEST_CREDENTIAL": "secret-value-xyz"},
 		Version: "test",
 	})
 	require.NoError(t, err)
 	_ = meta
 	t.Cleanup(func() { destroySandbox(ctx, mgr, "credinject") }) //nolint:errcheck // test cleanup
+
+	// The per-sandbox env overlay is injected at launch (recreate), not persisted
+	// from create — the caller re-supplies it on each start.
+	_, err = startSandbox(ctx, mgr, "credinject", sandbox.StartOptions{
+		Env: map[string]string{"TEST_CREDENTIAL": "secret-value-xyz"},
+	})
+	require.NoError(t, err)
 
 	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName("", "credinject"), 15*time.Second)
 

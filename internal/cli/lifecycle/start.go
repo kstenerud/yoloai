@@ -20,6 +20,7 @@ type startOpts struct {
 	prompt       string
 	promptFile   string
 	vscodeTunnel bool
+	env          []string
 }
 
 func NewStartCmd() *cobra.Command {
@@ -37,6 +38,7 @@ func NewStartCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&opts.prompt, "prompt", "p", "", "New prompt text (overwrites existing prompt)")
 	cmd.Flags().StringVarP(&opts.promptFile, "prompt-file", "f", "", "File containing new prompt")
 	cmd.Flags().BoolVar(&opts.vscodeTunnel, "vscode-tunnel", false, "Enable VS Code Remote Tunnel (persisted; takes effect on container recreate)")
+	cmd.Flags().StringArrayVar(&opts.env, "env", nil, "Per-sandbox env var KEY=VAL (not persisted; re-supply on each start)")
 
 	cmd.MarkFlagsMutuallyExclusive("resume", "prompt")
 	cmd.MarkFlagsMutuallyExclusive("resume", "prompt-file")
@@ -62,6 +64,11 @@ func runStart(cmd *cobra.Command, args []string, opts *startOpts) error {
 		defer cliutil.SetTerminalTitle("")
 	}
 
+	envMap, err := parseEnvSlice(opts.env)
+	if err != nil {
+		return err
+	}
+
 	slog.Info("starting sandbox", "event", "sandbox.start", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
 	return cliutil.WithSandbox(cmd, name, func(ctx context.Context, sb *yoloai.Sandbox) error {
 		res, startErr := sb.Start(ctx, yoloai.SandboxStartOptions{
@@ -69,6 +76,7 @@ func runStart(cmd *cobra.Command, args []string, opts *startOpts) error {
 			Prompt:       opts.prompt,
 			PromptFile:   opts.promptFile,
 			VscodeTunnel: opts.vscodeTunnel,
+			Env:          envMap,
 		})
 		if res != nil {
 			cliutil.RenderNotices(cmd, res.Notices)

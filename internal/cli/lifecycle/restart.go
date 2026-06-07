@@ -20,6 +20,7 @@ type restartOpts struct {
 	promptFile   string
 	isolation    string
 	vscodeTunnel bool
+	env          []string
 }
 
 func NewRestartCmd() *cobra.Command {
@@ -38,6 +39,7 @@ func NewRestartCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&opts.promptFile, "prompt-file", "f", "", "File containing new prompt")
 	cmd.Flags().StringVar(&opts.isolation, "isolation", "", "Override isolation mode (e.g. container-privileged for Docker-in-Docker)")
 	cmd.Flags().BoolVar(&opts.vscodeTunnel, "vscode-tunnel", false, "Enable VS Code Remote Tunnel (persisted; tunnel starts with the restarted container)")
+	cmd.Flags().StringArrayVar(&opts.env, "env", nil, "Per-sandbox env var KEY=VAL (not persisted; re-supply on each restart)")
 
 	cmd.MarkFlagsMutuallyExclusive("resume", "prompt")
 	cmd.MarkFlagsMutuallyExclusive("resume", "prompt-file")
@@ -64,6 +66,11 @@ func runRestart(cmd *cobra.Command, args []string, opts *restartOpts) error {
 		defer cliutil.SetTerminalTitle("")
 	}
 
+	envMap, err := parseEnvSlice(opts.env)
+	if err != nil {
+		return err
+	}
+
 	return cliutil.WithSandbox(cmd, name, func(ctx context.Context, sb *yoloai.Sandbox) error {
 		slog.Info("restarting sandbox", "event", "sandbox.restart", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
 		res, restartErr := sb.Restart(ctx, yoloai.SandboxStartOptions{
@@ -72,6 +79,7 @@ func runRestart(cmd *cobra.Command, args []string, opts *restartOpts) error {
 			PromptFile:   opts.promptFile,
 			Isolation:    yoloai.IsolationMode(opts.isolation),
 			VscodeTunnel: opts.vscodeTunnel,
+			Env:          envMap,
 		})
 		if res != nil {
 			cliutil.RenderNotices(cmd, res.Notices)
