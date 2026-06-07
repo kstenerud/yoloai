@@ -23,6 +23,10 @@ justification of record; principles here cite it by D-number.
 
 ## §1. Library-first — the CLI is the honesty-keeper
 
+> **Rule.** yoloAI is a library first; the CLI and mcpsrv are embedders, not insiders. Anything the CLI can do it must do through the public `yoloai` surface alone — a reach into `internal/` marks a missing public verb; the fix is to add the verb, never widen the reach. Litmus: could a separate-module daemon do this?
+>
+> **Bites when:** the CLI imports/reaches `internal/` for a capability instead of calling a `yoloai.*` verb. · **See also:** ARCH §2, DEV §2.
+
 **Principle.** yoloAI is a Go *library* first. The engine runs in-process behind a public
 `yoloai` surface; the CLI (`internal/cli/`) and the MCP server (`internal/mcpsrv/`) are
 *embedders* of that surface, not privileged insiders. A future separate-module daemon
@@ -77,6 +81,10 @@ litmus real). See also `development-principles.md §2`.
 ---
 
 ## §2. The public surface is the contract; the embedder is the audience
+
+> **Rule.** The `yoloai` ↔ `internal/` boundary is a published contract for an embedder who can name only exports: no public type may expose an internal one (even via a type alias), and in-tree embedders reach sandbox/runtime behaviour only through the surface. Both enforced mechanically (F1 detector + depguard) so drift fails CI.
+>
+> **Bites when:** a public type leaks an internal type, or you'd widen a depguard allow-list instead of adding a verb. · **See also:** ARCH §1, DEV §2.
 
 **Principle.** The boundary between the public `yoloai` surface and `internal/` is a
 *published contract*, and its audience is an external embedder who can name **only** what
@@ -138,6 +146,10 @@ tightening + rename). See also `development-principles.md §2`.
 ---
 
 ## §3. Host knowledge binds at a lifetime; the library never synthesizes it *(emerging — D58/D59, not yet enforced)*
+
+> **Rule.** *(Emerging — D58/D59, research-gated.)* This section is the architectural *why* behind DEV §12, **not** a second copy of the read-ban (DEV §12 + forbidigo already enforce that). The why: the library never synthesizes host knowledge from process ambient because the CLI is safe only *by accident* (process identity == principal, so a forged `HOME` hits a kernel ACL), while a many-principal daemon loses that net — synthesis becomes a confused-deputy / cross-tenant leak. Host knowledge must enter as explicit input bound to an embedder-controlled lifetime.
+>
+> **Bites when:** designing a library API that reaches host ambient state, or treating "thread it down" as ergonomics rather than a security boundary. · **See also:** DEV §12 (the enforced read-ban), SEC §6.
 
 **Principle (direction accepted 2026-06-01, D58 — not yet implemented).** Host knowledge
 — filesystem paths, the home directory, environment values, the requesting principal's

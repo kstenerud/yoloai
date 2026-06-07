@@ -38,6 +38,10 @@ The compositions:
 
 ## §1. Threat model is bounded — and stated explicitly
 
+> **Rule.** Enumerate both the threats yoloAI defends against AND those it does not; size defenses to what's in scope and reject complexity for out-of-scope threats.
+>
+> **Bites when:** adding a defense without checking it's in the stated threat model. · **See also:** SEC §9, GEN §5.
+
 **Principle.** The threats yoloAI defends against are enumerated. The threats it does NOT defend against are also enumerated. Defenses are sized to what's in scope; complexity for out-of-scope threats is rejected.
 
 ### Pattern
@@ -64,6 +68,10 @@ Originally established alongside D11.
 ---
 
 ## §2. Containment, not prevention — the sandbox limits blast radius
+
+> **Rule.** The agent runs arbitrary code; the sandbox doesn't make that code safe, it bounds what the code can reach. Design for bounded blast radius, not for preventing the agent from misbehaving.
+>
+> **Bites when:** designing a control that tries to make agent code "safe" rather than limiting its reach. · **See also:** SEC §5, GEN §5.
 
 **Principle.** The agent runs arbitrary code. The container, VM, or sandbox does not prevent the agent from doing dangerous things — it limits what those dangerous things can reach. Defenses are about *bounded blast radius*, not about making the agent's code safe.
 
@@ -92,6 +100,10 @@ Originally established alongside D4 (mount-mode taxonomy).
 ---
 
 ## §3. Defense-in-depth as opt-in layers
+
+> **Rule.** Stronger isolation (gVisor, Kata, Tart VMs, Seatbelt) is available but opt-in via explicit flags; standard Docker is the default balance. Don't force a heavier layer on users who don't need it.
+>
+> **Bites when:** making a stronger-isolation layer mandatory or the default. · **See also:** SEC §4, SEC §10.
 
 **Principle.** Stronger isolation (gVisor user-space kernel, Kata VMs, Tart macOS VMs, Seatbelt) is available but opt-in. Standard Docker is the default — it's the right balance for most users. Users with stronger threat models opt into stronger layers via explicit flags.
 
@@ -129,6 +141,10 @@ Originally established alongside D17.
 
 ## §4. Least privilege by mode — pay the capability cost only when needed
 
+> **Rule.** Grant a capability only when a specific feature needs it; the default mode pays zero capability cost (`:overlay` pays `CAP_SYS_ADMIN`, `--network-isolated` pays `CAP_NET_ADMIN`). Users not using a feature pay nothing.
+>
+> **Bites when:** granting a capability unconditionally instead of gating it on the feature. · **See also:** SEC §3, SEC §7.
+
 **Principle.** Capabilities are granted only when a specific feature requires them. The default mode pays zero capability cost. `:overlay` mode pays `CAP_SYS_ADMIN`. `--network-isolated` pays `CAP_NET_ADMIN`. Users not using these features pay nothing.
 
 ### Pattern
@@ -157,6 +173,10 @@ Originally established alongside D4 (mount modes) and D11 (network isolation).
 ---
 
 ## §5. Agent output is untrusted by default
+
+> **Rule.** Treat all agent output (edits, patches, commit messages, files) as data that crossed a trust boundary; defenses are structural, never detection-based — yoloAI never relies on a model recognising its own bad output.
+>
+> **Bites when:** relying on detecting or recognising malicious agent output as the control. · **See also:** SEC §2, DEV §4.
 
 **Principle.** Output from an AI agent — file edits, generated patches, commit messages, JSON written to `/yoloai/files/`, anything else — is data that crossed a trust boundary. Defenses are structural, not detection-based. yoloAI never relies on the model recognising bad output as the boundary control. The "Attacker Moves Second" consensus (Anthropic + OpenAI + DeepMind, Nov 2025) confirms detection-based defenses fail against adaptive attackers.
 
@@ -189,6 +209,10 @@ Anthropic + OpenAI + DeepMind "Attacker Moves Second"; `development-principles.m
 ---
 
 ## §6. Credentials never enter environment variables
+
+> **Rule.** Inject API keys via file-based bind-mount at `/run/secrets/<key>`, not `docker run -e`; the entrypoint reads the file and the host-side temp file is deleted. (OWASP / CIS Docker Benchmark.)
+>
+> **Bites when:** passing a secret through an environment variable. · **See also:** SEC §7, DEV §12.
 
 **Principle.** API keys are injected via file-based bind-mount at `/run/secrets/<key>`, not via `docker run -e KEY=value`. The container entrypoint reads the file and exports the env var inside the container, after which the host-side temp file is deleted. This follows OWASP and CIS Docker Benchmark guidance.
 
@@ -233,6 +257,10 @@ Originally established alongside the v1 design + D15 (Seatbelt) + D17 (`--isolat
 
 ## §7. Default-deny over default-allow
 
+> **Rule.** Prefer allow-known-good to block-known-bad — blocklists miss new credential locations, exfil routes, and dangerous paths; allowlists are enumerable and auditable.
+>
+> **Bites when:** building a blocklist for a security-relevant decision. · **See also:** SEC §6, GEN §6.
+
 **Principle.** When choosing between "block known-bad" and "allow known-good," allow known-good wins. Blocklists miss new credential locations, new exfiltration routes, new dangerous paths. Allowlists are enumerable and audit-able.
 
 ### Pattern
@@ -262,6 +290,10 @@ Originally established alongside D15.
 
 ## §8. Verify isolation claims — test against real scenarios, not marketing language
 
+> **Rule.** A backend's "isolates X" claim is a hypothesis until tested in the conditions yoloAI actually uses; verify behaviour against real scenarios, not vendor marketing.
+>
+> **Bites when:** asserting an isolation property from docs/marketing without a real test. · **See also:** GEN §7, GEN §10, TEST §6.
+
 **Principle.** A backend's claim that it "isolates X" is a hypothesis until verified. Vendor marketing pages list features; what matters is whether the feature behaves the way the docs say in the conditions yoloAI uses. Verify before claiming.
 
 ### Pattern
@@ -289,6 +321,10 @@ Originally established alongside D5.
 ---
 
 ## §9. Document the residual risk
+
+> **Rule.** Every defense has limits; surface them in the design docs, the guide, and error messages so users can judge acceptability. Hiding the limits strips users of the info they need to decide.
+>
+> **Bites when:** shipping a defense without stating what it doesn't cover. · **See also:** SEC §1, GEN §11.
 
 **Principle.** Every defense has known limits. Users decide based on whether the residual risk is acceptable for their use case. Hiding the limits doesn't make them go away; it strips users of the information they need to decide. The residual risks are surfaced in the design docs, the user guide, and the error messages — not buried.
 
@@ -324,6 +360,10 @@ Originally established alongside D11 and `docs/contributors/design/security.md`.
 
 ## §10. Power-user escapes are explicit and documented
 
+> **Rule.** Containment-undermining features (`cap_add`, devices, `container-privileged`, `--network host`, `--force`) are explicit and documented as "this undermines containment, here's why we offer it" — never silent, and never a global "make me unsafe" flag.
+>
+> **Bites when:** adding an isolation-weakening option silently or as a catch-all unsafe switch. · **See also:** SEC §3, GEN §6.
+
 **Principle.** Features that undermine isolation (cap_add, devices, `--isolation container-privileged`, `--network host`, `--force` on dangerous directories) exist for users who need them. They are explicit, not silent. They are documented as "this undermines containment, here's why we offer it." There is no global "make me unsafe" flag.
 
 ### Pattern
@@ -350,6 +390,10 @@ Cost of applying: explicit flag/config naming + documentation. Damage prevented:
 ---
 
 ## §11. One convention per security mechanism — no ad-hoc divergence
+
+> **Rule.** A security mechanism (input guarding, path confinement, capability grants, credential handling) follows ONE convention codebase-wide; a locally-correct one-off that diverges is itself a vulnerability surface (drift is what audits miss).
+>
+> **Bites when:** adding a one-off guard that differs from how its peers do it. · **See also:** SEC §7, DEV §6.
 
 **Principle.** A security-relevant mechanism (input guarding, path confinement, capability grants, credential handling) follows **one** convention across the whole codebase. Do not introduce a one-off guard that follows a *different* convention than its peers, even when the one-off is locally correct. The drift between conventions is itself the vulnerability surface — independent of any single missing check.
 

@@ -28,6 +28,10 @@ Complementary docs:
 
 ## §1. Engineering values — the cross-cutting vocabulary
 
+> **Rule.** The shared vocabulary the other sections draw on — YAGNI, KISS, DRY, SOLID, Demeter, least-astonishment, command/query separation. Default to the simplest correct solution; earn an abstraction on the *second* concrete use, not the first.
+>
+> **Bites when:** adding an abstraction, generalisation, or config knob for a single (or hypothetical) use case. · **See also:** §8, §9.
+
 A concise reference for the engineering values that shape every code path in yoloAI. Most aren't yoloAI-specific; they're the established vocabulary of professional software engineering.
 
 **YAGNI — You Aren't Gonna Need It.** Don't build for hypothetical future requirements. Features, abstractions, and generalisations earn their place when a second concrete use case appears — not before. For a single-author project, every unused capability is maintenance Karl pays per backend.
@@ -70,6 +74,10 @@ Kent Beck, Robert C. Martin, Sandi Metz, Parnas, Meyer, Postel, Knuth/Hoare. Ful
 ---
 
 ## §2. None of your business — boundary discipline, comply-or-complain
+
+> **Rule.** Policy owns *what* and *why*; mechanism owns *how*; neither questions the other. The only thing crossing back up is a typed refusal — the library never prompts, falls back, reinterprets intent, or makes a UX choice, and policy never reaches into the mechanism's internals (the fix for a missing capability is a new public verb, not a reach-through).
+>
+> **Bites when:** the library prompts / silently falls back / mode-switches, or the CLI imports the engine/runtime subtree instead of calling a `yoloai.*` verb. · **See also:** §4, §12, §13.
 
 **Principle. None of your business.** The boundary has two sides under one contract, and each is deliberately ignorant of the other. The **upper (policy) layer** owns the *what* and the *why*; the **lower (mechanism) layer** owns the *how*. Neither questions or depends on the other's reasons. The *only* thing that crosses in the reverse direction is a typed refusal — *"you've asked for the impossible, and here's why."* Everything else — the upper layer's motives, the lower layer's implementation — is none of the other's business.
 
@@ -142,6 +150,10 @@ Originally established alongside D7 (pluggable runtime interface); restated two-
 
 ## §3. Validate at every layer (defense in depth)
 
+> **Rule.** Every function that crosses a layer boundary re-validates its inputs against the domain's invariants — the callee never trusts that the caller already checked (the caller may be a refactor that lost the check, or a new public-API path that never had it).
+>
+> **Bites when:** skipping a check because "the layer above already validated." · **See also:** §4 (the one-time boundary parse vs. §3's repeated guard).
+
 **Principle.** Every function that crosses a layer boundary validates its inputs against the domain's invariants. The runtime layer validates inputs even if the domain "already did" — the runtime doesn't know what called it. The domain validates inputs even if the CLI handler did — the handler might be a refactor that lost the check, or a new public-API caller that never had it.
 
 This isn't paranoid; it's the same reason server-side validation matters when the frontend already validated.
@@ -168,6 +180,10 @@ David L. Parnas (1972); OWASP secure-coding guidance. Full citations: `../resear
 ---
 
 ## §4. Parse, don't validate
+
+> **Rule.** Parse at the boundary into a domain type whose existence proves the invariant; downstream takes the parsed type and never re-validates. Collapse constrained field-combos (mutually-exclusive bools, free-form strings that should be one of N) into typed enums so the invalid state is unrepresentable.
+>
+> **Bites when:** raw strings or bool-combos flow deep into the API, or one invariant is re-checked at many call sites. · **See also:** §3, §13.
 
 **Principle.** When data crosses a trust boundary or has invariants downstream code depends on, transform it into a distinct domain type whose existence proves the invariants hold. Downstream code takes the parsed type, not the raw input. The function that constructs the type is the *only* place the checks happen; once a value has the parsed type, no further validation is needed at every call site.
 
@@ -248,6 +264,10 @@ Alexis King "Parse, don't validate"; David L. Parnas (1972). Full citations: `..
 
 ## §5. Fail fast — surface errors at the earliest possible point
 
+> **Rule.** Surface errors at the earliest point — validate at the boundary, reject invalid construction args in the constructor, return immediately. Never carry partial state forward or paper over a failure with a silent fallback. When in doubt, error.
+>
+> **Bites when:** returning nil/zero on a bad state "to handle later," or adding a silent fallback default. · **See also:** §2 (comply-or-complain), §12.
+
 **Principle.** Detect and surface errors at the earliest possible point. Validate at the boundary before bad input reaches domain logic. Return errors immediately; don't carry partial state forward. Reject invalid construction arguments in constructors rather than storing bad state for a later crash. Don't paper over failures — let them be visible.
 
 ### Pattern
@@ -274,6 +294,10 @@ Effective Go §Errors; Bertrand Meyer *OOSC* (Design by Contract). Full citation
 ---
 
 ## §6. Warnings are signal; suppressions require justification
+
+> **Rule.** A lint / scanner / type warning is information about the code. Every suppression (`//nolint`, `#nosec`, a complexity-threshold override) carries a co-located comment explaining *why the finding doesn't apply here* — never "makes CI pass" or a restatement of the directive.
+>
+> **Bites when:** adding a suppression or raising a threshold to get the gate green. · **See also:** §7, §10.
 
 **Principle.** Lint findings, complexity alerts, security scanner warnings, and type errors are information about the code. Suppressing one without understanding what it's telling you discards that information permanently, silently, and often incorrectly. The fact that a suppression makes the checks pass is not a reason to add it; it is the definition of what suppressions do.
 
@@ -309,6 +333,10 @@ Effective Go; Uber Go Style Guide. Full citations: `../research/principles/devel
 ---
 
 ## §7. Act on every return value; justify every discard
+
+> **Rule.** Every return value carries information; don't discard one silently. A bare `_` on a non-trivial value — especially an error — needs a comment, except the closed list of policy-justified categories (CLI-writer `fmt.F*`, test-fixture `gosec`, cleanup `defer Close`).
+>
+> **Bites when:** dropping an error with `_ =` or no check at all. · **See also:** §6.
 
 **Principle.** Every return value carries information. Discarding it silently discards that information — permanently, invisibly, and often incorrectly. A caller that drops a return value without explanation has made an implicit claim that the value doesn't matter; state and defend that claim, don't assume it.
 
@@ -380,6 +408,10 @@ Effective Go §Errors; Go Code Review Comments. Full citations: `../research/pri
 
 ## §8. No half-finished implementations
 
+> **Rule.** A feature is shipped (works + tests + docs) or removed — never half-landed. Partial code is acceptable only when the missing piece is tracked in `design/plans/README.md` with an owner and target; untracked `// TODO: hook this up` is not. Breaking changes go in `BREAKING-CHANGES.md`.
+>
+> **Bites when:** leaving an untracked TODO, or landing a feature without its tests/docs. · **See also:** §9, §10.
+
 **Principle.** Public-beta status (`CLAUDE.md` §Project Status) means breaking changes are allowed if tracked. It does *not* mean half-implemented features are allowed. A feature is either shipped (works, has tests, is documented) or removed. The state-in-between is the worst — it confuses users and traps maintenance time.
 
 ### Pattern
@@ -408,6 +440,10 @@ Project `CLAUDE.md` §Project Status; D16. Full citations: `../research/principl
 
 ## §9. Plan-then-execute on cleanup
 
+> **Rule.** Architecture cleanup lands as a numbered, audited plan of single-responsibility commits — not opportunistic refactors riding along inside feature work. One W-number, one discrete commit, `make check` green at each.
+>
+> **Bites when:** refactoring unrelated code inside a feature change. · **See also:** §1, §8.
+
 **Principle.** Periodic architecture cleanup is the project's right shape — not opportunistic refactors. Architecture drift accumulates; the W-numbered remediation plan ensures the cleanup lands as a coherent shape, not as a string of half-overlapping commits.
 
 ### Pattern
@@ -432,6 +468,10 @@ Project D19; W-numbered remediation commits. Full citations: `../research/princi
 ---
 
 ## §10. Code quality gate — `make check`
+
+> **Rule.** `make check` (gofmt + golangci-lint + go-mod-tidy + Go tests + Python pytest/mypy) must pass before any code change is complete. Never loosen the gate — disable a linter, raise a threshold, skip a test — to land code.
+>
+> **Bites when:** calling a change "done" without a green `make check`, or weakening the gate to pass. · **See also:** §6.
 
 **Principle.** `make check` is the single quality gate. It runs gofmt, golangci-lint, go mod tidy verification, all Go tests, and the Python pytest + mypy targets. All must pass before any change is considered complete. CI runs the same targets, so green locally means green in CI.
 
@@ -460,6 +500,10 @@ Project `CLAUDE.md` §Code Quality Gate; D20. Full citations: `../research/princ
 
 ## §11. Iterate when the first approach doesn't work
 
+> **Rule.** After three failed attempts at the same approach, stop and rethink the architecture rather than grinding another workaround — some problems have a structural shape the obvious solution doesn't match. Record the failure trail; it's data, not waste.
+>
+> **Bites when:** reaching for "one more workaround" on a problem that has already resisted several. · **See also:** §9.
+
 **Principle.** When a problem resists three attempts at solution, the answer is not "try harder at the same approach." It's "step back and rethink the architecture." Some problems have a structural shape that the obvious solution doesn't match; the right answer is to find the structure, not to grind on the obvious.
 
 ### Pattern
@@ -484,6 +528,10 @@ Global `CLAUDE.md` §Agent operating principles; project D14, D11. Full citation
 ---
 
 ## §12. No ambient configuration
+
+> **Rule.** Resolve ambient state (env vars, `$HOME`/XDG paths, cwd, terminal detection, process identity) ONCE at the outermost edge — CLI startup, server bootstrap, test setup — and pass it down as explicit args; library code never reads it. An edge-resolved default implies a *pure accessor* downstream: panic if read before the edge ran, never a lazy fallback (a per-call fallback is a "hole" that re-reads ambient state and masks ordering bugs).
+>
+> **Bites when:** calling `os.Getenv` / `os.UserHomeDir` / `os.Getwd` below the CLI layer, or adding a "just for tests" fallback default. · **See also:** §4, §5.
 
 **Principle.** Library boundaries (the `yoloai.Client`, domain functions, server entry points) accept all configuration as explicit arguments. Environment variables, `$HOME`-derived paths, `os.Getwd()`, terminal detection, and other ambient process state are resolved at the OUTERMOST layer — CLI startup, server bootstrap, test setup — and passed down explicitly. Library code never reads ambient process state.
 
@@ -533,6 +581,10 @@ Twelve-Factor App factor III (config read once, passed explicitly); Zen of Pytho
 ---
 
 ## §13. Raw until it has to change
+
+> **Rule.** Keep data in the representation it already has until a *present* consumer actually needs a different shape; every conversion must serve a concrete consumer right where it happens. The complement to §4: §4 is the one justified boundary conversion (it proves an invariant); §13 forbids every other speculative reshape.
+>
+> **Bites when:** pre-emptively reshaping into a "rich" struct no current consumer needs, or a transform downstream just reverses. · **See also:** §4, §2.
 
 **Principle.** Data keeps the representation it already has until a consumer actually requires a different one. Don't pre-emptively transform a value into another shape when downstream code may have to transform it back, or when the "right" target shape isn't yet forced by a real consumer. Every conversion that *does* happen must be justifiable at the point where it happens — there is a concrete consumer right there whose need the new representation serves.
 

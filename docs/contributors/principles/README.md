@@ -11,12 +11,15 @@ The five principles docs that govern yoloAI's engineering disposition. Principle
 
 ```
 principles/
+├── rule-index.md                 ← fast-lookup rule sheet (one line + symptom per principle)
 ├── general-principles.md         ← meta: strategic + decision-making (applies to everything)
 │   ├── development-principles.md     ← engineering surface: code structure + practices
 │   ├── architecture-principles.md    ← architecture surface: module stance + public-surface contract
 │   ├── testing-principles.md         ← engineering surface: testing philosophy + discipline
 │   └── security-principles.md        ← security surface: sandbox containment + defense
 ```
+
+`rule-index.md` is the working-memory layer: a one-line **Rule** + **Bites when** symptom for every principle, cheap enough to load whole before a task. Match your action against a row, then open the cited section here for the full reasoning. The five principles docs are the authority; the index only points in.
 
 The four specialised docs reference back to the general parent; the general doc does not duplicate specialised content. When a new cross-cutting pattern is identified, the question is "is this specific to one surface (engineering / architecture / testing / security) or does it apply across all of them?" — if cross-cutting, it lands in `general-principles.md`; otherwise in the relevant specialised doc.
 
@@ -48,6 +51,7 @@ A principle wins over any standard or design choice that conflicts. If a standar
 
 ## How to use these docs
 
-- **Writing code.** When you're about to deviate from convention or add complexity, check the relevant principles doc. Most "should I do X?" questions have an answer here, with reasoning you can cite.
+- **Writing code (fast path).** Start at [rule-index.md](rule-index.md): scan the **Bites when** column for the symptom matching what you're about to do, then open the cited section. It's small enough to load whole.
+- **Writing code (deep).** When you're about to deviate from convention or add complexity, check the relevant principles doc. Most "should I do X?" questions have an answer here, with reasoning you can cite.
 - **Reviewing code (yours or an agent's).** A reviewer can say "this violates `development-principles.md §Validate at every layer`" and the conversation is grounded. The cost-vs-benefit framing in each principle is the resolution mechanism for "is this the right place to draw the line."
 - **Onboarding a contributor.** The principles + standards + `CLAUDE.md` are the contract. Anything not covered there is open.

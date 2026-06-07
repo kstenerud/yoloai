@@ -27,6 +27,10 @@ The scope difference vs. larger projects: there is no product manager to require
 
 ## §1. Pragmatic over perfect (YAGNI applied)
 
+> **Rule.** Decide under cost-vs-benefit; default to the smallest intervention that produces real user benefit and defer features whose need is hypothetical. (Not a licence to ship low-quality code — malleability is the prerequisite; see DEV.)
+>
+> **Bites when:** building down the long tail of presumptive features, or gold-plating past the user-visible benefit. · **See also:** DEV §1, GEN §4.
+
 **Principle.** yoloAI has a CLI to ship and a public-beta user base that needs reliability more than features. Decisions must be made under cost-vs-benefit. Don't go too far down the long tail of presumptive features. Default to the smallest intervention that produces real user benefit; defer features whose need is hypothetical. *This does not justify shipping low-quality code* — see `development-principles.md` for the malleable-code prerequisite that makes future iteration cheap.
 
 ### Pattern
@@ -54,6 +58,10 @@ Originally established in D22.
 ---
 
 ## §2. Boring tech, innovation tokens are scarce — spend them on the differentiator
+
+> **Rule.** yoloAI has ~3 innovation tokens — spend them on the differentiated product surface; everywhere else choose boring tech with well-understood failure modes. Each new dependency is a future operational/security liability.
+>
+> **Bites when:** reaching for a novel or heavy dependency for a non-differentiating need. · **See also:** GEN §3.
 
 **Principle.** yoloAI has ~3 innovation tokens (McKinley 2015). Spend them on the product surface that's differentiated; everywhere else, choose boring. Each new dependency adds a future liability whose ongoing operational and security cost dominates its build-time convenience. "Boring" means well-understood failure modes — yoloAI can list how it will let us down.
 
@@ -106,6 +114,10 @@ Originally established in D22.
 
 ## §3. Don't reinvent the wheel — ecosystem-first
 
+> **Rule.** Before designing a feature, check whether git, Docker, unix tools, or the runtime already provide the workflow; build the glue (the composition), not the primitives.
+>
+> **Bites when:** about to hand-build something git / docker / unix already does. · **See also:** GEN §2.
+
 **Principle.** Before designing a feature, check whether git, Docker, unix tools, or the runtime already provide a workflow that solves it. yoloAI's value is the *composition* — copy/diff/apply on top of git, sandboxes on top of Docker / Podman / Tart, idle detection on top of agent hooks. Build the glue, not the primitives.
 
 ### Pattern
@@ -135,6 +147,10 @@ Originally established alongside D8.
 
 ## §4. Action speed is inversely proportional to irreversibility cost — Type 1 and Type 2 doors
 
+> **Rule.** Match process to reversibility: reversible (Type 2) decisions ship fast at ~70% info; irreversible (Type 1) ones get confirmation gates. Watch for **Type 1.5** — looks reversible but isn't (CLI surface, config schema, user muscle memory).
+>
+> **Bites when:** applying heavy process to a reversible call, or shipping a CLI/config-schema change as if it were reversible. · **See also:** GEN §5.
+
 **Principle.** Reversible decisions (Type 2 — two-way doors) ship fast at ~70% information; irreversible decisions (Type 1 — one-way doors) slow down with confirmation gates. The trap is applying Type 1 process to Type 2 decisions — slowness without benefit. Equally, mis-classifying Type 1 as Type 2 produces unrecoverable mistakes. Beware **Type 1.5** — looks reversible but isn't (e.g., CLI surface changes that retrain user muscle memory, config schema changes that break existing user files).
 
 ### Pattern
@@ -161,6 +177,10 @@ Originally established in D22.
 ---
 
 ## §5. Worst-case is bounded — blast radius is a design-time question
+
+> **Rule.** Every operation with real-world consequence has an explicit upper bound — timeout, refusal, confirmation, or pre-flight — paired with a clear failure message. "What's the worst case if this misbehaves?" is a required design-time question.
+>
+> **Bites when:** adding an operation with no bound on damage / cost / time. · **See also:** GEN §6, SEC §2, DEV §5.
 
 **Principle.** Every operation with real-world consequence has an explicit upper bound — a timeout, a refusal, a confirmation gate, a pre-flight check. "What's the upper bound on damage / cost / time if this misbehaves?" is a required design-time question. The bound is paired with a clear failure message (the bound limits damage; the message prevents recurrence).
 
@@ -194,6 +214,10 @@ Originally established in D22.
 
 ## §6. Safe defaults — the protected mode is the default mode
 
+> **Rule.** Every flag whose dangerous setting could cost the user data has its SAFE setting as the default; the user must type the dangerous one. Defaults are a safety-net, not a preference.
+>
+> **Bites when:** defaulting a flag to its convenient-but-dangerous setting. · **See also:** SEC §7, GEN §5.
+
 **Principle.** Every flag whose dangerous setting could cost the user data has its safe setting as the default. The user must type the dangerous one. Defaults are not preferences — they are the safety-net that catches the new user, the rushed user, and the user who didn't read the docs.
 
 ### Pattern
@@ -226,6 +250,10 @@ Originally established alongside D4 + D15 + D16.
 
 ## §7. Factual accuracy bar — verify before you cite
 
+> **Rule.** Verify claims (competitor features, counts, security properties, kernel behaviour, vendor SLAs) against primary sources before citing; marketing language and plausibility are not evidence.
+>
+> **Bites when:** about to state a competitor / security / kernel fact you haven't checked. · **See also:** GEN §12, SEC §8.
+
 **Principle.** Research must be verified. Claims about competitor features, star counts, security properties, kernel behaviour, and vendor SLAs are not statements until they are checked against primary sources. Marketing language is not evidence. Plausibility is not verification.
 
 ### Pattern
@@ -254,6 +282,10 @@ Originally established in D5.
 ---
 
 ## §8. Document the "no" — D-entries are the future-self preservation layer
+
+> **Rule.** Every meaningful decision records what yoloAI explicitly does NOT do, and why, in a D-entry — the rejected alternatives matter as much as the chosen path, or the debate gets relitigated.
+>
+> **Bites when:** making a non-trivial decision without recording the rejected alternatives. · **See also:** GEN §11.
 
 **Principle.** Every meaningful decision records what yoloAI explicitly does NOT do, alongside what it does. The rejected alternatives and the rationale are as important as the chosen path — without them, future-Karl (or a future contributor, or an AI agent) will relitigate the same debate. D-entries are 1–2 pages each, written as a conversation with a future maintainer.
 
@@ -287,6 +319,10 @@ Originally established in D22 (this set).
 
 ## §9. Surface failures honestly — diagnostic-first, not catch-all
 
+> **Rule.** When a failure could be ambiguous (timeout vs ENOSPC vs crash vs misconfig), surface the specific cause as early as possible — a pre-flight refusal beats a confusing mid-operation failure. Diagnostic-first, not catch-all.
+>
+> **Bites when:** writing a catch-all error that defers diagnosis to the user. · **See also:** DEV §5.
+
 **Principle.** When a failure could be ambiguous (timeout vs. ENOSPC vs. agent crash vs. configuration error), surface the specific cause as early as possible. Catch-all error messages defer diagnosis to the user; specific error messages move it to the tool. The pre-flight check is the canonical pattern: refuse upfront with a clear error rather than failing mid-operation with a confusing one.
 
 ### Pattern
@@ -316,6 +352,10 @@ Originally established in D21.
 ---
 
 ## §10. Cross-platform awareness — verify per platform, document tradeoffs
+
+> **Rule.** A claim isn't cross-platform until verified per platform (Linux, macOS Docker/Tart/Seatbelt, Windows/WSL); document platform-specific tradeoffs explicitly rather than hiding behind "works on my machine."
+>
+> **Bites when:** asserting cross-platform behaviour verified on only one platform. · **See also:** GEN §7, SEC §8.
 
 **Principle.** Linux, macOS Docker Desktop, macOS Tart, macOS Seatbelt, Windows/WSL each behave differently in ways that matter (kernel features, filesystem semantics, capability grants, user namespace mapping, mount support). A claim is not a cross-platform claim until it is verified per platform. Platform-specific tradeoffs are documented explicitly, not hidden behind "it works on my machine."
 
@@ -347,6 +387,10 @@ Originally established in D5 (cross-platform clause in `CLAUDE.md` critique prin
 ---
 
 ## §11. Default to public
+
+> **Rule.** When in doubt, publish — design docs, research, decisions, breaking-changes, the principles themselves. The cost of publishing is trivial; the trust benefit compounds.
+>
+> **Bites when:** keeping a doc or decision private by default. · **See also:** GEN §8.
 
 **Principle.** When in doubt, publish. Design docs, research files, the idiosyncrasies catalog, the BREAKING-CHANGES log, the roadmap, the decision log, the principles themselves. yoloAI is OSS; the cost of publishing is trivial; the trust benefit compounds (users, contributors, AI agents reading the docs to land changes).
 
@@ -380,6 +424,10 @@ Originally established in D22.
 
 ## §12. A design is a hypothesis — aspirational until verified against reality
 
+> **Rule.** A design / spec / API-checkpoint is a provisional, falsifiable model — load-bearing only after implementation verifies it against the real capability. When facts contradict the model, the facts win: revise it and record why.
+>
+> **Bites when:** treating an unimplemented design as a contract, or coding to the doc when reality diverges. · **See also:** GEN §7, GEN §13.
+
 **Principle.** A design — a design doc, an API-surface checkpoint, a spec — is a *model*: a deliberately lossy compression of reality, not a contract. A model hides detail to make a problem thinkable, and that same hiding is what lets it be wrong: parts of any model break down when implementation surfaces facts the model omitted. A design is therefore **provisional and falsifiable until it has been implemented and verified to work against the real internal capability.** When facts contradict the model, the facts win: revise the model and record *why*. This mirrors the scientific method — design is the hypothesis, implementation the experiment, divergence the analysis, the updated doc the conclusion. The mirror image of §7: §7 requires a design be backed by *research*; §12 requires it also be backed by *implementation* before it is load-bearing.
 
 The deeper reason this is a standing principle and not a one-off caution: we are not omniscient, so our models *will* eventually diverge from reality once the rubber meets the road. A process that cannot revise its own map after that divergence will encode the first wrong guess permanently. So the models here are **designed to be changeable** — the obligation is to keep the map honest, never to defend it.
@@ -409,6 +457,10 @@ Originally established in D25.
 ---
 
 ## §13. No plan survives contact with the enemy — surface divergence and better ideas, even against an agreed plan
+
+> **Rule.** If something looks off — even when agreed, in the spec, planned in detail — raise it and discuss; if you find a better way, raise it. Agreement is a strong prior, not a gag order.
+>
+> **Bites when:** silently following an agreed plan you've already spotted a problem in. · **See also:** GEN §12.
 
 **Principle.** No design or plan is perfect. We work with incomplete information, and reality supplies the missing facts only once we act on them — so we *will* make mistakes, and the only question is whether we catch them. The standing obligation: **if something looks off — even if it is agreed upon, in the design, in the spec, planned to the minutest detail — you bring it up and we discuss it. If you discover a better way, you bring it up and we discuss it.** Agreement is a strong prior, not a gag order; a prior decision is a closed question only until new information reopens it. The discipline is to stay flexible when we discover our model of the world is wrong, and to treat that discovery as information to act on, not an inconvenience to suppress. Helmuth von Moltke the Elder: *"No plan survives contact with the enemy."*
 

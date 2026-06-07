@@ -29,6 +29,10 @@ The cost-vs-benefit framing is the same as the general principles: cost of writi
 
 ## §1. Confidence over coverage numbers
 
+> **Rule.** Coverage finds untested code; it's useless as a target. The question driving a test is "would this fail if the production code regressed in a way the user would notice?" — not "does this lift coverage past N%?"
+>
+> **Bites when:** writing or justifying a test to hit a coverage number. · **See also:** TEST §7, TEST §9.
+
 **Principle.** Coverage is a useful diagnostic for finding *untested* code; it is useless as a target. The question that drives a test isn't "does this push coverage past N%?" — it's "would this fail if the production code regressed in a way the user would notice?"
 
 ### Pattern
@@ -56,6 +60,10 @@ Originally established in global `CLAUDE.md` §Testing and ratified in D22.
 
 ## §2. Test behaviour, not implementation
 
+> **Rule.** Assert what the code does, not how. A test that breaks on a refactor with no behaviour change is testing implementation — rewrite it or delete it.
+>
+> **Bites when:** a test asserts on internal mechanics or call sequences. · **See also:** TEST §8.
+
 **Principle.** A test asserts on what the code does, not on how it does it. A test that breaks on refactor without a behaviour change is testing implementation; rewrite the test or delete it. The behavioural property is the contract the user (or caller) depends on; that's the property worth defending.
 
 ### Pattern
@@ -82,6 +90,10 @@ Originally established alongside D14 (pluggable idle detection — multiple reje
 ---
 
 ## §3. Error paths are first-class
+
+> **Rule.** Incidents happen on the unhappy path nobody tested. Make error paths trigger-able and test them by default.
+>
+> **Bites when:** testing only the happy path because the error path is "hard to trigger." · **See also:** DEV §5, TEST §4.
 
 **Principle.** Production incidents happen on the unhappy path. The happy path is the one everyone tested. The error path is the one no one tested because it was "hard to trigger." Make error paths trigger-able and test them by default.
 
@@ -111,6 +123,10 @@ Originally established alongside D6 (symlink resolution before safety checks —
 
 ## §4. Regression by default
 
+> **Rule.** When a bug ships, the regression test lands alongside the fix — it documents the shape of the wrongness and prevents recurrence.
+>
+> **Bites when:** fixing a bug without adding the test that pins it. · **See also:** TEST §9.
+
 **Principle.** When a bug ships, the test goes in alongside the fix. The test documents "this was wrong, here's the shape of the wrongness." The fix makes the test pass. The test prevents recurrence. Skipping the test means we will rediscover the same bug, possibly with worse consequences.
 
 ### Pattern
@@ -136,6 +152,10 @@ Kent Beck *TDD: By Example*; Martin Fowler "Eradicating Non-Determinism in Tests
 ---
 
 ## §5. Test at the right layer
+
+> **Rule.** Test each behaviour at the lowest layer where it can be verified with confidence (pure logic → unit, backend interaction → integration, workflow → e2e); higher-layer tests can't isolate a cause the way lower ones can.
+>
+> **Bites when:** reaching for an e2e/integration test for logic a unit test would pin precisely. · **See also:** TEST §6.
 
 **Principle.** For any given behaviour, find the lowest layer where it can be tested with confidence. Pure logic at the unit layer. Backend interaction at the integration layer. Full user workflow at the e2e layer. Tests at higher layers can't replace tests at lower layers because they can't isolate the cause of a failure.
 
@@ -165,6 +185,10 @@ Originally established alongside D19 (W3–W6 of the architecture remediation ma
 
 ## §6. Integration tests hit real backends — no mocking the daemon
 
+> **Rule.** Integration tests at the backend boundary use real Docker / Podman / containerd / Tart / Seatbelt — never mocks. A mock only records how yoloAI currently calls the daemon; it misses cross-backend and cross-version behaviour differences.
+>
+> **Bites when:** mocking the daemon / backend in an integration test. · **See also:** TEST §8, TEST §5.
+
 **Principle.** Integration tests at the backend boundary use real Docker / Podman / containerd / Tart / Seatbelt instances, not mocks. Mocks of these APIs are records of how yoloAI currently calls the backend; they don't catch behavioural differences between backends or across backend versions. Real backends do.
 
 ### Pattern
@@ -191,6 +215,10 @@ Originally established alongside D7 (pluggable runtime interface required tests 
 ---
 
 ## §7. The goal is healthy production code, not passing tests
+
+> **Rule.** A passing test is an artefact of the real goal — healthy production code. On a failure, ask whether the production code is correct, necessary, or could be done better — not "how do I make this green?"
+>
+> **Bites when:** editing a test to pass without asking whether the production code is right. · **See also:** TEST §1, DEV §10.
 
 **Principle.** A passing test is an artefact of the real goal: healthy production code. When a test fails, the question is not "how do I make this green?" — it's:
 
@@ -227,6 +255,10 @@ Originally established in global CLAUDE.md; ratified for yoloAI in D22.
 
 ## §8. Manual fakes over mock libraries
 
+> **Rule.** Substitute a collaborator with a hand-rolled fake that implements the interface, not a generated call-recording mock — fakes test behaviour and survive refactor; mocks test mechanics and break.
+>
+> **Bites when:** reaching for a mock-generator or call-sequence assertions. · **See also:** TEST §2.
+
 **Principle.** When the unit layer needs a substitute for a collaborator, write a hand-rolled fake that implements the interface, not a generated mock that records call sequences. Fakes test behaviour; mocks test mechanics. Behaviour tests survive refactor; mechanism tests break.
 
 ### Pattern
@@ -255,6 +287,10 @@ Originally established in `standards/GO.md` §Testing; ratified in D22.
 
 ## §9. Tests that catch new failure modes earn their place
 
+> **Rule.** A test that surfaces a previously-invisible failure mode beats one that adds coverage on an already-working path; when a confusing failure is diagnosed, add the test that would have made it un-confusing.
+>
+> **Bites when:** adding coverage on a path that already worked instead of pinning the new failure mode. · **See also:** TEST §1, TEST §4.
+
 **Principle.** A test that surfaces a previously-invisible failure mode is worth more than a test that adds coverage on a path that already worked. When a confusing failure has been diagnosed, add the test that would have made it un-confusing.
 
 ### Pattern
@@ -281,6 +317,10 @@ Originally established in D21.
 ---
 
 ## §10. Inject the seam; don't manipulate the process
+
+> **Rule.** Steer library behaviour in tests by constructing the explicit inputs the code reads (a `config.Layout`, an injected `io.Reader`/`io.Writer`), not by mutating global process state (`t.Setenv("HOME", …)`, swapping `os.Stdin`). Post-§12 the code no longer reads `HOME` — setting it is dead scaffolding that also forbids `t.Parallel`.
+>
+> **Bites when:** a test uses `t.Setenv` / `os.Stdin` swaps to steer a code path instead of passing inputs. · **See also:** DEV §12, TEST §8.
 
 **Principle.** A unit test steers library behaviour by constructing the explicit inputs the code reads — a `config.Layout` (DataDir, HomeDir, HostUID/GID, Env), an injected `io.Reader` / `io.Writer` — not by mutating global process state (`t.Setenv("HOME", …)`, swapping `os.Stdin`). After the §12 no-ambient-configuration work (`development-principles.md §12`), library code reads its configuration from the `config.Layout` it is handed; a test that sets `HOME` to steer a yoloAI code path is manipulating a global the code no longer reads — dead scaffolding that also forbids `t.Parallel`.
 
