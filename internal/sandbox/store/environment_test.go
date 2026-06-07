@@ -153,6 +153,7 @@ func TestMeta_MigrateV0ToV1_EmptyBackendBackfillsDocker(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, loaded.Version, "v0 should be migrated to v1")
 	assert.Equal(t, runtime.BackendDocker, loaded.BackendType, "empty legacy backend backfills to docker")
+	assert.Equal(t, "yoloai-base", loaded.ImageRef, "empty legacy image_ref backfills to yoloai-base")
 	assert.False(t, loaded.HostFilesystem, "docker backend should have HostFilesystem=false")
 }
 

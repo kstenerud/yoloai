@@ -132,14 +132,9 @@ func buildInstanceConfig(desc runtime.BackendDescriptor, st *state.State, mnts [
 		}
 	}
 
-	resolvedImage := st.ImageRef
-	if resolvedImage == "" {
-		resolvedImage = "yoloai-base"
-	}
-
 	instanceCfg := runtime.InstanceConfig{
 		Name:        cname,
-		ImageRef:    resolvedImage,
+		ImageRef:    st.ImageRef,
 		WorkingDir:  OverlayOrResolvedMountPath(st.Workdir),
 		Mounts:      mnts,
 		Ports:       ports,

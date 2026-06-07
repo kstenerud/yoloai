@@ -93,6 +93,12 @@ func migrate(meta *Environment) error {
 		if meta.BackendType == "" {
 			meta.BackendType = runtime.BackendDocker
 		}
+		// Likewise, pre-versioning sandboxes predate the `image_ref` field; the
+		// only image then was the singular "yoloai-base". Backfill it so the
+		// launch/restart path can trust a non-empty ImageRef.
+		if meta.ImageRef == "" {
+			meta.ImageRef = "yoloai-base"
+		}
 		// Bootstrap HostFilesystem from the backend's descriptor capability.
 		// The descriptor is the single source of truth; backends declare their
 		// own HostFilesystem flag (see runtime.BackendCaps).
