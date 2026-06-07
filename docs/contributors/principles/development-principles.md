@@ -3,7 +3,8 @@ ABOUTME: boundary discipline ("none of your business" — comply-or-complain),
 ABOUTME: validate-at-every-layer, parse-don't-validate, fail-fast,
 ABOUTME: warnings-are-signal, justify-every-discard, no-half-finished,
 ABOUTME: plan-then-execute cleanup, make-check gate, iterate-when-first-approach
-ABOUTME: -fails, raw-until-it-has-to-change, library-defaults-are-safety-only.
+ABOUTME: -fails, raw-until-it-has-to-change, library-defaults-are-safety-only,
+ABOUTME: name-for-the-reader's-distance.
 ABOUTME: How to write yoloAI code so future-you can change it safely.
 
 # Development principles
@@ -645,6 +646,49 @@ Audit conversation, 2026-06-07 (the dir-mode / tmux / agent-default round). Refi
 
 ---
 
+## §15. Name for the reader's distance
+
+> **Rule.** The clarity a name must carry is proportional to the contextual *distance* between where it is declared and where it is read. Struct/class fields travel farthest (read across many methods and files) so they must stand entirely alone; function parameters are read at the signature, not the body, so they must read like documentation; local variables are read close to their declaration, so terseness is defensible — but the tension grows with the length of the scope. A *clarifying* comment that merely restates what the name should have conveyed (`Source string // source path` → `SourcePath`) is a smell.
+>
+> **Bites when:** abbreviating a struct field (`rt`, `mu`, `c`, `ts`), giving a parameter a one-letter name, or writing a comment that the name should have carried. · **See also:** §1 (least-astonishment), §4; `../standards/go.md §Naming`.
+
+**Principle.** A name's job is to deliver meaning to the place it is *read*, which is rarely the place it is *declared*. The further a name travels from its declaration before it's used, the more a reader at the use site has paid to recover its meaning — they must navigate back to the declaration, losing their place. So the required clarity of a name scales with that distance. This is why the same abbreviation can be fine in one position and a defect in another: the cost isn't in the characters, it's in the look-up the reader is forced into.
+
+This is the *why* under `../standards/go.md §Naming`'s "clarity over brevity" and "rename when the comment is doing the name's job" rules. The standard says *what* to type; this principle says *how much clarity each position needs and why*, so you can judge a new case instead of memorising a list.
+
+### The three tiers, by distance
+
+1. **Struct / class fields — maximum distance.** A field is declared once and read across many methods, frequently spread over multiple files. A reader confused at a use site (`s.c.layout`, `rec.ts`) has to navigate all the way back to the type definition to recover what the field is — and then find their place again. Field names must therefore stand entirely on their own. A field of type `runtime.Runtime` is named `runtime`, not `rt`; the receiver-holder is `client`, not `c`; the timestamp is `timestamp`, not `ts`.
+
+   The corollary: a **clarifying comment on a field is a smell** — not because comments are bad, but because the comment lives at the *declaration* and never travels to the *use* site where the confusion actually is. `Source string // source path` "documents" the field exactly where no reader is confused, and is silent exactly where they are. The fix is to fold the comment into the name (`SourcePath`), so the meaning travels with every use. (This is distinct from a comment that encodes what the type system *can't* — an invariant, a side effect, a zero-value semantic, a cross-reference — which earns its keep and stays. `../standards/go.md §Naming` draws that line.)
+
+2. **Function parameters — the signature is the documentation.** A caller, and anyone reading the signature, sees the parameter's *name and type* and nothing else — never the body. `CreateSandbox(n string, a AgentType, d []string)` forces every reader into the implementation to learn what `n`, `a`, `d` are; `CreateSandbox(name string, agent AgentType, directories []string)` reads like documentation. Parameters are part of the interface, so they pay the field-level clarity tax, not the local-variable discount.
+
+3. **Local variables — terseness is defensible, to a point.** A local read three lines below its declaration carries its own context; the reader hasn't lost their place, so a short name (`pr` for a `profileResult`, `i` for a loop index) is fine. But the justification is *the short scope*, and it erodes as the scope grows: in a long method a terse local imposes the same look-up tax as a field, because the declaration has scrolled off-screen. The longer the function, the more a local earns a fuller name — or the more the function is asking to be split (§1). Method receivers are the standing exception: idiomatic Go keeps them 1–2 letters (`s` for `*Sandbox`) precisely because their scope and meaning are unambiguous at every use.
+
+### Pattern
+
+When you write or review a name, locate it on the distance axis and ask the matching question:
+
+- *Field:* "Could a reader at a random use site, with no other context, say what this is?" If not, rename. If a comment is supplying the missing meaning, fold it into the name.
+- *Parameter:* "Does the signature alone read like documentation?" If a reader would have to open the body, rename.
+- *Local:* "Is the declaration visible from every use?" If the scope is long enough that it isn't, give it a fuller name (or shorten the scope).
+
+### Worked examples
+
+- **The 2026-06-07 field-name audit (D73).** A sweep of the public surface and internal handles produced a cluster of renames that are all the same shape — an abbreviation that read fine at its declaration and opaquely everywhere else: `Client.rt`→`runtime`, `Client.mu`→`mutex`, `Sandbox.c`→`client` (and the `Agent`/`Workdir`/`Files`/`Network` sub-handles flattened to a `client`+`name` pair), `logRecord.ts`→`timestamp`, `resolvedCreateInputs.pr`→`profile`. Method receivers (`s`, `m`, `c`) were deliberately *left* short — tier 3's standing exception.
+- **The W-L8a / D45 comment-vs-name pass** (recorded in `../standards/go.md §Naming`): ~20 `yoloai.Client`-surface fields where the field *comment* was doing the name's job (`Note string // probe failure reason` → `UnavailableReason`) — the field tier of this principle, applied at API-design time.
+
+### Cost-vs-benefit
+
+Cost of applying: longer identifiers, and the discipline to rename when an abbreviation or a clarifying comment creeps in. Damage prevented: the per-read look-up tax a vague field imposes on every method that touches it; signatures that can't be understood without opening the body; the clarifying comment that documents a field exactly where no one is confused and stays silent exactly where they are; and the slow rot where `c.rt`, `s.c`, `rec.ts` accumulate until the code can only be read with the type definitions open in a second window.
+
+### Sources
+
+Global `~/.claude/CLAUDE.md` §Naming; project decision D73; concretised in `../standards/go.md §Naming` ("clarity over brevity", "field comments: rename when the comment is the name's job"). Cousin of §1 (least-astonishment) and §4 (a name's meaning, like an invariant, is established once and relied on downstream).
+
+---
+
 # Common over-generalisations to avoid
 
 | Over-generalisation                          | Why yoloAI rejects                                                                                                                                                                                                                                          |
@@ -662,6 +706,7 @@ Audit conversation, 2026-06-07 (the dir-mode / tmux / agent-default round). Refi
 | **No-env-vars-ever**                         | §12 bans env reads in *library code* as silent defaults. The CLI startup layer reads `YOLOAI_DATA_DIR` and similar; agents declare API-key env vars in their definitions. The rule is "read env once, at the outermost boundary, with the read documented" — not "env vars are forbidden everywhere."                  |
 | **Never-convert / always-pass-raw**          | §13 forbids *unjustified* conversions, not all of them. §4's boundary parse is a justified conversion (it proves an invariant); rendering a value for a human is a justified conversion (the human is the consumer). The rule is "convert where a present consumer needs it," not "never reshape data."                       |
 | **No-defaults-in-the-library-ever**          | §14 bans *convenience* defaults in the library, not *safety* ones. A safety-sensitive field whose default is the safe choice may be defaulted (at one named step, after its real sources resolve); a value with no safety dimension gets no default — accept unset, resolve, and error if still unset. The rule is "library defaults are safety-only," not "the library never supplies a value."                       |
+| **Spell-every-name-out**                     | §15 scales clarity to *distance*, not to a blanket maximum. A struct field read across many files must stand alone; a local read three lines down its declaration legitimately stays terse (`pr`, `i`), and a method receiver stays 1–2 letters by Go convention. The rule is "name for the reader's distance," not "never abbreviate."                                                                       |
 
 ---
 

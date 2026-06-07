@@ -534,6 +534,24 @@ The concrete trigger: `cliutil.Layout()` used to lazily re-derive `$HOME/.yoloai
 
 **Consequences.** Not breaking (CLI-internal). `Layout()` is now total and side-effect-free given a run edge. A pure accessor read before the edge is a programming error that panics loudly rather than silently following ambient `HOME`. Committed as one refactor (`refactor(cli): make Layout() a pure accessor, resolve the default at the edge`). §12 gained a worked example; §4 ("parse, don't validate") is the governing principle.
 
+## D73 — Name for the reader's distance: a name's required clarity scales with how far it travels from its declaration
+
+**Date:** 2026-06-07. **Status:** Accepted (owner, 2026-06-07).
+
+**Why.** A field-name audit of the public surface (`yoloai.Client` / `Sandbox` and the internal handles) turned up the recurring smell behind a class of renames: a name that's perfectly clear *at its declaration* loses all its context at the *use* site. The audit's mechanical fixes (`Client.rt`→`runtime`, `Client.mu`→`mutex`, `Sandbox.c`→`client`, `logRecord.ts`→`timestamp`, `resolvedCreateInputs.pr`→`profile`) all share one shape: the abbreviation was readable where it was *defined* but opaque everywhere it was *used* — which, for a struct field, is across many methods in many files. The standard already had the *what/how* (`standards/go.md §Naming`: "clarity over brevity", "a name that needs a comment to explain it is too short"); what was missing was the *why* that unifies fields, parameters, and locals into one rule and tells you *how much* clarity each needs.
+
+**The decision.** Promote the underlying rule to a named principle (`development-principles.md §15`): **the clarity a name must carry is proportional to the contextual distance between where it is declared and where it is read.** Three tiers, by distance:
+
+- **Struct / class fields — maximum distance, maximum clarity.** A field is declared once and read across many methods, often in many files. A reader confused at a use site must navigate back to the type definition to recover meaning. So field names must stand entirely on their own — and a *clarifying* comment (one that merely restates what the name should have said: `Source string // source path` → `SourcePath`) is a smell, because the comment lives at the declaration and never travels to the use site where the confusion actually is.
+- **Function parameters — the signature is the documentation.** A caller (and a reader of the signature) sees the parameter *name and type*, never the body. A vague parameter name forces a look-up into the implementation. Parameters are part of the interface; name them as such.
+- **Local variables — terseness is defensible, but tension grows with scope length.** A local read three lines below its declaration carries its own context. The longer the function, the more that justification erodes; in a long method a terse local is the same look-up tax as a field.
+
+A *clarifying* comment is distinct from a comment that encodes what the type system can't (an invariant, a side effect, zero-value semantics, a cross-reference) — those stay (`standards/go.md §Naming` already draws this line). The principle only condemns the comment that's doing the name's job.
+
+**Rejected.** (a) Leaving this as a standard only — it *is* concretely a Go-style rule, but the distance-scaling *why* is language-agnostic and is what lets a reader judge the field-vs-parameter-vs-local tradeoff instead of memorizing three separate rules; a principle is the right home for a why. (b) A blanket "no abbreviations" rule — over-broad; it would reject the accepted short forms (`ctx`, `err`, `i`) and ignore that a local's short scope legitimately licenses brevity.
+
+**Consequences.** Docs-only, not breaking. New `development-principles.md §15` ("Name for the reader's distance"); new `rule-index.md` row (DEV §15); `standards/go.md §Naming` cross-references the principle as the *why* behind its existing clarity-over-brevity rules. The originating audit's renames are the worked examples.
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.

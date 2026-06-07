@@ -93,6 +93,8 @@ Never use underscores in Go names (except in test functions: `Test_xxx`). Receiv
 
 ### Clarity over brevity
 
+The *why* behind this subsection and the next is `../principles/development-principles.md §15` ("name for the reader's distance"): a name's required clarity scales with the contextual distance between where it is declared and where it is read — so fields (read across many files) must stand alone, parameters must read like documentation at the signature, and locals may stay terse only as long as their scope is short. The rules below are that principle made concrete for Go.
+
 Names must be understandable to someone unfamiliar with the codebase. When you encounter a variable mid-function, its role should be obvious without scrolling to its declaration.
 
 - **Spell words out:** `containerName` not `ctrNm`, `directory` not `dir`
