@@ -48,13 +48,6 @@ func TestExecExitError_PassesThroughOtherErrors(t *testing.T) {
 	assert.NoError(t, execExitError(nil), "nil stays nil")
 }
 
-// destroyForOverwrite must short-circuit (and never touch the runtime) when the
-// destination doesn't exist — Overwrite on a fresh name is a plain clone.
-func TestClient_destroyForOverwrite_MissingDestIsNoop(t *testing.T) {
-	c, _ := clientWithSandbox(t) // nil runtime; the no-op path must not reach it
-	require.NoError(t, c.destroyForOverwrite(context.Background(), "ghost"))
-}
-
 func TestResetOptions_toInternal(t *testing.T) {
 	in := SandboxResetOptions{
 		RestartContainer: true,

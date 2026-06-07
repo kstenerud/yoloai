@@ -54,7 +54,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"sync"
 
 	"github.com/kstenerud/yoloai/internal/config"
@@ -64,8 +63,6 @@ import (
 	_ "github.com/kstenerud/yoloai/internal/runtime/seatbelt" // register backend
 	_ "github.com/kstenerud/yoloai/internal/runtime/tart"     // register backend
 	"github.com/kstenerud/yoloai/internal/sandbox"
-	"github.com/kstenerud/yoloai/internal/sandbox/create"
-	"github.com/kstenerud/yoloai/internal/sandbox/lifecycle"
 	"github.com/kstenerud/yoloai/internal/sandbox/state"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/yoerrors"
@@ -255,34 +252,6 @@ func (c *Client) ListSandboxes(ctx context.Context) ([]*SandboxInfo, error) {
 	return sandboxInfosFromStatus(sis), nil
 }
 
-// destroyForOverwrite tears down a pre-existing destination sandbox so a clone
-// can take its place. A missing destination is a no-op. The destination may
-// have been created on a different backend than this Client's, so it destroys
-// through the backend recorded in the destination's environment.json (falling
-// back to the Client's own runtime when that metadata is unreadable). Work is
-// abandoned unconditionally — an Overwrite clone is an explicit replace.
-func (c *Client) destroyForOverwrite(ctx context.Context, dest string) error {
-	dstDir := c.layout.SandboxDir(dest)
-	if _, err := os.Stat(dstDir); os.IsNotExist(err) {
-		return nil
-	}
-
-	deps := c.deps()
-	if meta, err := store.LoadEnvironment(dstDir); err == nil && meta.BackendType != "" {
-		rt, rtErr := runtime.New(ctx, meta.BackendType, c.layout)
-		if rtErr != nil {
-			return fmt.Errorf("connect to %s backend to overwrite %q: %w", meta.BackendType, dest, rtErr)
-		}
-		defer rt.Close() //nolint:errcheck // best-effort close after teardown
-		deps = state.Deps{Runtime: rt, Layout: c.layout, Input: c.input}
-	}
-
-	if _, err := lifecycle.Destroy(ctx, deps, dest); err != nil {
-		return fmt.Errorf("overwrite existing destination %q: %w", dest, err)
-	}
-	return nil
-}
-
 // CreateSandbox provisions a new sandbox from SandboxCreateOptions and returns a
 // dormant handle for it — the container is NOT started. Call Sandbox.Start to
 // launch the agent (and Sandbox.Wait to block until it finishes). The sandbox
@@ -300,7 +269,7 @@ func (c *Client) CreateSandbox(ctx context.Context, opts SandboxCreateOptions) (
 	if err := c.engine.EnsureSetup(ctx, c.output); err != nil {
 		return nil, err
 	}
-	if _, err := create.Run(ctx, c.deps(), internal); err != nil {
+	if _, err := c.engine.Create(ctx, internal); err != nil {
 		return nil, err
 	}
 	return &Sandbox{client: c, name: opts.Name}, nil

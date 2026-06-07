@@ -122,7 +122,7 @@ func (s *Sandbox) Stop(ctx context.Context) error {
 	if err := s.client.ensure(ctx); err != nil {
 		return err
 	}
-	return lifecycle.Stop(ctx, s.client.deps(), s.name)
+	return s.client.engine.Stop(ctx, s.name)
 }
 
 // Clone copies this sandbox's state into a new sandbox named dest. Although the
@@ -146,7 +146,7 @@ func (s *Sandbox) Clone(ctx context.Context, dest string, opts SandboxCloneOptio
 		return nil, err
 	}
 	if opts.Overwrite {
-		if err := s.client.destroyForOverwrite(ctx, dest); err != nil {
+		if err := s.client.engine.DestroyForOverwrite(ctx, dest); err != nil {
 			return nil, err
 		}
 	}
@@ -165,7 +165,7 @@ func (s *Sandbox) Start(ctx context.Context, opts SandboxStartOptions) (*StartRe
 	if err := s.client.ensure(ctx); err != nil {
 		return nil, err
 	}
-	return lifecycle.Start(ctx, s.client.deps(), s.name, opts)
+	return s.client.engine.Start(ctx, s.name, opts)
 }
 
 // Restart stops then starts the sandbox, applying opts on the way back up
@@ -178,10 +178,7 @@ func (s *Sandbox) Restart(ctx context.Context, opts SandboxStartOptions) (*Start
 	if err := s.client.ensure(ctx); err != nil {
 		return nil, err
 	}
-	if err := lifecycle.Stop(ctx, s.client.deps(), s.name); err != nil {
-		return nil, err
-	}
-	return lifecycle.Start(ctx, s.client.deps(), s.name, opts)
+	return s.client.engine.Restart(ctx, s.name, opts)
 }
 
 // waitPollInterval is how often Wait re-inspects the sandbox. A single
@@ -303,7 +300,7 @@ func (s *Sandbox) Reset(ctx context.Context, opts SandboxResetOptions) (*ResetRe
 	if err := s.client.ensure(ctx); err != nil {
 		return nil, err
 	}
-	return lifecycle.Reset(ctx, s.client.deps(), opts.toInternal(s.name))
+	return s.client.engine.Reset(ctx, opts.toInternal(s.name))
 }
 
 // HasActiveWork reports whether destroying the sandbox would lose work — a
@@ -332,7 +329,7 @@ func (s *Sandbox) Destroy(ctx context.Context, opts SandboxDestroyOptions) (*Des
 			return nil, yoerrors.NewActiveWorkError("%s", reason)
 		}
 	}
-	res, err := lifecycle.Destroy(ctx, s.client.deps(), s.name)
+	res, err := s.client.engine.Destroy(ctx, s.name)
 	if err != nil {
 		return nil, err
 	}

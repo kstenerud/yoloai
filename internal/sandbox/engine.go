@@ -15,6 +15,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	tmuxres "github.com/kstenerud/yoloai/internal/resources/tmux"
 	"github.com/kstenerud/yoloai/internal/runtime"
+	"github.com/kstenerud/yoloai/internal/sandbox/state"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
@@ -175,6 +176,14 @@ func (e *Engine) Close() error {
 		return nil
 	}
 	return e.runtime.Close()
+}
+
+// deps bundles the Engine's runtime, layout, and input into state.Deps for the
+// lifecycle and create free functions. Callers reach it only after ensure has
+// opened the runtime (or via TryEnsure for the host-only-fallback verbs, where a
+// nil runtime is acceptable).
+func (e *Engine) deps() state.Deps {
+	return state.Deps{Runtime: e.runtime, Layout: e.layout, Input: e.input}
 }
 
 // Layout returns the Engine's path-resolution Layout. Read-only —
