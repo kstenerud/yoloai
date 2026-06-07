@@ -184,11 +184,16 @@ func (r *Runtime) PruneCache(ctx context.Context, includeImages, dryRun bool, ou
 		fmt.Fprintf(output, "%s: build cache prune failed: %v\n", r.binaryName, err) //nolint:errcheck
 	}
 
-	// Volumes: only yoloai's own (label-scoped). all=true so named yoloai
-	// volumes are removed, not just anonymous ones. Scoping by label keeps the
-	// user's unrelated volumes (e.g. a project database) untouched and out of
-	// the reclaim accounting (see splitCacheBytes).
-	volFilter := filters.NewArgs(filters.Arg("label", managedLabel), filters.Arg("all", "true"))
+	// Volumes: only yoloai's own (label-scoped). On Docker, all=true so named
+	// yoloai volumes are removed, not just anonymous ones; Podman's docker-compat
+	// API rejects the "all" volume filter ("invalid volume filter") and prunes
+	// all unused volumes by default, so it's omitted there. Scoping by label
+	// keeps the user's unrelated volumes (e.g. a project database) untouched and
+	// out of the reclaim accounting (see splitCacheBytes).
+	volFilter := filters.NewArgs(filters.Arg("label", managedLabel))
+	if r.binaryName != "podman" {
+		volFilter.Add("all", "true")
+	}
 	if _, err := r.client.VolumesPrune(ctx, volFilter); err != nil {
 		fmt.Fprintf(output, "%s: volumes prune failed: %v\n", r.binaryName, err) //nolint:errcheck
 	}

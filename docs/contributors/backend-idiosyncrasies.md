@@ -799,7 +799,9 @@ An empty value disables LXC seccomp for that container entirely. The container m
 
 **Fix:** Scope both the estimate and the prune to volumes carrying the `com.yoloai.managed` label. `splitCacheBytes` counts only labeled volumes; `PruneCache` calls `VolumesPrune` with `label=com.yoloai.managed` + `all=true` (so named yoloai volumes are removed, not just anonymous ones). yoloai creates no volumes today, so this currently reclaims nothing and reports nothing for volumes — correct. Any future code that creates a volume MUST stamp it with `managedLabel`.
 
-**Code:** `internal/runtime/docker/prune.go` — `managedLabel` const, `splitCacheBytes` (label-gated volume loop), `PruneCache` (label+all `VolumesPrune` filter).
+**Podman caveat:** Podman's docker-compat API does **not** accept the `all` volume filter — passing it fails the whole prune with `failed to parse filters for all=true&label=…: "all" is an invalid volume filter`, surfacing as `podman: volumes prune failed: …`. Podman has no anonymous-vs-named distinction (`podman volume prune` removes every unused volume by default), so the `all=true` arg is unnecessary there. `PruneCache` therefore omits it when `binaryName == "podman"` and sends only the `label` filter.
+
+**Code:** `internal/runtime/docker/prune.go` — `managedLabel` const, `splitCacheBytes` (label-gated volume loop), `PruneCache` (label+all `VolumesPrune` filter, `all` omitted for Podman).
 
 ---
 
