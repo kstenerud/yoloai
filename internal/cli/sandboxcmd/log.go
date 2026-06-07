@@ -30,7 +30,7 @@ var sourceLabels = map[yoloai.LogSource]string{
 // logRecord is a parsed JSONL log entry, decomposed for pretty-printing. The
 // library hands us the raw line; turning it into display fields is CLI work.
 type logRecord struct {
-	ts          time.Time
+	timestamp   time.Time
 	level       string
 	event       string
 	msg         string
@@ -47,7 +47,7 @@ func parseLogRecord(line string, sourceLabel string) (logRecord, bool) {
 	}
 
 	rec := logRecord{sourceLabel: sourceLabel}
-	rec.ts = parseLogTimestamp(raw)
+	rec.timestamp = parseLogTimestamp(raw)
 	rec.level = rawJSONString(raw, "level")
 	rec.event = rawJSONString(raw, "event")
 	rec.msg = rawJSONString(raw, "msg")
@@ -170,7 +170,7 @@ func terminalWidth() int {
 //
 // Format: HH:MM:SS src     LEVL  event-name               message  key=val...
 func formatRecord(rec logRecord, width int) string {
-	local := rec.ts.Local()
+	local := rec.timestamp.Local()
 	timeStr := local.Format("15:04:05")
 	lvl := levelCode(rec.level)
 

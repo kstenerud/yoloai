@@ -108,12 +108,12 @@ type Client struct {
 	// Lazy backend connection. The runtime is opened once, on the first
 	// backend-bound operation, via ensure/tryEnsure — host-only reads
 	// (Workdir host-git, on-disk allowlist, filesystem readers) never trigger
-	// it. Guarded by mu; opened latches true on success and rt/engine are then
-	// stable for the Client's lifetime.
-	mu     sync.Mutex
-	opened bool
-	rt     runtime.Runtime
-	engine *sandbox.Engine
+	// it. Guarded by mutex; opened latches true on success and runtime/engine
+	// are then stable for the Client's lifetime.
+	mutex   sync.Mutex
+	opened  bool
+	runtime runtime.Runtime
+	engine  *sandbox.Engine
 }
 
 // NewClient creates a Client with explicit options.
@@ -177,8 +177,8 @@ var ErrBackendRequired = yoerrors.NewUsageError("yoloai: this operation requires
 // Client; a failed open is NOT cached (the next call retries). Safe for
 // concurrent use.
 func (c *Client) ensure(ctx context.Context) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
 	if c.opened {
 		return nil
 	}
@@ -189,7 +189,7 @@ func (c *Client) ensure(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("connect to %s backend: %w", c.backend, err)
 	}
-	c.rt = rt
+	c.runtime = rt
 	c.engine = sandbox.NewEngine(rt, c.logger, c.input, sandbox.WithLayout(c.layout))
 	c.opened = true
 	return nil
@@ -207,12 +207,12 @@ func (c *Client) tryEnsure(ctx context.Context) {
 // Close releases the underlying runtime connection, if one was ever opened.
 // A no-op on a Client whose backend was never used.
 func (c *Client) Close() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
 	if !c.opened {
 		return nil
 	}
-	return c.rt.Close()
+	return c.runtime.Close()
 }
 
 // Sandbox returns a sandbox-scoped handle, validating that the sandbox
@@ -226,7 +226,7 @@ func (c *Client) Sandbox(name string) (*Sandbox, error) {
 	if err := store.RequireSandboxDir(c.layout.SandboxDir(name)); err != nil {
 		return nil, err
 	}
-	return &Sandbox{c: c, name: name}, nil
+	return &Sandbox{client: c, name: name}, nil
 }
 
 // System returns the admin sub-handle for system-level operations.
@@ -239,7 +239,7 @@ func (c *Client) System() *System {
 // use with lifecycle and create free functions. Callers must ensure the
 // runtime is open (via ensure) before calling deps for a backend-bound op.
 func (c *Client) deps() state.Deps {
-	return state.Deps{Runtime: c.rt, Layout: c.layout, Input: c.input}
+	return state.Deps{Runtime: c.runtime, Layout: c.layout, Input: c.input}
 }
 
 // ListSandboxes returns info for all sandboxes.
@@ -302,7 +302,7 @@ func (c *Client) CreateSandbox(ctx context.Context, opts SandboxCreateOptions) (
 	if _, err := create.Run(ctx, c.deps(), internal); err != nil {
 		return nil, err
 	}
-	return &Sandbox{c: c, name: opts.Name}, nil
+	return &Sandbox{client: c, name: opts.Name}, nil
 }
 
 // IOStreams names the stdio handles for interactive Client methods.

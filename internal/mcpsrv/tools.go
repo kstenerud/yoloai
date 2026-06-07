@@ -157,7 +157,7 @@ func (s *Server) handleSandboxCreate(ctx context.Context, req mcp.CallToolReques
 		return textResult(errorf("workdir is required")), nil
 	}
 
-	if err := s.c.EnsureSetup(ctx); err != nil {
+	if err := s.client.EnsureSetup(ctx); err != nil {
 		return textResult(errorf("setup: %v", err)), nil
 	}
 
@@ -175,7 +175,7 @@ func (s *Server) handleSandboxCreate(ctx context.Context, req mcp.CallToolReques
 		AllowDirtyWorkdir: true,
 	}
 
-	sb, err := s.c.CreateSandbox(ctx, opts)
+	sb, err := s.client.CreateSandbox(ctx, opts)
 	if err != nil {
 		return textResult(errorf("create sandbox: %v", err)), nil
 	}
@@ -192,7 +192,7 @@ func (s *Server) handleSandboxStatus(ctx context.Context, req mcp.CallToolReques
 		return textResult(errorf("name is required")), nil
 	}
 
-	sb, err := s.c.Sandbox(name)
+	sb, err := s.client.Sandbox(name)
 	if err != nil {
 		return textResult(errorf("sandbox handle %q: %v", name, err)), nil
 	}
@@ -217,7 +217,7 @@ func (s *Server) handleSandboxStatus(ctx context.Context, req mcp.CallToolReques
 }
 
 func (s *Server) handleSandboxList(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	infos, err := s.c.ListSandboxes(ctx)
+	infos, err := s.client.ListSandboxes(ctx)
 	if err != nil {
 		return textResult(errorf("list sandboxes: %v", err)), nil
 	}
@@ -259,7 +259,7 @@ func (s *Server) handleSandboxDestroy(ctx context.Context, req mcp.CallToolReque
 		return textResult(errorf("name is required")), nil
 	}
 
-	sb, err := s.c.Sandbox(name)
+	sb, err := s.client.Sandbox(name)
 	if err != nil {
 		return textResult(errorf("sandbox handle %q: %v", name, err)), nil
 	}
@@ -287,7 +287,7 @@ func (s *Server) handleSandboxDiff(_ context.Context, req mcp.CallToolRequest) (
 		return textResult(errorf("name is required")), nil
 	}
 
-	sb, err := s.c.Sandbox(name)
+	sb, err := s.client.Sandbox(name)
 	if err != nil {
 		return textResult(errorf("sandbox handle %q: %v", name, err)), nil
 	}
@@ -316,7 +316,7 @@ func (s *Server) handleSandboxDiffFile(ctx context.Context, req mcp.CallToolRequ
 	// Workdir().Diff uses the Client's bound runtime and resolves
 	// copy-vs-overlay internally; for Docker / Podman / containerd that's
 	// host-side git (the patch package handles container-vs-host selection).
-	sb, err := s.c.Sandbox(name)
+	sb, err := s.client.Sandbox(name)
 	if err != nil {
 		return textResult(errorf("sandbox handle %q: %v", name, err)), nil
 	}
@@ -344,7 +344,7 @@ func (s *Server) handleSandboxLog(_ context.Context, req mcp.CallToolRequest) (*
 		lines = 100
 	}
 
-	sb, err := s.c.Sandbox(name)
+	sb, err := s.client.Sandbox(name)
 	if err != nil {
 		return textResult(errorf("sandbox handle %q: %v", name, err)), nil
 	}
@@ -371,7 +371,7 @@ func (s *Server) handleSandboxInput(ctx context.Context, req mcp.CallToolRequest
 		return textResult(errorf("text is required")), nil
 	}
 
-	sb, err := s.c.Sandbox(name)
+	sb, err := s.client.Sandbox(name)
 	if err != nil {
 		return textResult(errorf("sandbox handle %q: %v", name, err)), nil
 	}
@@ -390,7 +390,7 @@ func (s *Server) handleSandboxReset(ctx context.Context, req mcp.CallToolRequest
 		return textResult(errorf("name is required")), nil
 	}
 
-	sb, err := s.c.Sandbox(name)
+	sb, err := s.client.Sandbox(name)
 	if err != nil {
 		return textResult(errorf("sandbox handle %q: %v", name, err)), nil
 	}
@@ -409,7 +409,7 @@ func (s *Server) handleSandboxFilesList(_ context.Context, req mcp.CallToolReque
 		return textResult(errorf("name is required")), nil
 	}
 
-	sb, err := s.c.Sandbox(name)
+	sb, err := s.client.Sandbox(name)
 	if err != nil {
 		return textResult(errorf("sandbox %q: %v", name, err)), nil
 	}
@@ -448,7 +448,7 @@ func (s *Server) handleSandboxFilesRead(_ context.Context, req mcp.CallToolReque
 		return textResult(errorf("%v", err)), nil
 	}
 
-	sb, err := s.c.Sandbox(name)
+	sb, err := s.client.Sandbox(name)
 	if err != nil {
 		return textResult(errorf("sandbox %q: %v", name, err)), nil
 	}
@@ -479,7 +479,7 @@ func (s *Server) handleSandboxFilesWrite(_ context.Context, req mcp.CallToolRequ
 		return textResult(errorf("%v", err)), nil
 	}
 
-	sb, err := s.c.Sandbox(name)
+	sb, err := s.client.Sandbox(name)
 	if err != nil {
 		return textResult(errorf("sandbox %q: %v", name, err)), nil
 	}

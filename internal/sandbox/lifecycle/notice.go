@@ -55,9 +55,9 @@ func (n *notices) warnf(format string, args ...any) {
 // (which writes to a real io.Writer) while still surfacing warnings through the
 // Start/Reset result's Notices. F8.
 type noticeWriter struct {
-	n     *notices
-	level NoticeLevel
-	buf   []byte
+	notices *notices
+	level   NoticeLevel
+	buf     []byte
 }
 
 // Write splits the incoming bytes on newlines and appends each complete,
@@ -72,7 +72,7 @@ func (w *noticeWriter) Write(p []byte) (int, error) {
 			break
 		}
 		if line := strings.TrimSpace(string(w.buf[:i])); line != "" {
-			w.n.list = append(w.n.list, Notice{Level: w.level, Message: line})
+			w.notices.list = append(w.notices.list, Notice{Level: w.level, Message: line})
 		}
 		w.buf = w.buf[i+1:]
 	}

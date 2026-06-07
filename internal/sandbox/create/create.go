@@ -219,14 +219,14 @@ func prepareSandboxState(ctx context.Context, d state.Deps, opts Options) (*stat
 		return nil, err
 	}
 
-	workdir, auxDirs, err := parseAndValidateDirs(d, opts, agentDef, ri.pr.env, ycfg.Model)
+	workdir, auxDirs, err := parseAndValidateDirs(d, opts, agentDef, ri.profile.env, ycfg.Model)
 	if err != nil {
 		return nil, err
 	}
 
 	// Phase 2: Create directory structure and seed sandbox.
-	perms := state.Perms(ri.pr.isolation)
-	agentFilesInitialized, err := createAndSeedSandbox(ctx, d, sandboxDir, agentDef, ri.pr, perms, outputFor(opts.Output))
+	perms := state.Perms(ri.profile.isolation)
+	agentFilesInitialized, err := createAndSeedSandbox(ctx, d, sandboxDir, agentDef, ri.profile, perms, outputFor(opts.Output))
 	if err != nil {
 		return nil, err
 	}
@@ -262,7 +262,7 @@ func prepareSandboxState(ctx context.Context, d state.Deps, opts Options) (*stat
 // devcontainer config, mounts, lifecycle state) threaded into the later config/meta/
 // state build phases, so those builders take one struct instead of long scalar lists.
 type resolvedCreateInputs struct {
-	pr              *profileResult
+	profile         *profileResult
 	archetype       archetype.Archetype
 	devcontainerCfg *archetype.DevcontainerConfig
 	dcMounts        []string
@@ -302,7 +302,7 @@ func resolveProfileAndArchetype(ctx context.Context, d state.Deps, opts *Options
 	}
 
 	return &resolvedCreateInputs{
-		pr:              pr,
+		profile:         pr,
 		archetype:       resolvedArchetype,
 		devcontainerCfg: devcontainerCfg,
 		dcMounts:        dcMounts,
@@ -325,7 +325,7 @@ func createAndSeedSandbox(ctx context.Context, d state.Deps, sandboxDir string, 
 // Returns (configData, meta, tmuxConf, promptText, error).
 func buildConfigAndEnvironment(ctx context.Context, d state.Deps, opts Options, ri *resolvedCreateInputs, agentDef *agent.Definition, workdir *DirSpec, auxDirs []*DirSpec, gcfg *config.GlobalConfig, dirEnvs []store.DirEnvironment, baselineSHA string, sandboxDir string) ([]byte, *store.Environment, string, string, error) {
 	_ = ctx // reserved for future use
-	pr := ri.pr
+	pr := ri.profile
 	promptText, hasPrompt, model, agentCommand, tmuxConf, err := resolveAgentParams(agentDef, opts, pr, gcfg, d.Layout.HomeDir, d.Layout.Env, d.Input)
 	if err != nil {
 		return nil, nil, "", "", err
@@ -351,7 +351,7 @@ func buildConfigAndEnvironment(ctx context.Context, d state.Deps, opts Options, 
 
 // buildSandboxStateResult constructs the State from all resolved values.
 func buildSandboxStateResult(opts Options, sandboxDir string, workdir *DirSpec, workCopyDir string, auxDirs []*DirSpec, agentDef *agent.Definition, meta *store.Environment, ri *resolvedCreateInputs, configData []byte, tmuxConf string, layout config.Layout, homeDir string) *state.State {
-	pr := ri.pr
+	pr := ri.profile
 	return &state.State{
 		Name:                      opts.Name,
 		SandboxDir:                sandboxDir,

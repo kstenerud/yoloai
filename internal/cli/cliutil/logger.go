@@ -18,24 +18,24 @@ import (
 
 // multiSinkHandler fans log records to all registered sinks whose minLevel is satisfied.
 type multiSinkHandler struct {
-	mu    sync.Mutex
+	mutex sync.Mutex
 	sinks []sinkEntry
 }
 
 type sinkEntry struct {
-	h        slog.Handler
+	handler  slog.Handler
 	minLevel slog.Level
 }
 
 func (m *multiSinkHandler) addSink(h slog.Handler, minLevel slog.Level) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.sinks = append(m.sinks, sinkEntry{h: h, minLevel: minLevel})
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	m.sinks = append(m.sinks, sinkEntry{handler: h, minLevel: minLevel})
 }
 
 func (m *multiSinkHandler) Enabled(_ context.Context, level slog.Level) bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
 	for _, s := range m.sinks {
 		if level >= s.minLevel {
 			return true
@@ -45,33 +45,33 @@ func (m *multiSinkHandler) Enabled(_ context.Context, level slog.Level) bool {
 }
 
 func (m *multiSinkHandler) Handle(ctx context.Context, r slog.Record) error {
-	m.mu.Lock()
+	m.mutex.Lock()
 	sinks := append([]sinkEntry(nil), m.sinks...)
-	m.mu.Unlock()
+	m.mutex.Unlock()
 	for _, s := range sinks {
 		if r.Level >= s.minLevel {
-			_ = s.h.Handle(ctx, r) //nolint:errcheck // best-effort log fan-out
+			_ = s.handler.Handle(ctx, r) //nolint:errcheck // best-effort log fan-out
 		}
 	}
 	return nil
 }
 
 func (m *multiSinkHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
 	n := &multiSinkHandler{sinks: make([]sinkEntry, len(m.sinks))}
 	for i, s := range m.sinks {
-		n.sinks[i] = sinkEntry{h: s.h.WithAttrs(attrs), minLevel: s.minLevel}
+		n.sinks[i] = sinkEntry{handler: s.handler.WithAttrs(attrs), minLevel: s.minLevel}
 	}
 	return n
 }
 
 func (m *multiSinkHandler) WithGroup(name string) slog.Handler {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
 	n := &multiSinkHandler{sinks: make([]sinkEntry, len(m.sinks))}
 	for i, s := range m.sinks {
-		n.sinks[i] = sinkEntry{h: s.h.WithGroup(name), minLevel: s.minLevel}
+		n.sinks[i] = sinkEntry{handler: s.handler.WithGroup(name), minLevel: s.minLevel}
 	}
 	return n
 }

@@ -115,9 +115,9 @@ func TestParseLogRecord_RFC3339Timestamp(t *testing.T) {
 	line := `{"ts":"2026-03-15T14:23:01Z","level":"info","event":"e","msg":"m"}`
 	rec, ok := parseLogRecord(line, cliLabel)
 	require.True(t, ok)
-	assert.Equal(t, 2026, rec.ts.Year())
-	assert.Equal(t, time.March, rec.ts.Month())
-	assert.Equal(t, 15, rec.ts.Day())
+	assert.Equal(t, 2026, rec.timestamp.Year())
+	assert.Equal(t, time.March, rec.timestamp.Month())
+	assert.Equal(t, 15, rec.timestamp.Day())
 }
 
 func TestParseLogRecord_MissingTimestamp(t *testing.T) {
@@ -127,8 +127,8 @@ func TestParseLogRecord_MissingTimestamp(t *testing.T) {
 	after := time.Now().UTC()
 	require.True(t, ok)
 	// Fallback: ts is set to time.Now() during parsing.
-	assert.True(t, rec.ts.Equal(before) || rec.ts.After(before))
-	assert.True(t, rec.ts.Equal(after) || rec.ts.Before(after))
+	assert.True(t, rec.timestamp.Equal(before) || rec.timestamp.After(before))
+	assert.True(t, rec.timestamp.Equal(after) || rec.timestamp.Before(after))
 }
 
 func TestParseLogRecord_InvalidTimestamp(t *testing.T) {
@@ -138,8 +138,8 @@ func TestParseLogRecord_InvalidTimestamp(t *testing.T) {
 	after := time.Now().UTC()
 	require.True(t, ok)
 	// Unparseable ts also falls back to time.Now().
-	assert.True(t, rec.ts.Equal(before) || rec.ts.After(before))
-	assert.True(t, rec.ts.Equal(after) || rec.ts.Before(after))
+	assert.True(t, rec.timestamp.Equal(before) || rec.timestamp.After(before))
+	assert.True(t, rec.timestamp.Equal(after) || rec.timestamp.Before(after))
 }
 
 func TestParseLogRecord_NonStringExtraFields(t *testing.T) {
@@ -167,7 +167,7 @@ func TestParseLogRecord_InvalidJSON(t *testing.T) {
 
 func TestFormatRecord_ContainsExpectedParts(t *testing.T) {
 	rec := logRecord{
-		ts:          time.Date(2026, 3, 15, 14, 23, 1, 0, time.UTC),
+		timestamp:   time.Date(2026, 3, 15, 14, 23, 1, 0, time.UTC),
 		level:       "info",
 		event:       "sandbox.create",
 		msg:         "creating sandbox",
@@ -177,12 +177,12 @@ func TestFormatRecord_ContainsExpectedParts(t *testing.T) {
 	assert.Contains(t, out, "INFO")
 	assert.Contains(t, out, "sandbox.create")
 	assert.Contains(t, out, "creating sandbox")
-	assert.Contains(t, out, rec.ts.Local().Format("15:04:05"))
+	assert.Contains(t, out, rec.timestamp.Local().Format("15:04:05"))
 }
 
 func TestFormatRecord_ExtraFieldsAppended(t *testing.T) {
 	rec := logRecord{
-		ts:          time.Now(),
+		timestamp:   time.Now(),
 		level:       "info",
 		event:       "e",
 		msg:         "msg",
@@ -196,7 +196,7 @@ func TestFormatRecord_ExtraFieldsAppended(t *testing.T) {
 
 func TestFormatRecord_TruncatesAtWidth(t *testing.T) {
 	rec := logRecord{
-		ts:          time.Now(),
+		timestamp:   time.Now(),
 		level:       "info",
 		event:       "e",
 		msg:         strings.Repeat("x", 200),
@@ -208,7 +208,7 @@ func TestFormatRecord_TruncatesAtWidth(t *testing.T) {
 
 func TestFormatRecord_EventPaddedTo24(t *testing.T) {
 	rec := logRecord{
-		ts:          time.Now(),
+		timestamp:   time.Now(),
 		level:       "info",
 		event:       "short",
 		msg:         "msg",

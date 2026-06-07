@@ -189,7 +189,7 @@ func recreateContainer(ctx context.Context, d state.Deps, name string, meta *sto
 		ConfigJSON:   configData,
 		Layout:       d.Layout,
 		HomeDir:      d.Layout.HomeDir,
-		Output:       &noticeWriter{n: n, level: NoticeWarn},
+		Output:       &noticeWriter{notices: n, level: NoticeWarn},
 	}
 
 	if resume {

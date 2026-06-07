@@ -54,7 +54,8 @@ type AllowedDomain struct {
 //	agent-required = meta.NetworkAllow ∩ agentDef.NetworkAllowlist
 //	user-added     = meta.NetworkAllow \ agentDef.NetworkAllowlist
 type Network struct {
-	s *Sandbox
+	client *Client
+	name   string
 }
 
 // Allowed returns the sandbox's network allowlist with each entry
@@ -210,7 +211,7 @@ type DenyResult struct {
 // loadEnvironment reads the sandbox's environment.json. The Network handle's
 // methods all start with this read, so it's centralized here.
 func (n *Network) loadEnvironment() (*store.Environment, error) {
-	sandboxDir := n.s.c.layout.SandboxDir(n.s.name)
+	sandboxDir := n.client.layout.SandboxDir(n.name)
 	if err := store.RequireSandboxDir(sandboxDir); err != nil {
 		return nil, err
 	}
@@ -221,7 +222,7 @@ func (n *Network) loadEnvironment() (*store.Environment, error) {
 // :isolated network mode. Returns the sandbox directory path along
 // with the loaded meta so callers don't redo path resolution.
 func (n *Network) requireIsolated() (string, *store.Environment, error) {
-	sandboxDir := n.s.c.layout.SandboxDir(n.s.name)
+	sandboxDir := n.client.layout.SandboxDir(n.name)
 	if err := store.RequireSandboxDir(sandboxDir); err != nil {
 		return "", nil, err
 	}
@@ -233,9 +234,9 @@ func (n *Network) requireIsolated() (string, *store.Environment, error) {
 	case "isolated":
 		return sandboxDir, meta, nil
 	case "none":
-		return "", nil, yoerrors.NewUsageError("sandbox %q uses --network-none; cannot modify network access", n.s.name)
+		return "", nil, yoerrors.NewUsageError("sandbox %q uses --network-none; cannot modify network access", n.name)
 	default:
-		return "", nil, yoerrors.NewUsageError("sandbox %q is not using network isolation", n.s.name)
+		return "", nil, yoerrors.NewUsageError("sandbox %q is not using network isolation", n.name)
 	}
 }
 
@@ -253,12 +254,12 @@ func (n *Network) tryLivePatch(ctx context.Context, script string, scriptArgs []
 	// Open the backend lazily; a backend-less Client (or a failed open)
 	// leaves rt/engine nil. Treat that as "soft-fail; persisted-only"
 	// rather than panicking — the on-disk allowlist is the source of truth.
-	n.s.c.tryEnsure(ctx)
-	if n.s.c.engine == nil || n.s.c.rt == nil {
+	n.client.tryEnsure(ctx)
+	if n.client.engine == nil || n.client.runtime == nil {
 		return false, nil
 	}
 
-	info, err := n.s.c.engine.Inspect(ctx, n.s.name)
+	info, err := n.client.engine.Inspect(ctx, n.name)
 	if err != nil {
 		return false, nil //nolint:nilerr // soft-fail: not running, can't live-patch
 	}
@@ -268,7 +269,7 @@ func (n *Network) tryLivePatch(ctx context.Context, script string, scriptArgs []
 
 	execArgs := []string{"sh", "-c", script, "_"}
 	execArgs = append(execArgs, scriptArgs...)
-	if _, err := n.s.c.rt.Exec(ctx, store.InstanceName(n.s.c.layout.Principal, n.s.name), execArgs, "0"); err != nil {
+	if _, err := n.client.runtime.Exec(ctx, store.InstanceName(n.client.layout.Principal, n.name), execArgs, "0"); err != nil {
 		return false, err
 	}
 	return true, nil

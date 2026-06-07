@@ -22,7 +22,8 @@ import (
 // "changes"). Like Workdir/Network it is pure namespace expansion off a
 // validated *Sandbox: no IO, no error.
 type Agent struct {
-	s *Sandbox
+	client *Client
+	name   string
 }
 
 // Prompt returns the prompt text persisted for the sandbox. The bool reports
@@ -30,7 +31,7 @@ type Agent struct {
 // ("", false, nil); a present-but-empty prompt yields ("", true, nil). This is
 // a host-filesystem read and does not require a running backend.
 func (a *Agent) Prompt() (string, bool, error) {
-	return sandbox.ReadStoredPrompt(a.s.c.layout, a.s.name)
+	return sandbox.ReadStoredPrompt(a.client.layout, a.name)
 }
 
 // TerminalLog returns the raw agent terminal output for the sandbox. tailLines <= 0
@@ -40,7 +41,7 @@ func (a *Agent) Prompt() (string, bool, error) {
 // does not require a running backend. It is the recorded counterpart to
 // CaptureTerminal's live snapshot.
 func (a *Agent) TerminalLog(tailLines int) (string, error) {
-	return sandbox.ReadAgentLog(a.s.c.layout, a.s.name, tailLines)
+	return sandbox.ReadAgentLog(a.client.layout, a.name, tailLines)
 }
 
 // LogEvent is one structured-log line surfaced by Logs: the verbatim JSONL byte
@@ -98,7 +99,7 @@ func (o AgentLogsOptions) toInternal() sandbox.LogStreamOptions {
 // TerminalLog. Cancel ctx to stop a Follow stream early. A missing sandbox returns
 // ErrSandboxNotFound; an invalid MinLevel returns a *UsageError.
 func (a *Agent) Logs(ctx context.Context, opts AgentLogsOptions) (<-chan LogEvent, error) {
-	frames, err := sandbox.StreamLogs(ctx, a.s.c.layout, a.s.name, opts.toInternal())
+	frames, err := sandbox.StreamLogs(ctx, a.client.layout, a.name, opts.toInternal())
 	if err != nil {
 		return nil, err
 	}
@@ -140,20 +141,20 @@ type TerminalSnapshot struct {
 // non-interactive Exec to invoke `tmux capture-pane`; backend-specific
 // socket dispatch is handled inside that primitive. DF3.
 func (a *Agent) CaptureTerminal(ctx context.Context, scrollback int) (TerminalSnapshot, error) {
-	if err := a.s.c.ensure(ctx); err != nil {
+	if err := a.client.ensure(ctx); err != nil {
 		return TerminalSnapshot{}, err
 	}
-	plain, ansi, err := a.s.c.engine.CaptureTerminal(ctx, a.s.name, scrollback)
+	plain, ansi, err := a.client.engine.CaptureTerminal(ctx, a.name, scrollback)
 	return TerminalSnapshot{Plain: plain, ANSI: ansi}, err
 }
 
 // SendInput appends text to the running sandbox's tmux session as if the user
 // typed it. Returns ErrContainerNotRunning when the sandbox is stopped.
 func (a *Agent) SendInput(ctx context.Context, text string) error {
-	if err := a.s.c.ensure(ctx); err != nil {
+	if err := a.client.ensure(ctx); err != nil {
 		return err
 	}
-	return a.s.c.engine.SendInput(ctx, a.s.name, text)
+	return a.client.engine.SendInput(ctx, a.name, text)
 }
 
 // ContainerLogs returns the tail of the sandbox's raw container log (roughly
@@ -161,11 +162,11 @@ func (a *Agent) SendInput(ctx context.Context, text string) error {
 // fetched. This is backend container stdout/stderr for diagnostics — distinct
 // from the structured agent log stream.
 func (a *Agent) ContainerLogs(ctx context.Context, tailLines int) string {
-	a.s.c.tryEnsure(ctx) // best-effort: no backend → no container logs to fetch
-	if a.s.c.rt == nil {
+	a.client.tryEnsure(ctx) // best-effort: no backend → no container logs to fetch
+	if a.client.runtime == nil {
 		return ""
 	}
-	return runtime.LogsFor(ctx, a.s.c.rt, store.InstanceName(a.s.c.layout.Principal, a.s.name), tailLines)
+	return runtime.LogsFor(ctx, a.client.runtime, store.InstanceName(a.client.layout.Principal, a.name), tailLines)
 }
 
 // Attach connects the supplied IOStreams to the sandbox's tmux session.
@@ -176,24 +177,24 @@ func (a *Agent) Attach(ctx context.Context, io IOStreams) error {
 	if !io.TTY {
 		return yoerrors.NewUsageError("attach requires TTY=true")
 	}
-	if err := a.s.c.ensure(ctx); err != nil {
+	if err := a.client.ensure(ctx); err != nil {
 		return err
 	}
-	info, err := a.s.c.engine.Inspect(ctx, a.s.name)
+	info, err := a.client.engine.Inspect(ctx, a.name)
 	if err != nil {
 		return err
 	}
-	if err := attachStatusOK(info.Status, a.s.name); err != nil {
+	if err := attachStatusOK(info.Status, a.name); err != nil {
 		return err
 	}
-	containerName := store.InstanceName(a.s.c.layout.Principal, a.s.name)
-	user := sandbox.ContainerUser(info.Environment, a.s.c.layout.HostUID)
-	if err := sandbox.WaitForAttachReady(ctx, a.s.c.rt, a.s.c.layout, a.s.name, user, 300*time.Second); err != nil {
+	containerName := store.InstanceName(a.client.layout.Principal, a.name)
+	user := sandbox.ContainerUser(info.Environment, a.client.layout.HostUID)
+	if err := sandbox.WaitForAttachReady(ctx, a.client.runtime, a.client.layout, a.name, user, 300*time.Second); err != nil {
 		return fmt.Errorf("waiting for tmux session: %w", err)
 	}
-	sock := sandbox.ReadTmuxSocket(a.s.c.layout, a.s.name)
-	cmd := a.s.c.rt.AttachCommand(sock, io.Rows, io.Cols, info.Environment.Isolation)
-	return execExitError(a.s.c.rt.InteractiveExec(ctx, containerName, cmd, user, "", io))
+	sock := sandbox.ReadTmuxSocket(a.client.layout, a.name)
+	cmd := a.client.runtime.AttachCommand(sock, io.Rows, io.Cols, info.Environment.Isolation)
+	return execExitError(a.client.runtime.InteractiveExec(ctx, containerName, cmd, user, "", io))
 }
 
 // attachStatusOK returns nil if the sandbox status permits attach,

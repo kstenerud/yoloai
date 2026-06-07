@@ -17,8 +17,8 @@ import (
 // It exposes sandbox lifecycle, observation, refinement, and file exchange
 // tools for outer agents (Claude Desktop, VS Code Copilot, etc.).
 type Server struct {
-	c   *yoloai.Client
-	srv *server.MCPServer
+	client *yoloai.Client
+	srv    *server.MCPServer
 }
 
 // serverInstructions is returned in the initialize response and gives the outer
@@ -32,7 +32,7 @@ Call yoloai_help for the full workflow guide.`
 // New creates a new orchestration MCP server backed by c. The Client is the
 // caller's; ServeStdio does not close it.
 func New(c *yoloai.Client) *Server {
-	s := &Server{c: c}
+	s := &Server{client: c}
 	s.srv = server.NewMCPServer(
 		"yoloai",
 		"1.0.0",
