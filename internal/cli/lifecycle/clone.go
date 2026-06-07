@@ -47,7 +47,8 @@ func runClone(cmd *cobra.Command, args []string) error {
 	backend := cliutil.ResolveBackendForSandbox(src)
 	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		slog.Info("cloning sandbox", "event", "sandbox.clone", "source", src, "dest", dst) //nolint:gosec // G706: src/dst are validated sandbox names
-		if err := c.CloneSandbox(ctx, yoloai.SandboxCloneOptions{Source: src, Dest: dst, Overwrite: force}); err != nil {
+		sb, err := c.CloneSandbox(ctx, yoloai.SandboxCloneOptions{Source: src, Dest: dst, Overwrite: force})
+		if err != nil {
 			return err
 		}
 		slog.Info("clone complete", "event", "sandbox.clone.complete", "source", src, "dest", dst) //nolint:gosec // G706: src/dst are validated sandbox names
@@ -63,18 +64,14 @@ func runClone(cmd *cobra.Command, args []string) error {
 			return nil
 		}
 
-		return runCloneStart(cmd, ctx, c, src, dst, prompt, promptFile, attach)
+		return runCloneStart(cmd, ctx, sb, src, dst, prompt, promptFile, attach)
 	})
 }
 
 // runCloneStart starts the cloned sandbox and optionally attaches.
 // Attach reaches for raw runtime via AttachToSandboxByName — Client doesn't
 // yet expose attach (see CONVENTIONS.md "Hybrid handlers").
-func runCloneStart(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, src, dst, prompt, promptFile string, attach bool) error {
-	sb, err := c.Sandbox(dst)
-	if err != nil {
-		return err
-	}
+func runCloneStart(cmd *cobra.Command, ctx context.Context, sb *yoloai.Sandbox, src, dst, prompt, promptFile string, attach bool) error {
 	// Start notices ("Sandbox Y started") are redundant with clone's own
 	// "Cloned X → Y (started)" output below, so they're discarded here.
 	if _, err := sb.Start(ctx, yoloai.SandboxStartOptions{

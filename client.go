@@ -339,16 +339,22 @@ func (o SandboxCloneOptions) toInternal() sandbox.CloneOptions {
 //
 // With opts.Overwrite set, an existing destination is destroyed before the
 // copy; without it, an existing destination is a hard error.
-func (c *Client) CloneSandbox(ctx context.Context, opts SandboxCloneOptions) error {
+//
+// The returned *Sandbox is dormant — the container is NOT started. Call
+// Sandbox.Start to launch the agent on the clone.
+func (c *Client) CloneSandbox(ctx context.Context, opts SandboxCloneOptions) (*Sandbox, error) {
 	if err := c.ensure(ctx); err != nil {
-		return err
+		return nil, err
 	}
 	if opts.Overwrite {
 		if err := c.destroyForOverwrite(ctx, opts.Dest); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	return c.engine.Clone(ctx, opts.toInternal())
+	if err := c.engine.Clone(ctx, opts.toInternal()); err != nil {
+		return nil, err
+	}
+	return &Sandbox{c: c, name: opts.Dest}, nil
 }
 
 // destroyForOverwrite tears down a pre-existing destination sandbox so a clone
