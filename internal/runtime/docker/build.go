@@ -8,7 +8,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -18,8 +17,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/docker/docker/api/types/build"
-	dockerclient "github.com/docker/docker/client"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 )
@@ -87,26 +84,34 @@ func buildInputsChecksum() string {
 // writer (typically os.Stderr for user-visible progress).
 // On success, records a checksum of the build inputs so NeedsBuild can
 // detect when a rebuild is required.
-func buildBaseImage(ctx context.Context, layout config.Layout, client *dockerclient.Client, sourceDir string, output io.Writer, logger *slog.Logger) error {
+//
+// The build shells out to `<binary> build -` (BuildKit) rather than the moby
+// SDK's ImageBuild, which runs the legacy builder. On the containerd image
+// store the legacy builder commits a separate untagged image per Dockerfile
+// step; those show up as dangling, form the parent chain of yoloai-base, and
+// make `system prune` churn one of them off per run forever (see
+// backend-idiosyncrasies.md). BuildKit keeps step results in the build cache
+// instead, so no dangling intermediate images are produced. The embedded
+// context tar is piped to stdin, so no temp dir is needed.
+func (r *Runtime) buildBaseImage(ctx context.Context, layout config.Layout, output io.Writer, logger *slog.Logger) error {
 	buildCtx, err := createBuildContext()
 	if err != nil {
 		return fmt.Errorf("create build context: %w", err)
 	}
 
-	logger.Debug("building yoloai-base image")
+	logger.Debug("building yoloai-base image via BuildKit")
 
-	resp, err := client.ImageBuild(ctx, buildCtx, build.ImageBuildOptions{
-		Tags:       []string{"yoloai-base"},
-		Dockerfile: "Dockerfile",
-		Remove:     true,
-	})
-	if err != nil {
-		return fmt.Errorf("start image build: %w", err)
-	}
-	defer resp.Body.Close() //nolint:errcheck // best-effort cleanup
+	cmd := exec.CommandContext(ctx, r.binaryName, "build", "-t", "yoloai-base", "-") //nolint:gosec // binaryName is "docker" or "podman"
+	cmd.Stdin = buildCtx
+	cmd.Env = curatedBuildEnv(layout.Env)
+	cmd.Stdout = output
+	cmd.Stderr = output
 
-	if err := streamBuildOutput(resp.Body, output); err != nil {
-		return err
+	if err := cmd.Run(); err != nil {
+		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
+			return fmt.Errorf("%s build exited with code %d", r.binaryName, exitErr.ExitCode())
+		}
+		return fmt.Errorf("%s build: %w", r.binaryName, err)
 	}
 
 	// Record build inputs checksum so NeedsBuild can detect stale images.
@@ -165,55 +170,31 @@ func createBuildContext() (io.Reader, error) {
 	return &buf, nil
 }
 
-// buildMessage represents a single JSON message from Docker build output.
-type buildMessage struct {
-	Stream string `json:"stream"`
-	Error  string `json:"error"`
-}
-
 // BuildProfileImage builds a Docker image from a profile directory's Dockerfile.
 // The tag parameter is the full image tag (e.g., "yoloai-go-dev").
-// When secrets are provided, the build uses the Docker CLI with BuildKit
-// --secret flags instead of the SDK, since BuildKit secret sessions require
-// heavy dependencies.
+//
+// The build always uses BuildKit by shelling out to `<binary> build -` (context
+// tar on stdin), never the moby SDK's ImageBuild. The SDK runs the legacy
+// builder, which on the containerd image store commits a dangling intermediate
+// image per Dockerfile step and makes `system prune` churn forever (see
+// backend-idiosyncrasies.md). BuildKit also supplies the `--secret` plumbing
+// for profiles that need build secrets.
 func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir string, tag string, secrets []string, buildEnv map[string]string, output io.Writer, logger *slog.Logger) error {
-	if len(secrets) > 0 {
-		return r.buildProfileImageCLI(ctx, sourceDir, tag, secrets, buildEnv, output, logger)
-	}
-
 	buildCtx, err := createProfileBuildContext(sourceDir)
 	if err != nil {
 		return fmt.Errorf("create profile build context: %w", err)
 	}
 
-	logger.Debug("building profile image", "tag", tag, "sourceDir", sourceDir)
-
-	resp, err := r.client.ImageBuild(ctx, buildCtx, build.ImageBuildOptions{
-		Tags:       []string{tag},
-		Dockerfile: "Dockerfile",
-		Remove:     true,
-	})
-	if err != nil {
-		return fmt.Errorf("start profile image build: %w", err)
-	}
-	defer resp.Body.Close() //nolint:errcheck // best-effort cleanup
-
-	return streamBuildOutput(resp.Body, output)
-}
-
-// buildProfileImageCLI builds a profile image by shelling out to `docker build`
-// with BuildKit --secret flags. Used when build secrets are needed.
-func (r *Runtime) buildProfileImageCLI(ctx context.Context, sourceDir string, tag string, secrets []string, buildEnv map[string]string, output io.Writer, logger *slog.Logger) error {
-	args := []string{"build", "-t", tag, "-f", "Dockerfile"}
+	args := []string{"build", "-t", tag}
 	for _, s := range secrets {
 		args = append(args, "--secret", s)
 	}
-	args = append(args, ".")
+	args = append(args, "-")
 
-	logger.Debug("building profile image via CLI", "tag", tag, "sourceDir", sourceDir, "secrets", len(secrets))
+	logger.Debug("building profile image via BuildKit", "tag", tag, "sourceDir", sourceDir, "secrets", len(secrets))
 
-	cmd := exec.CommandContext(ctx, r.binaryName, args...) //nolint:gosec // args are validated by caller
-	cmd.Dir = sourceDir
+	cmd := exec.CommandContext(ctx, r.binaryName, args...) //nolint:gosec // binaryName is "docker" or "podman"; secrets are validated by caller
+	cmd.Stdin = buildCtx
 	cmd.Env = curatedBuildEnv(buildEnv)
 	cmd.Stdout = output
 	cmd.Stderr = output
@@ -360,27 +341,4 @@ func createProfileBuildContext(sourceDir string) (io.Reader, error) {
 	}
 
 	return &buf, nil
-}
-
-// streamBuildOutput reads JSON lines from a Docker build response,
-// extracts the stream field for human-readable output, and checks for errors.
-func streamBuildOutput(response io.Reader, output io.Writer) error {
-	decoder := json.NewDecoder(response)
-	for {
-		var msg buildMessage
-		if err := decoder.Decode(&msg); err != nil {
-			if errors.Is(err, io.EOF) {
-				return nil
-			}
-			return fmt.Errorf("decode build output: %w", err)
-		}
-
-		if msg.Error != "" {
-			return fmt.Errorf("docker build: %s", msg.Error)
-		}
-
-		if msg.Stream != "" {
-			fmt.Fprint(output, msg.Stream) //nolint:errcheck // best-effort output streaming
-		}
-	}
 }

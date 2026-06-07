@@ -302,12 +302,12 @@ func (r *Runtime) Setup(ctx context.Context, layout config.Layout, sourceDir str
 		if !exists {
 			fmt.Fprintln(output, "Building base image (first run only, this may take a few minutes)...") //nolint:errcheck // best-effort output
 		}
-		return buildBaseImage(ctx, layout, r.client, sourceDir, output, logger)
+		return r.buildBaseImage(ctx, layout, output, logger)
 	}
 
 	if NeedsBuild(layout, sourceDir) {
 		fmt.Fprintln(output, "Base image resources updated, rebuilding...") //nolint:errcheck // best-effort output
-		return buildBaseImage(ctx, layout, r.client, sourceDir, output, logger)
+		return r.buildBaseImage(ctx, layout, output, logger)
 	}
 
 	return nil

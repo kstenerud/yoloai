@@ -55,6 +55,7 @@ row to the index.
 | `doctor` shows containerd image cache as `?`; `prune --images` leaves devmapper pool blocks used / df unchanged | [containerd: both snapshotters hold a copy](#containerd-both-overlayfs-and-devmapper-snapshotters-hold-a-copy-prune-and-sizing-must-cover-both) |
 | Docker base image reads ~33 GiB on Linux vs ~5 GiB on macOS; `image rm` frees ~0; prune undercounts reclaim | [Docker: containerd store pins layers via build cache](#docker-containerd-image-store-image-rm-frees-no-disk-until-the-build-cache-is-pruned-sdk-spacereclaimed-undercounts) |
 | `prune` dry-run promises to reclaim "volumes" but reports `reclaimed 0 B`; doctor counts the user's own (non-yoloai) volumes | [Docker/Podman: volume prune is anonymous-only; scope to yoloai volumes](#dockerpodman-volume-prune-default-filter-removes-only-anonymous-volumes-reclaim-accounting-must-be-scoped-to-yoloais-own-volumes) |
+| `system prune` finds a different dangling image every run, reclaims 0 B, never converges, even with no builds | [Docker: legacy builder leaves a dangling image per step; build with BuildKit](#docker-legacy-builder-commits-one-dangling-intermediate-image-per-dockerfile-step-build-with-buildkit) |
 | `podman: build cache prune failed: Error response from daemon: Not Found` | [Podman: no build-cache endpoint (404)](#podman-docker-compat-api-has-no-build-cache-endpoint--buildcacheprune-returns-404-not-found) |
 | `prune --images` on Podman reports absurd reclaim (e.g. 142 GB freed for a ~5 GiB footprint) | [Podman: `ImagesPrune` `SpaceReclaimed` un-dedup sum](#podman-imagesprune-spacereclaimed-is-the-un-deduplicated-image-size-sum) |
 | `prune --images` leaves a snapshot chain; `Remove` → `cannot remove snapshot with child` | [containerd: remove snapshots leaf-first](#containerd-snapshots-must-be-removed-leaf-first-children-before-parents-or-removal-silently-stalls) |
@@ -802,6 +803,18 @@ An empty value disables LXC seccomp for that container entirely. The container m
 **Podman caveat:** Podman's docker-compat API does **not** accept the `all` volume filter — passing it fails the whole prune with `failed to parse filters for all=true&label=…: "all" is an invalid volume filter`, surfacing as `podman: volumes prune failed: …`. Podman has no anonymous-vs-named distinction (`podman volume prune` removes every unused volume by default), so the `all=true` arg is unnecessary there. `PruneCache` therefore omits it when `binaryName == "podman"` and sends only the `label` filter.
 
 **Code:** `internal/runtime/docker/prune.go` — `managedLabel` const, `splitCacheBytes` (label-gated volume loop), `PruneCache` (label+all `VolumesPrune` filter, `all` omitted for Podman).
+
+---
+
+### Docker: legacy builder commits one dangling intermediate image per Dockerfile step — build with BuildKit
+
+**Symptom:** `yoloai system prune` finds a *different* `<none>` (dangling) image on every run — `Orphaned resources: image faf2f314ca62`, then `8e3deeacf8ac`, etc. — even when no sandboxes are running and nothing has been built. Each removal reports `reclaimed 0 B` and the cycle never ends. `docker images -a --filter dangling=true` shows dozens of `<none>` images, all the same size (e.g. 6.63 GB), all created at the same time. Their IDs match the layers in `docker history yoloai-base`.
+
+**Explanation:** The moby Go SDK's `client.ImageBuild` runs the **legacy builder**, not BuildKit (the `#(nop) COPY …` history format is the tell). The legacy builder commits a separate image per Dockerfile instruction. On the **containerd image store** (Docker Desktop 23+ default) those per-step images are untagged manifests that form the parent chain of the tagged `yoloai-base` and surface as dangling. Without `-a`, the daemon reports only the current *leaf* of that untagged chain — exactly one image — so `pruneDanglingImages` removes one per run; removing it frees nothing (blobs are shared with the live tag) and exposes the next intermediate as the new leaf. The result is an N-deep peel that regenerates on every base rebuild and quietly destroys the layer cache rebuilds would reuse. (BuildKit, by contrast, keeps step results in the *build cache* — pruned by `BuildCachePrune` — not as images, so no dangling intermediates exist.)
+
+**Fix:** Build `yoloai-base` via BuildKit by shelling out to `<binary> build -` (context tar piped to stdin) with `DOCKER_BUILDKIT=1`, instead of `client.ImageBuild`. Podman's `build` (Buildah) likewise never commits per-step images, so the same code path is correct there. Profile builds with secrets already used this CLI path; the base build now matches. After switching, a one-time `docker image prune` clears the legacy intermediates left by prior builds (once `yoloai-base` is rebuilt with BuildKit they are no longer ancestors of any tag, so they prune cleanly and free real disk).
+
+**Code:** `internal/runtime/docker/build.go` — `(*Runtime).buildBaseImage` (CLI/BuildKit via `<binary> build -`), `curatedBuildEnv` (forces `DOCKER_BUILDKIT=1`).
 
 ---
 

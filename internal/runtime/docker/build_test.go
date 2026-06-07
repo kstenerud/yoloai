@@ -2,8 +2,6 @@ package docker
 
 import (
 	"archive/tar"
-	"bytes"
-	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -73,40 +71,6 @@ func TestCreateProfileBuildContext(t *testing.T) {
 	assert.Contains(t, found, "profile.yaml") // profile.yaml is NOT excluded (only config.yaml is)
 	assert.NotContains(t, found, lastBuildFile)
 	assert.NotContains(t, found, "config.yaml")
-}
-
-func TestStreamBuildOutput_ValidMessages(t *testing.T) {
-	var buf bytes.Buffer
-	encoder := json.NewEncoder(&buf)
-	require.NoError(t, encoder.Encode(buildMessage{Stream: "Step 1/3\n"}))
-	require.NoError(t, encoder.Encode(buildMessage{Stream: "Step 2/3\n"}))
-	require.NoError(t, encoder.Encode(buildMessage{Stream: "Step 3/3\n"}))
-
-	var output bytes.Buffer
-	err := streamBuildOutput(&buf, &output)
-	assert.NoError(t, err)
-	assert.Contains(t, output.String(), "Step 1/3")
-	assert.Contains(t, output.String(), "Step 3/3")
-}
-
-func TestStreamBuildOutput_ErrorMessage(t *testing.T) {
-	var buf bytes.Buffer
-	encoder := json.NewEncoder(&buf)
-	require.NoError(t, encoder.Encode(buildMessage{Stream: "Step 1/2\n"}))
-	require.NoError(t, encoder.Encode(buildMessage{Error: "build failed: missing dependency"}))
-
-	var output bytes.Buffer
-	err := streamBuildOutput(&buf, &output)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "missing dependency")
-}
-
-func TestStreamBuildOutput_EmptyStream(t *testing.T) {
-	var buf bytes.Buffer
-	var output bytes.Buffer
-	err := streamBuildOutput(&buf, &output)
-	assert.NoError(t, err)
-	assert.Empty(t, output.String())
 }
 
 func TestNeedsBuild_NoChecksum(t *testing.T) {
