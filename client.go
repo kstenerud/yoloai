@@ -379,14 +379,14 @@ func (c *Client) destroyForOverwrite(ctx context.Context, dest string) error {
 	return nil
 }
 
-// Create provisions a new sandbox from SandboxCreateOptions and (unless
-// opts.NoStart) starts the container with the agent. Returns the sandbox
-// name on success — currently always opts.Name, since name is required
-// (no auto-generation). Use RunSandbox for the higher-level "create + wait for
-// terminal status" convenience.
-func (c *Client) CreateSandbox(ctx context.Context, opts SandboxCreateOptions) (string, error) {
+// CreateSandbox provisions a new sandbox from SandboxCreateOptions and returns a
+// dormant handle for it — the container is NOT started. Call Sandbox.Start to
+// launch the agent (and Sandbox.Wait to block until it finishes). The sandbox
+// name is required (no auto-generation), so the returned handle is always bound
+// to opts.Name.
+func (c *Client) CreateSandbox(ctx context.Context, opts SandboxCreateOptions) (*Sandbox, error) {
 	if err := c.ensure(ctx); err != nil {
-		return "", err
+		return nil, err
 	}
 	internal := opts.toInternal()
 	internal.Version = c.version
@@ -394,9 +394,12 @@ func (c *Client) CreateSandbox(ctx context.Context, opts SandboxCreateOptions) (
 		internal.Output = c.output // seed the per-call progress writer from the Client's Output (F8)
 	}
 	if err := c.engine.EnsureSetup(ctx, c.output); err != nil {
-		return "", err
+		return nil, err
 	}
-	return create.Run(ctx, c.deps(), internal)
+	if _, err := create.Run(ctx, c.deps(), internal); err != nil {
+		return nil, err
+	}
+	return &Sandbox{c: c, name: opts.Name}, nil
 }
 
 // IOStreams names the stdio handles for interactive Client methods.

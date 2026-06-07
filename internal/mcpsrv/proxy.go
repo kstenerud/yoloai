@@ -143,13 +143,12 @@ func (p *ProxyServer) createSandbox(ctx context.Context) (*yoloai.Environment, e
 		AllowDirtyWorkdir: true,
 	}
 
-	if _, err := p.c.CreateSandbox(ctx, opts); err != nil {
+	sb, err := p.c.CreateSandbox(ctx, opts)
+	if err != nil {
 		return nil, fmt.Errorf("create sandbox %q: %w", p.sandboxName, err)
 	}
-
-	sb, err := p.c.Sandbox(p.sandboxName)
-	if err != nil {
-		return nil, fmt.Errorf("sandbox handle %q after create: %w", p.sandboxName, err)
+	if _, err := sb.Start(ctx, yoloai.SandboxStartOptions{}); err != nil {
+		return nil, fmt.Errorf("start sandbox %q after create: %w", p.sandboxName, err)
 	}
 	info, err := sb.Inspect(ctx)
 	if err != nil {

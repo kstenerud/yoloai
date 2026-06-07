@@ -175,8 +175,12 @@ func (s *Server) handleSandboxCreate(ctx context.Context, req mcp.CallToolReques
 		AllowDirtyWorkdir: true,
 	}
 
-	if _, err := s.c.CreateSandbox(ctx, opts); err != nil {
+	sb, err := s.c.CreateSandbox(ctx, opts)
+	if err != nil {
 		return textResult(errorf("create sandbox: %v", err)), nil
+	}
+	if _, err := sb.Start(ctx, yoloai.SandboxStartOptions{}); err != nil {
+		return textResult(errorf("start sandbox: %v", err)), nil
 	}
 
 	return textResult(fmt.Sprintf("Sandbox %q created. Poll sandbox_status every 5s.", name)), nil

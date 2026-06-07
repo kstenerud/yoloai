@@ -63,7 +63,7 @@ func TestResolveNewCmdOptions_FlagConflicts(t *testing.T) {
 		require.NoError(t, cmd.PersistentFlags().Set("json", "true"))
 		require.NoError(t, cmd.Flags().Set("attach", "true"))
 
-		_, _, err := resolveNewCmdOptions(cmd, "box", ".", nil, "")
+		_, _, _, err := resolveNewCmdOptions(cmd, "box", ".", nil, "")
 		assertUsageError(t, err, "--json and --attach are incompatible")
 	})
 
@@ -72,7 +72,7 @@ func TestResolveNewCmdOptions_FlagConflicts(t *testing.T) {
 		require.NoError(t, cmd.Flags().Set("network-none", "true"))
 		require.NoError(t, cmd.Flags().Set("port", "8080:80"))
 
-		_, _, err := resolveNewCmdOptions(cmd, "box", ".", nil, "")
+		_, _, _, err := resolveNewCmdOptions(cmd, "box", ".", nil, "")
 		assertUsageError(t, err, "--port is incompatible with --network-none")
 	})
 }

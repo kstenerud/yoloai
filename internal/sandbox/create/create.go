@@ -94,7 +94,6 @@ type Options struct {
 	Ports                []string              // --port flags (e.g., ["3000:3000"])
 	Replace              bool                  // --replace flag (safe: errors if unapplied work exists)
 	AbandonUnappliedWork bool                  // let Replace destroy a sandbox holding unapplied work (skips the safety check; CLI --force)
-	NoStart              bool                  // --no-start flag
 	Passthrough          []string              // args after -- passed to agent
 	Version              string                // yoloAI version for environment.json
 	Debug                bool                  // --debug flag (enable entrypoint debug logging)
@@ -162,27 +161,10 @@ func Run(ctx context.Context, d state.Deps, opts Options) (name string, err erro
 		return "", err
 	}
 
-	if opts.NoStart {
-		return "", nil
-	}
-
-	if err := launch.LaunchContainer(ctx, d, sandboxState); err != nil {
-		// Clean up sandbox directory and attempt container removal.
-		_ = os.RemoveAll(sandboxState.SandboxDir)
-		_ = d.Runtime.Remove(ctx, store.InstanceName(sandboxState.Layout.Principal, sandboxState.Name))
-		return "", err
-	}
-
-	// Execute VM-side work directory setup if baseline was deferred
-	if sandboxState.Environment.Workdir.Mode == "copy" && sandboxState.Environment.Workdir.BaselineSHA == "" {
-		if err := launch.ExecuteVMWorkDirSetup(ctx, d.Runtime, sandboxState.Name, sandboxState.SandboxDir, sandboxState.Environment); err != nil {
-			// Clean up on failure
-			_ = os.RemoveAll(sandboxState.SandboxDir)
-			_ = d.Runtime.Remove(ctx, store.InstanceName(sandboxState.Layout.Principal, sandboxState.Name))
-			return "", fmt.Errorf("execute VM work dir setup: %w", err)
-		}
-	}
-
+	// Create provisions only — it does not launch the container. The caller
+	// starts the sandbox explicitly via Sandbox.Start, whose first-launch path
+	// (lifecycle.start's StatusRemoved branch → recreateContainer) does the
+	// LaunchContainer + VM workdir-baseline setup that used to live here.
 	slog.Info("sandbox created", "event", "sandbox.create.complete", "sandbox", sandboxState.Name)
 	return sandboxState.Name, nil
 }

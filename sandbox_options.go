@@ -86,9 +86,6 @@ type SandboxCreateOptions struct {
 	// SandboxDestroyOptions.AbandonUnappliedWork. (The CLI's --force flag maps here.)
 	AbandonUnappliedWork bool
 
-	// NoStart creates the sandbox without launching the agent.
-	NoStart bool
-
 	// Passthrough are arguments passed to the agent after "--".
 	Passthrough []string
 
@@ -153,7 +150,6 @@ func (o SandboxCreateOptions) toInternal() sandbox.CreateOptions {
 		Ports:                formatPorts(o.Ports),
 		Replace:              o.Replace,
 		AbandonUnappliedWork: o.AbandonUnappliedWork,
-		NoStart:              o.NoStart,
 		Passthrough:          o.Passthrough,
 		Debug:                o.Debug,
 		CPUs:                 o.CPUs,
