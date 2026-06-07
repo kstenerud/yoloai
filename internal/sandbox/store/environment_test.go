@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kstenerud/yoloai/internal/config"
+	"github.com/kstenerud/yoloai/internal/runtime"
 	// Blank imports register backend descriptors so migrate() can look up
 	// HostFilesystem from runtime.Descriptor(name). The actual factories
 	// are not invoked here — only the static descriptors are needed.
@@ -129,6 +130,29 @@ func TestMeta_MigrateV0ToV1_Docker(t *testing.T) {
 	loaded, err := LoadEnvironment(dir)
 	require.NoError(t, err)
 	assert.Equal(t, 1, loaded.Version, "v0 should be migrated to v1")
+	assert.False(t, loaded.HostFilesystem, "docker backend should have HostFilesystem=false")
+}
+
+func TestMeta_MigrateV0ToV1_EmptyBackendBackfillsDocker(t *testing.T) {
+	// The very oldest sandboxes predate the `backend` field entirely, so it
+	// deserialises as "". Migration backfills Docker (the only backend that
+	// existed then) explicitly, so downstream readers (e.g. status grouping)
+	// can treat an empty BackendType as genuinely broken rather than coercing.
+	dir := t.TempDir()
+
+	legacyJSON := `{
+		"yoloai_version": "0.1.0",
+		"name": "oldest-sandbox",
+		"created_at": "2025-01-01T00:00:00Z",
+		"agent": "claude",
+		"workdir": {"host_path": "/tmp/proj", "mount_path": "/tmp/proj", "mode": "copy"}
+	}`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, EnvironmentFile), []byte(legacyJSON), 0600))
+
+	loaded, err := LoadEnvironment(dir)
+	require.NoError(t, err)
+	assert.Equal(t, 1, loaded.Version, "v0 should be migrated to v1")
+	assert.Equal(t, runtime.BackendDocker, loaded.BackendType, "empty legacy backend backfills to docker")
 	assert.False(t, loaded.HostFilesystem, "docker backend should have HostFilesystem=false")
 }
 

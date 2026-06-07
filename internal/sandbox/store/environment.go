@@ -83,9 +83,19 @@ func migrate(meta *Environment) error {
 			meta.Version, metaVersion)
 	}
 	if meta.Version < 1 {
-		// v0 → v1: bootstrap HostFilesystem from the backend's descriptor
-		// capability. The descriptor is the single source of truth; backends
-		// declare their own HostFilesystem flag (see runtime.BackendCaps).
+		// v0 → v1.
+		//
+		// Pre-versioning sandboxes predate the `backend` field, so an empty
+		// BackendType on a v0 meta means "legacy Docker sandbox" — Docker was
+		// the only backend then. Backfill it explicitly here, at the migration
+		// boundary, rather than coercing it at read time, so the rest of the
+		// codebase can treat an empty BackendType as genuinely broken metadata.
+		if meta.BackendType == "" {
+			meta.BackendType = runtime.BackendDocker
+		}
+		// Bootstrap HostFilesystem from the backend's descriptor capability.
+		// The descriptor is the single source of truth; backends declare their
+		// own HostFilesystem flag (see runtime.BackendCaps).
 		//
 		// If the named backend isn't registered on this platform we default
 		// to false — a meta whose backend can't be instantiated here will

@@ -461,11 +461,11 @@ func groupSandboxesByBackend(entries []os.DirEntry, sandboxesDir string) map[run
 			byBackend[""] = append(byBackend[""], entry.Name())
 			continue
 		}
-		backend := meta.BackendType
-		if backend == "" {
-			backend = "docker"
-		}
-		byBackend[backend] = append(byBackend[backend], entry.Name())
+		// BackendType is guaranteed non-empty for any healthy meta (the v0→v1
+		// migration backfills legacy Docker sandboxes; see store.migrate). An
+		// empty value here is genuinely broken metadata and keys to "", which
+		// the caller routes to brokenInfos.
+		byBackend[meta.BackendType] = append(byBackend[meta.BackendType], entry.Name())
 	}
 	return byBackend
 }
