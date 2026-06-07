@@ -88,7 +88,7 @@ func (n *Network) Allow(ctx context.Context, domains ...string) (*AllowResult, e
 		return nil, yoerrors.NewUsageError("at least one domain is required")
 	}
 
-	sandboxDir, meta, err := n.requireIsolated()
+	meta, err := n.requireIsolated()
 	if err != nil {
 		return nil, err
 	}
@@ -111,11 +111,11 @@ func (n *Network) Allow(ctx context.Context, domains ...string) (*AllowResult, e
 	}
 
 	meta.NetworkAllow = append(meta.NetworkAllow, added...)
-	if err := saveNetworkAllowlist(sandboxDir, meta); err != nil {
+	if err := n.engine.SaveNetworkAllowlist(n.name, meta); err != nil {
 		return nil, err
 	}
 
-	live, _ := n.tryLivePatch(ctx, ipsetResolveDomainsScript, added)
+	live, _ := n.engine.LivePatchNetwork(ctx, n.name, ipsetResolveDomainsScript, added)
 	return &AllowResult{Added: added, Live: live}, nil
 }
 
@@ -134,7 +134,7 @@ func (n *Network) Deny(ctx context.Context, domains ...string) (*DenyResult, err
 		return nil, yoerrors.NewUsageError("at least one domain is required")
 	}
 
-	sandboxDir, meta, err := n.requireIsolated()
+	meta, err := n.requireIsolated()
 	if err != nil {
 		return nil, err
 	}
@@ -170,7 +170,7 @@ func (n *Network) Deny(ctx context.Context, domains ...string) (*DenyResult, err
 	}
 
 	meta.NetworkAllow = remaining
-	if err := saveNetworkAllowlist(sandboxDir, meta); err != nil {
+	if err := n.engine.SaveNetworkAllowlist(n.name, meta); err != nil {
 		return nil, err
 	}
 
@@ -180,7 +180,7 @@ func (n *Network) Deny(ctx context.Context, domains ...string) (*DenyResult, err
 	if len(remaining) > 0 {
 		script += "\n" + ipsetResolveDomainsScript
 	}
-	live, _ := n.tryLivePatch(ctx, script, remaining)
+	live, _ := n.engine.LivePatchNetwork(ctx, n.name, script, remaining)
 	return &DenyResult{Removed: removed, Live: live}, nil
 }
 
@@ -211,79 +211,24 @@ type DenyResult struct {
 // loadEnvironment reads the sandbox's environment.json. The Network handle's
 // methods all start with this read, so it's centralized here.
 func (n *Network) loadEnvironment() (*store.Environment, error) {
-	sandboxDir := n.engine.Layout().SandboxDir(n.name)
-	if err := store.RequireSandboxDir(sandboxDir); err != nil {
-		return nil, err
-	}
-	return store.LoadEnvironment(sandboxDir)
+	return n.engine.LoadEnvironment(n.name)
 }
 
 // requireIsolated loads meta and rejects sandboxes that aren't in
-// :isolated network mode. Returns the sandbox directory path along
-// with the loaded meta so callers don't redo path resolution.
-func (n *Network) requireIsolated() (string, *store.Environment, error) {
-	sandboxDir := n.engine.Layout().SandboxDir(n.name)
-	if err := store.RequireSandboxDir(sandboxDir); err != nil {
-		return "", nil, err
-	}
-	meta, err := store.LoadEnvironment(sandboxDir)
+// :isolated network mode.
+func (n *Network) requireIsolated() (*store.Environment, error) {
+	meta, err := n.engine.LoadEnvironment(n.name)
 	if err != nil {
-		return "", nil, err
+		return nil, err
 	}
 	switch meta.NetworkMode {
 	case "isolated":
-		return sandboxDir, meta, nil
+		return meta, nil
 	case "none":
-		return "", nil, yoerrors.NewUsageError("sandbox %q uses --network-none; cannot modify network access", n.name)
+		return nil, yoerrors.NewUsageError("sandbox %q uses --network-none; cannot modify network access", n.name)
 	default:
-		return "", nil, yoerrors.NewUsageError("sandbox %q is not using network isolation", n.name)
+		return nil, yoerrors.NewUsageError("sandbox %q is not using network isolation", n.name)
 	}
-}
-
-// tryLivePatch attempts to exec a shell script inside the running
-// sandbox container to live-update ipset rules. Returns (live, err)
-// where live is true iff the exec succeeded; err is the runtime
-// error if the exec failed (caller can surface; not fatal because
-// the on-disk update is the source of truth).
-//
-// Soft-fails (sandbox not running, runtime not constructible, or a
-// backend-less Engine that never opened a runtime) return (false, nil)
-// so the caller treats them the same as a successful "no-op": the
-// change is queued for the next start.
-func (n *Network) tryLivePatch(ctx context.Context, script string, scriptArgs []string) (bool, error) {
-	// Open the backend lazily; a backend-less Engine (or a failed open)
-	// leaves the runtime nil. Treat that as "soft-fail; persisted-only"
-	// rather than panicking — the on-disk allowlist is the source of truth.
-	n.engine.TryEnsure(ctx)
-	rt := n.engine.Runtime()
-	if rt == nil {
-		return false, nil
-	}
-
-	info, err := n.engine.Inspect(ctx, n.name)
-	if err != nil {
-		return false, nil //nolint:nilerr // soft-fail: not running, can't live-patch
-	}
-	if info.Status != sandbox.StatusActive && info.Status != sandbox.StatusIdle {
-		return false, nil
-	}
-
-	execArgs := []string{"sh", "-c", script, "_"}
-	execArgs = append(execArgs, scriptArgs...)
-	if _, err := rt.Exec(ctx, store.InstanceName(n.engine.Layout().Principal, n.name), execArgs, "0"); err != nil {
-		return false, err
-	}
-	return true, nil
-}
-
-// saveNetworkAllowlist persists meta + the matching runtime-config
-// patch. Lives outside Network so per-handle tests can stub it; it's
-// a thin wrapper over the existing sandbox-side primitives.
-func saveNetworkAllowlist(sandboxDir string, meta *store.Environment) error {
-	if err := store.SaveEnvironment(sandboxDir, meta); err != nil {
-		return err
-	}
-	return sandbox.PatchConfigAllowedDomains(sandboxDir, meta.NetworkAllow)
 }
 
 // computeAllowedDomains turns flat meta.NetworkAllow into typed
