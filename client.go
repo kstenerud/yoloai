@@ -54,7 +54,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"sync"
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime"
@@ -63,7 +62,6 @@ import (
 	_ "github.com/kstenerud/yoloai/internal/runtime/seatbelt" // register backend
 	_ "github.com/kstenerud/yoloai/internal/runtime/tart"     // register backend
 	"github.com/kstenerud/yoloai/internal/sandbox"
-	"github.com/kstenerud/yoloai/internal/sandbox/state"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
@@ -94,23 +92,17 @@ var (
 // Client is the simple entry point for yoloAI operations.
 // A Client is safe for concurrent use by multiple goroutines.
 // Construct with NewClient.
+//
+// The Client is a thin factory over one Engine: it validates options, builds the
+// single Engine (which owns the lazy backend connection — D74), hands out the
+// Sandbox/System handles, and delegates Close. It holds no runtime of its own;
+// the per-sandbox handles route backend-bound work through the Engine, which
+// opens the backend on first use.
 type Client struct {
-	layout  config.Layout       // Q-W: DataDir-rooted path resolver propagated to Engine + apply
-	backend runtime.BackendType // selected backend; "" = backend-less (host-only reads/admin), backend-bound ops return ErrBackendRequired
-	logger  *slog.Logger        // for the lazily-built Engine
-	version string              // yoloAI version stamped into created sandboxes' environment.json
-	output  io.Writer           // ClientCreateOptions.Output (defaulted to io.Discard); seeds per-call progress writers (F8)
-	input   io.Reader           // ClientCreateOptions.Input (defaulted to an empty reader, never os.Stdin — §12); threaded to create.Run via state.Deps
-
-	// Lazy backend connection. The runtime is opened once, on the first
-	// backend-bound operation, via ensure/tryEnsure — host-only reads
-	// (Workdir host-git, on-disk allowlist, filesystem readers) never trigger
-	// it. Guarded by mutex; opened latches true on success and runtime/engine
-	// are then stable for the Client's lifetime.
-	mutex   sync.Mutex
-	opened  bool
-	runtime runtime.Runtime
-	engine  *sandbox.Engine
+	layout  config.Layout   // Q-W: DataDir-rooted path resolver; also reached by Sandbox/System handles for host-only path reads
+	engine  *sandbox.Engine // the one Engine; owns the lazy backend connection (D74)
+	version string          // yoloAI version stamped into created sandboxes' environment.json
+	output  io.Writer       // ClientCreateOptions.Output (defaulted to io.Discard); seeds per-call progress writers (F8)
 }
 
 // NewClient creates a Client with explicit options.
@@ -144,18 +136,17 @@ func NewClient(ctx context.Context, opts ClientCreateOptions) (*Client, error) {
 		input = bytes.NewReader(nil) // §12: empty reader, never the process's os.Stdin; embedders override, the CLI passes IOStreams
 	}
 
-	// The backend connection is NOT opened here.
-	// ClientCreateOptions.BackendType is optional: a backend-less Client serves
-	// host-only reads and admin without ever connecting; backend-bound ops open
-	// the runtime lazily on first use (ensure) or return ErrBackendRequired when
-	// BackendType is "".
+	// The backend connection is NOT opened here. The Engine is built eagerly
+	// from layout-only state with its runtime nil; ClientCreateOptions.BackendType
+	// is optional. A backend-less Engine serves host-only reads and (via System)
+	// admin without ever connecting; backend-bound ops open the runtime lazily on
+	// first use or return ErrBackendRequired when BackendType is "" (D74).
+	engine := sandbox.NewEngine(opts.BackendType, logger, input, sandbox.WithLayout(layout))
 	return &Client{
 		layout:  layout,
-		backend: opts.BackendType,
-		logger:  logger,
+		engine:  engine,
 		version: opts.Version,
 		output:  output,
-		input:   input,
 	}, nil
 }
 
@@ -169,48 +160,10 @@ func NewClient(ctx context.Context, opts ClientCreateOptions) (*Client, error) {
 // internal/sandbox, where the lazy backend connection it guards now lives (D74).
 var ErrBackendRequired = sandbox.ErrBackendRequired
 
-// ensure lazily opens the backend connection and builds the Engine on first
-// use, caching both for the Client's lifetime. It is the gate for every
-// backend-bound operation. Returns ErrBackendRequired for a backend-less
-// Client; a failed open is NOT cached (the next call retries). Safe for
-// concurrent use.
-func (c *Client) ensure(ctx context.Context) error {
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
-	if c.opened {
-		return nil
-	}
-	if c.backend == "" {
-		return ErrBackendRequired
-	}
-	rt, err := runtime.New(ctx, c.backend, c.layout)
-	if err != nil {
-		return fmt.Errorf("connect to %s backend: %w", c.backend, err)
-	}
-	c.runtime = rt
-	c.engine = sandbox.NewEngineWithRuntime(rt, c.logger, c.input, sandbox.WithLayout(c.layout))
-	c.opened = true
-	return nil
-}
-
-// tryEnsure opens the backend connection best-effort for operations that have a
-// host-only fallback (Workdir host-git, on-disk allowlist live-patch,
-// ContainerLogs, HasActiveWork): on success rt/engine are populated; on
-// failure (including a backend-less Client) they stay nil and the caller falls
-// back to its disk-only path. The error is intentionally discarded.
-func (c *Client) tryEnsure(ctx context.Context) {
-	_ = c.ensure(ctx) //nolint:errcheck // best-effort: callers fall back to a host-only path when rt stays nil
-}
-
-// Close releases the underlying runtime connection, if one was ever opened.
+// Close releases the Engine's backend connection, if one was ever opened.
 // A no-op on a Client whose backend was never used.
 func (c *Client) Close() error {
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
-	if !c.opened {
-		return nil
-	}
-	return c.runtime.Close()
+	return c.engine.Close()
 }
 
 // Sandbox returns a sandbox-scoped handle, validating that the sandbox
@@ -224,7 +177,7 @@ func (c *Client) Sandbox(name string) (*Sandbox, error) {
 	if err := store.RequireSandboxDir(c.layout.SandboxDir(name)); err != nil {
 		return nil, err
 	}
-	return &Sandbox{client: c, name: name}, nil
+	return &Sandbox{engine: c.engine, name: name}, nil
 }
 
 // System returns the admin sub-handle for system-level operations.
@@ -233,18 +186,8 @@ func (c *Client) System() *System {
 	return &System{layout: c.layout}
 }
 
-// deps bundles the Client's runtime, layout, and input into state.Deps for
-// use with lifecycle and create free functions. Callers must ensure the
-// runtime is open (via ensure) before calling deps for a backend-bound op.
-func (c *Client) deps() state.Deps {
-	return state.Deps{Runtime: c.runtime, Layout: c.layout, Input: c.input}
-}
-
 // ListSandboxes returns info for all sandboxes.
 func (c *Client) ListSandboxes(ctx context.Context) ([]*SandboxInfo, error) {
-	if err := c.ensure(ctx); err != nil {
-		return nil, err
-	}
 	sis, err := c.engine.List(ctx)
 	if err != nil {
 		return nil, err
@@ -258,9 +201,6 @@ func (c *Client) ListSandboxes(ctx context.Context) ([]*SandboxInfo, error) {
 // name is required (no auto-generation), so the returned handle is always bound
 // to opts.Name.
 func (c *Client) CreateSandbox(ctx context.Context, opts SandboxCreateOptions) (*Sandbox, error) {
-	if err := c.ensure(ctx); err != nil {
-		return nil, err
-	}
 	internal := opts.toInternal()
 	internal.Version = c.version
 	if internal.Output == nil {
@@ -272,7 +212,7 @@ func (c *Client) CreateSandbox(ctx context.Context, opts SandboxCreateOptions) (
 	if _, err := c.engine.Create(ctx, internal); err != nil {
 		return nil, err
 	}
-	return &Sandbox{client: c, name: opts.Name}, nil
+	return &Sandbox{engine: c.engine, name: opts.Name}, nil
 }
 
 // IOStreams names the stdio handles for interactive Client methods.
@@ -294,9 +234,6 @@ type TermSize = runtime.TermSize
 // (default backend/agent, tmux mode) is a separate concern handled by writing
 // config via System.Config().Set — the library has no setup-wizard verb.
 func (c *Client) EnsureSetup(ctx context.Context) error {
-	if err := c.ensure(ctx); err != nil {
-		return err
-	}
 	return c.engine.EnsureSetup(ctx, c.output)
 }
 

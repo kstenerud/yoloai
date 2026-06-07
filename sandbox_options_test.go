@@ -50,20 +50,19 @@ func TestSandboxCreateOptions_toInternal_PreservesExplicitWorkdir(t *testing.T) 
 	assert.True(t, in.Workdir.AllowDirty, "per-directory AllowDirty is preserved")
 }
 
-// A2/A3: Backend is OPTIONAL. A backend-less Client constructs cleanly (it
-// serves host-only reads and, via System(), cross-backend admin) and never
-// opens a connection at construction.
+// A2/A3 (D74): Backend is OPTIONAL. A backend-less Client constructs cleanly —
+// it serves host-only reads and, via System(), cross-backend admin. The
+// no-open-at-construction guarantee now lives on the Engine and is pinned by
+// sandbox.TestEngine_NewEngine_DoesNotOpen; here we assert the public contract:
+// construction succeeds with no BackendType.
 func TestNewClient_BackendOptional(t *testing.T) {
 	c, err := NewClient(context.Background(), ClientCreateOptions{DataDir: t.TempDir(), HomeDir: t.TempDir()})
 	require.NoError(t, err, "empty Backend is allowed — the Client is backend-less")
 	require.NotNil(t, c)
-	assert.False(t, c.opened, "construction must not open the backend")
-	assert.Equal(t, BackendType(""), c.backend)
 }
 
 // A backend-bound operation on a backend-less Client returns ErrBackendRequired
-// (a *UsageError) instead of the old panic footgun — and does not latch, so a
-// later op can still succeed once a backend is supplied.
+// (a *UsageError) instead of the old panic footgun.
 func TestBackendBoundOp_OnBackendlessClient_ReturnsErrBackendRequired(t *testing.T) {
 	c, err := NewClient(context.Background(), ClientCreateOptions{DataDir: t.TempDir(), HomeDir: t.TempDir()})
 	require.NoError(t, err)
@@ -73,14 +72,15 @@ func TestBackendBoundOp_OnBackendlessClient_ReturnsErrBackendRequired(t *testing
 	require.ErrorIs(t, err, ErrBackendRequired)
 	var ue *yoerrors.UsageError
 	require.ErrorAs(t, err, &ue, "ErrBackendRequired is a *UsageError for CLI exit-code mapping")
-	assert.False(t, c.opened, "a failed/short-circuited ensure must not latch opened")
 }
 
-// ErrBackendRequired is a stable sentinel: errors.Is matches it directly.
+// ErrBackendRequired is a stable sentinel: a backend-bound op on a backend-less
+// Client matches it via errors.Is, the form embedders use to branch.
 func TestErrBackendRequired_IsSentinel(t *testing.T) {
 	c, err := NewClient(context.Background(), ClientCreateOptions{DataDir: t.TempDir(), HomeDir: t.TempDir()})
 	require.NoError(t, err)
-	assert.True(t, errors.Is(c.ensure(context.Background()), ErrBackendRequired))
+	_, err = c.ListSandboxes(context.Background())
+	assert.True(t, errors.Is(err, ErrBackendRequired))
 }
 
 // Close on a Client whose backend was never opened is a no-op (no panic, no

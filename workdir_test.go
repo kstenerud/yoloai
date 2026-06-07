@@ -4,7 +4,9 @@
 package yoloai
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -12,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kstenerud/yoloai/internal/config"
+	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
@@ -24,7 +27,8 @@ func newSandboxHandle(t *testing.T, meta *store.Environment) *Sandbox {
 	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
 	require.NoError(t, os.MkdirAll(layout.SandboxDir(meta.Name), 0750))
 	require.NoError(t, store.SaveEnvironment(layout.SandboxDir(meta.Name), meta))
-	sb, err := (&Client{layout: layout}).Sandbox(meta.Name)
+	engine := sandbox.NewEngine("", slog.Default(), bytes.NewReader(nil), sandbox.WithLayout(layout))
+	sb, err := (&Client{layout: layout, engine: engine}).Sandbox(meta.Name)
 	require.NoError(t, err)
 	return sb
 }

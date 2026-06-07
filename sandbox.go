@@ -14,7 +14,6 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox"
-	"github.com/kstenerud/yoloai/internal/sandbox/lifecycle"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
@@ -35,7 +34,7 @@ var ErrSandboxDestroyed = yoerrors.NewUsageError("yoloai: this Sandbox handle wa
 // Sub-handles (Workdir, Network, Agent, Files) are pure namespace expansion off
 // a validated *Sandbox — no IO, no error.
 type Sandbox struct {
-	client *Client
+	engine *sandbox.Engine
 	name   string
 	// destroyed is set by a successful Destroy on this handle. Once set, every
 	// error-returning method short-circuits with ErrSandboxDestroyed instead of
@@ -59,20 +58,20 @@ func (s *Sandbox) Name() string { return s.name }
 
 // Workdir returns the workdir sub-handle for diff/apply operations.
 func (s *Sandbox) Workdir() *Workdir {
-	return &Workdir{client: s.client, name: s.name}
+	return &Workdir{engine: s.engine, name: s.name}
 }
 
 // Agent returns the agent-interaction sub-handle for this sandbox.
-func (s *Sandbox) Agent() *Agent { return &Agent{client: s.client, name: s.name} }
+func (s *Sandbox) Agent() *Agent { return &Agent{engine: s.engine, name: s.name} }
 
 // Files returns a file-exchange handle for the sandbox.
 func (s *Sandbox) Files() *Files {
-	return &Files{client: s.client, name: s.name}
+	return &Files{engine: s.engine, name: s.name}
 }
 
 // Network returns the sandbox's network-management sub-handle.
 func (s *Sandbox) Network() *Network {
-	return &Network{client: s.client, name: s.name}
+	return &Network{engine: s.engine, name: s.name}
 }
 
 // Metadata reads the sandbox's creation-time environment straight from disk —
@@ -84,7 +83,7 @@ func (s *Sandbox) Metadata() (*Environment, error) {
 	if err := s.checkNotDestroyed(); err != nil {
 		return nil, err
 	}
-	meta, err := store.LoadEnvironment(s.client.layout.SandboxDir(s.name))
+	meta, err := store.LoadEnvironment(s.engine.Layout().SandboxDir(s.name))
 	if err != nil {
 		return nil, err
 	}
@@ -96,10 +95,7 @@ func (s *Sandbox) Inspect(ctx context.Context) (*SandboxInfo, error) {
 	if err := s.checkNotDestroyed(); err != nil {
 		return nil, err
 	}
-	if err := s.client.ensure(ctx); err != nil {
-		return nil, err
-	}
-	si, err := s.client.engine.Inspect(ctx, s.name)
+	si, err := s.engine.Inspect(ctx, s.name)
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +107,7 @@ func (s *Sandbox) Inspect(ctx context.Context) (*SandboxInfo, error) {
 // Client's DataDir; returns a path even for unknown names (caller checks
 // existence). Embedders that read/write sandbox files resolve paths under it.
 func (s *Sandbox) Dir() string {
-	return s.client.layout.SandboxDir(s.name)
+	return s.engine.Layout().SandboxDir(s.name)
 }
 
 // Stop stops the running container without destroying the sandbox.
@@ -119,10 +115,7 @@ func (s *Sandbox) Stop(ctx context.Context) error {
 	if err := s.checkNotDestroyed(); err != nil {
 		return err
 	}
-	if err := s.client.ensure(ctx); err != nil {
-		return err
-	}
-	return s.client.engine.Stop(ctx, s.name)
+	return s.engine.Stop(ctx, s.name)
 }
 
 // Clone copies this sandbox's state into a new sandbox named dest. Although the
@@ -142,18 +135,15 @@ func (s *Sandbox) Clone(ctx context.Context, dest string, opts SandboxCloneOptio
 	if err := s.checkNotDestroyed(); err != nil {
 		return nil, err
 	}
-	if err := s.client.ensure(ctx); err != nil {
-		return nil, err
-	}
 	if opts.Overwrite {
-		if err := s.client.engine.DestroyForOverwrite(ctx, dest); err != nil {
+		if err := s.engine.DestroyForOverwrite(ctx, dest); err != nil {
 			return nil, err
 		}
 	}
-	if err := s.client.engine.Clone(ctx, sandbox.CloneOptions{Source: s.name, Dest: dest}); err != nil {
+	if err := s.engine.Clone(ctx, sandbox.CloneOptions{Source: s.name, Dest: dest}); err != nil {
 		return nil, err
 	}
-	return &Sandbox{client: s.client, name: dest}, nil
+	return &Sandbox{engine: s.engine, name: dest}, nil
 }
 
 // Start launches (or relaunches) the container for the existing sandbox.
@@ -162,10 +152,7 @@ func (s *Sandbox) Start(ctx context.Context, opts SandboxStartOptions) (*StartRe
 	if err := s.checkNotDestroyed(); err != nil {
 		return nil, err
 	}
-	if err := s.client.ensure(ctx); err != nil {
-		return nil, err
-	}
-	return s.client.engine.Start(ctx, s.name, opts)
+	return s.engine.Start(ctx, s.name, opts)
 }
 
 // Restart stops then starts the sandbox, applying opts on the way back up
@@ -175,10 +162,7 @@ func (s *Sandbox) Restart(ctx context.Context, opts SandboxStartOptions) (*Start
 	if err := s.checkNotDestroyed(); err != nil {
 		return nil, err
 	}
-	if err := s.client.ensure(ctx); err != nil {
-		return nil, err
-	}
-	return s.client.engine.Restart(ctx, s.name, opts)
+	return s.engine.Restart(ctx, s.name, opts)
 }
 
 // waitPollInterval is how often Wait re-inspects the sandbox. A single
@@ -229,11 +213,8 @@ func (s *Sandbox) Wait(ctx context.Context, opts SandboxWaitOptions) (*SandboxIn
 	if err := s.checkNotDestroyed(); err != nil {
 		return nil, err
 	}
-	if err := s.client.ensure(ctx); err != nil {
-		return nil, err
-	}
 	return pollUntil(ctx, waitPollInterval, opts.Timeout, opts.For, func(ctx context.Context) (*SandboxInfo, error) {
-		si, err := s.client.engine.Inspect(ctx, s.name)
+		si, err := s.engine.Inspect(ctx, s.name)
 		if err != nil {
 			return nil, fmt.Errorf("inspect sandbox: %w", err)
 		}
@@ -297,10 +278,7 @@ func (s *Sandbox) Reset(ctx context.Context, opts SandboxResetOptions) (*ResetRe
 	if err := s.checkNotDestroyed(); err != nil {
 		return nil, err
 	}
-	if err := s.client.ensure(ctx); err != nil {
-		return nil, err
-	}
-	return s.client.engine.Reset(ctx, opts.toInternal(s.name))
+	return s.engine.Reset(ctx, opts.toInternal(s.name))
 }
 
 // HasActiveWork reports whether destroying the sandbox would lose work — a
@@ -309,8 +287,7 @@ func (s *Sandbox) Reset(ctx context.Context, opts SandboxResetOptions) (*ResetRe
 // use it to pre-flight a batch of sandboxes before prompting once. For the
 // single-sandbox case prefer Destroy's atomic typed refusal.
 func (s *Sandbox) HasActiveWork(ctx context.Context) (bool, string) {
-	s.client.tryEnsure(ctx) // best-effort: with no backend we still detect on-disk unapplied work
-	return lifecycle.NeedsConfirmation(ctx, s.client.deps(), s.name)
+	return s.engine.NeedsConfirmation(ctx, s.name)
 }
 
 // Destroy removes the sandbox and its container. With opts.AbandonUnappliedWork
@@ -321,15 +298,12 @@ func (s *Sandbox) Destroy(ctx context.Context, opts SandboxDestroyOptions) (*Des
 	if err := s.checkNotDestroyed(); err != nil {
 		return nil, err
 	}
-	if err := s.client.ensure(ctx); err != nil {
-		return nil, err
-	}
 	if !opts.AbandonUnappliedWork {
 		if active, reason := s.HasActiveWork(ctx); active {
 			return nil, yoerrors.NewActiveWorkError("%s", reason)
 		}
 	}
-	res, err := s.client.engine.Destroy(ctx, s.name)
+	res, err := s.engine.Destroy(ctx, s.name)
 	if err != nil {
 		return nil, err
 	}
@@ -348,13 +322,10 @@ func (s *Sandbox) Exec(ctx context.Context, opts SandboxExecOptions, io IOStream
 	if err := s.checkNotDestroyed(); err != nil {
 		return err
 	}
-	if err := s.client.ensure(ctx); err != nil {
-		return err
-	}
 	if !opts.PTY {
-		return execExitError(s.client.engine.StdioExec(ctx, s.name, opts.Command, io.In, io.Out, io.Err))
+		return execExitError(s.engine.StdioExec(ctx, s.name, opts.Command, io.In, io.Out, io.Err))
 	}
-	return execExitError(s.client.engine.InteractiveExec(ctx, s.name, opts.Command, io))
+	return execExitError(s.engine.InteractiveExec(ctx, s.name, opts.Command, io))
 }
 
 // execExitError translates the runtime's internal *runtime.ExecError (a
@@ -480,21 +451,21 @@ type SandboxExecOptions struct {
 // (<state>/cache). Like FilesDir, it is pure path computation with no backend
 // contact.
 func (s *Sandbox) CacheDir() string {
-	return store.CacheDir(s.client.layout.SandboxDir(s.name))
+	return store.CacheDir(s.engine.Layout().SandboxDir(s.name))
 }
 
 // RuntimeConfigPath returns the host path of the sandbox's runtime-config.json
 // (<state>/runtime-config.json), the entrypoint/infrastructure config the
 // backend reads at launch. Pure path computation: no backend contact.
 func (s *Sandbox) RuntimeConfigPath() string {
-	return store.RuntimeConfigFilePath(s.client.layout.SandboxDir(s.name))
+	return store.RuntimeConfigFilePath(s.engine.Layout().SandboxDir(s.name))
 }
 
 // EnvironmentPath returns the host path of the sandbox's environment.json
 // (<state>/environment.json), the captured creation-time metadata. Pure path
 // computation; the file need not exist.
 func (s *Sandbox) EnvironmentPath() string {
-	return filepath.Join(s.client.layout.SandboxDir(s.name), store.EnvironmentFile)
+	return filepath.Join(s.engine.Layout().SandboxDir(s.name), store.EnvironmentFile)
 }
 
 // LogPaths holds the host paths of a sandbox's diagnostic JSONL streams and the
@@ -511,7 +482,7 @@ type LogPaths struct {
 // LogPaths returns the diagnostic file paths for the sandbox. No backend
 // is contacted.
 func (s *Sandbox) LogPaths() LogPaths {
-	dir := s.client.layout.SandboxDir(s.name)
+	dir := s.engine.Layout().SandboxDir(s.name)
 	return LogPaths{
 		CLI:         store.CLIJSONLPath(dir),
 		Sandbox:     store.SandboxJSONLPath(dir),
@@ -529,7 +500,7 @@ func (s *Sandbox) Unlock() (cleared bool, err error) {
 	if err := s.checkNotDestroyed(); err != nil {
 		return false, err
 	}
-	return store.ForceUnlock(s.client.layout, s.name)
+	return store.ForceUnlock(s.engine.Layout(), s.name)
 }
 
 // VscodeAttach describes how to open a sandbox in VS Code via its
@@ -552,7 +523,7 @@ func (s *Sandbox) VscodeAttach() (*VscodeAttach, error) {
 	if err := s.checkNotDestroyed(); err != nil {
 		return nil, err
 	}
-	sandboxDir := s.client.layout.SandboxDir(s.name)
+	sandboxDir := s.engine.Layout().SandboxDir(s.name)
 	if err := store.RequireSandboxDir(sandboxDir); err != nil {
 		return nil, sandbox.ErrSandboxNotFound
 	}

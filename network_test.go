@@ -4,7 +4,9 @@
 package yoloai
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -67,12 +69,12 @@ func writeNoNetworkSandbox(t *testing.T, c *System, name string) {
 func clientWithSandbox(t *testing.T) (*Client, *System) {
 	t.Helper()
 	sys := newTestClient(t)
-	// Don't construct a real backend runtime — Network.Allowed and
-	// agent-set derivation don't touch it. Allow/Deny tests cover
-	// the live-patch soft-fail path, where a nil runtime would
-	// panic on Exec, so we use a stub there too.
+	// Backend-less Engine sharing the System's layout — Network.Allowed and
+	// agent-set derivation don't touch the runtime, and the live-patch path
+	// soft-fails (Runtime() is nil) rather than panicking.
 	c := &Client{
 		layout: sys.layout,
+		engine: sandbox.NewEngine("", slog.Default(), bytes.NewReader(nil), sandbox.WithLayout(sys.layout)),
 	}
 	return c, sys
 }

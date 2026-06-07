@@ -54,7 +54,7 @@ type AllowedDomain struct {
 //	agent-required = meta.NetworkAllow ∩ agentDef.NetworkAllowlist
 //	user-added     = meta.NetworkAllow \ agentDef.NetworkAllowlist
 type Network struct {
-	client *Client
+	engine *sandbox.Engine
 	name   string
 }
 
@@ -211,7 +211,7 @@ type DenyResult struct {
 // loadEnvironment reads the sandbox's environment.json. The Network handle's
 // methods all start with this read, so it's centralized here.
 func (n *Network) loadEnvironment() (*store.Environment, error) {
-	sandboxDir := n.client.layout.SandboxDir(n.name)
+	sandboxDir := n.engine.Layout().SandboxDir(n.name)
 	if err := store.RequireSandboxDir(sandboxDir); err != nil {
 		return nil, err
 	}
@@ -222,7 +222,7 @@ func (n *Network) loadEnvironment() (*store.Environment, error) {
 // :isolated network mode. Returns the sandbox directory path along
 // with the loaded meta so callers don't redo path resolution.
 func (n *Network) requireIsolated() (string, *store.Environment, error) {
-	sandboxDir := n.client.layout.SandboxDir(n.name)
+	sandboxDir := n.engine.Layout().SandboxDir(n.name)
 	if err := store.RequireSandboxDir(sandboxDir); err != nil {
 		return "", nil, err
 	}
@@ -247,19 +247,20 @@ func (n *Network) requireIsolated() (string, *store.Environment, error) {
 // the on-disk update is the source of truth).
 //
 // Soft-fails (sandbox not running, runtime not constructible, or a
-// Client that wasn't built with a runtime+engine at all) return
-// (false, nil) so the caller treats them the same as a successful
-// "no-op": the change is queued for the next start.
+// backend-less Engine that never opened a runtime) return (false, nil)
+// so the caller treats them the same as a successful "no-op": the
+// change is queued for the next start.
 func (n *Network) tryLivePatch(ctx context.Context, script string, scriptArgs []string) (bool, error) {
-	// Open the backend lazily; a backend-less Client (or a failed open)
-	// leaves rt/engine nil. Treat that as "soft-fail; persisted-only"
+	// Open the backend lazily; a backend-less Engine (or a failed open)
+	// leaves the runtime nil. Treat that as "soft-fail; persisted-only"
 	// rather than panicking — the on-disk allowlist is the source of truth.
-	n.client.tryEnsure(ctx)
-	if n.client.engine == nil || n.client.runtime == nil {
+	n.engine.TryEnsure(ctx)
+	rt := n.engine.Runtime()
+	if rt == nil {
 		return false, nil
 	}
 
-	info, err := n.client.engine.Inspect(ctx, n.name)
+	info, err := n.engine.Inspect(ctx, n.name)
 	if err != nil {
 		return false, nil //nolint:nilerr // soft-fail: not running, can't live-patch
 	}
@@ -269,7 +270,7 @@ func (n *Network) tryLivePatch(ctx context.Context, script string, scriptArgs []
 
 	execArgs := []string{"sh", "-c", script, "_"}
 	execArgs = append(execArgs, scriptArgs...)
-	if _, err := n.client.runtime.Exec(ctx, store.InstanceName(n.client.layout.Principal, n.name), execArgs, "0"); err != nil {
+	if _, err := rt.Exec(ctx, store.InstanceName(n.engine.Layout().Principal, n.name), execArgs, "0"); err != nil {
 		return false, err
 	}
 	return true, nil

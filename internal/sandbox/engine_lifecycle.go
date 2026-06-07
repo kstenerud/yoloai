@@ -73,6 +73,15 @@ func (e *Engine) Create(ctx context.Context, opts create.Options) (string, error
 	return create.Run(ctx, e.deps(), opts)
 }
 
+// NeedsConfirmation reports whether destroying the sandbox would lose work — a
+// running agent, a dirty workdir, or unapplied commits — and a human-readable
+// reason. It opens the backend best-effort (TryEnsure): with no backend the
+// on-disk unapplied-work signals are still detected from the host.
+func (e *Engine) NeedsConfirmation(ctx context.Context, name string) (bool, string) {
+	e.TryEnsure(ctx)
+	return lifecycle.NeedsConfirmation(ctx, e.deps(), name)
+}
+
 // DestroyForOverwrite tears down a pre-existing destination sandbox so a clone
 // can take its place. A missing destination is a no-op. The destination may have
 // been created on a different backend than this Engine's, so it destroys through

@@ -211,7 +211,7 @@ func TestVscodeAttach_NotFound(t *testing.T) {
 func TestSandbox_DestroyedHandle_RefusesEveryErrorReturningMethod(t *testing.T) {
 	c := vscodeClient(t, nil) // backend-less; the guard must fire before any IO
 	ctx := context.Background()
-	sb := &Sandbox{client: c, name: "box", destroyed: true}
+	sb := &Sandbox{engine: c.engine, name: "box", destroyed: true}
 
 	ops := map[string]func() error{
 		"Metadata":     func() error { _, err := sb.Metadata(); return err },
