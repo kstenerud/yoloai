@@ -11,6 +11,10 @@ Complete — the multi-quarter program (Go↔Python boundary, `runtime.Runtime` 
 
 The Layer-1 public Go surface was declared complete (D52) but the F1 leak detector is blind to type aliases, so `store.Meta` leaks via `yoloai.Info` and ~7 consumer capabilities still reach `internal/` with no public verb. Plan: [layer1-completion.md](layer1-completion.md). Governed by CRITIQUE round G1–G7 and working-notes D53. Sequence: fix the detector (truth first) → carved `store.Meta` read-model + missing verbs → tighten depguard → (separately) reshape the agent-interaction surface. Supersedes the now-complete [layer1-public-api.md](../../archive/plans/layer1-public-api.md).
 
+## Public API — Engine owns the lazy runtime
+
+The A2/A3 collapse (D67) put one lazy `Client` in place, but parked the laziness machinery (`ensure`/`tryEnsure`/`deps`/`runtime`/`Close`) on `Client` when it is Engine-shaped — so per-sandbox sub-handles (`Agent`/`Workdir`/`Network`/`Files`) reach two/three levels deep (`a.client.engine.SendInput(…)`). Plan: [engine-owns-runtime.md](engine-owns-runtime.md). Move lazy-runtime ownership into the `Engine` (build eagerly layout-only, open `runtime.New` lazily inside), repoint handles to hold `*sandbox.Engine`. Internal-only (public surface unchanged, zero CLI churn). Stage 2 (optional/separate) pushes the patch/files/network free-function calls down into Engine methods. Governed by working-notes D74 (refines D67).
+
 ## Parallel Agent Workflows
 
 Based on [parallel agents research](../research/parallel-agents.md).

@@ -552,6 +552,22 @@ A *clarifying* comment is distinct from a comment that encodes what the type sys
 
 **Consequences.** Docs-only, not breaking. New `development-principles.md §15` ("Name for the reader's distance"); new `rule-index.md` row (DEV §15); `standards/go.md §Naming` cross-references the principle as the *why* behind its existing clarity-over-brevity rules. The originating audit's renames are the worked examples.
 
+## D74 — The lazy runtime belongs to the Engine, not the Client (refines D67)
+
+**Date:** 2026-06-07. **Status:** Accepted (owner, 2026-06-07). Refines [D67].
+
+**Why.** D67's A2/A3 collapse put **one lazy `Client`** in place of the old eager-Client / lazy-`SystemClient` split — the right *surface* call. But it parked the *laziness machinery* (`mutex`/`opened`/`runtime`/`engine`/`ensure`/`tryEnsure`/`deps()`/`Close()`) on `Client`, which is Engine-shaped: `Client.ensure` opens the runtime and *then constructs the Engine*, even though the `Engine` already owns `layout`/`input`/`logger`/`runtime` and is the object every sandbox operation runs through. The ownership is inverted one layer too high.
+
+The symptom is reach-depth at every sub-handle. `Agent`/`Workdir`/`Network`/`Files` each hold a `*Client` and reach two or three levels to do their job — `a.client.engine.SendInput(ctx, a.name, text)` (client→engine→verb), `w.client.layout`, `n.client.runtime.Exec(…)`. That Demeter smell is a *consequence* of the inverted ownership, not a naming nit; a rename can't fix it, only a re-home can. This is the architectural follow-through D67 deferred.
+
+**The decision.** Move lazy-runtime ownership **into the `Engine`**. Build the Engine eagerly from layout-only state (`runtime` nil); open the runtime lazily *inside* the Engine on the first backend-bound method (`runtime.New(ctx, backend, layout)`, mutex-guarded, latch on success only, failed open retryable). Relocate `ensure`/`tryEnsure`/`deps`/`Close` and the `mutex`/`opened`/`runtime` fields from `Client` to `Engine`; move `ErrBackendRequired` to the `sandbox` package and re-export it from root (public name unchanged). Promote the lifecycle/create free functions to first-class Engine methods (`Start`/`Stop`/`Restart`/`Reset`/`Destroy`/`NeedsConfirmation`/`Create`) so callers stop assembling `deps()`. Repoint the sub-handles from `*Client` to `*sandbox.Engine` + name, dropping reach depth to one (`a.engine.SendInput(name, …)`, `a.engine.Layout()` for path reads). `Client` shrinks to a factory: validate options, build the one eager Engine, hand out handles, delegate `Close()`. Preserve an injected-runtime constructor (`NewEngineWithRuntime`) for the ~12 mock/real-rt test sites and `destroyForOverwrite`'s ephemeral open.
+
+The public surface (`NewWithOptions`, `Options`, `Client.Sandbox`, the sub-handles, `ErrBackendRequired`) is **unchanged** — this is an internal ownership move, no breaking change required, zero CLI churn (CLI is public-API-only). A residual smell (Workdir/Network still thread `layout`+`runtime` into ~15 patch/files/network *free functions*) is scoped as a separate **Stage 2**: push those down into Engine methods too, the same way exec/attach were already pushed down (`internal/sandbox/exec.go`, `attach.go`). Stage 2 is sequenced, not cut. Full plan: [engine-owns-runtime.md](../design/plans/engine-owns-runtime.md).
+
+**Rejected.** (a) Leaving the machinery on `Client` and renaming the reach-deep call sites — treats the symptom; the depth comes from inverted ownership, which a rename can't move. (b) Keeping the Engine eagerly runtime-bound and a separate lazy wrapper on `Client` — that's the pre-D67 two-object split re-introduced one level down. (c) Collapsing `Client` into `Engine` entirely — `Client` still owns process-level concerns (option validation, handle factories, `System()`) and the public type identity; the goal is correct ownership, not fewer types.
+
+**Consequences.** Not breaking (internal re-home; public surface and CLI unchanged). The lazy-open invariant (open once, latch on success, host-only fallback when the open fails) moves wholesale to the `Engine` and is tested there. Sub-handles become one-level callers of `engine.Verb(name, …)`. Refines but does not supersede D67 (the surface decision stands; this corrects where the machinery lives). Worked examples: the exec/attach push-down already merged (`internal/sandbox/exec.go`, `attach.go`) is the pattern Stage 2 generalizes.
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.
