@@ -20,30 +20,30 @@ type Files struct {
 // Path returns the host path of the exchange directory. The directory may not
 // exist yet (Import creates it on demand).
 func (f *Files) Path() string {
-	return sandbox.FilesDir(f.engine.Layout(), f.name)
+	return f.engine.SandboxFiles(f.name)
 }
 
 // List expands the glob patterns against the exchange directory and returns
 // deduplicated, sorted relative paths. An empty match set is not an error.
 func (f *Files) List(patterns []string) ([]string, error) {
-	return sandbox.ListExchangeFiles(f.engine.Layout(), f.name, patterns)
+	return f.engine.ListFiles(f.name, patterns)
 }
 
 // Import copies a host file or directory into the exchange directory (creating
 // it if needed) and returns the base name placed. Without force, an existing
 // entry of the same name is an error.
 func (f *Files) Import(ctx context.Context, hostPath string, force bool) (string, error) {
-	return sandbox.ImportFile(ctx, f.engine.Layout(), f.name, hostPath, force)
+	return f.engine.ImportFile(ctx, f.name, hostPath, force)
 }
 
 // Export copies one exchange entry (rel) to dst on the host. Without force, an
 // existing dst is an error. rel is validated to stay within the exchange dir.
 func (f *Files) Export(ctx context.Context, rel, dst string, force bool) error {
-	return sandbox.ExportFile(ctx, f.engine.Layout(), f.name, rel, dst, force)
+	return f.engine.ExportFile(ctx, f.name, rel, dst, force)
 }
 
 // Remove deletes one exchange entry (rel). rel is validated to stay within the
 // exchange dir.
 func (f *Files) Remove(rel string) error {
-	return sandbox.RemoveExchangeFile(f.engine.Layout(), f.name, rel)
+	return f.engine.RemoveFile(f.name, rel)
 }
