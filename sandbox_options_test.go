@@ -24,10 +24,10 @@ func TestFormatPorts(t *testing.T) {
 	assert.Equal(t, []string{"3000:3000", "8080:80"}, got)
 }
 
-func TestSandboxCreateOptions_toInternal_DefaultsModeAndFoldsAck(t *testing.T) {
+func TestSandboxCreateOptions_toInternal_FoldsAckAndPassesModeThrough(t *testing.T) {
 	o := SandboxCreateOptions{
 		Name:                 "box",
-		Workdir:              DirSpec{Path: "/p"}, // Mode empty → defaults to copy
+		Workdir:              DirSpec{Path: "/p"}, // Mode empty → passes through; pipeline defaults it
 		AgentType:            AgentClaude,
 		Ports:                []PortMapping{{HostPort: 3000, ContainerPort: 80}},
 		AllowDirtyWorkdir:    true,
@@ -36,7 +36,7 @@ func TestSandboxCreateOptions_toInternal_DefaultsModeAndFoldsAck(t *testing.T) {
 	in := o.toInternal()
 
 	assert.Equal(t, "box", in.Name)
-	assert.Equal(t, DirModeCopy, in.Workdir.Mode, "empty workdir mode defaults to copy")
+	assert.Empty(t, in.Workdir.Mode, "toInternal does not default the mode — the create pipeline does, after the profile merge")
 	assert.True(t, in.Workdir.AllowDirty, "AllowDirtyWorkdir folds into Workdir.AllowDirty")
 	assert.True(t, in.AbandonUnappliedWork, "AbandonUnappliedWork carries through to the internal create options")
 	assert.Equal(t, "claude", in.Agent, "AgentType converts to string")

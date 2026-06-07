@@ -144,6 +144,30 @@ func TestSetupAuxDirs_NoTranslationIsIdentity(t *testing.T) {
 	assert.Equal(t, dirEnvs[0].HostPath, dirEnvs[0].MountPath)
 }
 
+// defaultDirModes is the single safe-default step: an unset workdir mode
+// resolves to :copy (original protected) and an unset aux mode to :ro. It runs
+// after the profile merge, so a profile-supplied dir with no mode is covered
+// here. Explicit modes are never overridden.
+func TestDefaultDirModes(t *testing.T) {
+	workdir := &DirSpec{Path: "/p"}
+	auxDirs := []*DirSpec{
+		{Path: "/a"},                  // unset → ro
+		{Path: "/b", Mode: DirModeRW}, // explicit → preserved
+	}
+
+	defaultDirModes(workdir, auxDirs)
+
+	assert.Equal(t, DirModeCopy, workdir.Mode, "unset workdir mode defaults to copy")
+	assert.Equal(t, DirModeRO, auxDirs[0].Mode, "unset aux mode defaults to read-only")
+	assert.Equal(t, DirModeRW, auxDirs[1].Mode, "explicit aux mode is preserved")
+}
+
+func TestDefaultDirModes_PreservesExplicitWorkdir(t *testing.T) {
+	workdir := &DirSpec{Path: "/p", Mode: DirModeOverlay}
+	defaultDirModes(workdir, nil)
+	assert.Equal(t, DirModeOverlay, workdir.Mode, "explicit workdir mode is preserved")
+}
+
 func TestCollectCopyDirs_NoCopy(t *testing.T) {
 	workdir := &DirSpec{Path: "/home/user/project", Mode: DirMode("rw")}
 	result := collectCopyDirs(workdir, nil)

@@ -123,14 +123,14 @@ type SandboxCreateOptions struct {
 }
 
 // toInternal maps the public SandboxCreateOptions onto the internal sandbox struct.
-// It folds AllowDirtyWorkdir into the workdir's per-directory AllowDirty and
-// defaults an unset workdir Mode to copy. Version and the interactive flags are
-// not caller inputs — Client.Create stamps Version from the Client.
+// It folds AllowDirtyWorkdir into the workdir's per-directory AllowDirty. Unset
+// dir modes are deliberately NOT defaulted here: the effective workdir/aux set is
+// the product of a profile merge that happens inside the create pipeline (a
+// profile can supply dirs with no mode), so the safe-mode default is applied
+// there, once, after the merge (see create.parseAndValidateDirs). Version and the
+// interactive flags are not caller inputs — Client.Create stamps Version.
 func (o SandboxCreateOptions) toInternal() sandbox.CreateOptions {
 	workdir := o.Workdir
-	if workdir.Mode == "" {
-		workdir.Mode = DirModeCopy
-	}
 	if o.AllowDirtyWorkdir {
 		workdir.AllowDirty = true
 	}

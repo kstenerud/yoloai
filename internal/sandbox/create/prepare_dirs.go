@@ -31,9 +31,6 @@ func parseAndValidateDirs(d state.Deps, opts Options, agentDef *agent.Definition
 	}
 	wd := opts.Workdir
 	workdir := &wd
-	if workdir.Mode == "" {
-		workdir.Mode = "copy"
-	}
 
 	if _, err := os.Stat(workdir.Path); err != nil {
 		return nil, nil, yoerrors.NewUsageError("workdir does not exist: %s", workdir.Path)
@@ -48,6 +45,8 @@ func parseAndValidateDirs(d state.Deps, opts Options, agentDef *agent.Definition
 		return nil, nil, err
 	}
 
+	defaultDirModes(workdir, auxDirs)
+
 	if err := checkDirSafety(workdir, auxDirs, outputFor(opts.Output), d.Layout.HomeDir); err != nil {
 		return nil, nil, err
 	}
@@ -61,6 +60,25 @@ func parseAndValidateDirs(d state.Deps, opts Options, agentDef *agent.Definition
 	}
 
 	return workdir, auxDirs, nil
+}
+
+// defaultDirModes fills any unset directory mode with its safe default — the
+// workdir to :copy (the original is protected via copy/diff/apply) and each aux
+// dir to read-only. This is the single place dir modes are defaulted, and it
+// lives in the pipeline (not at the public boundary) on purpose: the effective
+// workdir/aux set is the product of the profile merge that ran earlier, so a
+// profile-supplied dir with no mode is only fully known here. Because the field
+// is safety-sensitive and the default is the safe choice, resolving "unset" to
+// the safe default does not conflict with resisting defaults — they align.
+func defaultDirModes(workdir *DirSpec, auxDirs []*DirSpec) {
+	if workdir.Mode == "" {
+		workdir.Mode = DirModeCopy
+	}
+	for _, ad := range auxDirs {
+		if ad.Mode == "" {
+			ad.Mode = DirModeRO
+		}
+	}
 }
 
 // checkAuthAndLocalhostWarnings performs auth checks and localhost URL warnings.
@@ -365,9 +383,10 @@ func setupAuxDirs(rt runtime.Runtime, auxDirs []*DirSpec) ([]store.DirEnvironmen
 
 // setupAuxDir prepares a single auxiliary directory and returns its
 // DirEnvironment. After Q-U (2026-05-25) aux dirs only support :rw and the
-// default :ro, both of which are pure mounts with no host-side
-// preparation — the function just normalises mode and packs the meta.
-// The CLI / MCP boundary rejects :copy and :overlay via
+// default :ro, both of which are pure mounts with no host-side preparation —
+// the function just packs the meta. The mode is already resolved (unset modes
+// were defaulted to :ro in parseAndValidateDirs), so it is trusted verbatim
+// here. The CLI / MCP boundary rejects :copy and :overlay via
 // sandbox.ParseAuxDirArg, so they can't reach here.
 //
 // MountPath is recorded as the guest-visible path: backends that re-root
@@ -376,14 +395,10 @@ func setupAuxDirs(rt runtime.Runtime, auxDirs []*DirSpec) ([]store.DirEnvironmen
 // CLAUDE.md, `info`, and MCP {dir:N} placeholders don't point at a path that
 // doesn't exist in the guest. Identity for backends without translation.
 func setupAuxDir(rt runtime.Runtime, ad *DirSpec) (store.DirEnvironment, error) {
-	mode := ad.Mode
-	if mode == "" {
-		mode = DirModeRO
-	}
 	return store.DirEnvironment{
 		HostPath:  ad.Path,
 		MountPath: runtime.ResolveGuestMountPathFor(rt, ad.ResolvedMountPath()),
-		Mode:      mode,
+		Mode:      ad.Mode,
 	}, nil
 }
 
