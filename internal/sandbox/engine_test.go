@@ -29,6 +29,7 @@ type mockRuntime struct {
 	isReadyErr    error // error returned by IsReady
 	setupCalled   bool  // whether Setup was invoked
 	setupErr      error // error returned by Setup
+	closeCalls    int   // how many times Close was invoked
 }
 
 // Compile-time check.
@@ -76,6 +77,7 @@ func (m *mockRuntime) InteractiveExec(_ context.Context, _ string, _ []string, _
 }
 
 func (m *mockRuntime) Close() error {
+	m.closeCalls++
 	return nil
 }
 
@@ -306,4 +308,47 @@ func TestEngine_Close_NoopWhenUnopened(t *testing.T) {
 	layout := config.NewLayout(filepath.Join(t.TempDir(), ".yoloai"))
 	e := NewEngine("docker", slog.Default(), strings.NewReader(""), WithLayout(layout))
 	assert.NoError(t, e.Close(), "Close on an unopened Engine is a no-op")
+}
+
+// Close is terminal: after Close, a backend-bound op fails with ErrClosed rather
+// than reconnecting. The injected runtime is closed exactly once and released,
+// and the lazy factory is never invoked to re-dial.
+func TestEngine_Close_IsTerminal(t *testing.T) {
+	mock := &mockRuntime{}
+	layout := config.NewLayout(filepath.Join(t.TempDir(), ".yoloai"))
+	e := NewEngineWithRuntime(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
+
+	require.NoError(t, e.Close())
+	assert.Equal(t, 1, mock.closeCalls, "Close must close the underlying runtime once")
+	assert.Nil(t, e.runtime, "Close must release the runtime reference for GC")
+
+	err := e.ensure(context.Background())
+	assert.ErrorIs(t, err, ErrClosed, "backend-bound op after Close must return ErrClosed")
+	assert.Equal(t, 1, mock.closeCalls, "ensure after Close must not reconnect or re-close")
+}
+
+// Close is idempotent: a second Close is a no-op and does not double-close the
+// underlying runtime.
+func TestEngine_Close_Idempotent(t *testing.T) {
+	mock := &mockRuntime{}
+	layout := config.NewLayout(filepath.Join(t.TempDir(), ".yoloai"))
+	e := NewEngineWithRuntime(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
+
+	require.NoError(t, e.Close())
+	require.NoError(t, e.Close(), "second Close is a no-op")
+	assert.Equal(t, 1, mock.closeCalls, "idempotent Close must not double-close the runtime")
+}
+
+// Closing a never-opened Engine still latches terminal: a later backend-bound op
+// returns ErrClosed instead of lazily opening the backend.
+func TestEngine_Close_BlocksLazyOpenAfterwards(t *testing.T) {
+	registerLazyOpenMock(t)
+	lazyOpenCount.Store(0)
+	layout := config.NewLayout(filepath.Join(t.TempDir(), ".yoloai"))
+	e := NewEngine("lazyopenmock", slog.Default(), strings.NewReader(""), WithLayout(layout))
+
+	require.NoError(t, e.Close(), "Close on an unopened Engine is a no-op")
+	err := e.ensure(context.Background())
+	assert.ErrorIs(t, err, ErrClosed, "ensure after Close must not lazily open the backend")
+	assert.Equal(t, int64(0), lazyOpenCount.Load(), "the backend factory must never run after Close")
 }

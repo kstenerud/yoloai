@@ -4,6 +4,7 @@ package sandbox
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -47,6 +48,7 @@ type Engine struct {
 	// is then stable for the Engine's lifetime.
 	mutex   sync.Mutex
 	opened  bool
+	closed  bool
 	runtime runtime.Runtime
 }
 
@@ -55,6 +57,15 @@ type Engine struct {
 // Engine still serves host-only reads. The yoloai root package re-exports this
 // sentinel as yoloai.ErrBackendRequired.
 var ErrBackendRequired = yoerrors.NewUsageError("yoloai: this operation requires a backend, but the Client was constructed without ClientCreateOptions.BackendType (backend-less). Set ClientCreateOptions.BackendType (e.g. via yoloai.SelectBackend) to enable backend-bound operations. See development-principles.md §4.")
+
+// ErrClosed is returned by backend-bound Engine operations after Close has been
+// called. Close is terminal: it releases the backend connection and the Engine
+// is not reusable — a subsequent backend-bound op fails with ErrClosed rather
+// than silently reconnecting or running against a dead connection. Detect with
+// errors.Is. Pure host-only reads (reached via System/Sandbox handles) do not
+// touch the runtime and are unaffected. The yoloai root package re-exports this
+// sentinel as yoloai.ErrClosed.
+var ErrClosed = errors.New("yoloai: client is closed")
 
 // EngineOption configures an Engine.
 type EngineOption func(*Engine)
@@ -143,6 +154,9 @@ func newEngine(backend runtime.BackendType, rt runtime.Runtime, opened bool, log
 func (e *Engine) ensure(ctx context.Context) error {
 	e.mutex.Lock()
 	defer e.mutex.Unlock()
+	if e.closed {
+		return ErrClosed
+	}
 	if e.opened {
 		return nil
 	}
@@ -167,15 +181,24 @@ func (e *Engine) TryEnsure(ctx context.Context) {
 	_ = e.ensure(ctx) //nolint:errcheck // best-effort: callers fall back to a host-only path when runtime stays nil
 }
 
-// Close releases the underlying runtime connection, if one was ever opened.
-// A no-op on an Engine whose backend was never used.
+// Close releases the underlying runtime connection, if one was ever opened, and
+// marks the Engine terminally closed: subsequent backend-bound operations return
+// ErrClosed rather than reconnecting or running against the released connection.
+// Idempotent — a second Close is a no-op. Pure host-only reads (via the
+// System/Sandbox handles) never touch the runtime and remain usable.
 func (e *Engine) Close() error {
 	e.mutex.Lock()
 	defer e.mutex.Unlock()
+	if e.closed {
+		return nil
+	}
+	e.closed = true
 	if !e.opened || e.runtime == nil {
 		return nil
 	}
-	return e.runtime.Close()
+	rt := e.runtime
+	e.runtime = nil
+	return rt.Close()
 }
 
 // deps bundles the Engine's runtime, layout, and input into state.Deps for the

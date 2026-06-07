@@ -160,8 +160,24 @@ func NewClient(ctx context.Context, opts ClientCreateOptions) (*Client, error) {
 // internal/sandbox, where the lazy backend connection it guards now lives (D74).
 var ErrBackendRequired = sandbox.ErrBackendRequired
 
-// Close releases the Engine's backend connection, if one was ever opened.
-// A no-op on a Client whose backend was never used.
+// ErrClosed is returned by backend-bound operations called after Close. Close is
+// terminal — the Client is not reusable once closed. Detect with errors.Is.
+// Re-exported from internal/sandbox. See Close.
+var ErrClosed = sandbox.ErrClosed
+
+// Close releases the backend connection, if one was ever opened, and terminally
+// closes the Client: subsequent backend-bound operations return ErrClosed rather
+// than reconnecting or running against the released connection. Idempotent — a
+// second Close is a no-op. Pure host-only reads via System() and Sandbox() never
+// touch the backend and remain usable after Close.
+//
+// Embedders MUST call Close when done with a Client. Dropping a Client without
+// Close does not deterministically release the backend connection: nothing sets
+// a finalizer, so a Docker/containerd client's idle sockets persist until the Go
+// runtime eventually GCs the underlying fds. Long-lived hosts that create many
+// Clients will leak connections without an explicit Close. (Backend-less, Tart,
+// and Seatbelt Clients hold no persistent connection, so Close is a pure no-op
+// for them.)
 func (c *Client) Close() error {
 	return c.engine.Close()
 }
