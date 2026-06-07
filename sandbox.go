@@ -19,6 +19,13 @@ import (
 	"github.com/kstenerud/yoloai/yoerrors"
 )
 
+// ErrSandboxDestroyed is returned by error-returning methods on a *Sandbox
+// handle after Destroy has successfully run on that same handle. The handle is
+// a name-binding, not a lease, so it is not nil'd on destroy; this sentinel
+// turns a reuse-after-destroy into a precise, matchable refusal rather than the
+// generic ErrSandboxNotFound the underlying read would otherwise produce.
+var ErrSandboxDestroyed = yoerrors.NewUsageError("yoloai: this Sandbox handle was destroyed; obtain a fresh handle via Client.Sandbox after re-creating the sandbox")
+
 // Sandbox is a name-scoped handle for a single sandbox. The handle is
 // validated at construction (see Client.Sandbox), so methods on it can
 // assume the sandbox exists.
@@ -30,6 +37,20 @@ import (
 type Sandbox struct {
 	client *Client
 	name   string
+	// destroyed is set by a successful Destroy on this handle. Once set, every
+	// error-returning method short-circuits with ErrSandboxDestroyed instead of
+	// operating on a name whose backing state is gone. Pure path getters and the
+	// sub-handle accessors (no error to return) are unaffected.
+	destroyed bool
+}
+
+// checkNotDestroyed is the guard every error-returning method runs first: it
+// refuses a handle whose sandbox this handle already destroyed.
+func (s *Sandbox) checkNotDestroyed() error {
+	if s.destroyed {
+		return ErrSandboxDestroyed
+	}
+	return nil
 }
 
 // Name returns the sandbox name this handle is bound to. Useful for
@@ -60,6 +81,9 @@ func (s *Sandbox) Network() *Network {
 // wanted, not live state. For combined metadata + live status on a connected
 // client, use Inspect instead.
 func (s *Sandbox) Metadata() (*Environment, error) {
+	if err := s.checkNotDestroyed(); err != nil {
+		return nil, err
+	}
 	meta, err := store.LoadEnvironment(s.client.layout.SandboxDir(s.name))
 	if err != nil {
 		return nil, err
@@ -69,6 +93,9 @@ func (s *Sandbox) Metadata() (*Environment, error) {
 
 // Inspect returns combined metadata and live state for the sandbox.
 func (s *Sandbox) Inspect(ctx context.Context) (*SandboxInfo, error) {
+	if err := s.checkNotDestroyed(); err != nil {
+		return nil, err
+	}
 	if err := s.client.ensure(ctx); err != nil {
 		return nil, err
 	}
@@ -89,6 +116,9 @@ func (s *Sandbox) Dir() string {
 
 // Stop stops the running container without destroying the sandbox.
 func (s *Sandbox) Stop(ctx context.Context) error {
+	if err := s.checkNotDestroyed(); err != nil {
+		return err
+	}
 	if err := s.client.ensure(ctx); err != nil {
 		return err
 	}
@@ -109,6 +139,9 @@ func (s *Sandbox) Stop(ctx context.Context) error {
 // The returned *Sandbox is dormant — the container is NOT started. Call
 // Sandbox.Start to launch the agent on the clone.
 func (s *Sandbox) Clone(ctx context.Context, dest string, opts SandboxCloneOptions) (*Sandbox, error) {
+	if err := s.checkNotDestroyed(); err != nil {
+		return nil, err
+	}
 	if err := s.client.ensure(ctx); err != nil {
 		return nil, err
 	}
@@ -126,6 +159,9 @@ func (s *Sandbox) Clone(ctx context.Context, dest string, opts SandboxCloneOptio
 // Start launches (or relaunches) the container for the existing sandbox.
 // The sandbox must exist on disk; use Client.CreateSandbox for a new one.
 func (s *Sandbox) Start(ctx context.Context, opts SandboxStartOptions) (*StartResult, error) {
+	if err := s.checkNotDestroyed(); err != nil {
+		return nil, err
+	}
 	if err := s.client.ensure(ctx); err != nil {
 		return nil, err
 	}
@@ -136,6 +172,9 @@ func (s *Sandbox) Start(ctx context.Context, opts SandboxStartOptions) (*StartRe
 // (e.g. StartOptions.Isolation to bring it up under a different isolation
 // mode, StartOptions.Resume to re-feed the prompt).
 func (s *Sandbox) Restart(ctx context.Context, opts SandboxStartOptions) (*StartResult, error) {
+	if err := s.checkNotDestroyed(); err != nil {
+		return nil, err
+	}
 	if err := s.client.ensure(ctx); err != nil {
 		return nil, err
 	}
@@ -190,6 +229,9 @@ type SandboxWaitOptions struct {
 // is met. If opts.Timeout elapses first it returns the last-observed info with
 // ErrWaitTimeout; if the passed ctx is cancelled it returns ctx.Err().
 func (s *Sandbox) Wait(ctx context.Context, opts SandboxWaitOptions) (*SandboxInfo, error) {
+	if err := s.checkNotDestroyed(); err != nil {
+		return nil, err
+	}
 	if err := s.client.ensure(ctx); err != nil {
 		return nil, err
 	}
@@ -255,6 +297,9 @@ func waitConditionMet(st Status, cond WaitCondition) bool {
 // (per opts) optionally restarts the container and wipes agent state. Use for
 // "start over" workflows that abandon the agent's current changes.
 func (s *Sandbox) Reset(ctx context.Context, opts SandboxResetOptions) (*ResetResult, error) {
+	if err := s.checkNotDestroyed(); err != nil {
+		return nil, err
+	}
 	if err := s.client.ensure(ctx); err != nil {
 		return nil, err
 	}
@@ -276,6 +321,9 @@ func (s *Sandbox) HasActiveWork(ctx context.Context) (bool, string) {
 // *ActiveWorkError carrying the reason — the caller prompts and retries with
 // AbandonUnappliedWork true. Atomic: no check-then-act gap.
 func (s *Sandbox) Destroy(ctx context.Context, opts SandboxDestroyOptions) (*DestroyResult, error) {
+	if err := s.checkNotDestroyed(); err != nil {
+		return nil, err
+	}
 	if err := s.client.ensure(ctx); err != nil {
 		return nil, err
 	}
@@ -284,7 +332,12 @@ func (s *Sandbox) Destroy(ctx context.Context, opts SandboxDestroyOptions) (*Des
 			return nil, yoerrors.NewActiveWorkError("%s", reason)
 		}
 	}
-	return lifecycle.Destroy(ctx, s.client.deps(), s.name)
+	res, err := lifecycle.Destroy(ctx, s.client.deps(), s.name)
+	if err != nil {
+		return nil, err
+	}
+	s.destroyed = true
+	return res, nil
 }
 
 // Exec runs opts.Command inside the sandbox's container. With opts.PTY true it
@@ -295,6 +348,9 @@ func (s *Sandbox) Destroy(ctx context.Context, opts SandboxDestroyOptions) (*Des
 // (Tart/Seatbelt don't). A non-zero inner exit surfaces uniformly across
 // backends as *ExecExitError carrying the inner command's status code.
 func (s *Sandbox) Exec(ctx context.Context, opts SandboxExecOptions, io IOStreams) error {
+	if err := s.checkNotDestroyed(); err != nil {
+		return err
+	}
 	if err := s.client.ensure(ctx); err != nil {
 		return err
 	}
@@ -489,6 +545,9 @@ func (s *Sandbox) LogPaths() LogPaths {
 // surfaces a *UsageError when the recorded holder process is still alive. This
 // is a host-filesystem operation and does not require a running backend.
 func (s *Sandbox) Unlock() (cleared bool, err error) {
+	if err := s.checkNotDestroyed(); err != nil {
+		return false, err
+	}
 	return store.ForceUnlock(s.client.layout, s.name)
 }
 
@@ -509,6 +568,9 @@ type VscodeAttach struct {
 // sandbox metadata and the backend's declared capabilities — no running backend
 // is required.
 func (s *Sandbox) VscodeAttach() (*VscodeAttach, error) {
+	if err := s.checkNotDestroyed(); err != nil {
+		return nil, err
+	}
 	sandboxDir := s.client.layout.SandboxDir(s.name)
 	if err := store.RequireSandboxDir(sandboxDir); err != nil {
 		return nil, sandbox.ErrSandboxNotFound

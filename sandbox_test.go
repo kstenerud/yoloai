@@ -209,3 +209,52 @@ func TestVscodeAttach_NotFound(t *testing.T) {
 	_, err := c.Sandbox("ghost")
 	require.ErrorIs(t, err, ErrSandboxNotFound)
 }
+
+// TestSandbox_DestroyedHandle_RefusesEveryErrorReturningMethod pins the
+// reuse-after-destroy contract: once a handle's destroyed flag is set, every
+// error-returning method short-circuits with ErrSandboxDestroyed before
+// touching disk or the backend. The guard runs first, so a backend-less Client
+// suffices — none of these reach ensure/engine.
+func TestSandbox_DestroyedHandle_RefusesEveryErrorReturningMethod(t *testing.T) {
+	c := vscodeClient(t, nil) // backend-less; the guard must fire before any IO
+	ctx := context.Background()
+	sb := &Sandbox{client: c, name: "box", destroyed: true}
+
+	ops := map[string]func() error{
+		"Metadata":     func() error { _, err := sb.Metadata(); return err },
+		"Inspect":      func() error { _, err := sb.Inspect(ctx); return err },
+		"Stop":         func() error { return sb.Stop(ctx) },
+		"Clone":        func() error { _, err := sb.Clone(ctx, "dest", SandboxCloneOptions{}); return err },
+		"Start":        func() error { _, err := sb.Start(ctx, SandboxStartOptions{}); return err },
+		"Restart":      func() error { _, err := sb.Restart(ctx, SandboxStartOptions{}); return err },
+		"Wait":         func() error { _, err := sb.Wait(ctx, SandboxWaitOptions{}); return err },
+		"Reset":        func() error { _, err := sb.Reset(ctx, SandboxResetOptions{}); return err },
+		"Destroy":      func() error { _, err := sb.Destroy(ctx, SandboxDestroyOptions{}); return err },
+		"Exec":         func() error { return sb.Exec(ctx, SandboxExecOptions{Command: []string{"true"}}, IOStreams{}) },
+		"Unlock":       func() error { _, err := sb.Unlock(); return err },
+		"VscodeAttach": func() error { _, err := sb.VscodeAttach(); return err },
+	}
+
+	for name, op := range ops {
+		t.Run(name, func(t *testing.T) {
+			assert.ErrorIs(t, op(), ErrSandboxDestroyed)
+		})
+	}
+}
+
+// A live handle (destroyed flag unset) must NOT be refused by the guard — the
+// guard is the only thing the destroyed flag gates, so an unset flag lets the
+// call proceed to its normal path (here, a host-only read that succeeds).
+func TestSandbox_LiveHandle_PassesGuard(t *testing.T) {
+	c := vscodeClient(t, &store.Environment{
+		Name:        "box",
+		AgentType:   "test",
+		BackendType: BackendDocker,
+		Workdir:     store.WorkdirEnvironment{HostPath: "/proj", MountPath: "/proj", Mode: store.DirModeCopy},
+	})
+	sb, err := c.Sandbox("box")
+	require.NoError(t, err)
+
+	_, err = sb.Metadata()
+	assert.NotErrorIs(t, err, ErrSandboxDestroyed, "a live handle must not trip the destroyed guard")
+}
