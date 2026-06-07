@@ -5,7 +5,7 @@ Code navigation guide for the yoloAI codebase — the source of truth for **wher
 ## Package Map
 
 ```
-client.go                → Orchestration spine: Client (Run, List, Clone, Create, EnsureSetup)
+client.go                → Orchestration spine: Client (CreateSandbox, ListSandboxes, EnsureSetup)
 backend.go               → Package-level backend selection (SelectBackend, IsolationAvailability)
 sandbox.go               → Sandbox handle: lifecycle + flat readers (Inspect, Unlock, VscodeAttach, paths) + its option/read-model types
 system.go                → Orchestration spine: System (DiskUsage, Prune, Build, Check)
@@ -56,7 +56,7 @@ Dependency direction (W-L8 + W-L12 shape): `cmd/yoloai` → `internal/cli` → `
 
 | File | Purpose |
 |------|---------|
-| `client.go` | Orchestration spine — `Client` and its root methods (`ListSandboxes`, `CloneSandbox`, `CreateSandbox`, `EnsureSetup`) plus `SandboxCloneOptions` and the lazy-runtime construction helpers (`NewClient`, `ensure`, `newRuntime`). `CreateSandbox`/`CloneSandbox` provision dormant `*Sandbox` handles (no launch). Registers Docker, Podman, Seatbelt, and Tart backends via blank imports. |
+| `client.go` | Orchestration spine — `Client` and its root methods (`ListSandboxes`, `CreateSandbox`, `EnsureSetup`) plus the lazy-runtime construction helpers (`NewClient`, `ensure`, `newRuntime`) and `destroyForOverwrite` (shared by `Sandbox.Clone`). `CreateSandbox` provisions a dormant `*Sandbox` handle (no launch); cloning lives on `Sandbox.Clone`. Registers Docker, Podman, Seatbelt, and Tart backends via blank imports. |
 | `client_options.go` | `ClientCreateOptions` — the construction-time config `NewClient` takes (data/home dirs, optional `BackendType`, IO, env snapshot, principal). |
 | `sandbox_options.go` | The public sandbox option types: `SandboxCreateOptions` (the surface `Client.CreateSandbox` takes), plus `toInternal` mapping and port formatting. |
 | `system_config.go` | `ConfigAdmin` sub-handle (`Client.System().Config()`): `Effective`/`Get`/`Set`/`Reset` over the config files. |
@@ -397,7 +397,7 @@ On-disk sandbox state — paths, metadata, and creation-completion flags. Leaf s
 ## Key Types
 
 ### `yoloai.Client`
-High-level public API for library consumers. Wraps `sandbox.Engine` and `runtime.Runtime`. The `Client` root provides `CreateSandbox()`, `CloneSandbox()`, `ListSandboxes()`; per-sandbox verbs (`Start`, `Wait`, `Inspect`, `Stop`, `Destroy`, `Workdir().Diff/Apply`, …) live on the `*Sandbox` handle. Configured via `ClientCreateOptions` (backend, logger, output, input). `SandboxCreateOptions` mirrors CLI flags for `yoloai new`.
+High-level public API for library consumers. Wraps `sandbox.Engine` and `runtime.Runtime`. The `Client` root provides `CreateSandbox()`, `ListSandboxes()`; per-sandbox verbs (`Start`, `Wait`, `Inspect`, `Stop`, `Destroy`, `Clone`, `Workdir().Diff/Apply`, …) live on the `*Sandbox` handle. Configured via `ClientCreateOptions` (backend, logger, output, input). `SandboxCreateOptions` mirrors CLI flags for `yoloai new`.
 
 ### `sandbox.Engine`
 Central orchestrator. Holds a `runtime.Runtime`, backend name, logger, and I/O streams. All sandbox operations go through it: `Create()`, `Start()`, `Stop()`, `Destroy()`, `Reset()`, `Clone()`, `Inspect()`, `List()`, `EnsureSetup()`. The backend name is stored so it can be persisted in `Environment` at sandbox creation time.
@@ -472,7 +472,7 @@ Host context: `IsRoot`, `IsWSL2`, `InContainer`, `KVMGroup`. Detected once per i
 | `yoloai destroy` | `cli/lifecycle/destroy.go:NewDestroyCmd` | `yoloai.Client.Destroy()` |
 | `yoloai reset` | `cli/lifecycle/reset.go:NewResetCmd` | `yoloai.Client.Reset()` |
 | `yoloai restart` | `cli/lifecycle/restart.go:NewRestartCmd` | `yoloai.Client.Restart()` |
-| `yoloai clone` | `cli/lifecycle/clone.go:NewCloneCmd` | `yoloai.Client.CloneSandbox()` |
+| `yoloai clone` | `cli/lifecycle/clone.go:NewCloneCmd` | `yoloai.Sandbox.Clone()` |
 | `yoloai system info` | `cli/system/info.go` | Version, paths, disk usage, backend availability |
 | `yoloai system agents` | `cli/system/backends_agents.go` | Lists agent definitions from `agent` package |
 | `yoloai system backends` | `cli/system/backends_agents.go` | Probes each backend via `cliutil.CheckBackend` |

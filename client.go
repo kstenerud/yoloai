@@ -1,14 +1,14 @@
-// ABOUTME: Public high-level Client API (CreateSandbox, CloneSandbox, ListSandboxes, plus the
+// ABOUTME: Public high-level Client API (CreateSandbox, ListSandboxes, plus the
 // ABOUTME: Sandbox/System sub-handles) for embedding yoloAI in Go programs.
 // Package yoloai is the orchestration layer for yoloAI. Both the CLI
 // (internal/cli) and external embedders use it as the entry point for
 // running AI coding agents in isolated sandboxes.
 //
 // One Client is the entry point. It owns creation and cross-sandbox
-// operations (CreateSandbox, CloneSandbox, ListSandboxes) plus the
+// operations (CreateSandbox, ListSandboxes) plus the
 // per-sandbox handle accessor
 // Sandbox(name); per-sandbox operations (Inspect, Start, Stop, Restart, Reset,
-// Destroy, Exec, and the Workdir/Network/Agent sub-handles) live on that
+// Destroy, Exec, Clone, and the Workdir/Network/Agent sub-handles) live on that
 // *Sandbox handle, not the Client root. The backend connection is opened
 // lazily on the first backend-bound operation, so ClientCreateOptions.BackendType
 // is optional: a backend-less Client still serves host-only reads (Sandbox.Metadata,
@@ -163,7 +163,7 @@ func NewClient(ctx context.Context, opts ClientCreateOptions) (*Client, error) {
 }
 
 // ErrBackendRequired is returned by backend-bound operations (Exec, Attach,
-// Start, Stop, lifecycle, CreateSandbox, ListSandboxes, CloneSandbox, …) when the Client was
+// Start, Stop, lifecycle, Clone, CreateSandbox, ListSandboxes, …) when the Client was
 // constructed without ClientCreateOptions.BackendType. A backend-less Client
 // still serves host-only reads (Workdir host-git, on-disk allowlist, filesystem
 // readers) and, via System(), cross-backend admin. Set
@@ -252,48 +252,6 @@ func (c *Client) ListSandboxes(ctx context.Context) ([]*SandboxInfo, error) {
 		return nil, err
 	}
 	return sandboxInfosFromStatus(sis), nil
-}
-
-// SandboxCloneOptions configures Client.CloneSandbox. Hand-written rather than aliased so the
-// public surface doesn't expose internal/sandbox.CloneOptions. Overwrite (not
-// "Force") is the concern-specific name per the Q-J field audit — "Force" stays
-// a CLI flag only.
-type SandboxCloneOptions struct {
-	Source    string // existing sandbox name to copy from; required
-	Dest      string // new sandbox name; required
-	Overwrite bool   // destroy Dest first if it already exists
-}
-
-func (o SandboxCloneOptions) toInternal() sandbox.CloneOptions {
-	return sandbox.CloneOptions{Source: o.Source, Dest: o.Dest}
-}
-
-// Clone copies an existing sandbox's state into a new sandbox. Although the
-// copy itself is a disk-only deep-copy of the source sandbox dir under
-// DataDir/sandboxes/, Clone is backend-bound: it goes through the Engine (and,
-// under opts.Overwrite, tears the destination down through the runtime), so a
-// backend-less Client returns ErrBackendRequired. This matches real clone
-// workflows, which almost always start the destination right after. Embedders
-// wanting a pure offline copy should copy the sandbox dir themselves.
-//
-// With opts.Overwrite set, an existing destination is destroyed before the
-// copy; without it, an existing destination is a hard error.
-//
-// The returned *Sandbox is dormant — the container is NOT started. Call
-// Sandbox.Start to launch the agent on the clone.
-func (c *Client) CloneSandbox(ctx context.Context, opts SandboxCloneOptions) (*Sandbox, error) {
-	if err := c.ensure(ctx); err != nil {
-		return nil, err
-	}
-	if opts.Overwrite {
-		if err := c.destroyForOverwrite(ctx, opts.Dest); err != nil {
-			return nil, err
-		}
-	}
-	if err := c.engine.Clone(ctx, opts.toInternal()); err != nil {
-		return nil, err
-	}
-	return &Sandbox{c: c, name: opts.Dest}, nil
 }
 
 // destroyForOverwrite tears down a pre-existing destination sandbox so a clone

@@ -158,6 +158,14 @@ func (o SandboxCreateOptions) toInternal() sandbox.CreateOptions {
 	}
 }
 
+// SandboxCloneOptions configures Sandbox.Clone. Source (the receiver sandbox)
+// and Dest (the Clone argument) are not fields here — only the optional
+// behavior knob is. Overwrite (not "Force") is the concern-specific name per
+// the Q-J field audit — "Force" stays a CLI flag only.
+type SandboxCloneOptions struct {
+	Overwrite bool // destroy the destination first if it already exists
+}
+
 // formatPorts renders public PortMappings into the "host:container" strings the
 // internal create path parses (parsePortBindings; tcp-only).
 func formatPorts(ports []PortMapping) []string {

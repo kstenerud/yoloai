@@ -36,9 +36,10 @@ that shipped on the prior stable surface change; this is the entire Go migration
   `.Stop(ctx)`, `.Destroy(ctx, …)`), and route diff/apply through
   `.Sandbox(name).Workdir()`. `Close` remains on `Client`.
 - `List` → `ListSandboxes`. The sandbox verbs on the root `Client` now name
-  their noun: `ListSandboxes`, `CreateSandbox`, and `CloneSandbox` (the latter
-  two were introduced in this same reshape). `Client` is a multi-noun root —
-  the bare verbs didn't say what they acted on.
+  their noun: `ListSandboxes` and `CreateSandbox` (the latter introduced in this
+  same reshape). `Client` is a multi-noun root — the bare verbs didn't say what
+  they acted on. Cloning is a per-sandbox operation off the source handle,
+  `Sandbox.Clone` (see "Creation is dormant" below).
 
 Field semantics and zero values are otherwise unchanged — only the names and
 receivers move.
@@ -87,17 +88,27 @@ rather than reading the process environment.
   `"no-commit"`). See the `yoloai apply` entry below for the commits-only default and
   `--include-uncommitted`.
 
-### Creation is dormant; `CreateSandbox`/`CloneSandbox` return a live `*Sandbox`
+### Creation is dormant; `CreateSandbox` / `Sandbox.Clone` return a live `*Sandbox`
 
-`CreateSandbox` and `CloneSandbox` now *provision only* — they no longer launch the
-container. Each returns a live but unstarted `*Sandbox` handle (was `(string, error)`
-for create, `error` for clone), so embedders no longer make a second `Sandbox(name)`
-lookup. Launch is an explicit, separate step:
+`CreateSandbox` and the new `Sandbox.Clone` now *provision only* — they no longer
+launch the container. Each returns a live but unstarted `*Sandbox` handle (was
+`(string, error)` for create, `error` for clone), so embedders no longer make a second
+`Sandbox(name)` lookup. Cloning moved off the `Client` root onto the source sandbox
+handle — `srcSb.Clone(ctx, dest, SandboxCloneOptions{Overwrite: …})` — since the source
+is a pre-existing noun; `SandboxCloneOptions` keeps only `Overwrite` (Source is the
+receiver, Dest is the argument). Launch is an explicit, separate step:
 
 ```go
 sb, err := client.CreateSandbox(ctx, yoloai.SandboxCreateOptions{ … })
 if err != nil { … }
 if _, err := sb.Start(ctx, yoloai.SandboxStartOptions{}); err != nil { … }
+
+// clone:
+srcSb, err := client.Sandbox("source")
+if err != nil { … }
+clone, err := srcSb.Clone(ctx, "dest", yoloai.SandboxCloneOptions{})
+if err != nil { … }
+if _, err := clone.Start(ctx, yoloai.SandboxStartOptions{}); err != nil { … }
 ```
 
 `Sandbox.Start` already owned first-launch (its `StatusRemoved` path does the

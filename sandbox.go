@@ -95,6 +95,34 @@ func (s *Sandbox) Stop(ctx context.Context) error {
 	return lifecycle.Stop(ctx, s.c.deps(), s.name)
 }
 
+// Clone copies this sandbox's state into a new sandbox named dest. Although the
+// copy itself is a disk-only deep-copy of the source sandbox dir under
+// DataDir/sandboxes/, Clone is backend-bound: it goes through the Engine (and,
+// under opts.Overwrite, tears the destination down through the runtime), so a
+// backend-less Client returns ErrBackendRequired. This matches real clone
+// workflows, which almost always start the destination right after. Embedders
+// wanting a pure offline copy should copy the sandbox dir themselves.
+//
+// With opts.Overwrite set, an existing destination is destroyed before the
+// copy; without it, an existing destination is a hard error.
+//
+// The returned *Sandbox is dormant — the container is NOT started. Call
+// Sandbox.Start to launch the agent on the clone.
+func (s *Sandbox) Clone(ctx context.Context, dest string, opts SandboxCloneOptions) (*Sandbox, error) {
+	if err := s.c.ensure(ctx); err != nil {
+		return nil, err
+	}
+	if opts.Overwrite {
+		if err := s.c.destroyForOverwrite(ctx, dest); err != nil {
+			return nil, err
+		}
+	}
+	if err := s.c.engine.Clone(ctx, sandbox.CloneOptions{Source: s.name, Dest: dest}); err != nil {
+		return nil, err
+	}
+	return &Sandbox{c: s.c, name: dest}, nil
+}
+
 // Start launches (or relaunches) the container for the existing sandbox.
 // The sandbox must exist on disk; use Client.CreateSandbox for a new one.
 func (s *Sandbox) Start(ctx context.Context, opts SandboxStartOptions) (*StartResult, error) {

@@ -1,5 +1,5 @@
 // ABOUTME: Unit tests for the *Sandbox handle — its option types
-// ABOUTME: (Clone/Reset→internal mapping), the name-binding accessor, the
+// ABOUTME: (Reset→internal mapping), the name-binding accessor, the
 // ABOUTME: runtime-free path getters, Unlock, and VscodeAttach resolution.
 
 package yoloai
@@ -17,7 +17,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 )
 
@@ -47,12 +46,6 @@ func TestExecExitError_PassesThroughOtherErrors(t *testing.T) {
 	sentinel := errors.New("not an exit error")
 	assert.Same(t, sentinel, execExitError(sentinel), "non-exec errors are returned unchanged")
 	assert.NoError(t, execExitError(nil), "nil stays nil")
-}
-
-func TestCloneOptions_toInternal(t *testing.T) {
-	in := SandboxCloneOptions{Source: "src", Dest: "dst", Overwrite: true}.toInternal()
-	assert.Equal(t, sandbox.CloneOptions{Source: "src", Dest: "dst"}, in,
-		"Overwrite is an orchestration-layer concern, not carried into the Engine clone")
 }
 
 // destroyForOverwrite must short-circuit (and never touch the runtime) when the

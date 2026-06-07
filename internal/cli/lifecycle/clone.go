@@ -43,11 +43,15 @@ func runClone(cmd *cobra.Command, args []string) error {
 	// Source's backend governs the rest of the flow: after clone, dst inherits
 	// src's backend (copied via environment.json), so Start needs the same backend.
 	// Overwriting a pre-existing destination (which may live on a different
-	// backend) is handled inside Client.Clone via the Overwrite option.
+	// backend) is handled inside Sandbox.Clone via the Overwrite option.
 	backend := cliutil.ResolveBackendForSandbox(src)
 	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		slog.Info("cloning sandbox", "event", "sandbox.clone", "source", src, "dest", dst) //nolint:gosec // G706: src/dst are validated sandbox names
-		sb, err := c.CloneSandbox(ctx, yoloai.SandboxCloneOptions{Source: src, Dest: dst, Overwrite: force})
+		srcSb, err := c.Sandbox(src)
+		if err != nil {
+			return err
+		}
+		sb, err := srcSb.Clone(ctx, dst, yoloai.SandboxCloneOptions{Overwrite: force})
 		if err != nil {
 			return err
 		}
