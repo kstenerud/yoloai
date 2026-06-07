@@ -195,3 +195,15 @@ func (a *Agent) Attach(ctx context.Context, io IOStreams) error {
 	cmd := a.s.c.rt.AttachCommand(sock, io.Rows, io.Cols, info.Environment.Isolation)
 	return execExitError(a.s.c.rt.InteractiveExec(ctx, containerName, cmd, user, "", io))
 }
+
+// attachStatusOK returns nil if the sandbox status permits attach,
+// otherwise a typed error suitable for the CLI exit-code mapping.
+func attachStatusOK(status sandbox.Status, name string) error {
+	switch status {
+	case sandbox.StatusActive, sandbox.StatusIdle, sandbox.StatusDone, sandbox.StatusFailed:
+		return nil
+	default:
+		// StatusStopped, StatusRemoved, StatusBroken, StatusUnavailable
+		return fmt.Errorf("sandbox %q: %w", name, sandbox.ErrContainerNotRunning)
+	}
+}

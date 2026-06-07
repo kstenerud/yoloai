@@ -316,18 +316,6 @@ type IOStreams = runtime.IOStreams
 // runtime.TermSize so embedders need not import runtime directly.
 type TermSize = runtime.TermSize
 
-// attachStatusOK returns nil if the sandbox status permits attach,
-// otherwise a typed error suitable for the CLI exit-code mapping.
-func attachStatusOK(status sandbox.Status, name string) error {
-	switch status {
-	case sandbox.StatusActive, sandbox.StatusIdle, sandbox.StatusDone, sandbox.StatusFailed:
-		return nil
-	default:
-		// StatusStopped, StatusRemoved, StatusBroken, StatusUnavailable
-		return fmt.Errorf("sandbox %q: %w", name, sandbox.ErrContainerNotRunning)
-	}
-}
-
 // EnsureSetup performs idempotent first-run setup: scaffolds the DataDir,
 // materializes safe declarative defaults (defaults/config.yaml,
 // defaults/tmux.conf), builds the base image if needed, and stamps the
