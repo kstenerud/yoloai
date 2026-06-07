@@ -19,6 +19,9 @@ import (
 // thin delegation. A non-zero inner exit surfaces as the runtime's *ExecError,
 // which the library boundary translates to the public *ExecExitError.
 func (e *Engine) InteractiveExec(ctx context.Context, name string, cmd []string, io runtime.IOStreams) error {
+	if err := e.ensure(ctx); err != nil {
+		return err
+	}
 	info, err := e.Inspect(ctx, name)
 	if err != nil {
 		return err
@@ -36,6 +39,9 @@ func (e *Engine) InteractiveExec(ctx context.Context, name string, cmd []string,
 // bridges JSON-RPC over. Returns a *UsageError when the backend doesn't
 // implement stdio exec (Tart/Seatbelt don't).
 func (e *Engine) StdioExec(ctx context.Context, name string, cmd []string, stdin io.Reader, stdout, stderr io.Writer) error {
+	if err := e.ensure(ctx); err != nil {
+		return err
+	}
 	execer, ok := e.runtime.(runtime.StdioExecer)
 	if !ok {
 		return yoerrors.NewUsageError("backend %s does not support stdio exec", e.runtime.Descriptor().Type)
@@ -48,5 +54,9 @@ func (e *Engine) StdioExec(ctx context.Context, name string, cmd []string, stdin
 // fetched — this is best-effort diagnostics, distinct from the structured agent
 // log stream.
 func (e *Engine) ContainerLogs(ctx context.Context, name string, tailLines int) string {
+	e.TryEnsure(ctx) // best-effort: a backend-less Engine (or failed open) has no container logs
+	if e.runtime == nil {
+		return ""
+	}
 	return runtime.LogsFor(ctx, e.runtime, store.InstanceName(e.layout.Principal, name), tailLines)
 }

@@ -25,7 +25,14 @@ type CloneOptions struct {
 // everything else (agent, model, profile, workdir, config, work copies,
 // agent state, prompt) is preserved.
 func (e *Engine) Clone(ctx context.Context, opts CloneOptions) error {
-	_ = ctx // reserved for future use
+	// Clone's copy is disk-only, but it is a backend-bound verb by contract
+	// (callers almost always start the destination next); gate it so a
+	// backend-less Engine returns ErrBackendRequired rather than silently
+	// cloning. An injected-runtime Engine (tests) has opened latched, so this
+	// is a no-op there.
+	if err := e.ensure(ctx); err != nil {
+		return err
+	}
 
 	if err := store.ValidateName(opts.Dest); err != nil {
 		return err

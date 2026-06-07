@@ -69,7 +69,7 @@ func (m *lifecycleMockRuntime) Exec(ctx context.Context, name string, cmd []stri
 // need an engine before lifecycle methods moved to the lifecycle/ sub-package.
 func newLifecycleMgr(rt *lifecycleMockRuntime, tmpDir string) *Engine {
 	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
-	return NewEngine(rt, slog.Default(), strings.NewReader(""), WithLayout(layout))
+	return NewEngineWithRuntime(rt, slog.Default(), strings.NewReader(""), WithLayout(layout))
 }
 
 // createTestSandbox creates a sandbox directory with environment.json for tests.

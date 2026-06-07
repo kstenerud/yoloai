@@ -168,8 +168,9 @@ func NewClient(ctx context.Context, opts ClientCreateOptions) (*Client, error) {
 // still serves host-only reads (Workdir host-git, on-disk allowlist, filesystem
 // readers) and, via System(), cross-backend admin. Set
 // ClientCreateOptions.BackendType — resolve it at the boundary with
-// yoloai.SelectBackend — to enable backend-bound ops.
-var ErrBackendRequired = yoerrors.NewUsageError("yoloai: this operation requires a backend, but the Client was constructed without ClientCreateOptions.BackendType (backend-less). Set ClientCreateOptions.BackendType (e.g. via yoloai.SelectBackend) to enable backend-bound operations. See development-principles.md §4.")
+// yoloai.SelectBackend — to enable backend-bound ops. Re-exported from
+// internal/sandbox, where the lazy backend connection it guards now lives (D74).
+var ErrBackendRequired = sandbox.ErrBackendRequired
 
 // ensure lazily opens the backend connection and builds the Engine on first
 // use, caching both for the Client's lifetime. It is the gate for every
@@ -190,7 +191,7 @@ func (c *Client) ensure(ctx context.Context) error {
 		return fmt.Errorf("connect to %s backend: %w", c.backend, err)
 	}
 	c.runtime = rt
-	c.engine = sandbox.NewEngine(rt, c.logger, c.input, sandbox.WithLayout(c.layout))
+	c.engine = sandbox.NewEngineWithRuntime(rt, c.logger, c.input, sandbox.WithLayout(c.layout))
 	c.opened = true
 	return nil
 }

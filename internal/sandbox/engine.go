@@ -9,12 +9,14 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	tmuxres "github.com/kstenerud/yoloai/internal/resources/tmux"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/yoerrors"
 )
 
 // Engine is the central orchestrator for sandbox operations.
@@ -23,14 +25,35 @@ import (
 // progress take an explicit io.Writer per call (e.g. CreateOptions.Output,
 // EnsureSetup's out param) and discrete advisories are returned as structured
 // Notices. The yoloai.Client seeds those per-call writers from its ClientConfiguration.Output.
+//
+// The Engine owns the lazy backend connection (D74). It is built eagerly from
+// layout-only state (NewEngine), with runtime nil; the first backend-bound
+// method opens the runtime via ensure. A backend-less Engine (backend == "")
+// still serves host-only reads; a backend-bound op on it returns
+// ErrBackendRequired. Construction with an already-open runtime
+// (NewEngineWithRuntime — tests and the ephemeral overwrite path) latches
+// opened so ensure is a no-op.
 type Engine struct {
-	runtime  runtime.Runtime
 	backend  runtime.BackendType
 	logger   *slog.Logger
 	input    io.Reader
 	progress func(name, msg string) // optional progress callback
 	layout   config.Layout          // DataDir-rooted path resolver (Q-W.2)
+
+	// Lazy backend connection. runtime is opened once, on the first
+	// backend-bound operation, via ensure/TryEnsure — host-only reads never
+	// trigger it. Guarded by mutex; opened latches true on success and runtime
+	// is then stable for the Engine's lifetime.
+	mutex   sync.Mutex
+	opened  bool
+	runtime runtime.Runtime
 }
+
+// ErrBackendRequired is returned by backend-bound Engine operations when the
+// Engine was constructed without a backend (backend == ""). A backend-less
+// Engine still serves host-only reads. The yoloai root package re-exports this
+// sentinel as yoloai.ErrBackendRequired.
+var ErrBackendRequired = yoerrors.NewUsageError("yoloai: this operation requires a backend, but the Client was constructed without ClientCreateOptions.BackendType (backend-less). Set ClientCreateOptions.BackendType (e.g. via yoloai.SelectBackend) to enable backend-bound operations. See development-principles.md §4.")
 
 // EngineOption configures an Engine.
 type EngineOption func(*Engine)
@@ -50,9 +73,11 @@ func WithLayout(layout config.Layout) EngineOption {
 	return func(e *Engine) { e.layout = layout }
 }
 
-// NewEngine creates an Engine with the given runtime, logger, and input reader
-// for interactive prompts. The backend name is read from rt.Descriptor().Type
-// when rt is non-nil.
+// NewEngine creates a lazy Engine bound to a backend, opening no connection
+// (D74). The runtime is opened on the first backend-bound method via ensure;
+// backend == "" yields a backend-less Engine whose backend-bound ops return
+// ErrBackendRequired while its host-only reads still work. This is the primary
+// constructor used by yoloai.Client.
 //
 // The Engine holds no output writer (F8): per-call progress writers are passed
 // explicitly (CreateOptions.Output, EnsureSetup's out param) and discrete
@@ -66,14 +91,28 @@ func WithLayout(layout config.Layout) EngineOption {
 // the CLI command handlers always pass WithLayout; only direct
 // test construction needs to remember it (use config.NewLayout
 // with t.TempDir-based DataDir).
-func NewEngine(rt runtime.Runtime, logger *slog.Logger, input io.Reader, opts ...EngineOption) *Engine {
+func NewEngine(backend runtime.BackendType, logger *slog.Logger, input io.Reader, opts ...EngineOption) *Engine {
+	return newEngine(backend, nil, false, logger, input, opts...)
+}
+
+// NewEngineWithRuntime creates an Engine with an already-open runtime injected,
+// latching opened so ensure is a no-op (the runtime never re-opens lazily). The
+// backend name is read from rt.Descriptor().Type when rt is non-nil. Used by
+// tests (mock runtimes) and the ephemeral cross-backend overwrite path; rt may
+// be nil for a disk-only Engine whose backend-bound methods are never called.
+func NewEngineWithRuntime(rt runtime.Runtime, logger *slog.Logger, input io.Reader, opts ...EngineOption) *Engine {
 	var backend runtime.BackendType
 	if rt != nil {
 		backend = rt.Descriptor().Type
 	}
+	return newEngine(backend, rt, true, logger, input, opts...)
+}
+
+func newEngine(backend runtime.BackendType, rt runtime.Runtime, opened bool, logger *slog.Logger, input io.Reader, opts ...EngineOption) *Engine {
 	e := &Engine{
-		runtime: rt,
 		backend: backend,
+		runtime: rt,
+		opened:  opened,
 		logger:  logger,
 		input:   input,
 	}
@@ -96,6 +135,48 @@ func NewEngine(rt runtime.Runtime, logger *slog.Logger, input io.Reader, opts ..
 	return e
 }
 
+// ensure lazily opens the backend connection on first use, caching it for the
+// Engine's lifetime. It is the gate for every backend-bound operation. Returns
+// ErrBackendRequired for a backend-less Engine; a failed open is NOT cached (the
+// next call retries). Safe for concurrent use.
+func (e *Engine) ensure(ctx context.Context) error {
+	e.mutex.Lock()
+	defer e.mutex.Unlock()
+	if e.opened {
+		return nil
+	}
+	if e.backend == "" {
+		return ErrBackendRequired
+	}
+	rt, err := runtime.New(ctx, e.backend, e.layout)
+	if err != nil {
+		return fmt.Errorf("connect to %s backend: %w", e.backend, err)
+	}
+	e.runtime = rt
+	e.opened = true
+	return nil
+}
+
+// TryEnsure opens the backend best-effort for operations that have a host-only
+// fallback (Workdir host-git, on-disk allowlist live-patch, ContainerLogs): on
+// success runtime is populated; on failure (including a backend-less Engine) it
+// stays nil and the caller falls back to its disk-only path. The error is
+// intentionally discarded.
+func (e *Engine) TryEnsure(ctx context.Context) {
+	_ = e.ensure(ctx) //nolint:errcheck // best-effort: callers fall back to a host-only path when runtime stays nil
+}
+
+// Close releases the underlying runtime connection, if one was ever opened.
+// A no-op on an Engine whose backend was never used.
+func (e *Engine) Close() error {
+	e.mutex.Lock()
+	defer e.mutex.Unlock()
+	if !e.opened || e.runtime == nil {
+		return nil
+	}
+	return e.runtime.Close()
+}
+
 // Layout returns the Engine's path-resolution Layout. Read-only —
 // callers that need a different layout construct a new Engine with
 // WithLayout.
@@ -113,6 +194,9 @@ func (e *Engine) Layout() config.Layout { return e.layout }
 // records its own "wizard has run" bookkeeping — none of the library's
 // business.
 func (e *Engine) EnsureSetup(ctx context.Context, out io.Writer) error {
+	if err := e.ensure(ctx); err != nil {
+		return err
+	}
 	if out == nil {
 		out = io.Discard
 	}
@@ -180,11 +264,17 @@ func (e *Engine) ensureLayoutScaffold() error {
 
 // List returns info for all sandboxes.
 func (e *Engine) List(ctx context.Context) ([]*Info, error) {
+	if err := e.ensure(ctx); err != nil {
+		return nil, err
+	}
 	return ListSandboxes(ctx, e.layout, e.runtime)
 }
 
 // Inspect returns combined metadata and live state for a single sandbox.
 func (e *Engine) Inspect(ctx context.Context, name string) (*Info, error) {
+	if err := e.ensure(ctx); err != nil {
+		return nil, err
+	}
 	return InspectSandbox(ctx, e.layout, e.runtime, name)
 }
 
@@ -195,6 +285,9 @@ func (e *Engine) Runtime() runtime.Runtime { return e.runtime }
 
 // Status returns the current lifecycle status of a sandbox.
 func (e *Engine) Status(ctx context.Context, name string) (Status, error) {
+	if err := e.ensure(ctx); err != nil {
+		return "", err
+	}
 	return DetectStatus(ctx, e.runtime, store.InstanceName(e.layout.Principal, name), e.layout.SandboxDir(name))
 }
 
@@ -219,6 +312,9 @@ func (e *Engine) SandboxCache(name string) string {
 // same sandbox. Each call is brief (one exec), so the lock-hold time
 // is small even under interactive use.
 func (e *Engine) SendInput(ctx context.Context, name string, text string) error {
+	if err := e.ensure(ctx); err != nil {
+		return err
+	}
 	unlock, err := store.AcquireLock(e.layout, name)
 	if err != nil {
 		return err

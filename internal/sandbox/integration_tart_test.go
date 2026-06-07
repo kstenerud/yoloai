@@ -60,7 +60,7 @@ func tartIntegrationSetup(t *testing.T) (*sandbox.Engine, context.Context) {
 	}
 	t.Cleanup(func() { rt.Close() }) //nolint:errcheck // test cleanup
 
-	mgr := sandbox.NewEngine(rt, slog.Default(), strings.NewReader(""), sandbox.WithLayout(layout))
+	mgr := sandbox.NewEngineWithRuntime(rt, slog.Default(), strings.NewReader(""), sandbox.WithLayout(layout))
 	require.NoError(t, mgr.EnsureSetup(ctx, io.Discard))
 
 	return mgr, ctx

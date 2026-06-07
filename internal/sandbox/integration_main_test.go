@@ -61,7 +61,7 @@ func TestMain(m *testing.M) {
 	}
 	dockerrt.RecordBuildChecksum(integLayout, "")
 
-	mgr := sandbox.NewEngine(rt, slog.Default(), strings.NewReader(""), sandbox.WithLayout(integLayout))
+	mgr := sandbox.NewEngineWithRuntime(rt, slog.Default(), strings.NewReader(""), sandbox.WithLayout(integLayout))
 	var setupErr error
 	step("ensuring base image is ready", func() {
 		setupErr = mgr.EnsureSetup(ctx, io.Discard)

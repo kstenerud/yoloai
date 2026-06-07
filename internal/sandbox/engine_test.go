@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -109,7 +111,7 @@ func TestEnsureSetup_CreatesDirectories(t *testing.T) {
 
 	mock := &mockRuntime{} // image exists (no error)
 	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
-	mgr := NewEngine(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
+	mgr := NewEngineWithRuntime(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
 
 	err := mgr.EnsureSetup(context.Background(), io.Discard)
 	require.NoError(t, err)
@@ -127,7 +129,7 @@ func TestEnsureSetup_WritesConfigOnFirstRun(t *testing.T) {
 
 	mock := &mockRuntime{}
 	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
-	mgr := NewEngine(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
+	mgr := NewEngineWithRuntime(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
 
 	err := mgr.EnsureSetup(context.Background(), io.Discard)
 	require.NoError(t, err)
@@ -148,7 +150,7 @@ func TestEnsureSetup_DoesNotStampSchemaVersion(t *testing.T) {
 
 	mock := &mockRuntime{}
 	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
-	mgr := NewEngine(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
+	mgr := NewEngineWithRuntime(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
 
 	err := mgr.EnsureSetup(context.Background(), io.Discard)
 	require.NoError(t, err)
@@ -170,7 +172,7 @@ func TestEnsureSetup_PreservesConfigOnSubsequentRun(t *testing.T) {
 	layout := config.NewLayout(yoloaiDir)
 
 	mock := &mockRuntime{}
-	mgr := NewEngine(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
+	mgr := NewEngineWithRuntime(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
 
 	err := mgr.EnsureSetup(context.Background(), io.Discard)
 	require.NoError(t, err)
@@ -189,7 +191,7 @@ func TestEnsureSetup_AlwaysCallsSetup(t *testing.T) {
 	require.NoError(t, os.MkdirAll(layout.CacheDir(), 0750))
 	dockerrt.RecordBuildChecksum(layout, "")
 	mock := &mockRuntime{}
-	mgr := NewEngine(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
+	mgr := NewEngineWithRuntime(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
 
 	err := mgr.EnsureSetup(context.Background(), io.Discard)
 	require.NoError(t, err)
@@ -207,7 +209,7 @@ func TestEnsureSetup_RebuildWhenChecksumStale(t *testing.T) {
 	mock := &mockRuntime{} // Setup returns nil (success)
 	var output bytes.Buffer
 	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
-	mgr := NewEngine(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
+	mgr := NewEngineWithRuntime(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
 
 	err := mgr.EnsureSetup(context.Background(), &output)
 	require.NoError(t, err)
@@ -220,9 +222,88 @@ func TestEnsureSetup_BuildsWhenImageMissing(t *testing.T) {
 	mock := &mockRuntime{} // Setup returns nil (success)
 	var output bytes.Buffer
 	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
-	mgr := NewEngine(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
+	mgr := NewEngineWithRuntime(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
 
 	err := mgr.EnsureSetup(context.Background(), &output)
 	require.NoError(t, err)
 	assert.True(t, mock.setupCalled, "Setup should be called when image is missing")
+}
+
+// --- Lazy backend connection (D74) -----------------------------------------
+
+// lazyOpenCount counts how many times the "lazyopenmock" backend factory ran,
+// letting the concurrent-open test assert the Engine opens its runtime exactly
+// once. The backend is registered process-wide (registry panics on a double
+// Register) so registration is guarded by lazyOpenOnce.
+var (
+	lazyOpenCount atomic.Int64
+	lazyOpenOnce  sync.Once
+)
+
+func registerLazyOpenMock(t *testing.T) {
+	t.Helper()
+	lazyOpenOnce.Do(func() {
+		runtime.Register(
+			func(context.Context, config.Layout) (runtime.Runtime, error) {
+				lazyOpenCount.Add(1)
+				return &mockRuntime{}, nil
+			},
+			runtime.BackendDescriptor{Type: "lazyopenmock"},
+		)
+	})
+}
+
+// NewEngine (the lazy constructor) must not touch the backend at construction —
+// runtime stays nil until the first backend-bound op calls ensure.
+func TestEngine_NewEngine_DoesNotOpen(t *testing.T) {
+	layout := config.NewLayout(filepath.Join(t.TempDir(), ".yoloai"))
+	e := NewEngine("docker", slog.Default(), strings.NewReader(""), WithLayout(layout))
+	assert.False(t, e.opened, "NewEngine must not open the backend at construction")
+	assert.Nil(t, e.runtime, "runtime stays nil until the first backend-bound op")
+}
+
+// A backend-less Engine (backend == "") fails backend-bound ops with the typed
+// ErrBackendRequired sentinel and never latches opened.
+func TestEngine_Ensure_BackendlessReturnsErrBackendRequired(t *testing.T) {
+	layout := config.NewLayout(filepath.Join(t.TempDir(), ".yoloai"))
+	e := NewEngine("", slog.Default(), strings.NewReader(""), WithLayout(layout))
+	err := e.ensure(context.Background())
+	assert.ErrorIs(t, err, ErrBackendRequired)
+	assert.False(t, e.opened, "a backend-less ensure must not latch opened")
+}
+
+// Concurrent backend-bound calls open the runtime exactly once: the mutex
+// serializes the first open and the opened latch short-circuits the rest.
+func TestEngine_Ensure_OpensExactlyOnceUnderConcurrency(t *testing.T) {
+	registerLazyOpenMock(t)
+	lazyOpenCount.Store(0)
+	layout := config.NewLayout(filepath.Join(t.TempDir(), ".yoloai"))
+	e := NewEngine("lazyopenmock", slog.Default(), strings.NewReader(""), WithLayout(layout))
+
+	const n = 16
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func(i int) {
+			defer wg.Done()
+			errs[i] = e.ensure(context.Background())
+		}(i)
+	}
+	wg.Wait()
+
+	for _, err := range errs {
+		require.NoError(t, err)
+	}
+	assert.Equal(t, int64(1), lazyOpenCount.Load(), "concurrent ensure must open the backend exactly once")
+	assert.True(t, e.opened)
+	assert.NotNil(t, e.runtime)
+}
+
+// Close on an Engine whose backend was never opened is a no-op (no nil-runtime
+// deref, no error).
+func TestEngine_Close_NoopWhenUnopened(t *testing.T) {
+	layout := config.NewLayout(filepath.Join(t.TempDir(), ".yoloai"))
+	e := NewEngine("docker", slog.Default(), strings.NewReader(""), WithLayout(layout))
+	assert.NoError(t, e.Close(), "Close on an unopened Engine is a no-op")
 }

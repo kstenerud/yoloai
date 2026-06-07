@@ -30,6 +30,9 @@ const attachReadyTimeout = 300 * time.Second
 // sandbox must be running (Active/Idle/Done/Failed); stopped sandboxes return
 // ErrContainerNotRunning.
 func (e *Engine) Attach(ctx context.Context, name string, io runtime.IOStreams) error {
+	if err := e.ensure(ctx); err != nil {
+		return err
+	}
 	info, err := e.Inspect(ctx, name)
 	if err != nil {
 		return err
