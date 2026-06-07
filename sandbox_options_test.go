@@ -1,6 +1,6 @@
 // ABOUTME: Unit tests for the public sandbox option types (F1/F3):
-// ABOUTME: SandboxCreateOptions.toInternal mapping, SandboxRunOptions.materialize sugar,
-// ABOUTME: port formatting, and the A2/A3 lazy-backend / optional-BackendType contract.
+// ABOUTME: SandboxCreateOptions.toInternal mapping, port formatting, and the
+// ABOUTME: A2/A3 lazy-backend / optional-BackendType contract.
 
 package yoloai
 
@@ -48,25 +48,6 @@ func TestSandboxCreateOptions_toInternal_PreservesExplicitWorkdir(t *testing.T) 
 	in := o.toInternal()
 	assert.Equal(t, DirModeRW, in.Workdir.Mode, "explicit mode is preserved")
 	assert.True(t, in.Workdir.AllowDirty, "per-directory AllowDirty is preserved")
-}
-
-func TestSandboxRunOptions_materialize(t *testing.T) {
-	c := SandboxRunOptions{
-		Name:              "b",
-		WorkDir:           "/w",
-		Prompt:            "do the thing",
-		AgentType:         AgentClaude,
-		Replace:           true,
-		AllowDirtyWorkdir: true,
-	}.materialize()
-
-	assert.Equal(t, "b", c.Name)
-	assert.Equal(t, "/w", c.Workdir.Path)
-	assert.Equal(t, DirModeCopy, c.Workdir.Mode, "Run always copies the workdir")
-	assert.Equal(t, AgentClaude, c.AgentType)
-	assert.Equal(t, "do the thing", c.Prompt)
-	assert.True(t, c.Replace)
-	assert.True(t, c.AllowDirtyWorkdir)
 }
 
 // A2/A3: Backend is OPTIONAL. A backend-less Client constructs cleanly (it

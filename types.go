@@ -53,7 +53,7 @@ const (
 // extension agents supply their own name via the agent registry.
 //
 // Re-exported from internal/agent. Same Q-Y rationale as BackendType:
-// public fields like SandboxRunOptions.AgentType and SystemCheckOptions.AgentType take this
+// public fields like SandboxCreateOptions.AgentType and SystemCheckOptions.AgentType take this
 // typed name.
 type AgentType = agent.AgentType
 
@@ -105,8 +105,8 @@ const (
 // sandbox. HostPath is the path on the host, ContainerPath is the path
 // inside the sandbox, ReadOnly controls write access. Re-exported
 // (type alias) from internal/runtime so embedders constructing
-// SandboxRunOptions.Mounts (when that field lands) don't need to reach into
-// internal packages. Q-Y.
+// SandboxCreateOptions mount specs (when that field lands) don't need to reach
+// into internal packages. Q-Y.
 //
 // The "Path" suffix matches PortMapping's "Port" suffix: Go doesn't
 // surface types at the call site, so `m.HostPath` is self-documenting
@@ -134,7 +134,7 @@ type PortMapping = runtime.PortMapping
 //
 // Re-exported (type alias) from internal/runtime. F11 (2026-05-27)
 // established this typing so public fields like
-// SystemCheckOptions.Isolation and (future) SandboxRunOptions.Isolation take a
+// SystemCheckOptions.Isolation and SandboxCreateOptions.Isolation take a
 // closed-set typed value, exhaustive-checked at every switch.
 type IsolationMode = runtime.IsolationMode
 

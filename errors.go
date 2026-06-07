@@ -28,11 +28,10 @@ type ConfigError = yoerrors.ConfigError
 // agent — returned by Destroy when AbandonUnappliedWork is not set.
 type ActiveWorkError = yoerrors.ActiveWorkError
 
-// DirtyWorkdirError is returned by Create (and Run) when the workdir — or an
+// DirtyWorkdirError is returned by CreateSandbox when the workdir — or an
 // aux directory — has uncommitted git changes and the caller has not acked it
-// (via SandboxCreateOptions.AllowDirtyWorkdir / DirSpec.AllowDirty, or
-// SandboxRunOptions.AllowDirtyWorkdir). Catch it with errors.As to render a prompt and
-// retry with the ack set.
+// (via SandboxCreateOptions.AllowDirtyWorkdir / DirSpec.AllowDirty). Catch it
+// with errors.As to render a prompt and retry with the ack set.
 type DirtyWorkdirError = yoerrors.DirtyWorkdirError
 
 // DirtyDir names one uncommitted directory inside a DirtyWorkdirError: its host

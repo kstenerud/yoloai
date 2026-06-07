@@ -1,11 +1,11 @@
-// ABOUTME: Public high-level Client API (RunSandbox, CreateSandbox, CloneSandbox, ListSandboxes, plus the
+// ABOUTME: Public high-level Client API (CreateSandbox, CloneSandbox, ListSandboxes, plus the
 // ABOUTME: Sandbox/System sub-handles) for embedding yoloAI in Go programs.
 // Package yoloai is the orchestration layer for yoloAI. Both the CLI
 // (internal/cli) and external embedders use it as the entry point for
 // running AI coding agents in isolated sandboxes.
 //
 // One Client is the entry point. It owns creation and cross-sandbox
-// operations (RunSandbox, CreateSandbox, CloneSandbox, ListSandboxes) plus the
+// operations (CreateSandbox, CloneSandbox, ListSandboxes) plus the
 // per-sandbox handle accessor
 // Sandbox(name); per-sandbox operations (Inspect, Start, Stop, Restart, Reset,
 // Destroy, Exec, and the Workdir/Network/Agent sub-handles) live on that
@@ -33,16 +33,17 @@
 //	if err != nil { log.Fatal(err) }
 //	defer client.Close()
 //
-//	info, err := client.RunSandbox(ctx, yoloai.SandboxRunOptions{
+//	sb, err := client.CreateSandbox(ctx, yoloai.SandboxCreateOptions{
 //	    Name:    "myproject",
-//	    WorkDir: "/path/to/project",
+//	    Workdir: yoloai.DirSpec{Path: "/path/to/project"},
 //	    Prompt:  "Fix the login bug",
-//	    Wait:    true,
 //	})
 //	if err != nil { log.Fatal(err) }
+//	if _, err := sb.Start(ctx, yoloai.SandboxStartOptions{}); err != nil { log.Fatal(err) }
+//
+//	info, err := sb.Wait(ctx, yoloai.SandboxWaitOptions{For: yoloai.WaitForExit})
+//	if err != nil { log.Fatal(err) }
 //	if info.Status == yoloai.StatusDone {
-//	    sb, err := client.Sandbox(info.Environment.Name)
-//	    if err != nil { log.Fatal(err) }
 //	    sb.Workdir().Apply(ctx, yoloai.WorkdirApplyOptions{Mode: yoloai.ApplyModeCommits})
 //	}
 package yoloai
@@ -55,7 +56,6 @@ import (
 	"log/slog"
 	"os"
 	"sync"
-	"time"
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime"
@@ -75,7 +75,7 @@ import (
 // internal/sandbox so embedders can `errors.Is` against them without
 // reaching into internal packages.
 var (
-	// ErrSandboxExists is returned by RunSandbox when a sandbox with the given name
+	// ErrSandboxExists is returned by CreateSandbox when a sandbox with the given name
 	// already exists and Replace is false.
 	ErrSandboxExists = sandbox.ErrSandboxExists
 
@@ -89,7 +89,7 @@ var (
 	// recreated since the host last booted.
 	ErrContainerNotRunning = sandbox.ErrContainerNotRunning
 
-	// ErrMissingAPIKey is returned by RunSandbox/CreateSandbox when the selected agent
+	// ErrMissingAPIKey is returned by CreateSandbox when the selected agent
 	// requires an API key (via Definition.APIKeyEnvVars) but none is set.
 	ErrMissingAPIKey = sandbox.ErrMissingAPIKey
 )
@@ -240,67 +240,6 @@ func (c *Client) System() *System {
 // runtime is open (via ensure) before calling deps for a backend-bound op.
 func (c *Client) deps() state.Deps {
 	return state.Deps{Runtime: c.rt, Layout: c.layout, Input: c.input}
-}
-
-// pollUntilDone polls the sandbox status until it reaches a terminal state.
-func (c *Client) pollUntilDone(ctx context.Context, name string, progress func(string, string)) (*SandboxInfo, error) {
-	for {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(5 * time.Second):
-		}
-
-		info, err := c.engine.Inspect(ctx, name)
-		if err != nil {
-			return nil, fmt.Errorf("inspect sandbox: %w", err)
-		}
-		switch info.Status {
-		case sandbox.StatusDone, sandbox.StatusFailed, sandbox.StatusStopped, sandbox.StatusRemoved:
-			return sandboxInfoFromStatus(info), nil
-		case sandbox.StatusActive, sandbox.StatusIdle:
-			// still running — continue polling
-		default: // StatusBroken, StatusUnavailable
-			return sandboxInfoFromStatus(info), nil
-		}
-		if progress != nil {
-			progress(name, string(info.Status))
-		}
-	}
-}
-
-// RunSandbox creates a sandbox with the given options and starts the agent.
-// Equivalent to 'yoloai new <name> <workdir> --prompt <prompt>'.
-//
-// If opts.Wait is true, RunSandbox blocks until the agent finishes and returns the
-// final sandbox SandboxInfo. If opts.Wait is false, RunSandbox returns immediately after
-// the agent is launched; the SandboxInfo reflects the initial state.
-func (c *Client) RunSandbox(ctx context.Context, opts SandboxRunOptions) (*SandboxInfo, error) {
-	createOpts := opts.materialize()
-	if createOpts.AgentType == "" {
-		createOpts.AgentType = AgentType(resolveAgentFromConfig(c.layout))
-	}
-	if createOpts.Model == "" {
-		createOpts.Model = resolveModelFromConfig(c.layout)
-	}
-
-	if _, err := c.CreateSandbox(ctx, createOpts); err != nil {
-		return nil, fmt.Errorf("create sandbox: %w", err)
-	}
-
-	if opts.OnProgress != nil {
-		opts.OnProgress(opts.Name, "agent running")
-	}
-
-	if !opts.Wait {
-		si, err := c.engine.Inspect(ctx, opts.Name)
-		if err != nil {
-			return nil, err
-		}
-		return sandboxInfoFromStatus(si), nil
-	}
-
-	return c.pollUntilDone(ctx, opts.Name, opts.OnProgress)
 }
 
 // ListSandboxes returns info for all sandboxes.
@@ -460,22 +399,6 @@ func resolveBackendFromConfig(ctx context.Context, layout config.Layout) runtime
 	}
 	backend, _ := runtime.SelectBackend(ctx, preferred, "", "", layout.Env)
 	return backend
-}
-
-func resolveAgentFromConfig(layout config.Layout) string {
-	cfg, err := config.LoadDefaultsConfig(layout)
-	if err == nil && cfg.Agent != "" {
-		return cfg.Agent
-	}
-	return "claude"
-}
-
-func resolveModelFromConfig(layout config.Layout) string {
-	cfg, err := config.LoadDefaultsConfig(layout)
-	if err == nil && cfg.Model != "" {
-		return cfg.Model
-	}
-	return ""
 }
 
 func newRuntime(ctx context.Context, backend runtime.BackendType, layout config.Layout) (runtime.Runtime, error) {

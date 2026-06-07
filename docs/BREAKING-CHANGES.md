@@ -11,7 +11,7 @@ through it (never importing `internal/*`): per-sandbox operations moved onto
 resource-bound handles, creation and backend-selection became explicit, and every
 Options/result/error is now a public `yoloai.*` type. **The overwhelming majority of
 this surface is new in this release** — the handles, the `<Noun><Verb>Options`
-family (`SandboxCreateOptions`, `SandboxRunOptions`, `WorkdirDiffOptions`, …), the
+family (`SandboxCreateOptions`, `WorkdirDiffOptions`, …), the
 typed errors, the kind enums, and the `System()` / `Sandbox()` / `Agent()` /
 `Workdir()` accessors all describe new API with no prior name to migrate from. CLI
 behavior is unchanged except for the wire-format renames called out at the end.
@@ -21,7 +21,10 @@ that shipped on the prior stable surface change; this is the entire Go migration
 
 - `Options` → `ClientCreateOptions` (its `Backend` field is now `BackendType`,
   typed `yoloai.BackendType`).
-- `RunOptions` → `SandboxRunOptions`.
+- `Client.Run` / `RunOptions` were removed outright (not renamed). Creation no
+  longer launches: `CreateSandbox` provisions a *dormant* `*Sandbox`, which the
+  caller starts explicitly with `Sandbox.Start` and (optionally) blocks on with
+  the new `Sandbox.Wait`. See "Creation is dormant" below.
 - `ApplyOptions` → `WorkdirApplyOptions`, now reached via
   `client.Sandbox(name).Workdir().Apply(…)`.
 - `NewWithOptions(ctx, Options)` → `NewClient(ctx, ClientCreateOptions)`.
@@ -32,11 +35,10 @@ that shipped on the prior stable surface change; this is the entire Go migration
   Call them on the handle returned by `client.Sandbox(name)` (`.Inspect(ctx)`,
   `.Stop(ctx)`, `.Destroy(ctx, …)`), and route diff/apply through
   `.Sandbox(name).Workdir()`. `Close` remains on `Client`.
-- `List` → `ListSandboxes` and `Run` → `RunSandbox`. The sandbox verbs on the
-  root `Client` now name their noun: `RunSandbox`, `ListSandboxes`,
-  `CreateSandbox`, and `CloneSandbox` (the latter two were introduced in this
-  same reshape). `Client` is a multi-noun root — the bare verbs didn't say what
-  they acted on.
+- `List` → `ListSandboxes`. The sandbox verbs on the root `Client` now name
+  their noun: `ListSandboxes`, `CreateSandbox`, and `CloneSandbox` (the latter
+  two were introduced in this same reshape). `Client` is a multi-noun root —
+  the bare verbs didn't say what they acted on.
 
 Field semantics and zero values are otherwise unchanged — only the names and
 receivers move.
@@ -84,6 +86,38 @@ rather than reading the process environment.
 - `yoloai apply`: `--squash` → `--no-commit` (JSON `method` `"squash"` →
   `"no-commit"`). See the `yoloai apply` entry below for the commits-only default and
   `--include-uncommitted`.
+
+### Creation is dormant; `CreateSandbox`/`CloneSandbox` return a live `*Sandbox`
+
+`CreateSandbox` and `CloneSandbox` now *provision only* — they no longer launch the
+container. Each returns a live but unstarted `*Sandbox` handle (was `(string, error)`
+for create, `error` for clone), so embedders no longer make a second `Sandbox(name)`
+lookup. Launch is an explicit, separate step:
+
+```go
+sb, err := client.CreateSandbox(ctx, yoloai.SandboxCreateOptions{ … })
+if err != nil { … }
+if _, err := sb.Start(ctx, yoloai.SandboxStartOptions{}); err != nil { … }
+```
+
+`Sandbox.Start` already owned first-launch (its `StatusRemoved` path does the
+container launch + workdir-baseline setup), so the create-time prompt is delivered on
+that explicit `Start` exactly as before. The old `--no-start` CLI flag is honored by
+skipping the `Start` call.
+
+The waiting behavior that `Client.Run(Wait: true)` provided is now `Sandbox.Wait`:
+
+```go
+info, err := sb.Wait(ctx, yoloai.SandboxWaitOptions{
+    For:     yoloai.WaitForExit, // or WaitForIdle
+    Timeout: 0,                  // 0 = wait indefinitely
+})
+```
+
+`Wait` polls until the requested condition is met (`WaitForExit` settles on any
+terminal status; `WaitForIdle` also settles on `StatusIdle`). On timeout it returns
+the last-observed `*SandboxInfo` plus `ErrWaitTimeout` (which wraps
+`context.DeadlineExceeded`); on caller cancellation it returns `ctx.Err()`.
 
 ### Public read-model field renames (Go embedding surface)
 

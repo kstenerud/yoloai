@@ -27,7 +27,7 @@ const (
 	AllowedFromAgentRequirement DomainSource = "agent-requirement"
 
 	// AllowedFromUser means the user explicitly added this domain —
-	// either via SandboxRunOptions.AllowDomains at create time or via
+	// either via SandboxCreateOptions.NetworkAllow at create time or via
 	// `yoloai sandbox <name> allow` at runtime. The on-disk store
 	// can't distinguish between those two sub-cases today (Q-V); if
 	// a use case justifies it later a third source can be added

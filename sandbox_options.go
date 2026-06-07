@@ -1,6 +1,5 @@
 // ABOUTME: Public sandbox option types (F1/F3): SandboxCreateOptions (the advanced
-// ABOUTME: surface Client.Create takes) and SandboxRunOptions (the curated Run sugar),
-// ABOUTME: plus the mapping to the internal struct and the materialize bridge between them.
+// ABOUTME: surface Client.CreateSandbox takes) plus the mapping to the internal struct.
 
 package yoloai
 
@@ -26,15 +25,11 @@ import (
 //     ApplySeries/ApplyOverlay/ApplyAll; WorkdirDiffOptions → Diff/CommitDiff),
 //     or because the fields spread across distinct internal calls
 //     (BuildImageOptions).
-//
-// A public→public fold (Run sugar expanding into CreateSandbox) is neither: it keeps a
-// descriptive name (materialize), since it never reaches an internal type.
 
-// SandboxCreateOptions is the advanced, public creation surface for Client.Create —
-// the deep entry point mirroring every creation capability the CLI exposes,
+// SandboxCreateOptions is the public creation surface for Client.CreateSandbox —
+// the entry point mirroring every creation capability the CLI exposes,
 // built from public re-exported types so external embedders can construct it
-// without reaching into internal packages. Run (SandboxRunOptions) is the curated
-// convenience that materializes into this. F1/F3.
+// without reaching into internal packages. F1/F3.
 //
 // Confirmation is never interactive here: Create does not prompt. A dirty
 // workdir yields *DirtyWorkdirError unless acked via AllowDirtyWorkdir (or the
@@ -174,67 +169,4 @@ func formatPorts(ports []PortMapping) []string {
 		out = append(out, fmt.Sprintf("%d:%d", p.HostPort, p.ContainerPort))
 	}
 	return out
-}
-
-// SandboxRunOptions configures a sandbox run.
-type SandboxRunOptions struct {
-	// Name is the sandbox identifier. Required.
-	Name string
-
-	// WorkDir is the host directory to work in. Required.
-	// Mounted as :copy by default — the original is protected.
-	WorkDir string
-
-	// Prompt is the task description sent to the agent.
-	// If empty, the sandbox starts without a prompt (interactive mode).
-	Prompt string
-
-	// Agent selects the AI agent (yoloai.AgentClaude, yoloai.AgentGemini,
-	// yoloai.AgentCodex, …). Default: read from config.yaml, then
-	// yoloai.AgentClaude.
-	AgentType AgentType
-
-	// Model selects the model. Default: read from config.yaml, then agent default.
-	Model string
-
-	// Profile applies a named profile for environment, image, and settings.
-	// Default: read from config.yaml, then no profile.
-	Profile string
-
-	// Replace destroys any existing sandbox with the same name before creating
-	// a new one. The existing sandbox must have no unapplied changes.
-	Replace bool
-
-	// AllowDirtyWorkdir proceeds even when WorkDir has uncommitted git changes.
-	// Default false: Run refuses with *DirtyWorkdirError rather than letting the
-	// agent see — and possibly clobber — uncommitted work. Set true to
-	// consciously proceed (the non-interactive equivalent of answering the CLI's
-	// dirty-repo prompt).
-	AllowDirtyWorkdir bool
-
-	// Wait blocks until the agent reaches StatusDone, StatusFailed, or
-	// StatusStopped, polling every 5 seconds. Default: false.
-	Wait bool
-
-	// OnProgress receives status updates during the run. The first argument
-	// is the sandbox name; the second is a human-readable message.
-	// Safe to call concurrently from multiple goroutines (e.g., batch runs).
-	OnProgress func(name, msg string)
-}
-
-// materialize expands the curated SandboxRunOptions into the advanced
-// SandboxCreateOptions (F3: Run is sugar over Create). The run-flow extras
-// (Wait/OnProgress) are not creation params and stay on SandboxRunOptions,
-// handled by Run after Create.
-func (o SandboxRunOptions) materialize() SandboxCreateOptions {
-	return SandboxCreateOptions{
-		Name:              o.Name,
-		Workdir:           DirSpec{Path: o.WorkDir, Mode: DirModeCopy},
-		AgentType:         o.AgentType,
-		Model:             o.Model,
-		Profile:           o.Profile,
-		Prompt:            o.Prompt,
-		Replace:           o.Replace,
-		AllowDirtyWorkdir: o.AllowDirtyWorkdir,
-	}
 }

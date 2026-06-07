@@ -127,8 +127,8 @@ func TestClientCreateOptions_BackendIsTyped(t *testing.T) {
 	}
 }
 
-func TestRunOptions_AgentIsTyped(t *testing.T) {
-	opts := SandboxRunOptions{AgentType: AgentClaude}
+func TestCreateOptions_AgentIsTyped(t *testing.T) {
+	opts := SandboxCreateOptions{AgentType: AgentClaude}
 	switch opts.AgentType {
 	case AgentClaude:
 		// ok
