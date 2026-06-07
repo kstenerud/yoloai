@@ -554,7 +554,7 @@ A *clarifying* comment is distinct from a comment that encodes what the type sys
 
 ## D74 — The lazy runtime belongs to the Engine, not the Client (refines D67)
 
-**Date:** 2026-06-07. **Status:** Stage 1 implemented (commits C1–C3 on `main`, 2026-06-07). Refines [D67]. Stage 2 (push patch/files/network free-function calls down into Engine methods) sequenced as a separate follow-up.
+**Date:** 2026-06-07. **Status:** Fully implemented — Stage 1 (commits C1–C3) and Stage 2 (commits C4a `engine_workdir.go` / C4b `engine_files.go` / C4c `engine_network.go`) on `main`, 2026-06-07, `make check` green. Refines [D67]. The Workdir/Network/Files sub-handles now call `engine.Verb(name, …)` for the patch/files/network verbs and no longer thread `layout`/`runtime`; `Engine.Runtime()` is read only by the MCP proxy and `Engine.LivePatchNetwork` internally.
 
 **Why.** D67's A2/A3 collapse put **one lazy `Client`** in place of the old eager-Client / lazy-`SystemClient` split — the right *surface* call. But it parked the *laziness machinery* (`mutex`/`opened`/`runtime`/`engine`/`ensure`/`tryEnsure`/`deps()`/`Close()`) on `Client`, which is Engine-shaped: `Client.ensure` opens the runtime and *then constructs the Engine*, even though the `Engine` already owns `layout`/`input`/`logger`/`runtime` and is the object every sandbox operation runs through. The ownership is inverted one layer too high.
 

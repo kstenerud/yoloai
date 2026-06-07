@@ -3,9 +3,12 @@ ABOUTME: per-sandbox sub-handles stop reaching two/three levels deep. Refines D6
 
 # Plan: Engine owns the lazy runtime (refine D67)
 
-**Status (2026-06-07):** Stage 1 landed — C1 (`9f67d28`), C2 (`45aab36`), C3
-(`8479258`) on `main`, `make check` green. Stage 2 (C4, below) remains a
-sequenced follow-up. See [D74].
+**Status (2026-06-07):** Complete. Stage 1 landed — C1 (`9f67d28`), C2
+(`45aab36`), C3 (`8479258`); Stage 2 landed — C4a (Workdir →
+`engine_workdir.go`), C4b (Files → `engine_files.go`), C4c (Network →
+`engine_network.go`) — all on `main`, `make check` green. The Workdir/Network/
+Files sub-handles no longer thread `layout`/`runtime` into the patch/files/
+network free functions. See [D74].
 
 [D74]: ../../decisions/working-notes.md
 

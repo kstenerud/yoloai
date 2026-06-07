@@ -289,12 +289,10 @@ func (e *Engine) Inspect(ctx context.Context, name string) (*Info, error) {
 
 // Runtime returns the opened backend runtime, or nil if the backend was never
 // opened (a backend-less Engine, or no backend-bound op has run / a TryEnsure
-// failed). Two uses: the MCP proxy type-asserts it against optional interfaces
-// like runtime.StdioExecer; the Workdir/Network sub-handles call TryEnsure then
-// pass this — possibly nil — runtime to the patch/network free functions, which
-// no-op their live half when it is nil. The latter is the D74 Stage-1 bridge
-// (sub-handles source the runtime from the Engine instead of the Client); Stage
-// 2 pushes those free-function calls into Engine methods and drops that use.
+// failed). The MCP proxy type-asserts it against optional interfaces like
+// runtime.StdioExecer; Engine.LivePatchNetwork uses it internally to soft-fail
+// when the backend is unavailable. (D74 Stage 2 moved the former Workdir/Network
+// free-function threading into Engine methods, so handles no longer read it.)
 func (e *Engine) Runtime() runtime.Runtime {
 	e.mutex.Lock()
 	defer e.mutex.Unlock()
