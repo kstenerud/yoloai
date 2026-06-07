@@ -515,7 +515,8 @@ func TestLoadGlobalConfig_MissingFile(t *testing.T) {
 
 	cfg, err := LoadGlobalConfig(layout)
 	require.NoError(t, err)
-	assert.Empty(t, cfg.TmuxConf)
+	// A missing config materializes the declared default from globalKnownSettings.
+	assert.Equal(t, "default+host", cfg.TmuxConf)
 	assert.Nil(t, cfg.ModelAliases)
 }
 
@@ -525,7 +526,9 @@ func TestLoadGlobalConfig_Default(t *testing.T) {
 
 	cfg, err := LoadGlobalConfig(layout)
 	require.NoError(t, err)
-	assert.Empty(t, cfg.TmuxConf)
+	// The default template leaves tmux_conf unset, so it materializes to the
+	// declared default rather than empty.
+	assert.Equal(t, "default+host", cfg.TmuxConf)
 	assert.Nil(t, cfg.ModelAliases)
 }
 
@@ -560,7 +563,8 @@ func TestDeleteGlobalConfigField(t *testing.T) {
 
 	cfg, err := LoadGlobalConfig(layout)
 	require.NoError(t, err)
-	assert.Empty(t, cfg.TmuxConf)
+	// With tmux_conf deleted the next load falls back to the declared default.
+	assert.Equal(t, "default+host", cfg.TmuxConf)
 	assert.Equal(t, "haiku", cfg.ModelAliases["fast"])
 }
 

@@ -553,10 +553,12 @@ func LoadConfig(layout Layout) (*YoloaiConfig, error) {
 func LoadGlobalConfig(layout Layout) (*GlobalConfig, error) {
 	configPath := layout.GlobalConfigPath()
 
+	cfg := &GlobalConfig{}
+
 	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is DataDir/config.yaml
 	if err != nil {
 		if os.IsNotExist(err) {
-			return &GlobalConfig{}, nil
+			return applyGlobalDefaults(cfg), nil
 		}
 		return nil, fmt.Errorf("read global config.yaml: %w", err)
 	}
@@ -566,13 +568,12 @@ func LoadGlobalConfig(layout Layout) (*GlobalConfig, error) {
 		return nil, fmt.Errorf("parse global config.yaml: %w", err)
 	}
 
-	cfg := &GlobalConfig{}
 	if doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 {
-		return cfg, nil
+		return applyGlobalDefaults(cfg), nil
 	}
 	root := doc.Content[0]
 	if root.Kind != yaml.MappingNode {
-		return cfg, nil
+		return applyGlobalDefaults(cfg), nil
 	}
 
 	for i := 0; i < len(root.Content)-1; i += 2 {
@@ -583,7 +584,20 @@ func LoadGlobalConfig(layout Layout) (*GlobalConfig, error) {
 		}
 	}
 
-	return cfg, nil
+	return applyGlobalDefaults(cfg), nil
+}
+
+// applyGlobalDefaults fills any unset scalar global setting with its declared
+// default from globalKnownSettings — the single source of truth that `config
+// get` also reads. Materializing the default here (rather than letting each
+// downstream consumer re-invent one) keeps a freshly-loaded GlobalConfig
+// consistent with the reported config and prevents divergent ad-hoc fallbacks.
+func applyGlobalDefaults(cfg *GlobalConfig) *GlobalConfig {
+	if cfg.TmuxConf == "" {
+		def, _, _ := knownDefaultFrom("tmux_conf", globalKnownSettings)
+		cfg.TmuxConf = def
+	}
+	return cfg
 }
 
 // applyGlobalConfigField updates cfg for a single top-level key/value pair.

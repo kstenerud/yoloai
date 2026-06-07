@@ -578,12 +578,7 @@ func resolveAgentParams(agentDef *agent.Definition, opts Options, pr *profileRes
 	agentArgs := pr.agentArgs[opts.Agent]
 	agentCommand := invocation.BuildAgentCommand(agentDef, model, promptText, agentArgs, opts.Passthrough)
 
-	tmuxConf := gcfg.TmuxConf
-	if tmuxConf == "" {
-		tmuxConf = "default"
-	}
-
-	return promptText, hasPrompt, model, agentCommand, tmuxConf, nil
+	return promptText, hasPrompt, model, agentCommand, gcfg.TmuxConf, nil
 }
 
 // buildLifecycleConfig builds the lifecycle config if the archetype requires it.
