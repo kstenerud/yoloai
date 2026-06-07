@@ -17,13 +17,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// gateTestTop isolates HOME so TopDir() resolves to a fresh $HOME/.yoloai and
-// returns that TOP path. It resets the process-wide root layout around the test.
+// gateTestTop isolates HOME and sets the process-wide root layout to a fresh
+// $HOME/.yoloai (these tests call runMigrationGate directly, bypassing the root
+// command's PersistentPreRunE that would otherwise establish it). Returns that
+// TOP path and clears the layout on cleanup.
 func gateTestTop(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	cliutil.SetRootLayout(config.Layout{})
+	cliutil.SetRootLayout(cliutil.LayoutForDataDir(filepath.Join(home, ".yoloai")))
 	t.Cleanup(func() { cliutil.SetRootLayout(config.Layout{}) })
 	return filepath.Join(home, ".yoloai")
 }

@@ -3,14 +3,14 @@ package lifecycle
 import (
 	"testing"
 
+	"github.com/kstenerud/yoloai/internal/cli/clitest"
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestDestroyCmd_AllWithNames(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	_ = clitest.Home(t)
 
 	cmd := NewDestroyCmd()
 	cmd.SetArgs([]string{"--all", "mybox"})
@@ -20,8 +20,7 @@ func TestDestroyCmd_AllWithNames(t *testing.T) {
 }
 
 func TestDestroyCmd_NoArgsNoEnv(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	_ = clitest.Home(t)
 	t.Setenv(cliutil.EnvSandboxName, "")
 
 	// Without --all and without args, the command needs a runtime to proceed.
@@ -37,8 +36,7 @@ func TestDestroyCmd_NoArgsNoEnv(t *testing.T) {
 }
 
 func TestDestroyCmd_InvalidName(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	_ = clitest.Home(t)
 
 	// Invalid names fail at ValidateName inside the runtime callback.
 	// Same caveat as above — if Docker is unavailable, we get a different error.

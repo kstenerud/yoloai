@@ -15,13 +15,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// migrateTestTop isolates HOME so the data dir resolves to $HOME/.yoloai and
-// returns that TOP path, resetting the process-wide root layout around the test.
+// migrateTestTop isolates HOME and points the process-wide root layout at
+// $HOME/.yoloai (runMigrate executes the migrate subcommand standalone,
+// bypassing the root command's PersistentPreRunE that would otherwise establish
+// it). Returns that TOP path and clears the layout on cleanup.
 func migrateTestTop(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	cliutil.SetRootLayout(config.Layout{})
+	cliutil.SetRootLayout(cliutil.LayoutForDataDir(filepath.Join(home, ".yoloai")))
 	t.Cleanup(func() { cliutil.SetRootLayout(config.Layout{}) })
 	return filepath.Join(home, ".yoloai")
 }

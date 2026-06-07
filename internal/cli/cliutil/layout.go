@@ -13,42 +13,46 @@ import (
 	"github.com/kstenerud/yoloai/internal/fileutil"
 )
 
-// rootLayout is the Layout recorded by SetRootLayout at CLI startup
-// from either the --data-dir flag value or $HOME/.yoloai/. Every
-// command handler reads it via Layout(). This is the single
-// licensed place yoloai CLI code touches ambient HOME — every other
+// rootLayout is the Layout recorded by SetRootLayout / SetRootLayoutFromFlag
+// at CLI startup, from either the --data-dir flag value or the default
+// $HOME/.yoloai/. Every command handler reads it via Layout(). This is the
+// single licensed place yoloai CLI code touches ambient HOME — every other
 // library path now takes a config.Layout argument.
 //
 // See development-principles.md §12 (No ambient configuration).
 var rootLayout config.Layout
 
 // SetRootLayout records the Layout the rest of the CLI should use.
-// Called once from the root-cobra-command setup after the
-// --data-dir flag (if any) has been parsed.
-//
-// If SetRootLayout is never called (e.g. tests that bypass the root
-// command and call command-handler functions directly), Layout()
-// falls back to a Layout rooted at $HOME/.yoloai/ on each call (so
-// tests that t.Setenv("HOME", ...) see the updated value).
+// Production goes through SetRootLayoutFromFlag (from the root command's
+// PersistentPreRunE); this lower-level setter exists for tests that call
+// command-handler functions directly without going through the root command —
+// they must establish a Layout explicitly rather than relying on a fabricated
+// fallback.
 func SetRootLayout(l config.Layout) {
 	rootLayout = l
 }
 
-// Layout returns the CLI's working Layout. Reads the Layout set
-// by SetRootLayout at startup, or constructs a fallback from
-// $HOME/.yoloai/ when no SetRootLayout call was made (this happens
-// in tests that exercise command handlers without going through the
-// root command). The fallback is recomputed on every call so tests
-// that change HOME between cases see fresh paths.
-//
-// This function is the single permitted caller of os.UserHomeDir() in CLI
-// code (via resolveHome below); CLI handlers reading a Layout go through here.
+// SetRootLayoutFromFlag records the process-wide root Layout from the parsed
+// --data-dir flag value, defaulting to $HOME/.yoloai when the flag is empty.
+// Called once from the root command's PersistentPreRunE before any handler
+// runs. This is the single place ambient HOME resolves into the CLI's Layout
+// (via LayoutForDataDir → resolveHome); see development-principles.md §12.
+func SetRootLayoutFromFlag(dataDir string) {
+	if dataDir == "" {
+		dataDir = filepath.Join(resolveHome(), ".yoloai")
+	}
+	rootLayout = LayoutForDataDir(dataDir)
+}
+
+// Layout returns the CLI's working Layout. It is a pure accessor for the
+// Layout established by SetRootLayoutFromFlag (production) or SetRootLayout
+// (direct-handler tests). Calling it before either ran is a programming error
+// — the panic surfaces a handler that bypassed the root command's
+// PersistentPreRunE rather than silently fabricating a Layout from ambient
+// HOME.
 func Layout() config.Layout {
 	if rootLayout.DataDir == "" {
-		home := resolveHome()
-		l := config.NewLayoutFor(filepath.Join(home, ".yoloai", libraryNamespace), home)
-		l.Env = processEnv()
-		return l
+		panic("cliutil.Layout() called before the root Layout was set; CLI handlers run under the root command's PersistentPreRunE (SetRootLayoutFromFlag), and direct-handler tests must call SetRootLayout")
 	}
 	return rootLayout
 }

@@ -8,14 +8,14 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/kstenerud/yoloai/internal/testutil"
+	"github.com/kstenerud/yoloai/internal/cli/clitest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// cliConfigDir is a thin alias for testutil.CLIConfigDir so the existing
+// cliConfigDir is a thin alias for clitest.ConfigDir so the existing
 // per-test call sites stay terse.
-func cliConfigDir(t *testing.T) string { t.Helper(); return testutil.CLIConfigDir(t) }
+func cliConfigDir(t *testing.T) string { t.Helper(); return clitest.ConfigDir(t) }
 
 func TestConfigGet_EffectiveConfig(t *testing.T) {
 	dir := cliConfigDir(t)
@@ -37,8 +37,7 @@ func TestConfigGet_EffectiveConfig(t *testing.T) {
 }
 
 func TestConfigGet_NoFile(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	_ = clitest.Home(t)
 
 	cmd := newConfigGetCmd()
 	buf := new(bytes.Buffer)
@@ -82,8 +81,7 @@ func TestConfigSet_ExistingFile(t *testing.T) {
 }
 
 func TestConfigSet_NoFile(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	tmpDir := clitest.Home(t)
 
 	cmd := newConfigSetCmd()
 	cmd.SetArgs([]string{"container_backend", "tart"})

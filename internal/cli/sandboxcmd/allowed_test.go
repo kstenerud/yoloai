@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"testing"
 
+	"github.com/kstenerud/yoloai/internal/cli/clitest"
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
@@ -106,8 +107,7 @@ func TestNetworkList_JSONNoDomains(t *testing.T) {
 }
 
 func TestNetworkList_NonexistentSandbox(t *testing.T) {
-	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	_ = clitest.Home(t)
 
 	cmd := NewSandboxCmd()
 	cmd.SetOut(new(bytes.Buffer))

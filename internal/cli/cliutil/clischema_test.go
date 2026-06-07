@@ -15,13 +15,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// isolatedTop sets HOME to a fresh temp dir, resets the process-wide root
-// Layout so TopDir() falls back to $HOME/.yoloai, and returns that TOP path.
+// isolatedTop sets HOME to a fresh temp dir and points the process-wide root
+// Layout at $HOME/.yoloai (these tests call the migration functions directly,
+// bypassing the root command's PersistentPreRunE that would otherwise establish
+// it), returning that TOP path.
 func isolatedTop(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	cliutil.SetRootLayout(config.Layout{})
+	cliutil.SetRootLayout(cliutil.LayoutForDataDir(filepath.Join(home, ".yoloai")))
+	t.Cleanup(func() { cliutil.SetRootLayout(config.Layout{}) })
 	return filepath.Join(home, ".yoloai")
 }
 

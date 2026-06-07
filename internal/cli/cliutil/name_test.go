@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/kstenerud/yoloai/internal/cli/clitest"
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
 	"github.com/kstenerud/yoloai/yoerrors"
@@ -12,6 +13,7 @@ import (
 )
 
 func TestResolveName_ExplicitArg(t *testing.T) {
+	_ = clitest.Home(t)
 	name, rest, err := cliutil.ResolveName(nil, []string{"my-sandbox"})
 	require.NoError(t, err)
 	assert.Equal(t, "my-sandbox", name)

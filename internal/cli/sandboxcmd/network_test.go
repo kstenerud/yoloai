@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/kstenerud/yoloai/internal/cli/clitest"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/stretchr/testify/require"
 )
@@ -25,8 +26,7 @@ import (
 // exercise the rendering path.
 func createNetworkSandbox(t *testing.T, name, networkMode string, domains []string) string {
 	t.Helper()
-	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	tmpHome := clitest.Home(t)
 
 	sandboxDir := filepath.Join(tmpHome, ".yoloai", "library", "sandboxes", name)
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))

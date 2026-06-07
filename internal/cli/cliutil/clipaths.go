@@ -19,14 +19,13 @@ const (
 )
 
 // TopDir returns the shared top data directory (TOP) — the parent of both
-// TOP/library and TOP/cli. Defaults to $HOME/.yoloai, or the --data-dir
-// value when one was supplied. Derived from the library Layout's DataDir
-// (rooted at TOP/library by Layout / LayoutForDataDir).
+// TOP/library and TOP/cli. Derived from the root Layout's DataDir (rooted at
+// TOP/library by LayoutForDataDir), which is $HOME/.yoloai by default or the
+// --data-dir value when supplied. Like Layout(), this is a pure accessor: it
+// requires the root Layout to have been set (SetRootLayoutFromFlag in
+// production, SetRootLayout in direct-handler tests).
 func TopDir() string {
-	if rootLayout.DataDir != "" {
-		return filepath.Dir(rootLayout.DataDir)
-	}
-	return filepath.Join(resolveHome(), ".yoloai")
+	return filepath.Dir(Layout().DataDir)
 }
 
 // CLIDir returns TOP/cli — the root of the CLI app's own on-disk state.

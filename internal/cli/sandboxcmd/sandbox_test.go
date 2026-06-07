@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kstenerud/yoloai/internal/cli/clitest"
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/stretchr/testify/assert"
@@ -16,8 +17,7 @@ import (
 // setupSandboxCmdTest creates a minimal sandbox dir so name validation succeeds.
 func setupSandboxCmdTest(t *testing.T, name string) {
 	t.Helper()
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	tmpDir := clitest.Home(t)
 
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "library", "sandboxes", name)
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
@@ -97,8 +97,7 @@ func TestSandboxDispatch_SubcmdFirstWithEnv(t *testing.T) {
 }
 
 func TestSandboxDispatch_SubcmdFirstWithoutEnv(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	_ = clitest.Home(t)
 	t.Setenv(cliutil.EnvSandboxName, "")
 
 	cmd := NewSandboxCmd()
@@ -109,8 +108,7 @@ func TestSandboxDispatch_SubcmdFirstWithoutEnv(t *testing.T) {
 }
 
 func TestSandboxDispatch_InvalidName(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	_ = clitest.Home(t)
 
 	cmd := NewSandboxCmd()
 	cmd.SetArgs([]string{"INVALID_NAME!", "info"})

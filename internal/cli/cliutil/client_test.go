@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kstenerud/yoloai/internal/cli/clitest"
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
-	"github.com/kstenerud/yoloai/internal/testutil"
 
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox"
@@ -29,6 +29,7 @@ func TestResolveBackend_FlagSet(t *testing.T) {
 }
 
 func TestResolveBackend_IsolationVM(t *testing.T) {
+	_ = clitest.Home(t)
 	cmd := &cobra.Command{}
 	cmd.Flags().String("backend", "", "")
 	cmd.Flags().String("isolation", "", "")
@@ -41,6 +42,7 @@ func TestResolveBackend_IsolationVM(t *testing.T) {
 }
 
 func TestResolveBackend_IsolationVMEnhanced(t *testing.T) {
+	_ = clitest.Home(t)
 	cmd := &cobra.Command{}
 	cmd.Flags().String("backend", "", "")
 	cmd.Flags().String("isolation", "", "")
@@ -53,6 +55,7 @@ func TestResolveBackend_IsolationVMEnhanced(t *testing.T) {
 }
 
 func TestResolveBackend_OsMac(t *testing.T) {
+	_ = clitest.Home(t)
 	cmd := &cobra.Command{}
 	cmd.Flags().String("backend", "", "")
 	cmd.Flags().String("isolation", "", "")
@@ -63,6 +66,7 @@ func TestResolveBackend_OsMac(t *testing.T) {
 }
 
 func TestResolveBackend_OsMacIsolationVM(t *testing.T) {
+	_ = clitest.Home(t)
 	cmd := &cobra.Command{}
 	cmd.Flags().String("backend", "", "")
 	cmd.Flags().String("isolation", "", "")
@@ -74,7 +78,7 @@ func TestResolveBackend_OsMacIsolationVM(t *testing.T) {
 }
 
 func TestResolveBackend_ConfigOsMacFlagIsolationVM(t *testing.T) {
-	dir := testutil.CLIConfigDir(t)
+	dir := clitest.ConfigDir(t)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("os: mac\n"), 0600))
 
 	cmd := &cobra.Command{}
@@ -87,8 +91,7 @@ func TestResolveBackend_ConfigOsMacFlagIsolationVM(t *testing.T) {
 }
 
 func TestResolveBackend_FlagEmptyNoConfig(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	_ = clitest.Home(t)
 
 	cmd := &cobra.Command{}
 	cmd.Flags().String("backend", "", "")
@@ -99,22 +102,21 @@ func TestResolveBackend_FlagEmptyNoConfig(t *testing.T) {
 // --- ResolveContainerBackendConfig ---
 
 func TestResolveContainerBackendConfig_HasBackend(t *testing.T) {
-	dir := testutil.CLIConfigDir(t)
+	dir := clitest.ConfigDir(t)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("container_backend: tart\n"), 0600))
 
 	assert.Equal(t, runtime.BackendType("tart"), cliutil.ResolveContainerBackendConfig())
 }
 
 func TestResolveContainerBackendConfig_Empty(t *testing.T) {
-	dir := testutil.CLIConfigDir(t)
+	dir := clitest.ConfigDir(t)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("agent: claude\n"), 0600))
 
 	assert.Equal(t, runtime.BackendType(""), cliutil.ResolveContainerBackendConfig())
 }
 
 func TestResolveContainerBackendConfig_NoFile(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	_ = clitest.Home(t)
 
 	assert.Equal(t, runtime.BackendType(""), cliutil.ResolveContainerBackendConfig())
 }
@@ -122,8 +124,7 @@ func TestResolveContainerBackendConfig_NoFile(t *testing.T) {
 // --- ResolveBackendForSandbox ---
 
 func TestResolveBackendForSandbox_MetaHasBackend(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	tmpDir := clitest.Home(t)
 
 	name := "test-backend"
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "library", "sandboxes", name)
@@ -142,16 +143,14 @@ func TestResolveBackendForSandbox_MetaHasBackend(t *testing.T) {
 }
 
 func TestResolveBackendForSandbox_MetaMissing(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	_ = clitest.Home(t)
 
 	// No sandbox dir exists → falls back to config default
 	assert.Equal(t, runtime.BackendType("docker"), cliutil.ResolveBackendForSandbox("nonexistent"))
 }
 
 func TestResolveBackendForSandbox_MetaEmptyBackend(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	tmpDir := clitest.Home(t)
 
 	name := "test-empty-backend"
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "library", "sandboxes", name)
@@ -179,7 +178,7 @@ func TestResolveAgent_FlagSet(t *testing.T) {
 }
 
 func TestResolveAgent_FlagEmptyWithConfig(t *testing.T) {
-	dir := testutil.CLIConfigDir(t)
+	dir := clitest.ConfigDir(t)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("agent: aider\n"), 0600))
 
 	cmd := &cobra.Command{}
@@ -189,8 +188,7 @@ func TestResolveAgent_FlagEmptyWithConfig(t *testing.T) {
 }
 
 func TestResolveAgent_FlagEmptyNoConfig(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	_ = clitest.Home(t)
 
 	cmd := &cobra.Command{}
 	cmd.Flags().String("agent", "", "")
@@ -201,15 +199,14 @@ func TestResolveAgent_FlagEmptyNoConfig(t *testing.T) {
 // --- ResolveAgentFromConfig ---
 
 func TestResolveAgentFromConfig_HasAgent(t *testing.T) {
-	dir := testutil.CLIConfigDir(t)
+	dir := clitest.ConfigDir(t)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("agent: gemini\n"), 0600))
 
 	assert.Equal(t, "gemini", cliutil.ResolveAgentFromConfig())
 }
 
 func TestResolveAgentFromConfig_NoFile(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	_ = clitest.Home(t)
 
 	assert.Equal(t, "claude", cliutil.ResolveAgentFromConfig())
 }
@@ -225,7 +222,7 @@ func TestResolveModel_FlagSet(t *testing.T) {
 }
 
 func TestResolveModel_FlagEmptyWithConfig(t *testing.T) {
-	dir := testutil.CLIConfigDir(t)
+	dir := clitest.ConfigDir(t)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("model: sonnet\n"), 0600))
 
 	cmd := &cobra.Command{}
@@ -235,8 +232,7 @@ func TestResolveModel_FlagEmptyWithConfig(t *testing.T) {
 }
 
 func TestResolveModel_FlagEmptyNoConfig(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	_ = clitest.Home(t)
 
 	cmd := &cobra.Command{}
 	cmd.Flags().String("model", "", "")
@@ -247,15 +243,14 @@ func TestResolveModel_FlagEmptyNoConfig(t *testing.T) {
 // --- ResolveModelFromConfig ---
 
 func TestResolveModelFromConfig_HasModel(t *testing.T) {
-	dir := testutil.CLIConfigDir(t)
+	dir := clitest.ConfigDir(t)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("model: opus\n"), 0600))
 
 	assert.Equal(t, "opus", cliutil.ResolveModelFromConfig())
 }
 
 func TestResolveModelFromConfig_NoFile(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	_ = clitest.Home(t)
 
 	assert.Equal(t, "", cliutil.ResolveModelFromConfig())
 }
@@ -283,8 +278,7 @@ func TestResolveProfile_NoProfileBypass(t *testing.T) {
 
 func TestResolveProfile_FlagEmptyWithConfig(t *testing.T) {
 	// ResolveProfile no longer reads profile from config — flag only.
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	_ = clitest.Home(t)
 
 	cmd := &cobra.Command{}
 	cmd.Flags().String("profile", "", "")
@@ -294,8 +288,7 @@ func TestResolveProfile_FlagEmptyWithConfig(t *testing.T) {
 }
 
 func TestResolveProfile_FlagEmptyNoConfig(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	_ = clitest.Home(t)
 
 	cmd := &cobra.Command{}
 	cmd.Flags().String("profile", "", "")
@@ -311,8 +304,7 @@ func TestSandboxErrorHint_NilErr(t *testing.T) {
 }
 
 func TestSandboxErrorHint_ErrSandboxNotFound(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	_ = clitest.Home(t)
 
 	err := cliutil.SandboxErrorHint("test", sandbox.ErrSandboxNotFound)
 	assert.ErrorIs(t, err, sandbox.ErrSandboxNotFound)
@@ -321,8 +313,7 @@ func TestSandboxErrorHint_ErrSandboxNotFound(t *testing.T) {
 }
 
 func TestSandboxErrorHint_GenericError(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	_ = clitest.Home(t)
 
 	origErr := errors.New("something went wrong")
 	err := cliutil.SandboxErrorHint("test", origErr)

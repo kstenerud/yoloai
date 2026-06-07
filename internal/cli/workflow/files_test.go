@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kstenerud/yoloai/internal/cli/clitest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -17,8 +18,7 @@ import (
 // Returns the sandbox name and the files directory path.
 func setupFilesTest(t *testing.T) (string, string) {
 	t.Helper()
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	tmpDir := clitest.Home(t)
 
 	name := "testbox"
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "library", "sandboxes", name)
@@ -34,8 +34,7 @@ func TestFilesPut_CreatesFilesDirIfMissing(t *testing.T) {
 	// Regression: sandboxes created before the files/ feature was added have no
 	// host-side files/ directory. `files put` must create it rather than letting
 	// cp create a plain file named "files".
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	tmpDir := clitest.Home(t)
 
 	name := "testbox"
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "library", "sandboxes", name)

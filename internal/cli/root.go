@@ -224,16 +224,14 @@ diff and apply what you want to keep.`,
 	rootCmd.PersistentFlags().String("bugreport", "", "Write bug report (safe|unsafe)")
 	rootCmd.PersistentFlags().String("data-dir", "", "Override the yoloai data directory (default: $HOME/.yoloai/). HTTP/MCP/daemon/test embedders pass explicit paths; see development-principles.md §12.")
 
-	// Persistent pre-run: when --data-dir is supplied, record it as the
-	// process-wide rootLayout. Otherwise leave rootLayout empty so
-	// cliutil.Layout() resolves $HOME/.yoloai/ freshly on each call (important
-	// for tests that t.Setenv("HOME", ...) between cases). The HOME read
-	// goes through the single allowlisted site (cliutil.resolveHome).
+	// Persistent pre-run: record the process-wide rootLayout from the
+	// --data-dir flag (defaulting to $HOME/.yoloai when empty) before any
+	// command handler — or the migration gate below — reads it. The HOME
+	// read goes through the single allowlisted site (cliutil.resolveHome).
 	prevPersistentPreRunE := rootCmd.PersistentPreRunE
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
-		if dataDir, _ := cmd.Flags().GetString("data-dir"); dataDir != "" {
-			cliutil.SetRootLayout(cliutil.LayoutForDataDir(dataDir))
-		}
+		dataDir, _ := cmd.Flags().GetString("data-dir")
+		cliutil.SetRootLayoutFromFlag(dataDir)
 		// Run the read-only migration gate before any command touches the data
 		// dir: it create-freshes a genuinely new install, fails fast telling
 		// the user to run `yoloai system migrate` when the dir is out of date,
@@ -248,6 +246,14 @@ diff and apply what you want to keep.`,
 		}
 		return nil
 	}
+
+	// Establish the default root Layout before building the command tree.
+	// Dynamic `yoloai x` extension subcommands are registered now, at
+	// construction time — before flag parsing — and read CLIExtensionsDir(),
+	// so a Layout must already exist. --data-dir cannot influence which
+	// extensions load (it isn't parsed yet); the PersistentPreRunE above
+	// re-applies the flag for every other handler.
+	cliutil.SetRootLayoutFromFlag("")
 
 	registerCommands(rootCmd, version, commit, date)
 

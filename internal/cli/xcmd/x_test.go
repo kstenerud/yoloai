@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/kstenerud/yoloai/internal/cli"
+	"github.com/kstenerud/yoloai/internal/cli/clitest"
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 	"github.com/kstenerud/yoloai/internal/cli/extension"
 	"github.com/kstenerud/yoloai/internal/cli/xcmd"
@@ -24,8 +25,7 @@ import (
 // where the CLI app keeps its own state (TOP/cli); see cliutil.CLIExtensionsDir.
 func setupExtTest(t *testing.T) string {
 	t.Helper()
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	tmpDir := clitest.Home(t)
 
 	top := filepath.Join(tmpDir, ".yoloai")
 	extDir := filepath.Join(top, "cli", "extensions")
@@ -63,8 +63,7 @@ func TestXList_NoExtensions(t *testing.T) {
 }
 
 func TestXList_NoExtensionsDir(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	_ = clitest.Home(t)
 	// Don't create extensions dir
 
 	cmd := xcmd.NewCmd()

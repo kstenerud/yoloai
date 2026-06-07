@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kstenerud/yoloai/internal/cli/clitest"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -16,8 +17,7 @@ import (
 // setupLogTest creates a sandbox dir and returns the name and sandbox dir path.
 func setupLogTest(t *testing.T, name string) string {
 	t.Helper()
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	tmpDir := clitest.Home(t)
 
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "library", "sandboxes", name)
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "logs"), 0750))
