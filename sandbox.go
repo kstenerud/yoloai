@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"time"
 
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox"
@@ -114,6 +115,112 @@ func (s *Sandbox) Restart(ctx context.Context, opts SandboxStartOptions) (*Start
 		return nil, err
 	}
 	return lifecycle.Start(ctx, s.c.deps(), s.name, opts)
+}
+
+// waitPollInterval is how often Wait re-inspects the sandbox. A single
+// Inspect is one backend status query plus a host-side status-file read (no
+// container exec on the fast path), so a 1s cadence is cheap for a
+// human-scale wait.
+const waitPollInterval = 1 * time.Second
+
+// ErrWaitTimeout is returned by Sandbox.Wait when SandboxWaitOptions.Timeout
+// elapses before the requested condition is met. It wraps
+// context.DeadlineExceeded, so errors.Is(err, context.DeadlineExceeded) also
+// holds. Wait returns it alongside the last-observed SandboxInfo so callers can
+// see where the sandbox stalled.
+var ErrWaitTimeout = fmt.Errorf("sandbox wait timed out: %w", context.DeadlineExceeded)
+
+// WaitCondition selects what state ends a Wait. Dead/terminal states (Done,
+// Failed, Stopped, Removed, Suspended, Broken, Unavailable) always end the
+// wait regardless of the condition — you never keep polling a sandbox that
+// isn't running.
+type WaitCondition int
+
+const (
+	// WaitForExit returns only when the agent session is over (Done / Failed /
+	// Stopped, plus the always-terminal states). Idle does NOT satisfy it —
+	// an agent awaiting input keeps the wait blocked. This is the zero value.
+	WaitForExit WaitCondition = iota
+	// WaitForIdle returns as soon as the agent stops actively working: Idle,
+	// or any later terminal state. Use it for one-shot "fire a prompt, get the
+	// response" flows that shouldn't block once the agent is awaiting input.
+	WaitForIdle
+)
+
+// SandboxWaitOptions configures Sandbox.Wait.
+type SandboxWaitOptions struct {
+	// For is the condition that ends the wait. The zero value is WaitForExit.
+	For WaitCondition
+	// Timeout bounds the wait. Zero means no internal bound — the wait runs
+	// until the condition is met or the passed ctx is cancelled. When set, a
+	// timeout returns the last-observed SandboxInfo with ErrWaitTimeout.
+	Timeout time.Duration
+}
+
+// Wait blocks until the sandbox reaches the condition in opts, polling its
+// status once a second. It returns the SandboxInfo at the moment the condition
+// is met. If opts.Timeout elapses first it returns the last-observed info with
+// ErrWaitTimeout; if the passed ctx is cancelled it returns ctx.Err().
+func (s *Sandbox) Wait(ctx context.Context, opts SandboxWaitOptions) (*SandboxInfo, error) {
+	if err := s.c.ensure(ctx); err != nil {
+		return nil, err
+	}
+	return pollUntil(ctx, waitPollInterval, opts.Timeout, opts.For, func(ctx context.Context) (*SandboxInfo, error) {
+		si, err := s.c.engine.Inspect(ctx, s.name)
+		if err != nil {
+			return nil, fmt.Errorf("inspect sandbox: %w", err)
+		}
+		return sandboxInfoFromStatus(si), nil
+	})
+}
+
+// pollUntil drives the Wait loop independently of the backend: it calls poll
+// every interval until poll's status satisfies cond. Factored out (with poll
+// and interval injected) so the timing/timeout/cancel logic is unit-testable
+// without a live engine. Returns (info, nil) when cond is met; (lastInfo,
+// ErrWaitTimeout) when timeout > 0 elapses first; (nil, ctx.Err()) on cancel.
+func pollUntil(ctx context.Context, interval, timeout time.Duration, cond WaitCondition, poll func(context.Context) (*SandboxInfo, error)) (*SandboxInfo, error) {
+	var timeoutCh <-chan time.Time
+	if timeout > 0 {
+		t := time.NewTimer(timeout)
+		defer t.Stop()
+		timeoutCh = t.C
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		info, err := poll(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if waitConditionMet(info.Status, cond) {
+			return info, nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-timeoutCh:
+			return info, ErrWaitTimeout
+		case <-ticker.C:
+		}
+	}
+}
+
+// waitConditionMet reports whether a status satisfies the wait condition.
+// Active never satisfies it (agent still working); Idle satisfies only
+// WaitForIdle; every other status is terminal and always satisfies it (so an
+// unexpected/future status ends the wait rather than hanging forever).
+func waitConditionMet(st Status, cond WaitCondition) bool {
+	switch st {
+	case StatusActive:
+		return false
+	case StatusIdle:
+		return cond == WaitForIdle
+	default:
+		return true
+	}
 }
 
 // Reset re-copies the workdir into the sandbox, resets the diff baseline, and
