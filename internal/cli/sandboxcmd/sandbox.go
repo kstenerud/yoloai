@@ -4,8 +4,6 @@
 package sandboxcmd
 
 import (
-	"os"
-
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
 	"github.com/kstenerud/yoloai/yoerrors"
@@ -128,7 +126,7 @@ func runSandboxSubcommand(cmd *cobra.Command, subcmd, name string, rest []string
 func resolveSandboxDispatchArgs(args []string) (name, subcmd string, rest []string, err error) {
 	if sandboxSubcmds[args[0]] {
 		// args[0] is a subcommand — name must come from YOLOAI_SANDBOX
-		envName := os.Getenv(cliutil.EnvSandboxName) //nolint:forbidigo // §12: documented YOLOAI_SANDBOX feature; CLI boundary
+		envName := cliutil.SandboxNameFromEnv()
 		if envName == "" {
 			return "", "", nil, yoerrors.NewUsageError("sandbox name required before subcommand (or set YOLOAI_SANDBOX)")
 		}

@@ -12,6 +12,14 @@ import (
 // EnvSandboxName is the environment variable used as default sandbox name.
 const EnvSandboxName = "YOLOAI_SANDBOX"
 
+// SandboxNameFromEnv returns the YOLOAI_SANDBOX fallback (empty if unset). This
+// is the single point where the documented §12 ambient-config exception is read;
+// every command that wants the env fallback routes through here rather than
+// hand-rolling its own os.Getenv, so the forbidigo suppression lives in one place.
+func SandboxNameFromEnv() string {
+	return os.Getenv(EnvSandboxName) //nolint:forbidigo // §12: documented YOLOAI_SANDBOX feature; CLI boundary resolves it to an explicit name
+}
+
 // ValidateName checks that a sandbox name is well-formed (charset, no path
 // traversal). The CLI boundary owns name-format validation; commands that
 // resolve a name outside ResolveName (e.g. files' subcommand-first dispatch)
@@ -36,7 +44,7 @@ func ResolveName(_ *cobra.Command, args []string) (string, []string, error) {
 		return args[0], args[1:], nil
 	}
 
-	if envName := os.Getenv(EnvSandboxName); envName != "" { //nolint:forbidigo // §12: documented YOLOAI_SANDBOX feature; CLI boundary resolves it to an explicit name
+	if envName := SandboxNameFromEnv(); envName != "" {
 		if err := ValidateName(envName); err != nil {
 			return "", nil, err
 		}

@@ -80,7 +80,7 @@ func runDestroyCmd(cmd *cobra.Command, args []string) error {
 		// Only resolve from first arg if it's not a wildcard pattern
 		backend = cliutil.ResolveBackendForSandbox(args[0])
 	} else if !all && len(args) == 0 {
-		if envName := os.Getenv(cliutil.EnvSandboxName); envName != "" { //nolint:forbidigo // §12: documented YOLOAI_SANDBOX feature; CLI boundary
+		if envName := cliutil.SandboxNameFromEnv(); envName != "" {
 			backend = cliutil.ResolveBackendForSandbox(envName)
 		}
 	}
@@ -141,7 +141,7 @@ func resolveDestroyAll(cmd *cobra.Command, ctx context.Context, c *yoloai.Client
 
 // resolveDestroyFromEnv resolves the sandbox name from the environment when no args are given.
 func resolveDestroyFromEnv() ([]string, error) {
-	envName := os.Getenv(cliutil.EnvSandboxName) //nolint:forbidigo // §12: documented YOLOAI_SANDBOX feature; CLI boundary
+	envName := cliutil.SandboxNameFromEnv()
 	if envName == "" {
 		return nil, yoerrors.NewUsageError("at least one sandbox name is required (or use --all or set YOLOAI_SANDBOX)")
 	}
