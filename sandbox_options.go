@@ -45,7 +45,10 @@ type SandboxCreateOptions struct {
 	// AuxDirs are additional directories mounted alongside the workdir.
 	AuxDirs []DirSpec
 
-	// AgentType selects the AI agent. Empty resolves from config, then AgentClaude.
+	// AgentType selects the AI agent and is required: an empty AgentType is
+	// rejected, not defaulted. An unset agent is a missing required input (not
+	// an unsafe one), so the library never picks a default — embedders choose
+	// their own. The CLI resolves --agent / config / "claude" at its own edge.
 	AgentType AgentType
 
 	// Model selects the model/alias. Empty resolves from config, then the

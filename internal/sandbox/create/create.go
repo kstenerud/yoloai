@@ -398,6 +398,9 @@ func validateAndLoadConfig(d state.Deps, opts Options) (*agent.Definition, strin
 
 	agentDef := agent.GetAgent(opts.Agent)
 	if agentDef == nil {
+		if opts.Agent == "" {
+			return nil, "", nil, nil, yoerrors.NewUsageError("agent is required (the library does not pick a default agent)")
+		}
 		return nil, "", nil, nil, yoerrors.NewUsageError("unknown agent: %s", opts.Agent)
 	}
 
