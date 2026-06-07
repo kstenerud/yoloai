@@ -43,8 +43,7 @@ type WorkdirDiffOptions struct {
 // read the on-disk commit history. Folds the former Diff / DiffWithOptions /
 // DiffRef / DiffOverlay methods into one verb.
 func (w *Workdir) Diff(ctx context.Context, opts WorkdirDiffOptions) (string, error) {
-	w.engine.TryEnsure(ctx) // overlay diffs run git inside the container; copy-mode reads disk (rt unused)
-	meta, err := store.LoadEnvironment(w.engine.Layout().SandboxDir(w.name))
+	meta, err := w.engine.LoadEnvironment(w.name)
 	if err != nil {
 		return "", err
 	}
@@ -54,31 +53,14 @@ func (w *Workdir) Diff(ctx context.Context, opts WorkdirDiffOptions) (string, er
 		if overlay {
 			return "", yoerrors.NewPlatformError("ref-based diff is not supported for :overlay sandboxes (commits are not individually addressable from the host)")
 		}
-		return patch.GenerateCommitDiff(patch.CommitDiffOptions{
-			Name:   w.name,
-			Layout: w.engine.Layout(),
-			Ref:    opts.Ref,
-			Stat:   opts.Stat,
-		})
+		return w.engine.GenerateCommitDiff(w.name, opts.Ref, opts.Stat)
 	}
 
 	if overlay {
-		return patch.GenerateOverlayDiff(ctx, w.engine.Runtime(), patch.DiffOptions{
-			Name:     w.name,
-			Layout:   w.engine.Layout(),
-			Stat:     opts.Stat,
-			NameOnly: opts.NameOnly,
-		})
+		return w.engine.GenerateOverlayDiff(ctx, w.name, opts.Stat, opts.NameOnly)
 	}
 
-	return patch.GenerateDiff(ctx, patch.DiffOptions{
-		Name:     w.name,
-		Layout:   w.engine.Layout(),
-		Paths:    opts.Paths,
-		Stat:     opts.Stat,
-		NameOnly: opts.NameOnly,
-		Runtime:  w.engine.Runtime(),
-	})
+	return w.engine.GenerateWorkingDiff(ctx, w.name, opts.Paths, opts.Stat, opts.NameOnly)
 }
 
 // WorkdirExportOptions configures Workdir.Export. Dir is required.
@@ -127,8 +109,7 @@ func (w *Workdir) Export(ctx context.Context, opts WorkdirExportOptions) (*Expor
 	if opts.Dir == "" {
 		return nil, yoerrors.NewUsageError("export requires a destination directory: set WorkdirExportOptions.Dir")
 	}
-	w.engine.TryEnsure(ctx) // overlay export needs the running container; copy-mode reads disk (rt unused)
-	return patch.Export(ctx, w.engine.Layout(), w.engine.Runtime(), w.name, opts.toInternal())
+	return w.engine.ExportPatches(ctx, w.name, opts.toInternal())
 }
 
 // ApplyResult describes the outcome of an Apply: the host directory patched,
@@ -204,9 +185,8 @@ func (w *Workdir) Apply(ctx context.Context, opts WorkdirApplyOptions) (*ApplyRe
 	if opts.Mode != ApplyModeCommits && opts.Mode != ApplyModeNoCommit {
 		return nil, yoerrors.NewUsageError("apply mode is required: set WorkdirApplyOptions.Mode to yoloai.ApplyModeCommits or yoloai.ApplyModeNoCommit")
 	}
-	w.engine.TryEnsure(ctx) // overlay apply needs the running container; copy-mode reads disk (rt unused)
 
-	meta, err := store.LoadEnvironment(w.engine.Layout().SandboxDir(w.name))
+	meta, err := w.engine.LoadEnvironment(w.name)
 	if err != nil {
 		return nil, err
 	}
@@ -216,7 +196,7 @@ func (w *Workdir) Apply(ctx context.Context, opts WorkdirApplyOptions) (*ApplyRe
 		if overlay {
 			return nil, yoerrors.NewUsageError("cannot replay a commit series for an :overlay sandbox — overlay changes have no commit history; apply with ApplyModeNoCommit")
 		}
-		return patch.ApplySeries(ctx, w.engine.Layout(), w.engine.Runtime(), w.name, patch.ApplySeriesOptions{
+		return w.engine.ApplySeries(ctx, w.name, patch.ApplySeriesOptions{
 			Refs:               opts.Refs,
 			IncludeUncommitted: opts.IncludeUncommitted,
 			Paths:              opts.Paths,
@@ -225,12 +205,12 @@ func (w *Workdir) Apply(ctx context.Context, opts WorkdirApplyOptions) (*ApplyRe
 	}
 
 	if overlay {
-		return patch.ApplyOverlay(ctx, w.engine.Layout(), w.engine.Runtime(), w.name, patch.ApplyOverlayOptions{
+		return w.engine.ApplyOverlay(ctx, w.name, patch.ApplyOverlayOptions{
 			Paths:  opts.Paths,
 			DryRun: opts.DryRun,
 		})
 	}
-	return patch.ApplyAll(ctx, w.engine.Layout(), w.engine.Runtime(), w.name, patch.ApplyAllOptions{
+	return w.engine.ApplyAll(ctx, w.name, patch.ApplyAllOptions{
 		IncludeUncommitted: opts.IncludeUncommitted,
 		Paths:              opts.Paths,
 		DryRun:             opts.DryRun,
@@ -261,8 +241,7 @@ type WorkdirCommitsOptions struct {
 // baseline. Folds the former ListCommits / ListCommitsOverlay /
 // ListCommitsWithStats methods into one verb.
 func (w *Workdir) Commits(ctx context.Context, opts WorkdirCommitsOptions) ([]CommitInfo, error) {
-	w.engine.TryEnsure(ctx) // overlay history runs git log inside the container; copy-mode reads disk (rt unused)
-	meta, err := store.LoadEnvironment(w.engine.Layout().SandboxDir(w.name))
+	meta, err := w.engine.LoadEnvironment(w.name)
 	if err != nil {
 		return nil, err
 	}
@@ -271,7 +250,7 @@ func (w *Workdir) Commits(ctx context.Context, opts WorkdirCommitsOptions) ([]Co
 		if opts.Stat {
 			return nil, yoerrors.NewPlatformError("per-commit stat is not supported for :overlay sandboxes (overlay commits are not individually addressable from the host)")
 		}
-		cs, err := patch.ListCommitsBeyondBaselineOverlay(ctx, w.engine.Layout(), w.engine.Runtime(), w.name)
+		cs, err := w.engine.ListCommitsOverlay(ctx, w.name)
 		if err != nil {
 			return nil, err
 		}
@@ -279,7 +258,7 @@ func (w *Workdir) Commits(ctx context.Context, opts WorkdirCommitsOptions) ([]Co
 	}
 
 	if opts.Stat {
-		cs, err := patch.ListCommitsWithStats(ctx, w.engine.Layout(), w.engine.Runtime(), w.name)
+		cs, err := w.engine.ListCommitsWithStats(ctx, w.name)
 		if err != nil {
 			return nil, err
 		}
@@ -290,7 +269,7 @@ func (w *Workdir) Commits(ctx context.Context, opts WorkdirCommitsOptions) ([]Co
 		return out, nil
 	}
 
-	cs, err := patch.ListCommitsBeyondBaseline(ctx, w.engine.Layout(), w.engine.Runtime(), w.name)
+	cs, err := w.engine.ListCommits(ctx, w.name)
 	if err != nil {
 		return nil, err
 	}
@@ -308,8 +287,7 @@ func toCommitInfos(cs []patch.CommitInfo) []CommitInfo {
 // HasUncommittedChanges reports whether the workdir has uncommitted edits
 // beyond its last commit. Drives the "*" marker in `yoloai diff --log`.
 func (w *Workdir) HasUncommittedChanges(ctx context.Context) (bool, error) {
-	w.engine.TryEnsure(ctx)
-	return patch.HasUncommittedChanges(ctx, w.engine.Layout(), w.engine.Runtime(), w.name)
+	return w.engine.HasUncommittedChanges(ctx, w.name)
 }
 
 // BaselineChange reports a baseline move: the new baseline SHA and its commit
@@ -335,16 +313,14 @@ type BaselineConflictError = patch.BaselineConflictError
 // expectedCurrentSHA == "" to assert "no baseline yet" (valid only when none is
 // set). Refused with a *UsageError for :rw and :overlay workdirs.
 func (w *Workdir) AdvanceBaseline(ctx context.Context, expectedCurrentSHA string) (*BaselineChange, error) {
-	w.engine.TryEnsure(ctx)
-	return patch.AdvanceBaselineCAS(ctx, w.engine.Layout(), w.engine.Runtime(), w.name, expectedCurrentSHA)
+	return w.engine.AdvanceBaseline(ctx, w.name, expectedCurrentSHA)
 }
 
 // SetBaseline moves the diff baseline to the commit named by ref (short SHA,
 // full SHA, or any git rev), guarded by the same compare-and-swap as
 // AdvanceBaseline against expectedCurrentSHA.
 func (w *Workdir) SetBaseline(ctx context.Context, expectedCurrentSHA, ref string) (*BaselineChange, error) {
-	w.engine.TryEnsure(ctx)
-	return patch.SetBaselineCAS(ctx, w.engine.Layout(), w.engine.Runtime(), w.name, expectedCurrentSHA, ref)
+	return w.engine.SetBaseline(ctx, w.name, expectedCurrentSHA, ref)
 }
 
 // BaselineLog returns the workdir's commit history from sandbox inception to
@@ -353,8 +329,7 @@ func (w *Workdir) SetBaseline(ctx context.Context, expectedCurrentSHA, ref strin
 // after an accidental baseline advance. Refused with a *UsageError for :rw and
 // :overlay workdirs.
 func (w *Workdir) BaselineLog(ctx context.Context) ([]BaselineLogEntry, error) {
-	w.engine.TryEnsure(ctx)
-	return patch.BaselineLog(ctx, w.engine.Layout(), w.engine.Runtime(), w.name)
+	return w.engine.BaselineLog(ctx, w.name)
 }
 
 // TagInfo identifies a git tag in a sandbox's workdir (its Name and commit
@@ -375,31 +350,7 @@ type WorkdirTagsOptions struct {
 // present on the host. Folds ListTagsBeyondBaseline / ListUnappliedTags /
 // GetTagMessage.
 func (w *Workdir) Tags(ctx context.Context, opts WorkdirTagsOptions) ([]TagInfo, error) {
-	var (
-		tags []TagInfo
-		err  error
-	)
-	if opts.UnappliedOnly {
-		tags, err = sandbox.ListUnappliedTags(w.engine.Layout(), w.name)
-	} else {
-		tags, err = sandbox.ListTagsBeyondBaseline(w.engine.Layout(), w.name)
-	}
-	if err != nil {
-		return nil, err
-	}
-	if len(tags) == 0 {
-		return []TagInfo{}, nil
-	}
-
-	meta, err := store.LoadEnvironment(w.engine.Layout().SandboxDir(w.name))
-	if err != nil {
-		return nil, err
-	}
-	gitDir := store.WorkDir(w.engine.Layout().SandboxDir(w.name), meta.Workdir.HostPath)
-	for i := range tags {
-		tags[i].Message = sandbox.GetTagMessage(gitDir, tags[i].Name)
-	}
-	return tags, nil
+	return w.engine.WorkdirTags(w.name, opts.UnappliedOnly)
 }
 
 // TagOutcome is the result of transferring one tag to the host target repo.
@@ -430,7 +381,7 @@ type WorkdirTransferTagsOptions struct {
 // accepted for API symmetry; the current host-git implementation does not use
 // it (see Tags).
 func (w *Workdir) TransferTags(ctx context.Context, opts WorkdirTransferTagsOptions) (*TagTransferResult, error) {
-	return sandbox.TransferTags(w.engine.Layout(), w.name, opts.Tags, opts.SHAMap)
+	return w.engine.TransferWorkdirTags(w.name, opts.Tags, opts.SHAMap)
 }
 
 // TargetIsGitRepo reports whether the sandbox's original host work directory is
@@ -438,5 +389,5 @@ func (w *Workdir) TransferTags(ctx context.Context, opts WorkdirTransferTagsOpti
 // fallback and to gate selective apply. ctx is accepted for API symmetry; the
 // current host-fs implementation does not use it.
 func (w *Workdir) TargetIsGitRepo(ctx context.Context) (bool, error) {
-	return sandbox.TargetIsGitRepo(w.engine.Layout(), w.name)
+	return w.engine.TargetIsGitRepo(w.name)
 }
