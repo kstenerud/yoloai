@@ -56,7 +56,7 @@ Dependency direction (W-L8 + W-L12 shape): `cmd/yoloai` → `internal/cli` → `
 
 | File | Purpose |
 |------|---------|
-| `client.go` | Orchestration spine — `Client` and its root methods (`ListSandboxes`, `CreateSandbox`, `EnsureSetup`) plus the lazy-runtime construction helpers (`NewClient`, `ensure`) and `destroyForOverwrite` (shared by `Sandbox.Clone`). `CreateSandbox` provisions a dormant `*Sandbox` handle (no launch); cloning lives on `Sandbox.Clone`. Registers Docker, Podman, Seatbelt, and Tart backends via blank imports. |
+| `client.go` | Orchestration spine — `Client` and its root methods (`ListSandboxes`, `CreateSandbox`, `EnsureSetup`). Since D74 the `Client` is a thin factory: `NewClient` validates options and builds the single eager `*sandbox.Engine` (which owns the lazy backend connection); the per-sandbox handles route backend-bound work through that Engine. `CreateSandbox` provisions a dormant `*Sandbox` handle (no launch); cloning + overwrite-teardown live on `Sandbox.Clone` / `Engine.DestroyForOverwrite`. Registers Docker, Podman, Seatbelt, and Tart backends via blank imports. |
 | `client_options.go` | `ClientCreateOptions` — the construction-time config `NewClient` takes (data/home dirs, optional `BackendType`, IO, env snapshot, principal). |
 | `sandbox_options.go` | The public sandbox option types: `SandboxCreateOptions` (the surface `Client.CreateSandbox` takes), plus `toInternal` mapping and port formatting. |
 | `system_config.go` | `ConfigAdmin` sub-handle (`Client.System().Config()`): `Effective`/`Get`/`Set`/`Reset` over the config files. |
@@ -319,7 +319,7 @@ few helpers not yet carved out (clone, parse, setup, terminal/attach).
 
 | File | Purpose |
 |------|---------|
-| `engine.go` | `Engine` struct — slim deps-holder (`runtime.Runtime`, layout, input). `EnsureSetup()` / `EnsureSetupNonInteractive()` for first-run auto-setup. Lifecycle/create methods were dissolved into leaf free functions; `SendInput()` remains here. |
+| `engine.go` | `Engine` struct — owns the **lazy backend connection** (D74): built eagerly from layout-only state with `runtime` nil (`NewEngine`), opens once on the first backend-bound method via mutex-guarded `ensure`/`TryEnsure` (`NewEngineWithRuntime` injects an already-open runtime for tests + ephemeral overwrite). A backend-less Engine returns `ErrBackendRequired` from backend-bound verbs and still serves host-only reads. `EnsureSetup()` for first-run auto-setup, `Inspect`/`List`/`SendInput`/`Runtime()` here; the lifecycle/create verbs (`Start`/`Stop`/`Restart`/`Reset`/`Destroy`/`NeedsConfirmation`/`Create`/`DestroyForOverwrite`) are self-ensuring Engine methods in `engine_lifecycle.go` over the leaf free functions. |
 | `aliases.go` | Type/const aliases re-exporting the `create/` leaf's public symbols (CreateOptions, etc.) into package sandbox. |
 | `inspect.go` | Façade re-exports of the read-model — `type Info = status.Info`, `var InspectSandbox/ListSandboxes/DetectStatus = status.…`, Status/AgentStatus/WorkDataState constants. Implementation in `status/`. |
 | `lifecycle.go` | Façade re-exports of lifecycle — `type StartOptions/ResetOptions = lifecycle.…`, `var PatchConfigAllowedDomains = lifecycle.…`. Implementation in `lifecycle/`. |

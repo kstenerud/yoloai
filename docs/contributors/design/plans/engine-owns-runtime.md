@@ -3,6 +3,12 @@ ABOUTME: per-sandbox sub-handles stop reaching two/three levels deep. Refines D6
 
 # Plan: Engine owns the lazy runtime (refine D67)
 
+**Status (2026-06-07):** Stage 1 landed — C1 (`9f67d28`), C2 (`45aab36`), C3
+(`8479258`) on `main`, `make check` green. Stage 2 (C4, below) remains a
+sequenced follow-up. See [D74].
+
+[D74]: ../../decisions/working-notes.md
+
 ## The problem
 
 The A2/A3 collapse (D67) put **one lazy `Client`** in place of the old
