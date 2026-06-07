@@ -351,7 +351,6 @@ func TestIntegrationTart_VMLocalStorageVerification(t *testing.T) {
 		Name:    sandboxName,
 		Workdir: sandbox.DirSpec{Path: projectDir},
 		Agent:   "test",
-		NoStart: true, // Create but don't start
 		Version: "test",
 	})
 	require.NoError(t, err)

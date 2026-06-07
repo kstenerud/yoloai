@@ -36,6 +36,9 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	_, err = startSandbox(ctx, mgr, sandboxName, sandbox.StartOptions{})
+	require.NoError(t, err)
+
 	// Wait for container to become active
 	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName("", sandboxName), 15*time.Second)
 
@@ -136,7 +139,6 @@ func TestIntegration_CreateNoStart(t *testing.T) {
 		Name:    "nostart",
 		Workdir: sandbox.DirSpec{Path: projectDir},
 		Agent:   "test",
-		NoStart: true,
 		Version: "test",
 	})
 	require.NoError(t, err)
@@ -170,7 +172,6 @@ func TestIntegration_CopyMode(t *testing.T) {
 		Name:    "copymode",
 		Workdir: sandbox.DirSpec{Path: projectDir, Mode: sandbox.DirModeCopy},
 		Agent:   "test",
-		NoStart: true,
 		Version: "test",
 	})
 	require.NoError(t, err)
@@ -203,7 +204,6 @@ func TestIntegration_RWMode(t *testing.T) {
 		Name:    "rwmode",
 		Workdir: sandbox.DirSpec{Path: projectDir, Mode: sandbox.DirModeRW},
 		Agent:   "test",
-		NoStart: true,
 		Version: "test",
 	})
 	require.NoError(t, err)
@@ -228,7 +228,6 @@ func TestIntegration_AuxDirCopy_RejectedByLibrary(t *testing.T) {
 		Name:    "auxcopy-rejected",
 		Workdir: sandbox.DirSpec{Path: projectDir},
 		Agent:   "test",
-		NoStart: true,
 		AuxDirs: []sandbox.DirSpec{{Path: auxDir, Mode: sandbox.DirModeCopy}},
 		Version: "test",
 	})
@@ -252,7 +251,6 @@ func TestIntegration_AuxDirRW(t *testing.T) {
 		Name:    "auxrw",
 		Workdir: sandbox.DirSpec{Path: projectDir},
 		Agent:   "test",
-		NoStart: true,
 		AuxDirs: []sandbox.DirSpec{{Path: auxDir, Mode: sandbox.DirModeRW}},
 		Version: "test",
 	})
@@ -274,7 +272,6 @@ func TestIntegration_AuxDirRO(t *testing.T) {
 		Name:    "auxro",
 		Workdir: sandbox.DirSpec{Path: projectDir},
 		Agent:   "test",
-		NoStart: true,
 		AuxDirs: []sandbox.DirSpec{{Path: auxDir}},
 		Version: "test",
 	})
@@ -296,7 +293,6 @@ func TestIntegration_Replace(t *testing.T) {
 		Name:    "replaceme",
 		Workdir: sandbox.DirSpec{Path: projectDir},
 		Agent:   "test",
-		NoStart: true,
 		Version: "test",
 	})
 	require.NoError(t, err)
@@ -307,7 +303,6 @@ func TestIntegration_Replace(t *testing.T) {
 		Name:    "replaceme",
 		Workdir: sandbox.DirSpec{Path: projectDir},
 		Agent:   "test",
-		NoStart: true,
 		Replace: true,
 		Version: "test",
 	})
@@ -332,6 +327,9 @@ func TestIntegration_Reset(t *testing.T) {
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { destroySandbox(ctx, mgr, "resettest") }) //nolint:errcheck // test cleanup
+
+	_, err = startSandbox(ctx, mgr, "resettest", sandbox.StartOptions{})
+	require.NoError(t, err)
 
 	// Wait for container to become active
 	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName("", "resettest"), 15*time.Second)
@@ -376,6 +374,9 @@ func TestIntegration_Exec(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { destroySandbox(ctx, mgr, "exectest") }) //nolint:errcheck // test cleanup
 
+	_, err = startSandbox(ctx, mgr, "exectest", sandbox.StartOptions{})
+	require.NoError(t, err)
+
 	// Wait for container to become active
 	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName("", "exectest"), 15*time.Second)
 
@@ -394,7 +395,6 @@ func TestIntegration_DiffClean(t *testing.T) {
 		Name:    "diffclean",
 		Workdir: sandbox.DirSpec{Path: projectDir},
 		Agent:   "test",
-		NoStart: true,
 		Version: "test",
 	})
 	require.NoError(t, err)
@@ -413,7 +413,6 @@ func TestIntegration_DiffWithChanges(t *testing.T) {
 		Name:    "diffchanges",
 		Workdir: sandbox.DirSpec{Path: projectDir},
 		Agent:   "test",
-		NoStart: true,
 		Version: "test",
 	})
 	require.NoError(t, err)
@@ -443,7 +442,6 @@ func TestIntegration_ApplyPatch(t *testing.T) {
 		Name:    "applypatch",
 		Workdir: sandbox.DirSpec{Path: projectDir},
 		Agent:   "test",
-		NoStart: true,
 		Version: "test",
 	})
 	require.NoError(t, err)
@@ -490,7 +488,6 @@ func TestIntegration_Prompt(t *testing.T) {
 		Workdir: sandbox.DirSpec{Path: projectDir},
 		Agent:   "test",
 		Prompt:  "echo hello world",
-		NoStart: true,
 		Version: "test",
 	})
 	require.NoError(t, err)
@@ -515,7 +512,6 @@ func TestIntegration_ResourceLimits(t *testing.T) {
 		Name:    "reslimits",
 		Workdir: sandbox.DirSpec{Path: projectDir},
 		Agent:   "test",
-		NoStart: true,
 		CPUs:    "2",
 		Memory:  "512m",
 		Version: "test",
@@ -538,7 +534,6 @@ func TestIntegration_PortForwarding(t *testing.T) {
 		Name:    "portfwd",
 		Workdir: sandbox.DirSpec{Path: projectDir},
 		Agent:   "test",
-		NoStart: true,
 		Ports:   []string{"3000:3000"},
 		Version: "test",
 	})
@@ -559,7 +554,6 @@ func TestIntegration_MultiSandbox(t *testing.T) {
 			Name:    name,
 			Workdir: sandbox.DirSpec{Path: projectDir},
 			Agent:   "test",
-			NoStart: true,
 			Version: "test",
 		})
 		require.NoError(t, err)
@@ -593,7 +587,6 @@ func TestIntegration_DestroyCleanup(t *testing.T) {
 		Name:    "destroyme",
 		Workdir: sandbox.DirSpec{Path: projectDir},
 		Agent:   "test",
-		NoStart: true,
 		Version: "test",
 	})
 	require.NoError(t, err)
@@ -637,6 +630,9 @@ func TestIntegration_NetworkIsolation(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rcData, &rc))
 	assert.Equal(t, true, rc["network_isolated"], "runtime-config.json must have network_isolated: true")
 
+	_, err = startSandbox(ctx, mgr, "netisolated", sandbox.StartOptions{})
+	require.NoError(t, err)
+
 	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName("", "netisolated"), 15*time.Second)
 
 	// The entrypoint applies iptables rules before starting the agent, but
@@ -679,6 +675,9 @@ func TestIntegration_ReadOnlyMountVerified(t *testing.T) {
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { destroySandbox(ctx, mgr, "romount") }) //nolint:errcheck // test cleanup
+
+	_, err = startSandbox(ctx, mgr, "romount", sandbox.StartOptions{})
+	require.NoError(t, err)
 
 	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName("", "romount"), 15*time.Second)
 
@@ -792,6 +791,9 @@ func TestIntegration_AgentStubWorkflow(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { destroySandbox(ctx, mgr, "stubworkflow") }) //nolint:errcheck // test cleanup
 
+	_, err = startSandbox(ctx, mgr, "stubworkflow", sandbox.StartOptions{})
+	require.NoError(t, err)
+
 	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName("", "stubworkflow"), 15*time.Second)
 
 	// Simulate agent output: create a new file inside the container.
@@ -837,7 +839,6 @@ func TestIntegration_Clone(t *testing.T) {
 		Name:    "clone-a",
 		Workdir: sandbox.DirSpec{Path: projectDir},
 		Agent:   "test",
-		NoStart: true,
 		Version: "test",
 	})
 	require.NoError(t, err)
@@ -882,13 +883,7 @@ func TestIntegration_Overlay(t *testing.T) {
 		Agent:   "test",
 		Version: "test",
 	})
-	if err != nil {
-		if strings.Contains(err.Error(), "overlay") || strings.Contains(err.Error(), "mount") ||
-			strings.Contains(err.Error(), "CAP_SYS_ADMIN") || strings.Contains(err.Error(), "permission") {
-			t.Skip("overlay not supported: " + err.Error())
-		}
-		require.NoError(t, err) // fail on unexpected errors
-	}
+	require.NoError(t, err)
 	t.Cleanup(func() {
 		// The overlayfs workdir (ovlwork/) contains root-owned kernel files that
 		// cannot be removed by the test process. Clean them up via exec as root
@@ -898,6 +893,16 @@ func TestIntegration_Overlay(t *testing.T) {
 			[]string{"rm", "-rf", "/yoloai/overlay/" + ovlEncoded + "/ovlwork"}, "root")
 		destroySandbox(ctx, mgr, "overlay-integ") //nolint:errcheck // test cleanup
 	})
+
+	// The overlay mount happens at container launch (Start), not at provision
+	// time, so the "overlay unsupported" skip is detected here rather than on create.
+	if _, startErr := startSandbox(ctx, mgr, "overlay-integ", sandbox.StartOptions{}); startErr != nil {
+		if strings.Contains(startErr.Error(), "overlay") || strings.Contains(startErr.Error(), "mount") ||
+			strings.Contains(startErr.Error(), "CAP_SYS_ADMIN") || strings.Contains(startErr.Error(), "permission") {
+			t.Skip("overlay not supported: " + startErr.Error())
+		}
+		require.NoError(t, startErr) // fail on unexpected errors
+	}
 
 	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName("", "overlay-integ"), 15*time.Second)
 
