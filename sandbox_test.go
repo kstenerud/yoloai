@@ -207,7 +207,9 @@ func TestVscodeAttach_NotFound(t *testing.T) {
 // reuse-after-destroy contract: once a handle's destroyed flag is set, every
 // error-returning method short-circuits with ErrSandboxDestroyed before
 // touching disk or the backend. The guard runs first, so a backend-less Client
-// suffices — none of these reach ensure/engine.
+// suffices — none of these reach ensure/engine. Destroy is deliberately absent:
+// it is the one method that treats a destroyed handle as benign success (see
+// TestSandbox_DestroyedHandle_RepeatDestroyIsBenignSuccess).
 func TestSandbox_DestroyedHandle_RefusesEveryErrorReturningMethod(t *testing.T) {
 	c := vscodeClient(t, nil) // backend-less; the guard must fire before any IO
 	ctx := context.Background()
@@ -222,7 +224,6 @@ func TestSandbox_DestroyedHandle_RefusesEveryErrorReturningMethod(t *testing.T) 
 		"Restart":      func() error { _, err := sb.Restart(ctx, SandboxStartOptions{}); return err },
 		"Wait":         func() error { _, err := sb.Wait(ctx, SandboxWaitOptions{}); return err },
 		"Reset":        func() error { _, err := sb.Reset(ctx, SandboxResetOptions{}); return err },
-		"Destroy":      func() error { _, err := sb.Destroy(ctx, SandboxDestroyOptions{}); return err },
 		"Exec":         func() error { return sb.Exec(ctx, SandboxExecOptions{Command: []string{"true"}}, IOStreams{}) },
 		"Unlock":       func() error { _, err := sb.Unlock(); return err },
 		"VscodeAttach": func() error { _, err := sb.VscodeAttach(); return err },
@@ -233,6 +234,22 @@ func TestSandbox_DestroyedHandle_RefusesEveryErrorReturningMethod(t *testing.T) 
 			assert.ErrorIs(t, op(), ErrSandboxDestroyed)
 		})
 	}
+}
+
+// TestSandbox_DestroyedHandle_RepeatDestroyIsBenignSuccess pins the carve-out: a
+// second Destroy on an already-destroyed handle returns an empty result and no
+// error, so a defensive cleanup call by one handle holder can't be mistaken for a
+// broken-runtime failure by another. The empty result (no notices) marks this
+// call as the one that did NOT perform the teardown.
+func TestSandbox_DestroyedHandle_RepeatDestroyIsBenignSuccess(t *testing.T) {
+	c := vscodeClient(t, nil) // backend-less; must short-circuit before any IO
+	ctx := context.Background()
+	sb := &Sandbox{engine: c.engine, name: "box", destroyed: true}
+
+	res, err := sb.Destroy(ctx, SandboxDestroyOptions{})
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	assert.Empty(t, res.Notices, "a repeat Destroy did no teardown, so it carries no notices")
 }
 
 // A live handle (destroyed flag unset) must NOT be refused by the guard — the

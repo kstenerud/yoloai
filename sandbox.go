@@ -22,7 +22,9 @@ import (
 // handle after Destroy has successfully run on that same handle. The handle is
 // a name-binding, not a lease, so it is not nil'd on destroy; this sentinel
 // turns a reuse-after-destroy into a precise, matchable refusal rather than the
-// generic ErrSandboxNotFound the underlying read would otherwise produce.
+// generic ErrSandboxNotFound the underlying read would otherwise produce. Destroy
+// itself is the exception: a repeat Destroy is a benign no-op success, not this
+// refusal (see Destroy).
 var ErrSandboxDestroyed = yoerrors.NewUsageError("yoloai: this Sandbox handle was destroyed; obtain a fresh handle via Client.Sandbox after re-creating the sandbox")
 
 // Sandbox is a name-scoped handle for a single sandbox. The handle is
@@ -38,8 +40,9 @@ type Sandbox struct {
 	name   string
 	// destroyed is set by a successful Destroy on this handle. Once set, every
 	// error-returning method short-circuits with ErrSandboxDestroyed instead of
-	// operating on a name whose backing state is gone. Pure path getters and the
-	// sub-handle accessors (no error to return) are unaffected.
+	// operating on a name whose backing state is gone — except Destroy itself,
+	// which short-circuits to a benign empty-result success. Pure path getters and
+	// the sub-handle accessors (no error to return) are unaffected.
 	destroyed bool
 }
 
@@ -294,9 +297,19 @@ func (s *Sandbox) HasActiveWork(ctx context.Context) (bool, string) {
 // false it refuses a sandbox that HasActiveWork, returning a typed
 // *ActiveWorkError carrying the reason — the caller prompts and retries with
 // AbandonUnappliedWork true. Atomic: no check-then-act gap.
+//
+// Destroy is the one method that treats an already-destroyed handle as benign
+// success rather than refusing with ErrSandboxDestroyed: a second Destroy on the
+// same handle returns an empty &DestroyResult{} and nil error. This keeps
+// multiple holders' cleanup paths from amplifying — a holder that calls Destroy
+// defensively after another holder already tore the sandbox down sees success,
+// not a failure it might mistake for a broken runtime. The empty result (no
+// notices) signals "this call did not perform the teardown," so logs still
+// pinpoint which Destroy did the real work. Every other error-returning method
+// keeps refusing the stale handle with ErrSandboxDestroyed.
 func (s *Sandbox) Destroy(ctx context.Context, opts SandboxDestroyOptions) (*DestroyResult, error) {
-	if err := s.checkNotDestroyed(); err != nil {
-		return nil, err
+	if s.destroyed {
+		return &DestroyResult{}, nil
 	}
 	if !opts.AbandonUnappliedWork {
 		if active, reason := s.HasActiveWork(ctx); active {
