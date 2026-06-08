@@ -83,6 +83,7 @@ row to the index.
 | Agent dies silently/SIGTRAP (exit 133) on Seatbelt at launch; ICU/timezone deny in unified log | [Seatbelt: SBPL subpaths need vnode-resolved paths](#agent-dies-silently-sigtrap--sbpl-subpath-rules-must-use-vnode-resolved-paths) |
 | Interactive error output "stair-steps" (each line shifts right) on Seatbelt/Tart | [Seatbelt/Tart: local-PTY backends must bridge, not inherit host stdio](#interactive-error-output-stair-steps--local-pty-backends-must-bridge-not-inherit-host-stdio-also-tart) |
 | Migrated/upgraded Seatbelt sandbox still hits an already-fixed bug (SIGTRAP, `os.symlink FileExistsError`) on restart | [Seatbelt: regenerate derived artifacts on Start](#seatbelt-derived-artifacts-must-be-regenerated-on-start-not-frozen-at-create) |
+| `attach` on a migrated Seatbelt sandbox fails: `error creating .../tmux/tmux.sock (No such file or directory)`, flat path missing `library/` | [Seatbelt: derive tmux socket live, not from frozen config](#host-side-tmux-socket-must-be-derived-live-not-read-from-frozen-runtime-configjson-seatbelt) |
 | VS Code tunnel re-prompts for login on every container restart | [VS Code CLI: hostname-based keychain encryption](#vs-code-cli-file-keychain-uses-hostname-in-encryption-key) |
 | Second sandbox tunnel loops `error access singleton` forever | [VS Code CLI: singleton lock blocks concurrent tunnels](#vs-code-cli-singleton-lock-blocks-concurrent-tunnels) |
 | DNS works but HTTPS to api.anthropic.com times out | [DNS: timeout = API unreachable, not DNS](#request-timed-out-in-claude-code--api-unreachable-not-dns-failure) |
@@ -1616,6 +1617,18 @@ VirtioFS should only be used for:
 **Fix:** `Start` regenerates the derived artifacts from the persisted `InstanceConfig` before launch — `GenerateProfile(cfg, sandboxPath, r.homeDir)` + `writeSandboxScripts(sandboxPath)`. They are pure functions of config and host environment, not user state, so a restart on a newer binary self-heals sandboxes created by an older one. Independently, the `sandbox-setup.py` symlink guards use `os.path.lexists` (not `os.path.exists`, which follows symlinks and misses a dangling link) so re-running setup is idempotent.
 
 **Code:** `runtime/seatbelt/seatbelt.go::Start` (regen block after config load); `runtime/monitor/sandbox-setup.py` (`os.path.lexists` guards in `SeatbeltBackend.setup`)
+
+---
+
+### Host-side tmux socket must be derived live, not read from frozen `runtime-config.json` (Seatbelt)
+
+**Symptom:** `yoloai attach <box>` on a migrated Seatbelt sandbox fails with `error creating /Users/<you>/.yoloai/sandboxes/<box>/tmux/tmux.sock (No such file or directory)` — note the **flat** path, missing the `library/` principal-partition segment that migration introduced. Restart can also talk to the wrong socket on the prompt-delivery path.
+
+**Explanation:** `runtime-config.json` froze a `tmux_socket` field at Create. For container backends that value is a *container-internal* path (e.g. under `/yoloai`), which is migration-invariant — fine. But Seatbelt's socket is a **host** path under the sandbox dir (`<sandboxDir>/tmux/tmux.sock`), and `yoloai system migrate` relocates the sandbox dir (e.g. into the principal partition `…/sandboxes/library/<box>/`) **without rewriting the frozen field**. The in-sandbox tmux server is created at the *live* path (Python's `SeatbeltBackend.get_tmux_socket` derives it from live argv), so the Go host side — reading the frozen flat path — pointed at a socket that doesn't exist. Docker was unaffected only because its frozen value is a container path that never moves.
+
+**Fix:** Every Go host-side consumer derives the socket live via `runtime.TmuxSocket(layout.SandboxDir(name))` (what `terminal.go`'s capture-pane already did), instead of reading the frozen field. For docker this returns the same container path as before (no behavior change); for seatbelt/tart it tracks the current host dir. The frozen field stays in `runtime-config.json` because Python's docker backend still reads it (a migration-invariant container path), but the Go side no longer trusts it. General rule: **a frozen host-absolute path is a migration hazard — recompute host paths from the live layout, freeze only target-internal paths.**
+
+**Code:** `sandbox/attach.go::Attach` + `WaitForAttachReady` (was `ReadTmuxSocket`, now deleted); `sandbox/lifecycle/restart.go` (relaunch + `deliverPromptViaTmux`); the live source is each backend's `TmuxSocket(sandboxDir)`.
 
 ---
 

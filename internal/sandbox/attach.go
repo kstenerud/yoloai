@@ -6,7 +6,6 @@ package sandbox
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -44,7 +43,7 @@ func (e *Engine) Attach(ctx context.Context, name string, io runtime.IOStreams) 
 	if err := WaitForAttachReady(ctx, e.runtime, e.layout, name, user, attachReadyTimeout); err != nil {
 		return fmt.Errorf("waiting for tmux session: %w", err)
 	}
-	socket := ReadTmuxSocket(e.layout, name)
+	socket := e.runtime.TmuxSocket(e.layout.SandboxDir(name))
 	cmd := e.runtime.AttachCommand(socket, io.Rows, io.Cols, info.Environment.Isolation)
 	return e.runtime.InteractiveExec(ctx, store.InstanceName(e.layout.Principal, name), cmd, user, "", io)
 }
@@ -59,24 +58,6 @@ func attachStatusOK(status Status, name string) error {
 		// StatusStopped, StatusRemoved, StatusBroken, StatusUnavailable
 		return fmt.Errorf("sandbox %q: %w", name, ErrContainerNotRunning)
 	}
-}
-
-// ReadTmuxSocket returns the tmux socket path recorded in the sandbox's
-// runtime-config.json, or "" if the backend uses tmux's default per-user
-// socket. Exposed for embedders that need to read the same socket as
-// `yoloai sandbox <name> exec -- tmux -S <socket> ...`.
-func ReadTmuxSocket(layout config.Layout, sandboxName string) string {
-	data, err := os.ReadFile(store.RuntimeConfigFilePath(layout.SandboxDir(sandboxName))) //nolint:gosec // G304: path is layout-scoped sandbox dir
-	if err != nil {
-		return ""
-	}
-	var cfg struct {
-		TmuxSocket string `json:"tmux_socket"`
-	}
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return ""
-	}
-	return cfg.TmuxSocket
 }
 
 // WaitForAttachReady polls until the sandbox's agent has launched (or
@@ -102,7 +83,7 @@ func WaitForAttachReady(
 ) error {
 	containerName := store.InstanceName(layout.Principal, sandboxName)
 	jsonlPath := store.SandboxJSONLPath(layout.SandboxDir(sandboxName))
-	tmuxSocket := ReadTmuxSocket(layout, sandboxName)
+	tmuxSocket := rt.TmuxSocket(layout.SandboxDir(sandboxName))
 	deadline := time.Now().Add(timeout)
 	var lastExecErr error
 	for time.Now().Before(deadline) {

@@ -279,8 +279,9 @@ func relaunchAgent(ctx context.Context, d state.Deps, name string, meta *store.E
 		return err
 	}
 
+	socket := d.Runtime.TmuxSocket(d.Layout.SandboxDir(name))
 	if _, err := status.ExecInContainer(ctx, d.Runtime, name, meta, d.Layout.HostUID,
-		tmuxCmd(cfg.TmuxSocket, "respawn-pane", "-t", "main", "-k", cfg.AgentCommand),
+		tmuxCmd(socket, "respawn-pane", "-t", "main", "-k", cfg.AgentCommand),
 	); err != nil {
 		return fmt.Errorf("relaunch agent: %w", err)
 	}
@@ -302,8 +303,9 @@ func relaunchAgentWithResume(ctx context.Context, d state.Deps, name string, met
 
 	agentArgs := resolveAgentArgs(d.Layout, string(meta.AgentType), meta.Profile)
 	interactiveCmd := invocation.BuildAgentCommand(agentDef, meta.Model, "", agentArgs, cfg.Passthrough)
+	socket := d.Runtime.TmuxSocket(sandboxDir)
 	if _, err := status.ExecInContainer(ctx, d.Runtime, name, meta, d.Layout.HostUID,
-		tmuxCmd(cfg.TmuxSocket, "respawn-pane", "-t", "main", "-k", interactiveCmd),
+		tmuxCmd(socket, "respawn-pane", "-t", "main", "-k", interactiveCmd),
 	); err != nil {
 		return fmt.Errorf("relaunch agent: %w", err)
 	}
@@ -334,8 +336,9 @@ func relaunchAgentWithCustomPrompt(ctx context.Context, d state.Deps, name strin
 	// migration backfills it; empty for container backends, a no-op prepend), so
 	// the prepend is unconditional.
 	interactiveCmd = cfg.AgentLaunchPrefix + interactiveCmd
+	socket := d.Runtime.TmuxSocket(d.Layout.SandboxDir(name))
 	if _, err := status.ExecInContainer(ctx, d.Runtime, name, meta, d.Layout.HostUID,
-		tmuxCmd(cfg.TmuxSocket, "respawn-pane", "-t", "main", "-k", interactiveCmd),
+		tmuxCmd(socket, "respawn-pane", "-t", "main", "-k", interactiveCmd),
 	); err != nil {
 		return fmt.Errorf("relaunch agent: %w", err)
 	}
@@ -370,6 +373,7 @@ done`, cfg.ReadyPattern)
 func deliverPromptViaTmux(ctx context.Context, d state.Deps, name string, cfg runtimeconfig.ContainerConfig, meta *store.Environment, promptText, tmpFile string) error {
 	statusWrite := `printf '{"status":"active","timestamp":%d}' "$(date +%%s)" > "${YOLOAI_DIR:-/yoloai}/agent-status.json"`
 
+	socket := d.Runtime.TmuxSocket(d.Layout.SandboxDir(name))
 	script := fmt.Sprintf(`%s
 %s
 printf '%%s' "$1" > %s
@@ -381,7 +385,7 @@ for key in %s; do
     sleep 0.2
 done
 rm -f %s
-%s`, tmuxShellPrefix(cfg.TmuxSocket), buildReadyWaitScript(cfg), tmpFile, tmpFile, cfg.SubmitSequence, tmpFile, statusWrite)
+%s`, tmuxShellPrefix(socket), buildReadyWaitScript(cfg), tmpFile, tmpFile, cfg.SubmitSequence, tmpFile, statusWrite)
 
 	_, err := status.ExecInContainer(ctx, d.Runtime, name, meta, d.Layout.HostUID, []string{
 		"bash", "-c", "nohup bash -c '" + strings.ReplaceAll(script, "'", "'\"'\"'") + "' _ \"$1\" >/dev/null 2>&1 &", "_", promptText,
