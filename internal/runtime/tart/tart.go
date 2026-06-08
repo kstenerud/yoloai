@@ -541,10 +541,10 @@ func (r *Runtime) GitExec(ctx context.Context, name, workDir string, args ...str
 // out to `tart exec`. IOStreams determines whether a PTY is allocated and
 // where stdio is wired. The user and workDir params are ignored — tart
 // exec runs as the VM's logged-in user in its default cwd.
-func (r *Runtime) InteractiveExec(ctx context.Context, name string, cmd []string, _ string, _ string, io runtime.IOStreams) error {
+func (r *Runtime) InteractiveExec(ctx context.Context, name string, cmd []string, _ string, _ string, streams runtime.IOStreams) error {
 	args := []string{"exec"}
-	if io.TTY {
-		// -i attaches stdin, -t allocates a PTY (like docker exec -it)
+	if streams.TTY {
+		// -i attaches stdin, -t allocates the VM-side PTY (like docker exec -it).
 		args = append(args, "-i", "-t")
 	} else {
 		args = append(args, "-i")
@@ -553,10 +553,11 @@ func (r *Runtime) InteractiveExec(ctx context.Context, name string, cmd []string
 	args = append(args, cmd...)
 
 	c := exec.CommandContext(ctx, r.tartBin, args...) //nolint:gosec // G204: name and cmd are from validated sandbox state
-	c.Stdin = io.In
-	c.Stdout = io.Out
-	c.Stderr = io.Err
-	return runtime.InteractiveExitError(c.Run())
+	// PTYBridgeExec wraps the child in a local host PTY. tart already allocates a
+	// PTY inside the VM with -t, so this is a double-PTY (local + remote, like
+	// `script ssh -t`) — it works and gives uniform raw-mode handling at the CLI
+	// boundary, but can only be exercised on a macOS host with Tart installed.
+	return runtime.PTYBridgeExec(c, streams)
 }
 
 // Close is a no-op for Tart (no persistent client connection).

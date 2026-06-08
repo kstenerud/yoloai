@@ -34,8 +34,8 @@ import "io"
 // resize message, …) and converts them to TermSize values; the library only
 // forwards them to the backend's resize call. The docker/podman and containerd
 // backends honor this over their API sockets (ContainerExecResize / the shim
-// resize RPC); tart/seatbelt still delegate terminal management to a `… -it`
-// subprocess that handles resize itself, so they ignore this channel.
+// resize RPC); tart/seatbelt run the child under a local host PTY
+// (PTYBridgeExec) and apply updates via pty.Setsize. Every backend honors it.
 type TermSize struct {
 	Rows, Cols int
 }
@@ -63,7 +63,7 @@ type IOStreams struct {
 	// Resize, when non-nil, delivers live terminal-geometry updates for a
 	// running interactive exec. The caller owns the event source; the library
 	// only forwards to the backend. Socket-driven backends (docker/podman,
-	// containerd) honor it; tart/seatbelt delegate to an `… -it` subprocess
-	// and ignore it.
+	// containerd) honor it over their API socket; tart/seatbelt apply it to a
+	// local host PTY via pty.Setsize. All backends honor it.
 	Resize <-chan TermSize
 }

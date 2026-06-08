@@ -81,6 +81,7 @@ row to the index.
 | Agent silently fails to start on Tart (claude/node not found) | [Tart: provisioned tool dirs live only on the login PATH](#provisioned-tool-dirs-live-only-on-the-login-path-cirrus-base-image) |
 | Swift PM commands fail with sandbox-exec nesting errors on Seatbelt | [Seatbelt: macOS sandbox-exec doesn't nest](#macos-sandbox-exec-doesnt-nest--swift-pm-needs-the-swift-wrapper-sourced) |
 | Agent dies silently/SIGTRAP (exit 133) on Seatbelt at launch; ICU/timezone deny in unified log | [Seatbelt: SBPL subpaths need vnode-resolved paths](#agent-dies-silently-sigtrap--sbpl-subpath-rules-must-use-vnode-resolved-paths) |
+| Interactive error output "stair-steps" (each line shifts right) on Seatbelt/Tart | [Seatbelt/Tart: local-PTY backends must bridge, not inherit host stdio](#interactive-error-output-stair-steps--local-pty-backends-must-bridge-not-inherit-host-stdio-also-tart) |
 | Migrated/upgraded Seatbelt sandbox still hits an already-fixed bug (SIGTRAP, `os.symlink FileExistsError`) on restart | [Seatbelt: regenerate derived artifacts on Start](#seatbelt-derived-artifacts-must-be-regenerated-on-start-not-frozen-at-create) |
 | VS Code tunnel re-prompts for login on every container restart | [VS Code CLI: hostname-based keychain encryption](#vs-code-cli-file-keychain-uses-hostname-in-encryption-key) |
 | Second sandbox tunnel loops `error access singleton` forever | [VS Code CLI: singleton lock blocks concurrent tunnels](#vs-code-cli-singleton-lock-blocks-concurrent-tunnels) |
@@ -1591,6 +1592,18 @@ VirtioFS should only be used for:
 **Fix:** Wrap every `systemReadPaths()` entry in `resolvePathVariants()` so the resolved `/private/var/...` variant is emitted alongside the original — matching what every other profile section already does.
 
 **Code:** `runtime/seatbelt/profile.go::writeProfileSystemPaths` (+ `resolvePathVariants`); regression test `seatbelt_test.go::TestGenerateProfile_SystemPathsSymlinkResolved`
+
+---
+
+### Interactive error output "stair-steps" — local-PTY backends must bridge, not inherit host stdio (also Tart)
+
+**Symptom:** On seatbelt (and tart), when an interactive command fails early — e.g. `tmux` can't open its socket — the error message cascades down-and-to-the-right, each line starting one column further right than the last, instead of printing as clean left-aligned lines.
+
+**Explanation:** The CLI boundary (`cliutil.WithTerminal`) puts the host tty in raw mode (`term.MakeRaw`) for *every* interactive command, which clears `OPOST`/`ONLCR` — so a bare `\n` no longer gets an implicit carriage return. The bridged backends (docker/podman/containerd) are unaffected because their child runs under a *remote* PTY whose slave still has `OPOST` on, emitting proper `\r\n` that the library copies verbatim. Seatbelt and tart used to hand the child the host's `os.Stdin/Stdout/Stderr` directly (`cmd.Stdout = streams.Out`); the child then wrote bare `\n` into the raw host tty → stair-step. Inheriting host `*os.File`s also violated the `IOStreams` abstraction — it only worked when the streams happened to be real terminals, breaking any non-CLI embedder.
+
+**Fix:** Run the child under a *locally* allocated PTY (`runtime.PTYBridgeExec`, via `creack/pty.StartWithSize`) and `io.Copy` the master to the caller's streams — the same model docker uses, but with a host-local PTY. The PTY slave keeps `OPOST` on, so the child emits `\r\n` and the raw host tty renders it correctly. This also makes `IOStreams.Resize` work uniformly (forwarded via `pty.Setsize`) and keeps both backends embedder-safe. **Tart caveat:** `tart exec -t` already allocates a PTY inside the VM, so wrapping it locally is a double-PTY (local + remote, like `script ssh -t`) — correct, but only exercisable on a macOS host with Tart.
+
+**Code:** `runtime/interactive_pty.go::PTYBridgeExec`; `runtime/seatbelt/seatbelt.go::InteractiveExec`; `runtime/tart/tart.go::InteractiveExec`. The CLI raw-mode owner is `cli/cliutil/streams.go::WithTerminal` (unchanged — now uniform across backends).
 
 ---
 

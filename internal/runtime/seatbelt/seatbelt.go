@@ -435,20 +435,15 @@ func (r *Runtime) Exec(_ context.Context, name string, cmd []string, _ string) (
 }
 
 // InteractiveExec runs a command with the supplied IOStreams. For tmux
-// commands, injects the per-sandbox socket. For other commands, runs
-// under sandbox-exec. PTY allocation isn't explicit here: seatbelt is a
-// process-level sandbox (not a container/VM), so io.TTY is honored at
-// the level of the host process inherited stdio — TTY-ness comes from
-// whether io.In is a real terminal at the host.
-func (r *Runtime) InteractiveExec(_ context.Context, name string, cmd []string, _ string, _ string, io runtime.IOStreams) error {
+// commands, buildExecCommand injects the per-sandbox socket; other commands run
+// under sandbox-exec. When streams.TTY is set the child runs under a locally
+// allocated PTY (runtime.PTYBridgeExec) rather than inheriting the host stdio —
+// the bridge keeps error output from stair-stepping under the CLI's raw mode and
+// makes the path safe for non-CLI embedders whose streams aren't real *os.Files.
+func (r *Runtime) InteractiveExec(_ context.Context, name string, cmd []string, _ string, _ string, streams runtime.IOStreams) error {
 	sandboxPath := filepath.Join(r.layout.SandboxesDir(), sandboxName(name))
-
 	execCmd := r.buildExecCommand(sandboxPath, cmd)
-	execCmd.Stdin = io.In
-	execCmd.Stdout = io.Out
-	execCmd.Stderr = io.Err
-
-	return runtime.InteractiveExitError(execCmd.Run())
+	return runtime.PTYBridgeExec(execCmd, streams)
 }
 
 // Close is a no-op for seatbelt (no persistent connection).

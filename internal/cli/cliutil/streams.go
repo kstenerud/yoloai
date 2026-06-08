@@ -21,10 +21,10 @@ import (
 // escape sequences reach the remote PTY rather than the host line discipline),
 // seeds the initial geometry, and pumps SIGWINCH-driven resizes into
 // IOStreams.Resize — restoring the terminal and stopping the pump when fn
-// returns. Backends that delegate to an `… -it` subprocess ignore Resize and
-// manage the terminal themselves; the raw mode set here nests harmlessly under
-// theirs. When stdin is not a terminal (piped input, tests) it skips all
-// terminal management and hands fn plain streams.
+// returns. Every backend bridges through a PTY (a remote one over its API
+// socket, or a local one via PTYBridgeExec for tart/seatbelt), so the raw mode
+// set here applies uniformly. When stdin is not a terminal (piped input, tests)
+// it skips all terminal management and hands fn plain streams.
 //
 // This is where the §12 ambient-terminal reads live: the library never
 // inspects a stream's FD, sets raw mode, or installs signal handlers — that is
