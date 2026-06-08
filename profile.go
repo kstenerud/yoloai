@@ -235,7 +235,7 @@ func (a *ProfileAdmin) ReferencingSandboxes(_ context.Context, profileName strin
 // profile's built image. Returned by ProfileAdmin.Delete so the CLI
 // can surface them after the profile directory is gone.
 type ImageCleanupHint struct {
-	BackendType BackendType // backend descriptor name (yoloai.BackendDocker, etc.)
+	BackendType BackendType // backend descriptor type (yoloai.BackendDocker, etc.)
 	Image       string      // e.g. "yoloai-myprofile"
 	Command     string      // suggested shell command
 }

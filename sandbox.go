@@ -27,9 +27,10 @@ import (
 // refusal (see Destroy).
 var ErrSandboxDestroyed = yoerrors.NewUsageError("yoloai: this Sandbox handle was destroyed; obtain a fresh handle via Client.Sandbox after re-creating the sandbox")
 
-// Sandbox is a name-scoped handle for a single sandbox. The handle is
-// validated at construction (see Client.Sandbox), so methods on it can
-// assume the sandbox exists.
+// Sandbox is a name-scoped handle for a single sandbox. The handle is bound to
+// an existing sandbox at construction — Client.Sandbox validates existence,
+// while CreateSandbox and Clone return a handle to the sandbox they just
+// provisioned — so methods on it can assume the sandbox exists.
 //
 // Q-G resolution (Shape B): name-bound handles group per-sandbox
 // operations behind one accessor so the Client root stays uncluttered.

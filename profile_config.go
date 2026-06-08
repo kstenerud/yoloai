@@ -70,8 +70,8 @@ type ProfileAgentFiles struct {
 	Files   []string `json:"files,omitempty"`
 }
 
-// profileConfigFromMerged converts the internal merged config into the public
-// read model. It is nil-safe and one-directional; nested pointers are
+// resolvedProfileConfigFromMerged converts the internal merged config into the
+// public read model. It is nil-safe and one-directional; nested pointers are
 // allocated only when their internal counterpart is non-nil.
 func resolvedProfileConfigFromMerged(m *config.MergedConfig) *ResolvedProfileConfig {
 	if m == nil {
