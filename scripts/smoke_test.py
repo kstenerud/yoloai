@@ -2855,8 +2855,12 @@ def main() -> int:
         if ctx.backend_filter and spec.label in ctx.backend_filter:
             return True
         if ctx.test_filter:
-            for test_prefix in ("stop_start", "isolation_check"):
-                if f"{test_prefix}/{spec.label}" in ctx.test_filter:
+            # A bare label (`stop_start`) needs every backend prereq-built; a
+            # full name (`stop_start/tart`) needs only that one. Mirrors
+            # should_run_test so scheduling and prereq selection never disagree.
+            for test_prefix in ("stop_start", "isolation_check", "dind"):
+                if (test_prefix in ctx.test_filter
+                        or f"{test_prefix}/{spec.label}" in ctx.test_filter):
                     return True
         return False
 
@@ -2940,7 +2944,12 @@ def main() -> int:
     def should_run_test(test_name: str) -> bool:
         if ctx.test_filter is None:
             return True
-        return test_name in ctx.test_filter
+        # Match either the full "test/backend" name or the bare label, so
+        # `--test stop_start` runs every stop_start/<backend> (as documented in
+        # --help) while `--test stop_start/tart` pins a single backend. Must stay
+        # consistent with _spec_needed, which decides what gets prereq-built.
+        label = test_name.split("/", 1)[0]
+        return test_name in ctx.test_filter or label in ctx.test_filter
 
     def _run_backend_test(
         test_label: str,

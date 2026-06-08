@@ -7,6 +7,14 @@ History of codebase findings (issues discovered mid-work) that have been address
 are moved here from [`findings-unresolved.md`](findings-unresolved.md) once resolved, so the
 active file stays a working set. Newest first.
 
+### DF19 — Smoke `--test <label>` filter only matched the full `test/backend` name, so the documented bare-label form scheduled nothing
+
+- **Discovered:** 2026-06-08 · **Workstream:** DF12 verification (folding tag coverage into the smoke `stop_start` test)
+- **Severity:** LOW
+- **Disposition:** RESOLVED 2026-06-08 (addressed-in-place). `should_run_test` now matches the bare label (`test_name.split("/")[0]`) as well as the full name, and `_spec_needed` (which selects backends for prereq/image-build) mirrors that and also covers `dind` — so scheduling and prereq selection can't disagree. `--test stop_start` again runs every `stop_start/<backend>` as documented; `--test stop_start/tart` still pins one. Verified by `mypy --strict` + the `test_smoke_matrix.py` suite (these two are closures inside the run function, so not directly unit-covered; extracting them for a regression test is a possible follow-up).
+- **Description:** `should_run_test` compared the full `"<test>/<backend>"` name (e.g. `stop_start/tart`) against `--test` values with an exact `in` check, but `--help` documents `--test stop_start` (bare label) as a valid form. A bare-label filter therefore matched nothing and the whole matrix scheduled zero backends — while `isolation_check`/`dind` still printed their "not applicable" notes (computed before the filter), making the run look like it had completed (`0 passed, 0 failed, 0 skipped`). Surfaced when verifying DF12: `--test stop_start --backend tart` ran no tests at all.
+- **Pointer:** `scripts/smoke_test.py` — `should_run_test`, `_spec_needed`
+
 ### DF12 — Tag pipeline runs host git on the work copy, not the backend-aware exec (Tart-incorrect for VM work copies)
 
 - **Discovered:** 2026-05-31 · **Workstream:** W-L1 (G7 apply carve)
