@@ -103,7 +103,7 @@ func (r *Runtime) buildBaseImage(ctx context.Context, layout config.Layout, outp
 
 	cmd := exec.CommandContext(ctx, r.binaryName, "build", "-t", "yoloai-base", "-") //nolint:gosec // binaryName is "docker" or "podman"
 	cmd.Stdin = buildCtx
-	cmd.Env = curatedBuildEnv(layout.Env)
+	cmd.Env = CuratedBuildEnv(layout.Env)
 	cmd.Stdout = output
 	cmd.Stderr = output
 
@@ -195,7 +195,7 @@ func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir string, tag s
 
 	cmd := exec.CommandContext(ctx, r.binaryName, args...) //nolint:gosec // binaryName is "docker" or "podman"; secrets are validated by caller
 	cmd.Stdin = buildCtx
-	cmd.Env = curatedBuildEnv(buildEnv)
+	cmd.Env = CuratedBuildEnv(buildEnv)
 	cmd.Stdout = output
 	cmd.Stderr = output
 
@@ -228,13 +228,17 @@ var buildEnvAllowlist = []string{
 	"BUILDX_CONFIG", "BUILDX_BUILDER",
 }
 
-// curatedBuildEnv assembles the build subprocess's environment from the caller's
+// CuratedBuildEnv assembles the build subprocess's environment from the caller's
 // threaded host-env snapshot, keeping only the allowlisted keys and always
 // forcing BuildKit on. A nil/empty snapshot yields just DOCKER_BUILDKIT=1 — the
 // binary is still found (exec resolves it from the parent PATH at construction),
 // but the build runs with no inherited host config, which is the intended
 // fail-closed behavior for an embedder that supplied no env.
-func curatedBuildEnv(snapshot map[string]string) []string {
+//
+// Exported so sibling backends that shell out to `docker build` (the containerd
+// backend's Docker-build fallback) reuse the same §12-curated allowlist rather
+// than dumping os.Environ().
+func CuratedBuildEnv(snapshot map[string]string) []string {
 	env := make([]string, 0, len(buildEnvAllowlist)+1)
 	for _, key := range buildEnvAllowlist {
 		if v, ok := snapshot[key]; ok && v != "" {

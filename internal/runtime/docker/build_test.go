@@ -134,7 +134,7 @@ func TestCuratedBuildEnv_FiltersToAllowlistAndForcesBuildKit(t *testing.T) {
 		"DOCKER_CONFIG_EMPTY": "",
 	}
 
-	env := curatedBuildEnv(snapshot)
+	env := CuratedBuildEnv(snapshot)
 
 	assert.Contains(t, env, "DOCKER_HOST=tcp://10.0.0.1:2375")
 	assert.Contains(t, env, "HTTP_PROXY=http://proxy:8080")
@@ -149,6 +149,6 @@ func TestCuratedBuildEnv_FiltersToAllowlistAndForcesBuildKit(t *testing.T) {
 }
 
 func TestCuratedBuildEnv_NilSnapshotStillForcesBuildKit(t *testing.T) {
-	env := curatedBuildEnv(nil)
+	env := CuratedBuildEnv(nil)
 	assert.Equal(t, []string{"DOCKER_BUILDKIT=1"}, env)
 }
