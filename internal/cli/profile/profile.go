@@ -78,6 +78,24 @@ func newProfileListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+
+			if cliutil.JSONEnabled(cmd) {
+				type profileListItem struct {
+					Name          string `json:"name"`
+					HasDockerfile bool   `json:"has_dockerfile"`
+					Agent         string `json:"agent"`
+				}
+				items := make([]profileListItem, 0, len(summaries))
+				for _, s := range summaries {
+					items = append(items, profileListItem{
+						Name:          s.Name,
+						HasDockerfile: s.HasDockerfile,
+						Agent:         string(s.AgentType),
+					})
+				}
+				return cliutil.WriteJSONList(cmd.OutOrStdout(), "profiles", items)
+			}
+
 			if len(summaries) == 0 {
 				fmt.Fprintln(cmd.OutOrStdout(), "No profiles found") //nolint:errcheck
 				return nil
@@ -137,7 +155,7 @@ func runProfileInfoCmd(cmd *cobra.Command, name string, diffMode bool) error {
 	if cliutil.JSONEnabled(cmd) {
 		return cliutil.WriteJSON(cmd.OutOrStdout(), profileInfoJSON{
 			Profile:     info.Name,
-			Chain:       info.Chain,
+			Chain:       cliutil.EmptyIfNil(info.Chain),
 			Image:       info.Image,
 			Dockerfile:  info.HasDockerfile,
 			Agent:       info.Merged.Agent,
@@ -166,7 +184,7 @@ func renderProfileInfoDiff(cmd *cobra.Command, info *yoloai.ProfileInfo) error {
 	if cliutil.JSONEnabled(cmd) {
 		return cliutil.WriteJSON(cmd.OutOrStdout(), profileDiffJSON{
 			Profile:   info.Name,
-			Chain:     info.Chain,
+			Chain:     cliutil.EmptyIfNil(info.Chain),
 			Inherited: info.Parent,
 			Merged:    info.Merged,
 		})

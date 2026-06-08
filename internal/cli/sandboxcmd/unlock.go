@@ -36,8 +36,8 @@ func runSandboxUnlock(cmd *cobra.Command, name string) error {
 	}
 	if cliutil.JSONEnabled(cmd) {
 		return cliutil.WriteJSON(cmd.OutOrStdout(), map[string]string{
-			"sandbox": name,
-			"action":  action,
+			"name":   name,
+			"action": action,
 		})
 	}
 	msg := fmt.Sprintf("Cleared stale lock for sandbox %q\n", name)

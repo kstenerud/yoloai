@@ -25,11 +25,23 @@ now emit an envelope object:
 Also fixed: `system agents` and `extensions list` emitted `null` for an empty
 list; they now emit `[]`.
 
+Alongside the envelope change, the same convention pass also:
+
+- **`sandbox unlock`**: renamed the identifier key `sandbox` → `name` (now uniform
+  with every other command). `jq '.sandbox'` → `jq '.name'`.
+- **Empty arrays never `null`**: `sandbox allowed`'s `domains`, `system backend <name>`'s
+  `platforms`/`tradeoffs`, and `profile info`/`--diff`'s `chain` now serialize as
+  `[]` (not `null`) when empty.
+- **`clone --no-start`** now includes `"action": "cloned"` (additive — its started
+  sibling already carried `"action": "started"`).
+- **`profile list`** gained `--json` support, emitting `{"profiles": [{name,
+  has_dockerfile, agent}]}` (previously it ignored `--json` and printed a table).
+
 **Migration (consumers):** update `jq` filters from `.[]` to `.<key>[]` for these
 commands — e.g. `system backends --json | jq '.backends[]'`,
 `destroy --json --yes | jq '.destroyed[]'`. Commands that were already objects
 (`sandbox list`, `system disk`, `diff --log`, `system check`, all single-record
-and action commands) are unchanged. Rationale: a bare top-level array can carry
+and action commands) keep their shape. Rationale: a bare top-level array can carry
 neither a top-level error nor future metadata; a uniform object shape lets every
 command grow without breaking parsers. See finding DF17.
 

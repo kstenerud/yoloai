@@ -34,7 +34,7 @@ func runSandboxAllowed(cmd *cobra.Command, name string) error {
 			return cliutil.WriteJSON(cmd.OutOrStdout(), map[string]any{
 				"name":         name,
 				"network_mode": meta.NetworkMode,
-				"domains":      allowed,
+				"domains":      cliutil.EmptyIfNil(allowed),
 			})
 		}
 

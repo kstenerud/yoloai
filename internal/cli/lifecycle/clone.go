@@ -62,6 +62,7 @@ func runClone(cmd *cobra.Command, args []string) error {
 				return cliutil.WriteJSON(cmd.OutOrStdout(), map[string]any{
 					"source": src,
 					"dest":   dst,
+					"action": "cloned",
 				})
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Cloned %s → %s\n", src, dst) //nolint:errcheck

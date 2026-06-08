@@ -145,10 +145,10 @@ func showBackendDetail(cmd *cobra.Command, name string) error {
 			"description":  desc.Description,
 			"available":    desc.Available,
 			"note":         desc.Note,
-			"platforms":    desc.Platforms,
+			"platforms":    cliutil.EmptyIfNil(desc.Platforms),
 			"requires":     desc.Requires,
 			"install_hint": desc.InstallHint,
-			"tradeoffs":    tradeoffs,
+			"tradeoffs":    cliutil.EmptyIfNil(tradeoffs),
 		})
 	}
 
