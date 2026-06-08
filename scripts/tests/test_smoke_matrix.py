@@ -15,6 +15,8 @@ from smoke_test import (
     dind_applies,
     docker_provider_candidates,
     isolation_check_applies,
+    should_run_under_filter,
+    spec_needed_for_filters,
     uncovered_backends,
     uncovered_reason,
 )
@@ -154,3 +156,80 @@ def test_docker_provider_candidates_single_or_none_known() -> None:
     # context so --all-docker-providers collapses to one run.
     assert docker_provider_candidates(["default"], "default") == ["default"]
     assert docker_provider_candidates([], "") == []
+
+
+# --test / --backend filter matching (DF19). should_run_under_filter (scheduling)
+# and spec_needed_for_filters (prereq selection) must agree on every input.
+
+
+def test_filter_none_runs_everything() -> None:
+    # No --test filter: every test/backend slot runs.
+    assert should_run_under_filter("stop_start/tart", None) is True
+    assert should_run_under_filter("isolation_check/docker", None) is True
+    assert should_run_under_filter("clone", None) is True
+
+
+def test_filter_bare_label_matches_all_backends() -> None:
+    # DF19 regression: `--test stop_start` must select every stop_start/<backend>.
+    f = ["stop_start"]
+    assert should_run_under_filter("stop_start/tart", f) is True
+    assert should_run_under_filter("stop_start/docker", f) is True
+    # ...but not a different test.
+    assert should_run_under_filter("isolation_check/docker", f) is False
+    assert should_run_under_filter("clone", f) is False
+
+
+def test_filter_full_name_pins_one_backend() -> None:
+    f = ["stop_start/tart"]
+    assert should_run_under_filter("stop_start/tart", f) is True
+    assert should_run_under_filter("stop_start/docker", f) is False
+    assert should_run_under_filter("stop_start", f) is False  # bare != full
+
+
+def test_filter_bare_label_matches_clone() -> None:
+    # Non-matrix tests are referenced by their bare name; the label IS the name.
+    assert should_run_under_filter("clone", ["clone"]) is True
+    assert should_run_under_filter("stop_start/tart", ["clone"]) is False
+
+
+def test_spec_needed_no_filters_needs_every_backend() -> None:
+    assert spec_needed_for_filters("tart", None, None) is True
+    assert spec_needed_for_filters("docker", None, None) is True
+
+
+def test_spec_needed_backend_filter() -> None:
+    assert spec_needed_for_filters("tart", None, ["tart"]) is True
+    assert spec_needed_for_filters("docker", None, ["tart"]) is False
+
+
+def test_spec_needed_mirrors_should_run_for_bare_and_full() -> None:
+    # Bare label -> every backend is needed (so it gets prereq-built), matching
+    # should_run_under_filter selecting every backend.
+    assert spec_needed_for_filters("tart", ["stop_start"], None) is True
+    assert spec_needed_for_filters("docker", ["stop_start"], None) is True
+    # Full name -> only the named backend is needed.
+    assert spec_needed_for_filters("tart", ["stop_start/tart"], None) is True
+    assert spec_needed_for_filters("docker", ["stop_start/tart"], None) is False
+    # dind is a matrix test too (regression: it was missing from the prereq list).
+    assert spec_needed_for_filters("docker", ["dind"], None) is True
+
+
+def test_filter_scheduling_and_prereq_agree() -> None:
+    # For every matrix label and a couple of representative backends, a backend
+    # is prereq-needed exactly when at least one of its slots would be scheduled.
+    backends = ["docker", "tart", "podman"]
+    filters: list[list[str]] = [
+        ["stop_start"],
+        ["stop_start/tart"],
+        ["isolation_check"],
+        ["dind"],
+        ["stop_start", "isolation_check/docker"],
+    ]
+    for f in filters:
+        for b in backends:
+            scheduled = any(
+                should_run_under_filter(f"{label}/{b}", f)
+                for label in smoke_test.MATRIX_TEST_LABELS
+            )
+            needed = spec_needed_for_filters(b, f, None)
+            assert scheduled == needed, f"filter={f} backend={b}: scheduled={scheduled} needed={needed}"

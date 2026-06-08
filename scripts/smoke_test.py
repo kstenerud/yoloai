@@ -365,6 +365,49 @@ def is_full_test(name: str) -> bool:
     return name.split("/")[0] in FULL_ONLY_TESTS
 
 
+# Labels of the tests that fan out across the backend matrix (one slot per
+# backend). A bare `--test <label>` selects every <label>/<backend>; the full
+# `--test <label>/<backend>` pins one. Module-level (with the two predicates
+# below) so the --test/--backend filter logic is unit-testable.
+MATRIX_TEST_LABELS = ("stop_start", "isolation_check", "dind")
+
+
+def should_run_under_filter(test_name: str, test_filter: Optional[list[str]]) -> bool:
+    """Whether a "<test>/<backend>" (or bare "<test>") name passes --test.
+
+    A None filter matches everything. Otherwise an entry matches either the full
+    name or the bare label, so `--test stop_start` runs every stop_start/<backend>
+    (as documented in --help) while `--test stop_start/tart` pins one. Must mirror
+    spec_needed_for_filters so scheduling and prereq selection never disagree (DF19).
+    """
+    if test_filter is None:
+        return True
+    label = test_name.split("/", 1)[0]
+    return test_name in test_filter or label in test_filter
+
+
+def spec_needed_for_filters(
+    spec_label: str,
+    test_filter: Optional[list[str]],
+    backend_filter: Optional[list[str]],
+) -> bool:
+    """Whether a backend must be prereq-checked/built given the active filters.
+
+    Mirrors should_run_under_filter: a bare `--test <label>` needs every backend,
+    `--test <label>/<backend>` needs only that one, and `--backend <label>` needs
+    that backend. With no filters every backend is needed.
+    """
+    if not (test_filter or backend_filter):
+        return True
+    if backend_filter and spec_label in backend_filter:
+        return True
+    if test_filter:
+        for label in MATRIX_TEST_LABELS:
+            if label in test_filter or f"{label}/{spec_label}" in test_filter:
+                return True
+    return False
+
+
 # Structural applicability of matrix tests. Some (test × backend) pairings are
 # impossible by construction — no host change makes them runnable — so the runner
 # excludes them from scheduling instead of emitting a misleading SKIP, mirroring
@@ -2850,19 +2893,7 @@ def main() -> int:
     # because it supplies the credentials check.
     matrix_labels = {s.label for s in matrix}
     def _spec_needed(spec: "BackendSpec") -> bool:
-        if not (ctx.test_filter or ctx.backend_filter):
-            return True
-        if ctx.backend_filter and spec.label in ctx.backend_filter:
-            return True
-        if ctx.test_filter:
-            # A bare label (`stop_start`) needs every backend prereq-built; a
-            # full name (`stop_start/tart`) needs only that one. Mirrors
-            # should_run_test so scheduling and prereq selection never disagree.
-            for test_prefix in ("stop_start", "isolation_check", "dind"):
-                if (test_prefix in ctx.test_filter
-                        or f"{test_prefix}/{spec.label}" in ctx.test_filter):
-                    return True
-        return False
+        return spec_needed_for_filters(spec.label, ctx.test_filter, ctx.backend_filter)
 
     all_specs = [DEFAULT_BACKEND] + [
         s for s in matrix
@@ -2942,14 +2973,7 @@ def main() -> int:
     # -------------------------------------------------------------------------
     # Helper to check if a test should run based on --test filter
     def should_run_test(test_name: str) -> bool:
-        if ctx.test_filter is None:
-            return True
-        # Match either the full "test/backend" name or the bare label, so
-        # `--test stop_start` runs every stop_start/<backend> (as documented in
-        # --help) while `--test stop_start/tart` pins a single backend. Must stay
-        # consistent with _spec_needed, which decides what gets prereq-built.
-        label = test_name.split("/", 1)[0]
-        return test_name in ctx.test_filter or label in ctx.test_filter
+        return should_run_under_filter(test_name, ctx.test_filter)
 
     def _run_backend_test(
         test_label: str,
