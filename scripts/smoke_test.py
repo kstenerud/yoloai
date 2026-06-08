@@ -369,7 +369,7 @@ def is_full_test(name: str) -> bool:
 # backend). A bare `--test <label>` selects every <label>/<backend>; the full
 # `--test <label>/<backend>` pins one. Module-level (with the two predicates
 # below) so the --test/--backend filter logic is unit-testable.
-MATRIX_TEST_LABELS = ("stop_start", "isolation_check", "dind")
+MATRIX_TEST_LABELS = ("stop_start", "tag_transfer", "isolation_check", "dind")
 
 
 def should_run_under_filter(test_name: str, test_filter: Optional[list[str]]) -> bool:
@@ -566,6 +566,28 @@ class Test:
         if dest.exists():
             shutil.rmtree(dest)
         shutil.copytree(self.ctx.fixture_dir, dest)
+        return dest
+
+    def project_git(self, label: str) -> Path:
+        """Like project(), but initialize the copy as a git repo with one commit.
+
+        Used by tests that exercise the git-host apply path — commit replay via
+        format-patch/am and `apply --tags` tag transfer — which the plain
+        project() fixture can't reach (a non-git target makes apply fall back to
+        --no-commit, and tag transfer is skipped entirely)."""
+        dest = self.project(label)
+        (dest / ".smoke-baseline").write_text("baseline\n")
+        for args in (
+            ["init", "-q", "-b", "main"],
+            ["config", "user.email", "smoke@test.local"],
+            ["config", "user.name", "smoke"],
+            ["add", "-A"],
+            ["commit", "-qm", "baseline"],
+        ):
+            subprocess.run(
+                ["git", "-C", str(dest), *args],
+                check=True, capture_output=True, text=True,
+            )
         return dest
 
     def assert_ok(self, result: subprocess.CompletedProcess[str], step: str) -> None:
@@ -1914,6 +1936,72 @@ def test_stop_start(t: Test, spec: BackendSpec) -> None:
     t.assert_in("claude", r.stdout, "sandbox info (agent)")
 
 
+def _git_out(project: Path, *args: str) -> str:
+    """Run git in the host project dir and return stdout (raises on failure)."""
+    r = subprocess.run(
+        ["git", "-C", str(project), *args],
+        capture_output=True, text=True, check=True,
+    )
+    return r.stdout
+
+
+def test_tag_transfer(t: Test, spec: BackendSpec) -> None:
+    """Apply commits + transfer an annotated tag to a GIT host repo (DF12).
+
+    The complement to stop_start's non-git path: with a git target, `apply`
+    replays the agent's commit via format-patch/am and `apply --tags` re-creates
+    the agent's annotated tag on the host, mapped to the applied commit. On Tart
+    the tag read runs git inside the VM (runtime.GitExecFor); the transfer writes
+    to the host repo. Full-tier only — it's a second VM boot per backend, so it's
+    a release-gate check rather than a per-PR one.
+    """
+    project = t.project_git(f"tag-transfer-{spec.label}")
+    name = t.sandbox(f"tag-transfer-{spec.label}")
+    exdir = spec.exchange_dir(name)
+    # Commit a change and annotate it with a tag, all inside the work copy. The
+    # tag is chained before the sentinel, so the wait gates on its creation.
+    work = (
+        "echo feature > feature.txt"
+        " && git add -A && git commit -qm 'add feature'"
+        " && git tag -a v1 -m smoketag"
+    )
+    prompt = _prompt(exdir, work)
+
+    r = t.run(
+        "new", name, str(project),
+        "--model", "haiku",
+        "--prompt", prompt,
+        "--yes",
+        *spec.new_args(),
+        *t.debug_new_flags,
+        timeout=spec.new_timeout(),
+    )
+    t.assert_ok(r, "new")
+    t.wait_for_sentinel(name, timeout=spec.sentinel_timeout(), stall_grace_secs=spec.sentinel_stall_grace())
+
+    # One call: replay the commit onto the git host AND transfer the tag, mapped
+    # to the just-applied commit via the apply's own sandbox→host SHA map.
+    r = t.run("apply", name, "--yes", "--tags")
+    t.assert_ok(r, "apply --tags")
+
+    # The committed file landed (format-patch/am replay onto the git host).
+    if not (project / "feature.txt").exists():
+        raise AssertionError("feature.txt not found in project after apply --tags")
+
+    # The annotated tag was re-created on the host...
+    host_tags = _git_out(project, "tag", "-l").split()
+    if "v1" not in host_tags:
+        raise AssertionError(f"tag v1 not transferred to host repo; tags={host_tags}")
+    # ...pointing at the applied commit (subject sanity check).
+    subject = _git_out(project, "log", "-1", "--format=%s", "v1").strip()
+    if subject != "add feature":
+        raise AssertionError(f"tag v1 points at unexpected commit: {subject!r}")
+    # ...and it's annotated (carries the message), proving GetTagMessage ran.
+    message = _git_out(project, "for-each-ref", "--format=%(contents:subject)", "refs/tags/v1").strip()
+    if message != "smoketag":
+        raise AssertionError(f"tag v1 message not transferred: {message!r}")
+
+
 def test_clone(t: Test, spec: BackendSpec) -> None:
     """new (A) → wait → clone to B → diff B shows agent changes.
 
@@ -3096,6 +3184,14 @@ def main() -> int:
 
     print("\nBackend matrix (stop_start):")
     run_matrix_test("stop_start", test_stop_start)
+
+    # tag_transfer needs a second VM boot per backend (its own git-host sandbox),
+    # so it's a full-tier release-gate check rather than a per-PR base test.
+    print("\nBackend matrix (tag_transfer):")
+    if ctx.full:
+        run_matrix_test("tag_transfer", test_tag_transfer)
+    else:
+        print("  full tier only (use --full)")
 
     print("\nBackend matrix (isolation_check):")
     run_matrix_test(
