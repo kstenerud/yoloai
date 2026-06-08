@@ -2,7 +2,7 @@
 
 Tracks breaking changes made during beta. Each entry should be included in release notes for the version that introduces it.
 
-## Unreleased
+## v0.4.0
 
 ### Default Tart base image now tracks the host's macOS instead of being pinned to Sequoia
 
@@ -110,90 +110,6 @@ and action commands) keep their shape. Rationale: a bare top-level array can car
 neither a top-level error nor future metadata; a uniform object shape lets every
 command grow without breaking parsers. See finding DF17.
 
-### Public Go embedding surface reshaped (0.x layer-1)
-
-The root `yoloai` package was reshaped so external embedders drive yoloAI entirely
-through it (never importing `internal/*`): per-sandbox operations moved onto
-resource-bound handles, creation and backend-selection became explicit, and every
-Options/result/error is now a public `yoloai.*` type. **The overwhelming majority of
-this surface is new in this release** — the handles, the `<Noun><Verb>Options`
-family (`SandboxCreateOptions`, `WorkdirDiffOptions`, …), the
-typed errors, the kind enums, and the `System()` / `Sandbox()` / `Agent()` /
-`Workdir()` accessors all describe new API with no prior name to migrate from. CLI
-behavior is unchanged except for the wire-format renames called out at the end.
-
-**What actually breaks relative to the last release.** Only the handful of names
-that shipped on the prior stable surface change; this is the entire Go migration:
-
-- `Options` → `ClientCreateOptions` (its `Backend` field is now `BackendType`,
-  typed `yoloai.BackendType`).
-- `Client.Run` / `RunOptions` were removed outright (not renamed). Creation no
-  longer launches: `CreateSandbox` provisions a *dormant* `*Sandbox`, which the
-  caller starts explicitly with `Sandbox.Start` and (optionally) blocks on with
-  the new `Sandbox.Wait`. See "Creation is dormant" below.
-- `ApplyOptions` → `WorkdirApplyOptions`, now reached via
-  `client.Sandbox(name).Workdir().Apply(…)`.
-- `NewWithOptions(ctx, Options)` → `NewClient(ctx, ClientCreateOptions)`.
-- `New(ctx)` (the no-argument constructor) was removed — use
-  `NewClient(ctx, ClientCreateOptions{})`.
-- The per-`name` `Client` methods that shipped before — `Inspect`, `Stop`,
-  `Destroy`, `Diff`, `Apply`, `ApplyWithOptions` — are no longer flat on `Client`.
-  Call them on the handle returned by `client.Sandbox(name)` (`.Inspect(ctx)`,
-  `.Stop(ctx)`, `.Destroy(ctx, …)`), and route diff/apply through
-  `.Sandbox(name).Workdir()`. `Close` remains on `Client`.
-- `List` → `ListSandboxes`. The sandbox verbs on the root `Client` now name
-  their noun: `ListSandboxes` and `CreateSandbox` (the latter introduced in this
-  same reshape). `Client` is a multi-noun root — the bare verbs didn't say what
-  they acted on. Cloning is a per-sandbox operation off the source handle,
-  `Sandbox.Clone` (see "Creation is dormant" below).
-
-Field semantics and zero values are otherwise unchanged — only the names and
-receivers move.
-
-**Migration (Go embedders):** rename the four type/constructor names at call sites;
-insert `.Sandbox(name)` and drop the `name` argument from per-sandbox calls; route
-diff/apply/export/commits/tags through `.Workdir()`; replace `New(ctx)` with
-`NewClient(ctx, ClientCreateOptions{})`.
-
-**Orientation — the new shape (all new API, no prior name to migrate from).**
-`Client.Sandbox(name)` returns `(*Sandbox, error)` and rejects a missing sandbox
-with `ErrSandboxNotFound` at construction; its `.Workdir()` / `.Network()` /
-`.Agent()` accessors are pure namespace expansion (no IO, no error). Admin/fleet
-operations are reached via `Client.System()`. A `Client` built without
-`ClientCreateOptions.BackendType` serves every backend-free operation (admin,
-per-sandbox reads) without ever opening a runtime; a backend-bound call on such a
-`Client` returns the typed sentinel `ErrBackendRequired`. Diff/apply/export and the
-commit/tag/uncommitted reads live on `Workdir()`, each mode-agnostic;
-`WorkdirApplyOptions.Mode` is required (`ApplyModeCommits` replays the commit series,
-`ApplyModeNoCommit` lands a net diff). Errors are typed public shapes
-(`*ActiveWorkError`, `*DirtyWorkdirError`, `*UsageError`, …) — use `errors.As`. The
-kind enums read as `AgentType` / `BackendType` (value constants like `BackendDocker`
-unchanged). Interactive `Exec` / `Attach` take an `IOStreams` of opaque byte streams
-— the library never touches a stream FD, sets raw mode, or installs signal handlers;
-initial geometry comes from `Rows`/`Cols` and live resizes arrive on
-`IOStreams.Resize`. Backend selection is explicit via
-`yoloai.SelectBackend(ctx, preferred, isolation, targetOS, env)` /
-`SelectContainerBackend(ctx, preferred, env)`, both taking a host-env snapshot
-rather than reading the process environment.
-
-**Wire-format / CLI breakage (genuine vs the last release).**
-
-- `sandbox info` / `list` `--json` nest the creation-time settings under
-  `"environment"` (was `"meta"`), aligning with the on-disk `environment.json`
-  artifact they mirror.
-- The `sandbox info` / `list` read-model is curated: pure-mechanism fields
-  (`version`, `yoloai_version`, `image_ref`, `has_prompt`, `debug`, `userns_mode`,
-  `archetype`, `vscode_tunnel`, `inception_sha`) are dropped from both `--json` and
-  the human output (the `Image:` and `Version:` lines are gone). `network_mode` now
-  marshals from the typed `yoloai.NetworkMode` enum but to the same JSON string, so
-  network output is byte-stable.
-- `profile info` / `--diff` `--json`: the `agent_files` object's inner keys now
-  carry tags (`base_dir` / `files`) instead of the Go field names (`BaseDir` /
-  `Files`).
-- `yoloai apply`: `--squash` → `--no-commit` (JSON `method` `"squash"` →
-  `"no-commit"`). See the `yoloai apply` entry below for the commits-only default and
-  `--include-uncommitted`.
-
 ### Creation is dormant; `CreateSandbox` / `Sandbox.Clone` return a live `*Sandbox`
 
 `CreateSandbox` and the new `Sandbox.Clone` now *provision only* — they no longer
@@ -279,6 +195,141 @@ that can never be real backends; they are only meaningful for
 **Migration (Go embedders):** `AllBackends: true` → `BackendType: BackendsAll`; a
 previously-empty `BackendType` (the old implicit default) → `BackendType: BackendDefault`.
 
+### Launch-prefix legacy path removed; library data dir migrates to schema v2
+
+The agent launch command is wrapped with a backend-specific prefix (Tart prepends a
+`PATH=…`; Seatbelt sources `~/.swift-wrapper.sh`; container backends use no wrap). That
+prefix is now stored once at creation in each sandbox's `runtime-config.json`
+(`agent_launch_prefix`) as the single source of truth. The old per-backend Python fallback
+(`prepare_launch_command` in `sandbox-setup.py`) that reconstructed the prefix at runtime for
+sandboxes lacking the stored field is **removed**, along with the `use_launch_prefix` guard.
+
+**Previous behavior:** a sandbox whose `runtime-config.json` had no `agent_launch_prefix`
+relaunched its agent via the Python `prepare_launch_command` recomputation path.
+
+**New behavior:** the stored `agent_launch_prefix` is always used. The launch prefix is a
+per-backend constant fully derivable host-side, so the library bumps `LibrarySchemaVersion`
+to `2` and the v1→v2 step of `yoloai system migrate` (re)writes `agent_launch_prefix` for
+every sandbox from its stored backend type. This is idempotent — sandboxes that already carry
+the field get the identical deterministic value, so upgraders who created sandboxes on an
+earlier build of this line are unaffected. Container-backend sandboxes (docker/podman/
+containerd) resolve to an empty prefix (a no-op wrap); in practice only Tart and Seatbelt
+sandboxes change.
+
+**Migration:** run `yoloai system migrate` once after upgrading (the startup gate already
+requires this for any out-of-date data dir — see the data-directory bifurcation entry). The
+migration is idempotent. A pre-migration Tart/Seatbelt sandbox driven by the new binary
+*without* migrating would fail to relaunch its agent (the fallback is gone); migrating fixes
+it with no re-creation.
+
+### `--force` flags renamed for their consequence (`new`, `clone`, `files`, `system build`)
+
+**Previous behavior:** Five sites overloaded `--force`, each with a different effect:
+
+- `yoloai new --force` — replace a sandbox even when it holds unapplied changes or a running agent (the unsafe sibling of `--replace`).
+- `yoloai clone --force` — overwrite an existing destination sandbox.
+- `yoloai files put/get --force` — overwrite existing files.
+- `yoloai system build --force` (and `--all`) — rebuild an image that is already up to date.
+
+**New behavior:** there is no `--force` flag anywhere in the CLI. Each is replaced by a flag named for its consequence:
+
+- `yoloai new --abandon-unapplied` — implies `--replace`. `--replace` is unchanged: still the safe option that destroys a *clean* same-named sandbox first and aborts when one holds unapplied work.
+- `yoloai clone --overwrite`
+- `yoloai files put/get --overwrite`
+- `yoloai system build --rebuild`
+
+The `<dir>:force` directory-spec suffix (bypass the dangerous-mount-path guard) is **unchanged** — it is a path-mode suffix, not a `--force` flag.
+
+**Rationale:** one `--force` spelling hid four different consequences — discarding unreviewed work, clobbering a sandbox, clobbering files, redoing a build — so the flag's effect was unreadable at the call site. This mirrors the library API, which already replaced its generic `Force` option with consequence-named options (`AbandonUnappliedWork`, `Overwrite`, `Rebuild`). Naming a destructive flag after its effect makes the danger legible where it is invoked.
+
+**Migration:** in scripts, replace `--force` per command — `new` → `--abandon-unapplied`, `clone` → `--overwrite`, `files put`/`files get` → `--overwrite`, `system build` → `--rebuild`. The old `--force` is removed with no deprecation alias.
+
+## v0.3.0
+
+### Public Go embedding surface reshaped (0.x layer-1)
+
+The root `yoloai` package was reshaped so external embedders drive yoloAI entirely
+through it (never importing `internal/*`): per-sandbox operations moved onto
+resource-bound handles, creation and backend-selection became explicit, and every
+Options/result/error is now a public `yoloai.*` type. **The overwhelming majority of
+this surface is new in this release** — the handles, the `<Noun><Verb>Options`
+family (`SandboxCreateOptions`, `WorkdirDiffOptions`, …), the
+typed errors, the kind enums, and the `System()` / `Sandbox()` / `Agent()` /
+`Workdir()` accessors all describe new API with no prior name to migrate from. CLI
+behavior is unchanged except for the wire-format renames called out at the end.
+
+**What actually breaks relative to the last release.** Only the handful of names
+that shipped on the prior stable surface change; this is the entire Go migration:
+
+- `Options` → `ClientCreateOptions` (its `Backend` field is now `BackendType`,
+  typed `yoloai.BackendType`).
+- `Client.Run` / `RunOptions` were removed outright (not renamed). Creation no
+  longer launches: `CreateSandbox` provisions a *dormant* `*Sandbox`, which the
+  caller starts explicitly with `Sandbox.Start` and (optionally) blocks on with
+  the new `Sandbox.Wait`. See "Creation is dormant" below.
+- `ApplyOptions` → `WorkdirApplyOptions`, now reached via
+  `client.Sandbox(name).Workdir().Apply(…)`.
+- `NewWithOptions(ctx, Options)` → `NewClient(ctx, ClientCreateOptions)`.
+- `New(ctx)` (the no-argument constructor) was removed — use
+  `NewClient(ctx, ClientCreateOptions{})`.
+- The per-`name` `Client` methods that shipped before — `Inspect`, `Stop`,
+  `Destroy`, `Diff`, `Apply`, `ApplyWithOptions` — are no longer flat on `Client`.
+  Call them on the handle returned by `client.Sandbox(name)` (`.Inspect(ctx)`,
+  `.Stop(ctx)`, `.Destroy(ctx, …)`), and route diff/apply through
+  `.Sandbox(name).Workdir()`. `Close` remains on `Client`.
+- `List` → `ListSandboxes`. The sandbox verbs on the root `Client` now name
+  their noun: `ListSandboxes` and `CreateSandbox` (the latter introduced in this
+  same reshape). `Client` is a multi-noun root — the bare verbs didn't say what
+  they acted on. Cloning is a per-sandbox operation off the source handle,
+  `Sandbox.Clone` (see "Creation is dormant" below).
+
+Field semantics and zero values are otherwise unchanged — only the names and
+receivers move.
+
+**Migration (Go embedders):** rename the four type/constructor names at call sites;
+insert `.Sandbox(name)` and drop the `name` argument from per-sandbox calls; route
+diff/apply/export/commits/tags through `.Workdir()`; replace `New(ctx)` with
+`NewClient(ctx, ClientCreateOptions{})`.
+
+**Orientation — the new shape (all new API, no prior name to migrate from).**
+`Client.Sandbox(name)` returns `(*Sandbox, error)` and rejects a missing sandbox
+with `ErrSandboxNotFound` at construction; its `.Workdir()` / `.Network()` /
+`.Agent()` accessors are pure namespace expansion (no IO, no error). Admin/fleet
+operations are reached via `Client.System()`. A `Client` built without
+`ClientCreateOptions.BackendType` serves every backend-free operation (admin,
+per-sandbox reads) without ever opening a runtime; a backend-bound call on such a
+`Client` returns the typed sentinel `ErrBackendRequired`. Diff/apply/export and the
+commit/tag/uncommitted reads live on `Workdir()`, each mode-agnostic;
+`WorkdirApplyOptions.Mode` is required (`ApplyModeCommits` replays the commit series,
+`ApplyModeNoCommit` lands a net diff). Errors are typed public shapes
+(`*ActiveWorkError`, `*DirtyWorkdirError`, `*UsageError`, …) — use `errors.As`. The
+kind enums read as `AgentType` / `BackendType` (value constants like `BackendDocker`
+unchanged). Interactive `Exec` / `Attach` take an `IOStreams` of opaque byte streams
+— the library never touches a stream FD, sets raw mode, or installs signal handlers;
+initial geometry comes from `Rows`/`Cols` and live resizes arrive on
+`IOStreams.Resize`. Backend selection is explicit via
+`yoloai.SelectBackend(ctx, preferred, isolation, targetOS, env)` /
+`SelectContainerBackend(ctx, preferred, env)`, both taking a host-env snapshot
+rather than reading the process environment.
+
+**Wire-format / CLI breakage (genuine vs the last release).**
+
+- `sandbox info` / `list` `--json` nest the creation-time settings under
+  `"environment"` (was `"meta"`), aligning with the on-disk `environment.json`
+  artifact they mirror.
+- The `sandbox info` / `list` read-model is curated: pure-mechanism fields
+  (`version`, `yoloai_version`, `image_ref`, `has_prompt`, `debug`, `userns_mode`,
+  `archetype`, `vscode_tunnel`, `inception_sha`) are dropped from both `--json` and
+  the human output (the `Image:` and `Version:` lines are gone). `network_mode` now
+  marshals from the typed `yoloai.NetworkMode` enum but to the same JSON string, so
+  network output is byte-stable.
+- `profile info` / `--diff` `--json`: the `agent_files` object's inner keys now
+  carry tags (`base_dir` / `files`) instead of the Go field names (`BaseDir` /
+  `Files`).
+- `yoloai apply`: `--squash` → `--no-commit` (JSON `method` `"squash"` →
+  `"no-commit"`). See the `yoloai apply` entry below for the commits-only default and
+  `--include-uncommitted`.
+
 ### Data directory bifurcated into `library/` (engine) + `cli/` (app); one-time migration via `yoloai system migrate`
 
 The CLI's `~/.yoloai/` is now split into two namespaces under the same top dir:
@@ -327,33 +378,6 @@ see the tip resurface.
 **`tmux_conf` default.** Now defaults to `default+host` (was empty). The library
 "just works" via opinionated declarative defaults rather than depending on a
 completed setup ceremony to populate config.
-
-### Launch-prefix legacy path removed; library data dir migrates to schema v2
-
-The agent launch command is wrapped with a backend-specific prefix (Tart prepends a
-`PATH=…`; Seatbelt sources `~/.swift-wrapper.sh`; container backends use no wrap). That
-prefix is now stored once at creation in each sandbox's `runtime-config.json`
-(`agent_launch_prefix`) as the single source of truth. The old per-backend Python fallback
-(`prepare_launch_command` in `sandbox-setup.py`) that reconstructed the prefix at runtime for
-sandboxes lacking the stored field is **removed**, along with the `use_launch_prefix` guard.
-
-**Previous behavior:** a sandbox whose `runtime-config.json` had no `agent_launch_prefix`
-relaunched its agent via the Python `prepare_launch_command` recomputation path.
-
-**New behavior:** the stored `agent_launch_prefix` is always used. The launch prefix is a
-per-backend constant fully derivable host-side, so the library bumps `LibrarySchemaVersion`
-to `2` and the v1→v2 step of `yoloai system migrate` (re)writes `agent_launch_prefix` for
-every sandbox from its stored backend type. This is idempotent — sandboxes that already carry
-the field get the identical deterministic value, so upgraders who created sandboxes on an
-earlier build of this line are unaffected. Container-backend sandboxes (docker/podman/
-containerd) resolve to an empty prefix (a no-op wrap); in practice only Tart and Seatbelt
-sandboxes change.
-
-**Migration:** run `yoloai system migrate` once after upgrading (the startup gate already
-requires this for any out-of-date data dir — see the data-directory bifurcation entry). The
-migration is idempotent. A pre-migration Tart/Seatbelt sandbox driven by the new binary
-*without* migrating would fail to relaunch its agent (the fallback is gone); migrating fixes
-it with no re-creation.
 
 ### `yoloai system doctor` moves to `yoloai doctor`
 
@@ -745,28 +769,6 @@ All entrypoint scripts now use `$YOLOAI_DIR` instead of hardcoded paths. Docker 
 
 **Migration:** Remove any code that reads `container_id` from yoloAI JSON output. The field was always empty, so no information is lost.
 
-### `--force` flags renamed for their consequence (`new`, `clone`, `files`, `system build`)
-
-**Previous behavior:** Five sites overloaded `--force`, each with a different effect:
-
-- `yoloai new --force` — replace a sandbox even when it holds unapplied changes or a running agent (the unsafe sibling of `--replace`).
-- `yoloai clone --force` — overwrite an existing destination sandbox.
-- `yoloai files put/get --force` — overwrite existing files.
-- `yoloai system build --force` (and `--all`) — rebuild an image that is already up to date.
-
-**New behavior:** there is no `--force` flag anywhere in the CLI. Each is replaced by a flag named for its consequence:
-
-- `yoloai new --abandon-unapplied` — implies `--replace`. `--replace` is unchanged: still the safe option that destroys a *clean* same-named sandbox first and aborts when one holds unapplied work.
-- `yoloai clone --overwrite`
-- `yoloai files put/get --overwrite`
-- `yoloai system build --rebuild`
-
-The `<dir>:force` directory-spec suffix (bypass the dangerous-mount-path guard) is **unchanged** — it is a path-mode suffix, not a `--force` flag.
-
-**Rationale:** one `--force` spelling hid four different consequences — discarding unreviewed work, clobbering a sandbox, clobbering files, redoing a build — so the flag's effect was unreadable at the call site. This mirrors the library API, which already replaced its generic `Force` option with consequence-named options (`AbandonUnappliedWork`, `Overwrite`, `Rebuild`). Naming a destructive flag after its effect makes the danger legible where it is invoked.
-
-**Migration:** in scripts, replace `--force` per command — `new` → `--abandon-unapplied`, `clone` → `--overwrite`, `files put`/`files get` → `--overwrite`, `system build` → `--rebuild`. The old `--force` is removed with no deprecation alias.
-
 ### `yoloai new` no longer auto-attaches by default
 
 **Previous behavior:** `yoloai new` auto-attached to the tmux session after creation. `--detach`/`-d` skipped the attach.
@@ -818,3 +820,4 @@ The `<dir>:force` directory-spec suffix (bypass the dangerous-mount-path guard) 
 **Rationale:** `tmux_conf` and `model_aliases` are user preferences that should apply to all sandboxes regardless of profile. They don't belong in profile-overridable config.
 
 **Migration:** Automatic. On first run, yoloai moves `tmux_conf` and `model_aliases` from the base profile config to the global config. No manual action needed.
+
