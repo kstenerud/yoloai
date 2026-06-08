@@ -161,7 +161,7 @@ func TestFilesPut_OverwriteWithForce(t *testing.T) {
 
 	cmd := NewFilesCmd()
 	cmd.SetOut(new(bytes.Buffer))
-	cmd.SetArgs([]string{name, "put", "--force", src})
+	cmd.SetArgs([]string{name, "put", "--overwrite", src})
 	require.NoError(t, cmd.Execute())
 
 	got, err := os.ReadFile(filepath.Join(filesDir, "exists.txt")) //nolint:gosec // test helper
@@ -298,7 +298,7 @@ func TestFilesGet_OverwriteWithForce(t *testing.T) {
 
 	cmd := NewFilesCmd()
 	cmd.SetOut(new(bytes.Buffer))
-	cmd.SetArgs([]string{name, "get", "--force", "report.txt", "-o", dstDir})
+	cmd.SetArgs([]string{name, "get", "--overwrite", "report.txt", "-o", dstDir})
 	require.NoError(t, cmd.Execute())
 
 	got, err := os.ReadFile(dstFile) //nolint:gosec // test helper

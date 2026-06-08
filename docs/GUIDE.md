@@ -36,7 +36,7 @@ Full reference for commands, flags, configuration, and internals. For a quick ov
 | `yoloai system check` | Verify prerequisites for CI/CD pipelines |
 | `yoloai system disk` | Report on-disk usage per backend (sandboxes + image cache + snapshots) |
 | `yoloai doctor` | Capability status for all backends + a read-only repair advisory (see [Repair & cleanup](#repair--cleanup)) |
-| `yoloai system prune` | Clean up leftover state across all backends (`--dry-run`, `--yes`, `--images`) — see [Repair & cleanup](#repair--cleanup) |
+| `yoloai system prune` | Clean up leftover state across all backends (`--dry-run`, `--yes`, `--images`, `--trash`) — see [Repair & cleanup](#repair--cleanup) |
 | `yoloai system setup` | Re-run interactive first-run setup |
 | `yoloai sandbox` (alias: `sb`) | Sandbox inspection |
 | `yoloai sandbox list` | List sandboxes and their status |
@@ -315,7 +315,7 @@ Use `--json` on any command to get machine-readable JSON output:
 yoloai ls --json                           # all sandboxes as JSON array
 yoloai sandbox info mybox --json           # sandbox details as JSON object
 yoloai diff mybox --json                   # diff result as JSON
-yoloai destroy mybox --json --yes          # action result (--yes required)
+yoloai destroy mybox --json                # action result
 yoloai config get --json                   # full config as JSON
 ```
 
@@ -329,7 +329,7 @@ Errors are output to stderr as `{"error": "message"}`. Interactive commands (`at
 | 1     | General error |
 | 2     | Usage error (bad arguments, missing required args) |
 | 3     | Configuration error (bad config file, missing required config) |
-| 4     | Active work — sandbox has unapplied changes or a running agent; use `--yes` to force or `yoloai apply` first |
+| 4     | Active work — sandbox has unapplied changes or a running agent; use `--abandon-unapplied` to discard it or `yoloai apply` first |
 | 5     | Dependency error — required software not installed or not running (e.g., Docker daemon) |
 | 6     | Platform error — operation not possible on this OS/arch (e.g., tart on Linux) |
 | 7     | Auth error — credentials completely absent (e.g., `ANTHROPIC_API_KEY` not set) |
@@ -357,14 +357,14 @@ yoloai new task ./project --no-start
 # Auto-attach after creation
 yoloai new task ./project --attach
 
-# Skip confirmation prompts
-yoloai new task ./project --yes
+# Proceed even if the workdir has uncommitted changes (otherwise refused)
+yoloai new task ./project --allow-dirty
 
 # Replace an existing sandbox with the same name
 yoloai new task ./project --replace
 
-# Replace even if unapplied changes exist
-yoloai new task ./project --force
+# Replace even if unapplied changes exist (discards the unreviewed work)
+yoloai new task ./project --abandon-unapplied
 
 # Pass extra arguments directly to the agent CLI
 yoloai new task ./project -- --allowedTools "Edit,Write,Bash"
@@ -400,17 +400,17 @@ yoloai new task ./project --debug
 ### Managing sandboxes
 
 ```bash
-# Skip confirmation prompts
-yoloai destroy task --yes
-yoloai apply task --yes
+# Destroy a sandbox that has unapplied changes or a running agent (otherwise refused)
+yoloai destroy task --abandon-unapplied
+yoloai apply task --yes       # --yes confirms the apply you invoked
 
 # Stop/destroy all sandboxes
 yoloai stop --all
-yoloai destroy --all --yes
+yoloai destroy --all --abandon-unapplied
 
 # Destroy sandboxes matching a wildcard pattern
 yoloai destroy test*         # destroy all sandboxes starting with "test"
-yoloai destroy *-old --yes   # skip confirmation for sandboxes ending with "-old"
+yoloai destroy *-old --abandon-unapplied   # discard unreviewed work in matched sandboxes
 
 # Resume a stopped sandbox (re-feed original prompt with context)
 yoloai start task --resume
@@ -432,7 +432,7 @@ yoloai attach task --resume
 yoloai clone source-box dest-box
 yoloai clone source-box dest-box -a           # clone, start, and attach
 yoloai clone source-box dest-box --no-start   # clone without starting
-yoloai clone source-box dest-box --force      # replace existing destination
+yoloai clone source-box dest-box --overwrite  # overwrite existing destination
 yoloai clone source-box dest-box --prompt "continue with tests"
 
 # Reset workdir (in-place by default, agent stays running)
@@ -682,7 +682,7 @@ Over time a yoloai install accumulates cruft: orphaned containers/VMs from crash
 - **Refused** — dirs where yoloai can still detect uncommitted work (a dirty git copy, or a non-empty overlay upper layer). These are reported and left untouched; you review and remove them yourself.
 - **Quarantined to trash** — dirs whose metadata is corrupt or too new to read, but with no detectable work. Rather than guess, yoloai moves them to `~/.yoloai/library/trash/<name>` so nothing is lost.
 
-Use `--dry-run` to preview, and `--yes` to skip confirmation prompts (including the trash-deletion prompt).
+Use `--dry-run` to preview, `--yes` to skip the reclaim confirmation prompt, and `--trash` to also empty the trash (see below).
 
 ### Trash and recovery
 
@@ -692,7 +692,7 @@ Quarantined dirs go to `~/.yoloai/library/trash/`. There's no dedicated restore 
 mv ~/.yoloai/library/trash/<name> ~/.yoloai/library/sandboxes/<name>
 ```
 
-`yoloai system prune` reports how much is in the trash and offers to empty it. Because trash may hold something you wanted, it always asks first (answer no to keep it); `--yes` empties it without prompting. Nothing else ever deletes the trash automatically.
+`yoloai system prune` reports how much is in the trash but never empties it on its own — because trash may hold something you wanted, emptying it is opt-in via the `--trash` selector flag (parallel to `--images`). A plain prune, even with `--yes`, only reports the trash; `--yes` suppresses the reclaim prompt but never widens the scope to the trash. Nothing else ever deletes the trash automatically.
 
 ## Security
 

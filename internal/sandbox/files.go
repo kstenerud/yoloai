@@ -50,7 +50,7 @@ func ImportFile(ctx context.Context, layout config.Layout, name, hostPath string
 	dst := filepath.Join(filesDir, info.Name())
 	if !force {
 		if _, statErr := os.Stat(dst); statErr == nil { //nolint:gosec // G703: path is under sandbox files dir
-			return "", fmt.Errorf("target already exists: %s (use --force to overwrite)", info.Name())
+			return "", fmt.Errorf("target already exists: %s (use --overwrite to replace it)", info.Name())
 		}
 	}
 	if err := copyTree(ctx, absSrc, dst); err != nil {
@@ -70,7 +70,7 @@ func ExportFile(ctx context.Context, layout config.Layout, name, rel, dst string
 	}
 	if !force {
 		if _, err := os.Stat(dst); err == nil { //nolint:gosec // G703: dst is a user-specified destination
-			return fmt.Errorf("destination already exists: %s (use --force to overwrite)", dst)
+			return fmt.Errorf("destination already exists: %s (use --overwrite to replace it)", dst)
 		}
 	}
 	if err := copyTree(ctx, srcPath, dst); err != nil {

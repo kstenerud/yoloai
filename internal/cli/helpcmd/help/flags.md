@@ -20,9 +20,10 @@ CREATING SANDBOXES (yoloai new)
   --network-isolated  Allow only agent API traffic (iptables allowlist)
   --network-allow     Extra domain to allow (repeatable, implies --network-isolated)
   --attach, -a        Auto-attach after creation
-  --force             Replace existing sandbox (even with unapplied changes)
+  --replace            Replace an existing sandbox of the same name
+  --abandon-unapplied  Replace even when it has unapplied changes (implies --replace)
   --no-start          Create without starting
-  --yes, -y           Skip confirmations
+  --allow-dirty       Proceed even if the workdir has uncommitted changes
   --cpus <num>        CPU limit (e.g., 4, 2.5)
   --memory <size>     Memory limit (e.g., 8g, 512m)
   --isolation <mode>  Isolation mode: container (default),
@@ -45,7 +46,8 @@ REVIEWING AND APPLYING
 LIFECYCLE
 
   yoloai stop --all               Stop all sandboxes
-  yoloai destroy --all --yes      Destroy all sandboxes
+  yoloai destroy --all            Destroy all sandboxes
+  yoloai destroy <name> --abandon-unapplied  Destroy despite unapplied work
   yoloai reset <name> --clear-state  Reset and wipe agent state
   yoloai reset <name> --no-prompt Don't re-send prompt on reset
 

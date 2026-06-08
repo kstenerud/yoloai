@@ -17,7 +17,7 @@ import (
 
 func runClone(cmd *cobra.Command, args []string) error {
 	src, dst := args[0], args[1]
-	force, _ := cmd.Flags().GetBool("force")
+	overwrite, _ := cmd.Flags().GetBool("overwrite")
 	noStart, _ := cmd.Flags().GetBool("no-start")
 	attach, _ := cmd.Flags().GetBool("attach")
 	prompt, _ := cmd.Flags().GetString("prompt")
@@ -51,7 +51,7 @@ func runClone(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		sb, err := srcSb.Clone(ctx, dst, yoloai.SandboxCloneOptions{Overwrite: force})
+		sb, err := srcSb.Clone(ctx, dst, yoloai.SandboxCloneOptions{Overwrite: overwrite})
 		if err != nil {
 			return err
 		}
@@ -108,7 +108,7 @@ func addCloneFlags(cmd *cobra.Command) {
 	cmd.Flags().StringP("prompt", "p", "", "New prompt text (overwrites existing prompt)")
 	cmd.Flags().StringP("prompt-file", "f", "", "File containing new prompt")
 	cmd.Flags().Bool("no-start", false, "Clone without starting")
-	cmd.Flags().Bool("force", false, "Replace existing destination")
+	cmd.Flags().Bool("overwrite", false, "Overwrite an existing destination sandbox")
 
 	cmd.MarkFlagsMutuallyExclusive("no-start", "attach")
 	cmd.MarkFlagsMutuallyExclusive("prompt", "prompt-file")

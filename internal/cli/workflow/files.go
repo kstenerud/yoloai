@@ -38,7 +38,7 @@ Subcommands:
 		DisableFlagParsing: false,
 		RunE:               filesDispatch,
 	}
-	cmd.Flags().Bool("force", false, "Overwrite existing files")
+	cmd.Flags().Bool("overwrite", false, "Overwrite existing files")
 	cmd.Flags().StringP("output", "o", ".", "Destination directory (or file for single get)")
 	return cmd
 }
@@ -106,7 +106,7 @@ func runFilesPut(cmd *cobra.Command, files *yoloai.Files, args []string) error {
 	if len(args) == 0 {
 		return yoerrors.NewUsageError("at least one file is required")
 	}
-	force, _ := cmd.Flags().GetBool("force")
+	overwrite, _ := cmd.Flags().GetBool("overwrite")
 
 	expanded, err := expandHostGlobs(args)
 	if err != nil {
@@ -114,7 +114,7 @@ func runFilesPut(cmd *cobra.Command, files *yoloai.Files, args []string) error {
 	}
 
 	for _, src := range expanded {
-		placed, err := files.Import(cmd.Context(), src, force)
+		placed, err := files.Import(cmd.Context(), src, overwrite)
 		if err != nil {
 			return err
 		}
@@ -137,7 +137,7 @@ func runFilesGet(cmd *cobra.Command, files *yoloai.Files, args []string) error {
 	}
 
 	dst, _ := cmd.Flags().GetString("output")
-	force, _ := cmd.Flags().GetBool("force")
+	overwrite, _ := cmd.Flags().GetBool("overwrite")
 
 	absDst, err := filepath.Abs(dst)
 	if err != nil {
@@ -161,7 +161,7 @@ func runFilesGet(cmd *cobra.Command, files *yoloai.Files, args []string) error {
 		if info, statErr := os.Stat(fileDst); statErr == nil && info.IsDir() {
 			fileDst = filepath.Join(fileDst, filepath.Base(rel))
 		}
-		if err := files.Export(cmd.Context(), rel, fileDst, force); err != nil {
+		if err := files.Export(cmd.Context(), rel, fileDst, overwrite); err != nil {
 			return err
 		}
 		fmt.Fprintln(cmd.OutOrStdout(), fileDst) //nolint:errcheck // best-effort output

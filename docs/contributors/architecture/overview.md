@@ -176,9 +176,9 @@ Creating a sandbox happens in three stages: prepare resolves all configuration, 
 │  resolve profile chain  →  merge config  →  build image      │
 │  resolve agent (CLI → profile → defaults → "claude")         │
 │  resolve model + aliases                                     │
-│  create sandbox dir (~/.yoloai/sandboxes/myproject/)         │
+│  create sandbox dir (~/.yoloai/library/sandboxes/myproject/) │
 │  parse workdir modes, validate paths                         │
-│  check dirty repos (warn unless --force)                     │
+│  check dirty repos (refuse unless --allow-dirty)             │
 │  validate isolation prerequisites (caps check)               │
 │  detect credentials                                          │
 │                                                              │

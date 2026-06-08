@@ -46,10 +46,13 @@ func TestDestroyCmd_InvalidName(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestDestroyCmd_AllFlagRegistered(t *testing.T) {
+func TestDestroyCmd_FlagsRegistered(t *testing.T) {
 	cmd := NewDestroyCmd()
 	assert.NotNil(t, cmd.Flags().Lookup("all"))
-	assert.NotNil(t, cmd.Flags().Lookup("yes"))
+	// --yes was removed: widening the scope to discard unapplied work is opt-in
+	// via --abandon-unapplied alone, never via a prompt-suppressing --yes.
+	assert.Nil(t, cmd.Flags().Lookup("yes"))
+	assert.NotNil(t, cmd.Flags().Lookup("abandon-unapplied"))
 }
 
 func TestHasWildcard(t *testing.T) {

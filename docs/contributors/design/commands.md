@@ -9,7 +9,7 @@ Single Go binary. No runtime dependencies — just the binary and Docker.
 - `--quiet` / `-q`: Suppress non-essential output. `-q` for warn-only, `-qq` for error-only.
 - `--no-color`: Disable colored output.
 - `--json`: Output as JSON for scripting and CI. Errors go to stderr as `{"error": "message"}`. Interactive commands (`attach`, `exec`) reject `--json`.
-- `--debug`: Enable debug-level logging to the sandbox's persistent debug log (`~/.yoloai/sandboxes/<name>/debug.log`). For commands that do not operate on a sandbox, silently ignored. Useful for capturing a detailed trail before a problem occurs, so it is available when filing a bug report.
+- `--debug`: Enable debug-level logging to the sandbox's persistent debug log (`~/.yoloai/library/sandboxes/<name>/debug.log`). For commands that do not operate on a sandbox, silently ignored. Useful for capturing a detailed trail before a problem occurs, so it is available when filing a bug report.
 - `--bugreport <type>`: Write a structured Markdown bug report. `<type>` is `safe` (sanitized, suitable for sharing) or `unsafe` (unsanitized, for author debugging). Implicitly enables `--debug`. Report is always written regardless of outcome (success, error, panic, or signal). Output filename is auto-generated in the current directory: `yoloai-bugreport-[<sandbox>-]<timestamp>.md`. See [Bug Report Design](bugreport.md).
 
 **Environment Variables:**
@@ -33,27 +33,34 @@ Lifecycle:
   yoloai restart [-a] <name>                     Restart the agent in an existing sandbox
 
 Inspection:
+  yoloai doctor                                  Show capability status for all backends and isolation modes
   yoloai system                                  System information and management
   yoloai system info                             Show version, paths, disk usage, backend availability
   yoloai system agents [name]                    List available agents
   yoloai system backends [name]                  List available runtime backends
-  yoloai system build [profile|--all]            Build/rebuild container image(s)
+  yoloai system build [profile]                  Build/rebuild container image(s)
   yoloai system check                            Verify prerequisites for CI/CD pipelines
-  yoloai system doctor                           Show capability status for all backends and isolation modes
-  yoloai system prune                            Remove orphaned backend resources and stale temp files
+  yoloai system disk                             Report on-disk usage for yoloai and its backends
+  yoloai system migrate                          Migrate the data directory to the current on-disk layout
+  yoloai system prune                            Remove reclaimable backend cache and stale temp files
   yoloai system setup                            Run interactive setup  (--agent, --backend, --tmux-conf for automation)
   yoloai sandbox                                 Sandbox inspection
   yoloai sandbox list                            List sandboxes and their status
   yoloai sandbox <name> info                     Show sandbox configuration and state
   yoloai sandbox <name> log                      Show sandbox session log
   yoloai sandbox <name> exec <command>           Run a command inside the sandbox
+  yoloai sandbox <name> prompt                   Show the sandbox's prompt text
   yoloai sandbox <name> allow <domain>...       Allow additional domains in an isolated sandbox
   yoloai sandbox <name> allowed                 Show allowed domains for a sandbox
   yoloai sandbox <name> deny <domain>...        Remove domains from the allowlist
-  yoloai sandbox <name> bugreport <file>        Write a bug report for a sandbox to a file
+  yoloai sandbox <name> bugreport [safe|unsafe] Write a bug report for a sandbox to a file
+  yoloai sandbox <name> vscode                   Open the sandbox in VS Code (attach-to-container)
+  yoloai sandbox <name> unlock                   Force-clear a stale lock file (rare)
+  yoloai sandbox <name> terminal-snapshot [--ansi]  Capture the agent's rendered tmux pane
   yoloai ls                                      List sandboxes (shortcut for 'sandbox list')
   yoloai log <name>                              Show sandbox log (shortcut for 'sandbox log')
   yoloai exec <name> <command>                   Run a command inside a sandbox (shortcut for 'sandbox exec')
+  yoloai vscode <name>                           Open a sandbox in VS Code (shortcut for 'sandbox vscode')
 
 Workflow:
   yoloai files <name> put <file/glob>...               Copy files into sandbox exchange dir
@@ -190,11 +197,21 @@ Options:
 - `--network-isolated`: Allow only the agent's required API traffic. The agent can function but cannot access other external services, download arbitrary binaries, or exfiltrate code.
 - `--network-allow <domain>`: Allow traffic to specific additional domains (can be repeated). Implies `--network-isolated`. Added to the agent's default allowlist (see below).
 - `--network-none`: Run with `--network none` for full network isolation (agent API calls will also fail). Mutually exclusive with `--network-isolated` and `--network-allow`. **Warning:** Most agents (Claude, Codex) require network access to reach their API endpoints. This flag is useful for testing container setup without agent execution or for agents with locally-hosted models.
-- `--port <host:container>`: Expose a container port on the host (can be repeated). Example: `--port 3000:3000` for web dev. Without this, container services are not reachable from the host browser. Ports must be specified at creation time — Docker does not support adding port mappings to running containers. To add ports later, use `yoloai new --replace`.
-- `--replace`: Destroy existing sandbox of the same name before creating. Shorthand for `yoloai destroy <name> && yoloai new <name>`. Inherits destroy's smart confirmation — prompts when the existing sandbox has a running agent or unapplied changes. `--yes` skips confirmation.
+- `--port <host:container>`: Expose a container port on the host (can be repeated). Example: `--port 3000:3000` for web dev. Without this, container services are not reachable from the host browser. Ports must be specified at creation time — Docker does not support adding port mappings to running containers. To add ports later, use `yoloai new --abandon-unapplied`.
+- `--backend <name>`: Runtime backend to use (see `yoloai system backends`). Overrides the config default.
+- `--no-profile`: Use the base image even when config sets a default profile.
+- `--isolation <mode>`: Isolation mode: `container` (default), `container-enhanced` (gVisor), `container-privileged` (`--privileged`, for Docker-in-Docker), `vm` (Kata+QEMU), `vm-enhanced` (Kata+Firecracker).
+- `--os <os>`: Target OS: `linux` (default) or `mac`.
+- `--cpus <n>` / `--memory <size>`: Per-sandbox resource limits (e.g. `--cpus 2.5`, `--memory 8g`).
+- `--env <KEY=VAL>`: Set an environment variable inside the sandbox (repeatable).
+- `--archetype <name>`: Environment archetype (run `yoloai new --help` for the current set).
+- `--runtime <name>`: Apple simulator runtime for `mac` targets (`ios`, `tvos`, `watchos`, `visionos`; repeatable, e.g. `--runtime tvos:26.1`).
+- `--vscode-tunnel`: Launch a VS Code Remote Tunnel alongside the agent (connect from VS Code on any machine).
+- `--replace`: Destroy an existing sandbox of the same name before creating. Aborts if that sandbox holds unapplied changes (use `--abandon-unapplied` to override). Shorthand for `yoloai destroy <name> && yoloai new <name>`.
+- `--abandon-unapplied`: Like `--replace`, but proceeds even when the existing sandbox has a running agent or unapplied changes (implies `--replace`). Named for its consequence — the unreviewed work is discarded.
 - `--attach` / `-a`: Auto-attach to the tmux session after creation. Without this flag, the sandbox starts in the background and prints `yoloai attach <name>` as a hint.
 - `--no-start`: Create sandbox without starting the container. Useful for setup-only operations.
-- `--yes`: Skip confirmation prompts (dirty repo warning). For scripting.
+- `--allow-dirty`: Proceed even when a `:rw`/`:copy` workdir has uncommitted changes. Without it, a dirty workdir is **refused** with a typed error (`*yoloai.DirtyWorkdirError`) in every mode — yoloAI never prompts and there is no `--yes` to auto-proceed. Named for its consequence: the uncommitted changes become visible to the agent.
 - `-- <args>...`: Pass remaining arguments directly to the agent CLI invocation. Appended verbatim after yoloAI's built-in flags in the agent command. Example: `yoloai new fix-bug . --model opus -- --max-turns 5` produces `claude --dangerously-skip-permissions --model claude-opus-4-latest --max-turns 5`. **Do not duplicate first-class flags** (e.g., `--model`) in passthrough args — behavior is undefined (depends on the agent's CLI parser, which typically uses last-wins semantics).
 
 **Default network allowlist (per agent):**
@@ -231,7 +248,7 @@ The allowlist is agent-specific — each agent's definition includes its require
 2. Error if any two directories resolve to the same absolute container path (mirrored host path or custom `=<path>`).
 3. For each `:copy` directory, create an isolated writable copy:
    - If the directory is a git repo, record the current HEAD SHA in `meta.json`.
-   - Copy via `cp -rp` to `~/.yoloai/sandboxes/<name>/work/<encoded-path>/`, where `<encoded-path>` is the absolute host path with path separators and filesystem-unsafe characters encoded using [caret encoding](https://github.com/kstenerud/caret-encoding) (e.g., `/home/user/my-app` → `^2Fhome^2Fuser^2Fmy-app`). This is fully reversible and avoids collisions when multiple directories share the same basename. `cp -rp` preserves permissions, timestamps, and symlinks (POSIX-portable; `cp -a` is GNU-specific and unavailable on macOS). Everything is copied including `.git/` and files ignored by `.gitignore`, **except build artifacts** (`.build/`, `DerivedData/`, `node_modules/`, `__pycache__/`, `*.xcworkspace/xcuserdata/`, `*.xcodeproj/xcuserdata/`) which are excluded to prevent compilation failures from hardcoded paths and to improve copy performance.
+   - Copy via `cp -rp` to `~/.yoloai/library/sandboxes/<name>/work/<encoded-path>/`, where `<encoded-path>` is the absolute host path with path separators and filesystem-unsafe characters encoded using [caret encoding](https://github.com/kstenerud/caret-encoding) (e.g., `/home/user/my-app` → `^2Fhome^2Fuser^2Fmy-app`). This is fully reversible and avoids collisions when multiple directories share the same basename. `cp -rp` preserves permissions, timestamps, and symlinks (POSIX-portable; `cp -a` is GNU-specific and unavailable on macOS). Everything is copied including `.git/` and files ignored by `.gitignore`, **except build artifacts** (`.build/`, `DerivedData/`, `node_modules/`, `__pycache__/`, `*.xcworkspace/xcuserdata/`, `*.xcodeproj/xcuserdata/`) which are excluded to prevent compilation failures from hardcoded paths and to improve copy performance.
    - If the copy already has a `.git/` directory (from the original repo), use the recorded SHA as the baseline — `yoloai diff` will diff against it.
    - If the copy has no `.git/`, `git init` + `git add -A` + `git commit -m "initial"` to create a baseline.
    - The container receives a ready-to-use directory with a git baseline already established, mounted at the mirrored host path inside the container.
@@ -248,11 +265,11 @@ Before creating the sandbox (all checks run before any state is created on disk)
 - **Missing API key:** Error if the required API key for the selected agent is not set in the host environment.
 - **Dangerous directory detection:** Error if any mount target is `$HOME`, `/`, macOS system directories (`/System`, `/Library`, `/Applications`), or Linux system directories (`/usr`, `/etc`, `/var`, `/boot`, `/bin`, `/sbin`, `/lib`). All paths are resolved through symlinks (`filepath.EvalSymlinks`) before checking — a symlink to `$HOME` is caught the same as `$HOME` itself. Simple string match on the resolved absolute path. Override with `:force` suffix (e.g., `$HOME:force`, `$HOME:rw:force`), which downgrades to a warning.
 - **Path overlap detection:** Error if any two sandbox mounts have path prefix overlap (one resolved path starts with the other). All paths are resolved through symlinks before checking. Applies to all mount combinations (`:rw`/`:rw`, `:rw`/`:copy`, `:copy`/`:copy`). Check: does either resolved absolute path start with the other? Override with `:force` suffix on the overlapping path (e.g., `./parent:rw`, `./parent/child:copy:force`), which downgrades to a warning. `:force` is the explicit escape hatch for both dangerous directory and path overlap detection.
-- **Dirty git repo detection:** If any `:rw` or `:copy` directory is a git repo with uncommitted changes, warn with specifics and prompt for confirmation (skippable with `--yes` for scripting):
+- **Dirty git repo detection:** If any `:rw` or `:copy` directory is a git repo with uncommitted changes, warn with specifics and **refuse** unless `--allow-dirty` was passed. yoloAI never prompts here — proceeding past a dirty workdir widens what the agent can see, so it is opt-in via the selector flag alone:
   ```
   WARNING: ./my-app has uncommitted changes (3 files modified, 1 untracked)
   These changes will be visible to the agent and could be modified or lost.
-  Continue? [y/N]
+  Re-run with --allow-dirty to proceed.
   ```
 
 ### Container Startup
@@ -292,7 +309,7 @@ The agent definition specifies the default prompt delivery mode. Two modes exist
 **Interactive mode** (Claude's default; Codex's fallback when no `--prompt`):
 
 The agent runs in interactive mode inside tmux. When `--prompt` is provided:
-1. The prompt is saved to `~/.yoloai/sandboxes/<name>/prompt.txt`.
+1. The prompt is saved to `~/.yoloai/library/sandboxes/<name>/prompt.txt`.
 2. After the agent starts inside tmux, wait for it to be ready (~3s).
 3. For long prompts, write to a temp file and use `tmux load-buffer` + `tmux paste-buffer` to avoid shell escaping issues.
 4. Send via `tmux send-keys` with the agent's submit sequence (`Enter Enter` for Claude — double Enter required; `Enter` for Codex).
@@ -382,13 +399,14 @@ Read-only directories are skipped (no changes possible).
 
 Options:
 - `--stat`: Show summary (files changed, insertions, deletions) instead of full diff.
+- `--name-only`: List changed file paths only, without diff content.
 - `--log`: List individual agent commits beyond baseline (with commit SHA and subject). Combine with `--stat` to include per-commit file change summaries. Also notes uncommitted changes if present.
 - `<ref>`: Show diff for a specific commit (hex SHA prefix, 4+ chars) or range (`sha..sha`). Without `--`, auto-detected by hex pattern; with `--`, everything after is treated as path filters.
 - `-- <path>...`: Filter diff output to specific paths (relative to workdir).
 
 ### `yoloai apply`
 
-`yoloai apply <name> [--squash | --patches <dir>] [--include-uncommitted] [--force] [-- <path>...]`
+`yoloai apply <name> [--no-commit | --patches <dir>] [--include-uncommitted] [--tags] [--dry-run] [-y] [-- <path>...]`
 
 For `:copy` directories only. `:rw` directories need no apply — changes are already live. Read-only directories have no changes. For dirs that had no original git repo, excludes the synthetic `.git/` directory created by yoloAI.
 
@@ -411,7 +429,7 @@ Without `-- <path>...`, applies all changes. With `-- <path>...`, `git format-pa
 
 **Pre-flight checks:**
 
-- If the host repo has uncommitted changes, warns and aborts (suggest `git stash` or commit first). Overridable with `--force`.
+- If the host repo has uncommitted changes, they are auto-stashed before the commits are replayed (`git am --autostash`) and restored afterward — no flag or manual stash needed. (The former `--force` flag, which overrode an abort on dirty trees, has been removed.)
 - If there are no changes at all (no commits beyond baseline, no uncommitted changes), informs the user and exits 0.
 - If the agent is still running, prints "Note: agent is still running; apply may be incomplete" before proceeding.
 
@@ -423,26 +441,28 @@ Without `-- <path>...`, applies all changes. With `-- <path>...`, `git format-pa
 
 **Options:**
 
-- `--squash`: Flatten committed changes into a single unstaged patch (`git diff <baseline> HEAD`). With `--include-uncommitted`, flattens commits + uncommitted edits together (`git diff <baseline>` after `git add -A`). Shows a summary via `git diff --stat` and verifies cleanly with `git apply --check` before prompting for confirmation.
-- `--include-uncommitted`: Also apply the agent's uncommitted edits. Default is commits-only; with this flag, uncommitted changes are applied as unstaged modifications on top of the commits.
+- `--no-commit`: Flatten committed changes into a single unstaged patch (`git diff <baseline> HEAD`) instead of replaying individual commits. With `--include-uncommitted`, flattens commits + uncommitted edits together (`git diff <baseline>` after `git add -A`). Shows a summary via `git diff --stat` and verifies cleanly with `git apply --check` before prompting for confirmation. (Replaces the former `--squash`; the `--json` `method` value also changed `"squash"` → `"no-commit"`.)
+- `--include-uncommitted`: Also apply the agent's uncommitted edits. Default is commits-only; with this flag, uncommitted changes are applied as unstaged modifications on top of the commits. Not mutually exclusive with `--no-commit` — `--no-commit` controls patch shape, `--include-uncommitted` controls scope.
 - `--patches <dir>`: Export `.patch` files to the specified directory instead of applying. With `--include-uncommitted`, also writes `uncommitted.diff`. Prints instructions for manual application (`git am --3way <dir>/*.patch`). Useful for selective commit application — the user can delete unwanted `.patch` files before running `git am`, or use standard git tools (`git rebase -i`, `git cherry-pick`) after importing.
-- `--force`: Proceed even if the host repo has uncommitted changes.
+- `--tags`: Also transfer git tags the agent created.
+- `--dry-run`: Show what would be applied without applying it.
+- `-y` / `--yes`: Skip the confirmation prompt.
 
 ### `yoloai destroy`
 
 `yoloai destroy <name>...`
 
-Stops and removes the container via the sandbox's backend. Removes `~/.yoloai/sandboxes/<name>/` entirely. No special overlay cleanup needed — the kernel tears down the mount namespace when the container stops.
+Stops and removes the container via the sandbox's backend. Removes `~/.yoloai/library/sandboxes/<name>/` entirely. No special overlay cleanup needed — the kernel tears down the mount namespace when the container stops.
 
-Accepts multiple sandbox names (e.g., `yoloai destroy sandbox1 sandbox2 sandbox3`) with a single confirmation prompt showing all sandboxes to be destroyed.
+Accepts multiple sandbox names (e.g., `yoloai destroy sandbox1 sandbox2 sandbox3`); active-work refusal (below) is checked across all named sandboxes at once.
 
 **Wildcard support:** Sandbox names can include `*` and `?` wildcards for pattern matching. For example, `yoloai destroy test*` will destroy all sandboxes whose names start with "test". Wildcards are expanded against existing sandboxes; an error is returned if no matches are found.
 
-**Smart confirmation:** Confirmation is only required when the agent is still running or unapplied changes exist (detected via `git status --porcelain` on the host-side work directory, consistent with `list` CHANGES detection). If the sandbox is stopped/exited with no unapplied changes, destruction proceeds without prompting. `--yes` skips all confirmation regardless.
+**Active-work refusal:** If any target has a running agent or unapplied changes (detected via `git status --porcelain` on the host-side work directory, consistent with `list` CHANGES detection), destroy **refuses with a typed error in every mode** unless `--abandon-unapplied` was passed. yoloAI never prompts — discarding unreviewed work widens the destructive scope, so it is opt-in via the selector flag alone. A stopped/exited sandbox with no unapplied changes is destroyed directly. There is no `--yes`: destroy has no prompt to suppress.
 
 Options:
-- `--all`: Destroy all sandboxes (confirmation required unless `--yes` is also provided).
-- `--yes`: Skip confirmation prompts.
+- `--all`: Destroy all sandboxes.
+- `--abandon-unapplied`: Destroy even when a target has a running agent or unapplied changes (the unreviewed work is discarded). Named for its consequence.
 
 ### `yoloai sandbox <name> log` / `yoloai log`
 
@@ -453,6 +473,18 @@ Options:
 `yoloai exec <name> <command>` runs a command inside the sandbox container without attaching to tmux. Useful for debugging (`yoloai exec my-sandbox bash`) or quick operations (`yoloai exec my-sandbox npm install foo`).
 
 Implemented via the backend's exec mechanism (e.g., `docker exec` or `podman exec`), with `-i` added when stdin is a pipe/TTY and `-t` added when stdin is a TTY. This allows both interactive use (`yoloai exec my-sandbox bash`) and non-interactive use (`yoloai exec my-sandbox ls`, `echo "test" | yoloai exec my-sandbox cat`).
+
+### `yoloai sandbox <name> prompt`
+
+Prints the prompt text the sandbox was created with (read from the saved prompt). Text output writes the prompt verbatim; if the sandbox was created without a prompt, prints `No prompt configured`. JSON output is `{"name": "...", "prompt": "..."}` (with `"prompt": null` when none is configured). No runtime needed.
+
+### `yoloai sandbox <name> unlock`
+
+Force-clears a stale per-sandbox lock file left behind by an interrupted command. Refuses to clear the lock if the recorded holder process is still alive (surfaced as a usage error). Distinguishes "cleared a stale lock" from "no lock file present" so a defensive invocation (e.g. in a recovery script) reports honestly. JSON output is `{"name": "...", "action": "cleared"|"noop"}`. Rarely needed in normal use.
+
+### `yoloai sandbox <name> terminal-snapshot [--ansi]`
+
+Captures the agent's rendered tmux pane (the last visible screen plus ~200 lines of scrollback) for diagnostics and bug reports. Non-interactive (no PTY), so it pipes cleanly to a file or another tool. Plain text by default; `--ansi` preserves color/formatting escape sequences. Exits non-zero if the sandbox isn't running, so callers can distinguish "no capture because not running" from a genuine capture failure. `--json` is not supported.
 
 ### `yoloai sandbox <name> allow/allowed/deny`
 
@@ -571,15 +603,15 @@ Options:
 
 `yoloai system build <profile>` rebuilds a specific profile's image (which derives from `yoloai-base`).
 
-`yoloai system build --all` rebuilds everything: base image first, then all profile images (those with Dockerfiles).
+`yoloai system build --all` builds the image across **all available backends** (mutually exclusive with `--backend`). `--backend <name>` targets a specific backend; `--rebuild` rebuilds even when the image is up to date.
 
 Useful after modifying a profile's Dockerfile or when the base image needs updating (e.g., new agent CLI versions).
 
 Profile Dockerfiles that install private dependencies (e.g., `RUN go mod download` from a private repo, `RUN npm install` from a private registry) need build-time credentials. yoloAI passes host credentials to Docker BuildKit via `--secret` so they're available during the build but never stored in image layers. Example: `RUN --mount=type=secret,id=npmrc,target=/root/.npmrc npm install` in the Dockerfile, with yoloAI automatically providing `~/.npmrc` as the secret source. Additional secrets can be passed via `yoloai system build --secret id=<name>,src=<path> <profile>`.
 
-### `yoloai system doctor`
+### `yoloai doctor`
 
-`yoloai system doctor` probes all known backends and their supported isolation modes, then prints a three-tier summary:
+`yoloai doctor` (a top-level verb — formerly `yoloai system doctor`) probes all known backends and their supported isolation modes, then prints a three-tier summary. It also reports reclaimable backend cruft and sandboxes holding unreviewed work, delegating remediation to `yoloai system prune` and `yoloai destroy`.
 
 - **Ready to use** — all prerequisites are satisfied.
 - **Needs setup** — prerequisites are missing but fixable (e.g. install a package, add a user to a group). Exit code 1 when any entry is in this tier.
@@ -593,7 +625,7 @@ Flags:
 Example:
 
 ```
-$ yoloai system doctor
+$ yoloai doctor
 Ready to use:
   docker          container (default)
   docker          container-enhanced
@@ -605,7 +637,7 @@ Needs setup:
 
 ### `yoloai system prune`
 
-`yoloai system prune` scans for orphaned backend resources and stale temporary files, reports what it finds, and (after confirmation) removes them.
+`yoloai system prune` scans across all backends for orphaned resources, reclaimable backend cache, and stale temporary files, reports what it finds, and (after confirmation) removes them. Plain prune reclaims the no-rebuild cache (build cache, volumes); `--images` additionally removes the backend base/profile images (forcing a base rebuild). See `yoloai system disk` for the two reclaim tiers.
 
 **What gets pruned:**
 
@@ -616,12 +648,28 @@ Needs setup:
 
 **Broken sandbox warnings:** Sandbox directories with missing or corrupt `meta.json` are reported as warnings (with full path and suggested `yoloai destroy` command) but are NOT deleted — they may contain recoverable work.
 
-**What is NOT pruned:** Container images and build cache (affects all Docker/Podman usage, not just yoloai). Orphaned seatbelt processes (complex detection, low frequency).
+**What is NOT pruned by default:** Container base/profile images (reclaim them with `--images`, which forces a base rebuild). Orphaned seatbelt processes (complex detection, low frequency).
 
 Options:
 - `--dry-run`: Report only, don't ask or remove.
-- `-y`/`--yes`: Skip confirmation prompt.
-- `--backend`: Override runtime backend (default from config).
+- `-y`/`--yes`: Skip the reclaim confirmation prompt (it confirms the prune you invoked; it does **not** widen scope). Implied by `--json`.
+- `--images`: Also remove backend base/profile images (DESTRUCTIVE — forces a base rebuild).
+- `--trash`: Also empty the trash dir — deletes quarantined broken sandboxes (including any quarantined by this run). A selector flag parallel to `--images`; without it the trash is only reported, never emptied. `--yes` does not empty the trash.
+
+### `yoloai system disk`
+
+`yoloai system disk` reports on-disk usage for yoloai and each registered backend, so you can spot when it's time to prune. Output is a table with `SOURCE`, `CACHE`, `IMAGES`, and `DETAIL` columns:
+
+- The `sandboxes` row reports the size of the host-side sandbox state directory.
+- Each backend row reports its reclaimable `CACHE` (freed by `yoloai system prune` with no rebuild) and `IMAGES` (freed only by `yoloai system prune --images`, which forces a base rebuild). Backends that can't size images cheaply show `?`.
+
+Sizes include all content the backend tracks — not just yoloai's — because the backend doesn't tag content by who created it. `--json` emits `{"entries": [...]}`.
+
+### `yoloai system migrate`
+
+`yoloai system migrate` brings the data directory up to the on-disk layout the current build expects. It is the **only** command that mutates an existing data directory.
+
+The normal startup path never migrates: when the data directory is out of date, commands fail fast and point here. Migration relocates engine directories into the `library/` namespace and CLI state into `cli/` (in-place renames within one filesystem — no copying), then stamps each namespace's schema version. It is idempotent (a no-op on an already-current directory) and safe to re-run after a partial failure. `--json` emits `{"action": "migrated"|"already-current"}`.
 
 ### `yoloai stop`
 
@@ -699,6 +747,7 @@ Options:
 - `--keep-files`: Preserve the files directory (not cleared).
 - `--no-prompt`: Skip re-sending the prompt after reset.
 - `-a`/`--attach`: Auto-attach after restart. Implies `--restart`.
+- `--env <KEY=VAL>`: Per-sandbox env var applied on `--restart` (repeatable, not persisted).
 - `--debug`: Enable debug logging in sandbox entrypoint.
 
 Implied behaviors:
@@ -829,13 +878,13 @@ args:
     description: "What to improve"
 
 action: |
-  info="$(yoloai sandbox info --json "${sandbox}")"
+  info="$(yoloai sandbox "${sandbox}" info --json)"
   workdir="$(echo "${info}" | jq -r .workdir.host_path)"
   model="$(echo "${info}" | jq -r .model)"
-  prev_prompt="$(cat ~/.yoloai/sandboxes/${sandbox}/prompt.txt 2>/dev/null || echo '(none)')"
+  prev_prompt="$(cat ~/.yoloai/library/sandboxes/${sandbox}/prompt.txt 2>/dev/null || echo '(none)')"
   prev_diff="$(yoloai diff "${sandbox}" 2>/dev/null || echo '(no changes)')"
 
-  yoloai destroy --yes "${sandbox}"
+  yoloai destroy --abandon-unapplied "${sandbox}"
   yoloai new "${sandbox}" "${workdir}":copy -a \
     --model "${model}" \
     --prompt "Previous attempt at this task produced the diff below.
@@ -902,7 +951,7 @@ Extensions compose yoloai with the rest of the unix ecosystem — `gh`, `jq`, `g
 
 ### `yoloai files`
 
-Bidirectional file exchange between host and sandbox. Files live in `~/.yoloai/sandboxes/<name>/files/` on the host, mounted read-write at `/yoloai/files/` inside the sandbox. Both the user and the agent can read and write here. The directory is created when the sandbox is created and destroyed with `yoloai destroy`.
+Bidirectional file exchange between host and sandbox. Files live in `~/.yoloai/library/sandboxes/<name>/files/` on the host, mounted read-write at `/yoloai/files/` inside the sandbox. Both the user and the agent can read and write here. The directory is created when the sandbox is created and destroyed with `yoloai destroy`.
 
 **Purpose:** Pass reference material to the agent (logs, specs, screenshots) without polluting the work directory's git state, and retrieve artifacts the agent produces (reports, generated files) without them appearing in `yoloai diff` / `yoloai apply`.
 
@@ -919,7 +968,7 @@ Bidirectional file exchange between host and sandbox. Files live in `~/.yoloai/s
 Copy one or more files or directories into the sandbox's exchange directory. Arguments can be literal paths or glob patterns — quoted globs (e.g., `"*.txt"`) are expanded by the tool if the shell didn't expand them. Directories are copied recursively. If a target file already exists, the command fails with an error listing the conflicting paths.
 
 Options:
-- `--force`: Overwrite existing files instead of failing.
+- `--overwrite`: Overwrite existing files instead of failing.
 
 #### `yoloai files <sandbox> get <file/glob>... [-o dir]`
 
@@ -927,7 +976,7 @@ Copy files or directories from the sandbox's exchange directory to the host. Arg
 
 Options:
 - `-o`, `--output`: Destination directory (or file path for a single file). Defaults to `.` (current directory). When getting multiple items, the destination must be an existing directory.
-- `--force`: Overwrite existing destination files instead of failing.
+- `--overwrite`: Overwrite existing destination files instead of failing.
 
 #### `yoloai files <sandbox> ls [glob]...`
 
@@ -941,11 +990,11 @@ Prints the list of removed files. If no files match any pattern, exits with an e
 
 #### `yoloai files <sandbox> path`
 
-Print the absolute host-side path to the exchange directory (`~/.yoloai/sandboxes/<name>/files/`). Useful for direct manipulation with host tools (`cp`, `rsync`, `open`, etc.).
+Print the absolute host-side path to the exchange directory (`~/.yoloai/library/sandboxes/<name>/files/`). Useful for direct manipulation with host tools (`cp`, `rsync`, `open`, etc.).
 
 ### Cache Directory
 
-The cache directory (`~/.yoloai/sandboxes/<name>/cache/`) is mounted read-write at `/yoloai/cache/` inside the sandbox. It provides the agent with persistent scratch space for data that speeds up its work: cached HTTP responses, shallow-cloned Git repos, downloaded archives, and other reusable data. The agent context instructs it to check the cache before fetching URLs and to clone repos locally rather than fetching files over HTTPS.
+The cache directory (`~/.yoloai/library/sandboxes/<name>/cache/`) is mounted read-write at `/yoloai/cache/` inside the sandbox. It provides the agent with persistent scratch space for data that speeds up its work: cached HTTP responses, shallow-cloned Git repos, downloaded archives, and other reusable data. The agent context instructs it to check the cache before fetching URLs and to clone repos locally rather than fetching files over HTTPS.
 
 | Backend  | Mechanism | Path inside sandbox |
 |----------|-----------|---------------------|
@@ -953,7 +1002,7 @@ The cache directory (`~/.yoloai/sandboxes/<name>/cache/`) is mounted read-write 
 | Tart     | VirtioFS share | Backend-specific |
 | Seatbelt | SBPL profile grants rw on sandbox dir | Source path |
 
-The cache persists across `stop`/`start` cycles and is destroyed with `yoloai destroy`. `yoloai reset --clean` also clears it.
+The cache persists across `stop`/`start` cycles and is destroyed with `yoloai destroy`. `yoloai reset` also clears it by default (unless `--keep-cache` is given).
 
 ### Image Cleanup
 

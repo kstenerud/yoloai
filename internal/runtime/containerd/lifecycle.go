@@ -272,7 +272,7 @@ func ensureImageUnpacked(ctx context.Context, img client.Image, snapshotter stri
 		if yoerrors.IsDiskSpaceError(err) {
 			return yoerrors.AsDiskSpaceError("unpack base image", err)
 		}
-		return fmt.Errorf("unpack image: %w\n  Hint: image content may have been removed by containerd GC; run 'yoloai system build --force' to rebuild", err)
+		return fmt.Errorf("unpack image: %w\n  Hint: image content may have been removed by containerd GC; run 'yoloai system build --rebuild' to rebuild", err)
 	}
 	return nil
 }

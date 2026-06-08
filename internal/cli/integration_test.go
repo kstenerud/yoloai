@@ -76,7 +76,7 @@ func cliSetup(t *testing.T) (projectDir string) {
 
 	// Clean up the setup sandbox
 	root = NewRootCmd("test", "test", "test")
-	root.SetArgs([]string{"destroy", "--yes", "cli-setup"})
+	root.SetArgs([]string{"destroy", "--abandon-unapplied", "cli-setup"})
 	root.SetOut(&bytes.Buffer{})
 	root.SetErr(&bytes.Buffer{})
 	_ = root.ExecuteContext(context.Background())
@@ -101,7 +101,7 @@ func runCLI(t *testing.T, args ...string) (stdout, stderr string, err error) {
 // destroySandbox is a cleanup helper that destroys a sandbox, ignoring errors.
 func destroySandbox(t *testing.T, name string) {
 	t.Helper()
-	runCLI(t, "destroy", "--yes", name) //nolint:errcheck // best-effort cleanup
+	runCLI(t, "destroy", "--abandon-unapplied", name) //nolint:errcheck // best-effort cleanup
 }
 
 func TestCLI_NewAndDestroy(t *testing.T) {
@@ -114,7 +114,7 @@ func TestCLI_NewAndDestroy(t *testing.T) {
 	assert.DirExists(t, cliutil.Layout().SandboxDir("cli-new"))
 	assert.Contains(t, stderr, "cli-new") // Engine output goes to stderr
 
-	stdout, _, err := runCLI(t, "destroy", "--yes", "cli-new")
+	stdout, _, err := runCLI(t, "destroy", "--abandon-unapplied", "cli-new")
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "Destroyed")
 	assert.NoDirExists(t, cliutil.Layout().SandboxDir("cli-new"))
@@ -224,7 +224,7 @@ func TestCLI_Log(t *testing.T) {
 func TestCLI_DestroyNonExistent(t *testing.T) {
 	_ = cliSetup(t)
 
-	_, _, err := runCLI(t, "destroy", "--yes", "nonexistent-sandbox-xyz")
+	_, _, err := runCLI(t, "destroy", "--abandon-unapplied", "nonexistent-sandbox-xyz")
 	assert.Error(t, err)
 }
 
@@ -246,7 +246,7 @@ func TestCLI_NewReplace(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { destroySandbox(t, "cli-replace") })
 
-	_, _, err = runCLI(t, "new", "--agent", "test", "--no-start", "--force", "cli-replace", projectDir)
+	_, _, err = runCLI(t, "new", "--agent", "test", "--no-start", "--abandon-unapplied", "cli-replace", projectDir)
 	require.NoError(t, err)
 
 	assert.DirExists(t, cliutil.Layout().SandboxDir("cli-replace"))

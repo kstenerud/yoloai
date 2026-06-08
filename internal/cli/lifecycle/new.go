@@ -1,6 +1,6 @@
 // ABOUTME: 'new' command — create and start a sandbox in one step. Wires CLI
-// ABOUTME: flags to yoloai.SandboxCreateOptions, validates isolation/OS combos, prompts
-// ABOUTME: on a dirty workdir, and handles the optional auto-attach after creation.
+// ABOUTME: flags to yoloai.SandboxCreateOptions, validates isolation/OS combos, refuses
+// ABOUTME: a dirty workdir unless --allow-dirty, and handles optional auto-attach after creation.
 package lifecycle
 
 import (
@@ -44,10 +44,10 @@ func NewNewCmd(version string) *cobra.Command {
 	cmd.Flags().StringSlice("port", nil, "Port mapping (host:container)")
 	cmd.Flags().StringSliceP("dir", "d", nil, "Auxiliary directory (repeatable, default read-only)")
 	cmd.Flags().Bool("replace", false, "Replace existing sandbox with same name")
-	cmd.Flags().Bool("force", false, "Replace even if unapplied changes exist")
+	cmd.Flags().Bool("abandon-unapplied", false, "Replace even when the existing sandbox has unapplied changes or a running agent (implies --replace)")
 	cmd.Flags().Bool("no-start", false, "Create but don't start the container")
 	cmd.Flags().BoolP("attach", "a", false, "Auto-attach after creation")
-	cmd.Flags().BoolP("yes", "y", false, "Skip confirmations")
+	cmd.Flags().Bool("allow-dirty", false, "Proceed even if the workdir has uncommitted changes (they will be visible to the agent)")
 	cmd.Flags().String("cpus", "", "CPU limit (e.g., 4, 2.5)")
 	cmd.Flags().String("memory", "", "Memory limit (e.g., 8g, 512m)")
 	cmd.Flags().String("isolation", "", "Isolation mode: container (default), container-enhanced (gVisor), container-privileged (--privileged, use for Docker-in-Docker), vm (Kata+QEMU), vm-enhanced (Kata+Firecracker)")
@@ -163,8 +163,8 @@ func resolveNewCmdOptions(cmd *cobra.Command, name, rawWorkdirArg string, passth
 	}
 
 	replace, _ := cmd.Flags().GetBool("replace")
-	force, _ := cmd.Flags().GetBool("force")
-	if force {
+	abandonUnapplied, _ := cmd.Flags().GetBool("abandon-unapplied")
+	if abandonUnapplied {
 		replace = true
 	}
 	noStart, _ := cmd.Flags().GetBool("no-start")
@@ -225,7 +225,7 @@ func resolveNewCmdOptions(cmd *cobra.Command, name, rawWorkdirArg string, passth
 		NetworkAllow:         networkAllow,
 		Ports:                ports,
 		Replace:              replace,
-		AbandonUnappliedWork: force,
+		AbandonUnappliedWork: abandonUnapplied,
 		Passthrough:          passthrough,
 		Debug:                debug,
 		CPUs:                 cpus,
@@ -235,9 +235,10 @@ func resolveNewCmdOptions(cmd *cobra.Command, name, rawWorkdirArg string, passth
 		Runtimes:             runtimes,
 		VscodeTunnel:         vscodeTunnel,
 		Archetype:            archetypeFlag,
-		// --yes pre-acks the dirty-workdir refusal; without it, a dirty workdir
-		// triggers the interactive prompt in executeNewCreate.
-		AllowDirtyWorkdir: cliutil.EffectiveYes(cmd),
+		// A dirty workdir never auto-proceeds here. executeNewCreate surfaces the
+		// warning and requires --allow-dirty to widen the scope — we never prompt
+		// to widen it, so --yes (gone from this command) can't paper over it.
+		AllowDirtyWorkdir: false,
 	}, attach, noStart, nil
 }
 
@@ -310,16 +311,20 @@ func resolveNewDirSpecs(rawWorkdirArg string, rawDirs []string) (workdirSpec yol
 
 // executeNewCreate provisions the sandbox via Client.CreateSandbox, starts it
 // (unless --no-start), and — when attach — hands off to Sandbox.Attach for the
-// interactive session. If Create refuses a dirty workdir (*DirtyWorkdirError)
-// and we're interactive, it warns, prompts, and retries with the workdir acked
-// — the library never prompts itself.
+// interactive session. If Create refuses a dirty workdir (*DirtyWorkdirError) it
+// always prints the warning, then proceeds only when --allow-dirty was given;
+// otherwise it returns the refusal. It never prompts: widening the destructive
+// scope to include a dirty workdir is opt-in via --allow-dirty alone.
 func executeNewCreate(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, opts yoloai.SandboxCreateOptions, attach, noStart bool) error {
 	sb, err := c.CreateSandbox(ctx, opts)
 
 	var dirty *yoloai.DirtyWorkdirError
-	if errors.As(err, &dirty) && !cliutil.JSONEnabled(cmd) {
-		if !confirmDirtyWorkdir(cmd, dirty) {
-			return nil // user declined — cancel cleanly
+	if errors.As(err, &dirty) {
+		printDirtyWarning(cmd, dirty)
+		allowDirty, _ := cmd.Flags().GetBool("allow-dirty")
+		if !allowDirty {
+			fmt.Fprintln(cmd.ErrOrStderr(), "Re-run with --allow-dirty to proceed.") //nolint:errcheck // best-effort output
+			return dirty
 		}
 		opts.AllowDirtyWorkdir = true
 		sb, err = c.CreateSandbox(ctx, opts)
@@ -423,17 +428,16 @@ func printCreateSummary(out io.Writer, meta *yoloai.Environment, hasPrompt, vsco
 	}
 }
 
-// confirmDirtyWorkdir renders the uncommitted-changes warning and asks the user
-// whether to proceed. It owns the prompt the manager used to run inline (D24):
-// the library now refuses with a typed error and the CLI decides interactively.
-func confirmDirtyWorkdir(cmd *cobra.Command, dirty *yoloai.DirtyWorkdirError) bool {
+// printDirtyWarning renders the uncommitted-changes warning. It never prompts:
+// proceeding past a dirty workdir widens the destructive scope (the agent sees
+// changes that could be modified or lost), and scope is widened only by the
+// explicit --allow-dirty flag, never by an interactive answer.
+func printDirtyWarning(cmd *cobra.Command, dirty *yoloai.DirtyWorkdirError) {
 	out := cmd.ErrOrStderr()
 	for _, d := range dirty.Dirs {
 		fmt.Fprintf(out, "WARNING: %s has uncommitted changes (%s)\n", d.Path, d.Status) //nolint:errcheck // best-effort output
 	}
 	fmt.Fprintln(out, "These changes will be visible to the agent and could be modified or lost.") //nolint:errcheck // best-effort output
-	confirmed, err := cliutil.Confirm(cmd.Context(), "Continue? [y/N] ", cmd.InOrStdin(), out)
-	return err == nil && confirmed
 }
 
 // resolveNewIsolationOS resolves the --isolation and --os flags with config fallback

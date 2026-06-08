@@ -75,7 +75,7 @@ At least one flag must be provided; bare `yoloai reconfigure <name>` is an error
 ### Delta semantics
 
 - `-d` is **additive**: it adds a directory not already mounted. Re-specifying an existing host path with a different mode is an error — use `--remove-dir` first.
-- `--remove-dir` removes by host path. If the directory has a `:copy` mode and has accumulated changes (unapplied diff), warn and require `--yes` or `--force` to proceed. Changes are not automatically applied.
+- `--remove-dir` removes by host path. If the directory has a `:copy` mode and has accumulated changes (unapplied diff), warn and require `--yes` or `--abandon-unapplied` to proceed. Changes are not automatically applied.
 - `--env KEY=VAL` adds or replaces a key. `--unset-env KEY` removes it. Both are additive to the existing env.
 - `--cpus` / `--memory` replace the current value outright.
 - `--agent` replaces the current agent. Agent-state for the previous agent remains on disk but the new agent starts fresh.
@@ -85,7 +85,7 @@ At least one flag must be provided; bare `yoloai reconfigure <name>` is an error
 | Situation | Behavior |
 |---|---|
 | Sandbox is running | Print "Stopping sandbox…" and stop it before proceeding. |
-| `--remove-dir` targets a `:copy` dir with unapplied changes | Warn: "Removing this directory will discard unapplied changes. Use `yoloai apply` first, or pass `--force` to discard." Requires `--yes` or `--force`. |
+| `--remove-dir` targets a `:copy` dir with unapplied changes | Warn: "Removing this directory will discard unapplied changes. Use `yoloai apply` first, or pass `--abandon-unapplied` to discard." Requires `--yes` or `--abandon-unapplied`. |
 | `--remove-dir` targets the workdir | Error: workdir cannot be removed. |
 | `--agent` changes the agent | Warn: "Agent state from <old> will not be migrated. The new agent will start fresh." Requires `--yes`. |
 

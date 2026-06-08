@@ -4,6 +4,34 @@ Tracks breaking changes made during beta. Each entry should be included in relea
 
 ## Unreleased
 
+### Scope-widening confirmations replaced by selector flags (`--yes` no longer widens scope)
+
+The CLI never prompts to widen the destructive scope, and `--yes` no longer
+authorizes any collateral danger. Opting into a consequence beyond the verb you
+invoked is now an explicit, consequence-named selector flag; absent the flag the
+command **hard-refuses with a typed error in every mode** (interactive, `--json`,
+or piped) rather than prompting.
+
+**What breaks:**
+
+| Command | Before | After |
+|---|---|---|
+| `new` | dirty workdir → interactive confirm; `--yes` auto-proceeds | dirty workdir → **refuses** unless `--allow-dirty`; `--yes` removed |
+| `destroy` | active/unapplied work → confirm; `--yes` auto-proceeds | **refuses** unless `--abandon-unapplied`; `--yes` removed |
+| `system prune` | trash emptied when `--yes` set (and never under `--json`) | trash emptied only with `--trash` (a selector, parallel to `--images`); `--yes` now only suppresses the reclaim prompt |
+
+`--yes` survives only on commands whose prompt confirms *the verb you invoked*
+(`apply`, `system prune`'s reclaim, `profile delete`, `system tart remove`).
+
+**Migration:**
+
+- `yoloai new … ` on a dirty repo → add `--allow-dirty`.
+- `yoloai destroy … --yes` → `yoloai destroy … --abandon-unapplied` (only if the
+  target has unapplied changes or a running agent; otherwise drop `--yes`).
+- `yoloai system prune --yes` that relied on emptying the trash → add `--trash`.
+- Scripts can detect the refusals via `errors.As` on `*yoloai.DirtyWorkdirError`
+  (new) and the active-work error (destroy).
+
 ### CLI `--json` output is always a top-level object
 
 The `--json` output now follows a fixed structural convention (see
@@ -39,7 +67,7 @@ Alongside the envelope change, the same convention pass also:
 
 **Migration (consumers):** update `jq` filters from `.[]` to `.<key>[]` for these
 commands — e.g. `system backends --json | jq '.backends[]'`,
-`destroy --json --yes | jq '.destroyed[]'`. Commands that were already objects
+`destroy --json | jq '.destroyed[]'`. Commands that were already objects
 (`sandbox list`, `system disk`, `diff --log`, `system check`, all single-record
 and action commands) keep their shape. Rationale: a bare top-level array can carry
 neither a top-level error nor future metadata; a uniform object shape lets every
@@ -262,6 +290,33 @@ see the tip resurface.
 **`tmux_conf` default.** Now defaults to `default+host` (was empty). The library
 "just works" via opinionated declarative defaults rather than depending on a
 completed setup ceremony to populate config.
+
+### Launch-prefix legacy path removed; library data dir migrates to schema v2
+
+The agent launch command is wrapped with a backend-specific prefix (Tart prepends a
+`PATH=…`; Seatbelt sources `~/.swift-wrapper.sh`; container backends use no wrap). That
+prefix is now stored once at creation in each sandbox's `runtime-config.json`
+(`agent_launch_prefix`) as the single source of truth. The old per-backend Python fallback
+(`prepare_launch_command` in `sandbox-setup.py`) that reconstructed the prefix at runtime for
+sandboxes lacking the stored field is **removed**, along with the `use_launch_prefix` guard.
+
+**Previous behavior:** a sandbox whose `runtime-config.json` had no `agent_launch_prefix`
+relaunched its agent via the Python `prepare_launch_command` recomputation path.
+
+**New behavior:** the stored `agent_launch_prefix` is always used. The launch prefix is a
+per-backend constant fully derivable host-side, so the library bumps `LibrarySchemaVersion`
+to `2` and the v1→v2 step of `yoloai system migrate` (re)writes `agent_launch_prefix` for
+every sandbox from its stored backend type. This is idempotent — sandboxes that already carry
+the field get the identical deterministic value, so upgraders who created sandboxes on an
+earlier build of this line are unaffected. Container-backend sandboxes (docker/podman/
+containerd) resolve to an empty prefix (a no-op wrap); in practice only Tart and Seatbelt
+sandboxes change.
+
+**Migration:** run `yoloai system migrate` once after upgrading (the startup gate already
+requires this for any out-of-date data dir — see the data-directory bifurcation entry). The
+migration is idempotent. A pre-migration Tart/Seatbelt sandbox driven by the new binary
+*without* migrating would fail to relaunch its agent (the fallback is gone); migrating fixes
+it with no re-creation.
 
 ### `yoloai system doctor` moves to `yoloai doctor`
 
@@ -653,15 +708,27 @@ All entrypoint scripts now use `$YOLOAI_DIR` instead of hardcoded paths. Docker 
 
 **Migration:** Remove any code that reads `container_id` from yoloAI JSON output. The field was always empty, so no information is lost.
 
-### `yoloai new --replace` renamed to `--force`
+### `--force` flags renamed for their consequence (`new`, `clone`, `files`, `system build`)
 
-**Previous behavior:** `yoloai new --replace` replaced an existing sandbox with the same name.
+**Previous behavior:** Five sites overloaded `--force`, each with a different effect:
 
-**New behavior:** `yoloai new --force` replaces an existing sandbox. `--replace` still works but prints a deprecation warning to stderr and will be removed in a future release.
+- `yoloai new --force` — replace a sandbox even when it holds unapplied changes or a running agent (the unsafe sibling of `--replace`).
+- `yoloai clone --force` — overwrite an existing destination sandbox.
+- `yoloai files put/get --force` — overwrite existing files.
+- `yoloai system build --force` (and `--all`) — rebuild an image that is already up to date.
 
-**Rationale:** `--force` is the standard convention for "proceed despite conflict" across CLI tools (docker, git, etc.). `--replace` was non-standard and also conflicted with the `--force` flag used in `apply` for a similar "override safety check" purpose.
+**New behavior:** there is no `--force` flag anywhere in the CLI. Each is replaced by a flag named for its consequence:
 
-**Migration:** Replace `--replace` with `--force` in scripts. `--replace` continues to work during the deprecation period.
+- `yoloai new --abandon-unapplied` — implies `--replace`. `--replace` is unchanged: still the safe option that destroys a *clean* same-named sandbox first and aborts when one holds unapplied work.
+- `yoloai clone --overwrite`
+- `yoloai files put/get --overwrite`
+- `yoloai system build --rebuild`
+
+The `<dir>:force` directory-spec suffix (bypass the dangerous-mount-path guard) is **unchanged** — it is a path-mode suffix, not a `--force` flag.
+
+**Rationale:** one `--force` spelling hid four different consequences — discarding unreviewed work, clobbering a sandbox, clobbering files, redoing a build — so the flag's effect was unreadable at the call site. This mirrors the library API, which already replaced its generic `Force` option with consequence-named options (`AbandonUnappliedWork`, `Overwrite`, `Rebuild`). Naming a destructive flag after its effect makes the danger legible where it is invoked.
+
+**Migration:** in scripts, replace `--force` per command — `new` → `--abandon-unapplied`, `clone` → `--overwrite`, `files put`/`files get` → `--overwrite`, `system build` → `--rebuild`. The old `--force` is removed with no deprecation alias.
 
 ### `yoloai new` no longer auto-attaches by default
 

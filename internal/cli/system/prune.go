@@ -39,27 +39,28 @@ dedicated to yoloai; on shared machines, prefer the backend's own prune
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			dryRun, _ := cmd.Flags().GetBool("dry-run")
-			explicitYes, _ := cmd.Flags().GetBool("yes")
 			images, _ := cmd.Flags().GetBool("images")
-			return runSystemPrune(cmd, dryRun, explicitYes, images)
+			trash, _ := cmd.Flags().GetBool("trash")
+			return runSystemPrune(cmd, dryRun, images, trash)
 		},
 	}
 
 	cmd.Flags().Bool("dry-run", false, "Report only, don't remove anything")
-	cmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompts (including trash deletion)")
+	cmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompts")
 	cmd.Flags().Bool("images", false, "Also remove backend base/profile images (DESTRUCTIVE: forces base rebuild)")
+	cmd.Flags().Bool("trash", false, "Also empty the trash dir (deletes quarantined broken sandboxes, including any quarantined by this run)")
 
 	return cmd
 }
 
-func runSystemPrune(cmd *cobra.Command, dryRun, explicitYes, images bool) error {
+func runSystemPrune(cmd *cobra.Command, dryRun, images, trash bool) error {
 	ctx := cmd.Context()
 	output := cmd.OutOrStdout()
 	isJSON := cliutil.JSONEnabled(cmd)
-	// The main prune confirmation is skipped under --json too (EffectiveYes),
-	// so non-interactive scripted runs don't hang. Trash deletion is gated on
-	// the *explicit* --yes only — it may destroy data the user wanted, so
-	// plain --json never empties trash on its own.
+	// The prune confirmation (Class A — it confirms the reclaim you invoked) is
+	// skipped under --json too, so scripted runs don't hang. Emptying the trash
+	// widens the destructive scope and is opt-in via --trash alone; --yes only
+	// suppresses the confirmation prompt, it never authorizes the wider scope.
 	skipPruneConfirm := cliutil.EffectiveYes(cmd)
 
 	sys, err := cliutil.System()
@@ -102,10 +103,15 @@ func runSystemPrune(cmd *cobra.Command, dryRun, explicitYes, images bool) error 
 	}
 	printActualRemoval(output, actualResult, images, isJSON)
 
-	// Offer to reclaim the trash dir (it may now include sandboxes just
-	// quarantined plus anything from prior runs).
-	if err := maybeEmptyTrash(cmd, ctx, actualResult.TrashContents, explicitYes, isJSON); err != nil {
-		return err
+	// The trash dir (sandboxes just quarantined plus anything from prior runs)
+	// holds recoverable data, so emptying it is opt-in via --trash. Without it
+	// we only report what's there; with it we empty (prompt suppressed by --yes).
+	if trash {
+		if err := emptyTrash(cmd, ctx, actualResult.TrashContents, skipPruneConfirm, isJSON); err != nil {
+			return err
+		}
+	} else {
+		printTrashStatus(output, actualResult.TrashContents, isJSON)
 	}
 
 	if isJSON {
@@ -250,35 +256,35 @@ func printTrashStatus(output io.Writer, trash yoloai.TrashSummary, isJSON bool) 
 	if isJSON || trash.Count == 0 {
 		return
 	}
-	msg := fmt.Sprintf("Trash holds %d item(s) (%s) — recover with mv, or reclaim by running prune without --dry-run.\n",
+	msg := fmt.Sprintf("Trash holds %d item(s) (%s) — recover with mv, or empty with 'yoloai system prune --trash'.\n",
 		trash.Count, cliutil.HumanBytes(trash.Bytes))
 	fmt.Fprint(output, msg) //nolint:errcheck
 }
 
-// maybeEmptyTrash offers to delete the trash dir. Trash may hold data the
-// user wanted, so deletion is conservative: prompt by default (no/EOF →
-// keep), delete without prompting only on explicit --yes. In JSON mode it
-// never prompts (would corrupt output) — it keeps trash unless --yes.
-func maybeEmptyTrash(cmd *cobra.Command, ctx context.Context, trash yoloai.TrashSummary, explicitYes, isJSON bool) error {
+// emptyTrash deletes the trash dir's contents. It is only reached when --trash
+// was passed — the explicit opt-in to widen the scope to recoverable data. The
+// prompt here merely confirms the already-selected action and is suppressed by
+// skipConfirm (--yes/--json); it never widens scope on its own. In JSON mode
+// skipConfirm is true (EffectiveYes), so it empties without prompting.
+func emptyTrash(cmd *cobra.Command, ctx context.Context, trash yoloai.TrashSummary, skipConfirm, isJSON bool) error {
+	output := cmd.OutOrStdout()
 	if trash.Count == 0 {
+		if !isJSON {
+			fmt.Fprintln(output, "Trash is already empty.") //nolint:errcheck
+		}
 		return nil
 	}
-	output := cmd.OutOrStdout()
 
-	if !explicitYes {
-		if isJSON {
-			return nil // keep trash; JSON consumers re-run with --yes to reclaim
-		}
+	if !skipConfirm {
 		prompt := fmt.Sprintf(
-			"Trash holds %d item(s) (%s) that may contain data you wanted — delete it? [y/N]: ",
+			"Delete %d trash item(s) (%s)? This cannot be undone. [y/N]: ",
 			trash.Count, cliutil.HumanBytes(trash.Bytes))
 		confirmed, err := cliutil.Confirm(ctx, prompt, cmd.InOrStdin(), cmd.ErrOrStderr())
 		if err != nil {
 			return err
 		}
 		if !confirmed {
-			msg := fmt.Sprintf("Trash kept (%d item(s)). Recover with mv, or delete later with 'yoloai system prune --yes'.\n", trash.Count)
-			fmt.Fprint(output, msg) //nolint:errcheck
+			fmt.Fprintf(output, "Trash kept (%d item(s)). Recover with mv, or empty later with 'yoloai system prune --trash'.\n", trash.Count) //nolint:errcheck
 			return nil
 		}
 	}

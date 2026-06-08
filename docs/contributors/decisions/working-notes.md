@@ -280,7 +280,9 @@ No change to `f1KnownLeaks` (B4 closed no baseline entries — it removed `inter
 
 ## D59 — Multi-principal has a second axis (isolation), orthogonal to D58's binding axis; the deployment/principal seam runs *through* `DataDir`; physical sandbox partition, HomeDir dissolved into a credential bundle, embedder-lifetime principal handle
 
-**Date:** 2026-06-01. **Status:** Direction accepted (owner, 2026-06-01); three mechanisms settled (below), but **gated on a dedicated security-research pass before any plan doc** — sequence is *capture → research → re-decide next steps*. **Not yet implemented.** **Composition:** extends D58 (binding-lifetime frame) with a second, orthogonal concern; completes D58 decision-4 (credential what/where split) and confirms D58 decision-3's lean (handle over per-verb arg); builds on §12 + library-first.
+**Date:** 2026-06-01. **Status:** Direction accepted (owner, 2026-06-01); three mechanisms settled (below), but **gated on a dedicated security-research pass before any plan doc** — sequence is *capture → research → re-decide next steps*. **Partially implemented since.** **Composition:** extends D58 (binding-lifetime frame) with a second, orthogonal concern; completes D58 decision-4 (credential what/where split) and confirms D58 decision-3's lean (handle over per-verb arg); builds on §12 + library-first.
+
+> _Forward pointers (added 2026-06-08): pieces of this vision have since landed — principal **namespacing** via the runtime `InstanceName` is [D62]; the **credential what/where split** (HomeDir dissolving into a host-env credential snapshot + injectable `SecretsStagingDir`) is D63. The remaining facets — physical sandbox **partition** and the embedder-lifetime **principal handle** — are still gated on the security-research pass and not implemented._
 
 **The two axes are orthogonal.** D58 named one consequence of principal-multiplicity; this entry names the other, and they don't imply each other:
 - **Binding (D58):** does the library resolve an *ambient reference* against the wrong identity? (confused deputy). Fixed by: library never synthesizes principal scope; caller supplies it.
@@ -567,6 +569,40 @@ The public surface (`NewWithOptions`, `Options`, `Client.Sandbox`, the sub-handl
 **Rejected.** (a) Leaving the machinery on `Client` and renaming the reach-deep call sites — treats the symptom; the depth comes from inverted ownership, which a rename can't move. (b) Keeping the Engine eagerly runtime-bound and a separate lazy wrapper on `Client` — that's the pre-D67 two-object split re-introduced one level down. (c) Collapsing `Client` into `Engine` entirely — `Client` still owns process-level concerns (option validation, handle factories, `System()`) and the public type identity; the goal is correct ownership, not fewer types.
 
 **Consequences.** Not breaking (internal re-home; public surface and CLI unchanged). The lazy-open invariant (open once, latch on success, host-only fallback when the open fails) moves wholesale to the `Engine` and is tested there. Sub-handles become one-level callers of `engine.Verb(name, …)`. Refines but does not supersede D67 (the surface decision stands; this corrects where the machinery lives). Worked examples: the exec/attach push-down already merged (`internal/sandbox/exec.go`, `attach.go`) is the pattern Stage 2 generalizes.
+
+## D75 — The client constructor is `NewClient`; its options struct is `ClientCreateOptions` (retroactive)
+
+**Date:** recorded 2026-06-08 for a rename shipped earlier in commit `a052de6` (the rename predates this entry; rationale reconstructed). **Status:** Implemented.
+
+The single public client constructor is `NewClient(ctx, ClientCreateOptions) (*Client, error)`. The prior names — `NewWithOptions` and `Options` (as still referenced in [D74]'s body, which was accurate at its time) — were renamed. There is no longer a no-options `New` variant for `NewWithOptions` to disambiguate against, so `NewClient` says plainly what it constructs, and `ClientCreateOptions` names the thing-it-is (options for creating a client) instead of the bare, over-broad `Options`. Aligns with [D73] (a name's required clarity scales with how far it travels from its declaration — `Options` at package scope is too far from its meaning) and the D67/D68 "name the kind of thing" discipline.
+
+Breaking change to the Go embedding surface; tracked in `docs/BREAKING-CHANGES.md` under the layer-1 reshape. No behavior change — identifiers only.
+
+## D76 — CLI destructive flags are named for their consequence, not `--force`
+
+**Date:** 2026-06-08. **Status:** Implemented (for 0.4.0).
+
+The CLI overloaded `--force` across five sites with four distinct consequences: `new --force` (discard unapplied work and recreate), `clone --force` (overwrite a destination sandbox), `files put/get --force` (overwrite files), `system build --force` (rebuild an up-to-date image). A reader could not tell what "force" would do at a given call site. Each is renamed for its effect: `new --abandon-unapplied` (implies `--replace`, which is unchanged as the *safe* recreate that aborts on unapplied work), `clone --overwrite`, `files --overwrite`, `system build --rebuild`. There is no `--force` flag left in the CLI.
+
+This brings the CLI into line with the library API, which had already shed its generic `Force` option for consequence-named ones (`AbandonUnappliedWork`, `SandboxCloneOptions.Overwrite`, `BuildImageOptions.Rebuild`) — see the dangerous-option-naming discipline (name the option after the consequence, reuse domain nomenclature like "apply"/"unapplied"). Hard break, no deprecated alias, consistent with the rest of the 0.4.0 breaking sweep. The `<dir>:force` path-mode suffix (sets `DirSpec.AllowDangerousPath`) is **out of scope** — it is a colon-suffix on a dir argument, not a `--force` flag, with a narrower blast radius; left as `:force`. Tracked in `docs/BREAKING-CHANGES.md`.
+
+## D77 — Widening the destructive scope is opt-in via a selector flag, never via a prompt (so `--yes` can't widen it)
+
+**Date:** 2026-06-08. **Status:** Implemented (for 0.4.0).
+
+The CLI used `--yes` for two unlike jobs: (a) suppressing a confirmation for the action you invoked, and (b) authorizing *collateral* damage you did not ask for — `new --yes` proceeding past a dirty host workdir; `destroy --yes` discarding a sandbox's unapplied work; `system prune --yes` emptying the recoverable trash. (b) is the same overload that made `--force` unreadable ([D76]): one flag silently widening the blast radius.
+
+The rule: **widening the destructive scope is opt-in via an explicit, consequence-named selector flag on the command line — never via an interactive prompt. Because no prompt ever widens scope, `--yes` (which auto-answers prompts) can never widen scope either; it is reduced to its one honest job, suppressing a confirmation for the verb you invoked.** Corollary: if a command's *only* confirmation was a scope-widening one, its `--yes` is vestigial and is removed.
+
+Applied for 0.4.0:
+- `new`: `--yes` **removed**; a dirty workdir is opt-in via **`--allow-dirty`**. Without it, the command prints the warning and refuses (typed `DirtyWorkdirError`) in *every* mode — it never prompts. The warning is still shown when `--allow-dirty` is given.
+- `destroy`: `--yes` **removed**; discarding a sandbox's unapplied changes or running agent is opt-in via **`--abandon-unapplied`** (the consequence name `new` already uses). Without it, active work is refused (typed `ActiveWorkError`), never prompted. A clean sandbox destroys with no prompt, as before.
+- `system prune`: gains **`--trash`** as the selector that empties the recoverable trash (parallel to the existing `--images` selector). `--yes` is **kept** — prune still has a genuine Class-A confirmation (the reclaim you invoked) — but it no longer authorizes emptying trash; only `--trash` does. This drops the old "`--json` alone never empties trash" special-case: the gate is selection, not a `--yes`-vs-`--json` distinction.
+- Unchanged (Class A — the prompt confirms the verb you invoked, so `--yes`/`--json` legitimately suppress it): `apply` (all variants), `prune`'s main reclaim, `profile delete`, `system tart remove`.
+
+**Rejected.** (a) Keeping `--yes` as a synonym on `new`/`destroy` "for compatibility" — re-introduces a flag that looks safety-relevant but silently widens scope, the precise smell being removed. (b) An interactive `[y/N]` prompt for the scope-widening sites — a prompt you can answer "y" to *is* a scope-widening prompt, and `--yes` would auto-answer it; the only way `--yes` can never widen scope is for no prompt to widen scope. (c) prune's prior approach (gate trash on *explicit* `--yes`, exclude `--json`) — keeps `--yes` overloaded; `--trash` makes the selection explicit and symmetric with `--images`.
+
+**Consequences.** Breaking (removes `new --yes`/`destroy --yes`; scripts re-express intent as `--allow-dirty` / `--abandon-unapplied`; `prune --yes` no longer empties trash — add `--trash`). Tracked in `docs/BREAKING-CHANGES.md`. `standards/cli.md`'s confirmation-command family is rewritten around the selector-vs-prompt split. Builds on [D76] and the dangerous-option-naming discipline; the library API already drew this line (`AbandonUnappliedWork`, `Overwrite`, `Rebuild`) — this brings the CLI's `--yes` usage into the same discipline.
 
 # Convention reminders
 

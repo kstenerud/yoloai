@@ -64,14 +64,14 @@ func newSystemBuildCmd() *cobra.Command {
 	cmd.Flags().String("backend", "", "Runtime backend (see 'yoloai system backends')")
 	cmd.Flags().StringSlice("secret", nil, "Build secret (id=<name>,src=<path>); can be repeated")
 	cmd.Flags().Bool("all", false, "Build across all available backends")
-	cmd.Flags().Bool("force", false, "Force rebuild even if image is up to date")
+	cmd.Flags().Bool("rebuild", false, "Rebuild even if the image is already up to date")
 
 	return cmd
 }
 
 func runSystemBuild(cmd *cobra.Command, args []string, backend yoloai.BackendType) error {
 	secretFlags, _ := cmd.Flags().GetStringSlice("secret")
-	force, _ := cmd.Flags().GetBool("force")
+	rebuild, _ := cmd.Flags().GetBool("rebuild")
 
 	// Courtesy free-space check before pulling/building a multi-GB
 	// base image. The backend's storage dir (e.g. /var/lib/docker) is
@@ -99,7 +99,7 @@ func runSystemBuild(cmd *cobra.Command, args []string, backend yoloai.BackendTyp
 	opts := yoloai.BuildImageOptions{
 		Profile:     profile,
 		BackendType: bt,
-		Rebuild:     force,
+		Rebuild:     rebuild,
 		Secrets:     secrets,
 		Output:      buildOutputFor(cmd),
 	}
@@ -170,7 +170,7 @@ func runSystemBuildAll(cmd *cobra.Command, args []string) error {
 	}
 
 	secretFlags, _ := cmd.Flags().GetStringSlice("secret")
-	force, _ := cmd.Flags().GetBool("force")
+	rebuild, _ := cmd.Flags().GetBool("rebuild")
 
 	var profile string
 	if len(args) > 0 {
@@ -184,7 +184,7 @@ func runSystemBuildAll(cmd *cobra.Command, args []string) error {
 	opts := yoloai.BuildImageOptions{
 		Profile:     profile,
 		BackendType: yoloai.BackendsAll,
-		Rebuild:     force,
+		Rebuild:     rebuild,
 		Secrets:     secrets,
 		Output:      buildOutputFor(cmd),
 	}

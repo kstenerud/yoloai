@@ -81,7 +81,7 @@ type SandboxCreateOptions struct {
 	// AbandonUnappliedWork lets Replace destroy the existing sandbox even when it
 	// holds work never applied to the host — a running agent, a dirty workdir, or
 	// unapplied commits — skipping that safety check. Mirrors
-	// SandboxDestroyOptions.AbandonUnappliedWork. (The CLI's --force flag maps here.)
+	// SandboxDestroyOptions.AbandonUnappliedWork. (The CLI's --abandon-unapplied flag maps here.)
 	AbandonUnappliedWork bool
 
 	// Passthrough are arguments passed to the agent after "--".

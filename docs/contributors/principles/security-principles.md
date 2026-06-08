@@ -360,11 +360,11 @@ Originally established alongside D11 and `docs/contributors/design/security.md`.
 
 ## §10. Power-user escapes are explicit and documented
 
-> **Rule.** Containment-undermining features (`cap_add`, devices, `container-privileged`, `--network host`, `--force`) are explicit and documented as "this undermines containment, here's why we offer it" — never silent, and never a global "make me unsafe" flag.
+> **Rule.** Containment-undermining features (`cap_add`, devices, `container-privileged`, `--network host`, `:force`) are explicit and documented as "this undermines containment, here's why we offer it" — never silent, and never a global "make me unsafe" flag.
 >
 > **Bites when:** adding an isolation-weakening option silently or as a catch-all unsafe switch. · **See also:** SEC §3, GEN §6.
 
-**Principle.** Features that undermine isolation (cap_add, devices, `--isolation container-privileged`, `--network host`, `--force` on dangerous directories) exist for users who need them. They are explicit, not silent. They are documented as "this undermines containment, here's why we offer it." There is no global "make me unsafe" flag.
+**Principle.** Features that undermine isolation (cap_add, devices, `--isolation container-privileged`, `--network host`, `:force` on dangerous directories) exist for users who need them. They are explicit, not silent. They are documented as "this undermines containment, here's why we offer it." There is no global "make me unsafe" flag.
 
 ### Pattern
 
@@ -428,7 +428,7 @@ Cost of applying: when adding a guard, find and match the existing convention (a
 | **Maximum-isolation-for-everyone**                 | Standard Docker is the default for a reason — it's the right cost/benefit for most users. Forcing gVisor / Kata / Tart on everyone pays platform-quirk debt across the entire user base for the benefit of the few. §3 — defense-in-depth as opt-in.                              |
 | **Detect-prompt-injection-perfectly**              | The consensus paper (Anthropic + OpenAI + DeepMind, Nov 2025) says detection fails against adaptive attackers. Structural containment is the floor. §1, §5.                                                                                                                       |
 | **Audit-everything-tamper-evidently**              | Out of threat model. The user is the principal; the user's own forensic investigation of their own agent run isn't a threat scenario yoloAI defends against. `log.txt` + bug-report bundle is sufficient. §1.                                                                     |
-| **No-power-user-escapes**                          | Refusing to ship `cap_add` / `--isolation container-privileged` / `--force` forces power users to wrap yoloAI in their own scripts to get around it, which is worse. Explicit + documented + opt-in is better than refused. §10.                                                |
+| **No-power-user-escapes**                          | Refusing to ship `cap_add` / `--isolation container-privileged` / `:force` forces power users to wrap yoloAI in their own scripts to get around it, which is worse. Explicit + documented + opt-in is better than refused. §10.                                                |
 | **Block-the-user**                                 | The user is the principal, not an adversary. Dangerous-directory refusal can be overridden; that's working as designed. Friction without security is theatre. §1 — bounded threat model.                                                                                          |
 | **Single-isolation-knob**                          | "Just give me `--secure-mode`." Rejected — collapses orthogonal axes (backend, isolation, network, mounts) into one knob and forces wrong tradeoffs. Each axis is explicit. §3.                                                                                                  |
 | **Always-most-restrictive-network**                | The agent needs network access to function (model API calls). Defaulting to `--network-isolated` would break the default user experience. The isolation is opt-in for users with the relevant threat model. §6 — credential isolation handles the primary credential surface separately. |

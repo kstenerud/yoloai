@@ -155,7 +155,7 @@ func e2eSetup(t *testing.T) string {
 	if code != 0 {
 		t.Fatal("e2eSetup: EnsureSetup bootstrap failed")
 	}
-	runYoloai(t, "destroy", "--yes", "e2e-setup") //nolint:errcheck // best-effort cleanup
+	runYoloai(t, "destroy", "--abandon-unapplied", "e2e-setup") //nolint:errcheck // best-effort cleanup
 
 	return projectDir
 }
@@ -163,5 +163,5 @@ func e2eSetup(t *testing.T) string {
 // destroySandbox is a cleanup helper that destroys a sandbox, ignoring errors.
 func destroySandbox(t *testing.T, name string) {
 	t.Helper()
-	runYoloai(t, "destroy", "--yes", name) //nolint:errcheck // best-effort cleanup
+	runYoloai(t, "destroy", "--abandon-unapplied", name) //nolint:errcheck // best-effort cleanup
 }

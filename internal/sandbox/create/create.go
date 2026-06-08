@@ -93,7 +93,7 @@ type Options struct {
 	NetworkAllow         []string              // --network-allow flags
 	Ports                []string              // --port flags (e.g., ["3000:3000"])
 	Replace              bool                  // --replace flag (safe: errors if unapplied work exists)
-	AbandonUnappliedWork bool                  // let Replace destroy a sandbox holding unapplied work (skips the safety check; CLI --force)
+	AbandonUnappliedWork bool                  // let Replace destroy a sandbox holding unapplied work (skips the safety check; CLI --abandon-unapplied)
 	Passthrough          []string              // args after -- passed to agent
 	Version              string                // yoloAI version for environment.json
 	Debug                bool                  // --debug flag (enable entrypoint debug logging)
@@ -172,20 +172,20 @@ func Run(ctx context.Context, d state.Deps, opts Options) (name string, err erro
 // checkUnappliedWork checks if the named sandbox has any unapplied work
 // (uncommitted changes or commits beyond the baseline). Returns an error if
 // work would be lost, or if a present-but-unreadable environment.json means
-// unapplied work cannot be ruled out (callers bypass with --force).
+// unapplied work cannot be ruled out (callers bypass with --abandon-unapplied).
 func checkUnappliedWork(name string, sandboxDir string) error {
 	meta, err := store.LoadEnvironment(sandboxDir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil // no environment.json (e.g. interrupted creation) — genuinely nothing to protect
 		}
-		return fmt.Errorf("cannot verify unapplied work in sandbox %q: %w (pass --force to replace without this check)", name, err)
+		return fmt.Errorf("cannot verify unapplied work in sandbox %q: %w (pass --abandon-unapplied to replace without this check)", name, err)
 	}
 
 	if meta.Workdir.Mode == "copy" || meta.Workdir.Mode == "overlay" {
 		workDir := store.WorkDir(sandboxDir, meta.Workdir.HostPath)
 		if patch.HasUnappliedWork(workDir, meta.Workdir.BaselineSHA) {
-			return fmt.Errorf("sandbox %q has unapplied changes (use --force to replace anyway, or 'yoloai apply' first)", name)
+			return fmt.Errorf("sandbox %q has unapplied changes (use --abandon-unapplied to replace anyway, or 'yoloai apply' first)", name)
 		}
 	}
 
@@ -193,7 +193,7 @@ func checkUnappliedWork(name string, sandboxDir string) error {
 		if d.Mode == "copy" || d.Mode == "overlay" {
 			auxWorkDir := store.WorkDir(sandboxDir, d.HostPath)
 			if patch.HasUnappliedWork(auxWorkDir, d.BaselineSHA) {
-				return fmt.Errorf("sandbox %q has unapplied changes in %s (use --force to replace anyway, or 'yoloai apply' first)", name, d.HostPath)
+				return fmt.Errorf("sandbox %q has unapplied changes in %s (use --abandon-unapplied to replace anyway, or 'yoloai apply' first)", name, d.HostPath)
 			}
 		}
 	}

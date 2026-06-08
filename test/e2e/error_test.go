@@ -20,7 +20,7 @@ import (
 func TestE2E_ErrorExitCodeAndMessage(t *testing.T) {
 	_ = e2eSetup(t)
 
-	_, stderr, code := runYoloai(t, "destroy", "--yes", "no-such-sandbox")
+	_, stderr, code := runYoloai(t, "destroy", "--abandon-unapplied", "no-such-sandbox")
 	assert.Equal(t, 1, code, "destroy of a nonexistent sandbox should exit 1")
 	assert.Contains(t, stderr, "no-such-sandbox", "error message should name the sandbox")
 }

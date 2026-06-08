@@ -1599,7 +1599,7 @@ def _destroy_named_sandboxes(ctx: RunContext, names: list[str]) -> None:
     """
     for name in names:
         subprocess.run(
-            [ctx.yoloai_bin, "destroy", "--yes", name],
+            [ctx.yoloai_bin, "destroy", "--abandon-unapplied", name],
             capture_output=True,
             timeout=30,
         )
@@ -1865,7 +1865,7 @@ def test_stop_start(t: Test, spec: BackendSpec) -> None:
         "new", name, str(project),
         "--model", "haiku",
         "--prompt", prompt,
-        "--yes",
+        "--allow-dirty",
         *spec.new_args(),
         *t.debug_new_flags,
         timeout=spec.new_timeout(),
@@ -1971,7 +1971,7 @@ def test_tag_transfer(t: Test, spec: BackendSpec) -> None:
         "new", name, str(project),
         "--model", "haiku",
         "--prompt", prompt,
-        "--yes",
+        "--allow-dirty",
         *spec.new_args(),
         *t.debug_new_flags,
         timeout=spec.new_timeout(),
@@ -2017,7 +2017,7 @@ def test_clone(t: Test, spec: BackendSpec) -> None:
         "new", name_a, str(project),
         "--model", "haiku",
         "--prompt", prompt,
-        "--yes",
+        "--allow-dirty",
         *spec.new_args(),
         *t.debug_new_flags,
         timeout=spec.new_timeout(),
@@ -2053,7 +2053,7 @@ def test_isolation_check(t: Test, spec: BackendSpec) -> None:
 
     r = t.run(
         "new", name, str(project),
-        "--no-start", "--yes",
+        "--no-start", "--allow-dirty",
         "--network-isolated",
         *spec.new_args(),
         *t.debug_new_flags,
@@ -2139,7 +2139,7 @@ def test_dind(t: Test, spec: BackendSpec) -> None:
     # idle agent: a running container to exec into, with no model inference.
     r = t.run(
         "new", name, str(project),
-        "--no-start", "--yes",
+        "--no-start", "--allow-dirty",
         "--agent", "idle",
         *spec.new_args(),
         *t.debug_new_flags,
@@ -2332,7 +2332,7 @@ def _warm_up_vm_backends(
         print(f"  Warming up {spec.label} (cold create, outside the timed run)...")
         new_cmd = [
             ctx.yoloai_bin, "new", name, str(ctx.fixture_dir),
-            "--agent", "idle", "--yes", *spec.new_args(),
+            "--agent", "idle", "--allow-dirty", *spec.new_args(),
         ]
         try:
             r = subprocess.run(new_cmd, capture_output=True, text=True, timeout=BASE_BUILD_TIMEOUT)
@@ -2373,7 +2373,7 @@ def cleanup(ctx: RunContext) -> None:
         for name in ctx.sandboxes:
             try:
                 subprocess.run(
-                    [ctx.yoloai_bin, "destroy", "--yes", name],
+                    [ctx.yoloai_bin, "destroy", "--abandon-unapplied", name],
                     capture_output=True, timeout=60,
                 )
             except subprocess.TimeoutExpired:

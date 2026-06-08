@@ -175,7 +175,7 @@ func TestMain(m *testing.M) {
 
 	// Clean up the bootstrap sandbox (best-effort).
 	root := NewRootCmd("test", "test", "test")
-	root.SetArgs([]string{"destroy", "--yes", "cli-main-setup"})
+	root.SetArgs([]string{"destroy", "--abandon-unapplied", "cli-main-setup"})
 	root.SetOut(&bytes.Buffer{})
 	root.SetErr(&bytes.Buffer{})
 	_ = root.ExecuteContext(context.Background())

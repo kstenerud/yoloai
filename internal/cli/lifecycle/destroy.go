@@ -1,5 +1,5 @@
 // ABOUTME: Cobra "destroy" command: stops and removes one or more sandboxes,
-// ABOUTME: with wildcard expansion, --all, and active-work confirmation logic.
+// ABOUTME: with wildcard expansion, --all, and --abandon-unapplied active-work refusal.
 package lifecycle
 
 import (
@@ -58,14 +58,14 @@ func NewDestroyCmd() *cobra.Command {
 	}
 
 	cmd.Flags().Bool("all", false, "Destroy all sandboxes")
-	cmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
+	cmd.Flags().Bool("abandon-unapplied", false, "Destroy even when a sandbox has unapplied changes or a running agent")
 
 	return cmd
 }
 
 func runDestroyCmd(cmd *cobra.Command, args []string) error {
 	all, _ := cmd.Flags().GetBool("all")
-	yes := cliutil.EffectiveYes(cmd)
+	abandonUnapplied, _ := cmd.Flags().GetBool("abandon-unapplied")
 
 	if all && len(args) > 0 {
 		return yoerrors.NewUsageError("cannot specify sandbox names with --all")
@@ -95,16 +95,14 @@ func runDestroyCmd(cmd *cobra.Command, args []string) error {
 			return nil
 		}
 
-		// Smart confirmation (unless --yes)
-		if !yes {
-			if done, confirmErr := confirmDestroy(cmd, ctx, c, names); confirmErr != nil {
-				return confirmErr
-			} else if done {
-				return nil
-			}
+		// A sandbox with unapplied changes or a running agent is only destroyed
+		// when --abandon-unapplied authorizes discarding that work. We never
+		// prompt to widen the scope, so there is no --yes to paper over it.
+		if err := checkActiveWork(cmd, ctx, c, names, abandonUnapplied); err != nil {
+			return err
 		}
 
-		return executeDestroy(cmd, ctx, c, names)
+		return executeDestroy(cmd, ctx, c, names, abandonUnapplied)
 	})
 }
 
@@ -174,8 +172,15 @@ func resolveDestroyArgs(ctx context.Context, c *yoloai.Client, args []string) ([
 	return names, nil
 }
 
-// confirmDestroy checks for active work and prompts. Returns true if caller should return nil.
-func confirmDestroy(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, names []string) (done bool, err error) {
+// checkActiveWork refuses the destroy (without prompting) when any named sandbox
+// holds unapplied changes or a running agent, unless --abandon-unapplied
+// authorizes discarding it. Widening the destructive scope is opt-in via the
+// flag alone — there is no interactive prompt to answer, so nothing can paper
+// over the safety choice.
+func checkActiveWork(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, names []string, abandonUnapplied bool) error {
+	if abandonUnapplied {
+		return nil
+	}
 	var warnings []string
 	for _, name := range names {
 		sb, err := c.Sandbox(name)
@@ -189,30 +194,22 @@ func confirmDestroy(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, n
 		}
 	}
 	if len(warnings) == 0 {
-		return false, nil
+		return nil
 	}
 	fmt.Fprintln(cmd.ErrOrStderr(), "The following sandboxes have active work:") //nolint:errcheck // best-effort output
 	for _, w := range warnings {
 		fmt.Fprintln(cmd.ErrOrStderr(), w) //nolint:errcheck // best-effort output
 	}
-	// Non-TTY: cannot prompt — return a typed error so CI scripts can detect it.
-	if fi, statErr := os.Stdin.Stat(); statErr == nil && (fi.Mode()&os.ModeCharDevice) == 0 {
-		return false, yoerrors.NewActiveWorkError(
-			"%d sandbox(es) have active work; use --yes to force or run 'yoloai apply' first",
-			len(warnings),
-		)
-	}
-	confirmed, confirmErr := cliutil.Confirm(cmd.Context(), "Destroy all listed sandboxes? [y/N] ", os.Stdin, cmd.ErrOrStderr())
-	if confirmErr != nil {
-		return false, confirmErr
-	}
-	return !confirmed, nil
+	return yoerrors.NewActiveWorkError(
+		"%d sandbox(es) have active work; re-run with --abandon-unapplied or run 'yoloai apply' first",
+		len(warnings),
+	)
 }
 
 // executeDestroy destroys sandboxes and returns an error if any fail.
-// Calls Client.Destroy with force=true because confirmDestroy already
-// performed (or the caller skipped) the active-work check.
-func executeDestroy(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, names []string) error {
+// abandonUnapplied is threaded into each Destroy call; checkActiveWork has
+// already refused if work was present and the flag was absent.
+func executeDestroy(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, names []string, abandonUnapplied bool) error {
 	type destroyResult struct {
 		Name   string `json:"name"`
 		Action string `json:"action,omitempty"`
@@ -223,7 +220,7 @@ func executeDestroy(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, n
 		var results []destroyResult
 		for _, name := range names {
 			slog.Info("destroying sandbox", "event", "sandbox.destroy", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
-			if err := destroyOne(cmd, ctx, c, name); err != nil {
+			if err := destroyOne(cmd, ctx, c, name, abandonUnapplied); err != nil {
 				results = append(results, destroyResult{Name: name, Error: err.Error()})
 			} else {
 				slog.Info("sandbox destroyed", "event", "sandbox.destroy.complete", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
@@ -236,7 +233,7 @@ func executeDestroy(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, n
 	var errs []error
 	for _, name := range names {
 		slog.Info("destroying sandbox", "event", "sandbox.destroy", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
-		if err := destroyOne(cmd, ctx, c, name); err != nil {
+		if err := destroyOne(cmd, ctx, c, name, abandonUnapplied); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: destroy %s: %v\n", name, err) //nolint:errcheck // best-effort output
 			errs = append(errs, err)
 		} else {
@@ -251,15 +248,16 @@ func executeDestroy(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, n
 	return nil
 }
 
-// destroyOne force-destroys a single sandbox and renders any advisory notices
+// destroyOne destroys a single sandbox and renders any advisory notices
 // (e.g. a directory that couldn't be fully removed). Returns the destroy error,
-// if any.
-func destroyOne(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, name string) error {
+// if any. abandonUnapplied authorizes discarding unapplied work; when false the
+// library refuses a sandbox that still holds it (a backstop to checkActiveWork).
+func destroyOne(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, name string, abandonUnapplied bool) error {
 	sb, err := c.Sandbox(name)
 	if err != nil {
 		return err
 	}
-	res, err := sb.Destroy(ctx, yoloai.SandboxDestroyOptions{AbandonUnappliedWork: true})
+	res, err := sb.Destroy(ctx, yoloai.SandboxDestroyOptions{AbandonUnappliedWork: abandonUnapplied})
 	if res != nil {
 		cliutil.RenderNotices(cmd, res.Notices)
 	}

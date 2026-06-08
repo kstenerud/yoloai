@@ -20,6 +20,15 @@ func assertUsageError(t *testing.T, err error, wantSubstr string) {
 	assert.Contains(t, err.Error(), wantSubstr)
 }
 
+func TestNewCmd_DirtyWorkdirFlags(t *testing.T) {
+	cmd := NewNewCmd("test")
+	// --yes was removed: proceeding past a dirty workdir widens the destructive
+	// scope and is opt-in via --allow-dirty alone — never via a prompt-suppressing
+	// --yes, which could silently paper over the safety choice.
+	assert.Nil(t, cmd.Flags().Lookup("yes"))
+	assert.NotNil(t, cmd.Flags().Lookup("allow-dirty"))
+}
+
 func TestParseNewCmdPositional_Errors(t *testing.T) {
 	tests := []struct {
 		name      string

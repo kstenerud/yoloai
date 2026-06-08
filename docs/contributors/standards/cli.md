@@ -32,7 +32,7 @@ Note: Many popular tools (git, docker) silently accept interleaved options via G
 - Every short flag must have a long form
 - Short flags can be grouped: `-vq` is equivalent to `-v -q` (POSIX Guideline 5)
 - Boolean flags use `--flag` to enable and `--no-flag` to disable (e.g., `--color` / `--no-color`)
-- **`--no-*` convention:** Use `--no-X` to disable behavior that is on by default (`--no-start`, `--no-prompt`, `--no-profile`, `--no-color`). Use bare `--X` to enable behavior that is off by default (`--force`, `--dry-run`, `--resume`, `--attach`, `--restart`, `--include-uncommitted`). Use `--keep-X` to preserve something that is cleared by default (`--keep-cache`, `--keep-files`). This keeps the default invocation flag-free: running a command with no flags gives the default behavior, and each flag explicitly opts out of or into a non-default behavior.
+- **`--no-*` convention:** Use `--no-X` to disable behavior that is on by default (`--no-start`, `--no-prompt`, `--no-profile`, `--no-color`). Use bare `--X` to enable behavior that is off by default (`--rebuild`, `--overwrite`, `--dry-run`, `--resume`, `--attach`, `--restart`, `--include-uncommitted`). Use `--keep-X` to preserve something that is cleared by default (`--keep-cache`, `--keep-files`). This keeps the default invocation flag-free: running a command with no flags gives the default behavior, and each flag explicitly opts out of or into a non-default behavior.
 - Flags that take values: `--flag value` (space-separated) and `--flag=value` are both accepted
 
 ## Positional Arguments
@@ -94,7 +94,8 @@ The `--json` global flag switches all command output from human-readable text to
 
 - Normal output goes to stdout; errors to stderr; exit codes still signal success (0) or failure (non-zero).
 - **Interactive commands** (`attach`, `exec`) reject `--json` since they require a terminal.
-- **Confirmation commands** (`destroy`, `apply`, `system prune`) require `--yes` when `--json` is set, since interactive prompts can't work in a machine-readable pipeline. Exception: `system prune --dry-run` works without `--yes`.
+- **Confirmation commands** keep `--yes` only to suppress prompts that confirm *the verb you invoked* (`apply`, `system prune`'s reclaim, `profile delete`, `system tart remove`). `--yes` is implied by `--json`, since interactive prompts can't work in a machine-readable pipeline. Exception: `system prune --dry-run` needs no confirmation.
+- **Scope-widening is never a prompt.** Collateral danger you did *not* invoke is opted into only by an explicit, consequence-named selector flag — `new --allow-dirty`, `destroy --abandon-unapplied`, `system prune --trash`. Absent the flag the command **hard-refuses with a typed error in every mode** (including interactively); it never prompts, so `--yes` can never widen scope. Because their only guard was scope-widening, `new` and `destroy` carry **no `--yes`** at all.
 - **Commands with `--attach`** (`new`, `start`, `restart`) reject `--json --attach` since attach is interactive.
 
 **Examples:**
@@ -106,7 +107,7 @@ yoloai system backends --json         # {"backends": [...]}
 yoloai sandbox info mybox --json      # single sandbox object
 yoloai version --json                 # {"version": "...", "commit": "...", "date": "..."}
 yoloai diff mybox --log --json        # {"commits": [...], "has_uncommitted_changes": bool, "tags": [...]}
-yoloai destroy mybox --json --yes     # {"destroyed": [{"name": "...", "action": "destroyed"}]}
+yoloai destroy mybox --json           # {"destroyed": [{"name": "...", "action": "destroyed"}]}
 yoloai config get backend --json      # {"key": "backend", "value": "docker"}
 ```
 - After state-changing operations, suggest logical next commands (e.g., after `yoloai new`, suggest `yoloai attach`)

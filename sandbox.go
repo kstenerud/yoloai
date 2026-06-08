@@ -454,7 +454,7 @@ type SandboxDestroyOptions struct {
 	// never applied to the host — a running agent, a dirty workdir, or unapplied
 	// commits. With it false, Destroy refuses such a sandbox with a typed
 	// *ActiveWorkError carrying the reason, so the caller can prompt and retry.
-	// (The CLI's --force flag maps onto this field at the boundary.)
+	// (The CLI's --abandon-unapplied flag maps onto this field at the boundary.)
 	AbandonUnappliedWork bool
 }
 
