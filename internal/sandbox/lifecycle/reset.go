@@ -107,20 +107,23 @@ func Reset(ctx context.Context, d state.Deps, opts ResetOptions) (*ResetResult, 
 }
 
 // NeedsConfirmation checks if a sandbox requires confirmation before
-// destruction. Returns true only when destruction would lose unapplied work —
-// uncommitted changes or commits beyond the baseline — with a reason string for
+// destruction. Returns true when destruction would lose unapplied work —
+// uncommitted changes or commits beyond the baseline — OR when that can't be
+// verified (a VM-local backend that is not running), with a reason string for
 // the prompt. A running agent is NOT a blocker on its own: a live but clean
 // sandbox has nothing to lose, and gating on it forced --abandon-unapplied for
-// every routine destroy. The gate keys purely on the on-disk work signal, which
-// also means it works without a runtime connection.
-func NeedsConfirmation(_ context.Context, d state.Deps, name string) (bool, string) {
-	return unappliedWorkReason(d.Layout.SandboxDir(name))
+// every routine destroy. The work signal is read via the backend's git context
+// (in-VM for Tart), so callers must open the runtime first.
+func NeedsConfirmation(ctx context.Context, d state.Deps, name string) (bool, string) {
+	return unappliedWorkReason(ctx, d.Runtime, name, d.Layout.SandboxDir(name))
 }
 
-// unappliedWorkReason reports whether a sandbox's on-disk state holds work that
-// destruction would lose — uncommitted/beyond-baseline changes in the workdir
-// or any aux directory — independent of whether the agent is running.
-func unappliedWorkReason(sandboxDir string) (bool, string) {
+// unappliedWorkReason reports whether a sandbox holds work that destruction
+// would lose — uncommitted/beyond-baseline changes in the workdir or any aux
+// directory — independent of whether the agent is running. A WorkUnknown probe
+// (a VM-local backend that is not running, so the in-VM working copy can't be
+// read) fails safe: it blocks destroy with a reason that points to the cause.
+func unappliedWorkReason(ctx context.Context, rt runtime.Runtime, name, sandboxDir string) (bool, string) {
 	meta, err := store.LoadEnvironment(sandboxDir)
 	if err != nil {
 		// Environment is unreadable (a broken sandbox). Don't assume it's empty —
@@ -135,22 +138,32 @@ func unappliedWorkReason(sandboxDir string) (bool, string) {
 		return false, ""
 	}
 
-	if meta.Workdir.Mode == "copy" || meta.Workdir.Mode == "overlay" {
-		workDir := store.WorkDir(sandboxDir, meta.Workdir.HostPath)
-		if patch.HasUnappliedWork(workDir, meta.Workdir.BaselineSHA) {
-			return true, "unapplied changes exist"
-		}
+	if blocked, reason := dirWorkReason(ctx, rt, name, sandboxDir, meta.Workdir.Mode, meta.Workdir.HostPath, meta.Workdir.BaselineSHA); blocked {
+		return true, reason
 	}
-
 	for _, dirEnv := range meta.Directories {
-		if dirEnv.Mode == "copy" || dirEnv.Mode == "overlay" {
-			auxWorkDir := store.WorkDir(sandboxDir, dirEnv.HostPath)
-			if patch.HasUnappliedWork(auxWorkDir, dirEnv.BaselineSHA) {
-				return true, "unapplied changes exist"
-			}
+		if blocked, reason := dirWorkReason(ctx, rt, name, sandboxDir, dirEnv.Mode, dirEnv.HostPath, dirEnv.BaselineSHA); blocked {
+			return true, reason
 		}
 	}
 
+	return false, ""
+}
+
+// dirWorkReason probes one copy/overlay directory for unapplied work and maps
+// the result to a destroy-blocking reason. Non-copy/overlay modes never block.
+func dirWorkReason(ctx context.Context, rt runtime.Runtime, name, sandboxDir string, mode store.DirMode, hostPath, baselineSHA string) (bool, string) {
+	if mode != "copy" && mode != "overlay" {
+		return false, ""
+	}
+	workDir := store.WorkDir(sandboxDir, hostPath)
+	switch patch.HasUnappliedWorkVia(ctx, rt, name, workDir, baselineSHA) {
+	case patch.WorkDirty:
+		return true, "unapplied changes exist"
+	case patch.WorkUnknown:
+		return true, "sandbox is stopped, so unapplied changes can't be verified (start it to check, or use --abandon-unapplied)"
+	case patch.WorkClean:
+	}
 	return false, ""
 }
 

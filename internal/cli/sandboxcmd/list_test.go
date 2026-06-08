@@ -30,7 +30,7 @@ func makeBrokenInfo(name string) *yoloai.SandboxInfo {
 	return &yoloai.SandboxInfo{
 		Environment:    &yoloai.Environment{Name: name},
 		Status:         yoloai.StatusBroken,
-		Changes:        yoloai.ChangesUnknown,
+		Changes:        yoloai.ChangesNotApplicable,
 		DiskUsageBytes: -1,
 	}
 }
@@ -154,11 +154,13 @@ func TestFilterInfos_Changes(t *testing.T) {
 		makeInfo("a", yoloai.StatusActive, "claude", "", "yes"),
 		makeInfo("b", yoloai.StatusActive, "claude", "", "no"),
 		makeInfo("c", yoloai.StatusStopped, "gemini", "", "yes"),
+		makeInfo("d", yoloai.StatusStopped, "claude", "", "unknown"),
 	}
 	result := filterInfos(infos, listFilters{changes: true})
-	assert.Len(t, result, 2)
+	assert.Len(t, result, 3)
 	assert.Equal(t, "a", result[0].Environment.Name)
 	assert.Equal(t, "c", result[1].Environment.Name)
+	assert.Equal(t, "d", result[2].Environment.Name)
 }
 
 func TestFilterInfos_Combined(t *testing.T) {

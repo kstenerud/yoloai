@@ -173,7 +173,7 @@ func Run(ctx context.Context, d state.Deps, opts Options) (name string, err erro
 // (uncommitted changes or commits beyond the baseline). Returns an error if
 // work would be lost, or if a present-but-unreadable environment.json means
 // unapplied work cannot be ruled out (callers bypass with --abandon-unapplied).
-func checkUnappliedWork(name string, sandboxDir string) error {
+func checkUnappliedWork(ctx context.Context, rt runtime.Runtime, name string, sandboxDir string) error {
 	meta, err := store.LoadEnvironment(sandboxDir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -184,20 +184,39 @@ func checkUnappliedWork(name string, sandboxDir string) error {
 
 	if meta.Workdir.Mode == "copy" || meta.Workdir.Mode == "overlay" {
 		workDir := store.WorkDir(sandboxDir, meta.Workdir.HostPath)
-		if patch.HasUnappliedWork(workDir, meta.Workdir.BaselineSHA) {
-			return fmt.Errorf("sandbox %q has unapplied changes (use --abandon-unapplied to replace anyway, or 'yoloai apply' first)", name)
+		if err := unappliedWorkError(ctx, rt, name, workDir, meta.Workdir.BaselineSHA, ""); err != nil {
+			return err
 		}
 	}
 
 	for _, d := range meta.Directories {
 		if d.Mode == "copy" || d.Mode == "overlay" {
 			auxWorkDir := store.WorkDir(sandboxDir, d.HostPath)
-			if patch.HasUnappliedWork(auxWorkDir, d.BaselineSHA) {
-				return fmt.Errorf("sandbox %q has unapplied changes in %s (use --abandon-unapplied to replace anyway, or 'yoloai apply' first)", name, d.HostPath)
+			if err := unappliedWorkError(ctx, rt, name, auxWorkDir, d.BaselineSHA, d.HostPath); err != nil {
+				return err
 			}
 		}
 	}
 
+	return nil
+}
+
+// unappliedWorkError maps a work-dir probe to a replace-blocking error. inDir is
+// the aux directory's host path for the message ("" for the primary workdir). A
+// WorkUnknown result (a VM-local backend that is not running) fails safe: it
+// cannot be ruled out, so it blocks replace just like confirmed changes.
+func unappliedWorkError(ctx context.Context, rt runtime.Runtime, name, workDir, baselineSHA, inDir string) error {
+	loc := ""
+	if inDir != "" {
+		loc = " in " + inDir
+	}
+	switch patch.HasUnappliedWorkVia(ctx, rt, name, workDir, baselineSHA) {
+	case patch.WorkDirty:
+		return fmt.Errorf("sandbox %q has unapplied changes%s (use --abandon-unapplied to replace anyway, or 'yoloai apply' first)", name, loc)
+	case patch.WorkUnknown:
+		return fmt.Errorf("sandbox %q is stopped, so unapplied changes%s cannot be verified (start it to check, or use --abandon-unapplied to replace anyway)", name, loc)
+	case patch.WorkClean:
+	}
 	return nil
 }
 
@@ -486,7 +505,7 @@ func replaceSandboxIfNeeded(ctx context.Context, d state.Deps, opts Options, san
 		return nil // nothing to replace
 	}
 	if !opts.AbandonUnappliedWork {
-		if err := checkUnappliedWork(opts.Name, sandboxDir); err != nil {
+		if err := checkUnappliedWork(ctx, d.Runtime, opts.Name, sandboxDir); err != nil {
 			return err
 		}
 	}

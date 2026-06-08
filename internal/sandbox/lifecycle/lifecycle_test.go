@@ -432,6 +432,49 @@ func TestNeedsConfirmation_RunningButClean(t *testing.T) {
 	assert.Empty(t, reason)
 }
 
+// A VM-local backend (Tart) that is not running can't be probed: the working
+// copy lives in the VM, not on the host seed. GitExec reports ErrNotRunning, and
+// the gate must fail safe — block destroy rather than read a stale host copy.
+func TestNeedsConfirmation_StoppedVMFailsafe(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	name := "test-confirm-stopped"
+	hostPath := "/tmp/project"
+	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
+	workDir := filepath.Join(sandboxDir, "work", store.EncodePath(hostPath))
+	require.NoError(t, os.MkdirAll(workDir, 0750))
+
+	// Host seed is a clean repo (what the host can see) — but the agent's real
+	// edits would be inside the stopped VM, invisible here.
+	testutil.InitGitRepo(t, workDir)
+	testutil.WriteFile(t, workDir, "file.txt", "content")
+	testutil.GitAdd(t, workDir, ".")
+	testutil.GitCommit(t, workDir, "initial")
+
+	meta := &store.Environment{
+		Name:      name,
+		AgentType: "claude",
+		CreatedAt: time.Now(),
+		Workdir: store.WorkdirEnvironment{
+			HostPath:  hostPath,
+			MountPath: hostPath,
+			Mode:      "copy",
+		},
+	}
+	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
+
+	mock := &lifecycleMockRuntime{
+		gitExecFn: func(_ context.Context, _, _ string, _ ...string) (string, error) {
+			return "", runtime.ErrNotRunning
+		},
+	}
+
+	d := newLifecycleDeps(mock, tmpDir)
+	needs, reason := NeedsConfirmation(context.Background(), d, name)
+	assert.True(t, needs)
+	assert.Contains(t, reason, "stopped")
+}
+
 func TestNeedsConfirmation_ChangesExist(t *testing.T) {
 	tmpDir := t.TempDir()
 

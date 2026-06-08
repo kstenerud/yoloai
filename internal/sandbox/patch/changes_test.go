@@ -1,7 +1,8 @@
-// ABOUTME: Tests for DetectChanges and HasUnappliedWork git-status helpers.
+// ABOUTME: Tests for DetectChanges and HasUnappliedWorkVia git-status helpers.
 package patch
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -50,13 +51,16 @@ func TestDetectChanges_UntrackedFiles(t *testing.T) {
 	assert.Equal(t, "yes", DetectChanges(dir))
 }
 
-// HasUnappliedWork tests
+// HasUnappliedWorkVia tests. A nil runtime routes git to the host (the
+// non-GitExecer default), so these exercise the real git logic on host repos;
+// the WorkUnknown fail-safe path (a GitExecer backend reporting ErrNotRunning)
+// is covered in the lifecycle package where a runtime mock exists.
 
-func TestHasUnappliedWork_NoWorkDir(t *testing.T) {
-	assert.False(t, HasUnappliedWork("/nonexistent/path", "abc123"))
+func TestHasUnappliedWorkVia_NoWorkDir(t *testing.T) {
+	assert.Equal(t, WorkClean, HasUnappliedWorkVia(context.Background(), nil, "box", "/nonexistent/path", "abc123"))
 }
 
-func TestHasUnappliedWork_CleanAtBaseline(t *testing.T) {
+func TestHasUnappliedWorkVia_CleanAtBaseline(t *testing.T) {
 	dir := t.TempDir()
 	initGitRepo(t, dir)
 	writeTestFile(t, dir, "file.txt", "hello")
@@ -64,10 +68,10 @@ func TestHasUnappliedWork_CleanAtBaseline(t *testing.T) {
 	gitCommit(t, dir, "initial")
 
 	sha := gitRevParse(t, dir)
-	assert.False(t, HasUnappliedWork(dir, sha))
+	assert.Equal(t, WorkClean, HasUnappliedWorkVia(context.Background(), nil, "box", dir, sha))
 }
 
-func TestHasUnappliedWork_DirtyWorkingTree(t *testing.T) {
+func TestHasUnappliedWorkVia_DirtyWorkingTree(t *testing.T) {
 	dir := t.TempDir()
 	initGitRepo(t, dir)
 	writeTestFile(t, dir, "file.txt", "hello")
@@ -76,10 +80,10 @@ func TestHasUnappliedWork_DirtyWorkingTree(t *testing.T) {
 
 	sha := gitRevParse(t, dir)
 	writeTestFile(t, dir, "file.txt", "modified")
-	assert.True(t, HasUnappliedWork(dir, sha))
+	assert.Equal(t, WorkDirty, HasUnappliedWorkVia(context.Background(), nil, "box", dir, sha))
 }
 
-func TestHasUnappliedWork_CommitsBeyondBaseline(t *testing.T) {
+func TestHasUnappliedWorkVia_CommitsBeyondBaseline(t *testing.T) {
 	dir := t.TempDir()
 	initGitRepo(t, dir)
 	writeTestFile(t, dir, "file.txt", "hello")
@@ -93,10 +97,10 @@ func TestHasUnappliedWork_CommitsBeyondBaseline(t *testing.T) {
 	gitAdd(t, dir, ".")
 	gitCommit(t, dir, "agent work")
 
-	assert.True(t, HasUnappliedWork(dir, baselineSHA))
+	assert.Equal(t, WorkDirty, HasUnappliedWorkVia(context.Background(), nil, "box", dir, baselineSHA))
 }
 
-func TestHasUnappliedWork_EmptyBaseline(t *testing.T) {
+func TestHasUnappliedWorkVia_EmptyBaseline(t *testing.T) {
 	dir := t.TempDir()
 	initGitRepo(t, dir)
 	writeTestFile(t, dir, "file.txt", "hello")
@@ -104,5 +108,5 @@ func TestHasUnappliedWork_EmptyBaseline(t *testing.T) {
 	gitCommit(t, dir, "initial")
 
 	// Empty baseline — can't check commits, only dirty tree
-	assert.False(t, HasUnappliedWork(dir, ""))
+	assert.Equal(t, WorkClean, HasUnappliedWorkVia(context.Background(), nil, "box", dir, ""))
 }

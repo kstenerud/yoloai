@@ -7,6 +7,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"os/exec"
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime"
@@ -30,6 +31,7 @@ type lifecycleMockRuntime struct {
 	removeFn  func(ctx context.Context, name string) error
 	inspectFn func(ctx context.Context, name string) (runtime.InstanceInfo, error)
 	execFn    func(ctx context.Context, name string, cmd []string, user string) (runtime.ExecResult, error)
+	gitExecFn func(ctx context.Context, name, workDir string, args ...string) (string, error)
 }
 
 func (m *lifecycleMockRuntime) Stop(ctx context.Context, name string) error {
@@ -74,8 +76,19 @@ func (m *lifecycleMockRuntime) IsReady(_ context.Context) (bool, error) { return
 func (m *lifecycleMockRuntime) Create(_ context.Context, _ runtime.InstanceConfig) error {
 	return errMockNotImplemented
 }
-func (m *lifecycleMockRuntime) GitExec(_ context.Context, _ string, _ string, _ ...string) (string, error) {
-	return "", errMockNotImplemented
+
+// GitExec models a GitExecer backend. By default it runs git on the host
+// workDir — the behavior of a host-bind-mount backend like Docker — so tests
+// that stage real git repos under work/ exercise the real change-detection
+// path. Tests modeling a VM-local backend (Tart) set gitExecFn, e.g. to return
+// runtime.ErrNotRunning for the stopped-VM fail-safe case.
+func (m *lifecycleMockRuntime) GitExec(ctx context.Context, name, workDir string, args ...string) (string, error) {
+	if m.gitExecFn != nil {
+		return m.gitExecFn(ctx, name, workDir, args...)
+	}
+	cmdArgs := append([]string{"-C", workDir}, args...)
+	out, err := exec.CommandContext(ctx, "git", cmdArgs...).Output() //nolint:gosec // G204: test-controlled workDir
+	return string(out), err
 }
 func (m *lifecycleMockRuntime) InteractiveExec(_ context.Context, _ string, _ []string, _ string, _ string, _ runtime.IOStreams) error {
 	return errMockNotImplemented

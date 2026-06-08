@@ -51,7 +51,7 @@ type Info struct {
 	Environment *store.Environment `json:"environment"`
 	Status      Status             `json:"status"`
 	AgentStatus AgentStatus        `json:"agent_status,omitempty"` // agent activity status (may be empty)
-	HasChanges  string             `json:"has_changes"`            // "yes", "no", or "-" (unknown/not applicable)
+	HasChanges  string             `json:"has_changes"`            // "yes", "no", "unknown" (stopped VM-local backend), or "-" (not applicable)
 	// DiskUsageBytes is the total size of the sandbox directory in bytes, or
 	// -1 when it could not be measured. Rendering to a human-readable string
 	// is the CLI's responsibility (see cliutil.FormatSize).
@@ -307,29 +307,37 @@ func InspectSandbox(ctx context.Context, layout config.Layout, rt runtime.Runtim
 	return &Info{
 		Environment:    meta,
 		Status:         status,
-		HasChanges:     detectWorkdirChanges(sandboxDir, meta),
+		HasChanges:     detectWorkdirChanges(ctx, rt, name, sandboxDir, meta),
 		DiskUsageBytes: diskUsageBytes,
 	}, nil
 }
 
-// detectWorkdirChanges returns "yes", "no", or "-" for a sandbox's workdir and aux dirs.
-func detectWorkdirChanges(sandboxDir string, meta *store.Environment) string {
+// detectWorkdirChanges returns "yes", "no", "unknown", or "-" for a sandbox's
+// workdir and aux dirs. "unknown" means the working copy lives in a VM-local
+// backend (Tart) that is not running, so the probe can't reach it — the change
+// state genuinely can't be read from the host (see patch.HasUnappliedWorkVia).
+func detectWorkdirChanges(ctx context.Context, rt runtime.Runtime, name, sandboxDir string, meta *store.Environment) string {
 	if meta.Workdir.Mode != "copy" && meta.Workdir.Mode != "overlay" {
 		return "-"
 	}
 	workDir := store.WorkDir(sandboxDir, meta.Workdir.HostPath)
-	if patch.HasUnappliedWork(workDir, meta.Workdir.BaselineSHA) {
+	switch patch.HasUnappliedWorkVia(ctx, rt, name, workDir, meta.Workdir.BaselineSHA) {
+	case patch.WorkDirty:
 		return "yes"
-	}
-	if patch.DetectChanges(workDir) == "-" {
-		return "-"
+	case patch.WorkUnknown:
+		return "unknown"
+	case patch.WorkClean:
 	}
 	// workdir has no unapplied work — check aux dirs before reporting "no"
 	for _, d := range meta.Directories {
 		if d.Mode == "copy" || d.Mode == "overlay" {
 			auxWorkDir := store.WorkDir(sandboxDir, d.HostPath)
-			if patch.HasUnappliedWork(auxWorkDir, d.BaselineSHA) {
+			switch patch.HasUnappliedWorkVia(ctx, rt, name, auxWorkDir, d.BaselineSHA) {
+			case patch.WorkDirty:
 				return "yes"
+			case patch.WorkUnknown:
+				return "unknown"
+			case patch.WorkClean:
 			}
 		}
 	}
@@ -374,7 +382,7 @@ func InspectSandboxWithBackend(ctx context.Context, layout config.Layout, rt run
 	return &Info{
 		Environment:    meta,
 		Status:         status,
-		HasChanges:     detectWorkdirChanges(sandboxDir, meta),
+		HasChanges:     detectWorkdirChanges(ctx, rt, name, sandboxDir, meta),
 		DiskUsageBytes: diskUsageBytes,
 	}, nil
 }

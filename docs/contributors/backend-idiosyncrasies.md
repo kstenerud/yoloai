@@ -77,6 +77,7 @@ row to the index.
 | `xcrun simctl list runtimes` shows no runtimes when mounted via VirtioFS | [Tart: CoreSimulator requires sealed APFS](#coresimulator-cannot-discover-virtiofs-mounted-runtimes) |
 | `Failed to start launchd_sim: could not bind to session` when booting simulator | [Tart: ditto'd runtime is incomplete](#dittod-ios-runtime-is-incomplete-use-xcodebuild--downloadplatform) |
 | `git diff` fails with "unable to read" object / git corruption on Tart VM | [Tart: VirtioFS corrupts git repositories](#virtiofs-corrupts-git-repositories) |
+| Tart `info` shows `Changes: no` on a dirty sandbox; `destroy` skips the unapplied-work gate | [Tart: host change probe blind to in-VM workdir](#a-host-side-change-probe-is-blind-to-the-in-vm-workdir--info-showed-changes-no-on-a-dirty-tart-sandbox-and-destroy-skipped-its-gate) |
 | `yoloai new` times out / "command timed out" on Tart; sandbox.jsonl stops after xcodebuild firstlaunch; agent never starts | [Tart: signal_secrets_consumed deadlock with get_working_dir](#tart-signal_secrets_consumed-must-run-before-get_working_dir) |
 | Agent silently fails to start on Tart (claude/node not found) | [Tart: provisioned tool dirs live only on the login PATH](#provisioned-tool-dirs-live-only-on-the-login-path-cirrus-base-image) |
 | Swift PM commands fail with sandbox-exec nesting errors on Seatbelt | [Seatbelt: macOS sandbox-exec doesn't nest](#macos-sandbox-exec-doesnt-nest--swift-pm-needs-the-swift-wrapper-sourced) |
@@ -1553,6 +1554,18 @@ VirtioFS should only be used for:
 **Impact:** All Tart VMs with `:copy` mode directories are affected. Git corruption can lead to data loss and broken repositories.
 
 **Code:** `runtime/tart/tart.go::ResolveCopyMount`, `runtime/tart/tart.go::Create`, `sandbox/lifecycle.go::Reset` (needs implementation)
+
+### A host-side change probe is blind to the in-VM workdir — `info` showed `Changes: no` on a dirty Tart sandbox, and `destroy` skipped its gate
+
+**Symptom:** A Tart sandbox with real, unapplied work (`yoloai diff x` lists a new file) reported `Changes: no` in `yoloai sandbox x info`, and `yoloai destroy x` tore it down **without** demanding `--abandon-unapplied`. Silent data loss.
+
+**Root cause:** Because [VirtioFS corrupts git repositories](#virtiofs-corrupts-git-repositories), the working copy of a Tart `:copy`/`:overlay` sandbox lives on **VM-local storage**, not on the host. The host-side `work/` tree is only the *seed* copied in at creation — it never receives the agent's edits. The old change probe ran `git status --porcelain` against that host seed, so it always saw the pristine baseline and answered "no changes." The destroy/replace gate trusted that answer and let the teardown through. (Host-bind-mount backends — Docker/Podman/Containerd/Seatbelt — are unaffected: their workdir *is* the host path, so a host probe is correct.)
+
+**Fix:** Route change detection through the runtime via `runtime.GitExecFor` (`patch.HasUnappliedWorkVia`), so the probe runs *inside* the VM where the real working copy lives, exactly like `diff`/`apply`. The probe is tri-state (`WorkClean`/`WorkDirty`/`WorkUnknown`): when the VM-local backend is **stopped**, its `GitExec` returns `runtime.ErrNotRunning` and the probe reports `WorkUnknown` — the change state genuinely can't be read from the host. Callers **fail safe** on `WorkUnknown`: `info`/`list` surface `Changes: unknown` (public `yoloai.ChangesUnknown`), and the destroy/replace and reset gates block with a "sandbox is stopped, so unapplied changes can't be verified (start it to check, or use --abandon-unapplied)" message rather than reading a stale host seed and silently proceeding.
+
+**Why not just read the host seed:** there is no coherent host-side view to read — that's the whole reason git runs in-VM (see the VirtioFS section above). A host probe isn't merely stale, it's structurally incapable of seeing in-VM edits.
+
+**Code:** `internal/sandbox/patch/changes.go::HasUnappliedWorkVia` (+ `WorkProbe` tri-state), `internal/runtime/runtime.go::GitExecFor`/`ErrNotRunning`, gates in `internal/sandbox/create/create.go`, `internal/sandbox/lifecycle/reset.go::NeedsConfirmation`, and the read-model in `internal/sandbox/status/status.go::detectWorkdirChanges`. The engine opens the backend best-effort (`Engine.TryEnsure`) before the gate so a running VM can be probed.
 
 ### Provisioned tool dirs live only on the *login* PATH (Cirrus base image)
 

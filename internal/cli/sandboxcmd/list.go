@@ -96,7 +96,7 @@ func matchesFilters(info *yoloai.SandboxInfo, f listFilters) bool {
 	if f.profile != "" && !matchesProfileFilter(info, f.profile) {
 		return false
 	}
-	if f.changes && info.Changes != yoloai.ChangesPresent {
+	if f.changes && info.Changes != yoloai.ChangesPresent && info.Changes != yoloai.ChangesUnknown {
 		return false
 	}
 	return true

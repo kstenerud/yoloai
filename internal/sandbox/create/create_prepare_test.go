@@ -51,7 +51,7 @@ func TestCheckUnappliedWork_CorruptEnvironmentIsError(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, store.EnvironmentFile), []byte("{not valid json"), 0o600))
 
-	err := checkUnappliedWork("box", dir)
+	err := checkUnappliedWork(context.Background(), nil, "box", dir)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "cannot verify unapplied work")
 }
@@ -61,7 +61,7 @@ func TestCheckUnappliedWork_CorruptEnvironmentIsError(t *testing.T) {
 func TestCheckUnappliedWork_AbsentEnvironmentIsNil(t *testing.T) {
 	dir := t.TempDir()
 
-	require.NoError(t, checkUnappliedWork("box", dir))
+	require.NoError(t, checkUnappliedWork(context.Background(), nil, "box", dir))
 }
 
 // --- buildNetworkConfig ---
