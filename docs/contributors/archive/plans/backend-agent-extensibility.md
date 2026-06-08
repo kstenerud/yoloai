@@ -1,11 +1,24 @@
 # Backend and Agent Extensibility Refactor
 
-Addresses five architectural issues that will cause friction when adding new backends
-or agents. Each issue is independent and can be implemented in any order.
+Addressed ten architectural issues that caused friction when adding new backends
+or agents. Each issue was independent.
+
+**COMPLETE (verified 2026-06-08).** All ten issues are resolved in the current code.
+A few implemented shapes diverged from the original proposal (noted per-issue): the
+`store.Meta` struct was renamed `store.Environment`; the seed/readiness predicates
+landed as `BackendCaps` *descriptor fields* (`HostFilesystem`,
+`AgentProvisionedByBackend`) rather than interface methods; the image-readiness verbs
+are `EnsureSetup`/`IsReady`.
 
 ---
 
-## Issue 1 — `meta.Backend` string comparisons outside the dispatch layer
+## Issue 1 — `meta.Backend` string comparisons outside the dispatch layer — ✅ DONE
+
+Resolved. `runtime.BackendCaps.HostFilesystem` exists (seatbelt `true`, all others
+`false`); `store.Environment.HostFilesystem` is populated at creation from the
+descriptor capability and read at the former `== "seatbelt"` sites (e.g.
+`create/context.go:59`, `lifecycle/start.go:170`). No `== "seatbelt"` branches remain
+in non-test code.
 
 **Problem:** Three locations check `meta.Backend == "seatbelt"` (or `backendName ==
 "seatbelt"`) to decide whether the sandbox lives on the host filesystem or inside a
@@ -80,7 +93,15 @@ switch that will only ever have two cases.
 
 ---
 
-## Issue 2 — Agent-specific switch statements in `sandbox/create.go`
+## Issue 2 — Agent-specific switch statements in `sandbox/create.go` — ✅ DONE
+
+Resolved. `agent.Definition` carries `ApplySettings func(settings map[string]any)`,
+`ShortLivedOAuthWarning bool`, and `SeedsAllAgents bool` (`internal/agent/agent.go`),
+each agent sets its own closure inline; the create layer reads the fields instead of
+switching on agent names.
+
+### Original spec
+
 
 **Problem:** When a new agent is added, `sandbox/create.go` must be updated in
 multiple places with agent-specific logic. Currently:
@@ -165,7 +186,16 @@ SeedsAllAgents bool // true for the shell agent only
 
 ---
 
-## Issue 3 — `ShouldSeedHomeConfig()` rename to `AgentProvisionedByBackend()`
+## Issue 3 — `ShouldSeedHomeConfig()` rename to `AgentProvisionedByBackend()` — ✅ DONE
+
+Resolved (with a shape change). The predicate landed as a `BackendCaps` descriptor
+field `AgentProvisionedByBackend bool` (`runtime.go:140`) rather than an interface
+method — docker/podman/containerd/tart `true`, seatbelt `false`; call sites read
+`desc.AgentProvisionedByBackend` (`create/prepare_dirs.go:125`,
+`provision/provision.go:351`).
+
+### Original spec
+
 
 **Problem:** The method name is opaque. The actual question is: "is the agent binary
 already present on the target, or does this backend provision it as part of image
@@ -211,7 +241,14 @@ read `if m.runtime.AgentProvisionedByBackend()` instead of
 
 ---
 
-## Issue 4 — `EnsureImage`/`ImageExists` rename to `Setup`/`IsReady`
+## Issue 4 — `EnsureImage`/`ImageExists` rename to `Setup`/`IsReady` — ✅ DONE
+
+Resolved. `EnsureImage`/`ImageExists` are gone from the interface and all backends;
+the interface now exposes `EnsureSetup`/`IsReady(ctx) (bool, error)`
+(`runtime.go:218–221`).
+
+### Original spec
+
 
 **Problem:** Container-specific terminology. `EnsureImage` and `ImageExists` have no
 natural meaning for process-based backends (seatbelt: "ensure prerequisites installed
@@ -279,7 +316,14 @@ change required.
 
 ---
 
-## Issue 5 — `backendName` passed to determine tmux socket path in bugreport
+## Issue 5 — `backendName` passed to determine tmux socket path in bugreport — ✅ DONE
+
+Resolved. `Runtime.TmuxSocket(sandboxDir string)` exists (`runtime.go:274`);
+`writeBugReportTmuxCapture(w, sb)` no longer takes a `backendName` parameter
+(`sandboxcmd/bugreport.go:129`).
+
+### Original spec
+
 
 **Problem:** `writeBugReportTmuxCapture()` in `internal/cli/sandbox_bugreport.go:284`
 receives `backendName` and checks `if backendName == "seatbelt"` to decide between a
@@ -306,7 +350,15 @@ passes the sandbox directory it already holds.
 
 ---
 
-## Issue 6 — Preserve `InstanceConfig` split optionality (low-cost, do now)
+## Issue 6 — Preserve `InstanceConfig` split optionality (low-cost, do now) — ✅ DONE
+
+Resolved. `InstanceConfig` fields are grouped with the Universal / Container-VM /
+containerd-specific comment bands (`runtime.go:84,99,111`); the "Backend-specific
+params in `New()`, not `InstanceConfig`" convention is documented in
+`docs/contributors/standards/go.md:407`.
+
+### Original spec
+
 
 **Context:** `InstanceConfig` is a flat struct mixing universal fields with
 container/VM fields with containerd-specific fields. A full split (base struct +
@@ -366,7 +418,14 @@ positional construction (TBD from grep), `docs/contributors/standards/go.md`.
 
 ---
 
-## Issue 7 — `meta.json` has no version field
+## Issue 7 — `meta.json` has no version field — ✅ DONE
+
+Resolved. `store.Environment` has `Version int` with `const metaVersion = 1` and a
+`migrate()` that forward-migrates legacy v0 files (bootstrapping `HostFilesystem`) and
+hard-errors on a newer-than-known version (`store/environment.go:18–112`).
+
+### Original spec
+
 
 **Problem:** The `Meta` struct (`sandbox/meta.go`) has no version field. Any schema
 change — adding a required field, removing a field, changing a field type — silently
@@ -413,7 +472,16 @@ not silently run an old binary against a sandbox created by a newer one.
 
 ---
 
-## Issue 8 — Untyped errors in `internal/cli/` defeat the exit-code system
+## Issue 8 — Untyped errors in `internal/cli/` defeat the exit-code system — ✅ DONE
+
+Resolved. The typed constructors (`NewUsageError`/`NewConfigError`/`NewPlatformError`/
+`NewAuthError`/etc.) are now used across `internal/cli/` where the exit-code category is
+clear, and the convention is documented in `docs/contributors/standards/go.md`
+("Error Types and Exit Codes"). Remaining plain `fmt.Errorf` calls are the legitimate
+operational-failure (exit 1) cases.
+
+### Original spec
+
 
 **Problem:** The codebase has a typed error system (`config/errors.go`: `UsageError`,
 `ConfigError`, `DependencyError`, `PlatformError`, `AuthError`, `PermissionError`)
@@ -454,7 +522,13 @@ required), `docs/contributors/standards/go.md`.
 
 ---
 
-## Issue 9 — `os.Setenv` mutation during sandbox creation
+## Issue 9 — `os.Setenv` mutation during sandbox creation — ✅ DONE
+
+Resolved. No `os.Setenv` calls remain anywhere under `internal/sandbox/`; credential
+defaults are accumulated in a local map and merged at env-assembly time.
+
+### Original spec
+
 
 **Problem:** `sandbox/create.go:190` mutates the live process environment to inject
 credential defaults:
@@ -480,7 +554,14 @@ behaviour.
 
 ---
 
-## Issue 10 — Unused sentinel errors in `sandbox/errors.go`
+## Issue 10 — Unused sentinel errors in `sandbox/errors.go` — ✅ DONE
+
+Resolved. The genuinely-dead sentinels (`ErrDockerUnavailable`, `ErrNoChanges`) were
+removed; `ErrContainerNotRunning` and `ErrMissingAPIKey` were kept and are now wired
+into real call sites (`exec.go`, `attach.go`, `terminal.go`, `create/prepare_dirs.go`).
+
+### Original spec
+
 
 **Problem:** `sandbox/errors.go` defines sentinel errors that appear to be unused:
 `ErrDockerUnavailable`, `ErrMissingAPIKey`, `ErrContainerNotRunning`, `ErrNoChanges`.

@@ -21,7 +21,7 @@ After the first successful `yoloai new`, the CLI prints a single onboarding nudg
 
 ### `yoloai system setup` (the only interactive path)
 
-The dedicated, opt-in wizard. It is the sole place that prompts the user. It inspects the host via `SystemClient.SetupStatus`, prompts for tmux config / default backend / default agent, then writes the answers via the non-interactive `SystemClient.Setup` (Q-F: prompts live in the CLI; the library `Setup` takes resolved options and never reads stdin). Re-runnable at any time to redo choices.
+The dedicated, opt-in wizard. It is the sole place that prompts the user, and it lives **entirely in the CLI** — there is no library `Setup`/`SetupStatus` verb (D65 collapsed the wizard into the app; the library exposes no setup ceremony). It discovers what the host can offer through the read model — `System().BackendTypes(…)` and `System().AgentTypes(…)` for the available choices, plus the host probes behind `yoloai doctor` — prompts for tmux config / default backend / default agent, then persists each answer through the ordinary config surface, `System().Config().Set(ctx, key, value)` (the same path as `yoloai config set`). Re-runnable at any time to redo choices.
 
 **`--agent`, `--backend`, `--tmux-conf` flags** skip the matching prompt by supplying the choice directly (for automation: Ansible, dotfiles scripts, CI). Backend/agent prompts are also skipped automatically when only one option is available.
 

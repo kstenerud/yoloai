@@ -9,11 +9,11 @@ Complete — the multi-quarter program (Go↔Python boundary, `runtime.Runtime` 
 
 ## Public API — Layer-1 honest completion
 
-The Layer-1 public Go surface was declared complete (D52) but the F1 leak detector is blind to type aliases, so `store.Meta` leaks via `yoloai.Info` and ~7 consumer capabilities still reach `internal/` with no public verb. Plan: [layer1-completion.md](layer1-completion.md). Governed by CRITIQUE round G1–G7 and working-notes D53. Sequence: fix the detector (truth first) → carved `store.Meta` read-model + missing verbs → tighten depguard → (separately) reshape the agent-interaction surface. Supersedes the now-complete [layer1-public-api.md](../../archive/plans/layer1-public-api.md).
+Complete — all in-scope phases landed (Phase 1 detector truth + carved `store.Meta` → public `yoloai.Environment` read-model; Phase 2 missing verbs; Phase 3 depguard tighten via `cli-sandbox-scope`/`cli-runtime-scope`; Phases 5/6 consistency + carried-forward F6/F7/F9). Phase 4 (agent-interaction reshape) was always a separate later effort with its own plan and is not part of this program. Archived under [../archive/plans/layer1-completion.md](../archive/plans/layer1-completion.md) (with implemented-shape divergences noted there). Supersedes [layer1-public-api.md](../archive/plans/layer1-public-api.md).
 
 ## Public API — Engine owns the lazy runtime
 
-The A2/A3 collapse (D67) put one lazy `Client` in place, but parked the laziness machinery (`ensure`/`tryEnsure`/`deps`/`runtime`/`Close`) on `Client` when it is Engine-shaped — so per-sandbox sub-handles (`Agent`/`Workdir`/`Network`/`Files`) reach two/three levels deep (`a.client.engine.SendInput(…)`). Plan: [engine-owns-runtime.md](engine-owns-runtime.md). Move lazy-runtime ownership into the `Engine` (build eagerly layout-only, open `runtime.New` lazily inside), repoint handles to hold `*sandbox.Engine`. Internal-only (public surface unchanged, zero CLI churn). Stage 2 (optional/separate) pushes the patch/files/network free-function calls down into Engine methods. Governed by working-notes D74 (refines D67).
+Complete — D74 landed (Stage 1 `9f67d28`/`45aab36`/`8479258`, Stage 2 `8d8106c`/`0b38b3e`/`5321a9e`); the `Engine` owns the lazy `runtime.New` connection and the sub-handles (`Agent`/`Workdir`/`Network`/`Files`) hold a `*sandbox.Engine`. Archived under [../archive/plans/engine-owns-runtime.md](../archive/plans/engine-owns-runtime.md).
 
 ## Parallel Agent Workflows
 
@@ -206,14 +206,7 @@ An opt-in command to install + register `runsc` in the macOS Docker VM so `conta
 
 ### Backend and agent extensibility refactor
 
-Five architectural issues that cause friction when adding new backends or agents. Each is independent. See [plan](backend-agent-extensibility.md) for full spec.
-
-Summary of issues:
-1. `meta.Backend` string comparisons (`== "seatbelt"`) scattered outside the dispatch layer — should use `meta.HostFilesystem` (a `BackendCaps`-derived field stored at creation time)
-2. Agent-specific switch statements in `sandbox/create.go` — should use an `ApplySettings` function field on `agent.Definition`
-3. Exit-code typed errors in `internal/cli/` — nearly all CLI errors exit 1 via plain `fmt.Errorf`; the typed error system (`sandbox/errors.go`) exists but is unused where it matters
-4. Several sentinel errors in `sandbox/errors.go` (`ErrDockerUnavailable`, `ErrMissingAPIKey`, `ErrContainerNotRunning`, `ErrNoChanges`) appear unused
-5. (See plan for issues 5–10)
+Complete — all ten architectural-cleanup issues are resolved in current code (verified 2026-06-08): `HostFilesystem` + `AgentProvisionedByBackend` `BackendCaps` fields replace the scattered `== "seatbelt"` / seed checks; `agent.Definition.ApplySettings`/`ShortLivedOAuthWarning`/`SeedsAllAgents` replace the create-layer agent switches; `EnsureSetup`/`IsReady` and `TmuxSocket(sandboxDir)` replace the image/tmux-socket verbs; `InstanceConfig` is field-grouped with a go.md convention; `store.Environment` carries `Version` + `migrate()`; CLI uses the typed exit-code errors; the `os.Setenv` mutation and the dead sentinels are gone. Archived under [../archive/plans/backend-agent-extensibility.md](../archive/plans/backend-agent-extensibility.md) (per-issue divergence notes there).
 
 ## Operational Hardening
 

@@ -1,9 +1,29 @@
 # Layer 1 — Honest completion (post-D52/D53)
 
-**Plan only — no code yet.** Supersedes [layer1-public-api.md](../../archive/plans/layer1-public-api.md),
-which delivered the spine but declared completion on a detector that cannot see the
-biggest remaining leak. Governed by the CRITIQUE round **G1–G7** and working-notes
-**D53**.
+**COMPLETE (2026-06-08).** Every phase in this program's scope (Phases 1–3, plus the
+opportunistic 5/6) has landed. Phase 4 (the agent-interaction reshape) was always a
+**separate later effort with its own plan** (decided 2026-05-30) and is therefore not a
+remaining item of *this* program. See the per-phase markers below. Supersedes
+[layer1-public-api.md](../../archive/plans/layer1-public-api.md), which delivered the
+spine but declared completion on a detector that could not see the biggest remaining
+leak. Governed by the CRITIQUE round **G1–G7** and working-notes **D53**.
+
+**Implemented-shape divergences from the original plan:**
+- The F1 fence test moved from `public_api_test.go` to `internal_leak_fence_test.go`;
+  `f1KnownLeaks` is empty and the detector now descends through `*types.Alias` via
+  `types.Unalias` (Phase 1a delivered).
+- `store.Meta` was renamed to `store.Environment`; the carved public read-model is
+  `yoloai.Environment` (built by the one-directional `environmentFromStore` converter),
+  surfaced via `Sandbox.Metadata() (*Environment, error)`. (Phase 1b delivered, just
+  under different names than the plan's `store.Meta`/`Info.Meta`.)
+- Agent-log read landed as `Agent().TerminalLog()` + the streaming `Agent().Logs()`
+  (G5 activity-stream carve, `a22ea04`), not a `Sandbox.AgentLog()` verb.
+- The stored prompt is **read-only** in the public surface (`Agent().Prompt()`); no
+  set verb was added — initial prompts are delivered at create time, matching the
+  Phase 4 "prompt injection stays internal" intent.
+- Git-tag handling landed as `Workdir().Tags()` + `Workdir().TransferTags()` rather
+  than a standalone `Workdir().CreateTag()`; tags are created by the agent inside the
+  workdir and transferred on apply.
 
 ## The two falsified claims
 
@@ -38,9 +58,12 @@ gate so the reach-ins fail the lint. Truth before cleanup.
 Each phase keeps `make check` green at its boundary (Phase 1 transiently reds the F1
 test between 1a and 1b — that red is the deliverable of 1a).
 
-### Phase 1 — Truth (G1)
+### Phase 1 — Truth (G1) — ✅ DONE
 
-**1a. Detector honesty *(hours; do first, land alone)*.**
+**1a. Detector honesty *(hours; do first, land alone)*. — ✅ DONE.** `walkType` has the
+`*types.Alias` case (unwraps via `types.Unalias` and recurses); `walkObj` descends
+through alias underlying types; `f1KnownLeaks` is empty. Fence now in
+`internal_leak_fence_test.go`.
 Teach `walkType`/`walkObj` to descend through aliases:
 - Add a `*types.Alias` case to `walkType` that unwraps via `types.Unalias` and recurses.
 - In `walkObj`, stop blanket-returning on `IsAlias()`; descend into the underlying
@@ -54,16 +77,19 @@ That red is the truth and the acceptance criterion for 1a. Commit 1a with `store
 (and any other newly-surfaced entries) added to `f1KnownLeaks` as **explicit, documented
 deferrals** so the suite is green — never silent. Phase 1b removes them.
 
-**1b. Carve `store.Meta` into a public read-model *(the core; see "The carve" below)*.**
+**1b. Carve `store.Meta` into a public read-model *(the core; see "The carve" below)*. — ✅ DONE.**
+Landed as `yoloai.Environment` (converter `environmentFromStore`; the internal struct was
+renamed `store.Meta` → `store.Environment`), surfaced via `Sandbox.Metadata()`.
 Promote to a curated `yoloai` read-model — **not** an alias of the storage struct (that
 publishes mechanism and welds disk/wire format), **not** a field-for-field mirror. When
 done, remove the `store.Meta` deferral from `f1KnownLeaks`. Surfaces it via the new
 `Sandbox.Metadata()` verb (Phase 2's load-bearing gap) and reframes what `Info` exposes.
 
-### Phase 2 — Missing verbs (G7)
+### Phase 2 — Missing verbs (G7) — ✅ DONE
 
-Add a public home for each capability that currently reaches `internal/` directly. Each
-is small; the metadata one *is* Phase 1b.
+Every capability now has a public home; the only remaining `internal/sandbox/store`
+imports under `internal/cli` + `internal/mcpsrv` are in `_test.go` files. Implemented
+verb names diverge from the table in a few places (see the divergence note at the top).
 
 | Capability | Reaches today | New public verb |
 |---|---|---|
@@ -89,9 +115,14 @@ Phase 2's verb series gave every reach-in a public home, so:
   CLI does over the `internal/sandbox` + `internal/runtime` subtrees through the public
   surface alone.
 
-### Phase 4 — Agent-interaction reshape (G5 + G6) *(SEPARATE later effort — own plan)*
+### Phase 4 — Agent-interaction reshape (G5 + G6) *(SEPARATE later effort — own plan)* — NOT part of this program
 
-**Scoped OUT of this program (decided 2026-05-30).** This program is Phases 1–3 (+
+**Scoped OUT of this program (decided 2026-05-30).** *(Status note: the G5 activity-stream
+half already carved out via `Agent().Logs()`/`StreamLogs` (`a22ea04`), and the G6
+setup-wizard types (`TmuxConfigClass`/`SetupChoice`/`SetupStatus`) were removed by the
+D65 collapse. The PTY-bridge / caller-stdio decoupling — `IOStreams` still binds the
+engine to the caller's `io.Reader/Writer` — remains the open work for that future plan,
+to be written before the daemon module starts.)* This program is Phases 1–3 (+
 opportunistic 5/6); the interaction reshape gets its own plan, to be written and decided
 **before the separate daemon module starts** (i.e. before any wire protocol exists). The
 detail below is preserved as the seed for that future plan.
@@ -125,13 +156,15 @@ surfaces (D53):
   into `Client.CloneSandbox` (cross-backend destroy), internal `Force` removed. Enum homes left as-is
   (already principled). See `critiques-resolved.md`.
 
-### Phase 6 — Carried-forward (F6/F7/F9) *(verify before next critique-empty)*
+### Phase 6 — Carried-forward (F6/F7/F9) — ✅ DONE
 
-- **F6:** split `internal/sandbox/lifecycle/lifecycle.go` (1474-line god-file, six
-  concerns; collapse three near-identical `patchConfig*`) and `create/create_prepare.go`.
-- **F7:** extend the RUNTIME_CONFIG drift fence to `AGENT_STATUS_SCHEMA_VERSION` (an
-  unfenced cross-language Go+Python constant).
-- **F9:** fix stale module-root import paths in `development-principles.md` §2.
+- **F6:** done — lifecycle dissolved into the `internal/sandbox/lifecycle/` leaf (the old
+  1474-line god-file is gone; `internal/sandbox/lifecycle.go` is now a 14-line alias
+  shim).
+- **F7:** done — `AGENT_STATUS_SCHEMA_VERSION` drift fence lives in
+  `internal/sandbox/status/schema_version_test.go`.
+- **F9:** done — `development-principles.md` §2 uses current `internal/…` paths (no stale
+  module-root import paths).
 
 ## The carve — `store.Meta` → public read-model (Phase 1b detail)
 
