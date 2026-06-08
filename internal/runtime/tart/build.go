@@ -53,8 +53,11 @@ var provisionCommands = []string{
 	`which brew >/dev/null 2>&1 || NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"`,
 
 	// Install pinned tools. node@22 is keg-only; its bin dir is added to the
-	// login PATH below rather than relying on brew link.
-	`eval "$(/opt/homebrew/bin/brew shellenv)" && brew install tmux jq ripgrep node@22`,
+	// login PATH below rather than relying on brew link. HOMEBREW_NO_AUTO_UPDATE
+	// skips the formula-index refetch that otherwise runs on every brew install;
+	// the base is rebuilt wholesale when provisionCommands change, so a stale
+	// index never persists.
+	`eval "$(/opt/homebrew/bin/brew shellenv)" && HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ENV_HINTS=1 brew install tmux jq ripgrep node@22`,
 
 	// Install Claude Code via the native installer (standalone binary in
 	// ~/.local/bin, self-updating, no node dependency).
