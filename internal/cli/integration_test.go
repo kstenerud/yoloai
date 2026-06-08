@@ -33,15 +33,20 @@ func cliSetup(t *testing.T) (projectDir string) {
 
 	// Pre-seed the build-inputs checksum in the per-test HOME. Same
 	// rationale as the TestMain bootstrap (integration_main_test.go:88):
-	// `make integration` builds yoloai-base before this test binary
-	// starts; every per-test cliSetup creates a fresh HOME via
-	// t.TempDir() and so loses the pre-seed unless we re-apply it
-	// here. Without this, EnsureSetup re-builds against the existing
-	// daemon image and intermittently hits the AlreadyExists race
-	// documented in backend-idiosyncrasies.md "Docker daemon races
-	// on AlreadyExists when rebuilding an existing tag with identical
-	// content".
-	if testutil.IntegrationBackendType() == "" || testutil.IntegrationBackendType() == "docker" {
+	// `make integration`/`make integration-podman` builds yoloai-base
+	// before this test binary starts; every per-test cliSetup creates a
+	// fresh HOME via t.TempDir() and so loses the pre-seed unless we
+	// re-apply it here. Without the seed, EnsureSetup sees NeedsBuild ==
+	// true and rebuilds. On docker that rebuild intermittently hits the
+	// AlreadyExists race documented in backend-idiosyncrasies.md "Docker
+	// daemon races on AlreadyExists when rebuilding an existing tag with
+	// identical content". On podman it's worse: buildBaseImage shells out
+	// to `podman build` under the overridden HOME, whose rootless storage
+	// graphroot follows $HOME — a fresh empty store — forcing a full cold
+	// rebuild (re-pull + every RUN) that blows the test timeout. The image
+	// already exists in the service storage that imageExists queries via
+	// the socket, so seeding the checksum lets Setup skip the build.
+	if bt := testutil.IntegrationBackendType(); bt == "" || bt == "docker" || bt == "podman" {
 		layout := config.NewLayoutFor(filepath.Join(tmpHome, ".yoloai", "library"), tmpHome)
 		require.NoError(t, os.MkdirAll(layout.CacheDir(), 0750))
 		dockerrt.RecordBuildChecksum(layout, "")
