@@ -34,7 +34,10 @@ but this test still proves the §2 enforced-file fallbacks against real old-bina
 This proves the backward-compat fallbacks (§2) actually work against real
 old-binary sandboxes. Record the outcome here when run:
 
-> _Cross-version test results: (not yet run)_
+> _Cross-version test results: migration confirmed working on Linux and macOS
+> (2026-06-08) — old-binary sandboxes drive correctly under the new binary; the
+> v1→v2 `agent_launch_prefix` backfill (§3) carries pre-W1b sandboxes across the
+> launch-prefix fallback removal on both platforms._
 
 ## 2. Cross-version format / version gates on this branch
 
@@ -133,7 +136,7 @@ a string written. In practice the migration only touches macOS sandboxes.
 
 ## 4. Release checklist
 
-- [ ] §1 prerelease cross-version test run and results recorded.
+- [x] §1 prerelease cross-version test run and results recorded (Linux + macOS, 2026-06-08).
 - [ ] `docs/BREAKING-CHANGES.md` covers this branch's public-API reshape (layer-1) and the
       `agent_files` inner json-tag change.
 - [x] W1b shipped as the v1→v2 migration step (§3): `LibrarySchemaVersion` bumped to 2,
