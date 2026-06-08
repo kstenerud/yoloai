@@ -292,6 +292,20 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 		return fmt.Errorf("parse instance config: %w", err)
 	}
 
+	// Regenerate derived artifacts (SBPL profile + monitor scripts) from the
+	// persisted config on every Start. They are pure functions of cfg and the
+	// host environment, not user state, so regenerating here lets a restart on
+	// a newer binary self-heal sandboxes created by an older one — e.g. picking
+	// up the /private/var SBPL fix or sandbox-setup.py changes after a data-dir
+	// migration relocated (but did not rewrite) the frozen Create-time files.
+	profile := GenerateProfile(cfg, sandboxPath, r.homeDir)
+	if err := fileutil.WriteFile(filepath.Join(sandboxPath, backendDir, profileFileName), []byte(profile), 0600); err != nil {
+		return fmt.Errorf("regenerate profile: %w", err)
+	}
+	if err := writeSandboxScripts(sandboxPath); err != nil {
+		return fmt.Errorf("regenerate sandbox scripts: %w", err)
+	}
+
 	// Open log file for stderr capture
 	logPath := filepath.Join(sandboxPath, backendDir, processLogFileName)
 	logFile, err := fileutil.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600) //nolint:gosec // G304: sandboxPath is ~/.yoloai/sandboxes/<name>

@@ -81,6 +81,7 @@ row to the index.
 | Agent silently fails to start on Tart (claude/node not found) | [Tart: provisioned tool dirs live only on the login PATH](#provisioned-tool-dirs-live-only-on-the-login-path-cirrus-base-image) |
 | Swift PM commands fail with sandbox-exec nesting errors on Seatbelt | [Seatbelt: macOS sandbox-exec doesn't nest](#macos-sandbox-exec-doesnt-nest--swift-pm-needs-the-swift-wrapper-sourced) |
 | Agent dies silently/SIGTRAP (exit 133) on Seatbelt at launch; ICU/timezone deny in unified log | [Seatbelt: SBPL subpaths need vnode-resolved paths](#agent-dies-silently-sigtrap--sbpl-subpath-rules-must-use-vnode-resolved-paths) |
+| Migrated/upgraded Seatbelt sandbox still hits an already-fixed bug (SIGTRAP, `os.symlink FileExistsError`) on restart | [Seatbelt: regenerate derived artifacts on Start](#seatbelt-derived-artifacts-must-be-regenerated-on-start-not-frozen-at-create) |
 | VS Code tunnel re-prompts for login on every container restart | [VS Code CLI: hostname-based keychain encryption](#vs-code-cli-file-keychain-uses-hostname-in-encryption-key) |
 | Second sandbox tunnel loops `error access singleton` forever | [VS Code CLI: singleton lock blocks concurrent tunnels](#vs-code-cli-singleton-lock-blocks-concurrent-tunnels) |
 | DNS works but HTTPS to api.anthropic.com times out | [DNS: timeout = API unreachable, not DNS](#request-timed-out-in-claude-code--api-unreachable-not-dns-failure) |
@@ -1590,6 +1591,18 @@ VirtioFS should only be used for:
 **Fix:** Wrap every `systemReadPaths()` entry in `resolvePathVariants()` so the resolved `/private/var/...` variant is emitted alongside the original — matching what every other profile section already does.
 
 **Code:** `runtime/seatbelt/profile.go::writeProfileSystemPaths` (+ `resolvePathVariants`); regression test `seatbelt_test.go::TestGenerateProfile_SystemPathsSymlinkResolved`
+
+---
+
+### Seatbelt derived artifacts must be regenerated on Start, not frozen at Create
+
+**Symptom:** A Seatbelt sandbox created by an older yoloai binary still hits an already-fixed bug after upgrading — e.g. the SIGTRAP above, or `os.symlink ... FileExistsError` at `sandbox-setup.py` — even after `yoloai system migrate` relocated its data dir. Destroy + recreate works; restart/attach does not.
+
+**Explanation:** Unlike container backends (where `runtime-config.json` holds container-internal paths and the host dir is only a bind-mount source resolved fresh each Start), Seatbelt runs on the host and bakes host-absolute artifacts into the sandbox dir at **Create** time: the SBPL `profile.sb` and the monitor scripts (`sandbox-setup.py`, etc.). `Start` originally just re-read them off disk, so any bug baked in at Create — a profile missing the `/private/var` rules, a non-idempotent symlink step — persisted across upgrades. Data-dir migration relocates the directory but does not rewrite these frozen files, so a migrated old sandbox can never come up clean.
+
+**Fix:** `Start` regenerates the derived artifacts from the persisted `InstanceConfig` before launch — `GenerateProfile(cfg, sandboxPath, r.homeDir)` + `writeSandboxScripts(sandboxPath)`. They are pure functions of config and host environment, not user state, so a restart on a newer binary self-heals sandboxes created by an older one. Independently, the `sandbox-setup.py` symlink guards use `os.path.lexists` (not `os.path.exists`, which follows symlinks and misses a dangling link) so re-running setup is idempotent.
+
+**Code:** `runtime/seatbelt/seatbelt.go::Start` (regen block after config load); `runtime/monitor/sandbox-setup.py` (`os.path.lexists` guards in `SeatbeltBackend.setup`)
 
 ---
 

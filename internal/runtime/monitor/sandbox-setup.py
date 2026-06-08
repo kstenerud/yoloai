@@ -566,13 +566,13 @@ class SeatbeltBackend(Backend):
             for name in os.listdir(original_bin):
                 src = os.path.join(original_bin, name)
                 dst = os.path.join(new_bin, name)
-                if os.access(src, os.X_OK) and not os.path.exists(dst):
+                if os.access(src, os.X_OK) and not os.path.lexists(dst):
                     os.symlink(src, dst)
 
         # Symlink git config
         original_gitconfig = os.path.join(original_home, ".gitconfig")
         new_gitconfig = os.path.join(new_home, ".gitconfig")
-        if os.path.isfile(original_gitconfig) and not os.path.exists(new_gitconfig):
+        if os.path.isfile(original_gitconfig) and not os.path.lexists(new_gitconfig):
             os.symlink(original_gitconfig, new_gitconfig)
 
         original_git_dir = os.path.join(original_home, ".config", "git")
@@ -580,7 +580,7 @@ class SeatbeltBackend(Backend):
         new_git_dir = os.path.join(new_config_dir, "git")
         if os.path.isdir(original_git_dir):
             os.makedirs(new_config_dir, exist_ok=True)
-            if not os.path.exists(new_git_dir):
+            if not os.path.lexists(new_git_dir):
                 os.symlink(original_git_dir, new_git_dir)
 
         # Symlink agent state dir
@@ -599,7 +599,7 @@ class SeatbeltBackend(Backend):
                     continue
                 src = os.path.join(home_seed, name)
                 dst = os.path.join(new_home, name)
-                if not os.path.exists(dst):
+                if not os.path.lexists(dst):
                     os.symlink(src, dst)
 
         # Create Swift wrapper to auto-add --disable-sandbox when running in Seatbelt
