@@ -1781,6 +1781,15 @@ def test_stop_start(t: Test, spec: BackendSpec) -> None:
     its unique coverage, and it also folds in the basic new→diff→apply→log→info
     path that the old standalone `full_workflow` test asserted (dropped to halve
     the per-backend boot+inference cost — stop_start was already a superset).
+
+    The second prompt also commits a change and creates an annotated git tag
+    inside the work copy, so `diff --log` exercises the tag-read pipeline
+    (DF12: ListTagsBeyondBaseline + GetTagMessage). On Tart that pipeline runs
+    git *inside the VM* via runtime.GitExecFor; before DF12 it read the empty
+    host staging copy and found nothing. The tag creation is chained ahead of
+    the completion sentinel, so the existing wait_for_sentinel already gates on
+    it — a flaked tag step fails as a sentinel timeout, not a confusing
+    tag-assertion miss.
     """
     project = t.project(f"stop-start-{spec.label}")
     name = t.sandbox(f"stop-start-{spec.label}")
@@ -1801,21 +1810,43 @@ def test_stop_start(t: Test, spec: BackendSpec) -> None:
 
     # restart = stop + start internally.  A new prompt with a different sentinel
     # proves the agent ran successfully with injected credentials after restart.
-    # The prompt writes to the work copy so diff/apply can verify.
+    # The prompt writes to the work copy, then commits it and tags the commit so
+    # diff/apply and the tag-read pipeline (DF12) can verify. The tag step is
+    # chained before the sentinel, so the sentinel only fires once the tag
+    # exists. git identity is pre-configured in the work copy (yoloai sets
+    # user.name/user.email on the baseline), so the commit needs no -c flags.
     sentinel2 = "done2"
-    prompt2 = _prompt(exdir, "echo restarted > output2.txt", sentinel=sentinel2)
+    work2 = (
+        "echo restarted > output2.txt"
+        " && git add -A && git commit -qm checkpoint"
+        " && git tag -a v1 -m smoketag"
+    )
+    prompt2 = _prompt(exdir, work2, sentinel=sentinel2)
     r = t.run("restart", name, "--prompt", prompt2, timeout=spec.new_timeout())
     t.assert_ok(r, "restart")
 
     # Restart adds stop+start overhead on top of model inference, so allow extra time.
     t.wait_for_sentinel(name, sentinel=sentinel2, timeout=spec.sentinel_timeout() + 60, stall_grace_secs=spec.sentinel_stall_grace())
 
-    # Verify diff shows the restarted agent's output
+    # Verify diff shows the restarted agent's output (now committed, so it shows
+    # in the cumulative baseline→worktree diff).
     r = t.run("diff", name)
     t.assert_ok(r, "diff after restart")
     t.assert_in("output2.txt", r.stdout, "diff after restart")
 
-    # Apply and verify the file lands in the project directory
+    # DF12: the annotated tag created inside the sandbox must be discoverable
+    # from the host. `diff --log --json` lists commits beyond baseline with their
+    # tags; the tag's name (v1) and annotated message (smoketag) both come from
+    # git run in the sandbox's git context — in the VM on Tart. Asserting the
+    # message specifically covers GetTagMessage, the second half of the pipeline.
+    r = t.run("diff", name, "--log", "--json")
+    t.assert_ok(r, "diff --log --json for tags")
+    t.assert_in("v1", r.stdout, "tag name beyond baseline (ListTagsBeyondBaseline)")
+    t.assert_in("smoketag", r.stdout, "annotated tag message (GetTagMessage)")
+
+    # Apply and verify the file lands in the project directory. The fixture
+    # project isn't a git repo, so apply auto-uses --no-commit (working-tree
+    # patch); the committed output2.txt is part of that patch and still lands.
     r = t.run("apply", name, "--yes", "--include-uncommitted")
     t.assert_ok(r, "apply after restart")
 
