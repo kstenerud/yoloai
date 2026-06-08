@@ -244,6 +244,11 @@ type CacheUsage struct {
 	// ImageBytes is reclaimable only by `prune --images`, which forces a base
 	// rebuild (base/profile image layers). -1 if unknown.
 	ImageBytes int64
+	// StaleBytes is reclaimable by `prune --stale-bases`: superseded base images
+	// the current resolved base no longer references (e.g. an old-macOS Tart base
+	// left behind when the host OS — and thus the resolved codename — changed).
+	// Removing them never forces a rebuild of the current base. 0 = none.
+	StaleBytes int64
 	Detail     string // optional human-readable breakdown ("32 images, 304 snapshots")
 }
 
@@ -307,6 +312,30 @@ func PruneCacheFor(ctx context.Context, rt Runtime, includeImages, dryRun bool, 
 		return p.PruneCache(ctx, includeImages, dryRun, output)
 	}
 	return 0, nil
+}
+
+// StaleBasePruner is an optional interface for backends that can accumulate
+// superseded base images — bases the current resolved base no longer
+// references. Tart implements it: when the host macOS major (and thus the
+// resolved Cirrus codename) changes, the previous macos-<codename>-base OCI
+// image lingers, matched by neither the orphan VM sweep (it's an image, not a
+// yoloai-* VM) nor `prune --images` (which only targets the *current* base).
+// This removal is opt-in (`prune --stale-bases`) and never automatic — a
+// multi-GB base a user may still want to switch back to is kept until asked.
+//
+// Returns the removed (or, under dryRun, removable) image refs and the bytes
+// reclaimed (best-effort; 0 when unmeasurable or dry-run).
+type StaleBasePruner interface {
+	PruneStaleBases(ctx context.Context, dryRun bool, output io.Writer) (refs []string, reclaimed int64, err error)
+}
+
+// PruneStaleBasesFor calls rt.PruneStaleBases if implemented; for backends
+// without superseded bases it's a no-op returning (nil, 0, nil).
+func PruneStaleBasesFor(ctx context.Context, rt Runtime, dryRun bool, output io.Writer) ([]string, int64, error) {
+	if p, ok := rt.(StaleBasePruner); ok {
+		return p.PruneStaleBases(ctx, dryRun, output)
+	}
+	return nil, 0, nil
 }
 
 // LogTailer is an optional interface for backends that can return recent

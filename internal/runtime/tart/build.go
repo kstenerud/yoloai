@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -23,12 +24,32 @@ import (
 )
 
 const (
-	// defaultBaseImage is the Cirrus Labs macOS base image pulled on first run.
-	defaultBaseImage = "ghcr.io/cirruslabs/macos-sequoia-base:latest"
+	// newestKnownCodename is the most recent macOS the codename table knows. It
+	// is the fallback when the host's macOS major isn't mapped (an OS newer or
+	// older than anything in macOSCodenames) — pick the newest base we know
+	// rather than guessing. A user on an unmapped host can always pin tart.image.
+	newestKnownCodename = "tahoe"
+
+	// defaultBaseImage is the host-match fallback: the newest base yoloai knows.
+	// The actual default is host-matched (see resolveBaseImage); this constant is
+	// the image used when the host major is unmapped.
+	defaultBaseImage = "ghcr.io/cirruslabs/macos-" + newestKnownCodename + "-base:latest"
 
 	// provisionedImageName is the local VM name for the provisioned base image.
 	provisionedImageName = "yoloai-base"
 )
+
+// macOSCodenames maps a macOS major version to the Cirrus Labs image codename.
+// Cirrus publishes one repo per macOS major (macos-<codename>-base) with no
+// rolling "latest macOS" tag, so the major→codename mapping must live here.
+// Extend it when Apple ships a new major and Cirrus publishes its base image;
+// until then, an unmapped host falls back to newestKnownCodename and users can
+// pin tart.image to the new repo the day it appears (no yoloai release needed).
+var macOSCodenames = map[int]string{
+	14: "sonoma",
+	15: "sequoia",
+	26: "tahoe",
+}
 
 // provisionCommands are the shell commands to install dev tools in the base VM.
 // Each entry is run via tart exec as the admin user. They install Homebrew,
@@ -176,13 +197,51 @@ func (r *Runtime) vmExistsNamed(ctx context.Context, vmName string) (bool, error
 	return false, nil
 }
 
-// resolveBaseImage returns the base image to use, checking for a config
-// override in tart.image.
+// resolveBaseImage returns the base image to use. A tart.image config override
+// always wins; otherwise the default is matched to the host's macOS major so
+// the guest is new enough to run the host's Xcode (which yoloai mounts into the
+// VM). The guest tracks host OS upgrades automatically — the developer already
+// keeps the host current for App Store submission, so no yoloai release is
+// needed to follow a new macOS. The provision checksum hashes this string, so a
+// changed resolution triggers a rebuild on the next setup.
 func (r *Runtime) resolveBaseImage(_ string) string {
 	if r.baseImageOverride != "" {
 		return r.baseImageOverride
 	}
-	return defaultBaseImage
+	hostMajor := r.hostMajor
+	if hostMajor == nil {
+		hostMajor = hostMacOSMajor
+	}
+	return hostMatchedBaseImage(hostMajor)
+}
+
+// hostMatchedBaseImage builds the Cirrus base-image reference for the host's
+// macOS major, falling back to newestKnownCodename when the major can't be
+// determined or isn't mapped.
+func hostMatchedBaseImage(hostMajor func() (int, error)) string {
+	codename := newestKnownCodename
+	if major, err := hostMajor(); err == nil {
+		if name, ok := macOSCodenames[major]; ok {
+			codename = name
+		}
+	}
+	return fmt.Sprintf("ghcr.io/cirruslabs/macos-%s-base:latest", codename)
+}
+
+// hostMacOSMajor returns the host's macOS major version via `sw_vers
+// -productVersion` (e.g. "26.1" → 26). The tart backend only runs on macOS, so
+// sw_vers is always present.
+func hostMacOSMajor() (int, error) {
+	out, err := exec.Command("sw_vers", "-productVersion").Output()
+	if err != nil {
+		return 0, fmt.Errorf("sw_vers: %w", err)
+	}
+	major, _, _ := strings.Cut(strings.TrimSpace(string(out)), ".")
+	n, err := strconv.Atoi(major)
+	if err != nil {
+		return 0, fmt.Errorf("parse macOS version %q: %w", string(out), err)
+	}
+	return n, nil
 }
 
 // tartBaseChecksumPath returns the path where the tart base image build

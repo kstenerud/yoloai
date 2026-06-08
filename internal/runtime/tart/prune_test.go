@@ -78,7 +78,14 @@ esac
 
 	layout := config.NewLayout(filepath.Join(dir, ".yoloai"))
 	require.NoError(t, os.MkdirAll(layout.CacheDir(), 0700))
-	return &Runtime{tartBin: binPath, layout: layout, homeDir: dir}, deleteLog
+	// Pin the host major to tahoe (26) so resolveBaseImage deterministically
+	// returns defaultBaseImage regardless of the machine running the test.
+	return &Runtime{
+		tartBin:   binPath,
+		layout:    layout,
+		homeDir:   dir,
+		hostMajor: func() (int, error) { return 26, nil },
+	}, deleteLog
 }
 
 func deletedNames(t *testing.T, deleteLog string) []string {

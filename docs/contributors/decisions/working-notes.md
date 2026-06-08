@@ -604,6 +604,20 @@ Applied for 0.4.0:
 
 **Consequences.** Breaking (removes `new --yes`/`destroy --yes`; scripts re-express intent as `--allow-dirty` / `--abandon-unapplied`; `prune --yes` no longer empties trash — add `--trash`). Tracked in `docs/BREAKING-CHANGES.md`. `standards/cli.md`'s confirmation-command family is rewritten around the selector-vs-prompt split. Builds on [D76] and the dangerous-option-naming discipline; the library API already drew this line (`AbandonUnappliedWork`, `Overwrite`, `Rebuild`) — this brings the CLI's `--yes` usage into the same discipline.
 
+## D78 — The Tart base image is matched to the host's macOS, not hardcoded; superseded bases are opt-in reclaimable
+
+**Date:** 2026-06-08. **Status:** Implemented.
+
+**Problem.** The default Tart base was a hardcoded `ghcr.io/cirruslabs/macos-sequoia-base:latest`. Cirrus publishes one repo per macOS major (`macos-<codename>-base`) with **no rolling "latest macOS" tag**, and publication lags Apple's release. So the guest macOS was coupled to the yoloai *binary version*: getting a newer guest meant shipping a yoloai release. That fails hard against Apple's app-submission policy — a new Xcode (which requires a new macOS to run) gates submissions on a deadline yoloai's release cadence can't track. Since yoloai mounts the *host's* Xcode.app into the VM, the only thing the guest macOS must satisfy is "new enough to run the host's Xcode."
+
+**Decision.** Default the guest base to the **host's macOS major**, read at runtime via `sw_vers` and mapped through a small `major→codename` table (`internal/runtime/tart/build.go`). The developer already keeps the host current for the *same* Apple-policy reason, so the guest tracks host OS upgrades with no yoloai release. A `tart.image` config override still wins and is the documented day-zero escape hatch for a brand-new macOS (set it the day Cirrus ships the repo). Unmapped host majors fall back to the newest codename the table knows (`newestKnownCodename`). The provision checksum already hashes the resolved image string, so a changed resolution auto-triggers a rebuild.
+
+**Stale bases.** A host-OS upgrade leaves the previous `macos-<codename>-base` OCI image (~30 GB) on disk, matched by neither the orphan VM sweep (it's an image, not a `yoloai-*` VM) nor `prune --images` (which only targets the *current* base). Reclaiming it is **opt-in** via a new `system prune --stale-bases` selector (consistent with [D77]'s selector-not-prompt rule) — never automatic, because a multi-GB base a user may want to switch back to shouldn't vanish on a routine prune. `doctor` surfaces superseded bases (size + the exact reclaim command) as a read-only advisory, fed by a new `CacheUsage.StaleBytes`. Detection (`staleBaseImagesFrom`) targets only the `ghcr.io/cirruslabs/macos-*-base` family, excluding `-xcode` flavors and unrelated images.
+
+**Rejected.** (a) Registry/GitHub-API discovery of the newest `macos-*-base` to erase the codename table — adds a network dependency and failure mode at setup for a table that gains one row per year; the override already covers the gap. Left as a possible future enhancement. (b) Auto-removing the superseded base on rebuild — violates [D77]'s "widening destructive scope is opt-in"; a user may still want the old base. (c) Bumping the hardcoded default on a cadence — the whole point is to *decouple* the guest OS from the release cadence.
+
+**Consequences.** Behavior change to the default base (was: always sequoia; now: host-matched, newest-known `tahoe` fallback) — tracked in `docs/BREAKING-CHANGES.md`. New public surface: `SystemPruneOptions.IncludeStaleBases`, `BackendDiskUsage.StaleBytes`, `PruneKindStaleBase`, and the `runtime.StaleBasePruner` optional interface. Both `doctor` and `system disk` surface the superseded-base footprint (`system disk` adds a `STALE` column + `stale_bytes` JSON field; the column shows `-` for backends with no superseded bases).
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.

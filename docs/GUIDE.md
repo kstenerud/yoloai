@@ -36,7 +36,7 @@ Full reference for commands, flags, configuration, and internals. For a quick ov
 | `yoloai system check` | Verify prerequisites for CI/CD pipelines |
 | `yoloai system disk` | Report on-disk usage per backend (sandboxes + image cache + snapshots) |
 | `yoloai doctor` | Capability status for all backends + a read-only repair advisory (see [Repair & cleanup](#repair--cleanup)) |
-| `yoloai system prune` | Clean up leftover state across all backends (`--dry-run`, `--yes`, `--images`, `--trash`) — see [Repair & cleanup](#repair--cleanup) |
+| `yoloai system prune` | Clean up leftover state across all backends (`--dry-run`, `--yes`, `--images`, `--stale-bases`, `--trash`) — see [Repair & cleanup](#repair--cleanup) |
 | `yoloai system setup` | Re-run interactive first-run setup |
 | `yoloai sandbox` (alias: `sb`) | Sandbox inspection |
 | `yoloai sandbox list` | List sandboxes and their status |
@@ -547,7 +547,7 @@ yoloai config reset env.OLLAMA_API_BASE
 | `os` | `linux` | Guest OS: `linux` (default), `mac` (requires macOS host) |
 | `container_backend` | (auto-detect) | Linux container backend: `docker`, `podman`, or `""` (auto-detect, prefers docker) |
 | `isolation` | `container` | Isolation mode: `container` (runc), `container-enhanced` (gVisor), `container-privileged` (Docker `--privileged`, use for Docker-in-Docker), `vm` (Kata+QEMU), `vm-enhanced` (Kata+Firecracker) |
-| `tart.image` | (empty) | Custom base VM image for tart backend |
+| `tart.image` | (empty → host-matched) | Custom base VM image for tart backend. Empty = the Cirrus `macos-<codename>-base` matching the host's macOS (so the guest can run the host's Xcode), falling back to the newest macOS yoloai knows. Set it to pin a specific macOS — e.g. stay on an older base, or jump to a brand-new one (`ghcr.io/cirruslabs/macos-tahoe-base:latest`) the day Cirrus publishes it, without waiting for a yoloai release |
 | `env.<NAME>` | (empty) | Environment variable forwarded to container |
 | `agent_args.<AGENT>` | (empty) | Default CLI args for an agent (e.g., `agent_args.aider`) |
 | `resources.cpus` | (empty) | CPU limit (e.g., `4`, `2.5`) |
@@ -659,9 +659,10 @@ The cache directory persists across agent restarts (`yoloai stop` / `yoloai star
 
 Container backends accumulate disk over time — image layers, overlayfs snapshots, BuildKit cache, retired volumes. yoloai exposes two commands for this:
 
-- **`yoloai system disk`** — read-only report of what each available backend is consuming, plus the size of `~/.yoloai/library/sandboxes/`. The `CACHE` column is reclaimable with no rebuild; the `IMAGES` column needs `--images` and forces a rebuild. Run this when `df` looks unhappy to identify which backend is the culprit.
+- **`yoloai system disk`** — read-only report of what each available backend is consuming, plus the size of `~/.yoloai/library/sandboxes/`. The `CACHE` column is reclaimable with no rebuild; the `IMAGES` column needs `--images` and forces a rebuild; the `STALE` column (Tart, after a host-macOS upgrade) is reclaimable with `--stale-bases` and no rebuild. Run this when `df` looks unhappy to identify which backend is the culprit.
 - **`yoloai system prune`** — always reclaims each backend's *no-rebuild* cache: build cache, retired volumes, and dangling images. Crucially, this does **not** force a rebuild — the base image is kept, so the next `yoloai new` still runs without rebuilding. This is the safe default.
 - **`yoloai system prune --images`** — additionally removes each backend's base/profile images. This forces yoloai-base to rebuild on the next `yoloai new`, so expect a multi-minute first run afterwards. Prune always runs across every available backend; `--dry-run` previews what would be removed.
+- **`yoloai system prune --stale-bases`** — removes *superseded* base images left behind on the Tart backend when the host's macOS (and thus the matched base codename) changed. Unlike `--images`, this never touches the *current* base, so it forces no rebuild — it just reclaims the old macOS base (~30 GB) you upgraded away from. `yoloai doctor` flags these and prints this command.
 
 `--images` is intentionally aggressive: backends don't tag their content by who created it, so it removes ALL image content the backend tracks, not only yoloai's. On a host dedicated to yoloai (CI, dev VM) that's exactly what you want; on a shared workstation, prefer the backend's own prune (`docker system prune`, `podman system prune`, etc.) so you don't nuke unrelated projects' images.
 
@@ -672,7 +673,7 @@ Over time a yoloai install accumulates cruft: orphaned containers/VMs from crash
 **`yoloai doctor`** is the place to start. It's read-only — it never deletes anything — and reports four things alongside the backend capability status:
 
 - **Reclaimable now** — orphaned resources, lock files, temp dirs, and never-initialized sandbox dirs. Fix: `yoloai system prune`.
-- **Reclaimable space** — split into two tiers: cached data freed by plain `yoloai system prune` (no rebuild), and base images freed by `yoloai system prune --images` (forces a base rebuild).
+- **Reclaimable space** — split into tiers: cached data freed by plain `yoloai system prune` (no rebuild), base images freed by `yoloai system prune --images` (forces a base rebuild), and — on Tart, after a host-macOS upgrade — superseded base images freed by `yoloai system prune --stale-bases` (no rebuild).
 - **Unreviewed work** — broken sandbox dirs that still hold changes the agent made. yoloai refuses to touch these; review with `yoloai diff <name>` and remove with `yoloai destroy <name>` once you're done.
 - **Trash** — dirs that were quarantined rather than deleted (see below).
 

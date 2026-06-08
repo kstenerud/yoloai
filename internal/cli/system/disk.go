@@ -22,8 +22,10 @@ func newSystemDiskCmd() *cobra.Command {
 Surfaces how much space each container backend is consuming so you can spot
 when it's time to prune. The CACHE column is reclaimable by 'yoloai system
 prune' with no rebuild (build cache, volumes); the IMAGES column is reclaimable
-only by 'yoloai system prune --images', which forces a base rebuild. Sizes
-include all content the backend tracks — not just yoloai's — because the
+only by 'yoloai system prune --images', which forces a base rebuild. The STALE
+column is superseded base images (e.g. an old-macOS Tart base after a host
+upgrade), reclaimable by 'yoloai system prune --stale-bases' with no rebuild.
+Sizes include all content the backend tracks — not just yoloai's — because the
 backend doesn't tag content by who created it.`,
 		Args: cobra.NoArgs,
 		RunE: runSystemDisk,
@@ -48,21 +50,22 @@ func runSystemDisk(cmd *cobra.Command, _ []string) error {
 	}
 
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "SOURCE\tCACHE\tIMAGES\tDETAIL")                                                                 //nolint:errcheck
-	fmt.Fprintf(w, "sandboxes\t-\t%s\t%s\n", cliutil.HumanBytes(du.SandboxesBytes), cliutil.Layout().SandboxesDir()) //nolint:errcheck
+	fmt.Fprintln(w, "SOURCE\tCACHE\tIMAGES\tSTALE\tDETAIL")                                                             //nolint:errcheck
+	fmt.Fprintf(w, "sandboxes\t-\t%s\t-\t%s\n", cliutil.HumanBytes(du.SandboxesBytes), cliutil.Layout().SandboxesDir()) //nolint:errcheck
 	for _, b := range du.PerBackend {
 		if b.Err != nil {
-			fmt.Fprintf(w, "%s\t-\t-\t%v\n", b.Type, b.Err) //nolint:errcheck
+			fmt.Fprintf(w, "%s\t-\t-\t-\t%v\n", b.Type, b.Err) //nolint:errcheck
 			continue
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", b.Type, cliutil.HumanBytes(b.CachedBytes), imageBytesCell(b.ImageBytes), b.Detail) //nolint:errcheck
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", b.Type, cliutil.HumanBytes(b.CachedBytes), imageBytesCell(b.ImageBytes), staleBytesCell(b.StaleBytes), b.Detail) //nolint:errcheck
 	}
 	if err := w.Flush(); err != nil {
 		return err
 	}
-	fmt.Fprintln(out)                                                                      //nolint:errcheck
-	fmt.Fprintln(out, "Reclaim cached data (no rebuild):    yoloai system prune")          //nolint:errcheck
-	fmt.Fprintln(out, "Reclaim images (forces rebuild):     yoloai system prune --images") //nolint:errcheck
+	fmt.Fprintln(out)                                                                             //nolint:errcheck
+	fmt.Fprintln(out, "Reclaim cached data (no rebuild):    yoloai system prune")                 //nolint:errcheck
+	fmt.Fprintln(out, "Reclaim images (forces rebuild):     yoloai system prune --images")        //nolint:errcheck
+	fmt.Fprintln(out, "Reclaim superseded bases (no rebuild): yoloai system prune --stale-bases") //nolint:errcheck
 	return nil
 }
 
@@ -72,6 +75,16 @@ func runSystemDisk(cmd *cobra.Command, _ []string) error {
 func imageBytesCell(n int64) string {
 	if n < 0 {
 		return "?"
+	}
+	return cliutil.HumanBytes(n)
+}
+
+// staleBytesCell renders the STALE column, showing "-" when there are no
+// superseded bases (the common case, and for every backend but tart) rather
+// than a noisy "0 B" on every row.
+func staleBytesCell(n int64) string {
+	if n <= 0 {
+		return "-"
 	}
 	return cliutil.HumanBytes(n)
 }
@@ -89,6 +102,7 @@ func formatDiskJSON(du *yoloai.DiskUsage, sandboxesDir string) map[string]any {
 		} else {
 			entry["cached_bytes"] = b.CachedBytes
 			entry["image_bytes"] = b.ImageBytes
+			entry["stale_bytes"] = b.StaleBytes
 			entry["detail"] = b.Detail
 		}
 		entries = append(entries, entry)

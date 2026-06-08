@@ -242,13 +242,38 @@ func TestPortForwardArgs_MultipleWithProtocol(t *testing.T) {
 	assert.Equal(t, []string{"--net-softnet-expose=8080:80,5353:53"}, args)
 }
 
-func TestResolveBaseImage_Default(t *testing.T) {
-	r := &Runtime{}
+func TestResolveBaseImage_HostMatched(t *testing.T) {
+	cases := []struct {
+		name  string
+		major int
+		want  string
+	}{
+		{"sonoma", 14, "ghcr.io/cirruslabs/macos-sonoma-base:latest"},
+		{"sequoia", 15, "ghcr.io/cirruslabs/macos-sequoia-base:latest"},
+		{"tahoe", 26, "ghcr.io/cirruslabs/macos-tahoe-base:latest"},
+		{"unmapped future falls back to newest known", 27, defaultBaseImage},
+		{"unmapped old falls back to newest known", 12, defaultBaseImage},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &Runtime{hostMajor: func() (int, error) { return tc.major, nil }}
+			assert.Equal(t, tc.want, r.resolveBaseImage(""))
+		})
+	}
+}
+
+func TestResolveBaseImage_HostUndetected(t *testing.T) {
+	// sw_vers failure → newest-known fallback, never an empty/garbage ref.
+	r := &Runtime{hostMajor: func() (int, error) { return 0, assert.AnError }}
 	assert.Equal(t, defaultBaseImage, r.resolveBaseImage(""))
 }
 
 func TestResolveBaseImage_Override(t *testing.T) {
-	r := &Runtime{baseImageOverride: "my-custom-vm"}
+	// Override wins even when the host would resolve to a different codename.
+	r := &Runtime{
+		baseImageOverride: "my-custom-vm",
+		hostMajor:         func() (int, error) { return 15, nil },
+	}
 	assert.Equal(t, "my-custom-vm", r.resolveBaseImage(""))
 }
 

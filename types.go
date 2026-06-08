@@ -82,6 +82,7 @@ const (
 	PruneKindTempDir    PruneItemKind = "temp_dir"    // yoloai-side: stale ~/.yoloai temp dirs
 	PruneKindSandboxDir PruneItemKind = "sandbox_dir" // yoloai-side: never-initialized sandbox dir (no recoverable work)
 	PruneKindLockFile   PruneItemKind = "lock_file"   // yoloai-side: orphaned per-sandbox .lock file
+	PruneKindStaleBase  PruneItemKind = "stale_base"  // tart: superseded base image (prune --stale-bases)
 )
 
 // LogSource names a structured-log stream emitted by one of yoloai's

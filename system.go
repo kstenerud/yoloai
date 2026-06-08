@@ -150,6 +150,10 @@ type BackendDiskUsage struct {
 	// ImageBytes is reclaimable only by `prune --images`, forcing a rebuild
 	// (base/profile image layers). -1 when the backend can't report a size.
 	ImageBytes int64
+	// StaleBytes is reclaimable by `prune --stale-bases`: superseded base images
+	// the current base no longer references (e.g. an old-macOS Tart base). 0 when
+	// none; removing them forces no rebuild of the current base.
+	StaleBytes int64
 	Detail     string
 	Err        error
 }
@@ -174,6 +178,7 @@ func (s *System) DiskUsage(ctx context.Context) (*DiskUsage, error) {
 			Type:        desc.Type,
 			CachedBytes: usage.CachedBytes,
 			ImageBytes:  usage.ImageBytes,
+			StaleBytes:  usage.StaleBytes,
 			Detail:      usage.Detail,
 			Err:         usageErr,
 		})
@@ -552,6 +557,12 @@ type SystemPruneOptions struct {
 	// Build cache, volumes, and dangling images are always reclaimed —
 	// even without this — because doing so forces no rebuild.
 	IncludeBaseImage bool
+	// IncludeStaleBases additionally removes superseded base images a backend
+	// has left behind — e.g. an old-macOS Tart base orphaned when the host OS
+	// (and thus the resolved codename) changed. Unlike IncludeBaseImage, this
+	// does NOT touch the current base, so it forces no rebuild. Opt-in because
+	// the superseded base is multi-GB and a user may want to switch back to it.
+	IncludeStaleBases bool
 	// Output receives line-oriented progress from underlying tools.
 	// nil = io.Discard. Backend prune commands can be chatty; route
 	// to stderr in interactive CLI usage.
@@ -761,6 +772,22 @@ func (s *System) pruneBackend(ctx context.Context, backend BackendType, known []
 	if err != nil {
 		fmt.Fprintf(out, "Warning: cache prune %s failed: %v\n", backend, err) //nolint:errcheck
 	}
+
+	if opts.IncludeStaleBases {
+		refs, staleReclaimed, staleErr := runtime.PruneStaleBasesFor(ctx, rt, opts.DryRun, out)
+		if staleErr != nil {
+			fmt.Fprintf(out, "Warning: stale-base prune %s failed: %v\n", backend, staleErr) //nolint:errcheck
+		}
+		for _, ref := range refs {
+			items = append(items, PruneItem{
+				BackendType: backend,
+				Kind:        PruneKindStaleBase,
+				Name:        ref,
+			})
+		}
+		reclaimed += staleReclaimed
+	}
+
 	return items, reclaimed
 }
 

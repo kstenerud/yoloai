@@ -82,12 +82,87 @@ func (r *Runtime) CacheUsage(ctx context.Context) (runtime.CacheUsage, error) {
 		}
 	}
 
+	var staleBytes int64
+	for _, s := range staleBaseImagesFrom(entries, repo) {
+		staleBytes += s.Bytes
+	}
+
 	detail := fmt.Sprintf("%d provisioned VM, %d OCI base image rows", localCount, ociCount)
 	return runtime.CacheUsage{
 		CachedBytes: 0,
 		ImageBytes:  (localGB + ociGB) * bytesPerGB,
+		StaleBytes:  staleBytes,
 		Detail:      detail,
 	}, nil
+}
+
+// baseImageFamilyPrefix and baseImageFamilySuffix bound the Cirrus macOS base
+// repos yoloai pulls: ghcr.io/cirruslabs/macos-<codename>-base. The "-xcode"
+// flavors and unrelated VMs are excluded, so a stale-base sweep only ever
+// targets images yoloai itself could have created.
+const (
+	baseImageFamilyPrefix = "ghcr.io/cirruslabs/macos-"
+	baseImageFamilySuffix = "-base"
+)
+
+// isBaseImageFamily reports whether a bare repo path is a Cirrus macOS base repo.
+func isBaseImageFamily(repo string) bool {
+	return strings.HasPrefix(repo, baseImageFamilyPrefix) &&
+		strings.HasSuffix(repo, baseImageFamilySuffix)
+}
+
+// staleBaseImage is a superseded Cirrus base repo still on disk: the bare repo,
+// its deduped on-disk size in bytes, and the tart names to delete (a pulled
+// image is listed twice — by :latest tag and by @sha256 digest — and both must
+// go or the remaining row pins the on-disk copy).
+type staleBaseImage struct {
+	Repo  string
+	Bytes int64
+	Refs  []string
+}
+
+// staleBaseImages returns the Cirrus base repos on disk that differ from the
+// currently resolved base — superseded bases left behind by a host-macOS (and
+// thus codename) change.
+func (r *Runtime) staleBaseImages(ctx context.Context) ([]staleBaseImage, error) {
+	entries, err := r.listEntries(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return staleBaseImagesFrom(entries, baseImageRepo(r.resolveBaseImage(""))), nil
+}
+
+// staleBaseImagesFrom is the pure core of staleBaseImages: given the tart-list
+// rows and the current base repo, group every other Cirrus base repo's OCI rows
+// (tag + digest) into one entry, sizing it once (max row, since both rows share
+// a single on-disk copy — mirrors CacheUsage's dedup).
+func staleBaseImagesFrom(entries []tartListEntry, currentRepo string) []staleBaseImage {
+	byRepo := make(map[string]*staleBaseImage)
+	var order []string
+	for _, e := range entries {
+		if e.Source != "OCI" {
+			continue
+		}
+		repo := baseImageRepo(e.Name)
+		if repo == currentRepo || !isBaseImageFamily(repo) {
+			continue
+		}
+		s, ok := byRepo[repo]
+		if !ok {
+			s = &staleBaseImage{Repo: repo}
+			byRepo[repo] = s
+			order = append(order, repo)
+		}
+		s.Refs = append(s.Refs, e.Name)
+		if gb := e.Size * bytesPerGB; gb > s.Bytes {
+			s.Bytes = gb
+		}
+	}
+	out := make([]staleBaseImage, 0, len(order))
+	for _, repo := range order {
+		out = append(out, *byRepo[repo])
+	}
+	return out
 }
 
 // ownedImageBytes returns the rebuild-forcing footprint CacheUsage measures, or

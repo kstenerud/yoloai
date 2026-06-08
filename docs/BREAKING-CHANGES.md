@@ -4,6 +4,42 @@ Tracks breaking changes made during beta. Each entry should be included in relea
 
 ## Unreleased
 
+### Default Tart base image now tracks the host's macOS instead of being pinned to Sequoia
+
+The Tart backend's default base image was hardcoded to
+`ghcr.io/cirruslabs/macos-sequoia-base:latest`. It now resolves to the Cirrus
+base whose macOS major **matches the host** (read via `sw_vers`), so the guest
+is new enough to run the host's Xcode without waiting for a yoloai release.
+Hosts on a macOS major yoloai doesn't yet map fall back to the newest known
+base (currently Tahoe).
+
+**What breaks:** on first `new`/`setup` after upgrading, a host on a macOS other
+than Sequoia resolves to a different base and **re-pulls + reprovisions** the
+`yoloai-base` VM (a one-time ~30 GB download). A Sequoia host is unaffected. The
+old Sequoia base image is left on disk (see the new prune selector below), not
+auto-deleted.
+
+**Migration / opt-out:**
+
+- To pin a specific macOS (stay on the old base, or jump to a brand-new one the
+  day Cirrus publishes it), set `tart.image` in config — it always wins over the
+  host match:
+  ```yaml
+  tart:
+    image: ghcr.io/cirruslabs/macos-sequoia-base:latest
+  ```
+- After a host-OS upgrade, reclaim the superseded base with
+  `yoloai system prune --stale-bases` (or follow the hint in `yoloai doctor`).
+
+### `yoloai system prune` gains a `--stale-bases` selector
+
+A host-OS change leaves the previous Tart base image on disk; it is matched by
+neither the orphan sweep nor `--images` (which only targets the *current* base).
+The new `--stale-bases` selector removes superseded base images (it never
+touches the current base, so it forces no rebuild). This is additive — no
+existing invocation changes — and parallels the existing `--images`/`--trash`
+selectors. `yoloai doctor` reports superseded bases and the reclaim command.
+
 ### Scope-widening confirmations replaced by selector flags (`--yes` no longer widens scope)
 
 The CLI never prompts to widen the destructive scope, and `--yes` no longer

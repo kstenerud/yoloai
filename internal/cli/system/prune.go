@@ -35,25 +35,31 @@ without rebuilding afterward.
 --images additionally removes each backend's base/profile images, which
 forces yoloai-base to rebuild on the next sandbox creation. Use on a host
 dedicated to yoloai; on shared machines, prefer the backend's own prune
-(e.g., 'docker system prune').`,
+(e.g., 'docker system prune').
+
+--stale-bases removes superseded base images a backend left behind — e.g. an
+old-macOS Tart base orphaned when the host OS (and the resolved base codename)
+changed. It never touches the current base, so it forces no rebuild.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			dryRun, _ := cmd.Flags().GetBool("dry-run")
 			images, _ := cmd.Flags().GetBool("images")
+			staleBases, _ := cmd.Flags().GetBool("stale-bases")
 			trash, _ := cmd.Flags().GetBool("trash")
-			return runSystemPrune(cmd, dryRun, images, trash)
+			return runSystemPrune(cmd, dryRun, images, staleBases, trash)
 		},
 	}
 
 	cmd.Flags().Bool("dry-run", false, "Report only, don't remove anything")
 	cmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompts")
 	cmd.Flags().Bool("images", false, "Also remove backend base/profile images (DESTRUCTIVE: forces base rebuild)")
+	cmd.Flags().Bool("stale-bases", false, "Also remove superseded base images left by a host-OS change (no rebuild forced)")
 	cmd.Flags().Bool("trash", false, "Also empty the trash dir (deletes quarantined broken sandboxes, including any quarantined by this run)")
 
 	return cmd
 }
 
-func runSystemPrune(cmd *cobra.Command, dryRun, images, trash bool) error {
+func runSystemPrune(cmd *cobra.Command, dryRun, images, staleBases, trash bool) error {
 	ctx := cmd.Context()
 	output := cmd.OutOrStdout()
 	isJSON := cliutil.JSONEnabled(cmd)
@@ -70,9 +76,10 @@ func runSystemPrune(cmd *cobra.Command, dryRun, images, trash bool) error {
 
 	// First, a dry-run scan to find what's there.
 	scanResult, err := sys.Prune(ctx, yoloai.SystemPruneOptions{
-		DryRun:           true,
-		IncludeBaseImage: images,
-		Output:           output,
+		DryRun:            true,
+		IncludeBaseImage:  images,
+		IncludeStaleBases: staleBases,
+		Output:            output,
 	})
 	if err != nil {
 		return err
@@ -94,9 +101,10 @@ func runSystemPrune(cmd *cobra.Command, dryRun, images, trash bool) error {
 
 	// Actual removal. The library does the work; we just report.
 	actualResult, err := sys.Prune(ctx, yoloai.SystemPruneOptions{
-		DryRun:           false,
-		IncludeBaseImage: images,
-		Output:           output,
+		DryRun:            false,
+		IncludeBaseImage:  images,
+		IncludeStaleBases: staleBases,
+		Output:            output,
 	})
 	if err != nil {
 		return err
@@ -171,6 +179,8 @@ func printActualRemoval(output io.Writer, result *yoloai.PruneResult, images, is
 			fmt.Fprintf(output, "Removed orphaned lock for %s\n", item.Name) //nolint:errcheck
 		case yoloai.PruneKindSandboxDir:
 			fmt.Fprintf(output, "Removed never-initialized sandbox %s\n", item.Name) //nolint:errcheck
+		case yoloai.PruneKindStaleBase:
+			fmt.Fprintf(output, "Removed superseded base image %s\n", item.Name) //nolint:errcheck
 		default:
 			fmt.Fprintf(output, "Removed %s %s\n", item.Kind, item.Name) //nolint:errcheck
 		}
@@ -309,16 +319,25 @@ func printPruneFoundItems(output io.Writer, items []yoloai.PruneItem, isJSON boo
 	if isJSON {
 		return
 	}
-	var orphans, temps, hostCruft []yoloai.PruneItem
+	var orphans, temps, hostCruft, staleBases []yoloai.PruneItem
 	for _, item := range items {
 		switch item.Kind {
 		case yoloai.PruneKindTempDir:
 			temps = append(temps, item)
 		case yoloai.PruneKindLockFile, yoloai.PruneKindSandboxDir:
 			hostCruft = append(hostCruft, item)
+		case yoloai.PruneKindStaleBase:
+			staleBases = append(staleBases, item)
 		default:
 			orphans = append(orphans, item)
 		}
+	}
+	if len(staleBases) > 0 {
+		fmt.Fprintln(output, "Superseded base images:") //nolint:errcheck
+		for _, item := range staleBases {
+			fmt.Fprintf(output, "  %s\n", item.Name) //nolint:errcheck
+		}
+		fmt.Fprintln(output) //nolint:errcheck
 	}
 	if len(orphans) > 0 {
 		fmt.Fprintln(output, "Orphaned resources:") //nolint:errcheck

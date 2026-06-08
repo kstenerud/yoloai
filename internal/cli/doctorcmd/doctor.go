@@ -52,6 +52,7 @@ type cacheUsageJSON struct {
 	Backend     string `json:"backend"`
 	CachedBytes int64  `json:"cached_bytes"`
 	ImageBytes  int64  `json:"image_bytes,omitempty"`
+	StaleBytes  int64  `json:"stale_bytes,omitempty"`
 	Detail      string `json:"detail,omitempty"`
 }
 
@@ -113,6 +114,7 @@ Plus a read-only repair advisory (nothing is deleted by doctor):
   Reclaimable now        — orphaned resources, lock files, temp dirs, never-init dirs
   Reclaimable cached data — build caches reclaimable by 'prune' (no rebuild)
   Reclaimable images     — base images reclaimable only by 'prune --images' (forces rebuild)
+  Superseded base images — old-macOS bases reclaimable by 'prune --stale-bases' (no rebuild)
   Unreviewed work        — broken sandbox dirs still holding work (review/remove yourself)
   Trash                  — quarantined dirs recoverable with mv
 
@@ -262,6 +264,9 @@ func renderReclaimableSpace(w io.Writer, disk *yoloai.DiskUsage) {
 	renderReclaimTier(w, disk, "Reclaimable images (these will need to be regenerated to use yoloAI):",
 		"base images", "yoloai system prune --images",
 		func(b yoloai.BackendDiskUsage) int64 { return b.ImageBytes })
+	renderReclaimTier(w, disk, "Superseded base images from a previous macOS (safe to remove, no rebuild):",
+		"superseded base", "yoloai system prune --stale-bases",
+		func(b yoloai.BackendDiskUsage) int64 { return b.StaleBytes })
 }
 
 // renderReclaimTier prints one reclaim section (cached-data or images). bytesOf
@@ -429,13 +434,14 @@ func cacheUsageJSONList(disk *yoloai.DiskUsage) []cacheUsageJSON {
 		if imageBytes < 0 {
 			imageBytes = 0
 		}
-		if b.CachedBytes <= 0 && imageBytes <= 0 {
+		if b.CachedBytes <= 0 && imageBytes <= 0 && b.StaleBytes <= 0 {
 			continue
 		}
 		out = append(out, cacheUsageJSON{
 			Backend:     string(b.Type),
 			CachedBytes: b.CachedBytes,
 			ImageBytes:  imageBytes,
+			StaleBytes:  b.StaleBytes,
 			Detail:      b.Detail,
 		})
 	}

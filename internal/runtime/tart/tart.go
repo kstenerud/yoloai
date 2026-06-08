@@ -138,10 +138,11 @@ const (
 
 // Runtime implements runtime.Runtime using the Tart CLI.
 type Runtime struct {
-	tartBin           string        // path to tart binary
-	layout            config.Layout // DataDir-rooted path resolver (Q-W.6)
-	homeDir           string        // host home directory (layout.HomeDir); used for ~ expansion
-	baseImageOverride string        // custom base image from config (tart.image)
+	tartBin           string              // path to tart binary
+	layout            config.Layout       // DataDir-rooted path resolver (Q-W.6)
+	homeDir           string              // host home directory (layout.HomeDir); used for ~ expansion
+	baseImageOverride string              // custom base image from config (tart.image)
+	hostMajor         func() (int, error) // host macOS major version; seam for tests
 }
 
 // Compile-time check.
@@ -209,6 +210,7 @@ func New(_ context.Context, layout config.Layout) (*Runtime, error) {
 		layout:            layout,
 		homeDir:           layout.HomeDir,
 		baseImageOverride: baseImageOverride,
+		hostMajor:         hostMacOSMajor,
 	}, nil
 }
 
