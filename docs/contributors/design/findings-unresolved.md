@@ -40,30 +40,6 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 - **Trigger:** the next `TestCLI_StartStop` / `stop_start` "instance not found" or "not found shortly after start" failure on podman — if it recurs, capture `podman ps -a` + the container's exit state at the moment `verifyInstanceRunning` fires (before teardown) to distinguish a podman inspect race from a container that genuinely exited <1s after start, then implement the retry/backoff. If no recurrence across the next several podman integration/smoke runs, evict as a one-off environmental flake.
 - **Pointer:** `internal/sandbox/launch/launch.go:257` (`verifyInstanceRunning`); test `internal/cli/integration_test.go:183` (`TestCLI_StartStop`)
 
-### DF17 — CLI `--json` output has no structural convention (list-envelope + error/empty shape vary by command)
-
-- **Discovered:** 2026-06-03 · **Workstream:** Public-API "right reasons" round (A4 re-examination)
-- **Severity:** MEDIUM
-- **Disposition:** ESCALATED
-- **Description:** The CLI `--json` output is the live machine-readable contract (wrapper apps shell
-  out to the `yoloai` binary and parse it). Casing is already uniform (snake_case everywhere), but
-  the **structure** is ad-hoc per command: (1) list-type commands disagree on shape — some return a
-  bare array (`system backends`, `system agents`, `extensions list`, `stop`, `destroy`), others an
-  envelope (`sandbox list` → `{"sandboxes":[…],"unavailable_backends":[…]}`, `system disk` →
-  `{"entries":[…]}`) — with no rule for when to wrap; (2) error/empty representation disagrees —
-  array commands carry a per-item `"error"` omitted-on-success (`stop`/`destroy`/`disk`), bare-object
-  commands have no error field at all (errors via exit code + stderr), and empty results are
-  variously `[]`, `{}`, or a bare object with the array key absent. Escalated (not parked) because
-  this release is meant to set the **baseline public-facing interface** (API + CLI/JSON + MCP) from
-  which all future migrations are measured — the convention must be fixed *now*, before the baseline
-  freezes. CLI-layer-owned: the fix is a `--json` output style guide + a shared emission helper, not
-  a public-API change. (Split out from [[A4]], whose original public-struct-tag premise was
-  abandoned.)
-- **Pointer:** `internal/cli/cliutil/json.go` (`WriteJSON`); divergent sites incl.
-  `internal/cli/system/disk.go` (`formatDiskJSON` → `{"entries"}`), `internal/cli/sandboxcmd/list.go`
-  (`{"sandboxes"}` envelope), `internal/cli/system/backends_agents.go` (bare array),
-  `internal/cli/lifecycle/stop.go` / `destroy.go` (bare array, per-item `error`).
-
 ### DF18 — Backend run-coverage gap: live-daemon error paths + zero Seatbelt/Tart run coverage
 
 - **Discovered:** 2026-06-04 · **Workstream:** testing-critique (T13 split-out)

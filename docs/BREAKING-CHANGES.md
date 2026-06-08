@@ -4,6 +4,35 @@ Tracks breaking changes made during beta. Each entry should be included in relea
 
 ## Unreleased
 
+### CLI `--json` output is always a top-level object
+
+The `--json` output now follows a fixed structural convention (see
+`docs/contributors/standards/cli.md`): **every command emits a top-level JSON
+object, never a bare array.** List commands wrap their items in a semantically
+named array field, and an empty array is always `[]`, never `null`.
+
+**What breaks** — five commands that previously emitted a bare top-level array
+now emit an envelope object:
+
+| Command | Before | After |
+|---|---|---|
+| `system backends` | `[…]` | `{"backends": […]}` |
+| `system agents` | `[…]` (or `null` when empty) | `{"agents": […]}` |
+| `x` / `extensions list` | `[…]` | `{"extensions": […]}` |
+| `stop` | `[{name, action}]` | `{"stopped": [{name, action}]}` |
+| `destroy` | `[{name, action}]` | `{"destroyed": [{name, action}]}` |
+
+Also fixed: `system agents` and `extensions list` emitted `null` for an empty
+list; they now emit `[]`.
+
+**Migration (consumers):** update `jq` filters from `.[]` to `.<key>[]` for these
+commands — e.g. `system backends --json | jq '.backends[]'`,
+`destroy --json --yes | jq '.destroyed[]'`. Commands that were already objects
+(`sandbox list`, `system disk`, `diff --log`, `system check`, all single-record
+and action commands) are unchanged. Rationale: a bare top-level array can carry
+neither a top-level error nor future metadata; a uniform object shape lets every
+command grow without breaking parsers. See finding DF17.
+
 ### Public Go embedding surface reshaped (0.x layer-1)
 
 The root `yoloai` package was reshaped so external embedders drive yoloAI entirely

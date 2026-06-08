@@ -75,32 +75,38 @@ Every command supports:
 - `--help` and `--version` output goes to **stdout** (per GNU standards)
 ### JSON Output (`--json`)
 
-The `--json` global flag switches all command output from human-readable text to structured JSON. Designed for scripting, CI pipelines, and tool integration.
+The `--json` global flag switches all command output from human-readable text to structured JSON. Designed for scripting, CI pipelines, and tool integration. It is a **public contract** — wrapper apps shell out to the binary and parse stdout — so its structure follows a fixed convention.
+
+**Structural convention:**
+
+- **The top level is always a JSON object, never a bare array.** This gives every command a stable shape that can grow sibling fields (metadata, warnings, a top-level error) without breaking parsers. We deliberately diverge from `gh`/`docker` here: a bare top-level array can carry neither a top-level error nor future metadata.
+- **List commands** put their items in a semantically named array field — `{"sandboxes": […]}`, `{"backends": […]}`, `{"entries": […]}`, `{"commits": […]}`. Emit with `cliutil.WriteJSONList(w, key, items)`. A command that also needs sibling metadata (e.g. `sandbox list`'s `unavailable_backends`) builds its own struct instead.
+- **Arrays are always `[]` when empty, never `null`.** A nil Go slice marshals as `null`; `WriteJSONList` guards this, and every array field in a hand-built envelope struct must be wrapped with `cliutil.EmptyIfNil` (or pre-initialized with `make`). Consumers must never have to handle both `[]` and `null`.
+- **Single-record commands** (`version`, `sandbox info`, `system info`, `config get`) output an object of fields directly.
+- **Action/mutation commands** (`new`, `start`, `stop`, `destroy`, `apply`, …) output an object describing the outcome, with an `action` verb and the sandbox identifier under `name` (or `source`/`dest` for `clone`, `target` for `apply`). A batch mutation (`stop`, `destroy`) returns its per-target results in a named array (`{"stopped": […]}`), each item carrying `name` plus either `action` (success) or `error` (failure).
+
+**Errors:**
+
+- **Whole-command failure:** the process writes `{"error": "message"}` to **stderr** and exits non-zero. stdout carries data only — a consumer reads the exit code, not stdout, to detect failure.
+- **Per-item failure** in a batch result: an `error` field on the failing array element, omitted on success.
 
 **Behavior:**
 
-- Normal output goes to stdout as a single JSON object or array
-- Errors go to stderr as `{"error": "message"}`
-- No envelope wrapper — commands output their domain object directly (like `gh`, `docker`, `kubectl`)
-- Exit codes still signal success (0) or failure (non-zero)
-
-**Interactive commands** (`attach`, `exec`) reject `--json` with an error since they require a terminal.
-
-**Confirmation commands** (`destroy`, `apply`, `system prune`) require `--yes` when `--json` is set, since interactive prompts can't work in a machine-readable pipeline. Exception: `system prune --dry-run` works without `--yes`.
-
-**Commands with `--attach`** (`new`, `start`, `restart`) reject `--json --attach` since attach is interactive.
+- Normal output goes to stdout; errors to stderr; exit codes still signal success (0) or failure (non-zero).
+- **Interactive commands** (`attach`, `exec`) reject `--json` since they require a terminal.
+- **Confirmation commands** (`destroy`, `apply`, `system prune`) require `--yes` when `--json` is set, since interactive prompts can't work in a machine-readable pipeline. Exception: `system prune --dry-run` works without `--yes`.
+- **Commands with `--attach`** (`new`, `start`, `restart`) reject `--json --attach` since attach is interactive.
 
 **Examples:**
 
 ```bash
-yoloai list --json                    # JSON array of sandbox info
-yoloai list --json | jq '.[].meta.name'
+yoloai list --json                    # {"sandboxes": [...], "unavailable_backends": [...]}
+yoloai list --json | jq '.sandboxes[].meta.name'
+yoloai system backends --json         # {"backends": [...]}
 yoloai sandbox info mybox --json      # single sandbox object
 yoloai version --json                 # {"version": "...", "commit": "...", "date": "..."}
-yoloai diff mybox --json              # diff result object
-yoloai diff mybox --log --json        # {commits: [...], has_uncommitted_changes: bool}
-yoloai destroy mybox --json --yes     # [{name: "...", action: "destroyed"}]
-yoloai config get --json              # full config as JSON
+yoloai diff mybox --log --json        # {"commits": [...], "has_uncommitted_changes": bool, "tags": [...]}
+yoloai destroy mybox --json --yes     # {"destroyed": [{"name": "...", "action": "destroyed"}]}
 yoloai config get backend --json      # {"key": "backend", "value": "docker"}
 ```
 - After state-changing operations, suggest logical next commands (e.g., after `yoloai new`, suggest `yoloai attach`)

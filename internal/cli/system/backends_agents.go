@@ -100,7 +100,7 @@ func listBackends(cmd *cobra.Command) error {
 				Note:        b.Note,
 			})
 		}
-		return cliutil.WriteJSON(cmd.OutOrStdout(), items)
+		return cliutil.WriteJSONList(cmd.OutOrStdout(), "backends", items)
 	}
 
 	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 3, ' ', 0)
@@ -227,7 +227,7 @@ func listAgents(cmd *cobra.Command) error {
 				PromptMode:  a.PromptMode,
 			})
 		}
-		return cliutil.WriteJSON(cmd.OutOrStdout(), items)
+		return cliutil.WriteJSONList(cmd.OutOrStdout(), "agents", items)
 	}
 
 	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 3, ' ', 0)

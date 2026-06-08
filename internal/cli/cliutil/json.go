@@ -24,6 +24,11 @@ func JSONEnabled(cmd *cobra.Command) bool {
 }
 
 // WriteJSON marshals v as indented JSON and writes it to w with a trailing newline.
+//
+// Per the --json convention (standards/cli.md), v must be a JSON OBJECT, never a
+// bare array: every command emits a top-level object so consumers rely on a
+// stable shape and commands can grow sibling fields without breaking parsers.
+// Use WriteJSONList for single-array list commands.
 func WriteJSON(w io.Writer, v any) error {
 	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
@@ -31,6 +36,27 @@ func WriteJSON(w io.Writer, v any) error {
 	}
 	_, err = fmt.Fprintf(w, "%s\n", data)
 	return err
+}
+
+// WriteJSONList writes a list-type command's output as a single-key envelope
+// object: {"<key>": [...]}. This keeps every command's top-level shape an object
+// (see WriteJSON) and guarantees the array is [] rather than null when empty.
+// Commands that carry sibling metadata alongside the list (e.g. sandbox list's
+// unavailable_backends) build their own struct instead and wrap each array field
+// with EmptyIfNil.
+func WriteJSONList[T any](w io.Writer, key string, items []T) error {
+	return WriteJSON(w, map[string]any{key: EmptyIfNil(items)})
+}
+
+// EmptyIfNil returns s, or a non-nil empty slice when s is nil, so it marshals
+// as [] rather than null. Use for every array field inside a custom envelope
+// struct — a nil Go slice otherwise serializes as null, which the convention
+// forbids (consumers must never have to handle both [] and null).
+func EmptyIfNil[T any](s []T) []T {
+	if s == nil {
+		return []T{}
+	}
+	return s
 }
 
 // WriteJSONError writes a JSON error object to w. Used for stderr error output

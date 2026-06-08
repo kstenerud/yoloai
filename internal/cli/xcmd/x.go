@@ -143,7 +143,7 @@ func runExtensionList(cmd *cobra.Command, _ []string) error {
 
 	if len(exts) == 0 {
 		if cliutil.JSONEnabled(cmd) {
-			return cliutil.WriteJSON(cmd.OutOrStdout(), []any{})
+			return cliutil.WriteJSONList(cmd.OutOrStdout(), "extensions", []any{})
 		}
 		fmt.Fprintln(cmd.OutOrStdout(), "No extensions found.")                                                    //nolint:errcheck
 		fmt.Fprintln(cmd.OutOrStdout())                                                                            //nolint:errcheck
@@ -169,7 +169,7 @@ func runExtensionList(cmd *cobra.Command, _ []string) error {
 			}
 			out = append(out, e)
 		}
-		return cliutil.WriteJSON(cmd.OutOrStdout(), out)
+		return cliutil.WriteJSONList(cmd.OutOrStdout(), "extensions", out)
 	}
 
 	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 3, ' ', 0)

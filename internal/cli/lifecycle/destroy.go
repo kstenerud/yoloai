@@ -127,7 +127,7 @@ func resolveDestroyAll(cmd *cobra.Command, ctx context.Context, c *yoloai.Client
 	}
 	if len(infos) == 0 {
 		if cliutil.JSONEnabled(cmd) {
-			return nil, cliutil.WriteJSON(cmd.OutOrStdout(), []struct{}{})
+			return nil, cliutil.WriteJSONList(cmd.OutOrStdout(), "destroyed", []struct{}{})
 		}
 		_, err = fmt.Fprintln(cmd.OutOrStdout(), "No sandboxes to destroy")
 		return nil, err
@@ -230,7 +230,7 @@ func executeDestroy(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, n
 				results = append(results, destroyResult{Name: name, Action: "destroyed"})
 			}
 		}
-		return cliutil.WriteJSON(cmd.OutOrStdout(), results)
+		return cliutil.WriteJSONList(cmd.OutOrStdout(), "destroyed", results)
 	}
 
 	var errs []error

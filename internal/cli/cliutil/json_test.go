@@ -58,6 +58,34 @@ func TestWriteJSON_NilSlice(t *testing.T) {
 	assert.Equal(t, "null\n", buf.String())
 }
 
+func TestWriteJSONList_WrapsInEnvelope(t *testing.T) {
+	var buf bytes.Buffer
+	err := cliutil.WriteJSONList(&buf, "backends", []string{"docker", "tart"})
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"backends": ["docker", "tart"]}`, buf.String())
+}
+
+func TestWriteJSONList_NilSliceIsEmptyArray(t *testing.T) {
+	var buf bytes.Buffer
+	var items []string
+	err := cliutil.WriteJSONList(&buf, "agents", items)
+	require.NoError(t, err)
+	// A nil slice must serialize as [] inside the envelope, never null.
+	assert.JSONEq(t, `{"agents": []}`, buf.String())
+}
+
+func TestEmptyIfNil_NilBecomesEmptyNonNil(t *testing.T) {
+	var s []int
+	got := cliutil.EmptyIfNil(s)
+	assert.NotNil(t, got)
+	assert.Empty(t, got)
+}
+
+func TestEmptyIfNil_NonNilUnchanged(t *testing.T) {
+	s := []int{1, 2}
+	assert.Equal(t, []int{1, 2}, cliutil.EmptyIfNil(s))
+}
+
 func TestWriteJSONError(t *testing.T) {
 	var buf bytes.Buffer
 	cliutil.WriteJSONError(&buf, errors.New("something broke"))

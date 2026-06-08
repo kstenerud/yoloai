@@ -116,11 +116,13 @@ action: echo hello
 	root.SetArgs([]string{"--json", "x"})
 	require.NoError(t, root.Execute())
 
-	var result []map[string]any
+	var result struct {
+		Extensions []map[string]any `json:"extensions"`
+	}
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
-	require.Len(t, result, 1)
-	assert.Equal(t, "hello", result[0]["name"])
-	assert.Equal(t, "Say hello", result[0]["description"])
+	require.Len(t, result.Extensions, 1)
+	assert.Equal(t, "hello", result.Extensions[0]["name"])
+	assert.Equal(t, "Say hello", result.Extensions[0]["description"])
 }
 
 func TestXList_JSONEmpty(t *testing.T) {
@@ -132,9 +134,8 @@ func TestXList_JSONEmpty(t *testing.T) {
 	root.SetArgs([]string{"--json", "x"})
 	require.NoError(t, root.Execute())
 
-	var result []any
-	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
-	assert.Empty(t, result)
+	// Empty list is an envelope with an empty (non-null) array.
+	assert.JSONEq(t, `{"extensions": []}`, buf.String())
 }
 
 // --- Run ---
@@ -524,10 +525,12 @@ action: echo hi
 	root.SetArgs([]string{"--json", "x"})
 	require.NoError(t, root.Execute())
 
-	var result []map[string]any
+	var result struct {
+		Extensions []map[string]any `json:"extensions"`
+	}
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
-	require.Len(t, result, 1)
-	agents := result[0]["agents"].([]any)
+	require.Len(t, result.Extensions, 1)
+	agents := result.Extensions[0]["agents"].([]any)
 	assert.Contains(t, agents, "claude")
 	assert.Contains(t, agents, "codex")
 }

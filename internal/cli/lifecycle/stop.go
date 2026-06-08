@@ -94,7 +94,7 @@ func resolveStopAll(cmd *cobra.Command, ctx context.Context, c *yoloai.Client) (
 	}
 	if len(names) == 0 {
 		if cliutil.JSONEnabled(cmd) {
-			return nil, cliutil.WriteJSON(cmd.OutOrStdout(), []struct{}{})
+			return nil, cliutil.WriteJSONList(cmd.OutOrStdout(), "stopped", []struct{}{})
 		}
 		_, err = fmt.Fprintln(cmd.OutOrStdout(), "No running sandboxes to stop")
 		return nil, err
@@ -137,7 +137,7 @@ func executeStop(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, name
 				results = append(results, stopResult{Name: name, Action: "stopped"})
 			}
 		}
-		return cliutil.WriteJSON(cmd.OutOrStdout(), results)
+		return cliutil.WriteJSONList(cmd.OutOrStdout(), "stopped", results)
 	}
 
 	var errs []error
