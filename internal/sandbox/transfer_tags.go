@@ -3,10 +3,12 @@
 package sandbox
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/config"
+	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/internal/workspace"
 )
@@ -47,9 +49,9 @@ func TargetIsGitRepo(layout config.Layout, name string) (bool, error) {
 // the sandbox work copy and the host target — the no-commits-applied path.
 // Returns per-tag outcomes plus counts; an empty tag list is a no-op.
 //
-// Host-git only (matching the rest of the tag pipeline in tags.go); it does not
-// run git inside the backend, so it is not yet Tart-correct for VM work copies.
-func TransferTags(layout config.Layout, name string, tags []TagInfo, shaMap map[string]string) (*TransferTagsResult, error) {
+// The sandbox work copy is read through the backend (Tart-correct via rt); the
+// host target repo, where the tags are created, always uses host git.
+func TransferTags(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, tags []TagInfo, shaMap map[string]string) (*TransferTagsResult, error) {
 	res := &TransferTagsResult{}
 	if len(tags) == 0 {
 		return res, nil
@@ -68,7 +70,7 @@ func TransferTags(layout config.Layout, name string, tags []TagInfo, shaMap map[
 		for i, t := range tags {
 			sandboxSHAs[i] = t.SHA
 		}
-		shaMap, err = workspace.BuildSHAMapByMatching(workDir, targetDir, sandboxSHAs)
+		shaMap, err = workspace.BuildSHAMapByMatching(sandboxGitRunner(ctx, rt, name, workDir), targetDir, sandboxSHAs)
 		if err != nil {
 			return nil, fmt.Errorf("build SHA map: %w", err)
 		}

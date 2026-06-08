@@ -7,6 +7,13 @@ import (
 	"strings"
 )
 
+// GitRunner runs a git command against one repository and returns stdout. It
+// lets this low-level package stay free of an internal/runtime import: the
+// caller injects a runner that is host-direct for host repos, or backend-aware
+// (Tart runs git inside the VM) for sandbox work copies. See
+// runtime.GitExecFor and the runner builders in internal/sandbox/tags.go.
+type GitRunner func(args ...string) (string, error)
+
 // CommitExists checks if a commit SHA exists in the git repository.
 func CommitExists(dir, sha string) bool {
 	cmd := NewGitCmd(dir, "cat-file", "-e", sha)
@@ -22,15 +29,14 @@ type commitMeta struct {
 	Subject   string
 }
 
-// getCommitMeta retrieves commit metadata for a given SHA.
-func getCommitMeta(dir, sha string) (*commitMeta, error) {
+// getCommitMeta retrieves commit metadata for a given SHA via the runner.
+func getCommitMeta(git GitRunner, sha string) (*commitMeta, error) {
 	// Format: %H (hash) %an (author name) %at (timestamp) %s (subject)
-	cmd := NewGitCmd(dir, "show", "-s", "--format=%H%x00%an%x00%at%x00%s", sha)
-	output, err := cmd.Output()
+	output, err := git("show", "-s", "--format=%H%x00%an%x00%at%x00%s", sha)
 	if err != nil {
 		return nil, fmt.Errorf("git show: %w", err)
 	}
-	parts := strings.Split(strings.TrimSpace(string(output)), "\x00")
+	parts := strings.Split(strings.TrimSpace(output), "\x00")
 	if len(parts) < 4 {
 		return nil, fmt.Errorf("unexpected git show output format")
 	}
@@ -43,8 +49,10 @@ func getCommitMeta(dir, sha string) (*commitMeta, error) {
 }
 
 // BuildSHAMapByMatching builds a sandbox→host SHA map by matching commits.
-// Matches commits by author, timestamp, and subject line.
-func BuildSHAMapByMatching(sandboxDir, hostDir string, sandboxSHAs []string) (map[string]string, error) {
+// Matches commits by author, timestamp, and subject line. sandboxGit reads the
+// sandbox work copy (backend-aware, so it is correct for Tart VM work copies);
+// hostDir is the host target repo, always read with host git.
+func BuildSHAMapByMatching(sandboxGit GitRunner, hostDir string, sandboxSHAs []string) (map[string]string, error) {
 	shaMap := make(map[string]string)
 
 	// Get all commits from host (last 1000 should be enough)
@@ -79,7 +87,7 @@ func BuildSHAMapByMatching(sandboxDir, hostDir string, sandboxSHAs []string) (ma
 
 	// Match each sandbox SHA to a host SHA
 	for _, sandboxSHA := range sandboxSHAs {
-		meta, err := getCommitMeta(sandboxDir, sandboxSHA)
+		meta, err := getCommitMeta(sandboxGit, sandboxSHA)
 		if err != nil {
 			continue // skip if can't get info
 		}

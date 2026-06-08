@@ -7,6 +7,14 @@ History of codebase findings (issues discovered mid-work) that have been address
 are moved here from [`findings-unresolved.md`](findings-unresolved.md) once resolved, so the
 active file stays a working set. Newest first.
 
+### DF12 — Tag pipeline runs host git on the work copy, not the backend-aware exec (Tart-incorrect for VM work copies)
+
+- **Discovered:** 2026-05-31 · **Workstream:** W-L1 (G7 apply carve)
+- **Severity:** LOW
+- **Disposition:** RESOLVED 2026-06-08. The tag pipeline now reads the sandbox work copy through `runtime.GitExecFor` (which Tart translates into the VM), matching the diff/apply pipeline; the host target repo still uses host git. A `workspace.GitRunner` func type is injected into the lower-level `workspace` helpers so that package stays free of an `internal/runtime` import (no layering break): `internal/sandbox/tags.go` builds a `sandboxGitRunner` (backend-aware) and `hostGitRunner` (host-direct) and threads `ctx, rt, name` through `ListTagsBeyondBaseline`, `ListUnappliedTags`, `listAllTags`, `getTagMessage`; `transfer_tags.go`'s `TransferTags` and `workspace.BuildSHAMapByMatching`/`getCommitMeta` take the runner for the sandbox-side reads. The Engine `WorkdirTags`/`TransferWorkdirTags` gained `ctx` + a best-effort `TryEnsure` (a nil runtime falls back to host git, which `GitExecFor` already does, so Docker/Podman/Seatbelt behavior is unchanged). The public `Workdir.Tags`/`TransferTags` verbs already accepted `ctx`, so no public-API change. Verified via the host-backend tag tests + `make check`; full Tart VM e2e was not exercised on this host but relies on the same `GitExecer` contract the diff/apply pipeline already uses.
+- **Description:** The entire git-tag read/transfer pipeline (`internal/sandbox/tags.go`: `ListTagsBeyondBaseline`, `ListUnappliedTags`, `GetTagMessage`; `internal/workspace/tags.go`: `BuildSHAMapByMatching`, `CreateTag`, `getCommitMeta`) shelled out via `workspace.NewGitCmd` directly against the sandbox work-copy path on the host, rather than the backend-aware `runtime.GitExecFor`. For Docker/Seatbelt the work copy is a real host directory, so this was correct. For Tart the work copy lives inside the VM, so tag discovery/matching against that path read the wrong (or empty) repo. This was a **pre-existing, pipeline-wide** gap surfaced (not introduced) while relocating tag transfer into the public `Workdir().TransferTags` verb.
+- **Pointer:** `internal/sandbox/tags.go`, `internal/sandbox/transfer_tags.go`, `internal/workspace/tags.go`, `internal/sandbox/engine_workdir.go`
+
 ### DF16 — `ValidNameRe` is looser than the containerd identifier regex (a valid sandbox name can be an invalid containerd id)
 
 - **Discovered:** 2026-06-03 · **Workstream:** D58/D59 principal-namespacing research

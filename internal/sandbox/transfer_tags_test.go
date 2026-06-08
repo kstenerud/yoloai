@@ -3,6 +3,7 @@
 package sandbox
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -20,7 +21,7 @@ func TestTransferTags_EmptyIsNoOp(t *testing.T) {
 	layout := config.NewLayout(filepath.Join(tmp, ".yoloai"))
 	createTestSandbox(t, tmp, "box", filepath.Join(tmp, "host"), store.DirModeCopy)
 
-	res, err := TransferTags(layout, "box", nil, nil)
+	res, err := TransferTags(context.Background(), layout, nil, "box", nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, &TransferTagsResult{}, res)
 }
@@ -48,7 +49,7 @@ func TestTransferTags_ProvidedSHAMap(t *testing.T) {
 		"bbbb2222": hostSHA,
 	}
 
-	res, err := TransferTags(layout, "box", tags, shaMap)
+	res, err := TransferTags(context.Background(), layout, nil, "box", tags, shaMap)
 	require.NoError(t, err)
 	assert.Equal(t, 2, res.Applied)
 	assert.Equal(t, 0, res.Skipped)
@@ -79,7 +80,7 @@ func TestTransferTags_UnmatchedTag(t *testing.T) {
 	}
 	shaMap := map[string]string{"aaaa1111": hostSHA}
 
-	res, err := TransferTags(layout, "box", tags, shaMap)
+	res, err := TransferTags(context.Background(), layout, nil, "box", tags, shaMap)
 	require.NoError(t, err)
 	assert.Equal(t, 1, res.Applied)
 	assert.Equal(t, 1, res.Skipped)
@@ -123,7 +124,7 @@ func TestTransferTags_MatchingFallback(t *testing.T) {
 
 	tags := []TagInfo{{Name: "v1", SHA: sandboxSHA}}
 
-	res, err := TransferTags(layout, "box", tags, nil)
+	res, err := TransferTags(context.Background(), layout, nil, "box", tags, nil)
 	require.NoError(t, err)
 	assert.Equal(t, 1, res.Applied)
 	assert.Equal(t, hostSHA, testutil.RunGitOutput(t, hostDir, "rev-list", "-n", "1", "v1"))

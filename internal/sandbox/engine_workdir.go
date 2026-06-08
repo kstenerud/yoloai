@@ -135,15 +135,19 @@ func (e *Engine) BaselineLog(ctx context.Context, name string) ([]patch.Baseline
 // WorkdirTags returns the sandbox's checkpoint tags with their annotated
 // messages populated. With unappliedOnly, returns only tags not yet on the host.
 // Tagging is copy-mode only — :rw and :overlay workdirs yield an empty list.
-func (e *Engine) WorkdirTags(name string, unappliedOnly bool) ([]TagInfo, error) {
+func (e *Engine) WorkdirTags(ctx context.Context, name string, unappliedOnly bool) ([]TagInfo, error) {
+	// Open the backend best-effort so Tart reads run inside the VM; a nil
+	// runtime falls back to host git (correct for Docker/Podman/Seatbelt).
+	e.TryEnsure(ctx)
+
 	var (
 		tags []TagInfo
 		err  error
 	)
 	if unappliedOnly {
-		tags, err = ListUnappliedTags(e.layout, name)
+		tags, err = ListUnappliedTags(ctx, e.layout, e.runtime, name)
 	} else {
-		tags, err = ListTagsBeyondBaseline(e.layout, name)
+		tags, err = ListTagsBeyondBaseline(ctx, e.layout, e.runtime, name)
 	}
 	if err != nil {
 		return nil, err
@@ -156,17 +160,21 @@ func (e *Engine) WorkdirTags(name string, unappliedOnly bool) ([]TagInfo, error)
 	if err != nil {
 		return nil, err
 	}
-	gitDir := store.WorkDir(e.layout.SandboxDir(name), meta.Workdir.HostPath)
+	workDir := store.WorkDir(e.layout.SandboxDir(name), meta.Workdir.HostPath)
+	git := sandboxGitRunner(ctx, e.runtime, name, workDir)
 	for i := range tags {
-		tags[i].Message = GetTagMessage(gitDir, tags[i].Name)
+		tags[i].Message = getTagMessage(git, tags[i].Name)
 	}
 	return tags, nil
 }
 
 // TransferWorkdirTags re-creates the sandbox's tags on the host target repo,
 // pointing each at the host commit its sandbox commit landed on.
-func (e *Engine) TransferWorkdirTags(name string, tags []TagInfo, shaMap map[string]string) (*TransferTagsResult, error) {
-	return TransferTags(e.layout, name, tags, shaMap)
+func (e *Engine) TransferWorkdirTags(ctx context.Context, name string, tags []TagInfo, shaMap map[string]string) (*TransferTagsResult, error) {
+	// Best-effort backend open so commit-matching reads the Tart VM work copy;
+	// a nil runtime falls back to host git.
+	e.TryEnsure(ctx)
+	return TransferTags(ctx, e.layout, e.runtime, name, tags, shaMap)
 }
 
 // TargetIsGitRepo reports whether the sandbox's original host workdir is a git

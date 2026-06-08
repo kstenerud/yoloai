@@ -347,10 +347,10 @@ type WorkdirTagsOptions struct {
 // Tags returns the sandbox workdir's checkpoint tags, each with its annotated
 // Message populated. Tagging is copy-mode only — returns an empty list for :rw
 // and :overlay workdirs. With opts.UnappliedOnly, returns only tags not yet
-// present on the host. Folds ListTagsBeyondBaseline / ListUnappliedTags /
-// GetTagMessage.
+// present on the host. Folds ListTagsBeyondBaseline / ListUnappliedTags and the
+// per-tag message lookup; reads the sandbox work copy through the backend.
 func (w *Workdir) Tags(ctx context.Context, opts WorkdirTagsOptions) ([]TagInfo, error) {
-	return w.engine.WorkdirTags(w.name, opts.UnappliedOnly)
+	return w.engine.WorkdirTags(ctx, w.name, opts.UnappliedOnly)
 }
 
 // TagOutcome is the result of transferring one tag to the host target repo.
@@ -377,11 +377,11 @@ type WorkdirTransferTagsOptions struct {
 // TransferTags re-creates the agent's sandbox tags on the original host repo,
 // pointing each at the host commit its sandbox commit landed on. The library
 // owns the SHA mapping (or commit-matching when SHAMap is empty) and the git
-// tag plumbing; the caller renders the returned per-tag outcomes. ctx is
-// accepted for API symmetry; the current host-git implementation does not use
-// it (see Tags).
+// tag plumbing; the caller renders the returned per-tag outcomes. The sandbox
+// work copy is read through the backend (Tart-correct); the host target repo
+// uses host git.
 func (w *Workdir) TransferTags(ctx context.Context, opts WorkdirTransferTagsOptions) (*TagTransferResult, error) {
-	return w.engine.TransferWorkdirTags(w.name, opts.Tags, opts.SHAMap)
+	return w.engine.TransferWorkdirTags(ctx, w.name, opts.Tags, opts.SHAMap)
 }
 
 // TargetIsGitRepo reports whether the sandbox's original host work directory is
