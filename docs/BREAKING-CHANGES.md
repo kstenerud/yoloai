@@ -17,7 +17,7 @@ or piped) rather than prompting.
 | Command | Before | After |
 |---|---|---|
 | `new` | dirty workdir → interactive confirm; `--yes` auto-proceeds | dirty workdir → **refuses** unless `--allow-dirty`; `--yes` removed |
-| `destroy` | active/unapplied work → confirm; `--yes` auto-proceeds | **refuses** unless `--abandon-unapplied`; `--yes` removed |
+| `destroy` | active/unapplied work (incl. a running agent) → confirm; `--yes` auto-proceeds | unapplied changes → **refuses** unless `--abandon-unapplied`; a running agent alone no longer blocks; `--yes` removed |
 | `system prune` | trash emptied when `--yes` set (and never under `--json`) | trash emptied only with `--trash` (a selector, parallel to `--images`); `--yes` now only suppresses the reclaim prompt |
 
 `--yes` survives only on commands whose prompt confirms *the verb you invoked*
@@ -27,7 +27,8 @@ or piped) rather than prompting.
 
 - `yoloai new … ` on a dirty repo → add `--allow-dirty`.
 - `yoloai destroy … --yes` → `yoloai destroy … --abandon-unapplied` (only if the
-  target has unapplied changes or a running agent; otherwise drop `--yes`).
+  target has unapplied changes; a running-but-clean agent no longer needs the
+  flag, so otherwise just drop `--yes`).
 - `yoloai system prune --yes` that relied on emptying the trash → add `--trash`.
 - Scripts can detect the refusals via `errors.As` on `*yoloai.DirtyWorkdirError`
   (new) and the active-work error (destroy).

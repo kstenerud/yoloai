@@ -391,10 +391,34 @@ func TestStart_Resume_StoppedStatus(t *testing.T) {
 
 // NeedsConfirmation tests
 
-func TestNeedsConfirmation_Running(t *testing.T) {
+// A running agent with a clean workdir is NOT a destroy blocker: there is no
+// unapplied work to lose, so NeedsConfirmation must return false even when the
+// container is live.
+func TestNeedsConfirmation_RunningButClean(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	createTestSandbox(t, tmpDir, "test-confirm-running", "/tmp/project", "copy")
+	name := "test-confirm-running"
+	hostPath := "/tmp/project"
+	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
+	workDir := filepath.Join(sandboxDir, "work", store.EncodePath(hostPath))
+	require.NoError(t, os.MkdirAll(workDir, 0750))
+
+	testutil.InitGitRepo(t, workDir)
+	testutil.WriteFile(t, workDir, "file.txt", "content")
+	testutil.GitAdd(t, workDir, ".")
+	testutil.GitCommit(t, workDir, "initial")
+
+	meta := &store.Environment{
+		Name:      name,
+		AgentType: "claude",
+		CreatedAt: time.Now(),
+		Workdir: store.WorkdirEnvironment{
+			HostPath:  hostPath,
+			MountPath: hostPath,
+			Mode:      "copy",
+		},
+	}
+	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
 	mock := &lifecycleMockRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
@@ -403,9 +427,9 @@ func TestNeedsConfirmation_Running(t *testing.T) {
 	}
 
 	d := newLifecycleDeps(mock, tmpDir)
-	needs, reason := NeedsConfirmation(context.Background(), d, "test-confirm-running")
-	assert.True(t, needs)
-	assert.Equal(t, "agent is still running", reason)
+	needs, reason := NeedsConfirmation(context.Background(), d, name)
+	assert.False(t, needs)
+	assert.Empty(t, reason)
 }
 
 func TestNeedsConfirmation_ChangesExist(t *testing.T) {
@@ -1242,21 +1266,3 @@ func TestDestroy_ReadOnlyFiles(t *testing.T) {
 }
 
 // NeedsConfirmation edge cases
-
-func TestNeedsConfirmation_InspectError(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	createTestSandbox(t, tmpDir, "test-confirm-err", "/tmp/project", "copy")
-
-	mock := &lifecycleMockRuntime{
-		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
-			return runtime.InstanceInfo{}, fmt.Errorf("runtime unavailable")
-		},
-	}
-
-	d := newLifecycleDeps(mock, tmpDir)
-	needs, reason := NeedsConfirmation(context.Background(), d, "test-confirm-err")
-	// When inspect fails, DetectStatus returns an error → NeedsConfirmation returns false
-	assert.False(t, needs)
-	assert.Empty(t, reason)
-}

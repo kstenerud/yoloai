@@ -58,7 +58,7 @@ func NewDestroyCmd() *cobra.Command {
 	}
 
 	cmd.Flags().Bool("all", false, "Destroy all sandboxes")
-	cmd.Flags().Bool("abandon-unapplied", false, "Destroy even when a sandbox has unapplied changes or a running agent")
+	cmd.Flags().Bool("abandon-unapplied", false, "Destroy even when a sandbox has unapplied changes")
 
 	return cmd
 }
@@ -95,8 +95,8 @@ func runDestroyCmd(cmd *cobra.Command, args []string) error {
 			return nil
 		}
 
-		// A sandbox with unapplied changes or a running agent is only destroyed
-		// when --abandon-unapplied authorizes discarding that work. We never
+		// A sandbox with unapplied changes is only destroyed when
+		// --abandon-unapplied authorizes discarding that work. We never
 		// prompt to widen the scope, so there is no --yes to paper over it.
 		if err := checkActiveWork(cmd, ctx, c, names, abandonUnapplied); err != nil {
 			return err
@@ -173,10 +173,10 @@ func resolveDestroyArgs(ctx context.Context, c *yoloai.Client, args []string) ([
 }
 
 // checkActiveWork refuses the destroy (without prompting) when any named sandbox
-// holds unapplied changes or a running agent, unless --abandon-unapplied
-// authorizes discarding it. Widening the destructive scope is opt-in via the
-// flag alone — there is no interactive prompt to answer, so nothing can paper
-// over the safety choice.
+// holds unapplied changes, unless --abandon-unapplied authorizes discarding it.
+// A running agent alone does not block — only work that would actually be lost.
+// Widening the destructive scope is opt-in via the flag alone — there is no
+// interactive prompt to answer, so nothing can paper over the safety choice.
 func checkActiveWork(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, names []string, abandonUnapplied bool) error {
 	if abandonUnapplied {
 		return nil
@@ -196,12 +196,12 @@ func checkActiveWork(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, 
 	if len(warnings) == 0 {
 		return nil
 	}
-	fmt.Fprintln(cmd.ErrOrStderr(), "The following sandboxes have active work:") //nolint:errcheck // best-effort output
+	fmt.Fprintln(cmd.ErrOrStderr(), "The following sandboxes have unapplied changes:") //nolint:errcheck // best-effort output
 	for _, w := range warnings {
 		fmt.Fprintln(cmd.ErrOrStderr(), w) //nolint:errcheck // best-effort output
 	}
 	return yoerrors.NewActiveWorkError(
-		"%d sandbox(es) have active work; re-run with --abandon-unapplied or run 'yoloai apply' first",
+		"%d sandbox(es) have unapplied changes; re-run with --abandon-unapplied or run 'yoloai apply' first",
 		len(warnings),
 	)
 }

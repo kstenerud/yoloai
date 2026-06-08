@@ -24,8 +24,8 @@ type UsageError = yoerrors.UsageError
 // ConfigError indicates a configuration problem.
 type ConfigError = yoerrors.ConfigError
 
-// ActiveWorkError indicates a sandbox holds unapplied changes or a running
-// agent — returned by Destroy when AbandonUnappliedWork is not set.
+// ActiveWorkError indicates a sandbox holds unapplied changes — returned by
+// Destroy when AbandonUnappliedWork is not set.
 type ActiveWorkError = yoerrors.ActiveWorkError
 
 // DirtyWorkdirError is returned by CreateSandbox when the workdir — or an

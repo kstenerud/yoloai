@@ -79,8 +79,8 @@ type SandboxCreateOptions struct {
 	Replace bool
 
 	// AbandonUnappliedWork lets Replace destroy the existing sandbox even when it
-	// holds work never applied to the host — a running agent, a dirty workdir, or
-	// unapplied commits — skipping that safety check. Mirrors
+	// holds work never applied to the host — a dirty workdir or commits beyond the
+	// baseline — skipping that safety check. Mirrors
 	// SandboxDestroyOptions.AbandonUnappliedWork. (The CLI's --abandon-unapplied flag maps here.)
 	AbandonUnappliedWork bool
 

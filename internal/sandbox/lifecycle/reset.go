@@ -107,27 +107,14 @@ func Reset(ctx context.Context, d state.Deps, opts ResetOptions) (*ResetResult, 
 }
 
 // NeedsConfirmation checks if a sandbox requires confirmation before
-// destruction. Returns true if the agent is running or unapplied changes
-// exist (uncommitted changes or commits beyond baseline).
-// Returns a reason string for the confirmation prompt.
-func NeedsConfirmation(ctx context.Context, d state.Deps, name string) (bool, string) {
-	sandboxDir := d.Layout.SandboxDir(name)
-
-	// A backend-less caller (no runtime connection) can't probe whether the
-	// agent is live; skip the running check and rely on the on-disk
-	// unapplied-work probes. When a runtime is present and inspection itself
-	// fails, abort (return false) just as the original behavior did.
-	if d.Runtime != nil {
-		st, err := status.DetectStatus(ctx, d.Runtime, store.InstanceName(d.Layout.Principal, name), sandboxDir)
-		if err != nil {
-			return false, ""
-		}
-		if st == status.StatusActive || st == status.StatusIdle {
-			return true, "agent is still running"
-		}
-	}
-
-	return unappliedWorkReason(sandboxDir)
+// destruction. Returns true only when destruction would lose unapplied work —
+// uncommitted changes or commits beyond the baseline — with a reason string for
+// the prompt. A running agent is NOT a blocker on its own: a live but clean
+// sandbox has nothing to lose, and gating on it forced --abandon-unapplied for
+// every routine destroy. The gate keys purely on the on-disk work signal, which
+// also means it works without a runtime connection.
+func NeedsConfirmation(_ context.Context, d state.Deps, name string) (bool, string) {
+	return unappliedWorkReason(d.Layout.SandboxDir(name))
 }
 
 // unappliedWorkReason reports whether a sandbox's on-disk state holds work that

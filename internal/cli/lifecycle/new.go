@@ -44,7 +44,7 @@ func NewNewCmd(version string) *cobra.Command {
 	cmd.Flags().StringSlice("port", nil, "Port mapping (host:container)")
 	cmd.Flags().StringSliceP("dir", "d", nil, "Auxiliary directory (repeatable, default read-only)")
 	cmd.Flags().Bool("replace", false, "Replace existing sandbox with same name")
-	cmd.Flags().Bool("abandon-unapplied", false, "Replace even when the existing sandbox has unapplied changes or a running agent (implies --replace)")
+	cmd.Flags().Bool("abandon-unapplied", false, "Replace even when the existing sandbox has unapplied changes (implies --replace)")
 	cmd.Flags().Bool("no-start", false, "Create but don't start the container")
 	cmd.Flags().BoolP("attach", "a", false, "Auto-attach after creation")
 	cmd.Flags().Bool("allow-dirty", false, "Proceed even if the workdir has uncommitted changes (they will be visible to the agent)")

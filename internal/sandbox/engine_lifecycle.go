@@ -73,12 +73,10 @@ func (e *Engine) Create(ctx context.Context, opts create.Options) (string, error
 	return create.Run(ctx, e.deps(), opts)
 }
 
-// NeedsConfirmation reports whether destroying the sandbox would lose work — a
-// running agent, a dirty workdir, or unapplied commits — and a human-readable
-// reason. It opens the backend best-effort (TryEnsure): with no backend the
-// on-disk unapplied-work signals are still detected from the host.
+// NeedsConfirmation reports whether destroying the sandbox would lose unapplied
+// work — a dirty workdir or commits beyond the baseline — and a human-readable
+// reason. It's a pure on-disk query and needs no backend connection.
 func (e *Engine) NeedsConfirmation(ctx context.Context, name string) (bool, string) {
-	e.TryEnsure(ctx)
 	return lifecycle.NeedsConfirmation(ctx, e.deps(), name)
 }
 

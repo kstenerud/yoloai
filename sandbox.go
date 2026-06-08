@@ -285,9 +285,10 @@ func (s *Sandbox) Reset(ctx context.Context, opts SandboxResetOptions) (*ResetRe
 	return s.engine.Reset(ctx, opts.toInternal(s.name))
 }
 
-// HasActiveWork reports whether destroying the sandbox would lose work — a
-// running agent, a dirty workdir, or unapplied commits — and a human-readable
-// reason (empty when there's none). It's a pure query with no side effects;
+// HasActiveWork reports whether destroying the sandbox would lose unapplied
+// work — a dirty workdir or commits beyond the baseline — and a human-readable
+// reason (empty when there's none). A running agent alone does not count: a live
+// but clean sandbox has nothing to lose. It's a pure query with no side effects;
 // use it to pre-flight a batch of sandboxes before prompting once. For the
 // single-sandbox case prefer Destroy's atomic typed refusal.
 func (s *Sandbox) HasActiveWork(ctx context.Context) (bool, string) {
@@ -451,9 +452,10 @@ func (o SandboxResetOptions) toInternal(name string) sandbox.ResetOptions {
 // SandboxDestroyOptions configures Sandbox.Destroy.
 type SandboxDestroyOptions struct {
 	// AbandonUnappliedWork proceeds even when the sandbox holds work that was
-	// never applied to the host — a running agent, a dirty workdir, or unapplied
-	// commits. With it false, Destroy refuses such a sandbox with a typed
-	// *ActiveWorkError carrying the reason, so the caller can prompt and retry.
+	// never applied to the host — a dirty workdir or commits beyond the baseline.
+	// With it false, Destroy refuses such a sandbox with a typed *ActiveWorkError
+	// carrying the reason, so the caller can prompt and retry. A running agent
+	// alone is not unapplied work and never triggers the refusal.
 	// (The CLI's --abandon-unapplied flag maps onto this field at the boundary.)
 	AbandonUnappliedWork bool
 }

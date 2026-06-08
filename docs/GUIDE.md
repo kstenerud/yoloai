@@ -329,7 +329,7 @@ Errors are output to stderr as `{"error": "message"}`. Interactive commands (`at
 | 1     | General error |
 | 2     | Usage error (bad arguments, missing required args) |
 | 3     | Configuration error (bad config file, missing required config) |
-| 4     | Active work — sandbox has unapplied changes or a running agent; use `--abandon-unapplied` to discard it or `yoloai apply` first |
+| 4     | Active work — sandbox has unapplied changes; use `--abandon-unapplied` to discard them or `yoloai apply` first |
 | 5     | Dependency error — required software not installed or not running (e.g., Docker daemon) |
 | 6     | Platform error — operation not possible on this OS/arch (e.g., tart on Linux) |
 | 7     | Auth error — credentials completely absent (e.g., `ANTHROPIC_API_KEY` not set) |
@@ -400,7 +400,7 @@ yoloai new task ./project --debug
 ### Managing sandboxes
 
 ```bash
-# Destroy a sandbox that has unapplied changes or a running agent (otherwise refused)
+# Destroy a sandbox that has unapplied changes (otherwise refused; a running agent alone is fine)
 yoloai destroy task --abandon-unapplied
 yoloai apply task --yes       # --yes confirms the apply you invoked
 

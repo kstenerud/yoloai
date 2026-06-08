@@ -208,7 +208,7 @@ Options:
 - `--runtime <name>`: Apple simulator runtime for `mac` targets (`ios`, `tvos`, `watchos`, `visionos`; repeatable, e.g. `--runtime tvos:26.1`).
 - `--vscode-tunnel`: Launch a VS Code Remote Tunnel alongside the agent (connect from VS Code on any machine).
 - `--replace`: Destroy an existing sandbox of the same name before creating. Aborts if that sandbox holds unapplied changes (use `--abandon-unapplied` to override). Shorthand for `yoloai destroy <name> && yoloai new <name>`.
-- `--abandon-unapplied`: Like `--replace`, but proceeds even when the existing sandbox has a running agent or unapplied changes (implies `--replace`). Named for its consequence — the unreviewed work is discarded.
+- `--abandon-unapplied`: Like `--replace`, but proceeds even when the existing sandbox has unapplied changes (implies `--replace`). Named for its consequence — the unreviewed work is discarded.
 - `--attach` / `-a`: Auto-attach to the tmux session after creation. Without this flag, the sandbox starts in the background and prints `yoloai attach <name>` as a hint.
 - `--no-start`: Create sandbox without starting the container. Useful for setup-only operations.
 - `--allow-dirty`: Proceed even when a `:rw`/`:copy` workdir has uncommitted changes. Without it, a dirty workdir is **refused** with a typed error (`*yoloai.DirtyWorkdirError`) in every mode — yoloAI never prompts and there is no `--yes` to auto-proceed. Named for its consequence: the uncommitted changes become visible to the agent.
@@ -458,11 +458,11 @@ Accepts multiple sandbox names (e.g., `yoloai destroy sandbox1 sandbox2 sandbox3
 
 **Wildcard support:** Sandbox names can include `*` and `?` wildcards for pattern matching. For example, `yoloai destroy test*` will destroy all sandboxes whose names start with "test". Wildcards are expanded against existing sandboxes; an error is returned if no matches are found.
 
-**Active-work refusal:** If any target has a running agent or unapplied changes (detected via `git status --porcelain` on the host-side work directory, consistent with `list` CHANGES detection), destroy **refuses with a typed error in every mode** unless `--abandon-unapplied` was passed. yoloAI never prompts — discarding unreviewed work widens the destructive scope, so it is opt-in via the selector flag alone. A stopped/exited sandbox with no unapplied changes is destroyed directly. There is no `--yes`: destroy has no prompt to suppress.
+**Active-work refusal:** If any target has unapplied changes (detected via `git status --porcelain` on the host-side work directory, consistent with `list` CHANGES detection), destroy **refuses with a typed error in every mode** unless `--abandon-unapplied` was passed. A running agent alone is not a blocker — a live but clean sandbox has nothing to lose and is destroyed directly. yoloAI never prompts — discarding unreviewed work widens the destructive scope, so it is opt-in via the selector flag alone. There is no `--yes`: destroy has no prompt to suppress.
 
 Options:
 - `--all`: Destroy all sandboxes.
-- `--abandon-unapplied`: Destroy even when a target has a running agent or unapplied changes (the unreviewed work is discarded). Named for its consequence.
+- `--abandon-unapplied`: Destroy even when a target has unapplied changes (the unreviewed work is discarded). Named for its consequence.
 
 ### `yoloai sandbox <name> log` / `yoloai log`
 
