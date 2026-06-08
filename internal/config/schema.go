@@ -4,6 +4,7 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -19,7 +20,17 @@ import (
 // expects in its DataDir. Bump this when the library's on-disk layout or
 // file formats change in a way that needs a migration step; add a matching
 // case to migrateLibraryStep and document the change in BREAKING-CHANGES.
-const LibrarySchemaVersion = 1
+const LibrarySchemaVersion = 2
+
+// LaunchPrefixResolver maps a sandbox's stored backend type (the "backend"
+// string in environment.json) to that backend's constant agent-launch wrap
+// prefix. It is injected from a layer with runtime access (System.MigrateDataDir)
+// so this package stays free of an internal/runtime import. The resolver must
+// be a pure lookup over static backend descriptors — it must not construct a
+// Runtime or probe for a backend binary, so a Linux host can migrate the
+// Tart/Seatbelt sandboxes it cannot itself run. An unknown backend resolves to
+// "" (a no-op prepend).
+type LaunchPrefixResolver func(backendType string) string
 
 // LayoutStatus is the verdict of a realm status check: what a realm's DataDir
 // needs before it can be used. A too-new on-disk version is reported as an
@@ -143,11 +154,15 @@ func CreateFreshLibrary(layout Layout) error {
 // environment.json family of renames predates it), so reaching v1 only
 // means recording the stamp. The flat -> namespaced directory move is a
 // CLI-side concern handled above the library, since it restructures the dir
-// above the library's root.
+// above the library's root. v1 -> v2 backfills agent_launch_prefix (W1b).
+//
+// prefixFor resolves a sandbox's stored backend type to its constant launch
+// prefix; it is injected so this package stays free of an internal/runtime
+// import (see LaunchPrefixResolver).
 //
 // This is invoked only by the explicit migrate command (and direct embedders
 // that own their DataDir) — the engine no longer runs it automatically.
-func MigrateLibrary(layout Layout) error {
+func MigrateLibrary(layout Layout, prefixFor LaunchPrefixResolver) error {
 	stampPath := layout.SchemaVersionPath()
 	current, _, err := ReadSchemaVersion(stampPath)
 	if err != nil {
@@ -157,7 +172,7 @@ func MigrateLibrary(layout Layout) error {
 		return fmt.Errorf("library data dir schema version %d is newer than this build supports (%d); upgrade yoloai", current, LibrarySchemaVersion)
 	}
 	for v := current; v < LibrarySchemaVersion; v++ {
-		if err := migrateLibraryStep(layout, v); err != nil {
+		if err := migrateLibraryStep(layout, v, prefixFor); err != nil {
 			return fmt.Errorf("library migration v%d -> v%d: %w", v, v+1, err)
 		}
 	}
@@ -169,12 +184,108 @@ func MigrateLibrary(layout Layout) error {
 
 // migrateLibraryStep applies the single transform that takes the library's
 // DataDir from version `from` to `from+1`. Add a case per future bump.
-func migrateLibraryStep(_ Layout, from int) error {
+func migrateLibraryStep(layout Layout, from int, prefixFor LaunchPrefixResolver) error {
 	switch from {
 	case 0:
 		// v0 -> v1: no on-disk transform; stamping happens in MigrateLibrary.
 		return nil
+	case 1:
+		// v1 -> v2: backfill agent_launch_prefix into every sandbox.
+		return backfillLaunchPrefix(layout, prefixFor)
 	default:
 		return fmt.Errorf("no migration registered from version %d", from)
 	}
+}
+
+// backfillLaunchPrefix (v1 -> v2) writes each sandbox's backend-constant agent
+// launch prefix into its runtime-config.json, making agent_launch_prefix the
+// single source of truth for the launch wrap (W1b) and retiring the Python
+// prepare_launch_command fallback. The prefix is a deterministic per-backend
+// constant, so the write is unconditional and idempotent: rewriting an already
+// correct value is a no-op, and sandboxes that never had the field get it
+// filled. Container backends resolve to "" (a harmless no-op prepend); in
+// practice only Tart/Seatbelt sandboxes receive a non-empty string.
+func backfillLaunchPrefix(layout Layout, prefixFor LaunchPrefixResolver) error {
+	entries, err := os.ReadDir(layout.SandboxesDir())
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil // no sandboxes yet
+		}
+		return fmt.Errorf("read sandboxes dir: %w", err)
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		sandboxDir := filepath.Join(layout.SandboxesDir(), e.Name())
+		if err := backfillSandboxLaunchPrefix(sandboxDir, prefixFor); err != nil {
+			return fmt.Errorf("sandbox %q: %w", e.Name(), err)
+		}
+	}
+	return nil
+}
+
+// backfillSandboxLaunchPrefix backfills one sandbox's agent_launch_prefix. It
+// reads the backend type from environment.json, resolves the constant prefix,
+// and rewrites runtime-config.json with that value. A sandbox missing either
+// file is skipped (a partial/dormant directory with nothing to wrap). The
+// rewrite preserves every other field's exact bytes; only the one key changes.
+func backfillSandboxLaunchPrefix(sandboxDir string, prefixFor LaunchPrefixResolver) error {
+	backend, ok, err := readSandboxBackend(sandboxDir)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil // no environment.json: can't classify; leave untouched
+	}
+
+	rcPath := filepath.Join(sandboxDir, "runtime-config.json")
+	rcData, err := os.ReadFile(rcPath) //nolint:gosec // G304: trusted sandbox subpath
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil // no runtime-config.json: nothing to wrap
+		}
+		return fmt.Errorf("read runtime-config.json: %w", err)
+	}
+
+	var rc map[string]json.RawMessage
+	if err := json.Unmarshal(rcData, &rc); err != nil {
+		return fmt.Errorf("parse runtime-config.json: %w", err)
+	}
+	prefix, err := json.Marshal(prefixFor(backend))
+	if err != nil {
+		return fmt.Errorf("encode launch prefix: %w", err)
+	}
+	rc["agent_launch_prefix"] = prefix
+
+	out, err := json.MarshalIndent(rc, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode runtime-config.json: %w", err)
+	}
+	// runtime-config.json is bind-mounted into the container (read-only, no
+	// secrets); 0644 matches the create path's perm.
+	if err := fileutil.WriteFilePerm(rcPath, out, 0644); err != nil {
+		return fmt.Errorf("write runtime-config.json: %w", err)
+	}
+	return nil
+}
+
+// readSandboxBackend reads the "backend" field from a sandbox's
+// environment.json. The bool reports whether the file exists; a missing file
+// returns ("", false, nil) so the caller can skip an unclassifiable directory.
+func readSandboxBackend(sandboxDir string) (backend string, exists bool, err error) {
+	data, err := os.ReadFile(filepath.Join(sandboxDir, "environment.json")) //nolint:gosec // G304: trusted sandbox subpath
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("read environment.json: %w", err)
+	}
+	var env struct {
+		Backend string `json:"backend"`
+	}
+	if err := json.Unmarshal(data, &env); err != nil {
+		return "", false, fmt.Errorf("parse environment.json: %w", err)
+	}
+	return env.Backend, true, nil
 }

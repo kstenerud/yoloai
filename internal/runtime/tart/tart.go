@@ -45,7 +45,13 @@ var descriptor = runtime.BackendDescriptor{
 	BaseModeName:              runtime.IsolationModeVM,
 	AgentProvisionedByBackend: true,
 	AgentInstallMethod:        "native",
-	SupportedIsolationModes:   nil,
+	// Prepend the provisioned tool dirs to PATH so the agent launches from a
+	// non-login shell (tart exec bash -c does not source ~/.zprofile). Claude
+	// Code is installed natively in ~/.local/bin; node@22 is keg-only at
+	// /opt/homebrew/opt/node@22/bin. Mirrors the login PATH composed in the base
+	// image's ~/.zprofile (see build.go provisionCommands).
+	AgentLaunchPrefix:       `PATH="$HOME/.local/bin:/opt/homebrew/opt/node@22/bin:/opt/homebrew/bin:$PATH" `,
+	SupportedIsolationModes: nil,
 	Capabilities: runtime.BackendCaps{
 		NetworkIsolation: false,
 		OverlayDirs:      false,
@@ -564,13 +570,11 @@ func (r *Runtime) DiagHint(instanceName string) string {
 	return fmt.Sprintf("check VM log at %s", logPath)
 }
 
-// PrepareAgentCommand prepends the provisioned tool dirs to PATH so the agent
-// launches correctly from a non-login shell (tart exec bash -c does not source
-// ~/.zprofile). Claude Code is installed natively in ~/.local/bin; node@22 is
-// keg-only at /opt/homebrew/opt/node@22/bin. Mirrors the login PATH composed in
-// the base image's ~/.zprofile (see runtime/tart/build.go provisionCommands).
+// PrepareAgentCommand prepends the backend's constant launch wrap (see
+// descriptor.AgentLaunchPrefix) so the agent launches correctly from a
+// non-login shell.
 func (r *Runtime) PrepareAgentCommand(cmd string) string {
-	return fmt.Sprintf(`PATH="$HOME/.local/bin:/opt/homebrew/opt/node@22/bin:/opt/homebrew/bin:$PATH" %s`, cmd)
+	return descriptor.AgentLaunchPrefix + cmd
 }
 
 // TmuxSocket returns the explicit tmux socket path for Tart VMs.

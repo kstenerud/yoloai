@@ -4,6 +4,7 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -146,7 +147,7 @@ func TestMigrateLibrary_UnstampedV0_StampsAndPreservesData(t *testing.T) {
 	require.NoError(t, os.WriteFile(marker, []byte("data"), 0600))
 
 	layout := NewLayout(dir)
-	require.NoError(t, MigrateLibrary(layout))
+	require.NoError(t, MigrateLibrary(layout, testPrefixResolver))
 
 	v, exists, err := ReadSchemaVersion(layout.SchemaVersionPath())
 	require.NoError(t, err)
@@ -165,8 +166,8 @@ func TestMigrateLibrary_AlreadyCurrent_Idempotent(t *testing.T) {
 	layout := NewLayout(dir)
 	require.NoError(t, CreateFreshLibrary(layout)) // stamped at current
 
-	require.NoError(t, MigrateLibrary(layout))
-	require.NoError(t, MigrateLibrary(layout))
+	require.NoError(t, MigrateLibrary(layout, testPrefixResolver))
+	require.NoError(t, MigrateLibrary(layout, testPrefixResolver))
 
 	v, _, err := ReadSchemaVersion(layout.SchemaVersionPath())
 	require.NoError(t, err)
@@ -179,7 +180,7 @@ func TestMigrateLibrary_NewerThanBuild_Errors(t *testing.T) {
 	layout := NewLayout(dir)
 	require.NoError(t, WriteSchemaVersion(layout.SchemaVersionPath(), LibrarySchemaVersion+1))
 
-	err := MigrateLibrary(layout)
+	err := MigrateLibrary(layout, testPrefixResolver)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "upgrade yoloai")
 }
@@ -196,14 +197,74 @@ func TestMigrateLibraryStep(t *testing.T) {
 
 	for from := range LibrarySchemaVersion {
 		t.Run(fmt.Sprintf("registered_v%d", from), func(t *testing.T) {
-			require.NoError(t, migrateLibraryStep(layout, from),
+			require.NoError(t, migrateLibraryStep(layout, from, testPrefixResolver),
 				"every registered step on the path MigrateLibrary walks must succeed")
 		})
 	}
 
 	t.Run("unregistered_version_errors", func(t *testing.T) {
-		err := migrateLibraryStep(layout, LibrarySchemaVersion)
+		err := migrateLibraryStep(layout, LibrarySchemaVersion, testPrefixResolver)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "no migration registered")
 	})
+}
+
+// testPrefixResolver is a stand-in for the runtime-sourced resolver injected by
+// System.MigrateDataDir: a Tart sandbox gets a PATH wrap, everything else "".
+func testPrefixResolver(backendType string) string {
+	if backendType == "tart" {
+		return `PATH="/wrap/bin:$PATH" `
+	}
+	return ""
+}
+
+// writeSandbox materializes a minimal sandbox dir with the given backend and a
+// runtime-config.json whose agent_launch_prefix is set to prefix.
+func writeSandbox(t *testing.T, layout Layout, name, backend, prefix string) string {
+	t.Helper()
+	dir := filepath.Join(layout.SandboxesDir(), name)
+	require.NoError(t, os.MkdirAll(dir, 0750))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "environment.json"),
+		fmt.Appendf(nil, `{"backend":%q}`, backend), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "runtime-config.json"),
+		fmt.Appendf(nil, `{"agent_command":"claude","agent_launch_prefix":%q}`, prefix), 0600))
+	return dir
+}
+
+func readLaunchPrefix(t *testing.T, sandboxDir string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(sandboxDir, "runtime-config.json")) //nolint:gosec // G304: test temp dir
+	require.NoError(t, err)
+	var rc struct {
+		AgentCommand      string `json:"agent_command"`
+		AgentLaunchPrefix string `json:"agent_launch_prefix"`
+	}
+	require.NoError(t, json.Unmarshal(data, &rc))
+	assert.Equal(t, "claude", rc.AgentCommand, "sibling fields must survive the rewrite")
+	return rc.AgentLaunchPrefix
+}
+
+// The v1 -> v2 step recomputes agent_launch_prefix for every sandbox from its
+// stored backend type: a Tart sandbox that lacked the prefix gets it filled; a
+// container sandbox is left empty; an already-correct value is rewritten
+// identically (idempotent). Sibling fields are preserved.
+func TestMigrateLibrary_V1ToV2_BackfillsLaunchPrefix(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "library")
+	layout := NewLayout(dir)
+	require.NoError(t, os.MkdirAll(dir, 0750))
+	require.NoError(t, WriteSchemaVersion(layout.SchemaVersionPath(), 1)) // start at v1
+
+	tartBox := writeSandbox(t, layout, "tartbox", "tart", "")                          // missing prefix
+	dockerBox := writeSandbox(t, layout, "dockerbox", "docker", "")                    // correctly empty
+	tartHave := writeSandbox(t, layout, "tarthave", "tart", `PATH="/wrap/bin:$PATH" `) // already filled
+
+	require.NoError(t, MigrateLibrary(layout, testPrefixResolver))
+
+	v, _, err := ReadSchemaVersion(layout.SchemaVersionPath())
+	require.NoError(t, err)
+	assert.Equal(t, LibrarySchemaVersion, v)
+
+	assert.Equal(t, `PATH="/wrap/bin:$PATH" `, readLaunchPrefix(t, tartBox), "tart sandbox must be backfilled")
+	assert.Empty(t, readLaunchPrefix(t, dockerBox), "container sandbox must stay empty")
+	assert.Equal(t, `PATH="/wrap/bin:$PATH" `, readLaunchPrefix(t, tartHave), "already-correct value rewritten identically")
 }

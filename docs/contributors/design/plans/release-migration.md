@@ -40,7 +40,7 @@ old-binary sandboxes. Record the outcome here when run:
 
 | File | Field(s) | Enforced on read? | Cross-version behavior | Code |
 |---|---|---|---|---|
-| `runtime-config.json` | `agent_launch_prefix`, `use_launch_prefix` (W1a); `schema_version` (W2) | **No** — version written but not validated | Field-level tolerance only: old sandbox missing `agent_launch_prefix` → Python falls back to `prepare_launch_command` (the path W1b deletes, after `system migrate` backfills the field — see §3); unknown fields ignored. `schema_version` is a reserved field for a future loud-fail. | `runtimeconfig.go:17,40,44,45`; `create.go:721,725,726`; `sandbox-setup.py:818-825` |
+| `runtime-config.json` | `agent_launch_prefix` (W1a/W1b); `schema_version` (W2) | **No** — version written but not validated | Field-level tolerance only: unknown fields ignored. `agent_launch_prefix` is now the single source of truth for the launch wrap — the Python `prepare_launch_command` fallback is deleted (W1b) and the `system migrate` v1→v2 step backfills the field into every pre-W1a sandbox, so both launch paths read it unconditionally. `schema_version` is a reserved field for a future loud-fail. | `runtimeconfig.go:17,40,44`; `create.go`; `sandbox-setup.py` (single prefix path); `config/schema.go` (v1→v2 backfill) |
 | `agent-status.json` | `schema_version` (omitempty, W2) | **Yes** | `=0` (pre-W2) tolerated; any other mismatch rejected (loud-fail) | `status.go:182,190,241` |
 | `meta.json` | `version` (pre-existing) | **Yes** | `=0` legacy tolerated; `version > 1` (future/newer) rejected (loud-fail) | `meta.go:20,24,79` |
 
@@ -53,7 +53,12 @@ its `schema_version` is written but not yet checked, so a version skew there is 
 tolerated at field level. If runtime-config ever needs a hard incompatibility surfaced,
 wiring its `schema_version` into a loud-fail reader is the place to do it.
 
-## 3. Pending removal — W1b (retire the launch-prefix legacy path via migration)
+## 3. W1b — retire the launch-prefix legacy path via migration (IMPLEMENTED)
+
+**Status: implemented.** `LibrarySchemaVersion` is 2 with a v1→v2 backfill step
+(`config/schema.go`), the Python `prepare_launch_command` fallback is deleted, the
+`UseLaunchPrefix` gate is gone, and `restart.go` prepends `agent_launch_prefix`
+unconditionally. The design below is retained for context.
 
 Carried over from `../archive/plans/architecture-remediation.md` (now archived); this is its
 only live remnant. W1a stores the backend-specific wrap prefix once at sandbox creation
@@ -131,7 +136,7 @@ a string written. In practice the migration only touches macOS sandboxes.
 - [ ] §1 prerelease cross-version test run and results recorded.
 - [ ] `docs/BREAKING-CHANGES.md` covers this branch's public-API reshape (layer-1) and the
       `agent_files` inner json-tag change.
-- [ ] W1b shipped as the v1→v2 migration step (§3): `LibrarySchemaVersion` bumped,
+- [x] W1b shipped as the v1→v2 migration step (§3): `LibrarySchemaVersion` bumped to 2,
       `agent_launch_prefix` backfill verified, Python fallback deleted.
 - [ ] Any new on-disk/boundary field added since this doc was written is added to the §2
       table with its compat behavior.

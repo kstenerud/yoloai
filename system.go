@@ -107,7 +107,22 @@ func (s *System) CreateDataDir() error {
 // the engine no longer migrates as a side effect of setup.
 func (s *System) MigrateDataDir(ctx context.Context) error {
 	_ = ctx
-	return config.MigrateLibrary(s.layout)
+	return config.MigrateLibrary(s.layout, launchPrefixResolver())
+}
+
+// launchPrefixResolver builds a pure backend-type -> launch-prefix lookup from
+// the static backend descriptors. It is injected into the schema migration so
+// internal/config need not import internal/runtime, and so the lookup never
+// constructs a Runtime or probes for a backend binary — every backend is
+// registered (via client.go's blank imports) regardless of host platform, so a
+// Linux host can resolve a Tart/Seatbelt sandbox's prefix without the tooling
+// to run it. An unknown backend resolves to "" (a no-op prepend).
+func launchPrefixResolver() config.LaunchPrefixResolver {
+	prefixes := make(map[string]string)
+	for _, d := range runtime.Descriptors() {
+		prefixes[string(d.Type)] = d.AgentLaunchPrefix
+	}
+	return func(backendType string) string { return prefixes[backendType] }
 }
 
 // DiskUsage reports total on-disk usage by yoloai and each available

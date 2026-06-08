@@ -723,7 +723,6 @@ func buildContainerConfig(layout config.Layout, agentDef *agent.Definition, agen
 		HostGID:            layout.HostGID,
 		AgentCommand:       agentCommand,
 		AgentLaunchPrefix:  agentLaunchPrefix,
-		UseLaunchPrefix:    true,
 		StartupDelay:       int(agentDef.StartupDelay / time.Millisecond),
 		ReadyPattern:       agentDef.Idle.ReadyPattern,
 		SubmitSequence:     agentDef.SubmitSequence,

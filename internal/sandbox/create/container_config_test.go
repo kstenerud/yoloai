@@ -17,9 +17,9 @@ import (
 )
 
 func TestBuildContainerConfig_LaunchPrefixStored(t *testing.T) {
-	// W1a: the wrap prefix passed in is stored verbatim, gate is set true.
-	// Single source of truth: at runtime, Python and Go restart both read
-	// agent_launch_prefix instead of re-invoking PrepareAgentCommand.
+	// W1a/W1b: the wrap prefix passed in is stored verbatim as the single source
+	// of truth. At runtime, Python and Go restart both read agent_launch_prefix
+	// (unconditionally) instead of re-invoking PrepareAgentCommand.
 	agentDef := agent.GetAgent("claude")
 	prefix := `PATH="/opt/homebrew/opt/node/bin:$PATH" `
 	data, err := buildContainerConfig(config.NewLayout(t.TempDir()), agentDef, "claude", prefix, "default", "/tmp", false, false, nil, nil, nil, nil, 0, nil, "test", "", "", false, "", nil)
@@ -27,7 +27,6 @@ func TestBuildContainerConfig_LaunchPrefixStored(t *testing.T) {
 	var cfg runtimeconfig.ContainerConfig
 	require.NoError(t, json.Unmarshal(data, &cfg))
 	assert.Equal(t, prefix, cfg.AgentLaunchPrefix, "launch prefix must be stored verbatim")
-	assert.True(t, cfg.UseLaunchPrefix, "use_launch_prefix gate must be true for new sandboxes")
 }
 
 func TestBuildContainerConfig_ValidJSON(t *testing.T) {

@@ -187,21 +187,6 @@ class Backend(ABC):
         """
         pass
 
-    @abstractmethod
-    def prepare_launch_command(self, base_cmd):
-        """Prepare the final shell command to launch the agent.
-
-        Allows each backend to customize the launch command (e.g., set PATH,
-        source wrapper scripts, etc.) before exec'ing the agent.
-
-        Args:
-            base_cmd: The base command string to execute
-
-        Returns:
-            The modified command string ready for tmux send-keys
-        """
-        pass
-
 
 class DockerBackend(Backend):
     """Backend for Docker and Podman containers."""
@@ -268,10 +253,6 @@ class DockerBackend(Backend):
     def read_secrets(self, socket):
         """Read secrets from /run/secrets (inherited from entrypoint.py)."""
         return read_secrets("/run/secrets", socket=socket)
-
-    def prepare_launch_command(self, base_cmd):
-        """Docker doesn't need command customization."""
-        return base_cmd
 
 
 class TartBackend(Backend):
@@ -563,13 +544,6 @@ class TartBackend(Backend):
         """Read secrets from VirtioFS-mounted secrets directory and pass to tmux."""
         return read_secrets(os.path.join(self.yoloai_dir, "secrets"), socket=socket)
 
-    def prepare_launch_command(self, base_cmd):
-        """Prepend the provisioned tool dirs so the agent launches from a
-        non-login shell. Claude Code is native in ~/.local/bin; node@22 is
-        keg-only. Mirrors TartBackend.PrepareAgentCommand in runtime/tart/tart.go.
-        """
-        return f'PATH="$HOME/.local/bin:/opt/homebrew/opt/node@22/bin:/opt/homebrew/bin:$PATH" {base_cmd}'
-
 
 class SeatbeltBackend(Backend):
     """Backend for macOS Seatbelt sandboxing (lightweight, no VM)."""
@@ -700,12 +674,6 @@ swift() {
     def read_secrets(self, socket):
         """Read secrets from sandbox secrets directory and pass to tmux."""
         return read_secrets(os.path.join(self.yoloai_dir, "secrets"), socket=socket)
-
-    def prepare_launch_command(self, base_cmd):
-        """Source Swift wrapper to auto-add --disable-sandbox for Swift PM commands."""
-        # macOS sandboxes don't support nesting, so Swift PM's sandbox-exec calls
-        # fail. The wrapper automatically adds --disable-sandbox to swift build/test.
-        return f'source ~/.swift-wrapper.sh && {base_cmd}'
 
 
 # Backend registry (similar to Go's runtime.Register pattern)
@@ -841,17 +809,12 @@ def launch_agent(cfg, socket=None, working_dir=None, backend_inst=None, secrets=
     # set-environment doesn't reach already-running shells, so secrets are
     # exported inline before exec'ing the agent.
     #
-    # Prefer the stored launch prefix (W1a single-source-of-truth) when the gate
-    # is set; fall back to backend.prepare_launch_command for sandboxes created
-    # before this field existed. W1b retires the fallback one release later.
-    if cfg.get("use_launch_prefix"):
-        send_cmd = build_agent_launch_command(
-            agent_command, working_dir, secrets, cfg.get("agent_launch_prefix", ""))
-    elif backend_inst:
-        base_cmd = build_agent_launch_command(agent_command, working_dir, secrets)
-        send_cmd = backend_inst.prepare_launch_command(base_cmd)
-    else:
-        send_cmd = build_agent_launch_command(agent_command, working_dir, secrets)
+    # agent_launch_prefix is the single source of truth for the backend launch
+    # wrap (W1a/W1b). Every sandbox carries it: create writes it, and the v1->v2
+    # schema migration backfills it for older sandboxes (empty for container
+    # backends, a no-op prepend).
+    send_cmd = build_agent_launch_command(
+        agent_command, working_dir, secrets, cfg.get("agent_launch_prefix", ""))
 
     tmux("send-keys", "-t", "main", send_cmd, "Enter", socket=socket)
     log_info("sandbox.agent_launch", "agent process started", agent=agent, model=model)

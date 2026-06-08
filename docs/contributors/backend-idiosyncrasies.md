@@ -78,8 +78,8 @@ row to the index.
 | `Failed to start launchd_sim: could not bind to session` when booting simulator | [Tart: ditto'd runtime is incomplete](#dittod-ios-runtime-is-incomplete-use-xcodebuild--downloadplatform) |
 | `git diff` fails with "unable to read" object / git corruption on Tart VM | [Tart: VirtioFS corrupts git repositories](#virtiofs-corrupts-git-repositories) |
 | `yoloai new` times out / "command timed out" on Tart; sandbox.jsonl stops after xcodebuild firstlaunch; agent never starts | [Tart: signal_secrets_consumed deadlock with get_working_dir](#tart-signal_secrets_consumed-must-run-before-get_working_dir) |
-| Agent silently fails after `yoloai restart` on Tart (claude/node not found) | [Tart: provisioned tool dirs missing from non-login PATH](#provisioned-tool-dirs-missing-from-the-non-login-path-at-agent-launch) |
-| Agent silently fails after `yoloai restart` on Seatbelt (Swift PM sandbox error) | [Seatbelt: swift-wrapper not sourced on restart](#swift-wrapper-not-sourced-on-restart) |
+| Agent silently fails to start on Tart (claude/node not found) | [Tart: provisioned tool dirs live only on the login PATH](#provisioned-tool-dirs-live-only-on-the-login-path-cirrus-base-image) |
+| Swift PM commands fail with sandbox-exec nesting errors on Seatbelt | [Seatbelt: macOS sandbox-exec doesn't nest](#macos-sandbox-exec-doesnt-nest--swift-pm-needs-the-swift-wrapper-sourced) |
 | Agent dies silently/SIGTRAP (exit 133) on Seatbelt at launch; ICU/timezone deny in unified log | [Seatbelt: SBPL subpaths need vnode-resolved paths](#agent-dies-silently-sigtrap--sbpl-subpath-rules-must-use-vnode-resolved-paths) |
 | VS Code tunnel re-prompts for login on every container restart | [VS Code CLI: hostname-based keychain encryption](#vs-code-cli-file-keychain-uses-hostname-in-encryption-key) |
 | Second sandbox tunnel loops `error access singleton` forever | [VS Code CLI: singleton lock blocks concurrent tunnels](#vs-code-cli-singleton-lock-blocks-concurrent-tunnels) |
@@ -1551,15 +1551,13 @@ VirtioFS should only be used for:
 
 **Code:** `runtime/tart/tart.go::ResolveCopyMount`, `runtime/tart/tart.go::Create`, `sandbox/lifecycle.go::Reset` (needs implementation)
 
-### Provisioned tool dirs missing from the non-login PATH at agent launch
+### Provisioned tool dirs live only on the *login* PATH (Cirrus base image)
 
-**Symptom:** Agent silently fails to start after `yoloai restart` on a Tart VM (and would fail at first launch too if the wrap prefix were wrong). The tmux pane shows a shell prompt but no agent process.
+**Environmental fact:** The Cirrus-based Tart image composes its tool PATH in `~/.zprofile` — Homebrew, keg-only `node@22`, and `~/.local/bin` where the native Claude Code binary lives. That file is sourced only by *login* shells. The agent, however, is launched via `tart exec bash -c` (non-login) and, on restart, from Go via `respawn-pane`; neither sources `~/.zprofile`, so without intervention `claude` is not on PATH and the agent silently fails to start (a shell prompt, no agent process).
 
-**Explanation:** The provisioned base puts its tools on the *login* PATH via `~/.zprofile` (Homebrew, keg-only `node@22`, and `~/.local/bin` where the native Claude Code binary lives). But the agent is launched via `tart exec bash -c` (non-login) and, on restart, from Go via `respawn-pane` in `lifecycle.go` — neither sources `~/.zprofile`, so `claude` is not found.
+**How yoloAI handles it:** The backend's launch wrap (`PATH="$HOME/.local/bin:/opt/homebrew/opt/node@22/bin:/opt/homebrew/bin:$PATH"`) is a compile-time constant declared on the backend descriptor (`BackendDescriptor.AgentLaunchPrefix`). It is computed once at sandbox creation and stored as `agent_launch_prefix` in `runtime-config.json` — the single source of truth. Every launch path prepends that stored value: Go restart in `lifecycle/restart.go` and Python first-launch in `sandbox-setup.py` both read the field directly (older sandboxes are backfilled by the v1→v2 schema migration), so the two paths can never drift. (Historical note: an earlier base installed Claude Code via npm with a `#!/usr/bin/env node` shebang that the Cirrus image's `node@24` shadowed; switching to the native standalone binary removed that whole class of node-version shadowing, but the agent still needs `~/.local/bin` on the non-login PATH.)
 
-**Fix:** `PrepareAgentCommand(cmd string) string` on the `runtime.Runtime` interface prepends the provisioned tool dirs (`PATH="$HOME/.local/bin:/opt/homebrew/opt/node@22/bin:/opt/homebrew/bin:$PATH"`) to the command. The Go and Python launch paths use the same prefix. (Historical note: an earlier base installed Claude Code via npm with a `#!/usr/bin/env node` shebang that the Cirrus image's `node@24` shadowed; switching to the native standalone binary removed that whole class of node-version shadowing, but the agent still needs `~/.local/bin` on the non-login PATH.)
-
-**Code:** `runtime/tart/tart.go::PrepareAgentCommand`, `runtime/tart/build.go` (provisionCommands compose the login PATH), `sandbox/lifecycle.go` (relaunch path), `runtime/monitor/sandbox-setup.py::TartBackend.prepare_launch_command`
+**Code:** `runtime/tart/tart.go` (descriptor `AgentLaunchPrefix` + `PrepareAgentCommand`), `runtime/tart/build.go` (provisionCommands compose the login PATH), `sandbox/create/create.go` (stores the prefix), `sandbox/lifecycle/restart.go` (relaunch prepends it), `config/schema.go` (v1→v2 backfill)
 
 ---
 
@@ -1573,15 +1571,13 @@ VirtioFS should only be used for:
 
 **Code:** `internal/runtime/seatbelt/build.go::Setup` (PATH check only), `internal/runtime/seatbelt/prune.go` (no-op `Prune`, no `PruneCache`/`CacheUsage`); fallback in `internal/runtime/runtime.go::CacheUsageFor`.
 
-### swift-wrapper not sourced on restart
+### macOS `sandbox-exec` doesn't nest — Swift PM needs the swift-wrapper sourced
 
-**Symptom:** Agent silently fails after `yoloai restart` on a Seatbelt sandbox when the project uses Swift PM. Swift build/test commands fail with sandbox-exec nesting errors. Works fine on first launch.
+**Environmental fact:** macOS sandboxes don't support nesting, so a project's own Swift PM commands — which internally invoke `sandbox-exec` — fail inside a Seatbelt sandbox with nesting errors. The workaround is `~/.swift-wrapper.sh`, which intercepts swift commands and adds `--disable-sandbox`; it must be sourced into the agent's shell before launch, or Swift build/test breaks.
 
-**Explanation:** macOS sandboxes don't support nesting, so Swift PM's internal `sandbox-exec` calls fail. The workaround is `~/.swift-wrapper.sh`, which intercepts swift commands and adds `--disable-sandbox`. On first launch, Python `sandbox-setup.py` calls `prepare_launch_command()` which sources the wrapper. But `yoloai restart` relaunches from Go, bypassing the Python path.
+**How yoloAI handles it:** The backend's launch wrap (`source ~/.swift-wrapper.sh && `) is a compile-time constant declared on the backend descriptor (`BackendDescriptor.AgentLaunchPrefix`), computed once at sandbox creation and stored as `agent_launch_prefix` in `runtime-config.json` — the single source of truth. Both launch paths prepend that stored value: Go restart in `lifecycle/restart.go` and Python first-launch in `sandbox-setup.py` read the field directly (older sandboxes are backfilled by the v1→v2 schema migration), so the wrapper is sourced identically whether the agent starts via the Python path or a later Go-driven restart.
 
-**Fix:** The Seatbelt implementation of `PrepareAgentCommand()` prepends `source ~/.swift-wrapper.sh &&` to the command.
-
-**Code:** `runtime/seatbelt/seatbelt.go::PrepareAgentCommand`, `sandbox/lifecycle.go` (relaunch path), `runtime/monitor/sandbox-setup.py::SeatbeltBackend.prepare_launch_command`
+**Code:** `runtime/seatbelt/seatbelt.go` (descriptor `AgentLaunchPrefix` + `PrepareAgentCommand`), `sandbox/create/create.go` (stores the prefix), `sandbox/lifecycle/restart.go` (relaunch prepends it), `config/schema.go` (v1→v2 backfill)
 
 ---
 

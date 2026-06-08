@@ -31,7 +31,10 @@ var descriptor = runtime.BackendDescriptor{
 	InstallHint:               "",
 	BaseModeName:              runtime.IsolationModeProcess,
 	AgentProvisionedByBackend: false,
-	SupportedIsolationModes:   nil,
+	// Source the Swift wrapper that auto-adds --disable-sandbox for Swift PM
+	// commands inside the macOS sandbox.
+	AgentLaunchPrefix:       "source ~/.swift-wrapper.sh && ",
+	SupportedIsolationModes: nil,
 	Capabilities: runtime.BackendCaps{
 		NetworkIsolation: false,
 		OverlayDirs:      false,
@@ -445,10 +448,11 @@ func (r *Runtime) DiagHint(instanceName string) string {
 	return fmt.Sprintf("check log at %s", logPath)
 }
 
-// PrepareAgentCommand sources the Swift wrapper that auto-adds --disable-sandbox
-// for Swift PM commands inside the macOS sandbox.
+// PrepareAgentCommand prepends the backend's constant launch wrap (see
+// descriptor.AgentLaunchPrefix) — sourcing the Swift wrapper that auto-adds
+// --disable-sandbox for Swift PM commands inside the macOS sandbox.
 func (r *Runtime) PrepareAgentCommand(cmd string) string {
-	return "source ~/.swift-wrapper.sh && " + cmd
+	return descriptor.AgentLaunchPrefix + cmd
 }
 
 // TmuxSocket returns the per-sandbox tmux socket path for seatbelt. Each

@@ -42,7 +42,6 @@ type ContainerConfig struct {
 	HostGID            int                   `json:"host_gid"`
 	AgentCommand       string                `json:"agent_command"`
 	AgentLaunchPrefix  string                `json:"agent_launch_prefix"`
-	UseLaunchPrefix    bool                  `json:"use_launch_prefix"`
 	StartupDelay       int                   `json:"startup_delay"`
 	ReadyPattern       string                `json:"ready_pattern"`
 	SubmitSequence     string                `json:"submit_sequence"`

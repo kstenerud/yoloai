@@ -15,7 +15,6 @@ import (
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
-	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox/invocation"
 	"github.com/kstenerud/yoloai/internal/sandbox/launch"
 	provision "github.com/kstenerud/yoloai/internal/sandbox/provision"
@@ -330,14 +329,11 @@ func relaunchAgentWithCustomPrompt(ctx context.Context, d state.Deps, name strin
 
 	agentArgs := resolveAgentArgs(d.Layout, string(meta.AgentType), meta.Profile)
 	interactiveCmd := invocation.BuildAgentCommand(agentDef, meta.Model, "", agentArgs, cfg.Passthrough)
-	// Prefer the stored launch prefix (W1a single-source-of-truth) when the gate
-	// is set; fall back to re-invoking PrepareAgentCommand for sandboxes created
-	// before this field existed. W1b retires the fallback one release later.
-	if cfg.UseLaunchPrefix {
-		interactiveCmd = cfg.AgentLaunchPrefix + interactiveCmd
-	} else {
-		interactiveCmd = runtime.PrepareAgentCommandFor(d.Runtime, interactiveCmd)
-	}
+	// agent_launch_prefix is the single source of truth for the backend launch
+	// wrap (W1a). Post-W1b the field is present on every sandbox (the v1->v2
+	// migration backfills it; empty for container backends, a no-op prepend), so
+	// the prepend is unconditional.
+	interactiveCmd = cfg.AgentLaunchPrefix + interactiveCmd
 	if _, err := status.ExecInContainer(ctx, d.Runtime, name, meta, d.Layout.HostUID,
 		tmuxCmd(cfg.TmuxSocket, "respawn-pane", "-t", "main", "-k", interactiveCmd),
 	); err != nil {
