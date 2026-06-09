@@ -532,9 +532,9 @@ Global `CLAUDE.md` §Agent operating principles; project D14, D11. Full citation
 
 ## §12. No ambient configuration
 
-> **Rule.** Resolve ambient state (env vars, `$HOME`/XDG paths, cwd, terminal detection, process identity) ONCE at the outermost edge — CLI startup, server bootstrap, test setup — and pass it down as explicit args; library code never reads it. An edge-resolved default implies a *pure accessor* downstream: panic if read before the edge ran, never a lazy fallback (a per-call fallback is a "hole" that re-reads ambient state and masks ordering bugs).
+> **Rule.** Resolve ambient state (env vars, `$HOME`/XDG paths, cwd, terminal detection, process identity) ONCE at the outermost edge — CLI startup, server bootstrap, test setup — and pass it down as explicit args; library code never reads it. An edge-resolved default implies a *pure accessor* downstream: panic if read before the edge ran, never a lazy fallback (a per-call fallback is a "hole" that re-reads ambient state and masks ordering bugs). The rule binds **outward** too: every subprocess is launched with an **explicitly constructed `Env`** (never the inherited `os.Environ()`), so a child tool reads only the env we hand it. And it binds **test code identically** — a test gets no exemption; its only edge is its outermost isolation helper.
 >
-> **Bites when:** calling `os.Getenv` / `os.UserHomeDir` / `os.Getwd` below the CLI layer, or adding a "just for tests" fallback default. · **See also:** §4, §5.
+> **Bites when:** calling `os.Getenv` / `os.UserHomeDir` / `os.Getwd` below the CLI layer, adding a "just for tests" fallback default, or launching a subprocess with the inherited environment (so a tool picks up an ambient `$HOME`/`TART_HOME`/`DOCKER_HOST`/`GIT_*` you never set). · **See also:** §4, §5, TEST §6.
 
 **Principle.** Library boundaries (the `yoloai.Client`, domain functions, server entry points) accept all configuration as explicit arguments. Environment variables, `$HOME`-derived paths, `os.Getwd()`, terminal detection, and other ambient process state are resolved at the OUTERMOST layer — CLI startup, server bootstrap, test setup — and passed down explicitly. Library code never reads ambient process state.
 
@@ -549,8 +549,14 @@ Concrete bans (enforced by the forbidigo rules in `.golangci.yml`, **deny by def
 - **Identity:** `os.Geteuid` / `os.Getegid` / `os.Getgroups` / `os.Getppid`, `os.Hostname`, and `os/user`'s `Current` / `Lookup` / `LookupId`. (`os.Getuid` / `os.Getgid` are already banned by F31 — read `layout.HostUID` / `HostGID`.)
 - **Process I/O:** `os.Stdin` / `os.Stdout` / `os.Stderr` — library code takes an explicit `io.Reader` / `io.Writer` / `IOStreams`.
 - **Timezone:** `time.Local` — only intentional local-time parsing of user input may use it.
+- **Subprocess creation:** `exec.Command` / `exec.CommandContext` — banned outside the single command-builder helper. forbidigo has no data-flow, so it can't verify a `Cmd.Env` was set; instead it bans the *raw* call and funnels every subprocess through the helper, which constructs `cmd.Env` explicitly from injected config plus a minimal allowlist. The ban guarantees nothing reaches `Run`/`Start`/`Output` carrying an inherited `os.Environ()`.
 
 Deliberately **not** banned (documented in the lint config so a reader doesn't think they were forgotten): `os.Getpid` (our own PID — self-identity, used for lockfile ownership and unique exec IDs), `os.Getpagesize` (a hardware constant), and `os.Expand` (pure given an explicit mapping — only `ExpandEnv` is ambient).
+
+**The boundary runs outward, and tests get no pass.** Two extensions the in-process bans don't cover on their own:
+
+- *Child processes are ambient-config carriers.* `exec.Command` defaults `Cmd.Env` to the parent's `os.Environ()`, so a tool yoloAI shells out to (`tart`, `docker`, `git`, agent CLIs) reads whatever ambient env the process happens to have — *even though our own code read none of it*. Every subprocess goes through the command-builder helper, which sets `cmd.Env` from injected config (store location, identity, tool knobs) plus a minimal pass-through allowlist. forbidigo bans raw `exec.Command*` to force the funnel: it can't check the field is set, but the ban guarantees nothing skips the helper that sets it.
+- *No exemption for test code.* Everything in §12 binds `_test.go` **identically** — a test is not a license to read ambient env or to inherit a subprocess env. A test's only "edge" is its outermost isolation helper (the analogue of CLI startup): it establishes the isolated store/env there, once, and everything below takes explicit config. This is deliberate — the DF19 data loss happened *inside a test*, so exempting tests would exempt the exact code that caused the harm.
 
 Enforcement model — every ambient touch is **deliberate and documented**:
 
@@ -564,6 +570,7 @@ The single standing exception: API keys read by individual agents (`ANTHROPIC_AP
 - **`Client.Options.DataDir` is required** (Q-W resolution, 2026-05-25; working-notes D45). Client construction rejects empty DataDir. The CLI fills it from `$HOME/.yoloai/` at startup — its single licensed `os.UserHomeDir()` call. HTTP servers pass an explicit per-tenant path. Tests pass `t.TempDir()`. Eliminates the "daemon silently wrote to /root/.yoloai/" failure mode that the previous implicit-home design exposed.
 - **Agents declare env-key dependencies in `agent.Definition.APIKeyEnvVars`** (existing). The library does not call `os.Getenv("ANTHROPIC_API_KEY")` directly; it iterates the agent's declared keys. The dependency is in the agent's published contract, not implicit in deep library code.
 - **Resolve-at-edge implies a *pure accessor* downstream — never a lazy ambient fallback** (working-notes D72). When the CLI has a designed implicit default (here: `--data-dir` defaults to `$HOME/.yoloai`), do the implicit→explicit conversion AND validation ONCE at the edge, then have downstream code trust the resolved value. `SetRootLayoutFromFlag` resolves the default in the root command's `PersistentPreRunE` (the single licensed `os.UserHomeDir()` site); `cliutil.Layout()` is then a **pure accessor that panics if read before the edge ran** — it does NOT re-derive `$HOME/.yoloai` on the fly. A per-call lazy fallback is a "hole": it re-reads ambient state on every call, masks ordering bugs, and lets code paths silently work without going through the edge. The panic surfaces the bypass instead of hiding it. This is "parse, don't validate" (§4) applied to ambient config: verify at the boundary, carry a validated value inward. Tests stand in for the edge — they establish the value explicitly (`clitest.Home`), they do NOT lean on a fallback (and "keep a narrowed fallback for tests only" is the same hole renamed).
+- **DF19 — the child process that ate the dev's VMs** (2026-06-09; working-notes D79). `runTart` launched the `tart` CLI with the inherited environment, so `tart` read the ambient `$HOME` and operated on the real `~/.tart`. A unit test isolated yoloAI's `DataDir`/`HomeDir` (a temp dir) but **not** the *process* `$HOME`/`TART_HOME`, then invoked the real cross-backend `Prune` — whose tart sweep deleted the developer's real `yoloai-*` VMs during `make check`. yoloAI's own code never read `$HOME`; the leak was entirely the un-constructed child env, in test code. This is why §12 now binds **outward** (explicit `cmd.Env`, raw `exec.Command*` banned) and binds **tests** (no isolation-helper edge → no pass).
 
 ### Cost-vs-benefit
 
@@ -573,13 +580,14 @@ Damage prevented:
 - "Works on my machine" failures where dev tests pass because `$HOME` is set sensibly and a deployed daemon fails because `$HOME` is `/root/`, `/var/empty`, or unset.
 - Multi-tenant servers accidentally writing all tenants' state to one tenant's directory because the env-resolved path is shared.
 - Test pollution into the developer's real `~/.yoloai/` from a test that forgot to override the home dir.
+- A subprocess (build tool, VM CLI, git) silently operating on the developer's *real* store because it inherited an ambient `$HOME`/`TART_HOME`/`DOCKER_HOST` the calling code never set — including a test that destroys real resources (DF19).
 - Production daemons that pick up an unexpected env override and silently change behaviour (logging level, default backend, etc.).
 - Refactors that move code between layers and inadvertently widen the new layer's access to ambient state.
 - Hyrum's-law surprises: any observable env-read becomes an unwritten contract that future refactors can't safely remove.
 
 ### Sources
 
-Twelve-Factor App factor III (config read once, passed explicitly); Zen of Python "explicit is better than implicit". Project decision: Q-W (D45).
+Twelve-Factor App factor III (config read once, passed explicitly); Zen of Python "explicit is better than implicit". Project decision: Q-W (D45); pure-accessor refinement D72; the outward (explicit subprocess `cmd.Env`, raw `exec.Command*` banned) + no-test-pass refinement D79 (motivated by DF19).
 
 ---
 

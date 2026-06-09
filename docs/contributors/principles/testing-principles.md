@@ -187,7 +187,7 @@ Originally established alongside D19 (W3–W6 of the architecture remediation ma
 
 > **Rule.** Integration tests at the backend boundary use real Docker / Podman / containerd / Tart / Seatbelt — never mocks. A mock only records how yoloAI currently calls the daemon; it misses cross-backend and cross-version behaviour differences.
 >
-> **Bites when:** mocking the daemon / backend in an integration test. · **See also:** TEST §8, TEST §5.
+> **Bites when:** mocking the daemon / backend in an integration test. · **See also:** TEST §8, TEST §5, DEV §12 (isolate the backend store + explicit subprocess env so a real-backend test can't touch the developer's real resources — DF19).
 
 **Principle.** Integration tests at the backend boundary use real Docker / Podman / containerd / Tart / Seatbelt instances, not mocks. Mocks of these APIs are records of how yoloAI currently calls the backend; they don't catch behavioural differences between backends or across backend versions. Real backends do.
 

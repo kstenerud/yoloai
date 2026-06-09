@@ -618,6 +618,20 @@ Applied for 0.4.0:
 
 **Consequences.** Behavior change to the default base (was: always sequoia; now: host-matched, newest-known `tahoe` fallback) — tracked in `docs/BREAKING-CHANGES.md`. New public surface: `SystemPruneOptions.IncludeStaleBases`, `BackendDiskUsage.StaleBytes`, `PruneKindStaleBase`, and the `runtime.StaleBasePruner` optional interface. Both `doctor` and `system disk` surface the superseded-base footprint (`system disk` adds a `STALE` column + `stale_bytes` JSON field; the column shows `-` for backends with no superseded bases).
 
+## D79 — Ambient config is the enemy *outward* too: child processes get an explicit env, and the rule binds tests identically (no test pass)
+
+**Date:** 2026-06-09. **Status:** Implemented (principle refinement; mechanical enforcement + refactor phased).
+
+**Problem.** §12 ("No ambient configuration") governed yoloai's own *reads* of ambient state — forbidigo bans `os.Getenv`/`$HOME`/cwd/identity below the edge. It said nothing about the *outward* direction: `exec.Command` defaults `Cmd.Env` to the parent's `os.Environ()`, so a child tool (`tart`, `docker`, `git`, agent CLIs) inherits the **entire** ambient environment even though yoloai's own code read none of it. [DF19](../design/findings-unresolved.md): `runTart` launched `tart` with the inherited env → `tart` read ambient `$HOME` → operated on the real `~/.tart`. A unit test that isolated yoloai's `DataDir`/`HomeDir` but not the *process* env invoked the real cross-backend `Prune`, deleting the developer's real `yoloai-*` VMs during `make check`. The in-process discipline was structurally blind to it.
+
+**Decision.** §12 extends to the outward boundary: every `exec.Command`/`CommandContext` is launched with an **explicitly constructed `Env`** — store location, identity, and tool knobs from injected config, plus a minimal pass-through allowlist — **never the inherited `os.Environ()`**. A tool reads only the env we hand it; the env a child needs is resolved at the edge and threaded down as config, not pulled from ambient state at the call site.
+
+**No test pass.** The rule binds **test code identically to production** — there is no "just for tests" exemption. A test is not a license to read ambient env or to inherit a subprocess env. A test's *only* "edge" is its outermost isolation helper (the analogue of CLI startup); everything below it takes explicit config, exactly like production. This is deliberate and non-negotiable: the DF19 data loss happened *inside a test*, so exempting tests would exempt the precise code that caused the harm. (Reinforces §12's existing "never a 'just for tests' fallback default.")
+
+**Rejected.** (a) A `testing.Testing()` guard in the production prune that refuses the production namespace when run under test — a real net, but it embeds test-awareness in production logic (a layering smell) and only catches the `go test` path; the structural fix (explicit child env + injected namespace) makes ambient leakage impossible regardless, so the tripwire is redundant. (b) Exempting tests from the subprocess-env rule "for convenience" — exempts the exact class that caused DF19.
+
+**Consequences.** §12 gains the subprocess dimension + the no-test-pass clause; rule-index DEV §12 is updated; TEST §6 (real-backend test isolation) points to it. Mechanical enforcement (a check that flags an `exec.Command` whose `cmd.Env` is never set) and the downstream refactor — explicit `cmd.Env` at every subprocess site, a configurable resource namespace with namespace-aware prune across **all** backends, edge-only env ingestion, and one central test-isolation helper — are a separate phased workstream. Motivating incident: DF19.
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.
