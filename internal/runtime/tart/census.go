@@ -7,13 +7,13 @@ package tart
 
 import (
 	"context"
-	"os/exec"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/runtime"
+	"github.com/kstenerud/yoloai/internal/sysexec"
 )
 
 // maxConcurrentMacVMs is Apple's Virtualization.framework cap on simultaneously
@@ -43,8 +43,8 @@ type vmProcess struct {
 // runtime.VMCensusReporter. Detection is best-effort: a failed pgrep/lsof/ps
 // yields an empty census rather than an error.
 func (r *Runtime) VMCensus(ctx context.Context) (runtime.VMCensus, error) {
-	procs := detectVMProcesses(ctx)
-	owners := detectTartRunOwners(ctx)
+	procs := detectVMProcesses(ctx, r.execEnv)
+	owners := detectTartRunOwners(ctx, r.execEnv)
 	return classifyVMSlots(procs, owners, maxConcurrentMacVMs), nil
 }
 
@@ -80,8 +80,8 @@ func classifyVMSlots(procs []vmProcess, liveOwners map[string]bool, limit int) r
 // counted only when it positively holds a ~/.tart/vms/ disk open — we must
 // never report another app's VM as a killable tart orphan. Foreign VMs are
 // also typically Linux guests, which don't count against the macOS VM limit.
-func detectVMProcesses(ctx context.Context) []vmProcess {
-	out, err := exec.CommandContext(ctx, "pgrep", "-f", vmXPCProcessSubstr).Output()
+func detectVMProcesses(ctx context.Context, env []string) []vmProcess {
+	out, err := sysexec.CommandContext(ctx, env, "pgrep", "-f", vmXPCProcessSubstr).Output()
 	if err != nil {
 		return nil
 	}
@@ -91,7 +91,7 @@ func detectVMProcesses(ctx context.Context) []vmProcess {
 		if err != nil {
 			continue
 		}
-		name, deleted, isTart := vmNameFromLsof(ctx, pid)
+		name, deleted, isTart := vmNameFromLsof(ctx, env, pid)
 		if !isTart {
 			continue // another app's VM — not ours to count or kill
 		}
@@ -106,8 +106,8 @@ func detectVMProcesses(ctx context.Context) []vmProcess {
 // some other app's. The disk image is authoritative; nvram is a fallback. A
 // "(deleted)" marker means the image was removed out from under a still-running
 // process — the signature of a crashed temp VM.
-func vmNameFromLsof(ctx context.Context, pid int) (name string, deleted, isTart bool) {
-	out, err := exec.CommandContext(ctx, "lsof", "-p", strconv.Itoa(pid)).Output() //nolint:gosec // pid is an int parsed from pgrep output, not user input
+func vmNameFromLsof(ctx context.Context, env []string, pid int) (name string, deleted, isTart bool) {
+	out, err := sysexec.CommandContext(ctx, env, "lsof", "-p", strconv.Itoa(pid)).Output()
 	if err != nil {
 		return "", false, false
 	}
@@ -132,8 +132,8 @@ func vmNameFromLsof(ctx context.Context, pid int) (name string, deleted, isTart 
 
 // detectTartRunOwners returns the set of VM names that have a live `tart run`
 // launcher process. A VM in this set is an owned sandbox, not an orphan.
-func detectTartRunOwners(ctx context.Context) map[string]bool {
-	out, err := exec.CommandContext(ctx, "ps", "-axo", "command=").Output()
+func detectTartRunOwners(ctx context.Context, env []string) map[string]bool {
+	out, err := sysexec.CommandContext(ctx, env, "ps", "-axo", "command=").Output()
 	if err != nil {
 		return nil
 	}

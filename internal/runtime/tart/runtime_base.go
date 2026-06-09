@@ -21,7 +21,7 @@ import (
 // This lives on the tart Runtime, rather than in sandbox/create, so that
 // sandbox/ does not import runtime/tart.
 func (r *Runtime) PrepareRuntimeBase(ctx context.Context, layout config.Layout, runtimeSpecs []string) (string, error) {
-	resolved, err := ResolveRuntimeVersions(runtimeSpecs)
+	resolved, err := ResolveRuntimeVersions(ctx, r.execEnv, runtimeSpecs)
 	if err != nil {
 		return "", fmt.Errorf("resolve runtimes: %w", err)
 	}

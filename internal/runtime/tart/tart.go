@@ -31,10 +31,25 @@ import (
 // (DEV §12, DF19).
 var tartEnvAllowlist = []string{"PATH", "TMPDIR", "SSL_CERT_FILE", "SSL_CERT_DIR"}
 
+// BaseAdminEnv builds the explicit subprocess environment for tart operations
+// that run outside a constructed Runtime (e.g. xcrun simctl queries). Uses the
+// same allowlist and HOME/TART_HOME overrides as New() (DEV §12).
+func BaseAdminEnv(layout config.Layout) []string {
+	tartHome := filepath.Join(layout.HomeDir, ".tart")
+	if v := layout.Env["TART_HOME"]; v != "" {
+		tartHome = v
+	}
+	return sysexec.Curated(layout.Env, tartEnvAllowlist, map[string]string{
+		"HOME":      layout.HomeDir,
+		"TART_HOME": tartHome,
+	})
+}
+
 // getXcodeSelectPath returns the active Xcode developer directory path from xcode-select.
 // Returns empty string if xcode-select is not configured or fails.
-func getXcodeSelectPath() string {
-	cmd := exec.Command("xcode-select", "-p")
+// env is the explicit subprocess environment (DEV §12).
+func getXcodeSelectPath(env []string) string {
+	cmd := sysexec.Command(env, "xcode-select", "-p")
 	output, err := cmd.Output()
 	if err != nil {
 		return ""
@@ -84,8 +99,10 @@ var descriptor = runtime.BackendDescriptor{
 }
 
 // versionString returns tart's CLI version string.
+// Uses a minimal env: tart --version only needs PATH (DEV §12).
 func versionString(ctx context.Context) string {
-	out, err := exec.CommandContext(ctx, "tart", "--version").Output()
+	env := sysexec.Curated(nil, []string{"PATH"}, nil)
+	out, err := sysexec.CommandContext(ctx, env, "tart", "--version").Output()
 	if err != nil {
 		return ""
 	}
@@ -224,18 +241,21 @@ func New(_ context.Context, layout config.Layout) (*Runtime, error) {
 		tartHome = v
 	}
 
+	execEnv := sysexec.Curated(layout.Env, tartEnvAllowlist, map[string]string{
+		"HOME":      layout.HomeDir,
+		"TART_HOME": tartHome,
+	})
 	return &Runtime{
 		tartBin:           tartBin,
 		layout:            layout,
 		homeDir:           layout.HomeDir,
 		baseImageOverride: baseImageOverride,
-		hostMajor:         hostMacOSMajor,
+		// hostMajor is a closure over execEnv so the test seam (r.hostMajor = stub)
+		// still works: the seam replaces the whole closure, not the env inside it.
+		hostMajor: func() (int, error) { return hostMacOSMajor(execEnv) },
 		// Explicit env for every tart subprocess (DEV §12): edge-resolved
 		// allowlist plus HOME and TART_HOME forced from layout, never ambient.
-		execEnv: sysexec.Curated(layout.Env, tartEnvAllowlist, map[string]string{
-			"HOME":      layout.HomeDir,
-			"TART_HOME": tartHome,
-		}),
+		execEnv: execEnv,
 	}, nil
 }
 
@@ -340,10 +360,10 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 	}
 
 	// Start tart run as a background process.
-	// Use exec.Command (not CommandContext) because tart run is a long-lived
+	// Use sysexec.Command (not CommandContext) because tart run is a long-lived
 	// process that must survive after Start returns. CommandContext would kill
 	// it when the parent's context is cancelled.
-	cmd := exec.Command(r.tartBin, args...) //nolint:gosec // G204: args are constructed from validated config
+	cmd := sysexec.Command(r.execEnv, r.tartBin, args...)
 	cmd.Stderr = logFile
 	cmd.Stdout = logFile
 	// Detach the process from the parent so it survives
@@ -471,7 +491,7 @@ func (r *Runtime) Exec(ctx context.Context, name string, cmd []string, _ string)
 
 	slog.Debug("tart Exec", "vm", name, "args", args)
 
-	c := exec.CommandContext(ctx, r.tartBin, args...) //nolint:gosec // G204: vmName and cmd are from validated sandbox state
+	c := sysexec.CommandContext(ctx, r.execEnv, r.tartBin, args...)
 
 	return runtime.RunCmdExec(c)
 }
@@ -487,7 +507,7 @@ func (r *Runtime) ExecRaw(ctx context.Context, name string, cmd []string, _ stri
 
 	slog.Debug("tart ExecRaw", "vm", name, "args", args)
 
-	c := exec.CommandContext(ctx, r.tartBin, args...) //nolint:gosec // G204: vmName and cmd are from validated sandbox state
+	c := sysexec.CommandContext(ctx, r.execEnv, r.tartBin, args...)
 
 	return runtime.RunCmdExecRaw(c)
 }
@@ -579,7 +599,7 @@ func (r *Runtime) InteractiveExec(ctx context.Context, name string, cmd []string
 	args = append(args, name)
 	args = append(args, cmd...)
 
-	c := exec.CommandContext(ctx, r.tartBin, args...) //nolint:gosec // G204: name and cmd are from validated sandbox state
+	c := sysexec.CommandContext(ctx, r.execEnv, r.tartBin, args...)
 	// PTYBridgeExec wraps the child in a local host PTY. tart already allocates a
 	// PTY inside the VM with -t, so this is a double-PTY (local + remote, like
 	// `script ssh -t`) — it works and gives uniform raw-mode handling at the CLI
@@ -657,7 +677,7 @@ func (r *Runtime) buildRunArgs(vmName, sandboxPath string, mounts []runtime.Moun
 	}
 
 	// Detect active Xcode via xcode-select (supports multiple Xcodes, custom paths)
-	if xcodeDevPath := getXcodeSelectPath(); xcodeDevPath != "" {
+	if xcodeDevPath := getXcodeSelectPath(r.execEnv); xcodeDevPath != "" {
 		// xcode-select returns: /Applications/Xcode.app/Contents/Developer
 		// We need: /Applications/Xcode.app
 		xcodePath := filepath.Dir(filepath.Dir(xcodeDevPath))
@@ -813,7 +833,7 @@ func (r *Runtime) vmExists(ctx context.Context, vmName string) bool {
 // isRunning checks if the VM is running by attempting a trivial exec.
 func (r *Runtime) isRunning(ctx context.Context, vmName string) bool {
 	args := execArgs(vmName, "true")
-	cmd := exec.CommandContext(ctx, r.tartBin, args...) //nolint:gosec // G204
+	cmd := sysexec.CommandContext(ctx, r.execEnv, r.tartBin, args...)
 	return cmd.Run() == nil
 }
 
@@ -846,7 +866,7 @@ func (r *Runtime) waitForBoot(ctx context.Context, vmName string, procDone <-cha
 
 		// Try a simple command via tart exec
 		args := execArgs(vmName, "true")
-		cmd := exec.CommandContext(ctx, r.tartBin, args...) //nolint:gosec // G204
+		cmd := sysexec.CommandContext(ctx, r.execEnv, r.tartBin, args...)
 		var stderr bytes.Buffer
 		cmd.Stderr = &stderr
 		err := cmd.Run()
@@ -965,7 +985,7 @@ func (r *Runtime) stopVM(ctx context.Context, vmName string) {
 	stopCancel()
 
 	// Steps 2+3: walk the `tart run` host processes for this VM.
-	pids := pgrepTartRun(ctx, vmName)
+	pids := pgrepTartRun(ctx, r.execEnv, vmName)
 	if len(pids) == 0 {
 		return
 	}
@@ -1002,8 +1022,9 @@ func (r *Runtime) stopVM(ctx context.Context, vmName string) {
 
 // pgrepTartRun returns the PIDs of any `tart run …<vmName>` processes
 // on the host. Empty slice if pgrep finds nothing or fails.
-func pgrepTartRun(ctx context.Context, vmName string) []int {
-	pgrepCmd := exec.CommandContext(ctx, "pgrep", "-f", fmt.Sprintf("tart run.*%s", vmName)) //nolint:gosec // G204: vmName from validated sandbox state
+// env is the explicit subprocess environment (DEV §12).
+func pgrepTartRun(ctx context.Context, env []string, vmName string) []int {
+	pgrepCmd := sysexec.CommandContext(ctx, env, "pgrep", "-f", fmt.Sprintf("tart run.*%s", vmName))
 	out, err := pgrepCmd.Output()
 	if err != nil {
 		return nil

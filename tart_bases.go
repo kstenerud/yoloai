@@ -78,8 +78,9 @@ func (a *TartBaseAdmin) Available(ctx context.Context) (bool, error) {
 
 // AvailableRuntimes queries the host (xcrun simctl) for installed simulator
 // runtimes that a base can be built from. Needs no Tart VM connection.
-func (a *TartBaseAdmin) AvailableRuntimes() ([]TartRuntimeVersion, error) {
-	rv, err := tartrt.QueryAvailableRuntimes()
+func (a *TartBaseAdmin) AvailableRuntimes(ctx context.Context) ([]TartRuntimeVersion, error) {
+	env := tartrt.BaseAdminEnv(a.layout)
+	rv, err := tartrt.QueryAvailableRuntimes(ctx, env)
 	if err != nil {
 		return nil, err
 	}
@@ -89,8 +90,9 @@ func (a *TartBaseAdmin) AvailableRuntimes() ([]TartRuntimeVersion, error) {
 // PlanBase resolves the given platform specs ("ios", "ios:26.4", …) against the
 // host's available simulator runtimes and returns the resolved runtimes plus
 // the VM name Add would create — without creating anything.
-func (a *TartBaseAdmin) PlanBase(specs []string) (TartBasePlan, error) {
-	resolved, err := tartrt.ResolveRuntimeVersions(specs)
+func (a *TartBaseAdmin) PlanBase(ctx context.Context, specs []string) (TartBasePlan, error) {
+	env := tartrt.BaseAdminEnv(a.layout)
+	resolved, err := tartrt.ResolveRuntimeVersions(ctx, env, specs)
 	if err != nil {
 		return TartBasePlan{}, err
 	}

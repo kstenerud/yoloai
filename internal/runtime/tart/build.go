@@ -11,7 +11,6 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -21,6 +20,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/buildinfo"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
+	"github.com/kstenerud/yoloai/internal/sysexec"
 )
 
 const (
@@ -213,11 +213,12 @@ func (r *Runtime) resolveBaseImage(_ string) string {
 	if r.baseImageOverride != "" {
 		return r.baseImageOverride
 	}
-	hostMajor := r.hostMajor
-	if hostMajor == nil {
-		hostMajor = hostMacOSMajor
+	// r.hostMajor is always set by New() (a closure over r.execEnv). Tests that
+	// override it replace the entire closure, preserving the seam contract.
+	if r.hostMajor == nil {
+		return defaultBaseImage
 	}
-	return hostMatchedBaseImage(hostMajor)
+	return hostMatchedBaseImage(r.hostMajor)
 }
 
 // hostMatchedBaseImage builds the Cirrus base-image reference for the host's
@@ -236,8 +237,9 @@ func hostMatchedBaseImage(hostMajor func() (int, error)) string {
 // hostMacOSMajor returns the host's macOS major version via `sw_vers
 // -productVersion` (e.g. "26.1" → 26). The tart backend only runs on macOS, so
 // sw_vers is always present.
-func hostMacOSMajor() (int, error) {
-	out, err := exec.Command("sw_vers", "-productVersion").Output()
+// env is the explicit subprocess environment (DEV §12).
+func hostMacOSMajor(env []string) (int, error) {
+	out, err := sysexec.Command(env, "sw_vers", "-productVersion").Output()
 	if err != nil {
 		return 0, fmt.Errorf("sw_vers: %w", err)
 	}
@@ -324,7 +326,7 @@ func (r *Runtime) verifyTools(ctx context.Context, vmName string, output io.Writ
 		strings.Join(requiredTools, " "),
 	)
 	args := execArgs(vmName, "zsh", "-lc", script)
-	cmd := exec.CommandContext(ctx, r.tartBin, args...) //nolint:gosec // G204
+	cmd := sysexec.CommandContext(ctx, r.execEnv, r.tartBin, args...)
 	cmd.Stdout = output
 	cmd.Stderr = output
 	if err := cmd.Run(); err != nil {
@@ -337,14 +339,14 @@ func (r *Runtime) verifyTools(ctx context.Context, vmName string, output io.Writ
 // The content is piped via stdin to avoid shell-quoting the multi-line payload.
 func (r *Runtime) writeImprint(ctx context.Context, vmName, baseImage string) error {
 	args := execArgs(vmName, "bash", "-c", "cat > ~/.yoloai-base-info")
-	cmd := exec.CommandContext(ctx, r.tartBin, args...) //nolint:gosec // G204
+	cmd := sysexec.CommandContext(ctx, r.execEnv, r.tartBin, args...)
 	cmd.Stdin = strings.NewReader(r.buildInfoContent(baseImage))
 	return cmd.Run()
 }
 
 // pullImage pulls a Tart VM image from a registry.
 func (r *Runtime) pullImage(ctx context.Context, imageRef string, output io.Writer) error {
-	cmd := exec.CommandContext(ctx, r.tartBin, "pull", imageRef) //nolint:gosec // G204: imageRef from config
+	cmd := sysexec.CommandContext(ctx, r.execEnv, r.tartBin, "pull", imageRef)
 	cmd.Stdout = output
 	cmd.Stderr = output
 	return cmd.Run()
@@ -362,8 +364,10 @@ func (r *Runtime) bootForProvisioning(ctx context.Context, vmName, baseImage str
 	vmLogPath := vmLog.Name()
 	defer os.Remove(vmLogPath) //nolint:errcheck // best-effort cleanup
 
-	// Start the VM in the background for provisioning
-	cmd := exec.CommandContext(ctx, r.tartBin, "run", "--no-graphics", vmName) //nolint:gosec // G204
+	// Start the VM in the background for provisioning.
+	// Use sysexec.Command (not CommandContext) because the provisioning VM must
+	// run past the per-step context; the outer function's defer stops it on return.
+	cmd := sysexec.Command(r.execEnv, r.tartBin, "run", "--no-graphics", vmName)
 	cmd.Stdout = vmLog
 	cmd.Stderr = vmLog
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -385,7 +389,7 @@ func (r *Runtime) bootForProvisioning(ctx context.Context, vmName, baseImage str
 	// before we return, so tart stop will be a no-op or benign failure.
 	defer func() {
 		logger.Debug("stopping provisioning VM (safety net)", "vm", vmName)
-		stopCmd := exec.CommandContext(ctx, r.tartBin, "stop", vmName) //nolint:gosec // G204
+		stopCmd := sysexec.CommandContext(ctx, r.execEnv, r.tartBin, "stop", vmName)
 		if err := stopCmd.Run(); err != nil {
 			// Fall back to killing the tart run host process
 			_ = cmd.Process.Kill()
@@ -414,7 +418,7 @@ func (r *Runtime) bootForProvisioning(ctx context.Context, vmName, baseImage str
 		logger.Debug("provisioning", "step", i+1, "command", cmdStr)
 
 		args := execArgs(vmName, "bash", "-c", cmdStr)
-		provCmd := exec.CommandContext(ctx, r.tartBin, args...) //nolint:gosec // G204
+		provCmd := sysexec.CommandContext(ctx, r.execEnv, r.tartBin, args...)
 		provCmd.Stdout = output
 		provCmd.Stderr = output
 
@@ -446,7 +450,7 @@ func (r *Runtime) bootForProvisioning(ctx context.Context, vmName, baseImage str
 	// causing installed packages and profile edits to be missing in clones.
 	fmt.Fprintln(output, "Flushing filesystem and shutting down provisioning VM...") //nolint:errcheck // best-effort
 	shutArgs := execArgs(vmName, "bash", "-c", "sync; sudo /sbin/shutdown -h now")
-	shutCmd := exec.CommandContext(ctx, r.tartBin, shutArgs...) //nolint:gosec // G204
+	shutCmd := sysexec.CommandContext(ctx, r.execEnv, r.tartBin, shutArgs...)
 	shutCmd.Stdout = output
 	shutCmd.Stderr = output
 	_ = shutCmd.Run() // VM shuts down during exec — non-zero exit is expected
@@ -498,7 +502,7 @@ func (r *Runtime) CreateBase(ctx context.Context, baseName string, runtimes []Ru
 	// Copy each runtime into the VM
 	for _, rt := range runtimes {
 		fmt.Fprintf(progress, "Copying %s %s runtime (this may take several minutes)...\n", rt.Platform, rt.Version) //nolint:errcheck // best-effort progress
-		if err := CopyRuntimeToVM(ctx, tempVM, rt, progress); err != nil {
+		if err := CopyRuntimeToVM(ctx, r.execEnv, r.tartBin, tempVM, rt, progress); err != nil {
 			return fmt.Errorf("copy %s %s: %w", rt.Platform, rt.Version, err)
 		}
 	}
@@ -538,7 +542,7 @@ func (r *Runtime) startTempVM(ctx context.Context, vmName string) error {
 	args := []string{"run", "--no-graphics"}
 
 	// Mount Xcode (required for xcodebuild to work)
-	if xcodeDevPath := getXcodeSelectPath(); xcodeDevPath != "" {
+	if xcodeDevPath := getXcodeSelectPath(r.execEnv); xcodeDevPath != "" {
 		// xcode-select returns: /Applications/Xcode.app/Contents/Developer
 		// We need: /Applications/Xcode.app
 		xcodePath := filepath.Dir(filepath.Dir(xcodeDevPath))
@@ -574,7 +578,9 @@ func (r *Runtime) startTempVM(ctx context.Context, vmName string) error {
 	runLogPath := runLog.Name()
 	defer os.Remove(runLogPath) //nolint:errcheck // best-effort cleanup
 
-	cmd := exec.CommandContext(ctx, r.tartBin, args...) //nolint:gosec // G204: args are constructed internally
+	// Use sysexec.Command (not CommandContext) because the temp VM must run past
+	// the per-operation context; stopVM tears it down explicitly on return.
+	cmd := sysexec.Command(r.execEnv, r.tartBin, args...)
 	cmd.Stdout = runLog
 	cmd.Stderr = runLog
 	if err := cmd.Start(); err != nil {
@@ -603,7 +609,7 @@ func (r *Runtime) startTempVM(ctx context.Context, vmName string) error {
 // configureXcodeInVM sets up Xcode symlinks and configuration inside the VM.
 func (r *Runtime) configureXcodeInVM(ctx context.Context, vmName string) error {
 	// Get active Xcode path on host
-	xcodeDevPath := getXcodeSelectPath()
+	xcodeDevPath := getXcodeSelectPath(r.execEnv)
 	if xcodeDevPath == "" {
 		return fmt.Errorf("no active Xcode found (run xcode-select on host)")
 	}

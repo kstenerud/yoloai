@@ -7,16 +7,18 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os/exec"
+
+	"github.com/kstenerud/yoloai/internal/sysexec"
 )
 
 // CopyRuntimeToVM downloads and installs a runtime using xcodebuild -downloadPlatform.
 // This approach is verified to work correctly (see docs/contributors/design/research/ios-runtime-download-verification.md).
 // The ditto copy approach produced incomplete runtimes that failed to boot simulators.
 // VM must be running with Xcode configured.
+// env is the explicit subprocess environment (DEV §12); pass r.execEnv from the Runtime.
 // Progress is written to progress (the caller's writer); the library never
 // touches the process's os.Stdout/Stderr (§12).
-func CopyRuntimeToVM(ctx context.Context, vmName string, runtime RuntimeVersion, progress io.Writer) error {
+func CopyRuntimeToVM(ctx context.Context, env []string, tartBin, vmName string, runtime RuntimeVersion, progress io.Writer) error {
 	// Capitalize platform for xcodebuild (iOS, tvOS, watchOS, visionOS)
 	platformCap := CapitalizePlatform(runtime.Platform)
 
@@ -27,7 +29,7 @@ func CopyRuntimeToVM(ctx context.Context, vmName string, runtime RuntimeVersion,
 	fmt.Fprintf(progress, "Downloading %s %s runtime...\n", platformCap, runtime.Version) //nolint:errcheck // best-effort progress
 	downloadCmd := fmt.Sprintf("xcodebuild -downloadPlatform %s", platformCap)
 	args := execArgs(vmName, "bash", "-c", downloadCmd)
-	cmd := exec.CommandContext(ctx, "tart", args...) //nolint:gosec // G204: vmName from validated state
+	cmd := sysexec.CommandContext(ctx, env, tartBin, args...)
 
 	// Stream the subprocess's live progress to the caller's writer.
 	// xcodebuild outputs progress updates with carriage returns (\r); a TTY
@@ -44,7 +46,7 @@ func CopyRuntimeToVM(ctx context.Context, vmName string, runtime RuntimeVersion,
 	verifyCmd := fmt.Sprintf("xcrun simctl list runtimes 2>&1 | grep '%s %s'",
 		platformCap, runtime.Version)
 	args = execArgs(vmName, "bash", "-c", verifyCmd)
-	cmd = exec.CommandContext(ctx, "tart", args...) //nolint:gosec // G204: vmName from validated state
+	cmd = sysexec.CommandContext(ctx, env, tartBin, args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {

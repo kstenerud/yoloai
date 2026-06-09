@@ -134,7 +134,7 @@ func runSystemTartAdd(cmd *cobra.Command, args []string) error {
 	h := sys.TartBases()
 
 	fmt.Fprintf(cmd.OutOrStdout(), "\nResolving runtime versions...\n") //nolint:errcheck
-	plan, err := h.PlanBase(args)
+	plan, err := h.PlanBase(ctx, args)
 	if err != nil {
 		return fmt.Errorf("resolve runtimes: %w", err)
 	}
@@ -200,7 +200,7 @@ func runSystemTartList(cmd *cobra.Command, args []string) error {
 
 	bases = filterRuntimeBases(bases, args)
 
-	availableRuntimes, err := h.AvailableRuntimes()
+	availableRuntimes, err := h.AvailableRuntimes(ctx)
 	if err != nil {
 		availableRuntimes = nil
 	}

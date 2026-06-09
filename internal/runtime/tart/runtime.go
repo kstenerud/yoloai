@@ -3,13 +3,14 @@
 package tart
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"sort"
 	"strings"
 
 	"github.com/hashicorp/go-version"
+	"github.com/kstenerud/yoloai/internal/sysexec"
 )
 
 // RuntimeVersion represents a resolved Apple simulator runtime
@@ -55,9 +56,11 @@ type simctlRuntimesOutput struct {
 	Runtimes []simctlRuntime `json:"runtimes"`
 }
 
-// QueryAvailableRuntimes queries xcrun simctl on the HOST for available runtimes
-func QueryAvailableRuntimes() ([]RuntimeVersion, error) {
-	cmd := exec.Command("xcrun", "simctl", "list", "runtimes", "--json")
+// QueryAvailableRuntimes queries xcrun simctl on the HOST for available runtimes.
+// env is the explicit subprocess environment (DEV §12); pass r.execEnv from a
+// Runtime, or a sysexec.Curated slice when no Runtime is available.
+func QueryAvailableRuntimes(ctx context.Context, env []string) ([]RuntimeVersion, error) {
+	cmd := sysexec.CommandContext(ctx, env, "xcrun", "simctl", "list", "runtimes", "--json")
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("query simctl runtimes: %w", err)
@@ -86,8 +89,9 @@ func QueryAvailableRuntimes() ([]RuntimeVersion, error) {
 // ResolveRuntimeVersions resolves user input to specific runtime versions.
 // If version omitted/":latest", picks latest by semantic version.
 // If version specified, matches exact version or errors.
-func ResolveRuntimeVersions(inputs []string) ([]RuntimeVersion, error) {
-	available, err := QueryAvailableRuntimes()
+// env is the explicit subprocess environment (DEV §12); forwarded to QueryAvailableRuntimes.
+func ResolveRuntimeVersions(ctx context.Context, env []string, inputs []string) ([]RuntimeVersion, error) {
+	available, err := QueryAvailableRuntimes(ctx, env)
 	if err != nil {
 		return nil, err
 	}

@@ -13,6 +13,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// testPgrepEnv is the minimal explicit env for pgrepTartRun in tests (DEV §12).
+var testPgrepEnv = []string{"PATH=/usr/bin:/bin"}
+
 // TestWaitForExit_Empty verifies that an empty PID slice is a no-op.
 func TestWaitForExit_Empty(t *testing.T) {
 	survivors := waitForExit(nil, 100*time.Millisecond)
@@ -75,12 +78,12 @@ func TestPgrepTartRun_FindsMatchingProcess(t *testing.T) {
 	// Brief pause so the process shows up in the kernel's process table.
 	time.Sleep(100 * time.Millisecond)
 
-	pids := pgrepTartRun(context.Background(), vmName)
+	pids := pgrepTartRun(context.Background(), testPgrepEnv, vmName)
 	assert.Contains(t, pids, child.Process.Pid, "pgrepTartRun should find the spawned process")
 }
 
 // TestPgrepTartRun_NoMatch verifies that a non-existent VM name produces nil.
 func TestPgrepTartRun_NoMatch(t *testing.T) {
-	pids := pgrepTartRun(context.Background(), "yoloai-this-vm-does-not-exist-xyz987654")
+	pids := pgrepTartRun(context.Background(), testPgrepEnv, "yoloai-this-vm-does-not-exist-xyz987654")
 	assert.Nil(t, pids)
 }

@@ -31,7 +31,7 @@ func TestExecArgs(t *testing.T) {
 }
 
 func TestBuildRunArgs(t *testing.T) {
-	r := &Runtime{tartBin: "/usr/local/bin/tart"}
+	r := &Runtime{tartBin: "/usr/local/bin/tart", execEnv: []string{"PATH=/usr/bin:/bin"}}
 	sandboxPath := t.TempDir()
 
 	// Create an external dir that actually exists (for os.Stat check)
