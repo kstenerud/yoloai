@@ -76,6 +76,8 @@ row to the index.
 | `yoloai attach` fails with "no sessions" on Tart VM | [Tart: exec -t changes environment](#tart-exec--t-changes-environment-preventing-tmux-from-finding-socket) |
 | `xcrun simctl list runtimes` shows no runtimes when mounted via VirtioFS | [Tart: CoreSimulator requires sealed APFS](#coresimulator-cannot-discover-virtiofs-mounted-runtimes) |
 | `Failed to start launchd_sim: could not bind to session` when booting simulator | [Tart: ditto'd runtime is incomplete](#dittod-ios-runtime-is-incomplete-use-xcodebuild--downloadplatform) |
+| In-VM iOS runtime download is slow; does the cirruslabs Xcode base already include a simulator? | [Tart: cirruslabs Xcode base bakes in the default runtime](#cirruslabsmacos--xcode-base-images-already-bake-in-the-default-ios-runtime--the-in-vm-download-is-redundant-for-it) |
+| `iOS X.Y is not installed … install from Xcode > Settings > Components` sporadically on cirruslabs Xcode base | [Tart: cirruslabs Xcode base bakes in the default runtime](#cirruslabsmacos--xcode-base-images-already-bake-in-the-default-ios-runtime--the-in-vm-download-is-redundant-for-it) |
 | `git diff` fails with "unable to read" object / git corruption on Tart VM | [Tart: VirtioFS corrupts git repositories](#virtiofs-corrupts-git-repositories) |
 | Tart `info` shows `Changes: no` on a dirty sandbox; `destroy` skips the unapplied-work gate | [Tart: host change probe blind to in-VM workdir](#a-host-side-change-probe-is-blind-to-the-in-vm-workdir--info-showed-changes-no-on-a-dirty-tart-sandbox-and-destroy-skipped-its-gate) |
 | `yoloai new` times out / "command timed out" on Tart; sandbox.jsonl stops after xcodebuild firstlaunch; agent never starts | [Tart: signal_secrets_consumed deadlock with get_working_dir](#tart-signal_secrets_consumed-must-run-before-get_working_dir) |
@@ -1497,6 +1499,28 @@ The download approach installs to the **same path** that ditto was copying to, p
 **Verification:** See `docs/contributors/design/research/ios-runtime-download-verification.md` for complete manual verification that the download approach produces bootable simulators.
 
 **Code:** `runtime/tart/runtime_copy.go` (currently implements ditto approach, needs replacement with download approach)
+
+### `cirruslabs/macos-*-xcode` base images already bake in the default iOS runtime — the in-VM download is redundant for it
+
+**Symptom / question:** the in-VM `xcodebuild -downloadPlatform iOS` step (~8.5 GB download, expands to ~16 GB) is slow on every Tart `new`. Does the `ghcr.io/cirruslabs/macos-tahoe-xcode:latest` base (and its `macos-*-xcode` siblings) already include a simulator runtime so we can skip it?
+
+**Answer — yes, for the *default* runtime only.** The Cirrus Labs Xcode images are built by `templates/xcode.pkr.hcl` in `cirruslabs/macos-image-templates`, which runs exactly the commands our own verification settled on, but at *image-build* time:
+```
+"xcodebuild -downloadPlatform iOS",
+"xcodebuild -runFirstLaunch",
+```
+So `:latest` ships with the default iOS runtime pre-installed and validated. Extra versions are bakeable via the template's `additional_ios_builds` variable, but the stock published image carries only the default. If a project needs a *specific* (non-default) iOS version, that one still has to be downloaded in-VM via `xcodebuild -downloadPlatform iOS -buildVersion <build>` — same path the template uses for extras.
+
+**Known caveat — sporadic non-recognition on Xcode 26.x.** The runtime is installed but occasionally stops being recognized by `simctl` ("iOS X.Y is not installed. Please download and install the platform from Xcode > Settings > Components."), ~1 in 20 runs, correlated with Apple runtime / Xcode point releases. Cirrus has no confirmed fix from Apple. This means the in-VM download must stay available as a fallback even after we adopt a baked-in base — don't delete `runtime_copy.go`'s download path, gate it.
+
+**Tradeoff:** baking in trades per-run download time for a larger base-image pull/storage footprint (Xcode + runtime). Relevant when picking/pinning the Tart base in `runtime/tart`.
+
+**References:**
+- [macos-image-templates `xcode.pkr.hcl`](https://github.com/cirruslabs/macos-image-templates/blob/master/templates/xcode.pkr.hcl)
+- [Issue #303 — iOS simulator not recognized on `macos-tahoe-xcode:26.1`](https://github.com/cirruslabs/macos-image-templates/issues/303)
+- [actions/runner-images #12948 — Xcode 26 runtime recognition flake](https://github.com/actions/runner-images/issues/12948)
+
+**Code:** `runtime/tart/runtime_copy.go` (download path — keep as fallback), Tart base-image selection in `runtime/tart`.
 
 ### VirtioFS corrupts git repositories
 
