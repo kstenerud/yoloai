@@ -75,5 +75,10 @@ func TestTart_FullVMLifecycle(t *testing.T) {
 	// this body should mirror TestSeatbelt_CreateInspectRemove: build an
 	// InstanceConfig, call Create, verify the VM exists in `tart list`,
 	// call Remove, verify it's gone.
+	//
+	// MUST isolate + namespace per TEST §6: set t.Setenv("TART_HOME", t.TempDir())
+	// so it never touches ~/.tart; name VMs yoloai-test-<purpose>-<unixnano>-<rand>
+	// (never production yoloai-base*/yoloai-<sandbox>); clean up only its own VMs by
+	// name — never call Prune() against a shared store.
 	t.Skip("Tart full lifecycle test pending docs/contributors/design/plans/README.md §Tart Runtime fix")
 }

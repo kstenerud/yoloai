@@ -195,6 +195,14 @@ Originally established alongside D19 (W3–W6 of the architecture remediation ma
 
 Threshold: any test that crosses the `runtime.Runtime` boundary requires a real backend instance. Skip with `t.Skipf` if the backend isn't available locally; mark with the `integration` build tag so unit-test runs don't require backends. Cross-backend tests are parametrised over the backend (W5), not duplicated per backend.
 
+**Isolate and namespace real-backend state — never touch the developer's real resources.** A real backend is shared with whatever the developer is actually running. A test that creates (or, far worse, *sweeps*) resources can clobber real VMs/containers/images. Three non-negotiable rules:
+
+1. **Isolate the store when the backend allows it.** Tart honours `TART_HOME`: set `t.Setenv("TART_HOME", t.TempDir())` so the test never reads or writes `~/.tart`. (Docker/Podman share one daemon with no per-test store — there, rely on naming + scoped cleanup below.)
+2. **Namespace + time-unique names.** Never reuse production names. Production owns the `yoloai-` prefix: `yoloai-base`, `yoloai-base-<key>` (and `yoloai-base-xcode-<key>`), `yoloai-base-tmp-<hex>`, `yoloai-<sandbox>`. Test resources use a distinct, collision-proof form — `yoloai-test-<purpose>-<unixnano>-<rand>`. The `unixnano`+`rand` suffix keeps names unique across reruns and concurrent runs (stale leftovers from a crashed run never collide); the `-test-` segment marks the namespace; `<purpose>` extends cleanly to future image/VM kinds without a new convention.
+3. **Scoped cleanup only.** A test deletes its *own* resources by exact name (or its own `yoloai-test-<token>-*`). Never call a production-wide sweep — e.g. Tart `Prune()` removes every `yoloai-*` except the base — against a shared real store; it would delete the developer's live sandboxes.
+
+This came up the hard way: a Tart runtime base built for an A/B kept vanishing because production names and sweep semantics were reused outside an isolated store. The placeholder `TestTart_FullVMLifecycle` must follow this when it's implemented.
+
 ### Worked examples
 
 - All `runtime/*/integration_test.go` files require a real daemon. The Docker tests skip if `docker info` fails; same for Podman and containerd.
