@@ -6,11 +6,11 @@ import (
 	"context"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/runtime"
+	"github.com/kstenerud/yoloai/internal/workspace"
 )
 
 // WorkProbe is the outcome of probing a sandbox work dir for unapplied work.
@@ -33,14 +33,15 @@ const (
 // for broken sandboxes; gates that know the backend use HasUnappliedWorkVia,
 // which runs git in the backend's execution context. Returns "yes", "no", or
 // "-" (not a git repo / not applicable).
-func DetectChanges(workDir string) string {
+// env must be an explicit subprocess env derived from the caller's layout (DEV §12).
+func DetectChanges(env []string, workDir string) string {
 	if _, err := os.Stat(workDir); err != nil {
 		return "-"
 	}
 	if _, err := os.Stat(filepath.Join(workDir, ".git")); err != nil {
 		return "-"
 	}
-	cmd := exec.Command("git", "-C", workDir, "status", "--porcelain") //nolint:gosec // G204: workDir is sandbox-controlled path
+	cmd := workspace.NewGitCmdWithEnv(env, workDir, "status", "--porcelain")
 	output, err := cmd.Output()
 	if err != nil {
 		return "-"
@@ -75,8 +76,9 @@ func porcelainHasChange(output string) bool {
 // the backend reports the instance is not running — it returns WorkUnknown so
 // callers fail safe rather than read a stale host seed copy the VM never wrote
 // back to (see backend-idiosyncrasies.md "VirtioFS corrupts git repositories").
-func HasUnappliedWorkVia(ctx context.Context, rt runtime.Runtime, name, workDir, baselineSHA string) WorkProbe {
-	out, err := runtime.GitExecFor(ctx, rt, name, workDir, "status", "--porcelain")
+// env must be an explicit subprocess env derived from the caller's layout (DEV §12).
+func HasUnappliedWorkVia(ctx context.Context, env []string, rt runtime.Runtime, name, workDir, baselineSHA string) WorkProbe {
+	out, err := runtime.GitExecFor(ctx, env, rt, name, workDir, "status", "--porcelain")
 	if err != nil {
 		if errors.Is(err, runtime.ErrNotRunning) {
 			return WorkUnknown
@@ -91,7 +93,7 @@ func HasUnappliedWorkVia(ctx context.Context, rt runtime.Runtime, name, workDir,
 	if baselineSHA == "" {
 		return WorkClean
 	}
-	out, err = runtime.GitExecFor(ctx, rt, name, workDir, "rev-list", "--count", baselineSHA+"..HEAD")
+	out, err = runtime.GitExecFor(ctx, env, rt, name, workDir, "rev-list", "--count", baselineSHA+"..HEAD")
 	if err != nil {
 		if errors.Is(err, runtime.ErrNotRunning) {
 			return WorkUnknown

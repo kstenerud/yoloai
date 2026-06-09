@@ -51,7 +51,7 @@ func TestCheckUnappliedWork_CorruptEnvironmentIsError(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, store.EnvironmentFile), []byte("{not valid json"), 0o600))
 
-	err := checkUnappliedWork(context.Background(), nil, "box", dir)
+	err := checkUnappliedWork(context.Background(), []string{}, nil, "box", dir)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "cannot verify unapplied work")
 }
@@ -61,7 +61,7 @@ func TestCheckUnappliedWork_CorruptEnvironmentIsError(t *testing.T) {
 func TestCheckUnappliedWork_AbsentEnvironmentIsNil(t *testing.T) {
 	dir := t.TempDir()
 
-	require.NoError(t, checkUnappliedWork(context.Background(), nil, "box", dir))
+	require.NoError(t, checkUnappliedWork(context.Background(), []string{}, nil, "box", dir))
 }
 
 // --- buildNetworkConfig ---
@@ -512,7 +512,7 @@ func TestSetupWorkdir_DefersBaselineForWorkDirSetupBackends(t *testing.T) {
 	rt := &mockTartRuntime{}
 
 	// setupWorkdir should return empty SHA for WorkDirSetup backends
-	_, baselineSHA, err := setupWorkdir(sandboxDir, workdir, rt)
+	_, baselineSHA, err := setupWorkdir(os.Environ(), sandboxDir, workdir, rt)
 	require.NoError(t, err)
 	assert.Empty(t, baselineSHA, "baseline SHA should be empty for WorkDirSetup backends (baseline deferred to VM)")
 }
@@ -538,7 +538,7 @@ func TestSetupWorkdir_CreatesBaselineForDockerBackends(t *testing.T) {
 	rt := &mockDockerRuntime{}
 
 	// setupWorkdir should create baseline and return non-empty SHA for Docker
-	_, baselineSHA, err := setupWorkdir(sandboxDir, workdir, rt)
+	_, baselineSHA, err := setupWorkdir(os.Environ(), sandboxDir, workdir, rt)
 	require.NoError(t, err)
 	assert.NotEmpty(t, baselineSHA, "baseline SHA should be non-empty for Docker backends (immediate baseline)")
 	assert.Len(t, baselineSHA, 40, "SHA should be 40 characters (git SHA-1)")
@@ -568,7 +568,7 @@ func TestSetupWorkdir_OverlayModeDeferBaseline(t *testing.T) {
 	}
 
 	for _, rt := range runtimes {
-		_, baselineSHA, err := setupWorkdir(sandboxDir, workdir, rt)
+		_, baselineSHA, err := setupWorkdir(os.Environ(), sandboxDir, workdir, rt)
 		require.NoError(t, err)
 		assert.Empty(t, baselineSHA, "overlay mode should defer baseline for all backends")
 	}
@@ -587,7 +587,7 @@ func TestCheckDirtyRepos_RefusesUntilAcked(t *testing.T) {
 	wd := &DirSpec{Path: dir, Mode: DirModeCopy}
 
 	// Default: refuse with a typed *DirtyWorkdirError naming the dir — no prompt.
-	err := checkDirtyRepos(wd, nil)
+	err := checkDirtyRepos(nil, wd, nil)
 	var dwe *yoerrors.DirtyWorkdirError
 	require.ErrorAs(t, err, &dwe)
 	require.Len(t, dwe.Dirs, 1)
@@ -596,7 +596,7 @@ func TestCheckDirtyRepos_RefusesUntilAcked(t *testing.T) {
 
 	// AllowDirty acks the specific directory → proceeds.
 	wd.AllowDirty = true
-	require.NoError(t, checkDirtyRepos(wd, nil))
+	require.NoError(t, checkDirtyRepos(nil, wd, nil))
 }
 
 func TestCheckDirtyRepos_CleanRepoPasses(t *testing.T) {
@@ -606,7 +606,7 @@ func TestCheckDirtyRepos_CleanRepoPasses(t *testing.T) {
 	gitAdd(t, dir, ".")
 	gitCommit(t, dir, "init")
 
-	require.NoError(t, checkDirtyRepos(&DirSpec{Path: dir, Mode: DirModeCopy}, nil))
+	require.NoError(t, checkDirtyRepos(nil, &DirSpec{Path: dir, Mode: DirModeCopy}, nil))
 }
 
 // prepareSandboxState validation tests (via state.Deps, not Engine)

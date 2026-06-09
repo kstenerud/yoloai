@@ -14,6 +14,7 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime/caps"
+	"github.com/kstenerud/yoloai/internal/sysexec"
 )
 
 // The Runtime interface (runtime.go) is the contract every backend implements.
@@ -99,20 +100,21 @@ type GitExecer interface {
 // execution context; otherwise git runs on the host with workDir as-is. Returns
 // stdout on success; a *ExecError carrying the exit code on non-zero exit (so
 // callers can match, e.g., `git diff --quiet` exit 1 as "diffs present").
-func GitExecFor(ctx context.Context, rt Runtime, name, workDir string, args ...string) (string, error) {
+// env is the explicit subprocess env (DEV §12) used when falling back to host git.
+func GitExecFor(ctx context.Context, env []string, rt Runtime, name, workDir string, args ...string) (string, error) {
 	if g, ok := rt.(GitExecer); ok {
 		return g.GitExec(ctx, name, workDir, args...)
 	}
-	return hostGitExec(ctx, workDir, args...)
+	return hostGitExec(ctx, env, workDir, args...)
 }
 
 // hostGitExec runs git on the host filesystem rooted at workDir — the default
 // for backends that bind-mount host paths. Hooks are disabled (the host's repo
 // hooks must not fire for sandbox-internal git). Output is not trimmed (patches
 // are whitespace-sensitive).
-func hostGitExec(ctx context.Context, workDir string, args ...string) (string, error) {
+func hostGitExec(ctx context.Context, env []string, workDir string, args ...string) (string, error) {
 	cmdArgs := append([]string{"-c", "core.hooksPath=/dev/null", "-C", workDir}, args...)
-	cmd := exec.CommandContext(ctx, "git", cmdArgs...) //nolint:gosec // G204: workDir from validated sandbox state
+	cmd := sysexec.CommandContext(ctx, env, "git", cmdArgs...)
 	output, err := cmd.Output()
 	if err != nil {
 		var exitErr *exec.ExitError

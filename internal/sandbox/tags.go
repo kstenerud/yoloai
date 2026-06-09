@@ -10,6 +10,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/internal/sysexec"
 	"github.com/kstenerud/yoloai/internal/workspace"
 )
 
@@ -18,18 +19,20 @@ import (
 // a nil runtime), and inside the VM for Tart (runtime.GitExecFor translates the
 // host work path to its VM path). This is what makes the tag pipeline correct
 // for Tart VM work copies (see DF12).
-func sandboxGitRunner(ctx context.Context, rt runtime.Runtime, name, workDir string) workspace.GitRunner {
+// env is the explicit subprocess env for host-side git fallback (DEV §12).
+func sandboxGitRunner(ctx context.Context, env []string, rt runtime.Runtime, name, workDir string) workspace.GitRunner {
 	return func(args ...string) (string, error) {
-		return runtime.GitExecFor(ctx, rt, name, workDir, args...)
+		return runtime.GitExecFor(ctx, env, rt, name, workDir, args...)
 	}
 }
 
 // hostGitRunner returns a workspace.GitRunner that runs git directly on a host
 // path — used for the host target repo, which lives on the host even when the
 // sandbox runs in a VM. Hooks are disabled, matching the rest of the pipeline.
-func hostGitRunner(dir string) workspace.GitRunner {
+// env must be an explicit subprocess env derived from the caller's layout (DEV §12).
+func hostGitRunner(env []string, dir string) workspace.GitRunner {
 	return func(args ...string) (string, error) {
-		out, err := workspace.NewGitCmd(dir, args...).Output()
+		out, err := workspace.NewGitCmdWithEnv(env, dir, args...).Output()
 		return string(out), err
 	}
 }
@@ -99,7 +102,8 @@ func ListTagsBeyondBaseline(ctx context.Context, layout config.Layout, rt runtim
 		return nil, nil
 	}
 
-	git := sandboxGitRunner(ctx, rt, name, workDir)
+	gitEnv := sysexec.Curated(layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+	git := sandboxGitRunner(ctx, gitEnv, rt, name, workDir)
 
 	// Collect commit SHAs beyond baseline
 	revOut, err := git("rev-list", baselineSHA+"..HEAD")
@@ -155,7 +159,8 @@ func ListUnappliedTags(ctx context.Context, layout config.Layout, rt runtime.Run
 	}
 
 	// List all tags in sandbox
-	sandboxTags, err := listAllTags(sandboxGitRunner(ctx, rt, name, workDir))
+	gitEnvForSandbox := sysexec.Curated(layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+	sandboxTags, err := listAllTags(sandboxGitRunner(ctx, gitEnvForSandbox, rt, name, workDir))
 	if err != nil {
 		return nil, err
 	}
@@ -165,8 +170,9 @@ func ListUnappliedTags(ctx context.Context, layout config.Layout, rt runtime.Run
 	}
 
 	// List all tags on host
+	gitEnv := sysexec.Curated(layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
 	hostTagNames := make(map[string]bool)
-	hostTags, err := listAllTags(hostGitRunner(targetDir))
+	hostTags, err := listAllTags(hostGitRunner(gitEnv, targetDir))
 	if err == nil { // best-effort; ignore errors
 		for _, t := range hostTags {
 			hostTagNames[t.Name] = true

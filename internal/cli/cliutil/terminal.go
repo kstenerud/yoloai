@@ -6,7 +6,8 @@ package cliutil
 import (
 	"fmt"
 	"os"
-	"os/exec"
+
+	"github.com/kstenerud/yoloai/internal/sysexec"
 )
 
 // SetTerminalTitle sets the terminal title for the host terminal.
@@ -22,18 +23,21 @@ func SetTerminalTitle(title string) {
 	if os.Getenv("TMUX") == "" { //nolint:forbidigo // §12: CLI terminal detection (are we inside a host tmux session?)
 		return
 	}
+	// tmuxEnv: the layout-derived env for tmux subprocesses. PATH and HOME
+	// suffice — the socket is passed via -S, not via $HOME/.tmux.
+	tmuxEnv := sysexec.Curated(Layout().Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
 	if title != "" {
 		// Disable automatic-rename (tmux tracking the foreground
 		// process name) and allow-rename (programs sending escape
 		// sequences to rename the window) so our title sticks while
 		// the sandbox is attached.
-		exec.Command("tmux", "set-option", "-w", "automatic-rename", "off").Run() //nolint:errcheck,gosec // best-effort
-		exec.Command("tmux", "set-option", "-w", "allow-rename", "off").Run()     //nolint:errcheck,gosec // best-effort
-		exec.Command("tmux", "rename-window", title).Run()                        //nolint:errcheck,gosec // best-effort
+		sysexec.Command(tmuxEnv, "tmux", "set-option", "-w", "automatic-rename", "off").Run() //nolint:errcheck,gosec // best-effort
+		sysexec.Command(tmuxEnv, "tmux", "set-option", "-w", "allow-rename", "off").Run()     //nolint:errcheck,gosec // best-effort
+		sysexec.Command(tmuxEnv, "tmux", "rename-window", title).Run()                        //nolint:errcheck,gosec // best-effort
 	} else {
 		// Unset per-window overrides so the window reverts to the
 		// user's session/global defaults after detach.
-		exec.Command("tmux", "set-option", "-wu", "automatic-rename").Run() //nolint:errcheck,gosec // best-effort
-		exec.Command("tmux", "set-option", "-wu", "allow-rename").Run()     //nolint:errcheck,gosec // best-effort
+		sysexec.Command(tmuxEnv, "tmux", "set-option", "-wu", "automatic-rename").Run() //nolint:errcheck,gosec // best-effort
+		sysexec.Command(tmuxEnv, "tmux", "set-option", "-wu", "allow-rename").Run()     //nolint:errcheck,gosec // best-effort
 	}
 }

@@ -6,16 +6,22 @@ package provision
 
 import (
 	"fmt"
-	"os/exec"
 	"strings"
+
+	"github.com/kstenerud/yoloai/internal/sysexec"
 )
 
 // KeychainReader reads a generic password from the macOS Keychain by service name.
 // Overridden in tests to avoid real Keychain calls.
 var KeychainReader = readKeychainPassword
 
+// keychainEnv is the minimal env for the `security` subprocess. macOS's
+// security(1) lives at /usr/bin and needs only PATH; no layout is available at
+// this call site (provision is layout-free), so we curate a hardcoded minimum.
+var keychainEnv = []string{"PATH=/usr/bin:/bin:/usr/local/bin"}
+
 func readKeychainPassword(service string) ([]byte, error) {
-	out, err := exec.Command("security", "find-generic-password", "-s", service, "-w").Output() //nolint:gosec // service name comes from agent definition, not user input
+	out, err := sysexec.Command(keychainEnv, "security", "find-generic-password", "-s", service, "-w").Output()
 	if err != nil {
 		return nil, fmt.Errorf("keychain lookup for %q: %w", service, err)
 	}

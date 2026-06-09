@@ -20,6 +20,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/runtime/caps"
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/internal/sysexec"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
 
@@ -863,7 +864,8 @@ func (s *System) classifySandboxes() (known []string, broken []classifiedSandbox
 			known = append(known, store.InstanceName(s.layout.Principal, name))
 			continue
 		} else {
-			state, detail := sandbox.ProbeWorkData(path)
+			gitEnv := sysexec.Curated(s.layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+			state, detail := sandbox.ProbeWorkData(gitEnv, path)
 			c := classifiedSandbox{name: name, path: path, detail: detail}
 			switch {
 			case state == sandbox.WorkDataPresent:

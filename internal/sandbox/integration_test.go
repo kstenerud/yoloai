@@ -114,7 +114,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 		0600,
 	))
 
-	require.NoError(t, workspace.ApplyPatch(patchBytes, targetDir, false))
+	require.NoError(t, workspace.ApplyPatch(os.Environ(), patchBytes, targetDir, false))
 
 	applied, err := os.ReadFile(filepath.Join(targetDir, "main.go")) //nolint:gosec // G304: test file path
 	require.NoError(t, err)
@@ -472,7 +472,7 @@ func TestIntegration_ApplyPatch(t *testing.T) {
 		0600,
 	))
 
-	require.NoError(t, workspace.ApplyPatch(patchBytes, targetDir, false))
+	require.NoError(t, workspace.ApplyPatch(os.Environ(), patchBytes, targetDir, false))
 
 	applied, err := os.ReadFile(filepath.Join(targetDir, "main.go")) //nolint:gosec // test path
 	require.NoError(t, err)
@@ -827,7 +827,7 @@ func TestIntegration_AgentStubWorkflow(t *testing.T) {
 		[]byte("package main\n\nfunc main() {}\n"),
 		0600,
 	))
-	require.NoError(t, workspace.ApplyPatch(patchBytes, targetDir, false))
+	require.NoError(t, workspace.ApplyPatch(os.Environ(), patchBytes, targetDir, false))
 	assert.FileExists(t, filepath.Join(targetDir, "agent-output.txt"))
 }
 

@@ -10,6 +10,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/internal/sysexec"
 	"github.com/kstenerud/yoloai/internal/workspace"
 )
 
@@ -70,7 +71,8 @@ func TransferTags(ctx context.Context, layout config.Layout, rt runtime.Runtime,
 		for i, t := range tags {
 			sandboxSHAs[i] = t.SHA
 		}
-		shaMap, err = workspace.BuildSHAMapByMatching(sandboxGitRunner(ctx, rt, name, workDir), targetDir, sandboxSHAs)
+		gitEnv := sysexec.Curated(layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+		shaMap, err = workspace.BuildSHAMapByMatching(gitEnv, sandboxGitRunner(ctx, gitEnv, rt, name, workDir), targetDir, sandboxSHAs)
 		if err != nil {
 			return nil, fmt.Errorf("build SHA map: %w", err)
 		}
@@ -84,7 +86,8 @@ func TransferTags(ctx context.Context, layout config.Layout, rt runtime.Runtime,
 			res.Skipped++
 			continue
 		}
-		if createErr := workspace.CreateTag(targetDir, tag.Name, hostSHA, tag.Message); createErr != nil {
+		gitEnv := sysexec.Curated(layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+		if createErr := workspace.CreateTag(gitEnv, targetDir, tag.Name, hostSHA, tag.Message); createErr != nil {
 			res.Outcomes = append(res.Outcomes, TagOutcome{Name: tag.Name, Err: createErr.Error()})
 			res.Skipped++
 			continue

@@ -6,11 +6,11 @@ package testutil
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/kstenerud/yoloai/internal/sysexec"
 	"github.com/stretchr/testify/require"
 )
 
@@ -37,7 +37,8 @@ func GitCommit(t *testing.T, dir, msg string) {
 // GitRevParse returns the current HEAD SHA of the git repo at dir.
 func GitRevParse(t *testing.T, dir string) string {
 	t.Helper()
-	cmd := exec.Command("git", "-C", dir, "rev-parse", "HEAD") //nolint:gosec // G204: test helper
+	// Test helpers use os.Environ() — testutil is excluded from the forbidigo ban (§12).
+	cmd := sysexec.Command(os.Environ(), "git", "-C", dir, "rev-parse", "HEAD") //nolint:forbidigo // §12: test helper; testutil/ is excluded
 	out, err := cmd.Output()
 	require.NoError(t, err, "git rev-parse HEAD failed")
 	return strings.TrimSpace(string(out))
@@ -46,7 +47,7 @@ func GitRevParse(t *testing.T, dir string) string {
 // RunGit runs an arbitrary git command in dir.
 func RunGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", args...) //nolint:gosec // G204: test helper with known command
+	cmd := sysexec.Command(os.Environ(), "git", args...) //nolint:forbidigo // §12: test helper; testutil/ is excluded
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, "git %v failed: %s", args, out)
@@ -56,7 +57,7 @@ func RunGit(t *testing.T, dir string, args ...string) {
 // stdout. Use for read-only queries (rev-list, rev-parse) in assertions.
 func RunGitOutput(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", args...) //nolint:gosec // G204: test helper with known command
+	cmd := sysexec.Command(os.Environ(), "git", args...) //nolint:forbidigo // §12: test helper; testutil/ is excluded
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	require.NoError(t, err, "git %v failed", args)

@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -14,6 +13,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/internal/sysexec"
 )
 
 // FilesDir returns the host path of the sandbox's file-exchange directory.
@@ -53,7 +53,8 @@ func ImportFile(ctx context.Context, layout config.Layout, name, hostPath string
 			return "", fmt.Errorf("target already exists: %s (use --overwrite to replace it)", info.Name())
 		}
 	}
-	if err := copyTree(ctx, absSrc, dst); err != nil {
+	cpEnv := sysexec.Curated(layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+	if err := copyTree(ctx, cpEnv, absSrc, dst); err != nil {
 		return "", fmt.Errorf("copy %s: %w", hostPath, err)
 	}
 	return info.Name(), nil
@@ -73,7 +74,8 @@ func ExportFile(ctx context.Context, layout config.Layout, name, rel, dst string
 			return fmt.Errorf("destination already exists: %s (use --overwrite to replace it)", dst)
 		}
 	}
-	if err := copyTree(ctx, srcPath, dst); err != nil {
+	cpEnv := sysexec.Curated(layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+	if err := copyTree(ctx, cpEnv, srcPath, dst); err != nil {
 		return fmt.Errorf("copy: %w", err)
 	}
 	return nil
@@ -96,8 +98,8 @@ func RemoveExchangeFile(layout config.Layout, name, rel string) error {
 // copyTree copies src to dst preserving mode and recursing into directories,
 // honoring ctx cancellation. Uses cp -rp (matching prior CLI behavior) since the
 // exchange directory may hold directory trees.
-func copyTree(ctx context.Context, src, dst string) error {
-	cmd := exec.CommandContext(ctx, "cp", "-rp", src, dst) //nolint:gosec // G204: paths are validated
+func copyTree(ctx context.Context, env []string, src, dst string) error {
+	cmd := sysexec.CommandContext(ctx, env, "cp", "-rp", src, dst)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("%s", strings.TrimSpace(string(out)))
 	}

@@ -8,6 +8,7 @@ import (
 	"os/exec"
 
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+	"github.com/kstenerud/yoloai/internal/sysexec"
 
 	"github.com/spf13/cobra"
 )
@@ -51,7 +52,9 @@ func newSandboxVscodeCmd() *cobra.Command {
 
 			// Try to open VS Code if `code` is on PATH
 			if _, lookErr := exec.LookPath("code"); lookErr == nil {
-				openCmd := exec.Command("code", "--folder-uri", attach.FolderURI) //nolint:gosec // G204: uri is constructed from trusted sandbox metadata
+				// PATH+HOME suffice for the VS Code CLI; the folder URI carries no secrets.
+				codeEnv := sysexec.Curated(cliutil.Layout().Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+				openCmd := sysexec.Command(codeEnv, "code", "--folder-uri", attach.FolderURI)
 				if runErr := openCmd.Run(); runErr != nil {
 					// Fall through to print instructions
 					fmt.Fprintf(cmd.OutOrStdout(), "Failed to open VS Code (is VS Code CLI installed?)\n") //nolint:errcheck // best-effort output

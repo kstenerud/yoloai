@@ -15,8 +15,9 @@ import (
 type GitRunner func(args ...string) (string, error)
 
 // CommitExists checks if a commit SHA exists in the git repository.
-func CommitExists(dir, sha string) bool {
-	cmd := NewGitCmd(dir, "cat-file", "-e", sha)
+// env must be an explicit subprocess env derived from the caller's layout (DEV §12).
+func CommitExists(env []string, dir, sha string) bool {
+	cmd := NewGitCmdWithEnv(env, dir, "cat-file", "-e", sha)
 	err := cmd.Run()
 	return err == nil
 }
@@ -52,11 +53,12 @@ func getCommitMeta(git GitRunner, sha string) (*commitMeta, error) {
 // Matches commits by author, timestamp, and subject line. sandboxGit reads the
 // sandbox work copy (backend-aware, so it is correct for Tart VM work copies);
 // hostDir is the host target repo, always read with host git.
-func BuildSHAMapByMatching(sandboxGit GitRunner, hostDir string, sandboxSHAs []string) (map[string]string, error) {
+// env must be an explicit subprocess env derived from the caller's layout (DEV §12).
+func BuildSHAMapByMatching(env []string, sandboxGit GitRunner, hostDir string, sandboxSHAs []string) (map[string]string, error) {
 	shaMap := make(map[string]string)
 
 	// Get all commits from host (last 1000 should be enough)
-	cmd := NewGitCmd(hostDir, "log", "--format=%H%x00%an%x00%at%x00%s", "-1000")
+	cmd := NewGitCmdWithEnv(env, hostDir, "log", "--format=%H%x00%an%x00%at%x00%s", "-1000")
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("git log on host: %w", err)
@@ -107,14 +109,15 @@ func BuildSHAMapByMatching(sandboxGit GitRunner, hostDir string, sandboxSHAs []s
 // CreateTag creates a git tag on the given SHA in the target directory.
 // If message is non-empty, an annotated tag is created; otherwise lightweight.
 // Returns an error if the tag already exists or git tag fails.
-func CreateTag(dir, name, sha, message string) error {
+// env must be an explicit subprocess env derived from the caller's layout (DEV §12).
+func CreateTag(env []string, dir, name, sha, message string) error {
 	var args []string
 	if message != "" {
 		args = []string{"tag", "-a", name, sha, "-m", message}
 	} else {
 		args = []string{"tag", name, sha}
 	}
-	cmd := NewGitCmd(dir, args...)
+	cmd := NewGitCmdWithEnv(env, dir, args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		msg := strings.TrimSpace(string(output))

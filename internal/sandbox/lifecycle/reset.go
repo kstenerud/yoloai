@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -19,6 +18,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/sandbox/state"
 	"github.com/kstenerud/yoloai/internal/sandbox/status"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/internal/sysexec"
 	"github.com/kstenerud/yoloai/internal/workspace"
 )
 
@@ -115,7 +115,8 @@ func Reset(ctx context.Context, d state.Deps, opts ResetOptions) (*ResetResult, 
 // every routine destroy. The work signal is read via the backend's git context
 // (in-VM for Tart), so callers must open the runtime first.
 func NeedsConfirmation(ctx context.Context, d state.Deps, name string) (bool, string) {
-	return unappliedWorkReason(ctx, d.Runtime, name, d.Layout.SandboxDir(name))
+	gitEnv := sysexec.Curated(d.Layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+	return unappliedWorkReason(ctx, gitEnv, d.Runtime, name, d.Layout.SandboxDir(name))
 }
 
 // unappliedWorkReason reports whether a sandbox holds work that destruction
@@ -123,13 +124,13 @@ func NeedsConfirmation(ctx context.Context, d state.Deps, name string) (bool, st
 // directory — independent of whether the agent is running. A WorkUnknown probe
 // (a VM-local backend that is not running, so the in-VM working copy can't be
 // read) fails safe: it blocks destroy with a reason that points to the cause.
-func unappliedWorkReason(ctx context.Context, rt runtime.Runtime, name, sandboxDir string) (bool, string) {
+func unappliedWorkReason(ctx context.Context, gitEnv []string, rt runtime.Runtime, name, sandboxDir string) (bool, string) {
 	meta, err := store.LoadEnvironment(sandboxDir)
 	if err != nil {
 		// Environment is unreadable (a broken sandbox). Don't assume it's empty —
 		// that silently discards recoverable work. Fall back to a
 		// filesystem-level probe of work/ so destroy still prompts.
-		if workState, detail := status.ProbeWorkData(sandboxDir); workState != status.WorkDataNone {
+		if workState, detail := status.ProbeWorkData(gitEnv, sandboxDir); workState != status.WorkDataNone {
 			if detail == "" {
 				detail = "work directory present but metadata is unreadable"
 			}
@@ -138,11 +139,11 @@ func unappliedWorkReason(ctx context.Context, rt runtime.Runtime, name, sandboxD
 		return false, ""
 	}
 
-	if blocked, reason := dirWorkReason(ctx, rt, name, sandboxDir, meta.Workdir.Mode, meta.Workdir.HostPath, meta.Workdir.BaselineSHA); blocked {
+	if blocked, reason := dirWorkReason(ctx, gitEnv, rt, name, sandboxDir, meta.Workdir.Mode, meta.Workdir.HostPath, meta.Workdir.BaselineSHA); blocked {
 		return true, reason
 	}
 	for _, dirEnv := range meta.Directories {
-		if blocked, reason := dirWorkReason(ctx, rt, name, sandboxDir, dirEnv.Mode, dirEnv.HostPath, dirEnv.BaselineSHA); blocked {
+		if blocked, reason := dirWorkReason(ctx, gitEnv, rt, name, sandboxDir, dirEnv.Mode, dirEnv.HostPath, dirEnv.BaselineSHA); blocked {
 			return true, reason
 		}
 	}
@@ -152,12 +153,12 @@ func unappliedWorkReason(ctx context.Context, rt runtime.Runtime, name, sandboxD
 
 // dirWorkReason probes one copy/overlay directory for unapplied work and maps
 // the result to a destroy-blocking reason. Non-copy/overlay modes never block.
-func dirWorkReason(ctx context.Context, rt runtime.Runtime, name, sandboxDir string, mode store.DirMode, hostPath, baselineSHA string) (bool, string) {
+func dirWorkReason(ctx context.Context, gitEnv []string, rt runtime.Runtime, name, sandboxDir string, mode store.DirMode, hostPath, baselineSHA string) (bool, string) {
 	if mode != "copy" && mode != "overlay" {
 		return false, ""
 	}
 	workDir := store.WorkDir(sandboxDir, hostPath)
-	switch patch.HasUnappliedWorkVia(ctx, rt, name, workDir, baselineSHA) {
+	switch patch.HasUnappliedWorkVia(ctx, gitEnv, rt, name, workDir, baselineSHA) {
 	case patch.WorkDirty:
 		return true, "unapplied changes exist"
 	case patch.WorkUnknown:
@@ -202,8 +203,9 @@ func resetCopyWorkdir(d state.Deps, sandboxName, sandboxDir string, meta *store.
 		return "", fmt.Errorf("re-copy workdir: %w", err)
 	}
 
+	gitEnv := sysexec.Curated(d.Layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
 	if workspace.IsGitRepo(workDir) {
-		sha, err := workspace.HeadSHA(workDir)
+		sha, err := workspace.HeadSHAWithEnv(gitEnv, workDir)
 		if err != nil {
 			return "", fmt.Errorf("read HEAD of re-copied workdir: %w", err)
 		}
@@ -215,7 +217,7 @@ func resetCopyWorkdir(d state.Deps, sandboxName, sandboxDir string, meta *store.
 		// Defer baseline creation — executeVMWorkDirSetup will call it after container start
 		return "", nil
 	}
-	sha, err := workspace.Baseline(workDir)
+	sha, err := workspace.BaselineWithEnv(gitEnv, workDir)
 	if err != nil {
 		return "", fmt.Errorf("re-create git baseline: %w", err)
 	}
@@ -223,7 +225,7 @@ func resetCopyWorkdir(d state.Deps, sandboxName, sandboxDir string, meta *store.
 }
 
 // resetAuxCopyDir resets a single aux :copy dir and returns the new baseline SHA.
-func resetAuxCopyDir(sandboxDir string, d store.DirEnvironment) (string, error) {
+func resetAuxCopyDir(gitEnv []string, sandboxDir string, d store.DirEnvironment) (string, error) {
 	auxWorkDir := store.WorkDir(sandboxDir, d.HostPath)
 	if err := os.RemoveAll(auxWorkDir); err != nil {
 		return "", fmt.Errorf("remove aux work copy %s: %w", d.HostPath, err)
@@ -235,13 +237,13 @@ func resetAuxCopyDir(sandboxDir string, d store.DirEnvironment) (string, error) 
 		return "", fmt.Errorf("re-copy aux dir %s: %w", d.HostPath, err)
 	}
 	if workspace.IsGitRepo(auxWorkDir) {
-		sha, err := workspace.HeadSHA(auxWorkDir)
+		sha, err := workspace.HeadSHAWithEnv(gitEnv, auxWorkDir)
 		if err != nil {
 			return "", fmt.Errorf("read HEAD of re-copied aux dir %s: %w", d.HostPath, err)
 		}
 		return sha, nil
 	}
-	sha, err := workspace.Baseline(auxWorkDir)
+	sha, err := workspace.BaselineWithEnv(gitEnv, auxWorkDir)
 	if err != nil {
 		return "", fmt.Errorf("git baseline for aux dir %s: %w", d.HostPath, err)
 	}
@@ -250,11 +252,11 @@ func resetAuxCopyDir(sandboxDir string, d store.DirEnvironment) (string, error) 
 
 // resetAuxDirs resets all aux :copy and :overlay directories in meta,
 // updating BaselineSHA in-place.
-func resetAuxDirs(sandboxDir string, meta *store.Environment) error {
+func resetAuxDirs(gitEnv []string, sandboxDir string, meta *store.Environment) error {
 	for i, d := range meta.Directories {
 		switch d.Mode {
 		case store.DirModeCopy:
-			sha, err := resetAuxCopyDir(sandboxDir, d)
+			sha, err := resetAuxCopyDir(gitEnv, sandboxDir, d)
 			if err != nil {
 				return err
 			}
@@ -366,7 +368,8 @@ func prepareResetRestart(ctx context.Context, d state.Deps, opts ResetOptions, s
 	}
 
 	// Reset aux :copy and :overlay dirs
-	if err := resetAuxDirs(sandboxDir, meta); err != nil {
+	gitEnv := sysexec.Curated(d.Layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+	if err := resetAuxDirs(gitEnv, sandboxDir, meta); err != nil {
 		return err
 	}
 
@@ -410,22 +413,24 @@ func resetInPlace(ctx context.Context, d state.Deps, opts ResetOptions, meta *st
 	}
 
 	workDir := store.WorkDir(sandboxDir, meta.Workdir.HostPath)
+	gitEnv := sysexec.Curated(d.Layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+	rsyncEnv := sysexec.Curated(d.Layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
 
 	// Re-sync workdir from host (bind-mount makes changes visible in container)
-	if err := rsyncDir(meta.Workdir.HostPath, workDir); err != nil {
+	if err := rsyncDir(rsyncEnv, meta.Workdir.HostPath, workDir); err != nil {
 		return fmt.Errorf("rsync workdir: %w", err)
 	}
 
 	// Record baseline — preserve git history if source is a git repo
 	var newSHA string
 	if workspace.IsGitRepo(workDir) {
-		sha, err := workspace.HeadSHA(workDir)
+		sha, err := workspace.HeadSHAWithEnv(gitEnv, workDir)
 		if err != nil {
 			return fmt.Errorf("read HEAD of resynced workdir: %w", err)
 		}
 		newSHA = sha
 	} else {
-		sha, err := workspace.Baseline(workDir)
+		sha, err := workspace.BaselineWithEnv(gitEnv, workDir)
 		if err != nil {
 			return fmt.Errorf("re-create git baseline: %w", err)
 		}
@@ -490,8 +495,8 @@ func clearCacheAndFiles(d state.Deps, opts ResetOptions) error {
 // CLAUDE.md "Runtime dependencies"); the one backend where host-side access is
 // impossible — Tart, whose workdir lives inside the VM — is excluded by
 // resetInPlace before reaching here.
-func rsyncDir(src, dst string) error {
-	cmd := exec.Command("rsync", "-a", "--delete", src+"/", dst+"/") //nolint:gosec // src and dst are internal paths, not user-controlled
+func rsyncDir(env []string, src, dst string) error {
+	cmd := sysexec.Command(env, "rsync", "-a", "--delete", src+"/", dst+"/")
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("rsync: %s: %w", strings.TrimSpace(string(output)), err)
 	}

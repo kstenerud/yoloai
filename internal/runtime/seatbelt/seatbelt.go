@@ -333,8 +333,7 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 	profilePath := filepath.Join(sandboxPath, backendDir, profileFileName)
 	setupScriptPath := filepath.Join(sandboxPath, binDir, "sandbox-setup.py")
 
-	cmd := exec.Command(r.sandboxExecBin, "-f", profilePath, "python3", setupScriptPath, "seatbelt", sandboxPath) //nolint:gosec // G204: paths are constructed from validated config
-	cmd.Env = r.sandboxEnv()
+	cmd := sysexec.Command(r.sandboxEnv(), r.sandboxExecBin, "-f", profilePath, "python3", setupScriptPath, "seatbelt", sandboxPath)
 	cmd.Stderr = logFile
 	cmd.Stdout = logFile
 	cmd.SysProcAttr = &syscall.SysProcAttr{

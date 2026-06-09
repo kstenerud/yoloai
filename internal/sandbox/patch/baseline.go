@@ -11,6 +11,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/internal/sysexec"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
 
@@ -61,8 +62,9 @@ func shaForError(sha string) string {
 // only when none is set. :rw and :overlay workdirs are refused with a
 // *UsageError (their baselines aren't host-tracked).
 func AdvanceBaselineCAS(ctx context.Context, layout config.Layout, rt runtime.Runtime, name, expectedCurrentSHA string) (*BaselineChange, error) {
+	gitEnv := sysexec.Curated(layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
 	return mutateBaseline(ctx, layout, rt, name, expectedCurrentSHA, func(workDir string) (string, error) {
-		out, err := runtime.GitExecFor(ctx, rt, name, workDir, "rev-parse", "HEAD")
+		out, err := runtime.GitExecFor(ctx, gitEnv, rt, name, workDir, "rev-parse", "HEAD")
 		if err != nil {
 			return "", fmt.Errorf("resolve HEAD: %w", err)
 		}
@@ -74,8 +76,9 @@ func AdvanceBaselineCAS(ctx context.Context, layout config.Layout, rt runtime.Ru
 // SHA, full SHA, or any rev git can resolve), guarded by the same
 // compare-and-swap as AdvanceBaselineCAS.
 func SetBaselineCAS(ctx context.Context, layout config.Layout, rt runtime.Runtime, name, expectedCurrentSHA, ref string) (*BaselineChange, error) {
+	gitEnv := sysexec.Curated(layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
 	return mutateBaseline(ctx, layout, rt, name, expectedCurrentSHA, func(workDir string) (string, error) {
-		out, err := runtime.GitExecFor(ctx, rt, name, workDir, "rev-parse", ref)
+		out, err := runtime.GitExecFor(ctx, gitEnv, rt, name, workDir, "rev-parse", ref)
 		if err != nil {
 			return "", fmt.Errorf("resolve sha %q: %w", ref, err)
 		}
@@ -114,8 +117,9 @@ func mutateBaseline(ctx context.Context, layout config.Layout, rt runtime.Runtim
 
 	// Subject is cosmetic — a failed lookup must not fail the move.
 	workDir := store.WorkDir(sandboxDir, meta.Workdir.HostPath)
+	gitEnv := sysexec.Curated(layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
 	subject := ""
-	if out, subjErr := runtime.GitExecFor(ctx, rt, name, workDir, "log", "--format=%s", "-1", sha); subjErr == nil {
+	if out, subjErr := runtime.GitExecFor(ctx, gitEnv, rt, name, workDir, "log", "--format=%s", "-1", sha); subjErr == nil {
 		subject = strings.TrimSpace(out)
 	}
 	return &BaselineChange{NewSHA: sha, Subject: subject}, nil
@@ -203,10 +207,11 @@ func BaselineLog(ctx context.Context, layout config.Layout, rt runtime.Runtime, 
 
 	workDir := store.WorkDir(sandboxDir, meta.Workdir.HostPath)
 	baselineSHA := meta.Workdir.BaselineSHA
+	gitEnv := sysexec.Curated(layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
 
 	inceptionSHA := meta.Workdir.InceptionSHA
 	if inceptionSHA == "" {
-		if out, gitErr := runtime.GitExecFor(ctx, rt, name, workDir,
+		if out, gitErr := runtime.GitExecFor(ctx, gitEnv, rt, name, workDir,
 			"log", "--format=%H", "--author=yoloai@localhost", "--reverse", "--max-count=1",
 		); gitErr == nil {
 			inceptionSHA = strings.TrimSpace(out)
@@ -214,20 +219,20 @@ func BaselineLog(ctx context.Context, layout config.Layout, rt runtime.Runtime, 
 	}
 
 	if inceptionSHA == "" {
-		out, logErr := runtime.GitExecFor(ctx, rt, name, workDir, "log", "--format=%H %s")
+		out, logErr := runtime.GitExecFor(ctx, gitEnv, rt, name, workDir, "log", "--format=%H %s")
 		if logErr != nil {
 			return nil, fmt.Errorf("git log: %w", logErr)
 		}
 		return parseBaselineLog(out, baselineSHA), nil
 	}
 
-	out, err := runtime.GitExecFor(ctx, rt, name, workDir, "log", "--format=%H %s", inceptionSHA+"..HEAD")
+	out, err := runtime.GitExecFor(ctx, gitEnv, rt, name, workDir, "log", "--format=%H %s", inceptionSHA+"..HEAD")
 	if err != nil {
 		return nil, fmt.Errorf("git log: %w", err)
 	}
 	entries := parseBaselineLog(out, baselineSHA)
 
-	inceptionLine, err := runtime.GitExecFor(ctx, rt, name, workDir, "log", "--format=%H %s", "-1", inceptionSHA)
+	inceptionLine, err := runtime.GitExecFor(ctx, gitEnv, rt, name, workDir, "log", "--format=%H %s", "-1", inceptionSHA)
 	if err != nil {
 		return nil, fmt.Errorf("git log inception: %w", err)
 	}

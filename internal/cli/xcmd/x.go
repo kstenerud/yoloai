@@ -7,12 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"os/exec"
 	"strings"
 	"text/tabwriter"
 
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+	"github.com/kstenerud/yoloai/internal/sysexec"
 
 	"github.com/kstenerud/yoloai/internal/cli/extension"
 	"github.com/kstenerud/yoloai/yoerrors"
@@ -103,8 +103,13 @@ func runExtension(cmd *cobra.Command, ext *extension.Extension, args []string) e
 			ext.Name, agentName, strings.Join(ext.Agent.Names, ", "))
 	}
 
-	// Build environment
-	env := os.Environ() //nolint:forbidigo // §12: CLI extension exec inherits the caller's full env plus extension-specific vars
+	// Build environment: the extension gets the full edge-resolved env by design
+	// (still explicit from layout.Env, not ambient os.Environ()).
+	layout := cliutil.Layout()
+	env := make([]string, 0, len(layout.Env)+8)
+	for k, v := range layout.Env {
+		env = append(env, k+"="+v)
+	}
 	env = append(env, "agent="+agentName)
 
 	for i, a := range ext.Args {
@@ -117,9 +122,8 @@ func runExtension(cmd *cobra.Command, ext *extension.Extension, args []string) e
 		env = append(env, envName+"="+val)
 	}
 
-	// Execute action via sh -c
-	sh := exec.CommandContext(cmd.Context(), "sh", "-c", ext.Action) //nolint:gosec // user-authored script
-	sh.Env = env
+	// Execute action via sh -c with the explicit edge env (DEV §12).
+	sh := sysexec.CommandContext(cmd.Context(), env, "sh", "-c", ext.Action)
 	sh.Stdin = cmd.InOrStdin()
 	sh.Stdout = cmd.OutOrStdout()
 	sh.Stderr = cmd.ErrOrStderr()

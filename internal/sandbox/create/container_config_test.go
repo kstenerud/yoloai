@@ -112,7 +112,7 @@ func TestGitBaseline_FreshInit(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, dir, "file.txt", "hello")
 
-	sha, err := workspace.Baseline(dir)
+	sha, err := workspace.BaselineWithEnv(os.Environ(), dir)
 	require.NoError(t, err)
 	assert.Len(t, sha, 40)
 
@@ -124,7 +124,7 @@ func TestGitBaseline_FreshInit(t *testing.T) {
 func TestGitBaseline_EmptyDir(t *testing.T) {
 	dir := t.TempDir()
 
-	sha, err := workspace.Baseline(dir)
+	sha, err := workspace.BaselineWithEnv(os.Environ(), dir)
 	require.NoError(t, err)
 	assert.Len(t, sha, 40, "allow-empty should produce a valid commit")
 }
@@ -132,14 +132,14 @@ func TestGitBaseline_EmptyDir(t *testing.T) {
 func TestGitBaseline_EmptyGitRepo(t *testing.T) {
 	// Regression test: git init with no commits should be handled gracefully
 	dir := t.TempDir()
-	require.NoError(t, workspace.RunGitCmd(dir, "init"))
+	require.NoError(t, workspace.RunGitCmdWithEnv(os.Environ(), dir, "init"))
 	writeTestFile(t, dir, "file.txt", "hello")
 
 	// setupWorkdir should remove the empty .git and create a fresh baseline.
 	sandboxDir := filepath.Join(t.TempDir(), "test-sandbox")
 	workdir := &DirSpec{Path: dir, Mode: DirMode("copy")}
 	rt := &mockDockerRuntime{} // Docker-like backend: creates baseline on host
-	_, sha, err := setupWorkdir(sandboxDir, workdir, rt)
+	_, sha, err := setupWorkdir(os.Environ(), sandboxDir, workdir, rt)
 	require.NoError(t, err)
 	assert.Len(t, sha, 40)
 }

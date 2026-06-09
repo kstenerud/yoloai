@@ -8,6 +8,7 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/sandbox/patch"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/internal/sysexec"
 )
 
 // LoadEnvironment reads a sandbox's environment.json after confirming the
@@ -161,7 +162,8 @@ func (e *Engine) WorkdirTags(ctx context.Context, name string, unappliedOnly boo
 		return nil, err
 	}
 	workDir := store.WorkDir(e.layout.SandboxDir(name), meta.Workdir.HostPath)
-	git := sandboxGitRunner(ctx, e.runtime, name, workDir)
+	gitEnv := sysexec.Curated(e.layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+	git := sandboxGitRunner(ctx, gitEnv, e.runtime, name, workDir)
 	for i := range tags {
 		tags[i].Message = getTagMessage(git, tags[i].Name)
 	}

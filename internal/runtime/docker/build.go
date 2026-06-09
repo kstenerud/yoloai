@@ -19,6 +19,7 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
+	"github.com/kstenerud/yoloai/internal/sysexec"
 )
 
 // lastBuildFile is the filename used to record the last successful build checksum
@@ -101,9 +102,8 @@ func (r *Runtime) buildBaseImage(ctx context.Context, layout config.Layout, outp
 
 	logger.Debug("building yoloai-base image via BuildKit")
 
-	cmd := exec.CommandContext(ctx, r.binaryName, "build", "-t", "yoloai-base", "-") //nolint:gosec // binaryName is "docker" or "podman"
+	cmd := sysexec.CommandContext(ctx, CuratedBuildEnv(layout.Env), r.binaryName, "build", "-t", "yoloai-base", "-")
 	cmd.Stdin = buildCtx
-	cmd.Env = CuratedBuildEnv(layout.Env)
 	cmd.Stdout = output
 	cmd.Stderr = output
 
@@ -193,9 +193,8 @@ func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir string, tag s
 
 	logger.Debug("building profile image via BuildKit", "tag", tag, "sourceDir", sourceDir, "secrets", len(secrets))
 
-	cmd := exec.CommandContext(ctx, r.binaryName, args...) //nolint:gosec // binaryName is "docker" or "podman"; secrets are validated by caller
+	cmd := sysexec.CommandContext(ctx, CuratedBuildEnv(buildEnv), r.binaryName, args...)
 	cmd.Stdin = buildCtx
-	cmd.Env = CuratedBuildEnv(buildEnv)
 	cmd.Stdout = output
 	cmd.Stderr = output
 

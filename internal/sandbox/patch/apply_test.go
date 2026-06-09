@@ -156,7 +156,7 @@ func TestApplyPatch_GitTarget(t *testing.T) {
 	gitAdd(t, targetDir, ".")
 	gitCommit(t, targetDir, "initial")
 
-	require.NoError(t, workspace.ApplyPatch(patch, targetDir, true))
+	require.NoError(t, workspace.ApplyPatch(testEnv(), patch, targetDir, true))
 
 	content, err := os.ReadFile(filepath.Join(targetDir, "file.txt")) //nolint:gosec // G304: test file path
 	require.NoError(t, err)
@@ -179,7 +179,7 @@ func TestApplyPatch_NonGitTarget(t *testing.T) {
 	require.NoError(t, os.MkdirAll(targetDir, 0750))
 	writeTestFile(t, targetDir, "file.txt", "original content\n")
 
-	require.NoError(t, workspace.ApplyPatch(patch, targetDir, false))
+	require.NoError(t, workspace.ApplyPatch(testEnv(), patch, targetDir, false))
 
 	content, err := os.ReadFile(filepath.Join(targetDir, "file.txt")) //nolint:gosec // G304: test file path
 	require.NoError(t, err)
@@ -205,7 +205,7 @@ func TestApplyPatch_NewFile(t *testing.T) {
 	gitAdd(t, targetDir, ".")
 	gitCommit(t, targetDir, "initial")
 
-	require.NoError(t, workspace.ApplyPatch(patch, targetDir, true))
+	require.NoError(t, workspace.ApplyPatch(testEnv(), patch, targetDir, true))
 
 	content, err := os.ReadFile(filepath.Join(targetDir, "created.txt")) //nolint:gosec // G304: test file path
 	require.NoError(t, err)
@@ -258,7 +258,7 @@ func TestApplyPatch_DeleteFile(t *testing.T) {
 	gitAdd(t, targetDir, ".")
 	gitCommit(t, targetDir, "initial")
 
-	require.NoError(t, workspace.ApplyPatch(patch, targetDir, true))
+	require.NoError(t, workspace.ApplyPatch(testEnv(), patch, targetDir, true))
 
 	assert.FileExists(t, filepath.Join(targetDir, "keep.txt"))
 	assert.NoFileExists(t, filepath.Join(targetDir, "remove.txt"))
@@ -285,7 +285,7 @@ func TestCheckPatch_Conflict(t *testing.T) {
 	gitAdd(t, targetDir, ".")
 	gitCommit(t, targetDir, "initial")
 
-	err = workspace.CheckPatch(patch, targetDir, true)
+	err = workspace.CheckPatch(testEnv(), patch, targetDir, true)
 	assert.Error(t, err)
 }
 
@@ -308,7 +308,7 @@ func TestCheckPatch_Clean(t *testing.T) {
 	gitAdd(t, targetDir, ".")
 	gitCommit(t, targetDir, "initial")
 
-	err = workspace.CheckPatch(patch, targetDir, true)
+	err = workspace.CheckPatch(testEnv(), patch, targetDir, true)
 	assert.NoError(t, err)
 }
 
@@ -681,7 +681,7 @@ func TestApplyFormatPatch_Single(t *testing.T) {
 	gitAdd(t, targetDir, ".")
 	gitCommit(t, targetDir, "initial")
 
-	_, err = workspace.ApplyFormatPatch(patchDir, files, targetDir)
+	_, err = workspace.ApplyFormatPatch(testEnv(), patchDir, files, targetDir)
 	require.NoError(t, err)
 
 	content, err := os.ReadFile(filepath.Join(targetDir, "feature.txt")) //nolint:gosec
@@ -715,7 +715,7 @@ func TestApplyFormatPatch_Multiple(t *testing.T) {
 	gitAdd(t, targetDir, ".")
 	gitCommit(t, targetDir, "initial")
 
-	_, err = workspace.ApplyFormatPatch(patchDir, files, targetDir)
+	_, err = workspace.ApplyFormatPatch(testEnv(), patchDir, files, targetDir)
 	require.NoError(t, err)
 
 	// Both files should exist
@@ -723,7 +723,7 @@ func TestApplyFormatPatch_Multiple(t *testing.T) {
 	assert.FileExists(t, filepath.Join(targetDir, "b.txt"))
 
 	// Verify commits were created (initial + 2 applied = 3 total)
-	cmd := workspace.NewGitCmd(targetDir, "rev-list", "--count", "HEAD")
+	cmd := workspace.NewGitCmdWithEnv(testEnv(), targetDir, "rev-list", "--count", "HEAD")
 	out, err := cmd.Output()
 	require.NoError(t, err)
 	assert.Equal(t, "3", strings.TrimSpace(string(out)))
@@ -754,7 +754,7 @@ func TestApplyFormatPatch_Conflict(t *testing.T) {
 	gitAdd(t, targetDir, ".")
 	gitCommit(t, targetDir, "initial")
 
-	_, err = workspace.ApplyFormatPatch(patchDir, files, targetDir)
+	_, err = workspace.ApplyFormatPatch(testEnv(), patchDir, files, targetDir)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "git am failed")
 	assert.Contains(t, err.Error(), "--abort")
@@ -785,11 +785,11 @@ func TestApplyFormatPatch_PreservesAuthorship(t *testing.T) {
 	gitAdd(t, targetDir, ".")
 	gitCommit(t, targetDir, "initial")
 
-	_, err = workspace.ApplyFormatPatch(patchDir, files, targetDir)
+	_, err = workspace.ApplyFormatPatch(testEnv(), patchDir, files, targetDir)
 	require.NoError(t, err)
 
 	// Verify the commit message was preserved
-	cmd := workspace.NewGitCmd(targetDir, "log", "-1", "--format=%s")
+	cmd := workspace.NewGitCmdWithEnv(testEnv(), targetDir, "log", "-1", "--format=%s")
 	out, err := cmd.Output()
 	require.NoError(t, err)
 	assert.Equal(t, "my commit message", strings.TrimSpace(string(out)))
@@ -1230,7 +1230,7 @@ func TestSelectiveApplyFlow(t *testing.T) {
 	gitCommit(t, targetDir, "initial")
 
 	// Apply
-	_, err = workspace.ApplyFormatPatch(patchDir, files, targetDir)
+	_, err = workspace.ApplyFormatPatch(testEnv(), patchDir, files, targetDir)
 	require.NoError(t, err)
 
 	// Verify only A and B exist, not C
@@ -1293,7 +1293,7 @@ func TestApplyFlow_CommitsOnly(t *testing.T) {
 	gitAdd(t, targetDir, ".")
 	gitCommit(t, targetDir, "initial")
 
-	_, err = workspace.ApplyFormatPatch(patchDir, files, targetDir)
+	_, err = workspace.ApplyFormatPatch(testEnv(), patchDir, files, targetDir)
 	require.NoError(t, err)
 
 	// Verify both files exist with correct content
@@ -1303,7 +1303,7 @@ func TestApplyFlow_CommitsOnly(t *testing.T) {
 	assert.Equal(t, "feature B\n", string(contentB))
 
 	// Verify 3 commits (initial + 2 applied)
-	cmd := workspace.NewGitCmd(targetDir, "rev-list", "--count", "HEAD")
+	cmd := workspace.NewGitCmdWithEnv(testEnv(), targetDir, "rev-list", "--count", "HEAD")
 	out, _ := cmd.Output()
 	assert.Equal(t, "3", strings.TrimSpace(string(out)))
 }
@@ -1345,7 +1345,7 @@ func TestApplyFlow_CommitsAndUncommitted(t *testing.T) {
 	gitAdd(t, targetDir, ".")
 	gitCommit(t, targetDir, "initial")
 
-	_, err = workspace.ApplyFormatPatch(patchDir, files, targetDir)
+	_, err = workspace.ApplyFormatPatch(testEnv(), patchDir, files, targetDir)
 	require.NoError(t, err)
 
 	// Then apply uncommitted changes
@@ -1353,7 +1353,7 @@ func TestApplyFlow_CommitsAndUncommitted(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, uncommittedPatch)
 
-	require.NoError(t, workspace.ApplyPatch(uncommittedPatch, targetDir, true))
+	require.NoError(t, workspace.ApplyPatch(testEnv(), uncommittedPatch, targetDir, true))
 
 	// Verify committed file exists
 	assert.FileExists(t, filepath.Join(targetDir, "committed.txt"))
@@ -1394,7 +1394,7 @@ func TestApplyFlow_UncommittedOnly(t *testing.T) {
 	gitAdd(t, targetDir, ".")
 	gitCommit(t, targetDir, "initial")
 
-	require.NoError(t, workspace.ApplyPatch(patch, targetDir, true))
+	require.NoError(t, workspace.ApplyPatch(testEnv(), patch, targetDir, true))
 
 	content, _ := os.ReadFile(filepath.Join(targetDir, "file.txt")) //nolint:gosec
 	assert.Equal(t, "wip changes\n", string(content))
@@ -1426,7 +1426,7 @@ func TestApplyFlow_NonGitFallback(t *testing.T) {
 	require.NoError(t, os.MkdirAll(targetDir, 0750))
 	writeTestFile(t, targetDir, "file.txt", "original content\n")
 
-	require.NoError(t, workspace.ApplyPatch(patch, targetDir, false))
+	require.NoError(t, workspace.ApplyPatch(testEnv(), patch, targetDir, false))
 
 	// Verify the feature file was created
 	assert.FileExists(t, filepath.Join(targetDir, "feature.txt"))

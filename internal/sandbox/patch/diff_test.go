@@ -74,7 +74,7 @@ func createRWSandbox(t *testing.T, tmpDir, name, hostPath string) {
 
 func gitHEAD(t *testing.T, dir string) string {
 	t.Helper()
-	sha, err := workspace.HeadSHA(dir)
+	sha, err := workspace.HeadSHAWithEnv(testEnv(), dir)
 	require.NoError(t, err)
 	return sha
 }

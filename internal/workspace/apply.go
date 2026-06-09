@@ -28,9 +28,9 @@ type PatchSet struct {
 
 // CheckPatch verifies the patch applies cleanly to the target directory
 // via `git apply --check`. Returns nil if clean, error with context if not.
-func CheckPatch(patch []byte, targetDir string, isGit bool) error {
+func CheckPatch(env []string, patch []byte, targetDir string, isGit bool) error {
 	if isGit {
-		if err := runGitApply(targetDir, patch, "--check"); err != nil {
+		if err := runGitApply(env, targetDir, patch, "--check"); err != nil {
 			return formatApplyError(err, targetDir)
 		}
 		return nil
@@ -45,8 +45,8 @@ func CheckPatch(patch []byte, targetDir string, isGit bool) error {
 
 	// --unsafe-paths invariant: see ApplyPatch. Patches must originate from
 	// our own git diff of the target tree, never an external raw patch.
-	return withTempGitDir(func(tmpDir string) error {
-		if err := runGitApply(tmpDir, patch, "--check", "--unsafe-paths", "--directory="+realTarget); err != nil {
+	return withTempGitDir(env, func(tmpDir string) error {
+		if err := runGitApply(env, tmpDir, patch, "--check", "--unsafe-paths", "--directory="+realTarget); err != nil {
 			return formatApplyError(err, targetDir)
 		}
 		return nil
@@ -57,9 +57,9 @@ func CheckPatch(patch []byte, targetDir string, isGit bool) error {
 // For git repos: runs `git apply` from within the repo.
 // For non-git dirs: runs `git apply --unsafe-paths --directory=<path>`
 // from a temporary git-initialized directory.
-func ApplyPatch(patch []byte, targetDir string, isGit bool) error {
+func ApplyPatch(env []string, patch []byte, targetDir string, isGit bool) error {
 	if isGit {
-		if err := runGitApply(targetDir, patch); err != nil {
+		if err := runGitApply(env, targetDir, patch); err != nil {
 			return formatApplyError(err, targetDir)
 		}
 		return nil
@@ -81,8 +81,8 @@ func ApplyPatch(patch []byte, targetDir string, isGit bool) error {
 	// Do not route externally-sourced patches through this path without
 	// adding containment. git's separate "beyond a symbolic link" check
 	// still fires and blocks the create-symlink-then-write-through escape.
-	return withTempGitDir(func(tmpDir string) error {
-		if err := runGitApply(tmpDir, patch, "--unsafe-paths", "--directory="+realTarget); err != nil {
+	return withTempGitDir(env, func(tmpDir string) error {
+		if err := runGitApply(env, tmpDir, patch, "--unsafe-paths", "--directory="+realTarget); err != nil {
 			return formatApplyError(err, targetDir)
 		}
 		return nil
@@ -107,12 +107,12 @@ func extractSandboxSHAs(patchDir string, files []string) ([]string, error) {
 }
 
 // buildSHAMap pairs sandbox SHAs with the host SHAs created after applying patches.
-func buildSHAMap(targetDir, preTip string, sandboxSHAs []string) map[string]string {
+func buildSHAMap(env []string, targetDir, preTip string, sandboxSHAs []string) map[string]string {
 	logArgs := []string{"log", "--reverse", "--format=%H"}
 	if preTip != "" {
 		logArgs = append(logArgs, preTip+"..HEAD")
 	}
-	logOut, logErr := NewGitCmd(targetDir, logArgs...).Output()
+	logOut, logErr := NewGitCmdWithEnv(env, targetDir, logArgs...).Output()
 	if logErr != nil {
 		return nil
 	}
@@ -126,7 +126,7 @@ func buildSHAMap(targetDir, preTip string, sandboxSHAs []string) map[string]stri
 	return shaMap
 }
 
-func ApplyFormatPatch(patchDir string, files []string, targetDir string) (map[string]string, error) {
+func ApplyFormatPatch(env []string, patchDir string, files []string, targetDir string) (map[string]string, error) {
 	if len(files) == 0 {
 		return nil, nil
 	}
@@ -134,11 +134,11 @@ func ApplyFormatPatch(patchDir string, files []string, targetDir string) (map[st
 	// Record HEAD before applying so we can identify new commits afterward.
 	// Empty repos have no HEAD yet; preTip="" is handled below when building
 	// the git log range after git am completes.
-	preTip, err := HeadSHA(targetDir)
+	preTip, err := HeadSHAWithEnv(env, targetDir)
 	if err != nil {
 		// Only tolerate the empty-repo case (no commits → exit 128).
 		// Any other failure means the repo is in an unexpected state.
-		if !IsEmptyRepo(targetDir) {
+		if !IsEmptyRepo(env, targetDir) {
 			return nil, err
 		}
 		preTip = ""
@@ -161,21 +161,21 @@ func ApplyFormatPatch(patchDir string, files []string, targetDir string) (map[st
 	// manage the stash manually so any git version works.
 	var stashed bool
 	if preTip != "" {
-		stashed, err = stashIfDirty(targetDir)
+		stashed, err = stashIfDirty(env, targetDir)
 		if err != nil {
 			return nil, fmt.Errorf("stash uncommitted changes: %w", err)
 		}
 	}
 
 	args := append([]string{"am", "--3way"}, fullPaths...)
-	cmd := NewGitCmd(targetDir, args...)
+	cmd := NewGitCmdWithEnv(env, targetDir, args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		// am failed — abort cleanly, then restore the stash so the user
 		// is back to their original state and can retry.
-		_ = RunGitCmd(targetDir, "am", "--abort")
+		_ = RunGitCmdWithEnv(env, targetDir, "am", "--abort")
 		if stashed {
-			_ = RunGitCmd(targetDir, "stash", "pop")
+			_ = RunGitCmdWithEnv(env, targetDir, "stash", "pop")
 		}
 		return nil, formatAMError(output, targetDir)
 	}
@@ -183,10 +183,10 @@ func ApplyFormatPatch(patchDir string, files []string, targetDir string) (map[st
 	// Pair positionally: sandboxSHA[i] → hostSHA[i].
 	// shaMap is nil only when log fails (best-effort); in all other cases it is
 	// non-nil so callers can distinguish "am succeeded" from "am failed".
-	shaMap := buildSHAMap(targetDir, preTip, sandboxSHAs)
+	shaMap := buildSHAMap(env, targetDir, preTip, sandboxSHAs)
 
 	if stashed {
-		if err := RunGitCmd(targetDir, "stash", "pop"); err != nil {
+		if err := RunGitCmdWithEnv(env, targetDir, "stash", "pop"); err != nil {
 			// Commits were applied successfully; return shaMap so callers can
 			// advance the baseline before surfacing the stash conflict to the user.
 			return shaMap, fmt.Errorf("restore stashed changes after apply: %w (your commits were applied; run 'git stash pop' in %s to restore pre-session changes)", err, targetDir)
@@ -242,14 +242,14 @@ func ContiguousPrefixEnd(allCommits []CommitInfo, appliedSHAs map[string]bool) i
 
 // withTempGitDir creates a temporary git-initialized directory, calls fn
 // with its path, and cleans up afterward.
-func withTempGitDir(fn func(tmpDir string) error) error {
+func withTempGitDir(env []string, fn func(tmpDir string) error) error {
 	tmpDir, err := os.MkdirTemp("", "yoloai-apply-*")
 	if err != nil {
 		return fmt.Errorf("create temp dir: %w", err)
 	}
 	defer os.RemoveAll(tmpDir) //nolint:errcheck // best-effort cleanup
 
-	if err := RunGitCmd(tmpDir, "init"); err != nil {
+	if err := RunGitCmdWithEnv(env, tmpDir, "init"); err != nil {
 		return fmt.Errorf("git init temp dir: %w", err)
 	}
 
@@ -258,9 +258,9 @@ func withTempGitDir(fn func(tmpDir string) error) error {
 
 // runGitApply executes `git apply` with the given args, feeding the
 // patch via stdin. Returns the combined output on error.
-func runGitApply(dir string, patch []byte, args ...string) error {
+func runGitApply(env []string, dir string, patch []byte, args ...string) error {
 	applyArgs := append([]string{"apply"}, args...)
-	cmd := NewGitCmd(dir, applyArgs...)
+	cmd := NewGitCmdWithEnv(env, dir, applyArgs...)
 	cmd.Stdin = bytes.NewReader(patch)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -304,15 +304,15 @@ func formatApplyError(gitErr error, targetDir string) error {
 
 // stashIfDirty runs `git stash push --include-untracked` if the working tree
 // has uncommitted changes. Returns true if a stash was created.
-func stashIfDirty(dir string) (bool, error) {
-	out, err := NewGitCmd(dir, "status", "--porcelain").Output()
+func stashIfDirty(env []string, dir string) (bool, error) {
+	out, err := NewGitCmdWithEnv(env, dir, "status", "--porcelain").Output()
 	if err != nil {
 		return false, fmt.Errorf("git status: %w", err)
 	}
 	if len(strings.TrimSpace(string(out))) == 0 {
 		return false, nil
 	}
-	cmd := NewGitCmd(dir, "stash", "push", "--include-untracked", "--message", "yoloai pre-apply")
+	cmd := NewGitCmdWithEnv(env, dir, "stash", "push", "--include-untracked", "--message", "yoloai pre-apply")
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return false, fmt.Errorf("%s: %w", strings.TrimSpace(string(output)), err)
 	}

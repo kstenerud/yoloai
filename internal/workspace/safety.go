@@ -5,7 +5,6 @@ package workspace
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -87,13 +86,14 @@ func pathsOverlap(a, b string) bool {
 // CheckDirtyRepo checks if the given path is a git repository with
 // uncommitted changes. Returns a human-readable warning string if
 // dirty, empty string if clean or not a git repo.
-func CheckDirtyRepo(path string) (string, error) {
+// env must be an explicit subprocess env derived from the caller's layout (DEV §12).
+func CheckDirtyRepo(env []string, path string) (string, error) {
 	gitDir := filepath.Join(path, ".git")
 	if _, err := os.Stat(gitDir); err != nil {
 		return "", nil //nolint:nilerr // not a git repo; absence of .git is not an error
 	}
 
-	cmd := exec.Command("git", "-C", path, "status", "--porcelain") //nolint:gosec // G204: args are not user-controlled
+	cmd := NewGitCmdWithEnv(env, path, "status", "--porcelain")
 	output, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("git status in %q: %w", path, err)

@@ -1,5 +1,5 @@
-// ABOUTME: NewGitCmd, HeadSHA, IsEmptyRepo, RunGitCmd — low-level git wrappers
-// ABOUTME: with hooks disabled, shared by copy/diff/apply operations in workspace/.
+// ABOUTME: NewGitCmdWithEnv, HeadSHAWithEnv, IsEmptyRepo, RunGitCmdWithEnv — low-level
+// ABOUTME: git wrappers with explicit env, shared by copy/diff/apply operations in workspace/.
 package workspace
 
 import (
@@ -10,18 +10,20 @@ import (
 	"time"
 
 	"github.com/kstenerud/yoloai/internal/fileutil"
+	"github.com/kstenerud/yoloai/internal/sysexec"
 )
 
-// NewGitCmd builds an exec.Cmd for git with hooks disabled.
-// All internal git operations use this to prevent copied hooks from firing.
-func NewGitCmd(dir string, args ...string) *exec.Cmd {
+// NewGitCmdWithEnv builds an exec.Cmd for git with an explicit environment
+// and hooks disabled. Callers must supply a layout-derived env (DEV §12).
+func NewGitCmdWithEnv(env []string, dir string, args ...string) *exec.Cmd {
 	fullArgs := append([]string{"-c", "core.hooksPath=/dev/null", "-C", dir}, args...)
-	return exec.Command("git", fullArgs...) //nolint:gosec // G204: dir is sandbox-controlled path
+	return sysexec.Command(env, "git", fullArgs...)
 }
 
-// HeadSHA returns the HEAD commit SHA for the given git repo.
-func HeadSHA(dir string) (string, error) {
-	cmd := NewGitCmd(dir, "rev-parse", "HEAD")
+// HeadSHAWithEnv returns the HEAD commit SHA for the given git repo using
+// an explicit subprocess env (DEV §12).
+func HeadSHAWithEnv(env []string, dir string) (string, error) {
+	cmd := NewGitCmdWithEnv(env, dir, "rev-parse", "HEAD")
 	output, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("git rev-parse HEAD: %w", err)
@@ -30,23 +32,25 @@ func HeadSHA(dir string) (string, error) {
 }
 
 // IsEmptyRepo reports whether dir is a git repository with no commits yet.
-func IsEmptyRepo(dir string) bool {
-	cmd := NewGitCmd(dir, "rev-parse", "--verify", "HEAD")
+func IsEmptyRepo(env []string, dir string) bool {
+	cmd := NewGitCmdWithEnv(env, dir, "rev-parse", "--verify", "HEAD")
 	return cmd.Run() != nil
 }
 
-// RunGitCmd executes a git command in the given directory.
-func RunGitCmd(dir string, args ...string) error {
-	cmd := NewGitCmd(dir, args...)
+// RunGitCmdWithEnv executes a git command in the given directory with an
+// explicit subprocess env (DEV §12).
+func RunGitCmdWithEnv(env []string, dir string, args ...string) error {
+	cmd := NewGitCmdWithEnv(env, dir, args...)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git %s: %s: %w", args[0], strings.TrimSpace(string(output)), err)
 	}
 	return nil
 }
 
-// Baseline creates a fresh git baseline for the work copy.
+// BaselineWithEnv creates a fresh git baseline for the work copy using an
+// explicit subprocess env (DEV §12).
 // Assumes all .git entries have already been removed by RemoveGitDirs.
-func Baseline(workDir string) (string, error) {
+func BaselineWithEnv(env []string, workDir string) (string, error) {
 	cmds := [][]string{
 		{"init"},
 		{"config", "user.email", "yoloai@localhost"},
@@ -55,15 +59,14 @@ func Baseline(workDir string) (string, error) {
 		{"commit", "-m", "yoloai baseline", "--allow-empty"},
 	}
 	for _, args := range cmds {
-		if err := RunGitCmd(workDir, args...); err != nil {
+		if err := RunGitCmdWithEnv(env, workDir, args...); err != nil {
 			return "", err
 		}
 	}
 	if err := chownGitDir(workDir); err != nil {
 		return "", err
 	}
-
-	return HeadSHA(workDir)
+	return HeadSHAWithEnv(env, workDir)
 }
 
 // chownGitDir hands the .git tree back to the invoking user when yoloai runs
@@ -77,20 +80,17 @@ func chownGitDir(workDir string) error {
 	return nil
 }
 
-// BaselineUncommittedChanges commits any pre-existing uncommitted changes in
-// workDir as "yoloai: pre-session state", returning the resulting HEAD SHA.
-// If the working tree is already clean, it returns the current HEAD unchanged.
-// This ensures agent diffs only reflect what the agent changed, not changes
-// the user had before the session started.
-func BaselineUncommittedChanges(workDir string) (string, error) {
-	out, err := NewGitCmd(workDir, "status", "--porcelain").Output()
+// BaselineUncommittedChangesWithEnv commits any pre-existing uncommitted changes
+// in workDir as "yoloai: pre-session state", using an explicit subprocess env (DEV §12).
+func BaselineUncommittedChangesWithEnv(env []string, workDir string) (string, error) {
+	out, err := NewGitCmdWithEnv(env, workDir, "status", "--porcelain").Output()
 	if err != nil || len(strings.TrimSpace(string(out))) == 0 {
-		return HeadSHA(workDir)
+		return HeadSHAWithEnv(env, workDir)
 	}
-	if err := RunGitCmd(workDir, "add", "-A"); err != nil {
+	if err := RunGitCmdWithEnv(env, workDir, "add", "-A"); err != nil {
 		return "", fmt.Errorf("stage pre-session changes: %w", err)
 	}
-	if err := RunGitCmd(workDir,
+	if err := RunGitCmdWithEnv(env, workDir,
 		"-c", "user.email=yoloai@localhost",
 		"-c", "user.name=yoloai",
 		"commit", "-m", "yoloai: pre-session state",
@@ -100,7 +100,7 @@ func BaselineUncommittedChanges(workDir string) (string, error) {
 	if err := chownGitDir(workDir); err != nil {
 		return "", err
 	}
-	return HeadSHA(workDir)
+	return HeadSHAWithEnv(env, workDir)
 }
 
 // IsIndexLocked reports whether err is a git index.lock contention error.
@@ -112,13 +112,13 @@ func IsIndexLocked(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "index.lock")
 }
 
-// StageUntracked runs `git add -A` in the work directory to capture
-// files created by the agent that are not yet tracked. Retries on
-// index.lock contention (transient when the agent is active).
-func StageUntracked(workDir string) error {
+// StageUntrackedWithEnv runs `git add -A` in the work directory to capture
+// files created by the agent that are not yet tracked, using an explicit
+// subprocess env (DEV §12). Retries on index.lock contention.
+func StageUntrackedWithEnv(env []string, workDir string) error {
 	var err error
 	for range 5 {
-		err = RunGitCmd(workDir, "add", "-A")
+		err = RunGitCmdWithEnv(env, workDir, "add", "-A")
 		if err == nil || !IsIndexLocked(err) {
 			return err
 		}

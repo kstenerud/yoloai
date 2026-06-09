@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os/exec"
 	"runtime"
 	"strings"
 
@@ -147,13 +146,12 @@ func (r *Runtime) buildDockerImage(ctx context.Context, output io.Writer, logger
 	fmt.Fprintln(output, "Building yoloai-base image with Docker (this may take a few minutes)...") //nolint:errcheck // best-effort output
 	logger.Info("building yoloai-base image")
 
-	buildCmd := exec.CommandContext(ctx, dockerBin, "build", "-t", imageRef, "-f", "Dockerfile", "-") //nolint:gosec // G204: args are constants
 	// Curated build env from the threaded snapshot (§12 — never os.Environ).
 	// CuratedBuildEnv also forces BuildKit on: the legacy builder commits one
 	// dangling intermediate image per Dockerfile step on the containerd image
 	// store, which makes `system prune` churn forever (see
 	// backend-idiosyncrasies.md).
-	buildCmd.Env = dockerrt.CuratedBuildEnv(r.layout.Env)
+	buildCmd := sysexec.CommandContext(ctx, dockerrt.CuratedBuildEnv(r.layout.Env), dockerBin, "build", "-t", imageRef, "-f", "Dockerfile", "-")
 	buildCmd.Stdout = output
 	buildCmd.Stderr = output
 	buildCmd.Stdin = buildCtx

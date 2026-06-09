@@ -46,7 +46,7 @@ func TestPrepareAgentCommandFor(t *testing.T) {
 }
 
 func TestGitExecFor_DispatchesToGitExecer(t *testing.T) {
-	out, err := GitExecFor(context.Background(), gitRuntime{}, "box", "/w", "status")
+	out, err := GitExecFor(context.Background(), []string{}, gitRuntime{}, "box", "/w", "status")
 	require.NoError(t, err)
 	assert.Equal(t, "dispatched", out,
 		"a GitExecer backend (e.g. Tart) is dispatched to instead of host git")

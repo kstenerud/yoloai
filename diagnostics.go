@@ -6,12 +6,12 @@ package yoloai
 import (
 	"context"
 	"os"
-	"os/exec"
 	goruntime "runtime"
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime"
+	"github.com/kstenerud/yoloai/internal/sysexec"
 )
 
 // Diagnostics is a structured, point-in-time snapshot of the host and yoloai
@@ -96,7 +96,8 @@ func (s *System) systemDiagnostics() SystemDiagnostics {
 		DiskUsageBytes: -1,
 	}
 
-	if out, err := exec.Command("uname", "-a").Output(); err == nil {
+	unameEnv := sysexec.Curated(s.layout.Env, []string{"PATH", "HOME"}, nil)
+	if out, err := sysexec.Command(unameEnv, "uname", "-a").Output(); err == nil {
 		sys.Kernel = strings.TrimSpace(string(out))
 	}
 

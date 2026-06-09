@@ -177,7 +177,7 @@ func TestCheckPatch_CleanApply(t *testing.T) {
 
 	patch := generatePatch(t, dir, "file.txt", "old content\n", "new content\n")
 
-	err := CheckPatch(patch, dir, true)
+	err := CheckPatch(testEnv(), patch, dir, true)
 	assert.NoError(t, err)
 }
 
@@ -192,7 +192,7 @@ func TestCheckPatch_Conflict(t *testing.T) {
 	gitAdd(t, dir, "file.txt")
 	gitCommit(t, dir, "diverge")
 
-	err := CheckPatch(patch, dir, true)
+	err := CheckPatch(testEnv(), patch, dir, true)
 	assert.Error(t, err)
 }
 
@@ -206,7 +206,7 @@ func TestCheckPatch_NonGitDir(t *testing.T) {
 	targetDir := t.TempDir()
 	writeTestFile(t, targetDir, "file.txt", "old content\n")
 
-	err := CheckPatch(patch, targetDir, false)
+	err := CheckPatch(testEnv(), patch, targetDir, false)
 	assert.NoError(t, err)
 }
 
@@ -218,7 +218,7 @@ func TestApplyPatch_ApplyInGitRepo(t *testing.T) {
 
 	patch := generatePatch(t, dir, "file.txt", "old content\n", "new content\n")
 
-	err := ApplyPatch(patch, dir, true)
+	err := ApplyPatch(testEnv(), patch, dir, true)
 	require.NoError(t, err)
 
 	content, err := os.ReadFile(filepath.Join(dir, "file.txt")) //nolint:gosec // G304: test file path
@@ -236,7 +236,7 @@ func TestApplyPatch_NonGitDir(t *testing.T) {
 	targetDir := t.TempDir()
 	writeTestFile(t, targetDir, "file.txt", "old content\n")
 
-	err := ApplyPatch(patch, targetDir, false)
+	err := ApplyPatch(testEnv(), patch, targetDir, false)
 	require.NoError(t, err)
 
 	content, err := os.ReadFile(filepath.Join(targetDir, "file.txt")) //nolint:gosec // G304: test file path
@@ -255,14 +255,14 @@ func TestApplyPatch_ConflictReturnsError(t *testing.T) {
 	gitAdd(t, dir, "file.txt")
 	gitCommit(t, dir, "diverge")
 
-	err := ApplyPatch(patch, dir, true)
+	err := ApplyPatch(testEnv(), patch, dir, true)
 	assert.Error(t, err)
 }
 
 // --- ApplyFormatPatch ---
 
 func TestApplyFormatPatch_EmptyFilesList(t *testing.T) {
-	_, err := ApplyFormatPatch("/nonexistent", nil, "/nonexistent")
+	_, err := ApplyFormatPatch(testEnv(), "/nonexistent", nil, "/nonexistent")
 	assert.NoError(t, err)
 }
 
@@ -291,7 +291,7 @@ func TestApplyFormatPatch_EmptyTargetRepo(t *testing.T) {
 	targetDir := t.TempDir()
 	initGitRepo(t, targetDir)
 
-	shaMap, err := ApplyFormatPatch(patchDir, relFiles, targetDir)
+	shaMap, err := ApplyFormatPatch(testEnv(), patchDir, relFiles, targetDir)
 	require.NoError(t, err)
 	assert.Len(t, shaMap, 1, "should have one SHA mapping")
 
@@ -304,7 +304,7 @@ func TestApplyFormatPatch_EmptyTargetRepo(t *testing.T) {
 
 func TestWithTempGitDir_CallsFn(t *testing.T) {
 	var calledWith string
-	err := withTempGitDir(func(tmpDir string) error {
+	err := withTempGitDir(testEnv(), func(tmpDir string) error {
 		calledWith = tmpDir
 		// The temp dir should be a valid git repo
 		assert.True(t, IsGitRepo(tmpDir))
@@ -316,7 +316,7 @@ func TestWithTempGitDir_CallsFn(t *testing.T) {
 
 func TestWithTempGitDir_PropagatesError(t *testing.T) {
 	sentinel := fmt.Errorf("test sentinel error")
-	err := withTempGitDir(func(tmpDir string) error {
+	err := withTempGitDir(testEnv(), func(tmpDir string) error {
 		return sentinel
 	})
 	assert.ErrorIs(t, err, sentinel)
@@ -324,7 +324,7 @@ func TestWithTempGitDir_PropagatesError(t *testing.T) {
 
 func TestWithTempGitDir_CleansUp(t *testing.T) {
 	var capturedDir string
-	err := withTempGitDir(func(tmpDir string) error {
+	err := withTempGitDir(testEnv(), func(tmpDir string) error {
 		capturedDir = tmpDir
 		// Verify the dir exists while inside the callback
 		_, statErr := os.Stat(tmpDir)
@@ -347,7 +347,7 @@ func TestRunGitApply_ValidPatch(t *testing.T) {
 
 	patch := generatePatch(t, dir, "file.txt", "old content\n", "new content\n")
 
-	err := runGitApply(dir, patch)
+	err := runGitApply(testEnv(), dir, patch)
 	assert.NoError(t, err)
 
 	// Verify the file was changed
@@ -363,6 +363,6 @@ func TestRunGitApply_InvalidPatch(t *testing.T) {
 	gitAdd(t, dir, "dummy.txt")
 	gitCommit(t, dir, "initial")
 
-	err := runGitApply(dir, []byte("this is not a valid patch"))
+	err := runGitApply(testEnv(), dir, []byte("this is not a valid patch"))
 	assert.Error(t, err)
 }

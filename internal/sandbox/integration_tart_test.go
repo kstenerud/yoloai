@@ -157,7 +157,7 @@ func TestIntegrationTart_FullLifecycle(t *testing.T) {
 		0600,
 	))
 
-	require.NoError(t, workspace.ApplyPatch(patchBytes, targetDir, false))
+	require.NoError(t, workspace.ApplyPatch(os.Environ(), patchBytes, targetDir, false))
 
 	applied, err := os.ReadFile(filepath.Join(targetDir, "main.go")) //nolint:gosec // G304: test file path
 	require.NoError(t, err)

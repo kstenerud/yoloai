@@ -28,6 +28,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/sandbox/runtimeconfig"
 	"github.com/kstenerud/yoloai/internal/sandbox/state"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/internal/sysexec"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
 
@@ -173,7 +174,7 @@ func Run(ctx context.Context, d state.Deps, opts Options) (name string, err erro
 // (uncommitted changes or commits beyond the baseline). Returns an error if
 // work would be lost, or if a present-but-unreadable environment.json means
 // unapplied work cannot be ruled out (callers bypass with --abandon-unapplied).
-func checkUnappliedWork(ctx context.Context, rt runtime.Runtime, name string, sandboxDir string) error {
+func checkUnappliedWork(ctx context.Context, gitEnv []string, rt runtime.Runtime, name string, sandboxDir string) error {
 	meta, err := store.LoadEnvironment(sandboxDir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -184,7 +185,7 @@ func checkUnappliedWork(ctx context.Context, rt runtime.Runtime, name string, sa
 
 	if meta.Workdir.Mode == "copy" || meta.Workdir.Mode == "overlay" {
 		workDir := store.WorkDir(sandboxDir, meta.Workdir.HostPath)
-		if err := unappliedWorkError(ctx, rt, name, workDir, meta.Workdir.BaselineSHA, ""); err != nil {
+		if err := unappliedWorkError(ctx, gitEnv, rt, name, workDir, meta.Workdir.BaselineSHA, ""); err != nil {
 			return err
 		}
 	}
@@ -192,7 +193,7 @@ func checkUnappliedWork(ctx context.Context, rt runtime.Runtime, name string, sa
 	for _, d := range meta.Directories {
 		if d.Mode == "copy" || d.Mode == "overlay" {
 			auxWorkDir := store.WorkDir(sandboxDir, d.HostPath)
-			if err := unappliedWorkError(ctx, rt, name, auxWorkDir, d.BaselineSHA, d.HostPath); err != nil {
+			if err := unappliedWorkError(ctx, gitEnv, rt, name, auxWorkDir, d.BaselineSHA, d.HostPath); err != nil {
 				return err
 			}
 		}
@@ -205,12 +206,12 @@ func checkUnappliedWork(ctx context.Context, rt runtime.Runtime, name string, sa
 // the aux directory's host path for the message ("" for the primary workdir). A
 // WorkUnknown result (a VM-local backend that is not running) fails safe: it
 // cannot be ruled out, so it blocks replace just like confirmed changes.
-func unappliedWorkError(ctx context.Context, rt runtime.Runtime, name, workDir, baselineSHA, inDir string) error {
+func unappliedWorkError(ctx context.Context, gitEnv []string, rt runtime.Runtime, name, workDir, baselineSHA, inDir string) error {
 	loc := ""
 	if inDir != "" {
 		loc = " in " + inDir
 	}
-	switch patch.HasUnappliedWorkVia(ctx, rt, name, workDir, baselineSHA) {
+	switch patch.HasUnappliedWorkVia(ctx, gitEnv, rt, name, workDir, baselineSHA) {
 	case patch.WorkDirty:
 		return fmt.Errorf("sandbox %q has unapplied changes%s (use --abandon-unapplied to replace anyway, or 'yoloai apply' first)", name, loc)
 	case patch.WorkUnknown:
@@ -505,7 +506,8 @@ func replaceSandboxIfNeeded(ctx context.Context, d state.Deps, opts Options, san
 		return nil // nothing to replace
 	}
 	if !opts.AbandonUnappliedWork {
-		if err := checkUnappliedWork(ctx, d.Runtime, opts.Name, sandboxDir); err != nil {
+		gitEnv := sysexec.Curated(d.Layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+		if err := checkUnappliedWork(ctx, gitEnv, d.Runtime, opts.Name, sandboxDir); err != nil {
 			return err
 		}
 	}
@@ -545,7 +547,8 @@ func createSandboxDirs(sandboxDir string, perms state.IsolationPerms) error {
 func setupAllWorkdirs(d state.Deps, opts Options, workdir *DirSpec, auxDirs []*DirSpec, resolvedArchetype archetype.Archetype, devcontainerCfg *archetype.DevcontainerConfig) (string, string, []store.DirEnvironment, error) {
 	slog.Debug("setting up workdir", "event", "sandbox.create.workdir", "mode", string(workdir.Mode))
 	sandboxDir := d.Layout.SandboxDir(opts.Name)
-	workCopyDir, baselineSHA, err := setupWorkdir(sandboxDir, workdir, d.Runtime)
+	gitEnv := sysexec.Curated(d.Layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+	workCopyDir, baselineSHA, err := setupWorkdir(gitEnv, sandboxDir, workdir, d.Runtime)
 	if err != nil {
 		return "", "", nil, err
 	}

@@ -21,6 +21,7 @@ import (
 	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/buildinfo"
 	"github.com/kstenerud/yoloai/internal/fileutil"
+	"github.com/kstenerud/yoloai/internal/sysexec"
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
@@ -470,11 +471,13 @@ func writeBugReportTerminalSnapshot(ctx context.Context, w io.Writer, c *yoloai.
 // Only included in unsafe reports. Silently omitted if sandbox is not running.
 func writeBugReportTmuxCapture(w io.Writer, sb *yoloai.Sandbox) {
 	tmuxSock := readTmuxSocketFromConfig(sb)
+	// PATH+HOME suffice — the socket is passed explicitly via -S.
+	tmuxEnv := sysexec.Curated(cliutil.Layout().Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
 	var cmd *exec.Cmd
 	if tmuxSock != "" {
-		cmd = exec.Command("tmux", "-S", tmuxSock, "capture-pane", "-p", "-t", "main") //nolint:gosec // G204: tmuxSock is read from a yoloAI-owned config and validated as a path
+		cmd = sysexec.Command(tmuxEnv, "tmux", "-S", tmuxSock, "capture-pane", "-p", "-t", "main")
 	} else {
-		cmd = exec.Command("tmux", "capture-pane", "-p", "-t", "main")
+		cmd = sysexec.Command(tmuxEnv, "tmux", "capture-pane", "-p", "-t", "main")
 	}
 
 	out, err := cmd.Output()

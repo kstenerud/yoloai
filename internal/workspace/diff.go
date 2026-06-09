@@ -11,8 +11,8 @@ import (
 // a baseline SHA. Stages untracked files first, then runs git diff.
 //
 // Returns the diff text (empty string if there are no changes).
-func CopyDiff(workDir, baselineSHA string, paths []string, stat, nameOnly bool) (string, error) {
-	if err := StageUntracked(workDir); err != nil {
+func CopyDiff(env []string, workDir, baselineSHA string, paths []string, stat, nameOnly bool) (string, error) {
+	if err := StageUntrackedWithEnv(env, workDir); err != nil {
 		return "", err
 	}
 
@@ -31,7 +31,7 @@ func CopyDiff(workDir, baselineSHA string, paths []string, stat, nameOnly bool) 
 		args = append(args, paths...)
 	}
 
-	cmd := NewGitCmd(workDir, args...)
+	cmd := NewGitCmdWithEnv(env, workDir, args...)
 	output, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("git diff: %w", err)
@@ -44,7 +44,7 @@ func CopyDiff(workDir, baselineSHA string, paths []string, stat, nameOnly bool) 
 // string (no error) when the directory isn't a git repo — :rw can
 // point at a non-git tree and the caller should treat "no diff
 // available" the same as "no changes" for display purposes.
-func RWDiff(workDir string, paths []string, stat, nameOnly bool) (string, error) {
+func RWDiff(env []string, workDir string, paths []string, stat, nameOnly bool) (string, error) {
 	if !IsGitRepo(workDir) {
 		return "", nil
 	}
@@ -62,7 +62,7 @@ func RWDiff(workDir string, paths []string, stat, nameOnly bool) (string, error)
 		args = append(args, paths...)
 	}
 
-	cmd := NewGitCmd(workDir, args...)
+	cmd := NewGitCmdWithEnv(env, workDir, args...)
 	output, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("git diff: %w", err)
