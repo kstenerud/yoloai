@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -21,6 +20,7 @@ import (
 	specs "github.com/opencontainers/runtime-spec/specs-go"
 
 	"github.com/kstenerud/yoloai/internal/fileutil"
+	"github.com/kstenerud/yoloai/internal/sysexec"
 )
 
 // captureNetworkDiagnostics is called when waitForNetworkReady
@@ -70,28 +70,28 @@ func captureNetworkDiagnostics(ctx context.Context, r *Runtime, name string, tas
 		buf.WriteString("\n")
 	}
 
-	appendHostCmd(ctx, &buf, "ip netns list", "ip", "netns", "list")
-	appendHostCmd(ctx, &buf, "host-side ip addr (yoloai bridge interfaces)",
+	appendHostCmd(ctx, r.execEnv, &buf, "ip netns list", "ip", "netns", "list")
+	appendHostCmd(ctx, r.execEnv, &buf, "host-side ip addr (yoloai bridge interfaces)",
 		"sh", "-c", "ip addr show | grep -A2 -E 'yoloai0|veth' | head -60")
-	appendHostCmd(ctx, &buf, "bridge link",
+	appendHostCmd(ctx, r.execEnv, &buf, "bridge link",
 		"bridge", "link", "show")
-	appendHostCmd(ctx, &buf, "bridge fdb show br yoloai0",
+	appendHostCmd(ctx, r.execEnv, &buf, "bridge fdb show br yoloai0",
 		"bridge", "fdb", "show", "br", "yoloai0")
-	appendHostCmd(ctx, &buf, "ip netns exec "+netnsName+" ip addr",
+	appendHostCmd(ctx, r.execEnv, &buf, "ip netns exec "+netnsName+" ip addr",
 		"ip", "netns", "exec", netnsName, "ip", "addr")
-	appendHostCmd(ctx, &buf, "ip netns exec "+netnsName+" ip route",
+	appendHostCmd(ctx, r.execEnv, &buf, "ip netns exec "+netnsName+" ip route",
 		"ip", "netns", "exec", netnsName, "ip", "route")
-	appendHostCmd(ctx, &buf, "ip netns exec "+netnsName+" ip neighbor",
+	appendHostCmd(ctx, r.execEnv, &buf, "ip netns exec "+netnsName+" ip neighbor",
 		"ip", "netns", "exec", netnsName, "ip", "neighbor")
-	appendHostCmd(ctx, &buf, "ip netns exec "+netnsName+" bridge link",
+	appendHostCmd(ctx, r.execEnv, &buf, "ip netns exec "+netnsName+" bridge link",
 		"ip", "netns", "exec", netnsName, "bridge", "link")
-	appendHostCmd(ctx, &buf, "iptables -t nat -S POSTROUTING",
+	appendHostCmd(ctx, r.execEnv, &buf, "iptables -t nat -S POSTROUTING",
 		"iptables", "-t", "nat", "-S", "POSTROUTING")
-	appendHostCmd(ctx, &buf, "iptables -t filter -L CNI-FORWARD -n -v",
+	appendHostCmd(ctx, r.execEnv, &buf, "iptables -t filter -L CNI-FORWARD -n -v",
 		"iptables", "-t", "filter", "-L", "CNI-FORWARD", "-n", "-v")
-	appendHostCmd(ctx, &buf, "iptables -t filter -L FORWARD -n -v",
+	appendHostCmd(ctx, r.execEnv, &buf, "iptables -t filter -L FORWARD -n -v",
 		"iptables", "-t", "filter", "-L", "FORWARD", "-n", "-v")
-	appendHostCmd(ctx, &buf, "ls -la /run/cni/networks/yoloai/ (IPAM leases)",
+	appendHostCmd(ctx, r.execEnv, &buf, "ls -la /run/cni/networks/yoloai/ (IPAM leases)",
 		"ls", "-la", "/run/cni/networks/yoloai/")
 
 	outPath := filepath.Join(sandboxDir, "network-diag.txt")
@@ -198,11 +198,12 @@ func runDiagExec(ctx context.Context, task client.Task, label, script string, ti
 // timeout and writes its output to buf under the given label. Errors
 // are recorded in the buffer; this function never blocks the whole
 // diag capture if one command hangs.
-func appendHostCmd(ctx context.Context, buf *bytes.Buffer, label string, args ...string) {
+// env is the explicit subprocess env (DEV §12); pass r.execEnv.
+func appendHostCmd(ctx context.Context, env []string, buf *bytes.Buffer, label string, args ...string) {
 	fmt.Fprintf(buf, "\n== %s ==\n", label)
 	cmdCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(cmdCtx, args[0], args[1:]...) //nolint:gosec // G204: arg list is hard-coded; netnsName comes from container name (validated)
+	cmd := sysexec.CommandContext(cmdCtx, env, args[0], args[1:]...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		fmt.Fprintf(buf, "ERROR: %v\n", err)

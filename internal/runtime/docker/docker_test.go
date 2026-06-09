@@ -110,18 +110,19 @@ func TestRequiredCapabilities_Docker_NonEnhanced(t *testing.T) {
 }
 
 func buildDockerTestRuntime(binaryName string) *Runtime {
-	r := &Runtime{binaryName: binaryName}
+	testEnv := []string{"PATH=/usr/local/bin:/usr/bin:/bin"}
+	r := &Runtime{binaryName: binaryName, execEnv: testEnv}
 	r.gvisorRunsc = caps.NewGVisorRunsc(func(string) (string, error) {
 		return "/usr/local/sbin/runsc", nil // pass by default
 	})
-	r.gvisorRegistered = buildGVisorRegisteredCap(binaryName)
+	r.gvisorRegistered = buildGVisorRegisteredCap(testEnv, binaryName)
 	return r
 }
 
 func TestRequiredCapabilities_Docker_RunscPresent(t *testing.T) {
 	orig := dockerInfoOutput
 	defer func() { dockerInfoOutput = orig }()
-	dockerInfoOutput = func(_ context.Context, _ string) ([]byte, error) {
+	dockerInfoOutput = func(_ context.Context, _ []string, _ string) ([]byte, error) {
 		return []byte("runc\nrunsc\nio.containerd.runc.v2\n"), nil
 	}
 
@@ -138,7 +139,7 @@ func TestRequiredCapabilities_Docker_RunscPresent(t *testing.T) {
 func TestRequiredCapabilities_Docker_RunscMissing(t *testing.T) {
 	orig := dockerInfoOutput
 	defer func() { dockerInfoOutput = orig }()
-	dockerInfoOutput = func(_ context.Context, _ string) ([]byte, error) {
+	dockerInfoOutput = func(_ context.Context, _ []string, _ string) ([]byte, error) {
 		return []byte("runc\nio.containerd.runc.v2\n"), nil
 	}
 
@@ -173,7 +174,7 @@ func TestRequiredCapabilities_Docker_Enhanced_DaemonModel(t *testing.T) {
 func TestRequiredCapabilities_Docker_InfoFails(t *testing.T) {
 	orig := dockerInfoOutput
 	defer func() { dockerInfoOutput = orig }()
-	dockerInfoOutput = func(_ context.Context, _ string) ([]byte, error) {
+	dockerInfoOutput = func(_ context.Context, _ []string, _ string) ([]byte, error) {
 		return nil, fmt.Errorf("docker daemon not responding")
 	}
 

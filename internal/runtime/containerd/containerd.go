@@ -9,7 +9,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"os"
-	"os/exec"
 	goruntime "runtime"
 	"strings"
 	"syscall"
@@ -22,6 +21,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/runtime/caps"
+	"github.com/kstenerud/yoloai/internal/sysexec"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
 
@@ -49,8 +49,10 @@ var descriptor = runtime.BackendDescriptor{
 }
 
 // versionString returns containerd's daemon version via `containerd --version`.
+// Uses a minimal explicit env (PATH only) per DEV §12 — version probes need no secrets.
 func versionString(ctx context.Context) string {
-	out, err := exec.CommandContext(ctx, "containerd", "--version").Output()
+	env := sysexec.Curated(nil, []string{"PATH"}, nil)
+	out, err := sysexec.CommandContext(ctx, env, "containerd", "--version").Output()
 	if err != nil {
 		return ""
 	}
@@ -73,11 +75,20 @@ func init() {
 	}, descriptor)
 }
 
+// containerdExecAllowlist is the set of env vars passed to containerd-adjacent
+// CLI subprocesses (DEV §12). PATH is required for binary resolution; XDG_RUNTIME_DIR
+// is needed for rootless containerd socket lookup; SSL vars carry TLS trust anchors.
+var containerdExecAllowlist = []string{
+	"PATH", "TMPDIR", "SSL_CERT_FILE", "SSL_CERT_DIR",
+	"XDG_RUNTIME_DIR",
+}
+
 // Runtime implements runtime.Runtime using the containerd API.
 type Runtime struct {
 	client    *client.Client
 	namespace string        // always "yoloai"
 	layout    config.Layout // DataDir-rooted path resolver (Q-W.6)
+	execEnv   []string      // explicit subprocess env (DEV §12); from layout, never inherited
 
 	// Capability fields — built once in New(), returned by RequiredCapabilities.
 	kataShimV2           caps.HostCapability
@@ -121,7 +132,10 @@ func New(_ context.Context, layout config.Layout) (*Runtime, error) {
 		}
 		return nil, yoerrors.NewDependencyError("connect to containerd: %w\n  Is containerd running? Try: sudo systemctl start containerd", err)
 	}
-	r := &Runtime{client: c, namespace: "yoloai", layout: layout}
+	execEnv := sysexec.Curated(layout.Env, containerdExecAllowlist, map[string]string{
+		"HOME": layout.HomeDir,
+	})
+	r := &Runtime{client: c, namespace: "yoloai", layout: layout, execEnv: execEnv}
 	r.kataShimV2 = buildKataShimV2Cap()
 	r.kataFCShimV2 = buildKataFCShimV2Cap()
 	r.cniBridge = buildCNIBridgeCap()

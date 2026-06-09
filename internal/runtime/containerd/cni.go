@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -23,6 +22,7 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
+	"github.com/kstenerud/yoloai/internal/sysexec"
 )
 
 // cniStateFileName is the filename for per-sandbox CNI state.
@@ -181,8 +181,9 @@ func cleanupStaleIPAMLeases(containerName string) {
 }
 
 // setupCNI creates a network namespace, runs CNI ADD, and persists state.
-// Returns the netns path.
-func setupCNI(ctx context.Context, layout config.Layout, sandboxDir, containerName string) (string, error) {
+// Returns the netns path. env is the explicit subprocess env (DEV §12);
+// forwarded to runCNIAdd for iptables verification.
+func setupCNI(ctx context.Context, env []string, layout config.Layout, sandboxDir, containerName string) (string, error) {
 	if err := ensureCNIConflist(layout); err != nil {
 		return "", err
 	}
@@ -199,7 +200,7 @@ func setupCNI(ctx context.Context, layout config.Layout, sandboxDir, containerNa
 	}
 
 	// If CNI ADD fails, clean up both the netns and any partial IPAM allocation.
-	if err := runCNIAdd(ctx, layout, netnsPath, sandboxDir, containerName); err != nil {
+	if err := runCNIAdd(ctx, env, layout, netnsPath, sandboxDir, containerName); err != nil {
 		_ = deleteNetNS(nsName)
 		cleanupStaleIPAMLeases(containerName)
 
@@ -216,7 +217,7 @@ func setupCNI(ctx context.Context, layout config.Layout, sandboxDir, containerNa
 			if err != nil {
 				return "", err
 			}
-			if retryErr := runCNIAdd(ctx, layout, netnsPath, sandboxDir, containerName); retryErr != nil {
+			if retryErr := runCNIAdd(ctx, env, layout, netnsPath, sandboxDir, containerName); retryErr != nil {
 				_ = deleteNetNS(nsName)
 				cleanupStaleIPAMLeases(containerName)
 				return "", fmt.Errorf("CNI setup (retry after firewall no-op): %w", retryErr)
@@ -231,7 +232,8 @@ func setupCNI(ctx context.Context, layout config.Layout, sandboxDir, containerNa
 }
 
 // runCNIAdd runs CNI ADD for the given netns and persists cni-state.json.
-func runCNIAdd(ctx context.Context, layout config.Layout, netnsPath, sandboxDir, containerName string) error {
+// env is the explicit subprocess env (DEV §12); forwarded to verifyCNIForwardRules.
+func runCNIAdd(ctx context.Context, env []string, layout config.Layout, netnsPath, sandboxDir, containerName string) error {
 	n, err := cni.New(
 		cni.WithPluginConfDir(cniConfDir(layout)),
 		cni.WithPluginDir([]string{"/opt/cni/bin"}),
@@ -284,7 +286,7 @@ func runCNIAdd(ctx context.Context, layout config.Layout, netnsPath, sandboxDir,
 	var verifyErr error
 	if ip == "" {
 		verifyErr = fmt.Errorf("%w: CNI result has no IPConfigs for eth0 (suspected silent firewall no-op)", errFirewallRulesMissing)
-	} else if err := verifyCNIForwardRules(ctx, ip); err != nil {
+	} else if err := verifyCNIForwardRules(ctx, env, ip); err != nil {
 		verifyErr = err
 	}
 	if verifyErr != nil {
@@ -389,10 +391,11 @@ func runCNIDel(ctx context.Context, layout config.Layout, state cniState) error 
 //
 // ip must be the bare dotted form (e.g. "10.89.1.90"); the firewall plugin
 // writes rules with the /32 host mask.
-func verifyCNIForwardRules(ctx context.Context, ip string) error {
+// env is the explicit subprocess env (DEV §12); PATH must include sbin dirs for iptables.
+func verifyCNIForwardRules(ctx context.Context, env []string, ip string) error {
 	cmdCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(cmdCtx, "iptables", "-t", "filter", "-S", "CNI-FORWARD").CombinedOutput()
+	out, err := sysexec.CommandContext(cmdCtx, env, "iptables", "-t", "filter", "-S", "CNI-FORWARD").CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("iptables -S CNI-FORWARD for %s: %w (output: %s)", ip, err, strings.TrimSpace(string(out)))
 	}

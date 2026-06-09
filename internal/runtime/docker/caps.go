@@ -14,13 +14,14 @@ import (
 
 // buildGVisorRegisteredCap returns a HostCapability that checks whether runsc is
 // registered as a Docker runtime. Uses the injectable dockerInfoOutput var.
-func buildGVisorRegisteredCap(binaryName string) caps.HostCapability {
+// env is the explicit subprocess env (DEV §12); forwarded to dockerInfoOutput.
+func buildGVisorRegisteredCap(env []string, binaryName string) caps.HostCapability {
 	return caps.HostCapability{
 		ID:      "gvisor-registered",
 		Summary: "gVisor registered with Docker daemon",
 		Detail:  "Required for --isolation container-enhanced. runsc must be registered in daemon.json.",
 		Check: func(ctx context.Context) error {
-			out, err := dockerInfoOutput(ctx, binaryName)
+			out, err := dockerInfoOutput(ctx, env, binaryName)
 			if err != nil {
 				return fmt.Errorf("check runtimes: %w", err)
 			}

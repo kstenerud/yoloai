@@ -32,6 +32,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/runtime/caps"
+	"github.com/kstenerud/yoloai/internal/sysexec"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
 
@@ -85,8 +86,10 @@ func probe(_ context.Context, env map[string]string) (bool, string) {
 // summary. Returns "" if the docker binary is missing or the daemon is
 // unreachable — callers (bug reports, yoloai info) treat empty as "no
 // version known" and fall back to the probe's availability verdict.
+// Uses a minimal explicit env (PATH only) per DEV §12 — version probes need no secrets.
 func versionString(ctx context.Context) string {
-	out, err := exec.CommandContext(ctx, "docker", "version", "--format",
+	env := sysexec.Curated(nil, []string{"PATH"}, nil)
+	out, err := sysexec.CommandContext(ctx, env, "docker", "version", "--format",
 		"Client: {{.Client.Version}} / Server: {{.Server.Version}}").Output()
 	if err != nil {
 		return ""
@@ -105,6 +108,7 @@ type Runtime struct {
 	client     *dockerclient.Client
 	binaryName string                  // CLI binary name ("docker" or "podman")
 	principal  config.PrincipalSegment // namespaces the orphan sweep (DF19)
+	execEnv    []string                // explicit subprocess env (DEV §12); from layout, never inherited
 
 	// imageBytesFn computes the rebuild-forcing image-layer total from a
 	// DiskUsage snapshot. nil means "use du.LayersSize" (the daemon's
@@ -215,10 +219,24 @@ func dialFirstAlive(ctx context.Context, baseOpts []dockerclient.Opt, env map[st
 	return nil, ""
 }
 
+// dockerExecAllowlist is the set of env vars passed to docker/podman CLI
+// subprocesses (DEV §12). PATH is required for binary resolution; the
+// DOCKER_* and CONTAINER_HOST vars carry the daemon connection settings
+// threaded from the edge. HOME prevents credential helpers from reading
+// the ambient home. SSL vars carry TLS trust anchors for HTTPS pulls.
+var dockerExecAllowlist = []string{
+	"PATH", "TMPDIR", "SSL_CERT_FILE", "SSL_CERT_DIR",
+	"DOCKER_HOST", "DOCKER_CERT_PATH", "DOCKER_TLS_VERIFY", "DOCKER_API_VERSION",
+	"CONTAINER_HOST", "XDG_RUNTIME_DIR",
+}
+
 func newDockerRuntime(cli *dockerclient.Client, binaryName string, layout config.Layout) *Runtime {
-	r := &Runtime{client: cli, binaryName: binaryName, principal: layout.Principal}
+	execEnv := sysexec.Curated(layout.Env, dockerExecAllowlist, map[string]string{
+		"HOME": layout.HomeDir,
+	})
+	r := &Runtime{client: cli, binaryName: binaryName, principal: layout.Principal, execEnv: execEnv}
 	r.gvisorRunsc = caps.NewGVisorRunsc(exec.LookPath)
-	r.gvisorRegistered = buildGVisorRegisteredCap(binaryName)
+	r.gvisorRegistered = buildGVisorRegisteredCap(execEnv, binaryName)
 	return r
 }
 
@@ -726,9 +744,10 @@ func (r *Runtime) Descriptor() runtime.BackendDescriptor {
 }
 
 // dockerInfoOutput fetches the list of registered OCI runtime names from the
-// Docker daemon. Variable for testing.
-var dockerInfoOutput = func(ctx context.Context, binaryName string) ([]byte, error) {
-	return exec.CommandContext(ctx, binaryName, "info", "--format", "{{range $k, $v := .Runtimes}}{{$k}}\n{{end}}").Output() //nolint:gosec // G204: binaryName is "docker" or "podman"
+// Docker daemon. Variable for testing. env is the explicit subprocess env
+// (DEV §12); pass r.execEnv from a Runtime.
+var dockerInfoOutput = func(ctx context.Context, env []string, binaryName string) ([]byte, error) {
+	return sysexec.CommandContext(ctx, env, binaryName, "info", "--format", "{{range $k, $v := .Runtimes}}{{$k}}\n{{end}}").Output()
 }
 
 // RequiredCapabilities returns the host capabilities needed for the given isolation mode.

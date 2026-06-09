@@ -315,7 +315,7 @@ func TestSandboxName(t *testing.T) {
 }
 
 func TestBuildTmuxCommand(t *testing.T) {
-	r := &Runtime{sandboxExecBin: "/usr/bin/sandbox-exec"}
+	r := &Runtime{sandboxExecBin: "/usr/bin/sandbox-exec", execEnv: []string{"PATH=/usr/bin:/bin"}}
 	sandboxPath := "/Users/test/.yoloai/sandboxes/mybox"
 
 	cmd := r.buildTmuxCommand(sandboxPath, []string{"tmux", "attach", "-t", "main"})
@@ -337,7 +337,7 @@ func TestBuildTmuxCommand(t *testing.T) {
 }
 
 func TestBuildExecCommand_TmuxDetection(t *testing.T) {
-	r := &Runtime{sandboxExecBin: "/usr/bin/sandbox-exec"}
+	r := &Runtime{sandboxExecBin: "/usr/bin/sandbox-exec", execEnv: []string{"PATH=/usr/bin:/bin"}}
 	sandboxPath := "/Users/test/.yoloai/sandboxes/mybox"
 
 	// tmux command should use buildTmuxCommand

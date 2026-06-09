@@ -20,6 +20,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/runtime/caps"
 	"github.com/kstenerud/yoloai/internal/runtime/docker"
+	"github.com/kstenerud/yoloai/internal/sysexec"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
 
@@ -49,8 +50,10 @@ var descriptor = runtime.BackendDescriptor{
 }
 
 // versionString returns the podman client version string from `podman version`.
+// Uses a minimal explicit env (PATH only) per DEV §12 — version probes need no secrets.
 func versionString(ctx context.Context) string {
-	out, err := exec.CommandContext(ctx, "podman", "version", "--format", "{{.Client.Version}}").Output()
+	env := sysexec.Curated(nil, []string{"PATH"}, nil)
+	out, err := sysexec.CommandContext(ctx, env, "podman", "version", "--format", "{{.Client.Version}}").Output()
 	if err != nil {
 		return ""
 	}
@@ -216,7 +219,7 @@ func discoverSocket(env map[string]string) (string, error) {
 	}
 
 	// macOS: try podman machine inspect
-	sock, err := machineSocketDiscovery()
+	sock, err := machineSocketDiscovery(env)
 	if err == nil {
 		return sock, nil
 	}
@@ -239,10 +242,16 @@ var runscLookPath = exec.LookPath
 
 // machineSocketDiscovery tries to get the socket path from `podman machine inspect`.
 // Variable for testing - can be mocked to avoid executing podman commands.
+// env is the explicit subprocess env (DEV §12); pass layout.Env-derived slice from caller.
 var machineSocketDiscovery = defaultMachineSocketDiscovery
 
-func defaultMachineSocketDiscovery() (string, error) {
-	out, err := exec.Command("podman", "machine", "inspect", "--format", "{{.ConnectionInfo.PodmanSocket.Path}}").Output() //nolint:gosec // trusted binary path
+func defaultMachineSocketDiscovery(env map[string]string) (string, error) {
+	// Minimal allowlist: PATH for binary lookup, CONTAINER_HOST and XDG_RUNTIME_DIR
+	// for socket resolution on rootless Linux. HOME is overridden to prevent
+	// podman from reading the ambient home's containers.conf (DEV §12).
+	podmanEnv := sysexec.Curated(env, []string{"PATH", "TMPDIR", "CONTAINER_HOST", "XDG_RUNTIME_DIR"}, nil)
+	out, err := sysexec.Command(podmanEnv, "podman", "machine", "inspect",
+		"--format", "{{.ConnectionInfo.PodmanSocket.Path}}").Output()
 	if err != nil {
 		return "", err
 	}

@@ -18,6 +18,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/runtime/monitor"
+	"github.com/kstenerud/yoloai/internal/sysexec"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
 
@@ -95,11 +96,24 @@ const (
 	symlinkManifestName = "mount-symlinks.txt"
 )
 
+// seatbeltExecAllowlist is the set of env vars passed to sandbox-exec,
+// tmux, and other seatbelt subprocesses (DEV §12). Credentials (SSH_AUTH_SOCK,
+// AWS_SECRET_ACCESS_KEY, etc.) are excluded; the entrypoint injects agent API
+// keys from the secrets directory.
+var seatbeltExecAllowlist = []string{
+	"PATH", "HOME", "USER", "LOGNAME",
+	"SHELL", "TERM", "TMPDIR",
+	"LANG", "LC_ALL", "LC_CTYPE",
+	"LC_COLLATE", "LC_MESSAGES", "LC_MONETARY",
+	"LC_NUMERIC", "LC_TIME",
+}
+
 // Runtime implements runtime.Runtime using macOS sandbox-exec.
 type Runtime struct {
 	sandboxExecBin string        // path to sandbox-exec binary
 	layout         config.Layout // DataDir-rooted path resolver (Q-W.6)
 	homeDir        string        // user's real $HOME — needed for SBPL profile generation (not layout.DataDir)
+	execEnv        []string      // explicit subprocess env (DEV §12); from layout, never inherited
 }
 
 // Compile-time checks.
@@ -135,10 +149,12 @@ func New(_ context.Context, layout config.Layout, homeDir string) (*Runtime, err
 		return nil, yoerrors.NewDependencyError("sandbox-exec not found: %w", err)
 	}
 
+	execEnv := sysexec.Curated(layout.Env, seatbeltExecAllowlist, nil)
 	return &Runtime{
 		sandboxExecBin: sandboxExecBin,
 		layout:         layout,
 		homeDir:        homeDir,
+		execEnv:        execEnv,
 	}, nil
 }
 
@@ -370,7 +386,7 @@ func (r *Runtime) Stop(_ context.Context, name string) error {
 	// Kill tmux server via socket
 	tmuxSock := filepath.Join(sandboxPath, tmuxDir, tmuxSocketName)
 	if _, err := os.Stat(tmuxSock); err == nil {
-		killCmd := exec.Command("tmux", "-S", tmuxSock, "kill-server") //nolint:gosec // G204: path within sandbox dir
+		killCmd := sysexec.Command(r.execEnv, "tmux", "-S", tmuxSock, "kill-server")
 		_ = killCmd.Run()
 	}
 
@@ -646,7 +662,7 @@ func (r *Runtime) waitForTmux(ctx context.Context, sandboxPath string, procDone 
 		}
 
 		// Try to list tmux sessions via the socket
-		checkCmd := exec.Command("tmux", "-S", tmuxSock, "has-session", "-t", "main") //nolint:gosec // G204: path within sandbox dir
+		checkCmd := sysexec.Command(r.execEnv, "tmux", "-S", tmuxSock, "has-session", "-t", "main")
 		if checkCmd.Run() == nil {
 			return nil
 		}
@@ -676,7 +692,7 @@ func (r *Runtime) buildExecCommand(sandboxPath string, cmd []string) *exec.Cmd {
 	profilePath := filepath.Join(sandboxPath, backendDir, profileFileName)
 	args := []string{"-f", profilePath}
 	args = append(args, cmd...)
-	c := exec.Command(r.sandboxExecBin, args...) //nolint:gosec // G204: args from validated sandbox state
+	c := sysexec.Command(r.execEnv, r.sandboxExecBin, args...)
 
 	// Read working directory from runtime-config.json, which is the source of truth
 	// for seatbelt. patchConfigWorkingDir (called during Start) rewrites it
@@ -706,7 +722,7 @@ func (r *Runtime) buildTmuxCommand(sandboxPath string, cmd []string) *exec.Cmd {
 	if len(cmd) > 1 {
 		args = append(args, cmd[1:]...)
 	}
-	return exec.Command("tmux", args...) //nolint:gosec // G204: socket path within sandbox dir
+	return sysexec.Command(r.execEnv, "tmux", args...)
 }
 
 // patchConfigWorkingDir rewrites working_dir in runtime-config.json when the

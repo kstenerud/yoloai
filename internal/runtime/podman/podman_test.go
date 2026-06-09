@@ -86,7 +86,7 @@ func TestDiscoverSocket_NoSocket(t *testing.T) {
 	// Mock machine socket discovery to fail (prevents executing podman commands)
 	origMachineDiscovery := machineSocketDiscovery
 	defer func() { machineSocketDiscovery = origMachineDiscovery }()
-	machineSocketDiscovery = func() (string, error) {
+	machineSocketDiscovery = func(_ map[string]string) (string, error) {
 		return "", assert.AnError
 	}
 
@@ -130,7 +130,7 @@ func TestDiscoverSocket_WSL2(t *testing.T) {
 
 	origMachineDiscovery := machineSocketDiscovery
 	defer func() { machineSocketDiscovery = origMachineDiscovery }()
-	machineSocketDiscovery = func() (string, error) { return "", fmt.Errorf("not macOS") }
+	machineSocketDiscovery = func(_ map[string]string) (string, error) { return "", fmt.Errorf("not macOS") }
 
 	origSystem := systemSockPath
 	defer func() { systemSockPath = origSystem }()
@@ -154,7 +154,7 @@ func TestDiscoverSocket_WSL2_FirstPathWins(t *testing.T) {
 
 	origMachineDiscovery := machineSocketDiscovery
 	defer func() { machineSocketDiscovery = origMachineDiscovery }()
-	machineSocketDiscovery = func() (string, error) { return "", fmt.Errorf("not macOS") }
+	machineSocketDiscovery = func(_ map[string]string) (string, error) { return "", fmt.Errorf("not macOS") }
 
 	origSystem := systemSockPath
 	defer func() { systemSockPath = origSystem }()

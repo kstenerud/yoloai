@@ -15,6 +15,8 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/kstenerud/yoloai/internal/sysexec"
+
 	"github.com/containerd/containerd/v2/core/content"
 	"github.com/containerd/containerd/v2/core/images"
 	"github.com/containerd/containerd/v2/pkg/labels"
@@ -171,8 +173,8 @@ func (r *Runtime) slowPathImport(ctx context.Context, dockerBin string, output i
 
 	fmt.Fprintln(output, "Importing image into containerd namespace yoloai (this may take a few minutes)...") //nolint:errcheck // best-effort output
 
-	saveCmd := exec.CommandContext(ctx, dockerBin, "save", imageRef)                       //nolint:gosec // G204: imageRef is a constant
-	importCmd := exec.CommandContext(ctx, ctrBin, "-n", "yoloai", "images", "import", "-") //nolint:gosec // G204: ctrBin and args are trusted
+	saveCmd := sysexec.CommandContext(ctx, r.execEnv, dockerBin, "save", imageRef)
+	importCmd := sysexec.CommandContext(ctx, r.execEnv, ctrBin, "-n", "yoloai", "images", "import", "-")
 
 	importCmd.Stdin, err = saveCmd.StdoutPipe()
 	if err != nil {

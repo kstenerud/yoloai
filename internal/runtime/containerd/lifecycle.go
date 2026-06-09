@@ -181,7 +181,7 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 	sandboxDir := r.sandboxDirForName(cfg.Name)
 
 	// Set up network namespace and CNI.
-	netnsPath, err := setupCNI(ctx, r.layout, sandboxDir, cfg.Name)
+	netnsPath, err := setupCNI(ctx, r.execEnv, r.layout, sandboxDir, cfg.Name)
 	if err != nil {
 		return fmt.Errorf("setup CNI: %w", err)
 	}
