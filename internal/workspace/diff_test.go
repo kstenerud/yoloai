@@ -1,3 +1,5 @@
+// ABOUTME: Tests for workspace CopyDiff and RWDiff free-function wrappers.
+// ABOUTME: Detailed diff logic tests live in internal/git/ops_test.go.
 package workspace
 
 import (
@@ -7,9 +9,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// --- CopyDiff ---
+// --- CopyDiff wrapper ---
 
-func TestCopyDiff_NoChanges(t *testing.T) {
+func TestCopyDiff_Wrapper_NoChanges(t *testing.T) {
 	dir := t.TempDir()
 	initGitRepo(t, dir)
 	writeTestFile(t, dir, "file.txt", "hello\n")
@@ -22,7 +24,7 @@ func TestCopyDiff_NoChanges(t *testing.T) {
 	assert.Empty(t, out)
 }
 
-func TestCopyDiff_WithChanges(t *testing.T) {
+func TestCopyDiff_Wrapper_WithChanges(t *testing.T) {
 	dir := t.TempDir()
 	initGitRepo(t, dir)
 	writeTestFile(t, dir, "file.txt", "hello\n")
@@ -37,81 +39,16 @@ func TestCopyDiff_WithChanges(t *testing.T) {
 	assert.Contains(t, out, "hello world")
 }
 
-func TestCopyDiff_WithStat(t *testing.T) {
-	dir := t.TempDir()
-	initGitRepo(t, dir)
-	writeTestFile(t, dir, "file.txt", "hello\n")
-	gitAdd(t, dir, ".")
-	gitCommit(t, dir, "initial")
+// --- RWDiff wrapper ---
 
-	sha := headSHA(t, dir)
-	writeTestFile(t, dir, "file.txt", "hello world\n")
-
-	out, err := CopyDiff(testEnv(), dir, sha, nil, true, false)
-	require.NoError(t, err)
-	assert.Contains(t, out, "file.txt")
-	assert.Contains(t, out, "1 file changed")
-}
-
-func TestCopyDiff_WithPathFilter(t *testing.T) {
-	dir := t.TempDir()
-	initGitRepo(t, dir)
-	writeTestFile(t, dir, "a.txt", "a\n")
-	writeTestFile(t, dir, "b.txt", "b\n")
-	gitAdd(t, dir, ".")
-	gitCommit(t, dir, "initial")
-
-	sha := headSHA(t, dir)
-	writeTestFile(t, dir, "a.txt", "aaa\n")
-	writeTestFile(t, dir, "b.txt", "bbb\n")
-
-	out, err := CopyDiff(testEnv(), dir, sha, []string{"a.txt"}, false, false)
-	require.NoError(t, err)
-	assert.Contains(t, out, "a.txt")
-	assert.NotContains(t, out, "b.txt")
-}
-
-func TestCopyDiff_NewUntrackedFile(t *testing.T) {
-	dir := t.TempDir()
-	initGitRepo(t, dir)
-	writeTestFile(t, dir, "existing.txt", "existing\n")
-	gitAdd(t, dir, ".")
-	gitCommit(t, dir, "initial")
-
-	sha := headSHA(t, dir)
-	writeTestFile(t, dir, "new.txt", "new content\n")
-
-	out, err := CopyDiff(testEnv(), dir, sha, nil, false, false)
-	require.NoError(t, err)
-	// StageUntrackedWithEnv should pick up the new file.
-	assert.Contains(t, out, "new.txt")
-}
-
-// --- RWDiff ---
-
-// :rw pointed at a non-git tree was previously a special
-// "informational" DiffResult. Q-U collapses it to an empty string —
-// callers treat non-git :rw the same as "no changes".
-func TestRWDiff_NotGitRepo(t *testing.T) {
+func TestRWDiff_Wrapper_NotGitRepo(t *testing.T) {
 	dir := t.TempDir()
 	out, err := RWDiff(testEnv(), dir, nil, false, false)
 	require.NoError(t, err)
 	assert.Empty(t, out)
 }
 
-func TestRWDiff_NoChanges(t *testing.T) {
-	dir := t.TempDir()
-	initGitRepo(t, dir)
-	writeTestFile(t, dir, "file.txt", "hello\n")
-	gitAdd(t, dir, ".")
-	gitCommit(t, dir, "initial")
-
-	out, err := RWDiff(testEnv(), dir, nil, false, false)
-	require.NoError(t, err)
-	assert.Empty(t, out)
-}
-
-func TestRWDiff_WithChanges(t *testing.T) {
+func TestRWDiff_Wrapper_WithChanges(t *testing.T) {
 	dir := t.TempDir()
 	initGitRepo(t, dir)
 	writeTestFile(t, dir, "file.txt", "hello\n")
@@ -125,38 +62,8 @@ func TestRWDiff_WithChanges(t *testing.T) {
 	assert.Contains(t, out, "hello world")
 }
 
-func TestRWDiff_WithStat(t *testing.T) {
-	dir := t.TempDir()
-	initGitRepo(t, dir)
-	writeTestFile(t, dir, "file.txt", "hello\n")
-	gitAdd(t, dir, ".")
-	gitCommit(t, dir, "initial")
+// --- helper ---
 
-	writeTestFile(t, dir, "file.txt", "hello world\n")
-
-	out, err := RWDiff(testEnv(), dir, nil, true, false)
-	require.NoError(t, err)
-	assert.Contains(t, out, "file.txt")
-}
-
-func TestRWDiff_WithPathFilter(t *testing.T) {
-	dir := t.TempDir()
-	initGitRepo(t, dir)
-	writeTestFile(t, dir, "a.txt", "a\n")
-	writeTestFile(t, dir, "b.txt", "b\n")
-	gitAdd(t, dir, ".")
-	gitCommit(t, dir, "initial")
-
-	writeTestFile(t, dir, "a.txt", "aaa\n")
-	writeTestFile(t, dir, "b.txt", "bbb\n")
-
-	out, err := RWDiff(testEnv(), dir, []string{"a.txt"}, false, false)
-	require.NoError(t, err)
-	assert.Contains(t, out, "a.txt")
-	assert.NotContains(t, out, "b.txt")
-}
-
-// headSHA returns the HEAD SHA of a git repo.
 func headSHA(t *testing.T, dir string) string {
 	t.Helper()
 	sha, err := HeadSHAWithEnv(testEnv(), dir)

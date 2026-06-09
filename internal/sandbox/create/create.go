@@ -19,6 +19,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
+	"github.com/kstenerud/yoloai/internal/git"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox/archetype"
 	"github.com/kstenerud/yoloai/internal/sandbox/invocation"
@@ -29,7 +30,6 @@ import (
 	"github.com/kstenerud/yoloai/internal/sandbox/state"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/internal/sysexec"
-	"github.com/kstenerud/yoloai/internal/workspace"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
 
@@ -240,7 +240,7 @@ func prepareSandboxState(ctx context.Context, d state.Deps, opts Options) (*stat
 		return nil, err
 	}
 
-	workdir, auxDirs, err := parseAndValidateDirs(d, opts, agentDef, ri.profile.env, ycfg.Model)
+	workdir, auxDirs, err := parseAndValidateDirs(ctx, d, opts, agentDef, ri.profile.env, ycfg.Model)
 	if err != nil {
 		return nil, err
 	}
@@ -260,7 +260,7 @@ func prepareSandboxState(ctx context.Context, d state.Deps, opts Options) (*stat
 		}
 	}()
 
-	workCopyDir, baselineSHA, dirEnvs, err := setupAllWorkdirs(d, opts, workdir, auxDirs, ri.archetype, ri.devcontainerCfg)
+	workCopyDir, baselineSHA, dirEnvs, err := setupAllWorkdirs(ctx, d, opts, workdir, auxDirs, ri.archetype, ri.devcontainerCfg)
 	if err != nil {
 		return nil, err
 	}
@@ -545,10 +545,10 @@ func createSandboxDirs(sandboxDir string, perms state.IsolationPerms) error {
 }
 
 // setupAllWorkdirs sets up the workdir and aux dirs, and resolves copy mount paths.
-func setupAllWorkdirs(d state.Deps, opts Options, workdir *DirSpec, auxDirs []*DirSpec, resolvedArchetype archetype.Archetype, devcontainerCfg *archetype.DevcontainerConfig) (string, string, []store.DirEnvironment, error) {
+func setupAllWorkdirs(ctx context.Context, d state.Deps, opts Options, workdir *DirSpec, auxDirs []*DirSpec, resolvedArchetype archetype.Archetype, devcontainerCfg *archetype.DevcontainerConfig) (string, string, []store.DirEnvironment, error) {
 	slog.Debug("setting up workdir", "event", "sandbox.create.workdir", "mode", string(workdir.Mode))
 	sandboxDir := d.Layout.SandboxDir(opts.Name)
-	workCopyDir, baselineSHA, err := setupWorkdir(workspace.NewGit(d.Layout), sandboxDir, workdir, d.Runtime)
+	workCopyDir, baselineSHA, err := setupWorkdir(ctx, git.NewHost(d.Layout), sandboxDir, workdir, d.Runtime)
 	if err != nil {
 		return "", "", nil, err
 	}

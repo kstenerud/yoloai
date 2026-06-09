@@ -10,9 +10,9 @@ import (
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/config"
+	"github.com/kstenerud/yoloai/internal/git"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
-	"github.com/kstenerud/yoloai/internal/workspace"
 )
 
 // ApplyOverlayOptions configures ApplyOverlay.
@@ -57,9 +57,9 @@ func ApplyOverlay(ctx context.Context, layout config.Layout, rt runtime.Runtime,
 		return result, nil
 	}
 
-	git := workspace.NewGit(layout)
+	g := git.NewHost(layout)
 	for _, ps := range patches {
-		if applyErr := git.ApplyPatch(ps.Patch, ps.HostPath, workspace.IsGitRepo(ps.HostPath)); applyErr != nil {
+		if applyErr := g.ApplyPatch(ctx, ps.Patch, ps.HostPath, git.IsGitRepo(ps.HostPath)); applyErr != nil {
 			return nil, fmt.Errorf("%s: %w", ps.HostPath, applyErr)
 		}
 	}

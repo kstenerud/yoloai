@@ -1,7 +1,7 @@
+// ABOUTME: Tests for workspace transitional free-function wrappers over internal/git.
 package workspace
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -153,7 +153,7 @@ func TestStageUntrackedWithEnv_RetriesOnIndexLock(t *testing.T) {
 // IsIndexLocked tests
 
 func TestIsIndexLocked_DetectsLockError(t *testing.T) {
-	err := fmt.Errorf("git [add -A]: exit status 128: fatal: Unable to create '.git/index.lock': File exists")
+	err := runGitCmdError("git [add -A]: exit status 128: fatal: Unable to create '.git/index.lock': File exists")
 	assert.True(t, IsIndexLocked(err))
 }
 
@@ -162,7 +162,7 @@ func TestIsIndexLocked_NilIsNotLocked(t *testing.T) {
 }
 
 func TestIsIndexLocked_OtherErrorIsNotLocked(t *testing.T) {
-	assert.False(t, IsIndexLocked(fmt.Errorf("some other git error")))
+	assert.False(t, IsIndexLocked(runGitCmdError("some other git error")))
 }
 
 // BaselineUncommittedChangesWithEnv tests
@@ -251,3 +251,8 @@ func TestBaselineWithEnv_SetsUserConfig(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "yoloai@localhost", strings.TrimSpace(string(output)))
 }
+
+// runGitCmdError builds an error matching git index.lock error format.
+type runGitCmdError string
+
+func (e runGitCmdError) Error() string { return string(e) }

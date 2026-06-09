@@ -1,10 +1,10 @@
-// ABOUTME: IsDangerousDir, CheckPathOverlap, and CheckDirtyRepo guard sandbox
-// ABOUTME: creation from mounting system paths or mounting a dirty git repo.
+// ABOUTME: IsDangerousDir, CheckPathOverlap guard sandbox creation from mounting
+// ABOUTME: system paths. CheckDirtyRepo has moved to internal/git; the free-function
+// ABOUTME: wrapper is in workspace/git.go.
 package workspace
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 )
@@ -81,63 +81,4 @@ func pathsOverlap(a, b string) bool {
 		return true
 	}
 	return strings.HasPrefix(b, a+"/") || strings.HasPrefix(a, b+"/")
-}
-
-// CheckDirtyRepo checks if the given path is a git repository with
-// uncommitted changes. Returns a human-readable warning string if
-// dirty, empty string if clean or not a git repo.
-func (g *Git) CheckDirtyRepo(path string) (string, error) {
-	gitDir := filepath.Join(path, ".git")
-	if _, err := os.Stat(gitDir); err != nil {
-		return "", nil //nolint:nilerr // not a git repo; absence of .git is not an error
-	}
-
-	cmd := g.Cmd(path, "status", "--porcelain")
-	output, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("git status in %q: %w", path, err)
-	}
-
-	if len(output) == 0 {
-		return "", nil // clean repo
-	}
-
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-	modified := 0
-	untracked := 0
-	for _, line := range lines {
-		// Git status --porcelain format: "XY filename" where XY is a 2-char status code
-		// Extract filename (everything after the 3rd character)
-		if len(line) < 3 {
-			continue
-		}
-		filename := line[3:]
-
-		// Skip yoloai-generated bugreport files (both .md and .md.tmp)
-		if isBugreportFile(filepath.Base(filename)) {
-			continue
-		}
-
-		if strings.HasPrefix(line, "??") {
-			untracked++
-		} else {
-			modified++
-		}
-	}
-
-	var parts []string
-	if modified > 0 {
-		parts = append(parts, fmt.Sprintf("%d files modified", modified))
-	}
-	if untracked > 0 {
-		parts = append(parts, fmt.Sprintf("%d untracked", untracked))
-	}
-
-	return strings.Join(parts, ", "), nil
-}
-
-// CheckDirtyRepo is a transitional free-function wrapper (DEV §12). Delegates to NewGitWithEnv(env).CheckDirtyRepo.
-// env must be an explicit subprocess env derived from the caller's layout (DEV §12).
-func CheckDirtyRepo(env []string, path string) (string, error) {
-	return NewGitWithEnv(env).CheckDirtyRepo(path)
 }

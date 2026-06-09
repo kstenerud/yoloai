@@ -2,6 +2,7 @@
 package create
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
+	"github.com/kstenerud/yoloai/internal/git"
 	"github.com/kstenerud/yoloai/internal/sandbox/runtimeconfig"
 	"github.com/kstenerud/yoloai/internal/testutil"
 	"github.com/kstenerud/yoloai/internal/workspace"
@@ -140,7 +142,7 @@ func TestGitBaseline_EmptyGitRepo(t *testing.T) {
 	sandboxDir := filepath.Join(t.TempDir(), "test-sandbox")
 	workdir := &DirSpec{Path: dir, Mode: DirMode("copy")}
 	rt := &mockDockerRuntime{} // Docker-like backend: creates baseline on host
-	_, sha, err := setupWorkdir(workspace.NewGitWithEnv(testutil.GitEnv()), sandboxDir, workdir, rt)
+	_, sha, err := setupWorkdir(context.Background(), git.NewHostWithEnv(testutil.GitEnv()), sandboxDir, workdir, rt)
 	require.NoError(t, err)
 	assert.Len(t, sha, 40)
 }
