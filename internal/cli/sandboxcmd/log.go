@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"time"
 
@@ -155,9 +154,11 @@ func parseSourceFlag(sourceFlag string) []yoloai.LogSource {
 	return result
 }
 
-// terminalWidth returns the output width from $COLUMNS or os.Stdout, falling back to 120.
+// terminalWidth returns the output width from the edge-resolved $COLUMNS,
+// falling back to 120. §12: reads the threaded Layout().Env snapshot rather
+// than re-pulling ambient os.Getenv from a subcommand.
 func terminalWidth() int {
-	if s := os.Getenv("COLUMNS"); s != "" { //nolint:forbidigo // §12: CLI terminal-width detection for log output formatting
+	if s := cliutil.Layout().Env["COLUMNS"]; s != "" {
 		var w int
 		if _, err := fmt.Sscanf(s, "%d", &w); err == nil && w > 0 {
 			return w

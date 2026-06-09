@@ -19,8 +19,10 @@ import (
 func SetTerminalTitle(title string) {
 	fmt.Fprintf(os.Stdout, "\033]0;%s\007", title) //nolint:errcheck // best-effort terminal title
 
-	// If inside a host tmux session, also set the window name.
-	if os.Getenv("TMUX") == "" { //nolint:forbidigo // §12: CLI terminal detection (are we inside a host tmux session?)
+	// If inside a host tmux session, also set the window name. §12: read the
+	// edge-resolved env snapshot, not ambient os.Getenv — the same Layout().Env
+	// the tmux subprocess env is built from just below.
+	if Layout().Env["TMUX"] == "" {
 		return
 	}
 	// tmuxEnv: the layout-derived env for tmux subprocesses. PATH and HOME
