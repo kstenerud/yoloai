@@ -7,10 +7,11 @@ import (
 	"context"
 	"io"
 	"log/slog"
-	"os/exec"
+	"os"
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime"
+	"github.com/kstenerud/yoloai/internal/sysexec"
 )
 
 // Compile-time check.
@@ -87,7 +88,9 @@ func (m *lifecycleMockRuntime) GitExec(ctx context.Context, name, workDir string
 		return m.gitExecFn(ctx, name, workDir, args...)
 	}
 	cmdArgs := append([]string{"-C", workDir}, args...)
-	out, err := exec.CommandContext(ctx, "git", cmdArgs...).Output() //nolint:gosec // G204: test-controlled workDir
+	// Explicit env from the test edge (os.Environ is allowed in _test.go);
+	// the exec itself funnels through sysexec (DEV §12).
+	out, err := sysexec.CommandContext(ctx, os.Environ(), "git", cmdArgs...).Output()
 	return string(out), err
 }
 func (m *lifecycleMockRuntime) InteractiveExec(_ context.Context, _ string, _ []string, _ string, _ string, _ runtime.IOStreams) error {

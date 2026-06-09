@@ -184,6 +184,14 @@ linters:
         - pattern: "^os\\.Stderr$"
           msg: "ambient I/O — take an io.Writer / IOStreams; the CLI layer owns process streams; §12"
 
+        # §12 outward: a child process inherits the parent's full ambient env
+        # when Cmd.Env is unset (exec's default). Never call exec.Command* raw —
+        # go through internal/sysexec, which requires an explicit env. This binds
+        # test code too (the _test.go exclusion below deliberately omits this
+        # pattern). exec.LookPath (binary discovery) is fine. See DEV §12 / D79.
+        - pattern: "^exec\\.Command(Context)?$"
+          msg: "spawn subprocesses via internal/sysexec (explicit env, never inherited); see development-principles.md section 12 — exec.LookPath is fine"
+
         # §12 stdio by ANY mechanism. The os.Stdin/Stdout/Stderr bans above
         # cover the symbols; these cover the package-level wrappers and
         # builtins that hit the SAME process streams without naming them, so a
@@ -260,13 +268,25 @@ linters:
       - path: "internal/fileutil/fileutil\\.go"
         linters:
           - forbidigo
-      # Tests and test helpers create temp files for their own use — not ~/.yoloai paths.
+      # Tests may use the ambient-state patterns (temp files, os.Environ at the
+      # test edge, stdio, etc.) — EXCEPT exec.Command*, which binds tests too
+      # (DEV §12 / D79: subprocesses go through internal/sysexec with an explicit
+      # env, in test code as well). So this lists the patterns tests are exempt
+      # from; exec.Command is deliberately ABSENT. When adding a new forbidigo
+      # pattern that tests should be exempt from, add its matched symbol here.
       - path: "_test\\.go"
         linters:
           - forbidigo
+        text: "os\\.(WriteFile|OpenFile|MkdirAll|UserHomeDir|UserConfigDir|UserCacheDir|Getwd|Getuid|Getgid|Getenv|LookupEnv|Environ|ExpandEnv|Setenv|Unsetenv|Clearenv|Chdir|Args|Geteuid|Getegid|Getgroups|Getppid|Hostname|Stdin|Stdout|Stderr)|filepath\\.Dir|fmt\\.(Print|Printf|Println|Scan|Scanf|Scanln)|^print(ln)?$|log\\.(Print|Printf|Println|Fatal|Fatalf|Fatalln|Panic|Panicf|Panicln)|syscall\\.(Getenv|Setenv|Environ|Getuid|Getgid|Geteuid|Getegid|Getgroups|Getppid)|user\\.(Current|Lookup|LookupId|LookupGroup|LookupGroupId)|time\\.Local|sandbox\\.(NewManager|Manager)|runtime\\.(New|Runtime)"
+      # internal/sysexec is THE licensed exec.Command* site — the funnel that
+      # sets an explicit env; every other caller routes through it.
       - path: "internal/testutil/"
         linters:
           - forbidigo
+      - path: "internal/sysexec/"
+        linters:
+          - forbidigo
+        text: "exec\\.Command"
       # The licensed CLI startup site that resolves $HOME/.yoloai/ once at
       # process boot and threads the resulting config.Layout downward. This
       # is the ONLY production-code allowlist for the §12 ambient-HOME ban.

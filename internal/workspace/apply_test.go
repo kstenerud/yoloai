@@ -3,10 +3,10 @@ package workspace
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 
+	"github.com/kstenerud/yoloai/internal/sysexec"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -157,7 +157,7 @@ func generatePatch(t *testing.T, dir, filename, oldContent, newContent string) [
 	writeTestFile(t, dir, filename, newContent)
 	gitAdd(t, dir, filename)
 
-	cmd := exec.Command("git", "-C", dir, "diff", "--cached") //nolint:gosec // G204: test helper with known command
+	cmd := sysexec.Command(os.Environ(), "git", "-C", dir, "diff", "--cached") // test edge: os.Environ allowed in _test.go
 	out, err := cmd.Output()
 	require.NoError(t, err, "git diff --cached failed")
 	require.NotEmpty(t, out, "patch should not be empty")

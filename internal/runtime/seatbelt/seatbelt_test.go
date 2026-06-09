@@ -16,6 +16,7 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime"
+	"github.com/kstenerud/yoloai/internal/sysexec"
 )
 
 func TestGenerateProfile_DenyDefault(t *testing.T) {
@@ -662,8 +663,9 @@ func TestKillByPID_WaitsForExit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Start a long-running subprocess with its own process group
-	cmd := exec.Command("sleep", "60")
+	// Start a long-running subprocess with its own process group. Explicit env
+	// (DEV §12) — even a test fixture child goes through sysexec.
+	cmd := sysexec.Command([]string{"PATH=/usr/bin:/bin"}, "sleep", "60")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("failed to start sleep process: %v", err)

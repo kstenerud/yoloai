@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kstenerud/yoloai/internal/sysexec"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -24,7 +25,7 @@ func TestWaitForExit_Empty(t *testing.T) {
 
 // TestWaitForExit_AlreadyDead verifies that a reaped PID returns nil immediately.
 func TestWaitForExit_AlreadyDead(t *testing.T) {
-	cmd := exec.Command("sleep", "60")
+	cmd := sysexec.Command(testPgrepEnv, "sleep", "60")
 	require.NoError(t, cmd.Start())
 	pid := cmd.Process.Pid
 	require.NoError(t, cmd.Process.Kill())
@@ -40,7 +41,7 @@ func TestWaitForExit_AlreadyDead(t *testing.T) {
 // TestWaitForExit_TimesOutWithAlive verifies that a live process is returned
 // as a survivor once the timeout expires.
 func TestWaitForExit_TimesOutWithAlive(t *testing.T) {
-	cmd := exec.Command("sleep", "60")
+	cmd := sysexec.Command(testPgrepEnv, "sleep", "60")
 	require.NoError(t, cmd.Start())
 	pid := cmd.Process.Pid
 	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
