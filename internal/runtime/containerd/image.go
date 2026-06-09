@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os/exec"
 	"runtime"
 	"strings"
 
