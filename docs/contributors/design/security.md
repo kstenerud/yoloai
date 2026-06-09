@@ -33,45 +33,33 @@ The seatbelt (macOS sandbox-exec) backend applies **default-deny credential acce
 
 ## gVisor Security Mode
 
-gVisor provides **syscall-level sandboxing** by intercepting and filtering system calls through a user-space kernel (the "Sentry"). This adds defense-in-depth beyond container isolation. However, gVisor's user namespace UID remapping requires special permission handling:
+gVisor provides **syscall-level sandboxing** by intercepting and filtering system calls through a user-space kernel (the "Sentry"). This adds defense-in-depth beyond container isolation.
 
 ### Permission Requirements
 
-gVisor maps container UIDs to different host UIDs (e.g., container root → host UID 501, container yoloai user → host UID 1000+501). This causes permission issues when the container process tries to access bind-mounted directories:
-
-- **Standard Docker**: Uses normal permissions (directories: 0750, files: 0600) because container UIDs match what the Docker daemon expects.
-- **gVisor**: Requires relaxed permissions (directories: 0777, files: 0666) for container-accessible paths because the remapped UIDs don't match the owner.
-
-yoloai **automatically detects gVisor** and applies appropriate permissions:
+Host-side bind-mounted paths use the **same restrictive permissions for every isolation mode** (directories: 0750, files: 0600; secrets dir/files: 0700/0600). gVisor does *not* require relaxed/world-readable permissions: the container process runs as the **invoking host UID** (`store.ContainerUser` returns that UID for `container-enhanced`, the same UID that owns the staged paths), and gVisor enforces guest-side uid/mode faithfully against the host-mapped owner. Owner-only perms therefore both grant the sandbox access and deny every other local user.
 
 ```bash
-# Standard Docker (--security standard or omitted)
+# All isolation modes (standard Docker and gVisor alike)
 drwxr-x--- logs/           # 0750: owner + group only
 -rw------- sandbox.jsonl   # 0600: owner only
-
-# gVisor (--security gvisor)
-drwxrwxrwx logs/           # 0777: world-readable/writable
--rw-rw-rw- sandbox.jsonl   # 0666: world-readable/writable
 ```
+
+This was empirically validated on a real Linux + gVisor host — see resolved finding **DF20** (`docs/contributors/design/findings-resolved.md`). An earlier design assumed gVisor's UID remapping forced world-readable bits (0777/0666); that assumption was wrong and had made staged credentials world-readable in `/tmp` on multi-tenant hosts.
 
 **Affected paths** (inside `~/.yoloai/sandboxes/<name>/`):
 - Container-writable directories: `logs/`, `work/`, `agent-runtime/`, `files/`, `cache/`
 - Log files: `sandbox.jsonl`, `monitor.jsonl`, `agent-hooks.jsonl`
 - Status files: `agent-status.json`
-- Temporary secrets directory (exists only during container startup, removed within seconds)
+- Temporary secrets directory (exists only during container startup, removed within seconds; 0700 dir / 0600 files)
 
 **Host-only directories** (not bind-mounted) always use restrictive 0750 permissions: `home-seed/`, `bin/`, `tmux/`, `backend/`.
 
 ### Security Trade-offs
 
-**What this means for security:**
+**What this means for security:** all users benefit from principle of least privilege (0750/0600) regardless of isolation mode — sandbox files are not readable by other users on the host. gVisor users additionally gain syscall-level sandboxing inside the container that standard Docker lacks, at no cost to host-side file permission tightness. The sandbox directory (`~/.yoloai/sandboxes/<name>/`) is also created 0750.
 
-- **Standard Docker users**: Benefit from principle of least privilege (0750/0600). Sandbox files are not readable by other users on the host.
-- **gVisor users**: Trade tighter file permissions for syscall-level sandboxing. The relaxed permissions (0777/0666) make sandbox files world-readable on the host, but gVisor's syscall filtering provides an additional security layer inside the container that standard Docker lacks.
-
-**Mitigation:** The sandbox directory (`~/.yoloai/sandboxes/<name>/`) is created with 0750 permissions regardless of security mode, so while *contents* may be world-readable under gVisor, the parent directory is still restricted to the owner.
-
-**Inside the container:** File permissions are uniform regardless of backend. The container always sees the yoloai user as the owner. The permission differences only affect host-side access.
+**Inside the container:** the container process runs as the host UID and sees itself as the owner of the bind-mounted paths; permissions are uniform across backends.
 
 ### macOS + gVisor Compatibility
 

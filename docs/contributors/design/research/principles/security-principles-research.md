@@ -211,10 +211,12 @@ it adds to it. This is the correct framing for defense-in-depth.
 
 Applied to yoloAI: `--isolation container-enhanced` (the `docker-cenhanced` mode)
 runs containers under gVisor's `runsc` runtime. `docs/contributors/design/security.md`
-§gVisor Security Mode documents the UID remapping tradeoff: gVisor requires
-relaxed file permissions (0777/0666) for container-accessible paths because remapped
-UIDs don't match the owner. The security tradeoff is documented explicitly:
-"gVisor users trade tighter file permissions for syscall-level sandboxing."
+§gVisor Security Mode documents the host-side permission model. (**Correction, 2026-06-09 —
+finding DF20:** an earlier version of this section claimed gVisor *requires* relaxed
+`0777/0666` permissions because remapped UIDs don't match the owner. That was empirically
+disproved: the container runs as the invoking host UID, so gVisor uses the same restrictive
+`0750/0600` host-side permissions as standard Docker, at no cost to syscall-level
+sandboxing.)
 
 **Known limitation (cited in §9 below):** gVisor is blocked on macOS due to a
 confirmed Claude Code bug (github.com/anthropics/claude-code/issues/35454 —

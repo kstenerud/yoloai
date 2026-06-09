@@ -370,7 +370,7 @@ Threshold: every feature that touches the kernel, the filesystem, or the network
 - **Tart for macOS VMs** (commit `814d379`, 2026-02-26): the macOS-only backend. Linux users get a clear error rather than a confusing failure if they try `--backend tart` on Linux.
 - **Seatbelt** is macOS-only, restricted to default-deny credential access (D15). Documented in `docs/contributors/design/security.md` §Seatbelt Backend Security.
 - **VirtioFS on macOS Docker Desktop**: known ~3x I/O penalty for bind mounts (documented in `docs/contributors/design/research/sandboxing.md` and competitor research). Influenced the decision to support `:copy` and `:overlay` as alternatives.
-- **gVisor + bind-mount permissions** (`docs/contributors/design/security.md`): gVisor's user namespace UID remapping requires relaxed permissions (0777/0666 for container-writable paths). Standard Docker uses 0750/0600. yoloAI auto-detects gVisor and applies the right permissions.
+- **gVisor + bind-mount permissions** (`docs/contributors/design/security.md`): gVisor uses the same restrictive 0750/0600 host-side permissions as standard Docker — the container runs as the invoking host UID, so no relaxed/world-readable bits are needed. An earlier assumption to the contrary was empirically disproved (finding DF20).
 - **Windows/WSL** documented as expected-to-work-with-known-limitations (`docs/contributors/design/README.md` §Prerequisites): path translation, UID/GID mapping, `.gitignore` line endings.
 - **Architecture audit (2026-05)** W6 (commit `b99b46e`): CLI lifecycle subset runs on Podman in CI to catch backend-specific regressions.
 

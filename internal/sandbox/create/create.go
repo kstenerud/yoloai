@@ -245,7 +245,7 @@ func prepareSandboxState(ctx context.Context, d state.Deps, opts Options) (*stat
 	}
 
 	// Phase 2: Create directory structure and seed sandbox.
-	perms := state.Perms(ri.profile.isolation)
+	perms := state.Perms()
 	agentFilesInitialized, err := createAndSeedSandbox(ctx, d, sandboxDir, agentDef, ri.profile, perms, outputFor(opts.Output))
 	if err != nil {
 		return nil, err

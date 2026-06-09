@@ -355,7 +355,7 @@ func prepareResetRestart(ctx context.Context, d state.Deps, opts ResetOptions, s
 	cname := store.InstanceName(d.Layout.Principal, opts.Name)
 	_ = d.Runtime.Remove(ctx, cname)
 
-	perms := state.Perms(meta.Isolation)
+	perms := state.Perms()
 
 	// Clear logs so each run starts fresh
 	slog.Debug("clearing logs", "event", "sandbox.reset.logs", "sandbox", opts.Name)
@@ -455,13 +455,7 @@ func resetInPlace(ctx context.Context, d state.Deps, opts ResetOptions, meta *st
 // clearCacheAndFiles clears the cache and files directories unless --keep-X flags are set.
 func clearCacheAndFiles(d state.Deps, opts ResetOptions) error {
 	sandboxDir := d.Layout.SandboxDir(opts.Name)
-	// Load metadata to check security mode for permissions
-	meta, err := store.LoadEnvironment(sandboxDir)
-	if err != nil {
-		return fmt.Errorf("load metadata: %w", err)
-	}
-
-	perms := state.Perms(meta.Isolation)
+	perms := state.Perms()
 
 	if !opts.KeepCache {
 		cacheDir := store.CacheDir(sandboxDir)

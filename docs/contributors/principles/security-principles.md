@@ -121,7 +121,7 @@ Backends Tart (macOS VM) and Seatbelt (sandbox-exec) are separate axes — chose
 
 ### Worked examples
 
-- **gVisor `--isolation container-enhanced`** (D17, commit `87956ac`, 2026-03-17). User-space kernel intercepts syscalls. Permission-handling quirks (UID remapping → relaxed bind-mount permissions per `docs/contributors/design/security.md`) are documented as residual risks.
+- **gVisor `--isolation container-enhanced`** (D17, commit `87956ac`, 2026-03-17). User-space kernel intercepts syscalls. (An earlier design assumed UID remapping forced relaxed/world-readable bind-mount permissions; finding **DF20** empirically disproved that — the container runs as the invoking host UID, so host-side paths now use the same restrictive `0750`/`0600` as standard Docker. See `docs/contributors/design/security.md`.)
 - **gVisor on macOS refused** (commit `d078db6`, 2026-03-17). The upstream Claude Code + gVisor `epoll_pwait` hang is a known platform-specific bug; yoloAI refuses upfront with a pointer rather than silently failing. This is `§9 — document residual risk` in action.
 - **Tart for macOS VMs** (commits `814d379` and following, 2026-02-26). Full VM isolation; ~3× I/O cost on macOS (`docs/contributors/design/research/sandboxing.md`); chosen by users who want hardware-level isolation.
 - **Seatbelt** (D15, default-deny credential access, `docs/contributors/design/security.md` §Seatbelt Backend Security). macOS sandbox-exec syscall filtering. Restricted to specific paths (`~/.local/`, `~/.gitconfig`, `~/.config/git/`) and a safe environment subset.
@@ -342,7 +342,7 @@ For every security feature, the documented section names:
 - **`docs/contributors/design/security.md` is structured this way**. Each defense (file-based credentials, network isolation, dangerous-directory refusal) names its accepted tradeoffs explicitly.
 - **`docs/contributors/design/network-isolation.md` §Threat Model**: "Sandbox escape via kernel/runtime exploit. This is gVisor's and Kata's domain. Network isolation cannot help if the agent breaks out of the sandbox entirely." Documented as out-of-scope, not pretended.
 - **Network isolation known limitations** documented: DNS over UDP 53 must be open for domain resolution; CDN IP rotation can make rules stale; domain fronting remains theoretically possible. Same limitations as the consensus implementations (Anthropic, Trail of Bits).
-- **gVisor + bind-mount permissions**: relaxed permissions are documented as the cost of gVisor's user-namespace UID remapping. The user trades file permission tightness for syscall filtering; they can decide.
+- **gVisor + bind-mount permissions**: gVisor uses the same restrictive `0750`/`0600` host-side permissions as standard Docker (no relaxed/world-readable bits). The earlier "relaxed permissions are the cost of UID remapping" framing was empirically disproved — see finding **DF20**.
 - **`CAP_SYS_ADMIN` for `:overlay`**: documented as a broad capability with explicit tradeoff language: "the container's namespace isolation limits the blast radius, but this is a tradeoff: overlay gives instant setup and space efficiency at the cost of a wider capability grant."
 - **`:rw` is documented as protection-off**: "give the agent direct read/write access. Use only when you've committed your work or don't mind destructive changes."
 

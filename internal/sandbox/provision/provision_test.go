@@ -114,7 +114,7 @@ func TestCreateSecretsDir_WithKey(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
 	hostEnv := map[string]string{"ANTHROPIC_API_KEY": "sk-test-secret"}
 
-	dir, err := CreateSecretsDir(agentDef, nil, hostEnv, "", "")
+	dir, err := CreateSecretsDir(agentDef, nil, hostEnv, "")
 	require.NoError(t, err)
 	require.NotEmpty(t, dir)
 	defer os.RemoveAll(dir) //nolint:errcheck
@@ -127,7 +127,7 @@ func TestCreateSecretsDir_WithKey(t *testing.T) {
 func TestCreateSecretsDir_NoKey(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
 
-	dir, err := CreateSecretsDir(agentDef, nil, nil, "", "")
+	dir, err := CreateSecretsDir(agentDef, nil, nil, "")
 	require.NoError(t, err)
 	assert.Empty(t, dir)
 }
@@ -135,7 +135,7 @@ func TestCreateSecretsDir_NoKey(t *testing.T) {
 func TestCreateSecretsDir_NoEnvVars(t *testing.T) {
 	agentDef := agent.GetAgent("test")
 
-	dir, err := CreateSecretsDir(agentDef, nil, nil, "", "")
+	dir, err := CreateSecretsDir(agentDef, nil, nil, "")
 	require.NoError(t, err)
 	assert.Empty(t, dir)
 }
@@ -147,7 +147,7 @@ func TestCreateSecretsDir_WithEnvVars(t *testing.T) {
 		"CUSTOM_VAR":      "myvalue",
 	}
 
-	dir, err := CreateSecretsDir(agentDef, envVars, nil, "", "")
+	dir, err := CreateSecretsDir(agentDef, envVars, nil, "")
 	require.NoError(t, err)
 	require.NotEmpty(t, dir)
 	defer os.RemoveAll(dir) //nolint:errcheck
@@ -168,7 +168,7 @@ func TestCreateSecretsDir_APIKeyOverridesEnv(t *testing.T) {
 	}
 	hostEnv := map[string]string{"ANTHROPIC_API_KEY": "sk-real-key"}
 
-	dir, err := CreateSecretsDir(agentDef, envVars, hostEnv, "", "")
+	dir, err := CreateSecretsDir(agentDef, envVars, hostEnv, "")
 	require.NoError(t, err)
 	require.NotEmpty(t, dir)
 	defer os.RemoveAll(dir) //nolint:errcheck
@@ -181,7 +181,7 @@ func TestCreateSecretsDir_APIKeyOverridesEnv(t *testing.T) {
 func TestCreateSecretsDir_EmptyBoth(t *testing.T) {
 	agentDef := agent.GetAgent("test")
 
-	dir, err := CreateSecretsDir(agentDef, map[string]string{}, nil, "", "")
+	dir, err := CreateSecretsDir(agentDef, map[string]string{}, nil, "")
 	require.NoError(t, err)
 	assert.Empty(t, dir)
 }
@@ -191,7 +191,7 @@ func TestCreateSecretsDir_HonorsStagingRoot(t *testing.T) {
 	hostEnv := map[string]string{"ANTHROPIC_API_KEY": "sk-test-secret"}
 	stagingRoot := t.TempDir()
 
-	dir, err := CreateSecretsDir(agentDef, nil, hostEnv, "", stagingRoot)
+	dir, err := CreateSecretsDir(agentDef, nil, hostEnv, stagingRoot)
 	require.NoError(t, err)
 	require.NotEmpty(t, dir)
 	defer os.RemoveAll(dir) //nolint:errcheck

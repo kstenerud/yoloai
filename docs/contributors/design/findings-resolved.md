@@ -7,6 +7,27 @@ History of codebase findings (issues discovered mid-work) that have been address
 are moved here from [`findings-unresolved.md`](findings-unresolved.md) once resolved, so the
 active file stays a working set. Newest first.
 
+### DF20 — gVisor mode stages plaintext credentials world-readable in `/tmp`
+
+- **Discovered:** 2026-06-09 · **Workstream:** nolint-exception audit
+- **Severity:** MEDIUM
+- **Disposition:** RESOLVED 2026-06-09. Empirically validated on a real Linux + gVisor host (see the results table below), then **applied recommendation C**: deleted the `container-enhanced` special-case in `state.Perms` so it returns the restrictive `Dir:0750 / File:0600 / SecretsDir:0700 / SecretsFile:0600` for *all* isolation modes, and removed the four `//nolint:gosec` exceptions with it. The gVisor sandbox still reads its staged secrets because `store.ContainerUser` runs the container as the invoking host UID (the staging owner), and gVisor enforces guest-side uid/mode against the host-mapped owner — so owner-only perms are both sufficient for the sandbox and deny every other local user, closing the multi-tenant `/tmp` leak at the file perms. The now-dead `isolation` parameter was dropped from `state.Perms()` and from `provision.CreateSecretsDir` (its only use); call sites in `create.go`, `reset.go`, `provision.go`, and `launch.go` updated. The user-private `0700`-parent `SecretsStagingDir` default remains worthwhile as defense-in-depth but is no longer required for correctness.
+- **Description:** In `container-enhanced` (gVisor) isolation, `state.Perms` returned `SecretsDir: 0755` / `SecretsFile: 0644`, and `provision.CreateSecretsDir` stages the secrets via `os.MkdirTemp(stagingRoot, "yoloai-secrets-*")` where `stagingRoot` defaults to `""` → `os.TempDir()` (`/tmp` on Linux). `/tmp` is world-traversable, so for the window between staging and removal (the entrypoint reads `/run/secrets`, signals the consumed marker, then the host `RemoveAll`s the dir — up to `SecretsConsumedTimeout`, 30s default), **any local user on a multi-tenant Linux host could read the API keys / OAuth tokens** (`ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `CODEX_API_KEY`, …). The original `perms.go` comment claimed the broad bits were a real gVisor constraint (gofer/pre-remap container UID must read host-created files); the empirical validation below disproved that.
+- **Empirical validation (2026-06-09, real Linux + gVisor host):** Run on native Linux (KVM guest, Ubuntu 6.8.0), Docker daemon with `runsc` (release-20260309.0) registered. Mirrored yoloAI's Docker gVisor invocation: `docker run --runtime=runsc --user <hostUID>` (Docker has no `UsernsProvider`, so `UsernsMode=""`; `store.ContainerUser` returns the host UID as a numeric string for `container-enhanced` — the sandbox process runs as the *invoking host UID*, here 1000). Secrets staged on host owned by uid 1000, bind-mounted `:ro` to `/run/secrets`.
+
+  | Variant | parent / dir / file perms | sandbox read (uid 1000)? | second host user (`nobody`) read? |
+  |---|---|---|---|
+  | **C** (tightest) | `0700` / `0700` / `0600` | **OK** | blocked |
+  | **B** | `0700` / `0755` / `0644` | OK | blocked (by 0700 parent only) |
+  | **A** (status-quo, `/tmp`) | `/tmp` / `0755` / `0644` | OK | blocked (by 0700 parent only) |
+
+  **Gofer UID:** `runsc-gofer` and `runsc-sandbox` both run as **host root (uid 0)** — the host-side filesystem access is done by root, so the parent-dir mode never blocks the gofer.
+
+  **Mechanism (negative + positive control):** gVisor nonetheless enforces *guest-side* uid/mode faithfully. With a `0600` file owned by host uid 1000: a sandbox running as **uid 1234 → `Permission denied`** (NEG); running as the **matching uid 1000 → reads OK** (POS). A `0750` host-owned dir is likewise writable by the matching-uid sandbox. So access is granted by *owner-uid match between the staged path and `ContainerUser`*, not by the root gofer bypassing perms, and not by world bits.
+
+  **Caveat for future work:** the registered Docker runsc path uses `--user <hostUID>` + `UsernsMode=""`, which is what was validated. If a Podman-rootless gVisor path is ever added, re-validate, since `keep-id` maps the container to a subuid and the owner-match argument must be re-checked.
+- **Pointer:** `internal/sandbox/state/perms.go`; `internal/sandbox/provision/provision.go` (`CreateSecretsDir`, `EnsureContainerSettings`); call sites `internal/sandbox/create/create.go`, `internal/sandbox/lifecycle/reset.go`, `internal/sandbox/launch/launch.go`.
+
 ### DF17 — CLI `--json` output has no structural convention (list-envelope + error/empty shape vary by command)
 
 - **Discovered:** 2026-06-03 · **Workstream:** Public-API "right reasons" round (A4 re-examination)

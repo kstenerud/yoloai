@@ -588,19 +588,20 @@ stripping). Each has a code-level fix but no test verifying the fix prevents the
 If a refactor removes a workaround, nothing catches the regression.
 
 Most impactful subset to test first: (1) Kata stale socket recovery (pre-flight cleanup
-in containerd backend), (2) containerd snapshot orphan recovery, (3) gVisor permission
-detection (standard gets 0750/0600, gVisor gets 0777/0666 — see next entry).
+in containerd backend), (2) containerd snapshot orphan recovery, (3) sandbox path
+permissions are restrictive (`0750`/`0600`) in every isolation mode — see next entry.
 
-### gVisor permission mode detection
+### Sandbox path permission assertion
 
-`docs/contributors/design/security.md` documents that gVisor gets relaxed permissions (0777/0666) and
-standard Docker gets restrictive ones (0750/0600). The detection and permission-setting
-logic is in production code but has no test. A regression here is silent — files would be
-world-readable on standard Docker or inaccessible on gVisor.
+Host-side bind-mounted paths use restrictive `0750`/`0600` (secrets `0700`/`0600`) for
+every isolation mode — gVisor included, because the container runs as the invoking host
+UID (finding DF20; `state.Perms` no longer branches on isolation). `docs/contributors/design/security.md`
+documents this. A regression that re-introduced world-readable bits would silently expose
+sandbox contents — and, for the ephemeral secrets dir in `/tmp`, plaintext credentials — to
+other local users on a multi-tenant host.
 
-Test: create a standard sandbox, verify work dir permissions are 0750. The gVisor path
-can't run on CI (not available on standard runners) but the standard-mode permission
-assertion can.
+Test: create a sandbox, verify the work/secrets dir permissions are `0750`/`0700`. This runs
+on any backend (no gVisor needed) since the perms are now uniform.
 
 ---
 

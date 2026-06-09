@@ -25,7 +25,7 @@ import (
 // is created under stagingRoot; "" means the OS default temp dir (os.TempDir()), so
 // an embedder can stage a principal's plaintext credentials on a per-principal tmpfs.
 // Returns empty string if nothing was written.
-func CreateSecretsDir(agentDef *agent.Definition, configEnv, hostEnv map[string]string, security runtime.IsolationMode, stagingRoot string) (string, error) {
+func CreateSecretsDir(agentDef *agent.Definition, configEnv, hostEnv map[string]string, stagingRoot string) (string, error) {
 	if len(agentDef.APIKeyEnvVars) == 0 && len(agentDef.AuthHintEnvVars) == 0 && len(configEnv) == 0 {
 		return "", nil
 	}
@@ -35,18 +35,17 @@ func CreateSecretsDir(agentDef *agent.Definition, configEnv, hostEnv map[string]
 		return "", fmt.Errorf("create secrets temp dir: %w", err)
 	}
 
-	// Determine permissions based on security mode.
-	// gVisor gofer runs as remapped uid and needs world-readable/executable.
-	// Standard Docker can use restrictive permissions.
-	// The dir lives in /tmp and is removed within seconds of container startup.
-	perms := state.Perms(security)
+	// Owner-only perms: the container runs as the invoking host UID (the staging
+	// owner) in every isolation mode, so 0700/0600 is both readable by the
+	// sandbox and denied to other local users — see DF20.
+	perms := state.Perms()
 
 	if err := os.Chmod(tmpDir, perms.SecretsDir); err != nil {
 		_ = os.RemoveAll(tmpDir)
 		return "", fmt.Errorf("chmod secrets dir: %w", err)
 	}
 	// When running via sudo, chown the dir to the real user so the container
-	// process (running as that user via --userns=keep-id) can read it.
+	// process (running as that user) can read it.
 	_ = fileutil.ChownIfSudo(tmpDir) //nolint:errcheck // best-effort; individual files are already chowned by WriteFilePerm
 
 	wrote := false
@@ -237,8 +236,7 @@ func EnsureContainerSettings(agentDef *agent.Definition, sandboxDir string, isol
 		return nil
 	}
 
-	// Use restrictive permissions by default, world-writable only for container-enhanced (gVisor)
-	perms := state.Perms(isolation)
+	perms := state.Perms()
 
 	agentStateDir := filepath.Join(sandboxDir, store.AgentRuntimeDir)
 	if err := fileutil.MkdirAllPerm(agentStateDir, perms.Dir); err != nil {
