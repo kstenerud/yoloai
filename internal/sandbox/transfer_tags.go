@@ -71,7 +71,7 @@ func TransferTags(ctx context.Context, layout config.Layout, rt runtime.Runtime,
 		for i, t := range tags {
 			sandboxSHAs[i] = t.SHA
 		}
-		gitEnv := sysexec.Curated(layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+		gitEnv := sysexec.GitEnv(layout.Env)
 		shaMap, err = workspace.BuildSHAMapByMatching(gitEnv, sandboxGitRunner(ctx, gitEnv, rt, name, workDir), targetDir, sandboxSHAs)
 		if err != nil {
 			return nil, fmt.Errorf("build SHA map: %w", err)
@@ -86,7 +86,7 @@ func TransferTags(ctx context.Context, layout config.Layout, rt runtime.Runtime,
 			res.Skipped++
 			continue
 		}
-		gitEnv := sysexec.Curated(layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+		gitEnv := sysexec.GitEnv(layout.Env)
 		if createErr := workspace.CreateTag(gitEnv, targetDir, tag.Name, hostSHA, tag.Message); createErr != nil {
 			res.Outcomes = append(res.Outcomes, TagOutcome{Name: tag.Name, Err: createErr.Error()})
 			res.Skipped++

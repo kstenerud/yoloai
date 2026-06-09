@@ -506,7 +506,7 @@ func replaceSandboxIfNeeded(ctx context.Context, d state.Deps, opts Options, san
 		return nil // nothing to replace
 	}
 	if !opts.AbandonUnappliedWork {
-		gitEnv := sysexec.Curated(d.Layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+		gitEnv := sysexec.GitEnv(d.Layout.Env)
 		if err := checkUnappliedWork(ctx, gitEnv, d.Runtime, opts.Name, sandboxDir); err != nil {
 			return err
 		}
@@ -547,7 +547,7 @@ func createSandboxDirs(sandboxDir string, perms state.IsolationPerms) error {
 func setupAllWorkdirs(d state.Deps, opts Options, workdir *DirSpec, auxDirs []*DirSpec, resolvedArchetype archetype.Archetype, devcontainerCfg *archetype.DevcontainerConfig) (string, string, []store.DirEnvironment, error) {
 	slog.Debug("setting up workdir", "event", "sandbox.create.workdir", "mode", string(workdir.Mode))
 	sandboxDir := d.Layout.SandboxDir(opts.Name)
-	gitEnv := sysexec.Curated(d.Layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+	gitEnv := sysexec.GitEnv(d.Layout.Env)
 	workCopyDir, baselineSHA, err := setupWorkdir(gitEnv, sandboxDir, workdir, d.Runtime)
 	if err != nil {
 		return "", "", nil, err

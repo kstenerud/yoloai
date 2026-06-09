@@ -102,7 +102,7 @@ func ListTagsBeyondBaseline(ctx context.Context, layout config.Layout, rt runtim
 		return nil, nil
 	}
 
-	gitEnv := sysexec.Curated(layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+	gitEnv := sysexec.GitEnv(layout.Env)
 	git := sandboxGitRunner(ctx, gitEnv, rt, name, workDir)
 
 	// Collect commit SHAs beyond baseline
@@ -159,7 +159,7 @@ func ListUnappliedTags(ctx context.Context, layout config.Layout, rt runtime.Run
 	}
 
 	// List all tags in sandbox
-	gitEnvForSandbox := sysexec.Curated(layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+	gitEnvForSandbox := sysexec.GitEnv(layout.Env)
 	sandboxTags, err := listAllTags(sandboxGitRunner(ctx, gitEnvForSandbox, rt, name, workDir))
 	if err != nil {
 		return nil, err
@@ -170,7 +170,7 @@ func ListUnappliedTags(ctx context.Context, layout config.Layout, rt runtime.Run
 	}
 
 	// List all tags on host
-	gitEnv := sysexec.Curated(layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+	gitEnv := sysexec.GitEnv(layout.Env)
 	hostTagNames := make(map[string]bool)
 	hostTags, err := listAllTags(hostGitRunner(gitEnv, targetDir))
 	if err == nil { // best-effort; ignore errors

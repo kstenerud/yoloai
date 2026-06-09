@@ -62,7 +62,7 @@ func shaForError(sha string) string {
 // only when none is set. :rw and :overlay workdirs are refused with a
 // *UsageError (their baselines aren't host-tracked).
 func AdvanceBaselineCAS(ctx context.Context, layout config.Layout, rt runtime.Runtime, name, expectedCurrentSHA string) (*BaselineChange, error) {
-	gitEnv := sysexec.Curated(layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+	gitEnv := sysexec.GitEnv(layout.Env)
 	return mutateBaseline(ctx, layout, rt, name, expectedCurrentSHA, func(workDir string) (string, error) {
 		out, err := runtime.GitExecFor(ctx, gitEnv, rt, name, workDir, "rev-parse", "HEAD")
 		if err != nil {
@@ -76,7 +76,7 @@ func AdvanceBaselineCAS(ctx context.Context, layout config.Layout, rt runtime.Ru
 // SHA, full SHA, or any rev git can resolve), guarded by the same
 // compare-and-swap as AdvanceBaselineCAS.
 func SetBaselineCAS(ctx context.Context, layout config.Layout, rt runtime.Runtime, name, expectedCurrentSHA, ref string) (*BaselineChange, error) {
-	gitEnv := sysexec.Curated(layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+	gitEnv := sysexec.GitEnv(layout.Env)
 	return mutateBaseline(ctx, layout, rt, name, expectedCurrentSHA, func(workDir string) (string, error) {
 		out, err := runtime.GitExecFor(ctx, gitEnv, rt, name, workDir, "rev-parse", ref)
 		if err != nil {
@@ -117,7 +117,7 @@ func mutateBaseline(ctx context.Context, layout config.Layout, rt runtime.Runtim
 
 	// Subject is cosmetic — a failed lookup must not fail the move.
 	workDir := store.WorkDir(sandboxDir, meta.Workdir.HostPath)
-	gitEnv := sysexec.Curated(layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+	gitEnv := sysexec.GitEnv(layout.Env)
 	subject := ""
 	if out, subjErr := runtime.GitExecFor(ctx, gitEnv, rt, name, workDir, "log", "--format=%s", "-1", sha); subjErr == nil {
 		subject = strings.TrimSpace(out)
@@ -207,7 +207,7 @@ func BaselineLog(ctx context.Context, layout config.Layout, rt runtime.Runtime, 
 
 	workDir := store.WorkDir(sandboxDir, meta.Workdir.HostPath)
 	baselineSHA := meta.Workdir.BaselineSHA
-	gitEnv := sysexec.Curated(layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+	gitEnv := sysexec.GitEnv(layout.Env)
 
 	inceptionSHA := meta.Workdir.InceptionSHA
 	if inceptionSHA == "" {

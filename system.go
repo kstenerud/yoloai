@@ -864,7 +864,7 @@ func (s *System) classifySandboxes() (known []string, broken []classifiedSandbox
 			known = append(known, store.InstanceName(s.layout.Principal, name))
 			continue
 		} else {
-			gitEnv := sysexec.Curated(s.layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+			gitEnv := sysexec.GitEnv(s.layout.Env)
 			state, detail := sandbox.ProbeWorkData(gitEnv, path)
 			c := classifiedSandbox{name: name, path: path, detail: detail}
 			switch {

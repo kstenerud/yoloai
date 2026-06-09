@@ -306,7 +306,7 @@ func InspectSandbox(ctx context.Context, layout config.Layout, rt runtime.Runtim
 		diskUsageBytes = size
 	}
 
-	gitEnv := sysexec.Curated(layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+	gitEnv := sysexec.GitEnv(layout.Env)
 	return &Info{
 		Environment:    meta,
 		Status:         status,
@@ -382,7 +382,7 @@ func InspectSandboxWithBackend(ctx context.Context, layout config.Layout, rt run
 		return nil, err
 	}
 
-	gitEnv2 := sysexec.Curated(layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+	gitEnv2 := sysexec.GitEnv(layout.Env)
 	return &Info{
 		Environment:    meta,
 		Status:         status,

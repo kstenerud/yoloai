@@ -58,7 +58,7 @@ func ApplyOverlay(ctx context.Context, layout config.Layout, rt runtime.Runtime,
 		return result, nil
 	}
 
-	gitEnv := sysexec.Curated(layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+	gitEnv := sysexec.GitEnv(layout.Env)
 	for _, ps := range patches {
 		if applyErr := workspace.ApplyPatch(gitEnv, ps.Patch, ps.HostPath, workspace.IsGitRepo(ps.HostPath)); applyErr != nil {
 			return nil, fmt.Errorf("%s: %w", ps.HostPath, applyErr)

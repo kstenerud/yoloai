@@ -44,7 +44,7 @@ type DiffOptions struct {
 //     overlay diffs need container exec; route through
 //     GenerateOverlayDiff.
 func GenerateDiff(ctx context.Context, opts DiffOptions) (string, error) {
-	gitEnv := sysexec.Curated(opts.Layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+	gitEnv := sysexec.GitEnv(opts.Layout.Env)
 	workDir, baselineSHA, mode, err := loadDiffContext(opts.Layout, opts.Name)
 	if err != nil {
 		return "", err
@@ -108,7 +108,7 @@ func GenerateCommitDiff(opts CommitDiffOptions) (string, error) {
 		return "", fmt.Errorf("commit diff is not available for :rw directories")
 	}
 
-	gitEnv := sysexec.Curated(opts.Layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+	gitEnv := sysexec.GitEnv(opts.Layout.Env)
 	if err := workspace.StageUntrackedWithEnv(gitEnv, workDir); err != nil {
 		return "", err
 	}
@@ -158,7 +158,7 @@ func ListCommitsWithStats(ctx context.Context, layout config.Layout, rt runtime.
 		return nil, err
 	}
 
-	gitEnv := sysexec.Curated(layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+	gitEnv := sysexec.GitEnv(layout.Env)
 	result := make([]CommitInfoWithStat, len(commits))
 	for i, c := range commits {
 		cmd := workspace.NewGitCmdWithEnv(gitEnv, workDir, "diff", "--stat", c.SHA+"~1", c.SHA)

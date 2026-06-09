@@ -226,7 +226,7 @@ func checkDirOverlaps(workdir *DirSpec, auxDirs []*DirSpec) error {
 // *DirtyWorkdirError the caller must consciously override. The CLI catches it,
 // prompts, and retries with AllowDirty set.
 func checkDirtyRepos(layoutEnv map[string]string, workdir *DirSpec, auxDirs []*DirSpec) error {
-	gitEnv := sysexec.Curated(layoutEnv, []string{"PATH", "HOME", "TMPDIR"}, nil)
+	gitEnv := sysexec.GitEnv(layoutEnv)
 	var dirty []yoerrors.DirtyDir
 	check := func(d *DirSpec) error {
 		if d.AllowDirty {

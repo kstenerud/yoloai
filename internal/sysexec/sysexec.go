@@ -78,3 +78,16 @@ func Curated(layoutEnv map[string]string, allow []string, overrides map[string]s
 	sort.Strings(out)
 	return out
 }
+
+// GitEnv builds a curated environment for host-side git invocations. It is the
+// shared allowlist for every library git call so they stay consistent.
+//
+// Beyond PATH/HOME/TMPDIR it carries SUDO_UID: under `sudo`, yoloAI chowns the
+// sandbox work copy to the invoking user, so a git command running as root then
+// operates on a tree owned by SUDO_UID. git's sudo-aware ownership check reads
+// SUDO_UID to accept that tree; without it git rejects the repo as dubious
+// ("fatal: not in a git directory"). SUDO_UID is absent from layoutEnv on
+// non-sudo runs, so allowlisting it is a no-op there.
+func GitEnv(layoutEnv map[string]string) []string {
+	return Curated(layoutEnv, []string{"PATH", "HOME", "TMPDIR", "SUDO_UID"}, nil)
+}

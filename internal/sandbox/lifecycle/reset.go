@@ -115,7 +115,7 @@ func Reset(ctx context.Context, d state.Deps, opts ResetOptions) (*ResetResult, 
 // every routine destroy. The work signal is read via the backend's git context
 // (in-VM for Tart), so callers must open the runtime first.
 func NeedsConfirmation(ctx context.Context, d state.Deps, name string) (bool, string) {
-	gitEnv := sysexec.Curated(d.Layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+	gitEnv := sysexec.GitEnv(d.Layout.Env)
 	return unappliedWorkReason(ctx, gitEnv, d.Runtime, name, d.Layout.SandboxDir(name))
 }
 
@@ -203,7 +203,7 @@ func resetCopyWorkdir(d state.Deps, sandboxName, sandboxDir string, meta *store.
 		return "", fmt.Errorf("re-copy workdir: %w", err)
 	}
 
-	gitEnv := sysexec.Curated(d.Layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+	gitEnv := sysexec.GitEnv(d.Layout.Env)
 	if workspace.IsGitRepo(workDir) {
 		sha, err := workspace.HeadSHAWithEnv(gitEnv, workDir)
 		if err != nil {
@@ -368,7 +368,7 @@ func prepareResetRestart(ctx context.Context, d state.Deps, opts ResetOptions, s
 	}
 
 	// Reset aux :copy and :overlay dirs
-	gitEnv := sysexec.Curated(d.Layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+	gitEnv := sysexec.GitEnv(d.Layout.Env)
 	if err := resetAuxDirs(gitEnv, sandboxDir, meta); err != nil {
 		return err
 	}
@@ -413,7 +413,7 @@ func resetInPlace(ctx context.Context, d state.Deps, opts ResetOptions, meta *st
 	}
 
 	workDir := store.WorkDir(sandboxDir, meta.Workdir.HostPath)
-	gitEnv := sysexec.Curated(d.Layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+	gitEnv := sysexec.GitEnv(d.Layout.Env)
 	rsyncEnv := sysexec.Curated(d.Layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
 
 	// Re-sync workdir from host (bind-mount makes changes visible in container)

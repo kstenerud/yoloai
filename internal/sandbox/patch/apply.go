@@ -103,7 +103,7 @@ func ApplyAll(ctx context.Context, layout config.Layout, rt runtime.Runtime, nam
 
 	hostPath := meta.Workdir.HostPath
 	isGit := workspace.IsGitRepo(hostPath)
-	gitEnv := sysexec.Curated(layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+	gitEnv := sysexec.GitEnv(layout.Env)
 	if err := workspace.CheckPatch(gitEnv, patchBytes, hostPath, isGit); err != nil {
 		return nil, err
 	}
@@ -197,7 +197,7 @@ func ApplySeries(ctx context.Context, layout config.Layout, rt runtime.Runtime, 
 		return nil, nil
 	}
 
-	gitEnv := sysexec.Curated(layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+	gitEnv := sysexec.GitEnv(layout.Env)
 	shaMap, amErr := workspace.ApplyFormatPatch(gitEnv, patchDir, files, hostPath)
 	if amErr != nil && shaMap == nil {
 		// git am failed outright — nothing applied.
@@ -326,7 +326,7 @@ type PatchSet = workspace.PatchSet
 // changes the agent left behind are excluded. The CLI default is false; the
 // caller opts in via `yoloai apply --include-uncommitted`.
 func GeneratePatch(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, paths []string, includeUncommitted bool) (patch []byte, stat string, err error) {
-	gitEnv := sysexec.Curated(layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+	gitEnv := sysexec.GitEnv(layout.Env)
 	workDir, baselineSHA, mode, err := loadDiffContext(layout, name)
 	if err != nil {
 		return nil, "", err
@@ -577,7 +577,7 @@ func UpdateOverlayBaselineToHEAD(ctx context.Context, layout config.Layout, rt r
 // after the baseline commit, in chronological order (oldest first).
 // Returns an empty slice if HEAD == baseline.
 func ListCommitsBeyondBaseline(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string) ([]CommitInfo, error) {
-	gitEnv := sysexec.Curated(layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+	gitEnv := sysexec.GitEnv(layout.Env)
 	workDir, baselineSHA, mode, err := loadDiffContext(layout, name)
 	if err != nil {
 		return nil, err
@@ -612,7 +612,7 @@ func ListCommitsBeyondBaseline(ctx context.Context, layout config.Layout, rt run
 // HasUncommittedChanges checks whether the work copy has uncommitted
 // changes (staged or unstaged, including untracked files).
 func HasUncommittedChanges(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string) (bool, error) {
-	gitEnv := sysexec.Curated(layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+	gitEnv := sysexec.GitEnv(layout.Env)
 	workDir, _, mode, err := loadDiffContext(layout, name)
 	if err != nil {
 		return false, err
@@ -783,7 +783,7 @@ func selectRefs(refs []string, allCommits []CommitInfo, shaIndex map[string]int)
 // to only include changes in those paths. Returns the temp directory and sorted
 // file list. The caller is responsible for os.RemoveAll(patchDir).
 func GenerateFormatPatchForRefs(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, shas, paths []string) (patchDir string, files []string, err error) {
-	gitEnv := sysexec.Curated(layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+	gitEnv := sysexec.GitEnv(layout.Env)
 	workDir, _, mode, loadErr := loadDiffContext(layout, name)
 	if loadErr != nil {
 		return "", nil, loadErr
@@ -841,7 +841,7 @@ func AdvanceBaselineTo(layout config.Layout, name, sha string) error {
 // subsequent diff/apply operations don't re-show already-applied commits.
 // For :rw mode sandboxes, this is a no-op.
 func AdvanceBaseline(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string) error {
-	gitEnv := sysexec.Curated(layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+	gitEnv := sysexec.GitEnv(layout.Env)
 	return advanceBaselineUnlocked(layout, name, func(workDir string) (string, error) {
 		sha, err := runtime.GitExecFor(ctx, gitEnv, rt, name, workDir, "rev-parse", "HEAD")
 		if err != nil {
@@ -856,7 +856,7 @@ func AdvanceBaseline(ctx context.Context, layout config.Layout, rt runtime.Runti
 // of .patch filenames. The caller is responsible for os.RemoveAll(patchDir).
 // When paths is non-empty, only commits touching those paths are included.
 func GenerateFormatPatch(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, paths []string) (patchDir string, files []string, err error) {
-	gitEnv := sysexec.Curated(layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+	gitEnv := sysexec.GitEnv(layout.Env)
 	workDir, baselineSHA, mode, loadErr := loadDiffContext(layout, name)
 	if loadErr != nil {
 		return "", nil, loadErr
@@ -915,7 +915,7 @@ func GenerateFormatPatch(ctx context.Context, layout config.Layout, rt runtime.R
 // HEAD, not the baseline). This captures only uncommitted changes that the agent
 // hasn't committed. Returns empty patch if no uncommitted changes.
 func GenerateUncommittedDiff(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, paths []string) (patch []byte, stat string, err error) {
-	gitEnv := sysexec.Curated(layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+	gitEnv := sysexec.GitEnv(layout.Env)
 	workDir, _, mode, loadErr := loadDiffContext(layout, name)
 	if loadErr != nil {
 		return nil, "", loadErr
