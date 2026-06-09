@@ -3,7 +3,6 @@
 package patch
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -28,7 +27,6 @@ func writeTestFile(t *testing.T, dir, name, content string) {
 	testutil.WriteFile(t, dir, name, content)
 }
 
-// testEnv returns os.Environ() for use as an explicit subprocess env in tests.
-// Tests are the outermost edge; reading os.Environ() here is the licensed
-// boundary-resolve for the test process (DEV §12).
-func testEnv() []string { return os.Environ() } //nolint:forbidigo // §12: test-edge boundary; tests resolve ambient env once here
+// testEnv returns the curated hermetic git env used for git in this package's
+// tests (see testutil.GitEnv) — never the full ambient env (DEV §12).
+func testEnv() []string { return testutil.GitEnv() }

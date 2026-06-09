@@ -512,7 +512,7 @@ func TestSetupWorkdir_DefersBaselineForWorkDirSetupBackends(t *testing.T) {
 	rt := &mockTartRuntime{}
 
 	// setupWorkdir should return empty SHA for WorkDirSetup backends
-	_, baselineSHA, err := setupWorkdir(os.Environ(), sandboxDir, workdir, rt)
+	_, baselineSHA, err := setupWorkdir(testutil.GitEnv(), sandboxDir, workdir, rt)
 	require.NoError(t, err)
 	assert.Empty(t, baselineSHA, "baseline SHA should be empty for WorkDirSetup backends (baseline deferred to VM)")
 }
@@ -538,7 +538,7 @@ func TestSetupWorkdir_CreatesBaselineForDockerBackends(t *testing.T) {
 	rt := &mockDockerRuntime{}
 
 	// setupWorkdir should create baseline and return non-empty SHA for Docker
-	_, baselineSHA, err := setupWorkdir(os.Environ(), sandboxDir, workdir, rt)
+	_, baselineSHA, err := setupWorkdir(testutil.GitEnv(), sandboxDir, workdir, rt)
 	require.NoError(t, err)
 	assert.NotEmpty(t, baselineSHA, "baseline SHA should be non-empty for Docker backends (immediate baseline)")
 	assert.Len(t, baselineSHA, 40, "SHA should be 40 characters (git SHA-1)")
@@ -568,7 +568,7 @@ func TestSetupWorkdir_OverlayModeDeferBaseline(t *testing.T) {
 	}
 
 	for _, rt := range runtimes {
-		_, baselineSHA, err := setupWorkdir(os.Environ(), sandboxDir, workdir, rt)
+		_, baselineSHA, err := setupWorkdir(testutil.GitEnv(), sandboxDir, workdir, rt)
 		require.NoError(t, err)
 		assert.Empty(t, baselineSHA, "overlay mode should defer baseline for all backends")
 	}

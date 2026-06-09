@@ -26,7 +26,7 @@ import (
 // so they thread the real host env into New just as the CLI would.
 func envFromOS() map[string]string {
 	m := make(map[string]string)
-	for _, e := range os.Environ() {
+	for _, e := range os.Environ() { //nolint:forbidigo // §12: licensed test-edge env snapshot → layout.Env; curated by the runtime's execEnv allowlist before any subprocess sees it
 		if k, v, ok := strings.Cut(e, "="); ok {
 			m[k] = v
 		}

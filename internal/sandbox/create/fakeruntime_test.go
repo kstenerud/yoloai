@@ -95,7 +95,7 @@ func layoutForTmpDir(tmpDir string) config.Layout {
 	// snapshot so credential checks (which read Layout.Env, not os.Getenv) see
 	// any keys the test set via t.Setenv.
 	env := make(map[string]string)
-	for _, e := range os.Environ() {
+	for _, e := range os.Environ() { //nolint:forbidigo // §12: licensed test-edge env snapshot → layout.Env; curated by the runtime's execEnv allowlist before any subprocess sees it
 		if k, v, ok := strings.Cut(e, "="); ok {
 			env[k] = v
 		}

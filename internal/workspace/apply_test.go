@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/kstenerud/yoloai/internal/sysexec"
+	"github.com/kstenerud/yoloai/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -157,7 +158,7 @@ func generatePatch(t *testing.T, dir, filename, oldContent, newContent string) [
 	writeTestFile(t, dir, filename, newContent)
 	gitAdd(t, dir, filename)
 
-	cmd := sysexec.Command(os.Environ(), "git", "-C", dir, "diff", "--cached") // test edge: os.Environ allowed in _test.go
+	cmd := sysexec.Command(testutil.GitEnv(), "git", "-C", dir, "diff", "--cached")
 	out, err := cmd.Output()
 	require.NoError(t, err, "git diff --cached failed")
 	require.NotEmpty(t, out, "patch should not be empty")

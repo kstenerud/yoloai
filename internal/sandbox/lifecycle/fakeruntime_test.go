@@ -7,11 +7,11 @@ import (
 	"context"
 	"io"
 	"log/slog"
-	"os"
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sysexec"
+	"github.com/kstenerud/yoloai/internal/testutil"
 )
 
 // Compile-time check.
@@ -88,9 +88,9 @@ func (m *lifecycleMockRuntime) GitExec(ctx context.Context, name, workDir string
 		return m.gitExecFn(ctx, name, workDir, args...)
 	}
 	cmdArgs := append([]string{"-C", workDir}, args...)
-	// Explicit env from the test edge (os.Environ is allowed in _test.go);
-	// the exec itself funnels through sysexec (DEV §12).
-	out, err := sysexec.CommandContext(ctx, os.Environ(), "git", cmdArgs...).Output()
+	// Curated hermetic git env (PATH + identity, never the full ambient env)
+	// funneled through sysexec — see testutil.GitEnv and DEV §12.
+	out, err := sysexec.CommandContext(ctx, testutil.GitEnv(), "git", cmdArgs...).Output()
 	return string(out), err
 }
 func (m *lifecycleMockRuntime) InteractiveExec(_ context.Context, _ string, _ []string, _ string, _ string, _ runtime.IOStreams) error {

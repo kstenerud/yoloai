@@ -14,6 +14,23 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// GitEnv returns a curated, hermetic environment for running git in tests:
+// only the host PATH (so the git binary is found) plus an explicit identity and
+// disabled global/system config. It deliberately does NOT hand git the full
+// ambient environment — that would re-introduce the inheritance DEV §12 exists
+// to prevent and make tests depend on the developer's ~/.gitconfig. The single
+// os.Environ read happens in envSnapshot (the test edge); this allowlists PATH.
+func GitEnv() []string {
+	return sysexec.Curated(envSnapshot(), []string{"PATH"}, map[string]string{
+		"GIT_CONFIG_GLOBAL":   "/dev/null",
+		"GIT_CONFIG_SYSTEM":   "/dev/null",
+		"GIT_AUTHOR_NAME":     "yoloai-test",
+		"GIT_AUTHOR_EMAIL":    "test@yoloai.test",
+		"GIT_COMMITTER_NAME":  "yoloai-test",
+		"GIT_COMMITTER_EMAIL": "test@yoloai.test",
+	})
+}
+
 // InitGitRepo initializes a git repository in dir with a test user identity.
 func InitGitRepo(t *testing.T, dir string) {
 	t.Helper()
@@ -37,8 +54,7 @@ func GitCommit(t *testing.T, dir, msg string) {
 // GitRevParse returns the current HEAD SHA of the git repo at dir.
 func GitRevParse(t *testing.T, dir string) string {
 	t.Helper()
-	// Test helpers use os.Environ() — testutil is excluded from the forbidigo ban (§12).
-	cmd := sysexec.Command(os.Environ(), "git", "-C", dir, "rev-parse", "HEAD") //nolint:forbidigo // §12: test helper; testutil/ is excluded
+	cmd := sysexec.Command(GitEnv(), "git", "-C", dir, "rev-parse", "HEAD")
 	out, err := cmd.Output()
 	require.NoError(t, err, "git rev-parse HEAD failed")
 	return strings.TrimSpace(string(out))
@@ -47,7 +63,7 @@ func GitRevParse(t *testing.T, dir string) string {
 // RunGit runs an arbitrary git command in dir.
 func RunGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := sysexec.Command(os.Environ(), "git", args...) //nolint:forbidigo // §12: test helper; testutil/ is excluded
+	cmd := sysexec.Command(GitEnv(), "git", args...)
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, "git %v failed: %s", args, out)
@@ -57,7 +73,7 @@ func RunGit(t *testing.T, dir string, args ...string) {
 // stdout. Use for read-only queries (rev-list, rev-parse) in assertions.
 func RunGitOutput(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := sysexec.Command(os.Environ(), "git", args...) //nolint:forbidigo // §12: test helper; testutil/ is excluded
+	cmd := sysexec.Command(GitEnv(), "git", args...)
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	require.NoError(t, err, "git %v failed", args)

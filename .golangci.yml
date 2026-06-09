@@ -268,21 +268,33 @@ linters:
       - path: "internal/fileutil/fileutil\\.go"
         linters:
           - forbidigo
-      # Tests may use the ambient-state patterns (temp files, os.Environ at the
-      # test edge, stdio, etc.) — EXCEPT exec.Command*, which binds tests too
-      # (DEV §12 / D79: subprocesses go through internal/sysexec with an explicit
-      # env, in test code as well). So this lists the patterns tests are exempt
-      # from; exec.Command is deliberately ABSENT. When adding a new forbidigo
-      # pattern that tests should be exempt from, add its matched symbol here.
+      # Tests may use the ambient-state patterns (temp files, stdio, identity,
+      # etc.) — EXCEPT the full-ambient-env dumps (os.Environ / syscall.Environ)
+      # and exec.Command*, which bind tests too (DEV §12 / D79: a subprocess gets
+      # an explicit, curated env via internal/sysexec — handing it os.Environ()
+      # is functionally identical to inheriting the parent env and curates
+      # nothing, in test code as well). So this lists the patterns tests ARE
+      # exempt from; os.Environ, syscall.Environ, and exec.Command are
+      # deliberately ABSENT. The licensed test-edge env reads (testutil's
+      # envSnapshot, runtimetest's EnvFromOS) carry their own inline nolint and
+      # immediately curate. When adding a new forbidigo pattern that tests should
+      # be exempt from, add its matched symbol here.
       - path: "_test\\.go"
         linters:
           - forbidigo
-        text: "os\\.(WriteFile|OpenFile|MkdirAll|UserHomeDir|UserConfigDir|UserCacheDir|Getwd|Getuid|Getgid|Getenv|LookupEnv|Environ|ExpandEnv|Setenv|Unsetenv|Clearenv|Chdir|Args|Geteuid|Getegid|Getgroups|Getppid|Hostname|Stdin|Stdout|Stderr)|filepath\\.Dir|fmt\\.(Print|Printf|Println|Scan|Scanf|Scanln)|^print(ln)?$|log\\.(Print|Printf|Println|Fatal|Fatalf|Fatalln|Panic|Panicf|Panicln)|syscall\\.(Getenv|Setenv|Environ|Getuid|Getgid|Geteuid|Getegid|Getgroups|Getppid)|user\\.(Current|Lookup|LookupId|LookupGroup|LookupGroupId)|time\\.Local|sandbox\\.(NewManager|Manager)|runtime\\.(New|Runtime)"
+        text: "os\\.(WriteFile|OpenFile|MkdirAll|UserHomeDir|UserConfigDir|UserCacheDir|Getwd|Getuid|Getgid|Getenv|LookupEnv|ExpandEnv|Setenv|Unsetenv|Clearenv|Chdir|Args|Geteuid|Getegid|Getgroups|Getppid|Hostname|Stdin|Stdout|Stderr)|filepath\\.Dir|fmt\\.(Print|Printf|Println|Scan|Scanf|Scanln)|^print(ln)?$|log\\.(Print|Printf|Println|Fatal|Fatalf|Fatalln|Panic|Panicf|Panicln)|syscall\\.(Getenv|Setenv|Getuid|Getgid|Geteuid|Getegid|Getgroups|Getppid)|user\\.(Current|Lookup|LookupId|LookupGroup|LookupGroupId)|time\\.Local|sandbox\\.(NewManager|Manager)|runtime\\.(New|Runtime)"
       # internal/sysexec is THE licensed exec.Command* site — the funnel that
       # sets an explicit env; every other caller routes through it.
+      #
+      # testutil is the shared test-helper package; it gets the SAME exemption
+      # surface as _test.go (NOT a blanket forbidigo pass) so os.Environ /
+      # syscall.Environ / exec.Command are still banned here too. Its one
+      # licensed env-dump read (envSnapshot, which feeds GitEnv and the
+      # integration layout) carries an inline nolint and curates immediately.
       - path: "internal/testutil/"
         linters:
           - forbidigo
+        text: "os\\.(WriteFile|OpenFile|MkdirAll|UserHomeDir|UserConfigDir|UserCacheDir|Getwd|Getuid|Getgid|Getenv|LookupEnv|ExpandEnv|Setenv|Unsetenv|Clearenv|Chdir|Args|Geteuid|Getegid|Getgroups|Getppid|Hostname|Stdin|Stdout|Stderr)|filepath\\.Dir|fmt\\.(Print|Printf|Println|Scan|Scanf|Scanln)|^print(ln)?$|log\\.(Print|Printf|Println|Fatal|Fatalf|Fatalln|Panic|Panicf|Panicln)|syscall\\.(Getenv|Setenv|Getuid|Getgid|Geteuid|Getegid|Getgroups|Getppid)|user\\.(Current|Lookup|LookupId|LookupGroup|LookupGroupId)|time\\.Local|sandbox\\.(NewManager|Manager)|runtime\\.(New|Runtime)"
       - path: "internal/sysexec/"
         linters:
           - forbidigo

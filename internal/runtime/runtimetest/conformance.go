@@ -41,7 +41,7 @@ type SetupFunc func(t *testing.T) (DockerCompatRuntime, context.Context)
 // they thread the real host env into New just as the CLI would (§12).
 func EnvFromOS() map[string]string {
 	m := make(map[string]string)
-	for _, e := range os.Environ() {
+	for _, e := range os.Environ() { //nolint:forbidigo // §12: licensed test-edge env snapshot, curated before any subprocess sees it
 		if k, v, ok := strings.Cut(e, "="); ok {
 			m[k] = v
 		}

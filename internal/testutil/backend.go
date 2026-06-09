@@ -28,10 +28,13 @@ func IntegrationBackendType() string {
 }
 
 // envSnapshot captures the process environment as a map, the test-side
-// equivalent of the CLI's licensed os.Environ() boundary read.
+// equivalent of the CLI's licensed os.Environ() boundary read. This is the one
+// sanctioned env-dump in testutil: every consumer (GitEnv, the integration
+// layout) curates it via sysexec.Curated before any subprocess sees it; the
+// raw map is never handed to a child process (DEV §12).
 func envSnapshot() map[string]string {
 	m := make(map[string]string)
-	for _, e := range os.Environ() {
+	for _, e := range os.Environ() { //nolint:forbidigo // §12: licensed test-edge env snapshot; curated by all consumers before use
 		if k, v, ok := strings.Cut(e, "="); ok {
 			m[k] = v
 		}
