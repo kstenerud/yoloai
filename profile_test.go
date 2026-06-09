@@ -7,8 +7,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 
 	"github.com/kstenerud/yoloai/internal/config"
@@ -26,6 +28,36 @@ func newTestClient(t *testing.T) *System {
 	dataDir := filepath.Join(root, ".yoloai")
 	require.NoError(t, os.MkdirAll(dataDir, 0750))
 	c, err := NewClient(context.Background(), ClientCreateOptions{DataDir: dataDir, HomeDir: root})
+	require.NoError(t, err)
+	return c.System()
+}
+
+// testPrincipalCounter is used by newIsolatedTestClient to generate unique
+// principal tokens within a single test binary run.
+var testPrincipalCounter atomic.Uint64
+
+// newIsolatedTestClient is like newTestClient but injects a unique principal so
+// the runtime orphan sweep is scoped to "yoloai-t<N>-*" and can never touch the
+// developer's real "yoloai-<name>" or "yoloai-base" resources (DF19 backstop).
+// Use this for prune and other mutating system tests that exercise System.Prune
+// → backend sweep.
+func newIsolatedTestClient(t *testing.T) *System {
+	t.Helper()
+	root := t.TempDir()
+	dataDir := filepath.Join(root, ".yoloai")
+	require.NoError(t, os.MkdirAll(dataDir, 0750))
+	// PrincipalSegment must be alphanumeric-only and ≤ MaxPrincipalLength (8).
+	// "t" + zero-padded counter keeps it within the limit for up to 9999999 calls.
+	n := testPrincipalCounter.Add(1)
+	principal := fmt.Sprintf("t%07d", n)
+	principal = principal[len(principal)-config.MaxPrincipalLength:]
+	p, err := config.ParsePrincipalSegment(principal)
+	require.NoError(t, err)
+	c, err := NewClient(context.Background(), ClientCreateOptions{
+		DataDir:   dataDir,
+		HomeDir:   root,
+		Principal: string(p),
+	})
 	require.NoError(t, err)
 	return c.System()
 }

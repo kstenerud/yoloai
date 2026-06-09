@@ -15,6 +15,7 @@ import (
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
 
+	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime"
 )
 
@@ -46,11 +47,14 @@ func (r *Runtime) Prune(ctx context.Context, knownInstances []string, dryRun boo
 	return result, nil
 }
 
-// pruneContainers removes orphaned yoloai-* containers not in the known set.
+// pruneContainers removes orphaned containers owned by this runtime's principal
+// that are not in the known set. Scoped by principal so a test or secondary
+// principal never reclaims containers belonging to a different principal (DF19).
 func (r *Runtime) pruneContainers(ctx context.Context, known map[string]bool, dryRun bool, output io.Writer) ([]runtime.PruneItem, error) {
+	prefix := config.InstancePrefix(r.principal)
 	containers, err := r.client.ContainerList(ctx, container.ListOptions{
 		All:     true,
-		Filters: filters.NewArgs(filters.Arg("name", "yoloai-")),
+		Filters: filters.NewArgs(filters.Arg("name", prefix)),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("list containers: %w", err)
@@ -60,7 +64,7 @@ func (r *Runtime) pruneContainers(ctx context.Context, known map[string]bool, dr
 	for _, c := range containers {
 		// Container names include a leading "/".
 		name := strings.TrimPrefix(c.Names[0], "/")
-		if !strings.HasPrefix(name, "yoloai-") || known[name] {
+		if !strings.HasPrefix(name, prefix) || known[name] {
 			continue
 		}
 		if !dryRun && !r.removeContainer(ctx, name, output) {

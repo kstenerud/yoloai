@@ -119,12 +119,10 @@ func ValidateName(name string) error {
 // owned by the given principal. The default (empty) principal elides, yielding
 // the historical "yoloai-<name>"; a non-empty principal namespaces the id as
 // "yoloai-<principal>-<name>" so two principals' same-named sandboxes never
-// collide on the runtime backend. See D62.
+// collide on the runtime backend. Delegates to config.InstancePrefix so the
+// prefix logic lives in exactly one place (DF19). See D62.
 func InstanceName(principal config.PrincipalSegment, name string) string {
-	if principal == "" {
-		return "yoloai-" + name
-	}
-	return "yoloai-" + string(principal) + "-" + name
+	return config.InstancePrefix(principal) + name
 }
 
 // Per-sandbox subdirectory helpers. Each takes a sandboxDir (typically

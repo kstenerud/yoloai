@@ -15,6 +15,7 @@ import (
 	"github.com/containerd/containerd/v2/core/snapshots"
 	cerrdefs "github.com/containerd/errdefs"
 
+	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime"
 )
 
@@ -34,10 +35,14 @@ func (r *Runtime) Prune(ctx context.Context, knownInstances []string, dryRun boo
 		return runtime.PruneResult{}, fmt.Errorf("list containers: %w", err)
 	}
 
+	// Scope the sweep to this runtime's principal so a test or secondary
+	// principal never reclaims containers owned by a different principal (DF19).
+	prefix := config.InstancePrefix(r.layout.Principal)
+
 	var result runtime.PruneResult
 	for _, ctr := range containers {
 		name := ctr.ID()
-		if !strings.HasPrefix(name, "yoloai-") {
+		if !strings.HasPrefix(name, prefix) {
 			continue
 		}
 		if known[name] {
@@ -102,15 +107,17 @@ func (r *Runtime) PruneCache(ctx context.Context, includeImages, dryRun bool, ou
 	return r.pruneSnapshots(ctx, dryRun, output), nil
 }
 
-// refuseIfContainersExist returns an error if any yoloai-* container record
-// is still present in the namespace; cache prune isn't safe while one exists.
+// refuseIfContainersExist returns an error if any container owned by this
+// principal still exists in the namespace; cache prune isn't safe while one
+// exists. Scoped to this runtime's principal (DF19).
 func (r *Runtime) refuseIfContainersExist(ctx context.Context) error {
 	containers, err := r.client.Containers(ctx)
 	if err != nil {
 		return fmt.Errorf("list containers: %w", err)
 	}
+	prefix := config.InstancePrefix(r.layout.Principal)
 	for _, ctr := range containers {
-		if strings.HasPrefix(ctr.ID(), "yoloai-") {
+		if strings.HasPrefix(ctr.ID(), prefix) {
 			return fmt.Errorf("containerd cache prune: container %q still exists in yoloai namespace; stop and remove it first (yoloai system prune)", ctr.ID())
 		}
 	}

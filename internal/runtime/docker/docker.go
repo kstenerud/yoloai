@@ -103,7 +103,8 @@ func init() {
 // Runtime implements runtime.Runtime using the Docker SDK.
 type Runtime struct {
 	client     *dockerclient.Client
-	binaryName string // CLI binary name ("docker" or "podman")
+	binaryName string                  // CLI binary name ("docker" or "podman")
+	principal  config.PrincipalSegment // namespaces the orphan sweep (DF19)
 
 	// imageBytesFn computes the rebuild-forcing image-layer total from a
 	// DiskUsage snapshot. nil means "use du.LayersSize" (the daemon's
@@ -159,7 +160,7 @@ func NewWithSocket(ctx context.Context, host string, binaryName string, layout c
 
 	cli, pingErr := dialDocker(ctx, baseOpts, host)
 	if pingErr == nil {
-		return newDockerRuntime(cli, binaryName), nil
+		return newDockerRuntime(cli, binaryName, layout), nil
 	}
 
 	// Self-heal the auto path only: if the resolved socket is dead, adopt the
@@ -170,7 +171,7 @@ func NewWithSocket(ctx context.Context, host string, binaryName string, layout c
 		if cli, used := dialFirstAlive(ctx, baseOpts, env, host); cli != nil {
 			slog.Warn("docker daemon unreachable at resolved socket; using a live fallback",
 				"binary", binaryName, "resolved", displayHost(host), "using", used)
-			return newDockerRuntime(cli, binaryName), nil
+			return newDockerRuntime(cli, binaryName, layout), nil
 		}
 	}
 
@@ -214,8 +215,8 @@ func dialFirstAlive(ctx context.Context, baseOpts []dockerclient.Opt, env map[st
 	return nil, ""
 }
 
-func newDockerRuntime(cli *dockerclient.Client, binaryName string) *Runtime {
-	r := &Runtime{client: cli, binaryName: binaryName}
+func newDockerRuntime(cli *dockerclient.Client, binaryName string, layout config.Layout) *Runtime {
+	r := &Runtime{client: cli, binaryName: binaryName, principal: layout.Principal}
 	r.gvisorRunsc = caps.NewGVisorRunsc(exec.LookPath)
 	r.gvisorRegistered = buildGVisorRegisteredCap(binaryName)
 	return r

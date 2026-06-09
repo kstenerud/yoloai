@@ -73,6 +73,19 @@ func ParseSandboxName(name string) (SandboxName, error) {
 // segment is a single alphanumeric run of at most MaxPrincipalLength. See D62.
 type PrincipalSegment string
 
+// InstancePrefix returns the runtime instance-name prefix for the given principal.
+// With an empty principal it returns "yoloai-" (the historical default); with a
+// non-empty principal it returns "yoloai-<principal>-". This is the single source
+// of truth for the prefix used by both store.InstanceName and the backend orphan
+// sweeps — every prune predicate calls this so principal-scoping is centrally
+// maintained. See D62 / DF19.
+func InstancePrefix(p PrincipalSegment) string {
+	if p == "" {
+		return "yoloai-"
+	}
+	return "yoloai-" + string(p) + "-"
+}
+
 // ParsePrincipalSegment validates a principal identifier and returns it as a
 // PrincipalSegment. The empty string is accepted as the default sentinel.
 func ParsePrincipalSegment(principal string) (PrincipalSegment, error) {

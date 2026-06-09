@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime"
 )
 
@@ -25,10 +26,14 @@ func (r *Runtime) Prune(ctx context.Context, knownInstances []string, dryRun boo
 		return runtime.PruneResult{}, fmt.Errorf("list VMs: %w", err)
 	}
 
+	// Scope the sweep to this runtime's principal so a test or secondary
+	// principal never reclaims VMs owned by a different principal (DF19).
+	prefix := config.InstancePrefix(r.layout.Principal)
+
 	var result runtime.PruneResult
 	for line := range strings.SplitSeq(out, "\n") {
 		name := strings.TrimSpace(line)
-		if name == "" || !strings.HasPrefix(name, "yoloai-") {
+		if name == "" || !strings.HasPrefix(name, prefix) {
 			continue
 		}
 		// The provisioned base template shares the yoloai- prefix and the

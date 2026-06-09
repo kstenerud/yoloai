@@ -138,6 +138,32 @@ func TestPruneDryRunDeletesNothing(t *testing.T) {
 	require.Equal(t, "yoloai-orphan", result.Items[0].Name)
 }
 
+// TestPrunePrincipalScope verifies that a Runtime with a non-empty principal
+// only sweeps VMs whose names carry its own prefix ("yoloai-<principal>-*"),
+// leaving yoloai-base, other-principal VMs, and bare-yoloai VMs untouched.
+// This is the DF19 structural backstop: test-scoped prune can never touch the
+// developer's real resources.
+func TestPrunePrincipalScope(t *testing.T) {
+	r, deleteLog := fakeTart(t, []string{
+		provisionedImageName,  // yoloai-base — must survive (protected by name guard)
+		"yoloai-tok01-orphan", // same-principal orphan — must be deleted
+		"yoloai-other-vm",     // different-principal — must survive
+		"yoloai-plain",        // no-principal — must survive (wrong prefix)
+	})
+	// Set the layout principal to "tok01".
+	p, err := config.ParsePrincipalSegment("tok01")
+	require.NoError(t, err)
+	r.layout = r.layout.WithPrincipal(p)
+
+	result, err := r.Prune(context.Background(), nil, false, os.Stderr)
+	require.NoError(t, err)
+
+	deleted := deletedNames(t, deleteLog)
+	require.Equal(t, []string{"yoloai-tok01-orphan"}, deleted, "only the same-principal orphan must be deleted")
+	require.Len(t, result.Items, 1)
+	require.Equal(t, "yoloai-tok01-orphan", result.Items[0].Name)
+}
+
 // --- cache reclaim --------------------------------------------------------
 
 func TestPruneCacheRemovesBaseAndChecksum(t *testing.T) {
