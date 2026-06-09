@@ -160,6 +160,11 @@ func (r *Runtime) Setup(ctx context.Context, _ config.Layout, sourceDir string, 
 	provExists, _ := r.vmExistsNamed(ctx, provisionedImageName)
 	if provExists {
 		fmt.Fprintln(output, "Promoting newly provisioned image...") //nolint:errcheck // best-effort
+		// Stop the old base before deleting it: `tart delete` on a running VM
+		// fails with a misleading "instance not found", which would abandon a
+		// fully-provisioned (and possibly hour-long) build at the final step.
+		// stopVM is best-effort and a no-op when the VM is already stopped.
+		r.stopVM(ctx, provisionedImageName)
 		if _, err := r.runTart(ctx, "delete", provisionedImageName); err != nil {
 			return fmt.Errorf("delete old base: %w", err)
 		}

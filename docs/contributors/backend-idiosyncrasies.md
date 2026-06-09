@@ -103,6 +103,7 @@ row to the index.
 | `create task: ... more than one sandbox exists with the provided prefix "..."` (containerd-vm, under concurrency) | [Kata: shim resolves sandboxes by name prefix](#kata-shim-resolves-a-sandbox-from-the-container-id-by-prefix-prefix-related-names-collide) |
 | Is it safe to delete a `.lock` file while holding its flock? (prune / Destroy) | [Removing a .lock file while holding its flock is safe](#removing-a-lock-file-while-holding-its-flock-is-safe) |
 | Tart base build / `tart run` fails with `The number of VMs exceeds the system limit` or VM self-stops at boot, but `tart list` shows nothing running | [Tart: orphaned Virtualization VM processes consume the macOS VM limit](#orphaned-virtualization-vm-processes-survive-a-crashed-tart-run-and-silently-consume-the-macos-vm-limit) |
+| `tart delete <name>` fails with `instance not found` for a VM that exists (e.g. `delete old base: instance not found` during base promote) | [Tart: delete of a running VM reports "instance not found"](#tart-delete-of-a-running-vm-fails-with-a-misleading-instance-not-found-stop-first) |
 | `system disk` shows tart `IMAGES: ?` / `CACHE: 0 B` despite GBs in `~/.tart`; `prune --images` reports 0 reclaimed | [Tart: list double-counts OCI tag+digest; sizing/prune must dedup](#tart-list-reports-a-pulled-oci-image-twice-tag--digest-over-one-on-disk-copy-sizing-and-prune-must-dedup-and-remove-both-rows) |
 | macOS `docker` numbers don't match Docker Desktop assumptions (overlay2/btrfs, classic store) | [Docker on macOS may be OrbStack, not Docker Desktop](#docker-on-macos-may-be-orbstack-not-docker-desktop--docker-info-clientinfocontext-tells-you-which) |
 | Podman macOS reports image bytes correctly even though the Linux `LayersSize: 0` workaround exists | [Podman: `/system/df` reports `LayersSize: 0`](#podman-systemdf-reports-layerssize-0) (macOS/version caveat) |
@@ -1301,6 +1302,37 @@ VirtioFS paths, `ln -sfn target link` silently creates the symlink *inside* the
 target directory rather than replacing it, if a directory already exists at
 `link`. Must explicitly `rm -rf link` before `ln -sfn`. See the symlink command
 in `tart.go::runSetupScript`.
+
+### `tart delete` of a running VM fails with a misleading "instance not found"; stop first
+
+**Symptom:** `tart delete <name>` returns `instance not found` for a VM that
+demonstrably exists in `tart list` — because the VM is **running**. The error
+names the wrong cause (it reads as "no such VM" rather than "VM is busy/running").
+Observed as `delete old base: instance not found` at the final *promote* step of
+`yoloai system build --backend tart`, abandoning an hour-long provision: the swap
+in `Setup` deletes the old `yoloai-base` before cloning the freshly provisioned
+temp VM into place, and if the old `yoloai-base` happened to be running, the
+delete failed and the whole build was lost.
+
+**How a base ends up running unexpectedly:** anything that left a `tart run
+<name>` process alive — a crashed/abandoned boot, a stray manual `tart run
+yoloai-base` (e.g. a diagnostic that backgrounded it and never stopped it), or an
+unclean shutdown (`Error: unavailable (14): Transport became inactive` is tart's
+normal exec-transport drop as a VM powers off, but the host process can linger).
+`tart list` will show the VM as `running` and `ps aux | grep "tart run"` reveals
+the host launcher PID.
+
+**Fix:** stop the VM before deleting it. `Setup`'s promote now calls
+`r.stopVM(ctx, provisionedImageName)` (the bounded `tart stop` → SIGTERM →
+SIGKILL ladder in `tart.go::stopVM`, best-effort and a no-op when already
+stopped) before `tart delete`. See `build.go::Setup` promote block. Any future
+code path that deletes a VM that *could* be running must stop it first rather
+than trusting `tart delete`'s error text.
+
+**Manual recovery:** `tart stop <name>` (or kill the `tart run <name>` host PID),
+then retry. The provisioned base's identity isn't recorded until after a
+successful promote, so a failed promote leaves the old base in place and
+`needsBuild` still true — re-running `system build` rebuilds cleanly.
 
 ### `tart run` process must use `exec.Command`, not `exec.CommandContext`
 
