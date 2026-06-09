@@ -50,13 +50,15 @@ func (e *Engine) GenerateOverlayDiff(ctx context.Context, name string, stat, nam
 }
 
 // GenerateCommitDiff returns the diff for a specific commit or commit range from
-// the sandbox's on-disk history (copy-mode only; no runtime needed).
+// the sandbox work copy (copy-mode only). The runtime dispatches git to where
+// the work copy lives — on the host for bind-mount backends, in-VM for Tart.
 func (e *Engine) GenerateCommitDiff(ctx context.Context, name, ref string, stat bool) (string, error) {
 	return patch.GenerateCommitDiff(ctx, patch.CommitDiffOptions{
-		Name:   name,
-		Layout: e.layout,
-		Ref:    ref,
-		Stat:   stat,
+		Name:    name,
+		Layout:  e.layout,
+		Runtime: e.runtime,
+		Ref:     ref,
+		Stat:    stat,
 	})
 }
 

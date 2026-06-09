@@ -25,6 +25,7 @@ row to the index.
 | `hotplug memory error: ENOENT` in kata-agent logs | [Kata: hotplug ENOENT is normal](#hotplug-memory-error-enoent-is-normal) |
 | `yoloai destroy` hangs; `ctr tasks ls` shows RUNNING but no qemu/firecracker; host CPU 60–80% | [Kata: shim wedge with dead VM](#kata-shim-wedge-with-dead-vm-sigkill-via-containerd-doesnt-release-the-task) |
 | `yoloai destroy` hangs on a Tart sandbox; `tart list` shows VM running but guest unreachable | [Tart: VM process wedge](#tart-vm-process-wedge-tart-stop-and-sigterm-via-pgrep-dont-release-the-host-tart-run) |
+| `yoloai diff <sha>` / commit listing on a Tart `:copy` sandbox errors with `unknown revision` / `not a git repository` for SHAs just listed | [Tart: commit-level git must dispatch through the runtime](#tart-commit-level-git-diff-sha-commit-listing-must-dispatch-through-the-runtime-not-host-git) |
 | Task stays in `Created` after `Start()` returns | [Containerd: task.Start returns early](#taskstart-returns-before-the-vm-is-actually-running) |
 | `parent snapshot sha256:... does not exist: not found` | [Containerd: WithNewSnapshot doesn't unpack](#withnewsnapshot-does-not-unpack-image-layers) |
 | `docker save \| ctr import` hangs indefinitely | [Containerd: pipe hang on ctr failure](#docker-save--ctr-import-hangs-if-ctr-fails-early) |
@@ -1768,6 +1769,18 @@ Autopsy timeline signature: `hook.idle` (agent finished writing) lands a few sec
 **Fix:** `TartBackend.get_working_dir()` now, for `:copy` workdirs, keeps polling after the directory exists until a committed `HEAD` resolves (`git -C <workdir> rev-parse HEAD` succeeds) — the exact "baseline ready" signal, since the commit is `ExecuteVMWorkDirSetup`'s last step. Gated on copy mode via the `copy_dirs` config key (non-empty iff the workdir is `:copy`); non-copy workdirs have no git repo and must not wait. The secrets-consumed gate ([deadlock entry](#tart-signal_secrets_consumed-must-run-before-get_working_dir)) is unaffected — `signal_secrets_consumed()` still runs before this wait, so the host always reaches and completes the baseline commit regardless of the VM.
 
 **Code:** `runtime/monitor/sandbox-setup.py::TartBackend.get_working_dir` (and `_baseline_committed`)
+
+---
+
+### Tart: commit-level git (`diff <sha>`, commit listing) must dispatch through the runtime, not host git
+
+**Symptom:** On a Tart `:copy` sandbox, `yoloai diff <sha>` / a commit-range diff and the per-commit stat listing fail with `unknown revision or path not in the working tree` / `not a git repository` — for the *same* commit SHAs that plain `yoloai diff` and commit listing just reported as present.
+
+**Explanation:** Tart runs the sandbox work copy on **VM-local storage** and creates the baseline + agent commits **inside the VM** (`tart.Runtime.GitExec` translates the host workdir to a VM path like `/Users/admin/yoloai-work/<enc>` and execs git in the guest). Reads routed through the runtime (`git.NewSandbox` → `GitExecer`) see those commits; reads that run **host** git (`git.NewHost`) on the host workdir do not — that host path is the stale staging copy, or not a repo carrying those SHAs at all. `ListCommitsBeyondBaseline` and `GenerateDiff`'s `:copy` branch correctly used the sandbox scope, but `GenerateCommitDiff` and `ListCommitsWithStats` used a *host* runner to stat/diff the very commits the sandbox scope had just found, so they errored on VM-side SHAs. Bind-mount backends (Docker/Podman/Containerd) work because their work copy *is* on the host. Same root cause as the [host-side change-probe](#a-host-side-change-probe-is-blind-to-the-in-vm-workdir--info-showed-changes-no-on-a-dirty-tart-sandbox-and-destroy-skipped-its-gate) and [`:copy` diff after restart](#tart-copy-diff-after-restart-shows-no-changes) entries.
+
+**Fix:** Any git operation on the sandbox *work copy* must use `git.NewSandbox(layout, rt, name)` — it dispatches in-VM for Tart and falls back to host exec for non-`GitExecer` backends, so it's a no-op for Docker/Podman/Containerd — never `git.NewHost`. Reserve `git.NewHost` for genuinely host-resident targets (the user's original directory in apply, `:rw` live mounts, dirty-checks of source dirs). `GenerateCommitDiff` gained a `Runtime` field on `CommitDiffOptions` to carry the dispatch.
+
+**Code:** `internal/sandbox/patch/diff.go::GenerateCommitDiff` / `ListCommitsWithStats`; the host-vs-sandbox scope distinction lives in `internal/git` (`NewHost` vs `NewSandbox`).
 
 ---
 

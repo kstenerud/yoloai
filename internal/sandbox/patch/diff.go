@@ -88,10 +88,11 @@ var ErrOverlayRequiresRuntime = fmt.Errorf("overlay diff requires runtime exec; 
 
 // CommitDiffOptions controls commit-level diff generation.
 type CommitDiffOptions struct {
-	Name   string        // sandbox name
-	Layout config.Layout // resolves the sandbox state directory
-	Ref    string        // single SHA or "sha..sha" range
-	Stat   bool          // true for --stat summary only
+	Name    string          // sandbox name
+	Layout  config.Layout   // resolves the sandbox state directory
+	Runtime runtime.Runtime // dispatches git to the sandbox work copy (in-VM for Tart)
+	Ref     string          // single SHA or "sha..sha" range
+	Stat    bool            // true for --stat summary only
 }
 
 // GenerateCommitDiff produces a diff for a specific commit or range
@@ -107,7 +108,11 @@ func GenerateCommitDiff(ctx context.Context, opts CommitDiffOptions) (string, er
 		return "", fmt.Errorf("commit diff is not available for :rw directories")
 	}
 
-	g := git.NewHost(opts.Layout)
+	// The work copy lives where the sandbox runs it — on the host for
+	// bind-mount backends, inside the VM for Tart — so dispatch git through the
+	// runtime, exactly like GenerateDiff's :copy branch. NewSandbox falls back
+	// to host exec for non-GitExecer backends (docker/podman/containerd).
+	g := git.NewSandbox(opts.Layout, opts.Runtime, opts.Name)
 	if err := g.StageUntracked(ctx, workDir); err != nil {
 		return "", err
 	}
@@ -156,7 +161,10 @@ func ListCommitsWithStats(ctx context.Context, layout config.Layout, rt runtime.
 		return nil, err
 	}
 
-	g := git.NewHost(layout)
+	// Stat each commit in the same scope ListCommitsBeyondBaseline found them
+	// (sandbox work copy — in-VM for Tart). Using a host runner here statted
+	// VM-side SHAs on the host and broke commit listing on Tart.
+	g := git.NewSandbox(layout, rt, name)
 	result := make([]CommitInfoWithStat, len(commits))
 	for i, c := range commits {
 		output, statErr := g.Run(ctx, workDir, "diff", "--stat", c.SHA+"~1", c.SHA)
