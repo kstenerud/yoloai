@@ -16,12 +16,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kstenerud/yoloai/internal/config"
+	"github.com/kstenerud/yoloai/internal/git"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox/runtimeconfig"
 	"github.com/kstenerud/yoloai/internal/sandbox/state"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/internal/testutil"
-	"github.com/kstenerud/yoloai/internal/workspace"
 )
 
 // newLifecycleDeps builds a state.Deps backed by the given mock runtime and
@@ -71,7 +71,7 @@ func createRWSandbox(t *testing.T, tmpDir, name, hostPath string) {
 // gitHEAD returns the HEAD commit SHA for the git repo at dir.
 func gitHEAD(t *testing.T, dir string) string {
 	t.Helper()
-	sha, err := workspace.HeadSHAWithEnv(testutil.GitEnv(), dir)
+	sha, err := git.NewHostWithEnv(testutil.GitEnv()).HeadSHA(context.Background(), dir)
 	require.NoError(t, err)
 	return sha
 }

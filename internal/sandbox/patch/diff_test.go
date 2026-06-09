@@ -13,8 +13,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kstenerud/yoloai/internal/git"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
-	"github.com/kstenerud/yoloai/internal/workspace"
 )
 
 // createCopySandbox sets up a sandbox directory structure with a :copy mode
@@ -74,7 +74,7 @@ func createRWSandbox(t *testing.T, tmpDir, name, hostPath string) {
 
 func gitHEAD(t *testing.T, dir string) string {
 	t.Helper()
-	sha, err := workspace.HeadSHAWithEnv(testEnv(), dir)
+	sha, err := git.NewHostWithEnv(testEnv()).HeadSHA(context.Background(), dir)
 	require.NoError(t, err)
 	return sha
 }
@@ -257,7 +257,7 @@ func TestGenerateCommitDiff_SingleCommit(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, commits, 2)
 
-	result, err := GenerateCommitDiff(CommitDiffOptions{
+	result, err := GenerateCommitDiff(context.Background(), CommitDiffOptions{
 		Layout: testLayout(tmpDir),
 		Name:   "test-cdiff-single",
 		Ref:    commits[0].SHA,
@@ -290,7 +290,7 @@ func TestGenerateCommitDiff_Range(t *testing.T) {
 
 	// Range: first..third should include second and third
 	ref := commits[0].SHA + ".." + commits[2].SHA
-	result, err := GenerateCommitDiff(CommitDiffOptions{
+	result, err := GenerateCommitDiff(context.Background(), CommitDiffOptions{
 		Layout: testLayout(tmpDir),
 		Name:   "test-cdiff-range",
 		Ref:    ref,
@@ -318,7 +318,7 @@ func TestGenerateCommitDiff_Stat(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, commits, 1)
 
-	result, err := GenerateCommitDiff(CommitDiffOptions{
+	result, err := GenerateCommitDiff(context.Background(), CommitDiffOptions{
 		Layout: testLayout(tmpDir),
 		Name:   "test-cdiff-stat",
 		Ref:    commits[0].SHA,
@@ -338,7 +338,7 @@ func TestGenerateCommitDiff_RWError(t *testing.T) {
 	require.NoError(t, os.MkdirAll(hostDir, 0750))
 	createRWSandbox(t, tmpDir, "test-cdiff-rw", hostDir)
 
-	_, err := GenerateCommitDiff(CommitDiffOptions{
+	_, err := GenerateCommitDiff(context.Background(), CommitDiffOptions{
 		Layout: testLayout(tmpDir),
 		Name:   "test-cdiff-rw",
 		Ref:    "abc123",

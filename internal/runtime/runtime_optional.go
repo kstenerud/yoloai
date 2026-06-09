@@ -6,15 +6,10 @@ package runtime
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"io"
-	"os/exec"
-	"strings"
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime/caps"
-	"github.com/kstenerud/yoloai/internal/sysexec"
 )
 
 // The Runtime interface (runtime.go) is the contract every backend implements.
@@ -88,42 +83,10 @@ type WorkDirSetup interface {
 // GitExecer is an optional interface for backends whose git execution context
 // differs from "run git on the host" — i.e. backends that run git inside a VM
 // and must translate host work paths (Tart). Backends that run git on the host
-// (Docker, Podman, Containerd, Seatbelt) don't implement it; GitExecFor runs git
-// on the host directly via the package default.
+// (Docker, Podman, Containerd, Seatbelt) don't implement it; the git package's
+// sandbox scope (git.NewSandbox) runs git on the host directly via its default.
 type GitExecer interface {
 	GitExec(ctx context.Context, name, workDir string, args ...string) (string, error)
-}
-
-// GitExecFor runs a git command for the given instance. workDir is a host path
-// (e.g. ~/.yoloai/sandboxes/<name>/work/<encoded>) from the sandbox package
-// helpers. Backends implementing GitExecer (Tart) translate it to their
-// execution context; otherwise git runs on the host with workDir as-is. Returns
-// stdout on success; a *ExecError carrying the exit code on non-zero exit (so
-// callers can match, e.g., `git diff --quiet` exit 1 as "diffs present").
-// env is the explicit subprocess env (DEV §12) used when falling back to host git.
-func GitExecFor(ctx context.Context, env []string, rt Runtime, name, workDir string, args ...string) (string, error) {
-	if g, ok := rt.(GitExecer); ok {
-		return g.GitExec(ctx, name, workDir, args...)
-	}
-	return hostGitExec(ctx, env, workDir, args...)
-}
-
-// hostGitExec runs git on the host filesystem rooted at workDir — the default
-// for backends that bind-mount host paths. Hooks are disabled (the host's repo
-// hooks must not fire for sandbox-internal git). Output is not trimmed (patches
-// are whitespace-sensitive).
-func hostGitExec(ctx context.Context, env []string, workDir string, args ...string) (string, error) {
-	cmdArgs := append([]string{"-c", "core.hooksPath=/dev/null", "-C", workDir}, args...)
-	cmd := sysexec.CommandContext(ctx, env, "git", cmdArgs...)
-	output, err := cmd.Output()
-	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			return "", &ExecError{ExitCode: exitErr.ExitCode(), Stderr: strings.TrimSpace(string(exitErr.Stderr))}
-		}
-		return "", fmt.Errorf("git %v: %w", args, err)
-	}
-	return string(output), nil
 }
 
 // ===== 2. Capability probes & reporters =====

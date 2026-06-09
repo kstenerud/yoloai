@@ -3,6 +3,7 @@
 package sandbox_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -12,11 +13,11 @@ import (
 	"time"
 
 	"github.com/kstenerud/yoloai/internal/agent"
+	"github.com/kstenerud/yoloai/internal/git"
 	sandbox "github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/patch"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/internal/testutil"
-	"github.com/kstenerud/yoloai/internal/workspace"
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -114,7 +115,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 		0600,
 	))
 
-	require.NoError(t, workspace.ApplyPatch(testutil.GitEnv(), patchBytes, targetDir, false))
+	require.NoError(t, git.NewHostWithEnv(testutil.GitEnv()).ApplyPatch(context.Background(), patchBytes, targetDir, false))
 
 	applied, err := os.ReadFile(filepath.Join(targetDir, "main.go")) //nolint:gosec // G304: test file path
 	require.NoError(t, err)
@@ -472,7 +473,7 @@ func TestIntegration_ApplyPatch(t *testing.T) {
 		0600,
 	))
 
-	require.NoError(t, workspace.ApplyPatch(testutil.GitEnv(), patchBytes, targetDir, false))
+	require.NoError(t, git.NewHostWithEnv(testutil.GitEnv()).ApplyPatch(context.Background(), patchBytes, targetDir, false))
 
 	applied, err := os.ReadFile(filepath.Join(targetDir, "main.go")) //nolint:gosec // test path
 	require.NoError(t, err)
@@ -827,7 +828,7 @@ func TestIntegration_AgentStubWorkflow(t *testing.T) {
 		[]byte("package main\n\nfunc main() {}\n"),
 		0600,
 	))
-	require.NoError(t, workspace.ApplyPatch(testutil.GitEnv(), patchBytes, targetDir, false))
+	require.NoError(t, git.NewHostWithEnv(testutil.GitEnv()).ApplyPatch(context.Background(), patchBytes, targetDir, false))
 	assert.FileExists(t, filepath.Join(targetDir, "agent-output.txt"))
 }
 

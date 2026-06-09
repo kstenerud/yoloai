@@ -139,6 +139,14 @@ linters:
         - pattern: "^os\\.Getgid$"
           msg: "use layout.HostGID (or fileutil.HostGID at the OS boundary); library code must not read the process GID directly — see internal/config/layout.go"
 
+        # DEV §12 git-executor consolidation. The curated git subprocess env is
+        # built in exactly one place — internal/git (git.NewHost / git.NewSandbox).
+        # Every git invocation routes through *git.Git, so no other package needs
+        # to assemble a git env; a stray sysexec.GitEnv call signals a caller that
+        # bypassed the git executor.
+        - pattern: "^sysexec\\.GitEnv$"
+          msg: "build git envs only via git.NewHost / git.NewSandbox in internal/git — DEV §12"
+
         # §12 ambient-configuration hardening (deny by default). Ambient
         # process state — environment, identity, host, process I/O — must be
         # resolved at the outermost layer (CLI startup / explicit args) and
@@ -268,6 +276,13 @@ linters:
       - path: "internal/fileutil/fileutil\\.go"
         linters:
           - forbidigo
+      # internal/git is THE site that assembles the curated git subprocess env
+      # (git.NewHost derives it via sysexec.GitEnv). Every other package routes
+      # git through *git.Git, so the sysexec.GitEnv ban applies everywhere else.
+      - path: "internal/git/"
+        linters:
+          - forbidigo
+        text: "sysexec\\.GitEnv"
       # Tests may use the ambient-state patterns (temp files, stdio, identity,
       # etc.) — EXCEPT the full-ambient-env dumps (os.Environ / syscall.Environ)
       # and exec.Command*, which bind tests too (DEV §12 / D79: a subprocess gets

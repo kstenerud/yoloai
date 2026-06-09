@@ -52,7 +52,7 @@ const (
 var DirSize = status.DirSize
 
 // ProbeWorkData inspects a sandbox dir for recoverable data. See status.ProbeWorkData.
-// env must be an explicit subprocess env derived from the caller's layout (DEV §12).
+// g is a host-scoped git runner derived from the caller's layout (DEV §12).
 var ProbeWorkData = status.ProbeWorkData
 
 // ContainerUser resolves the in-container user for a sandbox. See status.ContainerUser.

@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -19,7 +18,6 @@ import (
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/runtime/caps"
-	"github.com/kstenerud/yoloai/internal/testutil"
 )
 
 // TestDescriptor_Name verifies the backend name reported by Descriptor().
@@ -37,38 +35,6 @@ func TestWithNamespace(t *testing.T) {
 	ns, ok := namespaces.Namespace(ctx)
 	require.True(t, ok, "withNamespace must set a containerd namespace on the context")
 	assert.Equal(t, "yoloai", ns)
-}
-
-// TestGitExec_ExitOneReturnsExecError verifies that non-zero git exit returns
-// *runtime.ExecError so callers can match exit codes via errors.As. Regression
-// guard: sandbox/patch/apply.go treats `git diff --quiet` exit 1 as "diffs
-// present" via errors.As(&runtime.ExecError); a plain string error would silently
-// fall through to "real error", failing `yoloai apply` on every changed sandbox.
-// containerd runs git on the host (it doesn't implement runtime.GitExecer), so
-// this exercises runtime.GitExecFor's default host-git path.
-func TestGitExec_ExitOneReturnsExecError(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not available")
-	}
-	// Initialize a temp repo with one committed file, then modify it — `git
-	// diff --quiet HEAD` exits 1 because the tracked file's content changed.
-	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "f"), []byte("v1"), 0600))
-	for _, args := range [][]string{
-		{"init", "-q"},
-		{"add", "f"},
-		{"commit", "-q", "-m", "init"},
-	} {
-		testutil.RunGit(t, dir, args...)
-	}
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "f"), []byte("v2"), 0600))
-
-	r := &Runtime{}
-	_, err := runtime.GitExecFor(context.Background(), testutil.GitEnv(), r, "", dir, "diff", "--quiet", "HEAD")
-	require.Error(t, err)
-	var execErr *runtime.ExecError
-	require.True(t, errors.As(err, &execErr), "GitExecFor must return *runtime.ExecError on non-zero exit; got %T: %v", err, err)
-	assert.Equal(t, 1, execErr.ExitCode)
 }
 
 // TestSandboxDirForName verifies the sandbox directory path derivation.

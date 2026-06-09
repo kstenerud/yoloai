@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/kstenerud/yoloai/internal/git"
 	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/workspace"
 )
 
 // WorkProbe is the outcome of probing a sandbox work dir for unapplied work.
@@ -33,20 +33,19 @@ const (
 // for broken sandboxes; gates that know the backend use HasUnappliedWorkVia,
 // which runs git in the backend's execution context. Returns "yes", "no", or
 // "-" (not a git repo / not applicable).
-// env must be an explicit subprocess env derived from the caller's layout (DEV §12).
-func DetectChanges(env []string, workDir string) string {
+// g is a host-scoped git runner derived from the caller's layout (DEV §12).
+func DetectChanges(ctx context.Context, g *git.Git, workDir string) string {
 	if _, err := os.Stat(workDir); err != nil {
 		return "-"
 	}
 	if _, err := os.Stat(filepath.Join(workDir, ".git")); err != nil {
 		return "-"
 	}
-	cmd := workspace.NewGitCmdWithEnv(env, workDir, "status", "--porcelain")
-	output, err := cmd.Output()
+	output, err := g.Run(ctx, workDir, "status", "--porcelain")
 	if err != nil {
 		return "-"
 	}
-	if porcelainHasChange(string(output)) {
+	if porcelainHasChange(output) {
 		return "yes"
 	}
 	return "no"
@@ -72,13 +71,13 @@ func porcelainHasChange(output string) bool {
 // HasUnappliedWorkVia reports whether a work directory holds unapplied work —
 // uncommitted changes OR commits beyond baselineSHA — running git in the
 // backend's execution context (in-VM for VM-local backends like Tart, on the
-// host otherwise) via runtime.GitExecFor. When that context is unavailable —
-// the backend reports the instance is not running — it returns WorkUnknown so
+// host otherwise) via the sandbox-scoped git runner. When that context is
+// unavailable — the backend reports the instance is not running — it returns WorkUnknown so
 // callers fail safe rather than read a stale host seed copy the VM never wrote
 // back to (see backend-idiosyncrasies.md "VirtioFS corrupts git repositories").
-// env must be an explicit subprocess env derived from the caller's layout (DEV §12).
-func HasUnappliedWorkVia(ctx context.Context, env []string, rt runtime.Runtime, name, workDir, baselineSHA string) WorkProbe {
-	out, err := runtime.GitExecFor(ctx, env, rt, name, workDir, "status", "--porcelain")
+// g is a sandbox-scoped git runner derived from the caller's layout (DEV §12).
+func HasUnappliedWorkVia(ctx context.Context, g *git.Git, workDir, baselineSHA string) WorkProbe {
+	out, err := g.Run(ctx, workDir, "status", "--porcelain")
 	if err != nil {
 		if errors.Is(err, runtime.ErrNotRunning) {
 			return WorkUnknown
@@ -93,7 +92,7 @@ func HasUnappliedWorkVia(ctx context.Context, env []string, rt runtime.Runtime, 
 	if baselineSHA == "" {
 		return WorkClean
 	}
-	out, err = runtime.GitExecFor(ctx, env, rt, name, workDir, "rev-list", "--count", baselineSHA+"..HEAD")
+	out, err = g.Run(ctx, workDir, "rev-list", "--count", baselineSHA+"..HEAD")
 	if err != nil {
 		if errors.Is(err, runtime.ErrNotRunning) {
 			return WorkUnknown

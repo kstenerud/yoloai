@@ -2,7 +2,6 @@ package workspace
 
 import (
 	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -53,82 +52,4 @@ func TestCheckPathOverlap_Identical(t *testing.T) {
 func TestCheckPathOverlap_DisjointSimilarNames(t *testing.T) {
 	err := CheckPathOverlap([]string{"/abc", "/ab"})
 	assert.NoError(t, err, "/ab is not a parent of /abc")
-}
-
-func TestCheckDirtyRepo_CleanRepo(t *testing.T) {
-	dir := t.TempDir()
-	initGitRepo(t, dir)
-
-	// Create and commit a file
-	writeTestFile(t, dir, "file.txt", "hello")
-	gitAdd(t, dir, ".")
-	gitCommit(t, dir, "initial")
-
-	warning, err := CheckDirtyRepo(testEnv(), dir)
-	require.NoError(t, err)
-	assert.Empty(t, warning)
-}
-
-func TestCheckDirtyRepo_DirtyRepo(t *testing.T) {
-	dir := t.TempDir()
-	initGitRepo(t, dir)
-
-	// Create and commit a file
-	writeTestFile(t, dir, "file.txt", "hello")
-	gitAdd(t, dir, ".")
-	gitCommit(t, dir, "initial")
-
-	// Modify the file and add an untracked file
-	writeTestFile(t, dir, "file.txt", "modified")
-	writeTestFile(t, dir, "new.txt", "untracked")
-
-	warning, err := CheckDirtyRepo(testEnv(), dir)
-	require.NoError(t, err)
-	assert.Contains(t, warning, "modified")
-	assert.Contains(t, warning, "untracked")
-}
-
-func TestCheckDirtyRepo_NotGitRepo(t *testing.T) {
-	dir := t.TempDir()
-
-	warning, err := CheckDirtyRepo(testEnv(), dir)
-	require.NoError(t, err)
-	assert.Empty(t, warning)
-}
-
-func TestCheckDirtyRepo_GitStatusFailureIsError(t *testing.T) {
-	dir := t.TempDir()
-	// A present-but-invalid .git (empty dir) makes `git status` fail. The
-	// guard must surface the failure, not silently report "clean".
-	require.NoError(t, os.Mkdir(filepath.Join(dir, ".git"), 0o750))
-
-	warning, err := CheckDirtyRepo(testEnv(), dir)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "git status")
-	assert.Empty(t, warning)
-}
-
-func TestCheckDirtyRepo_IgnoresBugreportFiles(t *testing.T) {
-	dir := t.TempDir()
-	initGitRepo(t, dir)
-
-	// Create and commit a file
-	writeTestFile(t, dir, "file.txt", "hello")
-	gitAdd(t, dir, ".")
-	gitCommit(t, dir, "initial")
-
-	// Add bugreport files (both .md and .md.tmp should be ignored)
-	writeTestFile(t, dir, "yoloai-bugreport-20260316-102123.534.md", "bugreport content")
-	writeTestFile(t, dir, "yoloai-bugreport-20260316-103627.211.md.tmp", "temp bugreport")
-
-	warning, err := CheckDirtyRepo(testEnv(), dir)
-	require.NoError(t, err)
-	assert.Empty(t, warning, "bugreport files should be ignored")
-
-	// Add a real untracked file (should be detected)
-	writeTestFile(t, dir, "new.txt", "untracked")
-
-	warning, err = CheckDirtyRepo(testEnv(), dir)
-	require.NoError(t, err)
-	assert.Contains(t, warning, "1 untracked")
 }

@@ -6,9 +6,9 @@ package sandbox
 import (
 	"context"
 
+	"github.com/kstenerud/yoloai/internal/git"
 	"github.com/kstenerud/yoloai/internal/sandbox/patch"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
-	"github.com/kstenerud/yoloai/internal/sysexec"
 )
 
 // LoadEnvironment reads a sandbox's environment.json after confirming the
@@ -51,8 +51,8 @@ func (e *Engine) GenerateOverlayDiff(ctx context.Context, name string, stat, nam
 
 // GenerateCommitDiff returns the diff for a specific commit or commit range from
 // the sandbox's on-disk history (copy-mode only; no runtime needed).
-func (e *Engine) GenerateCommitDiff(name, ref string, stat bool) (string, error) {
-	return patch.GenerateCommitDiff(patch.CommitDiffOptions{
+func (e *Engine) GenerateCommitDiff(ctx context.Context, name, ref string, stat bool) (string, error) {
+	return patch.GenerateCommitDiff(ctx, patch.CommitDiffOptions{
 		Name:   name,
 		Layout: e.layout,
 		Ref:    ref,
@@ -162,10 +162,9 @@ func (e *Engine) WorkdirTags(ctx context.Context, name string, unappliedOnly boo
 		return nil, err
 	}
 	workDir := store.WorkDir(e.layout.SandboxDir(name), meta.Workdir.HostPath)
-	gitEnv := sysexec.GitEnv(e.layout.Env)
-	git := sandboxGitRunner(ctx, gitEnv, e.runtime, name, workDir)
+	g := git.NewSandbox(e.layout, e.runtime, name)
 	for i := range tags {
-		tags[i].Message = getTagMessage(git, tags[i].Name)
+		tags[i].Message = getTagMessage(ctx, g, workDir, tags[i].Name)
 	}
 	return tags, nil
 }

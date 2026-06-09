@@ -12,10 +12,9 @@ import (
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/config"
+	"github.com/kstenerud/yoloai/internal/git"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
-	"github.com/kstenerud/yoloai/internal/sysexec"
-	"github.com/kstenerud/yoloai/internal/workspace"
 )
 
 // DiffOptions controls diff generation.
@@ -44,7 +43,6 @@ type DiffOptions struct {
 //     overlay diffs need container exec; route through
 //     GenerateOverlayDiff.
 func GenerateDiff(ctx context.Context, opts DiffOptions) (string, error) {
-	gitEnv := sysexec.GitEnv(opts.Layout.Env)
 	workDir, baselineSHA, mode, err := loadDiffContext(opts.Layout, opts.Name)
 	if err != nil {
 		return "", err
@@ -52,13 +50,14 @@ func GenerateDiff(ctx context.Context, opts DiffOptions) (string, error) {
 
 	switch mode {
 	case "rw":
-		return workspace.RWDiff(gitEnv, workDir, opts.Paths, opts.Stat, opts.NameOnly)
+		return git.NewHost(opts.Layout).RWDiff(ctx, workDir, opts.Paths, opts.Stat, opts.NameOnly)
 
 	case "overlay":
 		return "", ErrOverlayRequiresRuntime
 
 	default: // "copy"
-		if _, err := runtime.GitExecFor(ctx, gitEnv, opts.Runtime, opts.Name, workDir, "add", "-A"); err != nil {
+		g := git.NewSandbox(opts.Layout, opts.Runtime, opts.Name)
+		if _, err := g.Run(ctx, workDir, "add", "-A"); err != nil {
 			return "", err
 		}
 
@@ -74,7 +73,7 @@ func GenerateDiff(ctx context.Context, opts DiffOptions) (string, error) {
 			args = append(args, opts.Paths...)
 		}
 
-		output, err := runtime.GitExecFor(ctx, gitEnv, opts.Runtime, opts.Name, workDir, args...)
+		output, err := g.Run(ctx, workDir, args...)
 		if err != nil {
 			return "", err
 		}
@@ -98,7 +97,7 @@ type CommitDiffOptions struct {
 // GenerateCommitDiff produces a diff for a specific commit or range
 // within the sandbox work copy. Only works for :copy mode sandboxes.
 // Returns the diff text (empty string if there are no changes).
-func GenerateCommitDiff(opts CommitDiffOptions) (string, error) {
+func GenerateCommitDiff(ctx context.Context, opts CommitDiffOptions) (string, error) {
 	workDir, _, mode, err := loadDiffContext(opts.Layout, opts.Name)
 	if err != nil {
 		return "", err
@@ -108,8 +107,8 @@ func GenerateCommitDiff(opts CommitDiffOptions) (string, error) {
 		return "", fmt.Errorf("commit diff is not available for :rw directories")
 	}
 
-	gitEnv := sysexec.GitEnv(opts.Layout.Env)
-	if err := workspace.StageUntrackedWithEnv(gitEnv, workDir); err != nil {
+	g := git.NewHost(opts.Layout)
+	if err := g.StageUntracked(ctx, workDir); err != nil {
 		return "", err
 	}
 
@@ -128,12 +127,11 @@ func GenerateCommitDiff(opts CommitDiffOptions) (string, error) {
 		args = append(args, opts.Ref+"~1", opts.Ref)
 	}
 
-	cmd := workspace.NewGitCmdWithEnv(gitEnv, workDir, args...)
-	output, err := cmd.Output()
+	output, err := g.Run(ctx, workDir, args...)
 	if err != nil {
 		return "", fmt.Errorf("git diff %s: %w", opts.Ref, err)
 	}
-	return strings.TrimRight(string(output), "\n"), nil
+	return strings.TrimRight(output, "\n"), nil
 }
 
 // CommitInfoWithStat extends CommitInfo with a per-commit stat summary.
@@ -158,17 +156,16 @@ func ListCommitsWithStats(ctx context.Context, layout config.Layout, rt runtime.
 		return nil, err
 	}
 
-	gitEnv := sysexec.GitEnv(layout.Env)
+	g := git.NewHost(layout)
 	result := make([]CommitInfoWithStat, len(commits))
 	for i, c := range commits {
-		cmd := workspace.NewGitCmdWithEnv(gitEnv, workDir, "diff", "--stat", c.SHA+"~1", c.SHA)
-		output, statErr := cmd.Output()
+		output, statErr := g.Run(ctx, workDir, "diff", "--stat", c.SHA+"~1", c.SHA)
 		if statErr != nil {
 			return nil, fmt.Errorf("git diff --stat %s: %w", c.SHA, statErr)
 		}
 		result[i] = CommitInfoWithStat{
 			CommitInfo: c,
-			Stat:       strings.TrimRight(string(output), "\n"),
+			Stat:       strings.TrimRight(output, "\n"),
 		}
 	}
 

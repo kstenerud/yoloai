@@ -1,6 +1,5 @@
 // ABOUTME: IsDangerousDir, CheckPathOverlap guard sandbox creation from mounting
-// ABOUTME: system paths. CheckDirtyRepo has moved to internal/git; the free-function
-// ABOUTME: wrapper is in workspace/git.go.
+// ABOUTME: system paths. CheckDirtyRepo (the git-dirty probe) lives in internal/git.
 package workspace
 
 import (

@@ -2,12 +2,14 @@ package git
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sysexec"
 	"github.com/kstenerud/yoloai/internal/testutil"
 	"github.com/stretchr/testify/assert"
@@ -529,6 +531,28 @@ func TestHeadSHA_NoCommits(t *testing.T) {
 func TestHeadSHA_NotGitRepo(t *testing.T) {
 	_, err := NewHostWithEnv(testEnv()).HeadSHA(ctx, t.TempDir())
 	assert.Error(t, err)
+}
+
+// TestRun_ExitOneReturnsExecError verifies that a non-zero git exit returns
+// *runtime.ExecError so callers can match exit codes via errors.As. Regression
+// guard: sandbox/patch/apply.go treats `git diff --quiet HEAD` exit 1 as "diffs
+// present" via errors.As(&runtime.ExecError); a plain string error would silently
+// fall through to "real error", failing `yoloai apply` on every changed sandbox.
+// The host execer backs the sandbox scope for backends that don't implement
+// runtime.GitExecer (Docker, containerd, Seatbelt), so this guards that path too.
+func TestRun_ExitOneReturnsExecError(t *testing.T) {
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+	writeTestFile(t, dir, "f", "v1")
+	gitAdd(t, dir, ".")
+	gitCommit(t, dir, "init")
+	writeTestFile(t, dir, "f", "v2")
+
+	_, err := NewHostWithEnv(testEnv()).Run(ctx, dir, "diff", "--quiet", "HEAD")
+	require.Error(t, err)
+	var execErr *runtime.ExecError
+	require.True(t, errors.As(err, &execErr), "Run must return *runtime.ExecError on non-zero exit; got %T: %v", err, err)
+	assert.Equal(t, 1, execErr.ExitCode)
 }
 
 // ─── IsIndexLocked ───────────────────────────────────────────────────────────

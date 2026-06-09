@@ -53,7 +53,7 @@ func (w *Workdir) Diff(ctx context.Context, opts WorkdirDiffOptions) (string, er
 		if overlay {
 			return "", yoerrors.NewPlatformError("ref-based diff is not supported for :overlay sandboxes (commits are not individually addressable from the host)")
 		}
-		return w.engine.GenerateCommitDiff(w.name, opts.Ref, opts.Stat)
+		return w.engine.GenerateCommitDiff(ctx, w.name, opts.Ref, opts.Stat)
 	}
 
 	if overlay {

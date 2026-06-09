@@ -15,10 +15,9 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
+	"github.com/kstenerud/yoloai/internal/git"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
-	"github.com/kstenerud/yoloai/internal/sysexec"
-	"github.com/kstenerud/yoloai/internal/workspace"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
 
@@ -102,16 +101,16 @@ func ApplyAll(ctx context.Context, layout config.Layout, rt runtime.Runtime, nam
 	}
 
 	hostPath := meta.Workdir.HostPath
-	isGit := workspace.IsGitRepo(hostPath)
-	gitEnv := sysexec.GitEnv(layout.Env)
-	if err := workspace.CheckPatch(gitEnv, patchBytes, hostPath, isGit); err != nil {
+	isGit := git.IsGitRepo(hostPath)
+	hostGit := git.NewHost(layout)
+	if err := hostGit.CheckPatch(ctx, patchBytes, hostPath, isGit); err != nil {
 		return nil, err
 	}
 	if opts.DryRun {
 		return &ApplyResult{Dir: hostPath, Stat: stat}, nil
 	}
 
-	if err := workspace.ApplyPatch(gitEnv, patchBytes, hostPath, isGit); err != nil {
+	if err := hostGit.ApplyPatch(ctx, patchBytes, hostPath, isGit); err != nil {
 		return nil, fmt.Errorf("%s: %w", hostPath, err)
 	}
 
@@ -169,7 +168,7 @@ func ApplySeries(ctx context.Context, layout config.Layout, rt runtime.Runtime, 
 	}
 
 	hostPath := meta.Workdir.HostPath
-	if !workspace.IsGitRepo(hostPath) {
+	if !git.IsGitRepo(hostPath) {
 		return nil, yoerrors.NewUsageError(
 			"cannot replay a commit series onto %s: not a git repository — apply with NoCommit to land the net changes instead",
 			hostPath)
@@ -197,21 +196,21 @@ func ApplySeries(ctx context.Context, layout config.Layout, rt runtime.Runtime, 
 		return nil, nil
 	}
 
-	gitEnv := sysexec.GitEnv(layout.Env)
-	shaMap, amErr := workspace.ApplyFormatPatch(gitEnv, patchDir, files, hostPath)
+	hostGit := git.NewHost(layout)
+	shaMap, amErr := hostGit.ApplyFormatPatch(ctx, patchDir, files, hostPath)
 	if amErr != nil && shaMap == nil {
 		// git am failed outright — nothing applied.
 		return nil, amErr
 	}
 
-	return finishSeriesApply(ctx, layout, rt, name, hostPath, opts, gitEnv, seriesResult(hostPath, commits, shaMap), amErr)
+	return finishSeriesApply(ctx, layout, rt, name, hostPath, opts, hostGit, seriesResult(hostPath, commits, shaMap), amErr)
 }
 
 // finishSeriesApply advances the baseline (unless path-filtered), surfaces a git
 // am stash error (commits already landed), and applies uncommitted changes when
 // requested. amErr is the non-nil-but-non-fatal error from ApplyFormatPatch (a
 // stash it couldn't reapply); the commits in result did land.
-func finishSeriesApply(ctx context.Context, layout config.Layout, rt runtime.Runtime, name, hostPath string, opts ApplySeriesOptions, gitEnv []string, result *ApplyResult, amErr error) (*ApplyResult, error) {
+func finishSeriesApply(ctx context.Context, layout config.Layout, rt runtime.Runtime, name, hostPath string, opts ApplySeriesOptions, hostGit *git.Git, result *ApplyResult, amErr error) (*ApplyResult, error) {
 	// Advance the baseline past the applied commits (skip for path-filtered
 	// applies — the remaining paths still diff against it).
 	if len(opts.Paths) == 0 {
@@ -225,7 +224,7 @@ func finishSeriesApply(ctx context.Context, layout config.Layout, rt runtime.Run
 		return result, amErr
 	}
 	if opts.IncludeUncommitted {
-		applied, err := applySeriesUncommitted(ctx, layout, rt, name, hostPath, gitEnv, opts.Paths)
+		applied, err := applySeriesUncommitted(ctx, layout, rt, name, hostPath, hostGit, opts.Paths)
 		if err != nil {
 			return result, err
 		}
@@ -252,7 +251,7 @@ func seriesResult(hostPath string, commits []CommitInfo, shaMap map[string]strin
 // applySeriesUncommitted applies the agent's uncommitted edits as unstaged changes
 // after the commit series has landed. Errors are wrapped to make clear the
 // commits already applied (the caller surfaces them as a warning, not a hard failure).
-func applySeriesUncommitted(ctx context.Context, layout config.Layout, rt runtime.Runtime, name, hostPath string, gitEnv []string, paths []string) (bool, error) {
+func applySeriesUncommitted(ctx context.Context, layout config.Layout, rt runtime.Runtime, name, hostPath string, hostGit *git.Git, paths []string) (bool, error) {
 	uncommittedPatch, _, err := GenerateUncommittedDiff(ctx, layout, rt, name, paths)
 	if err != nil {
 		return false, fmt.Errorf("generate uncommitted diff (commits already applied): %w", err)
@@ -260,7 +259,7 @@ func applySeriesUncommitted(ctx context.Context, layout config.Layout, rt runtim
 	if len(uncommittedPatch) == 0 {
 		return false, nil
 	}
-	if err := workspace.ApplyPatch(gitEnv, uncommittedPatch, hostPath, true); err != nil {
+	if err := hostGit.ApplyPatch(ctx, uncommittedPatch, hostPath, true); err != nil {
 		return false, fmt.Errorf("apply uncommitted changes (commits already applied): %w", err)
 	}
 	return true, nil
@@ -303,17 +302,17 @@ func advanceSeriesBaseline(ctx context.Context, layout config.Layout, rt runtime
 	for _, c := range applied {
 		appliedSet[c.SourceSHA] = true
 	}
-	if prefixEnd := workspace.ContiguousPrefixEnd(all, appliedSet); prefixEnd >= 0 {
+	if prefixEnd := git.ContiguousPrefixEnd(all, appliedSet); prefixEnd >= 0 {
 		return AdvanceBaselineTo(layout, name, all[prefixEnd].SHA)
 	}
 	return nil
 }
 
-// CommitInfo is an alias for workspace.CommitInfo.
-type CommitInfo = workspace.CommitInfo
+// CommitInfo is an alias for git.CommitInfo.
+type CommitInfo = git.CommitInfo
 
-// PatchSet is an alias for workspace.PatchSet.
-type PatchSet = workspace.PatchSet
+// PatchSet is an alias for git.PatchSet.
+type PatchSet = git.PatchSet
 
 // GeneratePatch produces a binary patch from the work copy against the
 // baseline SHA. Optionally filtered to specific paths.
@@ -326,7 +325,7 @@ type PatchSet = workspace.PatchSet
 // changes the agent left behind are excluded. The CLI default is false; the
 // caller opts in via `yoloai apply --include-uncommitted`.
 func GeneratePatch(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, paths []string, includeUncommitted bool) (patch []byte, stat string, err error) {
-	gitEnv := sysexec.GitEnv(layout.Env)
+	g := git.NewSandbox(layout, rt, name)
 	workDir, baselineSHA, mode, err := loadDiffContext(layout, name)
 	if err != nil {
 		return nil, "", err
@@ -345,7 +344,7 @@ func GeneratePatch(ctx context.Context, layout config.Layout, rt runtime.Runtime
 	// includes them.
 	endpoint := "HEAD"
 	if includeUncommitted {
-		if addErr := gitAddRetry(ctx, gitEnv, rt, name, workDir); addErr != nil {
+		if addErr := gitAddRetry(ctx, g, workDir); addErr != nil {
 			return nil, "", fmt.Errorf("git add: %w", addErr)
 		}
 		endpoint = ""
@@ -360,7 +359,7 @@ func GeneratePatch(ctx context.Context, layout config.Layout, rt runtime.Runtime
 		patchArgs = append(patchArgs, paths...)
 	}
 
-	patchOut, err := runtime.GitExecFor(ctx, gitEnv, rt, name, workDir, patchArgs...)
+	patchOut, err := g.Run(ctx, workDir, patchArgs...)
 	if err != nil {
 		return nil, "", fmt.Errorf("git diff (patch): %w", err)
 	}
@@ -374,7 +373,7 @@ func GeneratePatch(ctx context.Context, layout config.Layout, rt runtime.Runtime
 		statArgs = append(statArgs, paths...)
 	}
 
-	statOut, err := runtime.GitExecFor(ctx, gitEnv, rt, name, workDir, statArgs...)
+	statOut, err := g.Run(ctx, workDir, statArgs...)
 	if err != nil {
 		return nil, "", fmt.Errorf("git diff (stat): %w", err)
 	}
@@ -577,7 +576,7 @@ func UpdateOverlayBaselineToHEAD(ctx context.Context, layout config.Layout, rt r
 // after the baseline commit, in chronological order (oldest first).
 // Returns an empty slice if HEAD == baseline.
 func ListCommitsBeyondBaseline(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string) ([]CommitInfo, error) {
-	gitEnv := sysexec.GitEnv(layout.Env)
+	g := git.NewSandbox(layout, rt, name)
 	workDir, baselineSHA, mode, err := loadDiffContext(layout, name)
 	if err != nil {
 		return nil, err
@@ -587,7 +586,7 @@ func ListCommitsBeyondBaseline(ctx context.Context, layout config.Layout, rt run
 		return nil, fmt.Errorf("commit listing is not available for :rw directories")
 	}
 
-	output, err := runtime.GitExecFor(ctx, gitEnv, rt, name, workDir, "log", "--reverse", "--format=%H %s", baselineSHA+"..HEAD")
+	output, err := g.Run(ctx, workDir, "log", "--reverse", "--format=%H %s", baselineSHA+"..HEAD")
 	if err != nil {
 		return nil, fmt.Errorf("git log: %w", err)
 	}
@@ -612,7 +611,7 @@ func ListCommitsBeyondBaseline(ctx context.Context, layout config.Layout, rt run
 // HasUncommittedChanges checks whether the work copy has uncommitted
 // changes (staged or unstaged, including untracked files).
 func HasUncommittedChanges(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string) (bool, error) {
-	gitEnv := sysexec.GitEnv(layout.Env)
+	g := git.NewSandbox(layout, rt, name)
 	workDir, _, mode, err := loadDiffContext(layout, name)
 	if err != nil {
 		return false, err
@@ -627,11 +626,11 @@ func HasUncommittedChanges(ctx context.Context, layout config.Layout, rt runtime
 	}
 
 	// Stage untracked files — retry on index.lock contention from agent activity.
-	if err = gitAddRetry(ctx, gitEnv, rt, name, workDir); err != nil {
+	if err = gitAddRetry(ctx, g, workDir); err != nil {
 		return false, fmt.Errorf("git add: %w", err)
 	}
 
-	_, err = runtime.GitExecFor(ctx, gitEnv, rt, name, workDir, "diff", "--quiet", "HEAD")
+	_, err = g.Run(ctx, workDir, "diff", "--quiet", "HEAD")
 	if err == nil {
 		return false, nil // exit 0 = clean
 	}
@@ -783,7 +782,7 @@ func selectRefs(refs []string, allCommits []CommitInfo, shaIndex map[string]int)
 // to only include changes in those paths. Returns the temp directory and sorted
 // file list. The caller is responsible for os.RemoveAll(patchDir).
 func GenerateFormatPatchForRefs(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, shas, paths []string) (patchDir string, files []string, err error) {
-	gitEnv := sysexec.GitEnv(layout.Env)
+	g := git.NewSandbox(layout, rt, name)
 	workDir, _, mode, loadErr := loadDiffContext(layout, name)
 	if loadErr != nil {
 		return "", nil, loadErr
@@ -808,7 +807,7 @@ func GenerateFormatPatchForRefs(ctx context.Context, layout config.Layout, rt ru
 			args = append(args, "--")
 			args = append(args, paths...)
 		}
-		output, runErr := runtime.GitExecFor(ctx, gitEnv, rt, name, workDir, args...)
+		output, runErr := g.Run(ctx, workDir, args...)
 		if runErr != nil {
 			os.RemoveAll(patchDir) //nolint:errcheck,gosec // best-effort cleanup
 			return "", nil, fmt.Errorf("git format-patch -1 %s: %w", sha, runErr)
@@ -841,9 +840,9 @@ func AdvanceBaselineTo(layout config.Layout, name, sha string) error {
 // subsequent diff/apply operations don't re-show already-applied commits.
 // For :rw mode sandboxes, this is a no-op.
 func AdvanceBaseline(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string) error {
-	gitEnv := sysexec.GitEnv(layout.Env)
+	g := git.NewSandbox(layout, rt, name)
 	return advanceBaselineUnlocked(layout, name, func(workDir string) (string, error) {
-		sha, err := runtime.GitExecFor(ctx, gitEnv, rt, name, workDir, "rev-parse", "HEAD")
+		sha, err := g.Run(ctx, workDir, "rev-parse", "HEAD")
 		if err != nil {
 			return "", fmt.Errorf("git rev-parse: %w", err)
 		}
@@ -856,7 +855,7 @@ func AdvanceBaseline(ctx context.Context, layout config.Layout, rt runtime.Runti
 // of .patch filenames. The caller is responsible for os.RemoveAll(patchDir).
 // When paths is non-empty, only commits touching those paths are included.
 func GenerateFormatPatch(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, paths []string) (patchDir string, files []string, err error) {
-	gitEnv := sysexec.GitEnv(layout.Env)
+	g := git.NewSandbox(layout, rt, name)
 	workDir, baselineSHA, mode, loadErr := loadDiffContext(layout, name)
 	if loadErr != nil {
 		return "", nil, loadErr
@@ -884,7 +883,7 @@ func GenerateFormatPatch(ctx context.Context, layout config.Layout, rt runtime.R
 		revArgs = append(revArgs, "--")
 		revArgs = append(revArgs, paths...)
 	}
-	revOut, revErr := runtime.GitExecFor(ctx, gitEnv, rt, name, workDir, revArgs...)
+	revOut, revErr := g.Run(ctx, workDir, revArgs...)
 	if revErr != nil {
 		os.RemoveAll(patchDir) //nolint:errcheck,gosec // best-effort cleanup
 		return "", nil, fmt.Errorf("git rev-list: %w", revErr)
@@ -892,7 +891,7 @@ func GenerateFormatPatch(ctx context.Context, layout config.Layout, rt runtime.R
 
 	shas := strings.Fields(strings.TrimSpace(revOut))
 	for i, sha := range shas {
-		output, runErr := runtime.GitExecFor(ctx, gitEnv, rt, name, workDir, "format-patch", "--stdout", "-1", sha)
+		output, runErr := g.Run(ctx, workDir, "format-patch", "--stdout", "-1", sha)
 		if runErr != nil {
 			os.RemoveAll(patchDir) //nolint:errcheck,gosec // best-effort cleanup
 			return "", nil, fmt.Errorf("git format-patch -1 %s: %w", sha, runErr)
@@ -915,7 +914,7 @@ func GenerateFormatPatch(ctx context.Context, layout config.Layout, rt runtime.R
 // HEAD, not the baseline). This captures only uncommitted changes that the agent
 // hasn't committed. Returns empty patch if no uncommitted changes.
 func GenerateUncommittedDiff(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, paths []string) (patch []byte, stat string, err error) {
-	gitEnv := sysexec.GitEnv(layout.Env)
+	g := git.NewSandbox(layout, rt, name)
 	workDir, _, mode, loadErr := loadDiffContext(layout, name)
 	if loadErr != nil {
 		return nil, "", loadErr
@@ -930,7 +929,7 @@ func GenerateUncommittedDiff(ctx context.Context, layout config.Layout, rt runti
 	}
 
 	// Stage untracked files
-	_, err = runtime.GitExecFor(ctx, gitEnv, rt, name, workDir, "add", "-A")
+	_, err = g.Run(ctx, workDir, "add", "-A")
 	if err != nil {
 		return nil, "", fmt.Errorf("git add: %w", err)
 	}
@@ -942,7 +941,7 @@ func GenerateUncommittedDiff(ctx context.Context, layout config.Layout, rt runti
 		patchArgs = append(patchArgs, paths...)
 	}
 
-	patchOut, err := runtime.GitExecFor(ctx, gitEnv, rt, name, workDir, patchArgs...)
+	patchOut, err := g.Run(ctx, workDir, patchArgs...)
 	if err != nil {
 		return nil, "", fmt.Errorf("git diff (uncommitted patch): %w", err)
 	}
@@ -958,7 +957,7 @@ func GenerateUncommittedDiff(ctx context.Context, layout config.Layout, rt runti
 		statArgs = append(statArgs, paths...)
 	}
 
-	statOut, err := runtime.GitExecFor(ctx, gitEnv, rt, name, workDir, statArgs...)
+	statOut, err := g.Run(ctx, workDir, statArgs...)
 	if err != nil {
 		return nil, "", fmt.Errorf("git diff (uncommitted stat): %w", err)
 	}
@@ -969,11 +968,11 @@ func GenerateUncommittedDiff(ctx context.Context, layout config.Layout, rt runti
 // gitAddRetry runs `git add -A` via the runtime, retrying on index.lock
 // contention. The agent may hold the lock briefly for status bar updates
 // while sharing the work dir via a bind mount.
-func gitAddRetry(ctx context.Context, gitEnv []string, rt runtime.Runtime, name, workDir string) error {
+func gitAddRetry(ctx context.Context, g *git.Git, workDir string) error {
 	var err error
 	for range 5 {
-		_, err = runtime.GitExecFor(ctx, gitEnv, rt, name, workDir, "add", "-A")
-		if err == nil || !workspace.IsIndexLocked(err) {
+		_, err = g.Run(ctx, workDir, "add", "-A")
+		if err == nil || !git.IsIndexLocked(err) {
 			return err
 		}
 		select {

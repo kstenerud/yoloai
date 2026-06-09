@@ -14,10 +14,10 @@ import (
 	"time"
 
 	"github.com/kstenerud/yoloai/internal/config"
+	"github.com/kstenerud/yoloai/internal/git"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox/patch"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
-	"github.com/kstenerud/yoloai/internal/sysexec"
 )
 
 // Status represents the current state of a sandbox.
@@ -103,8 +103,8 @@ const (
 // by checking the host-side upper layer. Returns the strongest signal found
 // (Present > Ambiguous > None) and a human-readable detail for the first
 // payload that carries data.
-// env must be an explicit subprocess env derived from the caller's layout (DEV §12).
-func ProbeWorkData(env []string, sandboxDir string) (WorkDataState, string) {
+// g is a host-scoped git runner derived from the caller's layout (DEV §12).
+func ProbeWorkData(ctx context.Context, g *git.Git, sandboxDir string) (WorkDataState, string) {
 	entries, err := os.ReadDir(filepath.Join(sandboxDir, "work"))
 	if err != nil {
 		return WorkDataNone, ""
@@ -119,7 +119,7 @@ func ProbeWorkData(env []string, sandboxDir string) (WorkDataState, string) {
 
 		// Copy mode: the work dir is the git repo itself.
 		if _, statErr := os.Stat(filepath.Join(workEntry, ".git")); statErr == nil {
-			if patch.DetectChanges(env, workEntry) == "yes" {
+			if patch.DetectChanges(ctx, g, workEntry) == "yes" {
 				return WorkDataPresent, "uncommitted changes in copied work dir"
 			}
 			// Clean tree, but without the baseline SHA from meta we can't
@@ -306,11 +306,10 @@ func InspectSandbox(ctx context.Context, layout config.Layout, rt runtime.Runtim
 		diskUsageBytes = size
 	}
 
-	gitEnv := sysexec.GitEnv(layout.Env)
 	return &Info{
 		Environment:    meta,
 		Status:         status,
-		HasChanges:     detectWorkdirChanges(ctx, gitEnv, rt, name, sandboxDir, meta),
+		HasChanges:     detectWorkdirChanges(ctx, git.NewSandbox(layout, rt, name), sandboxDir, meta),
 		DiskUsageBytes: diskUsageBytes,
 	}, nil
 }
@@ -319,12 +318,12 @@ func InspectSandbox(ctx context.Context, layout config.Layout, rt runtime.Runtim
 // workdir and aux dirs. "unknown" means the working copy lives in a VM-local
 // backend (Tart) that is not running, so the probe can't reach it — the change
 // state genuinely can't be read from the host (see patch.HasUnappliedWorkVia).
-func detectWorkdirChanges(ctx context.Context, gitEnv []string, rt runtime.Runtime, name, sandboxDir string, meta *store.Environment) string {
+func detectWorkdirChanges(ctx context.Context, g *git.Git, sandboxDir string, meta *store.Environment) string {
 	if meta.Workdir.Mode != "copy" && meta.Workdir.Mode != "overlay" {
 		return "-"
 	}
 	workDir := store.WorkDir(sandboxDir, meta.Workdir.HostPath)
-	switch patch.HasUnappliedWorkVia(ctx, gitEnv, rt, name, workDir, meta.Workdir.BaselineSHA) {
+	switch patch.HasUnappliedWorkVia(ctx, g, workDir, meta.Workdir.BaselineSHA) {
 	case patch.WorkDirty:
 		return "yes"
 	case patch.WorkUnknown:
@@ -335,7 +334,7 @@ func detectWorkdirChanges(ctx context.Context, gitEnv []string, rt runtime.Runti
 	for _, d := range meta.Directories {
 		if d.Mode == "copy" || d.Mode == "overlay" {
 			auxWorkDir := store.WorkDir(sandboxDir, d.HostPath)
-			switch patch.HasUnappliedWorkVia(ctx, gitEnv, rt, name, auxWorkDir, d.BaselineSHA) {
+			switch patch.HasUnappliedWorkVia(ctx, g, auxWorkDir, d.BaselineSHA) {
 			case patch.WorkDirty:
 				return "yes"
 			case patch.WorkUnknown:
@@ -382,11 +381,10 @@ func InspectSandboxWithBackend(ctx context.Context, layout config.Layout, rt run
 		return nil, err
 	}
 
-	gitEnv2 := sysexec.GitEnv(layout.Env)
 	return &Info{
 		Environment:    meta,
 		Status:         status,
-		HasChanges:     detectWorkdirChanges(ctx, gitEnv2, rt, name, sandboxDir, meta),
+		HasChanges:     detectWorkdirChanges(ctx, git.NewSandbox(layout, rt, name), sandboxDir, meta),
 		DiskUsageBytes: diskUsageBytes,
 	}, nil
 }

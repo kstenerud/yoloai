@@ -8,34 +8,10 @@ import (
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/config"
+	"github.com/kstenerud/yoloai/internal/git"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
-	"github.com/kstenerud/yoloai/internal/sysexec"
-	"github.com/kstenerud/yoloai/internal/workspace"
 )
-
-// sandboxGitRunner returns a workspace.GitRunner that runs git against the
-// sandbox work copy via the backend: on the host for Docker/Podman/Seatbelt (or
-// a nil runtime), and inside the VM for Tart (runtime.GitExecFor translates the
-// host work path to its VM path). This is what makes the tag pipeline correct
-// for Tart VM work copies (see DF12).
-// env is the explicit subprocess env for host-side git fallback (DEV §12).
-func sandboxGitRunner(ctx context.Context, env []string, rt runtime.Runtime, name, workDir string) workspace.GitRunner {
-	return func(args ...string) (string, error) {
-		return runtime.GitExecFor(ctx, env, rt, name, workDir, args...)
-	}
-}
-
-// hostGitRunner returns a workspace.GitRunner that runs git directly on a host
-// path — used for the host target repo, which lives on the host even when the
-// sandbox runs in a VM. Hooks are disabled, matching the rest of the pipeline.
-// env must be an explicit subprocess env derived from the caller's layout (DEV §12).
-func hostGitRunner(env []string, dir string) workspace.GitRunner {
-	return func(args ...string) (string, error) {
-		out, err := workspace.NewGitCmdWithEnv(env, dir, args...).Output()
-		return string(out), err
-	}
-}
 
 // loadDiffContext returns the work directory, baseline SHA, and workdir mode for
 // a sandbox. Used by tags.go to locate commits relative to the baseline.
@@ -102,11 +78,10 @@ func ListTagsBeyondBaseline(ctx context.Context, layout config.Layout, rt runtim
 		return nil, nil
 	}
 
-	gitEnv := sysexec.GitEnv(layout.Env)
-	git := sandboxGitRunner(ctx, gitEnv, rt, name, workDir)
+	g := git.NewSandbox(layout, rt, name)
 
 	// Collect commit SHAs beyond baseline
-	revOut, err := git("rev-list", baselineSHA+"..HEAD")
+	revOut, err := g.Run(ctx, workDir, "rev-list", baselineSHA+"..HEAD")
 	if err != nil {
 		return nil, fmt.Errorf("git rev-list: %w", err)
 	}
@@ -120,7 +95,7 @@ func ListTagsBeyondBaseline(ctx context.Context, layout config.Layout, rt runtim
 		return nil, nil
 	}
 
-	tags, err := listAllTags(git)
+	tags, err := listAllTags(ctx, g, workDir)
 	if err != nil {
 		return nil, err
 	}
@@ -154,13 +129,13 @@ func ListUnappliedTags(ctx context.Context, layout config.Layout, rt runtime.Run
 	targetDir := meta.Workdir.HostPath
 
 	// Check if target is a git repo
-	if !workspace.IsGitRepo(targetDir) {
+	if !git.IsGitRepo(targetDir) {
 		return nil, nil
 	}
 
 	// List all tags in sandbox
-	gitEnvForSandbox := sysexec.GitEnv(layout.Env)
-	sandboxTags, err := listAllTags(sandboxGitRunner(ctx, gitEnvForSandbox, rt, name, workDir))
+	sandboxGit := git.NewSandbox(layout, rt, name)
+	sandboxTags, err := listAllTags(ctx, sandboxGit, workDir)
 	if err != nil {
 		return nil, err
 	}
@@ -170,9 +145,9 @@ func ListUnappliedTags(ctx context.Context, layout config.Layout, rt runtime.Run
 	}
 
 	// List all tags on host
-	gitEnv := sysexec.GitEnv(layout.Env)
+	hostGit := git.NewHost(layout)
 	hostTagNames := make(map[string]bool)
-	hostTags, err := listAllTags(hostGitRunner(gitEnv, targetDir))
+	hostTags, err := listAllTags(ctx, hostGit, targetDir)
 	if err == nil { // best-effort; ignore errors
 		for _, t := range hostTags {
 			hostTagNames[t.Name] = true
@@ -192,22 +167,22 @@ func ListUnappliedTags(ctx context.Context, layout config.Layout, rt runtime.Run
 
 // getTagMessage returns the full message for an annotated tag via the runner.
 // Returns empty string for lightweight tags or if the message can't be read.
-func getTagMessage(git workspace.GitRunner, tagName string) string {
-	out, err := git("for-each-ref", "--format=%(contents)", "refs/tags/"+tagName)
+func getTagMessage(ctx context.Context, g *git.Git, dir, tagName string) string {
+	out, err := g.Run(ctx, dir, "for-each-ref", "--format=%(contents)", "refs/tags/"+tagName)
 	if err != nil {
 		return ""
 	}
 	return strings.TrimSpace(out)
 }
 
-// listAllTags returns all tags in the repository the runner targets.
+// listAllTags returns all tags in the repository at dir, read via g.
 // Tag messages are NOT populated (Message field is empty); use getTagMessage
 // to fetch the full message for a specific tag when needed.
-func listAllTags(git workspace.GitRunner) ([]TagInfo, error) {
+func listAllTags(ctx context.Context, g *git.Git, dir string) ([]TagInfo, error) {
 	// Use only single-line fields to keep parsing reliable.
 	// Multi-line tag messages are fetched separately via getTagMessage.
 	const tagFmt = "%(refname:short)\x01%(objecttype)\x01%(*objectname)\x01%(objectname)"
-	tagOut, err := git("for-each-ref", "--format="+tagFmt, "refs/tags")
+	tagOut, err := g.Run(ctx, dir, "for-each-ref", "--format="+tagFmt, "refs/tags")
 	if err != nil {
 		return nil, fmt.Errorf("git for-each-ref: %w", err)
 	}

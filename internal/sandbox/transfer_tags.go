@@ -8,10 +8,9 @@ import (
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/config"
+	"github.com/kstenerud/yoloai/internal/git"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
-	"github.com/kstenerud/yoloai/internal/sysexec"
-	"github.com/kstenerud/yoloai/internal/workspace"
 )
 
 // TagOutcome is the result of transferring one tag to the host. Applied is true
@@ -40,7 +39,7 @@ func TargetIsGitRepo(layout config.Layout, name string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return workspace.IsGitRepo(meta.Workdir.HostPath), nil
+	return git.IsGitRepo(meta.Workdir.HostPath), nil
 }
 
 // TransferTags re-creates the given sandbox tags on the host target repo,
@@ -71,8 +70,9 @@ func TransferTags(ctx context.Context, layout config.Layout, rt runtime.Runtime,
 		for i, t := range tags {
 			sandboxSHAs[i] = t.SHA
 		}
-		gitEnv := sysexec.GitEnv(layout.Env)
-		shaMap, err = workspace.BuildSHAMapByMatching(gitEnv, sandboxGitRunner(ctx, gitEnv, rt, name, workDir), targetDir, sandboxSHAs)
+		sandboxGit := git.NewSandbox(layout, rt, name)
+		hostGit := git.NewHost(layout)
+		shaMap, err = sandboxGit.BuildSHAMapByMatching(ctx, hostGit, targetDir, workDir, sandboxSHAs)
 		if err != nil {
 			return nil, fmt.Errorf("build SHA map: %w", err)
 		}
@@ -86,8 +86,8 @@ func TransferTags(ctx context.Context, layout config.Layout, rt runtime.Runtime,
 			res.Skipped++
 			continue
 		}
-		gitEnv := sysexec.GitEnv(layout.Env)
-		if createErr := workspace.CreateTag(gitEnv, targetDir, tag.Name, hostSHA, tag.Message); createErr != nil {
+		hostGit := git.NewHost(layout)
+		if createErr := hostGit.CreateTag(ctx, targetDir, tag.Name, hostSHA, tag.Message); createErr != nil {
 			res.Outcomes = append(res.Outcomes, TagOutcome{Name: tag.Name, Err: createErr.Error()})
 			res.Skipped++
 			continue

@@ -16,11 +16,11 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
+	"github.com/kstenerud/yoloai/internal/git"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/runtime/caps"
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
-	"github.com/kstenerud/yoloai/internal/sysexec"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
 
@@ -654,7 +654,7 @@ func (s *System) Prune(ctx context.Context, opts SystemPruneOptions) (*PruneResu
 	if out == nil {
 		out = io.Discard
 	}
-	known, broken := s.classifySandboxes()
+	known, broken := s.classifySandboxes(ctx)
 	result := &PruneResult{}
 
 	for _, desc := range runtime.Descriptors() {
@@ -847,7 +847,7 @@ type classifiedSandbox struct {
 //   - missing meta + no work dir                  → delete (never-init)
 //   - corrupt/version-too-new meta, no data,
 //     or incomplete dir w/ ambiguous content      → quarantine to trash
-func (s *System) classifySandboxes() (known []string, broken []classifiedSandbox) {
+func (s *System) classifySandboxes(ctx context.Context) (known []string, broken []classifiedSandbox) {
 	dir := s.layout.SandboxesDir()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -864,8 +864,7 @@ func (s *System) classifySandboxes() (known []string, broken []classifiedSandbox
 			known = append(known, store.InstanceName(s.layout.Principal, name))
 			continue
 		} else {
-			gitEnv := sysexec.GitEnv(s.layout.Env)
-			state, detail := sandbox.ProbeWorkData(gitEnv, path)
+			state, detail := sandbox.ProbeWorkData(ctx, git.NewHost(s.layout), path)
 			c := classifiedSandbox{name: name, path: path, detail: detail}
 			switch {
 			case state == sandbox.WorkDataPresent:
