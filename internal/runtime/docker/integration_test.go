@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime/docker"
 	"github.com/kstenerud/yoloai/internal/runtime/runtimetest"
 )
@@ -18,7 +19,7 @@ import (
 func TestDockerConformance(t *testing.T) {
 	runtimetest.RunConformance(t, func(t *testing.T) (runtimetest.DockerCompatRuntime, context.Context) {
 		ctx := context.Background()
-		rt, err := docker.New(ctx, runtimetest.EnvFromOS())
+		rt, err := docker.New(ctx, config.Layout{Env: runtimetest.EnvFromOS()})
 		require.NoError(t, err, "Docker must be running for integration tests")
 		t.Cleanup(func() { rt.Close() }) //nolint:errcheck // test cleanup
 		return rt, ctx

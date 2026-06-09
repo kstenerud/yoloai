@@ -69,7 +69,7 @@ func probe(_ context.Context, env map[string]string) (bool, string) {
 
 func init() {
 	runtime.Register(func(ctx context.Context, layout config.Layout) (runtime.Runtime, error) {
-		return New(ctx, layout.Env)
+		return New(ctx, layout)
 	}, descriptor)
 }
 
@@ -93,17 +93,17 @@ var _ runtime.DiskUsageReporter = (*Runtime)(nil) // inherited; image bytes via 
 
 // New creates a Podman Runtime by discovering the Podman socket and
 // connecting via the Docker SDK.
-func New(ctx context.Context, env map[string]string) (*Runtime, error) {
+func New(ctx context.Context, layout config.Layout) (*Runtime, error) {
 	if _, err := exec.LookPath("podman"); err != nil {
 		return nil, yoerrors.NewDependencyError("podman is not installed, install it from https://podman.io/docs/installation")
 	}
 
-	sock, err := discoverSocket(env)
+	sock, err := discoverSocket(layout.Env)
 	if err != nil {
 		return nil, yoerrors.NewDependencyError("podman socket not found: %w\nhint: run 'systemctl --user start podman.socket' or 'podman machine start'", err)
 	}
 
-	dockerRT, err := docker.NewWithSocket(ctx, sock, "podman", env)
+	dockerRT, err := docker.NewWithSocket(ctx, sock, "podman", layout)
 	if err != nil {
 		return nil, fmt.Errorf("connect to podman: %w", err)
 	}

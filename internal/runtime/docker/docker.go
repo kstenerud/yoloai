@@ -96,7 +96,7 @@ func versionString(ctx context.Context) string {
 
 func init() {
 	runtime.Register(func(ctx context.Context, layout config.Layout) (runtime.Runtime, error) {
-		return New(ctx, layout.Env)
+		return New(ctx, layout)
 	}, descriptor)
 }
 
@@ -122,25 +122,26 @@ var _ runtime.IsolationCapabilityProvider = (*Runtime)(nil)
 var _ runtime.CachePruner = (*Runtime)(nil)
 var _ runtime.DiskUsageReporter = (*Runtime)(nil)
 
-// New creates a Runtime and verifies the Docker daemon is reachable. env is
-// the caller's threaded environment snapshot (layout.Env); the daemon socket
+// New creates a Runtime and verifies the Docker daemon is reachable. layout
+// carries the threaded environment snapshot (layout.Env); the daemon socket
 // and TLS settings are read from it rather than os.Environ (§12). A nil/empty
-// env means "default socket, no TLS" — exactly the SDK's behavior when the
-// DOCKER_* vars are unset.
-func New(ctx context.Context, env map[string]string) (*Runtime, error) {
+// layout.Env means "default socket, no TLS" — exactly the SDK's behavior when
+// the DOCKER_* vars are unset.
+func New(ctx context.Context, layout config.Layout) (*Runtime, error) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		return nil, yoerrors.NewDependencyError("docker is not installed, install it from https://docs.docker.com/get-docker/")
 	}
-	return NewWithSocket(ctx, "", "docker", env)
+	return NewWithSocket(ctx, "", "docker", layout)
 }
 
 // NewWithSocket creates a Runtime connected to a specific Docker-compatible socket.
 // If host is non-empty it pins the connection to that socket. If host is empty,
-// the client is configured from env (DOCKER_HOST / DOCKER_CERT_PATH /
+// the client is configured from layout.Env (DOCKER_HOST / DOCKER_CERT_PATH /
 // DOCKER_TLS_VERIFY / DOCKER_API_VERSION) — the threaded snapshot, not
 // os.Environ (§12). binaryName is the CLI binary to use for interactive exec
 // and image builds (e.g., "docker" or "podman").
-func NewWithSocket(ctx context.Context, host string, binaryName string, env map[string]string) (*Runtime, error) {
+func NewWithSocket(ctx context.Context, host string, binaryName string, layout config.Layout) (*Runtime, error) {
+	env := layout.Env
 	baseOpts := []dockerclient.Opt{dockerclient.WithAPIVersionNegotiation()}
 	tlsOpts, err := tlsOptsFromEnv(env)
 	if err != nil {

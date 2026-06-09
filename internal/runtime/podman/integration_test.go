@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/runtime/podman"
 	"github.com/kstenerud/yoloai/internal/runtime/runtimetest"
@@ -20,7 +21,7 @@ import (
 func TestPodmanConformance(t *testing.T) {
 	runtimetest.RunConformance(t, func(t *testing.T) (runtimetest.DockerCompatRuntime, context.Context) {
 		ctx := context.Background()
-		rt, err := podman.New(ctx, runtimetest.EnvFromOS())
+		rt, err := podman.New(ctx, config.Layout{Env: runtimetest.EnvFromOS()})
 		require.NoError(t, err, "Podman must be running with socket activated for integration tests")
 		t.Cleanup(func() { rt.Close() }) //nolint:errcheck // test cleanup
 		return rt, ctx
@@ -31,7 +32,7 @@ func TestPodmanConformance(t *testing.T) {
 // distinguishes podman from the embedded docker runtime.
 func TestPodman_Descriptor(t *testing.T) {
 	ctx := context.Background()
-	rt, err := podman.New(ctx, runtimetest.EnvFromOS())
+	rt, err := podman.New(ctx, config.Layout{Env: runtimetest.EnvFromOS()})
 	require.NoError(t, err, "Podman must be running for integration tests")
 	t.Cleanup(func() { rt.Close() }) //nolint:errcheck // test cleanup
 

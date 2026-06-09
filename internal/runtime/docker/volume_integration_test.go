@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime"
 )
 
@@ -18,7 +19,7 @@ import (
 // backing for docker-in-docker's overlay2 driver (see ensureDindVolumeMount).
 func TestDindVolumeLifecycle(t *testing.T) {
 	ctx := context.Background()
-	rt, err := New(ctx, envFromOS())
+	rt, err := New(ctx, config.Layout{Env: envFromOS()})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close() })
 
@@ -50,7 +51,7 @@ func TestDindVolumeLifecycle(t *testing.T) {
 // only: a plain sandbox must not leave a stray /var/lib/docker volume behind.
 func TestDindVolumeNotCreatedForNonPrivileged(t *testing.T) {
 	ctx := context.Background()
-	rt, err := New(ctx, envFromOS())
+	rt, err := New(ctx, config.Layout{Env: envFromOS()})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close() })
 
