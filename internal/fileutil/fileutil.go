@@ -186,6 +186,33 @@ func WriteFilePerm(path string, data []byte, perm fs.FileMode) error {
 	return os.Chmod(path, perm) //nolint:gosec // G302: caller is responsible for choosing the perm
 }
 
+// CopyDirFiles copies every non-directory file directly under srcDir into
+// destDir (non-recursive; subdirectories are skipped), writing each with perm.
+// Every failure — an unreadable srcDir, a failed file read, or a failed write —
+// is returned. Callers copying credentials MUST NOT proceed silently when a
+// secret was dropped: a swallowed error here means a sandbox launches with
+// missing keys and the agent fails confusingly later (DEV §5, no silent
+// fallbacks).
+func CopyDirFiles(destDir, srcDir string, perm fs.FileMode) error {
+	entries, err := os.ReadDir(srcDir)
+	if err != nil {
+		return fmt.Errorf("read source dir %s: %w", srcDir, err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(srcDir, entry.Name())) //nolint:gosec // G304: srcDir is an internal sandbox dir / validated mount spec
+		if err != nil {
+			return fmt.Errorf("read %s: %w", entry.Name(), err)
+		}
+		if err := WriteFile(filepath.Join(destDir, entry.Name()), data, perm); err != nil {
+			return fmt.Errorf("copy %s: %w", entry.Name(), err)
+		}
+	}
+	return nil
+}
+
 // ReadJSONMap reads a JSON file into a map, returning an empty map if the file doesn't exist.
 func ReadJSONMap(path string) (map[string]any, error) {
 	data, err := os.ReadFile(path) //nolint:gosec // path is sandbox-controlled

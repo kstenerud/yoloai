@@ -220,7 +220,7 @@ func copySecretsToSandbox(sandboxPath string, mounts []runtime.MountSpec) error 
 			continue
 		}
 		if m.ContainerPath == "/run/secrets" {
-			if err := copySecretDir(secretsDir, m.HostPath); err != nil {
+			if err := fileutil.CopyDirFiles(secretsDir, m.HostPath, 0600); err != nil {
 				return err
 			}
 			continue
@@ -232,27 +232,6 @@ func copySecretsToSandbox(sandboxPath string, mounts []runtime.MountSpec) error 
 		keyName := filepath.Base(m.ContainerPath)
 		if err := fileutil.WriteFile(filepath.Join(secretsDir, keyName), data, 0600); err != nil { //nolint:gosec // G703: secretsDir is an internal sandbox directory
 			return fmt.Errorf("copy secret %s: %w", keyName, err)
-		}
-	}
-	return nil
-}
-
-// copySecretDir copies all non-directory files from srcDir into destDir.
-func copySecretDir(destDir, srcDir string) error {
-	entries, err := os.ReadDir(srcDir)
-	if err != nil {
-		return nil //nolint:nilerr // intentional: skip if directory read fails
-	}
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(srcDir, entry.Name())) //nolint:gosec // G304: source is from validated mount spec
-		if err != nil {
-			continue
-		}
-		if err := fileutil.WriteFile(filepath.Join(destDir, entry.Name()), data, 0600); err != nil { //nolint:gosec // G703: destDir is an internal sandbox directory
-			return fmt.Errorf("copy secret %s: %w", entry.Name(), err)
 		}
 	}
 	return nil
