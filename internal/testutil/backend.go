@@ -52,6 +52,11 @@ func NewIntegrationRuntime(ctx context.Context, t *testing.T) yrt.Runtime {
 	// thread the host env so backend socket discovery (e.g. podman's
 	// XDG_RUNTIME_DIR) sees the real environment, not an empty map.
 	layout.Env = envSnapshot()
+	// Namespace this runtime to a unique principal so a prune sweep in an
+	// integration test can only ever match yoloai-<principal>-*, never the
+	// developer's real resources (DEV §12, DF19). Shares the one principal
+	// source with the system Client tests.
+	layout = layout.WithPrincipal(UniqueTestPrincipal(t))
 	rt, err := yrt.New(ctx, yrt.BackendType(name), layout)
 	if err != nil {
 		t.Fatalf("create %q runtime: %v", name, err)

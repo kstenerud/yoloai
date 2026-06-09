@@ -143,7 +143,7 @@ func findTrashed(ts []TrashedSandbox, name string) bool {
 // dry run: known (untouched), never-init (delete), corrupt-no-data (trash),
 // data-bearing (refuse).
 func TestPrune_ClassifiesSandboxDirs(t *testing.T) {
-	c := newIsolatedTestClient(t)
+	c := newTestClient(t)
 
 	// known: valid metadata.
 	good := mkSandboxDir(t, c, "good")
@@ -187,7 +187,7 @@ func TestPrune_ClassifiesSandboxDirs(t *testing.T) {
 // deletes never-init dirs, quarantines corrupt dirs to trash, and leaves
 // data-bearing dirs untouched.
 func TestPrune_ExecutesClassifications(t *testing.T) {
-	c := newIsolatedTestClient(t)
+	c := newTestClient(t)
 
 	mkSandboxDir(t, c, "neverinit")
 	corrupt := mkSandboxDir(t, c, "corrupt")
