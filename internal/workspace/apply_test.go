@@ -305,7 +305,7 @@ func TestApplyFormatPatch_EmptyTargetRepo(t *testing.T) {
 
 func TestWithTempGitDir_CallsFn(t *testing.T) {
 	var calledWith string
-	err := withTempGitDir(testEnv(), func(tmpDir string) error {
+	err := NewGitWithEnv(testEnv()).withTempGitDir(func(tmpDir string) error {
 		calledWith = tmpDir
 		// The temp dir should be a valid git repo
 		assert.True(t, IsGitRepo(tmpDir))
@@ -317,7 +317,7 @@ func TestWithTempGitDir_CallsFn(t *testing.T) {
 
 func TestWithTempGitDir_PropagatesError(t *testing.T) {
 	sentinel := fmt.Errorf("test sentinel error")
-	err := withTempGitDir(testEnv(), func(tmpDir string) error {
+	err := NewGitWithEnv(testEnv()).withTempGitDir(func(tmpDir string) error {
 		return sentinel
 	})
 	assert.ErrorIs(t, err, sentinel)
@@ -325,7 +325,7 @@ func TestWithTempGitDir_PropagatesError(t *testing.T) {
 
 func TestWithTempGitDir_CleansUp(t *testing.T) {
 	var capturedDir string
-	err := withTempGitDir(testEnv(), func(tmpDir string) error {
+	err := NewGitWithEnv(testEnv()).withTempGitDir(func(tmpDir string) error {
 		capturedDir = tmpDir
 		// Verify the dir exists while inside the callback
 		_, statErr := os.Stat(tmpDir)
@@ -348,7 +348,7 @@ func TestRunGitApply_ValidPatch(t *testing.T) {
 
 	patch := generatePatch(t, dir, "file.txt", "old content\n", "new content\n")
 
-	err := runGitApply(testEnv(), dir, patch)
+	err := NewGitWithEnv(testEnv()).runGitApply(dir, patch)
 	assert.NoError(t, err)
 
 	// Verify the file was changed
@@ -364,6 +364,6 @@ func TestRunGitApply_InvalidPatch(t *testing.T) {
 	gitAdd(t, dir, "dummy.txt")
 	gitCommit(t, dir, "initial")
 
-	err := runGitApply(testEnv(), dir, []byte("this is not a valid patch"))
+	err := NewGitWithEnv(testEnv()).runGitApply(dir, []byte("this is not a valid patch"))
 	assert.Error(t, err)
 }

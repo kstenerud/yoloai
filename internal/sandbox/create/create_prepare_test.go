@@ -20,6 +20,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/sandbox/state"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/internal/testutil"
+	"github.com/kstenerud/yoloai/internal/workspace"
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -512,7 +513,7 @@ func TestSetupWorkdir_DefersBaselineForWorkDirSetupBackends(t *testing.T) {
 	rt := &mockTartRuntime{}
 
 	// setupWorkdir should return empty SHA for WorkDirSetup backends
-	_, baselineSHA, err := setupWorkdir(testutil.GitEnv(), sandboxDir, workdir, rt)
+	_, baselineSHA, err := setupWorkdir(workspace.NewGitWithEnv(testutil.GitEnv()), sandboxDir, workdir, rt)
 	require.NoError(t, err)
 	assert.Empty(t, baselineSHA, "baseline SHA should be empty for WorkDirSetup backends (baseline deferred to VM)")
 }
@@ -538,7 +539,7 @@ func TestSetupWorkdir_CreatesBaselineForDockerBackends(t *testing.T) {
 	rt := &mockDockerRuntime{}
 
 	// setupWorkdir should create baseline and return non-empty SHA for Docker
-	_, baselineSHA, err := setupWorkdir(testutil.GitEnv(), sandboxDir, workdir, rt)
+	_, baselineSHA, err := setupWorkdir(workspace.NewGitWithEnv(testutil.GitEnv()), sandboxDir, workdir, rt)
 	require.NoError(t, err)
 	assert.NotEmpty(t, baselineSHA, "baseline SHA should be non-empty for Docker backends (immediate baseline)")
 	assert.Len(t, baselineSHA, 40, "SHA should be 40 characters (git SHA-1)")
@@ -568,7 +569,7 @@ func TestSetupWorkdir_OverlayModeDeferBaseline(t *testing.T) {
 	}
 
 	for _, rt := range runtimes {
-		_, baselineSHA, err := setupWorkdir(testutil.GitEnv(), sandboxDir, workdir, rt)
+		_, baselineSHA, err := setupWorkdir(workspace.NewGitWithEnv(testutil.GitEnv()), sandboxDir, workdir, rt)
 		require.NoError(t, err)
 		assert.Empty(t, baselineSHA, "overlay mode should defer baseline for all backends")
 	}
@@ -587,7 +588,7 @@ func TestCheckDirtyRepos_RefusesUntilAcked(t *testing.T) {
 	wd := &DirSpec{Path: dir, Mode: DirModeCopy}
 
 	// Default: refuse with a typed *DirtyWorkdirError naming the dir — no prompt.
-	err := checkDirtyRepos(nil, wd, nil)
+	err := checkDirtyRepos(workspace.NewGitWithEnv(testutil.GitEnv()), wd, nil)
 	var dwe *yoerrors.DirtyWorkdirError
 	require.ErrorAs(t, err, &dwe)
 	require.Len(t, dwe.Dirs, 1)
@@ -596,7 +597,7 @@ func TestCheckDirtyRepos_RefusesUntilAcked(t *testing.T) {
 
 	// AllowDirty acks the specific directory → proceeds.
 	wd.AllowDirty = true
-	require.NoError(t, checkDirtyRepos(nil, wd, nil))
+	require.NoError(t, checkDirtyRepos(workspace.NewGitWithEnv(testutil.GitEnv()), wd, nil))
 }
 
 func TestCheckDirtyRepos_CleanRepoPasses(t *testing.T) {
@@ -606,7 +607,7 @@ func TestCheckDirtyRepos_CleanRepoPasses(t *testing.T) {
 	gitAdd(t, dir, ".")
 	gitCommit(t, dir, "init")
 
-	require.NoError(t, checkDirtyRepos(nil, &DirSpec{Path: dir, Mode: DirModeCopy}, nil))
+	require.NoError(t, checkDirtyRepos(workspace.NewGitWithEnv(testutil.GitEnv()), &DirSpec{Path: dir, Mode: DirModeCopy}, nil))
 }
 
 // prepareSandboxState validation tests (via state.Deps, not Engine)

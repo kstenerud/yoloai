@@ -29,6 +29,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/sandbox/state"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/internal/sysexec"
+	"github.com/kstenerud/yoloai/internal/workspace"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
 
@@ -547,8 +548,7 @@ func createSandboxDirs(sandboxDir string, perms state.IsolationPerms) error {
 func setupAllWorkdirs(d state.Deps, opts Options, workdir *DirSpec, auxDirs []*DirSpec, resolvedArchetype archetype.Archetype, devcontainerCfg *archetype.DevcontainerConfig) (string, string, []store.DirEnvironment, error) {
 	slog.Debug("setting up workdir", "event", "sandbox.create.workdir", "mode", string(workdir.Mode))
 	sandboxDir := d.Layout.SandboxDir(opts.Name)
-	gitEnv := sysexec.GitEnv(d.Layout.Env)
-	workCopyDir, baselineSHA, err := setupWorkdir(gitEnv, sandboxDir, workdir, d.Runtime)
+	workCopyDir, baselineSHA, err := setupWorkdir(workspace.NewGit(d.Layout), sandboxDir, workdir, d.Runtime)
 	if err != nil {
 		return "", "", nil, err
 	}

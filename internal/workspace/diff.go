@@ -11,8 +11,8 @@ import (
 // a baseline SHA. Stages untracked files first, then runs git diff.
 //
 // Returns the diff text (empty string if there are no changes).
-func CopyDiff(env []string, workDir, baselineSHA string, paths []string, stat, nameOnly bool) (string, error) {
-	if err := StageUntrackedWithEnv(env, workDir); err != nil {
+func (g *Git) CopyDiff(workDir, baselineSHA string, paths []string, stat, nameOnly bool) (string, error) {
+	if err := g.StageUntracked(workDir); err != nil {
 		return "", err
 	}
 
@@ -31,7 +31,7 @@ func CopyDiff(env []string, workDir, baselineSHA string, paths []string, stat, n
 		args = append(args, paths...)
 	}
 
-	cmd := NewGitCmdWithEnv(env, workDir, args...)
+	cmd := g.Cmd(workDir, args...)
 	output, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("git diff: %w", err)
@@ -40,11 +40,16 @@ func CopyDiff(env []string, workDir, baselineSHA string, paths []string, stat, n
 	return strings.TrimRight(string(output), "\n"), nil
 }
 
+// CopyDiff is a transitional free-function wrapper (DEV §12). Delegates to NewGitWithEnv(env).CopyDiff.
+func CopyDiff(env []string, workDir, baselineSHA string, paths []string, stat, nameOnly bool) (string, error) {
+	return NewGitWithEnv(env).CopyDiff(workDir, baselineSHA, paths, stat, nameOnly)
+}
+
 // RWDiff generates a diff for a :rw mode directory. Returns an empty
 // string (no error) when the directory isn't a git repo — :rw can
 // point at a non-git tree and the caller should treat "no diff
 // available" the same as "no changes" for display purposes.
-func RWDiff(env []string, workDir string, paths []string, stat, nameOnly bool) (string, error) {
+func (g *Git) RWDiff(workDir string, paths []string, stat, nameOnly bool) (string, error) {
 	if !IsGitRepo(workDir) {
 		return "", nil
 	}
@@ -62,11 +67,16 @@ func RWDiff(env []string, workDir string, paths []string, stat, nameOnly bool) (
 		args = append(args, paths...)
 	}
 
-	cmd := NewGitCmdWithEnv(env, workDir, args...)
+	cmd := g.Cmd(workDir, args...)
 	output, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("git diff: %w", err)
 	}
 
 	return strings.TrimRight(string(output), "\n"), nil
+}
+
+// RWDiff is a transitional free-function wrapper (DEV §12). Delegates to NewGitWithEnv(env).RWDiff.
+func RWDiff(env []string, workDir string, paths []string, stat, nameOnly bool) (string, error) {
+	return NewGitWithEnv(env).RWDiff(workDir, paths, stat, nameOnly)
 }

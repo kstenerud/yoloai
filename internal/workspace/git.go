@@ -1,5 +1,5 @@
-// ABOUTME: NewGitCmdWithEnv, HeadSHAWithEnv, IsEmptyRepo, RunGitCmdWithEnv — low-level
-// ABOUTME: git wrappers with explicit env, shared by copy/diff/apply operations in workspace/.
+// ABOUTME: Git — a host-git executor that bakes a curated subprocess env once and
+// ABOUTME: exposes purpose methods (Baseline, RunCmd, HeadSHA, …) for copy/diff/apply.
 package workspace
 
 import (
@@ -9,22 +9,44 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/sysexec"
 )
 
-// NewGitCmdWithEnv builds an exec.Cmd for git with an explicit environment
-// and hooks disabled. Callers must supply a layout-derived env (DEV §12).
-func NewGitCmdWithEnv(env []string, dir string, args ...string) *exec.Cmd {
-	fullArgs := append([]string{"-c", "core.hooksPath=/dev/null", "-C", dir}, args...)
-	return sysexec.Command(env, "git", fullArgs...)
+// Git runs host git with a curated, explicit subprocess environment that is
+// constructed once (NewGit) and never handed back to callers — they ask the
+// executor to run git rather than building an env and an exec themselves
+// (DEV §12). It is the single host-git entry point for workspace copy/diff/apply.
+type Git struct {
+	env []string
 }
 
-// HeadSHAWithEnv returns the HEAD commit SHA for the given git repo using
-// an explicit subprocess env (DEV §12).
-func HeadSHAWithEnv(env []string, dir string) (string, error) {
-	cmd := NewGitCmdWithEnv(env, dir, "rev-parse", "HEAD")
-	output, err := cmd.Output()
+// NewGit returns a host-git executor whose subprocess env is the curated git
+// env derived from the layout (PATH/HOME/TMPDIR/SUDO_UID — see sysexec.GitEnv).
+// The env is an internal detail from here on; callers use the methods.
+func NewGit(layout config.Layout) *Git {
+	return &Git{env: sysexec.GitEnv(layout.Env)}
+}
+
+// NewGitWithEnv builds a host-git executor over an explicit, already-curated
+// env. Use it where the env is not layout-derived — chiefly tests, which supply
+// a hermetic git env (testutil.GitEnv). Prefer NewGit in production code.
+func NewGitWithEnv(env []string) *Git {
+	return &Git{env: env}
+}
+
+// Cmd builds an *exec.Cmd for git in dir with the executor's curated env and
+// hooks disabled. Use for the few call sites that wire stdin/stdout themselves;
+// otherwise prefer RunCmd / HeadSHA / the higher-level methods.
+func (g *Git) Cmd(dir string, args ...string) *exec.Cmd {
+	fullArgs := append([]string{"-c", "core.hooksPath=/dev/null", "-C", dir}, args...)
+	return sysexec.Command(g.env, "git", fullArgs...)
+}
+
+// HeadSHA returns the HEAD commit SHA for the git repo at dir.
+func (g *Git) HeadSHA(dir string) (string, error) {
+	output, err := g.Cmd(dir, "rev-parse", "HEAD").Output()
 	if err != nil {
 		return "", fmt.Errorf("git rev-parse HEAD: %w", err)
 	}
@@ -32,25 +54,22 @@ func HeadSHAWithEnv(env []string, dir string) (string, error) {
 }
 
 // IsEmptyRepo reports whether dir is a git repository with no commits yet.
-func IsEmptyRepo(env []string, dir string) bool {
-	cmd := NewGitCmdWithEnv(env, dir, "rev-parse", "--verify", "HEAD")
-	return cmd.Run() != nil
+func (g *Git) IsEmptyRepo(dir string) bool {
+	return g.Cmd(dir, "rev-parse", "--verify", "HEAD").Run() != nil
 }
 
-// RunGitCmdWithEnv executes a git command in the given directory with an
-// explicit subprocess env (DEV §12).
-func RunGitCmdWithEnv(env []string, dir string, args ...string) error {
-	cmd := NewGitCmdWithEnv(env, dir, args...)
-	if output, err := cmd.CombinedOutput(); err != nil {
+// RunCmd executes a git command in dir, returning a wrapped error with the
+// combined output on failure.
+func (g *Git) RunCmd(dir string, args ...string) error {
+	if output, err := g.Cmd(dir, args...).CombinedOutput(); err != nil {
 		return fmt.Errorf("git %s: %s: %w", args[0], strings.TrimSpace(string(output)), err)
 	}
 	return nil
 }
 
-// BaselineWithEnv creates a fresh git baseline for the work copy using an
-// explicit subprocess env (DEV §12).
+// Baseline creates a fresh git baseline for the work copy.
 // Assumes all .git entries have already been removed by RemoveGitDirs.
-func BaselineWithEnv(env []string, workDir string) (string, error) {
+func (g *Git) Baseline(workDir string) (string, error) {
 	cmds := [][]string{
 		{"init"},
 		{"config", "user.email", "yoloai@localhost"},
@@ -59,14 +78,52 @@ func BaselineWithEnv(env []string, workDir string) (string, error) {
 		{"commit", "-m", "yoloai baseline", "--allow-empty"},
 	}
 	for _, args := range cmds {
-		if err := RunGitCmdWithEnv(env, workDir, args...); err != nil {
+		if err := g.RunCmd(workDir, args...); err != nil {
 			return "", err
 		}
 	}
 	if err := chownGitDir(workDir); err != nil {
 		return "", err
 	}
-	return HeadSHAWithEnv(env, workDir)
+	return g.HeadSHA(workDir)
+}
+
+// BaselineUncommittedChanges commits any pre-existing uncommitted changes in
+// workDir as "yoloai: pre-session state".
+func (g *Git) BaselineUncommittedChanges(workDir string) (string, error) {
+	out, err := g.Cmd(workDir, "status", "--porcelain").Output()
+	if err != nil || len(strings.TrimSpace(string(out))) == 0 {
+		return g.HeadSHA(workDir)
+	}
+	if err := g.RunCmd(workDir, "add", "-A"); err != nil {
+		return "", fmt.Errorf("stage pre-session changes: %w", err)
+	}
+	if err := g.RunCmd(workDir,
+		"-c", "user.email=yoloai@localhost",
+		"-c", "user.name=yoloai",
+		"commit", "-m", "yoloai: pre-session state",
+	); err != nil {
+		return "", fmt.Errorf("commit pre-session state: %w", err)
+	}
+	if err := chownGitDir(workDir); err != nil {
+		return "", err
+	}
+	return g.HeadSHA(workDir)
+}
+
+// StageUntracked runs `git add -A` in the work directory to capture files
+// created by the agent that are not yet tracked. Retries on index.lock
+// contention (the in-container agent's git can briefly hold the lock).
+func (g *Git) StageUntracked(workDir string) error {
+	var err error
+	for range 5 {
+		err = g.RunCmd(workDir, "add", "-A")
+		if err == nil || !IsIndexLocked(err) {
+			return err
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return err
 }
 
 // chownGitDir hands the .git tree back to the invoking user when yoloai runs
@@ -80,49 +137,31 @@ func chownGitDir(workDir string) error {
 	return nil
 }
 
-// BaselineUncommittedChangesWithEnv commits any pre-existing uncommitted changes
-// in workDir as "yoloai: pre-session state", using an explicit subprocess env (DEV §12).
-func BaselineUncommittedChangesWithEnv(env []string, workDir string) (string, error) {
-	out, err := NewGitCmdWithEnv(env, workDir, "status", "--porcelain").Output()
-	if err != nil || len(strings.TrimSpace(string(out))) == 0 {
-		return HeadSHAWithEnv(env, workDir)
-	}
-	if err := RunGitCmdWithEnv(env, workDir, "add", "-A"); err != nil {
-		return "", fmt.Errorf("stage pre-session changes: %w", err)
-	}
-	if err := RunGitCmdWithEnv(env, workDir,
-		"-c", "user.email=yoloai@localhost",
-		"-c", "user.name=yoloai",
-		"commit", "-m", "yoloai: pre-session state",
-	); err != nil {
-		return "", fmt.Errorf("commit pre-session state: %w", err)
-	}
-	if err := chownGitDir(workDir); err != nil {
-		return "", err
-	}
-	return HeadSHAWithEnv(env, workDir)
-}
-
 // IsIndexLocked reports whether err is a git index.lock contention error.
-// When the agent is running inside a container on a bind-mounted work dir,
-// its internal git operations (e.g. status bar updates) can briefly hold
-// the lock. Callers that need to run git add -A concurrently should retry
-// on this error rather than failing immediately.
 func IsIndexLocked(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "index.lock")
 }
 
-// StageUntrackedWithEnv runs `git add -A` in the work directory to capture
-// files created by the agent that are not yet tracked, using an explicit
-// subprocess env (DEV §12). Retries on index.lock contention.
+// --- transitional free-function wrappers (DEV §12 git-executor migration) ---
+// These keep existing callers compiling while call sites migrate to the Git
+// executor methods above. Removed once no caller references them.
+
+func NewGitCmdWithEnv(env []string, dir string, args ...string) *exec.Cmd {
+	return NewGitWithEnv(env).Cmd(dir, args...)
+}
+func HeadSHAWithEnv(env []string, dir string) (string, error) {
+	return NewGitWithEnv(env).HeadSHA(dir)
+}
+func IsEmptyRepo(env []string, dir string) bool { return NewGitWithEnv(env).IsEmptyRepo(dir) }
+func RunGitCmdWithEnv(env []string, dir string, args ...string) error {
+	return NewGitWithEnv(env).RunCmd(dir, args...)
+}
+func BaselineWithEnv(env []string, workDir string) (string, error) {
+	return NewGitWithEnv(env).Baseline(workDir)
+}
+func BaselineUncommittedChangesWithEnv(env []string, workDir string) (string, error) {
+	return NewGitWithEnv(env).BaselineUncommittedChanges(workDir)
+}
 func StageUntrackedWithEnv(env []string, workDir string) error {
-	var err error
-	for range 5 {
-		err = RunGitCmdWithEnv(env, workDir, "add", "-A")
-		if err == nil || !IsIndexLocked(err) {
-			return err
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	return err
+	return NewGitWithEnv(env).StageUntracked(workDir)
 }

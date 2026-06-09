@@ -12,7 +12,6 @@ import (
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
-	"github.com/kstenerud/yoloai/internal/sysexec"
 	"github.com/kstenerud/yoloai/internal/workspace"
 )
 
@@ -58,9 +57,9 @@ func ApplyOverlay(ctx context.Context, layout config.Layout, rt runtime.Runtime,
 		return result, nil
 	}
 
-	gitEnv := sysexec.GitEnv(layout.Env)
+	git := workspace.NewGit(layout)
 	for _, ps := range patches {
-		if applyErr := workspace.ApplyPatch(gitEnv, ps.Patch, ps.HostPath, workspace.IsGitRepo(ps.HostPath)); applyErr != nil {
+		if applyErr := git.ApplyPatch(ps.Patch, ps.HostPath, workspace.IsGitRepo(ps.HostPath)); applyErr != nil {
 			return nil, fmt.Errorf("%s: %w", ps.HostPath, applyErr)
 		}
 	}

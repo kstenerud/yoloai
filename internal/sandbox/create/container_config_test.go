@@ -140,7 +140,7 @@ func TestGitBaseline_EmptyGitRepo(t *testing.T) {
 	sandboxDir := filepath.Join(t.TempDir(), "test-sandbox")
 	workdir := &DirSpec{Path: dir, Mode: DirMode("copy")}
 	rt := &mockDockerRuntime{} // Docker-like backend: creates baseline on host
-	_, sha, err := setupWorkdir(testutil.GitEnv(), sandboxDir, workdir, rt)
+	_, sha, err := setupWorkdir(workspace.NewGitWithEnv(testutil.GitEnv()), sandboxDir, workdir, rt)
 	require.NoError(t, err)
 	assert.Len(t, sha, 40)
 }

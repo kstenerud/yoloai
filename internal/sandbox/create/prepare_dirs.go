@@ -17,7 +17,6 @@ import (
 	"github.com/kstenerud/yoloai/internal/sandbox/runtimeconfig"
 	"github.com/kstenerud/yoloai/internal/sandbox/state"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
-	"github.com/kstenerud/yoloai/internal/sysexec"
 	"github.com/kstenerud/yoloai/internal/workspace"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
@@ -56,7 +55,7 @@ func parseAndValidateDirs(d state.Deps, opts Options, agentDef *agent.Definition
 		return nil, nil, err
 	}
 
-	if err := checkDirtyRepos(d.Layout.Env, workdir, auxDirs); err != nil {
+	if err := checkDirtyRepos(workspace.NewGit(d.Layout), workdir, auxDirs); err != nil {
 		return nil, nil, err
 	}
 
@@ -225,14 +224,13 @@ func checkDirOverlaps(workdir *DirSpec, auxDirs []*DirSpec) error {
 // It never prompts: a dirty directory the caller has not acked yields a
 // *DirtyWorkdirError the caller must consciously override. The CLI catches it,
 // prompts, and retries with AllowDirty set.
-func checkDirtyRepos(layoutEnv map[string]string, workdir *DirSpec, auxDirs []*DirSpec) error {
-	gitEnv := sysexec.GitEnv(layoutEnv)
+func checkDirtyRepos(git *workspace.Git, workdir *DirSpec, auxDirs []*DirSpec) error {
 	var dirty []yoerrors.DirtyDir
 	check := func(d *DirSpec) error {
 		if d.AllowDirty {
 			return nil
 		}
-		msg, err := workspace.CheckDirtyRepo(gitEnv, d.Path)
+		msg, err := git.CheckDirtyRepo(d.Path)
 		if err != nil {
 			return fmt.Errorf("check repo status: %w", err)
 		}
@@ -261,14 +259,14 @@ func checkDirtyRepos(layoutEnv map[string]string, workdir *DirSpec, auxDirs []*D
 // the git baseline. Returns the work copy directory path and baseline SHA.
 // For backends implementing WorkDirSetup (e.g., Tart), baseline creation is
 // deferred until the VM starts, and this function returns empty SHA.
-func setupWorkdir(gitEnv []string, sandboxDir string, workdir *DirSpec, rt runtime.Runtime) (string, string, error) {
+func setupWorkdir(git *workspace.Git, sandboxDir string, workdir *DirSpec, rt runtime.Runtime) (string, string, error) {
 	workCopyDir := store.WorkDir(sandboxDir, workdir.Path)
 
 	if err := setupWorkdirDirs(sandboxDir, workdir, workCopyDir); err != nil {
 		return "", "", err
 	}
 
-	baselineSHA, err := createWorkdirBaseline(gitEnv, workdir, workCopyDir, rt)
+	baselineSHA, err := createWorkdirBaseline(git, workdir, workCopyDir, rt)
 	if err != nil {
 		return "", "", err
 	}
@@ -303,14 +301,14 @@ func setupWorkdirDirs(sandboxDir string, workdir *DirSpec, workCopyDir string) e
 }
 
 // createWorkdirBaseline creates or resolves the git baseline SHA for the workdir.
-func createWorkdirBaseline(gitEnv []string, workdir *DirSpec, workCopyDir string, rt runtime.Runtime) (string, error) {
+func createWorkdirBaseline(git *workspace.Git, workdir *DirSpec, workCopyDir string, rt runtime.Runtime) (string, error) {
 	switch workdir.Mode {
 	case "copy":
-		return createCopyBaseline(gitEnv, workCopyDir, rt)
+		return createCopyBaseline(git, workCopyDir, rt)
 	case "overlay":
 		return "", nil
 	default:
-		sha, _ := workspace.HeadSHAWithEnv(gitEnv, workdir.Path)
+		sha, _ := git.HeadSHA(workdir.Path)
 		return sha, nil
 	}
 }
@@ -318,7 +316,7 @@ func createWorkdirBaseline(gitEnv []string, workdir *DirSpec, workCopyDir string
 // createCopyBaseline creates the git baseline for a copy-mode workdir.
 // For backends implementing WorkDirSetup (e.g., Tart), baseline creation is
 // deferred until the VM starts, and this function returns empty SHA.
-func createCopyBaseline(gitEnv []string, workCopyDir string, rt runtime.Runtime) (string, error) {
+func createCopyBaseline(git *workspace.Git, workCopyDir string, rt runtime.Runtime) (string, error) {
 	// For backends implementing WorkDirSetup (e.g., Tart), the work directory
 	// is copied to VirtioFS staging on the host, then moved to local VM storage
 	// and baselined inside the VM after start. For other backends (Docker),
@@ -338,9 +336,9 @@ func createCopyBaseline(gitEnv []string, workCopyDir string, rt runtime.Runtime)
 	// If the source was a git repo with commits, just record HEAD as baseline.
 	// For non-git directories or empty repos, create a fresh repo.
 	if workspace.IsGitRepo(workCopyDir) {
-		return createBaselineForGitRepo(gitEnv, workCopyDir)
+		return createBaselineForGitRepo(git, workCopyDir)
 	}
-	sha, err := workspace.BaselineWithEnv(gitEnv, workCopyDir)
+	sha, err := git.Baseline(workCopyDir)
 	if err != nil {
 		return "", fmt.Errorf("git baseline: %w", err)
 	}
@@ -348,22 +346,22 @@ func createCopyBaseline(gitEnv []string, workCopyDir string, rt runtime.Runtime)
 }
 
 // createBaselineForGitRepo creates a baseline for a directory that is already a git repo.
-func createBaselineForGitRepo(gitEnv []string, workCopyDir string) (string, error) {
-	_, err := workspace.HeadSHAWithEnv(gitEnv, workCopyDir)
+func createBaselineForGitRepo(git *workspace.Git, workCopyDir string) (string, error) {
+	_, err := git.HeadSHA(workCopyDir)
 	if err != nil {
 		// Git repo exists but has no commits (or is broken).
 		// Remove .git and create fresh baseline.
 		if rmErr := workspace.RemoveGitDirs(workCopyDir); rmErr != nil {
 			return "", fmt.Errorf("remove invalid git dir: %w", rmErr)
 		}
-		sha, baselineErr := workspace.BaselineWithEnv(gitEnv, workCopyDir)
+		sha, baselineErr := git.Baseline(workCopyDir)
 		if baselineErr != nil {
 			return "", fmt.Errorf("git baseline after removing invalid repo: %w", baselineErr)
 		}
 		return sha, nil
 	}
 	// Commit any pre-existing dirty changes so agent diffs are clean.
-	sha, baselineErr := workspace.BaselineUncommittedChangesWithEnv(gitEnv, workCopyDir)
+	sha, baselineErr := git.BaselineUncommittedChanges(workCopyDir)
 	if baselineErr != nil {
 		return "", fmt.Errorf("baseline pre-session state: %w", baselineErr)
 	}
