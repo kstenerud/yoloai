@@ -19,6 +19,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/runtime/caps"
+	"github.com/kstenerud/yoloai/internal/testutil"
 )
 
 // TestDescriptor_Name verifies the backend name reported by Descriptor().
@@ -56,15 +57,14 @@ func TestGitExec_ExitOneReturnsExecError(t *testing.T) {
 	for _, args := range [][]string{
 		{"init", "-q"},
 		{"add", "f"},
-		{"-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "init"},
+		{"commit", "-q", "-m", "init"},
 	} {
-		c := exec.Command("git", append([]string{"-C", dir}, args...)...) //nolint:gosec // G204: test-only, args are constants
-		require.NoError(t, c.Run(), "git %v", args)
+		testutil.RunGit(t, dir, args...)
 	}
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "f"), []byte("v2"), 0600))
 
 	r := &Runtime{}
-	_, err := runtime.GitExecFor(context.Background(), r, "", dir, "diff", "--quiet", "HEAD")
+	_, err := runtime.GitExecFor(context.Background(), testutil.GitEnv(), r, "", dir, "diff", "--quiet", "HEAD")
 	require.Error(t, err)
 	var execErr *runtime.ExecError
 	require.True(t, errors.As(err, &execErr), "GitExecFor must return *runtime.ExecError on non-zero exit; got %T: %v", err, err)
