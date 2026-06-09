@@ -73,8 +73,16 @@ purely as an opt-in via `tart.image`?**
    bases for the same runtime collided on one name; image mode could silently reuse a
    `-base` base. Fix: family segment in the name (part of image mode).
 
-## Unresolved
+## Resolved: the "disappearing runtime base"
 
-- **Runtime base `yoloai-base-xcode-ios-26.5` vanished once** between creation and
-  reuse (raw `tart list` confirmed it was actually gone, not just a display artifact).
-  Not reproduced; potential base-lifecycle / data-loss bug. **Needs a clean repro.**
+The runtime base kept vanishing because **`make check` deletes real `yoloai-*`
+VMs.** Root cause (DF19): `TestPrune_ExecutesClassifications` (`system_test.go`,
+package `yoloai`, no build tag → runs in `make check`) calls the real
+`System.Prune(DryRun:false)`, which sweeps every available backend's orphans —
+including the **tart orphan-sweep against the real `~/.tart`** (the test isolates
+yoloAI's DataDir/HomeDir but not the `tart` CLI's `~/.tart`). It keeps
+`yoloai-base` and deletes the rest as orphans. Reproduced 2026-06-09: a planted
+`yoloai-canary-*` VM vanished after a single `make check`. **CRITICAL data-loss
+bug, escalated as DF19** — independent of the image-mode feature, and the reason
+to fix test-backend isolation (testing-principles §6) regardless of the Arm B
+decision.

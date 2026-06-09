@@ -64,6 +64,15 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
   `internal/runtime/seatbelt/`, `internal/runtime/tart/` (no integration tier); overlay error paths
   in `internal/sandbox/patch/apply.go` (`generateOverlayPatchForContext`, `ensureOverlayBaseline`).
 
+### DF19 — `make check` deletes the developer's real yoloai VMs via the system Prune test
+
+- **Discovered:** 2026-06-09 · **Workstream:** Tart `-xcode` base-image A/B investigation
+- **Severity:** CRITICAL (observable data loss)
+- **Disposition:** ESCALATED
+- **Description:** `TestPrune_ExecutesClassifications` (`system_test.go`, package `yoloai`, **no build tag → runs in `make check`**) calls the real `System.Prune(DryRun:false)`. Prune "iterates every registered backend available in the current environment and spins up an ephemeral runtime per backend" (`system.go:31`), so it runs the **tart orphan-sweep** (and the docker/podman equivalents) against the developer's **real** store. `newTestClient` isolates only yoloAI's DataDir/HomeDir; the `tart` CLI still reads the real `~/.tart` (it honors `$HOME`/`TART_HOME`, which the test never sets). Result: running `make check` on a host with live yoloAI sandboxes / runtime bases **deletes them** (keeps `yoloai-base`, sweeps the rest as orphans). Reproduced 2026-06-09 — a planted `yoloai-canary-*` VM vanished after a single `make check`. This is what repeatedly wiped the Tart runtime base during the A/B (the "unexplained disappearance").
+- **Fix:** isolate real backends in mutating system tests per [testing-principles §6](../principles/testing-principles.md): `t.Setenv("TART_HOME", t.TempDir())` and point `DOCKER_HOST`/`CONTAINER_HOST` at a bogus socket so the backend sweep hits empty/unavailable stores, while the host-side sandbox-dir classification (the test's actual subject) still runs against the temp layout. Apply in `newTestClient` (covers all system tests) or the prune tests specifically; verify it doesn't change the Info/Doctor tests' expectations.
+- **Pointer:** `system_test.go` (`TestPrune_ExecutesClassifications`), `profile_test.go::newTestClient`, `system.go::Prune` (backend sweep).
+
 ## Policy origin
 
 Established in [architecture-remediation.md](../archive/plans/architecture-remediation.md) and inherited by [layering-refactor.md](../archive/plans/layering-refactor.md).
