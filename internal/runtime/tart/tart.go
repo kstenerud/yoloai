@@ -19,8 +19,17 @@ import (
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/runtime"
+	"github.com/kstenerud/yoloai/internal/sysexec"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
+
+// tartEnvAllowlist is the set of edge-resolved env vars passed through to the
+// tart CLI (and the tools it spawns). HOME and TART_HOME are NOT in the list —
+// they are overridden from layout at construction. TART_HOME in particular is
+// load-bearing: tart resolves its store via macOS NSHomeDirectory() (the passwd
+// DB), so overriding $HOME does NOT redirect ~/.tart — only TART_HOME does
+// (DEV §12, DF19).
+var tartEnvAllowlist = []string{"PATH", "TMPDIR", "SSL_CERT_FILE", "SSL_CERT_DIR"}
 
 // getXcodeSelectPath returns the active Xcode developer directory path from xcode-select.
 // Returns empty string if xcode-select is not configured or fails.
@@ -143,6 +152,7 @@ type Runtime struct {
 	homeDir           string              // host home directory (layout.HomeDir); used for ~ expansion
 	baseImageOverride string              // custom base image from config (tart.image)
 	hostMajor         func() (int, error) // host macOS major version; seam for tests
+	execEnv           []string            // explicit subprocess env (DEV §12); from layout, never inherited
 }
 
 // Compile-time check.
@@ -205,12 +215,27 @@ func New(_ context.Context, layout config.Layout) (*Runtime, error) {
 		baseImageOverride = cfg.TartImage
 	}
 
+	// TART_HOME controls tart's store; tart reads it via NSHomeDirectory and so
+	// ignores $HOME. Honor an edge-resolved TART_HOME if the user set one,
+	// otherwise default it to <HomeDir>/.tart — which equals the real ~/.tart in
+	// production and an isolated temp store under test. This is the DF19 fix.
+	tartHome := filepath.Join(layout.HomeDir, ".tart")
+	if v := layout.Env["TART_HOME"]; v != "" {
+		tartHome = v
+	}
+
 	return &Runtime{
 		tartBin:           tartBin,
 		layout:            layout,
 		homeDir:           layout.HomeDir,
 		baseImageOverride: baseImageOverride,
 		hostMajor:         hostMacOSMajor,
+		// Explicit env for every tart subprocess (DEV §12): edge-resolved
+		// allowlist plus HOME and TART_HOME forced from layout, never ambient.
+		execEnv: sysexec.Curated(layout.Env, tartEnvAllowlist, map[string]string{
+			"HOME":      layout.HomeDir,
+			"TART_HOME": tartHome,
+		}),
 	}, nil
 }
 
@@ -745,7 +770,7 @@ func execArgs(vmName string, cmd ...string) []string {
 
 // runTart executes a tart command and returns stdout.
 func (r *Runtime) runTart(ctx context.Context, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, r.tartBin, args...) //nolint:gosec // G204: args are constructed internally
+	cmd := sysexec.CommandContext(ctx, r.execEnv, r.tartBin, args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

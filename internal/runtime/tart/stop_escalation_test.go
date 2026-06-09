@@ -45,7 +45,7 @@ esac
 `
 	require.NoError(t, os.WriteFile(fakeTart, []byte(script), 0700)) //nolint:gosec // G306: test binary needs execute bit
 
-	rt := &Runtime{tartBin: fakeTart}
+	rt := &Runtime{tartBin: fakeTart, execEnv: []string{"PATH=/usr/bin:/bin"}} // explicit env (DEV §12)
 
 	// --- SIGTERM-ignoring child process ---
 	// argv[0] matches "tart run.*yoloai-test-wedge-vm" so pgrepTartRun finds it.

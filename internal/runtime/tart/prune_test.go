@@ -85,6 +85,9 @@ esac
 		layout:    layout,
 		homeDir:   dir,
 		hostMajor: func() (int, error) { return 26, nil },
+		// Explicit env (the test's edge, per DEV §12): the stub shells out to
+		// awk/mv, so it needs PATH — but never the inherited ambient env.
+		execEnv: []string{"PATH=/usr/bin:/bin"},
 	}, deleteLog
 }
 
