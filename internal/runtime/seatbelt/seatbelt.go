@@ -48,14 +48,15 @@ var descriptor = runtime.BackendDescriptor{
 
 // probe reports whether Seatbelt is usable. sandbox-exec ships with every
 // macOS install, so a positive macOS check + LookPath suffices.
-func probe(_ context.Context, _ map[string]string) (bool, string) {
+func probe(_ context.Context, _ map[string]string) (runtime.ProbeStatus, string) {
 	if !isMacOS() {
-		return false, "seatbelt requires macOS"
+		return runtime.ProbeAbsent, "seatbelt requires macOS"
 	}
 	if _, err := exec.LookPath("sandbox-exec"); err != nil {
-		return false, "sandbox-exec not found on PATH"
+		return runtime.ProbeAbsent, "sandbox-exec not found on PATH"
 	}
-	return true, ""
+	// Built into macOS, no daemon — present means usable.
+	return runtime.ProbeRunning, ""
 }
 
 func init() {

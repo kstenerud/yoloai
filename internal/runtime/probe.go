@@ -26,26 +26,41 @@ var DaemonEnvVars = []string{
 	"CONTAINER_HOST", "XDG_RUNTIME_DIR", "HOME", "TMPDIR",
 }
 
-// Probe reports whether the named backend is usable right now. Returns
-// (false, "<reason>") when the backend is not registered on this platform
-// or its Probe says no. A backend whose descriptor has no Probe is treated
-// as always available (true, "").
+// Probe reports the named backend's availability tier on this host (Absent /
+// Installed / Running) plus a reason when not Running. A backend not registered
+// on this platform is ProbeAbsent; a registered backend with no descriptor Probe
+// is treated as ProbeRunning (always usable, e.g. built-ins).
 //
 // Distinct from IsAvailable: IsAvailable is static — "compiled in for this
-// platform" — while Probe is dynamic — "the daemon/socket/binary it needs
-// is actually present right now".
+// platform" — while Probe is dynamic — installed (binary present) and/or running
+// (daemon reachable) right now.
 //
 // env is the caller's threaded host-env snapshot, forwarded to the backend's
 // probe so socket discovery stays principal-scoped (§12). May be nil.
-func Probe(ctx context.Context, name BackendType, env map[string]string) (available bool, reason string) {
+func Probe(ctx context.Context, name BackendType, env map[string]string) (status ProbeStatus, reason string) {
 	desc, ok := Descriptor(name)
 	if !ok {
-		return false, fmt.Sprintf("backend %q is not available on this platform", name)
+		return ProbeAbsent, fmt.Sprintf("backend %q is not available on this platform", name)
 	}
 	if desc.Probe == nil {
-		return true, ""
+		return ProbeRunning, ""
 	}
 	return desc.Probe(ctx, env)
+}
+
+// Installed reports whether the named backend is at least installed (its tool is
+// present, whether or not its daemon is running). This is the tier auto-pick
+// selects on. reason is non-empty when not installed.
+func Installed(ctx context.Context, name BackendType, env map[string]string) (installed bool, reason string) {
+	status, r := Probe(ctx, name, env)
+	return status >= ProbeInstalled, r
+}
+
+// Running reports whether the named backend is usable right now (daemon
+// reachable). reason is non-empty when not running.
+func Running(ctx context.Context, name BackendType, env map[string]string) (running bool, reason string) {
+	status, r := Probe(ctx, name, env)
+	return status == ProbeRunning, r
 }
 
 // SelectBackend resolves the backend to use from an isolation mode, a
@@ -101,16 +116,17 @@ func SelectBackend(ctx context.Context, preferred BackendType, isolation Isolati
 	return SelectContainerBackend(ctx, preferred, env)
 }
 
-// SelectContainerBackend picks the best available container backend
-// (`BaseModeName == "container"`). It tries `preferred` first when non-empty
-// and registered, then falls back to any other available container backend,
-// in alphabetical order.
+// SelectContainerBackend picks the best container backend (`BaseModeName ==
+// "container"`) by the **installed** tier — the highest-priority backend whose
+// tool is present, whether or not its daemon is running (point-of-use starts it
+// on demand). It tries `preferred` first when non-empty and registered, then
+// falls back to any other installed container backend, in alphabetical order.
 //
-// If a preferred backend is named but not probe-available, the returned
-// warning string explains the fallback. If no container backend is available
-// at all, the returned name is the preferred one (or the first candidate
-// alphabetically), so the caller fails downstream in `runtime.New` with a
-// clear backend-specific error rather than a generic "no backend" message.
+// If a preferred backend is named but not installed, the returned warning string
+// explains the fallback. If no container backend is installed at all, the
+// returned name is the preferred one (or the first candidate alphabetically), so
+// the caller fails downstream in `runtime.New` with a clear backend-specific
+// error rather than a generic "no backend" message.
 //
 // env is the caller's threaded host-env snapshot, forwarded to each backend's
 // probe so socket discovery stays principal-scoped (§12). May be nil.
@@ -132,10 +148,11 @@ func SelectContainerBackend(ctx context.Context, preferred BackendType, env map[
 	// preference is for the docker/podman slot and "tart" isn't in it.
 	ordered := orderCandidates(candidates, preferred)
 
-	// Try each candidate in order.
+	// Pick the first *installed* candidate (not "running" — an installed-but-
+	// stopped backend is preferred over a lower-priority running one and is
+	// started on demand at point-of-use).
 	for _, name := range ordered {
-		ok, _ := Probe(ctx, name, env)
-		if ok {
+		if ok, _ := Installed(ctx, name, env); ok {
 			if preferred != "" && name != preferred {
 				warning = fmt.Sprintf("Warning: container_backend=%s not available; falling back to %s", preferred, name)
 			}

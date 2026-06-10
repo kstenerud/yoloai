@@ -62,3 +62,30 @@ func TestSelectBackend_NoRoutingDelegatesToContainerSlot(t *testing.T) {
 	assert.Equal(t, gotDirect, gotRouted,
 		"empty isolation/OS must match SelectContainerBackend exactly")
 }
+
+// TestProbeStatus_Ordering pins the tier order auto-pick relies on: a backend
+// that is merely installed still outranks an absent one, and only a running
+// backend clears the running threshold.
+func TestProbeStatus_Ordering(t *testing.T) {
+	assert.Less(t, ProbeAbsent, ProbeInstalled)
+	assert.Less(t, ProbeInstalled, ProbeRunning)
+	assert.GreaterOrEqual(t, ProbeRunning, ProbeInstalled, "running satisfies the installed threshold")
+	assert.Equal(t, "absent", ProbeAbsent.String())
+	assert.Equal(t, "installed", ProbeInstalled.String())
+	assert.Equal(t, "running", ProbeRunning.String())
+}
+
+// TestProbe_UnregisteredBackendIsAbsent verifies the helpers treat a backend
+// that isn't registered on this platform as Absent — neither installed nor
+// running — with a reason, so selection/diagnostics fail clearly.
+func TestProbe_UnregisteredBackendIsAbsent(t *testing.T) {
+	const bogus BackendType = "no-such-backend-xyz"
+	status, reason := Probe(context.Background(), bogus, nil)
+	assert.Equal(t, ProbeAbsent, status)
+	assert.NotEmpty(t, reason)
+
+	installed, _ := Installed(context.Background(), bogus, nil)
+	assert.False(t, installed)
+	running, _ := Running(context.Background(), bogus, nil)
+	assert.False(t, running)
+}

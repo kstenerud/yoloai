@@ -97,17 +97,18 @@ func versionString(ctx context.Context) string {
 // probe reports whether Tart is usable. Tart requires macOS on Apple Silicon
 // and the `tart` binary on PATH. We don't run `tart --version` here — that's a
 // fork+exec on every dispatch; LookPath suffices for "is it installed".
-func probe(_ context.Context, _ map[string]string) (bool, string) {
+func probe(_ context.Context, _ map[string]string) (runtime.ProbeStatus, string) {
 	if !isMacOS() {
-		return false, "tart requires macOS"
+		return runtime.ProbeAbsent, "tart requires macOS"
 	}
 	if !isAppleSilicon() {
-		return false, "tart requires Apple Silicon"
+		return runtime.ProbeAbsent, "tart requires Apple Silicon"
 	}
 	if _, err := exec.LookPath("tart"); err != nil {
-		return false, "tart binary not found (install with: brew install cirruslabs/cli/tart)"
+		return runtime.ProbeAbsent, "tart binary not found (install with: brew install cirruslabs/cli/tart)"
 	}
-	return true, ""
+	// No daemon — a present binary on a supported host is immediately usable.
+	return runtime.ProbeRunning, ""
 }
 
 func init() {

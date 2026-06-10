@@ -63,11 +63,14 @@ func versionString(ctx context.Context) string {
 // probe reports whether Podman is usable. discoverSocket is stat-only across
 // the known socket paths plus CONTAINER_HOST/DOCKER_HOST/podman machine; no
 // dial, matching docker's probe contract.
-func probe(_ context.Context, env map[string]string) (bool, string) {
+func probe(_ context.Context, env map[string]string) (runtime.ProbeStatus, string) {
 	if _, err := discoverSocket(env); err == nil {
-		return true, ""
+		return runtime.ProbeRunning, ""
 	}
-	return false, "podman socket not found (start podman.socket or 'podman machine start')"
+	if _, err := exec.LookPath("podman"); err == nil {
+		return runtime.ProbeInstalled, "podman installed but socket not reachable ('podman machine start' or 'systemctl --user start podman.socket')"
+	}
+	return runtime.ProbeAbsent, "podman not found (install from https://podman.io/docs/installation)"
 }
 
 func init() {

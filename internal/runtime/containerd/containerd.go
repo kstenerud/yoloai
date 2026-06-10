@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"os"
+	"os/exec"
 	goruntime "runtime"
 	"strings"
 	"syscall"
@@ -62,11 +63,14 @@ func versionString(ctx context.Context) string {
 // probe reports whether containerd is usable. Stat-only check on the daemon
 // socket; never dials. Matches the fast-fail path in New() so callers get the
 // same verdict without paying for client construction.
-func probe(_ context.Context, _ map[string]string) (bool, string) {
-	if _, err := os.Stat(containerdSock); err != nil {
-		return false, "containerd socket not found (start with: sudo systemctl start containerd)"
+func probe(_ context.Context, _ map[string]string) (runtime.ProbeStatus, string) {
+	if _, err := os.Stat(containerdSock); err == nil {
+		return runtime.ProbeRunning, ""
 	}
-	return true, ""
+	if _, err := exec.LookPath("containerd"); err == nil {
+		return runtime.ProbeInstalled, "containerd installed but socket not found (start with: sudo systemctl start containerd)"
+	}
+	return runtime.ProbeAbsent, "containerd not found (install containerd)"
 }
 
 func init() {

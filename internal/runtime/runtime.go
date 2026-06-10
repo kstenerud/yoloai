@@ -125,6 +125,40 @@ type ExecResult struct {
 	ExitCode int
 }
 
+// ProbeStatus is a backend's availability tier on the current host, ordered so
+// callers can compare against a threshold (>= ProbeInstalled / == ProbeRunning).
+//
+//   - ProbeAbsent    — the backend's tool isn't installed here at all.
+//   - ProbeInstalled — the tool is installed but its daemon/service isn't
+//     reachable yet (e.g. Docker Desktop installed but stopped, podman machine
+//     not started, the apple apiserver not started). The backend may be usable
+//     after a start-on-demand step.
+//   - ProbeRunning   — ready to use right now.
+//
+// Backend selection (auto-pick) chooses by ProbeInstalled — the highest-priority
+// *installed* backend wins, and point-of-use starts it if it isn't running.
+// Backends with no separate daemon (tart, seatbelt) are only ever Absent or
+// Running — they have nothing to be "installed but not running".
+type ProbeStatus int
+
+const (
+	ProbeAbsent ProbeStatus = iota
+	ProbeInstalled
+	ProbeRunning
+)
+
+// String renders the tier for diagnostics.
+func (s ProbeStatus) String() string {
+	switch s {
+	case ProbeRunning:
+		return "running"
+	case ProbeInstalled:
+		return "installed"
+	default:
+		return "absent"
+	}
+}
+
 // BackendDescriptor bundles the static facts each backend declares.
 // Returned by Runtime.Descriptor(). Values are compile-time constants per
 // backend (verified by the W11 spike, docs/contributors/design/research/runtime-interface-spike.md).
@@ -155,19 +189,22 @@ type BackendDescriptor struct {
 	// macOS VM boot (plus a possible one-time `xcodebuild -runFirstLaunch`)
 	// routinely exceeds the default. See backend-idiosyncrasies.md.
 	SecretsConsumedTimeout time.Duration
-	// Probe reports whether this backend is usable right now and, on failure,
-	// a short user-facing reason ("docker socket not reachable", "tart binary
-	// not found", …). Implementations must be fast and side-effect-free — they
-	// run on `yoloai info`, setup wizards, and detect-backend dispatch, so
-	// stat the socket / LookPath the binary; do not dial. nil is permitted but
-	// every shipped backend supplies a real probe.
+	// Probe reports the backend's availability tier on this host (Absent /
+	// Installed / Running) and, when not Running, a short user-facing reason
+	// ("docker installed but daemon not reachable", "tart binary not found", …).
+	// Implementations must be fast and side-effect-free — they run on `yoloai
+	// info`, setup wizards, and detect-backend dispatch, so LookPath the binary
+	// (installed) and stat the socket (running); do not dial. The split lets
+	// auto-pick select by installed (§ ProbeStatus) and point-of-use start an
+	// installed-but-stopped backend on demand. nil is permitted (treated as
+	// Running); every shipped backend supplies a real probe.
 	//
 	// env is the caller's threaded host-env snapshot (the same map fed to the
 	// factory). Backends that locate their daemon socket via env vars
 	// (DOCKER_HOST, CONTAINER_HOST, XDG_RUNTIME_DIR) read them from this map
 	// rather than os.Getenv, so probing stays principal-scoped (§12). Backends
 	// that probe by stat/LookPath ignore it.
-	Probe func(ctx context.Context, env map[string]string) (available bool, reason string)
+	Probe func(ctx context.Context, env map[string]string) (status ProbeStatus, reason string)
 
 	// CleanupHint returns a user-facing command that removes the named image
 	// from this backend's local store (e.g. "docker rmi yoloai-myprofile").

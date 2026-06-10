@@ -67,19 +67,22 @@ var descriptor = runtime.BackendDescriptor{
 // active-context endpoint is a positive signal; otherwise any well-known local
 // socket existing on disk counts (the default socket may be a stale symlink, so
 // a sibling provider's socket is an equally valid signal).
-func probe(_ context.Context, env map[string]string) (bool, string) {
+func probe(_ context.Context, env map[string]string) (runtime.ProbeStatus, string) {
 	if env["DOCKER_HOST"] != "" {
-		return true, ""
+		return runtime.ProbeRunning, ""
 	}
 	if host := resolveDockerHost(env); sockExists(host) {
-		return true, ""
+		return runtime.ProbeRunning, ""
 	}
 	for _, cand := range wellKnownDockerSockets(env) {
 		if sockExists(cand) {
-			return true, ""
+			return runtime.ProbeRunning, ""
 		}
 	}
-	return false, "docker socket not found (set DOCKER_HOST or start the docker daemon)"
+	if _, err := exec.LookPath("docker"); err == nil {
+		return runtime.ProbeInstalled, "docker installed but daemon not reachable (start Docker Desktop / OrbStack, or set DOCKER_HOST)"
+	}
+	return runtime.ProbeAbsent, "docker not found (set DOCKER_HOST or install Docker Desktop / OrbStack)"
 }
 
 // versionString runs `docker version` and returns a "Client: X / Server: Y"
