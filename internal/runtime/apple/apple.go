@@ -148,16 +148,23 @@ func (r *Runtime) DiagHint(instanceName string) string {
 	return fmt.Sprintf("container logs %s   (or: container system logs)", instanceName)
 }
 
-// TmuxSocket returns "" so exec'd processes use the uid-based default socket.
-func (r *Runtime) TmuxSocket(_ string) string { return "" }
+// TmuxSocket pins an explicit, user-independent socket path inside the container
+// (matching the docker backend, which shares this image + entrypoint), so every
+// exec attaches to the same tmux server regardless of the user it runs as. With
+// the uid-default socket, an exec as root would miss a server started as the
+// yoloai user.
+func (r *Runtime) TmuxSocket(_ string) string { return "/tmp/yoloai-tmux.sock" }
 
-// AttachCommand returns the command to attach to the sandbox's tmux session.
+// AttachCommand returns the *in-container* command to attach to the "main" tmux
+// session; the caller wraps it with `container exec` (so this must NOT start with
+// `container`). Mirrors the docker backend — the guest is the same Linux image,
+// and `script` gives tmux a clean PTY + controlling terminal.
 func (r *Runtime) AttachCommand(tmuxSocket string, _ int, _ int, _ runtime.IsolationMode) []string {
-	tmux := "tmux"
+	tmuxArgs := "exec tmux attach -t main"
 	if tmuxSocket != "" {
-		tmux = "tmux -S " + tmuxSocket
+		tmuxArgs = fmt.Sprintf("exec tmux -S %s attach -t main", tmuxSocket)
 	}
-	return []string{containerBin, "exec", "-i", "-t", "INSTANCE", "sh", "-lc", tmux + " attach"}
+	return []string{"/usr/bin/script", "-q", "-e", "-c", tmuxArgs, "/dev/null"}
 }
 
 // Create creates (but does not start) a container from the InstanceConfig. The
