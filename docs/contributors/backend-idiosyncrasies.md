@@ -1780,7 +1780,11 @@ Autopsy timeline signature: `hook.idle` (agent finished writing) lands a few sec
 
 **Fix:** Any git operation on the sandbox *work copy* must use `git.NewSandbox(layout, rt, name)` — it dispatches in-VM for Tart and falls back to host exec for non-`GitExecer` backends, so it's a no-op for Docker/Podman/Containerd — never `git.NewHost`. Reserve `git.NewHost` for genuinely host-resident targets (the user's original directory in apply, `:rw` live mounts, dirty-checks of source dirs). `GenerateCommitDiff` gained a `Runtime` field on `CommitDiffOptions` to carry the dispatch.
 
-**Code:** `internal/sandbox/patch/diff.go::GenerateCommitDiff` / `ListCommitsWithStats`; the host-vs-sandbox scope distinction lives in `internal/git` (`NewHost` vs `NewSandbox`).
+**Non-obvious gotcha (and second half of the fix):** threading `e.runtime` is not enough — the Engine opens its backend *lazily*, so the backend-bound Engine method must call `e.TryEnsure(ctx)` first or `e.runtime` is still `nil` and `NewSandbox(nil, …)` silently falls back to host git (failing on the VM-local path). Every sibling Engine method (`ListCommitsWithStats`, `ListCommits`, `WorkdirTags`, …) does this; `GenerateCommitDiff` originally did not because it predated needing a runtime. The host-side `ListCommitsWithStats` worked while `GenerateCommitDiff` failed precisely because only the former called `TryEnsure`.
+
+**Validated:** confirmed on a real macOS Tart host — `yoloai diff <sha>` and `diff --log --stat` on a Tart `:copy` sandbox both return correct output after the fix (they errored before).
+
+**Code:** `internal/sandbox/patch/diff.go::GenerateCommitDiff` / `ListCommitsWithStats`; `internal/sandbox/engine_workdir.go::Engine.GenerateCommitDiff` (the `TryEnsure` call); the host-vs-sandbox scope distinction lives in `internal/git` (`NewHost` vs `NewSandbox`).
 
 ---
 

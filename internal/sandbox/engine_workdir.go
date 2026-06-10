@@ -53,6 +53,11 @@ func (e *Engine) GenerateOverlayDiff(ctx context.Context, name string, stat, nam
 // the sandbox work copy (copy-mode only). The runtime dispatches git to where
 // the work copy lives — on the host for bind-mount backends, in-VM for Tart.
 func (e *Engine) GenerateCommitDiff(ctx context.Context, name, ref string, stat bool) (string, error) {
+	// Best-effort backend open so the work copy is read where it lives — in the
+	// VM for Tart; a nil runtime falls back to host git (correct for bind-mount
+	// backends). Without this, e.runtime stays nil and Tart commit diffs run
+	// host git on a VM-local path.
+	e.TryEnsure(ctx)
 	return patch.GenerateCommitDiff(ctx, patch.CommitDiffOptions{
 		Name:    name,
 		Layout:  e.layout,
