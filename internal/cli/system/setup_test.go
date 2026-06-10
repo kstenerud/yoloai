@@ -12,9 +12,111 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kstenerud/yoloai/internal/cli/clitest"
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// presetByID is a test helper to fetch a preset from a host's list.
+func presetByID(t *testing.T, presets []envPreset, id string) envPreset {
+	t.Helper()
+	p, ok := findPreset(presets, id)
+	require.True(t, ok, "preset %q must exist", id)
+	return p
+}
+
+func TestPresetsForHost(t *testing.T) {
+	mac := presetsForHost("darwin")
+	require.NotEmpty(t, mac)
+	assert.Equal(t, "apple", mac[0].ID, "apple is the recommended macOS default (first)")
+	macIDs := joinPresetIDs(mac)
+	for _, want := range []string{"apple", "orbstack", "docker-desktop", "podman", "tart", "seatbelt"} {
+		assert.Contains(t, macIDs, want)
+	}
+
+	linux := presetsForHost("linux")
+	assert.Equal(t, "docker", linux[0].ID, "docker leads on Linux")
+	assert.Contains(t, joinPresetIDs(linux), "vm")
+	assert.NotContains(t, joinPresetIDs(linux), "apple", "no apple/tart/seatbelt on Linux")
+
+	other := presetsForHost("windows")
+	assert.Equal(t, "docker", other[0].ID)
+	assert.NotContains(t, joinPresetIDs(other), "vm")
+}
+
+func TestPresetConfigOps(t *testing.T) {
+	mac := presetsForHost("darwin")
+
+	// tart: writes os+isolation, resets container_backend.
+	set, reset := presetConfigOps(presetByID(t, mac, "tart"))
+	assert.Equal(t, map[string]string{"os": "mac", "isolation": "vm"}, set)
+	assert.Equal(t, []string{"container_backend"}, reset)
+
+	// apple: writes nothing (all defaults), resets all three.
+	set, reset = presetConfigOps(presetByID(t, mac, "apple"))
+	assert.Empty(t, set)
+	assert.ElementsMatch(t, []string{"os", "isolation", "container_backend"}, reset)
+
+	// orbstack: writes container_backend, resets os+isolation.
+	set, reset = presetConfigOps(presetByID(t, mac, "orbstack"))
+	assert.Equal(t, map[string]string{"container_backend": "orbstack"}, set)
+	assert.ElementsMatch(t, []string{"os", "isolation"}, reset)
+}
+
+// TestApplyPreset_SetsAndResets is the regression for AC2: switching presets
+// must CLEAR the keys the new preset doesn't own, not leave them stale (an empty
+// Set would be ignored by mergeStringField).
+func TestApplyPreset_SetsAndResets(t *testing.T) {
+	_ = clitest.Home(t)
+	ctx := context.Background()
+	sc, err := cliutil.System()
+	require.NoError(t, err)
+	mac := presetsForHost("darwin")
+
+	// Apply tart → os=mac, isolation=vm present.
+	require.NoError(t, applyPreset(ctx, sc.Config(), presetByID(t, mac, "tart")))
+	v, err := sc.Config().Get(ctx, "os")
+	require.NoError(t, err)
+	assert.Equal(t, "mac", v)
+	v, err = sc.Config().Get(ctx, "isolation")
+	require.NoError(t, err)
+	assert.Equal(t, "vm", v)
+
+	// Switch to apple → the os and isolation overrides must be cleared, i.e. no
+	// longer the stale tart values (AC2). (They revert to whatever the lower
+	// layers provide; the invariant under test is "not stale".)
+	require.NoError(t, applyPreset(ctx, sc.Config(), presetByID(t, mac, "apple")))
+	v, _ = sc.Config().Get(ctx, "os")
+	assert.NotEqual(t, "mac", v, "os override must be cleared after switching to apple")
+	v, _ = sc.Config().Get(ctx, "isolation")
+	assert.NotEqual(t, "vm", v, "isolation override must be cleared after switching to apple")
+
+	// Switch to orbstack → container_backend set, os/isolation still clear.
+	require.NoError(t, applyPreset(ctx, sc.Config(), presetByID(t, mac, "orbstack")))
+	v, err = sc.Config().Get(ctx, "container_backend")
+	require.NoError(t, err)
+	assert.Equal(t, "orbstack", v)
+}
+
+func TestResolvePreset_FlagValidation(t *testing.T) {
+	mac := presetsForHost("darwin")
+	cmd := &cobra.Command{}
+	cmd.Flags().String("backend", "", "")
+
+	// Valid preset id is accepted without prompting (System unused on this path).
+	require.NoError(t, cmd.Flags().Set("backend", "tart"))
+	got, err := resolvePreset(context.Background(), cmd, mkReader(""), &bytes.Buffer{}, mac, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "tart", got)
+
+	// Unknown id errors and lists the valid ids.
+	require.NoError(t, cmd.Flags().Set("backend", "nope"))
+	_, err = resolvePreset(context.Background(), cmd, mkReader(""), &bytes.Buffer{}, mac, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "apple")
+}
 
 func mkReader(s string) *bufio.Reader { return bufio.NewReader(strings.NewReader(s)) }
 

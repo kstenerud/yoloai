@@ -339,8 +339,9 @@ linters:
         linters: [forbidigo]
         text: "\\.EnvForAppleContainer"
       # Daemon-socket discovery: backend probes/clients + the CLI commands that
-      # select a container backend.
-      - path: "(^|/)client\\.go$|internal/runtime/docker/docker\\.go|internal/runtime/podman/podman\\.go|internal/cli/cliutil/client\\.go|internal/cli/mcp/mcp\\.go|internal/cli/lifecycle/stop\\.go|internal/cli/lifecycle/destroy\\.go"
+      # select a container backend. discovery.go's System.BackendInstalled probes
+      # the installed tier with the same daemon-discovery env subset.
+      - path: "(^|/)client\\.go$|(^|/)discovery\\.go$|internal/runtime/docker/docker\\.go|internal/runtime/podman/podman\\.go|internal/cli/cliutil/client\\.go|internal/cli/mcp/mcp\\.go|internal/cli/lifecycle/stop\\.go|internal/cli/lifecycle/destroy\\.go"
         linters: [forbidigo]
         text: "\\.EnvForDaemonDiscovery"
       # Host-utility subprocesses (tmux, vscode, file copies, rsync, uname).

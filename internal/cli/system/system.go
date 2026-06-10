@@ -221,7 +221,7 @@ func newSystemSetupCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().String("backend", "", "Runtime backend (see 'yoloai system backends')")
+	cmd.Flags().String("backend", "", "Default-environment preset, e.g. apple/orbstack/docker-desktop/podman/tart/seatbelt on macOS, docker/podman/vm on Linux (skip prompt)")
 	cmd.Flags().String("agent", "", "Default agent (skip prompt)")
 	cmd.Flags().String("tmux-conf", "", "Tmux config mode: default, default+host, host, none (skip prompt)")
 

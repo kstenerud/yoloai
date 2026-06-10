@@ -124,6 +124,16 @@ func BackendTypes() []BackendInfo {
 	return out
 }
 
+// BackendInstalled reports whether the named backend's tool is present on the
+// host — the cheaper "installed" tier (binary exists), distinct from "running"
+// (daemon reachable, what CheckBackend/Available report). The setup wizard uses
+// it to tag presets the user can pick but hasn't installed yet, without paying a
+// daemon dial per option.
+func (s *System) BackendInstalled(ctx context.Context, name BackendType) bool {
+	installed, _ := runtime.Installed(ctx, name, s.layout.Env().EnvForDaemonDiscovery())
+	return installed
+}
+
 // CheckBackend probes a single backend for availability by constructing a
 // runtime and closing it. Returns whether the backend is reachable and a short
 // note explaining the failure when it is not. This is the single-backend

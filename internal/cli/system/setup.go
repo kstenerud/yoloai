@@ -63,7 +63,7 @@ func runSystemSetup(cmd *cobra.Command) error {
 	reader := bufio.NewReader(cmd.InOrStdin())
 	out := cmd.ErrOrStderr()
 
-	backends := availableBackends(ctx, sc)
+	presets := presetsForHost(runtime.GOOS)
 	agents := availableAgents(sc)
 
 	tmuxConf, previewed, err := resolveTmuxConf(ctx, cmd, reader, out)
@@ -75,7 +75,7 @@ func runSystemSetup(cmd *cobra.Command) error {
 		return nil
 	}
 
-	backendName, err := resolveChoice(ctx, reader, out, "backend", cliutil.FlagStr(cmd, "backend"), backends, "Default runtime backend:", 0)
+	presetID, err := resolvePreset(ctx, cmd, reader, out, presets, sc)
 	if err != nil {
 		return err
 	}
@@ -88,9 +88,11 @@ func runSystemSetup(cmd *cobra.Command) error {
 	if err := sc.Config().Set(ctx, "tmux_conf", tmuxConf); err != nil {
 		return err
 	}
-	if backendName != "" {
-		if err := sc.Config().Set(ctx, "container_backend", backendName); err != nil {
-			return err
+	if presetID != "" {
+		if p, ok := findPreset(presets, presetID); ok {
+			if err := applyPreset(ctx, sc.Config(), p); err != nil {
+				return err
+			}
 		}
 	}
 	if agentName != "" {
@@ -103,27 +105,164 @@ func runSystemSetup(cmd *cobra.Command) error {
 	return nil
 }
 
-// availableBackends returns the backends offered as the user's default. Filters
-// the public catalog by (a) Platforms ∋ host GOOS, (b) Architectures ∋ host
-// GOARCH (empty = any arch), (c) not isolation-target-only (containerd is
-// reached via --isolation vm, never picked directly).
-func availableBackends(ctx context.Context, sc *yoloai.System) []setupChoice {
-	hostOS := runtime.GOOS
-	hostArch := runtime.GOARCH
-	var opts []setupChoice
-	for _, b := range sc.BackendTypes(ctx, yoloai.BackendQuery{}) {
-		if b.IsolationTargetOnly {
-			continue
+// envPreset is one default-environment option in the setup wizard. On macOS a
+// pick implies up to three config keys — guest os, isolation tier, and
+// container_backend — so the technology implies the os and we never ask
+// "mac or linux?" separately. Selecting a preset writes its non-empty keys and
+// RESETS the rest of presetManagedKeys, so switching presets never leaves a
+// stale os/isolation/container_backend behind (an empty Set is ignored by
+// mergeStringField; Reset actually clears — AC2).
+type envPreset struct {
+	ID        string             // user-facing id and the --backend flag value
+	OS        string             // "os" value; "" = reset
+	Isolation string             // "isolation" value; "" = reset
+	Backend   string             // "container_backend" value; "" = reset
+	Blurb     string             // novice-friendly one-liner
+	Probe     yoloai.BackendType // backend whose install-state tags this preset; "" = always shown installed
+	Alias     bool               // ID is a container-system alias (availability = its socket exists)
+}
+
+// presetManagedKeys are the config keys a preset owns. Every preset sets some
+// and resets the rest, so this is the single source of "what a preset controls".
+var presetManagedKeys = []string{"os", "isolation", "container_backend"}
+
+// presetsForHost returns the default-environment presets offered on hostOS, in
+// recommended-first order (the first is the highlighted default). The macOS
+// order mirrors the blank-config auto-pick precedence — apple, then the
+// docker-VM container systems (orbstack, docker-desktop; see
+// yoloai.ContainerSystems), then podman — followed by the macOS-guest presets
+// (tart, seatbelt), which are wizard-only and never auto-selected as a default.
+func presetsForHost(hostOS string) []envPreset {
+	switch hostOS {
+	case "darwin":
+		return []envPreset{
+			{ID: "apple", Blurb: "Fastest, strongest isolation, macOS-native", Probe: "apple"},
+			{ID: "orbstack", Backend: "orbstack", Blurb: "Docker via OrbStack — fast, low overhead", Alias: true},
+			{ID: "docker-desktop", Backend: "docker-desktop", Blurb: "Docker via Docker Desktop", Alias: true},
+			{ID: "podman", Backend: "podman", Blurb: "Docker-compatible, daemonless, rootless", Probe: "podman"},
+			{ID: "tart", OS: "mac", Isolation: "vm", Blurb: "Full macOS VM — Xcode/Swift, heavier", Probe: "tart"},
+			{ID: "seatbelt", OS: "mac", Blurb: "Lightweight macOS sandbox — near-instant", Probe: "seatbelt"},
 		}
-		if !slices.Contains(b.Platforms, hostOS) {
-			continue
+	case "linux":
+		return []envPreset{
+			{ID: "docker", Blurb: "Linux containers — portable, fast", Probe: "docker"},
+			{ID: "podman", Backend: "podman", Blurb: "Daemonless, rootless", Probe: "podman"},
+			{ID: "vm", Isolation: "vm", Blurb: "Hardware-VM isolation (containerd + Kata)", Probe: "containerd"},
 		}
-		if len(b.Architectures) > 0 && !slices.Contains(b.Architectures, hostArch) {
-			continue
+	default: // windows and others: docker / podman via WSL
+		return []envPreset{
+			{ID: "docker", Blurb: "Linux containers via WSL", Probe: "docker"},
+			{ID: "podman", Backend: "podman", Blurb: "Daemonless, rootless (WSL)", Probe: "podman"},
 		}
-		opts = append(opts, setupChoice{Name: string(b.Type), Blurb: b.Description})
 	}
-	return opts
+}
+
+// presetConfigOps splits a preset into the keys to Set (its non-empty values)
+// and the keys to Reset (the rest of presetManagedKeys). Pure, so the
+// set-vs-reset write policy is testable without touching disk.
+func presetConfigOps(p envPreset) (set map[string]string, reset []string) {
+	set = map[string]string{}
+	if p.OS != "" {
+		set["os"] = p.OS
+	}
+	if p.Isolation != "" {
+		set["isolation"] = p.Isolation
+	}
+	if p.Backend != "" {
+		set["container_backend"] = p.Backend
+	}
+	for _, k := range presetManagedKeys {
+		if _, ok := set[k]; !ok {
+			reset = append(reset, k)
+		}
+	}
+	return set, reset
+}
+
+// applyPreset writes the preset's owned keys: Set for the ones it uses, Reset
+// for the ones it doesn't (so an earlier preset's os/isolation/container_backend
+// can't linger — AC2).
+func applyPreset(ctx context.Context, cfg *yoloai.ConfigAdmin, p envPreset) error {
+	set, reset := presetConfigOps(p)
+	for _, k := range presetManagedKeys {
+		if v, ok := set[k]; ok {
+			if err := cfg.Set(ctx, k, v); err != nil {
+				return err
+			}
+		}
+	}
+	for _, k := range reset {
+		if err := cfg.Reset(ctx, k); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// resolvePreset returns the chosen preset id. A --backend flag selects a preset
+// by id (validated against the host's presets); otherwise the wizard prompts
+// with availability tags, defaulting to the first (recommended) preset.
+func resolvePreset(ctx context.Context, cmd *cobra.Command, reader *bufio.Reader, out io.Writer, presets []envPreset, sc *yoloai.System) (string, error) {
+	if flag := cliutil.FlagStr(cmd, "backend"); flag != "" {
+		if _, ok := findPreset(presets, flag); !ok {
+			return "", fmt.Errorf("invalid --backend value %q (available: %s)", flag, joinPresetIDs(presets))
+		}
+		return flag, nil
+	}
+	return wizardChoice(ctx, reader, out, "Default environment:", buildPresetChoices(ctx, sc, presets), 0)
+}
+
+// buildPresetChoices renders each preset as a numbered choice, tagging the first
+// "(recommended)" and any whose backing tool isn't installed "(not installed)".
+// All presets are shown regardless of install state; a not-installed pick is
+// saved and falls back gracefully at launch.
+func buildPresetChoices(ctx context.Context, sc *yoloai.System, presets []envPreset) []setupChoice {
+	home := cliutil.Layout().HomeDir
+	choices := make([]setupChoice, len(presets))
+	for i, p := range presets {
+		blurb := p.Blurb
+		if i == 0 {
+			blurb += " (recommended)"
+		}
+		if !presetInstalled(ctx, sc, p, home) {
+			blurb += " (not installed)"
+		}
+		choices[i] = setupChoice{Name: p.ID, Blurb: blurb}
+	}
+	return choices
+}
+
+// presetInstalled reports whether a preset's backing technology is present on
+// the host: an alias preset by its daemon socket on disk, a backend preset by
+// the cheaper "installed" tier (binary present, daemon need not be running).
+func presetInstalled(ctx context.Context, sc *yoloai.System, p envPreset, home string) bool {
+	if p.Alias {
+		ok, _ := containerSystemAvailable(yoloai.ContainerSystemSocket(yoloai.BackendType(p.ID), home))
+		return ok
+	}
+	if p.Probe == "" {
+		return true
+	}
+	return sc.BackendInstalled(ctx, p.Probe)
+}
+
+// findPreset returns the preset with the given id.
+func findPreset(presets []envPreset, id string) (envPreset, bool) {
+	for _, p := range presets {
+		if p.ID == id {
+			return p, true
+		}
+	}
+	return envPreset{}, false
+}
+
+// joinPresetIDs renders the preset ids for an error message.
+func joinPresetIDs(presets []envPreset) string {
+	ids := make([]string, len(presets))
+	for i, p := range presets {
+		ids[i] = p.ID
+	}
+	return strings.Join(ids, ", ")
 }
 
 // availableAgents returns the user-selectable agents (RealOnly excludes the
@@ -276,7 +415,7 @@ func wizardChoice(ctx context.Context, reader *bufio.Reader, out io.Writer, head
 	fmt.Fprintln(out, heading) //nolint:errcheck
 	fmt.Fprintln(out)          //nolint:errcheck
 	for i, c := range choices {
-		fmt.Fprintf(out, "  [%d] %-10s %s\n", i+1, c.Name, c.Blurb) //nolint:errcheck
+		fmt.Fprintf(out, "  [%d] %-14s %s\n", i+1, c.Name, c.Blurb) //nolint:errcheck
 	}
 	fmt.Fprintf(out, "\nChoice [%d]: ", defaultIdx+1) //nolint:errcheck
 
