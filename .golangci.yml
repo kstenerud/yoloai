@@ -140,13 +140,13 @@ linters:
           msg: "use layout.HostGID (or fileutil.HostGID at the OS boundary); library code must not read the process GID directly — see internal/config/layout.go"
 
         # DEV §12 git-executor consolidation. The curated git subprocess env is
-        # built in exactly one place — config.Layout.GitEnv (layout_env.go), the
-        # sealed accessor that git.NewHost / git.NewSandbox call. Every git
-        # invocation routes through *git.Git, so no other package needs to
-        # assemble a git env; a stray sysexec.GitEnv call signals a caller that
-        # bypassed the Layout accessor and the git executor.
+        # built in exactly one place — config.HostEnv.EnvForGitInvocation
+        # (host_env.go), the sealed accessor that git.NewHost / git.NewSandbox
+        # call. Every git invocation routes through *git.Git, so no other package
+        # needs to assemble a git env; a stray sysexec.GitEnv call signals a
+        # caller that bypassed the HostEnv accessor and the git executor.
         - pattern: "^sysexec\\.GitEnv$"
-          msg: "build git envs via layout.GitEnv() (used by git.NewHost / git.NewSandbox); do not call sysexec.GitEnv directly — DEV §12"
+          msg: "build git envs via layout.Env().EnvForGitInvocation() (used by git.NewHost / git.NewSandbox); do not call sysexec.GitEnv directly — DEV §12"
 
         # DF19 test-edge env consolidation. The host environment is read in
         # exactly one place — testutil.GetCuratedHostEnv — which REQUIRES an
@@ -159,17 +159,18 @@ linters:
         - pattern: "^testutil\\.GetCuratedHostEnv$"
           msg: "the host environment is read in exactly one place (testutil.GetCuratedHostEnv), and only with an explicit allowlist; new callers must be added to the .golangci.yml allowlist — a deliberate, reviewed test-edge (§12). Unit/production code must not read the ambient env."
 
-        # DEV §12 Layout snapshot seal. config.Layout.env is unexported; the only
-        # methods that hand back the WHOLE snapshot are EnvSnapshot (embedder/
-        # diagnostics boundary) and EnvForExtension (the `yoloai x` passthrough).
-        # Both are deny-by-default so library code can't quietly re-acquire the
-        # full ambient map and bypass curation — it must use ExecEnv/CuratedEnv
-        # (allowlisted) or LookupEnv (one key). New callers go in the reviewed
-        # exclusions.rules allowlist below.
-        - pattern: "\\.EnvSnapshot$"
-          msg: "EnvSnapshot returns the whole env snapshot; it is only for the embedder/diagnostics boundary (filling ClientCreateOptions.Env or a bug report). Library code must use layout.ExecEnv/CuratedEnv (allowlisted) or LookupEnv — add reviewed callers to the .golangci.yml allowlist. DEV §12."
-        - pattern: "\\.EnvForExtension$"
-          msg: "EnvForExtension hands the full env to a user extension; it is the single sanctioned passthrough for `yoloai x`. Library code that shells out must use layout.ExecEnv with an allowlist — add reviewed callers to the .golangci.yml allowlist. DEV §12."
+        # DEV §12 HostEnv curation seal. config.Layout.env is unexported and is
+        # read only through the purpose-named config.HostEnv accessors reached via
+        # layout.Env() (host_env.go). Every EnvFor… accessor and PassthroughEnv is
+        # deny-by-default: a call site that pulls host env must justify which
+        # purpose it names and be added to the reviewed exclusions.rules allowlist
+        # below, so every env touch in the codebase stays greppable and reviewed.
+        # (The honest non-env queries InHostTmux/TerminalColumns are not gated —
+        # they hand back a bool/int, not env.)
+        - pattern: "\\.EnvFor[A-Z]\\w*$"
+          msg: "EnvFor… accessors hand out curated host env by named purpose; every call site must be reviewed and added to the .golangci.yml exclusions allowlist (DEV §12)."
+        - pattern: "\\.PassthroughEnv$"
+          msg: "PassthroughEnv hands the full host env to a `yoloai x` extension; it is the single sanctioned passthrough. Add reviewed callers to the .golangci.yml allowlist (DEV §12)."
 
         # §12 ambient-configuration hardening (deny by default). Ambient
         # process state — environment, identity, host, process I/O — must be
@@ -302,28 +303,65 @@ linters:
           - forbidigo
       # config.HostEnv.EnvForGitInvocation (host_env.go) is THE site that
       # assembles the curated git subprocess env (it wraps sysexec.GitEnv over
-      # the sealed snapshot); git.NewHost / git.NewSandbox route through it. The
-      # legacy Layout.GitEnv (layout_env.go) wraps the same call during the
-      # transition. Every other package routes git through *git.Git, so the
-      # sysexec.GitEnv ban applies everywhere else.
-      - path: "internal/config/(layout_env|host_env)\\.go"
+      # the sealed snapshot); git.NewHost / git.NewSandbox route through it.
+      # Every other package routes git through *git.Git, so the sysexec.GitEnv
+      # ban applies everywhere else.
+      - path: "internal/config/host_env\\.go"
         linters:
           - forbidigo
         text: "sysexec\\.GitEnv"
-      # Layout.EnvSnapshot allowlist — the reviewed embedder/diagnostics-boundary
-      # callers that forward the captured snapshot across the public API
-      # (ClientCreateOptions.Env) or dump it in a bug report. Path-scoped to the
-      # specific edge files; do NOT exclude whole dirs.
-      - path: "internal/cli/cliutil/client\\.go|internal/cli/lifecycle/new\\.go|internal/cli/sandboxcmd/bugreport\\.go"
-        linters:
-          - forbidigo
-        text: "\\.EnvSnapshot"
-      # Layout.EnvForExtension allowlist — the single `yoloai x` extension runner
-      # that hands the user's full edge env to their script (by design).
+
+      # config.HostEnv accessor allowlists (DEV §12). Each EnvFor… accessor and
+      # PassthroughEnv is deny-by-default; the reviewed call sites are listed
+      # here, one rule per purpose so the legitimate readers of each kind of host
+      # env stay greppable in one place. Path-scoped to specific files; do NOT
+      # exclude whole dirs. Root-level files (client.go/system.go/diagnostics.go)
+      # use (^|/) so the module-root path matches.
+      - path: "internal/git/git\\.go"
+        linters: [forbidigo]
+        text: "\\.EnvForGitInvocation"
+      - path: "internal/runtime/docker/docker\\.go"
+        linters: [forbidigo]
+        text: "\\.EnvForDockerExec"
+      - path: "internal/runtime/docker/build\\.go|internal/runtime/containerd/image\\.go"
+        linters: [forbidigo]
+        text: "\\.EnvForDockerBuild"
+      - path: "internal/runtime/containerd/containerd\\.go"
+        linters: [forbidigo]
+        text: "\\.EnvForContainerdExec"
+      - path: "internal/runtime/seatbelt/seatbelt\\.go"
+        linters: [forbidigo]
+        text: "\\.EnvForSeatbelt(Exec|Sandbox)"
+      - path: "internal/runtime/tart/tart\\.go"
+        linters: [forbidigo]
+        text: "\\.EnvForTartInvocation"
+      # Daemon-socket discovery: backend probes/clients + the CLI commands that
+      # select a container backend.
+      - path: "(^|/)client\\.go$|internal/runtime/docker/docker\\.go|internal/runtime/podman/podman\\.go|internal/cli/cliutil/client\\.go|internal/cli/mcp/mcp\\.go|internal/cli/lifecycle/stop\\.go|internal/cli/lifecycle/destroy\\.go"
+        linters: [forbidigo]
+        text: "\\.EnvForDaemonDiscovery"
+      # Host-utility subprocesses (tmux, vscode, file copies, rsync, uname).
+      - path: "(^|/)diagnostics\\.go$|internal/sandbox/files\\.go|internal/sandbox/lifecycle/reset\\.go|internal/cli/cliutil/terminal\\.go|internal/cli/sandboxcmd/bugreport\\.go|internal/cli/sandboxcmd/vscode\\.go"
+        linters: [forbidigo]
+        text: "\\.EnvForHostTool"
+      - path: "(^|/)diagnostics\\.go$"
+        linters: [forbidigo]
+        text: "\\.EnvForDiagnostics"
+      # ${VAR} config/profile interpolation: the config parse entry points and
+      # every ExpandPath call site that resolves a user-supplied path.
+      - path: "internal/config/config\\.go|internal/config/profile\\.go|internal/sandbox/lifecycle/start\\.go|internal/sandbox/lifecycle/restart\\.go|internal/sandbox/provision/provision\\.go|internal/sandbox/create/create\\.go|internal/sandbox/create/prepare_profile\\.go|internal/sandbox/create/prepare_archetype\\.go|internal/sandbox/mounts/mounts\\.go|internal/cli/mcp/mcp\\.go|internal/cli/lifecycle/new\\.go|internal/cli/workflow/apply\\.go"
+        linters: [forbidigo]
+        text: "\\.EnvForConfigInterpolation"
+      # Agent credentials: the provisioning/seed/model-prefix/doctor readers that
+      # resolve an agent definition's declared credential keys.
+      - path: "(^|/)system\\.go$|internal/sandbox/invocation/invocation\\.go|internal/sandbox/provision/provision\\.go|internal/sandbox/create/prepare_dirs\\.go"
+        linters: [forbidigo]
+        text: "\\.EnvForAgentCredentials"
+      # PassthroughEnv: the single `yoloai x` extension runner that hands the
+      # user's full edge env to their script (by design).
       - path: "internal/cli/xcmd/x\\.go"
-        linters:
-          - forbidigo
-        text: "\\.EnvForExtension"
+        linters: [forbidigo]
+        text: "\\.PassthroughEnv"
       # DF19 testutil.GetCuratedHostEnv allowlist — the licensed test-edge callers
       # of the one host-env read. golangci-lint does not analyze //go:build
       # integration files by default, so the ban only fires on non-tagged files;
@@ -351,7 +389,7 @@ linters:
       - path: "_test\\.go"
         linters:
           - forbidigo
-        text: "os\\.(WriteFile|OpenFile|MkdirAll|UserHomeDir|UserConfigDir|UserCacheDir|Getwd|Getuid|Getgid|Getenv|LookupEnv|ExpandEnv|Setenv|Unsetenv|Clearenv|Chdir|Args|Geteuid|Getegid|Getgroups|Getppid|Hostname|Stdin|Stdout|Stderr)|filepath\\.Dir|fmt\\.(Print|Printf|Println|Scan|Scanf|Scanln)|^print(ln)?$|log\\.(Print|Printf|Println|Fatal|Fatalf|Fatalln|Panic|Panicf|Panicln)|syscall\\.(Getenv|Setenv|Getuid|Getgid|Geteuid|Getegid|Getgroups|Getppid)|user\\.(Current|Lookup|LookupId|LookupGroup|LookupGroupId)|time\\.Local|sandbox\\.(NewManager|Manager)|runtime\\.(New|Runtime)"
+        text: "os\\.(WriteFile|OpenFile|MkdirAll|UserHomeDir|UserConfigDir|UserCacheDir|Getwd|Getuid|Getgid|Getenv|LookupEnv|ExpandEnv|Setenv|Unsetenv|Clearenv|Chdir|Args|Geteuid|Getegid|Getgroups|Getppid|Hostname|Stdin|Stdout|Stderr)|filepath\\.Dir|fmt\\.(Print|Printf|Println|Scan|Scanf|Scanln)|^print(ln)?$|log\\.(Print|Printf|Println|Fatal|Fatalf|Fatalln|Panic|Panicf|Panicln)|syscall\\.(Getenv|Setenv|Getuid|Getgid|Geteuid|Getegid|Getgroups|Getppid)|user\\.(Current|Lookup|LookupId|LookupGroup|LookupGroupId)|time\\.Local|sandbox\\.(NewManager|Manager)|runtime\\.(New|Runtime)|\\.EnvFor[A-Z]\\w*|\\.PassthroughEnv"
       # internal/sysexec is THE licensed exec.Command* site — the funnel that
       # sets an explicit env; every other caller routes through it.
       #
@@ -363,7 +401,7 @@ linters:
       - path: "internal/testutil/"
         linters:
           - forbidigo
-        text: "os\\.(WriteFile|OpenFile|MkdirAll|UserHomeDir|UserConfigDir|UserCacheDir|Getwd|Getuid|Getgid|Getenv|LookupEnv|ExpandEnv|Setenv|Unsetenv|Clearenv|Chdir|Args|Geteuid|Getegid|Getgroups|Getppid|Hostname|Stdin|Stdout|Stderr)|filepath\\.Dir|fmt\\.(Print|Printf|Println|Scan|Scanf|Scanln)|^print(ln)?$|log\\.(Print|Printf|Println|Fatal|Fatalf|Fatalln|Panic|Panicf|Panicln)|syscall\\.(Getenv|Setenv|Getuid|Getgid|Geteuid|Getegid|Getgroups|Getppid)|user\\.(Current|Lookup|LookupId|LookupGroup|LookupGroupId)|time\\.Local|sandbox\\.(NewManager|Manager)|runtime\\.(New|Runtime)"
+        text: "os\\.(WriteFile|OpenFile|MkdirAll|UserHomeDir|UserConfigDir|UserCacheDir|Getwd|Getuid|Getgid|Getenv|LookupEnv|ExpandEnv|Setenv|Unsetenv|Clearenv|Chdir|Args|Geteuid|Getegid|Getgroups|Getppid|Hostname|Stdin|Stdout|Stderr)|filepath\\.Dir|fmt\\.(Print|Printf|Println|Scan|Scanf|Scanln)|^print(ln)?$|log\\.(Print|Printf|Println|Fatal|Fatalf|Fatalln|Panic|Panicf|Panicln)|syscall\\.(Getenv|Setenv|Getuid|Getgid|Geteuid|Getegid|Getgroups|Getppid)|user\\.(Current|Lookup|LookupId|LookupGroup|LookupGroupId)|time\\.Local|sandbox\\.(NewManager|Manager)|runtime\\.(New|Runtime)|\\.EnvFor[A-Z]\\w*|\\.PassthroughEnv"
       - path: "internal/sysexec/"
         linters:
           - forbidigo
