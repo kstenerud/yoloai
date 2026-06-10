@@ -2,7 +2,7 @@
 
 **Sandboxed runner for AI coding agents. No more permission fatigue. Your files stay untouched until you say otherwise.**
 
-![terminal](terminal.svg)
+https://github.com/user-attachments/assets/9d6740b4-a34e-4253-82ec-cb0e4c7a8bd9
 
 AI coding agents want to edit your files and run commands, so you must choose between them constantly asking your permission, or bypassing permissions and risking a catastrophe.
 
@@ -30,7 +30,9 @@ You                          Sandbox                        Your project
 
 **Permission fatigue is real.** After a hundred approve/deny prompts you stop reading and just hit "yes" — or you reach for `--dangerously-skip-permissions` and hope for the best. Neither is great.
 
-yoloAI takes a different approach: let the agent do whatever it wants inside a disposable container. Your originals are never modified. When the agent is done, review the diff and choose what to keep.
+**Disabling permissions is dangerous! ... Unless you've sandboxed your agent, that is!**
+
+yoloAI takes a different approach: let the agent do whatever it wants inside a disposable container. Your original files are never modified. When the agent is done, review the diff and choose what to keep.
 
 - **Your files are untouchable.** The agent works on an isolated copy. Originals never change until you say so.
 - **Git-powered review.** `diff` shows exactly what changed. `apply` patches your project cleanly, preserving individual commits.
