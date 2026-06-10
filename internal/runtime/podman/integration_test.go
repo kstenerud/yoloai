@@ -22,7 +22,7 @@ import (
 func TestPodmanConformance(t *testing.T) {
 	runtimetest.RunConformance(t, func(t *testing.T) (runtimetest.DockerCompatRuntime, context.Context) {
 		ctx := context.Background()
-		rt, err := podman.New(ctx, config.Layout{Env: testutil.HostEnv()})
+		rt, err := podman.New(ctx, config.Layout{}.WithEnv(testutil.GetCuratedHostEnv(testutil.IntegrationHostEnvVars)))
 		require.NoError(t, err, "Podman must be running with socket activated for integration tests")
 		t.Cleanup(func() { rt.Close() }) //nolint:errcheck // test cleanup
 		return rt, ctx
@@ -33,7 +33,7 @@ func TestPodmanConformance(t *testing.T) {
 // distinguishes podman from the embedded docker runtime.
 func TestPodman_Descriptor(t *testing.T) {
 	ctx := context.Background()
-	rt, err := podman.New(ctx, config.Layout{Env: testutil.HostEnv()})
+	rt, err := podman.New(ctx, config.Layout{}.WithEnv(testutil.GetCuratedHostEnv(testutil.IntegrationHostEnvVars)))
 	require.NoError(t, err, "Podman must be running for integration tests")
 	t.Cleanup(func() { rt.Close() }) //nolint:errcheck // test cleanup
 

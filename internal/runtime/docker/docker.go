@@ -128,10 +128,10 @@ var _ runtime.CachePruner = (*Runtime)(nil)
 var _ runtime.DiskUsageReporter = (*Runtime)(nil)
 
 // New creates a Runtime and verifies the Docker daemon is reachable. layout
-// carries the threaded environment snapshot (layout.Env); the daemon socket
-// and TLS settings are read from it rather than os.Environ (§12). A nil/empty
-// layout.Env means "default socket, no TLS" — exactly the SDK's behavior when
-// the DOCKER_* vars are unset.
+// carries the threaded environment snapshot; the daemon socket and TLS settings
+// are read from the curated daemon subset (layout.CuratedEnv) rather than
+// os.Environ (§12). An empty curated subset means "default socket, no TLS" —
+// exactly the SDK's behavior when the DOCKER_* vars are unset.
 func New(ctx context.Context, layout config.Layout) (*Runtime, error) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		return nil, yoerrors.NewDependencyError("docker is not installed, install it from https://docs.docker.com/get-docker/")
@@ -141,12 +141,12 @@ func New(ctx context.Context, layout config.Layout) (*Runtime, error) {
 
 // NewWithSocket creates a Runtime connected to a specific Docker-compatible socket.
 // If host is non-empty it pins the connection to that socket. If host is empty,
-// the client is configured from layout.Env (DOCKER_HOST / DOCKER_CERT_PATH /
-// DOCKER_TLS_VERIFY / DOCKER_API_VERSION) — the threaded snapshot, not
-// os.Environ (§12). binaryName is the CLI binary to use for interactive exec
-// and image builds (e.g., "docker" or "podman").
+// the client is configured from the curated daemon subset of the threaded snapshot
+// (layout.CuratedEnv: DOCKER_HOST / DOCKER_CERT_PATH / DOCKER_TLS_VERIFY /
+// DOCKER_API_VERSION), not os.Environ (§12). binaryName is the CLI binary to use
+// for interactive exec and image builds (e.g., "docker" or "podman").
 func NewWithSocket(ctx context.Context, host string, binaryName string, layout config.Layout) (*Runtime, error) {
-	env := layout.Env
+	env := layout.CuratedEnv(runtime.DaemonEnvVars)
 	baseOpts := []dockerclient.Opt{dockerclient.WithAPIVersionNegotiation()}
 	tlsOpts, err := tlsOptsFromEnv(env)
 	if err != nil {
@@ -231,7 +231,7 @@ var dockerExecAllowlist = []string{
 }
 
 func newDockerRuntime(cli *dockerclient.Client, binaryName string, layout config.Layout) *Runtime {
-	execEnv := sysexec.Curated(layout.Env, dockerExecAllowlist, map[string]string{
+	execEnv := layout.ExecEnv(dockerExecAllowlist, map[string]string{
 		"HOME": layout.HomeDir,
 	})
 	r := &Runtime{client: cli, binaryName: binaryName, principal: layout.Principal, execEnv: execEnv}

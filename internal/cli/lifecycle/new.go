@@ -105,7 +105,7 @@ func runNewCmd(cmd *cobra.Command, args []string, version string) error {
 		Input:       cmd.InOrStdin(),
 		Output:      mgrOutput,
 		Version:     version,
-		Env:         l.Env,
+		Env:         l.EnvSnapshot(),
 	})
 	if err != nil {
 		return fmt.Errorf("connect to runtime: %w", err)
@@ -286,14 +286,14 @@ func resolveNewDirSpecs(rawWorkdirArg string, rawDirs []string) (workdirSpec yol
 	layout := cliutil.Layout()
 	homeDir := layout.HomeDir
 	if rawWorkdirArg != "" {
-		parsed, parseErr := cliutil.ParseDirArg(rawWorkdirArg, homeDir, layout.Env)
+		parsed, parseErr := cliutil.ParseDirArg(rawWorkdirArg, homeDir, layout)
 		if parseErr != nil {
 			return yoloai.DirSpec{}, nil, yoerrors.NewUsageError("invalid workdir: %s", parseErr)
 		}
 		workdirSpec = *parsed
 	}
 	for _, rawDir := range rawDirs {
-		parsed, parseErr := cliutil.ParseAuxDirArg(rawDir, homeDir, layout.Env)
+		parsed, parseErr := cliutil.ParseAuxDirArg(rawDir, homeDir, layout)
 		if parseErr != nil {
 			// ParseAuxDirArg returns *UsageError for the :copy/:overlay
 			// rejection cases (already user-actionable); pass it through.

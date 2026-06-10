@@ -63,19 +63,18 @@ type Layout struct {
 	// the canRunCNIBridge check and similar.
 	ProcessIsRoot bool
 
-	// Env is a snapshot of the process environment, captured once at the
+	// env is a snapshot of the process environment, captured once at the
 	// outermost boundary (the CLI's licensed os.Environ() read in
-	// cliutil), used to expand user-declared ${VAR} references in config
-	// values and paths. nil by default — NewLayout / NewLayoutFor leave
-	// it unset so library code never reads the live process env; the CLI
-	// populates it, tests/embedders set it explicitly. expandEnvBraced /
-	// ExpandPath read from this map rather than calling os.LookupEnv, so
-	// ${VAR} expansion happens against threaded data, not ambient state
-	// (the read crosses to the boundary; the user's declared intent to
-	// interpolate env is still honored). A nil/empty map means any
-	// ${VAR} reference is an unset-variable error — fine for the baked-in
-	// default config, which contains none.
-	Env map[string]string
+	// cliutil). It is UNEXPORTED so no caller can grab or index the whole
+	// ambient map and bypass curation: populate it only via WithEnv (at the
+	// edges), and read it only through the methods in layout_env.go —
+	// ExecEnv/CuratedEnv (allowlisted subprocess env), LookupEnv (one
+	// arbitrary key, for ${VAR} expansion and agent secrets), EnvForExtension
+	// (the single sanctioned full passthrough), or EnvSnapshot (the embedder/
+	// diagnostics boundary). A nil/empty map means any ${VAR} reference is an
+	// unset-variable error — fine for the baked-in default config, which
+	// contains none. See development-principles.md §12.
+	env map[string]string
 
 	// Principal namespaces this Layout's runtime instances so multiple
 	// principals (tenants) served from one process don't collide on the

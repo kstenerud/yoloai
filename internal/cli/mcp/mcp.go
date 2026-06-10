@@ -56,7 +56,7 @@ Add to ~/.claude.json to use with Claude Desktop:
 }
 
 func runMCPServe(cmd *cobra.Command, _ []string) error {
-	backend, warn := yoloai.SelectContainerBackend(cmd.Context(), cliutil.ResolveContainerBackendConfig(), cliutil.Layout().Env)
+	backend, warn := yoloai.SelectContainerBackend(cmd.Context(), cliutil.ResolveContainerBackendConfig(), cliutil.Layout().CuratedEnv(yoloai.DaemonEnvVars))
 	if warn != "" {
 		fmt.Fprintln(os.Stderr, warn)
 	}
@@ -144,7 +144,7 @@ func runMCPProxy(cmd *cobra.Command, args []string) error {
 	homeDir := layout.HomeDir
 	var workdirSpec yoloai.DirSpec
 	if rawWorkdir != "" {
-		parsed, err := cliutil.ParseDirArg(rawWorkdir, homeDir, layout.Env)
+		parsed, err := cliutil.ParseDirArg(rawWorkdir, homeDir, layout)
 		if err != nil {
 			return fmt.Errorf("invalid workdir: %w", err)
 		}
@@ -158,7 +158,7 @@ func runMCPProxy(cmd *cobra.Command, args []string) error {
 	// be :copy or :overlay (diff/apply is workdir-only).
 	var auxDirSpecs []yoloai.DirSpec
 	for _, rawDir := range rawDirs {
-		parsed, err := cliutil.ParseAuxDirArg(rawDir, homeDir, layout.Env)
+		parsed, err := cliutil.ParseAuxDirArg(rawDir, homeDir, layout)
 		if err != nil {
 			return fmt.Errorf("invalid directory %q: %w", rawDir, err)
 		}

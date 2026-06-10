@@ -92,7 +92,7 @@ func runApplyCmd(cmd *cobra.Command, args []string) error {
 	patchesDir, _ := cmd.Flags().GetString("patches")
 	if patchesDir != "" {
 		var expandErr error
-		patchesDir, expandErr = cliutil.ExpandPath(patchesDir, cliutil.Layout().HomeDir, cliutil.Layout().Env)
+		patchesDir, expandErr = cliutil.ExpandPath(patchesDir, cliutil.Layout().HomeDir, cliutil.Layout())
 		if expandErr != nil {
 			return fmt.Errorf("expand patches path: %w", expandErr)
 		}

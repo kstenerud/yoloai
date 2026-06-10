@@ -53,7 +53,7 @@ func newSandboxVscodeCmd() *cobra.Command {
 			// Try to open VS Code if `code` is on PATH
 			if _, lookErr := exec.LookPath("code"); lookErr == nil {
 				// PATH+HOME suffice for the VS Code CLI; the folder URI carries no secrets.
-				codeEnv := sysexec.Curated(cliutil.Layout().Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+				codeEnv := cliutil.Layout().ExecEnv([]string{"PATH", "HOME", "TMPDIR"}, nil)
 				openCmd := sysexec.Command(codeEnv, "code", "--folder-uri", attach.FolderURI)
 				if runErr := openCmd.Run(); runErr != nil {
 					// Fall through to print instructions

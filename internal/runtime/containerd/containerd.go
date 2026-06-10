@@ -132,7 +132,7 @@ func New(_ context.Context, layout config.Layout) (*Runtime, error) {
 		}
 		return nil, yoerrors.NewDependencyError("connect to containerd: %w\n  Is containerd running? Try: sudo systemctl start containerd", err)
 	}
-	execEnv := sysexec.Curated(layout.Env, containerdExecAllowlist, map[string]string{
+	execEnv := layout.ExecEnv(containerdExecAllowlist, map[string]string{
 		"HOME": layout.HomeDir,
 	})
 	r := &Runtime{client: c, namespace: "yoloai", layout: layout, execEnv: execEnv}

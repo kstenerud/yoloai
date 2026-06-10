@@ -30,27 +30,29 @@ var yoloaiBin string
 // a fresh snapshot here captures it). Never the full ambient env — the SUT gets
 // only what it needs and curates its own subprocesses downstream (DEV §12).
 func sutEnv() []string {
-	return sysexec.Curated(testutil.HostEnv(), []string{
+	vars := []string{
 		"PATH", "HOME", "TMPDIR",
 		"DOCKER_HOST", "DOCKER_CERT_PATH", "DOCKER_TLS_VERIFY", "DOCKER_API_VERSION", "DOCKER_CONFIG",
 		"CONTAINER_HOST", "XDG_RUNTIME_DIR",
 		"SSL_CERT_FILE", "SSL_CERT_DIR",
 		"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy",
 		"LANG", "LC_ALL", "LC_CTYPE",
-	}, nil)
+	}
+	return sysexec.Curated(testutil.GetCuratedHostEnv(vars), vars, nil)
 }
 
 // goBuildEnv is the curated environment for the `go build` of the SUT: PATH/HOME
 // plus the Go toolchain vars a build legitimately needs (module cache, proxy,
 // flags, cross-compile target), never the full ambient env (DEV §12).
 func goBuildEnv() []string {
-	return sysexec.Curated(testutil.HostEnv(), []string{
+	vars := []string{
 		"PATH", "HOME", "TMPDIR",
 		"GOPATH", "GOCACHE", "GOMODCACHE", "GOROOT", "GOBIN",
 		"GOFLAGS", "GOPROXY", "GOPRIVATE", "GONOSUMCHECK", "GONOSUMDB", "GOSUMDB", "GOINSECURE",
 		"GOTOOLCHAIN", "GO111MODULE", "GOOS", "GOARCH", "GOARM", "GOAMD64", "GOEXPERIMENT",
 		"CGO_ENABLED", "CC", "CXX",
-	}, nil)
+	}
+	return sysexec.Curated(testutil.GetCuratedHostEnv(vars), vars, nil)
 }
 
 // TestMain compiles the yoloai binary once before all E2E tests run.

@@ -85,9 +85,9 @@ func defaultDirModes(workdir *DirSpec, auxDirs []*DirSpec) {
 
 // checkAuthAndLocalhostWarnings performs auth checks and localhost URL warnings.
 func checkAuthAndLocalhostWarnings(d state.Deps, agentDef *agent.Definition, mergedEnv map[string]string, cfgModel string, opts Options) error {
-	hasAPIKey := provision.HasAnyAPIKey(agentDef, d.Layout.Env)
+	hasAPIKey := provision.HasAnyAPIKey(agentDef, d.Layout)
 	hasAuth := provision.HasAnyAuthFile(agentDef, d.Layout.HomeDir)
-	hasAuthHint := provision.HasAnyAuthHint(agentDef, mergedEnv, d.Layout.Env)
+	hasAuthHint := provision.HasAnyAuthHint(agentDef, mergedEnv, d.Layout)
 	if err := checkAgentAuth(agentDef, hasAPIKey, hasAuth, hasAuthHint, outputFor(opts.Output)); err != nil {
 		return err
 	}
@@ -128,7 +128,8 @@ func checkLocalhostURLs(d state.Deps, agentDef *agent.Definition, mergedEnv map[
 		return nil
 	}
 	for _, key := range agentDef.AuthHintEnvVars {
-		for _, val := range []string{d.Layout.Env[key], mergedEnv[key]} {
+		hostVal, _ := d.Layout.LookupEnv(key)
+		for _, val := range []string{hostVal, mergedEnv[key]} {
 			if val == "" || !containsLocalhost(val) {
 				continue
 			}

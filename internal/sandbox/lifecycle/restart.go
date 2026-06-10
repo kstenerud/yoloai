@@ -42,7 +42,7 @@ func initializeAgentFilesIfNeeded(layout config.Layout, agentDef *agent.Definiti
 	if agentFilesConfig == nil {
 		return nil
 	}
-	if err := provision.CopyAgentFiles(agentDef, sandboxDir, agentFilesConfig, layout.HomeDir, layout.Env); err != nil {
+	if err := provision.CopyAgentFiles(agentDef, sandboxDir, agentFilesConfig, layout.HomeDir, layout); err != nil {
 		return fmt.Errorf("copy agent files on restart: %w", err)
 	}
 	sbState.AgentFilesInitialized = true
@@ -120,8 +120,8 @@ func recreateContainer(ctx context.Context, d state.Deps, name string, meta *sto
 	sandboxDir := d.Layout.SandboxDir(name)
 
 	// Refresh seed files from host (handles OAuth token refresh between restarts)
-	hasAPIKey := provision.HasAnyAPIKey(agentDef, d.Layout.Env)
-	if _, err := provision.CopySeedFiles(agentDef, sandboxDir, hasAPIKey, d.Layout.HomeDir, d.Layout.Env); err != nil {
+	hasAPIKey := provision.HasAnyAPIKey(agentDef, d.Layout)
+	if _, err := provision.CopySeedFiles(agentDef, sandboxDir, hasAPIKey, d.Layout.HomeDir, d.Layout); err != nil {
 		return fmt.Errorf("refresh seed files: %w", err)
 	}
 

@@ -316,7 +316,7 @@ func resolveProfileAndArchetype(ctx context.Context, d state.Deps, opts *Options
 		fmt.Fprintln(outputFor(opts.Output), w) //nolint:errcheck // best-effort warning
 	}
 
-	mergedMounts, err := validateAndExpandMounts(pr.mounts, d.Layout.HomeDir, d.Layout.Env)
+	mergedMounts, err := validateAndExpandMounts(pr.mounts, d.Layout.HomeDir, d.Layout)
 	if err != nil {
 		return nil, err
 	}
@@ -338,7 +338,7 @@ func createAndSeedSandbox(ctx context.Context, d state.Deps, sandboxDir string, 
 	if err := createSandboxDirs(sandboxDir, perms); err != nil {
 		return false, err
 	}
-	return provision.SeedSandbox(d.Runtime, agentDef, sandboxDir, pr.isolation, pr.agentFiles, d.Layout.HomeDir, d.Layout.Env, output)
+	return provision.SeedSandbox(d.Runtime, agentDef, sandboxDir, pr.isolation, pr.agentFiles, d.Layout.HomeDir, d.Layout, output)
 }
 
 // buildConfigAndEnvironment builds the container config and sandbox meta structs.
@@ -346,7 +346,7 @@ func createAndSeedSandbox(ctx context.Context, d state.Deps, sandboxDir string, 
 func buildConfigAndEnvironment(ctx context.Context, d state.Deps, opts Options, ri *resolvedCreateInputs, agentDef *agent.Definition, workdir *DirSpec, auxDirs []*DirSpec, gcfg *config.GlobalConfig, dirEnvs []store.DirEnvironment, baselineSHA string, sandboxDir string) ([]byte, *store.Environment, string, string, error) {
 	_ = ctx // reserved for future use
 	pr := ri.profile
-	promptText, hasPrompt, model, agentCommand, tmuxConf, err := resolveAgentParams(agentDef, opts, pr, gcfg, d.Layout.HomeDir, d.Layout.Env, d.Input)
+	promptText, hasPrompt, model, agentCommand, tmuxConf, err := resolveAgentParams(agentDef, opts, pr, gcfg, d.Layout.HomeDir, d.Layout, d.Input)
 	if err != nil {
 		return nil, nil, "", "", err
 	}
@@ -582,8 +582,8 @@ func setupAllWorkdirs(ctx context.Context, d state.Deps, opts Options, workdir *
 
 // resolveAgentParams resolves prompt, model, agent command, and tmux config.
 // homeDir is used to expand leading "~" in the promptFile path.
-// env is the environment map for ${VAR} expansion; use layout.Env.
-func resolveAgentParams(agentDef *agent.Definition, opts Options, pr *profileResult, gcfg *config.GlobalConfig, homeDir string, env map[string]string, stdin io.Reader) (string, bool, string, string, string, error) {
+// env is the EnvLookup for ${VAR} expansion; pass a Layout.
+func resolveAgentParams(agentDef *agent.Definition, opts Options, pr *profileResult, gcfg *config.GlobalConfig, homeDir string, env config.EnvLookup, stdin io.Reader) (string, bool, string, string, string, error) {
 	promptText, err := invocation.ReadPrompt(opts.Prompt, opts.PromptFile, homeDir, env, stdin)
 	if err != nil {
 		return "", false, "", "", "", err

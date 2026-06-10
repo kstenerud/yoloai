@@ -31,7 +31,7 @@ type Git struct{ e execer }
 // NewHost returns a host-scoped Git whose subprocess env is derived from layout
 // (PATH/HOME/TMPDIR/SUDO_UID — see sysexec.GitEnv).
 func NewHost(layout config.Layout) *Git {
-	return &Git{hostExec{env: sysexec.GitEnv(layout.Env)}}
+	return &Git{hostExec{env: layout.GitEnv()}}
 }
 
 // NewHostWithEnv returns a host-scoped Git with an explicit, already-curated env.
@@ -43,10 +43,10 @@ func NewHostWithEnv(env []string) *Git {
 
 // NewSandbox returns a sandbox-scoped Git. If rt implements runtime.GitExecer
 // (e.g. Tart, which runs git in-VM), invocations dispatch there; otherwise they
-// fall back to host git using sysexec.GitEnv(layout.Env).
+// fall back to host git using layout.GitEnv().
 func NewSandbox(layout config.Layout, rt runtime.Runtime, name string) *Git {
 	return &Git{sandboxExec{
-		env:  sysexec.GitEnv(layout.Env),
+		env:  layout.GitEnv(),
 		rt:   rt,
 		name: name,
 	}}

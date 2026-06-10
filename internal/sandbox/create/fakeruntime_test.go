@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"path/filepath"
 
+	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/testutil"
@@ -90,9 +91,27 @@ func (e *fakeNotImplError) Error() string { return "fake runtime: not implemente
 // CLI does at startup so tests don't depend on ambient HOME.
 func layoutForTmpDir(tmpDir string) config.Layout {
 	l := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
-	// Mirror the CLI boundary: capture the process env as the Layout's host-env
-	// snapshot so credential checks (which read Layout.Env, not os.Getenv) see
-	// any keys the test set via t.Setenv.
-	l.Env = testutil.HostEnv()
+	// Mirror the CLI boundary: thread the host env so credential checks (which
+	// read the Layout, not os.Getenv) see the keys these tests inject via
+	// t.Setenv. The allowlist is every registered agent's API-key/auth-hint vars
+	// — the only env these prepare-flow tests set — never the full ambient env.
+	l = l.WithEnv(testutil.GetCuratedHostEnv(agentCredentialEnvVars()))
 	return l
+}
+
+// agentCredentialEnvVars collects the union of every registered agent's API-key
+// and auth-hint env var names. layoutForTmpDir allowlists these so a test that
+// sets a credential via t.Setenv has it surface through the Layout's curated
+// snapshot, without admitting any unrelated ambient var.
+func agentCredentialEnvVars() []string {
+	var keys []string
+	for _, name := range agent.AllAgentTypes() {
+		def := agent.GetAgent(name)
+		if def == nil {
+			continue
+		}
+		keys = append(keys, def.APIKeyEnvVars...)
+		keys = append(keys, def.AuthHintEnvVars...)
+	}
+	return keys
 }

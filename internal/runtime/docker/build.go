@@ -102,7 +102,7 @@ func (r *Runtime) buildBaseImage(ctx context.Context, layout config.Layout, outp
 
 	logger.Debug("building yoloai-base image via BuildKit")
 
-	cmd := sysexec.CommandContext(ctx, CuratedBuildEnv(layout.Env), r.binaryName, "build", "-t", "yoloai-base", "-")
+	cmd := sysexec.CommandContext(ctx, CuratedBuildEnv(layout), r.binaryName, "build", "-t", "yoloai-base", "-")
 	cmd.Stdin = buildCtx
 	cmd.Stdout = output
 	cmd.Stderr = output
@@ -179,7 +179,7 @@ func createBuildContext() (io.Reader, error) {
 // image per Dockerfile step and makes `system prune` churn forever (see
 // backend-idiosyncrasies.md). BuildKit also supplies the `--secret` plumbing
 // for profiles that need build secrets.
-func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir string, tag string, secrets []string, buildEnv map[string]string, output io.Writer, logger *slog.Logger) error {
+func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir string, tag string, secrets []string, buildEnv config.EnvLookup, output io.Writer, logger *slog.Logger) error {
 	buildCtx, err := createProfileBuildContext(sourceDir)
 	if err != nil {
 		return fmt.Errorf("create profile build context: %w", err)
@@ -237,10 +237,10 @@ var buildEnvAllowlist = []string{
 // Exported so sibling backends that shell out to `docker build` (the containerd
 // backend's Docker-build fallback) reuse the same §12-curated allowlist rather
 // than dumping os.Environ().
-func CuratedBuildEnv(snapshot map[string]string) []string {
+func CuratedBuildEnv(lookup config.EnvLookup) []string {
 	env := make([]string, 0, len(buildEnvAllowlist)+1)
 	for _, key := range buildEnvAllowlist {
-		if v, ok := snapshot[key]; ok && v != "" {
+		if v, ok := lookup.LookupEnv(key); ok && v != "" {
 			env = append(env, key+"="+v)
 		}
 	}

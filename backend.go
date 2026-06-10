@@ -11,6 +11,13 @@ import (
 	"github.com/kstenerud/yoloai/internal/runtime"
 )
 
+// DaemonEnvVars names the host-env keys backend selection consults for
+// daemon-socket discovery. Embedders curate their snapshot to this set
+// (config.Layout.CuratedEnv) before passing it to SelectBackend /
+// SelectContainerBackend, so probing sees the daemon settings without the whole
+// ambient env leaking in (§12). See runtime.DaemonEnvVars for the rationale.
+var DaemonEnvVars = runtime.DaemonEnvVars
+
 // SelectBackend resolves a concrete backend from a preferred backend plus
 // isolation / OS routing preferences, mirroring what the CLI does for its
 // --backend / --isolation / --os flags. It probes which container daemons are

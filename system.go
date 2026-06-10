@@ -502,8 +502,8 @@ func (s *System) checkImage(ctx context.Context, rt runtime.Runtime, backend str
 }
 
 // checkAgent verifies that at least one of the agent's API-key env vars is
-// present in the client's host-environment snapshot (s.layout.Env). The library
-// never reads os.Environ; credentials arrive as data via ClientCreateOptions.Env (§12).
+// present in the client's threaded env snapshot. The library never reads
+// os.Environ; credentials arrive as data via ClientCreateOptions.Env (§12).
 func (s *System) checkAgent(name string) CheckResult {
 	def := agent.GetAgent(name)
 	switch {
@@ -514,7 +514,7 @@ func (s *System) checkAgent(name string) CheckResult {
 	}
 	var found []string
 	for _, key := range def.APIKeyEnvVars {
-		if s.layout.Env[key] != "" {
+		if v, _ := s.layout.LookupEnv(key); v != "" {
 			found = append(found, key)
 		}
 	}

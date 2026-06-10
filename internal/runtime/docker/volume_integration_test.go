@@ -20,7 +20,7 @@ import (
 // backing for docker-in-docker's overlay2 driver (see ensureDindVolumeMount).
 func TestDindVolumeLifecycle(t *testing.T) {
 	ctx := context.Background()
-	rt, err := New(ctx, config.Layout{Env: testutil.HostEnv()})
+	rt, err := New(ctx, config.Layout{}.WithEnv(testutil.GetCuratedHostEnv(testutil.IntegrationHostEnvVars)))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close() })
 
@@ -52,7 +52,7 @@ func TestDindVolumeLifecycle(t *testing.T) {
 // only: a plain sandbox must not leave a stray /var/lib/docker volume behind.
 func TestDindVolumeNotCreatedForNonPrivileged(t *testing.T) {
 	ctx := context.Background()
-	rt, err := New(ctx, config.Layout{Env: testutil.HostEnv()})
+	rt, err := New(ctx, config.Layout{}.WithEnv(testutil.GetCuratedHostEnv(testutil.IntegrationHostEnvVars)))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close() })
 

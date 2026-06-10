@@ -101,7 +101,7 @@ func New(ctx context.Context, layout config.Layout) (*Runtime, error) {
 		return nil, yoerrors.NewDependencyError("podman is not installed, install it from https://podman.io/docs/installation")
 	}
 
-	sock, err := discoverSocket(layout.Env)
+	sock, err := discoverSocket(layout.CuratedEnv(runtime.DaemonEnvVars))
 	if err != nil {
 		return nil, yoerrors.NewDependencyError("podman socket not found: %w\nhint: run 'systemctl --user start podman.socket' or 'podman machine start'", err)
 	}
@@ -189,8 +189,8 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 //  5. macOS: `podman machine inspect` (Podman Machine)
 func discoverSocket(env map[string]string) (string, error) {
 	// Check the caller's env snapshot first (§12: the daemon-socket location
-	// is threaded data, not a live os.Getenv — see New's layout.Env / the
-	// probe's probeEnv boundary).
+	// is threaded data, not a live os.Getenv — see New's layout.CuratedEnv /
+	// the probe's probeEnv boundary).
 	if host := env["CONTAINER_HOST"]; host != "" {
 		return host, nil
 	}
@@ -242,7 +242,7 @@ var runscLookPath = exec.LookPath
 
 // machineSocketDiscovery tries to get the socket path from `podman machine inspect`.
 // Variable for testing - can be mocked to avoid executing podman commands.
-// env is the explicit subprocess env (DEV §12); pass layout.Env-derived slice from caller.
+// env is the explicit subprocess env (DEV §12); pass the curated daemon env (layout.CuratedEnv) from caller.
 var machineSocketDiscovery = defaultMachineSocketDiscovery
 
 func defaultMachineSocketDiscovery(env map[string]string) (string, error) {

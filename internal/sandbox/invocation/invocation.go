@@ -37,7 +37,7 @@ func ResolveModel(agentDef *agent.Definition, model string, userAliases map[stri
 // prefixed with "ollama_chat/" for litellm to route it correctly. The trigger
 // env var is looked up in hostEnv (the caller's host-environment snapshot) and
 // in configEnv (the profile env); the library never reads os.Environ (§12).
-func ApplyModelPrefix(agentDef *agent.Definition, model string, configEnv, hostEnv map[string]string) string {
+func ApplyModelPrefix(agentDef *agent.Definition, model string, configEnv map[string]string, hostEnv config.EnvLookup) string {
 	if model == "" || strings.Contains(model, "/") {
 		return model
 	}
@@ -45,7 +45,11 @@ func ApplyModelPrefix(agentDef *agent.Definition, model string, configEnv, hostE
 		return model
 	}
 	for envVar, prefix := range agentDef.ModelPrefixes {
-		if hostEnv[envVar] != "" || configEnv[envVar] != "" {
+		var hostVal string
+		if hostEnv != nil {
+			hostVal, _ = hostEnv.LookupEnv(envVar)
+		}
+		if hostVal != "" || configEnv[envVar] != "" {
 			return prefix + model
 		}
 	}
@@ -174,8 +178,8 @@ func ResolveDetectors(idle agent.IdleSupport) []string {
 // reader the "-" sentinel pulls from — threaded from the Engine's input
 // (the CLI wires os.Stdin there; embedders supply their own), so the library
 // never reaches for the process's stdin directly (§12).
-// env is the environment map for ${VAR} expansion; use layout.Env.
-func ReadPrompt(prompt, promptFile, homeDir string, env map[string]string, stdin io.Reader) (string, error) {
+// env is the EnvLookup for ${VAR} expansion; pass a Layout or MapEnv.
+func ReadPrompt(prompt, promptFile, homeDir string, env config.EnvLookup, stdin io.Reader) (string, error) {
 	if prompt != "" && promptFile != "" {
 		return "", yoerrors.NewUsageError("--prompt and --prompt-file are mutually exclusive")
 	}

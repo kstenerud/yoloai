@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kstenerud/yoloai/internal/agent"
+	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 )
@@ -18,7 +19,7 @@ import (
 
 func TestHasAnyAPIKey_Set(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
-	hostEnv := map[string]string{"ANTHROPIC_API_KEY": "sk-test-123"}
+	hostEnv := config.MapEnv{"ANTHROPIC_API_KEY": "sk-test-123"}
 
 	assert.True(t, HasAnyAPIKey(agentDef, hostEnv))
 }
@@ -112,7 +113,7 @@ func TestDescribeSeedAuthFiles_NoAuthFiles(t *testing.T) {
 
 func TestCreateSecretsDir_WithKey(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
-	hostEnv := map[string]string{"ANTHROPIC_API_KEY": "sk-test-secret"}
+	hostEnv := config.MapEnv{"ANTHROPIC_API_KEY": "sk-test-secret"}
 
 	dir, err := CreateSecretsDir(agentDef, nil, hostEnv, "")
 	require.NoError(t, err)
@@ -166,7 +167,7 @@ func TestCreateSecretsDir_APIKeyOverridesEnv(t *testing.T) {
 	envVars := map[string]string{
 		"ANTHROPIC_API_KEY": "should-be-overwritten",
 	}
-	hostEnv := map[string]string{"ANTHROPIC_API_KEY": "sk-real-key"}
+	hostEnv := config.MapEnv{"ANTHROPIC_API_KEY": "sk-real-key"}
 
 	dir, err := CreateSecretsDir(agentDef, envVars, hostEnv, "")
 	require.NoError(t, err)
@@ -188,7 +189,7 @@ func TestCreateSecretsDir_EmptyBoth(t *testing.T) {
 
 func TestCreateSecretsDir_HonorsStagingRoot(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
-	hostEnv := map[string]string{"ANTHROPIC_API_KEY": "sk-test-secret"}
+	hostEnv := config.MapEnv{"ANTHROPIC_API_KEY": "sk-test-secret"}
 	stagingRoot := t.TempDir()
 
 	dir, err := CreateSecretsDir(agentDef, nil, hostEnv, stagingRoot)
@@ -506,7 +507,7 @@ func TestHasAnyAuthHint_NoHintVars(t *testing.T) {
 
 func TestHasAnyAuthHint_HostEnvSet(t *testing.T) {
 	agentDef := agent.GetAgent("aider")
-	hostEnv := map[string]string{"OLLAMA_API_BASE": "http://localhost:11434"}
+	hostEnv := config.MapEnv{"OLLAMA_API_BASE": "http://localhost:11434"}
 	assert.True(t, HasAnyAuthHint(agentDef, nil, hostEnv))
 }
 

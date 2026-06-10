@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	yoloai "github.com/kstenerud/yoloai"
+	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -98,7 +99,7 @@ func TestParseDirArg_EnvVarExpansion(t *testing.T) {
 	home, err := os.UserHomeDir()
 	require.NoError(t, err)
 
-	env := map[string]string{"HOME": home}
+	env := config.MapEnv{"HOME": home}
 	result, err := ParseDirArg("${HOME}/somedir:copy", "/home/user", env)
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join(home, "somedir"), result.Path)

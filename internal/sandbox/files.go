@@ -53,7 +53,7 @@ func ImportFile(ctx context.Context, layout config.Layout, name, hostPath string
 			return "", fmt.Errorf("target already exists: %s (use --overwrite to replace it)", info.Name())
 		}
 	}
-	cpEnv := sysexec.Curated(layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+	cpEnv := layout.ExecEnv([]string{"PATH", "HOME", "TMPDIR"}, nil)
 	if err := copyTree(ctx, cpEnv, absSrc, dst); err != nil {
 		return "", fmt.Errorf("copy %s: %w", hostPath, err)
 	}
@@ -74,7 +74,7 @@ func ExportFile(ctx context.Context, layout config.Layout, name, rel, dst string
 			return fmt.Errorf("destination already exists: %s (use --overwrite to replace it)", dst)
 		}
 	}
-	cpEnv := sysexec.Curated(layout.Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+	cpEnv := layout.ExecEnv([]string{"PATH", "HOME", "TMPDIR"}, nil)
 	if err := copyTree(ctx, cpEnv, srcPath, dst); err != nil {
 		return fmt.Errorf("copy: %w", err)
 	}

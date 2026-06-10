@@ -199,7 +199,7 @@ env:
   MY_VAR: "${TEST_VAR}"
 `
 	_, layout := setupProfileDir(t, "env-profile", yaml)
-	layout.Env = map[string]string{"TEST_VAR": "expanded_value"}
+	layout = layout.WithEnv(map[string]string{"TEST_VAR": "expanded_value"})
 
 	cfg, err := LoadProfile(layout, "env-profile")
 	if err != nil {
@@ -997,7 +997,7 @@ setup:
   - "tailscale up --authkey=${TEST_AUTHKEY}"
 `
 	_, layout := setupProfileDir(t, "recipe-env", yaml)
-	layout.Env = map[string]string{"TEST_AUTHKEY": "secret123"}
+	layout = layout.WithEnv(map[string]string{"TEST_AUTHKEY": "secret123"})
 
 	cfg, err := LoadProfile(layout, "recipe-env")
 	if err != nil {

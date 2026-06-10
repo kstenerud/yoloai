@@ -18,7 +18,7 @@ import (
 func TestMain(m *testing.M) {
 	ctx := context.Background()
 
-	rt, err := New(ctx, config.Layout{Env: testutil.HostEnv()})
+	rt, err := New(ctx, config.Layout{}.WithEnv(testutil.GetCuratedHostEnv(testutil.IntegrationHostEnvVars)))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Podman unavailable, skipping integration tests: %v\n", err)
 		os.Exit(0)

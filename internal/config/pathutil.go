@@ -16,18 +16,18 @@ import (
 // homeDir is the user's home directory for ~ expansion; callers derive it
 // from layout.HomeDir (the conventional $HOME/.yoloai DataDir)
 // or pass an explicit home for testing.
-// env is the environment map used for ${VAR} expansion; use layout.Env.
+// env is the EnvLookup used for ${VAR} expansion; pass a Layout or MapEnv.
 // A nil env means any ${VAR} reference is an unset-variable error.
-func ExpandPath(path, homeDir string, env map[string]string) (string, error) {
+func ExpandPath(path, homeDir string, env EnvLookup) (string, error) {
 	path = ExpandTilde(path, homeDir)
 	return expandEnvBraced(path, env)
 }
 
-// expandEnvBraced expands ${VAR} references in s using the provided env map.
+// expandEnvBraced expands ${VAR} references in s using the provided EnvLookup.
 // Bare $VAR (without braces) is left as-is. Returns an error for
 // unset variables or unclosed ${.
-// A nil env map means any ${VAR} reference returns an "not set" error.
-func expandEnvBraced(s string, env map[string]string) (string, error) {
+// A nil env means any ${VAR} reference returns a "not set" error.
+func expandEnvBraced(s string, env EnvLookup) (string, error) {
 	var b strings.Builder
 	b.Grow(len(s))
 
@@ -50,7 +50,11 @@ func expandEnvBraced(s string, env map[string]string) (string, error) {
 		varName := s[i : i+end]
 		i += end + 1 // skip past "}"
 
-		val, ok := env[varName]
+		var val string
+		var ok bool
+		if env != nil {
+			val, ok = env.LookupEnv(varName)
+		}
 		if !ok {
 			return "", fmt.Errorf("environment variable %q is not set", varName)
 		}

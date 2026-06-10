@@ -80,7 +80,7 @@ func pinPodmanSocket() {
 	}
 	// Minimal curated env (real HOME, since this runs before per-test HOME
 	// override; PATH to find podman) — never the full ambient env (DEV §12).
-	probeEnv := sysexec.Curated(testutil.HostEnv(), []string{"PATH", "HOME"}, nil)
+	probeEnv := sysexec.Curated(testutil.GetCuratedHostEnv([]string{"PATH", "HOME"}), []string{"PATH", "HOME"}, nil)
 	out, err := sysexec.Command(probeEnv, "podman", "machine", "inspect", "--format", "{{.ConnectionInfo.PodmanSocket.Path}}").Output()
 	if err != nil {
 		return

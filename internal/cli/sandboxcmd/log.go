@@ -155,10 +155,10 @@ func parseSourceFlag(sourceFlag string) []yoloai.LogSource {
 }
 
 // terminalWidth returns the output width from the edge-resolved $COLUMNS,
-// falling back to 120. §12: reads the threaded Layout().Env snapshot rather
-// than re-pulling ambient os.Getenv from a subcommand.
+// falling back to 120. §12: reads the threaded snapshot rather than
+// re-pulling ambient os.Getenv from a subcommand.
 func terminalWidth() int {
-	if s := cliutil.Layout().Env["COLUMNS"]; s != "" {
+	if s, _ := cliutil.Layout().LookupEnv("COLUMNS"); s != "" {
 		var w int
 		if _, err := fmt.Sscanf(s, "%d", &w); err == nil && w > 0 {
 			return w

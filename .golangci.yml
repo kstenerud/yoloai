@@ -140,23 +140,36 @@ linters:
           msg: "use layout.HostGID (or fileutil.HostGID at the OS boundary); library code must not read the process GID directly — see internal/config/layout.go"
 
         # DEV §12 git-executor consolidation. The curated git subprocess env is
-        # built in exactly one place — internal/git (git.NewHost / git.NewSandbox).
-        # Every git invocation routes through *git.Git, so no other package needs
-        # to assemble a git env; a stray sysexec.GitEnv call signals a caller that
-        # bypassed the git executor.
+        # built in exactly one place — config.Layout.GitEnv (layout_env.go), the
+        # sealed accessor that git.NewHost / git.NewSandbox call. Every git
+        # invocation routes through *git.Git, so no other package needs to
+        # assemble a git env; a stray sysexec.GitEnv call signals a caller that
+        # bypassed the Layout accessor and the git executor.
         - pattern: "^sysexec\\.GitEnv$"
-          msg: "build git envs only via git.NewHost / git.NewSandbox in internal/git — DEV §12"
+          msg: "build git envs via layout.GitEnv() (used by git.NewHost / git.NewSandbox); do not call sysexec.GitEnv directly — DEV §12"
 
-        # DF19 test-edge env consolidation. The host environment is snapshotted
-        # in exactly one place — testutil.HostEnv — which curates nothing itself
-        # but is the single licensed os.Environ read; every consumer curates it
-        # (via sysexec.Curated, the runtime's execEnv allowlist, or GitEnv)
-        # before any subprocess sees it. New callers must be added to the
-        # exclusions.rules allowlist below: a deliberate, reviewed test-edge.
-        # (Calls inside the testutil package are unqualified `HostEnv()` and do
-        # not match this pattern, so testutil itself needs no exclusion.)
-        - pattern: "^testutil\\.HostEnv$"
-          msg: "the host environment is grabbed in exactly one place (testutil.HostEnv); new callers must be added to the .golangci.yml allowlist — a deliberate, reviewed test-edge (§12). Unit/production code must not read the ambient env."
+        # DF19 test-edge env consolidation. The host environment is read in
+        # exactly one place — testutil.GetCuratedHostEnv — which REQUIRES an
+        # allowlist, so a caller obtains only the vars it names, never the whole
+        # ambient map (curation at the source, not just before exec). New callers
+        # must be added to the exclusions.rules allowlist below: a deliberate,
+        # reviewed test-edge. (Calls inside the testutil package are unqualified
+        # `GetCuratedHostEnv()` and do not match this pattern, so testutil itself
+        # needs no exclusion.)
+        - pattern: "^testutil\\.GetCuratedHostEnv$"
+          msg: "the host environment is read in exactly one place (testutil.GetCuratedHostEnv), and only with an explicit allowlist; new callers must be added to the .golangci.yml allowlist — a deliberate, reviewed test-edge (§12). Unit/production code must not read the ambient env."
+
+        # DEV §12 Layout snapshot seal. config.Layout.env is unexported; the only
+        # methods that hand back the WHOLE snapshot are EnvSnapshot (embedder/
+        # diagnostics boundary) and EnvForExtension (the `yoloai x` passthrough).
+        # Both are deny-by-default so library code can't quietly re-acquire the
+        # full ambient map and bypass curation — it must use ExecEnv/CuratedEnv
+        # (allowlisted) or LookupEnv (one key). New callers go in the reviewed
+        # exclusions.rules allowlist below.
+        - pattern: "\\.EnvSnapshot$"
+          msg: "EnvSnapshot returns the whole env snapshot; it is only for the embedder/diagnostics boundary (filling ClientCreateOptions.Env or a bug report). Library code must use layout.ExecEnv/CuratedEnv (allowlisted) or LookupEnv — add reviewed callers to the .golangci.yml allowlist. DEV §12."
+        - pattern: "\\.EnvForExtension$"
+          msg: "EnvForExtension hands the full env to a user extension; it is the single sanctioned passthrough for `yoloai x`. Library code that shells out must use layout.ExecEnv with an allowlist — add reviewed callers to the .golangci.yml allowlist. DEV §12."
 
         # §12 ambient-configuration hardening (deny by default). Ambient
         # process state — environment, identity, host, process I/O — must be
@@ -287,15 +300,31 @@ linters:
       - path: "internal/fileutil/fileutil\\.go"
         linters:
           - forbidigo
-      # internal/git is THE site that assembles the curated git subprocess env
-      # (git.NewHost derives it via sysexec.GitEnv). Every other package routes
-      # git through *git.Git, so the sysexec.GitEnv ban applies everywhere else.
-      - path: "internal/git/"
+      # config.Layout.GitEnv (layout_env.go) is THE site that assembles the
+      # curated git subprocess env (it wraps sysexec.GitEnv over the sealed
+      # snapshot); git.NewHost / git.NewSandbox call layout.GitEnv(). Every other
+      # package routes git through *git.Git, so the sysexec.GitEnv ban applies
+      # everywhere else.
+      - path: "internal/config/layout_env\\.go"
         linters:
           - forbidigo
         text: "sysexec\\.GitEnv"
-      # DF19 testutil.HostEnv allowlist — the licensed test-edge callers of the
-      # one host-env snapshot. golangci-lint does not analyze //go:build
+      # Layout.EnvSnapshot allowlist — the reviewed embedder/diagnostics-boundary
+      # callers that forward the captured snapshot across the public API
+      # (ClientCreateOptions.Env) or dump it in a bug report. Path-scoped to the
+      # specific edge files; do NOT exclude whole dirs.
+      - path: "internal/cli/cliutil/client\\.go|internal/cli/lifecycle/new\\.go|internal/cli/sandboxcmd/bugreport\\.go"
+        linters:
+          - forbidigo
+        text: "\\.EnvSnapshot"
+      # Layout.EnvForExtension allowlist — the single `yoloai x` extension runner
+      # that hands the user's full edge env to their script (by design).
+      - path: "internal/cli/xcmd/x\\.go"
+        linters:
+          - forbidigo
+        text: "\\.EnvForExtension"
+      # DF19 testutil.GetCuratedHostEnv allowlist — the licensed test-edge callers
+      # of the one host-env read. golangci-lint does not analyze //go:build
       # integration files by default, so the ban only fires on non-tagged files;
       # this file is the sole non-tagged caller default `make check` flags. The
       # integration callers (docker/podman/sandbox *_test.go) are tagged and so
@@ -304,7 +333,7 @@ linters:
       - path: "internal/sandbox/create/fakeruntime_test\\.go"
         linters:
           - forbidigo
-        text: "testutil\\.HostEnv"
+        text: "testutil\\.GetCuratedHostEnv"
       # Tests may use the ambient-state patterns (temp files, stdio, identity,
       # etc.) — EXCEPT the full-ambient-env dumps (os.Environ / syscall.Environ)
       # and exec.Command*, which bind tests too (DEV §12 / D79: a subprocess gets
@@ -313,10 +342,11 @@ linters:
       # nothing, in test code as well). So this lists the patterns tests ARE
       # exempt from; os.Environ, syscall.Environ, and exec.Command are
       # deliberately ABSENT. The one licensed test-edge env read
-      # (testutil.HostEnv) carries its own inline nolint and immediately curates;
-      # its qualified callers are gated by the testutil.HostEnv forbid + the DF19
-      # allowlist above. When adding a new forbidigo pattern that tests should be
-      # exempt from, add its matched symbol here.
+      # (testutil.GetCuratedHostEnv) carries its own inline nolint and reads only
+      # an allowlist; its qualified callers are gated by the
+      # testutil.GetCuratedHostEnv forbid + the DF19 allowlist above. When adding
+      # a new forbidigo pattern that tests should be exempt from, add its matched
+      # symbol here.
       - path: "_test\\.go"
         linters:
           - forbidigo
@@ -327,8 +357,8 @@ linters:
       # testutil is the shared test-helper package; it gets the SAME exemption
       # surface as _test.go (NOT a blanket forbidigo pass) so os.Environ /
       # syscall.Environ / exec.Command are still banned here too. Its one
-      # licensed env-dump read (HostEnv, which feeds GitEnv and the
-      # integration layout) carries an inline nolint and curates immediately.
+      # licensed env read (GetCuratedHostEnv, which feeds GitEnv and the
+      # integration layout) carries an inline nolint and reads only an allowlist.
       - path: "internal/testutil/"
         linters:
           - forbidigo

@@ -53,8 +53,8 @@ func applyDirSuffix(result *yoloai.DirSpec, suffix, arg string) error {
 // default `:ro` for read-only). Aux `:copy` and `:overlay` are no
 // longer supported. Returns *UsageError pointing at the workarounds:
 // make the dir the workdir, mount as `:rw`, or run a separate sandbox.
-// env is the environment map for ${VAR} expansion; use layout.Env.
-func ParseAuxDirArg(arg, homeDir string, env map[string]string) (*yoloai.DirSpec, error) {
+// env is the EnvLookup for ${VAR} expansion; pass a Layout or MapEnv.
+func ParseAuxDirArg(arg, homeDir string, env config.EnvLookup) (*yoloai.DirSpec, error) {
 	d, err := ParseDirArg(arg, homeDir, env)
 	if err != nil {
 		return nil, err
@@ -84,11 +84,11 @@ func ParseAuxDirArg(arg, homeDir string, env map[string]string) (*yoloai.DirSpec
 // Default mode (no :copy or :rw) is determined by the caller
 // (workdir defaults to "copy", aux dirs default to "ro").
 // homeDir is used for ~ expansion; callers derive it from layout.HomeDir.
-// env is the environment map for ${VAR} expansion; use layout.Env.
+// env is the EnvLookup for ${VAR} expansion; pass a Layout or MapEnv.
 //
 // Use ParseAuxDirArg for the `-d` flag — it adds the workdir-only
 // validation enforced by Q-U.
-func ParseDirArg(arg, homeDir string, env map[string]string) (*yoloai.DirSpec, error) {
+func ParseDirArg(arg, homeDir string, env config.EnvLookup) (*yoloai.DirSpec, error) {
 	result := &yoloai.DirSpec{}
 
 	// Strip =<mount-path> first (before suffix parsing), since suffixes

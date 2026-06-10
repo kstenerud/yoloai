@@ -821,12 +821,12 @@ func TestGenerateProfile_ToolchainPaths(t *testing.T) {
 
 func TestSandboxEnv_Whitelist(t *testing.T) {
 	// Env vars that should be stripped, supplied via the threaded snapshot.
-	r := &Runtime{layout: config.Layout{Env: map[string]string{
+	r := &Runtime{layout: config.Layout{}.WithEnv(map[string]string{
 		"SSH_AUTH_SOCK":         "/tmp/ssh-agent.sock",
 		"AWS_SECRET_ACCESS_KEY": "super-secret",
 		"ANTHROPIC_API_KEY":     "sk-ant-test",
 		"GIT_AUTHOR_EMAIL":      "test@example.com",
-	}}}
+	})}
 
 	env := r.sandboxEnv()
 	envMap := make(map[string]string)
@@ -844,13 +844,13 @@ func TestSandboxEnv_Whitelist(t *testing.T) {
 }
 
 func TestSandboxEnv_PreservesWhitelisted(t *testing.T) {
-	r := &Runtime{layout: config.Layout{Env: map[string]string{
+	r := &Runtime{layout: config.Layout{}.WithEnv(map[string]string{
 		"PATH":     "/usr/bin:/bin",
 		"HOME":     "/Users/testuser",
 		"TERM":     "xterm-256color",
 		"LANG":     "en_US.UTF-8",
 		"LC_CTYPE": "UTF-8",
-	}}}
+	})}
 
 	env := r.sandboxEnv()
 	envMap := make(map[string]string)

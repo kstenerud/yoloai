@@ -67,7 +67,7 @@ func integrationSetup(t *testing.T) (*sandbox.Engine, context.Context) {
 	require.NoError(t, os.MkdirAll(layout.CacheDir(), 0750))
 	dockerrt.RecordBuildChecksum(layout, "")
 
-	rt, err := dockerrt.New(ctx, config.Layout{Env: testutil.HostEnv()})
+	rt, err := dockerrt.New(ctx, config.Layout{}.WithEnv(testutil.GetCuratedHostEnv(testutil.IntegrationHostEnvVars)))
 	require.NoError(t, err, "Docker must be running for integration tests")
 	t.Cleanup(func() { rt.Close() }) //nolint:errcheck // test cleanup
 

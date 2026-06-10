@@ -96,13 +96,13 @@ func (s *System) systemDiagnostics() SystemDiagnostics {
 		DiskUsageBytes: -1,
 	}
 
-	unameEnv := sysexec.Curated(s.layout.Env, []string{"PATH", "HOME"}, nil)
+	unameEnv := s.layout.ExecEnv([]string{"PATH", "HOME"}, nil)
 	if out, err := sysexec.Command(unameEnv, "uname", "-a").Output(); err == nil {
 		sys.Kernel = strings.TrimSpace(string(out))
 	}
 
 	for _, key := range diagnosticEnvVars {
-		if val := s.layout.Env[key]; val != "" {
+		if val, _ := s.layout.LookupEnv(key); val != "" {
 			sys.Env = append(sys.Env, EnvVar{Key: key, Value: val})
 		}
 	}

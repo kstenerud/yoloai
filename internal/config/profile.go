@@ -131,7 +131,7 @@ func ListProfiles(layout Layout) ([]string, error) {
 // profileOnlyHandler handles a profile-only YAML key (backend/workdir/directories)
 // — the keys ProfileConfig adds on top of the embedded YoloaiConfig. The common
 // keys are dispatched through yoloaiConfigHandlers in LoadProfile (IC2 fold).
-type profileOnlyHandler func(cfg *ProfileConfig, val *yaml.Node, env map[string]string) error
+type profileOnlyHandler func(cfg *ProfileConfig, val *yaml.Node, env EnvLookup) error
 
 // profileOnlyHandlers maps the three profile-only top-level keys to their handlers.
 var profileOnlyHandlers = map[string]profileOnlyHandler{
@@ -140,7 +140,7 @@ var profileOnlyHandlers = map[string]profileOnlyHandler{
 	"directories": handleProfileDirectories,
 }
 
-func handleProfileBackend(cfg *ProfileConfig, val *yaml.Node, env map[string]string) error {
+func handleProfileBackend(cfg *ProfileConfig, val *yaml.Node, env EnvLookup) error {
 	expanded, err := expandEnvBraced(val.Value, env)
 	if err != nil {
 		return err
@@ -149,7 +149,7 @@ func handleProfileBackend(cfg *ProfileConfig, val *yaml.Node, env map[string]str
 	return nil
 }
 
-func handleProfileWorkdir(cfg *ProfileConfig, val *yaml.Node, env map[string]string) error {
+func handleProfileWorkdir(cfg *ProfileConfig, val *yaml.Node, env EnvLookup) error {
 	if val.Kind != yaml.MappingNode {
 		return nil
 	}
@@ -173,7 +173,7 @@ func handleProfileWorkdir(cfg *ProfileConfig, val *yaml.Node, env map[string]str
 	return nil
 }
 
-func handleProfileDirectories(cfg *ProfileConfig, val *yaml.Node, env map[string]string) error {
+func handleProfileDirectories(cfg *ProfileConfig, val *yaml.Node, env EnvLookup) error {
 	if val.Kind != yaml.SequenceNode {
 		return nil
 	}
@@ -203,7 +203,7 @@ func handleProfileDirectories(cfg *ProfileConfig, val *yaml.Node, env map[string
 }
 
 // LoadProfile reads and parses a profile's config.yaml file.
-// layout.Env is used for ${VAR} expansion in config values.
+// The layout's threaded env snapshot is used for ${VAR} expansion in config values.
 //
 // Common keys are dispatched through the shared yoloaiConfigHandlers (onto the
 // embedded YoloaiConfig); the three profile-only keys go through
@@ -241,13 +241,13 @@ func LoadProfile(layout Layout, name string) (*ProfileConfig, error) {
 		key := root.Content[i].Value
 		val := root.Content[i+1]
 		if handler, ok := yoloaiConfigHandlers[key]; ok {
-			if err := handler(&cfg.YoloaiConfig, val, layout.Env); err != nil {
+			if err := handler(&cfg.YoloaiConfig, val, layout); err != nil {
 				return nil, err
 			}
 			continue
 		}
 		if handler, ok := profileOnlyHandlers[key]; ok {
-			if err := handler(cfg, val, layout.Env); err != nil {
+			if err := handler(cfg, val, layout); err != nil {
 				return nil, err
 			}
 		}
@@ -275,7 +275,7 @@ func LoadProfileConfig(layout Layout, name string) (*YoloaiConfig, error) {
 		return nil, fmt.Errorf("read profile config: %w", err)
 	}
 
-	override, err := parseConfigYAML(data, profileConfigPath, knownProfileKeys, layout.Env)
+	override, err := parseConfigYAML(data, profileConfigPath, knownProfileKeys, layout)
 	if err != nil {
 		return nil, err
 	}
@@ -377,7 +377,7 @@ func loadProfileLegacy(layout Layout, name string) (legacyProfileConfig, error) 
 
 	for i := 0; i < len(root.Content)-1; i += 2 {
 		if root.Content[i].Value == "extends" {
-			expanded, _ := expandEnvBraced(root.Content[i+1].Value, layout.Env)
+			expanded, _ := expandEnvBraced(root.Content[i+1].Value, layout)
 			return legacyProfileConfig{extends: expanded}, nil
 		}
 	}

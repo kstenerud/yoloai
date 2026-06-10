@@ -36,10 +36,10 @@ var tartEnvAllowlist = []string{"PATH", "TMPDIR", "SSL_CERT_FILE", "SSL_CERT_DIR
 // same allowlist and HOME/TART_HOME overrides as New() (DEV §12).
 func BaseAdminEnv(layout config.Layout) []string {
 	tartHome := filepath.Join(layout.HomeDir, ".tart")
-	if v := layout.Env["TART_HOME"]; v != "" {
+	if v, _ := layout.LookupEnv("TART_HOME"); v != "" {
 		tartHome = v
 	}
-	return sysexec.Curated(layout.Env, tartEnvAllowlist, map[string]string{
+	return layout.ExecEnv(tartEnvAllowlist, map[string]string{
 		"HOME":      layout.HomeDir,
 		"TART_HOME": tartHome,
 	})
@@ -237,11 +237,11 @@ func New(_ context.Context, layout config.Layout) (*Runtime, error) {
 	// otherwise default it to <HomeDir>/.tart — which equals the real ~/.tart in
 	// production and an isolated temp store under test. This is the DF19 fix.
 	tartHome := filepath.Join(layout.HomeDir, ".tart")
-	if v := layout.Env["TART_HOME"]; v != "" {
+	if v, _ := layout.LookupEnv("TART_HOME"); v != "" {
 		tartHome = v
 	}
 
-	execEnv := sysexec.Curated(layout.Env, tartEnvAllowlist, map[string]string{
+	execEnv := layout.ExecEnv(tartEnvAllowlist, map[string]string{
 		"HOME":      layout.HomeDir,
 		"TART_HOME": tartHome,
 	})

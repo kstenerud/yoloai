@@ -20,14 +20,14 @@ func SetTerminalTitle(title string) {
 	fmt.Fprintf(os.Stdout, "\033]0;%s\007", title) //nolint:errcheck // best-effort terminal title
 
 	// If inside a host tmux session, also set the window name. §12: read the
-	// edge-resolved env snapshot, not ambient os.Getenv — the same Layout().Env
-	// the tmux subprocess env is built from just below.
-	if Layout().Env["TMUX"] == "" {
+	// edge-resolved env snapshot, not ambient os.Getenv — the same threaded
+	// snapshot the tmux subprocess env is built from just below.
+	if v, _ := Layout().LookupEnv("TMUX"); v == "" {
 		return
 	}
 	// tmuxEnv: the layout-derived env for tmux subprocesses. PATH and HOME
 	// suffice — the socket is passed via -S, not via $HOME/.tmux.
-	tmuxEnv := sysexec.Curated(Layout().Env, []string{"PATH", "HOME", "TMPDIR"}, nil)
+	tmuxEnv := Layout().ExecEnv([]string{"PATH", "HOME", "TMPDIR"}, nil)
 	if title != "" {
 		// Disable automatic-rename (tmux tracking the foreground
 		// process name) and allow-rename (programs sending escape

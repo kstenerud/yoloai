@@ -149,7 +149,7 @@ func New(_ context.Context, layout config.Layout, homeDir string) (*Runtime, err
 		return nil, yoerrors.NewDependencyError("sandbox-exec not found: %w", err)
 	}
 
-	execEnv := sysexec.Curated(layout.Env, seatbeltExecAllowlist, nil)
+	execEnv := layout.ExecEnv(seatbeltExecAllowlist, nil)
 	return &Runtime{
 		sandboxExecBin: sandboxExecBin,
 		layout:         layout,
@@ -594,27 +594,26 @@ func (r *Runtime) killByPID(sandboxPath string) {
 }
 
 // sandboxEnv returns a filtered subset of the caller's threaded environment
-// snapshot (layout.Env), passing only safe OS/locale variables. Credentials
-// like SSH_AUTH_SOCK, AWS_SECRET_ACCESS_KEY, etc. are excluded. The entrypoint
-// injects agent API keys from the secrets directory; users can opt in to
-// additional env vars via the config env: section. The library reads
-// layout.Env, never os.Environ (§12) — the CLI captures the host env once at
-// its boundary and threads it in.
+// snapshot, passing only safe OS/locale variables via layout.ExecEnv over the
+// sandboxEnvAllowlist. Credentials like SSH_AUTH_SOCK, AWS_SECRET_ACCESS_KEY,
+// etc. are excluded. The entrypoint injects agent API keys from the secrets
+// directory; users can opt in to additional env vars via the config env: section.
+// The curated subset is built from the threaded snapshot, never os.Environ (§12) —
+// the CLI captures the host env once at its boundary and threads it in.
 func (r *Runtime) sandboxEnv() []string {
-	allowed := map[string]bool{
-		"PATH": true, "HOME": true, "USER": true, "LOGNAME": true,
-		"SHELL": true, "TERM": true, "TMPDIR": true,
-		"LANG": true, "LC_ALL": true, "LC_CTYPE": true,
-		"LC_COLLATE": true, "LC_MESSAGES": true, "LC_MONETARY": true,
-		"LC_NUMERIC": true, "LC_TIME": true,
-	}
-	var filtered []string
-	for k, v := range r.layout.Env {
-		if allowed[k] {
-			filtered = append(filtered, k+"="+v)
-		}
-	}
-	return filtered
+	return r.layout.ExecEnv(sandboxEnvAllowlist, nil)
+}
+
+// sandboxEnvAllowlist names the safe OS/locale vars passed into the seatbelt
+// sandbox. Credentials (SSH_AUTH_SOCK, AWS_SECRET_ACCESS_KEY, ...) are excluded;
+// the entrypoint injects agent API keys from the secrets dir, and users opt in
+// to extra vars via the config env: section.
+var sandboxEnvAllowlist = []string{
+	"PATH", "HOME", "USER", "LOGNAME",
+	"SHELL", "TERM", "TMPDIR",
+	"LANG", "LC_ALL", "LC_CTYPE",
+	"LC_COLLATE", "LC_MESSAGES", "LC_MONETARY",
+	"LC_NUMERIC", "LC_TIME",
 }
 
 // waitForTmux polls until the tmux session appears via the per-sandbox socket.

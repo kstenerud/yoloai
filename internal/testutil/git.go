@@ -19,9 +19,10 @@ import (
 // disabled global/system config. It deliberately does NOT hand git the full
 // ambient environment — that would re-introduce the inheritance DEV §12 exists
 // to prevent and make tests depend on the developer's ~/.gitconfig. The single
-// os.Environ read happens in HostEnv (the test edge); this allowlists PATH.
+// os.Environ read happens in GetCuratedHostEnv (the test edge), which already
+// narrows to PATH here.
 func GitEnv() []string {
-	return sysexec.Curated(HostEnv(), []string{"PATH"}, map[string]string{
+	return sysexec.Curated(GetCuratedHostEnv([]string{"PATH"}), []string{"PATH"}, map[string]string{
 		"GIT_CONFIG_GLOBAL":   "/dev/null",
 		"GIT_CONFIG_SYSTEM":   "/dev/null",
 		"GIT_AUTHOR_NAME":     "yoloai-test",

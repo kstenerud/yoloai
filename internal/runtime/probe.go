@@ -9,6 +9,20 @@ import (
 	"fmt"
 )
 
+// DaemonEnvVars names the host-env keys that container-backend probes and
+// clients consult for daemon-socket discovery — the union of what the Docker
+// SDK config reads (context/TLS/host) and what Podman socket discovery reads.
+// Callers curate their threaded snapshot to this set (Layout.CuratedEnv) before
+// handing it to Probe / SelectBackend / SelectContainerBackend, so backend
+// selection sees the daemon settings without the whole ambient env leaking in
+// (§12). Curating to a superset is safe: each backend reads only its own keys,
+// and CuratedEnv drops any key absent from the snapshot.
+var DaemonEnvVars = []string{
+	"DOCKER_HOST", "DOCKER_CONFIG", "DOCKER_CONTEXT",
+	"DOCKER_CERT_PATH", "DOCKER_TLS_VERIFY", "DOCKER_API_VERSION",
+	"CONTAINER_HOST", "XDG_RUNTIME_DIR", "HOME",
+}
+
 // Probe reports whether the named backend is usable right now. Returns
 // (false, "<reason>") when the backend is not registered on this platform
 // or its Probe says no. A backend whose descriptor has no Probe is treated

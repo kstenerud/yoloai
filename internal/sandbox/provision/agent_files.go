@@ -27,8 +27,8 @@ import (
 // Files that already exist in agent-runtime are never overwritten (SeedFiles win).
 // Returns nil if agentFiles is nil or the agent has no StateDir.
 // homeDir is used to expand leading "~" in configured paths.
-// env is the environment map for ${VAR} expansion; use layout.Env.
-func CopyAgentFiles(agentDef *agent.Definition, sandboxDir string, agentFiles *config.AgentFilesConfig, homeDir string, env map[string]string) error {
+// env is the EnvLookup for ${VAR} expansion; pass a Layout or MapEnv.
+func CopyAgentFiles(agentDef *agent.Definition, sandboxDir string, agentFiles *config.AgentFilesConfig, homeDir string, env config.EnvLookup) error {
 	if agentFiles == nil {
 		return nil
 	}

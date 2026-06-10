@@ -37,7 +37,7 @@ func TestMain(m *testing.M) {
 	var rt *dockerrt.Runtime
 	var dockerErr error
 	step("connecting to docker", func() {
-		rt, dockerErr = dockerrt.New(ctx, config.Layout{Env: testutil.HostEnv()})
+		rt, dockerErr = dockerrt.New(ctx, config.Layout{}.WithEnv(testutil.GetCuratedHostEnv(testutil.IntegrationHostEnvVars)))
 	})
 	if dockerErr != nil {
 		fmt.Fprintf(os.Stderr, "Docker unavailable, skipping integration tests: %v\n", dockerErr)

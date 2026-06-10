@@ -119,8 +119,7 @@ func NewClient(ctx context.Context, opts ClientCreateOptions) (*Client, error) {
 		return nil, yoerrors.NewUsageError("yoloai: invalid ClientCreateOptions.Principal: %v", err)
 	}
 
-	layout := config.NewLayoutFor(opts.DataDir, opts.HomeDir).WithPrincipal(principal)
-	layout.Env = opts.Env
+	layout := config.NewLayoutFor(opts.DataDir, opts.HomeDir).WithPrincipal(principal).WithEnv(opts.Env)
 	layout.SecretsStagingDir = opts.SecretsStagingDir
 
 	logger := opts.Logger
@@ -266,6 +265,6 @@ func resolveBackendFromConfig(ctx context.Context, layout config.Layout) runtime
 	if cfg, err := config.LoadDefaultsConfig(layout); err == nil {
 		preferred = runtime.BackendType(cfg.ContainerBackend)
 	}
-	backend, _ := runtime.SelectBackend(ctx, preferred, "", "", layout.Env)
+	backend, _ := runtime.SelectBackend(ctx, preferred, "", "", layout.CuratedEnv(runtime.DaemonEnvVars))
 	return backend
 }

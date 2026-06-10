@@ -152,7 +152,7 @@ func (r *Runtime) buildDockerImage(ctx context.Context, output io.Writer, logger
 	// dangling intermediate image per Dockerfile step on the containerd image
 	// store, which makes `system prune` churn forever (see
 	// backend-idiosyncrasies.md).
-	buildCmd := sysexec.CommandContext(ctx, dockerrt.CuratedBuildEnv(r.layout.Env), dockerBin, "build", "-t", imageRef, "-f", "Dockerfile", "-")
+	buildCmd := sysexec.CommandContext(ctx, dockerrt.CuratedBuildEnv(r.layout), dockerBin, "build", "-t", imageRef, "-f", "Dockerfile", "-")
 	buildCmd.Stdout = output
 	buildCmd.Stderr = output
 	buildCmd.Stdin = buildCtx
