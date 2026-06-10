@@ -32,7 +32,7 @@ DOCKER_HOST_ENV := $(DOCKER_HOST)
 DOCKER_HOST_RESOLVED = $(if $(DOCKER_HOST_ENV),$(DOCKER_HOST_ENV),$(shell docker context inspect --format '{{.Endpoints.docker.Host}}' 2>/dev/null))
 integration e2e base-image smoketest smoketest-full: export DOCKER_HOST = $(DOCKER_HOST_RESOLVED)
 
-.PHONY: build test fmt lint tidy-check govulncheck hadolint actionlint check cover integration e2e integration-podman integration-seatbelt integration-tart python-test python-typecheck ensure-python-venv setup-dev-python smoketest smoketest-full releasetest setcap clean
+.PHONY: build test fmt lint vet-tagged tidy-check govulncheck hadolint actionlint check cover integration e2e integration-podman integration-seatbelt integration-tart python-test python-typecheck ensure-python-venv setup-dev-python smoketest smoketest-full releasetest setcap clean
 
 build: $(BINARY)
 
@@ -82,8 +82,17 @@ hadolint:
 actionlint:
 	go run github.com/rhysd/actionlint/cmd/actionlint@latest
 
+## vet-tagged: typecheck every _test.go behind the integration & e2e build tags
+## WITHOUT running them. The default build (and `go build -tags ...`) skips
+## tagged test files, so a broken reference in an integration/e2e test — e.g. a
+## deleted helper — used to surface only in `make releasetest` (which spins up
+## daemons/VMs). `go vet` compiles the tagged test binaries but never executes
+## them, so this stays hermetic and fast while catching those build breaks early.
+vet-tagged:
+	go vet -tags 'integration e2e' ./...
+
 ## check: run all CI checks locally (same as PR checks)
-check: lint tidy-check hadolint actionlint test python-test
+check: lint vet-tagged tidy-check hadolint actionlint test python-test
 
 ## ensure-python-venv: provision the uv-managed venv on demand (idempotent).
 ## When uv is present this syncs the lockfile-pinned tools into .venv; when uv
