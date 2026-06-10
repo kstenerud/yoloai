@@ -73,6 +73,16 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 - **Fix:** isolate real backends in mutating system tests per [testing-principles §6](../principles/testing-principles.md): `t.Setenv("TART_HOME", t.TempDir())` and point `DOCKER_HOST`/`CONTAINER_HOST` at a bogus socket so the backend sweep hits empty/unavailable stores, while the host-side sandbox-dir classification (the test's actual subject) still runs against the temp layout. Apply in `newTestClient` (covers all system tests) or the prune tests specifically; verify it doesn't change the Info/Doctor tests' expectations.
 - **Pointer:** `system_test.go` (`TestPrune_ExecutesClassifications`), `profile_test.go::newTestClient`, `system.go::Prune` (backend sweep).
 
+### DF20 — Stale-base detection flags the *wanted* base as "superseded" when `tart.image` pins a non-default image
+
+- **Discovered:** 2026-06-10 · **Workstream:** Apple `container` backend planning (side-discovery while diagnosing a leftover config override)
+- **Severity:** MEDIUM (actively recommends deleting a wanted artifact; gated behind a dry-run preview + `y/N`, so not silent data loss)
+- **Disposition:** PARKED
+- **Description:** `staleBaseImagesFrom` classifies every installed Tart base whose repo ≠ the *current* repo as "superseded (safe to remove, no rebuild)", where current = `baseImageRepo(r.resolveBaseImage(""))` — and `resolveBaseImage` honors the `tart.image` config override. So an explicit `tart.image` pin makes the host-matched `macos-<codename>-base` look superseded, and `yoloai doctor` / `yoloai system prune --stale-bases` offer to delete the base the user actually uses. Observed 2026-06-10: a leftover `tart.image: ghcr.io/cirruslabs/macos-tahoe-xcode:26.5` (from the `-xcode` A/B) made `prune --stale-bases` offer to remove the real `macos-tahoe-base` (29.8 GiB) as "safe, no rebuild." Technically consistent with the override, but a sharp edge — nothing surfaces *which* configured image drives the "current" determination, so a config typo or leftover reads as a free cleanup.
+- **Fix:** surface the configured `tart.image` (and the resolved "current base repo") in the `doctor` / `prune --stale-bases` output so the user can see *why* a base is flagged; and/or treat an explicit non-`-base` override specially — don't label the host-matched `-base` "no rebuild, safe to remove" when the only reason it is non-current is an explicit override (warn instead, or exclude it from the stale set). Keep the genuine cross-macOS supersede case (old codename after an OS upgrade) working.
+- **Trigger:** the next time a custom `tart.image` is set in earnest (xcode image-mode adoption, pinning an older/newer macOS, etc.) — before that ships broadly, make the stale-base output name the driving config so it can never recommend deleting a wanted base.
+- **Pointer:** `internal/runtime/tart/diskusage.go:139` (`staleBaseImagesFrom`; `currentRepo` from `resolveBaseImage("")`), `internal/runtime/tart/stalebases.go:23` (`PruneStaleBases`); the `doctor` / `system prune --stale-bases` surfacing.
+
 ## Policy origin
 
 Established in [architecture-remediation.md](../archive/plans/architecture-remediation.md) and inherited by [layering-refactor.md](../archive/plans/layering-refactor.md).
