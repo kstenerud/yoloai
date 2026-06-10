@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/kstenerud/yoloai/internal/config"
+	"github.com/kstenerud/yoloai/internal/testutil"
 )
 
 // TestMain connects to Podman once and verifies the base image exists before
@@ -17,7 +18,7 @@ import (
 func TestMain(m *testing.M) {
 	ctx := context.Background()
 
-	rt, err := New(ctx, config.Layout{Env: envFromOS()})
+	rt, err := New(ctx, config.Layout{Env: testutil.HostEnv()})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Podman unavailable, skipping integration tests: %v\n", err)
 		os.Exit(0)
