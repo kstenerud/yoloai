@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -15,6 +14,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 	"github.com/kstenerud/yoloai/internal/config"
 	dockerrt "github.com/kstenerud/yoloai/internal/runtime/docker"
+	"github.com/kstenerud/yoloai/internal/sysexec"
 	"github.com/kstenerud/yoloai/internal/testutil"
 )
 
@@ -78,7 +78,10 @@ func pinPodmanSocket() {
 	if testutil.IntegrationBackendType() != "podman" {
 		return
 	}
-	out, err := exec.Command("podman", "machine", "inspect", "--format", "{{.ConnectionInfo.PodmanSocket.Path}}").Output() //nolint:gosec // trusted binary path
+	// Minimal curated env (real HOME, since this runs before per-test HOME
+	// override; PATH to find podman) — never the full ambient env (DEV §12).
+	probeEnv := sysexec.Curated(testutil.HostEnv(), []string{"PATH", "HOME"}, nil)
+	out, err := sysexec.Command(probeEnv, "podman", "machine", "inspect", "--format", "{{.ConnectionInfo.PodmanSocket.Path}}").Output()
 	if err != nil {
 		return
 	}

@@ -16,11 +16,42 @@ import (
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 	"github.com/kstenerud/yoloai/internal/config"
 	dockerrt "github.com/kstenerud/yoloai/internal/runtime/docker"
+	"github.com/kstenerud/yoloai/internal/sysexec"
+	"github.com/kstenerud/yoloai/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
 
 // yoloaiBin is the path to the compiled binary, set once in TestMain.
 var yoloaiBin string
+
+// sutEnv is the curated environment handed to the yoloai binary under test:
+// PATH/HOME/TMPDIR + daemon-discovery + TLS/locale/proxy, snapshotted from the
+// process env at call time (e2eSetup points HOME at a temp dir via t.Setenv, so
+// a fresh snapshot here captures it). Never the full ambient env — the SUT gets
+// only what it needs and curates its own subprocesses downstream (DEV §12).
+func sutEnv() []string {
+	return sysexec.Curated(testutil.HostEnv(), []string{
+		"PATH", "HOME", "TMPDIR",
+		"DOCKER_HOST", "DOCKER_CERT_PATH", "DOCKER_TLS_VERIFY", "DOCKER_API_VERSION", "DOCKER_CONFIG",
+		"CONTAINER_HOST", "XDG_RUNTIME_DIR",
+		"SSL_CERT_FILE", "SSL_CERT_DIR",
+		"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy",
+		"LANG", "LC_ALL", "LC_CTYPE",
+	}, nil)
+}
+
+// goBuildEnv is the curated environment for the `go build` of the SUT: PATH/HOME
+// plus the Go toolchain vars a build legitimately needs (module cache, proxy,
+// flags, cross-compile target), never the full ambient env (DEV §12).
+func goBuildEnv() []string {
+	return sysexec.Curated(testutil.HostEnv(), []string{
+		"PATH", "HOME", "TMPDIR",
+		"GOPATH", "GOCACHE", "GOMODCACHE", "GOROOT", "GOBIN",
+		"GOFLAGS", "GOPROXY", "GOPRIVATE", "GONOSUMCHECK", "GONOSUMDB", "GOSUMDB", "GOINSECURE",
+		"GOTOOLCHAIN", "GO111MODULE", "GOOS", "GOARCH", "GOARM", "GOAMD64", "GOEXPERIMENT",
+		"CGO_ENABLED", "CC", "CXX",
+	}, nil)
+}
 
 // TestMain compiles the yoloai binary once before all E2E tests run.
 func TestMain(m *testing.M) {
@@ -41,7 +72,7 @@ func TestMain(m *testing.M) {
 	defer os.RemoveAll(tmp)
 
 	yoloaiBin = filepath.Join(tmp, "yoloai")
-	build := exec.Command("go", "build", "-o", yoloaiBin, "./cmd/yoloai") //nolint:gosec // G204: known command
+	build := sysexec.Command(goBuildEnv(), "go", "build", "-o", yoloaiBin, "./cmd/yoloai")
 	build.Dir = modRoot
 	if out, err := build.CombinedOutput(); err != nil {
 		panic("build failed: " + string(out))
@@ -68,7 +99,7 @@ func findModuleRoot(dir string) string {
 // Returns stdout, stderr, and the exit code.
 func runYoloai(t *testing.T, args ...string) (stdout, stderr string, exitCode int) {
 	t.Helper()
-	cmd := exec.Command(yoloaiBin, args...) //nolint:gosec // G204: test helper, path set in TestMain
+	cmd := sysexec.Command(sutEnv(), yoloaiBin, args...)
 	var outBuf, errBuf bytes.Buffer
 	cmd.Stdout = &outBuf
 	cmd.Stderr = &errBuf
@@ -140,7 +171,7 @@ func e2eSetup(t *testing.T) string {
 
 	// Initialize git so yoloai doesn't warn about uncommitted changes.
 	gitInit := func(args ...string) {
-		cmd := exec.Command("git", args...) //nolint:gosec // G204: test helper
+		cmd := sysexec.Command(testutil.GitEnv(), "git", args...)
 		cmd.Dir = projectDir
 		_ = cmd.Run()
 	}

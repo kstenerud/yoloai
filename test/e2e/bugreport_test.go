@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/kstenerud/yoloai/internal/sysexec"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -18,7 +19,7 @@ import (
 // Returns stdout, stderr, and the exit code.
 func runYoloaiInDir(t *testing.T, dir string, args ...string) (stdout, stderr string, exitCode int) {
 	t.Helper()
-	cmd := exec.Command(yoloaiBin, args...) //nolint:gosec // G204: test helper, path set in TestMain
+	cmd := sysexec.Command(sutEnv(), yoloaiBin, args...)
 	cmd.Dir = dir
 	var outBuf, errBuf bytes.Buffer
 	cmd.Stdout = &outBuf
