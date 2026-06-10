@@ -102,7 +102,12 @@ func (r *Runtime) buildBaseImage(ctx context.Context, layout config.Layout, outp
 
 	logger.Debug("building yoloai-base image via BuildKit")
 
-	cmd := sysexec.CommandContext(ctx, layout.Env().EnvForDockerBuild(), r.binaryName, "build", "-t", "yoloai-base", "-")
+	// --provenance=false / --sbom=false: build a plain single-platform image, not a
+	// BuildKit attestation manifest list. On Docker Desktop's containerd image store
+	// the attestation index is the prime suspect for yoloai-base vanishing between
+	// runs (forcing a full rebuild every time); a local base image has no use for
+	// SBOM/provenance attestations anyway. Harmless on the classic overlay2 store.
+	cmd := sysexec.CommandContext(ctx, layout.Env().EnvForDockerBuild(), r.binaryName, "build", "--provenance=false", "--sbom=false", "-t", "yoloai-base", "-")
 	cmd.Stdin = buildCtx
 	cmd.Stdout = output
 	cmd.Stderr = output
@@ -185,7 +190,10 @@ func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir string, tag s
 		return fmt.Errorf("create profile build context: %w", err)
 	}
 
-	args := []string{"build", "-t", tag}
+	// --provenance=false / --sbom=false: see buildBaseImage — keep profile images a
+	// plain single-platform image so the containerd image store doesn't tag an
+	// attestation index that the existence check can lose.
+	args := []string{"build", "--provenance=false", "--sbom=false", "-t", tag}
 	for _, s := range secrets {
 		args = append(args, "--secret", s)
 	}
