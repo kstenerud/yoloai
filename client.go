@@ -57,6 +57,7 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime"
+	_ "github.com/kstenerud/yoloai/internal/runtime/apple"    // register backend
 	_ "github.com/kstenerud/yoloai/internal/runtime/docker"   // register backend
 	_ "github.com/kstenerud/yoloai/internal/runtime/podman"   // register backend
 	_ "github.com/kstenerud/yoloai/internal/runtime/seatbelt" // register backend
