@@ -411,11 +411,53 @@ func (r *Runtime) buildBaseImage(ctx context.Context, layout config.Layout, outp
 	return nil
 }
 
-// Prune sweeps orphaned apple containers. Not yet implemented — a no-op is safe
-// (reports nothing, never deletes a user's container); the orphan sweep lands
-// once the instance-naming convention is wired through.
-func (r *Runtime) Prune(_ context.Context, _ []string, _ bool, _ io.Writer) (runtime.PruneResult, error) {
-	return runtime.PruneResult{}, nil
+// Prune sweeps orphaned apple containers — `yoloai-*` instances (scoped to this
+// runtime's principal) that no longer correspond to a known sandbox. Mirrors the
+// tart/docker sweep: list, filter to this principal's prefix, skip known, then
+// stop+delete the rest. The base image is an OCI image (not a container), so it
+// never appears in `container list` and needs no special exclusion.
+func (r *Runtime) Prune(ctx context.Context, knownInstances []string, dryRun bool, output io.Writer) (runtime.PruneResult, error) {
+	out, err := r.runContainer(ctx, "list", "--all", "--quiet")
+	if err != nil {
+		return runtime.PruneResult{}, fmt.Errorf("list containers: %w", err)
+	}
+
+	// Scope the sweep to this runtime's principal so a test or secondary
+	// principal never reclaims containers owned by a different principal (DF19).
+	prefix := config.InstancePrefix(r.layout.Principal)
+
+	var result runtime.PruneResult
+	for _, name := range orphanInstances(out, prefix, knownInstances) {
+		if !dryRun {
+			// delete --force handles a running container; stop first is best-effort.
+			_, _ = r.runContainer(ctx, "stop", name)
+			if _, derr := r.runContainer(ctx, "delete", "--force", name); derr != nil && !errors.Is(derr, runtime.ErrNotFound) {
+				fmt.Fprintf(output, "Warning: failed to delete container %s: %v\n", name, derr) //nolint:errcheck // best-effort output
+				continue
+			}
+		}
+		result.Items = append(result.Items, runtime.PruneItem{Kind: "container", Name: name})
+	}
+	return result, nil
+}
+
+// orphanInstances parses `container list --quiet` output and returns the names
+// belonging to this principal (matching prefix) that aren't in known — the
+// orphans to sweep. Pure, so the filtering is testable without the live CLI.
+func orphanInstances(listOutput, prefix string, known []string) []string {
+	knownSet := make(map[string]bool, len(known))
+	for _, n := range known {
+		knownSet[n] = true
+	}
+	var out []string
+	for line := range strings.SplitSeq(listOutput, "\n") {
+		name := strings.TrimSpace(line)
+		if name == "" || !strings.HasPrefix(name, prefix) || knownSet[name] {
+			continue
+		}
+		out = append(out, name)
+	}
+	return out
 }
 
 // --- platform helpers ---

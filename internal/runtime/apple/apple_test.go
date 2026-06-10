@@ -9,6 +9,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestOrphanInstances locks the Prune sweep's filter: only this-principal
+// (prefix-matching) names that aren't known are orphans; non-prefixed names,
+// known names, and blank/whitespace lines are skipped.
+func TestOrphanInstances(t *testing.T) {
+	list := "yoloai-alpha\nyoloai-beta\nother-thing\n\n  yoloai-gamma  \n"
+	got := orphanInstances(list, "yoloai-", []string{"yoloai-beta"})
+	assert.Equal(t, []string{"yoloai-alpha", "yoloai-gamma"}, got)
+
+	// Everything known or non-matching → no orphans.
+	assert.Empty(t, orphanInstances("yoloai-x\nother\n", "yoloai-", []string{"yoloai-x"}))
+	assert.Empty(t, orphanInstances("", "yoloai-", nil))
+}
+
 // TestRegistered confirms the backend's init() registered a sane descriptor —
 // vm-tier, darwin/arm64, with the verified capability flags.
 func TestRegistered(t *testing.T) {
