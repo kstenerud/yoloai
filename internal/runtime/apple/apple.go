@@ -3,7 +3,9 @@
 package apple
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -157,33 +159,189 @@ func (r *Runtime) AttachCommand(tmuxSocket string, _ int, _ int, _ runtime.Isola
 	return []string{containerBin, "exec", "-i", "-t", "INSTANCE", "sh", "-lc", tmux + " attach"}
 }
 
-// --- Lifecycle / exec: filled in by the next step-2 increment. ---
+// Create creates (but does not start) a container from the InstanceConfig. The
+// apiserver holds the container record, so — unlike Tart — we don't persist an
+// instance.json; Start just references the name. The image's ENTRYPOINT runs as
+// the workload (we pass no command), matching the docker backend.
+func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error {
+	// Pre-clear any stale container with this name from a previous failed run.
+	_, _ = r.runContainer(ctx, "delete", "--force", cfg.Name)
+
+	args := []string{"create", "--name", cfg.Name}
+	if cfg.WorkingDir != "" {
+		args = append(args, "-w", cfg.WorkingDir)
+	}
+	for _, e := range cfg.ContainerEnv {
+		args = append(args, "-e", e)
+	}
+	for k, v := range cfg.Labels {
+		args = append(args, "-l", k+"="+v)
+	}
+	for _, c := range cfg.CapAdd {
+		args = append(args, "--cap-add", normalizeCap(c))
+	}
+	for _, m := range cfg.Mounts {
+		spec := fmt.Sprintf("type=virtiofs,source=%s,target=%s", m.HostPath, m.ContainerPath)
+		if m.ReadOnly {
+			spec += ",readonly"
+		}
+		args = append(args, "--mount", spec)
+	}
+	for _, p := range cfg.Ports {
+		args = append(args, "-p", fmt.Sprintf("%d:%d", p.HostPort, p.ContainerPort))
+	}
+	if cfg.UseInit {
+		args = append(args, "--init")
+	}
+	if cfg.Resources != nil {
+		if cfg.Resources.Memory > 0 {
+			args = append(args, "-m", strconv.FormatInt(cfg.Resources.Memory, 10))
+		}
+		if cpus := cfg.Resources.NanoCPUs / 1_000_000_000; cpus > 0 {
+			args = append(args, "-c", strconv.FormatInt(cpus, 10))
+		}
+	}
+	// NetworkMode "isolated" is enforced by in-guest iptables (entrypoint.py),
+	// not a container network, so we leave networking at the per-VM default —
+	// same as the docker backend.
+	args = append(args, cfg.ImageRef)
+
+	if _, err := r.runContainer(ctx, args...); err != nil {
+		return fmt.Errorf("create container: %w", err)
+	}
+	return nil
+}
+
+// Start starts a created/stopped container. Idempotent: an already-running
+// container returns nil; a missing one returns ErrNotFound.
+func (r *Runtime) Start(ctx context.Context, name string) error {
+	if _, err := r.runContainer(ctx, "start", name); err != nil {
+		info, ierr := r.Inspect(ctx, name)
+		switch {
+		case errors.Is(ierr, runtime.ErrNotFound):
+			return runtime.ErrNotFound
+		case ierr == nil && info.Running:
+			return nil // already running
+		default:
+			return fmt.Errorf("start container: %w", err)
+		}
+	}
+	return nil
+}
+
+// Stop stops a running container. Returns nil if already stopped or absent.
+func (r *Runtime) Stop(ctx context.Context, name string) error {
+	if _, err := r.runContainer(ctx, "stop", name); err != nil {
+		if info, ierr := r.Inspect(ctx, name); ierr != nil || !info.Running {
+			return nil //nolint:nilerr // best-effort: an absent/already-stopped container is a successful Stop
+		}
+		return fmt.Errorf("stop container: %w", err)
+	}
+	return nil
+}
+
+// Remove deletes a container (force, so a running one is removed too). Returns
+// nil if it's already gone.
+func (r *Runtime) Remove(ctx context.Context, name string) error {
+	if _, err := r.runContainer(ctx, "delete", "--force", name); err != nil {
+		if _, ierr := r.Inspect(ctx, name); errors.Is(ierr, runtime.ErrNotFound) {
+			return nil //nolint:nilerr // best-effort: an already-removed container is a successful Remove
+		}
+		return fmt.Errorf("remove container: %w", err)
+	}
+	return nil
+}
+
+// Inspect returns the container's running state. The `container inspect` JSON is
+// an array; state lives at [0].status.state (AC6: status is nested, not flat).
+func (r *Runtime) Inspect(ctx context.Context, name string) (runtime.InstanceInfo, error) {
+	out, err := r.runContainer(ctx, "inspect", name)
+	if err != nil {
+		return runtime.InstanceInfo{}, runtime.ErrNotFound
+	}
+	var arr []struct {
+		Status struct {
+			State string `json:"state"`
+		} `json:"status"`
+	}
+	if err := json.Unmarshal([]byte(out), &arr); err != nil || len(arr) == 0 {
+		return runtime.InstanceInfo{}, runtime.ErrNotFound
+	}
+	// Apple container has no state-to-disk suspend (AC14) → Suspended stays false.
+	return runtime.InstanceInfo{Running: arr[0].Status.State == "running"}, nil
+}
+
+// Exec runs a command in a running container and returns its captured output
+// and exit code.
+func (r *Runtime) Exec(ctx context.Context, name string, cmd []string, user string) (runtime.ExecResult, error) {
+	if info, err := r.Inspect(ctx, name); err != nil || !info.Running {
+		return runtime.ExecResult{}, runtime.ErrNotRunning
+	}
+	args := []string{"exec"}
+	if user != "" {
+		args = append(args, "-u", user)
+	}
+	args = append(args, name)
+	args = append(args, cmd...)
+	c := sysexec.CommandContext(ctx, r.execEnv, r.containerBin, args...)
+	return runtime.RunCmdExec(c)
+}
+
+// InteractiveExec runs a command interactively, bridging the supplied IOStreams
+// to the container's stdio (PTY when streams.TTY). Non-zero exits surface as an
+// *ExecError via PTYBridgeExec.
+func (r *Runtime) InteractiveExec(ctx context.Context, name string, cmd []string, user, workDir string, streams runtime.IOStreams) error {
+	args := []string{"exec"}
+	if streams.TTY {
+		args = append(args, "-i", "-t")
+	} else {
+		args = append(args, "-i")
+	}
+	if user != "" {
+		args = append(args, "-u", user)
+	}
+	if workDir != "" {
+		args = append(args, "-w", workDir)
+	}
+	args = append(args, name)
+	args = append(args, cmd...)
+	c := sysexec.CommandContext(ctx, r.execEnv, r.containerBin, args...)
+	return runtime.PTYBridgeExec(c, streams)
+}
+
+// runContainer shells out to the `container` CLI, returning trimmed stdout or an
+// error that carries the trimmed stderr for diagnosis.
+func (r *Runtime) runContainer(ctx context.Context, args ...string) (string, error) {
+	cmd := sysexec.CommandContext(ctx, r.execEnv, r.containerBin, args...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			return "", fmt.Errorf("%w: %s", err, msg)
+		}
+		return "", err
+	}
+	return strings.TrimSpace(stdout.String()), nil
+}
+
+// normalizeCap maps yoloai's docker-style cap names ("SYS_ADMIN") to the
+// CAP_-prefixed form Apple's `--cap-add` expects ("CAP_SYS_ADMIN"); "ALL" and
+// already-prefixed names pass through.
+func normalizeCap(c string) string {
+	if c == "ALL" || strings.HasPrefix(c, "CAP_") {
+		return c
+	}
+	return "CAP_" + c
+}
+
+// --- Setup / IsReady / Prune: next increment (image build + orphan sweep). ---
 
 func (r *Runtime) Setup(_ context.Context, _ config.Layout, _ string, _ io.Writer, _ *slog.Logger, _ bool) error {
 	return errNotImplemented
 }
 
 func (r *Runtime) IsReady(_ context.Context) (bool, error) { return false, nil }
-
-func (r *Runtime) Create(_ context.Context, _ runtime.InstanceConfig) error { return errNotImplemented }
-
-func (r *Runtime) Start(_ context.Context, _ string) error { return errNotImplemented }
-
-func (r *Runtime) Stop(_ context.Context, _ string) error { return errNotImplemented }
-
-func (r *Runtime) Remove(_ context.Context, _ string) error { return errNotImplemented }
-
-func (r *Runtime) Inspect(_ context.Context, _ string) (runtime.InstanceInfo, error) {
-	return runtime.InstanceInfo{}, errNotImplemented
-}
-
-func (r *Runtime) Exec(_ context.Context, _ string, _ []string, _ string) (runtime.ExecResult, error) {
-	return runtime.ExecResult{}, errNotImplemented
-}
-
-func (r *Runtime) InteractiveExec(_ context.Context, _ string, _ []string, _ string, _ string, _ runtime.IOStreams) error {
-	return errNotImplemented
-}
 
 func (r *Runtime) Prune(_ context.Context, _ []string, _ bool, _ io.Writer) (runtime.PruneResult, error) {
 	return runtime.PruneResult{}, errNotImplemented
