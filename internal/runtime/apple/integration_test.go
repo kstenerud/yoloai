@@ -61,12 +61,21 @@ func TestApple_Lifecycle(t *testing.T) {
 	host := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(host, "from-host.txt"), []byte("hi-from-host"), 0o644))
 
+	// A single-FILE mount — yoloai injects seed/credential files this way
+	// (e.g. ~/.claude.json). `--mount type=virtiofs` rejects a file source, so
+	// Create must use -v; this guards that regression.
+	seedFile := filepath.Join(t.TempDir(), "seed.json")
+	require.NoError(t, os.WriteFile(seedFile, []byte("seed-data"), 0o644))
+
 	const name = "yoloai-apple-itest"
 	cfg := runtime.InstanceConfig{
 		Name:     name,
 		ImageRef: itestImage,
 		Labels:   map[string]string{"com.yoloai.test": "1"},
-		Mounts:   []runtime.MountSpec{{HostPath: host, ContainerPath: "/mnt/work"}},
+		Mounts: []runtime.MountSpec{
+			{HostPath: host, ContainerPath: "/mnt/work"},
+			{HostPath: seedFile, ContainerPath: "/home/seed.json", ReadOnly: true},
+		},
 	}
 	require.NoError(t, rt.Create(ctx, cfg))
 	t.Cleanup(func() { _ = rt.Remove(context.Background(), name) })
@@ -89,6 +98,11 @@ func TestApple_Lifecycle(t *testing.T) {
 	data, rerr := os.ReadFile(filepath.Join(host, "g.txt"))
 	require.NoError(t, rerr)
 	assert.Equal(t, "from-guest", strings.TrimSpace(string(data)))
+
+	// Single-file (read-only) mount is readable in the guest.
+	res, err = rt.Exec(ctx, name, []string{"cat", "/home/seed.json"}, "")
+	require.NoError(t, err)
+	assert.Equal(t, "seed-data", res.Stdout)
 
 	// Exec exit-code propagation.
 	res, _ = rt.Exec(ctx, name, []string{"sh", "-c", "exit 42"}, "")

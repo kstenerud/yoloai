@@ -110,6 +110,8 @@ row to the index.
 | macOS `docker` numbers don't match Docker Desktop assumptions (overlay2/btrfs, classic store) | [Docker on macOS may be OrbStack, not Docker Desktop](#docker-on-macos-may-be-orbstack-not-docker-desktop--docker-info-clientinfocontext-tells-you-which) |
 | Podman macOS reports image bytes correctly even though the Linux `LayersSize: 0` workaround exists | [Podman: `/system/df` reports `LayersSize: 0`](#podman-systemdf-reports-layerssize-0) (macOS/version caveat) |
 | `system disk` shows seatbelt `IMAGES: ?` / `CACHE: 0 B` — is it a gap? | [Seatbelt has no backend image/cache store](#seatbelt-has-no-backend-imagecache-store--cacheusageprunecache-are-correctly-absent) |
+| Apple `container create … --mount …` fails: `path '…' is not a directory` | [Apple: `--mount type=virtiofs` rejects file sources; use `-v`](#apple-mount-typevirtiofs-rejects-a-file-source-use--v-for-file-mounts) |
+| Apple: `container build .` builds nothing / `COPY` fails (`"/x": not found`) | [Apple: `container build` drops a relative context](#apple-container-build-silently-drops-a-relative--context-pass-an-absolute-dir) |
 
 ---
 
@@ -2075,5 +2077,42 @@ accumulate, and `system prune` only ever removes the truly-orphaned ones.
 **Code:** `internal/sandbox/store/lock_unix.go` (`RemoveLockFile`,
 `SweepStaleLocks`); `internal/sandbox/lifecycle.go` (Destroy);
 `internal/sandbox/create.go` (Create rollback).
+
+---
+
+## Apple container (`container` CLI)
+
+### Apple: `--mount type=virtiofs` rejects a file source; use `-v` for file mounts
+
+**Symptom:** `container create … --mount type=virtiofs,source=<file>,target=<file>`
+fails with `Error: path '<file>' is not a directory`. yoloai injects
+credentials/config as individual file bind mounts (e.g. `~/.claude.json`,
+`~/.claude/settings.json`), so a docker-style file mount aborts `yoloai new`.
+
+**Explanation:** Apple's `--mount type=virtiofs` only accepts a **directory**
+source. The `-v`/`--volume` bind-mount flag, however, accepts both files and
+directories (and the `:ro` suffix), and propagates rw live in both directions.
+
+**Fix:** the apple backend builds every mount as `-v <host>:<guest>[:ro]`, not
+`--mount type=virtiofs`. Verified: `-v <file>:<file>` and `-v <file>:<file>:ro`
+both work; `-v <dir>:<dir>` propagates rw.
+
+**Code:** `internal/runtime/apple/apple.go` (`Create`, mount loop).
+
+### Apple: `container build .` silently drops a relative `.` context; pass an absolute dir
+
+**Symptom:** `container build -t img .` runs the `RUN` steps but every `COPY`
+fails with `failed to compute cache key: "/x": not found`; build output shows
+`transferring context: 2B` (an empty context).
+
+**Explanation:** Apple's `container build` silently transfers an empty context
+for a relative `.` path. An **absolute** context dir works
+(`transferring context: …` shows real bytes).
+
+**Fix:** `Setup` materializes the build context to a temp directory and passes
+its **absolute** path (`container build -t yoloai-base <abs-dir>`). The builder
+VM must also be started first (`container builder start`).
+
+**Code:** `internal/runtime/apple/apple.go` (`buildBaseImage`).
 
 ---

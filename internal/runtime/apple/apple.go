@@ -182,11 +182,16 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 		args = append(args, "--cap-add", normalizeCap(c))
 	}
 	for _, m := range cfg.Mounts {
-		spec := fmt.Sprintf("type=virtiofs,source=%s,target=%s", m.HostPath, m.ContainerPath)
+		// Use -v, not `--mount type=virtiofs`: -v bind-mounts both files and
+		// directories, whereas `--mount type=virtiofs` rejects a file source
+		// ("path '…' is not a directory"). yoloai mounts individual seed/
+		// credential files (e.g. ~/.claude.json), so -v is required. See
+		// backend-idiosyncrasies.md.
+		spec := m.HostPath + ":" + m.ContainerPath
 		if m.ReadOnly {
-			spec += ",readonly"
+			spec += ":ro"
 		}
-		args = append(args, "--mount", spec)
+		args = append(args, "-v", spec)
 	}
 	for _, p := range cfg.Ports {
 		args = append(args, "-p", fmt.Sprintf("%d:%d", p.HostPort, p.ContainerPort))
