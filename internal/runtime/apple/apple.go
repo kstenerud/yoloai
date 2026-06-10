@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"os/exec"
 	goruntime "runtime"
 	"strconv"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime"
+	dockerrt "github.com/kstenerud/yoloai/internal/runtime/docker"
 	"github.com/kstenerud/yoloai/internal/sysexec"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
@@ -35,9 +37,8 @@ const containerBin = "container"
 // can reference it without an initialization cycle through descriptor→probe.
 const installHint = "https://github.com/apple/container"
 
-// errNotImplemented marks the lifecycle/exec surface still being built out
-// (step 2 of the apple-container plan: skeleton first, then fill in).
-var errNotImplemented = errors.New("apple backend: not implemented yet")
+// baseImage is the local OCI image yoloai sandboxes run from.
+const baseImage = "yoloai-base"
 
 // descriptor holds the static facts for the apple backend; shared by the
 // registry registration and Runtime.Descriptor().
@@ -335,16 +336,75 @@ func normalizeCap(c string) string {
 	return "CAP_" + c
 }
 
-// --- Setup / IsReady / Prune: next increment (image build + orphan sweep). ---
+// Setup starts the apiserver and the builder, then builds yoloai-base from the
+// shared base-image build context when it is missing or its inputs changed.
+// Idempotent.
+func (r *Runtime) Setup(ctx context.Context, layout config.Layout, sourceDir string, output io.Writer, logger *slog.Logger, force bool) error {
+	// Start the apiserver and the (separate) builder VM on demand (AC3).
+	if _, err := r.runContainer(ctx, "system", "start"); err != nil {
+		return fmt.Errorf("start container system: %w", err)
+	}
+	if _, err := r.runContainer(ctx, "builder", "start"); err != nil {
+		return fmt.Errorf("start container builder: %w", err)
+	}
 
-func (r *Runtime) Setup(_ context.Context, _ config.Layout, _ string, _ io.Writer, _ *slog.Logger, _ bool) error {
-	return errNotImplemented
+	exists := r.imageExists(ctx, baseImage)
+	if force || !exists {
+		if !exists {
+			fmt.Fprintln(output, "Building base image (first run only, this may take a few minutes)...") //nolint:errcheck // best-effort progress
+		}
+		return r.buildBaseImage(ctx, layout, output, logger)
+	}
+	if dockerrt.NeedsBuild(layout, sourceDir) {
+		fmt.Fprintln(output, "Base image resources updated, rebuilding...") //nolint:errcheck // best-effort progress
+		return r.buildBaseImage(ctx, layout, output, logger)
+	}
+	return nil
 }
 
-func (r *Runtime) IsReady(_ context.Context) (bool, error) { return false, nil }
+// IsReady reports whether the yoloai-base image is present.
+func (r *Runtime) IsReady(ctx context.Context) (bool, error) {
+	return r.imageExists(ctx, baseImage), nil
+}
 
+// imageExists reports whether an image is present in the apple image store.
+func (r *Runtime) imageExists(ctx context.Context, ref string) bool {
+	_, err := r.runContainer(ctx, "image", "inspect", ref)
+	return err == nil
+}
+
+// buildBaseImage materializes the shared build context into a temp directory and
+// builds yoloai-base via `container build`. The context path is **absolute** — a
+// relative `.` silently transfers an empty context and every COPY fails (AC1).
+// Build inputs are the same embedded resources the docker backend uses, so
+// staleness rides on the shared checksum marker.
+func (r *Runtime) buildBaseImage(ctx context.Context, layout config.Layout, output io.Writer, logger *slog.Logger) error {
+	dir, err := os.MkdirTemp("", "yoloai-apple-build-")
+	if err != nil {
+		return fmt.Errorf("create build dir: %w", err)
+	}
+	defer os.RemoveAll(dir) //nolint:errcheck // best-effort temp cleanup
+
+	if err := dockerrt.WriteBuildContextDir(dir); err != nil {
+		return fmt.Errorf("write build context: %w", err)
+	}
+	logger.Debug("building yoloai-base via container build", "context", dir)
+
+	cmd := sysexec.CommandContext(ctx, r.execEnv, r.containerBin, "build", "-t", baseImage, dir)
+	cmd.Stdout = output
+	cmd.Stderr = output
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("container build: %w", err)
+	}
+	dockerrt.RecordBuildChecksum(layout, "")
+	return nil
+}
+
+// Prune sweeps orphaned apple containers. Not yet implemented — a no-op is safe
+// (reports nothing, never deletes a user's container); the orphan sweep lands
+// once the instance-naming convention is wired through.
 func (r *Runtime) Prune(_ context.Context, _ []string, _ bool, _ io.Writer) (runtime.PruneResult, error) {
-	return runtime.PruneResult{}, errNotImplemented
+	return runtime.PruneResult{}, nil
 }
 
 // --- platform helpers ---

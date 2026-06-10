@@ -7,7 +7,9 @@
 package apple
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -102,4 +104,32 @@ func TestApple_Lifecycle(t *testing.T) {
 	require.NoError(t, rt.Remove(ctx, name))
 	_, err = rt.Inspect(ctx, name)
 	assert.ErrorIs(t, err, runtime.ErrNotFound, "gone after Remove")
+}
+
+// TestApple_SetupBuildsBase exercises the real Setup path: start the apiserver +
+// builder and build the actual yoloai-base image from our Dockerfile via
+// `container build` (the first real test of our Dockerfile under Apple's
+// builder). Then IsReady is true and a second Setup skips. This build is slow
+// (full base image), so it lives behind the same YOLOAI_TEST_APPLE gate.
+func TestApple_SetupBuildsBase(t *testing.T) {
+	rt, ctx := appleSetup(t)
+
+	// A real CacheDir so the staleness marker persists (production has one;
+	// os.WriteFile won't mkdir).
+	layout := config.NewLayout(t.TempDir())
+	require.NoError(t, os.MkdirAll(layout.CacheDir(), 0o755))
+
+	var buf bytes.Buffer
+	require.NoError(t, rt.Setup(ctx, layout, "", &buf, slog.Default(), false),
+		"Setup must build yoloai-base from our Dockerfile under Apple's builder")
+
+	ready, err := rt.IsReady(ctx)
+	require.NoError(t, err)
+	assert.True(t, ready, "yoloai-base present after Setup")
+
+	// Second Setup: image present + marker current → skip (no rebuild).
+	var buf2 bytes.Buffer
+	require.NoError(t, rt.Setup(ctx, layout, "", &buf2, slog.Default(), false))
+	assert.NotContains(t, buf2.String(), "Building base image", "re-run must skip")
+	assert.NotContains(t, buf2.String(), "rebuilding", "re-run must not hit NeedsBuild")
 }

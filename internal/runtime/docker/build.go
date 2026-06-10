@@ -132,6 +132,36 @@ func CreateBuildContext() (io.Reader, error) {
 	return createBuildContext()
 }
 
+// WriteBuildContextDir materializes the same embedded base-image build context
+// (Dockerfile, entrypoints, scripts, tmux.conf) into dir. Backends whose build
+// command needs a *directory* context rather than a stdin tar — e.g. Apple
+// `container build <dir>` — use this instead of CreateBuildContext. It reuses
+// createBuildContext as the single source of truth for the file set.
+func WriteBuildContextDir(dir string) error {
+	tarReader, err := createBuildContext()
+	if err != nil {
+		return err
+	}
+	tr := tar.NewReader(tarReader)
+	for {
+		hdr, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("read build context tar: %w", err)
+		}
+		data, err := io.ReadAll(tr)
+		if err != nil {
+			return fmt.Errorf("read %s from build context: %w", hdr.Name, err)
+		}
+		if err := fileutil.WriteFile(filepath.Join(dir, hdr.Name), data, 0644); err != nil { //nolint:gosec // G306: build-context files, dir is a caller-owned temp dir
+			return fmt.Errorf("write %s: %w", hdr.Name, err)
+		}
+	}
+	return nil
+}
+
 // createBuildContext creates an in-memory tar archive containing the
 // embedded Dockerfile and entrypoints.
 func createBuildContext() (io.Reader, error) {
