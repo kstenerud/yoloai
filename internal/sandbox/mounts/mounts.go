@@ -327,7 +327,7 @@ func buildConfigAndSecretsMounts(st *state.State, secretsDir string) []runtime.M
 
 	// Config/profile mounts (host:container[:ro])
 	for _, m := range st.ConfigMounts {
-		spec, err := ParseConfigMount(m, st.HomeDir, st.Layout)
+		spec, err := ParseConfigMount(m, st.HomeDir, st.Layout.Env().EnvForConfigInterpolation())
 		if err != nil {
 			continue // skip unparseable mounts (validated at creation time)
 		}
@@ -360,7 +360,8 @@ func HasOverlayDirs(st *state.State) bool {
 // ParseConfigMount parses a "host:container[:ro]" mount string into a MountSpec.
 // The host path is expanded (tilde and ${VAR}).
 // homeDir is used to expand leading "~" in the host path.
-func ParseConfigMount(s, homeDir string, env config.EnvLookup) (runtime.MountSpec, error) {
+// env is the curated interpolation map for ${VAR} expansion.
+func ParseConfigMount(s, homeDir string, env map[string]string) (runtime.MountSpec, error) {
 	parts := strings.SplitN(s, ":", 3)
 	if len(parts) < 2 {
 		return runtime.MountSpec{}, fmt.Errorf("expected host:container[:ro] format")

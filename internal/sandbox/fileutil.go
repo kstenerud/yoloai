@@ -8,8 +8,9 @@ import (
 
 // ExpandPath composes tilde expansion with braced env var expansion.
 // homeDir is used for ~ expansion; derive from layout.HomeDir.
-// env is the EnvLookup for ${VAR} expansion; pass a Layout or MapEnv.
-func ExpandPath(p, homeDir string, env config.EnvLookup) (string, error) {
+// env is the curated interpolation map for ${VAR} expansion; pass
+// layout.Env().EnvForConfigInterpolation().
+func ExpandPath(p, homeDir string, env map[string]string) (string, error) {
 	return config.ExpandPath(p, homeDir, env)
 }
 

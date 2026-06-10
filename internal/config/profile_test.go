@@ -194,20 +194,22 @@ tart:
 }
 
 func TestLoadProfile_EnvExpansion(t *testing.T) {
+	// Only allowlisted interpolation vars (HOME/USER/LANG/TZ/LC_*) resolve in
+	// profile values now — see BREAKING-CHANGES v0.4.0.
 	yaml := `
 env:
-  MY_VAR: "${TEST_VAR}"
+  PROJECT_DIR: "${HOME}/project"
 `
 	_, layout := setupProfileDir(t, "env-profile", yaml)
-	layout = layout.WithEnv(map[string]string{"TEST_VAR": "expanded_value"})
+	layout = layout.WithEnv(map[string]string{"HOME": "/home/tester"})
 
 	cfg, err := LoadProfile(layout, "env-profile")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if cfg.Env["MY_VAR"] != "expanded_value" {
-		t.Errorf("Env[MY_VAR] = %q, want %q", cfg.Env["MY_VAR"], "expanded_value")
+	if cfg.Env["PROJECT_DIR"] != "/home/tester/project" {
+		t.Errorf("Env[PROJECT_DIR] = %q, want %q", cfg.Env["PROJECT_DIR"], "/home/tester/project")
 	}
 }
 
@@ -994,18 +996,18 @@ setup:
 func TestLoadProfile_RecipeEnvExpansion(t *testing.T) {
 	yaml := `
 setup:
-  - "tailscale up --authkey=${TEST_AUTHKEY}"
+  - "cp ${HOME}/.netrc /tmp/"
 `
 	_, layout := setupProfileDir(t, "recipe-env", yaml)
-	layout = layout.WithEnv(map[string]string{"TEST_AUTHKEY": "secret123"})
+	layout = layout.WithEnv(map[string]string{"HOME": "/home/tester"})
 
 	cfg, err := LoadProfile(layout, "recipe-env")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if len(cfg.Setup) != 1 || cfg.Setup[0] != "tailscale up --authkey=secret123" {
-		t.Errorf("Setup = %v, want [tailscale up --authkey=secret123]", cfg.Setup)
+	if len(cfg.Setup) != 1 || cfg.Setup[0] != "cp /home/tester/.netrc /tmp/" {
+		t.Errorf("Setup = %v, want [cp /home/tester/.netrc /tmp/]", cfg.Setup)
 	}
 }
 

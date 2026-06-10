@@ -27,7 +27,7 @@ func resolveAndApplyArchetype(ctx context.Context, d state.Deps, opts *Options, 
 	workdir := opts.Workdir.Path
 
 	// Step 1: Load .yoloai.yaml
-	yamlCfg, _, yamlErr := archetype.LoadYoloAIYaml(workdir, d.Layout.HomeDir, d.Layout)
+	yamlCfg, _, yamlErr := archetype.LoadYoloAIYaml(workdir, d.Layout.HomeDir, d.Layout.Env().EnvForConfigInterpolation())
 	if yamlErr != nil {
 		return "", nil, nil, nil, fmt.Errorf("load .yoloai.yaml: %w", yamlErr)
 	}
@@ -356,7 +356,8 @@ func printArchetypeOutput(output io.Writer, arch archetype.Archetype, source str
 
 // validateAndExpandMounts validates and expands config mount paths.
 // homeDir is used to expand leading "~" in host paths.
-func validateAndExpandMounts(mounts []string, homeDir string, env config.EnvLookup) ([]string, error) {
+// env is the curated interpolation map for ${VAR} expansion.
+func validateAndExpandMounts(mounts []string, homeDir string, env map[string]string) ([]string, error) {
 	result := make([]string, len(mounts))
 	for i, m := range mounts {
 		spec, err := mountspkg.ParseConfigMount(m, homeDir, env)

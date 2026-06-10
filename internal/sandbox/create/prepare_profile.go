@@ -72,7 +72,7 @@ func resolveProfileConfig(ctx context.Context, d state.Deps, opts *Options, agen
 	}
 
 	homeDir := d.Layout.HomeDir
-	if err := applyMergedProfileToOpts(opts, agentDef, merged, pr, ycfg.Agent, homeDir, d.Layout); err != nil {
+	if err := applyMergedProfileToOpts(opts, agentDef, merged, pr, ycfg.Agent, homeDir, d.Layout.Env().EnvForConfigInterpolation()); err != nil {
 		return nil, err
 	}
 
@@ -90,10 +90,11 @@ func resolveProfileConfig(ctx context.Context, d state.Deps, opts *Options, agen
 
 // applyMergedProfileToOpts applies merged profile values to opts and pr.
 // homeDir is used for ~ expansion in profile workdir and directory paths.
-// env resolves ${VAR} references; pass the Layout (it satisfies config.EnvLookup).
+// env is the curated interpolation map for ${VAR} expansion; pass
+// layout.Env().EnvForConfigInterpolation().
 // baseAgent is the agent name from the base config (ycfg.Agent), used to
 // detect whether the CLI override has been applied.
-func applyMergedProfileToOpts(opts *Options, agentDef **agent.Definition, merged *config.MergedConfig, pr *profileResult, baseAgent string, homeDir string, env config.EnvLookup) error {
+func applyMergedProfileToOpts(opts *Options, agentDef **agent.Definition, merged *config.MergedConfig, pr *profileResult, baseAgent string, homeDir string, env map[string]string) error {
 	// Apply merged values where CLI didn't override
 	if opts.Agent == baseAgent && merged.Agent != "" {
 		opts.Agent = merged.Agent
@@ -157,8 +158,9 @@ func applyMergedProfileToOpts(opts *Options, agentDef **agent.Definition, merged
 
 // prependProfileDirs prepends profile directory specs before the CLI aux dirs.
 // homeDir is used for ~ expansion in profile directory paths.
-// env resolves ${VAR} references; pass the Layout (it satisfies config.EnvLookup).
-func prependProfileDirs(opts *Options, profileDirs []config.ProfileDir, homeDir string, env config.EnvLookup) error {
+// env is the curated interpolation map for ${VAR} expansion; pass
+// layout.Env().EnvForConfigInterpolation().
+func prependProfileDirs(opts *Options, profileDirs []config.ProfileDir, homeDir string, env map[string]string) error {
 	var dirs []DirSpec
 	for _, pd := range profileDirs {
 		dirPath, err := config.ExpandPath(pd.Path, homeDir, env)

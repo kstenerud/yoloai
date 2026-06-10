@@ -106,15 +106,32 @@ func TestLoadConfig_EnvMap(t *testing.T) {
 
 func TestLoadConfig_EnvExpansion(t *testing.T) {
 	dir, layout := configDir(t)
-	layout = layout.WithEnv(map[string]string{"YOLOAI_TEST_HOST": "localhost"})
+	// Only allowlisted interpolation vars (HOME/USER/LANG/TZ/LC_*) resolve in
+	// config values now — see BREAKING-CHANGES v0.4.0.
+	layout = layout.WithEnv(map[string]string{"HOME": "/home/tester"})
 
-	content := "env:\n  API_BASE: http://${YOLOAI_TEST_HOST}:11434\n"
+	content := "env:\n  PROJECT_DIR: ${HOME}/project\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
 	cfg, err := LoadConfig(layout)
 	require.NoError(t, err)
 	require.Len(t, cfg.Env, 1)
-	assert.Equal(t, "http://localhost:11434", cfg.Env["API_BASE"])
+	assert.Equal(t, "/home/tester/project", cfg.Env["PROJECT_DIR"])
+}
+
+func TestLoadConfig_NonAllowlistedEnvVarNotInterpolated(t *testing.T) {
+	dir, layout := configDir(t)
+	// A var present in the host snapshot but NOT on the interpolation allowlist
+	// must not resolve — config interpolation can't pull arbitrary host vars
+	// (e.g. secrets) into config values. See BREAKING-CHANGES v0.4.0.
+	layout = layout.WithEnv(map[string]string{"MY_SECRET": "s3cr3t"})
+
+	content := "env:\n  LEAK: ${MY_SECRET}\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
+
+	_, err := LoadConfig(layout)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "MY_SECRET")
 }
 
 func TestLoadConfig_EnvExpansionError(t *testing.T) {
@@ -268,15 +285,15 @@ func TestDeleteConfigField_MissingFile(t *testing.T) {
 
 func TestLoadConfig_ExpandsEnvVars(t *testing.T) {
 	dir, layout := configDir(t)
-	layout = layout.WithEnv(map[string]string{"YOLOAI_TEST_AGENT": "gemini", "YOLOAI_TEST_BACKEND": "tart"})
+	// Scalar-field handler expands an allowlisted interpolation var (USER).
+	layout = layout.WithEnv(map[string]string{"USER": "claude"})
 
-	content := "agent: ${YOLOAI_TEST_AGENT}\ncontainer_backend: ${YOLOAI_TEST_BACKEND}\n"
+	content := "agent: ${USER}\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
 	cfg, err := LoadConfig(layout)
 	require.NoError(t, err)
-	assert.Equal(t, "gemini", cfg.Agent)
-	assert.Equal(t, "tart", cfg.ContainerBackend)
+	assert.Equal(t, "claude", cfg.Agent)
 }
 
 func TestLoadConfig_UnsetEnvVarError(t *testing.T) {
@@ -534,14 +551,14 @@ func TestLoadGlobalConfig_Default(t *testing.T) {
 
 func TestLoadGlobalConfig_EnvExpansion(t *testing.T) {
 	dir, layout := globalConfigDir(t)
-	layout = layout.WithEnv(map[string]string{"YOLOAI_TEST_TMUX": "default+host"})
+	layout = layout.WithEnv(map[string]string{"HOME": "/home/tester"})
 
-	content := "tmux_conf: ${YOLOAI_TEST_TMUX}\n"
+	content := "tmux_conf: ${HOME}/.tmux.conf\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
 	cfg, err := LoadGlobalConfig(layout)
 	require.NoError(t, err)
-	assert.Equal(t, "default+host", cfg.TmuxConf)
+	assert.Equal(t, "/home/tester/.tmux.conf", cfg.TmuxConf)
 }
 
 func TestIsGlobalKey(t *testing.T) {
@@ -670,14 +687,15 @@ func TestLoadConfig_RecipeFields(t *testing.T) {
 
 func TestLoadConfig_RecipeFieldsEnvExpansion(t *testing.T) {
 	dir, layout := configDir(t)
-	layout = layout.WithEnv(map[string]string{"YOLOAI_TEST_KEY": "mykey123"})
+	// Sequence-field handler expands an allowlisted interpolation var (HOME).
+	layout = layout.WithEnv(map[string]string{"HOME": "/home/tester"})
 
-	content := "setup:\n  - tailscale up --authkey=${YOLOAI_TEST_KEY}\n"
+	content := "setup:\n  - cp ${HOME}/.netrc /tmp/\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
 	cfg, err := LoadConfig(layout)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"tailscale up --authkey=mykey123"}, cfg.Setup)
+	assert.Equal(t, []string{"cp /home/tester/.netrc /tmp/"}, cfg.Setup)
 }
 
 func TestLoadConfig_Ports(t *testing.T) {

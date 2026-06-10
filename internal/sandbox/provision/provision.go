@@ -324,7 +324,9 @@ func ensureHomeSeedConfig(agentDef *agent.Definition, sandboxDir, installMethod 
 // SeedSandbox copies seed files, agent config files, and seeds the home config.
 // Returns agentFilesInitialized so the caller can persist it to SandboxState.
 // homeDir is used for ~ expansion in seed file host paths.
-func SeedSandbox(rt runtime.Runtime, agentDef *agent.Definition, sandboxDir string, isolation runtime.IsolationMode, agentFiles *config.AgentFilesConfig, homeDir string, hostEnv config.EnvLookup, output io.Writer) (agentFilesInitialized bool, err error) {
+// hostEnv supplies both the agent-credential lookups (HasAnyAPIKey/CopySeedFiles)
+// and, via its curated interpolation map, the ${VAR} expansion in CopyAgentFiles.
+func SeedSandbox(rt runtime.Runtime, agentDef *agent.Definition, sandboxDir string, isolation runtime.IsolationMode, agentFiles *config.AgentFilesConfig, homeDir string, hostEnv config.Layout, output io.Writer) (agentFilesInitialized bool, err error) {
 	// Copy seed files into agent-state (config, OAuth credentials, etc.)
 	hasAPIKey := HasAnyAPIKey(agentDef, hostEnv)
 	copiedAuth, err := CopySeedFiles(agentDef, sandboxDir, hasAPIKey, homeDir, hostEnv)
@@ -347,7 +349,7 @@ func SeedSandbox(rt runtime.Runtime, agentDef *agent.Definition, sandboxDir stri
 
 	// Copy agent_files (user-configured agent config files)
 	if agentFiles != nil && agentDef.StateDir != "" {
-		if err := CopyAgentFiles(agentDef, sandboxDir, agentFiles, homeDir, hostEnv); err != nil {
+		if err := CopyAgentFiles(agentDef, sandboxDir, agentFiles, homeDir, hostEnv.Env().EnvForConfigInterpolation()); err != nil {
 			return false, fmt.Errorf("copy agent files: %w", err)
 		}
 		agentFilesInitialized = true

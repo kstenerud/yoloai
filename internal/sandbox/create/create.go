@@ -316,7 +316,7 @@ func resolveProfileAndArchetype(ctx context.Context, d state.Deps, opts *Options
 		fmt.Fprintln(outputFor(opts.Output), w) //nolint:errcheck // best-effort warning
 	}
 
-	mergedMounts, err := validateAndExpandMounts(pr.mounts, d.Layout.HomeDir, d.Layout)
+	mergedMounts, err := validateAndExpandMounts(pr.mounts, d.Layout.HomeDir, d.Layout.Env().EnvForConfigInterpolation())
 	if err != nil {
 		return nil, err
 	}
@@ -582,16 +582,18 @@ func setupAllWorkdirs(ctx context.Context, d state.Deps, opts Options, workdir *
 
 // resolveAgentParams resolves prompt, model, agent command, and tmux config.
 // homeDir is used to expand leading "~" in the promptFile path.
-// env is the EnvLookup for ${VAR} expansion; pass a Layout.
-func resolveAgentParams(agentDef *agent.Definition, opts Options, pr *profileResult, gcfg *config.GlobalConfig, homeDir string, env config.EnvLookup, stdin io.Reader) (string, bool, string, string, string, error) {
-	promptText, err := invocation.ReadPrompt(opts.Prompt, opts.PromptFile, homeDir, env, stdin)
+// layout supplies both the curated interpolation map (prompt-file ${VAR}
+// expansion) and the host-env lookup ApplyModelPrefix needs for arbitrary
+// model-trigger keys.
+func resolveAgentParams(agentDef *agent.Definition, opts Options, pr *profileResult, gcfg *config.GlobalConfig, homeDir string, layout config.Layout, stdin io.Reader) (string, bool, string, string, string, error) {
+	promptText, err := invocation.ReadPrompt(opts.Prompt, opts.PromptFile, homeDir, layout.Env().EnvForConfigInterpolation(), stdin)
 	if err != nil {
 		return "", false, "", "", "", err
 	}
 	hasPrompt := promptText != ""
 
 	model := invocation.ResolveModel(agentDef, opts.Model, pr.userAliases)
-	model = invocation.ApplyModelPrefix(agentDef, model, pr.env, env)
+	model = invocation.ApplyModelPrefix(agentDef, model, pr.env, layout)
 	if err := invocation.ValidateModel(agentDef, model, opts.Model); err != nil {
 		return "", false, "", "", "", err
 	}

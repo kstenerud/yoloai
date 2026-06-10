@@ -178,8 +178,9 @@ func ResolveDetectors(idle agent.IdleSupport) []string {
 // reader the "-" sentinel pulls from — threaded from the Engine's input
 // (the CLI wires os.Stdin there; embedders supply their own), so the library
 // never reaches for the process's stdin directly (§12).
-// env is the EnvLookup for ${VAR} expansion; pass a Layout or MapEnv.
-func ReadPrompt(prompt, promptFile, homeDir string, env config.EnvLookup, stdin io.Reader) (string, error) {
+// env is the curated interpolation map for ${VAR} expansion; pass
+// layout.Env().EnvForConfigInterpolation().
+func ReadPrompt(prompt, promptFile, homeDir string, env map[string]string, stdin io.Reader) (string, error) {
 	if prompt != "" && promptFile != "" {
 		return "", yoerrors.NewUsageError("--prompt and --prompt-file are mutually exclusive")
 	}

@@ -12,7 +12,7 @@ import (
 // ExpandPath expands a leading ~ and ${VAR} references in a CLI flag path.
 // homeDir and env are supplied explicitly (the CLI captures them once into
 // Layout; the library never reads $HOME — see development-principles.md §12).
-func ExpandPath(path, homeDir string, env config.EnvLookup) (string, error) {
+func ExpandPath(path, homeDir string, env map[string]string) (string, error) {
 	return config.ExpandPath(path, homeDir, env)
 }
 

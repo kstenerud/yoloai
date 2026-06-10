@@ -142,9 +142,10 @@ func runMCPProxy(cmd *cobra.Command, args []string) error {
 	// Parse workdir if provided
 	layout := cliutil.Layout()
 	homeDir := layout.HomeDir
+	interpEnv := layout.Env().EnvForConfigInterpolation()
 	var workdirSpec yoloai.DirSpec
 	if rawWorkdir != "" {
-		parsed, err := cliutil.ParseDirArg(rawWorkdir, homeDir, layout)
+		parsed, err := cliutil.ParseDirArg(rawWorkdir, homeDir, interpEnv)
 		if err != nil {
 			return fmt.Errorf("invalid workdir: %w", err)
 		}
@@ -158,7 +159,7 @@ func runMCPProxy(cmd *cobra.Command, args []string) error {
 	// be :copy or :overlay (diff/apply is workdir-only).
 	var auxDirSpecs []yoloai.DirSpec
 	for _, rawDir := range rawDirs {
-		parsed, err := cliutil.ParseAuxDirArg(rawDir, homeDir, layout)
+		parsed, err := cliutil.ParseAuxDirArg(rawDir, homeDir, interpEnv)
 		if err != nil {
 			return fmt.Errorf("invalid directory %q: %w", rawDir, err)
 		}

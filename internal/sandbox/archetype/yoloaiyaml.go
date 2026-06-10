@@ -25,8 +25,9 @@ type YoloAIProjectConfig struct {
 // Returns (nil, false, error) on parse failures or unknown archetype.
 // Expands tilde in each Mounts entry via config.ExpandPath.
 // homeDir is used for ~ expansion; callers derive it from layout.HomeDir.
-// env is the EnvLookup for ${VAR} expansion; pass a Layout or MapEnv.
-func LoadYoloAIYaml(workdir, homeDir string, env config.EnvLookup) (*YoloAIProjectConfig, bool, error) {
+// env is the curated interpolation map for ${VAR} expansion; pass
+// layout.Env().EnvForConfigInterpolation().
+func LoadYoloAIYaml(workdir, homeDir string, env map[string]string) (*YoloAIProjectConfig, bool, error) {
 	path := filepath.Join(workdir, ".yoloai.yaml")
 	data, err := os.ReadFile(path) //nolint:gosec // G304: path is workdir + fixed filename
 	if err != nil {

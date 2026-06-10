@@ -285,15 +285,16 @@ func parseEnvSlice(envSlice []string) (map[string]string, error) {
 func resolveNewDirSpecs(rawWorkdirArg string, rawDirs []string) (workdirSpec yoloai.DirSpec, auxDirSpecs []yoloai.DirSpec, err error) {
 	layout := cliutil.Layout()
 	homeDir := layout.HomeDir
+	interpEnv := layout.Env().EnvForConfigInterpolation()
 	if rawWorkdirArg != "" {
-		parsed, parseErr := cliutil.ParseDirArg(rawWorkdirArg, homeDir, layout)
+		parsed, parseErr := cliutil.ParseDirArg(rawWorkdirArg, homeDir, interpEnv)
 		if parseErr != nil {
 			return yoloai.DirSpec{}, nil, yoerrors.NewUsageError("invalid workdir: %s", parseErr)
 		}
 		workdirSpec = *parsed
 	}
 	for _, rawDir := range rawDirs {
-		parsed, parseErr := cliutil.ParseAuxDirArg(rawDir, homeDir, layout)
+		parsed, parseErr := cliutil.ParseAuxDirArg(rawDir, homeDir, interpEnv)
 		if parseErr != nil {
 			// ParseAuxDirArg returns *UsageError for the :copy/:overlay
 			// rejection cases (already user-actionable); pass it through.

@@ -42,7 +42,7 @@ func initializeAgentFilesIfNeeded(layout config.Layout, agentDef *agent.Definiti
 	if agentFilesConfig == nil {
 		return nil
 	}
-	if err := provision.CopyAgentFiles(agentDef, sandboxDir, agentFilesConfig, layout.HomeDir, layout); err != nil {
+	if err := provision.CopyAgentFiles(agentDef, sandboxDir, agentFilesConfig, layout.HomeDir, layout.Env().EnvForConfigInterpolation()); err != nil {
 		return fmt.Errorf("copy agent files on restart: %w", err)
 	}
 	sbState.AgentFilesInitialized = true

@@ -4,6 +4,31 @@ Tracks breaking changes made during beta. Each entry should be included in relea
 
 ## v0.4.0
 
+### `${VAR}` interpolation in config/profile values resolves only a fixed allowlist
+
+`${VAR}` references in config and profile values (and in `.yoloai.yaml`, CLI dir
+specs, mount specs, prompt-file paths, and `agent_files`/`model_aliases`)
+previously resolved against the **entire** edge-resolved host environment — any
+process env var, including secrets like `${ANTHROPIC_API_KEY}` or
+`${DATABASE_URL}`, would substitute. Interpolation now resolves only a fixed
+allowlist: **`HOME`, `USER`, `LANG`, `TZ`, and any `LC_*`** (locale) var. Any
+other `${VAR}` reference now fails with `environment variable "VAR" is not set`.
+
+**Why:** config interpolation was the last arbitrary-key reader of the host-env
+snapshot. Restricting it to locale/home vars closes that path so a config value
+can no longer pull an arbitrary host secret into a sandbox or command line
+(DEV §12). Credentials still reach agents the supported way — injected as files
+under `/run/secrets`, declared via the agent's `APIKeyEnvVars`/`AuthHintEnvVars`.
+
+**What breaks:** a config/profile that interpolated a non-allowlisted var (e.g.
+`workdir.path: ${MY_PROJECTS}/app` or `env: { TOKEN: ${MY_TOKEN} }`) now errors
+at load instead of substituting.
+
+**Migration:** inline the literal value, or move the value into the config key
+directly (for `env:`, set the value literally — the credential injection path is
+unchanged). There is intentionally no opt-in to widen the allowlist yet; if you
+relied on interpolating another var, please open an issue describing the use case.
+
 ### Default Tart base image now tracks the host's macOS instead of being pinned to Sequoia
 
 The Tart backend's default base image was hardcoded to

@@ -103,7 +103,7 @@ func applyVscodeTunnelOption(d state.Deps, opts StartOptions, sandboxDir, name s
 // if provided, and persists it to prompt.txt + meta. Returns the prompt text
 // and whether a custom prompt is in use.
 // homeDir is used to expand leading "~" in the promptFile path.
-func preparePromptForStart(opts StartOptions, sandboxDir string, meta *store.Environment, homeDir string, env config.EnvLookup, stdin io.Reader) (promptText string, customPrompt bool, err error) {
+func preparePromptForStart(opts StartOptions, sandboxDir string, meta *store.Environment, homeDir string, env map[string]string, stdin io.Reader) (promptText string, customPrompt bool, err error) {
 	customPrompt = opts.Prompt != "" || opts.PromptFile != ""
 	if opts.Resume && customPrompt {
 		return "", false, fmt.Errorf("--resume and --prompt/--prompt-file are mutually exclusive")
@@ -288,7 +288,7 @@ func start(ctx context.Context, d state.Deps, name string, opts StartOptions, n 
 	}
 	slog.Debug("container status", "event", "sandbox.start.status", "sandbox", name, "status", string(st)) //nolint:gosec // G706: name is validated by ValidateName
 
-	promptText, customPrompt, err := preparePromptForStart(opts, sandboxDir, meta, d.Layout.HomeDir, d.Layout, d.Input)
+	promptText, customPrompt, err := preparePromptForStart(opts, sandboxDir, meta, d.Layout.HomeDir, d.Layout.Env().EnvForConfigInterpolation(), d.Input)
 	if err != nil {
 		return err
 	}
