@@ -352,7 +352,7 @@ Record in `decisions/working-notes.md`.
 2. Backend skeleton: descriptor + registration + installed/running probes + `system status`/`build`/lifecycle/`inspect` + Exec/InteractiveExec. Get a sandbox running with `:copy`.
 3. Mount modes `:rw`/`:ro`/`:overlay`; network-isolation iptables path.
 4. Selection: shared priority order (one definition) → darwin-host routing (default prefers `apple`, explicit `container_backend` wins over it; `--isolation vm` Linux → `apple`) + OrbStack-first sockets + container-system selector; `yoloai system backends` output.
-5. **Wizard rework → default-environment presets:** flat preset list writing `os`/`isolation`/`container_backend` per the mapping table (clearing unused keys); "(not installed)"/"(recommended)" tags + hint text. Verify `Config().Set("")` clears.
+5. **Wizard rework → default-environment presets:** flat preset list writing `os`/`isolation`/`container_backend` per the mapping table, clearing unused keys via `DeleteConfigField`/`Reset` (not `Set("")` — AC2); "(not installed)"/"(recommended)" tags + hint text.
 6. Curated-env keyset (`EnvForAppleContainer`) + forbidigo-gate per the env-access-seal pattern.
 7. Tests (lifecycle, mounts, installed/running probe, selection-priority matrix, wizard preset→config mapping) + `make check`; GUIDE backend section; backend-idiosyncrasies entries for any v1 quirks; decision-log entry.
 
