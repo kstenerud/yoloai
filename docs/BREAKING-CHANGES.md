@@ -2,7 +2,7 @@
 
 Tracks breaking changes made during beta. Each entry should be included in release notes for the version that introduces it.
 
-## v0.4.0
+## v0.5.0
 
 ### macOS default isolation becomes `vm` (Apple `container`) when it is installed
 
@@ -59,6 +59,36 @@ at load instead of substituting.
 directly (for `env:`, set the value literally — the credential injection path is
 unchanged). There is intentionally no opt-in to widen the allowlist yet; if you
 relied on interpolating another var, please open an issue describing the use case.
+
+### `IsolationAvailability` gains macOS Apple-`container` signals (Go embedding surface)
+
+The public `yoloai.IsolationAvailability` signature changed from
+`(isolation, targetOS, hostOS string)` to
+`(isolation, targetOS, hostOS string, hostMacOSMajor int, containerInstalled bool)`.
+
+**Why:** macOS `--isolation vm` now routes to the new `apple` backend, so the
+availability message must distinguish "Apple `container` not installed" from
+"macOS too old to run it". The two new parameters carry those host facts.
+
+**Migration:** pass the host's macOS major version and whether the `container`
+CLI is installed — `yoloai.AppleVMHostSignals()` returns exactly that pair:
+
+```go
+major, installed := yoloai.AppleVMHostSignals()
+avail, reason, help := yoloai.IsolationAvailability(iso, targetOS, hostOS, major, installed)
+```
+
+### `TartBaseAdmin.AvailableRuntimes` / `PlanBase` take a `context.Context`
+
+Both methods on the public `yoloai.TartBaseAdmin` gained a leading
+`ctx context.Context` parameter — `AvailableRuntimes(ctx)` and
+`PlanBase(ctx, specs)` — threading cancellation/timeout through the `tart`
+subprocesses they invoke.
+
+**Migration:** `a.AvailableRuntimes()` → `a.AvailableRuntimes(ctx)`;
+`a.PlanBase(specs)` → `a.PlanBase(ctx, specs)`.
+
+## v0.4.0
 
 ### Default Tart base image now tracks the host's macOS instead of being pinned to Sequoia
 
