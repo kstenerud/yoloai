@@ -211,6 +211,10 @@ gVisor `container-enhanced` works on the docker backend (Linux + macOS, per D69/
 
 An opt-in command to install + register `runsc` in the macOS Docker VM so `container-enhanced` works without manual VM surgery. Plan: [setup-gvisor.md](setup-gvisor.md). Blocking decision: the OrbStack `/tmp → /private/tmp` collision has no clean per-process fix, so the command must either replace the VM's `/tmp` (breaks OrbStack's `/tmp` sharing) behind explicit confirmation, or steer to Docker Desktop. Open research: whether runsc is installable in Docker Desktop's read-only LinuxKit VM at all.
 
+## Apple `container` backend
+
+Add an Apple `container` runtime backend (Linux OCI in per-container VMs, macOS 26 / Apple Silicon) — Docker-class mount-mode parity with stronger isolation, reusing existing profile images. Spike-verified; see [research/apple-container.md](../research/apple-container.md). Modeled as a **vm-tier** backend (`BaseModeName: IsolationModeVM`) that fills the macOS Linux-VM gap (`--isolation vm` for Linux currently degrades to docker). Because its VMs boot sub-second, it becomes the **macOS default** above the container slot — default macOS isolation shifts to VM when installed. macOS preference: `apple` > `orbstack` > `docker-desktop` > `podman` (OrbStack/Desktop hidden behind one `docker` backend); Linux keeps VMs low-priority (heavy/slow). Includes two cross-cutting reworks folded in: (1) a setup-wizard rework — a flat list of default-environment presets (each writing `os`/`isolation`/`container_backend`), sharing one priority order with the runtime auto-pick; (2) a two-tier probe across all backends (installed = binary exists; running = reachable now; select by installed, use by running, start-on-demand). Plan: [apple-container-backend.md](apple-container-backend.md). Backend key = `apple`; no design decisions remain open.
+
 ## Architecture Cleanup
 
 ### Backend and agent extensibility refactor
