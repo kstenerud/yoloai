@@ -46,7 +46,7 @@ All four open questions resolved positively against `container` 1.0.0.
 | Q1b | `:ro` | **Yes.** `--mount type=virtiofs,source=,target=,readonly` mounts read-only; guest writes fail with `Read-only file system`. |
 | Q2 | `:overlay` | **Yes, same cap requirement as Docker.** `overlay` is in the guest kernel (`/proc/filesystems`). Mount fails under default caps (no `CAP_SYS_ADMIN`; guest `CapEff=0x…a80425fb`), succeeds with `--cap-add CAP_SYS_ADMIN`; upper layer captures writes correctly. |
 | Q3 | Network allowlist via in-guest iptables | **Yes, cleanly.** With `--cap-add CAP_NET_ADMIN` (+`CAP_NET_RAW`), `iptables -A OUTPUT -d <ip> -j DROP` is enforced inside the guest (real per-VM kernel). None of gVisor's userspace-netstack problem (cf. `IsolationEnforcesInSandboxIptables`). |
-| Q4 | CLI/JSON surface | **Clean.** `list --format json\|yaml\|toml`, `inspect` emits pretty JSON (mounts as `type/source/destination`, per-container `status.networks[].ipv4Address`). `exec` propagates exit codes (verified `exit 42` → 42). Missing-container `inspect` → exit 1. |
+| Q4 | CLI/JSON surface | **Clean.** `list --format json\|yaml\|toml`, `inspect` emits pretty JSON. Per-container `status.networks[].ipv4Address`. **Mounts render nested** — `mounts[].type = {virtiofs:{}}` plus an `options[]` array, *not* a flat `type/source/destination` (parse the enum object). `exec` propagates exit codes (verified `exit 42` → 42). Missing-container `inspect` → exit 1. |
 
 ### Flag surface maps directly onto `InstanceConfig`
 
@@ -74,13 +74,17 @@ backend plan for how to bucket these.
 | `CONTAINER_APP_ROOT` | `ContainerPlugin/ApplicationRoot.swift` | State/data root. Default `~/Library/Application Support/com.apple.container`. **Resolved from `HOME`** when unset. |
 | `CONTAINER_INSTALL_ROOT` | `ContainerPlugin/InstallRoot.swift` | Install root for binaries/plugins. Default `/usr/local`. |
 | `CONTAINER_LOG_ROOT` | `ContainerPlugin/LogRoot.swift` | Log directory. |
-| `CONTAINER_DEFAULT_PLATFORM` | `ContainerAPIService/Client/DefaultPlatform.swift` | Default `os/arch` for image ops. Precedence: `--platform` > `--os/--arch` > this var. |
-| `CONTAINER_REGISTRY_HOST` / `CONTAINER_REGISTRY_USER` / `CONTAINER_REGISTRY_TOKEN` | `ContainerImagesService/Server/ImagesService.swift` | Registry auth for pulls (private images). |
+| `CONTAINER_DEFAULT_PLATFORM` | `Sources/Services/ContainerAPIService/Client/DefaultPlatform.swift` | Default `os/arch` for image ops. Precedence: `--platform` > `--os/--arch` > this var. |
+| `CONTAINER_REGISTRY_HOST` / `CONTAINER_REGISTRY_USER` / `CONTAINER_REGISTRY_TOKEN` | `Sources/Services/ContainerImagesService/Server/ImagesService.swift` | Registry auth for pulls (private images). |
 | `CONTAINER_DEBUG` | `Application.swift`, `MachineAPIServer+Start.swift` | Debug logging toggle. |
 | `CONTAINER_DEBUG_LAUNCHD_LABEL` | `ContainerPlugin/LaunchPlist.swift` | Debug launchd target (dev only). |
 | `SSH_AUTH_SOCK` | `ContainerRun.swift`, `ContainerStart.swift`, `MachineHelpers.swift`, `BuilderStart.swift` | Forwarded into the container/machine for an SSH agent. **We likely do NOT want to forward the host agent into a sandbox.** |
 | `BUILDKIT_COLORS`, `NO_COLOR` | `BuilderStart.swift` | Build-output coloring. |
-| (arbitrary) | `ContainerAPIService/Client/Parser.swift` | `${VAR}` interpolation in config/value substitution — user-controlled, not a fixed passthrough. |
+| (arbitrary) | `Sources/Services/ContainerAPIService/Client/Parser.swift` | `${VAR}` interpolation in config/value substitution — user-controlled, not a fixed passthrough. |
+
+Not env-driven (so outside the `HostEnv` keyset) but worth knowing: a user config
+at `~/.config/container/config.toml` (`PluginConfig.swift`, `docs/how-to.md`) can
+carry rosetta/registry settings the backend may need to account for.
 
 ### The key curation insight: no socket env var
 

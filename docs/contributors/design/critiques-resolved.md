@@ -7,6 +7,39 @@ History of critiques that have been addressed and applied. Items are moved here 
 [`critiques-unresolved.md`](critiques-unresolved.md) once resolved, so the active file stays
 a working set. Newest first.
 
+## AC1–AC14 (2026-06-10 Apple `container` backend round) — spike re-verified live; build-context + wizard-clear fixes applied
+
+- **Severity:** design-review (pre-implementation; no production code yet). **Resolved:** 2026-06-10 on
+  `apple-container-backend`. An independent adversarial agent re-ran the spike against `container` 1.0.0
+  (macOS 26, Apple Silicon), read the Swift source at `~/Devel/container`, and checked every cited
+  yoloAI internal. Core capability claims (Q1–Q4) all **CONFIRMED**; corrections applied to
+  `plans/apple-container-backend.md` + `research/apple-container.md`.
+- **AC1 (HIGH, new) — `container build .` drops a relative context** (empty 2-byte context → every
+  `COPY` fails; yoloAI's base Dockerfile has 8). Fix applied: `Setup` builds with an **absolute**
+  context path; **no Docker daemon needed** (kills the feared docker-coupling fallback, "no Docker
+  Desktop" survives). Flagged for `backend-idiosyncrasies.md` at implementation.
+- **AC2 (MED) — wizard `Set(key,"")` does NOT clear** (`mergeStringField` treats empty override as
+  "keep base"). Fix applied: preset writer uses `DeleteConfigField`/`Reset` (primitive exists,
+  `yamlnode.go:249`).
+- **AC3 (MED) — build needs `container builder start`** first (separate builder VM, cold-start). Added
+  to the `Setup` step.
+- **AC6 — inspect mounts are nested** (`type:{virtiofs:{}}` + `options[]`, not flat). Parser note added
+  to the `Inspect` row + research Q4.
+- **AC10 — allowlist DNS is the vmnet gateway** (`192.168.64.1`), not host resolv.conf; default-deny
+  must ACCEPT gateway:53. Network-isolation section updated; flagged for a live end-to-end test (raw
+  iptables alone isn't enough).
+- **AC8 — source-path drift** corrected to `Sources/Services/…`; noted the non-env
+  `~/.config/container/config.toml`.
+- **AC14 — macOS-15 runs with limitations; some features want M3.** Kept the strict `macOS≥26` probe
+  gate (safe over-gate); M3 caveat to note in GUIDE. Confirmed: no `--privileged`, `--cap-add ALL`
+  → full caps, 0.66s boot, kernel 6.18.15, no suspend subcommand, `--label`/`-p`/`--init` at create.
+- **CONFIRMED (tried hard to break, couldn't):** Q1–Q4 (live `:rw` both directions, `:ro`,
+  overlay+CAP_SYS_ADMIN, in-guest iptables), `machine`≠`container` home-mount (`defaultHomeMount=.rw`
+  machine-only), XPC daemon / no socket env, SSH_AUTH_SOCK forwarded (the "don't forward" caution is
+  justified), vm-tier modeling, literal mount paths, and all cited yoloAI internals (probe.go routing +
+  alphabetical fallback, dockerhost socket order, setup.go writes only `container_backend`, single-Probe
+  descriptor → the installed/running split is genuine cross-cutting work).
+
 ## T1–T15 (2026-06-04 Testing-critique round) — test-suite placement, dedup, and error-path coverage
 
 - **Severity:** test-health (no production behavior change). **Resolved:** 2026-06-04 on

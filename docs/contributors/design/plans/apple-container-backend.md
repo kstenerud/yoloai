@@ -68,11 +68,11 @@ cold `system start`.
 
 | `runtime.Runtime` method | `container` CLI |
 |---|---|
-| `Setup` | `container system start` if needed; build image from profile Dockerfile via `container build -t yoloai-<profile> <dir>` (BuildKit-based); or `image pull` for pull-only profiles. Reuses existing Dockerfiles unchanged. |
+| `Setup` | `container system start` **and `container builder start`** if needed (the builder is a separate VM, *not* running by default — AC3 cold-start, pulls a builder image); build image via `container build -t yoloai-<profile> -f <abs>/Dockerfile <abs-context>` — the **context path MUST be absolute**: a relative `.` silently transfers an empty (2-byte) context and every `COPY` fails (AC1 → backend-idiosyncrasies). No Docker daemon needed. Or `image pull` for pull-only profiles. |
 | `IsReady` | `container system status` reachable + target image present (`image inspect`). |
 | `Create` | `container create --name <n> <image> <init-cmd>` + mounts/caps/env/resources flags (below). |
 | `Start` / `Stop` / `Remove` | `container start` / `container stop` / `container delete`. Map "already gone/stopped" to nil. |
-| `Inspect` | `container inspect <n>` → JSON; read `.status.state` → `InstanceInfo.Running`. `ErrNotFound` on exit≠0/empty. |
+| `Inspect` | `container inspect <n>` → JSON; read `.status.state` → `InstanceInfo.Running`. `ErrNotFound` on exit≠0/empty. Mounts render **nested** (`mounts[].type = {virtiofs:{}}` + an `options[]` array), not flat `type/source/destination` — parse the enum object (AC6). |
 | `Exec` | `container exec <n> <cmd>`; capture stdout, propagate exit code into `ExecResult`. |
 | `InteractiveExec` | `container exec -i -t -u <user> -w <workDir> <n> <cmd>`; normalize non-zero exit via `runtime.InteractiveExitError`. |
 | `Prune` | `container list -a --format json`, filter `yoloai-*` not in `knownInstances`, `container delete`. |
@@ -128,9 +128,18 @@ such constraint to lift. So:
 ### Network isolation
 
 Verified: `--cap-add CAP_NET_ADMIN` + in-guest `iptables` enforces the allowlist
-(own per-VM kernel — none of gVisor's userspace-netstack problem). Reuse the
-existing in-sandbox iptables setup the docker backend already uses for
-`--network-isolated`; `NetworkIsolation: true`.
+(own per-VM kernel — none of gVisor's userspace-netstack problem). The allowlist
+machinery (`internal/runtime/docker/resources/entrypoint.py:isolate_network`:
+resolve `allowed_domains`→IPs, build ipset+iptables) is **backend-agnostic** — it
+needs only an iptables-honoring kernel (✓), `iptables`+`ipset` in the image,
+`CAP_NET_ADMIN`, and a working `/etc/resolv.conf`. **AC10 caveat:** in an apple
+guest `/etc/resolv.conf` is the **vmnet gateway** (`192.168.64.1`, Apple's own
+resolver), *not* the host's nameservers and *not* a fixed subnet — so the
+default-deny OUTPUT chain must ACCEPT the gateway's `:53` (it should fall out of
+the existing "allow resolv.conf nameservers" rule, but verify no host-DNS
+assumption is hard-coded). `ipset` rode on iptables-nft fine in the spike, and the
+entrypoint already has a `use_ipset=False` fallback. **Needs a live end-to-end
+`--network-isolated` test**, not just the raw-iptables capability. `NetworkIsolation: true`.
 
 ## Curated-env keyset (`HostEnv`)
 
@@ -216,7 +225,9 @@ collision: `tart` serves macOS guests, `apple` serves Linux guests.
    preference must win over the apple-default**: the darwin default branch honors
    a non-blank `container_backend` (the user chose a container system) before
    falling to "prefer apple" — otherwise a user who picked docker would be
-   silently overridden by apple on every launch.
+   silently overridden by apple on every launch. The darwin pre-step must gate on
+   `isolation==Default` (blank): an explicit `--isolation container` must still
+   bypass apple and hit the container slot (AC11).
 
 2. **Container-slot order stays explicit** (the orbstack/docker-desktop/podman
    sub-order, used for the explicit-container path and the Linux default): keep
@@ -287,11 +298,12 @@ collision: `tart` serves macOS guests, `apple` serves Linux guests.
    | `tart` (macOS guest) | `mac` | `vm` | — |
    | `seatbelt` (macOS sandbox) | `mac` | — | — |
 
-   - **Write all three keys per preset, clearing the ones it doesn't use** — so
-     switching `tart`→`apple` resets `os`/`isolation` back to blank rather than
-     leaving stale `mac`/`vm`. Verify `Config().Set(key, "")` actually clears vs.
-     the non-empty-override merge (`config.go` `mergeStringField`); add an unset
-     path if it doesn't.
+   - **Write the keys a preset uses; `Reset` the ones it doesn't** — so switching
+     `tart`→`apple` clears `os`/`isolation` rather than leaving stale `mac`/`vm`.
+     `Config().Set(key, "")` does **NOT** clear (verified, AC2: it writes an empty
+     string and `mergeStringField` treats an empty override as "keep base"). Use
+     the existing `DeleteConfigField` / `ConfigAdmin.Reset`
+     (`config/yamlnode.go:249`, `system_config.go:88`) for the unused keys.
    - **`container_backend` is blank for `apple`/`tart`/`seatbelt`** — the
      preference lives in `os`/`isolation`. So blank `container_backend` now means
      *any* of: setup not run, or a VM preset (`apple`/`tart`), or the process
@@ -351,22 +363,28 @@ Naming (`apple`) is settled; no design decisions gate the work now.
 - **v1 churn.** Bespoke CLI, no stable API contract; pin to the probed version,
   re-verify JSON/flags on upgrades. Biggest real risk.
 - **Two-tier probe (resolved → cross-cutting work).** installed = binary exists; running = reachable now; selection by installed, point-of-use by running (start-on-demand where possible). Touches all five backends' probes + the descriptor contract — bigger than apple, but apple is the forcing function. No design decisions remain open.
-- **Wizard preset clears stale keys** — `Config().Set(key, "")` must actually unset (so `tart`→`apple` resets `os`/`isolation`); verify vs. the non-empty-override merge, add an unset path if needed. Implementation concern, not a design fork.
+- **Wizard preset clears stale keys (resolved, AC2).** `Config().Set(key, "")` does NOT clear (empty override ignored by `mergeStringField`); the preset writer must `DeleteConfigField`/`Reset` unused keys. The primitive already exists — no design fork.
 - **Default isolation shifts to VM on macOS** when `apple` is installed — a behavior change for existing users (stronger default; `--isolation container` opts back). Call out in release notes / `BREAKING-CHANGES.md`.
-- **Image build path (could expand scope).** `Setup` assumes the existing
-  yoloai base/profile **Dockerfiles build unchanged under apple's own builder**
-  (`container build`, BuildKit-based). The base image does heavy provisioning
-  (node, DinD setup, etc.). Validate early: if apple's builder can't build it,
-  the fallback is build-with-docker-then-import — which couples `apple` to a
-  docker install and undercuts "no Docker Desktop." Confirm before committing.
-- **Network allowlist depth (could expand scope).** The spike proved *raw*
-  in-guest iptables works, but `--network-isolated` is more than iptables —
-  allowed-domain resolution, the rule-install setup script, and per-VM
-  `vmnet`/DNS specifics. Validate the **full** allowlist machinery ports, not
-  just the capability; apple's networking model differs from docker's bridge.
+- **Image build (resolved, AC1/AC3).** Existing Dockerfiles build under apple's
+  own builder — **no Docker daemon needed** (the feared docker-coupling fallback
+  is ruled out; "no Docker Desktop" survives). Two required steps: `container
+  builder start` before first build (separate builder VM, cold-start), and an
+  **absolute** build-context path — a relative `.` silently transfers an empty
+  context and all `COPY`s fail. Add the absolute-context quirk to
+  `backend-idiosyncrasies.md`.
+- **Network allowlist — end-to-end test still needed (AC10).** The machinery is
+  backend-agnostic and ported in the spike, but apple's DNS is the **vmnet
+  gateway** (`192.168.64.1`), not host resolv.conf — the default-deny chain must
+  ACCEPT gateway:53. Run the *real* `--network-isolated` path end-to-end (not
+  just raw iptables) before calling it done. See the Network isolation section.
+- **macOS version gate (AC14).** `container` actually *runs* on macOS 15 (with
+  limitations: no container-to-container net, no `container network`, IP
+  conflicts) and some features want **M3+**. Keep the strict `installed =
+  LookPath + macOS≥26` probe gate (a safe over-gate avoiding the macOS-15
+  footguns); note the M3-for-some-features caveat in GUIDE.
 - **Memory not released to host** (virtio balloon) — minor for ephemeral sandboxes; note in GUIDE.
-- **Labels / port publishing at create** — verify flag support; fall back to environment.json for labels (Tart/Seatbelt pattern) if unsupported.
-- **Suspend/resume + VS Code attach** — `InstanceInfo.Suspended`: unknown if apple supports state-to-disk suspend (assume false in v1). No docker-compat surface, so `ContainerAttach: false` (like Tart) — VS Code "Attach to Running Container" won't work; `exec`-based attach does.
+- **Labels / ports at create (confirmed, AC14).** `--label`, `-p/--publish`, `--init`, `--cidfile` all exist at create time — no environment.json fallback needed for labels.
+- **Suspend/resume + VS Code attach (confirmed, AC14).** No `suspend`/`pause`/`checkpoint` subcommand → `InstanceInfo.Suspended: false`. No docker-compat surface → `ContainerAttach: false` (like Tart); VS Code "Attach to Running Container" won't work, `exec`-based attach does.
 - **Privileged: N/A** — a VM is already privileged, so `apple` has no privileged mode and doesn't advertise `container-privileged` (a container-only special case). Workloads needing caps use plain `--cap-add` (host-safe). Settled — see "Privileged" above.
 
 ## References
