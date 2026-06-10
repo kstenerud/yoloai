@@ -259,7 +259,62 @@ func (r *Runtime) pruneCacheDryRun(ctx context.Context, includeImages bool, outp
 		estimate += images
 	}
 	fmt.Fprintf(output, "%s: cache prune skipped (--dry-run): would remove %s (~%s)\n", r.binaryName, what, formatBytes(uint64(estimate))) //nolint:errcheck,gosec // G115: estimate is non-negative
+	if includeImages {
+		r.warnImageReclaimBlockers(du, output)
+	}
 	return estimate
+}
+
+// imageReclaimBlocker is one container that pins image layers against
+// ImagesPrune. PruneCache removes stopped containers (exited/dead) before
+// ImagesPrune, so a blocker is any container in a state ContainersPrune won't
+// touch (created, running, paused, restarting, removing).
+type imageReclaimBlocker struct {
+	Name  string
+	State container.ContainerState
+	Image string
+}
+
+// imageReclaimBlockers identifies containers that ContainersPrune won't remove
+// and that will therefore pin their image layers when ImagesPrune runs.
+// Returns nil when image reclaim is unblocked. The dry-run estimate counts
+// du.LayersSize regardless of in-use status, so without this warning the user
+// sees a multi-GB promise and a "reclaimed 0 B" result with no explanation.
+func imageReclaimBlockers(du types.DiskUsage) []imageReclaimBlocker {
+	var blockers []imageReclaimBlocker
+	for _, c := range du.Containers {
+		if c == nil {
+			continue
+		}
+		switch c.State {
+		case container.StateExited, container.StateDead:
+			continue
+		}
+		name := ""
+		if len(c.Names) > 0 {
+			name = strings.TrimPrefix(c.Names[0], "/")
+		}
+		blockers = append(blockers, imageReclaimBlocker{
+			Name:  name,
+			State: c.State,
+			Image: c.Image,
+		})
+	}
+	return blockers
+}
+
+// warnImageReclaimBlockers prints a per-backend warning naming the containers
+// that will keep ImagesPrune from freeing the layers the dry-run estimate just
+// promised. No-op when nothing is blocking.
+func (r *Runtime) warnImageReclaimBlockers(du types.DiskUsage, output io.Writer) {
+	blockers := imageReclaimBlockers(du)
+	if len(blockers) == 0 {
+		return
+	}
+	fmt.Fprintf(output, "%s: image reclaim is blocked by %d active container(s) — stop or destroy them to reclaim image layers:\n", r.binaryName, len(blockers)) //nolint:errcheck
+	for _, b := range blockers {
+		fmt.Fprintf(output, "%s:   %s (%s) holds %s\n", r.binaryName, b.Name, b.State, b.Image) //nolint:errcheck
+	}
 }
 
 // CacheUsage implements runtime.DiskUsageReporter, splitting reclaimable bytes

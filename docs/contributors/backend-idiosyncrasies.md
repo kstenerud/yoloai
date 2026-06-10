@@ -59,6 +59,7 @@ row to the index.
 | `system prune` finds a different dangling image every run, reclaims 0 B, never converges, even with no builds | [Docker: legacy builder leaves a dangling image per step; build with BuildKit](#docker-legacy-builder-commits-one-dangling-intermediate-image-per-dockerfile-step-build-with-buildkit) |
 | `podman: build cache prune failed: Error response from daemon: Not Found` | [Podman: no build-cache endpoint (404)](#podman-docker-compat-api-has-no-build-cache-endpoint--buildcacheprune-returns-404-not-found) |
 | `prune --images` on Podman reports absurd reclaim (e.g. 142 GB freed for a ~5 GiB footprint) | [Podman: `ImagesPrune` `SpaceReclaimed` un-dedup sum](#podman-imagesprune-spacereclaimed-is-the-un-deduplicated-image-size-sum) |
+| `prune --images` dry-run promises multi-GB reclaim but `reclaimed 0 B`, while a `yoloai` sandbox is still running | [Docker/Podman: running containers pin image layers; warn at dry-run](#dockerpodman-imagesprune-cant-remove-images-held-by-non-stopped-containers-the-dry-run-must-name-the-blockers) |
 | `prune --images` leaves a snapshot chain; `Remove` → `cannot remove snapshot with child` | [containerd: remove snapshots leaf-first](#containerd-snapshots-must-be-removed-leaf-first-children-before-parents-or-removal-silently-stalls) |
 | `system disk` reports 0 containerd image bytes right after a successful `system build --backend containerd` | [containerd: import inconsistently materializes snapshots](#containerd-image-import-inconsistently-materializes-overlayfs-snapshots) |
 | Base layer won't prune (`cannot remove snapshot with child`) but no snapshot claims it as parent in any namespace | [containerd: leftover lease GC-roots an orphaned child](#containerd-a-leftover-lease-gc-roots-an-orphaned-child-blocking-base-layer-removal) |
@@ -826,6 +827,28 @@ An empty value disables LXC seccomp for that container entirely. The container m
 **Fix:** Build `yoloai-base` via BuildKit by shelling out to `<binary> build -` (context tar piped to stdin) with `DOCKER_BUILDKIT=1`, instead of `client.ImageBuild`. Podman's `build` (Buildah) likewise never commits per-step images, so the same code path is correct there. Profile builds with secrets already used this CLI path; the base build now matches. After switching, a one-time `docker image prune` clears the legacy intermediates left by prior builds (once `yoloai-base` is rebuilt with BuildKit they are no longer ancestors of any tag, so they prune cleanly and free real disk).
 
 **Code:** `internal/runtime/docker/build.go` — `(*Runtime).buildBaseImage` (CLI/BuildKit via `<binary> build -`), `curatedBuildEnv` (forces `DOCKER_BUILDKIT=1`).
+
+---
+
+### Docker/Podman: `ImagesPrune` can't remove images held by non-stopped containers; the dry-run must name the blockers
+
+**Symptom:** `yoloai system prune --images` (Docker or Podman) prints a confident multi-GB estimate during dry-run — e.g. `docker: cache prune skipped (--dry-run): would remove unused images, volumes, build cache (~7.14 GB)` — the user confirms, and the actual prune reports `docker: reclaimed 0 B` with no error message. Running it again gives the *same* dry-run estimate and the *same* 0 B result. `docker system df` shows `Images TOTAL=1 ACTIVE=1 SIZE=7.753GB RECLAIMABLE=7.753GB (100%)` despite a yoloai sandbox container being `Up 13 days`.
+
+**Explanation:** `PruneCache` runs `ContainersPrune` (which removes only **stopped** containers — `exited`/`dead`, the default filter) followed by `ImagesPrune` (which refuses to remove an image that any container still references — `running`, `paused`, `restarting`, `created`, and `removing` all pin it). A live yoloai sandbox holds `yoloai-base` open, so `ImagesPrune` is a no-op and `before − after` is zero. None of the prune calls return an error (they each succeed at doing nothing), so no `X prune failed` line appears — the user only sees the contradiction. The dry-run estimate, separately, uses `splitCacheBytes(du)` which reports `du.LayersSize` regardless of in-use status: it's a *footprint* total, not a *reclaimable* total, so the promise is misleading whenever any non-stopped container is attached. Docker's own `system df` RECLAIMABLE column has the same blindspot (it shows 100% reclaimable for an image with one active container), which is why neither tool surfaces the cause until you go look at `docker ps`.
+
+**Fix:** In `pruneCacheDryRun`, after the estimate line, scan `du.Containers` for any container whose `State` is not `exited` or `dead` and emit a per-backend warning naming each blocker before the user is prompted to confirm:
+
+```
+docker: cache prune skipped (--dry-run): would remove unused images, volumes, build cache (~7.14 GB)
+docker: image reclaim is blocked by 1 active container(s) — stop or destroy them to reclaim image layers:
+docker:   yoloai-x (running) holds yoloai-base
+```
+
+The estimate is left as-is — it's still a valid *upper bound* if the user stops the listed containers — but the warning makes the gap actionable. The check is gated behind `includeImages` because `BuildCachePrune` / `VolumesPrune` are unaffected by attached containers; only the image tier needs this signal. The fix is in the docker package and is inherited by the Podman backend (which embeds `*docker.Runtime`).
+
+**Note on Docker's `system df` RECLAIMABLE column:** it counts an image as reclaimable when nothing references it *for prune purposes* — but its "ACTIVE=1, RECLAIMABLE=100%" output for the same one-image case looks contradictory and is not useful for diagnosis. Trust `docker ps -a` + the new yoloai warning instead.
+
+**Code:** `internal/runtime/docker/prune.go` — `imageReclaimBlockers` (state filter), `(*Runtime).warnImageReclaimBlockers` (the per-line output), `pruneCacheDryRun` (the call site, `includeImages` only). Guard tests: `internal/runtime/docker/prune_test.go::TestImageReclaimBlockers_*`.
 
 ---
 

@@ -100,6 +100,55 @@ func TestSplitCacheBytes_IgnoresUnknownVolumeSize(t *testing.T) {
 	assert.Equal(t, gib, images)
 }
 
+// PruneCache removes stopped containers (exited/dead) before ImagesPrune, so
+// those don't block image reclaim. Every other state pins the image.
+func TestImageReclaimBlockers_FlagsNonRemovableStates(t *testing.T) {
+	du := types.DiskUsage{
+		Containers: []*container.Summary{
+			{Names: []string{"/run-1"}, State: container.StateRunning, Image: "yoloai-base"},
+			{Names: []string{"/paused-1"}, State: container.StatePaused, Image: "yoloai-base"},
+			{Names: []string{"/created-1"}, State: container.StateCreated, Image: "other"},
+			{Names: []string{"/restarting-1"}, State: container.StateRestarting, Image: "other"},
+			{Names: []string{"/removing-1"}, State: container.StateRemoving, Image: "other"},
+			{Names: []string{"/exited-1"}, State: container.StateExited, Image: "other"},
+			{Names: []string{"/dead-1"}, State: container.StateDead, Image: "other"},
+		},
+	}
+	got := imageReclaimBlockers(du)
+	assert.Len(t, got, 5)
+	names := make([]string, 0, len(got))
+	for _, b := range got {
+		names = append(names, b.Name)
+	}
+	assert.ElementsMatch(t, []string{"run-1", "paused-1", "created-1", "restarting-1", "removing-1"}, names)
+}
+
+// Container names from the docker API carry a leading "/" that must be trimmed
+// before display so the warning reads naturally.
+func TestImageReclaimBlockers_StripsLeadingSlashFromName(t *testing.T) {
+	du := types.DiskUsage{
+		Containers: []*container.Summary{
+			{Names: []string{"/yoloai-x"}, State: container.StateRunning, Image: "yoloai-base"},
+		},
+	}
+	got := imageReclaimBlockers(du)
+	assert.Len(t, got, 1)
+	assert.Equal(t, "yoloai-x", got[0].Name)
+	assert.Equal(t, "yoloai-base", got[0].Image)
+}
+
+// When everything is stopped, ImagesPrune will be free to remove image layers,
+// so the warning must stay silent.
+func TestImageReclaimBlockers_EmptyWhenAllStopped(t *testing.T) {
+	du := types.DiskUsage{
+		Containers: []*container.Summary{
+			{Names: []string{"/exited-1"}, State: container.StateExited, Image: "yoloai-base"},
+			{Names: []string{"/dead-1"}, State: container.StateDead, Image: "yoloai-base"},
+		},
+	}
+	assert.Nil(t, imageReclaimBlockers(du))
+}
+
 func TestFormatBytes_Bytes(t *testing.T) {
 	assert.Equal(t, "500 B", formatBytes(500))
 	assert.Equal(t, "0 B", formatBytes(0))
