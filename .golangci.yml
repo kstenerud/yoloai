@@ -300,12 +300,13 @@ linters:
       - path: "internal/fileutil/fileutil\\.go"
         linters:
           - forbidigo
-      # config.Layout.GitEnv (layout_env.go) is THE site that assembles the
-      # curated git subprocess env (it wraps sysexec.GitEnv over the sealed
-      # snapshot); git.NewHost / git.NewSandbox call layout.GitEnv(). Every other
-      # package routes git through *git.Git, so the sysexec.GitEnv ban applies
-      # everywhere else.
-      - path: "internal/config/layout_env\\.go"
+      # config.HostEnv.EnvForGitInvocation (host_env.go) is THE site that
+      # assembles the curated git subprocess env (it wraps sysexec.GitEnv over
+      # the sealed snapshot); git.NewHost / git.NewSandbox route through it. The
+      # legacy Layout.GitEnv (layout_env.go) wraps the same call during the
+      # transition. Every other package routes git through *git.Git, so the
+      # sysexec.GitEnv ban applies everywhere else.
+      - path: "internal/config/(layout_env|host_env)\\.go"
         linters:
           - forbidigo
         text: "sysexec\\.GitEnv"
