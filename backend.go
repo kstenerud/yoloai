@@ -56,7 +56,16 @@ func SelectContainerBackend(ctx context.Context, preferred BackendType, env map[
 // target OS on the given host OS, returning a human-readable reason and a
 // remediation hint when it is not. Embedders validate a requested isolation
 // mode at their boundary before constructing a Client (the CLI does this for
-// its --isolation / --os flags).
-func IsolationAvailability(isolation IsolationMode, targetOS, hostOS string) (available bool, reason, help string) {
-	return runtime.IsolationAvailability(isolation, targetOS, hostOS)
+// its --isolation / --os flags). hostMacOSMajor and containerInstalled describe
+// the host's Apple-`container` situation (see AppleVMHostSignals) so the
+// `--isolation vm` message can distinguish "not installed" from "macOS too old".
+func IsolationAvailability(isolation IsolationMode, targetOS, hostOS string, hostMacOSMajor int, containerInstalled bool) (available bool, reason, help string) {
+	return runtime.IsolationAvailability(isolation, targetOS, hostOS, hostMacOSMajor, containerInstalled)
+}
+
+// AppleVMHostSignals returns the host macOS major version and whether the Apple
+// `container` CLI is installed — the inputs IsolationAvailability needs to craft
+// the `--isolation vm` message on macOS. Re-exported from internal/runtime.
+func AppleVMHostSignals() (macOSMajor int, containerInstalled bool) {
+	return runtime.AppleVMHostSignals()
 }

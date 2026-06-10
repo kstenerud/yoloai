@@ -464,7 +464,8 @@ func resolveNewIsolationOS(cmd *cobra.Command) (isolation yoloai.IsolationMode, 
 // package owns the rules and their messages, the CLI just turns the verdict
 // into a UsageError.
 func validateIsolationOSCombo(isolation yoloai.IsolationMode, targetOS string) error {
-	available, reason, help := yoloai.IsolationAvailability(isolation, targetOS, goruntime.GOOS)
+	macMajor, containerInstalled := yoloai.AppleVMHostSignals()
+	available, reason, help := yoloai.IsolationAvailability(isolation, targetOS, goruntime.GOOS, macMajor, containerInstalled)
 	if available {
 		return nil
 	}

@@ -3,7 +3,39 @@
 // Package runtime defines the pluggable Runtime interface for sandbox backends.
 package runtime
 
-import "fmt"
+import (
+	"fmt"
+	"os/exec"
+	"strconv"
+	"strings"
+
+	"github.com/kstenerud/yoloai/internal/sysexec"
+)
+
+// appleMinMacOS mirrors the apple backend's macOS gate (apple.minMacOSMajor),
+// duplicated here to avoid a runtime→apple import cycle. macOS 26 is the first
+// release that drops x86, so "macOS >= appleMinMacOS" already implies Apple
+// Silicon — no separate architecture check is needed.
+const appleMinMacOS = 26
+
+// AppleVMHostSignals returns the two host facts the `--isolation vm`
+// availability message needs on macOS: the host macOS major version (0 when
+// undeterminable or not macOS) and whether the Apple `container` CLI is on PATH.
+// Pure host checks (LookPath + sw_vers), no daemon dial — safe at CLI
+// validation time.
+func AppleVMHostSignals() (macOSMajor int, containerInstalled bool) {
+	_, err := exec.LookPath("container")
+	containerInstalled = err == nil
+	out, verr := sysexec.Command(sysexec.Curated(nil, []string{"PATH"}, nil), "sw_vers", "-productVersion").Output()
+	if verr == nil {
+		s := strings.TrimSpace(string(out))
+		if i := strings.IndexByte(s, '.'); i >= 0 {
+			s = s[:i]
+		}
+		macOSMajor, _ = strconv.Atoi(s)
+	}
+	return macOSMajor, containerInstalled
+}
 
 // IsolationContainerRuntime returns the OCI runtime name for the given isolation
 // mode, or "" for the backend default (standard runc).
@@ -76,19 +108,25 @@ func SupportsOverlayDirs(isolation IsolationMode) bool {
 //
 // hostOS is runtime.GOOS-style ("darwin", "linux", "windows"); targetOS is
 // the --os flag value ("mac", "linux", or "").
-func IsolationAvailability(isolation IsolationMode, targetOS, hostOS string) (available bool, reason string, help string) {
+func IsolationAvailability(isolation IsolationMode, targetOS, hostOS string, hostMacOSMajor int, containerInstalled bool) (available bool, reason string, help string) {
 	macAlternatives := "Available isolation modes with --os mac:\n" +
+		"  container   macOS sandbox-exec (seatbelt)\n" +
+		"  vm          Full macOS VM (Tart)"
+	macVMFallbacks := "Use a Linux host for VM isolation, or use --os mac for macOS-native sandboxing:\n" +
 		"  container   macOS sandbox-exec (seatbelt)\n" +
 		"  vm          Full macOS VM (Tart)"
 
 	// Cases are ordered by precedence: the first matching rule wins.
 	switch {
-	case hostOS == "darwin" && targetOS != "mac" && (isolation == IsolationModeVM || isolation == IsolationModeVMEnhanced):
+	case hostOS == "darwin" && targetOS != "mac" && isolation == IsolationModeVM:
+		// Apple `container` is the macOS Linux-VM backend.
+		return appleVMAvailability(hostMacOSMajor, containerInstalled)
+
+	case hostOS == "darwin" && targetOS != "mac" && isolation == IsolationModeVMEnhanced:
+		// vm-enhanced (gVisor-in-VM) has no macOS backend — apple is a plain VM.
 		return false,
-			fmt.Sprintf("--isolation %s requires containerd, which is not available on macOS.", isolation),
-			"Use a Linux host for VM isolation, or use --os mac for macOS-native sandboxing:\n" +
-				"  container   macOS sandbox-exec (seatbelt)\n" +
-				"  vm          Full macOS VM (Tart)"
+			"--isolation vm-enhanced requires containerd, which is not available on macOS.",
+			macVMFallbacks
 
 	case targetOS == "mac" && (isolation == IsolationModeContainerEnhanced || isolation == IsolationModeVMEnhanced):
 		return false,
@@ -121,4 +159,23 @@ func IsolationAvailability(isolation IsolationMode, targetOS, hostOS string) (av
 	}
 
 	return true, "", ""
+}
+
+// appleVMAvailability is the `--isolation vm` verdict on a macOS host, where
+// Apple `container` is the Linux-VM backend. Available when installed; otherwise
+// the message distinguishes "macOS too old" (upgrade) from "not installed".
+func appleVMAvailability(hostMacOSMajor int, containerInstalled bool) (available bool, reason, help string) {
+	macFallback := "  container   macOS sandbox-exec (seatbelt)\n  vm          Full macOS VM (Tart)"
+	switch {
+	case hostMacOSMajor > 0 && hostMacOSMajor < appleMinMacOS:
+		return false,
+			fmt.Sprintf("--isolation vm on macOS needs Apple `container`, which requires macOS %d or newer on Apple Silicon (this Mac runs macOS %d).", appleMinMacOS, hostMacOSMajor),
+			fmt.Sprintf("Upgrade to macOS %d+ (Apple Silicon), use a Linux host, or use --os mac for macOS-native sandboxing:\n", appleMinMacOS) + macFallback
+	case containerInstalled:
+		return true, "", ""
+	default:
+		return false,
+			"--isolation vm on macOS needs Apple `container`, which isn't installed.",
+			"Install it from https://github.com/apple/container, then re-run — or use a Linux host, or --os mac for macOS-native sandboxing:\n" + macFallback
+	}
 }

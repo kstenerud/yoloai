@@ -67,34 +67,40 @@ func TestIsolationAvailability(t *testing.T) {
 		isolation IsolationMode
 		targetOS  string
 		hostOS    string
+		macMajor  int
+		container bool
 		want      bool
 	}{
 		// container-privileged: allowed on a darwin host targeting Linux
 		// containers (the regression this guards — it used to be blocked).
-		{"priv darwin host, linux target", IsolationModeContainerPrivileged, "linux", "darwin", true},
-		{"priv darwin host, default target", IsolationModeContainerPrivileged, "", "darwin", true},
-		{"priv linux host", IsolationModeContainerPrivileged, "", "linux", true},
+		{"priv darwin host, linux target", IsolationModeContainerPrivileged, "linux", "darwin", 0, false, true},
+		{"priv darwin host, default target", IsolationModeContainerPrivileged, "", "darwin", 0, false, true},
+		{"priv linux host", IsolationModeContainerPrivileged, "", "linux", 0, false, true},
 		// ...but not when explicitly targeting macOS-native backends.
-		{"priv os=mac rejected", IsolationModeContainerPrivileged, "mac", "darwin", false},
-		// VM modes still require containerd, unavailable on a darwin host.
-		{"vm darwin host rejected", IsolationModeVM, "linux", "darwin", false},
-		{"vm linux host ok", IsolationModeVM, "", "linux", true},
+		{"priv os=mac rejected", IsolationModeContainerPrivileged, "mac", "darwin", 0, false, false},
+		// VM on macOS now routes to Apple `container` — three paths:
+		{"vm darwin, container installed + macOS 26", IsolationModeVM, "linux", "darwin", 26, true, true},
+		{"vm darwin, container not installed", IsolationModeVM, "linux", "darwin", 26, false, false},
+		{"vm darwin, macOS too old (even with container)", IsolationModeVM, "linux", "darwin", 15, true, false},
+		// vm-enhanced (gVisor-in-VM) has no macOS backend (apple is a plain VM).
+		{"vm-enhanced darwin rejected", IsolationModeVMEnhanced, "linux", "darwin", 26, true, false},
+		{"vm linux host ok", IsolationModeVM, "", "linux", 0, false, true},
 		// container-enhanced (gVisor): rejected on a darwin host entirely (D71) —
 		// the macOS Docker VMs can't run runsc turn-key (Docker Desktop engine
 		// fails on registration; OrbStack /tmp chroot; cgroup hazard). gVisor is
 		// Linux-primary. Both --os mac and the host-darwin/linux-target case fail.
-		{"enhanced darwin host, linux target rejected", IsolationModeContainerEnhanced, "linux", "darwin", false},
-		{"enhanced darwin host, default target rejected", IsolationModeContainerEnhanced, "", "darwin", false},
-		{"enhanced os=mac rejected", IsolationModeContainerEnhanced, "mac", "darwin", false},
-		{"enhanced linux host ok", IsolationModeContainerEnhanced, "", "linux", true},
+		{"enhanced darwin host, linux target rejected", IsolationModeContainerEnhanced, "linux", "darwin", 0, false, false},
+		{"enhanced darwin host, default target rejected", IsolationModeContainerEnhanced, "", "darwin", 0, false, false},
+		{"enhanced os=mac rejected", IsolationModeContainerEnhanced, "mac", "darwin", 0, false, false},
+		{"enhanced linux host ok", IsolationModeContainerEnhanced, "", "linux", 0, false, true},
 		// Plain container is always fine.
-		{"container darwin host", IsolationModeContainer, "", "darwin", true},
+		{"container darwin host", IsolationModeContainer, "", "darwin", 0, false, true},
 	}
 	for _, c := range cases {
-		got, _, _ := IsolationAvailability(c.isolation, c.targetOS, c.hostOS)
+		got, _, _ := IsolationAvailability(c.isolation, c.targetOS, c.hostOS, c.macMajor, c.container)
 		if got != c.want {
-			t.Errorf("%s: IsolationAvailability(%q, %q, %q) = %v, want %v",
-				c.name, c.isolation, c.targetOS, c.hostOS, got, c.want)
+			t.Errorf("%s: IsolationAvailability(%q, %q, %q, %d, %v) = %v, want %v",
+				c.name, c.isolation, c.targetOS, c.hostOS, c.macMajor, c.container, got, c.want)
 		}
 	}
 }
