@@ -164,8 +164,18 @@ func CopySeedFiles(agentDef *agent.Definition, sandboxDir string, hasAPIKey bool
 		if err := fileutil.MkdirAll(filepath.Dir(targetPath), 0750); err != nil {
 			return copiedAuth, fmt.Errorf("create dir for %s: %w", sf.TargetPath, err)
 		}
-		if err := fileutil.WriteFile(targetPath, data, 0600); err != nil { //nolint:gosec // G703: targetPath is constructed from internal agent config, not user input
-			return copiedAuth, fmt.Errorf("write %s: %w", targetPath, err)
+		// Executable seeds (e.g. Claude Code's statusLine script, which it execs
+		// by path) get 0700 via WriteFilePerm, which chmods past the umask so the
+		// exec bit survives into the bind-mounted, possibly-different-uid sandbox.
+		// Everything else (credentials, config) stays 0600.
+		var writeErr error
+		if sf.Executable {
+			writeErr = fileutil.WriteFilePerm(targetPath, data, 0700)
+		} else {
+			writeErr = fileutil.WriteFile(targetPath, data, 0600) //nolint:gosec // G703: targetPath is constructed from internal agent config, not user input
+		}
+		if writeErr != nil {
+			return copiedAuth, fmt.Errorf("write %s: %w", targetPath, writeErr)
 		}
 		if sf.AuthOnly {
 			copiedAuth = true

@@ -33,6 +33,10 @@ type SeedFile struct {
 	// is unnecessary. When non-nil, copySeedFiles checks these instead of
 	// the agent-level hasAPIKey.
 	OwnerAPIKeys []string
+	// Executable seeds the file mode 0700 (owner rwx) instead of the default
+	// 0600, for scripts the agent execs by path (e.g. Claude Code's statusLine
+	// script). Credentials/config stay 0600.
+	Executable bool
 }
 
 // IdleSupport describes what idle detection signals an agent can produce.
@@ -137,6 +141,9 @@ var agents = map[string]*Definition{
 			{HostPath: "~/.claude/.credentials.json", TargetPath: ".credentials.json", AuthOnly: true, KeychainService: "Claude Code-credentials"},
 			{HostPath: "~/.claude/settings.json", TargetPath: "settings.json"},
 			{HostPath: "~/.claude.json", TargetPath: ".claude.json", HomeDir: true},
+			// statusLine script referenced by settings.json; Claude Code execs it
+			// by path, so it must keep the exec bit (Executable → 0700).
+			{HostPath: "~/.claude/statusline.sh", TargetPath: "statusline.sh", Executable: true},
 		},
 		StateDir:       "/home/yoloai/.claude/",
 		SubmitSequence: "Enter Enter",

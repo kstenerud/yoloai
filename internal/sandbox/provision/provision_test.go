@@ -229,6 +229,29 @@ func TestCopySeedFiles_CopiesExistingFiles(t *testing.T) {
 	assert.FileExists(t, filepath.Join(sandboxDir, store.AgentRuntimeDir, "settings.json"))
 }
 
+// TestCopySeedFiles_StatusLineScriptIsExecutable verifies the Executable seed
+// (Claude Code's statusline.sh) is copied with the owner-exec bit set, since
+// Claude Code execs it by path.
+func TestCopySeedFiles_StatusLineScriptIsExecutable(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	claudeDir := filepath.Join(tmpDir, ".claude")
+	require.NoError(t, os.MkdirAll(claudeDir, 0750))
+	require.NoError(t, os.WriteFile(filepath.Join(claudeDir, "statusline.sh"), []byte("#!/bin/sh\necho hi\n"), 0600))
+
+	sandboxDir := filepath.Join(tmpDir, "sandbox")
+	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
+	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "home-seed"), 0750))
+
+	_, err := CopySeedFiles(agent.GetAgent("claude"), sandboxDir, true, tmpDir, config.Layout{})
+	require.NoError(t, err)
+
+	dst := filepath.Join(sandboxDir, store.AgentRuntimeDir, "statusline.sh")
+	info, err := os.Stat(dst)
+	require.NoError(t, err)
+	assert.NotZero(t, info.Mode().Perm()&0100, "owner-exec bit must be set on the seeded statusLine script (got %o)", info.Mode().Perm())
+}
+
 func TestCopySeedFiles_SkipsAuthWhenAPIKeySet(t *testing.T) {
 	tmpDir := t.TempDir()
 
