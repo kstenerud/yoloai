@@ -15,6 +15,15 @@ Complete — all in-scope phases landed (Phase 1 detector truth + carved `store.
 
 Complete — D74 landed (Stage 1 `9f67d28`/`45aab36`/`8479258`, Stage 2 `8d8106c`/`0b38b3e`/`5321a9e`); the `Engine` owns the lazy `runtime.New` connection and the sub-handles (`Agent`/`Workdir`/`Network`/`Files`) hold a `*sandbox.Engine`. Archived under [../archive/plans/engine-owns-runtime.md](../archive/plans/engine-owns-runtime.md).
 
+## Env access seal — `config.HostEnv` curated accessors
+
+Replace the ad-hoc `config.Layout` env accessors (`LookupEnv`/`ExecEnv`/
+`CuratedEnv`/`EnvSnapshot`) with a single opaque, purpose-method,
+forbidigo-gated `HostEnv` type — every env touch names a purpose whose keyset
+is decided centrally (`GitEnv`-style), not chosen inline at the call site. A
+first encapsulation pass already landed (`9223058`); this supersedes its design.
+Plan + full handoff: [env-access-seal.md](env-access-seal.md).
+
 ## Parallel Agent Workflows
 
 Based on [parallel agents research](../research/parallel-agents.md).
