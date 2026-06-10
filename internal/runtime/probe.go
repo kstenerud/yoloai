@@ -12,6 +12,9 @@ import (
 // DaemonEnvVars names the host-env keys that container-backend probes and
 // clients consult for daemon-socket discovery — the union of what the Docker
 // SDK config reads (context/TLS/host) and what Podman socket discovery reads.
+// TMPDIR is in the set because `podman machine inspect` on macOS derives the
+// machine API socket path from it ($TMPDIR/podman/...); without it podman
+// reports the /tmp fallback path, which doesn't exist, and discovery fails.
 // Callers curate their threaded snapshot to this set (Layout.CuratedEnv) before
 // handing it to Probe / SelectBackend / SelectContainerBackend, so backend
 // selection sees the daemon settings without the whole ambient env leaking in
@@ -20,7 +23,7 @@ import (
 var DaemonEnvVars = []string{
 	"DOCKER_HOST", "DOCKER_CONFIG", "DOCKER_CONTEXT",
 	"DOCKER_CERT_PATH", "DOCKER_TLS_VERIFY", "DOCKER_API_VERSION",
-	"CONTAINER_HOST", "XDG_RUNTIME_DIR", "HOME",
+	"CONTAINER_HOST", "XDG_RUNTIME_DIR", "HOME", "TMPDIR",
 }
 
 // Probe reports whether the named backend is usable right now. Returns

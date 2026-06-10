@@ -106,14 +106,17 @@ var seatbeltSandboxAllowlist = []string{
 
 // daemonEnvAllowlist: keys container-backend probes and clients consult for
 // daemon-socket discovery — the union of what the Docker SDK config reads
-// (context/TLS/host) and what Podman socket discovery reads. A superset is safe:
+// (context/TLS/host) and what Podman socket discovery reads. TMPDIR is included
+// because `podman machine inspect` on macOS derives the machine API socket path
+// from it ($TMPDIR/podman/...); dropping it makes podman report the /tmp
+// fallback path, which doesn't exist, so discovery fails. A superset is safe:
 // each backend reads only its own keys. Mirrors the public runtime.DaemonEnvVars
 // (which external callers of the public SelectBackend pass): config cannot import
 // runtime (cycle), so the list is duplicated here; keep the two in sync.
 var daemonEnvAllowlist = []string{
 	"DOCKER_HOST", "DOCKER_CONFIG", "DOCKER_CONTEXT",
 	"DOCKER_CERT_PATH", "DOCKER_TLS_VERIFY", "DOCKER_API_VERSION",
-	"CONTAINER_HOST", "XDG_RUNTIME_DIR", "HOME",
+	"CONTAINER_HOST", "XDG_RUNTIME_DIR", "HOME", "TMPDIR",
 }
 
 // hostToolAllowlist: the minimal set for yoloAI's own host-side utility

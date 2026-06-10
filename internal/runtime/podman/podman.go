@@ -247,8 +247,10 @@ var machineSocketDiscovery = defaultMachineSocketDiscovery
 
 func defaultMachineSocketDiscovery(env map[string]string) (string, error) {
 	// Minimal allowlist: PATH for binary lookup, CONTAINER_HOST and XDG_RUNTIME_DIR
-	// for socket resolution on rootless Linux. HOME is overridden to prevent
-	// podman from reading the ambient home's containers.conf (DEV §12).
+	// for socket resolution on rootless Linux, TMPDIR because macOS `podman machine
+	// inspect` derives the machine API socket path from it ($TMPDIR/podman/...) and
+	// reports a stale /tmp fallback without it. HOME is deliberately dropped so
+	// podman does not read the ambient home's containers.conf (DEV §12).
 	podmanEnv := sysexec.Curated(env, []string{"PATH", "TMPDIR", "CONTAINER_HOST", "XDG_RUNTIME_DIR"}, nil)
 	out, err := sysexec.Command(podmanEnv, "podman", "machine", "inspect",
 		"--format", "{{.ConnectionInfo.PodmanSocket.Path}}").Output()

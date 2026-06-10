@@ -93,6 +93,7 @@ row to the index.
 | DNS works but HTTPS to api.anthropic.com times out | [DNS: timeout = API unreachable, not DNS](#request-timed-out-in-claude-code--api-unreachable-not-dns-failure) |
 | `iptables` warnings about legacy tables | [iptables-nft: legacy tables warning](#iptables--iptables-nft-both-iptables-legacy-and-iptables-nft-can-coexist) |
 | `Can't open socket to ipset` / network isolation fails on Podman macOS | [Podman macOS: iptables-nft lacks xt_set module](#podman-macos-iptables-nft-lacks-xt_set-module-ipset-unusable) |
+| `no podman socket found` on macOS though `podman machine` is running (any command: `system build`, `new`, …) | [Podman macOS: socket discovery needs TMPDIR](#macos-podman-machine-socket-discovery-needs-tmpdir-without-it-inspect-reports-a-stale-tmp-path) |
 | Smoke test: `stop_start/containerd-vm` fails with "agent idle for 9s+" | [QEMU: slow startup exceeds stall grace](#qemu-slow-startup-exceeds-smoke-test-stall-grace-period) |
 | Smoke test: `stop_start/tart` fails; exchange dir empty | [Tart: xcodebuild -runFirstLaunch blocks agent startup](#tart-xcodebuild--runfirstlaunch-blocks-agent-startup) |
 | `yoloai new --attach` hangs after "Sandbox created"; Python setup never completes | [Tart: mount_map uses Docker paths, triggering macOS automount](#tart-mount_map-uses-docker-style-paths-triggering-macos-automount-hang) |
@@ -874,6 +875,35 @@ Correct approach: check the socket path. `/run/podman/podman.sock` is the
 system (non-rootless) socket. Everything else — `$XDG_RUNTIME_DIR`, WSL2 paths,
 Podman Machine, `CONTAINER_HOST` — is treated as rootless. See
 `podman.go::socketIsRootless`.
+
+### macOS: Podman Machine socket discovery needs `TMPDIR`; without it `inspect` reports a stale `/tmp` path
+
+**Symptom:** Every yoloAI command that touches the Podman backend on macOS
+(`system build`, `new`, …) fails with `no podman socket found (checked
+$CONTAINER_HOST, $DOCKER_HOST, $XDG_RUNTIME_DIR/podman/podman.sock,
+/run/podman/podman.sock)` even though `podman machine start` reports the machine
+already running and `podman machine inspect` works fine from the shell.
+
+**Explanation:** On macOS, Podman runs in a VM and the host-side machine API
+socket path is derived from `$TMPDIR`: `podman machine inspect` reports
+`$TMPDIR/podman/podman-machine-default-api.sock` (e.g.
+`/var/folders/.../T/podman/...`). When `TMPDIR` is **absent** from the
+subprocess env, podman falls back to `/tmp/podman/podman-machine-default-api.sock`,
+which does not exist. yoloAI's discovery then `os.Stat`s that path, it fails, and
+`discoverSocket` reports "no podman socket found". `HOME` is *not* the
+determinant — the socket path is computed purely from `TMPDIR`.
+
+This bit us because `TMPDIR` was missing from the daemon-discovery allowlist:
+`machineSocketDiscovery` already allowlists `TMPDIR`, but the upstream
+`EnvForDaemonDiscovery()` snapshot it curates from had dropped it, so there was
+nothing to carry through. Docker users never saw this — only Podman-on-macOS
+reads `TMPDIR` for socket discovery.
+
+**Fix:** Keep `TMPDIR` in the daemon-discovery allowlist
+(`config.daemonEnvAllowlist` and the mirrored public `runtime.DaemonEnvVars`) so
+it survives to `podman.go::defaultMachineSocketDiscovery`. See
+`internal/config/host_env.go::daemonEnvAllowlist` and
+`internal/runtime/podman/podman.go::defaultMachineSocketDiscovery`.
 
 ### macOS: `--userns=keep-id` maps the Podman Machine uid (1000), not the macOS uid
 
