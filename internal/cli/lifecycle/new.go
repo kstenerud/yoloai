@@ -105,7 +105,7 @@ func runNewCmd(cmd *cobra.Command, args []string, version string) error {
 		Input:       cmd.InOrStdin(),
 		Output:      mgrOutput,
 		Version:     version,
-		Env:         cliutil.EdgeEnv(),
+		Env:         cliutil.BackendEnv(cmd),
 	})
 	if err != nil {
 		return fmt.Errorf("connect to runtime: %w", err)

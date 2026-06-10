@@ -103,7 +103,10 @@ func runSystemBuild(cmd *cobra.Command, args []string, backend yoloai.BackendTyp
 		Secrets:     secrets,
 		Output:      buildOutputFor(cmd),
 	}
-	sys, err := cliutil.System()
+	// BackendEnv pins DOCKER_HOST when the backend is a docker-VM alias
+	// (orbstack/docker-desktop), so the base image is built in the same daemon
+	// the sandbox will run in.
+	sys, err := cliutil.SystemWithEnv(cliutil.BackendEnv(cmd))
 	if err != nil {
 		return err
 	}

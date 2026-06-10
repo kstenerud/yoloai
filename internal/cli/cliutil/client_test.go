@@ -99,6 +99,62 @@ func TestResolveBackend_FlagEmptyNoConfig(t *testing.T) {
 	assert.Equal(t, runtime.BackendType("docker"), cliutil.ResolveBackend(cmd))
 }
 
+// --- container-system aliases (orbstack / docker-desktop) ---
+
+func TestResolveBackend_OrbstackAliasResolvesToDocker(t *testing.T) {
+	_ = clitest.Home(t)
+	cmd := &cobra.Command{}
+	cmd.Flags().String("backend", "", "")
+	require.NoError(t, cmd.Flags().Set("backend", "orbstack"))
+
+	assert.Equal(t, runtime.BackendType("docker"), cliutil.ResolveBackend(cmd),
+		"an orbstack pick must route to the docker backend")
+}
+
+func TestResolveBackend_DockerDesktopAliasResolvesToDocker(t *testing.T) {
+	_ = clitest.Home(t)
+	cmd := &cobra.Command{}
+	cmd.Flags().String("backend", "", "")
+	require.NoError(t, cmd.Flags().Set("backend", "docker-desktop"))
+
+	assert.Equal(t, runtime.BackendType("docker"), cliutil.ResolveBackend(cmd))
+}
+
+func TestResolveBackend_ConfigAliasResolvesToDocker(t *testing.T) {
+	dir := clitest.ConfigDir(t)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("container_backend: orbstack\n"), 0600))
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("backend", "", "")
+	cmd.Flags().String("isolation", "", "")
+	cmd.Flags().String("os", "", "")
+
+	assert.Equal(t, runtime.BackendType("docker"), cliutil.ResolveBackend(cmd),
+		"container_backend: orbstack must route to the docker backend")
+}
+
+func TestBackendEnv_PinsDockerHostForAlias(t *testing.T) {
+	home := clitest.Home(t)
+	cmd := &cobra.Command{}
+	cmd.Flags().String("backend", "", "")
+	require.NoError(t, cmd.Flags().Set("backend", "orbstack"))
+
+	env := cliutil.BackendEnv(cmd)
+	want := "unix://" + filepath.Join(home, ".orbstack/run/docker.sock")
+	assert.Equal(t, want, env["DOCKER_HOST"], "an alias pick must pin DOCKER_HOST to that provider's socket")
+}
+
+func TestBackendEnv_NoPinForPlainBackend(t *testing.T) {
+	_ = clitest.Home(t)
+	cmd := &cobra.Command{}
+	cmd.Flags().String("backend", "", "")
+	require.NoError(t, cmd.Flags().Set("backend", "docker"))
+
+	// A non-alias pick must leave any ambient DOCKER_HOST exactly as the edge
+	// captured it — BackendEnv must not synthesize a pin.
+	assert.Equal(t, cliutil.EdgeEnv()["DOCKER_HOST"], cliutil.BackendEnv(cmd)["DOCKER_HOST"])
+}
+
 // --- ResolveContainerBackendConfig ---
 
 func TestResolveContainerBackendConfig_HasBackend(t *testing.T) {

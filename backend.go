@@ -69,3 +69,44 @@ func IsolationAvailability(isolation IsolationMode, targetOS, hostOS string, hos
 func AppleVMHostSignals() (macOSMajor int, containerInstalled bool) {
 	return runtime.AppleVMHostSignals()
 }
+
+// Container-system alias ids: user-facing names for the docker backend pinned to
+// a specific local daemon socket. See ResolveContainerSystem.
+const (
+	ContainerSystemOrbstack      = runtime.ContainerSystemOrbstack
+	ContainerSystemDockerDesktop = runtime.ContainerSystemDockerDesktop
+)
+
+// ResolveContainerSystem translates a user-facing container-system id (e.g.
+// orbstack, docker-desktop) into the concrete (backend, DOCKER_HOST) pair to
+// use: the docker-VM aliases resolve to the docker backend with a pinned unix
+// socket so an explicit pick reaches that exact daemon; every other id passes
+// through with an empty dockerHost. Embedders and the CLI resolve a backend
+// preference through this before selection so an aliased preference both routes
+// to docker and carries its socket pin. Re-exported from internal/runtime.
+func ResolveContainerSystem(id BackendType, homeDir string) (backend BackendType, dockerHost string) {
+	return runtime.ResolveContainerSystem(id, homeDir)
+}
+
+// IsContainerSystemAlias reports whether id is a docker-VM alias (orbstack,
+// docker-desktop) rather than a registered backend.
+func IsContainerSystemAlias(id BackendType) bool {
+	return runtime.IsContainerSystemAlias(id)
+}
+
+// ContainerSystems returns the docker-VM alias ids in display order.
+func ContainerSystems() []BackendType {
+	return runtime.ContainerSystems()
+}
+
+// ContainerSystemLabel returns the human-facing product name for an alias id, or
+// the raw id when it is not an alias.
+func ContainerSystemLabel(id BackendType) string {
+	return runtime.ContainerSystemLabel(id)
+}
+
+// ContainerSystemSocket returns the pinned unix-socket DOCKER_HOST for an alias
+// id under homeDir, or "" when id is not an alias or homeDir is empty.
+func ContainerSystemSocket(id BackendType, homeDir string) string {
+	return runtime.ContainerSystemSocket(id, homeDir)
+}

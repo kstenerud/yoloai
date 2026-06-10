@@ -46,7 +46,9 @@ func runSystemCheck(cmd *cobra.Command, backend yoloai.BackendType, agentName, i
 		agentName = cliutil.ResolveAgent(cmd)
 	}
 
-	sys, err := cliutil.System()
+	// BackendEnv pins DOCKER_HOST for docker-VM aliases (orbstack/docker-desktop)
+	// so the reachability check probes the daemon the user actually selected.
+	sys, err := cliutil.SystemWithEnv(cliutil.BackendEnv(cmd))
 	if err != nil {
 		return err
 	}

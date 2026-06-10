@@ -49,9 +49,13 @@ func Coalesce(a, b string) string {
 // is delegated to runtime.SelectBackend so the CLI and library embedders share
 // one routing implementation (F21).
 func ResolveBackend(cmd *cobra.Command) yoloai.BackendType {
-	// Explicit --backend always wins.
+	// Explicit --backend always wins. A container-system alias (orbstack,
+	// docker-desktop) resolves to the docker backend; its socket pin is applied
+	// separately via BackendEnv (homeDir is irrelevant to the backend-type
+	// resolution, so "" avoids needing the root Layout here).
 	if b, _ := cmd.Flags().GetString("backend"); b != "" {
-		return yoloai.BackendType(b)
+		resolved, _ := yoloai.ResolveContainerSystem(yoloai.BackendType(b), "")
+		return resolved
 	}
 
 	// Read isolation and os from flags, falling back to config.
@@ -64,11 +68,57 @@ func ResolveBackend(cmd *cobra.Command) yoloai.BackendType {
 	isolation := yoloai.IsolationMode(Coalesce(FlagStr(cmd, "isolation"), cfgIsolation))
 	targetOS := Coalesce(FlagStr(cmd, "os"), cfgOS)
 
-	backend, warn := yoloai.SelectBackend(cmd.Context(), ResolveContainerBackendConfig(), isolation, targetOS, Layout().Env().EnvForDaemonDiscovery())
+	// Resolve a config alias preference to docker before routing, so
+	// container_backend: orbstack both routes to the docker slot and (via
+	// BackendEnv) pins its daemon.
+	preferred, _ := yoloai.ResolveContainerSystem(ResolveContainerBackendConfig(), "")
+	backend, warn := yoloai.SelectBackend(cmd.Context(), preferred, isolation, targetOS, Layout().Env().EnvForDaemonDiscovery())
 	if warn != "" {
 		fmt.Fprintln(os.Stderr, warn)
 	}
 	return backend
+}
+
+// rawBackendPreference returns the user's explicit backend choice as a raw,
+// unresolved string: the --backend flag if set, else the container_backend
+// config value, else "". A container-system alias (orbstack/docker-desktop) is
+// returned as-is so BackendEnv can compute its socket pin.
+func rawBackendPreference(cmd *cobra.Command) string {
+	if b, _ := cmd.Flags().GetString("backend"); b != "" {
+		return b
+	}
+	cfg, _ := config.LoadDefaultsConfig(Layout())
+	if cfg != nil {
+		return cfg.ContainerBackend
+	}
+	return ""
+}
+
+// BackendEnv returns the edge env to hand the library for a backend-driving
+// command, with DOCKER_HOST pinned when the resolved backend preference names a
+// specific docker daemon (orbstack/docker-desktop). The sandbox-creating (new),
+// image-build, and connectivity-check commands use it so the base image and the
+// sandbox target the same daemon. A non-alias preference leaves any
+// user-supplied DOCKER_HOST untouched; an alias pick wins, since the user named
+// a specific daemon.
+func BackendEnv(cmd *cobra.Command) map[string]string {
+	env := EdgeEnv()
+	id := yoloai.BackendType(rawBackendPreference(cmd))
+	if host := yoloai.ContainerSystemSocket(id, Layout().HomeDir); host != "" {
+		env = withEnvOverride(env, "DOCKER_HOST", host)
+	}
+	return env
+}
+
+// withEnvOverride returns a copy of env with key=val set. EdgeEnv() returns the
+// shared process snapshot, so callers must never mutate it in place.
+func withEnvOverride(env map[string]string, key, val string) map[string]string {
+	out := make(map[string]string, len(env)+1)
+	for k, v := range env {
+		out[k] = v
+	}
+	out[key] = val
+	return out
 }
 
 // FlagStr returns the value of a string flag if it was set, or "" if not available.
@@ -185,11 +235,20 @@ func Client(cmd *cobra.Command) (*yoloai.Client, error) {
 // It builds a backend-less Client (no runtime opened) and returns its System
 // sub-handle. The caller need not Close — a backend-less Client's Close is a no-op.
 func System() (*yoloai.System, error) {
+	return SystemWithEnv(EdgeEnv())
+}
+
+// SystemWithEnv is System() with an explicit edge env, so a backend-driving
+// system command (build, check) can carry a DOCKER_HOST pin from BackendEnv and
+// reach the docker daemon the user selected (orbstack/docker-desktop). The
+// Client stays backend-less; BuildImage/CheckPrerequisites construct the runtime
+// per their BackendType option using this env.
+func SystemWithEnv(env map[string]string) (*yoloai.System, error) {
 	l := Layout()
 	c, err := yoloai.NewClient(context.Background(), yoloai.ClientCreateOptions{
 		DataDir: l.DataDir,
 		HomeDir: l.HomeDir,
-		Env:     EdgeEnv(),
+		Env:     env,
 	})
 	if err != nil {
 		return nil, err

@@ -6,6 +6,7 @@ package system
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"text/tabwriter"
 
@@ -55,6 +56,50 @@ var backendTradeoffs = map[string][]string{
 		"Requires KVM — not available on standard cloud VMs without nested virtualization",
 		"Used automatically with --isolation vm or --isolation vm-enhanced",
 	},
+	"orbstack": {
+		"Alias for the Docker backend pinned to OrbStack's daemon socket",
+		"Fast, low-overhead Docker + Linux VM for macOS",
+		"Picking it targets OrbStack even when other Docker providers are also installed",
+	},
+	"docker-desktop": {
+		"Alias for the Docker backend pinned to Docker Desktop's daemon socket",
+		"Picking it targets Docker Desktop even when other Docker providers are also installed",
+	},
+}
+
+// containerSystemBackendRows returns CLI-only listing rows for the docker-VM
+// alias selectors (orbstack, docker-desktop). They are not registered backends —
+// each is the docker backend pinned to one daemon socket — so they don't appear
+// in runtime.Descriptors(); we surface them here so `yoloai system backends`
+// shows every container system the user can pick. Availability = the daemon
+// socket is present on disk.
+func containerSystemBackendRows() []yoloai.BackendInfo {
+	home := cliutil.Layout().HomeDir
+	rows := make([]yoloai.BackendInfo, 0, len(yoloai.ContainerSystems()))
+	for _, id := range yoloai.ContainerSystems() {
+		avail, note := containerSystemAvailable(yoloai.ContainerSystemSocket(id, home))
+		rows = append(rows, yoloai.BackendInfo{
+			Type:        id,
+			Description: "Docker, pinned to " + yoloai.ContainerSystemLabel(id),
+			Available:   avail,
+			Note:        note,
+		})
+	}
+	return rows
+}
+
+// containerSystemAvailable reports whether an alias's pinned daemon socket is
+// present on disk (a cheap stat, not a dial — mirrors the docker fallback
+// prober's sockExists check).
+func containerSystemAvailable(dockerHost string) (available bool, note string) {
+	path := strings.TrimPrefix(dockerHost, "unix://")
+	if path == "" {
+		return false, "no home directory to locate the daemon socket"
+	}
+	if _, err := os.Stat(path); err != nil {
+		return false, "daemon socket not found (is it installed and running?)"
+	}
+	return true, ""
 }
 
 func newSystemBackendsCmd() *cobra.Command {
@@ -83,6 +128,7 @@ func listBackends(cmd *cobra.Command) error {
 		return err
 	}
 	backends := sys.BackendTypes(cmd.Context(), yoloai.BackendQuery{ProbeAvailability: true})
+	backends = append(backends, containerSystemBackendRows()...)
 
 	if cliutil.JSONEnabled(cmd) {
 		type backendJSON struct {
@@ -127,7 +173,8 @@ func showBackendDetail(cmd *cobra.Command, name string) error {
 	}
 	var desc yoloai.BackendInfo
 	found := false
-	for _, b := range sys.BackendTypes(cmd.Context(), yoloai.BackendQuery{ProbeAvailability: true}) {
+	rows := append(sys.BackendTypes(cmd.Context(), yoloai.BackendQuery{ProbeAvailability: true}), containerSystemBackendRows()...)
+	for _, b := range rows {
 		if string(b.Type) == name {
 			desc = b
 			found = true
@@ -162,11 +209,15 @@ func showBackendDetail(cmd *cobra.Command, name string) error {
 		}
 	}
 
-	fmt.Fprintf(out, "Backend:     %s\n", desc.Type)                          //nolint:errcheck
-	fmt.Fprintf(out, "Description: %s\n", desc.Description)                   //nolint:errcheck
-	fmt.Fprintf(out, "Available:   %s\n", avail)                              //nolint:errcheck
-	fmt.Fprintf(out, "Platforms:   %s\n", strings.Join(desc.Platforms, ", ")) //nolint:errcheck
-	fmt.Fprintf(out, "Requires:    %s\n", desc.Requires)                      //nolint:errcheck
+	fmt.Fprintf(out, "Backend:     %s\n", desc.Type)        //nolint:errcheck
+	fmt.Fprintf(out, "Description: %s\n", desc.Description) //nolint:errcheck
+	fmt.Fprintf(out, "Available:   %s\n", avail)            //nolint:errcheck
+	if len(desc.Platforms) > 0 {
+		fmt.Fprintf(out, "Platforms:   %s\n", strings.Join(desc.Platforms, ", ")) //nolint:errcheck
+	}
+	if desc.Requires != "" {
+		fmt.Fprintf(out, "Requires:    %s\n", desc.Requires) //nolint:errcheck
+	}
 	if desc.InstallHint != "" {
 		fmt.Fprintf(out, "Install:     %s\n", desc.InstallHint) //nolint:errcheck
 	}
@@ -185,9 +236,12 @@ func showBackendDetail(cmd *cobra.Command, name string) error {
 // order; used in usage-error messages enumerating valid choices.
 func backendNames(_ *cobra.Command) []string {
 	backends := yoloai.BackendTypes()
-	names := make([]string, len(backends))
-	for i, b := range backends {
-		names[i] = string(b.Type)
+	names := make([]string, 0, len(backends)+len(yoloai.ContainerSystems()))
+	for _, b := range backends {
+		names = append(names, string(b.Type))
+	}
+	for _, id := range yoloai.ContainerSystems() {
+		names = append(names, string(id))
 	}
 	return names
 }

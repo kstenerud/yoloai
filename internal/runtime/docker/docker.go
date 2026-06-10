@@ -122,6 +122,11 @@ type Runtime struct {
 	// Capability fields — built once in New(), returned by RequiredCapabilities.
 	gvisorRunsc      caps.HostCapability
 	gvisorRegistered caps.HostCapability
+
+	// providerNames are the local Docker providers detected on the host at
+	// construction (OrbStack, Docker Desktop, …). Used only for the "you may have
+	// switched Docker providers" hint on not-found; empty for podman.
+	providerNames []string
 }
 
 // Compile-time check.
@@ -182,7 +187,7 @@ func NewWithSocket(ctx context.Context, host string, binaryName string, layout c
 		}
 	}
 
-	return nil, pingFailureError(pingErr, binaryName)
+	return nil, pingFailureError(pingErr, binaryName, env)
 }
 
 // dialDocker builds a client for host ("" = SDK default socket) and verifies
@@ -225,12 +230,28 @@ func dialFirstAlive(ctx context.Context, baseOpts []dockerclient.Opt, env map[st
 func newDockerRuntime(cli *dockerclient.Client, binaryName string, layout config.Layout) *Runtime {
 	execEnv := layout.Env().EnvForDockerExec()
 	r := &Runtime{client: cli, binaryName: binaryName, principal: layout.Principal, execEnv: execEnv}
+	if binaryName == "docker" {
+		r.providerNames = detectedDockerProviders(layout.HomeDir)
+	}
 	r.gvisorRunsc = caps.NewGVisorRunsc(exec.LookPath)
 	r.gvisorRegistered = buildGVisorRegisteredCap(execEnv, binaryName)
 	return r
 }
 
-func pingFailureError(err error, binaryName string) error {
+// notFound returns ErrNotFound, augmented with a provider-switch hint when more
+// than one local Docker provider is installed: the container may live in a
+// provider other than the one this client connected to (the OrbStack ⇄ Docker
+// Desktop footgun). The hint wraps ErrNotFound (%w), so errors.Is callers — and
+// the launch retry / status mapping — keep working unchanged.
+func (r *Runtime) notFound() error {
+	if len(r.providerNames) < 2 {
+		return runtime.ErrNotFound
+	}
+	return fmt.Errorf("%w — if you recently switched Docker providers, this sandbox's container may live in a different one (installed: %s); start the provider it was created on, or set DOCKER_HOST / 'docker context use' to point at it",
+		runtime.ErrNotFound, strings.Join(r.providerNames, ", "))
+}
+
+func pingFailureError(err error, binaryName string, env map[string]string) error {
 	if runtime.IsPermissionDenied(err) {
 		return yoerrors.NewPermissionError("%s socket permission denied: add your user to the %s group or run with sudo", binaryName, binaryName)
 	}
@@ -239,7 +260,14 @@ func pingFailureError(err error, binaryName string) error {
 	case "podman":
 		hint = "start Podman Desktop or run 'systemctl --user start podman.socket'"
 	default:
-		hint = "start Docker Desktop or run 'sudo systemctl start docker'"
+		// Name the Docker providers actually installed here, so a user who
+		// stopped one (e.g. OrbStack) to use another (Docker Desktop) — or who
+		// has only one installed — is pointed at the right thing to start.
+		if providers := detectedDockerProviders(env["HOME"]); len(providers) > 0 {
+			hint = "start your Docker provider (installed: " + strings.Join(providers, ", ") + ")"
+		} else {
+			hint = "start Docker Desktop or run 'sudo systemctl start docker'"
+		}
 	}
 	// Wrap the underlying ping error (%w) rather than discarding it: the hint is
 	// the common cause, but when it isn't, the real error is the only thing that
@@ -511,7 +539,7 @@ func (r *Runtime) Inspect(ctx context.Context, name string) (runtime.InstanceInf
 	info, err := r.client.ContainerInspect(ctx, name)
 	if err != nil {
 		if cerrdefs.IsNotFound(err) {
-			return runtime.InstanceInfo{}, runtime.ErrNotFound
+			return runtime.InstanceInfo{}, r.notFound()
 		}
 		return runtime.InstanceInfo{}, fmt.Errorf("inspect container: %w", err)
 	}

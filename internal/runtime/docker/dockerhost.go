@@ -100,18 +100,45 @@ func contextEndpointHost(configDir, name string) string {
 	return meta.Endpoints.Docker.Host
 }
 
+// dockerProviders are the local Docker-compatible daemons yoloai knows by name,
+// in preference order (OrbStack before Docker Desktop). rel is the socket path
+// under $HOME. The table feeds both the dead-socket fallback prober
+// (wellKnownDockerSockets) and the "you may have switched providers" hint
+// (detectedDockerProviders), so the two never drift.
+var dockerProviders = []struct{ rel, name string }{
+	{".orbstack/run/docker.sock", "OrbStack"},
+	{".docker/run/docker.sock", "Docker Desktop"},
+	{".colima/default/docker.sock", "Colima"},
+	{".rd/docker.sock", "Rancher Desktop"},
+}
+
 // wellKnownDockerSockets lists local Docker-compatible unix sockets to probe
 // when the resolved endpoint is dead, in preference order. The caller skips
 // paths that don't exist. HOME is sourced from the threaded env (§12).
 func wellKnownDockerSockets(env map[string]string) []string {
 	out := []string{unixScheme + "/var/run/docker.sock"}
 	if home := env["HOME"]; home != "" {
-		out = append(out,
-			unixScheme+filepath.Join(home, ".orbstack/run/docker.sock"),   // OrbStack (preferred over Docker Desktop)
-			unixScheme+filepath.Join(home, ".docker/run/docker.sock"),     // Docker Desktop
-			unixScheme+filepath.Join(home, ".colima/default/docker.sock"), // Colima
-			unixScheme+filepath.Join(home, ".rd/docker.sock"),             // Rancher Desktop
-		)
+		for _, p := range dockerProviders {
+			out = append(out, unixScheme+filepath.Join(home, p.rel))
+		}
+	}
+	return out
+}
+
+// detectedDockerProviders returns the product names of local Docker providers
+// whose daemon socket is present on disk under homeDir, in preference order. It
+// powers the switch-provider hint: when the active daemon doesn't have a
+// sandbox's container (or no daemon is reachable), it points the user at the
+// providers actually installed so they can start the one they created on.
+func detectedDockerProviders(homeDir string) []string {
+	if homeDir == "" {
+		return nil
+	}
+	var out []string
+	for _, p := range dockerProviders {
+		if sockExists(unixScheme + filepath.Join(homeDir, p.rel)) {
+			out = append(out, p.name)
+		}
 	}
 	return out
 }
