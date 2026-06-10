@@ -3,10 +3,10 @@
 ABOUTME: Handoff/plan for replacing the ad-hoc `config.Layout` env accessors
 ABOUTME: with a single opaque, purpose-method, forbidigo-gated curation type.
 
-Status: **designed, not yet implemented.** A first encapsulation pass already
-landed (commit `9223058`, branch `df19-test-isolation`); this plan supersedes
-that design with a stronger one the user signed off on. Read this whole file
-before touching code.
+Status: **IMPLEMENTED** on branch `df19-test-isolation` (commits `2f9e4fd`
+Phase 1, `2dcb9aa` Phase 2, `04c4c32` Phase 3, `764556d` Phase 4; `make check`
+green at each). The locked design below was followed; deviations recorded in
+§8 at the bottom. (Superseded the first encapsulation pass in `9223058`.)
 
 ---
 
@@ -233,3 +233,41 @@ in `fakeruntime_test.go`). Keep that hermetic.
 - `internal/cli/cliutil/{layout,client}.go` — the edge (`processEnv`, ClientCreateOptions).
 - `.golangci.yml` — forbidigo `forbid` + `exclusions.rules` (gate template).
 - `docs/BREAKING-CHANGES.md` — add the interpolation-constraint entry.
+
+---
+
+## 8. Deviations from this plan (as implemented)
+
+The locked design held; these are the points where the implementation chose a
+different (documented) path than the prose above:
+
+- **Type home.** `config.HostEnv` lives in a new `internal/config/host_env.go`,
+  not in `layout_env.go`. `layout_env.go` was deleted entirely; `WithEnv` moved
+  into `host_env.go`. (§5's "reconsider only if it bloats config" — a sibling
+  file read cleaner than reworking the old file in place.)
+- **`EnvLookup`/`LookupEnv`/`MapEnv` deletion moved Phase 2 → Phase 3.** The
+  plan's Phase 2 named the deletion, but those symbols were still used by the
+  agent-credential / docker-build / model-prefix / TART_HOME / TMUX/COLUMNS /
+  diagnostics readers, so deleting them in Phase 2 could not compile. Phase 2
+  constrained `${VAR}` expansion (its real goal); Phase 3 migrated those
+  remaining consumers and then deleted the interface + methods. End state is
+  identical to the plan.
+- **`runtime.DaemonEnvVars` / `yoloai.DaemonEnvVars` KEPT (not moved into
+  config).** They are public API: external callers of the public
+  `yoloai.SelectBackend` pass them. `config` cannot import `runtime` (import
+  cycle), so it carries its own `daemonEnvAllowlist` (backing
+  `EnvForDaemonDiscovery`) that mirrors the public list — a `keep the two in
+  sync` comment marks both. Internal callers all use `EnvForDaemonDiscovery`.
+- **`EnvSnapshot` removal** uses `cliutil.EdgeEnv()` (returns the
+  `processEnv()` snapshot captured at the CLI edge) to feed
+  `ClientCreateOptions.Env`; no new test-setter plumbing was needed because the
+  `LayoutForDataDir`-based test helpers already build their Layout from the same
+  `processEnv()`.
+- **Seatbelt allowlists.** `seatbeltExecAllowlist` and `sandboxEnvAllowlist`
+  were byte-identical, so `EnvForSeatbeltExec`/`EnvForSeatbeltSandbox` share one
+  backing var (`seatbeltSandboxAllowlist`) — two methods, same data.
+- **Gating granularity.** Phase 4 uses two broad `forbid` patterns
+  (`\.EnvFor[A-Z]\w*`, `\.PassthroughEnv`) rather than one per method, with one
+  `exclusions.rules` entry per purpose (grouping the allowed paths). Tests are
+  exempt from the accessor gate (they read the threaded, test-controlled Layout,
+  not ambient env); `os.Environ`/`exec.Command` stay banned in tests.
