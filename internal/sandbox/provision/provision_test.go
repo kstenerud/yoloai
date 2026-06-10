@@ -19,7 +19,7 @@ import (
 
 func TestHasAnyAPIKey_Set(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
-	hostEnv := config.MapEnv{"ANTHROPIC_API_KEY": "sk-test-123"}
+	hostEnv := config.Layout{}.WithEnv(map[string]string{"ANTHROPIC_API_KEY": "sk-test-123"})
 
 	assert.True(t, HasAnyAPIKey(agentDef, hostEnv))
 }
@@ -27,12 +27,12 @@ func TestHasAnyAPIKey_Set(t *testing.T) {
 func TestHasAnyAPIKey_Unset(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
 
-	assert.False(t, HasAnyAPIKey(agentDef, nil))
+	assert.False(t, HasAnyAPIKey(agentDef, config.Layout{}))
 }
 
 func TestHasAnyAPIKey_EmptyList(t *testing.T) {
 	agentDef := agent.GetAgent("test")
-	assert.True(t, HasAnyAPIKey(agentDef, nil)) // no API key required = always true
+	assert.True(t, HasAnyAPIKey(agentDef, config.Layout{})) // no API key required = always true
 }
 
 // HasAnyAuthFile tests
@@ -113,7 +113,7 @@ func TestDescribeSeedAuthFiles_NoAuthFiles(t *testing.T) {
 
 func TestCreateSecretsDir_WithKey(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
-	hostEnv := config.MapEnv{"ANTHROPIC_API_KEY": "sk-test-secret"}
+	hostEnv := config.Layout{}.WithEnv(map[string]string{"ANTHROPIC_API_KEY": "sk-test-secret"})
 
 	dir, err := CreateSecretsDir(agentDef, nil, hostEnv, "")
 	require.NoError(t, err)
@@ -128,7 +128,7 @@ func TestCreateSecretsDir_WithKey(t *testing.T) {
 func TestCreateSecretsDir_NoKey(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
 
-	dir, err := CreateSecretsDir(agentDef, nil, nil, "")
+	dir, err := CreateSecretsDir(agentDef, nil, config.Layout{}, "")
 	require.NoError(t, err)
 	assert.Empty(t, dir)
 }
@@ -136,7 +136,7 @@ func TestCreateSecretsDir_NoKey(t *testing.T) {
 func TestCreateSecretsDir_NoEnvVars(t *testing.T) {
 	agentDef := agent.GetAgent("test")
 
-	dir, err := CreateSecretsDir(agentDef, nil, nil, "")
+	dir, err := CreateSecretsDir(agentDef, nil, config.Layout{}, "")
 	require.NoError(t, err)
 	assert.Empty(t, dir)
 }
@@ -148,7 +148,7 @@ func TestCreateSecretsDir_WithEnvVars(t *testing.T) {
 		"CUSTOM_VAR":      "myvalue",
 	}
 
-	dir, err := CreateSecretsDir(agentDef, envVars, nil, "")
+	dir, err := CreateSecretsDir(agentDef, envVars, config.Layout{}, "")
 	require.NoError(t, err)
 	require.NotEmpty(t, dir)
 	defer os.RemoveAll(dir) //nolint:errcheck
@@ -167,7 +167,7 @@ func TestCreateSecretsDir_APIKeyOverridesEnv(t *testing.T) {
 	envVars := map[string]string{
 		"ANTHROPIC_API_KEY": "should-be-overwritten",
 	}
-	hostEnv := config.MapEnv{"ANTHROPIC_API_KEY": "sk-real-key"}
+	hostEnv := config.Layout{}.WithEnv(map[string]string{"ANTHROPIC_API_KEY": "sk-real-key"})
 
 	dir, err := CreateSecretsDir(agentDef, envVars, hostEnv, "")
 	require.NoError(t, err)
@@ -182,14 +182,14 @@ func TestCreateSecretsDir_APIKeyOverridesEnv(t *testing.T) {
 func TestCreateSecretsDir_EmptyBoth(t *testing.T) {
 	agentDef := agent.GetAgent("test")
 
-	dir, err := CreateSecretsDir(agentDef, map[string]string{}, nil, "")
+	dir, err := CreateSecretsDir(agentDef, map[string]string{}, config.Layout{}, "")
 	require.NoError(t, err)
 	assert.Empty(t, dir)
 }
 
 func TestCreateSecretsDir_HonorsStagingRoot(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
-	hostEnv := config.MapEnv{"ANTHROPIC_API_KEY": "sk-test-secret"}
+	hostEnv := config.Layout{}.WithEnv(map[string]string{"ANTHROPIC_API_KEY": "sk-test-secret"})
 	stagingRoot := t.TempDir()
 
 	dir, err := CreateSecretsDir(agentDef, nil, hostEnv, stagingRoot)
@@ -221,7 +221,7 @@ func TestCopySeedFiles_CopiesExistingFiles(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "home-seed"), 0750))
 
 	agentDef := agent.GetAgent("claude")
-	copied, err := CopySeedFiles(agentDef, sandboxDir, true, tmpDir, nil)
+	copied, err := CopySeedFiles(agentDef, sandboxDir, true, tmpDir, config.Layout{})
 	require.NoError(t, err)
 	assert.False(t, copied) // copied only tracks auth-only files; settings.json is not auth-only
 
@@ -242,7 +242,7 @@ func TestCopySeedFiles_SkipsAuthWhenAPIKeySet(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "home-seed"), 0750))
 
 	agentDef := agent.GetAgent("claude")
-	_, err := CopySeedFiles(agentDef, sandboxDir, true, tmpDir, nil) // hasAPIKey=true
+	_, err := CopySeedFiles(agentDef, sandboxDir, true, tmpDir, config.Layout{}) // hasAPIKey=true
 	require.NoError(t, err)
 
 	// Auth-only file should NOT be copied when API key is set
@@ -262,7 +262,7 @@ func TestCopySeedFiles_CopiesAuthWhenNoAPIKey(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "home-seed"), 0750))
 
 	agentDef := agent.GetAgent("claude")
-	copied, err := CopySeedFiles(agentDef, sandboxDir, false, tmpDir, nil) // hasAPIKey=false
+	copied, err := CopySeedFiles(agentDef, sandboxDir, false, tmpDir, config.Layout{}) // hasAPIKey=false
 	require.NoError(t, err)
 	assert.True(t, copied)
 
@@ -280,7 +280,7 @@ func TestCopySeedFiles_HomeDirFiles(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "home-seed"), 0750))
 
 	agentDef := agent.GetAgent("claude")
-	_, err := CopySeedFiles(agentDef, sandboxDir, true, tmpDir, nil)
+	_, err := CopySeedFiles(agentDef, sandboxDir, true, tmpDir, config.Layout{})
 	require.NoError(t, err)
 
 	// HomeDir=true file should go to home-seed/
@@ -295,7 +295,7 @@ func TestCopySeedFiles_SkipsMissingFiles(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "home-seed"), 0750))
 
 	agentDef := agent.GetAgent("claude")
-	copied, err := CopySeedFiles(agentDef, sandboxDir, true, tmpDir, nil)
+	copied, err := CopySeedFiles(agentDef, sandboxDir, true, tmpDir, config.Layout{})
 	require.NoError(t, err)
 	assert.False(t, copied)
 }
@@ -319,7 +319,7 @@ func TestCopySeedFiles_KeychainFallback(t *testing.T) {
 	}
 	defer func() { KeychainReader = origReader }()
 
-	copied, err := CopySeedFiles(agentDef, sandboxDir, false, tmpDir, nil) // hasAPIKey=false
+	copied, err := CopySeedFiles(agentDef, sandboxDir, false, tmpDir, config.Layout{}) // hasAPIKey=false
 	require.NoError(t, err)
 	assert.True(t, copied)
 
@@ -352,7 +352,7 @@ func TestCopySeedFiles_KeychainSkippedWhenFileExists(t *testing.T) {
 	}
 	defer func() { KeychainReader = origReader }()
 
-	copied, err := CopySeedFiles(agentDef, sandboxDir, false, tmpDir, nil)
+	copied, err := CopySeedFiles(agentDef, sandboxDir, false, tmpDir, config.Layout{})
 	require.NoError(t, err)
 	assert.True(t, copied)
 	assert.False(t, keychainCalled, "KeychainReader should not be called when file exists")
@@ -502,12 +502,12 @@ func TestEnsureHomeSeedConfig_NoopForTestAgent(t *testing.T) {
 
 func TestHasAnyAuthHint_NoHintVars(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
-	assert.False(t, HasAnyAuthHint(agentDef, nil, nil))
+	assert.False(t, HasAnyAuthHint(agentDef, nil, config.Layout{}))
 }
 
 func TestHasAnyAuthHint_HostEnvSet(t *testing.T) {
 	agentDef := agent.GetAgent("aider")
-	hostEnv := config.MapEnv{"OLLAMA_API_BASE": "http://localhost:11434"}
+	hostEnv := config.Layout{}.WithEnv(map[string]string{"OLLAMA_API_BASE": "http://localhost:11434"})
 	assert.True(t, HasAnyAuthHint(agentDef, nil, hostEnv))
 }
 
@@ -516,10 +516,10 @@ func TestHasAnyAuthHint_ConfigEnvSet(t *testing.T) {
 	configEnv := map[string]string{
 		"OLLAMA_API_BASE": "http://localhost:11434",
 	}
-	assert.True(t, HasAnyAuthHint(agentDef, configEnv, nil))
+	assert.True(t, HasAnyAuthHint(agentDef, configEnv, config.Layout{}))
 }
 
 func TestHasAnyAuthHint_NeitherSet(t *testing.T) {
 	agentDef := agent.GetAgent("aider")
-	assert.False(t, HasAnyAuthHint(agentDef, nil, nil))
+	assert.False(t, HasAnyAuthHint(agentDef, nil, config.Layout{}))
 }

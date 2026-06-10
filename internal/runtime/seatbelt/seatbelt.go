@@ -96,18 +96,6 @@ const (
 	symlinkManifestName = "mount-symlinks.txt"
 )
 
-// seatbeltExecAllowlist is the set of env vars passed to sandbox-exec,
-// tmux, and other seatbelt subprocesses (DEV §12). Credentials (SSH_AUTH_SOCK,
-// AWS_SECRET_ACCESS_KEY, etc.) are excluded; the entrypoint injects agent API
-// keys from the secrets directory.
-var seatbeltExecAllowlist = []string{
-	"PATH", "HOME", "USER", "LOGNAME",
-	"SHELL", "TERM", "TMPDIR",
-	"LANG", "LC_ALL", "LC_CTYPE",
-	"LC_COLLATE", "LC_MESSAGES", "LC_MONETARY",
-	"LC_NUMERIC", "LC_TIME",
-}
-
 // Runtime implements runtime.Runtime using macOS sandbox-exec.
 type Runtime struct {
 	sandboxExecBin string        // path to sandbox-exec binary
@@ -149,7 +137,7 @@ func New(_ context.Context, layout config.Layout, homeDir string) (*Runtime, err
 		return nil, yoerrors.NewDependencyError("sandbox-exec not found: %w", err)
 	}
 
-	execEnv := layout.ExecEnv(seatbeltExecAllowlist, nil)
+	execEnv := layout.Env().EnvForSeatbeltExec()
 	return &Runtime{
 		sandboxExecBin: sandboxExecBin,
 		layout:         layout,
@@ -601,19 +589,7 @@ func (r *Runtime) killByPID(sandboxPath string) {
 // The curated subset is built from the threaded snapshot, never os.Environ (§12) —
 // the CLI captures the host env once at its boundary and threads it in.
 func (r *Runtime) sandboxEnv() []string {
-	return r.layout.ExecEnv(sandboxEnvAllowlist, nil)
-}
-
-// sandboxEnvAllowlist names the safe OS/locale vars passed into the seatbelt
-// sandbox. Credentials (SSH_AUTH_SOCK, AWS_SECRET_ACCESS_KEY, ...) are excluded;
-// the entrypoint injects agent API keys from the secrets dir, and users opt in
-// to extra vars via the config env: section.
-var sandboxEnvAllowlist = []string{
-	"PATH", "HOME", "USER", "LOGNAME",
-	"SHELL", "TERM", "TMPDIR",
-	"LANG", "LC_ALL", "LC_CTYPE",
-	"LC_COLLATE", "LC_MESSAGES", "LC_MONETARY",
-	"LC_NUMERIC", "LC_TIME",
+	return r.layout.Env().EnvForSeatbeltSandbox()
 }
 
 // waitForTmux polls until the tmux session appears via the per-sandbox socket.

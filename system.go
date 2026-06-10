@@ -513,10 +513,8 @@ func (s *System) checkAgent(name string) CheckResult {
 		return CheckResult{Name: "agent", OK: true, Message: fmt.Sprintf("agent %q requires no credentials", name)}
 	}
 	var found []string
-	for _, key := range def.APIKeyEnvVars {
-		if v, _ := s.layout.LookupEnv(key); v != "" {
-			found = append(found, key)
-		}
+	for key := range s.layout.Env().EnvForAgentCredentials(def.APIKeyEnvVars) {
+		found = append(found, key)
 	}
 	if len(found) == 0 {
 		return CheckResult{

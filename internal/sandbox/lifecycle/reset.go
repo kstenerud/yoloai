@@ -415,7 +415,7 @@ func resetInPlace(ctx context.Context, d state.Deps, opts ResetOptions, meta *st
 
 	workDir := store.WorkDir(sandboxDir, meta.Workdir.HostPath)
 	g := git.NewHost(d.Layout)
-	rsyncEnv := d.Layout.ExecEnv([]string{"PATH", "HOME", "TMPDIR"}, nil)
+	rsyncEnv := d.Layout.Env().EnvForHostTool()
 
 	// Re-sync workdir from host (bind-mount makes changes visible in container)
 	if err := rsyncDir(rsyncEnv, meta.Workdir.HostPath, workDir); err != nil {

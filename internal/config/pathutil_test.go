@@ -15,14 +15,14 @@ func TestExpandPath_KnownVar(t *testing.T) {
 	home, err := os.UserHomeDir()
 	require.NoError(t, err)
 
-	env := MapEnv{"HOME": home}
+	env := map[string]string{"HOME": home}
 	result, err := ExpandPath("${HOME}/projects", home, env)
 	require.NoError(t, err)
 	assert.Equal(t, home+"/projects", result)
 }
 
 func TestExpandPath_ChainedVars(t *testing.T) {
-	env := MapEnv{"VAR1": "/first", "VAR2": "second"}
+	env := map[string]string{"VAR1": "/first", "VAR2": "second"}
 
 	result, err := ExpandPath("${VAR1}/${VAR2}", "/home/user", env)
 	require.NoError(t, err)
@@ -30,7 +30,7 @@ func TestExpandPath_ChainedVars(t *testing.T) {
 }
 
 func TestExpandPath_BareVarLiteral(t *testing.T) {
-	env := MapEnv{"VAR": "expanded"}
+	env := map[string]string{"VAR": "expanded"}
 
 	result, err := ExpandPath("$VAR/path", "/home/user", env)
 	require.NoError(t, err)
@@ -51,7 +51,7 @@ func TestExpandPath_UnclosedBrace(t *testing.T) {
 }
 
 func TestExpandPath_TildeAndVar(t *testing.T) {
-	env := MapEnv{"MYDIR": "projects"}
+	env := map[string]string{"MYDIR": "projects"}
 	home, err := os.UserHomeDir()
 	require.NoError(t, err)
 
@@ -78,7 +78,7 @@ func TestExpandPath_EmptyVarName(t *testing.T) {
 }
 
 func TestExpandPath_SetButEmpty(t *testing.T) {
-	env := MapEnv{"EMPTY_VAR": ""}
+	env := map[string]string{"EMPTY_VAR": ""}
 
 	result, err := ExpandPath("/prefix/${EMPTY_VAR}/suffix", "/home/user", env)
 	require.NoError(t, err)
@@ -86,7 +86,7 @@ func TestExpandPath_SetButEmpty(t *testing.T) {
 }
 
 func TestExpandPath_ValueContainsDollarBrace(t *testing.T) {
-	env := MapEnv{"TRICKY": "has${NESTED}inside"}
+	env := map[string]string{"TRICKY": "has${NESTED}inside"}
 
 	result, err := ExpandPath("/start/${TRICKY}/end", "/home/user", env)
 	require.NoError(t, err)
@@ -94,7 +94,7 @@ func TestExpandPath_ValueContainsDollarBrace(t *testing.T) {
 }
 
 func TestExpandPath_AdjacentVars(t *testing.T) {
-	env := MapEnv{"AA": "hello", "BB": "world"}
+	env := map[string]string{"AA": "hello", "BB": "world"}
 
 	result, err := ExpandPath("${AA}${BB}", "/home/user", env)
 	require.NoError(t, err)

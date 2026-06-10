@@ -105,7 +105,7 @@ func runExtension(cmd *cobra.Command, ext *extension.Extension, args []string) e
 
 	// Build environment: the extension gets the full edge-resolved env by design
 	// (still explicit from the threaded snapshot, not ambient os.Environ()).
-	env := cliutil.Layout().EnvForExtension()
+	env := cliutil.Layout().Env().PassthroughEnv()
 	env = append(env, "agent="+agentName)
 
 	for i, a := range ext.Args {

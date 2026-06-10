@@ -23,26 +23,11 @@ import (
 	"github.com/kstenerud/yoloai/yoerrors"
 )
 
-// tartEnvAllowlist is the set of edge-resolved env vars passed through to the
-// tart CLI (and the tools it spawns). HOME and TART_HOME are NOT in the list —
-// they are overridden from layout at construction. TART_HOME in particular is
-// load-bearing: tart resolves its store via macOS NSHomeDirectory() (the passwd
-// DB), so overriding $HOME does NOT redirect ~/.tart — only TART_HOME does
-// (DEV §12, DF19).
-var tartEnvAllowlist = []string{"PATH", "TMPDIR", "SSL_CERT_FILE", "SSL_CERT_DIR"}
-
 // BaseAdminEnv builds the explicit subprocess environment for tart operations
 // that run outside a constructed Runtime (e.g. xcrun simctl queries). Uses the
 // same allowlist and HOME/TART_HOME overrides as New() (DEV §12).
 func BaseAdminEnv(layout config.Layout) []string {
-	tartHome := filepath.Join(layout.HomeDir, ".tart")
-	if v, _ := layout.LookupEnv("TART_HOME"); v != "" {
-		tartHome = v
-	}
-	return layout.ExecEnv(tartEnvAllowlist, map[string]string{
-		"HOME":      layout.HomeDir,
-		"TART_HOME": tartHome,
-	})
+	return layout.Env().EnvForTartInvocation()
 }
 
 // getXcodeSelectPath returns the active Xcode developer directory path from xcode-select.
@@ -232,19 +217,12 @@ func New(_ context.Context, layout config.Layout) (*Runtime, error) {
 		baseImageOverride = cfg.TartImage
 	}
 
-	// TART_HOME controls tart's store; tart reads it via NSHomeDirectory and so
-	// ignores $HOME. Honor an edge-resolved TART_HOME if the user set one,
-	// otherwise default it to <HomeDir>/.tart — which equals the real ~/.tart in
-	// production and an isolated temp store under test. This is the DF19 fix.
-	tartHome := filepath.Join(layout.HomeDir, ".tart")
-	if v, _ := layout.LookupEnv("TART_HOME"); v != "" {
-		tartHome = v
-	}
-
-	execEnv := layout.ExecEnv(tartEnvAllowlist, map[string]string{
-		"HOME":      layout.HomeDir,
-		"TART_HOME": tartHome,
-	})
+	// EnvForTartInvocation applies tart's load-bearing TART_HOME override: tart
+	// reads its store via NSHomeDirectory and so ignores $HOME, so an
+	// edge-resolved TART_HOME is honored and otherwise defaulted to
+	// <HomeDir>/.tart (the real ~/.tart in production, an isolated temp store
+	// under test). This is the DF19 fix.
+	execEnv := layout.Env().EnvForTartInvocation()
 	return &Runtime{
 		tartBin:           tartBin,
 		layout:            layout,

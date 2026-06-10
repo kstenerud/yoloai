@@ -7,6 +7,7 @@ import (
 	"context"
 	"os"
 	goruntime "runtime"
+	"sort"
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/config"
@@ -70,11 +71,6 @@ type ConfigDiagnostics struct {
 	ProfileRaw  []byte
 }
 
-// diagnosticEnvVars is the allowlist of environment variables a bug report
-// captures — the host-networking and yoloai-context vars that explain most
-// backend-connectivity issues, and nothing sensitive.
-var diagnosticEnvVars = []string{"DOCKER_HOST", "CONTAINER_HOST", "XDG_RUNTIME_DIR", "YOLOAI_SANDBOX", "HOME", "TMUX"}
-
 // Diagnostics gathers a structured host/install snapshot for bug reports. It
 // probes every registered backend (constructing and closing each), reads the
 // VM-slot census, and reads both config files raw. Best-effort throughout:
@@ -96,13 +92,19 @@ func (s *System) systemDiagnostics() SystemDiagnostics {
 		DiskUsageBytes: -1,
 	}
 
-	unameEnv := s.layout.ExecEnv([]string{"PATH", "HOME"}, nil)
+	unameEnv := s.layout.Env().EnvForHostTool()
 	if out, err := sysexec.Command(unameEnv, "uname", "-a").Output(); err == nil {
 		sys.Kernel = strings.TrimSpace(string(out))
 	}
 
-	for _, key := range diagnosticEnvVars {
-		if val, _ := s.layout.LookupEnv(key); val != "" {
+	diagEnv := s.layout.Env().EnvForDiagnostics()
+	keys := make([]string, 0, len(diagEnv))
+	for k := range diagEnv {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		if val := diagEnv[key]; val != "" {
 			sys.Env = append(sys.Env, EnvVar{Key: key, Value: val})
 		}
 	}

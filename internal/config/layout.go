@@ -67,11 +67,11 @@ type Layout struct {
 	// outermost boundary (the CLI's licensed os.Environ() read in
 	// cliutil). It is UNEXPORTED so no caller can grab or index the whole
 	// ambient map and bypass curation: populate it only via WithEnv (at the
-	// edges), and read it only through the methods in layout_env.go —
-	// ExecEnv/CuratedEnv (allowlisted subprocess env), LookupEnv (one
-	// arbitrary key, for ${VAR} expansion and agent secrets), EnvForExtension
-	// (the single sanctioned full passthrough), or EnvSnapshot (the embedder/
-	// diagnostics boundary). A nil/empty map means any ${VAR} reference is an
+	// edges), and read it only through the curated HostEnv accessors reached
+	// via Env() (host_env.go) — each names a purpose (EnvForDockerExec,
+	// EnvForGitInvocation, EnvForConfigInterpolation, EnvForAgentCredentials, …)
+	// and hands back only that purpose's keyset, so no consumer sees the whole
+	// ambient map. A nil/empty map means any ${VAR} reference is an
 	// unset-variable error — fine for the baked-in default config, which
 	// contains none. See development-principles.md §12.
 	env map[string]string

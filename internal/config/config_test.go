@@ -666,7 +666,7 @@ func TestLoadConfig_AgentFilesEnvExpansion(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, cfg.AgentFiles)
 	// Env vars are expanded via ExpandAgentFiles; pass explicit env map instead of relying on process env.
-	env := MapEnv{"YOLOAI_AGENT_DIR": "/custom/path"}
+	env := map[string]string{"YOLOAI_AGENT_DIR": "/custom/path"}
 	expanded, err := ExpandAgentFiles(cfg.AgentFiles, layout.HomeDir, env)
 	require.NoError(t, err)
 	assert.Equal(t, "/custom/path", expanded.BaseDir)

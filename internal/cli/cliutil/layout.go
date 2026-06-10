@@ -22,6 +22,14 @@ import (
 // See development-principles.md §12 (No ambient configuration).
 var rootLayout config.Layout
 
+// rootEnv is the raw process-environment snapshot captured once at the CLI edge
+// (the same processEnv() that seeds the root Layout). It is the source for
+// ClientCreateOptions.Env: the CLI hands the library its captured env across the
+// public API boundary via EdgeEnv(), rather than exposing a whole-map getter on
+// Layout. nil until SetRootLayoutFromFlag runs (direct-handler tests that call
+// SetRootLayout fall back to a fresh processEnv() read in EdgeEnv).
+var rootEnv map[string]string
+
 // SetRootLayout records the Layout the rest of the CLI should use.
 // Production goes through SetRootLayoutFromFlag (from the root command's
 // PersistentPreRunE); this lower-level setter exists for tests that call
@@ -42,6 +50,20 @@ func SetRootLayoutFromFlag(dataDir string) {
 		dataDir = filepath.Join(resolveHome(), ".yoloai")
 	}
 	rootLayout = LayoutForDataDir(dataDir)
+	rootEnv = processEnv()
+}
+
+// EdgeEnv returns the raw process-environment snapshot captured at the CLI
+// boundary — the §12 licensed os.Environ() read (with sudo recovery). It is the
+// source for ClientCreateOptions.Env: the CLI hands the library its captured env
+// across the public API boundary here, instead of round-tripping through a
+// whole-map getter on Layout. Library code must never call this; it receives a
+// populated Layout and reads it through the curated HostEnv accessors.
+func EdgeEnv() map[string]string {
+	if rootEnv != nil {
+		return rootEnv
+	}
+	return processEnv()
 }
 
 // Layout returns the CLI's working Layout. It is a pure accessor for the

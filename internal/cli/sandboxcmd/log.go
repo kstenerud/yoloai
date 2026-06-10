@@ -158,11 +158,8 @@ func parseSourceFlag(sourceFlag string) []yoloai.LogSource {
 // falling back to 120. §12: reads the threaded snapshot rather than
 // re-pulling ambient os.Getenv from a subcommand.
 func terminalWidth() int {
-	if s, _ := cliutil.Layout().LookupEnv("COLUMNS"); s != "" {
-		var w int
-		if _, err := fmt.Sscanf(s, "%d", &w); err == nil && w > 0 {
-			return w
-		}
+	if w, ok := cliutil.Layout().Env().TerminalColumns(); ok && w > 0 {
+		return w
 	}
 	return 120
 }

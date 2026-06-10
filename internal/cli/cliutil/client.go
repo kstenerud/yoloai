@@ -64,7 +64,7 @@ func ResolveBackend(cmd *cobra.Command) yoloai.BackendType {
 	isolation := yoloai.IsolationMode(Coalesce(FlagStr(cmd, "isolation"), cfgIsolation))
 	targetOS := Coalesce(FlagStr(cmd, "os"), cfgOS)
 
-	backend, warn := yoloai.SelectBackend(cmd.Context(), ResolveContainerBackendConfig(), isolation, targetOS, Layout().CuratedEnv(yoloai.DaemonEnvVars))
+	backend, warn := yoloai.SelectBackend(cmd.Context(), ResolveContainerBackendConfig(), isolation, targetOS, Layout().Env().EnvForDaemonDiscovery())
 	if warn != "" {
 		fmt.Fprintln(os.Stderr, warn)
 	}
@@ -91,7 +91,7 @@ func ResolveContainerBackendConfig() yoloai.BackendType {
 // Used by lifecycle commands that operate on an existing sandbox.
 func ResolveBackendForSandbox(name string) yoloai.BackendType {
 	l := Layout()
-	c, err := yoloai.NewClient(context.Background(), yoloai.ClientCreateOptions{DataDir: l.DataDir, HomeDir: l.HomeDir, Env: l.EnvSnapshot()})
+	c, err := yoloai.NewClient(context.Background(), yoloai.ClientCreateOptions{DataDir: l.DataDir, HomeDir: l.HomeDir, Env: EdgeEnv()})
 	if err == nil {
 		defer c.Close() //nolint:errcheck // backend-less close is a no-op
 		if sb, sbErr := c.Sandbox(name); sbErr == nil {
@@ -101,7 +101,7 @@ func ResolveBackendForSandbox(name string) yoloai.BackendType {
 		}
 	}
 	// Probe is stat-only so an empty context is fine here.
-	backend, warn := yoloai.SelectContainerBackend(context.Background(), ResolveContainerBackendConfig(), Layout().CuratedEnv(yoloai.DaemonEnvVars))
+	backend, warn := yoloai.SelectContainerBackend(context.Background(), ResolveContainerBackendConfig(), Layout().Env().EnvForDaemonDiscovery())
 	if warn != "" {
 		fmt.Fprintln(os.Stderr, warn)
 	}
@@ -123,7 +123,7 @@ func WithClient(cmd *cobra.Command, backend yoloai.BackendType, fn func(ctx cont
 		Logger:      slog.Default(),
 		Input:       cmd.InOrStdin(),
 		Output:      cmd.ErrOrStderr(),
-		Env:         l.EnvSnapshot(),
+		Env:         EdgeEnv(),
 	})
 	if err != nil {
 		return fmt.Errorf("connect to runtime: %w", err)
@@ -173,7 +173,7 @@ func Client(cmd *cobra.Command) (*yoloai.Client, error) {
 		Logger:  slog.Default(),
 		Input:   cmd.InOrStdin(),
 		Output:  cmd.ErrOrStderr(),
-		Env:     l.EnvSnapshot(),
+		Env:     EdgeEnv(),
 	})
 }
 
@@ -189,7 +189,7 @@ func System() (*yoloai.System, error) {
 	c, err := yoloai.NewClient(context.Background(), yoloai.ClientCreateOptions{
 		DataDir: l.DataDir,
 		HomeDir: l.HomeDir,
-		Env:     l.EnvSnapshot(),
+		Env:     EdgeEnv(),
 	})
 	if err != nil {
 		return nil, err

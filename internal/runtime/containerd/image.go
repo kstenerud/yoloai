@@ -148,11 +148,11 @@ func (r *Runtime) buildDockerImage(ctx context.Context, output io.Writer, logger
 	logger.Info("building yoloai-base image")
 
 	// Curated build env from the threaded snapshot (§12 — never os.Environ).
-	// CuratedBuildEnv also forces BuildKit on: the legacy builder commits one
+	// EnvForDockerBuild also forces BuildKit on: the legacy builder commits one
 	// dangling intermediate image per Dockerfile step on the containerd image
 	// store, which makes `system prune` churn forever (see
 	// backend-idiosyncrasies.md).
-	buildCmd := sysexec.CommandContext(ctx, dockerrt.CuratedBuildEnv(r.layout), dockerBin, "build", "-t", imageRef, "-f", "Dockerfile", "-")
+	buildCmd := sysexec.CommandContext(ctx, r.layout.Env().EnvForDockerBuild(), dockerBin, "build", "-t", imageRef, "-f", "Dockerfile", "-")
 	buildCmd.Stdout = output
 	buildCmd.Stderr = output
 	buildCmd.Stdin = buildCtx

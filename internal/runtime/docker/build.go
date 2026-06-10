@@ -102,7 +102,7 @@ func (r *Runtime) buildBaseImage(ctx context.Context, layout config.Layout, outp
 
 	logger.Debug("building yoloai-base image via BuildKit")
 
-	cmd := sysexec.CommandContext(ctx, CuratedBuildEnv(layout), r.binaryName, "build", "-t", "yoloai-base", "-")
+	cmd := sysexec.CommandContext(ctx, layout.Env().EnvForDockerBuild(), r.binaryName, "build", "-t", "yoloai-base", "-")
 	cmd.Stdin = buildCtx
 	cmd.Stdout = output
 	cmd.Stderr = output
@@ -179,7 +179,7 @@ func createBuildContext() (io.Reader, error) {
 // image per Dockerfile step and makes `system prune` churn forever (see
 // backend-idiosyncrasies.md). BuildKit also supplies the `--secret` plumbing
 // for profiles that need build secrets.
-func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir string, tag string, secrets []string, buildEnv config.EnvLookup, output io.Writer, logger *slog.Logger) error {
+func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir string, tag string, secrets []string, buildEnv config.Layout, output io.Writer, logger *slog.Logger) error {
 	buildCtx, err := createProfileBuildContext(sourceDir)
 	if err != nil {
 		return fmt.Errorf("create profile build context: %w", err)
@@ -193,7 +193,7 @@ func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir string, tag s
 
 	logger.Debug("building profile image via BuildKit", "tag", tag, "sourceDir", sourceDir, "secrets", len(secrets))
 
-	cmd := sysexec.CommandContext(ctx, CuratedBuildEnv(buildEnv), r.binaryName, args...)
+	cmd := sysexec.CommandContext(ctx, buildEnv.Env().EnvForDockerBuild(), r.binaryName, args...)
 	cmd.Stdin = buildCtx
 	cmd.Stdout = output
 	cmd.Stderr = output
@@ -205,46 +205,6 @@ func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir string, tag s
 		return fmt.Errorf("%s build: %w", r.binaryName, err)
 	}
 	return nil
-}
-
-// buildEnvAllowlist names the host-environment keys the docker/podman build
-// subprocess legitimately needs: daemon connection, registry/credential-helper
-// config (HOME + DOCKER/CONTAINER config), proxy settings for base-image pulls,
-// SSH-agent forwarding, and the rootless/buildx XDG locations. The build child
-// receives ONLY these keys (plus DOCKER_BUILDKIT), drawn from the caller's
-// threaded env snapshot — never the live process env (§12). A multi-principal
-// embedder that omits a needed key (e.g. PATH for credential helpers) will see
-// the build fail loudly rather than silently inherit the host's value.
-var buildEnvAllowlist = []string{
-	"HOME", "PATH",
-	"DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG",
-	"DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH", "DOCKER_API_VERSION",
-	"CONTAINER_HOST", "CONTAINERS_CONF", "REGISTRY_AUTH_FILE",
-	"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "FTP_PROXY", "ALL_PROXY",
-	"http_proxy", "https_proxy", "no_proxy", "ftp_proxy", "all_proxy",
-	"SSH_AUTH_SOCK",
-	"XDG_RUNTIME_DIR", "XDG_CONFIG_HOME", "XDG_CACHE_HOME",
-	"BUILDX_CONFIG", "BUILDX_BUILDER",
-}
-
-// CuratedBuildEnv assembles the build subprocess's environment from the caller's
-// threaded host-env snapshot, keeping only the allowlisted keys and always
-// forcing BuildKit on. A nil/empty snapshot yields just DOCKER_BUILDKIT=1 — the
-// binary is still found (exec resolves it from the parent PATH at construction),
-// but the build runs with no inherited host config, which is the intended
-// fail-closed behavior for an embedder that supplied no env.
-//
-// Exported so sibling backends that shell out to `docker build` (the containerd
-// backend's Docker-build fallback) reuse the same §12-curated allowlist rather
-// than dumping os.Environ().
-func CuratedBuildEnv(lookup config.EnvLookup) []string {
-	env := make([]string, 0, len(buildEnvAllowlist)+1)
-	for _, key := range buildEnvAllowlist {
-		if v, ok := lookup.LookupEnv(key); ok && v != "" {
-			env = append(env, key+"="+v)
-		}
-	}
-	return append(env, "DOCKER_BUILDKIT=1")
 }
 
 // ProfileImageNeedsBuild returns true if the profile image needs to be

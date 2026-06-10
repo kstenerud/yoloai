@@ -20,11 +20,11 @@ import (
 //
 // buildEnv is the host-environment snapshot the build subprocess draws from
 // (the caller's Layout, never the live process env — §12). The backend
-// allowlists the keys its build CLI actually needs (CuratedBuildEnv); it does
-// not inherit os.Environ. A multi-principal embedder thus controls exactly
-// which env each principal's profile build sees.
+// allowlists the keys its build CLI actually needs (HostEnv.EnvForDockerBuild);
+// it does not inherit os.Environ. A multi-principal embedder thus controls
+// exactly which env each principal's profile build sees.
 type ProfileImageBuilder interface {
-	BuildProfileImage(ctx context.Context, sourceDir string, tag string, secrets []string, buildEnv config.EnvLookup, output io.Writer, logger *slog.Logger) error
+	BuildProfileImage(ctx context.Context, sourceDir string, tag string, secrets []string, buildEnv config.Layout, output io.Writer, logger *slog.Logger) error
 	ProfileImageNeedsBuild(profileDir string, parentDir string) bool
 	RecordProfileBuildChecksum(profileDir string)
 }

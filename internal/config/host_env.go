@@ -35,6 +35,16 @@ func (l Layout) Env() HostEnv {
 	return HostEnv{vars: l.env, homeDir: l.HomeDir}
 }
 
+// WithEnv returns a copy of the Layout carrying env as its host-env snapshot. It
+// is the only way to populate the (unexported) snapshot, so capture stays at the
+// edges: the CLI's licensed os.Environ read, yoloai.NewClient bridging the public
+// ClientCreateOptions.Env, and tests. Library code receives a populated Layout
+// and reads it only through the curated HostEnv accessors (layout.Env()).
+func (l Layout) WithEnv(env map[string]string) Layout {
+	l.env = env
+	return l
+}
+
 // --- Centralized per-purpose allowlists ---------------------------------------
 //
 // These are the single source of truth for what each purpose may carry. They
@@ -97,7 +107,9 @@ var seatbeltSandboxAllowlist = []string{
 // daemonEnvAllowlist: keys container-backend probes and clients consult for
 // daemon-socket discovery — the union of what the Docker SDK config reads
 // (context/TLS/host) and what Podman socket discovery reads. A superset is safe:
-// each backend reads only its own keys.
+// each backend reads only its own keys. Mirrors the public runtime.DaemonEnvVars
+// (which external callers of the public SelectBackend pass): config cannot import
+// runtime (cycle), so the list is duplicated here; keep the two in sync.
 var daemonEnvAllowlist = []string{
 	"DOCKER_HOST", "DOCKER_CONFIG", "DOCKER_CONTEXT",
 	"DOCKER_CERT_PATH", "DOCKER_TLS_VERIFY", "DOCKER_API_VERSION",

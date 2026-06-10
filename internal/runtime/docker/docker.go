@@ -146,7 +146,7 @@ func New(ctx context.Context, layout config.Layout) (*Runtime, error) {
 // DOCKER_API_VERSION), not os.Environ (§12). binaryName is the CLI binary to use
 // for interactive exec and image builds (e.g., "docker" or "podman").
 func NewWithSocket(ctx context.Context, host string, binaryName string, layout config.Layout) (*Runtime, error) {
-	env := layout.CuratedEnv(runtime.DaemonEnvVars)
+	env := layout.Env().EnvForDaemonDiscovery()
 	baseOpts := []dockerclient.Opt{dockerclient.WithAPIVersionNegotiation()}
 	tlsOpts, err := tlsOptsFromEnv(env)
 	if err != nil {
@@ -219,21 +219,8 @@ func dialFirstAlive(ctx context.Context, baseOpts []dockerclient.Opt, env map[st
 	return nil, ""
 }
 
-// dockerExecAllowlist is the set of env vars passed to docker/podman CLI
-// subprocesses (DEV §12). PATH is required for binary resolution; the
-// DOCKER_* and CONTAINER_HOST vars carry the daemon connection settings
-// threaded from the edge. HOME prevents credential helpers from reading
-// the ambient home. SSL vars carry TLS trust anchors for HTTPS pulls.
-var dockerExecAllowlist = []string{
-	"PATH", "TMPDIR", "SSL_CERT_FILE", "SSL_CERT_DIR",
-	"DOCKER_HOST", "DOCKER_CERT_PATH", "DOCKER_TLS_VERIFY", "DOCKER_API_VERSION",
-	"CONTAINER_HOST", "XDG_RUNTIME_DIR",
-}
-
 func newDockerRuntime(cli *dockerclient.Client, binaryName string, layout config.Layout) *Runtime {
-	execEnv := layout.ExecEnv(dockerExecAllowlist, map[string]string{
-		"HOME": layout.HomeDir,
-	})
+	execEnv := layout.Env().EnvForDockerExec()
 	r := &Runtime{client: cli, binaryName: binaryName, principal: layout.Principal, execEnv: execEnv}
 	r.gvisorRunsc = caps.NewGVisorRunsc(exec.LookPath)
 	r.gvisorRegistered = buildGVisorRegisteredCap(execEnv, binaryName)

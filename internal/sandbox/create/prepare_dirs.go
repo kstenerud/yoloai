@@ -127,9 +127,9 @@ func checkLocalhostURLs(d state.Deps, agentDef *agent.Definition, mergedEnv map[
 	if !desc.AgentProvisionedByBackend {
 		return nil
 	}
+	hostHints := d.Layout.Env().EnvForAgentCredentials(agentDef.AuthHintEnvVars)
 	for _, key := range agentDef.AuthHintEnvVars {
-		hostVal, _ := d.Layout.LookupEnv(key)
-		for _, val := range []string{hostVal, mergedEnv[key]} {
+		for _, val := range []string{hostHints[key], mergedEnv[key]} {
 			if val == "" || !containsLocalhost(val) {
 				continue
 			}

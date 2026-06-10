@@ -101,7 +101,7 @@ func New(ctx context.Context, layout config.Layout) (*Runtime, error) {
 		return nil, yoerrors.NewDependencyError("podman is not installed, install it from https://podman.io/docs/installation")
 	}
 
-	sock, err := discoverSocket(layout.CuratedEnv(runtime.DaemonEnvVars))
+	sock, err := discoverSocket(layout.Env().EnvForDaemonDiscovery())
 	if err != nil {
 		return nil, yoerrors.NewDependencyError("podman socket not found: %w\nhint: run 'systemctl --user start podman.socket' or 'podman machine start'", err)
 	}

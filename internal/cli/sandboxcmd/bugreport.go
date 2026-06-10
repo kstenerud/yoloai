@@ -145,7 +145,7 @@ func WriteSandboxSectionsForFlag(w io.Writer, name, reportType string) {
 		BackendType: yoloai.BackendType(backend),
 		Input:       os.Stdin,
 		Output:      io.Discard, // best-effort path; don't write to the in-progress bug report
-		Env:         l.EnvSnapshot(),
+		Env:         cliutil.EdgeEnv(),
 	})
 	if err != nil {
 		return
@@ -472,7 +472,7 @@ func writeBugReportTerminalSnapshot(ctx context.Context, w io.Writer, c *yoloai.
 func writeBugReportTmuxCapture(w io.Writer, sb *yoloai.Sandbox) {
 	tmuxSock := readTmuxSocketFromConfig(sb)
 	// PATH+HOME suffice — the socket is passed explicitly via -S.
-	tmuxEnv := cliutil.Layout().ExecEnv([]string{"PATH", "HOME", "TMPDIR"}, nil)
+	tmuxEnv := cliutil.Layout().Env().EnvForHostTool()
 	var cmd *exec.Cmd
 	if tmuxSock != "" {
 		cmd = sysexec.Command(tmuxEnv, "tmux", "-S", tmuxSock, "capture-pane", "-p", "-t", "main")

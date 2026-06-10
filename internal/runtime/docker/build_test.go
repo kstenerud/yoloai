@@ -123,7 +123,7 @@ func TestProfileBuildChecksum_MissingDockerfile(t *testing.T) {
 	assert.Empty(t, sum)
 }
 
-func TestCuratedBuildEnv_FiltersToAllowlistAndForcesBuildKit(t *testing.T) {
+func TestEnvForDockerBuild_FiltersToAllowlistAndForcesBuildKit(t *testing.T) {
 	snapshot := map[string]string{
 		"DOCKER_HOST":         "tcp://10.0.0.1:2375",
 		"HTTP_PROXY":          "http://proxy:8080",
@@ -134,7 +134,7 @@ func TestCuratedBuildEnv_FiltersToAllowlistAndForcesBuildKit(t *testing.T) {
 		"DOCKER_CONFIG_EMPTY": "",
 	}
 
-	env := CuratedBuildEnv(config.MapEnv(snapshot))
+	env := config.Layout{}.WithEnv(snapshot).Env().EnvForDockerBuild()
 
 	assert.Contains(t, env, "DOCKER_HOST=tcp://10.0.0.1:2375")
 	assert.Contains(t, env, "HTTP_PROXY=http://proxy:8080")
@@ -148,7 +148,7 @@ func TestCuratedBuildEnv_FiltersToAllowlistAndForcesBuildKit(t *testing.T) {
 	}
 }
 
-func TestCuratedBuildEnv_NilSnapshotStillForcesBuildKit(t *testing.T) {
-	env := CuratedBuildEnv(config.MapEnv(nil))
+func TestEnvForDockerBuild_NilSnapshotStillForcesBuildKit(t *testing.T) {
+	env := config.Layout{}.Env().EnvForDockerBuild()
 	assert.Equal(t, []string{"DOCKER_BUILDKIT=1"}, env)
 }

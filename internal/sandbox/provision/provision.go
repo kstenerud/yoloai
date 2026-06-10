@@ -25,7 +25,7 @@ import (
 // is created under stagingRoot; "" means the OS default temp dir (os.TempDir()), so
 // an embedder can stage a principal's plaintext credentials on a per-principal tmpfs.
 // Returns empty string if nothing was written.
-func CreateSecretsDir(agentDef *agent.Definition, configEnv map[string]string, hostEnv config.EnvLookup, stagingRoot string) (string, error) {
+func CreateSecretsDir(agentDef *agent.Definition, configEnv map[string]string, hostEnv config.Layout, stagingRoot string) (string, error) {
 	if len(agentDef.APIKeyEnvVars) == 0 && len(agentDef.AuthHintEnvVars) == 0 && len(configEnv) == 0 {
 		return "", nil
 	}
@@ -60,15 +60,9 @@ func CreateSecretsDir(agentDef *agent.Definition, configEnv map[string]string, h
 	}
 
 	// Write host env values for API keys and auth hints (overwrites config env on
-	// conflict). hostEnv is the caller's authorized host-environment snapshot.
-	for _, key := range append(agentDef.APIKeyEnvVars, agentDef.AuthHintEnvVars...) {
-		var value string
-		if hostEnv != nil {
-			value, _ = hostEnv.LookupEnv(key)
-		}
-		if value == "" {
-			continue
-		}
+	// conflict). EnvForAgentCredentials yields the present, non-empty subset of
+	// the agent's declared credential keys from the threaded host-env snapshot.
+	for key, value := range hostEnv.Env().EnvForAgentCredentials(append(agentDef.APIKeyEnvVars, agentDef.AuthHintEnvVars...)) {
 		if err := fileutil.WriteFilePerm(filepath.Join(tmpDir, key), []byte(value), perms.SecretsFile); err != nil {
 			_ = os.RemoveAll(tmpDir)
 			return "", fmt.Errorf("write secret %s: %w", key, err)
@@ -86,19 +80,11 @@ func CreateSecretsDir(agentDef *agent.Definition, configEnv map[string]string, h
 
 // HasAnyAPIKey returns true if any of the agent's required API key env vars are
 // present in hostEnv (the caller-supplied host-environment snapshot).
-func HasAnyAPIKey(agentDef *agent.Definition, hostEnv config.EnvLookup) bool {
+func HasAnyAPIKey(agentDef *agent.Definition, hostEnv config.Layout) bool {
 	if len(agentDef.APIKeyEnvVars) == 0 {
 		return true // no API key required
 	}
-	if hostEnv == nil {
-		return false
-	}
-	for _, key := range agentDef.APIKeyEnvVars {
-		if v, _ := hostEnv.LookupEnv(key); v != "" {
-			return true
-		}
-	}
-	return false
+	return len(hostEnv.Env().EnvForAgentCredentials(agentDef.APIKeyEnvVars)) > 0
 }
 
 // HasAnyAuthFile returns true if any auth-only seed files exist on disk
@@ -124,14 +110,10 @@ func HasAnyAuthFile(agentDef *agent.Definition, homeDir string) bool {
 // in hostEnv (the caller-supplied host-environment snapshot) or in the config
 // env map. This allows agents like aider to work with local model servers
 // (Ollama, LM Studio) without a cloud API key.
-func HasAnyAuthHint(agentDef *agent.Definition, configEnv map[string]string, hostEnv config.EnvLookup) bool {
+func HasAnyAuthHint(agentDef *agent.Definition, configEnv map[string]string, hostEnv config.Layout) bool {
+	hostCreds := hostEnv.Env().EnvForAgentCredentials(agentDef.AuthHintEnvVars)
 	for _, key := range agentDef.AuthHintEnvVars {
-		if hostEnv != nil {
-			if v, _ := hostEnv.LookupEnv(key); v != "" {
-				return true
-			}
-		}
-		if configEnv[key] != "" {
+		if hostCreds[key] != "" || configEnv[key] != "" {
 			return true
 		}
 	}
@@ -155,7 +137,7 @@ func DescribeSeedAuthFiles(agentDef *agent.Definition) string {
 // others go to agent-runtime/ (mounted at StateDir).
 // Returns true if any files were copied. Skips files that don't exist on the host.
 // homeDir is used for ~ expansion in seed file host paths.
-func CopySeedFiles(agentDef *agent.Definition, sandboxDir string, hasAPIKey bool, homeDir string, hostEnv config.EnvLookup) (bool, error) {
+func CopySeedFiles(agentDef *agent.Definition, sandboxDir string, hasAPIKey bool, homeDir string, hostEnv config.Layout) (bool, error) {
 	copiedAuth := false
 	agentStateDir := filepath.Join(sandboxDir, store.AgentRuntimeDir)
 	homeSeedDir := filepath.Join(sandboxDir, "home-seed")
@@ -194,20 +176,13 @@ func CopySeedFiles(agentDef *agent.Definition, sandboxDir string, hasAPIKey bool
 }
 
 // shouldSkipSeedFile returns true if the seed file should be skipped.
-func shouldSkipSeedFile(sf agent.SeedFile, hasAPIKey bool, hostEnv config.EnvLookup) bool {
+func shouldSkipSeedFile(sf agent.SeedFile, hasAPIKey bool, hostEnv config.Layout) bool {
 	if !sf.AuthOnly {
 		return false
 	}
 	if len(sf.OwnerAPIKeys) > 0 {
 		// Per-file API key check (used by shell agent): skip if any key is set
-		if hostEnv != nil {
-			for _, key := range sf.OwnerAPIKeys {
-				if v, _ := hostEnv.LookupEnv(key); v != "" {
-					return true
-				}
-			}
-		}
-		return false
+		return len(hostEnv.Env().EnvForAgentCredentials(sf.OwnerAPIKeys)) > 0
 	}
 	return hasAPIKey // auth file not needed when API key is set
 }

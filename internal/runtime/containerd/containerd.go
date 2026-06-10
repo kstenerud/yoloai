@@ -75,14 +75,6 @@ func init() {
 	}, descriptor)
 }
 
-// containerdExecAllowlist is the set of env vars passed to containerd-adjacent
-// CLI subprocesses (DEV §12). PATH is required for binary resolution; XDG_RUNTIME_DIR
-// is needed for rootless containerd socket lookup; SSL vars carry TLS trust anchors.
-var containerdExecAllowlist = []string{
-	"PATH", "TMPDIR", "SSL_CERT_FILE", "SSL_CERT_DIR",
-	"XDG_RUNTIME_DIR",
-}
-
 // Runtime implements runtime.Runtime using the containerd API.
 type Runtime struct {
 	client    *client.Client
@@ -132,9 +124,7 @@ func New(_ context.Context, layout config.Layout) (*Runtime, error) {
 		}
 		return nil, yoerrors.NewDependencyError("connect to containerd: %w\n  Is containerd running? Try: sudo systemctl start containerd", err)
 	}
-	execEnv := layout.ExecEnv(containerdExecAllowlist, map[string]string{
-		"HOME": layout.HomeDir,
-	})
+	execEnv := layout.Env().EnvForContainerdExec()
 	r := &Runtime{client: c, namespace: "yoloai", layout: layout, execEnv: execEnv}
 	r.kataShimV2 = buildKataShimV2Cap()
 	r.kataFCShimV2 = buildKataFCShimV2Cap()

@@ -37,19 +37,20 @@ func ResolveModel(agentDef *agent.Definition, model string, userAliases map[stri
 // prefixed with "ollama_chat/" for litellm to route it correctly. The trigger
 // env var is looked up in hostEnv (the caller's host-environment snapshot) and
 // in configEnv (the profile env); the library never reads os.Environ (§12).
-func ApplyModelPrefix(agentDef *agent.Definition, model string, configEnv map[string]string, hostEnv config.EnvLookup) string {
+func ApplyModelPrefix(agentDef *agent.Definition, model string, configEnv map[string]string, hostEnv config.Layout) string {
 	if model == "" || strings.Contains(model, "/") {
 		return model
 	}
 	if agentDef.ModelPrefixes == nil {
 		return model
 	}
+	triggerKeys := make([]string, 0, len(agentDef.ModelPrefixes))
+	for envVar := range agentDef.ModelPrefixes {
+		triggerKeys = append(triggerKeys, envVar)
+	}
+	hostTriggers := hostEnv.Env().EnvForAgentCredentials(triggerKeys)
 	for envVar, prefix := range agentDef.ModelPrefixes {
-		var hostVal string
-		if hostEnv != nil {
-			hostVal, _ = hostEnv.LookupEnv(envVar)
-		}
-		if hostVal != "" || configEnv[envVar] != "" {
+		if hostTriggers[envVar] != "" || configEnv[envVar] != "" {
 			return prefix + model
 		}
 	}

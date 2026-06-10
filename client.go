@@ -265,6 +265,6 @@ func resolveBackendFromConfig(ctx context.Context, layout config.Layout) runtime
 	if cfg, err := config.LoadDefaultsConfig(layout); err == nil {
 		preferred = runtime.BackendType(cfg.ContainerBackend)
 	}
-	backend, _ := runtime.SelectBackend(ctx, preferred, "", "", layout.CuratedEnv(runtime.DaemonEnvVars))
+	backend, _ := runtime.SelectBackend(ctx, preferred, "", "", layout.Env().EnvForDaemonDiscovery())
 	return backend
 }
