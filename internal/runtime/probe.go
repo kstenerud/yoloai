@@ -7,6 +7,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	goruntime "runtime"
 )
 
 // DaemonEnvVars names the host-env keys that container-backend probes and
@@ -104,6 +105,16 @@ func SelectBackend(ctx context.Context, preferred BackendType, isolation Isolati
 		return BackendSeatbelt, ""
 	}
 
+	// macOS host, Linux workload: the apple backend (fast per-container VM) is
+	// the default — preferred over the container slot — when installed, and is
+	// the macOS Linux-VM backend for `--isolation vm` (which would otherwise
+	// degrade to the container slot, since containerd is Linux-only). An explicit
+	// container_backend preference or `--isolation container` keeps the user in
+	// the container slot. See plans/apple-container-backend.md.
+	if goruntime.GOOS == "darwin" && darwinPrefersApple(ctx, preferred, isolation, env) {
+		return BackendApple, ""
+	}
+
 	// Isolation-based routing: vm / vm-enhanced prefer containerd (Kata),
 	// falling through to the container slot when containerd isn't
 	// available on this host.
@@ -114,6 +125,32 @@ func SelectBackend(ctx context.Context, preferred BackendType, isolation Isolati
 	}
 
 	return SelectContainerBackend(ctx, preferred, env)
+}
+
+// darwinPrefersApple reports whether a Linux workload on a macOS host should use
+// the apple backend instead of the container slot. It only fires when apple is
+// installed (the vm tier is cheap on macOS, so it's the default — but never
+// forced onto a host that can't run it). Cases:
+//   - container_backend=apple (explicit) → yes
+//   - --isolation vm → yes (apple is the macOS Linux-VM backend)
+//   - default isolation with no container preference → yes (the macOS default)
+//   - --isolation container/-enhanced/-privileged, or an explicit container
+//     preference → no (stay in the container slot)
+func darwinPrefersApple(ctx context.Context, preferred BackendType, isolation IsolationMode, env map[string]string) bool {
+	if installed, _ := Installed(ctx, BackendApple, env); !installed {
+		return false
+	}
+	if preferred == BackendApple {
+		return true
+	}
+	switch isolation {
+	case IsolationModeVM:
+		return true
+	case IsolationModeDefault:
+		return preferred == ""
+	default:
+		return false
+	}
 }
 
 // SelectContainerBackend picks the best container backend (`BaseModeName ==

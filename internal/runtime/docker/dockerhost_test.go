@@ -91,8 +91,8 @@ func TestWellKnownDockerSockets_IncludesProvidersUnderHome(t *testing.T) {
 	got := wellKnownDockerSockets(map[string]string{"HOME": "/home/u"})
 	assert.Equal(t, []string{
 		"unix:///var/run/docker.sock",
+		"unix:///home/u/.orbstack/run/docker.sock", // OrbStack preferred over Docker Desktop
 		"unix:///home/u/.docker/run/docker.sock",
-		"unix:///home/u/.orbstack/run/docker.sock",
 		"unix:///home/u/.colima/default/docker.sock",
 		"unix:///home/u/.rd/docker.sock",
 	}, got)

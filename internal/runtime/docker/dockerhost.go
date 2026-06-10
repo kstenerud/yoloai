@@ -107,8 +107,8 @@ func wellKnownDockerSockets(env map[string]string) []string {
 	out := []string{unixScheme + "/var/run/docker.sock"}
 	if home := env["HOME"]; home != "" {
 		out = append(out,
+			unixScheme+filepath.Join(home, ".orbstack/run/docker.sock"),   // OrbStack (preferred over Docker Desktop)
 			unixScheme+filepath.Join(home, ".docker/run/docker.sock"),     // Docker Desktop
-			unixScheme+filepath.Join(home, ".orbstack/run/docker.sock"),   // OrbStack
 			unixScheme+filepath.Join(home, ".colima/default/docker.sock"), // Colima
 			unixScheme+filepath.Join(home, ".rd/docker.sock"),             // Rancher Desktop
 		)

@@ -40,3 +40,33 @@ func TestProbe_TierOnThisHost(t *testing.T) {
 		[]runtime.ProbeStatus{runtime.ProbeAbsent, runtime.ProbeInstalled}, status,
 		"supported host: Absent (gate) or Installed")
 }
+
+// TestSelectBackend_DarwinPrefersApple verifies the macOS-host routing: when
+// apple is installed it's the default and the --isolation vm target, but
+// --isolation container and an explicit container preference stay in the
+// container slot. Runs only on a Mac with the container CLI installed; this test
+// binary registers both apple and — via apple's import — docker.
+func TestSelectBackend_DarwinPrefersApple(t *testing.T) {
+	ctx := context.Background()
+	if !isMacOS() {
+		t.Skip("apple routing only applies on a macOS host")
+	}
+	if installed, _ := runtime.Installed(ctx, runtime.BackendApple, nil); !installed {
+		t.Skip("apple backend not installed on this host")
+	}
+
+	got, _ := runtime.SelectBackend(ctx, "", runtime.IsolationModeDefault, "", nil)
+	assert.Equal(t, runtime.BackendApple, got, "macOS default prefers apple")
+
+	got, _ = runtime.SelectBackend(ctx, "", runtime.IsolationModeVM, "", nil)
+	assert.Equal(t, runtime.BackendApple, got, "--isolation vm routes to apple")
+
+	got, _ = runtime.SelectBackend(ctx, "", runtime.IsolationModeContainer, "", nil)
+	assert.NotEqual(t, runtime.BackendApple, got, "--isolation container is not apple")
+
+	got, _ = runtime.SelectBackend(ctx, runtime.BackendDocker, runtime.IsolationModeDefault, "", nil)
+	assert.NotEqual(t, runtime.BackendApple, got, "explicit container_backend wins over the apple default")
+
+	got, _ = runtime.SelectBackend(ctx, runtime.BackendApple, runtime.IsolationModeDefault, "", nil)
+	assert.Equal(t, runtime.BackendApple, got, "container_backend=apple is honored")
+}
