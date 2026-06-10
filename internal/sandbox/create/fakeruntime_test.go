@@ -7,12 +7,11 @@ import (
 	"context"
 	"io"
 	"log/slog"
-	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime"
+	"github.com/kstenerud/yoloai/internal/testutil"
 )
 
 // Compile-time check.
@@ -94,12 +93,6 @@ func layoutForTmpDir(tmpDir string) config.Layout {
 	// Mirror the CLI boundary: capture the process env as the Layout's host-env
 	// snapshot so credential checks (which read Layout.Env, not os.Getenv) see
 	// any keys the test set via t.Setenv.
-	env := make(map[string]string)
-	for _, e := range os.Environ() { //nolint:forbidigo // §12: licensed test-edge env snapshot → layout.Env; curated by the runtime's execEnv allowlist before any subprocess sees it
-		if k, v, ok := strings.Cut(e, "="); ok {
-			env[k] = v
-		}
-	}
-	l.Env = env
+	l.Env = testutil.HostEnv()
 	return l
 }

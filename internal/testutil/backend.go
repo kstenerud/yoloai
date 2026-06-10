@@ -27,14 +27,17 @@ func IntegrationBackendType() string {
 	return "docker"
 }
 
-// envSnapshot captures the process environment as a map, the test-side
-// equivalent of the CLI's licensed os.Environ() boundary read. This is the one
-// sanctioned env-dump in testutil: every consumer (GitEnv, the integration
-// layout) curates it via sysexec.Curated before any subprocess sees it; the
-// raw map is never handed to a child process (DEV §12).
-func envSnapshot() map[string]string {
+// HostEnv captures the process environment as a map. It is THE single licensed
+// test-edge read of the host environment — the test-side equivalent of the
+// CLI's licensed os.Environ() boundary read. Every consumer curates it before
+// any subprocess sees it: via sysexec.Curated (GitEnv), the runtime's execEnv
+// allowlist (config.Layout.Env), or GitEnv's PATH-only filter; the raw map is
+// never handed to a child process. It is forbidigo-gated in .golangci.yml so
+// new env-grabs cannot proliferate — new callers must be added to the
+// allowlist as a deliberate, reviewed test-edge (DEV §12).
+func HostEnv() map[string]string {
 	m := make(map[string]string)
-	for _, e := range os.Environ() { //nolint:forbidigo // §12: licensed test-edge env snapshot; curated by all consumers before use
+	for _, e := range os.Environ() { //nolint:forbidigo // §12: THE single licensed test-edge env snapshot; curated by all consumers before use
 		if k, v, ok := strings.Cut(e, "="); ok {
 			m[k] = v
 		}
@@ -54,7 +57,7 @@ func NewIntegrationRuntime(ctx context.Context, t *testing.T) yrt.Runtime {
 	// Tests are the boundary equivalent of the CLI's licensed os.Environ read:
 	// thread the host env so backend socket discovery (e.g. podman's
 	// XDG_RUNTIME_DIR) sees the real environment, not an empty map.
-	layout.Env = envSnapshot()
+	layout.Env = HostEnv()
 	// Namespace this runtime to a unique principal so a prune sweep in an
 	// integration test can only ever match yoloai-<principal>-*, never the
 	// developer's real resources (DEV §12, DF19). Shares the one principal

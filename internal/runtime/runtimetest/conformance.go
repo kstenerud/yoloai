@@ -36,19 +36,6 @@ type DockerCompatRuntime interface {
 // (e.g. rt.Close via t.Cleanup) already registered.
 type SetupFunc func(t *testing.T) (DockerCompatRuntime, context.Context)
 
-// EnvFromOS snapshots the process environment as a map. Integration tests are
-// the test-side boundary (equivalent to the CLI's licensed os.Environ read), so
-// they thread the real host env into New just as the CLI would (§12).
-func EnvFromOS() map[string]string {
-	m := make(map[string]string)
-	for _, e := range os.Environ() { //nolint:forbidigo // §12: licensed test-edge env snapshot, curated before any subprocess sees it
-		if k, v, ok := strings.Cut(e, "="); ok {
-			m[k] = v
-		}
-	}
-	return m
-}
-
 // createContainer creates a container on the yoloai-base image with its
 // entrypoint overridden to "sleep infinity" so it stays alive for exec tests.
 // Goes through the docker SDK directly because InstanceConfig does not expose

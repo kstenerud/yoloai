@@ -11,6 +11,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime/docker"
 	"github.com/kstenerud/yoloai/internal/runtime/runtimetest"
+	"github.com/kstenerud/yoloai/internal/testutil"
 )
 
 // TestDockerConformance runs the shared docker-API conformance suite against a
@@ -19,7 +20,7 @@ import (
 func TestDockerConformance(t *testing.T) {
 	runtimetest.RunConformance(t, func(t *testing.T) (runtimetest.DockerCompatRuntime, context.Context) {
 		ctx := context.Background()
-		rt, err := docker.New(ctx, config.Layout{Env: runtimetest.EnvFromOS()})
+		rt, err := docker.New(ctx, config.Layout{Env: testutil.HostEnv()})
 		require.NoError(t, err, "Docker must be running for integration tests")
 		t.Cleanup(func() { rt.Close() }) //nolint:errcheck // test cleanup
 		return rt, ctx

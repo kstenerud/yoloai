@@ -21,19 +21,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// envFromOS snapshots the process environment as a map. Integration tests are
-// the test-side boundary (equivalent to the CLI's licensed os.Environ read),
-// so they thread the real host env into New just as the CLI would.
-func envFromOS() map[string]string {
-	m := make(map[string]string)
-	for _, e := range os.Environ() { //nolint:forbidigo // §12: licensed test-edge env snapshot → layout.Env; curated by the runtime's execEnv allowlist before any subprocess sees it
-		if k, v, ok := strings.Cut(e, "="); ok {
-			m[k] = v
-		}
-	}
-	return m
-}
-
 // createSandbox runs the create pipeline through the carved create.Run entry
 // point, building the same Deps the Engine would (F5.2d dissolved
 // Engine.Create). EnsureSetup is already performed by integrationSetup.
@@ -80,7 +67,7 @@ func integrationSetup(t *testing.T) (*sandbox.Engine, context.Context) {
 	require.NoError(t, os.MkdirAll(layout.CacheDir(), 0750))
 	dockerrt.RecordBuildChecksum(layout, "")
 
-	rt, err := dockerrt.New(ctx, config.Layout{Env: envFromOS()})
+	rt, err := dockerrt.New(ctx, config.Layout{Env: testutil.HostEnv()})
 	require.NoError(t, err, "Docker must be running for integration tests")
 	t.Cleanup(func() { rt.Close() }) //nolint:errcheck // test cleanup
 

@@ -12,6 +12,7 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime"
+	"github.com/kstenerud/yoloai/internal/testutil"
 )
 
 // TestDindVolumeLifecycle verifies that a privileged sandbox gets a managed,
@@ -19,7 +20,7 @@ import (
 // backing for docker-in-docker's overlay2 driver (see ensureDindVolumeMount).
 func TestDindVolumeLifecycle(t *testing.T) {
 	ctx := context.Background()
-	rt, err := New(ctx, config.Layout{Env: envFromOS()})
+	rt, err := New(ctx, config.Layout{Env: testutil.HostEnv()})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close() })
 
@@ -51,7 +52,7 @@ func TestDindVolumeLifecycle(t *testing.T) {
 // only: a plain sandbox must not leave a stray /var/lib/docker volume behind.
 func TestDindVolumeNotCreatedForNonPrivileged(t *testing.T) {
 	ctx := context.Background()
-	rt, err := New(ctx, config.Layout{Env: envFromOS()})
+	rt, err := New(ctx, config.Layout{Env: testutil.HostEnv()})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close() })
 

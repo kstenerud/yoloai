@@ -147,6 +147,17 @@ linters:
         - pattern: "^sysexec\\.GitEnv$"
           msg: "build git envs only via git.NewHost / git.NewSandbox in internal/git — DEV §12"
 
+        # DF19 test-edge env consolidation. The host environment is snapshotted
+        # in exactly one place — testutil.HostEnv — which curates nothing itself
+        # but is the single licensed os.Environ read; every consumer curates it
+        # (via sysexec.Curated, the runtime's execEnv allowlist, or GitEnv)
+        # before any subprocess sees it. New callers must be added to the
+        # exclusions.rules allowlist below: a deliberate, reviewed test-edge.
+        # (Calls inside the testutil package are unqualified `HostEnv()` and do
+        # not match this pattern, so testutil itself needs no exclusion.)
+        - pattern: "^testutil\\.HostEnv$"
+          msg: "the host environment is grabbed in exactly one place (testutil.HostEnv); new callers must be added to the .golangci.yml allowlist — a deliberate, reviewed test-edge (§12). Unit/production code must not read the ambient env."
+
         # §12 ambient-configuration hardening (deny by default). Ambient
         # process state — environment, identity, host, process I/O — must be
         # resolved at the outermost layer (CLI startup / explicit args) and
@@ -283,6 +294,17 @@ linters:
         linters:
           - forbidigo
         text: "sysexec\\.GitEnv"
+      # DF19 testutil.HostEnv allowlist — the licensed test-edge callers of the
+      # one host-env snapshot. golangci-lint does not analyze //go:build
+      # integration files by default, so the ban only fires on non-tagged files;
+      # this file is the sole non-tagged caller default `make check` flags. The
+      # integration callers (docker/podman/sandbox *_test.go) are tagged and so
+      # are not analyzed by default — they need no entry here. Keep this
+      # path-scoped to the specific test-edge file; do NOT exclude whole dirs.
+      - path: "internal/sandbox/create/fakeruntime_test\\.go"
+        linters:
+          - forbidigo
+        text: "testutil\\.HostEnv"
       # Tests may use the ambient-state patterns (temp files, stdio, identity,
       # etc.) — EXCEPT the full-ambient-env dumps (os.Environ / syscall.Environ)
       # and exec.Command*, which bind tests too (DEV §12 / D79: a subprocess gets
@@ -290,10 +312,11 @@ linters:
       # is functionally identical to inheriting the parent env and curates
       # nothing, in test code as well). So this lists the patterns tests ARE
       # exempt from; os.Environ, syscall.Environ, and exec.Command are
-      # deliberately ABSENT. The licensed test-edge env reads (testutil's
-      # envSnapshot, runtimetest's EnvFromOS) carry their own inline nolint and
-      # immediately curate. When adding a new forbidigo pattern that tests should
-      # be exempt from, add its matched symbol here.
+      # deliberately ABSENT. The one licensed test-edge env read
+      # (testutil.HostEnv) carries its own inline nolint and immediately curates;
+      # its qualified callers are gated by the testutil.HostEnv forbid + the DF19
+      # allowlist above. When adding a new forbidigo pattern that tests should be
+      # exempt from, add its matched symbol here.
       - path: "_test\\.go"
         linters:
           - forbidigo
@@ -304,7 +327,7 @@ linters:
       # testutil is the shared test-helper package; it gets the SAME exemption
       # surface as _test.go (NOT a blanket forbidigo pass) so os.Environ /
       # syscall.Environ / exec.Command are still banned here too. Its one
-      # licensed env-dump read (envSnapshot, which feeds GitEnv and the
+      # licensed env-dump read (HostEnv, which feeds GitEnv and the
       # integration layout) carries an inline nolint and curates immediately.
       - path: "internal/testutil/"
         linters:
