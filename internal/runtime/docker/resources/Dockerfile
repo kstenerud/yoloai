@@ -45,7 +45,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Docker releases; pinning would freeze the sandbox on an old Docker version.
 # hadolint ignore=DL3008
 RUN install -m 0755 -d /etc/apt/keyrings \
-    && curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
+    && curl --retry 5 --retry-delay 2 --retry-all-errors -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
     && chmod a+r /etc/apt/keyrings/docker.asc \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian bookworm stable" \
        > /etc/apt/sources.list.d/docker.list \
@@ -67,7 +67,7 @@ ARG NODE_MAJOR=20
 # minor in apt would lock us to a single security release.
 # hadolint ignore=DL3008
 RUN mkdir -p /etc/apt/keyrings \
-    && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+    && curl --retry 5 --retry-delay 2 --retry-all-errors -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
        | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
     && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${NODE_MAJOR}.x nodistro main" \
        > /etc/apt/sources.list.d/nodesource.list \
@@ -77,7 +77,7 @@ RUN mkdir -p /etc/apt/keyrings \
 
 # Go (latest stable)
 ARG GO_VERSION=1.26.2
-RUN curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-$(dpkg --print-architecture | sed 's/i386/386/').tar.gz" \
+RUN curl --retry 5 --retry-delay 2 --retry-all-errors -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-$(dpkg --print-architecture | sed 's/i386/386/').tar.gz" \
       -o /tmp/go.tar.gz \
     && tar -C /usr/local -xzf /tmp/go.tar.gz \
     && rm /tmp/go.tar.gz
@@ -105,7 +105,7 @@ RUN GOPATH=/tmp/gopath go install github.com/golangci/golangci-lint/v2/cmd/golan
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
     PATH="/usr/local/cargo/bin:${PATH}"
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+RUN curl --retry 5 --retry-delay 2 --retry-all-errors --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
       | sh -s -- -y --default-toolchain stable --profile minimal --no-modify-path \
     && chmod -R a+rw "$RUSTUP_HOME" "$CARGO_HOME"
 # SC2016: same reason as the golang.sh write above — `$PATH` is intentional;
@@ -133,7 +133,7 @@ RUN pip install --break-system-packages --no-cache-dir aider-chat
 
 # VS Code CLI for Remote Tunnels (code tunnel)
 RUN ARCH=$(dpkg --print-architecture | sed 's/amd64/x64/') \
-    && curl -fsSL "https://code.visualstudio.com/sha/download?build=stable&os=cli-alpine-${ARCH}" \
+    && curl --retry 5 --retry-delay 2 --retry-all-errors -fsSL "https://code.visualstudio.com/sha/download?build=stable&os=cli-alpine-${ARCH}" \
     -o /tmp/vscode-cli.tar.gz \
     && tar -xzf /tmp/vscode-cli.tar.gz -C /usr/local/bin \
     && rm /tmp/vscode-cli.tar.gz
@@ -148,7 +148,7 @@ RUN printf '#!/bin/sh\nexec aider --yes-always "$@"\n' > /usr/local/bin/yolo-aid
 
 # gosu for dropping privileges
 ARG GOSU_VERSION=1.17
-RUN curl -fsSL "https://github.com/tianon/gosu/releases/download/${GOSU_VERSION}/gosu-$(dpkg --print-architecture)" \
+RUN curl --retry 5 --retry-delay 2 --retry-all-errors -fsSL "https://github.com/tianon/gosu/releases/download/${GOSU_VERSION}/gosu-$(dpkg --print-architecture)" \
       -o /usr/local/bin/gosu \
     && chmod +x /usr/local/bin/gosu \
     && gosu --version
