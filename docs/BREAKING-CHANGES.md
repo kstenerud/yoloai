@@ -4,6 +4,37 @@ Tracks breaking changes made during beta. Each entry should be included in relea
 
 ## v0.4.0
 
+### macOS default isolation becomes `vm` (Apple `container`) when it is installed
+
+When the Apple `container` CLI is installed (macOS 26+ on Apple Silicon), a
+plain `yoloai new` on macOS now defaults to **`vm` isolation** via the new
+`apple` backend — each sandbox runs as a Linux OCI container in its own
+lightweight VM — instead of a shared-kernel container on Docker/Podman/OrbStack.
+
+**Why:** Apple's per-container VMs boot in well under a second, so the stronger
+isolation is effectively free on macOS; making it the default gives a safer
+out-of-the-box posture. The platform rule is "VM-default only where VMs are
+cheap to start" — on Linux, VM isolation stays opt-in (`--isolation vm`) because
+containerd/Kata is heavy to start.
+
+**What changes:** on a macOS host with `container` installed and no explicit
+backend/isolation preference, sandboxes get a VM boundary (host kernel not
+shared). Behavior is otherwise the same — `:copy`/`:overlay` diff-apply,
+`--network-isolated`, restart, and `exec`-based `attach` all work. There is no
+suspend/resume and no VS Code "Attach to Running Container" on this backend.
+
+**Opt out / pin the old behavior:**
+
+- `--isolation container` (or `isolation: container` in config) keeps a
+  shared-kernel container on Docker/Podman/OrbStack.
+- An explicit `--backend` / `container_backend` (e.g. `orbstack`,
+  `docker-desktop`, `podman`) wins over the apple default.
+- Hosts without `container` installed are unaffected — the default stays a
+  container backend.
+
+The setup wizard's environment step now offers these as named presets
+(`apple` recommended, plus `orbstack`/`docker-desktop`/`podman`/`tart`/`seatbelt`).
+
 ### `${VAR}` interpolation in config/profile values resolves only a fixed allowlist
 
 `${VAR}` references in config and profile values (and in `.yoloai.yaml`, CLI dir

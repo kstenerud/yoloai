@@ -343,7 +343,9 @@ Errors are output to stderr as `{"error": "message"}`. Interactive commands (`at
 
 ### Creating sandboxes
 
-`--backend <name>` selects the runtime backend (`docker`, `podman`, `tart`, or `seatbelt`). Available on `new`, `build`, and `setup`. Lifecycle commands (`start`, `stop`, etc.) read the backend from the sandbox's `environment.json` automatically.
+`--backend <name>` selects the runtime backend (`docker`, `podman`, `apple`, `tart`, or `seatbelt`). Available on `new`, `build`, and `setup`. Lifecycle commands (`start`, `stop`, etc.) read the backend from the sandbox's `environment.json` automatically.
+
+On macOS you can also name a specific Docker provider — `--backend orbstack` or `--backend docker-desktop` — and yoloAI pins the docker backend to that provider's daemon socket, so the choice is honored even when both are installed. `apple` is the [Apple `container`](#apple-container-backend-macos) backend (per-container Linux VMs).
 
 ```bash
 # Prompt (headless — agent runs the task autonomously)
@@ -567,7 +569,7 @@ Agent resolution: `new` uses `--agent` flag > `agent` in config > `"claude"`.
 
 Model resolution: `new` uses `--model` flag > `model` in config > `""` (empty = agent's default model).
 
-Container backend resolution: `new`/`build`/`setup` use `--backend` flag > `container_backend` in config > auto-detect (prefers docker over podman). Valid values: `docker`, `podman`. Isolation level: `--isolation` flag > `isolation` in config > `"container"`. Lifecycle commands read the backend from the sandbox's `environment.json`.
+Container backend resolution: `new`/`build`/`setup` use `--backend` flag > `container_backend` in config > auto-detect. Valid values: `docker`, `podman`, and on macOS the container-system aliases `orbstack` / `docker-desktop` (the docker backend pinned to that provider's socket). Auto-detect on macOS prefers `apple` (when installed) for the VM-isolation default, otherwise a container backend (docker > podman); on Linux it prefers docker > podman. Isolation level: `--isolation` flag > `isolation` in config > `"container"` — except on macOS where an installed `apple` makes the unspecified default `vm`. Lifecycle commands read the backend from the sandbox's `environment.json`.
 
 Agent args: persistent default CLI args for specific agents. Inserted between the model flag and CLI passthrough (`--` args), so passthrough always takes precedence. Example: `yoloai config set agent_args.aider "--no-auto-commits --no-pretty"`. Profile `agent_args` merge with base config (per-agent key, profile wins on conflict).
 
@@ -741,6 +743,18 @@ yoloai new task . --isolation container-privileged
 
 Isolation modes are silently ignored on non-container backends (tart, seatbelt). Using `--isolation` explicitly on an incompatible backend is an error.
 
+**macOS `vm` isolation uses Apple `container`.** On a macOS host, `--isolation vm` for a Linux workload routes to the [Apple `container`](#apple-container-backend-macos) backend (per-container Linux VMs), not containerd — containerd/Kata is Linux-only. When Apple `container` is installed, it also becomes the **default** on macOS: a plain `yoloai new` gets VM isolation rather than a shared-kernel container, because Apple's per-container VMs boot in well under a second. Opt back to a shared-kernel container with `--isolation container` (Docker/Podman/OrbStack). This is a behavior change from earlier versions — see [BREAKING-CHANGES](BREAKING-CHANGES.md).
+
+#### Apple `container` backend (macOS)
+
+`apple` runs each sandbox as a Linux OCI container inside its own lightweight VM, via Apple's `container` CLI. It needs **no Docker Desktop** — the same `yoloai-base` Dockerfile is built by Apple's own builder.
+
+- **Requires macOS 26 (Tahoe) or newer on Apple Silicon.** yoloAI gates on `macOS ≥ 26`; on older macOS the `--isolation vm` error explains the upgrade path. Some features (e.g. Rosetta-backed amd64) want **M3 or newer**.
+- **Strong isolation, fast.** Each container gets a real VM boundary (the host kernel isn't shared), yet VMs start sub-second.
+- **Network isolation works** the same as on Linux — the in-VM Linux kernel enforces the `--network-isolated` allowlist.
+- **No suspend/resume and no VS Code "Attach to Running Container".** `container` has no checkpoint or docker-compat API; `exec`-based attach (`yoloai attach`) works normally.
+- **Memory is not released back to the host** until the VM stops (virtio-balloon) — minor for ephemeral sandboxes.
+
 **`container-privileged` — Docker-in-Docker and Compose:**
 
 This mode passes Docker's `--privileged` flag. The container receives all Linux capabilities, disables seccomp, and disables AppArmor/SELinux enforcement. Use it when the agent needs to run Docker or Compose stacks inside the sandbox.
@@ -775,7 +789,7 @@ yoloai's system check then verifies the `runsc` binary on `PATH` and its registr
 **Incompatibilities:**
 
 - **`container-enhanced` + `:overlay` directories:** gVisor's VFS2 kernel does not support overlayfs mounts inside the container. Use `:copy` or `:rw` instead — yoloai will error if you combine them.
-- **`vm` and `vm-enhanced`:** Use the containerd backend, not Docker or Podman. Selected automatically when `--isolation vm` or `vm-enhanced` is used on Linux.
+- **`vm` and `vm-enhanced`:** On Linux, use the containerd backend (Kata), not Docker or Podman — selected automatically when `--isolation vm` or `vm-enhanced` is used. On macOS, `vm` uses the [Apple `container`](#apple-container-backend-macos) backend instead (containerd is Linux-only); `vm-enhanced` has no macOS backend.
 - **`container-privileged`:** Requires a container backend (Docker/Podman). Available on both Linux and macOS hosts via that backend's Linux VM; only unavailable with `--os mac` (Seatbelt/Tart have no privileged mode).
 
 ## Toolchain Support
