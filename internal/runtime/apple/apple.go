@@ -130,10 +130,9 @@ func New(_ context.Context, layout config.Layout) (*Runtime, error) {
 		return nil, yoerrors.NewPlatformError("apple container backend requires macOS %d or later (found %d)", minMacOSMajor, major)
 	}
 
-	// TODO(step 6): replace with layout.Env().EnvForAppleContainer() once the
-	// curated HostEnv keyset lands. PATH locates the binary+plugins; HOME backs
-	// the default CONTAINER_APP_ROOT (~/Library/Application Support/...).
-	execEnv := sysexec.Curated(nil, []string{"PATH", "HOME"}, nil)
+	// Curated host env for every `container` CLI invocation (DEV §12): PATH +
+	// HOME + the CONTAINER_* roots/auth/debug knobs, no ambient inheritance.
+	execEnv := layout.Env().EnvForAppleContainer()
 	return &Runtime{containerBin: bin, layout: layout, execEnv: execEnv}, nil
 }
 

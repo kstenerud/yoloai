@@ -92,6 +92,25 @@ var containerdExecAllowlist = []string{
 // not redirect ~/.tart (DF19).
 var tartEnvAllowlist = []string{"PATH", "TMPDIR", "SSL_CERT_FILE", "SSL_CERT_DIR"}
 
+// appleExecAllowlist: the Apple `container` CLI. PATH locates the binary plus the
+// plugins/helpers it execs under the install root; HOME backs the default
+// CONTAINER_APP_ROOT (state root). Unlike docker/containerd, HOME is allowlisted
+// (passthrough) rather than overridden: the `container` apiserver is a shared
+// per-user launchd agent that resolves its state root from the real HOME, so
+// pointing the CLI at a layout HOME would desync the CLI from the daemon without
+// isolating anything (the daemon already runs under the real env). The CONTAINER_*
+// roots let a user relocate state/install/logs; CONTAINER_DEFAULT_PLATFORM is
+// honored below our explicit --os/--arch; CONTAINER_REGISTRY_* carry private-pull
+// auth; CONTAINER_DEBUG toggles debug logging. SSH_AUTH_SOCK is deliberately
+// excluded — yoloAI does not forward the host SSH agent into a sandbox.
+var appleExecAllowlist = []string{
+	"PATH", "HOME", "TMPDIR",
+	"CONTAINER_APP_ROOT", "CONTAINER_INSTALL_ROOT", "CONTAINER_LOG_ROOT",
+	"CONTAINER_DEFAULT_PLATFORM",
+	"CONTAINER_REGISTRY_HOST", "CONTAINER_REGISTRY_USER", "CONTAINER_REGISTRY_TOKEN",
+	"CONTAINER_DEBUG",
+}
+
 // seatbeltSandboxAllowlist: safe OS/locale vars passed into the seatbelt sandbox
 // (and the seatbelt host subprocesses — sandbox-exec, tmux). Credentials
 // (SSH_AUTH_SOCK, AWS_SECRET_ACCESS_KEY, …) are excluded; the entrypoint injects
@@ -196,6 +215,15 @@ func (h HostEnv) EnvForTartInvocation() []string {
 		"HOME":      h.homeDir,
 		"TART_HOME": tartHome,
 	})
+}
+
+// EnvForAppleContainer is the environment for Apple `container` CLI subprocesses.
+// HOME is passed through (not overridden the way EnvForDockerExec overrides it):
+// the container apiserver is a shared per-user launchd agent that resolves its
+// state root from the real HOME, so a different HOME would desync the CLI from the
+// daemon. See appleExecAllowlist.
+func (h HostEnv) EnvForAppleContainer() []string {
+	return sysexec.Curated(h.vars, appleExecAllowlist, nil)
 }
 
 // EnvForHostTool is the minimal environment for yoloAI's own host utility

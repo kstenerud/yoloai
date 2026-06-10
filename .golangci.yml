@@ -335,6 +335,9 @@ linters:
       - path: "internal/runtime/tart/tart\\.go"
         linters: [forbidigo]
         text: "\\.EnvForTartInvocation"
+      - path: "internal/runtime/apple/apple\\.go"
+        linters: [forbidigo]
+        text: "\\.EnvForAppleContainer"
       # Daemon-socket discovery: backend probes/clients + the CLI commands that
       # select a container backend.
       - path: "(^|/)client\\.go$|internal/runtime/docker/docker\\.go|internal/runtime/podman/podman\\.go|internal/cli/cliutil/client\\.go|internal/cli/mcp/mcp\\.go|internal/cli/lifecycle/stop\\.go|internal/cli/lifecycle/destroy\\.go"
