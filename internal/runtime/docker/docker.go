@@ -238,7 +238,10 @@ func pingFailureError(err error, binaryName string) error {
 	default:
 		hint = "start Docker Desktop or run 'sudo systemctl start docker'"
 	}
-	return yoerrors.NewDependencyError("%s daemon is not responding, %s", binaryName, hint)
+	// Wrap the underlying ping error (%w) rather than discarding it: the hint is
+	// the common cause, but when it isn't, the real error is the only thing that
+	// explains the failure.
+	return yoerrors.NewDependencyError("%s daemon is not responding (%w); %s", binaryName, err, hint)
 }
 
 // tlsOptsFromEnv reproduces the TLS and API-version halves of

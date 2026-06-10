@@ -74,13 +74,20 @@ func stampRealms(home string) error {
 // On macOS, "podman machine inspect" reads machine state from the real HOME; once
 // we override HOME for test isolation, the subprocess fails and socket discovery
 // falls through to "no podman socket found".
+//
+// TMPDIR is load-bearing in the probe env: macOS podman derives the machine API
+// socket path from $TMPDIR ($TMPDIR/podman/...). Without it, inspect reports the
+// /tmp fallback path, which doesn't exist, and we'd pin a dead CONTAINER_HOST —
+// the Docker SDK ping then fails with "daemon is not responding". Mirrors the
+// production allowlist (config.daemonEnvAllowlist).
 func pinPodmanSocket() {
 	if testutil.IntegrationBackendType() != "podman" {
 		return
 	}
 	// Minimal curated env (real HOME, since this runs before per-test HOME
-	// override; PATH to find podman) — never the full ambient env (DEV §12).
-	probeEnv := sysexec.Curated(testutil.GetCuratedHostEnv([]string{"PATH", "HOME"}), []string{"PATH", "HOME"}, nil)
+	// override; PATH to find podman; TMPDIR for the macOS socket path) — never
+	// the full ambient env (DEV §12).
+	probeEnv := sysexec.Curated(testutil.GetCuratedHostEnv([]string{"PATH", "HOME", "TMPDIR"}), []string{"PATH", "HOME", "TMPDIR"}, nil)
 	out, err := sysexec.Command(probeEnv, "podman", "machine", "inspect", "--format", "{{.ConnectionInfo.PodmanSocket.Path}}").Output()
 	if err != nil {
 		return
