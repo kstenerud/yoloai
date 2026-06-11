@@ -7,8 +7,6 @@ package runtimetest
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -98,171 +96,36 @@ func createContainer(t *testing.T, rt DockerCompatRuntime, ctx context.Context, 
 	return cfg.Name
 }
 
-// RunConformance exercises the behavioral contract shared by docker-API
-// backends. Each subtest connects through setup so every case gets a fresh
-// runtime with its own cleanup, matching the per-test isolation the
-// backend-specific suites had before they were unified.
+// RunConformance exercises the behavioral contract for docker-API backends. The
+// universal runtime.Runtime contract (lifecycle, exec, mounts, idempotency) is
+// delegated to the shared, backend-agnostic RunInterfaceConformance suite via an
+// SDK-backed Sleeper, so docker/podman verify the exact same table as the VM and
+// host backends. This function adds only the assertions that require the docker
+// SDK Client() to read host-config facts (resource limits, port bindings) the
+// runtime.Runtime interface does not expose.
+//
+// InteractiveExec and StdioExec drive the container over the SDK socket (the same
+// control plane as Inspect/Exec), not a `docker exec` subprocess — otherwise a
+// bare-CLI invocation can race the rootless-Podman store under load and report
+// "no such container" for a container Inspect sees running. The shared suite
+// exercises both.
 func RunConformance(t *testing.T, setup SetupFunc) {
-	t.Run("CreateStartStopRemove", func(t *testing.T) {
+	// Universal contract: adapt the docker-compat setup into the interface
+	// fixture, supplying an SDK-backed sleeper (entrypoint override → sleep).
+	RunInterfaceConformance(t, func(t *testing.T) InterfaceBackend {
 		rt, ctx := setup(t)
-		name := createContainer(t, rt, ctx, runtime.InstanceConfig{UseInit: true})
-
-		require.NoError(t, rt.Start(ctx, name))
-		info, err := rt.Inspect(ctx, name)
-		require.NoError(t, err)
-		assert.True(t, info.Running)
-
-		require.NoError(t, rt.Stop(ctx, name))
-		info, err = rt.Inspect(ctx, name)
-		require.NoError(t, err)
-		assert.False(t, info.Running)
-
-		require.NoError(t, rt.Remove(ctx, name))
-		_, err = rt.Inspect(ctx, name)
-		assert.ErrorIs(t, err, runtime.ErrNotFound)
+		return InterfaceBackend{
+			Runtime: rt,
+			Ctx:     ctx,
+			NewSleeper: func(t *testing.T, cfg runtime.InstanceConfig) string {
+				// docker/podman reap the `sleep infinity` PID 1 via tini.
+				cfg.UseInit = true
+				return createContainer(t, rt, ctx, cfg)
+			},
+		}
 	})
 
-	t.Run("InspectRunning", func(t *testing.T) {
-		rt, ctx := setup(t)
-		name := createContainer(t, rt, ctx, runtime.InstanceConfig{UseInit: true})
-		require.NoError(t, rt.Start(ctx, name))
-
-		info, err := rt.Inspect(ctx, name)
-		require.NoError(t, err)
-		assert.True(t, info.Running)
-	})
-
-	t.Run("InspectStopped", func(t *testing.T) {
-		rt, ctx := setup(t)
-		name := createContainer(t, rt, ctx, runtime.InstanceConfig{UseInit: true})
-		require.NoError(t, rt.Start(ctx, name))
-		require.NoError(t, rt.Stop(ctx, name))
-
-		info, err := rt.Inspect(ctx, name)
-		require.NoError(t, err)
-		assert.False(t, info.Running)
-	})
-
-	t.Run("InspectNotFound", func(t *testing.T) {
-		rt, ctx := setup(t)
-		_, err := rt.Inspect(ctx, "yoloai-nonexistent-container-xyz")
-		assert.ErrorIs(t, err, runtime.ErrNotFound)
-	})
-
-	t.Run("ExecSimple", func(t *testing.T) {
-		rt, ctx := setup(t)
-		name := createContainer(t, rt, ctx, runtime.InstanceConfig{UseInit: true})
-		require.NoError(t, rt.Start(ctx, name))
-
-		result, err := rt.Exec(ctx, name, []string{"echo", "hello"}, "")
-		require.NoError(t, err)
-		assert.Equal(t, "hello", result.Stdout)
-		assert.Equal(t, 0, result.ExitCode)
-	})
-
-	t.Run("ExecNonZeroExit", func(t *testing.T) {
-		rt, ctx := setup(t)
-		name := createContainer(t, rt, ctx, runtime.InstanceConfig{UseInit: true})
-		require.NoError(t, rt.Start(ctx, name))
-
-		result, err := rt.Exec(ctx, name, []string{"false"}, "")
-		assert.Error(t, err)
-		assert.Equal(t, 1, result.ExitCode)
-	})
-
-	t.Run("ExecNotRunning", func(t *testing.T) {
-		rt, ctx := setup(t)
-		name := createContainer(t, rt, ctx, runtime.InstanceConfig{UseInit: true})
-
-		_, err := rt.Exec(ctx, name, []string{"echo", "hello"}, "")
-		assert.Error(t, err)
-	})
-
-	// InteractiveExec and StdioExec must drive the container over the SDK socket
-	// (the same control plane as Inspect/Exec), not a `docker exec` subprocess —
-	// otherwise a bare-CLI invocation can race the rootless-Podman store under
-	// load and report "no such container" for a container Inspect sees running.
-	t.Run("StdioExecPipesOutput", func(t *testing.T) {
-		rt, ctx := setup(t)
-		execer, ok := rt.(runtime.StdioExecer)
-		require.True(t, ok, "docker-compat backend must implement StdioExecer")
-		name := createContainer(t, rt, ctx, runtime.InstanceConfig{UseInit: true})
-		require.NoError(t, rt.Start(ctx, name))
-
-		var stdout, stderr strings.Builder
-		err := execer.StdioExec(ctx, name, []string{"echo", "hello"}, nil, &stdout, &stderr)
-		require.NoError(t, err)
-		assert.Equal(t, "hello", strings.TrimSpace(stdout.String()))
-	})
-
-	t.Run("StdioExecNonZeroExit", func(t *testing.T) {
-		rt, ctx := setup(t)
-		execer, ok := rt.(runtime.StdioExecer)
-		require.True(t, ok, "docker-compat backend must implement StdioExecer")
-		name := createContainer(t, rt, ctx, runtime.InstanceConfig{UseInit: true})
-		require.NoError(t, rt.Start(ctx, name))
-
-		err := execer.StdioExec(ctx, name, []string{"sh", "-c", "exit 7"}, nil, nil, nil)
-		var execErr *runtime.ExecError
-		require.ErrorAs(t, err, &execErr, "non-zero exit must surface as *runtime.ExecError")
-		assert.Equal(t, 7, execErr.ExitCode)
-	})
-
-	t.Run("InteractiveExecNonZeroExit", func(t *testing.T) {
-		rt, ctx := setup(t)
-		name := createContainer(t, rt, ctx, runtime.InstanceConfig{UseInit: true})
-		require.NoError(t, rt.Start(ctx, name))
-
-		err := rt.InteractiveExec(ctx, name, []string{"sh", "-c", "exit 9"}, "", "", runtime.IOStreams{TTY: true})
-		var execErr *runtime.ExecError
-		require.ErrorAs(t, err, &execErr, "TTY exec non-zero exit must surface as *runtime.ExecError")
-		assert.Equal(t, 9, execErr.ExitCode)
-	})
-
-	t.Run("InteractiveExecZeroExit", func(t *testing.T) {
-		rt, ctx := setup(t)
-		name := createContainer(t, rt, ctx, runtime.InstanceConfig{UseInit: true})
-		require.NoError(t, rt.Start(ctx, name))
-
-		var out strings.Builder
-		err := rt.InteractiveExec(ctx, name, []string{"true"}, "", "", runtime.IOStreams{Out: &out, TTY: true})
-		assert.NoError(t, err, "exit 0 stays nil")
-	})
-
-	t.Run("BindMountReadWrite", func(t *testing.T) {
-		rt, ctx := setup(t)
-		hostDir := t.TempDir()
-		name := createContainer(t, rt, ctx, runtime.InstanceConfig{
-			UseInit: true,
-			Mounts:  []runtime.MountSpec{{HostPath: hostDir, ContainerPath: "/mnt/test", ReadOnly: false}},
-		})
-		require.NoError(t, rt.Start(ctx, name))
-
-		_, err := rt.Exec(ctx, name, []string{"sh", "-c", "echo hello > /mnt/test/output.txt"}, "")
-		require.NoError(t, err)
-
-		content, err := os.ReadFile(filepath.Join(hostDir, "output.txt"))
-		require.NoError(t, err)
-		assert.Contains(t, string(content), "hello")
-	})
-
-	t.Run("BindMountReadOnly", func(t *testing.T) {
-		rt, ctx := setup(t)
-		hostDir := t.TempDir()
-		require.NoError(t, os.WriteFile(filepath.Join(hostDir, "readonly.txt"), []byte("original"), 0600))
-		name := createContainer(t, rt, ctx, runtime.InstanceConfig{
-			UseInit: true,
-			Mounts:  []runtime.MountSpec{{HostPath: hostDir, ContainerPath: "/mnt/test", ReadOnly: true}},
-		})
-		require.NoError(t, rt.Start(ctx, name))
-
-		result, err := rt.Exec(ctx, name, []string{"cat", "/mnt/test/readonly.txt"}, "")
-		require.NoError(t, err)
-		assert.Equal(t, "original", result.Stdout)
-
-		_, err = rt.Exec(ctx, name, []string{"sh", "-c", "echo modified > /mnt/test/readonly.txt"}, "")
-		assert.Error(t, err, "write to RO mount should fail")
-	})
+	// --- Docker-SDK-only assertions (need Client() for host-config facts) ---
 
 	t.Run("ResourceLimits", func(t *testing.T) {
 		rt, ctx := setup(t)
@@ -306,27 +169,5 @@ func RunConformance(t *testing.T, setup SetupFunc) {
 		if err == nil {
 			assert.Contains(t, result.Stdout, "nodev")
 		}
-	})
-
-	t.Run("StopIdempotent", func(t *testing.T) {
-		rt, ctx := setup(t)
-		name := createContainer(t, rt, ctx, runtime.InstanceConfig{UseInit: true})
-		require.NoError(t, rt.Start(ctx, name))
-		require.NoError(t, rt.Stop(ctx, name))
-		assert.NoError(t, rt.Stop(ctx, name), "second Stop should be a no-op")
-	})
-
-	t.Run("RemoveIdempotent", func(t *testing.T) {
-		rt, ctx := setup(t)
-		name := createContainer(t, rt, ctx, runtime.InstanceConfig{UseInit: true})
-		require.NoError(t, rt.Remove(ctx, name))
-		assert.NoError(t, rt.Remove(ctx, name), "second Remove should be a no-op")
-	})
-
-	t.Run("IsReady", func(t *testing.T) {
-		rt, ctx := setup(t)
-		exists, err := rt.IsReady(ctx)
-		require.NoError(t, err)
-		assert.True(t, exists)
 	})
 }
