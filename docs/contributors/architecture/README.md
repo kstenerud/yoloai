@@ -892,7 +892,7 @@ target works on a Linux box or an Apple Silicon Mac.
 | podman | ✓ | ✓ (+ SDK extras) | `make integration-podman` | linux + mac | podman + socket |
 | containerd (Kata) | ✓ | ✓ | `make integration-containerd` | linux | Linux + containerd + Kata/KVM |
 | apple | ✓ | ✓ | `make integration-apple` | mac | macOS 26 + Apple Silicon + `container` |
-| tart | ✓ | ✓ (Mounts skipped — DF29) | `make integration-tart` | mac | macOS + Apple Silicon + tart |
+| tart | ✓ | ✓ (Mounts skipped — path model, DF29) | `make integration-tart` | mac | macOS + Apple Silicon + tart |
 | seatbelt | ✓ | ✓ (Mounts skipped — path model) | `make integration-seatbelt` | mac | macOS (sandbox-exec) |
 
 **Gating** — each integration package self-skips when its daemon/host is absent
@@ -908,7 +908,12 @@ runtime-level suite works because tart's `Start` now does **P1 only** (boot +
 mounts) when no sandbox `runtime-config.json` is present, skipping the **P2**
 `sandbox-setup.py` monitor — mirroring how every other backend runs conformance
 against a bare idle instance. Lifecycle/exec/interactive pass; `Mounts` is skipped
-(the Go-side VirtioFS symlink path doesn't stand up bare — DF29).
+for the **same reason as seatbelt** — the conformance mounts at `/mnt/test`, and
+the macOS guest's `/mnt` isn't writable without root (no passwordless sudo), so the
+symlink can't be created (the *conformance's container-path assumption*, not a
+VirtioFS gap). The failing `ln` was historically misread as "instance not found"
+because `mapTartError` misclassifies inner-command stderr — see DF29 (resolved) and
+DF30 (the mislabeling). Real mounts run in the smoke matrix.
 
 **Seatbelt conformance** (`TestSeatbeltConformance`) — also a participant, via the
 same P1/P2 split: `Start` launches a bare keep-alive process under the SBPL

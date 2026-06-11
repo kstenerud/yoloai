@@ -89,14 +89,15 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 - **Fix:** `skipIfNotAvailable` now stats **and** dials the socket (`net.DialTimeout`), skipping with a clear reason when it can't connect.
 - **Pointer:** `internal/runtime/containerd/integration_test.go` (`skipIfNotAvailable`).
 
-### DF29 — Tart bare-runtime VirtioFS mount path fails ("instance not found") in P1 (no monitor)
+### DF30 — Tart `mapTartError` misclassifies exec inner-command stderr as VM-level sentinels
 
-- **Discovered:** 2026-06-11 · **Workstream:** testing-refactor (wiring Tart onto the shared conformance suite)
-- **Severity:** LOW (test-infra; real sandboxes unaffected — they mount via the P2 monitor)
+- **Discovered:** 2026-06-11 · **Workstream:** testing-refactor (split out of [[DF29]], resolved)
+- **Severity:** LOW (cosmetic-to-misleading: wrong error category/message; no data loss or wrong control flow in normal use)
 - **Disposition:** PARKED
-- **Description:** With Tart wired onto `RunInterfaceConformance` (see [[DF27]], resolved), the `Mounts` section fails: a VirtioFS-mounted VM reports `instance not found` during the Go-side `createVMMountSymlinks` (P1, no monitor). `instance not found` is the signature of the documented **Tart exec stabilization race** (backend-idiosyncrasies "Tart exec needs brief stabilization delay after boot") — the VM passes Start's boot-wait `tart exec true` but a follow-on exec moments later fails; the mount-symlink exec runs inside Start right after the 500 ms stabilization sleep, so it lands in that window. The non-mount subtests don't exec during Start (createVMMountSymlinks is a no-op with no mounts) and exec only after Start returns, when the VM is stable — which is why only `Mounts` fails. Real sandboxes wire mounts through the **P2** Python monitor (`mount_map` → `sandbox-setup.py`), so the Go-side P1 path isn't normally exercised standalone. Likely fix: a short retry/readiness wait in `createSingleVMSymlink` (mirroring the boot-wait), not a VirtioFS-model change. The conformance sets `SkipMounts` for Tart meanwhile; lifecycle/exec/exec-on-stopped/interactive all PASS.
-- **Trigger:** when bare-runtime Tart mounts matter (an embedder using `runtime.Runtime` directly with mounts), or to complete Tart's conformance Mounts coverage.
-- **Pointer:** `internal/runtime/tart/mounts.go::createVMMountSymlinks`/`createSingleVMSymlink`; the `SkipMounts` reason in `internal/runtime/tart/integration_test.go::TestTartConformance`.
+- **Description:** `runTart` is the single funnel for **every** tart subprocess — `list`, `clone`, `run`, `delete`, **and `exec`** — and unconditionally passes the command's stderr through `mapTartError`, which pattern-matches substrings (`"no such"`, `"not found"`, `"does not exist"` → `runtime.ErrNotFound`; `"not running"`, `"is stopped"` → `runtime.ErrNotRunning`). For VM-level operations those substrings legitimately mean the VM/image is absent. For **`exec`**, the stderr belongs to the *inner guest command*, so a benign failure like `ln: /mnt/test: No such file or directory` (the [[DF29]] symlink failure) or any `cat`/`test`/`grep` that prints "not found" is mislabeled as `ErrNotFound` → surfaced to callers/logs as "instance not found", which is actively misleading during diagnosis (it cost real time on DF29). This is **our** code, not external tooling, so it does not belong in `backend-idiosyncrasies.md` — it should be fixed.
+- **Proposed fix:** stop applying the VM-level sentinel mapping to `exec` invocations. Simplest: in `runTart`, when `args[0] == "exec"`, skip `mapTartError`'s sentinel branches and return the raw `err` + stderr (or route exec through the existing `RunCmdExec` exit-code path used by the real `Exec` methods, so exec failures carry an exit code instead of a guessed sentinel). Add a `tart_test.go` case asserting an exec whose inner command prints "No such file or directory" does **not** map to `runtime.ErrNotFound`.
+- **Trigger:** before relying on `runtime.ErrNotFound`/`ErrNotRunning` from any `exec`-backed path, or next time a tart exec failure is being diagnosed.
+- **Pointer:** `internal/runtime/tart/tart.go::runTart` (the `mapTartError` call site) / `mapTartError`; exec callers `mounts.go::createSingleVMSymlink`/`runSetupScript`.
 
 ## Policy origin
 

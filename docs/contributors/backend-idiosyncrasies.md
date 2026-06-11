@@ -1520,6 +1520,8 @@ time.Sleep(500 * time.Millisecond)
 
 **Impact:** Without the delay, VM creation fails intermittently with "instance not found" errors, especially noticeable in automated tests where VMs are created and used quickly.
 
+**Caveat — "instance not found" is not a reliable signature of this race.** `runTart` funnels every `tart exec` through `mapTartError`, which turns *any* inner-command stderr containing `"no such"`/`"not found"` into `runtime.ErrNotFound` → "instance not found". So a guest command that simply fails (e.g. `ln: /mnt/test: No such file or directory`) reports the same message as a not-yet-ready guest agent. Before assuming this stabilization race, confirm the VM is actually unreachable (`isRunning` false, or a trivial probe exec also fails) — see findings DF30 / DF29. That mislabeling is our bug, tracked in DF30, not a tart behavior.
+
 **Code:** `runtime/tart/tart.go::Start` after `waitForBoot`
 
 ---

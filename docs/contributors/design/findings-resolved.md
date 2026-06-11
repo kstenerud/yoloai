@@ -7,6 +7,13 @@ History of codebase findings (issues discovered mid-work) that have been address
 are moved here from [`findings-unresolved.md`](findings-unresolved.md) once resolved, so the
 active file stays a working set. Newest first.
 
+### DF29 — Tart conformance `Mounts` "instance not found" was a misclassified `/mnt` failure, not a stabilization race
+
+- **Discovered:** 2026-06-11 · **Resolved:** 2026-06-11 · **Workstream:** testing-refactor (wiring Tart onto the shared conformance suite)
+- **Severity:** LOW (test-infra; real sandboxes unaffected)
+- **Disposition:** RESOLVED. The original hypothesis (the documented Tart exec **stabilization race**) was **disproven** by a diagnostic: with the VM up and exec-able (a probe `echo` succeeded, `isRunning=true`, `tart list` showed the VM), only the mount-symlink command failed. Root cause: conformance mounts at the container-centric path `/mnt/test`; on the macOS guest `/mnt` is root-owned and there is no passwordless sudo, so `createSingleVMSymlink`'s `ln -sfn … /mnt/test` (and its `sudo` fallback) fails with `ln: /mnt/test: No such file or directory`. `runTart` funnels that through `mapTartError`, which pattern-matches `"no such"` in the **inner command's** stderr and returns `runtime.ErrNotFound` → surfaced as "instance not found". This is the **same container-path assumption seatbelt skips** (its `/mnt/test` isn't host-writable without root either), not a VirtioFS or timing problem. Resolution: `SkipMounts` stays for Tart with the corrected, verified reason; no retry/readiness change was needed (the disproven-hypothesis retry experiment was reverted). The residual — `mapTartError` misclassifying exec inner-command stderr as VM-level sentinels — is split out as [[DF30]]. Real mount wiring remains covered by the sandbox-level (P2) lifecycle tests.
+- **Pointer:** `internal/runtime/tart/integration_test.go::TestTartConformance` (`SkipMounts` reason); `internal/runtime/tart/mounts.go::createSingleVMSymlink`; `internal/runtime/tart/tart.go::mapTartError`/`runTart`.
+
 ### DF18 (run-coverage half) — Seatbelt and Tart now have real run coverage
 
 - **Discovered:** 2026-06-04 · **Resolved:** 2026-06-11 · **Workstream:** testing-refactor

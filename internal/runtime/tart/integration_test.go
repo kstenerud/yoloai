@@ -104,12 +104,14 @@ func TestTartConformance(t *testing.T) {
 		return runtimetest.InterfaceBackend{
 			Runtime: rt,
 			Ctx:     ctx,
-			// Mounts are skipped on a bare runtime instance: a VirtioFS-mounted VM
-			// reports "instance not found" during the Go-side createVMMountSymlinks
-			// (P1). Real sandboxes wire mounts through the P2 Python monitor
-			// (mount_map), so this gap only affects bare runtime use; it needs its
-			// own fix to the Go-side symlink path. Tracked in DF29.
-			SkipMounts: "tart bare-runtime VirtioFS mount path needs work (instance-not-found during P1 symlink setup); see DF29",
+			// Conformance mounts at /mnt/test — a container-centric path. The
+			// macOS guest's /mnt is root-owned and the guest has no passwordless
+			// sudo, so the symlink command can't create it (the same
+			// /mnt-not-writable reason seatbelt skips). The failing `ln` emits
+			// "No such file or directory", which runTart's mapTartError
+			// misclassifies as runtime.ErrNotFound → "instance not found" (DF30).
+			// Real mount wiring is exercised by the sandbox-level lifecycle tests.
+			SkipMounts: "conformance /mnt/test is not host-writable in the macOS guest (no passwordless sudo); same container-path assumption seatbelt skips",
 			NewSleeper: func(t *testing.T, cfg runtime.InstanceConfig) string {
 				if cfg.ImageRef == "" {
 					cfg.ImageRef = "yoloai-base"
