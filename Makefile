@@ -214,9 +214,11 @@ integration-seatbelt:
 ## so it is gated behind YOLOAI_TEST_TART_VM=1 (skipped for a quick `make
 ## integration-tart`). `make releasetest` sets it, so the release gate runs the
 ## full suite — building the tart base first so a missing base fails loudly rather
-## than silently skipping.
+## than silently skipping. The base build only runs on macOS + Apple Silicon (where
+## tart can actually run); on any other host it is skipped and the go test self-skips
+## via TestMain, keeping this target runnable everywhere like the other backends.
 integration-tart:
-	@if [ "$$YOLOAI_TEST_TART_VM" = "1" ]; then \
+	@if [ "$$YOLOAI_TEST_TART_VM" = "1" ] && [ "$$(uname)" = "Darwin" ] && [ "$$(uname -m)" = "arm64" ]; then \
 		$(MAKE) build && \
 		echo "Building tart base image for the conformance suite..." && \
 		./$(BINARY) system build --backend tart; \
