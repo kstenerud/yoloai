@@ -56,8 +56,9 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
   `internal/runtime/seatbelt/`, `internal/runtime/tart/` (no integration tier); overlay error paths
   in `internal/sandbox/patch/apply.go` (`generateOverlayPatchForContext`, `ensureOverlayBaseline`).
 
-### DF20 — Stale-base detection flags the *wanted* base as "superseded" when `tart.image` pins a non-default image
+### DF24 — Stale-base detection flags the *wanted* base as "superseded" when `tart.image` pins a non-default image
 
+- **Renumbered:** originally recorded as DF20; renumbered to DF24 on 2026-06-11 to resolve a duplicate (DF20 is canonically the gVisor world-readable-credentials finding, which every cross-reference points to). The recording commit `7e1566c` still says "DF20".
 - **Discovered:** 2026-06-10 · **Workstream:** Apple `container` backend planning (side-discovery while diagnosing a leftover config override)
 - **Severity:** MEDIUM (actively recommends deleting a wanted artifact; gated behind a dry-run preview + `y/N`, so not silent data loss)
 - **Disposition:** PARKED
