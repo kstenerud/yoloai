@@ -5,9 +5,11 @@ package containerdrt
 import (
 	"context"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -15,15 +17,29 @@ import (
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/runtime/caps"
+	"github.com/kstenerud/yoloai/internal/runtime/runtimetest"
 	"github.com/kstenerud/yoloai/internal/testutil"
 )
 
-// skipIfNotAvailable skips the test if containerd is not available.
+const containerdSocket = "/run/containerd/containerd.sock"
+
+// skipIfNotAvailable skips the test when containerd is not actually usable on
+// this host. The socket file can exist yet be unconnectable — the daemon is
+// down, or the test user lacks dial permission (the socket is commonly
+// root-owned srw-rw----). A bare os.Stat would pass in that case and every test
+// would then fail at first use, so we probe a real connection: stat, then dial.
+// This is the host-aware contract — run where the backend works, skip cleanly
+// where it doesn't, rather than fail loudly.
 func skipIfNotAvailable(t *testing.T) {
 	t.Helper()
-	if _, err := os.Stat("/run/containerd/containerd.sock"); err != nil {
-		t.Skip("containerd not available: /run/containerd/containerd.sock not found")
+	if _, err := os.Stat(containerdSocket); err != nil {
+		t.Skipf("containerd not available: %s not found", containerdSocket)
 	}
+	conn, err := net.DialTimeout("unix", containerdSocket, 2*time.Second)
+	if err != nil {
+		t.Skipf("containerd not reachable (%s exists but is not connectable): %v", containerdSocket, err)
+	}
+	_ = conn.Close()
 }
 
 // testLayout constructs a Layout rooted at an isolated home for an
@@ -194,6 +210,51 @@ func TestIntegration_ContainerLifecycle(t *testing.T) {
 	// Inspect: should return ErrNotFound.
 	_, err = rt.Inspect(ctx, name)
 	assert.ErrorIs(t, err, runtime.ErrNotFound)
+}
+
+// TestContainerdConformance runs the shared, backend-agnostic behavioral
+// conformance suite against a live containerd + Kata daemon, so containerd
+// verifies the same lifecycle / exec / mount contract as docker, podman, and
+// apple. The sleeper is the yoloai-base image (its entrypoint idles, so the
+// container stays alive for exec) created under the Kata shim. The stdio section
+// auto-skips (containerd does not implement runtime.StdioExecer). The bespoke
+// TestIntegration_ContainerLifecycle is retained for the containerd-unique
+// restart-after-stop / stopped-task-cleanup guard the shared suite does not cover.
+func TestContainerdConformance(t *testing.T) {
+	skipIfNotAvailable(t)
+
+	runtimetest.RunInterfaceConformance(t, func(t *testing.T) runtimetest.InterfaceBackend {
+		ctx := context.Background()
+		rt, err := New(ctx, testLayout(t))
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = rt.Close() }) //nolint:errcheck // best-effort close
+
+		ready, err := rt.IsReady(ctx)
+		require.NoError(t, err)
+		if !ready {
+			t.Skip("yoloai-base not imported into containerd yoloai namespace; run 'yoloai system setup' first")
+		}
+
+		return runtimetest.InterfaceBackend{
+			Runtime: rt,
+			Ctx:     ctx,
+			NewSleeper: func(t *testing.T, cfg runtime.InstanceConfig) string {
+				if cfg.ImageRef == "" {
+					cfg.ImageRef = "yoloai-base"
+				}
+				if cfg.ContainerRuntime == "" {
+					cfg.ContainerRuntime = "io.containerd.kata.v2"
+				}
+				if cfg.WorkingDir == "" {
+					cfg.WorkingDir = "/"
+				}
+				_ = rt.Remove(ctx, cfg.Name) // evict any stale leftover from a failed run
+				require.NoError(t, rt.Create(ctx, cfg))
+				t.Cleanup(func() { _ = rt.Remove(context.Background(), cfg.Name) })
+				return cfg.Name
+			},
+		}
+	})
 }
 
 // TestIntegration_Prune verifies that Prune removes orphaned containers.
