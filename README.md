@@ -137,16 +137,17 @@ The agent works on an isolated copy, so you can keep iterating without risk. Eac
 
 ### Sandbox Backends
 
-| Backend  | Supported Hosts              | Dependencies                                                       |
-|----------|------------------------------|--------------------------------------------------------------------|
-| docker   | Linux, macOS, Windows (WSL2) | [Docker Engine](https://docs.docker.com/engine/install/) or [Docker Desktop](https://docs.docker.com/get-docker/) |
-| podman   | Linux, macOS                 | [Podman](https://podman.io/get-started) (`brew install podman` on macOS) |
-| tart     | macOS (Apple Silicon)        | [Tart](https://github.com/cirruslabs/tart) (`brew install cirruslabs/cli/tart`) |
-| seatbelt | macOS (any)                  | None (uses built-in `sandbox-exec`)                                |
+| Backend   | Supported Hosts              | Dependencies                                                       |
+|-----------|------------------------------|--------------------------------------------------------------------|
+| docker    | Linux, macOS, Windows (WSL2) | [Docker Engine](https://docs.docker.com/engine/install), [Docker Desktop](https://docs.docker.com/get-docker), or [OrbStack](https://orbstack.dev) |
+| podman    | Linux, macOS                 | [Podman](https://podman.io/get-started) (`brew install podman` on macOS) |
+| container | macOS (Apple Silicon)        | [Apple Container](https://github.com/apple/container) |
+| tart      | macOS (Apple Silicon)        | [Tart](https://github.com/cirruslabs/tart) (`brew install cirruslabs/cli/tart`) |
+| seatbelt  | macOS (any)                  | None (uses built-in `sandbox-exec`)                                |
 
-### Isolation Modes (Docker/Podman)
+### Isolation Modes
 
-Optionally upgrade the OCI runtime for stronger isolation on container backends:
+Optionally upgrade the OCI runtime for stronger isolation:
 
 | Mode | Description |
 |------|-------------|
