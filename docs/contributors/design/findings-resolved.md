@@ -7,6 +7,22 @@ History of codebase findings (issues discovered mid-work) that have been address
 are moved here from [`findings-unresolved.md`](findings-unresolved.md) once resolved, so the
 active file stays a working set. Newest first.
 
+### DF19 — `make check` deletes the developer's real yoloai VMs via the system Prune test
+
+- **Discovered:** 2026-06-09 · **Workstream:** Tart `-xcode` base-image A/B investigation
+- **Severity:** CRITICAL (observable data loss)
+- **Disposition:** RESOLVED 2026-06-11. Closed three independent ways: (1) `db55003` routed every tart subprocess through the `sysexec` choke point with an explicit, threaded env, so tart no longer inherits ambient `$HOME`/`$TART_HOME` ("closes DF19 data-loss path"); (2) the env-access-seal refactor's `config.HostEnv.EnvForTartInvocation` overrides `TART_HOME` to `<layout.HomeDir>/.tart` (`tart.go` comments it "the DF19 fix"), so in tests — where `newTestClient` isolates `HomeDir` to a `t.TempDir()` — tart operates on an isolated store, never the real `~/.tart`; (3) `24fe9bc` scoped backend orphan sweeps by `Layout.Principal` (and `newTestClient` assigns a unique principal) as a backstop, so even a real-store sweep cannot touch another principal's VMs. `TestPrune_ExecutesClassifications` (no build tag) now runs against the isolated/principal-scoped store; the planted `yoloai-canary-*` repro no longer vanishes. (The proposed remedy in the original entry — `t.Setenv("TART_HOME", …)` in `newTestClient` — was superseded by the stronger library-level env seal, which fixes the data-loss at its source rather than per-test.)
+- **Description:** `TestPrune_ExecutesClassifications` (`system_test.go`, package `yoloai`, **no build tag → runs in `make check`**) called the real `System.Prune(DryRun:false)`. Prune iterates every registered backend available in the current environment and spins up an ephemeral runtime per backend, so it ran the **tart orphan-sweep** (and docker/podman equivalents) against the developer's **real** store. `newTestClient` isolated only yoloAI's DataDir/HomeDir; the `tart` CLI still read the real `~/.tart` (it honors `$HOME`/`TART_HOME`, which the test never set). Result: running `make check` on a host with live yoloAI sandboxes / runtime bases **deleted them** (kept `yoloai-base`, swept the rest as orphans). Reproduced 2026-06-09 — a planted `yoloai-canary-*` VM vanished after a single `make check`; this is what repeatedly wiped the Tart runtime base during the A/B (the "unexplained disappearance").
+- **Pointer:** closing commits `db55003` (sysexec choke point) / `24fe9bc` (principal-scoped sweeps); `internal/runtime/tart/tart.go` (`EnvForTartInvocation`, "DF19 fix"); `profile_test.go::newTestClient` (isolated HomeDir + unique principal); `system.go::Prune` (backend sweep).
+
+### DF14 — `TestCLI_StartStop` intermittent `inspect instance after start: instance not found` on podman
+
+- **Discovered:** 2026-06-01 · **Workstream:** W-L1 (G7 store-surface carve)
+- **Severity:** LOW
+- **Disposition:** RESOLVED 2026-06-11. The candidate remedy was implemented in `cbab60b` ("tolerate transient not-found when verifying instance after start"): `verifyInstanceRunning` no longer does a bare 1s sleep + single `Inspect`. It now retries `Inspect` against a 4-second deadline, treating a transient `ErrNotFound` right after start as retryable (under load the daemon API can briefly fail to resolve a just-started container) while returning every other inspect error immediately. The post-launch not-found race self-heals instead of failing the start.
+- **Description:** A single `TestCLI_StartStop` run on the podman backend failed at `integration_test.go:183` (`new --agent test cli-startstop`) with `inspect instance after start: instance not found` (~1s after container launch podman momentarily could not find the just-started container). NOT a regression from the G7 carves (those relocate host-side Go functions and never touch the create/start/inspect path); did not reproduce on re-run. Same non-deterministic podman family as [[DF13]].
+- **Pointer:** fix `cbab60b`; `internal/sandbox/launch/launch.go` (`verifyInstanceRunning`, now a retry loop); test `internal/cli/integration_test.go` (`TestCLI_StartStop`).
+
 ### DF20 — gVisor mode stages plaintext credentials world-readable in `/tmp`
 
 - **Discovered:** 2026-06-09 · **Workstream:** nolint-exception audit

@@ -31,20 +31,12 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 - **Description:** On the `stop_start` restart leg (`restart` → `sb.Restart(StartOptions{Prompt:…})`), Claude Code v2.1.157 shows a "Quick safety check: Is this a project you trust?" dialog at startup whose selector line begins with `❯` — the same readiness pattern the prompt-injection waits for. The relaunched agent reached the welcome screen and sat idle at the ready prompt; the staged second prompt (`prompt.txt` correctly held the `done2` task) was never executed, so `files/done2` was never created and the test timed out (31s gap). Likely mechanism: the injected prompt + Enter is consumed by the trust dialog (Enter confirms "Yes, I trust this folder") rather than delivered to the agent REPL, dropping the task text. Non-deterministic: only podman failed this run (docker recovered on retry; docker-cenhanced/containerd-vm/vmenhanced passed). Matches the known podman network-flake family ("network: unreachable"). **NOT a regression** from the G7 carves — those relocate host-side Go functions and never touch entrypoint, start/restart, or tmux prompt injection (the `StartOptions.Prompt` path is unchanged; only `ResetOptions`/`Reset` were modified). Needs a reproduction before any fix; candidate remedy is to make restart prompt-injection wait for the *post-trust-dialog* steady-state ready prompt (or pre-trust the work copy) rather than the first `❯`.
 - **Pointer:** `internal/cli/lifecycle/restart.go:74`; agent-side readiness wait in the monitor/lifecycle start path; autopsy `.testcache/runs/yoloai-smoketest-20260531-233151.431/sandboxes/stop_start/podman/attempt1/FAILURE.md`
 
-### DF14 — `TestCLI_StartStop` intermittent `inspect instance after start: instance not found` on podman
-
-- **Discovered:** 2026-06-01 · **Workstream:** W-L1 (G7 store-surface carve)
-- **Severity:** LOW
-- **Disposition:** PARKED
-- **Description:** A single `TestCLI_StartStop` run on the podman backend failed at `integration_test.go:183` (`new --agent test cli-startstop`) with `inspect instance after start: instance not found` (run duration 2.70s). The error originates in `verifyInstanceRunning`, which does `time.Sleep(1 * time.Second)` then a single `rt.Inspect(ctx, cname)` and wraps the error — so ~1s after container launch podman momentarily could not find the just-started container. **NOT a regression** from the G7 carves: those relocate host-side Go functions (name validation, path computation, log paths, and the *post-start* `SandboxMetadata` summary) and never touch the create/start/inspect path where the error fires. Did **not** reproduce — `TestCLI_StartStop` passed cleanly at HEAD `33982a3` on both backends (docker 1.51s, podman 2.68s). Same non-deterministic podman family as [[DF13]] ("podman flaked alone on this leg; docker recovered"). Candidate remedy: replace `verifyInstanceRunning`'s bare 1s sleep + single `Inspect` with a short retry/backoff so a transient post-launch "not found" self-heals instead of failing the start.
-- **Trigger:** the next `TestCLI_StartStop` / `stop_start` "instance not found" or "not found shortly after start" failure on podman — if it recurs, capture `podman ps -a` + the container's exit state at the moment `verifyInstanceRunning` fires (before teardown) to distinguish a podman inspect race from a container that genuinely exited <1s after start, then implement the retry/backoff. If no recurrence across the next several podman integration/smoke runs, evict as a one-off environmental flake.
-- **Pointer:** `internal/sandbox/launch/launch.go:257` (`verifyInstanceRunning`); test `internal/cli/integration_test.go:183` (`TestCLI_StartStop`)
-
 ### DF18 — Backend run-coverage gap: live-daemon error paths + zero Seatbelt/Tart run coverage
 
 - **Discovered:** 2026-06-04 · **Workstream:** testing-critique (T13 split-out)
 - **Severity:** MEDIUM
-- **Disposition:** PARKED
+- **Disposition:** PARKED (partially addressed)
+- **Progress (2026-06-11):** A Tart integration tier now exists (`internal/runtime/tart/integration_test.go`, `//go:build integration`, Apple Silicon + tart) covering the *cheap* paths — `New`, `Descriptor`, `Inspect` not-found, idempotent `Remove`. The core gaps remain open: `TestTart_FullVMLifecycle` is still `t.Skip`-ped ("pending Tart Runtime fix"), **Seatbelt still has zero run coverage**, the docker-compat `runtimetest.RunConformance` table is not mirrored for Tart/Seatbelt, and the live-daemon error-injection cases (dead-daemon-mid-op, image-missing, exec-on-stopped, prune-failure, overlay diff/apply) are not added. Keep parked until the remaining items land.
 - **Description:** T13 promoted the *cheap* (host-only, fakeable) error paths to first-class
   assertions, but a class of error branches is reachable only against a live backend and stays
   unhit: dead-daemon-mid-op, image-missing, exec-on-stopped-container, prune-failure, and the
@@ -63,15 +55,6 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 - **Pointer:** `internal/runtime/runtimetest/conformance.go` (docker-compat table to mirror);
   `internal/runtime/seatbelt/`, `internal/runtime/tart/` (no integration tier); overlay error paths
   in `internal/sandbox/patch/apply.go` (`generateOverlayPatchForContext`, `ensureOverlayBaseline`).
-
-### DF19 — `make check` deletes the developer's real yoloai VMs via the system Prune test
-
-- **Discovered:** 2026-06-09 · **Workstream:** Tart `-xcode` base-image A/B investigation
-- **Severity:** CRITICAL (observable data loss)
-- **Disposition:** ESCALATED
-- **Description:** `TestPrune_ExecutesClassifications` (`system_test.go`, package `yoloai`, **no build tag → runs in `make check`**) calls the real `System.Prune(DryRun:false)`. Prune "iterates every registered backend available in the current environment and spins up an ephemeral runtime per backend" (`system.go:31`), so it runs the **tart orphan-sweep** (and the docker/podman equivalents) against the developer's **real** store. `newTestClient` isolates only yoloAI's DataDir/HomeDir; the `tart` CLI still reads the real `~/.tart` (it honors `$HOME`/`TART_HOME`, which the test never sets). Result: running `make check` on a host with live yoloAI sandboxes / runtime bases **deletes them** (keeps `yoloai-base`, sweeps the rest as orphans). Reproduced 2026-06-09 — a planted `yoloai-canary-*` VM vanished after a single `make check`. This is what repeatedly wiped the Tart runtime base during the A/B (the "unexplained disappearance").
-- **Fix:** isolate real backends in mutating system tests per [testing-principles §6](../principles/testing-principles.md): `t.Setenv("TART_HOME", t.TempDir())` and point `DOCKER_HOST`/`CONTAINER_HOST` at a bogus socket so the backend sweep hits empty/unavailable stores, while the host-side sandbox-dir classification (the test's actual subject) still runs against the temp layout. Apply in `newTestClient` (covers all system tests) or the prune tests specifically; verify it doesn't change the Info/Doctor tests' expectations.
-- **Pointer:** `system_test.go` (`TestPrune_ExecutesClassifications`), `profile_test.go::newTestClient`, `system.go::Prune` (backend sweep).
 
 ### DF20 — Stale-base detection flags the *wanted* base as "superseded" when `tart.image` pins a non-default image
 
