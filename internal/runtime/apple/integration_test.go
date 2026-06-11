@@ -1,8 +1,9 @@
 //go:build integration
 
 // ABOUTME: Apple container backend integration tests against the live `container`
-// ABOUTME: CLI. Opt-in via YOLOAI_TEST_APPLE=1 — builds a tiny image and runs real
-// ABOUTME: per-container VMs, so it is not part of the default suite.
+// ABOUTME: CLI. Availability is gated in TestMain (macOS 26 + Apple Silicon +
+// ABOUTME: container CLI); on any other host the suite skips cleanly. Builds a
+// ABOUTME: tiny image and runs real per-container VMs.
 
 package apple
 
@@ -13,10 +14,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime"
+	"github.com/kstenerud/yoloai/internal/runtime/runtimetest"
 	"github.com/kstenerud/yoloai/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -26,9 +29,6 @@ const itestImage = "yoloai-apple-itest:latest"
 
 func appleSetup(t *testing.T) (*Runtime, context.Context) {
 	t.Helper()
-	if os.Getenv("YOLOAI_TEST_APPLE") == "" {
-		t.Skip("set YOLOAI_TEST_APPLE=1 to run apple container integration tests")
-	}
 	home := testutil.IsolatedHome(t)
 	ctx := context.Background()
 	rt, err := New(ctx, config.NewLayout(filepath.Join(home, ".yoloai")))
@@ -37,19 +37,67 @@ func appleSetup(t *testing.T) (*Runtime, context.Context) {
 	return rt, ctx
 }
 
-// buildSleepImage builds a tiny long-running image. The context path is absolute
-// (t.TempDir), which exercises AC1 (a relative `.` context is silently dropped)
-// and AC3 (the builder VM must be started first).
+var (
+	sleepImageOnce sync.Once
+	sleepImageErr  error
+)
+
+// ensureSleepImage builds the tiny long-running test image once for the whole
+// package. The context path is absolute (a temp dir), which also exercises AC1
+// (a relative `.` context is silently dropped) and AC3 (the builder VM must be
+// started first). The image persists for the run — it is a tiny alpine reused
+// across every subtest, and skipping per-test deletion avoids a teardown race
+// when several conformance subtests share it.
+func ensureSleepImage(rt *Runtime, ctx context.Context) error {
+	sleepImageOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "apple-sleep-*")
+		if err != nil {
+			sleepImageErr = err
+			return
+		}
+		defer os.RemoveAll(dir) //nolint:errcheck // best-effort cleanup
+		dockerfile := "FROM alpine:3.22\nENTRYPOINT [\"sleep\", \"3600\"]\n"
+		if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte(dockerfile), 0o644); err != nil {
+			sleepImageErr = err
+			return
+		}
+		_, _ = rt.runContainer(ctx, "builder", "start") // idempotent (AC3)
+		if _, err := rt.runContainer(ctx, "build", "-t", itestImage, dir); err != nil {
+			sleepImageErr = err
+		}
+	})
+	return sleepImageErr
+}
+
+// buildSleepImage is the t-scoped wrapper used by the bespoke lifecycle test.
 func buildSleepImage(t *testing.T, rt *Runtime, ctx context.Context) {
 	t.Helper()
-	dir := t.TempDir()
-	dockerfile := "FROM alpine:3.22\nENTRYPOINT [\"sleep\", \"3600\"]\n"
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte(dockerfile), 0o644))
+	require.NoError(t, ensureSleepImage(rt, ctx), "container build with an absolute context must succeed (AC1/AC3)")
+}
 
-	_, _ = rt.runContainer(ctx, "builder", "start") // idempotent (AC3)
-	_, err := rt.runContainer(ctx, "build", "-t", itestImage, dir)
-	require.NoError(t, err, "container build with an absolute context must succeed (AC1/AC3)")
-	t.Cleanup(func() { _, _ = rt.runContainer(context.Background(), "image", "delete", itestImage) })
+// TestAppleConformance runs the shared, backend-agnostic behavioral conformance
+// suite against the live `container` CLI, so apple verifies the same lifecycle /
+// exec / mount contract as docker, podman, and containerd. The sleeper is a tiny
+// alpine "sleep" image; the stdio section auto-skips (apple does not implement
+// runtime.StdioExecer).
+func TestAppleConformance(t *testing.T) {
+	runtimetest.RunInterfaceConformance(t, func(t *testing.T) runtimetest.InterfaceBackend {
+		rt, ctx := appleSetup(t)
+		require.NoError(t, ensureSleepImage(rt, ctx))
+		return runtimetest.InterfaceBackend{
+			Runtime: rt,
+			Ctx:     ctx,
+			NewSleeper: func(t *testing.T, cfg runtime.InstanceConfig) string {
+				if cfg.ImageRef == "" {
+					cfg.ImageRef = itestImage
+				}
+				_ = rt.Remove(ctx, cfg.Name) // evict any stale leftover from a failed run
+				require.NoError(t, rt.Create(ctx, cfg))
+				t.Cleanup(func() { _ = rt.Remove(context.Background(), cfg.Name) })
+				return cfg.Name
+			},
+		}
+	})
 }
 
 // TestApple_Lifecycle drives the full create→start→exec→stop→remove path plus a
@@ -126,6 +174,9 @@ func TestApple_Lifecycle(t *testing.T) {
 // builder). Then IsReady is true and a second Setup skips. This build is slow
 // (full base image), so it lives behind the same YOLOAI_TEST_APPLE gate.
 func TestApple_SetupBuildsBase(t *testing.T) {
+	if os.Getenv("YOLOAI_TEST_APPLE_BASE") != "1" {
+		t.Skip("set YOLOAI_TEST_APPLE_BASE=1 to build the full yoloai-base under Apple's builder (slow)")
+	}
 	rt, ctx := appleSetup(t)
 
 	// A real CacheDir so the staleness marker persists (production has one;
