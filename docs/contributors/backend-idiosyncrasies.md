@@ -39,6 +39,7 @@ inclusion test first, then add a row to the index.
 | VM loses network silently; traffic stops | [Kata: tcfilter networking model](#tcfilter-networking-model) |
 | Container starts but has no network after `NewTask()` | [Kata: netns must be configured before NewTask](#kata-shim-startup-netns-must-be-fully-configured-before-newtask) |
 | Agent idle 9s+, route=ok but dns/tcp probe times out (DF8) | [Kata: netns warm-up race](#kata-netns-warm-up-race-tap0_kata-tc-mirred-filter-not-installed-when-taskstart-returns) |
+| Conformance/integration flaky under load; probe `task <name> not found` → 30s timeout → `instance not running`; or TTY exec `ENOENT` (DF28) | [Kata: guest-readiness race under churn](#kata-guest-readiness-race-under-back-to-back-vm-churn-task-not-found--exec-enoent) |
 | Agent "Not logged in"/idle after `restart` on containerd-vm; guest log `secrets.skip` | [Kata: secrets dir removed before guest read](#kata-secrets-temp-dir-removed-before-the-guest-reads-it) |
 | Tart: "secrets-consumed marker not observed before timeout" on every run (incl. passing) | [Kata: secrets dir removed before guest read](#kata-secrets-temp-dir-removed-before-the-guest-reads-it) (Tart variant) |
 | `EADDRINUSE` on shim start or `NewTask()` retry | [Kata: /run/kata persists on exit](#runkataname-persists-on-abnormal-exit), [EADDRINUSE on retry](#eaddrinuse-on-newtask-retry), [shim 500ms wait](#after-killing-orphaned-shim-processes-wait-500ms-before-proceeding) |
@@ -200,6 +201,57 @@ rather than blocking Start. See `lifecycle.go::waitForNetworkReady`.
 If the containerd backend ever honors `NetworkMode == "none"`, the
 probe will loop 30s and warn — acceptable for that edge case, but
 worth revisiting at that point.
+
+---
+
+### Kata: guest-readiness race under back-to-back VM churn (`task not found` / exec `ENOENT`)
+
+DF8 (above) is the *network* slice of a broader truth: `task.Start()`
+returns before the Kata guest is actually ready. Each yoloai Kata
+instance boots a **full systemd guest**, and the create→start→exec
+sequence fires immediately after `task.Start` returns. Two further
+readiness windows — *beyond* DF8's TC-filter gap — open during heavy
+back-to-back VM churn (a full conformance/integration run creating and
+tearing down ~15 VMs on a contended host):
+
+- **Task not queryable yet.** The network probe's in-task
+  exec-create races the task becoming addressable and gets
+  `probe exec create: task <name> not found`. The probe then loops its
+  full 30s budget and warns; a *follow-on* `Exec` against the same
+  instance sees `instance not running`.
+- **Guest process tree not up yet.** Interactive/TTY exec
+  (`InteractiveExec`) reaches the kata-agent before the guest rootfs /
+  PATH is fully mounted, and exec-process start returns
+  `rpc status: ... INTERNAL ... ENOENT: No such file or directory` (a
+  Rust kata-agent backtrace, *not* the benign hotplug ENOENT below).
+
+**Symptom:** `TestContainerdConformance` and `TestIntegration_ContainerLifecycle`
+**pass in isolation** (each subtest ~1.7s) but the **full suite is
+flaky** — a *random* 2–4 subtests fail per run with the two signatures
+above, and the failing set shifts run-to-run (so it is not a contract
+bug in any one subtest). Reproduced FAIL / PASS / FAIL across three
+full runs on Ubuntu 24.04, kernel 6.8, Kata 3.28.0 (qemu + systemd
+guest), containerd v2.2.2, 6 cores / 8 GB.
+
+**Not resource exhaustion:** at failure time 6.8 GB RAM free, 25 GB
+disk free, zero leftover tasks. The trigger is *concurrency of VM
+boot/teardown*, which widens the readiness windows under CPU
+contention — not memory/disk/ENOSPC (contrast the smoke disk-pressure
+case, which manifests as "agent idle 9s+" from real ENOSPC).
+
+**Status / fix direction (not yet fixed):** the durable fix is to gate
+the first probe/exec on an explicit kata-agent/guest-readiness signal
+(or serialize VM setup with a readiness wait) rather than trusting that
+`task.Start` returned. Until then: run flaky Kata subtests in isolation
+to confirm a green contract, and re-run the full suite on a transient
+failure. Tracked as **DF28** in `design/findings-unresolved.md`.
+
+**Code pointer:** `internal/runtime/containerd/lifecycle.go`
+(`waitForNetworkReady` — emits the `task ... not found` warning),
+`internal/runtime/containerd/integration_test.go`
+(`TestContainerdConformance` sleeper uses `io.containerd.kata.v2`),
+`internal/runtime/runtimetest/conformance_iface.go` (shared harness:
+the `InteractiveExec*` and `Exec*` subtests that surface it).
 
 ---
 
