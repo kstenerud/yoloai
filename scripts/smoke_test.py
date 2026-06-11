@@ -2529,6 +2529,11 @@ def _warm_up_vm_backends(
             continue
         if r.returncode != 0:
             print(f"  WARNING: {spec.label} warm-up create failed (exit {r.returncode}); matrix run will retry cold.")
+            # Surface the reason rather than swallowing it — a bare "exit 1" is
+            # undebuggable. Show the tail of stderr (or stdout) from `yoloai new`.
+            detail = (r.stderr or r.stdout or "").strip()
+            for line in detail.splitlines()[-10:]:
+                print(f"      {line}")
         _destroy_named_sandboxes(ctx, [name])
 
 
