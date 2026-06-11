@@ -7,6 +7,13 @@ History of codebase findings (issues discovered mid-work) that have been address
 are moved here from [`findings-unresolved.md`](findings-unresolved.md) once resolved, so the
 active file stays a working set. Newest first.
 
+### DF27 — Tart `:copy` symlink "bug" was stale; the real blockers were the idle command and Start-coupling
+
+- **Discovered:** 2026-06-11 · **Workstream:** testing-refactor (wiring Tart onto the shared conformance suite)
+- **Severity:** MEDIUM
+- **Disposition:** RESOLVED 2026-06-11. The documented `:copy` symlink failure **does not reproduce** — verified on an Apple Silicon host: `yoloai new` with a `/var/folders` temp-dir `:copy` workdir creates cleanly (the copy lands in VM-local storage; the symlink-skip at `mounts.go` already handles it). The actual blockers to Tart run coverage were two unrelated things, both now fixed: **(1)** the `idle` agent ran `sleep infinity`, a GNU-coreutils extension the macOS guest's BSD `sleep` rejects → agent exited 1 → sandbox `failed` (fixed: `tail -f /dev/null`, portable + 0% CPU; see backend-idiosyncrasies "macOS BSD `sleep`"); **(2)** tart's runtime `Create`/`Start` were coupled to a sandbox-provisioned `runtime-config.json` (`Start` ran the whole `sandbox-setup.py` monitor), so the runtime-level conformance couldn't drive it. Split into **P1** (boot + mounts, always) and **P2** (monitor, gated on config presence): absent a config, `Start` leaves a bare booted, exec-able VM — the same "bare idle instance" every other backend already uses for conformance. Tart now participates in `RunInterfaceConformance` (`TestTartConformance`, gated `YOLOAI_TEST_TART_VM=1`): lifecycle / exec / exec-on-stopped / interactive PASS; Mounts skipped (see [[DF29]]).
+- **Pointer:** `internal/agent/agent.go` (idle cmd); `internal/runtime/tart/mounts.go::runSetupScript` + `tart.go::addMountMapToConfig`/`patchConfigWorkingDir` (P1/P2 split); `internal/runtime/tart/integration_test.go::TestTartConformance`.
+
 ### DF19 — `make check` deletes the developer's real yoloai VMs via the system Prune test
 
 - **Discovered:** 2026-06-09 · **Workstream:** Tart `-xcode` base-image A/B investigation

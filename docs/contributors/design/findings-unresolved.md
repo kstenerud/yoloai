@@ -119,14 +119,14 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 - **Fix:** `skipIfNotAvailable` now stats **and** dials the socket (`net.DialTimeout`), skipping with a clear reason when it can't connect.
 - **Pointer:** `internal/runtime/containerd/integration_test.go` (`skipIfNotAvailable`).
 
-### DF27 — Tart `:copy` workdir symlink bug blocks Tart conformance/lifecycle coverage
+### DF29 — Tart bare-runtime VirtioFS mount path fails ("instance not found") in P1 (no monitor)
 
-- **Discovered:** 2026-06-11 · **Workstream:** testing-refactor (deciding Tart's place in the shared conformance suite)
-- **Severity:** MEDIUM (blocks real Tart run coverage; `TestTart_FullVMLifecycle` is a permanent skip)
-- **Disposition:** PARKED (fixable — prioritized for the post-refactor follow-up)
-- **Description:** Tart's workdir-mount path tries to create a symlink for a `:copy` workdir whose source is a temp dir (`t.TempDir()`), hitting a permission/already-exists case. This is why `TestTart_FullVMLifecycle` is a skipped stub and why Tart is a documented exception in the shared conformance suite rather than a participant. The fix is scoped and known: in the Tart mount-resolution path, detect `:copy` workdir mode and skip symlink creation (the copy is the canonical surface). macOS-only — needs an Apple Silicon host to verify. Once fixed, Tart's booted base VM becomes the conformance sleeper and it joins `RunInterfaceConformance`.
-- **Trigger:** the next time an Apple Silicon host is available to implement+verify the `:copy` symlink skip; then wire Tart onto `RunInterfaceConformance` (env-gated behind `YOLOAI_TEST_TART_VM=1`, like the existing heavy VM test).
-- **Pointer:** `docs/contributors/design/plans/README.md:135` (§Tart Runtime, the documented fix), `sandbox/integration_tart_test.go:33-37` (the skipped test), `internal/runtime/tart/integration_test.go:70` (`TestTart_FullVMLifecycle` stub).
+- **Discovered:** 2026-06-11 · **Workstream:** testing-refactor (wiring Tart onto the shared conformance suite)
+- **Severity:** LOW (test-infra; real sandboxes unaffected — they mount via the P2 monitor)
+- **Disposition:** PARKED
+- **Description:** With Tart wired onto `RunInterfaceConformance` (see [[DF27]], resolved), the `Mounts` section fails: a VirtioFS-mounted VM reports `instance not found` during the Go-side `createVMMountSymlinks` (P1, no monitor). `instance not found` is the signature of the documented **Tart exec stabilization race** (backend-idiosyncrasies "Tart exec needs brief stabilization delay after boot") — the VM passes Start's boot-wait `tart exec true` but a follow-on exec moments later fails; the mount-symlink exec runs inside Start right after the 500 ms stabilization sleep, so it lands in that window. The non-mount subtests don't exec during Start (createVMMountSymlinks is a no-op with no mounts) and exec only after Start returns, when the VM is stable — which is why only `Mounts` fails. Real sandboxes wire mounts through the **P2** Python monitor (`mount_map` → `sandbox-setup.py`), so the Go-side P1 path isn't normally exercised standalone. Likely fix: a short retry/readiness wait in `createSingleVMSymlink` (mirroring the boot-wait), not a VirtioFS-model change. The conformance sets `SkipMounts` for Tart meanwhile; lifecycle/exec/exec-on-stopped/interactive all PASS.
+- **Trigger:** when bare-runtime Tart mounts matter (an embedder using `runtime.Runtime` directly with mounts), or to complete Tart's conformance Mounts coverage.
+- **Pointer:** `internal/runtime/tart/mounts.go::createVMMountSymlinks`/`createSingleVMSymlink`; the `SkipMounts` reason in `internal/runtime/tart/integration_test.go::TestTartConformance`.
 
 ## Policy origin
 

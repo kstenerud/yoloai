@@ -904,6 +904,9 @@ const dockerHomeDir = "/home/yoloai"
 func (r *Runtime) patchConfigWorkingDir(sandboxPath string) error {
 	cfgPath := filepath.Join(sandboxPath, "runtime-config.json")
 	data, err := os.ReadFile(cfgPath) //nolint:gosec // G304: path within sandbox dir
+	if os.IsNotExist(err) {
+		return nil // no sandbox config → bare runtime instance, nothing to patch
+	}
 	if err != nil {
 		return err
 	}
@@ -1132,6 +1135,12 @@ func (r *Runtime) addMountMapToConfig(sandboxPath string, mounts []runtime.Mount
 	// Read existing runtime-config.json
 	cfgPath := filepath.Join(sandboxPath, "runtime-config.json")
 	data, err := os.ReadFile(cfgPath) //nolint:gosec // G304: path within sandbox dir
+	if os.IsNotExist(err) {
+		// No sandbox config → no monitor to consume the mount_map (a bare runtime
+		// Create). The Go-side createVMMountSymlinks wires the mounts in Start;
+		// mount_map is a P2 (monitor) artifact only.
+		return nil
+	}
 	if err != nil {
 		return err
 	}

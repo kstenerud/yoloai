@@ -130,11 +130,9 @@ Design considerations:
 
 ## Tart Runtime
 
-### Skip symlink creation for `:copy` workdirs
+### Skip symlink creation for `:copy` workdirs — RESOLVED (was stale)
 
-Tart's workdir-mount path currently fails when the source is a temporary directory (e.g., a Go `t.TempDir()` location) because the runtime tries to create a symlink that hits a permission or already-exists case. The integration test `sandbox/integration_tart_test.go` documents the symptom (test is gated behind `YOLOAI_TEST_TART=1` and disabled by default).
-
-Fix: in the Tart backend's mount-resolution path, detect `:copy` workdir mode and skip symlink creation — the copy is the canonical surface, no extra symlink needed. Test on an Apple Silicon machine with `YOLOAI_TEST_TART=1 go test -tags=integration ./sandbox/`.
+**Resolved 2026-06-11 (DF27).** This item described a `:copy`-workdir symlink failure for temp-dir sources. Verified on an Apple Silicon host that it **does not reproduce** — `yoloai new` with a `/var/folders` temp-dir `:copy` workdir creates cleanly; the symlink-skip in `mounts.go` already handles it. The real blockers to Tart run coverage were the `idle` agent's non-portable `sleep infinity` and tart `Start`'s coupling to the sandbox monitor — both fixed; tart now participates in `RunInterfaceConformance` (`TestTartConformance`). See `findings-resolved.md` DF27.
 
 Source TODO: `sandbox/integration_tart_test.go:33-37` (the test is skipped pending this fix).
 

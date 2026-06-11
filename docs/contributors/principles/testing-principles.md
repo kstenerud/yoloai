@@ -201,7 +201,7 @@ Threshold: any test that crosses the `runtime.Runtime` boundary requires a real 
 2. **Namespace + time-unique names.** Never reuse production names. Production owns the `yoloai-` prefix: `yoloai-base`, `yoloai-base-<key>` (and `yoloai-base-xcode-<key>`), `yoloai-base-tmp-<hex>`, `yoloai-<sandbox>`. Test resources use a distinct, collision-proof form — `yoloai-test-<purpose>-<unixnano>-<rand>`. The `unixnano`+`rand` suffix keeps names unique across reruns and concurrent runs (stale leftovers from a crashed run never collide); the `-test-` segment marks the namespace; `<purpose>` extends cleanly to future image/VM kinds without a new convention.
 3. **Scoped cleanup only.** A test deletes its *own* resources by exact name (or its own `yoloai-test-<token>-*`). Never call a production-wide sweep — e.g. Tart `Prune()` removes every `yoloai-*` except the base — against a shared real store; it would delete the developer's live sandboxes.
 
-This came up the hard way: a Tart runtime base built for an A/B kept vanishing because production names and sweep semantics were reused outside an isolated store. The placeholder `TestTart_FullVMLifecycle` must follow this when it's implemented.
+This came up the hard way: a Tart runtime base built for an A/B kept vanishing because production names and sweep semantics were reused outside an isolated store. `TestTartConformance` follows this — it names VMs `yoloai-test-*`, removes only its own via `t.Cleanup`, and never calls `Prune()`.
 
 ### Worked examples
 

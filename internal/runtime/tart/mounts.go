@@ -61,8 +61,20 @@ func remapTargetPath(target string) string {
 func (r *Runtime) runSetupScript(ctx context.Context, vmName, sandboxPath string, mounts []runtime.MountSpec) error {
 	vmSharedDir := filepath.Join(sharedDirVMPath, sharedDirName)
 
+	// P1: wire the mounts into the guest. Always — a bare runtime instance still
+	// needs its mounts reachable at the expected paths.
 	if err := r.createVMMountSymlinks(ctx, vmName, sandboxPath, vmSharedDir, mounts); err != nil {
 		return err
+	}
+
+	// P2: sandbox provisioning (workdir remap + the sandbox-setup.py monitor) runs
+	// only when the sandbox layer has provisioned a runtime-config.json. Absent it
+	// — a bare runtime Start (direct runtime.Runtime use / the conformance suite)
+	// — the VM is left booted, mounted, and exec-able with no monitor. This keeps
+	// tart's Start a clean P1 like every other backend's, with P2 gated on the
+	// sandbox handshake (the config file) rather than fused into Start.
+	if _, err := os.Stat(filepath.Join(sandboxPath, "runtime-config.json")); os.IsNotExist(err) {
+		return nil
 	}
 
 	if err := r.patchConfigWorkingDir(sandboxPath); err != nil {

@@ -4,7 +4,6 @@ package tart
 import (
 	"encoding/json"
 	"errors"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -448,8 +447,10 @@ func TestPatchConfigWorkingDir_MissingConfig(t *testing.T) {
 	sandboxDir := t.TempDir()
 	r := &Runtime{}
 	err := r.patchConfigWorkingDir(sandboxDir)
-	require.ErrorIs(t, err, fs.ErrNotExist,
-		"a missing runtime-config.json must surface as fs.ErrNotExist, distinct from a parse failure")
+	require.NoError(t, err,
+		"a missing runtime-config.json is a bare runtime instance (no sandbox monitor "+
+			"provisioned) — there is nothing to patch, so Start proceeds with a booted, "+
+			"exec-able VM rather than failing")
 }
 
 func TestPatchConfigWorkingDir_NoWorkingDirKey(t *testing.T) {

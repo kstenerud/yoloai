@@ -39,11 +39,10 @@ func tartIntegrationSetup(t *testing.T) (*sandbox.Engine, context.Context) {
 		t.Skip("skipping Tart integration test in short mode")
 	}
 
-	// Skip Tart tests by default - they're experimental
-	// Known issue: Tart workdir symlink creation fails for temp directories
-	// Tracked: docs/contributors/design/plans/README.md §Tart Runtime — "Skip symlink creation
-	// for :copy workdirs". Re-enable with YOLOAI_TEST_TART=1 on Apple Silicon
-	// to reproduce while iterating on the fix.
+	// Gated behind YOLOAI_TEST_TART=1 because each test clones+boots a multi-GB
+	// macOS VM. (The old "workdir symlink fails for temp dirs" note was DF27 —
+	// verified stale; the :copy path works. Runtime-level coverage now lives in
+	// internal/runtime/tart TestTartConformance.)
 	if os.Getenv("YOLOAI_TEST_TART") != "1" {
 		t.Skip("skipping Tart integration test (set YOLOAI_TEST_TART=1 to enable)")
 	}
