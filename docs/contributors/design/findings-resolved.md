@@ -7,6 +7,13 @@ History of codebase findings (issues discovered mid-work) that have been address
 are moved here from [`findings-unresolved.md`](findings-unresolved.md) once resolved, so the
 active file stays a working set. Newest first.
 
+### DF30 — Tart `mapTartError` no longer misclassifies exec inner-command stderr as VM-level sentinels
+
+- **Discovered:** 2026-06-11 · **Resolved:** 2026-06-11 · **Workstream:** testing-refactor (split out of [[DF29]])
+- **Severity:** LOW (misleading error category/message; no data loss or wrong control flow in normal use)
+- **Disposition:** RESOLVED. `runTart` is the single funnel for **every** tart subprocess — `list`, `clone`, `run`, `delete`, **and `exec`** — and passed each command's stderr through `mapTartError`, which maps substrings (`"no such"`/`"not found"`/`"does not exist"` → `runtime.ErrNotFound`; `"not running"`/`"is stopped"` → `runtime.ErrNotRunning`). For VM-level ops those substrings legitimately mean the VM/image is absent; for **`exec`** the stderr belongs to the *inner guest command*, so a benign `ln: /mnt/test: No such file or directory` (the [[DF29]] failure) was mislabeled as `ErrNotFound` → "instance not found", which cost real diagnosis time. **Fix:** `runTart` now skips the sentinel mapping when `args[0] == "exec"`, returning the raw error wrapped with the inner stderr so the real failure is surfaced. Verified safe: the only `errors.Is(…ErrNotFound)` callers are VM-level (`delete` in `prune.go`/`stalebases.go`); the real `Exec`/`ExecRaw` methods guard with their own `isRunning` check and use `RunCmdExec` (the exit-code path), never `runTart`. Covered by `TestRunTart_ExecFailureNotMappedToSentinel` (exec "No such file" → not `ErrNotFound`, raw stderr surfaced) and `TestRunTart_VMLevelFailureStillMapsToSentinel` (a non-exec `delete` with the same stderr still maps).
+- **Pointer:** `internal/runtime/tart/tart.go::runTart` (exec branch); `internal/runtime/tart/tart_test.go::TestRunTart_{ExecFailureNotMappedToSentinel,VMLevelFailureStillMapsToSentinel}`.
+
 ### DF29 — Tart conformance `Mounts` "instance not found" was a misclassified `/mnt` failure, not a stabilization race
 
 - **Discovered:** 2026-06-11 · **Resolved:** 2026-06-11 · **Workstream:** testing-refactor (wiring Tart onto the shared conformance suite)

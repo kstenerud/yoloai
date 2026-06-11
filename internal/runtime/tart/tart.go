@@ -776,6 +776,17 @@ func (r *Runtime) runTart(ctx context.Context, args ...string) (string, error) {
 
 	if err := cmd.Run(); err != nil {
 		stderrStr := strings.TrimSpace(stderr.String())
+		// For `tart exec`, stderr belongs to the inner guest command, not to tart
+		// itself — its "not found"/"no such"/"not running" text must NOT be read as
+		// a VM-level sentinel. mapTartError would otherwise mislabel e.g.
+		// `ln: /mnt/test: No such file or directory` as runtime.ErrNotFound →
+		// "instance not found" (DF30). Surface the raw failure for exec instead.
+		if len(args) > 0 && args[0] == "exec" {
+			if stderrStr != "" {
+				return "", fmt.Errorf("%w: %s", err, stderrStr)
+			}
+			return "", err
+		}
 		return "", mapTartError(err, stderrStr)
 	}
 

@@ -89,16 +89,6 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 - **Fix:** `skipIfNotAvailable` now stats **and** dials the socket (`net.DialTimeout`), skipping with a clear reason when it can't connect.
 - **Pointer:** `internal/runtime/containerd/integration_test.go` (`skipIfNotAvailable`).
 
-### DF30 — Tart `mapTartError` misclassifies exec inner-command stderr as VM-level sentinels
-
-- **Discovered:** 2026-06-11 · **Workstream:** testing-refactor (split out of [[DF29]], resolved)
-- **Severity:** LOW (cosmetic-to-misleading: wrong error category/message; no data loss or wrong control flow in normal use)
-- **Disposition:** PARKED
-- **Description:** `runTart` is the single funnel for **every** tart subprocess — `list`, `clone`, `run`, `delete`, **and `exec`** — and unconditionally passes the command's stderr through `mapTartError`, which pattern-matches substrings (`"no such"`, `"not found"`, `"does not exist"` → `runtime.ErrNotFound`; `"not running"`, `"is stopped"` → `runtime.ErrNotRunning`). For VM-level operations those substrings legitimately mean the VM/image is absent. For **`exec`**, the stderr belongs to the *inner guest command*, so a benign failure like `ln: /mnt/test: No such file or directory` (the [[DF29]] symlink failure) or any `cat`/`test`/`grep` that prints "not found" is mislabeled as `ErrNotFound` → surfaced to callers/logs as "instance not found", which is actively misleading during diagnosis (it cost real time on DF29). This is **our** code, not external tooling, so it does not belong in `backend-idiosyncrasies.md` — it should be fixed.
-- **Proposed fix:** stop applying the VM-level sentinel mapping to `exec` invocations. Simplest: in `runTart`, when `args[0] == "exec"`, skip `mapTartError`'s sentinel branches and return the raw `err` + stderr (or route exec through the existing `RunCmdExec` exit-code path used by the real `Exec` methods, so exec failures carry an exit code instead of a guessed sentinel). Add a `tart_test.go` case asserting an exec whose inner command prints "No such file or directory" does **not** map to `runtime.ErrNotFound`.
-- **Trigger:** before relying on `runtime.ErrNotFound`/`ErrNotRunning` from any `exec`-backed path, or next time a tart exec failure is being diagnosed.
-- **Pointer:** `internal/runtime/tart/tart.go::runTart` (the `mapTartError` call site) / `mapTartError`; exec callers `mounts.go::createSingleVMSymlink`/`runSetupScript`.
-
 ## Policy origin
 
 Established in [architecture-remediation.md](../archive/plans/architecture-remediation.md) and inherited by [layering-refactor.md](../archive/plans/layering-refactor.md).

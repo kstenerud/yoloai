@@ -108,8 +108,8 @@ func TestTartConformance(t *testing.T) {
 			// macOS guest's /mnt is root-owned and the guest has no passwordless
 			// sudo, so the symlink command can't create it (the same
 			// /mnt-not-writable reason seatbelt skips). The failing `ln` emits
-			// "No such file or directory", which runTart's mapTartError
-			// misclassifies as runtime.ErrNotFound → "instance not found" (DF30).
+			// "No such file or directory" (since DF30 surfaced verbatim; it
+			// used to be mislabeled "instance not found" by mapTartError).
 			// Real mount wiring is exercised by the sandbox-level lifecycle tests.
 			SkipMounts: "conformance /mnt/test is not host-writable in the macOS guest (no passwordless sudo); same container-path assumption seatbelt skips",
 			NewSleeper: func(t *testing.T, cfg runtime.InstanceConfig) string {

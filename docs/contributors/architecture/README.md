@@ -911,9 +911,9 @@ against a bare idle instance. Lifecycle/exec/interactive pass; `Mounts` is skipp
 for the **same reason as seatbelt** — the conformance mounts at `/mnt/test`, and
 the macOS guest's `/mnt` isn't writable without root (no passwordless sudo), so the
 symlink can't be created (the *conformance's container-path assumption*, not a
-VirtioFS gap). The failing `ln` was historically misread as "instance not found"
-because `mapTartError` misclassifies inner-command stderr — see DF29 (resolved) and
-DF30 (the mislabeling). Real mounts run in the smoke matrix.
+VirtioFS gap). The failing `ln` used to be misread as "instance not found" because
+`mapTartError` misclassified inner-command stderr — fixed in DF30 (exec stderr now
+surfaced verbatim); see DF29 (resolved) and DF30. Real mounts run in the smoke matrix.
 
 **Seatbelt conformance** (`TestSeatbeltConformance`) — also a participant, via the
 same P1/P2 split: `Start` launches a bare keep-alive process under the SBPL

@@ -2,10 +2,12 @@
 package tart
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -185,6 +187,44 @@ func TestMapTartError_Unknown(t *testing.T) {
 func TestMapTartError_EmptyStderr(t *testing.T) {
 	err := mapTartError(assert.AnError, "")
 	assert.Equal(t, assert.AnError, err)
+}
+
+// fakeFailingTart writes a stub `tart` that always exits 1 with the given
+// stderr, regardless of subcommand — to exercise runTart's error mapping.
+func fakeFailingTart(t *testing.T, stderr string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "tart")
+	script := "#!/bin/sh\nprintf '%s\\n' " + shellSingleQuote(stderr) + " >&2\nexit 1\n"
+	require.NoError(t, os.WriteFile(path, []byte(script), 0700)) //nolint:gosec // test fixture needs exec bit
+	return path
+}
+
+func shellSingleQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// DF30: `tart exec` stderr is the inner guest command's, so a "no such"/"not
+// found" message there must NOT be mapped to a VM-level sentinel — only
+// VM-level operations (delete/list/clone) get that treatment.
+func TestRunTart_ExecFailureNotMappedToSentinel(t *testing.T) {
+	const innerErr = "ln: /mnt/test: No such file or directory"
+	r := &Runtime{tartBin: fakeFailingTart(t, innerErr), execEnv: []string{"PATH=/usr/bin:/bin"}}
+
+	_, err := r.runTart(context.Background(), execArgs("yoloai-test", "bash", "-c", "ln -sfn a /mnt/test")...)
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, runtime.ErrNotFound,
+		"exec inner-command stderr must not be read as a VM-level sentinel")
+	assert.NotErrorIs(t, err, runtime.ErrNotRunning)
+	assert.Contains(t, err.Error(), innerErr, "the real failure must be surfaced, not swallowed")
+}
+
+func TestRunTart_VMLevelFailureStillMapsToSentinel(t *testing.T) {
+	// Same "no such" stderr, but a non-exec (VM-level) command — must still map.
+	r := &Runtime{tartBin: fakeFailingTart(t, "no such VM"), execEnv: []string{"PATH=/usr/bin:/bin"}}
+
+	_, err := r.runTart(context.Background(), "delete", "yoloai-test")
+	assert.ErrorIs(t, err, runtime.ErrNotFound,
+		"VM-level command stderr must still map to runtime.ErrNotFound")
 }
 
 func TestCheckVMLimitError_Detected(t *testing.T) {
