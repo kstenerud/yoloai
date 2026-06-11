@@ -208,12 +208,20 @@ integration-apple:
 integration-seatbelt:
 	go test -tags=integration -v -count=1 -timeout=5m ./internal/runtime/seatbelt/
 
-## integration-tart: run Tart integration tests (requires macOS with Apple Silicon + tart)
+## integration-tart: run Tart integration tests (requires macOS with Apple Silicon + tart).
 ## On platforms without tart the tests skip cleanly via TestMain (exit 0).
-## The TestTart_FullVMLifecycle test is gated behind YOLOAI_TEST_TART_VM=1
-## because it clones the base image (multi-GB, multi-minute).
+## The heavyweight TestTartConformance suite clones a multi-GB macOS VM per subtest,
+## so it is gated behind YOLOAI_TEST_TART_VM=1 (skipped for a quick `make
+## integration-tart`). `make releasetest` sets it, so the release gate runs the
+## full suite — building the tart base first so a missing base fails loudly rather
+## than silently skipping.
 integration-tart:
-	go test -tags=integration -v -count=1 -timeout=10m ./internal/runtime/tart/
+	@if [ "$$YOLOAI_TEST_TART_VM" = "1" ]; then \
+		$(MAKE) build && \
+		echo "Building tart base image for the conformance suite..." && \
+		./$(BINARY) system build --backend tart; \
+	fi
+	go test -tags=integration -v -count=1 -timeout=40m ./internal/runtime/tart/
 
 ## smoketest: run base-tier smoke tests (docker + containerd-vm / tart)
 ## VM backends require root (CAP_SYS_ADMIN + write to /var/run/netns/).
@@ -236,6 +244,13 @@ smoketest-full: build
 ## releasetest: run every test tier, fastest first
 ## Runs: lint → unit → integration → e2e → podman integration → full smoke
 ## Automatically escalates to root on Linux for smoke tests.
+## The release gate exercises everything the host supports: these exports flip on
+## the heavyweight macOS-VM paths (tart conformance clones a real base VM per
+## subtest; apple builds its real yoloai-base instead of a sleep image). They
+## propagate through the recursive sub-makes; on a host without tart/apple the
+## suites still skip cleanly via TestMain.
+releasetest: export YOLOAI_TEST_TART_VM := 1
+releasetest: export YOLOAI_TEST_APPLE_BASE := 1
 releasetest: check integration e2e integration-podman smoketest-full
 
 ## setcap: grant capabilities needed for VM backends (must re-run after each build)
