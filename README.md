@@ -2,8 +2,6 @@
 
 **Sandboxed runner for AI coding agents. No more permission fatigue. Your files stay untouched until you say otherwise.**
 
-https://github.com/user-attachments/assets/9d6740b4-a34e-4253-82ec-cb0e4c7a8bd9
-
 AI coding agents want to edit your files and run commands, so you must choose between them constantly asking your permission, or bypassing permissions and risking a catastrophe.
 
 Until now.
@@ -26,6 +24,8 @@ You                          Sandbox                        Your project
  ├─ yoloai destroy fix-bug      ├─ destroys sandbox              │
 ```
 
+https://github.com/user-attachments/assets/9d6740b4-a34e-4253-82ec-cb0e4c7a8bd9
+
 ## Why?
 
 **Permission fatigue is real.** After a hundred approve/deny prompts you stop reading and just hit "yes" — or you reach for `--dangerously-skip-permissions` and hope for the best. Neither is great.
@@ -40,14 +40,6 @@ yoloAI takes a different approach: let the agent do whatever it wants inside a d
 - **Persistent agent state.** Session history and config survive stops and restarts.
 - **Easy retry.** `yoloai reset` re-copies your original for a fresh attempt.
 
-## What yoloAI is not
-
-- **Not an orchestrator.** The orchestrator space is crowded (60+ tools) and rapidly evolving. yoloAI's value is the sandbox layer — it provides composable primitives (`new`, `diff`, `apply`) that orchestrators can build on top of, not a coordination framework.
-- **Not an autonomous agent platform.** yoloAI runs one agent in one sandbox — it doesn't decompose tasks, coordinate multiple agents, or manage autonomous workflows. You drive the loop.
-- **Not a permission system.** Instead of asking you to approve every file write and shell command, yoloAI eliminates the question entirely: the agent does whatever it wants in a disposable sandbox, and you review the result.
-- **Not a hosted service.** yoloAI is a local CLI tool. No accounts, no cloud, no vendor lock-in. Just a Go binary and your chosen sandbox backend.
-- **Not a live-sync tool.** Your originals are protected by default. The agent works on an isolated copy and changes only land when you say so. (Live mounts are available via `:rw` mode for those who want them.)
-
 ## Install
 
 ### Using `go install`
@@ -56,22 +48,24 @@ yoloAI takes a different approach: let the agent do whatever it wants inside a d
 # Latest release
 go install github.com/kstenerud/yoloai/cmd/yoloai@latest
 
-# Latest development version (beta)
+# Latest development version (unstable)
 go install github.com/kstenerud/yoloai/cmd/yoloai@main
 ```
 
-Requires Go 1.24+. The binary is placed in `$GOPATH/bin` (typically `~/go/bin`).
+Requires Go 1.26+. The binary is placed in `$GOPATH/bin` (typically `~/go/bin`).
 
 ### From source
 
 ```bash
 git clone https://github.com/kstenerud/yoloai.git
 cd yoloai
+git tag
+# then git checkout your chosen tag
 make build
 sudo mv yoloai /usr/local/bin/  # or add to PATH
 ```
 
-Single Go binary, no runtime dependencies beyond your chosen backend. On first run, yoloAI builds its base image (~2 min) and creates `~/.yoloai/`.
+It's a single Go binary, with no runtime dependencies beyond your chosen backend. On first run, yoloAI builds its base image and creates `~/.yoloai/`.
 
 ## One-Shot workflow
 
