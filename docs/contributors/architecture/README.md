@@ -867,6 +867,56 @@ make e2e
 # or: go test -tags=e2e -v -count=1 -timeout=15m ./test/e2e/
 ```
 
+### Backend conformance & per-host coverage
+
+Every backend is verified the same way: a shared, backend-agnostic behavioral
+suite in `internal/runtime/runtimetest`, run by each backend's integration
+package, with a per-host smoke matrix on top. Each tier is **host-aware** — it
+runs what the current host supports and skips the rest with a reason, so the same
+target works on a Linux box or an Apple Silicon Mac.
+
+- **`RunInterfaceConformance`** (`conformance_iface.go`) — the universal contract
+  through interface methods only: lifecycle, exec exit-codes, the exec-on-stopped
+  error path, idempotency, `IsReady`, and capability-gated `Mounts`/`Stdio`
+  sections (a backend declares a section it can't honor and the suite reports a
+  clean SKIP+reason). The one backend-specific seam is *how to start a
+  long-running instance* (a `Sleeper`): entrypoint override for docker/podman, a
+  sleep image for apple/containerd.
+- **`RunConformance`** (`conformance.go`) — wraps the above for docker-API
+  backends and adds the assertions that need the docker SDK `Client()` (resource
+  limits, port bindings). docker/podman run both.
+
+| Backend | Unit | `RunInterfaceConformance` | Integration target | Smoke matrix | Live run needs |
+|---------|:----:|:-------------------------:|--------------------|:------------:|----------------|
+| docker | ✓ | ✓ (+ SDK extras) | `make integration` | linux + mac | docker daemon |
+| podman | ✓ | ✓ (+ SDK extras) | `make integration-podman` | linux + mac | podman + socket |
+| containerd (Kata) | ✓ | ✓ | `make integration-containerd` | linux | Linux + containerd + Kata/KVM |
+| apple | ✓ | ✓ | `make integration-apple` | mac | macOS 26 + Apple Silicon + `container` |
+| tart | ✓ | ✗ — **blocked** (see below) | `make integration-tart` | mac | macOS + Apple Silicon + tart |
+| seatbelt | ✓ | ✗ — **process model** (see below) | `make integration-seatbelt` | mac | macOS (sandbox-exec) |
+
+**Gating** — each integration package self-skips when its daemon/host is absent
+(`TestMain` for docker/podman/apple/seatbelt/tart, `skipIfNotAvailable` for
+containerd — which probes a real socket connection, not just the socket file). So
+`make integration` runs every backend target and exercises only what the host
+supports. The slow apple base-image build is gated behind `YOLOAI_TEST_APPLE_BASE=1`;
+the slow tart VM clone behind `YOLOAI_TEST_TART_VM=1`.
+
+**Two documented exceptions** (not coverage gaps):
+- **tart** — `TestTart_FullVMLifecycle` is a stub blocked on the `:copy` workdir
+  symlink fix (`design/plans/README.md` §Tart Runtime). Once that lands, tart
+  joins `RunInterfaceConformance` (its booted base VM is the sleeper).
+- **seatbelt** — its `Start` boots the full monitor/tmux stack rather than a bare
+  exec sleeper, so the exec/mount conformance doesn't fit. It keeps a focused
+  lifecycle test (create/inspect/stop/remove + idempotency).
+
+**Smoke tiers** (`scripts/smoke_test.py`, `HOST_MATRICES`) — one matrix per host
+OS, every backend that OS can run. The tier flag changes only how *missing
+infrastructure* is treated: `make smoketest` SKIPS it (quick dev check),
+`make smoketest-full` FAILS loudly (release gate). A full run is per-OS, so the
+gate is **not** complete until `make releasetest` has passed on every supported
+host OS — the harness prints a reminder naming the others.
+
 **Run tests for a specific package:**
 ```
 go test ./sandbox/

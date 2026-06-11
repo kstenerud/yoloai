@@ -35,8 +35,22 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 
 - **Discovered:** 2026-06-04 · **Workstream:** testing-critique (T13 split-out)
 - **Severity:** MEDIUM
-- **Disposition:** PARKED (partially addressed)
-- **Progress (2026-06-11):** A Tart integration tier now exists (`internal/runtime/tart/integration_test.go`, `//go:build integration`, Apple Silicon + tart) covering the *cheap* paths — `New`, `Descriptor`, `Inspect` not-found, idempotent `Remove`. The core gaps remain open: `TestTart_FullVMLifecycle` is still `t.Skip`-ped ("pending Tart Runtime fix"), **Seatbelt still has zero run coverage**, the docker-compat `runtimetest.RunConformance` table is not mirrored for Tart/Seatbelt, and the live-daemon error-injection cases (dead-daemon-mid-op, image-missing, exec-on-stopped, prune-failure, overlay diff/apply) are not added. Keep parked until the remaining items land.
+- **Disposition:** PARTIALLY ADDRESSED (2026-06-11) — conformance gap closed; live-daemon error paths still PARKED
+- **Progress (2026-06-11, testing-refactor):** The conformance suite is **no longer
+  docker-only**. Extracted `runtimetest.RunInterfaceConformance` (backend-agnostic,
+  interface-only) as the shared behavioral contract; docker/podman delegate to it
+  (keeping their SDK-only checks via `RunConformance`), and **containerd and apple are
+  wired onto it**. Apple gained a `TestMain` availability gate (matching docker/podman/
+  seatbelt/tart) and a smoke-matrix entry, so it is no longer untested. Seatbelt and Tart
+  are now **documented exceptions** rather than silent gaps: Tart keeps its cheap-path
+  integration tier (`New`, `Descriptor`, `Inspect` not-found, idempotent `Remove`) and its
+  exec/mount conformance stays blocked on the `:copy` symlink fix — `TestTart_FullVMLifecycle`
+  is still skipped (see [[DF27]]); Seatbelt's `Start` boots the full monitor stack, not a bare
+  exec sleeper, so it keeps a focused lifecycle test (create/inspect/stop/remove + idempotency).
+  One error path from the original list — **exec-on-stopped** — is now a universal conformance
+  assertion. **Still parked:** the remaining live-daemon error paths (dead-daemon-mid-op,
+  image-missing, prune-failure, overlay diff/apply) — they need live error-injection, not a
+  test rewrite.
 - **Description:** T13 promoted the *cheap* (host-only, fakeable) error paths to first-class
   assertions, but a class of error branches is reachable only against a live backend and stays
   unhit: dead-daemon-mid-op, image-missing, exec-on-stopped-container, prune-failure, and the
@@ -86,6 +100,33 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 - **Fix options:** (a) cheapest — in the `StatusRemoved`→recreate path, when ≥2 Docker providers are installed, emit a notice ("recreating in <active>; if 'X' was created on a different provider, start it to reconnect the original") before recreating; needs the provider-detection signal (host docker knowledge) surfaced to the backend-agnostic lifecycle layer as a notice. (b) durable — the Hybrid-C upgrade: persist the resolved endpoint (or the container-system id) in `environment.json` next to `backend: docker` and re-inject `DOCKER_HOST` on restart, so a switched-but-still-running original re-pins exactly and a stopped original fails loudly instead of silently recreating.
 - **Trigger:** the first real report of "my sandbox reset itself after I switched from OrbStack to Docker Desktop" (or vice-versa), or when persisting a per-sandbox endpoint becomes worthwhile for another reason — whichever comes first. Until then the creation-time pin + the attach/connection hints are the agreed v1 behavior.
 - **Pointer:** `internal/runtime/container_system.go` (`ResolveContainerSystem`), `internal/cli/cliutil/client.go` (`BackendEnv` pin), `internal/sandbox/status/status.go:205` (not-found → `StatusRemoved`), `internal/sandbox/lifecycle/lifecycle.go` (`Start`→`recreateContainer`), `internal/runtime/docker/docker.go` (`notFound`/`pingFailureError` hints, `providerNames`).
+
+### DF25 — containerd `Exec` returned untrimmed stdout (contract inconsistency)
+
+- **Discovered:** 2026-06-11 · **Workstream:** testing-refactor (surfaced wiring containerd onto the shared conformance suite)
+- **Severity:** LOW
+- **Disposition:** ADDRESSED-IN-PLACE (2026-06-11)
+- **Description:** `ExecResult.Stdout` was an undocumented contract, and backends diverged: docker (`docker.go:581`), apple, seatbelt, and tart all trim (the latter two via the shared `runtime.RunCmdExec` helper), but containerd's `exec.go` returned `stdout.String()` **raw**. The old `TestIntegration_ContainerLifecycle` papered over it with `assert.Contains` instead of `assert.Equal`. A uniform conformance suite that asserts a trimmed result surfaced the divergence.
+- **Fix:** documented the trimmed contract on `runtime.ExecResult.Stdout` and made containerd's exec path trim (`strings.TrimSpace`). The shared suite now asserts the contract strictly for every backend.
+- **Pointer:** `internal/runtime/runtime.go` (`ExecResult.Stdout` doc), `internal/runtime/containerd/exec.go` (trim), `internal/runtime/docker/docker.go:581` / `internal/runtime/exec.go:64` (reference impls).
+
+### DF26 — containerd `skipIfNotAvailable` only stat'd the socket, so an unconnectable daemon failed every test
+
+- **Discovered:** 2026-06-11 · **Workstream:** testing-refactor (running `integration-containerd` on a host with a present-but-unconnectable socket)
+- **Severity:** LOW (test-infra; no production impact)
+- **Disposition:** ADDRESSED-IN-PLACE (2026-06-11)
+- **Description:** The containerd integration gate did only `os.Stat("/run/containerd/containerd.sock")`. On a host where the socket file exists but isn't connectable (daemon down, or the test user lacks dial permission — the socket is commonly root-owned `srw-rw----`), the stat passed and every containerd integration test then **failed** at first use instead of skipping. This breaks the host-aware contract (skip cleanly where the backend can't run). Reproduced on the Linux LXC dev host (socket present, owned by root, no Kata/KVM).
+- **Fix:** `skipIfNotAvailable` now stats **and** dials the socket (`net.DialTimeout`), skipping with a clear reason when it can't connect.
+- **Pointer:** `internal/runtime/containerd/integration_test.go` (`skipIfNotAvailable`).
+
+### DF27 — Tart `:copy` workdir symlink bug blocks Tart conformance/lifecycle coverage
+
+- **Discovered:** 2026-06-11 · **Workstream:** testing-refactor (deciding Tart's place in the shared conformance suite)
+- **Severity:** MEDIUM (blocks real Tart run coverage; `TestTart_FullVMLifecycle` is a permanent skip)
+- **Disposition:** PARKED (fixable — prioritized for the post-refactor follow-up)
+- **Description:** Tart's workdir-mount path tries to create a symlink for a `:copy` workdir whose source is a temp dir (`t.TempDir()`), hitting a permission/already-exists case. This is why `TestTart_FullVMLifecycle` is a skipped stub and why Tart is a documented exception in the shared conformance suite rather than a participant. The fix is scoped and known: in the Tart mount-resolution path, detect `:copy` workdir mode and skip symlink creation (the copy is the canonical surface). macOS-only — needs an Apple Silicon host to verify. Once fixed, Tart's booted base VM becomes the conformance sleeper and it joins `RunInterfaceConformance`.
+- **Trigger:** the next time an Apple Silicon host is available to implement+verify the `:copy` symlink skip; then wire Tart onto `RunInterfaceConformance` (env-gated behind `YOLOAI_TEST_TART_VM=1`, like the existing heavy VM test).
+- **Pointer:** `docs/contributors/design/plans/README.md:135` (§Tart Runtime, the documented fix), `sandbox/integration_tart_test.go:33-37` (the skipped test), `internal/runtime/tart/integration_test.go:70` (`TestTart_FullVMLifecycle` stub).
 
 ## Policy origin
 
