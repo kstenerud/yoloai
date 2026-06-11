@@ -27,7 +27,7 @@ type ProxyOptions struct {
 	AuxDirs []yoloai.DirSpec
 
 	// Agent is the agent to run in the container. Defaults to "idle"
-	// (sleep infinity — keeps the container alive without an AI agent).
+	// (a keep-alive process — keeps the container alive without an AI agent).
 	Agent string
 
 	// Model, Profile are passed to Engine.Create when creating.

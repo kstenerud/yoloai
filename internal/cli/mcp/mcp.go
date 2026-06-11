@@ -75,7 +75,7 @@ The sandbox is created automatically if it does not exist (requires workdir).
 If the sandbox already exists, it is reused regardless of the workdir argument.
 If the container is stopped, it is restarted.
 
-The default agent is "idle" (sleep infinity) — the container runs but no AI
+The default agent is "idle" (a keep-alive process) — the container runs but no AI
 agent is started. Use --agent to run an AI agent alongside the inner MCP server.
 
 Injects sandbox_diff into the tool surface. All other tools from the inner

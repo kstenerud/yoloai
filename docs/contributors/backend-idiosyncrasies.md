@@ -127,6 +127,7 @@ inclusion test first, then add a row to the index.
 | Apple `container create … --mount …` fails: `path '…' is not a directory` | [Apple: `--mount type=virtiofs` rejects file sources; use `-v`](#apple-mount-typevirtiofs-rejects-a-file-source-use--v-for-file-mounts) |
 | Apple: `container build .` builds nothing / `COPY` fails (`"/x": not found`) | [Apple: `container build` drops a relative context](#apple-container-build-silently-drops-a-relative--context-pass-an-absolute-dir) |
 | `podman build` → `Error: unknown flag: --provenance` / exit 125 | [Podman: build rejects docker BuildKit attestation flags](#podman-build-rejects-the-docker-buildkit-attestation-flags) |
+| `idle` agent / keep-alive exits 1 with `usage: sleep number[unit]` on a macOS/Tart guest | [macOS guest BSD sleep rejects sleep infinity](#macos-guest-bsd-sleep-rejects-sleep-infinity-gnu-only) |
 
 ---
 
@@ -1484,6 +1485,18 @@ symlink, try without sudo first, fall back to sudo:
 This avoids hardcoding which paths need sudo.
 
 **Code:** `runtime/tart/tart.go::runSetupScript` line ~900
+
+---
+
+### macOS guest BSD `sleep` rejects `sleep infinity` (GNU-only)
+
+**Symptom:** On a Tart (macOS) guest — or any BSD `sleep` — `sleep infinity` exits 1 with `usage: sleep number[unit] ...`. The `idle` agent used `sleep infinity`, so on Tart the agent pane exited immediately and the sandbox went `failed`; the Linux/GNU container backends (docker/podman/containerd/apple) were unaffected.
+
+**Explanation:** `sleep infinity` is a GNU-coreutils extension. macOS/BSD `sleep` accepts only a numeric duration, so `infinity` is an argument error. The launch is `exec sleep infinity`, so the failure killed the pane and the agent never came up.
+
+**Fix:** Keep-alive commands must be portable. The `idle` agent uses `tail -f /dev/null` — blocks event-driven (kqueue on BSD, inotify on Linux) at ~0% CPU and works on both. Any future "idle forever" command must avoid `sleep infinity`.
+
+**Code:** `internal/agent/agent.go` — the `idle` agent's `InteractiveCmd`/`HeadlessCmd`.
 
 ---
 

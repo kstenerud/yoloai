@@ -295,10 +295,14 @@ var agents = map[string]*Definition{
 		ModelAliases:   nil,
 	},
 	"idle": {
-		Type:           "idle",
-		Description:    "No-op container — keeps the sandbox running without an AI agent. Default for mcp-proxy.",
-		InteractiveCmd: "sleep infinity",
-		HeadlessCmd:    "sleep infinity",
+		Type:        "idle",
+		Description: "No-op container — keeps the sandbox running without an AI agent. Default for mcp-proxy.",
+		// `tail -f /dev/null`, not `sleep infinity`: the latter is a GNU-coreutils
+		// extension and the tart guest is macOS, whose BSD `sleep` rejects
+		// "infinity" (exit 1 → sandbox fails). tail -f blocks event-driven
+		// (kqueue/inotify) at ~0% CPU and is portable across BSD and GNU.
+		InteractiveCmd: "tail -f /dev/null",
+		HeadlessCmd:    "tail -f /dev/null",
 		PromptMode:     PromptModeInteractive,
 		APIKeyEnvVars:  []string{},
 		StateDir:       "",
