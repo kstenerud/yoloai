@@ -146,6 +146,10 @@ func (r *Runtime) InteractiveExec(ctx context.Context, name string, cmd []string
 		go forwardResizes(ctx, process, io.Resize)
 	}
 
+	// Surface the inner exit code as *runtime.ExecError (not a bare nil) so the
+	// errors.As-based callers — Sandbox.Exec, then the CLI's os.Exit — see it.
+	// Dropping it here makes `yoloai exec <box> -- false` exit 0 on this backend
+	// only. Mirrors the non-interactive Exec, which reads ExitCode() the same way.
 	exitStatus := <-exitCh
 	if code := int(exitStatus.ExitCode()); code != 0 {
 		return &runtime.ExecError{ExitCode: code}

@@ -449,7 +449,10 @@ func (r *Runtime) PrepareAgentCommand(cmd string) string {
 
 // TmuxSocket returns the per-sandbox tmux socket path for seatbelt. Each
 // seatbelt sandbox has its own socket under its sandbox directory, so the
-// socket path is derived from sandboxDir.
+// socket path is derived from sandboxDir. Host consumers must call this live
+// (never read a frozen runtime-config.json path): the sandbox dir moves on
+// `yoloai system migrate`, so a frozen host-absolute socket path goes stale —
+// freeze only target-internal paths, recompute host paths from the live layout.
 func (r *Runtime) TmuxSocket(sandboxDir string) string {
 	return filepath.Join(sandboxDir, tmuxDir, tmuxSocketName)
 }

@@ -308,6 +308,9 @@ func (r *Runtime) UsernsMode(hasSysAdmin bool) string {
 // rootless (user-space) daemon. The system socket (/run/podman/podman.sock)
 // is the only known non-rootless path; everything else (XDG_RUNTIME_DIR,
 // WSL2, Podman Machine, user-supplied CONTAINER_HOST) is treated as rootless.
+// Detect via the socket path, never os.Getuid(): under `sudo -E yoloai`
+// Getuid() is 0 yet the socket is still the user's rootless one, and
+// --userns=keep-id is wrong for a system socket but required for a rootless one.
 func socketIsRootless(sock string) bool {
 	path := strings.TrimPrefix(sock, "unix://")
 	return path != systemSockPath

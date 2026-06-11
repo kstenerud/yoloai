@@ -1,12 +1,34 @@
 # Backend Idiosyncrasies
 
-Behaviors that differ from documentation, require non-obvious workarounds, or
-have caused bugs. Use this as a first reference when a backend behaves
-unexpectedly. Update it whenever you discover something new.
+Durable facts about **external tooling and platforms we depend on but cannot
+change** — containerd, Kata, runc/gVisor, CNI plugins, iptables, the Docker and
+Podman engines and their Go SDKs, Tart, QEMU/Firecracker, macOS (`sandbox-exec`,
+Virtualization.framework, VirtioFS, CoreSimulator), the Go stdlib, POSIX, and
+the like — where the tool contradicts its own docs, behaves surprisingly, or
+forced us into a non-obvious workaround. Use this as the first reference when a
+backend misbehaves.
+
+**The inclusion test — does an entry belong here?**
+
+> Is the root-cause behavior in an external tool/OS we cannot fix? → **document it here.**
+> Is it our own code being wrong, which we have the power to just fix? → **it does not belong.**
+
+The entry earns its place only when the *surprise lives outside our codebase*.
+Writing our own workaround does not change that — the entry documents the
+external constraint that forced the workaround, not the workaround itself. A
+useful tell: **if you deleted every line of yoloAI's code, would the surprising
+behavior still exist out in the tool?** If yes, it belongs here. If the behavior
+exists only because of how *we* wired things, it does not.
+
+What does **not** belong: a bug we wrote and fixed, an ordering or race in our
+own startup sequence, a wrong return type or discarded value in our own code, an
+invariant of our own architecture. We control that code, so those lessons live
+in code comments, the decision log (`decisions/`), or git history — not here. If
+the only takeaway is "don't write our own code wrong," it is not an idiosyncrasy.
 
 **How to use:** scan the symptom index below to find the relevant section, then
-read the full entry for context and the fix. When you add an entry, also add a
-row to the index.
+read the full entry for context and the fix. When you add an entry, apply the
+inclusion test first, then add a row to the index.
 
 ---
 
@@ -25,14 +47,11 @@ row to the index.
 | `hotplug memory error: ENOENT` in kata-agent logs | [Kata: hotplug ENOENT is normal](#hotplug-memory-error-enoent-is-normal) |
 | `yoloai destroy` hangs; `ctr tasks ls` shows RUNNING but no qemu/firecracker; host CPU 60–80% | [Kata: shim wedge with dead VM](#kata-shim-wedge-with-dead-vm-sigkill-via-containerd-doesnt-release-the-task) |
 | `yoloai destroy` hangs on a Tart sandbox; `tart list` shows VM running but guest unreachable | [Tart: VM process wedge](#tart-vm-process-wedge-tart-stop-and-sigterm-via-pgrep-dont-release-the-host-tart-run) |
-| `yoloai diff <sha>` / commit listing on a Tart `:copy` sandbox errors with `unknown revision` / `not a git repository` for SHAs just listed | [Tart: commit-level git must dispatch through the runtime](#tart-commit-level-git-diff-sha-commit-listing-must-dispatch-through-the-runtime-not-host-git) |
 | Task stays in `Created` after `Start()` returns | [Containerd: task.Start returns early](#taskstart-returns-before-the-vm-is-actually-running) |
 | `parent snapshot sha256:... does not exist: not found` | [Containerd: WithNewSnapshot doesn't unpack](#withnewsnapshot-does-not-unpack-image-layers) |
 | `docker save \| ctr import` hangs indefinitely | [Containerd: pipe hang on ctr failure](#docker-save--ctr-import-hangs-if-ctr-fails-early) |
 | Containerd socket: no error from `os.Stat` despite permission denied | [Containerd: Stat can't detect EPERM](#osstat-on-the-containerd-socket-does-not-detect-permission-denied) |
 | Containerd GC removes blobs; image becomes unrunnable | [Containerd: GC removes child blobs](#containerd-gc-removes-child-blobs-while-leaving-the-root-manifest-intact) |
-| `yoloai apply` fails on containerd with `git diff --quiet: exec exited with code 1` | [Containerd: GitExec must return *runtime.ExecError](#gitexec-must-return-runtimeexecerror-not-a-plain-fmterrorf-on-non-zero-exit) |
-| `yoloai exec <box> -- false` exits 0 on containerd-vm; isolation_check smoke flaps | [Containerd: InteractiveExec discarded the exit code](#interactiveexec-discarded-the-inner-exit-code-so-yoloai-exec-always-exited-0) |
 | `already exists` on snapshot create after crash | [Containerd: orphaned snapshots](#kata-orphaned-snapshots-from-crashed-runs-must-be-pre-cleared) |
 | CNI bridge plugin: "netns and CNI_NETNS should not be the same" | [CNI: netns.NewNamed switches OS thread](#netnsnewnamed-switches-the-os-thread-via-unshare-and-never-restores-it) |
 | `createNetNS` fails with "file exists" (EEXIST) | [CNI: stale netns file](#stale-named-netns-files-at-varrunnetnsname-persist-after-failed-runs) |
@@ -63,7 +82,6 @@ row to the index.
 | `prune --images` leaves a snapshot chain; `Remove` → `cannot remove snapshot with child` | [containerd: remove snapshots leaf-first](#containerd-snapshots-must-be-removed-leaf-first-children-before-parents-or-removal-silently-stalls) |
 | `system disk` reports 0 containerd image bytes right after a successful `system build --backend containerd` | [containerd: import inconsistently materializes snapshots](#containerd-image-import-inconsistently-materializes-overlayfs-snapshots) |
 | Base layer won't prune (`cannot remove snapshot with child`) but no snapshot claims it as parent in any namespace | [containerd: leftover lease GC-roots an orphaned child](#containerd-a-leftover-lease-gc-roots-an-orphaned-child-blocking-base-layer-removal) |
-| Container starts as root / wrong uid under rootless Podman | [Podman: rootless detection uses socket path](#rootless-detection-must-use-socket-path-not-osgetuid) |
 | `yoloai exec`/`attach` on Podman returns exit 125 `no such container` under concurrent load though `info`/`Inspect` shows active | [Docker/Podman: interactive exec must use the API socket](#dockerpodman-interactive-execattach-must-use-the-api-socket-not-the-bare-cli-dual-control-plane-divergence) |
 | Wrong uid inside container on macOS Podman | [Podman: macOS keep-id maps VM uid](#macos---usernkeep-id-maps-the-podman-machine-uid-1000-not-the-macos-uid) |
 | Rootless Podman privileged: `sudo dockerd` fails, or agent crashes on `prompt.txt` | [Podman: Linux rootless privileged needs keep-id:uid=1001](#linux-rootless-privileged-dind-plain-keep-id-fails-both-ways-use-keep-iduid1001) |
@@ -82,13 +100,10 @@ row to the index.
 | `iOS X.Y is not installed … install from Xcode > Settings > Components` sporadically on cirruslabs Xcode base | [Tart: cirruslabs Xcode base bakes in the default runtime](#cirruslabsmacos--xcode-base-images-already-bake-in-the-default-ios-runtime--the-in-vm-download-is-redundant-for-it) |
 | `git diff` fails with "unable to read" object / git corruption on Tart VM | [Tart: VirtioFS corrupts git repositories](#virtiofs-corrupts-git-repositories) |
 | Tart `info` shows `Changes: no` on a dirty sandbox; `destroy` skips the unapplied-work gate | [Tart: host change probe blind to in-VM workdir](#a-host-side-change-probe-is-blind-to-the-in-vm-workdir--info-showed-changes-no-on-a-dirty-tart-sandbox-and-destroy-skipped-its-gate) |
-| `yoloai new` times out / "command timed out" on Tart; sandbox.jsonl stops after xcodebuild firstlaunch; agent never starts | [Tart: signal_secrets_consumed deadlock with get_working_dir](#tart-signal_secrets_consumed-must-run-before-get_working_dir) |
 | Agent silently fails to start on Tart (claude/node not found) | [Tart: provisioned tool dirs live only on the login PATH](#provisioned-tool-dirs-live-only-on-the-login-path-cirrus-base-image) |
 | Swift PM commands fail with sandbox-exec nesting errors on Seatbelt | [Seatbelt: macOS sandbox-exec doesn't nest](#macos-sandbox-exec-doesnt-nest--swift-pm-needs-the-swift-wrapper-sourced) |
 | Agent dies silently/SIGTRAP (exit 133) on Seatbelt at launch; ICU/timezone deny in unified log | [Seatbelt: SBPL subpaths need vnode-resolved paths](#agent-dies-silently-sigtrap--sbpl-subpath-rules-must-use-vnode-resolved-paths) |
 | Interactive error output "stair-steps" (each line shifts right) on Seatbelt/Tart | [Seatbelt/Tart: local-PTY backends must bridge, not inherit host stdio](#interactive-error-output-stair-steps--local-pty-backends-must-bridge-not-inherit-host-stdio-also-tart) |
-| Migrated/upgraded Seatbelt sandbox still hits an already-fixed bug (SIGTRAP, `os.symlink FileExistsError`) on restart | [Seatbelt: regenerate derived artifacts on Start](#seatbelt-derived-artifacts-must-be-regenerated-on-start-not-frozen-at-create) |
-| `attach` on a migrated Seatbelt sandbox fails: `error creating .../tmux/tmux.sock (No such file or directory)`, flat path missing `library/` | [Seatbelt: derive tmux socket live, not from frozen config](#host-side-tmux-socket-must-be-derived-live-not-read-from-frozen-runtime-configjson-seatbelt) |
 | VS Code tunnel re-prompts for login on every container restart | [VS Code CLI: hostname-based keychain encryption](#vs-code-cli-file-keychain-uses-hostname-in-encryption-key) |
 | Second sandbox tunnel loops `error access singleton` forever | [VS Code CLI: singleton lock blocks concurrent tunnels](#vs-code-cli-singleton-lock-blocks-concurrent-tunnels) |
 | DNS works but HTTPS to api.anthropic.com times out | [DNS: timeout = API unreachable, not DNS](#request-timed-out-in-claude-code--api-unreachable-not-dns-failure) |
@@ -98,8 +113,6 @@ row to the index.
 | Smoke test: `stop_start/containerd-vm` fails with "agent idle for 9s+" | [QEMU: slow startup exceeds stall grace](#qemu-slow-startup-exceeds-smoke-test-stall-grace-period) |
 | Smoke test: `stop_start/tart` fails; exchange dir empty | [Tart: xcodebuild -runFirstLaunch blocks agent startup](#tart-xcodebuild--runfirstlaunch-blocks-agent-startup) |
 | `yoloai new --attach` hangs after "Sandbox created"; Python setup never completes | [Tart: mount_map uses Docker paths, triggering macOS automount](#tart-mount_map-uses-docker-style-paths-triggering-macos-automount-hang) |
-| `FileNotFoundError` at `get_working_dir()` / agent starts in wrong directory | [Tart: workdir setup races Python startup](#tart-vm-workdir-setup-races-python-startup) |
-| Tart `:copy`: `yoloai diff` after `restart` reports "No changes" despite agent edits; smoke `stop_start/tart` fails `expected 'output2.txt' … got: No changes` | [Tart: :copy diff after restart shows 'No changes'](#tart-copy-diff-after-restart-shows-no-changes) |
 | `yoloai apply` fails: `git add: git [add -A]: exit status 128: … index.lock: File exists` while agent is running | [Docker/Podman: agent git and apply git race on index.lock](#dockerpodman-agent-git-and-apply-git-race-on-indexlock) |
 | `FileNotFoundError: 'tmux'` in `sandbox-setup.py::setup_tmux_session` on Tart VM (intermittent) | [Tart: transient FS/PATH failure makes tmux unresolvable during the firstlaunch window](#tart-transient-fspath-failure-makes-tmux-unresolvable-during-the-firstlaunch-window) |
 | Smoke test: `stop_start` fails "agent idle"; pane shows `Error: Exit code N` + a clarifying question; other backends pass | [Smoke harness: agent stalls when the sentinel command errors](#agent-stalls-when-the-sentinel-command-errors) |
@@ -132,12 +145,16 @@ If `eth0` is deleted from the netns (by any means), the TC mirred filter's targe
 device becomes `*` (null/missing), and the VM loses all network connectivity.
 Kata itself does NOT detect or report this; it continues running.
 
+---
+
 ### Kata shim startup: netns must be fully configured before `NewTask()`
 
 Kata reads `eth0` from the netns at **shim startup time** (during `NewTask()`).
 The Kata shim logs show `veth network interface found: eth0` with its IP and MAC.
 After this point, Kata has committed to using that `eth0`; changes to the netns
 veth are not reflected.
+
+---
 
 ### Kata netns warm-up race: `tap0_kata` TC mirred filter not installed when `task.Start` returns
 
@@ -184,12 +201,16 @@ If the containerd backend ever honors `NetworkMode == "none"`, the
 probe will loop 30s and warn — acceptable for that edge case, but
 worth revisiting at that point.
 
+---
+
 ### `/run/kata/<name>/` persists on abnormal exit
 
 The shim creates `/run/kata/<name>/shim-monitor.sock` at startup. If the shim
 dies without cleanup, this directory persists. A subsequent shim start for the
 same container name fails with `EADDRINUSE`. Must call `removeKataStateDir()`
 before retrying. See `lifecycle.go::removeKataStateDir`.
+
+---
 
 ### TTRPC shim socket: uppercase hex SHA256
 
@@ -198,12 +219,16 @@ Containerd's `SocketAddress()` formula for the TTRPC socket is:
 The **Kata Rust shim** formats the hash as **uppercase hex** (`%X`). The Go
 shim would use lowercase. Remove both defensively.
 
+---
+
 ### `EADDRINUSE` on `NewTask()` retry
 
 If a shim fails after binding the TTRPC socket but before containerd registers it,
 the orphaned socket file causes the next `NewTask()` to fail with `EADDRINUSE`.
 The retry loop in `Start()` handles this. Kill the orphaned shim PID first, then
 remove state directories, then retry.
+
+---
 
 ### Firecracker runtime-rs: explicit config path breaks VM boot
 
@@ -215,6 +240,8 @@ kata-agent becomes unreachable and the task never reaches Running).
 
 Fix: return `""` from `kataConfigPath()` for all runtimes, matching the
 behavior of `ctr run` (which works). See `lifecycle.go::kataConfigPath`.
+
+---
 
 ### Kata does NOT auto-create bind mount target directories
 
@@ -233,11 +260,15 @@ All bind mount targets must pre-exist in the container image:
 
 See commit fc3be64.
 
+---
+
 ### Kata shim teardown lag: `Delete()` fails transiently after task exit
 
 The Kata shim continues running briefly after the task exit event fires. An
 immediate `container.Delete()` may fail with a transient error. Must retry with
 a delay (5 attempts × 2s). See `lifecycle.go::retryDelete`.
+
+---
 
 ### After killing orphaned shim processes, wait 500ms before proceeding
 
@@ -245,6 +276,8 @@ Sending `SIGKILL` to an orphaned `containerd-shim-kata` process does not
 immediately release the TTRPC socket file. The OS needs approximately 500ms.
 Retrying `NewTask()` too quickly still hits `EADDRINUSE`. See
 `lifecycle.go::Create` and `Start`.
+
+---
 
 ### Kata shim wedge with dead VM: SIGKILL via containerd doesn't release the task
 
@@ -278,6 +311,8 @@ fix: `yoloai system prune` (which now uses the same escalation), or
 Cross-references: `clearStaleContainerState` uses the same escalation
 so a `yoloai new <name>` against a wedged orphan with the same name
 auto-recovers.
+
+---
 
 ### Tart VM process wedge: `tart stop` and SIGTERM via pgrep don't release the host `tart run`
 
@@ -314,6 +349,8 @@ containerd path does.
 it. The same `yoloai system prune` / `yoloai system doctor` surface
 applies (Tart's `Prune()` enumerates `yoloai-*` VMs via `tart list`
 and calls `stopVM + delete` per orphan).
+
+---
 
 ### Orphaned Virtualization VM processes survive a crashed `tart run` and silently consume the macOS VM limit
 
@@ -360,13 +397,13 @@ sandboxes), and prints the `kill <pid>` to reclaim an orphan. doctor
 orphan is safe (the VM is already untracked); doctor will not point you
 at a non-tart VM.
 
+---
+
 ### `hotplug memory error: ENOENT` is normal
 
 The Kata agent logs `{"msg":"hotplug memory error: ENOENT","level":"WARN",...}` on
 every boot. This is benign — it means no memory hotplug device is present, which
 is expected for non-balloon-memory configurations.
-
----
 
 ## CNI (Container Network Interface)
 
@@ -374,6 +411,8 @@ is expected for non-balloon-memory configurations.
 
 `libcni`'s `DelNetworkList` runs plugins in **reverse** order of the conflist:
 for `[bridge, portmap, firewall]` ADD order, DEL order is `firewall → portmap → bridge`.
+
+---
 
 ### The pre-flight `n.Remove()` can delete rules for RUNNING containers
 
@@ -389,6 +428,8 @@ container was previously created and its cache not cleaned up, the rules for the
 OLD IP get deleted. If IPAM re-allocates the same IP to the new container, those
 rules were needed for the new container too.
 
+---
+
 ### CNI results cache lives at `/var/lib/cni/results/`
 
 Cache key: `<networkName>-<containerID>-<ifName>` (e.g. `yoloai-yoloai-foo-eth0`).
@@ -398,6 +439,8 @@ to recover the prevResult for DEL. `cacheDel` removes it at end of successful DE
 If teardown fails mid-way, the cache file may be left behind. A subsequent ADD
 pre-flight DEL will find it and use it.
 
+---
+
 ### `AppendUnique` does not protect against interleaved ADD/DEL
 
 If thread A calls `AppendUnique` to add rule R, and thread B calls `Delete` to
@@ -405,6 +448,8 @@ remove rule R, and then thread A calls `AppendUnique` again for a different rule
 rule R is gone from the chain permanently (no re-check). This is not a problem
 in normal sequential operation but IS a problem if two `yoloai new` calls for the
 same container name run concurrently.
+
+---
 
 ### Firewall plugin: silent no-op when `result.IPs` is empty
 
@@ -443,6 +488,10 @@ retry emits `sandbox.network.firewall_retry` warn log; a failed
 defense-in-depth signals — if either fires in production after the DF10
 fix, capture iptables + thread state before destroying the sandbox.
 
+**Belongs here:** the silent no-op lives in the upstream CNI firewall plugin's `addRules()`; kept as a note on that external code path, though every observed firing traced back to the DF10 thread-netns bug (ours) and none has been independently reconfirmed since.
+
+---
+
 ### Go OS thread netns leak from `netns.NewNamed` / `netns.Set` without `runtime.LockOSThread`
 
 vishvananda/netns's `NewNamed`, `New`, and `Set` all operate via
@@ -475,6 +524,8 @@ Unlock. Grepping `netns\.\(New\|Set\)` in any future containerd
 backend code should turn up nothing except a function that follows
 that pattern.
 
+---
+
 ### `SetupIPMasq` creates a **chain jump**, not a bare MASQUERADE
 
 The bridge plugin's `SetupIPMasq` creates a per-container chain `CNI-XXXXXXXX`
@@ -484,11 +535,15 @@ comment or chain jump) is **not** from `SetupIPMasq`; it indicates broken state 
 either a partial teardown that deleted the chain but not the POSTROUTING rule, or
 a different tool wrote that rule.
 
+---
+
 ### `TeardownIPMasq` deletes by exact match (comment included)
 
 `TeardownIPMasq` calls `ipt.Delete("nat", "POSTROUTING", "-s", ip, "-j", chain, "-m", "comment", "--comment", comment)`.
 If the comment or chain name doesn't match exactly, the rule is NOT deleted. This
 can leave stale POSTROUTING rules after teardown.
+
+---
 
 ### Two `yoloai new` invocations for the same container name within ~1s WILL corrupt networking
 
@@ -503,8 +558,6 @@ The sequence is:
 This is the cause of the `firewall-test1` case where `eth0` disappeared: a second run
 was created while the first was still running.
 
----
-
 ## iptables-nft on Ubuntu 24.04
 
 ### `iptables` = iptables-nft; both `iptables-legacy` and `iptables-nft` can coexist
@@ -517,10 +570,14 @@ for CNI troubleshooting; legacy rules won't affect CNI traffic since CNI uses nf
 `iptables` warns `# Warning: iptables-legacy tables present, use iptables-legacy
 to see them` when both are active. Ignore this for CNI work.
 
+---
+
 ### `iptables-save` format shows exact rule ordering
 
 `iptables -L` reorders rules for display (e.g., show all chains). Use
 `iptables-save` to see the true append/insert order in the chain.
+
+---
 
 ### CNI-FORWARD rule ordering reflects add order
 
@@ -533,8 +590,6 @@ If per-IP rules appear BEFORE CNI-ADMIN in the chain, something called
 empty when `addRules` ran, then a DIFFERENT call's `setupChains` re-inserted
 CNI-ADMIN at position 1, pushing the already-appended IP rules down... actually
 this is impossible; see the actual cause in the "two `yoloai new`" item above).
-
----
 
 ## DNS inside Kata VMs
 
@@ -551,6 +606,8 @@ must be able to reach that IP via its default route through `yoloai0`. If
 networking is broken (no CNI-FORWARD ACCEPT rules), DNS queries are silently
 dropped at FORWARD.
 
+---
+
 ### "Request timed out" in Claude Code = API unreachable, NOT DNS failure
 
 When Claude Code prints `Request timed out. Retrying in 11 seconds…`, it means
@@ -559,8 +616,6 @@ the **HTTPS connection** to `api.anthropic.com` timed out. DNS might still work
 
 To distinguish: run `curl --connect-timeout 5 https://api.anthropic.com/` inside
 the VM. `000` = TCP timeout/refused; `4xx` = TCP connected, HTTP response received.
-
----
 
 ## Docker
 
@@ -573,6 +628,8 @@ the entrypoint cannot mount overlayfs inside the container and gets `EPERM`.
 Workaround: add `security-opt apparmor=unconfined` whenever `SYS_ADMIN` appears
 in `CapAdd`. See `docker.go::Create`. This is not advisory — the mount literally
 fails otherwise.
+
+---
 
 ### `/proc/sys` and `/sys/fs/cgroup` are read-only without `systempaths=unconfined`
 
@@ -609,6 +666,8 @@ is silently rejected or applies incorrectly.
 Workaround: re-append `\n` to the patch bytes if the last byte is not `\n`
 before calling `git apply`. See `Fix: restore trailing newline in overlay patch
 output` (commit f9bf669).
+
+---
 
 ### Docker daemon races on AlreadyExists when rebuilding an existing tag with identical content
 
@@ -659,6 +718,8 @@ exec -it`). See `docker.go::AttachCommand`.
 Note: this is ARM64-specific. On AMD64, `script` creates a fresh PTY and CTY
 cleanly without this issue.
 
+---
+
 ### OrbStack: gVisor (`runsc`) fails to start because `/tmp` is a virtiofs symlink to the macOS `/private/tmp`
 
 **Symptom:** `--isolation container-enhanced` on macOS under **OrbStack** fails at container start with the opaque:
@@ -684,6 +745,8 @@ failed to safely mount: expected to open /tmp, but found /private/tmp
 
 **Code pointer:** the macOS prerequisite check now relies on daemon registration (`docker.go::RequiredCapabilities` returns `gvisorRegistered` only off-Linux); the chroot collision is purely a VM filesystem-layout issue, surfaced at `runtime.New`/`Start`, not something yoloai's checks can detect ahead of time.
 
+---
+
 ### Docker-in-Docker: nested `fuse-overlayfs` can't exec on Docker Desktop / Podman Machine (macOS) — RESOLVED via overlay2 + real-fs volume
 
 **Symptom (pre-fix):** under `--isolation container-privileged` on macOS Docker Desktop, a nested `dockerd` configured for `fuse-overlayfs` + `docker run hello-world` pulled the image fine then died with:
@@ -701,6 +764,8 @@ Every nested container hit it — `alpine echo`, `busybox uname`, `hello-world` 
 The earlier stopgaps — a `system check` advisory and a smoke `dind` N/A-reclassification — were **removed** once the real fix landed (dind now works on every provider, so they'd be misleading).
 
 **Code pointer:** `internal/runtime/docker/docker.go` — `ensureDindVolumeMount` / `dockerLibVolumeName` (Create mounts it, Remove reclaims it). `internal/runtime/docker/resources/Dockerfile` — daemon.json pin removed. `internal/runtime/monitor/setup_helpers.py` `dockerd_storage_args` + `sandbox-setup.py` `start_dockerd` (fstype probe). Reproduce the *old* failure with `docker run --rm --privileged --entrypoint bash yoloai-base -c 'echo {} | sudo tee /etc/docker/daemon.json; sudo dockerd --storage-driver=fuse-overlayfs & … sudo docker run --rm hello-world'` on Docker Desktop.
+
+---
 
 ### gVisor netstack ignores in-sandbox iptables rules
 
@@ -721,6 +786,8 @@ The entrypoint loud-failure fix (`NetworkIsolationError`) catches *some* gVisor 
 **Permanent fix:** The redesign in [`docs/contributors/design/network-isolation.md`](design/network-isolation.md) moves enforcement to the host netns, where gVisor's netstack is irrelevant — packets leaving the gVisor sandbox traverse the host veth and hit the host iptables rules like any other backend. Until that lands, the combination is rejected.
 
 **Code:** `runtime/isolation.go::IsolationEnforcesInSandboxIptables`, `sandbox/create_instance.go::buildInstanceConfig`
+
+---
 
 ### Proxmox LXC seccomp survives `seccomp=unconfined` at the Docker layer
 
@@ -875,8 +942,6 @@ The estimate is left as-is — it's still a valid *upper bound* if the user stop
 
 **Code:** `internal/runtime/docker/prune.go` — `PruneCache` (`BuildCachePrune` error guarded by `!cerrdefs.IsNotFound`).
 
----
-
 ## Podman
 
 ### Podman: `/system/df` reports `LayersSize: 0`
@@ -891,6 +956,8 @@ The estimate is left as-is — it's still a valid *upper bound* if the user stop
 
 **macOS / version caveat (verified 2026-05-29, Podman 5.8.1 via Podman Machine `applehv`):** `LayersSize` is **NOT 0** on this version — the raw `/system/df` returns `LayersSize: 5018303449`, matching `podman system df` Images SIZE exactly. The `LayersSize: 0` bug above is therefore **Podman-version-specific**, not universal. The `podmanImageBytes` dedup still runs (it's unconditional) and, because every build-stage row shares the one base, it computes the *identical* value (`Σ(unique) + max(shared) == LayersSize` here), so it's harmless redundancy on 5.8.1 — the injected path agrees with the field it was working around. Keep the injection: older Podman (the version the bug was first seen on) still reports 0, and the dedup is correct on both.
 
+---
+
 ### Podman: `ImagesPrune` `SpaceReclaimed` is the un-deduplicated image-size sum
 
 **Symptom:** `yoloai system prune --images` on Podman reports a wildly inflated reclaim — e.g. **142.27 GB** freed when the actual footprint is ~5.18 GiB. The over-count scales with the number of images, exactly like the reporting-side bug.
@@ -901,18 +968,7 @@ The estimate is left as-is — it's still a valid *upper bound* if the user stop
 
 **Code:** `internal/runtime/docker/prune.go` `PruneCache` + `reclaimableBytes` (shared by docker + podman). Note `BuildCachePrune` returns "Not Found" on Podman (no BuildKit cache) — warned and harmless; the before/after delta still captures the actual reclaim.
 
-### Rootless detection must use socket path, not `os.Getuid()`
-
-Checking `os.Getuid() != 0` to detect rootless Podman is wrong. When the user
-runs `sudo -E yoloai`, `os.Getuid()` returns 0, but the socket is still the
-user's rootless socket (e.g. `$XDG_RUNTIME_DIR/podman/podman.sock`). Passing
-`--userns=keep-id` to a system Podman socket fails; not passing it to a rootless
-socket causes the container to start as root and exit immediately.
-
-Correct approach: check the socket path. `/run/podman/podman.sock` is the
-system (non-rootless) socket. Everything else — `$XDG_RUNTIME_DIR`, WSL2 paths,
-Podman Machine, `CONTAINER_HOST` — is treated as rootless. See
-`podman.go::socketIsRootless`.
+---
 
 ### macOS: Podman Machine socket discovery needs `TMPDIR`; without it `inspect` reports a stale `/tmp` path
 
@@ -943,6 +999,8 @@ it survives to `podman.go::defaultMachineSocketDiscovery`. See
 `internal/config/host_env.go::daemonEnvAllowlist` and
 `internal/runtime/podman/podman.go::defaultMachineSocketDiscovery`.
 
+---
+
 ### macOS: `--userns=keep-id` maps the Podman Machine uid (1000), not the macOS uid
 
 On macOS, Podman runs via Podman Machine (a Linux VM). `--userns=keep-id` maps
@@ -953,6 +1011,8 @@ the VM user's uid (1000) into the container — not the macOS user's uid (e.g.
 Workaround: skip `keep-id` on macOS (`runtime.GOOS == "darwin"`). The
 entrypoint uses `gosu` to remap `yoloai` to the correct uid, which is the same
 path Docker takes. See `podman.go::Create`.
+
+---
 
 ### Linux rootless privileged (dind): plain `keep-id` fails both ways; use `keep-id:uid=1001`
 
@@ -986,6 +1046,8 @@ when not root — `yoloai` has passwordless sudo. See
 podman-priv still run the entrypoint as root, so they take the direct (no-sudo)
 path unchanged.
 
+---
+
 ### Rootless Podman keeps a separate ID-mapped image copy per userns mapping
 
 **Symptom:** `create container … creating an ID-mapped copy of layer … lchown …:
@@ -1009,6 +1071,8 @@ underlying images are pruned. The Go build cache (`go clean -cache`, often
 multi-GB) is usually the fastest unrelated reclaim if the host is already near
 full.
 
+---
+
 ### Podman macOS: iptables-nft lacks `xt_set` module; ipset unusable
 
 On macOS, Podman Machine runs a Linux VM using `iptables-nft`. The `xt_set`
@@ -1023,6 +1087,8 @@ the `--match-set` `iptables` rule, taking down the container with a
 Fix: probe for ipset availability with a try/except around the `ipset create`
 call. On failure, fall back to per-IP `iptables -d <ip> -j ACCEPT` rules for
 each allowlisted address. See `entrypoint.py::isolate_network`.
+
+---
 
 ### Per-file bind mounts rejected by Podman's Docker-compatible API
 
@@ -1063,7 +1129,7 @@ The lock is held for only milliseconds, making this a transient flake rather tha
 
 **Code:** `internal/runtime/docker/docker.go` `execAttach`/`createExec`/`bridgeExecStreams`/`resizeExec`/`forwardExecResizes`. Conformance guards (run for docker AND podman): `runtime/runtimetest/conformance.go` `StdioExec*`/`InteractiveExec*ExitCode` subtests.
 
----
+**Belongs here:** the external fact is that the docker/podman bare CLI and the SDK socket can resolve the same container differently under load (cousin of the [docker-context divergence](#the-docker-go-sdk-ignores-docker-context-clientfromenv-honors-only-docker_host)); our fix was to stop straddling both control planes.
 
 ## Containerd
 
@@ -1077,6 +1143,8 @@ with: `parent snapshot sha256:... does not exist: not found`.
 Must explicitly call `img.IsUnpacked()` / `img.Unpack(ctx, snapshotter)` before
 `NewContainer()`. See `lifecycle.go::Create`.
 
+---
+
 ### `docker save | ctr import` hangs if `ctr` fails early
 
 If `ctr images import` exits with an error (e.g. permission denied on the
@@ -1086,59 +1154,7 @@ save` blocks indefinitely on a write to a broken pipe. The parent process hangs.
 Must wait on `importCmd.Wait()` first, and if it fails, immediately call
 `saveCmd.Process.Kill()` before calling `saveCmd.Wait()`. See `image.go::Setup`.
 
-### `GitExec` must return `*runtime.ExecError` (not a plain `fmt.Errorf`) on non-zero exit
-
-`sandbox/patch/apply.go::HasUncommittedChanges` runs `git diff --quiet HEAD`
-and treats exit 1 as "diffs present" via `errors.As(err, *runtime.ExecError)`.
-After W8 of the architecture remediation (`e59704b`) replaced the previous
-text-match (`strings.Contains(err.Error(), "exec exited with code 1")`) with
-the typed-error check, containerd's `GitExec` silently broke `yoloai apply` on
-every sandbox with uncommitted changes — including the smoke test's
-`stop_start/containerd-vm`. Symptom: `apply: exit 1` with stderr
-`git diff --quiet: exec exited with code 1`.
-
-Docker / podman / seatbelt wrap the original `*exec.ExitError` via `%w`, so
-`errors.As(err, *exec.ExitError)` (the fallback branch) recognises exit 1.
-Tart goes through `runtime.RunCmdExecRaw`, which directly returns
-`*runtime.ExecError`. Containerd unwrapped the `*exec.ExitError` into a plain
-`fmt.Errorf("exec exited with code %d: %s", ...)` string, losing the error
-type and breaking both branches.
-
-Fix: construct `&runtime.ExecError{ExitCode, Stderr}` directly so callers can
-match exit codes through `errors.As`. Regression test at
-`runtime/containerd/containerd_test.go::TestGitExec_ExitOneReturnsExecError`.
-See `runtime/containerd/containerd.go::GitExec`.
-
-### `InteractiveExec` discarded the inner exit code, so `yoloai exec` always exited 0
-
-Containerd's `InteractiveExec` (`runtime/containerd/exec.go`) drained the task's
-exit channel but threw the status away — `<-exitCh; return nil`. Every
-interactive exec therefore reported success regardless of the inner command's
-exit code, so `yoloai exec <box> -- false` exited 0 on this backend (Docker
-propagates the code for free: its `InteractiveExec` reads the exit code from
-`ContainerExecInspect` over the socket). The non-interactive `Exec` on the same backend was
-always correct — it reads `exitStatus.ExitCode()` — which made the gap easy to
-miss.
-
-This silently turned the smoke harness's `isolation_check` egress probe (which
-keyed off the `yoloai exec` exit code) into a no-op: the inner `curl` was being
-blocked correctly, but the swallowed exit code made the test alternately
-"pass for the wrong reason" or trip its blocked-by-timeout deadline depending on
-incidental exec-machinery errors — presenting as an intermittent isolation
-fail-open that did not exist.
-
-Fix: capture `exitStatus := <-exitCh` and return `&runtime.ExecError{ExitCode:
-code}` on non-zero, mirroring the non-interactive `Exec`. The shared
-`runtime.InteractiveExitError` helper normalizes the still-shelled-out backends
-(tart/seatbelt) to the same `*runtime.ExecError` contract (docker/podman now read
-the code from `ContainerExecInspect` over the socket), so every
-backend's `InteractiveExec` surfaces a non-zero inner exit identically. The
-public `Sandbox.Exec` boundary then translates that internal error into the
-public `*yoloai.ExecExitError` (carrying the inner code) — the CLI can't import
-`internal/runtime` (G7), so it matches the public type with one `errors.As` and
-`os.Exit`s the code (`cli/sandboxcmd/exec.go`). Regression test:
-`runtime/containerd/integration_test.go` (the `TestIntegration_ContainerLifecycle`
-exec assertions).
+---
 
 ### `os.Stat` on the containerd socket does not detect permission denied
 
@@ -1146,6 +1162,8 @@ exec assertions).
 no permission to open the socket (EPERM). The stat only checks directory entry
 existence. Must use `os.Open()` to distinguish ENOENT from EPERM. See `Fix:
 containerd backend: detect socket permission denied` (commit e24d201).
+
+---
 
 ### Containerd GC removes child blobs while leaving the root manifest intact
 
@@ -1156,6 +1174,8 @@ the root with `cs.Info(root)` is insufficient for verifying image readiness.
 
 Must walk the full descriptor tree with `images.Children` to verify all blobs
 are accessible. See `image.go::verifyDescriptorTree`.
+
+---
 
 ### Cross-namespace content sharing requires `containerd.io/namespace.shareable=true`
 
@@ -1170,6 +1190,8 @@ direct image → root target link by default; without these labels it cannot
 reach manifests, configs, and layers further down the tree and will collect them.
 See `image.go::linkFromDockerNamespace`, `shareDescriptorTree`, `setGCRefLabels`.
 
+---
+
 ### containerd: both overlayfs and devmapper snapshotters hold a copy; prune and sizing must cover both
 
 **Symptom (sizing):** before the fix, `yoloai doctor` reported the containerd backend's image cache as `?` (the `ImageBytes == -1` "unknown" sentinel), hiding several GB of real disk. **Symptom (prune):** `yoloai system prune --images` left thin-pool allocation behind — `dmsetup status containerd-pool` still showed >50% data blocks used after a prune that claimed success — and the leaked snapshots eventually filled the pool (a likely contributor to the `smoke-containerd-disk-pressure` ENOSPC stalls).
@@ -1182,6 +1204,8 @@ Sizing must go through the **containerd socket**, not the host filesystem: yoloa
 
 **Code:** `internal/runtime/containerd/prune.go` — `snapshotterNames` (`{overlayfs, devmapper}`), `snapshotInfos` (Walk returning each snapshot's `Info` incl. `Parent`; `present=false` skips an unconfigured snapshotter), `orderLeafFirst` (Kahn topological pass; see below), `pruneSnapshots`/`pruneSnapshotter` (iterate both, remove leaf-first, sum each removed snapshot's `Usage`, print the devmapper caveat), `CacheUsage` (sums `Usage` across both into `ImageBytes`, per-snapshotter breakdown in `Detail`).
 
+---
+
 ### containerd: snapshots must be removed leaf-first (children before parents) or removal silently stalls
 
 **Symptom:** `prune --images` removes some snapshots but leaves a chain behind; `SnapshotService.Remove` returns `cannot remove snapshot with child: failed precondition` for layers that still have descendants. A single arbitrary-order `Walk`+`Remove` pass only deletes the chain's leaves, leaving the bulk to be reclaimed by a later GC (which doesn't always root them).
@@ -1192,6 +1216,8 @@ Sizing must go through the **containerd socket**, not the host filesystem: yoloa
 
 **Code:** `internal/runtime/containerd/prune.go` `orderLeafFirst`, called by `pruneSnapshots`.
 
+---
+
 ### containerd: image import inconsistently materializes overlayfs snapshots
 
 **Symptom:** After `yoloai system build --backend containerd`, sometimes the import unpacks the image into overlayfs snapshots (e.g. 28 snapshots, so `system disk` immediately reports the footprint) and sometimes it only links the image (0 snapshots, `system disk` reports 0 image bytes for the namespace) — with no change in the command.
@@ -1200,6 +1226,8 @@ Sizing must go through the **containerd socket**, not the host filesystem: yoloa
 
 **Consequence for testing:** to get a containerd snapshot footprint to size/prune, create a sandbox (the normal `run` path unpacks via `img.Unpack`) rather than relying on the build to materialize snapshots. Avoid `ctr images mount` for this — see the lease entry below.
 
+---
+
 ### containerd: a leftover lease GC-roots an orphaned child, blocking base-layer removal
 
 **Symptom:** `prune --images` removes every layer except the base, which refuses removal with `cannot remove snapshot with child: failed precondition` — yet `ctr -n yoloai snapshots ls` (and every other namespace) shows **no** snapshot claiming it as parent. Retrying `Remove` keeps failing; the snapshot only disappears after the responsible lease is deleted and GC runs.
@@ -1207,6 +1235,8 @@ Sizing must go through the **containerd socket**, not the host filesystem: yoloa
 **Explanation:** A lease with a `containerd.io/gc.expire` label (created automatically by `ctr images mount`, among others) GC-roots the snapshots it pinned, including an active/View child of the base layer. That child keeps the base un-removable, but it isn't a normal committed snapshot so it doesn't appear in `snapshots ls`. The synchronous `Remove` precondition check still sees it. Dropping the lease lets the next GC pass collect both.
 
 **Consequence:** This is a **test-scaffolding artifact** (a leftover `ctr images mount` lease), not something yoloai's own create/destroy/prune flow produces — yoloai never creates such leases. If you manually `ctr images mount` to populate a testbed, `ctr -n yoloai leases rm <id>` afterward, or expect the base layer to linger until the 1-hour `gc.expire` elapses.
+
+---
 
 ### Kata: orphaned snapshots from crashed runs must be pre-cleared
 
@@ -1220,6 +1250,8 @@ Must call `r.client.SnapshotService(snapshotter).Remove(ctx, name)` before
 are silently ignored (snapshot may not exist). See `lifecycle.go::Create` and
 commit bf23e95.
 
+---
+
 ### `task.Start` returns before the VM is actually running
 
 For Kata Containers (full Linux VM boot), `task.Start` returns as soon as the
@@ -1230,6 +1262,8 @@ immediately after `Start()` returns will see `Created`.
 Must poll `task.Status()` until the status is `Running` or `Stopped`. The
 60-second timeout is chosen based on observed Kata boot times (Dragonball ~5s,
 Firecracker ~10s on fast hardware; slow CI can be 30s+). See `lifecycle.go::Start`.
+
+---
 
 ### Kata: secrets temp dir removed before the guest reads it
 
@@ -1311,6 +1345,8 @@ previously omitted the sudo-recovered `credOverrides` that `Create` sets, so
 vars are stripped and there was no sudo-recovery fallback) even though `sudo
 yoloai new` worked. Now mirrored in `lifecycle.go::recreateContainer`.
 
+---
+
 ### `netns.NewNamed()` switches the OS thread via `unshare(CLONE_NEWNET)` and never restores it
 
 `netns.NewNamed()` internally calls `unshare(CLONE_NEWNET)`, which moves the
@@ -1323,6 +1359,8 @@ Fix: call `runtime.LockOSThread()` before `netns.NewNamed()`, then manually
 save (`netns.Get()`) and restore (`netns.Set(origNS)`) the original namespace
 around the call. See `cni.go::createNetNS`.
 
+---
+
 ### Stale named netns files at `/var/run/netns/<name>` persist after failed runs
 
 If a previous run failed after `createNetNS()` but before `teardownCNI()` had a
@@ -1332,8 +1370,6 @@ chance to call `deleteNetNS()`, the named netns file persists at
 
 Must call `deleteNetNS(nsName)` unconditionally before `createNetNS()`. This is
 safe because `deleteNetNS` is idempotent (ignores ENOENT). See `cni.go::setupCNI`.
-
----
 
 ## Tart (macOS VMs)
 
@@ -1347,6 +1383,8 @@ safe because `deleteNetNS` is idempotent (ignores ENOENT). See `cni.go::setupCNI
 
 **Code:** `internal/runtime/tart/diskusage.go` (`CacheUsage`, `ownedImageBytes`, `ownedImageRefs`, `baseImageRepo`); `internal/runtime/tart/prune.go::PruneCache` (before/after delta, deletes all owned refs). Tests: `diskusage_test.go::{TestBaseImageRepo,TestCacheUsageCountsOwnedImagesDedupingOCI,TestPruneCacheReportsReclaimDelta,TestPruneCacheDryRunReturnsEstimate}`.
 
+---
+
 ### VirtioFS only supports directory mounts, not individual files
 
 `tart run --dir name:path` only accepts directories. Any per-file bind mount
@@ -1357,12 +1395,16 @@ Workaround: copy file contents into a sandbox directory and share the directory
 via VirtioFS. For secrets, copy all secret files into `sandboxDir/secrets/` and
 share `sandboxDir` as the `yoloai` VirtioFS share. See `tart.go::Create`.
 
+---
+
 ### VirtioFS mount path inside the VM contains spaces
 
 Tart mounts VirtioFS shares at `/Volumes/My Shared Files/<share-name>` inside
 the macOS VM. The path contains a space. Any shell command constructing this
 path must quote it. The setup script uses: `'%s/bin/sandbox-setup.py'` with
 `%s = /Volumes/My Shared Files/yoloai`. See `tart.go::runSetupScript`.
+
+---
 
 ### `ln -sfn` won't replace a directory; must use `rm -rf` first
 
@@ -1371,6 +1413,8 @@ VirtioFS paths, `ln -sfn target link` silently creates the symlink *inside* the
 target directory rather than replacing it, if a directory already exists at
 `link`. Must explicitly `rm -rf link` before `ln -sfn`. See the symlink command
 in `tart.go::runSetupScript`.
+
+---
 
 ### `tart delete` of a running VM fails with a misleading "instance not found"; stop first
 
@@ -1403,6 +1447,8 @@ then retry. The provisioned base's identity isn't recorded until after a
 successful promote, so a failed promote leaves the old base in place and
 `needsBuild` still true — re-running `system build` rebuilds cleanly.
 
+---
+
 ### `tart run` process must use `exec.Command`, not `exec.CommandContext`
 
 `tart run <vmName>` is a long-lived process that keeps the VM alive. Using
@@ -1410,6 +1456,10 @@ successful promote, so a failed promote leaves the old base in place and
 `Start()` function's context is cancelled (e.g. on HTTP request completion or
 timeout). Must use bare `exec.Command`, then set `SysProcAttr{Setpgid: true}`
 to detach it from the parent process group. See `tart.go::Start`.
+
+**Belongs here:** the surprise is Go stdlib's `exec.CommandContext` killing the child when its context is cancelled — so a request-scoped context must never own the long-lived VM process. That Go behavior is the trap; which context we pass is our part.
+
+---
 
 ### Tart cannot mkdir/symlink system directories like /var/folders
 
@@ -1435,6 +1485,8 @@ This avoids hardcoding which paths need sudo.
 
 **Code:** `runtime/tart/tart.go::runSetupScript` line ~900
 
+---
+
 ### Tart exec needs brief stabilization delay after boot
 
 **Symptom:** VM starts successfully and passes initial `tart exec <vmName> true` check during boot wait, but immediately after, running commands with `tart exec` fails with:
@@ -1456,6 +1508,8 @@ time.Sleep(500 * time.Millisecond)
 **Impact:** Without the delay, VM creation fails intermittently with "instance not found" errors, especially noticeable in automated tests where VMs are created and used quickly.
 
 **Code:** `runtime/tart/tart.go::Start` after `waitForBoot`
+
+---
 
 ### Tart exec does not support `--` argument separator
 
@@ -1490,6 +1544,8 @@ args := execArgs(vmName, "bash", "-c", "sudo mkdir -p /Library/Developer/...")
 
 **Code:** `runtime/tart/tart.go::execArgs`, `runtime/tart/build.go` (provisioning commands), `runtime/tart/runtime_copy.go` (needs fix)
 
+---
+
 ### Tart exec -t changes environment, preventing tmux from finding socket
 
 **Symptom:** When running `yoloai attach` on a Tart VM, tmux fails with "no sessions" even though `tart exec yoloai-x tmux ls` shows the session exists. The attach command reaches "attaching to tmux session" in logs but then fails with exit status 1.
@@ -1515,6 +1571,8 @@ tart exec -i -t yoloai-x tmux -S /private/tmp/tmux-501/default attach -t main
 **Impact:** `yoloai attach` completely broken for Tart VMs. Users cannot attach to running sandboxes.
 
 **Code:** `runtime/tart/tart.go::TmuxSocket` (returns explicit socket path), `runtime/tart/tart.go::AttachCommand` (uses socket when provided)
+
+---
 
 ### CoreSimulator cannot discover VirtioFS-mounted runtimes
 
@@ -1556,6 +1614,8 @@ The investigation's symlink test (docs/contributors/archive/investigations/ios-t
 - **Copy or download runtimes locally** inside VM (~8-16GB per runtime) - required
 
 **Code:** See `docs/contributors/archive/investigations/ios-testing-investigation.md` lines 844-966 for empirical testing; `runtime/tart/runtime_copy.go` for copy implementation.
+
+---
 
 ### Ditto'd iOS runtime is incomplete; use `xcodebuild -downloadPlatform`
 
@@ -1601,6 +1661,8 @@ The download approach installs to the **same path** that ditto was copying to, p
 
 **Code:** `runtime/tart/runtime_copy.go` (currently implements ditto approach, needs replacement with download approach)
 
+---
+
 ### `cirruslabs/macos-*-xcode` base images already bake in the default iOS runtime — the in-VM download is redundant for it
 
 **Symptom / question:** the in-VM `xcodebuild -downloadPlatform iOS` step (~8.5 GB download, expands to ~16 GB) is slow on every Tart `new`. Does the `ghcr.io/cirruslabs/macos-tahoe-xcode:latest` base (and its `macos-*-xcode` siblings) already include a simulator runtime so we can skip it?
@@ -1622,6 +1684,8 @@ So `:latest` ships with the default iOS runtime pre-installed and validated. Ext
 - [actions/runner-images #12948 — Xcode 26 runtime recognition flake](https://github.com/actions/runner-images/issues/12948)
 
 **Code:** `runtime/tart/runtime_copy.go` (download path — keep as fallback), Tart base-image selection in `runtime/tart`.
+
+---
 
 ### VirtioFS corrupts git repositories
 
@@ -1680,6 +1744,8 @@ VirtioFS should only be used for:
 
 **Code:** `runtime/tart/tart.go::ResolveCopyMount`, `runtime/tart/tart.go::Create`, `sandbox/lifecycle.go::Reset` (needs implementation)
 
+---
+
 ### A host-side change probe is blind to the in-VM workdir — `info` showed `Changes: no` on a dirty Tart sandbox, and `destroy` skipped its gate
 
 **Symptom:** A Tart sandbox with real, unapplied work (`yoloai diff x` lists a new file) reported `Changes: no` in `yoloai sandbox x info`, and `yoloai destroy x` tore it down **without** demanding `--abandon-unapplied`. Silent data loss.
@@ -1692,6 +1758,10 @@ VirtioFS should only be used for:
 
 **Code:** `internal/sandbox/patch/changes.go::HasUnappliedWorkVia` (+ `WorkProbe` tri-state), `internal/runtime/runtime.go::GitExecFor`/`ErrNotRunning`, gates in `internal/sandbox/create/create.go`, `internal/sandbox/lifecycle/reset.go::NeedsConfirmation`, and the read-model in `internal/sandbox/status/status.go::detectWorkdirChanges`. The engine opens the backend best-effort (`Engine.TryEnsure`) before the gate so a running VM can be probed.
 
+**Belongs here:** the external constraint is VirtioFS forcing the work copy to live in-VM (host-side git corrupts it — see [VirtioFS corrupts git repositories](#virtiofs-corrupts-git-repositories)), which is *why* a host-side probe is structurally wrong; the probe bug it caused was ours.
+
+---
+
 ### Provisioned tool dirs live only on the *login* PATH (Cirrus base image)
 
 **Environmental fact:** The Cirrus-based Tart image composes its tool PATH in `~/.zprofile` — Homebrew, keg-only `node@22`, and `~/.local/bin` where the native Claude Code binary lives. That file is sourced only by *login* shells. The agent, however, is launched via `tart exec bash -c` (non-login) and, on restart, from Go via `respawn-pane`; neither sources `~/.zprofile`, so without intervention `claude` is not on PATH and the agent silently fails to start (a shell prompt, no agent process).
@@ -1699,8 +1769,6 @@ VirtioFS should only be used for:
 **How yoloAI handles it:** The backend's launch wrap (`PATH="$HOME/.local/bin:/opt/homebrew/opt/node@22/bin:/opt/homebrew/bin:$PATH"`) is a compile-time constant declared on the backend descriptor (`BackendDescriptor.AgentLaunchPrefix`). It is computed once at sandbox creation and stored as `agent_launch_prefix` in `runtime-config.json` — the single source of truth. Every launch path prepends that stored value: Go restart in `lifecycle/restart.go` and Python first-launch in `sandbox-setup.py` both read the field directly (older sandboxes are backfilled by the v1→v2 schema migration), so the two paths can never drift. (Historical note: an earlier base installed Claude Code via npm with a `#!/usr/bin/env node` shebang that the Cirrus image's `node@24` shadowed; switching to the native standalone binary removed that whole class of node-version shadowing, but the agent still needs `~/.local/bin` on the non-login PATH.)
 
 **Code:** `runtime/tart/tart.go` (descriptor `AgentLaunchPrefix` + `PrepareAgentCommand`), `runtime/tart/build.go` (provisionCommands compose the login PATH), `sandbox/create/create.go` (stores the prefix), `sandbox/lifecycle/restart.go` (relaunch prepends it), `config/schema.go` (v1→v2 backfill)
-
----
 
 ## Seatbelt (macOS sandboxing)
 
@@ -1711,6 +1779,10 @@ VirtioFS should only be used for:
 **Explanation (verified 2026-05-29):** No. Seatbelt runs agents **directly on the host** via `sandbox-exec` using the host's own tools — its `Setup` only *checks* that required binaries are on `PATH` (`runtime/seatbelt/build.go`); it pulls/builds/caches **nothing**. There is no VM, no image, no layer store. The only on-disk state a seatbelt sandbox accumulates is the per-sandbox directory under `~/.yoloai/sandboxes/<name>/` (work dirs, agent-state, logs) — and that's already reported by the `sandboxes` row of `system disk`, the same for every backend. So seatbelt implements neither `DiskUsageReporter` nor `CachePruner`, and its core `Prune` is a no-op (no central registry of instances). The `?` in the IMAGES column is `CacheUsageFor`'s "unknown" fallback (`ImageBytes=-1`); it's cosmetically imperfect (a true "—"/0 would read better) but functionally correct — there is genuinely nothing for `prune`/`prune --images` to reclaim. **Leave it a no-op; do not invent a cache to measure.**
 
 **Code:** `internal/runtime/seatbelt/build.go::Setup` (PATH check only), `internal/runtime/seatbelt/prune.go` (no-op `Prune`, no `PruneCache`/`CacheUsage`); fallback in `internal/runtime/runtime.go::CacheUsageFor`.
+
+**Belongs here (caveat):** this is an architectural invariant, not a tool quirk — Seatbelt is a host-process backend with no image store. Recorded so nobody hunts for a cache (or files the `?` in the `IMAGES` column) that structurally cannot exist.
+
+---
 
 ### macOS `sandbox-exec` doesn't nest — Swift PM needs the swift-wrapper sourced
 
@@ -1744,29 +1816,7 @@ VirtioFS should only be used for:
 
 **Code:** `runtime/interactive_pty.go::PTYBridgeExec`; `runtime/seatbelt/seatbelt.go::InteractiveExec`; `runtime/tart/tart.go::InteractiveExec`. The CLI raw-mode owner is `cli/cliutil/streams.go::WithTerminal` (unchanged — now uniform across backends).
 
----
-
-### Seatbelt derived artifacts must be regenerated on Start, not frozen at Create
-
-**Symptom:** A Seatbelt sandbox created by an older yoloai binary still hits an already-fixed bug after upgrading — e.g. the SIGTRAP above, or `os.symlink ... FileExistsError` at `sandbox-setup.py` — even after `yoloai system migrate` relocated its data dir. Destroy + recreate works; restart/attach does not.
-
-**Explanation:** Unlike container backends (where `runtime-config.json` holds container-internal paths and the host dir is only a bind-mount source resolved fresh each Start), Seatbelt runs on the host and bakes host-absolute artifacts into the sandbox dir at **Create** time: the SBPL `profile.sb` and the monitor scripts (`sandbox-setup.py`, etc.). `Start` originally just re-read them off disk, so any bug baked in at Create — a profile missing the `/private/var` rules, a non-idempotent symlink step — persisted across upgrades. Data-dir migration relocates the directory but does not rewrite these frozen files, so a migrated old sandbox can never come up clean.
-
-**Fix:** `Start` regenerates the derived artifacts from the persisted `InstanceConfig` before launch — `GenerateProfile(cfg, sandboxPath, r.homeDir)` + `writeSandboxScripts(sandboxPath)`. They are pure functions of config and host environment, not user state, so a restart on a newer binary self-heals sandboxes created by an older one. Independently, the `sandbox-setup.py` symlink guards use `os.path.lexists` (not `os.path.exists`, which follows symlinks and misses a dangling link) so re-running setup is idempotent.
-
-**Code:** `runtime/seatbelt/seatbelt.go::Start` (regen block after config load); `runtime/monitor/sandbox-setup.py` (`os.path.lexists` guards in `SeatbeltBackend.setup`)
-
----
-
-### Host-side tmux socket must be derived live, not read from frozen `runtime-config.json` (Seatbelt)
-
-**Symptom:** `yoloai attach <box>` on a migrated Seatbelt sandbox fails with `error creating /Users/<you>/.yoloai/sandboxes/<box>/tmux/tmux.sock (No such file or directory)` — note the **flat** path, missing the `library/` principal-partition segment that migration introduced. Restart can also talk to the wrong socket on the prompt-delivery path.
-
-**Explanation:** `runtime-config.json` froze a `tmux_socket` field at Create. For container backends that value is a *container-internal* path (e.g. under `/yoloai`), which is migration-invariant — fine. But Seatbelt's socket is a **host** path under the sandbox dir (`<sandboxDir>/tmux/tmux.sock`), and `yoloai system migrate` relocates the sandbox dir (e.g. into the principal partition `…/sandboxes/library/<box>/`) **without rewriting the frozen field**. The in-sandbox tmux server is created at the *live* path (Python's `SeatbeltBackend.get_tmux_socket` derives it from live argv), so the Go host side — reading the frozen flat path — pointed at a socket that doesn't exist. Docker was unaffected only because its frozen value is a container path that never moves.
-
-**Fix:** Every Go host-side consumer derives the socket live via `runtime.TmuxSocket(layout.SandboxDir(name))` (what `terminal.go`'s capture-pane already did), instead of reading the frozen field. For docker this returns the same container path as before (no behavior change); for seatbelt/tart it tracks the current host dir. The frozen field stays in `runtime-config.json` because Python's docker backend still reads it (a migration-invariant container path), but the Go side no longer trusts it. General rule: **a frozen host-absolute path is a migration hazard — recompute host paths from the live layout, freeze only target-internal paths.**
-
-**Code:** `sandbox/attach.go::Attach` + `WaitForAttachReady` (was `ReadTmuxSocket`, now deleted); `sandbox/lifecycle/restart.go` (relaunch + `deliverPromptViaTmux`); the live source is each backend's `TmuxSocket(sandboxDir)`.
+**Belongs here:** the durable fact is POSIX raw mode stripping `OPOST`/`ONLCR` CR-translation (a terminal-layer behavior we can't change); our wiring merely triggered it, and the cross-backend rendering divergence is the lesson to keep.
 
 ---
 
@@ -1812,50 +1862,6 @@ The pattern of "fails then passes on retry" comes from VirtioFS persistence: `xc
 
 ---
 
-### Tart: VM workdir setup races Python startup
-
-**Symptom:** `FileNotFoundError: No such file or directory: '/Users/admin/yoloai-work/...'` in setup.log. The agent never starts. Appears after fixing the automount hang (below), because that hang was accidentally delaying Python long enough for the Go-side rsync to finish.
-
-**Explanation:** Python's `sandbox-setup.py` is launched via `nohup ... &` inside `launchContainer`. Go's `executeVMWorkDirSetup` (which runs rsync + git baseline to populate the workdir) is called *after* `launchContainer` returns. Python therefore reaches `backend.get_working_dir()` → `os.chdir(working_dir)` before the directory exists, crashing immediately.
-
-Previously, Python was delayed 60-120s by the automount hang on `/home/yoloai/.config`, which gave rsync enough time to finish. Fixing the automount bug removed that accidental delay.
-
-**Fix:** `TartBackend.get_working_dir()` now polls for the directory with a 120s timeout instead of calling `os.chdir` unconditionally. Python waits for Go to finish rsync before proceeding.
-
-**Code:** `runtime/monitor/sandbox-setup.py::TartBackend.get_working_dir`
-
----
-
-### Tart: `:copy` diff after restart shows 'No changes'
-
-**Symptom:** On the Tart backend with a `:copy` workdir, `yoloai diff` after a `restart --prompt "…writes a file…"` reports "No changes" even though the agent demonstrably created the file. Reproduces in the smoke test as `stop_start/tart` failing with `diff after restart: expected 'output2.txt' in output / got: No changes`. Racy — frequent but not every run; the no-restart `full_workflow/tart` path passes because a cold first boot is slow enough to hide it.
-
-**Explanation:** A baseline/agent ordering race. The diff baseline is the git commit created by `ExecuteVMWorkDirSetup` (host side): `mkdir` → `rsync` (original files only, no `--delete`) → `git init && git add -A && git commit`, run *after* `LaunchContainer` returns. But `LaunchContainer` only boots the VM — it does **not** launch the agent. The VM's own entrypoint (`sandbox-setup.py`) launches the agent and delivers the prompt asynchronously, gated only on `get_working_dir()` returning. The previous gate ([above](#tart-vm-workdir-setup-races-python-startup)) waited for the *directory* to exist, which happens after the host's `mkdir`/`rsync` but **before** the `git commit`. So on a fast clone-boot restart the agent launches, receives the prompt, and writes `output2.txt` before the baseline commit runs; `git add -A` then bakes `output2.txt` into the baseline, and `git diff <baseline>` shows nothing.
-
-Autopsy timeline signature: `hook.idle` (agent finished writing) lands a few seconds *before* `sandbox.restart.complete` (the `ExecuteVMWorkDirSetup` baseline commit), confirming the commit raced behind the agent.
-
-**Fix:** `TartBackend.get_working_dir()` now, for `:copy` workdirs, keeps polling after the directory exists until a committed `HEAD` resolves (`git -C <workdir> rev-parse HEAD` succeeds) — the exact "baseline ready" signal, since the commit is `ExecuteVMWorkDirSetup`'s last step. Gated on copy mode via the `copy_dirs` config key (non-empty iff the workdir is `:copy`); non-copy workdirs have no git repo and must not wait. The secrets-consumed gate ([deadlock entry](#tart-signal_secrets_consumed-must-run-before-get_working_dir)) is unaffected — `signal_secrets_consumed()` still runs before this wait, so the host always reaches and completes the baseline commit regardless of the VM.
-
-**Code:** `runtime/monitor/sandbox-setup.py::TartBackend.get_working_dir` (and `_baseline_committed`)
-
----
-
-### Tart: commit-level git (`diff <sha>`, commit listing) must dispatch through the runtime, not host git
-
-**Symptom:** On a Tart `:copy` sandbox, `yoloai diff <sha>` / a commit-range diff and the per-commit stat listing fail with `unknown revision or path not in the working tree` / `not a git repository` — for the *same* commit SHAs that plain `yoloai diff` and commit listing just reported as present.
-
-**Explanation:** Tart runs the sandbox work copy on **VM-local storage** and creates the baseline + agent commits **inside the VM** (`tart.Runtime.GitExec` translates the host workdir to a VM path like `/Users/admin/yoloai-work/<enc>` and execs git in the guest). Reads routed through the runtime (`git.NewSandbox` → `GitExecer`) see those commits; reads that run **host** git (`git.NewHost`) on the host workdir do not — that host path is the stale staging copy, or not a repo carrying those SHAs at all. `ListCommitsBeyondBaseline` and `GenerateDiff`'s `:copy` branch correctly used the sandbox scope, but `GenerateCommitDiff` and `ListCommitsWithStats` used a *host* runner to stat/diff the very commits the sandbox scope had just found, so they errored on VM-side SHAs. Bind-mount backends (Docker/Podman/Containerd) work because their work copy *is* on the host. Same root cause as the [host-side change-probe](#a-host-side-change-probe-is-blind-to-the-in-vm-workdir--info-showed-changes-no-on-a-dirty-tart-sandbox-and-destroy-skipped-its-gate) and [`:copy` diff after restart](#tart-copy-diff-after-restart-shows-no-changes) entries.
-
-**Fix:** Any git operation on the sandbox *work copy* must use `git.NewSandbox(layout, rt, name)` — it dispatches in-VM for Tart and falls back to host exec for non-`GitExecer` backends, so it's a no-op for Docker/Podman/Containerd — never `git.NewHost`. Reserve `git.NewHost` for genuinely host-resident targets (the user's original directory in apply, `:rw` live mounts, dirty-checks of source dirs). `GenerateCommitDiff` gained a `Runtime` field on `CommitDiffOptions` to carry the dispatch.
-
-**Non-obvious gotcha (and second half of the fix):** threading `e.runtime` is not enough — the Engine opens its backend *lazily*, so the backend-bound Engine method must call `e.TryEnsure(ctx)` first or `e.runtime` is still `nil` and `NewSandbox(nil, …)` silently falls back to host git (failing on the VM-local path). Every sibling Engine method (`ListCommitsWithStats`, `ListCommits`, `WorkdirTags`, …) does this; `GenerateCommitDiff` originally did not because it predated needing a runtime. The host-side `ListCommitsWithStats` worked while `GenerateCommitDiff` failed precisely because only the former called `TryEnsure`.
-
-**Validated:** confirmed on a real macOS Tart host — `yoloai diff <sha>` and `diff --log --stat` on a Tart `:copy` sandbox both return correct output after the fix (they errored before).
-
-**Code:** `internal/sandbox/patch/diff.go::GenerateCommitDiff` / `ListCommitsWithStats`; `internal/sandbox/engine_workdir.go::Engine.GenerateCommitDiff` (the `TryEnsure` call); the host-vs-sandbox scope distinction lives in `internal/git` (`NewHost` vs `NewSandbox`).
-
----
-
 ### VS Code CLI: file keychain uses hostname in encryption key
 
 **Symptom:** VS Code tunnel re-prompts for GitHub/Microsoft login on every `yoloai restart`, even though `~/.yoloai/vscode-cli/token.json` exists and the machine-id is stable. `code tunnel user show --verbose` prints "Using file keychain storage" but then "not logged in".
@@ -1886,43 +1892,6 @@ warn error access singleton, retrying: the process holding the singleton lock fi
 **Fix:** Each sandbox now gets its own per-sandbox vscode-cli data directory (`~/.yoloai/sandboxes/<name>/vscode-cli/`). The lock, tunnel config, and server binary are all sandbox-local. To avoid requiring re-authentication for every new sandbox, `token.json` is seeded from the global credential store (`~/.yoloai/vscode-cli/token.json`) when the per-sandbox directory is first created.
 
 **Code:** `sandbox/create.go::buildMounts` (vscodeTunnel section)
-
----
-
-### Tart: `signal_secrets_consumed` must run before `get_working_dir`
-
-**Symptom:** `yoloai new` times out ("command timed out") on the Tart backend.
-`sandbox.jsonl` shows setup events up to `tart.xcode.firstlaunch.started` then
-stops; `monitor.jsonl` is empty (agent never launched). The host log shows
-"secrets-consumed marker not observed before timeout".
-
-**Explanation:** A deadlock between the host and the in-VM setup script:
-
-1. `buildAndStart()` (host) calls `waitForSecretsConsumed(timeout)`, blocking
-   `launchContainer()` until the in-VM script writes `logs/.secrets-consumed`.
-2. `executeVMWorkDirSetup()` (rsync that creates the VM-local working dir) runs
-   only *after* `launchContainer()` returns — so the working dir never exists
-   while the host is waiting.
-3. `get_working_dir()` (in-VM) polls for the working dir for up to 120 s.
-4. `signal_secrets_consumed()` (in-VM) was called *after* `get_working_dir()`.
-
-Neither side could proceed: host waiting for the VM marker, VM waiting for the
-host rsync, host waiting for the VM marker …
-
-With a short `SecretsConsumedTimeout` (30 s) the host accidentally broke the
-deadlock by giving up and letting `launchContainer` return. With 180 s the
-smoke test's 120 s command timeout fires first.
-
-**Fix:** `signal_secrets_consumed()` now runs *before* `get_working_dir()` in
-`sandbox-setup.py::main()`. Secrets are available immediately (copied during
-`Create()` via `copySecretsToSandbox()`). The tmux session does not exist yet,
-so `tmux set-environment` is skipped; secrets reach the agent via the explicit
-`env_exports=` prefix in `launch_agent()::send-keys` instead.
-
-**Code:** `internal/runtime/monitor/sandbox-setup.py::main` (ordering of
-`read_secrets` / `signal_secrets_consumed` vs `get_working_dir`);
-`internal/sandbox/create.go` (ordering of `launchContainer` vs
-`executeVMWorkDirSetup`).
 
 ---
 
@@ -1995,8 +1964,6 @@ the happy path and removes the premature give-up. The `.done` marker and its
 `_FIRSTLAUNCH_MAX_WAIT_SECONDS`); `internal/runtime/monitor/sandbox-setup.py`
 (firstlaunch launch in `TartBackend.setup()`, plus `setup_tmux_session` and the
 `main()` `wait-for` block).
-
----
 
 ## Smoke harness (agent task execution)
 
@@ -2086,9 +2053,7 @@ live sandbox name for the Kata backend.
 **Code:** `scripts/smoke_test.py` (`RunContext.name_seq`, `Test.sandbox()`);
 ID construction in `internal/sandbox/store/paths.go` (`InstanceName`).
 
----
-
-## yoloai host-side (locks, prune)
+## OS & POSIX semantics
 
 ### Removing a `.lock` file while holding its flock is safe
 
@@ -2114,7 +2079,7 @@ accumulate, and `system prune` only ever removes the truly-orphaned ones.
 `SweepStaleLocks`); `internal/sandbox/lifecycle.go` (Destroy);
 `internal/sandbox/create.go` (Create rollback).
 
----
+**Belongs here:** the durable fact is POSIX `flock(2)` semantics — the lock binds to the open fd, not the path — which is what makes eager unlink-while-held safe; the design choice it licenses is ours.
 
 ## Apple container (`container` CLI)
 
@@ -2135,6 +2100,8 @@ both work; `-v <dir>:<dir>` propagates rw.
 
 **Code:** `internal/runtime/apple/apple.go` (`Create`, mount loop).
 
+---
+
 ### Apple: `container build .` silently drops a relative `.` context; pass an absolute dir
 
 **Symptom:** `container build -t img .` runs the `RUN` steps but every `COPY`
@@ -2150,5 +2117,3 @@ its **absolute** path (`container build -t yoloai-base <abs-dir>`). The builder
 VM must also be started first (`container builder start`).
 
 **Code:** `internal/runtime/apple/apple.go` (`buildBaseImage`).
-
----
