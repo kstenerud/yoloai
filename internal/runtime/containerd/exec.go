@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/containerd/containerd/v2/client"
 	"github.com/containerd/containerd/v2/pkg/cio"
@@ -93,8 +94,12 @@ func (r *Runtime) Exec(ctx context.Context, name string, cmd []string, user stri
 
 	exitStatus := <-exitCh
 
+	// Trim to honor the ExecResult.Stdout contract (whitespace-trimmed), so
+	// containerd matches docker/apple/seatbelt/tart — all of which trim via their
+	// Exec impl or the shared runtime.RunCmdExec helper. Without this, callers
+	// comparing exec output had to special-case a trailing newline on containerd.
 	result := runtime.ExecResult{
-		Stdout:   stdout.String(),
+		Stdout:   strings.TrimSpace(stdout.String()),
 		ExitCode: int(exitStatus.ExitCode()),
 	}
 

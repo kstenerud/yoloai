@@ -121,6 +121,11 @@ type InstanceInfo struct {
 
 // ExecResult holds the output of a non-interactive command execution.
 type ExecResult struct {
+	// Stdout is the command's standard output, trimmed of leading/trailing
+	// whitespace, so callers can compare against an expected value without
+	// normalizing. Every backend honors this (docker/apple trim in their Exec
+	// impl; seatbelt/tart via the shared runtime.RunCmdExec helper; containerd
+	// trims in its exec path). The shared conformance suite asserts it.
 	Stdout   string
 	ExitCode int
 }
