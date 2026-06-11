@@ -23,6 +23,7 @@ import contextlib
 import json
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -32,7 +33,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Iterable, Optional
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -1629,6 +1630,182 @@ def _record_result(ctx: RunContext, result: TestResult) -> None:
             ctx.junit.write_testcase(result)
 
 
+# ---------------------------------------------------------------------------
+# Run-id namespace + orphan sweep
+# ---------------------------------------------------------------------------
+
+# Every smoke sandbox is "<run_id>-<label>-<NNN>"; its backend instance carries
+# the yoloai instance prefix on top (e.g. a Tart VM
+# "yoloai-ysmk-1Ly3kq9fXz-stop-start-tart-002"). Names must satisfy containerd's
+# identifier grammar (alphanumeric runs joined by single '.'/'_'/'-') and the
+# 56-char cap, and the longest label (tag-transfer-containerd-vmenhanced, 34 ch)
+# leaves the run_id only ~17 chars — so the id packs its entropy in base62.
+#
+# Collisions were *inter-run*: the per-run `seq` already disambiguates names
+# within a run, but two runs that shared a 1-second timestamp (the provider
+# cycle, parallel CI) produced identical run_ids and thus identical names. The
+# id below is time-sortable (6 base62 chars of unix-seconds) plus a 4-char
+# base62 random tiebreak (~14.8M/sec), so a same-second clash is ~1-in-15M.
+#
+# "ysmk-" is the reserved prefix the orphan sweep keys on; requiring the 10-char
+# token shape keeps the matcher from ever firing on an unrelated "ysmk-*" name.
+_RUN_ID_PREFIX = "ysmk"
+_B62_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+_SMOKE_TOKEN_RE = re.compile(r"(?:^|[-/])" + _RUN_ID_PREFIX + r"-[0-9A-Za-z]{10}-")
+
+
+def _b62(value: int, width: int) -> str:
+    """Fixed-width base62 of a non-negative int (zero-padded, big-endian so that
+    equal-width values sort chronologically). Raises if it overflows `width`."""
+    if value < 0:
+        raise ValueError("value must be non-negative")
+    out: list[str] = []
+    for _ in range(width):
+        value, rem = divmod(value, 62)
+        out.append(_B62_ALPHABET[rem])
+    if value:
+        raise ValueError(f"value too large for {width} base62 chars")
+    return "".join(reversed(out))
+
+
+def _new_run_id() -> str:
+    """A collision-resistant, time-sortable run id that fits the sandbox-name cap:
+    "<prefix>-<6 base62 unix-seconds><4 base62 random>" (a 10-char token)."""
+    return f"{_RUN_ID_PREFIX}-{_b62(int(time.time()), 6)}{_b62(secrets.randbelow(62 ** 4), 4)}"
+
+
+def _is_smoke_name(name: str) -> bool:
+    """True if name is a smoke sandbox or its backend instance (from any run)."""
+    return bool(_SMOKE_TOKEN_RE.search(name))
+
+
+def _belongs_to_run(name: str, run_id: str) -> bool:
+    """True if name belongs to the given smoke run id (e.g. 'ysmk-1Ly3kq9fXz')."""
+    return f"{run_id}-" in name
+
+
+def _select_smoke_names(names: Iterable[str], run_id: str, which: str) -> list[str]:
+    """Smoke names for `which`: 'prior' = other runs' leftovers, 'current' = this
+    run's. Order-preserving and de-duplicated."""
+    want_current = which == "current"
+    seen: set[str] = set()
+    out: list[str] = []
+    for name in names:
+        if not name or name in seen or not _is_smoke_name(name):
+            continue
+        if _belongs_to_run(name, run_id) == want_current:
+            seen.add(name)
+            out.append(name)
+    return out
+
+
+def _smoke_store_names(ls_json: dict[str, Any], run_id: str, which: str) -> list[str]:
+    """Extract smoke sandbox names from `yoloai ls --json` output."""
+    names = [
+        (entry.get("environment") or {}).get("name", "")
+        for entry in (ls_json.get("sandboxes") or [])
+    ]
+    return _select_smoke_names(names, run_id, which)
+
+
+def _destroy_store_smoke(ctx: RunContext, which: str) -> list[str]:
+    """`yoloai ls --json` then `yoloai destroy` every in-store smoke sandbox.
+
+    Removes the backend instance AND its on-host sandbox dir — more aggressive
+    than `yoloai system prune`, which spares an instance whose dir still exists
+    (the lingering dir from a crashed run is exactly what keeps an orphaned Tart
+    VM counting against macOS's 2-VM limit across runs).
+    """
+    try:
+        listed = subprocess.run(
+            [ctx.yoloai_bin, "ls", "--json"],
+            capture_output=True, timeout=30, text=True,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return []
+    if listed.returncode != 0 or not listed.stdout.strip():
+        return []
+    try:
+        data = json.loads(listed.stdout)
+    except json.JSONDecodeError:
+        return []
+
+    destroyed: list[str] = []
+    for name in _smoke_store_names(data, ctx.run_id, which):
+        try:
+            r = subprocess.run(
+                [ctx.yoloai_bin, "destroy", "--abandon-unapplied", name],
+                capture_output=True, timeout=90, text=True,
+            )
+        except subprocess.TimeoutExpired:
+            print(f"  TIMEOUT destroy {name} (>90s); Tart backstop may still remove its VM")
+            continue
+        if r.returncode == 0:
+            destroyed.append(name)
+        else:
+            print(f"  WARN destroy {name}: exit {r.returncode}")
+    return destroyed
+
+
+def _delete_smoke_tart_vms(ctx: RunContext, which: str) -> list[str]:
+    """`tart list` then `tart delete` any smoke VM still present — true orphans
+    (store entry already gone) and wedged VMs a yoloai destroy couldn't tear
+    down. No-op when tart is not installed."""
+    tart = shutil.which("tart")
+    if tart is None:
+        return []
+    try:
+        listed = subprocess.run(
+            [tart, "list", "--quiet"],
+            capture_output=True, timeout=30, text=True,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return []
+    if listed.returncode != 0:
+        return []
+
+    deleted: list[str] = []
+    for name in _select_smoke_names(listed.stdout.splitlines(), ctx.run_id, which):
+        # A running VM can't be deleted; stop first (best-effort, short timeout —
+        # `delete` force-removes a wedged VM regardless of stop's outcome).
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            subprocess.run([tart, "stop", name], capture_output=True, timeout=15)
+        try:
+            r = subprocess.run([tart, "delete", name], capture_output=True, timeout=30, text=True)
+        except subprocess.TimeoutExpired:
+            print(f"  TIMEOUT tart delete {name} (>30s)")
+            continue
+        if r.returncode == 0:
+            deleted.append(name)
+        else:
+            print(f"  WARN tart delete {name}: {r.stderr.strip()[:120]}")
+    return deleted
+
+
+def _sweep_smoke_orphans(ctx: RunContext, which: str, label: str) -> None:
+    """Force-remove leftover smoke sandboxes and their backend instances.
+
+    Two passes, because neither alone suffices: the yoloai-store pass clears
+    in-store sandboxes and their dirs (so an orphan VM stops counting against
+    the macOS 2-VM limit), and the Tart backstop removes VMs the store no longer
+    knows about or that wedged. `which` is "prior" (other runs — pre-run, before
+    warm-up) or "current" (this run — post-run, so a run cleans up after itself
+    even when a per-sandbox destroy wedged). The harness owns the reserved
+    "ysmk-" namespace, so force-removing all of it is safe.
+    """
+    removed = _destroy_store_smoke(ctx, which) + _delete_smoke_tart_vms(ctx, which)
+    if not removed:
+        print(f"{label}: clean")
+    else:
+        scope = "prior runs" if which == "prior" else "this run"
+        print(f"{label}: removed {len(removed)} item(s) from {scope}")
+        for name in removed[:8]:
+            print(f"  {name}")
+        if len(removed) > 8:
+            print(f"  … and {len(removed) - 8} more")
+    print()
+
+
 def _prerun_prune(ctx: RunContext) -> None:
     """Run `yoloai system prune --yes` once before tests start.
 
@@ -2299,6 +2476,11 @@ def check_prerequisites(
         print(f"  {label:<{col_w}} {status:<6}  {pr.note}")
     print()
 
+    # Clear leftover smoke sandboxes/VMs from prior or crashed runs BEFORE
+    # warm-up — otherwise an orphaned Tart VM still counting against macOS's
+    # 2-VM limit makes the warm-up `new` (and the matrix) fail at creation.
+    _sweep_smoke_orphans(ctx, "prior", "pre-run sweep")
+
     _warm_up_vm_backends(ctx, backends, results)
 
     return results
@@ -2409,6 +2591,11 @@ def cleanup(ctx: RunContext) -> None:
                     "  PRUNE TIMEOUT (>180s) — orphan backend state likely remains. "
                     "Run 'yoloai system doctor' to inspect."
                 )
+
+    # Backstop: force-remove anything this run leaked that the per-sandbox
+    # destroy above couldn't (a wedged Tart VM, an untracked warm-up VM), so the
+    # run leaves no orphan to trip the next one's 2-VM limit.
+    _sweep_smoke_orphans(ctx, "current", "post-run sweep")
 
     shutil.rmtree(ctx.tmpdir, ignore_errors=True)
 
@@ -2916,7 +3103,7 @@ def main() -> int:
         )
         return 1
 
-    run_id = f"smoke-{int(time.time())}"
+    run_id = _new_run_id()
     tmpdir = Path(tempfile.mkdtemp(prefix="yoloai-smoke-"))
     _t = time.time()
     _ms = int(_t * 1000) % 1000
