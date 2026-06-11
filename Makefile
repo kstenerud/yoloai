@@ -32,7 +32,7 @@ DOCKER_HOST_ENV := $(DOCKER_HOST)
 DOCKER_HOST_RESOLVED = $(if $(DOCKER_HOST_ENV),$(DOCKER_HOST_ENV),$(shell docker context inspect --format '{{.Endpoints.docker.Host}}' 2>/dev/null))
 integration e2e base-image smoketest smoketest-full: export DOCKER_HOST = $(DOCKER_HOST_RESOLVED)
 
-.PHONY: build test fmt lint vet-tagged tidy-check govulncheck hadolint actionlint check cover integration e2e integration-podman integration-seatbelt integration-tart python-test python-typecheck ensure-python-venv setup-dev-python smoketest smoketest-full releasetest setcap clean
+.PHONY: build test fmt lint vet-tagged tidy-check govulncheck hadolint actionlint check cover integration e2e integration-podman integration-containerd integration-apple integration-seatbelt integration-tart python-test python-typecheck ensure-python-venv setup-dev-python smoketest smoketest-full releasetest setcap clean
 
 build: $(BINARY)
 
@@ -149,6 +149,11 @@ cover:
 base-image: build
 	./$(BINARY) system build --backend docker
 
+## integration: run every backend's integration suite. Each backend self-skips
+## when its daemon/host isn't available (TestMain gate / skipIfNotAvailable), so
+## the same target runs on any host and exercises whatever that host supports —
+## the host-aware contract. Docker additionally drives the cross-cutting sandbox/
+## and cli/ suites, which require a real container daemon.
 integration:
 	@if docker info >/dev/null 2>&1; then \
 		$(MAKE) base-image && \
@@ -156,10 +161,7 @@ integration:
 	else \
 		echo "Docker unavailable — skipping Docker integration tests"; \
 	fi
-	@if [ "$$(uname -s)" = "Darwin" ] && [ "$$(uname -m)" = "arm64" ]; then \
-		echo "Apple Silicon detected — running seatbelt and tart integration tests"; \
-		$(MAKE) integration-seatbelt integration-tart; \
-	fi
+	@$(MAKE) integration-containerd integration-apple integration-seatbelt integration-tart
 
 e2e: build
 	@if ! docker info >/dev/null 2>&1; then \
@@ -183,6 +185,21 @@ integration-podman: build
 	@echo "Running CLI lifecycle subset against Podman..."
 	@YOLOAI_TEST_BACKEND=podman go test -tags=integration -v -count=1 -timeout=10m \
 		-run '^TestCLI_(StartStop|StartAfterDone)$$' ./internal/cli/
+
+## integration-containerd: run containerd (Kata VM) integration tests.
+## Linux-only by build constraint (the package is `//go:build integration && linux`);
+## on macOS it compiles to no test files, and on Linux without the containerd
+## socket the tests skip cleanly via skipIfNotAvailable.
+integration-containerd:
+	go test -tags=integration -v -count=1 -timeout=10m ./internal/runtime/containerd/
+
+## integration-apple: run Apple `container` backend integration tests (requires
+## macOS 26 + Apple Silicon + the `container` CLI). On any other host the suite
+## skips cleanly via TestMain. The full base-image build is gated behind
+## YOLOAI_TEST_APPLE_BASE=1 (slow); the conformance + lifecycle tests use a tiny
+## alpine sleep image and run whenever the backend is available.
+integration-apple:
+	go test -tags=integration -v -count=1 -timeout=15m ./internal/runtime/apple/
 
 ## integration-seatbelt: run Seatbelt integration tests (requires macOS with sandbox-exec)
 ## On non-macOS platforms the tests skip cleanly via TestMain (exit 0).
