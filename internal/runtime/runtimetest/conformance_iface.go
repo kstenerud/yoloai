@@ -184,8 +184,9 @@ func RunInterfaceConformance(t *testing.T, setup InterfaceSetupFunc) {
 	t.Run("InteractiveExecNonZeroExit", func(t *testing.T) {
 		b := setup(t)
 		name := sleeper(t, b, runtime.InstanceConfig{})
+		var out strings.Builder
 		err := b.Runtime.InteractiveExec(b.Ctx, name, []string{"sh", "-c", "exit 9"}, "", "",
-			runtime.IOStreams{TTY: true})
+			runtime.IOStreams{Out: &out, TTY: true})
 		var execErr *runtime.ExecError
 		require.ErrorAs(t, err, &execErr, "TTY exec non-zero exit must surface as *runtime.ExecError")
 		assert.Equal(t, 9, execErr.ExitCode)

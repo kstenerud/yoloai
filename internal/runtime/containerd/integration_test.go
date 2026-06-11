@@ -40,6 +40,15 @@ func skipIfNotAvailable(t *testing.T) {
 		t.Skipf("containerd not reachable (%s exists but is not connectable): %v", containerdSocket, err)
 	}
 	_ = conn.Close()
+	// A reachable daemon is not sufficient: every test brings up CNI networking,
+	// which creates a named network namespace and needs CAP_SYS_ADMIN +
+	// CAP_DAC_OVERRIDE (typically root). On an unprivileged host the daemon
+	// dials fine but Create fails at "create netns: operation not permitted" —
+	// a host incapability, not a test failure. Probe it up front and skip.
+	if err := canCreateNetNSFunc(); err != nil {
+		t.Skipf("containerd reachable but this host cannot create network namespaces "+
+			"(needs CAP_SYS_ADMIN/root): %v", err)
+	}
 }
 
 // testLayout constructs a Layout rooted at an isolated home for an

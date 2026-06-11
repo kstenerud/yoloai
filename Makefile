@@ -187,9 +187,10 @@ integration-podman: build
 		-run '^TestCLI_(StartStop|StartAfterDone)$$' ./internal/cli/
 
 ## integration-containerd: run containerd (Kata VM) integration tests.
-## Linux-only by build constraint (the package is `//go:build integration && linux`);
-## on macOS it compiles to no test files, and on Linux without the containerd
-## socket the tests skip cleanly via skipIfNotAvailable.
+## Linux-only: the real tests are `//go:build integration && linux`. On non-Linux
+## hosts a stub TestMain (integration_main_test.go) exits 0 so this target runs
+## everywhere. On Linux, skipIfNotAvailable skips cleanly when the containerd
+## socket is absent/unconnectable or the host can't create network namespaces.
 integration-containerd:
 	go test -tags=integration -v -count=1 -timeout=10m ./internal/runtime/containerd/
 

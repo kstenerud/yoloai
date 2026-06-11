@@ -52,7 +52,14 @@ func PTYBridgeExec(cmd *exec.Cmd, streams IOStreams) error {
 		go func() { _, _ = io.Copy(ptmx, streams.In) }()
 	}
 	// Copy the child's PTY output until it exits and the master reports EOF.
-	_, _ = io.Copy(streams.Out, ptmx)
+	// A nil Out would make io.Copy deref a nil writer; drain to io.Discard
+	// instead so we still empty the PTY master (a full buffer would wedge the
+	// child) without requiring every caller to supply a sink.
+	out := streams.Out
+	if out == nil {
+		out = io.Discard
+	}
+	_, _ = io.Copy(out, ptmx)
 
 	return InteractiveExitError(cmd.Wait())
 }
