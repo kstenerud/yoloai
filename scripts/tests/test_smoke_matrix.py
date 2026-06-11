@@ -7,11 +7,9 @@ from typing import Callable
 
 import smoke_test
 from smoke_test import (
-    BASE_LINUX_BACKENDS,
-    BASE_MACOS_BACKENDS,
+    LINUX_BACKENDS,
+    MACOS_BACKENDS,
     BackendSpec,
-    FULL_LINUX_BACKENDS,
-    FULL_MACOS_BACKENDS,
     dind_applies,
     docker_provider_candidates,
     isolation_check_applies,
@@ -21,7 +19,7 @@ from smoke_test import (
     uncovered_reason,
 )
 
-ALL_SPECS = FULL_LINUX_BACKENDS + FULL_MACOS_BACKENDS
+ALL_SPECS = LINUX_BACKENDS + MACOS_BACKENDS
 
 
 def _labels(predicate: Callable[[BackendSpec], bool]) -> set[str]:
@@ -70,28 +68,37 @@ def test_seatbelt_and_tart_never_run_network_isolation() -> None:
     assert not dind_applies(by_label["tart"])
 
 
-def test_predicates_partition_cleanly_over_base_matrix() -> None:
+def test_predicates_partition_cleanly_over_matrix() -> None:
     # Sanity: predicates accept any BackendSpec from the shipped matrices without
     # raising, and at least one spec is applicable for each (the phase isn't dead).
-    assert any(dind_applies(s) for s in smoke_test.FULL_LINUX_BACKENDS)
-    assert any(isolation_check_applies(s) for s in smoke_test.FULL_LINUX_BACKENDS)
+    assert any(dind_applies(s) for s in LINUX_BACKENDS)
+    assert any(isolation_check_applies(s) for s in LINUX_BACKENDS)
 
 
-def test_uncovered_on_linux_full_lists_mac_only_backends() -> None:
-    # On a Linux host (this=FULL_LINUX), the macOS matrix contributes the mac-only
-    # backends; docker/podman run here so they're excluded. podman-priv now runs on
-    # Linux too (keep-id:uid=1001), so only the seatbelt/tart mac backends surface
-    # as uncovered.
-    labels = {s.label for s in uncovered_backends(FULL_MACOS_BACKENDS, FULL_LINUX_BACKENDS)}
-    assert labels == {"seatbelt", "tart"}
+def test_one_matrix_per_host_os() -> None:
+    # The tier no longer selects a smaller matrix — there is exactly one matrix per
+    # host OS, keyed in HOST_MATRICES. apple is macOS-only; containerd is Linux-only.
+    assert set(smoke_test.HOST_MATRICES) == {"linux", "mac"}
+    assert smoke_test.HOST_MATRICES["linux"] is LINUX_BACKENDS
+    assert smoke_test.HOST_MATRICES["mac"] is MACOS_BACKENDS
+    assert "apple" in {s.label for s in MACOS_BACKENDS}
+    assert "apple" not in {s.label for s in LINUX_BACKENDS}
 
 
-def test_uncovered_on_mac_full_includes_linux_isolation_variants() -> None:
-    # On a macOS host (this=FULL_MACOS), the Linux matrix contributes the OS-locked
+def test_uncovered_on_linux_lists_mac_only_backends() -> None:
+    # On a Linux host (this=LINUX), the macOS matrix contributes the mac-only
+    # backends; docker/podman/*-priv run here so they're excluded. The apple,
+    # seatbelt, and tart macOS backends surface as uncovered.
+    labels = {s.label for s in uncovered_backends(MACOS_BACKENDS, LINUX_BACKENDS)}
+    assert labels == {"seatbelt", "tart", "apple"}
+
+
+def test_uncovered_on_mac_includes_linux_isolation_variants() -> None:
+    # On a macOS host (this=MACOS), the Linux matrix contributes the OS-locked
     # containerd VMs and the gVisor variant yoloai blocks on macOS. docker/podman
     # are scheduled here; docker-priv is too (privileged runs via the container
     # backend's Linux VM on macOS), so neither is "uncovered".
-    labels = {s.label for s in uncovered_backends(FULL_LINUX_BACKENDS, FULL_MACOS_BACKENDS)}
+    labels = {s.label for s in uncovered_backends(LINUX_BACKENDS, MACOS_BACKENDS)}
     assert labels == {
         "docker-cenhanced",
         "containerd-vm",
@@ -102,31 +109,25 @@ def test_uncovered_on_mac_full_includes_linux_isolation_variants() -> None:
 def test_uncovered_never_lists_backends_scheduled_here() -> None:
     # docker/podman are in both matrices, so they're never "uncovered" either way.
     for other, here in (
-        (FULL_LINUX_BACKENDS, FULL_MACOS_BACKENDS),
-        (FULL_MACOS_BACKENDS, FULL_LINUX_BACKENDS),
+        (LINUX_BACKENDS, MACOS_BACKENDS),
+        (MACOS_BACKENDS, LINUX_BACKENDS),
     ):
         labels = {s.label for s in uncovered_backends(other, here)}
         assert "docker" not in labels
         assert "podman" not in labels
 
 
-def test_uncovered_base_tier_set_difference() -> None:
-    # Base tier: on Linux only tart is uncovered; on macOS only containerd-vm
-    # (OS-locked) is. docker-priv now runs in both base tiers (privileged via the
-    # container backend's Linux VM on macOS), so it's no longer uncovered.
-    assert {s.label for s in uncovered_backends(BASE_MACOS_BACKENDS, BASE_LINUX_BACKENDS)} == {"tart"}
-    assert {s.label for s in uncovered_backends(BASE_LINUX_BACKENDS, BASE_MACOS_BACKENDS)} == {
-        "containerd-vm",
-    }
-
-
 def test_uncovered_reason_distinguishes_os_lock_from_isolation() -> None:
-    # On a macOS run, uncovered Linux backends get specific reasons: OS-locked
-    # containerd points at the other host; gVisor (-enhanced) explains its
-    # macOS block. docker-priv is no longer here — it runs on macOS now.
-    by_label = {s.label: s for s in FULL_LINUX_BACKENDS}
-    assert uncovered_reason(by_label["containerd-vm"], "Linux") == "requires a Linux host"
-    enhanced = uncovered_reason(by_label["docker-cenhanced"], "Linux")
+    # Uncovered backends get specific, host-derived reasons: OS-locked daemons
+    # point at the host they need; gVisor (-enhanced) explains its macOS block.
+    linux_by_label = {s.label: s for s in LINUX_BACKENDS}
+    mac_by_label = {s.label: s for s in MACOS_BACKENDS}
+    assert uncovered_reason(linux_by_label["containerd-vm"]) == "requires a Linux host"
+    # apple is OS-locked to macOS — the reason is derived from the spec, not a
+    # passed-in label, so it stays correct on any host.
+    assert uncovered_reason(mac_by_label["apple"]) == "requires a macOS host"
+    assert uncovered_reason(mac_by_label["tart"]) == "requires a macOS host"
+    enhanced = uncovered_reason(linux_by_label["docker-cenhanced"])
     assert "gVisor" in enhanced and "macOS" in enhanced
 
 

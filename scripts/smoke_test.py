@@ -251,32 +251,14 @@ class RunContext:
 # Backend matrices
 # ---------------------------------------------------------------------------
 
-# Base tier: fast, reliable backends for PR gates and nightly smoke.
-BASE_LINUX_BACKENDS: list[BackendSpec] = [
-    BackendSpec("linux", "container",          "docker", "docker",
-                check_backend="docker", retries=1),
-    BackendSpec("linux", "container-privileged", "docker", "docker-priv",
-                check_backend="docker", retries=1),
-    BackendSpec("linux", "vm",                 None,     "containerd-vm",
-                check_backend="containerd", is_vm=True, check_isolation="vm",
-                sentinel_timeout_override=QEMU_TIMEOUT, stall_grace_secs=120,
-                retries=1),
-]
-
-BASE_MACOS_BACKENDS: list[BackendSpec] = [
-    BackendSpec("linux", "container", "docker", "docker",
-                check_backend="docker", retries=1),
-    # Docker Desktop / OrbStack / Podman Machine run --privileged inside their
-    # Linux VM, so privileged + dind work on macOS exactly as on Linux (verified
-    # on OrbStack / Apple Silicon). Mirrors the Linux base tier.
-    BackendSpec("linux", "container-privileged", "docker", "docker-priv",
-                check_backend="docker", retries=1),
-    BackendSpec("mac",   "vm",        None,     "tart",
-                check_backend="tart",   is_vm=True, retries=1, stall_grace_secs=120),
-]
-
-# Full tier: all backends for pre-release validation.
-FULL_LINUX_BACKENDS: list[BackendSpec] = [
+# One matrix per host OS — every backend that OS can exercise. The smoke *tier*
+# does NOT change this set; it only changes how unavailable infrastructure is
+# treated (see the `ctx.full` branches in run()): `make smoketest` SKIPS a
+# backend whose prereqs are missing — a quick check on a dev box that may lack
+# full release infra — while `make smoketest-full` FAILS loudly for any missing
+# infra, the release gate that proves the whole OS-supported matrix actually ran.
+# Adding a host OS (e.g. windows) is adding a key to HOST_MATRICES below.
+LINUX_BACKENDS: list[BackendSpec] = [
     BackendSpec("linux", "container",          "docker", "docker",
                 check_backend="docker", retries=1),
     BackendSpec("linux", "container",          "podman", "podman",
@@ -301,7 +283,7 @@ FULL_LINUX_BACKENDS: list[BackendSpec] = [
                 retries=1),
 ]
 
-FULL_MACOS_BACKENDS: list[BackendSpec] = [
+MACOS_BACKENDS: list[BackendSpec] = [
     BackendSpec("linux", "container", "docker", "docker",
                 check_backend="docker"),
     BackendSpec("linux", "container", "podman", "podman",
@@ -312,6 +294,14 @@ FULL_MACOS_BACKENDS: list[BackendSpec] = [
                 check_backend="seatbelt"),
     BackendSpec("mac",   "vm",        None,     "tart",
                 check_backend="tart",   is_vm=True, retries=1, stall_grace_secs=120),
+    # Apple `container` backend: a Linux workload (os=linux) in a per-container VM
+    # on a macOS 26+ Apple Silicon host. It must be forced with --backend apple —
+    # `--os mac --isolation vm` routes to Tart (the macOS-native VM), whereas apple
+    # is the default only for a Linux workload on a macOS host (see probe.go
+    # SelectBackend / darwinPrefersApple). Guest paths are the standard Linux
+    # /yoloai, so it uses the container-slot exchange dir, not Tart's /Volumes path.
+    BackendSpec("linux", "vm", "apple", "apple",
+                check_backend="apple", is_vm=True, retries=1, stall_grace_secs=120),
     # container-privileged runs on macOS via the container backend's Linux VM
     # (Docker Desktop / OrbStack / Podman Machine). Mirrors the Linux spec so
     # the dind + isolation_check matrix tests run here too. Verified on OrbStack
@@ -325,18 +315,30 @@ FULL_MACOS_BACKENDS: list[BackendSpec] = [
                 check_backend="podman", retries=1),
 ]
 
+# Host OS → its complete backend matrix. Keyed by the sys.platform-derived host
+# label ("linux" / "mac"); add "windows" here when a Windows host matrix exists.
+HOST_MATRICES: dict[str, list[BackendSpec]] = {
+    "linux": LINUX_BACKENDS,
+    "mac": MACOS_BACKENDS,
+}
+
+# Human-facing host-OS labels for end-of-run messages.
+HOST_OS_LABELS: dict[str, str] = {"linux": "Linux", "mac": "macOS", "windows": "Windows"}
+
 # Required for non-matrix tests. Must be available on both platforms.
 DEFAULT_BACKEND = BackendSpec(
     "linux", "container", "docker", "docker", check_backend="docker"
 )
 
-# Backends whose host OS is fixed by the underlying daemon: seatbelt/tart are
-# macOS-only, containerd (Kata) is Linux-only. docker/podman bridge to a VM on the
+# Backends whose host OS is fixed by the underlying daemon: seatbelt/tart and the
+# apple `container` backend are macOS-only (apple also needs macOS 26 + Apple
+# Silicon), containerd (Kata) is Linux-only. docker/podman bridge to a VM on the
 # foreign host (Docker Desktop / Podman Machine), so they run on both and are
 # absent here. Keyed by check_backend → required host OS.
 HOST_OS_LOCKED: dict[str, str] = {
     "seatbelt": "mac",
     "tart": "mac",
+    "apple": "mac",
     "containerd": "linux",
 }
 
@@ -476,15 +478,18 @@ def uncovered_backends(
     return out
 
 
-def uncovered_reason(spec: BackendSpec, other_host_label: str) -> str:
+def uncovered_reason(spec: BackendSpec) -> str:
     """Explain why an uncovered backend can't run on this host.
 
-    OS-locked daemons need the other hardware; daemons that bridge both hosts but
-    carry a host-specific isolation mode get the isolation note."""
+    OS-locked daemons need the other hardware; daemons that bridge multiple hosts
+    but carry a host-specific isolation mode get the isolation note. The required
+    host label is derived from the spec itself (HOST_OS_LOCKED → HOST_OS_LABELS),
+    so this stays correct with any number of host OSes."""
     if spec.check_backend in HOST_OS_LOCKED:
-        return f"requires a {other_host_label} host"
+        locked_os = HOST_OS_LOCKED[spec.check_backend]
+        return f"requires a {HOST_OS_LABELS.get(locked_os, locked_os)} host"
     return ISOLATION_HOST_NOTE.get(
-        spec.isolation, f"only scheduled on the {other_host_label} matrix"
+        spec.isolation, "only scheduled on another host OS's matrix"
     )
 
 
@@ -2956,23 +2961,23 @@ def main() -> int:
     atexit.register(cleanup, ctx)
 
     is_linux = sys.platform.startswith("linux")
-    other_host_label = "macOS" if is_linux else "Linux"
-    # When filters are active, use the full matrix so --test / --backend can
-    # reach backends (e.g. seatbelt) that live outside the base tier.
-    if ctx.full or ctx.test_filter or ctx.backend_filter:
-        matrix = FULL_LINUX_BACKENDS if is_linux else FULL_MACOS_BACKENDS
-        other_os_matrix = FULL_MACOS_BACKENDS if is_linux else FULL_LINUX_BACKENDS
-    else:
-        matrix = BASE_LINUX_BACKENDS if is_linux else BASE_MACOS_BACKENDS
-        other_os_matrix = BASE_MACOS_BACKENDS if is_linux else BASE_LINUX_BACKENDS
+    host_os = "linux" if is_linux else "mac"
+    # One matrix per host OS — the same set whether tier is base or full; the tier
+    # only changes skip-vs-fail on missing infra (handled per-backend below). The
+    # other host OSes' specs (union across every other key) drive the uncovered
+    # report and the cross-OS release reminder; this stays correct for N host OSes.
+    matrix = HOST_MATRICES[host_os]
+    other_os_specs = [
+        s for os_key, specs in HOST_MATRICES.items() if os_key != host_os for s in specs
+    ]
 
-    # Backends in the complete (both-host) tier matrix that this host can't run
+    # Backends in the complete (all-host) matrix that this host can't run
     # (situation 2): OS-locked daemons plus host-specific isolation modes the matrix
     # only schedules on the other side. Surfaced as a distinct end-of-run group with
     # a per-backend reason so no part of the matrix is silently absent.
     uncovered_notes = [
-        (s.label, uncovered_reason(s, other_host_label))
-        for s in uncovered_backends(other_os_matrix, matrix)
+        (s.label, uncovered_reason(s))
+        for s in uncovered_backends(other_os_specs, matrix)
     ]
 
     # Build the list of specs to prereq-check.  When explicit filters narrow
@@ -3214,6 +3219,23 @@ def main() -> int:
     if manifest is not None:
         print(f"\nmanifest: {manifest}")
     print(f"index: {_SMOKE_INDEX}")
+
+    # Release-gate reminder: smoketest-full proves only THIS host OS's matrix.
+    # The gate is not complete until it has also passed on every other supported
+    # host OS, because each host runs backends the others physically cannot (Apple
+    # Silicon → apple / tart / seatbelt; Linux → containerd Kata / gVisor). Name
+    # the other OSes so a single-host green is never mistaken for release sign-off.
+    if ctx.full:
+        other_oses = [HOST_OS_LABELS.get(k, k) for k in HOST_MATRICES if k != host_os]
+        if other_oses:
+            joined = " and ".join(other_oses)
+            uncovered_here = ", ".join(label for label, _ in uncovered_notes)
+            tail = f" (those hosts cover: {uncovered_here})" if uncovered_here else ""
+            print(
+                f"\nNOTE: this was the {HOST_OS_LABELS.get(host_os, host_os)} release "
+                f"matrix only. The release gate is NOT complete until `make releasetest` "
+                f"has also passed on {joined}{tail}."
+            )
 
     failed = [r for r in ctx.results if not r.passed and not r.skipped]
     return 1 if failed else 0
