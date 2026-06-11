@@ -13,6 +13,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestAttestationOptOutFlags_DockerOnly(t *testing.T) {
+	// Docker (BuildKit) emits and accepts SBOM/provenance attestations.
+	assert.Equal(t, []string{"--provenance=false", "--sbom=false"}, attestationOptOutFlags("docker"))
+	// Podman neither emits them nor accepts the flags — passing them fails with
+	// "unknown flag: --provenance" (the integration-podman CI break).
+	assert.Nil(t, attestationOptOutFlags("podman"))
+}
+
 func TestCreateBuildContext(t *testing.T) {
 	reader, err := createBuildContext()
 	require.NoError(t, err)

@@ -80,6 +80,21 @@ func buildInputsChecksum() string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
+// attestationOptOutFlags returns the build flags that disable BuildKit
+// SBOM/provenance attestations — but only for docker, which emits them. The
+// attestation manifest list is the prime suspect for yoloai-base/profile images
+// vanishing between runs on Docker Desktop's containerd image store (forcing a
+// full rebuild every time), and a local image has no use for attestations
+// anyway; harmless on the classic overlay2 store. Podman's `build` neither emits
+// such attestations nor accepts --provenance/--sbom (it errors "unknown flag:
+// --provenance"), so the flags are omitted for it.
+func attestationOptOutFlags(binaryName string) []string {
+	if binaryName == "docker" {
+		return []string{"--provenance=false", "--sbom=false"}
+	}
+	return nil
+}
+
 // buildBaseImage builds the yoloai-base Docker image from the embedded
 // Dockerfile and entrypoints. Build output is streamed to the provided
 // writer (typically os.Stderr for user-visible progress).
@@ -102,12 +117,9 @@ func (r *Runtime) buildBaseImage(ctx context.Context, layout config.Layout, outp
 
 	logger.Debug("building yoloai-base image via BuildKit")
 
-	// --provenance=false / --sbom=false: build a plain single-platform image, not a
-	// BuildKit attestation manifest list. On Docker Desktop's containerd image store
-	// the attestation index is the prime suspect for yoloai-base vanishing between
-	// runs (forcing a full rebuild every time); a local base image has no use for
-	// SBOM/provenance attestations anyway. Harmless on the classic overlay2 store.
-	cmd := sysexec.CommandContext(ctx, layout.Env().EnvForDockerBuild(), r.binaryName, "build", "--provenance=false", "--sbom=false", "-t", "yoloai-base", "-")
+	args := append([]string{"build"}, attestationOptOutFlags(r.binaryName)...)
+	args = append(args, "-t", "yoloai-base", "-")
+	cmd := sysexec.CommandContext(ctx, layout.Env().EnvForDockerBuild(), r.binaryName, args...)
 	cmd.Stdin = buildCtx
 	cmd.Stdout = output
 	cmd.Stderr = output
@@ -220,10 +232,8 @@ func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir string, tag s
 		return fmt.Errorf("create profile build context: %w", err)
 	}
 
-	// --provenance=false / --sbom=false: see buildBaseImage — keep profile images a
-	// plain single-platform image so the containerd image store doesn't tag an
-	// attestation index that the existence check can lose.
-	args := []string{"build", "--provenance=false", "--sbom=false", "-t", tag}
+	args := append([]string{"build"}, attestationOptOutFlags(r.binaryName)...)
+	args = append(args, "-t", tag)
 	for _, s := range secrets {
 		args = append(args, "--secret", s)
 	}

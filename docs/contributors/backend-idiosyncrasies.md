@@ -113,6 +113,7 @@ row to the index.
 | `system disk` shows seatbelt `IMAGES: ?` / `CACHE: 0 B` — is it a gap? | [Seatbelt has no backend image/cache store](#seatbelt-has-no-backend-imagecache-store--cacheusageprunecache-are-correctly-absent) |
 | Apple `container create … --mount …` fails: `path '…' is not a directory` | [Apple: `--mount type=virtiofs` rejects file sources; use `-v`](#apple-mount-typevirtiofs-rejects-a-file-source-use--v-for-file-mounts) |
 | Apple: `container build .` builds nothing / `COPY` fails (`"/x": not found`) | [Apple: `container build` drops a relative context](#apple-container-build-silently-drops-a-relative--context-pass-an-absolute-dir) |
+| `podman build` → `Error: unknown flag: --provenance` / exit 125 | [Podman: build rejects docker BuildKit attestation flags](#podman-build-rejects-the-docker-buildkit-attestation-flags) |
 
 ---
 
@@ -827,6 +828,18 @@ An empty value disables LXC seccomp for that container entirely. The container m
 **Fix:** Build `yoloai-base` via BuildKit by shelling out to `<binary> build -` (context tar piped to stdin) with `DOCKER_BUILDKIT=1`, instead of `client.ImageBuild`. Podman's `build` (Buildah) likewise never commits per-step images, so the same code path is correct there. Profile builds with secrets already used this CLI path; the base build now matches. After switching, a one-time `docker image prune` clears the legacy intermediates left by prior builds (once `yoloai-base` is rebuilt with BuildKit they are no longer ancestors of any tag, so they prune cleanly and free real disk).
 
 **Code:** `internal/runtime/docker/build.go` — `(*Runtime).buildBaseImage` (CLI/BuildKit via `<binary> build -`), `curatedBuildEnv` (forces `DOCKER_BUILDKIT=1`).
+
+---
+
+### Podman: `build` rejects the docker BuildKit attestation flags
+
+**Symptom:** `make integration-podman` (and any podman-backed `yoloai system build`) fails at the base/profile image build with `Error: unknown flag: --provenance` → `yoloai: podman build exited with code 125`. Docker builds are unaffected.
+
+**Explanation:** `--provenance` / `--sbom` are **BuildKit/`docker buildx`** flags that disable SBOM/provenance attestations. They were added to the shared `<binary> build` path to stop the attestation manifest list from making `yoloai-base` vanish between runs on Docker Desktop's containerd image store. Podman's `build` (Buildah) produces no such attestations and does not implement those flags — passing them is a hard error (podman 4.9.3 confirmed; not in `podman build --help`). Because the docker backend serves podman via the docker-compat path with `binaryName="podman"`, the flags leaked onto the podman command line.
+
+**Fix:** Gate the attestation opt-out flags on the binary — emit `--provenance=false --sbom=false` only when `binaryName == "docker"`, omit for podman (which needs neither). The base and profile build sites both go through one helper so the two stay consistent.
+
+**Code:** `internal/runtime/docker/build.go` — `attestationOptOutFlags(binaryName)`, used by `(*Runtime).buildBaseImage` and `(*Runtime).BuildProfileImage`.
 
 ---
 
