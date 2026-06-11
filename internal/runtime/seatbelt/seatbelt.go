@@ -301,7 +301,21 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 	profilePath := filepath.Join(sandboxPath, backendDir, profileFileName)
 	setupScriptPath := filepath.Join(sandboxPath, binDir, "sandbox-setup.py")
 
-	cmd := sysexec.Command(r.sandboxEnv(), r.sandboxExecBin, "-f", profilePath, "python3", setupScriptPath, "seatbelt", sandboxPath)
+	// P1 vs P2: run the full sandbox-setup.py monitor (tmux + agent) only when the
+	// sandbox layer provisioned a runtime-config.json. Absent it — a bare runtime
+	// Start (direct runtime.Runtime use / the conformance suite) — launch a bare
+	// keep-alive under the SBPL profile instead: a running, exec-able instance
+	// (Exec runs fresh sandbox-exec'd commands; the profile enforces the mount
+	// grants) with no monitor. Mirrors tart's P1/P2 split.
+	_, cfgStatErr := os.Stat(filepath.Join(sandboxPath, "runtime-config.json"))
+	bareInstance := os.IsNotExist(cfgStatErr)
+	sandboxArgs := []string{"-f", profilePath}
+	if bareInstance {
+		sandboxArgs = append(sandboxArgs, "tail", "-f", "/dev/null")
+	} else {
+		sandboxArgs = append(sandboxArgs, "python3", setupScriptPath, "seatbelt", sandboxPath)
+	}
+	cmd := sysexec.Command(r.sandboxEnv(), r.sandboxExecBin, sandboxArgs...)
 	cmd.Stderr = logFile
 	cmd.Stdout = logFile
 	cmd.SysProcAttr = &syscall.SysProcAttr{
@@ -333,16 +347,34 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 		logFile.Close() //nolint:errcheck,gosec // best-effort
 	}()
 
-	// Wait for tmux session to appear
+	return r.awaitInstanceReady(ctx, sandboxPath, logPath, bareInstance, procDone)
+}
+
+// awaitInstanceReady blocks until a just-launched seatbelt instance is usable, or
+// returns a diagnostic error (killing the process). A bare (P1) instance has no
+// monitor, so it only confirms the keep-alive didn't exit immediately (e.g. the
+// SBPL profile rejected the exec); a full (P2) instance waits for the monitor's
+// tmux session.
+func (r *Runtime) awaitInstanceReady(ctx context.Context, sandboxPath, logPath string, bareInstance bool, procDone <-chan error) error {
+	readLog := func() string {
+		if logData, err := os.ReadFile(logPath); err == nil && len(logData) > 0 { //nolint:gosec // G304: path within sandbox dir
+			return "\nlog output:\n" + strings.TrimSpace(string(logData))
+		}
+		return ""
+	}
+	if bareInstance {
+		select {
+		case procErr := <-procDone:
+			r.killByPID(sandboxPath)
+			return fmt.Errorf("bare keep-alive exited immediately: %w%s", procErr, readLog())
+		case <-time.After(300 * time.Millisecond):
+			return nil
+		}
+	}
 	if err := r.waitForTmux(ctx, sandboxPath, procDone); err != nil {
 		r.killByPID(sandboxPath)
-		detail := fmt.Sprintf("command: %s -f %s python3 %s seatbelt %s", r.sandboxExecBin, profilePath, setupScriptPath, sandboxPath)
-		if logData, readErr := os.ReadFile(logPath); readErr == nil && len(logData) > 0 { //nolint:gosec // G304: path within sandbox dir
-			detail += fmt.Sprintf("\nlog output:\n%s", strings.TrimSpace(string(logData)))
-		}
-		return fmt.Errorf("wait for tmux session: %w\n%s", err, detail)
+		return fmt.Errorf("wait for tmux session: %w%s", err, readLog())
 	}
-
 	return nil
 }
 
@@ -701,6 +733,9 @@ func (r *Runtime) patchConfigWorkingDir(sandboxPath string, mounts []runtime.Mou
 
 	cfgPath := filepath.Join(sandboxPath, "runtime-config.json")
 	data, err := os.ReadFile(cfgPath) //nolint:gosec // G304: path within sandbox dir
+	if os.IsNotExist(err) {
+		return nil // no sandbox config → bare runtime instance, nothing to patch
+	}
 	if err != nil {
 		return err
 	}

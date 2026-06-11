@@ -7,6 +7,12 @@ History of codebase findings (issues discovered mid-work) that have been address
 are moved here from [`findings-unresolved.md`](findings-unresolved.md) once resolved, so the
 active file stays a working set. Newest first.
 
+### DF18 (run-coverage half) — Seatbelt and Tart now have real run coverage
+
+- **Discovered:** 2026-06-04 · **Resolved:** 2026-06-11 · **Workstream:** testing-refactor
+- **Disposition:** RESOLVED. The original DF18 bundled two gaps; this closes the "zero Seatbelt/Tart run coverage" half (the live-daemon error-path half stays open in `findings-unresolved.md`). Both backends now participate in `RunInterfaceConformance` via a **P1/P2 split** — `Start` yields a bare exec-able instance when no sandbox `runtime-config.json` is present, instead of running the `sandbox-setup.py` monitor: `TestSeatbeltConformance` (host `sandbox-exec`; 12 core subtests pass) and `TestTartConformance` (real macOS VM, gated `YOLOAI_TEST_TART_VM=1`). Lifecycle / exec / interactive / idempotency pass on both; each skips `Mounts` for a backend-specific, *verified* reason (tart [[DF29]]; seatbelt's `/mnt/test` isn't host-writable without root — the SBPL RW/RO grants are unit-tested instead). Both "documented exception" rationales were wrong on inspection: tart's `:copy` symlink blocker was stale ([[DF27]]), and seatbelt does have a startable, exec-able instance (not "the process *is* the sandbox"). Also surfaced + fixed the `idle` agent's non-portable `sleep infinity` (see backend-idiosyncrasies "macOS BSD `sleep`").
+- **Pointer:** `internal/runtime/{seatbelt,tart}/integration_test.go` (`Test{Seatbelt,Tart}Conformance`); the P1/P2 split in `seatbelt.go::Start`/`awaitInstanceReady` and `tart.go`/`mounts.go::runSetupScript`.
+
 ### DF27 — Tart `:copy` symlink "bug" was stale; the real blockers were the idle command and Start-coupling
 
 - **Discovered:** 2026-06-11 · **Workstream:** testing-refactor (wiring Tart onto the shared conformance suite)

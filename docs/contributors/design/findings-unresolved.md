@@ -31,44 +31,14 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 - **Description:** On the `stop_start` restart leg (`restart` → `sb.Restart(StartOptions{Prompt:…})`), Claude Code v2.1.157 shows a "Quick safety check: Is this a project you trust?" dialog at startup whose selector line begins with `❯` — the same readiness pattern the prompt-injection waits for. The relaunched agent reached the welcome screen and sat idle at the ready prompt; the staged second prompt (`prompt.txt` correctly held the `done2` task) was never executed, so `files/done2` was never created and the test timed out (31s gap). Likely mechanism: the injected prompt + Enter is consumed by the trust dialog (Enter confirms "Yes, I trust this folder") rather than delivered to the agent REPL, dropping the task text. Non-deterministic: only podman failed this run (docker recovered on retry; docker-cenhanced/containerd-vm/vmenhanced passed). Matches the known podman network-flake family ("network: unreachable"). **NOT a regression** from the G7 carves — those relocate host-side Go functions and never touch entrypoint, start/restart, or tmux prompt injection (the `StartOptions.Prompt` path is unchanged; only `ResetOptions`/`Reset` were modified). Needs a reproduction before any fix; candidate remedy is to make restart prompt-injection wait for the *post-trust-dialog* steady-state ready prompt (or pre-trust the work copy) rather than the first `❯`.
 - **Pointer:** `internal/cli/lifecycle/restart.go:74`; agent-side readiness wait in the monitor/lifecycle start path; autopsy `.testcache/runs/yoloai-smoketest-20260531-233151.431/sandboxes/stop_start/podman/attempt1/FAILURE.md`
 
-### DF18 — Backend run-coverage gap: live-daemon error paths + zero Seatbelt/Tart run coverage
+### DF18 — Live-daemon error paths unhit by the conformance suite
 
 - **Discovered:** 2026-06-04 · **Workstream:** testing-critique (T13 split-out)
-- **Severity:** MEDIUM
-- **Disposition:** PARTIALLY ADDRESSED (2026-06-11) — conformance gap closed; live-daemon error paths still PARKED
-- **Progress (2026-06-11, testing-refactor):** The conformance suite is **no longer
-  docker-only**. Extracted `runtimetest.RunInterfaceConformance` (backend-agnostic,
-  interface-only) as the shared behavioral contract; docker/podman delegate to it
-  (keeping their SDK-only checks via `RunConformance`), and **containerd and apple are
-  wired onto it**. Apple gained a `TestMain` availability gate (matching docker/podman/
-  seatbelt/tart) and a smoke-matrix entry, so it is no longer untested. Seatbelt and Tart
-  are now **documented exceptions** rather than silent gaps: Tart keeps its cheap-path
-  integration tier (`New`, `Descriptor`, `Inspect` not-found, idempotent `Remove`) and its
-  exec/mount conformance stays blocked on the `:copy` symlink fix — `TestTart_FullVMLifecycle`
-  is still skipped (see [[DF27]]); Seatbelt's `Start` boots the full monitor stack, not a bare
-  exec sleeper, so it keeps a focused lifecycle test (create/inspect/stop/remove + idempotency).
-  One error path from the original list — **exec-on-stopped** — is now a universal conformance
-  assertion. **Still parked:** the remaining live-daemon error paths (dead-daemon-mid-op,
-  image-missing, prune-failure, overlay diff/apply) — they need live error-injection, not a
-  test rewrite.
-- **Description:** T13 promoted the *cheap* (host-only, fakeable) error paths to first-class
-  assertions, but a class of error branches is reachable only against a live backend and stays
-  unhit: dead-daemon-mid-op, image-missing, exec-on-stopped-container, prune-failure, and the
-  overlay diff/apply error paths (overlay requires a running container for the in-container git
-  exec). More structurally, **Seatbelt and Tart have no real run coverage at all** — no integration
-  tier exercises a real Seatbelt host-process sandbox or a real Tart VM, so their happy *and* error
-  paths are unverified except by the Python smoke harness. The conformance suite extracted in T2
-  (`runtimetest.RunConformance`) is docker-compatible only; Seatbelt and Tart need their own
-  behavioral tables. Not absorbed into the testing-critique scope because it needs live-daemon /
-  VM / macOS infrastructure, not a test rewrite.
-- **Trigger:** when CI (or a contributor host) gains a reachable Seatbelt (macOS) and Tart (macOS
-  VM) environment, stand up per-backend integration tables mirroring the docker conformance shape;
-  separately, add live-daemon error-injection cases (kill the daemon mid-op, reference a missing
-  image, exec into a stopped container, force a prune failure) to the docker/podman integration
-  tier where the daemon is already required.
-- **Pointer:** `internal/runtime/runtimetest/conformance.go` (docker-compat table to mirror);
-  `internal/runtime/seatbelt/`, `internal/runtime/tart/` (no integration tier); overlay error paths
-  in `internal/sandbox/patch/apply.go` (`generateOverlayPatchForContext`, `ensureOverlayBaseline`).
+- **Severity:** LOW–MEDIUM
+- **Disposition:** PARKED. (The other half of the original DF18 — "zero Seatbelt/Tart run coverage" — was **resolved 2026-06-11**; see `findings-resolved.md`. This entry is the remaining half.)
+- **Description:** A class of error branches is reachable only against a live backend and stays unhit by `RunInterfaceConformance`: **dead-daemon-mid-op**, **image-missing**, **prune-failure**, and the **overlay diff/apply** error paths (overlay needs a running container for the in-container git exec). `exec-on-stopped` was already promoted to a universal conformance assertion; these remain. Note **image-missing is not actually "live error-injection"** — it's a plain integration test (create with a bogus `ImageRef` → expect a clean error); the original "needs infrastructure, not a test rewrite" framing overstated the difficulty for that one, so start there.
+- **Trigger:** add error-injection cases to the docker/podman integration tier (the daemon is already required there) — image-missing first (cheapest), then prune-failure and dead-daemon-mid-op.
+- **Pointer:** `internal/runtime/runtimetest/conformance_iface.go` (shared suite — add assertions here); overlay error paths in `internal/sandbox/patch/apply.go` (`generateOverlayPatchForContext`, `ensureOverlayBaseline`).
 
 ### DF24 — Stale-base detection flags the *wanted* base as "superseded" when `tart.image` pins a non-default image
 

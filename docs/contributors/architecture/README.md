@@ -893,7 +893,7 @@ target works on a Linux box or an Apple Silicon Mac.
 | containerd (Kata) | ✓ | ✓ | `make integration-containerd` | linux | Linux + containerd + Kata/KVM |
 | apple | ✓ | ✓ | `make integration-apple` | mac | macOS 26 + Apple Silicon + `container` |
 | tart | ✓ | ✓ (Mounts skipped — DF29) | `make integration-tart` | mac | macOS + Apple Silicon + tart |
-| seatbelt | ✓ | ✗ — **process model** (see below) | `make integration-seatbelt` | mac | macOS (sandbox-exec) |
+| seatbelt | ✓ | ✓ (Mounts skipped — path model) | `make integration-seatbelt` | mac | macOS (sandbox-exec) |
 
 **Gating** — each integration package self-skips when its daemon/host is absent
 (`TestMain` for docker/podman/apple/seatbelt/tart, `skipIfNotAvailable` for
@@ -910,11 +910,17 @@ mounts) when no sandbox `runtime-config.json` is present, skipping the **P2**
 against a bare idle instance. Lifecycle/exec/interactive pass; `Mounts` is skipped
 (the Go-side VirtioFS symlink path doesn't stand up bare — DF29).
 
-**One documented exception** (not a coverage gap):
-- **seatbelt** — there is no separately-startable instance to exec into: the
-  sandbox lifetime *is* the `sandbox-exec`'d process, so the exec/mount
-  conformance doesn't fit. It keeps a focused lifecycle test (create/inspect/
-  stop/remove + idempotency).
+**Seatbelt conformance** (`TestSeatbeltConformance`) — also a participant, via the
+same P1/P2 split: `Start` launches a bare keep-alive process under the SBPL
+profile (P1) when no `runtime-config.json` is present, instead of the
+`sandbox-setup.py` monitor (P2). Each instance is a host `sandbox-exec` process,
+so it's fast (no VM/image). Lifecycle / exec / interactive / idempotency all pass;
+`Mounts` is skipped because the conformance mounts at `/mnt/test` and seatbelt is
+host-side, where `/mnt` isn't writable without root — the *conformance's
+container-path assumption*, not a seatbelt mount-capability gap (the SBPL RW/RO
+grants are unit-tested in `TestGenerateProfile_{ReadOnly,ReadWrite}Mount`, and
+real mounts run in the smoke matrix). *(The earlier "no separately-startable
+instance" claim was wrong — seatbelt has a real startable, exec-able instance.)*
 
 **Smoke tiers** (`scripts/smoke_test.py`, `HOST_MATRICES`) — one matrix per host
 OS, every backend that OS can run. The tier flag changes only how *missing
