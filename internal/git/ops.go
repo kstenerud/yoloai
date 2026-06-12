@@ -98,7 +98,7 @@ func (g *Git) StageUntracked(ctx context.Context, workDir string) error {
 // CopyDiff generates a diff for a :copy mode work directory against a baseline
 // SHA. Stages untracked files first, then runs git diff.
 // Returns the diff text (empty string if there are no changes).
-func (g *Git) CopyDiff(ctx context.Context, workDir, baselineSHA string, paths []string, stat, nameOnly bool) (string, error) {
+func (g *Git) CopyDiff(ctx context.Context, workDir, baselineSHA string, paths []string, stat, nameOnly bool, pathPrefix string) (string, error) {
 	if err := g.StageUntracked(ctx, workDir); err != nil {
 		return "", err
 	}
@@ -111,6 +111,9 @@ func (g *Git) CopyDiff(ctx context.Context, workDir, baselineSHA string, paths [
 		args = append(args, "--stat")
 	default:
 		args = append(args, "--binary")
+		if pathPrefix != "" {
+			args = append(args, "--src-prefix="+pathPrefix, "--dst-prefix="+pathPrefix)
+		}
 	}
 	args = append(args, baselineSHA)
 	if len(paths) > 0 {

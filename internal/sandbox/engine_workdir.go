@@ -26,7 +26,7 @@ func (e *Engine) LoadEnvironment(name string) (*store.Environment, error) {
 // GenerateWorkingDiff returns the copy-mode working diff (committed changes
 // since baseline). Best-effort backend open: a nil runtime falls back to the
 // host-git path.
-func (e *Engine) GenerateWorkingDiff(ctx context.Context, name string, dirHostPath string, paths []string, stat, nameOnly bool) (string, error) {
+func (e *Engine) GenerateWorkingDiff(ctx context.Context, name string, dirHostPath string, paths []string, stat, nameOnly bool, pathPrefix string) (string, error) {
 	e.TryEnsure(ctx)
 	return patch.GenerateDiff(ctx, patch.DiffOptions{
 		Name:        name,
@@ -36,6 +36,7 @@ func (e *Engine) GenerateWorkingDiff(ctx context.Context, name string, dirHostPa
 		NameOnly:    nameOnly,
 		Runtime:     e.runtime,
 		DirHostPath: dirHostPath,
+		PathPrefix:  pathPrefix,
 	})
 }
 

@@ -26,6 +26,9 @@ type DiffOptions struct {
 	Paths       []string        // optional path filter (relative to workdir)
 	Runtime     runtime.Runtime // runtime backend (required for :copy and :overlay)
 	DirHostPath string          // "" selects Dirs[0] (workdir)
+	// PathPrefix when set is passed to git as --src-prefix/--dst-prefix for the
+	// full diff output (copy mode only; ignored for Stat/NameOnly/overlay/Ref).
+	PathPrefix string
 }
 
 // GenerateDiff produces the workdir diff for a sandbox.
@@ -62,12 +65,18 @@ func GenerateDiff(ctx context.Context, opts DiffOptions) (string, error) {
 			return "", err
 		}
 
-		args := []string{"diff", "--binary", baselineSHA}
+		var args []string
 		switch {
 		case opts.Stat:
 			args = []string{"diff", "--stat", baselineSHA}
 		case opts.NameOnly:
 			args = []string{"diff", "--name-only", baselineSHA}
+		default:
+			args = []string{"diff", "--binary"}
+			if opts.PathPrefix != "" {
+				args = append(args, "--src-prefix="+opts.PathPrefix, "--dst-prefix="+opts.PathPrefix)
+			}
+			args = append(args, baselineSHA)
 		}
 		if len(opts.Paths) > 0 {
 			args = append(args, "--")

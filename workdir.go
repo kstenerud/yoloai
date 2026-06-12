@@ -36,6 +36,10 @@ type WorkdirDiffOptions struct {
 	// instead of the working diff. Disk-only; not supported for overlay-mode
 	// workdirs (their commits aren't individually addressable from the host).
 	Ref string
+	// PathPrefix when set is passed to git as --src-prefix/--dst-prefix for the
+	// full diff output; used by diff --all to embed absolute host paths in the
+	// patch header. Ignored for Stat, NameOnly, Ref, and overlay mode.
+	PathPrefix string
 }
 
 // Diff returns the workdir diff as text — "" means no changes. It resolves the
@@ -65,7 +69,7 @@ func (w *Workdir) Diff(ctx context.Context, opts WorkdirDiffOptions) (string, er
 		return w.engine.GenerateOverlayDiff(ctx, w.name, w.dirHostPath, opts.Stat, opts.NameOnly)
 	}
 
-	return w.engine.GenerateWorkingDiff(ctx, w.name, w.dirHostPath, opts.Paths, opts.Stat, opts.NameOnly)
+	return w.engine.GenerateWorkingDiff(ctx, w.name, w.dirHostPath, opts.Paths, opts.Stat, opts.NameOnly, opts.PathPrefix)
 }
 
 // WorkdirExportOptions configures Workdir.Export. Dir is required.

@@ -144,3 +144,15 @@ func TestParseDiffArgs_RefWithDashNoPaths(t *testing.T) {
 	assert.Equal(t, "abc123", ref)
 	assert.Nil(t, paths)
 }
+
+func TestDiffAll_WithLogFlag_ReturnsUsageError(t *testing.T) {
+	cmd := NewDiffCmd()
+	err := diffAll(cmd, "mybox", nil, true, false, false)
+	assert.Error(t, err)
+}
+
+func TestDiffAll_WithPositionalArgs_ReturnsUsageError(t *testing.T) {
+	cmd := NewDiffCmd()
+	err := diffAll(cmd, "mybox", []string{"abc123"}, false, false, false)
+	assert.Error(t, err)
+}

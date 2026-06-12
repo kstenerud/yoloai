@@ -25,7 +25,7 @@ var reHexRange = regexp.MustCompile(`^[0-9a-fA-F]{4,40}\.\.[0-9a-fA-F]{4,40}$`)
 
 func NewDiffCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "diff <name> [<dir>] [<ref>] [-- <path>...]",
+		Use:   "diff <name> [<dir> | --all] [<ref>] [-- <path>...]",
 		Short: "Show changes the agent made",
 		Long: `Show changes the agent made in a sandbox.
 
@@ -44,7 +44,8 @@ Examples:
   yoloai diff mybox abc1..def4       # range diff
   yoloai diff mybox -- src/          # full diff filtered to path
   yoloai diff mybox web              # diff of "web" dir (multi-dir sandbox)
-  yoloai diff mybox web abc123       # single commit diff in "web" dir`,
+  yoloai diff mybox web abc123       # single commit diff in "web" dir
+  yoloai diff mybox --all                # diff of all tracked dirs`,
 		GroupID: cliutil.GroupWorkflow,
 		Args:    cobra.ArbitraryArgs,
 		RunE:    runDiffCmd,
@@ -53,6 +54,7 @@ Examples:
 	cmd.Flags().Bool("stat", false, "Show summary (files changed, insertions, deletions)")
 	cmd.Flags().Bool("name-only", false, "List changed files without content")
 	cmd.Flags().Bool("log", false, "List agent commits beyond baseline")
+	cmd.Flags().Bool("all", false, "operate on all tracked directories")
 
 	cmd.MarkFlagsMutuallyExclusive("stat", "name-only")
 
@@ -69,6 +71,7 @@ func runDiffCmd(cmd *cobra.Command, args []string) error {
 	stat, _ := cmd.Flags().GetBool("stat")
 	nameOnly, _ := cmd.Flags().GetBool("name-only")
 	logFlag, _ := cmd.Flags().GetBool("log")
+	allFlag, _ := cmd.Flags().GetBool("all")
 
 	// Load meta early to detect overlay dirs and select the target dir.
 	env, metaErr := cliutil.SandboxMetadata(cmd, name)
@@ -79,6 +82,11 @@ func runDiffCmd(cmd *cobra.Command, args []string) error {
 	// args slice have been consumed before rest: 1 for name, +1 if SelectTrackedDir
 	// consumed a dir specifier. parseDiffArgs needs this to adjust ArgsLenAtDash.
 	argsConsumedBeforeRest := 1
+
+	if allFlag {
+		return diffAll(cmd, name, rest, logFlag, stat, nameOnly)
+	}
+
 	hostPath, selectedDir, rest, err := cliutil.SelectTrackedDir(env, rest)
 	if err != nil {
 		return err
@@ -440,4 +448,63 @@ func diffLogJSON(cmd *cobra.Command, name, hostPath string, stat bool) error {
 
 		return cliutil.WriteJSON(cmd.OutOrStdout(), result)
 	})
+}
+
+// diffAll generates a diff across all tracked directories.
+// For full diff (not stat/nameOnly): copy-mode dirs use PathPrefix for absolute
+// paths (no banner); overlay-mode dirs use a banner separator.
+// For stat/nameOnly: all dirs get a banner.
+func diffAll(cmd *cobra.Command, name string, rest []string, logFlag, stat, nameOnly bool) error {
+	if logFlag {
+		return yoerrors.NewUsageError("--log is per-commit; use a single dir specifier with --all")
+	}
+	if len(rest) > 0 {
+		return yoerrors.NewUsageError("--all does not accept additional arguments; use a single dir specifier for refs or path filters")
+	}
+	env, err := cliutil.SandboxMetadata(cmd, name)
+	if err != nil {
+		return err
+	}
+	tracked := env.TrackedDirs()
+	if len(tracked) == 0 {
+		return writeDiffOutput(cmd, "")
+	}
+
+	var combined strings.Builder
+	return cliutil.WithSandbox(cmd, name, func(ctx context.Context, sb *yoloai.Sandbox) error {
+		for _, d := range tracked {
+			if appendErr := diffOneDirAll(ctx, sb, d, stat, nameOnly, &combined); appendErr != nil {
+				return appendErr
+			}
+		}
+		return writeDiffOutput(cmd, strings.TrimRight(combined.String(), "\n"))
+	})
+}
+
+// diffOneDirAll diffs a single tracked directory and appends its output to
+// combined. Copy-mode dirs use PathPrefix for absolute paths; overlay-mode
+// dirs and stat/nameOnly output get a banner header.
+func diffOneDirAll(ctx context.Context, sb *yoloai.Sandbox, d yoloai.DirInfo, stat, nameOnly bool, combined *strings.Builder) error {
+	wd, wdErr := sb.TrackedDir(d.HostPath)
+	if wdErr != nil {
+		return wdErr
+	}
+	diffOpts := yoloai.WorkdirDiffOptions{Stat: stat, NameOnly: nameOnly}
+	isOverlay := d.Mode == yoloai.DirModeOverlay
+	if !stat && !nameOnly && !isOverlay {
+		diffOpts.PathPrefix = d.HostPath + "/"
+	}
+	out, diffErr := wd.Diff(ctx, diffOpts)
+	if diffErr != nil {
+		return diffErr
+	}
+	if out == "" {
+		return nil
+	}
+	if stat || nameOnly || isOverlay {
+		fmt.Fprintf(combined, "=== %s ===\n", d.HostPath)
+	}
+	combined.WriteString(out)
+	combined.WriteByte('\n')
+	return nil
 }

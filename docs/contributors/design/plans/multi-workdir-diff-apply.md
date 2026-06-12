@@ -1,8 +1,9 @@
 # Multi-workdir diff/apply
 
-**Status:** Designed, not implemented. Records [D81](../../decisions/working-notes.md#d81).
-Revives the multi-dir diff/apply capability that [Q-U](../../decisions/working-notes.md)
-(2026-05-25) removed, with the cleaner CLI surface Q-U explicitly deferred to "real demand".
+**Status:** Implemented on the `multi-workdir` branch (all 4 phases). Records
+[D81](../../decisions/working-notes.md#d81). Revives the multi-dir diff/apply capability
+that [Q-U](../../decisions/working-notes.md) (2026-05-25) removed, with the cleaner CLI
+surface Q-U explicitly deferred to "real demand".
 
 ## Problem
 
@@ -324,7 +325,7 @@ behaviors layer on. Each phase is one commit (or a small set), green under `make
 3. **CLI specifier + diff/apply over N dirs.** The CLI-edge specifier resolver
    (fragment → exact host path), `Sandbox.TrackedDir(hostPath)`, the require-a-specifier
    rule when 2+ tracked dirs; un-collapse `LoadAllDiffContexts`/patch-layer iteration.
-4. **`--all`.** `diff --all` (absolute-path prefix, concatenated) and `apply --all` (CLI
+4. DONE: **`--all`.** `diff --all` (absolute-path prefix, concatenated) and `apply --all` (CLI
    loop, per-dir summary, partial-failure exit code).
 
 ## Open questions

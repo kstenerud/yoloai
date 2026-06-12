@@ -7,6 +7,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
@@ -42,7 +44,7 @@ type applyResult struct {
 
 func NewApplyCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "apply <name> [<dir>] [<ref>...] [-- <path>...]",
+		Use:   "apply <name> [<dir> | --all] [<ref>...] [-- <path>...]",
 		Short: "Apply agent changes back to original work directory",
 		Long: `Apply agent changes back to the original directory.
 
@@ -63,7 +65,10 @@ Use --no-commit to land the changes as a single unstaged patch in the
 working tree instead of replaying the commits (combine with --include-uncommitted
 to include uncommitted edits too). It's also used automatically when the
 target isn't a git repository. Use --patches to export .patch files
-without applying them.`,
+without applying them.
+
+Examples:
+  yoloai apply mybox --all              # apply all tracked dirs`,
 		GroupID: cliutil.GroupWorkflow,
 		Args:    cobra.ArbitraryArgs,
 		RunE:    runApplyCmd,
@@ -75,6 +80,7 @@ without applying them.`,
 	cmd.Flags().Bool("include-uncommitted", false, "Also apply uncommitted changes; default is commits only")
 	cmd.Flags().Bool("dry-run", false, "Show what would be applied without applying")
 	cmd.Flags().Bool("tags", false, "Transfer git tags created by the agent")
+	cmd.Flags().Bool("all", false, "operate on all tracked directories")
 
 	cmd.MarkFlagsMutuallyExclusive("no-commit", "patches")
 	cmd.MarkFlagsMutuallyExclusive("no-commit", "tags")
@@ -105,6 +111,18 @@ func runApplyCmd(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	allFlag, _ := cmd.Flags().GetBool("all")
+
+	if allFlag {
+		if flags.patchesDir != "" {
+			return yoerrors.NewUsageError("--patches cannot be used with --all; use a single dir specifier")
+		}
+		if flags.withTags {
+			return yoerrors.NewUsageError("--tags with --all is not supported; use a single dir specifier")
+		}
+		return applyAll(cmd, name, flags)
+	}
+
 	// Load the sandbox read-model early so SelectTrackedDir can consume the
 	// dir specifier before parseApplyArgs sees the remaining positionals.
 	env, err := cliutil.SandboxMetadata(cmd, name)
@@ -115,6 +133,7 @@ func runApplyCmd(cmd *cobra.Command, args []string) error {
 	// args slice have been consumed before rest: 1 for name, +1 if SelectTrackedDir
 	// consumed a dir specifier. parseApplyArgs needs this to adjust ArgsLenAtDash.
 	argsConsumedBeforeRest := 1
+
 	hostPath, selectedDir, rest, err := cliutil.SelectTrackedDir(env, rest)
 	if err != nil {
 		return err
@@ -311,4 +330,81 @@ func printTagOutcomes(cmd *cobra.Command, result *yoloai.TagTransferResult) {
 			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: tag %q: %s\n", o.Name, o.Err) //nolint:errcheck
 		}
 	}
+}
+
+// applyAll applies changes across all tracked directories.
+// One dir's failure does not abort the others.
+// Returns an error if any dir failed.
+func applyAll(cmd *cobra.Command, name string, flags applyFlags) error {
+	env, err := cliutil.SandboxMetadata(cmd, name)
+	if err != nil {
+		return err
+	}
+	tracked := env.TrackedDirs()
+	if len(tracked) == 0 {
+		fmt.Fprintln(cmd.OutOrStdout(), "No tracked directories") //nolint:errcheck
+		return nil
+	}
+
+	if !flags.yes && !flags.dryRun {
+		confirmed, promptErr := cliutil.Confirm(cmd.Context(), fmt.Sprintf("Apply changes to all %d tracked directories? [y/N] ", len(tracked)), os.Stdin, cmd.ErrOrStderr())
+		if promptErr != nil {
+			return promptErr
+		}
+		if !confirmed {
+			return nil
+		}
+	}
+
+	var anyFailed bool
+	for _, d := range tracked {
+		applyErr := applyOneDir(cmd, name, d, flags)
+		label := filepath.Base(d.HostPath)
+		if applyErr != nil {
+			anyFailed = true
+			fmt.Fprintf(cmd.OutOrStdout(), "%-20s  FAILED (%s)\n", label, applyErr) //nolint:errcheck
+		} else {
+			fmt.Fprintf(cmd.OutOrStdout(), "%-20s  done  -> %s\n", label, d.HostPath) //nolint:errcheck
+		}
+	}
+	if anyFailed {
+		return fmt.Errorf("one or more directories failed to apply")
+	}
+	return nil
+}
+
+// applyOneDir applies changes for a single tracked directory during --all.
+func applyOneDir(cmd *cobra.Command, name string, d yoloai.DirInfo, flags applyFlags) error {
+	isOverlay := d.Mode == yoloai.DirModeOverlay
+	if isOverlay {
+		return cliutil.WithTrackedDir(cmd, name, d.HostPath, func(ctx context.Context, wd *yoloai.Workdir) error {
+			_, applyErr := wd.Apply(ctx, yoloai.WorkdirApplyOptions{
+				Mode:   yoloai.ApplyModeNoCommit,
+				DryRun: flags.dryRun,
+			})
+			return applyErr
+		})
+	}
+
+	// Determine mode: commits or no-commit
+	mode := yoloai.ApplyModeCommits
+	if flags.noCommit {
+		mode = yoloai.ApplyModeNoCommit
+	} else {
+		// Check if target is git — if not, fall back to no-commit
+		backend := cliutil.ResolveBackendForSandbox(name)
+		isGit, checkErr := targetIsGitRepo(cmd, name, d.HostPath, backend)
+		if checkErr == nil && !isGit {
+			mode = yoloai.ApplyModeNoCommit
+		}
+	}
+
+	return cliutil.WithTrackedDir(cmd, name, d.HostPath, func(ctx context.Context, wd *yoloai.Workdir) error {
+		_, applyErr := wd.Apply(ctx, yoloai.WorkdirApplyOptions{
+			Mode:               mode,
+			IncludeUncommitted: flags.includeUncommitted,
+			DryRun:             flags.dryRun,
+		})
+		return applyErr
+	})
 }

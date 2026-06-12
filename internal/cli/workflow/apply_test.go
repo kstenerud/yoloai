@@ -1,8 +1,11 @@
 package workflow
 
 import (
+	"path/filepath"
 	"testing"
 
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -90,4 +93,15 @@ func TestParseApplyArgs_RangeRef(t *testing.T) {
 	refs, paths := parseApplyArgs(rest, cmd, 1)
 	assert.Equal(t, []string{"abcd..ef12"}, refs)
 	assert.Nil(t, paths)
+}
+
+func TestApplyAll_WithPatches_ReturnsUsageError(t *testing.T) {
+	home := t.TempDir()
+	cliutil.SetRootLayout(cliutil.LayoutForDataDir(filepath.Join(home, ".yoloai")))
+	t.Cleanup(func() { cliutil.SetRootLayout(config.Layout{}) })
+
+	cmd := NewApplyCmd()
+	cmd.SetArgs([]string{"mybox", "--all", "--patches", "/tmp/p"})
+	err := cmd.Execute()
+	assert.Error(t, err)
 }
