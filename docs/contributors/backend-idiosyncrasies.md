@@ -115,6 +115,7 @@ inclusion test first, then add a row to the index.
 | `yoloai new --attach` hangs after "Sandbox created"; Python setup never completes | [Tart: mount_map uses Docker paths, triggering macOS automount](#tart-mount_map-uses-docker-style-paths-triggering-macos-automount-hang) |
 | `yoloai apply` fails: `git add: git [add -A]: exit status 128: … index.lock: File exists` while agent is running | [Docker/Podman: agent git and apply git race on index.lock](#dockerpodman-agent-git-and-apply-git-race-on-indexlock) |
 | `FileNotFoundError: 'tmux'` in `sandbox-setup.py::setup_tmux_session` on Tart VM (intermittent) | [Tart: transient FS/PATH failure makes tmux unresolvable during the firstlaunch window](#tart-transient-fspath-failure-makes-tmux-unresolvable-during-the-firstlaunch-window) |
+| `VM work dir setup: get baseline SHA: exec exited with code 69: You have not agreed to the Xcode license agreements` on Tart `new` (intermittent, passes on retry) | [Tart: transient FS/PATH failure makes tmux unresolvable during the firstlaunch window](#tart-transient-fspath-failure-makes-tmux-unresolvable-during-the-firstlaunch-window) |
 | Smoke test: `stop_start` fails "agent idle"; pane shows `Error: Exit code N` + a clarifying question; other backends pass | [Smoke harness: agent stalls when the sentinel command errors](#agent-stalls-when-the-sentinel-command-errors) |
 | `create task: ... more than one sandbox exists with the provided prefix "..."` (containerd-vm, under concurrency) | [Kata: shim resolves sandboxes by name prefix](#kata-shim-resolves-a-sandbox-from-the-container-id-by-prefix-prefix-related-names-collide) |
 | Is it safe to delete a `.lock` file while holding its flock? (prune / Destroy) | [Removing a .lock file while holding its flock is safe](#removing-a-lock-file-while-holding-its-flock-is-safe) |
@@ -1979,6 +1980,25 @@ the happy path and removes the premature give-up. The `.done` marker and its
 `_FIRSTLAUNCH_MAX_WAIT_SECONDS`); `internal/runtime/monitor/sandbox-setup.py`
 (firstlaunch launch in `TartBackend.setup()`, plus `setup_tmux_session` and the
 `main()` `wait-for` block).
+
+**Same storm, host side — the baseline-SHA `git` fails with exit 69:** the host
+runs the work-dir git baseline (`git init/add/commit`, then `git rev-parse HEAD`)
+via `tart exec` in `ExecuteVMWorkDirSetup` (`internal/sandbox/launch/vmworkdir.go`),
+*after* the secrets-consumed barrier — so the monitor has already accepted the
+Xcode license, yet `git` (the `xcode-select` shim on macOS) intermittently fails
+with **`exit 69: You have not agreed to the Xcode license agreements`**. Cause is
+the identical storm: while backgrounded `xcodebuild -runFirstLaunch` runs, the
+license check transiently fails. It passes on a cold retry because firstlaunch
+state persists in the host Xcode.app via VirtioFS, so the second VM finds it done
+and never raises the storm. The failure tends to surface on `rev-parse` rather
+than `git init` only because the earlier commands sometimes slip through before
+the storm peaks. **Fix:** `ExecuteVMWorkDirSetup` wraps each VM exec in
+`execVMSetupWithStormRetry`, which re-probes once per second to the same 240s
+ceiling while the error matches the storm signature (`isFirstlaunchStormTransient`:
+exit 69 + "Xcode license", or exit 127 command-not-found for binaries the storm
+hides). Non-transient errors return immediately; the happy path runs once and
+never sleeps. Mirrors the tmux resolver's "probe to a ceiling, ignore completion"
+strategy because the host cannot observe the firstlaunch marker.
 
 ## Smoke harness (agent task execution)
 
