@@ -29,8 +29,9 @@ func TestPruneTempFiles(t *testing.T) {
 	require.NoError(t, err)
 
 	// Dry run: should list stale but not remove
-	pruned, err := PruneTempFiles(true, 1*time.Hour)
+	pruned, failed, err := PruneTempFiles(true, 1*time.Hour)
 	require.NoError(t, err)
+	assert.Empty(t, failed, "dry run never attempts removal, so never fails")
 	assert.Contains(t, pruned, staleDir)
 	for _, p := range pruned {
 		assert.NotEqual(t, freshDir, p)
@@ -41,8 +42,9 @@ func TestPruneTempFiles(t *testing.T) {
 	assert.NoError(t, err, "stale dir should still exist after dry run")
 
 	// Real prune
-	pruned, err = PruneTempFiles(false, 1*time.Hour)
+	pruned, failed, err = PruneTempFiles(false, 1*time.Hour)
 	require.NoError(t, err)
+	assert.Empty(t, failed)
 	assert.Contains(t, pruned, staleDir)
 
 	// Stale dir should be gone
@@ -66,7 +68,7 @@ func TestPruneTempFiles_NonDir(t *testing.T) {
 	past := time.Now().Add(-2 * time.Hour)
 	require.NoError(t, os.Chtimes(f.Name(), past, past))
 
-	pruned, err := PruneTempFiles(true, 1*time.Hour)
+	pruned, _, err := PruneTempFiles(true, 1*time.Hour)
 	require.NoError(t, err)
 
 	// The file should not appear in pruned (only dirs are pruned)
@@ -75,4 +77,40 @@ func TestPruneTempFiles_NonDir(t *testing.T) {
 		// Also check by basename in case of /tmp prefix differences
 		assert.NotEqual(t, filepath.Base(f.Name()), filepath.Base(p))
 	}
+}
+
+// TestPruneTempFiles_UnremovableReportedAsFailed verifies the core honesty
+// guarantee: a stale dir that can't be removed is reported in failed and never
+// in pruned, so the caller can't falsely claim it was removed. This mirrors the
+// real-world case of a root-owned temp dir left by a sudo run.
+func TestPruneTempFiles_UnremovableReportedAsFailed(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses directory permission checks, so removal can't be made to fail this way")
+	}
+	t.Setenv("TMPDIR", t.TempDir())
+
+	staleDir, err := os.MkdirTemp("", "yoloai-unremovable-test-")
+	require.NoError(t, err)
+
+	// A child file makes the dir non-empty; stripping write on the parent means
+	// os.RemoveAll can't unlink the child, so removing staleDir fails.
+	require.NoError(t, os.WriteFile(filepath.Join(staleDir, "locked"), []byte("x"), 0o600))
+	require.NoError(t, os.Chmod(staleDir, 0o500))       //nolint:gosec // dir needs exec bit; read-only is the point — it forces removal to fail
+	t.Cleanup(func() { _ = os.Chmod(staleDir, 0o700) }) //nolint:gosec // restore write so t.TempDir cleanup can recurse in
+
+	past := time.Now().Add(-2 * time.Hour)
+	require.NoError(t, os.Chtimes(staleDir, past, past))
+
+	pruned, failed, err := PruneTempFiles(false, 1*time.Hour)
+	require.NoError(t, err)
+
+	assert.NotContains(t, pruned, staleDir, "an unremovable dir must not be reported as removed")
+	var failedPaths []string
+	for _, f := range failed {
+		failedPaths = append(failedPaths, f.Path)
+	}
+	assert.Contains(t, failedPaths, staleDir, "an unremovable dir must be reported as failed")
+
+	_, statErr := os.Stat(staleDir)
+	assert.NoError(t, statErr, "the dir should still exist since removal failed")
 }

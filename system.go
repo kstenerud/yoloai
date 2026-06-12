@@ -677,7 +677,7 @@ func (s *System) Prune(ctx context.Context, opts SystemPruneOptions) (*PruneResu
 		})
 	}
 
-	tempItems, err := s.pruneTempFiles(opts.DryRun)
+	tempItems, err := s.pruneTempFiles(opts.DryRun, out)
 	result.RemovedItems = append(result.RemovedItems, tempItems...)
 	if err != nil {
 		return result, err
@@ -790,21 +790,23 @@ func (s *System) pruneBackend(ctx context.Context, backend BackendType, known []
 	return items, reclaimed
 }
 
-// pruneTempFiles scans (and, when !dryRun, removes) stale yoloai
-// temp dirs. Returns the list of stale dirs as PruneItem entries.
-func (s *System) pruneTempFiles(dryRun bool) ([]PruneItem, error) {
-	stale, err := sandbox.PruneTempFiles(true, staleTempFileAge)
+// pruneTempFiles scans (and, when !dryRun, removes) stale yoloai temp dirs.
+// Returns one PruneItem per dir actually removed (or, under dryRun, that would
+// be removed) — a single call with the real dryRun so the reported items always
+// match what truly happened. Dirs that matched but couldn't be removed (e.g.
+// root-owned from a sudo run) are surfaced as warnings to out rather than
+// silently dropped or, worse, falsely reported as removed.
+func (s *System) pruneTempFiles(dryRun bool, out io.Writer) ([]PruneItem, error) {
+	removed, failed, err := sandbox.PruneTempFiles(dryRun, staleTempFileAge)
 	if err != nil {
-		return nil, fmt.Errorf("scan temp files: %w", err)
+		return nil, fmt.Errorf("prune temp files: %w", err)
 	}
-	items := make([]PruneItem, 0, len(stale))
-	for _, path := range stale {
+	items := make([]PruneItem, 0, len(removed))
+	for _, path := range removed {
 		items = append(items, PruneItem{Kind: PruneKindTempDir, Name: path})
 	}
-	if !dryRun {
-		if _, err := sandbox.PruneTempFiles(false, staleTempFileAge); err != nil {
-			return items, fmt.Errorf("remove temp files: %w", err)
-		}
+	for _, f := range failed {
+		fmt.Fprintf(out, "Warning: could not remove temp dir %s: %v (try 'sudo yoloai system prune')\n", f.Path, f.Err) //nolint:errcheck // best-effort progress
 	}
 	return items, nil
 }
