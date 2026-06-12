@@ -94,6 +94,7 @@ inclusion test first, then add a row to the index.
 | `tart exec` fails with "instance not found" right after boot | [Tart: exec needs stabilization delay](#tart-exec-needs-brief-stabilization-delay-after-boot) |
 | `tart exec` with `--` separator fails silently or returns exit status 1 | [Tart: no support for -- separator](#tart-exec-does-not-support----argument-separator) |
 | `yoloai attach` fails with "no sessions" on Tart VM | [Tart: exec -t changes environment](#tart-exec--t-changes-environment-preventing-tmux-from-finding-socket) |
+| Agent renders ASCII on Tart (logo `_______`, emoji as `_`) despite healthy TERM/locale | [Tart: attach renders ASCII (non-UTF-8 tmux client)](#tart-attach-renders-ascii-tmux-downgrades-a-non-utf-8-client) |
 | `xcrun simctl list runtimes` shows no runtimes when mounted via VirtioFS | [Tart: CoreSimulator requires sealed APFS](#coresimulator-cannot-discover-virtiofs-mounted-runtimes) |
 | `Failed to start launchd_sim: could not bind to session` when booting simulator | [Tart: ditto'd runtime is incomplete](#dittod-ios-runtime-is-incomplete-use-xcodebuild--downloadplatform) |
 | In-VM iOS runtime download is slow; does the cirruslabs Xcode base already include a simulator? | [Tart: cirruslabs Xcode base bakes in the default runtime](#cirruslabsmacos--xcode-base-images-already-bake-in-the-default-ios-runtime--the-in-vm-download-is-redundant-for-it) |
@@ -1587,6 +1588,20 @@ tart exec -i -t yoloai-x tmux -S /private/tmp/tmux-501/default attach -t main
 **Impact:** `yoloai attach` completely broken for Tart VMs. Users cannot attach to running sandboxes.
 
 **Code:** `runtime/tart/tart.go::TmuxSocket` (returns explicit socket path), `runtime/tart/tart.go::AttachCommand` (uses socket when provided)
+
+---
+
+### Tart attach renders ASCII: tmux downgrades a non-UTF-8 client
+
+**Symptom:** Under Tart (not Docker), the attached agent renders in "ASCII compatibility mode" — Claude Code's logo shows as `_______` instead of `▐▛███▜▌`, and status-line emoji (🏠 📁 🤖 🧠) and the `⏵⏵` glyph all show as `_`. Looks identical to the old "TERM unset → safe defaults" failure, but the agent's environment is fully healthy (`TERM=tmux-256color`, `LANG=en_US.UTF-8`, `LC_CTYPE=C.UTF-8`).
+
+**Tell:** Selecting the screen and copying gives ASCII (`_______`); letting *tmux* copy the same region (copy-mode / OSC 52) gives Unicode (`▐▛███▜▌`). So tmux's server grid holds correct UTF-8 — the downgrade happens when tmux *paints* to the client. `tmux -S … list-clients -F '#{client_utf8}'` reports `utf8=0`.
+
+**Explanation:** tmux decides UTF-8 support per *client*, from the first of `LC_ALL`/`LC_CTYPE`/`LANG` that is set containing "UTF-8". `yoloai attach` runs `tmux attach` via `tart exec`, and a `tart exec` session inherits an empty/`C` locale (none of those vars are set). tmux therefore flags the client `utf8=0` and substitutes `_` for every non-ASCII glyph on output — even though the agent (server side) was launched with a UTF-8 locale and its grid is UTF-8. Docker/containerd avoid this because the container image carries `LANG=C.UTF-8` (`sandbox/launch`), which the in-container tmux client inherits. macOS VMs have no `C.UTF-8` locale (only `<lang>_<REGION>.UTF-8` forms), so the container trick doesn't port.
+
+**Fix:** Pass `-u` to the attach client (`tmux -u … attach`). `-u` forces tmux to treat the terminal as UTF-8 regardless of locale — exactly the case here (the user's outer terminal is UTF-8; only the intermediate `tart exec` session dropped the locale hint). Verified on a live VM with a throwaway server: plain client → `utf8=0`; `tmux -u` → `utf8=1`; `env LC_ALL=en_US.UTF-8 tmux` → `utf8=1`. `-u` is preferred over injecting a locale because it needs no valid-locale lookup on macOS and no guest-env plumbing through `tart exec`.
+
+**Code:** `runtime/tart/tart.go::AttachCommand` (prepends `-u`). Container equivalent: `sandbox/launch/launch.go` (`ContainerEnv: ["LANG=C.UTF-8"]`).
 
 ---
 

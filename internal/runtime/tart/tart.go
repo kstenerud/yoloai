@@ -615,8 +615,16 @@ func (r *Runtime) TmuxSocket(_ string) string { return "/private/tmp/tmux-501/de
 // AttachCommand returns the command to attach to the tmux session in a tart VM.
 // Tart runs commands directly with the caller's terminal; no script wrapper
 // needed (and macOS BSD script does not support the GNU -c flag).
+//
+// The -u flag is load-bearing: the attach runs via `tart exec`, which gives the
+// client an empty/C locale (no LANG/LC_*). tmux guesses UTF-8 support from those
+// vars, so it flags the client utf8=0 and repaints every non-ASCII glyph as `_`
+// — the agent's logo and status-line emoji come out ASCII even though the server
+// grid is UTF-8. -u forces tmux to treat the terminal as UTF-8 regardless of
+// locale. Container backends sidestep this via LANG=C.UTF-8 in the container env
+// (sandbox/launch); macOS VMs have no C.UTF-8 locale, so -u is the clean fix.
 func (r *Runtime) AttachCommand(tmuxSocket string, _ int, _ int, _ runtime.IsolationMode) []string {
-	cmd := []string{"tmux"}
+	cmd := []string{"tmux", "-u"}
 	if tmuxSocket != "" {
 		cmd = append(cmd, "-S", tmuxSocket)
 	}

@@ -717,3 +717,26 @@ func TestTranslateWorkDirToVMPath(t *testing.T) {
 		})
 	}
 }
+
+func TestAttachCommand_ForcesUTF8(t *testing.T) {
+	r := &Runtime{}
+	cmd := r.AttachCommand("/private/tmp/tmux-501/default", 24, 80, "vm")
+	require.NotEmpty(t, cmd)
+	// -u is load-bearing: tart exec gives the client a C locale, so without it
+	// tmux flags the client utf8=0 and repaints non-ASCII glyphs as '_'.
+	assert.Equal(t, "tmux", cmd[0])
+	assert.Contains(t, cmd, "-u")
+	joined := strings.Join(cmd, " ")
+	assert.Contains(t, joined, "-S /private/tmp/tmux-501/default")
+	assert.Contains(t, joined, "attach -t main")
+}
+
+func TestAttachCommand_ForcesUTF8_NoSocket(t *testing.T) {
+	r := &Runtime{}
+	cmd := r.AttachCommand("", 24, 80, "vm")
+	require.NotEmpty(t, cmd)
+	assert.Contains(t, cmd, "-u")
+	joined := strings.Join(cmd, " ")
+	assert.NotContains(t, joined, "-S")
+	assert.Contains(t, joined, "attach -t main")
+}
