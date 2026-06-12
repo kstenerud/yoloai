@@ -5,6 +5,7 @@ import (
 	"fmt"
 	goruntime "runtime"
 	"testing"
+	"time"
 
 	"github.com/docker/docker/api/types/mount"
 	"github.com/stretchr/testify/assert"
@@ -206,4 +207,65 @@ func TestProbe_ReadsThreadedDockerHost(t *testing.T) {
 	status, reason := probe(context.Background(), map[string]string{"DOCKER_HOST": "tcp://example:2375"})
 	assert.Equal(t, runtime.ProbeRunning, status)
 	assert.Empty(t, reason)
+}
+
+// noBackoff makes confirmImagePresentByList retry without real sleeps.
+func noBackoff(int) time.Duration { return 0 }
+
+func TestConfirmImagePresentByList_FoundImmediately(t *testing.T) {
+	// List reports present on the first probe → inspect/list disagreement
+	// (the containerd-store inspect flap), zero backoff waits.
+	present, waits, err := confirmImagePresentByList(context.Background(),
+		func(context.Context) (bool, error) { return true, nil },
+		imageExistsRetries, noBackoff)
+	require.NoError(t, err)
+	assert.True(t, present)
+	assert.Equal(t, 0, waits)
+}
+
+func TestConfirmImagePresentByList_FoundAfterWarmup(t *testing.T) {
+	// List is empty for two probes, then surfaces the image (store warm-up).
+	calls := 0
+	present, waits, err := confirmImagePresentByList(context.Background(),
+		func(context.Context) (bool, error) {
+			calls++
+			return calls > 2, nil
+		},
+		imageExistsRetries, noBackoff)
+	require.NoError(t, err)
+	assert.True(t, present)
+	assert.Equal(t, 2, waits) // two backoff waits before the third probe found it
+}
+
+func TestConfirmImagePresentByList_GenuinelyAbsent(t *testing.T) {
+	// List never finds it → absent after exhausting the retry budget.
+	calls := 0
+	present, waits, err := confirmImagePresentByList(context.Background(),
+		func(context.Context) (bool, error) {
+			calls++
+			return false, nil
+		},
+		imageExistsRetries, noBackoff)
+	require.NoError(t, err)
+	assert.False(t, present)
+	assert.Equal(t, imageExistsRetries, waits)
+	assert.Equal(t, imageExistsRetries+1, calls) // initial probe + one per retry
+}
+
+func TestConfirmImagePresentByList_ListErrorPropagates(t *testing.T) {
+	present, _, err := confirmImagePresentByList(context.Background(),
+		func(context.Context) (bool, error) { return false, assert.AnError },
+		imageExistsRetries, noBackoff)
+	require.Error(t, err)
+	assert.False(t, present)
+}
+
+func TestConfirmImagePresentByList_ContextCancelledDuringBackoff(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already cancelled: the first empty probe leads into a cancelled wait
+	present, _, err := confirmImagePresentByList(ctx,
+		func(context.Context) (bool, error) { return false, nil },
+		imageExistsRetries, func(int) time.Duration { return time.Hour })
+	require.ErrorIs(t, err, context.Canceled)
+	assert.False(t, present)
 }

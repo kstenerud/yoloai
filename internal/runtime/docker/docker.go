@@ -21,6 +21,8 @@ import (
 	cerrdefs "github.com/containerd/errdefs"
 	dockertypes "github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/filters"
+	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/api/types/volume"
@@ -359,16 +361,94 @@ func (r *Runtime) IsReady(ctx context.Context) (bool, error) {
 	return r.imageExists(ctx, "yoloai-base")
 }
 
-// imageExists checks if a Docker image with the given tag exists locally.
+// imageExistsRetries bounds the warm-up settle loop in imageExists: after both
+// ImageInspect and ImageList report the image absent, the listing is retried
+// this many times with backoff before the absence is believed. This absorbs the
+// brief window where a Docker Desktop containerd image store, just resumed from
+// idle (Resource Saver), has not yet surfaced its tags. A genuinely-absent image
+// (first run) pays only the bounded backoff before the build proceeds.
+const imageExistsRetries = 3
+
+// imageExistsBackoff is the wait before retry attempt n (0-based): 500ms, 1s, 2s
+// — ~3.5s total across imageExistsRetries.
+func imageExistsBackoff(attempt int) time.Duration {
+	return 500 * time.Millisecond * (1 << attempt)
+}
+
+// imageExists reports whether an image tag resolves locally.
+//
+// On the Docker Desktop containerd image store, ImageInspect can transiently
+// report a *present* image as NotFound — observed as the first call after the
+// daemon resumes from idle (Resource Saver). Believing that single NotFound
+// makes Setup rebuild yoloai-base from scratch (~3 min) on every smoke run. So a
+// NotFound from ImageInspect is cross-checked against ImageList, which lists the
+// image even when inspect flaps; a disagreement is treated as present and logged
+// (the warning confirms the flap on the next real run). If both agree the image
+// is absent, the listing is retried with bounded backoff in case the store is
+// still settling after a resume. Once the inspect-vs-list disagreement is
+// confirmed in the field, the backoff (imageExistsRetries) can be dropped.
 func (r *Runtime) imageExists(ctx context.Context, imageRef string) (bool, error) {
-	_, err := r.client.ImageInspect(ctx, imageRef)
-	if err == nil {
+	if _, err := r.client.ImageInspect(ctx, imageRef); err == nil {
 		return true, nil
+	} else if !cerrdefs.IsNotFound(err) {
+		return false, err
 	}
-	if cerrdefs.IsNotFound(err) {
-		return false, nil
+
+	present, waits, err := confirmImagePresentByList(ctx,
+		func(c context.Context) (bool, error) { return r.imageListedByRef(c, imageRef) },
+		imageExistsRetries, imageExistsBackoff)
+	if err != nil {
+		return false, err
 	}
-	return false, err
+	if present {
+		if waits == 0 {
+			slog.Default().Warn("image present in list but ImageInspect reported it missing; treating as present (containerd-store inspect flap)",
+				"image", imageRef)
+		} else {
+			slog.Default().Warn("image surfaced in list only after backoff; treating as present (containerd store warm-up)",
+				"image", imageRef, "retries", waits)
+		}
+	}
+	return present, nil
+}
+
+// imageListedByRef reports whether ImageList returns any image for ref. ImageList
+// is more robust than ImageInspect on the containerd image store, which can
+// transiently NotFound a present tag on inspect.
+func (r *Runtime) imageListedByRef(ctx context.Context, ref string) (bool, error) {
+	imgs, err := r.client.ImageList(ctx, image.ListOptions{
+		Filters: filters.NewArgs(filters.Arg("reference", ref)),
+	})
+	if err != nil {
+		return false, err
+	}
+	return len(imgs) > 0, nil
+}
+
+// confirmImagePresentByList polls list until it reports the image present or the
+// retry budget is exhausted, sleeping backoff(attempt) between tries. It returns
+// whether the image was found and how many backoff waits were spent (0 = found
+// on the first probe, i.e. an inspect/list disagreement rather than warm-up).
+// Extracted from imageExists so the retry/backoff logic is unit-testable without
+// a live daemon.
+func confirmImagePresentByList(ctx context.Context, list func(context.Context) (bool, error), retries int, backoff func(int) time.Duration) (present bool, waits int, err error) {
+	for attempt := 0; ; attempt++ {
+		listed, lerr := list(ctx)
+		if lerr != nil {
+			return false, attempt, lerr
+		}
+		if listed {
+			return true, attempt, nil
+		}
+		if attempt >= retries {
+			return false, attempt, nil
+		}
+		select {
+		case <-ctx.Done():
+			return false, attempt, ctx.Err()
+		case <-time.After(backoff(attempt)):
+		}
+	}
 }
 
 // Create creates a new Docker container from the given InstanceConfig.
