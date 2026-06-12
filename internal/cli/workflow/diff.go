@@ -25,7 +25,7 @@ var reHexRange = regexp.MustCompile(`^[0-9a-fA-F]{4,40}\.\.[0-9a-fA-F]{4,40}$`)
 
 func NewDiffCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "diff <name> [<ref>] [-- <path>...]",
+		Use:   "diff <name> [<dir>] [<ref>] [-- <path>...]",
 		Short: "Show changes the agent made",
 		Long: `Show changes the agent made in a sandbox.
 
@@ -33,13 +33,18 @@ By default shows the full diff since baseline. With --log, lists
 individual agent commits. With a ref argument, shows a specific
 commit or range.
 
+<dir> is required when the sandbox tracks 2+ directories; it may be a
+basename, a path suffix, an exact host path, or an exact mount path.
+
 Examples:
   yoloai diff mybox                  # full diff
   yoloai diff mybox --log            # list commits
   yoloai diff mybox --log --stat     # list commits with file stats
   yoloai diff mybox abc123           # single commit diff
   yoloai diff mybox abc1..def4       # range diff
-  yoloai diff mybox -- src/          # full diff filtered to path`,
+  yoloai diff mybox -- src/          # full diff filtered to path
+  yoloai diff mybox web              # diff of "web" dir (multi-dir sandbox)
+  yoloai diff mybox web abc123       # single commit diff in "web" dir`,
 		GroupID: cliutil.GroupWorkflow,
 		Args:    cobra.ArbitraryArgs,
 		RunE:    runDiffCmd,
@@ -65,13 +70,24 @@ func runDiffCmd(cmd *cobra.Command, args []string) error {
 	nameOnly, _ := cmd.Flags().GetBool("name-only")
 	logFlag, _ := cmd.Flags().GetBool("log")
 
-	// Load meta early to detect overlay dirs
+	// Load meta early to detect overlay dirs and select the target dir.
 	env, metaErr := cliutil.SandboxMetadata(cmd, name)
 	if metaErr != nil {
 		return metaErr
 	}
-	overlay := env.HasOverlayDirs()
-	slog.Debug("generating diff", "event", "sandbox.diff", "sandbox", name, "workdir_mode", env.Workdir().Mode) //nolint:gosec // G706: name is validated by ValidateName
+	// argsConsumedBeforeRest tracks how many positional args from the original
+	// args slice have been consumed before rest: 1 for name, +1 if SelectTrackedDir
+	// consumed a dir specifier. parseDiffArgs needs this to adjust ArgsLenAtDash.
+	argsConsumedBeforeRest := 1
+	hostPath, selectedDir, rest, err := cliutil.SelectTrackedDir(env, rest)
+	if err != nil {
+		return err
+	}
+	if hostPath != "" {
+		argsConsumedBeforeRest = 2
+	}
+	overlay := selectedDir.Mode == yoloai.DirModeOverlay
+	slog.Debug("generating diff", "event", "sandbox.diff", "sandbox", name, "workdir_mode", selectedDir.Mode) //nolint:gosec // G706: name is validated by ValidateName
 
 	// Skip agent warning in JSON mode
 	if !cliutil.JSONEnabled(cmd) {
@@ -81,17 +97,17 @@ func runDiffCmd(cmd *cobra.Command, args []string) error {
 	// --log: list commits
 	if logFlag {
 		if overlay {
-			return diffLogOverlay(cmd, name, stat)
+			return diffLogOverlay(cmd, name, hostPath, stat)
 		}
 		if cliutil.JSONEnabled(cmd) {
-			return diffLogJSON(cmd, name, stat)
+			return diffLogJSON(cmd, name, hostPath, stat)
 		}
-		return diffLog(cmd, name, stat)
+		return diffLog(cmd, name, hostPath, stat)
 	}
 
 	// Parse ref vs paths: split on "--" if present, otherwise
 	// try to detect ref from the first positional arg.
-	ref, paths := parseDiffArgs(rest, cmd)
+	ref, paths := parseDiffArgs(rest, cmd, argsConsumedBeforeRest)
 
 	// Ref-based diff not supported for overlay
 	if ref != "" && overlay {
@@ -100,20 +116,28 @@ func runDiffCmd(cmd *cobra.Command, args []string) error {
 
 	// If ref is set, show that specific commit/range
 	if ref != "" {
-		return diffRef(cmd, name, ref, stat)
+		return diffRef(cmd, name, hostPath, ref, stat)
 	}
 
 	// Q-U: diff is workdir-only — overlay routes through container
 	// exec; everything else goes through the single workdir helper.
 	if overlay {
-		return diffOverlay(cmd, name, stat, nameOnly)
+		return diffOverlay(cmd, name, hostPath, stat, nameOnly)
 	}
-	return diffSingle(cmd, name, paths, stat, nameOnly)
+	return diffSingle(cmd, name, hostPath, paths, stat, nameOnly)
 }
 
-// diffSingle runs a diff for the sandbox's workdir.
-func diffSingle(cmd *cobra.Command, name string, paths []string, stat, nameOnly bool) error {
-	return cliutil.WithWorkdir(cmd, name, func(ctx context.Context, wd *yoloai.Workdir) error {
+// trackedDirHandle returns the Workdir handle for hostPath ("" = primary workdir).
+func trackedDirHandle(sb *yoloai.Sandbox, hostPath string) (*yoloai.Workdir, error) {
+	if hostPath == "" {
+		return sb.Workdir(), nil
+	}
+	return sb.TrackedDir(hostPath)
+}
+
+// diffSingle runs a diff for the sandbox's selected workdir.
+func diffSingle(cmd *cobra.Command, name, hostPath string, paths []string, stat, nameOnly bool) error {
+	return cliutil.WithTrackedDir(cmd, name, hostPath, func(ctx context.Context, wd *yoloai.Workdir) error {
 		out, err := wd.Diff(ctx, yoloai.WorkdirDiffOptions{Paths: paths, Stat: stat, NameOnly: nameOnly})
 		if err != nil {
 			return err
@@ -152,12 +176,16 @@ func requireOverlayRunning(ctx context.Context, sb *yoloai.Sandbox, name string)
 
 // diffOverlay runs the diff for an :overlay-mode workdir. Routes
 // through container exec since git lives inside the container.
-func diffOverlay(cmd *cobra.Command, name string, stat, nameOnly bool) error {
+func diffOverlay(cmd *cobra.Command, name, hostPath string, stat, nameOnly bool) error {
 	return cliutil.WithSandbox(cmd, name, func(ctx context.Context, sb *yoloai.Sandbox) error {
 		if err := requireOverlayRunning(ctx, sb, name); err != nil {
 			return err
 		}
-		out, err := sb.Workdir().Diff(ctx, yoloai.WorkdirDiffOptions{Stat: stat, NameOnly: nameOnly})
+		wd, err := trackedDirHandle(sb, hostPath)
+		if err != nil {
+			return err
+		}
+		out, err := wd.Diff(ctx, yoloai.WorkdirDiffOptions{Stat: stat, NameOnly: nameOnly})
 		if err != nil {
 			return err
 		}
@@ -166,7 +194,7 @@ func diffOverlay(cmd *cobra.Command, name string, stat, nameOnly bool) error {
 }
 
 // diffLogOverlay lists commits for overlay sandboxes by executing git log inside the container.
-func diffLogOverlay(cmd *cobra.Command, name string, stat bool) error {
+func diffLogOverlay(cmd *cobra.Command, name, hostPath string, stat bool) error {
 	if stat {
 		return yoerrors.NewPlatformError("--log --stat is not supported for :overlay sandboxes")
 	}
@@ -176,7 +204,11 @@ func diffLogOverlay(cmd *cobra.Command, name string, stat bool) error {
 			return err
 		}
 
-		commits, err := sb.Workdir().Commits(ctx, yoloai.WorkdirCommitsOptions{})
+		wd, err := trackedDirHandle(sb, hostPath)
+		if err != nil {
+			return err
+		}
+		commits, err := wd.Commits(ctx, yoloai.WorkdirCommitsOptions{})
 		if err != nil {
 			return err
 		}
@@ -212,7 +244,9 @@ func diffLogOverlay(cmd *cobra.Command, name string, stat bool) error {
 // after it is paths and everything before is a potential ref.
 // Without "--", the first arg is tried as a commit ref (hex pattern);
 // if it doesn't match, all args are treated as paths.
-func parseDiffArgs(rest []string, cmd *cobra.Command) (ref string, paths []string) {
+// argsConsumed is the number of positional args consumed from the original
+// args slice before rest (1 for name-only, 2 for name+dir-specifier).
+func parseDiffArgs(rest []string, cmd *cobra.Command, argsConsumed int) (ref string, paths []string) {
 	if len(rest) == 0 {
 		return "", nil
 	}
@@ -220,15 +254,9 @@ func parseDiffArgs(rest []string, cmd *cobra.Command) (ref string, paths []strin
 	// Check for explicit "--" separator in original args
 	dashAt := cmd.ArgsLenAtDash()
 	if dashAt >= 0 {
-		// Args before dash (excluding name which was already consumed)
-		// rest was already after name, so dashAt-1 gives us how many
-		// of rest are before the dash. But ArgsLenAtDash counts from
-		// the full args array. We need to adjust: name consumed 1 arg.
+		// Args before dash (excluding args already consumed).
 		beforeDash := min(
-			// how many of rest[] are before "--"
-			max(
-
-				dashAt-1, 0), len(rest))
+			max(dashAt-argsConsumed, 0), len(rest))
 
 		// Everything before dash is the ref (at most 1)
 		if beforeDash > 0 {
@@ -257,36 +285,36 @@ func looksLikeRef(s string) bool {
 }
 
 // diffLog lists commits beyond baseline.
-func diffLog(cmd *cobra.Command, name string, stat bool) error {
+func diffLog(cmd *cobra.Command, name, hostPath string, stat bool) error {
 	out := cmd.OutOrStdout()
 
 	// Fetch tags for inline display (best-effort).
 	var tags []yoloai.TagInfo
 	//nolint:errcheck // best-effort: tag annotations are decorative
-	_ = cliutil.WithWorkdir(cmd, name, func(ctx context.Context, wd *yoloai.Workdir) error {
+	_ = cliutil.WithTrackedDir(cmd, name, hostPath, func(ctx context.Context, wd *yoloai.Workdir) error {
 		tags, _ = wd.Tags(ctx, yoloai.WorkdirTagsOptions{})
 		return nil
 	})
 	tagsByCommit := buildTagsByCommit(tags)
 
 	if stat {
-		if err := diffLogWithStat(cmd, name, out, tagsByCommit); err != nil {
+		if err := diffLogWithStat(cmd, name, hostPath, out, tagsByCommit); err != nil {
 			return err
 		}
 	} else {
-		if err := diffLogBasic(cmd, name, out, tagsByCommit); err != nil {
+		if err := diffLogBasic(cmd, name, hostPath, out, tagsByCommit); err != nil {
 			return err
 		}
 	}
 
-	diffLogUncommitted(cmd, name, out)
+	diffLogUncommitted(cmd, name, hostPath, out)
 	return nil
 }
 
 // diffLogWithStat prints commits with file-change statistics.
-func diffLogWithStat(cmd *cobra.Command, name string, out io.Writer, tagsByCommit map[string][]string) error {
+func diffLogWithStat(cmd *cobra.Command, name, hostPath string, out io.Writer, tagsByCommit map[string][]string) error {
 	var commits []yoloai.CommitInfo
-	err := cliutil.WithWorkdir(cmd, name, func(ctx context.Context, wd *yoloai.Workdir) error {
+	err := cliutil.WithTrackedDir(cmd, name, hostPath, func(ctx context.Context, wd *yoloai.Workdir) error {
 		var listErr error
 		commits, listErr = wd.Commits(ctx, yoloai.WorkdirCommitsOptions{Stat: true})
 		return listErr
@@ -311,9 +339,9 @@ func diffLogWithStat(cmd *cobra.Command, name string, out io.Writer, tagsByCommi
 }
 
 // diffLogBasic prints commits without statistics.
-func diffLogBasic(cmd *cobra.Command, name string, out io.Writer, tagsByCommit map[string][]string) error {
+func diffLogBasic(cmd *cobra.Command, name, hostPath string, out io.Writer, tagsByCommit map[string][]string) error {
 	var commits []yoloai.CommitInfo
-	err := cliutil.WithWorkdir(cmd, name, func(ctx context.Context, wd *yoloai.Workdir) error {
+	err := cliutil.WithTrackedDir(cmd, name, hostPath, func(ctx context.Context, wd *yoloai.Workdir) error {
 		var listErr error
 		commits, listErr = wd.Commits(ctx, yoloai.WorkdirCommitsOptions{})
 		return listErr
@@ -341,9 +369,9 @@ func formatCommitLine(n int, sha, subject string, tagsByCommit map[string][]stri
 }
 
 // diffLogUncommitted appends an uncommitted-changes indicator when present (best-effort).
-func diffLogUncommitted(cmd *cobra.Command, name string, out io.Writer) {
+func diffLogUncommitted(cmd *cobra.Command, name, hostPath string, out io.Writer) {
 	var hasUncommitted bool
-	err := cliutil.WithWorkdir(cmd, name, func(ctx context.Context, wd *yoloai.Workdir) error {
+	err := cliutil.WithTrackedDir(cmd, name, hostPath, func(ctx context.Context, wd *yoloai.Workdir) error {
 		var uncommittedErr error
 		hasUncommitted, uncommittedErr = wd.HasUncommittedChanges(ctx)
 		return uncommittedErr
@@ -356,8 +384,8 @@ func diffLogUncommitted(cmd *cobra.Command, name string, out io.Writer) {
 // diffRef shows the diff for a specific commit or range. Disk-only; no
 // runtime needed, but routed through WithClient for symmetry with the
 // other diff handlers.
-func diffRef(cmd *cobra.Command, name, ref string, stat bool) error {
-	return cliutil.WithWorkdir(cmd, name, func(ctx context.Context, wd *yoloai.Workdir) error {
+func diffRef(cmd *cobra.Command, name, hostPath, ref string, stat bool) error {
+	return cliutil.WithTrackedDir(cmd, name, hostPath, func(ctx context.Context, wd *yoloai.Workdir) error {
 		out, err := wd.Diff(ctx, yoloai.WorkdirDiffOptions{Ref: ref, Stat: stat})
 		if err != nil {
 			return err
@@ -384,8 +412,8 @@ func agentRunningWarning(cmd *cobra.Command, name string) {
 }
 
 // diffLogJSON outputs commit log as JSON.
-func diffLogJSON(cmd *cobra.Command, name string, stat bool) error {
-	return cliutil.WithWorkdir(cmd, name, func(ctx context.Context, wd *yoloai.Workdir) error {
+func diffLogJSON(cmd *cobra.Command, name, hostPath string, stat bool) error {
+	return cliutil.WithTrackedDir(cmd, name, hostPath, func(ctx context.Context, wd *yoloai.Workdir) error {
 		cs, err := wd.Commits(ctx, yoloai.WorkdirCommitsOptions{Stat: stat})
 		if err != nil {
 			return err

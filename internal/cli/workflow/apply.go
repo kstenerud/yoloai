@@ -20,10 +20,10 @@ import (
 // Best-effort: a failed fetch yields nil (tag annotations are decorative and
 // never fail the apply). When unappliedOnly is true, only tags absent on the
 // host are returned. The returned tags carry their annotated-tag Message.
-func listSandboxTags(cmd *cobra.Command, name string, unappliedOnly bool) []yoloai.TagInfo {
+func listSandboxTags(cmd *cobra.Command, name, hostPath string, unappliedOnly bool) []yoloai.TagInfo {
 	var tags []yoloai.TagInfo
 	//nolint:errcheck // best-effort: tag listing failure must not fail the apply
-	_ = cliutil.WithWorkdir(cmd, name, func(ctx context.Context, wd *yoloai.Workdir) error {
+	_ = cliutil.WithTrackedDir(cmd, name, hostPath, func(ctx context.Context, wd *yoloai.Workdir) error {
 		tags, _ = wd.Tags(ctx, yoloai.WorkdirTagsOptions{UnappliedOnly: unappliedOnly})
 		return nil
 	})
@@ -42,7 +42,7 @@ type applyResult struct {
 
 func NewApplyCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "apply <name> [<ref>...] [-- <path>...]",
+		Use:   "apply <name> [<dir>] [<ref>...] [-- <path>...]",
 		Short: "Apply agent changes back to original work directory",
 		Long: `Apply agent changes back to the original directory.
 
@@ -50,6 +50,9 @@ By default, only committed changes are applied (individual commits via
 git format-patch/am). Uncommitted edits the agent left behind are
 detected and reported but NOT applied; pass --include-uncommitted to also
 bring them across as unstaged modifications.
+
+<dir> is required when the sandbox tracks 2+ directories; it may be a
+basename, a path suffix, an exact host path, or an exact mount path.
 
 Specific commits can be cherry-picked by providing ref arguments:
   yoloai apply mybox abc123 def456       # specific commits
@@ -80,6 +83,16 @@ without applying them.`,
 	return cmd
 }
 
+// applyFlags bundles the parsed CLI flags for the apply command.
+type applyFlags struct {
+	yes                bool
+	noCommit           bool
+	patchesDir         string
+	includeUncommitted bool
+	dryRun             bool
+	withTags           bool
+}
+
 func runApplyCmd(cmd *cobra.Command, args []string) error {
 	name, rest, err := cliutil.ResolveName(cmd, args)
 	if err != nil {
@@ -87,49 +100,79 @@ func runApplyCmd(cmd *cobra.Command, args []string) error {
 	}
 	defer cliutil.OpenCLIJSONLSink(name, cmd)()
 
-	yes := cliutil.EffectiveYes(cmd)
-	noCommit, _ := cmd.Flags().GetBool("no-commit")
-	patchesDir, _ := cmd.Flags().GetString("patches")
-	if patchesDir != "" {
-		var expandErr error
-		patchesDir, expandErr = cliutil.ExpandPath(patchesDir, cliutil.Layout().HomeDir, cliutil.Layout().Env().EnvForConfigInterpolation())
-		if expandErr != nil {
-			return fmt.Errorf("expand patches path: %w", expandErr)
-		}
+	flags, err := parseApplyFlags(cmd)
+	if err != nil {
+		return err
 	}
-	includeUncommitted, _ := cmd.Flags().GetBool("include-uncommitted")
-	dryRun, _ := cmd.Flags().GetBool("dry-run")
-	withTags, _ := cmd.Flags().GetBool("tags")
 
-	// Parse refs and paths from remaining args
-	refs, paths := parseApplyArgs(rest, cmd)
-
-	// Validate mutually exclusive options
-	if len(refs) > 0 && noCommit {
-		return yoerrors.NewUsageError("--no-commit cannot be used with commit refs — they are mutually exclusive")
-	}
-	// Load the sandbox read-model for target directory and mode validation.
+	// Load the sandbox read-model early so SelectTrackedDir can consume the
+	// dir specifier before parseApplyArgs sees the remaining positionals.
 	env, err := cliutil.SandboxMetadata(cmd, name)
 	if err != nil {
 		return err
 	}
-	if env.Workdir().Mode == yoloai.DirModeRW {
+	// argsConsumedBeforeRest tracks how many positional args from the original
+	// args slice have been consumed before rest: 1 for name, +1 if SelectTrackedDir
+	// consumed a dir specifier. parseApplyArgs needs this to adjust ArgsLenAtDash.
+	argsConsumedBeforeRest := 1
+	hostPath, selectedDir, rest, err := cliutil.SelectTrackedDir(env, rest)
+	if err != nil {
+		return err
+	}
+	if hostPath != "" {
+		argsConsumedBeforeRest = 2
+	}
+
+	// Parse refs and paths from remaining args (after name + optional dir specifier).
+	refs, paths := parseApplyArgs(rest, cmd, argsConsumedBeforeRest)
+
+	return dispatchApply(cmd, name, hostPath, selectedDir, refs, paths, flags)
+}
+
+// parseApplyFlags reads and validates flag values from the cobra command.
+func parseApplyFlags(cmd *cobra.Command) (applyFlags, error) {
+	var f applyFlags
+	f.yes = cliutil.EffectiveYes(cmd)
+	f.noCommit, _ = cmd.Flags().GetBool("no-commit")
+	f.patchesDir, _ = cmd.Flags().GetString("patches")
+	if f.patchesDir != "" {
+		var err error
+		f.patchesDir, err = cliutil.ExpandPath(f.patchesDir, cliutil.Layout().HomeDir, cliutil.Layout().Env().EnvForConfigInterpolation())
+		if err != nil {
+			return applyFlags{}, fmt.Errorf("expand patches path: %w", err)
+		}
+	}
+	f.includeUncommitted, _ = cmd.Flags().GetBool("include-uncommitted")
+	f.dryRun, _ = cmd.Flags().GetBool("dry-run")
+	f.withTags, _ = cmd.Flags().GetBool("tags")
+	return f, nil
+}
+
+// dispatchApply validates options and routes to the correct apply workflow.
+func dispatchApply(cmd *cobra.Command, name, hostPath string, selectedDir yoloai.DirInfo, refs, paths []string, flags applyFlags) error {
+	targetDir := selectedDir.HostPath
+
+	// Validate mutually exclusive options
+	if len(refs) > 0 && flags.noCommit {
+		return yoerrors.NewUsageError("--no-commit cannot be used with commit refs — they are mutually exclusive")
+	}
+	if selectedDir.Mode == yoloai.DirModeRW {
 		return yoerrors.NewUsageError("apply is not needed for :rw directories — changes are already live")
 	}
 
 	// --patches: export patch files instead of applying (handles all mount modes
 	// and ref subsets via Workdir().Export). Dispatched before the apply paths.
-	if patchesDir != "" {
-		return runExport(cmd, name, env, refs, paths, patchesDir, includeUncommitted)
+	if flags.patchesDir != "" {
+		return runExport(cmd, name, hostPath, selectedDir, refs, paths, flags.patchesDir, flags.includeUncommitted)
 	}
 
 	slog.Info("applying changes", "event", "sandbox.apply", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
-	if env.HasOverlayDirs() {
-		return applyOverlay(cmd, name, env, refs, paths, yes, dryRun)
+	if selectedDir.Mode == yoloai.DirModeOverlay {
+		return applyOverlay(cmd, name, hostPath, targetDir, refs, paths, flags.yes, flags.dryRun)
 	}
 
 	if !cliutil.JSONEnabled(cmd) {
-		fmt.Fprintf(cmd.OutOrStdout(), "Target: %s\n\n", env.Workdir().HostPath) //nolint:errcheck
+		fmt.Fprintf(cmd.OutOrStdout(), "Target: %s\n\n", targetDir) //nolint:errcheck
 	}
 
 	// Best-effort agent-running warning
@@ -139,30 +182,32 @@ func runApplyCmd(cmd *cobra.Command, args []string) error {
 
 	// Selective apply: specific commit refs
 	if len(refs) > 0 {
-		return applySelectedCommits(cmd, name, refs, paths, env, yes, dryRun, withTags)
+		return applySelectedCommits(cmd, name, hostPath, targetDir, refs, paths, flags.yes, flags.dryRun, flags.withTags)
 	}
 
 	// --no-commit: land one unstaged patch (commits only unless --include-uncommitted).
-	if noCommit {
-		return applyNoCommit(cmd, name, paths, env, yes, dryRun, includeUncommitted)
+	if flags.noCommit {
+		return applyNoCommit(cmd, name, hostPath, targetDir, paths, flags.yes, flags.dryRun, flags.includeUncommitted)
 	}
 
-	return runApplyFormatPatch(cmd, name, paths, env, yes, dryRun, includeUncommitted, withTags)
+	return runApplyFormatPatch(cmd, name, hostPath, targetDir, paths, flags.yes, flags.dryRun, flags.includeUncommitted, flags.withTags)
 }
 
 // parseApplyArgs separates ref arguments from path arguments.
-// Refs appear between the sandbox name and "--"; paths appear after "--".
-// Without "--", all remaining args are treated as refs if they look like
-// hex SHA prefixes or ranges, otherwise all are treated as paths.
-func parseApplyArgs(rest []string, cmd *cobra.Command) (refs []string, paths []string) {
+// Refs appear between the sandbox name (and optional dir specifier) and "--";
+// paths appear after "--". Without "--", all remaining args are treated as refs
+// if they look like hex SHA prefixes or ranges, otherwise all are treated as paths.
+// argsConsumedBeforeRest is the number of positional args already consumed from
+// the original args slice (1 for name-only, 2 for name+dir-specifier).
+func parseApplyArgs(rest []string, cmd *cobra.Command, argsConsumedBeforeRest int) (refs []string, paths []string) {
 	if len(rest) == 0 {
 		return nil, nil
 	}
 
 	dashAt := cmd.ArgsLenAtDash()
 	if dashAt >= 0 {
-		// Explicit "--" separator. Account for name already consumed.
-		beforeDash := min(max(dashAt-1, 0), len(rest))
+		// Explicit "--" separator. Account for args already consumed.
+		beforeDash := min(max(dashAt-argsConsumedBeforeRest, 0), len(rest))
 		refs = rest[:beforeDash]
 		paths = rest[beforeDash:]
 		return refs, paths
@@ -201,28 +246,32 @@ func buildTagsByCommit(tags []yoloai.TagInfo) map[string][]string {
 // provided SHA map can't trigger the matching path, so this won't error in
 // practice) and reported as zero counts. For the matching path use
 // transferTags directly so its error stays fatal.
-func applyTags(cmd *cobra.Command, name string, tags []yoloai.TagInfo, shaMap map[string]string, withTags bool) (applied, skipped int) {
+func applyTags(cmd *cobra.Command, name, hostPath string, tags []yoloai.TagInfo, shaMap map[string]string, withTags bool) (applied, skipped int) {
 	if !withTags || len(tags) == 0 {
 		return 0, 0
 	}
-	result, err := transferTags(cmd, name, tags, shaMap)
+	result, err := transferTags(cmd, name, hostPath, tags, shaMap)
 	if err != nil || result == nil {
 		return 0, 0
 	}
 	return result.Applied, result.Skipped
 }
 
-// targetIsGitRepo reports whether the sandbox's host work directory is a git
-// repository — the apply target. Opens a client to query the library.
-func targetIsGitRepo(cmd *cobra.Command, name string, backend yoloai.BackendType) (bool, error) {
+// targetIsGitRepo reports whether the sandbox's selected host work directory is
+// a git repository — the apply target. Opens a client to query the library.
+func targetIsGitRepo(cmd *cobra.Command, name, hostPath string, backend yoloai.BackendType) (bool, error) {
 	var isGit bool
 	err := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		sb, sbErr := c.Sandbox(name)
 		if sbErr != nil {
 			return sbErr
 		}
+		wd, wdErr := trackedDirHandle(sb, hostPath)
+		if wdErr != nil {
+			return wdErr
+		}
 		var checkErr error
-		isGit, checkErr = sb.Workdir().TargetIsGitRepo(ctx)
+		isGit, checkErr = wd.TargetIsGitRepo(ctx)
 		return checkErr
 	})
 	return isGit, err
@@ -233,9 +282,9 @@ func targetIsGitRepo(cmd *cobra.Command, name string, backend yoloai.BackendType
 // the library match commits by metadata (the no-commits-applied path). Returns
 // the result so callers can surface counts; the error is fatal only for the
 // matching path (a provided map never matches).
-func transferTags(cmd *cobra.Command, name string, tags []yoloai.TagInfo, shaMap map[string]string) (*yoloai.TagTransferResult, error) {
+func transferTags(cmd *cobra.Command, name, hostPath string, tags []yoloai.TagInfo, shaMap map[string]string) (*yoloai.TagTransferResult, error) {
 	var result *yoloai.TagTransferResult
-	err := cliutil.WithWorkdir(cmd, name, func(ctx context.Context, wd *yoloai.Workdir) error {
+	err := cliutil.WithTrackedDir(cmd, name, hostPath, func(ctx context.Context, wd *yoloai.Workdir) error {
 		var transferErr error
 		result, transferErr = wd.TransferTags(ctx, yoloai.WorkdirTransferTagsOptions{Tags: tags, SHAMap: shaMap})
 		return transferErr

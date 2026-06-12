@@ -18,14 +18,14 @@ import (
 )
 
 // runApplyFormatPatch handles the default format-patch apply flow.
-func runApplyFormatPatch(cmd *cobra.Command, name string, paths []string, env *yoloai.Environment, yes, dryRun, includeUncommitted, withTags bool) error {
+func runApplyFormatPatch(cmd *cobra.Command, name, hostPath, targetDir string, paths []string, yes, dryRun, includeUncommitted, withTags bool) error {
 	// Query work copy for commits and uncommitted changes. Uncommitted changes are
 	// always probed (even when includeUncommitted is false) so we can report them
 	// to the user as a hint. The host target's git-repo status decides the
 	// non-git fallback below.
 	var commits []yoloai.CommitInfo
 	var hasUncommitted, isGit bool
-	err := cliutil.WithWorkdir(cmd, name, func(ctx context.Context, wd *yoloai.Workdir) error {
+	err := cliutil.WithTrackedDir(cmd, name, hostPath, func(ctx context.Context, wd *yoloai.Workdir) error {
 		var listErr error
 		if commits, listErr = wd.Commits(ctx, yoloai.WorkdirCommitsOptions{}); listErr != nil {
 			return listErr
@@ -44,14 +44,14 @@ func runApplyFormatPatch(cmd *cobra.Command, name string, paths []string, env *y
 	if hasUncommitted {
 		slog.Debug("uncommitted changes detected", "event", "sandbox.apply.uncommitted", "sandbox", name, "include_uncommitted", includeUncommitted) //nolint:gosec // G706: name is validated by ValidateName
 	}
-	if done, doneErr := maybeReportNoChanges(cmd, name, env, commits, hasUncommitted, includeUncommitted, withTags); done {
+	if done, doneErr := maybeReportNoChanges(cmd, name, hostPath, targetDir, commits, hasUncommitted, includeUncommitted, withTags); done {
 		return doneErr
 	}
 
 	// Non-git fallback: can't use git am on non-git targets
 	if !isGit && len(commits) > 0 {
 		fmt.Fprintln(cmd.ErrOrStderr(), "Note: target is not a git repository — falling back to a single unstaged patch (--no-commit)") //nolint:errcheck
-		return applyNoCommit(cmd, name, paths, env, yes, dryRun, includeUncommitted)
+		return applyNoCommit(cmd, name, hostPath, targetDir, paths, yes, dryRun, includeUncommitted)
 	}
 
 	// No commits, only uncommitted changes (user opted in) — use the net-diff (no-commit) flow.
@@ -59,10 +59,10 @@ func runApplyFormatPatch(cmd *cobra.Command, name string, paths []string, env *y
 		if withTags {
 			return yoerrors.NewUsageError("--tags requires commits — cannot transfer tags with uncommitted-only changes")
 		}
-		return applyNoCommit(cmd, name, paths, env, yes, dryRun, includeUncommitted)
+		return applyNoCommit(cmd, name, hostPath, targetDir, paths, yes, dryRun, includeUncommitted)
 	}
 
-	return runApplyCommits(cmd, name, paths, env, commits, hasUncommitted, yes, dryRun, includeUncommitted, withTags)
+	return runApplyCommits(cmd, name, hostPath, targetDir, paths, commits, hasUncommitted, yes, dryRun, includeUncommitted, withTags)
 }
 
 // printUncommittedHint tells the user there are uncommitted edits they could
@@ -80,11 +80,11 @@ func reportUncommittedSkipHint(cmd *cobra.Command, hasUncommitted, includeUncomm
 
 // reportUnappliedTagsHint suggests --tags when sandbox has tags the user
 // didn't ask to transfer. Human-mode only.
-func reportUnappliedTagsHint(cmd *cobra.Command, name string, withTags bool) {
+func reportUnappliedTagsHint(cmd *cobra.Command, name, hostPath string, withTags bool) {
 	if cliutil.JSONEnabled(cmd) || withTags {
 		return
 	}
-	unappliedTags := listSandboxTags(cmd, name, true)
+	unappliedTags := listSandboxTags(cmd, name, hostPath, true)
 	if len(unappliedTags) > 0 {
 		fmt.Fprintf(cmd.OutOrStdout(), "\nHint: %d tag(s) available in sandbox but not on host. Run with --tags to transfer them.\n", len(unappliedTags)) //nolint:errcheck
 	}
@@ -93,7 +93,7 @@ func reportUnappliedTagsHint(cmd *cobra.Command, name string, withTags bool) {
 // maybeReportNoChanges handles the "nothing to apply" case at the entry of
 // the format-patch flow. Returns (true, err) when the caller should return;
 // (false, nil) to continue with the normal apply.
-func maybeReportNoChanges(cmd *cobra.Command, name string, env *yoloai.Environment, commits []yoloai.CommitInfo, hasUncommitted, includeUncommitted, withTags bool) (bool, error) {
+func maybeReportNoChanges(cmd *cobra.Command, name, hostPath, targetDir string, commits []yoloai.CommitInfo, hasUncommitted, includeUncommitted, withTags bool) (bool, error) {
 	if len(commits) > 0 {
 		return false, nil
 	}
@@ -103,13 +103,13 @@ func maybeReportNoChanges(cmd *cobra.Command, name string, env *yoloai.Environme
 	if hasUncommitted && !cliutil.JSONEnabled(cmd) {
 		printUncommittedHint(cmd, "no committed changes to apply")
 	}
-	return true, runApplyNoChanges(cmd, name, env, withTags)
+	return true, runApplyNoChanges(cmd, name, hostPath, targetDir, withTags)
 }
 
 // runApplyNoChanges handles the case where there are no commits or uncommitted changes to apply.
-func runApplyNoChanges(cmd *cobra.Command, name string, env *yoloai.Environment, withTags bool) error {
+func runApplyNoChanges(cmd *cobra.Command, name, hostPath, targetDir string, withTags bool) error {
 	// Check for unapplied tags even when there are no changes
-	unappliedTags := listSandboxTags(cmd, name, true)
+	unappliedTags := listSandboxTags(cmd, name, hostPath, true)
 
 	// If --tags is used, transfer tags even without commits. The library matches
 	// commits by metadata (empty SHA map) to map sandbox tags onto host commits.
@@ -118,13 +118,13 @@ func runApplyNoChanges(cmd *cobra.Command, name string, env *yoloai.Environment,
 			fmt.Fprintln(cmd.OutOrStdout(), "No changes to apply")                                                  //nolint:errcheck
 			fmt.Fprintf(cmd.OutOrStdout(), "\nTransferring %d tag(s) by matching commits...\n", len(unappliedTags)) //nolint:errcheck
 		}
-		result, transferErr := transferTags(cmd, name, unappliedTags, nil)
+		result, transferErr := transferTags(cmd, name, hostPath, unappliedTags, nil)
 		if transferErr != nil {
 			return transferErr
 		}
 		if cliutil.JSONEnabled(cmd) {
 			return cliutil.WriteJSON(cmd.OutOrStdout(), applyResult{
-				Target:      env.Workdir().HostPath,
+				Target:      targetDir,
 				TagsApplied: result.Applied,
 				TagsSkipped: result.Skipped,
 				Method:      "format-patch",
@@ -135,7 +135,7 @@ func runApplyNoChanges(cmd *cobra.Command, name string, env *yoloai.Environment,
 
 	if cliutil.JSONEnabled(cmd) {
 		return cliutil.WriteJSON(cmd.OutOrStdout(), applyResult{
-			Target: env.Workdir().HostPath,
+			Target: targetDir,
 			Method: "format-patch",
 		})
 	}
@@ -151,11 +151,9 @@ func runApplyNoChanges(cmd *cobra.Command, name string, env *yoloai.Environment,
 // (Workdir().Apply ApplyModeCommits), then transfers tags using the SHA mapping
 // it returns. The library owns generate / git am / baseline-advance / uncommitted;
 // this function owns the CLI summary, confirmation, tag transfer, and output.
-func runApplyCommits(cmd *cobra.Command, name string, paths []string, env *yoloai.Environment, commits []yoloai.CommitInfo, hasUncommitted, yes, dryRun, includeUncommitted, withTags bool) error {
-	targetDir := env.Workdir().HostPath
-
+func runApplyCommits(cmd *cobra.Command, name, hostPath, targetDir string, paths []string, commits []yoloai.CommitInfo, hasUncommitted, yes, dryRun, includeUncommitted, withTags bool) error {
 	// Fetch tags beyond baseline (best-effort; errors don't fail the apply).
-	tags := listSandboxTags(cmd, name, false)
+	tags := listSandboxTags(cmd, name, hostPath, false)
 	printApplyCommitsSummary(cmd, commits, tags, buildTagsByCommit(tags), hasUncommitted, includeUncommitted, withTags)
 
 	if dryRun {
@@ -177,7 +175,7 @@ func runApplyCommits(cmd *cobra.Command, name string, paths []string, env *yoloa
 	}
 
 	var result *yoloai.ApplyResult
-	applyErr := cliutil.WithWorkdir(cmd, name, func(ctx context.Context, wd *yoloai.Workdir) error {
+	applyErr := cliutil.WithTrackedDir(cmd, name, hostPath, func(ctx context.Context, wd *yoloai.Workdir) error {
 		var e error
 		result, e = wd.Apply(ctx, yoloai.WorkdirApplyOptions{
 			Mode: yoloai.ApplyModeCommits, IncludeUncommitted: includeUncommitted, Paths: paths,
@@ -201,8 +199,8 @@ func runApplyCommits(cmd *cobra.Command, name string, paths []string, env *yoloa
 		shaMap[strings.ToLower(c.SourceSHA)] = c.HostSHA
 	}
 	reportUncommittedSkipHint(cmd, hasUncommitted, includeUncommitted)
-	tagsApplied, tagsSkipped := applyTags(cmd, name, tags, shaMap, withTags)
-	reportUnappliedTagsHint(cmd, name, withTags)
+	tagsApplied, tagsSkipped := applyTags(cmd, name, hostPath, tags, shaMap, withTags)
+	reportUnappliedTagsHint(cmd, name, hostPath, withTags)
 
 	slog.Info("apply complete", "event", "sandbox.apply.complete", "sandbox", name, "commits_applied", commitsApplied, "uncommitted_applied", result.UncommittedApplied, "tags_applied", tagsApplied) //nolint:gosec // G706: name is validated by ValidateName
 	if cliutil.JSONEnabled(cmd) {

@@ -19,11 +19,11 @@ import (
 // function owns the CLI preview + confirmation + output. It previews via
 // DryRun (so the stat is exact, matching what the real apply lands), then —
 // after confirmation — applies for real.
-func applyNoCommit(cmd *cobra.Command, name string, paths []string, env *yoloai.Environment, yes, dryRun, includeUncommitted bool) error {
+func applyNoCommit(cmd *cobra.Command, name, hostPath, targetDir string, paths []string, yes, dryRun, includeUncommitted bool) error {
 	backend := cliutil.ResolveBackendForSandbox(name)
 
 	var preview *yoloai.ApplyResult
-	err := cliutil.WithWorkdir(cmd, name, func(ctx context.Context, wd *yoloai.Workdir) error {
+	err := cliutil.WithTrackedDir(cmd, name, hostPath, func(ctx context.Context, wd *yoloai.Workdir) error {
 		var e error
 		preview, e = wd.Apply(ctx, yoloai.WorkdirApplyOptions{
 			Mode: yoloai.ApplyModeNoCommit, IncludeUncommitted: includeUncommitted, Paths: paths, DryRun: true,
@@ -36,13 +36,13 @@ func applyNoCommit(cmd *cobra.Command, name string, paths []string, env *yoloai.
 
 	// Surface uncommitted changes the user might want to bring along.
 	if !includeUncommitted {
-		warnNoCommitSkippedUncommitted(cmd, name, backend)
+		warnNoCommitSkippedUncommitted(cmd, name, hostPath, backend)
 	}
 
 	if preview == nil {
 		if cliutil.JSONEnabled(cmd) {
 			return cliutil.WriteJSON(cmd.OutOrStdout(), applyResult{
-				Target: env.Workdir().HostPath,
+				Target: targetDir,
 				Method: "no-commit",
 			})
 		}
@@ -50,7 +50,7 @@ func applyNoCommit(cmd *cobra.Command, name string, paths []string, env *yoloai.
 		return err
 	}
 
-	targetDir := preview.Dir
+	applyTarget := preview.Dir
 	if !cliutil.JSONEnabled(cmd) {
 		fmt.Fprintln(cmd.OutOrStdout(), preview.Stat) //nolint:errcheck
 	}
@@ -63,7 +63,7 @@ func applyNoCommit(cmd *cobra.Command, name string, paths []string, env *yoloai.
 	}
 
 	if !yes {
-		prompt := fmt.Sprintf("Apply these changes to %s? [y/N] ", targetDir)
+		prompt := fmt.Sprintf("Apply these changes to %s? [y/N] ", applyTarget)
 		confirmed, confirmErr := cliutil.Confirm(cmd.Context(), prompt, os.Stdin, cmd.ErrOrStderr())
 		if confirmErr != nil {
 			return confirmErr
@@ -73,7 +73,7 @@ func applyNoCommit(cmd *cobra.Command, name string, paths []string, env *yoloai.
 		}
 	}
 
-	err = cliutil.WithWorkdir(cmd, name, func(ctx context.Context, wd *yoloai.Workdir) error {
+	err = cliutil.WithTrackedDir(cmd, name, hostPath, func(ctx context.Context, wd *yoloai.Workdir) error {
 		_, e := wd.Apply(ctx, yoloai.WorkdirApplyOptions{
 			Mode: yoloai.ApplyModeNoCommit, IncludeUncommitted: includeUncommitted, Paths: paths, DryRun: false,
 		})
@@ -85,19 +85,19 @@ func applyNoCommit(cmd *cobra.Command, name string, paths []string, env *yoloai.
 
 	if cliutil.JSONEnabled(cmd) {
 		return cliutil.WriteJSON(cmd.OutOrStdout(), applyResult{
-			Target:             targetDir,
+			Target:             applyTarget,
 			UncommittedApplied: true,
 			Method:             "no-commit",
 		})
 	}
-	_, err = fmt.Fprintf(cmd.OutOrStdout(), "Changes applied to %s\n", targetDir)
+	_, err = fmt.Fprintf(cmd.OutOrStdout(), "Changes applied to %s\n", applyTarget)
 	return err
 }
 
 // warnNoCommitSkippedUncommitted prints the --include-uncommitted hint when
 // --no-commit excludes uncommitted work. Best-effort: a failed check is silently
 // swallowed because the net-diff apply can still succeed on the committed delta.
-func warnNoCommitSkippedUncommitted(cmd *cobra.Command, name string, backend yoloai.BackendType) {
+func warnNoCommitSkippedUncommitted(cmd *cobra.Command, name, hostPath string, backend yoloai.BackendType) {
 	if cliutil.JSONEnabled(cmd) {
 		return
 	}
@@ -107,8 +107,12 @@ func warnNoCommitSkippedUncommitted(cmd *cobra.Command, name string, backend yol
 		if sbErr != nil {
 			return sbErr
 		}
+		wd, wdErr := trackedDirHandle(sb, hostPath)
+		if wdErr != nil {
+			return wdErr
+		}
 		var uncommittedErr error
-		hasUncommitted, uncommittedErr = sb.Workdir().HasUncommittedChanges(ctx)
+		hasUncommitted, uncommittedErr = wd.HasUncommittedChanges(ctx)
 		return uncommittedErr
 	})
 	if hasUncommitted {

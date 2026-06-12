@@ -20,18 +20,18 @@ import (
 // commit history, so this is always a net-diff apply (ApplyModeNoCommit);
 // --include-uncommitted has no effect. The container must be running (the diff
 // is captured by running git inside it).
-func applyOverlay(cmd *cobra.Command, name string, env *yoloai.Environment, refs, paths []string, yes, dryRun bool) error {
+func applyOverlay(cmd *cobra.Command, name, hostPath, targetDir string, refs, paths []string, yes, dryRun bool) error {
 	if len(refs) > 0 {
 		return yoerrors.NewPlatformError("selective ref apply is not supported for :overlay sandboxes")
 	}
 
-	preview, err := overlayApplyViaClient(cmd, name, paths, true)
+	preview, err := overlayApplyViaClient(cmd, name, hostPath, paths, true)
 	if err != nil {
 		return err
 	}
 	if preview == nil {
 		if cliutil.JSONEnabled(cmd) {
-			return cliutil.WriteJSON(cmd.OutOrStdout(), applyResult{Target: env.Workdir().HostPath, Method: "overlay"})
+			return cliutil.WriteJSON(cmd.OutOrStdout(), applyResult{Target: targetDir, Method: "overlay"})
 		}
 		_, e := fmt.Fprintln(cmd.OutOrStdout(), "No changes to apply")
 		return e
@@ -57,7 +57,7 @@ func applyOverlay(cmd *cobra.Command, name string, env *yoloai.Environment, refs
 		}
 	}
 
-	result, err := overlayApplyViaClient(cmd, name, paths, false)
+	result, err := overlayApplyViaClient(cmd, name, hostPath, paths, false)
 	if result == nil {
 		return err
 	}
@@ -75,14 +75,18 @@ func applyOverlay(cmd *cobra.Command, name string, env *yoloai.Environment, refs
 // overlayApplyViaClient runs the overlay apply through the workdir handle after
 // enforcing the running-container precondition. dryRun captures the diff stat
 // without applying.
-func overlayApplyViaClient(cmd *cobra.Command, name string, paths []string, dryRun bool) (*yoloai.ApplyResult, error) {
+func overlayApplyViaClient(cmd *cobra.Command, name, hostPath string, paths []string, dryRun bool) (*yoloai.ApplyResult, error) {
 	var result *yoloai.ApplyResult
 	err := cliutil.WithSandbox(cmd, name, func(ctx context.Context, sb *yoloai.Sandbox) error {
 		if runErr := requireOverlayRunning(ctx, sb, name); runErr != nil {
 			return runErr
 		}
+		wd, wdErr := trackedDirHandle(sb, hostPath)
+		if wdErr != nil {
+			return wdErr
+		}
 		var applyErr error
-		result, applyErr = sb.Workdir().Apply(ctx, yoloai.WorkdirApplyOptions{
+		result, applyErr = wd.Apply(ctx, yoloai.WorkdirApplyOptions{
 			Mode:   yoloai.ApplyModeNoCommit,
 			Paths:  paths,
 			DryRun: dryRun,

@@ -207,6 +207,21 @@ func WithWorkdir(cmd *cobra.Command, name string, fn func(ctx context.Context, w
 	})
 }
 
+// WithTrackedDir runs fn with the Workdir handle for the dir at hostPath
+// ("" = the primary workdir).
+func WithTrackedDir(cmd *cobra.Command, name, hostPath string, fn func(ctx context.Context, wd *yoloai.Workdir) error) error {
+	if hostPath == "" {
+		return WithWorkdir(cmd, name, fn)
+	}
+	return WithSandbox(cmd, name, func(ctx context.Context, sb *yoloai.Sandbox) error {
+		wd, err := sb.TrackedDir(hostPath)
+		if err != nil {
+			return err
+		}
+		return fn(ctx, wd)
+	})
+}
+
 // Client constructs a backend-less yoloai.Client from the CLI's layout —
 // no backend is selected, so the runtime is never opened. Use it for command
 // handlers that only need host-only per-sandbox reads (prompt, agent-log,

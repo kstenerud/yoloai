@@ -18,12 +18,16 @@ import (
 // runExport writes the sandbox's changes as patch files to dir instead of
 // applying them. It resolves copy-vs-overlay inside Workdir().Export; the CLI
 // only enforces the overlay running-precondition and prints the result.
-func runExport(cmd *cobra.Command, name string, env *yoloai.Environment, refs, paths []string, dir string, includeUncommitted bool) error {
-	overlay := env.HasOverlayDirs()
+func runExport(cmd *cobra.Command, name, hostPath string, selectedDir yoloai.DirInfo, refs, paths []string, dir string, includeUncommitted bool) error {
+	overlay := selectedDir.Mode == yoloai.DirModeOverlay
 
 	var result *yoloai.ExportResult
 	var hasUncommitted bool
 	err := cliutil.WithSandbox(cmd, name, func(ctx context.Context, sb *yoloai.Sandbox) error {
+		wd, wdErr := trackedDirHandle(sb, hostPath)
+		if wdErr != nil {
+			return wdErr
+		}
 		if overlay {
 			if runErr := requireOverlayRunning(ctx, sb, name); runErr != nil {
 				return runErr
@@ -31,10 +35,10 @@ func runExport(cmd *cobra.Command, name string, env *yoloai.Environment, refs, p
 		} else if !includeUncommitted {
 			// Best-effort: probe so we can hint that uncommitted edits exist but
 			// weren't exported.
-			hasUncommitted, _ = sb.Workdir().HasUncommittedChanges(ctx)
+			hasUncommitted, _ = wd.HasUncommittedChanges(ctx)
 		}
 		var exportErr error
-		result, exportErr = sb.Workdir().Export(ctx, yoloai.WorkdirExportOptions{
+		result, exportErr = wd.Export(ctx, yoloai.WorkdirExportOptions{
 			Dir:                dir,
 			Refs:               refs,
 			Paths:              paths,

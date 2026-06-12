@@ -19,11 +19,10 @@ import (
 // the resolved commits (DryRun) for the summary/confirm, then replays them via
 // Workdir().Apply — the library resolves refs, replays the series, and advances
 // the baseline across the contiguous applied prefix.
-func applySelectedCommits(cmd *cobra.Command, name string, refs, paths []string, env *yoloai.Environment, yes, dryRun, withTags bool) error {
-	targetDir := env.Workdir().HostPath
+func applySelectedCommits(cmd *cobra.Command, name, hostPath, targetDir string, refs, paths []string, yes, dryRun, withTags bool) error {
 	backend := cliutil.ResolveBackendForSandbox(name)
 
-	isGit, err := targetIsGitRepo(cmd, name, backend)
+	isGit, err := targetIsGitRepo(cmd, name, hostPath, backend)
 	if err != nil {
 		return err
 	}
@@ -31,7 +30,7 @@ func applySelectedCommits(cmd *cobra.Command, name string, refs, paths []string,
 		return fmt.Errorf("selective apply requires a git target directory — %s is not a git repository", targetDir)
 	}
 
-	preview, err := runSeriesApply(cmd, name, backend, refs, paths, true)
+	preview, err := runSeriesApply(cmd, name, hostPath, backend, refs, paths, true)
 	if err != nil {
 		return err
 	}
@@ -44,7 +43,7 @@ func applySelectedCommits(cmd *cobra.Command, name string, refs, paths []string,
 	}
 
 	resolved := commitInfosFromApplied(preview.Commits)
-	selectedTags := filterTagsForResolved(cmd, name, resolved)
+	selectedTags := filterTagsForResolved(cmd, name, hostPath, resolved)
 	tagsByCommit := buildTagsByCommit(selectedTags)
 
 	if !cliutil.JSONEnabled(cmd) {
@@ -66,7 +65,7 @@ func applySelectedCommits(cmd *cobra.Command, name string, refs, paths []string,
 		return nil
 	}
 
-	result, applyErr := runSeriesApply(cmd, name, backend, refs, paths, false)
+	result, applyErr := runSeriesApply(cmd, name, hostPath, backend, refs, paths, false)
 	if result == nil {
 		return applyErr
 	}
@@ -80,14 +79,14 @@ func applySelectedCommits(cmd *cobra.Command, name string, refs, paths []string,
 		shaMap[strings.ToLower(c.SourceSHA)] = c.HostSHA
 	}
 
-	return finishSelectiveApply(cmd, name, len(result.Commits), shaMap, applyErr, selectedTags, targetDir, withTags)
+	return finishSelectiveApply(cmd, name, hostPath, len(result.Commits), shaMap, applyErr, selectedTags, targetDir, withTags)
 }
 
 // runSeriesApply runs a commit-series apply through the workdir handle — dryRun
 // previews the commits that would land; otherwise it replays them. A non-nil
 // result with a non-nil error means the commits landed but a follow-on step
-// (git am stash, uncommitted changes) had a non-fatal issue.
-func runSeriesApply(cmd *cobra.Command, name string, backend yoloai.BackendType, refs, paths []string, dryRun bool) (*yoloai.ApplyResult, error) {
+// (git am stash, or uncommitted changes) had a non-fatal issue.
+func runSeriesApply(cmd *cobra.Command, name, hostPath string, backend yoloai.BackendType, refs, paths []string, dryRun bool) (*yoloai.ApplyResult, error) {
 	var result *yoloai.ApplyResult
 	err := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		var applyErr error
@@ -95,7 +94,11 @@ func runSeriesApply(cmd *cobra.Command, name string, backend yoloai.BackendType,
 		if sbErr != nil {
 			return sbErr
 		}
-		result, applyErr = sb.Workdir().Apply(ctx, yoloai.WorkdirApplyOptions{
+		wd, wdErr := trackedDirHandle(sb, hostPath)
+		if wdErr != nil {
+			return wdErr
+		}
+		result, applyErr = wd.Apply(ctx, yoloai.WorkdirApplyOptions{
 			Mode:   yoloai.ApplyModeCommits,
 			Refs:   refs,
 			Paths:  paths,
@@ -128,11 +131,11 @@ func confirmSelectiveApply(cmd *cobra.Command, yes bool, targetDir string) (bool
 }
 
 // finishSelectiveApply prints results, handles tags, and returns any follow-on error.
-func finishSelectiveApply(cmd *cobra.Command, name string, commitsApplied int, shaMap map[string]string, applyErr error, selectedTags []yoloai.TagInfo, targetDir string, withTags bool) error {
-	tagsApplied, tagsSkipped := applyTags(cmd, name, selectedTags, shaMap, withTags)
+func finishSelectiveApply(cmd *cobra.Command, name, hostPath string, commitsApplied int, shaMap map[string]string, applyErr error, selectedTags []yoloai.TagInfo, targetDir string, withTags bool) error {
+	tagsApplied, tagsSkipped := applyTags(cmd, name, hostPath, selectedTags, shaMap, withTags)
 
 	if !cliutil.JSONEnabled(cmd) && !withTags {
-		unappliedTags := listSandboxTags(cmd, name, true)
+		unappliedTags := listSandboxTags(cmd, name, hostPath, true)
 		if len(unappliedTags) > 0 {
 			fmt.Fprintf(cmd.OutOrStdout(), "\nHint: %d tag(s) available in sandbox but not on host. Run with --tags to transfer them.\n", len(unappliedTags)) //nolint:errcheck
 		}
@@ -152,8 +155,8 @@ func finishSelectiveApply(cmd *cobra.Command, name string, commitsApplied int, s
 }
 
 // filterTagsForResolved fetches tags beyond baseline and filters to those on the resolved commits.
-func filterTagsForResolved(cmd *cobra.Command, name string, resolved []yoloai.CommitInfo) []yoloai.TagInfo {
-	allTags := listSandboxTags(cmd, name, false)
+func filterTagsForResolved(cmd *cobra.Command, name, hostPath string, resolved []yoloai.CommitInfo) []yoloai.TagInfo {
+	allTags := listSandboxTags(cmd, name, hostPath, false)
 	resolvedSet := make(map[string]bool, len(resolved))
 	for _, c := range resolved {
 		resolvedSet[strings.ToLower(c.SHA)] = true
