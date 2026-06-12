@@ -9,7 +9,6 @@ import (
 
 	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/config"
-	"github.com/kstenerud/yoloai/yoerrors"
 )
 
 // knownSuffixes are the recognized directory argument suffixes.
@@ -45,14 +44,11 @@ func applyDirSuffix(result *yoloai.DirSpec, suffix, arg string) error {
 	return nil
 }
 
-// ParseAuxDirArg parses an auxiliary (`-d`) directory argument and
-// rejects modes the diff/apply workflow doesn't support on aux dirs.
+// ParseAuxDirArg parses an auxiliary (`-d`) directory argument.
 //
-// Q-U (resolved 2026-05-25): the diff/apply workflow operates on the
-// workdir only — aux dirs are reference mounts (`:rw` for live edits,
-// default `:ro` for read-only). Aux `:copy` and `:overlay` are no
-// longer supported. Returns *UsageError pointing at the workarounds:
-// make the dir the workdir, mount as `:rw`, or run a separate sandbox.
+// All modes are permitted on aux dirs: `:copy` and `:overlay` enable the
+// diff/apply workflow for multiple directories (D81, multi-workdir Phase 2),
+// `:rw` provides live-edit access, and the default `:ro` is read-only.
 // env is the curated interpolation map for ${VAR} expansion; pass
 // layout.Env().EnvForConfigInterpolation().
 func ParseAuxDirArg(arg, homeDir string, env map[string]string) (*yoloai.DirSpec, error) {
@@ -60,23 +56,7 @@ func ParseAuxDirArg(arg, homeDir string, env map[string]string) (*yoloai.DirSpec
 	if err != nil {
 		return nil, err
 	}
-	switch d.Mode {
-	case yoloai.DirModeCopy:
-		return nil, yoerrors.NewUsageError(
-			"aux directories cannot use :copy (diff/apply is workdir-only).\n"+
-				"  - to track changes, make %q the workdir instead\n"+
-				"  - to edit it live, use :rw\n"+
-				"  - for an isolated copy, run a separate sandbox", arg)
-	case yoloai.DirModeOverlay:
-		return nil, yoerrors.NewUsageError(
-			"aux directories cannot use :overlay (diff/apply is workdir-only).\n"+
-				"  - to track changes, make %q the workdir instead\n"+
-				"  - to edit it live, use :rw\n"+
-				"  - for an isolated copy, run a separate sandbox", arg)
-	case yoloai.DirModeRW, yoloai.DirModeRO, "":
-		// rw / ro / unset all permitted on aux dirs; caller applies the
-		// "" → ro default downstream.
-	}
+	// All modes accepted; caller applies the "" → ro default downstream.
 	return d, nil
 }
 

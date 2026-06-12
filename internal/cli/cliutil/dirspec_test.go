@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	yoloai "github.com/kstenerud/yoloai"
-	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -184,25 +183,18 @@ func TestDirArg_ResolvedMountPath(t *testing.T) {
 	assert.Equal(t, "/host/path", d2.ResolvedMountPath())
 }
 
-// Q-U: aux dirs no longer support :copy or :overlay; only :rw and the
-// default :ro. ParseAuxDirArg enforces this with a UsageError so the
-// CLI can pass the message through without wrapping.
-func TestParseAuxDirArg_RejectsCopy(t *testing.T) {
-	_, err := ParseAuxDirArg("/tmp/aux:copy", "/home/user", nil)
-	require.Error(t, err)
-	var usage *yoerrors.UsageError
-	require.ErrorAs(t, err, &usage)
-	assert.Contains(t, err.Error(), "aux directories cannot use :copy")
-	assert.Contains(t, err.Error(), "workdir")
-	assert.Contains(t, err.Error(), ":rw")
+// D81 (multi-workdir Phase 2): aux :copy and :overlay are now accepted.
+// ParseAuxDirArg no longer rejects them.
+func TestParseAuxDirArg_AcceptsCopy(t *testing.T) {
+	d, err := ParseAuxDirArg("/tmp/aux:copy", "/home/user", nil)
+	require.NoError(t, err)
+	assert.Equal(t, yoloai.DirModeCopy, d.Mode)
 }
 
-func TestParseAuxDirArg_RejectsOverlay(t *testing.T) {
-	_, err := ParseAuxDirArg("/tmp/aux:overlay", "/home/user", nil)
-	require.Error(t, err)
-	var usage *yoerrors.UsageError
-	require.ErrorAs(t, err, &usage)
-	assert.Contains(t, err.Error(), "aux directories cannot use :overlay")
+func TestParseAuxDirArg_AcceptsOverlay(t *testing.T) {
+	d, err := ParseAuxDirArg("/tmp/aux:overlay", "/home/user", nil)
+	require.NoError(t, err)
+	assert.Equal(t, yoloai.DirModeOverlay, d.Mode)
 }
 
 func TestParseAuxDirArg_AcceptsRW(t *testing.T) {

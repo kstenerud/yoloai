@@ -125,7 +125,7 @@ func TestSetupAuxDirs_GuestMountTranslation(t *testing.T) {
 		{Path: "/Users/karl/lib", Mode: DirModeRW},
 	}
 
-	dirEnvs, err := setupAuxDirs(&fakeGuestMountRuntime{}, auxDirs)
+	dirEnvs, err := setupAuxDirs(context.Background(), git.NewHostWithEnv(testutil.GitEnv()), t.TempDir(), &fakeGuestMountRuntime{}, auxDirs)
 	require.NoError(t, err)
 	require.Len(t, dirEnvs, 2)
 
@@ -139,10 +139,42 @@ func TestSetupAuxDirs_GuestMountTranslation(t *testing.T) {
 func TestSetupAuxDirs_NoTranslationIsIdentity(t *testing.T) {
 	auxDirs := []*DirSpec{{Path: "/Users/karl/work/embrace", Mode: "ro"}}
 
-	dirEnvs, err := setupAuxDirs(&fakeRuntime{}, auxDirs)
+	dirEnvs, err := setupAuxDirs(context.Background(), git.NewHostWithEnv(testutil.GitEnv()), t.TempDir(), &fakeRuntime{}, auxDirs)
 	require.NoError(t, err)
 	require.Len(t, dirEnvs, 1)
 	assert.Equal(t, dirEnvs[0].HostPath, dirEnvs[0].MountPath)
+}
+
+// D81 (multi-workdir Phase 2): an aux :copy dir gets host-side content setup
+// and a git baseline, just like the workdir.
+func TestSetupAuxDir_CopyMode_CreatesBaselineAndCopy(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping filesystem test in short mode")
+	}
+	tempDir := t.TempDir()
+	sandboxDir := filepath.Join(tempDir, "sandbox")
+	auxPath := filepath.Join(tempDir, "aux")
+
+	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "work"), 0755))                        //nolint:gosec // G301: test directory
+	require.NoError(t, os.MkdirAll(auxPath, 0755))                                                  //nolint:gosec // G301: test directory
+	require.NoError(t, os.WriteFile(filepath.Join(auxPath, "lib.go"), []byte("package lib"), 0644)) //nolint:gosec // G306: test file
+
+	auxCopy := &DirSpec{Path: auxPath, Mode: DirModeCopy}
+	rt := &mockDockerRuntime{}
+	g := git.NewHostWithEnv(testutil.GitEnv())
+
+	dirEnvs, err := setupAuxDirs(context.Background(), g, sandboxDir, rt, []*DirSpec{auxCopy})
+	require.NoError(t, err)
+	require.Len(t, dirEnvs, 1)
+
+	assert.NotEmpty(t, dirEnvs[0].BaselineSHA, "aux :copy dir must have a baseline SHA")
+	assert.Equal(t, dirEnvs[0].BaselineSHA, dirEnvs[0].InceptionSHA)
+	assert.Equal(t, store.DirModeCopy, dirEnvs[0].Mode)
+
+	// Verify host-side copy was created
+	auxWorkDir := store.WorkDir(sandboxDir, auxPath)
+	assert.DirExists(t, auxWorkDir)
+	assert.FileExists(t, filepath.Join(auxWorkDir, "lib.go"))
 }
 
 // defaultDirModes is the single safe-default step: an unset workdir mode
@@ -181,18 +213,16 @@ func TestCollectCopyDirs_WorkdirCopy(t *testing.T) {
 	assert.Equal(t, []string{"/home/user/project"}, result)
 }
 
-// Q-U: aux dirs can no longer be :copy or :overlay, so aux entries
-// passed through here are silently ignored by collectCopyDirs (the
-// parameter is kept for callsite stability). The mixed-modes case
-// reduces to "the workdir's mode decides; aux entries don't count".
-func TestCollectCopyDirs_MixedModes_IgnoresAux(t *testing.T) {
+// D81 (multi-workdir Phase 2): aux :copy dirs now participate in collectCopyDirs.
+// Only :rw and :ro aux entries are excluded; :copy aux entries are included.
+func TestCollectCopyDirs_MixedModes_IncludesAuxCopy(t *testing.T) {
 	workdir := &DirSpec{Path: "/home/user/project", Mode: DirMode("copy")}
 	auxDirs := []*DirSpec{
-		{Path: "/home/user/lib", Mode: DirMode("rw")},
+		{Path: "/home/user/lib", Mode: DirMode("copy")},
 		{Path: "/home/user/data", Mode: "ro"},
 	}
 	result := collectCopyDirs(workdir, auxDirs)
-	assert.Equal(t, []string{"/home/user/project"}, result)
+	assert.Equal(t, []string{"/home/user/project", "/home/user/lib"}, result)
 }
 
 func TestCollectCopyDirs_CustomMountPath(t *testing.T) {
@@ -219,18 +249,22 @@ func TestCollectOverlayMounts_WorkdirOverlay(t *testing.T) {
 	assert.Contains(t, result[0].Work, "ovlwork")
 }
 
-// Q-U: aux dirs can no longer be :overlay. collectOverlayMounts
-// ignores aux entries entirely; only the workdir's mode matters.
-// Regress-guards both the "aux :overlay no longer participates" and
-// "workdir-only result has length ≤ 1" invariants.
-func TestCollectOverlayMounts_IgnoresAux(t *testing.T) {
+// Workdir :copy with no :overlay aux dirs produces an empty mount list.
+func TestCollectOverlayMounts_NoOverlayDirs(t *testing.T) {
 	workdir := &DirSpec{Path: "/home/user/project", Mode: DirMode("copy")}
-	// aux entries here would have been overlay under the old code path;
-	// after Q-U they're rejected at parse time, but defending against a
-	// stale DirSpec constructed in-process is cheap.
 	auxDirs := []*DirSpec{{Path: "/home/user/lib", Mode: DirMode("rw")}}
 	result := collectOverlayMounts(workdir, auxDirs)
 	assert.Empty(t, result)
+}
+
+// D81 (multi-workdir Phase 2): aux :overlay dirs now contribute overlay mounts.
+func TestCollectOverlayMounts_IncludesAuxOverlay(t *testing.T) {
+	workdir := &DirSpec{Path: "/home/user/project", Mode: DirMode("copy")}
+	auxDirs := []*DirSpec{{Path: "/home/user/lib", Mode: DirMode("overlay")}}
+	result := collectOverlayMounts(workdir, auxDirs)
+	require.Len(t, result, 1)
+	assert.Contains(t, result[0].Merged, "merged")
+	assert.Contains(t, result[0].Lower, "lower")
 }
 
 func TestCollectOverlayMounts_WorkdirOnly(t *testing.T) {

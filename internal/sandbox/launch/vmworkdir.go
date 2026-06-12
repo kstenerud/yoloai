@@ -27,20 +27,37 @@ var (
 )
 
 // ExecuteVMWorkDirSetup runs VM-side work directory setup for backends that
-// implement WorkDirSetup (e.g., Tart). It copies the work directory from
-// VirtioFS staging to local VM storage, creates the git baseline inside the VM,
-// retrieves the baseline SHA, and updates environment.json with the SHA.
-// Returns nil if the runtime does not implement WorkDirSetup (Docker/containerd).
+// implement WorkDirSetup (e.g., Tart). For every :copy dir in the environment
+// (workdir and any :copy aux dirs), it copies from VirtioFS staging to local VM
+// storage, creates the git baseline inside the VM, retrieves the baseline SHA,
+// and writes it back to the environment. Saves environment.json once after all
+// dirs are processed. Returns nil if the runtime does not implement WorkDirSetup
+// (Docker/containerd).
 func ExecuteVMWorkDirSetup(ctx context.Context, rt runtime.Runtime, name, sandboxDir string, meta *store.Environment) error {
 	setupIntf, ok := rt.(runtime.WorkDirSetup)
 	if !ok {
 		return nil // Docker/containerd - no VM setup needed
 	}
 
-	vfsPath := filepath.Join("/Volumes/My Shared Files/yoloai/work", config.EncodePath(meta.Workdir().HostPath))
-	vmLocalPath := runtime.ResolveCopyMountFor(rt, name, meta.Workdir().HostPath)
-
 	instance := store.InstanceName(meta.Principal, name)
+
+	for i := range meta.Dirs {
+		if meta.Dirs[i].Mode != store.DirModeCopy {
+			continue
+		}
+		if err := setupVMCopyDir(ctx, rt, setupIntf, instance, name, meta, i); err != nil {
+			return err
+		}
+	}
+
+	return store.SaveEnvironment(sandboxDir, meta)
+}
+
+// setupVMCopyDir runs the VM-side setup for a single :copy directory at index i
+// in meta.Dirs: copies from VirtioFS staging, baselines, and records the SHA.
+func setupVMCopyDir(ctx context.Context, rt runtime.Runtime, setupIntf runtime.WorkDirSetup, instance, name string, meta *store.Environment, i int) error {
+	vfsPath := filepath.Join("/Volumes/My Shared Files/yoloai/work", config.EncodePath(meta.Dirs[i].HostPath))
+	vmLocalPath := runtime.ResolveCopyMountFor(rt, name, meta.Dirs[i].HostPath)
 
 	cmds := setupIntf.SetupWorkDirInVM(vfsPath, vmLocalPath)
 	for _, cmd := range cmds {
@@ -60,12 +77,11 @@ func ExecuteVMWorkDirSetup(ctx context.Context, rt runtime.Runtime, name, sandbo
 		return fmt.Errorf("get baseline SHA: %w", err)
 	}
 
-	// Update environment.json
-	meta.Workdir().BaselineSHA = strings.TrimSpace(result.Stdout)
-	if meta.Workdir().InceptionSHA == "" {
-		meta.Workdir().InceptionSHA = meta.Workdir().BaselineSHA
+	meta.Dirs[i].BaselineSHA = strings.TrimSpace(result.Stdout)
+	if meta.Dirs[i].InceptionSHA == "" {
+		meta.Dirs[i].InceptionSHA = meta.Dirs[i].BaselineSHA
 	}
-	return store.SaveEnvironment(sandboxDir, meta)
+	return nil
 }
 
 // execVMSetupWithStormRetry runs a single VM-setup command, retrying while it

@@ -18,7 +18,6 @@ import (
 	"github.com/kstenerud/yoloai/internal/sandbox/patch"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/internal/testutil"
-	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -215,28 +214,29 @@ func TestIntegration_RWMode(t *testing.T) {
 	assert.Equal(t, store.DirModeRW, meta.Workdir().Mode)
 }
 
-// Q-U (2026-05-25): aux directories can no longer be :copy or
-// :overlay. The library boundary (buildAuxDirs) returns a
-// *UsageError that mirrors the CLI's ParseAuxDirArg rejection so
-// programmatic embedders get the same loud failure as `yoloai new
-// -d <path>:copy`.
-func TestIntegration_AuxDirCopy_RejectedByLibrary(t *testing.T) {
+// D81 (multi-workdir Phase 2): aux :copy is now accepted. The library creates
+// a host-side copy and records a baseline SHA in environment.json, just as it
+// does for the workdir.
+func TestIntegration_AuxDirCopy_AcceptedByLibrary(t *testing.T) {
 	mgr, ctx := integrationSetup(t)
 	projectDir := createProjectDir(t)
 	auxDir := createAuxDir(t, "libs")
 
 	_, err := createSandbox(ctx, mgr, sandbox.CreateOptions{
-		Name:    "auxcopy-rejected",
+		Name:    "auxcopy-accepted",
 		Workdir: sandbox.DirSpec{Path: projectDir},
 		Agent:   "test",
 		AuxDirs: []sandbox.DirSpec{{Path: auxDir, Mode: sandbox.DirModeCopy}},
 		Version: "test",
 	})
-	require.Error(t, err)
-	var usage *yoerrors.UsageError
-	require.ErrorAs(t, err, &usage)
-	assert.Contains(t, err.Error(), "aux directories cannot use :copy")
-	assert.Contains(t, err.Error(), ":rw")
+	require.NoError(t, err)
+	t.Cleanup(func() { destroySandbox(ctx, mgr, "auxcopy-accepted") }) //nolint:errcheck // test cleanup
+
+	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir("auxcopy-accepted"))
+	require.NoError(t, err)
+	require.Len(t, meta.AuxDirs(), 1)
+	assert.Equal(t, store.DirModeCopy, meta.AuxDirs()[0].Mode)
+	assert.NotEmpty(t, meta.AuxDirs()[0].BaselineSHA, "aux :copy dir must have a baseline SHA")
 }
 
 // Aux :rw is the still-supported writable aux mode after Q-U. The

@@ -60,9 +60,10 @@ const (
 // callers (`Mode: DirModeCopy`, `m.Mode == DirModeRW`) continue to
 // work without churn.
 //
-// :copy and :overlay are workdir-only (Q-U, 2026-05-25); aux
-// directories accept only :rw and :ro (with :ro as the default
-// when DirSpec.Mode is left zero).
+// All modes are permitted on both workdir and aux dirs. :copy and :overlay
+// enable the diff/apply workflow (D81, multi-workdir Phase 2); :rw provides
+// live-edit access; :ro (the default when DirSpec.Mode is left zero on an aux
+// dir) is read-only.
 type DirMode = store.DirMode
 
 // Re-exported DirMode constants. Canonical definitions in
@@ -572,7 +573,7 @@ func setupAllWorkdirs(ctx context.Context, d state.Deps, opts Options, workdir *
 	}
 
 	slog.Debug("setting up aux dirs", "event", "sandbox.create.aux_dirs", "count", len(auxDirs))
-	dirEnvs, err := setupAuxDirs(d.Runtime, auxDirs)
+	dirEnvs, err := setupAuxDirs(ctx, git.NewHost(d.Layout), sandboxDir, d.Runtime, auxDirs)
 	if err != nil {
 		return "", "", nil, err
 	}
