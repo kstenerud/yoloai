@@ -24,6 +24,15 @@ is decided centrally (`GitEnv`-style), not chosen inline at the call site. A
 first encapsulation pass already landed (`9223058`); this supersedes its design.
 Plan + full handoff: [env-access-seal.md](env-access-seal.md).
 
+## Multi-workdir diff/apply
+
+Let one sandbox `:copy`-track **multiple** project dirs (not just the single positional
+workdir) so copy/diff/apply works on each. Restores the capability [Q-U](../../decisions/working-notes.md)
+removed, behind the clean surface it deferred: bulk ops span all tracked dirs, precise
+ops (`<ref>`/`-- pathspec`) name exactly one; a specifier is required only when 2+ dirs
+are tracked; `apply --all` lands every dir independently. Decision [D81](../../decisions/working-notes.md#d81).
+Plan: [multi-workdir-diff-apply.md](multi-workdir-diff-apply.md).
+
 ## Parallel Agent Workflows
 
 Based on [parallel agents research](../research/parallel-agents.md).
