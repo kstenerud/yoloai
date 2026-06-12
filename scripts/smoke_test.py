@@ -2381,6 +2381,45 @@ def _run_system_check(ctx: RunContext, daemon: str, isolation: str) -> tuple[boo
         return False, "yoloai binary not found"
 
 
+def _run_build_streaming(cmd: list[str], log_path: Path, timeout: int) -> int:
+    """Run cmd, teeing combined stdout+stderr to the terminal AND to log_path.
+
+    The build still streams live to the terminal (so a long build doesn't look
+    stuck) while every line is also persisted under the run dir. This is what
+    keeps yoloai's own WARN lines emitted during the build — e.g. the
+    containerd-store inspect-flap / warm-up notice from imageExists — in the test
+    report instead of only scrolling past on the caller's terminal. Returns the
+    process exit code; raises subprocess.TimeoutExpired on timeout (same contract
+    the caller already handles).
+    """
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(log_path, "w", encoding="utf-8") as logf:
+        proc = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
+        )
+        stream = proc.stdout
+        assert stream is not None  # stdout=PIPE always sets it
+
+        def pump() -> None:
+            for line in stream:
+                sys.stdout.write(line)
+                sys.stdout.flush()
+                logf.write(line)
+                logf.flush()
+
+        pump_thread = threading.Thread(target=pump, daemon=True)
+        pump_thread.start()
+        try:
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            pump_thread.join(timeout=5)
+            raise
+        pump_thread.join(timeout=5)
+    return proc.returncode or 0
+
+
 def check_prerequisites(
     ctx: RunContext,
     backends: list[BackendSpec],
@@ -2435,12 +2474,14 @@ def check_prerequisites(
     all_daemons: set[str] = {daemon for (daemon, _) in check_results}
 
     for daemon in sorted(all_daemons):
-        print(f"  Building yoloai-base image for {daemon} backend (output below)...")
+        build_log = ctx.log_dir / f"prereq-build-{daemon}.log"
+        print(f"  Building yoloai-base image for {daemon} backend (output below; captured to {build_log})...")
         build_timeout = TART_BASE_BUILD_TIMEOUT if daemon == "tart" else BASE_BUILD_TIMEOUT
         try:
-            r = subprocess.run(
+            build_rc = _run_build_streaming(
                 [ctx.yoloai_bin, "system", "build", "--backend", daemon],
-                timeout=build_timeout,
+                build_log,
+                build_timeout,
             )
         except subprocess.TimeoutExpired:
             # Fail loud rather than skip: a release gate must not pass while
@@ -2455,7 +2496,7 @@ def check_prerequisites(
             )
             sys.exit(1)
         print()
-        if r.returncode != 0:
+        if build_rc != 0:
             continue
         # Recheck all (daemon, *) pairs now that the image is current.
         for (d, isolation) in list(check_results.keys()):
