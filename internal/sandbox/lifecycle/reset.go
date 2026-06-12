@@ -60,7 +60,7 @@ func Reset(ctx context.Context, d state.Deps, opts ResetOptions) (*ResetResult, 
 		return nil, err
 	}
 
-	if meta.Workdir.Mode == "rw" {
+	if meta.Workdir().Mode == "rw" {
 		return nil, fmt.Errorf("reset is not applicable for :rw directories — changes are already in the original")
 	}
 
@@ -79,7 +79,7 @@ func Reset(ctx context.Context, d state.Deps, opts ResetOptions) (*ResetResult, 
 	}
 
 	// Auto-upgrade to restart: overlay mode requires container restart
-	if meta.Workdir.Mode == "overlay" {
+	if meta.Workdir().Mode == "overlay" {
 		opts.Restart = true
 	}
 
@@ -141,10 +141,10 @@ func unappliedWorkReason(ctx context.Context, hostGit, sandboxGit *git.Git, sand
 		return false, ""
 	}
 
-	if blocked, reason := dirWorkReason(ctx, sandboxGit, sandboxDir, meta.Workdir.Mode, meta.Workdir.HostPath, meta.Workdir.BaselineSHA); blocked {
+	if blocked, reason := dirWorkReason(ctx, sandboxGit, sandboxDir, meta.Workdir().Mode, meta.Workdir().HostPath, meta.Workdir().BaselineSHA); blocked {
 		return true, reason
 	}
-	for _, dirEnv := range meta.Directories {
+	for _, dirEnv := range meta.AuxDirs() {
 		if blocked, reason := dirWorkReason(ctx, sandboxGit, sandboxDir, dirEnv.Mode, dirEnv.HostPath, dirEnv.BaselineSHA); blocked {
 			return true, reason
 		}
@@ -192,16 +192,16 @@ func resetOverlayDirs(sandboxDir, hostPath string) error {
 // resetCopyWorkdir removes the work copy, re-copies from the host path, and
 // records the git baseline. Returns the new baseline SHA (empty if deferred).
 func resetCopyWorkdir(ctx context.Context, d state.Deps, sandboxName, sandboxDir string, meta *store.Environment) (string, error) {
-	workDir := store.WorkDir(sandboxDir, meta.Workdir.HostPath)
+	workDir := store.WorkDir(sandboxDir, meta.Workdir().HostPath)
 
 	if err := os.RemoveAll(workDir); err != nil {
 		return "", fmt.Errorf("remove work copy: %w", err)
 	}
-	if _, err := os.Stat(meta.Workdir.HostPath); err != nil {
-		return "", fmt.Errorf("original directory no longer exists: %s", meta.Workdir.HostPath)
+	if _, err := os.Stat(meta.Workdir().HostPath); err != nil {
+		return "", fmt.Errorf("original directory no longer exists: %s", meta.Workdir().HostPath)
 	}
-	slog.Debug("re-copying workdir", "event", "sandbox.reset.workdir", "sandbox", sandboxName, "host_path", meta.Workdir.HostPath)
-	if err := workspace.CopyDir(meta.Workdir.HostPath, workDir); err != nil {
+	slog.Debug("re-copying workdir", "event", "sandbox.reset.workdir", "sandbox", sandboxName, "host_path", meta.Workdir().HostPath)
+	if err := workspace.CopyDir(meta.Workdir().HostPath, workDir); err != nil {
 		return "", fmt.Errorf("re-copy workdir: %w", err)
 	}
 
@@ -255,19 +255,19 @@ func resetAuxCopyDir(ctx context.Context, g *git.Git, sandboxDir string, d store
 // resetAuxDirs resets all aux :copy and :overlay directories in meta,
 // updating BaselineSHA in-place.
 func resetAuxDirs(ctx context.Context, g *git.Git, sandboxDir string, meta *store.Environment) error {
-	for i, d := range meta.Directories {
+	for i, d := range meta.AuxDirs() {
 		switch d.Mode {
 		case store.DirModeCopy:
 			sha, err := resetAuxCopyDir(ctx, g, sandboxDir, d)
 			if err != nil {
 				return err
 			}
-			meta.Directories[i].BaselineSHA = sha
+			meta.Dirs[1+i].BaselineSHA = sha
 		case store.DirModeOverlay:
 			if err := resetOverlayDirs(sandboxDir, d.HostPath); err != nil {
 				return fmt.Errorf("aux overlay %s: %w", d.HostPath, err)
 			}
-			meta.Directories[i].BaselineSHA = ""
+			meta.Dirs[1+i].BaselineSHA = ""
 		case store.DirModeRW, store.DirModeRO, "":
 			// rw and ro aux dirs have no baseline to reset
 		}
@@ -305,8 +305,8 @@ func reinitLogs(sandboxDir string, perms state.IsolationPerms) {
 
 // resetWorkdir resets the main workdir (overlay or copy) and returns the new baseline SHA.
 func resetWorkdir(ctx context.Context, d state.Deps, sandboxName, sandboxDir string, meta *store.Environment) (string, error) {
-	if meta.Workdir.Mode == "overlay" {
-		if err := resetOverlayDirs(sandboxDir, meta.Workdir.HostPath); err != nil {
+	if meta.Workdir().Mode == "overlay" {
+		if err := resetOverlayDirs(sandboxDir, meta.Workdir().HostPath); err != nil {
 			return "", err
 		}
 		return "", nil // baseline deferred — container restart recreates it
@@ -375,7 +375,7 @@ func prepareResetRestart(ctx context.Context, d state.Deps, opts ResetOptions, s
 	}
 
 	// Update environment.json
-	meta.Workdir.BaselineSHA = newSHA
+	meta.Workdir().BaselineSHA = newSHA
 	if err := store.SaveEnvironment(sandboxDir, meta); err != nil {
 		return err
 	}
@@ -395,7 +395,7 @@ func prepareResetRestart(ctx context.Context, d state.Deps, opts ResetOptions, s
 
 	// Execute VM-side work directory setup if baseline was deferred (Tart VMs)
 	// For :copy mode, if BaselineSHA is empty, VM setup is needed
-	if meta.Workdir.Mode == "copy" && meta.Workdir.BaselineSHA == "" {
+	if meta.Workdir().Mode == "copy" && meta.Workdir().BaselineSHA == "" {
 		if err := launch.ExecuteVMWorkDirSetup(ctx, d.Runtime, opts.Name, sandboxDir, meta); err != nil {
 			return fmt.Errorf("VM work dir setup: %w", err)
 		}
@@ -413,12 +413,12 @@ func resetInPlace(ctx context.Context, d state.Deps, opts ResetOptions, meta *st
 		return fmt.Errorf("in-place reset not supported for Tart VMs (work dir is inside VM)")
 	}
 
-	workDir := store.WorkDir(sandboxDir, meta.Workdir.HostPath)
+	workDir := store.WorkDir(sandboxDir, meta.Workdir().HostPath)
 	g := git.NewHost(d.Layout)
 	rsyncEnv := d.Layout.Env().EnvForHostTool()
 
 	// Re-sync workdir from host (bind-mount makes changes visible in container)
-	if err := rsyncDir(rsyncEnv, meta.Workdir.HostPath, workDir); err != nil {
+	if err := rsyncDir(rsyncEnv, meta.Workdir().HostPath, workDir); err != nil {
 		return fmt.Errorf("rsync workdir: %w", err)
 	}
 
@@ -439,7 +439,7 @@ func resetInPlace(ctx context.Context, d state.Deps, opts ResetOptions, meta *st
 	}
 
 	// Update environment.json
-	meta.Workdir.BaselineSHA = newSHA
+	meta.Workdir().BaselineSHA = newSHA
 	if err := store.SaveEnvironment(sandboxDir, meta); err != nil {
 		return err
 	}

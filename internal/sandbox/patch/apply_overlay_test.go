@@ -26,7 +26,7 @@ func TestApplyOverlay_NonOverlayNoop(t *testing.T) {
 	meta := &store.Environment{
 		Name:      name,
 		AgentType: "test",
-		Workdir:   store.WorkdirEnvironment{HostPath: filepath.Join(tmpDir, "p"), MountPath: filepath.Join(tmpDir, "p"), Mode: store.DirModeCopy, BaselineSHA: "abc"},
+		Dirs:      []store.DirEnvironment{{HostPath: filepath.Join(tmpDir, "p"), MountPath: filepath.Join(tmpDir, "p"), Mode: store.DirModeCopy, BaselineSHA: "abc"}},
 	}
 	require.NoError(t, store.SaveEnvironment(layout.SandboxDir(name), meta))
 

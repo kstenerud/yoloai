@@ -39,7 +39,7 @@ func TargetIsGitRepo(layout config.Layout, name string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return git.IsGitRepo(meta.Workdir.HostPath), nil
+	return git.IsGitRepo(meta.Workdir().HostPath), nil
 }
 
 // TransferTags re-creates the given sandbox tags on the host target repo,
@@ -62,10 +62,10 @@ func TransferTags(ctx context.Context, layout config.Layout, rt runtime.Runtime,
 	if err != nil {
 		return nil, err
 	}
-	targetDir := meta.Workdir.HostPath
+	targetDir := meta.Workdir().HostPath
 
 	if len(shaMap) == 0 {
-		workDir := store.WorkDir(sandboxDir, meta.Workdir.HostPath)
+		workDir := store.WorkDir(sandboxDir, meta.Workdir().HostPath)
 		sandboxSHAs := make([]string, len(tags))
 		for i, t := range tags {
 			sandboxSHAs[i] = t.SHA

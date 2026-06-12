@@ -165,7 +165,7 @@ func (p *ProxyServer) createSandbox(ctx context.Context) (*yoloai.Environment, e
 //	{workdir}  — meta.Workdir.MountPath (the primary working directory)
 //	{files}    — the file exchange directory (/yoloai/files/)
 //	{cache}    — the cache directory (/yoloai/cache/)
-//	{dir:N}    — meta.Directories[N].MountPath (Nth auxiliary directory, 0-indexed)
+//	{dir:N}    — meta.AuxDirs()[N].MountPath (Nth auxiliary directory, 0-indexed)
 //
 // hostFilesDir/hostCacheDir are the on-host file-exchange and cache
 // directories (from Sandbox.Files().Path()/Sandbox.CacheDir()). They are used only when
@@ -181,7 +181,7 @@ func expandCmd(cmd []string, hostFilesDir, hostCacheDir string, meta *yoloai.Env
 
 	expanded := make([]string, len(cmd))
 	for i, arg := range cmd {
-		arg = strings.ReplaceAll(arg, "{workdir}", meta.Workdir.MountPath)
+		arg = strings.ReplaceAll(arg, "{workdir}", meta.Workdir().MountPath)
 		arg = strings.ReplaceAll(arg, "{files}", filesDir)
 		arg = strings.ReplaceAll(arg, "{cache}", cacheDir)
 
@@ -198,10 +198,11 @@ func expandCmd(cmd []string, hostFilesDir, hostCacheDir string, meta *yoloai.Env
 			end += start
 			indexStr := arg[start+5 : end]
 			n, err := strconv.Atoi(indexStr)
-			if err != nil || n < 0 || n >= len(meta.Directories) {
-				return nil, fmt.Errorf("placeholder {dir:%s}: index out of range (sandbox has %d auxiliary directories)", indexStr, len(meta.Directories))
+			auxDirs := meta.AuxDirs()
+			if err != nil || n < 0 || n >= len(auxDirs) {
+				return nil, fmt.Errorf("placeholder {dir:%s}: index out of range (sandbox has %d auxiliary directories)", indexStr, len(auxDirs))
 			}
-			arg = arg[:start] + meta.Directories[n].MountPath + arg[end+1:]
+			arg = arg[:start] + auxDirs[n].MountPath + arg[end+1:]
 		}
 
 		expanded[i] = arg

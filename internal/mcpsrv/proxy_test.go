@@ -12,14 +12,14 @@ import (
 )
 
 func env(hostFS bool, workdir string, auxDirs ...string) *yoloai.Environment {
-	dirs := make([]yoloai.DirInfo, len(auxDirs))
-	for i, d := range auxDirs {
-		dirs[i] = yoloai.DirInfo{MountPath: d}
+	dirs := make([]yoloai.DirInfo, 0, 1+len(auxDirs))
+	dirs = append(dirs, yoloai.DirInfo{MountPath: workdir})
+	for _, d := range auxDirs {
+		dirs = append(dirs, yoloai.DirInfo{MountPath: d})
 	}
 	return &yoloai.Environment{
 		HostFilesystem: hostFS,
-		Workdir:        yoloai.WorkdirInfo{MountPath: workdir},
-		Directories:    dirs,
+		Dirs:           dirs,
 	}
 }
 

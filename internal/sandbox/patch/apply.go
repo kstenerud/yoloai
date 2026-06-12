@@ -86,7 +86,7 @@ func ApplyAll(ctx context.Context, layout config.Layout, rt runtime.Runtime, nam
 	if err != nil {
 		return nil, err
 	}
-	if meta.Workdir.Mode != "copy" {
+	if meta.Workdir().Mode != "copy" {
 		// :rw is live; :overlay uses GenerateOverlayPatch. Neither belongs in
 		// the squash apply path that funnels through ApplyAll.
 		return nil, nil
@@ -100,7 +100,7 @@ func ApplyAll(ctx context.Context, layout config.Layout, rt runtime.Runtime, nam
 		return nil, nil
 	}
 
-	hostPath := meta.Workdir.HostPath
+	hostPath := meta.Workdir().HostPath
 	isGit := git.IsGitRepo(hostPath)
 	hostGit := git.NewHost(layout)
 	if err := hostGit.CheckPatch(ctx, patchBytes, hostPath, isGit); err != nil {
@@ -163,11 +163,11 @@ func ApplySeries(ctx context.Context, layout config.Layout, rt runtime.Runtime, 
 	if err != nil {
 		return nil, err
 	}
-	if meta.Workdir.Mode != "copy" {
+	if meta.Workdir().Mode != "copy" {
 		return nil, nil
 	}
 
-	hostPath := meta.Workdir.HostPath
+	hostPath := meta.Workdir().HostPath
 	if !git.IsGitRepo(hostPath) {
 		return nil, yoerrors.NewUsageError(
 			"cannot replay a commit series onto %s: not a git repository — apply with NoCommit to land the net changes instead",
@@ -442,20 +442,16 @@ func UpdateOverlayBaseline(layout config.Layout, name, hostPath, sha string) err
 	}
 
 	// Update workdir or aux dir
-	if meta.Workdir.HostPath == hostPath {
-		meta.Workdir.BaselineSHA = sha
-	} else {
-		found := false
-		for i := range meta.Directories {
-			if meta.Directories[i].HostPath == hostPath {
-				meta.Directories[i].BaselineSHA = sha
-				found = true
-				break
-			}
+	found := false
+	for i := range meta.Dirs {
+		if meta.Dirs[i].HostPath == hostPath {
+			meta.Dirs[i].BaselineSHA = sha
+			found = true
+			break
 		}
-		if !found {
-			return fmt.Errorf("directory %s not found in sandbox metadata", hostPath)
-		}
+	}
+	if !found {
+		return fmt.Errorf("directory %s not found in sandbox metadata", hostPath)
 	}
 
 	return store.SaveEnvironment(sandboxDir, meta)

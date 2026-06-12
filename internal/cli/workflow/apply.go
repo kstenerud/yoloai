@@ -113,7 +113,7 @@ func runApplyCmd(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if env.Workdir.Mode == yoloai.DirModeRW {
+	if env.Workdir().Mode == yoloai.DirModeRW {
 		return yoerrors.NewUsageError("apply is not needed for :rw directories — changes are already live")
 	}
 
@@ -129,7 +129,7 @@ func runApplyCmd(cmd *cobra.Command, args []string) error {
 	}
 
 	if !cliutil.JSONEnabled(cmd) {
-		fmt.Fprintf(cmd.OutOrStdout(), "Target: %s\n\n", env.Workdir.HostPath) //nolint:errcheck
+		fmt.Fprintf(cmd.OutOrStdout(), "Target: %s\n\n", env.Workdir().HostPath) //nolint:errcheck
 	}
 
 	// Best-effort agent-running warning

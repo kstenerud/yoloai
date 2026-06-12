@@ -31,7 +31,7 @@ func (e *Engine) InteractiveExec(ctx context.Context, name string, cmd []string,
 	}
 	user := ContainerUser(info.Environment, e.layout.HostUID)
 	return e.runtime.InteractiveExec(ctx, store.InstanceName(e.layout.Principal, name), cmd,
-		user, info.Environment.Workdir.MountPath, io)
+		user, info.Environment.Workdir().MountPath, io)
 }
 
 // StdioExec runs cmd inside the sandbox's container with raw stdio piped to the

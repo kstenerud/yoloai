@@ -31,7 +31,7 @@ func applyOverlay(cmd *cobra.Command, name string, env *yoloai.Environment, refs
 	}
 	if preview == nil {
 		if cliutil.JSONEnabled(cmd) {
-			return cliutil.WriteJSON(cmd.OutOrStdout(), applyResult{Target: env.Workdir.HostPath, Method: "overlay"})
+			return cliutil.WriteJSON(cmd.OutOrStdout(), applyResult{Target: env.Workdir().HostPath, Method: "overlay"})
 		}
 		_, e := fmt.Fprintln(cmd.OutOrStdout(), "No changes to apply")
 		return e

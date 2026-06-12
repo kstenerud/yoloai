@@ -40,10 +40,10 @@ func TestInspectSandbox_Removed(t *testing.T) {
 	meta := &store.Environment{
 		Name:      name,
 		AgentType: "claude",
-		Workdir: store.WorkdirEnvironment{
+		Dirs: []store.DirEnvironment{{
 			HostPath: "/tmp/test",
 			Mode:     "copy",
-		},
+		}},
 		CreatedAt: time.Now(),
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
@@ -87,10 +87,10 @@ func TestListSandboxes_IncludesBroken(t *testing.T) {
 	meta := &store.Environment{
 		Name:      "valid",
 		AgentType: "claude",
-		Workdir: store.WorkdirEnvironment{
+		Dirs: []store.DirEnvironment{{
 			HostPath: "/tmp/test",
 			Mode:     "copy",
-		},
+		}},
 		CreatedAt: time.Now(),
 	}
 	require.NoError(t, store.SaveEnvironment(validDir, meta))

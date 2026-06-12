@@ -25,7 +25,7 @@ func currentBaseline(t *testing.T, tmpDir, name string) string {
 	t.Helper()
 	meta, err := store.LoadEnvironment(testLayout(tmpDir).SandboxDir(name))
 	require.NoError(t, err)
-	return meta.Workdir.BaselineSHA
+	return meta.Workdir().BaselineSHA
 }
 
 func TestAdvanceBaselineCAS_HappyPath(t *testing.T) {

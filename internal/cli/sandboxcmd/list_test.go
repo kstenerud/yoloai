@@ -18,7 +18,7 @@ func makeInfo(name string, status yoloai.Status, agent, profile, changes string)
 			AgentType: agentpkg.AgentType(agent),
 			Profile:   profile,
 			CreatedAt: time.Now(),
-			Workdir:   yoloai.WorkdirInfo{HostPath: "/tmp/" + name},
+			Dirs:      []yoloai.DirInfo{{HostPath: "/tmp/" + name}},
 		},
 		Status:         status,
 		Changes:        yoloai.ChangeState(changes),

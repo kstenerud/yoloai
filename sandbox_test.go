@@ -166,7 +166,7 @@ func TestVscodeAttach_Supported(t *testing.T) {
 		Name:        "box",
 		AgentType:   "test",
 		BackendType: BackendDocker,
-		Workdir:     store.WorkdirEnvironment{HostPath: "/proj", MountPath: "/proj", Mode: store.DirModeCopy},
+		Dirs:        []store.DirEnvironment{{HostPath: "/proj", MountPath: "/proj", Mode: store.DirModeCopy}},
 	})
 	sb, err := c.Sandbox("box")
 	require.NoError(t, err)
@@ -185,7 +185,7 @@ func TestVscodeAttach_Unsupported(t *testing.T) {
 		Name:        "box",
 		AgentType:   "test",
 		BackendType: BackendSeatbelt,
-		Workdir:     store.WorkdirEnvironment{HostPath: "/proj", MountPath: "/proj", Mode: store.DirModeCopy},
+		Dirs:        []store.DirEnvironment{{HostPath: "/proj", MountPath: "/proj", Mode: store.DirModeCopy}},
 	})
 	sb, err := c.Sandbox("box")
 	require.NoError(t, err)
@@ -260,7 +260,7 @@ func TestSandbox_LiveHandle_PassesGuard(t *testing.T) {
 		Name:        "box",
 		AgentType:   "test",
 		BackendType: BackendDocker,
-		Workdir:     store.WorkdirEnvironment{HostPath: "/proj", MountPath: "/proj", Mode: store.DirModeCopy},
+		Dirs:        []store.DirEnvironment{{HostPath: "/proj", MountPath: "/proj", Mode: store.DirModeCopy}},
 	})
 	sb, err := c.Sandbox("box")
 	require.NoError(t, err)

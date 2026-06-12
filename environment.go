@@ -29,9 +29,9 @@ type Environment struct {
 	Isolation      IsolationMode `json:"isolation,omitempty"`
 	HostFilesystem bool          `json:"host_filesystem,omitempty"`
 
-	// As-built provenance.
-	Workdir     WorkdirInfo `json:"workdir"`
-	Directories []DirInfo   `json:"directories,omitempty"`
+	// As-built provenance. Dirs is the ordered directory list; element 0 is the
+	// workdir (use the Workdir()/AuxDirs()/TrackedDirs() accessors).
+	Dirs []DirInfo `json:"dirs,omitempty"`
 
 	// Resolved-config echo.
 	NetworkMode        NetworkMode       `json:"network_mode,omitempty"`
@@ -45,15 +45,40 @@ type Environment struct {
 	AutoCommitInterval int               `json:"auto_commit_interval,omitempty"`
 }
 
-// HasOverlayDirs reports whether the workdir or any auxiliary directory uses
-// :overlay mode. Overlay sandboxes keep their git state inside the container,
-// so callers route diff/apply through container exec rather than the host work
-// copy.
-func (e *Environment) HasOverlayDirs() bool {
-	if e.Workdir.Mode == DirModeOverlay {
-		return true
+// Workdir returns the primary directory — Dirs[0], the agent's cwd. Returns the
+// zero DirInfo for a malformed environment with no directories.
+func (e *Environment) Workdir() DirInfo {
+	if len(e.Dirs) == 0 {
+		return DirInfo{}
 	}
-	for _, d := range e.Directories {
+	return e.Dirs[0]
+}
+
+// AuxDirs returns the non-workdir directories (Dirs[1:]).
+func (e *Environment) AuxDirs() []DirInfo {
+	if len(e.Dirs) <= 1 {
+		return nil
+	}
+	return e.Dirs[1:]
+}
+
+// TrackedDirs returns the directories diff/apply operates on — those in
+// :copy or :overlay mode (the workdir is included when tracked).
+func (e *Environment) TrackedDirs() []DirInfo {
+	var out []DirInfo
+	for _, d := range e.Dirs {
+		if d.Mode == DirModeCopy || d.Mode == DirModeOverlay {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// HasOverlayDirs reports whether any directory uses :overlay mode. Overlay
+// sandboxes keep their git state inside the container, so callers route
+// diff/apply through container exec rather than the host work copy.
+func (e *Environment) HasOverlayDirs() bool {
+	for _, d := range e.Dirs {
 		if d.Mode == DirModeOverlay {
 			return true
 		}
@@ -61,22 +86,15 @@ func (e *Environment) HasOverlayDirs() bool {
 	return false
 }
 
-// WorkdirInfo is the resolved workdir state captured at creation time. Mirror
-// of the internal store.WorkdirEnvironment.
-type WorkdirInfo struct {
-	HostPath    string  `json:"host_path"`
-	MountPath   string  `json:"mount_path"`
-	Mode        DirMode `json:"mode"`
-	BaselineSHA string  `json:"baseline_sha,omitempty"`
-}
-
-// DirInfo is the resolved state of an auxiliary directory captured at creation
-// time. Mirror of the internal store.DirEnvironment.
+// DirInfo is the resolved state of one directory captured at creation time
+// (workdir and auxiliary alike — the workdir is Dirs[0]). Mirror of the
+// internal store.DirEnvironment.
 type DirInfo struct {
-	HostPath    string  `json:"host_path"`
-	MountPath   string  `json:"mount_path"`
-	Mode        DirMode `json:"mode"`
-	BaselineSHA string  `json:"baseline_sha,omitempty"`
+	HostPath     string  `json:"host_path"`
+	MountPath    string  `json:"mount_path"`
+	Mode         DirMode `json:"mode"`
+	BaselineSHA  string  `json:"baseline_sha,omitempty"`
+	InceptionSHA string  `json:"inception_sha,omitempty"`
 }
 
 // environmentFromStore builds the public read-model from the internal metadata.
@@ -96,7 +114,6 @@ func environmentFromStore(m *store.Environment) *Environment {
 		Model:              m.Model,
 		Isolation:          m.Isolation,
 		HostFilesystem:     m.HostFilesystem,
-		Workdir:            workdirInfoFromStore(m.Workdir),
 		NetworkMode:        NetworkMode(m.NetworkMode),
 		NetworkAllow:       m.NetworkAllow,
 		Ports:              m.Ports,
@@ -106,15 +123,10 @@ func environmentFromStore(m *store.Environment) *Environment {
 		Devices:            m.Devices,
 		AutoCommitInterval: m.AutoCommitInterval,
 	}
-	if len(m.Directories) > 0 {
-		env.Directories = make([]DirInfo, len(m.Directories))
-		for i, d := range m.Directories {
-			env.Directories[i] = DirInfo{
-				HostPath:    d.HostPath,
-				MountPath:   d.MountPath,
-				Mode:        d.Mode,
-				BaselineSHA: d.BaselineSHA,
-			}
+	if len(m.Dirs) > 0 {
+		env.Dirs = make([]DirInfo, len(m.Dirs))
+		for i, d := range m.Dirs {
+			env.Dirs[i] = dirInfoFromStore(d)
 		}
 	}
 	if m.Resources != nil {
@@ -126,12 +138,13 @@ func environmentFromStore(m *store.Environment) *Environment {
 	return env
 }
 
-func workdirInfoFromStore(w store.WorkdirEnvironment) WorkdirInfo {
-	return WorkdirInfo{
-		HostPath:    w.HostPath,
-		MountPath:   w.MountPath,
-		Mode:        w.Mode,
-		BaselineSHA: w.BaselineSHA,
+func dirInfoFromStore(d store.DirEnvironment) DirInfo {
+	return DirInfo{
+		HostPath:     d.HostPath,
+		MountPath:    d.MountPath,
+		Mode:         d.Mode,
+		BaselineSHA:  d.BaselineSHA,
+		InceptionSHA: d.InceptionSHA,
 	}
 }
 

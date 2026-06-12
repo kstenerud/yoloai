@@ -4,6 +4,31 @@ Tracks breaking changes made during beta. Each entry should be included in relea
 
 ## v0.5.0
 
+### `Environment` exposes one ordered `Dirs` list instead of `Workdir` + `Directories`
+
+The public read-model `yoloai.Environment` (carried on `SandboxInfo.Environment`)
+replaced its singular `Workdir WorkdirInfo` field and separate `Directories
+[]DirInfo` field with a single ordered **`Dirs []DirInfo`** where element 0 is
+the workdir. The `WorkdirInfo` type is removed (one `DirInfo` type now, with an
+added `InceptionSHA`). Access the workdir via the new `Workdir()` accessor, aux
+dirs via `AuxDirs()`, and the diff/apply set via `TrackedDirs()`. The JSON shape
+changes correspondingly: `{"workdir": {...}, "directories": [...]}` →
+`{"dirs": [{...}, ...]}`.
+
+**Why:** the singular workdir field forced every present and future multi-dir
+feature to special-case "the workdir vs the rest". One ordered list removes that
+seam — the groundwork for diff/apply across multiple tracked directories (D81).
+Done now, in beta, because reshaping a load-bearing field is far cheaper before
+the API stabilizes than after.
+
+**What breaks:** Go embedders reading `env.Workdir.HostPath` / ranging
+`env.Directories`, and any consumer parsing the `Environment` JSON.
+
+**Migration:** `env.Workdir.X` → `env.Workdir().X`; `env.Directories` →
+`env.AuxDirs()`. In JSON, read `dirs[0]` for the workdir and `dirs[1:]` for aux
+dirs. On-disk sandbox metadata (`environment.json`) migrates automatically on
+first read (schema v1 → v2); no user action is needed.
+
 ### macOS default isolation becomes `vm` (Apple `container`) when it is installed
 
 When the Apple `container` CLI is installed (macOS 26+ on Apple Silicon), a

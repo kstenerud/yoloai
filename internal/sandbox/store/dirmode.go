@@ -1,6 +1,6 @@
 // ABOUTME: DirMode — typed enum for sandbox directory mount modes
 // ABOUTME: (copy / overlay / rw / ro). Lives in store so persisted
-// ABOUTME: meta types (WorkdirEnvironment, DirEnvironment) can hold typed values
+// ABOUTME: meta types (DirEnvironment) can hold typed values
 // ABOUTME: instead of bare strings.
 
 package store
@@ -10,7 +10,7 @@ package store
 // works via the underlying string type (no MarshalText needed).
 //
 // Lives in store rather than the parent sandbox package because
-// store/environment.go's persisted WorkdirEnvironment / DirEnvironment types hold Mode
+// store/environment.go's persisted DirEnvironment type holds Mode
 // values. Parent-package re-export (sandbox.DirMode = store.DirMode)
 // keeps existing internal/sandbox callers working without churn.
 type DirMode string

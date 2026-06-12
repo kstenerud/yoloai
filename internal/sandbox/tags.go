@@ -26,28 +26,28 @@ func loadDiffContext(layout config.Layout, name string) (workDir string, baselin
 		return "", "", "", loadErr
 	}
 
-	mode = meta.Workdir.Mode
+	mode = meta.Workdir().Mode
 
 	switch mode {
 	case store.DirModeCopy:
-		mountPath := meta.Workdir.MountPath
-		if mountPath != "" && mountPath != meta.Workdir.HostPath {
+		mountPath := meta.Workdir().MountPath
+		if mountPath != "" && mountPath != meta.Workdir().HostPath {
 			workDir = mountPath
 		} else {
-			workDir = store.WorkDir(sandboxDir, meta.Workdir.HostPath)
+			workDir = store.WorkDir(sandboxDir, meta.Workdir().HostPath)
 		}
-		baselineSHA = meta.Workdir.BaselineSHA
+		baselineSHA = meta.Workdir().BaselineSHA
 		if baselineSHA == "" {
 			return "", "", "", fmt.Errorf("sandbox has no baseline SHA — was it created before diff support?")
 		}
 	case store.DirModeOverlay:
-		workDir = meta.Workdir.MountPath
+		workDir = meta.Workdir().MountPath
 		if workDir == "" {
-			workDir = meta.Workdir.HostPath
+			workDir = meta.Workdir().HostPath
 		}
-		baselineSHA = meta.Workdir.BaselineSHA
+		baselineSHA = meta.Workdir().BaselineSHA
 	case store.DirModeRW:
-		workDir = meta.Workdir.HostPath
+		workDir = meta.Workdir().HostPath
 		baselineSHA = "HEAD"
 	case store.DirModeRO:
 		return "", "", "", fmt.Errorf("workdir cannot be read-only (mode %s)", mode)
@@ -121,12 +121,12 @@ func ListUnappliedTags(ctx context.Context, layout config.Layout, rt runtime.Run
 		return nil, err
 	}
 
-	if meta.Workdir.Mode != "copy" {
+	if meta.Workdir().Mode != "copy" {
 		return nil, nil
 	}
 
-	workDir := store.WorkDir(sandboxDir, meta.Workdir.HostPath)
-	targetDir := meta.Workdir.HostPath
+	workDir := store.WorkDir(sandboxDir, meta.Workdir().HostPath)
+	targetDir := meta.Workdir().HostPath
 
 	// Check if target is a git repo
 	if !git.IsGitRepo(targetDir) {

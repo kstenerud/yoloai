@@ -71,7 +71,7 @@ func runDiffCmd(cmd *cobra.Command, args []string) error {
 		return metaErr
 	}
 	overlay := env.HasOverlayDirs()
-	slog.Debug("generating diff", "event", "sandbox.diff", "sandbox", name, "workdir_mode", env.Workdir.Mode) //nolint:gosec // G706: name is validated by ValidateName
+	slog.Debug("generating diff", "event", "sandbox.diff", "sandbox", name, "workdir_mode", env.Workdir().Mode) //nolint:gosec // G706: name is validated by ValidateName
 
 	// Skip agent warning in JSON mode
 	if !cliutil.JSONEnabled(cmd) {

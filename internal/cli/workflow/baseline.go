@@ -73,7 +73,7 @@ func withBaselineSandbox(cmd *cobra.Command, name string, fn func(ctx context.Co
 	if err != nil {
 		return err
 	}
-	expected := env.Workdir.BaselineSHA
+	expected := env.Workdir().BaselineSHA
 
 	return cliutil.WithSandbox(cmd, name, func(ctx context.Context, sb *yoloai.Sandbox) error {
 		return fn(ctx, sb, expected)

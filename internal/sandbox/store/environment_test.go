@@ -35,12 +35,12 @@ func TestMeta_SaveLoadRoundTrip(t *testing.T) {
 		CreatedAt:     time.Date(2025, 1, 15, 10, 30, 0, 0, time.UTC),
 		AgentType:     "claude",
 		Model:         "claude-sonnet-4-latest",
-		Workdir: WorkdirEnvironment{
+		Dirs: []DirEnvironment{{
 			HostPath:    "/home/user/projects/my-app",
 			MountPath:   "/home/user/projects/my-app",
 			Mode:        "copy",
 			BaselineSHA: "a1b2c3d4e5f6",
-		},
+		}},
 		HasPrompt:    true,
 		NetworkMode:  "isolated",
 		NetworkAllow: []string{"api.anthropic.com", "sentry.io"},
@@ -68,11 +68,11 @@ func TestMeta_OmitEmptyFields(t *testing.T) {
 		Name:          "test-sandbox",
 		CreatedAt:     time.Date(2025, 1, 15, 10, 30, 0, 0, time.UTC),
 		AgentType:     "claude",
-		Workdir: WorkdirEnvironment{
+		Dirs: []DirEnvironment{{
 			HostPath:  "/tmp/project",
 			MountPath: "/tmp/project",
 			Mode:      "copy",
-		},
+		}},
 	}
 
 	err := SaveEnvironment(dir, meta)
@@ -98,11 +98,11 @@ func TestMeta_VersionSetOnSave(t *testing.T) {
 	meta := &Environment{
 		Name:      "test-version",
 		AgentType: "claude",
-		Workdir: WorkdirEnvironment{
+		Dirs: []DirEnvironment{{
 			HostPath:  "/tmp/project",
 			MountPath: "/tmp/project",
 			Mode:      "copy",
-		},
+		}},
 	}
 
 	require.NoError(t, SaveEnvironment(dir, meta))
@@ -129,7 +129,7 @@ func TestMeta_MigrateV0ToV1_Docker(t *testing.T) {
 
 	loaded, err := LoadEnvironment(dir)
 	require.NoError(t, err)
-	assert.Equal(t, 1, loaded.Version, "v0 should be migrated to v1")
+	assert.Equal(t, 2, loaded.Version, "v0 should be migrated to current version")
 	assert.False(t, loaded.HostFilesystem, "docker backend should have HostFilesystem=false")
 }
 
@@ -151,7 +151,7 @@ func TestMeta_MigrateV0ToV1_EmptyBackendBackfillsDocker(t *testing.T) {
 
 	loaded, err := LoadEnvironment(dir)
 	require.NoError(t, err)
-	assert.Equal(t, 1, loaded.Version, "v0 should be migrated to v1")
+	assert.Equal(t, 2, loaded.Version, "v0 should be migrated to current version")
 	assert.Equal(t, runtime.BackendDocker, loaded.BackendType, "empty legacy backend backfills to docker")
 	assert.Equal(t, "yoloai-base", loaded.ImageRef, "empty legacy image_ref backfills to yoloai-base")
 	assert.False(t, loaded.HostFilesystem, "docker backend should have HostFilesystem=false")
@@ -172,7 +172,7 @@ func TestMeta_MigrateV0ToV1_Seatbelt(t *testing.T) {
 
 	loaded, err := LoadEnvironment(dir)
 	require.NoError(t, err)
-	assert.Equal(t, 1, loaded.Version, "v0 should be migrated to v1")
+	assert.Equal(t, 2, loaded.Version, "v0 should be migrated to current version")
 	assert.True(t, loaded.HostFilesystem, "seatbelt backend should have HostFilesystem=true")
 }
 
@@ -195,7 +195,7 @@ func TestMeta_MigrateV0ToV1_UnknownBackendDefaultsToFalse(t *testing.T) {
 
 	loaded, err := LoadEnvironment(dir)
 	require.NoError(t, err)
-	assert.Equal(t, 1, loaded.Version, "v0 should be migrated to v1 even with unknown backend")
+	assert.Equal(t, 2, loaded.Version, "v0 should be migrated to current version even with unknown backend")
 	assert.False(t, loaded.HostFilesystem, "unknown backend should default to HostFilesystem=false")
 }
 
@@ -219,11 +219,11 @@ func TestMeta_ResourcesOmittedWhenNil(t *testing.T) {
 		Name:          "no-resources",
 		CreatedAt:     time.Date(2025, 6, 1, 12, 0, 0, 0, time.UTC),
 		AgentType:     "claude",
-		Workdir: WorkdirEnvironment{
+		Dirs: []DirEnvironment{{
 			HostPath:  "/tmp/project",
 			MountPath: "/tmp/project",
 			Mode:      "copy",
-		},
+		}},
 	}
 
 	err := SaveEnvironment(dir, meta)
@@ -236,4 +236,44 @@ func TestMeta_ResourcesOmittedWhenNil(t *testing.T) {
 	require.NoError(t, json.Unmarshal(data, &raw))
 
 	assert.NotContains(t, raw, "resources")
+}
+
+func TestMeta_MigrateV1ToV2(t *testing.T) {
+	// Write a v1 environment.json with the old two-field shape (workdir object +
+	// directories array) and assert that LoadEnvironment repacks it into Dirs with
+	// the workdir at element 0 and the aux dir at element 1, and that re-saving
+	// drops the legacy keys.
+	dir := t.TempDir()
+
+	v1JSON := `{
+		"version": 1,
+		"name": "old-v1",
+		"created_at": "2025-01-01T00:00:00Z",
+		"backend": "docker",
+		"agent": "claude",
+		"image_ref": "yoloai-base",
+		"workdir": {"host_path": "/tmp/proj", "mount_path": "/tmp/proj", "mode": "copy", "baseline_sha": "abc123"},
+		"directories": [{"host_path": "/tmp/aux", "mount_path": "/tmp/aux", "mode": "ro"}]
+	}`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, EnvironmentFile), []byte(v1JSON), 0600))
+
+	loaded, err := LoadEnvironment(dir)
+	require.NoError(t, err)
+	assert.Equal(t, 2, loaded.Version, "v1 should be migrated to v2")
+	require.Len(t, loaded.Dirs, 2, "Dirs should have 2 entries (workdir + 1 aux)")
+	assert.Equal(t, "/tmp/proj", loaded.Dirs[0].HostPath)
+	assert.Equal(t, DirMode("copy"), loaded.Dirs[0].Mode)
+	assert.Equal(t, "abc123", loaded.Dirs[0].BaselineSHA)
+	assert.Equal(t, "/tmp/aux", loaded.Dirs[1].HostPath)
+	assert.Equal(t, DirMode("ro"), loaded.Dirs[1].Mode)
+
+	// Re-save and verify no legacy keys
+	require.NoError(t, SaveEnvironment(dir, loaded))
+	data, err := os.ReadFile(filepath.Join(dir, EnvironmentFile)) //nolint:gosec // test file in temp dir
+	require.NoError(t, err)
+	var raw map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(data, &raw))
+	assert.NotContains(t, raw, "workdir", "legacy workdir key must not be written back")
+	assert.NotContains(t, raw, "directories", "legacy directories key must not be written back")
+	assert.Contains(t, raw, "dirs", "new dirs key must be present")
 }

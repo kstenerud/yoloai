@@ -153,9 +153,9 @@ func recreateContainer(ctx context.Context, d state.Deps, name string, meta *sto
 	// verbatim at create time), so we construct DirSpec directly rather than
 	// re-parsing a ":suffix" string through the CLI layer.
 	workdir := &state.DirSpec{
-		Path:      meta.Workdir.HostPath,
-		MountPath: meta.Workdir.MountPath,
-		Mode:      store.DirMode(meta.Workdir.Mode),
+		Path:      meta.Workdir().HostPath,
+		MountPath: meta.Workdir().MountPath,
+		Mode:      store.DirMode(meta.Workdir().Mode),
 	}
 
 	// Extract tmux_conf from runtime-config.json
@@ -166,7 +166,7 @@ func recreateContainer(ctx context.Context, d state.Deps, name string, meta *sto
 
 	// Rebuild aux dir args from meta
 	var auxDirs []*state.DirSpec
-	for _, dirEnv := range meta.Directories {
+	for _, dirEnv := range meta.AuxDirs() {
 		auxDirs = append(auxDirs, &state.DirSpec{
 			Path:      dirEnv.HostPath,
 			MountPath: dirEnv.MountPath,
@@ -183,7 +183,7 @@ func recreateContainer(ctx context.Context, d state.Deps, name string, meta *sto
 		Name:         name,
 		SandboxDir:   sandboxDir,
 		Workdir:      workdir,
-		WorkCopyDir:  store.WorkDir(sandboxDir, meta.Workdir.HostPath),
+		WorkCopyDir:  store.WorkDir(sandboxDir, meta.Workdir().HostPath),
 		AuxDirs:      auxDirs,
 		Agent:        agentDef,
 		Model:        meta.Model,
@@ -219,7 +219,7 @@ func recreateContainer(ctx context.Context, d state.Deps, name string, meta *sto
 	// Execute VM-side work directory setup (Tart VMs).
 	// Always re-run when recreating: the old VM was destroyed, so its local
 	// work directory no longer exists even if BaselineSHA is already set.
-	if meta.Workdir.Mode == "copy" {
+	if meta.Workdir().Mode == "copy" {
 		if err := launch.ExecuteVMWorkDirSetup(ctx, d.Runtime, name, sandboxDir, meta); err != nil {
 			return fmt.Errorf("VM work dir setup: %w", err)
 		}

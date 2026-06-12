@@ -124,7 +124,7 @@ func runApplyNoChanges(cmd *cobra.Command, name string, env *yoloai.Environment,
 		}
 		if cliutil.JSONEnabled(cmd) {
 			return cliutil.WriteJSON(cmd.OutOrStdout(), applyResult{
-				Target:      env.Workdir.HostPath,
+				Target:      env.Workdir().HostPath,
 				TagsApplied: result.Applied,
 				TagsSkipped: result.Skipped,
 				Method:      "format-patch",
@@ -135,7 +135,7 @@ func runApplyNoChanges(cmd *cobra.Command, name string, env *yoloai.Environment,
 
 	if cliutil.JSONEnabled(cmd) {
 		return cliutil.WriteJSON(cmd.OutOrStdout(), applyResult{
-			Target: env.Workdir.HostPath,
+			Target: env.Workdir().HostPath,
 			Method: "format-patch",
 		})
 	}
@@ -152,7 +152,7 @@ func runApplyNoChanges(cmd *cobra.Command, name string, env *yoloai.Environment,
 // it returns. The library owns generate / git am / baseline-advance / uncommitted;
 // this function owns the CLI summary, confirmation, tag transfer, and output.
 func runApplyCommits(cmd *cobra.Command, name string, paths []string, env *yoloai.Environment, commits []yoloai.CommitInfo, hasUncommitted, yes, dryRun, includeUncommitted, withTags bool) error {
-	targetDir := env.Workdir.HostPath
+	targetDir := env.Workdir().HostPath
 
 	// Fetch tags beyond baseline (best-effort; errors don't fail the apply).
 	tags := listSandboxTags(cmd, name, false)

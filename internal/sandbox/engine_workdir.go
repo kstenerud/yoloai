@@ -168,7 +168,7 @@ func (e *Engine) WorkdirTags(ctx context.Context, name string, unappliedOnly boo
 	if err != nil {
 		return nil, err
 	}
-	workDir := store.WorkDir(e.layout.SandboxDir(name), meta.Workdir.HostPath)
+	workDir := store.WorkDir(e.layout.SandboxDir(name), meta.Workdir().HostPath)
 	g := git.NewSandbox(e.layout, e.runtime, name)
 	for i := range tags {
 		tags[i].Message = getTagMessage(ctx, g, workDir, tags[i].Name)

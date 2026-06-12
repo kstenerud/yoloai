@@ -319,11 +319,11 @@ func InspectSandbox(ctx context.Context, layout config.Layout, rt runtime.Runtim
 // backend (Tart) that is not running, so the probe can't reach it — the change
 // state genuinely can't be read from the host (see patch.HasUnappliedWorkVia).
 func detectWorkdirChanges(ctx context.Context, g *git.Git, sandboxDir string, meta *store.Environment) string {
-	if meta.Workdir.Mode != "copy" && meta.Workdir.Mode != "overlay" {
+	if meta.Workdir().Mode != "copy" && meta.Workdir().Mode != "overlay" {
 		return "-"
 	}
-	workDir := store.WorkDir(sandboxDir, meta.Workdir.HostPath)
-	switch patch.HasUnappliedWorkVia(ctx, g, workDir, meta.Workdir.BaselineSHA) {
+	workDir := store.WorkDir(sandboxDir, meta.Workdir().HostPath)
+	switch patch.HasUnappliedWorkVia(ctx, g, workDir, meta.Workdir().BaselineSHA) {
 	case patch.WorkDirty:
 		return "yes"
 	case patch.WorkUnknown:
@@ -331,7 +331,7 @@ func detectWorkdirChanges(ctx context.Context, g *git.Git, sandboxDir string, me
 	case patch.WorkClean:
 	}
 	// workdir has no unapplied work — check aux dirs before reporting "no"
-	for _, d := range meta.Directories {
+	for _, d := range meta.AuxDirs() {
 		if d.Mode == "copy" || d.Mode == "overlay" {
 			auxWorkDir := store.WorkDir(sandboxDir, d.HostPath)
 			switch patch.HasUnappliedWorkVia(ctx, g, auxWorkDir, d.BaselineSHA) {

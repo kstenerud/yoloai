@@ -47,7 +47,7 @@ func (w *Workdir) Diff(ctx context.Context, opts WorkdirDiffOptions) (string, er
 	if err != nil {
 		return "", err
 	}
-	overlay := meta.Workdir.Mode == store.DirModeOverlay
+	overlay := meta.Workdir().Mode == store.DirModeOverlay
 
 	if opts.Ref != "" {
 		if overlay {
@@ -190,7 +190,7 @@ func (w *Workdir) Apply(ctx context.Context, opts WorkdirApplyOptions) (*ApplyRe
 	if err != nil {
 		return nil, err
 	}
-	overlay := meta.Workdir.Mode == store.DirModeOverlay
+	overlay := meta.Workdir().Mode == store.DirModeOverlay
 
 	if opts.Mode == ApplyModeCommits {
 		if overlay {
@@ -246,7 +246,7 @@ func (w *Workdir) Commits(ctx context.Context, opts WorkdirCommitsOptions) ([]Co
 		return nil, err
 	}
 
-	if meta.Workdir.Mode == store.DirModeOverlay {
+	if meta.Workdir().Mode == store.DirModeOverlay {
 		if opts.Stat {
 			return nil, yoerrors.NewPlatformError("per-commit stat is not supported for :overlay sandboxes (overlay commits are not individually addressable from the host)")
 		}

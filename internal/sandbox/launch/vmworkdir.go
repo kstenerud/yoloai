@@ -37,8 +37,8 @@ func ExecuteVMWorkDirSetup(ctx context.Context, rt runtime.Runtime, name, sandbo
 		return nil // Docker/containerd - no VM setup needed
 	}
 
-	vfsPath := filepath.Join("/Volumes/My Shared Files/yoloai/work", config.EncodePath(meta.Workdir.HostPath))
-	vmLocalPath := runtime.ResolveCopyMountFor(rt, name, meta.Workdir.HostPath)
+	vfsPath := filepath.Join("/Volumes/My Shared Files/yoloai/work", config.EncodePath(meta.Workdir().HostPath))
+	vmLocalPath := runtime.ResolveCopyMountFor(rt, name, meta.Workdir().HostPath)
 
 	instance := store.InstanceName(meta.Principal, name)
 
@@ -61,9 +61,9 @@ func ExecuteVMWorkDirSetup(ctx context.Context, rt runtime.Runtime, name, sandbo
 	}
 
 	// Update environment.json
-	meta.Workdir.BaselineSHA = strings.TrimSpace(result.Stdout)
-	if meta.Workdir.InceptionSHA == "" {
-		meta.Workdir.InceptionSHA = meta.Workdir.BaselineSHA
+	meta.Workdir().BaselineSHA = strings.TrimSpace(result.Stdout)
+	if meta.Workdir().InceptionSHA == "" {
+		meta.Workdir().InceptionSHA = meta.Workdir().BaselineSHA
 	}
 	return store.SaveEnvironment(sandboxDir, meta)
 }

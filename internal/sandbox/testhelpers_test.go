@@ -82,11 +82,11 @@ func createTestSandbox(t *testing.T, tmpDir, name, hostPath string, mode store.D
 		Name:      name,
 		AgentType: "claude",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirEnvironment{
+		Dirs: []store.DirEnvironment{{
 			HostPath:  hostPath,
 			MountPath: hostPath,
 			Mode:      mode,
-		},
+		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 }

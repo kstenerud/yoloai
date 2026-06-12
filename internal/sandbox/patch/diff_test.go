@@ -41,12 +41,12 @@ func createCopySandbox(t *testing.T, tmpDir, name, hostPath string) string {
 		Name:      name,
 		AgentType: "test",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirEnvironment{
+		Dirs: []store.DirEnvironment{{
 			HostPath:    hostPath,
 			MountPath:   hostPath,
 			Mode:        "copy",
 			BaselineSHA: sha,
-		},
+		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
@@ -63,11 +63,11 @@ func createRWSandbox(t *testing.T, tmpDir, name, hostPath string) {
 		Name:      name,
 		AgentType: "test",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirEnvironment{
+		Dirs: []store.DirEnvironment{{
 			HostPath:  hostPath,
 			MountPath: hostPath,
 			Mode:      "rw",
-		},
+		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 }
@@ -397,11 +397,11 @@ func TestLoadDiffContext_NoBaseline(t *testing.T) {
 		Name:      "no-baseline",
 		AgentType: "test",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirEnvironment{
+		Dirs: []store.DirEnvironment{{
 			HostPath: "/tmp/test",
 			Mode:     "copy",
 			// BaselineSHA intentionally empty
-		},
+		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
@@ -425,12 +425,12 @@ func TestLoadDiffContext_CopyMode(t *testing.T) {
 		Name:      name,
 		AgentType: "test",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirEnvironment{
+		Dirs: []store.DirEnvironment{{
 			HostPath:    hostPath,
 			MountPath:   hostPath,
 			Mode:        "copy",
 			BaselineSHA: "abc123",
-		},
+		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
@@ -453,12 +453,12 @@ func TestLoadDiffContext_OverlayMode(t *testing.T) {
 		Name:      name,
 		AgentType: "test",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirEnvironment{
+		Dirs: []store.DirEnvironment{{
 			HostPath:    "/tmp/project",
 			MountPath:   "/container/project",
 			Mode:        "overlay",
 			BaselineSHA: "overlay-sha",
-		},
+		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
@@ -481,11 +481,11 @@ func TestLoadDiffContext_OverlayMode_FallbackToHostPath(t *testing.T) {
 		Name:      name,
 		AgentType: "test",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirEnvironment{
+		Dirs: []store.DirEnvironment{{
 			HostPath: "/tmp/project",
 			Mode:     "overlay",
 			// MountPath intentionally empty
-		},
+		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
@@ -507,10 +507,10 @@ func TestLoadDiffContext_RWMode(t *testing.T) {
 		Name:      name,
 		AgentType: "test",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirEnvironment{
+		Dirs: []store.DirEnvironment{{
 			HostPath: "/tmp/project",
 			Mode:     "rw",
-		},
+		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
@@ -533,10 +533,10 @@ func TestLoadDiffContext_UnsupportedMode(t *testing.T) {
 		Name:      name,
 		AgentType: "test",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirEnvironment{
+		Dirs: []store.DirEnvironment{{
 			HostPath: "/tmp/project",
 			Mode:     "bogus",
-		},
+		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
@@ -559,12 +559,12 @@ func TestLoadAllDiffContexts_SingleCopyWorkdir(t *testing.T) {
 		Name:      name,
 		AgentType: "test",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirEnvironment{
+		Dirs: []store.DirEnvironment{{
 			HostPath:    "/tmp/project",
 			MountPath:   "/tmp/project",
 			Mode:        "copy",
 			BaselineSHA: "sha1",
-		},
+		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
@@ -594,12 +594,12 @@ func TestLoadAllDiffContexts_WorkdirOnly_IgnoresAuxEntries(t *testing.T) {
 		Name:      name,
 		AgentType: "test",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirEnvironment{
+		Dirs: []store.DirEnvironment{{
 			HostPath:    "/tmp/project",
 			Mode:        "copy",
 			BaselineSHA: "sha-main",
-		},
-		Directories: []store.DirEnvironment{
+		}},
+		LegacyDirectories: []store.DirEnvironment{
 			// Pre-Q-U sandboxes may have these on disk. We must ignore
 			// them rather than fault.
 			{HostPath: "/tmp/aux-rw", Mode: "rw"},
@@ -628,11 +628,11 @@ func TestLoadAllDiffContexts_NoAuxDirs(t *testing.T) {
 		Name:      name,
 		AgentType: "test",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirEnvironment{
+		Dirs: []store.DirEnvironment{{
 			HostPath:    "/tmp/project",
 			Mode:        "copy",
 			BaselineSHA: "sha-only",
-		},
+		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
@@ -654,12 +654,12 @@ func TestLoadAllDiffContexts_OverlayWorkdirWithMountPath(t *testing.T) {
 		Name:      name,
 		AgentType: "test",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirEnvironment{
+		Dirs: []store.DirEnvironment{{
 			HostPath:    "/host/project",
 			MountPath:   "/container/project",
 			Mode:        "overlay",
 			BaselineSHA: "sha-ovl",
-		},
+		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 

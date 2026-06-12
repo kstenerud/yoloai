@@ -51,10 +51,10 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, sandboxName, meta.Name)
 	assert.Equal(t, agent.AgentTest, meta.AgentType)
-	assert.Equal(t, store.DirModeCopy, meta.Workdir.Mode)
-	assert.NotEmpty(t, meta.Workdir.BaselineSHA)
+	assert.Equal(t, store.DirModeCopy, meta.Workdir().Mode)
+	assert.NotEmpty(t, meta.Workdir().BaselineSHA)
 
-	workDir := store.WorkDir(mgr.Layout().SandboxDir(sandboxName), meta.Workdir.HostPath)
+	workDir := store.WorkDir(mgr.Layout().SandboxDir(sandboxName), meta.Workdir().HostPath)
 	assert.FileExists(t, filepath.Join(workDir, "main.go"))
 
 	// Verify container is running
@@ -152,11 +152,11 @@ func TestIntegration_CreateNoStart(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "nostart", meta.Name)
 	assert.Equal(t, agent.AgentTest, meta.AgentType)
-	assert.Equal(t, store.DirModeCopy, meta.Workdir.Mode)
-	assert.NotEmpty(t, meta.Workdir.BaselineSHA)
+	assert.Equal(t, store.DirModeCopy, meta.Workdir().Mode)
+	assert.NotEmpty(t, meta.Workdir().BaselineSHA)
 
 	// Verify work copy contains our file
-	workDir := store.WorkDir(mgr.Layout().SandboxDir("nostart"), meta.Workdir.HostPath)
+	workDir := store.WorkDir(mgr.Layout().SandboxDir("nostart"), meta.Workdir().HostPath)
 	assert.FileExists(t, filepath.Join(workDir, "main.go"))
 
 	// Verify standard subdirs
@@ -180,9 +180,9 @@ func TestIntegration_CopyMode(t *testing.T) {
 
 	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir("copymode"))
 	require.NoError(t, err)
-	assert.Equal(t, store.DirModeCopy, meta.Workdir.Mode)
+	assert.Equal(t, store.DirModeCopy, meta.Workdir().Mode)
 
-	workDir := store.WorkDir(mgr.Layout().SandboxDir("copymode"), meta.Workdir.HostPath)
+	workDir := store.WorkDir(mgr.Layout().SandboxDir("copymode"), meta.Workdir().HostPath)
 
 	// Modify work copy
 	require.NoError(t, os.WriteFile(
@@ -212,7 +212,7 @@ func TestIntegration_RWMode(t *testing.T) {
 
 	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir("rwmode"))
 	require.NoError(t, err)
-	assert.Equal(t, store.DirModeRW, meta.Workdir.Mode)
+	assert.Equal(t, store.DirModeRW, meta.Workdir().Mode)
 }
 
 // Q-U (2026-05-25): aux directories can no longer be :copy or
@@ -260,8 +260,8 @@ func TestIntegration_AuxDirRW(t *testing.T) {
 
 	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir("auxrw"))
 	require.NoError(t, err)
-	require.Len(t, meta.Directories, 1)
-	assert.Equal(t, store.DirModeRW, meta.Directories[0].Mode)
+	require.Len(t, meta.AuxDirs(), 1)
+	assert.Equal(t, store.DirModeRW, meta.AuxDirs()[0].Mode)
 }
 
 func TestIntegration_AuxDirRO(t *testing.T) {
@@ -281,8 +281,8 @@ func TestIntegration_AuxDirRO(t *testing.T) {
 
 	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir("auxro"))
 	require.NoError(t, err)
-	require.Len(t, meta.Directories, 1)
-	assert.Equal(t, store.DirModeRO, meta.Directories[0].Mode)
+	require.Len(t, meta.AuxDirs(), 1)
+	assert.Equal(t, store.DirModeRO, meta.AuxDirs()[0].Mode)
 }
 
 func TestIntegration_Replace(t *testing.T) {
@@ -337,7 +337,7 @@ func TestIntegration_Reset(t *testing.T) {
 
 	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir("resettest"))
 	require.NoError(t, err)
-	workDir := store.WorkDir(mgr.Layout().SandboxDir("resettest"), meta.Workdir.HostPath)
+	workDir := store.WorkDir(mgr.Layout().SandboxDir("resettest"), meta.Workdir().HostPath)
 
 	// Modify work copy
 	require.NoError(t, os.WriteFile(
@@ -421,7 +421,7 @@ func TestIntegration_DiffWithChanges(t *testing.T) {
 
 	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir("diffchanges"))
 	require.NoError(t, err)
-	workDir := store.WorkDir(mgr.Layout().SandboxDir("diffchanges"), meta.Workdir.HostPath)
+	workDir := store.WorkDir(mgr.Layout().SandboxDir("diffchanges"), meta.Workdir().HostPath)
 
 	require.NoError(t, os.WriteFile(
 		filepath.Join(workDir, "main.go"),
@@ -450,7 +450,7 @@ func TestIntegration_ApplyPatch(t *testing.T) {
 
 	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir("applypatch"))
 	require.NoError(t, err)
-	workDir := store.WorkDir(mgr.Layout().SandboxDir("applypatch"), meta.Workdir.HostPath)
+	workDir := store.WorkDir(mgr.Layout().SandboxDir("applypatch"), meta.Workdir().HostPath)
 
 	// Make a change
 	require.NoError(t, os.WriteFile(
@@ -807,7 +807,7 @@ func TestIntegration_AgentStubWorkflow(t *testing.T) {
 	// Verify the file is visible in the work copy on the host
 	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir("stubworkflow"))
 	require.NoError(t, err)
-	workDir := store.WorkDir(mgr.Layout().SandboxDir("stubworkflow"), meta.Workdir.HostPath)
+	workDir := store.WorkDir(mgr.Layout().SandboxDir("stubworkflow"), meta.Workdir().HostPath)
 	assert.FileExists(t, filepath.Join(workDir, "agent-output.txt"))
 
 	// Diff should detect the new file
@@ -851,7 +851,7 @@ func TestIntegration_Clone(t *testing.T) {
 	// Seed a change in A's work copy
 	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir("clone-a"))
 	require.NoError(t, err)
-	workDir := store.WorkDir(mgr.Layout().SandboxDir("clone-a"), meta.Workdir.HostPath)
+	workDir := store.WorkDir(mgr.Layout().SandboxDir("clone-a"), meta.Workdir().HostPath)
 	require.NoError(t, os.WriteFile(
 		filepath.Join(workDir, "main.go"),
 		[]byte("package main\n\nimport \"fmt\"\n\nfunc main() { fmt.Println(\"clone-test\") }\n"),
@@ -910,7 +910,7 @@ func TestIntegration_Overlay(t *testing.T) {
 	// For overlay mode, MountPath is /yoloai/overlay/<encoded>/merged — not the host path.
 	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir("overlay-integ"))
 	require.NoError(t, err)
-	containerPath := meta.Workdir.MountPath
+	containerPath := meta.Workdir().MountPath
 
 	// Create a git baseline inside the container. No .git exists in the lower
 	// layer, so git init creates a fresh repo in the upper layer with no

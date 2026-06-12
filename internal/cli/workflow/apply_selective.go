@@ -20,7 +20,7 @@ import (
 // Workdir().Apply — the library resolves refs, replays the series, and advances
 // the baseline across the contiguous applied prefix.
 func applySelectedCommits(cmd *cobra.Command, name string, refs, paths []string, env *yoloai.Environment, yes, dryRun, withTags bool) error {
-	targetDir := env.Workdir.HostPath
+	targetDir := env.Workdir().HostPath
 	backend := cliutil.ResolveBackendForSandbox(name)
 
 	isGit, err := targetIsGitRepo(cmd, name, backend)

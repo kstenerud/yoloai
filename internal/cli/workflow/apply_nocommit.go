@@ -42,7 +42,7 @@ func applyNoCommit(cmd *cobra.Command, name string, paths []string, env *yoloai.
 	if preview == nil {
 		if cliutil.JSONEnabled(cmd) {
 			return cliutil.WriteJSON(cmd.OutOrStdout(), applyResult{
-				Target: env.Workdir.HostPath,
+				Target: env.Workdir().HostPath,
 				Method: "no-commit",
 			})
 		}

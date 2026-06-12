@@ -16,7 +16,7 @@ func TestPrintCreateSummary_Basic(t *testing.T) {
 	printCreateSummary(&buf, &yoloai.Environment{
 		Name:      "test-sandbox",
 		AgentType: "claude",
-		Workdir:   yoloai.WorkdirInfo{HostPath: "/project", Mode: "copy"},
+		Dirs:      []yoloai.DirInfo{{HostPath: "/project", Mode: "copy"}},
 	}, false, false)
 	out := buf.String()
 	assert.Contains(t, out, "test-sandbox")
@@ -31,7 +31,7 @@ func TestPrintCreateSummary_WithPrompt(t *testing.T) {
 	printCreateSummary(&buf, &yoloai.Environment{
 		Name:      "test",
 		AgentType: "test",
-		Workdir:   yoloai.WorkdirInfo{HostPath: "/project", Mode: "copy"},
+		Dirs:      []yoloai.DirInfo{{HostPath: "/project", Mode: "copy"}},
 	}, true, false)
 	assert.Contains(t, buf.String(), "diff", "a prompted sandbox's hint mentions 'yoloai diff'")
 }
@@ -41,7 +41,7 @@ func TestPrintCreateSummary_NetworkNone(t *testing.T) {
 	printCreateSummary(&buf, &yoloai.Environment{
 		Name:        "test",
 		AgentType:   "test",
-		Workdir:     yoloai.WorkdirInfo{HostPath: "/project", Mode: "copy"},
+		Dirs:        []yoloai.DirInfo{{HostPath: "/project", Mode: "copy"}},
 		NetworkMode: "none",
 	}, false, false)
 	assert.Contains(t, buf.String(), "Network:  none")
@@ -52,7 +52,7 @@ func TestPrintCreateSummary_NetworkIsolated(t *testing.T) {
 	printCreateSummary(&buf, &yoloai.Environment{
 		Name:         "test",
 		AgentType:    "test",
-		Workdir:      yoloai.WorkdirInfo{HostPath: "/project", Mode: "copy"},
+		Dirs:         []yoloai.DirInfo{{HostPath: "/project", Mode: "copy"}},
 		NetworkMode:  "isolated",
 		NetworkAllow: []string{"api.anthropic.com", "sentry.io"},
 	}, false, false)
@@ -64,7 +64,7 @@ func TestPrintCreateSummary_WithPorts(t *testing.T) {
 	printCreateSummary(&buf, &yoloai.Environment{
 		Name:      "test",
 		AgentType: "test",
-		Workdir:   yoloai.WorkdirInfo{HostPath: "/project", Mode: "copy"},
+		Dirs:      []yoloai.DirInfo{{HostPath: "/project", Mode: "copy"}},
 		Ports:     []string{"3000:3000", "8080:80"},
 	}, false, false)
 	assert.Contains(t, buf.String(), "3000:3000")

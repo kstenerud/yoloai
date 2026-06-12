@@ -17,7 +17,10 @@ import (
 
 // metaVersion is the current schema version for Environment. Bump when adding or
 // changing fields that require migration from older sandboxes.
-const metaVersion = 1
+//
+// v2 collapsed the singular Workdir field + separate Directories slice into one
+// ordered Dirs list (element 0 is the workdir). See migrate().
+const metaVersion = 2
 
 // Environment holds sandbox configuration captured at creation time.
 type Environment struct {
@@ -33,8 +36,18 @@ type Environment struct {
 	AgentType agent.AgentType `json:"agent"`
 	Model     string          `json:"model,omitempty"`
 
-	Workdir     WorkdirEnvironment `json:"workdir"`
-	Directories []DirEnvironment   `json:"directories,omitempty"`
+	// Dirs is the ordered list of directories the sandbox manages. Element 0 is
+	// the workdir (the agent's cwd; "the workdir" for docs/UI). Entries with
+	// Mode copy/overlay are "tracked" (diff/apply applies to them); rw/ro are
+	// reference mounts. Use the Workdir()/AuxDirs() helpers rather than indexing.
+	Dirs []DirEnvironment `json:"dirs,omitempty"`
+
+	// LegacyWorkdir / LegacyDirectories are the pre-v2 schema fields, retained
+	// only so old environment.json files unmarshal and migrate() can repack them
+	// into Dirs. Never written back: migrate() clears them and omitempty drops
+	// them on save. Do not read these outside migrate().
+	LegacyWorkdir     *DirEnvironment  `json:"workdir,omitempty"`
+	LegacyDirectories []DirEnvironment `json:"directories,omitempty"`
 
 	HasPrompt          bool                   `json:"has_prompt"`
 	NetworkMode        string                 `json:"network_mode,omitempty"`
@@ -54,8 +67,11 @@ type Environment struct {
 	Archetype          string                 `json:"archetype,omitempty"`       // resolved environment archetype (simple, compose, devcontainer, apple)
 }
 
-// WorkdirEnvironment stores the resolved workdir state at creation time.
-type WorkdirEnvironment struct {
+// DirEnvironment stores resolved directory state at creation time, for every
+// entry in Environment.Dirs (workdir and auxiliary alike — the workdir is just
+// Dirs[0]). InceptionSHA / BaselineSHA are meaningful only for tracked
+// (copy/overlay) entries.
+type DirEnvironment struct {
 	HostPath     string  `json:"host_path"`
 	MountPath    string  `json:"mount_path"`
 	Mode         DirMode `json:"mode"` // typed; serializes as "copy"/"overlay"/"rw"/"ro"
@@ -63,13 +79,36 @@ type WorkdirEnvironment struct {
 	InceptionSHA string  `json:"inception_sha,omitempty"`
 }
 
-// DirEnvironment stores resolved directory state at creation time.
-// Used for both workdir and auxiliary directories.
-type DirEnvironment struct {
-	HostPath    string  `json:"host_path"`
-	MountPath   string  `json:"mount_path"`
-	Mode        DirMode `json:"mode"`
-	BaselineSHA string  `json:"baseline_sha,omitempty"`
+// Workdir returns the primary directory — Dirs[0], the agent's cwd. Returns nil
+// only for a malformed environment with no directories. The returned pointer
+// aliases the slice element, so writes through it (e.g. BaselineSHA updates)
+// persist on the next SaveEnvironment.
+func (e *Environment) Workdir() *DirEnvironment {
+	if len(e.Dirs) == 0 {
+		return nil
+	}
+	return &e.Dirs[0]
+}
+
+// AuxDirs returns the non-workdir directories (Dirs[1:]).
+func (e *Environment) AuxDirs() []DirEnvironment {
+	if len(e.Dirs) <= 1 {
+		return nil
+	}
+	return e.Dirs[1:]
+}
+
+// TrackedDirs returns the indices into Dirs of the tracked (copy/overlay)
+// entries — those diff/apply operates on. Returns indices (not copies) so
+// callers can write back BaselineSHA via &e.Dirs[i].
+func (e *Environment) TrackedDirs() []int {
+	var idx []int
+	for i := range e.Dirs {
+		if e.Dirs[i].Mode == DirModeCopy || e.Dirs[i].Mode == DirModeOverlay {
+			idx = append(idx, i)
+		}
+	}
+	return idx
 }
 
 // migrate applies forward migrations to meta loaded from disk.
@@ -110,6 +149,18 @@ func migrate(meta *Environment) error {
 			meta.HostFilesystem = desc.Capabilities.HostFilesystem
 		}
 		meta.Version = 1
+	}
+	if meta.Version < 2 {
+		// v1 → v2: collapse the singular `workdir` field and the separate
+		// `directories` slice into the ordered `dirs` list (workdir first).
+		// The legacy keys unmarshalled into LegacyWorkdir/LegacyDirectories;
+		// repack and clear them so they aren't written back.
+		if len(meta.Dirs) == 0 && meta.LegacyWorkdir != nil {
+			meta.Dirs = append([]DirEnvironment{*meta.LegacyWorkdir}, meta.LegacyDirectories...)
+		}
+		meta.LegacyWorkdir = nil
+		meta.LegacyDirectories = nil
+		meta.Version = 2
 	}
 	return nil
 }

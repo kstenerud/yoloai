@@ -233,12 +233,12 @@ func TestApplyPatch_DeleteFile(t *testing.T) {
 	meta := &store.Environment{
 		Name:      name,
 		AgentType: "test",
-		Workdir: store.WorkdirEnvironment{
+		Dirs: []store.DirEnvironment{{
 			HostPath:    hostPath,
 			MountPath:   hostPath,
 			Mode:        "copy",
 			BaselineSHA: sha,
-		},
+		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
@@ -825,9 +825,9 @@ func TestAdvanceBaseline_UpdatesMeta(t *testing.T) {
 	// Verify environment.json has new SHA
 	meta, err := store.LoadEnvironment(testLayout(tmpDir).SandboxDir(name))
 	require.NoError(t, err)
-	workDir := store.WorkDir(testLayout(tmpDir).SandboxDir(name), meta.Workdir.HostPath)
+	workDir := store.WorkDir(testLayout(tmpDir).SandboxDir(name), meta.Workdir().HostPath)
 	headSHA := gitHEAD(t, workDir)
-	assert.Equal(t, headSHA, meta.Workdir.BaselineSHA)
+	assert.Equal(t, headSHA, meta.Workdir().BaselineSHA)
 }
 
 func TestAdvanceBaseline_DiffEmptyAfterAdvance(t *testing.T) {
@@ -1177,7 +1177,7 @@ func TestAdvanceBaselineTo_UpdatesMeta(t *testing.T) {
 	// Verify meta has the second commit's SHA
 	meta, err := store.LoadEnvironment(testLayout(tmpDir).SandboxDir(name))
 	require.NoError(t, err)
-	assert.Equal(t, commits[1].SHA, meta.Workdir.BaselineSHA)
+	assert.Equal(t, commits[1].SHA, meta.Workdir().BaselineSHA)
 
 	// Only third commit should remain visible
 	remaining, err := ListCommitsBeyondBaseline(context.Background(), testLayout(tmpDir), rt, name)
@@ -1447,12 +1447,12 @@ func TestApplySeries_NonGitTargetRefuses(t *testing.T) {
 	meta := &store.Environment{
 		Name:      name,
 		AgentType: "test",
-		Workdir: store.WorkdirEnvironment{
+		Dirs: []store.DirEnvironment{{
 			HostPath:    hostPath,
 			MountPath:   hostPath,
 			Mode:        "copy",
 			BaselineSHA: "abc",
-		},
+		}},
 	}
 	require.NoError(t, store.SaveEnvironment(layout.SandboxDir(name), meta))
 

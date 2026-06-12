@@ -10,22 +10,20 @@ import (
 )
 
 func TestEnvironmentHasOverlayDirs_Workdir(t *testing.T) {
-	env := &Environment{Workdir: WorkdirInfo{Mode: DirModeOverlay}}
+	env := &Environment{Dirs: []DirInfo{{Mode: DirModeOverlay}}}
 	assert.True(t, env.HasOverlayDirs())
 }
 
 func TestEnvironmentHasOverlayDirs_AuxDir(t *testing.T) {
 	env := &Environment{
-		Workdir:     WorkdirInfo{Mode: DirModeCopy},
-		Directories: []DirInfo{{Mode: DirModeRW}, {Mode: DirModeOverlay}},
+		Dirs: []DirInfo{{Mode: DirModeCopy}, {Mode: DirModeRW}, {Mode: DirModeOverlay}},
 	}
 	assert.True(t, env.HasOverlayDirs())
 }
 
 func TestEnvironmentHasOverlayDirs_None(t *testing.T) {
 	env := &Environment{
-		Workdir:     WorkdirInfo{Mode: DirModeCopy},
-		Directories: []DirInfo{{Mode: DirModeCopy}, {Mode: DirModeRW}},
+		Dirs: []DirInfo{{Mode: DirModeCopy}, {Mode: DirModeCopy}, {Mode: DirModeRW}},
 	}
 	assert.False(t, env.HasOverlayDirs())
 }

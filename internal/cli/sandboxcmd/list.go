@@ -211,7 +211,7 @@ func runList(cmd *cobra.Command, _ []string) error {
 			formatProfile(info.Environment.Profile),
 			cliutil.FormatAge(info.Environment.CreatedAt),
 			cliutil.FormatDiskUsage(info.DiskUsageBytes),
-			info.Environment.Workdir.HostPath,
+			info.Environment.Workdir().HostPath,
 			info.Changes,
 		)
 	}

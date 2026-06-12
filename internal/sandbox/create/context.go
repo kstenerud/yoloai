@@ -29,8 +29,8 @@ func GenerateContext(sandboxDir string, meta *store.Environment) string {
 
 	// Directories section (always present — at minimum there's a workdir)
 	b.WriteString("\n## Directories\n\n")
-	writeDir(&b, meta.Workdir.MountPath, meta.Workdir.HostPath, meta.Workdir.Mode, true)
-	for _, d := range meta.Directories {
+	writeDir(&b, meta.Workdir().MountPath, meta.Workdir().HostPath, meta.Workdir().Mode, true)
+	for _, d := range meta.AuxDirs() {
 		writeDir(&b, d.MountPath, d.HostPath, d.Mode, false)
 	}
 

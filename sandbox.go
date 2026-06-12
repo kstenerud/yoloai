@@ -565,7 +565,7 @@ func (s *Sandbox) VscodeAttach() (*VscodeAttach, error) {
 
 	res.Supported = true
 	res.ContainerName = store.InstanceName(meta.Principal, meta.Name)
-	res.WorkdirPath = meta.Workdir.MountPath
+	res.WorkdirPath = meta.Workdir().MountPath
 
 	payload, err := json.Marshal(map[string]string{"containerName": res.ContainerName})
 	if err != nil {

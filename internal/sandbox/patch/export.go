@@ -52,14 +52,14 @@ func Export(ctx context.Context, layout config.Layout, rt runtime.Runtime, name 
 	if err != nil {
 		return nil, err
 	}
-	if meta.Workdir.Mode == store.DirModeRW {
+	if meta.Workdir().Mode == store.DirModeRW {
 		return nil, yoerrors.NewUsageError("export is not available for :rw directories — changes are already live")
 	}
 	if err := fileutil.MkdirAll(opts.Dir, 0750); err != nil {
 		return nil, fmt.Errorf("create export directory: %w", err)
 	}
 
-	if meta.Workdir.Mode == store.DirModeOverlay {
+	if meta.Workdir().Mode == store.DirModeOverlay {
 		return exportOverlay(ctx, layout, rt, name, opts)
 	}
 	return exportCopy(ctx, layout, rt, name, opts)

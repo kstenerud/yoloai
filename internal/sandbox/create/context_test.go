@@ -15,12 +15,8 @@ import (
 
 func TestGenerateContext_AllFields(t *testing.T) {
 	meta := &store.Environment{
-		Workdir: store.WorkdirEnvironment{
-			HostPath:  "/home/user/project",
-			MountPath: "/home/user/project",
-			Mode:      "copy",
-		},
-		Directories: []store.DirEnvironment{
+		Dirs: []store.DirEnvironment{
+			{HostPath: "/home/user/project", MountPath: "/home/user/project", Mode: "copy"},
 			{HostPath: "/opt/lib", MountPath: "/home/user/lib", Mode: "ro"},
 			{HostPath: "/data/shared", MountPath: "/data/shared", Mode: "rw"},
 		},
@@ -65,11 +61,11 @@ func assertContextContains(t *testing.T, result string) {
 
 func TestGenerateContext_MinimalFields(t *testing.T) {
 	meta := &store.Environment{
-		Workdir: store.WorkdirEnvironment{
+		Dirs: []store.DirEnvironment{{
 			HostPath:  "/home/user/project",
 			MountPath: "/home/user/project",
 			Mode:      "copy",
-		},
+		}},
 	}
 
 	result := GenerateContext("/tmp/yoloai-test-sb/test-sb", meta)
@@ -87,11 +83,11 @@ func TestGenerateContext_MinimalFields(t *testing.T) {
 
 func TestGenerateContext_NetworkNone(t *testing.T) {
 	meta := &store.Environment{
-		Workdir: store.WorkdirEnvironment{
+		Dirs: []store.DirEnvironment{{
 			HostPath:  "/project",
 			MountPath: "/project",
 			Mode:      "copy",
-		},
+		}},
 		NetworkMode: "none",
 	}
 
@@ -104,11 +100,11 @@ func TestGenerateContext_NetworkNone(t *testing.T) {
 
 func TestGenerateContext_WorkdirMountPath(t *testing.T) {
 	meta := &store.Environment{
-		Workdir: store.WorkdirEnvironment{
+		Dirs: []store.DirEnvironment{{
 			HostPath:  "/host/project",
 			MountPath: "/container/project",
 			Mode:      "copy",
-		},
+		}},
 	}
 
 	result := GenerateContext("/tmp/yoloai-test-sb/test-sb", meta)
@@ -123,11 +119,11 @@ func TestGenerateContext_SeatbeltFilesPath(t *testing.T) {
 		Name:           "test-sb",
 		BackendType:    "seatbelt",
 		HostFilesystem: true,
-		Workdir: store.WorkdirEnvironment{
+		Dirs: []store.DirEnvironment{{
 			HostPath:  "/home/user/project",
 			MountPath: "/home/user/project",
 			Mode:      "copy",
-		},
+		}},
 	}
 
 	sandboxDir := "/tmp/yoloai-test-sb/test-sb"
@@ -153,11 +149,11 @@ func TestGenerateContext_DockerFilesPath(t *testing.T) {
 	meta := &store.Environment{
 		Name:        "test-sb",
 		BackendType: "docker",
-		Workdir: store.WorkdirEnvironment{
+		Dirs: []store.DirEnvironment{{
 			HostPath:  "/home/user/project",
 			MountPath: "/home/user/project",
 			Mode:      "copy",
-		},
+		}},
 	}
 
 	result := GenerateContext("/tmp/yoloai-test-sb/test-sb", meta)
@@ -174,11 +170,11 @@ func TestGenerateContext_TartFilesPath(t *testing.T) {
 	meta := &store.Environment{
 		Name:        "test-sb",
 		BackendType: "tart",
-		Workdir: store.WorkdirEnvironment{
+		Dirs: []store.DirEnvironment{{
 			HostPath:  "/Users/admin/project",
 			MountPath: "/Users/admin/project",
 			Mode:      "copy",
-		},
+		}},
 	}
 
 	result := GenerateContext("/tmp/yoloai-test-sb/test-sb", meta)
@@ -204,11 +200,11 @@ func TestWriteContextFiles_WritesContextAndRef(t *testing.T) {
 	}
 
 	meta := &store.Environment{
-		Workdir: store.WorkdirEnvironment{
+		Dirs: []store.DirEnvironment{{
 			HostPath:  "/project",
 			MountPath: "/project",
 			Mode:      "copy",
-		},
+		}},
 	}
 	agentDef := &agent.Definition{
 		Type:        "claude",
@@ -246,11 +242,11 @@ func TestWriteContextFiles_NoRefWhenEmpty(t *testing.T) {
 	}
 
 	meta := &store.Environment{
-		Workdir: store.WorkdirEnvironment{
+		Dirs: []store.DirEnvironment{{
 			HostPath:  "/project",
 			MountPath: "/project",
 			Mode:      "copy",
-		},
+		}},
 	}
 	agentDef := &agent.Definition{
 		Type:     "test",

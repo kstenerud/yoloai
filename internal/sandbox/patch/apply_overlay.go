@@ -40,7 +40,7 @@ func ApplyOverlay(ctx context.Context, layout config.Layout, rt runtime.Runtime,
 	if err != nil {
 		return nil, err
 	}
-	if meta.Workdir.Mode != store.DirModeOverlay {
+	if meta.Workdir().Mode != store.DirModeOverlay {
 		return nil, nil
 	}
 
@@ -52,7 +52,7 @@ func ApplyOverlay(ctx context.Context, layout config.Layout, rt runtime.Runtime,
 		return nil, nil
 	}
 
-	result := &ApplyResult{Dir: meta.Workdir.HostPath, Stat: overlayStat(patches)}
+	result := &ApplyResult{Dir: meta.Workdir().HostPath, Stat: overlayStat(patches)}
 	if opts.DryRun {
 		return result, nil
 	}

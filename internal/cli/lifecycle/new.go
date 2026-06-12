@@ -394,8 +394,8 @@ func printCreateSummary(out io.Writer, meta *yoloai.Environment, hasPrompt, vsco
 	if meta.Profile != "" {
 		fmt.Fprintf(out, "  Profile:  %s\n", meta.Profile) //nolint:errcheck // best-effort output
 	}
-	fmt.Fprintf(out, "  Workdir:  %s (%s)\n", meta.Workdir.HostPath, meta.Workdir.Mode) //nolint:errcheck // best-effort output
-	for _, d := range meta.Directories {
+	fmt.Fprintf(out, "  Workdir:  %s (%s)\n", meta.Workdir().HostPath, meta.Workdir().Mode) //nolint:errcheck // best-effort output
+	for _, d := range meta.AuxDirs() {
 		mode := d.Mode
 		if mode == "" {
 			mode = "ro"

@@ -81,12 +81,12 @@ func printSandboxInfo(cmd *cobra.Command, sb *yoloai.Sandbox, name string, info 
 
 // printSandboxDirs prints workdir and auxiliary directory information.
 func printSandboxDirs(w io.Writer, meta *yoloai.Environment) {
-	if meta.Workdir.MountPath != "" && meta.Workdir.MountPath != meta.Workdir.HostPath {
-		fmt.Fprintf(w, "Workdir:     %s → %s (%s)\n", meta.Workdir.HostPath, meta.Workdir.MountPath, meta.Workdir.Mode) //nolint:errcheck
+	if meta.Workdir().MountPath != "" && meta.Workdir().MountPath != meta.Workdir().HostPath {
+		fmt.Fprintf(w, "Workdir:     %s → %s (%s)\n", meta.Workdir().HostPath, meta.Workdir().MountPath, meta.Workdir().Mode) //nolint:errcheck
 	} else {
-		fmt.Fprintf(w, "Workdir:     %s (%s)\n", meta.Workdir.HostPath, meta.Workdir.Mode) //nolint:errcheck
+		fmt.Fprintf(w, "Workdir:     %s (%s)\n", meta.Workdir().HostPath, meta.Workdir().Mode) //nolint:errcheck
 	}
-	for _, d := range meta.Directories {
+	for _, d := range meta.AuxDirs() {
 		if d.MountPath != d.HostPath {
 			fmt.Fprintf(w, "Dir:         %s → %s (%s)\n", d.HostPath, d.MountPath, d.Mode) //nolint:errcheck
 		} else {
@@ -124,8 +124,8 @@ func printSandboxResources(w io.Writer, meta *yoloai.Environment, info *yoloai.S
 		}
 	}
 	fmt.Fprintf(w, "Created:     %s (%s)\n", meta.CreatedAt.Format("2006-01-02T15:04:05Z07:00"), cliutil.FormatAge(meta.CreatedAt)) //nolint:errcheck
-	if meta.Workdir.BaselineSHA != "" {
-		fmt.Fprintf(w, "Baseline:    %s\n", meta.Workdir.BaselineSHA) //nolint:errcheck
+	if meta.Workdir().BaselineSHA != "" {
+		fmt.Fprintf(w, "Baseline:    %s\n", meta.Workdir().BaselineSHA) //nolint:errcheck
 	}
 	fmt.Fprintf(w, "Disk Usage:  %s\n", cliutil.FormatDiskUsage(info.DiskUsageBytes)) //nolint:errcheck
 	fmt.Fprintf(w, "Changes:     %s\n", info.Changes)                                 //nolint:errcheck

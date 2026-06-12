@@ -98,13 +98,13 @@ func TestIntegrationTart_FullLifecycle(t *testing.T) {
 	assert.Equal(t, sandboxName, meta.Name)
 	assert.Equal(t, agent.AgentTest, meta.AgentType)
 	assert.Equal(t, runtime.BackendTart, meta.BackendType)
-	assert.Equal(t, store.DirModeCopy, meta.Workdir.Mode)
-	assert.NotEmpty(t, meta.Workdir.BaselineSHA, "baseline SHA should be set after VM work dir setup")
+	assert.Equal(t, store.DirModeCopy, meta.Workdir().Mode)
+	assert.NotEmpty(t, meta.Workdir().BaselineSHA, "baseline SHA should be set after VM work dir setup")
 
 	// Verify work directory path is VM-local (not VirtioFS)
 	vmLocalPath := runtime.ResolveCopyMountFor(mgr.Runtime(), sandboxName, projectDir)
 	assert.Contains(t, vmLocalPath, "/Users/admin/yoloai-work/", "work dir should be on VM local storage")
-	assert.Equal(t, vmLocalPath, meta.Workdir.MountPath)
+	assert.Equal(t, vmLocalPath, meta.Workdir().MountPath)
 
 	// Verify VM is running
 	status, err := sandbox.DetectStatus(ctx, mgr.Runtime(), store.InstanceName("", sandboxName), mgr.Layout().SandboxDir(sandboxName))
@@ -245,9 +245,9 @@ func TestIntegrationTart_MultipleAuxDirs(t *testing.T) {
 
 	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir(sandboxName))
 	require.NoError(t, err)
-	require.Len(t, meta.Directories, 2, "should have two aux directories")
+	require.Len(t, meta.AuxDirs(), 2, "should have two aux directories")
 
-	for i, dir := range meta.Directories {
+	for i, dir := range meta.AuxDirs() {
 		assert.Equal(t, store.DirModeRW, dir.Mode)
 		// :rw is a live bind-mount; there's no baseline to capture.
 		assert.Empty(t, dir.BaselineSHA, "aux dir %d should have no baseline (rw)", i)
@@ -261,7 +261,7 @@ func TestIntegrationTart_MultipleAuxDirs(t *testing.T) {
 
 	// Modify both aux dirs from inside the VM — :rw means writes land
 	// on the host directly, so this also exercises the bind-mount.
-	for i, dir := range meta.Directories {
+	for i, dir := range meta.AuxDirs() {
 		modifyCmd := []string{"bash", "-c",
 			"echo 'modified' >> " + filepath.Join(dir.MountPath, "data.txt")}
 		result, err := mgr.Runtime().Exec(ctx, store.InstanceName("", sandboxName), modifyCmd, "admin")
@@ -293,7 +293,7 @@ func TestIntegrationTart_GitCorruption(t *testing.T) {
 
 	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir(sandboxName))
 	require.NoError(t, err)
-	vmLocalPath := meta.Workdir.MountPath
+	vmLocalPath := meta.Workdir().MountPath
 
 	// Run git status/diff multiple times to detect corruption
 	for i := 0; i < 10; i++ {
@@ -359,9 +359,9 @@ func TestIntegrationTart_VMLocalStorageVerification(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify mount path is VM-local, not VirtioFS
-	assert.Contains(t, meta.Workdir.MountPath, "/Users/admin/yoloai-work/",
+	assert.Contains(t, meta.Workdir().MountPath, "/Users/admin/yoloai-work/",
 		"Tart work dir should be on VM local storage")
-	assert.NotContains(t, meta.Workdir.MountPath, "/Volumes/My Shared Files",
+	assert.NotContains(t, meta.Workdir().MountPath, "/Volumes/My Shared Files",
 		"Tart work dir should not be on VirtioFS")
 
 	// Start VM and verify directory exists on local storage
@@ -375,22 +375,22 @@ func TestIntegrationTart_VMLocalStorageVerification(t *testing.T) {
 
 	// Check that work directory is a real directory (not a symlink to VirtioFS)
 	result, err := mgr.Runtime().Exec(ctx, store.InstanceName("", sandboxName),
-		[]string{"test", "-d", meta.Workdir.MountPath}, "admin")
+		[]string{"test", "-d", meta.Workdir().MountPath}, "admin")
 	require.NoError(t, err)
 	assert.Equal(t, 0, result.ExitCode, "work dir should exist on VM")
 
 	// Verify it's not a symlink. test -L exits 1 when path is not a symlink,
 	// so err is an *ExecError here — use the exit code directly.
 	result, _ = mgr.Runtime().Exec(ctx, store.InstanceName("", sandboxName),
-		[]string{"test", "-L", meta.Workdir.MountPath}, "admin")
+		[]string{"test", "-L", meta.Workdir().MountPath}, "admin")
 	assert.NotEqual(t, 0, result.ExitCode, "work dir should not be a symlink")
 
 	// Verify baseline SHA was created
-	assert.NotEmpty(t, meta.Workdir.BaselineSHA, "baseline SHA should be set after VM setup")
+	assert.NotEmpty(t, meta.Workdir().BaselineSHA, "baseline SHA should be set after VM setup")
 
 	// Verify the baseline commit exists in git history
 	result, err = mgr.Runtime().Exec(ctx, store.InstanceName("", sandboxName),
-		[]string{"git", "-C", meta.Workdir.MountPath, "log", "--oneline"}, "admin")
+		[]string{"git", "-C", meta.Workdir().MountPath, "log", "--oneline"}, "admin")
 	require.NoError(t, err)
 	assert.Contains(t, result.Stdout, "baseline", "git history should contain baseline commit")
 }

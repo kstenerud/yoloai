@@ -37,7 +37,7 @@ func createNetworkSandbox(t *testing.T, name, networkMode string, domains []stri
 		BackendType:  "docker",
 		NetworkMode:  networkMode,
 		NetworkAllow: domains,
-		Workdir:      store.WorkdirEnvironment{HostPath: "/tmp/test", MountPath: "/tmp/test", Mode: "copy"},
+		Dirs:         []store.DirEnvironment{{HostPath: "/tmp/test", MountPath: "/tmp/test", Mode: "copy"}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 

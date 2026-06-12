@@ -103,7 +103,7 @@ func TestExport_RWRefused(t *testing.T) {
 	meta := &store.Environment{
 		Name:      name,
 		AgentType: "test",
-		Workdir:   store.WorkdirEnvironment{HostPath: filepath.Join(tmpDir, "p"), MountPath: filepath.Join(tmpDir, "p"), Mode: store.DirModeRW},
+		Dirs:      []store.DirEnvironment{{HostPath: filepath.Join(tmpDir, "p"), MountPath: filepath.Join(tmpDir, "p"), Mode: store.DirModeRW}},
 	}
 	require.NoError(t, store.SaveEnvironment(layout.SandboxDir(name), meta))
 
@@ -124,7 +124,7 @@ func TestExport_OverlayRefsRefused(t *testing.T) {
 	meta := &store.Environment{
 		Name:      name,
 		AgentType: "test",
-		Workdir:   store.WorkdirEnvironment{HostPath: filepath.Join(tmpDir, "p"), MountPath: filepath.Join(tmpDir, "p"), Mode: store.DirModeOverlay, BaselineSHA: "abc"},
+		Dirs:      []store.DirEnvironment{{HostPath: filepath.Join(tmpDir, "p"), MountPath: filepath.Join(tmpDir, "p"), Mode: store.DirModeOverlay, BaselineSHA: "abc"}},
 	}
 	require.NoError(t, store.SaveEnvironment(layout.SandboxDir(name), meta))
 

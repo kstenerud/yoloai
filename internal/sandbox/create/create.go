@@ -55,7 +55,7 @@ const (
 )
 
 // DirMode is re-exported from store. The canonical type definition
-// lives there because the persisted WorkdirEnvironment / DirEnvironment types hold
+// lives there because the persisted DirEnvironment type holds
 // Mode values; keeping the alias here means existing in-package
 // callers (`Mode: DirModeCopy`, `m.Mode == DirModeRW`) continue to
 // work without churn.
@@ -183,14 +183,14 @@ func checkUnappliedWork(ctx context.Context, g *git.Git, name string, sandboxDir
 		return fmt.Errorf("cannot verify unapplied work in sandbox %q: %w (pass --abandon-unapplied to replace without this check)", name, err)
 	}
 
-	if meta.Workdir.Mode == "copy" || meta.Workdir.Mode == "overlay" {
-		workDir := store.WorkDir(sandboxDir, meta.Workdir.HostPath)
-		if err := unappliedWorkError(ctx, g, name, workDir, meta.Workdir.BaselineSHA, ""); err != nil {
+	if meta.Workdir().Mode == "copy" || meta.Workdir().Mode == "overlay" {
+		workDir := store.WorkDir(sandboxDir, meta.Workdir().HostPath)
+		if err := unappliedWorkError(ctx, g, name, workDir, meta.Workdir().BaselineSHA, ""); err != nil {
 			return err
 		}
 	}
 
-	for _, d := range meta.Directories {
+	for _, d := range meta.AuxDirs() {
 		if d.Mode == "copy" || d.Mode == "overlay" {
 			auxWorkDir := store.WorkDir(sandboxDir, d.HostPath)
 			if err := unappliedWorkError(ctx, g, name, auxWorkDir, d.BaselineSHA, d.HostPath); err != nil {
@@ -662,14 +662,13 @@ func buildEnvironment(opts Options, pr *profileResult, workdir *DirSpec, baselin
 		ImageRef:      pr.imageRef,
 		AgentType:     agent.AgentType(opts.Agent),
 		Model:         model,
-		Workdir: store.WorkdirEnvironment{
+		Dirs: append([]store.DirEnvironment{{
 			HostPath:     workdir.Path,
 			MountPath:    launch.OverlayOrResolvedMountPath(workdir),
 			Mode:         workdir.Mode,
 			BaselineSHA:  baselineSHA,
 			InceptionSHA: baselineSHA,
-		},
-		Directories:        dirEnvs,
+		}}, dirEnvs...),
 		HasPrompt:          hasPrompt,
 		NetworkMode:        networkMode,
 		NetworkAllow:       networkAllow,

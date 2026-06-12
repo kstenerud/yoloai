@@ -116,12 +116,12 @@ func seedCopySandbox(t *testing.T, layout config.Layout, name string) {
 		AgentType:   "claude",
 		BackendType: "gitdispatchmock",
 		CreatedAt:   time.Now(),
-		Workdir: store.WorkdirEnvironment{
+		Dirs: []store.DirEnvironment{{
 			HostPath:    "/tmp/project",
 			MountPath:   "/tmp/project",
 			Mode:        "copy",
 			BaselineSHA: "abc1230000000000000000000000000000000000",
-		},
+		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 }

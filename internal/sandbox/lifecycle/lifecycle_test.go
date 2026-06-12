@@ -41,11 +41,11 @@ func createTestSandbox(t *testing.T, tmpDir, name, hostPath string, mode store.D
 		Name:      name,
 		AgentType: "claude",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirEnvironment{
+		Dirs: []store.DirEnvironment{{
 			HostPath:  hostPath,
 			MountPath: hostPath,
 			Mode:      mode,
-		},
+		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 }
@@ -59,11 +59,11 @@ func createRWSandbox(t *testing.T, tmpDir, name, hostPath string) {
 		Name:      name,
 		AgentType: "test",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirEnvironment{
+		Dirs: []store.DirEnvironment{{
 			HostPath:  hostPath,
 			MountPath: hostPath,
 			Mode:      "rw",
-		},
+		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 }
@@ -262,11 +262,11 @@ func TestStart_Resume_DoneStatus(t *testing.T) {
 		AgentType: "claude",
 		HasPrompt: true,
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirEnvironment{
+		Dirs: []store.DirEnvironment{{
 			HostPath:  "/tmp/project",
 			MountPath: "/tmp/project",
 			Mode:      "copy",
-		},
+		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
@@ -336,11 +336,11 @@ func TestStart_Resume_StoppedStatus(t *testing.T) {
 		AgentType: "claude",
 		HasPrompt: true,
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirEnvironment{
+		Dirs: []store.DirEnvironment{{
 			HostPath:  "/tmp/project",
 			MountPath: "/tmp/project",
 			Mode:      "copy",
-		},
+		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
@@ -412,11 +412,11 @@ func TestNeedsConfirmation_RunningButClean(t *testing.T) {
 		Name:      name,
 		AgentType: "claude",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirEnvironment{
+		Dirs: []store.DirEnvironment{{
 			HostPath:  hostPath,
 			MountPath: hostPath,
 			Mode:      "copy",
-		},
+		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
@@ -455,11 +455,11 @@ func TestNeedsConfirmation_StoppedVMFailsafe(t *testing.T) {
 		Name:      name,
 		AgentType: "claude",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirEnvironment{
+		Dirs: []store.DirEnvironment{{
 			HostPath:  hostPath,
 			MountPath: hostPath,
 			Mode:      "copy",
-		},
+		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
@@ -494,11 +494,11 @@ func TestNeedsConfirmation_ChangesExist(t *testing.T) {
 		Name:      name,
 		AgentType: "claude",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirEnvironment{
+		Dirs: []store.DirEnvironment{{
 			HostPath:  hostPath,
 			MountPath: hostPath,
 			Mode:      "copy",
-		},
+		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
@@ -537,11 +537,11 @@ func TestNeedsConfirmation_NoChanges(t *testing.T) {
 		Name:      name,
 		AgentType: "claude",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirEnvironment{
+		Dirs: []store.DirEnvironment{{
 			HostPath:  hostPath,
 			MountPath: hostPath,
 			Mode:      "copy",
-		},
+		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
@@ -634,12 +634,12 @@ func TestReset_RecopiesWorkdir(t *testing.T) {
 		Name:      name,
 		AgentType: "claude",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirEnvironment{
+		Dirs: []store.DirEnvironment{{
 			HostPath:    origDir,
 			MountPath:   origDir,
 			Mode:        "copy",
 			BaselineSHA: sha,
-		},
+		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
@@ -674,8 +674,8 @@ func TestReset_RecopiesWorkdir(t *testing.T) {
 	// Verify new baseline SHA in meta
 	updatedMeta, err := store.LoadEnvironment(sandboxDir)
 	require.NoError(t, err)
-	assert.NotEmpty(t, updatedMeta.Workdir.BaselineSHA)
-	assert.NotEqual(t, sha, updatedMeta.Workdir.BaselineSHA) // new baseline
+	assert.NotEmpty(t, updatedMeta.Workdir().BaselineSHA)
+	assert.NotEqual(t, sha, updatedMeta.Workdir().BaselineSHA) // new baseline
 
 	// Verify cache and files were cleared (default behavior)
 	assert.NoFileExists(t, filepath.Join(cacheDir, "cached.txt"))
@@ -699,11 +699,11 @@ func TestReset_PromptOverwrite(t *testing.T) {
 		Name:      name,
 		AgentType: "claude",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirEnvironment{
+		Dirs: []store.DirEnvironment{{
 			HostPath:  origDir,
 			MountPath: origDir,
 			Mode:      "copy",
-		},
+		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
@@ -752,12 +752,12 @@ func TestReset_State(t *testing.T) {
 		Name:      name,
 		AgentType: "claude",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirEnvironment{
+		Dirs: []store.DirEnvironment{{
 			HostPath:    origDir,
 			MountPath:   origDir,
 			Mode:        "copy",
 			BaselineSHA: sha,
-		},
+		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
@@ -826,12 +826,12 @@ func TestReset_OriginalMissing(t *testing.T) {
 		Name:      name,
 		AgentType: "claude",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirEnvironment{
+		Dirs: []store.DirEnvironment{{
 			HostPath:    origDir,
 			MountPath:   origDir,
 			Mode:        "copy",
 			BaselineSHA: sha,
-		},
+		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
@@ -894,12 +894,12 @@ func TestReset_InPlace_SyncsWorkdir(t *testing.T) {
 		AgentType: "claude",
 		HasPrompt: true,
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirEnvironment{
+		Dirs: []store.DirEnvironment{{
 			HostPath:    origDir,
 			MountPath:   origDir,
 			Mode:        "copy",
 			BaselineSHA: sha,
-		},
+		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
@@ -942,8 +942,8 @@ func TestReset_InPlace_SyncsWorkdir(t *testing.T) {
 	// Verify new baseline SHA in meta
 	updatedMeta, err := store.LoadEnvironment(sandboxDir)
 	require.NoError(t, err)
-	assert.NotEmpty(t, updatedMeta.Workdir.BaselineSHA)
-	assert.NotEqual(t, sha, updatedMeta.Workdir.BaselineSHA)
+	assert.NotEmpty(t, updatedMeta.Workdir().BaselineSHA)
+	assert.NotEqual(t, sha, updatedMeta.Workdir().BaselineSHA)
 
 	// Verify cache and files were cleared (default behavior)
 	assert.NoFileExists(t, filepath.Join(cacheDir, "cached.txt"))
@@ -987,12 +987,12 @@ func TestReset_InPlace_KeepCache(t *testing.T) {
 		Name:      name,
 		AgentType: "claude",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirEnvironment{
+		Dirs: []store.DirEnvironment{{
 			HostPath:    origDir,
 			MountPath:   origDir,
 			Mode:        "copy",
 			BaselineSHA: sha,
-		},
+		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
@@ -1049,12 +1049,12 @@ func TestReset_InPlace_KeepFiles(t *testing.T) {
 		Name:      name,
 		AgentType: "claude",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirEnvironment{
+		Dirs: []store.DirEnvironment{{
 			HostPath:    origDir,
 			MountPath:   origDir,
 			Mode:        "copy",
 			BaselineSHA: sha,
-		},
+		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
@@ -1101,12 +1101,12 @@ func TestReset_UpgradesToRestartWhenNotRunning(t *testing.T) {
 		Name:      name,
 		AgentType: "claude",
 		CreatedAt: time.Now(),
-		Workdir: store.WorkdirEnvironment{
+		Dirs: []store.DirEnvironment{{
 			HostPath:    origDir,
 			MountPath:   origDir,
 			Mode:        "copy",
 			BaselineSHA: sha,
-		},
+		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
@@ -1142,8 +1142,8 @@ func TestReset_UpgradesToRestartWhenNotRunning(t *testing.T) {
 	// Verify new baseline SHA in meta
 	updatedMeta, err := store.LoadEnvironment(sandboxDir)
 	require.NoError(t, err)
-	assert.NotEmpty(t, updatedMeta.Workdir.BaselineSHA)
-	assert.NotEqual(t, sha, updatedMeta.Workdir.BaselineSHA)
+	assert.NotEmpty(t, updatedMeta.Workdir().BaselineSHA)
+	assert.NotEqual(t, sha, updatedMeta.Workdir().BaselineSHA)
 }
 
 // patchConfigDebug tests
@@ -1296,7 +1296,7 @@ func TestDestroy_ReadOnlyFiles(t *testing.T) {
 		Name:      name,
 		AgentType: "claude",
 		CreatedAt: time.Now(),
-		Workdir:   store.WorkdirEnvironment{HostPath: "/tmp/project", Mode: "copy"},
+		Dirs:      []store.DirEnvironment{{HostPath: "/tmp/project", Mode: "copy"}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 

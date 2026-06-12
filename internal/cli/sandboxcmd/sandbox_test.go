@@ -26,7 +26,7 @@ func setupSandboxCmdTest(t *testing.T, name string) {
 		Name:      name,
 		AgentType: "claude",
 		CreatedAt: time.Now(),
-		Workdir:   store.WorkdirEnvironment{HostPath: "/tmp/test", Mode: "copy"},
+		Dirs:      []store.DirEnvironment{{HostPath: "/tmp/test", Mode: "copy"}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 }

@@ -173,7 +173,7 @@ func TestCLI_Diff(t *testing.T) {
 	// Modify work copy
 	meta, err := store.LoadEnvironment(cliutil.Layout().SandboxDir("cli-diff"))
 	require.NoError(t, err)
-	workDir := store.WorkDir(cliutil.Layout().SandboxDir("cli-diff"), meta.Workdir.HostPath)
+	workDir := store.WorkDir(cliutil.Layout().SandboxDir("cli-diff"), meta.Workdir().HostPath)
 	require.NoError(t, os.WriteFile(
 		filepath.Join(workDir, "main.go"),
 		[]byte("package main\n\nimport \"fmt\"\n\nfunc main() { fmt.Println(\"diff-test\") }\n"),
@@ -482,7 +482,7 @@ func TestCLI_Apply(t *testing.T) {
 	// Seed work copy with a distinctive change
 	meta, err := store.LoadEnvironment(cliutil.Layout().SandboxDir("cli-apply"))
 	require.NoError(t, err)
-	workDir := store.WorkDir(cliutil.Layout().SandboxDir("cli-apply"), meta.Workdir.HostPath)
+	workDir := store.WorkDir(cliutil.Layout().SandboxDir("cli-apply"), meta.Workdir().HostPath)
 	require.NoError(t, os.WriteFile(
 		filepath.Join(workDir, "main.go"),
 		[]byte("package main\n\nimport \"fmt\"\n\nfunc main() { fmt.Println(\"apply-test\") }\n"),
@@ -509,7 +509,7 @@ func TestCLI_ApplyExport(t *testing.T) {
 
 	meta, err := store.LoadEnvironment(cliutil.Layout().SandboxDir("cli-export"))
 	require.NoError(t, err)
-	workDir := store.WorkDir(cliutil.Layout().SandboxDir("cli-export"), meta.Workdir.HostPath)
+	workDir := store.WorkDir(cliutil.Layout().SandboxDir("cli-export"), meta.Workdir().HostPath)
 	require.NoError(t, os.WriteFile(
 		filepath.Join(workDir, "main.go"),
 		[]byte("package main\n\nimport \"fmt\"\n\nfunc main() { fmt.Println(\"export-test\") }\n"),

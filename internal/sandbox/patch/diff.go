@@ -192,24 +192,24 @@ func loadDiffContext(layout config.Layout, name string) (workDir string, baselin
 		return "", "", "", loadErr
 	}
 
-	mode = meta.Workdir.Mode
+	mode = meta.Workdir().Mode
 
 	switch mode {
 	case store.DirModeCopy:
-		workDir = copyGitWorkDir(sandboxDir, meta.Workdir.HostPath, meta.Workdir.MountPath)
-		baselineSHA = meta.Workdir.BaselineSHA
+		workDir = copyGitWorkDir(sandboxDir, meta.Workdir().HostPath, meta.Workdir().MountPath)
+		baselineSHA = meta.Workdir().BaselineSHA
 		if baselineSHA == "" {
 			return "", "", "", fmt.Errorf("sandbox has no baseline SHA — was it created before diff support?")
 		}
 	case store.DirModeOverlay:
 		// Container path for exec
-		workDir = meta.Workdir.MountPath
+		workDir = meta.Workdir().MountPath
 		if workDir == "" {
-			workDir = meta.Workdir.HostPath // mirror host path
+			workDir = meta.Workdir().HostPath // mirror host path
 		}
-		baselineSHA = meta.Workdir.BaselineSHA // may be empty (deferred)
+		baselineSHA = meta.Workdir().BaselineSHA // may be empty (deferred)
 	case store.DirModeRW:
-		workDir = meta.Workdir.HostPath
+		workDir = meta.Workdir().HostPath
 		baselineSHA = "HEAD"
 	case store.DirModeRO:
 		return "", "", "", fmt.Errorf("workdir cannot be read-only (mode %s)", mode)
@@ -246,29 +246,29 @@ func LoadAllDiffContexts(layout config.Layout, name string) ([]DiffContext, erro
 		return nil, err
 	}
 
-	switch meta.Workdir.Mode {
+	switch meta.Workdir().Mode {
 	case store.DirModeCopy:
 		return []DiffContext{{
-			HostPath:    meta.Workdir.HostPath,
-			WorkDir:     copyGitWorkDir(sandboxDir, meta.Workdir.HostPath, meta.Workdir.MountPath),
-			BaselineSHA: meta.Workdir.BaselineSHA,
+			HostPath:    meta.Workdir().HostPath,
+			WorkDir:     copyGitWorkDir(sandboxDir, meta.Workdir().HostPath, meta.Workdir().MountPath),
+			BaselineSHA: meta.Workdir().BaselineSHA,
 			Mode:        store.DirModeCopy,
 		}}, nil
 	case store.DirModeOverlay:
-		mountPath := meta.Workdir.MountPath
+		mountPath := meta.Workdir().MountPath
 		if mountPath == "" {
-			mountPath = meta.Workdir.HostPath
+			mountPath = meta.Workdir().HostPath
 		}
 		return []DiffContext{{
-			HostPath:    meta.Workdir.HostPath,
+			HostPath:    meta.Workdir().HostPath,
 			WorkDir:     mountPath,
-			BaselineSHA: meta.Workdir.BaselineSHA,
+			BaselineSHA: meta.Workdir().BaselineSHA,
 			Mode:        store.DirModeOverlay,
 		}}, nil
 	case store.DirModeRW:
 		return []DiffContext{{
-			HostPath: meta.Workdir.HostPath,
-			WorkDir:  meta.Workdir.HostPath,
+			HostPath: meta.Workdir().HostPath,
+			WorkDir:  meta.Workdir().HostPath,
 			Mode:     store.DirModeRW,
 		}}, nil
 	case store.DirModeRO, "":
@@ -296,7 +296,7 @@ func ListCommitsBeyondBaselineOverlay(ctx context.Context, layout config.Layout,
 	if err != nil {
 		return nil, fmt.Errorf("load metadata: %w", err)
 	}
-	if meta.Workdir.Mode != "overlay" {
+	if meta.Workdir().Mode != "overlay" {
 		return nil, nil
 	}
 
@@ -337,7 +337,7 @@ func GenerateOverlayDiff(ctx context.Context, rt runtime.Runtime, opts DiffOptio
 	if err != nil {
 		return "", fmt.Errorf("load metadata: %w", err)
 	}
-	if meta.Workdir.Mode != "overlay" {
+	if meta.Workdir().Mode != "overlay" {
 		return "", nil
 	}
 
