@@ -60,7 +60,7 @@ func TestExport_CopyWithRefs(t *testing.T) {
 	createCopySandboxWithCommits(t, tmpDir, name, "/tmp/project", exportThreeCommits)
 	rt := hostGitRuntime()
 
-	commits, err := ListCommitsBeyondBaseline(context.Background(), testLayout(tmpDir), rt, name)
+	commits, err := ListCommitsBeyondBaseline(context.Background(), testLayout(tmpDir), rt, name, "")
 	require.NoError(t, err)
 	require.Len(t, commits, 3)
 

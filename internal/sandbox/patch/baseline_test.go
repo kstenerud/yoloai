@@ -40,7 +40,7 @@ func TestAdvanceBaselineCAS_HappyPath(t *testing.T) {
 	rt := hostGitRuntime()
 	expected := currentBaseline(t, tmpDir, name)
 
-	change, err := AdvanceBaselineCAS(context.Background(), testLayout(tmpDir), rt, name, expected)
+	change, err := AdvanceBaselineCAS(context.Background(), testLayout(tmpDir), rt, name, "", expected)
 	require.NoError(t, err)
 	assert.Equal(t, gitHEAD(t, workDir), change.NewSHA)
 	assert.Equal(t, "add feature", change.Subject)
@@ -59,7 +59,7 @@ func TestAdvanceBaselineCAS_ConflictDoesNotWrite(t *testing.T) {
 	rt := hostGitRuntime()
 	before := currentBaseline(t, tmpDir, name)
 
-	_, err := AdvanceBaselineCAS(context.Background(), testLayout(tmpDir), rt, name, "deadbeefdeadbeef")
+	_, err := AdvanceBaselineCAS(context.Background(), testLayout(tmpDir), rt, name, "", "deadbeefdeadbeef")
 	var conflict *BaselineConflictError
 	require.ErrorAs(t, err, &conflict)
 	assert.Equal(t, "deadbeefdeadbeef", conflict.Expected)
@@ -75,7 +75,7 @@ func TestAdvanceBaselineCAS_EmptyExpectedConflictsWhenSet(t *testing.T) {
 	createCopySandbox(t, tmpDir, name, "/tmp/project")
 
 	rt := hostGitRuntime()
-	_, err := AdvanceBaselineCAS(context.Background(), testLayout(tmpDir), rt, name, "")
+	_, err := AdvanceBaselineCAS(context.Background(), testLayout(tmpDir), rt, name, "", "")
 	var conflict *BaselineConflictError
 	require.ErrorAs(t, err, &conflict)
 	assert.Equal(t, "", conflict.Expected)
@@ -92,13 +92,13 @@ func TestSetBaselineCAS_HappyPath(t *testing.T) {
 	})
 
 	rt := hostGitRuntime()
-	commits, err := ListCommitsBeyondBaseline(context.Background(), testLayout(tmpDir), rt, name)
+	commits, err := ListCommitsBeyondBaseline(context.Background(), testLayout(tmpDir), rt, name, "")
 	require.NoError(t, err)
 	require.Len(t, commits, 2)
 	target := commits[0] // "first"
 
 	expected := currentBaseline(t, tmpDir, name)
-	change, err := SetBaselineCAS(context.Background(), testLayout(tmpDir), rt, name, expected, target.SHA)
+	change, err := SetBaselineCAS(context.Background(), testLayout(tmpDir), rt, name, "", expected, target.SHA)
 	require.NoError(t, err)
 	assert.Equal(t, target.SHA, change.NewSHA)
 	assert.Equal(t, "first", change.Subject)
@@ -116,7 +116,7 @@ func TestSetBaselineCAS_Conflict(t *testing.T) {
 
 	rt := hostGitRuntime()
 	before := currentBaseline(t, tmpDir, name)
-	_, err := SetBaselineCAS(context.Background(), testLayout(tmpDir), rt, name, "notthecurrentsha", gitHEAD(t, workDir))
+	_, err := SetBaselineCAS(context.Background(), testLayout(tmpDir), rt, name, "", "notthecurrentsha", gitHEAD(t, workDir))
 	var conflict *BaselineConflictError
 	require.ErrorAs(t, err, &conflict)
 	assert.Equal(t, before, currentBaseline(t, tmpDir, name))
@@ -132,7 +132,7 @@ func TestBaselineCAS_RWUsageError(t *testing.T) {
 	createRWSandbox(t, tmpDir, name, hostDir)
 
 	rt := hostGitRuntime()
-	_, err := AdvanceBaselineCAS(context.Background(), testLayout(tmpDir), rt, name, "")
+	_, err := AdvanceBaselineCAS(context.Background(), testLayout(tmpDir), rt, name, "", "")
 	require.Error(t, err)
 	var usage *yoerrors.UsageError
 	assert.True(t, errors.As(err, &usage))
@@ -152,7 +152,7 @@ func TestBaselineLog_MarksBaseline(t *testing.T) {
 	rt := hostGitRuntime()
 	baseline := currentBaseline(t, tmpDir, name)
 
-	entries, err := BaselineLog(context.Background(), testLayout(tmpDir), rt, name)
+	entries, err := BaselineLog(context.Background(), testLayout(tmpDir), rt, name, "")
 	require.NoError(t, err)
 	require.NotEmpty(t, entries)
 

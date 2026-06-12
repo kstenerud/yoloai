@@ -238,6 +238,33 @@ func TestMeta_ResourcesOmittedWhenNil(t *testing.T) {
 	assert.NotContains(t, raw, "resources")
 }
 
+func TestEnvironmentDir(t *testing.T) {
+	env := &Environment{
+		Dirs: []DirEnvironment{
+			{HostPath: "/a", Mode: DirModeCopy},
+			{HostPath: "/b", Mode: DirModeRW},
+		},
+	}
+
+	// "" selects Dirs[0]
+	d := env.Dir("")
+	require.NotNil(t, d)
+	assert.Equal(t, "/a", d.HostPath)
+
+	// exact match returns that dir
+	d = env.Dir("/b")
+	require.NotNil(t, d)
+	assert.Equal(t, "/b", d.HostPath)
+
+	// write through pointer propagates to slice
+	d.Mode = DirModeOverlay
+	assert.Equal(t, DirModeOverlay, env.Dirs[1].Mode)
+
+	// non-existent path returns nil
+	d = env.Dir("/nope")
+	assert.Nil(t, d)
+}
+
 func TestMeta_MigrateV1ToV2(t *testing.T) {
 	// Write a v1 environment.json with the old two-field shape (workdir object +
 	// directories array) and assert that LoadEnvironment repacks it into Dirs with

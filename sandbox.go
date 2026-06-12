@@ -62,7 +62,29 @@ func (s *Sandbox) Name() string { return s.name }
 
 // Workdir returns the workdir sub-handle for diff/apply operations.
 func (s *Sandbox) Workdir() *Workdir {
-	return &Workdir{engine: s.engine, name: s.name}
+	return &Workdir{engine: s.engine, name: s.name, dirHostPath: ""}
+}
+
+// TrackedDir returns a Workdir sub-handle targeted at the tracked directory
+// identified by hostPath. Returns a *UsageError if no directory with that
+// host path exists in the sandbox, or if the directory is not tracked
+// (mode :copy or :overlay).
+func (s *Sandbox) TrackedDir(hostPath string) (*Workdir, error) {
+	if err := s.checkNotDestroyed(); err != nil {
+		return nil, err
+	}
+	meta, err := s.engine.LoadEnvironment(s.name)
+	if err != nil {
+		return nil, err
+	}
+	dir := meta.Dir(hostPath)
+	if dir == nil {
+		return nil, yoerrors.NewUsageError("no directory %q in sandbox %q", hostPath, s.name)
+	}
+	if dir.Mode != store.DirModeCopy && dir.Mode != store.DirModeOverlay {
+		return nil, yoerrors.NewUsageError("directory %q is not tracked (mode %s); diff/apply needs :copy or :overlay", hostPath, dir.Mode)
+	}
+	return &Workdir{engine: s.engine, name: s.name, dirHostPath: hostPath}, nil
 }
 
 // Agent returns the agent-interaction sub-handle for this sandbox.

@@ -34,12 +34,16 @@ type TransferTagsResult struct {
 // TargetIsGitRepo reports whether the sandbox's original host work directory is
 // a git repository — the apply target. Drives the CLI's non-git fallback and
 // the selective-apply precondition.
-func TargetIsGitRepo(layout config.Layout, name string) (bool, error) {
+func TargetIsGitRepo(layout config.Layout, name string, dirHostPath string) (bool, error) {
 	meta, err := store.LoadEnvironment(layout.SandboxDir(name))
 	if err != nil {
 		return false, err
 	}
-	return git.IsGitRepo(meta.Workdir().HostPath), nil
+	dir := meta.Dir(dirHostPath)
+	if dir == nil {
+		return false, nil
+	}
+	return git.IsGitRepo(dir.HostPath), nil
 }
 
 // TransferTags re-creates the given sandbox tags on the host target repo,
@@ -51,7 +55,7 @@ func TargetIsGitRepo(layout config.Layout, name string) (bool, error) {
 //
 // The sandbox work copy is read through the backend (Tart-correct via rt); the
 // host target repo, where the tags are created, always uses host git.
-func TransferTags(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, tags []TagInfo, shaMap map[string]string) (*TransferTagsResult, error) {
+func TransferTags(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, dirHostPath string, tags []TagInfo, shaMap map[string]string) (*TransferTagsResult, error) {
 	res := &TransferTagsResult{}
 	if len(tags) == 0 {
 		return res, nil
@@ -62,10 +66,14 @@ func TransferTags(ctx context.Context, layout config.Layout, rt runtime.Runtime,
 	if err != nil {
 		return nil, err
 	}
-	targetDir := meta.Workdir().HostPath
+	dir := meta.Dir(dirHostPath)
+	if dir == nil {
+		return nil, fmt.Errorf("directory %q not found in sandbox %q", dirHostPath, name)
+	}
+	targetDir := dir.HostPath
 
 	if len(shaMap) == 0 {
-		workDir := store.WorkDir(sandboxDir, meta.Workdir().HostPath)
+		workDir := store.WorkDir(sandboxDir, dir.HostPath)
 		sandboxSHAs := make([]string, len(tags))
 		for i, t := range tags {
 			sandboxSHAs[i] = t.SHA

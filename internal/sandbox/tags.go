@@ -15,7 +15,7 @@ import (
 
 // loadDiffContext returns the work directory, baseline SHA, and workdir mode for
 // a sandbox. Used by tags.go to locate commits relative to the baseline.
-func loadDiffContext(layout config.Layout, name string) (workDir string, baselineSHA string, mode store.DirMode, err error) {
+func loadDiffContext(layout config.Layout, name string, dirHostPath string) (workDir string, baselineSHA string, mode store.DirMode, err error) {
 	sandboxDir := layout.SandboxDir(name)
 	if dirErr := store.RequireSandboxDir(sandboxDir); dirErr != nil {
 		return "", "", "", dirErr
@@ -26,28 +26,32 @@ func loadDiffContext(layout config.Layout, name string) (workDir string, baselin
 		return "", "", "", loadErr
 	}
 
-	mode = meta.Workdir().Mode
+	dir := meta.Dir(dirHostPath)
+	if dir == nil {
+		return "", "", "", fmt.Errorf("directory %q not found in sandbox %q", dirHostPath, name)
+	}
+
+	mode = dir.Mode
 
 	switch mode {
 	case store.DirModeCopy:
-		mountPath := meta.Workdir().MountPath
-		if mountPath != "" && mountPath != meta.Workdir().HostPath {
-			workDir = mountPath
+		if dir.MountPath != "" && dir.MountPath != dir.HostPath {
+			workDir = dir.MountPath
 		} else {
-			workDir = store.WorkDir(sandboxDir, meta.Workdir().HostPath)
+			workDir = store.WorkDir(sandboxDir, dir.HostPath)
 		}
-		baselineSHA = meta.Workdir().BaselineSHA
+		baselineSHA = dir.BaselineSHA
 		if baselineSHA == "" {
 			return "", "", "", fmt.Errorf("sandbox has no baseline SHA — was it created before diff support?")
 		}
 	case store.DirModeOverlay:
-		workDir = meta.Workdir().MountPath
+		workDir = dir.MountPath
 		if workDir == "" {
-			workDir = meta.Workdir().HostPath
+			workDir = dir.HostPath
 		}
-		baselineSHA = meta.Workdir().BaselineSHA
+		baselineSHA = dir.BaselineSHA
 	case store.DirModeRW:
-		workDir = meta.Workdir().HostPath
+		workDir = dir.HostPath
 		baselineSHA = "HEAD"
 	case store.DirModeRO:
 		return "", "", "", fmt.Errorf("workdir cannot be read-only (mode %s)", mode)
@@ -68,8 +72,8 @@ type TagInfo struct {
 // ListTagsBeyondBaseline returns tags whose target commit is beyond the baseline.
 // Returns nil for :rw and :overlay sandboxes (not supported). Reads the sandbox
 // work copy through the backend, so it is correct for Tart VM work copies.
-func ListTagsBeyondBaseline(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string) ([]TagInfo, error) {
-	workDir, baselineSHA, mode, err := loadDiffContext(layout, name)
+func ListTagsBeyondBaseline(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, dirHostPath string) ([]TagInfo, error) {
+	workDir, baselineSHA, mode, err := loadDiffContext(layout, name, dirHostPath)
 	if err != nil {
 		return nil, err
 	}
@@ -114,19 +118,20 @@ func ListTagsBeyondBaseline(ctx context.Context, layout config.Layout, rt runtim
 // This is useful for showing hints about tags that haven't been transferred yet,
 // even if their commits have already been applied. The sandbox side is read
 // through the backend (Tart-correct); the host target repo uses host git.
-func ListUnappliedTags(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string) ([]TagInfo, error) {
+func ListUnappliedTags(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, dirHostPath string) ([]TagInfo, error) {
 	sandboxDir := layout.SandboxDir(name)
 	meta, err := store.LoadEnvironment(sandboxDir)
 	if err != nil {
 		return nil, err
 	}
 
-	if meta.Workdir().Mode != "copy" {
+	dir := meta.Dir(dirHostPath)
+	if dir == nil || dir.Mode != "copy" {
 		return nil, nil
 	}
 
-	workDir := store.WorkDir(sandboxDir, meta.Workdir().HostPath)
-	targetDir := meta.Workdir().HostPath
+	workDir := store.WorkDir(sandboxDir, dir.HostPath)
+	targetDir := dir.HostPath
 
 	// Check if target is a git repo
 	if !git.IsGitRepo(targetDir) {

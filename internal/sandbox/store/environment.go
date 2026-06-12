@@ -111,6 +111,20 @@ func (e *Environment) TrackedDirs() []int {
 	return idx
 }
 
+// Dir returns the directory entry addressed by hostPath, or the workdir
+// (Dirs[0]) when hostPath is "". Returns nil if hostPath matches no entry.
+func (e *Environment) Dir(hostPath string) *DirEnvironment {
+	if hostPath == "" {
+		return e.Workdir()
+	}
+	for i := range e.Dirs {
+		if e.Dirs[i].HostPath == hostPath {
+			return &e.Dirs[i]
+		}
+	}
+	return nil
+}
+
 // migrate applies forward migrations to meta loaded from disk.
 // Missing Version (old files) deserialises as 0 and is migrated to current.
 // A version higher than the binary knows is a hard error — the user should not

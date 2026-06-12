@@ -29,6 +29,8 @@ type ExportOptions struct {
 	// IncludeUncommitted additionally writes the agent's uncommitted edits as
 	// uncommitted.diff (copy mode only; overlay has no commit/uncommitted split).
 	IncludeUncommitted bool
+	// DirHostPath selects the directory to export; "" selects Dirs[0] (workdir).
+	DirHostPath string
 }
 
 // ExportResult reports what Export wrote.
@@ -52,14 +54,18 @@ func Export(ctx context.Context, layout config.Layout, rt runtime.Runtime, name 
 	if err != nil {
 		return nil, err
 	}
-	if meta.Workdir().Mode == store.DirModeRW {
+	dir := meta.Dir(opts.DirHostPath)
+	if dir == nil {
+		return nil, yoerrors.NewUsageError("directory not found in sandbox")
+	}
+	if dir.Mode == store.DirModeRW {
 		return nil, yoerrors.NewUsageError("export is not available for :rw directories — changes are already live")
 	}
 	if err := fileutil.MkdirAll(opts.Dir, 0750); err != nil {
 		return nil, fmt.Errorf("create export directory: %w", err)
 	}
 
-	if meta.Workdir().Mode == store.DirModeOverlay {
+	if dir.Mode == store.DirModeOverlay {
 		return exportOverlay(ctx, layout, rt, name, opts)
 	}
 	return exportCopy(ctx, layout, rt, name, opts)
@@ -88,7 +94,7 @@ func exportCopy(ctx context.Context, layout config.Layout, rt runtime.Runtime, n
 	}
 
 	if opts.IncludeUncommitted {
-		uncommitted, _, diffErr := GenerateUncommittedDiff(ctx, layout, rt, name, opts.Paths)
+		uncommitted, _, diffErr := GenerateUncommittedDiff(ctx, layout, rt, name, opts.DirHostPath, opts.Paths)
 		if diffErr != nil {
 			return nil, diffErr
 		}
@@ -109,9 +115,9 @@ func exportCopy(ctx context.Context, layout config.Layout, rt runtime.Runtime, n
 // opts.Refs subset when given, otherwise the whole beyond-baseline range.
 func generateExportPatch(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, opts ExportOptions) (patchDir string, files []string, err error) {
 	if len(opts.Refs) == 0 {
-		return GenerateFormatPatch(ctx, layout, rt, name, opts.Paths)
+		return GenerateFormatPatch(ctx, layout, rt, name, opts.DirHostPath, opts.Paths)
 	}
-	commits, err := ResolveRefs(ctx, layout, rt, name, opts.Refs)
+	commits, err := ResolveRefs(ctx, layout, rt, name, opts.DirHostPath, opts.Refs)
 	if err != nil {
 		return "", nil, err
 	}
@@ -119,7 +125,7 @@ func generateExportPatch(ctx context.Context, layout config.Layout, rt runtime.R
 	for i, c := range commits {
 		shas[i] = c.SHA
 	}
-	return GenerateFormatPatchForRefs(ctx, layout, rt, name, shas, opts.Paths)
+	return GenerateFormatPatchForRefs(ctx, layout, rt, name, opts.DirHostPath, shas, opts.Paths)
 }
 
 // exportOverlay writes the upper-layer diff(s) for an overlay-mode sandbox.
@@ -127,7 +133,7 @@ func exportOverlay(ctx context.Context, layout config.Layout, rt runtime.Runtime
 	if len(opts.Refs) > 0 {
 		return nil, yoerrors.NewUsageError("cannot export specific commits from an :overlay sandbox — overlay changes have no commit history")
 	}
-	patches, err := GenerateOverlayPatch(ctx, layout, rt, name, opts.Paths)
+	patches, err := GenerateOverlayPatch(ctx, layout, rt, name, opts.DirHostPath, opts.Paths)
 	if err != nil {
 		return nil, err
 	}

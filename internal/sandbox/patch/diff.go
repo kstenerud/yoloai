@@ -19,12 +19,13 @@ import (
 
 // DiffOptions controls diff generation.
 type DiffOptions struct {
-	Name     string          // sandbox name
-	Layout   config.Layout   // resolves the sandbox state directory
-	Stat     bool            // true for --stat summary only
-	NameOnly bool            // true for --name-only (list changed files)
-	Paths    []string        // optional path filter (relative to workdir)
-	Runtime  runtime.Runtime // runtime backend (required for :copy and :overlay)
+	Name        string          // sandbox name
+	Layout      config.Layout   // resolves the sandbox state directory
+	Stat        bool            // true for --stat summary only
+	NameOnly    bool            // true for --name-only (list changed files)
+	Paths       []string        // optional path filter (relative to workdir)
+	Runtime     runtime.Runtime // runtime backend (required for :copy and :overlay)
+	DirHostPath string          // "" selects Dirs[0] (workdir)
 }
 
 // GenerateDiff produces the workdir diff for a sandbox.
@@ -43,7 +44,7 @@ type DiffOptions struct {
 //     overlay diffs need container exec; route through
 //     GenerateOverlayDiff.
 func GenerateDiff(ctx context.Context, opts DiffOptions) (string, error) {
-	workDir, baselineSHA, mode, err := loadDiffContext(opts.Layout, opts.Name)
+	workDir, baselineSHA, mode, err := loadDiffContext(opts.Layout, opts.Name, opts.DirHostPath)
 	if err != nil {
 		return "", err
 	}
@@ -88,18 +89,19 @@ var ErrOverlayRequiresRuntime = fmt.Errorf("overlay diff requires runtime exec; 
 
 // CommitDiffOptions controls commit-level diff generation.
 type CommitDiffOptions struct {
-	Name    string          // sandbox name
-	Layout  config.Layout   // resolves the sandbox state directory
-	Runtime runtime.Runtime // dispatches git to the sandbox work copy (in-VM for Tart)
-	Ref     string          // single SHA or "sha..sha" range
-	Stat    bool            // true for --stat summary only
+	Name        string          // sandbox name
+	Layout      config.Layout   // resolves the sandbox state directory
+	Runtime     runtime.Runtime // dispatches git to the sandbox work copy (in-VM for Tart)
+	Ref         string          // single SHA or "sha..sha" range
+	Stat        bool            // true for --stat summary only
+	DirHostPath string          // "" selects Dirs[0] (workdir)
 }
 
 // GenerateCommitDiff produces a diff for a specific commit or range
 // within the sandbox work copy. Only works for :copy mode sandboxes.
 // Returns the diff text (empty string if there are no changes).
 func GenerateCommitDiff(ctx context.Context, opts CommitDiffOptions) (string, error) {
-	workDir, _, mode, err := loadDiffContext(opts.Layout, opts.Name)
+	workDir, _, mode, err := loadDiffContext(opts.Layout, opts.Name, opts.DirHostPath)
 	if err != nil {
 		return "", err
 	}
@@ -147,8 +149,8 @@ type CommitInfoWithStat struct {
 
 // ListCommitsWithStats returns commits beyond baseline with per-commit
 // --stat summaries. Returns an empty slice if HEAD == baseline.
-func ListCommitsWithStats(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string) ([]CommitInfoWithStat, error) {
-	commits, err := ListCommitsBeyondBaseline(ctx, layout, rt, name)
+func ListCommitsWithStats(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, dirHostPath string) ([]CommitInfoWithStat, error) {
+	commits, err := ListCommitsBeyondBaseline(ctx, layout, rt, name, dirHostPath)
 	if err != nil {
 		return nil, err
 	}
@@ -156,7 +158,7 @@ func ListCommitsWithStats(ctx context.Context, layout config.Layout, rt runtime.
 		return nil, nil
 	}
 
-	workDir, _, _, err := loadDiffContext(layout, name)
+	workDir, _, _, err := loadDiffContext(layout, name, dirHostPath)
 	if err != nil {
 		return nil, err
 	}
@@ -181,7 +183,7 @@ func ListCommitsWithStats(ctx context.Context, layout config.Layout, rt runtime.
 }
 
 // loadDiffContext loads the metadata and resolves paths needed for diff.
-func loadDiffContext(layout config.Layout, name string) (workDir string, baselineSHA string, mode store.DirMode, err error) {
+func loadDiffContext(layout config.Layout, name string, dirHostPath string) (workDir string, baselineSHA string, mode store.DirMode, err error) {
 	sandboxDir := layout.SandboxDir(name)
 	if dirErr := store.RequireSandboxDir(sandboxDir); dirErr != nil {
 		return "", "", "", dirErr
@@ -192,24 +194,29 @@ func loadDiffContext(layout config.Layout, name string) (workDir string, baselin
 		return "", "", "", loadErr
 	}
 
-	mode = meta.Workdir().Mode
+	dir := meta.Dir(dirHostPath)
+	if dir == nil {
+		return "", "", "", fmt.Errorf("directory %q not found in sandbox %q", dirHostPath, name)
+	}
+
+	mode = dir.Mode
 
 	switch mode {
 	case store.DirModeCopy:
-		workDir = copyGitWorkDir(sandboxDir, meta.Workdir().HostPath, meta.Workdir().MountPath)
-		baselineSHA = meta.Workdir().BaselineSHA
+		workDir = copyGitWorkDir(sandboxDir, dir.HostPath, dir.MountPath)
+		baselineSHA = dir.BaselineSHA
 		if baselineSHA == "" {
 			return "", "", "", fmt.Errorf("sandbox has no baseline SHA — was it created before diff support?")
 		}
 	case store.DirModeOverlay:
 		// Container path for exec
-		workDir = meta.Workdir().MountPath
+		workDir = dir.MountPath
 		if workDir == "" {
-			workDir = meta.Workdir().HostPath // mirror host path
+			workDir = dir.HostPath // mirror host path
 		}
-		baselineSHA = meta.Workdir().BaselineSHA // may be empty (deferred)
+		baselineSHA = dir.BaselineSHA // may be empty (deferred)
 	case store.DirModeRW:
-		workDir = meta.Workdir().HostPath
+		workDir = dir.HostPath
 		baselineSHA = "HEAD"
 	case store.DirModeRO:
 		return "", "", "", fmt.Errorf("workdir cannot be read-only (mode %s)", mode)
@@ -235,7 +242,7 @@ type DiffContext struct {
 // overlay loop callers (GenerateOverlayPatch,
 // UpdateOverlayBaselineToHEAD, ListCommitsBeyondBaselineOverlay)
 // don't need their loop bodies rewritten.
-func LoadAllDiffContexts(layout config.Layout, name string) ([]DiffContext, error) {
+func LoadAllDiffContexts(layout config.Layout, name string, dirHostPath string) ([]DiffContext, error) {
 	sandboxDir := layout.SandboxDir(name)
 	if err := store.RequireSandboxDir(sandboxDir); err != nil {
 		return nil, err
@@ -246,29 +253,34 @@ func LoadAllDiffContexts(layout config.Layout, name string) ([]DiffContext, erro
 		return nil, err
 	}
 
-	switch meta.Workdir().Mode {
+	dir := meta.Dir(dirHostPath)
+	if dir == nil {
+		return nil, nil
+	}
+
+	switch dir.Mode {
 	case store.DirModeCopy:
 		return []DiffContext{{
-			HostPath:    meta.Workdir().HostPath,
-			WorkDir:     copyGitWorkDir(sandboxDir, meta.Workdir().HostPath, meta.Workdir().MountPath),
-			BaselineSHA: meta.Workdir().BaselineSHA,
+			HostPath:    dir.HostPath,
+			WorkDir:     copyGitWorkDir(sandboxDir, dir.HostPath, dir.MountPath),
+			BaselineSHA: dir.BaselineSHA,
 			Mode:        store.DirModeCopy,
 		}}, nil
 	case store.DirModeOverlay:
-		mountPath := meta.Workdir().MountPath
+		mountPath := dir.MountPath
 		if mountPath == "" {
-			mountPath = meta.Workdir().HostPath
+			mountPath = dir.HostPath
 		}
 		return []DiffContext{{
-			HostPath:    meta.Workdir().HostPath,
+			HostPath:    dir.HostPath,
 			WorkDir:     mountPath,
-			BaselineSHA: meta.Workdir().BaselineSHA,
+			BaselineSHA: dir.BaselineSHA,
 			Mode:        store.DirModeOverlay,
 		}}, nil
 	case store.DirModeRW:
 		return []DiffContext{{
-			HostPath: meta.Workdir().HostPath,
-			WorkDir:  meta.Workdir().HostPath,
+			HostPath: dir.HostPath,
+			WorkDir:  dir.HostPath,
 			Mode:     store.DirModeRW,
 		}}, nil
 	case store.DirModeRO, "":
@@ -291,16 +303,17 @@ func copyGitWorkDir(sandboxDir, hostPath, mountPath string) string {
 
 // ListCommitsBeyondBaselineOverlay returns commits beyond the baseline for
 // an overlay-mode workdir by executing git log inside the running container.
-func ListCommitsBeyondBaselineOverlay(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string) ([]CommitInfo, error) {
+func ListCommitsBeyondBaselineOverlay(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, dirHostPath string) ([]CommitInfo, error) {
 	meta, err := store.LoadEnvironment(layout.SandboxDir(name))
 	if err != nil {
 		return nil, fmt.Errorf("load metadata: %w", err)
 	}
-	if meta.Workdir().Mode != "overlay" {
+	dir := meta.Dir(dirHostPath)
+	if dir == nil || dir.Mode != "overlay" {
 		return nil, nil
 	}
 
-	dc, err := overlayDiffContext(layout, name)
+	dc, err := overlayDiffContext(layout, name, dirHostPath)
 	if err != nil {
 		return nil, err
 	}
@@ -337,11 +350,12 @@ func GenerateOverlayDiff(ctx context.Context, rt runtime.Runtime, opts DiffOptio
 	if err != nil {
 		return "", fmt.Errorf("load metadata: %w", err)
 	}
-	if meta.Workdir().Mode != "overlay" {
+	dir := meta.Dir(opts.DirHostPath)
+	if dir == nil || dir.Mode != "overlay" {
 		return "", nil
 	}
 
-	dc, err := overlayDiffContext(opts.Layout, opts.Name)
+	dc, err := overlayDiffContext(opts.Layout, opts.Name, opts.DirHostPath)
 	if err != nil {
 		return "", err
 	}
@@ -379,8 +393,8 @@ func GenerateOverlayDiff(ctx context.Context, rt runtime.Runtime, opts DiffOptio
 // overlayDiffContext returns the workdir's DiffContext, asserting the
 // mode is overlay. Used by GenerateOverlayDiff /
 // ListCommitsBeyondBaselineOverlay as a small typed accessor.
-func overlayDiffContext(layout config.Layout, name string) (DiffContext, error) {
-	contexts, err := LoadAllDiffContexts(layout, name)
+func overlayDiffContext(layout config.Layout, name string, dirHostPath string) (DiffContext, error) {
+	contexts, err := LoadAllDiffContexts(layout, name, dirHostPath)
 	if err != nil {
 		return DiffContext{}, err
 	}

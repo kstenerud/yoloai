@@ -161,27 +161,27 @@ func TestEngine_WorkCopyGit_DispatchesToRuntime(t *testing.T) {
 		want string
 	}{
 		{"GenerateCommitDiff", nil, func() error {
-			_, err := e.GenerateCommitDiff(ctx, name, "deadbee", false)
+			_, err := e.GenerateCommitDiff(ctx, name, "", "deadbee", false)
 			return err
 		}, "deadbee"}, // the per-commit diff must run against the work copy in-runtime
 		{"ListCommitsWithStats", oneCommitLog, func() error {
-			_, err := e.ListCommitsWithStats(ctx, name)
+			_, err := e.ListCommitsWithStats(ctx, name, "")
 			return err
 		}, "--stat"}, // the stat loop (the original bug) must dispatch, not just the find-side log
 		{"ListCommits", nil, func() error {
-			_, err := e.ListCommits(ctx, name)
+			_, err := e.ListCommits(ctx, name, "")
 			return err
 		}, "log"},
 		{"HasUncommittedChanges", nil, func() error {
-			_, err := e.HasUncommittedChanges(ctx, name)
+			_, err := e.HasUncommittedChanges(ctx, name, "")
 			return err
 		}, ""},
 		{"BaselineLog", nil, func() error {
-			_, err := e.BaselineLog(ctx, name)
+			_, err := e.BaselineLog(ctx, name, "")
 			return err
 		}, ""},
 		{"WorkdirTags", nil, func() error {
-			_, err := e.WorkdirTags(ctx, name, false)
+			_, err := e.WorkdirTags(ctx, name, "", false)
 			return err
 		}, ""},
 	}

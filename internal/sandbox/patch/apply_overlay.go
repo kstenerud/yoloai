@@ -22,6 +22,8 @@ type ApplyOverlayOptions struct {
 	// DryRun captures the upper-layer diff and returns its stat without applying
 	// or advancing the overlay baseline.
 	DryRun bool
+	// DirHostPath selects the directory to apply; "" selects Dirs[0] (workdir).
+	DirHostPath string
 }
 
 // ApplyOverlay lands an :overlay sandbox's upper-layer changes onto the host as
@@ -40,11 +42,12 @@ func ApplyOverlay(ctx context.Context, layout config.Layout, rt runtime.Runtime,
 	if err != nil {
 		return nil, err
 	}
-	if meta.Workdir().Mode != store.DirModeOverlay {
+	dir := meta.Dir(opts.DirHostPath)
+	if dir == nil || dir.Mode != store.DirModeOverlay {
 		return nil, nil
 	}
 
-	patches, err := GenerateOverlayPatch(ctx, layout, rt, name, opts.Paths)
+	patches, err := GenerateOverlayPatch(ctx, layout, rt, name, opts.DirHostPath, opts.Paths)
 	if err != nil {
 		return nil, err
 	}
@@ -52,7 +55,7 @@ func ApplyOverlay(ctx context.Context, layout config.Layout, rt runtime.Runtime,
 		return nil, nil
 	}
 
-	result := &ApplyResult{Dir: meta.Workdir().HostPath, Stat: overlayStat(patches)}
+	result := &ApplyResult{Dir: dir.HostPath, Stat: overlayStat(patches)}
 	if opts.DryRun {
 		return result, nil
 	}
@@ -64,7 +67,7 @@ func ApplyOverlay(ctx context.Context, layout config.Layout, rt runtime.Runtime,
 		}
 	}
 	for _, ps := range patches {
-		if baseErr := UpdateOverlayBaselineToHEAD(ctx, layout, rt, name, ps.HostPath); baseErr != nil {
+		if baseErr := UpdateOverlayBaselineToHEAD(ctx, layout, rt, name, opts.DirHostPath, ps.HostPath); baseErr != nil {
 			return nil, fmt.Errorf("advance overlay baseline: %w", baseErr)
 		}
 	}

@@ -17,8 +17,9 @@ import (
 // diff/apply surface. Reached via Sandbox(name).Workdir(); pure namespace
 // expansion (no IO, no error). Q-G / F2.
 type Workdir struct {
-	engine *sandbox.Engine
-	name   string
+	engine      *sandbox.Engine
+	name        string
+	dirHostPath string // "" = Dirs[0] (workdir)
 }
 
 // WorkdirDiffOptions configures Workdir.Diff. All fields are optional; the zero value
@@ -47,20 +48,24 @@ func (w *Workdir) Diff(ctx context.Context, opts WorkdirDiffOptions) (string, er
 	if err != nil {
 		return "", err
 	}
-	overlay := meta.Workdir().Mode == store.DirModeOverlay
+	dir := meta.Dir(w.dirHostPath)
+	if dir == nil {
+		return "", yoerrors.NewUsageError("no tracked directory found")
+	}
+	overlay := dir.Mode == store.DirModeOverlay
 
 	if opts.Ref != "" {
 		if overlay {
 			return "", yoerrors.NewPlatformError("ref-based diff is not supported for :overlay sandboxes (commits are not individually addressable from the host)")
 		}
-		return w.engine.GenerateCommitDiff(ctx, w.name, opts.Ref, opts.Stat)
+		return w.engine.GenerateCommitDiff(ctx, w.name, w.dirHostPath, opts.Ref, opts.Stat)
 	}
 
 	if overlay {
-		return w.engine.GenerateOverlayDiff(ctx, w.name, opts.Stat, opts.NameOnly)
+		return w.engine.GenerateOverlayDiff(ctx, w.name, w.dirHostPath, opts.Stat, opts.NameOnly)
 	}
 
-	return w.engine.GenerateWorkingDiff(ctx, w.name, opts.Paths, opts.Stat, opts.NameOnly)
+	return w.engine.GenerateWorkingDiff(ctx, w.name, w.dirHostPath, opts.Paths, opts.Stat, opts.NameOnly)
 }
 
 // WorkdirExportOptions configures Workdir.Export. Dir is required.
@@ -82,12 +87,13 @@ type WorkdirExportOptions struct {
 
 // toInternal maps the public WorkdirExportOptions onto patch.ExportOptions (IC7:
 // one internal counterpart, so a value→value method rather than inline mapping).
-func (o WorkdirExportOptions) toInternal() patch.ExportOptions {
+func (o WorkdirExportOptions) toInternal(dirHostPath string) patch.ExportOptions {
 	return patch.ExportOptions{
 		Dir:                o.Dir,
 		Refs:               o.Refs,
 		Paths:              o.Paths,
 		IncludeUncommitted: o.IncludeUncommitted,
+		DirHostPath:        dirHostPath,
 	}
 }
 
@@ -109,7 +115,7 @@ func (w *Workdir) Export(ctx context.Context, opts WorkdirExportOptions) (*Expor
 	if opts.Dir == "" {
 		return nil, yoerrors.NewUsageError("export requires a destination directory: set WorkdirExportOptions.Dir")
 	}
-	return w.engine.ExportPatches(ctx, w.name, opts.toInternal())
+	return w.engine.ExportPatches(ctx, w.name, opts.toInternal(w.dirHostPath))
 }
 
 // ApplyResult describes the outcome of an Apply: the host directory patched,
@@ -190,7 +196,11 @@ func (w *Workdir) Apply(ctx context.Context, opts WorkdirApplyOptions) (*ApplyRe
 	if err != nil {
 		return nil, err
 	}
-	overlay := meta.Workdir().Mode == store.DirModeOverlay
+	dir := meta.Dir(w.dirHostPath)
+	if dir == nil {
+		return nil, yoerrors.NewUsageError("no tracked directory found")
+	}
+	overlay := dir.Mode == store.DirModeOverlay
 
 	if opts.Mode == ApplyModeCommits {
 		if overlay {
@@ -201,19 +211,22 @@ func (w *Workdir) Apply(ctx context.Context, opts WorkdirApplyOptions) (*ApplyRe
 			IncludeUncommitted: opts.IncludeUncommitted,
 			Paths:              opts.Paths,
 			DryRun:             opts.DryRun,
+			DirHostPath:        w.dirHostPath,
 		})
 	}
 
 	if overlay {
 		return w.engine.ApplyOverlay(ctx, w.name, patch.ApplyOverlayOptions{
-			Paths:  opts.Paths,
-			DryRun: opts.DryRun,
+			Paths:       opts.Paths,
+			DryRun:      opts.DryRun,
+			DirHostPath: w.dirHostPath,
 		})
 	}
 	return w.engine.ApplyAll(ctx, w.name, patch.ApplyAllOptions{
 		IncludeUncommitted: opts.IncludeUncommitted,
 		Paths:              opts.Paths,
 		DryRun:             opts.DryRun,
+		DirHostPath:        w.dirHostPath,
 	})
 }
 
@@ -246,11 +259,16 @@ func (w *Workdir) Commits(ctx context.Context, opts WorkdirCommitsOptions) ([]Co
 		return nil, err
 	}
 
-	if meta.Workdir().Mode == store.DirModeOverlay {
+	dir := meta.Dir(w.dirHostPath)
+	if dir == nil {
+		return nil, yoerrors.NewUsageError("no tracked directory found")
+	}
+
+	if dir.Mode == store.DirModeOverlay {
 		if opts.Stat {
 			return nil, yoerrors.NewPlatformError("per-commit stat is not supported for :overlay sandboxes (overlay commits are not individually addressable from the host)")
 		}
-		cs, err := w.engine.ListCommitsOverlay(ctx, w.name)
+		cs, err := w.engine.ListCommitsOverlay(ctx, w.name, w.dirHostPath)
 		if err != nil {
 			return nil, err
 		}
@@ -258,7 +276,7 @@ func (w *Workdir) Commits(ctx context.Context, opts WorkdirCommitsOptions) ([]Co
 	}
 
 	if opts.Stat {
-		cs, err := w.engine.ListCommitsWithStats(ctx, w.name)
+		cs, err := w.engine.ListCommitsWithStats(ctx, w.name, w.dirHostPath)
 		if err != nil {
 			return nil, err
 		}
@@ -269,7 +287,7 @@ func (w *Workdir) Commits(ctx context.Context, opts WorkdirCommitsOptions) ([]Co
 		return out, nil
 	}
 
-	cs, err := w.engine.ListCommits(ctx, w.name)
+	cs, err := w.engine.ListCommits(ctx, w.name, w.dirHostPath)
 	if err != nil {
 		return nil, err
 	}
@@ -287,7 +305,7 @@ func toCommitInfos(cs []patch.CommitInfo) []CommitInfo {
 // HasUncommittedChanges reports whether the workdir has uncommitted edits
 // beyond its last commit. Drives the "*" marker in `yoloai diff --log`.
 func (w *Workdir) HasUncommittedChanges(ctx context.Context) (bool, error) {
-	return w.engine.HasUncommittedChanges(ctx, w.name)
+	return w.engine.HasUncommittedChanges(ctx, w.name, w.dirHostPath)
 }
 
 // BaselineChange reports a baseline move: the new baseline SHA and its commit
@@ -313,14 +331,14 @@ type BaselineConflictError = patch.BaselineConflictError
 // expectedCurrentSHA == "" to assert "no baseline yet" (valid only when none is
 // set). Refused with a *UsageError for :rw and :overlay workdirs.
 func (w *Workdir) AdvanceBaseline(ctx context.Context, expectedCurrentSHA string) (*BaselineChange, error) {
-	return w.engine.AdvanceBaseline(ctx, w.name, expectedCurrentSHA)
+	return w.engine.AdvanceBaseline(ctx, w.name, w.dirHostPath, expectedCurrentSHA)
 }
 
 // SetBaseline moves the diff baseline to the commit named by ref (short SHA,
 // full SHA, or any git rev), guarded by the same compare-and-swap as
 // AdvanceBaseline against expectedCurrentSHA.
 func (w *Workdir) SetBaseline(ctx context.Context, expectedCurrentSHA, ref string) (*BaselineChange, error) {
-	return w.engine.SetBaseline(ctx, w.name, expectedCurrentSHA, ref)
+	return w.engine.SetBaseline(ctx, w.name, w.dirHostPath, expectedCurrentSHA, ref)
 }
 
 // BaselineLog returns the workdir's commit history from sandbox inception to
@@ -329,7 +347,7 @@ func (w *Workdir) SetBaseline(ctx context.Context, expectedCurrentSHA, ref strin
 // after an accidental baseline advance. Refused with a *UsageError for :rw and
 // :overlay workdirs.
 func (w *Workdir) BaselineLog(ctx context.Context) ([]BaselineLogEntry, error) {
-	return w.engine.BaselineLog(ctx, w.name)
+	return w.engine.BaselineLog(ctx, w.name, w.dirHostPath)
 }
 
 // TagInfo identifies a git tag in a sandbox's workdir (its Name and commit
@@ -350,7 +368,7 @@ type WorkdirTagsOptions struct {
 // present on the host. Folds ListTagsBeyondBaseline / ListUnappliedTags and the
 // per-tag message lookup; reads the sandbox work copy through the backend.
 func (w *Workdir) Tags(ctx context.Context, opts WorkdirTagsOptions) ([]TagInfo, error) {
-	return w.engine.WorkdirTags(ctx, w.name, opts.UnappliedOnly)
+	return w.engine.WorkdirTags(ctx, w.name, w.dirHostPath, opts.UnappliedOnly)
 }
 
 // TagOutcome is the result of transferring one tag to the host target repo.
@@ -381,7 +399,7 @@ type WorkdirTransferTagsOptions struct {
 // work copy is read through the backend (Tart-correct); the host target repo
 // uses host git.
 func (w *Workdir) TransferTags(ctx context.Context, opts WorkdirTransferTagsOptions) (*TagTransferResult, error) {
-	return w.engine.TransferWorkdirTags(ctx, w.name, opts.Tags, opts.SHAMap)
+	return w.engine.TransferWorkdirTags(ctx, w.name, w.dirHostPath, opts.Tags, opts.SHAMap)
 }
 
 // TargetIsGitRepo reports whether the sandbox's original host work directory is
@@ -389,5 +407,5 @@ func (w *Workdir) TransferTags(ctx context.Context, opts WorkdirTransferTagsOpti
 // fallback and to gate selective apply. ctx is accepted for API symmetry; the
 // current host-fs implementation does not use it.
 func (w *Workdir) TargetIsGitRepo(ctx context.Context) (bool, error) {
-	return w.engine.TargetIsGitRepo(w.name)
+	return w.engine.TargetIsGitRepo(w.name, w.dirHostPath)
 }
