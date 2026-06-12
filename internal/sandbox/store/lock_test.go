@@ -6,6 +6,7 @@ package store
 
 import (
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -354,7 +355,7 @@ func TestSweepStaleLocks_RemovesOrphanedLock(t *testing.T) {
 	require.NoError(t, err)
 	unlock() // releases flock; file remains on disk by design
 
-	removed, err := SweepStaleLocks(layout, false)
+	removed, err := SweepStaleLocks(layout, false, io.Discard)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"ghost"}, removed)
 	assert.NoFileExists(t, layout.SandboxLockPath("ghost"))
@@ -369,7 +370,7 @@ func TestSweepStaleLocks_SkipsHeldLock(t *testing.T) {
 	require.NoError(t, err)
 	defer unlock()
 
-	removed, err := SweepStaleLocks(layout, false)
+	removed, err := SweepStaleLocks(layout, false, io.Discard)
 	require.NoError(t, err)
 	assert.NotContains(t, removed, "held")
 	assert.FileExists(t, layout.SandboxLockPath("held"))
@@ -385,7 +386,7 @@ func TestSweepStaleLocks_SkipsLockBesideExistingDir(t *testing.T) {
 	require.NoError(t, err)
 	unlock()
 
-	removed, err := SweepStaleLocks(layout, false)
+	removed, err := SweepStaleLocks(layout, false, io.Discard)
 	require.NoError(t, err)
 	assert.NotContains(t, removed, "live")
 	assert.FileExists(t, layout.SandboxLockPath("live"))
@@ -400,10 +401,36 @@ func TestSweepStaleLocks_DryRunKeepsFile(t *testing.T) {
 	require.NoError(t, err)
 	unlock()
 
-	removed, err := SweepStaleLocks(layout, true)
+	removed, err := SweepStaleLocks(layout, true, io.Discard)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"ghost"}, removed)
 	assert.FileExists(t, layout.SandboxLockPath("ghost"), "dry-run must not remove the file")
+}
+
+// TestSweepStaleLocks_WarnsOnUnremovable verifies a stale lock that can't be
+// removed is left out of the removed list AND surfaces a warning, rather than
+// being silently dropped. Stripping write on the sandboxes dir makes os.Remove
+// of the lock file inside it fail.
+func TestSweepStaleLocks_WarnsOnUnremovable(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses directory permission checks, so removal can't be made to fail this way")
+	}
+	layout := testLayout(t)
+
+	unlock, err := AcquireLock(layout, "ghost")
+	require.NoError(t, err)
+	unlock()
+
+	dir := layout.SandboxesDir()
+	require.NoError(t, os.Chmod(dir, 0o500))       //nolint:gosec // dir needs exec bit; read-only is the point — it forces removal to fail
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) }) //nolint:gosec // restore write so t.TempDir cleanup can recurse in
+
+	var warnings strings.Builder
+	removed, err := SweepStaleLocks(layout, false, &warnings)
+	require.NoError(t, err)
+
+	assert.NotContains(t, removed, "ghost", "an unremovable lock must not be reported as removed")
+	assert.Contains(t, warnings.String(), "ghost", "an unremovable lock must surface a warning")
 }
 
 // TestQuarantineSandbox_MovesToTrash verifies a sandbox dir is relocated

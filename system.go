@@ -667,7 +667,7 @@ func (s *System) Prune(ctx context.Context, opts SystemPruneOptions) (*PruneResu
 	// Sweep orphaned <name>.lock files with no live holder. Runs after the
 	// dir classifications above so locks beside a just-deleted never-init
 	// dir are caught too.
-	swept, err := store.SweepStaleLocks(s.layout, opts.DryRun)
+	swept, err := store.SweepStaleLocks(s.layout, opts.DryRun, out)
 	if err != nil {
 		fmt.Fprintf(out, "Warning: lock sweep failed: %v\n", err) //nolint:errcheck // best-effort progress
 	}

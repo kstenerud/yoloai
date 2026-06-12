@@ -8,6 +8,7 @@ package store
 import (
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -210,7 +211,7 @@ func RemoveLockFile(layout config.Layout, name string) error {
 // a concurrent create/destroy.
 //
 // dryRun reports without removing.
-func SweepStaleLocks(layout config.Layout, dryRun bool) ([]string, error) {
+func SweepStaleLocks(layout config.Layout, dryRun bool, out io.Writer) ([]string, error) {
 	dir := layout.SandboxesDir()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -248,6 +249,10 @@ func SweepStaleLocks(layout config.Layout, dryRun bool) ([]string, error) {
 		rmErr := os.Remove(path)
 		release()
 		if rmErr != nil && !errors.Is(rmErr, fs.ErrNotExist) {
+			// Surface, don't swallow: a lock we can't remove keeps blocking its
+			// sandbox name, so the user needs to know why it persists. Matches
+			// the backend prunes' warn-and-skip convention.
+			fmt.Fprintf(out, "Warning: could not remove stale lock %s: %v\n", path, rmErr) //nolint:errcheck // best-effort progress
 			continue
 		}
 		removed = append(removed, name)

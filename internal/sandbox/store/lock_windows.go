@@ -6,7 +6,11 @@
 
 package store
 
-import "github.com/kstenerud/yoloai/internal/config"
+import (
+	"io"
+
+	"github.com/kstenerud/yoloai/internal/config"
+)
 
 // AcquireLock is a no-op on Windows.
 func AcquireLock(_ config.Layout, _ string) (func(), error) {
@@ -33,6 +37,6 @@ func RemoveLockFile(_ config.Layout, _ string) error {
 
 // SweepStaleLocks is a no-op on Windows — AcquireLock never creates lock
 // files on this platform, so there are none to sweep.
-func SweepStaleLocks(_ config.Layout, _ bool) ([]string, error) {
+func SweepStaleLocks(_ config.Layout, _ bool, _ io.Writer) ([]string, error) {
 	return nil, nil
 }
