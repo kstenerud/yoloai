@@ -59,6 +59,7 @@ For Claude Code users, this is enforced automatically: `.claude/settings.json` r
 - **Factual accuracy matters:** Star counts, feature claims, and security assertions must be verified. Don't repeat marketing language or unverifiable numbers.
 - **Cross-platform awareness:** Always consider Linux, macOS (Docker Desktop + VirtioFS), and Windows/WSL. Note platform-specific tradeoffs explicitly.
 - **Commit granularity:** One commit per logical change. Research, design updates, and critique application get separate commits.
+- **Branching:** Contributions go via a feature branch and a pull request. Larger work that spans multiple phases and commits stays on a feature branch, merged to `main` once complete.
 - **Backend debugging:** Before diagnosing a backend problem (containerd, Kata, CNI, Docker, Podman, Tart, Seatbelt), read `docs/contributors/backend-idiosyncrasies.md`. Use the symptom index to jump directly to the relevant entry. Do not repeat investigation that is already documented there.
 - **Recording new idiosyncrasies:** When you discover a backend behavior that contradicts documentation, required a surprising workaround, or could cause the same bug again — add an entry to `docs/contributors/backend-idiosyncrasies.md`. Add a row to the symptom index. Keep entries concise: symptom, explanation, fix, code pointer. Do this before committing the fix.
 
