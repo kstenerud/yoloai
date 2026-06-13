@@ -1,4 +1,4 @@
-// Package seatbelt implements runtime.Runtime using macOS sandbox-exec.
+// Package seatbelt implements runtime.Backend using macOS sandbox-exec.
 // ABOUTME: Runs agent processes under sandbox-exec SBPL profiles for lightweight isolation.
 package seatbelt
 
@@ -65,7 +65,7 @@ func init() {
 	// The registry factory derives homeDir from layout via the conventional
 	// $HOME/.yoloai DataDir: homeDir = layout.HomeDir.
 	// Direct callers (CLI, tests) may call New(ctx, layout, homeDir) explicitly.
-	runtime.Register(func(ctx context.Context, layout config.Layout) (runtime.Runtime, error) {
+	runtime.Register(func(ctx context.Context, layout config.Layout) (runtime.Backend, error) {
 		return New(ctx, layout, layout.HomeDir)
 	}, descriptor)
 }
@@ -99,7 +99,7 @@ const (
 	symlinkManifestName = "mount-symlinks.txt"
 )
 
-// Runtime implements runtime.Runtime using macOS sandbox-exec.
+// Runtime implements runtime.Backend using macOS sandbox-exec.
 type Runtime struct {
 	sandboxExecBin string        // path to sandbox-exec binary
 	layout         config.Layout // DataDir-rooted path resolver (Q-W.6)
@@ -108,7 +108,7 @@ type Runtime struct {
 }
 
 // Compile-time checks.
-var _ runtime.Runtime = (*Runtime)(nil)
+var _ runtime.Backend = (*Runtime)(nil)
 var _ runtime.CopyMountResolver = (*Runtime)(nil)
 var _ runtime.InteractiveSession = (*Runtime)(nil)
 
@@ -306,7 +306,7 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 
 	// P1 vs P2: run the full sandbox-setup.py monitor (tmux + agent) only when the
 	// sandbox layer provisioned a runtime-config.json. Absent it — a bare runtime
-	// Start (direct runtime.Runtime use / the conformance suite) — launch a bare
+	// Start (direct runtime.Backend use / the conformance suite) — launch a bare
 	// keep-alive under the SBPL profile instead: a running, exec-able instance
 	// (Exec runs fresh sandbox-exec'd commands; the profile enforces the mount
 	// grants) with no monitor. Mirrors tart's P1/P2 split.

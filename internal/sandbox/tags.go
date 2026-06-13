@@ -72,7 +72,7 @@ type TagInfo struct {
 // ListTagsBeyondBaseline returns tags whose target commit is beyond the baseline.
 // Returns nil for :rw and :overlay sandboxes (not supported). Reads the sandbox
 // work copy through the backend, so it is correct for Tart VM work copies.
-func ListTagsBeyondBaseline(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, dirHostPath string) ([]TagInfo, error) {
+func ListTagsBeyondBaseline(ctx context.Context, layout config.Layout, rt runtime.Backend, name string, dirHostPath string) ([]TagInfo, error) {
 	workDir, baselineSHA, mode, err := loadDiffContext(layout, name, dirHostPath)
 	if err != nil {
 		return nil, err
@@ -118,7 +118,7 @@ func ListTagsBeyondBaseline(ctx context.Context, layout config.Layout, rt runtim
 // This is useful for showing hints about tags that haven't been transferred yet,
 // even if their commits have already been applied. The sandbox side is read
 // through the backend (Tart-correct); the host target repo uses host git.
-func ListUnappliedTags(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, dirHostPath string) ([]TagInfo, error) {
+func ListUnappliedTags(ctx context.Context, layout config.Layout, rt runtime.Backend, name string, dirHostPath string) ([]TagInfo, error) {
 	sandboxDir := layout.SandboxDir(name)
 	meta, err := store.LoadEnvironment(sandboxDir)
 	if err != nil {

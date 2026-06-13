@@ -68,7 +68,7 @@ func LaunchContainer(ctx context.Context, d state.Deps, st *state.State) error {
 // starts the instance. hasSecrets indicates whether secrets were injected via
 // a temporary directory that the caller will remove after this call returns.
 // Extracted from launchContainer().
-func buildAndStart(ctx context.Context, rt runtime.Runtime, st *state.State, mnts []runtime.MountSpec, ports []runtime.PortMapping, hasSecrets bool) error {
+func buildAndStart(ctx context.Context, rt runtime.Backend, st *state.State, mnts []runtime.MountSpec, ports []runtime.PortMapping, hasSecrets bool) error {
 	cname := store.InstanceName(st.Layout.Principal, st.Name)
 	instanceCfg, err := buildInstanceConfig(rt.Descriptor(), st, mnts, ports)
 	if err != nil {
@@ -289,7 +289,7 @@ func gvisorStartHint(isolation runtime.IsolationMode, err error) error {
 
 // verifyInstanceRunning checks that the instance is still running after start,
 // collecting log output for diagnostics if it has exited.
-func verifyInstanceRunning(ctx context.Context, rt runtime.Runtime, st *state.State, cname string) error {
+func verifyInstanceRunning(ctx context.Context, rt runtime.Backend, st *state.State, cname string) error {
 	// Verify instance is still running (catches immediate crashes). A real crash
 	// leaves the container inspectable with Running=false (handled below). A
 	// transient ErrNotFound right after start is different: under load the daemon

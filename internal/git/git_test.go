@@ -11,13 +11,13 @@ import (
 	"github.com/kstenerud/yoloai/internal/runtime"
 )
 
-// gitExecerRuntime embeds runtime.Runtime (nil) so it satisfies the interface
+// gitExecerRuntime embeds runtime.Backend (nil) so it satisfies the interface
 // without implementing every method. It declares SandboxSide locality (so the
 // sandbox execer routes git to the backend) and implements GitExec (the
 // operation the routing uses). The embedded nil is never called — the sandbox
 // execer only reads Descriptor() and GitExec.
 type gitExecerRuntime struct {
-	runtime.Runtime
+	runtime.Backend
 	lastWorkDir string
 	lastArgs    []string
 }
@@ -38,7 +38,7 @@ func (g *gitExecerRuntime) Descriptor() runtime.BackendDescriptor {
 // used to prove the injection decision is the FilesystemLocality property, not
 // the mere presence of GitExecer.
 type hostSideExecerRuntime struct {
-	runtime.Runtime
+	runtime.Backend
 }
 
 func (g *hostSideExecerRuntime) GitExec(_ context.Context, _, _ string, _ ...string) (string, error) {

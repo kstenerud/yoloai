@@ -26,7 +26,7 @@ import (
 
 // newLifecycleDeps builds a state.Deps backed by the given mock runtime and
 // a layout rooted at tmpDir/.yoloai — mirrors what the Engine would build.
-func newLifecycleDeps(rt runtime.Runtime, tmpDir string) state.Deps {
+func newLifecycleDeps(rt runtime.Backend, tmpDir string) state.Deps {
 	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
 	return state.Deps{Runtime: rt, Layout: layout, Input: strings.NewReader("")}
 }

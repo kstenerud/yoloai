@@ -1,7 +1,7 @@
 //go:build integration
 
 // ABOUTME: Backend-agnostic behavioral conformance suite. Exercises the
-// ABOUTME: runtime.Runtime contract through interface methods only, so every
+// ABOUTME: runtime.Backend contract through interface methods only, so every
 // ABOUTME: backend (docker, podman, containerd, tart, seatbelt, apple) verifies
 // ABOUTME: one shared table. Sections a backend cannot support are declared
 // ABOUTME: skipped (with a reason) rather than forced, keeping results legible.
@@ -32,7 +32,7 @@ type Sleeper func(t *testing.T, cfg runtime.InstanceConfig) string
 
 // InterfaceBackend is the per-test fixture a backend hands the conformance suite.
 type InterfaceBackend struct {
-	Runtime    runtime.Runtime
+	Runtime    runtime.Backend
 	Ctx        context.Context
 	NewSleeper Sleeper
 
@@ -60,7 +60,7 @@ func conformanceInstanceName(t *testing.T) string {
 	return "yoloai-test-" + strings.ReplaceAll(t.Name(), "/", "-")
 }
 
-// RunInterfaceConformance exercises the universal runtime.Runtime contract every
+// RunInterfaceConformance exercises the universal runtime.Backend contract every
 // backend must honor, plus capability-gated sections a backend opts into via the
 // InterfaceBackend skip fields. Each subtest calls setup for its own isolated
 // fixture, matching the per-test isolation the backend-specific suites had before

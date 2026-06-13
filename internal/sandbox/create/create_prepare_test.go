@@ -468,7 +468,7 @@ func TestApplyConfigDefaults_RecipesFromConfigWhenNoProfile(t *testing.T) {
 
 // --- setupWorkdir baseline deferral ---
 
-// mockDockerRuntime implements runtime.Runtime without WorkDirSetup (Docker-like behavior).
+// mockDockerRuntime implements runtime.Backend without WorkDirSetup (Docker-like behavior).
 type mockDockerRuntime struct{}
 
 func (m *mockDockerRuntime) Setup(ctx context.Context, layout config.Layout, sourceDir string, output io.Writer, logger *slog.Logger, force bool) error {
@@ -516,7 +516,7 @@ func (m *mockDockerRuntime) Descriptor() runtime.BackendDescriptor {
 	}
 }
 
-// mockTartRuntime implements both runtime.Runtime and runtime.WorkDirSetup (Tart-like):
+// mockTartRuntime implements both runtime.Backend and runtime.WorkDirSetup (Tart-like):
 // a SandboxSide backend whose baseline is deferred to the VM.
 type mockTartRuntime struct {
 	mockDockerRuntime
@@ -609,7 +609,7 @@ func TestSetupWorkdir_OverlayModeDeferBaseline(t *testing.T) {
 	}
 
 	// Test with both runtime types
-	runtimes := []runtime.Runtime{
+	runtimes := []runtime.Backend{
 		&mockDockerRuntime{},
 		&mockTartRuntime{},
 	}

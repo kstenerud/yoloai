@@ -14,13 +14,13 @@ import (
 // bareRuntime embeds the Runtime interface (nil) so it satisfies Runtime
 // without implementing any optional interface. The helpers only type-assert;
 // they never call the embedded (nil) methods.
-type bareRuntime struct{ Runtime }
+type bareRuntime struct{ Backend }
 
-type logRuntime struct{ Runtime }
+type logRuntime struct{ Backend }
 
 func (logRuntime) Logs(_ context.Context, name string, _ int) string { return "logs:" + name }
 
-type prepRuntime struct{ Runtime }
+type prepRuntime struct{ Backend }
 
 func (prepRuntime) PrepareAgentCommand(cmd string) string { return "wrapped:" + cmd }
 

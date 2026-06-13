@@ -9,7 +9,7 @@ import "io"
 // caller controls where input comes from and where output / error go,
 // rather than the backend hard-coding os.Stdin / os.Stdout / os.Stderr.
 //
-// The original `runtime.Runtime.InteractiveExec` signature took no IO
+// The original `runtime.Backend.InteractiveExec` signature took no IO
 // parameters and reached for the calling process's stdio. That worked for
 // the CLI (where the process stdio IS the user's terminal) but broke any
 // non-CLI embedder — HTTP servers, MCP bridges, test harnesses bridging

@@ -55,7 +55,7 @@ func TargetIsGitRepo(layout config.Layout, name string, dirHostPath string) (boo
 //
 // The sandbox work copy is read through the backend (Tart-correct via rt); the
 // host target repo, where the tags are created, always uses host git.
-func TransferTags(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, dirHostPath string, tags []TagInfo, shaMap map[string]string) (*TransferTagsResult, error) {
+func TransferTags(ctx context.Context, layout config.Layout, rt runtime.Backend, name string, dirHostPath string, tags []TagInfo, shaMap map[string]string) (*TransferTagsResult, error) {
 	res := &TransferTagsResult{}
 	if len(tags) == 0 {
 		return res, nil

@@ -107,7 +107,7 @@ func registerGitDispatchMock(t *testing.T) {
 	t.Helper()
 	gitDispatchOnce.Do(func() {
 		runtime.Register(
-			func(context.Context, config.Layout) (runtime.Runtime, error) {
+			func(context.Context, config.Layout) (runtime.Backend, error) {
 				return &gitDispatchMock{}, nil
 			},
 			runtime.BackendDescriptor{Type: "gitdispatchmock"},

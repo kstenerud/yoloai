@@ -24,7 +24,7 @@ import (
 // package's sandbox scope only dispatches to the runtime when it implements
 // runtime.GitExecer (Tart only) — a nil Runtime falls through to host git. So
 // these tests need no backend and no daemon; passing nil keeps them in the unit suite.
-func hostGitRuntime() runtime.Runtime {
+func hostGitRuntime() runtime.Backend {
 	return nil
 }
 
@@ -466,7 +466,7 @@ func TestHasUncommittedChanges_OnlyCommits(t *testing.T) {
 // The host-git tests above only ever exercise the *exec.ExitError branch — this
 // fake reaches the *runtime.ExecError branch that non-host backends actually hit.
 type gitExecRuntime struct {
-	runtime.Runtime // embedded: only GitExec is invoked here, rest stay nil
+	runtime.Backend // embedded: only GitExec is invoked here, rest stay nil
 	diffErr         error
 }
 

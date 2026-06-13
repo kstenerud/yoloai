@@ -1,4 +1,4 @@
-// Package podman implements the runtime.Runtime interface using Podman's
+// Package podman implements the runtime.Backend interface using Podman's
 // Docker-compatible API socket. It embeds the Docker runtime and overrides
 // only what differs.
 // ABOUTME: Podman backend — wraps Docker runtime with Podman socket discovery and rootless support.
@@ -75,12 +75,12 @@ func probe(_ context.Context, env map[string]string) (runtime.ProbeStatus, strin
 }
 
 func init() {
-	runtime.Register(func(ctx context.Context, layout config.Layout) (runtime.Runtime, error) {
+	runtime.Register(func(ctx context.Context, layout config.Layout) (runtime.Backend, error) {
 		return New(ctx, layout)
 	}, descriptor)
 }
 
-// Runtime implements runtime.Runtime by embedding the Docker runtime
+// Runtime implements runtime.Backend by embedding the Docker runtime
 // and connecting to Podman's Docker-compatible socket.
 type Runtime struct {
 	*docker.Runtime
@@ -92,7 +92,7 @@ type Runtime struct {
 }
 
 // Compile-time checks.
-var _ runtime.Runtime = (*Runtime)(nil)
+var _ runtime.Backend = (*Runtime)(nil)
 var _ runtime.UsernsProvider = (*Runtime)(nil)
 var _ runtime.IsolationCapabilityProvider = (*Runtime)(nil)
 var _ runtime.InteractiveSession = (*Runtime)(nil)

@@ -49,7 +49,7 @@ type ExportResult struct {
 // opts.Refs subset) plus an optional uncommitted.diff; overlay-mode writes the
 // upper-layer diff(s) captured by running git inside the container (which must
 // be running). Never advances the baseline.
-func Export(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, opts ExportOptions) (*ExportResult, error) {
+func Export(ctx context.Context, layout config.Layout, rt runtime.Backend, name string, opts ExportOptions) (*ExportResult, error) {
 	meta, err := store.LoadEnvironment(layout.SandboxDir(name))
 	if err != nil {
 		return nil, err
@@ -73,7 +73,7 @@ func Export(ctx context.Context, layout config.Layout, rt runtime.Runtime, name 
 
 // exportCopy writes format-patch files (+ optional uncommitted.diff) for a
 // copy-mode sandbox.
-func exportCopy(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, opts ExportOptions) (*ExportResult, error) {
+func exportCopy(ctx context.Context, layout config.Layout, rt runtime.Backend, name string, opts ExportOptions) (*ExportResult, error) {
 	patchDir, files, err := generateExportPatch(ctx, layout, rt, name, opts)
 	if err != nil {
 		return nil, err
@@ -113,7 +113,7 @@ func exportCopy(ctx context.Context, layout config.Layout, rt runtime.Runtime, n
 
 // generateExportPatch produces the format-patch series for the export: the
 // opts.Refs subset when given, otherwise the whole beyond-baseline range.
-func generateExportPatch(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, opts ExportOptions) (patchDir string, files []string, err error) {
+func generateExportPatch(ctx context.Context, layout config.Layout, rt runtime.Backend, name string, opts ExportOptions) (patchDir string, files []string, err error) {
 	if len(opts.Refs) == 0 {
 		return GenerateFormatPatch(ctx, layout, rt, name, opts.DirHostPath, opts.Paths)
 	}
@@ -129,7 +129,7 @@ func generateExportPatch(ctx context.Context, layout config.Layout, rt runtime.R
 }
 
 // exportOverlay writes the upper-layer diff(s) for an overlay-mode sandbox.
-func exportOverlay(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, opts ExportOptions) (*ExportResult, error) {
+func exportOverlay(ctx context.Context, layout config.Layout, rt runtime.Backend, name string, opts ExportOptions) (*ExportResult, error) {
 	if len(opts.Refs) > 0 {
 		return nil, yoerrors.NewUsageError("cannot export specific commits from an :overlay sandbox — overlay changes have no commit history")
 	}

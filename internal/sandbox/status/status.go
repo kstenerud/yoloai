@@ -165,7 +165,7 @@ func ContainerUser(meta *store.Environment, hostUID int) string {
 // ExecInContainer runs a command inside a sandbox instance and returns stdout.
 // hostUID is layout.HostUID at the boundary (F31); it precedes cmd so
 // multi-line cmd literals at call sites stay readable.
-func ExecInContainer(ctx context.Context, rt runtime.Runtime, sandboxName string, meta *store.Environment, hostUID int, cmd []string) (string, error) {
+func ExecInContainer(ctx context.Context, rt runtime.Backend, sandboxName string, meta *store.Environment, hostUID int, cmd []string) (string, error) {
 	result, err := rt.Exec(ctx, store.InstanceName(meta.Principal, sandboxName), cmd, ContainerUser(meta, hostUID))
 	if err != nil {
 		return "", err
@@ -199,7 +199,7 @@ type statusJSON struct {
 
 // DetectStatus queries the runtime and agent-status.json to determine sandbox status.
 // sandboxDir is the host-side sandbox directory.
-func DetectStatus(ctx context.Context, rt runtime.Runtime, containerName string, sandboxDir string) (Status, error) {
+func DetectStatus(ctx context.Context, rt runtime.Backend, containerName string, sandboxDir string) (Status, error) {
 	info, err := rt.Inspect(ctx, containerName)
 	if err != nil {
 		if errors.Is(err, runtime.ErrNotFound) {
@@ -285,7 +285,7 @@ func parseStatusJSON(data []byte) (Status, bool) {
 }
 
 // InspectSandbox loads metadata and queries the runtime for a single sandbox.
-func InspectSandbox(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string) (*Info, error) {
+func InspectSandbox(ctx context.Context, layout config.Layout, rt runtime.Backend, name string) (*Info, error) {
 	sandboxDir := layout.SandboxDir(name)
 	if err := store.RequireSandboxDir(sandboxDir); err != nil {
 		return nil, err
@@ -349,7 +349,7 @@ func detectWorkdirChanges(ctx context.Context, g *git.Git, sandboxDir string, me
 // InspectSandboxWithBackend loads metadata and optionally queries the runtime.
 // If rt is nil, returns basic info (from environment.json and filesystem) with StatusUnavailable.
 // If rt is available, performs full inspection including container state.
-func InspectSandboxWithBackend(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string) (*Info, error) {
+func InspectSandboxWithBackend(ctx context.Context, layout config.Layout, rt runtime.Backend, name string) (*Info, error) {
 	sandboxDir := layout.SandboxDir(name)
 	if err := store.RequireSandboxDir(sandboxDir); err != nil {
 		return nil, err
@@ -390,7 +390,7 @@ func InspectSandboxWithBackend(ctx context.Context, layout config.Layout, rt run
 }
 
 // ListSandboxes scans ~/.yoloai/sandboxes/ and returns info for all sandboxes.
-func ListSandboxes(ctx context.Context, layout config.Layout, rt runtime.Runtime) ([]*Info, error) {
+func ListSandboxes(ctx context.Context, layout config.Layout, rt runtime.Backend) ([]*Info, error) {
 	sandboxesDir := layout.SandboxesDir()
 
 	entries, err := os.ReadDir(sandboxesDir)
@@ -427,7 +427,7 @@ func ListSandboxes(ctx context.Context, layout config.Layout, rt runtime.Runtime
 // Takes a newRuntimeFunc parameter for creating runtimes (enables testing).
 // Returns (infos, unavailableBackends, error).
 // Sandboxes whose backends are unavailable get StatusUnavailable.
-func ListSandboxesMultiBackend(ctx context.Context, layout config.Layout, newRuntimeFunc func(context.Context, runtime.BackendType) (runtime.Runtime, error)) ([]*Info, []string, error) {
+func ListSandboxesMultiBackend(ctx context.Context, layout config.Layout, newRuntimeFunc func(context.Context, runtime.BackendType) (runtime.Backend, error)) ([]*Info, []string, error) {
 	sandboxesDir := layout.SandboxesDir()
 
 	entries, err := os.ReadDir(sandboxesDir)
@@ -496,10 +496,10 @@ func brokenInfos(names []string) []*Info {
 
 // inspectBackendGroup inspects all sandboxes for a single backend, returning
 // their Info entries and any newly discovered unavailable backend names.
-func inspectBackendGroup(ctx context.Context, layout config.Layout, newRuntimeFunc func(context.Context, runtime.BackendType) (runtime.Runtime, error), backend runtime.BackendType, names []string, unavailableSet map[runtime.BackendType]bool) ([]*Info, []string) {
+func inspectBackendGroup(ctx context.Context, layout config.Layout, newRuntimeFunc func(context.Context, runtime.BackendType) (runtime.Backend, error), backend runtime.BackendType, names []string, unavailableSet map[runtime.BackendType]bool) ([]*Info, []string) {
 	var unavailableBackends []string
 	rt, err := newRuntimeFunc(ctx, backend)
-	var effectiveRT runtime.Runtime
+	var effectiveRT runtime.Backend
 	if err == nil {
 		effectiveRT = rt
 		defer rt.Close() //nolint:errcheck,gosec // best-effort cleanup

@@ -245,7 +245,7 @@ func checkDirtyRepos(ctx context.Context, g *git.Git, workdir *DirSpec, auxDirs 
 // the git baseline. Returns the work copy directory path and baseline SHA.
 // For backends implementing WorkDirSetup (e.g., Tart), baseline creation is
 // deferred until the VM starts, and this function returns empty SHA.
-func setupWorkdir(ctx context.Context, g *git.Git, sandboxDir string, workdir *DirSpec, rt runtime.Runtime) (string, string, error) {
+func setupWorkdir(ctx context.Context, g *git.Git, sandboxDir string, workdir *DirSpec, rt runtime.Backend) (string, string, error) {
 	workCopyDir := store.WorkDir(sandboxDir, workdir.Path)
 
 	if err := setupDirContent(sandboxDir, workdir, workCopyDir); err != nil {
@@ -291,7 +291,7 @@ func setupDirContent(sandboxDir string, dir *DirSpec, workCopyDir string) error 
 }
 
 // createDirBaseline creates or resolves the git baseline SHA for a dir.
-func createDirBaseline(ctx context.Context, g *git.Git, dir *DirSpec, workCopyDir string, rt runtime.Runtime) (string, error) {
+func createDirBaseline(ctx context.Context, g *git.Git, dir *DirSpec, workCopyDir string, rt runtime.Backend) (string, error) {
 	switch dir.Mode {
 	case "copy":
 		return createCopyBaseline(ctx, g, workCopyDir, rt)
@@ -306,7 +306,7 @@ func createDirBaseline(ctx context.Context, g *git.Git, dir *DirSpec, workCopyDi
 // createCopyBaseline creates the git baseline for a copy-mode workdir.
 // For SandboxSide backends (e.g., Tart) the work copy lives inside the sandbox,
 // so baseline creation is deferred until the VM starts and this returns empty SHA.
-func createCopyBaseline(ctx context.Context, g *git.Git, workCopyDir string, rt runtime.Runtime) (string, error) {
+func createCopyBaseline(ctx context.Context, g *git.Git, workCopyDir string, rt runtime.Backend) (string, error) {
 	// A SandboxSide backend (e.g. Tart) keeps the work copy inside the sandbox:
 	// it is staged via VirtioFS, moved to local VM storage, and baselined inside
 	// the VM after start. A HostSide backend (Docker) baselines on the host
@@ -362,7 +362,7 @@ func createBaselineForGitRepo(ctx context.Context, g *git.Git, workCopyDir strin
 // slice. :copy and :overlay dirs get host-side content setup and a git baseline
 // (same pipeline as the workdir). :rw and :ro dirs are pure reference mounts
 // with no host-side preparation.
-func setupAuxDirs(ctx context.Context, g *git.Git, sandboxDir string, rt runtime.Runtime, auxDirs []*DirSpec) ([]store.DirEnvironment, error) {
+func setupAuxDirs(ctx context.Context, g *git.Git, sandboxDir string, rt runtime.Backend, auxDirs []*DirSpec) ([]store.DirEnvironment, error) {
 	var dirEnvs []store.DirEnvironment
 	for _, ad := range auxDirs {
 		dm, err := setupAuxDir(ctx, g, sandboxDir, rt, ad)
@@ -384,7 +384,7 @@ func setupAuxDirs(ctx context.Context, g *git.Git, sandboxDir string, rt runtime
 // must advertise where the mount is actually reachable, so the generated
 // CLAUDE.md, `info`, and MCP {dir:N} placeholders don't point at a path that
 // doesn't exist in the guest. Identity for backends without translation.
-func setupAuxDir(ctx context.Context, g *git.Git, sandboxDir string, rt runtime.Runtime, ad *DirSpec) (store.DirEnvironment, error) {
+func setupAuxDir(ctx context.Context, g *git.Git, sandboxDir string, rt runtime.Backend, ad *DirSpec) (store.DirEnvironment, error) {
 	switch ad.Mode {
 	case DirModeCopy, DirModeOverlay:
 		workCopyDir := store.WorkDir(sandboxDir, ad.Path)

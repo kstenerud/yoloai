@@ -1,4 +1,4 @@
-// Package docker implements the runtime.Runtime interface using Docker SDK.
+// Package docker implements the runtime.Backend interface using Docker SDK.
 // ABOUTME: Wraps Docker SDK client for container lifecycle, exec, and image ops.
 package docker
 
@@ -104,12 +104,12 @@ func versionString(ctx context.Context) string {
 }
 
 func init() {
-	runtime.Register(func(ctx context.Context, layout config.Layout) (runtime.Runtime, error) {
+	runtime.Register(func(ctx context.Context, layout config.Layout) (runtime.Backend, error) {
 		return New(ctx, layout)
 	}, descriptor)
 }
 
-// Runtime implements runtime.Runtime using the Docker SDK.
+// Runtime implements runtime.Backend using the Docker SDK.
 type Runtime struct {
 	client     *dockerclient.Client
 	binaryName string                  // CLI binary name ("docker" or "podman")
@@ -133,7 +133,7 @@ type Runtime struct {
 }
 
 // Compile-time check.
-var _ runtime.Runtime = (*Runtime)(nil)
+var _ runtime.Backend = (*Runtime)(nil)
 var _ runtime.IsolationCapabilityProvider = (*Runtime)(nil)
 var _ runtime.CachePruner = (*Runtime)(nil)
 var _ runtime.InteractiveSession = (*Runtime)(nil)

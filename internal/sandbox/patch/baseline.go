@@ -61,7 +61,7 @@ func shaForError(sha string) string {
 // writing. expectedCurrentSHA == "" means "expect no baseline yet" and is valid
 // only when none is set. :rw and :overlay workdirs are refused with a
 // *UsageError (their baselines aren't host-tracked).
-func AdvanceBaselineCAS(ctx context.Context, layout config.Layout, rt runtime.Runtime, name, dirHostPath, expectedCurrentSHA string) (*BaselineChange, error) {
+func AdvanceBaselineCAS(ctx context.Context, layout config.Layout, rt runtime.Backend, name, dirHostPath, expectedCurrentSHA string) (*BaselineChange, error) {
 	g := git.NewSandbox(layout, rt, name)
 	return mutateBaseline(ctx, layout, rt, name, dirHostPath, expectedCurrentSHA, func(workDir string) (string, error) {
 		out, err := g.Run(ctx, workDir, "rev-parse", "HEAD")
@@ -75,7 +75,7 @@ func AdvanceBaselineCAS(ctx context.Context, layout config.Layout, rt runtime.Ru
 // SetBaselineCAS moves the diff baseline to the commit named by ref (a short
 // SHA, full SHA, or any rev git can resolve), guarded by the same
 // compare-and-swap as AdvanceBaselineCAS.
-func SetBaselineCAS(ctx context.Context, layout config.Layout, rt runtime.Runtime, name, dirHostPath, expectedCurrentSHA, ref string) (*BaselineChange, error) {
+func SetBaselineCAS(ctx context.Context, layout config.Layout, rt runtime.Backend, name, dirHostPath, expectedCurrentSHA, ref string) (*BaselineChange, error) {
 	g := git.NewSandbox(layout, rt, name)
 	return mutateBaseline(ctx, layout, rt, name, dirHostPath, expectedCurrentSHA, func(workDir string) (string, error) {
 		out, err := g.Run(ctx, workDir, "rev-parse", ref)
@@ -90,7 +90,7 @@ func SetBaselineCAS(ctx context.Context, layout config.Layout, rt runtime.Runtim
 // per-sandbox lock makes the read-compare-write atomic against concurrent
 // operations on the same host; commitBaseline runs the CAS + resolve + write
 // under it, so a conflict short-circuits before any git work.
-func mutateBaseline(ctx context.Context, layout config.Layout, rt runtime.Runtime, name, dirHostPath, expectedCurrentSHA string, resolve func(workDir string) (string, error)) (*BaselineChange, error) {
+func mutateBaseline(ctx context.Context, layout config.Layout, rt runtime.Backend, name, dirHostPath, expectedCurrentSHA string, resolve func(workDir string) (string, error)) (*BaselineChange, error) {
 	sandboxDir := layout.SandboxDir(name)
 	if err := store.RequireSandboxDir(sandboxDir); err != nil {
 		return nil, err
@@ -201,7 +201,7 @@ func checkBaselineMode(mode store.DirMode) error {
 //  1. meta.Workdir().InceptionSHA (written at sandbox creation for new sandboxes)
 //  2. first commit authored by yoloai@localhost (legacy fresh-repo sandboxes)
 //  3. full log fallback (old sandboxes on existing repos with no marker)
-func BaselineLog(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, dirHostPath string) ([]BaselineLogEntry, error) {
+func BaselineLog(ctx context.Context, layout config.Layout, rt runtime.Backend, name string, dirHostPath string) ([]BaselineLogEntry, error) {
 	sandboxDir := layout.SandboxDir(name)
 	if err := store.RequireSandboxDir(sandboxDir); err != nil {
 		return nil, err

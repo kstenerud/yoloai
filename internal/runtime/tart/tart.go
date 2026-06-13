@@ -1,4 +1,4 @@
-// Package tart implements the runtime.Runtime interface using Tart VMs.
+// Package tart implements the runtime.Backend interface using Tart VMs.
 // ABOUTME: Shells out to the tart CLI for macOS VM lifecycle, exec, and image ops.
 package tart
 
@@ -114,7 +114,7 @@ func probe(_ context.Context, _ map[string]string) (runtime.ProbeStatus, string)
 }
 
 func init() {
-	runtime.Register(func(ctx context.Context, layout config.Layout) (runtime.Runtime, error) {
+	runtime.Register(func(ctx context.Context, layout config.Layout) (runtime.Backend, error) {
 		return New(ctx, layout)
 	}, descriptor)
 }
@@ -150,7 +150,7 @@ const (
 	tartVMLimitSubstr = "The number of VMs exceeds the system limit"
 )
 
-// Runtime implements runtime.Runtime using the Tart CLI.
+// Runtime implements runtime.Backend using the Tart CLI.
 type Runtime struct {
 	tartBin           string              // path to tart binary
 	layout            config.Layout       // DataDir-rooted path resolver (Q-W.6)
@@ -161,7 +161,7 @@ type Runtime struct {
 }
 
 // Compile-time check.
-var _ runtime.Runtime = (*Runtime)(nil)
+var _ runtime.Backend = (*Runtime)(nil)
 var _ runtime.CopyMountResolver = (*Runtime)(nil)
 var _ runtime.InteractiveSession = (*Runtime)(nil)
 

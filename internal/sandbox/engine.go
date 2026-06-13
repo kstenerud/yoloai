@@ -49,7 +49,7 @@ type Engine struct {
 	mutex   sync.Mutex
 	opened  bool
 	closed  bool
-	runtime runtime.Runtime
+	runtime runtime.Backend
 }
 
 // ErrBackendRequired is returned by backend-bound Engine operations when the
@@ -112,7 +112,7 @@ func NewEngine(backend runtime.BackendType, logger *slog.Logger, input io.Reader
 // backend name is read from rt.Descriptor().Type when rt is non-nil. Used by
 // tests (mock runtimes) and the ephemeral cross-backend overwrite path; rt may
 // be nil for a disk-only Engine whose backend-bound methods are never called.
-func NewEngineWithRuntime(rt runtime.Runtime, logger *slog.Logger, input io.Reader, opts ...EngineOption) *Engine {
+func NewEngineWithRuntime(rt runtime.Backend, logger *slog.Logger, input io.Reader, opts ...EngineOption) *Engine {
 	var backend runtime.BackendType
 	if rt != nil {
 		backend = rt.Descriptor().Type
@@ -120,7 +120,7 @@ func NewEngineWithRuntime(rt runtime.Runtime, logger *slog.Logger, input io.Read
 	return newEngine(backend, rt, true, logger, input, opts...)
 }
 
-func newEngine(backend runtime.BackendType, rt runtime.Runtime, opened bool, logger *slog.Logger, input io.Reader, opts ...EngineOption) *Engine {
+func newEngine(backend runtime.BackendType, rt runtime.Backend, opened bool, logger *slog.Logger, input io.Reader, opts ...EngineOption) *Engine {
 	e := &Engine{
 		backend: backend,
 		runtime: rt,
@@ -316,7 +316,7 @@ func (e *Engine) Inspect(ctx context.Context, name string) (*Info, error) {
 // runtime.StdioExecer; Engine.LivePatchNetwork uses it internally to soft-fail
 // when the backend is unavailable. (D74 Stage 2 moved the former Workdir/Network
 // free-function threading into Engine methods, so handles no longer read it.)
-func (e *Engine) Runtime() runtime.Runtime {
+func (e *Engine) Runtime() runtime.Backend {
 	e.mutex.Lock()
 	defer e.mutex.Unlock()
 	return e.runtime

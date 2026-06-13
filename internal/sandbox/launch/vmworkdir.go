@@ -33,7 +33,7 @@ var (
 // and writes it back to the environment. Saves environment.json once after all
 // dirs are processed. Returns nil if the runtime does not implement WorkDirSetup
 // (Docker/containerd).
-func ExecuteVMWorkDirSetup(ctx context.Context, rt runtime.Runtime, name, sandboxDir string, meta *store.Environment) error {
+func ExecuteVMWorkDirSetup(ctx context.Context, rt runtime.Backend, name, sandboxDir string, meta *store.Environment) error {
 	// Only SandboxSide backends keep the work copy inside the sandbox and need
 	// VM-side setup; HostSide backends (Docker/containerd) baseline on the host.
 	if runtime.LocalityOf(rt) != runtime.LocalitySandboxSide {
@@ -60,7 +60,7 @@ func ExecuteVMWorkDirSetup(ctx context.Context, rt runtime.Runtime, name, sandbo
 
 // setupVMCopyDir runs the VM-side setup for a single :copy directory at index i
 // in meta.Dirs: copies from VirtioFS staging, baselines, and records the SHA.
-func setupVMCopyDir(ctx context.Context, rt runtime.Runtime, setupIntf runtime.WorkDirSetup, instance, name string, meta *store.Environment, i int) error {
+func setupVMCopyDir(ctx context.Context, rt runtime.Backend, setupIntf runtime.WorkDirSetup, instance, name string, meta *store.Environment, i int) error {
 	vfsPath := filepath.Join("/Volumes/My Shared Files/yoloai/work", config.EncodePath(meta.Dirs[i].HostPath))
 	vmLocalPath := runtime.ResolveCopyMountFor(rt, name, meta.Dirs[i].HostPath)
 

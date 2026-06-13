@@ -176,7 +176,7 @@ func newTerminalMgr(rt *terminalMockRuntime, tmpDir string) *Engine {
 // *lifecycleMockRuntime but we want the wider terminalMockRuntime to
 // receive Exec/Inspect calls. The package-internal field is set
 // directly since both manager and test live in the same package.
-func (e *Engine) WithRuntime(rt runtime.Runtime) *Engine {
+func (e *Engine) WithRuntime(rt runtime.Backend) *Engine {
 	e.runtime = rt
 	return e
 }

@@ -1,6 +1,6 @@
 //go:build linux
 
-// Package containerdrt implements the runtime.Runtime interface using containerd.
+// Package containerdrt implements the runtime.Backend interface using containerd.
 // ABOUTME: Manages container/VM lifecycle via the containerd API for Kata Containers (vm isolation).
 package containerdrt
 
@@ -75,12 +75,12 @@ func probe(_ context.Context, _ map[string]string) (runtime.ProbeStatus, string)
 }
 
 func init() {
-	runtime.Register(func(ctx context.Context, layout config.Layout) (runtime.Runtime, error) {
+	runtime.Register(func(ctx context.Context, layout config.Layout) (runtime.Backend, error) {
 		return New(ctx, layout)
 	}, descriptor)
 }
 
-// Runtime implements runtime.Runtime using the containerd API.
+// Runtime implements runtime.Backend using the containerd API.
 type Runtime struct {
 	client    *client.Client
 	namespace string        // always "yoloai"
@@ -98,7 +98,7 @@ type Runtime struct {
 }
 
 // Compile-time check.
-var _ runtime.Runtime = (*Runtime)(nil)
+var _ runtime.Backend = (*Runtime)(nil)
 var _ runtime.IsolationCapabilityProvider = (*Runtime)(nil)
 var _ runtime.CachePruner = (*Runtime)(nil)
 var _ runtime.InteractiveSession = (*Runtime)(nil)

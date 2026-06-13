@@ -16,7 +16,7 @@ import (
 // interactive input reader used by create (prompt reading via invocation.ReadPrompt)
 // and lifecycle (start prompt).
 type Deps struct {
-	Runtime runtime.Runtime
+	Runtime runtime.Backend
 	Layout  config.Layout
 	Input   io.Reader
 }

@@ -272,17 +272,17 @@ const (
 
 // LocalityOf returns rt's declared FilesystemLocality, defaulting to
 // LocalityHostSide for a nil runtime.
-func LocalityOf(rt Runtime) FilesystemLocality {
+func LocalityOf(rt Backend) FilesystemLocality {
 	if rt == nil {
 		return LocalityHostSide
 	}
 	return rt.Descriptor().Capabilities.FilesystemLocality
 }
 
-// Runtime is the sandbox backend interface. Implementations manage the
+// Backend is the sandbox backend interface. Implementations manage the
 // lifecycle of sandbox instances (containers, VMs, etc.) and provide
 // image/environment management.
-type Runtime interface {
+type Backend interface {
 	// Setup prepares the backend for launching agents (builds/pulls images,
 	// checks prerequisites). sourceDir is the profile directory containing
 	// build instructions (Dockerfile etc.); ignored by backends that don't

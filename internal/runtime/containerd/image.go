@@ -46,7 +46,7 @@ const dockerImageRef = "docker.io/library/yoloai-base:latest"
 // containerd-snapshotter mode, or when the fast path fails verification.
 //
 // The layout parameter is currently unused by the containerd Setup path —
-// it's accepted to satisfy the runtime.Runtime interface (Q-W.5) and remains
+// it's accepted to satisfy the runtime.Backend interface (Q-W.5) and remains
 // available for any future host-path needs without a further signature change.
 func (r *Runtime) Setup(ctx context.Context, layout config.Layout, sourceDir string, output io.Writer, logger *slog.Logger, force bool) error {
 	ctx = r.withNamespace(ctx)

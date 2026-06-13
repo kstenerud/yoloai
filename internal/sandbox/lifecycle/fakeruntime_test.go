@@ -1,4 +1,4 @@
-// ABOUTME: Minimal runtime.Runtime stub for lifecycle-package white-box tests.
+// ABOUTME: Minimal runtime.Backend stub for lifecycle-package white-box tests.
 // ABOUTME: Mirrors the zero-value behavior of sandbox.mockRuntime without
 // ABOUTME: importing the façade (which would create an import cycle).
 package lifecycle
@@ -15,7 +15,7 @@ import (
 )
 
 // Compile-time check.
-var _ runtime.Runtime = (*lifecycleMockRuntime)(nil)
+var _ runtime.Backend = (*lifecycleMockRuntime)(nil)
 
 var errMockNotImplemented = &mockNotImplError{}
 
@@ -23,7 +23,7 @@ type mockNotImplError struct{}
 
 func (e *mockNotImplError) Error() string { return "mock: not implemented" }
 
-// lifecycleMockRuntime is a configurable runtime.Runtime for lifecycle-package tests.
+// lifecycleMockRuntime is a configurable runtime.Backend for lifecycle-package tests.
 // Hooks that are nil fall back to nil-safe defaults (Stop/Start/Remove return nil,
 // Inspect returns errMockNotImplemented, Exec returns errMockNotImplemented).
 type lifecycleMockRuntime struct {

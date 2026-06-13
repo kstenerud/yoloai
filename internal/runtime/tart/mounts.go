@@ -69,7 +69,7 @@ func (r *Runtime) runSetupScript(ctx context.Context, vmName, sandboxPath string
 
 	// P2: sandbox provisioning (workdir remap + the sandbox-setup.py monitor) runs
 	// only when the sandbox layer has provisioned a runtime-config.json. Absent it
-	// — a bare runtime Start (direct runtime.Runtime use / the conformance suite)
+	// — a bare runtime Start (direct runtime.Backend use / the conformance suite)
 	// — the VM is left booted, mounted, and exec-able with no monitor. This keeps
 	// tart's Start a clean P1 like every other backend's, with P2 gated on the
 	// sandbox handshake (the config file) rather than fused into Start.

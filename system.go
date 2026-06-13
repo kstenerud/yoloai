@@ -205,7 +205,7 @@ type SystemInfo struct {
 // reached (e.g. their daemon is down) so callers can warn without failing.
 func (s *System) AllSandboxes(ctx context.Context) ([]*SandboxInfo, []BackendType, error) {
 	infos, unavailable, err := sandbox.ListSandboxesMultiBackend(ctx, s.layout,
-		func(ctx context.Context, backend runtime.BackendType) (runtime.Runtime, error) {
+		func(ctx context.Context, backend runtime.BackendType) (runtime.Backend, error) {
 			return runtime.New(ctx, backend, s.layout)
 		})
 	if err != nil {
@@ -490,7 +490,7 @@ func (s *System) CheckPrerequisites(ctx context.Context, opts CheckPrerequisites
 }
 
 // checkImage verifies the yoloai-base image is available on rt.
-func (s *System) checkImage(ctx context.Context, rt runtime.Runtime, backend string) CheckResult {
+func (s *System) checkImage(ctx context.Context, rt runtime.Backend, backend string) CheckResult {
 	exists, err := rt.IsReady(ctx)
 	switch {
 	case err != nil:
@@ -529,7 +529,7 @@ func (s *System) checkAgent(name string) CheckResult {
 // checkIsolation runs the capability checks declared by the backend
 // for the requested isolation mode. Returns OK when the backend has
 // no requirements for the mode.
-func (s *System) checkIsolation(ctx context.Context, rt runtime.Runtime, isolation runtime.IsolationMode) CheckResult {
+func (s *System) checkIsolation(ctx context.Context, rt runtime.Backend, isolation runtime.IsolationMode) CheckResult {
 	if rt == nil {
 		return CheckResult{Name: "isolation", OK: false, Message: "backend unavailable; isolation check skipped"}
 	}

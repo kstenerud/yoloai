@@ -26,7 +26,7 @@ import (
 // volumes today; any future code that does MUST stamp them with this label.
 const managedLabel = "com.yoloai.managed"
 
-// Prune implements runtime.Runtime.
+// Prune implements runtime.Backend.
 func (r *Runtime) Prune(ctx context.Context, knownInstances []string, dryRun bool, output io.Writer) (runtime.PruneResult, error) {
 	known := make(map[string]bool, len(knownInstances))
 	for _, name := range knownInstances {

@@ -1,4 +1,4 @@
-// ABOUTME: Minimal runtime.Runtime stub for status-package tests, with
+// ABOUTME: Minimal runtime.Backend stub for status-package tests, with
 // ABOUTME: configurable Inspect/Exec hooks for status-detection scenarios.
 package status
 
@@ -12,9 +12,9 @@ import (
 )
 
 // Compile-time check.
-var _ runtime.Runtime = (*fakeRuntime)(nil)
+var _ runtime.Backend = (*fakeRuntime)(nil)
 
-// fakeRuntime is a minimal runtime.Runtime for status-package tests. Inspect
+// fakeRuntime is a minimal runtime.Backend for status-package tests. Inspect
 // and Exec dispatch to optional hooks; all other operations return
 // "not implemented".
 type fakeRuntime struct {

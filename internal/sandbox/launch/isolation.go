@@ -14,7 +14,7 @@ import (
 // Shared by the create pipeline (before the image build) and lifecycle reset
 // (when changing an existing sandbox's isolation mode) — it lives in launch/ so
 // neither create/ nor lifecycle/ needs to import the other.
-func CheckIsolationPrerequisites(ctx context.Context, rt runtime.Runtime, isolation runtime.IsolationMode) error {
+func CheckIsolationPrerequisites(ctx context.Context, rt runtime.Backend, isolation runtime.IsolationMode) error {
 	capList := runtime.RequiredCapabilitiesFor(rt, isolation)
 	if len(capList) == 0 {
 		return nil // backend has no requirements for this mode

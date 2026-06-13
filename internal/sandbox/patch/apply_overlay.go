@@ -31,7 +31,7 @@ type ApplyOverlayOptions struct {
 // git inside the container (which must be running), applies it to each modified
 // host path, and advances the overlay baseline. Returns (nil, nil) when there
 // is nothing to apply.
-func ApplyOverlay(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, opts ApplyOverlayOptions) (*ApplyResult, error) {
+func ApplyOverlay(ctx context.Context, layout config.Layout, rt runtime.Backend, name string, opts ApplyOverlayOptions) (*ApplyResult, error) {
 	unlock, err := store.AcquireLock(layout, name)
 	if err != nil {
 		return nil, err

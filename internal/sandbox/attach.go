@@ -79,7 +79,7 @@ func attachStatusOK(status Status, name string) error {
 // embedders calling Client.Attach get the polling transparently.
 func WaitForAttachReady(
 	ctx context.Context,
-	rt runtime.Runtime,
+	rt runtime.Backend,
 	layout config.Layout,
 	sandboxName, user string,
 	timeout time.Duration,
@@ -115,7 +115,7 @@ func WaitForAttachReady(
 // error (container not running, context cancelled).
 func pollAttachReady(
 	ctx context.Context,
-	rt runtime.Runtime,
+	rt runtime.Backend,
 	containerName, jsonlPath, tmuxSocket, user string,
 ) (bool, error) {
 	if ctx.Err() != nil {

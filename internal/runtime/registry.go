@@ -14,7 +14,7 @@ import (
 
 // Factory creates a new Runtime instance given a Layout.
 // The Layout provides DataDir-rooted paths so backends never read ambient HOME.
-type Factory func(context.Context, config.Layout) (Runtime, error)
+type Factory func(context.Context, config.Layout) (Backend, error)
 
 // entry pairs a factory with the backend's static descriptor so callers can
 // look up either side independently — descriptors without paying the cost of
@@ -44,7 +44,7 @@ func Register(factory Factory, descriptor BackendDescriptor) {
 
 // New creates a Runtime for the given backend name and layout.
 // Returns an error if the backend is not registered (unavailable on this platform).
-func New(ctx context.Context, name BackendType, layout config.Layout) (Runtime, error) {
+func New(ctx context.Context, name BackendType, layout config.Layout) (Backend, error) {
 	mu.RLock()
 	e, ok := backends[name]
 	mu.RUnlock()

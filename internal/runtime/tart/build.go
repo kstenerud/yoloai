@@ -99,7 +99,7 @@ var requiredTools = []string{"tmux", "node", "jq", "rg", "claude"}
 // as the base instead of the default.
 //
 // The layout parameter is currently unused by the tart Setup path — it's
-// accepted to satisfy the runtime.Runtime interface (Q-W.5) and remains
+// accepted to satisfy the runtime.Backend interface (Q-W.5) and remains
 // available for any future host-path needs (e.g., lock files) without a
 // further signature change.
 func (r *Runtime) Setup(ctx context.Context, _ config.Layout, sourceDir string, output io.Writer, logger *slog.Logger, force bool) error {

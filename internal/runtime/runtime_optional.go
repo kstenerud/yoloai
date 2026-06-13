@@ -40,7 +40,7 @@ type CopyMountResolver interface {
 
 // ResolveCopyMountFor returns the in-sandbox path for a :copy directory.
 // Falls back to hostPath when the backend doesn't implement CopyMountResolver.
-func ResolveCopyMountFor(rt Runtime, sandboxName, hostPath string) string {
+func ResolveCopyMountFor(rt Backend, sandboxName, hostPath string) string {
 	if p, ok := rt.(CopyMountResolver); ok {
 		return p.ResolveCopyMount(sandboxName, hostPath)
 	}
@@ -65,7 +65,7 @@ type GuestMountResolver interface {
 // ResolveGuestMountPathFor returns the guest-visible path for a mount target.
 // Falls back to containerPath when the backend doesn't implement
 // GuestMountResolver.
-func ResolveGuestMountPathFor(rt Runtime, containerPath string) string {
+func ResolveGuestMountPathFor(rt Backend, containerPath string) string {
 	if p, ok := rt.(GuestMountResolver); ok {
 		return p.ResolveGuestMountPath(containerPath)
 	}
@@ -114,7 +114,7 @@ type IsolationCapabilityProvider interface {
 
 // RequiredCapabilitiesFor returns the host capabilities needed for the given
 // isolation mode, or nil when the backend has no requirements for the mode.
-func RequiredCapabilitiesFor(rt Runtime, isolation IsolationMode) []caps.HostCapability {
+func RequiredCapabilitiesFor(rt Backend, isolation IsolationMode) []caps.HostCapability {
 	if p, ok := rt.(IsolationCapabilityProvider); ok {
 		return p.RequiredCapabilities(isolation)
 	}
@@ -190,7 +190,7 @@ type VMCensusReporter interface {
 // VMCensusFor returns the VM-slot census for the backend, or ok=false when the
 // backend does not run under a VM concurrency limit (does not implement
 // VMCensusReporter).
-func VMCensusFor(ctx context.Context, rt Runtime) (census VMCensus, ok bool, err error) {
+func VMCensusFor(ctx context.Context, rt Backend) (census VMCensus, ok bool, err error) {
 	p, ok := rt.(VMCensusReporter)
 	if !ok {
 		return VMCensus{}, false, nil
@@ -226,7 +226,7 @@ type DiskUsageReporter interface {
 
 // CacheUsageFor calls rt.CacheUsage if implemented; otherwise returns a
 // CacheUsage with ImageBytes=-1 to signal "unknown".
-func CacheUsageFor(ctx context.Context, rt Runtime) (CacheUsage, error) {
+func CacheUsageFor(ctx context.Context, rt Backend) (CacheUsage, error) {
 	if r, ok := rt.(DiskUsageReporter); ok {
 		return r.CacheUsage(ctx)
 	}
@@ -272,7 +272,7 @@ type CachePruner interface {
 
 // PruneCacheFor calls rt.PruneCache if implemented (returning the bytes
 // reclaimed); for backends without a cache it's a no-op returning (0, nil).
-func PruneCacheFor(ctx context.Context, rt Runtime, includeImages, dryRun bool, output io.Writer) (int64, error) {
+func PruneCacheFor(ctx context.Context, rt Backend, includeImages, dryRun bool, output io.Writer) (int64, error) {
 	if p, ok := rt.(CachePruner); ok {
 		return p.PruneCache(ctx, includeImages, dryRun, output)
 	}
@@ -296,7 +296,7 @@ type StaleBasePruner interface {
 
 // PruneStaleBasesFor calls rt.PruneStaleBases if implemented; for backends
 // without superseded bases it's a no-op returning (nil, 0, nil).
-func PruneStaleBasesFor(ctx context.Context, rt Runtime, dryRun bool, output io.Writer) ([]string, int64, error) {
+func PruneStaleBasesFor(ctx context.Context, rt Backend, dryRun bool, output io.Writer) ([]string, int64, error) {
 	if p, ok := rt.(StaleBasePruner); ok {
 		return p.PruneStaleBases(ctx, dryRun, output)
 	}
@@ -313,7 +313,7 @@ type LogTailer interface {
 
 // LogsFor returns the last tail lines of an instance's logs, or "" when the
 // backend doesn't implement LogTailer.
-func LogsFor(ctx context.Context, rt Runtime, name string, tail int) string {
+func LogsFor(ctx context.Context, rt Backend, name string, tail int) string {
 	if t, ok := rt.(LogTailer); ok {
 		return t.Logs(ctx, name, tail)
 	}
@@ -330,7 +330,7 @@ type AgentCommandPreparer interface {
 
 // PrepareAgentCommandFor applies the backend's agent-command wrapping, or
 // returns cmd unchanged when the backend doesn't implement AgentCommandPreparer.
-func PrepareAgentCommandFor(rt Runtime, cmd string) string {
+func PrepareAgentCommandFor(rt Backend, cmd string) string {
 	if p, ok := rt.(AgentCommandPreparer); ok {
 		return p.PrepareAgentCommand(cmd)
 	}
@@ -362,7 +362,7 @@ type InteractiveSession interface {
 
 // TmuxSocketFor returns the backend's tmux socket for sandboxDir, or "" when the
 // backend has no interactive session.
-func TmuxSocketFor(rt Runtime, sandboxDir string) string {
+func TmuxSocketFor(rt Backend, sandboxDir string) string {
 	if s, ok := rt.(InteractiveSession); ok {
 		return s.TmuxSocket(sandboxDir)
 	}
@@ -371,7 +371,7 @@ func TmuxSocketFor(rt Runtime, sandboxDir string) string {
 
 // AttachCommandFor returns the interactive attach command, or (nil, false) when
 // the backend has no interactive session.
-func AttachCommandFor(rt Runtime, tmuxSocket string, rows, cols int, isolation IsolationMode) ([]string, bool) {
+func AttachCommandFor(rt Backend, tmuxSocket string, rows, cols int, isolation IsolationMode) ([]string, bool) {
 	if s, ok := rt.(InteractiveSession); ok {
 		return s.AttachCommand(tmuxSocket, rows, cols, isolation), true
 	}

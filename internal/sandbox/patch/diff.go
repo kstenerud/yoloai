@@ -24,7 +24,7 @@ type DiffOptions struct {
 	Stat        bool            // true for --stat summary only
 	NameOnly    bool            // true for --name-only (list changed files)
 	Paths       []string        // optional path filter (relative to workdir)
-	Runtime     runtime.Runtime // runtime backend (required for :copy and :overlay)
+	Runtime     runtime.Backend // runtime backend (required for :copy and :overlay)
 	DirHostPath string          // "" selects Dirs[0] (workdir)
 	// PathPrefix when set is passed to git as --src-prefix/--dst-prefix for the
 	// full diff output (copy mode only; ignored for Stat/NameOnly/overlay/Ref).
@@ -100,7 +100,7 @@ var ErrOverlayRequiresRuntime = fmt.Errorf("overlay diff requires runtime exec; 
 type CommitDiffOptions struct {
 	Name        string          // sandbox name
 	Layout      config.Layout   // resolves the sandbox state directory
-	Runtime     runtime.Runtime // dispatches git to the sandbox work copy (in-VM for Tart)
+	Runtime     runtime.Backend // dispatches git to the sandbox work copy (in-VM for Tart)
 	Ref         string          // single SHA or "sha..sha" range
 	Stat        bool            // true for --stat summary only
 	DirHostPath string          // "" selects Dirs[0] (workdir)
@@ -158,7 +158,7 @@ type CommitInfoWithStat struct {
 
 // ListCommitsWithStats returns commits beyond baseline with per-commit
 // --stat summaries. Returns an empty slice if HEAD == baseline.
-func ListCommitsWithStats(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, dirHostPath string) ([]CommitInfoWithStat, error) {
+func ListCommitsWithStats(ctx context.Context, layout config.Layout, rt runtime.Backend, name string, dirHostPath string) ([]CommitInfoWithStat, error) {
 	commits, err := ListCommitsBeyondBaseline(ctx, layout, rt, name, dirHostPath)
 	if err != nil {
 		return nil, err
@@ -312,7 +312,7 @@ func copyGitWorkDir(sandboxDir, hostPath, mountPath string) string {
 
 // ListCommitsBeyondBaselineOverlay returns commits beyond the baseline for
 // an overlay-mode workdir by executing git log inside the running container.
-func ListCommitsBeyondBaselineOverlay(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, dirHostPath string) ([]CommitInfo, error) {
+func ListCommitsBeyondBaselineOverlay(ctx context.Context, layout config.Layout, rt runtime.Backend, name string, dirHostPath string) ([]CommitInfo, error) {
 	meta, err := store.LoadEnvironment(layout.SandboxDir(name))
 	if err != nil {
 		return nil, fmt.Errorf("load metadata: %w", err)
@@ -354,7 +354,7 @@ func ListCommitsBeyondBaselineOverlay(ctx context.Context, layout config.Layout,
 // sandbox by executing git commands inside the running container.
 // Use opts.Stat for a summary, opts.NameOnly for a file list only.
 // Returns the diff text (empty string if there are no changes).
-func GenerateOverlayDiff(ctx context.Context, rt runtime.Runtime, opts DiffOptions) (string, error) {
+func GenerateOverlayDiff(ctx context.Context, rt runtime.Backend, opts DiffOptions) (string, error) {
 	meta, err := store.LoadEnvironment(opts.Layout.SandboxDir(opts.Name))
 	if err != nil {
 		return "", fmt.Errorf("load metadata: %w", err)

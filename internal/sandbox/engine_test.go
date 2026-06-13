@@ -23,7 +23,7 @@ import (
 
 var errMockNotImplemented = fmt.Errorf("mock: not implemented")
 
-// mockRuntime implements runtime.Runtime for testing.
+// mockRuntime implements runtime.Backend for testing.
 type mockRuntime struct {
 	isReadyResult bool  // returned by IsReady
 	isReadyErr    error // error returned by IsReady
@@ -33,7 +33,7 @@ type mockRuntime struct {
 }
 
 // Compile-time check.
-var _ runtime.Runtime = (*mockRuntime)(nil)
+var _ runtime.Backend = (*mockRuntime)(nil)
 
 func (m *mockRuntime) Setup(_ context.Context, _ config.Layout, _ string, _ io.Writer, _ *slog.Logger, _ bool) error {
 	m.setupCalled = true
@@ -247,7 +247,7 @@ func registerLazyOpenMock(t *testing.T) {
 	t.Helper()
 	lazyOpenOnce.Do(func() {
 		runtime.Register(
-			func(context.Context, config.Layout) (runtime.Runtime, error) {
+			func(context.Context, config.Layout) (runtime.Backend, error) {
 				lazyOpenCount.Add(1)
 				return &mockRuntime{}, nil
 			},

@@ -46,7 +46,7 @@ func NewHostWithEnv(env []string) *Git {
 // copy inside the sandbox, e.g. Tart) dispatches git through the backend; a
 // HostSide backend (and a nil runtime) runs host git. Call sites and the
 // executors never branch on locality again.
-func NewSandbox(layout config.Layout, rt runtime.Runtime, name string) *Git {
+func NewSandbox(layout config.Layout, rt runtime.Backend, name string) *Git {
 	env := layout.Env().EnvForGitInvocation()
 	if runtime.LocalityOf(rt) == runtime.LocalitySandboxSide {
 		return &Git{sandboxExec{env: env, rt: rt, name: name}}
@@ -133,7 +133,7 @@ func (h hostExec) run(ctx context.Context, workDir string, stdin []byte, args ..
 // (apply/am) falls back to host git.
 type sandboxExec struct {
 	env  []string
-	rt   runtime.Runtime
+	rt   runtime.Backend
 	name string
 }
 

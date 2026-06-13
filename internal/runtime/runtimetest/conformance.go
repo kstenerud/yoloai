@@ -21,12 +21,12 @@ import (
 )
 
 // DockerCompatRuntime is the surface shared by every docker-API-compatible
-// backend: the runtime.Runtime contract plus the exported docker SDK client the
+// backend: the runtime.Backend contract plus the exported docker SDK client the
 // conformance suite uses to create long-lived test containers and to verify
-// host-config facts (resource limits, port bindings) the runtime.Runtime
+// host-config facts (resource limits, port bindings) the runtime.Backend
 // interface does not expose.
 type DockerCompatRuntime interface {
-	runtime.Runtime
+	runtime.Backend
 	Client() *dockerclient.Client
 }
 
@@ -97,12 +97,12 @@ func createContainer(t *testing.T, rt DockerCompatRuntime, ctx context.Context, 
 }
 
 // RunConformance exercises the behavioral contract for docker-API backends. The
-// universal runtime.Runtime contract (lifecycle, exec, mounts, idempotency) is
+// universal runtime.Backend contract (lifecycle, exec, mounts, idempotency) is
 // delegated to the shared, backend-agnostic RunInterfaceConformance suite via an
 // SDK-backed Sleeper, so docker/podman verify the exact same table as the VM and
 // host backends. This function adds only the assertions that require the docker
 // SDK Client() to read host-config facts (resource limits, port bindings) the
-// runtime.Runtime interface does not expose.
+// runtime.Backend interface does not expose.
 //
 // InteractiveExec and StdioExec drive the container over the SDK socket (the same
 // control plane as Inspect/Exec), not a `docker exec` subprocess — otherwise a

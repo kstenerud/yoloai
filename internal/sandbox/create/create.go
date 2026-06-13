@@ -632,7 +632,7 @@ func buildLifecycleConfig(resolvedArchetype archetype.Archetype, archetypeDocker
 }
 
 // resolveUsernsMode determines the effective user namespace mode for the runtime.
-func resolveUsernsMode(rt runtime.Runtime, workdir *DirSpec, auxDirs []*DirSpec, capAdd []string) string {
+func resolveUsernsMode(rt runtime.Backend, workdir *DirSpec, auxDirs []*DirSpec, capAdd []string) string {
 	up, ok := rt.(runtime.UsernsProvider)
 	if !ok {
 		return ""

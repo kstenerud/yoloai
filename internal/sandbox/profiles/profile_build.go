@@ -36,8 +36,8 @@ type ProfileImageBuilder interface {
 //
 // layout is the DataDir-rooted Layout used to locate the base profile
 // directory and for any host-path needs Setup may have (Q-W.5 threads
-// it through runtime.Runtime.Setup).
-func EnsureProfileImage(ctx context.Context, rt runtime.Runtime, layout config.Layout, profileName string, secrets []string, output io.Writer, logger *slog.Logger, force bool) error {
+// it through runtime.Backend.Setup).
+func EnsureProfileImage(ctx context.Context, rt runtime.Backend, layout config.Layout, profileName string, secrets []string, output io.Writer, logger *slog.Logger, force bool) error {
 	if !rt.Descriptor().Capabilities.CapAdd {
 		return nil
 	}

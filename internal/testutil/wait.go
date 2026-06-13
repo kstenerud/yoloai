@@ -76,7 +76,7 @@ func WaitForStatus(ctx context.Context, t *testing.T, statusFn func(context.Cont
 
 // WaitForActive polls rt.Inspect until the instance is running or timeout elapses.
 // instanceName must already be the resolved runtime instance name (e.g. sandbox.InstanceName(name)).
-func WaitForActive(ctx context.Context, t *testing.T, rt yrt.Runtime, instanceName string, timeout time.Duration) {
+func WaitForActive(ctx context.Context, t *testing.T, rt yrt.Backend, instanceName string, timeout time.Duration) {
 	t.Helper()
 	Wait(
 		ctx, t,
@@ -90,7 +90,7 @@ func WaitForActive(ctx context.Context, t *testing.T, rt yrt.Runtime, instanceNa
 // WaitForStopped polls rt.Inspect until the instance is not running (stopped or removed)
 // or timeout elapses.
 // instanceName must already be the resolved runtime instance name.
-func WaitForStopped(ctx context.Context, t *testing.T, rt yrt.Runtime, instanceName string, timeout time.Duration) {
+func WaitForStopped(ctx context.Context, t *testing.T, rt yrt.Backend, instanceName string, timeout time.Duration) {
 	t.Helper()
 	Wait(
 		ctx, t,

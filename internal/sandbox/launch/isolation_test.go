@@ -16,9 +16,9 @@ import (
 )
 
 // Compile-time check.
-var _ runtime.Runtime = (*fakeRuntime)(nil)
+var _ runtime.Backend = (*fakeRuntime)(nil)
 
-// fakeRuntime is a minimal runtime.Runtime for launch-package tests. It does
+// fakeRuntime is a minimal runtime.Backend for launch-package tests. It does
 // not implement the optional CapabilityRequirer interface, so
 // RequiredCapabilitiesFor returns nil for it.
 type fakeRuntime struct{}

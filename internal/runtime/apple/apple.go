@@ -1,4 +1,4 @@
-// Package apple implements runtime.Runtime using Apple's `container` CLI.
+// Package apple implements runtime.Backend using Apple's `container` CLI.
 // ABOUTME: Shells out to `container` for Linux OCI workloads in per-container VMs (macOS 26+).
 package apple
 
@@ -72,7 +72,7 @@ var descriptor = runtime.BackendDescriptor{
 }
 
 func init() {
-	runtime.Register(func(ctx context.Context, layout config.Layout) (runtime.Runtime, error) {
+	runtime.Register(func(ctx context.Context, layout config.Layout) (runtime.Backend, error) {
 		return New(ctx, layout)
 	}, descriptor)
 }
@@ -107,7 +107,7 @@ func versionString(ctx context.Context) string {
 	return strings.TrimSpace(string(out))
 }
 
-// Runtime implements runtime.Runtime by shelling out to the `container` CLI.
+// Runtime implements runtime.Backend by shelling out to the `container` CLI.
 type Runtime struct {
 	containerBin string        // resolved path to the container binary
 	layout       config.Layout // DataDir-rooted path resolver (DEV §12)
@@ -115,7 +115,7 @@ type Runtime struct {
 }
 
 // Compile-time check that the skeleton satisfies the interface.
-var _ runtime.Runtime = (*Runtime)(nil)
+var _ runtime.Backend = (*Runtime)(nil)
 var _ runtime.InteractiveSession = (*Runtime)(nil)
 
 // New constructs the apple Runtime after verifying platform, the CLI, and the

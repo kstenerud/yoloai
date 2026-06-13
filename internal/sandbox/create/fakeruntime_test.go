@@ -1,4 +1,4 @@
-// ABOUTME: Minimal runtime.Runtime stub for create-package white-box tests.
+// ABOUTME: Minimal runtime.Backend stub for create-package white-box tests.
 // ABOUTME: Mirrors the zero-value behavior of sandbox.mockRuntime without
 // ABOUTME: importing the façade (which would create an import cycle).
 package create
@@ -16,9 +16,9 @@ import (
 )
 
 // Compile-time check.
-var _ runtime.Runtime = (*fakeRuntime)(nil)
+var _ runtime.Backend = (*fakeRuntime)(nil)
 
-// fakeRuntime is a minimal runtime.Runtime for create-package tests.
+// fakeRuntime is a minimal runtime.Backend for create-package tests.
 // All container operations return "not implemented" (matching sandbox.mockRuntime).
 type fakeRuntime struct{}
 

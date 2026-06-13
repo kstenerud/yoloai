@@ -311,7 +311,7 @@ func ensureHomeSeedConfig(agentDef *agent.Definition, sandboxDir, installMethod 
 // homeDir is used for ~ expansion in seed file host paths.
 // hostEnv supplies both the agent-credential lookups (HasAnyAPIKey/CopySeedFiles)
 // and, via its curated interpolation map, the ${VAR} expansion in CopyAgentFiles.
-func SeedSandbox(rt runtime.Runtime, agentDef *agent.Definition, sandboxDir string, isolation runtime.IsolationMode, agentFiles *config.AgentFilesConfig, homeDir string, hostEnv config.Layout, output io.Writer) (agentFilesInitialized bool, err error) {
+func SeedSandbox(rt runtime.Backend, agentDef *agent.Definition, sandboxDir string, isolation runtime.IsolationMode, agentFiles *config.AgentFilesConfig, homeDir string, hostEnv config.Layout, output io.Writer) (agentFilesInitialized bool, err error) {
 	// Copy seed files into agent-state (config, OAuth credentials, etc.)
 	hasAPIKey := HasAnyAPIKey(agentDef, hostEnv)
 	copiedAuth, err := CopySeedFiles(agentDef, sandboxDir, hasAPIKey, homeDir, hostEnv)

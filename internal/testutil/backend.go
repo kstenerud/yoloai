@@ -76,7 +76,7 @@ var IntegrationHostEnvVars = []string{
 // (default "docker"). On failure it calls t.Fatal with the backend name so
 // the source of the failure is unambiguous. The returned runtime must be
 // closed by the caller.
-func NewIntegrationRuntime(ctx context.Context, t *testing.T) yrt.Runtime {
+func NewIntegrationRuntime(ctx context.Context, t *testing.T) yrt.Backend {
 	t.Helper()
 	name := IntegrationBackendType()
 	home, _ := os.UserHomeDir()
