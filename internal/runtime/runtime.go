@@ -184,7 +184,7 @@ type BackendDescriptor struct {
 
 	// SecretsConsumedTimeout caps how long the host waits for the in-sandbox
 	// "secrets consumed" marker before removing the ephemeral secrets dir
-	// (see internal/sandbox/create_instance.go). Zero means "use the package
+	// (see internal/orchestrator/create_instance.go). Zero means "use the package
 	// default" (a few tens of seconds, fine for fast-booting container
 	// backends). Slow-booting backends — where the guest can take longer than
 	// the default just to reach the entrypoint that reads the secrets — set

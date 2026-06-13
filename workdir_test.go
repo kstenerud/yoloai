@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kstenerud/yoloai/internal/config"
-	"github.com/kstenerud/yoloai/internal/sandbox"
+	"github.com/kstenerud/yoloai/internal/orchestrator"
 	"github.com/kstenerud/yoloai/internal/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
@@ -27,7 +27,7 @@ func newSandboxHandle(t *testing.T, meta *store.Environment) *Sandbox {
 	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
 	require.NoError(t, os.MkdirAll(layout.SandboxDir(meta.Name), 0750))
 	require.NoError(t, store.SaveEnvironment(layout.SandboxDir(meta.Name), meta))
-	engine := sandbox.NewEngine("", slog.Default(), bytes.NewReader(nil), sandbox.WithLayout(layout))
+	engine := orchestrator.NewEngine("", slog.Default(), bytes.NewReader(nil), orchestrator.WithLayout(layout))
 	sb, err := (&Client{layout: layout, engine: engine}).Sandbox(meta.Name)
 	require.NoError(t, err)
 	return sb

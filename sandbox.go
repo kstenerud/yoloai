@@ -12,8 +12,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/kstenerud/yoloai/internal/orchestrator"
 	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
@@ -37,7 +37,7 @@ var ErrSandboxDestroyed = yoerrors.NewUsageError("yoloai: this Sandbox handle wa
 // Sub-handles (Workdir, Network, Agent, Files) are pure namespace expansion off
 // a validated *Sandbox — no IO, no error.
 type Sandbox struct {
-	engine *sandbox.Engine
+	engine *orchestrator.Engine
 	name   string
 	// destroyed is set by a successful Destroy on this handle. Once set, every
 	// error-returning method short-circuits with ErrSandboxDestroyed instead of
@@ -166,7 +166,7 @@ func (s *Sandbox) Clone(ctx context.Context, dest string, opts SandboxCloneOptio
 			return nil, err
 		}
 	}
-	if err := s.engine.Clone(ctx, sandbox.CloneOptions{Source: s.name, Dest: dest}); err != nil {
+	if err := s.engine.Clone(ctx, orchestrator.CloneOptions{Source: s.name, Dest: dest}); err != nil {
 		return nil, err
 	}
 	return &Sandbox{engine: s.engine, name: dest}, nil
@@ -406,40 +406,40 @@ type SandboxInfo struct {
 }
 
 // Status is a sandbox's lifecycle state. Re-exported (type alias) from
-// internal/sandbox; the constants below are the closed set of values.
-type Status = sandbox.Status
+// internal/orchestrator; the constants below are the closed set of values.
+type Status = orchestrator.Status
 
 const (
-	StatusActive      Status = sandbox.StatusActive      // container running, agent working
-	StatusIdle        Status = sandbox.StatusIdle        // container running, agent awaiting input
-	StatusDone        Status = sandbox.StatusDone        // agent exited cleanly (exit 0)
-	StatusFailed      Status = sandbox.StatusFailed      // agent exited non-zero
-	StatusStopped     Status = sandbox.StatusStopped     // container stopped
-	StatusSuspended   Status = sandbox.StatusSuspended   // VM suspended (Tart only)
-	StatusRemoved     Status = sandbox.StatusRemoved     // container removed, sandbox dir remains
-	StatusBroken      Status = sandbox.StatusBroken      // sandbox dir exists but environment.json missing/invalid
-	StatusUnavailable Status = sandbox.StatusUnavailable // backend not running
+	StatusActive      Status = orchestrator.StatusActive      // container running, agent working
+	StatusIdle        Status = orchestrator.StatusIdle        // container running, agent awaiting input
+	StatusDone        Status = orchestrator.StatusDone        // agent exited cleanly (exit 0)
+	StatusFailed      Status = orchestrator.StatusFailed      // agent exited non-zero
+	StatusStopped     Status = orchestrator.StatusStopped     // container stopped
+	StatusSuspended   Status = orchestrator.StatusSuspended   // VM suspended (Tart only)
+	StatusRemoved     Status = orchestrator.StatusRemoved     // container removed, sandbox dir remains
+	StatusBroken      Status = orchestrator.StatusBroken      // sandbox dir exists but environment.json missing/invalid
+	StatusUnavailable Status = orchestrator.StatusUnavailable // backend not running
 )
 
 // AgentStatus is the agent's activity state inside a running sandbox, carried
-// on SandboxInfo.AgentStatus. Re-exported (type alias) from internal/sandbox; the
+// on SandboxInfo.AgentStatus. Re-exported (type alias) from internal/orchestrator; the
 // constants below are the closed set of values. Distinct from Status, which is
 // the sandbox/container lifecycle state.
-type AgentStatus = sandbox.AgentStatus
+type AgentStatus = orchestrator.AgentStatus
 
 const (
-	AgentStatusUnknown AgentStatus = sandbox.AgentStatusUnknown // not yet determined
-	AgentStatusActive  AgentStatus = sandbox.AgentStatusActive  // actively working
-	AgentStatusIdle    AgentStatus = sandbox.AgentStatusIdle    // awaiting input
-	AgentStatusDone    AgentStatus = sandbox.AgentStatusDone    // completed its task
-	AgentStatusFailed  AgentStatus = sandbox.AgentStatusFailed  // exited with an error
+	AgentStatusUnknown AgentStatus = orchestrator.AgentStatusUnknown // not yet determined
+	AgentStatusActive  AgentStatus = orchestrator.AgentStatusActive  // actively working
+	AgentStatusIdle    AgentStatus = orchestrator.AgentStatusIdle    // awaiting input
+	AgentStatusDone    AgentStatus = orchestrator.AgentStatusDone    // completed its task
+	AgentStatusFailed  AgentStatus = orchestrator.AgentStatusFailed  // exited with an error
 )
 
 // SandboxStartOptions configures Sandbox.Start (and Restart). Re-exported (type alias)
-// from internal/sandbox — its fields (Resume, Prompt, PromptFile, Isolation,
+// from internal/orchestrator — its fields (Resume, Prompt, PromptFile, Isolation,
 // VscodeTunnel) are all legitimate start-time knobs, so no field cleanup is
 // needed.
-type SandboxStartOptions = sandbox.StartOptions
+type SandboxStartOptions = orchestrator.StartOptions
 
 // SandboxResetOptions configures Sandbox.Reset. Hand-written rather than aliased: the
 // internal struct carries a Name field that the handle now supplies, so it's
@@ -460,8 +460,8 @@ type SandboxResetOptions struct {
 	Env map[string]string
 }
 
-func (o SandboxResetOptions) toInternal(name string) sandbox.ResetOptions {
-	return sandbox.ResetOptions{
+func (o SandboxResetOptions) toInternal(name string) orchestrator.ResetOptions {
+	return orchestrator.ResetOptions{
 		Name:       name,
 		Restart:    o.RestartContainer,
 		ClearState: o.ClearState,
@@ -571,7 +571,7 @@ func (s *Sandbox) VscodeAttach() (*VscodeAttach, error) {
 	}
 	sandboxDir := s.engine.Layout().SandboxDir(s.name)
 	if err := store.RequireSandboxDir(sandboxDir); err != nil {
-		return nil, sandbox.ErrSandboxNotFound
+		return nil, orchestrator.ErrSandboxNotFound
 	}
 	meta, err := store.LoadEnvironment(sandboxDir)
 	if err != nil {

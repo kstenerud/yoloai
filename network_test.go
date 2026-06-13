@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kstenerud/yoloai/internal/sandbox"
+	"github.com/kstenerud/yoloai/internal/orchestrator"
 	"github.com/kstenerud/yoloai/internal/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/stretchr/testify/assert"
@@ -74,7 +74,7 @@ func clientWithSandbox(t *testing.T) (*Client, *System) {
 	// soft-fails (Runtime() is nil) rather than panicking.
 	c := &Client{
 		layout: sys.layout,
-		engine: sandbox.NewEngine("", slog.Default(), bytes.NewReader(nil), sandbox.WithLayout(sys.layout)),
+		engine: orchestrator.NewEngine("", slog.Default(), bytes.NewReader(nil), orchestrator.WithLayout(sys.layout)),
 	}
 	return c, sys
 }
@@ -164,7 +164,7 @@ func TestNetwork_Allowed_NotFound(t *testing.T) {
 	// F22: a missing sandbox is rejected at handle construction, where the name
 	// was typed — not lazily inside Network().Allowed.
 	_, err := c.Sandbox("ghost")
-	assert.ErrorIs(t, err, sandbox.ErrSandboxNotFound)
+	assert.ErrorIs(t, err, orchestrator.ErrSandboxNotFound)
 }
 
 // --- Allow ---

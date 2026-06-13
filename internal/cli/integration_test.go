@@ -16,7 +16,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/config"
 	dockerrt "github.com/kstenerud/yoloai/internal/runtime/docker"
 
-	"github.com/kstenerud/yoloai/internal/sandbox"
+	"github.com/kstenerud/yoloai/internal/orchestrator"
 	"github.com/kstenerud/yoloai/internal/store"
 	"github.com/kstenerud/yoloai/internal/testutil"
 	"github.com/stretchr/testify/assert"
@@ -436,7 +436,7 @@ func TestCLI_StartAfterDone(t *testing.T) {
 	defer rt.Close() //nolint:errcheck // test cleanup
 
 	testutil.WaitForStatus(context.Background(), t, func(ctx context.Context) (string, error) {
-		s, err := sandbox.DetectStatus(ctx, rt, store.InstanceName("", "cli-startdone"), cliutil.Layout().SandboxDir("cli-startdone"))
+		s, err := orchestrator.DetectStatus(ctx, rt, store.InstanceName("", "cli-startdone"), cliutil.Layout().SandboxDir("cli-startdone"))
 		return string(s), err
 	}, string(yoloai.StatusDone), 60*time.Second)
 

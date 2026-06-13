@@ -56,38 +56,38 @@ import (
 	"log/slog"
 
 	"github.com/kstenerud/yoloai/internal/config"
+	"github.com/kstenerud/yoloai/internal/orchestrator"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	_ "github.com/kstenerud/yoloai/internal/runtime/apple"    // register backend
 	_ "github.com/kstenerud/yoloai/internal/runtime/docker"   // register backend
 	_ "github.com/kstenerud/yoloai/internal/runtime/podman"   // register backend
 	_ "github.com/kstenerud/yoloai/internal/runtime/seatbelt" // register backend
 	_ "github.com/kstenerud/yoloai/internal/runtime/tart"     // register backend
-	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
 
 // Sentinel errors returned by Client methods. Re-exported from
-// internal/sandbox so embedders can `errors.Is` against them without
+// internal/orchestrator so embedders can `errors.Is` against them without
 // reaching into internal packages.
 var (
 	// ErrSandboxExists is returned by CreateSandbox when a sandbox with the given name
 	// already exists and Replace is false.
-	ErrSandboxExists = sandbox.ErrSandboxExists
+	ErrSandboxExists = orchestrator.ErrSandboxExists
 
 	// ErrSandboxNotFound is returned by methods that operate on a named
 	// sandbox when no sandbox with that name exists on disk.
-	ErrSandboxNotFound = sandbox.ErrSandboxNotFound
+	ErrSandboxNotFound = orchestrator.ErrSandboxNotFound
 
 	// ErrContainerNotRunning is returned by methods that require a live
 	// container (Exec, Attach, CaptureTerminal, SendInput, …) when the
 	// sandbox exists but its container is stopped or has not been
 	// recreated since the host last booted.
-	ErrContainerNotRunning = sandbox.ErrContainerNotRunning
+	ErrContainerNotRunning = orchestrator.ErrContainerNotRunning
 
 	// ErrMissingAPIKey is returned by CreateSandbox when the selected agent
 	// requires an API key (via Definition.APIKeyEnvVars) but none is set.
-	ErrMissingAPIKey = sandbox.ErrMissingAPIKey
+	ErrMissingAPIKey = orchestrator.ErrMissingAPIKey
 )
 
 // Client is the simple entry point for yoloAI operations.
@@ -100,10 +100,10 @@ var (
 // the per-sandbox handles route backend-bound work through the Engine, which
 // opens the backend on first use.
 type Client struct {
-	layout  config.Layout   // Q-W: DataDir-rooted path resolver; also reached by Sandbox/System handles for host-only path reads
-	engine  *sandbox.Engine // the one Engine; owns the lazy backend connection (D74)
-	version string          // yoloAI version stamped into created sandboxes' environment.json
-	output  io.Writer       // ClientCreateOptions.Output (defaulted to io.Discard); seeds per-call progress writers (F8)
+	layout  config.Layout        // Q-W: DataDir-rooted path resolver; also reached by Sandbox/System handles for host-only path reads
+	engine  *orchestrator.Engine // the one Engine; owns the lazy backend connection (D74)
+	version string               // yoloAI version stamped into created sandboxes' environment.json
+	output  io.Writer            // ClientCreateOptions.Output (defaulted to io.Discard); seeds per-call progress writers (F8)
 }
 
 // NewClient creates a Client with explicit options.
@@ -141,7 +141,7 @@ func NewClient(ctx context.Context, opts ClientCreateOptions) (*Client, error) {
 	// is optional. A backend-less Engine serves host-only reads and (via System)
 	// admin without ever connecting; backend-bound ops open the runtime lazily on
 	// first use or return ErrBackendRequired when BackendType is "" (D74).
-	engine := sandbox.NewEngine(opts.BackendType, logger, input, sandbox.WithLayout(layout))
+	engine := orchestrator.NewEngine(opts.BackendType, logger, input, orchestrator.WithLayout(layout))
 	return &Client{
 		layout:  layout,
 		engine:  engine,
@@ -157,13 +157,13 @@ func NewClient(ctx context.Context, opts ClientCreateOptions) (*Client, error) {
 // readers) and, via System(), cross-backend admin. Set
 // ClientCreateOptions.BackendType — resolve it at the boundary with
 // yoloai.SelectBackend — to enable backend-bound ops. Re-exported from
-// internal/sandbox, where the lazy backend connection it guards now lives (D74).
-var ErrBackendRequired = sandbox.ErrBackendRequired
+// internal/orchestrator, where the lazy backend connection it guards now lives (D74).
+var ErrBackendRequired = orchestrator.ErrBackendRequired
 
 // ErrClosed is returned by backend-bound operations called after Close. Close is
 // terminal — the Client is not reusable once closed. Detect with errors.Is.
-// Re-exported from internal/sandbox. See Close.
-var ErrClosed = sandbox.ErrClosed
+// Re-exported from internal/orchestrator. See Close.
+var ErrClosed = orchestrator.ErrClosed
 
 // Close releases the backend connection, if one was ever opened, and terminally
 // closes the Client: subsequent backend-bound operations return ErrClosed rather

@@ -12,7 +12,7 @@ package store
 // Lives in store rather than the parent sandbox package because
 // store/environment.go's persisted DirEnvironment type holds Mode
 // values. Parent-package re-export (sandbox.DirMode = store.DirMode)
-// keeps existing internal/sandbox callers working without churn.
+// keeps existing internal/orchestrator callers working without churn.
 type DirMode string
 
 const (

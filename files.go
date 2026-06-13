@@ -5,7 +5,7 @@ package yoloai
 import (
 	"context"
 
-	"github.com/kstenerud/yoloai/internal/sandbox"
+	"github.com/kstenerud/yoloai/internal/orchestrator"
 )
 
 // Files is a name-scoped handle for a sandbox's file-exchange directory
@@ -13,7 +13,7 @@ import (
 // work — it needs no container backend, so callers can shuttle files even when
 // the sandbox isn't running.
 type Files struct {
-	engine *sandbox.Engine
+	engine *orchestrator.Engine
 	name   string
 }
 

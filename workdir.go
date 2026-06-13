@@ -8,7 +8,7 @@ import (
 	"context"
 
 	"github.com/kstenerud/yoloai/internal/copyflow"
-	"github.com/kstenerud/yoloai/internal/sandbox"
+	"github.com/kstenerud/yoloai/internal/orchestrator"
 	"github.com/kstenerud/yoloai/internal/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
@@ -17,7 +17,7 @@ import (
 // diff/apply surface. Reached via Sandbox(name).Workdir(); pure namespace
 // expansion (no IO, no error). Q-G / F2.
 type Workdir struct {
-	engine      *sandbox.Engine
+	engine      *orchestrator.Engine
 	name        string
 	dirHostPath string // "" = Dirs[0] (workdir)
 }
@@ -103,7 +103,7 @@ func (o WorkdirExportOptions) toInternal(dirHostPath string) copyflow.ExportOpti
 
 // ExportResult reports what Export wrote: the destination Dir, the patch/diff
 // Files (absolute paths), and whether an uncommitted.diff was written.
-// Re-exported (type alias) from internal/sandbox/copyflow.
+// Re-exported (type alias) from internal/orchestrator/copyflow.
 type ExportResult = copyflow.ExportResult
 
 // Export writes the agent's changes as patch files under opts.Dir instead of
@@ -124,12 +124,12 @@ func (w *Workdir) Export(ctx context.Context, opts WorkdirExportOptions) (*Expor
 
 // ApplyResult describes the outcome of an Apply: the host directory patched,
 // the replayed Commits (series apply) or a `git diff --stat` (NoCommit), and
-// whether uncommitted changes were applied. Re-exported (type alias) from internal/sandbox/copyflow.
+// whether uncommitted changes were applied. Re-exported (type alias) from internal/orchestrator/copyflow.
 type ApplyResult = copyflow.ApplyResult
 
 // AppliedCommit is one commit replayed onto the host by a series apply — its
 // Subject, the SourceSHA in the sandbox, and the HostSHA after git am rewrote
-// it. Re-exported (type alias) from internal/sandbox/copyflow.
+// it. Re-exported (type alias) from internal/orchestrator/copyflow.
 type AppliedCommit = copyflow.AppliedCommit
 
 // ApplyMode selects how Apply lands changes. Required — there is no default,
@@ -313,19 +313,19 @@ func (w *Workdir) HasUncommittedChanges(ctx context.Context) (bool, error) {
 }
 
 // BaselineChange reports a baseline move: the new baseline SHA and its commit
-// subject. Re-exported (type alias) from internal/sandbox/copyflow.
+// subject. Re-exported (type alias) from internal/orchestrator/copyflow.
 type BaselineChange = copyflow.BaselineChange
 
 // BaselineLogEntry is one commit in the workdir's history from sandbox
 // inception to HEAD, with IsBaseline marking the current baseline.
-// Re-exported (type alias) from internal/sandbox/copyflow.
+// Re-exported (type alias) from internal/orchestrator/copyflow.
 type BaselineLogEntry = copyflow.BaselineLogEntry
 
 // BaselineConflictError is returned by AdvanceBaseline / SetBaseline when the
 // stored baseline no longer matches the caller's expectedCurrentSHA — the
 // compare-and-swap failed because something moved it concurrently. It carries
 // Expected and Actual so the caller can recover. Match it with errors.As.
-// Re-exported (type alias) from internal/sandbox/copyflow.
+// Re-exported (type alias) from internal/orchestrator/copyflow.
 type BaselineConflictError = copyflow.BaselineConflictError
 
 // AdvanceBaseline moves the diff baseline to the workdir's current HEAD, but
@@ -355,9 +355,9 @@ func (w *Workdir) BaselineLog(ctx context.Context) ([]BaselineLogEntry, error) {
 }
 
 // TagInfo identifies a git tag in a sandbox's workdir (its Name and commit
-// SHA). Re-exported (type alias) from internal/sandbox so embedders can hold
+// SHA). Re-exported (type alias) from internal/orchestrator so embedders can hold
 // the tag-listing results without importing internal packages.
-type TagInfo = sandbox.TagInfo
+type TagInfo = orchestrator.TagInfo
 
 // WorkdirTagsOptions configures Workdir.Tags.
 type WorkdirTagsOptions struct {
@@ -376,12 +376,12 @@ func (w *Workdir) Tags(ctx context.Context, opts WorkdirTagsOptions) ([]TagInfo,
 }
 
 // TagOutcome is the result of transferring one tag to the host target repo.
-// Re-exported (type alias) from internal/sandbox.
-type TagOutcome = sandbox.TagOutcome
+// Re-exported (type alias) from internal/orchestrator.
+type TagOutcome = orchestrator.TagOutcome
 
 // TagTransferResult collects per-tag outcomes plus applied/skipped counts.
-// Re-exported (type alias) from internal/sandbox.
-type TagTransferResult = sandbox.TransferTagsResult
+// Re-exported (type alias) from internal/orchestrator.
+type TagTransferResult = orchestrator.TransferTagsResult
 
 // WorkdirTransferTagsOptions configures Workdir.TransferTags.
 type WorkdirTransferTagsOptions struct {

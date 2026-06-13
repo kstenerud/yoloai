@@ -21,7 +21,7 @@ import (
 // Why this matters: external embedders cannot import internal packages.
 // A function with signature `func (c *Client) Create(opts *sandbox.CreateOptions)`
 // compiles in internal callers (yoloai's own internal/cli) but NOT in
-// external embedders — `sandbox` is `internal/sandbox`, which Go's
+// external embedders — `sandbox` is `internal/orchestrator`, which Go's
 // internal-visibility rules forbid. The Client's package doc claims
 // external embedders are a supported audience; this test enforces
 // that claim. CRITIQUE.md §F1 is the motivating finding.

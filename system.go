@@ -17,9 +17,9 @@ import (
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/git"
+	"github.com/kstenerud/yoloai/internal/orchestrator"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/runtime/caps"
-	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
@@ -204,7 +204,7 @@ type SystemInfo struct {
 // infos plus the names of backends that have sandbox dirs but couldn't be
 // reached (e.g. their daemon is down) so callers can warn without failing.
 func (s *System) AllSandboxes(ctx context.Context) ([]*SandboxInfo, []BackendType, error) {
-	infos, unavailable, err := sandbox.ListSandboxesMultiBackend(ctx, s.layout,
+	infos, unavailable, err := orchestrator.ListSandboxesMultiBackend(ctx, s.layout,
 		func(ctx context.Context, backend runtime.BackendType) (runtime.Backend, error) {
 			return runtime.New(ctx, backend, s.layout)
 		})
@@ -417,7 +417,7 @@ func (s *System) buildOne(ctx context.Context, backend BackendType, opts BuildIm
 	}
 	defer rt.Close() //nolint:errcheck // best-effort
 	if opts.Profile != "" {
-		return sandbox.EnsureProfileImage(ctx, rt, s.layout, opts.Profile, opts.Secrets, out, slog.Default(), opts.Rebuild)
+		return orchestrator.EnsureProfileImage(ctx, rt, s.layout, opts.Profile, opts.Secrets, out, slog.Default(), opts.Rebuild)
 	}
 	return rt.Setup(ctx, s.layout, s.layout.ProfileDir("base"), out, slog.Default(), opts.Rebuild)
 }
@@ -797,7 +797,7 @@ func (s *System) pruneBackend(ctx context.Context, backend BackendType, known []
 // root-owned from a sudo run) are surfaced as warnings to out rather than
 // silently dropped or, worse, falsely reported as removed.
 func (s *System) pruneTempFiles(dryRun bool, out io.Writer) ([]PruneItem, error) {
-	removed, failed, err := sandbox.PruneTempFiles(dryRun, staleTempFileAge)
+	removed, failed, err := orchestrator.PruneTempFiles(dryRun, staleTempFileAge)
 	if err != nil {
 		return nil, fmt.Errorf("prune temp files: %w", err)
 	}
@@ -864,12 +864,12 @@ func (s *System) classifySandboxes(ctx context.Context) (known []string, broken 
 			known = append(known, store.InstanceName(s.layout.Principal, name))
 			continue
 		} else {
-			state, detail := sandbox.ProbeWorkData(ctx, git.NewHost(s.layout), path)
+			state, detail := orchestrator.ProbeWorkData(ctx, git.NewHost(s.layout), path)
 			c := classifiedSandbox{name: name, path: path, detail: detail}
 			switch {
-			case state == sandbox.WorkDataPresent:
+			case state == orchestrator.WorkDataPresent:
 				c.action = actionRefuse
-			case errors.Is(loadErr, os.ErrNotExist) && state == sandbox.WorkDataNone:
+			case errors.Is(loadErr, os.ErrNotExist) && state == orchestrator.WorkDataNone:
 				c.action = actionDelete
 				c.detail = "never initialized (no metadata, no work directory)"
 			default:

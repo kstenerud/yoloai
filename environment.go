@@ -6,7 +6,7 @@ package yoloai
 import (
 	"time"
 
-	"github.com/kstenerud/yoloai/internal/sandbox"
+	"github.com/kstenerud/yoloai/internal/orchestrator"
 	"github.com/kstenerud/yoloai/internal/store"
 )
 
@@ -148,9 +148,9 @@ func dirInfoFromStore(d store.DirEnvironment) DirInfo {
 	}
 }
 
-// sandboxInfoFromStatus converts the internal read-model (sandbox.Info, an alias
+// sandboxInfoFromStatus converts the internal read-model (orchestrator.Info, an alias
 // of status.Info) into the public SandboxInfo at the library boundary. Nil-safe.
-func sandboxInfoFromStatus(si *sandbox.Info) *SandboxInfo {
+func sandboxInfoFromStatus(si *orchestrator.Info) *SandboxInfo {
 	if si == nil {
 		return nil
 	}
@@ -165,7 +165,7 @@ func sandboxInfoFromStatus(si *sandbox.Info) *SandboxInfo {
 
 // sandboxInfosFromStatus maps a slice of internal read-models to public
 // SandboxInfo values.
-func sandboxInfosFromStatus(sis []*sandbox.Info) []*SandboxInfo {
+func sandboxInfosFromStatus(sis []*orchestrator.Info) []*SandboxInfo {
 	out := make([]*SandboxInfo, len(sis))
 	for i, si := range sis {
 		out[i] = sandboxInfoFromStatus(si)

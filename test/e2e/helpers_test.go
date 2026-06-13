@@ -125,7 +125,7 @@ func e2eSetup(t *testing.T) string {
 
 	// Pre-seed the build-inputs checksum in the per-test HOME. Same
 	// rationale as the integration tests (see
-	// internal/sandbox/integration_helpers_test.go and
+	// internal/orchestrator/integration_helpers_test.go and
 	// backend-idiosyncrasies.md "Docker daemon races on AlreadyExists
 	// when rebuilding an existing tag with identical content"). Without
 	// this, the bootstrap `yoloai new` subprocess re-builds the base

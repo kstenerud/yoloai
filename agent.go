@@ -7,7 +7,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/kstenerud/yoloai/internal/sandbox"
+	"github.com/kstenerud/yoloai/internal/orchestrator"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
 
@@ -19,7 +19,7 @@ import (
 // "changes"). Like Workdir/Network it is pure namespace expansion off a
 // validated *Sandbox: no IO, no error.
 type Agent struct {
-	engine *sandbox.Engine
+	engine *orchestrator.Engine
 	name   string
 }
 
@@ -28,7 +28,7 @@ type Agent struct {
 // ("", false, nil); a present-but-empty prompt yields ("", true, nil). This is
 // a host-filesystem read and does not require a running backend.
 func (a *Agent) Prompt() (string, bool, error) {
-	return sandbox.ReadStoredPrompt(a.engine.Layout(), a.name)
+	return orchestrator.ReadStoredPrompt(a.engine.Layout(), a.name)
 }
 
 // TerminalLog returns the raw agent terminal output for the sandbox. tailLines <= 0
@@ -38,7 +38,7 @@ func (a *Agent) Prompt() (string, bool, error) {
 // does not require a running backend. It is the recorded counterpart to
 // CaptureTerminal's live snapshot.
 func (a *Agent) TerminalLog(tailLines int) (string, error) {
-	return sandbox.ReadAgentLog(a.engine.Layout(), a.name, tailLines)
+	return orchestrator.ReadAgentLog(a.engine.Layout(), a.name, tailLines)
 }
 
 // LogEvent is one structured-log line surfaced by Logs: the verbatim JSONL byte
@@ -75,10 +75,10 @@ type AgentLogsOptions struct {
 	Follow bool
 }
 
-// toInternal maps the public AgentLogsOptions onto sandbox.LogStreamOptions (IC7:
+// toInternal maps the public AgentLogsOptions onto orchestrator.LogStreamOptions (IC7:
 // one internal counterpart, so a value→value method rather than inline mapping).
-func (o AgentLogsOptions) toInternal() sandbox.LogStreamOptions {
-	return sandbox.LogStreamOptions{
+func (o AgentLogsOptions) toInternal() orchestrator.LogStreamOptions {
+	return orchestrator.LogStreamOptions{
 		Sources:  o.Sources,
 		MinLevel: o.MinLevel,
 		Since:    o.Since,
@@ -96,7 +96,7 @@ func (o AgentLogsOptions) toInternal() sandbox.LogStreamOptions {
 // TerminalLog. Cancel ctx to stop a Follow stream early. A missing sandbox returns
 // ErrSandboxNotFound; an invalid MinLevel returns a *UsageError.
 func (a *Agent) Logs(ctx context.Context, opts AgentLogsOptions) (<-chan LogEvent, error) {
-	frames, err := sandbox.StreamLogs(ctx, a.engine.Layout(), a.name, opts.toInternal())
+	frames, err := orchestrator.StreamLogs(ctx, a.engine.Layout(), a.name, opts.toInternal())
 	if err != nil {
 		return nil, err
 	}
@@ -119,7 +119,7 @@ func (a *Agent) Logs(ctx context.Context, opts AgentLogsOptions) (<-chan LogEven
 // Both fields are best-effort: if the runtime supplied plain output but
 // the ANSI-preserving variant failed, Plain will be populated and ANSI
 // will be nil — that's the documented degraded mode (see
-// sandbox.Engine.CaptureTerminal).
+// orchestrator.Engine.CaptureTerminal).
 type TerminalSnapshot struct {
 	Plain []byte // tmux capture-pane -p output, printable characters only
 	ANSI  []byte // same capture with terminal-control escape sequences preserved (-e flag)
@@ -134,7 +134,7 @@ type TerminalSnapshot struct {
 // not fatal); a partial snapshot (Plain set, ANSI nil) on a successful
 // plain capture with a failed ANSI capture.
 //
-// Backed by sandbox.Engine.CaptureTerminal which uses the runtime's
+// Backed by orchestrator.Engine.CaptureTerminal which uses the runtime's
 // non-interactive Exec to invoke `tmux capture-pane`; backend-specific
 // socket dispatch is handled inside that primitive. DF3.
 func (a *Agent) CaptureTerminal(ctx context.Context, scrollback int) (TerminalSnapshot, error) {

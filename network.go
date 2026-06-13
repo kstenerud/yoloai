@@ -7,7 +7,7 @@ import (
 	"context"
 
 	"github.com/kstenerud/yoloai/internal/agent"
-	"github.com/kstenerud/yoloai/internal/sandbox"
+	"github.com/kstenerud/yoloai/internal/orchestrator"
 	"github.com/kstenerud/yoloai/internal/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
@@ -54,7 +54,7 @@ type AllowedDomain struct {
 //	agent-required = meta.NetworkAllow ∩ agentDef.NetworkAllowlist
 //	user-added     = meta.NetworkAllow \ agentDef.NetworkAllowlist
 type Network struct {
-	engine *sandbox.Engine
+	engine *orchestrator.Engine
 	name   string
 }
 

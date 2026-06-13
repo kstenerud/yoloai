@@ -7,8 +7,8 @@ import (
 	"context"
 
 	"github.com/kstenerud/yoloai/internal/agent"
+	"github.com/kstenerud/yoloai/internal/orchestrator/archetype"
 	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/sandbox/archetype"
 )
 
 // AgentInfo is the public, serializable view of a shipped agent definition. It

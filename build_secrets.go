@@ -2,7 +2,7 @@
 // ABOUTME: files and validate Docker BuildKit --secret specs for profile builds.
 package yoloai
 
-import "github.com/kstenerud/yoloai/internal/sandbox/profiles"
+import "github.com/kstenerud/yoloai/internal/orchestrator/profiles"
 
 // AutoBuildSecrets detects well-known credential files on the host (e.g.
 // ~/.npmrc) and returns Docker BuildKit --secret specs (id=<name>,src=<path>)

@@ -7,8 +7,8 @@ package yoloai
 
 import (
 	"github.com/kstenerud/yoloai/internal/agent"
+	"github.com/kstenerud/yoloai/internal/orchestrator"
 	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/store"
 )
 
@@ -152,57 +152,57 @@ const (
 // DirSpec describes a directory to mount in the sandbox: host Path, mount
 // Mode, optional container MountPath, and the per-directory safety acks
 // (AllowDirty for uncommitted git changes, AllowDangerousPath for the :force
-// dangerous-path override). Re-exported (type alias) from internal/sandbox so
+// dangerous-path override). Re-exported (type alias) from internal/orchestrator so
 // embedders populate SandboxCreateOptions.Workdir / AuxDirs without importing
 // internal packages. F1.
-type DirSpec = sandbox.DirSpec
+type DirSpec = orchestrator.DirSpec
 
 // DirMode names how a directory is mounted into the sandbox. Closed set.
-// Re-exported (type alias) from internal/sandbox.
-type DirMode = sandbox.DirMode
+// Re-exported (type alias) from internal/orchestrator.
+type DirMode = orchestrator.DirMode
 
 const (
-	DirModeCopy    DirMode = sandbox.DirModeCopy    // full copy; diff/apply workflow (default)
-	DirModeOverlay DirMode = sandbox.DirModeOverlay // overlayfs upper layer; diff/apply (Docker-only)
-	DirModeRW      DirMode = sandbox.DirModeRW      // live read-write bind mount
-	DirModeRO      DirMode = sandbox.DirModeRO      // read-only bind mount
+	DirModeCopy    DirMode = orchestrator.DirModeCopy    // full copy; diff/apply workflow (default)
+	DirModeOverlay DirMode = orchestrator.DirModeOverlay // overlayfs upper layer; diff/apply (Docker-only)
+	DirModeRW      DirMode = orchestrator.DirModeRW      // live read-write bind mount
+	DirModeRO      DirMode = orchestrator.DirModeRO      // read-only bind mount
 )
 
 // NetworkMode names a sandbox's network access policy. Closed set.
-// Re-exported (type alias) from internal/sandbox.
-type NetworkMode = sandbox.NetworkMode
+// Re-exported (type alias) from internal/orchestrator.
+type NetworkMode = orchestrator.NetworkMode
 
 const (
-	NetworkModeDefault  NetworkMode = sandbox.NetworkModeDefault  // full network access
-	NetworkModeNone     NetworkMode = sandbox.NetworkModeNone     // no network access
-	NetworkModeIsolated NetworkMode = sandbox.NetworkModeIsolated // allowlist only
+	NetworkModeDefault  NetworkMode = orchestrator.NetworkModeDefault  // full network access
+	NetworkModeNone     NetworkMode = orchestrator.NetworkModeNone     // no network access
+	NetworkModeIsolated NetworkMode = orchestrator.NetworkModeIsolated // allowlist only
 )
 
 // Notice is a user-facing advisory message returned on an orchestration
-// result. Re-exported (type alias) from internal/sandbox.
-type Notice = sandbox.Notice
+// result. Re-exported (type alias) from internal/orchestrator.
+type Notice = orchestrator.Notice
 
 // NoticeLevel classifies a Notice (info vs warning) for rendering.
-// Re-exported (type alias) from internal/sandbox.
-type NoticeLevel = sandbox.NoticeLevel
+// Re-exported (type alias) from internal/orchestrator.
+type NoticeLevel = orchestrator.NoticeLevel
 
 const (
 	// NoticeInfo is an informational status message.
-	NoticeInfo NoticeLevel = sandbox.NoticeInfo
+	NoticeInfo NoticeLevel = orchestrator.NoticeInfo
 	// NoticeWarn is a warning the user should heed.
-	NoticeWarn NoticeLevel = sandbox.NoticeWarn
+	NoticeWarn NoticeLevel = orchestrator.NoticeWarn
 )
 
 // DestroyResult reports the outcome of a Destroy — any advisory notices emitted
 // (e.g. a directory that couldn't be fully removed). Re-exported (type alias)
-// from internal/sandbox.
-type DestroyResult = sandbox.DestroyResult
+// from internal/orchestrator.
+type DestroyResult = orchestrator.DestroyResult
 
 // StartResult reports the outcome of a Start/Restart — the advisory/status
 // notices emitted (e.g. "Sandbox X started"). Re-exported (type alias) from
-// internal/sandbox.
-type StartResult = sandbox.StartResult
+// internal/orchestrator.
+type StartResult = orchestrator.StartResult
 
 // ResetResult reports the outcome of a Reset — the advisory/status notices
-// emitted. Re-exported (type alias) from internal/sandbox.
-type ResetResult = sandbox.ResetResult
+// emitted. Re-exported (type alias) from internal/orchestrator.
+type ResetResult = orchestrator.ResetResult

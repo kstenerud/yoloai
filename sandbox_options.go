@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/kstenerud/yoloai/internal/sandbox"
+	"github.com/kstenerud/yoloai/internal/orchestrator"
 )
 
 // Option-mapping convention (IC7).
@@ -17,8 +17,8 @@ import (
 //
 //   - toInternal(): use it whenever the public struct maps onto exactly one
 //     internal counterpart struct. The mapping is a pure value→value method
-//     (e.g. SandboxCreateOptions→sandbox.CreateOptions, AgentLogsOptions→
-//     sandbox.LogStreamOptions, WorkdirExportOptions→copyflow.ExportOptions).
+//     (e.g. SandboxCreateOptions→orchestrator.CreateOptions, AgentLogsOptions→
+//     orchestrator.LogStreamOptions, WorkdirExportOptions→copyflow.ExportOptions).
 //   - inline field-by-field at the call site: only when there is NO single
 //     internal struct to map to — either because the verb fans out to several
 //     internal structs chosen by runtime state (WorkdirApplyOptions →
@@ -129,12 +129,12 @@ type SandboxCreateOptions struct {
 // profile can supply dirs with no mode), so the safe-mode default is applied
 // there, once, after the merge (see create.parseAndValidateDirs). Version and the
 // interactive flags are not caller inputs — Client.Create stamps Version.
-func (o SandboxCreateOptions) toInternal() sandbox.CreateOptions {
+func (o SandboxCreateOptions) toInternal() orchestrator.CreateOptions {
 	workdir := o.Workdir
 	if o.AllowDirtyWorkdir {
 		workdir.AllowDirty = true
 	}
-	return sandbox.CreateOptions{
+	return orchestrator.CreateOptions{
 		Name:                 o.Name,
 		Workdir:              workdir,
 		AuxDirs:              o.AuxDirs,

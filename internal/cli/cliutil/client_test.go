@@ -10,8 +10,8 @@ import (
 	"github.com/kstenerud/yoloai/internal/cli/clitest"
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
+	"github.com/kstenerud/yoloai/internal/orchestrator"
 	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/store"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
@@ -362,8 +362,8 @@ func TestSandboxErrorHint_NilErr(t *testing.T) {
 func TestSandboxErrorHint_ErrSandboxNotFound(t *testing.T) {
 	_ = clitest.Home(t)
 
-	err := cliutil.SandboxErrorHint("test", sandbox.ErrSandboxNotFound)
-	assert.ErrorIs(t, err, sandbox.ErrSandboxNotFound)
+	err := cliutil.SandboxErrorHint("test", orchestrator.ErrSandboxNotFound)
+	assert.ErrorIs(t, err, orchestrator.ErrSandboxNotFound)
 	// Should NOT contain the hint (no directory to point at)
 	assert.NotContains(t, err.Error(), "to remove:")
 }
