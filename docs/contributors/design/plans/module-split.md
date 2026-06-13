@@ -163,11 +163,15 @@ it is built around host-filesystem access and special-cases Tart via in-VM git
 dispatch, `WorkDirSetup` deferred baselines, `ResolveCopyMountFor`, and
 guest-mount-path translation. The refinement knows about Tart.
 
-**The visible symptom is optional-interface proliferation.** Every type-asserted
-optional interface on the runtime — `WorkDirSetup`, `CopyMountResolver`,
-`GuestMountResolver`, `AgentCommandPreparer`, `StaleBasePruner`, … — is a place a
-higher layer must know "if this backend does X, do Y." Each is an unsealed leak
-surfaced as a capability the caller branches on. **Their count is a leakage metric.**
+**The visible symptom is optional-interface proliferation** — **14** type-asserted
+optional interfaces on the runtime (`runtime_optional.go`). But the map showed only
+**~6 are decision-driving** (a higher layer branches *core logic* on them):
+`GitExecer`/`WorkDirSetup`/`CopyMountResolver`/`GuestMountResolver` (all facets of
+filesystem locality), plus `StdioExecer` and `UsernsProvider`. The other ~7
+(`VMCensusReporter`, `DiskUsageReporter`, `CachePruner`, `StaleBasePruner`, `LogTailer`,
+`AppleSimulatorRuntimes`, `AgentCommandPreparer`) are legitimately optional *operations* —
+call-if-present diagnostics/maintenance, no logic branch. So the leakage metric is "~6
+decision-driving detections," not 14.
 
 **Why this is the sharpest risk to the split.** A module boundary that looks clean
 but doesn't seal these seams is *worse* than today: it presents a false abstraction
@@ -179,10 +183,13 @@ modules without sealing the seams multiplies that trap rather than removing it.
 ### What the plan must add
 
 1. **A backend-leakage map** — the analog of the agent map, run *before* drawing the
-   substrate/refinement boundary: enumerate every optional runtime interface, every
-   `if <backend>`/capability branch above the runtime layer, and every place copyflow
-   touches the filesystem **directly** instead of through the backend. That inventory —
-   not the agent map — decides where the copyflow/substrate line actually falls.
+   substrate/refinement boundary. **Done (2026-06-13) — see
+   [research/backend-leakage-map.md](../research/backend-leakage-map.md).** It revised this
+   section's framing: there are **0 backend-identity logic leaks** above the runtime (the
+   runtime already hides identity), git execution is **already routed** backend-correctly
+   via `GitExecer`/`git.NewSandbox`, and the real leak is **capability-by-type-assertion**
+   (14 optional interfaces) plus **implicit inference** (`mountPath != hostPath`) — not
+   identity-branching. Most of it collapses into one property, `FilesystemLocality`.
 2. **Backend-seam ownership.** Each idiosyncrasy gets a named owner layer. Sealing it
    *inside the backend implementation* (so no higher layer sees it) is the default — e.g.
    the filesystem-locality seam becomes a substrate primitive, *"run git/exec against a
@@ -217,9 +224,17 @@ backend interface itself.** For each leak, pick one of three strategies:
   reset, and host-vs-in-VM git all key off the *property*.
 - **Irreducible branch** — genuinely unavoidable; minimize and document.
 
-**Governing rule: no layer above the runtime may reference a backend by identity.** Every
-adaptation goes through a declared property; a backend-name token (`tart`, `docker`,
-`seatbelt`) anywhere above the runtime layer is a defect, checkable by grep.
+**Governing rule (sharpened by the map): no higher layer may *detect* a decision-driving
+capability — by backend-identity, by `rt.(SomeInterface)` type-assertion, or by implicit
+inference (`mountPath != hostPath`). It must read a named, semantic property.** Identity
+tokens above the runtime are a defect (grep-checkable) — the map found **zero**, so that
+battle is already won; the live front is capability-*detection*. Optional *operations*
+(prune/logs/census) may remain call-if-present. The headline property, `FilesystemLocality`,
+absorbs four of the decision-driving interfaces, the `mountPath != hostPath` inference, and
+the existing `BackendCaps.HostFilesystem` flag; git *execution* is already sealed via
+`git.NewSandbox`/`GitExecer`, so the remaining work is naming the property and closing the
+host-assuming change-probe (`status.go`), which the catalog confirms is blind to the in-VM
+workdir on Tart.
 
 **This flips the interface's design direction** — from bottom-up (each backend's quirks
 bubble up as an optional type-asserted interface or a name-check) to top-down (enumerate
