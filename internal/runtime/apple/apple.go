@@ -57,10 +57,11 @@ var descriptor = runtime.BackendDescriptor{
 	HostFromContainer:       "",
 	SupportedIsolationModes: nil,
 	Capabilities: runtime.BackendCaps{
-		NetworkIsolation: true, // in-guest iptables (own per-VM kernel) — verified
-		OverlayDirs:      true, // overlayfs with --cap-add CAP_SYS_ADMIN — verified
-		CapAdd:           true,
-		HostFilesystem:   false,
+		NetworkIsolation:   true, // in-guest iptables (own per-VM kernel) — verified
+		OverlayDirs:        true, // overlayfs with --cap-add CAP_SYS_ADMIN — verified
+		CapAdd:             true,
+		HostFilesystem:     false,
+		FilesystemLocality: runtime.LocalityHostSide,
 		// Literal mount paths (no Tart-style remap) → the /yoloai default works.
 		VMRuntimeDir: "",
 	},

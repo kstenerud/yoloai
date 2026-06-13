@@ -230,11 +230,14 @@ inference (`mountPath != hostPath`). It must read a named, semantic property.** 
 tokens above the runtime are a defect (grep-checkable) — the map found **zero**, so that
 battle is already won; the live front is capability-*detection*. Optional *operations*
 (prune/logs/census) may remain call-if-present. The headline property, `FilesystemLocality`,
-absorbs four of the decision-driving interfaces, the `mountPath != hostPath` inference, and
-the existing `BackendCaps.HostFilesystem` flag; git *execution* is already sealed via
-`git.NewSandbox`/`GitExecer`, so the remaining work is naming the property and closing the
-host-assuming change-probe (`status.go`), which the catalog confirms is blind to the in-VM
-workdir on Tart.
+is the **decision** that gates the four SandboxSide filesystem *operations*
+(`GitExecer`/`WorkDirSetup`/`CopyMountResolver`/`GuestMountResolver`). It is **orthogonal to
+`BackendCaps.HostFilesystem`** (a state-location axis — seatbelt is HostFilesystem=true yet
+HostSide), and `mountPath != hostPath` is a separate copy-relocation concern, not locality.
+**First cut landed** (this branch): the property is declared by all backends and now drives
+git routing in `git.NewSandbox` (replacing the `GitExecer` type-assertion). The remaining
+SandboxSide operations and the host-assuming change-probe (`status.go`, which the catalog
+confirms is blind to the in-VM workdir on Tart) are the next increments.
 
 **This flips the interface's design direction** — from bottom-up (each backend's quirks
 bubble up as an optional type-asserted interface or a name-check) to top-down (enumerate

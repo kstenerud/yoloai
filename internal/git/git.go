@@ -134,12 +134,18 @@ type sandboxExec struct {
 }
 
 func (s sandboxExec) run(ctx context.Context, workDir string, stdin []byte, args ...string) (string, error) {
-	if ge, ok := s.rt.(runtime.GitExecer); ok {
-		// GitExecer has no stdin parameter; sandbox ops are currently stdin-free.
-		// If a future caller passes stdin here, fall through to the host path.
-		if stdin == nil {
-			return ge.GitExec(ctx, s.name, workDir, args...)
+	// FilesystemLocality is the named decision: a SandboxSide backend keeps its
+	// work copy inside the sandbox (e.g. Tart's VM), so git must run there via
+	// GitExecer; a HostSide backend runs git on the host. This replaces
+	// detecting the capability by type-asserting GitExecer — the property
+	// decides, GitExecer is merely the operation that carries it out. Sandbox
+	// ops are stdin-free; a future caller passing stdin falls through to host.
+	if runtime.LocalityOf(s.rt) == runtime.LocalitySandboxSide && stdin == nil {
+		ge, ok := s.rt.(runtime.GitExecer)
+		if !ok {
+			return "", fmt.Errorf("yoloai bug: backend %s declares SandboxSide filesystem locality but does not implement GitExecer", s.rt.Descriptor().Type)
 		}
+		return ge.GitExec(ctx, s.name, workDir, args...)
 	}
 	return (hostExec{env: s.env}).run(ctx, workDir, stdin, args...)
 }

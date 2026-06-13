@@ -236,12 +236,47 @@ type BackendDescriptor struct {
 // BackendCaps declares what features a runtime backend supports.
 // Each backend returns its capabilities via BackendDescriptor.Capabilities.
 type BackendCaps struct {
-	NetworkIsolation bool   // supports --network=isolated (iptables domain filtering)
-	OverlayDirs      bool   // supports :overlay mount mode (overlayfs inside the container)
-	CapAdd           bool   // supports cap_add, devices, and setup commands
-	HostFilesystem   bool   // true when sandbox state lives on the host (seatbelt, future SSH)
-	ContainerAttach  bool   // exposes a docker-compatible container surface so VS Code's "Attach to Running Container" works
-	VMRuntimeDir     string // path to yoloai state inside the VM; "" means /yoloai (docker default)
+	NetworkIsolation   bool               // supports --network=isolated (iptables domain filtering)
+	OverlayDirs        bool               // supports :overlay mount mode (overlayfs inside the container)
+	CapAdd             bool               // supports cap_add, devices, and setup commands
+	HostFilesystem     bool               // true when sandbox state lives on the host (seatbelt, future SSH)
+	ContainerAttach    bool               // exposes a docker-compatible container surface so VS Code's "Attach to Running Container" works
+	VMRuntimeDir       string             // path to yoloai state inside the VM; "" means /yoloai (docker default)
+	FilesystemLocality FilesystemLocality // where tracked work copies live; see the type doc. Zero value = LocalityHostSide.
+}
+
+// FilesystemLocality declares where a sandbox's tracked work copies live
+// relative to the host, which determines whether host tooling (git, the change
+// probe) can read them directly or must dispatch through the backend.
+//
+// It is ORTHOGONAL to BackendCaps.HostFilesystem, which is about where sandbox
+// *state* lives, not the work copy: seatbelt is HostFilesystem=true yet
+// LocalityHostSide; tart is HostFilesystem=false and LocalitySandboxSide.
+//
+// This property is the named replacement for detecting "does this backend run
+// git in-VM?" by type-asserting runtime.GitExecer. The property decides whether
+// to route through the backend; GitExecer remains the operation that does it.
+type FilesystemLocality int
+
+const (
+	// LocalityHostSide: work copies are readable on the host filesystem, so
+	// git/diff/change-probe run on the host (docker, podman, containerd,
+	// seatbelt, apple). The zero value, so an unset backend defaults here.
+	LocalityHostSide FilesystemLocality = iota
+	// LocalitySandboxSide: work copies live inside the sandbox (e.g. Tart's
+	// VM, where VirtioFS corrupts host-side git), so git must run in-VM and a
+	// host-side change probe is blind. A backend declaring this MUST implement
+	// GitExecer.
+	LocalitySandboxSide
+)
+
+// LocalityOf returns rt's declared FilesystemLocality, defaulting to
+// LocalityHostSide for a nil runtime.
+func LocalityOf(rt Runtime) FilesystemLocality {
+	if rt == nil {
+		return LocalityHostSide
+	}
+	return rt.Descriptor().Capabilities.FilesystemLocality
 }
 
 // Runtime is the sandbox backend interface. Implementations manage the

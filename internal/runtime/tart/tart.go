@@ -62,10 +62,11 @@ var descriptor = runtime.BackendDescriptor{
 	AgentLaunchPrefix:       `PATH="$HOME/.local/bin:/opt/homebrew/opt/node@22/bin:/opt/homebrew/bin:$PATH" `,
 	SupportedIsolationModes: nil,
 	Capabilities: runtime.BackendCaps{
-		NetworkIsolation: false,
-		OverlayDirs:      false,
-		CapAdd:           false,
-		HostFilesystem:   false,
+		NetworkIsolation:   false,
+		OverlayDirs:        false,
+		CapAdd:             false,
+		HostFilesystem:     false,
+		FilesystemLocality: runtime.LocalitySandboxSide,
 		// Tart VMs use a VirtioFS share at "/Volumes/My Shared Files/yoloai"
 		// (path contains spaces). The setup script creates a symlink
 		// /Users/admin/.yoloai → /Volumes/My Shared Files/yoloai so that

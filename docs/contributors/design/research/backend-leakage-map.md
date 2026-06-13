@@ -51,9 +51,27 @@ call-if-present interface; no core-logic branch hangs on it).
 | `UsernsProvider` | exec user (`keep-id` vs `yoloai`) | **`UsernsMode string`** |
 | `IsolationCapabilityProvider` | host caps required per isolation mode | **`IsolationCaps map[IsolationMode][]HostCapability`** |
 
-`FilesystemLocality` is the headline: it absorbs **four** of the 14 interfaces plus the
-implicit `mountPath != hostPath` inference plus the existing `BackendCaps.HostFilesystem`
-flag. That single property is most of the backend-axis leak.
+`FilesystemLocality{HostSide,SandboxSide}` is the headline **decision property**; the four
+filesystem interfaces (`GitExecer`, `WorkDirSetup`, `CopyMountResolver`, `GuestMountResolver`)
+are the SandboxSide **operations** it gates — the property says "this backend needs in-VM
+handling", the interfaces remain the *how*.
+
+**Two corrections the implementation audit forced (2026-06-13):**
+- It is **orthogonal to `BackendCaps.HostFilesystem`, not a unification.** `HostFilesystem`
+  means "sandbox *state* lives on the host" (seatbelt only); locality is about the *work
+  copy*. Seatbelt is `HostFilesystem=true` **and** `LocalityHostSide`; tart is
+  `HostFilesystem=false` and `LocalitySandboxSide`. Independent axes.
+- `copyGitWorkDir`'s `mountPath != hostPath` is **copy-relocation** (true for both seatbelt
+  *and* tart), **not** a locality inference. The real implicit locality detection was the
+  `rt.(GitExecer)` type-assertion in `git.NewSandbox`.
+
+**First cut landed (commit on this branch):** `FilesystemLocality` added to `BackendCaps`,
+declared by all six backends (tart=SandboxSide, rest=HostSide), and `git.NewSandbox` now
+routes on the property (`LocalityOf(rt) == SandboxSide`) instead of type-asserting
+`GitExecer` — with a conformance guard (SandboxSide ⟹ must implement GitExecer) and a test
+proving the property, not the interface, decides. The remaining three SandboxSide operations
+(`WorkDirSetup`/`CopyMountResolver`/`GuestMountResolver`) and the host-side change probe are
+the next increments.
 
 ### Optional operations → stay optional interfaces (call-if-present)
 
@@ -70,8 +88,8 @@ optionally, a `Supports*` flag for symmetry.
 
 ## The existing capability seed (`BackendDescriptor` / `BackendCaps`)
 
-Already-declared proto-properties read above the runtime: `HostFilesystem` (→ folds into
-`FilesystemLocality`), `ContainerAttach`, `CapAdd`, `SupportedIsolationModes`,
+Already-declared proto-properties read above the runtime: `HostFilesystem` (a *separate*
+state-location axis — NOT locality), `ContainerAttach`, `CapAdd`, `SupportedIsolationModes`,
 `Architectures`, `IsolationTargetOnly`, `AgentProvisionedByBackend`, `HostFromContainer`,
 `VMRuntimeDir`. The redesign **extends this struct** with the decision-driving properties
 above rather than inventing a new mechanism — the descriptor is already the right home.

@@ -91,6 +91,16 @@ func (m *gitDispatchMock) GitExec(_ context.Context, _ string, _ string, args ..
 	return gitDispatchHook.record(args)
 }
 
+// Descriptor declares SandboxSide locality (like Tart) so the work-copy git
+// dispatch routes here — the FilesystemLocality property, not the presence of
+// GitExec, drives routing.
+func (m *gitDispatchMock) Descriptor() runtime.BackendDescriptor {
+	return runtime.BackendDescriptor{
+		Type:         "gitdispatchmock",
+		Capabilities: runtime.BackendCaps{FilesystemLocality: runtime.LocalitySandboxSide},
+	}
+}
+
 var gitDispatchOnce sync.Once
 
 func registerGitDispatchMock(t *testing.T) {

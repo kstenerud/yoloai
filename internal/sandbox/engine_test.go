@@ -101,9 +101,10 @@ func (m *mockRuntime) Descriptor() runtime.BackendDescriptor {
 		Type:         "mock",
 		BaseModeName: runtime.IsolationModeContainer,
 		Capabilities: runtime.BackendCaps{
-			NetworkIsolation: true,
-			OverlayDirs:      true,
-			CapAdd:           true,
+			NetworkIsolation:   true,
+			OverlayDirs:        true,
+			CapAdd:             true,
+			FilesystemLocality: runtime.LocalitySandboxSide,
 		},
 	}
 }

@@ -477,6 +477,13 @@ func (g *gitExecRuntime) GitExec(_ context.Context, _, _ string, args ...string)
 	return "", nil // git add -A
 }
 
+func (g *gitExecRuntime) Descriptor() runtime.BackendDescriptor {
+	return runtime.BackendDescriptor{
+		Type:         "gitexec",
+		Capabilities: runtime.BackendCaps{FilesystemLocality: runtime.LocalitySandboxSide},
+	}
+}
+
 // TestHasUncommittedChanges_ExecErrorExit1 pins the backend (Tart/containerd)
 // path: a *runtime.ExecError with code 1 from `git diff --quiet` means "dirty",
 // not a failure. No host-git test can reach this branch.

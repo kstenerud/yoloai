@@ -510,6 +510,9 @@ func (m *mockDockerRuntime) Descriptor() runtime.BackendDescriptor {
 	return runtime.BackendDescriptor{
 		Type:         "mock",
 		BaseModeName: runtime.IsolationModeContainer,
+		Capabilities: runtime.BackendCaps{
+			FilesystemLocality: runtime.LocalitySandboxSide,
+		},
 	}
 }
 
