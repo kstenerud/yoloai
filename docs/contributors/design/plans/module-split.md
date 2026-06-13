@@ -226,8 +226,11 @@ rule):
   locality; they hold a `*Git` and call `g.Run`. Audit outcome: `UsernsProvider`,
   `StdioExecer`, and `IsolationCapabilityProvider` were *already* injection/value-providers
   (the caller uses a returned value, or one wrapper returns a typed "unsupported" error) —
-  **no change needed**. The remaining injection target is the host change-probe (an injected
-  `ChangeProbe`: host-reading vs backend-routed) — Tart-gated.
+  **no change needed**. And the change-probe is **already injected**: `detectWorkdirChanges`
+  runs through the runtime-aware `git.NewSandbox` (in-VM for Tart) and fails safe
+  (`WorkUnknown`) when the VM is stopped (commit `89a30cc`, predating this branch). The
+  host-side `DetectChanges` remains only as the broken-sandbox *recovery* fallback (backend
+  unknown), by design. So no injection target remains.
 - **Seal inside the backend** — a sibling of injection: the backend's own method does the
   right thing; the caller never knows there's variance (mount-path translation, exec
   stabilization delays, VM-wedge recovery, "run git against the work copy").
@@ -261,8 +264,9 @@ HostSide), and `mountPath != hostPath` is a separate copy-relocation concern, no
 **Landed (this branch):** the property is declared by all backends and now drives **both** the
 git routing in `git.NewSandbox` and the baseline-deferral / in-place-reset decisions in
 `prepare_dirs.go`/`vmworkdir.go`/`reset.go` (replacing five `rt.(WorkDirSetup)` type-asserts).
-The host-assuming change-probe (`status.go`, blind to the in-VM workdir on Tart) and the two
-remaining non-locality decision-drivers (`StdioExecer`/`UsernsProvider`) are next.
+The change-probe is *already* runtime-aware (`detectWorkdirChanges` → `HasUnappliedWorkVia`
+runs in-VM for Tart; `89a30cc`), and `StdioExecer`/`UsernsProvider` are already
+value-injection — so **no decision-driving conversions remain**.
 
 **This flips the interface's design direction** — from bottom-up (each backend's quirks
 bubble up as an optional type-asserted interface or a name-check) to top-down (enumerate
@@ -401,9 +405,10 @@ Each phase is independently mergeable and green under `make check`.
   `CopyMountResolver`/`GuestMountResolver`/`UsernsProvider`/`StdioExecer`/
   `IsolationCapabilityProvider` were all found to be *operations* / value-injection already in
   the right shape — **no conversions** (the "~6 decision-driving" over-counted; the real number
-  was 2). **Remaining:** the host-side change probe in `status.go` (an injected `ChangeProbe`;
-  behavior-changing on Tart → needs Tart validation); a grep-level "no backend-identity above
-  the runtime" fence; and the first conformance-suite slice keyed off the properties across
+  was 2). The change-probe turned out to be **already done** (`89a30cc` made
+  `detectWorkdirChanges` runtime-aware — in-VM for Tart, `WorkUnknown` when stopped), so no
+  Tart-gated decision work remains. **Remaining:** a grep-level "no backend-identity above the
+  runtime" fence; and the first conformance-suite slice keyed off the properties across
   docker/tart/seatbelt.
   This phase decides where the substrate/refinement boundary can honestly fall — the cut below
   depends on it.

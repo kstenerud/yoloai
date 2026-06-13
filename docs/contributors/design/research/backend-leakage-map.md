@@ -58,8 +58,8 @@ decision-driving leaks — both now resolved via `FilesystemLocality`. The other
 (`CopyMountResolver`, `GuestMountResolver`, `UsernsProvider`, `StdioExecer`,
 `IsolationCapabilityProvider`) were *already* operations or value-injection. The original
 "~6 decision-driving" over-counted by tunnel-visioning on type-asserts; the real number was
-**2**. The decision-driving conversion work is complete; what remains is the host-side
-change-probe (an injected `ChangeProbe`, Tart-gated), a grep fence, and a conformance slice.
+**2**. The decision-driving conversion work is complete (and the change-probe turned out to be
+*already* runtime-aware — `89a30cc`); what remains is a grep fence and a conformance slice.
 
 `FilesystemLocality{HostSide,SandboxSide}` is the headline **decision property**; it gates the
 two in-sandbox **operations** `GitExecer` (git) and `WorkDirSetup` (deferred baseline) — the
@@ -86,9 +86,9 @@ all six backends (tart=SandboxSide, rest=HostSide). It now drives **both** local
 the operation) and tests proving the property, not the interface, decides. A test-mock
 cleanup followed: mocks now declare locality matching the backend model they represent
 (Docker-like = HostSide, Tart-like = SandboxSide) — a blanket "implements GitExec ⟹
-SandboxSide" was too coarse. **Remaining:** the host-side change probe (`status.go`,
-behavior-changing on Tart → needs Tart validation) and the two non-locality decision-drivers
-(`StdioExecer`/`UsernsProvider`).
+SandboxSide" was too coarse. **Remaining:** a grep fence and a conformance slice. (The
+change-probe is already runtime-aware — `89a30cc`; `StdioExecer`/`UsernsProvider`/the
+resolvers are already operations / value-injection.)
 
 ### Optional operations → stay optional interfaces (call-if-present)
 
@@ -122,9 +122,10 @@ above rather than inventing a new mechanism — the descriptor is already the ri
   makes the catalog's "host probe blind to in-VM workdir" a typed fact instead of tribal
   knowledge. (It is orthogonal to `HostFilesystem`, and distinct from the `mountPath !=
   hostPath` copy-relocation inference — see the corrections above.)
-- **Close the change-detection residue**: route `status.go`'s work-probe through the
-  backend (or gate it on `FilesystemLocality == HostSide`) so a dirty Tart sandbox isn't
-  reported clean.
+- **Change-detection residue — already closed** (`89a30cc`): `detectWorkdirChanges` routes
+  the work-probe through the runtime-aware git (in-VM for Tart; `WorkUnknown` when the VM is
+  stopped). Only the broken-sandbox *recovery* fallback (`DetectChanges`) stays host-side, by
+  design (the backend is unknown there).
 - **Revised governing rule** (the original "no backend-identity checks" is already met):
   *no higher layer may detect a capability by type-assertion or by implicit inference for a
   decision-driving concern — it must read a named, semantic property.* Optional operations
