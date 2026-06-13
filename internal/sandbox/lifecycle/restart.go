@@ -112,7 +112,7 @@ func mergeLaunchEnv(layout config.Layout, meta *store.Environment, extraEnv map[
 // surfaced through n as Notices rather than a raw writer, since the restart
 // entry points (Start/Reset) return their output as a *Result's Notices (F8).
 func recreateContainer(ctx context.Context, d state.Deps, name string, meta *store.Environment, resume bool, extraEnv map[string]string, n *notices) error {
-	agentDef := agent.GetAgent(string(meta.AgentType))
+	agentDef := agent.GetAgent(meta.AgentType)
 	if agentDef == nil {
 		return yoerrors.NewConfigError("unknown agent %q in sandbox state — this sandbox was created with an agent that's not registered in the current yoloai installation; destroy and recreate the sandbox with a registered agent", meta.AgentType)
 	}
@@ -255,7 +255,7 @@ func tmuxShellPrefix(socket string) string {
 // metadata, returning a typed config error when that agent is no longer
 // registered in the current yoloai installation.
 func requireAgent(meta *store.Environment) (*agent.Definition, error) {
-	agentDef := agent.GetAgent(string(meta.AgentType))
+	agentDef := agent.GetAgent(meta.AgentType)
 	if agentDef == nil {
 		return nil, yoerrors.NewConfigError("unknown agent %q in sandbox state — this sandbox was created with an agent that's not registered in the current yoloai installation; destroy and recreate the sandbox with a registered agent", meta.AgentType)
 	}
@@ -301,7 +301,7 @@ func relaunchAgentWithResume(ctx context.Context, d state.Deps, name string, met
 		return err
 	}
 
-	agentArgs := resolveAgentArgs(d.Layout, string(meta.AgentType), meta.Profile)
+	agentArgs := resolveAgentArgs(d.Layout, meta.AgentType, meta.Profile)
 	interactiveCmd := invocation.BuildAgentCommand(agentDef, meta.Model, "", agentArgs, cfg.Passthrough)
 	socket := d.Runtime.TmuxSocket(sandboxDir)
 	if _, err := status.ExecInContainer(ctx, d.Runtime, name, meta, d.Layout.HostUID,
@@ -329,7 +329,7 @@ func relaunchAgentWithCustomPrompt(ctx context.Context, d state.Deps, name strin
 		return err
 	}
 
-	agentArgs := resolveAgentArgs(d.Layout, string(meta.AgentType), meta.Profile)
+	agentArgs := resolveAgentArgs(d.Layout, meta.AgentType, meta.Profile)
 	interactiveCmd := invocation.BuildAgentCommand(agentDef, meta.Model, "", agentArgs, cfg.Passthrough)
 	// agent_launch_prefix is the single source of truth for the backend launch
 	// wrap (W1a). Post-W1b the field is present on every sandbox (the v1->v2
@@ -405,7 +405,7 @@ func prepareRelaunchFiles(d state.Deps, name string, meta *store.Environment, pr
 	if err != nil {
 		return err
 	}
-	agentArgs := resolveAgentArgs(d.Layout, string(meta.AgentType), meta.Profile)
+	agentArgs := resolveAgentArgs(d.Layout, meta.AgentType, meta.Profile)
 	return patchRuntimeConfig(sandboxDir, func(cfg *runtimeconfig.ContainerConfig) {
 		cfg.AgentCommand = invocation.BuildAgentCommand(agentDef, meta.Model, "", agentArgs, cfg.Passthrough)
 	})

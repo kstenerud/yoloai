@@ -419,9 +419,14 @@ Each phase is independently mergeable and green under `make check`.
   and the refactor is validated on Linux + real Tart.
   This phase decides where the substrate/refinement boundary can honestly fall — the cut below
   depends on it.
-- **A — close the import edges.** Relocate `AgentType`/`Model` and the idle/agent-launch
-  config out of substrate packages; `store` and the substrate half of `runtimeconfig` no
-  longer import `agent`. (Smallest, highest-signal; proves the substrate can be agent-free.)
+- **A — close the import edges. DONE** (branch `agent-decouple`). Both edges closed with **no
+  migration** and no wire-format change: `store.Environment.AgentType` is now a plain `string`
+  (the agent layer parses it into `agent.AgentType` at the edge — `agent.GetAgent(meta.AgentType)`);
+  `runtimeconfig` owns its own `IdleSupport` DTO (identical JSON: same field names, no tags) and
+  the create pipeline maps `agentDef.Idle` → it. `store` and `runtimeconfig` no longer import
+  `agent`. The minimal type-change sufficed — the sidecar / opaque-payload options below were
+  not needed to close the import (they remain options only if substrate should stop *persisting*
+  agent fields at all, a separate concern). Proves the substrate can be agent-free.
 - **B — extract PTY.** Move `creack/pty` usage out of `internal/runtime` core into its own
   package; assert via `go list -deps` that the core exec/transfer surface pulls no terminal
   library.

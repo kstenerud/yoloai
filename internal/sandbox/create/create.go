@@ -661,7 +661,7 @@ func buildEnvironment(opts Options, pr *profileResult, workdir *DirSpec, baselin
 		BackendType:   backend,
 		Profile:       pr.name,
 		ImageRef:      pr.imageRef,
-		AgentType:     agent.AgentType(opts.Agent),
+		AgentType:     opts.Agent,
 		Model:         model,
 		Dirs: append([]store.DirEnvironment{{
 			HostPath:     workdir.Path,
@@ -761,14 +761,19 @@ func buildContainerConfig(layout config.Layout, agentDef *agent.Definition, agen
 		AutoCommitInterval: autoCommitInterval,
 		CopyDirs:           copyDirs,
 		HookIdle:           agentDef.Idle.Hook,
-		Idle:               agentDef.Idle,
-		Detectors:          invocation.ResolveDetectors(agentDef.Idle),
-		SandboxName:        sandboxName,
-		TmuxSocket:         tmuxSocket,
-		Isolation:          isolation,
-		VscodeTunnel:       vscodeTunnel,
-		VscodeTunnelName:   vscodeTunnelName,
-		Lifecycle:          lifecycle,
+		Idle: runtimeconfig.IdleSupport{
+			Hook:            agentDef.Idle.Hook,
+			ReadyPattern:    agentDef.Idle.ReadyPattern,
+			ContextSignal:   agentDef.Idle.ContextSignal,
+			WchanApplicable: agentDef.Idle.WchanApplicable,
+		},
+		Detectors:        invocation.ResolveDetectors(agentDef.Idle),
+		SandboxName:      sandboxName,
+		TmuxSocket:       tmuxSocket,
+		Isolation:        isolation,
+		VscodeTunnel:     vscodeTunnel,
+		VscodeTunnelName: vscodeTunnelName,
+		Lifecycle:        lifecycle,
 	}
 	return json.MarshalIndent(cfg, "", "  ")
 }

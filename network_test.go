@@ -32,7 +32,7 @@ func writeIsolatedSandbox(t *testing.T, c *System, name, agentName string, allow
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 	meta := &store.Environment{
 		Name:         name,
-		AgentType:    AgentType(agentName),
+		AgentType:    agentName,
 		CreatedAt:    time.Now(),
 		NetworkMode:  "isolated",
 		NetworkAllow: allow,

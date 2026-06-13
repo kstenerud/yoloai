@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/runtime"
@@ -33,8 +32,11 @@ type Environment struct {
 	Profile       string                  `json:"profile,omitempty"`
 	ImageRef      string                  `json:"image_ref,omitempty"`
 
-	AgentType agent.AgentType `json:"agent"`
-	Model     string          `json:"model,omitempty"`
+	// AgentType is the agent name (e.g. "claude"). Held as a plain string so the
+	// substrate store does not import the agent package; the agent layer parses
+	// it into agent.AgentType when it needs the typed value.
+	AgentType string `json:"agent"`
+	Model     string `json:"model,omitempty"`
 
 	// Dirs is the ordered list of directories the sandbox manages. Element 0 is
 	// the workdir (the agent's cwd; "the workdir" for docs/UI). Entries with

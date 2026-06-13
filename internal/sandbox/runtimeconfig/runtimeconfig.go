@@ -4,9 +4,20 @@
 package runtimeconfig
 
 import (
-	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/runtime"
 )
+
+// IdleSupport is the wire form of an agent's idle-detection capabilities as
+// serialized into runtime-config.json for the Python status-monitor. Field
+// names are the JSON keys (no tags) and MUST match what the monitor reads. It
+// mirrors agent.IdleSupport but is owned here so this serialization layer does
+// not import the agent package — the orchestration layer maps between them.
+type IdleSupport struct {
+	Hook            bool
+	ReadyPattern    string
+	ContextSignal   bool
+	WchanApplicable bool
+}
 
 // SchemaVersion is the contract version between Go (writer) and Python
 // (reader, via sandbox-setup.py and status-monitor.py) for
@@ -57,7 +68,7 @@ type ContainerConfig struct {
 	AutoCommitInterval int                   `json:"auto_commit_interval,omitempty"`
 	CopyDirs           []string              `json:"copy_dirs,omitempty"`
 	HookIdle           bool                  `json:"hook_idle,omitempty"`
-	Idle               agent.IdleSupport     `json:"idle"`
+	Idle               IdleSupport           `json:"idle"`
 	Detectors          []string              `json:"detectors,omitempty"`
 	SandboxName        string                `json:"sandbox_name"`
 	TmuxSocket         string                `json:"tmux_socket,omitempty"`

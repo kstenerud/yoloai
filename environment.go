@@ -110,7 +110,7 @@ func environmentFromStore(m *store.Environment) *Environment {
 		CreatedAt:          m.CreatedAt,
 		BackendType:        m.BackendType,
 		Profile:            m.Profile,
-		AgentType:          m.AgentType,
+		AgentType:          AgentType(m.AgentType),
 		Model:              m.Model,
 		Isolation:          m.Isolation,
 		HostFilesystem:     m.HostFilesystem,

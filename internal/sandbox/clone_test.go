@@ -64,7 +64,7 @@ func TestClone_Success(t *testing.T) {
 	meta, err := store.LoadEnvironment(dstDir)
 	require.NoError(t, err)
 	assert.Equal(t, "dest", meta.Name)
-	assert.Equal(t, agent.AgentClaude, meta.AgentType)
+	assert.Equal(t, string(agent.AgentClaude), meta.AgentType)
 	assert.Equal(t, "abc123", meta.Workdir().BaselineSHA)
 	// CreatedAt should be refreshed (newer than source)
 	assert.True(t, meta.CreatedAt.After(time.Now().Add(-time.Minute)))
