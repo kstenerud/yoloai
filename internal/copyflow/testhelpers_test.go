@@ -1,6 +1,6 @@
-// ABOUTME: Shared test helpers for sandbox/patch unit tests.
+// ABOUTME: Shared test helpers for copyflow unit tests.
 
-package patch
+package copyflow
 
 import (
 	"path/filepath"

@@ -2,7 +2,7 @@
 // ABOUTME: instead of applying them (the `apply --patches` flow). Copy-mode emits
 // ABOUTME: format-patch files (+ uncommitted.diff); overlay emits upper-layer diffs.
 
-package patch
+package copyflow
 
 import (
 	"context"

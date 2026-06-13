@@ -552,7 +552,7 @@ func TestHeadSHA_NotGitRepo(t *testing.T) {
 
 // TestRun_ExitOneReturnsExecError verifies that a non-zero git exit returns
 // *runtime.ExecError so callers can match exit codes via errors.As. Regression
-// guard: sandbox/patch/apply.go treats `git diff --quiet HEAD` exit 1 as "diffs
+// guard: copyflow/apply.go treats `git diff --quiet HEAD` exit 1 as "diffs
 // present" via errors.As(&runtime.ExecError); a plain string error would silently
 // fall through to "real error", failing `yoloai apply` on every changed sandbox.
 // The host execer backs the sandbox scope for backends that don't implement

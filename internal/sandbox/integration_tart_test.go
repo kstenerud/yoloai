@@ -18,11 +18,11 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
+	"github.com/kstenerud/yoloai/internal/copyflow"
 	"github.com/kstenerud/yoloai/internal/git"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/runtime/tart"
 	"github.com/kstenerud/yoloai/internal/sandbox"
-	"github.com/kstenerud/yoloai/internal/sandbox/patch"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/internal/testutil"
 	"github.com/stretchr/testify/assert"
@@ -138,13 +138,13 @@ func TestIntegrationTart_FullLifecycle(t *testing.T) {
 	assert.Contains(t, result.Stdout, "main.go", "git should detect modified file")
 
 	// Generate diff (should use VM-exec path for Tart)
-	diffResult, err := patch.GenerateDiff(ctx, patch.DiffOptions{Name: sandboxName, Layout: mgr.Layout(), Runtime: mgr.Runtime()})
+	diffResult, err := copyflow.GenerateDiff(ctx, copyflow.DiffOptions{Name: sandboxName, Layout: mgr.Layout(), Runtime: mgr.Runtime()})
 	require.NoError(t, err)
 	assert.NotEmpty(t, diffResult, "diff should not be empty after modification")
 	assert.Contains(t, diffResult, "fmt.Println", "diff should contain modification")
 
 	// Generate patch and apply to a target directory (while VM is still running)
-	patchBytes, stat, err := patch.GeneratePatch(ctx, mgr.Layout(), mgr.Runtime(), sandboxName, "", nil, true)
+	patchBytes, stat, err := copyflow.GeneratePatch(ctx, mgr.Layout(), mgr.Runtime(), sandboxName, "", nil, true)
 	require.NoError(t, err)
 	assert.NotEmpty(t, patchBytes)
 	assert.Contains(t, stat, "main.go")
@@ -330,7 +330,7 @@ func TestIntegrationTart_GitCorruption(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 0, result.ExitCode)
 
-	diffResult, err := patch.GenerateDiff(ctx, patch.DiffOptions{Name: sandboxName, Layout: mgr.Layout(), Runtime: mgr.Runtime()})
+	diffResult, err := copyflow.GenerateDiff(ctx, copyflow.DiffOptions{Name: sandboxName, Layout: mgr.Layout(), Runtime: mgr.Runtime()})
 	require.NoError(t, err)
 	assert.NotEmpty(t, diffResult)
 	assert.Contains(t, diffResult, "test.txt")

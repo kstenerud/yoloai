@@ -1,7 +1,7 @@
 // ABOUTME: Unit tests for diff generation across :copy, :overlay, and :rw sandbox modes.
 // ABOUTME: Tests loadDiffContext, LoadAllDiffContexts, GenerateDiff, and related helpers.
 
-package patch
+package copyflow
 
 import (
 	"context"

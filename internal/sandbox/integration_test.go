@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"github.com/kstenerud/yoloai/internal/agent"
+	"github.com/kstenerud/yoloai/internal/copyflow"
 	"github.com/kstenerud/yoloai/internal/git"
 	sandbox "github.com/kstenerud/yoloai/internal/sandbox"
-	"github.com/kstenerud/yoloai/internal/sandbox/patch"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/internal/testutil"
 	"github.com/stretchr/testify/assert"
@@ -74,7 +74,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 		0600,
 	))
 
-	diffResult, err := patch.GenerateDiff(ctx, patch.DiffOptions{Name: sandboxName, Layout: mgr.Layout(), Runtime: mgr.Runtime()})
+	diffResult, err := copyflow.GenerateDiff(ctx, copyflow.DiffOptions{Name: sandboxName, Layout: mgr.Layout(), Runtime: mgr.Runtime()})
 	require.NoError(t, err)
 	assert.NotEmpty(t, diffResult)
 	assert.Contains(t, diffResult, "fmt")
@@ -102,7 +102,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	assert.Equal(t, 0, result.ExitCode)
 
 	// Generate patch and apply to a target directory
-	patchBytes, stat, err := patch.GeneratePatch(ctx, mgr.Layout(), mgr.Runtime(), sandboxName, "", nil, true)
+	patchBytes, stat, err := copyflow.GeneratePatch(ctx, mgr.Layout(), mgr.Runtime(), sandboxName, "", nil, true)
 	require.NoError(t, err)
 	assert.NotEmpty(t, patchBytes)
 	assert.Contains(t, stat, "main.go")
@@ -401,7 +401,7 @@ func TestIntegration_DiffClean(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { destroySandbox(ctx, mgr, "diffclean") }) //nolint:errcheck // test cleanup
 
-	diffResult, err := patch.GenerateDiff(ctx, patch.DiffOptions{Name: "diffclean", Layout: mgr.Layout(), Runtime: mgr.Runtime()})
+	diffResult, err := copyflow.GenerateDiff(ctx, copyflow.DiffOptions{Name: "diffclean", Layout: mgr.Layout(), Runtime: mgr.Runtime()})
 	require.NoError(t, err)
 	assert.Empty(t, diffResult)
 }
@@ -429,7 +429,7 @@ func TestIntegration_DiffWithChanges(t *testing.T) {
 		0600,
 	))
 
-	diffResult, err := patch.GenerateDiff(ctx, patch.DiffOptions{Name: "diffchanges", Layout: mgr.Layout(), Runtime: mgr.Runtime()})
+	diffResult, err := copyflow.GenerateDiff(ctx, copyflow.DiffOptions{Name: "diffchanges", Layout: mgr.Layout(), Runtime: mgr.Runtime()})
 	require.NoError(t, err)
 	assert.NotEmpty(t, diffResult)
 	assert.Contains(t, diffResult, "fmt")
@@ -460,7 +460,7 @@ func TestIntegration_ApplyPatch(t *testing.T) {
 	))
 
 	// Generate patch
-	patchBytes, stat, err := patch.GeneratePatch(ctx, mgr.Layout(), mgr.Runtime(), "applypatch", "", nil, true)
+	patchBytes, stat, err := copyflow.GeneratePatch(ctx, mgr.Layout(), mgr.Runtime(), "applypatch", "", nil, true)
 	require.NoError(t, err)
 	assert.NotEmpty(t, patchBytes)
 	assert.Contains(t, stat, "main.go")
@@ -811,13 +811,13 @@ func TestIntegration_AgentStubWorkflow(t *testing.T) {
 	assert.FileExists(t, filepath.Join(workDir, "agent-output.txt"))
 
 	// Diff should detect the new file
-	diffResult, err := patch.GenerateDiff(ctx, patch.DiffOptions{Name: "stubworkflow", Layout: mgr.Layout(), Runtime: mgr.Runtime()})
+	diffResult, err := copyflow.GenerateDiff(ctx, copyflow.DiffOptions{Name: "stubworkflow", Layout: mgr.Layout(), Runtime: mgr.Runtime()})
 	require.NoError(t, err)
 	assert.NotEmpty(t, diffResult, "diff should not be empty after agent created a file")
 	assert.Contains(t, diffResult, "agent-output.txt")
 
 	// Generate patch and apply to a fresh copy of the original project
-	patchBytes, stat, err := patch.GeneratePatch(ctx, mgr.Layout(), mgr.Runtime(), "stubworkflow", "", nil, true)
+	patchBytes, stat, err := copyflow.GeneratePatch(ctx, mgr.Layout(), mgr.Runtime(), "stubworkflow", "", nil, true)
 	require.NoError(t, err)
 	assert.NotEmpty(t, patchBytes)
 	assert.Contains(t, stat, "agent-output.txt")
@@ -862,7 +862,7 @@ func TestIntegration_Clone(t *testing.T) {
 	require.NoError(t, mgr.Clone(ctx, sandbox.CloneOptions{Source: "clone-a", Dest: "clone-b"}))
 
 	// Diff on clone should show the seeded change
-	diffResult, err := patch.GenerateDiff(ctx, patch.DiffOptions{Name: "clone-b", Layout: mgr.Layout(), Runtime: mgr.Runtime()})
+	diffResult, err := copyflow.GenerateDiff(ctx, copyflow.DiffOptions{Name: "clone-b", Layout: mgr.Layout(), Runtime: mgr.Runtime()})
 	require.NoError(t, err)
 	assert.NotEmpty(t, diffResult, "cloned sandbox should have changes")
 	assert.Contains(t, diffResult, "clone-test")
@@ -938,7 +938,7 @@ func TestIntegration_Overlay(t *testing.T) {
 		time.Sleep(500 * time.Millisecond)
 	}
 	require.NotEmpty(t, baselineSHA, "git init + commit inside overlay should produce a valid SHA within 15s")
-	require.NoError(t, patch.UpdateOverlayBaseline(mgr.Layout(), "overlay-integ", projectDir, baselineSHA))
+	require.NoError(t, copyflow.UpdateOverlayBaseline(mgr.Layout(), "overlay-integ", projectDir, baselineSHA))
 
 	// Write a file inside the container (overlay captures it in upper layer)
 	writeResult, err := mgr.Runtime().Exec(ctx, store.InstanceName("", "overlay-integ"),
@@ -949,15 +949,15 @@ func TestIntegration_Overlay(t *testing.T) {
 	// Diff: must use GenerateOverlayDiff (GenerateDiff returns
 	// ErrOverlayRequiresRuntime for overlay; overlay needs container
 	// exec).
-	overlayDiff, err := patch.GenerateOverlayDiff(ctx, mgr.Runtime(), patch.DiffOptions{Name: "overlay-integ", Layout: mgr.Layout()})
+	overlayDiff, err := copyflow.GenerateOverlayDiff(ctx, mgr.Runtime(), copyflow.DiffOptions{Name: "overlay-integ", Layout: mgr.Layout()})
 	require.NoError(t, err)
 	assert.NotEmpty(t, overlayDiff, "overlay should have changes after exec write")
 	assert.Contains(t, overlayDiff, "output.txt")
 
-	// Apply via the library orchestrator patch.ApplyOverlay (captures the
+	// Apply via the library orchestrator copyflow.ApplyOverlay (captures the
 	// upper-layer diff, applies it to the host, advances the overlay baseline) —
 	// the same path Workdir().Apply(ApplyModeNoCommit) takes for overlay.
-	result, err := patch.ApplyOverlay(ctx, mgr.Layout(), mgr.Runtime(), "overlay-integ", patch.ApplyOverlayOptions{})
+	result, err := copyflow.ApplyOverlay(ctx, mgr.Layout(), mgr.Runtime(), "overlay-integ", copyflow.ApplyOverlayOptions{})
 	require.NoError(t, err)
 	require.NotNil(t, result, "overlay apply should report a result when there are changes")
 	assert.True(t, result.UncommittedApplied)
@@ -968,7 +968,7 @@ func TestIntegration_Overlay(t *testing.T) {
 	assert.Contains(t, string(applied), "overlay-test")
 
 	// DryRun reports the same stat without re-applying.
-	preview, err := patch.ApplyOverlay(ctx, mgr.Layout(), mgr.Runtime(), "overlay-integ", patch.ApplyOverlayOptions{DryRun: true})
+	preview, err := copyflow.ApplyOverlay(ctx, mgr.Layout(), mgr.Runtime(), "overlay-integ", copyflow.ApplyOverlayOptions{DryRun: true})
 	require.NoError(t, err)
 	require.NotNil(t, preview)
 	assert.Contains(t, preview.Stat, "output.txt")

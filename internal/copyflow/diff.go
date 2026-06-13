@@ -4,7 +4,7 @@
 // Package patch generates and applies git-format patches between a sandbox's
 // host work directory and its in-sandbox copy. Covers :copy, :overlay, and
 // :rw modes; supports format-patch, squash, selective, and export workflows.
-package patch
+package copyflow
 
 import (
 	"context"

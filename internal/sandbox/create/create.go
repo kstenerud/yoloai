@@ -18,13 +18,13 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
+	"github.com/kstenerud/yoloai/internal/copyflow"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/git"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox/archetype"
 	"github.com/kstenerud/yoloai/internal/sandbox/invocation"
 	"github.com/kstenerud/yoloai/internal/sandbox/launch"
-	"github.com/kstenerud/yoloai/internal/sandbox/patch"
 	provision "github.com/kstenerud/yoloai/internal/sandbox/provision"
 	"github.com/kstenerud/yoloai/internal/sandbox/runtimeconfig"
 	"github.com/kstenerud/yoloai/internal/sandbox/state"
@@ -212,12 +212,12 @@ func unappliedWorkError(ctx context.Context, g *git.Git, name, workDir, baseline
 	if inDir != "" {
 		loc = " in " + inDir
 	}
-	switch patch.HasUnappliedWorkVia(ctx, g, workDir, baselineSHA) {
-	case patch.WorkDirty:
+	switch copyflow.HasUnappliedWorkVia(ctx, g, workDir, baselineSHA) {
+	case copyflow.WorkDirty:
 		return fmt.Errorf("sandbox %q has unapplied changes%s (use --abandon-unapplied to replace anyway, or 'yoloai apply' first)", name, loc)
-	case patch.WorkUnknown:
+	case copyflow.WorkUnknown:
 		return fmt.Errorf("sandbox %q is stopped, so unapplied changes%s cannot be verified (start it to check, or use --abandon-unapplied to replace anyway)", name, loc)
-	case patch.WorkClean:
+	case copyflow.WorkClean:
 	}
 	return nil
 }

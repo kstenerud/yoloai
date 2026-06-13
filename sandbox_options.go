@@ -18,7 +18,7 @@ import (
 //   - toInternal(): use it whenever the public struct maps onto exactly one
 //     internal counterpart struct. The mapping is a pure value→value method
 //     (e.g. SandboxCreateOptions→sandbox.CreateOptions, AgentLogsOptions→
-//     sandbox.LogStreamOptions, WorkdirExportOptions→patch.ExportOptions).
+//     sandbox.LogStreamOptions, WorkdirExportOptions→copyflow.ExportOptions).
 //   - inline field-by-field at the call site: only when there is NO single
 //     internal struct to map to — either because the verb fans out to several
 //     internal structs chosen by runtime state (WorkdirApplyOptions →

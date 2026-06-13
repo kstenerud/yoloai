@@ -11,11 +11,11 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/kstenerud/yoloai/internal/copyflow"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/git"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox/launch"
-	"github.com/kstenerud/yoloai/internal/sandbox/patch"
 	"github.com/kstenerud/yoloai/internal/sandbox/state"
 	"github.com/kstenerud/yoloai/internal/sandbox/status"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
@@ -161,12 +161,12 @@ func dirWorkReason(ctx context.Context, sandboxGit *git.Git, sandboxDir string, 
 		return false, ""
 	}
 	workDir := store.WorkDir(sandboxDir, hostPath)
-	switch patch.HasUnappliedWorkVia(ctx, sandboxGit, workDir, baselineSHA) {
-	case patch.WorkDirty:
+	switch copyflow.HasUnappliedWorkVia(ctx, sandboxGit, workDir, baselineSHA) {
+	case copyflow.WorkDirty:
 		return true, "unapplied changes exist"
-	case patch.WorkUnknown:
+	case copyflow.WorkUnknown:
 		return true, "sandbox is stopped, so unapplied changes can't be verified (start it to check, or use --abandon-unapplied)"
-	case patch.WorkClean:
+	case copyflow.WorkClean:
 	}
 	return false, ""
 }

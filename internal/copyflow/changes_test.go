@@ -1,5 +1,5 @@
 // ABOUTME: Tests for DetectChanges and HasUnappliedWorkVia git-status helpers.
-package patch
+package copyflow
 
 import (
 	"context"

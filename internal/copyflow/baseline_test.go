@@ -1,6 +1,6 @@
 // ABOUTME: Unit tests for the CAS-guarded baseline verbs (advance/set) and the
 // ABOUTME: baseline-log read-model in baseline.go.
-package patch
+package copyflow
 
 import (
 	"context"

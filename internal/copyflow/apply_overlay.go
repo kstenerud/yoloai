@@ -2,7 +2,7 @@
 // ABOUTME: host. The diff is captured by running git inside the container (which
 // ABOUTME: must be running); there is no commit history, so it's a net-diff apply.
 
-package patch
+package copyflow
 
 import (
 	"context"

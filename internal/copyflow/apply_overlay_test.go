@@ -2,7 +2,7 @@
 // ABOUTME: The container-backed happy path is covered by integration tests; here
 // ABOUTME: we cover the cheap guard (non-overlay sandboxes are a no-op).
 
-package patch
+package copyflow
 
 import (
 	"context"

@@ -7,8 +7,8 @@ package yoloai
 import (
 	"context"
 
+	"github.com/kstenerud/yoloai/internal/copyflow"
 	"github.com/kstenerud/yoloai/internal/sandbox"
-	"github.com/kstenerud/yoloai/internal/sandbox/patch"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
@@ -28,7 +28,7 @@ type WorkdirDiffOptions struct {
 	// Paths narrows the diff to specific files (relative to the workdir).
 	// Ignored for overlay-mode workdirs and for Ref diffs.
 	Paths []string
-	// Stat renders a `git diff --stat` summary instead of the full patch.
+	// Stat renders a `git diff --stat` summary instead of the full copyflow.
 	Stat bool
 	// NameOnly lists changed file names only (`git diff --name-only`).
 	NameOnly bool
@@ -89,10 +89,10 @@ type WorkdirExportOptions struct {
 	IncludeUncommitted bool
 }
 
-// toInternal maps the public WorkdirExportOptions onto patch.ExportOptions (IC7:
+// toInternal maps the public WorkdirExportOptions onto copyflow.ExportOptions (IC7:
 // one internal counterpart, so a value→value method rather than inline mapping).
-func (o WorkdirExportOptions) toInternal(dirHostPath string) patch.ExportOptions {
-	return patch.ExportOptions{
+func (o WorkdirExportOptions) toInternal(dirHostPath string) copyflow.ExportOptions {
+	return copyflow.ExportOptions{
 		Dir:                o.Dir,
 		Refs:               o.Refs,
 		Paths:              o.Paths,
@@ -103,8 +103,8 @@ func (o WorkdirExportOptions) toInternal(dirHostPath string) patch.ExportOptions
 
 // ExportResult reports what Export wrote: the destination Dir, the patch/diff
 // Files (absolute paths), and whether an uncommitted.diff was written.
-// Re-exported (type alias) from internal/sandbox/patch.
-type ExportResult = patch.ExportResult
+// Re-exported (type alias) from internal/sandbox/copyflow.
+type ExportResult = copyflow.ExportResult
 
 // Export writes the agent's changes as patch files under opts.Dir instead of
 // applying them — the `yoloai apply --patches` flow. It resolves the workdir's
@@ -124,13 +124,13 @@ func (w *Workdir) Export(ctx context.Context, opts WorkdirExportOptions) (*Expor
 
 // ApplyResult describes the outcome of an Apply: the host directory patched,
 // the replayed Commits (series apply) or a `git diff --stat` (NoCommit), and
-// whether uncommitted changes were applied. Re-exported (type alias) from internal/sandbox/patch.
-type ApplyResult = patch.ApplyResult
+// whether uncommitted changes were applied. Re-exported (type alias) from internal/sandbox/copyflow.
+type ApplyResult = copyflow.ApplyResult
 
 // AppliedCommit is one commit replayed onto the host by a series apply — its
 // Subject, the SourceSHA in the sandbox, and the HostSHA after git am rewrote
-// it. Re-exported (type alias) from internal/sandbox/patch.
-type AppliedCommit = patch.AppliedCommit
+// it. Re-exported (type alias) from internal/sandbox/copyflow.
+type AppliedCommit = copyflow.AppliedCommit
 
 // ApplyMode selects how Apply lands changes. Required — there is no default,
 // because the choice is consequential and mutually exclusive, and a movable
@@ -210,7 +210,7 @@ func (w *Workdir) Apply(ctx context.Context, opts WorkdirApplyOptions) (*ApplyRe
 		if overlay {
 			return nil, yoerrors.NewUsageError("cannot replay a commit series for an :overlay sandbox — overlay changes have no commit history; apply with ApplyModeNoCommit")
 		}
-		return w.engine.ApplySeries(ctx, w.name, patch.ApplySeriesOptions{
+		return w.engine.ApplySeries(ctx, w.name, copyflow.ApplySeriesOptions{
 			Refs:               opts.Refs,
 			IncludeUncommitted: opts.IncludeUncommitted,
 			Paths:              opts.Paths,
@@ -220,13 +220,13 @@ func (w *Workdir) Apply(ctx context.Context, opts WorkdirApplyOptions) (*ApplyRe
 	}
 
 	if overlay {
-		return w.engine.ApplyOverlay(ctx, w.name, patch.ApplyOverlayOptions{
+		return w.engine.ApplyOverlay(ctx, w.name, copyflow.ApplyOverlayOptions{
 			Paths:       opts.Paths,
 			DryRun:      opts.DryRun,
 			DirHostPath: w.dirHostPath,
 		})
 	}
-	return w.engine.ApplyAll(ctx, w.name, patch.ApplyAllOptions{
+	return w.engine.ApplyAll(ctx, w.name, copyflow.ApplyAllOptions{
 		IncludeUncommitted: opts.IncludeUncommitted,
 		Paths:              opts.Paths,
 		DryRun:             opts.DryRun,
@@ -298,7 +298,7 @@ func (w *Workdir) Commits(ctx context.Context, opts WorkdirCommitsOptions) ([]Co
 	return toCommitInfos(cs), nil
 }
 
-func toCommitInfos(cs []patch.CommitInfo) []CommitInfo {
+func toCommitInfos(cs []copyflow.CommitInfo) []CommitInfo {
 	out := make([]CommitInfo, len(cs))
 	for i, c := range cs {
 		out[i] = CommitInfo{SHA: c.SHA, Subject: c.Subject}
@@ -313,20 +313,20 @@ func (w *Workdir) HasUncommittedChanges(ctx context.Context) (bool, error) {
 }
 
 // BaselineChange reports a baseline move: the new baseline SHA and its commit
-// subject. Re-exported (type alias) from internal/sandbox/patch.
-type BaselineChange = patch.BaselineChange
+// subject. Re-exported (type alias) from internal/sandbox/copyflow.
+type BaselineChange = copyflow.BaselineChange
 
 // BaselineLogEntry is one commit in the workdir's history from sandbox
 // inception to HEAD, with IsBaseline marking the current baseline.
-// Re-exported (type alias) from internal/sandbox/patch.
-type BaselineLogEntry = patch.BaselineLogEntry
+// Re-exported (type alias) from internal/sandbox/copyflow.
+type BaselineLogEntry = copyflow.BaselineLogEntry
 
 // BaselineConflictError is returned by AdvanceBaseline / SetBaseline when the
 // stored baseline no longer matches the caller's expectedCurrentSHA — the
 // compare-and-swap failed because something moved it concurrently. It carries
 // Expected and Actual so the caller can recover. Match it with errors.As.
-// Re-exported (type alias) from internal/sandbox/patch.
-type BaselineConflictError = patch.BaselineConflictError
+// Re-exported (type alias) from internal/sandbox/copyflow.
+type BaselineConflictError = copyflow.BaselineConflictError
 
 // AdvanceBaseline moves the diff baseline to the workdir's current HEAD, but
 // only if the stored baseline still equals expectedCurrentSHA (compare-and-swap

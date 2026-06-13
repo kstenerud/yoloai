@@ -1,7 +1,7 @@
 // ABOUTME: CAS-guarded baseline mutation (advance/set) and the baseline-log
 // ABOUTME: read-model. The lock + compare-and-swap live here so two clients
 // ABOUTME: can't silently clobber each other's baseline moves.
-package patch
+package copyflow
 
 import (
 	"context"

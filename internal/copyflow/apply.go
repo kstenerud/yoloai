@@ -1,7 +1,7 @@
 // ABOUTME: Apply operations: patch generation, baseline advancement, overlay apply,
 // ABOUTME: selective ref resolution, format-patch, and uncommitted diff for sandbox work directories.
 
-package patch
+package copyflow
 
 import (
 	"context"

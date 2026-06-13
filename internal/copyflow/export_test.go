@@ -1,7 +1,7 @@
 // ABOUTME: Tests for Export — writing the sandbox's changes as patch files to a
 // ABOUTME: directory (the apply --patches flow) without applying them.
 
-package patch
+package copyflow
 
 import (
 	"context"

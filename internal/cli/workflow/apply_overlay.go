@@ -1,7 +1,7 @@
 // ABOUTME: Overlay apply workflow — for sandboxes whose workdir uses overlayfs.
 // ABOUTME: Thin CLI wrapper: enforces the running-container precondition, then
 // ABOUTME: routes through Workdir().Apply(ApplyModeNoCommit) (the library owns
-// ABOUTME: capture/apply/baseline-advance via patch.ApplyOverlay).
+// ABOUTME: capture/apply/baseline-advance via copyflow.ApplyOverlay).
 package workflow
 
 import (

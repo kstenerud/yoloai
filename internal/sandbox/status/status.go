@@ -14,9 +14,9 @@ import (
 	"time"
 
 	"github.com/kstenerud/yoloai/internal/config"
+	"github.com/kstenerud/yoloai/internal/copyflow"
 	"github.com/kstenerud/yoloai/internal/git"
 	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/sandbox/patch"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 )
 
@@ -119,7 +119,7 @@ func ProbeWorkData(ctx context.Context, g *git.Git, sandboxDir string) (WorkData
 
 		// Copy mode: the work dir is the git repo itself.
 		if _, statErr := os.Stat(filepath.Join(workEntry, ".git")); statErr == nil {
-			if patch.DetectChanges(ctx, g, workEntry) == "yes" {
+			if copyflow.DetectChanges(ctx, g, workEntry) == "yes" {
 				return WorkDataPresent, "uncommitted changes in copied work dir"
 			}
 			// Clean tree, but without the baseline SHA from meta we can't
@@ -317,29 +317,29 @@ func InspectSandbox(ctx context.Context, layout config.Layout, rt runtime.Backen
 // detectWorkdirChanges returns "yes", "no", "unknown", or "-" for a sandbox's
 // workdir and aux dirs. "unknown" means the working copy lives in a VM-local
 // backend (Tart) that is not running, so the probe can't reach it — the change
-// state genuinely can't be read from the host (see patch.HasUnappliedWorkVia).
+// state genuinely can't be read from the host (see copyflow.HasUnappliedWorkVia).
 func detectWorkdirChanges(ctx context.Context, g *git.Git, sandboxDir string, meta *store.Environment) string {
 	if meta.Workdir().Mode != "copy" && meta.Workdir().Mode != "overlay" {
 		return "-"
 	}
 	workDir := store.WorkDir(sandboxDir, meta.Workdir().HostPath)
-	switch patch.HasUnappliedWorkVia(ctx, g, workDir, meta.Workdir().BaselineSHA) {
-	case patch.WorkDirty:
+	switch copyflow.HasUnappliedWorkVia(ctx, g, workDir, meta.Workdir().BaselineSHA) {
+	case copyflow.WorkDirty:
 		return "yes"
-	case patch.WorkUnknown:
+	case copyflow.WorkUnknown:
 		return "unknown"
-	case patch.WorkClean:
+	case copyflow.WorkClean:
 	}
 	// workdir has no unapplied work — check aux dirs before reporting "no"
 	for _, d := range meta.AuxDirs() {
 		if d.Mode == "copy" || d.Mode == "overlay" {
 			auxWorkDir := store.WorkDir(sandboxDir, d.HostPath)
-			switch patch.HasUnappliedWorkVia(ctx, g, auxWorkDir, d.BaselineSHA) {
-			case patch.WorkDirty:
+			switch copyflow.HasUnappliedWorkVia(ctx, g, auxWorkDir, d.BaselineSHA) {
+			case copyflow.WorkDirty:
 				return "yes"
-			case patch.WorkUnknown:
+			case copyflow.WorkUnknown:
 				return "unknown"
-			case patch.WorkClean:
+			case copyflow.WorkClean:
 			}
 		}
 	}

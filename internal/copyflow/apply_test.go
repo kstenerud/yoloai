@@ -1,7 +1,7 @@
 // ABOUTME: Unit tests for patch generation, baseline advancement, format-patch, selective apply,
-// ABOUTME: uncommitted diff, and commit ref resolution in sandbox/patch.
+// ABOUTME: uncommitted diff, and commit ref resolution in copyflow.
 
-package patch
+package copyflow
 
 import (
 	"context"
