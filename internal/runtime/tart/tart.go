@@ -163,6 +163,14 @@ type Runtime struct {
 var _ runtime.Runtime = (*Runtime)(nil)
 var _ runtime.CopyMountResolver = (*Runtime)(nil)
 
+// A SandboxSide backend (Descriptor().Capabilities.FilesystemLocality) keeps its
+// work copy inside the sandbox, so it MUST run git in-VM and defer baseline
+// creation to the VM — i.e. implement GitExecer and WorkDirSetup. These
+// compile-time assertions enforce that invariant for tart (the sandbox-scoped
+// git runner and ExecuteVMWorkDirSetup both rely on it).
+var _ runtime.GitExecer = (*Runtime)(nil)
+var _ runtime.WorkDirSetup = (*Runtime)(nil)
+
 // Descriptor returns a BackendDescriptor with the static facts for this backend.
 func (r *Runtime) Descriptor() runtime.BackendDescriptor {
 	return descriptor

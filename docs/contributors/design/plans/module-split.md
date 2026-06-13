@@ -401,15 +401,19 @@ Each phase is independently mergeable and green under `make check`.
   orthogonal to `HostFilesystem`, not a unification). **Done so far:** the property is
   declared by all backends and drives **git routing** (`git.NewSandbox`) and the
   **baseline-deferral / in-place-reset** decisions (`prepare_dirs.go`/`vmworkdir.go`/
-  `reset.go` — five `rt.(WorkDirSetup)` type-asserts), each with a conformance guard + tests.
+  `reset.go` — five `rt.(WorkDirSetup)` type-asserts), each with a conformance guard + tests,
+  **validated behavior-preserving on real Tart** (`module-split` @ `d46d512`: full
+  create→diff→info/destroy-gate→reset→apply lifecycle green). A conformance slice now
+  enforces the `SandboxSide ⟹ GitExecer + WorkDirSetup` invariant — compile-time in the tart
+  package (Linux-checked) plus a generic check in the interface conformance suite.
   `CopyMountResolver`/`GuestMountResolver`/`UsernsProvider`/`StdioExecer`/
   `IsolationCapabilityProvider` were all found to be *operations* / value-injection already in
   the right shape — **no conversions** (the "~6 decision-driving" over-counted; the real number
   was 2). The change-probe turned out to be **already done** (`89a30cc` made
   `detectWorkdirChanges` runtime-aware — in-VM for Tart, `WorkUnknown` when stopped), so no
-  Tart-gated decision work remains. **Remaining:** a grep-level "no backend-identity above the
-  runtime" fence; and the first conformance-suite slice keyed off the properties across
-  docker/tart/seatbelt.
+  Tart-gated decision work remains. The conformance slice is **done** (compile-time tart
+  assertions + a generic interface-conformance check). **Remaining:** only the grep-level "no
+  backend-identity above the runtime" fence.
   This phase decides where the substrate/refinement boundary can honestly fall — the cut below
   depends on it.
 - **A — close the import edges.** Relocate `AgentType`/`Model` and the idle/agent-launch

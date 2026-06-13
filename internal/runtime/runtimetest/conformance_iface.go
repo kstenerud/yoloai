@@ -77,6 +77,24 @@ func RunInterfaceConformance(t *testing.T, setup InterfaceSetupFunc) {
 		return name
 	}
 
+	// --- Property invariants (no VM needed) ---
+
+	// A backend declaring SandboxSide FilesystemLocality keeps its work copy
+	// inside the sandbox, so the diff/apply layer runs git in-sandbox (GitExecer)
+	// and defers baseline creation to the sandbox (WorkDirSetup). The
+	// property-based dispatch in git.NewSandbox and ExecuteVMWorkDirSetup assumes
+	// this invariant; this asserts it for any backend, present or future.
+	t.Run("SandboxSideImplementsLocalityOps", func(t *testing.T) {
+		b := setup(t)
+		if b.Runtime.Descriptor().Capabilities.FilesystemLocality != runtime.LocalitySandboxSide {
+			t.Skip("HostSide backend: no in-sandbox locality operations required")
+		}
+		_, isGitExecer := b.Runtime.(runtime.GitExecer)
+		assert.True(t, isGitExecer, "SandboxSide backend must implement runtime.GitExecer (git runs in-sandbox)")
+		_, isWorkDirSetup := b.Runtime.(runtime.WorkDirSetup)
+		assert.True(t, isWorkDirSetup, "SandboxSide backend must implement runtime.WorkDirSetup (baseline deferred to sandbox)")
+	})
+
 	// --- Universal lifecycle ---
 
 	t.Run("CreateStartStopRemove", func(t *testing.T) {
