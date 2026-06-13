@@ -394,7 +394,7 @@ both load-bearing today *and* not yet decoupled.
 
 Each phase is independently mergeable and green under `make check`.
 
-- **0 — backend-leakage map → interface re-derivation (PREREQUISITE, in progress).** Run the
+- **0 — backend-leakage map → interface re-derivation (PREREQUISITE — COMPLETE).** Run the
   backend-leakage map (**done** — [research/backend-leakage-map.md](../research/backend-leakage-map.md));
   classify each leak *seal | model-as-property | irreducible*, and re-derive the backend
   interface as the resulting **property set** (starting with `FilesystemLocality` — which is
@@ -412,8 +412,11 @@ Each phase is independently mergeable and green under `make check`.
   was 2). The change-probe turned out to be **already done** (`89a30cc` made
   `detectWorkdirChanges` runtime-aware — in-VM for Tart, `WorkUnknown` when stopped), so no
   Tart-gated decision work remains. The conformance slice is **done** (compile-time tart
-  assertions + a generic interface-conformance check). **Remaining:** only the grep-level "no
-  backend-identity above the runtime" fence.
+  assertions + a generic interface-conformance check), and so is the grep fence (a `make check`
+  test scans `internal/sandbox` for `==`/`case` against backend constants, with a regex unit
+  test proving it catches violations). **Phase 0 is complete** — the property set is derived,
+  the two genuine decision leaks are resolved by injection/property, the invariant is guarded,
+  and the refactor is validated on Linux + real Tart.
   This phase decides where the substrate/refinement boundary can honestly fall — the cut below
   depends on it.
 - **A — close the import edges.** Relocate `AgentType`/`Model` and the idle/agent-launch
