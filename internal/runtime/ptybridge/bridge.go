@@ -1,7 +1,11 @@
-// ABOUTME: PTYBridgeExec runs a child command under a locally-allocated PTY and
-// ABOUTME: copies it to the caller's IOStreams — the seatbelt/tart bridge model.
-
-package runtime
+// ABOUTME: Exec runs a child command under a locally-allocated PTY and copies it
+// ABOUTME: to the caller's IOStreams — the seatbelt/tart/apple bridge model.
+//
+// This lives in its own package (not internal/runtime) so the runtime core's
+// dependency closure does not pull github.com/creack/pty: only backends that
+// actually bridge a local PTY import ptybridge. PTY is a refinement of exec, not
+// part of the core contract (which is already PTY-optional via IOStreams.TTY).
+package ptybridge
 
 import (
 	"fmt"
@@ -10,12 +14,14 @@ import (
 	"os/exec"
 
 	"github.com/creack/pty"
+
+	"github.com/kstenerud/yoloai/internal/runtime"
 )
 
-// PTYBridgeExec runs cmd interactively, bridging the caller's IOStreams the same
-// way the docker backend bridges its API-socket exec: when TTY is set the child
-// runs under a locally-allocated PTY slave, and the library copies the PTY
-// master to the caller's Out verbatim.
+// Exec runs cmd interactively, bridging the caller's IOStreams the same way the
+// docker backend bridges its API-socket exec: when TTY is set the child runs
+// under a locally-allocated PTY slave, and the library copies the PTY master to
+// the caller's Out verbatim.
 //
 // Wrapping the child in a local PTY (rather than inheriting the host's stdio) is
 // what keeps error output from stair-stepping. The PTY slave has OPOST on, so
@@ -28,12 +34,12 @@ import (
 //
 // When TTY is false the child's stdio is wired straight to the streams as plain
 // pipes; no PTY is allocated.
-func PTYBridgeExec(cmd *exec.Cmd, streams IOStreams) error {
+func Exec(cmd *exec.Cmd, streams runtime.IOStreams) error {
 	if !streams.TTY {
 		cmd.Stdin = streams.In
 		cmd.Stdout = streams.Out
 		cmd.Stderr = streams.Err
-		return InteractiveExitError(cmd.Run())
+		return runtime.InteractiveExitError(cmd.Run())
 	}
 
 	ptmx, err := pty.StartWithSize(cmd, winsize(streams.Rows, streams.Cols))
@@ -45,7 +51,7 @@ func PTYBridgeExec(cmd *exec.Cmd, streams IOStreams) error {
 	if streams.Resize != nil {
 		done := make(chan struct{})
 		defer close(done)
-		go forwardPTYResizes(ptmx, streams.Resize, done)
+		go forwardResizes(ptmx, streams.Resize, done)
 	}
 
 	if streams.In != nil {
@@ -61,13 +67,13 @@ func PTYBridgeExec(cmd *exec.Cmd, streams IOStreams) error {
 	}
 	_, _ = io.Copy(out, ptmx)
 
-	return InteractiveExitError(cmd.Wait())
+	return runtime.InteractiveExitError(cmd.Wait())
 }
 
-// forwardPTYResizes applies caller-supplied geometry updates to the PTY until
-// the channel closes or the exec returns (done closes). Mirrors the docker
-// backend's forwardExecResizes, but drives the local PTY via pty.Setsize.
-func forwardPTYResizes(ptmx *os.File, resize <-chan TermSize, done <-chan struct{}) {
+// forwardResizes applies caller-supplied geometry updates to the PTY until the
+// channel closes or the exec returns (done closes). Mirrors the docker backend's
+// forwardExecResizes, but drives the local PTY via pty.Setsize.
+func forwardResizes(ptmx *os.File, resize <-chan runtime.TermSize, done <-chan struct{}) {
 	for {
 		select {
 		case <-done:

@@ -19,6 +19,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/runtime"
+	"github.com/kstenerud/yoloai/internal/runtime/ptybridge"
 	"github.com/kstenerud/yoloai/internal/sysexec"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
@@ -588,11 +589,11 @@ func (r *Runtime) InteractiveExec(ctx context.Context, name string, cmd []string
 	args = append(args, cmd...)
 
 	c := sysexec.CommandContext(ctx, r.execEnv, r.tartBin, args...)
-	// PTYBridgeExec wraps the child in a local host PTY. tart already allocates a
+	// ptybridge.Exec wraps the child in a local host PTY. tart already allocates a
 	// PTY inside the VM with -t, so this is a double-PTY (local + remote, like
 	// `script ssh -t`) — it works and gives uniform raw-mode handling at the CLI
 	// boundary, but can only be exercised on a macOS host with Tart installed.
-	return runtime.PTYBridgeExec(c, streams)
+	return ptybridge.Exec(c, streams)
 }
 
 // Close is a no-op for Tart (no persistent client connection).

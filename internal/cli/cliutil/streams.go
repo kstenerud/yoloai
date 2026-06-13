@@ -22,7 +22,7 @@ import (
 // seeds the initial geometry, and pumps SIGWINCH-driven resizes into
 // IOStreams.Resize — restoring the terminal and stopping the pump when fn
 // returns. Every backend bridges through a PTY (a remote one over its API
-// socket, or a local one via PTYBridgeExec for tart/seatbelt), so the raw mode
+// socket, or a local one via ptybridge.Exec for tart/seatbelt), so the raw mode
 // set here applies uniformly. When stdin is not a terminal (piped input, tests)
 // it skips all terminal management and hands fn plain streams.
 //

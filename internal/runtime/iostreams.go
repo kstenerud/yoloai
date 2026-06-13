@@ -35,7 +35,7 @@ import "io"
 // forwards them to the backend's resize call. The docker/podman and containerd
 // backends honor this over their API sockets (ContainerExecResize / the shim
 // resize RPC); tart/seatbelt run the child under a local host PTY
-// (PTYBridgeExec) and apply updates via pty.Setsize. Every backend honors it.
+// (ptybridge.Exec) and apply updates via pty.Setsize. Every backend honors it.
 type TermSize struct {
 	Rows, Cols int
 }

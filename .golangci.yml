@@ -91,6 +91,21 @@ linters:
           deny:
             - pkg: "github.com/kstenerud/yoloai/internal/sandbox"
               desc: "internal/cli and internal/mcpsrv must reach sandbox behavior through the public yoloai spine (Client / Sandbox / Workdir / SystemClient and yoloai.* re-exports), not the internal/sandbox façade or any leaf subpackage (store/patch/archetype/…) — F1 Half-B + G2."
+        # Module-split Phase B: the runtime CORE must stay free of a terminal
+        # library so importing internal/runtime doesn't transitively pull
+        # github.com/creack/pty. PTY is a refinement of exec (already optional via
+        # IOStreams.TTY); local-PTY bridging lives in internal/runtime/ptybridge,
+        # imported only by the backends that need it (tart/seatbelt/apple). The
+        # glob matches only files directly in internal/runtime (not its
+        # subpackages), so ptybridge itself is unmatched and may import creack/pty.
+        runtime-core-no-pty:
+          list-mode: lax
+          files:
+            - "**/internal/runtime/*.go"
+            - "!$test"
+          deny:
+            - pkg: "github.com/creack/pty"
+              desc: "the runtime core must not import a terminal library — local-PTY bridging belongs in internal/runtime/ptybridge so the core's dependency closure stays terminal-free (module-split Phase B)."
     forbidigo:
       # Ban raw os file-creation calls. Use internal/fileutil wrappers instead
       # so files are chowned to the real user when yoloai runs under sudo.

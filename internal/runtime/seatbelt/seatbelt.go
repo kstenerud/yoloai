@@ -18,6 +18,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/runtime/monitor"
+	"github.com/kstenerud/yoloai/internal/runtime/ptybridge"
 	"github.com/kstenerud/yoloai/internal/sysexec"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
@@ -453,13 +454,13 @@ func (r *Runtime) Exec(_ context.Context, name string, cmd []string, _ string) (
 // InteractiveExec runs a command with the supplied IOStreams. For tmux
 // commands, buildExecCommand injects the per-sandbox socket; other commands run
 // under sandbox-exec. When streams.TTY is set the child runs under a locally
-// allocated PTY (runtime.PTYBridgeExec) rather than inheriting the host stdio —
+// allocated PTY (ptybridge.Exec) rather than inheriting the host stdio —
 // the bridge keeps error output from stair-stepping under the CLI's raw mode and
 // makes the path safe for non-CLI embedders whose streams aren't real *os.Files.
 func (r *Runtime) InteractiveExec(_ context.Context, name string, cmd []string, _ string, _ string, streams runtime.IOStreams) error {
 	sandboxPath := filepath.Join(r.layout.SandboxesDir(), sandboxName(name))
 	execCmd := r.buildExecCommand(sandboxPath, cmd)
-	return runtime.PTYBridgeExec(execCmd, streams)
+	return ptybridge.Exec(execCmd, streams)
 }
 
 // Close is a no-op for seatbelt (no persistent connection).

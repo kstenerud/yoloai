@@ -125,7 +125,7 @@ core or a backend; `tangled`/`leak` = needs real work to lift out).
 | auto-commit loop | copy workflow | host `git`, `bash` | clean (config flag, default off) |
 | agent credential injection | transfer | — | clean (secret bind-mount) |
 | profiles / image build | provisioning | host `docker`/`buildctl` | clean (separate phase; no-op on tart/seatbelt) |
-| PTY allocation | exec | `creack/pty`, `x/term` | **leak** (lives in `internal/runtime` core today) |
+| PTY allocation | exec | `creack/pty`, `x/term` | **extracted (Phase B)** to `internal/runtime/ptybridge`; core clean, depguard-fenced |
 | interactive session + persistence | exec | host `tmux`, `bash` | **tangled** (mandatory launch convention) |
 | idle detection / monitoring | exec | host `python3`, `tmux`, `bash` | clean (instrumental; sandbox runs without it) |
 | network isolation / allowlist | networking | `go-cni`, `netns` · host `iptables`/`dig`/`ipset` | partial (clean from non-CNI backends; threaded into containerd startup) |
@@ -136,8 +136,9 @@ core or a backend; `tangled`/`leak` = needs real work to lift out).
 | VS Code tunnel/attach | consumer interface | host `code` | partial |
 
 **Core-only deps** — what survives when every refinement is stripped:
-`golang.org/x/sys`, `yaml.v3`, plus the one backend in use. The only confirmed
-*core leak* is `creack/pty` (PTY) sitting in `internal/runtime` — Phase B's target.
+`golang.org/x/sys`, `yaml.v3`, plus the one backend in use. The one confirmed
+*core leak* was `creack/pty` (PTY) sitting in `internal/runtime` — **extracted in Phase B**
+to `internal/runtime/ptybridge` and depguard-fenced, so the core is now terminal-free.
 
 The three rows that are more than naming + a depguard fence — **overlay**,
 **interactive session/tmux**, and **network isolation** — are the real refactor
@@ -427,9 +428,13 @@ Each phase is independently mergeable and green under `make check`.
   `agent`. The minimal type-change sufficed — the sidecar / opaque-payload options below were
   not needed to close the import (they remain options only if substrate should stop *persisting*
   agent fields at all, a separate concern). Proves the substrate can be agent-free.
-- **B — extract PTY.** Move `creack/pty` usage out of `internal/runtime` core into its own
-  package; assert via `go list -deps` that the core exec/transfer surface pulls no terminal
-  library.
+- **B — extract PTY. DONE** (branch `agent-decouple`). `interactive_pty.go`'s local-PTY
+  bridge moved from `package runtime` to `internal/runtime/ptybridge` (`PTYBridgeExec` →
+  `ptybridge.Exec`); the tart/seatbelt/apple backends import it, the core does not. Verified:
+  `go list -deps ./internal/runtime` no longer contains `creack/pty` (was 1, now 0); only
+  `ptybridge` and the backends that bridge a local PTY pull it (docker is clean — it bridges
+  over its API socket). Locked in by a depguard rule (`runtime-core-no-pty`) that fails the
+  build on a `creack/pty` import in a core `internal/runtime/*.go` file (verified it catches).
 - **C — session abstraction.** Introduce the `session` capability with PTY-session (tmux
   strategy) and stream-session (no-PTY) implementations; route the launch layer through it;
   add an agent capability flag. tmux stops being mandatory.

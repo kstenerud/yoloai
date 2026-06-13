@@ -20,6 +20,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	dockerrt "github.com/kstenerud/yoloai/internal/runtime/docker"
+	"github.com/kstenerud/yoloai/internal/runtime/ptybridge"
 	"github.com/kstenerud/yoloai/internal/sysexec"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
@@ -302,7 +303,7 @@ func (r *Runtime) Exec(ctx context.Context, name string, cmd []string, user stri
 
 // InteractiveExec runs a command interactively, bridging the supplied IOStreams
 // to the container's stdio (PTY when streams.TTY). Non-zero exits surface as an
-// *ExecError via PTYBridgeExec.
+// *ExecError via ptybridge.Exec.
 func (r *Runtime) InteractiveExec(ctx context.Context, name string, cmd []string, user, workDir string, streams runtime.IOStreams) error {
 	args := []string{"exec"}
 	if streams.TTY {
@@ -319,7 +320,7 @@ func (r *Runtime) InteractiveExec(ctx context.Context, name string, cmd []string
 	args = append(args, name)
 	args = append(args, cmd...)
 	c := sysexec.CommandContext(ctx, r.execEnv, r.containerBin, args...)
-	return runtime.PTYBridgeExec(c, streams)
+	return ptybridge.Exec(c, streams)
 }
 
 // runContainer shells out to the `container` CLI, returning trimmed stdout or an
