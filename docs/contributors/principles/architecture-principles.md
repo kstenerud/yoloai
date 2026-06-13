@@ -54,14 +54,14 @@ no, the surface has a gap.
 
 ### Worked examples
 
-- **The G7 verb series (D55).** Each CLI/mcpsrv reach into `internal/sandbox/{store,…}`
+- **The G7 verb series (D55).** Each CLI/mcpsrv reach into `internal/orchestrator/{store,…}`
   or `internal/runtime` was replaced by a public verb: metadata/log/discovery/prompt
   reads route through `SystemClient` / `Client` / `Sandbox`; backend probing gained
   `SystemClient.CheckBackend` rather than reaching for `runtime.New`. After the series,
   cli+mcpsrv held **zero** non-test imports of those subtrees.
 - **mcpsrv as the canary.** The MCP-server prototype is the in-tree stand-in for a real
   separate-module embedder; its tool set is the proof that the public surface is
-  sufficient. When it reached `internal/sandbox/store` for ~5 of its tools, that was the
+  sufficient. When it reached `internal/store` for ~5 of its tools, that was the
   signal the surface was incomplete — not licence to keep the reach.
 
 ### Cost-vs-benefit
@@ -108,9 +108,10 @@ The two share the same enforcement teeth.
   "empty and honestly so" is the completion bar, never "empty because the detector can't
   see it."
 - **depguard fences** (`.golangci.yml`). The twin rules `cli-sandbox-scope` and
-  `cli-runtime-scope` deny `internal/sandbox` and `internal/runtime` to non-test
-  cli+mcpsrv code **by prefix** — the whole subtree, façade *and* every leaf
-  (`store`/`patch`/`archetype`/`status`/…), with no per-leaf allow-list. The one
+  `cli-runtime-scope` deny `internal/orchestrator`, `internal/store`, `internal/copyflow`,
+  and `internal/runtime` to non-test cli+mcpsrv code — the orchestrator subtree by prefix
+  (façade *and* every leaf: `archetype`/`status`/…), plus the two lifted substrate packages
+  `internal/store` and `internal/copyflow` by explicit deny entries. The one
   sanctioned exception (`internal/cli/system/tart` → `internal/runtime/tart`) is scoped to
   that single package.
 
@@ -124,7 +125,7 @@ widened allow-list.
   had been hiding), *then* carving the public read-model — truth before cleanup. A test
   that passes because it cannot see the leak is worse than one that fails.
 - **G2 fence tightening (D57).** Dropping the three leaf allow-entries
-  (`store`/`patch`/`archetype`) and denying `internal/sandbox` by prefix made the fence
+  (`store`/`copyflow`/`archetype`) and denying `internal/orchestrator` by prefix made the fence
   mean what it claimed: a 3-import probe yields 3 denials; the CLI is now a faithful proxy
   for a separate-module daemon over those subtrees.
 

@@ -11,9 +11,9 @@ the development doc traces to a dated, named, findable source so the reasoning
 doesn't evaporate when decisions are revisited.
 
 Applied to yoloAI's parameters: single author, Go CLI binary, OSS public beta,
-pluggable `runtime.Runtime` interface with five backends (Docker, Podman, Tart,
+pluggable `runtime.Backend` interface with five backends (Docker, Podman, Tart,
 Seatbelt, containerd). Core differentiator: copy/diff/apply workflow. Domain
-logic in `sandbox/`, recently carved into subpackages (`archetype/`, `patch/`,
+logic in `orchestrator/`, recently carved into subpackages (`archetype/`, `copyflow/`,
 `store/`) per architecture remediation W12. CLI in `internal/cli/` using Cobra.
 Python helpers in `runtime/monitor/` with typed pytest tests.
 
@@ -80,7 +80,7 @@ one problem simply.
 
 Raymond's companion "Rule of Modularity" (same chapter) is directly relevant to
 yoloAI's pluggable backend design: "Write simple parts connected by clean
-interfaces" — the `runtime.Runtime` interface (`runtime/runtime.go`) is exactly
+interfaces" — the `runtime.Backend` interface (`runtime/runtime.go`) is exactly
 this. Seventeen methods, no backend-specific types at the interface boundary.
 Backends are simple modules behind the interface; the interface is simple enough
 to implement in five different ways without contradictions.
@@ -119,8 +119,8 @@ published by Robert C. Martin (Uncle Bob) at objectmentor.com between 1995 and
   is the canonical OCP implementation: backends are added by registering a
   `(Factory, BackendDescriptor)` pair. The registry code never changes when a new
   backend is added. Adding the sixth backend is purely additive.
-- **LSP** (Liskov Substitution Principle) — every `runtime.Runtime` implementation
-  must substitute for any other without callers in `sandbox/` observing a behavior
+- **LSP** (Liskov Substitution Principle) — every `runtime.Backend` implementation
+  must substitute for any other without callers in `orchestrator/` observing a behavior
   difference for the shared contract. Backend-specific behavior (Tart VM path
   translation, Seatbelt SBPL setup) must not break the invariants callers rely on.
 - **ISP** (Interface Segregation Principle) — the optional interface pattern in
@@ -128,8 +128,8 @@ published by Robert C. Martin (Uncle Bob) at objectmentor.com between 1995 and
   `DiskUsageReporter`, `StdioExecer`, `IsolationCapabilityProvider`) is textbook
   ISP: small, focused interfaces rather than one large interface with methods most
   backends don't need. Backends implement only what applies to them.
-- **DIP** (Dependency Inversion Principle) — `sandbox/` depends on the `runtime.Runtime`
-  interface, not on `runtime/docker.Docker`. The interface is defined in the
+- **DIP** (Dependency Inversion Principle) — `orchestrator/` depends on the `runtime.Backend`
+  interface, not on `runtime/docker.Runtime`. The interface is defined in the
   `runtime` package (the higher-level policy layer), not in any backend package.
 
 Martin also published *Clean Code* (Prentice Hall, 2008) which popularized SRP
@@ -162,7 +162,7 @@ key distinction Parnas draws: decompose by the *design decisions that are likely
 to change*, not by functional steps. Each module hides a decision. This paper is
 also the origin of the module boundary concept that SOLID later systematized.
 
-Applied to yoloAI: the `runtime.Runtime` interface hides the backend implementation
+Applied to yoloAI: the `runtime.Backend` interface hides the backend implementation
 decisions (Docker API version, containerd snapshotter, Tart VM path translation).
 No code outside a backend package knows about `docker.ImageBuild`, `tart.VM`, or
 `seatbelt.SBPLProfile`. This is Parnas-style encapsulation: the things hidden are
@@ -225,7 +225,7 @@ bags.
 David Holub's "Getter and Setter Methods Are Evil" (JavaWorld, 2003) [verify] is
 a commonly cited earlier statement of the same idea. In the Go context, the
 principle is softer — Go's simpler type system and lack of inheritance make pure
-TDA harder — but it shapes interface design: `runtime.Runtime` methods tell the
+TDA harder — but it shapes interface design: `runtime.Backend` methods tell the
 runtime what to do (`Create`, `Start`, `Stop`, `Exec`) rather than exposing state
 for callers to read and act on.
 
@@ -237,8 +237,8 @@ a function that returns a value should not have side effects (query); a function
 that has side effects should return void (command). "Asking a question should not
 change the answer."
 
-Applied to yoloAI: `runtime.Runtime.Inspect()` (query — returns state, no side
-effects) and `runtime.Runtime.Create()` (command — creates the instance, returns
+Applied to yoloAI: `runtime.Backend.Inspect()` (query — returns state, no side
+effects) and `runtime.Backend.Create()` (command — creates the instance, returns
 only an error). The `IsReady()` predicate is a query; `Setup()` is a command. The
 `standards/GO.md` enforces this indirectly: typed error returns from domain
 packages use the error value to signal failure, not to carry side-effect state.
@@ -297,11 +297,12 @@ traversals ("be liberal" does not mean "skip the check").
 
 The design decision is D7: "No backend-specific types leak outside their package."
 The registry design (W11, commit `1f4457c`) formalizes this: `runtime.New()` takes
-a backend name string and returns a `runtime.Runtime` interface. No caller outside
-a backend package holds a `*docker.Runtime` or `*tart.Runtime`.
+a backend name string and returns a `runtime.Backend` interface. No caller outside
+a backend package holds a `*docker.Runtime` or `*tart.Runtime` (the concrete types
+are internal to each backend package).
 
 The `internal/cli/helpers.go` dispatch function `newRuntime()` is the single
-crossing point where a backend name string becomes a `runtime.Runtime`. This is the
+crossing point where a backend name string becomes a `runtime.Backend`. This is the
 anti-corruption layer pattern from domain-driven design (Evans, E. *Domain-Driven
 Design*, Addison-Wesley, 2003, Chapter 14 "Maintaining Model Integrity"). Evans's
 framing: a boundary layer translates between external models and the internal
@@ -315,7 +316,7 @@ criterion for good module decomposition: hide "design decisions which are likely
 to change." The Docker SDK, the Tart API, and the containerd gRPC interface are all
 "likely to change" — Docker has deprecated and re-introduced APIs; Tart is a young
 tool; containerd's snapshotter API changed between v1 and v2. All of these are
-hidden behind the `runtime.Runtime` interface.
+hidden behind the `runtime.Backend` interface.
 
 The failure mode Parnas documents: decompose by functional steps (step 1 pulls the
 image, step 2 creates the container, step 3 starts the container) instead of by
@@ -327,10 +328,10 @@ change reasons. A functional decomposition would leak Docker types into step 1,
 Raymond, E.S. *The Art of Unix Programming*, Chapter 1, Rule of Modularity: "Build
 simple parts connected by clean interfaces." The corollary rule, Rule of Separation:
 "Separate policy from mechanism." In yoloAI, the runtime backends are mechanism
-(how to create a container); the sandbox package is policy (when to create it, what
+(how to create a container); the orchestrator package is policy (when to create it, what
 to put in it, what mode to use). The interface enforces the separation structurally:
-the policy layer (`sandbox/`) can only call the mechanism layer (`runtime/`) via the
-`runtime.Runtime` interface methods — no policy logic has access to mechanism
+the policy layer (`orchestrator/`) can only call the mechanism layer (`runtime/`) via the
+`runtime.Backend` interface methods — no policy logic has access to mechanism
 internals.
 
 ### yoloAI-specific: optional interfaces as ISP at the boundary
@@ -360,8 +361,8 @@ precondition; the callee's side is the postcondition. Maintaining the contract
 means checking preconditions at the boundary — not relying on callers to have
 already validated.
 
-Applied to yoloAI: `sandbox/parse.go` validates sandbox names at the CLI boundary
-(D10). `sandbox/create.go` re-validates path parameters before filesystem operations.
+Applied to yoloAI: `orchestrator/parse.go` validates sandbox names at the CLI boundary
+(D10). `orchestrator/create.go` re-validates path parameters before filesystem operations.
 `runtime/docker/docker.go` validates that the Docker daemon is reachable before
 attempting creates. Each layer validates because the layer above may be bypassed
 (tests call sandbox functions directly; future callers may not go through the CLI).
@@ -630,7 +631,7 @@ over time as callers multiply.
 
 Applied to yoloAI: a half-finished backend (e.g., a backend that implements
 `Create()` but whose `Exec()` always returns `ErrUnsupported`) makes the
-`runtime.Runtime` interface a lie for that backend. Users who select the backend
+`runtime.Backend` interface a lie for that backend. Users who select the backend
 get partial behavior with no clear indication of what works. The principle is:
 either implement completely or don't ship the backend yet.
 

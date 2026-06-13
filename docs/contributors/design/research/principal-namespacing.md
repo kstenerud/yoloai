@@ -39,7 +39,7 @@ axes of multi-principal embedding).
 
 ## The concrete blocker (ground truth)
 
-`internal/sandbox/store/paths.go:130` —
+`internal/store/paths.go:130` —
 
 ```go
 func InstanceName(name string) string { return "yoloai-" + name }
@@ -409,7 +409,7 @@ not — stays 56). The following remain open and feed the implementing plan:
   principal scope), [D59](../../decisions/working-notes.md) (isolation axis — physical partition),
   [D62](../../decisions/working-notes.md) (**the namespacing decision recorded from this study** —
   deterministic `yoloai-<principal>-<name>`, `P≤8`/`N≤56`, no library hashing).
-- Code ground truth: `internal/sandbox/store/paths.go:113-132` (`ValidateName`,
+- Code ground truth: `internal/store/paths.go:113-132` (`ValidateName`,
   `InstanceName`); `internal/config/names.go:10,14` (`MaxNameLength`, `ValidNameRe`);
   `internal/runtime/{docker/docker.go:304, containerd/lifecycle.go:235-246,
   containerd/cni.go:129-193, tart/tart.go:217-591, seatbelt/seatbelt.go:513-518}`.

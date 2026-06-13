@@ -186,7 +186,7 @@ The host-side iptables/ipset machinery exists in a Linux kernel. Three deploymen
 
 **macOS host, Docker Desktop.** Docker Desktop runs Docker inside a LinuxKit VM; the veth peers live inside that VM, not on the macOS host. The macOS-side `pf` doesn't see them. Two implementation options:
 
-1. *Reject at sandbox creation.* If `runtime.Runtime.SandboxInterface(...)` detects it's running on a Docker-Desktop daemon (queryable via `docker info`'s `OperatingSystem` field), return `runtime.ErrHostSideFilterUnsupported` and fail `--network-isolated` loudly. The user gets a specific error pointing them at Tart (with a `pf`-based design once that's written) or a Linux host.
+1. *Reject at sandbox creation.* If `runtime.Backend.SandboxInterface(...)` detects it's running on a Docker-Desktop daemon (queryable via `docker info`'s `OperatingSystem` field), return `runtime.ErrHostSideFilterUnsupported` and fail `--network-isolated` loudly. The user gets a specific error pointing them at Tart (with a `pf`-based design once that's written) or a Linux host.
 2. *Tunnel rule installation into the VM.* Docker Desktop exposes a shell into the LinuxKit VM via `docker run --rm --privileged --pid=host justincormack/nsenter1`. We could shell into the VM and install rules there. This is fragile, undocumented, and version-specific, so v1 picks option 1.
 
 **WSL2 host, Docker Desktop or WSL-distro Docker.** Two sub-cases:

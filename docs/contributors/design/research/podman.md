@@ -21,7 +21,7 @@ the Docker backend with `DOCKER_HOST`.
 
 ## Architecture Fit
 
-The `runtime.Runtime` interface fully isolates backend concerns. Adding Podman is self-contained in a
+The `runtime.Backend` interface fully isolates backend concerns. Adding Podman is self-contained in a
 new `runtime/podman/` package.
 
 Backend selection currently lives in two places:

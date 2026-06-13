@@ -73,7 +73,7 @@ Every new dependency must answer "what failure mode does this introduce, and can
 
 | Token | Spent on                                    | Justification                                                                                                                                                              |
 | ----- | ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1     | Pluggable `runtime.Runtime` abstraction     | Five backends ship today (Docker / Podman / Tart / Seatbelt / containerd). The architectural bet is the moat.                                                              |
+| 1     | Pluggable `runtime.Backend` abstraction     | Five backends ship today (Docker / Podman / Tart / Seatbelt / containerd). The architectural bet is the moat.                                                              |
 | 2     | Copy/diff/apply via `git format-patch`/`am` | The differentiator. No competitor protects originals with a review step. The bet is that this UX wins the category.                                                        |
 | 3     | MCP server (`mark3labs/mcp-go`)             | `internal/mcpsrv/` exposes yoloAI as an MCP tool surface so editor-side agents can drive sandboxes. The bet is that MCP becomes the integration interface for AI tooling.  |
 

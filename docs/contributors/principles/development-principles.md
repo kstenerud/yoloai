@@ -42,10 +42,10 @@ A concise reference for the engineering values that shape every code path in yol
 **DRY — Don't Repeat Yourself.** Every piece of knowledge has one authoritative location. Duplicated logic means that when the knowledge changes, it must be found and applied in N places — and N−1 will be wrong. But — Sandi Metz: "duplication is far cheaper than the wrong abstraction." Extract on the second concrete use case; don't extract preemptively.
 
 **SOLID.** Five principles for package and type design:
-- *S — Single Responsibility*: each package, type, and function has one reason to change. `internal/runtime/` is runtime backends; `internal/sandbox/` is sandbox lifecycle; `internal/cli/` is the CLI surface. Mixing these creates coupling that blocks change.
-- *O — Open/Closed*: extend behaviour by adding code, not modifying stable core paths. New backends add a `runtime.Runtime` implementation; they don't edit the dispatch. New agents add agent definitions; they don't edit the agent registry's internals.
-- *L — Liskov Substitution*: every implementation of `runtime.Runtime` must be fully substitutable. A backend that panics on `Stop()` is not a valid `Runtime`; it violates the contract the caller relies on.
-- *I — Interface Segregation*: narrow interfaces at consumption sites. The CLI takes `runtime.Runtime`, not `*runtime.docker.Backend`. Optional behaviours (e.g., overlay support) live behind optional interfaces (W11 step 3).
+- *S — Single Responsibility*: each package, type, and function has one reason to change. `internal/runtime/` is runtime backends; `internal/orchestrator/` is sandbox lifecycle; `internal/cli/` is the CLI surface. Mixing these creates coupling that blocks change.
+- *O — Open/Closed*: extend behaviour by adding code, not modifying stable core paths. New backends add a `runtime.Backend` implementation; they don't edit the dispatch. New agents add agent definitions; they don't edit the agent registry's internals.
+- *L — Liskov Substitution*: every implementation of `runtime.Backend` must be fully substitutable. A backend that panics on `Stop()` is not a valid `Backend`; it violates the contract the caller relies on.
+- *I — Interface Segregation*: narrow interfaces at consumption sites. The CLI takes a `runtime.Backend`, not `*runtime.docker.Backend`. Optional behaviours (e.g., overlay support) live behind optional interfaces (W11 step 3).
 - *D — Dependency Inversion*: depend on interfaces, not concrete types, at every significant boundary. Runtime backends, agent definitions, idle detectors, store helpers — all interface-mediated. The composition root (`internal/cli/helpers.go::newRuntime`) is the only place concrete types are wired.
 
 **Separation of Concerns.** Each layer has one job: CLI handlers parse args and format output; domain packages hold business logic; runtime backends call the underlying daemon. Mixing these creates coupling that prevents independent testing and evolution. See §2 for the project-specific expression.
@@ -88,13 +88,13 @@ The **mechanism layer** — the domain/library — does exactly what it is asked
 
 ### Pattern
 
-Import direction is strict. The **public surface** lives at the module root: the `yoloai` package itself (the Layer-1/2 contract) and the `yoerrors/` error-sentinel package. Everything else is private under `internal/` — the embedders (`internal/cli/`, `internal/mcpsrv/`), the engine (`internal/sandbox/` and its `store`/`patch`/`archetype`/`lifecycle`/`launch`/`status`/`create` subpackages), the runtime backends (`internal/runtime/` + `docker`/`tart`/`seatbelt`/`containerd`/`podman`/`caps`), and the support packages (`internal/agent/`, `internal/config/`, `internal/workspace/`, `internal/fileutil/`, `internal/testutil/`). The layering:
+Import direction is strict. The **public surface** lives at the module root: the `yoloai` package itself (the Layer-1/2 contract) and the `yoerrors/` error-sentinel package. Everything else is private under `internal/` — the embedders (`internal/cli/`, `internal/mcpsrv/`), the engine (`internal/orchestrator/` and its `store`/`copyflow`/`archetype`/`lifecycle`/`launch`/`status`/`create` subpackages), the runtime backends (`internal/runtime/` + `docker`/`tart`/`seatbelt`/`containerd`/`podman`/`caps`), and the support packages (`internal/agent/`, `internal/config/`, `internal/workspace/`, `internal/fileutil/`, `internal/testutil/`). The layering:
 
 ```
 cmd/yoloai/main.go         → internal/cli
-internal/cli/, mcpsrv/     → yoloai (root) + yoerrors    (fenced OFF internal/sandbox + internal/runtime — D57)
-yoloai (root)              → internal/sandbox + internal/runtime + internal/config + yoerrors
-internal/sandbox/          → internal/runtime + internal/agent + internal/config + internal/workspace
+internal/cli/, mcpsrv/     → yoloai (root) + yoerrors    (fenced OFF internal/orchestrator + internal/runtime — D57)
+yoloai (root)              → internal/orchestrator + internal/runtime + internal/config + yoerrors
+internal/orchestrator/     → internal/runtime + internal/agent + internal/config + internal/workspace
 internal/workspace/        → internal/config   (git via os/exec; no runtime dep)
 internal/runtime/<backend> → backend SDK + internal/runtime (interfaces only) + internal/config (leaf types)
 internal/agent/            → internal/config   (agent definitions reference config types)
@@ -121,8 +121,8 @@ The flip side — the comply-or-complain contract spelled out:
 
 ### Worked examples
 
-- `yoloai apply` (CLI) → `internal/sandbox/patch.Apply` (domain) → `runtime.Runtime.GitExec` (backend boundary). The CLI parses flags, the domain assembles the patch, the runtime executes git. None of those three reach across.
-- The W12 architecture remediation (commits `a3207eb`, `e100e4d`, `ccde491`, 2026-05-20) carved `internal/sandbox/archetype/`, `internal/sandbox/patch/`, `internal/sandbox/store/` as subpackages. Each has a clean import boundary; subsequent changes to one don't ripple.
+- `yoloai apply` (CLI) → `internal/copyflow.Apply` (domain) → `runtime.Backend.GitExec` (backend boundary). The CLI parses flags, the domain assembles the patch, the runtime executes git. None of those three reach across.
+- The W12 architecture remediation (commits `a3207eb`, `e100e4d`, `ccde491`, 2026-05-20) carved `internal/orchestrator/archetype/`, `internal/copyflow/`, `internal/store/` as subpackages. Each has a clean import boundary; subsequent changes to one don't ripple.
 - W10 (commit `5f91cdf`, 2026-05-20) closed three backend-name leaks — `if backend == "docker"` branches that had crept into CLI / domain code. Replaced with capability checks or registry queries.
 - W11 (commits `3b4a9ae`, `d525d60`, `c00d367`, `1f4457c`, 2026-05-20) introduced `BackendDescriptor` and a `(factory, descriptor)` registry. Adding a backend is now purely additive — register the descriptor, no dispatch edits.
 
@@ -212,7 +212,7 @@ For every domain concept yoloAI cares about:
 | Network allowlist domain          | `string`          | `AllowedDomain`         | Valid hostname, not localhost (commit `4d9f7f6`)  |
 | Agent type                        | `string`          | `AgentType`             | Known agent in the registry                       |
 | Backend descriptor (W11)          | (factory return)  | `BackendDescriptor`     | Capabilities enumerated                           |
-| Patch (D9)                        | `[]byte`          | `Patch` (`internal/sandbox/patch/`) | Valid `git format-patch` output                   |
+| Patch (D9)                        | `[]byte`          | `Patch` (`internal/copyflow/`) | Valid `git format-patch` output                   |
 | Network policy (W-L8a)            | `(bool, bool)`    | `yoloai.NetworkMode`    | "Open / isolated / none" — invalid combo unrepresentable |
 | Isolation mode (W-L8a)            | `string`          | `yoloai.IsolationMode`  | One of the five known modes; typo = compile error |
 | Apply mode (W-L8a)                | `(bool, string)`  | `yoloai.ApplyMode`      | Default / squash / export; mutex enforced by type |
@@ -224,7 +224,7 @@ Go limits (named in the research file): same-package construction is unrestricte
 
 ### Worked examples
 
-- Sandbox name (D10) — **target:** a `SandboxName` parsed type. **Today:** `store.ValidateName(string) error` in `internal/sandbox/store/paths.go` (validate-style, not yet parsed — see † above).
+- Sandbox name (D10) — **target:** a `SandboxName` parsed type. **Today:** `store.ValidateName(string) error` in `internal/store/paths.go` (validate-style, not yet parsed — see † above).
 - Workdir path — **target:** a resolved-path type after tilde expansion + env-var interpolation (commits `25fcb82`, `a57d765`, 2026-02-27). **Today:** `config.ExpandPath(...)` in `internal/config/pathutil.go` returns a bare `string` (see † above).
 - `internal/runtime/registry.go` — `BackendDescriptor` constructed only by registered factories (W11 step 4).
 - Reject-don't-strip: invalid input fails parsing; we never silently sanitise. Stripping is what attackers (and confused users) count on.
@@ -351,7 +351,7 @@ Go's blank identifier `_` is a deliberate-discard signal, not a free pass. For n
 
 Idiomatic exceptions where `_` needs no comment:
 - Range loops where only the index or value is needed.
-- Blank receiver in interface assertions: `var _ runtime.Runtime = (*docker.Backend)(nil)`.
+- Blank receiver in interface assertions: `var _ runtime.Backend = (*docker.Runtime)(nil)`.
 
 Deferred `Close()` on read-only resources is a documented acceptable case:
 
@@ -666,7 +666,7 @@ This is the *why* under `../standards/go.md §Naming`'s "clarity over brevity" a
 
 ### The three tiers, by distance
 
-1. **Struct / class fields — maximum distance.** A field is declared once and read across many methods, frequently spread over multiple files. A reader confused at a use site (`s.c.layout`, `rec.ts`) has to navigate all the way back to the type definition to recover what the field is — and then find their place again. Field names must therefore stand entirely on their own. A field of type `runtime.Runtime` is named `runtime`, not `rt`; the receiver-holder is `client`, not `c`; the timestamp is `timestamp`, not `ts`.
+1. **Struct / class fields — maximum distance.** A field is declared once and read across many methods, frequently spread over multiple files. A reader confused at a use site (`s.c.layout`, `rec.ts`) has to navigate all the way back to the type definition to recover what the field is — and then find their place again. Field names must therefore stand entirely on their own. A field of type `runtime.Backend` is named `backend`, not `rt`; the receiver-holder is `client`, not `c`; the timestamp is `timestamp`, not `ts`.
 
    The corollary: a **clarifying comment on a field is a smell** — not because comments are bad, but because the comment lives at the *declaration* and never travels to the *use* site where the confusion actually is. `Source string // source path` "documents" the field exactly where no reader is confused, and is silent exactly where they are. The fix is to fold the comment into the name (`SourcePath`), so the meaning travels with every use. (This is distinct from a comment that encodes what the type system *can't* — an invariant, a side effect, a zero-value semantic, a cross-reference — which earns its keep and stays. `../standards/go.md §Naming` draws that line.)
 

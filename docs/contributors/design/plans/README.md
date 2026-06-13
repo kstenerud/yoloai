@@ -5,7 +5,7 @@ Create a plan file in this directory before starting implementation.
 
 ## Architecture Remediation
 
-Complete — the multi-quarter program (Go↔Python boundary, `runtime.Runtime` interface, dependency direction, error patterns, slog conventions) landed; the plan and its audit are archived under `../archive/`. The one release-gated remnant (W1b — retire the launch-prefix legacy path) and the rest of this branch's cross-version concerns are tracked in [release-migration.md](release-migration.md).
+Complete — the multi-quarter program (Go↔Python boundary, `runtime.Backend` interface, dependency direction, error patterns, slog conventions) landed; the plan and its audit are archived under `../archive/`. The one release-gated remnant (W1b — retire the launch-prefix legacy path) and the rest of this branch's cross-version concerns are tracked in [release-migration.md](release-migration.md).
 
 ## Public API — Layer-1 honest completion
 
@@ -188,7 +188,7 @@ roadmap-driven design when MCP-in-sandbox usage justifies it.
 
 `internal/mcpsrv/tools.go` calls `patch.GenerateDiff` with `Runtime: nil`, which works for Docker (host-side git) but fails for Tart (where git runs inside the VM via the runtime exec). The MCP server doesn't currently have a runtime handle; it would need one to support diff for VM-backed sandboxes.
 
-Fix: thread the active `runtime.Runtime` through the MCP server struct (`internal/mcpsrv/server.go`) and pass it via `patch.DiffOptions.Runtime` for the affected MCP tools. Verify against Tart on Apple Silicon once that backend is fully tested.
+Fix: thread the active `runtime.Backend` through the MCP server struct (`internal/mcpsrv/server.go`) and pass it via `patch.DiffOptions.Runtime` for the affected MCP tools. Verify against Tart on Apple Silicon once that backend is fully tested.
 
 Source TODO: `internal/mcpsrv/tools.go:304-307` ("MCP is primarily used with Docker backends, we pass nil for now").
 

@@ -483,7 +483,19 @@ Each phase is independently mergeable and green under `make check`.
   split. Building it speculatively across the Go/Python boundary is the over-build to avoid.
 - **D — depguard fences.** Encode the DAG as build-failing rules (substrate → upward = error;
   copyflow ↔ session = error; etc.). Locks in the structure.
-- **E — renames (optional, mechanical).** Apply the naming table as isolated commits.
+- **E — renames. DONE** (branch `module-split-renames`). Applied the naming table as four
+  isolated, behavior-preserving commits, each green on `make check` + `go vet -tags 'integration e2e'`:
+  (1) the core interface `runtime.Runtime` → `runtime.Backend` (gopls symbol rename; concrete
+  per-backend `Runtime` types kept their package-local names); (2) `internal/sandbox/patch` →
+  top-level `internal/copyflow` (the copy/diff/apply refinement reclaims a substrate home, pkg
+  `patch`→`copyflow`); (3) `internal/sandbox/store` → top-level `internal/store` (persisted
+  metadata is substrate; agent-free since Phase A; import-path-only, pkg name unchanged); (4)
+  `internal/sandbox` → `internal/orchestrator` (the misnamed package was always the agent
+  *orchestration* layer; pkg `sandbox`→`orchestrator`, the 11 orchestration subpackages ride along
+  nested). The DAG-faithful choice was to lift only the two substrate packages a non-orchestration
+  consumer would actually pull (`copyflow`, `store`); the rest stay nested because none is a
+  standalone substrate primitive. The `cli-sandbox-scope` depguard fence gained explicit denies for
+  the two lifted packages so the lift didn't open a hole in the F1/G2 layering gate.
 - **F — `go.mod`-per-module (optional).** Only if/when an external consumer wants one piece.
 
 ## Open questions

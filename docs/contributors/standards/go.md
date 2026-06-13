@@ -48,10 +48,10 @@ yoloai/
 │   ├── agent/                 # Agent definitions (Aider, Claude, Codex, Gemini, OpenCode, etc.)
 │   ├── cli/                   # Cobra command definitions
 │   ├── runtime/               # Pluggable runtime interface
-│   │   ├── docker/            # Docker implementation of runtime.Runtime
+│   │   ├── docker/            # Docker implementation of runtime.Backend
 │   │   ├── tart/              # Tart (macOS VM) implementation
 │   │   └── seatbelt/          # Seatbelt (macOS sandbox-exec) implementation
-│   └── sandbox/               # Core logic: create, lifecycle, diff, apply, config, inspect
+│   └── orchestrator/          # Core logic: create, lifecycle, diff, apply, config, inspect
 └── docs/                      # Documentation
 ```
 
@@ -167,7 +167,7 @@ import (
 	"github.com/docker/docker/client"
 	"github.com/spf13/cobra"
 
-	"github.com/kstenerud/yoloai/internal/sandbox"
+	"github.com/kstenerud/yoloai/internal/orchestrator"
 )
 ```
 
@@ -259,7 +259,7 @@ user-facing messages with no upstream cause to wrap.
 ## Configuration and Constants
 
 - No magic strings — use constants or typed values
-- Config parsing isolated in `internal/sandbox/config.go`; rest of code receives typed structs
+- Config parsing isolated in `internal/orchestrator/config.go`; rest of code receives typed structs
 - Default values defined in one place, not scattered
 - Environment variable names prefixed with `YOLOAI_` for yoloai-specific vars
 - **No ambient configuration in library code.** `os.UserHomeDir()`, `os.Getenv()`, and `os.Getwd()` are banned outside the single allowlisted CLI entry point (enforced by the W-L10 linter). Library functions take typed parameters; the CLI reads env at startup once and passes values down. See `../principles/development-principles.md §12` for the rule, exceptions (agent API keys read by `agent.Definition`), and enforcement scope.

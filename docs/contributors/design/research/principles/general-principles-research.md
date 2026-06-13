@@ -316,7 +316,7 @@ No single "author" owns this citation; it is documented in git's own man pages
 (git-format-patch(1), git-am(1)), first shipped in git 1.3 (Linus Torvalds, 2005).
 The relevant property: `git format-patch` produces an email-formatted patch series
 that `git am` can apply to any git repository — not just the one that produced it.
-yoloAI's `yoloai diff` / `yoloai apply` workflow (see `sandbox/patch/` in
+yoloAI's `yoloai diff` / `yoloai apply` workflow (see `copyflow/` in
 codebase) uses this mechanism because it is the established, widely-understood
 tool for "capture changes and apply them elsewhere." Building a bespoke diff format
 would have been reinventing a solved problem. The design doc states this explicitly:

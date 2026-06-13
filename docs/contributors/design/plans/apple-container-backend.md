@@ -66,7 +66,7 @@ cold `system start`.
 
 ### Interface method → CLI verb
 
-| `runtime.Runtime` method | `container` CLI |
+| `runtime.Backend` method | `container` CLI |
 |---|---|
 | `Setup` | `container system start` **and `container builder start`** if needed (the builder is a separate VM, *not* running by default — AC3 cold-start, pulls a builder image); build image via `container build -t yoloai-<profile> -f <abs>/Dockerfile <abs-context>` — the **context path MUST be absolute**: a relative `.` silently transfers an empty (2-byte) context and every `COPY` fails (AC1 → backend-idiosyncrasies). No Docker daemon needed. Or `image pull` for pull-only profiles. |
 | `IsReady` | `container system status` reachable + target image present (`image inspect`). |

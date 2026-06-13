@@ -68,7 +68,7 @@ Each backend's init() calls:
         │          │           │          │            │
         ▼          ▼           ▼          ▼            ▼
      ┌─────────────────────────────────────────────────────┐
-     │             runtime.Runtime interface               │
+     │             runtime.Backend interface               │
      │                                                     │
      │    lifecycle · exec · capabilities · maintenance    │
      │    (full method catalog → README.md "Key Types")    │

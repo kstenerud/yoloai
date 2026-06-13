@@ -74,7 +74,7 @@ Threshold: write the test against the observable result (return value, state cha
 
 - Integration tests for `yoloai start` assert "container is running, agent is ready, prompt was delivered" — not "Docker client `ContainerCreate` was called with these specific arguments."
 - The backend-parametrized integration suite (W5, commit `1591b24`, 2026-05-20) runs the same assertions against Docker, Podman, and containerd. The assertions don't know which backend they're hitting; they care that the contract holds.
-- Tests for `runtime.Runtime` consumers (above the seam) use a fake backend that implements the contract. The tests would pass against the fake or against real Docker; they don't assert on which methods got called.
+- Tests for `runtime.Backend` consumers (above the seam) use a fake backend that implements the contract. The tests would pass against the fake or against real Docker; they don't assert on which methods got called.
 - Tests for the `auto_commit_interval` feature (commit `c8c58b0`, 2026-03-03) assert that commits are produced at the expected cadence, not that any specific git command was invoked.
 
 ### Cost-vs-benefit
@@ -104,7 +104,7 @@ Threshold: every function that can fail has at least one test for each failure m
 ### Worked examples
 
 - `TestCLI_StartAfterDone` (commit `c10d6eb`) — tests the behaviour when `start` is called on a sandbox that's already finished. The error case.
-- Sandbox name validation tests (`internal/sandbox/name_test.go`) cover the path-traversal cases, the empty case, the too-long case, the invalid-characters case. The error inputs are the test set.
+- Sandbox name validation tests (`internal/store/name_test.go`) cover the path-traversal cases, the empty case, the too-long case, the invalid-characters case. The error inputs are the test set.
 - Containerd `GitExec` returns `*runtime.ExecError` on non-zero exit (commit `8749864`, 2026-05-21): the failure-mode contract is tested explicitly. Before the fix, error-path callers received the wrong type and couldn't inspect the error correctly.
 - Integration tests include `daemon-not-running`, `sandbox-not-found`, `apply-with-no-changes` cases. These are the failure modes that bite in production.
 - The `:rw`-on-dirty-repo warning has a dedicated test (`commit-aware diff and selective apply`, `ca0b8e4`): the warning path is part of the contract.
@@ -166,7 +166,7 @@ Threshold: ask which layer can prove this behaviour without spurious dependencie
 ### Worked examples
 
 - **Unit:** path normalization, caret encoding (`encode_test.go`), config key routing (`IsGlobalKey` tests), argument validation (`name_test.go`). No backend, no I/O.
-- **Integration:** `runtime.Runtime` implementations against real daemons (`runtime/docker/*_test.go`, `runtime/podman/*_test.go`, `runtime/containerd/*_test.go`). Build tag `integration`; CI runs the Docker subset; Podman CI subset added in W6 (commit `b99b46e`, 2026-05-20).
+- **Integration:** `runtime.Backend` implementations against real daemons (`runtime/docker/*_test.go`, `runtime/podman/*_test.go`, `runtime/containerd/*_test.go`). Build tag `integration`; CI runs the Docker subset; Podman CI subset added in W6 (commit `b99b46e`, 2026-05-20).
 - **e2e:** `test/e2e/` — full sandbox lifecycle including tmux session and agent launch. Smoke tests use the two-stage sentinel + disk pre-flight (D21).
 - **Python:** `runtime/monitor/tests/` — pure functions (W3, commit `0d50c54`, 2026-05-20) tested without spawning processes; I/O seams + race coordination (W4, commit `41561fe`) tested with explicit fixtures.
 - **What doesn't go in CI:** Tart e2e (requires Apple Silicon hardware); macOS Seatbelt e2e on Linux CI; full smoke suite (too slow per commit). Documented honestly rather than aspirationally.
@@ -193,7 +193,7 @@ Originally established alongside D19 (W3–W6 of the architecture remediation ma
 
 ### Pattern
 
-Threshold: any test that crosses the `runtime.Runtime` boundary requires a real backend instance. Skip with `t.Skipf` if the backend isn't available locally; mark with the `integration` build tag so unit-test runs don't require backends. Cross-backend tests are parametrised over the backend (W5), not duplicated per backend.
+Threshold: any test that crosses the `runtime.Backend` boundary requires a real backend instance. Skip with `t.Skipf` if the backend isn't available locally; mark with the `integration` build tag so unit-test runs don't require backends. Cross-backend tests are parametrised over the backend (W5), not duplicated per backend.
 
 **Isolate and namespace real-backend state — never touch the developer's real resources.** A real backend is shared with whatever the developer is actually running. A test that creates (or, far worse, *sweeps*) resources can clobber real VMs/containers/images. Three non-negotiable rules:
 
@@ -275,7 +275,7 @@ Threshold: define the interface at the consumer's site (Go convention — "accep
 
 ### Worked examples
 
-- `runtime.Runtime` is the canonical interface. The current codebase tests it primarily at the *integration* layer against real daemons (`runtime/<backend>/integration_test.go`, build tag `integration`); a dedicated `runtime.Fake` for unit-layer tests above the seam does not yet exist. The principle still applies: when a unit test does need a `runtime.Runtime` substitute, write a hand-rolled fake (struct implementing the interface with predetermined results), not a generated mock that records call sequences.
+- `runtime.Backend` is the canonical interface. The current codebase tests it primarily at the *integration* layer against real daemons (`runtime/<backend>/integration_test.go`, build tag `integration`); a dedicated `runtime.FakeBackend` for unit-layer tests above the seam does not yet exist. The principle still applies: when a unit test does need a `runtime.Backend` substitute, write a hand-rolled fake (struct implementing the interface with predetermined results), not a generated mock that records call sequences.
 - `standards/GO.md` §Testing: "Mocking: define interfaces at the consumption site, not the implementation site. Mock via interface satisfaction."
 - `standards/GO.md` §Code Organization Patterns: "Accept interfaces, return structs — define interfaces at the point of consumption, not alongside the implementation."
 - No `gomock` / `mockery` / `mockgen` in `go.mod`. Verified by `grep` against the lockfile.
@@ -340,14 +340,14 @@ Threshold: if the behaviour under test is yoloAI code, give it explicit inputs:
 - For stdin-driven paths, pass an `io.Reader` (e.g. `strings.NewReader(...)`); do not swap `os.Stdin`.
 - For `${VAR}` expansion, set `layout.Env`; do not `t.Setenv`.
 
-The **one** legitimate `t.Setenv("HOME", …)` is isolating a HOME-reading *subprocess*: `git` reads `$HOME/.gitconfig` and `$HOME/.config/git`, so tests that spawn real git (`internal/workspace/*_test.go`, `internal/sandbox/patch/*_test.go`) set `HOME` to a temp dir to shield the test from the developer's git config. That swap is load-bearing — keep it (equivalently, `GIT_CONFIG_GLOBAL`). The other legitimate case is a test that deliberately exercises the CLI's `cliutil.Layout()` ambient-`$HOME` fallback.
+The **one** legitimate `t.Setenv("HOME", …)` is isolating a HOME-reading *subprocess*: `git` reads `$HOME/.gitconfig` and `$HOME/.config/git`, so tests that spawn real git (`internal/workspace/*_test.go`, `internal/copyflow/*_test.go`) set `HOME` to a temp dir to shield the test from the developer's git config. That swap is load-bearing — keep it (equivalently, `GIT_CONFIG_GLOBAL`). The other legitimate case is a test that deliberately exercises the CLI's `cliutil.Layout()` ambient-`$HOME` fallback.
 
 ### Worked examples
 
-- `internal/sandbox` unit tests build `config.NewLayout(filepath.Join(t.TempDir(), ".yoloai"))` and pass it through `WithLayout`; the `HOME` swap they once carried is vestigial after §12 and removed in D23's cleanup.
+- `internal/orchestrator` unit tests build `config.NewLayout(filepath.Join(t.TempDir(), ".yoloai"))` and pass it through `WithLayout`; the `HOME` swap they once carried is vestigial after §12 and removed in D23's cleanup.
 - `ReadPrompt` takes an `io.Reader`; `TestReadPrompt_StdinDash` supplies `strings.NewReader("…")` instead of swapping the global `os.Stdin`.
 - `${VAR}` config-expansion tests pass an explicit env map / set `layout.Env` (`internal/config/config_test.go`, `pathutil_test.go`) rather than `t.Setenv`.
-- Load-bearing counter-example: `internal/sandbox/patch/apply_test.go` keeps `t.Setenv("HOME", tmpDir)` because it runs real `git`; removing it would let the developer's `.gitconfig` leak into the test.
+- Load-bearing counter-example: `internal/copyflow/apply_test.go` keeps `t.Setenv("HOME", tmpDir)` because it runs real `git`; removing it would let the developer's `.gitconfig` leak into the test.
 
 ### Cost-vs-benefit
 

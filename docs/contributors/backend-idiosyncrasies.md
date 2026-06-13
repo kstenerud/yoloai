@@ -656,7 +656,7 @@ mode makes `/proc/sys` and `/sys/fs/cgroup` writable and works on all Docker ver
 `systempaths=unconfined` achieves the same with a narrower capability grant but requires
 Docker ≥ 20.10 and is rejected by older daemons with `invalid --security-opt`.
 
-**Code:** `sandbox/create_instance.go` case `container-privileged`.
+**Code:** `orchestrator/create_instance.go` case `container-privileged`.
 
 ---
 
@@ -696,8 +696,8 @@ dockerrt.RecordBuildChecksum(layout, "")
 
 **Apply at EVERY fresh-HOME site, not just `TestMain`.** Each per-test `cliSetup` / `integrationSetup` / `e2eSetup` helper calls `t.TempDir()` for its own isolated HOME — those new HOMEs don't carry the `TestMain` seed, so the first test in the suite re-triggers the rebuild race even when `TestMain` already pre-seeded. In the e2e suite the failure mode is more severe: the binary runs as a subprocess and a wedged Docker SDK HTTP transport hangs the subprocess indefinitely (test has no per-call timeout, only the 15-minute suite timeout). The subprocess inherits `HOME` from the test process via `t.Setenv`, so writing the checksum in the test process is visible to the subprocess. Applied at:
 
-- `internal/sandbox/integration_main_test.go:TestMain` (binary bootstrap)
-- `internal/sandbox/integration_helpers_test.go::integrationSetup` (per-test)
+- `internal/orchestrator/integration_main_test.go:TestMain` (binary bootstrap)
+- `internal/orchestrator/integration_helpers_test.go::integrationSetup` (per-test)
 - `internal/cli/integration_main_test.go:TestMain` (binary bootstrap)
 - `internal/cli/integration_test.go::cliSetup` (per-test)
 - `test/e2e/helpers_test.go::e2eSetup` (per-test, subprocess-visible)
@@ -785,11 +785,11 @@ Standard runc (`--isolation container`, `--isolation container-privileged`) is u
 
 The entrypoint loud-failure fix (`NetworkIsolationError`) catches *some* gVisor failures incidentally — gVisor's iptables emulation rejects `-m set --match-set`, so the ipset-backed allowlist rule fails at container start, taking the sandbox down. That's accidental and brittle: future gVisor versions may accept the rule without enforcing it, putting us back in silent-no-op territory.
 
-**Fix:** Reject the combination at sandbox creation, before the container is built. `runtime.IsolationEnforcesInSandboxIptables(isolation)` returns false for `container-enhanced`; `sandbox/create_instance.go::buildInstanceConfig` checks this when `state.networkMode == "isolated"` and returns an explicit error pointing the user at the working isolation modes.
+**Fix:** Reject the combination at sandbox creation, before the container is built. `runtime.IsolationEnforcesInSandboxIptables(isolation)` returns false for `container-enhanced`; `orchestrator/create_instance.go::buildInstanceConfig` checks this when `state.networkMode == "isolated"` and returns an explicit error pointing the user at the working isolation modes.
 
 **Permanent fix:** The redesign in [`docs/contributors/design/network-isolation.md`](design/network-isolation.md) moves enforcement to the host netns, where gVisor's netstack is irrelevant — packets leaving the gVisor sandbox traverse the host veth and hit the host iptables rules like any other backend. Until that lands, the combination is rejected.
 
-**Code:** `runtime/isolation.go::IsolationEnforcesInSandboxIptables`, `sandbox/create_instance.go::buildInstanceConfig`
+**Code:** `runtime/isolation.go::IsolationEnforcesInSandboxIptables`, `orchestrator/create_instance.go::buildInstanceConfig`
 
 ---
 
@@ -820,7 +820,7 @@ An empty value disables LXC seccomp for that container entirely. The container m
 
 **Impact on yoloai:** Rootless Docker silently fails inside `container-privileged` sandboxes on Proxmox LXC hosts even though yoloai's configuration is correct. Rootful Docker works because it does not use a user namespace.
 
-**Code:** `sandbox/create_instance.go` — the seccomp setting is correct; the failure is environmental.
+**Code:** `orchestrator/create_instance.go` — the seccomp setting is correct; the failure is environmental.
 
 ---
 
@@ -1343,7 +1343,7 @@ the invariant rather than relying on VirtioFS lag. Trade-off: on a cold
 first-boot `new` blocks until the real read (the marker is the signal that the
 guest is done) instead of bailing at 30s — correctness over latency for an
 ephemeral credential. Code: `runtime.go` (`SecretsConsumedTimeout` field),
-`runtime/tart/tart.go` (180s), `sandbox/create_instance.go::effectiveSecretsConsumedTimeout`.
+`runtime/tart/tart.go` (180s), `orchestrator/create_instance.go::effectiveSecretsConsumedTimeout`.
 
 Orphan cleanup: an abnormally-terminated `new` (killed / timed-out before
 `launchContainer`'s `defer os.RemoveAll`) leaves the `yoloai-secrets-*` dir — a
@@ -1610,11 +1610,11 @@ tart exec -i -t yoloai-x tmux -S /private/tmp/tmux-501/default attach -t main
 
 **Tell:** Selecting the screen and copying gives ASCII (`_______`); letting *tmux* copy the same region (copy-mode / OSC 52) gives Unicode (`▐▛███▜▌`). So tmux's server grid holds correct UTF-8 — the downgrade happens when tmux *paints* to the client. `tmux -S … list-clients -F '#{client_utf8}'` reports `utf8=0`.
 
-**Explanation:** tmux decides UTF-8 support per *client*, from the first of `LC_ALL`/`LC_CTYPE`/`LANG` that is set containing "UTF-8". `yoloai attach` runs `tmux attach` via `tart exec`, and a `tart exec` session inherits an empty/`C` locale (none of those vars are set). tmux therefore flags the client `utf8=0` and substitutes `_` for every non-ASCII glyph on output — even though the agent (server side) was launched with a UTF-8 locale and its grid is UTF-8. Docker/containerd avoid this because the container image carries `LANG=C.UTF-8` (`sandbox/launch`), which the in-container tmux client inherits. macOS VMs have no `C.UTF-8` locale (only `<lang>_<REGION>.UTF-8` forms), so the container trick doesn't port.
+**Explanation:** tmux decides UTF-8 support per *client*, from the first of `LC_ALL`/`LC_CTYPE`/`LANG` that is set containing "UTF-8". `yoloai attach` runs `tmux attach` via `tart exec`, and a `tart exec` session inherits an empty/`C` locale (none of those vars are set). tmux therefore flags the client `utf8=0` and substitutes `_` for every non-ASCII glyph on output — even though the agent (server side) was launched with a UTF-8 locale and its grid is UTF-8. Docker/containerd avoid this because the container image carries `LANG=C.UTF-8` (`orchestrator/launch`), which the in-container tmux client inherits. macOS VMs have no `C.UTF-8` locale (only `<lang>_<REGION>.UTF-8` forms), so the container trick doesn't port.
 
 **Fix:** Pass `-u` to the attach client (`tmux -u … attach`). `-u` forces tmux to treat the terminal as UTF-8 regardless of locale — exactly the case here (the user's outer terminal is UTF-8; only the intermediate `tart exec` session dropped the locale hint). Verified on a live VM with a throwaway server: plain client → `utf8=0`; `tmux -u` → `utf8=1`; `env LC_ALL=en_US.UTF-8 tmux` → `utf8=1`. `-u` is preferred over injecting a locale because it needs no valid-locale lookup on macOS and no guest-env plumbing through `tart exec`.
 
-**Code:** `runtime/tart/tart.go::AttachCommand` (prepends `-u`). Container equivalent: `sandbox/launch/launch.go` (`ContainerEnv: ["LANG=C.UTF-8"]`).
+**Code:** `runtime/tart/tart.go::AttachCommand` (prepends `-u`). Container equivalent: `orchestrator/launch/launch.go` (`ContainerEnv: ["LANG=C.UTF-8"]`).
 
 ---
 
@@ -1786,7 +1786,7 @@ VirtioFS should only be used for:
 
 **Impact:** All Tart VMs with `:copy` mode directories are affected. Git corruption can lead to data loss and broken repositories.
 
-**Code:** `runtime/tart/tart.go::ResolveCopyMount`, `runtime/tart/tart.go::Create`, `sandbox/lifecycle.go::Reset` (needs implementation)
+**Code:** `runtime/tart/tart.go::ResolveCopyMount`, `runtime/tart/tart.go::Create`, `orchestrator/lifecycle.go::Reset` (needs implementation)
 
 ---
 
@@ -1800,7 +1800,7 @@ VirtioFS should only be used for:
 
 **Why not just read the host seed:** there is no coherent host-side view to read — that's the whole reason git runs in-VM (see the VirtioFS section above). A host probe isn't merely stale, it's structurally incapable of seeing in-VM edits.
 
-**Code:** `internal/sandbox/patch/changes.go::HasUnappliedWorkVia` (+ `WorkProbe` tri-state), `internal/runtime/runtime.go::GitExecFor`/`ErrNotRunning`, gates in `internal/sandbox/create/create.go`, `internal/sandbox/lifecycle/reset.go::NeedsConfirmation`, and the read-model in `internal/sandbox/status/status.go::detectWorkdirChanges`. The engine opens the backend best-effort (`Engine.TryEnsure`) before the gate so a running VM can be probed.
+**Code:** `internal/copyflow/changes.go::HasUnappliedWorkVia` (+ `WorkProbe` tri-state), `internal/runtime/runtime.go::GitExecFor`/`ErrNotRunning`, gates in `internal/orchestrator/create/create.go`, `internal/orchestrator/lifecycle/reset.go::NeedsConfirmation`, and the read-model in `internal/orchestrator/status/status.go::detectWorkdirChanges`. The engine opens the backend best-effort (`Engine.TryEnsure`) before the gate so a running VM can be probed.
 
 **Belongs here:** the external constraint is VirtioFS forcing the work copy to live in-VM (host-side git corrupts it — see [VirtioFS corrupts git repositories](#virtiofs-corrupts-git-repositories)), which is *why* a host-side probe is structurally wrong; the probe bug it caused was ours.
 
@@ -1812,7 +1812,7 @@ VirtioFS should only be used for:
 
 **How yoloAI handles it:** The backend's launch wrap (`PATH="$HOME/.local/bin:/opt/homebrew/opt/node@22/bin:/opt/homebrew/bin:$PATH"`) is a compile-time constant declared on the backend descriptor (`BackendDescriptor.AgentLaunchPrefix`). It is computed once at sandbox creation and stored as `agent_launch_prefix` in `runtime-config.json` — the single source of truth. Every launch path prepends that stored value: Go restart in `lifecycle/restart.go` and Python first-launch in `sandbox-setup.py` both read the field directly (older sandboxes are backfilled by the v1→v2 schema migration), so the two paths can never drift. (Historical note: an earlier base installed Claude Code via npm with a `#!/usr/bin/env node` shebang that the Cirrus image's `node@24` shadowed; switching to the native standalone binary removed that whole class of node-version shadowing, but the agent still needs `~/.local/bin` on the non-login PATH.)
 
-**Code:** `runtime/tart/tart.go` (descriptor `AgentLaunchPrefix` + `PrepareAgentCommand`), `runtime/tart/build.go` (provisionCommands compose the login PATH), `sandbox/create/create.go` (stores the prefix), `sandbox/lifecycle/restart.go` (relaunch prepends it), `config/schema.go` (v1→v2 backfill)
+**Code:** `runtime/tart/tart.go` (descriptor `AgentLaunchPrefix` + `PrepareAgentCommand`), `runtime/tart/build.go` (provisionCommands compose the login PATH), `orchestrator/create/create.go` (stores the prefix), `orchestrator/lifecycle/restart.go` (relaunch prepends it), `config/schema.go` (v1→v2 backfill)
 
 ## Seatbelt (macOS sandboxing)
 
@@ -1834,7 +1834,7 @@ VirtioFS should only be used for:
 
 **How yoloAI handles it:** The backend's launch wrap (`source ~/.swift-wrapper.sh && `) is a compile-time constant declared on the backend descriptor (`BackendDescriptor.AgentLaunchPrefix`), computed once at sandbox creation and stored as `agent_launch_prefix` in `runtime-config.json` — the single source of truth. Both launch paths prepend that stored value: Go restart in `lifecycle/restart.go` and Python first-launch in `sandbox-setup.py` read the field directly (older sandboxes are backfilled by the v1→v2 schema migration), so the wrapper is sourced identically whether the agent starts via the Python path or a later Go-driven restart.
 
-**Code:** `runtime/seatbelt/seatbelt.go` (descriptor `AgentLaunchPrefix` + `PrepareAgentCommand`), `sandbox/create/create.go` (stores the prefix), `sandbox/lifecycle/restart.go` (relaunch prepends it), `config/schema.go` (v1→v2 backfill)
+**Code:** `runtime/seatbelt/seatbelt.go` (descriptor `AgentLaunchPrefix` + `PrepareAgentCommand`), `orchestrator/create/create.go` (stores the prefix), `orchestrator/lifecycle/restart.go` (relaunch prepends it), `config/schema.go` (v1→v2 backfill)
 
 ---
 
@@ -1935,7 +1935,7 @@ warn error access singleton, retrying: the process holding the singleton lock fi
 
 **Fix:** Each sandbox now gets its own per-sandbox vscode-cli data directory (`~/.yoloai/sandboxes/<name>/vscode-cli/`). The lock, tunnel config, and server binary are all sandbox-local. To avoid requiring re-authentication for every new sandbox, `token.json` is seeded from the global credential store (`~/.yoloai/vscode-cli/token.json`) when the per-sandbox directory is first created.
 
-**Code:** `sandbox/create.go::buildMounts` (vscodeTunnel section)
+**Code:** `orchestrator/create.go::buildMounts` (vscodeTunnel section)
 
 ---
 
@@ -2011,7 +2011,7 @@ the happy path and removes the premature give-up. The `.done` marker and its
 
 **Same storm, host side — the baseline-SHA `git` fails with exit 69:** the host
 runs the work-dir git baseline (`git init/add/commit`, then `git rev-parse HEAD`)
-via `tart exec` in `ExecuteVMWorkDirSetup` (`internal/sandbox/launch/vmworkdir.go`),
+via `tart exec` in `ExecuteVMWorkDirSetup` (`internal/orchestrator/launch/vmworkdir.go`),
 *after* the secrets-consumed barrier — so the monitor has already accepted the
 Xcode license, yet `git` (the `xcode-select` shim on macOS) intermittently fails
 with **`exit 69: You have not agreed to the Xcode license agreements`**. Cause is
@@ -2090,7 +2090,7 @@ here `…-containerd-vm` is a prefix of `…-containerd-vmenhanced`, and the par
 matrix runs both Kata backends concurrently.
 
 **Explanation:** yoloAI passes the instance name (`InstanceName`,
-`internal/sandbox/store/paths.go`) verbatim as the containerd container ID and does
+`internal/store/paths.go`) verbatim as the containerd container ID and does
 **no** prefix matching of its own. The prefix lookup is **entirely inside the
 external Kata shim** (`containerd-shim-kata-v2` / runtime-rs): given a full
 container ID it scans its sandbox store for entries that *start with* that ID and
@@ -2114,7 +2114,7 @@ the fix would be a create-time check that rejects or warns on a prefix-related
 live sandbox name for the Kata backend.
 
 **Code:** `scripts/smoke_test.py` (`RunContext.name_seq`, `Test.sandbox()`);
-ID construction in `internal/sandbox/store/paths.go` (`InstanceName`).
+ID construction in `internal/store/paths.go` (`InstanceName`).
 
 ## OS & POSIX semantics
 
@@ -2138,9 +2138,9 @@ genuinely orphaned lock files (no holder) are swept.
 safe to run concurrently with live sandboxes. Lock files therefore don't
 accumulate, and `system prune` only ever removes the truly-orphaned ones.
 
-**Code:** `internal/sandbox/store/lock_unix.go` (`RemoveLockFile`,
-`SweepStaleLocks`); `internal/sandbox/lifecycle.go` (Destroy);
-`internal/sandbox/create.go` (Create rollback).
+**Code:** `internal/store/lock_unix.go` (`RemoveLockFile`,
+`SweepStaleLocks`); `internal/orchestrator/lifecycle.go` (Destroy);
+`internal/orchestrator/create.go` (Create rollback).
 
 **Belongs here:** the durable fact is POSIX `flock(2)` semantics — the lock binds to the open fd, not the path — which is what makes eager unlink-while-held safe; the design choice it licenses is ours.
 

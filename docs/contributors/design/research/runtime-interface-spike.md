@@ -2,7 +2,7 @@
 
 **Status:** Spike complete. Verdict: **proceed** with `BackendDescriptor` extraction. The plan's abort threshold (">30% of `Capabilities()` values dynamic") is not hit — `BackendCaps` is 100% statically declared across all backends.
 
-This document catalogs every method on the `runtime.Runtime` interface and classifies it as **static** (constant per-backend, candidate for `BackendDescriptor`), **dynamic** (depends on host probing or per-call inputs, must stay as an interface method), or **lifecycle** (core operation, stays on a narrowed `Runtime`/`Lifecycle` interface).
+This document catalogs every method on the `runtime.Backend` interface and classifies it as **static** (constant per-backend, candidate for `BackendDescriptor`), **dynamic** (depends on host probing or per-call inputs, must stay as an interface method), or **lifecycle** (core operation, stays on a narrowed `Runtime`/`Lifecycle` interface).
 
 ## Backends surveyed
 

@@ -46,7 +46,7 @@ backends?*
 
 Also add `testutil.WaitForStatus` helper to support `TestCLI_StartAfterDone`.
 Signature accepts a `func(context.Context) (string, error)` status poller rather than a
-`runtime.Runtime` directly — sandbox status is a higher-level concept than container
+`runtime.Backend` directly — sandbox status is a higher-level concept than container
 running/stopped state, and importing `sandbox` from `testutil` would create an import cycle.
 
 ### Smoke test (`smoke_test.py`)

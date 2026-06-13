@@ -504,10 +504,10 @@ an interface: the production code depends on an interface; the test substitutes 
 fake that implements the interface. The key property of a seam: it is the behavior
 that changes, not the calling code.
 
-Applied to yoloAI: the `runtime.Runtime` interface is a seam. Integration tests
+Applied to yoloAI: the `runtime.Backend` interface is a seam. Integration tests
 hit real backends through this seam. Unit tests for logic above the seam use a
 fake backend that returns predetermined results. The fake does not record
-interactions; it implements the behavior contract. When the `runtime.Runtime`
+interactions; it implements the behavior contract. When the `runtime.Backend`
 interface changes (as it did during W11, commit `1f4457c`), all fakes fail to
 compile — which is the right signal (the contract changed) rather than a false
 negative.
