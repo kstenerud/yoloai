@@ -99,9 +99,11 @@ above rather than inventing a new mechanism — the descriptor is already the ri
 - **Reclassify the backend axis as "mostly clean, mostly already-sealed."** Like the agent
   axis, the substrate is further along than feared: identity is hidden, git execution is
   routed. The work is **naming implicit properties**, not untangling deep coupling.
-- **`FilesystemLocality` is the one property worth the effort** — it unifies four
-  interfaces, the implicit inference, and `HostFilesystem`, and it makes the catalog's
-  "host probe blind to in-VM workdir" a typed fact instead of tribal knowledge.
+- **`FilesystemLocality` is the one property worth the effort** — it gates the four
+  filesystem interfaces (and in the first cut replaced the `GitExecer` type-assert), and it
+  makes the catalog's "host probe blind to in-VM workdir" a typed fact instead of tribal
+  knowledge. (It is orthogonal to `HostFilesystem`, and distinct from the `mountPath !=
+  hostPath` copy-relocation inference — see the corrections above.)
 - **Close the change-detection residue**: route `status.go`'s work-probe through the
   backend (or gate it on `FilesystemLocality == HostSide`) so a dirty Tart sandbox isn't
   reported clean.

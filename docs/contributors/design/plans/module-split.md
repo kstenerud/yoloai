@@ -1,8 +1,9 @@
 # Module split: sandbox substrate vs. agent orchestration
 
-**Status:** Designed, NOT implemented and NOT yet committed. Depends on the
-`multi-workdir` branch merging to `main` first; the split itself is a separate
-feature branch. Will earn a D-number in `working-notes.md` when adopted.
+**Status:** Active on the `module-split` branch (cut from `main` after `multi-workdir`
+merged). The agent map, the backend-leakage map, and the Phase 0 **first cut**
+(`FilesystemLocality` + git routing) have landed here; remaining phases below. Will earn
+a D-number in `working-notes.md` when adopted.
 
 **Premise (from the coupling map, 2026-06-13):** yoloAI is already, structurally,
 a reusable *sandbox substrate* under an *agent-specific* shell. The substrate's
@@ -243,9 +244,11 @@ confirms is blind to the in-VM workdir on Tart) are the next increments.
 bubble up as an optional type-asserted interface or a name-check) to top-down (enumerate
 the *decisions* higher layers make that depend on backend variance, name the property
 behind each; the interface *is* that property set plus the operations). `BackendDescriptor`/
-`BackendCaps` is the seed: scattered flags likely **unify** (the `HostFilesystem` flag and
-Tart's in-VM locality are facets of one `FilesystemLocality`), and the grab-bag of optional
-interfaces shrinks to the genuinely-optional *operations*.
+`BackendCaps` is the seed: one property can replace several scattered *detections*
+(`FilesystemLocality` gates the four filesystem interfaces and already replaced the
+`GitExecer` type-assert — though it is **orthogonal to** `HostFilesystem`, a separate
+state-location axis, not a facet of it), and the grab-bag of optional interfaces shrinks to
+the genuinely-optional *operations*.
 
 **The discipline that keeps this from being the type-asserts repainted:** a property must
 be **semantic** (a consequence the higher layer reasons about) and **answerable by a
@@ -363,17 +366,18 @@ both load-bearing today *and* not yet decoupled.
 
 Each phase is independently mergeable and green under `make check`.
 
-- **0 — backend-leakage map → interface re-derivation (PREREQUISITE).** Run the
-  backend-leakage map (optional-interface inventory · above-runtime backend branches ·
-  copyflow's direct-filesystem touches). Classify each leak *seal | model-as-property |
-  irreducible*, and re-derive the backend interface as the resulting **property set**
-  (starting with `FilesystemLocality`, unifying the existing `HostFilesystem` flag);
-  enforce "no backend-identity checks above the runtime" with a grep-level fence. Seal the
-  filesystem-locality *execution* via the "run git/exec against a work copy,
-  backend-correctly" primitive and route copyflow through it. Stand up the first slice of
-  the conformance suite, keyed off the new properties, across docker/tart/seatbelt. This
-  phase decides where the substrate/refinement boundary can honestly fall — the cut below
-  depends on it.
+- **0 — backend-leakage map → interface re-derivation (PREREQUISITE, in progress).** Run the
+  backend-leakage map (**done** — [research/backend-leakage-map.md](../research/backend-leakage-map.md));
+  classify each leak *seal | model-as-property | irreducible*, and re-derive the backend
+  interface as the resulting **property set** (starting with `FilesystemLocality` — which is
+  orthogonal to `HostFilesystem`, not a unification). **First cut done:** the property is
+  declared by all backends and drives git routing in `git.NewSandbox` (replacing the
+  `GitExecer` type-assert), with a conformance guard + test. **Remaining:** the other three
+  SandboxSide *operations* (`WorkDirSetup`/`CopyMountResolver`/`GuestMountResolver`); the
+  host-side change probe in `status.go` (behavior-changing on Tart → needs Tart validation);
+  a grep-level "no backend-identity above the runtime" fence; and the first conformance-suite
+  slice keyed off the properties across docker/tart/seatbelt. This phase decides where the
+  substrate/refinement boundary can honestly fall — the cut below depends on it.
 - **A — close the import edges.** Relocate `AgentType`/`Model` and the idle/agent-launch
   config out of substrate packages; `store` and the substrate half of `runtimeconfig` no
   longer import `agent`. (Smallest, highest-signal; proves the substrate can be agent-free.)
@@ -412,10 +416,13 @@ Each phase is independently mergeable and green under `make check`.
 - Replacing tmux for interactive agents (it works; alternatives are sidegrades). The win is
   *adding* the no-PTY path, not removing tmux.
 
-## Sequencing note
+## Sequencing — status
 
-This doc is intentionally uncommitted. Order of operations: (1) `multi-workdir`
-releasetest passes on all backends → (2) merge `multi-workdir` to `main` on its own
-merits → (3) cut a new branch for this split → (4) commit this doc there and work the
-phases. The untracked doc travels with the working tree across the branch cut, so it is
-available to commit on the new branch.
+Done: (1) `multi-workdir` releasetest passed (Linux + Mac) → (2) merged to `main`
+(fast-forward to `a631456`) → (3) `module-split` branch cut → (4) this doc, the
+[backend-leakage map](../research/backend-leakage-map.md), and the Phase 0 first cut
+committed here.
+
+**Next:** finish Phase 0 (the remaining SandboxSide operations, the `status.go` change
+probe — which changes Tart behavior and so wants Tart validation, not just Linux
+`make check` — and the first conformance-suite slice), then Phases A–F.
