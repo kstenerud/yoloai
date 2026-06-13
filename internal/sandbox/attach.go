@@ -43,8 +43,11 @@ func (e *Engine) Attach(ctx context.Context, name string, io runtime.IOStreams) 
 	if err := WaitForAttachReady(ctx, e.runtime, e.layout, name, user, attachReadyTimeout); err != nil {
 		return fmt.Errorf("waiting for tmux session: %w", err)
 	}
-	socket := e.runtime.TmuxSocket(e.layout.SandboxDir(name))
-	cmd := e.runtime.AttachCommand(socket, io.Rows, io.Cols, info.Environment.Isolation)
+	socket := runtime.TmuxSocketFor(e.runtime, e.layout.SandboxDir(name))
+	cmd, ok := runtime.AttachCommandFor(e.runtime, socket, io.Rows, io.Cols, info.Environment.Isolation)
+	if !ok {
+		return fmt.Errorf("backend %s does not support interactive attach", e.runtime.Descriptor().Type)
+	}
 	return e.runtime.InteractiveExec(ctx, store.InstanceName(e.layout.Principal, name), cmd, user, "", io)
 }
 
@@ -83,7 +86,7 @@ func WaitForAttachReady(
 ) error {
 	containerName := store.InstanceName(layout.Principal, sandboxName)
 	jsonlPath := store.SandboxJSONLPath(layout.SandboxDir(sandboxName))
-	tmuxSocket := rt.TmuxSocket(layout.SandboxDir(sandboxName))
+	tmuxSocket := runtime.TmuxSocketFor(rt, layout.SandboxDir(sandboxName))
 	deadline := time.Now().Add(timeout)
 	var lastExecErr error
 	for time.Now().Before(deadline) {

@@ -15,6 +15,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
+	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox/invocation"
 	"github.com/kstenerud/yoloai/internal/sandbox/launch"
 	provision "github.com/kstenerud/yoloai/internal/sandbox/provision"
@@ -279,7 +280,7 @@ func relaunchAgent(ctx context.Context, d state.Deps, name string, meta *store.E
 		return err
 	}
 
-	socket := d.Runtime.TmuxSocket(d.Layout.SandboxDir(name))
+	socket := runtime.TmuxSocketFor(d.Runtime, d.Layout.SandboxDir(name))
 	if _, err := status.ExecInContainer(ctx, d.Runtime, name, meta, d.Layout.HostUID,
 		tmuxCmd(socket, "respawn-pane", "-t", "main", "-k", cfg.AgentCommand),
 	); err != nil {
@@ -303,7 +304,7 @@ func relaunchAgentWithResume(ctx context.Context, d state.Deps, name string, met
 
 	agentArgs := resolveAgentArgs(d.Layout, meta.AgentType, meta.Profile)
 	interactiveCmd := invocation.BuildAgentCommand(agentDef, meta.Model, "", agentArgs, cfg.Passthrough)
-	socket := d.Runtime.TmuxSocket(sandboxDir)
+	socket := runtime.TmuxSocketFor(d.Runtime, sandboxDir)
 	if _, err := status.ExecInContainer(ctx, d.Runtime, name, meta, d.Layout.HostUID,
 		tmuxCmd(socket, "respawn-pane", "-t", "main", "-k", interactiveCmd),
 	); err != nil {
@@ -336,7 +337,7 @@ func relaunchAgentWithCustomPrompt(ctx context.Context, d state.Deps, name strin
 	// migration backfills it; empty for container backends, a no-op prepend), so
 	// the prepend is unconditional.
 	interactiveCmd = cfg.AgentLaunchPrefix + interactiveCmd
-	socket := d.Runtime.TmuxSocket(d.Layout.SandboxDir(name))
+	socket := runtime.TmuxSocketFor(d.Runtime, d.Layout.SandboxDir(name))
 	if _, err := status.ExecInContainer(ctx, d.Runtime, name, meta, d.Layout.HostUID,
 		tmuxCmd(socket, "respawn-pane", "-t", "main", "-k", interactiveCmd),
 	); err != nil {
@@ -373,7 +374,7 @@ done`, cfg.ReadyPattern)
 func deliverPromptViaTmux(ctx context.Context, d state.Deps, name string, cfg runtimeconfig.ContainerConfig, meta *store.Environment, promptText, tmpFile string) error {
 	statusWrite := `printf '{"status":"active","timestamp":%d}' "$(date +%%s)" > "${YOLOAI_DIR:-/yoloai}/agent-status.json"`
 
-	socket := d.Runtime.TmuxSocket(d.Layout.SandboxDir(name))
+	socket := runtime.TmuxSocketFor(d.Runtime, d.Layout.SandboxDir(name))
 	script := fmt.Sprintf(`%s
 %s
 printf '%%s' "$1" > %s

@@ -136,6 +136,7 @@ type Runtime struct {
 var _ runtime.Runtime = (*Runtime)(nil)
 var _ runtime.IsolationCapabilityProvider = (*Runtime)(nil)
 var _ runtime.CachePruner = (*Runtime)(nil)
+var _ runtime.InteractiveSession = (*Runtime)(nil)
 var _ runtime.DiskUsageReporter = (*Runtime)(nil)
 
 // New creates a Runtime and verifies the Docker daemon is reachable. layout

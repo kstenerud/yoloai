@@ -163,6 +163,7 @@ type Runtime struct {
 // Compile-time check.
 var _ runtime.Runtime = (*Runtime)(nil)
 var _ runtime.CopyMountResolver = (*Runtime)(nil)
+var _ runtime.InteractiveSession = (*Runtime)(nil)
 
 // A SandboxSide backend (Descriptor().Capabilities.FilesystemLocality) keeps its
 // work copy inside the sandbox, so it MUST run git in-VM and defer baseline

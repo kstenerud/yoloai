@@ -110,6 +110,7 @@ type Runtime struct {
 // Compile-time checks.
 var _ runtime.Runtime = (*Runtime)(nil)
 var _ runtime.CopyMountResolver = (*Runtime)(nil)
+var _ runtime.InteractiveSession = (*Runtime)(nil)
 
 // Descriptor returns a BackendDescriptor with the static facts for this backend.
 func (r *Runtime) Descriptor() runtime.BackendDescriptor {

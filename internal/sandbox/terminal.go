@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 )
 
@@ -46,7 +47,7 @@ func (e *Engine) CaptureTerminal(ctx context.Context, name string, scrollback in
 	}
 
 	containerName := store.InstanceName(e.layout.Principal, name)
-	socket := e.runtime.TmuxSocket(e.layout.SandboxDir(name))
+	socket := runtime.TmuxSocketFor(e.runtime, e.layout.SandboxDir(name))
 	user := ContainerUser(info.Environment, e.layout.HostUID)
 
 	plain, err = e.capturePane(ctx, containerName, socket, user, scrollback, false)

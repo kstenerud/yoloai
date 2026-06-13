@@ -116,6 +116,7 @@ type Runtime struct {
 
 // Compile-time check that the skeleton satisfies the interface.
 var _ runtime.Runtime = (*Runtime)(nil)
+var _ runtime.InteractiveSession = (*Runtime)(nil)
 
 // New constructs the apple Runtime after verifying platform, the CLI, and the
 // macOS version gate. The apiserver is not started here — Setup does that on

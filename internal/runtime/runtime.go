@@ -342,21 +342,6 @@ type Runtime interface {
 	// Descriptor returns a BackendDescriptor with static facts about this backend.
 	// Values are compile-time constants and do not change after construction.
 	Descriptor() BackendDescriptor
-
-	// TmuxSocket returns the tmux socket path for a sandbox, or empty string
-	// if the backend uses the uid-based default socket. sandboxDir is the
-	// resolved sandbox directory path. The value is written into
-	// runtime-config.json at sandbox creation time so all exec'd processes
-	// (including non-interactive execs) find the same tmux server as the
-	// container init process.
-	TmuxSocket(sandboxDir string) string
-
-	// AttachCommand returns the command to exec interactively to attach to
-	// the tmux session in a running instance. tmuxSocket is the fixed socket
-	// path from runtime-config.json (empty = use default). rows and cols are
-	// the current terminal dimensions (0 = unknown). isolation is the sandbox
-	// isolation mode (e.g. IsolationModeContainerEnhanced).
-	AttachCommand(tmuxSocket string, rows, cols int, isolation IsolationMode) []string
 }
 
 // IsPermissionDenied reports whether err represents a "permission denied"

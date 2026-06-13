@@ -101,6 +101,7 @@ type Runtime struct {
 var _ runtime.Runtime = (*Runtime)(nil)
 var _ runtime.IsolationCapabilityProvider = (*Runtime)(nil)
 var _ runtime.CachePruner = (*Runtime)(nil)
+var _ runtime.InteractiveSession = (*Runtime)(nil)
 var _ runtime.DiskUsageReporter = (*Runtime)(nil)
 
 // Descriptor returns a BackendDescriptor with the static facts for this backend.

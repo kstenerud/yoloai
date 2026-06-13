@@ -358,7 +358,7 @@ func buildConfigAndEnvironment(ctx context.Context, d state.Deps, opts Options, 
 	lifecycleCfg := buildLifecycleConfig(ri.archetype, pr.archetypeDockerDRequired, ri.onCreateDone, ri.devcontainerCfg)
 
 	backend := d.Runtime.Descriptor().Type
-	configData, err := buildContainerConfig(d.Layout, agentDef, agentCommand, runtime.PrepareAgentCommandFor(d.Runtime, ""), tmuxConf, launch.OverlayOrResolvedMountPath(workdir), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, collectOverlayMounts(workdir, auxDirs), pr.setup, pr.autoCommitInterval, collectCopyDirs(workdir, auxDirs), opts.Name, d.Runtime.TmuxSocket(sandboxDir), pr.isolation, opts.VscodeTunnel, invocation.SanitizeTunnelName(opts.Name), lifecycleCfg)
+	configData, err := buildContainerConfig(d.Layout, agentDef, agentCommand, runtime.PrepareAgentCommandFor(d.Runtime, ""), tmuxConf, launch.OverlayOrResolvedMountPath(workdir), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, collectOverlayMounts(workdir, auxDirs), pr.setup, pr.autoCommitInterval, collectCopyDirs(workdir, auxDirs), opts.Name, runtime.TmuxSocketFor(d.Runtime, sandboxDir), pr.isolation, opts.VscodeTunnel, invocation.SanitizeTunnelName(opts.Name), lifecycleCfg)
 	if err != nil {
 		return nil, nil, "", "", fmt.Errorf("build %s: %w", store.RuntimeConfigFile, err)
 	}

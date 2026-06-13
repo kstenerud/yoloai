@@ -336,3 +336,44 @@ func PrepareAgentCommandFor(rt Runtime, cmd string) string {
 	}
 	return cmd
 }
+
+// ===== 4. Interactive session =====
+
+// InteractiveSession is implemented by backends that expose an interactive
+// terminal session (a tmux "main" session) for attach, prompt delivery, and
+// terminal capture. Optional: a headless backend with no interactive session
+// simply does not implement it, keeping the core Runtime contract session-free
+// (module-split Phase C-minimal).
+type InteractiveSession interface {
+	// TmuxSocket returns the tmux socket path for a sandbox, or "" if the
+	// backend uses the uid-based default socket. sandboxDir is the resolved
+	// sandbox directory path. The value is written into runtime-config.json
+	// at sandbox creation time so all exec'd processes (including
+	// non-interactive execs) find the same tmux server as the container init
+	// process.
+	TmuxSocket(sandboxDir string) string
+	// AttachCommand returns the command to exec interactively to attach to
+	// the tmux session in a running instance. tmuxSocket is the fixed socket
+	// path from runtime-config.json (empty = use default). rows and cols are
+	// the current terminal dimensions (0 = unknown). isolation is the sandbox
+	// isolation mode (e.g. IsolationModeContainerEnhanced).
+	AttachCommand(tmuxSocket string, rows, cols int, isolation IsolationMode) []string
+}
+
+// TmuxSocketFor returns the backend's tmux socket for sandboxDir, or "" when the
+// backend has no interactive session.
+func TmuxSocketFor(rt Runtime, sandboxDir string) string {
+	if s, ok := rt.(InteractiveSession); ok {
+		return s.TmuxSocket(sandboxDir)
+	}
+	return ""
+}
+
+// AttachCommandFor returns the interactive attach command, or (nil, false) when
+// the backend has no interactive session.
+func AttachCommandFor(rt Runtime, tmuxSocket string, rows, cols int, isolation IsolationMode) ([]string, bool) {
+	if s, ok := rt.(InteractiveSession); ok {
+		return s.AttachCommand(tmuxSocket, rows, cols, isolation), true
+	}
+	return nil, false
+}
