@@ -83,9 +83,10 @@ func Reset(ctx context.Context, d state.Deps, opts ResetOptions) (*ResetResult, 
 		opts.Restart = true
 	}
 
-	// Auto-upgrade to restart: Tart VMs store the work dir inside the VM,
-	// so in-place reset (host-side file access) is not possible.
-	if _, ok := d.Runtime.(runtime.WorkDirSetup); ok {
+	// Auto-upgrade to restart: a SandboxSide backend (e.g. Tart) keeps the work
+	// copy inside the sandbox, so in-place reset (host-side file access) is not
+	// possible.
+	if runtime.LocalityOf(d.Runtime) == runtime.LocalitySandboxSide {
 		opts.Restart = true
 	}
 
@@ -213,9 +214,9 @@ func resetCopyWorkdir(ctx context.Context, d state.Deps, sandboxName, sandboxDir
 		}
 		return sha, nil
 	}
-	// Tart VMs require the container to be running to exec setup commands inside the VM.
-	// Docker creates baseline on the host before starting the container.
-	if _, ok := d.Runtime.(runtime.WorkDirSetup); ok {
+	// SandboxSide backends (e.g. Tart) require the container running to exec setup
+	// commands inside the sandbox. HostSide backends baseline on the host before start.
+	if runtime.LocalityOf(d.Runtime) == runtime.LocalitySandboxSide {
 		// Defer baseline creation — executeVMWorkDirSetup will call it after container start
 		return "", nil
 	}
@@ -407,10 +408,10 @@ func prepareResetRestart(ctx context.Context, d state.Deps, opts ResetOptions, s
 // resetInPlace resets the workspace while the agent is still running.
 // Syncs files from host, recreates git baseline, and notifies the agent via tmux.
 func resetInPlace(ctx context.Context, d state.Deps, opts ResetOptions, meta *store.Environment, sandboxDir string) error {
-	// Tart VMs store the work directory inside the VM, not on the host.
-	// In-place reset requires direct host access to the work directory.
-	if _, ok := d.Runtime.(runtime.WorkDirSetup); ok {
-		return fmt.Errorf("in-place reset not supported for Tart VMs (work dir is inside VM)")
+	// In-place reset requires direct host access to the work copy; a SandboxSide
+	// backend (e.g. Tart) keeps it inside the sandbox, so it is unsupported there.
+	if runtime.LocalityOf(d.Runtime) == runtime.LocalitySandboxSide {
+		return fmt.Errorf("in-place reset not supported when the work copy is inside the sandbox (SandboxSide backend, e.g. Tart)")
 	}
 
 	workDir := store.WorkDir(sandboxDir, meta.Workdir().HostPath)

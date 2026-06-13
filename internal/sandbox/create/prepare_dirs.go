@@ -304,21 +304,21 @@ func createDirBaseline(ctx context.Context, g *git.Git, dir *DirSpec, workCopyDi
 }
 
 // createCopyBaseline creates the git baseline for a copy-mode workdir.
-// For backends implementing WorkDirSetup (e.g., Tart), baseline creation is
-// deferred until the VM starts, and this function returns empty SHA.
+// For SandboxSide backends (e.g., Tart) the work copy lives inside the sandbox,
+// so baseline creation is deferred until the VM starts and this returns empty SHA.
 func createCopyBaseline(ctx context.Context, g *git.Git, workCopyDir string, rt runtime.Runtime) (string, error) {
-	// For backends implementing WorkDirSetup (e.g., Tart), the work directory
-	// is copied to VirtioFS staging on the host, then moved to local VM storage
-	// and baselined inside the VM after start. For other backends (Docker),
-	// baseline is created on the host immediately after copying.
-	if _, ok := rt.(runtime.WorkDirSetup); ok {
-		// Tart: baseline will be created in VM after container start.
-		// Return empty SHA to signal deferred baseline creation.
-		slog.Debug("setupWorkdir: runtime implements WorkDirSetup, deferring baseline to VM",
+	// A SandboxSide backend (e.g. Tart) keeps the work copy inside the sandbox:
+	// it is staged via VirtioFS, moved to local VM storage, and baselined inside
+	// the VM after start. A HostSide backend (Docker) baselines on the host
+	// immediately after copying.
+	if runtime.LocalityOf(rt) == runtime.LocalitySandboxSide {
+		// Baseline will be created in-sandbox after start; return empty SHA to
+		// signal deferral.
+		slog.Debug("setupWorkdir: SandboxSide backend, deferring baseline to sandbox",
 			"backend", rt.Descriptor().Type)
 		return "", nil
 	}
-	slog.Debug("setupWorkdir: runtime does NOT implement WorkDirSetup, creating baseline on host",
+	slog.Debug("setupWorkdir: HostSide backend, creating baseline on host",
 		"backend", rt.Descriptor().Type)
 
 	// Docker: preserve original git history so the agent (and user) can

@@ -511,14 +511,23 @@ func (m *mockDockerRuntime) Descriptor() runtime.BackendDescriptor {
 		Type:         "mock",
 		BaseModeName: runtime.IsolationModeContainer,
 		Capabilities: runtime.BackendCaps{
-			FilesystemLocality: runtime.LocalitySandboxSide,
+			FilesystemLocality: runtime.LocalityHostSide,
 		},
 	}
 }
 
-// mockTartRuntime implements both runtime.Runtime and runtime.WorkDirSetup (Tart-like).
+// mockTartRuntime implements both runtime.Runtime and runtime.WorkDirSetup (Tart-like):
+// a SandboxSide backend whose baseline is deferred to the VM.
 type mockTartRuntime struct {
 	mockDockerRuntime
+}
+
+func (m *mockTartRuntime) Descriptor() runtime.BackendDescriptor {
+	return runtime.BackendDescriptor{
+		Type:         "mock-tart",
+		BaseModeName: runtime.IsolationModeVM,
+		Capabilities: runtime.BackendCaps{FilesystemLocality: runtime.LocalitySandboxSide},
+	}
 }
 
 func (m *mockTartRuntime) SetupWorkDirInVM(virtiofsStagingPath, vmLocalPath string) []string {

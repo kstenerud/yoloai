@@ -34,9 +34,14 @@ var (
 // dirs are processed. Returns nil if the runtime does not implement WorkDirSetup
 // (Docker/containerd).
 func ExecuteVMWorkDirSetup(ctx context.Context, rt runtime.Runtime, name, sandboxDir string, meta *store.Environment) error {
+	// Only SandboxSide backends keep the work copy inside the sandbox and need
+	// VM-side setup; HostSide backends (Docker/containerd) baseline on the host.
+	if runtime.LocalityOf(rt) != runtime.LocalitySandboxSide {
+		return nil
+	}
 	setupIntf, ok := rt.(runtime.WorkDirSetup)
 	if !ok {
-		return nil // Docker/containerd - no VM setup needed
+		return fmt.Errorf("yoloai bug: backend %s declares SandboxSide filesystem locality but does not implement WorkDirSetup", rt.Descriptor().Type)
 	}
 
 	instance := store.InstanceName(meta.Principal, name)

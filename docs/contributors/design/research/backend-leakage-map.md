@@ -45,16 +45,17 @@ call-if-present interface; no core-logic branch hangs on it).
 |---|---|---|
 | `GitExecer` | run git on host vs in-VM | **`FilesystemLocality{HostSide,SandboxSide}`** |
 | `WorkDirSetup` | host baseline vs VM-deferred baseline | …same |
-| `CopyMountResolver` | copy mount target = host path vs VM-local | …same |
-| `GuestMountResolver` | mount visible at container path vs re-rooted guest path | …same |
 | `StdioExecer` | can bridge stdio to an in-sandbox process (MCP) | **`StdioBridge bool`** |
 | `UsernsProvider` | exec user (`keep-id` vs `yoloai`) | **`UsernsMode string`** |
 | `IsolationCapabilityProvider` | host caps required per isolation mode | **`IsolationCaps map[IsolationMode][]HostCapability`** |
 
-`FilesystemLocality{HostSide,SandboxSide}` is the headline **decision property**; the four
-filesystem interfaces (`GitExecer`, `WorkDirSetup`, `CopyMountResolver`, `GuestMountResolver`)
-are the SandboxSide **operations** it gates — the property says "this backend needs in-VM
-handling", the interfaces remain the *how*.
+`FilesystemLocality{HostSide,SandboxSide}` is the headline **decision property**; it gates the
+two in-sandbox **operations** `GitExecer` (git) and `WorkDirSetup` (deferred baseline) — the
+property says "this backend keeps the work copy in the sandbox", the interfaces remain the
+*how*. **Refined by implementation (2026-06-13):** `CopyMountResolver`/`GuestMountResolver`
+are NOT locality decisions — they are reached only through `Resolve*For` helpers with an
+identity default (no branch), so they are *operations* and belong in the call-if-present list
+below, not here.
 
 **Two corrections the implementation audit forced (2026-06-13):**
 - It is **orthogonal to `BackendCaps.HostFilesystem`, not a unification.** `HostFilesystem`
@@ -65,13 +66,17 @@ handling", the interfaces remain the *how*.
   *and* tart), **not** a locality inference. The real implicit locality detection was the
   `rt.(GitExecer)` type-assertion in `git.NewSandbox`.
 
-**First cut landed (commit on this branch):** `FilesystemLocality` added to `BackendCaps`,
-declared by all six backends (tart=SandboxSide, rest=HostSide), and `git.NewSandbox` now
-routes on the property (`LocalityOf(rt) == SandboxSide`) instead of type-asserting
-`GitExecer` — with a conformance guard (SandboxSide ⟹ must implement GitExecer) and a test
-proving the property, not the interface, decides. The remaining three SandboxSide operations
-(`WorkDirSetup`/`CopyMountResolver`/`GuestMountResolver`) and the host-side change probe are
-the next increments.
+**Landed (commits on this branch):** `FilesystemLocality` added to `BackendCaps`, declared by
+all six backends (tart=SandboxSide, rest=HostSide). It now drives **both** locality decisions:
+`git.NewSandbox` routing (replacing the `GitExecer` type-assert) **and** the baseline-deferral
+/ in-place-reset decisions in `prepare_dirs.go`/`vmworkdir.go`/`reset.go` (replacing five
+`rt.(WorkDirSetup)` type-asserts) — each with a conformance guard (SandboxSide ⟹ implements
+the operation) and tests proving the property, not the interface, decides. A test-mock
+cleanup followed: mocks now declare locality matching the backend model they represent
+(Docker-like = HostSide, Tart-like = SandboxSide) — a blanket "implements GitExec ⟹
+SandboxSide" was too coarse. **Remaining:** the host-side change probe (`status.go`,
+behavior-changing on Tart → needs Tart validation) and the two non-locality decision-drivers
+(`StdioExecer`/`UsernsProvider`).
 
 ### Optional operations → stay optional interfaces (call-if-present)
 
@@ -82,9 +87,10 @@ their presence (it just calls them if available, for `doctor`/`disk`/`prune`/log
 `AgentCommandPreparer` is borderline — a deterministic command transform already partly
 captured by `BackendDescriptor.AgentLaunchPrefix`; could fold into a descriptor field.
 
-So the reducible target is **~6 decision-driving interfaces → ~3 properties**, dominated
-by `FilesystemLocality`. The other ~7 are legitimately optional and need no change beyond,
-optionally, a `Supports*` flag for symmetry.
+So the reducible target is **~4 decision-driving interfaces → ~3 properties**, dominated
+by `FilesystemLocality` (which gates `GitExecer` + `WorkDirSetup` — both now converted). The
+other ~9 (incl. the two path resolvers) are legitimately optional operations and need no
+change beyond, optionally, a `Supports*` flag for symmetry.
 
 ## The existing capability seed (`BackendDescriptor` / `BackendCaps`)
 
@@ -99,8 +105,8 @@ above rather than inventing a new mechanism — the descriptor is already the ri
 - **Reclassify the backend axis as "mostly clean, mostly already-sealed."** Like the agent
   axis, the substrate is further along than feared: identity is hidden, git execution is
   routed. The work is **naming implicit properties**, not untangling deep coupling.
-- **`FilesystemLocality` is the one property worth the effort** — it gates the four
-  filesystem interfaces (and in the first cut replaced the `GitExecer` type-assert), and it
+- **`FilesystemLocality` is the one property worth the effort** — it gates the two in-sandbox
+  operations `GitExecer` and `WorkDirSetup` (it has replaced both their type-asserts), and it
   makes the catalog's "host probe blind to in-VM workdir" a typed fact instead of tribal
   knowledge. (It is orthogonal to `HostFilesystem`, and distinct from the `mountPath !=
   hostPath` copy-relocation inference — see the corrections above.)

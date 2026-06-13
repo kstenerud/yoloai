@@ -165,14 +165,16 @@ dispatch, `WorkDirSetup` deferred baselines, `ResolveCopyMountFor`, and
 guest-mount-path translation. The refinement knows about Tart.
 
 **The visible symptom is optional-interface proliferation** — **14** type-asserted
-optional interfaces on the runtime (`runtime_optional.go`). But the map showed only
-**~6 are decision-driving** (a higher layer branches *core logic* on them):
-`GitExecer`/`WorkDirSetup`/`CopyMountResolver`/`GuestMountResolver` (all facets of
-filesystem locality), plus `StdioExecer` and `UsernsProvider`. The other ~7
-(`VMCensusReporter`, `DiskUsageReporter`, `CachePruner`, `StaleBasePruner`, `LogTailer`,
-`AppleSimulatorRuntimes`, `AgentCommandPreparer`) are legitimately optional *operations* —
-call-if-present diagnostics/maintenance, no logic branch. So the leakage metric is "~6
-decision-driving detections," not 14.
+optional interfaces on the runtime (`runtime_optional.go`). But only **~4 are
+decision-driving** (a higher layer branches *core logic* on their presence):
+**`GitExecer`** and **`WorkDirSetup`** (both = the `FilesystemLocality` decision — *both now
+converted to the property*), plus `StdioExecer` and `UsernsProvider`. Refined by
+implementation: `CopyMountResolver`/`GuestMountResolver` turned out to be **operations, not
+decisions** — reached only through `Resolve*For` helpers with an identity default, no
+branch — so they join the ~9 legitimately-optional *operations* (`VMCensusReporter`,
+`DiskUsageReporter`, `CachePruner`, `StaleBasePruner`, `LogTailer`, `AppleSimulatorRuntimes`,
+`AgentCommandPreparer`, the two resolvers). So the reducible leak was ~4 detections, of
+which the two locality ones are done; `StdioExecer`/`UsernsProvider` remain.
 
 **Why this is the sharpest risk to the split.** A module boundary that looks clean
 but doesn't seal these seams is *worse* than today: it presents a false abstraction
@@ -230,23 +232,25 @@ capability — by backend-identity, by `rt.(SomeInterface)` type-assertion, or b
 inference (`mountPath != hostPath`). It must read a named, semantic property.** Identity
 tokens above the runtime are a defect (grep-checkable) — the map found **zero**, so that
 battle is already won; the live front is capability-*detection*. Optional *operations*
-(prune/logs/census) may remain call-if-present. The headline property, `FilesystemLocality`,
-is the **decision** that gates the four SandboxSide filesystem *operations*
-(`GitExecer`/`WorkDirSetup`/`CopyMountResolver`/`GuestMountResolver`). It is **orthogonal to
+(prune/logs/census, and — confirmed by implementation — the `CopyMountResolver`/
+`GuestMountResolver` path resolvers, which have identity defaults) may remain call-if-present.
+The headline property, `FilesystemLocality`, is the **decision** that gates the two in-sandbox
+operations `GitExecer` (git) and `WorkDirSetup` (deferred baseline). It is **orthogonal to
 `BackendCaps.HostFilesystem`** (a state-location axis — seatbelt is HostFilesystem=true yet
 HostSide), and `mountPath != hostPath` is a separate copy-relocation concern, not locality.
-**First cut landed** (this branch): the property is declared by all backends and now drives
-git routing in `git.NewSandbox` (replacing the `GitExecer` type-assertion). The remaining
-SandboxSide operations and the host-assuming change-probe (`status.go`, which the catalog
-confirms is blind to the in-VM workdir on Tart) are the next increments.
+**Landed (this branch):** the property is declared by all backends and now drives **both** the
+git routing in `git.NewSandbox` and the baseline-deferral / in-place-reset decisions in
+`prepare_dirs.go`/`vmworkdir.go`/`reset.go` (replacing five `rt.(WorkDirSetup)` type-asserts).
+The host-assuming change-probe (`status.go`, blind to the in-VM workdir on Tart) and the two
+remaining non-locality decision-drivers (`StdioExecer`/`UsernsProvider`) are next.
 
 **This flips the interface's design direction** — from bottom-up (each backend's quirks
 bubble up as an optional type-asserted interface or a name-check) to top-down (enumerate
 the *decisions* higher layers make that depend on backend variance, name the property
 behind each; the interface *is* that property set plus the operations). `BackendDescriptor`/
 `BackendCaps` is the seed: one property can replace several scattered *detections*
-(`FilesystemLocality` gates the four filesystem interfaces and already replaced the
-`GitExecer` type-assert — though it is **orthogonal to** `HostFilesystem`, a separate
+(`FilesystemLocality` gates the two in-sandbox operations `GitExecer` + `WorkDirSetup` and
+already replaced both their type-asserts — though it is **orthogonal to** `HostFilesystem`, a separate
 state-location axis, not a facet of it), and the grab-bag of optional interfaces shrinks to
 the genuinely-optional *operations*.
 
@@ -370,14 +374,17 @@ Each phase is independently mergeable and green under `make check`.
   backend-leakage map (**done** — [research/backend-leakage-map.md](../research/backend-leakage-map.md));
   classify each leak *seal | model-as-property | irreducible*, and re-derive the backend
   interface as the resulting **property set** (starting with `FilesystemLocality` — which is
-  orthogonal to `HostFilesystem`, not a unification). **First cut done:** the property is
-  declared by all backends and drives git routing in `git.NewSandbox` (replacing the
-  `GitExecer` type-assert), with a conformance guard + test. **Remaining:** the other three
-  SandboxSide *operations* (`WorkDirSetup`/`CopyMountResolver`/`GuestMountResolver`); the
-  host-side change probe in `status.go` (behavior-changing on Tart → needs Tart validation);
-  a grep-level "no backend-identity above the runtime" fence; and the first conformance-suite
-  slice keyed off the properties across docker/tart/seatbelt. This phase decides where the
-  substrate/refinement boundary can honestly fall — the cut below depends on it.
+  orthogonal to `HostFilesystem`, not a unification). **Done so far:** the property is
+  declared by all backends and drives **git routing** (`git.NewSandbox`) and the
+  **baseline-deferral / in-place-reset** decisions (`prepare_dirs.go`/`vmworkdir.go`/
+  `reset.go` — five `rt.(WorkDirSetup)` type-asserts), each with a conformance guard + tests.
+  `CopyMountResolver`/`GuestMountResolver` were found to be *operations* (identity default),
+  not conversions. **Remaining:** the host-side change probe in `status.go` (behavior-changing
+  on Tart → needs Tart validation); the two non-locality decision-drivers
+  (`StdioExecer`/`UsernsProvider`); a grep-level "no backend-identity above the runtime" fence;
+  and the first conformance-suite slice keyed off the properties across docker/tart/seatbelt.
+  This phase decides where the substrate/refinement boundary can honestly fall — the cut below
+  depends on it.
 - **A — close the import edges.** Relocate `AgentType`/`Model` and the idle/agent-launch
   config out of substrate packages; `store` and the substrate half of `runtimeconfig` no
   longer import `agent`. (Smallest, highest-signal; proves the substrate can be agent-free.)

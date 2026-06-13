@@ -33,6 +33,10 @@ type lifecycleMockRuntime struct {
 	inspectFn func(ctx context.Context, name string) (runtime.InstanceInfo, error)
 	execFn    func(ctx context.Context, name string, cmd []string, user string) (runtime.ExecResult, error)
 	gitExecFn func(ctx context.Context, name, workDir string, args ...string) (string, error)
+	// locality controls the backend's declared FilesystemLocality; zero value
+	// (LocalityHostSide) suits host-side reset/baseline tests, SandboxSide the
+	// VM tests (git dispatched in-sandbox, host probe blind).
+	locality runtime.FilesystemLocality
 }
 
 func (m *lifecycleMockRuntime) Stop(ctx context.Context, name string) error {
@@ -117,7 +121,7 @@ func (m *lifecycleMockRuntime) Descriptor() runtime.BackendDescriptor {
 			NetworkIsolation:   true,
 			OverlayDirs:        true,
 			CapAdd:             true,
-			FilesystemLocality: runtime.LocalitySandboxSide,
+			FilesystemLocality: m.locality,
 		},
 	}
 }

@@ -63,7 +63,7 @@ func (f *fakeRuntime) Descriptor() runtime.BackendDescriptor {
 			NetworkIsolation:   true,
 			OverlayDirs:        true,
 			CapAdd:             true,
-			FilesystemLocality: runtime.LocalitySandboxSide,
+			FilesystemLocality: runtime.LocalityHostSide,
 		},
 	}
 }
