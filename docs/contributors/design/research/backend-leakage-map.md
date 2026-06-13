@@ -47,11 +47,19 @@ ladder in the plan doc). The "Resolution" column reflects that:
 
 | Interface | Drives | Resolution |
 |---|---|---|
-| `GitExecer` | run git on host vs in-VM | **`FilesystemLocality`** property — the change-probe consequence ripples (declared fact also feeds conformance/messaging) |
-| `WorkDirSetup` | host baseline vs VM-deferred baseline | `FilesystemLocality` (done); a `BaselineStrategy` *injection* is the tighter form |
-| `StdioExecer` | bridge stdio to an in-sandbox process (MCP) | **inject** a bridge (no-op/error impl); caller handles "unsupported" via the error — *not* a `bool` flag |
-| `UsernsProvider` | exec user (`keep-id` vs `yoloai`) | already **injection-of-a-value** — the caller just uses the returned mode; no property/branch |
-| `IsolationCapabilityProvider` | host caps required per isolation mode | a returned value (injection) or a `map` property |
+| `GitExecer` | run git on host vs in-VM | **`FilesystemLocality`** property — the change-probe consequence ripples (declared fact also feeds conformance/messaging). **DONE** (rung-1 injection at `git.NewSandbox`) |
+| `WorkDirSetup` | host baseline vs VM-deferred baseline | `FilesystemLocality` — **DONE**; a `BaselineStrategy` *injection* is the tighter form (could-be-tighter) |
+| `StdioExecer` | bridge stdio to an in-sandbox process (MCP) | **already correct** — one wrapper (`Engine.StdioExec`) returns a typed *unsupported* error; the MCP proxy just calls a public exec verb and lets it surface. No higher layer branches. **No change.** |
+| `UsernsProvider` | exec user (`keep-id` vs `yoloai`) | **already injection-of-a-value** — the caller uses the returned mode; no property/branch. **No change.** |
+| `IsolationCapabilityProvider` | host caps required per isolation mode | **already value-injection** — `RequiredCapabilitiesFor` returns the cap list, validated generically. **No change.** |
+
+**Audit conclusion (2026-06-13):** only `GitExecer` + `WorkDirSetup` were genuine
+decision-driving leaks — both now resolved via `FilesystemLocality`. The other five
+(`CopyMountResolver`, `GuestMountResolver`, `UsernsProvider`, `StdioExecer`,
+`IsolationCapabilityProvider`) were *already* operations or value-injection. The original
+"~6 decision-driving" over-counted by tunnel-visioning on type-asserts; the real number was
+**2**. The decision-driving conversion work is complete; what remains is the host-side
+change-probe (an injected `ChangeProbe`, Tart-gated), a grep fence, and a conformance slice.
 
 `FilesystemLocality{HostSide,SandboxSide}` is the headline **decision property**; it gates the
 two in-sandbox **operations** `GitExecer` (git) and `WorkDirSetup` (deferred baseline) — the

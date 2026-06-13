@@ -223,11 +223,11 @@ rule):
 - **Inject the implementation (preferred).** Shape the interface so the *decision doesn't
   need to be made*: the right strategy is wired in at the boundary, and the call site calls
   one method with no `if`. `git.NewSandbox` already does this — diff/apply never branch on
-  locality; they hold a `*Git` and call `g.Run`. Pending items that fit injection rather
-  than a flag: `UsernsProvider` (a value provider — the caller just *uses* the returned
-  mode), `StdioExecer` (inject a bridge with a no-op/error impl; the caller handles
-  "unsupported" via the error), and the host change-probe (an injected `ChangeProbe`:
-  host-reading vs backend-routed).
+  locality; they hold a `*Git` and call `g.Run`. Audit outcome: `UsernsProvider`,
+  `StdioExecer`, and `IsolationCapabilityProvider` were *already* injection/value-providers
+  (the caller uses a returned value, or one wrapper returns a typed "unsupported" error) —
+  **no change needed**. The remaining injection target is the host change-probe (an injected
+  `ChangeProbe`: host-reading vs backend-routed) — Tart-gated.
 - **Seal inside the backend** — a sibling of injection: the backend's own method does the
   right thing; the caller never knows there's variance (mount-path translation, exec
   stabilization delays, VM-wedge recovery, "run git against the work copy").
@@ -398,11 +398,13 @@ Each phase is independently mergeable and green under `make check`.
   declared by all backends and drives **git routing** (`git.NewSandbox`) and the
   **baseline-deferral / in-place-reset** decisions (`prepare_dirs.go`/`vmworkdir.go`/
   `reset.go` — five `rt.(WorkDirSetup)` type-asserts), each with a conformance guard + tests.
-  `CopyMountResolver`/`GuestMountResolver` were found to be *operations* (identity default),
-  not conversions. **Remaining:** the host-side change probe in `status.go` (behavior-changing
-  on Tart → needs Tart validation); the two non-locality decision-drivers
-  (`StdioExecer`/`UsernsProvider`); a grep-level "no backend-identity above the runtime" fence;
-  and the first conformance-suite slice keyed off the properties across docker/tart/seatbelt.
+  `CopyMountResolver`/`GuestMountResolver`/`UsernsProvider`/`StdioExecer`/
+  `IsolationCapabilityProvider` were all found to be *operations* / value-injection already in
+  the right shape — **no conversions** (the "~6 decision-driving" over-counted; the real number
+  was 2). **Remaining:** the host-side change probe in `status.go` (an injected `ChangeProbe`;
+  behavior-changing on Tart → needs Tart validation); a grep-level "no backend-identity above
+  the runtime" fence; and the first conformance-suite slice keyed off the properties across
+  docker/tart/seatbelt.
   This phase decides where the substrate/refinement boundary can honestly fall — the cut below
   depends on it.
 - **A — close the import edges.** Relocate `AgentType`/`Model` and the idle/agent-launch
