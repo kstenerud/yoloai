@@ -35,15 +35,13 @@ func (g *gitExecerRuntime) Descriptor() runtime.BackendDescriptor {
 }
 
 // hostSideExecerRuntime implements GitExec yet declares HostSide locality —
-// used to prove the dispatch decision is the FilesystemLocality property, not
+// used to prove the injection decision is the FilesystemLocality property, not
 // the mere presence of GitExecer.
 type hostSideExecerRuntime struct {
 	runtime.Runtime
-	dispatched bool
 }
 
 func (g *hostSideExecerRuntime) GitExec(_ context.Context, _, _ string, _ ...string) (string, error) {
-	g.dispatched = true
 	return "dispatched", nil
 }
 
@@ -66,37 +64,37 @@ func TestNewSandbox_DispatchesToGitExecer(t *testing.T) {
 	assert.Equal(t, []string{"status", "--porcelain"}, rt.lastArgs)
 }
 
-// TestNewSandbox_FallsBackToHostGit verifies the sandbox scope runs host git
-// for backends that don't implement GitExecer (Docker, containerd, Seatbelt).
-func TestNewSandbox_FallsBackToHostGit(t *testing.T) {
-	dir := t.TempDir()
-	initGitRepo(t, dir)
-	writeTestFile(t, dir, "f", "v1")
-	gitAdd(t, dir, ".")
-	gitCommit(t, dir, "init")
+// TestNewSandbox_InjectsExecerByLocality verifies the factory injects the
+// executor by FilesystemLocality (decided once), not by GitExecer presence: a
+// SandboxSide backend gets the dispatching executor; a HostSide backend (even
+// one that implements GitExec) and a nil runtime get the host executor.
+func TestNewSandbox_InjectsExecerByLocality(t *testing.T) {
+	layout := config.NewLayout("/home/u/.yoloai")
 
-	// A nil-runtime sandbox falls back to host git; build env from the test env
-	// via the host execer the sandbox scope wraps.
-	g := &Git{sandboxExec{env: testEnv(), rt: nil, name: "box"}}
-	sha, err := g.HeadSHA(context.Background(), dir)
-	require.NoError(t, err)
-	assert.Len(t, sha, 40)
+	sb := NewSandbox(layout, &gitExecerRuntime{}, "box")
+	_, ok := sb.e.(sandboxExec)
+	assert.True(t, ok, "SandboxSide backend must get the sandbox (dispatching) executor")
+
+	hs := NewSandbox(layout, &hostSideExecerRuntime{}, "box")
+	_, ok = hs.e.(hostExec)
+	assert.True(t, ok, "HostSide backend gets the host executor even though it implements GitExec")
+
+	nilrt := NewSandbox(layout, nil, "box")
+	_, ok = nilrt.e.(hostExec)
+	assert.True(t, ok, "nil runtime gets the host executor")
 }
 
-// TestNewSandbox_HostSideDoesNotDispatch verifies the FilesystemLocality
-// property — not the presence of GitExecer — decides routing: a HostSide
-// backend runs host git even though it implements GitExec.
-func TestNewSandbox_HostSideDoesNotDispatch(t *testing.T) {
+// TestHostExec_RunsHostGit verifies the host executor (what NewSandbox injects
+// for a HostSide backend) runs real host git.
+func TestHostExec_RunsHostGit(t *testing.T) {
 	dir := t.TempDir()
 	initGitRepo(t, dir)
 	writeTestFile(t, dir, "f", "v1")
 	gitAdd(t, dir, ".")
 	gitCommit(t, dir, "init")
 
-	rt := &hostSideExecerRuntime{}
-	g := &Git{sandboxExec{env: testEnv(), rt: rt, name: "box"}}
+	g := &Git{hostExec{env: testEnv()}}
 	sha, err := g.HeadSHA(context.Background(), dir)
 	require.NoError(t, err)
 	assert.Len(t, sha, 40)
-	assert.False(t, rt.dispatched, "HostSide backend must run host git even though it implements GitExecer")
 }

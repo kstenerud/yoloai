@@ -41,15 +41,17 @@ func NewHostWithEnv(env []string) *Git {
 	return &Git{hostExec{env: env}}
 }
 
-// NewSandbox returns a sandbox-scoped Git. If rt implements runtime.GitExecer
-// (e.g. Tart, which runs git in-VM), invocations dispatch there; otherwise they
-// fall back to host git using layout.Env().EnvForGitInvocation().
+// NewSandbox returns a sandbox-scoped Git with the executor *injected* by the
+// backend's FilesystemLocality — decided once, here. A SandboxSide backend (work
+// copy inside the sandbox, e.g. Tart) dispatches git through the backend; a
+// HostSide backend (and a nil runtime) runs host git. Call sites and the
+// executors never branch on locality again.
 func NewSandbox(layout config.Layout, rt runtime.Runtime, name string) *Git {
-	return &Git{sandboxExec{
-		env:  layout.Env().EnvForGitInvocation(),
-		rt:   rt,
-		name: name,
-	}}
+	env := layout.Env().EnvForGitInvocation()
+	if runtime.LocalityOf(rt) == runtime.LocalitySandboxSide {
+		return &Git{sandboxExec{env: env, rt: rt, name: name}}
+	}
+	return &Git{hostExec{env: env}}
 }
 
 // ─── low-level ───────────────────────────────────────────────────────────────
@@ -124,9 +126,11 @@ func (h hostExec) run(ctx context.Context, workDir string, stdin []byte, args ..
 	return stdoutBuf.String(), nil
 }
 
-// sandboxExec dispatches to GitExecer (e.g. Tart) when available, otherwise
-// falls back to hostExec. Sandbox git ops do not pass stdin (apply/am are
-// host-only operations in the current code paths).
+// sandboxExec is the SandboxSide strategy: it dispatches git through the
+// backend (GitExecer) so it runs against the in-sandbox work copy. It is
+// constructed only for SandboxSide backends (see NewSandbox), so it never
+// re-checks locality. Sandbox git ops are stdin-free; a stdin-bearing op
+// (apply/am) falls back to host git.
 type sandboxExec struct {
 	env  []string
 	rt   runtime.Runtime
@@ -134,13 +138,7 @@ type sandboxExec struct {
 }
 
 func (s sandboxExec) run(ctx context.Context, workDir string, stdin []byte, args ...string) (string, error) {
-	// FilesystemLocality is the named decision: a SandboxSide backend keeps its
-	// work copy inside the sandbox (e.g. Tart's VM), so git must run there via
-	// GitExecer; a HostSide backend runs git on the host. This replaces
-	// detecting the capability by type-asserting GitExecer — the property
-	// decides, GitExecer is merely the operation that carries it out. Sandbox
-	// ops are stdin-free; a future caller passing stdin falls through to host.
-	if runtime.LocalityOf(s.rt) == runtime.LocalitySandboxSide && stdin == nil {
+	if stdin == nil {
 		ge, ok := s.rt.(runtime.GitExecer)
 		if !ok {
 			return "", fmt.Errorf("yoloai bug: backend %s declares SandboxSide filesystem locality but does not implement GitExecer", s.rt.Descriptor().Type)
