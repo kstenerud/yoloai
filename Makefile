@@ -157,7 +157,7 @@ base-image: build
 integration:
 	@if docker info >/dev/null 2>&1; then \
 		$(MAKE) base-image && \
-		go test -tags=integration -v -count=1 -timeout=10m ./internal/sandbox/ ./internal/runtime/docker/ ./internal/cli/; \
+		go test -tags=integration -v -count=1 -timeout=10m ./internal/orchestrator/ ./internal/runtime/docker/ ./internal/cli/; \
 	else \
 		echo "Docker unavailable — skipping Docker integration tests"; \
 	fi

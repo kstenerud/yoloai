@@ -79,7 +79,7 @@ def write_status(status_file, status, exit_code=None):
     log instead, so the monitor never reads back its own writes here.
     """
     # This schema_version must equal agentStatusSchemaVersion in
-    # internal/sandbox/status/status.go (fenced by schema_version_test.go).
+    # internal/orchestrator/status/status.go (fenced by schema_version_test.go).
     data = {
         "schema_version": 1,
         "status": status,

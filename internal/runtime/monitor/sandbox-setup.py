@@ -126,8 +126,8 @@ def signal_secrets_consumed(yoloai_dir):
 
 
 # AGENT_STATUS_SCHEMA_VERSION must equal agentStatusSchemaVersion in
-# internal/sandbox/status/status.go. The cross-language fence in
-# internal/sandbox/status/schema_version_test.go asserts the agreement.
+# internal/orchestrator/status/status.go. The cross-language fence in
+# internal/orchestrator/status/schema_version_test.go asserts the agreement.
 AGENT_STATUS_SCHEMA_VERSION = 1
 
 
