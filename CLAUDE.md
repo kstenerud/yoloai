@@ -20,7 +20,7 @@ Docs are organized by **role** — the layer you're operating in. Pick the tier,
 
 `docs/contributors/` — **contributors** (working on yoloAI itself):
 
-- `architecture/README.md` — Code navigation guide: package map, file index, key types, command→code map, data flows, "where to change" recipes, testing. (`overview.md` is the conceptual-layering companion.) Keep in sync when architecture changes.
+- `architecture/README.md` — Index for the architecture docs; routes to the topic files below. Each is a single subject: `code-map.md` (package map, file index, key types, command→code map), `data-flows.md` (runtime call chains), `host-layout.md` (`~/.yoloai/` on-disk structure), `where-to-change.md` (change recipes), `testing.md` (test tiers, conformance, infra), and `overview.md` (the conceptual-layering companion). Keep in sync when architecture changes.
 - `principles/README.md` — Index of principle docs (general / development / testing / security-sandbox). Principles explain **why** — cite the relevant section when you make a non-obvious design or code choice. A principle wins over any conflicting standard.
 - `standards/README.md` — Index of per-technology standards: `go.md`, `cli.md`, `shell.md`, `python.md`, `makefile.md`, `dockerfile.md`, `markdown.md`. Standards explain **what** and **how**.
 - `decisions/` — Append-only D-numbered decision log. `README.md` indexes the dir; `working-notes.md` is the live log (D45 onward) and `working-notes-archive.md` holds the older D1–D44. New non-trivial decisions land in `working-notes.md` first; principles and standards cite D-entries by number. Retroactive entries are flagged `(retroactive)`.
