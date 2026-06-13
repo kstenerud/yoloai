@@ -12,7 +12,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/sandbox/launch"
 	"github.com/kstenerud/yoloai/internal/sandbox/state"
-	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/internal/store"
 )
 
 // Stop stops a sandbox's instance.

@@ -20,7 +20,7 @@ import (
 	mountspkg "github.com/kstenerud/yoloai/internal/sandbox/mounts"
 	"github.com/kstenerud/yoloai/internal/sandbox/provision"
 	"github.com/kstenerud/yoloai/internal/sandbox/state"
-	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/internal/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
 

@@ -13,7 +13,7 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/internal/store"
 )
 
 // GenerateContext builds a markdown description of the sandbox environment

@@ -10,7 +10,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
 	_ "github.com/kstenerud/yoloai/internal/runtime/tart" // registers tart descriptor for VMRuntimeDir test
-	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/internal/store"
 )
 
 func TestGenerateContext_AllFields(t *testing.T) {

@@ -12,7 +12,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/sandbox/invocation"
 	"github.com/kstenerud/yoloai/internal/sandbox/runtimeconfig"
-	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/internal/store"
 )
 
 // loadContainerConfig reads and parses runtime-config.json from a sandbox dir.

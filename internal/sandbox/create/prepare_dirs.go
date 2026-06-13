@@ -19,7 +19,7 @@ import (
 	provision "github.com/kstenerud/yoloai/internal/sandbox/provision"
 	"github.com/kstenerud/yoloai/internal/sandbox/runtimeconfig"
 	"github.com/kstenerud/yoloai/internal/sandbox/state"
-	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/internal/store"
 	"github.com/kstenerud/yoloai/internal/workspace"
 	"github.com/kstenerud/yoloai/yoerrors"
 )

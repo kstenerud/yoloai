@@ -22,7 +22,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/sandbox/runtimeconfig"
 	"github.com/kstenerud/yoloai/internal/sandbox/state"
 	"github.com/kstenerud/yoloai/internal/sandbox/status"
-	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/internal/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
 

@@ -19,7 +19,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox/provision"
 	"github.com/kstenerud/yoloai/internal/sandbox/state"
-	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/internal/store"
 	"github.com/kstenerud/yoloai/internal/testutil"
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/stretchr/testify/assert"

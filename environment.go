@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/kstenerud/yoloai/internal/sandbox"
-	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/internal/store"
 )
 
 // Environment is the curated read-model of a sandbox captured at creation time,

@@ -7,7 +7,7 @@ package sandbox
 import (
 	"context"
 
-	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/internal/store"
 )
 
 // SaveNetworkAllowlist persists the sandbox's environment.json and the matching

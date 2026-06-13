@@ -10,7 +10,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/git"
 	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/internal/store"
 )
 
 // TagOutcome is the result of transferring one tag to the host. Applied is true

@@ -14,7 +14,7 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox"
-	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/internal/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
 

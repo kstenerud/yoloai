@@ -28,7 +28,7 @@ import (
 	provision "github.com/kstenerud/yoloai/internal/sandbox/provision"
 	"github.com/kstenerud/yoloai/internal/sandbox/runtimeconfig"
 	"github.com/kstenerud/yoloai/internal/sandbox/state"
-	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/internal/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
 
@@ -67,7 +67,7 @@ const (
 type DirMode = store.DirMode
 
 // Re-exported DirMode constants. Canonical definitions in
-// internal/sandbox/store/dirmode.go.
+// internal/store/dirmode.go.
 const (
 	DirModeCopy    = store.DirModeCopy
 	DirModeOverlay = store.DirModeOverlay

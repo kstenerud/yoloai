@@ -13,7 +13,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/sandbox/create"
 	"github.com/kstenerud/yoloai/internal/sandbox/lifecycle"
 	"github.com/kstenerud/yoloai/internal/sandbox/state"
-	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/internal/store"
 )
 
 // Start launches (or relaunches) the container for an existing sandbox. Opens

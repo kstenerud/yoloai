@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kstenerud/yoloai/internal/git"
-	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/internal/store"
 )
 
 // createCopySandbox sets up a sandbox directory structure with a :copy mode

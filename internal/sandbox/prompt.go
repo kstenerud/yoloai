@@ -7,7 +7,7 @@ import (
 	"os"
 
 	"github.com/kstenerud/yoloai/internal/config"
-	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/internal/store"
 )
 
 // ReadStoredPrompt returns the prompt text persisted for a sandbox. The bool

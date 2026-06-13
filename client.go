@@ -63,7 +63,7 @@ import (
 	_ "github.com/kstenerud/yoloai/internal/runtime/seatbelt" // register backend
 	_ "github.com/kstenerud/yoloai/internal/runtime/tart"     // register backend
 	"github.com/kstenerud/yoloai/internal/sandbox"
-	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/internal/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
 

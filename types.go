@@ -9,7 +9,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox"
-	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/internal/store"
 )
 
 // BackendType names a runtime backend. Open-set typed string —
@@ -89,7 +89,7 @@ const (
 // components. Closed set — adding a new source requires both a
 // constant here and a producer in the implementation.
 //
-// Re-exported (type alias) from internal/sandbox/store. Q-Y design
+// Re-exported (type alias) from internal/store. Q-Y design
 // promised this exposure at the yoloai root so future AgentLogsOptions.Sources
 // callers don't need to reach into internal packages to construct or
 // switch over a typed source list.

@@ -14,7 +14,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox/state"
-	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/internal/store"
 )
 
 // CreateSecretsDir creates a temp directory with one file per env var / API key.

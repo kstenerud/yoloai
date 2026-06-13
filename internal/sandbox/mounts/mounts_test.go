@@ -13,7 +13,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox/state"
-	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/internal/store"
 )
 
 func TestBuild_CopyMode(t *testing.T) {

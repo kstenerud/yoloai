@@ -9,7 +9,7 @@ import (
 	"fmt"
 
 	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/internal/store"
 )
 
 // CaptureTerminal returns the rendered agent terminal — what `yoloai

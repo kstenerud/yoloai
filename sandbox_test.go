@@ -17,7 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/internal/store"
 )
 
 // execExitError is the Sandbox.Exec boundary that gives embedders one public
