@@ -1806,6 +1806,68 @@ def _sweep_smoke_orphans(ctx: RunContext, which: str, label: str) -> None:
     print()
 
 
+def parse_vm_census(doctor_json: dict[str, Any]) -> Optional[tuple[int, int, list[str]]]:
+    """Extract (limit, in_use, occupant_names) from `yoloai doctor --json`.
+
+    Returns None when the host reports no VM census — non-macOS, tart not
+    installed, or a doctor that predates the field — which the caller treats as
+    "no macOS VM limit to honor". `in_use` counts every occupied slot, including
+    orphaned Virtualization XPC processes that `tart list` can't see (see
+    backend-idiosyncrasies: orphaned Virtualization processes consume the limit).
+    """
+    census = doctor_json.get("vm_census")
+    if not isinstance(census, dict):
+        return None
+    limit = census.get("limit")
+    in_use = census.get("in_use")
+    if not isinstance(limit, int) or not isinstance(in_use, int):
+        return None
+    names = [
+        s["vm_name"]
+        for s in census.get("slots", [])
+        if isinstance(s, dict) and s.get("vm_name")
+    ]
+    return limit, in_use, names
+
+
+def plan_tart_slots(free: int, requested_concurrency: int) -> int:
+    """How many tart VMs the harness may run at once given `free` host slots.
+
+    0 means the host is fully occupied — the caller skips (base) or fails loudly
+    (full) the tart tests. Otherwise the cap is the smaller of what's free and
+    what was requested, so the matrix runs serially within the spare slots rather
+    than over-scheduling into `The number of VMs exceeds the system limit`.
+    """
+    if free <= 0:
+        return 0
+    return min(free, max(1, requested_concurrency))
+
+
+def query_tart_slots(ctx: RunContext) -> Optional[tuple[int, int, list[str]]]:
+    """(limit, in_use, occupant_names) from `yoloai doctor --json`, or None.
+
+    None on any inability to determine the census (doctor missing, timed out, or
+    unparseable, or the host has no VM limit) — the caller then proceeds without
+    a tart-slot constraint rather than letting a diagnostic hiccup gate the run.
+    doctor exits non-zero when the limit is reached but still prints the JSON, so
+    the return code is ignored.
+    """
+    try:
+        result = subprocess.run(
+            [ctx.yoloai_bin, "doctor", "--json"],
+            capture_output=True, timeout=30, text=True,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return None
+    try:
+        data = json.loads(result.stdout)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    return parse_vm_census(data)
+
+
 def _prerun_prune(ctx: RunContext) -> None:
     """Run `yoloai system prune --yes` once before tests start.
 
@@ -3296,6 +3358,50 @@ def main() -> int:
     # on the same wedge that caused the leak in the first place.
     _prerun_prune(ctx)
 
+    # macOS caps concurrent macOS-guest VMs host-wide (Virtualization.framework,
+    # typically 2). Each tart test boots one; VMs the harness doesn't own — a
+    # user's persistent sandbox, another app's microVM, a leaked orphan — hold
+    # slots it can't reclaim, and without accounting for them the harness
+    # schedules straight into `The number of VMs exceeds the system limit`
+    # (exit 11). Run AFTER the prune so this run's own prior-run leftovers are
+    # already gone and only genuinely-foreign occupants remain. Tart-only: the
+    # apple backend runs Linux guests, exempt from the macOS VM cap (see
+    # backend-idiosyncrasies). `preq` only carries "tart" on macOS when it's
+    # scheduled, so this whole block is implicitly macOS + tart-in-filter gated.
+    # The cap is applied via ctx.vm_concurrency, shared by the macOS VM
+    # semaphore; the apple backend inherits it, which at worst mildly serializes
+    # apple under foreign-VM pressure (never a correctness issue).
+    tart_preq = preq.get("tart")
+    if tart_preq is not None and tart_preq.available:
+        census = query_tart_slots(ctx)
+        if census is not None:
+            limit, in_use, occupants = census
+            free = limit - in_use
+            cap = plan_tart_slots(free, ctx.vm_concurrency)
+            who = ", ".join(occupants) if occupants else "other VM(s)"
+            if cap == 0:
+                # No free slot. Mirror the unavailable-backend contract: base
+                # tier skips tart, full tier fails it loudly. Routed through the
+                # prereq result so _run_backend_test enforces it uniformly.
+                note = (
+                    f"no free macOS VM slot: {in_use} of {limit} in use ({who}); "
+                    "stop a VM to free a slot"
+                )
+                preq["tart"] = PrereqResult(
+                    spec=tart_preq.spec, available=False, note=note,
+                )
+                if ctx.full:
+                    print(f"ERROR: full tier requires tart but {note}")
+                else:
+                    print(f"WARNING: tart tests will skip — {note}")
+                print()
+            elif cap < ctx.vm_concurrency:
+                print(
+                    f"NOTE: {in_use} of {limit} macOS VM slot(s) in use ({who}); "
+                    f"capping tart concurrency at {cap}.\n"
+                )
+                ctx.vm_concurrency = cap
+
     # -------------------------------------------------------------------------
     # Helper to check if a test should run based on --test filter
     def should_run_test(test_name: str) -> bool:
@@ -3357,10 +3463,15 @@ def main() -> int:
                     result = run_test(ctx, test_name, lambda t: test_fn(t, spec), attempt=attempt)
                     if result.passed:
                         break
-            # On VM backends, a failed test can leave a running VM that consumes a
-            # host VM slot and blocks subsequent VM tests. Destroy immediately
-            # after retries are exhausted (state already preserved at this point).
-            if not result.passed and spec.is_vm:
+            # VM backends hold a scarce host slot (the macOS 2-VM cap). Free it
+            # as soon as the test ends — pass OR fail — instead of waiting for
+            # the end-of-run cleanup, so a later VM test (or a coexisting foreign
+            # VM) isn't blocked and the harness's own peak stays within the
+            # concurrency cap. On failure run_test has already preserved forensic
+            # state under <log>/sandboxes/<test>/attempt<N>/. Destroy inside the
+            # gate so the slot is released before the semaphore admits the next
+            # waiter.
+            if spec.is_vm:
                 _destroy_named_sandboxes(ctx, result.sandboxes)
         _record_result(ctx, result)
 
