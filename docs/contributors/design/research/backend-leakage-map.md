@@ -39,15 +39,19 @@ logic on it → should be a named **property**) vs. an **optional operation** (t
 either can or can't perform a maintenance/diagnostic action → fine to keep as a
 call-if-present interface; no core-logic branch hangs on it).
 
-### Decision-driving → become properties
+### Decision-driving → resolve by injection (preferred) or a declared property
 
-| Interface | Drives | Property |
+A property + branch is only the *fallback*. The preferred resolution is **injection** — shape
+the interface so the decision isn't made at the call site (see the "inject the implementation"
+ladder in the plan doc). The "Resolution" column reflects that:
+
+| Interface | Drives | Resolution |
 |---|---|---|
-| `GitExecer` | run git on host vs in-VM | **`FilesystemLocality{HostSide,SandboxSide}`** |
-| `WorkDirSetup` | host baseline vs VM-deferred baseline | …same |
-| `StdioExecer` | can bridge stdio to an in-sandbox process (MCP) | **`StdioBridge bool`** |
-| `UsernsProvider` | exec user (`keep-id` vs `yoloai`) | **`UsernsMode string`** |
-| `IsolationCapabilityProvider` | host caps required per isolation mode | **`IsolationCaps map[IsolationMode][]HostCapability`** |
+| `GitExecer` | run git on host vs in-VM | **`FilesystemLocality`** property — the change-probe consequence ripples (declared fact also feeds conformance/messaging) |
+| `WorkDirSetup` | host baseline vs VM-deferred baseline | `FilesystemLocality` (done); a `BaselineStrategy` *injection* is the tighter form |
+| `StdioExecer` | bridge stdio to an in-sandbox process (MCP) | **inject** a bridge (no-op/error impl); caller handles "unsupported" via the error — *not* a `bool` flag |
+| `UsernsProvider` | exec user (`keep-id` vs `yoloai`) | already **injection-of-a-value** — the caller just uses the returned mode; no property/branch |
+| `IsolationCapabilityProvider` | host caps required per isolation mode | a returned value (injection) or a `map` property |
 
 `FilesystemLocality{HostSide,SandboxSide}` is the headline **decision property**; it gates the
 two in-sandbox **operations** `GitExecer` (git) and `WorkDirSetup` (deferred baseline) — the

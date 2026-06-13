@@ -216,20 +216,40 @@ boundary correctly until you know where the backends actually leak across it.
 ### Remediation: model properties, not backend identity (the interface redesign)
 
 The map's output is not just a list of seams — it is the input to **re-deriving the
-backend interface itself.** For each leak, pick one of three strategies:
+backend interface itself.** For each leak, pick the *highest* strategy that fits — and
+**default to injection; never reflexively branch on a property** (the anti-tunnel-vision
+rule):
 
-- **Seal** — absorb it inside the backend impl; the higher layer never knows (mount-path
-  translation, exec stabilization delays, VM-wedge recovery, "run git against the work copy").
-- **Model as a property** — when the consequence ripples up and *cannot* be hidden, expose
-  it as a typed descriptor property and make the higher layer a pure function of it.
-  *Example:* `FilesystemLocality{HostSide, SandboxSide}` replaces every "is this Tart?"
-  with "are the work files host-side or sandbox-side?" — the host change-probe, in-place
-  reset, and host-vs-in-VM git all key off the *property*.
+- **Inject the implementation (preferred).** Shape the interface so the *decision doesn't
+  need to be made*: the right strategy is wired in at the boundary, and the call site calls
+  one method with no `if`. `git.NewSandbox` already does this — diff/apply never branch on
+  locality; they hold a `*Git` and call `g.Run`. Pending items that fit injection rather
+  than a flag: `UsernsProvider` (a value provider — the caller just *uses* the returned
+  mode), `StdioExecer` (inject a bridge with a no-op/error impl; the caller handles
+  "unsupported" via the error), and the host change-probe (an injected `ChangeProbe`:
+  host-reading vs backend-routed).
+- **Seal inside the backend** — a sibling of injection: the backend's own method does the
+  right thing; the caller never knows there's variance (mount-path translation, exec
+  stabilization delays, VM-wedge recovery, "run git against the work copy").
+- **Declared property + branch** — only when the call site must *reason about the
+  consequence* in a way a strategy-swap can't cleanly absorb. Even then, prefer an injected
+  strategy first. The property still earns its keep as a **declared fact** — for the
+  conformance matrix and for user-facing messaging — independent of whether anything
+  branches on it. *Example:* `FilesystemLocality{HostSide, SandboxSide}`. (The
+  `WorkDirSetup` baseline-deferral currently uses this; a `BaselineStrategy` injection is
+  the tighter rung-1 form — a known "could be tighter".)
 - **Irreducible branch** — genuinely unavoidable; minimize and document.
+
+This is a ladder, not a menu: injection/seal (no decision) beats a property-branch (a
+decision on a *fact*) beats a type-assert beats a name-check. But don't over-rotate — a
+`Strategy` interface for a trivial two-way split is indirection for its own sake; pick
+deliberately.
 
 **Governing rule (sharpened by the map): no higher layer may *detect* a decision-driving
 capability — by backend-identity, by `rt.(SomeInterface)` type-assertion, or by implicit
-inference (`mountPath != hostPath`). It must read a named, semantic property.** Identity
+inference (`mountPath != hostPath`). Instead the right behavior is **injected** (preferred —
+the decision isn't made) or, when the call site must reason about the consequence, read from
+a named, semantic property.** Identity
 tokens above the runtime are a defect (grep-checkable) — the map found **zero**, so that
 battle is already won; the live front is capability-*detection*. Optional *operations*
 (prune/logs/census, and — confirmed by implementation — the `CopyMountResolver`/
