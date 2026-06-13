@@ -388,8 +388,44 @@ output via `capture-pane`). Split them:
   substrate — and "agents that don't need a PTY" (and non-agent sandboxed tasks) get a
   first-class path.
 
-This is the single most valuable architectural outcome of the split: the piece that is
-both load-bearing today *and* not yet decoupled.
+This is the most valuable architectural *direction* of the split — but the coupling map
+below shows it is also the largest and most speculative, so its implementation is gated on
+real demand.
+
+### Grounded by the tmux/session coupling map (2026-06-13)
+
+A read-only map of the current state changes the shape of this work — it is not a clean
+strategy swap:
+
+- **tmux is mandatory middleware, not a pluggable strategy.** ~63 touch-points across ~35
+  files: session lifecycle (`sandbox-setup.py::setup_tmux_session`), prompt delivery
+  (`send-keys`/`load-buffer`/`paste-buffer` in both `sandbox-setup.py` *and* Go
+  `restart.go`/`engine.go`/`reset.go`), output capture (`capture-pane` for snapshots **and**
+  idle detection in `status-monitor.py`), and attach. The work spans the **Go↔Python
+  boundary** — a stream strategy needs a different entrypoint path *and* different Go ops.
+- **The core Runtime interface bakes in tmux**: `TmuxSocket()` and `AttachCommand()` are
+  required methods every backend implements.
+- **There is no consumer of a stream/headless session today.** Every shipped agent is
+  `PromptMode=Interactive`; even `PromptMode=Headless` agents are still launched into tmux.
+  The stream-session path would serve only the *hypothetical* headless-runner / non-agent
+  consumer that the **Non-goals** section explicitly defers.
+
+So Phase C splits into two very different sizes:
+
+- **C-minimal (cheap, no consumer needed):** lift `TmuxSocket`/`AttachCommand` off the core
+  `Runtime` interface into an **optional** `InteractiveSession` interface (the same
+  type-assert pattern as the other capabilities). The core contract stops mentioning tmux; a
+  headless/non-agent backend need not implement it. Contained, low-risk, honest-contract win.
+- **C-full (large, speculative):** the real `session` abstraction — a PTY/tmux strategy + a
+  no-PTY stream strategy, an agent `SessionKind` capability, and a conditional entrypoint
+  that doesn't create tmux for stream agents. Touches all ~63 points across Go + Python.
+
+**Recommendation: defer C-full until a concrete headless / non-PTY consumer exists** — the
+same "real demand" trigger that justified multi-workdir and this whole split (and that the
+Non-goals already bind: *don't build the hypothetical headless runner now*). Building the
+stream strategy speculatively, across the Go/Python boundary, with no consumer to validate
+it, is precisely the over-build to avoid. Do **C-minimal** if/when the honest-contract win is
+wanted; capture C-full's design (above) and let demand pull it.
 
 ## Phasing (the future feature branch)
 
@@ -435,9 +471,14 @@ Each phase is independently mergeable and green under `make check`.
   `ptybridge` and the backends that bridge a local PTY pull it (docker is clean — it bridges
   over its API socket). Locked in by a depguard rule (`runtime-core-no-pty`) that fails the
   build on a `creack/pty` import in a core `internal/runtime/*.go` file (verified it catches).
-- **C — session abstraction.** Introduce the `session` capability with PTY-session (tmux
-  strategy) and stream-session (no-PTY) implementations; route the launch layer through it;
-  add an agent capability flag. tmux stops being mandatory.
+- **C — session abstraction. Design refined; C-full DEFERRED** (no consumer). The tmux
+  coupling map (see *The session abstraction* above) found tmux is mandatory middleware
+  (~63 points, Go + Python), and **no stream/headless consumer exists today**. So:
+  **C-minimal** (optional `InteractiveSession` interface lifting `TmuxSocket`/`AttachCommand`
+  off the core contract) is available as a cheap honest-contract win; **C-full** (PTY +
+  stream strategies, `SessionKind`, conditional entrypoint) is **deferred until a concrete
+  headless / non-PTY consumer appears** — per the same real-demand rule that drives the whole
+  split. Building it speculatively across the Go/Python boundary is the over-build to avoid.
 - **D — depguard fences.** Encode the DAG as build-failing rules (substrate → upward = error;
   copyflow ↔ session = error; etc.). Locks in the structure.
 - **E — renames (optional, mechanical).** Apply the naming table as isolated commits.
