@@ -89,6 +89,38 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 - **Fix:** `skipIfNotAvailable` now stats **and** dials the socket (`net.DialTimeout`), skipping with a clear reason when it can't connect.
 - **Pointer:** `internal/runtime/containerd/integration_test.go` (`skipIfNotAvailable`).
 
+### DF31 — Substrate `Backend` bakes in tmux + the agent monitor
+
+- **Discovered:** 2026-06-14 · **Workstream:** public-layering (first audit pass)
+- **Severity:** MEDIUM
+- **Disposition:** PARKED (tracked by [public-layering.md](plans/public-layering.md) Shape stage)
+- **Description:** `go list -deps` of the intended substrate island (`internal/runtime` + a backend + `internal/store`) is clean of agent/copyflow/PTY, **but still pulls `internal/runtime/monitor` and `internal/resources/tmux`** — the backend's container `Setup`/launch embeds the tmux + status-monitor Python launch convention. So even a headless `Backend.Create` ships the agent-monitoring scripts and a tmux session: "run a container" is fused with "run a tmux-wrapped, monitored agent session." This is the Phase C-full "tmux is mandatory middleware" finding re-surfacing at the substrate boundary. The cleanest split makes tmux+monitor a *session/idle refinement* injected at launch, not a substrate `Setup` default.
+- **Pointer:** `internal/runtime/*/{build,setup}.go` (container bootstrap); `internal/runtime/monitor/`, `internal/resources/tmux/`. Related: Q103.
+
+### DF32 — No agent-free managed lifecycle (lifecycle verbs only exist agent-aware)
+
+- **Discovered:** 2026-06-14 · **Workstream:** public-layering (first audit pass)
+- **Severity:** MEDIUM
+- **Disposition:** PARKED (the load-bearing carve for [public-layering.md](plans/public-layering.md))
+- **Description:** `go list -deps ./internal/orchestrator/lifecycle` pulls `internal/agent` (restart relaunches the agent) and `internal/copyflow` (reset re-syncs copy dirs; status probes uncommitted copy changes). Raw `runtime.Backend` gives create/start/stop/destroy, but the *managed* lifecycle (name→instance resolution, persisted status, liveness) lives entangled with agents + the copy workflow. A power-user wanting "managed lifecycle, no agents" must drop to raw `Backend` + `store` and hand-roll the glue. Resolution: carve a substrate-level managed lifecycle (Backend + store, agent-agnostic) and let the agent-aware orchestrator layer *that* + relaunch + copy-resync on top.
+- **Pointer:** `internal/orchestrator/lifecycle/{start,restart,reset}.go`; direct `internal/agent` importers — `lifecycle`, `invocation`, `state`, `provision`. Related: Q103.
+
+### DF33 — `runtimeconfig` mixes substrate and agent-launch fields
+
+- **Discovered:** 2026-06-14 · **Workstream:** public-layering (first audit pass)
+- **Severity:** LOW–MEDIUM
+- **Disposition:** PARKED (tracked by [public-layering.md](plans/public-layering.md) Shape stage)
+- **Description:** The Go↔Python container config (`internal/orchestrator/runtimeconfig`) carries substrate fields (mounts, network, copy dirs) **and** agent-launch fields (`AgentCommand`, `ReadyPattern`, `Idle`) in one DTO, and the Python entrypoint always sets up tmux + launches the agent. So the substrate's container bootstrap is agent-shaped. For a clean substrate the config should split into a substrate-launch part and an agent-launch part (the module-split plan flagged this under Phase A but only closed the *import* edge, not the *schema* conflation).
+- **Pointer:** `internal/orchestrator/runtimeconfig/runtimeconfig.go`; `internal/runtime/monitor/sandbox-setup.py`. Related: DF31, Q104.
+
+### DF34 — Network isolation threaded into the containerd backend
+
+- **Discovered:** 2026-06-14 · **Workstream:** public-layering (first audit pass)
+- **Severity:** LOW
+- **Disposition:** PARKED (deferred refinement; [public-layering.md](plans/public-layering.md) later cycle)
+- **Description:** Network isolation / allowlist (CNI, netns, iptables) is woven into the containerd backend's startup rather than living as a standalone `netpolicy` refinement injected over the substrate. The substrate backend therefore "knows about" network policy. Lower priority than DF31/DF32 (netpolicy is a later-cycle refinement), but recorded so the substrate audit accounts for it.
+- **Pointer:** `internal/runtime/containerd/` (CNI setup in startup path). Related: [public-layering.md](plans/public-layering.md) netpolicy row.
+
 ## Policy origin
 
 Established in [architecture-remediation.md](../archive/plans/architecture-remediation.md) and inherited by [layering-refactor.md](../archive/plans/layering-refactor.md).
