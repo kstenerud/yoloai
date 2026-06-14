@@ -15,6 +15,17 @@ Complete — all in-scope phases landed (Phase 1 detector truth + carved `store.
 
 Complete — D74 landed (Stage 1 `9f67d28`/`45aab36`/`8479258`, Stage 2 `8d8106c`/`0b38b3e`/`5321a9e`); the `Engine` owns the lazy `runtime.New` connection and the sub-handles (`Agent`/`Workdir`/`Network`/`Files`) hold a `*sandbox.Engine`. Archived under [../archive/plans/engine-owns-runtime.md](../archive/plans/engine-owns-runtime.md).
 
+## Public layering — composable layers staged behind `internal/`
+
+Active. Decompose yoloAI into a stack of composable public layers (`runtime`, `store`, `copyflow`,
+`agent`, a new agent-free managed lifecycle, …) under an 80/20 surface: the `yoloai` package stays
+the small stable top; the layers are opt-in for power users, and the library is built on the same
+layers. Strategy: shape every layer **as if public** but keep it under `internal/` (retaining
+churn-freedom), mirror the future public paths 1:1, and promote by a mechanical move last. One
+module throughout. Proceeds via audit cycles (mechanical `go list -deps` separation + semantic
+conflation review) draining to the findings/questions queues. Supersedes the deferred C-full/F
+notes in [D83](../../decisions/working-notes.md). Frame doc: [public-layering.md](public-layering.md).
+
 ## Env access seal — `config.HostEnv` curated accessors
 
 Replace the ad-hoc `config.Layout` env accessors (`LookupEnv`/`ExecEnv`/

@@ -33,3 +33,15 @@ Questions encountered during design and implementation that need resolution. Res
 ## Model Version Tracking
 
 98. **Strategy for keeping model aliases current** — Gemini's model aliases drifted (pointed to 2.5 when Gemini 3 was the current default). This will recur as providers release new models. Need a process to stay current. Options to discuss: periodic manual review cadence, automated checks against provider APIs/docs, pinning to stable identifiers that providers maintain (e.g., `-latest` suffixes where available), or documenting that aliases are best-effort and users should use `--model` for specific versions.
+
+## Public layering (semantic conflations)
+
+Surfaced by the [public-layering](plans/public-layering.md) audit — each fuses two concepts in one type and needs a *decision*, not a mechanical fix. Each earns a D-number when resolved.
+
+103. **What does "idle" mean without an agent?** — `Status ∈ {Active, Idle, Done, Failed}` is *agent-activity* derived from the Python monitor watching agent hooks/output. A substrate sandbox has no "idle" — only *liveness*: `{Running, Stopped, Exited(code)}`. Two different status concepts are fused into one type. Likely split: the substrate owns liveness; the agent layer derives Active/Idle/Done *from* liveness + the monitor. Affects `store.SandboxState`, the `status` package, and the public `Status` read-model. Related: [DF31](findings-unresolved.md), [DF32](findings-unresolved.md).
+
+104. **Should `store.Environment` carry agent payload?** — The persisted *substrate* record holds *agent* config (`AgentType`/`Model`, now plain strings but still present). Substrate identity vs agent config in one schema. Options the module-split plan named but deferred: opaque agent-owned payload, an agent-owned sidecar file, or leave it (accept the substrate record knows an agent string). Decide before the `store` layer is promoted, since it fixes the persisted schema (a versioned migration, like the v1→v2 reshape). Related: [DF33](findings-unresolved.md).
+
+105. **Foundation publicity: does `config.Layout`/`HostEnv` become public?** — Every layer takes a `config.Layout` (paths) and reads host env via `HostEnv`. If the layers are public, either `config` is promoted too, or each layer accepts a narrower interface (e.g., just the paths it needs) so the foundation stays internal. Decide the boundary before promoting the substrate, since it's the first layer that exposes `Layout` in its surface.
+
+106. **The `sandbox` noun.** — The module-split rename freed `sandbox` (the orchestration package is now `orchestrator`). The new public managed-lifecycle layer (substrate create/start/stop/destroy + persistence, agent-free — see [DF32](findings-unresolved.md)) is its natural claimant, but there is already a public `yoloai.Sandbox` *handle type*. Resolve the name (`yoloai/sandbox` package + `yoloai.Sandbox` type? a different layer name?) before the carve, not after.
