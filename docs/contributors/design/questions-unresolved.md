@@ -36,8 +36,4 @@ Questions encountered during design and implementation that need resolution. Res
 
 ## Public layering (semantic conflations)
 
-Surfaced by the [public-layering](plans/public-layering.md) audit — each fuses two concepts in one type and needs a *decision*, not a mechanical fix. Each earns a D-number when resolved. (Q103 and Q106 resolved by [D84](../decisions/working-notes.md) → [questions-resolved.md](questions-resolved.md).)
-
-104. **Should `store.Environment` carry agent payload?** — The persisted *substrate* record holds *agent* config (`AgentType`/`Model`, now plain strings but still present). Substrate identity vs agent config in one schema. Options the module-split plan named but deferred: opaque agent-owned payload, an agent-owned sidecar file, or leave it (accept the substrate record knows an agent string). Decide before the `store` layer is promoted, since it fixes the persisted schema (a versioned migration, like the v1→v2 reshape). Related: [DF33](findings-unresolved.md).
-
-105. **Foundation publicity: does `config.Layout`/`HostEnv` become public?** — Every layer takes a `config.Layout` (paths) and reads host env via `HostEnv`. If the layers are public, either `config` is promoted too, or each layer accepts a narrower interface (e.g., just the paths it needs) so the foundation stays internal. Decide the boundary before promoting the substrate, since it's the first layer that exposes `Layout` in its surface. (Surfaced again as an open item in [substrate-interface.md](substrate-interface.md): `Identity` is opaque, but the substrate still needs path context.)
+Surfaced by the [public-layering](plans/public-layering.md) audit. All four resolved: Q103 + Q106 by [D84](../decisions/working-notes.md), Q104 + Q105 by [D85](../decisions/working-notes.md) → [questions-resolved.md](questions-resolved.md). (Mechanical findings continue in [findings-unresolved.md](findings-unresolved.md): DF31–DF34.)

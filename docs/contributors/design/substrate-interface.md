@@ -175,13 +175,21 @@ type ProcSpec struct {                                // what to run, how
 - **`Caps`** ⇐ today's `BackendDescriptor`/`BackendCaps` + `FilesystemLocality`, plus the new
   `KeepAliveModel`.
 
-## Open items (carried, not blocking the surface)
+## Decided since (D85)
 
-- **Q104 — `store.Environment` agent payload.** The substrate's persisted record should be agent-free
-  (consistent with §9); where `AgentType`/`Model` actually go (agent sidecar vs opaque payload) is
-  still open and fixes the persisted schema (a versioned migration).
-- **Q105 — foundation publicity.** `Identity` is opaque, but the substrate still needs path context
-  (where its state lives). Does it take a `config.Layout`, or a narrower paths interface? Decide
-  before promotion.
+- **Q104 — persistence.** The substrate's `environment.json` is **agent-free** (consistent with §9):
+  it persists only substrate facts. Agent config (`AgentType`/`Model`/`HasPrompt` + agent-launch
+  settings) lives in an **agent-owned sidecar** (`agent.json`), via `store`'s sudo-safe IO. Not an
+  opaque payload. Generalizes: each layer persists its own facts; the substrate record sheds all
+  non-substrate fields. Versioned reshape (v2→v3). See [D85](../decisions/working-notes.md).
+- **Q105 — foundation boundary.** `config.Layout`/`HostEnv` stay **internal**. The substrate's
+  construction takes **narrow, edge-resolved inputs** — a small substrate-scoped paths value (the ~6
+  dirs it uses) + injected curated host-tool env — never the fat aggregate. Parse-don't-validate at
+  the public boundary. See [D85](../decisions/working-notes.md).
+
+## Still open (not blocking the surface)
+
 - **The persisted-status channel** (for durable exit/"done") is named here but its shape is the
   agent/upper layer's design, not the substrate's.
+- **Shape-time:** per-purpose host-tool env keysets in the backend vs central in internal `HostEnv`
+  (D85 leans backend-declares-keysets, edge-supplies-values).
