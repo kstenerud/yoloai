@@ -103,7 +103,7 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 - **Severity:** MEDIUM
 - **Disposition:** PARKED (the load-bearing carve for [public-layering.md](plans/public-layering.md))
 - **Description:** `go list -deps ./internal/orchestrator/lifecycle` pulls `internal/agent` (restart relaunches the agent) and `internal/copyflow` (reset re-syncs copy dirs; status probes uncommitted copy changes). Raw `runtime.Backend` gives create/start/stop/destroy, but the *managed* lifecycle (name→instance resolution, persisted status, liveness) lives entangled with agents + the copy workflow. A power-user wanting "managed lifecycle, no agents" must drop to raw `Backend` + `store` and hand-roll the glue. Resolution: carve a substrate-level managed lifecycle (Backend + store, agent-agnostic) and let the agent-aware orchestrator layer *that* + relaunch + copy-resync on top.
-- **Pointer:** `internal/orchestrator/lifecycle/{start,restart,reset}.go`; direct `internal/agent` importers — `lifecycle`, `invocation`, `state`, `provision`. Related: Q103.
+- **Pointer:** `internal/orchestrator/lifecycle/{start,restart,reset}.go`; direct `internal/agent` importers — `lifecycle`, `invocation`, `state`, `provision`. **Resolution direction:** [substrate-interface.md](substrate-interface.md) / [D84](../decisions/working-notes.md) — the agent-free managed lifecycle is the `Substrate` handle (Start/Stop/Suspend/Resume/Destroy + Launch/Exec); the agent-aware orchestrator becomes a consumer that adds relaunch + copy-resync on top.
 
 ### DF33 — `runtimeconfig` mixes substrate and agent-launch fields
 
@@ -111,7 +111,7 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 - **Severity:** LOW–MEDIUM
 - **Disposition:** PARKED (tracked by [public-layering.md](plans/public-layering.md) Shape stage)
 - **Description:** The Go↔Python container config (`internal/orchestrator/runtimeconfig`) carries substrate fields (mounts, network, copy dirs) **and** agent-launch fields (`AgentCommand`, `ReadyPattern`, `Idle`) in one DTO, and the Python entrypoint always sets up tmux + launches the agent. So the substrate's container bootstrap is agent-shaped. For a clean substrate the config should split into a substrate-launch part and an agent-launch part (the module-split plan flagged this under Phase A but only closed the *import* edge, not the *schema* conflation).
-- **Pointer:** `internal/orchestrator/runtimeconfig/runtimeconfig.go`; `internal/runtime/monitor/sandbox-setup.py`. Related: DF31, Q104.
+- **Pointer:** `internal/orchestrator/runtimeconfig/runtimeconfig.go`; `internal/runtime/monitor/sandbox-setup.py`. Related: DF31, Q104. **Resolution direction:** [substrate-interface.md](substrate-interface.md) §9 / [D84](../decisions/working-notes.md) — `ProvisionSpec` is agent-free (image/mounts/resources/network/isolation/env only); agent command/ready/idle move to the agent layer's `ProcSpec` at `Launch`.
 
 ### DF34 — Network isolation threaded into the containerd backend
 

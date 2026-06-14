@@ -7,6 +7,10 @@ History of design/implementation questions that have been answered. Items are mo
 from [`questions-unresolved.md`](questions-unresolved.md) once resolved, so the active file
 stays a working set. Newest first.
 
+103. ~~**What does "idle" mean without an agent?**~~ — **Resolved (D84, 2026-06-14):** It doesn't. The substrate owns *liveness* only — `State ∈ {Provisioned, Running, Suspended, Stopped}`. `Active`/`Idle`/`Done`/`Failed` are the **agent layer** interpreting `State` + a process's `ExitStatus` + the monitor (Done/Failed = relabel of exit 0/non-zero; Active vs Idle = the one thing only an agent-watcher can know). A launched process's exit is a per-process fact (`Process.Wait`), not substrate state. There is no middle "supervision" tier — "supervision" is caller policy over substrate mechanism, not a layer. See [substrate-interface.md](substrate-interface.md) §3 / [D84](../decisions/working-notes.md).
+
+106. ~~**The `sandbox` noun**~~ — **Resolved (D84, 2026-06-14):** No collision after all. The substrate handle is named **`Substrate`**; the agent-aware product handle stays **`yoloai.Sandbox`** — different names at different layers. The freed `sandbox` noun is *not* claimed by the substrate layer. See [substrate-interface.md](substrate-interface.md) / [D84](../decisions/working-notes.md).
+
 1. ~~**Go module path**~~ — **Resolved:** `github.com/kstenerud/yoloai`.
 
 2. ~~**Node.js version**~~ — **Resolved:** Node.js 22 LTS via NodeSource. Claude Code's `engines` field requires `>=18.0.0`; Node 22 is well within range. Node 20 LTS reaches EOL April 2026 — Node 22 LTS (maintenance until April 2027) avoids shipping with an EOL runtime. Anthropic's devcontainer still uses Node 20 as of February 2026, but no Node 22-specific incompatibilities have been found. The native Claude Code installer (curl script) is not suitable: bundles Bun with broken proxy support (issue #14165), segfaults on Debian bookworm AMD64 (#12044), and auto-updates. npm install shows a deprecation warning but remains the only reliable path for Docker/proxy use. See [Implementation Research](research/implementation.md) "Claude Code Installation Research".

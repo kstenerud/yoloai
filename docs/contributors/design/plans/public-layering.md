@@ -55,7 +55,7 @@ of the audit + shape cycles.
 | **Foundations** | pure plumbing (paths, sudo-safe FS, locks, subprocess) | — | `internal/{config,fileutil,locking,sysexec}` | **yes** (but `config.Layout`/`HostEnv` cross every layer — see Q105) |
 | **Substrate — backend** | pluggable create/start/stop/destroy/exec/transfer | `yoloai/runtime` (+ `/docker`, `/tart`, …), `yoloai/runtime/caps` | `internal/runtime*` | no |
 | **Substrate — record** | persisted sandbox metadata + path layout | `yoloai/store` | `internal/store` | no |
-| **Substrate — managed lifecycle** | agent-free create/start/stop/destroy *with* persistence + liveness | **(new — needs a home + name, Q106)** | carve from `internal/orchestrator/lifecycle` | no |
+| **Substrate — managed lifecycle** | agent-free create/start/stop/destroy *with* persistence + liveness | the **`Substrate`** handle ([substrate-interface.md](../substrate-interface.md), D84) | carve from `internal/orchestrator/lifecycle` | no |
 | **Refinement — copyflow** | copy/diff/apply review over a backend + git | `yoloai/copyflow` | `internal/copyflow` | no |
 | **Refinement — session** | interactive PTY / tmux attach over exec | `yoloai/session` | carve from `orchestrator/attach` + `runtime/ptybridge` | no (later) |
 | **Refinement — netpolicy** | network isolation / allowlist | `yoloai/netpolicy` | threaded in `runtime/containerd` (DF34) | no (later) |
@@ -66,6 +66,12 @@ of the audit + shape cycles.
 
 The orchestration glue stays internal *on purpose*: it is essentially what the root `Client`
 already wraps, so exposing both is redundant. The valuable cuts are the layers *below* it.
+
+**Substrate target surface — designed (D84).** The bottom rung's as-public surface
+(`Backend`/`Substrate`/`Process` + the liveness-only status model, mechanism-not-policy boundary,
+channels-emergent rule, principal-out identity) is specified in
+[substrate-interface.md](../substrate-interface.md). It resolves Q103/Q106 and gives DF31/DF32/DF33
+their resolution direction — the first "Shape" output of the program, designed before being built.
 
 ## Audit methodology
 
