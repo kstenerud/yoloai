@@ -67,11 +67,22 @@ of the audit + shape cycles.
 The orchestration glue stays internal *on purpose*: it is essentially what the root `Client`
 already wraps, so exposing both is redundant. The valuable cuts are the layers *below* it.
 
-**Substrate target surface — designed (D84).** The bottom rung's as-public surface
+**Substrate target surface — designed (D84, D85).** The bottom rung's as-public surface
 (`Backend`/`Substrate`/`Process` + the liveness-only status model, mechanism-not-policy boundary,
 channels-emergent rule, principal-out identity) is specified in
-[substrate-interface.md](../substrate-interface.md). It resolves Q103/Q106 and gives DF31/DF32/DF33
-their resolution direction — the first "Shape" output of the program, designed before being built.
+[substrate-interface.md](../substrate-interface.md). It resolves Q103/Q106 (D84) and Q104/Q105 (D85,
+persistence + foundation boundaries) and gives DF31/DF32/DF33 their resolution direction.
+
+**Copyflow refinement — designed (D86).** The copy/diff/apply review layer's as-public model
+(per-dir repo-aware handle, seeding-vs-propagation, `--all` as collection-never-merge,
+characterize-and-surface, the hermetic-git security seal, copyflow-owned baselines) is specified in
+[copyflow-layer.md](../copyflow-layer.md), with the seal a verify-the-code finding (DF35).
+
+**Next session — the config/persistence helper (foundation).** The pattern under D85/D86 (each layer
+persists its own facts) generalizes into a shared, dumb persistence helper: sudo-safe, atomic,
+versioned read/write of a *named* JSON record in a passed-in dir + a central filename registry,
+mostly a reframe of `store`. Its home/name is undecided (a new `internal/record`/`internal/persist`
+pkg vs reframing `store`); that fork is the first task to resume.
 
 ## Audit methodology
 

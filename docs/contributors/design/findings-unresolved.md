@@ -121,6 +121,14 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 - **Description:** Network isolation / allowlist (CNI, netns, iptables) is woven into the containerd backend's startup rather than living as a standalone `netpolicy` refinement injected over the substrate. The substrate backend therefore "knows about" network policy. Lower priority than DF31/DF32 (netpolicy is a later-cycle refinement), but recorded so the substrate audit accounts for it.
 - **Pointer:** `internal/runtime/containerd/` (CNI setup in startup path). Related: [public-layering.md](plans/public-layering.md) netpolicy row.
 
+### DF35 — Verify copyflow's hermetic-git seal: no in-sandbox git may write outside the sandbox
+
+- **Discovered:** 2026-06-14 · **Workstream:** public-layering (copyflow design, D86)
+- **Severity:** MEDIUM (security — needs verification; could be CRITICAL if violated)
+- **Disposition:** PARKED (verify during copyflow Shape)
+- **Description:** The copyflow design (D86 §7) makes a hermetic-git security seal load-bearing: the git *inside* the sandbox is untrusted and must be **read + emit only** — it never writes anything outside the sandbox; changes egress *only* as diff+metadata via a read-only channel, and the trusted host-side git applies. Copy-mode `apply.go` uses `git.NewSandbox` (in-sandbox/in-VM git) on several paths (≈ lines 332, 579, 614, 785, 843, 858, 917). **Verify that none of these has an in-sandbox git writing to a host-mounted original** (e.g. an apply or checkout that targets a path outside the sandbox). If any does, it is a security finding (an untrusted binary with write access to the user's real project), not just a refactor — and the fix is to route all *writes-to-original* through the host-side trusted git, fed only the extracted diff+metadata.
+- **Pointer:** `internal/copyflow/apply.go` (`git.NewSandbox` call sites); contrast `git.NewHost` (the trusted apply path). Design: [copyflow-layer.md](copyflow-layer.md) §7 / [D86](../decisions/working-notes.md).
+
 ## Policy origin
 
 Established in [architecture-remediation.md](../archive/plans/architecture-remediation.md) and inherited by [layering-refactor.md](../archive/plans/layering-refactor.md).

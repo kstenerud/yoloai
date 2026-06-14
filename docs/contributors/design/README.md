@@ -20,6 +20,7 @@ decisions). For the code-architecture altitude, see [`../architecture/`](../arch
 | [setup.md](setup.md) | `yoloai system setup` flow and first-run provisioning. |
 | [security.md](security.md) | Sandbox threat model, credential handling, capability tradeoffs. |
 | [substrate-interface.md](substrate-interface.md) | The agent-free isolated-environment layer (`Backend`/`Substrate`/`Process`) for the public-layering program: liveness-only status, mechanism-not-policy, channels-emergent, principal-out. Decision [D84](../decisions/working-notes.md). |
+| [copyflow-layer.md](copyflow-layer.md) | The copy/diff/apply review refinement: per-dir repo-aware handle, seeding-vs-propagation, `--all` as collection-never-merge, characterize-and-surface for nature mismatches, the hermetic-git security seal. Decision [D86](../decisions/working-notes.md). |
 | [network-isolation.md](network-isolation.md) | Network isolation design: iptables/ipset, domain allowlisting, isolation modes. |
 | [environments.md](environments.md) | Environment archetypes and detection (devcontainer / yoloAI project config). |
 | [reconfigure.md](reconfigure.md) | Reconfiguring an existing sandbox. |
