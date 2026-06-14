@@ -95,7 +95,7 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 - **Severity:** MEDIUM
 - **Disposition:** PARKED (tracked by [public-layering.md](plans/public-layering.md) Shape stage)
 - **Description:** `go list -deps` of the intended substrate island (`internal/runtime` + a backend + `internal/store`) is clean of agent/copyflow/PTY, **but still pulls `internal/runtime/monitor` and `internal/resources/tmux`** — the backend's container `Setup`/launch embeds the tmux + status-monitor Python launch convention. So even a headless `Backend.Create` ships the agent-monitoring scripts and a tmux session: "run a container" is fused with "run a tmux-wrapped, monitored agent session." This is the Phase C-full "tmux is mandatory middleware" finding re-surfacing at the substrate boundary. The cleanest split makes tmux+monitor a *session/idle refinement* injected at launch, not a substrate `Setup` default.
-- **Pointer:** `internal/runtime/*/{build,setup}.go` (container bootstrap); `internal/runtime/monitor/`, `internal/resources/tmux/`. Related: Q103.
+- **Pointer:** `internal/runtime/*/{build,setup}.go` (container bootstrap); `internal/runtime/monitor/`, `internal/resources/tmux/`. Related: Q103. **Resolution direction:** [research/container-init-delineation.md](research/container-init-delineation.md) — give Docker/Podman a neutral PID 1 (`--init`/tini, the k8s-`pause` / Seatbelt-P1 pattern) and launch the agent via exec; the VM backends are already clean.
 
 ### DF32 — No agent-free managed lifecycle (lifecycle verbs only exist agent-aware)
 
