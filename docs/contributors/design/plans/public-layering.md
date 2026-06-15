@@ -88,6 +88,12 @@ boundary — daemon-optional, file-locks sound inside our envelope. Spec:
 [shared-state-concurrency.md](../research/shared-state-concurrency.md); findings DF36/DF37. Home/name
 of the package deferred (low-stakes behind the `Handle` interface).
 
+**In progress — the session refinement.** Design started, not converged (no D-number):
+[session-layer.md](../session-layer.md) has the framing-so-far (a `Session` consumer of the substrate
+over a `SessionKind {PTY, Stream}` strategy; concentrate the tmux scatter; separate `SessionKind` from
+`PromptMode`; move agent-session launch off the Python entrypoint to a Go-driven `Launch`) and a
+**RESUME-HERE** section with the open questions. This is where the work paused.
+
 ## Audit methodology
 
 Two independent audits, run per intended layer, draining to the existing queues.
