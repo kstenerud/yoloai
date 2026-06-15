@@ -78,11 +78,15 @@ persistence + foundation boundaries) and gives DF31/DF32/DF33 their resolution d
 characterize-and-surface, the hermetic-git security seal, copyflow-owned baselines) is specified in
 [copyflow-layer.md](../copyflow-layer.md), with the seal a verify-the-code finding (DF35).
 
-**Next session — the config/persistence helper (foundation).** The pattern under D85/D86 (each layer
-persists its own facts) generalizes into a shared, dumb persistence helper: sudo-safe, atomic,
-versioned read/write of a *named* JSON record in a passed-in dir + a central filename registry,
-mostly a reframe of `store`. Its home/name is undecided (a new `internal/record`/`internal/persist`
-pkg vs reframing `store`); that fork is the first task to resume.
+**Foundation — the persistence helper — designed (D87).** The pattern under D85/D86 (each layer
+persists its own facts) generalized into a shared foundation: scoped versioned **handles** over **one
+doc per ownership domain** (library / cli / mcp — the D60 bifurcation), a **monotonic-version +
+append-only raw-JSON migration registry** (balk + explicit `system migrate`, never auto-migrate),
+**`flock` + atomic-rename** concurrency, and the **library/tool single-source-of-truth** ownership
+boundary — daemon-optional, file-locks sound inside our envelope. Spec:
+[persistence-helper.md](../persistence-helper.md); research:
+[shared-state-concurrency.md](../research/shared-state-concurrency.md); findings DF36/DF37. Home/name
+of the package deferred (low-stakes behind the `Handle` interface).
 
 ## Audit methodology
 

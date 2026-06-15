@@ -129,6 +129,36 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 - **Description:** The copyflow design (D86 §7) makes a hermetic-git security seal load-bearing: the git *inside* the sandbox is untrusted and must be **read + emit only** — it never writes anything outside the sandbox; changes egress *only* as diff+metadata via a read-only channel, and the trusted host-side git applies. Copy-mode `apply.go` uses `git.NewSandbox` (in-sandbox/in-VM git) on several paths (≈ lines 332, 579, 614, 785, 843, 858, 917). **Verify that none of these has an in-sandbox git writing to a host-mounted original** (e.g. an apply or checkout that targets a path outside the sandbox). If any does, it is a security finding (an untrusted binary with write access to the user's real project), not just a refactor — and the fix is to route all *writes-to-original* through the host-side trusted git, fed only the extracted diff+metadata.
 - **Pointer:** `internal/copyflow/apply.go` (`git.NewSandbox` call sites); contrast `git.NewHost` (the trusted apply path). Design: [copyflow-layer.md](copyflow-layer.md) §7 / [D86](../decisions/working-notes.md).
 
+### DF36 — Persistence is unsafe on a network filesystem; detect and warn/refuse
+
+- **Discovered:** 2026-06-15 · **Workstream:** public-layering (persistence helper, D87)
+- **Severity:** MEDIUM (data-safety)
+- **Disposition:** PARKED (implement with the persistence helper)
+- **Description:** The persistence model (D87) relies on POSIX advisory locking (`flock`) + atomic
+  `rename`. Both are **unreliable on network filesystems** — "POSIX advisory locking is known to be
+  buggy or even unimplemented on many NFS implementations," and a lock that gets lost can lead to
+  silent corruption ([sqlite.org/lockingv3](https://sqlite.org/lockingv3.html); man7 `fcntl_locking`).
+  Networked `$HOME` is real (corporate/university). SQLite is *worse* here (WAL needs same-host shared
+  memory), so this is not a JSON-vs-SQLite escape — it's an environmental constraint. yoloAI should
+  **detect the data dir's filesystem and warn (or refuse) on a network FS** rather than corrupt
+  silently.
+- **Pointer:** wherever the data dir is resolved (`config.Layout`); the persistence helper's open path. Design: [persistence-helper.md](persistence-helper.md) / [research/shared-state-concurrency.md](research/shared-state-concurrency.md) / [D87](../decisions/working-notes.md).
+
+### DF37 — File-locking hardening: confirm `flock` not `fcntl`, add the fsync-durability dance
+
+- **Discovered:** 2026-06-15 · **Workstream:** public-layering (persistence helper, D87)
+- **Severity:** MEDIUM (silent-corruption / data-loss avoidance)
+- **Disposition:** PARKED (verify + harden with the persistence helper)
+- **Description:** Two file-locking footguns the research flagged: (1) **`fcntl`/`F_SETLK` POSIX record
+  locks release when *any* fd to the file is closed** (a library that opens/reads/closes the same file
+  silently drops the lock — the man page calls it "bad") and don't inherit across `fork` as expected;
+  **`flock`** has sane semantics (binds to the open file description, self-cleans on crash) and is
+  portable to macOS. Confirm `store/lock_unix.go` (and any other locking) uses `flock`, not `fcntl`.
+  (2) Atomic `rename` gives atomicity but **not durability** — a crash can leave a zero-length file
+  (the real ext4 delayed-allocation bug) unless the write does **`fsync(temp) → rename → fsync(parent
+  dir)`**. Add that dance to the atomic-write path.
+- **Pointer:** `internal/store/lock_unix.go`; `internal/fileutil` (atomic write). Design: [research/shared-state-concurrency.md](research/shared-state-concurrency.md) / [D87](../decisions/working-notes.md).
+
 ## Policy origin
 
 Established in [architecture-remediation.md](../archive/plans/architecture-remediation.md) and inherited by [layering-refactor.md](../archive/plans/layering-refactor.md).
