@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/fileutil"
@@ -23,6 +24,7 @@ func (s *Server) registerTools() {
 	// Lifecycle
 	s.srv.AddTool(sandboxCreateTool(), s.handleSandboxCreate)
 	s.srv.AddTool(sandboxStatusTool(), s.handleSandboxStatus)
+	s.srv.AddTool(sandboxWaitTool(), s.handleSandboxWait)
 	s.srv.AddTool(sandboxListTool(), s.handleSandboxList)
 	s.srv.AddTool(sandboxDestroyTool(), s.handleSandboxDestroy)
 
@@ -59,6 +61,15 @@ func sandboxStatusTool() mcp.Tool {
 	return mcp.NewTool("sandbox_status",
 		mcp.WithDescription("Get sandbox status. Poll this after sandbox_create (every 5s). agent_status: active=working, idle=waiting at prompt, done=finished, failed=error. Check sandbox_files_read for question.json when waiting_for_input."),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Sandbox name")),
+	)
+}
+
+func sandboxWaitTool() mcp.Tool {
+	return mcp.NewTool("sandbox_wait",
+		mcp.WithDescription("Block until the sandbox agent reaches a condition, then return its final status — use instead of polling sandbox_status in a loop. 'idle' (default) returns when the agent stops working and waits at the prompt; 'exit' returns only when the agent session ends. Returns the same status fields as sandbox_status."),
+		mcp.WithString("name", mcp.Required(), mcp.Description("Sandbox name")),
+		mcp.WithString("for", mcp.Description("Condition to wait for: 'idle' (default) or 'exit'")),
+		mcp.WithNumber("timeout_seconds", mcp.Description("Maximum seconds to wait. 0 or omitted waits indefinitely.")),
 	)
 }
 
@@ -213,6 +224,48 @@ func (s *Server) handleSandboxStatus(ctx context.Context, req mcp.CallToolReques
 		"created":          info.Environment.CreatedAt,
 	}, "", "  ")
 
+	return textResult(string(out)), nil
+}
+
+func (s *Server) handleSandboxWait(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	name := req.GetString("name", "")
+	if name == "" {
+		return textResult(errorf("name is required")), nil
+	}
+
+	var cond yoloai.WaitCondition
+	switch req.GetString("for", "idle") {
+	case "", "idle":
+		cond = yoloai.WaitForIdle
+	case "exit":
+		cond = yoloai.WaitForExit
+	default:
+		return textResult(errorf("invalid 'for' value: must be 'idle' or 'exit'")), nil
+	}
+
+	timeout := time.Duration(req.GetFloat("timeout_seconds", 0) * float64(time.Second))
+
+	sb, err := s.client.Sandbox(name)
+	if err != nil {
+		return textResult(errorf("sandbox handle %q: %v", name, err)), nil
+	}
+	info, err := sb.Wait(ctx, yoloai.SandboxWaitOptions{For: cond, Timeout: timeout})
+	if err != nil {
+		if info != nil && errors.Is(err, yoloai.ErrWaitTimeout) {
+			return textResult(errorf("wait timed out for sandbox %q (last status: %s)", name, info.Status)), nil
+		}
+		return textResult(errorf("wait for sandbox %q: %v", name, err)), nil
+	}
+
+	out, _ := json.MarshalIndent(map[string]any{
+		"name":             info.Environment.Name,
+		"status":           string(info.Status),
+		"agent_status":     string(info.AgentStatus),
+		"agent":            info.Environment.AgentType,
+		"model":            info.Environment.Model,
+		"has_changes":      string(info.Changes),
+		"disk_usage_bytes": info.DiskUsageBytes,
+	}, "", "  ")
 	return textResult(string(out)), nil
 }
 

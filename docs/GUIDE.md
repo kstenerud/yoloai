@@ -20,6 +20,7 @@ Full reference for commands, flags, configuration, and internals. For a quick ov
 | `yoloai stop <name>...` | Stop sandboxes (preserving state) |
 | `yoloai start <name>` | Start a stopped sandbox |
 | `yoloai restart <name>` | Restart the agent in an existing sandbox |
+| `yoloai wait <name>` | Block until the agent is idle or exits (`--for idle\|exit`, `--timeout`) |
 | `yoloai clone <source> <dest>` | Clone a sandbox (copy state to a new sandbox) |
 | `yoloai reset <name>` | Re-copy workdir and reset to original state |
 | `yoloai destroy <name>...` | Stop and remove sandboxes |

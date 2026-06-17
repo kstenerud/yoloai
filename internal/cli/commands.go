@@ -37,6 +37,7 @@ func registerCommands(root *cobra.Command, version, commit, date string) {
 		lifecycle.NewRestartCmd(),
 		lifecycle.NewDestroyCmd(),
 		lifecycle.NewResetCmd(),
+		lifecycle.NewWaitCmd(),
 		mcp.NewCmd(),
 
 		// Workflow
