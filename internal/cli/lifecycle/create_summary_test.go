@@ -26,6 +26,27 @@ func TestPrintCreateSummary_Basic(t *testing.T) {
 	assert.Contains(t, out, "attach")
 }
 
+func TestPrintCreateSummary_WithModel(t *testing.T) {
+	var buf bytes.Buffer
+	printCreateSummary(&buf, &yoloai.Environment{
+		Name:      "test-sandbox",
+		AgentType: "claude",
+		Model:     "claude-sonnet-4-6",
+		Dirs:      []yoloai.DirInfo{{HostPath: "/project", Mode: "copy"}},
+	}, false, false)
+	assert.Contains(t, buf.String(), "Model:    claude-sonnet-4-6")
+}
+
+func TestPrintCreateSummary_NoModelWhenUnset(t *testing.T) {
+	var buf bytes.Buffer
+	printCreateSummary(&buf, &yoloai.Environment{
+		Name:      "test-sandbox",
+		AgentType: "claude",
+		Dirs:      []yoloai.DirInfo{{HostPath: "/project", Mode: "copy"}},
+	}, false, false)
+	assert.NotContains(t, buf.String(), "Model:")
+}
+
 func TestPrintCreateSummary_WithPrompt(t *testing.T) {
 	var buf bytes.Buffer
 	printCreateSummary(&buf, &yoloai.Environment{

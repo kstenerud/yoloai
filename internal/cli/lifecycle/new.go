@@ -391,6 +391,9 @@ func loadCreatedMeta(c *yoloai.Client, name string) (*yoloai.Environment, error)
 func printCreateSummary(out io.Writer, meta *yoloai.Environment, hasPrompt, vscodeTunnel bool) {
 	fmt.Fprintf(out, "Sandbox %s created\n", meta.Name)  //nolint:errcheck // best-effort output
 	fmt.Fprintf(out, "  Agent:    %s\n", meta.AgentType) //nolint:errcheck // best-effort output
+	if meta.Model != "" {
+		fmt.Fprintf(out, "  Model:    %s\n", meta.Model) //nolint:errcheck // best-effort output
+	}
 	if meta.Profile != "" {
 		fmt.Fprintf(out, "  Profile:  %s\n", meta.Profile) //nolint:errcheck // best-effort output
 	}
