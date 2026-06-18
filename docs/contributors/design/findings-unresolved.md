@@ -178,6 +178,16 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 - **Trigger:** when API-key / adversarial usage becomes routine (the Anthropic JV engagement), or when DF38's MCP credential model is designed — whichever first.
 - **Pointer:** the agent-state / credential bind-mount wiring (per-agent definition `state directory` → provision mount setup); contrast the env-var credential path under [D63]. Related: DF38.
 
+### DF40 — seatbelt/tart launch leaves the host-run tmux+agent attached to the caller's controlling terminal (macOS terminal-corruption sibling of the fixed docker bug)
+
+- **Discovered:** 2026-06-18 · **Workstream:** terminal-corruption investigation (external concurrent trial harness; the **docker/Linux** half was root-caused and fixed on `main` in `f208b32` — `WithTerminal` only enters raw mode when stdin *and* stdout are terminals)
+- **Severity:** MEDIUM (terminal corruption / usability — staircased output, dead Ctrl-C; **seatbelt and tart only**, i.e. macOS)
+- **Disposition:** PARKED — **needs a macOS host to reproduce + verify; cannot be tested or fixed from Linux** (both backends are macOS-only). Recorded so a macOS-running agent can pick it up.
+- **Description:** The fixed docker bug was a host-side raw-mode race in the CLI's `WithTerminal`. The **seatbelt** and **tart** backends have a *separate, structurally similar* exposure on the **backend launch** path (not `WithTerminal`): each starts its long-lived host process — `sandbox-exec … python3 sandbox-setup.py` (seatbelt) / `tart run` (tart), which on these backends runs **tmux + the agent on the host** — with `cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}` and **no `Setsid`**. `Setpgid` makes a new process group but stays in the **same session**, so the detached host-run tmux/agent keeps the caller's **controlling terminal** (`/dev/tty`) and can leave it in raw mode after `new`/`start` returns. `sysexec` already leaves `cmd.Stdin` nil (→ `/dev/null`), so the residual vector is the controlling terminal via Setpgid-without-Setsid, **not** stdin. **Unverified** — needs a macOS host (no repro possible on Linux/docker, where tmux runs *inside* the container and never touches the host tty).
+- **Likely fix:** launch these host processes detached from the controlling terminal — `Setsid: true` (new session, no controlling tty) and/or `cmd.Stdin = nil`/`/dev/null` made explicit — mirroring the docker fix's intent (a non-interactive launch must not mutate the caller's terminal). Verify tmux still starts cleanly under the new session on both backends.
+- **Trigger:** the next time anyone runs yoloai **non-interactively on macOS** with `--backend seatbelt` or `--backend tart` (e.g. a batch/trial harness), or any macOS terminal-corruption report — reproduce there, then apply + verify the detach.
+- **Pointer:** `internal/runtime/seatbelt/seatbelt.go:324`, `internal/runtime/tart/tart.go:360` (the `SysProcAttr{Setpgid: true}` launches). Contrast the fixed docker path: `internal/cli/cliutil/streams.go` (`WithTerminal`, `main`@`f208b32`).
+
 ## Policy origin
 
 Established in [architecture-remediation.md](../archive/plans/architecture-remediation.md) and inherited by [layering-refactor.md](../archive/plans/layering-refactor.md).
