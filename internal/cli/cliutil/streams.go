@@ -17,22 +17,32 @@ import (
 )
 
 // WithTerminal binds the calling process's terminal to a yoloai.IOStreams and
-// runs fn with it. When stdin is a real terminal it puts it in raw mode (so
+// runs fn with it. When the session is interactive it puts stdin in raw mode (so
 // escape sequences reach the remote PTY rather than the host line discipline),
 // seeds the initial geometry, and pumps SIGWINCH-driven resizes into
 // IOStreams.Resize — restoring the terminal and stopping the pump when fn
 // returns. Every backend bridges through a PTY (a remote one over its API
 // socket, or a local one via ptybridge.Exec for tart/seatbelt), so the raw mode
-// set here applies uniformly. When stdin is not a terminal (piped input, tests)
-// it skips all terminal management and hands fn plain streams.
+// set here applies uniformly. When the session is not interactive (piped input
+// or captured/redirected output, tests) it skips all terminal management and
+// hands fn plain streams.
+//
+// "Interactive" requires BOTH stdin and stdout to be a terminal. Gating on stdin
+// alone is wrong when stdout is captured/redirected — a non-interactive exec
+// (e.g. `yoloai exec box -- cat f` with output piped): it needlessly puts the
+// shared controlling terminal into raw mode, and concurrent invocations then
+// race on MakeRaw/Restore and can leave it raw (ONLCR/ISIG off → staircased
+// output, dead Ctrl-C). A session whose output is a pipe is non-interactive by
+// definition, so there is no PTY to forward escape sequences to anyway.
 //
 // This is where the §12 ambient-terminal reads live: the library never
 // inspects a stream's FD, sets raw mode, or installs signal handlers — that is
 // the embedder's job, and for the CLI the embedder is right here.
 func WithTerminal(fn func(yoloai.IOStreams) error) error {
 	in := os.Stdin
-	fd := int(in.Fd()) //nolint:gosec // G115: a file descriptor is a small non-negative int
-	isTTY := term.IsTerminal(fd)
+	fd := int(in.Fd())           //nolint:gosec // G115: a file descriptor is a small non-negative int
+	outFd := int(os.Stdout.Fd()) //nolint:gosec // G115: a file descriptor is a small non-negative int
+	isTTY := term.IsTerminal(fd) && term.IsTerminal(outFd)
 	streams := yoloai.IOStreams{
 		In:   in,
 		Out:  os.Stdout,
@@ -43,8 +53,10 @@ func WithTerminal(fn func(yoloai.IOStreams) error) error {
 
 	// TTY=true is a contract that the streams ARE a tty (the backend runs the
 	// inner exec with `-it`); claiming it over piped/redirected stdin makes
-	// `docker exec -it` fail with "the input device is not a TTY". When stdin
-	// is not a terminal, hand fn plain streams (TTY=false) and skip raw mode.
+	// `docker exec -it` fail with "the input device is not a TTY", and claiming
+	// it over captured stdout both garbles the output (cooked CRLF) and triggers
+	// the raw-mode race above. When the session is not interactive, hand fn
+	// plain streams (TTY=false) and skip raw mode.
 	if !isTTY {
 		return fn(streams)
 	}
