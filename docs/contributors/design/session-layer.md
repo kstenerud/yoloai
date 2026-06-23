@@ -10,7 +10,10 @@ dated sections below. **Advanced 2026-06-23** — re-launch semantics converged 
 fresh-environment event, not a restart event) + tier-2 hook completion signal converged (authoritative
 per-turn idle via the agent's turn-stop hook, hook-authoritative-exclusive with a deferred `hook-unreliable`
 escape hatch, turn-cursor contract) + handle named **`IOSession`** (channel-agnostic; disambiguated from the agent's
-conversation "session"). Still no D-number — only the inject/capture **security** thread remains (RESUME-HERE).
+conversation "session") + inject/capture **security** converged (one-way trust valve; attach=ssh-model
+pass-through, snapshot/bug-report=sanitize+redact+opt-in, inject=argv-parameterized; all accepted gated on
+load-bearing risk **documentation**). **ALL DESIGN THREADS RESOLVED 2026-06-23** — ready for its D-number (D88)
++ a finalized consolidated spec.
 This is the framing reached so far + the open
 questions — *not* a finalized spec like [substrate-interface.md](substrate-interface.md) /
 [copyflow-layer.md](copyflow-layer.md) / [persistence-helper.md](persistence-helper.md). The session
@@ -286,13 +289,47 @@ The internal in-container process the PTY `Launch` starts (broker + agent + moni
 `session-runner` if it persists as the session anchor, `session-setup` if it sets-up-and-hands-off to the
 broker. An internal, spec-time mechanism detail, not public API.
 
+## 2026-06-23 — security: the inject/capture trust valve converged
+
+Drains the last RESUME-HERE thread. The `IOSession` is the host-side boundary to an **untrusted** agent; it is
+a **one-way trust valve** — the mirror of copyflow's seal (copyflow protects the host *filesystem*; this
+protects the host *terminal + shared artifacts*). Threat model: capture/attach egress untrusted bytes
+(**secrets** + **terminal-escape sequences** — OSC-52 clipboard, cursor/title injection); inject ingresses to
+the untrusted box.
+
+**Egress is minimized by the carve.** Because the monitor is relocated in-container (spine #2), routine
+idle-capture stays *in* the sandbox — only the minimal derived **status sidecar** crosses; tier-2
+(hook-authoritative) shrinks even that. So raw capture egresses **only on explicit user actions** (attach,
+snapshot, bug report) — a small, deliberate surface.
+
+**Capture = tainted at the boundary**, handled by where it goes:
+- **Live `attach` = pass-through** — you *cannot* sanitize a live TUI without breaking it (the escapes *are*
+  the UI). Stance: the **ssh-to-untrusted-host model** — attaching exposes your terminal to the agent by your
+  explicit choice.
+- **Snapshot / bug report (the share vector) = sanitize escapes + best-effort secret-redact + opt-in
+  inclusion.** Free-form output has no schema, so auto-redaction is unreliable; we therefore do **not** pretend
+  it is auto-safe — inclusion is explicit and runs through the existing `bugreport.go` sanitization.
+
+**Inject = opaque intent in** — argv-parameterized, **never** interpolated into a host shell command. The
+current `deliverPromptViaTmux` already does this (payload as `$1`); the contract locks it (+ spec-time audit).
+
+**Accepted on one condition — DOCUMENTATION is load-bearing.** The risk is acceptable *only because it is
+informed*, so docs are a **definition-of-done deliverable**, not a footnote: (a) `attach` help / GUIDE security
+section must state the terminal-exposure (ssh-model) risk; (b) the bug-report/snapshot path must warn that
+captured output may carry secrets, that redaction is best-effort, and prompt review before sharing. Ties to
+`design/security.md` + the security-sandbox principles.
+
+**Scope boundary:** inject *authorization* (who may drive the agent) is the embedder/principal concern (D58/D59
+isolation axes), not the session layer — mechanism here, policy above.
+
 ## Open questions — RESUME HERE
 
-The Go↔Python boundary (spine, 2026-06-18) and re-launch / tier-2-hook / `IOSession`-naming (all 2026-06-23)
-are now **resolved**. **One thread remains:**
+**All design threads resolved** (lifetime 2026-06-16; spine 2026-06-18; re-launch / tier-2-hook /
+`IOSession`-naming / security all 2026-06-23). The session layer is **ready to earn its D-number (next is D88)
++ a finalized spec** — consolidate these chronological convergence sections into a clean topic-organized spec
+like [substrate-interface.md](substrate-interface.md) / [copyflow-layer.md](copyflow-layer.md) /
+[persistence-helper.md](persistence-helper.md).
 
-1. **Security.** Inject/capture trust boundary — within the sandbox vs across the host boundary; lighter than
-   copyflow's hermetic seal, but **capture can egress agent-printed secrets into bug reports**. The
-   credential-delivery slice is already tracked as **DF38**/**DF39**.
-
-Once this drains, the session layer earns its D-number + a finalized spec (like substrate/copyflow/persistence).
+Spec-time to-dos already flagged: confirm the current `Stop`-hook wiring (tier-2); name the internal
+in-container process (`session-runner` vs `session-setup`); audit the inject escaping; enumerate the doc
+surfaces the security posture requires.
