@@ -5,7 +5,10 @@ the conversation can resume after a machine restart. **Advanced 2026-06-16** (co
 the `lifetime` axis and the completion-signal staging converged. **Advanced 2026-06-18** — the structural
 spine (the Go↔Python carve) converged: neutral PID 1, relocate-the-monitor, coarse `Launch`,
 Launch-unit-by-`SessionKind`, and the `ProvisionSpec`/`ProcSpec`/`AgentLaunchSpec` schema split. See the
-dated sections below. Still no D-number — re-launch / tier-2-shape / naming / security remain (RESUME-HERE).
+dated sections below. **Advanced 2026-06-23** — re-launch semantics converged (restart=re-run-the-launch;
+`lifetime` decides prompt replay; persistent restart = **fresh agent**, cross-agent-parity rule; trust is a
+fresh-environment event, not a restart event). Still no D-number — tier-2 hook-log shape / `Session` naming /
+inject-capture security remain (RESUME-HERE).
 This is the framing reached so far + the open
 questions — *not* a finalized spec like [substrate-interface.md](substrate-interface.md) /
 [copyflow-layer.md](copyflow-layer.md) / [persistence-helper.md](persistence-helper.md). The session
@@ -169,43 +172,68 @@ shape remain (see RESUME-HERE below).
    layer) that compiles into `ProcSpec` + a staged config. Agent fields **never** appear in a substrate type;
    that is what makes DF31+DF33 *close* rather than relocate.
 
+## 2026-06-23 — re-launch semantics converged
+
+Drains RESUME-HERE thread #1 (re-launch) and closes the resume-vs-fresh question (old #B).
+
+**Restart, stop/start, and create are three operations distinguished by *which layer cycles*** — a payoff of
+the carve's independent substrate/session lifecycles:
+1. **Restart (session-level)** — substrate stays **up**; the orchestrator terminates the `Launch`'d session
+   tree and re-`Launch`es it. `Substrate.Start` is *not* called. Light, fast, environment unchanged.
+2. **Stop → Start (substrate-level)** — substrate cycles down/up: `Substrate.Start` = agent-free env-up +
+   neutral PID 1 **only** (supervision is caller policy, D84 mechanism-not-policy), then the orchestrator
+   re-issues `Launch`.
+3. **Create / reset-to-fresh** — fresh substrate and (for create) a fresh workdir copy.
+
+**Persisted vs ephemeral.** `ProvisionSpec` (env definition) + `AgentLaunchSpec` (agent intent) are persisted
+— `ProvisionSpec` in the substrate store record, `AgentLaunchSpec` in a D85 agent **sidecar** beside it; both
+re-read on start. The session process tree is **always ephemeral**, re-materialized by `Launch` — never the
+old PID ("re-open-env-never-process", D84). A bare `start` uses the *persisted* `AgentLaunchSpec` (no
+re-resolve — changing model/etc. is `reset`/recreate, not a silent start-time swap).
+
+**The trust prompt is a fresh-*environment* event, not a restart event.** Claude's folder-trust lives in the
+persisted `~/.claude`, keyed to a stable workdir path — a *first-encounter-of-this-folder* event. In-place
+restart never triggers it; stop/start doesn't either (state + path persist); only a genuinely-new folder
+does. **DF13's dialog-on-restart was a symptom of restart-as-stop_start**; under this model it evaporates.
+Belt-and-suspenders hardening: pre-trust the workdir at create so it never appears at all.
+
+**Prompt replay is decided by `lifetime`, not a global flag** — "restart = re-run the launch (`ProcSpec`)"
+gives the right answer for both automatically, because the prompt is *in* the launch command for one-shot and
+not for persistent:
+- **one-shot / headless** bakes the prompt into the launch (`claude -p "task"`) → restart re-runs it →
+  **re-injects** (what a script/agent driver wants; restart *means* "run the trial again");
+- **persistent / interactive** launches the agent and injects the prompt *separately, post-launch* → restart
+  re-runs the agent command only → **no replay**.
+So least-astonishment falls out of the existing `lifetime` axis — no new choice, no global default that
+surprises one camp. A script wanting re-injection uses one-shot / `reset --prompt`, not a flipped default.
+
+**Resume-vs-fresh (old open question B) → FRESH.** A persistent restart brings back a **fresh agent**, not a
+resumed conversation. Two reasons, the second load-bearing:
+- The environment (work copy, `~/.claude` history, progress) **persists**, so the original prompt is stale by
+  definition — replaying the kickoff would fight the world the agent re-enters.
+- **Cross-agent parity rule:** the session layer's baseline re-launch must be the lowest common denominator,
+  and "relaunch a fresh agent" is the only thing *every* agent supports. Native conversation-resume (Claude's
+  `--continue`) is Claude-shaped; baking it into the baseline would re-couple the abstraction to one agent —
+  the coupling the carve exists to remove. **Fresh is the baseline**; native resume is a *deferred per-agent
+  capability* declared on `AgentLaunchSpec` and opted into, never assumed.
+
+This matches the current `relaunchAgent` default (plain respawn, no prompt) — so the change is "keep the
+default, make it `lifetime`-aware," not a rewrite. The `--prompt` (new task) / `--resume` (re-feed + preamble)
+opt-ins remain for explicit re-injection; `--resume`'s preamble-replay is now of dubious value given the
+staleness reasoning (revisit whether it earns its keep — a CLI-surface question, not a core semantic).
+
 ## Open questions — RESUME HERE
 
-The Go↔Python boundary thread (old #3) is now **resolved** — see the 2026-06-18 spine above. Remaining,
-in rough priority:
+The Go↔Python boundary (spine, 2026-06-18) and re-launch semantics (2026-06-23) are now **resolved**.
+Remaining, in rough priority:
 
-1. **Re-launch semantics** (next thread). Lean: `Substrate.Start` = agent-free env-up + neutral PID 1
-   **only** (no agent — supervision is caller policy, D84 mechanism-not-policy); the **agent-aware
-   orchestrator** owns re-issuing `Launch` on start/restart; `AgentLaunchSpec` is **persisted** alongside
-   `ProvisionSpec` (the env definition + the agent intent), while the session process is always ephemeral and
-   re-materialized by `Launch` ("re-open-env-never-process", D84). Bare restart must **not** re-inject the
-   prompt (DF13); reset-with-prompt injects the new one. To confirm + nail.
-2. **The tier-2 hook-log "done" signal shape.** Channel-agnostic (a hook writing a log/sidecar, not terminal
+1. **The tier-2 hook-log "done" signal shape.** Channel-agnostic (a hook writing a log/sidecar, not terminal
    scraping); PTY-capture-based idle is the PTY-only *extra*; one-shot-via-`-p` needs neither (exit = done).
    Pin *where* it lives (session layer, above substrate liveness — D84-consistent) and its exact on-disk shape
    (ties to the monitor sidecar from spine #2).
-3. **The `Session` handle name** (and the agent-session supervisor's name).
-4. **Security.** Inject/capture trust boundary — within the sandbox vs across the host boundary; lighter than
+2. **The `Session` handle name** (and the agent-session supervisor's name).
+3. **Security.** Inject/capture trust boundary — within the sandbox vs across the host boundary; lighter than
    copyflow's hermetic seal, but **capture can egress agent-printed secrets into bug reports**. The
    credential-delivery slice is already tracked as **DF38**/**DF39**.
 
 Once these drain, the session layer earns its D-number + a finalized spec (like substrate/copyflow/persistence).
-
-The 2026-06-15 kickoff questions were engaged on 2026-06-16 (see the section above); current state —
-1. **Scope vs the C-full deferral** — *sharpened, lean confirmed.* The first real headless consumer
-   (control-eval) does **not** force the Stream strategy (PTY + composition, or `-p`, serve it), so the
-   real-demand trigger for Stream still hasn't tripped. Design the abstraction (`Session` + `SessionKind`,
-   tmux as one strategy); don't build Stream speculatively.
-2. **Capture feeds Q103** — *mostly resolved by the three-tier model.* Capture-based idle is **PTY-only**;
-   the **tier-2 hook-log signal** is the channel-agnostic per-turn done; one-shot-via-`-p` needs neither
-   (exit = done). Remaining: pin *where* the hook-log signal lives (session layer, above substrate liveness —
-   D84-consistent) and its exact shape.
-3. **The Go↔Python boundary (the heavy one)** — *still open, sharper motivation.* How much session logic
-   moves to Go (launch the broker via `Launch`, inject/capture via `Exec`) vs a thin in-container helper.
-   Tier-3 (the clean `-p` one-shot) is **gated on this reshape** (DF31), making it control-eval's best path —
-   the strongest candidate for the next thread.
-
-Also still to do for this layer: the **security** angle (input injection / capture within the sandbox vs
-across the host boundary — lighter than copyflow's hermetic seal, but capture can egress agent-printed
-secrets into bug reports; the credential-delivery slice is now tracked as **DF38**/**DF39**), and the
-**handle/name** for the `Session` type.
