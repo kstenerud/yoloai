@@ -7,8 +7,10 @@ spine (the Go↔Python carve) converged: neutral PID 1, relocate-the-monitor, co
 Launch-unit-by-`SessionKind`, and the `ProvisionSpec`/`ProcSpec`/`AgentLaunchSpec` schema split. See the
 dated sections below. **Advanced 2026-06-23** — re-launch semantics converged (restart=re-run-the-launch;
 `lifetime` decides prompt replay; persistent restart = **fresh agent**, cross-agent-parity rule; trust is a
-fresh-environment event, not a restart event). Still no D-number — tier-2 hook-log shape / `Session` naming /
-inject-capture security remain (RESUME-HERE).
+fresh-environment event, not a restart event) + tier-2 hook completion signal converged (authoritative
+per-turn idle via the agent's turn-stop hook, hook-authoritative-exclusive with a deferred `hook-unreliable`
+escape hatch, turn-cursor contract). Still no D-number — `Session` naming / inject-capture security remain
+(RESUME-HERE).
 This is the framing reached so far + the open
 questions — *not* a finalized spec like [substrate-interface.md](substrate-interface.md) /
 [copyflow-layer.md](copyflow-layer.md) / [persistence-helper.md](persistence-helper.md). The session
@@ -222,17 +224,51 @@ default, make it `lifetime`-aware," not a rewrite. The `--prompt` (new task) / `
 opt-ins remain for explicit re-injection; `--resume`'s preamble-replay is now of dubious value given the
 staleness reasoning (revisit whether it earns its keep — a CLI-surface question, not a core semantic).
 
+## 2026-06-23 — tier-2 hook completion signal converged
+
+Drains RESUME-HERE #1 (tier-2 shape). Tier-2 is **authoritative per-turn completion** — the agent's own
+turn-stop hook (Claude's `Stop`) *declaring* "this turn is finished, awaiting input" — vs tier-1's heuristic
+*guess* and tier-3's process-exit. It is a **per-agent capability** (the heuristic detector stack is the
+agnostic baseline; the hook is the per-agent upgrade — same parity rule as native-resume from re-launch) and
+lives as **agent-status in a sidecar, above substrate liveness** (D84-clean); the relocated monitor (spine #2)
+is its consumer. NB the word "done" was loose — tier-2 is authoritative *idle / turn-complete*, not
+session-over (that stays tier-3 / liveness).
+
+**Authoritative-and-exclusive (the blip fix).** When an agent is hook-capable, idle is determined **only** by
+the hook; the heuristic detectors (ready-pattern, output-stability) run **only** for hook-less agents. The
+startup blip — a false early `idle` ~20s in, before real work — is a *heuristic artifact* (the hook never
+fires on it), so trusting the hook alone removes it. The crash/hang case (hook never fires) is covered by
+**liveness** (process exit → done/failed), not heuristics — so for hook-capable agents the heuristics add
+nothing but the blip.
+
+**Escape hatch (deferred, designed-for).** Idle detection has a long, painful history, so we do *not* bet
+everything on the hook: a per-agent **"hook-unreliable"** flag is a planned future addition that runs the hook
+*and* the heuristics together (use the hook when it fires; heuristics backstop a *missed* hook). Built only if
+testing shows a flaky hook. The open detail — combining the two without reviving the blip (likely: heuristics
+as a *late/conservative* backstop whose threshold sits well after the early blip, catching missed hooks
+without racing them) — is a testing-time problem, deferred. **Design-now requirement:** detector resolution is
+a per-agent **mode selector** `{hook-authoritative, heuristic-only, (future) hook-assisted}`, not a hardcoded
+hook-XOR-heuristics, so the third mode slots in without rework. Today we build the first two.
+
+**The contract carries a turn cursor (or the blip returns at the API).** Even an authoritative hook can be
+read *stale*. So the signal carries a **monotonic turn index (+ timestamp)**: the agent emits turn events
+(turn-start → `active`, turn-stop → `idle`, incrementing the counter) into the agent sidecar — a single
+overwritten `agent-status.json` carrying the counter (YAGNI over an append-only event log). The session layer
+derives current status; `Sandbox.Wait(WaitForIdle)` waits for *completed-turn > the turn at which my prompt
+was submitted*, so it cannot trip on an earlier idle (the blip). Tier-2 is thus a **reliability upgrade to the
+existing `Wait`** (and the shipped `yoloai wait`), not a new API.
+
+**Spec-phase to-do:** confirm the current hook wiring — is Claude's `Stop` already writing
+`agent-status.json`, or does the existing "hook detector" (`ResolveDetectors`, `IdleSupport.Hook`) read
+something else? — before implementing. Doesn't change the design.
+
 ## Open questions — RESUME HERE
 
-The Go↔Python boundary (spine, 2026-06-18) and re-launch semantics (2026-06-23) are now **resolved**.
-Remaining, in rough priority:
+The Go↔Python boundary (spine, 2026-06-18), re-launch semantics, and the tier-2 hook signal (both 2026-06-23)
+are now **resolved**. Remaining, in rough priority:
 
-1. **The tier-2 hook-log "done" signal shape.** Channel-agnostic (a hook writing a log/sidecar, not terminal
-   scraping); PTY-capture-based idle is the PTY-only *extra*; one-shot-via-`-p` needs neither (exit = done).
-   Pin *where* it lives (session layer, above substrate liveness — D84-consistent) and its exact on-disk shape
-   (ties to the monitor sidecar from spine #2).
-2. **The `Session` handle name** (and the agent-session supervisor's name).
-3. **Security.** Inject/capture trust boundary — within the sandbox vs across the host boundary; lighter than
+1. **The `Session` handle name** (and the agent-session supervisor's name).
+2. **Security.** Inject/capture trust boundary — within the sandbox vs across the host boundary; lighter than
    copyflow's hermetic seal, but **capture can egress agent-printed secrets into bug reports**. The
    credential-delivery slice is already tracked as **DF38**/**DF39**.
 
