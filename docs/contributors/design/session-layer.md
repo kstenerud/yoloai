@@ -9,8 +9,8 @@ dated sections below. **Advanced 2026-06-23** — re-launch semantics converged 
 `lifetime` decides prompt replay; persistent restart = **fresh agent**, cross-agent-parity rule; trust is a
 fresh-environment event, not a restart event) + tier-2 hook completion signal converged (authoritative
 per-turn idle via the agent's turn-stop hook, hook-authoritative-exclusive with a deferred `hook-unreliable`
-escape hatch, turn-cursor contract). Still no D-number — `Session` naming / inject-capture security remain
-(RESUME-HERE).
+escape hatch, turn-cursor contract) + handle named **`IOSession`** (channel-agnostic; disambiguated from the agent's
+conversation "session"). Still no D-number — only the inject/capture **security** thread remains (RESUME-HERE).
 This is the framing reached so far + the open
 questions — *not* a finalized spec like [substrate-interface.md](substrate-interface.md) /
 [copyflow-layer.md](copyflow-layer.md) / [persistence-helper.md](persistence-helper.md). The session
@@ -262,14 +262,37 @@ existing `Wait`** (and the shipped `yoloai wait`), not a new API.
 `agent-status.json`, or does the existing "hook detector" (`ResolveDetectors`, `IdleSupport.Hook`) read
 something else? — before implementing. Doesn't change the design.
 
+## 2026-06-23 — naming: the `IOSession` handle
+
+The host-side handle (attach · inject · capture · persist over a `SessionKind`-chosen strategy) is named
+**`IOSession`**. Rejected: `Session` (collides *conversationally* with the agent's own *conversation* "session"
+— `~/.claude`; no in-API clash, but a reader-confusion one the user wanted resolved in the name);
+`TerminalSession` / `Console` / `Terminal` (**channel-shaped** — they name the abstraction after the PTY
+strategy and exclude Stream, re-making the tmux-shaped coupling the refinement exists to remove); `Channel`
+(collides with Go `chan` and the substrate's channels-emergent concept). `IOSession` keeps the
+durable/reattachable "session" resonance while "IO" both disambiguates from the conversation *and* signals
+channel-agnostic (I/O over PTY **or** stream). Likely reached as `sb.Agent().IOSession()`.
+
+**Conceptual clarification (informs the layering).** The agent's *execution* and the `IOSession` are separable
+concerns — the `-p` one-shot runs with **no `IOSession` at all** (substrate `Launch`+`Wait`; the existence
+proof). `attach`/`capture`/`inject` are a separable surface over a running agent (it doesn't care if anyone is
+attached — that's the durable/reattachable essence). But the *channel provision itself* differs by kind: pure
+conduit in **Stream** (the agent is the process; the session wraps its stdio), versus the agent's **host
+terminal** in **PTY** (the broker provides the terminal a TUI agent needs to *exist*; the agent runs *inside*
+it) — the same Launch-unit asymmetry as spine #4. So `IOSession` names the *purpose* (I/O); the PTY's
+terminal-provision is *how* I/O happens for a TUI, not a second job in the name.
+
+The internal in-container process the PTY `Launch` starts (broker + agent + monitor) is **not** named yet —
+`session-runner` if it persists as the session anchor, `session-setup` if it sets-up-and-hands-off to the
+broker. An internal, spec-time mechanism detail, not public API.
+
 ## Open questions — RESUME HERE
 
-The Go↔Python boundary (spine, 2026-06-18), re-launch semantics, and the tier-2 hook signal (both 2026-06-23)
-are now **resolved**. Remaining, in rough priority:
+The Go↔Python boundary (spine, 2026-06-18) and re-launch / tier-2-hook / `IOSession`-naming (all 2026-06-23)
+are now **resolved**. **One thread remains:**
 
-1. **The `Session` handle name** (and the agent-session supervisor's name).
-2. **Security.** Inject/capture trust boundary — within the sandbox vs across the host boundary; lighter than
+1. **Security.** Inject/capture trust boundary — within the sandbox vs across the host boundary; lighter than
    copyflow's hermetic seal, but **capture can egress agent-printed secrets into bug reports**. The
    credential-delivery slice is already tracked as **DF38**/**DF39**.
 
-Once these drain, the session layer earns its D-number + a finalized spec (like substrate/copyflow/persistence).
+Once this drains, the session layer earns its D-number + a finalized spec (like substrate/copyflow/persistence).
