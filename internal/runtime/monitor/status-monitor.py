@@ -612,18 +612,34 @@ def run_monitor(config_path, status_file, tmux_sock=None):
             set_title(title, tmux_sock)
             prev_title = title
 
+    # The monitor is a DURABLE session component (DF46): it watches the pane for
+    # the life of the box, not a single agent run. When the agent exits it records
+    # "done" but keeps watching, so an in-place relaunch (respawn-pane) is
+    # re-detected and tracked without restarting the monitor. It exits only when
+    # the box (and the session-runner that parents it) goes down.
+    in_done = False  # latched while the pane is dead, cleared on respawn
     while True:
         # 1. Check pane death
         dead, exit_code = check_pane_dead(tmux_sock)
         if dead:
-            ec = exit_code if exit_code is not None else 1
-            debug(f"pane dead: exit_code={ec}")
-            _log_jsonl("info", "status.transition", "status changed",
-                       **{"from": hold_status or "unknown", "to": "done", "detector": "pane_dead",
-                          "exit_code": ec})
-            write_status(status_file, "done", ec)
-            update_title(sandbox_name)
-            break
+            if not in_done:
+                ec = exit_code if exit_code is not None else 1
+                debug(f"pane dead: exit_code={ec}")
+                _log_jsonl("info", "status.transition", "status changed",
+                           **{"from": hold_status or "unknown", "to": "done", "detector": "pane_dead",
+                              "exit_code": ec})
+                write_status(status_file, "done", ec)
+                update_title(sandbox_name)
+                hold_status = "done"
+                hold_active_count = 0
+                stability = {}
+                in_done = True
+            time.sleep(POLL_INTERVAL)
+            continue
+
+        # Pane is alive again: a new agent has been launched into it (respawn).
+        # Clear the done latch and fall through to normal active/idle detection.
+        in_done = False
 
         # 2. Get agent PID
         agent_pid = get_agent_pid(tmux_sock)
@@ -691,10 +707,6 @@ def run_monitor(config_path, status_file, tmux_sock=None):
             update_title(sandbox_name)
 
         time.sleep(POLL_INTERVAL)
-
-    _log_jsonl("info", "monitor.exit", "monitor exiting", reason="pane_dead")
-    if _monitor_log:
-        _monitor_log.close()
 
 
 def main():
