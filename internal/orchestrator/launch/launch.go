@@ -140,7 +140,9 @@ func startViaLaunch(ctx context.Context, rt runtime.Backend, launcher runtime.Pr
 
 	// The box must finish root provisioning before we launch the session-runner
 	// over it; otherwise the runner is killed mid-setup (DF44 readiness race).
-	if err := waitForSubstrateReady(readyPath, effectiveSecretsConsumedTimeout(rt.Descriptor())); err != nil {
+	// The substrate owns the readiness signal (launcher.Ready); we own the wait
+	// policy.
+	if err := waitForReady(ctx, launcher, cname, effectiveSecretsConsumedTimeout(rt.Descriptor())); err != nil {
 		return err
 	}
 
@@ -319,20 +321,30 @@ func waitForSecretsConsumed(markerPath string, timeout time.Duration) {
 	}
 }
 
-// waitForSubstrateReady blocks until the .substrate-ready marker exists or the
-// timeout elapses. The keepalive entrypoint writes it after root provisioning
-// completes (immediately before exec'ing the holder). Unlike the secrets wait,
-// a timeout here is a hard error: launching the session-runner before the box
-// is provisioned gets it silently killed (DF44 readiness race), so we refuse to
-// launch into a box that never signalled ready.
-func waitForSubstrateReady(markerPath string, timeout time.Duration) error {
+// waitForReady polls the substrate's own readiness signal (launcher.Ready) until
+// it reports the box can accept a launched process, or the timeout elapses. The
+// substrate owns HOW readiness is determined; this owns the wait policy. Unlike
+// the secrets wait, a timeout here is a hard error: launching the session-runner
+// before the box is provisioned gets it silently killed (DF44 readiness race),
+// so we refuse to launch into a box that never signalled ready. Transient Ready
+// errors during boot (the container briefly not accepting execs) are tolerated
+// until the deadline.
+func waitForReady(ctx context.Context, launcher runtime.ProcessLauncher, name string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
+	var lastErr error
 	for {
-		if _, err := os.Stat(markerPath); err == nil {
+		ready, err := launcher.Ready(ctx, name)
+		if err == nil && ready {
 			return nil
 		}
+		if err != nil {
+			lastErr = err
+		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("substrate not ready: marker %s not observed within %s (root provisioning did not complete)", markerPath, timeout)
+			if lastErr != nil {
+				return fmt.Errorf("substrate not ready within %s: %w", timeout, lastErr)
+			}
+			return fmt.Errorf("substrate not ready within %s (root provisioning did not complete)", timeout)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}

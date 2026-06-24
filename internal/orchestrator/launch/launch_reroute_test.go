@@ -30,12 +30,8 @@ import (
 // rerouteBaseRuntime records Create/Start/Inspect calls and returns running=true
 // on Inspect so verifyInstanceRunning is satisfied.
 type rerouteBaseRuntime struct {
-	mu sync.Mutex
-	// readyMarkerPath, when set, is written by Start to simulate the entrypoint
-	// signalling root-provisioning complete (the .substrate-ready marker the
-	// Launch path waits for before launching the session-runner).
-	readyMarkerPath string
-	callSeq         []string // ordered call log: "Create", "Start", "Inspect"
+	mu      sync.Mutex
+	callSeq []string // ordered call log: "Create", "Start", "Ready", "Launch", "Inspect"
 }
 
 var _ runtime.Backend = (*rerouteBaseRuntime)(nil)
@@ -52,10 +48,6 @@ func (r *rerouteBaseRuntime) Create(_ context.Context, _ runtime.InstanceConfig)
 }
 func (r *rerouteBaseRuntime) Start(_ context.Context, _ string) error {
 	r.record("Start")
-	if r.readyMarkerPath != "" {
-		_ = os.MkdirAll(filepath.Dir(r.readyMarkerPath), 0750)
-		_ = os.WriteFile(r.readyMarkerPath, nil, 0600)
-	}
 	return nil
 }
 func (r *rerouteBaseRuntime) Inspect(_ context.Context, _ string) (runtime.InstanceInfo, error) {
@@ -134,6 +126,14 @@ type rerouteLaunchRuntime struct {
 }
 
 var _ runtime.ProcessLauncher = (*rerouteLaunchRuntime)(nil)
+
+// Ready reports the substrate ready immediately (the entrypoint-provisioning
+// step is simulated as instantaneous). It records the call so tests can assert
+// the readiness gate runs between Start and Launch.
+func (r *rerouteLaunchRuntime) Ready(_ context.Context, _ string) (bool, error) {
+	r.record("Ready")
+	return true, nil
+}
 
 func (r *rerouteLaunchRuntime) Launch(_ context.Context, name string, spec runtime.ProcSpec) (runtime.Process, error) {
 	r.record("Launch")
@@ -215,7 +215,6 @@ func TestBuildAndStart_LaunchPath(t *testing.T) {
 
 	rt := &rerouteLaunchRuntime{}
 	rt.markerPath = markerPath
-	rt.readyMarkerPath = filepath.Join(dir, store.SubstrateReadyMarker)
 
 	st := makeTestState(dir)
 	err := buildAndStart(context.Background(), rt, st, nil, nil, true /*hasSecrets*/)
@@ -238,20 +237,24 @@ func TestBuildAndStart_LaunchPath(t *testing.T) {
 	assert.Contains(t, joined, "sandbox-setup.py", "ProcSpec.Argv must reference sandbox-setup.py")
 	assert.Contains(t, joined, "session-runner.log", "ProcSpec.Argv must redirect output to session-runner.log")
 
-	// Call order: Create → Start → Launch (marker wait is after, implicit
-	// because buildAndStart returned without error and the marker was present).
+	// Call order: Create → Start → Ready → Launch. The readiness gate must run
+	// between Start and Launch (a runner launched before the box is ready is
+	// killed mid-setup — DF44).
 	rt.mu.Lock()
 	seq := append([]string(nil), rt.callSeq...)
 	rt.mu.Unlock()
 
 	createIdx := indexOf(seq, "Create")
 	startIdx := indexOf(seq, "Start")
+	readyIdx := indexOf(seq, "Ready")
 	launchIdx := indexOf(seq, "Launch")
 	require.NotEqual(t, -1, createIdx, "Create must be called")
 	require.NotEqual(t, -1, startIdx, "Start must be called")
+	require.NotEqual(t, -1, readyIdx, "Ready must be called")
 	require.NotEqual(t, -1, launchIdx, "Launch must be called")
 	assert.Less(t, createIdx, startIdx, "Create must precede Start")
-	assert.Less(t, startIdx, launchIdx, "Start must precede Launch")
+	assert.Less(t, startIdx, readyIdx, "Start must precede the readiness gate")
+	assert.Less(t, readyIdx, launchIdx, "the readiness gate must precede Launch")
 
 	// The marker must be present (fakeProcess wrote it; the wait observed it).
 	_, statErr := os.Stat(markerPath)
@@ -308,7 +311,6 @@ func TestBuildAndStart_LaunchPath_NoSecrets(t *testing.T) {
 	// No markerPath — if we accidentally call waitForSecretsConsumed it would
 	// spin for the full timeout; leaving it empty ensures the test is fast.
 	rt.markerPath = ""
-	rt.readyMarkerPath = filepath.Join(dir, store.SubstrateReadyMarker)
 
 	st := makeTestState(dir)
 	err := buildAndStart(context.Background(), rt, st, nil, nil, false /*hasSecrets*/)

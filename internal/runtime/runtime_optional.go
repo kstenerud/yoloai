@@ -275,6 +275,14 @@ type Process interface {
 // are its blocking siblings. Backends that don't implement it cannot yet host
 // the carve's neutral-PID-1 + Launch model (broadened in a later step).
 type ProcessLauncher interface {
+	// Ready reports whether the instance has finished its own provisioning and
+	// can accept a launched process — substrate-interface.md §Ready ("up AND able
+	// to accept work", distinct from Inspect's Running, which is merely "PID 1 is
+	// up"). A process launched before the box is ready is silently killed mid-set
+	// up (DF44 readiness race), so callers must wait for Ready before Launch. The
+	// backend owns HOW readiness is determined; the caller owns the wait policy
+	// (timeout, poll interval).
+	Ready(ctx context.Context, name string) (bool, error)
 	Launch(ctx context.Context, name string, spec ProcSpec) (Process, error)
 }
 

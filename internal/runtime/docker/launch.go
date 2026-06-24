@@ -20,6 +20,27 @@ import (
 // compile-time assertion: *Runtime must satisfy ProcessLauncher.
 var _ runtime.ProcessLauncher = (*Runtime)(nil)
 
+// substrateReadyMarker is the in-container path of the readiness marker the
+// keepalive entrypoint writes once root provisioning is complete (mirror of
+// store.SubstrateReadyMarker, the host-relative path under the sandbox dir).
+// entrypoint.py hard-codes the same path; keep them in sync.
+const substrateReadyMarker = "/yoloai/logs/.substrate-ready"
+
+// Ready reports whether the instance has finished root provisioning and can
+// accept a launched session-runner. It checks, in-container, for the marker the
+// keepalive entrypoint writes immediately before exec'ing the holder — so the
+// substrate owns the readiness convention, not the caller. The probe always
+// exits 0 (a missing marker is "not ready", not an exec error); a genuine exec
+// failure (e.g. the container is not yet accepting execs) is returned as error.
+func (r *Runtime) Ready(ctx context.Context, name string) (bool, error) {
+	probe := "if [ -f " + substrateReadyMarker + " ]; then echo READY; fi"
+	res, err := r.Exec(ctx, name, []string{"sh", "-c", probe}, "")
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(res.Stdout) == "READY", nil
+}
+
 // Launch starts a process inside the named running instance and returns a
 // non-blocking Process handle. Unlike Exec/InteractiveExec it returns
 // immediately after attaching; the caller drives I/O and calls Wait to

@@ -42,6 +42,10 @@ func TestPrepareAgentCommandFor(t *testing.T) {
 // nothing. Used only for the LauncherOf type-dispatch test.
 type launchRuntime struct{ Backend }
 
+func (launchRuntime) Ready(_ context.Context, _ string) (bool, error) {
+	return true, nil
+}
+
 func (launchRuntime) Launch(_ context.Context, _ string, _ ProcSpec) (Process, error) {
 	return nil, nil
 }
