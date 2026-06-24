@@ -92,7 +92,7 @@ So the agent layer absorbs only agent-specific *data + tiny adapters*; the runne
 | **Model** | alias table + prefix rules *(data)* + opencode validation *(thin adapter)* | requested model name → caller | the generic resolver → **agent layer** *(keeps resolver with its alias data)* |
 | **Credentials** | env-var names + seed-file list + state dir *(data)* | credential **values** → caller (D63/DF38) | secrets-staging + seed-copy → **envsetup** |
 | **Network** | required domains, a *floor* *(data)* | effective policy → **netpolicy** | policy-composer + enforcer → netpolicy |
-| **Context** | the **global-context-file location** (`StateDir`+`ContextFile`) | each layer's fragment → assembled **DEF** | generic "append DEF to ABC at location" → provision/envsetup |
+| **Context** | the `DEF`-injection **method** (append-at-`StateDir`/`ContextFile`, or aider's launch-flag) *(data)* | each layer's fragment → assembled **DEF** | generic `DEF`-deliverer → provision/envsetup *(ABC already seeded by Credentials)* |
 | **Self-config** | `folderTrust`/`sandbox`/notif key-flips *(data)* + `ApplySettings` residual *(thin adapter)* | — *(none)* | settings-writer → envsetup |
 
 Byproduct: once the hook *command* leaves for completion, even Claude's "hard" mechanism collapses to **data**
@@ -111,43 +111,48 @@ Byproduct: once the hook *command* leaves for completion, even Claude's "hard" m
 **Forks resolved:** model-resolver → agent layer (keep the resolver with its alias data); credential staging →
 envsetup; context → the global-context model below.
 
-### Context — the global-context model
+### Context — the DEF-injection model (survey-confirmed)
 
-The clean shape (the "fuzzy multi-owner" framing reduced to a fan-in + a generic append):
+Two refinements collapsed the earlier "context sink" into something smaller. **(1) The user's global config
+(ABC) is already seeded** — the **Credentials/State** capability copies the agent's home dir (`SeedFiles` +
+the agent-files copy governed by `AgentFilesExclude`), and the global `CLAUDE.md` is *not* excluded. So Context
+does **not** reach outside; it is a *purely internal* step: deliver yoloAI's collected context (`DEF`) to where
+the agent reads it. **(2)** A web survey of all five shipped agents
+([research/agent-global-context.md](research/agent-global-context.md), verified mid-2026) found four fit a
+single home-dir markdown file, and **Aider is a structural outlier** (no auto-read global file).
 
-- **Outside:** user's global `~/.claude/CLAUDE.md` = `ABC` · yoloai's collected context = `DEF` · workdir
-  `CLAUDE.md` = `GHI`. **Inside:** the global file = **`ABC`+`DEF`** (yoloai's appended to the user's) · workdir
-  file = `GHI` (copied untouched via copyflow — no one's concern).
-- **The only agent-specific datum is the global-context-file location** (`StateDir`+`ContextFile`, already
-  declared). Everything else is generic: *read the user's config there (ABC) → append yoloai's collected
-  context (DEF) → write the result to that location inside.* No per-agent sink logic — a location + a generic
-  append.
-- **The fan-in:** `DEF` is assembled from each concerned layer's **fragment** — file-exchange → the Q&A
-  protocol, sandbox → orientation, netpolicy → "you're network-isolated" later. Each fragment is owned by its
-  contributor (the payload side); the agent owns only the location.
+So the Context capability is **the agent's `DEF`-injection *method*, declared as data** — two shapes:
+
+- **append-to-context-file** (Claude `~/.claude/CLAUDE.md`, Gemini `GEMINI.md`, Codex/OpenCode `AGENTS.md`):
+  append `DEF` at the agent's already-declared `StateDir`/`ContextFile`. Since ABC is already seeded there, this
+  is just an in-sandbox append. **Resolve the *effective* path** (footguns: Gemini's configurable
+  `context.fileName`; Codex's `AGENTS.override.md` precedence + `CODEX_HOME`; OpenCode's CLAUDE.md fallback).
+- **launch-flag** (Aider): no auto-read global file exists — write `DEF` to a scratch file and inject
+  `--read <file>` into the launch command. This **crosses into the Launch capability** (a launch-arg the agent
+  declares), the robust route vs mutating `~/.aider.conf.yml` (last-wins; a project config can override).
+
+Both are **data** (a tagged method + parameters), so the capability *generalized* across the divergence rather
+than breaking — confirming the "data + thin adapter" shape held without forcing code. The **fan-in** is
+unchanged: `DEF` is assembled from each concerned layer's fragment (file-exchange → Q&A, sandbox → orientation,
+netpolicy → isolation-notice), each owned by its contributor; the agent owns only the injection method.
 
 **Findings (cleanups this surfaces):**
-- The Q&A-protocol injection must become **agent-agnostic** — today it is hardcoded Claude-only
-  (`if ContextFile == "CLAUDE.md"`, `context.go:177`); it should be a `DEF` fragment appended at *each agent's*
-  declared location. A mis-homing the principle predicts.
-- **Append, don't clobber:** the runner must append `DEF` to the *seeded* user config, never overwrite it (the
+- The Q&A-protocol injection must become **agent-agnostic** — today hardcoded Claude-only
+  (`if ContextFile == "CLAUDE.md"`, `context.go:177`); it is a `DEF` fragment, delivered by *each agent's*
+  method. A mis-homing the principle predicts.
+- **Append, don't clobber:** the append-method must append `DEF` to the *seeded* ABC, never overwrite it (the
   current write-then-append into the context file is the thing to fix).
-- Agents with **no global-context location** (`StateDir`/`ContextFile` empty — e.g. aider today) currently
-  receive no `DEF`. A capability gap declared by *absence* — acceptable, but those agents miss the operating
-  instructions.
-
-**Open verification (side trip, in progress):** the "single global-context-*file* location" shape is being
-surveyed across all shipped agents (research note `research/agent-global-context.md`, pending) — to confirm no
-agent has a structurally different mechanism (a config key, multiple hierarchical files, a `/memory` command,
-or nothing) that the capability must generalize to rather than break on. The user's steer: *each agent knows
-how to consolidate its own context; the outside only needs "how do I find your global stuff to pass it to
-you?"* — so if an agent diverges, the divergence lives in that agent's thin adapter, not in the generic
-runner.
+- **The injected block is the weakest layer** — all agents let a closer project file win on conflict. Fine for
+  operating-instruction defaults; the design must not *rely* on `DEF` being authoritative (not a containment
+  concern — the sandbox is the real boundary).
+- **AGENTS.md convergence:** Codex+OpenCode are native `AGENTS.md`, Gemini can be pointed at it; a *future*
+  agent most likely uses `AGENTS.md` — a sane default for new registrations.
 
 ## Open questions — RESUME HERE
 
-The re-homing map (2026-06-24) is **resolved** (above), pending the global-context survey that verifies the
-Context capability's per-agent shape. Remaining:
+The re-homing map (2026-06-24) is **resolved** (above); the global-context survey landed
+([research/agent-global-context.md](research/agent-global-context.md)) and the Context capability is reconciled
+(injection-method; aider's launch-flag divergence stayed data). Remaining:
 
 1. **The public surface.** What the `agent` package exposes — the capability/`Definition` types, the catalog,
    the code-adapter interface — and how it relates to the runtime `sb.Agent()` handle (Attach/SendInput/Prompt/

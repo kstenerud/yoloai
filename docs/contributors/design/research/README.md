@@ -6,6 +6,7 @@ Research documents supporting yoloAI's design decisions. Each file covers a broa
 |------|--------|
 | [Competitors](competitors.md) | Existing tools, community pain points, feature comparison |
 | [Agents](agents.md) | AI coding CLI agents, shell mode, Aider local-model integration |
+| [Agent global-context](agent-global-context.md) | **Verified mid-2026.** How each shipped agent (Claude/Aider/Gemini/Codex/OpenCode) ingests GLOBAL user-level context. 4 fit "append to one home-dir markdown file"; **Aider is the outlier** (no auto-read global file — needs file + a `--read`/`read:` declaration). Footguns (Gemini configurable name, Codex `AGENTS.override.md`+`CODEX_HOME`, OpenCode CLAUDE.md fallback), imports non-portable (Claude/Gemini only), injected block is the weakest layer, AGENTS.md convergence. Backs [agent-layer.md](../agent-layer.md) Context capability. |
 | [Security](security.md) | Credential management, network isolation, proxy sidecar, Claude Code proxy support |
 | [Principal isolation](principal-isolation.md) | **Multi-tenant (D59).** Current single-principal baseline + what breaks when a daemon serves many principals: physical partition + id unforgeability, workdir/aux path confinement (symlink/TOCTOU), enumeration, credential bundle; plus blind spots beyond the brief — container escape as cross-tenant boundary, runtime-daemon confused deputy, shared-resource poisoning, log secrets, handle revocation. Pre-design. |
 | [Sandboxing](sandboxing.md) | Alternative filesystem isolation, macOS VM sandbox, macOS process/FS isolation |
