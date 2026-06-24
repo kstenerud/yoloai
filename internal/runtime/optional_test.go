@@ -1,6 +1,6 @@
 // ABOUTME: Tests for the optional-interface dispatch helpers (LogsFor,
-// ABOUTME: PrepareAgentCommandFor) — that they dispatch to a backend implementing
-// ABOUTME: the optional interface, and fall back otherwise.
+// ABOUTME: PrepareAgentCommandFor, LauncherOf) — that they dispatch to a backend
+// ABOUTME: implementing the optional interface, and fall back otherwise.
 
 package runtime
 
@@ -36,4 +36,21 @@ func TestPrepareAgentCommandFor(t *testing.T) {
 		"a backend without AgentCommandPreparer returns the command unchanged")
 	assert.Equal(t, "wrapped:agent --foo", PrepareAgentCommandFor(prepRuntime{}, "agent --foo"),
 		"an AgentCommandPreparer backend is dispatched to")
+}
+
+// launchRuntime is a minimal stub that implements ProcessLauncher but does
+// nothing. Used only for the LauncherOf type-dispatch test.
+type launchRuntime struct{ Backend }
+
+func (launchRuntime) Launch(_ context.Context, _ string, _ ProcSpec) (Process, error) {
+	return nil, nil
+}
+
+func TestLauncherOf(t *testing.T) {
+	_, ok := LauncherOf(bareRuntime{})
+	assert.False(t, ok, "a backend without ProcessLauncher returns (nil, false)")
+
+	l, ok := LauncherOf(launchRuntime{})
+	assert.True(t, ok, "a ProcessLauncher backend is recognised")
+	assert.NotNil(t, l, "LauncherOf returns the backend as a ProcessLauncher")
 }

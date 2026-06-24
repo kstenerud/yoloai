@@ -235,6 +235,55 @@ func CacheUsageFor(ctx context.Context, rt Backend) (CacheUsage, error) {
 
 // ===== 3. Optional operations =====
 
+// ExitStatus is the result of a launched process exiting. Signaled and Signal
+// are populated when the backend can report signal death; docker exec cannot,
+// so it always reports Signaled=false.
+type ExitStatus struct {
+	Code     int
+	Signaled bool
+	Signal   int
+}
+
+// ProcessStreams holds the I/O streams of a launched process. Stdin is non-nil
+// only when ProcSpec.Stdin was requested. Stderr is nil for a TTY process (the
+// pty merges stdout+stderr into Stdout).
+type ProcessStreams struct {
+	Stdin  io.WriteCloser
+	Stdout io.Reader
+	Stderr io.Reader
+}
+
+// Process is a handle to a single launched process. Per substrate-interface.md
+// §6 it is live only within the launching call's lifetime — there is no
+// re-open-by-pid. Signal() is deliberately omitted for now (docker exec has no
+// per-exec signal API; the carve kills launched processes via Stop/tmux, not
+// per-process signal). Add it when a consumer needs it.
+type Process interface {
+	// ID returns the backend-assigned identifier for this process (e.g. a docker
+	// exec ID).
+	ID() string
+	// Streams returns the process's I/O streams.
+	Streams() ProcessStreams
+	// Wait blocks until the process exits or ctx is cancelled. Returns the exit
+	// status on clean exit or ctx.Err() on cancellation.
+	Wait(ctx context.Context) (ExitStatus, error)
+}
+
+// ProcessLauncher is an optional backend interface: start a process inside a
+// running instance and return a non-blocking Process handle. This is the
+// agent-free Launch verb of substrate-interface.md; today's Exec/InteractiveExec
+// are its blocking siblings. Backends that don't implement it cannot yet host
+// the carve's neutral-PID-1 + Launch model (broadened in a later step).
+type ProcessLauncher interface {
+	Launch(ctx context.Context, name string, spec ProcSpec) (Process, error)
+}
+
+// LauncherOf returns rt as a ProcessLauncher if the backend implements one.
+func LauncherOf(rt Backend) (ProcessLauncher, bool) {
+	l, ok := rt.(ProcessLauncher)
+	return l, ok
+}
+
 // StdioExecer is an optional interface implemented by backends that can run a
 // child process inside a sandbox with stdio piped to caller-provided
 // reader/writers. Used by the MCP proxy to bridge an outer agent's stdio to an
