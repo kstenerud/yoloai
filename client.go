@@ -55,6 +55,7 @@ import (
 	"io"
 	"log/slog"
 
+	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/orchestrator"
 	"github.com/kstenerud/yoloai/internal/runtime"
@@ -134,6 +135,14 @@ func NewClient(ctx context.Context, opts ClientCreateOptions) (*Client, error) {
 	input := opts.Input
 	if input == nil {
 		input = bytes.NewReader(nil) // §12: empty reader, never the process's os.Stdin; embedders override, the CLI passes IOStreams
+	}
+
+	// Register file-defined agents from DataDir/agents/ before the engine is
+	// constructed so that agent definitions are available to CreateSandbox.
+	// A missing agents/ directory is silently ignored (D89: file-defined agents
+	// are optional; existing single-data-dir assumption documented in RegisterFileAgents).
+	if err := agent.RegisterFileAgents(layout.AgentsDir()); err != nil {
+		return nil, fmt.Errorf("yoloai: loading file-defined agents: %w", err)
 	}
 
 	// The backend connection is NOT opened here. The Engine is built eagerly

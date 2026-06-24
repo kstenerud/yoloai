@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -96,6 +97,11 @@ type Definition struct {
 	// agents rather than just itself (used by the shell agent).
 	SeedsAllAgents bool
 }
+
+// agentsMu guards the agents map for concurrent reads and file-agent registration.
+// init() runs single-threaded before user goroutines start, so init() and
+// buildShellAgent() read/write agents without holding this lock.
+var agentsMu sync.RWMutex
 
 var agents = map[string]*Definition{
 	"aider": {
@@ -316,11 +322,15 @@ var agents = map[string]*Definition{
 // GetAgent returns the agent definition for the given name.
 // Returns nil if the agent is not known.
 func GetAgent(name string) *Definition {
+	agentsMu.RLock()
+	defer agentsMu.RUnlock()
 	return agents[name]
 }
 
 // AllAgentTypes returns sorted agent names for stable iteration.
 func AllAgentTypes() []string {
+	agentsMu.RLock()
+	defer agentsMu.RUnlock()
 	names := make([]string, 0, len(agents))
 	for name := range agents {
 		names = append(names, name)
@@ -332,6 +342,8 @@ func AllAgentTypes() []string {
 // RealAgents returns sorted names of agents that are real coding agents
 // (excludes utility pseudo-agents like "test" and "shell").
 func RealAgents() []string {
+	agentsMu.RLock()
+	defer agentsMu.RUnlock()
 	var names []string
 	for name := range agents {
 		if name == "test" || name == "shell" || name == "idle" {
@@ -358,8 +370,23 @@ func (d *Definition) StateRelPath() string {
 	return ""
 }
 
+// realAgentNamesLocked returns sorted real agent names without acquiring agentsMu.
+// Callers must hold agentsMu (or call only from init, before any goroutines start).
+func realAgentNamesLocked() []string {
+	var names []string
+	for name := range agents {
+		if name == "test" || name == "shell" || name == "idle" {
+			continue
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
 // buildShellAgent constructs a shell agent whose SeedFiles and APIKeyEnvVars
-// are the union of all real agents.
+// are the union of all real agents. Called only from init(), which runs
+// single-threaded before any goroutines start — no lock needed.
 func buildShellAgent() *Definition {
 	var seedFiles []SeedFile
 	seen := map[string]bool{}
@@ -367,7 +394,7 @@ func buildShellAgent() *Definition {
 	seenDomains := map[string]bool{}
 	var networkAllowlist []string
 
-	for _, name := range RealAgents() {
+	for _, name := range realAgentNamesLocked() {
 		ag := agents[name]
 		for _, sf := range ag.SeedFiles {
 			remapped := sf

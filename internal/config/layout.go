@@ -215,6 +215,13 @@ func (l Layout) DockerBaseLocksDir() string {
 	return filepath.Join(l.DataDir, "docker-base-locks")
 }
 
+// AgentsDir returns DataDir/agents/ — the directory where user-defined
+// agent YAML files are placed (one file per agent, named <type>.yaml).
+// A missing directory is silently ignored by RegisterFileAgents.
+func (l Layout) AgentsDir() string {
+	return filepath.Join(l.DataDir, "agents")
+}
+
 // VscodeCLIDir returns DataDir/vscode-cli/, the global VS Code CLI
 // token seed store. It is NOT mounted directly into containers;
 // each sandbox gets its own per-sandbox vscode-cli directory
