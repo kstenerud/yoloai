@@ -173,35 +173,38 @@ func WriteContextFiles(sandboxDir string, meta *store.Environment, agentDef *age
 			return fmt.Errorf("write agent context file %s: %w", agentDef.ContextFile, err)
 		}
 
-		// Append Q&A protocol section to Claude's CLAUDE.md so it knows
-		// how to ask questions through the file exchange directory.
-		if agentDef.ContextFile == "CLAUDE.md" {
-			filesDir := runtimeDir(sandboxDir, meta) + "/files"
-			qa := "\n## yoloAI File Exchange Protocol\n\n" +
-				"You are running inside a yoloAI sandbox. A file exchange directory is\n" +
-				"available at `" + filesDir + "/` — readable and writable from both inside\n" +
-				"and outside the sandbox.\n\n" +
-				"**When you need to ask a question or need input to continue:**\n\n" +
-				"1. Write your question to `" + filesDir + "/question.json`:\n" +
-				"   ```json\n" +
-				"   {\"question\": \"your question here\", \"context\": \"optional context\"}\n" +
-				"   ```\n" +
-				"2. Poll `" + filesDir + "/answer.json` every 5 seconds until it appears.\n" +
-				"3. Read the answer and continue your task.\n\n" +
-				"Do not make assumptions about blocking decisions. Write the question file\n" +
-				"and wait. The question will be seen and answered by an external agent or user.\n"
-			f, err := fileutil.OpenFile(refPath, os.O_APPEND|os.O_WRONLY, 0600) //nolint:gosec // path is from sandbox dir, controlled by yoloai
-			if err != nil {
-				return fmt.Errorf("open agent context file %s for append: %w", agentDef.ContextFile, err)
-			}
-			_, writeErr := f.WriteString(qa)
-			closeErr := f.Close()
-			if writeErr != nil {
-				return fmt.Errorf("append Q&A protocol to %s: %w", agentDef.ContextFile, writeErr)
-			}
-			if closeErr != nil {
-				return fmt.Errorf("close agent context file %s: %w", agentDef.ContextFile, closeErr)
-			}
+		// Append the yoloAI file-exchange Q&A protocol to the agent's context
+		// file so the agent knows how to ask questions through the exchange
+		// directory. The protocol is agent-AGNOSTIC — it describes a yoloAI
+		// mechanism (question.json/answer.json), keyed only on the agent's
+		// declared ContextFile, so every agent that reads a native context file
+		// gets it (not just Claude's CLAUDE.md). The fuller DEF-fan-in delivered
+		// per the agent's injection method is the envsetup re-homing (D91/D92).
+		filesDir := runtimeDir(sandboxDir, meta) + "/files"
+		qa := "\n## yoloAI File Exchange Protocol\n\n" +
+			"You are running inside a yoloAI sandbox. A file exchange directory is\n" +
+			"available at `" + filesDir + "/` — readable and writable from both inside\n" +
+			"and outside the sandbox.\n\n" +
+			"**When you need to ask a question or need input to continue:**\n\n" +
+			"1. Write your question to `" + filesDir + "/question.json`:\n" +
+			"   ```json\n" +
+			"   {\"question\": \"your question here\", \"context\": \"optional context\"}\n" +
+			"   ```\n" +
+			"2. Poll `" + filesDir + "/answer.json` every 5 seconds until it appears.\n" +
+			"3. Read the answer and continue your task.\n\n" +
+			"Do not make assumptions about blocking decisions. Write the question file\n" +
+			"and wait. The question will be seen and answered by an external agent or user.\n"
+		f, err := fileutil.OpenFile(refPath, os.O_APPEND|os.O_WRONLY, 0600) //nolint:gosec // path is from sandbox dir, controlled by yoloai
+		if err != nil {
+			return fmt.Errorf("open agent context file %s for append: %w", agentDef.ContextFile, err)
+		}
+		_, writeErr := f.WriteString(qa)
+		closeErr := f.Close()
+		if writeErr != nil {
+			return fmt.Errorf("append Q&A protocol to %s: %w", agentDef.ContextFile, writeErr)
+		}
+		if closeErr != nil {
+			return fmt.Errorf("close agent context file %s: %w", agentDef.ContextFile, closeErr)
 		}
 	}
 

@@ -15,13 +15,25 @@ import (
 // exposes only the user-facing fields; the agent's internal launch machinery
 // (commands, seed files, idle handling, settings patches) stays internal.
 type AgentInfo struct {
-	Type          AgentType
-	Description   string
-	PromptMode    string // "interactive" or "headless"
+	Type        AgentType
+	Description string
+	// PromptMode is the agent's default prompt-delivery mode: "interactive"
+	// (typed into the session) or "headless" (passed as a CLI arg).
+	PromptMode string
+	// SupportsHeadless reports whether the agent has a headless / one-shot launch
+	// form (a `-p`-style non-interactive run) — what an embedder checks to decide
+	// whether it can drive the agent without an interactive session.
+	SupportsHeadless bool
+	// IdleHook reports whether the agent emits an authoritative turn hook
+	// (tier-2 idle detection); false means idle is detected heuristically only.
+	IdleHook      bool
 	APIKeyEnvVars []string
 	StateDir      string
 	ModelFlag     string
 	ModelAliases  map[string]string
+	// NetworkFloor is the set of domains the agent itself requires (the
+	// agent-requirement floor that's always allowed under isolated networking).
+	NetworkFloor []string
 }
 
 // BackendInfo is the public, serializable view of a registered runtime backend.
@@ -165,13 +177,16 @@ func Archetypes() []string {
 
 func agentInfoFromDefinition(def *agent.Definition) AgentInfo {
 	return AgentInfo{
-		Type:          def.Type,
-		Description:   def.Description,
-		PromptMode:    string(def.PromptMode),
-		APIKeyEnvVars: def.APIKeyEnvVars,
-		StateDir:      def.StateDir,
-		ModelFlag:     def.ModelFlag,
-		ModelAliases:  def.ModelAliases,
+		Type:             def.Type,
+		Description:      def.Description,
+		PromptMode:       string(def.PromptMode),
+		SupportsHeadless: def.HeadlessCmd != "",
+		IdleHook:         def.Idle.Hook,
+		APIKeyEnvVars:    def.APIKeyEnvVars,
+		StateDir:         def.StateDir,
+		ModelFlag:        def.ModelFlag,
+		ModelAliases:     def.ModelAliases,
+		NetworkFloor:     def.NetworkAllowlist,
 	}
 }
 

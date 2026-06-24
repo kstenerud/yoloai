@@ -233,6 +233,43 @@ func TestWriteContextFiles_WritesContextAndRef(t *testing.T) {
 	if !strings.Contains(string(refData), "# Sandbox Environment") {
 		t.Error("agent instruction file missing inlined context")
 	}
+	if !strings.Contains(string(refData), "yoloAI File Exchange Protocol") {
+		t.Error("agent instruction file missing the Q&A file-exchange protocol")
+	}
+}
+
+// TestWriteContextFiles_QAProtocolIsAgentAgnostic verifies the file-exchange Q&A
+// protocol is appended to ANY agent's context file (keyed on the declared
+// ContextFile), not just Claude's CLAUDE.md — the agnosticism fix.
+func TestWriteContextFiles_QAProtocolIsAgentAgnostic(t *testing.T) {
+	sandboxDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750); err != nil {
+		t.Fatal(err)
+	}
+
+	meta := &store.Environment{
+		Dirs: []store.DirEnvironment{{HostPath: "/project", MountPath: "/project", Mode: "copy"}},
+	}
+	agentDef := &agent.Definition{
+		Type:        "gemini",
+		StateDir:    "/home/yoloai/.gemini/",
+		ContextFile: "GEMINI.md",
+	}
+
+	if err := WriteContextFiles(sandboxDir, meta, agentDef); err != nil {
+		t.Fatalf("WriteContextFiles: %v", err)
+	}
+
+	refData, err := os.ReadFile(filepath.Join(sandboxDir, store.AgentRuntimeDir, "GEMINI.md")) //nolint:gosec // G304: test helper path
+	if err != nil {
+		t.Fatalf("read GEMINI.md: %v", err)
+	}
+	if !strings.Contains(string(refData), "# Sandbox Environment") {
+		t.Error("GEMINI.md missing inlined context")
+	}
+	if !strings.Contains(string(refData), "yoloAI File Exchange Protocol") {
+		t.Error("GEMINI.md missing the Q&A protocol — it must be agent-agnostic, not Claude-only")
+	}
 }
 
 func TestWriteContextFiles_NoRefWhenEmpty(t *testing.T) {
