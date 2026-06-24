@@ -151,6 +151,24 @@ type ProcSpec struct {                                // what to run, how
 }
 ```
 
+## In-container provisioning the substrate owns (the entrypoint carve — DF41/DF42)
+
+Provisioning is not only the host-side container shell; today `entrypoint.py` does **agent-free root work
+in-container** that the D88 carve would otherwise orphan (verified — see [DF41](findings-unresolved.md)). The
+substrate claims the two filesystem/identity pieces (it is the agent-free environment layer):
+- **UID/GID remap** — retarget the in-container agent user to the host uid/gid + `chown` the bind-mounted tree,
+  so the agent can read/write host-mounted files. Pure environment hygiene.
+- **The in-container overlay mount** (`mount -t overlay`, with the VirtioFS→tmpfs fallback) — `:overlay`'s
+  filesystem realization. **No layer owns this today** ([DF42](findings-unresolved.md): it is inline Python, no
+  Go ownership, no explicit unmount); the substrate owns it as *filesystem provisioning* (copyflow operates on
+  the result; the mount is the substrate giving the container its filesystem). The substrate must also own the
+  **explicit unmount** on teardown (today implicit-via-destroy; the carve must not lose it).
+
+The other two entrypoint operations re-home elsewhere: `isolate_network` → **netpolicy** (its `ip-filter`
+strategy); the secrets read + `.secrets-consumed` handshake → **envsetup**. Under the carve these become
+Go-driven steps (via `Launch`/`Exec`) over the neutral keep-alive, run in the backend's locality
+([backend-topology.md](backend-topology.md): container / VM-guest / host).
+
 ## Deliberately NOT at this level (the boundary is the point)
 
 - **Restart / backoff / ordering / `WaitForAll`** → caller policy (orchestration).

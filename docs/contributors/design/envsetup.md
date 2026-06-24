@@ -56,8 +56,39 @@ container runs, from `{agent-declared shapes + caller-supplied values + the asse
 | **Secrets** | agent: env-var names + seed-file list | caller: the `Env` snapshot + host files (D63) | bind-mounted secrets dir; the DF38 seam |
 | **Seed files** | agent: `SeedFiles` + `StateDir` + `AgentFilesExclude` | the agent's host config (incl. `ABC`) | auth-only files skipped if a key is set; the DF39 seam |
 | **Settings** | agent: self-config key-flips + the `ApplySettings` residual | — | host-side patch of the seeded `settings.json` |
-| **Context (`DEF`)** | agent: the injection *method* (append-at-file / launch-flag) | the assembled `DEF` (fan-in) | append to the seeded `ABC`, don't clobber (D89) |
+| **Context (`DEF`)** | agent: the injection *method* (append-at-file / launch-flag) | the fan-in *fragments* (envsetup **assembles** → `DEF`) | append to the seeded `ABC`, don't clobber (D89) |
 | **Env** | config + profile env | caller overlay (wins) | the agent runtime env, distinct from `ProvisionSpec.env` |
+
+## Design-review remediation (2026-06-24, D92)
+
+- **`DEF` has an assembler: envsetup.** The agent declares the injection *method*; the fan-in contributors
+  (file-exchange → Q&A, sandbox → orientation, netpolicy → isolation-notice) each supply a *fragment*;
+  **envsetup gathers the fragments into the single `DEF`** and delivers it. (Previously the spec said envsetup
+  "receives `DEF` pre-assembled" and the agent disclaimed assembly — leaving it ownerless. Resolved: assemble +
+  deliver is one job, envsetup's.)
+- **Envsetup claims the `entrypoint.py` secrets work** ([DF41](findings-unresolved.md)): the **secrets read**
+  from `/run/secrets` and the **`.secrets-consumed` marker handshake** (the host↔sandbox signal that lets the
+  host delete the staged dir) re-home here — they are credential delivery + its teardown half. Under the carve
+  they become Go-driven steps over the neutral keep-alive, in the backend's locality
+  ([backend-topology.md](backend-topology.md)). (UID-remap/overlay → substrate; `isolate_network` → netpolicy.)
+- **Ordering is a contract, not an accident.** The stages have a hard happens-before: substrate provision →
+  **seed `ABC`** → **append `DEF`** (the Context stage appends to the *seeded* file — "append, don't clobber");
+  settings patch the seeded `settings.json`; the staged agent-config artifact must exist before the session
+  `Launch`'s in-container monitor reads it. Pin this pipeline order.
+- **Atomicity / failure.** Staging happens **before** the neutral container runs, so a *partial* stage (some
+  secrets written, settings patched, context appended, then a failure) must **not** let the box boot against
+  half-staged contents — staging is **fail-closed + cleaned up** (don't launch; remove the partial secrets dir).
+  Mirrors netpolicy's fail-closed.
+- **The three env-bearing contracts need a stated rule.** Env lives in `ProvisionSpec.Env` (container base,
+  substrate), `EnvSpec` resolved-env (agent runtime: config + profile + caller overlay, envsetup), and
+  `ProcSpec.Env` (the per-process launch). Rule: envsetup resolves the agent runtime env and the agent-layer
+  **compiles it into `ProcSpec.Env`** at launch; `ProvisionSpec.Env` is the base it layers over; caller overlay
+  wins. The resolved **model** rides the agent command (via `ModelFlag`) compiled into `ProcSpec`, *not* an env
+  var, unless an agent declares an env-based model.
+- **Characterize-and-surface the credential-at-rest now** ([DF43](findings-unresolved.md)/DF39): the baseline
+  must **warn** that host creds enter an untrusted box, and that **seatbelt/tart keep the staged secrets on
+  disk for the sandbox lifetime** (the container path is ephemeral). The secure-secrets build (DF38) is the
+  durable fix; the *surfacing* is baseline-now.
 
 ## Cross-references
 

@@ -125,9 +125,10 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 
 - **Discovered:** 2026-06-14 · **Workstream:** public-layering (copyflow design, D86)
 - **Severity:** MEDIUM (security — needs verification; could be CRITICAL if violated)
-- **Disposition:** PARKED (verify during copyflow Shape)
-- **Description:** The copyflow design (D86 §7) makes a hermetic-git security seal load-bearing: the git *inside* the sandbox is untrusted and must be **read + emit only** — it never writes anything outside the sandbox; changes egress *only* as diff+metadata via a read-only channel, and the trusted host-side git applies. Copy-mode `apply.go` uses `git.NewSandbox` (in-sandbox/in-VM git) on several paths (≈ lines 332, 579, 614, 785, 843, 858, 917). **Verify that none of these has an in-sandbox git writing to a host-mounted original** (e.g. an apply or checkout that targets a path outside the sandbox). If any does, it is a security finding (an untrusted binary with write access to the user's real project), not just a refactor — and the fix is to route all *writes-to-original* through the host-side trusted git, fed only the extracted diff+metadata.
-- **Pointer:** `internal/copyflow/apply.go` (`git.NewSandbox` call sites); contrast `git.NewHost` (the trusted apply path). Design: [copyflow-layer.md](copyflow-layer.md) §7 / [D86](../decisions/working-notes.md).
+- **Disposition:** **RESOLVED — VERIFIED CLEAN 2026-06-24** (D92 design-review remediation; should drain to `findings-resolved.md`). Every `git.NewSandbox` call site is **read/emit-only** and structurally confined to the sandbox work copy: target dirs resolve through `store.WorkDir(sandboxDir, hostPath)` under `~/.yoloai/sandboxes/<name>/` (the host original `dir.HostPath` is *never* passed to a sandbox git), and the sandbox executor never routes stdin/`RunInput` (the write path) — every writer (`ApplyPatch`/`ApplyFormatPatch`/`CheckPatch`/`CreateTag`) is on `git.NewHost` targeting `dir.HostPath`. Overlay git (`execInSandbox`, `git -C <containerPath>`) is even more confined. The seal **holds**.
+- **Residual invariant (carry forward):** the host-side apply uses `git apply --unsafe-paths --directory=<original>` (`git/ops.go:220-228`), safe *only* because the patch is always yoloAI-generated from the work copy — **never an agent-supplied raw patch**. The code comment warns against routing raw patches through this path; that is the real surface to keep protected. Note in copyflow-layer.md §7.
+- **Description:** The copyflow design (D86 §7) makes a hermetic-git security seal load-bearing: the git *inside* the sandbox is untrusted and must be **read + emit only** — it never writes anything outside the sandbox; changes egress *only* as diff+metadata via a read-only channel, and the trusted host-side git applies. Copy-mode `apply.go` uses `git.NewSandbox` (in-sandbox/in-VM git) on several paths (≈ lines 332, 579, 614, 785, 843, 858, 917). **[Verified — see Disposition.]**
+- **Pointer:** `internal/copyflow/apply.go` (`git.NewSandbox` call sites); contrast `git.NewHost` (the trusted apply path); the `--unsafe-paths` note at `internal/git/ops.go:220-228`. Design: [copyflow-layer.md](copyflow-layer.md) §7 / [D86](../decisions/working-notes.md).
 
 ### DF36 — Persistence is unsafe on a network filesystem; detect and warn/refuse
 
@@ -187,6 +188,30 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 - **Likely fix:** launch these host processes detached from the controlling terminal — `Setsid: true` (new session, no controlling tty) and/or `cmd.Stdin = nil`/`/dev/null` made explicit — mirroring the docker fix's intent (a non-interactive launch must not mutate the caller's terminal). Verify tmux still starts cleanly under the new session on both backends.
 - **Trigger:** the next time anyone runs yoloai **non-interactively on macOS** with `--backend seatbelt` or `--backend tart` (e.g. a batch/trial harness), or any macOS terminal-corruption report — reproduce there, then apply + verify the detach.
 - **Pointer:** `internal/runtime/seatbelt/seatbelt.go:324`, `internal/runtime/tart/tart.go:360` (the `SysProcAttr{Setpgid: true}` launches). Contrast the fixed docker path: `internal/cli/cliutil/streams.go` (`WithTerminal`, `main`@`f208b32`).
+
+### DF41 — the carve orphans the agent-free root work fused into `entrypoint.py` (each layer must claim its piece)
+
+- **Discovered:** 2026-06-24 · **Workstream:** public-layering design-review remediation ([D92](../decisions/working-notes.md))
+- **Severity:** MEDIUM (load-bearing for the D88 carve; not a runtime bug yet — a design hole that would orphan working code at Shape)
+- **Disposition:** PARKED (resolved-in-design by D92's rehoming; the *Shape* must implement it)
+- **Description:** `entrypoint.py::main()` does four **agent-free** root operations before `gosu`-exec'ing the agent: **UID/GID remap** (`:70-103`), reading **staged secrets** from `/run/secrets` + the **`.secrets-consumed` marker handshake** (`:106-152`), **network isolation** (`:180-286`), and the **in-container overlay mount** (`:289-368`). The D88 carve makes PID 1 neutral and demotes the agent session to a `Launch` — which would **orphan all four**, because they live inline in the agent-facing Python with no Go/abstraction owning them. Verified across the tree. Rehoming (D92): **UID-remap + overlay-mount → substrate** (provisioning); **`isolate_network` → netpolicy** (its `ip-filter` strategy — already designed); **secrets read + consumed-marker → envsetup** (credential delivery + its teardown half). Each spec must now **explicitly claim** its piece.
+- **Pointer:** `internal/runtime/docker/resources/entrypoint.py` (`main` `:393-446`; `remap_uid`, `read_secrets`, `signal_secrets_consumed`, `isolate_network`, `apply_overlays`). Go path-computation only: `collectOverlayMounts` (`orchestrator/create/prepare_dirs.go:434`). Resolution: [backend-topology.md](backend-topology.md), substrate/netpolicy/envsetup specs.
+
+### DF42 — the in-container overlay mount has no owning abstraction and no explicit teardown
+
+- **Discovered:** 2026-06-24 · **Workstream:** public-layering design-review remediation (D92)
+- **Severity:** MEDIUM
+- **Disposition:** PARKED (substrate claims it per D92; teardown to add at Shape)
+- **Description:** The `:overlay` mode's actual `mount -t overlay` (with the VirtioFS→tmpfs fallback for macOS Docker Desktop) is **inline in `entrypoint.py::apply_overlays` with zero Go ownership** — verified: no `mount -t overlay`/`umount`/`Unmount` anywhere in the Go tree; Go only computes the lower/upper/work/merged path strings. So no layer conceptually owns the mount today (it's owned by "whatever runs `entrypoint.py`"), and there is **no explicit unmount** — the overlay/tmpfs is reclaimed only by kernel namespace teardown on container destroy. The carve must give the mount an owner (substrate, per D92) **and** an explicit unmount on the teardown path (today implicit-via-destroy; the carve must not lose it).
+- **Pointer:** `entrypoint.py:289-368` (`apply_overlays`); `orchestrator/create/prepare_dirs.go:434` (`collectOverlayMounts`, path-strings only); copyflow `:overlay` (D86 §3). Related: DF41.
+
+### DF43 — seatbelt/tart keep staged secrets at rest for the sandbox lifetime; container path has a narrow crash-leak
+
+- **Discovered:** 2026-06-24 · **Workstream:** public-layering design-review remediation (D92)
+- **Severity:** MEDIUM (security — credential-at-rest; sharper for the metered-JV-key + adversarial-agent direction)
+- **Disposition:** PARKED (envsetup characterize-and-surface now; the secure-secrets seam, DF38, is the real fix)
+- **Description:** The **container** backends stage secrets in an ephemeral `os.MkdirTemp(…, "yoloai-secrets-*")` deleted via `defer os.RemoveAll` after the consumed-marker handshake — clean, no credential-at-rest in normal operation. But **seatbelt and tart write secrets into the *persistent* `<sandboxPath>/secrets/`**, on disk for the **whole sandbox lifetime**, removed only on destroy. And the container path has a narrow leak: a SIGKILL between `MkdirTemp` and the deferred remove leaves `0600` files in `/tmp` with **no startup sweep** for stale `yoloai-secrets-*`. Envsetup should **characterize-and-surface** this (and DF39) now; the secure-secrets model (DF38) is the durable fix.
+- **Pointer:** container path `provision.go:33`, `launch.go:52-54,201-217`; seatbelt `seatbelt.go:206-225`; tart `tart.go:1196-1215`, `:456`. Related: DF38, DF39.
 
 ## Policy origin
 

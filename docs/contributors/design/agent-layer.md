@@ -148,6 +148,13 @@ isolation-notice) — is the payload side; the agent owns only the injection met
   default for a future agent.
 - **The file-defined-agents work** is a schema + loader (`~/.yoloai/agents/*.yaml`) + a validator; the shipped
   agents are good dogfood for the schema once their `ApplySettings` is declarative-ized.
+- **Shape the hook-registration object** (the agent→completion contract, D92): it carries the agent's
+  *event-map* — which agent hook events map to the abstract turn-start/turn-stop signals (Claude: `Stop`→stop,
+  `PreToolUse`+`UserPromptSubmit`→start) — plus the settings path-and-shape to append into. Completion supplies
+  the status-writer *command*; a shared helper does the append. (Sketch it like `ProcSpec`/`EnvSpec`, not just
+  named.)
+- **The DEF-deliverer is envsetup** (D92) — the agent declares the injection *method* only; the agent capability
+  table's "→ provision/envsetup" resolves to **envsetup** (which now also *assembles* `DEF` from the fan-in).
 
 ## Cross-references
 

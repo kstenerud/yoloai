@@ -117,9 +117,14 @@ N applies) — never merging.
 
 ## Open / verify items
 
-- **Verify the hermetic seal in the current code** (DF35): copy-mode `apply.go` uses `git.NewSandbox`
-  on several paths — confirm none has an *in-sandbox* git writing to a host-mounted original. If any
-  does, it's a security finding, not just a refactor.
+- **The hermetic seal is VERIFIED CLEAN** (DF35, 2026-06-24 design-review remediation, D92): every
+  `git.NewSandbox` call site is read/emit-only and structurally confined — target dirs resolve through
+  `store.WorkDir(...)` under `~/.yoloai/sandboxes/<name>/` (the host original is never handed to a sandbox
+  git), and the sandbox executor never routes the write path (`RunInput`); all writers (`ApplyPatch`/
+  `ApplyFormatPatch`/`CreateTag`) are on `git.NewHost` targeting `dir.HostPath`. **Residual invariant to
+  protect:** the host apply uses `git apply --unsafe-paths --directory=<original>`, safe *only* because the
+  patch is always yoloAI-generated from the work copy — **never an agent-supplied raw patch** (`git/ops.go:220`
+  warns of this). Keep that the rule.
 - **Handle name** — `TrackedDir` vs `Workspace` vs `Review`. TBD.
 - **The config/persistence helper** (foundation, generalizes D85) — copyflow's baseline record rides
   on it; its home/name is the next session's first task.

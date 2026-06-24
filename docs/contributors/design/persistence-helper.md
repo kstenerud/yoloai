@@ -81,8 +81,15 @@ keeps migrations from rippling.
    source of truth all tools must agree on; tools own private views/caches/UX/bookkeeping. Two tests:
    - **(1) Would another tool need to agree on this value to operate correctly on the sandbox?** Yes →
      **library** (substrate config, copyflow baselines — cli `diff` and mcp `apply` *must* agree —,
-     agent config + status, the resolved prompt). Only-meaningful-to-one-tool → **tool** (cli's
+     **agent config** [`agent.json`], the resolved prompt). Only-meaningful-to-one-tool → **tool** (cli's
      last-command/list-view state, mcp's client-session mapping).
+   - **The runtime status sidecar (`agent-status.json`) is *outside* this Handle/`flock`+`Update` contract**
+     *(clarified 2026-06-24, D92)*. It is written **in-container by the monitor** (which cannot take the host
+     `flock`), single-writer, and **host-polled** — a different concurrency class than the versioned,
+     host-authored library docs. Two distinct "sidecars" not to conflate: **`agent.json`** = versioned agent
+     *config*, host-authored, under the Handle; **`agent-status.json`** = turn-cursor + active/idle *status*,
+     monitor-authored in-container, read-only to the host, *not* version-guarded or `flock`-mediated. The
+     Handle governs library config docs; the status file is a lock-free single-producer/single-consumer channel.
    - **(2) Does it need *atomic coupling* with the sandbox's reality?** Yes → it **is** library state
      (promote it). Because file locks give no cross-domain transaction, **tool state must be
      independently recoverable from library state, never atomically co-updated** — a tool that crashes

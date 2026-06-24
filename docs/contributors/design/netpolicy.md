@@ -36,12 +36,22 @@ network logic out of the backends.
    single assumption is what would force a rewrite when the proxy lands. "Hostile" = `isolated` + the
    `egress-proxy` strategy — a new *strategy*, not a new *mode*.
 
-4. **Capability is per-(backend × strategy), with honest characterization.** `ip-filter` needs in-container
-   iptables (containers + Linux-VM); `egress-proxy` needs a host-side interception point — *potentially
-   broader*, and notably it may **solve seatbelt/tart's current no-op** (a host-side proxy filters where
-   in-guest iptables can't). Netpolicy **characterizes-and-surfaces** unenforceable policy (e.g. `isolated` on
-   seatbelt/tart today is a silent no-op → refuse/warn, don't pretend) — the same discipline as copyflow's
-   nature-mismatch.
+4. **Capability is per-(backend × *isolation-mode* × platform × strategy), with honest characterization.**
+   *(Sharpened 2026-06-24, D92 — verified against code; the earlier "per-(backend × strategy)" was
+   under-dimensioned.)* `ip-filter` needs an in-sandbox iptables the kernel actually consults, so its
+   enforceability turns on **the isolation mode and platform**, not just the backend:
+   - **Works:** `container` / `container-privileged` (docker/podman), `vm` / `vm-enhanced` (containerd-Kata,
+     tart-VM, apple-VM) — all run the in-sandbox iptables path. *(Podman-on-macOS: the kernel lacks `xt_set`, so
+     ipset fails and the code falls back to per-IP iptables rules — verified; a degraded-but-working path.)*
+   - **Cannot (silent no-op), already hard-rejected in shipped code:** `container-enhanced` (gVisor/runsc) —
+     gVisor's userspace netstack ignores in-sandbox iptables; `IsolationEnforcesInSandboxIptables` returns false
+     and `buildInstanceConfig` **refuses `isolated + container-enhanced` at create**. This existing reject must
+     become a **first-class part of netpolicy's capability model**, not an ad-hoc create-time guard.
+   - **`isolated` not supported at all:** seatbelt/tart (no in-sandbox iptables) — but see the verified
+     `none`-holds note below; their *deny-all* path differs from their *allowlist* gap.
+   `egress-proxy` needs a host-side interception point — *potentially broader* — and may **solve seatbelt/tart's
+   `isolated` gap** (a host-side proxy filters where in-guest iptables can't). Netpolicy
+   **characterizes-and-surfaces** unenforceable policy (refuse/warn, don't pretend).
 
 ## Honest characterization — what `ip-filter` does and doesn't promise
 
@@ -55,8 +65,20 @@ network logic out of the backends.
 - **In-sandbox tamper** — enforcement lives inside the box; an agent with in-sandbox privilege (yoloai grants
   sudo for deps) can disturb it.
 
-So **`none` is the only hard network boundary today.** The design must label `ip-filter` honestly and not
-over-promise (a wrong security claim is the worst kind — our own critique principle).
+So **`none` is the only hard network boundary today** *for `ip-filter`-class backends*. The design must label
+`ip-filter` honestly and not over-promise (a wrong security claim is the worst kind — our own critique
+principle).
+
+**`none` DOES hold on macOS (verified 2026-06-24, D92 — a reviewed false alarm corrected).** `mode: none` is
+enforced *natively*, independent of the in-sandbox iptables path: **seatbelt** via SBPL `(deny default)` (the
+profile simply omits `(allow network*)`); **tart** via `--net-softnet-block=0.0.0.0/0` + `::/0` at the VM
+level. So `none` is a hard boundary on *every* backend — only `isolated` (the allowlist) is the seatbelt/tart
+gap. Fail-mode is already **fail-closed** (`entrypoint.py` aborts before launching the agent if rules can't
+install); the carve must **preserve** that — enforcement failing to apply must refuse the launch, never fail
+open (for the metered-JV-key + adversarial case, fail-open is a credential-exfil event).
+
+**`ip-filter` is the re-home target for `entrypoint.py:isolate_network`** ([DF41](findings-unresolved.md)) — the
+existing in-container enforcement *is* this strategy, lifted to a Go-driven step over the neutral keep-alive.
 
 ## Hostile containment — the committed future (`egress-proxy`)
 
@@ -69,12 +91,30 @@ is a strictly-better *interpretation of the same allowlist* — it slots into th
 model change and no contract change** (the contract already doesn't assume an in-sandbox point). It may also
 be how seatbelt/tart gain isolation at all (§4).
 
+**Two structural-room refinements the review surfaced (2026-06-24, D92):**
+- **The *mutation transport* is also per-strategy — not just the enforcement *point*.** Today `allow`/`deny`
+  live-patch by exec'ing an in-sandbox `dig`+ipset script — structurally married to `ip-filter`. The
+  `egress-proxy` cannot reuse it (it reconfigures host-side). So `Network.Allow/Deny` must **dispatch on the
+  active strategy** (the dispatch point doesn't exist today). The policy *data* is strategy-agnostic; only the
+  apply/live-patch *transport* needs the seam.
+- **The proxy *mechanism* is unresolved and gated on Q37.** "Forced through" works only if the agent honors
+  proxy env (`HTTP_PROXY`) *or* you do transparent netns interception. [Q37](questions-unresolved.md) records
+  Codex's static-binary proxy-honoring is **unverified** — so the proxy must be **routing-enforced
+  (transparent intercept), not env-cooperative**, or the "outside the agent's reach" claim fails for at least
+  one shipped agent. Pin this when the strategy is built.
+
 ## Lifecycle
 
-Composed at create (`mode` + `network_allow` → `environment.json`; mirrored to the enforcement input);
-mutated at runtime (`allow`/`deny` re-resolve + live-patch the running enforcement); persisted in the
-Environment; re-applied on restart (fresh resolution under `ip-filter`). The no-dynamic-re-resolution
-stale-IP gap is an `ip-filter` property the `egress-proxy` strategy (domain-native) does not share.
+Composed at create; mutated at runtime (`allow`/`deny` re-resolve + live-patch the running enforcement —
+per-strategy transport, §Hostile); re-applied on restart (fresh resolution under `ip-filter`). The
+no-dynamic-re-resolution stale-IP gap is an `ip-filter` property the `egress-proxy` strategy (domain-native)
+does not share.
+
+**Persisted home (resolves a review contradiction, D92).** The substrate's `ProvisionSpec`/`environment.json`
+(D85, agent-free) explicitly *disclaims* the egress allowlist ("egress allowlist = netpolicy refinement"). So
+the composed `mode + allowlist + provenance` is **netpolicy's own persisted record** — its own persistence
+domain (D87 `Handle`), not a field smuggled into the substrate's record. (Today's code does keep
+`NetworkMode`/`NetworkAllow` in `environment.json`; the Shape moves them to the netpolicy domain.)
 
 ## Cross-references
 

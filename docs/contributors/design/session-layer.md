@@ -186,6 +186,30 @@ egresses **only on explicit user actions** (attach, snapshot, bug report) — a 
 - **Scope boundary:** inject *authorization* (who may drive the agent) is the embedder/principal concern
   (D58/D59 isolation axes), not the session layer — mechanism here, policy above.
 
+## Backend topology + failure semantics (2026-06-24 design-review remediation, D92)
+
+**The carve is uniform across all six backends** — verified, all run the *same* `sandbox-setup.py`
+([backend-topology.md](backend-topology.md)); the per-backend difference is only *where* it runs and *how* it's
+launched, which `KeepAliveModel`/`FilesystemLocality` already abstract. The coarse-`Launch` "in-container
+session process" framing (§5) is shorthand for "in the backend's locality" — container (docker/podman), **VM
+guest** (containerd/tart/apple), or **host** (seatbelt).
+
+**The one structurally-divergent case — seatbelt (`HostKeepAlive`).** There is no "inside" to launch into: the
+broker/agent/monitor are **host processes** in the substrate's own process tree (`sandbox-exec`-confined). So
+§6's liveness derivation needs a host-process variant: substrate liveness is the **host process group**, not a
+container/guest; the "tracked process" is the host-side session process. (NB the earlier conversational claim
+that *both* seatbelt and tart "run on the host" was wrong — tart/containerd/apple are VM guests; only seatbelt
+is a host process.)
+
+**Failure semantics (the happy path was the only path specified):**
+- **Launch readiness vs idle-wait.** A `Launch` that partially comes up — broker up but the agent dies, or the
+  monitor never writes its first status — must fail through a **bounded launch-readiness timeout distinct from
+  `Wait(WaitForIdle)`** (which waits on a turn cursor that would never advance). "The monitor never reported at
+  all" is a launch failure, not an idle timeout.
+- **Teardown of the relocated session.** For container/VM backends the broker+monitor die with the box; for
+  **seatbelt** they are host processes that must be reaped on stop/destroy (already done via `killByPID`/pgrep
+  — preserve it through the carve; this is *not* the DF40 issue, which is terminal-corruption, not a leak).
+
 ## Implementation notes (spec-time to-dos)
 
 - **Confirm the current `Stop`-hook wiring** before implementing tier-2 — is Claude's `Stop` already writing
