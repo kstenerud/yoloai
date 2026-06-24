@@ -43,6 +43,7 @@ var descriptor = runtime.BackendDescriptor{
 		HostFilesystem:     false,
 		FilesystemLocality: runtime.LocalityHostSide,
 		ContainerAttach:    true,
+		KeepAliveModel:     runtime.KeepAliveContainerInit,
 	},
 	Probe:             probe,
 	CleanupHint:       func(image string) string { return "podman rmi " + image },

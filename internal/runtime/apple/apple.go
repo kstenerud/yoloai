@@ -63,6 +63,7 @@ var descriptor = runtime.BackendDescriptor{
 		CapAdd:             true,
 		HostFilesystem:     false,
 		FilesystemLocality: runtime.LocalityHostSide,
+		KeepAliveModel:     runtime.KeepAliveGuestOSInit,
 		// Literal mount paths (no Tart-style remap) → the /yoloai default works.
 		VMRuntimeDir: "",
 	},

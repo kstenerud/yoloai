@@ -45,6 +45,7 @@ var descriptor = runtime.BackendDescriptor{
 		CapAdd:             true,
 		HostFilesystem:     false,
 		FilesystemLocality: runtime.LocalityHostSide,
+		KeepAliveModel:     runtime.KeepAliveGuestOSInit,
 	},
 	Probe:         probe,
 	VersionString: versionString,

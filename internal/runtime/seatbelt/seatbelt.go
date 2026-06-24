@@ -43,6 +43,7 @@ var descriptor = runtime.BackendDescriptor{
 		CapAdd:             false,
 		HostFilesystem:     true,
 		FilesystemLocality: runtime.LocalityHostSide,
+		KeepAliveModel:     runtime.KeepAliveHostKeepAlive,
 	},
 	Probe:         probe,
 	VersionString: func(_ context.Context) string { return "built-in" },
