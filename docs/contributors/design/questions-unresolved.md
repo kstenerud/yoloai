@@ -7,7 +7,7 @@ Questions encountered during design and implementation that need resolution. Res
 
 ## Codex and cleanup
 
-37. **Codex proxy support** — Whether Codex's static Rust binary honors `HTTP_PROXY`/`HTTPS_PROXY` env vars is unverified (see [commands.md](../design/commands.md), [Security Research](research/security.md)). Critical for `--network-isolated` mode with Codex. If it ignores proxy env vars, would need iptables-only enforcement.
+37. **Codex proxy support — RESOLVED 2026-06-24** (D92; → drain to questions-resolved.md). Codex *does* honor `HTTP_PROXY`/`HTTPS_PROXY` de-facto (reqwest default) but **inconsistently** (issue #4242 open), and **intentionally disables env proxy inside its own sandbox**. More to the point, the question's premise is moot for *containment*: env-proxy is never a boundary for an untrusted agent (it can unset it / use raw sockets / UDP / IPv6), and even transparent intercept alone is bypassable by a `NET_ADMIN`/sudo agent. The hostile-containment primitive is a **default-deny egress netns + a forced proxy on a different principal/namespace** — see [research/agent-proxy-support.md](research/agent-proxy-support.md) and [netpolicy.md](../design/netpolicy.md) §Hostile. Per-agent proxy-env injection is a *convenience hint*, not containment.
 
 38. **Codex required network domains** — Only `api.openai.com` is confirmed (see [commands.md](../design/commands.md)). Additional domains (telemetry, model downloads) may be required.
 

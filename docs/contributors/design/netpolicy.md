@@ -99,11 +99,17 @@ be how seatbelt/tart gain isolation at all (§4).
   `egress-proxy` cannot reuse it (it reconfigures host-side). So `Network.Allow/Deny` must **dispatch on the
   active strategy** (the dispatch point doesn't exist today). The policy *data* is strategy-agnostic; only the
   apply/live-patch *transport* needs the seam.
-- **The proxy *mechanism* is unresolved and gated on Q37.** "Forced through" works only if the agent honors
-  proxy env (`HTTP_PROXY`) *or* you do transparent netns interception. [Q37](questions-unresolved.md) records
-  Codex's static-binary proxy-honoring is **unverified** — so the proxy must be **routing-enforced
-  (transparent intercept), not env-cooperative**, or the "outside the agent's reach" claim fails for at least
-  one shipped agent. Pin this when the strategy is built.
+- **The proxy *mechanism* (resolved 2026-06-24 — [research/agent-proxy-support.md](research/agent-proxy-support.md),
+  closes Q37).** Env-proxy (`HTTP_PROXY`) is **never** a containment boundary for an untrusted agent — it lives
+  *inside* the agent's environment, so it can unset it, ignore it, or use raw sockets / UDP / IPv6 (and Codex
+  *disables* env proxy inside its own sandbox; Aider needs a flag; support is per-agent-quirky). And —
+  sharper than the earlier "routing-enforced" framing — **transparent intercept *alone* is also bypassable**
+  (a `NET_ADMIN`/sudo agent rewrites the rules; UDP/IPv6 escape). So the load-bearing `egress-proxy` primitive
+  is: **a default-deny egress firewall in the sandbox netns whose only outbound path is forced to a filtering
+  proxy on a *different principal/namespace* than the agent.** This *is* "enforcement outside the agent's reach
+  by construction," made precise — and it's why the current in-sandbox `ip-filter` (iptables a sudo agent can
+  flush) is not hostile-grade. Per-agent proxy-env injection stays a *convenience hint* for cooperating agents
+  + observability (an agent-layer capability), never the boundary.
 
 ## Lifecycle
 
