@@ -367,12 +367,22 @@ done`, cfg.ReadyPattern)
 	}
 }
 
-// deliverPromptViaTmux waits for the agent to be ready, then stages promptText in
-// the in-container scratch file tmpFile and pastes it into the main tmux pane.
-// The "active" status is written only after delivery, avoiding the race where
-// status reads "active" during the readiness wait.
+// deliverPromptViaTmux writes "active", then (in the background) waits for the
+// agent to be ready, stages promptText in the in-container scratch file tmpFile,
+// and pastes it into the main tmux pane.
+//
+// "active" is written SYNCHRONOUSLY, up front — before the (possibly multi-second,
+// backgrounded) readiness wait and paste. On a restart the prior turn's "idle" is
+// still on disk and has no staleness expiry (status.go), so writing active first
+// is what stops a Sandbox.Wait poll from reading that stale idle in the gap
+// between submit and the agent's first turn hook. The status is correct: a prompt
+// is pending, so the agent is (about to be) working. This supersedes the turn
+// cursor for Wait robustness (session-layer.md §Tier-2).
 func deliverPromptViaTmux(ctx context.Context, d state.Deps, name string, cfg runtimeconfig.ContainerConfig, meta *store.Environment, promptText, tmpFile string) error {
-	statusWrite := `printf '{"status":"active","timestamp":%d}' "$(date +%%s)" > "${YOLOAI_DIR:-/yoloai}/agent-status.json"`
+	activeWrite := `printf '{"schema_version":1,"status":"active","exit_code":null,"timestamp":%d}' "$(date +%s)" > "${YOLOAI_DIR:-/yoloai}/agent-status.json"`
+	if _, err := status.ExecInContainer(ctx, d.Runtime, name, meta, d.Layout.HostUID, []string{"bash", "-c", activeWrite}); err != nil {
+		return fmt.Errorf("write active status before delivery: %w", err)
+	}
 
 	socket := runtime.TmuxSocketFor(d.Runtime, d.Layout.SandboxDir(name))
 	script := fmt.Sprintf(`%s
@@ -385,8 +395,7 @@ for key in %s; do
     _tmux send-keys -t main "$key"
     sleep 0.2
 done
-rm -f %s
-%s`, tmuxShellPrefix(socket), buildReadyWaitScript(cfg), tmpFile, tmpFile, cfg.SubmitSequence, tmpFile, statusWrite)
+rm -f %s`, tmuxShellPrefix(socket), buildReadyWaitScript(cfg), tmpFile, tmpFile, cfg.SubmitSequence, tmpFile)
 
 	_, err := status.ExecInContainer(ctx, d.Runtime, name, meta, d.Layout.HostUID, []string{
 		"bash", "-c", "nohup bash -c '" + strings.ReplaceAll(script, "'", "'\"'\"'") + "' _ \"$1\" >/dev/null 2>&1 &", "_", promptText,

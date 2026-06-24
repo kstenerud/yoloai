@@ -121,6 +121,15 @@ authoritative *idle / turn-complete*, not session-over; that is tier-3 / livenes
   the counter (YAGNI over an append-only event log). `Sandbox.Wait(WaitForIdle)` waits for *completed-turn >
   the turn at which my prompt was submitted*, so it cannot trip on an earlier idle. Tier-2 is thus a
   **reliability upgrade to the existing `Wait`**, not a new API.
+  - **Shape-time finding (the cursor was over-built — superseded for `Wait`).** The stale-idle the cursor
+    guards against only arises on **restart**: create starts from an empty `agent-status.json`, which
+    `DetectStatus` reads as `active` (the safe default), so `Wait` can't trip there. On restart the prior
+    turn's `idle` persists (no staleness expiry), and the only gap is that `deliverPrompt` wrote `active`
+    *after* its backgrounded readiness-wait. **Reversing that one write — `active` written synchronously
+    *before* delivery — closes the window with no schema change, no hook changes, no migration** (there is
+    never an instant where "prompt submitted but status idle"). The monotonic counter is therefore not built;
+    `Wait` keeps keying on the binary status. One interaction handled: the monitor's respawn idle-seed is made
+    conditional (seed only if the on-disk status is still `done`) so it can't clobber that pre-submit `active`.
 
 ## Re-launch — restart, stop/start, create
 

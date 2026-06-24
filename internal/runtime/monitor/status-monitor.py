@@ -94,6 +94,20 @@ def write_status(status_file, status, exit_code=None):
         pass
 
 
+def read_status_value(status_file):
+    """Read the current status string from status_file ("" on any error).
+
+    Used so the respawn idle-seed can tell whether something out-of-band (a
+    resume-restart's deliverPrompt writing "active") has already set the status,
+    and avoid clobbering it back to idle.
+    """
+    try:
+        with open(status_file) as f:
+            return json.load(f).get("status", "")
+    except (OSError, ValueError):
+        return ""
+
+
 def set_title(name, tmux_sock=None):
     """Set tmux window title."""
     tmux_cmd(["rename-window", "-t", "main", name], tmux_sock)
@@ -653,12 +667,18 @@ def run_monitor(config_path, status_file, tmux_sock=None):
             # when the next turn starts). Initial create is seeded by
             # sandbox-setup.py, so no seed is needed on first start.
             if in_done:
-                _log_jsonl("info", "status.transition", "status changed",
-                           **{"from": "done", "to": "idle", "detector": "respawn_seed"})
-                write_status(status_file, "idle")
-                update_title(f"> {sandbox_name}")
-                hold_status = "idle"
                 in_done = False
+                # Seed "idle" on respawn — but ONLY if nothing has set a fresher
+                # status out-of-band. A resume-restart respawns the pane and then
+                # synchronously writes "active" via deliverPrompt; seeding idle
+                # unconditionally would clobber that back to a stale idle (the
+                # very thing the active-before-submit write exists to prevent).
+                if read_status_value(status_file) == "done":
+                    _log_jsonl("info", "status.transition", "status changed",
+                               **{"from": "done", "to": "idle", "detector": "respawn_seed"})
+                    write_status(status_file, "idle")
+                    update_title(f"> {sandbox_name}")
+                    hold_status = "idle"
             time.sleep(POLL_INTERVAL)
             continue
 
