@@ -30,8 +30,12 @@ import (
 // rerouteBaseRuntime records Create/Start/Inspect calls and returns running=true
 // on Inspect so verifyInstanceRunning is satisfied.
 type rerouteBaseRuntime struct {
-	mu      sync.Mutex
-	callSeq []string // ordered call log: "Create", "Start", "Inspect"
+	mu sync.Mutex
+	// readyMarkerPath, when set, is written by Start to simulate the entrypoint
+	// signalling root-provisioning complete (the .substrate-ready marker the
+	// Launch path waits for before launching the session-runner).
+	readyMarkerPath string
+	callSeq         []string // ordered call log: "Create", "Start", "Inspect"
 }
 
 var _ runtime.Backend = (*rerouteBaseRuntime)(nil)
@@ -48,6 +52,10 @@ func (r *rerouteBaseRuntime) Create(_ context.Context, _ runtime.InstanceConfig)
 }
 func (r *rerouteBaseRuntime) Start(_ context.Context, _ string) error {
 	r.record("Start")
+	if r.readyMarkerPath != "" {
+		_ = os.MkdirAll(filepath.Dir(r.readyMarkerPath), 0750)
+		_ = os.WriteFile(r.readyMarkerPath, nil, 0600)
+	}
 	return nil
 }
 func (r *rerouteBaseRuntime) Inspect(_ context.Context, _ string) (runtime.InstanceInfo, error) {
@@ -207,6 +215,7 @@ func TestBuildAndStart_LaunchPath(t *testing.T) {
 
 	rt := &rerouteLaunchRuntime{}
 	rt.markerPath = markerPath
+	rt.readyMarkerPath = filepath.Join(dir, store.SubstrateReadyMarker)
 
 	st := makeTestState(dir)
 	err := buildAndStart(context.Background(), rt, st, nil, nil, true /*hasSecrets*/)
@@ -222,11 +231,12 @@ func TestBuildAndStart_LaunchPath(t *testing.T) {
 	rt.mu.Unlock()
 	require.NotNil(t, spec, "Launch must have been called once")
 
-	// ProcSpec must point at sandbox-setup.py and run as yoloai.
+	// ProcSpec must point at sandbox-setup.py (via sh -c wrapper), run as yoloai, and be detached.
 	assert.Equal(t, "yoloai", spec.User, "ProcSpec.User must be yoloai")
-	require.True(t, len(spec.Argv) >= 3, "ProcSpec.Argv must have at least 3 elements")
-	assert.Contains(t, spec.Argv[len(spec.Argv)-2], "sandbox-setup.py",
-		"ProcSpec.Argv must include sandbox-setup.py")
+	assert.True(t, spec.Detached, "ProcSpec.Detached must be true for the session-runner")
+	joined := strings.Join(spec.Argv, " ")
+	assert.Contains(t, joined, "sandbox-setup.py", "ProcSpec.Argv must reference sandbox-setup.py")
+	assert.Contains(t, joined, "session-runner.log", "ProcSpec.Argv must redirect output to session-runner.log")
 
 	// Call order: Create → Start → Launch (marker wait is after, implicit
 	// because buildAndStart returned without error and the marker was present).
@@ -298,6 +308,7 @@ func TestBuildAndStart_LaunchPath_NoSecrets(t *testing.T) {
 	// No markerPath — if we accidentally call waitForSecretsConsumed it would
 	// spin for the full timeout; leaving it empty ensures the test is fast.
 	rt.markerPath = ""
+	rt.readyMarkerPath = filepath.Join(dir, store.SubstrateReadyMarker)
 
 	st := makeTestState(dir)
 	err := buildAndStart(context.Background(), rt, st, nil, nil, false /*hasSecrets*/)

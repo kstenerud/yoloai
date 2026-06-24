@@ -142,14 +142,32 @@ type ProvisionSpec struct {                           // substrate-level ONLY �
 }
 
 type ProcSpec struct {                                // what to run, how
-    Argv  []string
-    Env   []EnvVar
-    Cwd   string
-    User  string
-    TTY   bool                                        // request a pty; a RICH reattachable session is a refinement
-    Stdin bool
+    Argv     []string
+    Env      []EnvVar
+    Cwd      string
+    User     string
+    TTY      bool                                     // request a pty; a RICH reattachable session is a refinement
+    Stdin    bool
+    Detached bool                                     // durable process that OUTLIVES the launching client (§Detached)
 }
 ```
+
+## Detached launch — a durable process that outlives its launcher (`ProcSpec.Detached`)
+
+`Launch` must support a process that **survives the launching client's disconnect** — yoloAI's defining
+trait is that the box (and its session) runs on after `yoloai new` exits. This is `ProcSpec.Detached`:
+the substrate starts the process detached, does **not** stream its stdio back (the process redirects its
+own output to files inside the substrate), and `Wait` still reports exit via backend inspection. It does
+**not** violate §6 ("never re-open a process by pid") — the detached process is durable *in the substrate*,
+but its handle is still live only within the launching call; you reach it afterward through an *interface*
+(tmux), never its pid.
+
+This was promoted to a first-class primitive capability after a live smoke (2026-06-24, [DF44](findings-unresolved.md))
+showed the alternative — an *attached* `docker exec` for the long-lived session-runner — gets the runner
+**killed mid-startup** when the launching CLI exits (the agent survived only because tmux self-daemonizes;
+the status-monitor and the secrets-consumed marker did not). "Outlives its launcher" is a substrate-level
+property, so it belongs in the `Launch` contract, not bolted on at the call site. Docker realizes it with a
+detached exec (`ContainerExecStart{Detach:true}`); other backends map it to their own detached-spawn.
 
 ## In-container provisioning the substrate owns (the entrypoint carve — DF41/DF42)
 

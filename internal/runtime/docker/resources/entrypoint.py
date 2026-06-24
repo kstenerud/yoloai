@@ -451,7 +451,16 @@ def main():
         _log_file.flush()
         _log_file.close()
 
-    if cfg.get("keepalive_only"):
+    if keepalive:
+        # Signal that root provisioning is complete and the box is ready for the
+        # host to launch the session-runner over the holder. The host blocks on
+        # this marker before ProcessLauncher.Launch: a runner started DURING root
+        # setup (UID remap, chown -R, network) is silently killed — the readiness
+        # race found in the S3 carve smoke (DF44). Written LAST, just before exec.
+        try:
+            open(os.path.join(yoloai_dir, "logs", ".substrate-ready"), "w").close()
+        except OSError:
+            pass
         if running_as_root:
             os.execvp("gosu", ["gosu", "yoloai", "sleep", "infinity"])
         else:

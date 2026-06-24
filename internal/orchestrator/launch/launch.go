@@ -114,14 +114,22 @@ func buildAndStart(ctx context.Context, rt runtime.Backend, st *state.State, mnt
 //  1. Patch runtime-config.json with keepalive_only:true BEFORE Create, so the
 //     entrypoint reads it on first boot and takes the holder branch.
 //  2. Create + Start (box comes up on the sleep-infinity holder).
-//  3. Launch sandbox-setup.py — it reads /run/secrets and writes the
+//  3. Wait for the .substrate-ready marker — the entrypoint writes it after root
+//     provisioning completes, immediately before exec'ing the holder. A runner
+//     launched DURING root setup (UID remap etc.) is silently killed (DF44).
+//  4. Launch sandbox-setup.py — it reads /run/secrets and writes the
 //     .secrets-consumed marker itself.
-//  4. waitForSecretsConsumed AFTER Launch, so the marker is written by the
+//  5. waitForSecretsConsumed AFTER Launch, so the marker is written by the
 //     launched runner before the host removes the secrets dir.
 func startViaLaunch(ctx context.Context, rt runtime.Backend, launcher runtime.ProcessLauncher, st *state.State, cname string, instanceCfg runtime.InstanceConfig, markerPath string, hasSecrets bool) error {
 	if err := patchKeepaliveOnly(st.SandboxDir, true); err != nil {
 		return fmt.Errorf("patch keepalive_only: %w", err)
 	}
+
+	// Clear any stale readiness marker from a prior boot so the wait below sees
+	// only this launch's signal (it lives in the persistent sandbox dir).
+	readyPath := filepath.Join(st.SandboxDir, store.SubstrateReadyMarker)
+	_ = os.Remove(readyPath) //nolint:errcheck // best-effort; absent is fine
 
 	if err := rt.Create(ctx, instanceCfg); err != nil {
 		return gvisorStartHint(st.Isolation, err)
@@ -130,25 +138,21 @@ func startViaLaunch(ctx context.Context, rt runtime.Backend, launcher runtime.Pr
 		return fmt.Errorf("start instance: %w", gvisorStartHint(st.Isolation, err))
 	}
 
-	proc, err := launcher.Launch(ctx, cname, runtime.ProcSpec{
-		Argv:  []string{"python3", "/yoloai/bin/sandbox-setup.py", "docker"},
-		User:  "yoloai",
-		Cwd:   OverlayOrResolvedMountPath(st.Workdir),
-		Env:   []string{"HOME=/home/yoloai", "YOLOAI_DIR=/yoloai"},
-		TTY:   false,
-		Stdin: false,
+	// The box must finish root provisioning before we launch the session-runner
+	// over it; otherwise the runner is killed mid-setup (DF44 readiness race).
+	if err := waitForSubstrateReady(readyPath, effectiveSecretsConsumedTimeout(rt.Descriptor())); err != nil {
+		return err
+	}
+
+	_, err := launcher.Launch(ctx, cname, runtime.ProcSpec{
+		Argv:     []string{"sh", "-c", "exec python3 /yoloai/bin/sandbox-setup.py docker >> /yoloai/logs/session-runner.log 2>&1"},
+		User:     "yoloai",
+		Cwd:      OverlayOrResolvedMountPath(st.Workdir),
+		Env:      []string{"HOME=/home/yoloai", "YOLOAI_DIR=/yoloai"},
+		Detached: true,
 	})
 	if err != nil {
 		return fmt.Errorf("launch session-runner: %w", err)
-	}
-	// Drain the runner's streams so the Docker multiplexing goroutine does not
-	// block. The runner logs to its own files; stdout/stderr here are discarded.
-	streams := proc.Streams()
-	if streams.Stdout != nil {
-		go io.Copy(io.Discard, streams.Stdout) //nolint:errcheck // best-effort drain
-	}
-	if streams.Stderr != nil {
-		go io.Copy(io.Discard, streams.Stderr) //nolint:errcheck // best-effort drain
 	}
 
 	// The secrets marker is now written by the launched runner, not the
@@ -310,6 +314,25 @@ func waitForSecretsConsumed(markerPath string, timeout time.Duration) {
 			slog.Warn("secrets-consumed marker not observed before timeout; removing secrets dir anyway",
 				"marker", markerPath, "timeout", timeout)
 			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+// waitForSubstrateReady blocks until the .substrate-ready marker exists or the
+// timeout elapses. The keepalive entrypoint writes it after root provisioning
+// completes (immediately before exec'ing the holder). Unlike the secrets wait,
+// a timeout here is a hard error: launching the session-runner before the box
+// is provisioned gets it silently killed (DF44 readiness race), so we refuse to
+// launch into a box that never signalled ready.
+func waitForSubstrateReady(markerPath string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		if _, err := os.Stat(markerPath); err == nil {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("substrate not ready: marker %s not observed within %s (root provisioning did not complete)", markerPath, timeout)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}

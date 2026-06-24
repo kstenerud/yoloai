@@ -114,3 +114,26 @@ func TestLaunchStdinEcho(t *testing.T) {
 	assert.Equal(t, 0, status.Code, "cat exits 0 after stdin closes")
 	_ = strings.TrimSpace("") // keep strings import used
 }
+
+// TestLaunch_Detached verifies that Detached:true launches a process without
+// attaching stdio — Launch succeeds, the process ID is non-empty, and Streams
+// returns empty/nil readers with no stdin writer.
+func TestLaunch_Detached(t *testing.T) {
+	const sandboxName = "yoloai-launch-it-detached"
+	rt := launchTestInstance(t, sandboxName)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	spec := runtime.ProcSpec{
+		Argv:     []string{"sh", "-c", "sleep 30"},
+		Detached: true,
+	}
+	proc, err := rt.Launch(ctx, sandboxName, spec)
+	require.NoError(t, err)
+	assert.NotEmpty(t, proc.ID(), "detached process must have a non-empty exec ID")
+
+	streams := proc.Streams()
+	assert.Nil(t, streams.Stdout, "detached process must have nil Stdout")
+	assert.Nil(t, streams.Stderr, "detached process must have nil Stderr")
+	assert.Nil(t, streams.Stdin, "detached process must have nil Stdin")
+}

@@ -345,6 +345,13 @@ type ProcSpec struct {
 	TTY bool
 	// Stdin requests that stdin be left open so the caller can write to it.
 	Stdin bool
+	// Detached requests a long-lived process that survives the launching
+	// client's disconnect. Its stdio is NOT streamed back to the caller
+	// (Streams() returns zero/nil readers and writer); the process is expected
+	// to redirect its own output to files inside the substrate. Wait still
+	// reports exit via backend inspection. Use for a session-runner / daemon
+	// that must outlive the caller.
+	Detached bool
 }
 
 // Backend is the sandbox backend interface. Implementations manage the

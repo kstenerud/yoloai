@@ -24,7 +24,48 @@ var _ runtime.ProcessLauncher = (*Runtime)(nil)
 // non-blocking Process handle. Unlike Exec/InteractiveExec it returns
 // immediately after attaching; the caller drives I/O and calls Wait to
 // collect the exit status.
+//
+// When spec.Detached is true the process is started without attaching stdio —
+// it survives the caller's disconnect. Streams() returns empty/nil readers and
+// the writer is nil; the process must redirect its own output to files inside
+// the substrate.
 func (r *Runtime) Launch(ctx context.Context, name string, spec runtime.ProcSpec) (runtime.Process, error) {
+	if spec.Detached {
+		return r.launchDetached(ctx, name, spec)
+	}
+	return r.launchAttached(ctx, name, spec)
+}
+
+// launchDetached starts a process with Detach:true so it survives the caller's
+// disconnect. No stdio is attached; the returned Process has empty streams.
+func (r *Runtime) launchDetached(ctx context.Context, name string, spec runtime.ProcSpec) (runtime.Process, error) {
+	opts := container.ExecOptions{
+		Cmd:          spec.Argv,
+		User:         spec.User,
+		WorkingDir:   spec.Cwd,
+		Env:          spec.Env,
+		Tty:          false,
+		AttachStdin:  false,
+		AttachStdout: false,
+		AttachStderr: false,
+	}
+	execResp, err := r.client.ContainerExecCreate(ctx, name, opts)
+	if err != nil {
+		return nil, fmt.Errorf("launch detached exec create: %w", err)
+	}
+	if err := r.client.ContainerExecStart(ctx, execResp.ID, container.ExecStartOptions{Detach: true}); err != nil {
+		return nil, fmt.Errorf("launch detached exec start: %w", err)
+	}
+	return &dockerProcess{
+		client:   r.client,
+		execID:   execResp.ID,
+		detached: true,
+	}, nil
+}
+
+// launchAttached starts a process with stdio attached, returning a Process
+// whose Streams() carry the live I/O pipes.
+func (r *Runtime) launchAttached(ctx context.Context, name string, spec runtime.ProcSpec) (runtime.Process, error) {
 	opts := container.ExecOptions{
 		Cmd:          spec.Argv,
 		User:         spec.User,
@@ -117,10 +158,11 @@ func (h *hijackWriteCloser) Close() error {
 
 // dockerProcess is the concrete runtime.Process returned by Launch.
 type dockerProcess struct {
-	client  *dockerclient.Client
-	execID  string
-	resp    dockertypes.HijackedResponse
-	streams runtime.ProcessStreams
+	client   *dockerclient.Client
+	execID   string
+	resp     dockertypes.HijackedResponse
+	streams  runtime.ProcessStreams
+	detached bool // true when started detached; resp is zero-value and must not be closed
 }
 
 // ID returns the docker exec ID for this process.
@@ -145,7 +187,9 @@ func (p *dockerProcess) Wait(ctx context.Context) (runtime.ExitStatus, error) {
 			return runtime.ExitStatus{}, fmt.Errorf("exec inspect: %w", err)
 		}
 		if !inspect.Running {
-			p.resp.Close()
+			if !p.detached {
+				p.resp.Close()
+			}
 			return runtime.ExitStatus{Code: inspect.ExitCode}, nil
 		}
 		select {

@@ -78,6 +78,7 @@ inclusion test first, then add a row to the index.
 | `system prune` finds a different dangling image every run, reclaims 0 B, never converges, even with no builds | [Docker: legacy builder leaves a dangling image per step; build with BuildKit](#docker-legacy-builder-commits-one-dangling-intermediate-image-per-dockerfile-step-build-with-buildkit) |
 | Smoke/`system build` rebuilds `yoloai-base` from scratch every run on Docker Desktop (not OrbStack), though the image is present | [Docker Desktop: ImageInspect transiently NotFounds a present image on the idle containerd store](#docker-desktop-imageinspect-transiently-notfounds-a-present-image-on-the-idle-containerd-store) |
 | `podman: build cache prune failed: Error response from daemon: Not Found` | [Podman: no build-cache endpoint (404)](#podman-docker-compat-api-has-no-build-cache-endpoint--buildcacheprune-returns-404-not-found) |
+| Long-lived `docker exec` (attached) process dies when the launching CLI exits; status-monitor / marker missing | [Docker: attached exec doesn't outlive its client](#docker-exec-an-attached-exec-does-not-outlive-the-client-that-started-it) |
 | `prune --images` on Podman reports absurd reclaim (e.g. 142 GB freed for a ~5 GiB footprint) | [Podman: `ImagesPrune` `SpaceReclaimed` un-dedup sum](#podman-imagesprune-spacereclaimed-is-the-un-deduplicated-image-size-sum) |
 | `prune --images` dry-run promises multi-GB reclaim but `reclaimed 0 B`, while a `yoloai` sandbox is still running | [Docker/Podman: running containers pin image layers; warn at dry-run](#dockerpodman-imagesprune-cant-remove-images-held-by-non-stopped-containers-the-dry-run-must-name-the-blockers) |
 | `prune --images` leaves a snapshot chain; `Remove` → `cannot remove snapshot with child` | [containerd: remove snapshots leaf-first](#containerd-snapshots-must-be-removed-leaf-first-children-before-parents-or-removal-silently-stalls) |
@@ -957,6 +958,18 @@ The estimate is left as-is — it's still a valid *upper bound* if the user stop
 **Fix:** In `PruneCache`, swallow the error when `cerrdefs.IsNotFound(err)` is true (it stays a real failure for any other error). Podman has no build cache to free, so skipping is correct.
 
 **Code:** `internal/runtime/docker/prune.go` — `PruneCache` (`BuildCachePrune` error guarded by `!cerrdefs.IsNotFound`).
+
+---
+
+### Docker exec: an attached exec does not outlive the client that started it
+
+**Symptom:** A long-lived process started with `ContainerExecAttach` (attached `docker exec`) dies when the launching process exits — even though the container itself keeps running.
+
+**Explanation:** An attached exec's lifetime is coupled to its hijacked stdio connection. When the client that opened the attach closes it (e.g. the CLI returns), the exec'd process is terminated / loses its stdio and exits — it is **not** a detached background process. This bit us when the session-runner (`sandbox-setup.py`), launched attached, was killed mid-startup the moment `yoloai new` returned ([DF44](design/findings-unresolved.md)); the agent survived only because tmux self-daemonizes, but the status-monitor never started and the secrets-consumed marker was never written. Inclusion-test check: if you deleted all yoloAI code, `docker exec <ctr> <longproc>` attached *still* would not survive the client disconnect — the surprise is the engine's exec lifetime, not our wiring.
+
+**Fix:** For a process that must outlive its launcher, start it **detached** — `ContainerExecStart` with `container.ExecStartOptions{Detach: true}` (no attach) — and redirect its stdio to files inside the container (detached stdio is otherwise discarded). yoloAI exposes this as `runtime.ProcSpec.Detached`.
+
+**Code:** `internal/runtime/docker/launch.go` (the `Detached` branch); `internal/orchestrator/launch/launch.go::startViaLaunch`. Related: DF44.
 
 ## Podman
 
