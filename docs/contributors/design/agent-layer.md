@@ -77,18 +77,84 @@ real mechanism, so after re-homing the residual code is small. No `Register()` u
 custom non-Claude harness agent for the security-research direction) forces it — same "shape the seam, defer
 the build" move as Stream (D88) and the `hook-unreliable` mode.
 
+## The re-homing map (2026-06-24)
+
+Re-homing is a **two-way sort**, and it reveals the agent layer is *thinner* than "gather all agent logic":
+each capability splits **three** ways — the agent keeps its **declaration** (data + a thin adapter); the
+cross-layer **payload** leaves for its owner; and the generic **runner** (detector-loop, seed-stager,
+policy-composer, prompt-deliverer) belongs to the *consuming* layer, parameterized by the agent's declaration.
+So the agent layer absorbs only agent-specific *data + tiny adapters*; the runners distribute outward.
+
+| Capability | Agent keeps (data + thin adapter) | Payload → owner | Generic runner → layer |
+|---|---|---|---|
+| **Completion** | hook event-map + registration shape *(data)* + a *shared* append helper | status-writer cmd **+ turn-cursor** → completion | detector-loop / monitor → completion |
+| **Launch** | command template + `PromptMode` + `SubmitSequence` + `ModelFlag` *(data)* | prompt text → session/lifetime; model name → caller | prompt-delivery (inject vs bake) + template-fill → session/lifetime |
+| **Model** | alias table + prefix rules *(data)* + opencode validation *(thin adapter)* | requested model name → caller | the generic resolver → **agent layer** *(keeps resolver with its alias data)* |
+| **Credentials** | env-var names + seed-file list + state dir *(data)* | credential **values** → caller (D63/DF38) | secrets-staging + seed-copy → **envsetup** |
+| **Network** | required domains, a *floor* *(data)* | effective policy → **netpolicy** | policy-composer + enforcer → netpolicy |
+| **Context** | the **global-context-file location** (`StateDir`+`ContextFile`) | each layer's fragment → assembled **DEF** | generic "append DEF to ABC at location" → provision/envsetup |
+| **Self-config** | `folderTrust`/`sandbox`/notif key-flips *(data)* + `ApplySettings` residual *(thin adapter)* | — *(none)* | settings-writer → envsetup |
+
+Byproduct: once the hook *command* leaves for completion, even Claude's "hard" mechanism collapses to **data**
+(an event-name map + a *shared* append helper, not a per-agent func) — so the thin code-adapter shrinks to
+~just opencode's model-validation and the settings-merge residual.
+
+**Boundaries pinned with unbuilt layers** (the point of re-homing):
+- **completion ←** the agent hands a registration request; completion owns the status-writer **and the
+  turn-cursor maintenance** (a shell hook keeping a monotonic counter is completion's implementation detail —
+  which *confirms* the command is completion's, not the agent's).
+- **netpolicy ←** the agent's domain-*floor*; netpolicy composes floor + user-adds + isolation + enforcement.
+- **envsetup ←** the seed-staging + settings-write mechanism, parameterized by the agent's
+  credential-shape/seed-list/self-config/exclude-rules. **Credentials shed from the agent entirely** — shape
+  to the agent, values to the caller, staging to envsetup.
+
+**Forks resolved:** model-resolver → agent layer (keep the resolver with its alias data); credential staging →
+envsetup; context → the global-context model below.
+
+### Context — the global-context model
+
+The clean shape (the "fuzzy multi-owner" framing reduced to a fan-in + a generic append):
+
+- **Outside:** user's global `~/.claude/CLAUDE.md` = `ABC` · yoloai's collected context = `DEF` · workdir
+  `CLAUDE.md` = `GHI`. **Inside:** the global file = **`ABC`+`DEF`** (yoloai's appended to the user's) · workdir
+  file = `GHI` (copied untouched via copyflow — no one's concern).
+- **The only agent-specific datum is the global-context-file location** (`StateDir`+`ContextFile`, already
+  declared). Everything else is generic: *read the user's config there (ABC) → append yoloai's collected
+  context (DEF) → write the result to that location inside.* No per-agent sink logic — a location + a generic
+  append.
+- **The fan-in:** `DEF` is assembled from each concerned layer's **fragment** — file-exchange → the Q&A
+  protocol, sandbox → orientation, netpolicy → "you're network-isolated" later. Each fragment is owned by its
+  contributor (the payload side); the agent owns only the location.
+
+**Findings (cleanups this surfaces):**
+- The Q&A-protocol injection must become **agent-agnostic** — today it is hardcoded Claude-only
+  (`if ContextFile == "CLAUDE.md"`, `context.go:177`); it should be a `DEF` fragment appended at *each agent's*
+  declared location. A mis-homing the principle predicts.
+- **Append, don't clobber:** the runner must append `DEF` to the *seeded* user config, never overwrite it (the
+  current write-then-append into the context file is the thing to fix).
+- Agents with **no global-context location** (`StateDir`/`ContextFile` empty — e.g. aider today) currently
+  receive no `DEF`. A capability gap declared by *absence* — acceptable, but those agents miss the operating
+  instructions.
+
+**Open verification (side trip, in progress):** the "single global-context-*file* location" shape is being
+surveyed across all shipped agents (research note `research/agent-global-context.md`, pending) — to confirm no
+agent has a structurally different mechanism (a config key, multiple hierarchical files, a `/memory` command,
+or nothing) that the capability must generalize to rather than break on. The user's steer: *each agent knows
+how to consolidate its own context; the outside only needs "how do I find your global stuff to pass it to
+you?"* — so if an agent diverges, the divergence lives in that agent's thin adapter, not in the generic
+runner.
+
 ## Open questions — RESUME HERE
 
-1. **The re-homing map.** Confirm each payload's destination layer (most are obvious from the table). The
-   sharp ones cross into layers not yet built: **completion ← the hook-command** (the completion layer must own
-   the status-writer + turn-cursor, the agent only the registration shape) and **netpolicy ← the
-   allowlist-floor** (the agent declares its required domains; netpolicy composes the policy). These two pin
-   boundaries with unbuilt refinements.
-2. **The public surface.** What the `agent` package exposes — the capability/`Definition` types, the catalog,
+The re-homing map (2026-06-24) is **resolved** (above), pending the global-context survey that verifies the
+Context capability's per-agent shape. Remaining:
+
+1. **The public surface.** What the `agent` package exposes — the capability/`Definition` types, the catalog,
    the code-adapter interface — and how it relates to the runtime `sb.Agent()` handle (Attach/SendInput/Prompt/
    CaptureTerminal/Logs, today a read-only accessor).
-3. **The package boundary** relative to `invocation`/`provision`/`create`/`context`/`network`, which hold
+2. **The package boundary** relative to `invocation`/`provision`/`create`/`context`/`network`, which hold
    today's scattered agent-aware logic that this layer gathers.
 
-Once these drain, the agent layer earns its D-number + a finalized spec (like substrate/session/copyflow/
-persistence). After it: netpolicy, envsetup remain in the design cluster, then Shape and Move.
+Once these drain (and the global-context survey lands), the agent layer earns its D-number + a finalized spec
+(like substrate/session/copyflow/persistence). After it: netpolicy, envsetup remain in the design cluster,
+then Shape and Move.
