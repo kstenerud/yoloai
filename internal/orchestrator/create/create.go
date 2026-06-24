@@ -767,6 +767,7 @@ func buildContainerConfig(layout config.Layout, agentDef *agent.Definition, agen
 			ContextSignal:   agentDef.Idle.ContextSignal,
 			WchanApplicable: agentDef.Idle.WchanApplicable,
 		},
+		IdleMode:         invocation.ResolveIdleMode(agentDef.Idle),
 		Detectors:        invocation.ResolveDetectors(agentDef.Idle),
 		SandboxName:      sandboxName,
 		TmuxSocket:       tmuxSocket,

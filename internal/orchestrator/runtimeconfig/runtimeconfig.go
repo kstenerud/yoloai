@@ -48,34 +48,41 @@ type LifecycleConfig struct {
 // tmux config, socket, passthrough args, and ready/startup settings for
 // container restart and prompt delivery.
 type ContainerConfig struct {
-	SchemaVersion      int                   `json:"schema_version"`
-	HostUID            int                   `json:"host_uid"`
-	HostGID            int                   `json:"host_gid"`
-	AgentCommand       string                `json:"agent_command"`
-	AgentLaunchPrefix  string                `json:"agent_launch_prefix"`
-	StartupDelay       int                   `json:"startup_delay"`
-	ReadyPattern       string                `json:"ready_pattern"`
-	SubmitSequence     string                `json:"submit_sequence"`
-	TmuxConf           string                `json:"tmux_conf"`
-	WorkingDir         string                `json:"working_dir"`
-	StateDirName       string                `json:"state_dir_name"`
-	Debug              bool                  `json:"debug,omitempty"`
-	NetworkIsolated    bool                  `json:"network_isolated,omitempty"`
-	AllowedDomains     []string              `json:"allowed_domains,omitempty"`
-	Passthrough        []string              `json:"passthrough,omitempty"`
-	OverlayMounts      []OverlayMountConfig  `json:"overlay_mounts,omitempty"`
-	SetupCommands      []string              `json:"setup_commands,omitempty"`
-	AutoCommitInterval int                   `json:"auto_commit_interval,omitempty"`
-	CopyDirs           []string              `json:"copy_dirs,omitempty"`
-	HookIdle           bool                  `json:"hook_idle,omitempty"`
-	Idle               IdleSupport           `json:"idle"`
-	Detectors          []string              `json:"detectors,omitempty"`
-	SandboxName        string                `json:"sandbox_name"`
-	TmuxSocket         string                `json:"tmux_socket,omitempty"`
-	Isolation          runtime.IsolationMode `json:"isolation,omitempty"`
-	VscodeTunnel       bool                  `json:"vscode_tunnel,omitempty"`
-	VscodeTunnelName   string                `json:"vscode_tunnel_name,omitempty"`
-	Lifecycle          *LifecycleConfig      `json:"lifecycle,omitempty"`
+	SchemaVersion      int                  `json:"schema_version"`
+	HostUID            int                  `json:"host_uid"`
+	HostGID            int                  `json:"host_gid"`
+	AgentCommand       string               `json:"agent_command"`
+	AgentLaunchPrefix  string               `json:"agent_launch_prefix"`
+	StartupDelay       int                  `json:"startup_delay"`
+	ReadyPattern       string               `json:"ready_pattern"`
+	SubmitSequence     string               `json:"submit_sequence"`
+	TmuxConf           string               `json:"tmux_conf"`
+	WorkingDir         string               `json:"working_dir"`
+	StateDirName       string               `json:"state_dir_name"`
+	Debug              bool                 `json:"debug,omitempty"`
+	NetworkIsolated    bool                 `json:"network_isolated,omitempty"`
+	AllowedDomains     []string             `json:"allowed_domains,omitempty"`
+	Passthrough        []string             `json:"passthrough,omitempty"`
+	OverlayMounts      []OverlayMountConfig `json:"overlay_mounts,omitempty"`
+	SetupCommands      []string             `json:"setup_commands,omitempty"`
+	AutoCommitInterval int                  `json:"auto_commit_interval,omitempty"`
+	CopyDirs           []string             `json:"copy_dirs,omitempty"`
+	HookIdle           bool                 `json:"hook_idle,omitempty"`
+	Idle               IdleSupport          `json:"idle"`
+	// IdleMode selects how the status monitor determines active/idle: the
+	// per-agent mode selector (session-layer.md §Tier-2). "hook-authoritative" =
+	// the agent's hook is the sole idle authority (no heuristics, no startup
+	// blip); "heuristic-only" = the detector stack. Absent → heuristic-only
+	// (back-compat for sandboxes created before the selector). Additive optional
+	// field → no SchemaVersion bump.
+	IdleMode         string                `json:"idle_mode,omitempty"`
+	Detectors        []string              `json:"detectors,omitempty"`
+	SandboxName      string                `json:"sandbox_name"`
+	TmuxSocket       string                `json:"tmux_socket,omitempty"`
+	Isolation        runtime.IsolationMode `json:"isolation,omitempty"`
+	VscodeTunnel     bool                  `json:"vscode_tunnel,omitempty"`
+	VscodeTunnelName string                `json:"vscode_tunnel_name,omitempty"`
+	Lifecycle        *LifecycleConfig      `json:"lifecycle,omitempty"`
 	// KeepaliveOnly, when true, brings the box up on a neutral agent-free
 	// keep-alive (`sleep infinity`) after the root setup, instead of launching
 	// the agent session — the S2 carve's agent-free substrate bring-up. The

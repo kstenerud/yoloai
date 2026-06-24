@@ -588,10 +588,18 @@ def run_monitor(config_path, status_file, tmux_sock=None):
         pass
 
     sandbox_name = config.get("sandbox_name", "sandbox")
+    # Mode selector (session-layer.md Tier-2). hook-authoritative: the agent's
+    # turn hook is the sole active/idle authority (it writes agent-status.json
+    # directly); the monitor runs no heuristics for active/idle — only pane-death
+    # -> done and a one-shot idle seed on respawn. Absent -> heuristic-only
+    # (back-compat for sandboxes created before the selector existed).
+    idle_mode = config.get("idle_mode", "heuristic-only")
+    hook_authoritative = idle_mode == "hook-authoritative"
     detectors = build_detectors(config, tmux_sock, yoloai_dir)
 
     detector_names = [d.name for d in detectors]
     _log_jsonl("info", "monitor.start", "monitor started",
+               idle_mode=idle_mode,
                detectors=detector_names,
                sandbox=sandbox_name)
     debug(f"platform: linux={IS_LINUX} macos={IS_MACOS}")
@@ -634,6 +642,23 @@ def run_monitor(config_path, status_file, tmux_sock=None):
                 hold_active_count = 0
                 stability = {}
                 in_done = True
+            time.sleep(POLL_INTERVAL)
+            continue
+
+        if hook_authoritative:
+            # The agent's hook owns active/idle (it writes agent-status.json on
+            # turn-start/turn-stop). The monitor runs NO heuristics here — that
+            # is what removes the startup blip. It only seeds "idle" once when a
+            # just-respawned agent comes up waiting (the hook flips it to active
+            # when the next turn starts). Initial create is seeded by
+            # sandbox-setup.py, so no seed is needed on first start.
+            if in_done:
+                _log_jsonl("info", "status.transition", "status changed",
+                           **{"from": "done", "to": "idle", "detector": "respawn_seed"})
+                write_status(status_file, "idle")
+                update_title(f"> {sandbox_name}")
+                hold_status = "idle"
+                in_done = False
             time.sleep(POLL_INTERVAL)
             continue
 

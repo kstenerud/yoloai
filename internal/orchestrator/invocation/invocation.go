@@ -174,6 +174,32 @@ func ResolveDetectors(idle agent.IdleSupport) []string {
 	return detectors
 }
 
+// Idle-detection modes (the per-agent mode selector — session-layer.md §Tier-2).
+// The status monitor reads idle_mode from runtime-config.json and branches.
+const (
+	// IdleModeHookAuthoritative: idle/active is owned EXCLUSIVELY by the agent's
+	// turn hook (it writes agent-status.json directly); the monitor runs no
+	// heuristic detectors for active/idle (only pane-death → done + a respawn
+	// idle seed). This removes the startup blip, which is a heuristic artifact.
+	IdleModeHookAuthoritative = "hook-authoritative"
+	// IdleModeHeuristicOnly: the agent-agnostic heuristic detector stack (wchan,
+	// ready-pattern, …). For agents without a turn hook.
+	IdleModeHeuristicOnly = "heuristic-only"
+	// A future IdleModeHookAssisted (hook + heuristic backstop for a missed hook)
+	// slots in here without reworking the selector — the design-now seam.
+)
+
+// ResolveIdleMode selects the per-agent idle-detection mode. Hook-capable agents
+// trust the authoritative hook exclusively (heuristics would only re-introduce
+// the startup blip and add nothing a hook-capable agent needs — crash/hang is
+// covered by liveness, not heuristics); others fall back to the heuristic stack.
+func ResolveIdleMode(idle agent.IdleSupport) string {
+	if idle.Hook {
+		return IdleModeHookAuthoritative
+	}
+	return IdleModeHeuristicOnly
+}
+
 // ReadPrompt reads the prompt from --prompt, --prompt-file, or stdin ("-").
 // homeDir is used to expand leading "~" in the promptFile path. stdin is the
 // reader the "-" sentinel pulls from — threaded from the Engine's input
