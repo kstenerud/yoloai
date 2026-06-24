@@ -68,14 +68,26 @@ model-format validation. The code-adapter **is the seam**.
 even the residual is config. Deferred to when open-registry is actually wanted; no consumer needs it yet
 (YAGNI; the ROADMAP's new agents are *shipped* additions, and control-eval uses claude).
 
-## Open vs closed — closed now, seam-shaped
+## Openness — the file/data path is open; code-adapter deferred
 
-The registry stays the shipped closed set (it is a hardcoded map today with zero extension points; the public
-`AgentInfo` catalog in `discovery.go` is read-only). The capability model + code-adapter is the **seam** that
-makes opening cheap later: the principle revealed that most of the agent's "code" was *mis-homed payload*, not
-real mechanism, so after re-homing the residual code is small. No `Register()` until a real consumer (e.g. a
-custom non-Claude harness agent for the security-research direction) forces it — same "shape the seam, defer
-the build" move as Stream (D88) and the `hook-unreliable` mode.
+Revised 2026-06-24 from an earlier "closed now, seam-shaped" lean. Once the capability model + re-homing made
+the Definition *mostly data*, opening the data path turned out cheap — so we open it now rather than dancing
+around it (the residual "code" was mostly mis-homed payload, not real mechanism).
+
+- **File-defined agents are open** — `~/.yoloai/agents/<name>.yaml` (**own files** — an agent is a different
+  noun than a profile, which *selects* an agent). A file inherently carries only the **data-expressible** subset
+  (no Go func), so **the file format *is* the data/code boundary, enforced by construction.** This covers the
+  realistic want — *wrap a non-Claude tool as an agent* (e.g. a security-research harness agent). A user-defined
+  agent is **trusted config** (same trust level as a profile / Dockerfile the user writes), *not* untrusted
+  input — which bounds the security surface (declaring seed files / a network floor / a launch command is the
+  user configuring their own setup). Work to open: a **schema + loader + validator** (the capability model paid
+  for the rest).
+- **The code-adapter stays internal** — agents needing a procedural mechanism (Claude's settings-merge,
+  opencode's validation) stay Go-defined. The public adapter interface is the *one* genuinely-deferred piece,
+  gated on a real *code-needing* third-party agent.
+- Declarative-izing the shipped agents' `ApplySettings` (wanted anyway; the re-homing already shrank it — the
+  hook part leaves for completion, Gemini's is a key-flip, Claude's residual is key-flips + a shared merge
+  helper) makes the shipped agents mostly file-expressible too — dogfooding the schema.
 
 ## The re-homing map (2026-06-24)
 
@@ -148,18 +160,42 @@ netpolicy → isolation-notice), each owned by its contributor; the agent owns o
 - **AGENTS.md convergence:** Codex+OpenCode are native `AGENTS.md`, Gemini can be pointed at it; a *future*
   agent most likely uses `AGENTS.md` — a sane default for new registrations.
 
+## The public surface (2026-06-24)
+
+"Agent" means two things publicly, with different surfaces: the agent **type** (Claude as a declarative
+capability bundle — the agent layer's own surface) and the agent **instance** (the agent running in *this*
+sandbox — `sb.Agent()`, a *composition* over layers).
+
+1. **Separability is *why* the agent layer is opt-in.** A caller wanting only sandboxing imports
+   `substrate`/`runtime` and **never pulls in** the agent machinery. Guaranteed by the dependency direction —
+   `agent → substrate/session/copyflow`, **never back** (the carve enforces it). The root `yoloai` package is
+   batteries-included; `substrate` is the agent-free island. (This — not a registration API — was the original
+   reason for the opt-in layer.)
+2. **The type surface = a read-only capability catalog** (`yoloai.AgentTypes()` → `AgentInfo`), enriched from
+   today's thin auth/model fields into the **public capability declaration**: one-shot/headless support,
+   idle-mode (hook?), native-resume, prompt-mode, the network floor — the flags an embedder needs to choose
+   *how* to run an agent. The internal `Definition` + the code-adapter interface stay internal.
+3. **File-defined agents are open** — `~/.yoloai/agents/<name>.yaml` (see *Openness* above). The data path is
+   open now; the code-adapter is the one deferred piece.
+4. **The instance handle `sb.Agent()` is a join**, not the agent layer — agent identity (type/model) + prompt
+   (`AgentLaunchSpec` read) + status (completion sidecar) + **`.IOSession()`** (the session channel, D88). The
+   interaction primitives (`Attach`/`SendInput`/`CaptureTerminal`/`TerminalLog`) **move to `IOSession`** per
+   D88; `Agent` slims to the agent-specific reads + the join. It lives in the **root `yoloai`** composition,
+   not the agent package.
+
 ## Open questions — RESUME HERE
 
-The re-homing map (2026-06-24) is **resolved** (above); the global-context survey landed
-([research/agent-global-context.md](research/agent-global-context.md)) and the Context capability is reconciled
-(injection-method; aider's launch-flag divergence stayed data). Remaining:
+The capability-model spine, the re-homing map (+ the global-context survey,
+[research/agent-global-context.md](research/agent-global-context.md)), and the public surface are all
+**resolved**.
 
-1. **The public surface.** What the `agent` package exposes — the capability/`Definition` types, the catalog,
-   the code-adapter interface — and how it relates to the runtime `sb.Agent()` handle (Attach/SendInput/Prompt/
-   CaptureTerminal/Logs, today a read-only accessor).
-2. **The package boundary** relative to `invocation`/`provision`/`create`/`context`/`network`, which hold
-   today's scattered agent-aware logic that this layer gathers.
+The old RESUME-HERE #2 — **the package boundary** — is now a **corollary, not an open question**: re-homing
+fixes what lives in the agent package (the capability data model, the catalog, the model-resolver, the thin
+code-adapter, the file loader/validator) while the runners live in their consuming layers; separability fixes
+the dependency direction (`agent → lower`, never back); `sb.Agent()` lives in the root composition. The
+concrete code-move from today's scattered `invocation`/`provision`/`create`/`context`/`network` is a
+**Shape-phase** task, not a design decision.
 
-Once these drain (and the global-context survey lands), the agent layer earns its D-number + a finalized spec
-(like substrate/session/copyflow/persistence). After it: netpolicy, envsetup remain in the design cluster,
-then Shape and Move.
+So the agent layer is **ready for its D-number + a finalized spec** (like substrate/session/copyflow/
+persistence) — consolidate this doc into a clean topic-organized spec + mint the next D-number. After it:
+netpolicy, envsetup remain in the design cluster, then Shape and Move.
