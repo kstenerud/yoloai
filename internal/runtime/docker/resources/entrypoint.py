@@ -431,10 +431,26 @@ def main():
     apply_overlays(cfg, yoloai_dir)
     run_setup_commands(cfg)
 
+    if cfg.get("keepalive_only"):
+        # S2 carve: agent-free substrate bring-up. Secrets have already landed
+        # in the environment above (read_secrets + signal_secrets_consumed ran
+        # as normal); they are harmless here — the real secrets re-home is done
+        # by envsetup in S2c and later. tini (PID 1) reaps and forwards SIGTERM
+        # to sleep, so `docker stop` works cleanly.
+        log_info("entrypoint.keepalive_only", "box up on neutral keep-alive; no agent launched")
+
     # Flush and close the log before exec (fd will be closed by exec).
     if _log_file:
         _log_file.flush()
         _log_file.close()
+
+    if cfg.get("keepalive_only"):
+        if running_as_root:
+            os.execvp("gosu", ["gosu", "yoloai", "sleep", "infinity"])
+        else:
+            # Podman rootless: already running as the host user.
+            os.environ["HOME"] = "/home/yoloai"
+            os.execvp("sleep", ["sleep", "infinity"])
 
     setup_py = os.path.join(yoloai_dir, "bin", "sandbox-setup.py")
 

@@ -76,4 +76,10 @@ type ContainerConfig struct {
 	VscodeTunnel       bool                  `json:"vscode_tunnel,omitempty"`
 	VscodeTunnelName   string                `json:"vscode_tunnel_name,omitempty"`
 	Lifecycle          *LifecycleConfig      `json:"lifecycle,omitempty"`
+	// KeepaliveOnly, when true, brings the box up on a neutral agent-free
+	// keep-alive (`sleep infinity`) after the root setup, instead of launching
+	// the agent session — the S2 carve's agent-free substrate bring-up. The
+	// orchestrator does not set it yet (S2c flips it); it exists so the
+	// entrypoint can honor it.
+	KeepaliveOnly bool `json:"keepalive_only,omitempty"`
 }
