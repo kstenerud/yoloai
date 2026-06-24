@@ -152,6 +152,22 @@ fresh agent" is the only thing *every* agent supports. Native conversation-resum
 *deferred per-agent capability* on `AgentLaunchSpec`, never the baseline. Matches the current `relaunchAgent`
 default.
 
+**Fall-to-shell resume hint (the user-initiated alternative to auto-relaunch).** Auto-relaunch is *declined* —
+it conflates "exited" (fact) with "should be running" (policy the launcher can't read): it can't distinguish an
+intentional `/quit` from an accident, turns crashes into crash-loops, and breaks one-shot `lifetime` (a `-p`
+run that exits *is done*; relaunch would re-run the baked prompt forever). Auto-relaunch is Tier-2 supervision,
+which the substrate declines (D84 §4); it stays available only as *opt-in caller policy*, never a default.
+Instead, the **launch shape** for a persistent/PTY session is `… ; exec $SHELL` (no `exec` on the agent), so
+**agent-exit drops to an interactive shell in the same pane** — not a dead pane — which prints a resume hint and
+carries a `resume.sh` on `PATH`. This is the concrete, shippable form of the deferred native-resume capability:
+*data + a launch-wrapper, entirely in the box*, user-initiated (intent preserved). The resume **command** is an
+agent-layer declaration (see [agent-layer.md](agent-layer.md) Resume capability); the session layer supplies the
+launch shape + the session-id. **Gated by `lifetime` × `SessionKind`:** persistent + PTY only — one-shot/Stream
+sessions have no terminal to drop into, so exit = done, no shell, no hint. Deterministic resume of the *right*
+conversation needs the session id; the cleanest route is to **inject a known session id at launch** where the
+agent supports it (Claude `--session-id`), so resume is exactly `--resume <same-id>` — a per-agent detail to
+verify at Shape.
+
 **The trust prompt is a fresh-*environment* event, not a restart event.** Claude's folder-trust lives in the
 persisted `~/.claude`, keyed to a stable workdir path — a *first-encounter-of-this-folder* event. In-place
 restart never triggers it; stop/start doesn't either. DF13's dialog-on-restart was a symptom of

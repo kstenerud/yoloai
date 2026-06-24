@@ -63,11 +63,20 @@ agent-agnostic mechanism.
 | **Network** | required domains, a *floor* *(data)* | effective policy → **netpolicy** | policy-composer + enforcer → netpolicy |
 | **Context** | the `DEF`-injection **method** (append-at-`StateDir`/`ContextFile`, or aider's launch-flag) *(data)* | each layer's fragment → assembled **DEF** | generic `DEF`-deliverer → provision/envsetup *(ABC already seeded by Credentials)* |
 | **Self-config** | `folderTrust`/`sandbox`/notif key-flips *(data)* + `ApplySettings` residual *(thin adapter)* | — *(none — the agent's own "run-me-like-this")* | settings-writer → envsetup |
+| **Resume** | resume command template (or *"none"*) + session-id support flag *(data)* | session id → session/lifetime | fall-to-shell launch-wrapper + hint print → session |
 
 Refinement: some capabilities are **mechanism-only** (self-config has no consumer payload). Byproduct of
 re-homing: once the hook *command* leaves for completion, even Claude's "hard" mechanism collapses to data (an
 event-map + a *shared* append helper, not a per-agent func), so the thin code-adapter shrinks to ~just
 opencode's validation and the settings-merge residual.
+
+**Resume is honestly characterized, never faked.** The Resume declaration is *data* — a resume command template
+or the literal *"none"*. Agents with native resume (Claude `--resume`, Codex/Gemini equivalents) run the real
+thing; agents without (Aider, our known global-context outlier) declare *"none"* → the `resume.sh` relaunches a
+**fresh** agent and *says so* (netpolicy-style honest characterization — never print "resumed" when it wasn't).
+The session-layer fall-to-shell wrapper + session-id supply are the generic runner; see
+[session-layer.md](session-layer.md) "Fall-to-shell resume hint". Deterministic resume depends on a session id —
+the agent declares whether it can *set* one at launch (Claude `--session-id`), which the session layer injects.
 
 **Folder-trust as an agent-layer principle.** Claude's trust dialog (DF13) and Gemini's
 `security.folderTrust.enabled=false` are the same capability: *the sandbox is the real trust boundary, so
