@@ -1,9 +1,12 @@
 // ABOUTME: translating resolved State into a runtime.InstanceConfig, starting
-// ABOUTME: the container, and verifying it is running.
+// ABOUTME: the container, and verifying it is running. When the backend supports
+// ABOUTME: runtime.ProcessLauncher the container is brought up agent-free (keepalive
+// ABOUTME: holder) and sandbox-setup.py is launched as a separate process over it.
 package launch
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -16,8 +19,10 @@ import (
 	"time"
 
 	"github.com/kstenerud/yoloai/internal/config"
+	"github.com/kstenerud/yoloai/internal/fileutil"
 	mountspkg "github.com/kstenerud/yoloai/internal/orchestrator/mounts"
 	"github.com/kstenerud/yoloai/internal/orchestrator/provision"
+	"github.com/kstenerud/yoloai/internal/orchestrator/runtimeconfig"
 	"github.com/kstenerud/yoloai/internal/orchestrator/state"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/store"
@@ -68,6 +73,11 @@ func LaunchContainer(ctx context.Context, d state.Deps, st *state.State) error {
 // starts the instance. hasSecrets indicates whether secrets were injected via
 // a temporary directory that the caller will remove after this call returns.
 // Extracted from launchContainer().
+//
+// When the backend implements runtime.ProcessLauncher the box is brought up
+// agent-free (keepalive_only holder) and sandbox-setup.py is launched as a
+// separate process over it — the S3 re-route. Backends without ProcessLauncher
+// follow the legacy path: the agent is welded into the entrypoint as before.
 func buildAndStart(ctx context.Context, rt runtime.Backend, st *state.State, mnts []runtime.MountSpec, ports []runtime.PortMapping, hasSecrets bool) error {
 	cname := store.InstanceName(st.Layout.Principal, st.Name)
 	instanceCfg, err := buildInstanceConfig(rt.Descriptor(), st, mnts, ports)
@@ -83,14 +93,83 @@ func buildAndStart(ctx context.Context, rt runtime.Backend, st *state.State, mnt
 		_ = os.Remove(markerPath) //nolint:errcheck // best-effort; absent is fine
 	}
 
+	if launcher, ok := runtime.LauncherOf(rt); ok {
+		if err := startViaLaunch(ctx, rt, launcher, st, cname, instanceCfg, markerPath, hasSecrets); err != nil {
+			return err
+		}
+	} else {
+		if err := startLegacy(ctx, rt, st, cname, instanceCfg, markerPath, hasSecrets); err != nil {
+			return err
+		}
+	}
+
+	return verifyInstanceRunning(ctx, rt, st, cname)
+}
+
+// startViaLaunch brings up the container agent-free (keepalive_only) and then
+// launches sandbox-setup.py as a separate process over it. Used when the
+// backend implements runtime.ProcessLauncher (currently Docker only).
+//
+// Ordering that matters:
+//  1. Patch runtime-config.json with keepalive_only:true BEFORE Create, so the
+//     entrypoint reads it on first boot and takes the holder branch.
+//  2. Create + Start (box comes up on the sleep-infinity holder).
+//  3. Launch sandbox-setup.py — it reads /run/secrets and writes the
+//     .secrets-consumed marker itself.
+//  4. waitForSecretsConsumed AFTER Launch, so the marker is written by the
+//     launched runner before the host removes the secrets dir.
+func startViaLaunch(ctx context.Context, rt runtime.Backend, launcher runtime.ProcessLauncher, st *state.State, cname string, instanceCfg runtime.InstanceConfig, markerPath string, hasSecrets bool) error {
+	if err := patchKeepaliveOnly(st.SandboxDir, true); err != nil {
+		return fmt.Errorf("patch keepalive_only: %w", err)
+	}
+
 	if err := rt.Create(ctx, instanceCfg); err != nil {
 		return gvisorStartHint(st.Isolation, err)
 	}
-
 	if err := rt.Start(ctx, cname); err != nil {
 		return fmt.Errorf("start instance: %w", gvisorStartHint(st.Isolation, err))
 	}
 
+	proc, err := launcher.Launch(ctx, cname, runtime.ProcSpec{
+		Argv:  []string{"python3", "/yoloai/bin/sandbox-setup.py", "docker"},
+		User:  "yoloai",
+		Cwd:   OverlayOrResolvedMountPath(st.Workdir),
+		Env:   []string{"HOME=/home/yoloai", "YOLOAI_DIR=/yoloai"},
+		TTY:   false,
+		Stdin: false,
+	})
+	if err != nil {
+		return fmt.Errorf("launch session-runner: %w", err)
+	}
+	// Drain the runner's streams so the Docker multiplexing goroutine does not
+	// block. The runner logs to its own files; stdout/stderr here are discarded.
+	streams := proc.Streams()
+	if streams.Stdout != nil {
+		go io.Copy(io.Discard, streams.Stdout) //nolint:errcheck // best-effort drain
+	}
+	if streams.Stderr != nil {
+		go io.Copy(io.Discard, streams.Stderr) //nolint:errcheck // best-effort drain
+	}
+
+	// The secrets marker is now written by the launched runner, not the
+	// entrypoint — so we wait here, after Launch, not after Start.
+	if hasSecrets {
+		waitForSecretsConsumed(markerPath, effectiveSecretsConsumedTimeout(rt.Descriptor()))
+	}
+	return nil
+}
+
+// startLegacy is the original bring-up path for backends without
+// runtime.ProcessLauncher: create the instance, start it, and wait for the
+// entrypoint (which runs sandbox-setup.py inline) to consume secrets.
+// No keepalive_only patch; the agent is welded into the entrypoint as before.
+func startLegacy(ctx context.Context, rt runtime.Backend, st *state.State, cname string, instanceCfg runtime.InstanceConfig, markerPath string, hasSecrets bool) error {
+	if err := rt.Create(ctx, instanceCfg); err != nil {
+		return gvisorStartHint(st.Isolation, err)
+	}
+	if err := rt.Start(ctx, cname); err != nil {
+		return fmt.Errorf("start instance: %w", gvisorStartHint(st.Isolation, err))
+	}
 	// Wait for the entrypoint to signal it has read /run/secrets before the
 	// caller removes the host-side secrets temp dir. A fixed sleep used to
 	// guard this, but it raced on slow-booting backends (Kata VM via
@@ -102,8 +181,31 @@ func buildAndStart(ctx context.Context, rt runtime.Backend, st *state.State, mnt
 	if hasSecrets {
 		waitForSecretsConsumed(markerPath, effectiveSecretsConsumedTimeout(rt.Descriptor()))
 	}
+	return nil
+}
 
-	return verifyInstanceRunning(ctx, rt, st, cname)
+// patchKeepaliveOnly reads runtime-config.json in sandboxDir, sets (or clears)
+// the keepalive_only field, and writes it back atomically. Called before
+// rt.Create so the entrypoint reads the updated config on first boot.
+func patchKeepaliveOnly(sandboxDir string, keepalive bool) error {
+	configPath := filepath.Join(sandboxDir, store.RuntimeConfigFile)
+	data, err := os.ReadFile(configPath) //nolint:gosec // path is sandbox-controlled
+	if err != nil {
+		return fmt.Errorf("read runtime-config.json: %w", err)
+	}
+	var cfg runtimeconfig.ContainerConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return fmt.Errorf("parse runtime-config.json: %w", err)
+	}
+	cfg.KeepaliveOnly = keepalive
+	updated, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal runtime-config.json: %w", err)
+	}
+	if err := fileutil.WriteFile(configPath, updated, 0600); err != nil {
+		return fmt.Errorf("write runtime-config.json: %w", err)
+	}
+	return nil
 }
 
 // buildInstanceConfig constructs the runtime.InstanceConfig from sandbox state.

@@ -419,9 +419,17 @@ def main():
             log_error("mount.shared_error", "mount --make-shared / failed",
                       exit_code=e.returncode, stderr=e.stderr.decode(errors="replace").strip())
 
+    keepalive = cfg.get("keepalive_only")
+
     remap_uid(cfg, running_as_root)
-    read_secrets()
-    signal_secrets_consumed(yoloai_dir)
+    if not keepalive:
+        # In keepalive_only mode the entrypoint must NOT read secrets or write the
+        # consumed marker — the launched session-runner (sandbox-setup.py) does
+        # both itself, and the host waits for the marker before removing the
+        # ephemeral secrets dir. Writing it here first would cause the host to
+        # remove the dir before the runner has read /run/secrets.
+        read_secrets()
+        signal_secrets_consumed(yoloai_dir)
 
     # Suppress browser-open attempts inside the sandbox.
     os.environ.setdefault("BROWSER", "true")
@@ -431,12 +439,11 @@ def main():
     apply_overlays(cfg, yoloai_dir)
     run_setup_commands(cfg)
 
-    if cfg.get("keepalive_only"):
-        # S2 carve: agent-free substrate bring-up. Secrets have already landed
-        # in the environment above (read_secrets + signal_secrets_consumed ran
-        # as normal); they are harmless here — the real secrets re-home is done
-        # by envsetup in S2c and later. tini (PID 1) reaps and forwards SIGTERM
-        # to sleep, so `docker stop` works cleanly.
+    if keepalive:
+        # S3 carve: agent-free substrate bring-up. The session-runner is launched
+        # over this holder via runtime.ProcessLauncher; it reads /run/secrets and
+        # writes the consumed marker itself. tini (PID 1) reaps and forwards
+        # SIGTERM to sleep, so `docker stop` works cleanly.
         log_info("entrypoint.keepalive_only", "box up on neutral keep-alive; no agent launched")
 
     # Flush and close the log before exec (fd will be closed by exec).
