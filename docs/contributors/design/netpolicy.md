@@ -43,10 +43,12 @@ network logic out of the backends.
    - **Works:** `container` / `container-privileged` (docker/podman), `vm` / `vm-enhanced` (containerd-Kata,
      tart-VM, apple-VM) — all run the in-sandbox iptables path. *(Podman-on-macOS: the kernel lacks `xt_set`, so
      ipset fails and the code falls back to per-IP iptables rules — verified; a degraded-but-working path.)*
-   - **Cannot (silent no-op), already hard-rejected in shipped code:** `container-enhanced` (gVisor/runsc) —
-     gVisor's userspace netstack ignores in-sandbox iptables; `IsolationEnforcesInSandboxIptables` returns false
-     and `buildInstanceConfig` **refuses `isolated + container-enhanced` at create**. This existing reject must
-     become a **first-class part of netpolicy's capability model**, not an ad-hoc create-time guard.
+   - **Cannot (silent no-op), already hard-rejected in shipped code:** `container-enhanced` (gVisor/runsc).
+     *Precisely* (verified online 2026-06-24): gVisor's userspace netstack lacks the iptables **NAT table**
+     (`gvisor#170`, open since 2018) and **`ipset`/`xt_set`**, with only partial filter-table support — so
+     yoloai's **ipset-based** OUTPUT default-deny does not reliably apply. `IsolationEnforcesInSandboxIptables`
+     returns false and `buildInstanceConfig` **refuses `isolated + container-enhanced` at create**. This existing
+     reject must become a **first-class part of netpolicy's capability model**, not an ad-hoc create-time guard.
    - **`isolated` not supported at all:** seatbelt/tart (no in-sandbox iptables) — but see the verified
      `none`-holds note below; their *deny-all* path differs from their *allowlist* gap.
    `egress-proxy` needs a host-side interception point — *potentially broader* — and may **solve seatbelt/tart's

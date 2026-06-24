@@ -46,7 +46,9 @@ container runs, from `{agent-declared shapes + caller-supplied values + the asse
    envsetup establishes the honest baseline (D63: caller `Env` + `SecretsStagingDir`) and **seams the
    committed-future secure model** without building it now. The structural room:
    - the credential-staging mechanism must **not assume** "stage plaintext files into a bind-mounted dir" is
-     the only path — a future secure path (a broker, ephemeral injection, or no-host-creds-at-all) must slot in;
+     the only path — a future secure path (a broker, ephemeral injection, or no-host-creds-at-all) must slot in.
+     **This includes the in-container *read* side** (D92): today 4+ backend consumers hard-read plaintext files
+     at `/run/secrets`; the seam must lift that assumption too, or it's drawn one layer too high;
    - the host-config seed must be able to become **opt-in / filtered** rather than wholesale-copy (DF39).
 
 ## What envsetup stages
@@ -74,7 +76,10 @@ container runs, from `{agent-declared shapes + caller-supplied values + the asse
 - **Ordering is a contract, not an accident.** The stages have a hard happens-before: substrate provision →
   **seed `ABC`** → **append `DEF`** (the Context stage appends to the *seeded* file — "append, don't clobber");
   settings patch the seeded `settings.json`; the staged agent-config artifact must exist before the session
-  `Launch`'s in-container monitor reads it. Pin this pipeline order.
+  `Launch`'s in-container monitor reads it. Pin this pipeline order. **The artifact's location is conveyed by
+  convention** (D92): the agent layer compiles its path into the neutral `ProcSpec` (an arg or env var) so the
+  in-container session process + monitor find it — the artifact is produced (agent), staged (envsetup), and
+  read (in-container) by three parties, so its path must be an explicit contract, not an implicit default.
 - **Atomicity / failure.** Staging happens **before** the neutral container runs, so a *partial* stage (some
   secrets written, settings patched, context appended, then a failure) must **not** let the box boot against
   half-staged contents — staging is **fail-closed + cleaned up** (don't launch; remove the partial secrets dir).

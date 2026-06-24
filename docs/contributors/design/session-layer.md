@@ -155,8 +155,15 @@ default.
 **The trust prompt is a fresh-*environment* event, not a restart event.** Claude's folder-trust lives in the
 persisted `~/.claude`, keyed to a stable workdir path — a *first-encounter-of-this-folder* event. In-place
 restart never triggers it; stop/start doesn't either. DF13's dialog-on-restart was a symptom of
-restart-as-stop_start; under this model it dissolves. Belt-and-suspenders hardening: pre-trust the workdir at
+restart-as-stop_start; under this model it **should dissolve** — but DF13 itself notes it needs a reproduction,
+so *verify with a smoke repro at Shape*, don't assume. Belt-and-suspenders hardening: pre-trust the workdir at
 create.
+
+**Two further lifecycle legs the carve must preserve** (beyond restart/stop-start/create): **in-place `reset`**
+(the rsync workdir re-sync while the agent keeps running — container backends; shells out to host `rsync`) and
+**suspend/resume** (tart VM, cap-gated per D84). Both re-materialize or preserve the session under the same
+"re-open-env-never-process" principle; neither introduces new session state, but the Shape must keep them
+working through the carve.
 
 ## Security — the one-way trust valve
 
@@ -209,6 +216,14 @@ is a host process.)
 - **Teardown of the relocated session.** For container/VM backends the broker+monitor die with the box; for
   **seatbelt** they are host processes that must be reaped on stop/destroy (already done via `killByPID`/pgrep
   — preserve it through the carve; this is *not* the DF40 issue, which is terminal-corruption, not a leak).
+- **Conformance coverage.** The carve multiplies the `Launch`/relaunch error surface;
+  [DF18](findings-unresolved.md) already records that dead-daemon-mid-op / image-missing / overlay error paths
+  are unhit by the conformance suite. The suite must grow to cover the new `Substrate.Launch`/`Process.Wait` and
+  relaunch error branches at Shape.
+
+*(Minor consistency note: tier-3 "exit=done" spans both the Stream `SessionKind` and the no-`IOSession` `-p`
+path — both have the **agent** as the substrate-tracked process. §6 derives it from the Stream kind; the `-p`
+path is the same principle without an `IOSession`. Cosmetic, not a contradiction.)*
 
 ## Implementation notes (spec-time to-dos)
 

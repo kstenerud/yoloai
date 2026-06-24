@@ -154,11 +154,19 @@ become *its* records (moving out of a substrate-private package).
 
 ## Open items / findings
 
+- **D85-vs-D87 layout is *not* a contradiction** (clarified, D92): D85 describes separate records
+  (`environment.json`/`agent.json`/`copyflow.json`); §2's `Handle`/`Sub(name)` membrane deliberately hides
+  "separate file vs section of a big one" from components, so the physical layout is an intentional Shape-time
+  deferral, not a conflict.
+- **The first registered migration step *is* D85's `v2→v3` split** (the agent fields move out of
+  `environment.json`) — and it is a **redistribution** step (root-owned, cross-section, runs before content
+  steps). It's the canonical first test of the migration registry; name it as such at Shape.
+- **DF37 — partly satisfied:** verified the lock primitive already uses **`flock`** (`internal/locking/flock.go`),
+  and the **sacred version field + `ErrTooNew` ratchet** are already live (`Environment.Version` + `migrate()`).
+  Remaining: add the **`fsync(temp) → rename → fsync(dir)`** durability dance to atomic writes; the doc-per-domain
+  split + raw-JSON migration registry are still to build.
 - **DF36** — detect the data dir's filesystem and **warn/refuse on a network FS** (advisory locking is
   unreliable on NFS/SMB → corruption; SQLite is *worse* there, so this isn't a JSON-vs-SQLite escape).
-- **DF37** — file-locking hardening: confirm `store/lock_unix.go` uses **`flock`, not `fcntl`** (the
-  silent-corruption footgun), and add the **`fsync(temp) → rename → fsync(dir)`** durability dance to
-  atomic writes.
 - **Home/name of the helper** — reframe `store` (the shared lock already lives there) vs a new
   `internal/record`/`internal/persist`. Now low-stakes (it's behind the `Handle` interface). Decide at
   Shape time.
