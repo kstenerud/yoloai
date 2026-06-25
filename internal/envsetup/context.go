@@ -1,7 +1,7 @@
-// ABOUTME: Generates sandbox context file and per-agent reference files.
-// ABOUTME: Context describes the sandbox environment (dirs, network, resources)
-// ABOUTME: so AI agents understand their constraints without trial and error.
-package create
+// ABOUTME: Assembles and delivers the sandbox context (the DEF) — a markdown
+// ABOUTME: description of the environment + the file-exchange protocol — into the
+// ABOUTME: agent's native context file. Agent-agnostic: keyed on EnvSpec.ContextFile.
+package envsetup
 
 import (
 	"fmt"
@@ -10,8 +10,6 @@ import (
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/fileutil"
-
-	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/store"
 )
@@ -156,8 +154,10 @@ func writeDir(b *strings.Builder, mountPath, hostPath string, mode store.DirMode
 }
 
 // WriteContextFiles writes the sandbox context file and optional per-agent
-// instruction file into the sandbox directory.
-func WriteContextFiles(sandboxDir string, meta *store.Environment, agentDef *agent.Definition) error {
+// instruction file into the sandbox directory. The agent's native context
+// filename comes from EnvSpec.ContextFile (compiled at the orchestrator
+// boundary), keeping this assembler agent-agnostic.
+func WriteContextFiles(sandboxDir string, meta *store.Environment, spec EnvSpec) error {
 	content := GenerateContext(sandboxDir, meta)
 
 	// Write context.md at sandbox root (reference copy)
@@ -167,10 +167,10 @@ func WriteContextFiles(sandboxDir string, meta *store.Environment, agentDef *age
 	}
 
 	// Write full context inline into the agent's native instruction file
-	if agentDef.ContextFile != "" && agentDef.StateDir != "" {
-		refPath := filepath.Join(sandboxDir, store.AgentRuntimeDir, agentDef.ContextFile)
+	if spec.ContextFile != "" && spec.HasStateDir {
+		refPath := filepath.Join(sandboxDir, store.AgentRuntimeDir, spec.ContextFile)
 		if err := fileutil.WriteFile(refPath, []byte(content), 0600); err != nil {
-			return fmt.Errorf("write agent context file %s: %w", agentDef.ContextFile, err)
+			return fmt.Errorf("write agent context file %s: %w", spec.ContextFile, err)
 		}
 
 		// Append the yoloAI file-exchange Q&A protocol to the agent's context
@@ -196,15 +196,15 @@ func WriteContextFiles(sandboxDir string, meta *store.Environment, agentDef *age
 			"and wait. The question will be seen and answered by an external agent or user.\n"
 		f, err := fileutil.OpenFile(refPath, os.O_APPEND|os.O_WRONLY, 0600) //nolint:gosec // path is from sandbox dir, controlled by yoloai
 		if err != nil {
-			return fmt.Errorf("open agent context file %s for append: %w", agentDef.ContextFile, err)
+			return fmt.Errorf("open agent context file %s for append: %w", spec.ContextFile, err)
 		}
 		_, writeErr := f.WriteString(qa)
 		closeErr := f.Close()
 		if writeErr != nil {
-			return fmt.Errorf("append Q&A protocol to %s: %w", agentDef.ContextFile, writeErr)
+			return fmt.Errorf("append Q&A protocol to %s: %w", spec.ContextFile, writeErr)
 		}
 		if closeErr != nil {
-			return fmt.Errorf("close agent context file %s: %w", agentDef.ContextFile, closeErr)
+			return fmt.Errorf("close agent context file %s: %w", spec.ContextFile, closeErr)
 		}
 	}
 

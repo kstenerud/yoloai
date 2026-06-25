@@ -24,6 +24,7 @@ func BuildEnvSpec(def *agent.Definition) envsetup.EnvSpec {
 		StateRelPath:           def.StateRelPath(),
 		HasStateDir:            def.StateDir != "",
 		AgentFilesExclude:      def.AgentFilesExclude,
+		ContextFile:            def.ContextFile,
 		SettingsPatches:        settingsPatches(def),
 		ShortLivedOAuthWarning: def.ShortLivedOAuthWarning,
 	}

@@ -27,6 +27,11 @@ type EnvSpec struct {
 	// AgentFilesExclude are globs skipped when copying agent_files (string form).
 	AgentFilesExclude []string
 
+	// ContextFile is the agent's native instruction filename (e.g. "CLAUDE.md")
+	// that the assembled sandbox context (the DEF) is written into; "" when the
+	// agent reads no native context file. Used with HasStateDir to gate delivery.
+	ContextFile string
+
 	// SettingsPatches are the resolved settings.json mutations to apply. For a
 	// normal agent this is one entry targeting the agent-runtime dir; for the
 	// shell agent the compiler expands it to one entry per real agent targeting

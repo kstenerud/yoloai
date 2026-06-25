@@ -1,5 +1,5 @@
 // ABOUTME: Tests for sandbox context file generation and writing.
-package create
+package envsetup
 
 import (
 	"os"
@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
 	_ "github.com/kstenerud/yoloai/internal/runtime/tart" // registers tart descriptor for VMRuntimeDir test
 	"github.com/kstenerud/yoloai/internal/store"
@@ -206,13 +205,9 @@ func TestWriteContextFiles_WritesContextAndRef(t *testing.T) {
 			Mode:      "copy",
 		}},
 	}
-	agentDef := &agent.Definition{
-		Type:        "claude",
-		StateDir:    "/home/yoloai/.claude/",
-		ContextFile: "CLAUDE.md",
-	}
+	spec := EnvSpec{ContextFile: "CLAUDE.md", HasStateDir: true}
 
-	if err := WriteContextFiles(sandboxDir, meta, agentDef); err != nil {
+	if err := WriteContextFiles(sandboxDir, meta, spec); err != nil {
 		t.Fatalf("WriteContextFiles: %v", err)
 	}
 
@@ -250,13 +245,9 @@ func TestWriteContextFiles_QAProtocolIsAgentAgnostic(t *testing.T) {
 	meta := &store.Environment{
 		Dirs: []store.DirEnvironment{{HostPath: "/project", MountPath: "/project", Mode: "copy"}},
 	}
-	agentDef := &agent.Definition{
-		Type:        "gemini",
-		StateDir:    "/home/yoloai/.gemini/",
-		ContextFile: "GEMINI.md",
-	}
+	spec := EnvSpec{ContextFile: "GEMINI.md", HasStateDir: true}
 
-	if err := WriteContextFiles(sandboxDir, meta, agentDef); err != nil {
+	if err := WriteContextFiles(sandboxDir, meta, spec); err != nil {
 		t.Fatalf("WriteContextFiles: %v", err)
 	}
 
@@ -285,12 +276,9 @@ func TestWriteContextFiles_NoRefWhenEmpty(t *testing.T) {
 			Mode:      "copy",
 		}},
 	}
-	agentDef := &agent.Definition{
-		Type:     "test",
-		StateDir: "",
-	}
+	spec := EnvSpec{} // no context file, no state dir
 
-	if err := WriteContextFiles(sandboxDir, meta, agentDef); err != nil {
+	if err := WriteContextFiles(sandboxDir, meta, spec); err != nil {
 		t.Fatalf("WriteContextFiles: %v", err)
 	}
 
