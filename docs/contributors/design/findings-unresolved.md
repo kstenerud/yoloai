@@ -267,6 +267,14 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
   `YOLOAI_SECRET_KEYS` env var set in `internal/orchestrator/launch/launch.go` (or wherever E3 injects the
   sentinel into `ProcSpec.Env`). Related: DF41, DF43.
 
+### DF48 — Gemini sandbox auth (api-key-via-file) hits an interactive first-run onboarding/conflict
+
+- **Discovered:** 2026-06-25 · **Workstream:** agent-detection-strategies (Phase A, Gemini)
+- **Severity:** MEDIUM
+- **Disposition:** PARKED
+- **Description:** Gemini CLI 0.47 with `security.auth.selectedType = "gemini-api-key"` stores the API key in `~/.gemini/gemini-credentials.json` (the old `oauth_creds.json` renamed). Seeding that file lets Gemini authenticate ("Authenticated with gemini-api-key") but Gemini then shows an interactive first-run **auth-method selection menu** and a **"delete or rename this file to resolve the issue"** prompt, so it never reaches its input and no turn runs non-interactively. yoloai only seeds 3 of the ~8 `~/.gemini/` state files (missing `projects.json`, `installation_id`, `state.json`, `trustedFolders.json`), the likely cause of the re-onboarding. Blocks driving a real Gemini turn in the sandbox — which blocks **live-fire** verification of the Gemini detection hook (the hook *config* + *command* are verified independently). Needs a focused fix: seed enough Gemini state to complete onboarding, or bypass the menu. Affects real Gemini users too, not just testing.
+- **Pointer:** `internal/agent/agent.go` (gemini `SeedFiles`); the detection hook itself is `injectGeminiHook` (verified separately).
+
 ## Policy origin
 
 Established in [architecture-remediation.md](../archive/plans/architecture-remediation.md) and inherited by [layering-refactor.md](../archive/plans/layering-refactor.md).

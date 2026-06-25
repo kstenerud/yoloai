@@ -200,7 +200,11 @@ var agents = map[string]*Definition{
 		PromptMode:     PromptModeInteractive,
 		APIKeyEnvVars:  []string{"GEMINI_API_KEY"},
 		SeedFiles: []SeedFile{
+			// Gemini renamed its OAuth credential file oauth_creds.json →
+			// gemini-credentials.json (current CLI, e.g. 0.47). Seed both: AuthOnly
+			// files are skipped when absent, so this covers old and new CLIs.
 			{HostPath: "~/.gemini/oauth_creds.json", TargetPath: "oauth_creds.json", AuthOnly: true},
+			{HostPath: "~/.gemini/gemini-credentials.json", TargetPath: "gemini-credentials.json", AuthOnly: true},
 			{HostPath: "~/.gemini/google_accounts.json", TargetPath: "google_accounts.json", AuthOnly: true},
 			{HostPath: "~/.gemini/settings.json", TargetPath: "settings.json"},
 		},
@@ -208,6 +212,7 @@ var agents = map[string]*Definition{
 		SubmitSequence: "Enter",
 		StartupDelay:   3 * time.Second,
 		Idle: IdleSupport{
+			Hook:            true,
 			ReadyPattern:    "Type your message",
 			ContextSignal:   true,
 			WchanApplicable: true,
@@ -221,7 +226,7 @@ var agents = map[string]*Definition{
 		},
 		NetworkAllowlist:  []string{"generativelanguage.googleapis.com", "cloudcode-pa.googleapis.com", "oauth2.googleapis.com"},
 		ContextFile:       "GEMINI.md",
-		AgentFilesExclude: []string{"logs/", "oauth_creds.json", "google_accounts.json"},
+		AgentFilesExclude: []string{"logs/", "oauth_creds.json", "gemini-credentials.json", "google_accounts.json"},
 		ApplySettings: func(s map[string]any) {
 			// Preserve existing security settings (e.g. auth.selectedType) while
 			// disabling folder trust — the container is already sandboxed.
@@ -231,6 +236,9 @@ var agents = map[string]*Definition{
 			}
 			security["folderTrust"] = map[string]any{"enabled": false}
 			s["security"] = security
+			// Native turn-completion detection: BeforeAgent → active, AfterAgent
+			// → idle (Gemini CLI >= v0.26.0). Makes Gemini hook-authoritative.
+			injectGeminiHook(s)
 		},
 	},
 	"opencode": {
@@ -461,6 +469,38 @@ const statusIdleCommand = `printf '{"ts":"%s","level":"info","event":"hook.idle"
 // (PreToolUse and UserPromptSubmit hooks). This ensures the title updates from
 // "> name" back to "name" as soon as a new prompt is submitted or a tool is called.
 const statusActiveCommand = `printf '{"ts":"%s","level":"info","event":"hook.active","msg":"agent hook: active","status":"active"}\n' "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" >> "${YOLOAI_DIR:-/yoloai}/logs/agent-hooks.jsonl" && printf '{"schema_version":1,"status":"active","exit_code":null,"timestamp":%d}\n' "$(date +%s)" > "${YOLOAI_DIR:-/yoloai}/agent-status.json"`
+
+// geminiActiveCommand / geminiIdleCommand reuse the shared status writers but
+// also emit an empty JSON object on stdout: Gemini parses a hook's stdout as JSON
+// and mandates "no plain text" — "{}" means "continue, take no action", so the
+// status write is the only side effect. The status-writer payload itself is
+// completion's (D89); only the trailing stdout contract is Gemini-specific.
+const geminiActiveCommand = statusActiveCommand + ` && printf '{}'`
+const geminiIdleCommand = statusIdleCommand + ` && printf '{}'`
+
+// injectGeminiHook merges Gemini CLI lifecycle hooks into the settings map for
+// status tracking: BeforeAgent → active (a turn started), AfterAgent → idle
+// (turn complete). Mirrors injectIdleHook but uses Gemini's hooks schema (each
+// group carries matcher/sequential) and event names. Requires Gemini CLI
+// >= v0.26.0; preserves any hooks the user configured.
+func injectGeminiHook(settings map[string]any) {
+	hooks, _ := settings["hooks"].(map[string]any)
+	if hooks == nil {
+		hooks = map[string]any{}
+	}
+	group := func(command string) map[string]any {
+		return map[string]any{
+			"matcher":    nil,
+			"sequential": false,
+			"hooks":      []any{map[string]any{"type": "command", "command": command}},
+		}
+	}
+	existingBefore, _ := hooks["BeforeAgent"].([]any)
+	hooks["BeforeAgent"] = append(existingBefore, group(geminiActiveCommand))
+	existingAfter, _ := hooks["AfterAgent"].([]any)
+	hooks["AfterAgent"] = append(existingAfter, group(geminiIdleCommand))
+	settings["hooks"] = hooks
+}
 
 // injectIdleHook merges hooks into Claude Code's settings map for status tracking.
 // Stop → idle (turn complete), PreToolUse + UserPromptSubmit → running (work started).

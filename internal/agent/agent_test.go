@@ -81,16 +81,19 @@ func TestGetAgent_Gemini(t *testing.T) {
 	assert.Contains(t, def.HeadlessCmd, "gemini -p")
 	assert.Equal(t, PromptModeInteractive, def.PromptMode)
 	assert.Equal(t, []string{"GEMINI_API_KEY"}, def.APIKeyEnvVars)
-	require.Len(t, def.SeedFiles, 3)
+	require.Len(t, def.SeedFiles, 4)
 	assert.Equal(t, "~/.gemini/oauth_creds.json", def.SeedFiles[0].HostPath)
 	assert.Equal(t, "oauth_creds.json", def.SeedFiles[0].TargetPath)
 	assert.True(t, def.SeedFiles[0].AuthOnly)
-	assert.Equal(t, "~/.gemini/google_accounts.json", def.SeedFiles[1].HostPath)
-	assert.Equal(t, "google_accounts.json", def.SeedFiles[1].TargetPath)
+	assert.Equal(t, "~/.gemini/gemini-credentials.json", def.SeedFiles[1].HostPath)
+	assert.Equal(t, "gemini-credentials.json", def.SeedFiles[1].TargetPath)
 	assert.True(t, def.SeedFiles[1].AuthOnly)
-	assert.Equal(t, "~/.gemini/settings.json", def.SeedFiles[2].HostPath)
-	assert.Equal(t, "settings.json", def.SeedFiles[2].TargetPath)
-	assert.False(t, def.SeedFiles[2].AuthOnly)
+	assert.Equal(t, "~/.gemini/google_accounts.json", def.SeedFiles[2].HostPath)
+	assert.Equal(t, "google_accounts.json", def.SeedFiles[2].TargetPath)
+	assert.True(t, def.SeedFiles[2].AuthOnly)
+	assert.Equal(t, "~/.gemini/settings.json", def.SeedFiles[3].HostPath)
+	assert.Equal(t, "settings.json", def.SeedFiles[3].TargetPath)
+	assert.False(t, def.SeedFiles[3].AuthOnly)
 	assert.Equal(t, "/home/yoloai/.gemini/", def.StateDir)
 	assert.Equal(t, "Enter", def.SubmitSequence)
 	assert.Equal(t, 3*time.Second, def.StartupDelay)
@@ -339,6 +342,7 @@ func TestApplySettings_ClaudePreservesExistingHooks(t *testing.T) {
 func TestApplySettings_Gemini(t *testing.T) {
 	def := GetAgent("gemini")
 	require.NotNil(t, def)
+	require.True(t, def.Idle.Hook, "gemini should be hook-authoritative")
 	require.NotNil(t, def.ApplySettings, "gemini should have ApplySettings set")
 
 	settings := map[string]any{}
@@ -349,6 +353,12 @@ func TestApplySettings_Gemini(t *testing.T) {
 	folderTrust, ok := security["folderTrust"].(map[string]any)
 	require.True(t, ok, "folderTrust should be a map")
 	assert.Equal(t, false, folderTrust["enabled"])
+
+	// Native turn-completion hooks injected: BeforeAgent → active, AfterAgent → idle.
+	hooks, ok := settings["hooks"].(map[string]any)
+	require.True(t, ok, "hooks should be a map")
+	assert.NotNil(t, hooks["BeforeAgent"], "BeforeAgent hook should be set")
+	assert.NotNil(t, hooks["AfterAgent"], "AfterAgent hook should be set")
 }
 
 func TestApplySettings_GeminiPreservesExistingSecurityFields(t *testing.T) {
