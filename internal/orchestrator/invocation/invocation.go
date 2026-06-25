@@ -216,14 +216,17 @@ func ResolveIdleMode(idle agent.IdleSupport) string {
 
 // ResolveFallToShell decides whether the agent launches under the fall-to-shell
 // wrapper (agent-run.sh, D96 / agent-detection.md). The wrapper records an
-// authoritative `done` on agent exit and keeps the pane alive as a shell, which
-// is only safe while nothing re-derives active/idle from that idle shell. As of
-// Phase 3 the heuristic monitor honors a wrapper-written `done` (it no longer
-// clobbers it by reading the idle shell) and get_agent_pid descends through the
-// wrapper to the real agent — so fall-to-shell is safe for BOTH
-// hook-authoritative and heuristic agents. Every persistent-PTY agent gets it.
-// The per-agent gate is retained for the Phase-4 cleanup that removes it; for now
-// it is universally on.
+// authoritative `done` on agent exit and keeps the pane alive as a shell; the
+// heuristic monitor honors that `done` and get_agent_pid descends through the
+// wrapper, so it is safe for both hook-authoritative and heuristic agents.
+//
+// It is the **persistent-PTY gate**: fall-to-shell only makes sense for a
+// persistent interactive session that has a terminal to drop into (session-layer.md
+// gates it on lifetime × SessionKind — one-shot/`-p` and Stream sessions exit=done
+// with no shell). Every agent yoloAI launches today runs as a persistent PTY in the
+// tmux pane, so the gate is universally on. When the session-layer carve lands the
+// `lifetime` axis, that axis drives this gate (off for one-shot); the field stays as
+// its home rather than being removed and re-added.
 func ResolveFallToShell(_ agent.IdleSupport) bool {
 	return true
 }

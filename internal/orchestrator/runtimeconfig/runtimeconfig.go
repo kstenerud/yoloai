@@ -80,10 +80,10 @@ type ContainerConfig struct {
 	// FallToShell, when true, launches the agent under the fall-to-shell wrapper
 	// (agent-run.sh, D96): on agent exit the wrapper records an authoritative
 	// `done` and keeps the pane alive as an interactive shell instead of letting
-	// it die. Resolved per-agent (on for hook-authoritative; off for heuristic
-	// until the monitor honors a wrapper-written `done`). Absent → off
-	// (back-compat for sandboxes created before the wrapper). Additive optional
-	// field → no SchemaVersion bump.
+	// it die. The persistent-PTY gate (invocation.ResolveFallToShell): on for every
+	// agent today, eventually driven off for one-shot sessions by the session-layer
+	// `lifetime` axis. Absent → off (back-compat for sandboxes created before the
+	// wrapper). Additive optional field → no SchemaVersion bump.
 	FallToShell bool `json:"fall_to_shell,omitempty"`
 	// ResumeCmd is the fall-to-shell resume command (D96 DD4): the agent's launch
 	// command plus its native resume flag (e.g. Claude "… --continue"), read by

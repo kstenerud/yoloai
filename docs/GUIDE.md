@@ -449,6 +449,31 @@ yoloai reset task --restart -a  # restart and auto-attach
 yoloai reset task --debug       # debug entrypoint issues on restart
 ```
 
+### When the agent exits (fall-to-shell)
+
+When an agent process exits inside a sandbox — you quit it (e.g. Claude's
+`/exit`), or it ends its run — the pane does **not** die. It drops to an
+interactive shell in the workdir, and the sandbox status becomes `done` (so
+`yoloai wait` and status reporting still work). The shell keeps the box usable:
+inspect what the agent changed, run `git`, or relaunch the agent.
+
+A hint in the pane points at **`yoloai-resume`** — run it from that shell to
+relaunch the agent in place:
+
+```bash
+yoloai-resume   # run inside the fall-to-shell shell (yoloai attach <name> to get there)
+```
+
+- For agents with native conversation resume (Claude → `--continue`),
+  `yoloai-resume` continues the **prior conversation**.
+- For agents without native resume, it starts a **fresh** session and says so —
+  it never claims a resume that didn't happen.
+
+This is distinct from the host-side `yoloai restart --resume` / `yoloai start
+--resume` (above), which relaunch from *outside* the sandbox and re-feed the
+original prompt. `yoloai-resume` runs *inside* the shell you're already in and,
+where supported, resumes the live conversation rather than re-feeding a prompt.
+
 ### Reviewing changes
 
 ```bash

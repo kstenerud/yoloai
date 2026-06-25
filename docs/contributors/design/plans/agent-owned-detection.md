@@ -168,13 +168,25 @@ consumer — consistent with the reserved-seam decision (D96 refinement) and the
 goal of *this* plan (fall-to-shell + resume + don't-clobber-done) is met by the
 honor-done latch + the pid descent above.
 
-**Phase 4 — Unify + own.** All agents use the uniform external-sibling runner
-spawned/owned per the new model; reshape `status-monitor.py` ownership
-accordingly; remove the gate (DD5) once the matrix is green. *Docker checkpoint:*
-the full agent matrix (Claude + at least one heuristic agent) — active/idle/done
-transitions at the right moments, fall-to-shell + resume, restart-brings-it-back
-(DF46), no blip, no stale idle. Re-run the existing smoke (`scripts/smoke_test.py`)
-where applicable.
+**Phase 4 — polish + docs. ✅ DONE 2026-06-25.** Reduced from the original
+"unify + own" because the strategy formalization (the bulk of the original Phase 4)
+was deferred to [agent-detection-strategies.md](agent-detection-strategies.md).
+What landed: (a) the `FallToShell` gate **reframed** from "rollout gate" to the
+**persistent-PTY gate** (always-on now; the session-layer `lifetime` axis drives it
+off for one-shot later) — kept, not removed, since session-layer.md gates
+fall-to-shell on lifetime × SessionKind; (b) **user docs** — GUIDE.md "When the
+agent exits (fall-to-shell)" section covering the behavior + `yoloai-resume`,
+distinguished from the host-side `--resume`. *No `BREAKING-CHANGES.md` entry:* the
+public contract is preserved — `status=done` still fires on agent exit (now
+wrapper-written with the agent's real exit code), and pane-death was never a public
+API. *Regression guard:* `scripts/smoke_test.py` requires `ANTHROPIC_API_KEY`/
+`CLAUDE_CODE_OAUTH_TOKEN` **in the environment**, which isn't set here (Claude auth
+is the seeded credentials file), so the full harness couldn't run; substituted an
+**auth-free deterministic guard** with the synthetic `idle` agent (heuristic):
+fall-to-shell → `done` (exit 137) + live bash pane + honor-done held across cycles
+→ `yoloai-resume` fresh relaunch → status recovered. Combined with the Phase-1–3
+real-Docker checkpoints (hook + heuristic, real-auth conversation resume), the
+lifecycle is covered.
 
 ## Docker testing strategy
 
