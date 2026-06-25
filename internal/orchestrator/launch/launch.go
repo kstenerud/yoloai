@@ -20,6 +20,7 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
+	"github.com/kstenerud/yoloai/internal/netpolicy"
 	mountspkg "github.com/kstenerud/yoloai/internal/orchestrator/mounts"
 	"github.com/kstenerud/yoloai/internal/orchestrator/provision"
 	"github.com/kstenerud/yoloai/internal/orchestrator/runtimeconfig"
@@ -220,23 +221,11 @@ func buildInstanceConfig(desc runtime.BackendDescriptor, st *state.State, mnts [
 	caps := desc.Capabilities
 
 	if st.NetworkMode == "isolated" {
-		if !caps.NetworkIsolation {
-			return runtime.InstanceConfig{}, fmt.Errorf("--network=isolated is not supported by the %s backend", desc.Type)
-		}
-		// Per-isolation-mode check: some OCI runtimes (notably gVisor / runsc
-		// for --isolation=container-enhanced) do not honor iptables rules
-		// applied inside the sandbox, so the in-sandbox enforcement is a
-		// silent no-op. Refuse rather than lie. See
-		// docs/contributors/design/network-isolation.md for the redesign that removes this
-		// limitation by moving enforcement to the host netns.
-		if !runtime.IsolationEnforcesInSandboxIptables(st.Isolation) {
-			return runtime.InstanceConfig{}, fmt.Errorf(
-				"--network=isolated cannot be enforced with --isolation=%s: "+
-					"gVisor's userspace netstack ignores in-sandbox iptables rules. "+
-					"Use --isolation=container (default) or a VM-based isolation mode "+
-					"(--isolation=vm or --isolation=vm-enhanced) instead",
-				st.Isolation,
-			)
+		// Whether the allowlist can actually be enforced is a netpolicy decision:
+		// it composes the backend's capability with the isolation mode's in-sandbox
+		// iptables honoring (gVisor refuses). See netpolicy.CanEnforce.
+		if ok, reason := netpolicy.CanEnforce(netpolicy.StrategyIPFilter, caps, desc.Type, st.Isolation); !ok {
+			return runtime.InstanceConfig{}, errors.New(reason)
 		}
 	}
 
