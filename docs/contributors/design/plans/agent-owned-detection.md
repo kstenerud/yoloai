@@ -138,13 +138,35 @@ fall-to-shell shell, run `yoloai-resume`; verify the agent resumes the *prior*
 conversation (claude `--continue`), detection re-establishes, and status goes
 `done`→`active`/`idle` correctly (no stale-idle clobber, no blip).
 
-**Phase 3 — DetectionSpec + honor wrapper-done in the runner; extend to a
-heuristic agent.** Formalize `DetectionSpec` (DD2) compiled at the boundary;
-make the detection runner latch a wrapper-written `done` and not clobber it with
-the idle shell (DD1). Enable fall-to-shell for a heuristic agent (e.g. Gemini or
-Aider). *Docker checkpoint:* heuristic-agent fall-to-shell → `done` (NOT `idle`
-from the shell); resume works; AND a hook-authoritative run still passes all
-Phase-1/2 checks (no cross-mode regression).
+**Phase 3 — honor wrapper-done in the heuristic runner; extend to heuristic
+agents. ✅ DONE 2026-06-25 (verified real-Docker).** Made the detection runner
+latch a wrapper-written `done` and not clobber it with the idle shell (DD1), and
+fixed the process-detection prerequisite the heuristic path needs under the
+wrapper: `get_agent_pid` now **descends through the wrapper to the real agent**
+(the wrapper sits in `do_wait`, which `ACTIVE_WCHANS` would misread as a
+permanently-active agent). `ResolveFallToShell` now enables fall-to-shell for all
+agents (hook + heuristic). *Docker checkpoint (passed):* gemini (heuristic)
+agent-only exit → wrapper wrote `done` exit_code 137, pane alive as bash, and the
+heuristic monitor **held `done` across many cycles** (no idle clobber); the pid
+descent returned the gemini node (86), not the wrapper sh (71); `yoloai-resume`
+relaunched fresh ("no native resume") and status recovered; a claude
+(hook-authoritative) run still passed turn→idle→`/exit`→`done`→fall-to-shell with
+no clobber (no cross-mode regression).
+
+*Note — `DetectionSpec` formalization deferred (not a scope cut).* The plan
+originally bundled formalizing a compiled `DetectionSpec` (gathering
+`idle_mode`/`detectors`/`fall_to_shell`/`resume_cmd` into one strategy-shaped
+spec) into this phase. The verified research
+([research/agent-callbacks.md](../research/agent-callbacks.md)) showed the
+strategy abstraction's real consumer is **wiring the vendor turn-completion
+callbacks** (Codex/Gemini/OpenCode/Aider) — which is a *separate* effort, not in
+this fall-to-shell/resume plan. Building the `DetectionSpec`/strategy framework
+now, before any second strategy is wired, is premature abstraction (YAGNI). It is
+deferred to land **with** the vendor-callback wiring, where it has a real second
+consumer — consistent with the reserved-seam decision (D96 refinement) and the
+"strategy-first so the enum need not be widened later" intent. The functional
+goal of *this* plan (fall-to-shell + resume + don't-clobber-done) is met by the
+honor-done latch + the pid descent above.
 
 **Phase 4 — Unify + own.** All agents use the uniform external-sibling runner
 spawned/owned per the new model; reshape `status-monitor.py` ownership

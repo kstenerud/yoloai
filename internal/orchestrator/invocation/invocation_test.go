@@ -158,11 +158,11 @@ func TestResolveFallToShell_HookAgentEnabled(t *testing.T) {
 	assert.True(t, ResolveFallToShell(agent.IdleSupport{Hook: true}))
 }
 
-func TestResolveFallToShell_HeuristicAgentDisabled(t *testing.T) {
-	// Heuristic agents stay on the exec-the-agent path until the runner honors a
-	// wrapper-written `done` (Phase 3) — otherwise the monitor would read the
-	// idle fall-to-shell shell as `idle` and clobber `done`.
-	assert.False(t, ResolveFallToShell(agent.IdleSupport{ReadyPattern: "> $", WchanApplicable: true}))
+func TestResolveFallToShell_HeuristicAgentEnabled(t *testing.T) {
+	// As of Phase 3 heuristic agents also get fall-to-shell: the monitor honors a
+	// wrapper-written `done` (no longer clobbering it with the idle shell) and
+	// get_agent_pid descends through the wrapper to the real agent.
+	assert.True(t, ResolveFallToShell(agent.IdleSupport{ReadyPattern: "> $", WchanApplicable: true}))
 }
 
 func TestResolveResumeCommand_AppendsFlag(t *testing.T) {

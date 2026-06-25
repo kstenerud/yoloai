@@ -217,14 +217,15 @@ func ResolveIdleMode(idle agent.IdleSupport) string {
 // ResolveFallToShell decides whether the agent launches under the fall-to-shell
 // wrapper (agent-run.sh, D96 / agent-detection.md). The wrapper records an
 // authoritative `done` on agent exit and keeps the pane alive as a shell, which
-// is only safe while nothing re-derives active/idle from that idle shell. In
-// hook-authoritative mode the monitor runs no heuristics while the pane lives, so
-// the wrapper's `done` survives untouched — enabled. Heuristic mode would clobber
-// it (the monitor reads the idle shell as `idle`) until the runner learns to
-// honor a wrapper-written `done` (Phase 3) — disabled for now. This is the
-// rollout gate; it widens to heuristic agents once that honor-change lands.
-func ResolveFallToShell(idle agent.IdleSupport) bool {
-	return idle.Hook
+// is only safe while nothing re-derives active/idle from that idle shell. As of
+// Phase 3 the heuristic monitor honors a wrapper-written `done` (it no longer
+// clobbers it by reading the idle shell) and get_agent_pid descends through the
+// wrapper to the real agent — so fall-to-shell is safe for BOTH
+// hook-authoritative and heuristic agents. Every persistent-PTY agent gets it.
+// The per-agent gate is retained for the Phase-4 cleanup that removes it; for now
+// it is universally on.
+func ResolveFallToShell(_ agent.IdleSupport) bool {
+	return true
 }
 
 // ReadPrompt reads the prompt from --prompt, --prompt-file, or stdin ("-").

@@ -474,16 +474,71 @@ def build_detectors(config, tmux_sock=None, yoloai_dir=None):
     return detectors
 
 
+def _run(cmd):
+    """Run a command and return stripped stdout, or "" on any failure."""
+    try:
+        return subprocess.check_output(
+            cmd, text=True, timeout=5, stderr=subprocess.DEVNULL).strip()
+    except (subprocess.SubprocessError, OSError):
+        return ""
+
+
+def proc_is_wrapper(pid):
+    """True if PID is the fall-to-shell wrapper (agent-run.sh, D96).
+
+    Under fall-to-shell the wrapper is the pane process and runs the agent as a
+    CHILD (so it can regain the pane and write `done` on agent exit). The
+    process-based detectors (wchan) must therefore inspect the child, not the
+    wrapper — the wrapper sits in `do_wait` waiting for the child, which
+    ACTIVE_WCHANS would misread as a permanently-active agent.
+    """
+    if IS_LINUX:
+        try:
+            cmdline = Path(f"/proc/{pid}/cmdline").read_text()
+        except OSError:
+            return False
+        return "agent-run.sh" in cmdline
+    return "agent-run.sh" in _run(["ps", "-o", "command=", "-p", str(pid)])
+
+
+def first_child_pid(pid):
+    """Return the first child PID of PID, or None."""
+    if IS_LINUX:
+        try:
+            children = Path(f"/proc/{pid}/task/{pid}/children").read_text().split()
+        except OSError:
+            return None
+        candidates = children
+    else:
+        candidates = _run(["pgrep", "-P", str(pid)]).split()
+    for c in candidates:
+        try:
+            return int(c)
+        except ValueError:
+            continue
+    return None
+
+
 def get_agent_pid(tmux_sock=None):
-    """Get the PID of the agent process running in the tmux pane."""
+    """Get the PID of the agent process running in the tmux pane.
+
+    When the pane process is the fall-to-shell wrapper (agent-run.sh), descend
+    one level to the agent it launched as a child, so process-based detectors
+    inspect the agent and not the wrapper's `wait()` (D96 Phase 3).
+    """
     output = tmux_cmd(["list-panes", "-t", "main", "-F", "#{pane_pid}"], tmux_sock)
     pid_str = output.strip()
-    if pid_str:
-        try:
-            return int(pid_str)
-        except ValueError:
-            pass
-    return None
+    if not pid_str:
+        return None
+    try:
+        pane_pid = int(pid_str)
+    except ValueError:
+        return None
+    if proc_is_wrapper(pane_pid):
+        child = first_child_pid(pane_pid)
+        if child is not None:
+            return child
+    return pane_pid
 
 
 _tmux_fail_count = 0  # consecutive cycles where tmux returned no usable data
@@ -682,8 +737,29 @@ def run_monitor(config_path, status_file, tmux_sock=None):
             time.sleep(POLL_INTERVAL)
             continue
 
-        # Pane is alive again: a new agent has been launched into it (respawn).
-        # Clear the done latch and fall through to normal active/idle detection.
+        # Honor a wrapper-written `done` (D96 Phase 3). Under fall-to-shell the
+        # wrapper records `done` on agent exit but keeps the pane alive as a
+        # shell, so check_pane_dead stays False. We must NOT run the detector
+        # stack against that idle shell — it would clobber `done` with
+        # `idle`/`active`, masquerading an exited agent as waiting. The on-disk
+        # `done` IS the latch: detectors only ever write active/idle, so a `done`
+        # with a live pane can only be the wrapper's. yoloai-resume clears it
+        # (seeds `idle`) when it relaunches the agent, at which point detection
+        # resumes below.
+        if read_status_value(status_file) == "done":
+            if not in_done:
+                in_done = True
+                hold_status = "done"
+                hold_active_count = 0
+                stability = {}
+                update_title(sandbox_name)
+                debug("wrapper-done latched; detection paused until resume")
+            time.sleep(POLL_INTERVAL)
+            continue
+
+        # Pane is alive and not in the wrapper-done latch: a new agent has been
+        # launched into it (initial launch or respawn). Clear the done latch and
+        # fall through to normal active/idle detection.
         in_done = False
 
         # 2. Get agent PID
