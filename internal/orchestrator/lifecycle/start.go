@@ -15,6 +15,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/envsetup"
 	"github.com/kstenerud/yoloai/internal/fileutil"
+	"github.com/kstenerud/yoloai/internal/orchestrator/envspec"
 	"github.com/kstenerud/yoloai/internal/orchestrator/invocation"
 	"github.com/kstenerud/yoloai/internal/orchestrator/launch"
 	"github.com/kstenerud/yoloai/internal/orchestrator/state"
@@ -214,11 +215,12 @@ func handleSuspendedResume(ctx context.Context, d state.Deps, cname, name string
 	}
 
 	// Refresh credentials and settings from host (handles token refresh between sessions).
-	hasAPIKey := envsetup.HasAnyAPIKey(agentDef, d.Layout)
-	if _, err := envsetup.CopySeedFiles(agentDef, sandboxDir, hasAPIKey, d.Layout.HomeDir, d.Layout); err != nil {
+	spec := envspec.BuildEnvSpec(agentDef)
+	hasAPIKey := envsetup.HasAnyAPIKey(spec, d.Layout)
+	if _, err := envsetup.CopySeedFiles(spec, sandboxDir, hasAPIKey, d.Layout.HomeDir, d.Layout); err != nil {
 		return fmt.Errorf("refresh seed files: %w", err)
 	}
-	if err := envsetup.EnsureContainerSettings(agentDef, sandboxDir, meta.Isolation); err != nil {
+	if err := envsetup.EnsureContainerSettings(sandboxDir, spec.SettingsPatches); err != nil {
 		return fmt.Errorf("ensure container settings: %w", err)
 	}
 

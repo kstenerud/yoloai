@@ -11,7 +11,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/store"
@@ -29,7 +28,7 @@ import (
 // homeDir is used to expand leading "~" in configured paths.
 // env is the curated interpolation map for ${VAR} expansion; pass
 // layout.Env().EnvForConfigInterpolation().
-func CopyAgentFiles(agentDef *agent.Definition, sandboxDir string, agentFiles *config.AgentFilesConfig, homeDir string, env map[string]string) error {
+func CopyAgentFiles(spec EnvSpec, sandboxDir string, agentFiles *config.AgentFilesConfig, homeDir string, env map[string]string) error {
 	if agentFiles == nil {
 		return nil
 	}
@@ -40,7 +39,7 @@ func CopyAgentFiles(agentDef *agent.Definition, sandboxDir string, agentFiles *c
 	}
 
 	if expanded.IsStringForm() {
-		return copyAgentFilesFromBaseDir(agentDef, sandboxDir, expanded.BaseDir)
+		return copyAgentFilesFromBaseDir(spec, sandboxDir, expanded.BaseDir)
 	}
 
 	return copyAgentFilesList(sandboxDir, expanded.Files)
@@ -50,8 +49,8 @@ func CopyAgentFiles(agentDef *agent.Definition, sandboxDir string, agentFiles *c
 // directory. For example, if baseDir is "/home/user" and the agent is Claude,
 // it copies from /home/user/.claude/ into agent-runtime/.
 // Applies AgentFilesExclude patterns and skips files that already exist.
-func copyAgentFilesFromBaseDir(agentDef *agent.Definition, sandboxDir, baseDir string) error {
-	relPath := agentDef.StateRelPath()
+func copyAgentFilesFromBaseDir(spec EnvSpec, sandboxDir, baseDir string) error {
+	relPath := spec.StateRelPath
 	if relPath == "" {
 		return nil // agent has no state dir (aider, test, shell)
 	}
@@ -80,7 +79,7 @@ func copyAgentFilesFromBaseDir(agentDef *agent.Definition, sandboxDir, baseDir s
 		}
 
 		// Check exclusion patterns
-		if shouldExclude(rel, d.IsDir(), agentDef.AgentFilesExclude) {
+		if shouldExclude(rel, d.IsDir(), spec.AgentFilesExclude) {
 			if d.IsDir() {
 				return filepath.SkipDir
 			}

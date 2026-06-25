@@ -16,6 +16,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/git"
 	"github.com/kstenerud/yoloai/internal/netpolicy"
+	"github.com/kstenerud/yoloai/internal/orchestrator/envspec"
 	"github.com/kstenerud/yoloai/internal/orchestrator/launch"
 	"github.com/kstenerud/yoloai/internal/orchestrator/runtimeconfig"
 	"github.com/kstenerud/yoloai/internal/orchestrator/state"
@@ -87,7 +88,8 @@ func defaultDirModes(workdir *DirSpec, auxDirs []*DirSpec) {
 
 // checkAuthAndLocalhostWarnings performs auth checks and localhost URL warnings.
 func checkAuthAndLocalhostWarnings(d state.Deps, agentDef *agent.Definition, mergedEnv map[string]string, cfgModel string, opts Options) error {
-	hasAPIKey := envsetup.HasAnyAPIKey(agentDef, d.Layout)
+	spec := envspec.BuildEnvSpec(agentDef)
+	hasAPIKey := envsetup.HasAnyAPIKey(spec, d.Layout)
 	hasAuth := envsetup.HasAnyAuthFile(agentDef, d.Layout.HomeDir)
 	hasAuthHint := envsetup.HasAnyAuthHint(agentDef, mergedEnv, d.Layout)
 	if err := checkAgentAuth(agentDef, hasAPIKey, hasAuth, hasAuthHint, outputFor(opts.Output)); err != nil {

@@ -15,24 +15,57 @@ import (
 	"github.com/kstenerud/yoloai/internal/store"
 )
 
+func agentSpec(agentDef *agent.Definition) EnvSpec {
+	sfs := make([]SeedFile, len(agentDef.SeedFiles))
+	for i, sf := range agentDef.SeedFiles {
+		sfs[i] = SeedFile{
+			HostPath:        sf.HostPath,
+			TargetPath:      sf.TargetPath,
+			AuthOnly:        sf.AuthOnly,
+			HomeDir:         sf.HomeDir,
+			KeychainService: sf.KeychainService,
+			OwnerAPIKeys:    sf.OwnerAPIKeys,
+			Executable:      sf.Executable,
+		}
+	}
+	var patches []SettingsPatch
+	if !agentDef.SeedsAllAgents && agentDef.StateDir != "" && agentDef.ApplySettings != nil {
+		patches = []SettingsPatch{{
+			RelDir:  store.AgentRuntimeDir,
+			DirPerm: store.Perms().Dir,
+			Apply:   agentDef.ApplySettings,
+		}}
+	}
+	return EnvSpec{
+		APIKeyEnvVars:          agentDef.APIKeyEnvVars,
+		AuthHintEnvVars:        agentDef.AuthHintEnvVars,
+		SeedFiles:              sfs,
+		StateRelPath:           agentDef.StateRelPath(),
+		HasStateDir:            agentDef.StateDir != "",
+		AgentFilesExclude:      agentDef.AgentFilesExclude,
+		SettingsPatches:        patches,
+		ShortLivedOAuthWarning: agentDef.ShortLivedOAuthWarning,
+	}
+}
+
 // HasAnyAPIKey tests
 
 func TestHasAnyAPIKey_Set(t *testing.T) {
-	agentDef := agent.GetAgent("claude")
+	spec := EnvSpec{APIKeyEnvVars: agent.GetAgent("claude").APIKeyEnvVars}
 	hostEnv := config.Layout{}.WithEnv(map[string]string{"ANTHROPIC_API_KEY": "sk-test-123"})
 
-	assert.True(t, HasAnyAPIKey(agentDef, hostEnv))
+	assert.True(t, HasAnyAPIKey(spec, hostEnv))
 }
 
 func TestHasAnyAPIKey_Unset(t *testing.T) {
-	agentDef := agent.GetAgent("claude")
+	spec := EnvSpec{APIKeyEnvVars: agent.GetAgent("claude").APIKeyEnvVars}
 
-	assert.False(t, HasAnyAPIKey(agentDef, config.Layout{}))
+	assert.False(t, HasAnyAPIKey(spec, config.Layout{}))
 }
 
 func TestHasAnyAPIKey_EmptyList(t *testing.T) {
-	agentDef := agent.GetAgent("test")
-	assert.True(t, HasAnyAPIKey(agentDef, config.Layout{})) // no API key required = always true
+	spec := EnvSpec{}
+	assert.True(t, HasAnyAPIKey(spec, config.Layout{})) // no API key required = always true
 }
 
 // HasAnyAuthFile tests
@@ -220,8 +253,8 @@ func TestCopySeedFiles_CopiesExistingFiles(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "home-seed"), 0750))
 
-	agentDef := agent.GetAgent("claude")
-	copied, err := CopySeedFiles(agentDef, sandboxDir, true, tmpDir, config.Layout{})
+	spec := agentSpec(agent.GetAgent("claude"))
+	copied, err := CopySeedFiles(spec, sandboxDir, true, tmpDir, config.Layout{})
 	require.NoError(t, err)
 	assert.False(t, copied) // copied only tracks auth-only files; settings.json is not auth-only
 
@@ -243,7 +276,7 @@ func TestCopySeedFiles_StatusLineScriptIsExecutable(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "home-seed"), 0750))
 
-	_, err := CopySeedFiles(agent.GetAgent("claude"), sandboxDir, true, tmpDir, config.Layout{})
+	_, err := CopySeedFiles(agentSpec(agent.GetAgent("claude")), sandboxDir, true, tmpDir, config.Layout{})
 	require.NoError(t, err)
 
 	dst := filepath.Join(sandboxDir, store.AgentRuntimeDir, "statusline.sh")
@@ -264,8 +297,7 @@ func TestCopySeedFiles_SkipsAuthWhenAPIKeySet(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "home-seed"), 0750))
 
-	agentDef := agent.GetAgent("claude")
-	_, err := CopySeedFiles(agentDef, sandboxDir, true, tmpDir, config.Layout{}) // hasAPIKey=true
+	_, err := CopySeedFiles(agentSpec(agent.GetAgent("claude")), sandboxDir, true, tmpDir, config.Layout{}) // hasAPIKey=true
 	require.NoError(t, err)
 
 	// Auth-only file should NOT be copied when API key is set
@@ -284,8 +316,7 @@ func TestCopySeedFiles_CopiesAuthWhenNoAPIKey(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "home-seed"), 0750))
 
-	agentDef := agent.GetAgent("claude")
-	copied, err := CopySeedFiles(agentDef, sandboxDir, false, tmpDir, config.Layout{}) // hasAPIKey=false
+	copied, err := CopySeedFiles(agentSpec(agent.GetAgent("claude")), sandboxDir, false, tmpDir, config.Layout{}) // hasAPIKey=false
 	require.NoError(t, err)
 	assert.True(t, copied)
 
@@ -302,8 +333,7 @@ func TestCopySeedFiles_HomeDirFiles(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "home-seed"), 0750))
 
-	agentDef := agent.GetAgent("claude")
-	_, err := CopySeedFiles(agentDef, sandboxDir, true, tmpDir, config.Layout{})
+	_, err := CopySeedFiles(agentSpec(agent.GetAgent("claude")), sandboxDir, true, tmpDir, config.Layout{})
 	require.NoError(t, err)
 
 	// HomeDir=true file should go to home-seed/
@@ -317,8 +347,7 @@ func TestCopySeedFiles_SkipsMissingFiles(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "home-seed"), 0750))
 
-	agentDef := agent.GetAgent("claude")
-	copied, err := CopySeedFiles(agentDef, sandboxDir, true, tmpDir, config.Layout{})
+	copied, err := CopySeedFiles(agentSpec(agent.GetAgent("claude")), sandboxDir, true, tmpDir, config.Layout{})
 	require.NoError(t, err)
 	assert.False(t, copied)
 }
@@ -330,8 +359,6 @@ func TestCopySeedFiles_KeychainFallback(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "home-seed"), 0750))
 
-	agentDef := agent.GetAgent("claude")
-
 	// Override KeychainReader to return credentials
 	origReader := KeychainReader
 	KeychainReader = func(service string) ([]byte, error) {
@@ -342,7 +369,7 @@ func TestCopySeedFiles_KeychainFallback(t *testing.T) {
 	}
 	defer func() { KeychainReader = origReader }()
 
-	copied, err := CopySeedFiles(agentDef, sandboxDir, false, tmpDir, config.Layout{}) // hasAPIKey=false
+	copied, err := CopySeedFiles(agentSpec(agent.GetAgent("claude")), sandboxDir, false, tmpDir, config.Layout{}) // hasAPIKey=false
 	require.NoError(t, err)
 	assert.True(t, copied)
 
@@ -364,8 +391,6 @@ func TestCopySeedFiles_KeychainSkippedWhenFileExists(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "home-seed"), 0750))
 
-	agentDef := agent.GetAgent("claude")
-
 	// Override KeychainReader — should NOT be called since file exists
 	origReader := KeychainReader
 	keychainCalled := false
@@ -375,7 +400,7 @@ func TestCopySeedFiles_KeychainSkippedWhenFileExists(t *testing.T) {
 	}
 	defer func() { KeychainReader = origReader }()
 
-	copied, err := CopySeedFiles(agentDef, sandboxDir, false, tmpDir, config.Layout{})
+	copied, err := CopySeedFiles(agentSpec(agent.GetAgent("claude")), sandboxDir, false, tmpDir, config.Layout{})
 	require.NoError(t, err)
 	assert.True(t, copied)
 	assert.False(t, keychainCalled, "KeychainReader should not be called when file exists")
@@ -393,7 +418,7 @@ func TestEnsureContainerSettings_SetsSkipPermissions(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
 
 	agentDef := agent.GetAgent("claude")
-	require.NoError(t, EnsureContainerSettings(agentDef, sandboxDir, ""))
+	require.NoError(t, EnsureContainerSettings(sandboxDir, agentSpec(agentDef).SettingsPatches))
 
 	settings, err := fileutil.ReadJSONMap(filepath.Join(sandboxDir, store.AgentRuntimeDir, "settings.json"))
 	require.NoError(t, err)
@@ -405,7 +430,7 @@ func TestEnsureContainerSettings_NoopForTestAgent(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
 
 	agentDef := agent.GetAgent("test")
-	require.NoError(t, EnsureContainerSettings(agentDef, sandboxDir, ""))
+	require.NoError(t, EnsureContainerSettings(sandboxDir, agentSpec(agentDef).SettingsPatches))
 
 	// No settings file should be created for test agent
 	assert.NoFileExists(t, filepath.Join(sandboxDir, store.AgentRuntimeDir, "settings.json"))
@@ -420,7 +445,7 @@ func TestEnsureContainerSettings_PreservesExisting(t *testing.T) {
 	require.NoError(t, fileutil.WriteJSONMap(settingsPath, map[string]any{"customKey": "customValue"}))
 
 	agentDef := agent.GetAgent("claude")
-	require.NoError(t, EnsureContainerSettings(agentDef, sandboxDir, ""))
+	require.NoError(t, EnsureContainerSettings(sandboxDir, agentSpec(agentDef).SettingsPatches))
 
 	settings, err := fileutil.ReadJSONMap(settingsPath)
 	require.NoError(t, err)
@@ -433,7 +458,7 @@ func TestEnsureContainerSettings_GeminiDisablesFolderTrust(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
 
 	agentDef := agent.GetAgent("gemini")
-	require.NoError(t, EnsureContainerSettings(agentDef, sandboxDir, ""))
+	require.NoError(t, EnsureContainerSettings(sandboxDir, agentSpec(agentDef).SettingsPatches))
 
 	settings, err := fileutil.ReadJSONMap(filepath.Join(sandboxDir, store.AgentRuntimeDir, "settings.json"))
 	require.NoError(t, err)
@@ -458,7 +483,7 @@ func TestEnsureContainerSettings_GeminiPreservesAuthSettings(t *testing.T) {
 	}))
 
 	agentDef := agent.GetAgent("gemini")
-	require.NoError(t, EnsureContainerSettings(agentDef, sandboxDir, ""))
+	require.NoError(t, EnsureContainerSettings(sandboxDir, agentSpec(agentDef).SettingsPatches))
 
 	settings, err := fileutil.ReadJSONMap(settingsPath)
 	require.NoError(t, err)
@@ -486,7 +511,7 @@ func TestEnsureHomeSeedConfig_SetsInstallMethod(t *testing.T) {
 	}))
 
 	agentDef := agent.GetAgent("claude")
-	require.NoError(t, ensureHomeSeedConfig(agentDef, sandboxDir, "npm-global"))
+	require.NoError(t, ensureHomeSeedConfig(agentSpec(agentDef), sandboxDir, "npm-global"))
 
 	cfg, err := fileutil.ReadJSONMap(filepath.Join(homeSeedDir, ".claude.json"))
 	require.NoError(t, err)
@@ -505,7 +530,7 @@ func TestEnsureHomeSeedConfig_NativeMethodForTart(t *testing.T) {
 	}))
 
 	agentDef := agent.GetAgent("claude")
-	require.NoError(t, ensureHomeSeedConfig(agentDef, sandboxDir, "native"))
+	require.NoError(t, ensureHomeSeedConfig(agentSpec(agentDef), sandboxDir, "native"))
 
 	cfg, err := fileutil.ReadJSONMap(filepath.Join(homeSeedDir, ".claude.json"))
 	require.NoError(t, err)
@@ -518,7 +543,7 @@ func TestEnsureHomeSeedConfig_NoopForTestAgent(t *testing.T) {
 	agentDef := agent.GetAgent("test")
 
 	// Should not error even with no home-seed dir
-	require.NoError(t, ensureHomeSeedConfig(agentDef, sandboxDir, "npm-global"))
+	require.NoError(t, ensureHomeSeedConfig(agentSpec(agentDef), sandboxDir, "npm-global"))
 }
 
 // HasAnyAuthHint tests

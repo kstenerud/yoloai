@@ -16,6 +16,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/envsetup"
 	"github.com/kstenerud/yoloai/internal/fileutil"
+	"github.com/kstenerud/yoloai/internal/orchestrator/envspec"
 	"github.com/kstenerud/yoloai/internal/orchestrator/invocation"
 	"github.com/kstenerud/yoloai/internal/orchestrator/launch"
 	"github.com/kstenerud/yoloai/internal/orchestrator/runtimeconfig"
@@ -43,7 +44,8 @@ func initializeAgentFilesIfNeeded(layout config.Layout, agentDef *agent.Definiti
 	if agentFilesConfig == nil {
 		return nil
 	}
-	if err := envsetup.CopyAgentFiles(agentDef, sandboxDir, agentFilesConfig, layout.HomeDir, layout.Env().EnvForConfigInterpolation()); err != nil {
+	spec := envspec.BuildEnvSpec(agentDef)
+	if err := envsetup.CopyAgentFiles(spec, sandboxDir, agentFilesConfig, layout.HomeDir, layout.Env().EnvForConfigInterpolation()); err != nil {
 		return fmt.Errorf("copy agent files on restart: %w", err)
 	}
 	sbState.AgentFilesInitialized = true
@@ -121,15 +123,16 @@ func recreateContainer(ctx context.Context, d state.Deps, name string, meta *sto
 	sandboxDir := d.Layout.SandboxDir(name)
 
 	// Refresh seed files from host (handles OAuth token refresh between restarts)
-	hasAPIKey := envsetup.HasAnyAPIKey(agentDef, d.Layout)
-	if _, err := envsetup.CopySeedFiles(agentDef, sandboxDir, hasAPIKey, d.Layout.HomeDir, d.Layout); err != nil {
+	spec := envspec.BuildEnvSpec(agentDef)
+	hasAPIKey := envsetup.HasAnyAPIKey(spec, d.Layout)
+	if _, err := envsetup.CopySeedFiles(spec, sandboxDir, hasAPIKey, d.Layout.HomeDir, d.Layout); err != nil {
 		return fmt.Errorf("refresh seed files: %w", err)
 	}
 
 	// Re-apply container settings (copySeedFiles overwrites settings.json
 	// with the host version, which lacks sandbox-specific settings like
 	// skipDangerousModePermissionPrompt)
-	if err := envsetup.EnsureContainerSettings(agentDef, sandboxDir, meta.Isolation); err != nil {
+	if err := envsetup.EnsureContainerSettings(sandboxDir, spec.SettingsPatches); err != nil {
 		return fmt.Errorf("ensure container settings: %w", err)
 	}
 

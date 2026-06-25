@@ -12,7 +12,6 @@ import (
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
-	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/store"
 )
 
@@ -79,11 +78,11 @@ func CreateSecretsDir(agentDef *agent.Definition, configEnv map[string]string, h
 
 // HasAnyAPIKey returns true if any of the agent's required API key env vars are
 // present in hostEnv (the caller-supplied host-environment snapshot).
-func HasAnyAPIKey(agentDef *agent.Definition, hostEnv config.Layout) bool {
-	if len(agentDef.APIKeyEnvVars) == 0 {
+func HasAnyAPIKey(spec EnvSpec, hostEnv config.Layout) bool {
+	if len(spec.APIKeyEnvVars) == 0 {
 		return true // no API key required
 	}
-	return len(hostEnv.Env().EnvForAgentCredentials(agentDef.APIKeyEnvVars)) > 0
+	return len(hostEnv.Env().EnvForAgentCredentials(spec.APIKeyEnvVars)) > 0
 }
 
 // HasAnyAuthFile returns true if any auth-only seed files exist on disk
@@ -136,12 +135,12 @@ func DescribeSeedAuthFiles(agentDef *agent.Definition) string {
 // others go to agent-runtime/ (mounted at StateDir).
 // Returns true if any files were copied. Skips files that don't exist on the host.
 // homeDir is used for ~ expansion in seed file host paths.
-func CopySeedFiles(agentDef *agent.Definition, sandboxDir string, hasAPIKey bool, homeDir string, hostEnv config.Layout) (bool, error) {
+func CopySeedFiles(spec EnvSpec, sandboxDir string, hasAPIKey bool, homeDir string, hostEnv config.Layout) (bool, error) {
 	copiedAuth := false
 	agentStateDir := filepath.Join(sandboxDir, store.AgentRuntimeDir)
 	homeSeedDir := filepath.Join(sandboxDir, "home-seed")
 
-	for _, sf := range agentDef.SeedFiles {
+	for _, sf := range spec.SeedFiles {
 		if shouldSkipSeedFile(sf, hasAPIKey, hostEnv) {
 			continue
 		}
@@ -185,7 +184,7 @@ func CopySeedFiles(agentDef *agent.Definition, sandboxDir string, hasAPIKey bool
 }
 
 // shouldSkipSeedFile returns true if the seed file should be skipped.
-func shouldSkipSeedFile(sf agent.SeedFile, hasAPIKey bool, hostEnv config.Layout) bool {
+func shouldSkipSeedFile(sf SeedFile, hasAPIKey bool, hostEnv config.Layout) bool {
 	if !sf.AuthOnly {
 		return false
 	}
@@ -199,7 +198,7 @@ func shouldSkipSeedFile(sf agent.SeedFile, hasAPIKey bool, hostEnv config.Layout
 // loadSeedFileData reads data from the host file or keychain for a seed file.
 // Returns (data, true, nil) if found, (nil, false, nil) if not found, or (nil, false, err) on error.
 // homeDir is used for ~ expansion in seed file host paths.
-func loadSeedFileData(sf agent.SeedFile, homeDir string) ([]byte, bool, error) {
+func loadSeedFileData(sf SeedFile, homeDir string) ([]byte, bool, error) {
 	hostPath := config.ExpandTilde(sf.HostPath, homeDir)
 	if _, err := os.Stat(hostPath); err == nil {
 		data, readErr := os.ReadFile(hostPath) //nolint:gosec // G304: path is from agent definition, not user input
@@ -217,55 +216,21 @@ func loadSeedFileData(sf agent.SeedFile, homeDir string) ([]byte, bool, error) {
 	return nil, false, nil
 }
 
-// EnsureContainerSettings merges required container settings into agent-state/settings.json.
-// Agent-specific adjustments are driven by each agent's ApplySettings field.
-// Shell agents (SeedsAllAgents=true) apply each real agent's settings into
-// home-seed subdirectories instead.
-func EnsureContainerSettings(agentDef *agent.Definition, sandboxDir string, isolation runtime.IsolationMode) error {
-	if agentDef.SeedsAllAgents {
-		return ensureShellContainerSettings(sandboxDir, isolation)
-	}
-
-	if agentDef.StateDir == "" || agentDef.ApplySettings == nil {
-		return nil
-	}
-
-	perms := store.Perms()
-
-	agentStateDir := filepath.Join(sandboxDir, store.AgentRuntimeDir)
-	if err := fileutil.MkdirAllPerm(agentStateDir, perms.Dir); err != nil {
-		return fmt.Errorf("create %s dir: %w", store.AgentRuntimeDir, err)
-	}
-	settingsPath := filepath.Join(agentStateDir, "settings.json")
-
-	settings, err := fileutil.ReadJSONMap(settingsPath)
-	if err != nil {
-		return err
-	}
-	agentDef.ApplySettings(settings)
-	return fileutil.WriteJSONMap(settingsPath, settings)
-}
-
-// ensureShellContainerSettings applies each real agent's container settings
-// to its home-seed subdirectory (e.g., home-seed/.claude/settings.json).
-func ensureShellContainerSettings(sandboxDir string, _ runtime.IsolationMode) error {
-	for _, name := range agent.RealAgents() {
-		def := agent.GetAgent(name)
-		if def.StateDir == "" || def.ApplySettings == nil {
-			continue
+// EnsureContainerSettings applies each resolved settings patch to its
+// settings.json (creating the dir as needed). The patch list is compiled
+// upstream (envspec.BuildEnvSpec); an empty list is a no-op.
+func EnsureContainerSettings(sandboxDir string, patches []SettingsPatch) error {
+	for _, p := range patches {
+		dir := filepath.Join(sandboxDir, p.RelDir)
+		if err := fileutil.MkdirAllPerm(dir, p.DirPerm); err != nil {
+			return fmt.Errorf("create settings dir %s: %w", p.RelDir, err)
 		}
-		dirBase := filepath.Base(def.StateDir)
-		dirPath := filepath.Join(sandboxDir, "home-seed", dirBase)
-		settingsPath := filepath.Join(dirPath, "settings.json")
-
-		if err := fileutil.MkdirAll(dirPath, 0750); err != nil {
-			return fmt.Errorf("create %s dir: %w", dirBase, err)
-		}
+		settingsPath := filepath.Join(dir, "settings.json")
 		settings, err := fileutil.ReadJSONMap(settingsPath)
 		if err != nil {
 			return err
 		}
-		def.ApplySettings(settings)
+		p.Apply(settings)
 		if err := fileutil.WriteJSONMap(settingsPath, settings); err != nil {
 			return err
 		}
@@ -280,10 +245,10 @@ func ensureShellContainerSettings(sandboxDir string, _ runtime.IsolationMode) er
 // "native"; when the backend installs via npm, a mismatch makes Claude Code
 // emit spurious warnings about a missing ~/.local/bin/claude and PATH
 // misconfiguration. Writing the backend's real method keeps them consistent.
-func ensureHomeSeedConfig(agentDef *agent.Definition, sandboxDir, installMethod string) error {
+func ensureHomeSeedConfig(spec EnvSpec, sandboxDir, installMethod string) error {
 	// Only relevant for agents that seed .claude.json into HomeDir
 	var hasHomeSeed bool
-	for _, sf := range agentDef.SeedFiles {
+	for _, sf := range spec.SeedFiles {
 		if sf.HomeDir && sf.TargetPath == ".claude.json" {
 			hasHomeSeed = true
 			break
@@ -310,40 +275,33 @@ func ensureHomeSeedConfig(agentDef *agent.Definition, sandboxDir, installMethod 
 // homeDir is used for ~ expansion in seed file host paths.
 // hostEnv supplies both the agent-credential lookups (HasAnyAPIKey/CopySeedFiles)
 // and, via its curated interpolation map, the ${VAR} expansion in CopyAgentFiles.
-func SeedSandbox(rt runtime.Backend, agentDef *agent.Definition, sandboxDir string, isolation runtime.IsolationMode, agentFiles *config.AgentFilesConfig, homeDir string, hostEnv config.Layout, output io.Writer) (agentFilesInitialized bool, err error) {
-	// Copy seed files into agent-state (config, OAuth credentials, etc.)
-	hasAPIKey := HasAnyAPIKey(agentDef, hostEnv)
-	copiedAuth, err := CopySeedFiles(agentDef, sandboxDir, hasAPIKey, homeDir, hostEnv)
+func SeedSandbox(spec EnvSpec, sandboxDir string, agentFiles *config.AgentFilesConfig, homeDir string, hostEnv config.Layout, provisionedByBackend bool, installMethod string, output io.Writer) (agentFilesInitialized bool, err error) {
+	hasAPIKey := HasAnyAPIKey(spec, hostEnv)
+	copiedAuth, err := CopySeedFiles(spec, sandboxDir, hasAPIKey, homeDir, hostEnv)
 	if err != nil {
 		return false, fmt.Errorf("copy seed files: %w", err)
 	}
 
-	// Warn when an agent is using short-lived OAuth credentials instead of a long-lived token.
-	if agentDef.ShortLivedOAuthWarning && copiedAuth {
+	if spec.ShortLivedOAuthWarning && copiedAuth {
 		fmt.Fprintln(output, "Warning: using OAuth credentials from ~/.claude/.credentials.json")                         //nolint:errcheck // best-effort warning
 		fmt.Fprintln(output, "  These tokens expire after ~30 minutes and may fail in long-running sessions.")            //nolint:errcheck // best-effort warning
 		fmt.Fprintln(output, "  For reliable auth, run 'claude setup-token' and export CLAUDE_CODE_OAUTH_TOKEN instead.") //nolint:errcheck // best-effort warning
 		fmt.Fprintln(output)                                                                                              //nolint:errcheck // best-effort warning
 	}
 
-	// Ensure container-required settings (e.g., skip bypass permissions prompt)
-	if err := EnsureContainerSettings(agentDef, sandboxDir, isolation); err != nil {
+	if err := EnsureContainerSettings(sandboxDir, spec.SettingsPatches); err != nil {
 		return false, fmt.Errorf("ensure container settings: %w", err)
 	}
 
-	// Copy agent_files (user-configured agent config files)
-	if agentFiles != nil && agentDef.StateDir != "" {
-		if err := CopyAgentFiles(agentDef, sandboxDir, agentFiles, homeDir, hostEnv.Env().EnvForConfigInterpolation()); err != nil {
+	if agentFiles != nil && spec.HasStateDir {
+		if err := CopyAgentFiles(spec, sandboxDir, agentFiles, homeDir, hostEnv.Env().EnvForConfigInterpolation()); err != nil {
 			return false, fmt.Errorf("copy agent files: %w", err)
 		}
 		agentFilesInitialized = true
 	}
 
-	// Fix install method in seeded .claude.json so it matches how this backend
-	// installed Claude Code. Skipped for process-based backends that run the
-	// host's native agent installation.
-	if desc := rt.Descriptor(); desc.AgentProvisionedByBackend {
-		if err := ensureHomeSeedConfig(agentDef, sandboxDir, desc.AgentInstallMethod); err != nil {
+	if provisionedByBackend {
+		if err := ensureHomeSeedConfig(spec, sandboxDir, installMethod); err != nil {
 			return false, fmt.Errorf("ensure home seed config: %w", err)
 		}
 	}
