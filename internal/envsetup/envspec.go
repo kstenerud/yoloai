@@ -8,8 +8,14 @@ import "os"
 // staging inputs. The orchestrator compiles it from an agent.Definition
 // (see internal/orchestrator/envspec); envsetup itself never imports agent.
 type EnvSpec struct {
-	// Credentials — consumed by the secrets/auth-detection stage (not yet
-	// migrated to EnvSpec; populated here for the upcoming step).
+	// APIKeyEnvVars / AuthHintEnvVars name the agent's credential env vars,
+	// consumed by the secrets/auth-detection stage. Reserved seam (D95,
+	// docs/contributors/design/secure-secrets.md): credential *delivery* must not
+	// calcify around "the value goes into the agent's env" — the committed future
+	// is a host-side egress-proxy broker that holds/injects/refreshes credentials
+	// so the live credential never enters the sandbox. Consumers here must not
+	// assume the agent always holds the key; a brokered posture and a
+	// refresh-capable CredentialSource slot in additively when the proxy is built.
 	APIKeyEnvVars   []string
 	AuthHintEnvVars []string
 
