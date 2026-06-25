@@ -1,6 +1,6 @@
 // ABOUTME: Filesystem permission values for sandbox host-side directories and files
 // ABOUTME: that the container process accesses; uniform (owner-only) across isolation modes.
-package state
+package store
 
 import "os"
 

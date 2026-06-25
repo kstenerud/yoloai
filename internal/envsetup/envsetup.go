@@ -12,7 +12,6 @@ import (
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
-	"github.com/kstenerud/yoloai/internal/orchestrator/state"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/store"
 )
@@ -38,7 +37,7 @@ func CreateSecretsDir(agentDef *agent.Definition, configEnv map[string]string, h
 	// Owner-only perms: the container runs as the invoking host UID (the staging
 	// owner) in every isolation mode, so 0700/0600 is both readable by the
 	// sandbox and denied to other local users — see DF20.
-	perms := state.Perms()
+	perms := store.Perms()
 
 	if err := os.Chmod(tmpDir, perms.SecretsDir); err != nil {
 		_ = os.RemoveAll(tmpDir)
@@ -231,7 +230,7 @@ func EnsureContainerSettings(agentDef *agent.Definition, sandboxDir string, isol
 		return nil
 	}
 
-	perms := state.Perms()
+	perms := store.Perms()
 
 	agentStateDir := filepath.Join(sandboxDir, store.AgentRuntimeDir)
 	if err := fileutil.MkdirAllPerm(agentStateDir, perms.Dir); err != nil {

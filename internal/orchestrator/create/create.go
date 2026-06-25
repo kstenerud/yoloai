@@ -246,7 +246,7 @@ func prepareSandboxState(ctx context.Context, d state.Deps, opts Options) (*stat
 	}
 
 	// Phase 2: Create directory structure and seed sandbox.
-	perms := state.Perms()
+	perms := store.Perms()
 	agentFilesInitialized, err := createAndSeedSandbox(ctx, d, sandboxDir, agentDef, ri.profile, perms, outputFor(opts.Output))
 	if err != nil {
 		return nil, err
@@ -334,7 +334,7 @@ func resolveProfileAndArchetype(ctx context.Context, d state.Deps, opts *Options
 }
 
 // createAndSeedSandbox creates directory structure and seeds the sandbox with agent files.
-func createAndSeedSandbox(ctx context.Context, d state.Deps, sandboxDir string, agentDef *agent.Definition, pr *profileResult, perms state.IsolationPerms, output io.Writer) (bool, error) {
+func createAndSeedSandbox(ctx context.Context, d state.Deps, sandboxDir string, agentDef *agent.Definition, pr *profileResult, perms store.IsolationPerms, output io.Writer) (bool, error) {
 	_ = ctx // reserved for future use
 	if err := createSandboxDirs(sandboxDir, perms); err != nil {
 		return false, err
@@ -519,7 +519,7 @@ func replaceSandboxIfNeeded(ctx context.Context, d state.Deps, opts Options, san
 }
 
 // createSandboxDirs creates the directory structure for a new sandbox.
-func createSandboxDirs(sandboxDir string, perms state.IsolationPerms) error {
+func createSandboxDirs(sandboxDir string, perms store.IsolationPerms) error {
 	for _, dir := range []string{
 		sandboxDir,
 		filepath.Join(sandboxDir, "home-seed"),
@@ -691,7 +691,7 @@ func buildEnvironment(opts Options, pr *profileResult, workdir *DirSpec, baselin
 
 // writeStatFiles writes all state files for the new sandbox (meta, sandbox-state,
 // prompt, logs, agent-status, runtime-config, context).
-func writeStatFiles(sandboxDir string, meta *store.Environment, agentDef *agent.Definition, agentFilesInitialized bool, hasPrompt bool, promptText string, configData []byte, perms state.IsolationPerms) error {
+func writeStatFiles(sandboxDir string, meta *store.Environment, agentDef *agent.Definition, agentFilesInitialized bool, hasPrompt bool, promptText string, configData []byte, perms store.IsolationPerms) error {
 	if err := store.SaveEnvironment(sandboxDir, meta); err != nil {
 		return err
 	}
