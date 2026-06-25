@@ -217,7 +217,7 @@ func TestBuildAndStart_LaunchPath(t *testing.T) {
 	rt.markerPath = markerPath
 
 	st := makeTestState(dir)
-	err := buildAndStart(context.Background(), rt, st, nil, nil, true /*hasSecrets*/)
+	err := buildAndStart(context.Background(), rt, st, nil, nil, true /*hasSecrets*/, nil)
 	require.NoError(t, err)
 
 	// keepalive_only must be set in the on-disk config.
@@ -277,7 +277,7 @@ func TestBuildAndStart_LegacyPath(t *testing.T) {
 
 	st := makeTestState(dir)
 	// No secrets in this test — simplifies the legacy path (no marker wait).
-	err := buildAndStart(context.Background(), rt, st, nil, nil, false /*hasSecrets*/)
+	err := buildAndStart(context.Background(), rt, st, nil, nil, false /*hasSecrets*/, nil)
 	require.NoError(t, err)
 
 	// keepalive_only must NOT have been set.
@@ -313,7 +313,7 @@ func TestBuildAndStart_LaunchPath_NoSecrets(t *testing.T) {
 	rt.markerPath = ""
 
 	st := makeTestState(dir)
-	err := buildAndStart(context.Background(), rt, st, nil, nil, false /*hasSecrets*/)
+	err := buildAndStart(context.Background(), rt, st, nil, nil, false /*hasSecrets*/, nil)
 	require.NoError(t, err)
 
 	assert.True(t, readRuntimeConfigKeepalive(t, dir),

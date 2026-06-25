@@ -14,6 +14,23 @@ import (
 	"github.com/kstenerud/yoloai/internal/store"
 )
 
+// ResolveSecretEnv returns the resolved secret key->value map for a sandbox:
+// the profile/config env (configEnv) overlaid by the agent's declared
+// credential keys resolved against the caller's host-env snapshot (the latter
+// wins on conflict). Returns a nil/empty map when there is nothing to deliver.
+// This is the single source of "what the secrets are"; the transport (staged
+// files for the legacy path, process env for the Launch path) is the caller's.
+func ResolveSecretEnv(spec EnvSpec, configEnv map[string]string, hostEnv config.Layout) map[string]string {
+	out := make(map[string]string, len(configEnv))
+	for k, v := range configEnv {
+		out[k] = v
+	}
+	for k, v := range hostEnv.Env().EnvForAgentCredentials(append(spec.APIKeyEnvVars, spec.AuthHintEnvVars...)) {
+		out[k] = v
+	}
+	return out
+}
+
 // CreateSecretsDir creates a temp directory with one file per env var / API key.
 // configEnv (the ${VAR}-expanded profile env) is written first; the agent's API-key
 // and auth-hint values are then resolved from hostEnv (the caller-supplied host
@@ -23,7 +40,8 @@ import (
 // an embedder can stage a principal's plaintext credentials on a per-principal tmpfs.
 // Returns empty string if nothing was written.
 func CreateSecretsDir(spec EnvSpec, configEnv map[string]string, hostEnv config.Layout, stagingRoot string) (string, error) {
-	if len(spec.APIKeyEnvVars) == 0 && len(spec.AuthHintEnvVars) == 0 && len(configEnv) == 0 {
+	m := ResolveSecretEnv(spec, configEnv, hostEnv)
+	if len(m) == 0 {
 		return "", nil
 	}
 
@@ -45,31 +63,11 @@ func CreateSecretsDir(spec EnvSpec, configEnv map[string]string, hostEnv config.
 	// process (running as that user) can read it.
 	_ = fileutil.ChownIfSudo(tmpDir) //nolint:errcheck // best-effort; individual files are already chowned by WriteFilePerm
 
-	wrote := false
-
-	// Write config (profile) env vars first.
-	for k, v := range configEnv {
+	for k, v := range m {
 		if err := fileutil.WriteFilePerm(filepath.Join(tmpDir, k), []byte(v), perms.SecretsFile); err != nil {
 			_ = os.RemoveAll(tmpDir)
-			return "", fmt.Errorf("write env %s: %w", k, err)
+			return "", fmt.Errorf("write secret %s: %w", k, err)
 		}
-		wrote = true
-	}
-
-	// Write host env values for API keys and auth hints (overwrites config env on
-	// conflict). EnvForAgentCredentials yields the present, non-empty subset of
-	// the agent's declared credential keys from the threaded host-env snapshot.
-	for key, value := range hostEnv.Env().EnvForAgentCredentials(append(spec.APIKeyEnvVars, spec.AuthHintEnvVars...)) {
-		if err := fileutil.WriteFilePerm(filepath.Join(tmpDir, key), []byte(value), perms.SecretsFile); err != nil {
-			_ = os.RemoveAll(tmpDir)
-			return "", fmt.Errorf("write secret %s: %w", key, err)
-		}
-		wrote = true
-	}
-
-	if !wrote {
-		_ = os.RemoveAll(tmpDir)
-		return "", nil
 	}
 
 	return tmpDir, nil

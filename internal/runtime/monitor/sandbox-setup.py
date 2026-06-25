@@ -105,6 +105,23 @@ def read_secrets(secrets_dir, socket=None):
     return secrets
 
 
+def read_secrets_from_env(socket=None):
+    """Build the secrets dict from the env vars named in YOLOAI_SECRET_KEYS.
+
+    The values are already in os.environ (delivered via the launched process's
+    environment); this collects the named subset and mirrors them into the tmux
+    session environment so the agent pane inherits them, exactly as the
+    file-based read_secrets does.
+    """
+    names = [n for n in os.environ.get("YOLOAI_SECRET_KEYS", "").split(",") if n]
+    secrets = {n: os.environ[n] for n in names if n in os.environ}
+    log_info("read_secrets_from_env.done", f"loaded {len(secrets)} secrets from env")
+    if socket:
+        for name, value in secrets.items():
+            tmux("set-environment", "-t", "main", name, value, socket=socket)
+    return secrets
+
+
 def signal_secrets_consumed(yoloai_dir):
     """Touch a host-visible marker after secrets have been read.
 
@@ -251,8 +268,14 @@ class DockerBackend(Backend):
         pass
 
     def read_secrets(self, socket):
-        """Read secrets from /run/secrets (inherited from entrypoint.py)."""
-        return read_secrets("/run/secrets", socket=socket)
+        """Read secrets from env vars named in YOLOAI_SECRET_KEYS.
+
+        On the Launch path secrets arrive in the process environment (ProcSpec.Env);
+        YOLOAI_SECRET_KEYS names which env vars are secrets. Values are already in
+        os.environ — this collects them and mirrors into the tmux session environment
+        so the agent pane inherits them.
+        """
+        return read_secrets_from_env(socket=socket)
 
 
 class TartBackend(Backend):

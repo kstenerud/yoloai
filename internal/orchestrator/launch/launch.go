@@ -14,6 +14,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -53,15 +54,24 @@ func LaunchContainer(ctx context.Context, d state.Deps, st *state.State) error {
 	}
 
 	spec := envspec.BuildEnvSpec(st.Agent)
-	secretsDir, err := envsetup.CreateSecretsDir(spec, envVars, st.Layout, st.Layout.SecretsStagingDir)
-	if err != nil {
-		return fmt.Errorf("create secrets: %w", err)
-	}
-	if secretsDir != "" {
-		defer os.RemoveAll(secretsDir) //nolint:errcheck // best-effort cleanup
+	var secretsDir string
+	var secretEnv map[string]string
+	if _, isLauncher := runtime.LauncherOf(d.Runtime); isLauncher {
+		// Launch path (Docker): deliver secrets via the launched process's env; no host staging, no mount, no marker.
+		secretEnv = envsetup.ResolveSecretEnv(spec, envVars, st.Layout)
+	} else {
+		// Legacy path: stage host files bind-mounted at /run/secrets (unchanged).
+		var err error
+		secretsDir, err = envsetup.CreateSecretsDir(spec, envVars, st.Layout, st.Layout.SecretsStagingDir)
+		if err != nil {
+			return fmt.Errorf("create secrets: %w", err)
+		}
+		if secretsDir != "" {
+			defer os.RemoveAll(secretsDir) //nolint:errcheck // best-effort cleanup
+		}
 	}
 
-	mnts := mountspkg.Build(st, secretsDir)
+	mnts := mountspkg.Build(st, secretsDir) // secretsDir=="" on the launch path -> no /run/secrets mount
 
 	ports, err := parsePortBindings(st.Ports)
 	if err != nil {
@@ -69,19 +79,20 @@ func LaunchContainer(ctx context.Context, d state.Deps, st *state.State) error {
 	}
 	ports = filterAvailablePorts(ports, outputOr(st.Output))
 
-	return buildAndStart(ctx, d.Runtime, st, mnts, ports, secretsDir != "")
+	return buildAndStart(ctx, d.Runtime, st, mnts, ports, secretsDir != "", secretEnv)
 }
 
 // buildAndStart constructs the runtime InstanceConfig from State and
 // starts the instance. hasSecrets indicates whether secrets were injected via
 // a temporary directory that the caller will remove after this call returns.
-// Extracted from launchContainer().
+// secretEnv is the secret map delivered via ProcSpec.Env on the Launch path
+// (nil on the legacy path). Extracted from launchContainer().
 //
 // When the backend implements runtime.ProcessLauncher the box is brought up
 // agent-free (keepalive_only holder) and sandbox-setup.py is launched as a
 // separate process over it — the S3 re-route. Backends without ProcessLauncher
 // follow the legacy path: the agent is welded into the entrypoint as before.
-func buildAndStart(ctx context.Context, rt runtime.Backend, st *state.State, mnts []runtime.MountSpec, ports []runtime.PortMapping, hasSecrets bool) error {
+func buildAndStart(ctx context.Context, rt runtime.Backend, st *state.State, mnts []runtime.MountSpec, ports []runtime.PortMapping, hasSecrets bool, secretEnv map[string]string) error {
 	cname := store.InstanceName(st.Layout.Principal, st.Name)
 	instanceCfg, err := buildInstanceConfig(rt.Descriptor(), st, mnts, ports)
 	if err != nil {
@@ -97,7 +108,7 @@ func buildAndStart(ctx context.Context, rt runtime.Backend, st *state.State, mnt
 	}
 
 	if launcher, ok := runtime.LauncherOf(rt); ok {
-		if err := startViaLaunch(ctx, rt, launcher, st, cname, instanceCfg, markerPath, hasSecrets); err != nil {
+		if err := startViaLaunch(ctx, rt, launcher, st, cname, instanceCfg, markerPath, hasSecrets, secretEnv); err != nil {
 			return err
 		}
 	} else {
@@ -120,11 +131,11 @@ func buildAndStart(ctx context.Context, rt runtime.Backend, st *state.State, mnt
 //  3. Wait for the .substrate-ready marker — the entrypoint writes it after root
 //     provisioning completes, immediately before exec'ing the holder. A runner
 //     launched DURING root setup (UID remap etc.) is silently killed (DF44).
-//  4. Launch sandbox-setup.py — it reads /run/secrets and writes the
-//     .secrets-consumed marker itself.
-//  5. waitForSecretsConsumed AFTER Launch, so the marker is written by the
-//     launched runner before the host removes the secrets dir.
-func startViaLaunch(ctx context.Context, rt runtime.Backend, launcher runtime.ProcessLauncher, st *state.State, cname string, instanceCfg runtime.InstanceConfig, markerPath string, hasSecrets bool) error {
+//  4. Launch sandbox-setup.py — secrets arrive in ProcSpec.Env (YOLOAI_SECRET_KEYS
+//     + named vars); there is no /run/secrets read on this path.
+//  5. The secrets-consumed marker wait is SKIPPED on the Launch path (hasSecrets is
+//     false; secrets were not staged to a host dir so no synchronization is needed).
+func startViaLaunch(ctx context.Context, rt runtime.Backend, launcher runtime.ProcessLauncher, st *state.State, cname string, instanceCfg runtime.InstanceConfig, markerPath string, hasSecrets bool, secretEnv map[string]string) error {
 	if err := patchKeepaliveOnly(st.SandboxDir, true); err != nil {
 		return fmt.Errorf("patch keepalive_only: %w", err)
 	}
@@ -149,11 +160,24 @@ func startViaLaunch(ctx context.Context, rt runtime.Backend, launcher runtime.Pr
 		return err
 	}
 
+	env := []string{"HOME=/home/yoloai", "YOLOAI_DIR=/yoloai"}
+	if len(secretEnv) > 0 {
+		keys := make([]string, 0, len(secretEnv))
+		for k := range secretEnv {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys) // deterministic ordering
+		for _, k := range keys {
+			env = append(env, k+"="+secretEnv[k])
+		}
+		env = append(env, "YOLOAI_SECRET_KEYS="+strings.Join(keys, ","))
+	}
+
 	_, err := launcher.Launch(ctx, cname, runtime.ProcSpec{
 		Argv:     []string{"sh", "-c", "exec python3 /yoloai/bin/sandbox-setup.py docker >> /yoloai/logs/session-runner.log 2>&1"},
 		User:     "yoloai",
 		Cwd:      OverlayOrResolvedMountPath(st.Workdir),
-		Env:      []string{"HOME=/home/yoloai", "YOLOAI_DIR=/yoloai"},
+		Env:      env,
 		Detached: true,
 	})
 	if err != nil {
