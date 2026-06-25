@@ -12,11 +12,11 @@ import (
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/agent"
+	"github.com/kstenerud/yoloai/internal/envsetup"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/git"
 	"github.com/kstenerud/yoloai/internal/netpolicy"
 	"github.com/kstenerud/yoloai/internal/orchestrator/launch"
-	provision "github.com/kstenerud/yoloai/internal/orchestrator/provision"
 	"github.com/kstenerud/yoloai/internal/orchestrator/runtimeconfig"
 	"github.com/kstenerud/yoloai/internal/orchestrator/state"
 	"github.com/kstenerud/yoloai/internal/runtime"
@@ -87,9 +87,9 @@ func defaultDirModes(workdir *DirSpec, auxDirs []*DirSpec) {
 
 // checkAuthAndLocalhostWarnings performs auth checks and localhost URL warnings.
 func checkAuthAndLocalhostWarnings(d state.Deps, agentDef *agent.Definition, mergedEnv map[string]string, cfgModel string, opts Options) error {
-	hasAPIKey := provision.HasAnyAPIKey(agentDef, d.Layout)
-	hasAuth := provision.HasAnyAuthFile(agentDef, d.Layout.HomeDir)
-	hasAuthHint := provision.HasAnyAuthHint(agentDef, mergedEnv, d.Layout)
+	hasAPIKey := envsetup.HasAnyAPIKey(agentDef, d.Layout)
+	hasAuth := envsetup.HasAnyAuthFile(agentDef, d.Layout.HomeDir)
+	hasAuthHint := envsetup.HasAnyAuthHint(agentDef, mergedEnv, d.Layout)
 	if err := checkAgentAuth(agentDef, hasAPIKey, hasAuth, hasAuthHint, outputFor(opts.Output)); err != nil {
 		return err
 	}
@@ -113,7 +113,7 @@ func checkAgentAuth(agentDef *agent.Definition, hasAPIKey, hasAuth, hasAuthHint 
 	}
 	msg := fmt.Sprintf("no authentication found for %s: set %s",
 		agentDef.Type, strings.Join(agentDef.APIKeyEnvVars, "/"))
-	if authDesc := provision.DescribeSeedAuthFiles(agentDef); authDesc != "" {
+	if authDesc := envsetup.DescribeSeedAuthFiles(agentDef); authDesc != "" {
 		msg += fmt.Sprintf(" or provide OAuth credentials (%s)", authDesc)
 	}
 	if len(agentDef.AuthHintEnvVars) > 0 {

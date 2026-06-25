@@ -19,12 +19,12 @@ import (
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/copyflow"
+	"github.com/kstenerud/yoloai/internal/envsetup"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/git"
 	"github.com/kstenerud/yoloai/internal/orchestrator/archetype"
 	"github.com/kstenerud/yoloai/internal/orchestrator/invocation"
 	"github.com/kstenerud/yoloai/internal/orchestrator/launch"
-	provision "github.com/kstenerud/yoloai/internal/orchestrator/provision"
 	"github.com/kstenerud/yoloai/internal/orchestrator/runtimeconfig"
 	"github.com/kstenerud/yoloai/internal/orchestrator/state"
 	"github.com/kstenerud/yoloai/internal/runtime"
@@ -339,7 +339,7 @@ func createAndSeedSandbox(ctx context.Context, d state.Deps, sandboxDir string, 
 	if err := createSandboxDirs(sandboxDir, perms); err != nil {
 		return false, err
 	}
-	return provision.SeedSandbox(d.Runtime, agentDef, sandboxDir, pr.isolation, pr.agentFiles, d.Layout.HomeDir, d.Layout, output)
+	return envsetup.SeedSandbox(d.Runtime, agentDef, sandboxDir, pr.isolation, pr.agentFiles, d.Layout.HomeDir, d.Layout, output)
 }
 
 // buildConfigAndEnvironment builds the container config and sandbox meta structs.

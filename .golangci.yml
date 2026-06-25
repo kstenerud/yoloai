@@ -376,12 +376,12 @@ linters:
         text: "\\.EnvForDiagnostics"
       # ${VAR} config/profile interpolation: the config parse entry points and
       # every ExpandPath call site that resolves a user-supplied path.
-      - path: "internal/config/config\\.go|internal/config/profile\\.go|internal/orchestrator/lifecycle/start\\.go|internal/orchestrator/lifecycle/restart\\.go|internal/orchestrator/provision/provision\\.go|internal/orchestrator/create/create\\.go|internal/orchestrator/create/prepare_profile\\.go|internal/orchestrator/create/prepare_archetype\\.go|internal/orchestrator/mounts/mounts\\.go|internal/cli/mcp/mcp\\.go|internal/cli/lifecycle/new\\.go|internal/cli/workflow/apply\\.go"
+      - path: "internal/config/config\\.go|internal/config/profile\\.go|internal/orchestrator/lifecycle/start\\.go|internal/orchestrator/lifecycle/restart\\.go|internal/envsetup/envsetup\\.go|internal/orchestrator/create/create\\.go|internal/orchestrator/create/prepare_profile\\.go|internal/orchestrator/create/prepare_archetype\\.go|internal/orchestrator/mounts/mounts\\.go|internal/cli/mcp/mcp\\.go|internal/cli/lifecycle/new\\.go|internal/cli/workflow/apply\\.go"
         linters: [forbidigo]
         text: "\\.EnvForConfigInterpolation"
       # Agent credentials: the provisioning/seed/model-prefix/doctor readers that
       # resolve an agent definition's declared credential keys.
-      - path: "(^|/)system\\.go$|internal/orchestrator/invocation/invocation\\.go|internal/orchestrator/provision/provision\\.go|internal/orchestrator/create/prepare_dirs\\.go"
+      - path: "(^|/)system\\.go$|internal/orchestrator/invocation/invocation\\.go|internal/envsetup/envsetup\\.go|internal/orchestrator/create/prepare_dirs\\.go"
         linters: [forbidigo]
         text: "\\.EnvForAgentCredentials"
       # PassthroughEnv: the single `yoloai x` extension runner that hands the

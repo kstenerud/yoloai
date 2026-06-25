@@ -1,6 +1,6 @@
 // ABOUTME: Seed-file and credential provisioning for a sandbox before first launch:
 // ABOUTME: secret-dir creation, auth checks, and settings injection.
-package provision
+package envsetup
 
 import (
 	"fmt"

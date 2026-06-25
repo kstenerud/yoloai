@@ -19,10 +19,10 @@ import (
 	"time"
 
 	"github.com/kstenerud/yoloai/internal/config"
+	"github.com/kstenerud/yoloai/internal/envsetup"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/netpolicy"
 	mountspkg "github.com/kstenerud/yoloai/internal/orchestrator/mounts"
-	"github.com/kstenerud/yoloai/internal/orchestrator/provision"
 	"github.com/kstenerud/yoloai/internal/orchestrator/runtimeconfig"
 	"github.com/kstenerud/yoloai/internal/orchestrator/state"
 	"github.com/kstenerud/yoloai/internal/runtime"
@@ -51,7 +51,7 @@ func LaunchContainer(ctx context.Context, d state.Deps, st *state.State) error {
 		envVars = cfg.Env
 	}
 
-	secretsDir, err := provision.CreateSecretsDir(st.Agent, envVars, st.Layout, st.Layout.SecretsStagingDir)
+	secretsDir, err := envsetup.CreateSecretsDir(st.Agent, envVars, st.Layout, st.Layout.SecretsStagingDir)
 	if err != nil {
 		return fmt.Errorf("create secrets: %w", err)
 	}

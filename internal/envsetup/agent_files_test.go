@@ -1,4 +1,4 @@
-package provision
+package envsetup
 
 import (
 	"os"

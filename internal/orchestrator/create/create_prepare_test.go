@@ -15,8 +15,8 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
+	"github.com/kstenerud/yoloai/internal/envsetup"
 	"github.com/kstenerud/yoloai/internal/git"
-	"github.com/kstenerud/yoloai/internal/orchestrator/provision"
 	"github.com/kstenerud/yoloai/internal/orchestrator/state"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/store"
@@ -859,12 +859,12 @@ func TestPrepareSandboxState_MissingAPIKeyErrorWithAuthFiles(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 
-	// Override provision.KeychainReader to fail
-	origReader := provision.KeychainReader
-	provision.KeychainReader = func(_ string) ([]byte, error) {
+	// Override envsetup.KeychainReader to fail
+	origReader := envsetup.KeychainReader
+	envsetup.KeychainReader = func(_ string) ([]byte, error) {
 		return nil, fmt.Errorf("not found")
 	}
-	defer func() { provision.KeychainReader = origReader }()
+	defer func() { envsetup.KeychainReader = origReader }()
 
 	d := state.Deps{
 		Runtime: &fakeRuntime{},

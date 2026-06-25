@@ -2,7 +2,7 @@
 
 //go:build darwin
 
-package provision
+package envsetup
 
 import (
 	"fmt"

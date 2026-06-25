@@ -1,4 +1,4 @@
-package provision
+package envsetup
 
 // ABOUTME: Copies user-configured agent files into sandbox agent-runtime directory.
 // ABOUTME: Supports string form (base directory) and list form (explicit paths).
