@@ -34,7 +34,7 @@ internal/orchestrator/status/      → Leaf: sandbox read-model — DetectStatus
 internal/orchestrator/launch/      → Leaf: shared launch primitives (instance build/start, Teardown, vm-workdir, CheckIsolationPrerequisites)
 internal/orchestrator/mounts/      → Leaf: mount-spec construction from DirSpec/Meta
 internal/orchestrator/invocation/  → Leaf: agent invocation/command assembly
-internal/orchestrator/provision/   → Leaf: agent-files seeding + keychain credential sourcing
+internal/envsetup/       → Layer (D91): stages agent-specific sandbox contents host-side — secret-dir, seed files, settings, agent-files, keychain credential sourcing (the substrate's dual). Was internal/orchestrator/provision/.
 internal/orchestrator/profiles/    → Leaf: profile image building (dependency order, staleness)
 internal/orchestrator/runtimeconfig/ → Leaf: ContainerConfig assembly for the runtime layer
 internal/orchestrator/archetype/   → Project archetype detection (devcontainer, compose, apple, simple) + .yoloai.yaml + VS Code workspace injection
