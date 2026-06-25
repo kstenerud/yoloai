@@ -115,6 +115,11 @@ def read_secrets_from_env(socket=None):
     """
     names = [n for n in os.environ.get("YOLOAI_SECRET_KEYS", "").split(",") if n]
     secrets = {n: os.environ[n] for n in names if n in os.environ}
+    # Drop the yoloai-internal sentinel so it does not leak into the tmux server's
+    # inherited environment (the tmux session is created after this runs) and thus
+    # the agent's panes. The secret values themselves stay in os.environ — the
+    # agent needs them — but this plumbing var is not the agent's business.
+    os.environ.pop("YOLOAI_SECRET_KEYS", None)
     log_info("read_secrets_from_env.done", f"loaded {len(secrets)} secrets from env")
     if socket:
         for name, value in secrets.items():
@@ -172,6 +177,12 @@ from abc import ABC, abstractmethod
 class Backend(ABC):
     """Abstract base class for sandbox backends."""
 
+    # Whether this backend stages secrets in a host-side dir whose deletion the
+    # host gates on the .secrets-consumed marker. True for the file-staging
+    # backends (Tart/Seatbelt); DockerBackend overrides to False because it now
+    # receives secrets via the launch env, so there is no staged dir to release.
+    writes_consumed_marker = True
+
     def __init__(self, cfg, yoloai_dir):
         self.cfg = cfg
         self.yoloai_dir = yoloai_dir
@@ -207,6 +218,10 @@ class Backend(ABC):
 
 class DockerBackend(Backend):
     """Backend for Docker and Podman containers."""
+
+    # Secrets arrive via the launch env (ProcSpec.Env), not a host-staged dir,
+    # so there is nothing for the host to release — the consumed-marker is moot.
+    writes_consumed_marker = False
 
     def setup(self):
         """Docker-specific setup: git baseline for overlays, auto-commit loop."""
@@ -1288,7 +1303,8 @@ def main():
     # backends that use a real socket; secrets reach the agent via the explicit
     # env_exports= prefix in the launch_agent() send-keys command instead.
     secrets = backend.read_secrets(socket)
-    signal_secrets_consumed(yoloai_dir)
+    if backend.writes_consumed_marker:
+        signal_secrets_consumed(yoloai_dir)
 
     working_dir = backend.get_working_dir()
 
