@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/store"
@@ -23,8 +22,8 @@ import (
 // is created under stagingRoot; "" means the OS default temp dir (os.TempDir()), so
 // an embedder can stage a principal's plaintext credentials on a per-principal tmpfs.
 // Returns empty string if nothing was written.
-func CreateSecretsDir(agentDef *agent.Definition, configEnv map[string]string, hostEnv config.Layout, stagingRoot string) (string, error) {
-	if len(agentDef.APIKeyEnvVars) == 0 && len(agentDef.AuthHintEnvVars) == 0 && len(configEnv) == 0 {
+func CreateSecretsDir(spec EnvSpec, configEnv map[string]string, hostEnv config.Layout, stagingRoot string) (string, error) {
+	if len(spec.APIKeyEnvVars) == 0 && len(spec.AuthHintEnvVars) == 0 && len(configEnv) == 0 {
 		return "", nil
 	}
 
@@ -60,7 +59,7 @@ func CreateSecretsDir(agentDef *agent.Definition, configEnv map[string]string, h
 	// Write host env values for API keys and auth hints (overwrites config env on
 	// conflict). EnvForAgentCredentials yields the present, non-empty subset of
 	// the agent's declared credential keys from the threaded host-env snapshot.
-	for key, value := range hostEnv.Env().EnvForAgentCredentials(append(agentDef.APIKeyEnvVars, agentDef.AuthHintEnvVars...)) {
+	for key, value := range hostEnv.Env().EnvForAgentCredentials(append(spec.APIKeyEnvVars, spec.AuthHintEnvVars...)) {
 		if err := fileutil.WriteFilePerm(filepath.Join(tmpDir, key), []byte(value), perms.SecretsFile); err != nil {
 			_ = os.RemoveAll(tmpDir)
 			return "", fmt.Errorf("write secret %s: %w", key, err)
@@ -88,8 +87,8 @@ func HasAnyAPIKey(spec EnvSpec, hostEnv config.Layout) bool {
 // HasAnyAuthFile returns true if any auth-only seed files exist on disk
 // or can be read from the macOS Keychain.
 // homeDir is used for ~ expansion in seed file host paths.
-func HasAnyAuthFile(agentDef *agent.Definition, homeDir string) bool {
-	for _, sf := range agentDef.SeedFiles {
+func HasAnyAuthFile(spec EnvSpec, homeDir string) bool {
+	for _, sf := range spec.SeedFiles {
 		if sf.AuthOnly {
 			if _, err := os.Stat(config.ExpandTilde(sf.HostPath, homeDir)); err == nil {
 				return true
@@ -108,9 +107,9 @@ func HasAnyAuthFile(agentDef *agent.Definition, homeDir string) bool {
 // in hostEnv (the caller-supplied host-environment snapshot) or in the config
 // env map. This allows agents like aider to work with local model servers
 // (Ollama, LM Studio) without a cloud API key.
-func HasAnyAuthHint(agentDef *agent.Definition, configEnv map[string]string, hostEnv config.Layout) bool {
-	hostCreds := hostEnv.Env().EnvForAgentCredentials(agentDef.AuthHintEnvVars)
-	for _, key := range agentDef.AuthHintEnvVars {
+func HasAnyAuthHint(spec EnvSpec, configEnv map[string]string, hostEnv config.Layout) bool {
+	hostCreds := hostEnv.Env().EnvForAgentCredentials(spec.AuthHintEnvVars)
+	for _, key := range spec.AuthHintEnvVars {
 		if hostCreds[key] != "" || configEnv[key] != "" {
 			return true
 		}
@@ -119,9 +118,9 @@ func HasAnyAuthHint(agentDef *agent.Definition, configEnv map[string]string, hos
 }
 
 // DescribeSeedAuthFiles returns a human-readable description of expected auth file paths.
-func DescribeSeedAuthFiles(agentDef *agent.Definition) string {
+func DescribeSeedAuthFiles(spec EnvSpec) string {
 	var paths []string
-	for _, sf := range agentDef.SeedFiles {
+	for _, sf := range spec.SeedFiles {
 		if sf.AuthOnly {
 			paths = append(paths, sf.HostPath)
 		}

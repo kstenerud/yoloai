@@ -80,19 +80,19 @@ func TestHasAnyAuthFile_Exists(t *testing.T) {
 	require.NoError(t, os.MkdirAll(claudeDir, 0750))
 	require.NoError(t, os.WriteFile(filepath.Join(claudeDir, ".credentials.json"), []byte(`{}`), 0600))
 
-	assert.True(t, HasAnyAuthFile(agentDef, tmpDir))
+	assert.True(t, HasAnyAuthFile(agentSpec(agentDef), tmpDir))
 }
 
 func TestHasAnyAuthFile_Missing(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	agentDef := agent.GetAgent("claude")
-	assert.False(t, HasAnyAuthFile(agentDef, tmpDir))
+	assert.False(t, HasAnyAuthFile(agentSpec(agentDef), tmpDir))
 }
 
 func TestHasAnyAuthFile_NoAuthFiles(t *testing.T) {
 	agentDef := agent.GetAgent("test")
-	assert.False(t, HasAnyAuthFile(agentDef, "/home/user"))
+	assert.False(t, HasAnyAuthFile(agentSpec(agentDef), "/home/user"))
 }
 
 func TestHasAnyAuthFile_KeychainFallback(t *testing.T) {
@@ -111,7 +111,7 @@ func TestHasAnyAuthFile_KeychainFallback(t *testing.T) {
 	}
 	defer func() { KeychainReader = origReader }()
 
-	assert.True(t, HasAnyAuthFile(agentDef, tmpDir))
+	assert.True(t, HasAnyAuthFile(agentSpec(agentDef), tmpDir))
 }
 
 func TestHasAnyAuthFile_KeychainFallbackFails(t *testing.T) {
@@ -126,20 +126,20 @@ func TestHasAnyAuthFile_KeychainFallbackFails(t *testing.T) {
 	}
 	defer func() { KeychainReader = origReader }()
 
-	assert.False(t, HasAnyAuthFile(agentDef, tmpDir))
+	assert.False(t, HasAnyAuthFile(agentSpec(agentDef), tmpDir))
 }
 
 // DescribeSeedAuthFiles tests
 
 func TestDescribeSeedAuthFiles_Claude(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
-	desc := DescribeSeedAuthFiles(agentDef)
+	desc := DescribeSeedAuthFiles(agentSpec(agentDef))
 	assert.Contains(t, desc, ".credentials.json")
 }
 
 func TestDescribeSeedAuthFiles_NoAuthFiles(t *testing.T) {
 	agentDef := agent.GetAgent("test")
-	assert.Empty(t, DescribeSeedAuthFiles(agentDef))
+	assert.Empty(t, DescribeSeedAuthFiles(agentSpec(agentDef)))
 }
 
 // CreateSecretsDir tests
@@ -148,7 +148,7 @@ func TestCreateSecretsDir_WithKey(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
 	hostEnv := config.Layout{}.WithEnv(map[string]string{"ANTHROPIC_API_KEY": "sk-test-secret"})
 
-	dir, err := CreateSecretsDir(agentDef, nil, hostEnv, "")
+	dir, err := CreateSecretsDir(agentSpec(agentDef), nil, hostEnv, "")
 	require.NoError(t, err)
 	require.NotEmpty(t, dir)
 	defer os.RemoveAll(dir) //nolint:errcheck
@@ -161,7 +161,7 @@ func TestCreateSecretsDir_WithKey(t *testing.T) {
 func TestCreateSecretsDir_NoKey(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
 
-	dir, err := CreateSecretsDir(agentDef, nil, config.Layout{}, "")
+	dir, err := CreateSecretsDir(agentSpec(agentDef), nil, config.Layout{}, "")
 	require.NoError(t, err)
 	assert.Empty(t, dir)
 }
@@ -169,7 +169,7 @@ func TestCreateSecretsDir_NoKey(t *testing.T) {
 func TestCreateSecretsDir_NoEnvVars(t *testing.T) {
 	agentDef := agent.GetAgent("test")
 
-	dir, err := CreateSecretsDir(agentDef, nil, config.Layout{}, "")
+	dir, err := CreateSecretsDir(agentSpec(agentDef), nil, config.Layout{}, "")
 	require.NoError(t, err)
 	assert.Empty(t, dir)
 }
@@ -181,7 +181,7 @@ func TestCreateSecretsDir_WithEnvVars(t *testing.T) {
 		"CUSTOM_VAR":      "myvalue",
 	}
 
-	dir, err := CreateSecretsDir(agentDef, envVars, config.Layout{}, "")
+	dir, err := CreateSecretsDir(agentSpec(agentDef), envVars, config.Layout{}, "")
 	require.NoError(t, err)
 	require.NotEmpty(t, dir)
 	defer os.RemoveAll(dir) //nolint:errcheck
@@ -202,7 +202,7 @@ func TestCreateSecretsDir_APIKeyOverridesEnv(t *testing.T) {
 	}
 	hostEnv := config.Layout{}.WithEnv(map[string]string{"ANTHROPIC_API_KEY": "sk-real-key"})
 
-	dir, err := CreateSecretsDir(agentDef, envVars, hostEnv, "")
+	dir, err := CreateSecretsDir(agentSpec(agentDef), envVars, hostEnv, "")
 	require.NoError(t, err)
 	require.NotEmpty(t, dir)
 	defer os.RemoveAll(dir) //nolint:errcheck
@@ -215,7 +215,7 @@ func TestCreateSecretsDir_APIKeyOverridesEnv(t *testing.T) {
 func TestCreateSecretsDir_EmptyBoth(t *testing.T) {
 	agentDef := agent.GetAgent("test")
 
-	dir, err := CreateSecretsDir(agentDef, map[string]string{}, config.Layout{}, "")
+	dir, err := CreateSecretsDir(agentSpec(agentDef), map[string]string{}, config.Layout{}, "")
 	require.NoError(t, err)
 	assert.Empty(t, dir)
 }
@@ -225,7 +225,7 @@ func TestCreateSecretsDir_HonorsStagingRoot(t *testing.T) {
 	hostEnv := config.Layout{}.WithEnv(map[string]string{"ANTHROPIC_API_KEY": "sk-test-secret"})
 	stagingRoot := t.TempDir()
 
-	dir, err := CreateSecretsDir(agentDef, nil, hostEnv, stagingRoot)
+	dir, err := CreateSecretsDir(agentSpec(agentDef), nil, hostEnv, stagingRoot)
 	require.NoError(t, err)
 	require.NotEmpty(t, dir)
 	defer os.RemoveAll(dir) //nolint:errcheck
@@ -550,13 +550,13 @@ func TestEnsureHomeSeedConfig_NoopForTestAgent(t *testing.T) {
 
 func TestHasAnyAuthHint_NoHintVars(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
-	assert.False(t, HasAnyAuthHint(agentDef, nil, config.Layout{}))
+	assert.False(t, HasAnyAuthHint(agentSpec(agentDef), nil, config.Layout{}))
 }
 
 func TestHasAnyAuthHint_HostEnvSet(t *testing.T) {
 	agentDef := agent.GetAgent("aider")
 	hostEnv := config.Layout{}.WithEnv(map[string]string{"OLLAMA_API_BASE": "http://localhost:11434"})
-	assert.True(t, HasAnyAuthHint(agentDef, nil, hostEnv))
+	assert.True(t, HasAnyAuthHint(agentSpec(agentDef), nil, hostEnv))
 }
 
 func TestHasAnyAuthHint_ConfigEnvSet(t *testing.T) {
@@ -564,10 +564,10 @@ func TestHasAnyAuthHint_ConfigEnvSet(t *testing.T) {
 	configEnv := map[string]string{
 		"OLLAMA_API_BASE": "http://localhost:11434",
 	}
-	assert.True(t, HasAnyAuthHint(agentDef, configEnv, config.Layout{}))
+	assert.True(t, HasAnyAuthHint(agentSpec(agentDef), configEnv, config.Layout{}))
 }
 
 func TestHasAnyAuthHint_NeitherSet(t *testing.T) {
 	agentDef := agent.GetAgent("aider")
-	assert.False(t, HasAnyAuthHint(agentDef, nil, config.Layout{}))
+	assert.False(t, HasAnyAuthHint(agentSpec(agentDef), nil, config.Layout{}))
 }

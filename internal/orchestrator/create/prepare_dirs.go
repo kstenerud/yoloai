@@ -90,8 +90,8 @@ func defaultDirModes(workdir *DirSpec, auxDirs []*DirSpec) {
 func checkAuthAndLocalhostWarnings(d state.Deps, agentDef *agent.Definition, mergedEnv map[string]string, cfgModel string, opts Options) error {
 	spec := envspec.BuildEnvSpec(agentDef)
 	hasAPIKey := envsetup.HasAnyAPIKey(spec, d.Layout)
-	hasAuth := envsetup.HasAnyAuthFile(agentDef, d.Layout.HomeDir)
-	hasAuthHint := envsetup.HasAnyAuthHint(agentDef, mergedEnv, d.Layout)
+	hasAuth := envsetup.HasAnyAuthFile(spec, d.Layout.HomeDir)
+	hasAuthHint := envsetup.HasAnyAuthHint(spec, mergedEnv, d.Layout)
 	if err := checkAgentAuth(agentDef, hasAPIKey, hasAuth, hasAuthHint, outputFor(opts.Output)); err != nil {
 		return err
 	}
@@ -115,7 +115,7 @@ func checkAgentAuth(agentDef *agent.Definition, hasAPIKey, hasAuth, hasAuthHint 
 	}
 	msg := fmt.Sprintf("no authentication found for %s: set %s",
 		agentDef.Type, strings.Join(agentDef.APIKeyEnvVars, "/"))
-	if authDesc := envsetup.DescribeSeedAuthFiles(agentDef); authDesc != "" {
+	if authDesc := envsetup.DescribeSeedAuthFiles(envspec.BuildEnvSpec(agentDef)); authDesc != "" {
 		msg += fmt.Sprintf(" or provide OAuth credentials (%s)", authDesc)
 	}
 	if len(agentDef.AuthHintEnvVars) > 0 {
