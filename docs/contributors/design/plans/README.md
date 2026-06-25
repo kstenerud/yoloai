@@ -125,6 +125,16 @@ Allow users to override the auto-resolved detector stack via profile-level confi
 
 See [idle detection research](../research/idle-detection.md) §3.9 Q1.
 
+### Per-agent custom detection strategies (🚧 public-layering merge gate)
+
+[agent-detection-strategies.md](agent-detection-strategies.md) — deferred tail of
+[agent-owned-detection.md](agent-owned-detection.md). Promote detection to a
+first-class per-agent strategy and wire each agent's native turn-completion
+callback (Codex `notify`, Gemini `AfterAgent`, OpenCode `session.idle`, Aider
+`--notifications-command`; survey-backed by
+[research/agent-callbacks.md](../research/agent-callbacks.md)). **The
+`public-layering` branch does not merge to `main` until this is done.**
+
 ## Seatbelt Improvements
 
 ### Per-agent sandbox access documentation

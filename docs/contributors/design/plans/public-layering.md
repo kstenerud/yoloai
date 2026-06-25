@@ -7,6 +7,14 @@ emerges from the audit cycles (decision: facts drive the surface). Supersedes th
 C-full / F notes in [D83](../../decisions/working-notes.md) and builds directly on
 [module-split.md](module-split.md).
 
+> **🚧 Merge gate (decided 2026-06-25).** This branch does **not** merge to `main`
+> until per-agent custom detection strategies are wired for every agent that
+> exposes a native turn-completion callback — see
+> [agent-detection-strategies.md](agent-detection-strategies.md). The shipped
+> fall-to-shell + resume work ([agent-owned-detection.md](agent-owned-detection.md))
+> deferred that strategy formalization to its own task; it is a release blocker, not
+> dropped.
+
 ## Goal
 
 Decompose yoloAI into a stack of **composable public layers** so a consumer can take exactly
