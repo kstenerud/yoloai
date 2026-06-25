@@ -118,6 +118,20 @@ func BuildAgentCommand(agentDef *agent.Definition, model string, prompt string, 
 	return cmd
 }
 
+// ResolveResumeCommand builds the fall-to-shell resume command (D96 DD4): the
+// agent's interactive launch command plus its native resume flag, so
+// yoloai-resume continues the prior conversation. Returns "" when the agent
+// declares no resume flag — yoloai-resume then relaunches a fresh session
+// (honest characterization, never claims a resume that didn't happen). The
+// resume command carries no prompt: it continues an existing conversation, it
+// does not start a new task.
+func ResolveResumeCommand(agentCommand, resumeFlag string) string {
+	if resumeFlag == "" {
+		return ""
+	}
+	return agentCommand + " " + resumeFlag
+}
+
 // SanitizeTunnelName converts a sandbox name to a valid VS Code tunnel name.
 // VS Code tunnel names are limited to 20 characters, lowercase alphanumeric
 // and hyphens, with no leading or trailing hyphens.

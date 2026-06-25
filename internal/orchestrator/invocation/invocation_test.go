@@ -165,6 +165,19 @@ func TestResolveFallToShell_HeuristicAgentDisabled(t *testing.T) {
 	assert.False(t, ResolveFallToShell(agent.IdleSupport{ReadyPattern: "> $", WchanApplicable: true}))
 }
 
+func TestResolveResumeCommand_AppendsFlag(t *testing.T) {
+	// Claude's resume command is the launch command + its native resume flag,
+	// continuing the prior conversation with no fresh prompt.
+	got := ResolveResumeCommand("claude --dangerously-skip-permissions", "--continue")
+	assert.Equal(t, "claude --dangerously-skip-permissions --continue", got)
+}
+
+func TestResolveResumeCommand_NoFlagYieldsEmpty(t *testing.T) {
+	// An agent with no native resume flag yields "" → yoloai-resume relaunches a
+	// fresh session and says so (never claims a resume that didn't happen).
+	assert.Equal(t, "", ResolveResumeCommand("aider --yes-always", ""))
+}
+
 func TestValidateModel_OpenCodeWithProviderPrefix(t *testing.T) {
 	agentDef := agent.GetAgent("opencode")
 	err := ValidateModel(agentDef, "openai/gpt-4o", "openai/gpt-4o")

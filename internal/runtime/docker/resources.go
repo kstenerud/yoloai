@@ -47,3 +47,7 @@ var embeddedDiagnoseIdle = monitor.DiagnoseScript()
 // installed executable in /yoloai/bin and invoked by the launch command for
 // hook-authoritative agents.
 var embeddedAgentRun = monitor.AgentRunScript()
+
+// embeddedYoloaiResume provides the in-sandbox resume command (D96 DD4),
+// installed executable in /yoloai/bin as `yoloai-resume`.
+var embeddedYoloaiResume = monitor.YoloaiResumeScript()

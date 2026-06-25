@@ -84,6 +84,14 @@ type Definition struct {
 	ContextFile       string            // filename in StateDir for sandbox context reference (e.g., "CLAUDE.md")
 	AgentFilesExclude []string          // glob patterns to skip when copying agent_files (string form)
 
+	// ResumeFlag is the agent's native conversation-resume flag, appended to the
+	// interactive command to continue the prior conversation (e.g. Claude
+	// "--continue"). "" means the agent has no native resume — the fall-to-shell
+	// yoloai-resume script then relaunches a FRESH session and says so (honest
+	// characterization, D96/agent-detection.md DD4). Resolved into resume_cmd for
+	// the fall-to-shell wrapper.
+	ResumeFlag string
+
 	// ApplySettings patches the agent's settings map before it is written to disk.
 	// Called with the parsed settings map; mutates it in place.
 	// Nil means no patches are needed.
@@ -142,6 +150,7 @@ var agents = map[string]*Definition{
 		InteractiveCmd: "claude --dangerously-skip-permissions",
 		HeadlessCmd:    `claude -p "PROMPT" --dangerously-skip-permissions`,
 		PromptMode:     PromptModeInteractive,
+		ResumeFlag:     "--continue",
 		APIKeyEnvVars:  []string{"ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"},
 		SeedFiles: []SeedFile{
 			{HostPath: "~/.claude/.credentials.json", TargetPath: ".credentials.json", AuthOnly: true, KeychainService: "Claude Code-credentials"},

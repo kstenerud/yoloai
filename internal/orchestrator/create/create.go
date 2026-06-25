@@ -773,6 +773,7 @@ func buildContainerConfig(layout config.Layout, agentDef *agent.Definition, agen
 		IdleMode:         invocation.ResolveIdleMode(agentDef.Idle),
 		Detectors:        invocation.ResolveDetectors(agentDef.Idle),
 		FallToShell:      invocation.ResolveFallToShell(agentDef.Idle),
+		ResumeCmd:        invocation.ResolveResumeCommand(agentCommand, agentDef.ResumeFlag),
 		SandboxName:      sandboxName,
 		TmuxSocket:       tmuxSocket,
 		Isolation:        isolation,

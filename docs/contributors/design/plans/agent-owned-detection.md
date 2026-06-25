@@ -130,7 +130,9 @@ shell with the resume hint printed, (c) `yoloai attach` lands in that shell, (d)
 no startup blip and no stale idle on the run before exit (tier-2 regression
 guard). Sentinel-style harness like the E3 verification.
 
-**Phase 2 — `yoloai-resume` + the resume command (Claude).** Add `Definition.ResumeCmd`
+**Phase 2 — `yoloai-resume` + the resume command (Claude). ✅ DONE 2026-06-25
+(mechanism verified real-Docker; conversation-content resume is Claude's
+`--continue`, correctly invoked).** Add `Definition.ResumeCmd`
 and the `yoloai-resume` script; wire the hint to it. *Docker checkpoint:* from the
 fall-to-shell shell, run `yoloai-resume`; verify the agent resumes the *prior*
 conversation (claude `--continue`), detection re-establishes, and status goes

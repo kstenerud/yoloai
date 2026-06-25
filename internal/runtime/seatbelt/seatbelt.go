@@ -256,6 +256,10 @@ func writeSandboxScripts(sandboxPath string) error {
 	if err := fileutil.WriteFile(agentRunPath, monitor.AgentRunScript(), 0755); err != nil { //nolint:gosec // G306: wrapper needs exec permission
 		return fmt.Errorf("write agent-run.sh: %w", err)
 	}
+	resumePath := filepath.Join(sandboxPath, binDir, "yoloai-resume")
+	if err := fileutil.WriteFile(resumePath, monitor.YoloaiResumeScript(), 0755); err != nil { //nolint:gosec // G306: resume script needs exec permission
+		return fmt.Errorf("write yoloai-resume: %w", err)
+	}
 	tmuxConfPath := filepath.Join(sandboxPath, tmuxDir, "tmux.conf")
 	if err := fileutil.WriteFile(tmuxConfPath, embeddedTmuxConf, 0600); err != nil {
 		return fmt.Errorf("write tmux.conf: %w", err)

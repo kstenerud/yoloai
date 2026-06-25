@@ -72,6 +72,7 @@ func buildInputsChecksum() string {
 		{"status-monitor.py", embeddedStatusMonitor},
 		{"diagnose-idle.sh", embeddedDiagnoseIdle},
 		{"agent-run.sh", embeddedAgentRun},
+		{"yoloai-resume", embeddedYoloaiResume},
 		{"tmux.conf", embeddedTmuxConf},
 	}
 	for _, f := range files {
@@ -194,6 +195,7 @@ func createBuildContext() (io.Reader, error) {
 		{"status-monitor.py", embeddedStatusMonitor},
 		{"diagnose-idle.sh", embeddedDiagnoseIdle},
 		{"agent-run.sh", embeddedAgentRun},
+		{"yoloai-resume", embeddedYoloaiResume},
 		{"tmux.conf", embeddedTmuxConf},
 	}
 

@@ -21,8 +21,9 @@ monitor="${YOLOAI_DIR}/bin/status-monitor.py"
 "$@"
 rc=$?
 
-python3 "$monitor" --write-done "$status_file" "$rc" 2>/dev/null || true
+python3 "$monitor" --write-status done "$status_file" "$rc" 2>/dev/null || true
 
-printf '\n[yoloai] agent exited (status %s). This pane is now an interactive shell.\n\n' "$rc"
+printf '\n[yoloai] agent exited (status %s). This pane is now an interactive shell.\n' "$rc"
+printf "[yoloai] Run 'yoloai-resume' to relaunch the agent, or keep working here.\n\n"
 
 exec "${SHELL:-/bin/bash}" -l

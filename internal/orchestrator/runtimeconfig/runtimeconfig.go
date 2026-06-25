@@ -84,7 +84,13 @@ type ContainerConfig struct {
 	// until the monitor honors a wrapper-written `done`). Absent → off
 	// (back-compat for sandboxes created before the wrapper). Additive optional
 	// field → no SchemaVersion bump.
-	FallToShell      bool                  `json:"fall_to_shell,omitempty"`
+	FallToShell bool `json:"fall_to_shell,omitempty"`
+	// ResumeCmd is the fall-to-shell resume command (D96 DD4): the agent's launch
+	// command plus its native resume flag (e.g. Claude "… --continue"), read by
+	// the in-sandbox yoloai-resume script to continue the prior conversation. ""
+	// when the agent has no native resume → yoloai-resume relaunches fresh and
+	// says so. Additive optional field → no SchemaVersion bump.
+	ResumeCmd        string                `json:"resume_cmd,omitempty"`
 	SandboxName      string                `json:"sandbox_name"`
 	TmuxSocket       string                `json:"tmux_socket,omitempty"`
 	Isolation        runtime.IsolationMode `json:"isolation,omitempty"`
