@@ -14,6 +14,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/git"
+	"github.com/kstenerud/yoloai/internal/netpolicy"
 	"github.com/kstenerud/yoloai/internal/orchestrator/launch"
 	provision "github.com/kstenerud/yoloai/internal/orchestrator/provision"
 	"github.com/kstenerud/yoloai/internal/orchestrator/runtimeconfig"
@@ -414,17 +415,7 @@ func setupAuxDir(ctx context.Context, g *git.Git, sandboxDir string, rt runtime.
 // buildNetworkConfig determines the network mode and allowlist from options
 // and agent definition.
 func buildNetworkConfig(opts Options, agentDef *agent.Definition) (string, []string) {
-	switch opts.Network {
-	case NetworkModeNone:
-		return "none", nil
-	case NetworkModeIsolated:
-		var allow []string
-		allow = append(allow, agentDef.NetworkAllowlist...)
-		allow = append(allow, opts.NetworkAllow...)
-		return "isolated", allow
-	default:
-		return "", nil
-	}
+	return netpolicy.Compose(string(opts.Network), agentDef.NetworkAllowlist, opts.NetworkAllow)
 }
 
 // collectOverlayMounts builds overlay mount configs for config.json from the
