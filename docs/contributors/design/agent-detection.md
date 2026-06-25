@@ -105,12 +105,21 @@ extension of D89's mechanism-vs-payload — detection is a per-agent *mechanism*
   with no better signal, *and by user/file-defined agents* (`~/.yoloai/agents/*.yaml`),
   which carry no code. This is today's `heuristic-only`.
 - **An agent with a native turn-completion signal supplies its own strategy** —
-  today only Claude (the `Stop` hook → `hook-authoritative`). Whether Codex /
-  Gemini / OpenCode / Aider expose an equivalent callback is the **load-bearing
-  unknown** that decides how much of this abstraction is worth building — it is
-  *unverified* and gated on [research/agent-callbacks.md](research/agent-callbacks.md).
-  If they have no callback, they fall to the heuristic default and the abstraction
-  stays Claude-vs-default (what the enum already covers).
+  today only Claude (the `Stop` hook → `hook-authoritative`), but the survey
+  ([research/agent-callbacks.md](research/agent-callbacks.md), **verified
+  2026-06-25**) settled the load-bearing question: **all four other shipped agents
+  expose a usable turn-completion callback** — Codex (`notify` →
+  `agent-turn-complete`, rich JSON), Gemini (`AfterAgent` hook, GA ≥ v0.26.0 — note
+  *not* `Stop`), OpenCode (`session.idle` via a plugin hook or the SSE stream), and
+  Aider (`--notifications-command`, a bare *data-free* pulse). So the **heuristic
+  stack is the *floor*** (legacy versions, unknown/file-defined agents), not the
+  common case — which is what makes the strategy seam **worth building**, not just
+  Claude-vs-default. Two design consequences the contract must honor: (1) callbacks
+  come in **two families** — *agent-runs-our-command* (Codex/Gemini/Aider, and
+  OpenCode's plugin) vs *we-subscribe-to-a-stream* (OpenCode's SSE) — the strategy
+  interface must cover both; (2) Aider's payload-free pulse means the contract is a
+  **thin "a turn ended" signal**, not "hand me the assistant message" — keep the
+  strategy boundary minimal so the weakest callback still fits.
 - **Stacking is reserved as exactly one composite, not a framework.** The one
   combination we already know we want is `hook-assisted` (hook authoritative +
   heuristic as a conservative backstop for a *missed* hook — session-layer.md
