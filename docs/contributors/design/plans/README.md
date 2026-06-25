@@ -66,7 +66,7 @@ Design considerations:
 
 ### Agent status detection (rework planned)
 
-Current implementation works but is fragile. See [idle detection research](../research/idle-detection.md) for full audit, external research, and architecture proposal for a pluggable detector framework.
+Current implementation works but is fragile. See [idle detection research](../research/idle-detection.md) for full audit, external research, and architecture proposal for a pluggable detector framework. **A concrete design+build plan now exists** — [agent-owned-detection.md](agent-owned-detection.md) — folding in fall-to-shell + `yoloai-resume`: make detection the agent's own responsibility (an agent-agnostic `DetectionSpec`, uniform external-watch mechanism first), have the launch wrapper own the exit lifecycle (write `done` + fall to an interactive shell + resume hint), and add a `yoloai-resume` one-command resume. Phase-gated with real-Docker checkpoints to protect the fragile detection layer. Supersedes the deferred fall-to-shell item in [public-layering.md](public-layering.md).
 
 ### Test agent harness
 
