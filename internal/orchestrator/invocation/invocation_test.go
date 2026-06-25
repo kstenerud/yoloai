@@ -151,6 +151,20 @@ func TestResolveDetectors_NoCapabilities(t *testing.T) {
 	assert.Nil(t, detectors)
 }
 
+func TestResolveFallToShell_HookAgentEnabled(t *testing.T) {
+	// Hook-authoritative agents launch under the fall-to-shell wrapper: the
+	// monitor runs no heuristics while the pane lives, so a wrapper-written
+	// `done` survives untouched (D96 Phase 1).
+	assert.True(t, ResolveFallToShell(agent.IdleSupport{Hook: true}))
+}
+
+func TestResolveFallToShell_HeuristicAgentDisabled(t *testing.T) {
+	// Heuristic agents stay on the exec-the-agent path until the runner honors a
+	// wrapper-written `done` (Phase 3) — otherwise the monitor would read the
+	// idle fall-to-shell shell as `idle` and clobber `done`.
+	assert.False(t, ResolveFallToShell(agent.IdleSupport{ReadyPattern: "> $", WchanApplicable: true}))
+}
+
 func TestValidateModel_OpenCodeWithProviderPrefix(t *testing.T) {
 	agentDef := agent.GetAgent("opencode")
 	err := ValidateModel(agentDef, "openai/gpt-4o", "openai/gpt-4o")

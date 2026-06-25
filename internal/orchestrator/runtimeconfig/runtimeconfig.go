@@ -75,8 +75,16 @@ type ContainerConfig struct {
 	// blip); "heuristic-only" = the detector stack. Absent → heuristic-only
 	// (back-compat for sandboxes created before the selector). Additive optional
 	// field → no SchemaVersion bump.
-	IdleMode         string                `json:"idle_mode,omitempty"`
-	Detectors        []string              `json:"detectors,omitempty"`
+	IdleMode  string   `json:"idle_mode,omitempty"`
+	Detectors []string `json:"detectors,omitempty"`
+	// FallToShell, when true, launches the agent under the fall-to-shell wrapper
+	// (agent-run.sh, D96): on agent exit the wrapper records an authoritative
+	// `done` and keeps the pane alive as an interactive shell instead of letting
+	// it die. Resolved per-agent (on for hook-authoritative; off for heuristic
+	// until the monitor honors a wrapper-written `done`). Absent → off
+	// (back-compat for sandboxes created before the wrapper). Additive optional
+	// field → no SchemaVersion bump.
+	FallToShell      bool                  `json:"fall_to_shell,omitempty"`
 	SandboxName      string                `json:"sandbox_name"`
 	TmuxSocket       string                `json:"tmux_socket,omitempty"`
 	Isolation        runtime.IsolationMode `json:"isolation,omitempty"`

@@ -851,8 +851,15 @@ def launch_agent(cfg, socket=None, working_dir=None, backend_inst=None, secrets=
     # wrap (W1a/W1b). Every sandbox carries it: create writes it, and the v1->v2
     # schema migration backfills it for older sandboxes (empty for container
     # backends, a no-op prepend).
+    # Fall-to-shell (D96): hook-authoritative agents launch under agent-run.sh,
+    # which records `done` on agent exit and keeps the pane alive as a shell.
+    # Gated by fall_to_shell in runtime-config.json (off for older sandboxes and
+    # heuristic agents → unchanged exec-the-agent behavior). The wrapper is
+    # installed at a fixed image path; it derives its own YOLOAI_DIR paths.
+    wrapper = "/yoloai/bin/agent-run.sh" if cfg.get("fall_to_shell") else ""
     send_cmd = build_agent_launch_command(
-        agent_command, working_dir, secrets, cfg.get("agent_launch_prefix", ""))
+        agent_command, working_dir, secrets, cfg.get("agent_launch_prefix", ""),
+        wrapper=wrapper)
 
     tmux("send-keys", "-t", "main", send_cmd, "Enter", socket=socket)
     log_info("sandbox.agent_launch", "agent process started", agent=agent, model=model)

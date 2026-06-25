@@ -224,6 +224,7 @@ COPY setup_helpers.py /yoloai/bin/setup_helpers.py
 COPY tmux_io.py /yoloai/bin/tmux_io.py
 COPY status-monitor.py /yoloai/bin/status-monitor.py
 COPY diagnose-idle.sh /yoloai/bin/diagnose-idle.sh
-RUN chmod +x /yoloai/bin/entrypoint.sh /yoloai/bin/entrypoint.py /yoloai/bin/diagnose-idle.sh
+COPY agent-run.sh /yoloai/bin/agent-run.sh
+RUN chmod +x /yoloai/bin/entrypoint.sh /yoloai/bin/entrypoint.py /yoloai/bin/diagnose-idle.sh /yoloai/bin/agent-run.sh
 
 ENTRYPOINT ["/yoloai/bin/entrypoint.sh"]

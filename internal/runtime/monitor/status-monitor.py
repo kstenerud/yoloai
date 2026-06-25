@@ -754,7 +754,31 @@ def run_monitor(config_path, status_file, tmux_sock=None):
         time.sleep(POLL_INTERVAL)
 
 
+def write_done_cli(args):
+    """Handle `status-monitor.py --write-done STATUS_FILE EXIT_CODE`.
+
+    The fall-to-shell launch wrapper (agent-run.sh, D96) calls this to record the
+    agent's authoritative `done` on exit — pane death no longer does it, because
+    the wrapper keeps the pane alive as a shell. Routing through the monitor's own
+    write_status keeps the agent-status.json schema single-sourced (fenced by
+    schema_version_test.go) instead of duplicated in shell.
+    """
+    if len(args) < 2:
+        print("Usage: status-monitor.py --write-done STATUS_FILE EXIT_CODE", file=sys.stderr)
+        sys.exit(2)
+    status_file = args[0]
+    try:
+        exit_code = int(args[1])
+    except ValueError:
+        exit_code = 1
+    write_status(status_file, "done", exit_code)
+
+
 def main():
+    if len(sys.argv) >= 2 and sys.argv[1] == "--write-done":
+        write_done_cli(sys.argv[2:])
+        return
+
     if len(sys.argv) < 3:
         print(f"Usage: {sys.argv[0]} CONFIG_PATH STATUS_FILE [TMUX_SOCK]", file=sys.stderr)
         sys.exit(1)

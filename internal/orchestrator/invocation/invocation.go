@@ -200,6 +200,19 @@ func ResolveIdleMode(idle agent.IdleSupport) string {
 	return IdleModeHeuristicOnly
 }
 
+// ResolveFallToShell decides whether the agent launches under the fall-to-shell
+// wrapper (agent-run.sh, D96 / agent-detection.md). The wrapper records an
+// authoritative `done` on agent exit and keeps the pane alive as a shell, which
+// is only safe while nothing re-derives active/idle from that idle shell. In
+// hook-authoritative mode the monitor runs no heuristics while the pane lives, so
+// the wrapper's `done` survives untouched — enabled. Heuristic mode would clobber
+// it (the monitor reads the idle shell as `idle`) until the runner learns to
+// honor a wrapper-written `done` (Phase 3) — disabled for now. This is the
+// rollout gate; it widens to heuristic agents once that honor-change lands.
+func ResolveFallToShell(idle agent.IdleSupport) bool {
+	return idle.Hook
+}
+
 // ReadPrompt reads the prompt from --prompt, --prompt-file, or stdin ("-").
 // homeDir is used to expand leading "~" in the promptFile path. stdin is the
 // reader the "-" sentinel pulls from — threaded from the Engine's input

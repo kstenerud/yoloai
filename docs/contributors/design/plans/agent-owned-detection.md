@@ -121,7 +121,7 @@ Write a short design doc + decision (next Dxx) resolving these BEFORE coding:
 **D96**. Gate: awaiting design review before Phase 1.
 
 **Phase 1 — Fall-to-shell + wrapper-writes-done, hook-authoritative only
-(Claude).** The safe increment: change the launch command (DD3 wrapper) so on
+(Claude). ✅ DONE 2026-06-25 (verified real-Docker).** The safe increment: change the launch command (DD3 wrapper) so on
 Claude's exit it writes `done`, prints the resume hint, and execs a shell. The
 monitor (hook-authoritative) already runs no heuristics, so the wrapper's `done`
 survives. *Docker checkpoint:* create a Claude sandbox; quit the agent; verify

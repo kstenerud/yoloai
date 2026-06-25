@@ -42,3 +42,8 @@ var embeddedStatusMonitor = monitor.Script()
 
 // embeddedDiagnoseIdle provides the idle detection diagnostic script.
 var embeddedDiagnoseIdle = monitor.DiagnoseScript()
+
+// embeddedAgentRun provides the fall-to-shell agent launch wrapper (D96),
+// installed executable in /yoloai/bin and invoked by the launch command for
+// hook-authoritative agents.
+var embeddedAgentRun = monitor.AgentRunScript()
