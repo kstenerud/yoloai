@@ -51,11 +51,39 @@ container runs, from `{agent-declared shapes + caller-supplied values + the asse
      at `/run/secrets`; the seam must lift that assumption too, or it's drawn one layer too high;
    - the host-config seed must be able to become **opt-in / filtered** rather than wholesale-copy (DF39).
 
+## What "secure secrets" actually means (threat model)
+
+Concealing an in-use credential from the agent is a **non-goal**: usable implies reachable — an agent with
+code-execution and a network path can read or abuse any credential it must use to do its task (an SSH key it
+needs for git, an API key it calls). File-vs-env delivery does not change this.
+
+Secure-secrets is instead three things:
+
+1. **Blast-radius / scope.** Deliver a credential whose theft is bounded — a metered/scoped per-task token
+   rather than a master key; a repo-scoped deploy key rather than the whole `~/.ssh`. This is largely
+   **caller-side**: the embedder supplies a scoped credential via the D63 caller-`Env` snapshot; yoloAI's job
+   is faithful delivery and not over-granting.
+
+2. **Bystander-exclusion ([DF39](findings-unresolved.md)).** Do not hand the agent credentials the task does
+   not need — filtered/opt-in host-config seed, not a wholesale `~/.claude` copy. This one **yoloAI can
+   enforce**.
+
+3. **Exfil-cost reduction.** Broker / just-in-time injection — an egress proxy injecting an API auth header so
+   the key never enters the sandbox; ssh-agent forwarding so the agent can sign/push during the session but
+   cannot walk away with the key. Not bulletproof, but raises theft from "read a file" to "actively intercept
+   your own tool calls" and shrinks the at-rest footprint.
+
+**At-rest hygiene is not a default concern.** yoloAI sandboxes are single-purpose and ephemeral; on a
+single-user host the staged secret is the user's own `0600` file (and post-E3, Docker stages no host file at
+all). Plaintext-at-rest only matters when **multiple principals' credentials share one host** — an embedded
+multi-principal daemon — and that is handled by the per-principal `SecretsStagingDir` knob (an embedder
+control), not by default behavior or a runtime warning.
+
 ## What envsetup stages
 
 | Stage | From (shape) | From (value) | Notes |
 |---|---|---|---|
-| **Secrets** | agent: env-var names + seed-file list | caller: the `Env` snapshot + host files (D63) | bind-mounted secrets dir; the DF38 seam |
+| **Secrets** | agent: env-var names + seed-file list | caller: the `Env` snapshot + host files (D63) | **Docker/Launch path (E3):** delivered as `ProcSpec.Env` (env-of-the-launched `sandbox-setup.py`), `YOLOAI_SECRET_KEYS` sentinel names which vars are secrets — no host-staged dir. **Legacy backends** (containerd, tart, seatbelt — no `ProcessLauncher`): still a bind-mounted secrets dir at `/run/secrets` (containerd) or `<sandbox>/secrets/` (tart/seatbelt) until they are carved. The DF38 seam. |
 | **Seed files** | agent: `SeedFiles` + `StateDir` + `AgentFilesExclude` | the agent's host config (incl. `ABC`) | auth-only files skipped if a key is set; the DF39 seam |
 | **Settings** | agent: self-config key-flips + the `ApplySettings` residual | — | host-side patch of the seeded `settings.json` |
 | **Context (`DEF`)** | agent: the injection *method* (append-at-file / launch-flag) | the fan-in *fragments* (envsetup **assembles** → `DEF`) | append to the seeded `ABC`, don't clobber (D89) |
@@ -68,11 +96,14 @@ container runs, from `{agent-declared shapes + caller-supplied values + the asse
   **envsetup gathers the fragments into the single `DEF`** and delivers it. (Previously the spec said envsetup
   "receives `DEF` pre-assembled" and the agent disclaimed assembly — leaving it ownerless. Resolved: assemble +
   deliver is one job, envsetup's.)
-- **Envsetup claims the `entrypoint.py` secrets work** ([DF41](findings-unresolved.md)): the **secrets read**
-  from `/run/secrets` and the **`.secrets-consumed` marker handshake** (the host↔sandbox signal that lets the
-  host delete the staged dir) re-home here — they are credential delivery + its teardown half. Under the carve
-  they become Go-driven steps over the neutral keep-alive, in the backend's locality
-  ([backend-topology.md](backend-topology.md)). (UID-remap/overlay → substrate; `isolate_network` → netpolicy.)
+- **Envsetup claims the `entrypoint.py` secrets work** ([DF41](findings-unresolved.md)): for the
+  **Docker/Launch path** this is **resolved by dissolution** (E3: credentials are delivered as `ProcSpec.Env`,
+  so there is no host-staged `/run/secrets` dir to read and no `.secrets-consumed` marker to write — the
+  marker and the read simply do not exist on this path). For **legacy backends** (containerd, tart, seatbelt),
+  the secrets read from `/run/secrets` + the `.secrets-consumed` marker handshake (the host↔sandbox signal
+  that lets the host delete the staged dir) remain — they re-home to envsetup and become Go-driven steps over
+  the neutral keep-alive once those backends are carved. Implemented + verified on real Docker (commit
+  163533a9). (UID-remap/overlay → substrate; `isolate_network` → netpolicy.)
 - **Ordering is a contract, not an accident.** The stages have a hard happens-before: substrate provision →
   **seed `ABC`** → **append `DEF`** (the Context stage appends to the *seeded* file — "append, don't clobber");
   settings patch the seeded `settings.json`; the staged agent-config artifact must exist before the session
@@ -90,10 +121,12 @@ container runs, from `{agent-declared shapes + caller-supplied values + the asse
   **compiles it into `ProcSpec.Env`** at launch; `ProvisionSpec.Env` is the base it layers over; caller overlay
   wins. The resolved **model** rides the agent command (via `ModelFlag`) compiled into `ProcSpec`, *not* an env
   var, unless an agent declares an env-based model.
-- **Characterize-and-surface the credential-at-rest now** ([DF43](findings-unresolved.md)/DF39): the baseline
-  must **warn** that host creds enter an untrusted box, and that **seatbelt/tart keep the staged secrets on
-  disk for the sandbox lifetime** (the container path is ephemeral). The secure-secrets build (DF38) is the
-  durable fix; the *surfacing* is baseline-now.
+- **Credential-at-rest ([DF43](findings-unresolved.md)/DF39).** The at-rest concern is **not** a default
+  baseline warning. On the Docker/Launch path (E3) no host file is staged at all; on a single-user/ephemeral
+  host the staged credential is the user's own `0600` file. **seatbelt/tart keep staged secrets on disk for
+  the sandbox lifetime** and must surface this in integrator documentation (not a CLI warning); that handling
+  is the per-principal `SecretsStagingDir` embedder knob. The secure-secrets build (DF38) is the durable fix
+  for all backends.
 
 ## Cross-references
 

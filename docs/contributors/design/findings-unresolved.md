@@ -193,7 +193,13 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 
 - **Discovered:** 2026-06-24 · **Workstream:** public-layering design-review remediation ([D92](../decisions/working-notes.md))
 - **Severity:** MEDIUM (load-bearing for the D88 carve; not a runtime bug yet — a design hole that would orphan working code at Shape)
-- **Disposition:** PARKED (resolved-in-design by D92's rehoming; the *Shape* must implement it)
+- **Disposition:** PARTIALLY RESOLVED — **Docker/Launch path: dissolved by E3** (secrets delivered as
+  `ProcSpec.Env`; no host-staged `/run/secrets` dir, no `.secrets-consumed` marker — nothing to re-home for
+  the secrets piece on this path; implemented + verified on real Docker, commit 163533a9). UID-remap,
+  overlay-mount → substrate; `isolate_network` → netpolicy; all per D92 design — pending Shape
+  implementation. **Legacy backends** (containerd, tart, seatbelt): secrets-read + marker still present in
+  `entrypoint.py`, re-home to envsetup as Go-driven steps when those backends are carved. The UID-remap,
+  overlay-mount, and `isolate_network` pieces remain PARKED pending Shape for all backends.
 - **Description:** `entrypoint.py::main()` does four **agent-free** root operations before `gosu`-exec'ing the agent: **UID/GID remap** (`:70-103`), reading **staged secrets** from `/run/secrets` + the **`.secrets-consumed` marker handshake** (`:106-152`), **network isolation** (`:180-286`), and the **in-container overlay mount** (`:289-368`). The D88 carve makes PID 1 neutral and demotes the agent session to a `Launch` — which would **orphan all four**, because they live inline in the agent-facing Python with no Go/abstraction owning them. Verified across the tree. Rehoming (D92): **UID-remap + overlay-mount → substrate** (provisioning); **`isolate_network` → netpolicy** (its `ip-filter` strategy — already designed); **secrets read + consumed-marker → envsetup** (credential delivery + its teardown half). Each spec must now **explicitly claim** its piece.
 - **Pointer:** `internal/runtime/docker/resources/entrypoint.py` (`main` `:393-446`; `remap_uid`, `read_secrets`, `signal_secrets_consumed`, `isolate_network`, `apply_overlays`). Go path-computation only: `collectOverlayMounts` (`orchestrator/create/prepare_dirs.go:434`). Resolution: [backend-topology.md](backend-topology.md), substrate/netpolicy/envsetup specs.
 
@@ -208,10 +214,17 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 ### DF43 — seatbelt/tart keep staged secrets at rest for the sandbox lifetime; container path has a narrow crash-leak
 
 - **Discovered:** 2026-06-24 · **Workstream:** public-layering design-review remediation (D92)
-- **Severity:** MEDIUM (security — credential-at-rest; sharper for the metered-JV-key + adversarial-agent direction)
-- **Disposition:** PARKED (envsetup characterize-and-surface now; the secure-secrets seam, DF38, is the real fix)
-- **Description:** The **container** backends stage secrets in an ephemeral `os.MkdirTemp(…, "yoloai-secrets-*")` deleted via `defer os.RemoveAll` after the consumed-marker handshake — clean, no credential-at-rest in normal operation. But **seatbelt and tart write secrets into the *persistent* `<sandboxPath>/secrets/`**, on disk for the **whole sandbox lifetime**, removed only on destroy. And the container path has a narrow leak: a SIGKILL between `MkdirTemp` and the deferred remove leaves `0600` files in `/tmp` with **no startup sweep** for stale `yoloai-secrets-*`. Envsetup should **characterize-and-surface** this (and DF39) now; the secure-secrets model (DF38) is the durable fix.
-- **Pointer:** container path `provision.go:33`, `launch.go:52-54,201-217`; seatbelt `seatbelt.go:206-225`; tart `tart.go:1196-1215`, `:456`. Related: DF38, DF39.
+- **Severity:** LOW (DOWNGRADED from MEDIUM — Docker now stages no host file at all post-E3; at-rest is moot
+  for single-user/ephemeral use)
+- **Disposition:** DOWNGRADED — decided NOT to emit a runtime warning. Reasoning (D93): at-rest hygiene is
+  not a default concern on the single-user/ephemeral model (the staged secret is the user's own `0600` file;
+  Docker/Launch path stages no host file at all post-E3). The multi-principal-daemon case is the embedder's
+  concern, addressed by the `SecretsStagingDir` knob and surfaced in integrator documentation if anywhere.
+  **seatbelt/tart** still persist secrets to `<sandbox>/secrets/` for the sandbox lifetime — that is a
+  real-but-non-default concern documented in `envsetup.md §5` for integrators. The secure-secrets build
+  (DF38) remains the durable fix.
+- **Description:** The **container** backends stage secrets in an ephemeral `os.MkdirTemp(…, "yoloai-secrets-*")` deleted via `defer os.RemoveAll` after the consumed-marker handshake — and **post-E3 (Docker/Launch path) no host file is staged at all** (credentials delivered as `ProcSpec.Env`). But **seatbelt and tart write secrets into the *persistent* `<sandboxPath>/secrets/`**, on disk for the **whole sandbox lifetime**, removed only on destroy. The legacy container path also has a narrow crash-leak: a SIGKILL between `MkdirTemp` and the deferred remove leaves `0600` files in `/tmp` with no startup sweep for stale `yoloai-secrets-*`.
+- **Pointer:** Docker/Launch path: no host-staged dir (E3, commit 163533a9); legacy container `provision.go:33`, `launch.go:52-54,201-217`; seatbelt `seatbelt.go:206-225`; tart `tart.go:1196-1215`, `:456`. Related: DF38, DF39.
 
 ### DF44 — the Launch'd session-runner does not survive the launching client's exit
 
@@ -236,6 +249,23 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 - **Disposition:** RESOLVED-VERIFIED — fix **(C)**, the durable monitor (`status-monitor.py` no longer exits on pane-death; it records `done` and keeps watching, re-detecting `done→active/idle` on respawn). Verified end-to-end on real docker: kill agent → monitor survives + status `done`; `yoloai start` → agent back + same monitor + status recovered to `idle`. Drain to `findings-resolved.md` at next tidy. **Pre-existing, not a carve regression** — but the carve made in-place relaunch the common, reliable path (box always stays up), so the gap surfaced. Fix (C) chosen over (A)/(B) because it matches the carve thesis: the session (runner + tmux + monitor) is the durable thing the agent is launched into, and it's the right foundation for the tier-2 completion work.
 - **Description:** `status-monitor.py` is **one-shot**: it watches the tmux pane and, when the agent exits, writes `status:done` + exit code and **exits** (`status-monitor.py:615-695`). It is launched **only** by `sandbox-setup.py` at initial setup (`:1325`). The terminal-status relaunch path — `Start` on a `Done`/`Failed` agent → `handleTerminalStatus` → `relaunchAgent` — does `tmux respawn-pane -t main -k <agentCmd>` to bring the agent back, but **never restarts the monitor** (no monitor reference anywhere in `lifecycle/`). **Verified on real docker:** kill the agent → box survives (carve holder + session-runner persist) → status flips to `done, exit_code 143` → `yoloai start` → agent returns and is interactive, **but the monitor is gone and `agent-status.json` is frozen at the prior `done`** — so idle/done detection no longer tracks the relaunched agent. Three fix directions: **(A)** `relaunchAgent` also re-launches the monitor (host-driven, matches today's model); **(B)** route relaunch through the persisting session-runner (carve-aligned: the runner owns the session); **(C)** make the monitor durable across agent runs (don't exit on pane-death; re-detect `done→active` on respawn).
 - **Pointer:** `internal/runtime/monitor/status-monitor.py:615-695` (exits on `pane_dead`); `internal/runtime/monitor/sandbox-setup.py:1188,1325` (`launch_monitor`, setup-only); `internal/orchestrator/lifecycle/restart.go:277` (`relaunchAgent`, no monitor restart); `start.go:301` (`Done`/`Failed` → `handleTerminalStatus`).
+
+### DF47 — E3 loose ends: vestigial `.secrets-consumed` write in `sandbox-setup.py`; `YOLOAI_SECRET_KEYS` visible in tmux env
+
+- **Discovered:** 2026-06-25 · **Workstream:** public-layering Shape, E3 env-delivery verification (commit 163533a9)
+- **Severity:** LOW (harmless litter + minor info-leak; neither is a correctness or security regression)
+- **Disposition:** PARKED (tidy-ups; address when touching `sandbox-setup.py` or the Launch path next)
+- **Description:** Two small loose ends left after E3 on the Docker/Launch path: **(a)** `sandbox-setup.py`
+  still **writes the `.secrets-consumed` marker** (`:signal_secrets_consumed`) even on the Docker/Launch path
+  where the host no longer waits for it — the host's `waitForSecretsConsumed` logic was removed by E3, so the
+  write is vestigial litter under `~/.yoloai/.../logs/`. Harmless, but should be gated off for Docker (the
+  marker is still meaningful for legacy backends). **(b)** The `YOLOAI_SECRET_KEYS` sentinel (key *names*
+  only, not values) passed in `ProcSpec.Env` is visible in the agent's tmux environment after
+  `sandbox-setup.py` starts tmux — could be unset after the secrets are consumed to reduce the info-footprint
+  in the session env.
+- **Pointer:** `internal/runtime/docker/resources/sandbox-setup.py` (`signal_secrets_consumed`); the
+  `YOLOAI_SECRET_KEYS` env var set in `internal/orchestrator/launch/launch.go` (or wherever E3 injects the
+  sentinel into `ProcSpec.Env`). Related: DF41, DF43.
 
 ## Policy origin
 
