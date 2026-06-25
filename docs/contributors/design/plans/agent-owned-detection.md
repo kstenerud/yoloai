@@ -116,8 +116,9 @@ Write a short design doc + decision (next Dxx) resolving these BEFORE coding:
 
 ## Build phases (each ends with a Docker checkpoint — do not proceed until green)
 
-**Phase 0 — Design.** Write the spec/decision (DD1–DD6). No code. Gate: design
-reviewed.
+**Phase 0 — Design. ✅ DONE 2026-06-25.** DD1–DD6 resolved in
+[../agent-detection.md](../agent-detection.md) (the build contracts) + decision
+**D96**. Gate: awaiting design review before Phase 1.
 
 **Phase 1 — Fall-to-shell + wrapper-writes-done, hook-authoritative only
 (Claude).** The safe increment: change the launch command (DD3 wrapper) so on
