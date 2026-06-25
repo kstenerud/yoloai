@@ -16,6 +16,7 @@ import (
 	"github.com/containerd/errdefs"
 	specs "github.com/opencontainers/runtime-spec/specs-go"
 
+	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime"
 )
 
@@ -133,7 +134,7 @@ func (r *Runtime) InteractiveExec(ctx context.Context, name string, cmd []string
 		return err
 	}
 
-	process, exitCh, err := startInteractiveExec(ctx, task, ctr, cmd, user, workDir, io)
+	process, exitCh, err := startInteractiveExec(ctx, r.layout, task, ctr, cmd, user, workDir, io)
 	if err != nil {
 		return err
 	}
@@ -198,8 +199,8 @@ func (r *Runtime) loadContainerAndTask(ctx context.Context, name string) (client
 
 // startInteractiveExec creates the FIFO set, builds the process spec, and starts the exec.
 // Returns the process, an exit channel, and any error.
-func startInteractiveExec(ctx context.Context, task client.Task, ctr client.Container, cmd []string, user, workDir string, io runtime.IOStreams) (client.Process, <-chan client.ExitStatus, error) {
-	fifoDir, err := os.MkdirTemp("", "yoloai-exec-")
+func startInteractiveExec(ctx context.Context, layout config.Layout, task client.Task, ctr client.Container, cmd []string, user, workDir string, io runtime.IOStreams) (client.Process, <-chan client.ExitStatus, error) {
+	fifoDir, err := layout.MkdirTemp("yoloai-exec-")
 	if err != nil {
 		return nil, nil, fmt.Errorf("create FIFO dir: %w", err)
 	}

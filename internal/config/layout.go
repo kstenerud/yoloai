@@ -4,6 +4,7 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
 
 	"github.com/kstenerud/yoloai/internal/fileutil"
@@ -89,14 +90,38 @@ type Layout struct {
 	// SecretsStagingDir is the parent directory under which the short-lived
 	// per-sandbox secrets directory is created (one file per credential,
 	// bind-mounted into the container and removed seconds after startup). The
-	// zero value "" means "use the OS default temp dir" (os.TempDir()), which
-	// is what the CLI uses. A daemon embedder serving multiple principals can
-	// point this at a per-principal tmpfs so one principal's plaintext
-	// credentials are never staged on a path another principal can read. This
-	// is the "the *what* stays in the library, the *where* becomes caller-
-	// supplied" refinement of D59 — the library still decides what to stage and
-	// when to delete it; the embedder decides where.
+	// zero value "" means "use Layout.MkdirTemp" (DataDir/tmp), keeping
+	// yoloai's footprint entirely under the data dir. A daemon embedder
+	// serving multiple principals can point this at a per-principal tmpfs so
+	// one principal's plaintext credentials are never staged on a path another
+	// principal can read. This is the "the *what* stays in the library, the
+	// *where* becomes caller-supplied" refinement of D59 — the library still
+	// decides what to stage and when to delete it; the embedder decides where.
 	SecretsStagingDir string
+}
+
+// TempDir returns DataDir/tmp — the yoloai-owned scratch root. Temp files live
+// here, not the global temp dir, so yoloai's entire on-disk footprint stays
+// localized under one relocatable data dir (two installs with different data
+// dirs never share scratch space).
+func (l Layout) TempDir() string { return filepath.Join(l.DataDir, "tmp") }
+
+// MkdirTemp creates a uniquely-named directory under TempDir() (creating
+// TempDir() if needed) and returns its path. The yoloai-rooted analogue of
+// os.MkdirTemp(""), used everywhere that previously wrote to the global temp dir.
+func (l Layout) MkdirTemp(pattern string) (string, error) {
+	if err := fileutil.MkdirAll(l.TempDir(), 0o700); err != nil {
+		return "", err
+	}
+	return os.MkdirTemp(l.TempDir(), pattern)
+}
+
+// CreateTemp is the file analogue of MkdirTemp.
+func (l Layout) CreateTemp(pattern string) (*os.File, error) {
+	if err := fileutil.MkdirAll(l.TempDir(), 0o700); err != nil {
+		return nil, err
+	}
+	return os.CreateTemp(l.TempDir(), pattern)
 }
 
 // WithPrincipal returns a copy of the Layout scoped to the given principal.

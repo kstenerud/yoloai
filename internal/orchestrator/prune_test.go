@@ -8,16 +8,24 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/kstenerud/yoloai/internal/config"
 )
 
+// testLayout returns a Layout whose DataDir (and therefore TempDir) is rooted
+// in the test's temp dir so PruneTempFiles never touches the real system.
+func testLayout(t *testing.T) config.Layout {
+	t.Helper()
+	return config.Layout{DataDir: t.TempDir()}
+}
+
 func TestPruneTempFiles(t *testing.T) {
-	// PruneTempFiles scans os.TempDir(), which honors $TMPDIR — point it at a
-	// throwaway dir so the test controls exactly what's present and never
-	// touches (or deletes real orphans in) the shared system temp dir.
-	t.Setenv("TMPDIR", t.TempDir())
+	layout := testLayout(t)
+	tmpRoot := layout.TempDir()
+	require.NoError(t, os.MkdirAll(tmpRoot, 0o700))
 
 	// Create a stale dir (older than maxAge) in the isolated temp dir.
-	staleDir, err := os.MkdirTemp("", "yoloai-stale-test-")
+	staleDir, err := os.MkdirTemp(tmpRoot, "yoloai-stale-test-")
 	require.NoError(t, err)
 
 	// Age it to 2 hours ago
@@ -25,11 +33,11 @@ func TestPruneTempFiles(t *testing.T) {
 	require.NoError(t, os.Chtimes(staleDir, past, past))
 
 	// Create a fresh dir (within maxAge)
-	freshDir, err := os.MkdirTemp("", "yoloai-fresh-test-")
+	freshDir, err := os.MkdirTemp(tmpRoot, "yoloai-fresh-test-")
 	require.NoError(t, err)
 
 	// Dry run: should list stale but not remove
-	pruned, failed, err := PruneTempFiles(true, 1*time.Hour)
+	pruned, failed, err := PruneTempFiles(layout, true, 1*time.Hour)
 	require.NoError(t, err)
 	assert.Empty(t, failed, "dry run never attempts removal, so never fails")
 	assert.Contains(t, pruned, staleDir)
@@ -42,7 +50,7 @@ func TestPruneTempFiles(t *testing.T) {
 	assert.NoError(t, err, "stale dir should still exist after dry run")
 
 	// Real prune
-	pruned, failed, err = PruneTempFiles(false, 1*time.Hour)
+	pruned, failed, err = PruneTempFiles(layout, false, 1*time.Hour)
 	require.NoError(t, err)
 	assert.Empty(t, failed)
 	assert.Contains(t, pruned, staleDir)
@@ -57,10 +65,12 @@ func TestPruneTempFiles(t *testing.T) {
 }
 
 func TestPruneTempFiles_NonDir(t *testing.T) {
-	t.Setenv("TMPDIR", t.TempDir())
+	layout := testLayout(t)
+	tmpRoot := layout.TempDir()
+	require.NoError(t, os.MkdirAll(tmpRoot, 0o700))
 
 	// Create a file (not dir) with yoloai- prefix — should be skipped
-	f, err := os.CreateTemp("", "yoloai-file-test-")
+	f, err := os.CreateTemp(tmpRoot, "yoloai-file-test-")
 	require.NoError(t, err)
 	f.Close() //nolint:errcheck,gosec // test cleanup
 
@@ -68,13 +78,13 @@ func TestPruneTempFiles_NonDir(t *testing.T) {
 	past := time.Now().Add(-2 * time.Hour)
 	require.NoError(t, os.Chtimes(f.Name(), past, past))
 
-	pruned, _, err := PruneTempFiles(true, 1*time.Hour)
+	pruned, _, err := PruneTempFiles(layout, true, 1*time.Hour)
 	require.NoError(t, err)
 
 	// The file should not appear in pruned (only dirs are pruned)
 	for _, p := range pruned {
 		assert.NotEqual(t, f.Name(), p)
-		// Also check by basename in case of /tmp prefix differences
+		// Also check by basename in case of path differences
 		assert.NotEqual(t, filepath.Base(f.Name()), filepath.Base(p))
 	}
 }
@@ -87,9 +97,11 @@ func TestPruneTempFiles_UnremovableReportedAsFailed(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root bypasses directory permission checks, so removal can't be made to fail this way")
 	}
-	t.Setenv("TMPDIR", t.TempDir())
+	layout := testLayout(t)
+	tmpRoot := layout.TempDir()
+	require.NoError(t, os.MkdirAll(tmpRoot, 0o700))
 
-	staleDir, err := os.MkdirTemp("", "yoloai-unremovable-test-")
+	staleDir, err := os.MkdirTemp(tmpRoot, "yoloai-unremovable-test-")
 	require.NoError(t, err)
 
 	// A child file makes the dir non-empty; stripping write on the parent means
@@ -101,7 +113,7 @@ func TestPruneTempFiles_UnremovableReportedAsFailed(t *testing.T) {
 	past := time.Now().Add(-2 * time.Hour)
 	require.NoError(t, os.Chtimes(staleDir, past, past))
 
-	pruned, failed, err := PruneTempFiles(false, 1*time.Hour)
+	pruned, failed, err := PruneTempFiles(layout, false, 1*time.Hour)
 	require.NoError(t, err)
 
 	assert.NotContains(t, pruned, staleDir, "an unremovable dir must not be reported as removed")

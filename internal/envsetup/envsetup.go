@@ -36,8 +36,9 @@ func ResolveSecretEnv(spec EnvSpec, configEnv map[string]string, hostEnv config.
 // and auth-hint values are then resolved from hostEnv (the caller-supplied host
 // environment snapshot) and overwrite on conflict (take precedence). hostEnv is the
 // sole credential source — the library never reads os.Environ (§12). The directory
-// is created under stagingRoot; "" means the OS default temp dir (os.TempDir()), so
-// an embedder can stage a principal's plaintext credentials on a per-principal tmpfs.
+// is created under stagingRoot; "" uses hostEnv.MkdirTemp (DataDir/tmp), keeping
+// yoloai's footprint localized; a non-empty stagingRoot (e.g. a per-principal tmpfs)
+// is honored as-is so an embedder can stage credentials on an isolated path.
 // Returns empty string if nothing was written.
 func CreateSecretsDir(spec EnvSpec, configEnv map[string]string, hostEnv config.Layout, stagingRoot string) (string, error) {
 	m := ResolveSecretEnv(spec, configEnv, hostEnv)
@@ -45,9 +46,17 @@ func CreateSecretsDir(spec EnvSpec, configEnv map[string]string, hostEnv config.
 		return "", nil
 	}
 
-	tmpDir, err := os.MkdirTemp(stagingRoot, "yoloai-secrets-*")
-	if err != nil {
-		return "", fmt.Errorf("create secrets temp dir: %w", err)
+	var (
+		tmpDir string
+		mkErr  error
+	)
+	if stagingRoot == "" {
+		tmpDir, mkErr = hostEnv.MkdirTemp("yoloai-secrets-*")
+	} else {
+		tmpDir, mkErr = os.MkdirTemp(stagingRoot, "yoloai-secrets-*")
+	}
+	if mkErr != nil {
+		return "", fmt.Errorf("create secrets temp dir: %w", mkErr)
 	}
 
 	// Owner-only perms: the container runs as the invoking host UID (the staging

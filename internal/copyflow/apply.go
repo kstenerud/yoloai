@@ -796,7 +796,7 @@ func GenerateFormatPatchForRefs(ctx context.Context, layout config.Layout, rt ru
 		return "", nil, fmt.Errorf("format-patch for :overlay directories requires container exec")
 	}
 
-	patchDir, err = os.MkdirTemp("", "yoloai-format-patch-*")
+	patchDir, err = layout.MkdirTemp("yoloai-format-patch-*")
 	if err != nil {
 		return "", nil, fmt.Errorf("create temp dir: %w", err)
 	}
@@ -869,7 +869,7 @@ func GenerateFormatPatch(ctx context.Context, layout config.Layout, rt runtime.B
 		return "", nil, fmt.Errorf("format-patch for :overlay directories requires container exec")
 	}
 
-	patchDir, err = os.MkdirTemp("", "yoloai-format-patch-*")
+	patchDir, err = layout.MkdirTemp("yoloai-format-patch-*")
 	if err != nil {
 		return "", nil, fmt.Errorf("create temp dir: %w", err)
 	}

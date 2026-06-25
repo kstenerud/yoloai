@@ -357,7 +357,7 @@ func (r *Runtime) pullImage(ctx context.Context, imageRef string, output io.Writ
 // the VM down. baseImage is needed for the imprint's provision checksum.
 func (r *Runtime) bootForProvisioning(ctx context.Context, vmName, baseImage string, output io.Writer, logger *slog.Logger) error {
 	// Capture tart run output to a temp log for debugging
-	vmLog, err := os.CreateTemp("", "yoloai-tart-*.log")
+	vmLog, err := r.layout.CreateTemp("yoloai-tart-*.log")
 	if err != nil {
 		return fmt.Errorf("create VM log: %w", err)
 	}
@@ -571,7 +571,7 @@ func (r *Runtime) startTempVM(ctx context.Context, vmName string) error {
 	// immediately). A file — not a bytes.Buffer — because os/exec's output-copy
 	// goroutine may still be writing when waitForBoot times out; reading the
 	// buffer concurrently would be a data race, but a file read is not.
-	runLog, err := os.CreateTemp("", "yoloai-tart-tmp-*.log")
+	runLog, err := r.layout.CreateTemp("yoloai-tart-tmp-*.log")
 	if err != nil {
 		return fmt.Errorf("create VM log: %w", err)
 	}

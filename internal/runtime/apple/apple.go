@@ -394,7 +394,7 @@ func (r *Runtime) imageExists(ctx context.Context, ref string) bool {
 // Build inputs are the same embedded resources the docker backend uses, so
 // staleness rides on the shared checksum marker.
 func (r *Runtime) buildBaseImage(ctx context.Context, layout config.Layout, output io.Writer, logger *slog.Logger) error {
-	dir, err := os.MkdirTemp("", "yoloai-apple-build-")
+	dir, err := layout.MkdirTemp("yoloai-apple-build-")
 	if err != nil {
 		return fmt.Errorf("create build dir: %w", err)
 	}
