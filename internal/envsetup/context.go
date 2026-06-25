@@ -166,10 +166,21 @@ func WriteContextFiles(sandboxDir string, meta *store.Environment, spec EnvSpec)
 		return fmt.Errorf("write context.md: %w", err)
 	}
 
-	// Write full context inline into the agent's native instruction file
+	// Write full context inline into the agent's native instruction file.
 	if spec.ContextFile != "" && spec.HasStateDir {
 		refPath := filepath.Join(sandboxDir, store.AgentRuntimeDir, spec.ContextFile)
-		if err := fileutil.WriteFile(refPath, []byte(content), 0600); err != nil {
+
+		// Append, don't clobber (D92): the seed/agent_files stage runs BEFORE this
+		// in the create flow, so the user's own context file (e.g. a seeded
+		// ~/.claude/CLAUDE.md) may already exist here. Overwriting it would destroy
+		// the user's instructions; instead the yoloAI orientation is appended after
+		// it (separated by a blank line when the seeded file is non-empty). When no
+		// file was seeded, this creates it fresh — byte-identical to the old write.
+		sep := ""
+		if info, statErr := os.Stat(refPath); statErr == nil && info.Size() > 0 {
+			sep = "\n\n"
+		}
+		if err := appendToFile(refPath, sep+content); err != nil {
 			return fmt.Errorf("write agent context file %s: %w", spec.ContextFile, err)
 		}
 
@@ -194,19 +205,23 @@ func WriteContextFiles(sandboxDir string, meta *store.Environment, spec EnvSpec)
 			"3. Read the answer and continue your task.\n\n" +
 			"Do not make assumptions about blocking decisions. Write the question file\n" +
 			"and wait. The question will be seen and answered by an external agent or user.\n"
-		f, err := fileutil.OpenFile(refPath, os.O_APPEND|os.O_WRONLY, 0600) //nolint:gosec // path is from sandbox dir, controlled by yoloai
-		if err != nil {
-			return fmt.Errorf("open agent context file %s for append: %w", spec.ContextFile, err)
-		}
-		_, writeErr := f.WriteString(qa)
-		closeErr := f.Close()
-		if writeErr != nil {
-			return fmt.Errorf("append Q&A protocol to %s: %w", spec.ContextFile, writeErr)
-		}
-		if closeErr != nil {
-			return fmt.Errorf("close agent context file %s: %w", spec.ContextFile, closeErr)
+		if err := appendToFile(refPath, qa); err != nil {
+			return fmt.Errorf("append Q&A protocol to %s: %w", spec.ContextFile, err)
 		}
 	}
 
 	return nil
+}
+
+// appendToFile appends s to the file at path, creating it (0600) if absent.
+func appendToFile(path, s string) error {
+	f, err := fileutil.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600) //nolint:gosec // path is a sandbox-controlled agent-runtime path
+	if err != nil {
+		return err
+	}
+	if _, werr := f.WriteString(s); werr != nil {
+		_ = f.Close() //nolint:errcheck // returning the write error
+		return werr
+	}
+	return f.Close()
 }
