@@ -95,6 +95,44 @@ the agent and re-establishes detection in one command.
   *formalization* (gather what exists into a typed spec), not a rewrite of the
   detector stack.
 
+### DD2 refinement — detection is a *strategy*, with a per-agent python-spine seam (reserved)
+
+`Mode` is the enum form of a more general idea: **detection is a strategy the
+agent supplies, defaulting to the heuristic stack.** The honest model (an
+extension of D89's mechanism-vs-payload — detection is a per-agent *mechanism*):
+
+- **The default strategy is the heuristic detector stack** — used by every agent
+  with no better signal, *and by user/file-defined agents* (`~/.yoloai/agents/*.yaml`),
+  which carry no code. This is today's `heuristic-only`.
+- **An agent with a native turn-completion signal supplies its own strategy** —
+  today only Claude (the `Stop` hook → `hook-authoritative`). Whether Codex /
+  Gemini / OpenCode / Aider expose an equivalent callback is the **load-bearing
+  unknown** that decides how much of this abstraction is worth building — it is
+  *unverified* and gated on [research/agent-callbacks.md](research/agent-callbacks.md).
+  If they have no callback, they fall to the heuristic default and the abstraction
+  stays Claude-vs-default (what the enum already covers).
+- **Stacking is reserved as exactly one composite, not a framework.** The one
+  combination we already know we want is `hook-assisted` (hook authoritative +
+  heuristic as a conservative backstop for a *missed* hook — session-layer.md
+  §Tier-2's reserved third mode). General N-way parallel strategies with a
+  winner-policy is **YAGNI** until a *second* composite actually appears; do not
+  build the framework for one known stack.
+- **The implementation seam — a per-agent python module ("the spine").** Detection
+  runs **in the sandbox** (the python monitor), not in the host library, so the
+  natural extension point for a code-needing strategy is a per-agent **namespaced
+  python module loaded by convention** — not a Go adapter. This is a meaningful
+  openness refinement of D89: D89 keeps *host-side procedural* mechanisms internal
+  (Go-only), but an *in-sandbox detection* strategy can be a droppable python file,
+  so **file-defined agents could eventually bring detection logic, not just data**.
+  Trust holds: in-sandbox detection is **not** a security boundary — the host
+  already treats `agent-status.json` as a hint (tier-2 is reliability, not
+  security; session-layer.md), and the agent already runs arbitrary code as the
+  same sandbox user — so a pluggable/user-supplied strategy widens no real attack
+  surface. **Reserved, not built:** populate the spine with only the two real
+  strategies (heuristic default, Claude hook) until research surfaces a third; the
+  same generalizes to *other* per-agent in-sandbox specifics later. Mirrors how
+  netpolicy reserved `egress-proxy` and envsetup reserved secure-secrets.
+
 ## DD3 — the wrapper (a staged generic script, parameterized)
 
 - **Staged script, not an inline one-liner.** The exit lifecycle (run agent →

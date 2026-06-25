@@ -130,6 +130,15 @@ isolation-notice) — is the payload side; the agent owns only the injection met
 - **The code-adapter stays internal** — agents needing a procedural mechanism (Claude's settings-merge,
   opencode's validation) stay Go-defined. The public adapter interface is gated on a real *code-needing*
   third-party agent.
+  - **Refinement (2026-06-25) — the in-sandbox exception.** "Procedural code stays Go-defined and internal"
+    holds for *host-side* mechanisms. Some per-agent mechanisms run **in the sandbox**, not the host library —
+    the prime case is **detection strategy** (the python status monitor). For those the natural extension point
+    is a droppable per-agent **python module loaded by convention** ("the spine"), which a *file-defined* agent
+    could carry — so in-sandbox detection logic is open in a way host-side Go adapters are not. The trust model
+    permits it: in-sandbox detection is not a security boundary (the host treats `agent-status.json` as a hint;
+    the agent already runs code as the same sandbox user). Seam reserved, not built — see
+    [agent-detection.md](agent-detection.md) DD2 and [research/agent-callbacks.md](research/agent-callbacks.md)
+    (the gating vendor-callback survey).
 - Declarative-izing the shipped agents' `ApplySettings` (wanted anyway; re-homing already shrank it) makes the
   shipped agents mostly file-expressible too — dogfooding the schema.
 
