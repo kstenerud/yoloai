@@ -93,6 +93,7 @@ type Options struct {
 	Profile              string                // profile name (from --profile flag)
 	Prompt               string                // prompt text (from --prompt)
 	PromptFile           string                // prompt file path (from --prompt-file)
+	Headless             bool                  // launch the agent in its own headless mode (yoloai run); requires a prompt (D100)
 	Network              NetworkMode           // network access policy
 	NetworkAllow         []string              // --network-allow flags
 	Ports                []string              // --port flags (e.g., ["3000:3000"])
@@ -362,7 +363,7 @@ func buildConfigAndEnvironment(ctx context.Context, d state.Deps, opts Options, 
 	lifecycleCfg := buildLifecycleConfig(ri.archetype, pr.archetypeDockerDRequired, ri.onCreateDone, ri.devcontainerCfg)
 
 	backend := d.Runtime.Descriptor().Type
-	configData, err := buildContainerConfig(d.Layout, agentDef, agentCommand, d.Runtime.Descriptor().AgentLaunchPrefix, tmuxConf, launch.OverlayOrResolvedMountPath(workdir), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, collectOverlayMounts(workdir, auxDirs), pr.setup, pr.autoCommitInterval, collectCopyDirs(workdir, auxDirs), opts.Name, runtime.TmuxSocketFor(d.Runtime, sandboxDir), pr.isolation, opts.VscodeTunnel, invocation.SanitizeTunnelName(opts.Name), lifecycleCfg)
+	configData, err := buildContainerConfig(d.Layout, agentDef, agentCommand, d.Runtime.Descriptor().AgentLaunchPrefix, tmuxConf, launch.OverlayOrResolvedMountPath(workdir), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, collectOverlayMounts(workdir, auxDirs), pr.setup, pr.autoCommitInterval, collectCopyDirs(workdir, auxDirs), opts.Name, runtime.TmuxSocketFor(d.Runtime, sandboxDir), pr.isolation, opts.VscodeTunnel, invocation.SanitizeTunnelName(opts.Name), lifecycleCfg, opts.Headless)
 	if err != nil {
 		return nil, nil, "", "", fmt.Errorf("build %s: %w", store.RuntimeConfigFile, err)
 	}
@@ -596,6 +597,9 @@ func resolveAgentParams(agentDef *agent.Definition, opts Options, pr *profileRes
 		return "", false, "", "", "", err
 	}
 	hasPrompt := promptText != ""
+	if opts.Headless && !hasPrompt {
+		return "", false, "", "", "", yoerrors.NewUsageError("headless mode requires a prompt (--prompt or --prompt-file)")
+	}
 
 	model := invocation.ResolveModel(agentDef, opts.Model, pr.userAliases)
 	model = invocation.ApplyModelPrefix(agentDef, model, pr.env, layout)
@@ -604,7 +608,7 @@ func resolveAgentParams(agentDef *agent.Definition, opts Options, pr *profileRes
 	}
 
 	agentArgs := pr.agentArgs[opts.Agent]
-	agentCommand := invocation.BuildAgentCommand(agentDef, model, promptText, agentArgs, opts.Passthrough)
+	agentCommand := invocation.BuildAgentCommand(agentDef, model, promptText, agentArgs, opts.Passthrough, opts.Headless)
 
 	return promptText, hasPrompt, model, agentCommand, gcfg.TmuxConf, nil
 }
@@ -740,7 +744,7 @@ func writeStatFiles(sandboxDir string, meta *store.Environment, agentDef *agent.
 // agentLaunchPrefix is the backend's constant launch wrap (BackendDescriptor.AgentLaunchPrefix;
 // e.g. a 'PATH=...' prefix for Tart), computed once by the caller and stored here as the
 // single source of truth for the agent-command wrap (W1a of the architecture remediation plan).
-func buildContainerConfig(layout config.Layout, agentDef *agent.Definition, agentCommand string, agentLaunchPrefix string, tmuxConf string, workingDir string, debug bool, networkIsolated bool, allowedDomains []string, passthrough []string, overlayMounts []runtimeconfig.OverlayMountConfig, setupCommands []string, autoCommitInterval int, copyDirs []string, sandboxName string, tmuxSocket string, isolation runtime.IsolationMode, vscodeTunnel bool, vscodeTunnelName string, lifecycle *runtimeconfig.LifecycleConfig) ([]byte, error) {
+func buildContainerConfig(layout config.Layout, agentDef *agent.Definition, agentCommand string, agentLaunchPrefix string, tmuxConf string, workingDir string, debug bool, networkIsolated bool, allowedDomains []string, passthrough []string, overlayMounts []runtimeconfig.OverlayMountConfig, setupCommands []string, autoCommitInterval int, copyDirs []string, sandboxName string, tmuxSocket string, isolation runtime.IsolationMode, vscodeTunnel bool, vscodeTunnelName string, lifecycle *runtimeconfig.LifecycleConfig, headless bool) ([]byte, error) {
 	var stateDirName string
 	if agentDef.StateDir != "" {
 		stateDirName = filepath.Base(agentDef.StateDir)
@@ -752,6 +756,7 @@ func buildContainerConfig(layout config.Layout, agentDef *agent.Definition, agen
 		HostGID:            layout.HostGID,
 		AgentCommand:       agentCommand,
 		AgentLaunchPrefix:  agentLaunchPrefix,
+		Headless:           headless,
 		StartupDelay:       int(agentDef.StartupDelay / time.Millisecond),
 		ReadyPattern:       agentDef.Idle.ReadyPattern,
 		SubmitSequence:     agentDef.SubmitSequence,
@@ -775,7 +780,7 @@ func buildContainerConfig(layout config.Layout, agentDef *agent.Definition, agen
 		},
 		IdleMode:         invocation.ResolveIdleMode(agentDef.Idle),
 		Detectors:        invocation.ResolveDetectors(agentDef.Idle),
-		FallToShell:      invocation.ResolveFallToShell(agentDef.Idle),
+		FallToShell:      invocation.ResolveFallToShell(agentDef.Idle, headless),
 		ResumeCmd:        invocation.ResolveResumeCommand(agentCommand, agentDef.ResumeFlag),
 		SandboxName:      sandboxName,
 		TmuxSocket:       tmuxSocket,

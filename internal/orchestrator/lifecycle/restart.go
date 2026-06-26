@@ -306,7 +306,7 @@ func relaunchAgentWithResume(ctx context.Context, d state.Deps, name string, met
 	}
 
 	agentArgs := resolveAgentArgs(d.Layout, meta.AgentType, meta.Profile)
-	interactiveCmd := invocation.BuildAgentCommand(agentDef, meta.Model, "", agentArgs, cfg.Passthrough)
+	interactiveCmd := invocation.BuildAgentCommand(agentDef, meta.Model, "", agentArgs, cfg.Passthrough, false)
 	socket := runtime.TmuxSocketFor(d.Runtime, sandboxDir)
 	if _, err := status.ExecInContainer(ctx, d.Runtime, name, meta, d.Layout.HostUID,
 		tmuxCmd(socket, "respawn-pane", "-t", "main", "-k", interactiveCmd),
@@ -334,7 +334,7 @@ func relaunchAgentWithCustomPrompt(ctx context.Context, d state.Deps, name strin
 	}
 
 	agentArgs := resolveAgentArgs(d.Layout, meta.AgentType, meta.Profile)
-	interactiveCmd := invocation.BuildAgentCommand(agentDef, meta.Model, "", agentArgs, cfg.Passthrough)
+	interactiveCmd := invocation.BuildAgentCommand(agentDef, meta.Model, "", agentArgs, cfg.Passthrough, false)
 	// agent_launch_prefix is the single source of truth for the backend launch
 	// wrap (W1a). Post-W1b the field is present on every sandbox (the v1->v2
 	// migration backfills it; empty for container backends, a no-op prepend), so
@@ -420,7 +420,7 @@ func prepareRelaunchFiles(d state.Deps, name string, meta *store.Environment, pr
 	}
 	agentArgs := resolveAgentArgs(d.Layout, meta.AgentType, meta.Profile)
 	return patchRuntimeConfig(sandboxDir, func(cfg *runtimeconfig.ContainerConfig) {
-		cfg.AgentCommand = invocation.BuildAgentCommand(agentDef, meta.Model, "", agentArgs, cfg.Passthrough)
+		cfg.AgentCommand = invocation.BuildAgentCommand(agentDef, meta.Model, "", agentArgs, cfg.Passthrough, false)
 	})
 }
 

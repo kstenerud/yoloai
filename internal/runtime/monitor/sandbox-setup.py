@@ -1350,8 +1350,15 @@ def main():
         launch_vscode_tunnel(cfg, socket=socket)
 
     monitor_exit(socket=socket)
-    wait_for_ready(cfg, socket=socket)
-    prompt_delivered = deliver_prompt(cfg, yoloai_dir, socket=socket, preamble=preamble)
+    if cfg.get("headless"):
+        # Headless run (D100): the prompt is baked into the launch command, so
+        # there is nothing to wait for or inject — the agent works from the first
+        # line and the monitor records done+exit-code when its pane dies. Treat it
+        # as a delivered prompt so the initial status is "active".
+        prompt_delivered = True
+    else:
+        wait_for_ready(cfg, socket=socket)
+        prompt_delivered = deliver_prompt(cfg, yoloai_dir, socket=socket, preamble=preamble)
     # Main thread is done writing to the tmux pane; the lifecycle background
     # banner is now safe to deliver.
     pane_ready.set()

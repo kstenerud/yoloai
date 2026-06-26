@@ -25,7 +25,7 @@ func TestBuildContainerConfig_LaunchPrefixStored(t *testing.T) {
 	// (unconditionally) from descriptor.AgentLaunchPrefix.
 	agentDef := agent.GetAgent("claude")
 	prefix := `PATH="/opt/homebrew/opt/node/bin:$PATH" `
-	data, err := buildContainerConfig(config.NewLayout(t.TempDir()), agentDef, "claude", prefix, "default", "/tmp", false, false, nil, nil, nil, nil, 0, nil, "test", "", "", false, "", nil)
+	data, err := buildContainerConfig(config.NewLayout(t.TempDir()), agentDef, "claude", prefix, "default", "/tmp", false, false, nil, nil, nil, nil, 0, nil, "test", "", "", false, "", nil, false)
 	require.NoError(t, err)
 	var cfg runtimeconfig.ContainerConfig
 	require.NoError(t, json.Unmarshal(data, &cfg))
@@ -34,7 +34,7 @@ func TestBuildContainerConfig_LaunchPrefixStored(t *testing.T) {
 
 func TestBuildContainerConfig_ValidJSON(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
-	data, err := buildContainerConfig(config.NewLayout(t.TempDir()), agentDef, "claude --dangerously-skip-permissions", "", "default+host", "/Users/test/project", false, false, nil, nil, nil, nil, 0, nil, "test", "", "", false, "", nil)
+	data, err := buildContainerConfig(config.NewLayout(t.TempDir()), agentDef, "claude --dangerously-skip-permissions", "", "default+host", "/Users/test/project", false, false, nil, nil, nil, nil, 0, nil, "test", "", "", false, "", nil, false)
 	require.NoError(t, err)
 
 	var cfg runtimeconfig.ContainerConfig
@@ -52,6 +52,27 @@ func TestBuildContainerConfig_ValidJSON(t *testing.T) {
 	assert.Empty(t, cfg.AllowedDomains)
 }
 
+func TestBuildContainerConfig_Headless(t *testing.T) {
+	// A headless run (D100) sets headless and turns fall-to-shell off so the pane
+	// dies on agent exit → Tier-3 done detection. The interactive default keeps
+	// fall-to-shell on.
+	agentDef := agent.GetAgent("claude")
+
+	headlessData, err := buildContainerConfig(config.NewLayout(t.TempDir()), agentDef, `claude -p "x"`, "", "default", "/tmp", false, false, nil, nil, nil, nil, 0, nil, "test", "", "", false, "", nil, true)
+	require.NoError(t, err)
+	var headless runtimeconfig.ContainerConfig
+	require.NoError(t, json.Unmarshal(headlessData, &headless))
+	assert.True(t, headless.Headless)
+	assert.False(t, headless.FallToShell, "headless must not fall to shell")
+
+	interactiveData, err := buildContainerConfig(config.NewLayout(t.TempDir()), agentDef, "claude", "", "default", "/tmp", false, false, nil, nil, nil, nil, 0, nil, "test", "", "", false, "", nil, false)
+	require.NoError(t, err)
+	var interactive runtimeconfig.ContainerConfig
+	require.NoError(t, json.Unmarshal(interactiveData, &interactive))
+	assert.False(t, interactive.Headless)
+	assert.True(t, interactive.FallToShell, "interactive keeps fall-to-shell on")
+}
+
 func TestBuildContainerConfig_StateDirName(t *testing.T) {
 	tests := []struct {
 		agent    string
@@ -64,7 +85,7 @@ func TestBuildContainerConfig_StateDirName(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.agent, func(t *testing.T) {
 			agentDef := agent.GetAgent(tt.agent)
-			data, err := buildContainerConfig(config.NewLayout(t.TempDir()), agentDef, "cmd", "", "default", "/tmp", false, false, nil, nil, nil, nil, 0, nil, "test", "", "", false, "", nil)
+			data, err := buildContainerConfig(config.NewLayout(t.TempDir()), agentDef, "cmd", "", "default", "/tmp", false, false, nil, nil, nil, nil, 0, nil, "test", "", "", false, "", nil, false)
 			require.NoError(t, err)
 			var cfg runtimeconfig.ContainerConfig
 			require.NoError(t, json.Unmarshal(data, &cfg))
@@ -76,7 +97,7 @@ func TestBuildContainerConfig_StateDirName(t *testing.T) {
 func TestBuildContainerConfig_NetworkIsolated(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
 	domains := []string{"api.anthropic.com", "sentry.io"}
-	data, err := buildContainerConfig(config.NewLayout(t.TempDir()), agentDef, "claude", "", "default", "/tmp", false, true, domains, nil, nil, nil, 0, nil, "test", "", "", false, "", nil)
+	data, err := buildContainerConfig(config.NewLayout(t.TempDir()), agentDef, "claude", "", "default", "/tmp", false, true, domains, nil, nil, nil, 0, nil, "test", "", "", false, "", nil, false)
 	require.NoError(t, err)
 
 	var cfg runtimeconfig.ContainerConfig
@@ -89,7 +110,7 @@ func TestBuildContainerConfig_NetworkIsolated(t *testing.T) {
 func TestBuildContainerConfig_AutoCommitInterval(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
 	copyDirs := []string{"/home/user/project", "/home/user/lib"}
-	data, err := buildContainerConfig(config.NewLayout(t.TempDir()), agentDef, "claude", "", "default", "/tmp", false, false, nil, nil, nil, nil, 60, copyDirs, "test", "", "", false, "", nil)
+	data, err := buildContainerConfig(config.NewLayout(t.TempDir()), agentDef, "claude", "", "default", "/tmp", false, false, nil, nil, nil, nil, 60, copyDirs, "test", "", "", false, "", nil, false)
 	require.NoError(t, err)
 
 	var cfg runtimeconfig.ContainerConfig
@@ -101,7 +122,7 @@ func TestBuildContainerConfig_AutoCommitInterval(t *testing.T) {
 
 func TestBuildContainerConfig_AutoCommitIntervalZero(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
-	data, err := buildContainerConfig(config.NewLayout(t.TempDir()), agentDef, "claude", "", "default", "/tmp", false, false, nil, nil, nil, nil, 0, nil, "test", "", "", false, "", nil)
+	data, err := buildContainerConfig(config.NewLayout(t.TempDir()), agentDef, "claude", "", "default", "/tmp", false, false, nil, nil, nil, nil, 0, nil, "test", "", "", false, "", nil, false)
 	require.NoError(t, err)
 
 	var cfg runtimeconfig.ContainerConfig
