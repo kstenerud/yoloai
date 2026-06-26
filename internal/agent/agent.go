@@ -34,9 +34,10 @@ const (
 type SeedFile struct {
 	HostPath   string // e.g., "~/.claude/settings.json"
 	TargetPath string // relative to StateDir, e.g., "settings.json"
-	// Content, when non-nil, is written verbatim instead of reading HostPath —
-	// for yoloai-provided files like the OpenCode status plugin (not copied from
-	// the host).
+	// Content, when non-nil, is a yoloai-provided fallback: written when HostPath
+	// is empty (a file with no host source, e.g. the OpenCode status plugin) or
+	// when the host file is absent (an agent default, e.g. aider's empty "{}"
+	// conf). A present host file still wins.
 	Content         []byte
 	AuthOnly        bool   // if true, only required when no API key is set
 	HomeDir         bool   // if true, TargetPath is relative to /home/yoloai/ instead of StateDir
@@ -142,7 +143,11 @@ var agents = map[string]*Definition{
 		APIKeyEnvVars:   []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "DEEPSEEK_API_KEY", "OPENROUTER_API_KEY"},
 		AuthHintEnvVars: []string{"OLLAMA_API_BASE", "OPENAI_API_BASE"},
 		SeedFiles: []SeedFile{
-			{HostPath: "~/.aider.conf.yml", TargetPath: ".aider.conf.yml", HomeDir: true},
+			// Default to an empty YAML map when the host has no aider config: aider
+			// errors on an empty/whitespace .aider.conf.yml ("NoneType, not a
+			// dict"), and the file is always present in the sandbox. A real host
+			// config still wins (Content is a fallback).
+			{HostPath: "~/.aider.conf.yml", TargetPath: ".aider.conf.yml", Content: []byte("{}\n"), HomeDir: true},
 		},
 		StateDir:       "",
 		SubmitSequence: "Enter",

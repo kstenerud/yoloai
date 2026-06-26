@@ -26,6 +26,7 @@ func TestGetAgent_Aider(t *testing.T) {
 	assert.Equal(t, ".aider.conf.yml", def.SeedFiles[0].TargetPath)
 	assert.True(t, def.SeedFiles[0].HomeDir)
 	assert.False(t, def.SeedFiles[0].AuthOnly)
+	assert.Equal(t, []byte("{}\n"), def.SeedFiles[0].Content, "aider needs a valid empty-conf fallback")
 	assert.Equal(t, "", def.StateDir)
 	assert.Equal(t, "Enter", def.SubmitSequence)
 	assert.Equal(t, 3*time.Second, def.StartupDelay)

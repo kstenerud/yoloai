@@ -52,7 +52,7 @@ type EnvSpec struct {
 type SeedFile struct {
 	HostPath        string
 	TargetPath      string
-	Content         []byte // when non-nil, written verbatim instead of reading HostPath
+	Content         []byte // fallback content: written when HostPath is empty or its file is absent
 	AuthOnly        bool
 	HomeDir         bool
 	KeychainService string

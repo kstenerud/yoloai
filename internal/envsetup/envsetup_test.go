@@ -21,6 +21,7 @@ func agentSpec(agentDef *agent.Definition) EnvSpec {
 		sfs[i] = SeedFile{
 			HostPath:        sf.HostPath,
 			TargetPath:      sf.TargetPath,
+			Content:         sf.Content,
 			AuthOnly:        sf.AuthOnly,
 			HomeDir:         sf.HomeDir,
 			KeychainService: sf.KeychainService,
@@ -260,6 +261,42 @@ func TestCopySeedFiles_CopiesExistingFiles(t *testing.T) {
 
 	// settings.json should be in agent-runtime (not auth-only)
 	assert.FileExists(t, filepath.Join(sandboxDir, store.AgentRuntimeDir, "settings.json"))
+}
+
+func TestCopySeedFiles_ContentFallbackWhenHostAbsent(t *testing.T) {
+	tmpDir := t.TempDir()
+	sandboxDir := filepath.Join(tmpDir, "sandbox")
+	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
+	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "home-seed"), 0750))
+
+	// Host file does not exist → the Content fallback is written (aider's case).
+	spec := EnvSpec{SeedFiles: []SeedFile{
+		{HostPath: filepath.Join(tmpDir, "absent.yml"), TargetPath: ".aider.conf.yml", Content: []byte("{}\n"), HomeDir: true},
+	}}
+	_, err := CopySeedFiles(spec, sandboxDir, false, tmpDir, config.Layout{})
+	require.NoError(t, err)
+	got, err := os.ReadFile(filepath.Join(sandboxDir, "home-seed", ".aider.conf.yml")) //nolint:gosec // G304: test-controlled temp path
+	require.NoError(t, err)
+	assert.Equal(t, "{}\n", string(got))
+}
+
+func TestCopySeedFiles_HostFileWinsOverContent(t *testing.T) {
+	tmpDir := t.TempDir()
+	hostConf := filepath.Join(tmpDir, "host.yml")
+	require.NoError(t, os.WriteFile(hostConf, []byte("model: x\n"), 0600))
+	sandboxDir := filepath.Join(tmpDir, "sandbox")
+	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
+	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "home-seed"), 0750))
+
+	// A present host file wins over the Content fallback.
+	spec := EnvSpec{SeedFiles: []SeedFile{
+		{HostPath: hostConf, TargetPath: ".aider.conf.yml", Content: []byte("{}\n"), HomeDir: true},
+	}}
+	_, err := CopySeedFiles(spec, sandboxDir, false, tmpDir, config.Layout{})
+	require.NoError(t, err)
+	got, err := os.ReadFile(filepath.Join(sandboxDir, "home-seed", ".aider.conf.yml")) //nolint:gosec // G304: test-controlled temp path
+	require.NoError(t, err)
+	assert.Equal(t, "model: x\n", string(got))
 }
 
 // TestCopySeedFiles_StatusLineScriptIsExecutable verifies the Executable seed

@@ -192,7 +192,6 @@ RUN mkdir -p \
     && touch \
         /home/yoloai/.claude.json \
         /home/yoloai/.opencode.json \
-        /home/yoloai/.aider.conf.yml \
         /home/yoloai/.tmux.conf \
     && chown -R yoloai:yoloai /home/yoloai
 

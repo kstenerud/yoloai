@@ -205,22 +205,27 @@ func shouldSkipSeedFile(sf SeedFile, hasAPIKey bool, hostEnv config.Layout) bool
 // Returns (data, true, nil) if found, (nil, false, nil) if not found, or (nil, false, err) on error.
 // homeDir is used for ~ expansion in seed file host paths.
 func loadSeedFileData(sf SeedFile, homeDir string) ([]byte, bool, error) {
-	if sf.Content != nil {
-		return sf.Content, true, nil
-	}
-	hostPath := config.ExpandTilde(sf.HostPath, homeDir)
-	if _, err := os.Stat(hostPath); err == nil {
-		data, readErr := os.ReadFile(hostPath) //nolint:gosec // G304: path is from agent definition, not user input
-		if readErr != nil {
-			return nil, false, fmt.Errorf("read %s: %w", hostPath, readErr)
+	if sf.HostPath != "" {
+		hostPath := config.ExpandTilde(sf.HostPath, homeDir)
+		if _, err := os.Stat(hostPath); err == nil {
+			data, readErr := os.ReadFile(hostPath) //nolint:gosec // G304: path is from agent definition, not user input
+			if readErr != nil {
+				return nil, false, fmt.Errorf("read %s: %w", hostPath, readErr)
+			}
+			return data, true, nil
 		}
-		return data, true, nil
 	}
 	if sf.KeychainService != "" {
 		data, keychainErr := KeychainReader(sf.KeychainService)
 		if keychainErr == nil {
 			return data, true, nil
 		}
+	}
+	// Content is the fallback: the sole source when the seed has no HostPath
+	// (e.g. the OpenCode status plugin), or an agent-provided default written
+	// when the host file is absent (e.g. aider's empty "{}" conf).
+	if sf.Content != nil {
+		return sf.Content, true, nil
 	}
 	return nil, false, nil
 }
