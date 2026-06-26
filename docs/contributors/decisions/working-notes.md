@@ -916,6 +916,29 @@ Only then the **mechanical move**: `runtime` first/with `store`, repoint the fen
 
 **Cross-refs:** consumer needs sourced from control-eval's trial-engine report (folded into Phase 2). Sub-plans: [session-layer.md](../design/session-layer.md) (D88, Phase 1a), [store-workload-split.md](../design/plans/store-workload-split.md) (D98, Phase 1b), [move-audit.md](../design/plans/move-audit.md) (D97, Phase 3).
 
+## D100 — One-shot is "headless launch in the same flow", and `yoloai run` is its sole verb
+
+**Date:** 2026-06-26. **Status:** Active (user-converged design, 2026-06-26). Scopes Phase 1a-i. Refines [D88](#) / [session-layer.md](../design/session-layer.md) and supersedes the bare-process framing of [plans/session-carve.md](../design/plans/session-carve.md) §1a-i. Recorded in session-carve.md.
+
+**What one-shot actually is.** Launch the agent in **its own headless mode** (`claude -p`, `gemini -p`, `aider --message …`) instead of the interactive TTY takeover. That is the *whole* delta from yoloAI's perspective — two concrete changes, nothing structural:
+1. `invocation.BuildAgentCommand` takes the `HeadlessCmd` branch (prompt baked into the launch command) instead of `InteractiveCmd`. This is the time-saver: no `StartupDelay`, no ready-pattern settle, no `send-keys` prompt injection — the agent works from the first line.
+2. `invocation.ResolveFallToShell` returns **off** for headless, so when the agent finishes the tmux pane **dies** (instead of dropping to a resume shell).
+
+**Everything else is unchanged.** Same keepalive bring-up, same `sandbox-setup.py` session-runner, same tmux pane, same status monitor. Crucially, **Tier-3 (exit = done) already falls out of the existing path**: the monitor's `check_pane_dead` reads the dead pane's exit code and calls `write_status(done, exit_code)`, which `status.DetectStatus` already maps to `StatusDone`/`StatusFailed`. So `Sandbox.Wait(WaitForExit)` and `yoloai wait` observe completion **with no new launch path, no `agent-oneshot.sh` wrapper, no bare keepalive-exec, and no `status.go` change.** `sandbox-setup.py` only skips `deliver_prompt` when headless (the prompt is already in the command).
+
+**Reconciliation with D88.** D88 imagined one-shot *shedding* tmux+monitor (agent as a bare tracked process, exit=done directly). We do **not** do that: keeping the monitor is simpler and strictly better, because pane-death **is** the done signal we'd otherwise rebuild. The earlier "no IOSession, no tmux, no monitor" language was a purity goal, not a requirement. A true zero-overhead bare-process variant remains possible later as the **Stream `SessionKind`** (post-merge remainder), if eval-at-scale ever needs it — it is explicitly *not* 1a-i.
+
+**The CLI surface — `run` only, no `new --headless`.** Headless is meaningless without a prompt (nothing to run), and a finished headless agent leaves no live session to attach to — so every headless invocation is the run-to-completion task shape. That is exactly `run`; a `new --headless` would be a worse spelling of it. Therefore **`new` stays purely interactive (unchanged)** and **`run` is the sole headless verb**:
+
+`yoloai run <name> [workdir] -p "…" [-d <dir>…] [--wait] [--rm]`
+- **Requires a prompt** (always). **Workdir is an optional positional** (relaxed from `new`, where it's required) — omit it for the no-workdir case (agent just makes API calls). `--dir` keeps its `new` meaning (aux dirs), never reinterpreted as the workdir.
+- **Non-blocking by default** — launch and return; the sandbox persists in `Done` for later `diff`/`apply`/`destroy`.
+- **`--wait`** blocks until the agent is done (streams, exits with the agent's code).
+- **`--rm` implies `--wait`**, then destroys. Fire-and-forget is the shell's job (`yoloai run … --rm &`) — **no reaper daemon** (rejected: needs infra 1a-i doesn't justify).
+- **Names stay required** — no auto-generation (the "name required" safe-default holds; the earlier nameless example was a mistake).
+
+**Library knob.** `SandboxCreateOptions.Headless bool` (create-time, persisted to runtime-config so restart reproduces it). `run` = `CreateSandbox(Headless:true)` → `Start` → optional `Wait(WaitForExit)` → optional `Destroy`. The CLI surfaces `Headless` *only* through `run`; embedders can set it directly and compose their own wait/cleanup. A terse top-level `yoloai status <name>` (scriptable poll primitive) is **deferred** — `sandbox info` covers it for now; `status` (not `state`, which collides with the workdir change-state concept) if/when added.
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.

@@ -17,16 +17,27 @@ session process (`sandbox-setup.py`); the tmux choreography **stays in Python**.
 
 ## The decomposition (ordered; each its own commit(s))
 
-### 1a-i — One-shot `-p` / Tier-3 + the `wait`/`run` verbs *(start here)*
-The cleanest, highest-consumer-value piece, and greenfield (a new launch path that doesn't disturb
-the persistent/tmux path). A `lifetime ∈ {one-shot, persistent}` caller axis (D88 §3): for an agent
-with a headless command (`agent.Definition.HeadlessCmd`, e.g. `claude -p "PROMPT"`), one-shot =
-`Substrate.Launch(ProcSpec{the headless agent})` + `Wait(WaitForExit)` — **no IOSession, no tmux, no
-monitor**; the tracked process *is* the agent, so **exit = done (Tier-3)** falls straight out (§6).
-Surfaces: `yoloai run --lifetime one-shot` (and the `yoloai wait` verb + MCP `sandbox_wait` from
-Phase 2 B1, since `Wait` is the completion mechanism). `--output-format stream-json` gives usage
-(feeds Phase 2 B2). **Open:** the bounded launch-readiness timeout distinct from `Wait` (§failure
-semantics); per-agent headless-command resolution; how `run` composes create+launch+wait+destroy.
+### 1a-i — Headless launch + `yoloai run` *(start here)* — **resolved, see [D100](../../decisions/working-notes.md)**
+
+**Superseded framing (kept for history):** this step was first scoped as a *bare-process* one-shot —
+`Substrate.Launch(ProcSpec{the headless agent})` + `Wait`, "no IOSession, no tmux, no monitor", the
+tracked process *is* the agent. That over-built it. The converged design (D100) is far smaller.
+
+**The actual design (D100).** One-shot = launch the agent in **its own headless mode** (`claude -p`,
+`gemini -p`, `aider --message`) *within the existing flow*. Two deltas, nothing structural:
+1. `invocation.BuildAgentCommand` takes the `HeadlessCmd` branch (prompt baked in) — skips the
+   startup-settle + `send-keys` injection. The time-saver.
+2. `invocation.ResolveFallToShell` returns **off** for headless → the tmux pane **dies** on agent
+   exit → the monitor's existing `check_pane_dead` records `done`+exit-code → `status.DetectStatus`
+   maps it to `Done`/`Failed`. **Tier-3 falls out of the path that exists today** — no new launch
+   path, no wrapper, no `status.go` change. `sandbox-setup.py` only skips `deliver_prompt` when
+   headless. `Sandbox.Wait(WaitForExit)` + the `yoloai wait` verb (both already built) observe it.
+
+**Surface:** the new **`yoloai run <name> [workdir] -p "…" [--wait] [--rm]`** verb (the sole headless
+CLI surface — *not* a `--headless` flag on `new`). Library knob: `SandboxCreateOptions.Headless`.
+Non-blocking default; `--wait` blocks; `--rm` implies `--wait` then destroys (fire-and-forget via
+shell `&`, no reaper). `--output-format stream-json` gives usage (feeds Phase 2 B2). Full interface +
+rationale in [D100](../../decisions/working-notes.md).
 
 ### 1a-ii — `AgentLaunchPrefix` off the public `BackendDescriptor`
 Empty for all container backends; non-empty only for **tart** (`PATH=…`) and **seatbelt**
