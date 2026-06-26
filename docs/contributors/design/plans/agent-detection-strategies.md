@@ -10,6 +10,24 @@ so it lands as its own task.
 > turn-completion callback uses a custom detection strategy (not the heuristic
 > fallback). Decided 2026-06-25.
 
+## Progress
+
+- **Phase A — Gemini ✅ wired (57605f5e)**, hook-authoritative via `BeforeAgent`→active
+  / `AfterAgent`→idle in settings.json (existing `ApplySettings` mechanism; commands
+  append `printf '{}'` for Gemini's stdout-JSON contract). Config + command verified;
+  **live-fire blocked by [DF48](../findings-unresolved.md)** (Gemini interactive
+  first-run onboarding).
+- **Phase B — Codex ✅ DONE (0d523fb1), FULLY VERIFIED LIVE.** Hook-authoritative
+  (full start+stop, like Claude) via a dedicated `~/.codex/hooks.json`: `UserPromptSubmit`
+  /`PreToolUse`→active, `Stop`→idle, nested under a top-level `hooks` key. Generalized
+  the settings-write (`SettingsPatch.FileName`/`Definition.SettingsFileName`) — no TOML
+  patching. Launch with `--dangerously-bypass-hook-trust` (sandbox is the trust
+  boundary). Also fixed a latent ApplySettings non-idempotency (shared `appendHookGroup`).
+  Codex auths via seeded `auth.json` (no env key), so a real turn ran: hook log shows
+  `hook.active`+`hook.idle` written by codex, status active→idle, no blip.
+- **Phase C — OpenCode** (subscribe-family: plugin `event` hook or SSE) — next.
+- **Phase D — Aider** (`--notifications-command` launch flag; config-level verify, no auth).
+
 ## What
 
 Promote detection from today's informal two-strategy form (an `idle_mode` enum the
