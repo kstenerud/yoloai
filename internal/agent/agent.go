@@ -537,11 +537,12 @@ func injectGeminiHook(settings map[string]any) {
 	if hooks == nil {
 		hooks = map[string]any{}
 	}
+	// No "matcher": Gemini 0.47 validates it as a string and rejects null, and
+	// BeforeAgent/AfterAgent are agent-level (nothing to match). The minimal
+	// group — just the command hooks — mirrors Claude's shape.
 	group := func(command string) map[string]any {
 		return map[string]any{
-			"matcher":    nil,
-			"sequential": false,
-			"hooks":      []any{map[string]any{"type": "command", "command": command}},
+			"hooks": []any{map[string]any{"type": "command", "command": command}},
 		}
 	}
 	appendHookGroup(hooks, "BeforeAgent", geminiActiveCommand, group(geminiActiveCommand))
