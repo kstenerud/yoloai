@@ -61,6 +61,7 @@ func TestGetAgent_Claude(t *testing.T) {
 	assert.Equal(t, "~/.claude.json", def.SeedFiles[2].HostPath)
 	assert.Equal(t, ".claude.json", def.SeedFiles[2].TargetPath)
 	assert.True(t, def.SeedFiles[2].HomeDir)
+	assert.Equal(t, []byte("{}\n"), def.SeedFiles[2].Content, "claude needs a valid empty-JSON default (empty file = 'corrupted')")
 	assert.Equal(t, "~/.claude/statusline.sh", def.SeedFiles[3].HostPath)
 	assert.Equal(t, "statusline.sh", def.SeedFiles[3].TargetPath)
 	assert.True(t, def.SeedFiles[3].Executable, "statusLine script must seed executable")

@@ -186,7 +186,10 @@ var agents = map[string]*Definition{
 		SeedFiles: []SeedFile{
 			{HostPath: "~/.claude/.credentials.json", TargetPath: ".credentials.json", AuthOnly: true, KeychainService: "Claude Code-credentials"},
 			{HostPath: "~/.claude/settings.json", TargetPath: "settings.json"},
-			{HostPath: "~/.claude.json", TargetPath: ".claude.json", HomeDir: true},
+			// Default to an empty JSON object when the host has no ~/.claude.json:
+			// Claude Code treats an empty/0-byte file as corrupted (logs a scary
+			// "config corrupted" warning and backs it up). A real host file wins.
+			{HostPath: "~/.claude.json", TargetPath: ".claude.json", Content: []byte("{}\n"), HomeDir: true},
 			// statusLine script referenced by settings.json; Claude Code execs it
 			// by path, so it must keep the exec bit (Executable → 0700).
 			{HostPath: "~/.claude/statusline.sh", TargetPath: "statusline.sh", Executable: true},
