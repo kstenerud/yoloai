@@ -677,6 +677,43 @@ func TestLoadAllDiffContexts_NoAuxDirs(t *testing.T) {
 	assert.Equal(t, "/tmp/project", contexts[0].HostPath)
 }
 
+// ─── ParseNumstat ────────────────────────────────────────────────────────────
+
+func TestParseNumstat_Normal(t *testing.T) {
+	input := "1\t2\tfoo.go\n3\t0\tbar.go\n"
+	got := ParseNumstat(input)
+	require.Len(t, got, 2)
+	assert.Equal(t, FileChange{Path: "foo.go", Additions: 1, Deletions: 2}, got[0])
+	assert.Equal(t, FileChange{Path: "bar.go", Additions: 3, Deletions: 0}, got[1])
+}
+
+func TestParseNumstat_Binary(t *testing.T) {
+	input := "-\t-\timg.png\n"
+	got := ParseNumstat(input)
+	require.Len(t, got, 1)
+	assert.Equal(t, FileChange{Path: "img.png", Additions: -1, Deletions: -1, Binary: true}, got[0])
+}
+
+func TestParseNumstat_Empty(t *testing.T) {
+	assert.Nil(t, ParseNumstat(""))
+}
+
+func TestParseNumstat_TrailingNewline(t *testing.T) {
+	input := "5\t3\tmain.go\n"
+	got := ParseNumstat(input)
+	require.Len(t, got, 1)
+	assert.Equal(t, FileChange{Path: "main.go", Additions: 5, Deletions: 3}, got[0])
+}
+
+func TestParseNumstat_Mixed(t *testing.T) {
+	input := "10\t4\ta.go\n-\t-\tb.png\n0\t7\tc.go\n"
+	got := ParseNumstat(input)
+	require.Len(t, got, 3)
+	assert.Equal(t, FileChange{Path: "a.go", Additions: 10, Deletions: 4}, got[0])
+	assert.Equal(t, FileChange{Path: "b.png", Additions: -1, Deletions: -1, Binary: true}, got[1])
+	assert.Equal(t, FileChange{Path: "c.go", Additions: 0, Deletions: 7}, got[2])
+}
+
 func TestLoadAllDiffContexts_OverlayWorkdirWithMountPath(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)

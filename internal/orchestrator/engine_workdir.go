@@ -53,6 +53,31 @@ func (e *Engine) GenerateOverlayDiff(ctx context.Context, name string, dirHostPa
 	})
 }
 
+// GenerateWorkingChanges returns the structured per-file change summary for
+// copy/rw workdirs. Best-effort backend open: a nil runtime falls back to the
+// host-git path.
+func (e *Engine) GenerateWorkingChanges(ctx context.Context, name string, dirHostPath string, paths []string) ([]copyflow.FileChange, error) {
+	e.TryEnsure(ctx)
+	return copyflow.GenerateChanges(ctx, copyflow.DiffOptions{
+		Name:        name,
+		Layout:      e.layout,
+		Paths:       paths,
+		Runtime:     e.runtime,
+		DirHostPath: dirHostPath,
+	})
+}
+
+// GenerateOverlayChanges returns the structured per-file change summary for an
+// :overlay-mode workdir (requires the running container).
+func (e *Engine) GenerateOverlayChanges(ctx context.Context, name string, dirHostPath string) ([]copyflow.FileChange, error) {
+	e.TryEnsure(ctx)
+	return copyflow.GenerateOverlayChanges(ctx, e.runtime, copyflow.DiffOptions{
+		Name:        name,
+		Layout:      e.layout,
+		DirHostPath: dirHostPath,
+	})
+}
+
 // GenerateCommitDiff returns the diff for a specific commit or commit range from
 // the sandbox work copy (copy-mode only). The runtime dispatches git to where
 // the work copy lives — on the host for bind-mount backends, in-VM for Tart.

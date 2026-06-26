@@ -9,6 +9,7 @@ package copyflow
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/config"
@@ -23,12 +24,79 @@ type DiffOptions struct {
 	Layout      config.Layout   // resolves the sandbox state directory
 	Stat        bool            // true for --stat summary only
 	NameOnly    bool            // true for --name-only (list changed files)
+	Numstat     bool            // true for --numstat machine-readable per-file add/del counts
 	Paths       []string        // optional path filter (relative to workdir)
 	Runtime     runtime.Backend // runtime backend (required for :copy and :overlay)
 	DirHostPath string          // "" selects Dirs[0] (workdir)
 	// PathPrefix when set is passed to git as --src-prefix/--dst-prefix for the
 	// full diff output (copy mode only; ignored for Stat/NameOnly/overlay/Ref).
 	PathPrefix string
+}
+
+// FileChange is one file's line-count delta in a workdir diff. Additions and
+// Deletions are -1 for binary files (git --numstat prints "-" for those).
+type FileChange struct {
+	Path      string `json:"path"`
+	Additions int    `json:"additions"`
+	Deletions int    `json:"deletions"`
+	Binary    bool   `json:"binary,omitempty"`
+}
+
+// ParseNumstat parses `git diff --numstat` output ("<add>\t<del>\t<path>" per
+// line; binary files show "-\t-\t<path>"). Returns nil for empty input.
+func ParseNumstat(text string) []FileChange {
+	text = strings.TrimRight(text, "\n")
+	if text == "" {
+		return nil
+	}
+	var result []FileChange
+	for line := range strings.SplitSeq(text, "\n") {
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\t", 3)
+		if len(parts) != 3 {
+			continue
+		}
+		fc := FileChange{Path: parts[2]}
+		if parts[0] == "-" || parts[1] == "-" {
+			fc.Binary = true
+			fc.Additions = -1
+			fc.Deletions = -1
+		} else {
+			var err error
+			if fc.Additions, err = strconv.Atoi(parts[0]); err != nil {
+				continue
+			}
+			if fc.Deletions, err = strconv.Atoi(parts[1]); err != nil {
+				continue
+			}
+		}
+		result = append(result, fc)
+	}
+	return result
+}
+
+// GenerateChanges returns the structured per-file change summary for copy/rw
+// workdirs (overlay returns ErrOverlayRequiresRuntime; use GenerateOverlayChanges).
+func GenerateChanges(ctx context.Context, opts DiffOptions) ([]FileChange, error) {
+	opts.Numstat = true
+	out, err := GenerateDiff(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	return ParseNumstat(out), nil
+}
+
+// GenerateOverlayChanges returns the structured per-file change summary for an
+// :overlay-mode workdir by executing git --numstat inside the running container.
+func GenerateOverlayChanges(ctx context.Context, rt runtime.Backend, opts DiffOptions) ([]FileChange, error) {
+	opts.Numstat = true
+	out, err := GenerateOverlayDiff(ctx, rt, opts)
+	if err != nil {
+		return nil, err
+	}
+	return ParseNumstat(out), nil
 }
 
 // GenerateDiff produces the workdir diff for a sandbox.
@@ -54,7 +122,7 @@ func GenerateDiff(ctx context.Context, opts DiffOptions) (string, error) {
 
 	switch mode {
 	case "rw":
-		return git.NewHost(opts.Layout).RWDiff(ctx, workDir, opts.Paths, opts.Stat, opts.NameOnly)
+		return git.NewHost(opts.Layout).RWDiff(ctx, workDir, opts.Paths, opts.Stat, opts.NameOnly, opts.Numstat)
 
 	case "overlay":
 		return "", ErrOverlayRequiresRuntime
@@ -67,6 +135,8 @@ func GenerateDiff(ctx context.Context, opts DiffOptions) (string, error) {
 
 		var args []string
 		switch {
+		case opts.Numstat:
+			args = []string{"diff", "--numstat", baselineSHA}
 		case opts.Stat:
 			args = []string{"diff", "--stat", baselineSHA}
 		case opts.NameOnly:
@@ -383,6 +453,8 @@ func GenerateOverlayDiff(ctx context.Context, rt runtime.Backend, opts DiffOptio
 
 	args := []string{"git", "-c", "core.hooksPath=/dev/null", "-C", dc.WorkDir, "diff"}
 	switch {
+	case opts.Numstat:
+		args = append(args, "--numstat")
 	case opts.NameOnly:
 		args = append(args, "--name-only")
 	case opts.Stat:

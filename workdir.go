@@ -72,6 +72,72 @@ func (w *Workdir) Diff(ctx context.Context, opts WorkdirDiffOptions) (string, er
 	return w.engine.GenerateWorkingDiff(ctx, w.name, w.dirHostPath, opts.Paths, opts.Stat, opts.NameOnly, opts.PathPrefix)
 }
 
+// FileChange is one file's line-count delta in a workdir diff. Additions and
+// Deletions are -1 for binary files.
+type FileChange struct {
+	Path      string `json:"path"`
+	Additions int    `json:"additions"`
+	Deletions int    `json:"deletions"`
+	Binary    bool   `json:"binary,omitempty"`
+}
+
+// Changes is the structured per-file summary of a workdir's changes vs its
+// baseline — the machine-readable companion to Diff's raw patch.
+type Changes struct {
+	Files     []FileChange `json:"files"`
+	Additions int          `json:"additions"` // total across non-binary files
+	Deletions int          `json:"deletions"`
+}
+
+// Changes returns the structured change summary for the workdir. Like Diff, it
+// reflects copy/overlay/rw mode automatically.
+func (w *Workdir) Changes(ctx context.Context) (*Changes, error) {
+	meta, err := w.engine.LoadEnvironment(w.name)
+	if err != nil {
+		return nil, err
+	}
+	dir := meta.Dir(w.dirHostPath)
+	if dir == nil {
+		return nil, yoerrors.NewUsageError("no tracked directory found")
+	}
+
+	var internal []copyflow.FileChange
+	if dir.Mode == store.DirModeOverlay {
+		internal, err = w.engine.GenerateOverlayChanges(ctx, w.name, w.dirHostPath)
+	} else {
+		internal, err = w.engine.GenerateWorkingChanges(ctx, w.name, w.dirHostPath, nil)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return changesFromCopyflow(internal), nil
+}
+
+// changesFromCopyflow maps []copyflow.FileChange to a *Changes value, summing
+// additions and deletions across non-binary files.
+func changesFromCopyflow(src []copyflow.FileChange) *Changes {
+	files := make([]FileChange, len(src))
+	var totalAdd, totalDel int
+	for i, fc := range src {
+		files[i] = FileChange{
+			Path:      fc.Path,
+			Additions: fc.Additions,
+			Deletions: fc.Deletions,
+			Binary:    fc.Binary,
+		}
+		if !fc.Binary {
+			totalAdd += fc.Additions
+			totalDel += fc.Deletions
+		}
+	}
+	return &Changes{
+		Files:     files,
+		Additions: totalAdd,
+		Deletions: totalDel,
+	}
+}
+
 // WorkdirExportOptions configures Workdir.Export. Dir is required.
 type WorkdirExportOptions struct {
 	// Dir is the destination directory for the patch files (created if absent).

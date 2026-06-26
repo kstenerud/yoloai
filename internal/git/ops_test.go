@@ -461,7 +461,7 @@ func TestCopyDiff_WithPathPrefix(t *testing.T) {
 
 func TestRWDiff_NotGitRepo(t *testing.T) {
 	dir := t.TempDir()
-	out, err := NewHostWithEnv(testEnv()).RWDiff(ctx, dir, nil, false, false)
+	out, err := NewHostWithEnv(testEnv()).RWDiff(ctx, dir, nil, false, false, false)
 	require.NoError(t, err)
 	assert.Empty(t, out)
 }
@@ -473,7 +473,7 @@ func TestRWDiff_NoChanges(t *testing.T) {
 	gitAdd(t, dir, ".")
 	gitCommit(t, dir, "initial")
 
-	out, err := NewHostWithEnv(testEnv()).RWDiff(ctx, dir, nil, false, false)
+	out, err := NewHostWithEnv(testEnv()).RWDiff(ctx, dir, nil, false, false, false)
 	require.NoError(t, err)
 	assert.Empty(t, out)
 }
@@ -487,7 +487,7 @@ func TestRWDiff_WithChanges(t *testing.T) {
 
 	writeTestFile(t, dir, "file.txt", "hello world\n")
 
-	out, err := NewHostWithEnv(testEnv()).RWDiff(ctx, dir, nil, false, false)
+	out, err := NewHostWithEnv(testEnv()).RWDiff(ctx, dir, nil, false, false, false)
 	require.NoError(t, err)
 	assert.Contains(t, out, "hello world")
 }
@@ -501,7 +501,7 @@ func TestRWDiff_WithStat(t *testing.T) {
 
 	writeTestFile(t, dir, "file.txt", "hello world\n")
 
-	out, err := NewHostWithEnv(testEnv()).RWDiff(ctx, dir, nil, true, false)
+	out, err := NewHostWithEnv(testEnv()).RWDiff(ctx, dir, nil, true, false, false)
 	require.NoError(t, err)
 	assert.Contains(t, out, "file.txt")
 }
@@ -517,7 +517,7 @@ func TestRWDiff_WithPathFilter(t *testing.T) {
 	writeTestFile(t, dir, "a.txt", "aaa\n")
 	writeTestFile(t, dir, "b.txt", "bbb\n")
 
-	out, err := NewHostWithEnv(testEnv()).RWDiff(ctx, dir, []string{"a.txt"}, false, false)
+	out, err := NewHostWithEnv(testEnv()).RWDiff(ctx, dir, []string{"a.txt"}, false, false, false)
 	require.NoError(t, err)
 	assert.Contains(t, out, "a.txt")
 	assert.NotContains(t, out, "b.txt")

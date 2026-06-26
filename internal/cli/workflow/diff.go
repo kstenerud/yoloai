@@ -150,6 +150,21 @@ func diffSingle(cmd *cobra.Command, name, hostPath string, paths []string, stat,
 		if err != nil {
 			return err
 		}
+		// For a full diff in JSON mode, enrich the output with structured per-file
+		// change counts. Stat and NameOnly remain plain (they're already structured
+		// summaries and the caller picked them explicitly).
+		if cliutil.JSONEnabled(cmd) && !stat && !nameOnly {
+			changes, changesErr := wd.Changes(ctx)
+			if changesErr == nil {
+				return cliutil.WriteJSON(cmd.OutOrStdout(), map[string]any{
+					"diff":      out,
+					"files":     changes.Files,
+					"additions": changes.Additions,
+					"deletions": changes.Deletions,
+				})
+			}
+			// Fall back to the plain diff envelope if changes fetch fails.
+		}
 		return writeDiffOutput(cmd, out)
 	})
 }

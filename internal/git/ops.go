@@ -130,13 +130,15 @@ func (g *Git) CopyDiff(ctx context.Context, workDir, baselineSHA string, paths [
 
 // RWDiff generates a diff for a :rw mode directory. Returns an empty string
 // (no error) when the directory is not a git repo.
-func (g *Git) RWDiff(ctx context.Context, workDir string, paths []string, stat, nameOnly bool) (string, error) {
+func (g *Git) RWDiff(ctx context.Context, workDir string, paths []string, stat, nameOnly, numstat bool) (string, error) {
 	if !IsGitRepo(workDir) {
 		return "", nil
 	}
 
 	args := []string{"diff"}
 	switch {
+	case numstat:
+		args = append(args, "--numstat")
 	case nameOnly:
 		args = append(args, "--name-only")
 	case stat:
