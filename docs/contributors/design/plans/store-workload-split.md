@@ -104,6 +104,48 @@ pure path change with Q104 already done.
   on **`sb.Agent().Type()/Model()`** and shed them from the public `Environment` view; tests +
   BREAKING-CHANGES.
 
+## Build breakdown (C1 done; C2 = the cutover; C3 = migration test + docs)
+
+Surface confirmed by audit (2026-06-26): `agentcfg.Load` is soft on a missing file (zero-value);
+`create` dual-writes `agent.json` (`create.go:736`); per-sandbox `environment.json` migrates
+**transparently on load** via the typed `migrate()` ladder (`store/environment.go`), `metaVersion=2`;
+`system migrate` (→ `System.MigrateDataDir` → `config.MigrateLibrary`) does **realm**-level work only
+and does NOT iterate sandboxes for env-record version bumps. Readers of `meta.AgentType`/`meta.Model`:
+`restart.go` (10 refs incl. `requireAgent`, 3×`resolveAgentArgs`, 3×`BuildAgentCommand`, `state.Model`),
+`network.go` (×2 `agentNetworkFloor`), `bugreport.go` (×2 display). Public view: root
+`environment.go:27-28` + `environmentFromStore`.
+
+- **C1 — DONE (additive groundwork, committed):** `Engine.LoadAgentConfig` + `sb.Agent().Type()/Model()`
+  read `agent.json`. No behavior change; public `Environment` still carries agent/model (coexist).
+
+- **C2 — the cutover (one coherent commit; compiles + `make check` green; old sandboxes balk till migrate):**
+  - **Slim** `store.Environment`: drop `AgentType`/`Model` fields; `metaVersion`→**3**.
+  - **Balk, don't write-on-read (M2/D61):** `LoadEnvironment` returns `ErrNeedsMigration` when the raw
+    `environment.json` still carries `agent`/`model` keys (equivalently version<3). It must check the
+    RAW bytes BEFORE unmarshalling into the slimmed struct (the struct no longer has the fields, so
+    unmarshal would silently drop them — the data must be read raw first). No file writes in Load.
+  - **Migration (raw-JSON, explicit):** a per-sandbox `migrateEnvironmentRecord(sandboxDir)` that:
+    read `environment.json` → `map[string]json.RawMessage`; if it has `agent`/`model`: write
+    `agent.json` via `agentcfg.Save{AgentType,Model}` (idempotent — skip if agent.json already valid),
+    delete the keys, then run the **existing** typed `migrate()` for any v0→v2 in-struct steps, set
+    version 3, atomic-write. MUST be data-safe: never delete the keys before agent.json is durably
+    written. Wire it into `system migrate` as a new **per-sandbox pass** (iterate `SandboxesDir()`,
+    idempotent) — `MigrateDataDir` calls it after `MigrateLibrary`. Surface `ErrNeedsMigration` at the
+    CLI boundary with "run `yoloai system migrate`".
+  - **Redirect readers** to `agentcfg`/`Engine.LoadAgentConfig` (NO meta-fallback — the balk guarantees
+    agent.json exists by read time): `requireAgent`/`resolveAgentArgs`/`BuildAgentCommand` in restart;
+    `agentNetworkFloor` in network; `bugreport` display. `create` already has the values (writes both).
+  - **Public reshape:** drop `AgentType`/`Model` from the root `Environment` view + `environmentFromStore`;
+    consumers (bugreport, any CLI/MCP showing agent/model from `Environment`) move to `sb.Agent().Type()/Model()`.
+  - *Compiling order note:* slimming the struct breaks every reader at compile time, so the reader
+    redirects + public-view edit land in the SAME commit as the slim.
+
+- **C3 — migration test + BREAKING-CHANGES:** a test that writes a v2 `environment.json` fixture WITH
+  agent/model (no agent.json), runs the per-sandbox migration, asserts: `agent.json` now has the right
+  type/model, `environment.json` is v3 without the keys, and a second run is a no-op (idempotent). Plus
+  a data-loss guard (kill between agent.json-write and key-strip → re-run still recovers). `BREAKING-CHANGES.md`
+  entry: existing sandboxes need `yoloai system migrate`; `Environment.AgentType/Model` move to `sb.Agent()`.
+
 ## Cross-references
 
 [D97](../../decisions/working-notes.md) (the surface-cleanup that surfaced Q104),
