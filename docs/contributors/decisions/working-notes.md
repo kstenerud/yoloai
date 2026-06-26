@@ -885,6 +885,18 @@ Only then the **mechanical move**: `runtime` first/with `store`, repoint the fen
 
 **Open sub-questions (user's call) — raised alongside this entry:** (Q-A) split `store.Environment.AgentType/Model` into an agent-owned record (via `Handle.Sub`, honoring D87 "each layer persists its own facts") vs. bless them as opaque transport strings; (Q-B) do the cleanup+move on this branch as its capstone vs. merge the gate-satisfied branch to `main` now and run the Move as a fresh focused branch.
 
+## D98 — Q104: split inside-process config (agent/model) out of the substrate record; migrate explicitly (M2)
+
+**Date:** 2026-06-26. **Status:** Decided; scoped in [plans/store-workload-split.md](../design/plans/store-workload-split.md); building on `substrate-move` (Stage 3b of the Move). Resolves the long-open **Q104**.
+
+**The cut (from the user's taxonomy).** `store.Environment` (`environment.json`) mixes four kinds of fact: *constitutive* (`BackendType`, `ImageRef` — the sandbox **is** a backend instance from an image), *policy on the sandbox* (`Dirs`, `NetworkAllow`), *provenance* (`CreatedAt`, `Name`, `Principal`, `Profile` — the request, fanned out), and **inside-process config** (`AgentType`, `Model` — configuration of a *process that runs inside* the sandbox). The first three describe the sandbox; the last describes a **tenant workload**. A *substrate* record promoted to public `yoloai/store` must not describe a tenant process — that is the real Q104 conflation (not "store imports agent"; it never did — the fields are opaque strings). So `AgentType`/`Model` move to their own per-sandbox doc **`agent.json`**, **owned by orchestration** (the layer that decides what runs inside — NOT the agent *catalog*, which stays zero-import standalone); `store` provides only the persistence *mechanism* (prefer the D87 `Handle` — `agent.json` is its first real consumer).
+
+**Migration = M2 (explicit), not M1 (transparent).** The v2→v3 step is *cross-file*: relocate `agent`/`model` out of `environment.json` into `agent.json`, reading keys the slimmed struct no longer has (a raw-JSON step — the `environment.go MigrateRecord` TODO). M1 would do this transparently at `LoadEnvironment`, but that gives `Load` a file-*write* side effect — exactly what explicit-migrate exists to avoid. **M2:** a v2 record balks with `ErrNeedsMigration`; `yoloai system migrate` gains a per-sandbox pass that relocates. Chosen because it matches the project's migration philosophy ([[feedback-migration-versioning-philosophy]] / D61: dumb plain-int checkers, no auto-migration, explicit fail-fast `system migrate` owns recognition+relocation) and the D87 direction the per-sandbox record is already TODO'd toward — and it starts retiring the legacy transparent per-sandbox auto-migrate rather than extending it.
+
+**Build order (each its own commit; 1–2 behavior-preserving, 3 the semver cut).** (1) new `agent.json` record + orchestration ownership + `create` dual-writes it (readers still read `meta`); (2) redirect readers (`restart.go` ~10 refs, `network.go` floor, create-config, bugreport) to `agent.json`; (3) slim `store.Environment` (drop the fields, `metaVersion`→3, raw-JSON v2→v3 relocation + balk, `system migrate` per-sandbox pass); (4) tests + BREAKING-CHANGES (on-disk sandbox-record format changes; note even though `store` isn't public yet).
+
+**Consequences.** First real consumer of the D87 `store.Handle`. `system migrate` grows a per-sandbox iteration (new). Existing sandboxes balk until migrated (deliberate, D61). `store.Environment` becomes an honest substrate-only record before the Move freezes it.
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.

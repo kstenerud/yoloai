@@ -26,6 +26,16 @@ module throughout. Proceeds via audit cycles (mechanical `go list -deps` separat
 conflation review) draining to the findings/questions queues. Supersedes the deferred C-full/F
 notes in [D83](../../decisions/working-notes.md). Frame doc: [public-layering.md](public-layering.md).
 
+### The Move (S6) — pre-Move audit + Stage 3b surface cleanup
+
+The substrate/store promotion is gated on a surface-cleanup sub-phase (Stage 3b) decided by
+the pre-Move audit ([move-audit.md](move-audit.md), [D97](../../decisions/working-notes.md)):
+the runtime contract is request-in/no-mechanism-out (architecture-principles §4), agent-shaped
+remnants leave, and the substrate record becomes agent-free. In progress on `substrate-move`.
+One sub-task has its own scope: **[store-workload-split.md](store-workload-split.md)** ([D98](../../decisions/working-notes.md))
+— split the inside-process config (`agent`/`model`) out of `store.Environment` into an
+orchestration-owned `agent.json`, with an explicit (M2) `system migrate` v2→v3 relocation.
+
 ## Env access seal — `config.HostEnv` curated accessors
 
 Replace the ad-hoc `config.Layout` env accessors (`LookupEnv`/`ExecEnv`/
