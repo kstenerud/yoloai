@@ -4,12 +4,19 @@
 package agent
 
 import (
+	_ "embed"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 )
+
+// opencodeStatusPlugin is the OpenCode plugin (seeded into the sandbox) that
+// mirrors turn state into agent-status.json, making OpenCode hook-authoritative.
+//
+//go:embed opencode_plugin.js
+var opencodeStatusPlugin string
 
 // PromptMode determines how the agent receives its initial prompt.
 type PromptMode string
@@ -25,8 +32,12 @@ const (
 // HostPath supports ~ for the user's home directory, expanded at runtime.
 // TargetPath is relative to the agent's StateDir.
 type SeedFile struct {
-	HostPath        string // e.g., "~/.claude/settings.json"
-	TargetPath      string // relative to StateDir, e.g., "settings.json"
+	HostPath   string // e.g., "~/.claude/settings.json"
+	TargetPath string // relative to StateDir, e.g., "settings.json"
+	// Content, when non-nil, is written verbatim instead of reading HostPath —
+	// for yoloai-provided files like the OpenCode status plugin (not copied from
+	// the host).
+	Content         []byte
 	AuthOnly        bool   // if true, only required when no API key is set
 	HomeDir         bool   // if true, TargetPath is relative to /home/yoloai/ instead of StateDir
 	KeychainService string // macOS Keychain service name; used as fallback when HostPath is missing
@@ -261,11 +272,16 @@ var agents = map[string]*Definition{
 			{HostPath: "~/.config/github-copilot/hosts.json", TargetPath: ".config/github-copilot/hosts.json", AuthOnly: true, HomeDir: true},
 			{HostPath: "~/.config/github-copilot/apps.json", TargetPath: ".config/github-copilot/apps.json", AuthOnly: true, HomeDir: true},
 			{HostPath: "~/.config/opencode/.opencode.json", TargetPath: ".config/opencode/.opencode.json", HomeDir: true},
+			// Native turn-completion detection via an OpenCode plugin (a JS file
+			// OpenCode auto-loads): session.idle → idle, message.updated → active.
+			// yoloai-provided content (no host file). Makes OpenCode hook-authoritative.
+			{TargetPath: ".config/opencode/plugins/yoloai-status.js", Content: []byte(opencodeStatusPlugin), HomeDir: true},
 		},
 		StateDir:       "/home/yoloai/.local/share/opencode/",
 		SubmitSequence: "Enter",
 		StartupDelay:   3 * time.Second,
 		Idle: IdleSupport{
+			Hook:            true,
 			WchanApplicable: true,
 		},
 		ModelFlag: "--model",

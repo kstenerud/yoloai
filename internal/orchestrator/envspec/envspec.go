@@ -39,6 +39,7 @@ func toSeedFiles(in []agent.SeedFile) []envsetup.SeedFile {
 		out[i] = envsetup.SeedFile{
 			HostPath:        sf.HostPath,
 			TargetPath:      sf.TargetPath,
+			Content:         sf.Content,
 			AuthOnly:        sf.AuthOnly,
 			HomeDir:         sf.HomeDir,
 			KeychainService: sf.KeychainService,

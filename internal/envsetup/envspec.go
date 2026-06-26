@@ -52,6 +52,7 @@ type EnvSpec struct {
 type SeedFile struct {
 	HostPath        string
 	TargetPath      string
+	Content         []byte // when non-nil, written verbatim instead of reading HostPath
 	AuthOnly        bool
 	HomeDir         bool
 	KeychainService string

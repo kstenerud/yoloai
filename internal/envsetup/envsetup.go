@@ -205,6 +205,9 @@ func shouldSkipSeedFile(sf SeedFile, hasAPIKey bool, hostEnv config.Layout) bool
 // Returns (data, true, nil) if found, (nil, false, nil) if not found, or (nil, false, err) on error.
 // homeDir is used for ~ expansion in seed file host paths.
 func loadSeedFileData(sf SeedFile, homeDir string) ([]byte, bool, error) {
+	if sf.Content != nil {
+		return sf.Content, true, nil
+	}
 	hostPath := config.ExpandTilde(sf.HostPath, homeDir)
 	if _, err := os.Stat(hostPath); err == nil {
 		data, readErr := os.ReadFile(hostPath) //nolint:gosec // G304: path is from agent definition, not user input
