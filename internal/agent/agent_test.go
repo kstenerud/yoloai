@@ -14,7 +14,10 @@ func TestGetAgent_Aider(t *testing.T) {
 
 	assert.Equal(t, AgentType("aider"), def.Type)
 	assert.NotEmpty(t, def.Description)
-	assert.Equal(t, "aider --yes-always", def.InteractiveCmd)
+	assert.Contains(t, def.InteractiveCmd, "aider --yes-always")
+	assert.Contains(t, def.InteractiveCmd, "--notifications-command")
+	assert.Contains(t, def.InteractiveCmd, "--write-status idle")
+	assert.True(t, def.Idle.Hook, "aider should be hook-authoritative (idle via --notifications-command)")
 	assert.Contains(t, def.HeadlessCmd, "aider --message")
 	assert.Equal(t, PromptModeInteractive, def.PromptMode)
 	assert.Equal(t, []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "DEEPSEEK_API_KEY", "OPENROUTER_API_KEY"}, def.APIKeyEnvVars)

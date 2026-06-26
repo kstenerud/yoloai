@@ -284,7 +284,7 @@ interactive_cmd: fake-aider
 	// Original built-in must be intact.
 	def := GetAgent("aider")
 	require.NotNil(t, def)
-	assert.Equal(t, "aider --yes-always", def.InteractiveCmd)
+	assert.Contains(t, def.InteractiveCmd, "aider --yes-always")
 }
 
 func TestRegisterFileAgents_IdempotentFileAgent(t *testing.T) {

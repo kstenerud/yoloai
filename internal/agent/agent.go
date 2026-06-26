@@ -129,9 +129,14 @@ var agentsMu sync.RWMutex
 
 var agents = map[string]*Definition{
 	"aider": {
-		Type:            "aider",
-		Description:     "Aider — AI pair programming in your terminal",
-		InteractiveCmd:  "aider --yes-always",
+		Type:        "aider",
+		Description: "Aider — AI pair programming in your terminal",
+		// --notifications-command runs on "LLM finished, waiting for input" (turn
+		// complete → idle). It is Aider's only turn callback (no turn-start event),
+		// so Aider is hook-authoritative for IDLE; the active signal comes from
+		// yoloai's prompt-delivery (active-before-submit). Reuses the --write-status
+		// CLI (schema single-sourced).
+		InteractiveCmd:  "aider --yes-always --notifications --notifications-command 'python3 /yoloai/bin/status-monitor.py --write-status idle /yoloai/agent-status.json'",
 		HeadlessCmd:     `aider --message "PROMPT" --yes-always --no-pretty --no-fancy-input`,
 		PromptMode:      PromptModeInteractive,
 		APIKeyEnvVars:   []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "DEEPSEEK_API_KEY", "OPENROUTER_API_KEY"},
@@ -143,6 +148,11 @@ var agents = map[string]*Definition{
 		SubmitSequence: "Enter",
 		StartupDelay:   3 * time.Second,
 		Idle: IdleSupport{
+			// Hook-authoritative for idle via --notifications-command (above).
+			// Stop-only: active relies on prompt-delivery's active-before-submit,
+			// so a turn the user types directly (via attach) shows stale-idle until
+			// it completes — a known gap a future hook-assisted mode would close.
+			Hook:            true,
 			ReadyPattern:    "> $",
 			ContextSignal:   true,
 			WchanApplicable: true,
