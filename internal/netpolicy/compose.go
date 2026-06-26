@@ -1,10 +1,8 @@
 // ABOUTME: compose.go implements network-policy composition: the domain-allowlist
-// ABOUTME: construction logic (agent floor, user additions, provenance tagging).
+// ABOUTME: construction logic (provenance tagging, mode resolution).
 // ABOUTME: Enforcement (iptables/ipset) and transport live in separate layers.
 
 package netpolicy
-
-import "github.com/kstenerud/yoloai/internal/agent"
 
 // DomainSource identifies where an allowed domain came from. Used by
 // callers that want to distinguish agent-required domains from
@@ -28,28 +26,18 @@ type AllowedDomain struct {
 	Source DomainSource `json:"source"`
 }
 
-// AgentFloor returns the set of domains the named agent's definition
-// requires. Returns an empty (non-nil) map for unknown or nil agents
-// so provenance derivation degrades gracefully to "everything looks
-// user-added" rather than blowing up.
-func AgentFloor(agentType string) map[string]bool {
-	out := make(map[string]bool)
-	def := agent.GetAgent(agentType)
-	if def == nil {
-		return out
-	}
-	for _, d := range def.NetworkAllowlist {
-		out[d] = true
-	}
-	return out
-}
-
 // WithProvenance tags each domain in allow with its source: domains
-// present in the named agent's floor are tagged AllowedFromAgentRequirement;
-// all others are AllowedFromUser. Order matches allow; returns an
-// empty non-nil slice when allow is empty.
-func WithProvenance(allow []string, agentType string) []AllowedDomain {
-	agentSet := AgentFloor(agentType)
+// present in the caller-supplied agentFloor slice are tagged
+// AllowedFromAgentRequirement; all others are AllowedFromUser. The
+// caller supplies agentDef.NetworkAllowlist (or nil for an unknown
+// agent — provenance degrades gracefully to "everything looks
+// user-added"). Order matches allow; returns an empty non-nil slice
+// when allow is empty.
+func WithProvenance(allow []string, agentFloor []string) []AllowedDomain {
+	agentSet := make(map[string]bool, len(agentFloor))
+	for _, d := range agentFloor {
+		agentSet[d] = true
+	}
 	out := make([]AllowedDomain, 0, len(allow))
 	for _, d := range allow {
 		source := AllowedFromUser

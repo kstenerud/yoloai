@@ -1,6 +1,5 @@
 // ABOUTME: compose_test.go tests the domain-allowlist composition functions:
-// ABOUTME: AgentFloor (agent domain set), WithProvenance (provenance tagging),
-// ABOUTME: and Compose (mode + allowlist resolution).
+// ABOUTME: WithProvenance (provenance tagging) and Compose (mode + allowlist resolution).
 
 package netpolicy_test
 
@@ -11,30 +10,17 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestAgentFloor(t *testing.T) {
-	t.Run("known agent returns non-empty map containing expected domain", func(t *testing.T) {
-		floor := netpolicy.AgentFloor("claude")
-		assert.NotNil(t, floor)
-		assert.True(t, floor["api.anthropic.com"], "expected api.anthropic.com in claude floor")
-	})
-
-	t.Run("unknown agent returns empty non-nil map", func(t *testing.T) {
-		floor := netpolicy.AgentFloor("ghost")
-		assert.NotNil(t, floor)
-		assert.Empty(t, floor)
-	})
-}
-
 func TestWithProvenance(t *testing.T) {
 	t.Run("empty allow list returns empty non-nil slice", func(t *testing.T) {
-		result := netpolicy.WithProvenance(nil, "claude")
+		result := netpolicy.WithProvenance(nil, []string{"api.anthropic.com"})
 		assert.NotNil(t, result)
 		assert.Empty(t, result)
 	})
 
 	t.Run("tags agent-floor domain as agent-requirement and user domain as user", func(t *testing.T) {
+		floor := []string{"api.anthropic.com"}
 		allow := []string{"api.anthropic.com", "extra.example"}
-		result := netpolicy.WithProvenance(allow, "claude")
+		result := netpolicy.WithProvenance(allow, floor)
 		assert.Len(t, result, 2)
 		assert.Equal(t, netpolicy.AllowedDomain{
 			Domain: "api.anthropic.com",
@@ -46,9 +32,9 @@ func TestWithProvenance(t *testing.T) {
 		}, result[1])
 	})
 
-	t.Run("unknown agent tags all domains as user", func(t *testing.T) {
+	t.Run("nil floor tags all domains as user", func(t *testing.T) {
 		allow := []string{"api.anthropic.com", "extra.example"}
-		result := netpolicy.WithProvenance(allow, "ghost")
+		result := netpolicy.WithProvenance(allow, nil)
 		for _, d := range result {
 			assert.Equal(t, netpolicy.AllowedFromUser, d.Source)
 		}

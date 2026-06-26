@@ -6,6 +6,7 @@ package yoloai
 import (
 	"context"
 
+	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/netpolicy"
 	"github.com/kstenerud/yoloai/internal/orchestrator"
 	"github.com/kstenerud/yoloai/internal/store"
@@ -137,16 +138,10 @@ func (n *Network) Deny(ctx context.Context, domains ...string) (*DenyResult, err
 	}
 
 	// Provenance of removed entries — computed before we mutate meta.
-	agentSet := agentDomainSet(string(meta.AgentType))
+	removed := netpolicy.WithProvenance(domains, agentNetworkFloor(string(meta.AgentType)))
 	toRemove := make(map[string]bool, len(domains))
-	removed := make([]AllowedDomain, 0, len(domains))
 	for _, d := range domains {
 		toRemove[d] = true
-		source := AllowedFromUser
-		if agentSet[d] {
-			source = AllowedFromAgentRequirement
-		}
-		removed = append(removed, AllowedDomain{Domain: d, Source: source})
 	}
 
 	remaining := make([]string, 0, len(meta.NetworkAllow))
@@ -223,15 +218,18 @@ func (n *Network) requireIsolated() (*store.Environment, error) {
 // definition. Order matches meta order; unknown agent name produces
 // all-user entries (no agent → no known requirements).
 func computeAllowedDomains(meta *store.Environment) []AllowedDomain {
-	return netpolicy.WithProvenance(meta.NetworkAllow, string(meta.AgentType))
+	return netpolicy.WithProvenance(meta.NetworkAllow, agentNetworkFloor(string(meta.AgentType)))
 }
 
-// agentDomainSet returns the set of domains the named agent's
-// definition requires. Returns an empty (non-nil) map for unknown
-// agents — provenance derivation degrades gracefully to "everything
-// looks user-added" rather than blowing up.
-func agentDomainSet(agentName string) map[string]bool {
-	return netpolicy.AgentFloor(agentName)
+// agentNetworkFloor returns the domains the named agent's definition requires
+// (its network floor). Returns nil for an unknown/empty agent — provenance then
+// degrades gracefully to "everything looks user-added".
+func agentNetworkFloor(agentName string) []string {
+	def := agent.GetAgent(agentName)
+	if def == nil {
+		return nil
+	}
+	return def.NetworkAllowlist
 }
 
 // ipsetResolveDomainsScript is the shell fragment that resolves
