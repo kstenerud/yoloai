@@ -23,6 +23,7 @@ func (s *Server) registerTools() {
 
 	// Lifecycle
 	s.srv.AddTool(sandboxCreateTool(), s.handleSandboxCreate)
+	s.srv.AddTool(sandboxRunTool(), s.handleSandboxRun)
 	s.srv.AddTool(sandboxStatusTool(), s.handleSandboxStatus)
 	s.srv.AddTool(sandboxWaitTool(), s.handleSandboxWait)
 	s.srv.AddTool(sandboxListTool(), s.handleSandboxList)
@@ -51,6 +52,18 @@ func sandboxCreateTool() mcp.Tool {
 		mcp.WithString("name", mcp.Required(), mcp.Description("Unique sandbox name (alphanumeric, hyphens, underscores)")),
 		mcp.WithString("workdir", mcp.Required(), mcp.Description("Absolute path to the host working directory")),
 		mcp.WithString("prompt", mcp.Description("Task description for the agent")),
+		mcp.WithString("agent", mcp.Description("Agent to use (claude, gemini, codex, aider). Default: from config.")),
+		mcp.WithString("model", mcp.Description("Model override. Default: agent's default.")),
+		mcp.WithString("profile", mcp.Description("Profile name for environment customization.")),
+	)
+}
+
+func sandboxRunTool() mcp.Tool {
+	return mcp.NewTool("sandbox_run",
+		mcp.WithDescription("Run a task to completion in a new sandbox: the agent launches in headless mode (its own -p/print mode) with the prompt baked in, works, and exits. Returns immediately — wait with sandbox_wait (for=exit) until done/failed, then sandbox_diff to read the changes, then sandbox_destroy. To run many tasks concurrently, fire several sandbox_run calls (unique names) before waiting on them. Use this for autonomous one-shot tasks; use sandbox_create for an interactive session."),
+		mcp.WithString("name", mcp.Required(), mcp.Description("Unique sandbox name (alphanumeric, hyphens, underscores)")),
+		mcp.WithString("workdir", mcp.Required(), mcp.Description("Absolute path to the host working directory")),
+		mcp.WithString("prompt", mcp.Required(), mcp.Description("Task description for the agent (required: headless mode runs it to completion)")),
 		mcp.WithString("agent", mcp.Description("Agent to use (claude, gemini, codex, aider). Default: from config.")),
 		mcp.WithString("model", mcp.Description("Model override. Default: agent's default.")),
 		mcp.WithString("profile", mcp.Description("Profile name for environment customization.")),
@@ -168,10 +181,6 @@ func (s *Server) handleSandboxCreate(ctx context.Context, req mcp.CallToolReques
 		return textResult(errorf("workdir is required")), nil
 	}
 
-	if err := s.client.EnsureSetup(ctx); err != nil {
-		return textResult(errorf("setup: %v", err)), nil
-	}
-
 	opts := yoloai.SandboxCreateOptions{
 		Name: name,
 		Workdir: yoloai.DirSpec{
@@ -185,16 +194,68 @@ func (s *Server) handleSandboxCreate(ctx context.Context, req mcp.CallToolReques
 		// MCP sandbox_create is non-interactive: proceed on a dirty workdir.
 		AllowDirtyWorkdir: true,
 	}
+	if errStr := s.createAndStart(ctx, opts); errStr != "" {
+		return textResult(errStr), nil
+	}
+	return textResult(fmt.Sprintf("Sandbox %q created. Poll sandbox_status every 5s.", name)), nil
+}
 
+// createAndStart provisions a sandbox from opts and starts it, returning an
+// error string ("" on success) ready for textResult. Shared by sandbox_create
+// and sandbox_run, which differ only in their options and messaging.
+func (s *Server) createAndStart(ctx context.Context, opts yoloai.SandboxCreateOptions) string {
+	if err := s.client.EnsureSetup(ctx); err != nil {
+		return errorf("setup: %v", err)
+	}
 	sb, err := s.client.CreateSandbox(ctx, opts)
 	if err != nil {
-		return textResult(errorf("create sandbox: %v", err)), nil
+		return errorf("create sandbox: %v", err)
 	}
 	if _, err := sb.Start(ctx, yoloai.SandboxStartOptions{}); err != nil {
-		return textResult(errorf("start sandbox: %v", err)), nil
+		return errorf("start sandbox: %v", err)
+	}
+	return ""
+}
+
+func (s *Server) handleSandboxRun(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	name := req.GetString("name", "")
+	workdir := req.GetString("workdir", "")
+	prompt := req.GetString("prompt", "")
+	agent := req.GetString("agent", "")
+	model := req.GetString("model", "")
+	profile := req.GetString("profile", "")
+
+	if name == "" {
+		return textResult(errorf("name is required")), nil
+	}
+	if workdir == "" {
+		return textResult(errorf("workdir is required")), nil
+	}
+	if prompt == "" {
+		return textResult(errorf("prompt is required for sandbox_run (headless mode runs the prompt to completion)")), nil
 	}
 
-	return textResult(fmt.Sprintf("Sandbox %q created. Poll sandbox_status every 5s.", name)), nil
+	opts := yoloai.SandboxCreateOptions{
+		Name: name,
+		Workdir: yoloai.DirSpec{
+			Path: workdir,
+			Mode: yoloai.DirModeCopy,
+		},
+		AgentType:         yoloai.AgentType(agent),
+		Model:             model,
+		Profile:           profile,
+		Prompt:            prompt,
+		Headless:          true,
+		AllowDirtyWorkdir: true,
+	}
+	if errStr := s.createAndStart(ctx, opts); errStr != "" {
+		return textResult(errStr), nil
+	}
+	// Non-blocking by design: returns immediately so an outer agent can fire
+	// many concurrent runs (the MCP proxy serializes calls, but each launch is
+	// quick and the sandboxes run in parallel). Compose sandbox_wait +
+	// sandbox_diff + sandbox_destroy for the result.
+	return textResult(fmt.Sprintf("Sandbox %q running headlessly. Wait with sandbox_wait (for=exit), then read changes with sandbox_diff, then sandbox_destroy. For many tasks, launch several sandbox_run calls before waiting.", name)), nil
 }
 
 func (s *Server) handleSandboxStatus(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
