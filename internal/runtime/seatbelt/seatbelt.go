@@ -484,13 +484,6 @@ func (r *Runtime) DiagHint(instanceName string) string {
 	return fmt.Sprintf("check log at %s", logPath)
 }
 
-// PrepareAgentCommand prepends the backend's constant launch wrap (see
-// descriptor.AgentLaunchPrefix) — sourcing the Swift wrapper that auto-adds
-// --disable-sandbox for Swift PM commands inside the macOS sandbox.
-func (r *Runtime) PrepareAgentCommand(cmd string) string {
-	return descriptor.AgentLaunchPrefix + cmd
-}
-
 // TmuxSocket returns the per-sandbox tmux socket path for seatbelt. Each
 // seatbelt sandbox has its own socket under its sandbox directory, so the
 // socket path is derived from sandboxDir. Host consumers must call this live

@@ -361,7 +361,7 @@ func buildConfigAndEnvironment(ctx context.Context, d state.Deps, opts Options, 
 	lifecycleCfg := buildLifecycleConfig(ri.archetype, pr.archetypeDockerDRequired, ri.onCreateDone, ri.devcontainerCfg)
 
 	backend := d.Runtime.Descriptor().Type
-	configData, err := buildContainerConfig(d.Layout, agentDef, agentCommand, runtime.PrepareAgentCommandFor(d.Runtime, ""), tmuxConf, launch.OverlayOrResolvedMountPath(workdir), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, collectOverlayMounts(workdir, auxDirs), pr.setup, pr.autoCommitInterval, collectCopyDirs(workdir, auxDirs), opts.Name, runtime.TmuxSocketFor(d.Runtime, sandboxDir), pr.isolation, opts.VscodeTunnel, invocation.SanitizeTunnelName(opts.Name), lifecycleCfg)
+	configData, err := buildContainerConfig(d.Layout, agentDef, agentCommand, d.Runtime.Descriptor().AgentLaunchPrefix, tmuxConf, launch.OverlayOrResolvedMountPath(workdir), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, collectOverlayMounts(workdir, auxDirs), pr.setup, pr.autoCommitInterval, collectCopyDirs(workdir, auxDirs), opts.Name, runtime.TmuxSocketFor(d.Runtime, sandboxDir), pr.isolation, opts.VscodeTunnel, invocation.SanitizeTunnelName(opts.Name), lifecycleCfg)
 	if err != nil {
 		return nil, nil, "", "", fmt.Errorf("build %s: %w", store.RuntimeConfigFile, err)
 	}
@@ -733,10 +733,9 @@ func writeStatFiles(sandboxDir string, meta *store.Environment, agentDef *agent.
 }
 
 // buildContainerConfig creates the config.json content.
-// agentLaunchPrefix is the backend-specific wrap prefix that PrepareAgentCommand
-// would prepend (e.g. a 'PATH="..." ' prefix for Tart);
-// computed once by the caller, stored here as single source of truth for the
-// agent-command wrap (W1a of the architecture remediation plan).
+// agentLaunchPrefix is the backend's constant launch wrap (BackendDescriptor.AgentLaunchPrefix;
+// e.g. a 'PATH=...' prefix for Tart), computed once by the caller and stored here as the
+// single source of truth for the agent-command wrap (W1a of the architecture remediation plan).
 func buildContainerConfig(layout config.Layout, agentDef *agent.Definition, agentCommand string, agentLaunchPrefix string, tmuxConf string, workingDir string, debug bool, networkIsolated bool, allowedDomains []string, passthrough []string, overlayMounts []runtimeconfig.OverlayMountConfig, setupCommands []string, autoCommitInterval int, copyDirs []string, sandboxName string, tmuxSocket string, isolation runtime.IsolationMode, vscodeTunnel bool, vscodeTunnelName string, lifecycle *runtimeconfig.LifecycleConfig) ([]byte, error) {
 	var stateDirName string
 	if agentDef.StateDir != "" {

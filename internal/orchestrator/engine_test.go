@@ -94,7 +94,6 @@ func (m *mockRuntime) TmuxSocket(_ string) string { return "" }
 func (m *mockRuntime) AttachCommand(_ string, _, _ int, _ runtime.IsolationMode) []string {
 	return nil
 }
-func (m *mockRuntime) PrepareAgentCommand(cmd string) string { return cmd }
 
 func (m *mockRuntime) Descriptor() runtime.BackendDescriptor {
 	return runtime.BackendDescriptor{

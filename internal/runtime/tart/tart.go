@@ -609,13 +609,6 @@ func (r *Runtime) DiagHint(instanceName string) string {
 	return fmt.Sprintf("check VM log at %s", logPath)
 }
 
-// PrepareAgentCommand prepends the backend's constant launch wrap (see
-// descriptor.AgentLaunchPrefix) so the agent launches correctly from a
-// non-login shell.
-func (r *Runtime) PrepareAgentCommand(cmd string) string {
-	return descriptor.AgentLaunchPrefix + cmd
-}
-
 // TmuxSocket returns the explicit tmux socket path for Tart VMs.
 // When tart exec allocates a PTY with -t, the environment changes (TMPDIR)
 // prevent tmux from finding its socket at the default location. We must

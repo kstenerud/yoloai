@@ -112,7 +112,6 @@ func (m *lifecycleMockRuntime) TmuxSocket(_ string) string { return "" }
 func (m *lifecycleMockRuntime) AttachCommand(_ string, _, _ int, _ runtime.IsolationMode) []string {
 	return nil
 }
-func (m *lifecycleMockRuntime) PrepareAgentCommand(cmd string) string { return cmd }
 func (m *lifecycleMockRuntime) Descriptor() runtime.BackendDescriptor {
 	return runtime.BackendDescriptor{
 		Type:         "mock",

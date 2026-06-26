@@ -377,23 +377,6 @@ func LogsFor(ctx context.Context, rt Backend, name string, tail int) string {
 	return ""
 }
 
-// AgentCommandPreparer is an optional interface for backends that wrap an agent
-// launch command with backend-specific environment setup (PATH overrides, shell
-// wrappers). Backends that need no wrapping don't implement it; PrepareAgentCommandFor
-// returns the command unchanged.
-type AgentCommandPreparer interface {
-	PrepareAgentCommand(cmd string) string
-}
-
-// PrepareAgentCommandFor applies the backend's agent-command wrapping, or
-// returns cmd unchanged when the backend doesn't implement AgentCommandPreparer.
-func PrepareAgentCommandFor(rt Backend, cmd string) string {
-	if p, ok := rt.(AgentCommandPreparer); ok {
-		return p.PrepareAgentCommand(cmd)
-	}
-	return cmd
-}
-
 // ===== 4. Interactive session =====
 
 // InteractiveSession is implemented by backends that expose an interactive

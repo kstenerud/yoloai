@@ -79,7 +79,6 @@ func (r *rerouteBaseRuntime) TmuxSocket(_ string) string                     { r
 func (r *rerouteBaseRuntime) AttachCommand(_ string, _, _ int, _ runtime.IsolationMode) []string {
 	return nil
 }
-func (r *rerouteBaseRuntime) PrepareAgentCommand(cmd string) string { return cmd }
 func (r *rerouteBaseRuntime) Descriptor() runtime.BackendDescriptor {
 	return runtime.BackendDescriptor{
 		Type:         "mock",
