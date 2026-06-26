@@ -117,6 +117,45 @@ plan didn't know?"
 - Start from `git log --oneline main..public-layering` to ground "what changed,"
   then the design cluster, then the code.
 
+## Verdict (2026-06-26) — see D97
+
+**Audit run.** Six dimensions fanned to read-only investigators; synthesized into
+**[D97](../../decisions/working-notes.md)**. Headline: the **functional** carve (D88 S0–S3:
+Launch primitive, agent-free keepalive, agent-reroute-over-Launch) is **built and verified**, but
+the substrate/store **public surface is not yet agent-free**, so the Move is **not yet a pure
+`git mv`**. It needs a bounded **surface-cleanup Shape sub-phase** first (now **Stage 3b** in
+[public-layering.md](public-layering.md)), shaped by the WHAT/HOW lens recorded as
+**architecture-principles §4** (substrate verbs are request-in / no-mechanism-out): most of the
+runtime "agent-leak" is mis-named substrate HOW that **folds into `Launch`/`InteractiveExec`**
+(ingredient-vendors), one field is a kept **fact-query** (`AgentProvisionedByBackend`), and one
+is agent config **payload** to re-home (`AgentInstallMethod`). See D97 for the full cut.
+
+**By dimension:**
+1. **Assumptions** — `InstanceConfig`/`ProcSpec` are agent-free; the agent-fused DTO lives in
+   `orchestrator/runtimeconfig` (not the substrate). BUT agent-shaped exports survive in
+   `internal/runtime` (`BackendDescriptor`'s 3 agent fields, `AgentCommandPreparer`,
+   `InteractiveSession`/tmux — DF31) and `internal/store` (`Environment.{AgentType,Model}` — Q104).
+2. **Surface** — ~85 runtime + ~90 store symbols are clean substrate; the 7 above are the only
+   agent-leaky ones. New surface (netpolicy `Strategy`/`CanEnforce`, agent catalog) is **not** part
+   of this move — separate later promotions.
+3. **Hidden** — keep `runtimeconfig` DTO, monitor scripts, hook details, fall-to-shell internals,
+   and the `paths.go` on-disk *filename* constants internal (expose path *helpers* only).
+4. **Layout** — new packages map cleanly; the deferred `detectspec` was correctly not built
+   (YAGNI, validated by the strategies task). `netpolicy/compose.go` imports `agent` (upward
+   escaped-dep) — invert via the D89 floor-as-payload re-homing before netpolicy promotes.
+5. **Sequencing** — **ordering constraint:** `store` imports `runtime` ⇒ runtime first/with store.
+   D95 seam reserved & sufficient; detection merge-gate satisfied (clears main-merge, independent of
+   the Move). Surface-cleanup (3b) is the one hard prerequisite.
+6. **De-risk** — repoint `.golangci.yml` fences (lines 66/98/112 + forbidigo) + `internal_leak_fence`
+   auto-passes; `make releasetest` is the gate; `go vet -tags 'integration e2e'` recompiles the ~28
+   build-tagged files; procedure proven by three prior moves.
+
+**Rejected:** "move-then-clean" (promote agent-shaped fields now, break later) — violates Frame
+strategy #5 and the no-scope-cut standard.
+
+**Open (user's call):** Q-A store split vs. opaque-transport for `AgentType/Model`; Q-B
+branch-capstone vs. merge-then-fresh-branch for the Move.
+
 ## Cross-references
 
 - [public-layering.md](public-layering.md) (the Frame this audits), the D84–D96

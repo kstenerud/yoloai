@@ -57,6 +57,7 @@ This file is small on purpose: load all of it at the start of a task. It carries
 | ARCH §1  | Library-first; CLI/mcpsrv are embedders. Everything goes through the public surface — a reach into internal/ means a missing verb; add the verb. | The CLI imports/reaches internal/ instead of calling a yoloai.* verb.            |
 | ARCH §2  | yoloai↔internal is a published contract: no public type exposes an internal one (even via alias); embedders reach the engine only via the surface. Enforced (F1 + depguard). | A public type leaks an internal type, or widening a depguard allow-list instead of adding a verb. |
 | ARCH §3  | *(Emerging, research-gated.)* The why behind DEV §12 (not a second read-ban): CLI is safe by accident (kernel ACL), a many-principal daemon isn't — host knowledge must bind at an embedder-controlled lifetime. | Designing a library API that reaches host ambient, or treating "thread it down" as ergonomics not security. |
+| ARCH §4  | Substrate verbs are request-in, no-mechanism-out: hand the backend a request (`ProcSpec`/exec/attach), it owns HOW. Fact-queries (capability reads) stay on the surface; ingredient-vendors (launch-prefix, prepared command, attach argv) fold into the verb. | A backend getter the caller concatenates/execs, or restart rebuilds a command from a serialized mechanism fragment instead of routing through `Launch`. |
 
 ## testing-principles.md
 

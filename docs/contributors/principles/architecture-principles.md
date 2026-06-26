@@ -220,6 +220,77 @@ isolation axis; physical partition; HomeDir dissolution; embedder-lifetime handl
 
 ---
 
+## §4. Substrate verbs accept requests and encapsulate mechanism — request-in, no mechanism-out
+
+> **Rule.** A substrate (backend) verb takes a *request* (`ProcSpec`, an exec/attach request) and owns *how* it fulfils it; it must not vend an *ingredient* of the mechanism for the caller to apply (a launch-prefix string, a "prepared" command, an attach argv). Fact-*queries* — capability values the caller reads to make its *own* decision — are fine; ingredient-*vendors* are not: fold them into the verb. The verb names the WHAT; backend-private HOW never reaches the surface.
+>
+> **Bites when:** a backend exposes a getter the caller concatenates/execs (`prefix + cmd`, run-the-returned-argv), or a path like restart rebuilds a command from a serialized mechanism fragment instead of routing through the launch verb. · **See also:** ARCH §1/§2, DEV §2 (mechanism owns how), D89 (mechanism-vs-payload).
+
+**Principle.** The substrate (`runtime.Backend` and its optional interfaces) owns HOW an
+environment runs a process; the caller owns WHAT runs in it — `development-principles.md §2`
+and D89's mechanism-vs-payload, one layer down. So a substrate verb must be **request-in,
+mechanism-stays-in**: the caller hands a request — a `ProcSpec` to `Launch`, an exec/attach
+request to `InteractiveExec` — and the backend applies whatever PATH wrap, shell sourcing, or
+env prefix *its* environment needs, internally. It must not hand the caller a *piece* of that
+mechanism (a launch-prefix to prepend, a "prepared" command to run, an attach argv to exec)
+and trust the caller to apply it. That ingredient-vendor shape leaks HOW across the boundary
+and couples every caller to the backend's internals.
+
+The line is **fact-query vs ingredient-vendor**:
+
+- A **fact-query** returns a capability the caller reads to branch its *own* logic
+  (`AgentProvisionedByBackend` → envsetup decides whether to seed; the `BackendCaps` booleans;
+  `Probe`). Legitimate — the caller isn't applying the backend's mechanism.
+- An **ingredient-vendor** returns a fragment of the backend's mechanism for the caller to
+  assemble (`AgentLaunchPrefix` → `prefix + cmd`; `PrepareAgentCommand` → run the returned
+  string; `InteractiveSession.AttachCommand` → exec the returned argv). Illegitimate — fold it
+  into the request-accepting verb so the fragment never crosses the surface.
+
+The payoff is a **smaller, stabler public surface**: request-in / no-mechanism-out means the
+public contract is a handful of verbs plus honest capability facts — no mechanism fragments to
+freeze into semver and later regret.
+
+### The tell — a caller reconstructing mechanism without the backend
+
+The reliable smell is a caller *rebuilding* what a verb should have done. `AgentLaunchPrefix` is
+serialized into `runtime-config.json` and re-applied at restart
+(`orchestrator/lifecycle/restart.go`) *specifically* so the command can be recomputed "without
+constructing a Runtime." That convenience is the leak: restart reaches around the launch verb
+and re-implements its prefixing. The fix is not to expose the fragment more cleanly — it is to
+route restart *through* the backend's launch verb (the S0–S3 carve's own thesis: everything runs
+via `Launch`), after which the prefix is a backend-private detail that never needs serializing or
+exporting.
+
+### Worked example — the substrate surface cleanup (D97, Stage 3b)
+
+The pre-Move audit found three ingredient-vendors mis-named as "agent" surface in
+`internal/runtime`: `AgentLaunchPrefix`, `AgentCommandPreparer`/`PrepareAgentCommand`, and
+`InteractiveSession.AttachCommand`. Under this principle they are not renamed-and-kept; they
+**dissolve into `Launch`/`InteractiveExec`** and leave the public surface. `AgentProvisionedByBackend`
+is a fact-query and stays a descriptor capability. `AgentInstallMethod` is neither — it is agent
+(Claude) config payload — so it re-homes to the agent layer. The load-bearing change is
+restart-through-`Launch` (above), verified on real Docker; the folds-into-the-verb are otherwise
+behavior-preserving.
+
+### Cost-vs-benefit
+
+Cost: the backend must accept a richer request and do the assembly internally (e.g. `Launch`
+applies the env prefix), and a caller that took a shortcut — rebuilding a command from a stored
+fragment — must be rerouted through the verb, sometimes a real behavioral change. Damage
+prevented: a public substrate that freezes mechanism fragments into semver; callers silently
+coupled to a backend's PATH/shell internals; restart and create drifting because each
+re-implements the launch wrap. Request-in / no-mechanism-out keeps the WHAT/HOW seam where the
+layer boundary already is.
+
+### Sources
+
+Project decision D97 (pre-Move audit; the substrate surface cleanup that recast the "agent-leaky"
+runtime fields along the WHAT/HOW line). Extends `development-principles.md §2` (mechanism owns
+how) and D89 (mechanism-vs-payload) to the substrate verb surface. Request types:
+`runtime.ProcSpec` / `ProcessLauncher.Launch` (`substrate-interface.md`, D84).
+
+---
+
 # Common over-generalisations to avoid
 
 | Over-generalisation | Why yoloAI rejects |
@@ -230,6 +301,7 @@ isolation axis; physical partition; HomeDir dissolution; embedder-lifetime handl
 | **Allow-list-the-one-reach** | §1/§2 — when a fence goes red for a legitimate need, the fix is a public verb, not a per-leaf allow-entry. Allow-lists re-introduce exactly the blindness G2 removed. |
 | **Resolve-`${VAR}`/`~`-in-the-library** | §3 — both are ambient host-environment references. The library loads raw; the boundary resolves against an explicit (possibly nil) environment. Doing it in the library is safe in the CLI by accident, unsafe in a daemon by construction. |
 | **Long-lived-is-the-risk** | §3 — process *lifetime* (short vs long) adds only staleness. It's the *principal-multiplicity* axis (single vs many) that removes the kernel safety net. A long-lived single-principal MCP server is far safer than a short-lived many-principal request handler. |
+| **Rename-the-leak-and-keep-it** | §4 — an ingredient-vendor (`AgentLaunchPrefix`, a "prepared" command, an attach argv) doesn't become clean by dropping the agent-bias from its name. If the caller *applies* the fragment, fold it into the request-accepting verb; only *fact-queries* stay on the surface. A serialized fragment a caller recomputes "without a Runtime" is the tell, not the fix. |
 
 ---
 

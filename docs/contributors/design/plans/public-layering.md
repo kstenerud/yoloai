@@ -161,8 +161,20 @@ This is a seed, not the full set — later cycles will add more.
 3. **Shape** — restructure behind `internal/` to the as-public layout/surface, resolving each
    finding/conflation; each resolution a D-entry. Includes the substrate managed-lifecycle carve
    (the load-bearing one — DF32) and the idle/liveness split (Q103).
-4. **Move** — promote `internal/<layer>` → `yoloai/<layer>` per stabilized layer, mechanically.
-   One module. Add depguard fences at each promotion.
+   - **3b. Substrate surface-cleanup (pre-Move, D97).** The pre-Move audit
+     ([plans/move-audit.md](move-audit.md), D97) found the *functional* carve done (Launch +
+     keepalive + agent-reroute, S0–S3) but the *public surface* still agent-shaped: a pure
+     `git mv` would freeze agent concepts into semver. Before promoting `runtime`/`store`, a
+     bounded behavior-preserving sub-phase must extract the agent-shaped exports
+     (`BackendDescriptor.{AgentProvisionedByBackend,AgentInstallMethod,AgentLaunchPrefix}`,
+     `AgentCommandPreparer`, `InteractiveSession`/tmux → DF31; `store.Environment.{AgentType,Model}`
+     → Q104), keep the `paths.go` on-disk *filename* constants unexported-as-API (expose helpers
+     only), and clear two stale comments. **Ordering constraint:** `store` imports `runtime`
+     (`BackendType`), so `runtime` promotes before/with `store`; `store` cannot go first.
+4. **Move** — promote `internal/<layer>` → `yoloai/<layer>` per stabilized layer, mechanically
+   (only after 3b for runtime/store). One module. Add depguard fences at each promotion; the
+   move is the proven `git mv` + import sweep + fence-repoint, gated by `make releasetest`
+   (+ `go vet -tags 'integration e2e'` for the build-tagged tests). See D97 for the verdict.
 
 ## Non-goals
 
