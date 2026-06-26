@@ -181,6 +181,10 @@ RUN groupadd -g 1001 yoloai \
 # bind mount targets exist in the image. Kata Containers (and any OCI runtime
 # that does not auto-create missing targets like runc does) requires that both
 # directory and file bind mount destinations exist before the mount is applied.
+# The file placeholders are deliberately EMPTY and generic — agent-specific
+# defaults (e.g. aider's "{}" conf) live in the agent definition via
+# SeedFile.Content, which always stages the file so it is bind-mounted *over*
+# the empty placeholder; the placeholder is never the file the agent reads.
 RUN mkdir -p \
         /home/yoloai/.claude \
         /home/yoloai/.gemini \
@@ -192,6 +196,7 @@ RUN mkdir -p \
     && touch \
         /home/yoloai/.claude.json \
         /home/yoloai/.opencode.json \
+        /home/yoloai/.aider.conf.yml \
         /home/yoloai/.tmux.conf \
     && chown -R yoloai:yoloai /home/yoloai
 
