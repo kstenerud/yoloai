@@ -614,9 +614,13 @@ func resolveAgentParams(agentDef *agent.Definition, opts Options, pr *profileRes
 		return "", false, "", "", "", false, err
 	}
 
-	// Headless is a preference: it's honored only when safe for this agent +
-	// auth, otherwise the agent runs interactively (D101).
-	headless := opts.Headless && headlessViable(agentDef, layout)
+	// Headless is a preference, honored only when the agent has usable auth we can
+	// observe (D101): with auth present the agent won't hit a login prompt (so it
+	// can't hang on an OAuth/browser flow that never completes in a headless pane);
+	// without it, run interactively so the user can attach and authenticate. This
+	// is failsafe-forward — it bets on observed auth, not on any agent's headless
+	// behavior staying the same across releases.
+	headless := opts.Headless && agentHasUsableAuth(agentDef, pr.env, layout)
 
 	agentArgs := pr.agentArgs[opts.Agent]
 	agentCommand := invocation.BuildAgentCommand(agentDef, model, promptText, agentArgs, opts.Passthrough, headless)
@@ -624,13 +628,19 @@ func resolveAgentParams(agentDef *agent.Definition, opts Options, pr *profileRes
 	return promptText, hasPrompt, model, agentCommand, gcfg.TmuxConf, headless, nil
 }
 
-// headlessViable reports whether headless mode is safe to run for this agent
-// given the available auth. An agent whose headless mode could hang on a
-// browser/OAuth login that can't complete in a headless pane (D101) is viable
-// only when an API key is present; Claude (HeadlessSafeWithoutAPIKey) and the
-// utility agents (no APIKeyEnvVars → HasAnyAPIKey true) are always viable.
-func headlessViable(agentDef *agent.Definition, layout config.Layout) bool {
-	return agentDef.HeadlessSafeWithoutAPIKey || envsetup.HasAnyAPIKey(envspec.BuildEnvSpec(agentDef), layout)
+// agentHasUsableAuth reports whether the agent has authentication we can observe
+// — an API-key env var, an auth credential file (or macOS Keychain entry), or an
+// auth hint (e.g. a local model server). It reuses the same envsetup checks as
+// the create-time missing-auth gate (prepare_dirs.checkAgentAuth) so there is one
+// auth-presence convention. `yoloai run` uses it to decide headless vs the
+// interactive TTY flow (D101): headless only when auth is present, so the agent
+// can't stall on a login prompt in a headless pane. Agents that require no API
+// key (test/idle) report true via HasAnyAPIKey.
+func agentHasUsableAuth(agentDef *agent.Definition, configEnv map[string]string, layout config.Layout) bool {
+	spec := envspec.BuildEnvSpec(agentDef)
+	return envsetup.HasAnyAPIKey(spec, layout) ||
+		envsetup.HasAnyAuthFile(spec, layout.HomeDir) ||
+		envsetup.HasAnyAuthHint(spec, configEnv, layout)
 }
 
 // buildLifecycleConfig builds the lifecycle config if the archetype requires it.

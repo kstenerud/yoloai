@@ -76,36 +76,25 @@ type IdleSupport struct {
 
 // Definition describes an agent's install, launch, and behavioral characteristics.
 type Definition struct {
-	Type           AgentType
-	Description    string
-	InteractiveCmd string
-	HeadlessCmd    string
-	PromptMode     PromptMode
-	// HeadlessSafeWithoutAPIKey reports that the agent's headless mode runs
-	// safely even when no API-key env var is present — it works on an
-	// interactive/subscription login AND fails cleanly (non-zero exit) rather
-	// than hanging on a browser/OAuth flow that can never complete in a headless
-	// pane. Only Claude qualifies (`-p` runs on a `/login` subscription, with
-	// `/login` disabled in `-p` so it can't hang). For every other agent this is
-	// false, so `yoloai run` gates headless on an API key (envsetup.HasAnyAPIKey)
-	// and otherwise falls back to the interactive TTY flow (D101,
-	// research/agent-headless-auth.md). Utility agents with no APIKeyEnvVars
-	// (test/idle) pass HasAnyAPIKey regardless, so they need not set this.
-	HeadlessSafeWithoutAPIKey bool
-	APIKeyEnvVars             []string
-	AuthHintEnvVars           []string // env vars indicating auth is configured without a cloud API key (e.g. local model servers)
-	AuthOptional              bool     // when true, missing auth is a warning not an error (for agents with many auth paths)
-	SeedFiles                 []SeedFile
-	StateDir                  string
-	SubmitSequence            string
-	StartupDelay              time.Duration
-	Idle                      IdleSupport
-	ModelFlag                 string
-	ModelAliases              map[string]string
-	ModelPrefixes             map[string]string // env var → model prefix (e.g. OLLAMA_API_BASE → "ollama_chat/")
-	NetworkAllowlist          []string          // domains allowed when network-isolated
-	ContextFile               string            // filename in StateDir for sandbox context reference (e.g., "CLAUDE.md")
-	AgentFilesExclude         []string          // glob patterns to skip when copying agent_files (string form)
+	Type              AgentType
+	Description       string
+	InteractiveCmd    string
+	HeadlessCmd       string
+	PromptMode        PromptMode
+	APIKeyEnvVars     []string
+	AuthHintEnvVars   []string // env vars indicating auth is configured without a cloud API key (e.g. local model servers)
+	AuthOptional      bool     // when true, missing auth is a warning not an error (for agents with many auth paths)
+	SeedFiles         []SeedFile
+	StateDir          string
+	SubmitSequence    string
+	StartupDelay      time.Duration
+	Idle              IdleSupport
+	ModelFlag         string
+	ModelAliases      map[string]string
+	ModelPrefixes     map[string]string // env var → model prefix (e.g. OLLAMA_API_BASE → "ollama_chat/")
+	NetworkAllowlist  []string          // domains allowed when network-isolated
+	ContextFile       string            // filename in StateDir for sandbox context reference (e.g., "CLAUDE.md")
+	AgentFilesExclude []string          // glob patterns to skip when copying agent_files (string form)
 
 	// ResumeFlag is the agent's native conversation-resume flag, appended to the
 	// interactive command to continue the prior conversation (e.g. Claude
@@ -187,14 +176,16 @@ var agents = map[string]*Definition{
 		},
 	},
 	"claude": {
-		Type:                      "claude",
-		Description:               "Anthropic Claude Code — AI coding assistant",
-		InteractiveCmd:            "claude --dangerously-skip-permissions",
-		HeadlessCmd:               `claude -p "PROMPT" --dangerously-skip-permissions`,
-		PromptMode:                PromptModeInteractive,
-		HeadlessSafeWithoutAPIKey: true, // claude -p runs on a /login subscription and exits cleanly when under-authed (D101)
-		ResumeFlag:                "--continue",
-		APIKeyEnvVars:             []string{"ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"},
+		Type:        "claude",
+		Description: "Anthropic Claude Code — AI coding assistant",
+		// Headless command must NOT add --bare: --bare skips OAuth/keychain reads and
+		// is API-key-only, which would break subscription logins; plain `claude -p`
+		// honors a /login subscription (D101, research/agent-headless-auth.md).
+		InteractiveCmd: "claude --dangerously-skip-permissions",
+		HeadlessCmd:    `claude -p "PROMPT" --dangerously-skip-permissions`,
+		PromptMode:     PromptModeInteractive,
+		ResumeFlag:     "--continue",
+		APIKeyEnvVars:  []string{"ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"},
 		SeedFiles: []SeedFile{
 			{HostPath: "~/.claude/.credentials.json", TargetPath: ".credentials.json", AuthOnly: true, KeychainService: "Claude Code-credentials"},
 			{HostPath: "~/.claude/settings.json", TargetPath: "settings.json"},

@@ -18,34 +18,53 @@ fall back to the interactive TTY flow otherwise (where the user can attach and a
 
 ## Matrix
 
-| Agent | Headless OK on OAuth/subscription (no API key)? | Failure mode when under-authed | Verdict for `run` |
-|---|---|---|---|
-| **Claude Code** (`claude -p`) | **Yes** — runs on a `/login` subscription; `/login` is disabled in `-p` so it can't hang | **Clean** non-zero exit (`Not logged in`) | **Headless always safe** — `HeadlessSafeWithoutAPIKey = true` |
-| **Gemini CLI** (`gemini -p`) | No — can't initiate OAuth login headless (needs a browser); only a pre-cached token or API key works | **HANGS** on the OAuth/browser wait (#1696, #13853) | Headless only with an API key |
-| **Aider** (`--message`) | N/A — BYO-API-key only, no OAuth concept | **HANGS ~5 min** on OpenRouter OAuth onboarding (verified in `aider/onboarding.py`: no isatty guard, 300 s timeout) | Headless only with an API key |
-| **Codex** (`codex exec`) | Conditional — works with a pre-seeded `~/.codex/auth.json`; `exec` won't log in itself | Clean error, but a **historical hang** bug (#1569) | Headless only with an API key (conservative; seeded auth.json under-covered, accepted) |
-| **OpenCode** (`opencode run`) | Likely — shares `auth.json` with the TUI; under-auth appears to error cleanly | Clean error (not a hang) | Headless only with an API key (conservative) |
+The design (below) treats all agents uniformly — headless only when auth is observed — so the
+matrix is here as the verified *facts* (especially the failure modes) that justify that rule, not
+as per-agent special-casing.
 
-## Bottom line (the design rule)
+| Agent | Headless OK on OAuth/subscription (no API key)? | Failure mode when under-authed |
+|---|---|---|
+| **Claude Code** (`claude -p`) | **Yes** — plain `-p` reads OAuth/keychain and runs on a `/login` subscription; `/login` is disabled in `-p` so it can't hang (only `--bare` is key-only) | **Clean** non-zero exit (`Not logged in`) |
+| **Gemini CLI** (`gemini -p`) | No — can't initiate OAuth login headless (needs a browser); only a pre-cached token or API key works | **HANGS** on the OAuth/browser wait (#1696, #13853) |
+| **Aider** (`--message`) | N/A — BYO-API-key only, no OAuth concept | **HANGS ~5 min** on OpenRouter OAuth onboarding (verified in `aider/onboarding.py`: no isatty guard, 300 s timeout) |
+| **Codex** (`codex exec`) | Conditional — works with a pre-seeded `~/.codex/auth.json`; `exec` won't log in itself | Clean error, but a **historical hang** bug (#1569) |
+| **OpenCode** (`opencode run`) | Likely — shares `auth.json` with the TUI; under-auth appears to error cleanly | Clean error (not a hang) |
 
-- **Claude** is the one agent safe to run headless on any auth (including a subscription with no
-  API-key env var), because it fails cleanly and `/login` is disabled in `-p` (no TTY hang). →
-  `HeadlessSafeWithoutAPIKey = true`.
-- **Every other real agent** can hang headless without a usable key, so headless is gated on an
-  API key being present (`envsetup.HasAnyAPIKey`, which checks the agent's API-key **env vars**).
-  No key → fall back to the TTY flow.
-- **Utility agents** (`test`, `idle`) declare no `APIKeyEnvVars`, so `HasAnyAPIKey` returns true and
-  they stay headless — no auth, no hang.
+## The `claude -p` vs `--bare` distinction (verified directly)
 
-## Known conservative gaps (accepted, per "not worth chasing")
+Per code.claude.com/docs/en/headless: plain `claude -p` "loads the same context an interactive
+session would, including anything configured in … `~/.claude`," and **`--bare` is the variant that
+"skips OAuth and keychain reads"** and requires `ANTHROPIC_API_KEY`/`apiKeyHelper`. So a
+subscription `/login` works under plain `-p` but **not** under `--bare`. Two consequences:
+- yoloAI's claude headless command must **never** add `--bare` (it would silently become
+  API-key-only and break subscription users). Enforced by the comment at claude's `HeadlessCmd`.
+- The docs note `--bare` "will become the default for `-p` in a future release" — a forward change
+  we can't predict. The design below does **not** depend on it.
 
-- `HasAnyAPIKey` checks env vars, **not** OAuth credential files. A Codex/OpenCode user with a
-  valid seeded `auth.json` (but no key env var) falls back to TTY unnecessarily — slower, never
-  broken. (Claude's file-based subscription is covered by the explicit flag instead.)
-- "Credential present" ≠ "credential valid" — an expired token still presents a file/var, so a
-  hang is still theoretically possible. The TTY fallback keeps such a case **visible and
-  attachable** rather than an invisible headless stall, which is the graceful behavior the user
-  asked for.
+## Bottom line (the design rule — failsafe-forward)
+
+Headless is a startup optimization; the interactive TTY flow always works. So `yoloai run` goes
+headless **only when the agent has authentication we can observe** — an API key, an auth credential
+file/Keychain entry, or an auth hint (local model server) — reusing the same `envsetup` checks as
+the create-time missing-auth gate (one auth-presence convention). With auth present an agent won't
+hit a login prompt, so it can't hang; without it, run interactively so the user can attach and
+authenticate.
+
+**Why observed-auth and not a per-agent "headless-safe" flag:** a flag encodes an *assumption* about
+an agent's headless behavior (e.g. "Claude is fine without a key") that an upstream release can
+invalidate — and our code can't retroactively know. Betting on observed auth instead depends on
+nothing that can change upstream: for Claude the reachable behavior is identical (create already
+requires Claude to have auth, or it errors first), but the fragile assumption is gone, and the
+worst case if any agent's auth stops working stays a clean failure, never a hang. Utility agents
+(`test`, `idle`) require no API key → `HasAnyAPIKey` true → always viable.
+
+## Known residual (accepted, per "not worth chasing")
+
+"Credential present" ≠ "credential valid" — an expired token still presents a file/var, so an agent
+that re-auths on expiry (Gemini/Codex) could still hang headless. The durable fix is a headless
+launch with no answerable interactive TTY (so a login attempt fails fast instead of stalling) —
+tracked as a follow-up tied to the session-carve's no-TTY mode. Until then the auth-presence gate
+covers the common no-auth case, and `--tty` is the manual escape hatch.
 
 ## Sources
 

@@ -140,7 +140,7 @@ func executeRun(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, opts 
 		headless = meta.Headless
 	}
 	if opts.Headless && !headless && !cliutil.JSONEnabled(cmd) {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Note: %s can't run headless without an API key — running interactively (attach with 'yoloai attach %s' to monitor).\n", //nolint:errcheck // best-effort output
+		fmt.Fprintf(cmd.ErrOrStderr(), "Note: no usable credentials for %s headless mode — running interactively (attach with 'yoloai attach %s' to authenticate/monitor).\n", //nolint:errcheck // best-effort output
 			opts.AgentType, sb.Name())
 	}
 

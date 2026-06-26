@@ -73,17 +73,23 @@ func TestBuildContainerConfig_Headless(t *testing.T) {
 	assert.True(t, interactive.FallToShell, "interactive keeps fall-to-shell on")
 }
 
-func TestHeadlessViable(t *testing.T) {
-	// D101: headless is safe for Claude on any auth; other agents need an API key
-	// (else they could hang on a login flow in a headless pane); utility agents
-	// with no API-key env vars are always viable.
-	noKeys := config.Layout{}.WithEnv(map[string]string{})
+func TestAgentHasUsableAuth(t *testing.T) {
+	// D101 (failsafe): headless is gated on OBSERVED auth — an agent runs headless
+	// only when it has a usable key/credential, so it can't stall on a login prompt
+	// in a headless pane. No special-casing any agent's headless behavior.
+	noAuth := config.Layout{}.WithEnv(map[string]string{})
+	withAnthropicKey := config.Layout{}.WithEnv(map[string]string{"ANTHROPIC_API_KEY": "x"})
 	withGeminiKey := config.Layout{}.WithEnv(map[string]string{"GEMINI_API_KEY": "x"})
 
-	assert.True(t, headlessViable(agent.GetAgent("claude"), noKeys), "claude is headless-safe without a key")
-	assert.True(t, headlessViable(agent.GetAgent("test"), noKeys), "test has no API-key env vars → viable")
-	assert.False(t, headlessViable(agent.GetAgent("gemini"), noKeys), "gemini needs an API key for headless")
-	assert.True(t, headlessViable(agent.GetAgent("gemini"), withGeminiKey), "gemini viable once a key is present")
+	// No auth → not viable, for EVERY real agent including Claude (we never bet on
+	// key-less headless working — the failsafe property).
+	assert.False(t, agentHasUsableAuth(agent.GetAgent("claude"), nil, noAuth), "claude with no observable auth → not viable")
+	assert.False(t, agentHasUsableAuth(agent.GetAgent("gemini"), nil, noAuth), "gemini with no auth → not viable")
+	// Auth present → viable.
+	assert.True(t, agentHasUsableAuth(agent.GetAgent("claude"), nil, withAnthropicKey), "claude with a key → viable")
+	assert.True(t, agentHasUsableAuth(agent.GetAgent("gemini"), nil, withGeminiKey), "gemini with a key → viable")
+	// Utility agents need no API key → always viable.
+	assert.True(t, agentHasUsableAuth(agent.GetAgent("test"), nil, noAuth), "test needs no API key → viable")
 }
 
 func TestBuildContainerConfig_StateDirName(t *testing.T) {

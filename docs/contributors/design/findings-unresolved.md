@@ -285,6 +285,25 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
   `internal/orchestrator/create/prepare_dirs.go` (`setupWorkdir`), `internal/orchestrator/state/state.go`
   (`DirSpec.ResolvedMountPath`), and every `meta.Workdir()` reader.
 
+### DF50 — a headless agent with a present-but-invalid credential can still hang; the durable fix is a headless launch with no answerable TTY
+
+- **Discovered:** 2026-06-26 · **Workstream:** Phase 1a (D101, headless-auth fallback)
+- **Severity:** LOW
+- **Disposition:** PARKED
+- **Description:** D101 gates headless on *observed* auth (`agentHasUsableAuth`), which covers the
+  common no-auth case (→ TTY fallback). But "credential present" ≠ "credential valid": an expired
+  token still presents a file/env var, so an agent that re-authenticates on expiry (Gemini, Codex)
+  could still launch a login/browser flow and **hang** in a headless pane. The auth-presence check
+  can't detect validity. The durable, agent-agnostic fix is to run headless with **no answerable
+  interactive TTY** (close stdin / no PTY the agent can block on), so any interactive login attempt
+  fails fast instead of stalling — but today the headless flow runs the agent in the tmux pane (a
+  PTY) to reuse pane-death detection (D100), so it *has* an answerable terminal. This ties to the
+  session-carve's no-TTY headless mode. Until then the auth-presence gate + `run --tty` escape hatch
+  are the mitigation.
+- **Pointer:** `internal/orchestrator/create/create.go` (`agentHasUsableAuth`); the headless launch
+  runs in the tmux pane via `internal/runtime/monitor/sandbox-setup.py` (`launch_agent`). Related:
+  D100, D101, session-layer.md.
+
 ## Policy origin
 
 Established in [architecture-remediation.md](../archive/plans/architecture-remediation.md) and inherited by [layering-refactor.md](../archive/plans/layering-refactor.md).
