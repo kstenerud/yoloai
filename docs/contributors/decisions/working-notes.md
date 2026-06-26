@@ -939,6 +939,22 @@ Only then the **mechanical move**: `runtime` first/with `store`, repoint the fen
 
 **Library knob.** `SandboxCreateOptions.Headless bool` (create-time, persisted to runtime-config so restart reproduces it). `run` = `CreateSandbox(Headless:true)` → `Start` → optional `Wait(WaitForExit)` → optional `Destroy`. The CLI surfaces `Headless` *only* through `run`; embedders can set it directly and compose their own wait/cleanup. A terse top-level `yoloai status <name>` (scriptable poll primitive) is **deferred** — `sandbox info` covers it for now; `status` (not `state`, which collides with the workdir change-state concept) if/when added.
 
+**Status update (D101):** the `Headless` knob is now a *preference*, not a force — create may downgrade it to interactive when the agent's headless mode would be unsafe without an API key (D101). 1a-i verified end-to-end on real Docker (success: exit 0 → done; failure: exit 3 → failed → `run` exit 1; `--rm` cleans up both). No-workdir mode deferred (DF49).
+
+## D101 — `yoloai run` falls back to the TTY flow when headless mode would hang on auth; `--tty` forces it
+
+**Date:** 2026-06-26. **Status:** Active (user-requested, 2026-06-26). Extends [D100](#). Backed by verified research: [research/agent-headless-auth.md](../design/research/agent-headless-auth.md).
+
+**The problem.** Headless launch is a startup optimization, but several agents' headless modes **hang** when they lack usable auth — they try a browser/OAuth login that can never complete in a headless pane (Gemini #1696/#13853; Aider ~5 min, verified in `onboarding.py`; Codex #1569). The hang, not a worse result, is the hazard. The interactive TTY flow always works and is attachable.
+
+**The rule (conservative; the TTY path is the always-safe fallback, only cost is a slower start).** `run` goes headless **only when it's safe**, else falls back to the interactive TTY flow:
+- **Claude** is headless-safe on any auth — `-p` runs on a subscription `/login`, `/login` is disabled in `-p` (can't hang), and it exits cleanly when under-authed. → new field **`agent.Definition.HeadlessSafeWithoutAPIKey = true`** (Claude only).
+- **Every other real agent** gates headless on an API key being present (`envsetup.HasAnyAPIKey`, which checks the agent's API-key **env vars**). No key → fall back. Utility agents (`test`/`idle`) declare no `APIKeyEnvVars` → `HasAnyAPIKey` is true → they stay headless.
+
+**Mechanics.** `SandboxCreateOptions.Headless` becomes a **preference**: create computes the *effective* headless = `requested && (HeadlessSafeWithoutAPIKey || HasAnyAPIKey)`, builds the command + `fall_to_shell` from it, and **persists the effective value** to `store.Environment.Headless` (and the public `Environment.Headless`). The CLI `run` reads the effective value back to pick its wait condition — **`WaitForExit` when headless** (pane-death = done, Tier-3), **`WaitForIdle` when the TTY fallback ran** (an interactive agent finishes its turn and goes idle rather than exiting) — and prints a one-line notice when it auto-fell-back. A new **`run --tty`** flag forces the interactive flow (sets `Headless=false`) for users who want to attach and monitor/debug; no notice (the user chose it). The auth downgrade is a library-internal safe default (auth lives in the library; the safe choice avoids a hang), and the effective value is observable — see [[safe-default-aligns-with-resist-defaults]].
+
+**Accepted conservative gaps (per "trust docs, don't chase holes"):** `HasAnyAPIKey` ignores OAuth credential *files*, so a Codex/OpenCode user with a valid seeded `auth.json` (no key env var) falls back to TTY unnecessarily — slower, never broken. "Present" ≠ "valid", so an expired token could still hang headless; the TTY fallback keeps that case visible/attachable, which is the graceful behavior requested.
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.
