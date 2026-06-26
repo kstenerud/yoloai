@@ -25,8 +25,14 @@ so it lands as its own task.
   boundary). Also fixed a latent ApplySettings non-idempotency (shared `appendHookGroup`).
   Codex auths via seeded `auth.json` (no env key), so a real turn ran: hook log shows
   `hook.active`+`hook.idle` written by codex, status active→idle, no blip.
-- **Phase C — OpenCode** (subscribe-family: plugin `event` hook or SSE) — next.
-- **Phase D — Aider** (`--notifications-command` launch flag; config-level verify, no auth).
+- **Phase C — OpenCode ✅ DONE (542a51d7), VERIFIED LIVE.** Hook-authoritative via a
+  yoloai-provided plugin (`opencode_plugin.js`, go:embed'd → seeded to
+  `~/.config/opencode/plugins/`): keys off `session.status` (`{status:{type:busy|idle}}`)
+  — NOT message.updated/session.idle, which fire *after* turn completion (verified, would
+  stick at active). New `SeedFile.Content` mechanism for yoloai-provided (non-host) files.
+  OpenCode auths via seeded auth.json; real turn → active→idle. Also fixed a Makefile
+  stale-binary bug (embed deps; [[make-build-embed-deps]]).
+- **Phase D — Aider** (`--notifications-command` launch flag; config-level verify, no auth) — next.
 
 ## What
 
