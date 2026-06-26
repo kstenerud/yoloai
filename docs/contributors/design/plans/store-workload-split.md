@@ -83,29 +83,26 @@ already surfaces the agent's prompt/terminal/attach; D67/agent-layer.md "`sb.Age
 (type/model) + …"); the substrate view and public `store.Environment` carry **substrate facts
 only**. So at the Move, `sb.Agent()` gains `Type()`/`Model()` and the `Environment` view sheds them.
 
-## Resequencing — one Move-prep pass, not mid-3b (2026-06-26)
+## Resequencing — lands NOW, straight to final shape (revised 2026-06-26)
 
-The internal slim (drop agent/model from `store.Environment`) and the public reshape (agent/model
-→ `sb.Agent()`) are **coupled** — you cannot slim the record without changing what feeds the public
-view, and the public reshape is deliberately Move-time (keep the public API stable through the
-internal refactor). Doing the slim earlier would force *throwaway* view-plumbing (the public
-`Environment` builder temporarily sourcing from `agent.json`, deleted at the Move) — the
-transitional scaffolding [[feedback-feature-branch-no-transitional-scaffolding]] says to skip.
-
-So the split lands as a single coherent **Move-prep pass**, immediately before the mechanical
-`git mv` (which stays a pure path change):
+**Constraint lifted (user, 2026-06-26):** an inconsistent public API mid-branch is fine
+([[feedback-inconsistent-public-api-ok-midbranch]]) — the public reshape need NOT be bundled into a
+single Move-time pass to keep the API stable. The original "defer to Move-prep" framing existed only
+to avoid a *throwaway* public-`Environment`-stable shim; with that no longer required, Q104 lands
+**now, all at once, straight to its final shape** (slim + public reshape together) — no shim, so the
+[[feedback-feature-branch-no-transitional-scaffolding]] concern is satisfied directly. The migration
+bridges old on-disk records, so there is no runtime fallback either. `git mv` (the Move) stays a
+pure path change with Q104 already done.
 
 - **Step 1 — DONE (`70e7b11f`):** `internal/orchestrator/agentcfg` + `create` dual-writes
   `agent.json` (pre-stages the data; additive, behavior-preserving).
-- **Move-prep pass (deferred to the Move):** redirect internal readers
-  (`restart`/`start`/`requireAgent`; `network` via a new `Engine.LoadAgentConfig`) to `agent.json`;
-  **slim `store.Environment`** (drop the fields, `metaVersion`→3); the **v2→v3 raw-JSON relocation
-  + balk + `system migrate` per-sandbox pass** (M2); surface agent/model on **`sb.Agent()`** and
-  shed them from the `Environment` view; tests + BREAKING-CHANGES. No transitional fallbacks (the
-  branch lands whole).
-
-3b itself finishes with the remaining trivial carve-free items (`paths.go` publicity, stale
-comments); `store.Environment` becomes agent-free at Move-prep — still before the public freeze.
+- **Now (one coherent pass, a few commits):** redirect internal readers
+  (`restart`/`start`/`requireAgent`; `network` via a new `Engine.LoadAgentConfig`) to read
+  `agent.json` directly — **no `meta`-fallback** (the migration guarantees `agent.json` exists by
+  the time a reader runs); **slim `store.Environment`** (drop the fields, `metaVersion`→3); the
+  **v2→v3 raw-JSON relocation + balk + `system migrate` per-sandbox pass** (M2); surface agent/model
+  on **`sb.Agent().Type()/Model()`** and shed them from the public `Environment` view; tests +
+  BREAKING-CHANGES.
 
 ## Cross-references
 
