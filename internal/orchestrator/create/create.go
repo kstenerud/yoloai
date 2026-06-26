@@ -342,7 +342,7 @@ func createAndSeedSandbox(ctx context.Context, d state.Deps, sandboxDir string, 
 	}
 	desc := d.Runtime.Descriptor()
 	spec := envspec.BuildEnvSpec(agentDef)
-	return envsetup.SeedSandbox(spec, sandboxDir, pr.agentFiles, d.Layout.HomeDir, d.Layout, desc.AgentProvisionedByBackend, desc.AgentInstallMethod, output)
+	return envsetup.SeedSandbox(spec, sandboxDir, pr.agentFiles, d.Layout.HomeDir, d.Layout, desc.AgentProvisionedByBackend, output)
 }
 
 // buildConfigAndEnvironment builds the container config and sandbox meta structs.

@@ -54,7 +54,6 @@ var descriptor = runtime.BackendDescriptor{
 	InstallHint:               "brew install cirruslabs/cli/tart",
 	BaseModeName:              runtime.IsolationModeVM,
 	AgentProvisionedByBackend: true,
-	AgentInstallMethod:        "native",
 	// Prepend the provisioned tool dirs to PATH so the agent launches from a
 	// non-login shell (tart exec bash -c does not source ~/.zprofile). Claude
 	// Code is installed natively in ~/.local/bin; node@22 is keg-only at

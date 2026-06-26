@@ -181,7 +181,6 @@ type BackendDescriptor struct {
 	InstallHint               string          // install URL or shell command; "" when no install is needed
 	BaseModeName              IsolationMode   // typed label for the backend's default (no-isolation) mode
 	AgentProvisionedByBackend bool            // true when the backend's image/VM ships the agent binary
-	AgentInstallMethod        string          // how the backend installs Claude Code ("npm-global" or "native"); patched into seeded .claude.json so it matches reality. "" when AgentProvisionedByBackend is false.
 	AgentLaunchPrefix         string          // backend-specific wrap prepended to the agent launch command (e.g. a PATH= prefix for Tart, a shell-wrapper source for Seatbelt); "" for backends that need no wrapping. A compile-time constant per backend — host-derivable from the backend type alone, so a sandbox's stored prefix can be recomputed without constructing a Runtime. Source of truth for the agent-command launch wrap and the v1->v2 launch-prefix backfill migration.
 	SupportedIsolationModes   []IsolationMode // non-default isolation modes this backend can support
 	Capabilities              BackendCaps     // feature-set flags

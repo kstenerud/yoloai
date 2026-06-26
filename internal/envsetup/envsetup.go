@@ -256,14 +256,15 @@ func EnsureContainerSettings(sandboxDir string, patches []SettingsPatch) error {
 	return nil
 }
 
-// ensureHomeSeedConfig patches home-seed/.claude.json so its installMethod
-// matches how the backend actually installed Claude Code (installMethod is the
-// backend's AgentInstallMethod — "npm-global" for the container backends,
-// "native" for Tart). The seeded file comes from the host, which usually says
-// "native"; when the backend installs via npm, a mismatch makes Claude Code
-// emit spurious warnings about a missing ~/.local/bin/claude and PATH
-// misconfiguration. Writing the backend's real method keeps them consistent.
-func ensureHomeSeedConfig(spec EnvSpec, sandboxDir, installMethod string) error {
+// ensureHomeSeedConfig strips the stale installMethod from home-seed/.claude.json
+// instead of patching it to the backend's value. The seeded file comes from the
+// host, which usually records the host's own install method (e.g. "native") — a
+// value that mismatches how the image installed Claude and would trigger spurious
+// PATH/auto-updater warnings. We delete the key so no stale value propagates.
+// Claude's auto-updater is disabled at the agent layer (DISABLE_AUTOUPDATER in
+// settings.json env, see docs/contributors/design/research/agent-self-update.md),
+// making installMethod inert regardless.
+func ensureHomeSeedConfig(spec EnvSpec, sandboxDir string) error {
 	// Only relevant for agents that seed .claude.json into HomeDir
 	var hasHomeSeed bool
 	for _, sf := range spec.SeedFiles {
@@ -283,7 +284,7 @@ func ensureHomeSeedConfig(spec EnvSpec, sandboxDir, installMethod string) error 
 		return err
 	}
 
-	cfg["installMethod"] = installMethod
+	delete(cfg, "installMethod")
 
 	return fileutil.WriteJSONMap(configPath, cfg)
 }
@@ -293,7 +294,7 @@ func ensureHomeSeedConfig(spec EnvSpec, sandboxDir, installMethod string) error 
 // homeDir is used for ~ expansion in seed file host paths.
 // hostEnv supplies both the agent-credential lookups (HasAnyAPIKey/CopySeedFiles)
 // and, via its curated interpolation map, the ${VAR} expansion in CopyAgentFiles.
-func SeedSandbox(spec EnvSpec, sandboxDir string, agentFiles *config.AgentFilesConfig, homeDir string, hostEnv config.Layout, provisionedByBackend bool, installMethod string, output io.Writer) (agentFilesInitialized bool, err error) {
+func SeedSandbox(spec EnvSpec, sandboxDir string, agentFiles *config.AgentFilesConfig, homeDir string, hostEnv config.Layout, provisionedByBackend bool, output io.Writer) (agentFilesInitialized bool, err error) {
 	hasAPIKey := HasAnyAPIKey(spec, hostEnv)
 	copiedAuth, err := CopySeedFiles(spec, sandboxDir, hasAPIKey, homeDir, hostEnv)
 	if err != nil {
@@ -319,7 +320,7 @@ func SeedSandbox(spec EnvSpec, sandboxDir string, agentFiles *config.AgentFilesC
 	}
 
 	if provisionedByBackend {
-		if err := ensureHomeSeedConfig(spec, sandboxDir, installMethod); err != nil {
+		if err := ensureHomeSeedConfig(spec, sandboxDir); err != nil {
 			return false, fmt.Errorf("ensure home seed config: %w", err)
 		}
 	}

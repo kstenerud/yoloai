@@ -220,6 +220,16 @@ var agents = map[string]*Definition{
 			s["sandbox"] = map[string]any{"enabled": false}
 			// Ensure Claude Code emits BEL for tmux tab highlighting.
 			s["preferredNotifChannel"] = "terminal_bell"
+			// Disable Claude Code's auto-updater: a disposable, image-pinned sandbox never
+			// self-updates (the image owns the version), and with updates off the seeded
+			// installMethod is inert — so the substrate need not declare it. See
+			// docs/contributors/design/research/agent-self-update.md.
+			env, _ := s["env"].(map[string]any)
+			if env == nil {
+				env = map[string]any{}
+			}
+			env["DISABLE_AUTOUPDATER"] = "1"
+			s["env"] = env
 			// Inject hooks for status tracking. Claude Code's own hook system is
 			// far more reliable than polling tmux capture-pane for a ready pattern.
 			injectIdleHook(s)

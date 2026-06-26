@@ -37,7 +37,6 @@ var descriptor = runtime.BackendDescriptor{
 	InstallHint:               "sudo apt install containerd kata-containers containernetworking-plugins",
 	BaseModeName:              runtime.IsolationModeVM,
 	AgentProvisionedByBackend: true,
-	AgentInstallMethod:        "npm-global",
 	SupportedIsolationModes:   []runtime.IsolationMode{runtime.IsolationModeVM, runtime.IsolationModeVMEnhanced},
 	Capabilities: runtime.BackendCaps{
 		NetworkIsolation:   true,

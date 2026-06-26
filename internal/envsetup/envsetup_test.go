@@ -536,42 +536,28 @@ func TestEnsureContainerSettings_GeminiPreservesAuthSettings(t *testing.T) {
 
 // ensureHomeSeedConfig tests
 
-func TestEnsureHomeSeedConfig_SetsInstallMethod(t *testing.T) {
+// TestEnsureHomeSeedConfig_StripsStaleInstallMethod verifies that a host-seeded
+// .claude.json carrying its own installMethod (e.g. "native") has that key removed
+// rather than overwritten, so no stale value propagates into the sandbox.
+// Other keys must be left intact (the rest of the host config is still useful).
+func TestEnsureHomeSeedConfig_StripsStaleInstallMethod(t *testing.T) {
 	sandboxDir := t.TempDir()
 	homeSeedDir := filepath.Join(sandboxDir, "home-seed")
 	require.NoError(t, os.MkdirAll(homeSeedDir, 0750))
 
-	// Create the .claude.json that would have been seeded
+	// Seed a .claude.json as the host would produce it
 	require.NoError(t, fileutil.WriteJSONMap(filepath.Join(homeSeedDir, ".claude.json"), map[string]any{
 		"installMethod": "native",
 		"otherKey":      "preserved",
 	}))
 
 	agentDef := agent.GetAgent("claude")
-	require.NoError(t, ensureHomeSeedConfig(agentSpec(agentDef), sandboxDir, "npm-global"))
+	require.NoError(t, ensureHomeSeedConfig(agentSpec(agentDef), sandboxDir))
 
 	cfg, err := fileutil.ReadJSONMap(filepath.Join(homeSeedDir, ".claude.json"))
 	require.NoError(t, err)
-	assert.Equal(t, "npm-global", cfg["installMethod"])
-	assert.Equal(t, "preserved", cfg["otherKey"])
-}
-
-func TestEnsureHomeSeedConfig_NativeMethodForTart(t *testing.T) {
-	sandboxDir := t.TempDir()
-	homeSeedDir := filepath.Join(sandboxDir, "home-seed")
-	require.NoError(t, os.MkdirAll(homeSeedDir, 0750))
-
-	require.NoError(t, fileutil.WriteJSONMap(filepath.Join(homeSeedDir, ".claude.json"), map[string]any{
-		"installMethod": "native",
-		"otherKey":      "preserved",
-	}))
-
-	agentDef := agent.GetAgent("claude")
-	require.NoError(t, ensureHomeSeedConfig(agentSpec(agentDef), sandboxDir, "native"))
-
-	cfg, err := fileutil.ReadJSONMap(filepath.Join(homeSeedDir, ".claude.json"))
-	require.NoError(t, err)
-	assert.Equal(t, "native", cfg["installMethod"])
+	_, ok := cfg["installMethod"]
+	assert.False(t, ok, "installMethod should be stripped from the seeded config")
 	assert.Equal(t, "preserved", cfg["otherKey"])
 }
 
@@ -580,7 +566,7 @@ func TestEnsureHomeSeedConfig_NoopForTestAgent(t *testing.T) {
 	agentDef := agent.GetAgent("test")
 
 	// Should not error even with no home-seed dir
-	require.NoError(t, ensureHomeSeedConfig(agentSpec(agentDef), sandboxDir, "npm-global"))
+	require.NoError(t, ensureHomeSeedConfig(agentSpec(agentDef), sandboxDir))
 }
 
 // HasAnyAuthHint tests
