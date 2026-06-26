@@ -252,6 +252,21 @@ def test_build_agent_launch_command_prepends_secret_exports() -> None:
     assert out == "export T='x'; cd '/w' && exec claude"
 
 
+def test_build_agent_launch_command_wraps_for_fall_to_shell() -> None:
+    # With a wrapper set (D96 fall-to-shell), the agent runs as an argument to the
+    # wrapper instead of being exec'd directly — the wrapper becomes the pane's
+    # process and the agent its child.
+    out = setup_helpers.build_agent_launch_command(
+        "claude --foo", "/w", None, wrapper="/yoloai/bin/agent-run.sh")
+    assert out == "cd '/w' && exec /yoloai/bin/agent-run.sh claude --foo"
+
+
+def test_build_agent_launch_command_wrapper_no_workdir() -> None:
+    out = setup_helpers.build_agent_launch_command(
+        "claude", None, None, wrapper="/yoloai/bin/agent-run.sh")
+    assert out == "exec /yoloai/bin/agent-run.sh claude"
+
+
 def test_build_agent_launch_command_applies_launch_prefix() -> None:
     # The W1a launch prefix (e.g. Tart's PATH=...) is prepended verbatim, ahead
     # of the secret exports and cd.

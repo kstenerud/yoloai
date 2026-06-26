@@ -160,6 +160,7 @@ def build_agent_launch_command(
     working_dir: str | None,
     secrets: dict[str, str] | None,
     launch_prefix: str = "",
+    wrapper: str = "",
 ) -> str:
     """Compose the shell command sent to the agent's tmux pane.
 
@@ -168,12 +169,19 @@ def build_agent_launch_command(
     ``agent_command`` (so the agent replaces the shell and its exit code becomes
     the pane's), and prepends ``launch_prefix`` (e.g. a ``PATH=... `` prefix a
     backend needs). Pure string composition — no tmux, no subprocess.
+
+    When ``wrapper`` is set (the fall-to-shell launch wrapper path, D96), the
+    agent command runs as ``exec {wrapper} {agent_command}`` instead: the wrapper
+    becomes the pane's process, runs the agent as a child, and on the agent's exit
+    records ``done`` and drops the pane to a shell — so the pane no longer dies on
+    agent exit. The agent command's words pass through to the wrapper as argv.
     """
+    target = f"{wrapper} {agent_command}" if wrapper else agent_command
     exports = build_secret_exports(secrets)
     if working_dir:
-        base = f"{exports}cd '{working_dir}' && exec {agent_command}"
+        base = f"{exports}cd '{working_dir}' && exec {target}"
     else:
-        base = f"{exports}exec {agent_command}"
+        base = f"{exports}exec {target}"
     return launch_prefix + base
 
 

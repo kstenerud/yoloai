@@ -3,8 +3,8 @@
 package orchestrator
 
 import (
-	"github.com/kstenerud/yoloai/internal/orchestrator/state"
 	"github.com/kstenerud/yoloai/internal/orchestrator/status"
+	"github.com/kstenerud/yoloai/internal/store"
 )
 
 // Status represents the current state of a sandbox. See status.Status.
@@ -76,8 +76,8 @@ var ListSandboxes = status.ListSandboxes
 // ListSandboxesMultiBackend inspects sandboxes per their backends. See status.ListSandboxesMultiBackend.
 var ListSandboxesMultiBackend = status.ListSandboxesMultiBackend
 
-// IsolationPerms is re-exported from state. See state.IsolationPerms.
-type IsolationPerms = state.IsolationPerms
+// IsolationPerms is re-exported from store. See store.IsolationPerms.
+type IsolationPerms = store.IsolationPerms
 
-// Perms is re-exported from state. See state.Perms.
-var Perms = state.Perms
+// Perms is re-exported from store. See store.Perms.
+var Perms = store.Perms

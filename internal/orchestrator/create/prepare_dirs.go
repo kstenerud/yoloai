@@ -12,10 +12,12 @@ import (
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/agent"
+	"github.com/kstenerud/yoloai/internal/envsetup"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/git"
+	"github.com/kstenerud/yoloai/internal/netpolicy"
+	"github.com/kstenerud/yoloai/internal/orchestrator/envspec"
 	"github.com/kstenerud/yoloai/internal/orchestrator/launch"
-	provision "github.com/kstenerud/yoloai/internal/orchestrator/provision"
 	"github.com/kstenerud/yoloai/internal/orchestrator/runtimeconfig"
 	"github.com/kstenerud/yoloai/internal/orchestrator/state"
 	"github.com/kstenerud/yoloai/internal/runtime"
@@ -86,9 +88,10 @@ func defaultDirModes(workdir *DirSpec, auxDirs []*DirSpec) {
 
 // checkAuthAndLocalhostWarnings performs auth checks and localhost URL warnings.
 func checkAuthAndLocalhostWarnings(d state.Deps, agentDef *agent.Definition, mergedEnv map[string]string, cfgModel string, opts Options) error {
-	hasAPIKey := provision.HasAnyAPIKey(agentDef, d.Layout)
-	hasAuth := provision.HasAnyAuthFile(agentDef, d.Layout.HomeDir)
-	hasAuthHint := provision.HasAnyAuthHint(agentDef, mergedEnv, d.Layout)
+	spec := envspec.BuildEnvSpec(agentDef)
+	hasAPIKey := envsetup.HasAnyAPIKey(spec, d.Layout)
+	hasAuth := envsetup.HasAnyAuthFile(spec, d.Layout.HomeDir)
+	hasAuthHint := envsetup.HasAnyAuthHint(spec, mergedEnv, d.Layout)
 	if err := checkAgentAuth(agentDef, hasAPIKey, hasAuth, hasAuthHint, outputFor(opts.Output)); err != nil {
 		return err
 	}
@@ -112,7 +115,7 @@ func checkAgentAuth(agentDef *agent.Definition, hasAPIKey, hasAuth, hasAuthHint 
 	}
 	msg := fmt.Sprintf("no authentication found for %s: set %s",
 		agentDef.Type, strings.Join(agentDef.APIKeyEnvVars, "/"))
-	if authDesc := provision.DescribeSeedAuthFiles(agentDef); authDesc != "" {
+	if authDesc := envsetup.DescribeSeedAuthFiles(envspec.BuildEnvSpec(agentDef)); authDesc != "" {
 		msg += fmt.Sprintf(" or provide OAuth credentials (%s)", authDesc)
 	}
 	if len(agentDef.AuthHintEnvVars) > 0 {
@@ -414,17 +417,7 @@ func setupAuxDir(ctx context.Context, g *git.Git, sandboxDir string, rt runtime.
 // buildNetworkConfig determines the network mode and allowlist from options
 // and agent definition.
 func buildNetworkConfig(opts Options, agentDef *agent.Definition) (string, []string) {
-	switch opts.Network {
-	case NetworkModeNone:
-		return "none", nil
-	case NetworkModeIsolated:
-		var allow []string
-		allow = append(allow, agentDef.NetworkAllowlist...)
-		allow = append(allow, opts.NetworkAllow...)
-		return "isolated", allow
-	default:
-		return "", nil
-	}
+	return netpolicy.Compose(string(opts.Network), agentDef.NetworkAllowlist, opts.NetworkAllow)
 }
 
 // collectOverlayMounts builds overlay mount configs for config.json from the

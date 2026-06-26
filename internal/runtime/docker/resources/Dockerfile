@@ -181,6 +181,10 @@ RUN groupadd -g 1001 yoloai \
 # bind mount targets exist in the image. Kata Containers (and any OCI runtime
 # that does not auto-create missing targets like runc does) requires that both
 # directory and file bind mount destinations exist before the mount is applied.
+# The file placeholders are deliberately EMPTY and generic — agent-specific
+# defaults (e.g. aider's "{}" conf) live in the agent definition via
+# SeedFile.Content, which always stages the file so it is bind-mounted *over*
+# the empty placeholder; the placeholder is never the file the agent reads.
 RUN mkdir -p \
         /home/yoloai/.claude \
         /home/yoloai/.gemini \
@@ -224,6 +228,13 @@ COPY setup_helpers.py /yoloai/bin/setup_helpers.py
 COPY tmux_io.py /yoloai/bin/tmux_io.py
 COPY status-monitor.py /yoloai/bin/status-monitor.py
 COPY diagnose-idle.sh /yoloai/bin/diagnose-idle.sh
-RUN chmod +x /yoloai/bin/entrypoint.sh /yoloai/bin/entrypoint.py /yoloai/bin/diagnose-idle.sh
+COPY agent-run.sh /yoloai/bin/agent-run.sh
+COPY yoloai-resume /yoloai/bin/yoloai-resume
+# chmod the exec scripts, and put /yoloai/bin on PATH so the fall-to-shell user
+# can run `yoloai-resume` by name (D96). SC2016: the literal `$PATH` is intended —
+# it is expanded by the shell that sources the profile, same as golang.sh above.
+# hadolint ignore=SC2016
+RUN chmod +x /yoloai/bin/entrypoint.sh /yoloai/bin/entrypoint.py /yoloai/bin/diagnose-idle.sh /yoloai/bin/agent-run.sh /yoloai/bin/yoloai-resume \
+    && echo 'export PATH="/yoloai/bin:$PATH"' > /etc/profile.d/yoloai-bin.sh
 
 ENTRYPOINT ["/yoloai/bin/entrypoint.sh"]

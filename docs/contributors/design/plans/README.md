@@ -15,6 +15,17 @@ Complete — all in-scope phases landed (Phase 1 detector truth + carved `store.
 
 Complete — D74 landed (Stage 1 `9f67d28`/`45aab36`/`8479258`, Stage 2 `8d8106c`/`0b38b3e`/`5321a9e`); the `Engine` owns the lazy `runtime.New` connection and the sub-handles (`Agent`/`Workdir`/`Network`/`Files`) hold a `*sandbox.Engine`. Archived under [../archive/plans/engine-owns-runtime.md](../archive/plans/engine-owns-runtime.md).
 
+## Public layering — composable layers staged behind `internal/`
+
+Active. Decompose yoloAI into a stack of composable public layers (`runtime`, `store`, `copyflow`,
+`agent`, a new agent-free managed lifecycle, …) under an 80/20 surface: the `yoloai` package stays
+the small stable top; the layers are opt-in for power users, and the library is built on the same
+layers. Strategy: shape every layer **as if public** but keep it under `internal/` (retaining
+churn-freedom), mirror the future public paths 1:1, and promote by a mechanical move last. One
+module throughout. Proceeds via audit cycles (mechanical `go list -deps` separation + semantic
+conflation review) draining to the findings/questions queues. Supersedes the deferred C-full/F
+notes in [D83](../../decisions/working-notes.md). Frame doc: [public-layering.md](public-layering.md).
+
 ## Env access seal — `config.HostEnv` curated accessors
 
 Replace the ad-hoc `config.Layout` env accessors (`LookupEnv`/`ExecEnv`/
@@ -55,7 +66,7 @@ Design considerations:
 
 ### Agent status detection (rework planned)
 
-Current implementation works but is fragile. See [idle detection research](../research/idle-detection.md) for full audit, external research, and architecture proposal for a pluggable detector framework.
+Current implementation works but is fragile. See [idle detection research](../research/idle-detection.md) for full audit, external research, and architecture proposal for a pluggable detector framework. **A concrete design+build plan now exists** — [agent-owned-detection.md](agent-owned-detection.md) — folding in fall-to-shell + `yoloai-resume`: make detection the agent's own responsibility (an agent-agnostic `DetectionSpec`, uniform external-watch mechanism first), have the launch wrapper own the exit lifecycle (write `done` + fall to an interactive shell + resume hint), and add a `yoloai-resume` one-command resume. Phase-gated with real-Docker checkpoints to protect the fragile detection layer. Supersedes the deferred fall-to-shell item in [public-layering.md](public-layering.md).
 
 ### Test agent harness
 
@@ -113,6 +124,16 @@ See [OPEN_QUESTIONS.md](../questions-unresolved.md) §77.
 Allow users to override the auto-resolved detector stack via profile-level config. A `detectors` list in profile `config.yaml` would replace the automatically computed stack, letting users disable noisy detectors or change priority order. No CLI flag — config file only.
 
 See [idle detection research](../research/idle-detection.md) §3.9 Q1.
+
+### Per-agent custom detection strategies (🚧 public-layering merge gate)
+
+[agent-detection-strategies.md](agent-detection-strategies.md) — deferred tail of
+[agent-owned-detection.md](agent-owned-detection.md). Promote detection to a
+first-class per-agent strategy and wire each agent's native turn-completion
+callback (Codex `notify`, Gemini `AfterAgent`, OpenCode `session.idle`, Aider
+`--notifications-command`; survey-backed by
+[research/agent-callbacks.md](../research/agent-callbacks.md)). **The
+`public-layering` branch does not merge to `main` until this is done.**
 
 ## Seatbelt Improvements
 

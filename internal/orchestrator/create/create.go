@@ -19,12 +19,13 @@ import (
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/copyflow"
+	"github.com/kstenerud/yoloai/internal/envsetup"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/git"
 	"github.com/kstenerud/yoloai/internal/orchestrator/archetype"
+	"github.com/kstenerud/yoloai/internal/orchestrator/envspec"
 	"github.com/kstenerud/yoloai/internal/orchestrator/invocation"
 	"github.com/kstenerud/yoloai/internal/orchestrator/launch"
-	provision "github.com/kstenerud/yoloai/internal/orchestrator/provision"
 	"github.com/kstenerud/yoloai/internal/orchestrator/runtimeconfig"
 	"github.com/kstenerud/yoloai/internal/orchestrator/state"
 	"github.com/kstenerud/yoloai/internal/runtime"
@@ -246,7 +247,7 @@ func prepareSandboxState(ctx context.Context, d state.Deps, opts Options) (*stat
 	}
 
 	// Phase 2: Create directory structure and seed sandbox.
-	perms := state.Perms()
+	perms := store.Perms()
 	agentFilesInitialized, err := createAndSeedSandbox(ctx, d, sandboxDir, agentDef, ri.profile, perms, outputFor(opts.Output))
 	if err != nil {
 		return nil, err
@@ -334,12 +335,14 @@ func resolveProfileAndArchetype(ctx context.Context, d state.Deps, opts *Options
 }
 
 // createAndSeedSandbox creates directory structure and seeds the sandbox with agent files.
-func createAndSeedSandbox(ctx context.Context, d state.Deps, sandboxDir string, agentDef *agent.Definition, pr *profileResult, perms state.IsolationPerms, output io.Writer) (bool, error) {
+func createAndSeedSandbox(ctx context.Context, d state.Deps, sandboxDir string, agentDef *agent.Definition, pr *profileResult, perms store.IsolationPerms, output io.Writer) (bool, error) {
 	_ = ctx // reserved for future use
 	if err := createSandboxDirs(sandboxDir, perms); err != nil {
 		return false, err
 	}
-	return provision.SeedSandbox(d.Runtime, agentDef, sandboxDir, pr.isolation, pr.agentFiles, d.Layout.HomeDir, d.Layout, output)
+	desc := d.Runtime.Descriptor()
+	spec := envspec.BuildEnvSpec(agentDef)
+	return envsetup.SeedSandbox(spec, sandboxDir, pr.agentFiles, d.Layout.HomeDir, d.Layout, desc.AgentProvisionedByBackend, desc.AgentInstallMethod, output)
 }
 
 // buildConfigAndEnvironment builds the container config and sandbox meta structs.
@@ -519,7 +522,7 @@ func replaceSandboxIfNeeded(ctx context.Context, d state.Deps, opts Options, san
 }
 
 // createSandboxDirs creates the directory structure for a new sandbox.
-func createSandboxDirs(sandboxDir string, perms state.IsolationPerms) error {
+func createSandboxDirs(sandboxDir string, perms store.IsolationPerms) error {
 	for _, dir := range []string{
 		sandboxDir,
 		filepath.Join(sandboxDir, "home-seed"),
@@ -691,7 +694,7 @@ func buildEnvironment(opts Options, pr *profileResult, workdir *DirSpec, baselin
 
 // writeStatFiles writes all state files for the new sandbox (meta, sandbox-state,
 // prompt, logs, agent-status, runtime-config, context).
-func writeStatFiles(sandboxDir string, meta *store.Environment, agentDef *agent.Definition, agentFilesInitialized bool, hasPrompt bool, promptText string, configData []byte, perms state.IsolationPerms) error {
+func writeStatFiles(sandboxDir string, meta *store.Environment, agentDef *agent.Definition, agentFilesInitialized bool, hasPrompt bool, promptText string, configData []byte, perms store.IsolationPerms) error {
 	if err := store.SaveEnvironment(sandboxDir, meta); err != nil {
 		return err
 	}
@@ -723,7 +726,7 @@ func writeStatFiles(sandboxDir string, meta *store.Environment, agentDef *agent.
 	if err := fileutil.WriteFilePerm(filepath.Join(sandboxDir, store.RuntimeConfigFile), configData, configPerm); err != nil {
 		return fmt.Errorf("write %s: %w", store.RuntimeConfigFile, err)
 	}
-	if err := WriteContextFiles(sandboxDir, meta, agentDef); err != nil {
+	if err := envsetup.WriteContextFiles(sandboxDir, meta, envspec.BuildEnvSpec(agentDef)); err != nil {
 		return fmt.Errorf("write context files: %w", err)
 	}
 	return nil
@@ -767,7 +770,10 @@ func buildContainerConfig(layout config.Layout, agentDef *agent.Definition, agen
 			ContextSignal:   agentDef.Idle.ContextSignal,
 			WchanApplicable: agentDef.Idle.WchanApplicable,
 		},
+		IdleMode:         invocation.ResolveIdleMode(agentDef.Idle),
 		Detectors:        invocation.ResolveDetectors(agentDef.Idle),
+		FallToShell:      invocation.ResolveFallToShell(agentDef.Idle),
+		ResumeCmd:        invocation.ResolveResumeCommand(agentCommand, agentDef.ResumeFlag),
 		SandboxName:      sandboxName,
 		TmuxSocket:       tmuxSocket,
 		Isolation:        isolation,

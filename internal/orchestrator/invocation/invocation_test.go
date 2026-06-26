@@ -151,6 +151,33 @@ func TestResolveDetectors_NoCapabilities(t *testing.T) {
 	assert.Nil(t, detectors)
 }
 
+func TestResolveFallToShell_HookAgentEnabled(t *testing.T) {
+	// Hook-authoritative agents launch under the fall-to-shell wrapper: the
+	// monitor runs no heuristics while the pane lives, so a wrapper-written
+	// `done` survives untouched (D96 Phase 1).
+	assert.True(t, ResolveFallToShell(agent.IdleSupport{Hook: true}))
+}
+
+func TestResolveFallToShell_HeuristicAgentEnabled(t *testing.T) {
+	// As of Phase 3 heuristic agents also get fall-to-shell: the monitor honors a
+	// wrapper-written `done` (no longer clobbering it with the idle shell) and
+	// get_agent_pid descends through the wrapper to the real agent.
+	assert.True(t, ResolveFallToShell(agent.IdleSupport{ReadyPattern: "> $", WchanApplicable: true}))
+}
+
+func TestResolveResumeCommand_AppendsFlag(t *testing.T) {
+	// Claude's resume command is the launch command + its native resume flag,
+	// continuing the prior conversation with no fresh prompt.
+	got := ResolveResumeCommand("claude --dangerously-skip-permissions", "--continue")
+	assert.Equal(t, "claude --dangerously-skip-permissions --continue", got)
+}
+
+func TestResolveResumeCommand_NoFlagYieldsEmpty(t *testing.T) {
+	// An agent with no native resume flag yields "" → yoloai-resume relaunches a
+	// fresh session and says so (never claims a resume that didn't happen).
+	assert.Equal(t, "", ResolveResumeCommand("aider --yes-always", ""))
+}
+
 func TestValidateModel_OpenCodeWithProviderPrefix(t *testing.T) {
 	agentDef := agent.GetAgent("opencode")
 	err := ValidateModel(agentDef, "openai/gpt-4o", "openai/gpt-4o")

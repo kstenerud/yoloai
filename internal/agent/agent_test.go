@@ -14,7 +14,10 @@ func TestGetAgent_Aider(t *testing.T) {
 
 	assert.Equal(t, AgentType("aider"), def.Type)
 	assert.NotEmpty(t, def.Description)
-	assert.Equal(t, "aider --yes-always", def.InteractiveCmd)
+	assert.Contains(t, def.InteractiveCmd, "aider --yes-always")
+	assert.Contains(t, def.InteractiveCmd, "--notifications-command")
+	assert.Contains(t, def.InteractiveCmd, "--write-status idle")
+	assert.True(t, def.Idle.Hook, "aider should be hook-authoritative (idle via --notifications-command)")
 	assert.Contains(t, def.HeadlessCmd, "aider --message")
 	assert.Equal(t, PromptModeInteractive, def.PromptMode)
 	assert.Equal(t, []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "DEEPSEEK_API_KEY", "OPENROUTER_API_KEY"}, def.APIKeyEnvVars)
@@ -23,6 +26,7 @@ func TestGetAgent_Aider(t *testing.T) {
 	assert.Equal(t, ".aider.conf.yml", def.SeedFiles[0].TargetPath)
 	assert.True(t, def.SeedFiles[0].HomeDir)
 	assert.False(t, def.SeedFiles[0].AuthOnly)
+	assert.Equal(t, []byte("{}\n"), def.SeedFiles[0].Content, "aider needs a valid empty-conf fallback")
 	assert.Equal(t, "", def.StateDir)
 	assert.Equal(t, "Enter", def.SubmitSequence)
 	assert.Equal(t, 3*time.Second, def.StartupDelay)
@@ -57,6 +61,7 @@ func TestGetAgent_Claude(t *testing.T) {
 	assert.Equal(t, "~/.claude.json", def.SeedFiles[2].HostPath)
 	assert.Equal(t, ".claude.json", def.SeedFiles[2].TargetPath)
 	assert.True(t, def.SeedFiles[2].HomeDir)
+	assert.Equal(t, []byte("{}\n"), def.SeedFiles[2].Content, "claude needs a valid empty-JSON default (empty file = 'corrupted')")
 	assert.Equal(t, "~/.claude/statusline.sh", def.SeedFiles[3].HostPath)
 	assert.Equal(t, "statusline.sh", def.SeedFiles[3].TargetPath)
 	assert.True(t, def.SeedFiles[3].Executable, "statusLine script must seed executable")
@@ -81,16 +86,19 @@ func TestGetAgent_Gemini(t *testing.T) {
 	assert.Contains(t, def.HeadlessCmd, "gemini -p")
 	assert.Equal(t, PromptModeInteractive, def.PromptMode)
 	assert.Equal(t, []string{"GEMINI_API_KEY"}, def.APIKeyEnvVars)
-	require.Len(t, def.SeedFiles, 3)
+	require.Len(t, def.SeedFiles, 4)
 	assert.Equal(t, "~/.gemini/oauth_creds.json", def.SeedFiles[0].HostPath)
 	assert.Equal(t, "oauth_creds.json", def.SeedFiles[0].TargetPath)
 	assert.True(t, def.SeedFiles[0].AuthOnly)
-	assert.Equal(t, "~/.gemini/google_accounts.json", def.SeedFiles[1].HostPath)
-	assert.Equal(t, "google_accounts.json", def.SeedFiles[1].TargetPath)
+	assert.Equal(t, "~/.gemini/gemini-credentials.json", def.SeedFiles[1].HostPath)
+	assert.Equal(t, "gemini-credentials.json", def.SeedFiles[1].TargetPath)
 	assert.True(t, def.SeedFiles[1].AuthOnly)
-	assert.Equal(t, "~/.gemini/settings.json", def.SeedFiles[2].HostPath)
-	assert.Equal(t, "settings.json", def.SeedFiles[2].TargetPath)
-	assert.False(t, def.SeedFiles[2].AuthOnly)
+	assert.Equal(t, "~/.gemini/google_accounts.json", def.SeedFiles[2].HostPath)
+	assert.Equal(t, "google_accounts.json", def.SeedFiles[2].TargetPath)
+	assert.True(t, def.SeedFiles[2].AuthOnly)
+	assert.Equal(t, "~/.gemini/settings.json", def.SeedFiles[3].HostPath)
+	assert.Equal(t, "settings.json", def.SeedFiles[3].TargetPath)
+	assert.False(t, def.SeedFiles[3].AuthOnly)
 	assert.Equal(t, "/home/yoloai/.gemini/", def.StateDir)
 	assert.Equal(t, "Enter", def.SubmitSequence)
 	assert.Equal(t, 3*time.Second, def.StartupDelay)
@@ -115,7 +123,7 @@ func TestGetAgent_OpenCode(t *testing.T) {
 	assert.Equal(t, []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GROQ_API_KEY", "OPENROUTER_API_KEY", "XAI_API_KEY"}, def.APIKeyEnvVars)
 	assert.Equal(t, []string{"GITHUB_TOKEN", "LOCAL_ENDPOINT", "AZURE_OPENAI_ENDPOINT", "AWS_ACCESS_KEY_ID", "AWS_PROFILE", "AWS_DEFAULT_PROFILE", "AWS_REGION", "AWS_DEFAULT_REGION", "VERTEXAI_PROJECT"}, def.AuthHintEnvVars)
 	assert.True(t, def.AuthOptional)
-	require.Len(t, def.SeedFiles, 5)
+	require.Len(t, def.SeedFiles, 6)
 	assert.Equal(t, "~/.local/share/opencode/auth.json", def.SeedFiles[0].HostPath)
 	assert.Equal(t, "auth.json", def.SeedFiles[0].TargetPath)
 	assert.True(t, def.SeedFiles[0].AuthOnly)
@@ -135,6 +143,12 @@ func TestGetAgent_OpenCode(t *testing.T) {
 	assert.Equal(t, ".config/opencode/.opencode.json", def.SeedFiles[4].TargetPath)
 	assert.True(t, def.SeedFiles[4].HomeDir)
 	assert.False(t, def.SeedFiles[4].AuthOnly)
+	// The yoloai-provided status plugin (embedded content, not a host file).
+	assert.Equal(t, ".config/opencode/plugins/yoloai-status.js", def.SeedFiles[5].TargetPath)
+	assert.NotEmpty(t, def.SeedFiles[5].Content)
+	assert.Empty(t, def.SeedFiles[5].HostPath)
+	assert.True(t, def.SeedFiles[5].HomeDir)
+	assert.True(t, def.Idle.Hook, "opencode should be hook-authoritative")
 	assert.Equal(t, "/home/yoloai/.local/share/opencode/", def.StateDir)
 	assert.Equal(t, "Enter", def.SubmitSequence)
 	assert.Equal(t, 3*time.Second, def.StartupDelay)
@@ -152,7 +166,7 @@ func TestGetAgent_Codex(t *testing.T) {
 
 	assert.Equal(t, AgentType("codex"), def.Type)
 	assert.NotEmpty(t, def.Description)
-	assert.Equal(t, "codex --dangerously-bypass-approvals-and-sandbox", def.InteractiveCmd)
+	assert.Equal(t, "codex --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust", def.InteractiveCmd)
 	assert.Contains(t, def.HeadlessCmd, "codex exec")
 	assert.Equal(t, PromptModeInteractive, def.PromptMode)
 	assert.Equal(t, []string{"CODEX_API_KEY", "OPENAI_API_KEY"}, def.APIKeyEnvVars)
@@ -339,6 +353,7 @@ func TestApplySettings_ClaudePreservesExistingHooks(t *testing.T) {
 func TestApplySettings_Gemini(t *testing.T) {
 	def := GetAgent("gemini")
 	require.NotNil(t, def)
+	require.True(t, def.Idle.Hook, "gemini should be hook-authoritative")
 	require.NotNil(t, def.ApplySettings, "gemini should have ApplySettings set")
 
 	settings := map[string]any{}
@@ -349,6 +364,12 @@ func TestApplySettings_Gemini(t *testing.T) {
 	folderTrust, ok := security["folderTrust"].(map[string]any)
 	require.True(t, ok, "folderTrust should be a map")
 	assert.Equal(t, false, folderTrust["enabled"])
+
+	// Native turn-completion hooks injected: BeforeAgent → active, AfterAgent → idle.
+	hooks, ok := settings["hooks"].(map[string]any)
+	require.True(t, ok, "hooks should be a map")
+	assert.NotNil(t, hooks["BeforeAgent"], "BeforeAgent hook should be set")
+	assert.NotNil(t, hooks["AfterAgent"], "AfterAgent hook should be set")
 }
 
 func TestApplySettings_GeminiPreservesExistingSecurityFields(t *testing.T) {
@@ -367,8 +388,42 @@ func TestApplySettings_GeminiPreservesExistingSecurityFields(t *testing.T) {
 	assert.Equal(t, map[string]any{"enabled": false}, security["folderTrust"])
 }
 
+func TestApplySettings_Codex(t *testing.T) {
+	def := GetAgent("codex")
+	require.NotNil(t, def)
+	require.True(t, def.Idle.Hook, "codex should be hook-authoritative")
+	require.Equal(t, "hooks.json", def.SettingsFileName, "codex hooks go in hooks.json, not settings.json")
+	require.NotNil(t, def.ApplySettings, "codex should have ApplySettings set")
+
+	root := map[string]any{}
+	def.ApplySettings(root)
+
+	// hooks.json nests events under a top-level "hooks" key (mirrors config.toml).
+	hooks, ok := root["hooks"].(map[string]any)
+	require.True(t, ok, "hooks.json content nests under a 'hooks' key")
+	assert.NotNil(t, hooks["Stop"], "Stop hook should be set")
+	assert.NotNil(t, hooks["UserPromptSubmit"], "UserPromptSubmit hook should be set")
+	assert.NotNil(t, hooks["PreToolUse"], "PreToolUse hook should be set")
+}
+
+func TestApplySettings_Idempotent(t *testing.T) {
+	// ApplySettings is re-applied on every create+start and restart; the hook
+	// injectors must not accumulate duplicates. Applying twice yields one group
+	// per event, same as once.
+	for _, name := range []string{"claude", "gemini", "codex"} {
+		def := GetAgent(name)
+		require.NotNil(t, def)
+		once := map[string]any{}
+		def.ApplySettings(once)
+		twice := map[string]any{}
+		def.ApplySettings(twice)
+		def.ApplySettings(twice)
+		assert.Equal(t, once, twice, "agent %q ApplySettings should be idempotent", name)
+	}
+}
+
 func TestApplySettings_OtherAgentsNil(t *testing.T) {
-	for _, name := range []string{"aider", "codex", "opencode", "test", "idle"} {
+	for _, name := range []string{"aider", "opencode", "test", "idle"} {
 		def := GetAgent(name)
 		require.NotNil(t, def, "agent %q should exist", name)
 		assert.Nil(t, def.ApplySettings, "agent %q should have nil ApplySettings", name)

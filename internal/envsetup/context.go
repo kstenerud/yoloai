@@ -1,7 +1,7 @@
-// ABOUTME: Generates sandbox context file and per-agent reference files.
-// ABOUTME: Context describes the sandbox environment (dirs, network, resources)
-// ABOUTME: so AI agents understand their constraints without trial and error.
-package create
+// ABOUTME: Assembles and delivers the sandbox context (the DEF) — a markdown
+// ABOUTME: description of the environment + the file-exchange protocol — into the
+// ABOUTME: agent's native context file. Agent-agnostic: keyed on EnvSpec.ContextFile.
+package envsetup
 
 import (
 	"fmt"
@@ -10,8 +10,6 @@ import (
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/fileutil"
-
-	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/store"
 )
@@ -156,8 +154,10 @@ func writeDir(b *strings.Builder, mountPath, hostPath string, mode store.DirMode
 }
 
 // WriteContextFiles writes the sandbox context file and optional per-agent
-// instruction file into the sandbox directory.
-func WriteContextFiles(sandboxDir string, meta *store.Environment, agentDef *agent.Definition) error {
+// instruction file into the sandbox directory. The agent's native context
+// filename comes from EnvSpec.ContextFile (compiled at the orchestrator
+// boundary), keeping this assembler agent-agnostic.
+func WriteContextFiles(sandboxDir string, meta *store.Environment, spec EnvSpec) error {
 	content := GenerateContext(sandboxDir, meta)
 
 	// Write context.md at sandbox root (reference copy)
@@ -166,44 +166,62 @@ func WriteContextFiles(sandboxDir string, meta *store.Environment, agentDef *age
 		return fmt.Errorf("write context.md: %w", err)
 	}
 
-	// Write full context inline into the agent's native instruction file
-	if agentDef.ContextFile != "" && agentDef.StateDir != "" {
-		refPath := filepath.Join(sandboxDir, store.AgentRuntimeDir, agentDef.ContextFile)
-		if err := fileutil.WriteFile(refPath, []byte(content), 0600); err != nil {
-			return fmt.Errorf("write agent context file %s: %w", agentDef.ContextFile, err)
+	// Write full context inline into the agent's native instruction file.
+	if spec.ContextFile != "" && spec.HasStateDir {
+		refPath := filepath.Join(sandboxDir, store.AgentRuntimeDir, spec.ContextFile)
+
+		// Append, don't clobber (D92): the seed/agent_files stage runs BEFORE this
+		// in the create flow, so the user's own context file (e.g. a seeded
+		// ~/.claude/CLAUDE.md) may already exist here. Overwriting it would destroy
+		// the user's instructions; instead the yoloAI orientation is appended after
+		// it (separated by a blank line when the seeded file is non-empty). When no
+		// file was seeded, this creates it fresh — byte-identical to the old write.
+		sep := ""
+		if info, statErr := os.Stat(refPath); statErr == nil && info.Size() > 0 {
+			sep = "\n\n"
+		}
+		if err := appendToFile(refPath, sep+content); err != nil {
+			return fmt.Errorf("write agent context file %s: %w", spec.ContextFile, err)
 		}
 
-		// Append Q&A protocol section to Claude's CLAUDE.md so it knows
-		// how to ask questions through the file exchange directory.
-		if agentDef.ContextFile == "CLAUDE.md" {
-			filesDir := runtimeDir(sandboxDir, meta) + "/files"
-			qa := "\n## yoloAI File Exchange Protocol\n\n" +
-				"You are running inside a yoloAI sandbox. A file exchange directory is\n" +
-				"available at `" + filesDir + "/` — readable and writable from both inside\n" +
-				"and outside the sandbox.\n\n" +
-				"**When you need to ask a question or need input to continue:**\n\n" +
-				"1. Write your question to `" + filesDir + "/question.json`:\n" +
-				"   ```json\n" +
-				"   {\"question\": \"your question here\", \"context\": \"optional context\"}\n" +
-				"   ```\n" +
-				"2. Poll `" + filesDir + "/answer.json` every 5 seconds until it appears.\n" +
-				"3. Read the answer and continue your task.\n\n" +
-				"Do not make assumptions about blocking decisions. Write the question file\n" +
-				"and wait. The question will be seen and answered by an external agent or user.\n"
-			f, err := fileutil.OpenFile(refPath, os.O_APPEND|os.O_WRONLY, 0600) //nolint:gosec // path is from sandbox dir, controlled by yoloai
-			if err != nil {
-				return fmt.Errorf("open agent context file %s for append: %w", agentDef.ContextFile, err)
-			}
-			_, writeErr := f.WriteString(qa)
-			closeErr := f.Close()
-			if writeErr != nil {
-				return fmt.Errorf("append Q&A protocol to %s: %w", agentDef.ContextFile, writeErr)
-			}
-			if closeErr != nil {
-				return fmt.Errorf("close agent context file %s: %w", agentDef.ContextFile, closeErr)
-			}
+		// Append the yoloAI file-exchange Q&A protocol to the agent's context
+		// file so the agent knows how to ask questions through the exchange
+		// directory. The protocol is agent-AGNOSTIC — it describes a yoloAI
+		// mechanism (question.json/answer.json), keyed only on the agent's
+		// declared ContextFile, so every agent that reads a native context file
+		// gets it (not just Claude's CLAUDE.md). The fuller DEF-fan-in delivered
+		// per the agent's injection method is the envsetup re-homing (D91/D92).
+		filesDir := runtimeDir(sandboxDir, meta) + "/files"
+		qa := "\n## yoloAI File Exchange Protocol\n\n" +
+			"You are running inside a yoloAI sandbox. A file exchange directory is\n" +
+			"available at `" + filesDir + "/` — readable and writable from both inside\n" +
+			"and outside the sandbox.\n\n" +
+			"**When you need to ask a question or need input to continue:**\n\n" +
+			"1. Write your question to `" + filesDir + "/question.json`:\n" +
+			"   ```json\n" +
+			"   {\"question\": \"your question here\", \"context\": \"optional context\"}\n" +
+			"   ```\n" +
+			"2. Poll `" + filesDir + "/answer.json` every 5 seconds until it appears.\n" +
+			"3. Read the answer and continue your task.\n\n" +
+			"Do not make assumptions about blocking decisions. Write the question file\n" +
+			"and wait. The question will be seen and answered by an external agent or user.\n"
+		if err := appendToFile(refPath, qa); err != nil {
+			return fmt.Errorf("append Q&A protocol to %s: %w", spec.ContextFile, err)
 		}
 	}
 
 	return nil
+}
+
+// appendToFile appends s to the file at path, creating it (0600) if absent.
+func appendToFile(path, s string) error {
+	f, err := fileutil.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600) //nolint:gosec // path is a sandbox-controlled agent-runtime path
+	if err != nil {
+		return err
+	}
+	if _, werr := f.WriteString(s); werr != nil {
+		_ = f.Close() //nolint:errcheck // returning the write error
+		return werr
+	}
+	return f.Close()
 }

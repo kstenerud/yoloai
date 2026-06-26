@@ -278,7 +278,7 @@ func resetAuxDirs(ctx context.Context, g *git.Git, sandboxDir string, meta *stor
 
 // clearAgentState wipes and recreates the agent-runtime directory and resets
 // the AgentFilesInitialized flag.
-func clearAgentState(sandboxDir string, perms state.IsolationPerms) error {
+func clearAgentState(sandboxDir string, perms store.IsolationPerms) error {
 	agentStateDir := filepath.Join(sandboxDir, store.AgentRuntimeDir)
 	if err := os.RemoveAll(agentStateDir); err != nil {
 		return fmt.Errorf("remove %s: %w", store.AgentRuntimeDir, err)
@@ -296,7 +296,7 @@ func clearAgentState(sandboxDir string, perms state.IsolationPerms) error {
 }
 
 // reinitLogs removes and recreates the sandbox log files with appropriate permissions.
-func reinitLogs(sandboxDir string, perms state.IsolationPerms) {
+func reinitLogs(sandboxDir string, perms store.IsolationPerms) {
 	_ = os.RemoveAll(filepath.Join(sandboxDir, store.LogsDir))
 	_ = fileutil.MkdirAllPerm(filepath.Join(sandboxDir, store.LogsDir), perms.Dir)
 	for _, logFile := range []string{store.SandboxJSONLFile, store.MonitorJSONLFile, store.HooksJSONLFile} {
@@ -318,7 +318,7 @@ func resetWorkdir(ctx context.Context, d state.Deps, sandboxName, sandboxDir str
 // applyPostResetOptions handles optional post-reset actions: wiping agent state,
 // clearing cache/files, patching debug config, and temporarily hiding prompt.txt.
 // Returns a cleanup func that must be deferred by the caller (restores prompt.txt).
-func applyPostResetOptions(d state.Deps, opts ResetOptions, sandboxDir string, perms state.IsolationPerms) (func(), error) {
+func applyPostResetOptions(d state.Deps, opts ResetOptions, sandboxDir string, perms store.IsolationPerms) (func(), error) {
 	if opts.ClearState {
 		if err := clearAgentState(sandboxDir, perms); err != nil {
 			return nil, err
@@ -358,7 +358,7 @@ func prepareResetRestart(ctx context.Context, d state.Deps, opts ResetOptions, s
 	cname := store.InstanceName(d.Layout.Principal, opts.Name)
 	_ = d.Runtime.Remove(ctx, cname)
 
-	perms := state.Perms()
+	perms := store.Perms()
 
 	// Clear logs so each run starts fresh
 	slog.Debug("clearing logs", "event", "sandbox.reset.logs", "sandbox", opts.Name)
@@ -457,7 +457,7 @@ func resetInPlace(ctx context.Context, d state.Deps, opts ResetOptions, meta *st
 // clearCacheAndFiles clears the cache and files directories unless --keep-X flags are set.
 func clearCacheAndFiles(d state.Deps, opts ResetOptions) error {
 	sandboxDir := d.Layout.SandboxDir(opts.Name)
-	perms := state.Perms()
+	perms := store.Perms()
 
 	if !opts.KeepCache {
 		cacheDir := store.CacheDir(sandboxDir)

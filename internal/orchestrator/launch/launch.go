@@ -1,9 +1,12 @@
 // ABOUTME: translating resolved State into a runtime.InstanceConfig, starting
-// ABOUTME: the container, and verifying it is running.
+// ABOUTME: the container, and verifying it is running. When the backend supports
+// ABOUTME: runtime.ProcessLauncher the container is brought up agent-free (keepalive
+// ABOUTME: holder) and sandbox-setup.py is launched as a separate process over it.
 package launch
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -11,13 +14,18 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/kstenerud/yoloai/internal/config"
+	"github.com/kstenerud/yoloai/internal/envsetup"
+	"github.com/kstenerud/yoloai/internal/fileutil"
+	"github.com/kstenerud/yoloai/internal/netpolicy"
+	"github.com/kstenerud/yoloai/internal/orchestrator/envspec"
 	mountspkg "github.com/kstenerud/yoloai/internal/orchestrator/mounts"
-	"github.com/kstenerud/yoloai/internal/orchestrator/provision"
+	"github.com/kstenerud/yoloai/internal/orchestrator/runtimeconfig"
 	"github.com/kstenerud/yoloai/internal/orchestrator/state"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/store"
@@ -45,15 +53,25 @@ func LaunchContainer(ctx context.Context, d state.Deps, st *state.State) error {
 		envVars = cfg.Env
 	}
 
-	secretsDir, err := provision.CreateSecretsDir(st.Agent, envVars, st.Layout, st.Layout.SecretsStagingDir)
-	if err != nil {
-		return fmt.Errorf("create secrets: %w", err)
-	}
-	if secretsDir != "" {
-		defer os.RemoveAll(secretsDir) //nolint:errcheck // best-effort cleanup
+	spec := envspec.BuildEnvSpec(st.Agent)
+	var secretsDir string
+	var secretEnv map[string]string
+	if _, isLauncher := runtime.LauncherOf(d.Runtime); isLauncher {
+		// Launch path (Docker): deliver secrets via the launched process's env; no host staging, no mount, no marker.
+		secretEnv = envsetup.ResolveSecretEnv(spec, envVars, st.Layout)
+	} else {
+		// Legacy path: stage host files bind-mounted at /run/secrets (unchanged).
+		var err error
+		secretsDir, err = envsetup.CreateSecretsDir(spec, envVars, st.Layout, st.Layout.SecretsStagingDir)
+		if err != nil {
+			return fmt.Errorf("create secrets: %w", err)
+		}
+		if secretsDir != "" {
+			defer os.RemoveAll(secretsDir) //nolint:errcheck // best-effort cleanup
+		}
 	}
 
-	mnts := mountspkg.Build(st, secretsDir)
+	mnts := mountspkg.Build(st, secretsDir) // secretsDir=="" on the launch path -> no /run/secrets mount
 
 	ports, err := parsePortBindings(st.Ports)
 	if err != nil {
@@ -61,14 +79,20 @@ func LaunchContainer(ctx context.Context, d state.Deps, st *state.State) error {
 	}
 	ports = filterAvailablePorts(ports, outputOr(st.Output))
 
-	return buildAndStart(ctx, d.Runtime, st, mnts, ports, secretsDir != "")
+	return buildAndStart(ctx, d.Runtime, st, mnts, ports, secretsDir != "", secretEnv)
 }
 
 // buildAndStart constructs the runtime InstanceConfig from State and
 // starts the instance. hasSecrets indicates whether secrets were injected via
 // a temporary directory that the caller will remove after this call returns.
-// Extracted from launchContainer().
-func buildAndStart(ctx context.Context, rt runtime.Backend, st *state.State, mnts []runtime.MountSpec, ports []runtime.PortMapping, hasSecrets bool) error {
+// secretEnv is the secret map delivered via ProcSpec.Env on the Launch path
+// (nil on the legacy path). Extracted from launchContainer().
+//
+// When the backend implements runtime.ProcessLauncher the box is brought up
+// agent-free (keepalive_only holder) and sandbox-setup.py is launched as a
+// separate process over it — the S3 re-route. Backends without ProcessLauncher
+// follow the legacy path: the agent is welded into the entrypoint as before.
+func buildAndStart(ctx context.Context, rt runtime.Backend, st *state.State, mnts []runtime.MountSpec, ports []runtime.PortMapping, hasSecrets bool, secretEnv map[string]string) error {
 	cname := store.InstanceName(st.Layout.Principal, st.Name)
 	instanceCfg, err := buildInstanceConfig(rt.Descriptor(), st, mnts, ports)
 	if err != nil {
@@ -83,14 +107,102 @@ func buildAndStart(ctx context.Context, rt runtime.Backend, st *state.State, mnt
 		_ = os.Remove(markerPath) //nolint:errcheck // best-effort; absent is fine
 	}
 
+	if launcher, ok := runtime.LauncherOf(rt); ok {
+		if err := startViaLaunch(ctx, rt, launcher, st, cname, instanceCfg, markerPath, hasSecrets, secretEnv); err != nil {
+			return err
+		}
+	} else {
+		if err := startLegacy(ctx, rt, st, cname, instanceCfg, markerPath, hasSecrets); err != nil {
+			return err
+		}
+	}
+
+	return verifyInstanceRunning(ctx, rt, st, cname)
+}
+
+// startViaLaunch brings up the container agent-free (keepalive_only) and then
+// launches sandbox-setup.py as a separate process over it. Used when the
+// backend implements runtime.ProcessLauncher (currently Docker only).
+//
+// Ordering that matters:
+//  1. Patch runtime-config.json with keepalive_only:true BEFORE Create, so the
+//     entrypoint reads it on first boot and takes the holder branch.
+//  2. Create + Start (box comes up on the sleep-infinity holder).
+//  3. Wait for the .substrate-ready marker — the entrypoint writes it after root
+//     provisioning completes, immediately before exec'ing the holder. A runner
+//     launched DURING root setup (UID remap etc.) is silently killed (DF44).
+//  4. Launch sandbox-setup.py — secrets arrive in ProcSpec.Env (YOLOAI_SECRET_KEYS
+//     + named vars); there is no /run/secrets read on this path.
+//  5. The secrets-consumed marker wait is SKIPPED on the Launch path (hasSecrets is
+//     false; secrets were not staged to a host dir so no synchronization is needed).
+func startViaLaunch(ctx context.Context, rt runtime.Backend, launcher runtime.ProcessLauncher, st *state.State, cname string, instanceCfg runtime.InstanceConfig, markerPath string, hasSecrets bool, secretEnv map[string]string) error {
+	if err := patchKeepaliveOnly(st.SandboxDir, true); err != nil {
+		return fmt.Errorf("patch keepalive_only: %w", err)
+	}
+
+	// Clear any stale readiness marker from a prior boot so the wait below sees
+	// only this launch's signal (it lives in the persistent sandbox dir).
+	readyPath := filepath.Join(st.SandboxDir, store.SubstrateReadyMarker)
+	_ = os.Remove(readyPath) //nolint:errcheck // best-effort; absent is fine
+
 	if err := rt.Create(ctx, instanceCfg); err != nil {
 		return gvisorStartHint(st.Isolation, err)
 	}
-
 	if err := rt.Start(ctx, cname); err != nil {
 		return fmt.Errorf("start instance: %w", gvisorStartHint(st.Isolation, err))
 	}
 
+	// The box must finish root provisioning before we launch the session-runner
+	// over it; otherwise the runner is killed mid-setup (DF44 readiness race).
+	// The substrate owns the readiness signal (launcher.Ready); we own the wait
+	// policy.
+	if err := waitForReady(ctx, launcher, cname, effectiveSecretsConsumedTimeout(rt.Descriptor())); err != nil {
+		return err
+	}
+
+	env := []string{"HOME=/home/yoloai", "YOLOAI_DIR=/yoloai"}
+	if len(secretEnv) > 0 {
+		keys := make([]string, 0, len(secretEnv))
+		for k := range secretEnv {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys) // deterministic ordering
+		for _, k := range keys {
+			env = append(env, k+"="+secretEnv[k])
+		}
+		env = append(env, "YOLOAI_SECRET_KEYS="+strings.Join(keys, ","))
+	}
+
+	_, err := launcher.Launch(ctx, cname, runtime.ProcSpec{
+		Argv:     []string{"sh", "-c", "exec python3 /yoloai/bin/sandbox-setup.py docker >> /yoloai/logs/session-runner.log 2>&1"},
+		User:     "yoloai",
+		Cwd:      OverlayOrResolvedMountPath(st.Workdir),
+		Env:      env,
+		Detached: true,
+	})
+	if err != nil {
+		return fmt.Errorf("launch session-runner: %w", err)
+	}
+
+	// The secrets marker is now written by the launched runner, not the
+	// entrypoint — so we wait here, after Launch, not after Start.
+	if hasSecrets {
+		waitForSecretsConsumed(markerPath, effectiveSecretsConsumedTimeout(rt.Descriptor()))
+	}
+	return nil
+}
+
+// startLegacy is the original bring-up path for backends without
+// runtime.ProcessLauncher: create the instance, start it, and wait for the
+// entrypoint (which runs sandbox-setup.py inline) to consume secrets.
+// No keepalive_only patch; the agent is welded into the entrypoint as before.
+func startLegacy(ctx context.Context, rt runtime.Backend, st *state.State, cname string, instanceCfg runtime.InstanceConfig, markerPath string, hasSecrets bool) error {
+	if err := rt.Create(ctx, instanceCfg); err != nil {
+		return gvisorStartHint(st.Isolation, err)
+	}
+	if err := rt.Start(ctx, cname); err != nil {
+		return fmt.Errorf("start instance: %w", gvisorStartHint(st.Isolation, err))
+	}
 	// Wait for the entrypoint to signal it has read /run/secrets before the
 	// caller removes the host-side secrets temp dir. A fixed sleep used to
 	// guard this, but it raced on slow-booting backends (Kata VM via
@@ -102,8 +214,31 @@ func buildAndStart(ctx context.Context, rt runtime.Backend, st *state.State, mnt
 	if hasSecrets {
 		waitForSecretsConsumed(markerPath, effectiveSecretsConsumedTimeout(rt.Descriptor()))
 	}
+	return nil
+}
 
-	return verifyInstanceRunning(ctx, rt, st, cname)
+// patchKeepaliveOnly reads runtime-config.json in sandboxDir, sets (or clears)
+// the keepalive_only field, and writes it back atomically. Called before
+// rt.Create so the entrypoint reads the updated config on first boot.
+func patchKeepaliveOnly(sandboxDir string, keepalive bool) error {
+	configPath := filepath.Join(sandboxDir, store.RuntimeConfigFile)
+	data, err := os.ReadFile(configPath) //nolint:gosec // path is sandbox-controlled
+	if err != nil {
+		return fmt.Errorf("read runtime-config.json: %w", err)
+	}
+	var cfg runtimeconfig.ContainerConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return fmt.Errorf("parse runtime-config.json: %w", err)
+	}
+	cfg.KeepaliveOnly = keepalive
+	updated, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal runtime-config.json: %w", err)
+	}
+	if err := fileutil.WriteFile(configPath, updated, 0600); err != nil {
+		return fmt.Errorf("write runtime-config.json: %w", err)
+	}
+	return nil
 }
 
 // buildInstanceConfig constructs the runtime.InstanceConfig from sandbox state.
@@ -112,23 +247,11 @@ func buildInstanceConfig(desc runtime.BackendDescriptor, st *state.State, mnts [
 	caps := desc.Capabilities
 
 	if st.NetworkMode == "isolated" {
-		if !caps.NetworkIsolation {
-			return runtime.InstanceConfig{}, fmt.Errorf("--network=isolated is not supported by the %s backend", desc.Type)
-		}
-		// Per-isolation-mode check: some OCI runtimes (notably gVisor / runsc
-		// for --isolation=container-enhanced) do not honor iptables rules
-		// applied inside the sandbox, so the in-sandbox enforcement is a
-		// silent no-op. Refuse rather than lie. See
-		// docs/contributors/design/network-isolation.md for the redesign that removes this
-		// limitation by moving enforcement to the host netns.
-		if !runtime.IsolationEnforcesInSandboxIptables(st.Isolation) {
-			return runtime.InstanceConfig{}, fmt.Errorf(
-				"--network=isolated cannot be enforced with --isolation=%s: "+
-					"gVisor's userspace netstack ignores in-sandbox iptables rules. "+
-					"Use --isolation=container (default) or a VM-based isolation mode "+
-					"(--isolation=vm or --isolation=vm-enhanced) instead",
-				st.Isolation,
-			)
+		// Whether the allowlist can actually be enforced is a netpolicy decision:
+		// it composes the backend's capability with the isolation mode's in-sandbox
+		// iptables honoring (gVisor refuses). See netpolicy.CanEnforce.
+		if ok, reason := netpolicy.CanEnforce(netpolicy.StrategyIPFilter, caps, desc.Type, st.Isolation); !ok {
+			return runtime.InstanceConfig{}, errors.New(reason)
 		}
 	}
 
@@ -208,6 +331,35 @@ func waitForSecretsConsumed(markerPath string, timeout time.Duration) {
 			slog.Warn("secrets-consumed marker not observed before timeout; removing secrets dir anyway",
 				"marker", markerPath, "timeout", timeout)
 			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+// waitForReady polls the substrate's own readiness signal (launcher.Ready) until
+// it reports the box can accept a launched process, or the timeout elapses. The
+// substrate owns HOW readiness is determined; this owns the wait policy. Unlike
+// the secrets wait, a timeout here is a hard error: launching the session-runner
+// before the box is provisioned gets it silently killed (DF44 readiness race),
+// so we refuse to launch into a box that never signalled ready. Transient Ready
+// errors during boot (the container briefly not accepting execs) are tolerated
+// until the deadline.
+func waitForReady(ctx context.Context, launcher runtime.ProcessLauncher, name string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for {
+		ready, err := launcher.Ready(ctx, name)
+		if err == nil && ready {
+			return nil
+		}
+		if err != nil {
+			lastErr = err
+		}
+		if time.Now().After(deadline) {
+			if lastErr != nil {
+				return fmt.Errorf("substrate not ready within %s: %w", timeout, lastErr)
+			}
+			return fmt.Errorf("substrate not ready within %s (root provisioning did not complete)", timeout)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}

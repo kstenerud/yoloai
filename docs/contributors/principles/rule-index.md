@@ -30,6 +30,7 @@ This file is small on purpose: load all of it at the start of a task. It carries
 | DEV §13 | Keep data in the shape it already has until a *present* consumer needs a different one; every conversion must serve a concrete consumer right where it happens. | Pre-emptively reshaping into a "rich" struct no current consumer needs, or a transform downstream just reverses. |
 | DEV §14 | A library default is legitimate only to keep a caller off an *unsafe* path (safety-sensitive field, safe default, applied after the real sources resolve). No safety dimension → no default: accept unset, resolve, error if still unset. Convenience defaults live in a layer on top of the API. | Adding a library default for ergonomics / "it should just work," or to spare the caller from typing a value with no safety consequence. |
 | DEV §15 | A name's required clarity scales with the *distance* from its declaration to its use: struct/class fields travel farthest (read across many files) so must stand alone; parameters read like docs at the signature; locals may stay terse but tension grows with scope length. A comment that restates what the name should carry is a smell. | Abbreviating a struct field (`rt`, `mu`, `c`, `ts`), giving a parameter a one-letter name, or writing a comment the name should have carried. |
+| DEV §16 | Hit a defect in the project's own infrastructure (build, harness, script, doc process)? Fix it if quick and in-scope; otherwise file a finding. A stopgap workaround is fine only when paired with a fix or a finding. | Noticing infra breakage, quietly routing around it, and saying nothing — leaving it neither fixed nor tracked. |
 
 ## general-principles.md
 
@@ -56,6 +57,7 @@ This file is small on purpose: load all of it at the start of a task. It carries
 | ARCH §1  | Library-first; CLI/mcpsrv are embedders. Everything goes through the public surface — a reach into internal/ means a missing verb; add the verb. | The CLI imports/reaches internal/ instead of calling a yoloai.* verb.            |
 | ARCH §2  | yoloai↔internal is a published contract: no public type exposes an internal one (even via alias); embedders reach the engine only via the surface. Enforced (F1 + depguard). | A public type leaks an internal type, or widening a depguard allow-list instead of adding a verb. |
 | ARCH §3  | *(Emerging, research-gated.)* The why behind DEV §12 (not a second read-ban): CLI is safe by accident (kernel ACL), a many-principal daemon isn't — host knowledge must bind at an embedder-controlled lifetime. | Designing a library API that reaches host ambient, or treating "thread it down" as ergonomics not security. |
+| ARCH §4  | Substrate verbs are request-in, no-mechanism-out: hand the backend a request (`ProcSpec`/exec/attach), it owns HOW. Fact-queries (capability reads) stay on the surface; ingredient-vendors (launch-prefix, prepared command, attach argv) fold into the verb. | A backend getter the caller concatenates/execs, or restart rebuilds a command from a serialized mechanism fragment instead of routing through `Launch`. |
 
 ## testing-principles.md
 

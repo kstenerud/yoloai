@@ -229,7 +229,7 @@ in `fakeruntime_test.go`). Keep that hermetic.
 - `internal/runtime/probe.go` — `DaemonEnvVars`.
 - backend allowlists to move: `internal/runtime/docker/{docker,build}.go`,
   `containerd/containerd.go`, `seatbelt/seatbelt.go`, `tart/tart.go`.
-- `internal/orchestrator/provision/provision.go` — agent-cred `LookupEnv` loops.
+- `internal/envsetup/envsetup.go` — agent-cred `LookupEnv` loops.
 - `internal/cli/cliutil/{layout,client}.go` — the edge (`processEnv`, ClientCreateOptions).
 - `.golangci.yml` — forbidigo `forbid` + `exclusions.rules` (gate template).
 - `docs/BREAKING-CHANGES.md` — add the interpolation-constraint entry.

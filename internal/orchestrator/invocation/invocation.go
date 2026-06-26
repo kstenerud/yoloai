@@ -118,6 +118,20 @@ func BuildAgentCommand(agentDef *agent.Definition, model string, prompt string, 
 	return cmd
 }
 
+// ResolveResumeCommand builds the fall-to-shell resume command (D96 DD4): the
+// agent's interactive launch command plus its native resume flag, so
+// yoloai-resume continues the prior conversation. Returns "" when the agent
+// declares no resume flag — yoloai-resume then relaunches a fresh session
+// (honest characterization, never claims a resume that didn't happen). The
+// resume command carries no prompt: it continues an existing conversation, it
+// does not start a new task.
+func ResolveResumeCommand(agentCommand, resumeFlag string) string {
+	if resumeFlag == "" {
+		return ""
+	}
+	return agentCommand + " " + resumeFlag
+}
+
 // SanitizeTunnelName converts a sandbox name to a valid VS Code tunnel name.
 // VS Code tunnel names are limited to 20 characters, lowercase alphanumeric
 // and hyphens, with no leading or trailing hyphens.
@@ -172,6 +186,49 @@ func ResolveDetectors(idle agent.IdleSupport) []string {
 	}
 
 	return detectors
+}
+
+// Idle-detection modes (the per-agent mode selector — session-layer.md §Tier-2).
+// The status monitor reads idle_mode from runtime-config.json and branches.
+const (
+	// IdleModeHookAuthoritative: idle/active is owned EXCLUSIVELY by the agent's
+	// turn hook (it writes agent-status.json directly); the monitor runs no
+	// heuristic detectors for active/idle (only pane-death → done + a respawn
+	// idle seed). This removes the startup blip, which is a heuristic artifact.
+	IdleModeHookAuthoritative = "hook-authoritative"
+	// IdleModeHeuristicOnly: the agent-agnostic heuristic detector stack (wchan,
+	// ready-pattern, …). For agents without a turn hook.
+	IdleModeHeuristicOnly = "heuristic-only"
+	// A future IdleModeHookAssisted (hook + heuristic backstop for a missed hook)
+	// slots in here without reworking the selector — the design-now seam.
+)
+
+// ResolveIdleMode selects the per-agent idle-detection mode. Hook-capable agents
+// trust the authoritative hook exclusively (heuristics would only re-introduce
+// the startup blip and add nothing a hook-capable agent needs — crash/hang is
+// covered by liveness, not heuristics); others fall back to the heuristic stack.
+func ResolveIdleMode(idle agent.IdleSupport) string {
+	if idle.Hook {
+		return IdleModeHookAuthoritative
+	}
+	return IdleModeHeuristicOnly
+}
+
+// ResolveFallToShell decides whether the agent launches under the fall-to-shell
+// wrapper (agent-run.sh, D96 / agent-detection.md). The wrapper records an
+// authoritative `done` on agent exit and keeps the pane alive as a shell; the
+// heuristic monitor honors that `done` and get_agent_pid descends through the
+// wrapper, so it is safe for both hook-authoritative and heuristic agents.
+//
+// It is the **persistent-PTY gate**: fall-to-shell only makes sense for a
+// persistent interactive session that has a terminal to drop into (session-layer.md
+// gates it on lifetime × SessionKind — one-shot/`-p` and Stream sessions exit=done
+// with no shell). Every agent yoloAI launches today runs as a persistent PTY in the
+// tmux pane, so the gate is universally on. When the session-layer carve lands the
+// `lifetime` axis, that axis drives this gate (off for one-shot); the field stays as
+// its home rather than being removed and re-added.
+func ResolveFallToShell(_ agent.IdleSupport) bool {
+	return true
 }
 
 // ReadPrompt reads the prompt from --prompt, --prompt-file, or stdin ("-").

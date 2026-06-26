@@ -6,42 +6,29 @@ package yoloai
 import (
 	"context"
 
-	"github.com/kstenerud/yoloai/internal/agent"
+	"github.com/kstenerud/yoloai/internal/netpolicy"
 	"github.com/kstenerud/yoloai/internal/orchestrator"
 	"github.com/kstenerud/yoloai/internal/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
 
-// DomainSource identifies where an allowed domain came from. Used by
-// callers (UIs, automation) that want to distinguish agent-required
-// domains from user-added ones — e.g. to warn before removing a
-// domain the agent itself needs to function.
-type DomainSource string
+// DomainSource identifies where an allowed domain came from.
+// See netpolicy.DomainSource for the authoritative definition.
+type DomainSource = netpolicy.DomainSource
+
+// AllowedDomain is one entry in Network.Allowed().
+// See netpolicy.AllowedDomain for the authoritative definition.
+type AllowedDomain = netpolicy.AllowedDomain
 
 const (
-	// AllowedFromAgentRequirement means the agent's definition
-	// (agent.Definition.NetworkAllowlist) requires this domain.
-	// Removing it will break the agent itself; embedders should
-	// surface the consequence rather than silently accept the
-	// removal.
-	AllowedFromAgentRequirement DomainSource = "agent-requirement"
+	// AllowedFromAgentRequirement means the agent's built-in
+	// NetworkAllowlist requires this domain. Removing it may break
+	// the agent.
+	AllowedFromAgentRequirement DomainSource = netpolicy.AllowedFromAgentRequirement
 
-	// AllowedFromUser means the user explicitly added this domain —
-	// either via SandboxCreateOptions.NetworkAllow at create time or via
-	// `yoloai sandbox <name> allow` at runtime. The on-disk store
-	// can't distinguish between those two sub-cases today (Q-V); if
-	// a use case justifies it later a third source can be added
-	// without breaking this contract.
-	AllowedFromUser DomainSource = "user"
+	// AllowedFromUser means the domain was added by the user.
+	AllowedFromUser DomainSource = netpolicy.AllowedFromUser
 )
-
-// AllowedDomain is one entry in Network.Allowed(). Domain is the
-// host pattern (e.g. "api.anthropic.com"); Source identifies why
-// it's on the list.
-type AllowedDomain struct {
-	Domain string       `json:"domain"`
-	Source DomainSource `json:"source"`
-}
 
 // Network is the per-sandbox network-allowlist sub-handle.
 //
@@ -236,16 +223,7 @@ func (n *Network) requireIsolated() (*store.Environment, error) {
 // definition. Order matches meta order; unknown agent name produces
 // all-user entries (no agent → no known requirements).
 func computeAllowedDomains(meta *store.Environment) []AllowedDomain {
-	agentSet := agentDomainSet(string(meta.AgentType))
-	out := make([]AllowedDomain, 0, len(meta.NetworkAllow))
-	for _, d := range meta.NetworkAllow {
-		source := AllowedFromUser
-		if agentSet[d] {
-			source = AllowedFromAgentRequirement
-		}
-		out = append(out, AllowedDomain{Domain: d, Source: source})
-	}
-	return out
+	return netpolicy.WithProvenance(meta.NetworkAllow, string(meta.AgentType))
 }
 
 // agentDomainSet returns the set of domains the named agent's
@@ -253,15 +231,7 @@ func computeAllowedDomains(meta *store.Environment) []AllowedDomain {
 // agents — provenance derivation degrades gracefully to "everything
 // looks user-added" rather than blowing up.
 func agentDomainSet(agentName string) map[string]bool {
-	out := make(map[string]bool)
-	def := agent.GetAgent(agentName)
-	if def == nil {
-		return out
-	}
-	for _, d := range def.NetworkAllowlist {
-		out[d] = true
-	}
-	return out
+	return netpolicy.AgentFloor(agentName)
 }
 
 // ipsetResolveDomainsScript is the shell fragment that resolves

@@ -93,6 +93,17 @@ const (
 	// (entrypoint.py, sandbox-setup.py) hard-code the same relative path;
 	// keep them in sync.
 	SecretsConsumedMarker = "logs/.secrets-consumed" //nolint:gosec // G101: a marker filename, not a credential
+
+	// SubstrateReadyMarker is a host-visible marker the in-sandbox entrypoint
+	// writes once root provisioning (UID remap, network isolation, overlay
+	// mounts, setup commands) is complete and immediately before it execs the
+	// neutral keep-alive holder — i.e. the box is ready to accept a launched
+	// session-runner. The host waits for this before ProcessLauncher.Launch:
+	// a runner started DURING root setup is silently killed (the readiness race
+	// found in the S3 carve smoke, DF44). Only the keepalive_only bring-up
+	// writes it. Lives under logs/ for the same bind-mount reason as
+	// SecretsConsumedMarker; entrypoint.py hard-codes the same relative path.
+	SubstrateReadyMarker = "logs/.substrate-ready"
 )
 
 // EncodePath encodes a host path using the caret encoding spec for use as a

@@ -408,7 +408,12 @@ func chownGitDir(workDir string) error {
 // withTempGitDir creates a temporary git-initialized directory, calls fn
 // with its path, and cleans up afterward.
 func (g *Git) withTempGitDir(ctx context.Context, fn func(tmpDir string) error) error {
-	tmpDir, err := os.MkdirTemp("", "yoloai-apply-*")
+	if g.tempDir != "" {
+		if err := fileutil.MkdirAll(g.tempDir, 0o700); err != nil {
+			return fmt.Errorf("create temp root: %w", err)
+		}
+	}
+	tmpDir, err := os.MkdirTemp(g.tempDir, "yoloai-apply-*")
 	if err != nil {
 		return fmt.Errorf("create temp dir: %w", err)
 	}

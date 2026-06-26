@@ -89,6 +89,184 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 - **Fix:** `skipIfNotAvailable` now stats **and** dials the socket (`net.DialTimeout`), skipping with a clear reason when it can't connect.
 - **Pointer:** `internal/runtime/containerd/integration_test.go` (`skipIfNotAvailable`).
 
+### DF31 — Substrate `Backend` bakes in tmux + the agent monitor
+
+- **Discovered:** 2026-06-14 · **Workstream:** public-layering (first audit pass)
+- **Severity:** MEDIUM
+- **Disposition:** PARKED (tracked by [public-layering.md](plans/public-layering.md) Shape stage)
+- **Description:** `go list -deps` of the intended substrate island (`internal/runtime` + a backend + `internal/store`) is clean of agent/copyflow/PTY, **but still pulls `internal/runtime/monitor` and `internal/resources/tmux`** — the backend's container `Setup`/launch embeds the tmux + status-monitor Python launch convention. So even a headless `Backend.Create` ships the agent-monitoring scripts and a tmux session: "run a container" is fused with "run a tmux-wrapped, monitored agent session." This is the Phase C-full "tmux is mandatory middleware" finding re-surfacing at the substrate boundary. The cleanest split makes tmux+monitor a *session/idle refinement* injected at launch, not a substrate `Setup` default.
+- **Pointer:** `internal/runtime/*/{build,setup}.go` (container bootstrap); `internal/runtime/monitor/`, `internal/resources/tmux/`. Related: Q103. **Resolution direction:** [research/container-init-delineation.md](research/container-init-delineation.md) — give Docker/Podman a neutral PID 1 (`--init`/tini, the k8s-`pause` / Seatbelt-P1 pattern) and launch the agent via exec; the VM backends are already clean.
+
+### DF32 — No agent-free managed lifecycle (lifecycle verbs only exist agent-aware)
+
+- **Discovered:** 2026-06-14 · **Workstream:** public-layering (first audit pass)
+- **Severity:** MEDIUM
+- **Disposition:** PARKED (the load-bearing carve for [public-layering.md](plans/public-layering.md))
+- **Description:** `go list -deps ./internal/orchestrator/lifecycle` pulls `internal/agent` (restart relaunches the agent) and `internal/copyflow` (reset re-syncs copy dirs; status probes uncommitted copy changes). Raw `runtime.Backend` gives create/start/stop/destroy, but the *managed* lifecycle (name→instance resolution, persisted status, liveness) lives entangled with agents + the copy workflow. A power-user wanting "managed lifecycle, no agents" must drop to raw `Backend` + `store` and hand-roll the glue. Resolution: carve a substrate-level managed lifecycle (Backend + store, agent-agnostic) and let the agent-aware orchestrator layer *that* + relaunch + copy-resync on top.
+- **Pointer:** `internal/orchestrator/lifecycle/{start,restart,reset}.go`; direct `internal/agent` importers — `lifecycle`, `invocation`, `state`, `provision`. **Resolution direction:** [substrate-interface.md](substrate-interface.md) / [D84](../decisions/working-notes.md) — the agent-free managed lifecycle is the `Substrate` handle (Start/Stop/Suspend/Resume/Destroy + Launch/Exec); the agent-aware orchestrator becomes a consumer that adds relaunch + copy-resync on top.
+
+### DF33 — `runtimeconfig` mixes substrate and agent-launch fields
+
+- **Discovered:** 2026-06-14 · **Workstream:** public-layering (first audit pass)
+- **Severity:** LOW–MEDIUM
+- **Disposition:** PARKED (tracked by [public-layering.md](plans/public-layering.md) Shape stage)
+- **Description:** The Go↔Python container config (`internal/orchestrator/runtimeconfig`) carries substrate fields (mounts, network, copy dirs) **and** agent-launch fields (`AgentCommand`, `ReadyPattern`, `Idle`) in one DTO, and the Python entrypoint always sets up tmux + launches the agent. So the substrate's container bootstrap is agent-shaped. For a clean substrate the config should split into a substrate-launch part and an agent-launch part (the module-split plan flagged this under Phase A but only closed the *import* edge, not the *schema* conflation).
+- **Pointer:** `internal/orchestrator/runtimeconfig/runtimeconfig.go`; `internal/runtime/monitor/sandbox-setup.py`. Related: DF31, Q104. **Resolution direction:** [substrate-interface.md](substrate-interface.md) §9 / [D84](../decisions/working-notes.md) — `ProvisionSpec` is agent-free (image/mounts/resources/network/isolation/env only); agent command/ready/idle move to the agent layer's `ProcSpec` at `Launch`.
+
+### DF34 — Network isolation threaded into the containerd backend
+
+- **Discovered:** 2026-06-14 · **Workstream:** public-layering (first audit pass)
+- **Severity:** LOW
+- **Disposition:** PARKED (deferred refinement; [public-layering.md](plans/public-layering.md) later cycle)
+- **Description:** Network isolation / allowlist (CNI, netns, iptables) is woven into the containerd backend's startup rather than living as a standalone `netpolicy` refinement injected over the substrate. The substrate backend therefore "knows about" network policy. Lower priority than DF31/DF32 (netpolicy is a later-cycle refinement), but recorded so the substrate audit accounts for it.
+- **Pointer:** `internal/runtime/containerd/` (CNI setup in startup path). Related: [public-layering.md](plans/public-layering.md) netpolicy row.
+
+### DF35 — Verify copyflow's hermetic-git seal: no in-sandbox git may write outside the sandbox
+
+- **Discovered:** 2026-06-14 · **Workstream:** public-layering (copyflow design, D86)
+- **Severity:** MEDIUM (security — needs verification; could be CRITICAL if violated)
+- **Disposition:** **RESOLVED — VERIFIED CLEAN 2026-06-24** (D92 design-review remediation; should drain to `findings-resolved.md`). Every `git.NewSandbox` call site is **read/emit-only** and structurally confined to the sandbox work copy: target dirs resolve through `store.WorkDir(sandboxDir, hostPath)` under `~/.yoloai/sandboxes/<name>/` (the host original `dir.HostPath` is *never* passed to a sandbox git), and the sandbox executor never routes stdin/`RunInput` (the write path) — every writer (`ApplyPatch`/`ApplyFormatPatch`/`CheckPatch`/`CreateTag`) is on `git.NewHost` targeting `dir.HostPath`. Overlay git (`execInSandbox`, `git -C <containerPath>`) is even more confined. The seal **holds**.
+- **Residual invariant (carry forward):** the host-side apply uses `git apply --unsafe-paths --directory=<original>` (`git/ops.go:220-228`), safe *only* because the patch is always yoloAI-generated from the work copy — **never an agent-supplied raw patch**. The code comment warns against routing raw patches through this path; that is the real surface to keep protected. Note in copyflow-layer.md §7.
+- **Description:** The copyflow design (D86 §7) makes a hermetic-git security seal load-bearing: the git *inside* the sandbox is untrusted and must be **read + emit only** — it never writes anything outside the sandbox; changes egress *only* as diff+metadata via a read-only channel, and the trusted host-side git applies. Copy-mode `apply.go` uses `git.NewSandbox` (in-sandbox/in-VM git) on several paths (≈ lines 332, 579, 614, 785, 843, 858, 917). **[Verified — see Disposition.]**
+- **Pointer:** `internal/copyflow/apply.go` (`git.NewSandbox` call sites); contrast `git.NewHost` (the trusted apply path); the `--unsafe-paths` note at `internal/git/ops.go:220-228`. Design: [copyflow-layer.md](copyflow-layer.md) §7 / [D86](../decisions/working-notes.md).
+
+### DF36 — Persistence is unsafe on a network filesystem; detect and warn/refuse
+
+- **Discovered:** 2026-06-15 · **Workstream:** public-layering (persistence helper, D87)
+- **Severity:** MEDIUM (data-safety)
+- **Disposition:** PARKED (implement with the persistence helper)
+- **Description:** The persistence model (D87) relies on POSIX advisory locking (`flock`) + atomic
+  `rename`. Both are **unreliable on network filesystems** — "POSIX advisory locking is known to be
+  buggy or even unimplemented on many NFS implementations," and a lock that gets lost can lead to
+  silent corruption ([sqlite.org/lockingv3](https://sqlite.org/lockingv3.html); man7 `fcntl_locking`).
+  Networked `$HOME` is real (corporate/university). SQLite is *worse* here (WAL needs same-host shared
+  memory), so this is not a JSON-vs-SQLite escape — it's an environmental constraint. yoloAI should
+  **detect the data dir's filesystem and warn (or refuse) on a network FS** rather than corrupt
+  silently.
+- **Pointer:** wherever the data dir is resolved (`config.Layout`); the persistence helper's open path. Design: [persistence-helper.md](persistence-helper.md) / [research/shared-state-concurrency.md](research/shared-state-concurrency.md) / [D87](../decisions/working-notes.md).
+
+### DF37 — File-locking hardening: confirm `flock` not `fcntl`, add the fsync-durability dance
+
+- **Discovered:** 2026-06-15 · **Workstream:** public-layering (persistence helper, D87)
+- **Severity:** MEDIUM (silent-corruption / data-loss avoidance)
+- **Disposition:** PARKED (verify + harden with the persistence helper)
+- **Description:** Two file-locking footguns the research flagged: (1) **`fcntl`/`F_SETLK` POSIX record
+  locks release when *any* fd to the file is closed** (a library that opens/reads/closes the same file
+  silently drops the lock — the man page calls it "bad") and don't inherit across `fork` as expected;
+  **`flock`** has sane semantics (binds to the open file description, self-cleans on crash) and is
+  portable to macOS. Confirm `store/lock_unix.go` (and any other locking) uses `flock`, not `fcntl`.
+  (2) Atomic `rename` gives atomicity but **not durability** — a crash can leave a zero-length file
+  (the real ext4 delayed-allocation bug) unless the write does **`fsync(temp) → rename → fsync(parent
+  dir)`**. Add that dance to the atomic-write path.
+- **Pointer:** `internal/store/lock_unix.go`; `internal/fileutil` (atomic write). Design: [research/shared-state-concurrency.md](research/shared-state-concurrency.md) / [D87](../decisions/working-notes.md).
+
+### DF38 — MCP surface has no per-call credential input, and tool-arg injection collides with "agents shouldn't handle credentials"
+
+- **Discovered:** 2026-06-16 · **Workstream:** public-layering (session-layer / trial-engine design, driven by the control-eval consumer — see `design/session-layer.md`, `~/experiments/control-eval/docs/yoloai-trial-engine-report.md` P3)
+- **Severity:** MEDIUM (security — credential handling on an unbuilt surface; no shipped regression)
+- **Disposition:** **RESOLVED-IN-DESIGN by [D95](../decisions/working-notes.md) ([secure-secrets.md](secure-secrets.md))**; build phased (kept here until built, per the partial-resolution rule). The dedicated design pass is done — the credential boundary is a host-side egress proxy that holds/injects/refreshes credentials so the live key never enters the sandbox; for MCP, the cleaner "supply credentials to the server at launch, tool calls carry no secrets" path is the chosen shape. The contract seam (EnvSpec credential-shape + a refresh-capable `CredentialSource`) is reserved now; the proxy builds later with netpolicy's `egress-proxy` strategy.
+- **Description:** D63 established the credential model: the library does **zero ambient credential reads**; credentials arrive as an injected `Env` snapshot populated **at the edge**. The CLI edge already honors this — control-eval cleans its env and passes only the keys Claude Code needs via `--env`. The **MCP surface is also an edge**, but its tools (`sandbox_create`/`sandbox_run` — `name, workdir, prompt, agent, model`) expose **no credential input**. For a caller (control-eval now, a daemon later) to inject per call, the tools need an explicit `env`/`credentials` input **and** the MCP edge must enforce the same no-ambient-read discipline (never fall back to the MCP *server's* own host env). Such a param must be treated as a **secret** — redacted from any tool-call logging/tracing (local stdio transport doesn't cross a new trust boundary, but the key must not land in logs).
+  **The wrinkle (load-bearing, the reason this is PARKED not just a TODO):** MCP servers are designed for **agents** to call, and an agent should not be handling raw credentials — so passing a real API key as a *tool-call argument* is architecturally suspect. A cleaner alternative: supply credentials to the **MCP server at launch** (env/config), so it performs all operations under those fixed credentials and tool calls carry no secrets. That wants a proper **secure-secrets-handling** design. The upcoming **API-key (metered JV key) + adversarial-agent** context raises the stakes: a real billable key inside an untrusted sandbox makes exfiltration-prevention (network-isolation allowlist) load-bearing, not theoretical.
+- **Trigger:** when the concurrent MCP orchestration surface (trial-engine P3) is taken up, or when a secure-secrets model is designed — whichever first.
+- **Pointer:** `internal/mcpsrv/tools.go`, `internal/cli/mcp/` (tool schemas — add the credential input + no-ambient discipline). Credential model: [D63] (`Env` snapshot, `SecretsStagingDir`); principal/credential-bundle [D58]/[D63]. Design context: [session-layer.md](session-layer.md).
+
+### DF39 — `$HOME` credential files are the last implicit ambient-credential bleed into the sandbox
+
+- **Discovered:** 2026-06-16 · **Workstream:** public-layering (session-layer / trial-engine design)
+- **Severity:** LOW–MEDIUM (security — implicit host credentials enter the sandbox; matters most for untrusted agents on a real key)
+- **Disposition:** **RESOLVED-IN-DESIGN by [D95](../decisions/working-notes.md) ([secure-secrets.md](secure-secrets.md))**; build phased (kept here until built). Under D95 the `$HOME` credential mount becomes **caller-controlled and filtered** (never implicit) — the caller fully controls what credential material enters, and where an agent authenticates via the proxy-injected path, no host credential file enters at all.
+- **Description:** yoloAI bind-mounts the agent's host credential/state directory (e.g. `~/.claude`) into the sandbox so the in-container agent authenticates. After D63 removed ambient credential reads from the library proper — and with the CLI edge otherwise cleaning the env to only required keys — this `$HOME` mount is the **last implicit ambient-config source**. It contradicts the caller-injects-everything model, and in the adversarial-agent + real-JV-key world it means the user's **actual host credentials can be mounted into an untrusted sandbox** (leak/exfil vector + an unaccounted auth path that may not even be the intended billing principal). Eventual shape: the caller fully controls what credentials enter; the `$HOME` credential mount becomes **opt-in**, not implicit.
+- **Trigger:** when API-key / adversarial usage becomes routine (the Anthropic JV engagement), or when DF38's MCP credential model is designed — whichever first.
+- **Pointer:** the agent-state / credential bind-mount wiring (per-agent definition `state directory` → provision mount setup); contrast the env-var credential path under [D63]. Related: DF38.
+
+### DF40 — seatbelt/tart launch leaves the host-run tmux+agent attached to the caller's controlling terminal (macOS terminal-corruption sibling of the fixed docker bug)
+
+- **Discovered:** 2026-06-18 · **Workstream:** terminal-corruption investigation (external concurrent trial harness; the **docker/Linux** half was root-caused and fixed on `main` in `f208b32` — `WithTerminal` only enters raw mode when stdin *and* stdout are terminals)
+- **Severity:** MEDIUM (terminal corruption / usability — staircased output, dead Ctrl-C; **seatbelt and tart only**, i.e. macOS)
+- **Disposition:** PARKED — **needs a macOS host to reproduce + verify; cannot be tested or fixed from Linux** (both backends are macOS-only). Recorded so a macOS-running agent can pick it up.
+- **Description:** The fixed docker bug was a host-side raw-mode race in the CLI's `WithTerminal`. The **seatbelt** and **tart** backends have a *separate, structurally similar* exposure on the **backend launch** path (not `WithTerminal`): each starts its long-lived host process — `sandbox-exec … python3 sandbox-setup.py` (seatbelt) / `tart run` (tart), which on these backends runs **tmux + the agent on the host** — with `cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}` and **no `Setsid`**. `Setpgid` makes a new process group but stays in the **same session**, so the detached host-run tmux/agent keeps the caller's **controlling terminal** (`/dev/tty`) and can leave it in raw mode after `new`/`start` returns. `sysexec` already leaves `cmd.Stdin` nil (→ `/dev/null`), so the residual vector is the controlling terminal via Setpgid-without-Setsid, **not** stdin. **Unverified** — needs a macOS host (no repro possible on Linux/docker, where tmux runs *inside* the container and never touches the host tty).
+- **Likely fix:** launch these host processes detached from the controlling terminal — `Setsid: true` (new session, no controlling tty) and/or `cmd.Stdin = nil`/`/dev/null` made explicit — mirroring the docker fix's intent (a non-interactive launch must not mutate the caller's terminal). Verify tmux still starts cleanly under the new session on both backends.
+- **Trigger:** the next time anyone runs yoloai **non-interactively on macOS** with `--backend seatbelt` or `--backend tart` (e.g. a batch/trial harness), or any macOS terminal-corruption report — reproduce there, then apply + verify the detach.
+- **Pointer:** `internal/runtime/seatbelt/seatbelt.go:324`, `internal/runtime/tart/tart.go:360` (the `SysProcAttr{Setpgid: true}` launches). Contrast the fixed docker path: `internal/cli/cliutil/streams.go` (`WithTerminal`, `main`@`f208b32`).
+
+### DF41 — the carve orphans the agent-free root work fused into `entrypoint.py` (each layer must claim its piece)
+
+- **Discovered:** 2026-06-24 · **Workstream:** public-layering design-review remediation ([D92](../decisions/working-notes.md))
+- **Severity:** MEDIUM (load-bearing for the D88 carve; not a runtime bug yet — a design hole that would orphan working code at Shape)
+- **Disposition:** PARTIALLY RESOLVED — **Docker/Launch path: dissolved by E3** (secrets delivered as
+  `ProcSpec.Env`; no host-staged `/run/secrets` dir, no `.secrets-consumed` marker — nothing to re-home for
+  the secrets piece on this path; implemented + verified on real Docker, commit 163533a9). UID-remap,
+  overlay-mount → substrate; `isolate_network` → netpolicy; all per D92 design — pending Shape
+  implementation. **Legacy backends** (containerd, tart, seatbelt): secrets-read + marker still present in
+  `entrypoint.py`, re-home to envsetup as Go-driven steps when those backends are carved. The UID-remap,
+  overlay-mount, and `isolate_network` pieces remain PARKED pending Shape for all backends.
+- **Description:** `entrypoint.py::main()` does four **agent-free** root operations before `gosu`-exec'ing the agent: **UID/GID remap** (`:70-103`), reading **staged secrets** from `/run/secrets` + the **`.secrets-consumed` marker handshake** (`:106-152`), **network isolation** (`:180-286`), and the **in-container overlay mount** (`:289-368`). The D88 carve makes PID 1 neutral and demotes the agent session to a `Launch` — which would **orphan all four**, because they live inline in the agent-facing Python with no Go/abstraction owning them. Verified across the tree. Rehoming (D92): **UID-remap + overlay-mount → substrate** (provisioning); **`isolate_network` → netpolicy** (its `ip-filter` strategy — already designed); **secrets read + consumed-marker → envsetup** (credential delivery + its teardown half). Each spec must now **explicitly claim** its piece.
+- **Pointer:** `internal/runtime/docker/resources/entrypoint.py` (`main` `:393-446`; `remap_uid`, `read_secrets`, `signal_secrets_consumed`, `isolate_network`, `apply_overlays`). Go path-computation only: `collectOverlayMounts` (`orchestrator/create/prepare_dirs.go:434`). Resolution: [backend-topology.md](backend-topology.md), substrate/netpolicy/envsetup specs.
+
+### DF42 — the in-container overlay mount has no owning abstraction and no explicit teardown
+
+- **Discovered:** 2026-06-24 · **Workstream:** public-layering design-review remediation (D92)
+- **Severity:** MEDIUM
+- **Disposition:** PARKED (substrate claims it per D92; teardown to add at Shape)
+- **Description:** The `:overlay` mode's actual `mount -t overlay` (with the VirtioFS→tmpfs fallback for macOS Docker Desktop) is **inline in `entrypoint.py::apply_overlays` with zero Go ownership** — verified: no `mount -t overlay`/`umount`/`Unmount` anywhere in the Go tree; Go only computes the lower/upper/work/merged path strings. So no layer conceptually owns the mount today (it's owned by "whatever runs `entrypoint.py`"), and there is **no explicit unmount** — the overlay/tmpfs is reclaimed only by kernel namespace teardown on container destroy. The carve must give the mount an owner (substrate, per D92) **and** an explicit unmount on the teardown path (today implicit-via-destroy; the carve must not lose it).
+- **Pointer:** `entrypoint.py:289-368` (`apply_overlays`); `orchestrator/create/prepare_dirs.go:434` (`collectOverlayMounts`, path-strings only); copyflow `:overlay` (D86 §3). Related: DF41.
+
+### DF43 — seatbelt/tart keep staged secrets at rest for the sandbox lifetime; container path has a narrow crash-leak
+
+- **Discovered:** 2026-06-24 · **Workstream:** public-layering design-review remediation (D92)
+- **Severity:** LOW (DOWNGRADED from MEDIUM — Docker now stages no host file at all post-E3; at-rest is moot
+  for single-user/ephemeral use)
+- **Disposition:** DOWNGRADED — decided NOT to emit a runtime warning. Reasoning (D93): at-rest hygiene is
+  not a default concern on the single-user/ephemeral model (the staged secret is the user's own `0600` file;
+  Docker/Launch path stages no host file at all post-E3). The multi-principal-daemon case is the embedder's
+  concern, addressed by the `SecretsStagingDir` knob and surfaced in integrator documentation if anywhere.
+  **seatbelt/tart** still persist secrets to `<sandbox>/secrets/` for the sandbox lifetime — that is a
+  real-but-non-default concern documented in `envsetup.md §5` for integrators. The secure-secrets build
+  (DF38) remains the durable fix.
+- **Description:** The **container** backends stage secrets in an ephemeral `os.MkdirTemp(…, "yoloai-secrets-*")` deleted via `defer os.RemoveAll` after the consumed-marker handshake — and **post-E3 (Docker/Launch path) no host file is staged at all** (credentials delivered as `ProcSpec.Env`). But **seatbelt and tart write secrets into the *persistent* `<sandboxPath>/secrets/`**, on disk for the **whole sandbox lifetime**, removed only on destroy. The legacy container path also has a narrow crash-leak: a SIGKILL between `MkdirTemp` and the deferred remove leaves `0600` files in `/tmp` with no startup sweep for stale `yoloai-secrets-*`.
+- **Pointer:** Docker/Launch path: no host-staged dir (E3, commit 163533a9); legacy container `provision.go:33`, `launch.go:52-54,201-217`; seatbelt `seatbelt.go:206-225`; tart `tart.go:1196-1215`, `:456`. Related: DF38, DF39.
+
+### DF44 — the Launch'd session-runner does not survive the launching client's exit
+
+- **Discovered:** 2026-06-24 · **Workstream:** public-layering Shape, live smoke of the S3 carve re-route
+- **Severity:** HIGH (silently breaks idle/completion detection + the secrets handshake; only caught because the smoke ran on real docker — the unit test cannot see `docker exec` lifetime)
+- **Disposition:** RESOLVED-VERIFIED (`cc78ac86`; end-to-end on real docker — runner persists, status-monitor up, both markers written, `agent-status.json` populated, agent interactive). Drain to `findings-resolved.md` at next tidy. **Two root causes, not one:** (1) process-lifetime coupling — fixed with a first-class `ProcSpec.Detached` (`ContainerExecStart{Detach:true}` + stdio → `/yoloai/logs/session-runner.log`); (2) a **readiness race** the smoke matrix then exposed — a runner launched *during* entrypoint root-setup (UID remap / `chown -R` / network) is silently killed even when detached (a trivial command or a post-provision launch both survive). Fixed with a `.substrate-ready` marker the keepalive entrypoint writes after root-setup (before exec'ing the holder); `startViaLaunch` waits for it before Launch, erroring on timeout (substrate `Ready()` semantics).
+- **Description:** S3 launches `sandbox-setup.py` via `ProcessLauncher.Launch`, implemented (S2a) as an **attached** `docker exec` (`ContainerExecAttach`). The runner is long-lived (it sets up tmux, launches the agent, runs the status-monitor, then blocks on `tmux wait-for`). But an attached exec is bound to its client connection: when `yoloai new` returns, the connection drops and the runner is **killed mid-`main()`**. Smoke evidence: PID-1 holder + tmux + `claude` alive, but **no `sandbox-setup.py` process**, `sandbox.jsonl` stops at `entrypoint.keepalive_only`, `agent-status.json` = `{}`, `monitor.jsonl` empty (status-monitor never ran), `.secrets-consumed` **never written** (host `waitForSecretsConsumed` stalls to its timeout; env/`/run/secrets` credentials unreliable — the smoke's claude only authed via the file-mounted `~/.claude`). The agent survives **only** because tmux self-daemonizes. The S2a "drain streams to discard" was a band-aid for the demux goroutine; the real issue is **process-lifetime coupling**. "A durable process that outlives its launcher" is a *general* substrate need (yoloAI's defining trait: the box runs on after the CLI exits) → it belongs in the `Launch` primitive, not bolted on at the call site. Also recorded as a docker backend idiosyncrasy.
+- **Pointer:** `internal/runtime/docker/launch.go` (the attached `Launch`), `internal/orchestrator/launch/launch.go::startViaLaunch`, `internal/runtime/runtime.go` (`ProcSpec`). Sibling: [substrate-interface.md](substrate-interface.md) §ProcSpec.
+
+### DF45 — base-image build lock is keyed by data-dir but the image tag is global to the docker daemon
+
+- **Discovered:** 2026-06-24 · **Workstream:** public-layering Shape (concurrency question raised during the smoke)
+- **Severity:** LOW (benign redundancy, **not** corruption — surfaced for the multi-principal/[D62](../decisions/working-notes.md) direction)
+- **Disposition:** PARKED (single-data-dir behavior is correct; **Trigger:** the multi-principal daemon that serves several data dirs against one docker daemon)
+- **Description:** `Setup` serializes base-image builds with a proper double-checked `flock`: acquire `layout.DockerBaseLockPath("yoloai-base")` → re-check `imageExists` + `NeedsBuild` **inside** the lock → build only if needed → write the checksum inside the lock. So concurrent `yoloai new` within one data dir **cooperate** (one builds, the rest block then skip — no double build, no checksum race, no tag stomp). BUT the lock path derives from the **data-dir** (`layout`), while the image tag `yoloai-base` is **global to the docker daemon**. Two `yoloai new` with *different* `--data-dir` against the *same* daemon (the D62 multi-principal case) do **not** serialize on this lock → redundant concurrent `docker build` of the same global tag, last-write-wins. Benign (wasted work; per-data-dir checksum files don't corrupt each other), but a latent inefficiency the multi-tenant work should account for — e.g. namespace the tag per principal, or key the lock on the global image name rather than the data dir. Ties into the [shared-state-concurrency](research/shared-state-concurrency.md) research (D87): "is the lock keyed to the same scope as the resource it guards?"
+- **Pointer:** `internal/runtime/docker/docker.go:332` (`Setup`, the double-checked lock), `internal/runtime/docker/base_lock.go` (`AcquireBaseLock` → `DockerBaseLockPath`), `internal/runtime/docker/build.go:42-54,134` (checksum). Tart mirrors the same pattern.
+
+### DF46 — in-place agent relaunch restarts the agent but not the status-monitor (idle detection dies)
+
+- **Discovered:** 2026-06-24 · **Workstream:** public-layering Shape, S3.3 restart-brings-it-back verification (real-docker smoke)
+- **Severity:** MEDIUM (idle/done detection silently dead after an in-place relaunch — matters for scripted/completion use, e.g. `yoloai wait`; interactive use is unaffected since the agent itself returns fine)
+- **Disposition:** RESOLVED-VERIFIED — fix **(C)**, the durable monitor (`status-monitor.py` no longer exits on pane-death; it records `done` and keeps watching, re-detecting `done→active/idle` on respawn). Verified end-to-end on real docker: kill agent → monitor survives + status `done`; `yoloai start` → agent back + same monitor + status recovered to `idle`. Drain to `findings-resolved.md` at next tidy. **Pre-existing, not a carve regression** — but the carve made in-place relaunch the common, reliable path (box always stays up), so the gap surfaced. Fix (C) chosen over (A)/(B) because it matches the carve thesis: the session (runner + tmux + monitor) is the durable thing the agent is launched into, and it's the right foundation for the tier-2 completion work.
+- **Description:** `status-monitor.py` is **one-shot**: it watches the tmux pane and, when the agent exits, writes `status:done` + exit code and **exits** (`status-monitor.py:615-695`). It is launched **only** by `sandbox-setup.py` at initial setup (`:1325`). The terminal-status relaunch path — `Start` on a `Done`/`Failed` agent → `handleTerminalStatus` → `relaunchAgent` — does `tmux respawn-pane -t main -k <agentCmd>` to bring the agent back, but **never restarts the monitor** (no monitor reference anywhere in `lifecycle/`). **Verified on real docker:** kill the agent → box survives (carve holder + session-runner persist) → status flips to `done, exit_code 143` → `yoloai start` → agent returns and is interactive, **but the monitor is gone and `agent-status.json` is frozen at the prior `done`** — so idle/done detection no longer tracks the relaunched agent. Three fix directions: **(A)** `relaunchAgent` also re-launches the monitor (host-driven, matches today's model); **(B)** route relaunch through the persisting session-runner (carve-aligned: the runner owns the session); **(C)** make the monitor durable across agent runs (don't exit on pane-death; re-detect `done→active` on respawn).
+- **Pointer:** `internal/runtime/monitor/status-monitor.py:615-695` (exits on `pane_dead`); `internal/runtime/monitor/sandbox-setup.py:1188,1325` (`launch_monitor`, setup-only); `internal/orchestrator/lifecycle/restart.go:277` (`relaunchAgent`, no monitor restart); `start.go:301` (`Done`/`Failed` → `handleTerminalStatus`).
+
+### DF47 — E3 loose ends: vestigial `.secrets-consumed` write in `sandbox-setup.py`; `YOLOAI_SECRET_KEYS` visible in tmux env
+
+- **Discovered:** 2026-06-25 · **Workstream:** public-layering Shape, E3 env-delivery verification (commit 163533a9)
+- **Severity:** LOW (harmless litter + minor info-leak; neither is a correctness or security regression)
+- **Disposition:** **RESOLVED 2026-06-25, commit 4908b11b** (should drain to `findings-resolved.md`). Both fixed + verified on real Docker: (a) `DockerBackend.writes_consumed_marker = False` gates the marker write off for the Docker/Launch path (legacy backends keep it); (b) `read_secrets_from_env` pops `YOLOAI_SECRET_KEYS` from `os.environ` before tmux starts, so it never reaches the agent's panes. Verified: `ANTHROPIC_API_KEY` still reaches the agent (no regression), `YOLOAI_SECRET_KEYS` absent from the tmux env, no marker for Docker.
+- **Description:** Two small loose ends left after E3 on the Docker/Launch path: **(a)** `sandbox-setup.py`
+  still **writes the `.secrets-consumed` marker** (`:signal_secrets_consumed`) even on the Docker/Launch path
+  where the host no longer waits for it — the host's `waitForSecretsConsumed` logic was removed by E3, so the
+  write is vestigial litter under `~/.yoloai/.../logs/`. Harmless, but should be gated off for Docker (the
+  marker is still meaningful for legacy backends). **(b)** The `YOLOAI_SECRET_KEYS` sentinel (key *names*
+  only, not values) passed in `ProcSpec.Env` is visible in the agent's tmux environment after
+  `sandbox-setup.py` starts tmux — could be unset after the secrets are consumed to reduce the info-footprint
+  in the session env.
+- **Pointer:** `internal/runtime/docker/resources/sandbox-setup.py` (`signal_secrets_consumed`); the
+  `YOLOAI_SECRET_KEYS` env var set in `internal/orchestrator/launch/launch.go` (or wherever E3 injects the
+  sentinel into `ProcSpec.Env`). Related: DF41, DF43.
+
 ## Policy origin
 
 Established in [architecture-remediation.md](../archive/plans/architecture-remediation.md) and inherited by [layering-refactor.md](../archive/plans/layering-refactor.md).

@@ -26,19 +26,22 @@ type execer interface {
 
 // Git is the unified git executor. Construct it with NewHost, NewHostWithEnv,
 // or NewSandbox. All operations accept a context as their first argument.
-type Git struct{ e execer }
+type Git struct {
+	e       execer
+	tempDir string // yoloai-owned temp root (layout.TempDir()); empty → os.TempDir() fallback
+}
 
 // NewHost returns a host-scoped Git whose subprocess env is derived from layout
 // (PATH/HOME/TMPDIR/SUDO_UID — see sysexec.GitEnv).
 func NewHost(layout config.Layout) *Git {
-	return &Git{hostExec{env: layout.Env().EnvForGitInvocation()}}
+	return &Git{e: hostExec{env: layout.Env().EnvForGitInvocation()}, tempDir: layout.TempDir()}
 }
 
 // NewHostWithEnv returns a host-scoped Git with an explicit, already-curated env.
 // Use in tests (testutil.GitEnv) and transitional workspace wrappers.
 // Prefer NewHost in production code.
 func NewHostWithEnv(env []string) *Git {
-	return &Git{hostExec{env: env}}
+	return &Git{e: hostExec{env: env}}
 }
 
 // NewSandbox returns a sandbox-scoped Git with the executor *injected* by the
@@ -49,9 +52,9 @@ func NewHostWithEnv(env []string) *Git {
 func NewSandbox(layout config.Layout, rt runtime.Backend, name string) *Git {
 	env := layout.Env().EnvForGitInvocation()
 	if runtime.LocalityOf(rt) == runtime.LocalitySandboxSide {
-		return &Git{sandboxExec{env: env, rt: rt, name: name}}
+		return &Git{e: sandboxExec{env: env, rt: rt, name: name}, tempDir: layout.TempDir()}
 	}
-	return &Git{hostExec{env: env}}
+	return &Git{e: hostExec{env: env}, tempDir: layout.TempDir()}
 }
 
 // ─── low-level ───────────────────────────────────────────────────────────────

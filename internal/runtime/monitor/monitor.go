@@ -22,6 +22,12 @@ var embeddedSetupHelpers []byte
 //go:embed tmux_io.py
 var embeddedTmuxIO []byte
 
+//go:embed agent-run.sh
+var embeddedAgentRun []byte
+
+//go:embed yoloai-resume.sh
+var embeddedYoloaiResume []byte
+
 // Script returns the embedded status-monitor.py content.
 func Script() []byte {
 	return embeddedStatusMonitor
@@ -49,4 +55,21 @@ func SetupHelpers() []byte {
 // backends must write it alongside sandbox-setup.py in the sandbox bin dir.
 func TmuxIO() []byte {
 	return embeddedTmuxIO
+}
+
+// AgentRunScript returns the embedded agent-run.sh wrapper. It is the
+// fall-to-shell launch wrapper (D96): backends must install it executable in
+// the sandbox bin dir alongside status-monitor.py, which it invokes via
+// `--write-status done` to record the agent's authoritative `done` on exit.
+func AgentRunScript() []byte {
+	return embeddedAgentRun
+}
+
+// YoloaiResumeScript returns the embedded yoloai-resume script. It is the
+// in-sandbox resume command (D96 DD4): run from the fall-to-shell shell, it
+// relaunches the agent (continuing the prior conversation where supported)
+// through agent-run.sh. Backends install it executable in the sandbox bin dir
+// as `yoloai-resume` (no extension).
+func YoloaiResumeScript() []byte {
+	return embeddedYoloaiResume
 }

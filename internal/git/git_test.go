@@ -93,7 +93,7 @@ func TestHostExec_RunsHostGit(t *testing.T) {
 	gitAdd(t, dir, ".")
 	gitCommit(t, dir, "init")
 
-	g := &Git{hostExec{env: testEnv()}}
+	g := &Git{e: hostExec{env: testEnv()}}
 	sha, err := g.HeadSHA(context.Background(), dir)
 	require.NoError(t, err)
 	assert.Len(t, sha, 40)

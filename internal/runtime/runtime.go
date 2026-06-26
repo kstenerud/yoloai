@@ -80,6 +80,10 @@ const (
 )
 
 // InstanceConfig holds the parameters for creating a sandbox instance.
+// It is the substrate's agent-free provision config — the ProvisionSpec of
+// docs/contributors/design/substrate-interface.md. The agent-specific fields
+// fused here today (DF33: agent command, ready pattern, idle config) are split
+// out into orchestrator/runtimeconfig during the session-layer carve.
 type InstanceConfig struct {
 	// Universal — all backends.
 	Name        string
@@ -243,6 +247,7 @@ type BackendCaps struct {
 	ContainerAttach    bool               // exposes a docker-compatible container surface so VS Code's "Attach to Running Container" works
 	VMRuntimeDir       string             // path to yoloai state inside the VM; "" means /yoloai (docker default)
 	FilesystemLocality FilesystemLocality // where tracked work copies live; see the type doc. Zero value = LocalityHostSide.
+	KeepAliveModel     KeepAliveModel     // init/keep-alive model; see the type doc. Zero value = KeepAliveContainerInit.
 }
 
 // FilesystemLocality declares where a sandbox's tracked work copies live
@@ -277,6 +282,76 @@ func LocalityOf(rt Backend) FilesystemLocality {
 		return LocalityHostSide
 	}
 	return rt.Descriptor().Capabilities.FilesystemLocality
+}
+
+// KeepAliveModel classifies how each backend keeps its isolated environment
+// alive and reaps the processes running inside it. Declared per-backend in
+// BackendCaps so callers reason by semantic property, never by backend type.
+// See docs/contributors/design/backend-topology.md for the per-backend table.
+type KeepAliveModel int
+
+const (
+	// KeepAliveContainerInit: a container init must become the neutral PID 1,
+	// with the agent session launched on top via a Go-driven Launch call. The
+	// container init is the reaper; the agent is NOT PID 1 (DF31 carve target).
+	// Backends: docker, podman.
+	// See docs/contributors/design/backend-topology.md.
+	KeepAliveContainerInit KeepAliveModel = iota
+
+	// KeepAliveGuestOSInit: the guest OS's own init already keeps the
+	// environment up and reaps processes; the neutral keep-alive is provided
+	// for free by the VM. Launch targets the guest, not a synthetic PID 1.
+	// Backends: containerd (Kata microVM), tart (macOS VM), apple (per-container Apple VM).
+	// See docs/contributors/design/backend-topology.md.
+	KeepAliveGuestOSInit
+
+	// KeepAliveHostKeepAlive: no container or VM — the isolated environment is
+	// a host process group (sandbox-exec). Keep-alive is the host process tree;
+	// there is no "inside" to Launch into in the container/VM sense.
+	// Backend: seatbelt.
+	// See docs/contributors/design/backend-topology.md.
+	KeepAliveHostKeepAlive
+)
+
+// KeepAliveModelOf returns rt's declared KeepAliveModel, defaulting to
+// KeepAliveContainerInit for a nil runtime.
+func KeepAliveModelOf(rt Backend) KeepAliveModel {
+	if rt == nil {
+		return KeepAliveContainerInit
+	}
+	return rt.Descriptor().Capabilities.KeepAliveModel
+}
+
+// ProcSpec is the agent-neutral launch input for the future Substrate.Launch
+// verb (docs/contributors/design/substrate-interface.md §ProcSpec). It carries
+// NO agent fields (DF33) — agent command, ready pattern, and idle config belong
+// to the orchestrator layer. ProcSpec is consumed when the Launch verb lands in
+// the session-layer carve; it is defined here now so dependent types can
+// reference it before the carve lands.
+type ProcSpec struct {
+	// Argv is the command and its arguments.
+	Argv []string
+	// Env holds additional environment variables for the process in KEY=VAL
+	// form, matching the package's existing ContainerEnv convention.
+	Env []string
+	// Cwd is the working directory inside the substrate. Empty means the
+	// backend's default (typically the image WORKDIR or home dir).
+	Cwd string
+	// User is the user[:group] to run the process as. Empty means the
+	// backend's default user.
+	User string
+	// TTY requests a pseudo-terminal. A rich reattachable session (tmux) is
+	// a higher-level refinement built on top; TTY here is the raw pty flag.
+	TTY bool
+	// Stdin requests that stdin be left open so the caller can write to it.
+	Stdin bool
+	// Detached requests a long-lived process that survives the launching
+	// client's disconnect. Its stdio is NOT streamed back to the caller
+	// (Streams() returns zero/nil readers and writer); the process is expected
+	// to redirect its own output to files inside the substrate. Wait still
+	// reports exit via backend inspection. Use for a session-runner / daemon
+	// that must outlive the caller.
+	Detached bool
 }
 
 // Backend is the sandbox backend interface. Implementations manage the

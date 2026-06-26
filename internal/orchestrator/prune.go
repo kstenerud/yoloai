@@ -1,6 +1,6 @@
 package orchestrator
 
-// ABOUTME: Cleans up stale yoloai-* temporary directories in the system temp dir.
+// ABOUTME: Cleans up stale yoloai-* temporary directories under the yoloai data dir.
 
 import (
 	"fmt"
@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/kstenerud/yoloai/internal/config"
 )
 
 // TempPruneFailure is a stale temp dir that matched but could not be removed —
@@ -19,22 +21,25 @@ type TempPruneFailure struct {
 	Err  error
 }
 
-// PruneTempFiles removes stale yoloai-* directories older than maxAge from the
-// system temp dir (os.TempDir()). It returns the paths actually removed (or, in
-// dryRun, that would be removed) and — for non-dry-run runs — any matching dirs
-// that could not be removed. The removed list reflects what truly happened: a
-// dir whose os.RemoveAll fails lands in failed, never in pruned, so callers must
-// not report it as removed.
-//
-// It must read os.TempDir(), not a hardcoded /tmp: the dirs are created with
-// os.MkdirTemp("", "yoloai-…") which honors $TMPDIR and, on macOS, defaults to
-// /var/folders/.../T — so a hardcoded /tmp would never find them there
-// (leaving orphaned yoloai-secrets-* credential dirs from killed runs uncleaned).
-func PruneTempFiles(dryRun bool, maxAge time.Duration) (pruned []string, failed []TempPruneFailure, err error) {
-	tmpDir := os.TempDir()
-	entries, err := os.ReadDir(tmpDir)
-	if err != nil {
-		return nil, nil, fmt.Errorf("read %s: %w", tmpDir, err)
+// PruneTempFiles removes stale yoloai-* directories older than maxAge from
+// layout.TempDir() (DataDir/tmp). It returns the paths actually removed (or,
+// in dryRun, that would be removed) and — for non-dry-run runs — any matching
+// dirs that could not be removed. The removed list reflects what truly happened:
+// a dir whose os.RemoveAll fails lands in failed, never in pruned, so callers
+// must not report it as removed.
+func PruneTempFiles(layout config.Layout, dryRun bool, maxAge time.Duration) (pruned []string, failed []TempPruneFailure, err error) {
+	return pruneTempDir(layout.TempDir(), dryRun, maxAge)
+}
+
+// pruneTempDir scans root for stale yoloai-* directories, removing those older
+// than maxAge. A missing root is silently ignored (nothing to prune).
+func pruneTempDir(root string, dryRun bool, maxAge time.Duration) (pruned []string, failed []TempPruneFailure, err error) {
+	entries, readErr := os.ReadDir(root)
+	if readErr != nil {
+		if os.IsNotExist(readErr) {
+			return nil, nil, nil // nothing to prune
+		}
+		return nil, nil, fmt.Errorf("read %s: %w", root, readErr)
 	}
 
 	cutoff := time.Now().Add(-maxAge)
@@ -47,15 +52,15 @@ func PruneTempFiles(dryRun bool, maxAge time.Duration) (pruned []string, failed 
 			continue
 		}
 
-		info, err := entry.Info()
-		if err != nil {
+		info, statErr := entry.Info()
+		if statErr != nil {
 			continue // skip entries we can't stat
 		}
 		if info.ModTime().After(cutoff) {
 			continue // too recent
 		}
 
-		path := filepath.Join(tmpDir, entry.Name())
+		path := filepath.Join(root, entry.Name())
 
 		if !dryRun {
 			if rmErr := os.RemoveAll(path); rmErr != nil {

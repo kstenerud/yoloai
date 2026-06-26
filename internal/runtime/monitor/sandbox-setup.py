@@ -105,6 +105,28 @@ def read_secrets(secrets_dir, socket=None):
     return secrets
 
 
+def read_secrets_from_env(socket=None):
+    """Build the secrets dict from the env vars named in YOLOAI_SECRET_KEYS.
+
+    The values are already in os.environ (delivered via the launched process's
+    environment); this collects the named subset and mirrors them into the tmux
+    session environment so the agent pane inherits them, exactly as the
+    file-based read_secrets does.
+    """
+    names = [n for n in os.environ.get("YOLOAI_SECRET_KEYS", "").split(",") if n]
+    secrets = {n: os.environ[n] for n in names if n in os.environ}
+    # Drop the yoloai-internal sentinel so it does not leak into the tmux server's
+    # inherited environment (the tmux session is created after this runs) and thus
+    # the agent's panes. The secret values themselves stay in os.environ — the
+    # agent needs them — but this plumbing var is not the agent's business.
+    os.environ.pop("YOLOAI_SECRET_KEYS", None)
+    log_info("read_secrets_from_env.done", f"loaded {len(secrets)} secrets from env")
+    if socket:
+        for name, value in secrets.items():
+            tmux("set-environment", "-t", "main", name, value, socket=socket)
+    return secrets
+
+
 def signal_secrets_consumed(yoloai_dir):
     """Touch a host-visible marker after secrets have been read.
 
@@ -155,6 +177,12 @@ from abc import ABC, abstractmethod
 class Backend(ABC):
     """Abstract base class for sandbox backends."""
 
+    # Whether this backend stages secrets in a host-side dir whose deletion the
+    # host gates on the .secrets-consumed marker. True for the file-staging
+    # backends (Tart/Seatbelt); DockerBackend overrides to False because it now
+    # receives secrets via the launch env, so there is no staged dir to release.
+    writes_consumed_marker = True
+
     def __init__(self, cfg, yoloai_dir):
         self.cfg = cfg
         self.yoloai_dir = yoloai_dir
@@ -190,6 +218,10 @@ class Backend(ABC):
 
 class DockerBackend(Backend):
     """Backend for Docker and Podman containers."""
+
+    # Secrets arrive via the launch env (ProcSpec.Env), not a host-staged dir,
+    # so there is nothing for the host to release — the consumed-marker is moot.
+    writes_consumed_marker = False
 
     def setup(self):
         """Docker-specific setup: git baseline for overlays, auto-commit loop."""
@@ -251,8 +283,14 @@ class DockerBackend(Backend):
         pass
 
     def read_secrets(self, socket):
-        """Read secrets from /run/secrets (inherited from entrypoint.py)."""
-        return read_secrets("/run/secrets", socket=socket)
+        """Read secrets from env vars named in YOLOAI_SECRET_KEYS.
+
+        On the Launch path secrets arrive in the process environment (ProcSpec.Env);
+        YOLOAI_SECRET_KEYS names which env vars are secrets. Values are already in
+        os.environ — this collects them and mirrors into the tmux session environment
+        so the agent pane inherits them.
+        """
+        return read_secrets_from_env(socket=socket)
 
 
 class TartBackend(Backend):
@@ -813,8 +851,15 @@ def launch_agent(cfg, socket=None, working_dir=None, backend_inst=None, secrets=
     # wrap (W1a/W1b). Every sandbox carries it: create writes it, and the v1->v2
     # schema migration backfills it for older sandboxes (empty for container
     # backends, a no-op prepend).
+    # Fall-to-shell (D96): hook-authoritative agents launch under agent-run.sh,
+    # which records `done` on agent exit and keeps the pane alive as a shell.
+    # Gated by fall_to_shell in runtime-config.json (off for older sandboxes and
+    # heuristic agents → unchanged exec-the-agent behavior). The wrapper is
+    # installed at a fixed image path; it derives its own YOLOAI_DIR paths.
+    wrapper = "/yoloai/bin/agent-run.sh" if cfg.get("fall_to_shell") else ""
     send_cmd = build_agent_launch_command(
-        agent_command, working_dir, secrets, cfg.get("agent_launch_prefix", ""))
+        agent_command, working_dir, secrets, cfg.get("agent_launch_prefix", ""),
+        wrapper=wrapper)
 
     tmux("send-keys", "-t", "main", send_cmd, "Enter", socket=socket)
     log_info("sandbox.agent_launch", "agent process started", agent=agent, model=model)
@@ -1265,7 +1310,8 @@ def main():
     # backends that use a real socket; secrets reach the agent via the explicit
     # env_exports= prefix in the launch_agent() send-keys command instead.
     secrets = backend.read_secrets(socket)
-    signal_secrets_consumed(yoloai_dir)
+    if backend.writes_consumed_marker:
+        signal_secrets_consumed(yoloai_dir)
 
     working_dir = backend.get_working_dir()
 

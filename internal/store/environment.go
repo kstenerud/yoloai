@@ -181,6 +181,18 @@ func migrate(meta *Environment) error {
 	return nil
 }
 
+// SchemaVersion implements store.Record. Returns the version this binary writes.
+func (e *Environment) SchemaVersion() int {
+	return metaVersion
+}
+
+// MigrateRecord implements store.Migrator. Advances the record from its current
+// Version to metaVersion by running the typed migration ladder.
+// TODO(persist): convert the typed migrate ladder to append-only raw-JSON steps per D87 §3.
+func (e *Environment) MigrateRecord() error {
+	return migrate(e)
+}
+
 // SaveEnvironment writes environment.json to the given directory path.
 func SaveEnvironment(dir string, meta *Environment) error {
 	meta.Version = metaVersion

@@ -697,6 +697,63 @@ Global `~/.claude/CLAUDE.md` §Naming; project decision D73; concretised in `../
 
 ---
 
+## §16. Don't ignore broken windows — fix it or file it, never silently work around
+
+When you hit a defect in the project's own infrastructure — the build, the test
+harness, a Makefile, a script, a doc process, a flaky tool — **do not quietly
+route around it and move on**. A silent workaround leaves the trap armed for the
+next person (often future-you), and a tolerated broken window signals that
+breakage is acceptable, so more accumulate. The discipline is binary:
+
+- **Quick and in-scope → fix it now.** If the proper fix is small and doesn't
+  derail the current task, just do it.
+- **Otherwise → record it as a finding** (`findings-unresolved.md`, a `DF`) with
+  enough detail to fix later. Then proceed.
+
+What you must *not* do is the third thing: notice the breakage, work around it to
+keep moving, and say nothing — so it's neither fixed nor tracked.
+
+### Pattern
+
+The tell is a sentence like "I'll just use X directly instead" or "it works if I
+do Y first." That workaround is evidence of a broken window. Stop and ask: is the
+real fix quick? Fix it. Not quick? File it. The workaround is fine *as a
+stopgap*, but only paired with a fix or a finding — never alone.
+
+### Worked examples
+
+- **Makefile embed-dependency (the fix-it case).** The `build` target globbed
+  embed files by extension and missed a new `*.js` embed, serving a *stale
+  binary* — which cost ~an hour of false debugging (runtime behaviour didn't
+  match the edited source). The first instinct was to work around it (`go build`
+  by hand) and keep going. The right move, taken once surfaced, was the quick
+  proper fix: delegate dependency tracking to `go build` (commit on the
+  public-layering branch). A broken build window is exactly the kind that breeds
+  more.
+- **Gemini sandbox auth (the file-it case).** Gemini's interactive first-run
+  onboarding blocked non-interactive turns — not a quick fix and out of the
+  current task's scope, so it was recorded as [DF48](../design/findings-unresolved.md)
+  rather than hacked around invisibly.
+
+### Cost-vs-benefit
+
+A silent workaround is cheap *now* and expensive *later*: the defect recurs, and
+the next encounter pays the full diagnosis cost again (the stale-binary hour).
+Filing a finding is a one-minute insurance premium against that; a quick fix
+removes the trap entirely. The only thing that doesn't pay is pretending it isn't
+there.
+
+### Sources
+
+User direction (2026-06-26): "Don't ignore broken windows. If it's a quick fix,
+do so. Otherwise record it as a finding so we have it recorded and can fix it
+later." Wilson & Kelling's *broken windows* applied to engineering infrastructure;
+cousin of §5 (fail fast — surface, don't bury) and the project's
+findings-queue discipline (mid-workstream discoveries are tracked, not absorbed
+silently).
+
+---
+
 # Common over-generalisations to avoid
 
 | Over-generalisation                          | Why yoloAI rejects                                                                                                                                                                                                                                          |
@@ -715,6 +772,7 @@ Global `~/.claude/CLAUDE.md` §Naming; project decision D73; concretised in `../
 | **Never-convert / always-pass-raw**          | §13 forbids *unjustified* conversions, not all of them. §4's boundary parse is a justified conversion (it proves an invariant); rendering a value for a human is a justified conversion (the human is the consumer). The rule is "convert where a present consumer needs it," not "never reshape data."                       |
 | **No-defaults-in-the-library-ever**          | §14 bans *convenience* defaults in the library, not *safety* ones. A safety-sensitive field whose default is the safe choice may be defaulted (at one named step, after its real sources resolve); a value with no safety dimension gets no default — accept unset, resolve, and error if still unset. The rule is "library defaults are safety-only," not "the library never supplies a value."                       |
 | **Spell-every-name-out**                     | §15 scales clarity to *distance*, not to a blanket maximum. A struct field read across many files must stand alone; a local read three lines down its declaration legitimately stays terse (`pr`, `i`), and a method receiver stays 1–2 letters by Go convention. The rule is "name for the reader's distance," not "never abbreviate."                                                                       |
+| **Fix-or-file-every-imperfection**           | §16 is about *infrastructure defects you actually hit* (a stale build, a flaky harness), not a mandate to log every cosmetic nit or to fix unrelated things mid-task. The rule is "don't silently work around the breakage in front of you" — pair a stopgap with a fix or a finding; it is not "stop the world for every imperfection."                                                                      |
 
 ---
 

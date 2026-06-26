@@ -797,7 +797,7 @@ func (s *System) pruneBackend(ctx context.Context, backend BackendType, known []
 // root-owned from a sudo run) are surfaced as warnings to out rather than
 // silently dropped or, worse, falsely reported as removed.
 func (s *System) pruneTempFiles(dryRun bool, out io.Writer) ([]PruneItem, error) {
-	removed, failed, err := orchestrator.PruneTempFiles(dryRun, staleTempFileAge)
+	removed, failed, err := orchestrator.PruneTempFiles(s.layout, dryRun, staleTempFileAge)
 	if err != nil {
 		return nil, fmt.Errorf("prune temp files: %w", err)
 	}

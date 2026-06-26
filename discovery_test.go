@@ -27,6 +27,10 @@ func TestSystem_Agents_Catalog(t *testing.T) {
 	require.True(t, ok, "claude agent present in catalog")
 	assert.NotEmpty(t, claude.Description)
 	assert.Contains(t, []string{"interactive", "headless"}, claude.PromptMode)
+	// Capability flags an embedder uses to choose how to drive the agent.
+	assert.True(t, claude.IdleHook, "claude declares an authoritative turn hook (tier-2 idle)")
+	assert.True(t, claude.SupportsHeadless, "claude supports a headless/one-shot launch form")
+	assert.NotEmpty(t, claude.NetworkFloor, "claude declares a network floor (its required API domains)")
 }
 
 func TestSystem_Agents_RealOnly(t *testing.T) {

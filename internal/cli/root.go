@@ -11,6 +11,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/cli/bugreport"
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 	"github.com/kstenerud/yoloai/internal/cli/extension"
@@ -239,6 +240,13 @@ diff and apply what you want to keep.`,
 		// migrate command. Exempt commands (version, help, completion, the
 		// migrate command itself) skip it.
 		if err := runMigrationGate(cmd); err != nil {
+			return err
+		}
+		// Register file-defined agents (~/.yoloai/agents/*.yaml) so every command
+		// — including the static AgentTypes() catalog (`system agents`), which
+		// never constructs a Client — sees them. Idempotent with NewClient's own
+		// registration for library embedders.
+		if err := agent.RegisterFileAgents(cliutil.Layout().AgentsDir()); err != nil {
 			return err
 		}
 		if prevPersistentPreRunE != nil {
