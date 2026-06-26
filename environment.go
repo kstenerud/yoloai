@@ -20,12 +20,17 @@ import (
 // (BackendType, AgentType, IsolationMode, DirMode, NetworkMode).
 type Environment struct {
 	// Identity & posture.
-	Name           string        `json:"name"`
-	CreatedAt      time.Time     `json:"created_at"`
-	BackendType    BackendType   `json:"backend"`
-	Profile        string        `json:"profile,omitempty"`
-	AgentType      AgentType     `json:"agent"`
-	Model          string        `json:"model,omitempty"`
+	Name        string      `json:"name"`
+	CreatedAt   time.Time   `json:"created_at"`
+	BackendType BackendType `json:"backend"`
+	Profile     string      `json:"profile,omitempty"`
+	AgentType   AgentType   `json:"agent"`
+	Model       string      `json:"model,omitempty"`
+	// Headless is the effective launch mode: true when the agent runs in its own
+	// headless mode (prompt baked in, pane-death = done), false for the
+	// interactive TTY flow. `yoloai run` requests headless but it may be
+	// downgraded when the agent's headless mode is unsafe without an API key (D101).
+	Headless       bool          `json:"headless,omitempty"`
 	Isolation      IsolationMode `json:"isolation,omitempty"`
 	HostFilesystem bool          `json:"host_filesystem,omitempty"`
 
@@ -112,6 +117,7 @@ func environmentFromStore(m *store.Environment) *Environment {
 		Profile:            m.Profile,
 		AgentType:          AgentType(m.AgentType),
 		Model:              m.Model,
+		Headless:           m.Headless,
 		Isolation:          m.Isolation,
 		HostFilesystem:     m.HostFilesystem,
 		NetworkMode:        NetworkMode(m.NetworkMode),

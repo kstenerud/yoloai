@@ -37,6 +37,13 @@ type Environment struct {
 	// it into agent.AgentType when it needs the typed value.
 	AgentType string `json:"agent"`
 	Model     string `json:"model,omitempty"`
+	// Headless records whether the agent runs in its own headless mode (prompt
+	// baked into the launch command, pane-death = done) versus the interactive
+	// TTY flow. This is the EFFECTIVE mode chosen at create: `yoloai run` requests
+	// headless, but create downgrades to interactive when the agent's headless
+	// mode would be unsafe without an API key (D101). Consumers read it back to
+	// pick a completion signal (exit for headless, idle for interactive).
+	Headless bool `json:"headless,omitempty"`
 
 	// Dirs is the ordered list of directories the sandbox manages. Element 0 is
 	// the workdir (the agent's cwd; "the workdir" for docs/UI). Entries with

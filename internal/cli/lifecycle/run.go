@@ -32,6 +32,7 @@ func NewRunCmd(version string) *cobra.Command {
 	addCreateFlags(cmd)
 	cmd.Flags().Bool("wait", false, "Block until the agent finishes (exit code reflects the agent's outcome)")
 	cmd.Flags().Bool("rm", false, "Destroy the sandbox after the agent finishes (implies --wait)")
+	cmd.Flags().Bool("tty", false, "Run the agent interactively (in a tmux pane you can attach to) instead of headless — useful for monitoring/debugging")
 
 	return cmd
 }
@@ -58,7 +59,11 @@ func runRunCmd(cmd *cobra.Command, args []string, version string) error {
 	if err != nil {
 		return err
 	}
-	opts.Headless = true
+	// run requests headless by default; --tty forces the interactive flow. The
+	// request may still be downgraded internally when headless is unsafe for the
+	// agent without an API key (D101).
+	tty, _ := cmd.Flags().GetBool("tty")
+	opts.Headless = !tty
 
 	wait, _ := cmd.Flags().GetBool("wait")
 	rm, _ := cmd.Flags().GetBool("rm")
@@ -125,6 +130,20 @@ func executeRun(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, opts 
 	if cliutil.BugReportFile != nil {
 		cliutil.BugReportSandboxName = sb.Name()
 	}
+
+	// Read the effective launch mode: create may have downgraded a requested
+	// headless to interactive when the agent's headless mode is unsafe without an
+	// API key (D101). It drives the wait condition (a headless agent exits; an
+	// interactive one finishes its turn and goes idle) and the fallback notice.
+	headless := opts.Headless
+	if meta, metaErr := sb.Metadata(); metaErr == nil {
+		headless = meta.Headless
+	}
+	if opts.Headless && !headless && !cliutil.JSONEnabled(cmd) {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Note: %s can't run headless without an API key — running interactively (attach with 'yoloai attach %s' to monitor).\n", //nolint:errcheck // best-effort output
+			opts.AgentType, sb.Name())
+	}
+
 	if _, err := sb.Start(ctx, yoloai.SandboxStartOptions{Env: opts.Env}); err != nil {
 		return err
 	}
@@ -137,12 +156,25 @@ func executeRun(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, opts 
 			}
 			return cliutil.WriteJSON(cmd.OutOrStdout(), meta)
 		}
-		fmt.Fprintf(cmd.ErrOrStderr(), "Sandbox %s running headlessly. Check with 'yoloai sandbox info %s'; wait with 'yoloai wait %s'.\n", //nolint:errcheck // best-effort output
+		fmt.Fprintf(cmd.ErrOrStderr(), "Sandbox %s running. Check with 'yoloai sandbox info %s'; wait with 'yoloai wait %s'.\n", //nolint:errcheck // best-effort output
 			sb.Name(), sb.Name(), sb.Name())
 		return nil
 	}
 
-	info, err := sb.Wait(ctx, yoloai.SandboxWaitOptions{For: yoloai.WaitForExit})
+	return waitForRunResult(cmd, ctx, sb, headless, rm)
+}
+
+// waitForRunResult blocks until the agent completes, optionally destroys the
+// sandbox (--rm), reports the outcome, and maps a failed agent to a non-zero
+// exit. A headless agent exits when done (WaitForExit); an interactive one
+// (the D101 TTY fallback) finishes its turn and goes idle without exiting
+// (WaitForIdle).
+func waitForRunResult(cmd *cobra.Command, ctx context.Context, sb *yoloai.Sandbox, headless, rm bool) error {
+	waitFor := yoloai.WaitForExit
+	if !headless {
+		waitFor = yoloai.WaitForIdle
+	}
+	info, err := sb.Wait(ctx, yoloai.SandboxWaitOptions{For: waitFor})
 	if err != nil {
 		return err
 	}

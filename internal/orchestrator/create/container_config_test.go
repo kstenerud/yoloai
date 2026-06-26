@@ -73,6 +73,19 @@ func TestBuildContainerConfig_Headless(t *testing.T) {
 	assert.True(t, interactive.FallToShell, "interactive keeps fall-to-shell on")
 }
 
+func TestHeadlessViable(t *testing.T) {
+	// D101: headless is safe for Claude on any auth; other agents need an API key
+	// (else they could hang on a login flow in a headless pane); utility agents
+	// with no API-key env vars are always viable.
+	noKeys := config.Layout{}.WithEnv(map[string]string{})
+	withGeminiKey := config.Layout{}.WithEnv(map[string]string{"GEMINI_API_KEY": "x"})
+
+	assert.True(t, headlessViable(agent.GetAgent("claude"), noKeys), "claude is headless-safe without a key")
+	assert.True(t, headlessViable(agent.GetAgent("test"), noKeys), "test has no API-key env vars → viable")
+	assert.False(t, headlessViable(agent.GetAgent("gemini"), noKeys), "gemini needs an API key for headless")
+	assert.True(t, headlessViable(agent.GetAgent("gemini"), withGeminiKey), "gemini viable once a key is present")
+}
+
 func TestBuildContainerConfig_StateDirName(t *testing.T) {
 	tests := []struct {
 		agent    string

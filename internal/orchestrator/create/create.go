@@ -352,7 +352,7 @@ func createAndSeedSandbox(ctx context.Context, d state.Deps, sandboxDir string, 
 func buildConfigAndEnvironment(ctx context.Context, d state.Deps, opts Options, ri *resolvedCreateInputs, agentDef *agent.Definition, workdir *DirSpec, auxDirs []*DirSpec, gcfg *config.GlobalConfig, dirEnvs []store.DirEnvironment, baselineSHA string, sandboxDir string) ([]byte, *store.Environment, string, string, error) {
 	_ = ctx // reserved for future use
 	pr := ri.profile
-	promptText, hasPrompt, model, agentCommand, tmuxConf, err := resolveAgentParams(agentDef, opts, pr, gcfg, d.Layout.HomeDir, d.Layout, d.Input)
+	promptText, hasPrompt, model, agentCommand, tmuxConf, headless, err := resolveAgentParams(agentDef, opts, pr, gcfg, d.Layout.HomeDir, d.Layout, d.Input)
 	if err != nil {
 		return nil, nil, "", "", err
 	}
@@ -363,7 +363,7 @@ func buildConfigAndEnvironment(ctx context.Context, d state.Deps, opts Options, 
 	lifecycleCfg := buildLifecycleConfig(ri.archetype, pr.archetypeDockerDRequired, ri.onCreateDone, ri.devcontainerCfg)
 
 	backend := d.Runtime.Descriptor().Type
-	configData, err := buildContainerConfig(d.Layout, agentDef, agentCommand, d.Runtime.Descriptor().AgentLaunchPrefix, tmuxConf, launch.OverlayOrResolvedMountPath(workdir), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, collectOverlayMounts(workdir, auxDirs), pr.setup, pr.autoCommitInterval, collectCopyDirs(workdir, auxDirs), opts.Name, runtime.TmuxSocketFor(d.Runtime, sandboxDir), pr.isolation, opts.VscodeTunnel, invocation.SanitizeTunnelName(opts.Name), lifecycleCfg, opts.Headless)
+	configData, err := buildContainerConfig(d.Layout, agentDef, agentCommand, d.Runtime.Descriptor().AgentLaunchPrefix, tmuxConf, launch.OverlayOrResolvedMountPath(workdir), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, collectOverlayMounts(workdir, auxDirs), pr.setup, pr.autoCommitInterval, collectCopyDirs(workdir, auxDirs), opts.Name, runtime.TmuxSocketFor(d.Runtime, sandboxDir), pr.isolation, opts.VscodeTunnel, invocation.SanitizeTunnelName(opts.Name), lifecycleCfg, headless)
 	if err != nil {
 		return nil, nil, "", "", fmt.Errorf("build %s: %w", store.RuntimeConfigFile, err)
 	}
@@ -371,6 +371,7 @@ func buildConfigAndEnvironment(ctx context.Context, d state.Deps, opts Options, 
 	usernsMode := resolveUsernsMode(d.Runtime, workdir, auxDirs, pr.capAdd)
 	meta := buildEnvironment(opts, pr, workdir, baselineSHA, dirEnvs, hasPrompt, networkMode, networkAllow, usernsMode, d.Runtime.Descriptor().Capabilities.HostFilesystem, string(ri.archetype), backend, model, ri.mergedMounts)
 	meta.Principal = d.Layout.Principal // record the owning principal for attribution + runtime namespace (D62)
+	meta.Headless = headless            // effective headless mode (may be a D101 downgrade of opts.Headless)
 
 	return configData, meta, tmuxConf, promptText, nil
 }
@@ -586,31 +587,50 @@ func setupAllWorkdirs(ctx context.Context, d state.Deps, opts Options, workdir *
 	return workCopyDir, baselineSHA, dirEnvs, nil
 }
 
-// resolveAgentParams resolves prompt, model, agent command, and tmux config.
-// homeDir is used to expand leading "~" in the promptFile path.
-// layout supplies both the curated interpolation map (prompt-file ${VAR}
+// resolveAgentParams resolves prompt, model, agent command, tmux config, and the
+// effective headless mode. homeDir is used to expand leading "~" in the promptFile
+// path. layout supplies both the curated interpolation map (prompt-file ${VAR}
 // expansion) and the host-env lookup ApplyModelPrefix needs for arbitrary
 // model-trigger keys.
-func resolveAgentParams(agentDef *agent.Definition, opts Options, pr *profileResult, gcfg *config.GlobalConfig, homeDir string, layout config.Layout, stdin io.Reader) (string, bool, string, string, string, error) {
+//
+// The returned headless bool is the EFFECTIVE mode, which may be a downgrade of
+// opts.Headless: Headless is a preference, and an agent whose headless mode could
+// hang on an OAuth/browser flow without an API key is run interactively instead
+// (D101). The caller persists the effective value so `run` can pick its wait
+// condition and notice the fallback.
+func resolveAgentParams(agentDef *agent.Definition, opts Options, pr *profileResult, gcfg *config.GlobalConfig, homeDir string, layout config.Layout, stdin io.Reader) (string, bool, string, string, string, bool, error) {
 	promptText, err := invocation.ReadPrompt(opts.Prompt, opts.PromptFile, homeDir, layout.Env().EnvForConfigInterpolation(), stdin)
 	if err != nil {
-		return "", false, "", "", "", err
+		return "", false, "", "", "", false, err
 	}
 	hasPrompt := promptText != ""
 	if opts.Headless && !hasPrompt {
-		return "", false, "", "", "", yoerrors.NewUsageError("headless mode requires a prompt (--prompt or --prompt-file)")
+		return "", false, "", "", "", false, yoerrors.NewUsageError("headless mode requires a prompt (--prompt or --prompt-file)")
 	}
 
 	model := invocation.ResolveModel(agentDef, opts.Model, pr.userAliases)
 	model = invocation.ApplyModelPrefix(agentDef, model, pr.env, layout)
 	if err := invocation.ValidateModel(agentDef, model, opts.Model); err != nil {
-		return "", false, "", "", "", err
+		return "", false, "", "", "", false, err
 	}
 
-	agentArgs := pr.agentArgs[opts.Agent]
-	agentCommand := invocation.BuildAgentCommand(agentDef, model, promptText, agentArgs, opts.Passthrough, opts.Headless)
+	// Headless is a preference: it's honored only when safe for this agent +
+	// auth, otherwise the agent runs interactively (D101).
+	headless := opts.Headless && headlessViable(agentDef, layout)
 
-	return promptText, hasPrompt, model, agentCommand, gcfg.TmuxConf, nil
+	agentArgs := pr.agentArgs[opts.Agent]
+	agentCommand := invocation.BuildAgentCommand(agentDef, model, promptText, agentArgs, opts.Passthrough, headless)
+
+	return promptText, hasPrompt, model, agentCommand, gcfg.TmuxConf, headless, nil
+}
+
+// headlessViable reports whether headless mode is safe to run for this agent
+// given the available auth. An agent whose headless mode could hang on a
+// browser/OAuth login that can't complete in a headless pane (D101) is viable
+// only when an API key is present; Claude (HeadlessSafeWithoutAPIKey) and the
+// utility agents (no APIKeyEnvVars → HasAnyAPIKey true) are always viable.
+func headlessViable(agentDef *agent.Definition, layout config.Layout) bool {
+	return agentDef.HeadlessSafeWithoutAPIKey || envsetup.HasAnyAPIKey(envspec.BuildEnvSpec(agentDef), layout)
 }
 
 // buildLifecycleConfig builds the lifecycle config if the archetype requires it.
