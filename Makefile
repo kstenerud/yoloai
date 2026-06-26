@@ -12,9 +12,6 @@ MYPY := $(VENV)/bin/mypy
 PYTEST := $(VENV)/bin/pytest
 PY_REQ_LOCK := internal/runtime/monitor/tests/requirements-dev.lock
 
-GOFILES := $(shell find . -name '*.go' -not -path './vendor/*')
-EMBEDFILES := $(shell find internal -type f \( -name 'Dockerfile' -o -name '*.sh' -o -name '*.py' -o -name '*.conf' -o -name '*.md' \) -not -path './vendor/*' -not -path '*/__pycache__/*' -not -path '*/tests/*')
-
 # Resolve the Docker endpoint from the active docker context when DOCKER_HOST is
 # not already set. `docker context use` retargets the docker CLI, but the Go SDK
 # and the HOME-isolating integration harness only honor DOCKER_HOST — so a stale
@@ -34,9 +31,14 @@ integration e2e base-image smoketest smoketest-full: export DOCKER_HOST = $(DOCK
 
 .PHONY: build test fmt lint vet-tagged tidy-check govulncheck hadolint actionlint check cover integration e2e integration-podman integration-containerd integration-apple integration-seatbelt integration-tart python-test python-typecheck ensure-python-venv setup-dev-python smoketest smoketest-full releasetest setcap clean
 
-build: $(BINARY)
-
-$(BINARY): $(GOFILES) $(EMBEDFILES) go.mod go.sum
+# Always invoke `go build` and let it decide whether to relink. `go build` does
+# complete, authoritative dependency tracking — crucially including //go:embed'd
+# files. A Make prerequisite list can't safely replicate that: it previously
+# globbed embed files by extension (Dockerfile/*.sh/*.py/*.conf/*.md) and
+# silently missed new embed types (e.g. a *.js plugin), serving a stale binary.
+# go's build cache makes a no-op build effectively instant, so always running it
+# costs nothing and is never stale.
+build:
 	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/yoloai
 
 test:
