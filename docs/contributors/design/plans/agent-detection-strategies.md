@@ -51,11 +51,20 @@ codex `hooks.json` via `SettingsFileName`, opencode plugin via `SeedFile.Content
 aider launch flag) accommodated every strategy without a new abstraction. This
 validates deferring it as premature (D96 refinement).
 
-**Residual verification gaps** (wiring done, live-fire not fully confirmed):
-- Gemini: config+command verified; live-fire blocked by [DF48](../findings-unresolved.md)
-  (gemini interactive onboarding).
-- Aider: config verified; no aider auth to drive a real turn; the stop-only
-  active-gap awaits a future **hook-assisted** mode.
+**Aider live-fire ✅ VERIFIED (60c42904)** against a remote Ollama
+(`qwen2.5-coder`): aider replied, and in hook-authoritative mode (no heuristics)
+status went active→idle, so `--notifications-command` fired. That fix also
+resolved a real bug — the Dockerfile touched an **empty** `~/.aider.conf.yml`
+placeholder, which aider's YAML loader rejects, so aider exited on startup
+whenever the host had no config. Fixed agent-locally: `SeedFile.Content` is now a
+*fallback* (host file wins; else the agent's default), aider declares `{}`, and
+the agent-specific placeholder left the Dockerfile (a file bind-mount auto-creates
+its target, so no placeholder is needed).
+
+**Residual** (one item): Gemini live-fire blocked by
+[DF48](../findings-unresolved.md) (gemini interactive onboarding); config+command
+verified. Aider's stop-only **active-gap** (user-typed-via-attach turns) still
+awaits a future **hook-assisted** mode, but its callback is now confirmed live.
 
 ## What
 
