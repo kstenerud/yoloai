@@ -63,25 +63,13 @@ func TestParseNewCmdPositional_Errors(t *testing.T) {
 	}
 }
 
-func TestResolveNewCmdOptions_FlagConflicts(t *testing.T) {
-	t.Run("json + attach incompatible", func(t *testing.T) {
-		cmd := NewNewCmd("test")
-		// --json is a root persistent flag in production; register one here so
-		// cliutil.JSONEnabled finds it.
-		cmd.PersistentFlags().Bool("json", false, "")
-		require.NoError(t, cmd.PersistentFlags().Set("json", "true"))
-		require.NoError(t, cmd.Flags().Set("attach", "true"))
-
-		_, _, _, err := resolveNewCmdOptions(cmd, "box", ".", nil, "")
-		assertUsageError(t, err, "--json and --attach are incompatible")
-	})
-
+func TestResolveCreateOptions_FlagConflicts(t *testing.T) {
 	t.Run("port + network-none incompatible", func(t *testing.T) {
 		cmd := NewNewCmd("test")
 		require.NoError(t, cmd.Flags().Set("network-none", "true"))
 		require.NoError(t, cmd.Flags().Set("port", "8080:80"))
 
-		_, _, _, err := resolveNewCmdOptions(cmd, "box", ".", nil, "")
+		_, err := resolveCreateOptions(cmd, "box", ".", nil, "")
 		assertUsageError(t, err, "--port is incompatible with --network-none")
 	})
 }

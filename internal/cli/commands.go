@@ -31,6 +31,7 @@ func registerCommands(root *cobra.Command, version, commit, date string) {
 	root.AddCommand(
 		// Lifecycle
 		lifecycle.NewNewCmd(version),
+		lifecycle.NewRunCmd(version),
 		lifecycle.NewCloneCmd(),
 		lifecycle.NewStartCmd(),
 		lifecycle.NewStopCmd(),

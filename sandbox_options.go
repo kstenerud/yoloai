@@ -64,6 +64,14 @@ type SandboxCreateOptions struct {
 	// PromptFile reads the prompt from a host file instead of Prompt.
 	PromptFile string
 
+	// Headless launches the agent in its own headless mode (e.g. `claude -p`):
+	// the prompt is baked into the launch command rather than injected into an
+	// interactive session, and the task ends when the agent exits (the sandbox
+	// reaches StatusDone/StatusFailed). Requires a prompt. This is what the
+	// `yoloai run` verb sets; embedders compose their own wait/cleanup over it
+	// (CreateSandbox → Start → Wait(WaitForExit) → optional Destroy). See D100.
+	Headless bool
+
 	// Network sets the network access policy. Default = full access.
 	Network NetworkMode
 
@@ -143,6 +151,7 @@ func (o SandboxCreateOptions) toInternal() orchestrator.CreateOptions {
 		Profile:              o.Profile,
 		Prompt:               o.Prompt,
 		PromptFile:           o.PromptFile,
+		Headless:             o.Headless,
 		Network:              o.Network,
 		NetworkAllow:         o.NetworkAllow,
 		Ports:                formatPorts(o.Ports),

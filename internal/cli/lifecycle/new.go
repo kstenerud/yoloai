@@ -31,6 +31,19 @@ func NewNewCmd(version string) *cobra.Command {
 		},
 	}
 
+	addCreateFlags(cmd)
+	cmd.Flags().Bool("no-start", false, "Create but don't start the container")
+	cmd.Flags().BoolP("attach", "a", false, "Auto-attach after creation")
+	cmd.MarkFlagsMutuallyExclusive("no-start", "attach")
+
+	return cmd
+}
+
+// addCreateFlags registers the sandbox-creation flags shared by `new` and `run`.
+// The two verbs differ only in their handoff flags — `new` adds --no-start /
+// --attach (interactive), `run` adds --wait / --rm (headless task) — so the
+// creation surface stays single-sourced here and can't drift between them.
+func addCreateFlags(cmd *cobra.Command) {
 	cmd.Flags().StringP("prompt", "p", "", "Prompt text for the agent")
 	cmd.Flags().StringP("prompt-file", "f", "", "File containing the prompt")
 	cmd.Flags().StringP("model", "m", "", "Model name or alias")
@@ -45,8 +58,6 @@ func NewNewCmd(version string) *cobra.Command {
 	cmd.Flags().StringSliceP("dir", "d", nil, "Auxiliary directory (repeatable, default read-only)")
 	cmd.Flags().Bool("replace", false, "Replace existing sandbox with same name")
 	cmd.Flags().Bool("abandon-unapplied", false, "Replace even when the existing sandbox has unapplied changes (implies --replace)")
-	cmd.Flags().Bool("no-start", false, "Create but don't start the container")
-	cmd.Flags().BoolP("attach", "a", false, "Auto-attach after creation")
 	cmd.Flags().Bool("allow-dirty", false, "Proceed even if the workdir has uncommitted changes (they will be visible to the agent)")
 	cmd.Flags().String("cpus", "", "CPU limit (e.g., 4, 2.5)")
 	cmd.Flags().String("memory", "", "Memory limit (e.g., 8g, 512m)")
@@ -59,9 +70,6 @@ func NewNewCmd(version string) *cobra.Command {
 
 	cmd.MarkFlagsMutuallyExclusive("network-none", "network-isolated")
 	cmd.MarkFlagsMutuallyExclusive("profile", "no-profile")
-	cmd.MarkFlagsMutuallyExclusive("no-start", "attach")
-
-	return cmd
 }
 
 func runNewCmd(cmd *cobra.Command, args []string, version string) error {
@@ -70,7 +78,13 @@ func runNewCmd(cmd *cobra.Command, args []string, version string) error {
 		return err
 	}
 
-	opts, attach, noStart, err := resolveNewCmdOptions(cmd, name, rawWorkdirArg, passthrough, profileFlag)
+	noStart, _ := cmd.Flags().GetBool("no-start")
+	attach, _ := cmd.Flags().GetBool("attach")
+	if cliutil.JSONEnabled(cmd) && attach {
+		return yoerrors.NewUsageError("--json and --attach are incompatible")
+	}
+
+	opts, err := resolveCreateOptions(cmd, name, rawWorkdirArg, passthrough, profileFlag)
 	if err != nil {
 		return err
 	}
@@ -87,12 +101,20 @@ func runNewCmd(cmd *cobra.Command, args []string, version string) error {
 		defer cliutil.SetTerminalTitle("")
 	}
 
-	backend := cliutil.ResolveBackend(cmd)
+	c, err := newCreateClient(cmd, version)
+	if err != nil {
+		return err
+	}
+	defer c.Close() //nolint:errcheck // best-effort cleanup
+	return executeNewCreate(cmd, cmd.Context(), c, opts, attach, noStart)
+}
 
-	// new.go's one quirk vs other Client-using commands: in JSON mode we
-	// want the Engine's progress output suppressed so it doesn't pollute
-	// the JSON document on stdout. WithClient hardcodes cmd.ErrOrStderr,
-	// so we construct the Client by hand here to override Output.
+// newCreateClient builds the Client used by the create-family verbs (new, run).
+// Its one quirk vs other Client-using commands: in JSON mode the Engine's
+// progress output is suppressed (io.Discard) so it doesn't pollute the JSON
+// document on stdout — WithClient hardcodes cmd.ErrOrStderr, so the create
+// verbs construct the Client by hand to override Output.
+func newCreateClient(cmd *cobra.Command, version string) (*yoloai.Client, error) {
 	mgrOutput := cmd.ErrOrStderr()
 	if cliutil.JSONEnabled(cmd) {
 		mgrOutput = io.Discard
@@ -101,17 +123,16 @@ func runNewCmd(cmd *cobra.Command, args []string, version string) error {
 	c, err := yoloai.NewClient(cmd.Context(), yoloai.ClientCreateOptions{
 		DataDir:     l.DataDir,
 		HomeDir:     l.HomeDir,
-		BackendType: yoloai.BackendType(backend),
+		BackendType: yoloai.BackendType(cliutil.ResolveBackend(cmd)),
 		Input:       cmd.InOrStdin(),
 		Output:      mgrOutput,
 		Version:     version,
 		Env:         cliutil.BackendEnv(cmd),
 	})
 	if err != nil {
-		return fmt.Errorf("connect to runtime: %w", err)
+		return nil, fmt.Errorf("connect to runtime: %w", err)
 	}
-	defer c.Close() //nolint:errcheck // best-effort cleanup
-	return executeNewCreate(cmd, cmd.Context(), c, opts, attach, noStart)
+	return c, nil
 }
 
 // parseNewCmdPositional validates and splits positional args for the new command.
@@ -144,10 +165,11 @@ func parseNewCmdPositional(cmd *cobra.Command, args []string) (name, rawWorkdirA
 	return name, rawWorkdirArg, passthrough, profileFlag, nil
 }
 
-// resolveNewCmdOptions reads all flags and builds the public yoloai.SandboxCreateOptions.
-// attach and noStart are returned separately — they gate the post-create handoff
-// (start + attach), not creation itself (Create only provisions).
-func resolveNewCmdOptions(cmd *cobra.Command, name, rawWorkdirArg string, passthrough []string, profileFlag string) (yoloai.SandboxCreateOptions, bool, bool, error) {
+// resolveCreateOptions reads the shared creation flags and builds the public
+// yoloai.SandboxCreateOptions. Shared by `new` and `run`; the verb-specific
+// handoff flags (--no-start/--attach for new, --wait/--rm for run) are read by
+// the callers, not here, since they gate the post-create handoff, not creation.
+func resolveCreateOptions(cmd *cobra.Command, name, rawWorkdirArg string, passthrough []string, profileFlag string) (yoloai.SandboxCreateOptions, error) {
 	prompt, _ := cmd.Flags().GetString("prompt")
 	promptFile, _ := cmd.Flags().GetString("prompt-file")
 	model := cliutil.ResolveModel(cmd)
@@ -167,19 +189,14 @@ func resolveNewCmdOptions(cmd *cobra.Command, name, rawWorkdirArg string, passth
 	if abandonUnapplied {
 		replace = true
 	}
-	noStart, _ := cmd.Flags().GetBool("no-start")
-	attach, _ := cmd.Flags().GetBool("attach")
 
-	if cliutil.JSONEnabled(cmd) && attach {
-		return yoloai.SandboxCreateOptions{}, false, false, yoerrors.NewUsageError("--json and --attach are incompatible")
-	}
 	if networkNone && len(rawPorts) > 0 {
-		return yoloai.SandboxCreateOptions{}, false, false, yoerrors.NewUsageError("--port is incompatible with --network-none")
+		return yoloai.SandboxCreateOptions{}, yoerrors.NewUsageError("--port is incompatible with --network-none")
 	}
 
 	ports, err := parsePortFlags(rawPorts)
 	if err != nil {
-		return yoloai.SandboxCreateOptions{}, false, false, err
+		return yoloai.SandboxCreateOptions{}, err
 	}
 
 	cpus, _ := cmd.Flags().GetString("cpus")
@@ -192,17 +209,17 @@ func resolveNewCmdOptions(cmd *cobra.Command, name, rawWorkdirArg string, passth
 
 	isolation, _, err := resolveNewIsolationOS(cmd)
 	if err != nil {
-		return yoloai.SandboxCreateOptions{}, false, false, err
+		return yoloai.SandboxCreateOptions{}, err
 	}
 
 	envMap, err := parseEnvSlice(envSlice)
 	if err != nil {
-		return yoloai.SandboxCreateOptions{}, false, false, err
+		return yoloai.SandboxCreateOptions{}, err
 	}
 
 	workdirSpec, auxDirSpecs, err := resolveNewDirSpecs(rawWorkdirArg, rawDirs)
 	if err != nil {
-		return yoloai.SandboxCreateOptions{}, false, false, err
+		return yoloai.SandboxCreateOptions{}, err
 	}
 
 	networkMode := yoloai.NetworkModeDefault
@@ -239,7 +256,7 @@ func resolveNewCmdOptions(cmd *cobra.Command, name, rawWorkdirArg string, passth
 		// warning and requires --allow-dirty to widen the scope — we never prompt
 		// to widen it, so --yes (gone from this command) can't paper over it.
 		AllowDirtyWorkdir: false,
-	}, attach, noStart, nil
+	}, nil
 }
 
 // parsePortFlags parses --port "host:container" strings into typed PortMappings
@@ -317,19 +334,7 @@ func resolveNewDirSpecs(rawWorkdirArg string, rawDirs []string) (workdirSpec yol
 // otherwise it returns the refusal. It never prompts: widening the destructive
 // scope to include a dirty workdir is opt-in via --allow-dirty alone.
 func executeNewCreate(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, opts yoloai.SandboxCreateOptions, attach, noStart bool) error {
-	sb, err := c.CreateSandbox(ctx, opts)
-
-	var dirty *yoloai.DirtyWorkdirError
-	if errors.As(err, &dirty) {
-		printDirtyWarning(cmd, dirty)
-		allowDirty, _ := cmd.Flags().GetBool("allow-dirty")
-		if !allowDirty {
-			fmt.Fprintln(cmd.ErrOrStderr(), "Re-run with --allow-dirty to proceed.") //nolint:errcheck // best-effort output
-			return dirty
-		}
-		opts.AllowDirtyWorkdir = true
-		sb, err = c.CreateSandbox(ctx, opts)
-	}
+	sb, err := createSandboxWithDirtyRetry(cmd, ctx, c, opts)
 	if err != nil {
 		return err
 	}
@@ -372,6 +377,31 @@ func executeNewCreate(cmd *cobra.Command, ctx context.Context, c *yoloai.Client,
 	return cliutil.WithTerminal(func(io yoloai.IOStreams) error {
 		return sb.Agent().Attach(ctx, io)
 	})
+}
+
+// createSandboxWithDirtyRetry provisions the sandbox, handling the
+// dirty-workdir refusal uniformly for `new` and `run`: on *DirtyWorkdirError it
+// prints the warning, then proceeds only when --allow-dirty was given (re-issuing
+// the create with AllowDirtyWorkdir set); otherwise it returns the refusal. It
+// never prompts — widening the destructive scope to include a dirty workdir is
+// opt-in via --allow-dirty alone.
+func createSandboxWithDirtyRetry(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, opts yoloai.SandboxCreateOptions) (*yoloai.Sandbox, error) {
+	sb, err := c.CreateSandbox(ctx, opts)
+	var dirty *yoloai.DirtyWorkdirError
+	if errors.As(err, &dirty) {
+		printDirtyWarning(cmd, dirty)
+		allowDirty, _ := cmd.Flags().GetBool("allow-dirty")
+		if !allowDirty {
+			fmt.Fprintln(cmd.ErrOrStderr(), "Re-run with --allow-dirty to proceed.") //nolint:errcheck // best-effort output
+			return nil, dirty
+		}
+		opts.AllowDirtyWorkdir = true
+		sb, err = c.CreateSandbox(ctx, opts)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return sb, nil
 }
 
 // loadCreatedMeta reads a just-created sandbox's metadata through the in-scope
