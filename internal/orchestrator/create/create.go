@@ -22,6 +22,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/envsetup"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/git"
+	"github.com/kstenerud/yoloai/internal/orchestrator/agentcfg"
 	"github.com/kstenerud/yoloai/internal/orchestrator/archetype"
 	"github.com/kstenerud/yoloai/internal/orchestrator/envspec"
 	"github.com/kstenerud/yoloai/internal/orchestrator/invocation"
@@ -696,6 +697,9 @@ func buildEnvironment(opts Options, pr *profileResult, workdir *DirSpec, baselin
 // prompt, logs, agent-status, runtime-config, context).
 func writeStatFiles(sandboxDir string, meta *store.Environment, agentDef *agent.Definition, agentFilesInitialized bool, hasPrompt bool, promptText string, configData []byte, perms store.IsolationPerms) error {
 	if err := store.SaveEnvironment(sandboxDir, meta); err != nil {
+		return err
+	}
+	if err := agentcfg.Save(sandboxDir, &agentcfg.AgentConfig{AgentType: meta.AgentType, Model: meta.Model}); err != nil {
 		return err
 	}
 	if err := store.SaveSandboxState(sandboxDir, &store.SandboxState{
