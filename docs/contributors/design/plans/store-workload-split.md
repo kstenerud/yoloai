@@ -74,18 +74,38 @@ cost (a one-time `system migrate` for existing sandboxes) is exactly the model D
 deliberately. M1 is the lighter, less-surprising-for-now option if we'd rather not expand
 `system migrate`'s scope in this step.
 
-## Decomposition (once the M1/M2 decision is made)
+## Public surface — the clean end-state (Move-time)
 
-1. **New `agent.json` record + orchestration ownership** — type, persistence, `create` writes it.
-   Readers still read `meta.AgentType/Model` (dual-present), so this step is behavior-preserving.
-2. **Redirect readers** to `agent.json` (restart, network, create-config, bugreport).
-3. **Slim `store.Environment`** — drop the fields; `metaVersion` → 3; add the raw-JSON v2→v3
-   relocation under the chosen migration style (M1 ladder step, or M2 `system migrate` pass +
-   balk).
-4. **Tests + BREAKING-CHANGES.md** — the on-disk sandbox-record format changes (existing
-   sandboxes need migration); note it even though `store` is not yet public.
+The split has a public dimension too: today agent/model leak onto the public read-model
+(`yoloai.Environment` view, `environment.go:27-28`). The clean/consistent surface mirrors the
+internal taxonomy — **agent identity (type/model) lives on `sb.Agent()`** (the agent noun, which
+already surfaces the agent's prompt/terminal/attach; D67/agent-layer.md "`sb.Agent()` = identity
+(type/model) + …"); the substrate view and public `store.Environment` carry **substrate facts
+only**. So at the Move, `sb.Agent()` gains `Type()`/`Model()` and the `Environment` view sheds them.
 
-Each step is its own commit; 1–2 are behavior-preserving, 3 is the semver-relevant cut.
+## Resequencing — one Move-prep pass, not mid-3b (2026-06-26)
+
+The internal slim (drop agent/model from `store.Environment`) and the public reshape (agent/model
+→ `sb.Agent()`) are **coupled** — you cannot slim the record without changing what feeds the public
+view, and the public reshape is deliberately Move-time (keep the public API stable through the
+internal refactor). Doing the slim earlier would force *throwaway* view-plumbing (the public
+`Environment` builder temporarily sourcing from `agent.json`, deleted at the Move) — the
+transitional scaffolding [[feedback-feature-branch-no-transitional-scaffolding]] says to skip.
+
+So the split lands as a single coherent **Move-prep pass**, immediately before the mechanical
+`git mv` (which stays a pure path change):
+
+- **Step 1 — DONE (`70e7b11f`):** `internal/orchestrator/agentcfg` + `create` dual-writes
+  `agent.json` (pre-stages the data; additive, behavior-preserving).
+- **Move-prep pass (deferred to the Move):** redirect internal readers
+  (`restart`/`start`/`requireAgent`; `network` via a new `Engine.LoadAgentConfig`) to `agent.json`;
+  **slim `store.Environment`** (drop the fields, `metaVersion`→3); the **v2→v3 raw-JSON relocation
+  + balk + `system migrate` per-sandbox pass** (M2); surface agent/model on **`sb.Agent()`** and
+  shed them from the `Environment` view; tests + BREAKING-CHANGES. No transitional fallbacks (the
+  branch lands whole).
+
+3b itself finishes with the remaining trivial carve-free items (`paths.go` publicity, stale
+comments); `store.Environment` becomes agent-free at Move-prep — still before the public freeze.
 
 ## Cross-references
 

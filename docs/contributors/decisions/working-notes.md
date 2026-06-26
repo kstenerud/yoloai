@@ -897,6 +897,8 @@ Only then the **mechanical move**: `runtime` first/with `store`, repoint the fen
 
 **Consequences.** First real consumer of the D87 `store.Handle`. `system migrate` grows a per-sandbox iteration (new). Existing sandboxes balk until migrated (deliberate, D61). `store.Environment` becomes an honest substrate-only record before the Move freezes it.
 
+**Refinement (2026-06-26) — the split is one Move-prep pass, public home is `sb.Agent()`.** The split has a public dimension: today agent/model leak onto the public `yoloai.Environment` view. The clean surface mirrors the internal taxonomy — agent identity (type/model) lives on **`sb.Agent()`** (the agent noun, per D67/agent-layer.md), and the substrate view + public `store.Environment` carry substrate facts only. The internal slim and the public reshape (view → `sb.Agent()`) are **coupled** (can't slim the record without changing what feeds the public view), and the public reshape is deliberately Move-time. So build-order steps 2–4 + the public reshape are **resequenced into a single coherent Move-prep pass** immediately before the mechanical `git mv` — doing them mid-3b would force throwaway view-plumbing ([[feedback-feature-branch-no-transitional-scaffolding]]). Step 1 (`70e7b11f`, dual-write) pre-stages the data; 3b otherwise finishes with the trivial carve-free items. `store.Environment` still becomes agent-free before the public freeze (at Move-prep). See [plans/store-workload-split.md](../design/plans/store-workload-split.md) §Resequencing.
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.
