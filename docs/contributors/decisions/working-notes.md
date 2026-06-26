@@ -955,6 +955,18 @@ Only then the **mechanical move**: `runtime` first/with `store`, repoint the fen
 
 **Accepted residual (DF50):** "credential present" ≠ "valid" — an expired token still presents a file/var, so an agent that re-auths on expiry (Gemini/Codex) could still hang headless. The durable fix is a headless launch with **no answerable interactive TTY** (a login attempt fails fast instead of stalling), tracked as **DF50** tied to the session-carve's no-TTY mode. Until then the auth-presence gate covers the common no-auth case and `--tty` is the manual escape hatch.
 
+## D102 — split the inside-process config (agent, model) out of the substrate record (Q104, M2)
+
+**Date:** 2026-06-26. **Status:** Active (implemented on `substrate-move`). Resolves **Q104**; chooses migration style **M2** from [store-workload-split.md](../design/plans/store-workload-split.md).
+
+**The decision.** `store.Environment` (`environment.json`) is the sandbox's persisted **substrate record** and is being promoted to a public layer. It carried `AgentType` + `Model` — *configuration of a process that runs inside the sandbox*, categorically distinct from the record's constitutive/policy/provenance facts. Promoting a record that also describes a tenant process's config would freeze that conflation into public semver. So agent/model move to a sibling per-sandbox doc **`agent.json`** (`internal/orchestrator/agentcfg`), owned by orchestration; `store.Environment` advances to **schema v3** and sheds the fields.
+
+**Migration (M2 — balk + explicit `system migrate`, per [D61](#)/[[feedback-migration-versioning-philosophy]]).** `LoadEnvironment` does not migrate on read: it reads the raw `version` BEFORE unmarshalling (the slimmed struct can't see the dropped keys) and returns `ErrNeedsMigration` for any record below v3 — no write-on-read. The relocation is an explicit per-sandbox pass, `orchestrator.MigrateAgentConfigs`, wired into `System.MigrateDataDir` after `MigrateLibrary`. It is **idempotent and crash-safe**: `agent.json` (the only irreplaceable copy) is written *before* `environment.json` is rewritten, so an interrupted run loses nothing and a re-run completes. The **realm schema bumps v2 → v3** (a no-op `migrateLibraryStep`, since `internal/config` can't import store/agentcfg) purely so the existing startup gate (`RealmStatus`) prompts `yoloai system migrate` up front rather than letting the user first hit a per-sandbox balk.
+
+**Public surface (refinement on the plan).** The substrate **view** `yoloai.Environment` sheds agent/model. They surface instead on the **aggregated read-model** `SandboxInfo` as **top-level fields** (`info.AgentType`/`info.Model`, joining `AgentStatus` — which is already top-level there, not inside `Environment`), populated from `agent.json` during inspection, AND per-handle via **`sb.Agent().Type()/Model()`**. This keeps `list` a single batched inspection (no per-row handle read) while the taxonomy holds: `Environment` = substrate facts; the aggregated Info surfaces agent identity because that is its job. Recorded in [store-workload-split.md](../design/plans/store-workload-split.md) §"C2 build — two refinements". Mid-branch public-API inconsistency is acceptable here ([[feedback-inconsistent-public-api-ok-midbranch]]); the change lands straight to final shape, no shim.
+
+**Accepted residual:** `prune` classifies a load error as corrupt, so a pre-v3 record with no work data could be quarantined by `prune` before migration — but the startup gate migrates everything to v3 before `prune` runs, and data-bearing dirs are detected filesystem-side (no meta needed) and refused, so no user work is at risk.
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.

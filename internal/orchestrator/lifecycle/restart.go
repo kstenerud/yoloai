@@ -16,6 +16,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/envsetup"
 	"github.com/kstenerud/yoloai/internal/fileutil"
+	"github.com/kstenerud/yoloai/internal/orchestrator/agentcfg"
 	"github.com/kstenerud/yoloai/internal/orchestrator/envspec"
 	"github.com/kstenerud/yoloai/internal/orchestrator/invocation"
 	"github.com/kstenerud/yoloai/internal/orchestrator/launch"
@@ -115,9 +116,9 @@ func mergeLaunchEnv(layout config.Layout, meta *store.Environment, extraEnv map[
 // surfaced through n as Notices rather than a raw writer, since the restart
 // entry points (Start/Reset) return their output as a *Result's Notices (F8).
 func recreateContainer(ctx context.Context, d state.Deps, name string, meta *store.Environment, resume bool, extraEnv map[string]string, n *notices) error {
-	agentDef := agent.GetAgent(meta.AgentType)
-	if agentDef == nil {
-		return yoerrors.NewConfigError("unknown agent %q in sandbox state — this sandbox was created with an agent that's not registered in the current yoloai installation; destroy and recreate the sandbox with a registered agent", meta.AgentType)
+	agentDef, acfg, err := requireAgent(d, name)
+	if err != nil {
+		return err
 	}
 
 	sandboxDir := d.Layout.SandboxDir(name)
@@ -190,7 +191,7 @@ func recreateContainer(ctx context.Context, d state.Deps, name string, meta *sto
 		WorkCopyDir:  store.WorkDir(sandboxDir, meta.Workdir().HostPath),
 		AuxDirs:      auxDirs,
 		Agent:        agentDef,
-		Model:        meta.Model,
+		Model:        acfg.Model,
 		Profile:      meta.Profile,
 		ImageRef:     meta.ImageRef,
 		Env:          envVars,
@@ -255,15 +256,20 @@ func tmuxShellPrefix(socket string) string {
 	return "_tmux() { tmux \"$@\"; }"
 }
 
-// requireAgent resolves the agent definition named in a sandbox's stored
-// metadata, returning a typed config error when that agent is no longer
-// registered in the current yoloai installation.
-func requireAgent(meta *store.Environment) (*agent.Definition, error) {
-	agentDef := agent.GetAgent(meta.AgentType)
-	if agentDef == nil {
-		return nil, yoerrors.NewConfigError("unknown agent %q in sandbox state — this sandbox was created with an agent that's not registered in the current yoloai installation; destroy and recreate the sandbox with a registered agent", meta.AgentType)
+// requireAgent resolves the agent definition for a sandbox from its agent.json
+// (the inside-process config Q104 split out of environment.json), returning the
+// loaded config too (callers need its model) and a typed config error when that
+// agent is no longer registered in the current yoloai installation.
+func requireAgent(d state.Deps, name string) (*agent.Definition, *agentcfg.AgentConfig, error) {
+	acfg, err := agentcfg.Load(d.Layout.SandboxDir(name))
+	if err != nil {
+		return nil, nil, err
 	}
-	return agentDef, nil
+	agentDef := agent.GetAgent(acfg.AgentType)
+	if agentDef == nil {
+		return nil, nil, yoerrors.NewConfigError("unknown agent %q in sandbox state — this sandbox was created with an agent that's not registered in the current yoloai installation; destroy and recreate the sandbox with a registered agent", acfg.AgentType)
+	}
+	return agentDef, acfg, nil
 }
 
 // readResumeText reads a sandbox's original prompt.txt and prepends the resume
@@ -300,13 +306,13 @@ func relaunchAgentWithResume(ctx context.Context, d state.Deps, name string, met
 	if err != nil {
 		return err
 	}
-	agentDef, err := requireAgent(meta)
+	agentDef, acfg, err := requireAgent(d, name)
 	if err != nil {
 		return err
 	}
 
-	agentArgs := resolveAgentArgs(d.Layout, meta.AgentType, meta.Profile)
-	interactiveCmd := invocation.BuildAgentCommand(agentDef, meta.Model, "", agentArgs, cfg.Passthrough, false)
+	agentArgs := resolveAgentArgs(d.Layout, acfg.AgentType, meta.Profile)
+	interactiveCmd := invocation.BuildAgentCommand(agentDef, acfg.Model, "", agentArgs, cfg.Passthrough, false)
 	socket := runtime.TmuxSocketFor(d.Runtime, sandboxDir)
 	if _, err := status.ExecInContainer(ctx, d.Runtime, name, meta, d.Layout.HostUID,
 		tmuxCmd(socket, "respawn-pane", "-t", "main", "-k", interactiveCmd),
@@ -328,13 +334,13 @@ func relaunchAgentWithCustomPrompt(ctx context.Context, d state.Deps, name strin
 	if err != nil {
 		return err
 	}
-	agentDef, err := requireAgent(meta)
+	agentDef, acfg, err := requireAgent(d, name)
 	if err != nil {
 		return err
 	}
 
-	agentArgs := resolveAgentArgs(d.Layout, meta.AgentType, meta.Profile)
-	interactiveCmd := invocation.BuildAgentCommand(agentDef, meta.Model, "", agentArgs, cfg.Passthrough, false)
+	agentArgs := resolveAgentArgs(d.Layout, acfg.AgentType, meta.Profile)
+	interactiveCmd := invocation.BuildAgentCommand(agentDef, acfg.Model, "", agentArgs, cfg.Passthrough, false)
 	// agent_launch_prefix is the single source of truth for the backend launch
 	// wrap (W1a). Post-W1b the field is present on every sandbox (the v1->v2
 	// migration backfills it; empty for container backends, a no-op prepend), so
@@ -414,13 +420,13 @@ func prepareRelaunchFiles(d state.Deps, name string, meta *store.Environment, pr
 	if err := fileutil.WriteFile(filepath.Join(sandboxDir, "resume-prompt.txt"), []byte(promptText), 0600); err != nil {
 		return fmt.Errorf("write resume-prompt.txt: %w", err)
 	}
-	agentDef, err := requireAgent(meta)
+	agentDef, acfg, err := requireAgent(d, name)
 	if err != nil {
 		return err
 	}
-	agentArgs := resolveAgentArgs(d.Layout, meta.AgentType, meta.Profile)
+	agentArgs := resolveAgentArgs(d.Layout, acfg.AgentType, meta.Profile)
 	return patchRuntimeConfig(sandboxDir, func(cfg *runtimeconfig.ContainerConfig) {
-		cfg.AgentCommand = invocation.BuildAgentCommand(agentDef, meta.Model, "", agentArgs, cfg.Passthrough, false)
+		cfg.AgentCommand = invocation.BuildAgentCommand(agentDef, acfg.Model, "", agentArgs, cfg.Passthrough, false)
 	})
 }
 

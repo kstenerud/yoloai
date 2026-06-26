@@ -15,11 +15,11 @@ func makeInfo(name string, status yoloai.Status, agent, profile, changes string)
 	return &yoloai.SandboxInfo{
 		Environment: &yoloai.Environment{
 			Name:      name,
-			AgentType: agentpkg.AgentType(agent),
 			Profile:   profile,
 			CreatedAt: time.Now(),
 			Dirs:      []yoloai.DirInfo{{HostPath: "/tmp/" + name}},
 		},
+		AgentType:      agentpkg.AgentType(agent),
 		Status:         status,
 		Changes:        yoloai.ChangeState(changes),
 		DiskUsageBytes: 1024 * 1024,

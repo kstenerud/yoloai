@@ -4,6 +4,40 @@ Tracks breaking changes made during beta. Each entry should be included in relea
 
 ## v0.5.0
 
+### Agent type and model move off the substrate record onto `agent.json` / `SandboxInfo` / `Sandbox.Agent()`
+
+The agent type and model are no longer fields of the substrate record. They are
+**inside-process config** — configuration of a process that runs *inside* the
+sandbox — not facts about the sandbox container itself, so they are split out
+(Q104) ahead of promoting the store to a public layer.
+
+- **On disk:** `environment.json` no longer carries `agent` / `model`. A new
+  sibling file **`agent.json`** (`{"version":1,"agent":...,"model":...}`) holds
+  them. The substrate record advances to schema **v3**.
+- **Public read-model:** `yoloai.Environment` (carried on
+  `SandboxInfo.Environment`) loses `AgentType` / `Model`. They move **top-level
+  onto `yoloai.SandboxInfo`** (`info.AgentType`, `info.Model`), next to
+  `AgentStatus`, and are also reachable per-handle via
+  **`sb.Agent().Type()` / `sb.Agent().Model()`**.
+
+**Why:** promoting a substrate record that also describes a tenant process's
+configuration would freeze that conflation into the public API. The substrate
+record should carry constitutive/policy/provenance facts only; "what runs
+inside" belongs to the orchestration layer.
+
+**What breaks:** Go embedders reading `env.AgentType` / `env.Model` off the
+`Environment` view, or parsing `agent` / `model` out of the `Environment` JSON;
+anything reading `agent` / `model` directly from `environment.json` on disk.
+
+**Migration:** `info.Environment.AgentType` → `info.AgentType` (or
+`sb.Agent().Type()`); likewise for `Model`. Existing sandboxes need a one-time
+**`yoloai system migrate`** — the data dir schema bump (realm v2 → v3) makes the
+startup gate prompt for it. The migration relocates each sandbox's `agent` /
+`model` into `agent.json` and stamps `environment.json` to v3; it is idempotent
+and writes `agent.json` before rewriting `environment.json`, so an interrupted
+run loses nothing. Until migrated, a sandbox's `environment.json` balks on load
+with a "needs migration" error rather than being rewritten on read.
+
 ### `Environment` exposes one ordered `Dirs` list instead of `Workdir` + `Directories`
 
 The public read-model `yoloai.Environment` (carried on `SandboxInfo.Environment`)

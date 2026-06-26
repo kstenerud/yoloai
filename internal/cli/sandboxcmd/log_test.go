@@ -24,7 +24,6 @@ func setupLogTest(t *testing.T, name string) string {
 
 	meta := &store.Environment{
 		Name:      name,
-		AgentType: "claude",
 		CreatedAt: time.Now(),
 		Dirs:      []store.DirEnvironment{{HostPath: "/tmp/test", Mode: "copy"}},
 	}

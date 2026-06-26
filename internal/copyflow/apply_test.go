@@ -231,8 +231,7 @@ func TestApplyPatch_DeleteFile(t *testing.T) {
 	sha := gitHEAD(t, workDir)
 
 	meta := &store.Environment{
-		Name:      name,
-		AgentType: "test",
+		Name: name,
 		Dirs: []store.DirEnvironment{{
 			HostPath:    hostPath,
 			MountPath:   hostPath,
@@ -1452,8 +1451,7 @@ func TestApplySeries_NonGitTargetRefuses(t *testing.T) {
 	require.NoError(t, os.MkdirAll(hostPath, 0750)) // exists but not a git repo
 
 	meta := &store.Environment{
-		Name:      name,
-		AgentType: "test",
+		Name: name,
 		Dirs: []store.DirEnvironment{{
 			HostPath:    hostPath,
 			MountPath:   hostPath,

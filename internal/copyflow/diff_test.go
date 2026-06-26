@@ -39,7 +39,6 @@ func createCopySandbox(t *testing.T, tmpDir, name, hostPath string) string {
 	// Write environment.json
 	meta := &store.Environment{
 		Name:      name,
-		AgentType: "test",
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
 			HostPath:    hostPath,
@@ -61,7 +60,6 @@ func createRWSandbox(t *testing.T, tmpDir, name, hostPath string) {
 
 	meta := &store.Environment{
 		Name:      name,
-		AgentType: "test",
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
 			HostPath:  hostPath,
@@ -395,7 +393,6 @@ func TestLoadDiffContext_NoBaseline(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      "no-baseline",
-		AgentType: "test",
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
 			HostPath: "/tmp/test",
@@ -423,7 +420,6 @@ func TestLoadDiffContext_CopyMode(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
-		AgentType: "test",
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
 			HostPath:    hostPath,
@@ -451,7 +447,6 @@ func TestLoadDiffContext_OverlayMode(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
-		AgentType: "test",
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
 			HostPath:    "/tmp/project",
@@ -479,7 +474,6 @@ func TestLoadDiffContext_OverlayMode_FallbackToHostPath(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
-		AgentType: "test",
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
 			HostPath: "/tmp/project",
@@ -505,7 +499,6 @@ func TestLoadDiffContext_RWMode(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
-		AgentType: "test",
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
 			HostPath: "/tmp/project",
@@ -531,7 +524,6 @@ func TestLoadDiffContext_UnsupportedMode(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
-		AgentType: "test",
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
 			HostPath: "/tmp/project",
@@ -556,7 +548,6 @@ func TestLoadDiffContext_DirSelector(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
-		AgentType: "test",
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{
 			{HostPath: "/tmp/first", Mode: "copy", BaselineSHA: "sha-first"},
@@ -592,7 +583,6 @@ func TestLoadAllDiffContexts_SingleCopyWorkdir(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
-		AgentType: "test",
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
 			HostPath:    "/tmp/project",
@@ -627,7 +617,6 @@ func TestLoadAllDiffContexts_WorkdirOnly_IgnoresAuxEntries(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
-		AgentType: "test",
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
 			HostPath:    "/tmp/project",
@@ -661,7 +650,6 @@ func TestLoadAllDiffContexts_NoAuxDirs(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
-		AgentType: "test",
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
 			HostPath:    "/tmp/project",
@@ -724,7 +712,6 @@ func TestLoadAllDiffContexts_OverlayWorkdirWithMountPath(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
-		AgentType: "test",
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
 			HostPath:    "/host/project",

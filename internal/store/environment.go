@@ -1,5 +1,5 @@
-// ABOUTME: Sandbox environment metadata (environment.json) load/save.
-// ABOUTME: Tracks agent, model, directories, and creation-time settings.
+// ABOUTME: Sandbox environment metadata (environment.json) load/save — the
+// ABOUTME: substrate record: directories, posture, provenance, creation settings.
 package store
 
 import (
@@ -19,7 +19,13 @@ import (
 //
 // v2 collapsed the singular Workdir field + separate Directories slice into one
 // ordered Dirs list (element 0 is the workdir). See migrate().
-const metaVersion = 2
+// v3 removed the inside-process config (agent, model) from the substrate record;
+// it now lives in the sibling agent.json (Q104). Because that relocation is
+// cross-file, it is NOT a step in the in-struct migrate() ladder — it is an
+// explicit per-sandbox pass run by `yoloai system migrate` (see
+// orchestrator.MigrateAgentConfigs). LoadEnvironment balks on any record below
+// v3 rather than migrating on read (D61: no write-on-read).
+const metaVersion = 3
 
 // Environment holds sandbox configuration captured at creation time.
 type Environment struct {
@@ -32,11 +38,6 @@ type Environment struct {
 	Profile       string                  `json:"profile,omitempty"`
 	ImageRef      string                  `json:"image_ref,omitempty"`
 
-	// AgentType is the agent name (e.g. "claude"). Held as a plain string so the
-	// substrate store does not import the agent package; the agent layer parses
-	// it into agent.AgentType when it needs the typed value.
-	AgentType string `json:"agent"`
-	Model     string `json:"model,omitempty"`
 	// Headless records whether the agent runs in its own headless mode (prompt
 	// baked into the launch command, pane-death = done) versus the interactive
 	// TTY flow. This is the EFFECTIVE mode chosen at create: `yoloai run` requests
@@ -194,10 +195,21 @@ func (e *Environment) SchemaVersion() int {
 }
 
 // MigrateRecord implements store.Migrator. Advances the record from its current
-// Version to metaVersion by running the typed migration ladder.
-// TODO(persist): convert the typed migrate ladder to append-only raw-JSON steps per D87 §3.
+// Version to metaVersion by running the typed migration ladder. The cross-file
+// v2->v3 relocation (agent/model -> agent.json) is NOT done here — it is an
+// explicit per-sandbox pass (orchestrator.MigrateAgentConfigs); this ladder only
+// covers the in-struct steps (v0->v1 backend/image backfill, v1->v2 dirs collapse).
 func (e *Environment) MigrateRecord() error {
 	return migrate(e)
+}
+
+// MigrateEnvironment runs the in-struct migration ladder on a record loaded from
+// raw bytes. Exported for the explicit `yoloai system migrate` per-sandbox pass,
+// which reads a pre-v3 record's raw JSON, relocates its agent/model into
+// agent.json, then calls this to bring the remaining substrate fields current
+// before re-saving at metaVersion.
+func MigrateEnvironment(meta *Environment) error {
+	return migrate(meta)
 }
 
 // SaveEnvironment writes environment.json to the given directory path.
@@ -237,7 +249,13 @@ func ContainerUser(meta *Environment, hostUID int) string {
 	return "yoloai"
 }
 
-// LoadEnvironment reads environment.json from the given directory path.
+// LoadEnvironment reads environment.json from the given directory path. It does
+// not migrate on read: a record below metaVersion balks with ErrNeedsMigration
+// (the cross-file v2->v3 relocation must run via `yoloai system migrate`, D61's
+// no-write-on-read rule), and a record above it errors as too-new. The version
+// is read from the raw bytes BEFORE unmarshalling into the slimmed struct —
+// otherwise the dropped agent/model keys would vanish silently before the
+// migration could relocate them.
 func LoadEnvironment(dir string) (*Environment, error) {
 	path := filepath.Join(dir, EnvironmentFile)
 
@@ -246,13 +264,24 @@ func LoadEnvironment(dir string) (*Environment, error) {
 		return nil, fmt.Errorf("read %s: %w", EnvironmentFile, err)
 	}
 
+	var probe struct {
+		Version int `json:"version"`
+	}
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", EnvironmentFile, err)
+	}
+	switch {
+	case probe.Version > metaVersion:
+		return nil, fmt.Errorf("sandbox was created with a newer version of yoloai "+
+			"(meta version %d, this binary knows %d); upgrade yoloai to use it",
+			probe.Version, metaVersion)
+	case probe.Version < metaVersion:
+		return nil, fmt.Errorf("%s is at schema v%d: %w", EnvironmentFile, probe.Version, ErrNeedsMigration)
+	}
+
 	var meta Environment
 	if err := json.Unmarshal(data, &meta); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", EnvironmentFile, err)
-	}
-
-	if err := migrate(&meta); err != nil {
-		return nil, err
 	}
 
 	return &meta, nil

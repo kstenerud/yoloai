@@ -364,7 +364,12 @@ func executeNewCreate(cmd *cobra.Command, ctx context.Context, c *yoloai.Client,
 	// library's). Goes to stderr — the stream the Engine's creation output
 	// used — keeping human output cohesive there (stdout is reserved for --json).
 	if meta, loadErr := loadCreatedMeta(c, sb.Name()); loadErr == nil {
-		printCreateSummary(cmd.ErrOrStderr(), meta, opts.Prompt != "", opts.VscodeTunnel)
+		// Agent type/model are inside-process config, no longer on the substrate
+		// Environment view — read them from the agent noun (Q104). Best-effort:
+		// a read failure just blanks those summary lines.
+		agentType, _ := sb.Agent().Type()
+		model, _ := sb.Agent().Model()
+		printCreateSummary(cmd.ErrOrStderr(), meta, agentType, model, opts.Prompt != "", opts.VscodeTunnel)
 	}
 
 	// First successful create runs EnsureSetup; show the one-time onboarding
@@ -418,11 +423,11 @@ func loadCreatedMeta(c *yoloai.Client, name string) (*yoloai.Environment, error)
 // printCreateSummary renders the post-create summary + next-step hints from the
 // created sandbox's metadata. The library returns the sandbox; the CLI owns this
 // presentation (F8).
-func printCreateSummary(out io.Writer, meta *yoloai.Environment, hasPrompt, vscodeTunnel bool) {
-	fmt.Fprintf(out, "Sandbox %s created\n", meta.Name)  //nolint:errcheck // best-effort output
-	fmt.Fprintf(out, "  Agent:    %s\n", meta.AgentType) //nolint:errcheck // best-effort output
-	if meta.Model != "" {
-		fmt.Fprintf(out, "  Model:    %s\n", meta.Model) //nolint:errcheck // best-effort output
+func printCreateSummary(out io.Writer, meta *yoloai.Environment, agentType yoloai.AgentType, model string, hasPrompt, vscodeTunnel bool) {
+	fmt.Fprintf(out, "Sandbox %s created\n", meta.Name) //nolint:errcheck // best-effort output
+	fmt.Fprintf(out, "  Agent:    %s\n", agentType)     //nolint:errcheck // best-effort output
+	if model != "" {
+		fmt.Fprintf(out, "  Model:    %s\n", model) //nolint:errcheck // best-effort output
 	}
 	if meta.Profile != "" {
 		fmt.Fprintf(out, "  Profile:  %s\n", meta.Profile) //nolint:errcheck // best-effort output

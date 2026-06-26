@@ -29,8 +29,7 @@ import (
 // storeMeta writes a minimal valid environment.json into sandboxDir for name.
 func storeMeta(sandboxDir, name string) error {
 	return store.SaveEnvironment(sandboxDir, &store.Environment{
-		Name:      name,
-		AgentType: "test",
+		Name: name,
 	})
 }
 

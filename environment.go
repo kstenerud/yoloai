@@ -16,16 +16,17 @@ import (
 // configuration an embedder would render or decide from. Internal mechanism
 // fields (on-disk schema version, image ref, prompt/debug/userns/vscode flags)
 // are deliberately omitted — they describe *how* containment is achieved, not
-// the sandbox a consumer reasons about. Typed fields reuse the public aliases
-// (BackendType, AgentType, IsolationMode, DirMode, NetworkMode).
+// the sandbox a consumer reasons about. The inside-process config (agent type,
+// model) is likewise not here — it is not a substrate fact; it rides on
+// SandboxInfo (the aggregated read-model) and Sandbox.Agent() instead (Q104).
+// Typed fields reuse the public aliases
+// (BackendType, IsolationMode, DirMode, NetworkMode).
 type Environment struct {
 	// Identity & posture.
 	Name        string      `json:"name"`
 	CreatedAt   time.Time   `json:"created_at"`
 	BackendType BackendType `json:"backend"`
 	Profile     string      `json:"profile,omitempty"`
-	AgentType   AgentType   `json:"agent"`
-	Model       string      `json:"model,omitempty"`
 	// Headless is the effective launch mode: true when the agent runs in its own
 	// headless mode (prompt baked in, pane-death = done), false for the
 	// interactive TTY flow. `yoloai run` requests headless but it may be
@@ -115,8 +116,6 @@ func environmentFromStore(m *store.Environment) *Environment {
 		CreatedAt:          m.CreatedAt,
 		BackendType:        m.BackendType,
 		Profile:            m.Profile,
-		AgentType:          AgentType(m.AgentType),
-		Model:              m.Model,
 		Headless:           m.Headless,
 		Isolation:          m.Isolation,
 		HostFilesystem:     m.HostFilesystem,
@@ -162,6 +161,8 @@ func sandboxInfoFromStatus(si *orchestrator.Info) *SandboxInfo {
 	}
 	return &SandboxInfo{
 		Environment:    environmentFromStore(si.Environment),
+		AgentType:      AgentType(si.AgentType),
+		Model:          si.Model,
 		Status:         si.Status,
 		AgentStatus:    si.AgentStatus,
 		Changes:        ChangeState(si.HasChanges),

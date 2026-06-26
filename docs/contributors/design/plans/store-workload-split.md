@@ -106,6 +106,10 @@ pure path change with Q104 already done.
 
 ## Build breakdown (C1 done; C2 = the cutover; C3 = migration test + docs)
 
+**Status: C1 + C2 + C3 all DONE (2026-06-26, `substrate-move`).** The cutover landed
+straight to final shape; `make check` + tagged vet green. Settled as **D102**.
+
+
 Surface confirmed by audit (2026-06-26): `agentcfg.Load` is soft on a missing file (zero-value);
 `create` dual-writes `agent.json` (`create.go:736`); per-sandbox `environment.json` migrates
 **transparently on load** via the typed `migrate()` ladder (`store/environment.go`), `metaVersion=2`;
@@ -117,6 +121,33 @@ and does NOT iterate sandboxes for env-record version bumps. Readers of `meta.Ag
 
 - **C1 — DONE (additive groundwork, committed):** `Engine.LoadAgentConfig` + `sb.Agent().Type()/Model()`
   read `agent.json`. No behavior change; public `Environment` still carries agent/model (coexist).
+
+### C2 build — two refinements settled during implementation (2026-06-26)
+
+1. **Public read-model: agent/model ride on `SandboxInfo` top-level, not only `sb.Agent()`.**
+   The plan said "consumers move to `sb.Agent().Type()/Model()`". Refined: the
+   `Environment` *substrate view* sheds them (correct), but the *aggregated*
+   read-model `SandboxInfo`/`status.Info` keeps them as **top-level fields**
+   (`info.AgentType`, `info.Model`) — joining `AgentStatus`, which is already
+   top-level on `SandboxInfo`, not buried in `Environment`. Rationale: `list`
+   stays a single batched inspection (no per-row `sb.Agent()` handle read), and
+   the taxonomy holds — `Environment` = substrate facts; the aggregated Info
+   surfaces agent identity because that is its job. `sb.Agent().Type()/Model()`
+   remains the targeted per-handle accessor. Populated from `agent.json` in
+   `InspectSandbox`/`InspectSandboxWithBackend` (soft: missing → "").
+
+2. **Realm schema bumped v2 → v3 to drive the existing D61 startup gate.**
+   Rather than relying solely on the per-sandbox load-balk to surface "needs
+   migration", `LibrarySchemaVersion` bumps to 3 with a **no-op**
+   `migrateLibraryStep` case (internal/config cannot import store/agentcfg, so
+   it does no per-sandbox work). The real per-sandbox relocation runs in
+   `System.MigrateDataDir` **after** `MigrateLibrary`, as
+   `orchestrator.MigrateAgentConfigs`. The realm bump means `RealmStatus`
+   reports the data dir stale → the startup gate prompts `yoloai system migrate`
+   up front, instead of the user first hitting a per-sandbox balk. The load-time
+   balk (`LoadEnvironment` returns `ErrNeedsMigration` for version<3) stays as
+   the data-safety net (it never rewrites-on-read, never drops the agent/model
+   keys before relocation).
 
 - **C2 — the cutover (one coherent commit; compiles + `make check` green; old sandboxes balk till migrate):**
   - **Slim** `store.Environment`: drop `AgentType`/`Model` fields; `metaVersion`→**3**.

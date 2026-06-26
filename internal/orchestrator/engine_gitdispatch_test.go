@@ -123,7 +123,6 @@ func seedCopySandbox(t *testing.T, layout config.Layout, name string) {
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "work"), 0750))
 	meta := &store.Environment{
 		Name:        name,
-		AgentType:   "claude",
 		BackendType: "gitdispatchmock",
 		CreatedAt:   time.Now(),
 		Dirs: []store.DirEnvironment{{

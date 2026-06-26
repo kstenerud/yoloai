@@ -175,8 +175,8 @@ func writeBugReportSandboxDetail(ctx context.Context, w io.Writer, c *yoloai.Cli
 		meta := info.Environment
 		fmt.Fprintf(w, "- **Name:** %s\n", meta.Name)           //nolint:errcheck
 		fmt.Fprintf(w, "- **Status:** %s\n", info.Status)       //nolint:errcheck
-		fmt.Fprintf(w, "- **Agent:** %s\n", meta.AgentType)     //nolint:errcheck
-		fmt.Fprintf(w, "- **Model:** %s\n", meta.Model)         //nolint:errcheck
+		fmt.Fprintf(w, "- **Agent:** %s\n", info.AgentType)     //nolint:errcheck
+		fmt.Fprintf(w, "- **Model:** %s\n", info.Model)         //nolint:errcheck
 		fmt.Fprintf(w, "- **Backend:** %s\n", meta.BackendType) //nolint:errcheck
 		fmt.Fprintln(w)                                         //nolint:errcheck
 	}

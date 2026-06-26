@@ -21,6 +21,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/copyflow"
 	"github.com/kstenerud/yoloai/internal/git"
 	"github.com/kstenerud/yoloai/internal/orchestrator"
+	"github.com/kstenerud/yoloai/internal/orchestrator/agentcfg"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/runtime/tart"
 	"github.com/kstenerud/yoloai/internal/store"
@@ -96,7 +97,9 @@ func TestIntegrationTart_FullLifecycle(t *testing.T) {
 	meta, err := store.LoadEnvironment(sandboxDir)
 	require.NoError(t, err)
 	assert.Equal(t, sandboxName, meta.Name)
-	assert.Equal(t, string(agent.AgentTest), meta.AgentType)
+	acfg, err := agentcfg.Load(sandboxDir)
+	require.NoError(t, err)
+	assert.Equal(t, string(agent.AgentTest), acfg.AgentType)
 	assert.Equal(t, runtime.BackendTart, meta.BackendType)
 	assert.Equal(t, store.DirModeCopy, meta.Workdir().Mode)
 	assert.NotEmpty(t, meta.Workdir().BaselineSHA, "baseline SHA should be set after VM work dir setup")

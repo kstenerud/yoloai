@@ -164,7 +164,6 @@ func vscodeClient(t *testing.T, meta *store.Environment) *Client {
 func TestVscodeAttach_Supported(t *testing.T) {
 	c := vscodeClient(t, &store.Environment{
 		Name:        "box",
-		AgentType:   "test",
 		BackendType: BackendDocker,
 		Dirs:        []store.DirEnvironment{{HostPath: "/proj", MountPath: "/proj", Mode: store.DirModeCopy}},
 	})
@@ -183,7 +182,6 @@ func TestVscodeAttach_Supported(t *testing.T) {
 func TestVscodeAttach_Unsupported(t *testing.T) {
 	c := vscodeClient(t, &store.Environment{
 		Name:        "box",
-		AgentType:   "test",
 		BackendType: BackendSeatbelt,
 		Dirs:        []store.DirEnvironment{{HostPath: "/proj", MountPath: "/proj", Mode: store.DirModeCopy}},
 	})
@@ -258,7 +256,6 @@ func TestSandbox_DestroyedHandle_RepeatDestroyIsBenignSuccess(t *testing.T) {
 func TestSandbox_LiveHandle_PassesGuard(t *testing.T) {
 	c := vscodeClient(t, &store.Environment{
 		Name:        "box",
-		AgentType:   "test",
 		BackendType: BackendDocker,
 		Dirs:        []store.DirEnvironment{{HostPath: "/proj", MountPath: "/proj", Mode: store.DirModeCopy}},
 	})

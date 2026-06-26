@@ -269,17 +269,17 @@ func prepareSandboxState(ctx context.Context, d state.Deps, opts Options) (*stat
 	}
 
 	// Phase 3: Build config, meta, and state files.
-	configData, meta, tmuxConf, promptText, err := buildConfigAndEnvironment(ctx, d, opts, ri, agentDef, workdir, auxDirs, gcfg, dirEnvs, baselineSHA, sandboxDir)
+	configData, meta, model, tmuxConf, promptText, err := buildConfigAndEnvironment(ctx, d, opts, ri, agentDef, workdir, auxDirs, gcfg, dirEnvs, baselineSHA, sandboxDir)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := writeStatFiles(sandboxDir, meta, agentDef, agentFilesInitialized, meta.HasPrompt, promptText, configData, perms); err != nil {
+	if err := writeStatFiles(sandboxDir, meta, agentDef, opts.Agent, model, agentFilesInitialized, meta.HasPrompt, promptText, configData, perms); err != nil {
 		return nil, err
 	}
 
 	success = true
-	return buildSandboxStateResult(opts, sandboxDir, workdir, workCopyDir, auxDirs, agentDef, meta, ri, configData, tmuxConf, d.Layout, d.Layout.HomeDir), nil
+	return buildSandboxStateResult(opts, sandboxDir, workdir, workCopyDir, auxDirs, agentDef, meta, model, ri, configData, tmuxConf, d.Layout, d.Layout.HomeDir), nil
 }
 
 // resolvedCreateInputs carries the Phase-1 resolution outputs (profile, archetype,
@@ -348,13 +348,15 @@ func createAndSeedSandbox(ctx context.Context, d state.Deps, sandboxDir string, 
 }
 
 // buildConfigAndEnvironment builds the container config and sandbox meta structs.
-// Returns (configData, meta, tmuxConf, promptText, error).
-func buildConfigAndEnvironment(ctx context.Context, d state.Deps, opts Options, ri *resolvedCreateInputs, agentDef *agent.Definition, workdir *DirSpec, auxDirs []*DirSpec, gcfg *config.GlobalConfig, dirEnvs []store.DirEnvironment, baselineSHA string, sandboxDir string) ([]byte, *store.Environment, string, string, error) {
+// Returns (configData, meta, model, tmuxConf, promptText, error). model is
+// returned alongside meta because the substrate record no longer carries it
+// (Q104) — the caller needs it for agent.json and the launch state.
+func buildConfigAndEnvironment(ctx context.Context, d state.Deps, opts Options, ri *resolvedCreateInputs, agentDef *agent.Definition, workdir *DirSpec, auxDirs []*DirSpec, gcfg *config.GlobalConfig, dirEnvs []store.DirEnvironment, baselineSHA string, sandboxDir string) ([]byte, *store.Environment, string, string, string, error) {
 	_ = ctx // reserved for future use
 	pr := ri.profile
 	promptText, hasPrompt, model, agentCommand, tmuxConf, headless, err := resolveAgentParams(agentDef, opts, pr, gcfg, d.Layout.HomeDir, d.Layout, d.Input)
 	if err != nil {
-		return nil, nil, "", "", err
+		return nil, nil, "", "", "", err
 	}
 
 	networkMode, networkAllow := buildNetworkConfig(opts, agentDef)
@@ -365,19 +367,19 @@ func buildConfigAndEnvironment(ctx context.Context, d state.Deps, opts Options, 
 	backend := d.Runtime.Descriptor().Type
 	configData, err := buildContainerConfig(d.Layout, agentDef, agentCommand, d.Runtime.Descriptor().AgentLaunchPrefix, tmuxConf, launch.OverlayOrResolvedMountPath(workdir), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, collectOverlayMounts(workdir, auxDirs), pr.setup, pr.autoCommitInterval, collectCopyDirs(workdir, auxDirs), opts.Name, runtime.TmuxSocketFor(d.Runtime, sandboxDir), pr.isolation, opts.VscodeTunnel, invocation.SanitizeTunnelName(opts.Name), lifecycleCfg, headless)
 	if err != nil {
-		return nil, nil, "", "", fmt.Errorf("build %s: %w", store.RuntimeConfigFile, err)
+		return nil, nil, "", "", "", fmt.Errorf("build %s: %w", store.RuntimeConfigFile, err)
 	}
 
 	usernsMode := resolveUsernsMode(d.Runtime, workdir, auxDirs, pr.capAdd)
-	meta := buildEnvironment(opts, pr, workdir, baselineSHA, dirEnvs, hasPrompt, networkMode, networkAllow, usernsMode, d.Runtime.Descriptor().Capabilities.HostFilesystem, string(ri.archetype), backend, model, ri.mergedMounts)
+	meta := buildEnvironment(opts, pr, workdir, baselineSHA, dirEnvs, hasPrompt, networkMode, networkAllow, usernsMode, d.Runtime.Descriptor().Capabilities.HostFilesystem, string(ri.archetype), backend, ri.mergedMounts)
 	meta.Principal = d.Layout.Principal // record the owning principal for attribution + runtime namespace (D62)
 	meta.Headless = headless            // effective headless mode (may be a D101 downgrade of opts.Headless)
 
-	return configData, meta, tmuxConf, promptText, nil
+	return configData, meta, model, tmuxConf, promptText, nil
 }
 
 // buildSandboxStateResult constructs the State from all resolved values.
-func buildSandboxStateResult(opts Options, sandboxDir string, workdir *DirSpec, workCopyDir string, auxDirs []*DirSpec, agentDef *agent.Definition, meta *store.Environment, ri *resolvedCreateInputs, configData []byte, tmuxConf string, layout config.Layout, homeDir string) *state.State {
+func buildSandboxStateResult(opts Options, sandboxDir string, workdir *DirSpec, workCopyDir string, auxDirs []*DirSpec, agentDef *agent.Definition, meta *store.Environment, model string, ri *resolvedCreateInputs, configData []byte, tmuxConf string, layout config.Layout, homeDir string) *state.State {
 	pr := ri.profile
 	return &state.State{
 		Name:                      opts.Name,
@@ -386,7 +388,7 @@ func buildSandboxStateResult(opts Options, sandboxDir string, workdir *DirSpec, 
 		WorkCopyDir:               workCopyDir,
 		AuxDirs:                   auxDirs,
 		Agent:                     agentDef,
-		Model:                     meta.Model,
+		Model:                     model,
 		Profile:                   pr.name,
 		ImageRef:                  pr.imageRef,
 		Env:                       pr.env,
@@ -691,7 +693,7 @@ func resolveUsernsMode(rt runtime.Backend, workdir *DirSpec, auxDirs []*DirSpec,
 }
 
 // buildEnvironment constructs the Environment struct for a new sandbox.
-func buildEnvironment(opts Options, pr *profileResult, workdir *DirSpec, baselineSHA string, dirEnvs []store.DirEnvironment, hasPrompt bool, networkMode string, networkAllow []string, usernsMode string, hostFilesystem bool, archetypeStr string, backend runtime.BackendType, model string, mergedMounts []string) *store.Environment {
+func buildEnvironment(opts Options, pr *profileResult, workdir *DirSpec, baselineSHA string, dirEnvs []store.DirEnvironment, hasPrompt bool, networkMode string, networkAllow []string, usernsMode string, hostFilesystem bool, archetypeStr string, backend runtime.BackendType, mergedMounts []string) *store.Environment {
 	return &store.Environment{
 		YoloaiVersion: opts.Version,
 		Name:          opts.Name,
@@ -699,8 +701,6 @@ func buildEnvironment(opts Options, pr *profileResult, workdir *DirSpec, baselin
 		BackendType:   backend,
 		Profile:       pr.name,
 		ImageRef:      pr.imageRef,
-		AgentType:     opts.Agent,
-		Model:         model,
 		Dirs: append([]store.DirEnvironment{{
 			HostPath:     workdir.Path,
 			MountPath:    launch.OverlayOrResolvedMountPath(workdir),
@@ -729,11 +729,13 @@ func buildEnvironment(opts Options, pr *profileResult, workdir *DirSpec, baselin
 
 // writeStatFiles writes all state files for the new sandbox (meta, sandbox-state,
 // prompt, logs, agent-status, runtime-config, context).
-func writeStatFiles(sandboxDir string, meta *store.Environment, agentDef *agent.Definition, agentFilesInitialized bool, hasPrompt bool, promptText string, configData []byte, perms store.IsolationPerms) error {
+func writeStatFiles(sandboxDir string, meta *store.Environment, agentDef *agent.Definition, agentType, model string, agentFilesInitialized bool, hasPrompt bool, promptText string, configData []byte, perms store.IsolationPerms) error {
 	if err := store.SaveEnvironment(sandboxDir, meta); err != nil {
 		return err
 	}
-	if err := agentcfg.Save(sandboxDir, &agentcfg.AgentConfig{AgentType: meta.AgentType, Model: meta.Model}); err != nil {
+	// agent.json is the inside-process config, kept out of the substrate record
+	// (Q104). agentType/model are passed in because meta no longer carries them.
+	if err := agentcfg.Save(sandboxDir, &agentcfg.AgentConfig{AgentType: agentType, Model: model}); err != nil {
 		return err
 	}
 	if err := store.SaveSandboxState(sandboxDir, &store.SandboxState{

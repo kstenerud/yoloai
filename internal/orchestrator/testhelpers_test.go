@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kstenerud/yoloai/internal/config"
+	"github.com/kstenerud/yoloai/internal/orchestrator/agentcfg"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/store"
 	"github.com/kstenerud/yoloai/internal/testutil"
@@ -80,7 +81,6 @@ func createTestSandbox(t *testing.T, tmpDir, name, hostPath string, mode store.D
 
 	meta := &store.Environment{
 		Name:      name,
-		AgentType: "claude",
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
 			HostPath:  hostPath,
@@ -89,6 +89,9 @@ func createTestSandbox(t *testing.T, tmpDir, name, hostPath string, mode store.D
 		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
+	// agent/model are the inside-process config, kept in the sibling agent.json
+	// (Q104). Write it so agent-resolving paths see a configured agent.
+	require.NoError(t, agentcfg.Save(sandboxDir, &agentcfg.AgentConfig{AgentType: "claude"}))
 }
 
 func writeTestFile(t *testing.T, dir, name, content string) {

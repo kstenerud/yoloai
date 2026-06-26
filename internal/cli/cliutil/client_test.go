@@ -189,7 +189,6 @@ func TestResolveBackendForSandbox_MetaHasBackend(t *testing.T) {
 	meta := &store.Environment{
 		Name:        name,
 		BackendType: "tart",
-		AgentType:   "claude",
 		CreatedAt:   time.Now(),
 		Dirs:        []store.DirEnvironment{{HostPath: "/tmp/test", Mode: "copy"}},
 	}
@@ -214,7 +213,6 @@ func TestResolveBackendForSandbox_MetaEmptyBackend(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
-		AgentType: "claude",
 		CreatedAt: time.Now(),
 		Dirs:      []store.DirEnvironment{{HostPath: "/tmp/test", Mode: "copy"}},
 	}

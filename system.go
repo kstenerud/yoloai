@@ -108,7 +108,14 @@ func (s *System) CreateDataDir() error {
 // the engine no longer migrates as a side effect of setup.
 func (s *System) MigrateDataDir(ctx context.Context) error {
 	_ = ctx
-	return config.MigrateLibrary(s.layout, launchPrefixResolver())
+	if err := config.MigrateLibrary(s.layout, launchPrefixResolver()); err != nil {
+		return err
+	}
+	// Per-sandbox pass: relocate agent/model out of each environment.json into
+	// agent.json (Q104). Run after the realm stamp; idempotent, so a re-run after
+	// an interrupted migration completes safely. Lives in the orchestrator because
+	// it needs store/agentcfg types internal/config cannot import.
+	return orchestrator.MigrateAgentConfigs(s.layout)
 }
 
 // launchPrefixResolver builds a pure backend-type -> launch-prefix lookup from

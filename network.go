@@ -56,7 +56,23 @@ func (n *Network) Allowed(_ context.Context) ([]AllowedDomain, error) {
 	if err != nil {
 		return nil, err
 	}
-	return computeAllowedDomains(meta), nil
+	agentType, err := n.agentType()
+	if err != nil {
+		return nil, err
+	}
+	return computeAllowedDomains(meta, agentType), nil
+}
+
+// agentType resolves the sandbox's configured agent type from agent.json, the
+// inside-process config the substrate record no longer carries (Q104). It feeds
+// the network-floor provenance; a sandbox loaded successfully has been migrated,
+// so agent.json is present.
+func (n *Network) agentType() (string, error) {
+	acfg, err := n.engine.LoadAgentConfig(n.name)
+	if err != nil {
+		return "", err
+	}
+	return acfg.AgentType, nil
 }
 
 // Allow adds domains to the user-source portion of the allowlist.
@@ -137,8 +153,12 @@ func (n *Network) Deny(ctx context.Context, domains ...string) (*DenyResult, err
 		}
 	}
 
+	agentType, err := n.agentType()
+	if err != nil {
+		return nil, err
+	}
 	// Provenance of removed entries — computed before we mutate meta.
-	removed := netpolicy.WithProvenance(domains, agentNetworkFloor(string(meta.AgentType)))
+	removed := netpolicy.WithProvenance(domains, agentNetworkFloor(agentType))
 	toRemove := make(map[string]bool, len(domains))
 	for _, d := range domains {
 		toRemove[d] = true
@@ -217,8 +237,8 @@ func (n *Network) requireIsolated() (*store.Environment, error) {
 // entries with provenance computed from the bound agent's
 // definition. Order matches meta order; unknown agent name produces
 // all-user entries (no agent → no known requirements).
-func computeAllowedDomains(meta *store.Environment) []AllowedDomain {
-	return netpolicy.WithProvenance(meta.NetworkAllow, agentNetworkFloor(string(meta.AgentType)))
+func computeAllowedDomains(meta *store.Environment, agentType string) []AllowedDomain {
+	return netpolicy.WithProvenance(meta.NetworkAllow, agentNetworkFloor(agentType))
 }
 
 // agentNetworkFloor returns the domains the named agent's definition requires

@@ -14,6 +14,7 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/git"
+	"github.com/kstenerud/yoloai/internal/orchestrator/agentcfg"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/store"
 	"github.com/kstenerud/yoloai/internal/testutil"
@@ -38,8 +39,7 @@ func TestInspectSandbox_Removed(t *testing.T) {
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 	meta := &store.Environment{
-		Name:      name,
-		AgentType: "claude",
+		Name: name,
 		Dirs: []store.DirEnvironment{{
 			HostPath: "/tmp/test",
 			Mode:     "copy",
@@ -47,6 +47,7 @@ func TestInspectSandbox_Removed(t *testing.T) {
 		CreatedAt: time.Now(),
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
+	require.NoError(t, agentcfg.Save(sandboxDir, &agentcfg.AgentConfig{AgentType: "claude"}))
 
 	mock := &fakeRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
@@ -85,8 +86,7 @@ func TestListSandboxes_IncludesBroken(t *testing.T) {
 	validDir := filepath.Join(sandboxesDir, "valid")
 	require.NoError(t, os.MkdirAll(validDir, 0750))
 	meta := &store.Environment{
-		Name:      "valid",
-		AgentType: "claude",
+		Name: "valid",
 		Dirs: []store.DirEnvironment{{
 			HostPath: "/tmp/test",
 			Mode:     "copy",
@@ -94,6 +94,7 @@ func TestListSandboxes_IncludesBroken(t *testing.T) {
 		CreatedAt: time.Now(),
 	}
 	require.NoError(t, store.SaveEnvironment(validDir, meta))
+	require.NoError(t, agentcfg.Save(validDir, &agentcfg.AgentConfig{AgentType: "claude"}))
 
 	// Create a broken sandbox (dir exists but no environment.json)
 	brokenDir := filepath.Join(sandboxesDir, "broken")

@@ -24,7 +24,8 @@ import (
 // the loaded value equals the original byte-for-byte. A full-struct assert.Equal
 // subsumes every per-field round-trip, so there are deliberately no per-field
 // round-trip variants — only tests for distinct logic (omitempty, version
-// stamping, migration, version-too-new) live alongside.
+// stamping, migration, version-too-new) live alongside. Agent/model are no longer
+// substrate fields (Q104) so they do not appear here.
 func TestMeta_SaveLoadRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 
@@ -33,8 +34,6 @@ func TestMeta_SaveLoadRoundTrip(t *testing.T) {
 		Name:          "fix-build",
 		Principal:     "acme",
 		CreatedAt:     time.Date(2025, 1, 15, 10, 30, 0, 0, time.UTC),
-		AgentType:     "claude",
-		Model:         "claude-sonnet-4-latest",
 		Dirs: []DirEnvironment{{
 			HostPath:    "/home/user/projects/my-app",
 			MountPath:   "/home/user/projects/my-app",
@@ -67,7 +66,6 @@ func TestMeta_OmitEmptyFields(t *testing.T) {
 		YoloaiVersion: "1.0.0",
 		Name:          "test-sandbox",
 		CreatedAt:     time.Date(2025, 1, 15, 10, 30, 0, 0, time.UTC),
-		AgentType:     "claude",
 		Dirs: []DirEnvironment{{
 			HostPath:  "/tmp/project",
 			MountPath: "/tmp/project",
@@ -84,9 +82,12 @@ func TestMeta_OmitEmptyFields(t *testing.T) {
 	var raw map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(data, &raw))
 
-	assert.NotContains(t, raw, "model")
 	assert.NotContains(t, raw, "network_mode")
 	assert.NotContains(t, raw, "ports")
+	// agent/model are no longer substrate fields — the slimmed record never
+	// writes them (they live in the sibling agent.json, Q104).
+	assert.NotContains(t, raw, "agent")
+	assert.NotContains(t, raw, "model")
 	// Default (no-principal) sandboxes omit the field, so existing
 	// environment.json files load as the default principal unchanged.
 	assert.NotContains(t, raw, "principal")
@@ -96,8 +97,7 @@ func TestMeta_VersionSetOnSave(t *testing.T) {
 	dir := t.TempDir()
 
 	meta := &Environment{
-		Name:      "test-version",
-		AgentType: "claude",
+		Name: "test-version",
 		Dirs: []DirEnvironment{{
 			HostPath:  "/tmp/project",
 			MountPath: "/tmp/project",
@@ -113,10 +113,42 @@ func TestMeta_VersionSetOnSave(t *testing.T) {
 	assert.Equal(t, metaVersion, loaded.Version)
 }
 
-func TestMeta_MigrateV0ToV1_Docker(t *testing.T) {
+// TestLoadEnvironment_BalksBelowCurrentVersion asserts the M2/D61 rule: a record
+// below the current schema is not migrated on read (which would mean a write
+// side-effect and, worse, would drop the agent/model keys the slimmed struct no
+// longer has before they could be relocated). LoadEnvironment balks with
+// ErrNeedsMigration; the explicit `yoloai system migrate` pass does the work.
+func TestLoadEnvironment_BalksBelowCurrentVersion(t *testing.T) {
 	dir := t.TempDir()
 
-	// Write a legacy environment.json without a version field (simulates pre-versioning sandboxes).
+	v2JSON := `{
+		"version": 2,
+		"name": "pre-q104",
+		"backend": "docker",
+		"agent": "claude",
+		"model": "opus",
+		"dirs": [{"host_path": "/tmp/proj", "mount_path": "/tmp/proj", "mode": "copy"}]
+	}`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, EnvironmentFile), []byte(v2JSON), 0600))
+
+	_, err := LoadEnvironment(dir)
+	require.ErrorIs(t, err, ErrNeedsMigration)
+}
+
+// migrateLadder unmarshals a legacy record and runs the in-struct migration
+// ladder (the v0->v2 backfills). It is the path the explicit per-sandbox
+// migration uses after relocating agent/model into agent.json; LoadEnvironment
+// no longer runs it on read (it balks instead).
+func migrateLadder(t *testing.T, legacyJSON string) *Environment {
+	t.Helper()
+	var meta Environment
+	require.NoError(t, json.Unmarshal([]byte(legacyJSON), &meta))
+	require.NoError(t, MigrateEnvironment(&meta))
+	return &meta
+}
+
+func TestMeta_MigrateV0ToV1_Docker(t *testing.T) {
+	// Legacy environment.json without a version field (pre-versioning sandbox).
 	legacyJSON := `{
 		"yoloai_version": "0.1.0",
 		"name": "old-sandbox",
@@ -125,11 +157,7 @@ func TestMeta_MigrateV0ToV1_Docker(t *testing.T) {
 		"agent": "claude",
 		"workdir": {"host_path": "/tmp/proj", "mount_path": "/tmp/proj", "mode": "copy"}
 	}`
-	require.NoError(t, os.WriteFile(filepath.Join(dir, EnvironmentFile), []byte(legacyJSON), 0600))
-
-	loaded, err := LoadEnvironment(dir)
-	require.NoError(t, err)
-	assert.Equal(t, 2, loaded.Version, "v0 should be migrated to current version")
+	loaded := migrateLadder(t, legacyJSON)
 	assert.False(t, loaded.HostFilesystem, "docker backend should have HostFilesystem=false")
 }
 
@@ -138,8 +166,6 @@ func TestMeta_MigrateV0ToV1_EmptyBackendBackfillsDocker(t *testing.T) {
 	// deserialises as "". Migration backfills Docker (the only backend that
 	// existed then) explicitly, so downstream readers (e.g. status grouping)
 	// can treat an empty BackendType as genuinely broken rather than coercing.
-	dir := t.TempDir()
-
 	legacyJSON := `{
 		"yoloai_version": "0.1.0",
 		"name": "oldest-sandbox",
@@ -147,19 +173,13 @@ func TestMeta_MigrateV0ToV1_EmptyBackendBackfillsDocker(t *testing.T) {
 		"agent": "claude",
 		"workdir": {"host_path": "/tmp/proj", "mount_path": "/tmp/proj", "mode": "copy"}
 	}`
-	require.NoError(t, os.WriteFile(filepath.Join(dir, EnvironmentFile), []byte(legacyJSON), 0600))
-
-	loaded, err := LoadEnvironment(dir)
-	require.NoError(t, err)
-	assert.Equal(t, 2, loaded.Version, "v0 should be migrated to current version")
+	loaded := migrateLadder(t, legacyJSON)
 	assert.Equal(t, runtime.BackendDocker, loaded.BackendType, "empty legacy backend backfills to docker")
 	assert.Equal(t, "yoloai-base", loaded.ImageRef, "empty legacy image_ref backfills to yoloai-base")
 	assert.False(t, loaded.HostFilesystem, "docker backend should have HostFilesystem=false")
 }
 
 func TestMeta_MigrateV0ToV1_Seatbelt(t *testing.T) {
-	dir := t.TempDir()
-
 	legacyJSON := `{
 		"yoloai_version": "0.1.0",
 		"name": "old-seatbelt",
@@ -168,11 +188,7 @@ func TestMeta_MigrateV0ToV1_Seatbelt(t *testing.T) {
 		"agent": "claude",
 		"workdir": {"host_path": "/tmp/proj", "mount_path": "/tmp/proj", "mode": "copy"}
 	}`
-	require.NoError(t, os.WriteFile(filepath.Join(dir, EnvironmentFile), []byte(legacyJSON), 0600))
-
-	loaded, err := LoadEnvironment(dir)
-	require.NoError(t, err)
-	assert.Equal(t, 2, loaded.Version, "v0 should be migrated to current version")
+	loaded := migrateLadder(t, legacyJSON)
 	assert.True(t, loaded.HostFilesystem, "seatbelt backend should have HostFilesystem=true")
 }
 
@@ -181,8 +197,6 @@ func TestMeta_MigrateV0ToV1_UnknownBackendDefaultsToFalse(t *testing.T) {
 	// (or doesn't exist at all), migration should default HostFilesystem to
 	// false rather than panicking or rejecting the load. The conservative
 	// answer keeps the upgrade path forward-compatible.
-	dir := t.TempDir()
-
 	legacyJSON := `{
 		"yoloai_version": "0.1.0",
 		"name": "old-mystery",
@@ -191,19 +205,15 @@ func TestMeta_MigrateV0ToV1_UnknownBackendDefaultsToFalse(t *testing.T) {
 		"agent": "claude",
 		"workdir": {"host_path": "/tmp/proj", "mount_path": "/tmp/proj", "mode": "copy"}
 	}`
-	require.NoError(t, os.WriteFile(filepath.Join(dir, EnvironmentFile), []byte(legacyJSON), 0600))
-
-	loaded, err := LoadEnvironment(dir)
-	require.NoError(t, err)
-	assert.Equal(t, 2, loaded.Version, "v0 should be migrated to current version even with unknown backend")
+	loaded := migrateLadder(t, legacyJSON)
 	assert.False(t, loaded.HostFilesystem, "unknown backend should default to HostFilesystem=false")
 }
 
 func TestMeta_FutureVersionReturnsError(t *testing.T) {
 	dir := t.TempDir()
 
-	futureJSON := `{"version": 9999, "name": "future", "agent": "claude",
-		"workdir": {"host_path": "/tmp", "mount_path": "/tmp", "mode": "copy"}}`
+	futureJSON := `{"version": 9999, "name": "future",
+		"dirs": [{"host_path": "/tmp", "mount_path": "/tmp", "mode": "copy"}]}`
 	require.NoError(t, os.WriteFile(filepath.Join(dir, EnvironmentFile), []byte(futureJSON), 0600))
 
 	_, err := LoadEnvironment(dir)
@@ -218,7 +228,6 @@ func TestMeta_ResourcesOmittedWhenNil(t *testing.T) {
 		YoloaiVersion: "1.0.0",
 		Name:          "no-resources",
 		CreatedAt:     time.Date(2025, 6, 1, 12, 0, 0, 0, time.UTC),
-		AgentType:     "claude",
 		Dirs: []DirEnvironment{{
 			HostPath:  "/tmp/project",
 			MountPath: "/tmp/project",
@@ -266,12 +275,9 @@ func TestEnvironmentDir(t *testing.T) {
 }
 
 func TestMeta_MigrateV1ToV2(t *testing.T) {
-	// Write a v1 environment.json with the old two-field shape (workdir object +
-	// directories array) and assert that LoadEnvironment repacks it into Dirs with
-	// the workdir at element 0 and the aux dir at element 1, and that re-saving
-	// drops the legacy keys.
-	dir := t.TempDir()
-
+	// A v1 record with the old two-field shape (workdir object + directories
+	// array): the ladder repacks it into Dirs with the workdir at element 0 and
+	// the aux dir at element 1, and re-saving drops the legacy keys.
 	v1JSON := `{
 		"version": 1,
 		"name": "old-v1",
@@ -282,11 +288,7 @@ func TestMeta_MigrateV1ToV2(t *testing.T) {
 		"workdir": {"host_path": "/tmp/proj", "mount_path": "/tmp/proj", "mode": "copy", "baseline_sha": "abc123"},
 		"directories": [{"host_path": "/tmp/aux", "mount_path": "/tmp/aux", "mode": "ro"}]
 	}`
-	require.NoError(t, os.WriteFile(filepath.Join(dir, EnvironmentFile), []byte(v1JSON), 0600))
-
-	loaded, err := LoadEnvironment(dir)
-	require.NoError(t, err)
-	assert.Equal(t, 2, loaded.Version, "v1 should be migrated to v2")
+	loaded := migrateLadder(t, v1JSON)
 	require.Len(t, loaded.Dirs, 2, "Dirs should have 2 entries (workdir + 1 aux)")
 	assert.Equal(t, "/tmp/proj", loaded.Dirs[0].HostPath)
 	assert.Equal(t, DirMode("copy"), loaded.Dirs[0].Mode)
@@ -294,7 +296,8 @@ func TestMeta_MigrateV1ToV2(t *testing.T) {
 	assert.Equal(t, "/tmp/aux", loaded.Dirs[1].HostPath)
 	assert.Equal(t, DirMode("ro"), loaded.Dirs[1].Mode)
 
-	// Re-save and verify no legacy keys
+	// Re-save and verify no legacy keys, current version stamped.
+	dir := t.TempDir()
 	require.NoError(t, SaveEnvironment(dir, loaded))
 	data, err := os.ReadFile(filepath.Join(dir, EnvironmentFile)) //nolint:gosec // test file in temp dir
 	require.NoError(t, err)

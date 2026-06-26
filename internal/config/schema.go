@@ -20,7 +20,7 @@ import (
 // expects in its DataDir. Bump this when the library's on-disk layout or
 // file formats change in a way that needs a migration step; add a matching
 // case to migrateLibraryStep and document the change in BREAKING-CHANGES.
-const LibrarySchemaVersion = 2
+const LibrarySchemaVersion = 3
 
 // LaunchPrefixResolver maps a sandbox's stored backend type (the "backend"
 // string in environment.json) to that backend's constant agent-launch wrap
@@ -155,6 +155,9 @@ func CreateFreshLibrary(layout Layout) error {
 // means recording the stamp. The flat -> namespaced directory move is a
 // CLI-side concern handled above the library, since it restructures the dir
 // above the library's root. v1 -> v2 backfills agent_launch_prefix (W1b).
+// v2 -> v3 is a no-op stamp here: the matching per-sandbox work (relocating
+// agent/model into agent.json, Q104) runs in System.MigrateDataDir after this,
+// in a layer that can import store/agentcfg.
 //
 // prefixFor resolves a sandbox's stored backend type to its constant launch
 // prefix; it is injected so this package stays free of an internal/runtime
@@ -192,6 +195,15 @@ func migrateLibraryStep(layout Layout, from int, prefixFor LaunchPrefixResolver)
 	case 1:
 		// v1 -> v2: backfill agent_launch_prefix into every sandbox.
 		return backfillLaunchPrefix(layout, prefixFor)
+	case 2:
+		// v2 -> v3: no realm-level transform here. The per-sandbox relocation of
+		// agent/model out of environment.json into agent.json (Q104) needs the
+		// store + agentcfg types, which this package cannot import (store -> config
+		// already). That pass runs above the library, in System.MigrateDataDir,
+		// after MigrateLibrary stamps the realm. Bumping the realm version is what
+		// makes the startup gate force `yoloai system migrate` before any
+		// per-sandbox load balks on the slimmed record.
+		return nil
 	default:
 		return fmt.Errorf("no migration registered from version %d", from)
 	}

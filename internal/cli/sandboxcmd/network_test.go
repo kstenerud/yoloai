@@ -33,7 +33,6 @@ func createNetworkSandbox(t *testing.T, name, networkMode string, domains []stri
 
 	meta := &store.Environment{
 		Name:         name,
-		AgentType:    "test",
 		BackendType:  "docker",
 		NetworkMode:  networkMode,
 		NetworkAllow: domains,

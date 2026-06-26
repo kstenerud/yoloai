@@ -145,9 +145,10 @@ func findTrashed(ts []TrashedSandbox, name string) bool {
 func TestPrune_ClassifiesSandboxDirs(t *testing.T) {
 	c := newTestClient(t)
 
-	// known: valid metadata.
+	// known: valid metadata at the current schema version (a pre-v3 record now
+	// balks on load and would classify as corrupt — see Q104).
 	good := mkSandboxDir(t, c, "good")
-	writeEnv(t, good, `{"version":1}`)
+	writeEnv(t, good, `{"version":3}`)
 
 	// never-init: no metadata, no work dir.
 	mkSandboxDir(t, c, "neverinit")

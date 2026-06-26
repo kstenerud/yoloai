@@ -209,7 +209,7 @@ func handleSuspendedResume(ctx context.Context, d state.Deps, cname, name string
 	slog.Info("resuming suspended sandbox", "event", "sandbox.start.resume", "sandbox", name)
 	sandboxDir := d.Layout.SandboxDir(name)
 
-	agentDef, err := requireAgent(meta)
+	agentDef, _, err := requireAgent(d, name)
 	if err != nil {
 		return err
 	}

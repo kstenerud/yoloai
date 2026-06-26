@@ -16,6 +16,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/copyflow"
 	"github.com/kstenerud/yoloai/internal/git"
 	"github.com/kstenerud/yoloai/internal/orchestrator"
+	"github.com/kstenerud/yoloai/internal/orchestrator/agentcfg"
 	"github.com/kstenerud/yoloai/internal/store"
 	"github.com/kstenerud/yoloai/internal/testutil"
 	"github.com/stretchr/testify/assert"
@@ -49,7 +50,9 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	meta, err := store.LoadEnvironment(sandboxDir)
 	require.NoError(t, err)
 	assert.Equal(t, sandboxName, meta.Name)
-	assert.Equal(t, string(agent.AgentTest), meta.AgentType)
+	acfg, err := agentcfg.Load(sandboxDir)
+	require.NoError(t, err)
+	assert.Equal(t, string(agent.AgentTest), acfg.AgentType)
 	assert.Equal(t, store.DirModeCopy, meta.Workdir().Mode)
 	assert.NotEmpty(t, meta.Workdir().BaselineSHA)
 
@@ -150,7 +153,9 @@ func TestIntegration_CreateNoStart(t *testing.T) {
 	meta, err := store.LoadEnvironment(sandboxDir)
 	require.NoError(t, err)
 	assert.Equal(t, "nostart", meta.Name)
-	assert.Equal(t, string(agent.AgentTest), meta.AgentType)
+	acfg, err := agentcfg.Load(sandboxDir)
+	require.NoError(t, err)
+	assert.Equal(t, string(agent.AgentTest), acfg.AgentType)
 	assert.Equal(t, store.DirModeCopy, meta.Workdir().Mode)
 	assert.NotEmpty(t, meta.Workdir().BaselineSHA)
 

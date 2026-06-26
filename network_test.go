@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kstenerud/yoloai/internal/orchestrator"
+	"github.com/kstenerud/yoloai/internal/orchestrator/agentcfg"
 	"github.com/kstenerud/yoloai/internal/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/stretchr/testify/assert"
@@ -32,12 +33,12 @@ func writeIsolatedSandbox(t *testing.T, c *System, name, agentName string, allow
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 	meta := &store.Environment{
 		Name:         name,
-		AgentType:    agentName,
 		CreatedAt:    time.Now(),
 		NetworkMode:  "isolated",
 		NetworkAllow: allow,
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
+	require.NoError(t, agentcfg.Save(sandboxDir, &agentcfg.AgentConfig{AgentType: agentName}))
 
 	// PatchConfigAllowedDomains reads + writes runtime-config.json.
 	// A minimal `{}` is enough — the patch helper inserts the
@@ -56,11 +57,11 @@ func writeNoNetworkSandbox(t *testing.T, c *System, name string) {
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 	meta := &store.Environment{
 		Name:        name,
-		AgentType:   "test",
 		CreatedAt:   time.Now(),
 		NetworkMode: "none",
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
+	require.NoError(t, agentcfg.Save(sandboxDir, &agentcfg.AgentConfig{AgentType: "test"}))
 }
 
 // clientWithSandbox returns a yoloai.Client wired up against a
@@ -98,9 +99,9 @@ func TestNetwork_Allowed_NoIsolation_Empty(t *testing.T) {
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 	require.NoError(t, store.SaveEnvironment(sandboxDir, &store.Environment{
 		Name:      "box",
-		AgentType: "claude",
 		CreatedAt: time.Now(),
 	}))
+	require.NoError(t, agentcfg.Save(sandboxDir, &agentcfg.AgentConfig{AgentType: "claude"}))
 
 	allowed, err := mustSandbox(t, c, "box").Network().Allowed(context.Background())
 	require.NoError(t, err)
@@ -254,10 +255,10 @@ func TestNetwork_Allow_NotIsolated_UsageError(t *testing.T) {
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 	require.NoError(t, store.SaveEnvironment(sandboxDir, &store.Environment{
 		Name:      "box",
-		AgentType: "claude",
 		CreatedAt: time.Now(),
 		// no NetworkMode set
 	}))
+	require.NoError(t, agentcfg.Save(sandboxDir, &agentcfg.AgentConfig{AgentType: "claude"}))
 
 	_, err := mustSandbox(t, c, "box").Network().Allow(context.Background(), "a.example")
 	require.Error(t, err)
@@ -336,10 +337,9 @@ func TestNetwork_Deny_NoDomains_UsageError(t *testing.T) {
 
 func TestComputeAllowedDomains_ClaudeAgent(t *testing.T) {
 	meta := &store.Environment{
-		AgentType:    "claude",
 		NetworkAllow: []string{"api.anthropic.com", "extra.example"},
 	}
-	out := computeAllowedDomains(meta)
+	out := computeAllowedDomains(meta, "claude")
 	require.Len(t, out, 2)
 	assert.Equal(t, "api.anthropic.com", out[0].Domain)
 	assert.Equal(t, AllowedFromAgentRequirement, out[0].Source)
@@ -348,8 +348,8 @@ func TestComputeAllowedDomains_ClaudeAgent(t *testing.T) {
 }
 
 func TestComputeAllowedDomains_EmptyAllow(t *testing.T) {
-	meta := &store.Environment{AgentType: "claude"}
-	out := computeAllowedDomains(meta)
+	meta := &store.Environment{}
+	out := computeAllowedDomains(meta, "claude")
 	assert.NotNil(t, out)
 	assert.Empty(t, out)
 }
