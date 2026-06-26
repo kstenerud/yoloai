@@ -32,7 +32,30 @@ so it lands as its own task.
   stick at active). New `SeedFile.Content` mechanism for yoloai-provided (non-host) files.
   OpenCode auths via seeded auth.json; real turn → active→idle. Also fixed a Makefile
   stale-binary bug (embed deps; [[make-build-embed-deps]]).
-- **Phase D — Aider** (`--notifications-command` launch flag; config-level verify, no auth) — next.
+- **Phase D — Aider ✅ DONE (30fb192a).** Hook-authoritative for idle via
+  `--notifications-command` (reuses `--write-status idle`). Stop-only (no turn-start),
+  so active comes from prompt-delivery's active-before-submit; a user-typed-via-attach
+  turn shows stale-idle until it completes — a known gap a future **hook-assisted** mode
+  would close (chosen deliberately over deferring aider). Config-verified only (aider
+  create is auth-gated, no aider key): command renders correctly, idle_mode
+  hook-authoritative, the command writes idle; live-fire relies on aider's documented
+  behavior.
+
+## Status — all four wired (merge-gate wiring requirement met)
+
+Every shipped agent that exposes a native turn-completion callback now uses it
+(Claude was already; +Gemini, Codex, OpenCode, Aider). **The `DetectionSpec`
+formalization turned out unnecessary** — the existing `Idle.Hook` + `idle_mode`
+model plus per-agent *registration mechanisms* (settings.json `ApplySettings`,
+codex `hooks.json` via `SettingsFileName`, opencode plugin via `SeedFile.Content`,
+aider launch flag) accommodated every strategy without a new abstraction. This
+validates deferring it as premature (D96 refinement).
+
+**Residual verification gaps** (wiring done, live-fire not fully confirmed):
+- Gemini: config+command verified; live-fire blocked by [DF48](../findings-unresolved.md)
+  (gemini interactive onboarding).
+- Aider: config verified; no aider auth to drive a real turn; the stop-only
+  active-gap awaits a future **hook-assisted** mode.
 
 ## What
 
