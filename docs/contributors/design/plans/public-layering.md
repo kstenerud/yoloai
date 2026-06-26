@@ -191,8 +191,13 @@ remainder ([D99](../../decisions/working-notes.md)):
   (1b) **Q104** agent/model → `sb.Agent().Type()/Model()` + `agent.json` + M2 migration
   ([store-workload-split.md](store-workload-split.md)). (1c) `paths.go` helpers-only. (1d) re-home
   the residual `entrypoint.py` secrets-read for legacy backends.
-- **Phase 2 — near-term consumer surface (control-eval).** `yoloai wait` + `sandbox_wait`;
-  `sandbox_run` + concurrency (headline); `Sandbox.Usage()`; structured diff `--json`; UX fixes.
+- **Phase 2 — near-term consumer surface (control-eval).** **Done:** `yoloai wait` + `sandbox_wait`
+  (pre-existing); `yoloai run` + headless/Tier-3 (D100/D101); structured diff `--json` +
+  `Workdir.Changes()`; MCP `sandbox_run` + native concurrency (the mark3labs server runs tool calls
+  in parallel). **Deferred follow-up:** `Sandbox.Usage()` token/cost ledger — needs the headless
+  agent to emit `--output-format json` + stdout capture + per-agent parsing (claude/gemini/… differ);
+  decided 2026-06-26 to ship the rest and leave Usage as a focused later task. UX fixes
+  (name-validation message, model in `new` summary) still open.
 - **Phase 3 — the Move.** `git mv` the sealed layers → public (default `runtime`+`store`+`copyflow`
   +`agent`; plumbing layers stay clean-internal, promote later additively), fences, `releasetest`,
   one `BREAKING-CHANGES` entry (D97). Final promotion set decided at the Move.
