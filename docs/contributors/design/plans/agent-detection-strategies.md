@@ -12,11 +12,17 @@ so it lands as its own task.
 
 ## Progress
 
-- **Phase A — Gemini ✅ wired (57605f5e)**, hook-authoritative via `BeforeAgent`→active
-  / `AfterAgent`→idle in settings.json (existing `ApplySettings` mechanism; commands
-  append `printf '{}'` for Gemini's stdout-JSON contract). Config + command verified;
-  **live-fire blocked by [DF48](../findings-unresolved.md)** (Gemini interactive
-  first-run onboarding).
+- **Phase A — Gemini ✅ wired (57605f5e) + fixed (e3603dc3); BeforeAgent verified LIVE.**
+  Hook-authoritative via `BeforeAgent`→active / `AfterAgent`→idle in settings.json
+  (existing `ApplySettings` mechanism; commands append `printf '{}'` for Gemini's
+  stdout-JSON contract). [DF48](findings-resolved via the matcher fix) resolved:
+  dropped the `matcher: null` that gemini 0.47 rejected (it had invalidated the whole
+  hooks block), and confirmed the onboarding/"conflict" was the stale `gemini-credentials.json`
+  (`AuthOnly`, correctly skipped when `GEMINI_API_KEY` is set; `folderTrust:false` handles
+  the trust check). With a real key: clean auth, valid hooks, and gemini fires
+  `BeforeAgent`→active **live** (`hook.active`). `AfterAgent`→idle is the identical
+  registered+validated mechanism; not directly observed only because the gemini free-tier
+  key rate-limits before completing a turn (external, not yoloai).
 - **Phase B — Codex ✅ DONE (0d523fb1), FULLY VERIFIED LIVE.** Hook-authoritative
   (full start+stop, like Claude) via a dedicated `~/.codex/hooks.json`: `UserPromptSubmit`
   /`PreToolUse`→active, `Stop`→idle, nested under a top-level `hooks` key. Generalized
@@ -61,10 +67,11 @@ whenever the host had no config. Fixed agent-locally: `SeedFile.Content` is now 
 the agent-specific placeholder left the Dockerfile (a file bind-mount auto-creates
 its target, so no placeholder is needed).
 
-**Residual** (one item): Gemini live-fire blocked by
-[DF48](../findings-unresolved.md) (gemini interactive onboarding); config+command
-verified. Aider's stop-only **active-gap** (user-typed-via-attach turns) still
-awaits a future **hook-assisted** mode, but its callback is now confirmed live.
+**Residual** (none blocking): DF48 resolved — Gemini auths clean and fires
+`BeforeAgent` live; `AfterAgent`→idle wasn't directly observed only because the
+gemini free-tier key rate-limits before completing a turn (external). Aider's
+stop-only **active-gap** (user-typed-via-attach turns) still awaits a future
+**hook-assisted** mode, but its callback is confirmed live.
 
 ## What
 
