@@ -99,8 +99,9 @@ type ContainerConfig struct {
 	Lifecycle        *LifecycleConfig      `json:"lifecycle,omitempty"`
 	// KeepaliveOnly, when true, brings the box up on a neutral agent-free
 	// keep-alive (`sleep infinity`) after the root setup, instead of launching
-	// the agent session — the S2 carve's agent-free substrate bring-up. The
-	// orchestrator does not set it yet (S2c flips it); it exists so the
-	// entrypoint can honor it.
+	// the agent session — the carve's agent-free substrate bring-up. The
+	// orchestrator sets it when routing the agent through Launch over a
+	// keepalive box (launch.startViaLaunch → patchKeepaliveOnly); the entrypoint
+	// honors it.
 	KeepaliveOnly bool `json:"keepalive_only,omitempty"`
 }

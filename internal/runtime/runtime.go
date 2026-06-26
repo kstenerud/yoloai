@@ -81,9 +81,9 @@ const (
 
 // InstanceConfig holds the parameters for creating a sandbox instance.
 // It is the substrate's agent-free provision config — the ProvisionSpec of
-// docs/contributors/design/substrate-interface.md. The agent-specific fields
-// fused here today (DF33: agent command, ready pattern, idle config) are split
-// out into orchestrator/runtimeconfig during the session-layer carve.
+// docs/contributors/design/substrate-interface.md. Agent-launch fields (agent
+// command, ready pattern, idle config) are NOT here; they live in the
+// orchestrator's runtimeconfig.ContainerConfig (the DF33 substrate/agent split).
 type InstanceConfig struct {
 	// Universal — all backends.
 	Name        string
