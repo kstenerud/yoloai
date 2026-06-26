@@ -59,9 +59,11 @@ type SeedFile struct {
 	Executable      bool
 }
 
-// SettingsPatch is one resolved settings.json mutation.
+// SettingsPatch is one resolved JSON-config mutation (e.g. settings.json, or
+// codex's hooks.json).
 type SettingsPatch struct {
-	RelDir  string               // dir under sandboxDir holding settings.json
-	DirPerm os.FileMode          // perms for MkdirAllPerm of RelDir
-	Apply   func(map[string]any) // mutate settings.json in place
+	RelDir   string               // dir under sandboxDir holding the config file
+	DirPerm  os.FileMode          // perms for MkdirAllPerm of RelDir
+	FileName string               // config filename; "" defaults to "settings.json"
+	Apply    func(map[string]any) // mutate the parsed config map in place
 }

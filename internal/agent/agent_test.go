@@ -155,7 +155,7 @@ func TestGetAgent_Codex(t *testing.T) {
 
 	assert.Equal(t, AgentType("codex"), def.Type)
 	assert.NotEmpty(t, def.Description)
-	assert.Equal(t, "codex --dangerously-bypass-approvals-and-sandbox", def.InteractiveCmd)
+	assert.Equal(t, "codex --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust", def.InteractiveCmd)
 	assert.Contains(t, def.HeadlessCmd, "codex exec")
 	assert.Equal(t, PromptModeInteractive, def.PromptMode)
 	assert.Equal(t, []string{"CODEX_API_KEY", "OPENAI_API_KEY"}, def.APIKeyEnvVars)
@@ -377,8 +377,42 @@ func TestApplySettings_GeminiPreservesExistingSecurityFields(t *testing.T) {
 	assert.Equal(t, map[string]any{"enabled": false}, security["folderTrust"])
 }
 
+func TestApplySettings_Codex(t *testing.T) {
+	def := GetAgent("codex")
+	require.NotNil(t, def)
+	require.True(t, def.Idle.Hook, "codex should be hook-authoritative")
+	require.Equal(t, "hooks.json", def.SettingsFileName, "codex hooks go in hooks.json, not settings.json")
+	require.NotNil(t, def.ApplySettings, "codex should have ApplySettings set")
+
+	root := map[string]any{}
+	def.ApplySettings(root)
+
+	// hooks.json nests events under a top-level "hooks" key (mirrors config.toml).
+	hooks, ok := root["hooks"].(map[string]any)
+	require.True(t, ok, "hooks.json content nests under a 'hooks' key")
+	assert.NotNil(t, hooks["Stop"], "Stop hook should be set")
+	assert.NotNil(t, hooks["UserPromptSubmit"], "UserPromptSubmit hook should be set")
+	assert.NotNil(t, hooks["PreToolUse"], "PreToolUse hook should be set")
+}
+
+func TestApplySettings_Idempotent(t *testing.T) {
+	// ApplySettings is re-applied on every create+start and restart; the hook
+	// injectors must not accumulate duplicates. Applying twice yields one group
+	// per event, same as once.
+	for _, name := range []string{"claude", "gemini", "codex"} {
+		def := GetAgent(name)
+		require.NotNil(t, def)
+		once := map[string]any{}
+		def.ApplySettings(once)
+		twice := map[string]any{}
+		def.ApplySettings(twice)
+		def.ApplySettings(twice)
+		assert.Equal(t, once, twice, "agent %q ApplySettings should be idempotent", name)
+	}
+}
+
 func TestApplySettings_OtherAgentsNil(t *testing.T) {
-	for _, name := range []string{"aider", "codex", "opencode", "test", "idle"} {
+	for _, name := range []string{"aider", "opencode", "test", "idle"} {
 		def := GetAgent(name)
 		require.NotNil(t, def, "agent %q should exist", name)
 		assert.Nil(t, def.ApplySettings, "agent %q should have nil ApplySettings", name)

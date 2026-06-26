@@ -62,9 +62,10 @@ func settingsPatches(def *agent.Definition) []envsetup.SettingsPatch {
 				continue
 			}
 			ps = append(ps, envsetup.SettingsPatch{
-				RelDir:  filepath.Join("home-seed", filepath.Base(d.StateDir)),
-				DirPerm: 0o750,
-				Apply:   d.ApplySettings,
+				RelDir:   filepath.Join("home-seed", filepath.Base(d.StateDir)),
+				DirPerm:  0o750,
+				FileName: d.SettingsFileName,
+				Apply:    d.ApplySettings,
 			})
 		}
 		return ps
@@ -73,8 +74,9 @@ func settingsPatches(def *agent.Definition) []envsetup.SettingsPatch {
 		return nil
 	}
 	return []envsetup.SettingsPatch{{
-		RelDir:  store.AgentRuntimeDir,
-		DirPerm: store.Perms().Dir,
-		Apply:   def.ApplySettings,
+		RelDir:   store.AgentRuntimeDir,
+		DirPerm:  store.Perms().Dir,
+		FileName: def.SettingsFileName,
+		Apply:    def.ApplySettings,
 	}}
 }

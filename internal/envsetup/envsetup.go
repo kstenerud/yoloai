@@ -231,7 +231,11 @@ func EnsureContainerSettings(sandboxDir string, patches []SettingsPatch) error {
 		if err := fileutil.MkdirAllPerm(dir, p.DirPerm); err != nil {
 			return fmt.Errorf("create settings dir %s: %w", p.RelDir, err)
 		}
-		settingsPath := filepath.Join(dir, "settings.json")
+		fileName := p.FileName
+		if fileName == "" {
+			fileName = "settings.json"
+		}
+		settingsPath := filepath.Join(dir, fileName)
 		settings, err := fileutil.ReadJSONMap(settingsPath)
 		if err != nil {
 			return err

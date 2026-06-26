@@ -92,10 +92,15 @@ type Definition struct {
 	// the fall-to-shell wrapper.
 	ResumeFlag string
 
-	// ApplySettings patches the agent's settings map before it is written to disk.
-	// Called with the parsed settings map; mutates it in place.
-	// Nil means no patches are needed.
+	// ApplySettings patches the agent's JSON config map before it is written to
+	// disk. Called with the parsed config map; mutates it in place. Nil means no
+	// patches are needed.
 	ApplySettings func(settings map[string]any)
+
+	// SettingsFileName is the JSON config file ApplySettings targets in the
+	// agent's state dir. "" defaults to "settings.json" (Claude, Gemini); Codex
+	// uses "hooks.json" (its dedicated lifecycle-hooks file).
+	SettingsFileName string
 
 	// ShortLivedOAuthWarning, if true, warns users when an OAuth credential file
 	// is copied into the sandbox (used by Claude Code which uses short-lived tokens).
@@ -277,10 +282,14 @@ var agents = map[string]*Definition{
 		AgentFilesExclude: []string{"auth.json", "sessions/"},
 	},
 	"codex": {
-		Type:           "codex",
-		Description:    "OpenAI Codex — AI coding agent",
-		InteractiveCmd: "codex --dangerously-bypass-approvals-and-sandbox",
-		HeadlessCmd:    `codex exec --dangerously-bypass-approvals-and-sandbox "PROMPT"`,
+		Type:        "codex",
+		Description: "OpenAI Codex — AI coding agent",
+		// --dangerously-bypass-hook-trust runs our status-tracking hooks without
+		// Codex's interactive trust prompt; the sandbox is the trust boundary
+		// (the agent-layer folder-trust principle), same rationale as the
+		// approvals/sandbox bypass.
+		InteractiveCmd: "codex --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust",
+		HeadlessCmd:    `codex exec --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust "PROMPT"`,
 		PromptMode:     PromptModeInteractive,
 		APIKeyEnvVars:  []string{"CODEX_API_KEY", "OPENAI_API_KEY"},
 		SeedFiles: []SeedFile{
@@ -291,6 +300,7 @@ var agents = map[string]*Definition{
 		SubmitSequence: "Enter",
 		StartupDelay:   3 * time.Second,
 		Idle: IdleSupport{
+			Hook:            true,
 			ReadyPattern:    "›",
 			ContextSignal:   true,
 			WchanApplicable: true,
@@ -302,7 +312,12 @@ var agents = map[string]*Definition{
 			"mini":    "codex-mini-latest",
 		},
 		NetworkAllowlist:  []string{"api.openai.com"},
-		AgentFilesExclude: []string{"auth.json", "sessions/"},
+		AgentFilesExclude: []string{"auth.json", "sessions/", "hooks.json"},
+		// Native turn-completion detection via Codex's lifecycle hooks, written to
+		// its dedicated ~/.codex/hooks.json: UserPromptSubmit/PreToolUse → active,
+		// Stop → idle. Makes Codex hook-authoritative.
+		SettingsFileName: "hooks.json",
+		ApplySettings:    injectCodexHooks,
 	},
 	"test": {
 		Type:           "test",
@@ -495,11 +510,67 @@ func injectGeminiHook(settings map[string]any) {
 			"hooks":      []any{map[string]any{"type": "command", "command": command}},
 		}
 	}
-	existingBefore, _ := hooks["BeforeAgent"].([]any)
-	hooks["BeforeAgent"] = append(existingBefore, group(geminiActiveCommand))
-	existingAfter, _ := hooks["AfterAgent"].([]any)
-	hooks["AfterAgent"] = append(existingAfter, group(geminiIdleCommand))
+	appendHookGroup(hooks, "BeforeAgent", geminiActiveCommand, group(geminiActiveCommand))
+	appendHookGroup(hooks, "AfterAgent", geminiIdleCommand, group(geminiIdleCommand))
 	settings["hooks"] = hooks
+}
+
+// hookEventHasCommand reports whether any group already registered under a hook
+// event contains a command hook with the given command. ApplySettings is
+// re-applied on every create+start and restart, so the injectors must be
+// idempotent — without this check the hooks accumulate one duplicate per apply.
+func hookEventHasCommand(groups []any, command string) bool {
+	for _, g := range groups {
+		gm, ok := g.(map[string]any)
+		if !ok {
+			continue
+		}
+		inner, _ := gm["hooks"].([]any)
+		for _, h := range inner {
+			hm, ok := h.(map[string]any)
+			if !ok {
+				continue
+			}
+			if cmd, _ := hm["command"].(string); cmd == command {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// appendHookGroup adds a hook group under an event, idempotently (skips if a
+// group with the same command is already registered) and preserving any hooks
+// already present.
+func appendHookGroup(hooks map[string]any, event, command string, group map[string]any) {
+	existing, _ := hooks[event].([]any)
+	if hookEventHasCommand(existing, command) {
+		return
+	}
+	hooks[event] = append(existing, group)
+}
+
+// injectCodexHooks writes Codex lifecycle hooks into its hooks.json map for
+// status tracking: UserPromptSubmit + PreToolUse → active (a turn started),
+// Stop → idle (turn complete). Codex runs each command via shell and treats
+// "exit 0 with no output" as success, so the shared status writers are reused
+// directly (no stdout contract, unlike Gemini). hooks.json nests the event→groups
+// map under a top-level "hooks" key (mirroring config.toml's `[hooks]`); preserves
+// any hooks already present.
+func injectCodexHooks(root map[string]any) {
+	hooks, _ := root["hooks"].(map[string]any)
+	if hooks == nil {
+		hooks = map[string]any{}
+	}
+	group := func(command string) map[string]any {
+		return map[string]any{
+			"hooks": []any{map[string]any{"type": "command", "command": command}},
+		}
+	}
+	appendHookGroup(hooks, "UserPromptSubmit", statusActiveCommand, group(statusActiveCommand))
+	appendHookGroup(hooks, "PreToolUse", statusActiveCommand, group(statusActiveCommand))
+	appendHookGroup(hooks, "Stop", statusIdleCommand, group(statusIdleCommand))
+	root["hooks"] = hooks
 }
 
 // injectIdleHook merges hooks into Claude Code's settings map for status tracking.
@@ -520,33 +591,18 @@ func injectIdleHook(settings map[string]any) {
 		hooks = map[string]any{}
 	}
 
-	// Stop hook: mark idle when Claude concludes its response.
-	idleHook := map[string]any{
-		"type":    "command",
-		"command": statusIdleCommand,
-	}
 	idleGroup := map[string]any{
-		"hooks": []any{idleHook},
-	}
-	existingStop, _ := hooks["Stop"].([]any)
-	hooks["Stop"] = append(existingStop, idleGroup)
-
-	// PreToolUse hook: mark active when Claude starts using tools.
-	activeHook := map[string]any{
-		"type":    "command",
-		"command": statusActiveCommand,
+		"hooks": []any{map[string]any{"type": "command", "command": statusIdleCommand}},
 	}
 	activeGroup := map[string]any{
-		"hooks": []any{activeHook},
+		"hooks": []any{map[string]any{"type": "command", "command": statusActiveCommand}},
 	}
-	existingPre, _ := hooks["PreToolUse"].([]any)
-	hooks["PreToolUse"] = append(existingPre, activeGroup)
-
-	// UserPromptSubmit hook: mark active as soon as a new prompt is submitted,
-	// before PreToolUse fires. This closes the window where the agent appears
-	// idle between prompt submission and the first tool call.
-	existingSubmit, _ := hooks["UserPromptSubmit"].([]any)
-	hooks["UserPromptSubmit"] = append(existingSubmit, activeGroup)
+	// Stop → idle; PreToolUse + UserPromptSubmit → active (the latter closes the
+	// window where the agent looks idle between prompt submit and the first tool
+	// call). Idempotent so re-applies (create+start, restart) don't accumulate.
+	appendHookGroup(hooks, "Stop", statusIdleCommand, idleGroup)
+	appendHookGroup(hooks, "PreToolUse", statusActiveCommand, activeGroup)
+	appendHookGroup(hooks, "UserPromptSubmit", statusActiveCommand, activeGroup)
 
 	settings["hooks"] = hooks
 }
