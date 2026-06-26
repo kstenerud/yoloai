@@ -176,6 +176,32 @@ This is a seed, not the full set — later cycles will add more.
    move is the proven `git mv` + import sweep + fence-repoint, gated by `make releasetest`
    (+ `go vet -tags 'integration e2e'` for the build-tagged tests). See D97 for the verdict.
 
+### Endgame roadmap (D99 — supersedes the piecemeal 3b.x / per-layer step lists)
+
+The program now runs to a **solid, mergeable state** in one branch (`substrate-move`), landing on
+`main` as **one clean break** — so *incidental per-commit API/contract churn is fine* (each commit
+compiles + passes `make check`; only the public contract may churn between commits). We build
+straight toward the final shape, no inter-commit stability dance. Three phases + a low-priority
+remainder ([D99](../../decisions/working-notes.md)):
+
+- **Phase 1 — seal every interface (behind `internal/`).** (1a) the **session-carve public
+  realization** [long pole]: `IOSession` on `sb.Agent()` (concentrate the tmux scatter), the final
+  `Launch`/`ProcSpec` contract, `AgentLaunchPrefix` off the public descriptor, slim
+  `sandbox-setup.py` / neutral PID-1 default, **+ build one-shot `-p`/Tier-3** (control-eval).
+  (1b) **Q104** agent/model → `sb.Agent().Type()/Model()` + `agent.json` + M2 migration
+  ([store-workload-split.md](store-workload-split.md)). (1c) `paths.go` helpers-only. (1d) re-home
+  the residual `entrypoint.py` secrets-read for legacy backends.
+- **Phase 2 — near-term consumer surface (control-eval).** `yoloai wait` + `sandbox_wait`;
+  `sandbox_run` + concurrency (headline); `Sandbox.Usage()`; structured diff `--json`; UX fixes.
+- **Phase 3 — the Move.** `git mv` the sealed layers → public (default `runtime`+`store`+`copyflow`
+  +`agent`; plumbing layers stay clean-internal, promote later additively), fences, `releasetest`,
+  one `BREAKING-CHANGES` entry (D97). Final promotion set decided at the Move.
+- **Remainder (post-merge):** Stream `SessionKind`, D95 broker, netpolicy egress-proxy,
+  plumbing-layer promotions, macOS findings, backend research, op-hardening.
+
+The earlier "3b" framing (above) is now Phase 1's substrate slice; what 3b deferred as "Move-prep"
+is folded into Phase 1 directly (no stability constraint to defer it for).
+
 ## Non-goals
 
 - Separate `go.mod` per layer (one module until a pruned-dep-graph consumer appears).
