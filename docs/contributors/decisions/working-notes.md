@@ -931,7 +931,7 @@ Only then the **mechanical move**: `runtime` first/with `store`, repoint the fen
 **The CLI surface — `run` only, no `new --headless`.** Headless is meaningless without a prompt (nothing to run), and a finished headless agent leaves no live session to attach to — so every headless invocation is the run-to-completion task shape. That is exactly `run`; a `new --headless` would be a worse spelling of it. Therefore **`new` stays purely interactive (unchanged)** and **`run` is the sole headless verb**:
 
 `yoloai run <name> [workdir] -p "…" [-d <dir>…] [--wait] [--rm]`
-- **Requires a prompt** (always). **Workdir is an optional positional** (relaxed from `new`, where it's required) — omit it for the no-workdir case (agent just makes API calls). `--dir` keeps its `new` meaning (aux dirs), never reinterpreted as the workdir.
+- **Requires a prompt** (always). **Workdir is a positional** (design intent: optional, relaxed from `new`, for the no-workdir "agent just makes API calls" case). `--dir` keeps its `new` meaning (aux dirs), never reinterpreted as the workdir. *Implementation note:* the no-workdir mode needs the create pipeline's "workdir is `Dirs[0]`" invariant broken first — deferred as **DF49**; until then `run` requires a workdir like `new`.
 - **Non-blocking by default** — launch and return; the sandbox persists in `Done` for later `diff`/`apply`/`destroy`.
 - **`--wait`** blocks until the agent is done (streams, exits with the agent's code).
 - **`--rm` implies `--wait`**, then destroys. Fire-and-forget is the shell's job (`yoloai run … --rm &`) — **no reaper daemon** (rejected: needs infra 1a-i doesn't justify).

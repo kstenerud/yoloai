@@ -19,7 +19,7 @@ func TestParseRunCmdPositional(t *testing.T) {
 		wantWdArg string
 	}{
 		{name: "no args -> name required", args: nil, wantErr: "sandbox name is required"},
-		{name: "name only ok (workdir optional)", args: []string{"box"}, wantName: "box", wantWdArg: ""},
+		{name: "name only parses (workdir guard is in runRunCmd, DF49)", args: []string{"box"}, wantName: "box", wantWdArg: ""},
 		{name: "name + workdir ok", args: []string{"box", "."}, wantName: "box", wantWdArg: "."},
 		{name: "too many positionals", args: []string{"box", "wd", "extra"}, wantErr: "too many positional arguments"},
 	}
@@ -42,7 +42,15 @@ func TestParseRunCmdPositional(t *testing.T) {
 func TestRunCmd_RequiresPrompt(t *testing.T) {
 	// run without a prompt is a usage error, surfaced before any backend contact.
 	cmd := NewRunCmd("test")
-	cmd.SetArgs([]string{"box", "."})
 	err := runRunCmd(cmd, []string{"box", "."}, "test")
 	assertUsageError(t, err, "requires a prompt")
+}
+
+func TestRunCmd_RequiresWorkdir(t *testing.T) {
+	// run with a prompt but no workdir is a usage error (DF49: no-workdir mode is
+	// deferred), surfaced before any backend contact.
+	cmd := NewRunCmd("test")
+	require.NoError(t, cmd.Flags().Set("prompt", "do the thing"))
+	err := runRunCmd(cmd, []string{"box"}, "test")
+	assertUsageError(t, err, "workdir is required")
 }

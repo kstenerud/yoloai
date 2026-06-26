@@ -15,13 +15,13 @@ import (
 
 func NewRunCmd(version string) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "run [flags] <name> [workdir] -p <prompt> [-d <dir>...] [-- <agent-args>...]",
+		Use:   "run [flags] <name> <workdir> -p <prompt> [-d <dir>...] [-- <agent-args>...]",
 		Short: "Run an agent headlessly to completion",
 		Long: "Create a sandbox and run the agent in its own headless mode (e.g. claude -p): " +
 			"the prompt is baked into the launch command and the task ends when the agent exits. " +
-			"A prompt is required; the workdir is optional. By default run returns once the agent " +
-			"is launched — use --wait to block until it finishes, or --rm to also destroy the " +
-			"sandbox afterwards (--rm implies --wait). For fire-and-forget, background it with '&'.",
+			"A prompt and workdir are required. By default run returns once the agent is launched — " +
+			"use --wait to block until it finishes, or --rm to also destroy the sandbox afterwards " +
+			"(--rm implies --wait). For fire-and-forget, background it with '&'.",
 		GroupID: cliutil.GroupLifecycle,
 		Args:    cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -46,6 +46,12 @@ func runRunCmd(cmd *cobra.Command, args []string, version string) error {
 	promptFile, _ := cmd.Flags().GetString("prompt-file")
 	if prompt == "" && promptFile == "" {
 		return yoerrors.NewUsageError("yoloai run requires a prompt (--prompt or --prompt-file)")
+	}
+	// A workdir-less run (the agent just makes API calls) is the intended end
+	// state, but it needs the no-Dirs[0]-workdir pipeline work tracked in DF49.
+	// Until then, require a workdir like `new` does.
+	if rawWorkdirArg == "" {
+		return yoerrors.NewUsageError("workdir is required\n\nUsage: yoloai run [flags] <name> <workdir> --prompt <text>\n\nExample: yoloai run %s . --prompt \"fix the bug\"", name)
 	}
 
 	opts, err := resolveCreateOptions(cmd, name, rawWorkdirArg, passthrough, profileFlag)
@@ -73,9 +79,13 @@ func runRunCmd(cmd *cobra.Command, args []string, version string) error {
 	return executeRun(cmd, cmd.Context(), c, opts, wait, rm)
 }
 
-// parseRunCmdPositional splits run's positional args: <name> is required, [workdir]
-// is optional (run supports a no-workdir agent that just makes API calls), and
-// anything after `--` is passed through to the agent.
+// parseRunCmdPositional splits run's positional args: <name> is required and
+// [workdir] is the second positional, with anything after `--` passed through to
+// the agent. The workdir is parsed as optional (the design allows a no-workdir
+// run), but a true no-workdir mode requires breaking the "workdir is Dirs[0]"
+// invariant across the create/diff pipeline (DF49), so until that lands the
+// caller still requires a workdir — enforced in runRunCmd, not here, so the
+// parser stays a pure split.
 func parseRunCmdPositional(cmd *cobra.Command, args []string) (name, rawWorkdirArg string, passthrough []string, profileFlag string, err error) {
 	dashIdx := cmd.ArgsLenAtDash()
 	var positional []string

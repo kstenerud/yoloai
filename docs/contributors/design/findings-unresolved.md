@@ -267,6 +267,24 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
   `YOLOAI_SECRET_KEYS` env var set in `internal/orchestrator/launch/launch.go` (or wherever E3 injects the
   sentinel into `ProcSpec.Env`). Related: DF41, DF43.
 
+### DF49 — `yoloai run` can't yet run workdir-less (the "agent just makes API calls" case) — the create pipeline assumes workdir is Dirs[0]
+
+- **Discovered:** 2026-06-26 · **Workstream:** Phase 1a-i (D100, the `run` verb)
+- **Severity:** LOW
+- **Disposition:** PARKED
+- **Description:** The `run` design (D100) allows an optional workdir — a headless agent that
+  only makes API calls needs no project dir. But the create pipeline bakes in "the workdir is
+  `Dirs[0]`": `meta.Workdir()` is `Dirs[0]`, `setupWorkdir`/baseline/mount/`working_dir` all derive
+  from `workdir.Path`, and an empty `Path` resolves to an empty mount path (`ResolvedMountPath()`
+  returns `""`). A clean no-workdir mode (skip workdir provisioning, run in `/home/yoloai`, no diff
+  target, `ChangeState` = not-applicable) means breaking that invariant across many readers — too
+  broad for 1a-i. **Interim:** `run` requires a workdir like `new` (enforced in `runRunCmd`; the
+  positional parser stays a pure split that accepts name-only). The no-workdir user just passes a
+  throwaway dir or `.`.
+- **Pointer:** `internal/cli/lifecycle/run.go` (`runRunCmd` workdir guard); the invariant lives in
+  `internal/orchestrator/create/prepare_dirs.go` (`setupWorkdir`), `internal/orchestrator/state/state.go`
+  (`DirSpec.ResolvedMountPath`), and every `meta.Workdir()` reader.
+
 ## Policy origin
 
 Established in [architecture-remediation.md](../archive/plans/architecture-remediation.md) and inherited by [layering-refactor.md](../archive/plans/layering-refactor.md).
