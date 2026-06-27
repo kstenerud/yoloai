@@ -10,14 +10,15 @@ import (
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/fileutil"
+	"github.com/kstenerud/yoloai/internal/netpolicycfg"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/store"
 )
 
 // GenerateContext builds a markdown description of the sandbox environment
 // from Environment fields. Sections are omitted when they have no content.
-// sandboxDir is the per-sandbox state directory (used to compute
-// host-filesystem file/cache paths for backends that don't have a
+// sandboxDir is the per-sandbox state directory (used to load netpolicy.json
+// and compute host-filesystem file/cache paths for backends that don't have a
 // runtime mount).
 func GenerateContext(sandboxDir string, meta *store.Environment) string {
 	var b strings.Builder
@@ -32,16 +33,21 @@ func GenerateContext(sandboxDir string, meta *store.Environment) string {
 		writeDir(&b, d.MountPath, d.HostPath, d.Mode, false)
 	}
 
-	// Network section (only when network mode is set)
-	if meta.NetworkMode != "" {
+	// Network section (only when network mode is set). Load from netpolicy.json
+	// (D90: network policy lives in its own record, not the substrate record).
+	np, _ := netpolicycfg.Load(sandboxDir)
+	if np == nil {
+		np = &netpolicycfg.Netpolicy{}
+	}
+	if np.Mode != "" {
 		b.WriteString("\n## Network\n\n")
-		switch meta.NetworkMode {
+		switch np.Mode {
 		case "none":
 			b.WriteString("No network access.\n")
 		case "isolated":
-			if len(meta.NetworkAllow) > 0 {
+			if len(np.Allow) > 0 {
 				b.WriteString("Isolated. Allowed domains: ")
-				b.WriteString(strings.Join(meta.NetworkAllow, ", "))
+				b.WriteString(strings.Join(np.Allow, ", "))
 				b.WriteString("\n")
 			} else {
 				b.WriteString("Isolated. No domains allowed.\n")

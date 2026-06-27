@@ -378,7 +378,16 @@ func executeNewCreate(cmd *cobra.Command, ctx context.Context, c *yoloai.Client,
 		// a read failure just blanks those summary lines.
 		agentType, _ := sb.Agent().Type()
 		model, _ := sb.Agent().Model()
-		printCreateSummary(cmd.ErrOrStderr(), meta, agentType, model, opts.Prompt != "", opts.VscodeTunnel)
+		// NetworkMode/NetworkAllow are network-policy config, no longer on the
+		// substrate Environment view (D90) — read from Inspect. Best-effort:
+		// a read failure just skips the network summary line.
+		var networkMode yoloai.NetworkMode
+		var networkAllow []string
+		if sbInfo, inspErr := sb.Inspect(cmd.Context()); inspErr == nil {
+			networkMode = sbInfo.NetworkMode
+			networkAllow = sbInfo.NetworkAllow
+		}
+		printCreateSummary(cmd.ErrOrStderr(), meta, agentType, model, networkMode, networkAllow, opts.Prompt != "", opts.VscodeTunnel)
 	}
 
 	// First successful create runs EnsureSetup; show the one-time onboarding
@@ -431,8 +440,9 @@ func loadCreatedMeta(c *yoloai.Client, name string) (*yoloai.Environment, error)
 
 // printCreateSummary renders the post-create summary + next-step hints from the
 // created sandbox's metadata. The library returns the sandbox; the CLI owns this
-// presentation (F8).
-func printCreateSummary(out io.Writer, meta *yoloai.Environment, agentType yoloai.AgentType, model string, hasPrompt, vscodeTunnel bool) {
+// presentation (F8). networkMode and networkAllow are passed separately because
+// they are not substrate facts (D90) and do not ride on meta (*yoloai.Environment).
+func printCreateSummary(out io.Writer, meta *yoloai.Environment, agentType yoloai.AgentType, model string, networkMode yoloai.NetworkMode, networkAllow []string, hasPrompt, vscodeTunnel bool) {
 	fmt.Fprintf(out, "Sandbox %s created\n", meta.Name) //nolint:errcheck // best-effort output
 	fmt.Fprintf(out, "  Agent:    %s\n", agentType)     //nolint:errcheck // best-effort output
 	if model != "" {
@@ -453,11 +463,11 @@ func printCreateSummary(out io.Writer, meta *yoloai.Environment, agentType yoloa
 			fmt.Fprintf(out, "  Dir:      %s (%s)\n", d.HostPath, mode) //nolint:errcheck // best-effort output
 		}
 	}
-	switch meta.NetworkMode {
+	switch networkMode {
 	case "none":
 		fmt.Fprintln(out, "  Network:  none") //nolint:errcheck // best-effort output
 	case "isolated":
-		fmt.Fprintf(out, "  Network:  isolated (%d allowed domains)\n", len(meta.NetworkAllow)) //nolint:errcheck // best-effort output
+		fmt.Fprintf(out, "  Network:  isolated (%d allowed domains)\n", len(networkAllow)) //nolint:errcheck // best-effort output
 	}
 	if len(meta.Ports) > 0 {
 		fmt.Fprintf(out, "  Ports:    %s\n", strings.Join(meta.Ports, ", ")) //nolint:errcheck // best-effort output

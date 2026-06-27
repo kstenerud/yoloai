@@ -16,6 +16,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/envsetup"
 	"github.com/kstenerud/yoloai/internal/fileutil"
+	"github.com/kstenerud/yoloai/internal/netpolicycfg"
 	"github.com/kstenerud/yoloai/internal/orchestrator/agentcfg"
 	"github.com/kstenerud/yoloai/internal/orchestrator/envspec"
 	"github.com/kstenerud/yoloai/internal/orchestrator/invocation"
@@ -184,6 +185,11 @@ func recreateContainer(ctx context.Context, d state.Deps, name string, meta *sto
 		return err
 	}
 
+	np, err := netpolicycfg.Load(sandboxDir)
+	if err != nil {
+		return fmt.Errorf("load netpolicy: %w", err)
+	}
+
 	sbState2 := &state.State{
 		Name:         name,
 		SandboxDir:   sandboxDir,
@@ -196,8 +202,8 @@ func recreateContainer(ctx context.Context, d state.Deps, name string, meta *sto
 		ImageRef:     meta.ImageRef,
 		Env:          envVars,
 		HasPrompt:    meta.HasPrompt,
-		NetworkMode:  meta.NetworkMode,
-		NetworkAllow: meta.NetworkAllow,
+		NetworkMode:  np.Mode,
+		NetworkAllow: np.Allow,
 		Ports:        meta.Ports,
 		ConfigMounts: meta.Mounts,
 		TmuxConf:     cfgJSON.TmuxConf,

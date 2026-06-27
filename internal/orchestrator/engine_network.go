@@ -7,18 +7,20 @@ package orchestrator
 import (
 	"context"
 
+	"github.com/kstenerud/yoloai/internal/netpolicycfg"
 	"github.com/kstenerud/yoloai/store"
 )
 
-// SaveNetworkAllowlist persists the sandbox's environment.json and the matching
-// runtime-config allowed-domains patch. The caller mutates meta.NetworkAllow
-// then hands the whole meta here.
-func (e *Engine) SaveNetworkAllowlist(name string, meta *store.Environment) error {
+// SaveNetworkAllowlist persists the sandbox's netpolicy.json and the matching
+// runtime-config allowed-domains patch. The caller mutates np.Allow then hands
+// the whole Netpolicy here (D90: network policy lives in netpolicy.json, not
+// the substrate environment.json).
+func (e *Engine) SaveNetworkAllowlist(name string, np *netpolicycfg.Netpolicy) error {
 	sandboxDir := e.layout.SandboxDir(name)
-	if err := store.SaveEnvironment(sandboxDir, meta); err != nil {
+	if err := netpolicycfg.Save(sandboxDir, np); err != nil {
 		return err
 	}
-	return PatchConfigAllowedDomains(sandboxDir, meta.NetworkAllow)
+	return PatchConfigAllowedDomains(sandboxDir, np.Allow)
 }
 
 // LivePatchNetwork best-effort execs a shell script inside the running sandbox

@@ -405,8 +405,15 @@ type SandboxInfo struct {
 	// not substrate facts (Q104). They are read from the sandbox's agent.json
 	// during inspection; an unmigrated pre-Q104 record yields "". The same values
 	// are available targeted via Sandbox.Agent().Type()/Model().
-	AgentType      AgentType   `json:"agent,omitempty"`
-	Model          string      `json:"model,omitempty"`
+	AgentType AgentType `json:"agent,omitempty"`
+	Model     string    `json:"model,omitempty"`
+	// NetworkMode and NetworkAllow are the sandbox's network policy — the mode
+	// and composed egress allowlist. They sit here on the aggregated read-model,
+	// not on Environment (the substrate view), because they are not substrate
+	// facts (D90). They are read from the sandbox's netpolicy.json during
+	// inspection; a sandbox with no network restriction has NetworkMode="".
+	NetworkMode    NetworkMode `json:"network_mode,omitempty"`
+	NetworkAllow   []string    `json:"network_allow,omitempty"`
 	Status         Status      `json:"status"`
 	AgentStatus    AgentStatus `json:"agent_status,omitempty"`
 	Changes        ChangeState `json:"has_changes"`

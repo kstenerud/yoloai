@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kstenerud/yoloai/internal/netpolicycfg"
 	"github.com/kstenerud/yoloai/internal/orchestrator"
 	"github.com/kstenerud/yoloai/internal/orchestrator/agentcfg"
 	"github.com/kstenerud/yoloai/store"
@@ -32,13 +33,13 @@ func writeIsolatedSandbox(t *testing.T, c *System, name, agentName string, allow
 	sandboxDir := c.layout.SandboxDir(name)
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 	meta := &store.Environment{
-		Name:         name,
-		CreatedAt:    time.Now(),
-		NetworkMode:  "isolated",
-		NetworkAllow: allow,
+		Name:      name,
+		CreatedAt: time.Now(),
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 	require.NoError(t, agentcfg.Save(sandboxDir, &agentcfg.AgentConfig{AgentType: agentName}))
+	// Network policy now lives in netpolicy.json (D90), not the substrate record.
+	require.NoError(t, netpolicycfg.Save(sandboxDir, &netpolicycfg.Netpolicy{Mode: "isolated", Allow: allow}))
 
 	// PatchConfigAllowedDomains reads + writes runtime-config.json.
 	// A minimal `{}` is enough — the patch helper inserts the
@@ -56,12 +57,13 @@ func writeNoNetworkSandbox(t *testing.T, c *System, name string) {
 	sandboxDir := c.layout.SandboxDir(name)
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 	meta := &store.Environment{
-		Name:        name,
-		CreatedAt:   time.Now(),
-		NetworkMode: "none",
+		Name:      name,
+		CreatedAt: time.Now(),
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 	require.NoError(t, agentcfg.Save(sandboxDir, &agentcfg.AgentConfig{AgentType: "test"}))
+	// Network policy now lives in netpolicy.json (D90), not the substrate record.
+	require.NoError(t, netpolicycfg.Save(sandboxDir, &netpolicycfg.Netpolicy{Mode: "none"}))
 }
 
 // clientWithSandbox returns a yoloai.Client wired up against a
@@ -288,10 +290,10 @@ func TestNetwork_Deny_RemovesAndTagsSource(t *testing.T) {
 		"Deny must surface that an agent-required domain was removed so UIs can warn")
 	assert.Equal(t, AllowedFromUser, bySource["example.com"])
 
-	// Allowlist is empty now on disk.
-	meta, err := store.LoadEnvironment(sys.layout.SandboxDir("box"))
+	// Allowlist is empty now on disk (netpolicy.json, not environment.json — D90).
+	np, err := netpolicycfg.Load(sys.layout.SandboxDir("box"))
 	require.NoError(t, err)
-	assert.Empty(t, meta.NetworkAllow)
+	assert.Empty(t, np.Allow)
 }
 
 func TestNetwork_Deny_DomainNotInList_UsageError(t *testing.T) {
@@ -315,9 +317,9 @@ func TestNetwork_Deny_PartialFailureRollsBack(t *testing.T) {
 	_, err := mustSandbox(t, c, "box").Network().Deny(context.Background(), "a.example", "absent.example")
 	require.Error(t, err)
 
-	meta, err := store.LoadEnvironment(sys.layout.SandboxDir("box"))
+	np, err := netpolicycfg.Load(sys.layout.SandboxDir("box"))
 	require.NoError(t, err)
-	assert.Equal(t, []string{"a.example", "b.example"}, meta.NetworkAllow,
+	assert.Equal(t, []string{"a.example", "b.example"}, np.Allow,
 		"validation failure must leave the allowlist untouched")
 }
 
@@ -336,10 +338,8 @@ func TestNetwork_Deny_NoDomains_UsageError(t *testing.T) {
 // can't break provenance computation without a loud test.)
 
 func TestComputeAllowedDomains_ClaudeAgent(t *testing.T) {
-	meta := &store.Environment{
-		NetworkAllow: []string{"api.anthropic.com", "extra.example"},
-	}
-	out := computeAllowedDomains(meta, "claude")
+	// computeAllowedDomains takes the allow slice directly (D90: np.Allow).
+	out := computeAllowedDomains([]string{"api.anthropic.com", "extra.example"}, "claude")
 	require.Len(t, out, 2)
 	assert.Equal(t, "api.anthropic.com", out[0].Domain)
 	assert.Equal(t, AllowedFromAgentRequirement, out[0].Source)
@@ -348,8 +348,7 @@ func TestComputeAllowedDomains_ClaudeAgent(t *testing.T) {
 }
 
 func TestComputeAllowedDomains_EmptyAllow(t *testing.T) {
-	meta := &store.Environment{}
-	out := computeAllowedDomains(meta, "claude")
+	out := computeAllowedDomains(nil, "claude")
 	assert.NotNil(t, out)
 	assert.Empty(t, out)
 }

@@ -15,16 +15,18 @@ import (
 // provenance source (agent-requirement vs user-added). The library's
 // Network.Allowed() does the derivation; this just renders.
 func runSandboxAllowed(cmd *cobra.Command, name string) error {
-	// Branch on NetworkMode early so the "not isolated" / "none"
-	// cases render their static messages without making the library
-	// load the allowlist. Network.Allowed() doesn't reject those
-	// states (read-only never errors) — we surface them here.
-	meta, err := loadEnvironmentForRead(cmd, name)
-	if err != nil {
-		return err
-	}
-
 	return cliutil.WithSandbox(cmd, name, func(ctx context.Context, sb *yoloai.Sandbox) error {
+		// Branch on NetworkMode early so the "not isolated" / "none"
+		// cases render their static messages without making the library
+		// load the allowlist. Network.Allowed() doesn't reject those
+		// states (read-only never errors) — we surface them here.
+		// NetworkMode rides on SandboxInfo (not Environment) — D90.
+		info, err := sb.Inspect(ctx)
+		if err != nil {
+			return err
+		}
+		networkMode := info.NetworkMode
+
 		allowed, err := sb.Network().Allowed(ctx)
 		if err != nil {
 			return err
@@ -33,13 +35,13 @@ func runSandboxAllowed(cmd *cobra.Command, name string) error {
 		if cliutil.JSONEnabled(cmd) {
 			return cliutil.WriteJSON(cmd.OutOrStdout(), map[string]any{
 				"name":         name,
-				"network_mode": meta.NetworkMode,
+				"network_mode": networkMode,
 				"domains":      cliutil.EmptyIfNil(allowed),
 			})
 		}
 
 		w := cmd.OutOrStdout()
-		switch meta.NetworkMode {
+		switch networkMode {
 		case "none":
 			fmt.Fprintln(w, "Network disabled (--network-none)") //nolint:errcheck
 		case "isolated":
@@ -59,21 +61,4 @@ func runSandboxAllowed(cmd *cobra.Command, name string) error {
 		}
 		return nil
 	})
-}
-
-// loadEnvironmentForRead reads the sandbox's metadata without enforcing the
-// "isolated mode required" precondition. The `allowed` subcommand needs to
-// print specific messages for the other network modes, so it can't go through
-// requireIsolated.
-func loadEnvironmentForRead(cmd *cobra.Command, name string) (*yoloai.Environment, error) {
-	c, err := cliutil.Client(cmd)
-	if err != nil {
-		return nil, err
-	}
-	defer c.Close() //nolint:errcheck // best-effort cleanup
-	sb, err := c.Sandbox(name)
-	if err != nil {
-		return nil, err
-	}
-	return sb.Metadata()
 }

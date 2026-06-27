@@ -75,7 +75,7 @@ func printSandboxInfo(cmd *cobra.Command, sb *yoloai.Sandbox, name string, info 
 	}
 
 	printSandboxDirs(w, meta)
-	printSandboxNetwork(w, meta)
+	printSandboxNetwork(w, info)
 	printSandboxResources(w, meta, info)
 }
 
@@ -96,16 +96,18 @@ func printSandboxDirs(w io.Writer, meta *yoloai.Environment) {
 }
 
 // printSandboxNetwork prints network mode and port information.
-func printSandboxNetwork(w io.Writer, meta *yoloai.Environment) {
-	if meta.NetworkMode != "" {
-		if meta.NetworkMode == "isolated" && len(meta.NetworkAllow) > 0 {
-			fmt.Fprintf(w, "Network:     isolated (%s)\n", strings.Join(meta.NetworkAllow, ", ")) //nolint:errcheck
+// NetworkMode/NetworkAllow ride on SandboxInfo (not Environment) — they are
+// not substrate facts (D90).
+func printSandboxNetwork(w io.Writer, info *yoloai.SandboxInfo) {
+	if info.NetworkMode != "" {
+		if info.NetworkMode == "isolated" && len(info.NetworkAllow) > 0 {
+			fmt.Fprintf(w, "Network:     isolated (%s)\n", strings.Join(info.NetworkAllow, ", ")) //nolint:errcheck
 		} else {
-			fmt.Fprintf(w, "Network:     %s\n", meta.NetworkMode) //nolint:errcheck
+			fmt.Fprintf(w, "Network:     %s\n", info.NetworkMode) //nolint:errcheck
 		}
 	}
-	if len(meta.Ports) > 0 {
-		fmt.Fprintf(w, "Ports:       %s\n", strings.Join(meta.Ports, ", ")) //nolint:errcheck
+	if info.Environment != nil && len(info.Environment.Ports) > 0 {
+		fmt.Fprintf(w, "Ports:       %s\n", strings.Join(info.Environment.Ports, ", ")) //nolint:errcheck
 	}
 }
 

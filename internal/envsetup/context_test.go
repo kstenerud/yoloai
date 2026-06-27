@@ -8,23 +8,30 @@ import (
 	"testing"
 
 	"github.com/kstenerud/yoloai/internal/config"
+	"github.com/kstenerud/yoloai/internal/netpolicycfg"
 	_ "github.com/kstenerud/yoloai/runtime/tart" // registers tart descriptor for VMRuntimeDir test
 	"github.com/kstenerud/yoloai/store"
 )
 
 func TestGenerateContext_AllFields(t *testing.T) {
+	sandboxDir := t.TempDir()
+	// Network policy now lives in netpolicy.json (D90), not on the substrate record.
+	if err := netpolicycfg.Save(sandboxDir, &netpolicycfg.Netpolicy{
+		Mode:  "isolated",
+		Allow: []string{"api.anthropic.com", "sentry.io"},
+	}); err != nil {
+		t.Fatalf("save netpolicy: %v", err)
+	}
 	meta := &store.Environment{
 		Dirs: []store.DirEnvironment{
 			{HostPath: "/home/user/project", MountPath: "/home/user/project", Mode: "copy"},
 			{HostPath: "/opt/lib", MountPath: "/home/user/lib", Mode: "ro"},
 			{HostPath: "/data/shared", MountPath: "/data/shared", Mode: "rw"},
 		},
-		NetworkMode:  "isolated",
-		NetworkAllow: []string{"api.anthropic.com", "sentry.io"},
-		Resources:    &config.ResourceLimits{CPUs: "4", Memory: "8g"},
+		Resources: &config.ResourceLimits{CPUs: "4", Memory: "8g"},
 	}
 
-	result := GenerateContext("/tmp/yoloai-test-sb/test-sb", meta)
+	result := GenerateContext(sandboxDir, meta)
 	assertContextContains(t, result)
 }
 
@@ -67,7 +74,8 @@ func TestGenerateContext_MinimalFields(t *testing.T) {
 		}},
 	}
 
-	result := GenerateContext("/tmp/yoloai-test-sb/test-sb", meta)
+	// No netpolicy.json written — network section should be absent.
+	result := GenerateContext(t.TempDir(), meta)
 
 	if !strings.Contains(result, "## Directories") {
 		t.Error("missing Directories section")
@@ -81,16 +89,20 @@ func TestGenerateContext_MinimalFields(t *testing.T) {
 }
 
 func TestGenerateContext_NetworkNone(t *testing.T) {
+	sandboxDir := t.TempDir()
+	// Network policy now lives in netpolicy.json (D90), not on the substrate record.
+	if err := netpolicycfg.Save(sandboxDir, &netpolicycfg.Netpolicy{Mode: "none"}); err != nil {
+		t.Fatalf("save netpolicy: %v", err)
+	}
 	meta := &store.Environment{
 		Dirs: []store.DirEnvironment{{
 			HostPath:  "/project",
 			MountPath: "/project",
 			Mode:      "copy",
 		}},
-		NetworkMode: "none",
 	}
 
-	result := GenerateContext("/tmp/yoloai-test-sb/test-sb", meta)
+	result := GenerateContext(sandboxDir, meta)
 
 	if !strings.Contains(result, "No network access.") {
 		t.Error("missing 'no network' message")

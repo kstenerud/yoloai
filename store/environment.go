@@ -60,8 +60,6 @@ type Environment struct {
 	LegacyDirectories []DirEnvironment `json:"directories,omitempty"`
 
 	HasPrompt          bool                   `json:"has_prompt"`
-	NetworkMode        string                 `json:"network_mode,omitempty"`
-	NetworkAllow       []string               `json:"network_allow,omitempty"`
 	Ports              []string               `json:"ports,omitempty"`
 	Resources          *config.ResourceLimits `json:"resources,omitempty"`
 	Mounts             []string               `json:"mounts,omitempty"`
@@ -196,9 +194,10 @@ func (e *Environment) SchemaVersion() int {
 
 // MigrateRecord implements store.Migrator. Advances the record from its current
 // Version to metaVersion by running the typed migration ladder. The cross-file
-// v2->v3 relocation (agent/model -> agent.json) is NOT done here — it is an
-// explicit per-sandbox pass (orchestrator.MigrateAgentConfigs); this ladder only
-// covers the in-struct steps (v0->v1 backend/image backfill, v1->v2 dirs collapse).
+// v2->v3 relocation (agent/model -> agent.json; network_mode/network_allow ->
+// netpolicy.json) is NOT done here — it is an explicit per-sandbox pass
+// (orchestrator.MigrateAgentConfigs); this ladder only covers the in-struct
+// steps (v0->v1 backend/image backfill, v1->v2 dirs collapse).
 func (e *Environment) MigrateRecord() error {
 	return migrate(e)
 }
@@ -206,8 +205,9 @@ func (e *Environment) MigrateRecord() error {
 // MigrateEnvironment runs the in-struct migration ladder on a record loaded from
 // raw bytes. Exported for the explicit `yoloai system migrate` per-sandbox pass,
 // which reads a pre-v3 record's raw JSON, relocates its agent/model into
-// agent.json, then calls this to bring the remaining substrate fields current
-// before re-saving at metaVersion.
+// agent.json and network_mode/network_allow into netpolicy.json, then calls
+// this to bring the remaining substrate fields current before re-saving at
+// metaVersion.
 func MigrateEnvironment(meta *Environment) error {
 	return migrate(meta)
 }

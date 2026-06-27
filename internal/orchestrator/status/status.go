@@ -15,6 +15,7 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/git"
+	"github.com/kstenerud/yoloai/internal/netpolicycfg"
 	"github.com/kstenerud/yoloai/internal/orchestrator/agentcfg"
 	"github.com/kstenerud/yoloai/internal/orchestrator/workprobe"
 	"github.com/kstenerud/yoloai/runtime"
@@ -55,11 +56,16 @@ type Info struct {
 	// agent.json (Q104 split them out of the substrate Environment record). They
 	// ride on Info — the aggregated read-model — rather than on Environment (the
 	// substrate view), alongside AgentStatus; an unmigrated record yields "".
-	AgentType   string      `json:"agent,omitempty"`
-	Model       string      `json:"model,omitempty"`
-	Status      Status      `json:"status"`
-	AgentStatus AgentStatus `json:"agent_status,omitempty"` // agent activity status (may be empty)
-	HasChanges  string      `json:"has_changes"`            // "yes", "no", "unknown" (stopped VM-local backend), or "-" (not applicable)
+	AgentType string `json:"agent,omitempty"`
+	Model     string `json:"model,omitempty"`
+	// NetworkMode and NetworkAllow are the sandbox's network policy, read from
+	// netpolicy.json (D90 split them out of the substrate Environment record).
+	// They ride on Info — the aggregated read-model — rather than on Environment.
+	NetworkMode  string      `json:"network_mode,omitempty"`
+	NetworkAllow []string    `json:"network_allow,omitempty"`
+	Status       Status      `json:"status"`
+	AgentStatus  AgentStatus `json:"agent_status,omitempty"` // agent activity status (may be empty)
+	HasChanges   string      `json:"has_changes"`            // "yes", "no", "unknown" (stopped VM-local backend), or "-" (not applicable)
 	// DiskUsageBytes is the total size of the sandbox directory in bytes, or
 	// -1 when it could not be measured. Rendering to a human-readable string
 	// is the CLI's responsibility (see cliutil.FormatSize).
@@ -314,10 +320,13 @@ func InspectSandbox(ctx context.Context, layout config.Layout, rt runtime.Backen
 	}
 
 	agentType, model := loadAgentIdentity(sandboxDir)
+	networkMode, networkAllow := loadNetworkPolicy(sandboxDir)
 	return &Info{
 		Environment:    meta,
 		AgentType:      agentType,
 		Model:          model,
+		NetworkMode:    networkMode,
+		NetworkAllow:   networkAllow,
 		Status:         status,
 		HasChanges:     detectWorkdirChanges(ctx, git.NewSandbox(layout, rt, name), sandboxDir, meta),
 		DiskUsageBytes: diskUsageBytes,
@@ -334,6 +343,17 @@ func loadAgentIdentity(sandboxDir string) (agentType, model string) {
 		return "", ""
 	}
 	return acfg.AgentType, acfg.Model
+}
+
+// loadNetworkPolicy reads a sandbox's netpolicy.json for the read-model.
+// Best-effort: a missing or unreadable netpolicy.json yields zero values
+// (a sandbox with default, non-isolated networking writes no record).
+func loadNetworkPolicy(sandboxDir string) (mode string, allow []string) {
+	np, err := netpolicycfg.Load(sandboxDir)
+	if err != nil {
+		return "", nil
+	}
+	return np.Mode, np.Allow
 }
 
 // detectWorkdirChanges returns "yes", "no", "unknown", or "-" for a sandbox's
@@ -388,6 +408,7 @@ func InspectSandboxWithBackend(ctx context.Context, layout config.Layout, rt run
 	}
 
 	agentType, model := loadAgentIdentity(sandboxDir)
+	networkMode, networkAllow := loadNetworkPolicy(sandboxDir)
 
 	// If runtime is nil, return basic info with unavailable status
 	if rt == nil {
@@ -395,6 +416,8 @@ func InspectSandboxWithBackend(ctx context.Context, layout config.Layout, rt run
 			Environment:    meta,
 			AgentType:      agentType,
 			Model:          model,
+			NetworkMode:    networkMode,
+			NetworkAllow:   networkAllow,
 			Status:         StatusUnavailable,
 			HasChanges:     "-",
 			DiskUsageBytes: diskUsageBytes,
@@ -411,6 +434,8 @@ func InspectSandboxWithBackend(ctx context.Context, layout config.Layout, rt run
 		Environment:    meta,
 		AgentType:      agentType,
 		Model:          model,
+		NetworkMode:    networkMode,
+		NetworkAllow:   networkAllow,
 		Status:         status,
 		HasChanges:     detectWorkdirChanges(ctx, git.NewSandbox(layout, rt, name), sandboxDir, meta),
 		DiskUsageBytes: diskUsageBytes,

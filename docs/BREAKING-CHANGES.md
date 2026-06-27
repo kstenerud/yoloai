@@ -53,6 +53,45 @@ MCP tool outputs (`sandbox_status`, `sandbox_list`, `sandbox_wait`) are **not
 affected** — they already build an explicit top-level `agent` key and did not
 expose the `environment` nesting.
 
+### Network policy moves off the substrate record onto `netpolicy.json` / `SandboxInfo` (D90)
+
+The network policy fields (`network_mode`, `network_allow`) are no longer fields
+of the substrate record. They are **network-layer config** — policy describing
+what the sandbox process is permitted to reach — not facts about the sandbox
+container itself, so they are split out (D90) into a dedicated record.
+
+- **On disk:** `environment.json` no longer carries `network_mode` /
+  `network_allow`. A new sibling file **`netpolicy.json`**
+  (`{"version":1,"network_mode":...,"network_allow":[...]}`) holds them. The
+  substrate record remains at schema **v3** — this relocation is part of the same
+  v3 migration step as the Q104 agent/model split above.
+- **Public read-model:** `yoloai.Environment` loses `NetworkMode` / `NetworkAllow`.
+  They move **top-level onto `yoloai.SandboxInfo`** (`info.NetworkMode`,
+  `info.NetworkAllow`), next to `AgentType` / `Model`.
+
+**Why:** the same principle as Q104 — the substrate record should carry
+constitutive facts about the sandbox container, not policy belonging to another
+layer. Network policy is orchestration-layer config (D90).
+
+**What breaks:** Go embedders reading `env.NetworkMode` / `env.NetworkAllow` off
+the `Environment` view, or parsing those keys out of `environment.json` on disk.
+Shell pipelines reading `network_mode` / `network_allow` from `--json` output
+must update their filters.
+
+**Migration:** `info.Environment.NetworkMode` → `info.NetworkMode`; likewise for
+`NetworkAllow`. The same **`yoloai system migrate`** that handles Q104 also
+writes `netpolicy.json` for each sandbox. The two sibling files (`agent.json`,
+`netpolicy.json`) are written before `environment.json` is rewritten, so a crash
+mid-migration is safe to resume.
+
+**CLI wire-format migration (`--json`):** `yoloai sandbox info --json` now emits
+`network_mode` and `network_allow` as **top-level keys** on the `SandboxInfo`
+object, not nested under `environment`:
+
+- `jq '.environment.network_mode'` → `jq '.network_mode'`
+- `jq '.environment.network_allow'` → `jq '.network_allow'`
+- `jq '.sandboxes[].environment.network_mode'` → `jq '.sandboxes[].network_mode'`
+
 ### `yoloai diff --json` gains `files`, `additions`, and `deletions` keys (additive)
 
 `yoloai diff <name> --json` now includes three additional keys alongside `diff`:

@@ -7,7 +7,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/kstenerud/yoloai/store"
+	"github.com/kstenerud/yoloai/internal/netpolicycfg"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -21,9 +21,9 @@ func TestNetworkRemove_SingleDomain(t *testing.T) {
 	cmd.SetArgs([]string{"nr-single", "deny", "drop.com"})
 	require.NoError(t, cmd.Execute())
 
-	meta, err := store.LoadEnvironment(sandboxDir)
+	np, err := netpolicycfg.Load(sandboxDir)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"keep.com"}, meta.NetworkAllow)
+	assert.Equal(t, []string{"keep.com"}, np.Allow)
 	assert.Contains(t, out.String(), "drop.com")
 	assert.Contains(t, out.String(), "will take effect on next start")
 }
@@ -37,9 +37,9 @@ func TestNetworkRemove_MultipleDomains(t *testing.T) {
 	cmd.SetArgs([]string{"nr-multi", "deny", "b.com", "d.com"})
 	require.NoError(t, cmd.Execute())
 
-	meta, err := store.LoadEnvironment(sandboxDir)
+	np, err := netpolicycfg.Load(sandboxDir)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"a.com", "c.com"}, meta.NetworkAllow)
+	assert.Equal(t, []string{"a.com", "c.com"}, np.Allow)
 }
 
 func TestNetworkRemove_AllDomains(t *testing.T) {
@@ -51,9 +51,10 @@ func TestNetworkRemove_AllDomains(t *testing.T) {
 	cmd.SetArgs([]string{"nr-all", "deny", "only.com"})
 	require.NoError(t, cmd.Execute())
 
-	meta, err := store.LoadEnvironment(sandboxDir)
+	np, err := netpolicycfg.Load(sandboxDir)
 	require.NoError(t, err)
-	assert.Nil(t, meta.NetworkAllow)
+	// Empty allow after removing the last domain — slice may be nil or empty.
+	assert.Empty(t, np.Allow)
 }
 
 func TestNetworkRemove_DomainNotInList(t *testing.T) {
@@ -109,7 +110,7 @@ func TestNetworkRemove_PreservesOrder(t *testing.T) {
 	cmd.SetArgs([]string{"nr-order", "deny", "middle.com"})
 	require.NoError(t, cmd.Execute())
 
-	meta, err := store.LoadEnvironment(sandboxDir)
+	np, err := netpolicycfg.Load(sandboxDir)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"first.com", "last.com"}, meta.NetworkAllow)
+	assert.Equal(t, []string{"first.com", "last.com"}, np.Allow)
 }

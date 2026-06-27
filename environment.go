@@ -40,8 +40,6 @@ type Environment struct {
 	Dirs []DirInfo `json:"dirs,omitempty"`
 
 	// Resolved-config echo.
-	NetworkMode        NetworkMode       `json:"network_mode,omitempty"`
-	NetworkAllow       []string          `json:"network_allow,omitempty"`
 	Ports              []string          `json:"ports,omitempty"`
 	Resources          *ProfileResources `json:"resources,omitempty"`
 	Mounts             []string          `json:"mounts,omitempty"`
@@ -119,8 +117,6 @@ func environmentFromStore(m *store.Environment) *Environment {
 		Headless:           m.Headless,
 		Isolation:          m.Isolation,
 		HostFilesystem:     m.HostFilesystem,
-		NetworkMode:        NetworkMode(m.NetworkMode),
-		NetworkAllow:       m.NetworkAllow,
 		Ports:              m.Ports,
 		Mounts:             m.Mounts,
 		Setup:              m.Setup,
@@ -163,6 +159,8 @@ func sandboxInfoFromStatus(si *orchestrator.Info) *SandboxInfo {
 		Environment:    environmentFromStore(si.Environment),
 		AgentType:      AgentType(si.AgentType),
 		Model:          si.Model,
+		NetworkMode:    NetworkMode(si.NetworkMode),
+		NetworkAllow:   si.NetworkAllow,
 		Status:         si.Status,
 		AgentStatus:    si.AgentStatus,
 		Changes:        ChangeState(si.HasChanges),

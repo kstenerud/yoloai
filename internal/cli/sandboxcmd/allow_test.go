@@ -7,7 +7,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/kstenerud/yoloai/store"
+	"github.com/kstenerud/yoloai/internal/netpolicycfg"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -21,10 +21,10 @@ func TestNetworkAdd_NewDomains(t *testing.T) {
 	cmd.SetArgs([]string{"na-new", "allow", "added.com"})
 	require.NoError(t, cmd.Execute())
 
-	// Verify persisted
-	meta, err := store.LoadEnvironment(sandboxDir)
+	// Verify persisted in netpolicy.json (D90).
+	np, err := netpolicycfg.Load(sandboxDir)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"existing.com", "added.com"}, meta.NetworkAllow)
+	assert.Equal(t, []string{"existing.com", "added.com"}, np.Allow)
 
 	// Output says "will take effect on next start" since Docker isn't running
 	assert.Contains(t, out.String(), "added.com")
@@ -52,9 +52,9 @@ func TestNetworkAdd_DeduplicateWithinInput(t *testing.T) {
 	cmd.SetArgs([]string{"na-inputdup", "allow", "dup.com", "dup.com", "unique.com"})
 	require.NoError(t, cmd.Execute())
 
-	meta, err := store.LoadEnvironment(sandboxDir)
+	np, err := netpolicycfg.Load(sandboxDir)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"dup.com", "unique.com"}, meta.NetworkAllow)
+	assert.Equal(t, []string{"dup.com", "unique.com"}, np.Allow)
 }
 
 func TestNetworkAdd_MultipleDomains(t *testing.T) {
@@ -66,9 +66,9 @@ func TestNetworkAdd_MultipleDomains(t *testing.T) {
 	cmd.SetArgs([]string{"na-multi", "allow", "a.com", "b.com", "c.com"})
 	require.NoError(t, cmd.Execute())
 
-	meta, err := store.LoadEnvironment(sandboxDir)
+	np, err := netpolicycfg.Load(sandboxDir)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"keep.com", "a.com", "b.com", "c.com"}, meta.NetworkAllow)
+	assert.Equal(t, []string{"keep.com", "a.com", "b.com", "c.com"}, np.Allow)
 }
 
 func TestNetworkAdd_NoDomainArg(t *testing.T) {

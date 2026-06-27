@@ -20,12 +20,13 @@ import (
 
 // TestMeta_SaveLoadRoundTrip is the comprehensive serialization round-trip: it
 // populates every persisted field (including the pointer-typed Resources, the
-// typed-segment Principal, and the slice fields Ports/NetworkAllow) and asserts
-// the loaded value equals the original byte-for-byte. A full-struct assert.Equal
-// subsumes every per-field round-trip, so there are deliberately no per-field
-// round-trip variants — only tests for distinct logic (omitempty, version
-// stamping, migration, version-too-new) live alongside. Agent/model are no longer
-// substrate fields (Q104) so they do not appear here.
+// typed-segment Principal, and the slice fields Ports) and asserts the loaded
+// value equals the original byte-for-byte. A full-struct assert.Equal subsumes
+// every per-field round-trip, so there are deliberately no per-field round-trip
+// variants — only tests for distinct logic (omitempty, version stamping,
+// migration, version-too-new) live alongside. Agent/model are no longer substrate
+// fields (Q104); network_mode/network_allow are no longer substrate fields (D90)
+// — they live in sibling agent.json / netpolicy.json.
 func TestMeta_SaveLoadRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 
@@ -40,10 +41,8 @@ func TestMeta_SaveLoadRoundTrip(t *testing.T) {
 			Mode:        "copy",
 			BaselineSHA: "a1b2c3d4e5f6",
 		}},
-		HasPrompt:    true,
-		NetworkMode:  "isolated",
-		NetworkAllow: []string{"api.anthropic.com", "sentry.io"},
-		Ports:        []string{"3000:3000", "8080:8080"},
+		HasPrompt: true,
+		Ports:     []string{"3000:3000", "8080:8080"},
 		Resources: &config.ResourceLimits{
 			CPUs:   "4",
 			Memory: "8g",
