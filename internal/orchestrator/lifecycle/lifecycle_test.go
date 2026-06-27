@@ -787,7 +787,14 @@ func TestReset_State(t *testing.T) {
 	for _, e := range entries {
 		names = append(names, e.Name())
 	}
-	assert.Equal(t, []string{"settings.json"}, names)
+	// Assert the two behaviors under test — the prior agent-runtime state
+	// (session.json) was wiped, and settings.json was re-applied — rather than the
+	// exact dir listing. On a host that actually has the agent's credentials, the
+	// restart's credential seeding also (correctly) materializes .credentials.json,
+	// e.g. from the macOS Keychain; exact-matching made the test depend on the
+	// developer's host not being logged in to the agent.
+	assert.NotContains(t, names, "session.json", "clear-state wipes the prior agent-runtime state")
+	assert.Contains(t, names, "settings.json", "settings.json is re-applied after the wipe")
 }
 
 func TestReset_RWMode_Error(t *testing.T) {
