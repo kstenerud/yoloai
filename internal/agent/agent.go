@@ -217,6 +217,20 @@ var agents = map[string]*Definition{
 		AgentFilesExclude: []string{"projects/", "statsig/", "todos/", ".credentials.json", "*.log"},
 		ApplySettings: func(s map[string]any) {
 			s["skipDangerousModePermissionPrompt"] = true
+			// Default the terminal renderer to the classic ("default") line
+			// renderer when the user hasn't chosen one. Claude Code added a "Try
+			// the new fullscreen renderer?" upsell that, when accepted, re-execs
+			// claude with only its own extraArgs — dropping our
+			// --dangerously-skip-permissions flag — so the relaunched session runs
+			// in default (ask) permission mode and stalls on a tool-permission
+			// prompt with no human to answer it. Claude suppresses the upsell once
+			// the persisted `tui` preference is set to ANY value, so we only fill
+			// it in when absent: an explicit user choice (default OR fullscreen)
+			// already prevents the upsell and is respected as-is. See
+			// docs/contributors/backend-idiosyncrasies.md (Claude fullscreen upsell).
+			if _, ok := s["tui"]; !ok {
+				s["tui"] = "default"
+			}
 			// Disable Claude Code's built-in sandbox-exec to prevent nesting failures.
 			// sandbox-exec cannot be nested — an inner sandbox-exec inherits the outer
 			// profile's restrictions and typically fails.

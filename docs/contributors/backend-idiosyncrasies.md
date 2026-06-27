@@ -116,6 +116,7 @@ inclusion test first, then add a row to the index.
 | `no podman socket found` on macOS though `podman machine` is running (any command: `system build`, `new`, …) | [Podman macOS: socket discovery needs TMPDIR](#macos-podman-machine-socket-discovery-needs-tmpdir-without-it-inspect-reports-a-stale-tmp-path) |
 | Smoke test: `stop_start/containerd-vm` fails with "agent idle for 9s+" | [QEMU: slow startup exceeds stall grace](#qemu-slow-startup-exceeds-smoke-test-stall-grace-period) |
 | Smoke test: `stop_start/tart` fails; exchange dir empty | [Tart: xcodebuild -runFirstLaunch blocks agent startup](#tart-xcodebuild--runfirstlaunch-blocks-agent-startup) |
+| Smoke `done` never fires; claude stuck on a Bash permission prompt despite `--dangerously-skip-permissions`; "fullscreen renderer" modal seen | [Claude: fullscreen upsell re-execs and drops the flag](#claude-the-fullscreen-renderer-upsell-re-execs-claude-and-drops---dangerously-skip-permissions) |
 | `yoloai new --attach` hangs after "Sandbox created"; Python setup never completes | [Tart: mount_map uses Docker paths, triggering macOS automount](#tart-mount_map-uses-docker-style-paths-triggering-macos-automount-hang) |
 | `yoloai apply` fails: `git add: git [add -A]: exit status 128: … index.lock: File exists` while agent is running | [Docker/Podman: agent git and apply git race on index.lock](#dockerpodman-agent-git-and-apply-git-race-on-indexlock) |
 | `FileNotFoundError: 'tmux'` in `sandbox-setup.py::setup_tmux_session` on Tart VM (intermittent) | [Tart: transient FS/PATH failure makes tmux unresolvable during the firstlaunch window](#tart-transient-fspath-failure-makes-tmux-unresolvable-during-the-firstlaunch-window) |
@@ -2231,3 +2232,41 @@ dying container.
 **Code:** `runtime/docker/resources/entrypoint.py` (`read_config`, `keepalive`),
 `runtime/docker/launch.go` (`Ready`/`Launch`),
 `internal/orchestrator/launch/launch.go` (`waitForReady`).
+
+## Claude: the "fullscreen renderer" upsell re-execs claude and drops `--dangerously-skip-permissions`
+
+**Symptom:** Agent smokes (clone, every `stop_start/*` backend) stall — the `done`
+sentinel never fires. The preserved `terminal-snapshot.txt` shows claude parked on a
+**Bash tool-permission prompt** ("Do you want to proceed? 1. Yes / 2. Yes, and don't
+ask again / 3. No") **even though `claude --dangerously-skip-permissions` was launched**
+(confirmed in `agent.log`). A *"Try the new fullscreen renderer?"* modal appears earlier
+in the same run. Pinning claude to an "older" version does **not** help — the same prompt
+appears on 2.1.177.
+
+**Explanation:** Claude Code added a fullscreen-renderer upsell. Decompiling the
+`claude.exe` bundle: the upsell-gate `In9()` shows it unless `EK()` (already fullscreen),
+`n6().tui !== undefined` (renderer already chosen by the user), `!WF8()`, or a seen-count
+cap. When the upsell is **accepted**, claude relaunches itself via
+`yTH({freshIfNoTranscript:true, extraArgs})` — and for a fresh session the args are
+**only the upsell's own `extraArgs`**, so the original `--dangerously-skip-permissions`
+is **dropped**. The re-execed session therefore runs in default *ask* permission mode and
+blocks on the first tool call, with no human in the tmux pane to answer. The real-run
+`agent.log` corroborates the order: the `fullscreen renderer` text precedes the `[?1049h`
+(enter-alternate-screen) escape — i.e. the upsell was accepted, *then* claude switched to
+fullscreen via the flagless re-exec. Note `skipDangerousModePermissionPrompt` only skips
+the bypass-mode **dialog**; it does not re-select bypass mode after a flagless relaunch.
+This is **not** version drift and **not** a yoloAI infra bug (launch/keepalive/tmux/
+prompt-delivery are all fine) — only the agent-under-test changed.
+
+**Fix:** Default the renderer to classic at the agent layer — claude's `ApplySettings`
+sets `settings.tui = "default"` **only when the user hasn't already chosen a `tui`**. That
+makes `In9()`'s `n6().tui !== undefined` check treat the renderer as already chosen, so the
+upsell **never appears** → no flagless re-exec → `--dangerously-skip-permissions` stays in
+effect. An explicit user `tui` (default *or* fullscreen) is respected as-is — any value
+suppresses the upsell, so we never clobber it. `tui` is a real persisted Claude setting
+(`"Set the terminal UI renderer (default | fullscreen)"`), so this is version-robust rather
+than chasing each new onboarding modal. With the root cause fixed, the Dockerfile claude
+pin was removed (no-pin policy restored).
+
+**Code:** `internal/agent/agent.go` (claude `ApplySettings`, `s["tui"] = "default"`);
+`internal/agent/agent_test.go` (`TestApplySettings_Claude`).
