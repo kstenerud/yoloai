@@ -92,17 +92,17 @@ func TestKeepaliveOnly_AgentFreeStartup(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, info.Running, "container should be running under keepalive_only")
 
-	// Give the entrypoint a moment to exec into sleep.
-	time.Sleep(500 * time.Millisecond)
+	// Wait until the neutral keeper (sleep) is the running holder. The entrypoint
+	// writes .substrate-ready and then execs gosu→sleep, so poll for the process
+	// rather than sleeping a fixed interval, which races a slow or loaded host
+	// (rt.Exec returns an error when pgrep finds nothing and exits non-zero).
+	require.Eventually(t, func() bool {
+		r, _ := rt.Exec(ctx, name, []string{"pgrep", "-x", "sleep"}, "root")
+		return r.ExitCode == 0
+	}, 15*time.Second, 200*time.Millisecond, "sleep keeper (neutral holder) never started under keepalive_only")
 
 	// Assert agent-free: sandbox-setup.py must NOT be running.
 	noAgent, _ := rt.Exec(ctx, name, []string{"pgrep", "-f", "sandbox-setup.py"}, "root")
 	assert.NotEqual(t, 0, noAgent.ExitCode,
 		"sandbox-setup.py must not be running under keepalive_only; pgrep should exit non-zero")
-
-	// Assert the neutral holder is running.
-	sleepProc, err := rt.Exec(ctx, name, []string{"pgrep", "-x", "sleep"}, "root")
-	require.NoError(t, err)
-	assert.Equal(t, 0, sleepProc.ExitCode,
-		"sleep process (the neutral keeper) should be running under keepalive_only")
 }
