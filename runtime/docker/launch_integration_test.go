@@ -37,6 +37,17 @@ func launchTestInstance(t *testing.T, name string) *Runtime {
 	require.NoError(t, rt.Create(ctx, cfg))
 	t.Cleanup(func() { _ = rt.Remove(ctx, name) })
 	require.NoError(t, rt.Start(ctx, name))
+
+	// Gate on substrate readiness before launching, exactly as production does
+	// (internal/orchestrator/launch.startViaLaunch → waitForReady → Ready()). A
+	// bare InstanceConfig has no runtime-config.json, so the entrypoint comes up
+	// in agent-free keepalive mode and writes the .substrate-ready marker once its
+	// init is up; gating on it avoids exec'ing into a container whose init isn't
+	// ready yet, which surfaces as runc "procReady not received".
+	require.Eventually(t, func() bool {
+		ready, err := rt.Ready(ctx, name)
+		return err == nil && ready
+	}, 30*time.Second, 100*time.Millisecond, "substrate did not become ready for exec")
 	return rt
 }
 
@@ -57,7 +68,10 @@ func TestLaunchNonTTYExitCode(t *testing.T) {
 
 	streams := proc.Streams()
 	require.NotNil(t, streams.Stdout)
-	assert.Nil(t, streams.Stderr, "non-TTY: stderr pipe should not be nil, but for this test we ignore it")
+	// A non-TTY launch demuxes the multiplexed exec stream into separate stdout
+	// and stderr pipes (buildProcessStreams), so Stderr is a real reader here — we
+	// just don't assert on its content in this test.
+	require.NotNil(t, streams.Stderr, "non-TTY: stderr is demuxed to its own pipe")
 
 	// Read stdout before Wait — the goroutine demuxes asynchronously.
 	stdoutBytes, err := io.ReadAll(streams.Stdout)

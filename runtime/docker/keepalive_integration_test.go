@@ -75,6 +75,16 @@ func TestKeepaliveOnly_AgentFreeStartup(t *testing.T) {
 	t.Cleanup(func() { _ = rt.Remove(ctx, name) })
 	require.NoError(t, rt.Start(ctx, name))
 
+	// The entrypoint runs as root and writes .substrate-ready (and its logs) into
+	// the bind-mounted logs dir, so under rootful Docker (container root = host
+	// root) those files are root-owned and the non-root test process can't unlink
+	// them during t.TempDir cleanup. Remove them from inside the container, where
+	// root can. Registered after Start so it runs (cleanups are LIFO) before the
+	// rt.Remove and TempDir cleanups — while the container is still alive.
+	t.Cleanup(func() {
+		_, _ = rt.Exec(ctx, name, []string{"find", "/yoloai/logs", "-mindepth", "1", "-delete"}, "root")
+	})
+
 	// Wait for the container to be running (sleep infinity should hold it up).
 	testutil.WaitForActive(ctx, t, rt, name, 15*time.Second)
 
