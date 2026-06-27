@@ -9,9 +9,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kstenerud/yoloai/runtime"
-	// Side-effect imports register each backend's descriptor via init().
+	// Side-effect imports register each backend's descriptor via init(). These
+	// backends all have a platform-neutral descriptor, so they register (and this
+	// file compiles) on every host. containerd is linux-only (its Go client deps
+	// build only on linux) — its import + assertion live in keepalive_linux_test.go,
+	// mirroring the binary's runtime_imports_linux.go.
 	_ "github.com/kstenerud/yoloai/runtime/apple"
-	_ "github.com/kstenerud/yoloai/runtime/containerd"
 	_ "github.com/kstenerud/yoloai/runtime/docker"
 	_ "github.com/kstenerud/yoloai/runtime/podman"
 	_ "github.com/kstenerud/yoloai/runtime/seatbelt"
@@ -33,7 +36,6 @@ func TestKeepAliveModelOf_PerBackend(t *testing.T) {
 	}{
 		{runtime.BackendDocker, runtime.KeepAliveContainerInit},
 		{runtime.BackendPodman, runtime.KeepAliveContainerInit},
-		{runtime.BackendContainerd, runtime.KeepAliveGuestOSInit},
 		{runtime.BackendTart, runtime.KeepAliveGuestOSInit},
 		{runtime.BackendApple, runtime.KeepAliveGuestOSInit},
 		{runtime.BackendSeatbelt, runtime.KeepAliveHostKeepAlive},
