@@ -126,20 +126,51 @@ Toolchain confirmed: qemu 8.2.2 (`-M microvm` +
   + `-machine …,memory-backend=mem`) and a `virtiofsd --socket-path --shared-dir` daemon
   per VM. Validated against the rebuilt kernel in spike Phase B.
 
+## Increment-2 image model (settled 2026-06-27 from the build-flow map)
+
+microvm reuses the existing Docker build pipeline exactly as **containerd does**
+(containerd's `Setup` already shells out to `docker build` to produce `yoloai-base`,
+then converts). So microvm is **not** a from-scratch image builder:
+
+- The agent CLIs + entrypoint scripts live in `yoloai-base` (built by Docker from
+  `debian:bookworm-slim`, `runtime/docker/resources/Dockerfile`). microvm inherits all of it.
+- microvm adds a thin **`FROM yoloai-base`** layer (an embedded Dockerfile, like the
+  base resources) installing `linux-image-amd64 qemu-guest-agent systemd-sysv` — the
+  distro kernel, the guest agent, and a real init. Image tag e.g. `yoloai-base-microvm`
+  / `yoloai-<profile>-microvm`.
+- **Architectural consequence:** microvm needs **Docker at *build* time** (no
+  registry-hosted `yoloai-base`) — consistent with containerd, accepted rather than
+  reimplementing a docker-free base build.
+- **bookworm kernel note:** the base distro is bookworm (6.1); `VIRTIO_FS`/`FUSE_FS`/
+  `VIRTIO_CONSOLE` are `=m` there (built-in on trixie/6.12 in the spike) → they rely
+  on udev/modprobe autoload at boot rather than being baked in. Validate the bookworm
+  boot in sub-step (b); if autoload is flaky, pin a newer base for the microvm layer
+  or force the modules via `/etc/modules-load.d` + `initramfs-tools/modules`.
+
 ## Build sub-steps (sizes from the scope)
 
-- **(a) Rootfs builder — `Setup()`/`IsReady()` (M):** `skopeo copy docker://<profile> oci:…`
-  → `umoci unpack` → inject a **neutral keepalive init** (NOT pve's login-respawn —
-  a minimal reaper for the D88 model) → `mkfs.ext4 -F -d <rootfs> disk.raw` (no
-  loop-mount, rootless-safe) → optional `qemu-img convert` to qcow2. Greenfield Go
-  wrapping the CLI tools.
+- **(a) Rootfs builder — `Setup()`/`IsReady()` (M):** build the `…-microvm` image via
+  the Docker pipeline (mirror containerd's lock + build-inputs checksum + fast-path),
+  then convert: `skopeo copy docker-daemon:<image> oci:…` → `umoci unpack` →
+  `mkfs.ext4 -F -d <rootfs> disk.raw` (no loop-mount; `umoci` needs root/userns for
+  ownership) → **extract `/boot/vmlinuz*` + `/boot/initrd.img*`** from the rootfs to a
+  cached location for `-kernel`/`-initrd`. The ext4 is the **golden** read-only base;
+  `Create` makes a per-instance writable **qcow2 overlay** backed by it (instant, like
+  `tart clone`). `IsReady` checks the golden ext4 + kernel + initrd exist. Cache under
+  `<DataDir>/microvm/`. Greenfield Go wrapping the CLI tools.
 - **(b) QEMU lifecycle — Create/Start/Stop/Remove/Inspect/Prune (L):** per-instance
-  config in `~/.yoloai/sandboxes/<name>/`; `Start` execs the daemonized
-  `qemu-system-x86_64 -M microvm -kernel … -append "console=ttyS0 root=/dev/vda rw …"
-  -nodefaults -nographic -drive …,if=none,id=d0 -device virtio-blk-device …
-  -device virtio-net-device,netdev=n0 -netdev tap,…`, PID to instance dir; Stop =
-  SIGTERM→SIGKILL escalation (reuse the `runtime/docker` pattern); Inspect = PID-alive
-  check. TAP add/cleanup in Start/Remove. **Biggest chunk.**
+  config + overlay disk in `~/.yoloai/sandboxes/<name>/`; `Start` execs the daemonized
+  validated invocation (distro-kernel path): `qemu-system-x86_64 -machine
+  microvm,acpi=on,memory-backend=mem -enable-kvm -cpu host -m … -kernel <vmlinuz>
+  -initrd <initrd.img> -append "console=ttyS0 root=/dev/vda rw rootfstype=ext4"
+  -drive …,if=none,id=root -device virtio-blk-device,drive=root
+  -object memory-backend-memfd,id=mem,size=…,share=on
+  -chardev socket,id=qga,… -device virtio-serial-device -device virtserialport,…name=org.qemu.guest_agent.0
+  -chardev socket,id=vfs,… -device vhost-user-fs-device,chardev=vfs,tag=workdir
+  -nodefaults -no-reboot -nographic -serial file:serial.log` (+ `virtiofsd` per VM);
+  PID to instance dir; Stop = SIGTERM→SIGKILL escalation (reuse the `runtime/docker`
+  pattern); Inspect = PID-alive check. TAP add/cleanup deferred (networking, sub-step d).
+  **Biggest chunk.**
 - **(c) Exec / session (M):** **guest-agent (QGA)** over virtio-serial UNIX socket
   for non-interactive `Exec` + the `ProcessLauncher.Launch` headless path (JSON
   `{out-data,err-data,exitcode}` → `runtime.ExecResult`); **serial console** on a
