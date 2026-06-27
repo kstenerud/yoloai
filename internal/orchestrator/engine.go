@@ -322,28 +322,15 @@ func (e *Engine) Runtime() runtime.Backend {
 	return e.runtime
 }
 
-// Status returns the current lifecycle status of a sandbox.
-func (e *Engine) Status(ctx context.Context, name string) (Status, error) {
-	if err := e.ensure(ctx); err != nil {
-		return "", err
-	}
-	return DetectStatus(ctx, e.runtime, store.InstanceName(e.layout.Principal, name), e.layout.SandboxDir(name))
-}
-
 // SandboxFiles returns the path to the per-sandbox file exchange directory.
 func (e *Engine) SandboxFiles(name string) string {
 	return store.FilesDir(e.layout.SandboxDir(name))
 }
 
-// SandboxCache returns the path to the per-sandbox cache directory.
-func (e *Engine) SandboxCache(name string) string {
-	return store.CacheDir(e.layout.SandboxDir(name))
-}
-
 // SendInput sends text to the sandbox agent's terminal via tmux send-keys.
 // If the agent is running, this interrupts it mid-task. If the agent is idle
 // at its prompt, this sends a follow-up message. The caller should check
-// Engine.Status before calling to know which case applies.
+// the sandbox status (via Inspect) before calling to know which case applies.
 //
 // Acquires the per-sandbox lock (Q-T): SendInput mutates sandbox state
 // (injects keystrokes into the running agent's tmux session), so it

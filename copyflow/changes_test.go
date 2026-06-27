@@ -13,12 +13,12 @@ import (
 // DetectChanges tests
 
 func TestDetectChanges_NoWorkDir(t *testing.T) {
-	assert.Equal(t, "-", DetectChanges(context.Background(), git.NewHostWithEnv(testEnv()), "/nonexistent/path"))
+	assert.Equal(t, "-", DetectChanges(context.Background(), git.NewTestHostWithEnv(testEnv()), "/nonexistent/path"))
 }
 
 func TestDetectChanges_NotGitRepo(t *testing.T) {
 	dir := t.TempDir()
-	assert.Equal(t, "-", DetectChanges(context.Background(), git.NewHostWithEnv(testEnv()), dir))
+	assert.Equal(t, "-", DetectChanges(context.Background(), git.NewTestHostWithEnv(testEnv()), dir))
 }
 
 func TestDetectChanges_CleanRepo(t *testing.T) {
@@ -28,7 +28,7 @@ func TestDetectChanges_CleanRepo(t *testing.T) {
 	gitAdd(t, dir, ".")
 	gitCommit(t, dir, "initial")
 
-	assert.Equal(t, "no", DetectChanges(context.Background(), git.NewHostWithEnv(testEnv()), dir))
+	assert.Equal(t, "no", DetectChanges(context.Background(), git.NewTestHostWithEnv(testEnv()), dir))
 }
 
 func TestDetectChanges_DirtyRepo(t *testing.T) {
@@ -39,7 +39,7 @@ func TestDetectChanges_DirtyRepo(t *testing.T) {
 	gitCommit(t, dir, "initial")
 
 	writeTestFile(t, dir, "file.txt", "modified")
-	assert.Equal(t, "yes", DetectChanges(context.Background(), git.NewHostWithEnv(testEnv()), dir))
+	assert.Equal(t, "yes", DetectChanges(context.Background(), git.NewTestHostWithEnv(testEnv()), dir))
 }
 
 func TestDetectChanges_UntrackedFiles(t *testing.T) {
@@ -50,7 +50,7 @@ func TestDetectChanges_UntrackedFiles(t *testing.T) {
 	gitCommit(t, dir, "initial")
 
 	writeTestFile(t, dir, "new.txt", "untracked")
-	assert.Equal(t, "yes", DetectChanges(context.Background(), git.NewHostWithEnv(testEnv()), dir))
+	assert.Equal(t, "yes", DetectChanges(context.Background(), git.NewTestHostWithEnv(testEnv()), dir))
 }
 
 // HasUnappliedWorkVia tests. A host-scoped runner runs git directly on the host
@@ -60,7 +60,7 @@ func TestDetectChanges_UntrackedFiles(t *testing.T) {
 // package where a runtime mock exists.
 
 func TestHasUnappliedWorkVia_NoWorkDir(t *testing.T) {
-	assert.Equal(t, WorkClean, HasUnappliedWorkVia(context.Background(), git.NewHostWithEnv(testEnv()), "/nonexistent/path", "abc123"))
+	assert.Equal(t, WorkClean, HasUnappliedWorkVia(context.Background(), git.NewTestHostWithEnv(testEnv()), "/nonexistent/path", "abc123"))
 }
 
 func TestHasUnappliedWorkVia_CleanAtBaseline(t *testing.T) {
@@ -71,7 +71,7 @@ func TestHasUnappliedWorkVia_CleanAtBaseline(t *testing.T) {
 	gitCommit(t, dir, "initial")
 
 	sha := gitRevParse(t, dir)
-	assert.Equal(t, WorkClean, HasUnappliedWorkVia(context.Background(), git.NewHostWithEnv(testEnv()), dir, sha))
+	assert.Equal(t, WorkClean, HasUnappliedWorkVia(context.Background(), git.NewTestHostWithEnv(testEnv()), dir, sha))
 }
 
 func TestHasUnappliedWorkVia_DirtyWorkingTree(t *testing.T) {
@@ -83,7 +83,7 @@ func TestHasUnappliedWorkVia_DirtyWorkingTree(t *testing.T) {
 
 	sha := gitRevParse(t, dir)
 	writeTestFile(t, dir, "file.txt", "modified")
-	assert.Equal(t, WorkDirty, HasUnappliedWorkVia(context.Background(), git.NewHostWithEnv(testEnv()), dir, sha))
+	assert.Equal(t, WorkDirty, HasUnappliedWorkVia(context.Background(), git.NewTestHostWithEnv(testEnv()), dir, sha))
 }
 
 func TestHasUnappliedWorkVia_CommitsBeyondBaseline(t *testing.T) {
@@ -100,7 +100,7 @@ func TestHasUnappliedWorkVia_CommitsBeyondBaseline(t *testing.T) {
 	gitAdd(t, dir, ".")
 	gitCommit(t, dir, "agent work")
 
-	assert.Equal(t, WorkDirty, HasUnappliedWorkVia(context.Background(), git.NewHostWithEnv(testEnv()), dir, baselineSHA))
+	assert.Equal(t, WorkDirty, HasUnappliedWorkVia(context.Background(), git.NewTestHostWithEnv(testEnv()), dir, baselineSHA))
 }
 
 func TestHasUnappliedWorkVia_EmptyBaseline(t *testing.T) {
@@ -111,5 +111,5 @@ func TestHasUnappliedWorkVia_EmptyBaseline(t *testing.T) {
 	gitCommit(t, dir, "initial")
 
 	// Empty baseline — can't check commits, only dirty tree
-	assert.Equal(t, WorkClean, HasUnappliedWorkVia(context.Background(), git.NewHostWithEnv(testEnv()), dir, ""))
+	assert.Equal(t, WorkClean, HasUnappliedWorkVia(context.Background(), git.NewTestHostWithEnv(testEnv()), dir, ""))
 }

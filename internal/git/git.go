@@ -24,8 +24,8 @@ type execer interface {
 	run(ctx context.Context, workDir string, stdin []byte, args ...string) (stdout string, err error)
 }
 
-// Git is the unified git executor. Construct it with NewHost, NewHostWithEnv,
-// or NewSandbox. All operations accept a context as their first argument.
+// Git is the unified git executor. Construct it with NewHost, NewTestHostWithEnv
+// (tests), or NewSandbox. All operations accept a context as their first argument.
 type Git struct {
 	e       execer
 	tempDir string // yoloai-owned temp root (layout.TempDir()); empty → os.TempDir() fallback
@@ -37,10 +37,9 @@ func NewHost(layout config.Layout) *Git {
 	return &Git{e: hostExec{env: layout.Env().EnvForGitInvocation()}, tempDir: layout.TempDir()}
 }
 
-// NewHostWithEnv returns a host-scoped Git with an explicit, already-curated env.
-// Use in tests (testutil.GitEnv) and transitional workspace wrappers.
-// Prefer NewHost in production code.
-func NewHostWithEnv(env []string) *Git {
+// NewTestHostWithEnv returns a host-scoped Git with an explicit, already-curated env.
+// TEST-ONLY: production code uses NewHost.
+func NewTestHostWithEnv(env []string) *Git {
 	return &Git{e: hostExec{env: env}}
 }
 
@@ -55,21 +54,6 @@ func NewSandbox(layout config.Layout, rt runtime.Backend, name string) *Git {
 		return &Git{e: sandboxExec{env: env, rt: rt, name: name}, tempDir: layout.TempDir()}
 	}
 	return &Git{e: hostExec{env: env}, tempDir: layout.TempDir()}
-}
-
-// ─── low-level ───────────────────────────────────────────────────────────────
-
-// Cmd builds a raw *exec.Cmd for git in dir with hooks disabled. Use for the
-// few call sites in workspace/tags.go that wire stdin/stdout themselves; prefer
-// Run/RunCmd or the higher-level ops in all new code.
-func (g *Git) Cmd(dir string, args ...string) *exec.Cmd {
-	// Only the host execer exposes a raw Cmd; sandbox scope doesn't support it.
-	// Unwrap to hostExec if possible, otherwise panic to surface a misuse.
-	if h, ok := g.e.(hostExec); ok {
-		fullArgs := append([]string{"-c", "core.hooksPath=/dev/null", "-C", dir}, args...)
-		return sysexec.Command(h.env, "git", fullArgs...)
-	}
-	panic("git.Git.Cmd is only supported for host-scoped executors")
 }
 
 // Run executes a git command in workDir and returns stdout.

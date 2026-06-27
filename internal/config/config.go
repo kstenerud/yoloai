@@ -141,19 +141,6 @@ var knownDefaultsKeys = map[string]bool{
 	"devices": true, "setup": true,
 }
 
-// knownProfileKeys: valid top-level keys in profiles/<name>/config.yaml.
-// Superset of defaults keys — adds workdir and directories.
-var knownProfileKeys = map[string]bool{
-	"os": true, "agent": true, "model": true, "container_backend": true,
-	"isolation": true, "tart": true, "network": true, "agent_files": true,
-	"mounts": true, "ports": true, "resources": true, "agent_args": true,
-	"env": true, "auto_commit_interval": true, "cap_add": true,
-	"devices": true, "setup": true,
-	"workdir": true, "directories": true, // profile-only
-	// backend is kept for profile backend constraint (different from container_backend)
-	"backend": true,
-}
-
 // yoloaiConfigHandler is a function that handles a single YAML key in a YoloaiConfig.
 type yoloaiConfigHandler func(cfg *YoloaiConfig, val *yaml.Node, env map[string]string) error
 

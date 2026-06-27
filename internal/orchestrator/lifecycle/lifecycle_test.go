@@ -72,7 +72,7 @@ func createRWSandbox(t *testing.T, tmpDir, name, hostPath string) {
 // gitHEAD returns the HEAD commit SHA for the git repo at dir.
 func gitHEAD(t *testing.T, dir string) string {
 	t.Helper()
-	sha, err := git.NewHostWithEnv(testutil.GitEnv()).HeadSHA(context.Background(), dir)
+	sha, err := git.NewTestHostWithEnv(testutil.GitEnv()).HeadSHA(context.Background(), dir)
 	require.NoError(t, err)
 	return sha
 }

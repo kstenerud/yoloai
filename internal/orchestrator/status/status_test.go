@@ -364,14 +364,14 @@ func TestParseStatusJSON(t *testing.T) {
 // ProbeWorkData tests
 
 func TestProbeWorkData_NoWorkDir(t *testing.T) {
-	st, _ := ProbeWorkData(context.Background(), git.NewHostWithEnv(testutil.GitEnv()), t.TempDir())
+	st, _ := ProbeWorkData(context.Background(), git.NewTestHostWithEnv(testutil.GitEnv()), t.TempDir())
 	assert.Equal(t, WorkDataNone, st)
 }
 
 func TestProbeWorkData_EmptyWorkDir(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.Mkdir(filepath.Join(dir, "work"), 0o750))
-	st, _ := ProbeWorkData(context.Background(), git.NewHostWithEnv(testutil.GitEnv()), dir)
+	st, _ := ProbeWorkData(context.Background(), git.NewTestHostWithEnv(testutil.GitEnv()), dir)
 	assert.Equal(t, WorkDataNone, st)
 }
 
@@ -385,7 +385,7 @@ func TestProbeWorkData_CopyCleanIsAmbiguous(t *testing.T) {
 	testutil.GitCommit(t, work, "initial")
 
 	// Clean tree, but baseline is unknown without meta — preserve it.
-	st, _ := ProbeWorkData(context.Background(), git.NewHostWithEnv(testutil.GitEnv()), dir)
+	st, _ := ProbeWorkData(context.Background(), git.NewTestHostWithEnv(testutil.GitEnv()), dir)
 	assert.Equal(t, WorkDataAmbiguous, st)
 }
 
@@ -399,7 +399,7 @@ func TestProbeWorkData_CopyDirtyIsPresent(t *testing.T) {
 	testutil.GitCommit(t, work, "initial")
 	testutil.WriteFile(t, work, "file.txt", "modified")
 
-	st, detail := ProbeWorkData(context.Background(), git.NewHostWithEnv(testutil.GitEnv()), dir)
+	st, detail := ProbeWorkData(context.Background(), git.NewTestHostWithEnv(testutil.GitEnv()), dir)
 	assert.Equal(t, WorkDataPresent, st)
 	assert.NotEmpty(t, detail)
 }
@@ -410,7 +410,7 @@ func TestProbeWorkData_OverlayUpperNonEmptyIsPresent(t *testing.T) {
 	require.NoError(t, os.MkdirAll(upper, 0o750))
 	testutil.WriteFile(t, upper, "changed.txt", "diff")
 
-	st, detail := ProbeWorkData(context.Background(), git.NewHostWithEnv(testutil.GitEnv()), dir)
+	st, detail := ProbeWorkData(context.Background(), git.NewTestHostWithEnv(testutil.GitEnv()), dir)
 	assert.Equal(t, WorkDataPresent, st)
 	assert.NotEmpty(t, detail)
 }
@@ -421,6 +421,6 @@ func TestProbeWorkData_OverlayUpperEmptyIsAmbiguous(t *testing.T) {
 	upper := filepath.Join(dir, "work", store.EncodePath("/home/u/proj"), "upper")
 	require.NoError(t, os.MkdirAll(upper, 0o750))
 
-	st, _ := ProbeWorkData(context.Background(), git.NewHostWithEnv(testutil.GitEnv()), dir)
+	st, _ := ProbeWorkData(context.Background(), git.NewTestHostWithEnv(testutil.GitEnv()), dir)
 	assert.Equal(t, WorkDataAmbiguous, st)
 }

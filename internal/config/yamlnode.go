@@ -489,13 +489,3 @@ func splitDottedPath(path string) []string {
 	parts = append(parts, path[start:])
 	return parts
 }
-
-// FindYAMLValue returns the value node for a top-level key in a mapping.
-func FindYAMLValue(root *yaml.Node, key string) *yaml.Node {
-	for i := 0; i < len(root.Content)-1; i += 2 {
-		if root.Content[i].Value == key {
-			return root.Content[i+1]
-		}
-	}
-	return nil
-}

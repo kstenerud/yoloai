@@ -156,7 +156,7 @@ func TestGitBaseline_FreshInit(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, dir, "file.txt", "hello")
 
-	sha, err := git.NewHostWithEnv(testutil.GitEnv()).Baseline(context.Background(), dir)
+	sha, err := git.NewTestHostWithEnv(testutil.GitEnv()).Baseline(context.Background(), dir)
 	require.NoError(t, err)
 	assert.Len(t, sha, 40)
 
@@ -168,7 +168,7 @@ func TestGitBaseline_FreshInit(t *testing.T) {
 func TestGitBaseline_EmptyDir(t *testing.T) {
 	dir := t.TempDir()
 
-	sha, err := git.NewHostWithEnv(testutil.GitEnv()).Baseline(context.Background(), dir)
+	sha, err := git.NewTestHostWithEnv(testutil.GitEnv()).Baseline(context.Background(), dir)
 	require.NoError(t, err)
 	assert.Len(t, sha, 40, "allow-empty should produce a valid commit")
 }
@@ -176,14 +176,14 @@ func TestGitBaseline_EmptyDir(t *testing.T) {
 func TestGitBaseline_EmptyGitRepo(t *testing.T) {
 	// Regression test: git init with no commits should be handled gracefully
 	dir := t.TempDir()
-	require.NoError(t, git.NewHostWithEnv(testutil.GitEnv()).RunCmd(context.Background(), dir, "init"))
+	require.NoError(t, git.NewTestHostWithEnv(testutil.GitEnv()).RunCmd(context.Background(), dir, "init"))
 	writeTestFile(t, dir, "file.txt", "hello")
 
 	// setupWorkdir should remove the empty .git and create a fresh baseline.
 	sandboxDir := filepath.Join(t.TempDir(), "test-sandbox")
 	workdir := &DirSpec{Path: dir, Mode: DirMode("copy")}
 	rt := &mockDockerRuntime{} // Docker-like backend: creates baseline on host
-	_, sha, err := setupWorkdir(context.Background(), git.NewHostWithEnv(testutil.GitEnv()), sandboxDir, workdir, rt)
+	_, sha, err := setupWorkdir(context.Background(), git.NewTestHostWithEnv(testutil.GitEnv()), sandboxDir, workdir, rt)
 	require.NoError(t, err)
 	assert.Len(t, sha, 40)
 }

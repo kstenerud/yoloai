@@ -207,8 +207,8 @@ func handleProfileDirectories(cfg *ProfileConfig, val *yaml.Node, env map[string
 //
 // Common keys are dispatched through the shared yoloaiConfigHandlers (onto the
 // embedded YoloaiConfig); the three profile-only keys go through
-// profileOnlyHandlers (IC2 fold). Unknown keys are silently ignored — unlike
-// LoadProfileConfig, LoadProfile does not validate against knownProfileKeys.
+// profileOnlyHandlers (IC2 fold). Unknown keys are silently ignored — LoadProfile
+// does not validate top-level keys.
 func LoadProfile(layout Layout, name string) (*ProfileConfig, error) {
 	dir := layout.ProfileDir(name)
 	path := filepath.Join(dir, "config.yaml")
@@ -256,32 +256,6 @@ func LoadProfile(layout Layout, name string) (*ProfileConfig, error) {
 	}
 
 	return cfg, nil
-}
-
-// LoadProfileConfig loads the effective config for the with-profile path:
-// baked-in defaults merged with DataDir/profiles/<name>/config.yaml.
-// defaults/config.yaml is NOT consulted — profiles are self-contained.
-func LoadProfileConfig(layout Layout, name string) (*YoloaiConfig, error) {
-	base, err := LoadBakedInDefaults()
-	if err != nil {
-		return nil, err
-	}
-
-	profileConfigPath := filepath.Join(layout.ProfileDir(name), "config.yaml")
-	data, err := os.ReadFile(profileConfigPath) //nolint:gosec // G304: path is from profile directory
-	if err != nil {
-		if os.IsNotExist(err) {
-			return base, nil
-		}
-		return nil, fmt.Errorf("read profile config: %w", err)
-	}
-
-	override, err := parseConfigYAML(data, profileConfigPath, knownProfileKeys, layout.Env().EnvForConfigInterpolation())
-	if err != nil {
-		return nil, err
-	}
-
-	return mergeConfigs(base, override), nil
 }
 
 // ResolveProfileImage returns the Docker image tag for a sandbox using the
@@ -547,34 +521,4 @@ func ValidateProfileBackend(profileBackend, resolvedBackend string) error {
 		return fmt.Errorf("profile requires backend %q but resolved backend is %q", profileBackend, resolvedBackend)
 	}
 	return nil
-}
-
-// LoadMergedConfig loads the baked-in defaults and merges the named profile
-// in a single call. If profileName is empty, returns defaults with no profile.
-func LoadMergedConfig(layout Layout, profileName string) (*MergedConfig, error) {
-	if profileName == "" {
-		base, err := LoadDefaultsConfig(layout)
-		if err != nil {
-			return nil, err
-		}
-		return &MergedConfig{
-			Agent:            base.Agent,
-			Model:            base.Model,
-			OS:               base.OS,
-			ContainerBackend: base.ContainerBackend,
-			Env:              base.Env,
-		}, nil
-	}
-
-	base, err := LoadBakedInDefaults()
-	if err != nil {
-		return nil, err
-	}
-
-	// Use legacy chain resolution for backward compatibility
-	chain, err := ResolveProfileChain(layout, profileName)
-	if err != nil {
-		return nil, err
-	}
-	return MergeProfileChain(layout, base, chain)
 }

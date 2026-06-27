@@ -72,7 +72,7 @@ func createRWSandbox(t *testing.T, tmpDir, name, hostPath string) {
 
 func gitHEAD(t *testing.T, dir string) string {
 	t.Helper()
-	sha, err := git.NewHostWithEnv(testEnv()).HeadSHA(context.Background(), dir)
+	sha, err := git.NewTestHostWithEnv(testEnv()).HeadSHA(context.Background(), dir)
 	require.NoError(t, err)
 	return sha
 }
