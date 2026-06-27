@@ -42,9 +42,9 @@ type FileChange struct {
 	Binary    bool   `json:"binary,omitempty"`
 }
 
-// ParseNumstat parses `git diff --numstat` output ("<add>\t<del>\t<path>" per
+// parseNumstat parses `git diff --numstat` output ("<add>\t<del>\t<path>" per
 // line; binary files show "-\t-\t<path>"). Returns nil for empty input.
-func ParseNumstat(text string) []FileChange {
+func parseNumstat(text string) []FileChange {
 	text = strings.TrimRight(text, "\n")
 	if text == "" {
 		return nil
@@ -85,7 +85,7 @@ func GenerateChanges(ctx context.Context, opts DiffOptions) ([]FileChange, error
 	if err != nil {
 		return nil, err
 	}
-	return ParseNumstat(out), nil
+	return parseNumstat(out), nil
 }
 
 // GenerateOverlayChanges returns the structured per-file change summary for an
@@ -96,7 +96,7 @@ func GenerateOverlayChanges(ctx context.Context, rt runtime.Backend, opts DiffOp
 	if err != nil {
 		return nil, err
 	}
-	return ParseNumstat(out), nil
+	return parseNumstat(out), nil
 }
 
 // GenerateDiff produces the workdir diff for a sandbox.
@@ -314,14 +314,14 @@ type DiffContext struct {
 	Mode        store.DirMode // "copy", "overlay", or "rw"
 }
 
-// LoadAllDiffContexts returns the diff context for the sandbox's
+// loadAllDiffContexts returns the diff context for the sandbox's
 // workdir. After Q-U (2026-05-25) the diff/apply surface is
 // workdir-only; aux dirs only support :rw / :ro and aren't
 // diffable. The slice return shape is preserved so the existing
 // overlay loop callers (GenerateOverlayPatch,
 // UpdateOverlayBaselineToHEAD, ListCommitsBeyondBaselineOverlay)
 // don't need their loop bodies rewritten.
-func LoadAllDiffContexts(layout config.Layout, name string, dirHostPath string) ([]DiffContext, error) {
+func loadAllDiffContexts(layout config.Layout, name string, dirHostPath string) ([]DiffContext, error) {
 	sandboxDir := layout.SandboxDir(name)
 	if err := store.RequireSandboxDir(sandboxDir); err != nil {
 		return nil, err
@@ -475,7 +475,7 @@ func GenerateOverlayDiff(ctx context.Context, rt runtime.Backend, opts DiffOptio
 // mode is overlay. Used by GenerateOverlayDiff /
 // ListCommitsBeyondBaselineOverlay as a small typed accessor.
 func overlayDiffContext(layout config.Layout, name string, dirHostPath string) (DiffContext, error) {
-	contexts, err := LoadAllDiffContexts(layout, name, dirHostPath)
+	contexts, err := loadAllDiffContexts(layout, name, dirHostPath)
 	if err != nil {
 		return DiffContext{}, err
 	}

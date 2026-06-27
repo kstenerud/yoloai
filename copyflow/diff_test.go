@@ -1,5 +1,5 @@
 // ABOUTME: Unit tests for diff generation across :copy, :overlay, and :rw sandbox modes.
-// ABOUTME: Tests loadDiffContext, LoadAllDiffContexts, GenerateDiff, and related helpers.
+// ABOUTME: Tests loadDiffContext, loadAllDiffContexts, GenerateDiff, and related helpers.
 
 package copyflow
 
@@ -571,7 +571,7 @@ func TestLoadDiffContext_DirSelector(t *testing.T) {
 	assert.Error(t, err)
 }
 
-// --- LoadAllDiffContexts tests ---
+// --- loadAllDiffContexts tests ---
 
 func TestLoadAllDiffContexts_SingleCopyWorkdir(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -593,7 +593,7 @@ func TestLoadAllDiffContexts_SingleCopyWorkdir(t *testing.T) {
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
-	contexts, err := LoadAllDiffContexts(testLayout(tmpDir), name, "")
+	contexts, err := loadAllDiffContexts(testLayout(tmpDir), name, "")
 	require.NoError(t, err)
 	require.Len(t, contexts, 1)
 	assert.Equal(t, store.DirModeCopy, contexts[0].Mode)
@@ -602,7 +602,7 @@ func TestLoadAllDiffContexts_SingleCopyWorkdir(t *testing.T) {
 }
 
 // Q-U (2026-05-25): the workdir is the only diffable directory.
-// LoadAllDiffContexts ignores meta.Directories entirely — aux dirs
+// loadAllDiffContexts ignores meta.Directories entirely — aux dirs
 // are aux mounts, not diff sources. The test regress-guards both
 // "aux entries are not in the result" and "the existing meta on disk
 // is tolerated when aux entries are present" (a real on-disk state
@@ -632,7 +632,7 @@ func TestLoadAllDiffContexts_WorkdirOnly_IgnoresAuxEntries(t *testing.T) {
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
-	contexts, err := LoadAllDiffContexts(testLayout(tmpDir), name, "")
+	contexts, err := loadAllDiffContexts(testLayout(tmpDir), name, "")
 	require.NoError(t, err)
 	require.Len(t, contexts, 1)
 	assert.Equal(t, store.DirModeCopy, contexts[0].Mode)
@@ -659,17 +659,17 @@ func TestLoadAllDiffContexts_NoAuxDirs(t *testing.T) {
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
-	contexts, err := LoadAllDiffContexts(testLayout(tmpDir), name, "")
+	contexts, err := loadAllDiffContexts(testLayout(tmpDir), name, "")
 	require.NoError(t, err)
 	require.Len(t, contexts, 1)
 	assert.Equal(t, "/tmp/project", contexts[0].HostPath)
 }
 
-// ─── ParseNumstat ────────────────────────────────────────────────────────────
+// ─── parseNumstat ────────────────────────────────────────────────────────────
 
 func TestParseNumstat_Normal(t *testing.T) {
 	input := "1\t2\tfoo.go\n3\t0\tbar.go\n"
-	got := ParseNumstat(input)
+	got := parseNumstat(input)
 	require.Len(t, got, 2)
 	assert.Equal(t, FileChange{Path: "foo.go", Additions: 1, Deletions: 2}, got[0])
 	assert.Equal(t, FileChange{Path: "bar.go", Additions: 3, Deletions: 0}, got[1])
@@ -677,25 +677,25 @@ func TestParseNumstat_Normal(t *testing.T) {
 
 func TestParseNumstat_Binary(t *testing.T) {
 	input := "-\t-\timg.png\n"
-	got := ParseNumstat(input)
+	got := parseNumstat(input)
 	require.Len(t, got, 1)
 	assert.Equal(t, FileChange{Path: "img.png", Additions: -1, Deletions: -1, Binary: true}, got[0])
 }
 
 func TestParseNumstat_Empty(t *testing.T) {
-	assert.Nil(t, ParseNumstat(""))
+	assert.Nil(t, parseNumstat(""))
 }
 
 func TestParseNumstat_TrailingNewline(t *testing.T) {
 	input := "5\t3\tmain.go\n"
-	got := ParseNumstat(input)
+	got := parseNumstat(input)
 	require.Len(t, got, 1)
 	assert.Equal(t, FileChange{Path: "main.go", Additions: 5, Deletions: 3}, got[0])
 }
 
 func TestParseNumstat_Mixed(t *testing.T) {
 	input := "10\t4\ta.go\n-\t-\tb.png\n0\t7\tc.go\n"
-	got := ParseNumstat(input)
+	got := parseNumstat(input)
 	require.Len(t, got, 3)
 	assert.Equal(t, FileChange{Path: "a.go", Additions: 10, Deletions: 4}, got[0])
 	assert.Equal(t, FileChange{Path: "b.png", Additions: -1, Deletions: -1, Binary: true}, got[1])
@@ -722,7 +722,7 @@ func TestLoadAllDiffContexts_OverlayWorkdirWithMountPath(t *testing.T) {
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 
-	contexts, err := LoadAllDiffContexts(testLayout(tmpDir), name, "")
+	contexts, err := loadAllDiffContexts(testLayout(tmpDir), name, "")
 	require.NoError(t, err)
 	require.Len(t, contexts, 1)
 	assert.Equal(t, store.DirModeOverlay, contexts[0].Mode)

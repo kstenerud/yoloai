@@ -468,7 +468,7 @@ func GenerateOverlayPatch(ctx context.Context, layout config.Layout, rt runtime.
 	if err != nil {
 		return nil, fmt.Errorf("load metadata: %w", err)
 	}
-	contexts, err := LoadAllDiffContexts(layout, name, dirHostPath)
+	contexts, err := loadAllDiffContexts(layout, name, dirHostPath)
 	if err != nil {
 		return nil, err
 	}
@@ -551,7 +551,7 @@ func UpdateOverlayBaselineToHEAD(ctx context.Context, layout config.Layout, rt r
 	if err != nil {
 		return fmt.Errorf("load metadata: %w", err)
 	}
-	contexts, err := LoadAllDiffContexts(layout, name, dirHostPath)
+	contexts, err := loadAllDiffContexts(layout, name, dirHostPath)
 	if err != nil {
 		return err
 	}
@@ -651,33 +651,6 @@ func HasUncommittedChanges(ctx context.Context, layout config.Layout, rt runtime
 	}
 
 	return false, fmt.Errorf("git diff --quiet: %w", err)
-}
-
-// ResolveRef resolves a short SHA prefix to a full 40-char SHA among
-// commits beyond the baseline. Returns an error if the ref is ambiguous
-// (matches multiple commits) or not found.
-func ResolveRef(ctx context.Context, layout config.Layout, rt runtime.Backend, name string, dirHostPath string, ref string) (CommitInfo, error) {
-	commits, err := ListCommitsBeyondBaseline(ctx, layout, rt, name, dirHostPath)
-	if err != nil {
-		return CommitInfo{}, err
-	}
-
-	ref = strings.ToLower(ref)
-	var matches []CommitInfo
-	for _, c := range commits {
-		if strings.HasPrefix(strings.ToLower(c.SHA), ref) {
-			matches = append(matches, c)
-		}
-	}
-
-	switch len(matches) {
-	case 0:
-		return CommitInfo{}, fmt.Errorf("ref %q not found among sandbox commits", ref)
-	case 1:
-		return matches[0], nil
-	default:
-		return CommitInfo{}, fmt.Errorf("ref %q is ambiguous — matches %d commits", ref, len(matches))
-	}
 }
 
 // selectRefRange resolves a "start..end" range ref and marks matching commits

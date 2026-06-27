@@ -144,21 +144,6 @@ func BackendPath(sandboxDir string) string {
 	return filepath.Join(sandboxDir, BackendDir)
 }
 
-// BinPath returns the executable scripts directory within a sandbox.
-func BinPath(sandboxDir string) string {
-	return filepath.Join(sandboxDir, BinDir)
-}
-
-// TmuxPath returns the tmux configuration directory within a sandbox.
-func TmuxPath(sandboxDir string) string {
-	return filepath.Join(sandboxDir, TmuxDir)
-}
-
-// AgentRuntimePath returns the agent-managed state directory within a sandbox.
-func AgentRuntimePath(sandboxDir string) string {
-	return filepath.Join(sandboxDir, AgentRuntimeDir)
-}
-
 // HomeSeedPath returns the home-seed directory within a sandbox.
 func HomeSeedPath(sandboxDir string) string {
 	return filepath.Join(sandboxDir, "home-seed")
