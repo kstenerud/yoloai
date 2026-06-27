@@ -159,6 +159,17 @@ func startViaLaunch(ctx context.Context, rt runtime.Backend, launcher runtime.Pr
 		return fmt.Errorf("patch keepalive_only: %w", err)
 	}
 
+	// Signal keepalive_only to the entrypoint via an env var as well, not only the
+	// patched runtime-config.json. The file patch is an atomic rename (new inode)
+	// immediately before Create; Docker Desktop's gRPC-FUSE serves the stale
+	// pre-patch content for that single-file bind mount when the entrypoint reads
+	// it at container start, so the box silently takes the legacy inline path and
+	// never writes .substrate-ready (waitForReady then times out). An env var is
+	// baked into the container config at create, immune to mount-propagation lag,
+	// and the entrypoint treats it as authoritative. The file patch remains as the
+	// Linux/OrbStack-side record and a backstop. See backend-idiosyncrasies.md.
+	instanceCfg.ContainerEnv = append(instanceCfg.ContainerEnv, "YOLOAI_KEEPALIVE_ONLY=1")
+
 	// Clear any stale readiness marker from a prior boot so the wait below sees
 	// only this launch's signal (it lives in the persistent sandbox dir).
 	readyPath := filepath.Join(st.SandboxDir, store.SubstrateReadyMarker)

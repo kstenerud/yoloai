@@ -442,6 +442,18 @@ def main():
     # respects its explicit keepalive_only (default False → launch the agent).
     keepalive = cfg.get("keepalive_only", not cfg)
 
+    # YOLOAI_KEEPALIVE_ONLY is the authoritative signal for the agent-free
+    # bring-up (startViaLaunch sets it on the container). It overrides the file
+    # because the file's keepalive_only is patched on the host via atomic rename
+    # just before Create, and Docker Desktop's gRPC-FUSE serves the *stale*
+    # pre-patch content for a single-file bind mount when the entrypoint reads it
+    # at container start — so the box would silently take the legacy inline path
+    # and never write .substrate-ready, and the host would time out. An env var is
+    # baked into the container config at create, immune to that mount staleness.
+    # See docs/contributors/backend-idiosyncrasies.md.
+    if os.environ.get("YOLOAI_KEEPALIVE_ONLY") == "1":
+        keepalive = True
+
     remap_uid(cfg, running_as_root)
     if not keepalive:
         # In keepalive_only mode the entrypoint must NOT read secrets or write the

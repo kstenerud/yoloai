@@ -30,8 +30,9 @@ import (
 // rerouteBaseRuntime records Create/Start/Inspect calls and returns running=true
 // on Inspect so verifyInstanceRunning is satisfied.
 type rerouteBaseRuntime struct {
-	mu      sync.Mutex
-	callSeq []string // ordered call log: "Create", "Start", "Ready", "Launch", "Inspect"
+	mu         sync.Mutex
+	callSeq    []string                // ordered call log: "Create", "Start", "Ready", "Launch", "Inspect"
+	createdCfg *runtime.InstanceConfig // the InstanceConfig passed to Create (for env assertions)
 }
 
 var _ runtime.Backend = (*rerouteBaseRuntime)(nil)
@@ -42,8 +43,12 @@ func (r *rerouteBaseRuntime) record(name string) {
 	r.callSeq = append(r.callSeq, name)
 }
 
-func (r *rerouteBaseRuntime) Create(_ context.Context, _ runtime.InstanceConfig) error {
+func (r *rerouteBaseRuntime) Create(_ context.Context, cfg runtime.InstanceConfig) error {
 	r.record("Create")
+	r.mu.Lock()
+	copied := cfg
+	r.createdCfg = &copied
+	r.mu.Unlock()
 	return nil
 }
 func (r *rerouteBaseRuntime) Start(_ context.Context, _ string) error {
@@ -226,6 +231,16 @@ func TestBuildAndStart_LaunchPath(t *testing.T) {
 	assert.True(t, readRuntimeConfigKeepalive(t, dir),
 		"keepalive_only must be true after the Launch path sets it")
 
+	// keepalive_only must ALSO be signalled via the container env, the channel that
+	// survives Docker Desktop's stale single-file-bind-mount-after-rename (the file
+	// patch alone never reaches the entrypoint there). See backend-idiosyncrasies.md.
+	rt.mu.Lock()
+	createdCfg := rt.createdCfg
+	rt.mu.Unlock()
+	require.NotNil(t, createdCfg, "Create must have been called")
+	assert.Contains(t, createdCfg.ContainerEnv, "YOLOAI_KEEPALIVE_ONLY=1",
+		"the Launch path must set YOLOAI_KEEPALIVE_ONLY=1 in the container env")
+
 	// Launch must have been called.
 	rt.mu.Lock()
 	spec := rt.launchedSpec
@@ -329,6 +344,15 @@ func TestBuildAndStart_LegacyPath(t *testing.T) {
 	assert.Contains(t, seq, "Create", "Create must be called in legacy path")
 	assert.Contains(t, seq, "Start", "Start must be called in legacy path")
 	assert.NotContains(t, seq, "Launch", "Launch must NOT be called in legacy path")
+
+	// The legacy path must NOT set the keepalive env var — the entrypoint welds the
+	// agent inline and would otherwise be forced into the holder branch.
+	rt.mu.Lock()
+	createdCfg := rt.createdCfg
+	rt.mu.Unlock()
+	require.NotNil(t, createdCfg, "Create must have been called")
+	assert.NotContains(t, createdCfg.ContainerEnv, "YOLOAI_KEEPALIVE_ONLY=1",
+		"the legacy path must NOT set YOLOAI_KEEPALIVE_ONLY")
 
 	createIdx := indexOf(seq, "Create")
 	startIdx := indexOf(seq, "Start")

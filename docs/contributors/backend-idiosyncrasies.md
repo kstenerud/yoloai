@@ -78,6 +78,7 @@ inclusion test first, then add a row to the index.
 | `prune` dry-run promises to reclaim "volumes" but reports `reclaimed 0 B`; doctor counts the user's own (non-yoloai) volumes | [Docker/Podman: volume prune is anonymous-only; scope to yoloai volumes](#dockerpodman-volume-prune-default-filter-removes-only-anonymous-volumes-reclaim-accounting-must-be-scoped-to-yoloais-own-volumes) |
 | `system prune` finds a different dangling image every run, reclaims 0 B, never converges, even with no builds | [Docker: legacy builder leaves a dangling image per step; build with BuildKit](#docker-legacy-builder-commits-one-dangling-intermediate-image-per-dockerfile-step-build-with-buildkit) |
 | Smoke/`system build` rebuilds `yoloai-base` from scratch every run on Docker Desktop (not OrbStack), though the image is present | [Docker Desktop: ImageInspect transiently NotFounds a present image on the idle containerd store](#docker-desktop-imageinspect-transiently-notfounds-a-present-image-on-the-idle-containerd-store) |
+| Every `new`/`start`/`clone` fails on Docker Desktop (passes on OrbStack/Linux) with `substrate not ready within 30s`; container log skips `entrypoint.keepalive_only`, no `.substrate-ready` | [Docker Desktop: single-file bind mount serves stale content after atomic rename](#docker-desktop-a-single-file-bind-mount-serves-stale-content-after-the-host-atomic-renames-it-keepalive_only-never-reaches-the-entrypoint) |
 | `podman: build cache prune failed: Error response from daemon: Not Found` | [Podman: no build-cache endpoint (404)](#podman-docker-compat-api-has-no-build-cache-endpoint--buildcacheprune-returns-404-not-found) |
 | Long-lived `docker exec` (attached) process dies when the launching CLI exits; status-monitor / marker missing | [Docker: attached exec doesn't outlive its client](#docker-exec-an-attached-exec-does-not-outlive-the-client-that-started-it) |
 | `prune --images` on Podman reports absurd reclaim (e.g. 142 GB freed for a ~5 GiB footprint) | [Podman: `ImagesPrune` `SpaceReclaimed` un-dedup sum](#podman-imagesprune-spacereclaimed-is-the-un-deduplicated-image-size-sum) |
@@ -916,6 +917,49 @@ An empty value disables LXC seccomp for that container entirely. The container m
 **Fix:** Make `imageExists` distrust a lone `ImageInspect` NotFound: cross-check with `ImageList` (reference filter), which lists the image even when inspect flaps. On disagreement the image is treated as present and the discrepancy is logged (`containerd-store inspect flap`). If both inspect and list report absent, the listing is retried with bounded backoff (~3.5 s total) in case the store is still settling after a resume — a separate "warm-up" log distinguishes that case. A genuinely-absent image (real first run) pays only the bounded backoff. The two warnings let a real run confirm which case fires; once the inspect-vs-list disagreement is confirmed in the field, the backoff retry can be dropped.
 
 **Code:** `runtime/docker/docker.go` — `(*Runtime).imageExists` (inspect → list cross-check), `imageListedByRef`, `confirmImagePresentByList` (retry/backoff, unit-tested), `imageExistsRetries`/`imageExistsBackoff`.
+
+---
+
+### Docker Desktop: a single-file bind mount serves stale content after the host atomic-renames it (keepalive_only never reaches the entrypoint)
+
+**Symptom:** Every `yoloai new`/`start`/`clone` fails on **Docker Desktop** (macOS) with
+`yoloai: substrate not ready within 30s (root provisioning did not complete)`; the
+identical command passes on **OrbStack** and on Linux. The failure autopsy shows the
+in-container `sandbox.jsonl` jumped straight from `entrypoint.python_start` to
+`sandbox.agent_launch` — **no** `entrypoint.keepalive_only` event and **no**
+`/yoloai/logs/.substrate-ready` marker — even though the host's
+`runtime-config.json` clearly has `"keepalive_only": true`, and a `docker exec … cat
+/yoloai/runtime-config.json` seconds later *also* shows `true`.
+
+**Explanation:** The agent-free bring-up (D88 `startViaLaunch`) signals the entrypoint
+by patching `keepalive_only:true` into `runtime-config.json` just before `Create`. That
+patch is an **atomic rename** (write temp + rename), which gives the file a **new
+inode**. `runtime-config.json` is mounted into the container as a **single-file**
+read-only bind mount (`buildSystemMounts`). Docker Desktop's gRPC-FUSE file sharing
+caches the path→inode mapping and serves the **stale pre-patch content** for that
+single file when the entrypoint reads it at container start — so the entrypoint sees
+`keepalive_only` absent, evaluates `cfg.get("keepalive_only", not cfg)` to `False`
+(config is non-empty), takes the **legacy inline** path, runs sandbox-setup.py itself,
+and never writes `.substrate-ready`. The host's `waitForReady` polls for that marker
+and times out at 30s. The cache refreshes within a second or two, which is why a later
+`exec` shows the correct content — masking the race. OrbStack (and Linux bind mounts)
+propagate the new inode immediately, so they never see stale content. **The bug is not
+that the host failed to patch the file — it did — but that the patched single file does
+not reach the container in time on Docker Desktop.**
+
+**Fix:** Don't rely on the patched single-file bind mount as the only signal.
+`startViaLaunch` also sets `YOLOAI_KEEPALIVE_ONLY=1` in the container's env
+(`InstanceConfig.ContainerEnv` → `containerConfig.Env`), which is baked into the
+container config at create time and is immune to mount-propagation lag. The entrypoint
+treats the env var as authoritative (forces `keepalive=True` when set). The file patch
+stays as the Linux/OrbStack record and a backstop. General rule: **a host-side change to
+a single-file bind mount may not be visible inside a Docker Desktop container promptly;
+deliver create-time signals via env vars (or a bind-mounted *directory*, which
+propagates in real time) rather than by mutating a bind-mounted file.**
+
+**Code:** `internal/orchestrator/launch/launch.go` (`startViaLaunch` sets
+`YOLOAI_KEEPALIVE_ONLY=1`), `runtime/docker/resources/entrypoint.py` (env override of
+the `keepalive` decision).
 
 ---
 
