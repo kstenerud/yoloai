@@ -27,13 +27,13 @@ The binary is literally `container`; that word collides with the domain noun
 throughout the codebase. Proposed `BackendType` key: **`apple`** (user-facing
 `--backend apple`, description "Apple container — Linux OCI in per-container
 VMs"). Alternative: `apple-container`. Avoid `container`. Pick one and add the
-const to `internal/runtime/names.go`. (This doc uses `apple`.)
+const to `runtime/names.go`. (This doc uses `apple`.)
 
 ## Backend shape
 
 Mechanism mirrors **Tart** (shell out to a bespoke CLI, parse output);
 capabilities mirror **Docker** (full mount-mode parity). Package
-`internal/runtime/apple/`. Register via `init()` → `runtime.Register(factory,
+`runtime/apple/`. Register via `init()` → `runtime.Register(factory,
 descriptor)`, guarded to `darwin`/`arm64`.
 
 ### Descriptor
@@ -129,7 +129,7 @@ such constraint to lift. So:
 
 Verified: `--cap-add CAP_NET_ADMIN` + in-guest `iptables` enforces the allowlist
 (own per-VM kernel — none of gVisor's userspace-netstack problem). The allowlist
-machinery (`internal/runtime/docker/resources/entrypoint.py:isolate_network`:
+machinery (`runtime/docker/resources/entrypoint.py:isolate_network`:
 resolve `allowed_domains`→IPs, build ipset+iptables) is **backend-agnostic** — it
 needs only an iptables-honoring kernel (✓), `iptables`+`ipset` in the image,
 `CAP_NET_ADMIN`, and a working `/etc/resolv.conf`. **AC10 caveat:** in an apple
@@ -215,7 +215,7 @@ collision: `tart` serves macOS guests, `apple` serves Linux guests.
 
 ### What changes
 
-1. **`SelectBackend` routing (`internal/runtime/probe.go`).** Add darwin-host
+1. **`SelectBackend` routing (`runtime/probe.go`).** Add darwin-host
    handling so that (a) the unspecified default prefers `apple` when installed
    before the container slot, and (b) `--isolation vm` for a Linux workload
    routes to `apple` instead of falling through to docker. `apple` is **not**
@@ -234,7 +234,7 @@ collision: `tart` serves macOS guests, `apple` serves Linux guests.
    docker > podman, and resolve OrbStack vs Docker Desktop via #3.
 
 3. **OrbStack before Docker Desktop in docker socket discovery.**
-   `internal/runtime/docker/dockerhost.go` `wellKnownDockerSockets` currently
+   `runtime/docker/dockerhost.go` `wellKnownDockerSockets` currently
    lists Docker Desktop **before** OrbStack — reorder to OrbStack first
    (dead-endpoint fallback only; explicit `DOCKER_HOST` / active `docker
    context` still wins).
@@ -391,10 +391,10 @@ Naming (`apple`) is settled; no design decisions gate the work now.
 
 - [research/apple-container.md](../research/apple-container.md) — the verified spike + env-var catalog.
 - [research/linux-vm-backends.md](../research/linux-vm-backends.md) §8 — prior "evaluate when macOS 26 adopted" note this supersedes for the spike.
-- `internal/runtime/runtime.go` — `Runtime`, `InstanceConfig`, `BackendCaps`, `BackendDescriptor`.
-- `internal/runtime/probe.go` — `SelectBackend` / `SelectContainerBackend` / `orderCandidates` (priority change).
-- `internal/runtime/docker/dockerhost.go` — `wellKnownDockerSockets` (OrbStack-vs-Desktop order).
-- `internal/runtime/tart/tart.go` — closest mechanism analog (shell-out descriptor/registration).
+- `runtime/runtime.go` — `Runtime`, `InstanceConfig`, `BackendCaps`, `BackendDescriptor`.
+- `runtime/probe.go` — `SelectBackend` / `SelectContainerBackend` / `orderCandidates` (priority change).
+- `runtime/docker/dockerhost.go` — `wellKnownDockerSockets` (OrbStack-vs-Desktop order).
+- `runtime/tart/tart.go` — closest mechanism analog (shell-out descriptor/registration).
 - `internal/cli/cliutil/client.go` — `ResolveBackend` / `container_backend`.
 - `internal/cli/lifecycle/new.go:40` — the `--backend` flag.
 - `internal/cli/system/setup.go` — the setup wizard's backend step (`availableBackends`, `resolveChoice`); third selection surface.

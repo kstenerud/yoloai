@@ -5,8 +5,8 @@ three container providers yoloAI targets: native **Linux**, **Docker Desktop** (
 **OrbStack** (macOS VM), and **Podman Machine** (macOS VM). The question is which storage driver the
 *nested* daemon should use, and how to select it portably instead of hardcoding one.
 
-Today yoloAI pins `fuse-overlayfs` in two places — `internal/runtime/docker/resources/Dockerfile`
-(`/etc/docker/daemon.json`) and `internal/runtime/monitor/sandbox-setup.py`
+Today yoloAI pins `fuse-overlayfs` in two places — `runtime/docker/resources/Dockerfile`
+(`/etc/docker/daemon.json`) and `runtime/monitor/sandbox-setup.py`
 (`start_dockerd()` passes `--storage-driver=fuse-overlayfs`). That pin works on Linux and OrbStack
 but **breaks on Docker Desktop and Podman Machine**, where every nested `execve` off the
 fuse-overlayfs mount returns `EINVAL`.
@@ -161,13 +161,13 @@ overlay-backed case that needs vfs.)
 
 Runtime selection over a baked-image constant:
 
-- `internal/runtime/docker/resources/Dockerfile` (~L156-160) — drop the static
+- `runtime/docker/resources/Dockerfile` (~L156-160) — drop the static
   `{"storage-driver":"fuse-overlayfs"}` `daemon.json` pin.
 - yoloAI container-config for privileged sandboxes — mount a named/anonymous **volume** (real-fs in
   the VM) at `/var/lib/docker` so the nested graph isn't on the overlay rootfs.
-- `internal/runtime/monitor/sandbox-setup.py` `start_dockerd()` (~L1062-1088) — replace
+- `runtime/monitor/sandbox-setup.py` `start_dockerd()` (~L1062-1088) — replace
   `--storage-driver=fuse-overlayfs` with the fstype-probe selection above.
-- `internal/runtime/docker/caps.go` `dindAdvisory` — narrow to the residual overlay-backed Mac-VM
+- `runtime/docker/caps.go` `dindAdvisory` — narrow to the residual overlay-backed Mac-VM
   fallback. The current Linux comment ("native overlay2 nests; dind works") is **misleading**:
   overlay2 does *not* nest on the default overlay rootfs, only on a real-fs backing.
 

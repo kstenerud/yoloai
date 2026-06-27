@@ -7,6 +7,13 @@ History of codebase findings (issues discovered mid-work) that have been address
 are moved here from [`findings-unresolved.md`](findings-unresolved.md) once resolved, so the
 active file stays a working set. Newest first.
 
+### DF51 — Narrative/design docs updated to the post-Move `runtime`/`store`/`copyflow` paths
+
+- **Discovered:** 2026-06-27 · **Resolved:** 2026-06-27 · **Workstream:** public-layering Phase 3 (the Move, commit `10004e1a`)
+- **Severity:** LOW (docs-only; not build-affecting)
+- **Disposition:** RESOLVED. Swept the live narrative/design docs that still cited the pre-Move `internal/{runtime,store,copyflow}` paths, updating only **current-location** references (`internal/runtime/...` → `runtime/...`, `internal/store/...` → `store/...`, `internal/copyflow/...` → `copyflow/...`) while leaving **historical/transition** text intact ("promote `internal/runtime` to public", Phase-B extraction notes, before→after rename tables). Touched: the three principles docs (`architecture-`/`development-`/`security-principles.md` — including the public-surface/layering description, which now names `runtime`/`store`/`copyflow` as public root packages alongside `yoloai`/`yoerrors`), four research docs, six plans (only their current-code pointers), `questions-unresolved.md`, and the open findings' pointers in `findings-unresolved.md`. Deliberately **not** touched: `archive/` + `decisions/` history, the history sinks (`findings-resolved`/`-deferred`, `critiques-resolved`), and the historical-by-design plans `module-split.md` / `move-audit.md` / `public-layering.md` (their `internal/<layer>` mentions describe the pre-Move state). `make check` green.
+- **Pointer:** spread across `docs/contributors/{principles,design}/` (see commit); the historical-leave docs and the DF51 entry itself were excluded.
+
 ### DF52 — claude-code "fullscreen renderer" upsell stalled agent smokes by dropping `--dangerously-skip-permissions` on re-exec
 
 - **Discovered:** 2026-06-27 · **Resolved:** 2026-06-27 · **Workstream:** `substrate-move` releasetest verification (clone + all stop_start smokes)

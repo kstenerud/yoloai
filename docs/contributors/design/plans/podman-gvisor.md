@@ -25,9 +25,9 @@ Probed on a dev machine (Apple Silicon, `podman-machine-default`, applehv, runni
 - The machine is **rootless by default** (`podman machine inspect … Rootful` → `false`).
 - Default OCI runtime is `crun`; `runsc` is **not** configured.
 - `podman` exposes a Docker-compat socket; yoloai's podman backend embeds
-  `docker.Runtime` and talks to that socket (`internal/runtime/podman/podman.go`).
+  `docker.Runtime` and talks to that socket (`runtime/podman/podman.go`).
 
-What blocks gVisor today (`internal/runtime/podman/`):
+What blocks gVisor today (`runtime/podman/`):
 
 1. **Rootless hard-block.** `buildRootlessCheckCap` (`caps.go`) returns a **permanent**
    failure whenever the socket is rootless — "rootless Podman cannot run gVisor due to
@@ -139,7 +139,7 @@ verdict), then 3 (the rootless rework, which depends on R1), then 4–6.
 
 - D69, D70 — `docs/contributors/decisions/working-notes.md` (the docker gate + daemon-location fix this mirrors).
 - `docs/contributors/backend-idiosyncrasies.md` — OrbStack `/tmp` gVisor chroot collision; gVisor netstack ignores in-sandbox iptables.
-- `internal/runtime/podman/` — `podman.go`, `caps.go` (current rootless block + host-PATH check).
-- `internal/runtime/docker/docker.go` — `RequiredCapabilities` (the daemon-location pattern to mirror).
+- `runtime/podman/` — `podman.go`, `caps.go` (current rootless block + host-PATH check).
+- `runtime/docker/docker.go` — `RequiredCapabilities` (the daemon-location pattern to mirror).
 - `docs/GUIDE.md` — isolation modes / gVisor setup.
 - `docs/contributors/design/security.md` — where the rootless-vs-gVisor security framing belongs.

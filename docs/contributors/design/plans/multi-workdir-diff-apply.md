@@ -30,10 +30,10 @@ per-dir filtering. "We were projecting sophistication onto a rarely-exercised fe
 
 The machinery was collapsed, not deleted in spirit:
 
-- `internal/copyflow/diff.go` — `LoadAllDiffContexts()` still **returns a slice**;
+- `copyflow/diff.go` — `LoadAllDiffContexts()` still **returns a slice**;
   it just yields ≤1 entry now. The comment says the slice shape was kept so overlay-loop
   callers wouldn't need rewriting.
-- `internal/copyflow/apply.go` — `ApplyAll()` keeps its name; "the iteration is
+- `copyflow/apply.go` — `ApplyAll()` keeps its name; "the iteration is
   gone." The multi-dir loop lived in the deleted `GenerateMultiPatch()`.
 
 So restoring is largely **un-collapsing** these loops behind a deliberately small CLI
@@ -220,7 +220,7 @@ than bolting peer-dirs onto a singular field later. Rationale: the singular `Wor
 field is load-bearing in ~25 files; every later multi-dir feature would have to special-
 case "workdir vs the others". One ordered list removes that seam permanently.
 
-`internal/store/environment.go`:
+`store/environment.go`:
 
 - `WorkdirEnvironment` and `DirEnvironment` unify into one element type carrying
   `HostPath`, `MountPath`, `Mode`, `BaselineSHA`, and `InceptionSHA` (the last was

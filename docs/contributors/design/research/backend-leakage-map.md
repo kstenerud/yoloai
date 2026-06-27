@@ -2,13 +2,13 @@
 
 **Date:** 2026-06-13. **Status:** Research; feeds
 [plans/module-split.md](../plans/module-split.md) Phase 0. Read-only inventory of
-where backend-specific behavior leaks *above* the `internal/runtime` layer, so the
+where backend-specific behavior leaks *above* the `runtime` layer, so the
 backend interface can be re-derived as a set of semantic **properties**.
 
 ## Headline findings (verified)
 
 1. **Zero backend-identity logic leaks above the runtime.** A grep for
-   `Backend{Tart,Docker,…}` / `.BackendType ==` / `== "tart"` outside `internal/runtime`
+   `Backend{Tart,Docker,…}` / `.BackendType ==` / `== "tart"` outside `runtime`
    returns only: doc comments, the empty-`BackendType` lazy selector (an emptiness check,
    not identity), and `tart_bases.go` (the `yoloai tart` base-image *feature command*,
    legitimately Tart-bound). **The runtime already hides backend identity from core
@@ -16,7 +16,7 @@ backend interface can be re-derived as a set of semantic **properties**.
    was the wrong target.
 
 2. **The real leak is capability-by-type-assertion.** There are **14** optional,
-   type-asserted interfaces in `internal/runtime/runtime_optional.go`. Each is a place a
+   type-asserted interfaces in `runtime/runtime_optional.go`. Each is a place a
    higher layer detects a capability by `rt.(SomeInterface)` rather than reading a named
    property. **14 is the leakage metric.**
 

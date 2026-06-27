@@ -55,13 +55,13 @@ no, the surface has a gap.
 ### Worked examples
 
 - **The G7 verb series (D55).** Each CLI/mcpsrv reach into `internal/orchestrator/{store,…}`
-  or `internal/runtime` was replaced by a public verb: metadata/log/discovery/prompt
+  or `runtime` was replaced by a public verb: metadata/log/discovery/prompt
   reads route through `SystemClient` / `Client` / `Sandbox`; backend probing gained
   `SystemClient.CheckBackend` rather than reaching for `runtime.New`. After the series,
   cli+mcpsrv held **zero** non-test imports of those subtrees.
 - **mcpsrv as the canary.** The MCP-server prototype is the in-tree stand-in for a real
   separate-module embedder; its tool set is the proof that the public surface is
-  sufficient. When it reached `internal/store` for ~5 of its tools, that was the
+  sufficient. When it reached `store` for ~5 of its tools, that was the
   signal the surface was incomplete — not licence to keep the reach.
 
 ### Cost-vs-benefit
@@ -82,13 +82,13 @@ litmus real). See also `development-principles.md §2`.
 
 ## §2. The public surface is the contract; the embedder is the audience
 
-> **Rule.** The `yoloai` ↔ `internal/` boundary is a published contract for an embedder who can name only exports: no public type may expose an internal one (even via a type alias), and in-tree embedders reach sandbox/runtime behaviour only through the surface. Both enforced mechanically (F1 detector + depguard) so drift fails CI.
+> **Rule.** The public surface (`yoloai`, `yoerrors`, `runtime`, `store`, `copyflow`) is a published contract for an embedder who can name only exports: no public type may expose a type from `internal/` (even via a type alias), and in-tree embedders reach sandbox/runtime behaviour only through the surface. Both enforced mechanically (F1 detector + depguard) so drift fails CI.
 >
 > **Bites when:** a public type leaks an internal type, or you'd widen a depguard allow-list instead of adding a verb. · **See also:** ARCH §1, DEV §2.
 
-**Principle.** The boundary between the public `yoloai` surface and `internal/` is a
+**Principle.** The boundary between the public surface (`yoloai` + `yoerrors` + the promoted substrate packages `runtime`/`store`/`copyflow`) and `internal/` is a
 *published contract*, and its audience is an external embedder who can name **only** what
-is exported. Two consequences follow: (1) a public type may not expose an internal one —
+is exported. Two consequences follow: (1) a public type may not expose a type from `internal/` —
 not even transitively, not even behind a type alias; (2) the in-tree embedders (cli,
 mcpsrv) may reach sandbox/runtime behaviour *only* through that surface. Both are enforced
 mechanically so drift fails CI, not review.
@@ -108,11 +108,11 @@ The two share the same enforcement teeth.
   "empty and honestly so" is the completion bar, never "empty because the detector can't
   see it."
 - **depguard fences** (`.golangci.yml`). The twin rules `cli-sandbox-scope` and
-  `cli-runtime-scope` deny `internal/orchestrator`, `internal/store`, `internal/copyflow`,
-  and `internal/runtime` to non-test cli+mcpsrv code — the orchestrator subtree by prefix
-  (façade *and* every leaf: `archetype`/`status`/…), plus the two lifted substrate packages
-  `internal/store` and `internal/copyflow` by explicit deny entries. The one
-  sanctioned exception (`internal/cli/system/tart` → `internal/runtime/tart`) is scoped to
+  `cli-runtime-scope` deny `internal/orchestrator`, `store`, `copyflow`,
+  and `runtime` to non-test cli+mcpsrv code — the orchestrator subtree by prefix
+  (façade *and* every leaf: `archetype`/`status`/…), plus the three public substrate packages
+  `store`, `copyflow`, and `runtime` by explicit deny entries. The one
+  sanctioned exception (`internal/cli/system/tart` → `runtime/tart`) is scoped to
   that single package.
 
 When a fence or the detector goes red, the resolution is a public verb (§1), never a
@@ -264,7 +264,7 @@ exporting.
 ### Worked example — the substrate surface cleanup (D97, Stage 3b)
 
 The pre-Move audit found three ingredient-vendors mis-named as "agent" surface in
-`internal/runtime`: `AgentLaunchPrefix`, `AgentCommandPreparer`/`PrepareAgentCommand`, and
+`runtime`: `AgentLaunchPrefix`, `AgentCommandPreparer`/`PrepareAgentCommand`, and
 `InteractiveSession.AttachCommand`. Under this principle they are not renamed-and-kept; they
 **dissolve into `Launch`/`InteractiveExec`** and leave the public surface. `AgentProvisionedByBackend`
 is a fact-query and stays a descriptor capability. `AgentInstallMethod` is neither — it is agent

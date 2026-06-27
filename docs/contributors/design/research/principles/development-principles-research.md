@@ -515,7 +515,7 @@ The suppressions in `.golangci.yml` are documented:
   that wraps the banned calls) and test files ("Tests and test helpers create temp
   files for their own use").
 - `revive`'s `redefines-builtin-id` rule is disabled with the comment:
-  "internal/runtime is an intentional name for the runtime abstraction layer."
+  "runtime is an intentional name for the runtime abstraction layer."
 
 This pattern — disable only with a comment explaining why — is the principle made
 mechanical: suppressions are explicit claims, not silent overrides.
