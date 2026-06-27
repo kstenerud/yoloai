@@ -22,11 +22,18 @@ Provides a `vm`-class isolation on **Linux + KVM only** (`//go:build linux` — 
 
 1. **Isolation-mode name** → **new `microvm`** (`--isolation microvm`). Distinct
    prereqs/UX from Kata; no ambiguous auto-selection.
-2. **Kernel strategy** → **bundle/download a pinned `vmlinuz` at `yoloai setup`.**
-   The spike (below) pins the exact requirement: a **stock Firecracker CI kernel is
-   insufficient** — it must be a custom build with `CONFIG_VIRTIO_MMIO_CMDLINE_DEVICES=y`
-   **and** `CONFIG_FUSE_FS=y` + `CONFIG_VIRTIO_FS=y` (for the chosen virtiofs workdir).
-   The pve `build-kernel.sh` (Firecracker base + pve overlay, 6.12) produces exactly this.
+2. **Kernel strategy** → **REVISED 2026-06-27 to the distro-kernel + initrd path**
+   (the user picked it over a hosted artifact, to avoid drift). The microvm profile
+   image carries the **base distro's own stock kernel + initrd** (`apt install
+   linux-image-amd64 qemu-guest-agent`); the backend boots it with
+   `-M microvm,acpi=on -kernel … -initrd …` (ACPI enumerates the virtio-mmio
+   devices, the initrd loads `virtio_mmio`/`virtio_blk`). **No hosted/built artifact
+   for us to maintain — kernel updates ride the base image / distro CVE train.**
+   Both this path and the original custom-kernel path (a pve-6.12 PVH bzImage with
+   `CMDLINE_DEVICES`, no initrd) are spike-validated; a **config override** for a
+   user-supplied kernel stays as the escape hatch. (Original finding retained below:
+   a stock *Firecracker* CI kernel is insufficient — it lacks `CMDLINE_DEVICES` **and**
+   `FUSE_FS`/`VIRTIO_FS`; only a custom build or a distro kernel works.)
 3. **Rootfs toolchain** → **skopeo/umoci as setup-time prereqs** (checked by `IsReady`),
    matching how kata is a containerd setup dep. Revisit the `umoci` Go-lib path if dep
    friction shows up.
@@ -39,9 +46,26 @@ Provides a `vm`-class isolation on **Linux + KVM only** (`//go:build linux` — 
 
 ## Spike results (2026-06-27, this Linux box — `~/.cache/yoloai-research/microvm-spike/`)
 
-**STATUS: fully validated — boot + QGA exec + virtiofs all green. Backend de-risked;
-ready to write Go.** Harness in the spike dir (`build-rootfs.sh`, `boot.sh`,
-`qga-drive.py`, `microvm-init`, `Dockerfile`). Validated end-to-end:
+**STATUS: fully validated on BOTH kernel paths — boot + QGA exec + virtiofs all
+green. Backend de-risked; ready to write Go.** Harness in the spike dir
+(`build-rootfs.sh`, `boot.sh`, `qga-drive.py`, `microvm-init`, `Dockerfile`;
+the distro-kernel variant under `initrd/`).
+
+**Path B — distro kernel + initrd (CHOSEN, validated 2026-06-27):** a
+`debian:trixie-slim` image with `linux-image-amd64 qemu-guest-agent systemd-sysv`
+builds with its **own** 6.12.94 kernel + a 36 MB initrd (`update-initramfs` runs
+during `docker build`). That kernel has `VIRTIO_MMIO=m`/`VIRTIO_BLK=m` (loaded from
+the initrd), `VIRTIO_FS=y`+`FUSE_FS=y`+`VIRTIO_CONSOLE=y` built-in, `ACPI=y`. Booted
+via `-machine microvm,acpi=on,memory-backend=mem -kernel vmlinuz -initrd initrd.img
+-append "console=ttyS0 root=/dev/vda rw rootfstype=ext4"` + the same virtio-blk /
+QGA-serial / vhost-user-fs devices. systemd auto-started qemu-guest-agent → **QGA
+exec OK**; virtiofs mounted with **bidirectional** read/write confirmed. (Benign
+`PCI: Fatal: No config space access function` line — microvm has no PCI; harmless.)
+**Increment-2 mechanic:** the microvm profile build adds the kernel+qga packages;
+Setup extracts `/boot/vmlinuz*` + `/boot/initrd.img*` from the unpacked rootfs to
+pass to `-kernel`/`-initrd`. No artifact hosting.
+
+**Path A — custom PVH kernel, no initrd (validated, kept as fallback/override):**
 - ✅ **Boot:** pve 6.12 kernel boots via `-M microvm,acpi=off` (PVH entry), mounts the
   ext4 root on `/dev/vda`, runs `/sbin/init`. ~3.6s to init in the spike.
 - ✅ **QGA exec (the #1 unknown):** host drove `guest-sync → guest-ping → guest-exec →
