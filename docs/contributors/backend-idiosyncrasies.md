@@ -137,6 +137,8 @@ inclusion test first, then add a row to the index.
 | Apple: `container build .` builds nothing / `COPY` fails (`"/x": not found`) | [Apple: `container build` drops a relative context](#apple-container-build-silently-drops-a-relative--context-pass-an-absolute-dir) |
 | `podman build` → `Error: unknown flag: --provenance` / exit 125 | [Podman: build rejects docker BuildKit attestation flags](#podman-build-rejects-the-docker-buildkit-attestation-flags) |
 | `idle` agent / keep-alive exits 1 with `usage: sleep number[unit]` on a macOS/Tart guest | [macOS guest BSD sleep rejects sleep infinity](#macos-guest-bsd-sleep-rejects-sleep-infinity-gnu-only) |
+| arm64 base build: `link: running gcc failed` / `-fuse-ld=gold` / `cannot find 'ld'` | [Base image (trixie): gold linker split out of binutils](#base-image-trixie-gold-linker-is-a-separate-package-arm64-cgo-link-fails) |
+| Base build: `pip install aider-chat` fails `setuptools.build_meta` / installs ancient 0.16.0 | [Base image (trixie): aider needs Python <3.13](#base-image-trixie-aider-chat-does-not-support-python-313-install-it-isolated-on-312-via-uv) |
 
 ---
 
@@ -2402,3 +2404,52 @@ form globally.
 `internal/orchestrator/launch/launch_reroute_test.go`
 (`TestBuildAndStart_ContainerEnhancedTakesLegacyPath`); `runtime/isolation_test.go`
 (`TestSupportsAgentFreeLaunch`).
+
+---
+
+## Base image (trixie): gold linker is a separate package; arm64 cgo link fails
+
+**Symptom.** Building `yoloai-base` **on arm64** (e.g. an Apple-Silicon Mac) fails at
+the `go install golangci-lint` step:
+
+```
+/usr/local/go/pkg/tool/linux_arm64/link: running gcc failed: exit status 1
+/usr/bin/gcc ... -fuse-ld=gold ...
+collect2: fatal error: cannot find 'ld'
+```
+
+amd64 builds are unaffected, so this only shows up on Apple-Silicon hosts.
+
+**Explanation.** The Go toolchain links cgo binaries with `-fuse-ld=gold` on
+`linux/arm64` — a long-standing workaround for old GNU BFD-linker bugs on ARM.
+Debian **trixie** split the gold linker out of the `binutils` package into a
+separate `binutils-gold` package (gold is upstream-deprecated), so a default
+trixie image has no `ld.gold` and the cgo link fails. bookworm bundled gold, so
+this never surfaced before the base bump. On amd64 Go uses bfd, so it doesn't
+trigger there.
+
+**Fix.** Install `binutils-gold` in the base image (it restores
+`<arch>-linux-gnu-ld.gold`). Done in `runtime/docker/resources/Dockerfile`'s apt
+list. If a future Debian drops gold entirely, switch Go to bfd/lld instead.
+
+**Code:** `runtime/docker/resources/Dockerfile` (apt list, `binutils-gold`).
+
+## Base image (trixie): `aider-chat` does not support Python 3.13; install it isolated on 3.12 via uv
+
+**Symptom.** `pip install --break-system-packages --no-cache-dir aider-chat` on the
+trixie base fails — pip resolves an ancient `aider-chat==0.16.0` and its pinned deps
+fail to build (`Cannot import 'setuptools.build_meta'`).
+
+**Explanation.** trixie ships Python **3.13** as the system `python3`. The current
+`aider-chat` (0.86.2) caps `requires-python` at `<3.13` (it pins exact dependency
+versions that don't yet support 3.13), so pip filters out every modern release and
+backtracks to 0.16.0, whose decade-old deps can't build on 3.13. The other four
+agents are npm/Node and are unaffected.
+
+**Fix.** Install aider isolated on a uv-managed Python 3.12:
+`uv tool install --python 3.12 aider-chat`. This yields the *current* aider, keeps it
+unpinned, and is aider's own recommended install path. Tools/interpreters live under
+`/opt/uv`; the `aider` launcher lands in `/usr/local/bin`. Revisit (back to a plain
+system install) once aider supports 3.13.
+
+**Code:** `runtime/docker/resources/Dockerfile` (uv install + `uv tool install aider-chat`).
