@@ -23,6 +23,15 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 
 ## Findings
 
+### DF54 — New verbs (`run`, `diff --json`, `sandbox_run`) lack automated E2E/smoke coverage
+
+- **Discovered:** 2026-06-27 · **Workstream:** pre-merge audit (test-gap)
+- **Severity:** LOW (the paths were verified manually on real Docker; their decision logic is now unit-tested)
+- **Disposition:** PARKED
+- **Description:** The orchestration happy-paths of `yoloai run` (`executeRun`/`waitForRunResult`), the `diff --json` structured output, and MCP `sandbox_run` take concrete `*yoloai.Client`/`*yoloai.Sandbox` and so aren't unit-stubbable; the smoke harness (`scripts/smoke_test.py`) doesn't exercise them either. The decision logic IS now unit-tested (commit `373e2735` — `changesFromCopyflow`, `agentHasUsableAuth`, `resolveAgentParams` downgrade, `handleSandboxRun` guards), and the full paths were verified live (real-Docker `run` success/failure exit codes + `--rm` cleanup; MCP `sandbox_run` full stdio flow), but there is no automated regression gate.
+- **Trigger:** when extending the smoke matrix, or before these verbs take on more behavior — add a `run` / `diff --json` / `sandbox_run` case to `scripts/smoke_test.py` (real Docker + test agent), and/or extract a thin interface so `executeRun`/`waitForRunResult` become unit-testable.
+- **Pointer:** `internal/cli/lifecycle/run.go`; `internal/cli/workflow/diff.go`; `internal/mcpsrv/tools.go`; `scripts/smoke_test.py`.
+
 ### DF53 — Tart silently ignores `-p` port mappings (port-forwarding never wired into `tart run`)
 
 - **Discovered:** 2026-06-27 · **Workstream:** pre-merge audit (tart test-bypass cleanup)
