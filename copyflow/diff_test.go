@@ -702,6 +702,15 @@ func TestParseNumstat_Mixed(t *testing.T) {
 	assert.Equal(t, FileChange{Path: "c.go", Additions: 0, Deletions: 7}, got[2])
 }
 
+func TestParseNumstat_Rename(t *testing.T) {
+	// git diff --numstat emits "{old => new}/file.go" as the path for renames.
+	// parseNumstat stores the raw third field verbatim (SplitN with 3 parts).
+	input := "2\t0\t{old => new}/file.go\n"
+	got := parseNumstat(input)
+	require.Len(t, got, 1)
+	assert.Equal(t, FileChange{Path: "{old => new}/file.go", Additions: 2, Deletions: 0}, got[0])
+}
+
 func TestLoadAllDiffContexts_OverlayWorkdirWithMountPath(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)

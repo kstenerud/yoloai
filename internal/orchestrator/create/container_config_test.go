@@ -93,6 +93,51 @@ func TestAgentHasUsableAuth(t *testing.T) {
 	assert.True(t, agentHasUsableAuth(agent.GetAgent("test"), nil, noAuth), "test needs no API key → viable")
 }
 
+func TestResolveAgentParams_HeadlessDowngrade(t *testing.T) {
+	// D101 (failsafe-forward): opts.Headless is a PREFERENCE. resolveAgentParams
+	// computes effective headless = opts.Headless && agentHasUsableAuth(...).
+	// Without observable auth the preference is silently downgraded to interactive.
+	claudeDef := agent.GetAgent("claude")
+	noAuthLayout := config.NewLayout(t.TempDir()).WithEnv(map[string]string{})
+	withKeyLayout := config.NewLayout(t.TempDir()).WithEnv(map[string]string{"ANTHROPIC_API_KEY": "sk-test"})
+	pr := &profileResult{}
+	gcfg := &config.GlobalConfig{}
+	homeDir := t.TempDir()
+	prompt := "do something"
+
+	// Headless=true but no auth → effective headless must be false (downgraded).
+	opts := Options{Agent: "claude", Prompt: prompt, Headless: true}
+	_, _, _, _, _, headless, err := resolveAgentParams(claudeDef, opts, pr, gcfg, homeDir, noAuthLayout, nil)
+	require.NoError(t, err)
+	assert.False(t, headless, "headless without observable auth must be downgraded to interactive")
+
+	// Headless=true with auth present → stays true.
+	_, _, _, _, _, headless, err = resolveAgentParams(claudeDef, opts, pr, gcfg, homeDir, withKeyLayout, nil)
+	require.NoError(t, err)
+	assert.True(t, headless, "headless with observable auth must stay true")
+}
+
+func TestAgentHasUsableAuth_AuthHintEnvVar(t *testing.T) {
+	// An agent with an AuthHintEnvVar set in configEnv is viable even without a
+	// cloud API key (e.g. aider pointing at a local Ollama instance).
+	withHint := config.Layout{}.WithEnv(map[string]string{})
+	configEnv := map[string]string{"OLLAMA_API_BASE": "http://localhost:11434"}
+	assert.True(t, agentHasUsableAuth(agent.GetAgent("aider"), configEnv, withHint), "aider with OLLAMA_API_BASE in configEnv → viable")
+}
+
+func TestAgentHasUsableAuth_AuthFile(t *testing.T) {
+	// An agent whose auth-only credential file exists on disk is viable without
+	// a cloud API key. gemini uses ~/.gemini/oauth_creds.json as an AuthOnly file.
+	tmpDir := t.TempDir()
+	credDir := tmpDir + "/.gemini"
+	require.NoError(t, os.MkdirAll(credDir, 0750))
+	require.NoError(t, os.WriteFile(credDir+"/oauth_creds.json", []byte("{}"), 0600))
+
+	// NewLayoutFor so HomeDir points at tmpDir (where ~/.gemini/... resolves correctly).
+	layout := config.NewLayoutFor(tmpDir+"/.yoloai", tmpDir).WithEnv(map[string]string{})
+	assert.True(t, agentHasUsableAuth(agent.GetAgent("gemini"), nil, layout), "gemini with credentials file → viable")
+}
+
 func TestBuildContainerConfig_StateDirName(t *testing.T) {
 	tests := []struct {
 		agent    string
