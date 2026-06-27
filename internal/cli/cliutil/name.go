@@ -5,6 +5,7 @@ package cliutil
 import (
 	"os"
 
+	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
@@ -21,15 +22,15 @@ func SandboxNameFromEnv() string {
 }
 
 // ValidateName checks that a sandbox name is well-formed (charset, no path
-// traversal). The CLI boundary owns name-format validation; commands that
-// resolve a name outside ResolveName (e.g. files' subcommand-first dispatch)
-// call this instead of reaching into the store package directly.
+// traversal). It is a pure parse of the name grammar (config.ParseSandboxName) —
+// the same check the library applies via System().ValidateSandboxName, but
+// without constructing a System or needing the root Layout, so it is cheap and
+// runs at the earliest CLI edge. Commands that resolve a name outside ResolveName
+// call this rather than reaching into the store package directly (config is the
+// shared low-level home of the name grammar; store re-exports it).
 func ValidateName(name string) error {
-	sys, err := System()
-	if err != nil {
-		return err
-	}
-	return sys.ValidateSandboxName(name)
+	_, err := config.ParseSandboxName(name)
+	return err
 }
 
 // ResolveName extracts the sandbox name from positional args, falling back

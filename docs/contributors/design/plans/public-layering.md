@@ -196,8 +196,13 @@ remainder ([D99](../../decisions/working-notes.md)):
   `Workdir.Changes()`; MCP `sandbox_run` + native concurrency (the mark3labs server runs tool calls
   in parallel). **Deferred follow-up:** `Sandbox.Usage()` token/cost ledger — needs the headless
   agent to emit `--output-format json` + stdout capture + per-agent parsing (claude/gemini/… differ);
-  decided 2026-06-26 to ship the rest and leave Usage as a focused later task. UX fixes
-  (name-validation message, model in `new` summary) still open.
+  decided 2026-06-26 to ship the rest and leave Usage as a focused later task. **UX fixes DONE
+  (2026-06-27):** the `new` summary already prints the resolved model (since Q104's
+  `printCreateSummary` reads `sb.Agent().Model()`); name-format validation now runs up front at the
+  shared CLI edge (`resolveCreateOptions`, covering `new`+`run`) so a typo'd or swapped-with-workdir
+  name fails instantly with the "looks like a path" hint instead of after client/setup work, and
+  `cliutil.ValidateName` became a pure `config.ParseSandboxName` call (no `System`/root-Layout
+  dependency); the charset error gained a valid example.
 - **Phase 3 — the Move.** `git mv` the sealed layers → public (default `runtime`+`store`+`copyflow`
   +`agent`; plumbing layers stay clean-internal, promote later additively), fences, `releasetest`,
   one `BREAKING-CHANGES` entry (D97). Final promotion set decided at the Move.

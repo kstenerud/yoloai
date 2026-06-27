@@ -74,6 +74,21 @@ func TestResolveCreateOptions_FlagConflicts(t *testing.T) {
 	})
 }
 
+// TestResolveCreateOptions_RejectsInvalidNameUpFront pins the fast-feedback path:
+// a malformed name fails at the shared CLI edge (before any client/setup work),
+// not deep in the create pipeline. The swapped-with-workdir case (an absolute
+// path where the name belongs) gets the actionable "looks like a path" hint.
+func TestResolveCreateOptions_RejectsInvalidNameUpFront(t *testing.T) {
+	t.Run("charset-invalid name", func(t *testing.T) {
+		_, err := resolveCreateOptions(NewNewCmd("test"), "bad name!", ".", nil, "")
+		assertUsageError(t, err, "invalid sandbox name")
+	})
+	t.Run("path passed as name (swapped args)", func(t *testing.T) {
+		_, err := resolveCreateOptions(NewNewCmd("test"), "/home/me/project", ".", nil, "")
+		assertUsageError(t, err, "looks like a path")
+	})
+}
+
 func TestParsePortFlags(t *testing.T) {
 	tests := []struct {
 		name    string

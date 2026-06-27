@@ -170,6 +170,15 @@ func parseNewCmdPositional(cmd *cobra.Command, args []string) (name, rawWorkdirA
 // handoff flags (--no-start/--attach for new, --wait/--rm for run) are read by
 // the callers, not here, since they gate the post-create handoff, not creation.
 func resolveCreateOptions(cmd *cobra.Command, name, rawWorkdirArg string, passthrough []string, profileFlag string) (yoloai.SandboxCreateOptions, error) {
+	// Validate the name format up front, at the CLI edge — before constructing a
+	// client, the courtesy disk check, or a first-run base-image build. A typo'd
+	// or swapped-with-workdir name (the message flags the "looks like a path"
+	// case) then fails instantly instead of after setup work. The library still
+	// re-checks the name as a contract guard; this is the fast-feedback path.
+	if err := cliutil.ValidateName(name); err != nil {
+		return yoloai.SandboxCreateOptions{}, err
+	}
+
 	prompt, _ := cmd.Flags().GetString("prompt")
 	promptFile, _ := cmd.Flags().GetString("prompt-file")
 	model := cliutil.ResolveModel(cmd)
