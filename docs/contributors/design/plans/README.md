@@ -3,6 +3,14 @@
 Designed features not yet implemented. Each links to its design spec.
 Create a plan file in this directory before starting implementation.
 
+## Post-merge roadmap (current)
+
+The public-layering endgame (D99) merged at `b9c91834`. The remaining work — the
+D99 post-merge remainder, the open findings, and a new Linux/KVM microvm isolation
+backend — is scoped and sequenced in **[post-merge-roadmap.md](post-merge-roadmap.md)**
+(workstreams A–E with sizes, dependencies, platform constraints, the decisions a
+human must make before building each, and a recommended phase order).
+
 ## Architecture Remediation
 
 Complete — the multi-quarter program (Go↔Python boundary, `runtime.Backend` interface, dependency direction, error patterns, slog conventions) landed; the plan and its audit are archived under `../archive/`. The one release-gated remnant (W1b — retire the launch-prefix legacy path) and the rest of this branch's cross-version concerns are tracked in [release-migration.md](release-migration.md).
