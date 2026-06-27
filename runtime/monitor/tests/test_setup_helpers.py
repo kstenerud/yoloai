@@ -258,13 +258,24 @@ def test_build_agent_launch_command_wraps_for_fall_to_shell() -> None:
     # process and the agent its child.
     out = setup_helpers.build_agent_launch_command(
         "claude --foo", "/w", None, wrapper="/yoloai/bin/agent-run.sh")
-    assert out == "cd '/w' && exec /yoloai/bin/agent-run.sh claude --foo"
+    assert out == "cd '/w' && exec '/yoloai/bin/agent-run.sh' claude --foo"
 
 
 def test_build_agent_launch_command_wrapper_no_workdir() -> None:
     out = setup_helpers.build_agent_launch_command(
         "claude", None, None, wrapper="/yoloai/bin/agent-run.sh")
-    assert out == "exec /yoloai/bin/agent-run.sh claude"
+    assert out == "exec '/yoloai/bin/agent-run.sh' claude"
+
+
+def test_build_agent_launch_command_quotes_wrapper_with_spaces() -> None:
+    # On Tart the wrapper lives under the VirtioFS mount at
+    # "/Volumes/My Shared Files/yoloai/bin", so the path must be single-quoted or
+    # exec would split it on the spaces.
+    out = setup_helpers.build_agent_launch_command(
+        "claude", "/w", None,
+        wrapper="/Volumes/My Shared Files/yoloai/bin/agent-run.sh")
+    assert out == (
+        "cd '/w' && exec '/Volumes/My Shared Files/yoloai/bin/agent-run.sh' claude")
 
 
 def test_build_agent_launch_command_applies_launch_prefix() -> None:

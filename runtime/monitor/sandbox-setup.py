@@ -72,6 +72,10 @@ def log_debug(event, msg, **fields):
         _log("debug", event, msg, **fields)
 
 
+def log_error(event, msg, **fields):
+    _log("error", event, msg, **fields)
+
+
 # --- Utility functions ---
 
 
@@ -802,7 +806,7 @@ def setup_tmux_session(cfg, yoloai_dir, socket=None):
              alive_after_pipe_pane=bool(_sessions_after_pp.strip()))
 
 
-def launch_agent(cfg, socket=None, working_dir=None, backend_inst=None, secrets=None):
+def launch_agent(cfg, socket=None, working_dir=None, backend_inst=None, secrets=None, yoloai_dir=None):
     """Launch the agent command inside the tmux session."""
     agent_command = cfg.get("agent_command", "")
     agent = cfg.get("agent", "")
@@ -854,9 +858,13 @@ def launch_agent(cfg, socket=None, working_dir=None, backend_inst=None, secrets=
     # Fall-to-shell (D96): hook-authoritative agents launch under agent-run.sh,
     # which records `done` on agent exit and keeps the pane alive as a shell.
     # Gated by fall_to_shell in runtime-config.json (off for older sandboxes and
-    # heuristic agents → unchanged exec-the-agent behavior). The wrapper is
-    # installed at a fixed image path; it derives its own YOLOAI_DIR paths.
-    wrapper = "/yoloai/bin/agent-run.sh" if cfg.get("fall_to_shell") else ""
+    # heuristic agents → unchanged exec-the-agent behavior). The wrapper lives in
+    # the sandbox bin dir, which differs per backend (/yoloai/bin for containers,
+    # the VirtioFS mount for Tart, the sandbox dir for seatbelt), so resolve it
+    # from yoloai_dir rather than hardcoding the container path; it derives its
+    # own YOLOAI_DIR paths once running.
+    bin_dir = yoloai_dir or os.environ.get("YOLOAI_DIR", "/yoloai")
+    wrapper = os.path.join(bin_dir, "bin", "agent-run.sh") if cfg.get("fall_to_shell") else ""
     send_cmd = build_agent_launch_command(
         agent_command, working_dir, secrets, cfg.get("agent_launch_prefix", ""),
         wrapper=wrapper)
@@ -1344,7 +1352,7 @@ def main():
                  uid=stat_info.st_uid, gid=stat_info.st_gid)
         os.chmod(socket, 0o777)
 
-    launch_agent(cfg, socket=socket, working_dir=working_dir, backend_inst=backend, secrets=secrets)
+    launch_agent(cfg, socket=socket, working_dir=working_dir, backend_inst=backend, secrets=secrets, yoloai_dir=yoloai_dir)
 
     if cfg.get("vscode_tunnel"):
         launch_vscode_tunnel(cfg, socket=socket)

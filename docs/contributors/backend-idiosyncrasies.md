@@ -127,6 +127,7 @@ inclusion test first, then add a row to the index.
 | Is it safe to delete a `.lock` file while holding its flock? (prune / Destroy) | [Removing a .lock file while holding its flock is safe](#removing-a-lock-file-while-holding-its-flock-is-safe) |
 | Tart base build / `tart run` fails with `The number of VMs exceeds the system limit` or VM self-stops at boot, but `tart list` shows nothing running | [Tart: orphaned Virtualization VM processes consume the macOS VM limit](#orphaned-virtualization-vm-processes-survive-a-crashed-tart-run-and-silently-consume-the-macos-vm-limit) |
 | `tart delete <name>` fails with `instance not found` for a VM that exists (e.g. `delete old base: instance not found` during base promote) | [Tart: delete of a running VM reports "instance not found"](#tart-delete-of-a-running-vm-fails-with-a-misleading-instance-not-found-stop-first) |
+| Smoke `stop_start`/`tag_transfer` fails **only on Tart**: `zsh: no such file or directory: /yoloai/bin/agent-run.sh`, pane dead (127); `setup.log` shows `NameError: log_error` | [Tart: fall-to-shell wrapper path must derive from yoloai_dir](#tart-the-fall-to-shell-wrapper-path-must-derive-from-yoloai_dir-not-the-container-yoloai) |
 | `system disk` shows tart `IMAGES: ?` / `CACHE: 0 B` despite GBs in `~/.tart`; `prune --images` reports 0 reclaimed | [Tart: list double-counts OCI tag+digest; sizing/prune must dedup](#tart-list-reports-a-pulled-oci-image-twice-tag--digest-over-one-on-disk-copy-sizing-and-prune-must-dedup-and-remove-both-rows) |
 | macOS `docker` numbers don't match Docker Desktop assumptions (overlay2/btrfs, classic store) | [Docker on macOS may be OrbStack, not Docker Desktop](#docker-on-macos-may-be-orbstack-not-docker-desktop--docker-info-clientinfocontext-tells-you-which) |
 | Podman macOS reports image bytes correctly even though the Linux `LayersSize: 0` workaround exists | [Podman: `/system/df` reports `LayersSize: 0`](#podman-systemdf-reports-layerssize-0) (macOS/version caveat) |
@@ -2043,6 +2044,50 @@ exit 69 + "Xcode license", or exit 127 command-not-found for binaries the storm
 hides). Non-transient errors return immediately; the happy path runs once and
 never sleeps. Mirrors the tmux resolver's "probe to a ceiling, ignore completion"
 strategy because the host cannot observe the firstlaunch marker.
+
+### Tart: the fall-to-shell wrapper path must derive from `yoloai_dir`, not the container `/yoloai`
+
+**Symptom:** a `stop_start`/`tag_transfer` smoke test fails **only on Tart** with
+"sentinel 'done' not seen in 180s" and the autopsy "Python traceback in guest setup".
+The preserved `terminal-snapshot.txt` shows the pane died immediately after launch:
+
+```
+… && exec /yoloai/bin/agent-run.sh claude --dangerously-skip-permissions …
+zsh: no such file or directory: /yoloai/bin/agent-run.sh
+Pane is dead (status 127, …)
+```
+
+`setup.log` then shows `NameError: name 'log_error' is not defined` from
+`deliver_prompt` — a red herring that only fires *because* the pane is already dead.
+
+**Explanation:** `sandbox-setup.py`'s `launch_agent` hardcoded the fall-to-shell
+wrapper (D96) as the container path `/yoloai/bin/agent-run.sh`. That path only exists
+on container backends, where `YOLOAI_DIR=/yoloai`. On Tart the yoloai dir is the
+VirtioFS share `/Volumes/My Shared Files/yoloai` (the backend writes `agent-run.sh`
+there and passes that path to the script as `sys.argv[2]`); there is **no** `/yoloai`
+in the VM (only `/Users/admin/.yoloai`, a symlink to the share). So `exec` failed and
+the agent never ran, so the agent never created the `files/done` sentinel the harness
+waits on. Two compounding failures hid the root cause: (1) `deliver_prompt` then tried
+to paste into the dead pane, hit the undefined `log_error`, and crashed `main()`
+**before** `launch_monitor` ran — so the monitor never recorded the pane-death `done`
+either; (2) the cascade only surfaced on Tart because the Tart VM pane runs **zsh**,
+which **exits on a failed `exec`** (pane dies, status 127). The seatbelt pane runs
+**bash 3.2**, whose failed-`exec` behavior differs, so the same hardcoded-path bug did
+not kill that pane the same way — which is why seatbelt appeared to pass and masked a
+backend-agnostic bug as Tart-specific.
+
+**Fix:** derive the wrapper from the per-backend `yoloai_dir`
+(`os.path.join(yoloai_dir, "bin", "agent-run.sh")`), exactly as `launch_monitor`
+already does for `status-monitor.py` — `/yoloai/bin/...` for containers, the share for
+Tart, the sandbox dir for seatbelt. The path is single-quoted in
+`build_agent_launch_command` so the spaces in the Tart share (`/Volumes/My Shared
+Files/…`) don't split the `exec` argv. Separately, `log_error` was defined (it was only
+ever referenced, never declared) so a genuine paste failure logs instead of crashing
+the whole setup.
+
+**Code:** `runtime/monitor/sandbox-setup.py` (`launch_agent` wrapper derivation,
+`log_error`), `runtime/monitor/setup_helpers.py` (`build_agent_launch_command` wrapper
+quoting); tart passes `yoloai_dir` via `runtime/tart/mounts.go` `runSetupScript`.
 
 ## Smoke harness (agent task execution)
 

@@ -171,12 +171,14 @@ def build_agent_launch_command(
     backend needs). Pure string composition — no tmux, no subprocess.
 
     When ``wrapper`` is set (the fall-to-shell launch wrapper path, D96), the
-    agent command runs as ``exec {wrapper} {agent_command}`` instead: the wrapper
+    agent command runs as ``exec '{wrapper}' {agent_command}`` instead: the wrapper
     becomes the pane's process, runs the agent as a child, and on the agent's exit
     records ``done`` and drops the pane to a shell — so the pane no longer dies on
-    agent exit. The agent command's words pass through to the wrapper as argv.
+    agent exit. The agent command's words pass through to the wrapper as argv. The
+    wrapper path is single-quoted to tolerate spaces (the Tart VirtioFS mount lives
+    under ``/Volumes/My Shared Files/``).
     """
-    target = f"{wrapper} {agent_command}" if wrapper else agent_command
+    target = f"'{wrapper}' {agent_command}" if wrapper else agent_command
     exports = build_secret_exports(secrets)
     if working_dir:
         base = f"{exports}cd '{working_dir}' && exec {target}"
