@@ -61,8 +61,23 @@ DEBUG = False
 
 
 def read_config(path):
-    with open(path) as f:
-        return json.load(f)
+    """Read runtime-config.json into a dict.
+
+    A missing or empty file means a bare substrate instance — one created via the
+    runtime's Create without the orchestrator's agent config (the S3 carve, D88) —
+    which has no agent to launch. Return an empty dict; main() treats an empty
+    config as keepalive_only so the box comes up as a neutral holder instead of
+    crashing. A present-but-malformed config still raises: that is a real error,
+    not the agent-free case.
+    """
+    try:
+        with open(path) as f:
+            data = f.read()
+    except FileNotFoundError:
+        return {}
+    if not data.strip():
+        return {}
+    return json.loads(data)
 
 
 # --- Setup stages ---
@@ -419,7 +434,13 @@ def main():
             log_error("mount.shared_error", "mount --make-shared / failed",
                       exit_code=e.returncode, stderr=e.stderr.decode(errors="replace").strip())
 
-    keepalive = cfg.get("keepalive_only")
+    # A bare substrate instance (empty config, no agent) is a neutral keepalive
+    # holder by definition — there is no agent_command to launch, and the agent
+    # path (sandbox-setup.py) requires the config anyway. So default to
+    # keepalive_only when the config is empty, matching the agent-free substrate
+    # brought up via runtime.Create + Launch (S3 carve, D88). A non-empty config
+    # respects its explicit keepalive_only (default False → launch the agent).
+    keepalive = cfg.get("keepalive_only", not cfg)
 
     remap_uid(cfg, running_as_root)
     if not keepalive:
