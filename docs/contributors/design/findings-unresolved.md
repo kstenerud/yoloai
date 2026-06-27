@@ -23,6 +23,14 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 
 ## Findings
 
+### DF51 — Narrative/design docs still reference the pre-Move `internal/{runtime,store,copyflow}` paths
+
+- **Discovered:** 2026-06-27 · **Workstream:** public-layering Phase 3 (the Move, commit `10004e1a`)
+- **Severity:** LOW
+- **Disposition:** PARKED
+- **Description:** The Move promoted `runtime`/`store`/`copyflow` to module-root public packages. Build files, Go imports/comments, and the structural navigation docs (`code-map.md`, `CLAUDE.md`, `architecture/`, `backend-idiosyncrasies.md`) were updated. The remaining stale `internal/<layer>` references live in **narrative/design docs** (`module-split.md`, `copyflow-layer.md`, the principles, research, and several plans) where a blind sed would corrupt meaning — many say "promote `internal/runtime` to public", which is historically correct. These need a careful read-and-update (distinguish "the path is now X" from "it *was* internal/X"), not a sweep. Not build-affecting.
+- **Pointer:** `git grep -lE "internal/(runtime|store|copyflow)" -- 'docs/**/*.md'` (excluding `archive/` + `decisions/` history)
+
 ### DF13 — Restart prompt re-injection races Claude Code's folder-trust dialog (second prompt dropped)
 
 - **Discovered:** 2026-05-31 · **Workstream:** W-L1 (G7, surfaced by smoke run `yoloai-smoketest-20260531-233151.431`)

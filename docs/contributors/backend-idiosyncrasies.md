@@ -768,7 +768,7 @@ Every nested container hit it — `alpine echo`, `busybox uname`, `hello-world` 
 
 The earlier stopgaps — a `system check` advisory and a smoke `dind` N/A-reclassification — were **removed** once the real fix landed (dind now works on every provider, so they'd be misleading).
 
-**Code pointer:** `internal/runtime/docker/docker.go` — `ensureDindVolumeMount` / `dockerLibVolumeName` (Create mounts it, Remove reclaims it). `internal/runtime/docker/resources/Dockerfile` — daemon.json pin removed. `internal/runtime/monitor/setup_helpers.py` `dockerd_storage_args` + `sandbox-setup.py` `start_dockerd` (fstype probe). Reproduce the *old* failure with `docker run --rm --privileged --entrypoint bash yoloai-base -c 'echo {} | sudo tee /etc/docker/daemon.json; sudo dockerd --storage-driver=fuse-overlayfs & … sudo docker run --rm hello-world'` on Docker Desktop.
+**Code pointer:** `runtime/docker/docker.go` — `ensureDindVolumeMount` / `dockerLibVolumeName` (Create mounts it, Remove reclaims it). `runtime/docker/resources/Dockerfile` — daemon.json pin removed. `runtime/monitor/setup_helpers.py` `dockerd_storage_args` + `sandbox-setup.py` `start_dockerd` (fstype probe). Reproduce the *old* failure with `docker run --rm --privileged --entrypoint bash yoloai-base -c 'echo {} | sudo tee /etc/docker/daemon.json; sudo dockerd --storage-driver=fuse-overlayfs & … sudo docker run --rm hello-world'` on Docker Desktop.
 
 ---
 
@@ -833,7 +833,7 @@ An empty value disables LXC seccomp for that container entirely. The container m
 
 **Fix:** Use `du.LayersSize` for the image portion of the cache total; add container `SizeRw`, volume `UsageData.Size`, and build-cache `Size` on top (those live outside the image layer store and are not deduplicated against it). Never sum `du.Images[].Size`.
 
-**Code:** `internal/runtime/docker/prune.go` `splitCacheBytes()` (shared by docker + podman; returns the no-rebuild `cached` total and the rebuild-forcing `images` total separately). Guard test: `internal/runtime/docker/prune_test.go::TestSplitCacheBytes_ImagesUseDeduplicatedLayersSize`.
+**Code:** `runtime/docker/prune.go` `splitCacheBytes()` (shared by docker + podman; returns the no-rebuild `cached` total and the rebuild-forcing `images` total separately). Guard test: `runtime/docker/prune_test.go::TestSplitCacheBytes_ImagesUseDeduplicatedLayersSize`.
 
 **Related (Podman):** the `du.LayersSize` fix above silently fails on Podman, whose docker-compat `/system/df` returns `LayersSize: 0`. The Podman backend injects a per-image dedup instead — see [Podman: `/system/df` reports `LayersSize: 0`](#podman-systemdf-reports-layerssize-0).
 
@@ -851,7 +851,7 @@ An empty value disables LXC seccomp for that container entirely. The container m
 
 **Note on logical vs physical:** because `CacheUsage` counts build cache and image layers separately but they *share* content on the containerd store, the reported reclaim is a *logical* figure that can exceed the physical bytes `df` shows freed. That gap is expected and documented (D37), not a bug.
 
-**Code:** `internal/runtime/docker/prune.go` — `PruneCache` (prune order + before/after delta), `reclaimableBytes` (the `CacheUsage` sample), `splitCacheBytes` (build cache counted as no-rebuild `cached`, `LayersSize` as rebuild-forcing `images`).
+**Code:** `runtime/docker/prune.go` — `PruneCache` (prune order + before/after delta), `reclaimableBytes` (the `CacheUsage` sample), `splitCacheBytes` (build cache counted as no-rebuild `cached`, `LayersSize` as rebuild-forcing `images`).
 
 ---
 
@@ -861,7 +861,7 @@ An empty value disables LXC seccomp for that container entirely. The container m
 
 **Why it matters / what we verified (2026-05-29, Docker 29.4.0 via OrbStack):** the socket/API-only sizing path is store- and VM-agnostic, so it Just Works regardless of which macOS Docker you run. `yoloai system disk` reported docker `image_bytes = 5023481654` (4.68 GiB) — **byte-exact** against `docker system df` Images SIZE `5.023GB` — and `cached_bytes = 507954634` (484.4 MiB) matching Local Volumes `508MB`. Because OrbStack uses the **classic** store (not the containerd snapshotter), the [`image rm` frees no disk until build cache pruned](#docker-containerd-image-store-image-rm-frees-no-disk-until-the-build-cache-is-pruned-sdk-spacereclaimed-undercounts) pinning behavior does **not** apply, and the logical-vs-physical reclaim gap collapses (logical ≈ physical). No code change needed; the takeaway is to **check `docker info` for the active context/store before comparing numbers** — "macOS Docker" is not necessarily Docker Desktop.
 
-**Code:** none (verification only). Sizing path: `internal/runtime/docker/prune.go` `CacheUsage`/`splitCacheBytes`.
+**Code:** none (verification only). Sizing path: `runtime/docker/prune.go` `CacheUsage`/`splitCacheBytes`.
 
 ---
 
@@ -873,7 +873,7 @@ An empty value disables LXC seccomp for that container entirely. The container m
 
 **Fix:** `resolveDockerHost` mirrors the CLI's precedence sourced from the threaded env (§12): `DOCKER_HOST` → active context (`DOCKER_CONTEXT` env, else config.json `currentContext`) endpoint → "" (SDK default). Any parse/read failure degrades to "". As a self-heal for the stale-symlink case with no context switch, when the resolved socket fails `Ping` the auto path probes well-known local sockets (`/var/run`, Docker Desktop, OrbStack, Colima, Rancher Desktop) and adopts the first that answers, printing a one-line stderr notice. An explicitly pinned host (the podman backend) bypasses both. `probe` was widened to match (context endpoint or any existing well-known socket counts as available).
 
-**Code:** `internal/runtime/docker/dockerhost.go` — `resolveDockerHost`, `wellKnownDockerSockets`, `sockExists`; `internal/runtime/docker/docker.go` — `NewWithSocket` (`dialDocker`/`dialFirstAlive` fallback), `probe`.
+**Code:** `runtime/docker/dockerhost.go` — `resolveDockerHost`, `wellKnownDockerSockets`, `sockExists`; `runtime/docker/docker.go` — `NewWithSocket` (`dialDocker`/`dialFirstAlive` fallback), `probe`.
 
 ---
 
@@ -887,7 +887,7 @@ An empty value disables LXC seccomp for that container entirely. The container m
 
 **Podman caveat:** Podman's docker-compat API does **not** accept the `all` volume filter — passing it fails the whole prune with `failed to parse filters for all=true&label=…: "all" is an invalid volume filter`, surfacing as `podman: volumes prune failed: …`. Podman has no anonymous-vs-named distinction (`podman volume prune` removes every unused volume by default), so the `all=true` arg is unnecessary there. `PruneCache` therefore omits it when `binaryName == "podman"` and sends only the `label` filter.
 
-**Code:** `internal/runtime/docker/prune.go` — `managedLabel` const, `splitCacheBytes` (label-gated volume loop), `PruneCache` (label+all `VolumesPrune` filter, `all` omitted for Podman).
+**Code:** `runtime/docker/prune.go` — `managedLabel` const, `splitCacheBytes` (label-gated volume loop), `PruneCache` (label+all `VolumesPrune` filter, `all` omitted for Podman).
 
 ---
 
@@ -899,7 +899,7 @@ An empty value disables LXC seccomp for that container entirely. The container m
 
 **Fix:** Build `yoloai-base` via BuildKit by shelling out to `<binary> build -` (context tar piped to stdin) with `DOCKER_BUILDKIT=1`, instead of `client.ImageBuild`. Podman's `build` (Buildah) likewise never commits per-step images, so the same code path is correct there. Profile builds with secrets already used this CLI path; the base build now matches. After switching, a one-time `docker image prune` clears the legacy intermediates left by prior builds (once `yoloai-base` is rebuilt with BuildKit they are no longer ancestors of any tag, so they prune cleanly and free real disk).
 
-**Code:** `internal/runtime/docker/build.go` — `(*Runtime).buildBaseImage` (CLI/BuildKit via `<binary> build -`), `curatedBuildEnv` (forces `DOCKER_BUILDKIT=1`).
+**Code:** `runtime/docker/build.go` — `(*Runtime).buildBaseImage` (CLI/BuildKit via `<binary> build -`), `curatedBuildEnv` (forces `DOCKER_BUILDKIT=1`).
 
 ---
 
@@ -911,7 +911,7 @@ An empty value disables LXC seccomp for that container entirely. The container m
 
 **Fix:** Make `imageExists` distrust a lone `ImageInspect` NotFound: cross-check with `ImageList` (reference filter), which lists the image even when inspect flaps. On disagreement the image is treated as present and the discrepancy is logged (`containerd-store inspect flap`). If both inspect and list report absent, the listing is retried with bounded backoff (~3.5 s total) in case the store is still settling after a resume — a separate "warm-up" log distinguishes that case. A genuinely-absent image (real first run) pays only the bounded backoff. The two warnings let a real run confirm which case fires; once the inspect-vs-list disagreement is confirmed in the field, the backoff retry can be dropped.
 
-**Code:** `internal/runtime/docker/docker.go` — `(*Runtime).imageExists` (inspect → list cross-check), `imageListedByRef`, `confirmImagePresentByList` (retry/backoff, unit-tested), `imageExistsRetries`/`imageExistsBackoff`.
+**Code:** `runtime/docker/docker.go` — `(*Runtime).imageExists` (inspect → list cross-check), `imageListedByRef`, `confirmImagePresentByList` (retry/backoff, unit-tested), `imageExistsRetries`/`imageExistsBackoff`.
 
 ---
 
@@ -923,7 +923,7 @@ An empty value disables LXC seccomp for that container entirely. The container m
 
 **Fix:** Gate the attestation opt-out flags on the binary — emit `--provenance=false --sbom=false` only when `binaryName == "docker"`, omit for podman (which needs neither). The base and profile build sites both go through one helper so the two stay consistent.
 
-**Code:** `internal/runtime/docker/build.go` — `attestationOptOutFlags(binaryName)`, used by `(*Runtime).buildBaseImage` and `(*Runtime).BuildProfileImage`.
+**Code:** `runtime/docker/build.go` — `attestationOptOutFlags(binaryName)`, used by `(*Runtime).buildBaseImage` and `(*Runtime).BuildProfileImage`.
 
 ---
 
@@ -945,7 +945,7 @@ The estimate is left as-is — it's still a valid *upper bound* if the user stop
 
 **Note on Docker's `system df` RECLAIMABLE column:** it counts an image as reclaimable when nothing references it *for prune purposes* — but its "ACTIVE=1, RECLAIMABLE=100%" output for the same one-image case looks contradictory and is not useful for diagnosis. Trust `docker ps -a` + the new yoloai warning instead.
 
-**Code:** `internal/runtime/docker/prune.go` — `imageReclaimBlockers` (state filter), `(*Runtime).warnImageReclaimBlockers` (the per-line output), `pruneCacheDryRun` (the call site, `includeImages` only). Guard tests: `internal/runtime/docker/prune_test.go::TestImageReclaimBlockers_*`.
+**Code:** `runtime/docker/prune.go` — `imageReclaimBlockers` (state filter), `(*Runtime).warnImageReclaimBlockers` (the per-line output), `pruneCacheDryRun` (the call site, `includeImages` only). Guard tests: `runtime/docker/prune_test.go::TestImageReclaimBlockers_*`.
 
 ---
 
@@ -957,7 +957,7 @@ The estimate is left as-is — it's still a valid *upper bound* if the user stop
 
 **Fix:** In `PruneCache`, swallow the error when `cerrdefs.IsNotFound(err)` is true (it stays a real failure for any other error). Podman has no build cache to free, so skipping is correct.
 
-**Code:** `internal/runtime/docker/prune.go` — `PruneCache` (`BuildCachePrune` error guarded by `!cerrdefs.IsNotFound`).
+**Code:** `runtime/docker/prune.go` — `PruneCache` (`BuildCachePrune` error guarded by `!cerrdefs.IsNotFound`).
 
 ---
 
@@ -969,7 +969,7 @@ The estimate is left as-is — it's still a valid *upper bound* if the user stop
 
 **Fix:** For a process that must outlive its launcher, start it **detached** — `ContainerExecStart` with `container.ExecStartOptions{Detach: true}` (no attach) — and redirect its stdio to files inside the container (detached stdio is otherwise discarded). yoloAI exposes this as `runtime.ProcSpec.Detached`.
 
-**Code:** `internal/runtime/docker/launch.go` (the `Detached` branch); `internal/orchestrator/launch/launch.go::startViaLaunch`. Related: DF44.
+**Code:** `runtime/docker/launch.go` (the `Detached` branch); `internal/orchestrator/launch/launch.go::startViaLaunch`. Related: DF44.
 
 ## Podman
 
@@ -981,7 +981,7 @@ The estimate is left as-is — it's still a valid *upper bound* if the user stop
 
 **Fix:** The Podman backend injects a per-image dedup via `docker.Runtime.SetImageBytesFunc`. Summing `img.Size` would multiply-count the shared base (38 build stages sharing one ~5.5 GB base read as ~150 GB — the failure mode of the shared-layers entry above). The deduplicated total is `Σ(img.Size − img.SharedSize) + max(img.SharedSize)`: every image's unique bytes plus the shared layer set counted once. For yoloai's single-base build chain the largest `SharedSize` captures the full shared union exactly; multiple independent bases would slightly underestimate the shared tier.
 
-**Code:** `internal/runtime/podman/podman.go` `podmanImageBytes()` (injected in `New` via `SetImageBytesFunc`); `internal/runtime/docker/prune.go` `splitCacheBytes()` (uses `imageBytesFn` when set, else `du.LayersSize`). Guard tests: `podman_test.go::TestPodmanImageBytes_*`, `docker/prune_test.go::TestSplitCacheBytes_ImageBytesFuncOverride`.
+**Code:** `runtime/podman/podman.go` `podmanImageBytes()` (injected in `New` via `SetImageBytesFunc`); `runtime/docker/prune.go` `splitCacheBytes()` (uses `imageBytesFn` when set, else `du.LayersSize`). Guard tests: `podman_test.go::TestPodmanImageBytes_*`, `docker/prune_test.go::TestSplitCacheBytes_ImageBytesFuncOverride`.
 
 **macOS / version caveat (verified 2026-05-29, Podman 5.8.1 via Podman Machine `applehv`):** `LayersSize` is **NOT 0** on this version — the raw `/system/df` returns `LayersSize: 5018303449`, matching `podman system df` Images SIZE exactly. The `LayersSize: 0` bug above is therefore **Podman-version-specific**, not universal. The `podmanImageBytes` dedup still runs (it's unconditional) and, because every build-stage row shares the one base, it computes the *identical* value (`Σ(unique) + max(shared) == LayersSize` here), so it's harmless redundancy on 5.8.1 — the injected path agrees with the field it was working around. Keep the injection: older Podman (the version the bug was first seen on) still reports 0, and the dedup is correct on both.
 
@@ -995,7 +995,7 @@ The estimate is left as-is — it's still a valid *upper bound* if the user stop
 
 **Fix:** Don't use `SpaceReclaimed` at all. Report reclaim as the drop in the backend's own `CacheUsage` across the prune (`before − after`); `CacheUsage` already deduplicates correctly for Podman (via `podmanImageBytes`), so the delta is accurate (verified: 5.18 GB, matching the `/system/df` dedup) and self-attributed per backend. See working-notes D37.
 
-**Code:** `internal/runtime/docker/prune.go` `PruneCache` + `reclaimableBytes` (shared by docker + podman). Note `BuildCachePrune` returns "Not Found" on Podman (no BuildKit cache) — warned and harmless; the before/after delta still captures the actual reclaim.
+**Code:** `runtime/docker/prune.go` `PruneCache` + `reclaimableBytes` (shared by docker + podman). Note `BuildCachePrune` returns "Not Found" on Podman (no BuildKit cache) — warned and harmless; the before/after delta still captures the actual reclaim.
 
 ---
 
@@ -1026,7 +1026,7 @@ reads `TMPDIR` for socket discovery.
 (`config.daemonEnvAllowlist` and the mirrored public `runtime.DaemonEnvVars`) so
 it survives to `podman.go::defaultMachineSocketDiscovery`. See
 `internal/config/host_env.go::daemonEnvAllowlist` and
-`internal/runtime/podman/podman.go::defaultMachineSocketDiscovery`.
+`runtime/podman/podman.go::defaultMachineSocketDiscovery`.
 
 ---
 
@@ -1071,7 +1071,7 @@ drives everything:
 macOS unchanged). Because the agent now runs non-root, the entrypoint's
 `mount --make-shared /` (needed for dind mount propagation) runs via `sudo -n`
 when not root — `yoloai` has passwordless sudo. See
-`internal/runtime/docker/resources/entrypoint.py` `main()`. Docker-priv and macOS
+`runtime/docker/resources/entrypoint.py` `main()`. Docker-priv and macOS
 podman-priv still run the entrypoint as root, so they take the direct (no-sudo)
 path unchanged.
 
@@ -1156,7 +1156,7 @@ The lock is held for only milliseconds, making this a transient flake rather tha
 
 **Fix:** Route interactive exec/attach through the same SDK socket as every other op. `InteractiveExec` and `StdioExec` now share one `execAttach` core: `ContainerExecCreate` → `ContainerExecAttach` (hijacked conn) → `bridgeExecStreams` (TTY: raw `io.Copy`; non-TTY: `stdcopy.StdCopy`) → `ContainerExecInspect` for the exit code, returning `&runtime.ExecError{ExitCode}` on non-zero. TTY sizing/resize go over `ContainerExecResize`. One connection, one control plane — no bare-CLI store race. (`r.binaryName` survives only for `build`/`prune`/log helpers.)
 
-**Code:** `internal/runtime/docker/docker.go` `execAttach`/`createExec`/`bridgeExecStreams`/`resizeExec`/`forwardExecResizes`. Conformance guards (run for docker AND podman): `runtime/runtimetest/conformance.go` `StdioExec*`/`InteractiveExec*ExitCode` subtests.
+**Code:** `runtime/docker/docker.go` `execAttach`/`createExec`/`bridgeExecStreams`/`resizeExec`/`forwardExecResizes`. Conformance guards (run for docker AND podman): `runtime/runtimetest/conformance.go` `StdioExec*`/`InteractiveExec*ExitCode` subtests.
 
 **Belongs here:** the external fact is that the docker/podman bare CLI and the SDK socket can resolve the same container differently under load (cousin of the [docker-context divergence](#the-docker-go-sdk-ignores-docker-context-clientfromenv-honors-only-docker_host)); our fix was to stop straddling both control planes.
 
@@ -1231,7 +1231,7 @@ Sizing must go through the **containerd socket**, not the host filesystem: yoloa
 
 **devmapper caveat:** removing a devmapper thin snapshot returns its blocks to the pool (the `dmsetup` used-block count drops), but the pool's backing loopback file (`/var/lib/containerd/devmapper/data`, host-configured at a fixed size, ~10 GB) **does not shrink** — discards are not punched back to the host file. So host `df` is unchanged by a prune even though the pool regains free blocks. yoloai's prune prints this explicitly so the reported reclaim isn't mistaken for freed host disk. (The pool itself is a host prerequisite, configured by the devmapper setup script + `/etc/containerd/config.toml`, not owned by yoloai — yoloai only prunes the snapshots it created inside it.)
 
-**Code:** `internal/runtime/containerd/prune.go` — `snapshotterNames` (`{overlayfs, devmapper}`), `snapshotInfos` (Walk returning each snapshot's `Info` incl. `Parent`; `present=false` skips an unconfigured snapshotter), `orderLeafFirst` (Kahn topological pass; see below), `pruneSnapshots`/`pruneSnapshotter` (iterate both, remove leaf-first, sum each removed snapshot's `Usage`, print the devmapper caveat), `CacheUsage` (sums `Usage` across both into `ImageBytes`, per-snapshotter breakdown in `Detail`).
+**Code:** `runtime/containerd/prune.go` — `snapshotterNames` (`{overlayfs, devmapper}`), `snapshotInfos` (Walk returning each snapshot's `Info` incl. `Parent`; `present=false` skips an unconfigured snapshotter), `orderLeafFirst` (Kahn topological pass; see below), `pruneSnapshots`/`pruneSnapshotter` (iterate both, remove leaf-first, sum each removed snapshot's `Usage`, print the devmapper caveat), `CacheUsage` (sums `Usage` across both into `ImageBytes`, per-snapshotter breakdown in `Detail`).
 
 ---
 
@@ -1243,7 +1243,7 @@ Sizing must go through the **containerd socket**, not the host filesystem: yoloa
 
 **Fix:** Order removals leaf-first via a Kahn topological pass over the in-memory `Parent` links (`orderLeafFirst`): enqueue snapshots with no in-set child, emit each, decrement its parent's child-count, enqueue the parent when it reaches zero. Every `Remove` then succeeds in one pass and the returned reclaim total reflects bytes actually freed — no reliance on a later GC. Any snapshot left un-emitted (cycle, or a parent outside the set) is appended at the end so nothing is silently dropped.
 
-**Code:** `internal/runtime/containerd/prune.go` `orderLeafFirst`, called by `pruneSnapshots`.
+**Code:** `runtime/containerd/prune.go` `orderLeafFirst`, called by `pruneSnapshots`.
 
 ---
 
@@ -1410,7 +1410,7 @@ safe because `deleteNetNS` is idempotent (ignores ENOENT). See `cni.go::setupCNI
 
 **Fix:** Tart now implements `DiskUsageReporter`. `CacheUsage` sums the provisioned VM + the base-repo OCI rows **deduped to one** (max Size per repo, mirroring the podman "count shared once" approach), reporting it as `ImageBytes` (tart has no no-rebuild cache → `CachedBytes` always 0). `PruneCache` deletes the provisioned VM **and every base-repo OCI row** (tag *and* digest), then reports reclaim as the `CacheUsage` before−after delta (D37), same as docker/podman. Scope is deliberately yoloai's base images only — not every VM tart tracks, nor live sandbox clones — so the IMAGES column reconciles with what `prune --images` actually frees (unlike docker/podman, tart is the user's general VM tool and must not imply it'll delete unrelated personal VMs). Result: tart now reports **55.88 GiB** (matching `du`'s ~56 GiB) and the dry-run estimate includes it.
 
-**Code:** `internal/runtime/tart/diskusage.go` (`CacheUsage`, `ownedImageBytes`, `ownedImageRefs`, `baseImageRepo`); `internal/runtime/tart/prune.go::PruneCache` (before/after delta, deletes all owned refs). Tests: `diskusage_test.go::{TestBaseImageRepo,TestCacheUsageCountsOwnedImagesDedupingOCI,TestPruneCacheReportsReclaimDelta,TestPruneCacheDryRunReturnsEstimate}`.
+**Code:** `runtime/tart/diskusage.go` (`CacheUsage`, `ownedImageBytes`, `ownedImageRefs`, `baseImageRepo`); `runtime/tart/prune.go::PruneCache` (before/after delta, deletes all owned refs). Tests: `diskusage_test.go::{TestBaseImageRepo,TestCacheUsageCountsOwnedImagesDedupingOCI,TestPruneCacheReportsReclaimDelta,TestPruneCacheDryRunReturnsEstimate}`.
 
 ---
 
@@ -1813,7 +1813,7 @@ VirtioFS should only be used for:
 
 **Why not just read the host seed:** there is no coherent host-side view to read — that's the whole reason git runs in-VM (see the VirtioFS section above). A host probe isn't merely stale, it's structurally incapable of seeing in-VM edits.
 
-**Code:** `internal/copyflow/changes.go::HasUnappliedWorkVia` (+ `WorkProbe` tri-state), `internal/runtime/runtime.go::GitExecFor`/`ErrNotRunning`, gates in `internal/orchestrator/create/create.go`, `internal/orchestrator/lifecycle/reset.go::NeedsConfirmation`, and the read-model in `internal/orchestrator/status/status.go::detectWorkdirChanges`. The engine opens the backend best-effort (`Engine.TryEnsure`) before the gate so a running VM can be probed.
+**Code:** `copyflow/changes.go::HasUnappliedWorkVia` (+ `WorkProbe` tri-state), `runtime/runtime.go::GitExecFor`/`ErrNotRunning`, gates in `internal/orchestrator/create/create.go`, `internal/orchestrator/lifecycle/reset.go::NeedsConfirmation`, and the read-model in `internal/orchestrator/status/status.go::detectWorkdirChanges`. The engine opens the backend best-effort (`Engine.TryEnsure`) before the gate so a running VM can be probed.
 
 **Belongs here:** the external constraint is VirtioFS forcing the work copy to live in-VM (host-side git corrupts it — see [VirtioFS corrupts git repositories](#virtiofs-corrupts-git-repositories)), which is *why* a host-side probe is structurally wrong; the probe bug it caused was ours.
 
@@ -1835,7 +1835,7 @@ VirtioFS should only be used for:
 
 **Explanation (verified 2026-05-29):** No. Seatbelt runs agents **directly on the host** via `sandbox-exec` using the host's own tools — its `Setup` only *checks* that required binaries are on `PATH` (`runtime/seatbelt/build.go`); it pulls/builds/caches **nothing**. There is no VM, no image, no layer store. The only on-disk state a seatbelt sandbox accumulates is the per-sandbox directory under `~/.yoloai/sandboxes/<name>/` (work dirs, agent-state, logs) — and that's already reported by the `sandboxes` row of `system disk`, the same for every backend. So seatbelt implements neither `DiskUsageReporter` nor `CachePruner`, and its core `Prune` is a no-op (no central registry of instances). The `?` in the IMAGES column is `CacheUsageFor`'s "unknown" fallback (`ImageBytes=-1`); it's cosmetically imperfect (a true "—"/0 would read better) but functionally correct — there is genuinely nothing for `prune`/`prune --images` to reclaim. **Leave it a no-op; do not invent a cache to measure.**
 
-**Code:** `internal/runtime/seatbelt/build.go::Setup` (PATH check only), `internal/runtime/seatbelt/prune.go` (no-op `Prune`, no `PruneCache`/`CacheUsage`); fallback in `internal/runtime/runtime.go::CacheUsageFor`.
+**Code:** `runtime/seatbelt/build.go::Setup` (PATH check only), `runtime/seatbelt/prune.go` (no-op `Prune`, no `PruneCache`/`CacheUsage`); fallback in `runtime/runtime.go::CacheUsageFor`.
 
 **Belongs here (caveat):** this is an architectural invariant, not a tool quirk — Seatbelt is a host-process backend with no image store. Recorded so nobody hunts for a cache (or files the `?` in the `IMAGES` column) that structurally cannot exist.
 
@@ -2016,9 +2016,9 @@ present the very first probe returns it, so dropping the optimisation costs noth
 the happy path and removes the premature give-up. The `.done` marker and its
 `sh -c '… ; : > "$1"'` wrapper are gone.
 
-**Code:** `internal/runtime/monitor/tmux_io.py` (`tmux_bin`, `_probe_tmux_bin`,
+**Code:** `runtime/monitor/tmux_io.py` (`tmux_bin`, `_probe_tmux_bin`,
 `_in_firstlaunch_context`, `set_firstlaunch_marker`, `_RESOLVE_ATTEMPTS`,
-`_FIRSTLAUNCH_MAX_WAIT_SECONDS`); `internal/runtime/monitor/sandbox-setup.py`
+`_FIRSTLAUNCH_MAX_WAIT_SECONDS`); `runtime/monitor/sandbox-setup.py`
 (firstlaunch launch in `TartBackend.setup()`, plus `setup_tmux_session` and the
 `main()` `wait-for` block).
 
@@ -2103,7 +2103,7 @@ here `…-containerd-vm` is a prefix of `…-containerd-vmenhanced`, and the par
 matrix runs both Kata backends concurrently.
 
 **Explanation:** yoloAI passes the instance name (`InstanceName`,
-`internal/store/paths.go`) verbatim as the containerd container ID and does
+`store/paths.go`) verbatim as the containerd container ID and does
 **no** prefix matching of its own. The prefix lookup is **entirely inside the
 external Kata shim** (`containerd-shim-kata-v2` / runtime-rs): given a full
 container ID it scans its sandbox store for entries that *start with* that ID and
@@ -2127,7 +2127,7 @@ the fix would be a create-time check that rejects or warns on a prefix-related
 live sandbox name for the Kata backend.
 
 **Code:** `scripts/smoke_test.py` (`RunContext.name_seq`, `Test.sandbox()`);
-ID construction in `internal/store/paths.go` (`InstanceName`).
+ID construction in `store/paths.go` (`InstanceName`).
 
 ## OS & POSIX semantics
 
@@ -2151,7 +2151,7 @@ genuinely orphaned lock files (no holder) are swept.
 safe to run concurrently with live sandboxes. Lock files therefore don't
 accumulate, and `system prune` only ever removes the truly-orphaned ones.
 
-**Code:** `internal/store/lock_unix.go` (`RemoveLockFile`,
+**Code:** `store/lock_unix.go` (`RemoveLockFile`,
 `SweepStaleLocks`); `internal/orchestrator/lifecycle.go` (Destroy);
 `internal/orchestrator/create.go` (Create rollback).
 
@@ -2174,7 +2174,7 @@ directories (and the `:ro` suffix), and propagates rw live in both directions.
 `--mount type=virtiofs`. Verified: `-v <file>:<file>` and `-v <file>:<file>:ro`
 both work; `-v <dir>:<dir>` propagates rw.
 
-**Code:** `internal/runtime/apple/apple.go` (`Create`, mount loop).
+**Code:** `runtime/apple/apple.go` (`Create`, mount loop).
 
 ---
 
@@ -2192,4 +2192,4 @@ for a relative `.` path. An **absolute** context dir works
 its **absolute** path (`container build -t yoloai-base <abs-dir>`). The builder
 VM must also be started first (`container builder start`).
 
-**Code:** `internal/runtime/apple/apple.go` (`buildBaseImage`).
+**Code:** `runtime/apple/apple.go` (`buildBaseImage`).

@@ -19,14 +19,14 @@ internal/config/         → Configuration loading, profiles, migration, state, 
 internal/fileutil/       → os.MkdirAll / os.WriteFile wrappers for sudo ownership fix
 internal/locking/        → Per-sandbox advisory locks (Q-T)
 internal/mcpsrv/         → MCP server exposing sandbox operations as tools for outer agents
-internal/runtime/        → Pluggable runtime interface, backend registry, isolation mapping, exec helpers
-internal/runtime/caps/   → Capability detection system (host probing, fix instructions, doctor output)
-internal/runtime/docker/      → Docker implementation of runtime.Backend
-internal/runtime/podman/      → Podman implementation (embeds Docker runtime, overrides socket discovery and rootless support)
-internal/runtime/tart/        → Tart (macOS VM) implementation of runtime.Backend
-internal/runtime/seatbelt/    → Seatbelt (macOS sandbox-exec) implementation of runtime.Backend
-internal/runtime/containerd/  → Containerd implementation of runtime.Backend (Kata Containers VM isolation)
-internal/runtime/monitor/     → Embedded monitoring scripts shared across all backends (sandbox-setup.py, status-monitor.py, diagnose-idle.sh)
+runtime/        → Pluggable runtime interface, backend registry, isolation mapping, exec helpers
+runtime/caps/   → Capability detection system (host probing, fix instructions, doctor output)
+runtime/docker/      → Docker implementation of runtime.Backend
+runtime/podman/      → Podman implementation (embeds Docker runtime, overrides socket discovery and rootless support)
+runtime/tart/        → Tart (macOS VM) implementation of runtime.Backend
+runtime/seatbelt/    → Seatbelt (macOS sandbox-exec) implementation of runtime.Backend
+runtime/containerd/  → Containerd implementation of runtime.Backend (Kata Containers VM isolation)
+runtime/monitor/     → Embedded monitoring scripts shared across all backends (sandbox-setup.py, status-monitor.py, diagnose-idle.sh)
 internal/orchestrator/             → Façade (package orchestrator): Engine deps-holder + alias re-exports; clone, parse, setup, terminal/attach
 internal/orchestrator/create/      → Leaf: sandbox-creation orchestration (Run = prepare → seed → build) + context files
 internal/orchestrator/lifecycle/   → Leaf: Start/Stop/Destroy/Reset/NeedsConfirmation free functions + restart/relaunch + Notice types
@@ -38,9 +38,9 @@ internal/envsetup/       → Layer (D91): stages agent-specific sandbox contents
 internal/orchestrator/profiles/    → Leaf: profile image building (dependency order, staleness)
 internal/orchestrator/runtimeconfig/ → Leaf: ContainerConfig assembly for the runtime layer
 internal/orchestrator/archetype/   → Project archetype detection (devcontainer, compose, apple, simple) + .yoloai.yaml + VS Code workspace injection
-internal/copyflow/       → Git-format diff/apply machinery for :copy, :overlay, and :rw modes
+copyflow/       → Git-format diff/apply machinery for :copy, :overlay, and :rw modes
 internal/orchestrator/state/       → Leaf: shared value types (DirSpec, State, Deps, IsolationPerms/Perms) every F5 leaf imports
-internal/store/       → On-disk sandbox state: paths, Meta record, SandboxState completion flags
+store/       → On-disk sandbox state: paths, Meta record, SandboxState completion flags
 internal/testutil/            → Shared test helpers (git, fixtures, home isolation, container polling) — test use only
 internal/workspace/           → Workspace utilities (copy, git, safety checks, tags)
 test/e2e/                → End-to-end tests against the compiled binary (build tag: e2e)
@@ -48,7 +48,7 @@ test/e2e/                → End-to-end tests against the compiled binary (build
 
 Public Go surface is the **`yoloai` package only** (W-L12). Every other Go package lives under `internal/` and is unreachable from external imports by the Go compiler itself. `cmd/yoloai` is the binary entry, not a library.
 
-Dependency direction (W-L8 + W-L12 shape): `cmd/yoloai` → `internal/cli` → `yoloai` (Client + System) → `internal/orchestrator` + `internal/copyflow` + `internal/store` + `internal/runtime`; `internal/orchestrator` → `internal/orchestrator/archetype` + `internal/store` + `internal/runtime` + `internal/agent` + `internal/workspace`; `internal/copyflow` → `internal/orchestrator` + `internal/store`; `internal/store` and `internal/orchestrator/state` are leaves (`state` holds the shared `DirSpec`/`State`/`Deps`/`Perms` value types so the F5 subpackages depend on it without importing the `orchestrator` façade). Post-F5 the `orchestrator` package is a thin **façade**: it re-exports leaf types/functions via `type X = leaf.X` / `var X = leaf.X` aliases and holds the `Engine` deps-holder, while orchestration lives in the leaves. The F5 DAG is `state ← {mounts, invocation, provision, profiles, runtimeconfig} ← launch ← {create, lifecycle}` (create/ and lifecycle/ are siblings — neither imports the other; their one-time shared check `CheckIsolationPrerequisites` lives in `launch/`) `← orchestrator` (façade). Methods were **dissolved** into free functions taking `state.Deps`, not left as thin delegators; `yoloai.Client`/`Sandbox` call e.g. `lifecycle.Stop(ctx, deps, name)` and `create.Run(ctx, deps, ...)` directly. `internal/agent` stands alone; `internal/mcpsrv` depends on `yoloai` (not `orchestrator.Engine`). The CLI reaches into neither the `internal/orchestrator` **façade** package nor any of its leaf subpackages (`archetype`/`status`/…), nor the lifted-out substrate packages `internal/store` and `internal/copyflow`, nor `internal/runtime/*` — every command goes through `yoloai.Client`, `yoloai.System`, and the `yoloai.*` re-exports. (G7 gave every former leaf reach-in a public verb — sandbox-metadata reads, agent-log/file paths, agent/model/backend discovery, stored-prompt get/set, the git-tag-on-apply — so the leaves are no longer consumer surfaces.) The `withRuntime`/`withManager` helpers were removed in W-L10. Cross-backend enumeration (`ls`, `doctor`, `system info`) goes through `System.AllSandboxes` / `Doctor` / `Info` (F23); the only remaining `cliutil.NewRuntime` callers are `cliutil.CheckBackend` (the availability-probe chokepoint, used by a few read-only displays) and the backend-scoped `system tart` subtree. Depguard (`.golangci.yml`) enforces the boundary going forward with two twin rules over non-test `internal/cli/**` and `internal/mcpsrv/**`: `cli-sandbox-scope` denies `internal/orchestrator` (façade + nested leaves) plus the two lifted substrate packages `internal/store` and `internal/copyflow` by explicit deny entries (F1 Half-B + G2) — and `cli-runtime-scope` denies `internal/runtime` (only `internal/cli/system/tart/` is exempt, W-L13/G7).
+Dependency direction (W-L8 + W-L12 shape): `cmd/yoloai` → `internal/cli` → `yoloai` (Client + System) → `internal/orchestrator` + `copyflow` + `store` + `runtime`; `internal/orchestrator` → `internal/orchestrator/archetype` + `store` + `runtime` + `internal/agent` + `internal/workspace`; `copyflow` → `internal/orchestrator` + `store`; `store` and `internal/orchestrator/state` are leaves (`state` holds the shared `DirSpec`/`State`/`Deps`/`Perms` value types so the F5 subpackages depend on it without importing the `orchestrator` façade). Post-F5 the `orchestrator` package is a thin **façade**: it re-exports leaf types/functions via `type X = leaf.X` / `var X = leaf.X` aliases and holds the `Engine` deps-holder, while orchestration lives in the leaves. The F5 DAG is `state ← {mounts, invocation, provision, profiles, runtimeconfig} ← launch ← {create, lifecycle}` (create/ and lifecycle/ are siblings — neither imports the other; their one-time shared check `CheckIsolationPrerequisites` lives in `launch/`) `← orchestrator` (façade). Methods were **dissolved** into free functions taking `state.Deps`, not left as thin delegators; `yoloai.Client`/`Sandbox` call e.g. `lifecycle.Stop(ctx, deps, name)` and `create.Run(ctx, deps, ...)` directly. `internal/agent` stands alone; `internal/mcpsrv` depends on `yoloai` (not `orchestrator.Engine`). The CLI reaches into neither the `internal/orchestrator` **façade** package nor any of its leaf subpackages (`archetype`/`status`/…), nor the lifted-out substrate packages `store` and `copyflow`, nor `runtime/*` — every command goes through `yoloai.Client`, `yoloai.System`, and the `yoloai.*` re-exports. (G7 gave every former leaf reach-in a public verb — sandbox-metadata reads, agent-log/file paths, agent/model/backend discovery, stored-prompt get/set, the git-tag-on-apply — so the leaves are no longer consumer surfaces.) The `withRuntime`/`withManager` helpers were removed in W-L10. Cross-backend enumeration (`ls`, `doctor`, `system info`) goes through `System.AllSandboxes` / `Doctor` / `Info` (F23); the only remaining `cliutil.NewRuntime` callers are `cliutil.CheckBackend` (the availability-probe chokepoint, used by a few read-only displays) and the backend-scoped `system tart` subtree. Depguard (`.golangci.yml`) enforces the boundary going forward with two twin rules over non-test `internal/cli/**` and `internal/mcpsrv/**`: `cli-sandbox-scope` denies `internal/orchestrator` (façade + nested leaves) plus the two lifted substrate packages `store` and `copyflow` by explicit deny entries (F1 Half-B + G2) — and `cli-runtime-scope` denies `runtime` (only `internal/cli/system/tart/` is exempt, W-L13/G7).
 
 ## File Index
 
@@ -91,7 +91,7 @@ only orchestration, error handling, and subcommand registration.
 |------|---------|
 | `root.go` | `Execute()` entry point, `NewRootCmd()` builder (exported so subpackage tests can construct the full CLI tree for integration checks), global flags (`-v`, `-q`, `--json`, `--bugreport`, etc.), error→exit-code mapping, bug-report file open/close orchestration. |
 | `commands.go` | `registerCommands()` — sets up the four help groups and wires each subpackage's exported `NewCmd` constructor onto the root. The only file that imports every command subpackage. |
-| `runtime_imports_linux.go` | Linux-only blank import of `internal/runtime/containerd` so the backend self-registers on Linux builds. |
+| `runtime_imports_linux.go` | Linux-only blank import of `runtime/containerd` so the backend self-registers on Linux builds. |
 | `integration_test.go`, `integration_main_test.go` | Cross-subpackage CLI integration tests that drive Cobra end to end. |
 
 #### Foundation (`internal/cli/cliutil/`)
@@ -160,7 +160,7 @@ after sandboxcmd.
 |------|---------|
 | `system.go` | Parent + `build` + `setup` wiring. |
 | `build`/`prune`/`check`/`disk`/`info`/`setup`/`completion` and `backends_agents.go` | Each system subcommand. |
-| `tart/` | Nested subpackage — the one sanctioned importer of `internal/runtime/tart` (depguard `cli-backend-scope` rule). |
+| `tart/` | Nested subpackage — the one sanctioned importer of `runtime/tart` (depguard `cli-backend-scope` rule). |
 
 #### Single-command subpackages
 

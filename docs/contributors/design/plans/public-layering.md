@@ -201,6 +201,16 @@ remainder ([D99](../../decisions/working-notes.md)):
 - **Phase 3 — the Move.** `git mv` the sealed layers → public (default `runtime`+`store`+`copyflow`
   +`agent`; plumbing layers stay clean-internal, promote later additively), fences, `releasetest`,
   one `BREAKING-CHANGES` entry (D97). Final promotion set decided at the Move.
+  - **DONE (2026-06-27, commit `10004e1a`): `runtime`+`store`+`copyflow` promoted.** `git mv` to
+    module root, tree-wide import sweep (174 files / 155 renames), fence repoint (`.golangci.yml`
+    depguard + runtime-core glob; Makefile/lock paths), constructed-path + doc-comment fixes.
+    Verified green: `make check`, golangci-lint, `go vet -tags 'integration e2e'`, `make build`,
+    tagged-test link. **`agent` is NOT git-mv'd** — its public surface is the root capability
+    catalog (D89), already sealed. **No `BREAKING-CHANGES` entry: the promotion is additive** —
+    external consumers could never import `internal/*`, and the root `yoloai` API is unchanged, so
+    new public packages add surface without breaking anything. Remaining: the integration/e2e/smoke
+    *runs* need real backends (CI); narrative/design-doc path references are an accuracy follow-up
+    (DF51, findings-unresolved).
 - **Remainder (post-merge):** Stream `SessionKind`, D95 broker, netpolicy egress-proxy,
   plumbing-layer promotions, macOS findings, backend research, op-hardening.
 
