@@ -87,6 +87,9 @@ func (r *rerouteBaseRuntime) Descriptor() runtime.BackendDescriptor {
 			NetworkIsolation: true,
 			OverlayDirs:      true,
 			CapAdd:           true,
+			// This fake represents a Docker-like backend that opts into the D88
+			// keepalive-holder + Launch bring-up; these tests verify that path.
+			AgentFreeLaunch: true,
 		},
 	}
 }

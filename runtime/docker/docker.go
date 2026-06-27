@@ -57,6 +57,7 @@ var descriptor = runtime.BackendDescriptor{
 		FilesystemLocality: runtime.LocalityHostSide,
 		ContainerAttach:    true,
 		KeepAliveModel:     runtime.KeepAliveContainerInit,
+		AgentFreeLaunch:    true, // D88 keepalive-holder + Launch bring-up (Docker only; see BackendCaps).
 	},
 	Probe:             probe,
 	CleanupHint:       func(image string) string { return "docker rmi " + image },

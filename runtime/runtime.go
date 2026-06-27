@@ -246,6 +246,15 @@ type BackendCaps struct {
 	VMRuntimeDir       string             // path to yoloai state inside the VM; "" means /yoloai (docker default)
 	FilesystemLocality FilesystemLocality // where tracked work copies live; see the type doc. Zero value = LocalityHostSide.
 	KeepAliveModel     KeepAliveModel     // init/keep-alive model; see the type doc. Zero value = KeepAliveContainerInit.
+	// AgentFreeLaunch opts the backend into the D88 bring-up: the box comes up
+	// agent-free on a keepalive_only holder (the entrypoint writes .substrate-ready
+	// then execs sleep) and the host Launches sandbox-setup.py over it via
+	// runtime.ProcessLauncher. Requires the backend to implement ProcessLauncher.
+	// Zero value (false) selects the legacy path — the agent is welded into the
+	// entrypoint and the host waits for the secrets-consumed marker instead. Only
+	// Docker opts in; Podman inherits Launch by embedding Docker but its rootless
+	// bring-up is not verified on this path, so it stays on legacy.
+	AgentFreeLaunch bool
 }
 
 // FilesystemLocality declares where a sandbox's tracked work copies live

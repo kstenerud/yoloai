@@ -107,7 +107,12 @@ func buildAndStart(ctx context.Context, rt runtime.Backend, st *state.State, mnt
 		_ = os.Remove(markerPath) //nolint:errcheck // best-effort; absent is fine
 	}
 
-	if launcher, ok := runtime.LauncherOf(rt); ok {
+	// Use the D88 keepalive-holder + Launch bring-up only when the backend both
+	// implements ProcessLauncher AND opts in via Capabilities.AgentFreeLaunch.
+	// Podman satisfies ProcessLauncher by embedding the Docker runtime, but its
+	// rootless bring-up is not verified on this path (the keepalive holder does not
+	// reliably win the boot, so waitForReady times out), so it stays on legacy.
+	if launcher, ok := runtime.LauncherOf(rt); ok && rt.Descriptor().Capabilities.AgentFreeLaunch {
 		if err := startViaLaunch(ctx, rt, launcher, st, cname, instanceCfg, markerPath, hasSecrets, secretEnv); err != nil {
 			return err
 		}
