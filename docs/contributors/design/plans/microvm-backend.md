@@ -141,11 +141,13 @@ then converts). So microvm is **not** a from-scratch image builder:
 - **Architectural consequence:** microvm needs **Docker at *build* time** (no
   registry-hosted `yoloai-base`) — consistent with containerd, accepted rather than
   reimplementing a docker-free base build.
-- **bookworm kernel note:** the base distro is bookworm (6.1); `VIRTIO_FS`/`FUSE_FS`/
-  `VIRTIO_CONSOLE` are `=m` there (built-in on trixie/6.12 in the spike) → they rely
-  on udev/modprobe autoload at boot rather than being baked in. Validate the bookworm
-  boot in sub-step (b); if autoload is flaky, pin a newer base for the microvm layer
-  or force the modules via `/etc/modules-load.d` + `initramfs-tools/modules`.
+- **base distro is now trixie (Debian 13, kernel 6.12)** — the shared `yoloai-base`
+  was bumped bookworm→trixie (commit `e81212bd`) ahead of this work. Trixie's 6.12
+  kernel has `VIRTIO_FS`/`FUSE_FS`/`VIRTIO_CONSOLE` **built-in** (`=y`), exactly as the
+  spike used, so the earlier bookworm `=m` module-autoload concern is **resolved** (no
+  autoload gamble). `VIRTIO_MMIO`/`VIRTIO_BLK` remain `=m`, loaded from the initrd as
+  validated. (The trixie bump also moved aider to a uv-managed Python 3.12 — aider caps
+  requires-python at <3.13; unrelated to microvm but part of the same base change.)
 
 ## Build sub-steps (sizes from the scope)
 
