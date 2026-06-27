@@ -12,12 +12,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kstenerud/yoloai/copyflow"
 	"github.com/kstenerud/yoloai/internal/agent"
-	"github.com/kstenerud/yoloai/internal/copyflow"
 	"github.com/kstenerud/yoloai/internal/git"
 	"github.com/kstenerud/yoloai/internal/orchestrator"
-	"github.com/kstenerud/yoloai/internal/store"
+	"github.com/kstenerud/yoloai/internal/orchestrator/agentcfg"
 	"github.com/kstenerud/yoloai/internal/testutil"
+	"github.com/kstenerud/yoloai/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -49,7 +50,9 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	meta, err := store.LoadEnvironment(sandboxDir)
 	require.NoError(t, err)
 	assert.Equal(t, sandboxName, meta.Name)
-	assert.Equal(t, string(agent.AgentTest), meta.AgentType)
+	acfg, err := agentcfg.Load(sandboxDir)
+	require.NoError(t, err)
+	assert.Equal(t, string(agent.AgentTest), acfg.AgentType)
 	assert.Equal(t, store.DirModeCopy, meta.Workdir().Mode)
 	assert.NotEmpty(t, meta.Workdir().BaselineSHA)
 
@@ -114,7 +117,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 		0600,
 	))
 
-	require.NoError(t, git.NewHostWithEnv(testutil.GitEnv()).ApplyPatch(context.Background(), patchBytes, targetDir, false))
+	require.NoError(t, git.NewTestHostWithEnv(testutil.GitEnv()).ApplyPatch(context.Background(), patchBytes, targetDir, false))
 
 	applied, err := os.ReadFile(filepath.Join(targetDir, "main.go")) //nolint:gosec // G304: test file path
 	require.NoError(t, err)
@@ -150,7 +153,9 @@ func TestIntegration_CreateNoStart(t *testing.T) {
 	meta, err := store.LoadEnvironment(sandboxDir)
 	require.NoError(t, err)
 	assert.Equal(t, "nostart", meta.Name)
-	assert.Equal(t, string(agent.AgentTest), meta.AgentType)
+	acfg, err := agentcfg.Load(sandboxDir)
+	require.NoError(t, err)
+	assert.Equal(t, string(agent.AgentTest), acfg.AgentType)
 	assert.Equal(t, store.DirModeCopy, meta.Workdir().Mode)
 	assert.NotEmpty(t, meta.Workdir().BaselineSHA)
 
@@ -473,7 +478,7 @@ func TestIntegration_ApplyPatch(t *testing.T) {
 		0600,
 	))
 
-	require.NoError(t, git.NewHostWithEnv(testutil.GitEnv()).ApplyPatch(context.Background(), patchBytes, targetDir, false))
+	require.NoError(t, git.NewTestHostWithEnv(testutil.GitEnv()).ApplyPatch(context.Background(), patchBytes, targetDir, false))
 
 	applied, err := os.ReadFile(filepath.Join(targetDir, "main.go")) //nolint:gosec // test path
 	require.NoError(t, err)
@@ -828,7 +833,7 @@ func TestIntegration_AgentStubWorkflow(t *testing.T) {
 		[]byte("package main\n\nfunc main() {}\n"),
 		0600,
 	))
-	require.NoError(t, git.NewHostWithEnv(testutil.GitEnv()).ApplyPatch(context.Background(), patchBytes, targetDir, false))
+	require.NoError(t, git.NewTestHostWithEnv(testutil.GitEnv()).ApplyPatch(context.Background(), patchBytes, targetDir, false))
 	assert.FileExists(t, filepath.Join(targetDir, "agent-output.txt"))
 }
 

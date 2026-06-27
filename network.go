@@ -6,9 +6,10 @@ package yoloai
 import (
 	"context"
 
+	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/netpolicy"
+	"github.com/kstenerud/yoloai/internal/netpolicycfg"
 	"github.com/kstenerud/yoloai/internal/orchestrator"
-	"github.com/kstenerud/yoloai/internal/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
 
@@ -35,27 +36,43 @@ const (
 // Q-V resolution (2026-05-25): provenance is RECOVERABLE at read
 // time because the agent's default allowlist is shipped data
 // reachable via agent.GetAgent(name).NetworkAllowlist. The on-disk
-// store (meta.NetworkAllow) flattens agent + user entries together,
+// store (netpolicy.json) flattens agent + user entries together,
 // but Allowed() splits them back out at read time:
 //
-//	agent-required = meta.NetworkAllow ∩ agentDef.NetworkAllowlist
-//	user-added     = meta.NetworkAllow \ agentDef.NetworkAllowlist
+//	agent-required = np.Allow ∩ agentDef.NetworkAllowlist
+//	user-added     = np.Allow \ agentDef.NetworkAllowlist
 type Network struct {
 	engine *orchestrator.Engine
 	name   string
 }
 
 // Allowed returns the sandbox's network allowlist with each entry
-// tagged by its source. Order matches meta.NetworkAllow's on-disk
-// order. Returns an empty (non-nil) slice when the sandbox is not
-// in :isolated network mode or has no entries, so JSON callers
-// render `[]` rather than `null`.
+// tagged by its source. Order matches np.Allow's on-disk order.
+// Returns an empty (non-nil) slice when the sandbox is not in
+// :isolated network mode or has no entries, so JSON callers render
+// `[]` rather than `null`.
 func (n *Network) Allowed(_ context.Context) ([]AllowedDomain, error) {
-	meta, err := n.loadEnvironment()
+	np, err := n.loadNetpolicy()
 	if err != nil {
 		return nil, err
 	}
-	return computeAllowedDomains(meta), nil
+	agentType, err := n.agentType()
+	if err != nil {
+		return nil, err
+	}
+	return computeAllowedDomains(np.Allow, agentType), nil
+}
+
+// agentType resolves the sandbox's configured agent type from agent.json, the
+// inside-process config the substrate record no longer carries (Q104). It feeds
+// the network-floor provenance; a sandbox loaded successfully has been migrated,
+// so agent.json is present.
+func (n *Network) agentType() (string, error) {
+	acfg, err := n.engine.LoadAgentConfig(n.name)
+	if err != nil {
+		return "", err
+	}
+	return acfg.AgentType, nil
 }
 
 // Allow adds domains to the user-source portion of the allowlist.
@@ -75,13 +92,13 @@ func (n *Network) Allow(ctx context.Context, domains ...string) (*AllowResult, e
 		return nil, yoerrors.NewUsageError("at least one domain is required")
 	}
 
-	meta, err := n.requireIsolated()
+	np, err := n.requireIsolated()
 	if err != nil {
 		return nil, err
 	}
 
-	existing := make(map[string]bool, len(meta.NetworkAllow))
-	for _, d := range meta.NetworkAllow {
+	existing := make(map[string]bool, len(np.Allow))
+	for _, d := range np.Allow {
 		existing[d] = true
 	}
 	added := make([]string, 0, len(domains))
@@ -97,8 +114,8 @@ func (n *Network) Allow(ctx context.Context, domains ...string) (*AllowResult, e
 		return &AllowResult{Added: []string{}, Live: false}, nil
 	}
 
-	meta.NetworkAllow = append(meta.NetworkAllow, added...)
-	if err := n.engine.SaveNetworkAllowlist(n.name, meta); err != nil {
+	np.Allow = append(np.Allow, added...)
+	if err := n.engine.SaveNetworkAllowlist(n.name, np); err != nil {
 		return nil, err
 	}
 
@@ -121,13 +138,13 @@ func (n *Network) Deny(ctx context.Context, domains ...string) (*DenyResult, err
 		return nil, yoerrors.NewUsageError("at least one domain is required")
 	}
 
-	meta, err := n.requireIsolated()
+	np, err := n.requireIsolated()
 	if err != nil {
 		return nil, err
 	}
 
-	existing := make(map[string]bool, len(meta.NetworkAllow))
-	for _, d := range meta.NetworkAllow {
+	existing := make(map[string]bool, len(np.Allow))
+	for _, d := range np.Allow {
 		existing[d] = true
 	}
 	for _, d := range domains {
@@ -136,28 +153,26 @@ func (n *Network) Deny(ctx context.Context, domains ...string) (*DenyResult, err
 		}
 	}
 
-	// Provenance of removed entries — computed before we mutate meta.
-	agentSet := agentDomainSet(string(meta.AgentType))
+	agentType, err := n.agentType()
+	if err != nil {
+		return nil, err
+	}
+	// Provenance of removed entries — computed before we mutate np.
+	removed := netpolicy.WithProvenance(domains, agentNetworkFloor(agentType))
 	toRemove := make(map[string]bool, len(domains))
-	removed := make([]AllowedDomain, 0, len(domains))
 	for _, d := range domains {
 		toRemove[d] = true
-		source := AllowedFromUser
-		if agentSet[d] {
-			source = AllowedFromAgentRequirement
-		}
-		removed = append(removed, AllowedDomain{Domain: d, Source: source})
 	}
 
-	remaining := make([]string, 0, len(meta.NetworkAllow))
-	for _, d := range meta.NetworkAllow {
+	remaining := make([]string, 0, len(np.Allow))
+	for _, d := range np.Allow {
 		if !toRemove[d] {
 			remaining = append(remaining, d)
 		}
 	}
 
-	meta.NetworkAllow = remaining
-	if err := n.engine.SaveNetworkAllowlist(n.name, meta); err != nil {
+	np.Allow = remaining
+	if err := n.engine.SaveNetworkAllowlist(n.name, np); err != nil {
 		return nil, err
 	}
 
@@ -195,22 +210,22 @@ type DenyResult struct {
 
 // --- helpers ---
 
-// loadEnvironment reads the sandbox's environment.json. The Network handle's
-// methods all start with this read, so it's centralized here.
-func (n *Network) loadEnvironment() (*store.Environment, error) {
-	return n.engine.LoadEnvironment(n.name)
+// loadNetpolicy reads the sandbox's netpolicy.json.
+func (n *Network) loadNetpolicy() (*netpolicycfg.Netpolicy, error) {
+	sandboxDir := n.engine.Layout().SandboxDir(n.name)
+	return netpolicycfg.Load(sandboxDir)
 }
 
-// requireIsolated loads meta and rejects sandboxes that aren't in
+// requireIsolated loads netpolicy and rejects sandboxes that aren't in
 // :isolated network mode.
-func (n *Network) requireIsolated() (*store.Environment, error) {
-	meta, err := n.engine.LoadEnvironment(n.name)
+func (n *Network) requireIsolated() (*netpolicycfg.Netpolicy, error) {
+	np, err := n.loadNetpolicy()
 	if err != nil {
 		return nil, err
 	}
-	switch meta.NetworkMode {
+	switch np.Mode {
 	case "isolated":
-		return meta, nil
+		return np, nil
 	case "none":
 		return nil, yoerrors.NewUsageError("sandbox %q uses --network-none; cannot modify network access", n.name)
 	default:
@@ -218,20 +233,22 @@ func (n *Network) requireIsolated() (*store.Environment, error) {
 	}
 }
 
-// computeAllowedDomains turns flat meta.NetworkAllow into typed
-// entries with provenance computed from the bound agent's
-// definition. Order matches meta order; unknown agent name produces
-// all-user entries (no agent → no known requirements).
-func computeAllowedDomains(meta *store.Environment) []AllowedDomain {
-	return netpolicy.WithProvenance(meta.NetworkAllow, string(meta.AgentType))
+// computeAllowedDomains turns flat np.Allow into typed entries with provenance
+// computed from the bound agent's definition. Order matches np.Allow order;
+// unknown agent name produces all-user entries.
+func computeAllowedDomains(allow []string, agentType string) []AllowedDomain {
+	return netpolicy.WithProvenance(allow, agentNetworkFloor(agentType))
 }
 
-// agentDomainSet returns the set of domains the named agent's
-// definition requires. Returns an empty (non-nil) map for unknown
-// agents — provenance derivation degrades gracefully to "everything
-// looks user-added" rather than blowing up.
-func agentDomainSet(agentName string) map[string]bool {
-	return netpolicy.AgentFloor(agentName)
+// agentNetworkFloor returns the domains the named agent's definition requires
+// (its network floor). Returns nil for an unknown/empty agent — provenance then
+// degrades gracefully to "everything looks user-added".
+func agentNetworkFloor(agentName string) []string {
+	def := agent.GetAgent(agentName)
+	if def == nil {
+		return nil
+	}
+	return def.NetworkAllowlist
 }
 
 // ipsetResolveDomainsScript is the shell fragment that resolves

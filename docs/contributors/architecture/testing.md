@@ -33,7 +33,7 @@ make e2e
 ## Backend conformance & per-host coverage
 
 Every backend is verified the same way: a shared, backend-agnostic behavioral
-suite in `internal/runtime/runtimetest`, run by each backend's integration
+suite in `runtime/runtimetest`, run by each backend's integration
 package, with a per-host smoke matrix on top. Each tier is **host-aware** — it
 runs what the current host supports and skips the rest with a reason, so the same
 target works on a Linux box or an Apple Silicon Mac.

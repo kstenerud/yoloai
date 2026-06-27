@@ -12,7 +12,7 @@ import (
 	// Backend registrations live in client.go (the root package);
 	// importing yoloai below pulls in those init() side effects, so a
 	// blank-import block here is redundant. Keeping this package free of
-	// any internal/runtime import is what lets cli-runtime-scope fence the
+	// any runtime import is what lets cli-runtime-scope fence the
 	// whole CLI off the runtime layer (tart now goes through the public
 	// System.TartBases handle, so there is no backend exemption).
 	yoloai "github.com/kstenerud/yoloai"

@@ -48,6 +48,7 @@ inclusion test first, then add a row to the index.
 | `yoloai destroy` hangs; `ctr tasks ls` shows RUNNING but no qemu/firecracker; host CPU 60–80% | [Kata: shim wedge with dead VM](#kata-shim-wedge-with-dead-vm-sigkill-via-containerd-doesnt-release-the-task) |
 | `yoloai destroy` hangs on a Tart sandbox; `tart list` shows VM running but guest unreachable | [Tart: VM process wedge](#tart-vm-process-wedge-tart-stop-and-sigterm-via-pgrep-dont-release-the-host-tart-run) |
 | Task stays in `Created` after `Start()` returns | [Containerd: task.Start returns early](#taskstart-returns-before-the-vm-is-actually-running) |
+| `OCI runtime exec failed: ... procReady not received` on exec/Launch | [Docker: procReady usually means the container is dying, not broken runc](#docker-procready-not-received-usually-means-the-container-is-exiting-not-a-broken-runtime) |
 | `parent snapshot sha256:... does not exist: not found` | [Containerd: WithNewSnapshot doesn't unpack](#withnewsnapshot-does-not-unpack-image-layers) |
 | `docker save \| ctr import` hangs indefinitely | [Containerd: pipe hang on ctr failure](#docker-save--ctr-import-hangs-if-ctr-fails-early) |
 | Containerd socket: no error from `os.Stat` despite permission denied | [Containerd: Stat can't detect EPERM](#osstat-on-the-containerd-socket-does-not-detect-permission-denied) |
@@ -77,6 +78,7 @@ inclusion test first, then add a row to the index.
 | `prune` dry-run promises to reclaim "volumes" but reports `reclaimed 0 B`; doctor counts the user's own (non-yoloai) volumes | [Docker/Podman: volume prune is anonymous-only; scope to yoloai volumes](#dockerpodman-volume-prune-default-filter-removes-only-anonymous-volumes-reclaim-accounting-must-be-scoped-to-yoloais-own-volumes) |
 | `system prune` finds a different dangling image every run, reclaims 0 B, never converges, even with no builds | [Docker: legacy builder leaves a dangling image per step; build with BuildKit](#docker-legacy-builder-commits-one-dangling-intermediate-image-per-dockerfile-step-build-with-buildkit) |
 | Smoke/`system build` rebuilds `yoloai-base` from scratch every run on Docker Desktop (not OrbStack), though the image is present | [Docker Desktop: ImageInspect transiently NotFounds a present image on the idle containerd store](#docker-desktop-imageinspect-transiently-notfounds-a-present-image-on-the-idle-containerd-store) |
+| Every `new`/`start`/`clone` fails on Docker Desktop (passes on OrbStack/Linux) with `substrate not ready within 30s`; container log skips `entrypoint.keepalive_only`, no `.substrate-ready` | [Docker Desktop: single-file bind mount serves stale content after atomic rename](#docker-desktop-a-single-file-bind-mount-serves-stale-content-after-the-host-atomic-renames-it-keepalive_only-never-reaches-the-entrypoint) |
 | `podman: build cache prune failed: Error response from daemon: Not Found` | [Podman: no build-cache endpoint (404)](#podman-docker-compat-api-has-no-build-cache-endpoint--buildcacheprune-returns-404-not-found) |
 | Long-lived `docker exec` (attached) process dies when the launching CLI exits; status-monitor / marker missing | [Docker: attached exec doesn't outlive its client](#docker-exec-an-attached-exec-does-not-outlive-the-client-that-started-it) |
 | `prune --images` on Podman reports absurd reclaim (e.g. 142 GB freed for a ~5 GiB footprint) | [Podman: `ImagesPrune` `SpaceReclaimed` un-dedup sum](#podman-imagesprune-spacereclaimed-is-the-un-deduplicated-image-size-sum) |
@@ -115,6 +117,8 @@ inclusion test first, then add a row to the index.
 | `no podman socket found` on macOS though `podman machine` is running (any command: `system build`, `new`, …) | [Podman macOS: socket discovery needs TMPDIR](#macos-podman-machine-socket-discovery-needs-tmpdir-without-it-inspect-reports-a-stale-tmp-path) |
 | Smoke test: `stop_start/containerd-vm` fails with "agent idle for 9s+" | [QEMU: slow startup exceeds stall grace](#qemu-slow-startup-exceeds-smoke-test-stall-grace-period) |
 | Smoke test: `stop_start/tart` fails; exchange dir empty | [Tart: xcodebuild -runFirstLaunch blocks agent startup](#tart-xcodebuild--runfirstlaunch-blocks-agent-startup) |
+| Smoke `done` never fires; claude stuck on a Bash permission prompt despite `--dangerously-skip-permissions`; "fullscreen renderer" modal seen | [Claude: fullscreen upsell re-execs and drops the flag](#claude-the-fullscreen-renderer-upsell-re-execs-claude-and-drops---dangerously-skip-permissions) |
+| `container-enhanced` (gVisor): `new` exits 0 / `ls` active but agent never runs; box stuck on `sleep infinity`, only `entrypoint.keepalive_only` logged | [gVisor: docker exec --user resolves stale image passwd](#gvisor-container-enhanced-docker-exec---user-name-resolves-against-the-stale-image-passwd-not-the-live-one) |
 | `yoloai new --attach` hangs after "Sandbox created"; Python setup never completes | [Tart: mount_map uses Docker paths, triggering macOS automount](#tart-mount_map-uses-docker-style-paths-triggering-macos-automount-hang) |
 | `yoloai apply` fails: `git add: git [add -A]: exit status 128: … index.lock: File exists` while agent is running | [Docker/Podman: agent git and apply git race on index.lock](#dockerpodman-agent-git-and-apply-git-race-on-indexlock) |
 | `FileNotFoundError: 'tmux'` in `sandbox-setup.py::setup_tmux_session` on Tart VM (intermittent) | [Tart: transient FS/PATH failure makes tmux unresolvable during the firstlaunch window](#tart-transient-fspath-failure-makes-tmux-unresolvable-during-the-firstlaunch-window) |
@@ -124,6 +128,7 @@ inclusion test first, then add a row to the index.
 | Is it safe to delete a `.lock` file while holding its flock? (prune / Destroy) | [Removing a .lock file while holding its flock is safe](#removing-a-lock-file-while-holding-its-flock-is-safe) |
 | Tart base build / `tart run` fails with `The number of VMs exceeds the system limit` or VM self-stops at boot, but `tart list` shows nothing running | [Tart: orphaned Virtualization VM processes consume the macOS VM limit](#orphaned-virtualization-vm-processes-survive-a-crashed-tart-run-and-silently-consume-the-macos-vm-limit) |
 | `tart delete <name>` fails with `instance not found` for a VM that exists (e.g. `delete old base: instance not found` during base promote) | [Tart: delete of a running VM reports "instance not found"](#tart-delete-of-a-running-vm-fails-with-a-misleading-instance-not-found-stop-first) |
+| Smoke `stop_start`/`tag_transfer` fails **only on Tart**: `zsh: no such file or directory: /yoloai/bin/agent-run.sh`, pane dead (127); `setup.log` shows `NameError: log_error` | [Tart: fall-to-shell wrapper path must derive from yoloai_dir](#tart-the-fall-to-shell-wrapper-path-must-derive-from-yoloai_dir-not-the-container-yoloai) |
 | `system disk` shows tart `IMAGES: ?` / `CACHE: 0 B` despite GBs in `~/.tart`; `prune --images` reports 0 reclaimed | [Tart: list double-counts OCI tag+digest; sizing/prune must dedup](#tart-list-reports-a-pulled-oci-image-twice-tag--digest-over-one-on-disk-copy-sizing-and-prune-must-dedup-and-remove-both-rows) |
 | macOS `docker` numbers don't match Docker Desktop assumptions (overlay2/btrfs, classic store) | [Docker on macOS may be OrbStack, not Docker Desktop](#docker-on-macos-may-be-orbstack-not-docker-desktop--docker-info-clientinfocontext-tells-you-which) |
 | Podman macOS reports image bytes correctly even though the Linux `LayersSize: 0` workaround exists | [Podman: `/system/df` reports `LayersSize: 0`](#podman-systemdf-reports-layerssize-0) (macOS/version caveat) |
@@ -768,7 +773,7 @@ Every nested container hit it — `alpine echo`, `busybox uname`, `hello-world` 
 
 The earlier stopgaps — a `system check` advisory and a smoke `dind` N/A-reclassification — were **removed** once the real fix landed (dind now works on every provider, so they'd be misleading).
 
-**Code pointer:** `internal/runtime/docker/docker.go` — `ensureDindVolumeMount` / `dockerLibVolumeName` (Create mounts it, Remove reclaims it). `internal/runtime/docker/resources/Dockerfile` — daemon.json pin removed. `internal/runtime/monitor/setup_helpers.py` `dockerd_storage_args` + `sandbox-setup.py` `start_dockerd` (fstype probe). Reproduce the *old* failure with `docker run --rm --privileged --entrypoint bash yoloai-base -c 'echo {} | sudo tee /etc/docker/daemon.json; sudo dockerd --storage-driver=fuse-overlayfs & … sudo docker run --rm hello-world'` on Docker Desktop.
+**Code pointer:** `runtime/docker/docker.go` — `ensureDindVolumeMount` / `dockerLibVolumeName` (Create mounts it, Remove reclaims it). `runtime/docker/resources/Dockerfile` — daemon.json pin removed. `runtime/monitor/setup_helpers.py` `dockerd_storage_args` + `sandbox-setup.py` `start_dockerd` (fstype probe). Reproduce the *old* failure with `docker run --rm --privileged --entrypoint bash yoloai-base -c 'echo {} | sudo tee /etc/docker/daemon.json; sudo dockerd --storage-driver=fuse-overlayfs & … sudo docker run --rm hello-world'` on Docker Desktop.
 
 ---
 
@@ -833,7 +838,7 @@ An empty value disables LXC seccomp for that container entirely. The container m
 
 **Fix:** Use `du.LayersSize` for the image portion of the cache total; add container `SizeRw`, volume `UsageData.Size`, and build-cache `Size` on top (those live outside the image layer store and are not deduplicated against it). Never sum `du.Images[].Size`.
 
-**Code:** `internal/runtime/docker/prune.go` `splitCacheBytes()` (shared by docker + podman; returns the no-rebuild `cached` total and the rebuild-forcing `images` total separately). Guard test: `internal/runtime/docker/prune_test.go::TestSplitCacheBytes_ImagesUseDeduplicatedLayersSize`.
+**Code:** `runtime/docker/prune.go` `splitCacheBytes()` (shared by docker + podman; returns the no-rebuild `cached` total and the rebuild-forcing `images` total separately). Guard test: `runtime/docker/prune_test.go::TestSplitCacheBytes_ImagesUseDeduplicatedLayersSize`.
 
 **Related (Podman):** the `du.LayersSize` fix above silently fails on Podman, whose docker-compat `/system/df` returns `LayersSize: 0`. The Podman backend injects a per-image dedup instead — see [Podman: `/system/df` reports `LayersSize: 0`](#podman-systemdf-reports-layerssize-0).
 
@@ -851,7 +856,7 @@ An empty value disables LXC seccomp for that container entirely. The container m
 
 **Note on logical vs physical:** because `CacheUsage` counts build cache and image layers separately but they *share* content on the containerd store, the reported reclaim is a *logical* figure that can exceed the physical bytes `df` shows freed. That gap is expected and documented (D37), not a bug.
 
-**Code:** `internal/runtime/docker/prune.go` — `PruneCache` (prune order + before/after delta), `reclaimableBytes` (the `CacheUsage` sample), `splitCacheBytes` (build cache counted as no-rebuild `cached`, `LayersSize` as rebuild-forcing `images`).
+**Code:** `runtime/docker/prune.go` — `PruneCache` (prune order + before/after delta), `reclaimableBytes` (the `CacheUsage` sample), `splitCacheBytes` (build cache counted as no-rebuild `cached`, `LayersSize` as rebuild-forcing `images`).
 
 ---
 
@@ -861,7 +866,7 @@ An empty value disables LXC seccomp for that container entirely. The container m
 
 **Why it matters / what we verified (2026-05-29, Docker 29.4.0 via OrbStack):** the socket/API-only sizing path is store- and VM-agnostic, so it Just Works regardless of which macOS Docker you run. `yoloai system disk` reported docker `image_bytes = 5023481654` (4.68 GiB) — **byte-exact** against `docker system df` Images SIZE `5.023GB` — and `cached_bytes = 507954634` (484.4 MiB) matching Local Volumes `508MB`. Because OrbStack uses the **classic** store (not the containerd snapshotter), the [`image rm` frees no disk until build cache pruned](#docker-containerd-image-store-image-rm-frees-no-disk-until-the-build-cache-is-pruned-sdk-spacereclaimed-undercounts) pinning behavior does **not** apply, and the logical-vs-physical reclaim gap collapses (logical ≈ physical). No code change needed; the takeaway is to **check `docker info` for the active context/store before comparing numbers** — "macOS Docker" is not necessarily Docker Desktop.
 
-**Code:** none (verification only). Sizing path: `internal/runtime/docker/prune.go` `CacheUsage`/`splitCacheBytes`.
+**Code:** none (verification only). Sizing path: `runtime/docker/prune.go` `CacheUsage`/`splitCacheBytes`.
 
 ---
 
@@ -873,7 +878,7 @@ An empty value disables LXC seccomp for that container entirely. The container m
 
 **Fix:** `resolveDockerHost` mirrors the CLI's precedence sourced from the threaded env (§12): `DOCKER_HOST` → active context (`DOCKER_CONTEXT` env, else config.json `currentContext`) endpoint → "" (SDK default). Any parse/read failure degrades to "". As a self-heal for the stale-symlink case with no context switch, when the resolved socket fails `Ping` the auto path probes well-known local sockets (`/var/run`, Docker Desktop, OrbStack, Colima, Rancher Desktop) and adopts the first that answers, printing a one-line stderr notice. An explicitly pinned host (the podman backend) bypasses both. `probe` was widened to match (context endpoint or any existing well-known socket counts as available).
 
-**Code:** `internal/runtime/docker/dockerhost.go` — `resolveDockerHost`, `wellKnownDockerSockets`, `sockExists`; `internal/runtime/docker/docker.go` — `NewWithSocket` (`dialDocker`/`dialFirstAlive` fallback), `probe`.
+**Code:** `runtime/docker/dockerhost.go` — `resolveDockerHost`, `wellKnownDockerSockets`, `sockExists`; `runtime/docker/docker.go` — `NewWithSocket` (`dialDocker`/`dialFirstAlive` fallback), `probe`.
 
 ---
 
@@ -887,7 +892,7 @@ An empty value disables LXC seccomp for that container entirely. The container m
 
 **Podman caveat:** Podman's docker-compat API does **not** accept the `all` volume filter — passing it fails the whole prune with `failed to parse filters for all=true&label=…: "all" is an invalid volume filter`, surfacing as `podman: volumes prune failed: …`. Podman has no anonymous-vs-named distinction (`podman volume prune` removes every unused volume by default), so the `all=true` arg is unnecessary there. `PruneCache` therefore omits it when `binaryName == "podman"` and sends only the `label` filter.
 
-**Code:** `internal/runtime/docker/prune.go` — `managedLabel` const, `splitCacheBytes` (label-gated volume loop), `PruneCache` (label+all `VolumesPrune` filter, `all` omitted for Podman).
+**Code:** `runtime/docker/prune.go` — `managedLabel` const, `splitCacheBytes` (label-gated volume loop), `PruneCache` (label+all `VolumesPrune` filter, `all` omitted for Podman).
 
 ---
 
@@ -899,7 +904,7 @@ An empty value disables LXC seccomp for that container entirely. The container m
 
 **Fix:** Build `yoloai-base` via BuildKit by shelling out to `<binary> build -` (context tar piped to stdin) with `DOCKER_BUILDKIT=1`, instead of `client.ImageBuild`. Podman's `build` (Buildah) likewise never commits per-step images, so the same code path is correct there. Profile builds with secrets already used this CLI path; the base build now matches. After switching, a one-time `docker image prune` clears the legacy intermediates left by prior builds (once `yoloai-base` is rebuilt with BuildKit they are no longer ancestors of any tag, so they prune cleanly and free real disk).
 
-**Code:** `internal/runtime/docker/build.go` — `(*Runtime).buildBaseImage` (CLI/BuildKit via `<binary> build -`), `curatedBuildEnv` (forces `DOCKER_BUILDKIT=1`).
+**Code:** `runtime/docker/build.go` — `(*Runtime).buildBaseImage` (CLI/BuildKit via `<binary> build -`), `curatedBuildEnv` (forces `DOCKER_BUILDKIT=1`).
 
 ---
 
@@ -911,7 +916,50 @@ An empty value disables LXC seccomp for that container entirely. The container m
 
 **Fix:** Make `imageExists` distrust a lone `ImageInspect` NotFound: cross-check with `ImageList` (reference filter), which lists the image even when inspect flaps. On disagreement the image is treated as present and the discrepancy is logged (`containerd-store inspect flap`). If both inspect and list report absent, the listing is retried with bounded backoff (~3.5 s total) in case the store is still settling after a resume — a separate "warm-up" log distinguishes that case. A genuinely-absent image (real first run) pays only the bounded backoff. The two warnings let a real run confirm which case fires; once the inspect-vs-list disagreement is confirmed in the field, the backoff retry can be dropped.
 
-**Code:** `internal/runtime/docker/docker.go` — `(*Runtime).imageExists` (inspect → list cross-check), `imageListedByRef`, `confirmImagePresentByList` (retry/backoff, unit-tested), `imageExistsRetries`/`imageExistsBackoff`.
+**Code:** `runtime/docker/docker.go` — `(*Runtime).imageExists` (inspect → list cross-check), `imageListedByRef`, `confirmImagePresentByList` (retry/backoff, unit-tested), `imageExistsRetries`/`imageExistsBackoff`.
+
+---
+
+### Docker Desktop: a single-file bind mount serves stale content after the host atomic-renames it (keepalive_only never reaches the entrypoint)
+
+**Symptom:** Every `yoloai new`/`start`/`clone` fails on **Docker Desktop** (macOS) with
+`yoloai: substrate not ready within 30s (root provisioning did not complete)`; the
+identical command passes on **OrbStack** and on Linux. The failure autopsy shows the
+in-container `sandbox.jsonl` jumped straight from `entrypoint.python_start` to
+`sandbox.agent_launch` — **no** `entrypoint.keepalive_only` event and **no**
+`/yoloai/logs/.substrate-ready` marker — even though the host's
+`runtime-config.json` clearly has `"keepalive_only": true`, and a `docker exec … cat
+/yoloai/runtime-config.json` seconds later *also* shows `true`.
+
+**Explanation:** The agent-free bring-up (D88 `startViaLaunch`) signals the entrypoint
+by patching `keepalive_only:true` into `runtime-config.json` just before `Create`. That
+patch is an **atomic rename** (write temp + rename), which gives the file a **new
+inode**. `runtime-config.json` is mounted into the container as a **single-file**
+read-only bind mount (`buildSystemMounts`). Docker Desktop's gRPC-FUSE file sharing
+caches the path→inode mapping and serves the **stale pre-patch content** for that
+single file when the entrypoint reads it at container start — so the entrypoint sees
+`keepalive_only` absent, evaluates `cfg.get("keepalive_only", not cfg)` to `False`
+(config is non-empty), takes the **legacy inline** path, runs sandbox-setup.py itself,
+and never writes `.substrate-ready`. The host's `waitForReady` polls for that marker
+and times out at 30s. The cache refreshes within a second or two, which is why a later
+`exec` shows the correct content — masking the race. OrbStack (and Linux bind mounts)
+propagate the new inode immediately, so they never see stale content. **The bug is not
+that the host failed to patch the file — it did — but that the patched single file does
+not reach the container in time on Docker Desktop.**
+
+**Fix:** Don't rely on the patched single-file bind mount as the only signal.
+`startViaLaunch` also sets `YOLOAI_KEEPALIVE_ONLY=1` in the container's env
+(`InstanceConfig.ContainerEnv` → `containerConfig.Env`), which is baked into the
+container config at create time and is immune to mount-propagation lag. The entrypoint
+treats the env var as authoritative (forces `keepalive=True` when set). The file patch
+stays as the Linux/OrbStack record and a backstop. General rule: **a host-side change to
+a single-file bind mount may not be visible inside a Docker Desktop container promptly;
+deliver create-time signals via env vars (or a bind-mounted *directory*, which
+propagates in real time) rather than by mutating a bind-mounted file.**
+
+**Code:** `internal/orchestrator/launch/launch.go` (`startViaLaunch` sets
+`YOLOAI_KEEPALIVE_ONLY=1`), `runtime/docker/resources/entrypoint.py` (env override of
+the `keepalive` decision).
 
 ---
 
@@ -923,7 +971,7 @@ An empty value disables LXC seccomp for that container entirely. The container m
 
 **Fix:** Gate the attestation opt-out flags on the binary — emit `--provenance=false --sbom=false` only when `binaryName == "docker"`, omit for podman (which needs neither). The base and profile build sites both go through one helper so the two stay consistent.
 
-**Code:** `internal/runtime/docker/build.go` — `attestationOptOutFlags(binaryName)`, used by `(*Runtime).buildBaseImage` and `(*Runtime).BuildProfileImage`.
+**Code:** `runtime/docker/build.go` — `attestationOptOutFlags(binaryName)`, used by `(*Runtime).buildBaseImage` and `(*Runtime).BuildProfileImage`.
 
 ---
 
@@ -945,7 +993,7 @@ The estimate is left as-is — it's still a valid *upper bound* if the user stop
 
 **Note on Docker's `system df` RECLAIMABLE column:** it counts an image as reclaimable when nothing references it *for prune purposes* — but its "ACTIVE=1, RECLAIMABLE=100%" output for the same one-image case looks contradictory and is not useful for diagnosis. Trust `docker ps -a` + the new yoloai warning instead.
 
-**Code:** `internal/runtime/docker/prune.go` — `imageReclaimBlockers` (state filter), `(*Runtime).warnImageReclaimBlockers` (the per-line output), `pruneCacheDryRun` (the call site, `includeImages` only). Guard tests: `internal/runtime/docker/prune_test.go::TestImageReclaimBlockers_*`.
+**Code:** `runtime/docker/prune.go` — `imageReclaimBlockers` (state filter), `(*Runtime).warnImageReclaimBlockers` (the per-line output), `pruneCacheDryRun` (the call site, `includeImages` only). Guard tests: `runtime/docker/prune_test.go::TestImageReclaimBlockers_*`.
 
 ---
 
@@ -957,7 +1005,7 @@ The estimate is left as-is — it's still a valid *upper bound* if the user stop
 
 **Fix:** In `PruneCache`, swallow the error when `cerrdefs.IsNotFound(err)` is true (it stays a real failure for any other error). Podman has no build cache to free, so skipping is correct.
 
-**Code:** `internal/runtime/docker/prune.go` — `PruneCache` (`BuildCachePrune` error guarded by `!cerrdefs.IsNotFound`).
+**Code:** `runtime/docker/prune.go` — `PruneCache` (`BuildCachePrune` error guarded by `!cerrdefs.IsNotFound`).
 
 ---
 
@@ -969,7 +1017,7 @@ The estimate is left as-is — it's still a valid *upper bound* if the user stop
 
 **Fix:** For a process that must outlive its launcher, start it **detached** — `ContainerExecStart` with `container.ExecStartOptions{Detach: true}` (no attach) — and redirect its stdio to files inside the container (detached stdio is otherwise discarded). yoloAI exposes this as `runtime.ProcSpec.Detached`.
 
-**Code:** `internal/runtime/docker/launch.go` (the `Detached` branch); `internal/orchestrator/launch/launch.go::startViaLaunch`. Related: DF44.
+**Code:** `runtime/docker/launch.go` (the `Detached` branch); `internal/orchestrator/launch/launch.go::startViaLaunch`. Related: DF44.
 
 ## Podman
 
@@ -981,7 +1029,7 @@ The estimate is left as-is — it's still a valid *upper bound* if the user stop
 
 **Fix:** The Podman backend injects a per-image dedup via `docker.Runtime.SetImageBytesFunc`. Summing `img.Size` would multiply-count the shared base (38 build stages sharing one ~5.5 GB base read as ~150 GB — the failure mode of the shared-layers entry above). The deduplicated total is `Σ(img.Size − img.SharedSize) + max(img.SharedSize)`: every image's unique bytes plus the shared layer set counted once. For yoloai's single-base build chain the largest `SharedSize` captures the full shared union exactly; multiple independent bases would slightly underestimate the shared tier.
 
-**Code:** `internal/runtime/podman/podman.go` `podmanImageBytes()` (injected in `New` via `SetImageBytesFunc`); `internal/runtime/docker/prune.go` `splitCacheBytes()` (uses `imageBytesFn` when set, else `du.LayersSize`). Guard tests: `podman_test.go::TestPodmanImageBytes_*`, `docker/prune_test.go::TestSplitCacheBytes_ImageBytesFuncOverride`.
+**Code:** `runtime/podman/podman.go` `podmanImageBytes()` (injected in `New` via `SetImageBytesFunc`); `runtime/docker/prune.go` `splitCacheBytes()` (uses `imageBytesFn` when set, else `du.LayersSize`). Guard tests: `podman_test.go::TestPodmanImageBytes_*`, `docker/prune_test.go::TestSplitCacheBytes_ImageBytesFuncOverride`.
 
 **macOS / version caveat (verified 2026-05-29, Podman 5.8.1 via Podman Machine `applehv`):** `LayersSize` is **NOT 0** on this version — the raw `/system/df` returns `LayersSize: 5018303449`, matching `podman system df` Images SIZE exactly. The `LayersSize: 0` bug above is therefore **Podman-version-specific**, not universal. The `podmanImageBytes` dedup still runs (it's unconditional) and, because every build-stage row shares the one base, it computes the *identical* value (`Σ(unique) + max(shared) == LayersSize` here), so it's harmless redundancy on 5.8.1 — the injected path agrees with the field it was working around. Keep the injection: older Podman (the version the bug was first seen on) still reports 0, and the dedup is correct on both.
 
@@ -995,7 +1043,7 @@ The estimate is left as-is — it's still a valid *upper bound* if the user stop
 
 **Fix:** Don't use `SpaceReclaimed` at all. Report reclaim as the drop in the backend's own `CacheUsage` across the prune (`before − after`); `CacheUsage` already deduplicates correctly for Podman (via `podmanImageBytes`), so the delta is accurate (verified: 5.18 GB, matching the `/system/df` dedup) and self-attributed per backend. See working-notes D37.
 
-**Code:** `internal/runtime/docker/prune.go` `PruneCache` + `reclaimableBytes` (shared by docker + podman). Note `BuildCachePrune` returns "Not Found" on Podman (no BuildKit cache) — warned and harmless; the before/after delta still captures the actual reclaim.
+**Code:** `runtime/docker/prune.go` `PruneCache` + `reclaimableBytes` (shared by docker + podman). Note `BuildCachePrune` returns "Not Found" on Podman (no BuildKit cache) — warned and harmless; the before/after delta still captures the actual reclaim.
 
 ---
 
@@ -1026,7 +1074,7 @@ reads `TMPDIR` for socket discovery.
 (`config.daemonEnvAllowlist` and the mirrored public `runtime.DaemonEnvVars`) so
 it survives to `podman.go::defaultMachineSocketDiscovery`. See
 `internal/config/host_env.go::daemonEnvAllowlist` and
-`internal/runtime/podman/podman.go::defaultMachineSocketDiscovery`.
+`runtime/podman/podman.go::defaultMachineSocketDiscovery`.
 
 ---
 
@@ -1071,7 +1119,7 @@ drives everything:
 macOS unchanged). Because the agent now runs non-root, the entrypoint's
 `mount --make-shared /` (needed for dind mount propagation) runs via `sudo -n`
 when not root — `yoloai` has passwordless sudo. See
-`internal/runtime/docker/resources/entrypoint.py` `main()`. Docker-priv and macOS
+`runtime/docker/resources/entrypoint.py` `main()`. Docker-priv and macOS
 podman-priv still run the entrypoint as root, so they take the direct (no-sudo)
 path unchanged.
 
@@ -1156,7 +1204,7 @@ The lock is held for only milliseconds, making this a transient flake rather tha
 
 **Fix:** Route interactive exec/attach through the same SDK socket as every other op. `InteractiveExec` and `StdioExec` now share one `execAttach` core: `ContainerExecCreate` → `ContainerExecAttach` (hijacked conn) → `bridgeExecStreams` (TTY: raw `io.Copy`; non-TTY: `stdcopy.StdCopy`) → `ContainerExecInspect` for the exit code, returning `&runtime.ExecError{ExitCode}` on non-zero. TTY sizing/resize go over `ContainerExecResize`. One connection, one control plane — no bare-CLI store race. (`r.binaryName` survives only for `build`/`prune`/log helpers.)
 
-**Code:** `internal/runtime/docker/docker.go` `execAttach`/`createExec`/`bridgeExecStreams`/`resizeExec`/`forwardExecResizes`. Conformance guards (run for docker AND podman): `runtime/runtimetest/conformance.go` `StdioExec*`/`InteractiveExec*ExitCode` subtests.
+**Code:** `runtime/docker/docker.go` `execAttach`/`createExec`/`bridgeExecStreams`/`resizeExec`/`forwardExecResizes`. Conformance guards (run for docker AND podman): `runtime/runtimetest/conformance.go` `StdioExec*`/`InteractiveExec*ExitCode` subtests.
 
 **Belongs here:** the external fact is that the docker/podman bare CLI and the SDK socket can resolve the same container differently under load (cousin of the [docker-context divergence](#the-docker-go-sdk-ignores-docker-context-clientfromenv-honors-only-docker_host)); our fix was to stop straddling both control planes.
 
@@ -1231,7 +1279,7 @@ Sizing must go through the **containerd socket**, not the host filesystem: yoloa
 
 **devmapper caveat:** removing a devmapper thin snapshot returns its blocks to the pool (the `dmsetup` used-block count drops), but the pool's backing loopback file (`/var/lib/containerd/devmapper/data`, host-configured at a fixed size, ~10 GB) **does not shrink** — discards are not punched back to the host file. So host `df` is unchanged by a prune even though the pool regains free blocks. yoloai's prune prints this explicitly so the reported reclaim isn't mistaken for freed host disk. (The pool itself is a host prerequisite, configured by the devmapper setup script + `/etc/containerd/config.toml`, not owned by yoloai — yoloai only prunes the snapshots it created inside it.)
 
-**Code:** `internal/runtime/containerd/prune.go` — `snapshotterNames` (`{overlayfs, devmapper}`), `snapshotInfos` (Walk returning each snapshot's `Info` incl. `Parent`; `present=false` skips an unconfigured snapshotter), `orderLeafFirst` (Kahn topological pass; see below), `pruneSnapshots`/`pruneSnapshotter` (iterate both, remove leaf-first, sum each removed snapshot's `Usage`, print the devmapper caveat), `CacheUsage` (sums `Usage` across both into `ImageBytes`, per-snapshotter breakdown in `Detail`).
+**Code:** `runtime/containerd/prune.go` — `snapshotterNames` (`{overlayfs, devmapper}`), `snapshotInfos` (Walk returning each snapshot's `Info` incl. `Parent`; `present=false` skips an unconfigured snapshotter), `orderLeafFirst` (Kahn topological pass; see below), `pruneSnapshots`/`pruneSnapshotter` (iterate both, remove leaf-first, sum each removed snapshot's `Usage`, print the devmapper caveat), `CacheUsage` (sums `Usage` across both into `ImageBytes`, per-snapshotter breakdown in `Detail`).
 
 ---
 
@@ -1243,7 +1291,7 @@ Sizing must go through the **containerd socket**, not the host filesystem: yoloa
 
 **Fix:** Order removals leaf-first via a Kahn topological pass over the in-memory `Parent` links (`orderLeafFirst`): enqueue snapshots with no in-set child, emit each, decrement its parent's child-count, enqueue the parent when it reaches zero. Every `Remove` then succeeds in one pass and the returned reclaim total reflects bytes actually freed — no reliance on a later GC. Any snapshot left un-emitted (cycle, or a parent outside the set) is appended at the end so nothing is silently dropped.
 
-**Code:** `internal/runtime/containerd/prune.go` `orderLeafFirst`, called by `pruneSnapshots`.
+**Code:** `runtime/containerd/prune.go` `orderLeafFirst`, called by `pruneSnapshots`.
 
 ---
 
@@ -1410,7 +1458,7 @@ safe because `deleteNetNS` is idempotent (ignores ENOENT). See `cni.go::setupCNI
 
 **Fix:** Tart now implements `DiskUsageReporter`. `CacheUsage` sums the provisioned VM + the base-repo OCI rows **deduped to one** (max Size per repo, mirroring the podman "count shared once" approach), reporting it as `ImageBytes` (tart has no no-rebuild cache → `CachedBytes` always 0). `PruneCache` deletes the provisioned VM **and every base-repo OCI row** (tag *and* digest), then reports reclaim as the `CacheUsage` before−after delta (D37), same as docker/podman. Scope is deliberately yoloai's base images only — not every VM tart tracks, nor live sandbox clones — so the IMAGES column reconciles with what `prune --images` actually frees (unlike docker/podman, tart is the user's general VM tool and must not imply it'll delete unrelated personal VMs). Result: tart now reports **55.88 GiB** (matching `du`'s ~56 GiB) and the dry-run estimate includes it.
 
-**Code:** `internal/runtime/tart/diskusage.go` (`CacheUsage`, `ownedImageBytes`, `ownedImageRefs`, `baseImageRepo`); `internal/runtime/tart/prune.go::PruneCache` (before/after delta, deletes all owned refs). Tests: `diskusage_test.go::{TestBaseImageRepo,TestCacheUsageCountsOwnedImagesDedupingOCI,TestPruneCacheReportsReclaimDelta,TestPruneCacheDryRunReturnsEstimate}`.
+**Code:** `runtime/tart/diskusage.go` (`CacheUsage`, `ownedImageBytes`, `ownedImageRefs`, `baseImageRepo`); `runtime/tart/prune.go::PruneCache` (before/after delta, deletes all owned refs). Tests: `diskusage_test.go::{TestBaseImageRepo,TestCacheUsageCountsOwnedImagesDedupingOCI,TestPruneCacheReportsReclaimDelta,TestPruneCacheDryRunReturnsEstimate}`.
 
 ---
 
@@ -1813,7 +1861,7 @@ VirtioFS should only be used for:
 
 **Why not just read the host seed:** there is no coherent host-side view to read — that's the whole reason git runs in-VM (see the VirtioFS section above). A host probe isn't merely stale, it's structurally incapable of seeing in-VM edits.
 
-**Code:** `internal/copyflow/changes.go::HasUnappliedWorkVia` (+ `WorkProbe` tri-state), `internal/runtime/runtime.go::GitExecFor`/`ErrNotRunning`, gates in `internal/orchestrator/create/create.go`, `internal/orchestrator/lifecycle/reset.go::NeedsConfirmation`, and the read-model in `internal/orchestrator/status/status.go::detectWorkdirChanges`. The engine opens the backend best-effort (`Engine.TryEnsure`) before the gate so a running VM can be probed.
+**Code:** `copyflow/changes.go::HasUnappliedWorkVia` (+ `WorkProbe` tri-state), `runtime/runtime.go::GitExecFor`/`ErrNotRunning`, gates in `internal/orchestrator/create/create.go`, `internal/orchestrator/lifecycle/reset.go::NeedsConfirmation`, and the read-model in `internal/orchestrator/status/status.go::detectWorkdirChanges`. The engine opens the backend best-effort (`Engine.TryEnsure`) before the gate so a running VM can be probed.
 
 **Belongs here:** the external constraint is VirtioFS forcing the work copy to live in-VM (host-side git corrupts it — see [VirtioFS corrupts git repositories](#virtiofs-corrupts-git-repositories)), which is *why* a host-side probe is structurally wrong; the probe bug it caused was ours.
 
@@ -1835,7 +1883,7 @@ VirtioFS should only be used for:
 
 **Explanation (verified 2026-05-29):** No. Seatbelt runs agents **directly on the host** via `sandbox-exec` using the host's own tools — its `Setup` only *checks* that required binaries are on `PATH` (`runtime/seatbelt/build.go`); it pulls/builds/caches **nothing**. There is no VM, no image, no layer store. The only on-disk state a seatbelt sandbox accumulates is the per-sandbox directory under `~/.yoloai/sandboxes/<name>/` (work dirs, agent-state, logs) — and that's already reported by the `sandboxes` row of `system disk`, the same for every backend. So seatbelt implements neither `DiskUsageReporter` nor `CachePruner`, and its core `Prune` is a no-op (no central registry of instances). The `?` in the IMAGES column is `CacheUsageFor`'s "unknown" fallback (`ImageBytes=-1`); it's cosmetically imperfect (a true "—"/0 would read better) but functionally correct — there is genuinely nothing for `prune`/`prune --images` to reclaim. **Leave it a no-op; do not invent a cache to measure.**
 
-**Code:** `internal/runtime/seatbelt/build.go::Setup` (PATH check only), `internal/runtime/seatbelt/prune.go` (no-op `Prune`, no `PruneCache`/`CacheUsage`); fallback in `internal/runtime/runtime.go::CacheUsageFor`.
+**Code:** `runtime/seatbelt/build.go::Setup` (PATH check only), `runtime/seatbelt/prune.go` (no-op `Prune`, no `PruneCache`/`CacheUsage`); fallback in `runtime/runtime.go::CacheUsageFor`.
 
 **Belongs here (caveat):** this is an architectural invariant, not a tool quirk — Seatbelt is a host-process backend with no image store. Recorded so nobody hunts for a cache (or files the `?` in the `IMAGES` column) that structurally cannot exist.
 
@@ -2016,9 +2064,9 @@ present the very first probe returns it, so dropping the optimisation costs noth
 the happy path and removes the premature give-up. The `.done` marker and its
 `sh -c '… ; : > "$1"'` wrapper are gone.
 
-**Code:** `internal/runtime/monitor/tmux_io.py` (`tmux_bin`, `_probe_tmux_bin`,
+**Code:** `runtime/monitor/tmux_io.py` (`tmux_bin`, `_probe_tmux_bin`,
 `_in_firstlaunch_context`, `set_firstlaunch_marker`, `_RESOLVE_ATTEMPTS`,
-`_FIRSTLAUNCH_MAX_WAIT_SECONDS`); `internal/runtime/monitor/sandbox-setup.py`
+`_FIRSTLAUNCH_MAX_WAIT_SECONDS`); `runtime/monitor/sandbox-setup.py`
 (firstlaunch launch in `TartBackend.setup()`, plus `setup_tmux_session` and the
 `main()` `wait-for` block).
 
@@ -2040,6 +2088,50 @@ exit 69 + "Xcode license", or exit 127 command-not-found for binaries the storm
 hides). Non-transient errors return immediately; the happy path runs once and
 never sleeps. Mirrors the tmux resolver's "probe to a ceiling, ignore completion"
 strategy because the host cannot observe the firstlaunch marker.
+
+### Tart: the fall-to-shell wrapper path must derive from `yoloai_dir`, not the container `/yoloai`
+
+**Symptom:** a `stop_start`/`tag_transfer` smoke test fails **only on Tart** with
+"sentinel 'done' not seen in 180s" and the autopsy "Python traceback in guest setup".
+The preserved `terminal-snapshot.txt` shows the pane died immediately after launch:
+
+```
+… && exec /yoloai/bin/agent-run.sh claude --dangerously-skip-permissions …
+zsh: no such file or directory: /yoloai/bin/agent-run.sh
+Pane is dead (status 127, …)
+```
+
+`setup.log` then shows `NameError: name 'log_error' is not defined` from
+`deliver_prompt` — a red herring that only fires *because* the pane is already dead.
+
+**Explanation:** `sandbox-setup.py`'s `launch_agent` hardcoded the fall-to-shell
+wrapper (D96) as the container path `/yoloai/bin/agent-run.sh`. That path only exists
+on container backends, where `YOLOAI_DIR=/yoloai`. On Tart the yoloai dir is the
+VirtioFS share `/Volumes/My Shared Files/yoloai` (the backend writes `agent-run.sh`
+there and passes that path to the script as `sys.argv[2]`); there is **no** `/yoloai`
+in the VM (only `/Users/admin/.yoloai`, a symlink to the share). So `exec` failed and
+the agent never ran, so the agent never created the `files/done` sentinel the harness
+waits on. Two compounding failures hid the root cause: (1) `deliver_prompt` then tried
+to paste into the dead pane, hit the undefined `log_error`, and crashed `main()`
+**before** `launch_monitor` ran — so the monitor never recorded the pane-death `done`
+either; (2) the cascade only surfaced on Tart because the Tart VM pane runs **zsh**,
+which **exits on a failed `exec`** (pane dies, status 127). The seatbelt pane runs
+**bash 3.2**, whose failed-`exec` behavior differs, so the same hardcoded-path bug did
+not kill that pane the same way — which is why seatbelt appeared to pass and masked a
+backend-agnostic bug as Tart-specific.
+
+**Fix:** derive the wrapper from the per-backend `yoloai_dir`
+(`os.path.join(yoloai_dir, "bin", "agent-run.sh")`), exactly as `launch_monitor`
+already does for `status-monitor.py` — `/yoloai/bin/...` for containers, the share for
+Tart, the sandbox dir for seatbelt. The path is single-quoted in
+`build_agent_launch_command` so the spaces in the Tart share (`/Volumes/My Shared
+Files/…`) don't split the `exec` argv. Separately, `log_error` was defined (it was only
+ever referenced, never declared) so a genuine paste failure logs instead of crashing
+the whole setup.
+
+**Code:** `runtime/monitor/sandbox-setup.py` (`launch_agent` wrapper derivation,
+`log_error`), `runtime/monitor/setup_helpers.py` (`build_agent_launch_command` wrapper
+quoting); tart passes `yoloai_dir` via `runtime/tart/mounts.go` `runSetupScript`.
 
 ## Smoke harness (agent task execution)
 
@@ -2103,7 +2195,7 @@ here `…-containerd-vm` is a prefix of `…-containerd-vmenhanced`, and the par
 matrix runs both Kata backends concurrently.
 
 **Explanation:** yoloAI passes the instance name (`InstanceName`,
-`internal/store/paths.go`) verbatim as the containerd container ID and does
+`store/paths.go`) verbatim as the containerd container ID and does
 **no** prefix matching of its own. The prefix lookup is **entirely inside the
 external Kata shim** (`containerd-shim-kata-v2` / runtime-rs): given a full
 container ID it scans its sandbox store for entries that *start with* that ID and
@@ -2127,7 +2219,7 @@ the fix would be a create-time check that rejects or warns on a prefix-related
 live sandbox name for the Kata backend.
 
 **Code:** `scripts/smoke_test.py` (`RunContext.name_seq`, `Test.sandbox()`);
-ID construction in `internal/store/paths.go` (`InstanceName`).
+ID construction in `store/paths.go` (`InstanceName`).
 
 ## OS & POSIX semantics
 
@@ -2151,7 +2243,7 @@ genuinely orphaned lock files (no holder) are swept.
 safe to run concurrently with live sandboxes. Lock files therefore don't
 accumulate, and `system prune` only ever removes the truly-orphaned ones.
 
-**Code:** `internal/store/lock_unix.go` (`RemoveLockFile`,
+**Code:** `store/lock_unix.go` (`RemoveLockFile`,
 `SweepStaleLocks`); `internal/orchestrator/lifecycle.go` (Destroy);
 `internal/orchestrator/create.go` (Create rollback).
 
@@ -2174,7 +2266,7 @@ directories (and the `:ro` suffix), and propagates rw live in both directions.
 `--mount type=virtiofs`. Verified: `-v <file>:<file>` and `-v <file>:<file>:ro`
 both work; `-v <dir>:<dir>` propagates rw.
 
-**Code:** `internal/runtime/apple/apple.go` (`Create`, mount loop).
+**Code:** `runtime/apple/apple.go` (`Create`, mount loop).
 
 ---
 
@@ -2192,4 +2284,121 @@ for a relative `.` path. An **absolute** context dir works
 its **absolute** path (`container build -t yoloai-base <abs-dir>`). The builder
 VM must also be started first (`container builder start`).
 
-**Code:** `internal/runtime/apple/apple.go` (`buildBaseImage`).
+**Code:** `runtime/apple/apple.go` (`buildBaseImage`).
+
+## Docker: `procReady not received` usually means the container is exiting, not a broken runtime
+
+**Symptom:** An exec into a yoloai container (`runtime.Launch`, `Exec`, or a raw
+`docker exec`) fails with `Error response from daemon: OCI runtime exec failed:
+exec failed: unable to start container process: procReady not received`.
+Intermittent — sometimes the same test passes.
+
+**Explanation:** This is almost never a broken Docker/runc. `procReady` is runc
+reporting that the exec process's init never signalled ready over its sync pipe —
+which happens when the container's PID 1 is **gone or going** at the moment of the
+exec. The classic cause here is the container **crashing on startup** and the exec
+racing the crash: a substrate-only container (created via `runtime.Create` with a
+bare `InstanceConfig`, no orchestrator `runtime-config.json`) whose `entrypoint.py`
+used to `json.load()` an empty config and exit 1. The exec lands during that brief
+dying window → `procReady`; when the exec wins the race the test passes, hence the
+flake.
+
+**How to tell it apart (do this before suspecting Docker):**
+- Plain `docker exec <vanilla-alpine> echo hi` works → runc is fine.
+- `docker exec <the yoloai container> echo hi` a few seconds after start works →
+  the container accepts execs once settled; the failure was a startup race.
+- `docker ps -a --filter name=<ctr>` shows `Exited (1)` → the container is
+  crashing; `docker logs <ctr>` shows why (here: `JSONDecodeError` from
+  `read_config`).
+
+**Fix:** Two parts. (1) The entrypoint now treats a missing/empty
+`runtime-config.json` as the agent-free keepalive case instead of crashing
+(`fa8d7fe5`), so a bare substrate box stays up. (2) Production already gates
+`Launch` on readiness (`internal/orchestrator/launch.startViaLaunch` →
+`waitForReady` → `Ready()`); tests that exec right after `Start` must do the same
+(`launchTestInstance`). Don't add a retry to `Launch` itself — it would mask a
+dying container.
+
+**Code:** `runtime/docker/resources/entrypoint.py` (`read_config`, `keepalive`),
+`runtime/docker/launch.go` (`Ready`/`Launch`),
+`internal/orchestrator/launch/launch.go` (`waitForReady`).
+
+## Claude: the "fullscreen renderer" upsell re-execs claude and drops `--dangerously-skip-permissions`
+
+**Symptom:** Agent smokes (clone, every `stop_start/*` backend) stall — the `done`
+sentinel never fires. The preserved `terminal-snapshot.txt` shows claude parked on a
+**Bash tool-permission prompt** ("Do you want to proceed? 1. Yes / 2. Yes, and don't
+ask again / 3. No") **even though `claude --dangerously-skip-permissions` was launched**
+(confirmed in `agent.log`). A *"Try the new fullscreen renderer?"* modal appears earlier
+in the same run. Pinning claude to an "older" version does **not** help — the same prompt
+appears on 2.1.177.
+
+**Explanation:** Claude Code added a fullscreen-renderer upsell. Decompiling the
+`claude.exe` bundle: the upsell-gate `In9()` shows it unless `EK()` (already fullscreen),
+`n6().tui !== undefined` (renderer already chosen by the user), `!WF8()`, or a seen-count
+cap. When the upsell is **accepted**, claude relaunches itself via
+`yTH({freshIfNoTranscript:true, extraArgs})` — and for a fresh session the args are
+**only the upsell's own `extraArgs`**, so the original `--dangerously-skip-permissions`
+is **dropped**. The re-execed session therefore runs in default *ask* permission mode and
+blocks on the first tool call, with no human in the tmux pane to answer. The real-run
+`agent.log` corroborates the order: the `fullscreen renderer` text precedes the `[?1049h`
+(enter-alternate-screen) escape — i.e. the upsell was accepted, *then* claude switched to
+fullscreen via the flagless re-exec. Note `skipDangerousModePermissionPrompt` only skips
+the bypass-mode **dialog**; it does not re-select bypass mode after a flagless relaunch.
+This is **not** version drift and **not** a yoloAI infra bug (launch/keepalive/tmux/
+prompt-delivery are all fine) — only the agent-under-test changed.
+
+**Fix:** Default the renderer to classic at the agent layer — claude's `ApplySettings`
+sets `settings.tui = "default"` **only when the user hasn't already chosen a `tui`**. That
+makes `In9()`'s `n6().tui !== undefined` check treat the renderer as already chosen, so the
+upsell **never appears** → no flagless re-exec → `--dangerously-skip-permissions` stays in
+effect. An explicit user `tui` (default *or* fullscreen) is respected as-is — any value
+suppresses the upsell, so we never clobber it. `tui` is a real persisted Claude setting
+(`"Set the terminal UI renderer (default | fullscreen)"`), so this is version-robust rather
+than chasing each new onboarding modal. With the root cause fixed, the Dockerfile claude
+pin was removed (no-pin policy restored).
+
+**Code:** `internal/agent/agent.go` (claude `ApplySettings`, `s["tui"] = "default"`);
+`internal/agent/agent_test.go` (`TestApplySettings_Claude`).
+
+## gVisor (container-enhanced): `docker exec --user <name>` resolves against the stale image passwd, not the live one
+
+**Symptom:** On the docker backend under `--isolation container-enhanced` (gVisor/
+runsc), `yoloai new` returns exit 0 and `yoloai ls` shows `active`, but the agent
+never actually runs: the smoke `done` sentinel never fires, `sandbox.jsonl` stops at
+`entrypoint.keepalive_only`, `agent-status.json` is `{}`, and inside the container the
+only process is `sleep infinity` — no tmux, no `sandbox-setup.py`, no monitor. The same
+sandbox on plain docker (runc) works.
+
+**Explanation:** The D88 keepalive+Launch bring-up boots the box on a neutral
+keepalive holder, then the host launches `sandbox-setup.py` over it with a detached
+`docker exec --user yoloai` (`runtime.ProcessLauncher`). The image ships `yoloai` as
+UID **1001**; the entrypoint's uid-remap rewrites the **live** `/etc/passwd` to make
+`yoloai` = the **host UID** (e.g. 1000) and chowns `/yoloai` to match. Under **runc**,
+`docker exec --user yoloai` re-reads the live passwd → resolves to 1000 → owns
+`/yoloai/logs` → the launched process writes its log and runs. Under **gVisor**,
+`docker exec --user yoloai` resolves the username against the image's **original**
+`/etc/passwd` (snapshotted at container start) → **1001** → the process runs as the
+stale UID, which no longer owns the remapped `/yoloai` dirs (now 1000, mode 750). Its
+first action — the log redirect `>> /yoloai/logs/session-runner.log` — hits `EACCES`,
+so `sh -c 'exec python3 …'` dies at the redirect **before** exec'ing python. The agent
+never welds, and because the launch is detached the error is swallowed (`new` still
+exits 0). Confirmed directly: `docker exec -u yoloai <gvisor-box> id` → `uid=1001`,
+while `docker exec -u 1000 …` and the live `/etc/passwd` both say 1000.
+
+**Fix:** Route `container-enhanced` to the **legacy in-entrypoint weld** instead of
+the D88 keepalive+Launch path (`runtime.SupportsAgentFreeLaunch` returns false for it;
+`usesAgentFreeLaunch` ANDs it in, so both bring-up and secrets delivery stay in sync).
+The legacy path runs `sandbox-setup.py` from the entrypoint's own process tree and
+drops to `yoloai` **in-container** (against the live, remapped passwd), so there is no
+host-side `exec --user` and no stale-UID write. This mirrors the podman reroute. Note a
+numeric `--user 1000:1000` would also write correctly but drops supplementary groups
+(the `docker` group needed for dind under `--isolation container-privileged`, which
+shares the same `ProcSpec`), so the legacy reroute is preferred over changing the user
+form globally.
+
+**Code:** `runtime/isolation.go` (`SupportsAgentFreeLaunch`);
+`internal/orchestrator/launch/launch.go` (`usesAgentFreeLaunch` gate);
+`internal/orchestrator/launch/launch_reroute_test.go`
+(`TestBuildAndStart_ContainerEnhancedTakesLegacyPath`); `runtime/isolation_test.go`
+(`TestSupportsAgentFreeLaunch`).

@@ -9,9 +9,9 @@ import (
 	"log/slog"
 
 	"github.com/kstenerud/yoloai/internal/config"
-	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sysexec"
 	"github.com/kstenerud/yoloai/internal/testutil"
+	"github.com/kstenerud/yoloai/runtime"
 )
 
 // Compile-time check.
@@ -112,7 +112,6 @@ func (m *lifecycleMockRuntime) TmuxSocket(_ string) string { return "" }
 func (m *lifecycleMockRuntime) AttachCommand(_ string, _, _ int, _ runtime.IsolationMode) []string {
 	return nil
 }
-func (m *lifecycleMockRuntime) PrepareAgentCommand(cmd string) string { return cmd }
 func (m *lifecycleMockRuntime) Descriptor() runtime.BackendDescriptor {
 	return runtime.BackendDescriptor{
 		Type:         "mock",

@@ -26,6 +26,26 @@ module throughout. Proceeds via audit cycles (mechanical `go list -deps` separat
 conflation review) draining to the findings/questions queues. Supersedes the deferred C-full/F
 notes in [D83](../../decisions/working-notes.md). Frame doc: [public-layering.md](public-layering.md).
 
+### The Move (S6) — pre-Move audit + Stage 3b surface cleanup
+
+The substrate/store promotion is gated on a surface-cleanup sub-phase (Stage 3b) decided by
+the pre-Move audit ([move-audit.md](move-audit.md), [D97](../../decisions/working-notes.md)):
+the runtime contract is request-in/no-mechanism-out (architecture-principles §4), agent-shaped
+remnants leave, and the substrate record becomes agent-free. In progress on `substrate-move`.
+Sub-tasks with their own scope: **[store-workload-split.md](store-workload-split.md)** ([D98](../../decisions/working-notes.md))
+— split the inside-process config (`agent`/`model`) out of `store.Environment` into an
+orchestration-owned `agent.json` (M2 migration); **[session-carve.md](session-carve.md)** — Phase 1a
+(the long pole): the session-layer public realization (`IOSession` on `sb.Agent()`, the final
+`Launch`/`ProcSpec` contract, `AgentLaunchPrefix` off the descriptor, one-shot `-p`/Tier-3).
+
+### Endgame (D99) — drive to a solid, mergeable state
+
+The whole program now runs to a **solid, mergeable state** in `substrate-move`, landing on `main` as
+**one clean break** (incidental per-commit contract churn is fine). Three phases — P1 seal every
+interface (the session carve + Q104 + `paths.go`), P2 the control-eval consumer surface
+(`wait`/`sandbox_run`/usage/diff), P3 the Move — then a low-priority remainder. Frame:
+[public-layering.md](public-layering.md) §Endgame + [D99](../../decisions/working-notes.md).
+
 ## Env access seal — `config.HostEnv` curated accessors
 
 Replace the ad-hoc `config.Layout` env accessors (`LookupEnv`/`ExecEnv`/

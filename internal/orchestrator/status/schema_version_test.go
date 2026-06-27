@@ -42,12 +42,12 @@ func TestAgentStatusSchemaVersion_CrossLanguageAgreement(t *testing.T) {
 		expectedMatches int    // how many literals we expect to find (guards a silently-stale regex)
 	}{
 		{
-			path:            filepath.Join("internal", "runtime", "monitor", "sandbox-setup.py"),
+			path:            filepath.Join("runtime", "monitor", "sandbox-setup.py"),
 			pattern:         `(?m)^AGENT_STATUS_SCHEMA_VERSION\s*=\s*(\d+)`,
 			expectedMatches: 1,
 		},
 		{
-			path:            filepath.Join("internal", "runtime", "monitor", "status-monitor.py"),
+			path:            filepath.Join("runtime", "monitor", "status-monitor.py"),
 			pattern:         `"schema_version":\s*(\d+)`,
 			expectedMatches: 1,
 		},

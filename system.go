@@ -18,9 +18,10 @@ import (
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/git"
 	"github.com/kstenerud/yoloai/internal/orchestrator"
-	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/runtime/caps"
-	"github.com/kstenerud/yoloai/internal/store"
+	"github.com/kstenerud/yoloai/internal/orchestrator/launch"
+	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/runtime/caps"
+	"github.com/kstenerud/yoloai/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
 
@@ -108,22 +109,27 @@ func (s *System) CreateDataDir() error {
 // the engine no longer migrates as a side effect of setup.
 func (s *System) MigrateDataDir(ctx context.Context) error {
 	_ = ctx
-	return config.MigrateLibrary(s.layout, launchPrefixResolver())
+	if err := config.MigrateLibrary(s.layout, launchPrefixResolver()); err != nil {
+		return err
+	}
+	// Per-sandbox pass: relocate agent/model out of each environment.json into
+	// agent.json (Q104). Run after the realm stamp; idempotent, so a re-run after
+	// an interrupted migration completes safely. Lives in the orchestrator because
+	// it needs store/agentcfg types internal/config cannot import.
+	return orchestrator.MigrateAgentConfigs(s.layout)
 }
 
-// launchPrefixResolver builds a pure backend-type -> launch-prefix lookup from
-// the static backend descriptors. It is injected into the schema migration so
-// internal/config need not import internal/runtime, and so the lookup never
-// constructs a Runtime or probes for a backend binary — every backend is
-// registered (via client.go's blank imports) regardless of host platform, so a
-// Linux host can resolve a Tart/Seatbelt sandbox's prefix without the tooling
+// launchPrefixResolver adapts the orchestrator's static backend-type ->
+// agent-launch-prefix table (launch.AgentLaunchPrefix) to the string-keyed
+// resolver the schema migration expects. It is injected into the migration so
+// internal/config need not import the launch layer, and the lookup is a pure
+// static map — it never constructs a Runtime or probes for a backend binary, so
+// a Linux host can resolve a Tart/Seatbelt sandbox's prefix without the tooling
 // to run it. An unknown backend resolves to "" (a no-op prepend).
 func launchPrefixResolver() config.LaunchPrefixResolver {
-	prefixes := make(map[string]string)
-	for _, d := range runtime.Descriptors() {
-		prefixes[string(d.Type)] = d.AgentLaunchPrefix
+	return func(backendType string) string {
+		return launch.AgentLaunchPrefix(runtime.BackendType(backendType))
 	}
-	return func(backendType string) string { return prefixes[backendType] }
 }
 
 // DiskUsage reports total on-disk usage by yoloai and each available
@@ -241,11 +247,11 @@ func (s *System) Info(ctx context.Context) (*SystemInfo, error) {
 
 // VMCensus is a point-in-time accounting of host VM slots against the
 // platform's concurrent-VM limit. Re-exported (type alias) from
-// internal/runtime.
+// runtime.
 type VMCensus = runtime.VMCensus
 
 // VMSlot describes one VM occupying a host VM slot. Re-exported (type alias)
-// from internal/runtime.
+// from runtime.
 type VMSlot = runtime.VMSlot
 
 // SystemDoctorOptions filters Doctor's per-backend health checks. Empty filters

@@ -52,38 +52,76 @@ func TestResolveModel_NilUserAliasesFallsBack(t *testing.T) {
 
 func TestBuildAgentCommand_InteractiveWithModel(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
-	result := BuildAgentCommand(agentDef, "claude-opus-4-latest", "", "", nil)
+	result := BuildAgentCommand(agentDef, "claude-opus-4-latest", "", "", nil, false)
 	assert.Equal(t, "claude --dangerously-skip-permissions --model claude-opus-4-latest", result)
 }
 
 func TestBuildAgentCommand_InteractiveWithPassthrough(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
-	result := BuildAgentCommand(agentDef, "claude-sonnet-4-latest", "", "", []string{"--max-turns", "5"})
+	result := BuildAgentCommand(agentDef, "claude-sonnet-4-latest", "", "", []string{"--max-turns", "5"}, false)
 	assert.Equal(t, "claude --dangerously-skip-permissions --model claude-sonnet-4-latest --max-turns 5", result)
 }
 
 func TestBuildAgentCommand_HeadlessWithPrompt(t *testing.T) {
 	agentDef := agent.GetAgent("test")
-	result := BuildAgentCommand(agentDef, "", "echo hello", "", nil)
+	result := BuildAgentCommand(agentDef, "", "echo hello", "", nil, false)
 	assert.Equal(t, `sh -c "echo hello"`, result)
 }
 
 func TestBuildAgentCommand_InteractiveFallback(t *testing.T) {
 	agentDef := agent.GetAgent("test")
-	result := BuildAgentCommand(agentDef, "", "", "", nil)
+	result := BuildAgentCommand(agentDef, "", "", "", nil, false)
 	assert.Equal(t, "bash", result)
 }
 
 func TestBuildAgentCommand_WithAgentArgs(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
-	result := BuildAgentCommand(agentDef, "claude-sonnet-4-latest", "", "--allowedTools '*'", []string{"--max-turns", "5"})
+	result := BuildAgentCommand(agentDef, "claude-sonnet-4-latest", "", "--allowedTools '*'", []string{"--max-turns", "5"}, false)
 	assert.Equal(t, "claude --dangerously-skip-permissions --model claude-sonnet-4-latest --allowedTools '*' --max-turns 5", result)
 }
 
 func TestBuildAgentCommand_AgentArgsOnly(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
-	result := BuildAgentCommand(agentDef, "", "", "--verbose", nil)
+	result := BuildAgentCommand(agentDef, "", "", "--verbose", nil, false)
 	assert.Equal(t, "claude --dangerously-skip-permissions --verbose", result)
+}
+
+func TestBuildAgentCommand_HeadlessForcesHeadlessCmd(t *testing.T) {
+	// `yoloai run` forces headless on an agent that defaults to interactive:
+	// the prompt is baked into the launch command (HeadlessCmd), not injected.
+	agentDef := agent.GetAgent("claude")
+	result := BuildAgentCommand(agentDef, "", "do the thing", "", nil, true)
+	assert.Equal(t, `claude -p "do the thing" --dangerously-skip-permissions`, result)
+}
+
+func TestBuildAgentCommand_HeadlessHonorsModel(t *testing.T) {
+	// A forced-headless run still applies --model (e.g. `claude -p "…" --model opus`).
+	agentDef := agent.GetAgent("claude")
+	result := BuildAgentCommand(agentDef, "claude-opus-4-latest", "do the thing", "", nil, true)
+	assert.Equal(t, `claude -p "do the thing" --dangerously-skip-permissions --model claude-opus-4-latest`, result)
+}
+
+func TestBuildAgentCommand_HeadlessEscapesPrompt(t *testing.T) {
+	// The prompt is embedded in a double-quoted shell argument, so quotes and
+	// expansions must be escaped.
+	agentDef := agent.GetAgent("claude")
+	result := BuildAgentCommand(agentDef, "", `say "hi" $USER`, "", nil, true)
+	assert.Equal(t, `claude -p "say \"hi\" \$USER" --dangerously-skip-permissions`, result)
+}
+
+func TestBuildAgentCommand_HeadlessNoPromptFallsToInteractive(t *testing.T) {
+	// Headless is only taken when there is a prompt to bake in; with none it
+	// falls back to the interactive command (create rejects this combination
+	// upstream, but the builder is defensive).
+	agentDef := agent.GetAgent("claude")
+	result := BuildAgentCommand(agentDef, "", "", "", nil, true)
+	assert.Equal(t, "claude --dangerously-skip-permissions", result)
+}
+
+func TestResolveFallToShell_OffWhenHeadless(t *testing.T) {
+	// Headless run: the pane must die on agent exit so the monitor's pane-death
+	// detection records the authoritative done+exit-code (Tier-3, D100).
+	assert.False(t, ResolveFallToShell(agent.IdleSupport{Hook: true}, true))
 }
 
 func TestReadPrompt_DirectText(t *testing.T) {
@@ -155,14 +193,14 @@ func TestResolveFallToShell_HookAgentEnabled(t *testing.T) {
 	// Hook-authoritative agents launch under the fall-to-shell wrapper: the
 	// monitor runs no heuristics while the pane lives, so a wrapper-written
 	// `done` survives untouched (D96 Phase 1).
-	assert.True(t, ResolveFallToShell(agent.IdleSupport{Hook: true}))
+	assert.True(t, ResolveFallToShell(agent.IdleSupport{Hook: true}, false))
 }
 
 func TestResolveFallToShell_HeuristicAgentEnabled(t *testing.T) {
 	// As of Phase 3 heuristic agents also get fall-to-shell: the monitor honors a
 	// wrapper-written `done` (no longer clobbering it with the idle shell) and
 	// get_agent_pid descends through the wrapper to the real agent.
-	assert.True(t, ResolveFallToShell(agent.IdleSupport{ReadyPattern: "> $", WchanApplicable: true}))
+	assert.True(t, ResolveFallToShell(agent.IdleSupport{ReadyPattern: "> $", WchanApplicable: true}, false))
 }
 
 func TestResolveResumeCommand_AppendsFlag(t *testing.T) {

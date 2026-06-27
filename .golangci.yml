@@ -36,7 +36,7 @@ linters:
         - error  # canonical key is "err" — wider Go ecosystem standardizes on err
     revive:
       rules:
-        # internal/runtime is an intentional name for the runtime abstraction
+        # runtime is an intentional name for the runtime abstraction
         # layer — not a collision with Go's stdlib "runtime" in practice.
         - name: redefines-builtin-id
           disabled: true
@@ -45,13 +45,13 @@ linters:
         # G7 runtime-abstraction fence: internal/cli and internal/mcpsrv must
         # reach the runtime layer through the public yoloai spine (the
         # BackendName / IsolationMode / VMCensus re-exports and the
-        # SystemClient / Client verbs), never by importing the internal/runtime
+        # SystemClient / Client verbs), never by importing the runtime
         # abstraction (or any backend subpackage) directly. This is the runtime
         # twin of cli-sandbox-scope: it keeps the CLI/MCP honest about
         # what a separate-module daemon could do through the public surface.
         #
         # Scope: internal/cli/** and internal/mcpsrv/** (non-test). The root
-        # yoloai package legitimately wraps internal/runtime (including the tart
+        # yoloai package legitimately wraps runtime (including the tart
         # backend, via the public SystemClient.TartBases handle) and lives
         # outside these globs, so it is naturally unmatched. No CLI/MCP
         # exemption remains: `yoloai system tart` now drives the backend through
@@ -63,8 +63,8 @@ linters:
             - "**/internal/mcpsrv/**"
             - "!$test"
           deny:
-            - pkg: "github.com/kstenerud/yoloai/internal/runtime"
-              desc: "internal/cli and internal/mcpsrv must not import the internal/runtime abstraction directly (the deny is prefix-wide, so it also covers every backend subpackage like internal/runtime/tart) — use the public yoloai types (BackendName/IsolationMode/VMCensus/…) and SystemClient/Client verbs (G7)."
+            - pkg: "github.com/kstenerud/yoloai/runtime"
+              desc: "internal/cli and internal/mcpsrv must not import the runtime abstraction directly (the deny is prefix-wide, so it also covers every backend subpackage like runtime/tart) — use the public yoloai types (BackendName/IsolationMode/VMCensus/…) and SystemClient/Client verbs (G7)."
         # F1 Half-B + G2 layering gate: internal/cli and internal/mcpsrv must
         # reach sandbox behavior through the public spine (yoloai.Client /
         # Sandbox / Workdir / SystemClient + yoloai.* re-exports), never by
@@ -78,7 +78,7 @@ linters:
         # allow-list and the deny now covers the entire subtree by prefix.)
         # Module-split Phase E lifted the copy/diff/apply refinement and the
         # persisted-metadata store out of the orchestration subtree to
-        # top-level (internal/copyflow, internal/store); they stay fenced here
+        # top-level (copyflow, store); they stay fenced here
         # by their own deny entries so the lift didn't open a hole.
         #
         # Scope: the rule targets only internal/cli/** and internal/mcpsrv/**
@@ -95,25 +95,25 @@ linters:
           deny:
             - pkg: "github.com/kstenerud/yoloai/internal/orchestrator"
               desc: "internal/cli and internal/mcpsrv must reach sandbox behavior through the public yoloai spine (Client / Sandbox / Workdir / SystemClient and yoloai.* re-exports), not the internal/orchestrator façade or any leaf subpackage (archetype/status/…) — F1 Half-B + G2."
-            - pkg: "github.com/kstenerud/yoloai/internal/store"
-              desc: "internal/cli and internal/mcpsrv must reach persisted-metadata behavior through the public yoloai spine, not the internal/store substrate package directly — F1 Half-B + G2 (Phase-E lift)."
-            - pkg: "github.com/kstenerud/yoloai/internal/copyflow"
-              desc: "internal/cli and internal/mcpsrv must reach copy/diff/apply behavior through the public yoloai spine, not the internal/copyflow substrate package directly — F1 Half-B + G2 (Phase-E lift)."
+            - pkg: "github.com/kstenerud/yoloai/store"
+              desc: "internal/cli and internal/mcpsrv must reach persisted-metadata behavior through the public yoloai spine, not the store substrate package directly — F1 Half-B + G2 (Phase-E lift)."
+            - pkg: "github.com/kstenerud/yoloai/copyflow"
+              desc: "internal/cli and internal/mcpsrv must reach copy/diff/apply behavior through the public yoloai spine, not the copyflow substrate package directly — F1 Half-B + G2 (Phase-E lift)."
         # Module-split Phase B: the runtime CORE must stay free of a terminal
-        # library so importing internal/runtime doesn't transitively pull
+        # library so importing runtime doesn't transitively pull
         # github.com/creack/pty. PTY is a refinement of exec (already optional via
-        # IOStreams.TTY); local-PTY bridging lives in internal/runtime/ptybridge,
+        # IOStreams.TTY); local-PTY bridging lives in runtime/ptybridge,
         # imported only by the backends that need it (tart/seatbelt/apple). The
-        # glob matches only files directly in internal/runtime (not its
+        # glob matches only files directly in runtime (not its
         # subpackages), so ptybridge itself is unmatched and may import creack/pty.
         runtime-core-no-pty:
           list-mode: lax
           files:
-            - "**/internal/runtime/*.go"
+            - "**/runtime/*.go"
             - "!$test"
           deny:
             - pkg: "github.com/creack/pty"
-              desc: "the runtime core must not import a terminal library — local-PTY bridging belongs in internal/runtime/ptybridge so the core's dependency closure stays terminal-free (module-split Phase B)."
+              desc: "the runtime core must not import a terminal library — local-PTY bridging belongs in runtime/ptybridge so the core's dependency closure stays terminal-free (module-split Phase B)."
     forbidigo:
       # Ban raw os file-creation calls. Use internal/fileutil wrappers instead
       # so files are chowned to the real user when yoloai runs under sudo.
@@ -315,7 +315,7 @@ linters:
         - pattern: "^sandbox\\.Manager$"
           msg: "use yoloai.Client; CLI commands access orchestration via cliutil.WithClient / cliutil.NewSystemClient — see internal/cli/CONVENTIONS.md"
         - pattern: "^runtime\\.New$"
-          msg: "use cliutil.NewRuntime (the documented chokepoint in internal/cli/cliutil/client.go)"
+          msg: "the CLI must not construct a backend directly; depend on yoloai.Client / yoloai.System (e.g. System.CheckBackend) — see internal/cli/CONVENTIONS.md"
         - pattern: "^runtime\\.Runtime$"
           msg: "depend on yoloai.Client / yoloai.SystemClient instead of the bare backend interface — see internal/cli/CONVENTIONS.md"
   exclusions:
@@ -343,28 +343,28 @@ linters:
       - path: "internal/git/git\\.go"
         linters: [forbidigo]
         text: "\\.EnvForGitInvocation"
-      - path: "internal/runtime/docker/docker\\.go"
+      - path: "runtime/docker/docker\\.go"
         linters: [forbidigo]
         text: "\\.EnvForDockerExec"
-      - path: "internal/runtime/docker/build\\.go|internal/runtime/containerd/image\\.go"
+      - path: "runtime/docker/build\\.go|runtime/containerd/image\\.go"
         linters: [forbidigo]
         text: "\\.EnvForDockerBuild"
-      - path: "internal/runtime/containerd/containerd\\.go"
+      - path: "runtime/containerd/containerd\\.go"
         linters: [forbidigo]
         text: "\\.EnvForContainerdExec"
-      - path: "internal/runtime/seatbelt/seatbelt\\.go"
+      - path: "runtime/seatbelt/seatbelt\\.go"
         linters: [forbidigo]
         text: "\\.EnvForSeatbelt(Exec|Sandbox)"
-      - path: "internal/runtime/tart/tart\\.go"
+      - path: "runtime/tart/tart\\.go"
         linters: [forbidigo]
         text: "\\.EnvForTartInvocation"
-      - path: "internal/runtime/apple/apple\\.go"
+      - path: "runtime/apple/apple\\.go"
         linters: [forbidigo]
         text: "\\.EnvForAppleContainer"
       # Daemon-socket discovery: backend probes/clients + the CLI commands that
       # select a container backend. discovery.go's System.BackendInstalled probes
       # the installed tier with the same daemon-discovery env subset.
-      - path: "(^|/)client\\.go$|(^|/)discovery\\.go$|internal/runtime/docker/docker\\.go|internal/runtime/podman/podman\\.go|internal/cli/cliutil/client\\.go|internal/cli/mcp/mcp\\.go|internal/cli/lifecycle/stop\\.go|internal/cli/lifecycle/destroy\\.go"
+      - path: "(^|/)client\\.go$|(^|/)discovery\\.go$|runtime/docker/docker\\.go|runtime/podman/podman\\.go|internal/cli/cliutil/client\\.go|internal/cli/mcp/mcp\\.go|internal/cli/lifecycle/stop\\.go|internal/cli/lifecycle/destroy\\.go"
         linters: [forbidigo]
         text: "\\.EnvForDaemonDiscovery"
       # Host-utility subprocesses (tmux, vscode, file copies, rsync, uname).
@@ -490,23 +490,10 @@ linters:
       # unused). internal/mcpsrv/ doesn't need an exemption either —
       # it migrated to *yoloai.Client and references only sandbox
       # value types (DirSpec, Status constants, CreateOptions).
-      - path: "^client\\.go$|^system\\.go$|^discovery\\.go$|^tart_bases\\.go$|^internal/runtime/|^internal/orchestrator/|^internal/store/|^internal/copyflow/|^internal/git/"
+      - path: "^client\\.go$|^system\\.go$|^discovery\\.go$|^tart_bases\\.go$|^runtime/|^internal/orchestrator/|^store/|^copyflow/|^internal/git/"
         linters:
           - forbidigo
         text: "sandbox\\.(NewManager|Manager)|runtime\\.(Runtime|New)"
-
-      # NewRuntime in cliutil/client.go is the only sanctioned construction
-      # site for a raw runtime.Runtime in CLI code. After F23 moved
-      # cross-backend enumeration (list, system_doctor, info) onto
-      # yoloai.SystemClient, the remaining callers are cliutil.CheckBackend
-      # (the backend availability-probe chokepoint) and the backend-scoped
-      # system_tart subtree.
-      # (Moved from internal/cli/helpers.go → internal/cli/cliutil/client.go
-      # during W-L13's cliutil/ extraction.)
-      - path: "internal/cli/cliutil/client\\.go"
-        linters:
-          - forbidigo
-        text: "runtime\\.(Runtime|New)"
 
 run:
   timeout: 2m

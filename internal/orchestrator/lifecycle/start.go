@@ -20,8 +20,8 @@ import (
 	"github.com/kstenerud/yoloai/internal/orchestrator/launch"
 	"github.com/kstenerud/yoloai/internal/orchestrator/state"
 	"github.com/kstenerud/yoloai/internal/orchestrator/status"
-	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/store"
+	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
 
@@ -209,7 +209,7 @@ func handleSuspendedResume(ctx context.Context, d state.Deps, cname, name string
 	slog.Info("resuming suspended sandbox", "event", "sandbox.start.resume", "sandbox", name)
 	sandboxDir := d.Layout.SandboxDir(name)
 
-	agentDef, err := requireAgent(meta)
+	agentDef, _, err := requireAgent(d, name)
 	if err != nil {
 		return err
 	}

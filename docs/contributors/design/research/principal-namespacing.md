@@ -39,7 +39,7 @@ axes of multi-principal embedding).
 
 ## The concrete blocker (ground truth)
 
-`internal/store/paths.go:130` —
+`store/paths.go:130` —
 
 ```go
 func InstanceName(name string) string { return "yoloai-" + name }
@@ -49,15 +49,15 @@ Principal-blind: the only namespacing is the fixed `yoloai-` prefix. Every backe
 this string verbatim as the host-visible instance handle:
 
 - Docker — `cfg.Name` is passed straight to `ContainerCreate(..., cfg.Name)`
-  (`internal/runtime/docker/docker.go:304`).
+  (`runtime/docker/docker.go:304`).
 - containerd — `client.NewContainer(ctx, cfg.Name, ...)` *and*
-  `client.WithNewSnapshot(cfg.Name, img)` (`internal/runtime/containerd/lifecycle.go:246,235`),
+  `client.WithNewSnapshot(cfg.Name, img)` (`runtime/containerd/lifecycle.go:246,235`),
   so the name is **both** the container id and the snapshot key.
 - Tart — `tart clone <image> <cfg.Name>` then `tart run <cfg.Name>`
-  (`internal/runtime/tart/tart.go:217`); `instancePrefix = "yoloai-"` is the backend's own
+  (`runtime/tart/tart.go:217`); `instancePrefix = "yoloai-"` is the backend's own
   copy of the prefix (`tart.go:591`).
 - Seatbelt — the name only derives the on-disk sandbox dir
-  (`internal/runtime/seatbelt/seatbelt.go:513-518`); there is **no** host-global
+  (`runtime/seatbelt/seatbelt.go:513-518`); there is **no** host-global
   process/VM registry keyed by the name (sandbox-exec is tracked by PID).
 
 **Host-global, name-derived resources (the surprise from the audit).** On the containerd
@@ -65,7 +65,7 @@ backend the instance name leaks into *host-global* Linux/CNI namespaces, not jus
 container id:
 
 - Network namespace: `nsName := "yoloai-" + containerName` → `/var/run/netns/yoloai-yoloai-<name>`
-  (`internal/runtime/containerd/cni.go:193,129`). This is a **host-global** named netns —
+  (`runtime/containerd/cni.go:193,129`). This is a **host-global** named netns —
   double-prefixed, so it eats *two* `yoloai-` prefixes of the budget.
 - libcni results cache: `/var/lib/cni/results/yoloai-<containerName>-eth0` (`cni.go:150`).
 - host-local IPAM lease files at `/var/lib/cni/networks/yoloai/<IP>` store the
@@ -78,7 +78,7 @@ is the filesystem `NAME_MAX` of 255, **not** the binding constraint). Docker bri
 the sandbox netns internally — so this host-global leak is **containerd-specific**. Verify
 no other host-global derivation exists if a new backend is added.
 
-`internal/runtime/isolation.go` was checked: it is pure isolation-mode→OCI-runtime mapping
+`runtime/isolation.go` was checked: it is pure isolation-mode→OCI-runtime mapping
 and derives **nothing** from the instance name. Good.
 
 ## Current naming rules (ground truth — cite these)
@@ -120,13 +120,13 @@ RFC-1123 §2.1 DNS-label limit, and it binds **only if the instance name is used
 label or hostname.** It is **not** — verified across every backend:
 
 - **Docker** sets **no** `Hostname` in `container.Config`
-  (`internal/runtime/docker/docker.go`); Docker assigns the *container ID* (not the name) as
-  the hostname (confirmed by `internal/runtime/monitor/sandbox-setup.py:901` "Docker assigns
+  (`runtime/docker/docker.go`); Docker assigns the *container ID* (not the name) as
+  the hostname (confirmed by `runtime/monitor/sandbox-setup.py:901` "Docker assigns
   the container ID as hostname"), and `ContainerCreate` is called with an empty
   `network.NetworkingConfig{}` — **no network alias**, so the name is never a resolvable
   host on any Docker network.
 - **containerd** builds the OCI spec with `oci.WithDefaultSpec()` + `oci.WithImageConfig`
-  and **no** `oci.WithHostname` (`internal/runtime/containerd/lifecycle.go`); the name is the
+  and **no** `oci.WithHostname` (`runtime/containerd/lifecycle.go`); the name is the
   container id + snapshot key, neither of which is DNS-resolved.
 - **Tart / Seatbelt** never register the name as a hostname or network alias either.
 
@@ -409,9 +409,9 @@ not — stays 56). The following remain open and feed the implementing plan:
   principal scope), [D59](../../decisions/working-notes.md) (isolation axis — physical partition),
   [D62](../../decisions/working-notes.md) (**the namespacing decision recorded from this study** —
   deterministic `yoloai-<principal>-<name>`, `P≤8`/`N≤56`, no library hashing).
-- Code ground truth: `internal/store/paths.go:113-132` (`ValidateName`,
+- Code ground truth: `store/paths.go:113-132` (`ValidateName`,
   `InstanceName`); `internal/config/names.go:10,14` (`MaxNameLength`, `ValidNameRe`);
-  `internal/runtime/{docker/docker.go:304, containerd/lifecycle.go:235-246,
+  `runtime/{docker/docker.go:304, containerd/lifecycle.go:235-246,
   containerd/cni.go:129-193, tart/tart.go:217-591, seatbelt/seatbelt.go:513-518}`.
 
 ## Sources (verified external facts)

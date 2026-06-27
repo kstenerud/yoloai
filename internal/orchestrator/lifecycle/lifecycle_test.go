@@ -17,11 +17,12 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/git"
+	"github.com/kstenerud/yoloai/internal/orchestrator/agentcfg"
 	"github.com/kstenerud/yoloai/internal/orchestrator/runtimeconfig"
 	"github.com/kstenerud/yoloai/internal/orchestrator/state"
-	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/store"
 	"github.com/kstenerud/yoloai/internal/testutil"
+	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/store"
 )
 
 // newLifecycleDeps builds a state.Deps backed by the given mock runtime and
@@ -39,7 +40,6 @@ func createTestSandbox(t *testing.T, tmpDir, name, hostPath string, mode store.D
 
 	meta := &store.Environment{
 		Name:      name,
-		AgentType: "claude",
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
 			HostPath:  hostPath,
@@ -48,6 +48,7 @@ func createTestSandbox(t *testing.T, tmpDir, name, hostPath string, mode store.D
 		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
+	require.NoError(t, agentcfg.Save(sandboxDir, &agentcfg.AgentConfig{AgentType: "claude"}))
 }
 
 // createRWSandbox creates a minimal :rw mode sandbox directory structure for tests.
@@ -57,7 +58,6 @@ func createRWSandbox(t *testing.T, tmpDir, name, hostPath string) {
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 	meta := &store.Environment{
 		Name:      name,
-		AgentType: "test",
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
 			HostPath:  hostPath,
@@ -66,12 +66,13 @@ func createRWSandbox(t *testing.T, tmpDir, name, hostPath string) {
 		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
+	require.NoError(t, agentcfg.Save(sandboxDir, &agentcfg.AgentConfig{AgentType: "test"}))
 }
 
 // gitHEAD returns the HEAD commit SHA for the git repo at dir.
 func gitHEAD(t *testing.T, dir string) string {
 	t.Helper()
-	sha, err := git.NewHostWithEnv(testutil.GitEnv()).HeadSHA(context.Background(), dir)
+	sha, err := git.NewTestHostWithEnv(testutil.GitEnv()).HeadSHA(context.Background(), dir)
 	require.NoError(t, err)
 	return sha
 }
@@ -259,7 +260,6 @@ func TestStart_Resume_DoneStatus(t *testing.T) {
 	// Create meta with HasPrompt=true
 	meta := &store.Environment{
 		Name:      name,
-		AgentType: "claude",
 		HasPrompt: true,
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
@@ -269,6 +269,7 @@ func TestStart_Resume_DoneStatus(t *testing.T) {
 		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
+	require.NoError(t, agentcfg.Save(sandboxDir, &agentcfg.AgentConfig{AgentType: "claude"}))
 
 	// Write prompt.txt
 	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "prompt.txt"), []byte("Write hello world"), 0600))
@@ -333,7 +334,6 @@ func TestStart_Resume_StoppedStatus(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
-		AgentType: "claude",
 		HasPrompt: true,
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
@@ -343,6 +343,7 @@ func TestStart_Resume_StoppedStatus(t *testing.T) {
 		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
+	require.NoError(t, agentcfg.Save(sandboxDir, &agentcfg.AgentConfig{AgentType: "claude"}))
 
 	// Write prompt.txt
 	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "prompt.txt"), []byte("Write hello world"), 0600))
@@ -410,7 +411,6 @@ func TestNeedsConfirmation_RunningButClean(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
-		AgentType: "claude",
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
 			HostPath:  hostPath,
@@ -419,6 +419,7 @@ func TestNeedsConfirmation_RunningButClean(t *testing.T) {
 		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
+	require.NoError(t, agentcfg.Save(sandboxDir, &agentcfg.AgentConfig{AgentType: "claude"}))
 
 	mock := &lifecycleMockRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
@@ -453,7 +454,6 @@ func TestNeedsConfirmation_StoppedVMFailsafe(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
-		AgentType: "claude",
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
 			HostPath:  hostPath,
@@ -462,6 +462,7 @@ func TestNeedsConfirmation_StoppedVMFailsafe(t *testing.T) {
 		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
+	require.NoError(t, agentcfg.Save(sandboxDir, &agentcfg.AgentConfig{AgentType: "claude"}))
 
 	mock := &lifecycleMockRuntime{
 		locality: runtime.LocalitySandboxSide, // VM: git runs in-sandbox; host probe is blind
@@ -493,7 +494,6 @@ func TestNeedsConfirmation_ChangesExist(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
-		AgentType: "claude",
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
 			HostPath:  hostPath,
@@ -502,6 +502,7 @@ func TestNeedsConfirmation_ChangesExist(t *testing.T) {
 		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
+	require.NoError(t, agentcfg.Save(sandboxDir, &agentcfg.AgentConfig{AgentType: "claude"}))
 
 	// Make changes in work dir
 	testutil.WriteFile(t, workDir, "file.txt", "modified")
@@ -536,7 +537,6 @@ func TestNeedsConfirmation_NoChanges(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
-		AgentType: "claude",
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
 			HostPath:  hostPath,
@@ -545,6 +545,7 @@ func TestNeedsConfirmation_NoChanges(t *testing.T) {
 		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
+	require.NoError(t, agentcfg.Save(sandboxDir, &agentcfg.AgentConfig{AgentType: "claude"}))
 
 	mock := &lifecycleMockRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
@@ -633,7 +634,6 @@ func TestReset_RecopiesWorkdir(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
-		AgentType: "claude",
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
 			HostPath:    origDir,
@@ -643,6 +643,7 @@ func TestReset_RecopiesWorkdir(t *testing.T) {
 		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
+	require.NoError(t, agentcfg.Save(sandboxDir, &agentcfg.AgentConfig{AgentType: "claude"}))
 
 	// Modify work copy
 	testutil.WriteFile(t, workDir, "file.txt", "modified by agent\n")
@@ -698,7 +699,6 @@ func TestReset_PromptOverwrite(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
-		AgentType: "claude",
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
 			HostPath:  origDir,
@@ -707,6 +707,7 @@ func TestReset_PromptOverwrite(t *testing.T) {
 		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
+	require.NoError(t, agentcfg.Save(sandboxDir, &agentcfg.AgentConfig{AgentType: "claude"}))
 
 	mock := &lifecycleMockRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
@@ -751,7 +752,6 @@ func TestReset_State(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
-		AgentType: "claude",
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
 			HostPath:    origDir,
@@ -761,6 +761,7 @@ func TestReset_State(t *testing.T) {
 		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
+	require.NoError(t, agentcfg.Save(sandboxDir, &agentcfg.AgentConfig{AgentType: "claude"}))
 
 	mock := &lifecycleMockRuntime{
 		stopFn: func(_ context.Context, _ string) error {
@@ -786,7 +787,14 @@ func TestReset_State(t *testing.T) {
 	for _, e := range entries {
 		names = append(names, e.Name())
 	}
-	assert.Equal(t, []string{"settings.json"}, names)
+	// Assert the two behaviors under test — the prior agent-runtime state
+	// (session.json) was wiped, and settings.json was re-applied — rather than the
+	// exact dir listing. On a host that actually has the agent's credentials, the
+	// restart's credential seeding also (correctly) materializes .credentials.json,
+	// e.g. from the macOS Keychain; exact-matching made the test depend on the
+	// developer's host not being logged in to the agent.
+	assert.NotContains(t, names, "session.json", "clear-state wipes the prior agent-runtime state")
+	assert.Contains(t, names, "settings.json", "settings.json is re-applied after the wipe")
 }
 
 func TestReset_RWMode_Error(t *testing.T) {
@@ -825,7 +833,6 @@ func TestReset_OriginalMissing(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
-		AgentType: "claude",
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
 			HostPath:    origDir,
@@ -835,6 +842,7 @@ func TestReset_OriginalMissing(t *testing.T) {
 		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
+	require.NoError(t, agentcfg.Save(sandboxDir, &agentcfg.AgentConfig{AgentType: "claude"}))
 
 	// Delete the original
 	require.NoError(t, os.RemoveAll(origDir))
@@ -892,7 +900,6 @@ func TestReset_InPlace_SyncsWorkdir(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
-		AgentType: "claude",
 		HasPrompt: true,
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
@@ -903,6 +910,7 @@ func TestReset_InPlace_SyncsWorkdir(t *testing.T) {
 		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
+	require.NoError(t, agentcfg.Save(sandboxDir, &agentcfg.AgentConfig{AgentType: "claude"}))
 
 	// Simulate agent changes in work copy
 	testutil.WriteFile(t, workDir, "file.txt", "modified by agent\n")
@@ -986,7 +994,6 @@ func TestReset_InPlace_KeepCache(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
-		AgentType: "claude",
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
 			HostPath:    origDir,
@@ -996,6 +1003,7 @@ func TestReset_InPlace_KeepCache(t *testing.T) {
 		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
+	require.NoError(t, agentcfg.Save(sandboxDir, &agentcfg.AgentConfig{AgentType: "claude"}))
 
 	mock := &lifecycleMockRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
@@ -1048,7 +1056,6 @@ func TestReset_InPlace_KeepFiles(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
-		AgentType: "claude",
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
 			HostPath:    origDir,
@@ -1058,6 +1065,7 @@ func TestReset_InPlace_KeepFiles(t *testing.T) {
 		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
+	require.NoError(t, agentcfg.Save(sandboxDir, &agentcfg.AgentConfig{AgentType: "claude"}))
 
 	mock := &lifecycleMockRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
@@ -1100,7 +1108,6 @@ func TestReset_UpgradesToRestartWhenNotRunning(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
-		AgentType: "claude",
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
 			HostPath:    origDir,
@@ -1110,6 +1117,7 @@ func TestReset_UpgradesToRestartWhenNotRunning(t *testing.T) {
 		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
+	require.NoError(t, agentcfg.Save(sandboxDir, &agentcfg.AgentConfig{AgentType: "claude"}))
 
 	// Modify work copy
 	testutil.WriteFile(t, workDir, "file.txt", "modified by agent\n")
@@ -1295,11 +1303,11 @@ func TestDestroy_ReadOnlyFiles(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
-		AgentType: "claude",
 		CreatedAt: time.Now(),
 		Dirs:      []store.DirEnvironment{{HostPath: "/tmp/project", Mode: "copy"}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
+	require.NoError(t, agentcfg.Save(sandboxDir, &agentcfg.AgentConfig{AgentType: "claude"}))
 
 	mock := &lifecycleMockRuntime{}
 	d := newLifecycleDeps(mock, tmpDir)

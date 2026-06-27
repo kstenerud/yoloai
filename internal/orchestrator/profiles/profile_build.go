@@ -12,7 +12,7 @@ import (
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/config"
-	"github.com/kstenerud/yoloai/internal/runtime"
+	"github.com/kstenerud/yoloai/runtime"
 )
 
 // ProfileImageBuilder is optionally implemented by backends that support

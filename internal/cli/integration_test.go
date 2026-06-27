@@ -14,11 +14,12 @@ import (
 	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 	"github.com/kstenerud/yoloai/internal/config"
-	dockerrt "github.com/kstenerud/yoloai/internal/runtime/docker"
+	"github.com/kstenerud/yoloai/internal/netpolicycfg"
+	dockerrt "github.com/kstenerud/yoloai/runtime/docker"
 
 	"github.com/kstenerud/yoloai/internal/orchestrator"
-	"github.com/kstenerud/yoloai/internal/store"
 	"github.com/kstenerud/yoloai/internal/testutil"
+	"github.com/kstenerud/yoloai/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -260,11 +261,11 @@ func TestCLI_NetworkLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { destroySandbox(t, "cli-net") })
 
-	// Verify meta has network isolation
-	meta, err := store.LoadEnvironment(cliutil.Layout().SandboxDir("cli-net"))
+	// Verify netpolicy has network isolation (D90: network policy lives in netpolicy.json).
+	np, err := netpolicycfg.Load(cliutil.Layout().SandboxDir("cli-net"))
 	require.NoError(t, err)
-	assert.Equal(t, "isolated", meta.NetworkMode)
-	initialDomains := len(meta.NetworkAllow)
+	assert.Equal(t, "isolated", np.Mode)
+	initialDomains := len(np.Allow)
 
 	// List domains (allowed)
 	stdout, _, err := runCLI(t, "sandbox", "cli-net", "allowed")
@@ -278,11 +279,11 @@ func TestCLI_NetworkLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "extra.example.com")
 
-	// Verify persisted
-	meta, err = store.LoadEnvironment(cliutil.Layout().SandboxDir("cli-net"))
+	// Verify persisted (D90: network policy lives in netpolicy.json).
+	np, err = netpolicycfg.Load(cliutil.Layout().SandboxDir("cli-net"))
 	require.NoError(t, err)
-	assert.Contains(t, meta.NetworkAllow, "extra.example.com")
-	assert.Contains(t, meta.NetworkAllow, "api.test.com")
+	assert.Contains(t, np.Allow, "extra.example.com")
+	assert.Contains(t, np.Allow, "api.test.com")
 
 	// List again — should show added domains
 	stdout, _, err = runCLI(t, "sandbox", "cli-net", "allowed")
@@ -303,11 +304,11 @@ func TestCLI_NetworkLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "api.test.com")
 
-	// Verify removal persisted
-	meta, err = store.LoadEnvironment(cliutil.Layout().SandboxDir("cli-net"))
+	// Verify removal persisted (D90: network policy lives in netpolicy.json).
+	np, err = netpolicycfg.Load(cliutil.Layout().SandboxDir("cli-net"))
 	require.NoError(t, err)
-	assert.Contains(t, meta.NetworkAllow, "extra.example.com")
-	assert.NotContains(t, meta.NetworkAllow, "api.test.com")
+	assert.Contains(t, np.Allow, "extra.example.com")
+	assert.NotContains(t, np.Allow, "api.test.com")
 
 	// Remove nonexistent domain — should error
 	_, _, err = runCLI(t, "sandbox", "cli-net", "deny", "nope.com")

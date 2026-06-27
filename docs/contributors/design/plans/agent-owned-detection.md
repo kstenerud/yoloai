@@ -34,7 +34,7 @@ exact code just stabilized — hence: design first, phase-gated Docker testing.
   `setup_helpers.build_agent_launch_command` → `{exports}cd '<wd>' && exec
   {agent_command}`. The `exec` means the agent replaces the shell, so its exit
   code becomes the pane's and **the pane dies on agent exit**.
-- **Detection:** `internal/runtime/monitor/status-monitor.py` is a **separate
+- **Detection:** `runtime/monitor/status-monitor.py` is a **separate
   durable process** watching the pane *externally* (via `tmux capture-pane` /
   `list-panes` for pane-pid, wchan, pane-dead). It is NOT in the user↔agent tty
   path. Main loop (`status-monitor.py:~643`): (1) `check_pane_dead` → write

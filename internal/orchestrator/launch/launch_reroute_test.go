@@ -21,8 +21,8 @@ import (
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/orchestrator/runtimeconfig"
 	"github.com/kstenerud/yoloai/internal/orchestrator/state"
-	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/store"
+	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/store"
 )
 
 // --- call-recording fake runtime (base, no ProcessLauncher) ---
@@ -30,8 +30,9 @@ import (
 // rerouteBaseRuntime records Create/Start/Inspect calls and returns running=true
 // on Inspect so verifyInstanceRunning is satisfied.
 type rerouteBaseRuntime struct {
-	mu      sync.Mutex
-	callSeq []string // ordered call log: "Create", "Start", "Ready", "Launch", "Inspect"
+	mu         sync.Mutex
+	callSeq    []string                // ordered call log: "Create", "Start", "Ready", "Launch", "Inspect"
+	createdCfg *runtime.InstanceConfig // the InstanceConfig passed to Create (for env assertions)
 }
 
 var _ runtime.Backend = (*rerouteBaseRuntime)(nil)
@@ -42,8 +43,12 @@ func (r *rerouteBaseRuntime) record(name string) {
 	r.callSeq = append(r.callSeq, name)
 }
 
-func (r *rerouteBaseRuntime) Create(_ context.Context, _ runtime.InstanceConfig) error {
+func (r *rerouteBaseRuntime) Create(_ context.Context, cfg runtime.InstanceConfig) error {
 	r.record("Create")
+	r.mu.Lock()
+	copied := cfg
+	r.createdCfg = &copied
+	r.mu.Unlock()
 	return nil
 }
 func (r *rerouteBaseRuntime) Start(_ context.Context, _ string) error {
@@ -79,7 +84,6 @@ func (r *rerouteBaseRuntime) TmuxSocket(_ string) string                     { r
 func (r *rerouteBaseRuntime) AttachCommand(_ string, _, _ int, _ runtime.IsolationMode) []string {
 	return nil
 }
-func (r *rerouteBaseRuntime) PrepareAgentCommand(cmd string) string { return cmd }
 func (r *rerouteBaseRuntime) Descriptor() runtime.BackendDescriptor {
 	return runtime.BackendDescriptor{
 		Type:         "mock",
@@ -88,6 +92,9 @@ func (r *rerouteBaseRuntime) Descriptor() runtime.BackendDescriptor {
 			NetworkIsolation: true,
 			OverlayDirs:      true,
 			CapAdd:           true,
+			// This fake represents a Docker-like backend that opts into the D88
+			// keepalive-holder + Launch bring-up; these tests verify that path.
+			AgentFreeLaunch: true,
 		},
 	}
 }
@@ -224,6 +231,16 @@ func TestBuildAndStart_LaunchPath(t *testing.T) {
 	assert.True(t, readRuntimeConfigKeepalive(t, dir),
 		"keepalive_only must be true after the Launch path sets it")
 
+	// keepalive_only must ALSO be signalled via the container env, the channel that
+	// survives Docker Desktop's stale single-file-bind-mount-after-rename (the file
+	// patch alone never reaches the entrypoint there). See backend-idiosyncrasies.md.
+	rt.mu.Lock()
+	createdCfg := rt.createdCfg
+	rt.mu.Unlock()
+	require.NotNil(t, createdCfg, "Create must have been called")
+	assert.Contains(t, createdCfg.ContainerEnv, "YOLOAI_KEEPALIVE_ONLY=1",
+		"the Launch path must set YOLOAI_KEEPALIVE_ONLY=1 in the container env")
+
 	// Launch must have been called.
 	rt.mu.Lock()
 	spec := rt.launchedSpec
@@ -261,6 +278,41 @@ func TestBuildAndStart_LaunchPath(t *testing.T) {
 	assert.NoError(t, statErr, "secrets-consumed marker must exist after Launch")
 }
 
+// TestBuildAndStart_ContainerEnhancedTakesLegacyPath verifies that a
+// Launch-capable, AgentFreeLaunch-opted-in backend is STILL routed to the legacy
+// in-entrypoint weld under container-enhanced (gVisor) isolation. The D88
+// keepalive+Launch path's host-side `exec --user yoloai` resolves the username
+// against gVisor's stale image passwd and writes as the wrong UID, so the agent
+// never welds (see runtime.SupportsAgentFreeLaunch). The legacy path must be used
+// instead: no keepalive_only patch and no Launch call.
+func TestBuildAndStart_ContainerEnhancedTakesLegacyPath(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "logs"), 0750))
+	writeMinimalRuntimeConfig(t, dir)
+
+	rt := &rerouteLaunchRuntime{}
+
+	st := makeTestState(dir)
+	st.Isolation = runtime.IsolationModeContainerEnhanced
+
+	// hasSecrets=false so the legacy path doesn't block on the secrets marker
+	// (the entrypoint would write it in production; the fake doesn't simulate it).
+	err := buildAndStart(context.Background(), rt, st, nil, nil, false /*hasSecrets*/, nil)
+	require.NoError(t, err)
+
+	// Legacy path: keepalive_only stays false and Launch is never called.
+	assert.False(t, readRuntimeConfigKeepalive(t, dir),
+		"container-enhanced must NOT patch keepalive_only (legacy weld)")
+	rt.mu.Lock()
+	spec := rt.launchedSpec
+	seq := append([]string(nil), rt.callSeq...)
+	rt.mu.Unlock()
+	assert.Nil(t, spec, "Launch must NOT be called under container-enhanced (legacy path)")
+	assert.Equal(t, -1, indexOf(seq, "Launch"), "the call sequence must not contain Launch")
+	assert.NotEqual(t, -1, indexOf(seq, "Create"), "Create must still be called")
+	assert.NotEqual(t, -1, indexOf(seq, "Start"), "Start must still be called")
+}
+
 // TestBuildAndStart_LegacyPath verifies the unchanged legacy flow for backends
 // without ProcessLauncher:
 //
@@ -292,6 +344,15 @@ func TestBuildAndStart_LegacyPath(t *testing.T) {
 	assert.Contains(t, seq, "Create", "Create must be called in legacy path")
 	assert.Contains(t, seq, "Start", "Start must be called in legacy path")
 	assert.NotContains(t, seq, "Launch", "Launch must NOT be called in legacy path")
+
+	// The legacy path must NOT set the keepalive env var — the entrypoint welds the
+	// agent inline and would otherwise be forced into the holder branch.
+	rt.mu.Lock()
+	createdCfg := rt.createdCfg
+	rt.mu.Unlock()
+	require.NotNil(t, createdCfg, "Create must have been called")
+	assert.NotContains(t, createdCfg.ContainerEnv, "YOLOAI_KEEPALIVE_ONLY=1",
+		"the legacy path must NOT set YOLOAI_KEEPALIVE_ONLY")
 
 	createIdx := indexOf(seq, "Create")
 	startIdx := indexOf(seq, "Start")

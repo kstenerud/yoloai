@@ -27,8 +27,8 @@ import (
 	mountspkg "github.com/kstenerud/yoloai/internal/orchestrator/mounts"
 	"github.com/kstenerud/yoloai/internal/orchestrator/runtimeconfig"
 	"github.com/kstenerud/yoloai/internal/orchestrator/state"
-	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/store"
+	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
 
@@ -56,7 +56,7 @@ func LaunchContainer(ctx context.Context, d state.Deps, st *state.State) error {
 	spec := envspec.BuildEnvSpec(st.Agent)
 	var secretsDir string
 	var secretEnv map[string]string
-	if _, isLauncher := runtime.LauncherOf(d.Runtime); isLauncher {
+	if _, agentFree := usesAgentFreeLaunch(d.Runtime, st.Isolation); agentFree {
 		// Launch path (Docker): deliver secrets via the launched process's env; no host staging, no mount, no marker.
 		secretEnv = envsetup.ResolveSecretEnv(spec, envVars, st.Layout)
 	} else {
@@ -82,16 +82,31 @@ func LaunchContainer(ctx context.Context, d state.Deps, st *state.State) error {
 	return buildAndStart(ctx, d.Runtime, st, mnts, ports, secretsDir != "", secretEnv)
 }
 
+// usesAgentFreeLaunch reports whether this sandbox uses the D88 agent-free
+// keepalive+Launch bring-up: the backend must implement runtime.ProcessLauncher
+// AND opt in via Capabilities.AgentFreeLaunch AND the isolation mode must support
+// the host-side launch exec (runtime.SupportsAgentFreeLaunch — false for gVisor;
+// see that function). Both the secrets-delivery choice and the container bring-up
+// gate on this single helper, so they stay in sync — a sandbox on legacy bring-up
+// also gets legacy /run/secrets staging. Podman inherits Launch by embedding the
+// Docker runtime but does not opt in, so it takes the legacy path; docker under
+// container-enhanced (gVisor) opts in at the backend level but is excluded by
+// isolation, so it too takes the legacy in-entrypoint weld.
+func usesAgentFreeLaunch(rt runtime.Backend, isolation runtime.IsolationMode) (runtime.ProcessLauncher, bool) {
+	launcher, ok := runtime.LauncherOf(rt)
+	return launcher, ok && rt.Descriptor().Capabilities.AgentFreeLaunch && runtime.SupportsAgentFreeLaunch(isolation)
+}
+
 // buildAndStart constructs the runtime InstanceConfig from State and
 // starts the instance. hasSecrets indicates whether secrets were injected via
 // a temporary directory that the caller will remove after this call returns.
 // secretEnv is the secret map delivered via ProcSpec.Env on the Launch path
 // (nil on the legacy path). Extracted from launchContainer().
 //
-// When the backend implements runtime.ProcessLauncher the box is brought up
-// agent-free (keepalive_only holder) and sandbox-setup.py is launched as a
-// separate process over it — the S3 re-route. Backends without ProcessLauncher
-// follow the legacy path: the agent is welded into the entrypoint as before.
+// When the backend opts into the agent-free bring-up (usesAgentFreeLaunch) the box
+// comes up on a keepalive_only holder and sandbox-setup.py is launched as a
+// separate process over it — the S3 re-route. Otherwise it follows the legacy
+// path: the agent is welded into the entrypoint as before.
 func buildAndStart(ctx context.Context, rt runtime.Backend, st *state.State, mnts []runtime.MountSpec, ports []runtime.PortMapping, hasSecrets bool, secretEnv map[string]string) error {
 	cname := store.InstanceName(st.Layout.Principal, st.Name)
 	instanceCfg, err := buildInstanceConfig(rt.Descriptor(), st, mnts, ports)
@@ -107,7 +122,11 @@ func buildAndStart(ctx context.Context, rt runtime.Backend, st *state.State, mnt
 		_ = os.Remove(markerPath) //nolint:errcheck // best-effort; absent is fine
 	}
 
-	if launcher, ok := runtime.LauncherOf(rt); ok {
+	// Use the D88 keepalive-holder + Launch bring-up only for backends that opt in
+	// (see usesAgentFreeLaunch). Secrets delivery (above) is gated on the same
+	// condition, so the two stay in sync — a backend on the legacy bring-up also
+	// gets legacy /run/secrets staging.
+	if launcher, ok := usesAgentFreeLaunch(rt, st.Isolation); ok {
 		if err := startViaLaunch(ctx, rt, launcher, st, cname, instanceCfg, markerPath, hasSecrets, secretEnv); err != nil {
 			return err
 		}
@@ -139,6 +158,17 @@ func startViaLaunch(ctx context.Context, rt runtime.Backend, launcher runtime.Pr
 	if err := patchKeepaliveOnly(st.SandboxDir, true); err != nil {
 		return fmt.Errorf("patch keepalive_only: %w", err)
 	}
+
+	// Signal keepalive_only to the entrypoint via an env var as well, not only the
+	// patched runtime-config.json. The file patch is an atomic rename (new inode)
+	// immediately before Create; Docker Desktop's gRPC-FUSE serves the stale
+	// pre-patch content for that single-file bind mount when the entrypoint reads
+	// it at container start, so the box silently takes the legacy inline path and
+	// never writes .substrate-ready (waitForReady then times out). An env var is
+	// baked into the container config at create, immune to mount-propagation lag,
+	// and the entrypoint treats it as authoritative. The file patch remains as the
+	// Linux/OrbStack-side record and a backstop. See backend-idiosyncrasies.md.
+	instanceCfg.ContainerEnv = append(instanceCfg.ContainerEnv, "YOLOAI_KEEPALIVE_ONLY=1")
 
 	// Clear any stale readiness marker from a prior boot so the wait below sees
 	// only this launch's signal (it lives in the persistent sandbox dir).

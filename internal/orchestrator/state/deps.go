@@ -7,7 +7,7 @@ import (
 	"io"
 
 	"github.com/kstenerud/yoloai/internal/config"
-	"github.com/kstenerud/yoloai/internal/runtime"
+	"github.com/kstenerud/yoloai/runtime"
 )
 
 // Deps holds the runtime backend, path layout, and interactive input reader

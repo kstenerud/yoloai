@@ -6,10 +6,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/kstenerud/yoloai/internal/runtime"
-	dockerrt "github.com/kstenerud/yoloai/internal/runtime/docker"
-	_ "github.com/kstenerud/yoloai/internal/runtime/seatbelt" // backend init() registers the descriptor for tests
-	tartrt "github.com/kstenerud/yoloai/internal/runtime/tart"
+	"github.com/kstenerud/yoloai/runtime"
+	dockerrt "github.com/kstenerud/yoloai/runtime/docker"
+	_ "github.com/kstenerud/yoloai/runtime/seatbelt" // backend init() registers the descriptor for tests
+	tartrt "github.com/kstenerud/yoloai/runtime/tart"
 )
 
 // IsolationSnapshotter tests

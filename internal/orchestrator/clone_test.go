@@ -14,7 +14,8 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
-	"github.com/kstenerud/yoloai/internal/store"
+	"github.com/kstenerud/yoloai/internal/orchestrator/agentcfg"
+	"github.com/kstenerud/yoloai/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
 
@@ -31,7 +32,6 @@ func createCloneSource(t *testing.T, tmpDir, name string) {
 
 	meta := &store.Environment{
 		Name:        name,
-		AgentType:   "claude",
 		BackendType: "docker",
 		CreatedAt:   time.Now().Add(-time.Hour), // created an hour ago
 		Dirs: []store.DirEnvironment{{
@@ -42,6 +42,7 @@ func createCloneSource(t *testing.T, tmpDir, name string) {
 		}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
+	require.NoError(t, agentcfg.Save(sandboxDir, &agentcfg.AgentConfig{AgentType: "claude"}))
 
 	// Add some content to clone
 	writeTestFile(t, sandboxDir, "log.txt", "session log content")
@@ -64,7 +65,9 @@ func TestClone_Success(t *testing.T) {
 	meta, err := store.LoadEnvironment(dstDir)
 	require.NoError(t, err)
 	assert.Equal(t, "dest", meta.Name)
-	assert.Equal(t, string(agent.AgentClaude), meta.AgentType)
+	dstAgent, err := agentcfg.Load(dstDir)
+	require.NoError(t, err)
+	assert.Equal(t, string(agent.AgentClaude), dstAgent.AgentType)
 	assert.Equal(t, "abc123", meta.Workdir().BaselineSHA)
 	// CreatedAt should be refreshed (newer than source)
 	assert.True(t, meta.CreatedAt.After(time.Now().Add(-time.Minute)))

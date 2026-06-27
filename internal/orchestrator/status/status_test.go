@@ -14,9 +14,10 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/git"
-	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/store"
+	"github.com/kstenerud/yoloai/internal/orchestrator/agentcfg"
 	"github.com/kstenerud/yoloai/internal/testutil"
+	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/store"
 )
 
 // InspectSandbox tests
@@ -38,8 +39,7 @@ func TestInspectSandbox_Removed(t *testing.T) {
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 	meta := &store.Environment{
-		Name:      name,
-		AgentType: "claude",
+		Name: name,
 		Dirs: []store.DirEnvironment{{
 			HostPath: "/tmp/test",
 			Mode:     "copy",
@@ -47,6 +47,7 @@ func TestInspectSandbox_Removed(t *testing.T) {
 		CreatedAt: time.Now(),
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
+	require.NoError(t, agentcfg.Save(sandboxDir, &agentcfg.AgentConfig{AgentType: "claude"}))
 
 	mock := &fakeRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
@@ -85,8 +86,7 @@ func TestListSandboxes_IncludesBroken(t *testing.T) {
 	validDir := filepath.Join(sandboxesDir, "valid")
 	require.NoError(t, os.MkdirAll(validDir, 0750))
 	meta := &store.Environment{
-		Name:      "valid",
-		AgentType: "claude",
+		Name: "valid",
 		Dirs: []store.DirEnvironment{{
 			HostPath: "/tmp/test",
 			Mode:     "copy",
@@ -94,6 +94,7 @@ func TestListSandboxes_IncludesBroken(t *testing.T) {
 		CreatedAt: time.Now(),
 	}
 	require.NoError(t, store.SaveEnvironment(validDir, meta))
+	require.NoError(t, agentcfg.Save(validDir, &agentcfg.AgentConfig{AgentType: "claude"}))
 
 	// Create a broken sandbox (dir exists but no environment.json)
 	brokenDir := filepath.Join(sandboxesDir, "broken")
@@ -363,14 +364,14 @@ func TestParseStatusJSON(t *testing.T) {
 // ProbeWorkData tests
 
 func TestProbeWorkData_NoWorkDir(t *testing.T) {
-	st, _ := ProbeWorkData(context.Background(), git.NewHostWithEnv(testutil.GitEnv()), t.TempDir())
+	st, _ := ProbeWorkData(context.Background(), git.NewTestHostWithEnv(testutil.GitEnv()), t.TempDir())
 	assert.Equal(t, WorkDataNone, st)
 }
 
 func TestProbeWorkData_EmptyWorkDir(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.Mkdir(filepath.Join(dir, "work"), 0o750))
-	st, _ := ProbeWorkData(context.Background(), git.NewHostWithEnv(testutil.GitEnv()), dir)
+	st, _ := ProbeWorkData(context.Background(), git.NewTestHostWithEnv(testutil.GitEnv()), dir)
 	assert.Equal(t, WorkDataNone, st)
 }
 
@@ -384,7 +385,7 @@ func TestProbeWorkData_CopyCleanIsAmbiguous(t *testing.T) {
 	testutil.GitCommit(t, work, "initial")
 
 	// Clean tree, but baseline is unknown without meta — preserve it.
-	st, _ := ProbeWorkData(context.Background(), git.NewHostWithEnv(testutil.GitEnv()), dir)
+	st, _ := ProbeWorkData(context.Background(), git.NewTestHostWithEnv(testutil.GitEnv()), dir)
 	assert.Equal(t, WorkDataAmbiguous, st)
 }
 
@@ -398,7 +399,7 @@ func TestProbeWorkData_CopyDirtyIsPresent(t *testing.T) {
 	testutil.GitCommit(t, work, "initial")
 	testutil.WriteFile(t, work, "file.txt", "modified")
 
-	st, detail := ProbeWorkData(context.Background(), git.NewHostWithEnv(testutil.GitEnv()), dir)
+	st, detail := ProbeWorkData(context.Background(), git.NewTestHostWithEnv(testutil.GitEnv()), dir)
 	assert.Equal(t, WorkDataPresent, st)
 	assert.NotEmpty(t, detail)
 }
@@ -409,7 +410,7 @@ func TestProbeWorkData_OverlayUpperNonEmptyIsPresent(t *testing.T) {
 	require.NoError(t, os.MkdirAll(upper, 0o750))
 	testutil.WriteFile(t, upper, "changed.txt", "diff")
 
-	st, detail := ProbeWorkData(context.Background(), git.NewHostWithEnv(testutil.GitEnv()), dir)
+	st, detail := ProbeWorkData(context.Background(), git.NewTestHostWithEnv(testutil.GitEnv()), dir)
 	assert.Equal(t, WorkDataPresent, st)
 	assert.NotEmpty(t, detail)
 }
@@ -420,6 +421,6 @@ func TestProbeWorkData_OverlayUpperEmptyIsAmbiguous(t *testing.T) {
 	upper := filepath.Join(dir, "work", store.EncodePath("/home/u/proj"), "upper")
 	require.NoError(t, os.MkdirAll(upper, 0o750))
 
-	st, _ := ProbeWorkData(context.Background(), git.NewHostWithEnv(testutil.GitEnv()), dir)
+	st, _ := ProbeWorkData(context.Background(), git.NewTestHostWithEnv(testutil.GitEnv()), dir)
 	assert.Equal(t, WorkDataAmbiguous, st)
 }

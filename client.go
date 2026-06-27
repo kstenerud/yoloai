@@ -58,13 +58,13 @@ import (
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/orchestrator"
-	"github.com/kstenerud/yoloai/internal/runtime"
-	_ "github.com/kstenerud/yoloai/internal/runtime/apple"    // register backend
-	_ "github.com/kstenerud/yoloai/internal/runtime/docker"   // register backend
-	_ "github.com/kstenerud/yoloai/internal/runtime/podman"   // register backend
-	_ "github.com/kstenerud/yoloai/internal/runtime/seatbelt" // register backend
-	_ "github.com/kstenerud/yoloai/internal/runtime/tart"     // register backend
-	"github.com/kstenerud/yoloai/internal/store"
+	"github.com/kstenerud/yoloai/runtime"
+	_ "github.com/kstenerud/yoloai/runtime/apple"    // register backend
+	_ "github.com/kstenerud/yoloai/runtime/docker"   // register backend
+	_ "github.com/kstenerud/yoloai/runtime/podman"   // register backend
+	_ "github.com/kstenerud/yoloai/runtime/seatbelt" // register backend
+	_ "github.com/kstenerud/yoloai/runtime/tart"     // register backend
+	"github.com/kstenerud/yoloai/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
 

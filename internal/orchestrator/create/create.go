@@ -18,18 +18,20 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
-	"github.com/kstenerud/yoloai/internal/copyflow"
 	"github.com/kstenerud/yoloai/internal/envsetup"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/git"
+	"github.com/kstenerud/yoloai/internal/netpolicycfg"
+	"github.com/kstenerud/yoloai/internal/orchestrator/agentcfg"
 	"github.com/kstenerud/yoloai/internal/orchestrator/archetype"
 	"github.com/kstenerud/yoloai/internal/orchestrator/envspec"
 	"github.com/kstenerud/yoloai/internal/orchestrator/invocation"
 	"github.com/kstenerud/yoloai/internal/orchestrator/launch"
 	"github.com/kstenerud/yoloai/internal/orchestrator/runtimeconfig"
 	"github.com/kstenerud/yoloai/internal/orchestrator/state"
-	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/store"
+	"github.com/kstenerud/yoloai/internal/orchestrator/workprobe"
+	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
 
@@ -68,7 +70,7 @@ const (
 type DirMode = store.DirMode
 
 // Re-exported DirMode constants. Canonical definitions in
-// internal/store/dirmode.go.
+// store/dirmode.go.
 const (
 	DirModeCopy    = store.DirModeCopy
 	DirModeOverlay = store.DirModeOverlay
@@ -92,6 +94,7 @@ type Options struct {
 	Profile              string                // profile name (from --profile flag)
 	Prompt               string                // prompt text (from --prompt)
 	PromptFile           string                // prompt file path (from --prompt-file)
+	Headless             bool                  // launch the agent in its own headless mode (yoloai run); requires a prompt (D100)
 	Network              NetworkMode           // network access policy
 	NetworkAllow         []string              // --network-allow flags
 	Ports                []string              // --port flags (e.g., ["3000:3000"])
@@ -213,12 +216,12 @@ func unappliedWorkError(ctx context.Context, g *git.Git, name, workDir, baseline
 	if inDir != "" {
 		loc = " in " + inDir
 	}
-	switch copyflow.HasUnappliedWorkVia(ctx, g, workDir, baselineSHA) {
-	case copyflow.WorkDirty:
+	switch workprobe.HasUnappliedWorkVia(ctx, g, workDir, baselineSHA) {
+	case workprobe.WorkDirty:
 		return fmt.Errorf("sandbox %q has unapplied changes%s (use --abandon-unapplied to replace anyway, or 'yoloai apply' first)", name, loc)
-	case copyflow.WorkUnknown:
+	case workprobe.WorkUnknown:
 		return fmt.Errorf("sandbox %q is stopped, so unapplied changes%s cannot be verified (start it to check, or use --abandon-unapplied to replace anyway)", name, loc)
-	case copyflow.WorkClean:
+	case workprobe.WorkClean:
 	}
 	return nil
 }
@@ -267,17 +270,17 @@ func prepareSandboxState(ctx context.Context, d state.Deps, opts Options) (*stat
 	}
 
 	// Phase 3: Build config, meta, and state files.
-	configData, meta, tmuxConf, promptText, err := buildConfigAndEnvironment(ctx, d, opts, ri, agentDef, workdir, auxDirs, gcfg, dirEnvs, baselineSHA, sandboxDir)
+	configData, meta, model, tmuxConf, promptText, networkMode, networkAllow, err := buildConfigAndEnvironment(ctx, d, opts, ri, agentDef, workdir, auxDirs, gcfg, dirEnvs, baselineSHA, sandboxDir)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := writeStatFiles(sandboxDir, meta, agentDef, agentFilesInitialized, meta.HasPrompt, promptText, configData, perms); err != nil {
+	if err := writeStatFiles(sandboxDir, meta, agentDef, opts.Agent, model, networkMode, networkAllow, agentFilesInitialized, meta.HasPrompt, promptText, configData, perms); err != nil {
 		return nil, err
 	}
 
 	success = true
-	return buildSandboxStateResult(opts, sandboxDir, workdir, workCopyDir, auxDirs, agentDef, meta, ri, configData, tmuxConf, d.Layout, d.Layout.HomeDir), nil
+	return buildSandboxStateResult(opts, sandboxDir, workdir, workCopyDir, auxDirs, agentDef, meta, model, networkMode, networkAllow, ri, configData, tmuxConf, d.Layout, d.Layout.HomeDir), nil
 }
 
 // resolvedCreateInputs carries the Phase-1 resolution outputs (profile, archetype,
@@ -342,17 +345,20 @@ func createAndSeedSandbox(ctx context.Context, d state.Deps, sandboxDir string, 
 	}
 	desc := d.Runtime.Descriptor()
 	spec := envspec.BuildEnvSpec(agentDef)
-	return envsetup.SeedSandbox(spec, sandboxDir, pr.agentFiles, d.Layout.HomeDir, d.Layout, desc.AgentProvisionedByBackend, desc.AgentInstallMethod, output)
+	return envsetup.SeedSandbox(spec, sandboxDir, pr.agentFiles, d.Layout.HomeDir, d.Layout, desc.AgentProvisionedByBackend, output)
 }
 
 // buildConfigAndEnvironment builds the container config and sandbox meta structs.
-// Returns (configData, meta, tmuxConf, promptText, error).
-func buildConfigAndEnvironment(ctx context.Context, d state.Deps, opts Options, ri *resolvedCreateInputs, agentDef *agent.Definition, workdir *DirSpec, auxDirs []*DirSpec, gcfg *config.GlobalConfig, dirEnvs []store.DirEnvironment, baselineSHA string, sandboxDir string) ([]byte, *store.Environment, string, string, error) {
+// Returns (configData, meta, model, tmuxConf, promptText, networkMode, networkAllow, error).
+// model, networkMode, and networkAllow are returned alongside meta because the
+// substrate record no longer carries them (Q104/D90) — the caller needs them for
+// agent.json, netpolicy.json, and the launch state.
+func buildConfigAndEnvironment(ctx context.Context, d state.Deps, opts Options, ri *resolvedCreateInputs, agentDef *agent.Definition, workdir *DirSpec, auxDirs []*DirSpec, gcfg *config.GlobalConfig, dirEnvs []store.DirEnvironment, baselineSHA string, sandboxDir string) ([]byte, *store.Environment, string, string, string, string, []string, error) {
 	_ = ctx // reserved for future use
 	pr := ri.profile
-	promptText, hasPrompt, model, agentCommand, tmuxConf, err := resolveAgentParams(agentDef, opts, pr, gcfg, d.Layout.HomeDir, d.Layout, d.Input)
+	promptText, hasPrompt, model, agentCommand, tmuxConf, headless, err := resolveAgentParams(agentDef, opts, pr, gcfg, d.Layout.HomeDir, d.Layout, d.Input)
 	if err != nil {
-		return nil, nil, "", "", err
+		return nil, nil, "", "", "", "", nil, err
 	}
 
 	networkMode, networkAllow := buildNetworkConfig(opts, agentDef)
@@ -361,20 +367,23 @@ func buildConfigAndEnvironment(ctx context.Context, d state.Deps, opts Options, 
 	lifecycleCfg := buildLifecycleConfig(ri.archetype, pr.archetypeDockerDRequired, ri.onCreateDone, ri.devcontainerCfg)
 
 	backend := d.Runtime.Descriptor().Type
-	configData, err := buildContainerConfig(d.Layout, agentDef, agentCommand, runtime.PrepareAgentCommandFor(d.Runtime, ""), tmuxConf, launch.OverlayOrResolvedMountPath(workdir), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, collectOverlayMounts(workdir, auxDirs), pr.setup, pr.autoCommitInterval, collectCopyDirs(workdir, auxDirs), opts.Name, runtime.TmuxSocketFor(d.Runtime, sandboxDir), pr.isolation, opts.VscodeTunnel, invocation.SanitizeTunnelName(opts.Name), lifecycleCfg)
+	configData, err := buildContainerConfig(d.Layout, agentDef, agentCommand, launch.AgentLaunchPrefix(backend), tmuxConf, launch.OverlayOrResolvedMountPath(workdir), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, collectOverlayMounts(workdir, auxDirs), pr.setup, pr.autoCommitInterval, collectCopyDirs(workdir, auxDirs), opts.Name, runtime.TmuxSocketFor(d.Runtime, sandboxDir), pr.isolation, opts.VscodeTunnel, invocation.SanitizeTunnelName(opts.Name), lifecycleCfg, headless)
 	if err != nil {
-		return nil, nil, "", "", fmt.Errorf("build %s: %w", store.RuntimeConfigFile, err)
+		return nil, nil, "", "", "", "", nil, fmt.Errorf("build %s: %w", store.RuntimeConfigFile, err)
 	}
 
 	usernsMode := resolveUsernsMode(d.Runtime, workdir, auxDirs, pr.capAdd)
-	meta := buildEnvironment(opts, pr, workdir, baselineSHA, dirEnvs, hasPrompt, networkMode, networkAllow, usernsMode, d.Runtime.Descriptor().Capabilities.HostFilesystem, string(ri.archetype), backend, model, ri.mergedMounts)
+	meta := buildEnvironment(opts, pr, workdir, baselineSHA, dirEnvs, hasPrompt, usernsMode, d.Runtime.Descriptor().Capabilities.HostFilesystem, string(ri.archetype), backend, ri.mergedMounts)
 	meta.Principal = d.Layout.Principal // record the owning principal for attribution + runtime namespace (D62)
+	meta.Headless = headless            // effective headless mode (may be a D101 downgrade of opts.Headless)
 
-	return configData, meta, tmuxConf, promptText, nil
+	return configData, meta, model, tmuxConf, promptText, string(networkMode), networkAllow, nil
 }
 
 // buildSandboxStateResult constructs the State from all resolved values.
-func buildSandboxStateResult(opts Options, sandboxDir string, workdir *DirSpec, workCopyDir string, auxDirs []*DirSpec, agentDef *agent.Definition, meta *store.Environment, ri *resolvedCreateInputs, configData []byte, tmuxConf string, layout config.Layout, homeDir string) *state.State {
+// networkMode and networkAllow are passed explicitly because the substrate
+// record (meta) no longer carries them (D90); they live in netpolicy.json.
+func buildSandboxStateResult(opts Options, sandboxDir string, workdir *DirSpec, workCopyDir string, auxDirs []*DirSpec, agentDef *agent.Definition, meta *store.Environment, model string, networkMode string, networkAllow []string, ri *resolvedCreateInputs, configData []byte, tmuxConf string, layout config.Layout, homeDir string) *state.State {
 	pr := ri.profile
 	return &state.State{
 		Name:                      opts.Name,
@@ -383,13 +392,13 @@ func buildSandboxStateResult(opts Options, sandboxDir string, workdir *DirSpec, 
 		WorkCopyDir:               workCopyDir,
 		AuxDirs:                   auxDirs,
 		Agent:                     agentDef,
-		Model:                     meta.Model,
+		Model:                     model,
 		Profile:                   pr.name,
 		ImageRef:                  pr.imageRef,
 		Env:                       pr.env,
 		HasPrompt:                 meta.HasPrompt,
-		NetworkMode:               meta.NetworkMode,
-		NetworkAllow:              meta.NetworkAllow,
+		NetworkMode:               networkMode,
+		NetworkAllow:              networkAllow,
 		Ports:                     opts.Ports,
 		ConfigMounts:              ri.mergedMounts,
 		TmuxConf:                  tmuxConf,
@@ -584,28 +593,60 @@ func setupAllWorkdirs(ctx context.Context, d state.Deps, opts Options, workdir *
 	return workCopyDir, baselineSHA, dirEnvs, nil
 }
 
-// resolveAgentParams resolves prompt, model, agent command, and tmux config.
-// homeDir is used to expand leading "~" in the promptFile path.
-// layout supplies both the curated interpolation map (prompt-file ${VAR}
+// resolveAgentParams resolves prompt, model, agent command, tmux config, and the
+// effective headless mode. homeDir is used to expand leading "~" in the promptFile
+// path. layout supplies both the curated interpolation map (prompt-file ${VAR}
 // expansion) and the host-env lookup ApplyModelPrefix needs for arbitrary
 // model-trigger keys.
-func resolveAgentParams(agentDef *agent.Definition, opts Options, pr *profileResult, gcfg *config.GlobalConfig, homeDir string, layout config.Layout, stdin io.Reader) (string, bool, string, string, string, error) {
+//
+// The returned headless bool is the EFFECTIVE mode, which may be a downgrade of
+// opts.Headless: Headless is a preference, and an agent whose headless mode could
+// hang on an OAuth/browser flow without an API key is run interactively instead
+// (D101). The caller persists the effective value so `run` can pick its wait
+// condition and notice the fallback.
+func resolveAgentParams(agentDef *agent.Definition, opts Options, pr *profileResult, gcfg *config.GlobalConfig, homeDir string, layout config.Layout, stdin io.Reader) (string, bool, string, string, string, bool, error) {
 	promptText, err := invocation.ReadPrompt(opts.Prompt, opts.PromptFile, homeDir, layout.Env().EnvForConfigInterpolation(), stdin)
 	if err != nil {
-		return "", false, "", "", "", err
+		return "", false, "", "", "", false, err
 	}
 	hasPrompt := promptText != ""
+	if opts.Headless && !hasPrompt {
+		return "", false, "", "", "", false, yoerrors.NewUsageError("headless mode requires a prompt (--prompt or --prompt-file)")
+	}
 
 	model := invocation.ResolveModel(agentDef, opts.Model, pr.userAliases)
 	model = invocation.ApplyModelPrefix(agentDef, model, pr.env, layout)
 	if err := invocation.ValidateModel(agentDef, model, opts.Model); err != nil {
-		return "", false, "", "", "", err
+		return "", false, "", "", "", false, err
 	}
 
-	agentArgs := pr.agentArgs[opts.Agent]
-	agentCommand := invocation.BuildAgentCommand(agentDef, model, promptText, agentArgs, opts.Passthrough)
+	// Headless is a preference, honored only when the agent has usable auth we can
+	// observe (D101): with auth present the agent won't hit a login prompt (so it
+	// can't hang on an OAuth/browser flow that never completes in a headless pane);
+	// without it, run interactively so the user can attach and authenticate. This
+	// is failsafe-forward — it bets on observed auth, not on any agent's headless
+	// behavior staying the same across releases.
+	headless := opts.Headless && agentHasUsableAuth(agentDef, pr.env, layout)
 
-	return promptText, hasPrompt, model, agentCommand, gcfg.TmuxConf, nil
+	agentArgs := pr.agentArgs[opts.Agent]
+	agentCommand := invocation.BuildAgentCommand(agentDef, model, promptText, agentArgs, opts.Passthrough, headless)
+
+	return promptText, hasPrompt, model, agentCommand, gcfg.TmuxConf, headless, nil
+}
+
+// agentHasUsableAuth reports whether the agent has authentication we can observe
+// — an API-key env var, an auth credential file (or macOS Keychain entry), or an
+// auth hint (e.g. a local model server). It reuses the same envsetup checks as
+// the create-time missing-auth gate (prepare_dirs.checkAgentAuth) so there is one
+// auth-presence convention. `yoloai run` uses it to decide headless vs the
+// interactive TTY flow (D101): headless only when auth is present, so the agent
+// can't stall on a login prompt in a headless pane. Agents that require no API
+// key (test/idle) report true via HasAnyAPIKey.
+func agentHasUsableAuth(agentDef *agent.Definition, configEnv map[string]string, layout config.Layout) bool {
+	spec := envspec.BuildEnvSpec(agentDef)
+	return envsetup.HasAnyAPIKey(spec, layout) ||
+		envsetup.HasAnyAuthFile(spec, layout.HomeDir) ||
+		envsetup.HasAnyAuthHint(spec, configEnv, layout)
 }
 
 // buildLifecycleConfig builds the lifecycle config if the archetype requires it.
@@ -656,7 +697,9 @@ func resolveUsernsMode(rt runtime.Backend, workdir *DirSpec, auxDirs []*DirSpec,
 }
 
 // buildEnvironment constructs the Environment struct for a new sandbox.
-func buildEnvironment(opts Options, pr *profileResult, workdir *DirSpec, baselineSHA string, dirEnvs []store.DirEnvironment, hasPrompt bool, networkMode string, networkAllow []string, usernsMode string, hostFilesystem bool, archetypeStr string, backend runtime.BackendType, model string, mergedMounts []string) *store.Environment {
+// Network policy (networkMode/networkAllow) is no longer stored here (D90);
+// it goes to the sibling netpolicy.json via writeStatFiles.
+func buildEnvironment(opts Options, pr *profileResult, workdir *DirSpec, baselineSHA string, dirEnvs []store.DirEnvironment, hasPrompt bool, usernsMode string, hostFilesystem bool, archetypeStr string, backend runtime.BackendType, mergedMounts []string) *store.Environment {
 	return &store.Environment{
 		YoloaiVersion: opts.Version,
 		Name:          opts.Name,
@@ -664,8 +707,6 @@ func buildEnvironment(opts Options, pr *profileResult, workdir *DirSpec, baselin
 		BackendType:   backend,
 		Profile:       pr.name,
 		ImageRef:      pr.imageRef,
-		AgentType:     opts.Agent,
-		Model:         model,
 		Dirs: append([]store.DirEnvironment{{
 			HostPath:     workdir.Path,
 			MountPath:    launch.OverlayOrResolvedMountPath(workdir),
@@ -674,8 +715,6 @@ func buildEnvironment(opts Options, pr *profileResult, workdir *DirSpec, baselin
 			InceptionSHA: baselineSHA,
 		}}, dirEnvs...),
 		HasPrompt:          hasPrompt,
-		NetworkMode:        networkMode,
-		NetworkAllow:       networkAllow,
 		Ports:              opts.Ports,
 		Resources:          pr.resources,
 		Mounts:             mergedMounts,
@@ -694,9 +733,22 @@ func buildEnvironment(opts Options, pr *profileResult, workdir *DirSpec, baselin
 
 // writeStatFiles writes all state files for the new sandbox (meta, sandbox-state,
 // prompt, logs, agent-status, runtime-config, context).
-func writeStatFiles(sandboxDir string, meta *store.Environment, agentDef *agent.Definition, agentFilesInitialized bool, hasPrompt bool, promptText string, configData []byte, perms store.IsolationPerms) error {
+// networkMode and networkAllow are passed explicitly because meta no longer
+// carries them (D90); they go to netpolicy.json. agentType/model go to agent.json.
+func writeStatFiles(sandboxDir string, meta *store.Environment, agentDef *agent.Definition, agentType, model string, networkMode string, networkAllow []string, agentFilesInitialized bool, hasPrompt bool, promptText string, configData []byte, perms store.IsolationPerms) error {
 	if err := store.SaveEnvironment(sandboxDir, meta); err != nil {
 		return err
+	}
+	// agent.json is the inside-process config, kept out of the substrate record
+	// (Q104). agentType/model are passed in because meta no longer carries them.
+	if err := agentcfg.Save(sandboxDir, &agentcfg.AgentConfig{AgentType: agentType, Model: model}); err != nil {
+		return err
+	}
+	// netpolicy.json is the network policy record, kept out of the substrate
+	// record (D90). networkMode/networkAllow are passed in because meta no
+	// longer carries them.
+	if err := netpolicycfg.Save(sandboxDir, &netpolicycfg.Netpolicy{Mode: networkMode, Allow: networkAllow}); err != nil {
+		return fmt.Errorf("write %s: %w", netpolicycfg.NetpolicyFile, err)
 	}
 	if err := store.SaveSandboxState(sandboxDir, &store.SandboxState{
 		AgentFilesInitialized: agentFilesInitialized,
@@ -733,11 +785,10 @@ func writeStatFiles(sandboxDir string, meta *store.Environment, agentDef *agent.
 }
 
 // buildContainerConfig creates the config.json content.
-// agentLaunchPrefix is the backend-specific wrap prefix that PrepareAgentCommand
-// would prepend (e.g. a 'PATH="..." ' prefix for Tart);
-// computed once by the caller, stored here as single source of truth for the
-// agent-command wrap (W1a of the architecture remediation plan).
-func buildContainerConfig(layout config.Layout, agentDef *agent.Definition, agentCommand string, agentLaunchPrefix string, tmuxConf string, workingDir string, debug bool, networkIsolated bool, allowedDomains []string, passthrough []string, overlayMounts []runtimeconfig.OverlayMountConfig, setupCommands []string, autoCommitInterval int, copyDirs []string, sandboxName string, tmuxSocket string, isolation runtime.IsolationMode, vscodeTunnel bool, vscodeTunnelName string, lifecycle *runtimeconfig.LifecycleConfig) ([]byte, error) {
+// agentLaunchPrefix is the backend's constant launch wrap (launch.AgentLaunchPrefix;
+// e.g. a 'PATH=...' prefix for Tart), computed once by the caller and stored here as the
+// single source of truth for the agent-command wrap (W1a of the architecture remediation plan).
+func buildContainerConfig(layout config.Layout, agentDef *agent.Definition, agentCommand string, agentLaunchPrefix string, tmuxConf string, workingDir string, debug bool, networkIsolated bool, allowedDomains []string, passthrough []string, overlayMounts []runtimeconfig.OverlayMountConfig, setupCommands []string, autoCommitInterval int, copyDirs []string, sandboxName string, tmuxSocket string, isolation runtime.IsolationMode, vscodeTunnel bool, vscodeTunnelName string, lifecycle *runtimeconfig.LifecycleConfig, headless bool) ([]byte, error) {
 	var stateDirName string
 	if agentDef.StateDir != "" {
 		stateDirName = filepath.Base(agentDef.StateDir)
@@ -749,6 +800,7 @@ func buildContainerConfig(layout config.Layout, agentDef *agent.Definition, agen
 		HostGID:            layout.HostGID,
 		AgentCommand:       agentCommand,
 		AgentLaunchPrefix:  agentLaunchPrefix,
+		Headless:           headless,
 		StartupDelay:       int(agentDef.StartupDelay / time.Millisecond),
 		ReadyPattern:       agentDef.Idle.ReadyPattern,
 		SubmitSequence:     agentDef.SubmitSequence,
@@ -772,7 +824,7 @@ func buildContainerConfig(layout config.Layout, agentDef *agent.Definition, agen
 		},
 		IdleMode:         invocation.ResolveIdleMode(agentDef.Idle),
 		Detectors:        invocation.ResolveDetectors(agentDef.Idle),
-		FallToShell:      invocation.ResolveFallToShell(agentDef.Idle),
+		FallToShell:      invocation.ResolveFallToShell(agentDef.Idle, headless),
 		ResumeCmd:        invocation.ResolveResumeCommand(agentCommand, agentDef.ResumeFlag),
 		SandboxName:      sandboxName,
 		TmuxSocket:       tmuxSocket,

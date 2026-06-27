@@ -8,15 +8,15 @@ package yoloai
 import (
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/orchestrator"
-	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/store"
+	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/store"
 )
 
 // BackendType names a runtime backend. Open-set typed string —
 // the constants document the backends that ship with yoloai;
 // custom builds can register additional names via runtime.Register.
 //
-// Re-exported (type alias) from internal/runtime so embedders can use
+// Re-exported (type alias) from runtime so embedders can use
 // the type without importing internal packages. Q-Y resolution
 // (2026-05-25): public API fields like ClientCreateOptions.BackendType and
 // SystemCheckOptions.BackendType take this typed name rather than plain string,
@@ -89,7 +89,7 @@ const (
 // components. Closed set — adding a new source requires both a
 // constant here and a producer in the implementation.
 //
-// Re-exported (type alias) from internal/store. Q-Y design
+// Re-exported (type alias) from store. Q-Y design
 // promised this exposure at the yoloai root so future AgentLogsOptions.Sources
 // callers don't need to reach into internal packages to construct or
 // switch over a typed source list.
@@ -105,7 +105,7 @@ const (
 // MountSpec describes a bind mount from the host filesystem into the
 // sandbox. HostPath is the path on the host, ContainerPath is the path
 // inside the sandbox, ReadOnly controls write access. Re-exported
-// (type alias) from internal/runtime so embedders constructing
+// (type alias) from runtime so embedders constructing
 // SandboxCreateOptions mount specs (when that field lands) don't need to reach
 // into internal packages. Q-Y.
 //
@@ -119,7 +119,7 @@ type MountSpec = runtime.MountSpec
 
 // PortMapping describes a host-to-sandbox port forwarding. HostPort and
 // ContainerPort are integer port numbers; Protocol defaults to "tcp"
-// when empty. Re-exported (type alias) from internal/runtime. Q-Y.
+// when empty. Re-exported (type alias) from runtime. Q-Y.
 //
 // Naming mirrors MountSpec above: direction in the prefix (Host /
 // Container), kind in the suffix (Path / Port). Without the type-
@@ -133,7 +133,7 @@ type PortMapping = runtime.PortMapping
 // constants below are the only valid values. Empty value
 // (IsolationModeDefault) means "use the backend's BaseMode".
 //
-// Re-exported (type alias) from internal/runtime. F11 (2026-05-27)
+// Re-exported (type alias) from runtime. F11 (2026-05-27)
 // established this typing so public fields like
 // SystemCheckOptions.Isolation and SandboxCreateOptions.Isolation take a
 // closed-set typed value, exhaustive-checked at every switch.

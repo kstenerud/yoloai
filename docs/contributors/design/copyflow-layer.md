@@ -128,4 +128,4 @@ N applies) — never merging.
 - **Handle name** — `TrackedDir` vs `Workspace` vs `Review`. TBD.
 - **The config/persistence helper** (foundation, generalizes D85) — copyflow's baseline record rides
   on it; its home/name is the next session's first task.
-- Drop copyflow's apparent `internal/runtime/docker` import (no symbol usage found — likely indirect).
+- Drop copyflow's apparent `runtime/docker` import (no symbol usage found — likely indirect).

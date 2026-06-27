@@ -7,9 +7,10 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/kstenerud/yoloai/internal/copyflow"
+	"github.com/kstenerud/yoloai/copyflow"
 	"github.com/kstenerud/yoloai/internal/git"
-	"github.com/kstenerud/yoloai/internal/store"
+	"github.com/kstenerud/yoloai/internal/orchestrator/agentcfg"
+	"github.com/kstenerud/yoloai/store"
 )
 
 // LoadEnvironment reads a sandbox's environment.json after confirming the
@@ -21,6 +22,20 @@ func (e *Engine) LoadEnvironment(name string) (*store.Environment, error) {
 		return nil, err
 	}
 	return store.LoadEnvironment(sandboxDir)
+}
+
+// LoadAgentConfig reads a sandbox's agent.json — the inside-process config
+// (agent type + model) that Q104 splits out of the substrate environment record.
+// It confirms the sandbox directory exists, then reads the sibling doc. A sandbox
+// with no agent.json yields a zero-value config (agentcfg.Load is soft on a
+// missing file), so callers must tolerate empty fields for records not yet
+// carrying it.
+func (e *Engine) LoadAgentConfig(name string) (*agentcfg.AgentConfig, error) {
+	sandboxDir := e.layout.SandboxDir(name)
+	if err := store.RequireSandboxDir(sandboxDir); err != nil {
+		return nil, err
+	}
+	return agentcfg.Load(sandboxDir)
 }
 
 // GenerateWorkingDiff returns the copy-mode working diff (committed changes
@@ -49,6 +64,31 @@ func (e *Engine) GenerateOverlayDiff(ctx context.Context, name string, dirHostPa
 		Layout:      e.layout,
 		Stat:        stat,
 		NameOnly:    nameOnly,
+		DirHostPath: dirHostPath,
+	})
+}
+
+// GenerateWorkingChanges returns the structured per-file change summary for
+// copy/rw workdirs. Best-effort backend open: a nil runtime falls back to the
+// host-git path.
+func (e *Engine) GenerateWorkingChanges(ctx context.Context, name string, dirHostPath string, paths []string) ([]copyflow.FileChange, error) {
+	e.TryEnsure(ctx)
+	return copyflow.GenerateChanges(ctx, copyflow.DiffOptions{
+		Name:        name,
+		Layout:      e.layout,
+		Paths:       paths,
+		Runtime:     e.runtime,
+		DirHostPath: dirHostPath,
+	})
+}
+
+// GenerateOverlayChanges returns the structured per-file change summary for an
+// :overlay-mode workdir (requires the running container).
+func (e *Engine) GenerateOverlayChanges(ctx context.Context, name string, dirHostPath string) ([]copyflow.FileChange, error) {
+	e.TryEnsure(ctx)
+	return copyflow.GenerateOverlayChanges(ctx, e.runtime, copyflow.DiffOptions{
+		Name:        name,
+		Layout:      e.layout,
 		DirHostPath: dirHostPath,
 	})
 }

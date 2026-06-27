@@ -94,17 +94,25 @@ func ValidateModel(agentDef *agent.Definition, resolvedModel string, originalMod
 
 // BuildAgentCommand constructs the full agent command string for config.json.
 // Arg priority (left to right, last flag wins): base cmd → model flag → agentArgs → passthrough.
-func BuildAgentCommand(agentDef *agent.Definition, model string, prompt string, agentArgs string, passthrough []string) string {
+//
+// headless forces the HeadlessCmd branch (prompt baked into the launch command,
+// the agent's own -p mode) even for agents that default to interactive delivery —
+// this is what `yoloai run` sets. An agent whose own PromptMode is headless takes
+// that branch regardless. Either way the branch is only taken when there is a
+// prompt to bake in; with no prompt it falls back to the interactive command.
+func BuildAgentCommand(agentDef *agent.Definition, model string, prompt string, agentArgs string, passthrough []string, headless bool) string {
 	var cmd string
 
-	if agentDef.PromptMode == agent.PromptModeHeadless && prompt != "" {
+	if (headless || agentDef.PromptMode == agent.PromptModeHeadless) && prompt != "" {
 		escaped := shellEscapeForDoubleQuotes(prompt)
 		cmd = strings.ReplaceAll(agentDef.HeadlessCmd, "PROMPT", escaped)
 	} else {
 		cmd = agentDef.InteractiveCmd
-		if model != "" && agentDef.ModelFlag != "" {
-			cmd += " " + agentDef.ModelFlag + " " + model
-		}
+	}
+	// The model flag applies to both delivery modes — a headless `run` still
+	// honors --model (e.g. `claude -p "…" --model opus`).
+	if model != "" && agentDef.ModelFlag != "" {
+		cmd += " " + agentDef.ModelFlag + " " + model
 	}
 
 	if agentArgs != "" {
@@ -222,13 +230,13 @@ func ResolveIdleMode(idle agent.IdleSupport) string {
 //
 // It is the **persistent-PTY gate**: fall-to-shell only makes sense for a
 // persistent interactive session that has a terminal to drop into (session-layer.md
-// gates it on lifetime × SessionKind — one-shot/`-p` and Stream sessions exit=done
-// with no shell). Every agent yoloAI launches today runs as a persistent PTY in the
-// tmux pane, so the gate is universally on. When the session-layer carve lands the
-// `lifetime` axis, that axis drives this gate (off for one-shot); the field stays as
-// its home rather than being removed and re-added.
-func ResolveFallToShell(_ agent.IdleSupport) bool {
-	return true
+// gates it on lifetime × SessionKind). A headless `run` (D100) has no terminal to
+// drop into — the agent runs its own -p mode and the task ends when it exits — so
+// the gate is off, letting the pane die so the monitor's pane-death detection
+// records the authoritative `done`+exit-code (Tier-3). Interactive sessions keep
+// the gate on (a persistent PTY in the tmux pane).
+func ResolveFallToShell(_ agent.IdleSupport, headless bool) bool {
+	return !headless
 }
 
 // ReadPrompt reads the prompt from --prompt, --prompt-file, or stdin ("-").

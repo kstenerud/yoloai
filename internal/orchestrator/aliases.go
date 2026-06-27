@@ -5,7 +5,7 @@ package orchestrator
 import (
 	"github.com/kstenerud/yoloai/internal/orchestrator/create"
 	"github.com/kstenerud/yoloai/internal/orchestrator/state"
-	"github.com/kstenerud/yoloai/internal/store"
+	"github.com/kstenerud/yoloai/store"
 )
 
 // CreateOptions re-exports create.Options so external callers that reference
@@ -33,7 +33,7 @@ type DirSpec = state.DirSpec
 type DirMode = store.DirMode
 
 // Re-exported DirMode constants. Canonical definitions in
-// internal/store/dirmode.go.
+// store/dirmode.go.
 const (
 	DirModeCopy    = store.DirModeCopy
 	DirModeOverlay = store.DirModeOverlay

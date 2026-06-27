@@ -16,7 +16,7 @@ func TestCreateTag_Lightweight(t *testing.T) {
 	gitAdd(t, dir, ".")
 	gitCommit(t, dir, "init")
 
-	g := NewHostWithEnv(testEnv())
+	g := NewTestHostWithEnv(testEnv())
 	sha, err := g.HeadSHA(ctx, dir)
 	require.NoError(t, err)
 
@@ -35,7 +35,7 @@ func TestCreateTag_DuplicateFails(t *testing.T) {
 	gitAdd(t, dir, ".")
 	gitCommit(t, dir, "init")
 
-	g := NewHostWithEnv(testEnv())
+	g := NewTestHostWithEnv(testEnv())
 	sha, err := g.HeadSHA(ctx, dir)
 	require.NoError(t, err)
 
@@ -55,7 +55,7 @@ func TestBuildSHAMapByMatching(t *testing.T) {
 	gitAdd(t, host, ".")
 	gitCommit(t, host, "shared subject")
 
-	g := NewHostWithEnv(testEnv())
+	g := NewTestHostWithEnv(testEnv())
 	hostSHA, err := g.HeadSHA(ctx, host)
 	require.NoError(t, err)
 

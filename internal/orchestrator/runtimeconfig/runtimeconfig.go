@@ -4,7 +4,7 @@
 package runtimeconfig
 
 import (
-	"github.com/kstenerud/yoloai/internal/runtime"
+	"github.com/kstenerud/yoloai/runtime"
 )
 
 // IdleSupport is the wire form of an agent's idle-detection capabilities as
@@ -48,11 +48,17 @@ type LifecycleConfig struct {
 // tmux config, socket, passthrough args, and ready/startup settings for
 // container restart and prompt delivery.
 type ContainerConfig struct {
-	SchemaVersion      int                  `json:"schema_version"`
-	HostUID            int                  `json:"host_uid"`
-	HostGID            int                  `json:"host_gid"`
-	AgentCommand       string               `json:"agent_command"`
-	AgentLaunchPrefix  string               `json:"agent_launch_prefix"`
+	SchemaVersion     int    `json:"schema_version"`
+	HostUID           int    `json:"host_uid"`
+	HostGID           int    `json:"host_gid"`
+	AgentCommand      string `json:"agent_command"`
+	AgentLaunchPrefix string `json:"agent_launch_prefix"`
+	// Headless, when true, means the agent runs in its own headless mode (the
+	// prompt is baked into AgentCommand, e.g. `claude -p`). The session-runner
+	// then skips deliver_prompt (nothing to inject) and FallToShell is off so the
+	// pane dies on exit → Tier-3 done detection (D100). Absent → off (interactive
+	// delivery). Additive optional field → no SchemaVersion bump.
+	Headless           bool                 `json:"headless,omitempty"`
 	StartupDelay       int                  `json:"startup_delay"`
 	ReadyPattern       string               `json:"ready_pattern"`
 	SubmitSequence     string               `json:"submit_sequence"`
@@ -80,10 +86,12 @@ type ContainerConfig struct {
 	// FallToShell, when true, launches the agent under the fall-to-shell wrapper
 	// (agent-run.sh, D96): on agent exit the wrapper records an authoritative
 	// `done` and keeps the pane alive as an interactive shell instead of letting
-	// it die. The persistent-PTY gate (invocation.ResolveFallToShell): on for every
-	// agent today, eventually driven off for one-shot sessions by the session-layer
-	// `lifetime` axis. Absent → off (back-compat for sandboxes created before the
-	// wrapper). Additive optional field → no SchemaVersion bump.
+	// it die. The persistent-PTY gate (invocation.ResolveFallToShell): on for
+	// interactive sessions, off for a headless run (D100) — a headless agent has
+	// no terminal to drop into, so the pane is left to die and the monitor's
+	// pane-death detection records the authoritative done+exit-code (Tier-3).
+	// Absent → off (back-compat for sandboxes created before the wrapper).
+	// Additive optional field → no SchemaVersion bump.
 	FallToShell bool `json:"fall_to_shell,omitempty"`
 	// ResumeCmd is the fall-to-shell resume command (D96 DD4): the agent's launch
 	// command plus its native resume flag (e.g. Claude "… --continue"), read by
@@ -99,8 +107,9 @@ type ContainerConfig struct {
 	Lifecycle        *LifecycleConfig      `json:"lifecycle,omitempty"`
 	// KeepaliveOnly, when true, brings the box up on a neutral agent-free
 	// keep-alive (`sleep infinity`) after the root setup, instead of launching
-	// the agent session — the S2 carve's agent-free substrate bring-up. The
-	// orchestrator does not set it yet (S2c flips it); it exists so the
-	// entrypoint can honor it.
+	// the agent session — the carve's agent-free substrate bring-up. The
+	// orchestrator sets it when routing the agent through Launch over a
+	// keepalive box (launch.startViaLaunch → patchKeepaliveOnly); the entrypoint
+	// honors it.
 	KeepaliveOnly bool `json:"keepalive_only,omitempty"`
 }

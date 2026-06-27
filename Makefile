@@ -10,7 +10,7 @@ LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.dat
 VENV := .venv
 MYPY := $(VENV)/bin/mypy
 PYTEST := $(VENV)/bin/pytest
-PY_REQ_LOCK := internal/runtime/monitor/tests/requirements-dev.lock
+PY_REQ_LOCK := runtime/monitor/tests/requirements-dev.lock
 
 # Resolve the Docker endpoint from the active docker context when DOCKER_HOST is
 # not already set. `docker context use` retargets the docker CLI, but the Go SDK
@@ -29,7 +29,7 @@ DOCKER_HOST_ENV := $(DOCKER_HOST)
 DOCKER_HOST_RESOLVED = $(if $(DOCKER_HOST_ENV),$(DOCKER_HOST_ENV),$(shell docker context inspect --format '{{.Endpoints.docker.Host}}' 2>/dev/null))
 integration e2e base-image smoketest smoketest-full: export DOCKER_HOST = $(DOCKER_HOST_RESOLVED)
 
-.PHONY: build test fmt lint vet-tagged tidy-check govulncheck hadolint actionlint check cover integration e2e integration-podman integration-containerd integration-apple integration-seatbelt integration-tart python-test python-typecheck ensure-python-venv setup-dev-python smoketest smoketest-full releasetest setcap clean
+.PHONY: build test fmt lint vet-tagged crosscheck tidy-check govulncheck hadolint actionlint check cover integration e2e integration-podman integration-containerd integration-apple integration-seatbelt integration-tart python-test python-typecheck ensure-python-venv setup-dev-python smoketest smoketest-full releasetest setcap clean
 
 # Always invoke `go build` and let it decide whether to relink. `go build` does
 # complete, authoritative dependency tracking — crucially including //go:embed'd
@@ -74,9 +74,9 @@ govulncheck:
 ## CI installs hadolint and treats this target as required.
 hadolint:
 	@if command -v hadolint >/dev/null 2>&1; then \
-		hadolint internal/runtime/docker/resources/Dockerfile; \
+		hadolint runtime/docker/resources/Dockerfile; \
 	elif docker info >/dev/null 2>&1; then \
-		docker run --rm -i hadolint/hadolint < internal/runtime/docker/resources/Dockerfile; \
+		docker run --rm -i hadolint/hadolint < runtime/docker/resources/Dockerfile; \
 	else \
 		echo "hadolint: skipping (install hadolint or start Docker to enable)"; \
 	fi
@@ -93,8 +93,20 @@ actionlint:
 vet-tagged:
 	go vet -tags 'integration e2e' ./...
 
+## crosscheck: cross-compile + typecheck the whole tree (incl. the cmd/yoloai
+## binary AND every _test.go) for macOS — the non-host platform. `make check`
+## otherwise only builds for the host (linux), so a darwin-only break — a backend
+## whose Go deps build only on linux, an unconditional import of one, a //go:build
+## typo — used to surface only when someone ran `make releasetest` on a Mac.
+## `go vet` cross-compiles every package and test file for darwin without
+## executing them (a darwin binary can't run on linux), so it stays hermetic and
+## fast. Windows is not a target (the project runs under WSL = linux; docker/tart
+## are //go:build !windows), so only darwin is cross-checked.
+crosscheck:
+	GOOS=darwin GOARCH=arm64 go vet ./...
+
 ## check: run all CI checks locally (same as PR checks)
-check: lint vet-tagged tidy-check hadolint actionlint test python-test
+check: lint vet-tagged crosscheck tidy-check hadolint actionlint test python-test
 
 ## ensure-python-venv: provision the uv-managed venv on demand (idempotent).
 ## When uv is present this syncs the lockfile-pinned tools into .venv; when uv
@@ -111,7 +123,7 @@ ensure-python-venv:
 ## python-test: run pytest from the uv-managed venv (skip when venv absent)
 python-test: python-typecheck
 	@if [ -x $(PYTEST) ]; then \
-		$(PYTEST) internal/runtime/monitor/tests/ -v; \
+		$(PYTEST) runtime/monitor/tests/ -v; \
 		$(PYTEST) scripts/tests/ -v; \
 	else \
 		echo "Python tests skipped (install uv to enable: https://docs.astral.sh/uv/)"; \
@@ -123,7 +135,7 @@ python-test: python-typecheck
 ## top-level "conftest" module if checked in one pass.
 python-typecheck: ensure-python-venv
 	@if [ -x $(MYPY) ]; then \
-		$(MYPY) --strict internal/runtime/monitor/setup_helpers.py internal/runtime/monitor/tmux_io.py internal/runtime/monitor/tests/; \
+		$(MYPY) --strict runtime/monitor/setup_helpers.py runtime/monitor/tmux_io.py runtime/monitor/tests/; \
 		$(MYPY) --strict scripts/smoke_test.py scripts/govulncheck.py scripts/tests/; \
 	else \
 		echo "Python type-check skipped (install uv to enable: https://docs.astral.sh/uv/)"; \
@@ -159,7 +171,7 @@ base-image: build
 integration:
 	@if docker info >/dev/null 2>&1; then \
 		$(MAKE) base-image && \
-		go test -tags=integration -v -count=1 -timeout=10m ./internal/orchestrator/ ./internal/runtime/docker/ ./internal/cli/; \
+		go test -tags=integration -v -count=1 -timeout=10m ./internal/orchestrator/ ./runtime/docker/ ./internal/cli/; \
 	else \
 		echo "Docker unavailable — skipping Docker integration tests"; \
 	fi
@@ -175,7 +187,7 @@ e2e: build
 ## integration-podman: run Podman integration tests (requires Podman with socket)
 ##
 ## Two suites run under YOLOAI_TEST_BACKEND=podman:
-##   1. ./internal/runtime/podman/                    — backend-internal tests
+##   1. ./runtime/podman/                    — backend-internal tests
 ##   2. ./internal/cli/ launch/lifecycle subset — CLI flow against podman
 ##      Catches sandbox-setup.py regressions that only surface on a non-Docker
 ##      runtime (CI's Docker job won't notice; that's the point of the matrix).
@@ -183,7 +195,7 @@ integration-podman: build
 	@echo "Building base image with Podman..."
 	@./$(BINARY) system build --backend=podman
 	@echo "Running Podman runtime tests..."
-	@go test -tags=integration -v -count=1 -timeout=10m ./internal/runtime/podman/
+	@go test -tags=integration -v -count=1 -timeout=10m ./runtime/podman/
 	@echo "Running CLI lifecycle subset against Podman..."
 	@YOLOAI_TEST_BACKEND=podman go test -tags=integration -v -count=1 -timeout=10m \
 		-run '^TestCLI_(StartStop|StartAfterDone)$$' ./internal/cli/
@@ -194,7 +206,7 @@ integration-podman: build
 ## everywhere. On Linux, skipIfNotAvailable skips cleanly when the containerd
 ## socket is absent/unconnectable or the host can't create network namespaces.
 integration-containerd:
-	go test -tags=integration -v -count=1 -timeout=10m ./internal/runtime/containerd/
+	go test -tags=integration -v -count=1 -timeout=10m ./runtime/containerd/
 
 ## integration-apple: run Apple `container` backend integration tests (requires
 ## macOS 26 + Apple Silicon + the `container` CLI). On any other host the suite
@@ -202,13 +214,13 @@ integration-containerd:
 ## YOLOAI_TEST_APPLE_BASE=1 (slow); the conformance + lifecycle tests use a tiny
 ## alpine sleep image and run whenever the backend is available.
 integration-apple:
-	go test -tags=integration -v -count=1 -timeout=15m ./internal/runtime/apple/
+	go test -tags=integration -v -count=1 -timeout=15m ./runtime/apple/
 
 ## integration-seatbelt: run Seatbelt integration tests (requires macOS with sandbox-exec)
 ## On non-macOS platforms the tests skip cleanly via TestMain (exit 0).
 ## Pair-runs are encouraged on macOS as part of releasetest on Apple Silicon machines.
 integration-seatbelt:
-	go test -tags=integration -v -count=1 -timeout=5m ./internal/runtime/seatbelt/
+	go test -tags=integration -v -count=1 -timeout=5m ./runtime/seatbelt/
 
 ## integration-tart: run Tart integration tests (requires macOS with Apple Silicon + tart).
 ## On platforms without tart the tests skip cleanly via TestMain (exit 0).
@@ -225,7 +237,7 @@ integration-tart:
 		echo "Building tart base image for the conformance suite..." && \
 		./$(BINARY) system build --backend tart; \
 	fi
-	go test -tags=integration -v -count=1 -timeout=40m ./internal/runtime/tart/
+	go test -tags=integration -v -count=1 -timeout=40m ./runtime/tart/
 
 ## smoketest: run base-tier smoke tests (docker + containerd-vm / tart)
 ## VM backends require root (CAP_SYS_ADMIN + write to /var/run/netns/).

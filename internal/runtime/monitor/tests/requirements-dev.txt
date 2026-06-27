@@ -1,9 +1,0 @@
-# Human-edited source for the Python dev tools (pytest, mypy) used to test
-# and type-check the sandbox-side scripts in runtime/monitor/ and the smoke
-# harness. These loose constraints are compiled into requirements-dev.lock
-# (exact, hashed pins) which is what `make setup-dev-python` actually installs
-# into the uv-managed .venv. After editing this file, regenerate the lock:
-#   uv pip compile --generate-hashes internal/runtime/monitor/tests/requirements-dev.txt \
-#     -o internal/runtime/monitor/tests/requirements-dev.lock
-pytest>=8,<9
-mypy>=1.10,<2

@@ -8,8 +8,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/kstenerud/yoloai/internal/store"
 	"github.com/kstenerud/yoloai/internal/workspace"
+	"github.com/kstenerud/yoloai/store"
 )
 
 // CloneOptions configures a sandbox clone operation. Overwriting a pre-existing

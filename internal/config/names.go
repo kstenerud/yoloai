@@ -61,7 +61,7 @@ func ParseSandboxName(name string) (SandboxName, error) {
 		return "", yoerrors.NewUsageError("invalid sandbox name: must be at most %d characters (got %d)", MaxNameLength, len(name))
 	}
 	if !sandboxNameRe.MatchString(name) {
-		return "", yoerrors.NewUsageError("invalid sandbox name %q: must be alphanumeric segments joined by single '.', '_', or '-' (no leading, trailing, or repeated separators)", name)
+		return "", yoerrors.NewUsageError("invalid sandbox name %q: must be alphanumeric segments joined by single '.', '_', or '-' (no leading, trailing, or repeated separators), e.g. \"my-box\" or \"feature_2\"", name)
 	}
 	return SandboxName(name), nil
 }

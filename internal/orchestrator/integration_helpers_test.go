@@ -16,8 +16,8 @@ import (
 	"github.com/kstenerud/yoloai/internal/orchestrator/create"
 	"github.com/kstenerud/yoloai/internal/orchestrator/lifecycle"
 	"github.com/kstenerud/yoloai/internal/orchestrator/state"
-	dockerrt "github.com/kstenerud/yoloai/internal/runtime/docker"
 	"github.com/kstenerud/yoloai/internal/testutil"
+	dockerrt "github.com/kstenerud/yoloai/runtime/docker"
 	"github.com/stretchr/testify/require"
 )
 

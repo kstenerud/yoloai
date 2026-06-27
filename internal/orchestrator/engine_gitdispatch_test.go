@@ -28,8 +28,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kstenerud/yoloai/internal/config"
-	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/store"
+	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/store"
 )
 
 // gitDispatchRec records the git invocations a GitExecer backend receives.
@@ -123,7 +123,6 @@ func seedCopySandbox(t *testing.T, layout config.Layout, name string) {
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "work"), 0750))
 	meta := &store.Environment{
 		Name:        name,
-		AgentType:   "claude",
 		BackendType: "gitdispatchmock",
 		CreatedAt:   time.Now(),
 		Dirs: []store.DirEnvironment{{

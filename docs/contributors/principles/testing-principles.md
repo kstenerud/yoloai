@@ -104,7 +104,7 @@ Threshold: every function that can fail has at least one test for each failure m
 ### Worked examples
 
 - `TestCLI_StartAfterDone` (commit `c10d6eb`) — tests the behaviour when `start` is called on a sandbox that's already finished. The error case.
-- Sandbox name validation tests (`internal/store/name_test.go`) cover the path-traversal cases, the empty case, the too-long case, the invalid-characters case. The error inputs are the test set.
+- Sandbox name validation tests (`store/name_test.go`) cover the path-traversal cases, the empty case, the too-long case, the invalid-characters case. The error inputs are the test set.
 - Containerd `GitExec` returns `*runtime.ExecError` on non-zero exit (commit `8749864`, 2026-05-21): the failure-mode contract is tested explicitly. Before the fix, error-path callers received the wrong type and couldn't inspect the error correctly.
 - Integration tests include `daemon-not-running`, `sandbox-not-found`, `apply-with-no-changes` cases. These are the failure modes that bite in production.
 - The `:rw`-on-dirty-repo warning has a dedicated test (`commit-aware diff and selective apply`, `ca0b8e4`): the warning path is part of the contract.
@@ -341,14 +341,14 @@ Threshold: if the behaviour under test is yoloAI code, give it explicit inputs:
 - For stdin-driven paths, pass an `io.Reader` (e.g. `strings.NewReader(...)`); do not swap `os.Stdin`.
 - For `${VAR}` expansion, set `layout.Env`; do not `t.Setenv`.
 
-The **one** legitimate `t.Setenv("HOME", …)` is isolating a HOME-reading *subprocess*: `git` reads `$HOME/.gitconfig` and `$HOME/.config/git`, so tests that spawn real git (`internal/workspace/*_test.go`, `internal/copyflow/*_test.go`) set `HOME` to a temp dir to shield the test from the developer's git config. That swap is load-bearing — keep it (equivalently, `GIT_CONFIG_GLOBAL`). The other legitimate case is a test that deliberately exercises the CLI's `cliutil.Layout()` ambient-`$HOME` fallback.
+The **one** legitimate `t.Setenv("HOME", …)` is isolating a HOME-reading *subprocess*: `git` reads `$HOME/.gitconfig` and `$HOME/.config/git`, so tests that spawn real git (`internal/workspace/*_test.go`, `copyflow/*_test.go`) set `HOME` to a temp dir to shield the test from the developer's git config. That swap is load-bearing — keep it (equivalently, `GIT_CONFIG_GLOBAL`). The other legitimate case is a test that deliberately exercises the CLI's `cliutil.Layout()` ambient-`$HOME` fallback.
 
 ### Worked examples
 
 - `internal/orchestrator` unit tests build `config.NewLayout(filepath.Join(t.TempDir(), ".yoloai"))` and pass it through `WithLayout`; the `HOME` swap they once carried is vestigial after §12 and removed in D23's cleanup.
 - `ReadPrompt` takes an `io.Reader`; `TestReadPrompt_StdinDash` supplies `strings.NewReader("…")` instead of swapping the global `os.Stdin`.
 - `${VAR}` config-expansion tests pass an explicit env map / set `layout.Env` (`internal/config/config_test.go`, `pathutil_test.go`) rather than `t.Setenv`.
-- Load-bearing counter-example: `internal/copyflow/apply_test.go` keeps `t.Setenv("HOME", tmpDir)` because it runs real `git`; removing it would let the developer's `.gitconfig` leak into the test.
+- Load-bearing counter-example: `copyflow/apply_test.go` keeps `t.Setenv("HOME", tmpDir)` because it runs real `git`; removing it would let the developer's `.gitconfig` leak into the test.
 
 ### Cost-vs-benefit
 

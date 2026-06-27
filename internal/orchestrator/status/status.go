@@ -14,10 +14,12 @@ import (
 	"time"
 
 	"github.com/kstenerud/yoloai/internal/config"
-	"github.com/kstenerud/yoloai/internal/copyflow"
 	"github.com/kstenerud/yoloai/internal/git"
-	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/store"
+	"github.com/kstenerud/yoloai/internal/netpolicycfg"
+	"github.com/kstenerud/yoloai/internal/orchestrator/agentcfg"
+	"github.com/kstenerud/yoloai/internal/orchestrator/workprobe"
+	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/store"
 )
 
 // Status represents the current state of a sandbox.
@@ -50,9 +52,20 @@ const (
 // Info holds the combined metadata and live state for a sandbox.
 type Info struct {
 	Environment *store.Environment `json:"environment"`
-	Status      Status             `json:"status"`
-	AgentStatus AgentStatus        `json:"agent_status,omitempty"` // agent activity status (may be empty)
-	HasChanges  string             `json:"has_changes"`            // "yes", "no", "unknown" (stopped VM-local backend), or "-" (not applicable)
+	// AgentType and Model are the sandbox's inside-process config, read from
+	// agent.json (Q104 split them out of the substrate Environment record). They
+	// ride on Info — the aggregated read-model — rather than on Environment (the
+	// substrate view), alongside AgentStatus; an unmigrated record yields "".
+	AgentType string `json:"agent,omitempty"`
+	Model     string `json:"model,omitempty"`
+	// NetworkMode and NetworkAllow are the sandbox's network policy, read from
+	// netpolicy.json (D90 split them out of the substrate Environment record).
+	// They ride on Info — the aggregated read-model — rather than on Environment.
+	NetworkMode  string      `json:"network_mode,omitempty"`
+	NetworkAllow []string    `json:"network_allow,omitempty"`
+	Status       Status      `json:"status"`
+	AgentStatus  AgentStatus `json:"agent_status,omitempty"` // agent activity status (may be empty)
+	HasChanges   string      `json:"has_changes"`            // "yes", "no", "unknown" (stopped VM-local backend), or "-" (not applicable)
 	// DiskUsageBytes is the total size of the sandbox directory in bytes, or
 	// -1 when it could not be measured. Rendering to a human-readable string
 	// is the CLI's responsibility (see cliutil.FormatSize).
@@ -119,7 +132,7 @@ func ProbeWorkData(ctx context.Context, g *git.Git, sandboxDir string) (WorkData
 
 		// Copy mode: the work dir is the git repo itself.
 		if _, statErr := os.Stat(filepath.Join(workEntry, ".git")); statErr == nil {
-			if copyflow.DetectChanges(ctx, g, workEntry) == "yes" {
+			if workprobe.DetectChanges(ctx, g, workEntry) == "yes" {
 				return WorkDataPresent, "uncommitted changes in copied work dir"
 			}
 			// Clean tree, but without the baseline SHA from meta we can't
@@ -306,40 +319,69 @@ func InspectSandbox(ctx context.Context, layout config.Layout, rt runtime.Backen
 		diskUsageBytes = size
 	}
 
+	agentType, model := loadAgentIdentity(sandboxDir)
+	networkMode, networkAllow := loadNetworkPolicy(sandboxDir)
 	return &Info{
 		Environment:    meta,
+		AgentType:      agentType,
+		Model:          model,
+		NetworkMode:    networkMode,
+		NetworkAllow:   networkAllow,
 		Status:         status,
 		HasChanges:     detectWorkdirChanges(ctx, git.NewSandbox(layout, rt, name), sandboxDir, meta),
 		DiskUsageBytes: diskUsageBytes,
 	}, nil
 }
 
+// loadAgentIdentity reads a sandbox's inside-process config (agent.json) for the
+// read-model. Best-effort: a missing or unreadable agent.json yields empty
+// strings (an unmigrated pre-Q104 record, or a partial directory) — the agent
+// columns simply render blank rather than failing the whole inspection.
+func loadAgentIdentity(sandboxDir string) (agentType, model string) {
+	acfg, err := agentcfg.Load(sandboxDir)
+	if err != nil {
+		return "", ""
+	}
+	return acfg.AgentType, acfg.Model
+}
+
+// loadNetworkPolicy reads a sandbox's netpolicy.json for the read-model.
+// Best-effort: a missing or unreadable netpolicy.json yields zero values
+// (a sandbox with default, non-isolated networking writes no record).
+func loadNetworkPolicy(sandboxDir string) (mode string, allow []string) {
+	np, err := netpolicycfg.Load(sandboxDir)
+	if err != nil {
+		return "", nil
+	}
+	return np.Mode, np.Allow
+}
+
 // detectWorkdirChanges returns "yes", "no", "unknown", or "-" for a sandbox's
 // workdir and aux dirs. "unknown" means the working copy lives in a VM-local
 // backend (Tart) that is not running, so the probe can't reach it — the change
-// state genuinely can't be read from the host (see copyflow.HasUnappliedWorkVia).
+// state genuinely can't be read from the host (see workprobe.HasUnappliedWorkVia).
 func detectWorkdirChanges(ctx context.Context, g *git.Git, sandboxDir string, meta *store.Environment) string {
 	if meta.Workdir().Mode != "copy" && meta.Workdir().Mode != "overlay" {
 		return "-"
 	}
 	workDir := store.WorkDir(sandboxDir, meta.Workdir().HostPath)
-	switch copyflow.HasUnappliedWorkVia(ctx, g, workDir, meta.Workdir().BaselineSHA) {
-	case copyflow.WorkDirty:
+	switch workprobe.HasUnappliedWorkVia(ctx, g, workDir, meta.Workdir().BaselineSHA) {
+	case workprobe.WorkDirty:
 		return "yes"
-	case copyflow.WorkUnknown:
+	case workprobe.WorkUnknown:
 		return "unknown"
-	case copyflow.WorkClean:
+	case workprobe.WorkClean:
 	}
 	// workdir has no unapplied work — check aux dirs before reporting "no"
 	for _, d := range meta.AuxDirs() {
 		if d.Mode == "copy" || d.Mode == "overlay" {
 			auxWorkDir := store.WorkDir(sandboxDir, d.HostPath)
-			switch copyflow.HasUnappliedWorkVia(ctx, g, auxWorkDir, d.BaselineSHA) {
-			case copyflow.WorkDirty:
+			switch workprobe.HasUnappliedWorkVia(ctx, g, auxWorkDir, d.BaselineSHA) {
+			case workprobe.WorkDirty:
 				return "yes"
-			case copyflow.WorkUnknown:
+			case workprobe.WorkUnknown:
 				return "unknown"
-			case copyflow.WorkClean:
+			case workprobe.WorkClean:
 			}
 		}
 	}
@@ -365,10 +407,17 @@ func InspectSandboxWithBackend(ctx context.Context, layout config.Layout, rt run
 		diskUsageBytes = size
 	}
 
+	agentType, model := loadAgentIdentity(sandboxDir)
+	networkMode, networkAllow := loadNetworkPolicy(sandboxDir)
+
 	// If runtime is nil, return basic info with unavailable status
 	if rt == nil {
 		return &Info{
 			Environment:    meta,
+			AgentType:      agentType,
+			Model:          model,
+			NetworkMode:    networkMode,
+			NetworkAllow:   networkAllow,
 			Status:         StatusUnavailable,
 			HasChanges:     "-",
 			DiskUsageBytes: diskUsageBytes,
@@ -383,6 +432,10 @@ func InspectSandboxWithBackend(ctx context.Context, layout config.Layout, rt run
 
 	return &Info{
 		Environment:    meta,
+		AgentType:      agentType,
+		Model:          model,
+		NetworkMode:    networkMode,
+		NetworkAllow:   networkAllow,
 		Status:         status,
 		HasChanges:     detectWorkdirChanges(ctx, git.NewSandbox(layout, rt, name), sandboxDir, meta),
 		DiskUsageBytes: diskUsageBytes,

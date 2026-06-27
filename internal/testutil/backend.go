@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/kstenerud/yoloai/internal/config"
-	yrt "github.com/kstenerud/yoloai/internal/runtime"
+	yrt "github.com/kstenerud/yoloai/runtime"
 )
 
 // integrationBackendEnv selects the backend used by parametrized integration

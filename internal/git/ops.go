@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/kstenerud/yoloai/internal/fileutil"
-	"github.com/kstenerud/yoloai/internal/runtime"
+	"github.com/kstenerud/yoloai/runtime"
 )
 
 // ─── high-level ops ──────────────────────────────────────────────────────────
@@ -95,48 +95,17 @@ func (g *Git) StageUntracked(ctx context.Context, workDir string) error {
 
 // ─── diff ops ────────────────────────────────────────────────────────────────
 
-// CopyDiff generates a diff for a :copy mode work directory against a baseline
-// SHA. Stages untracked files first, then runs git diff.
-// Returns the diff text (empty string if there are no changes).
-func (g *Git) CopyDiff(ctx context.Context, workDir, baselineSHA string, paths []string, stat, nameOnly bool, pathPrefix string) (string, error) {
-	if err := g.StageUntracked(ctx, workDir); err != nil {
-		return "", err
-	}
-
-	args := []string{"diff"}
-	switch {
-	case nameOnly:
-		args = append(args, "--name-only")
-	case stat:
-		args = append(args, "--stat")
-	default:
-		args = append(args, "--binary")
-		if pathPrefix != "" {
-			args = append(args, "--src-prefix="+pathPrefix, "--dst-prefix="+pathPrefix)
-		}
-	}
-	args = append(args, baselineSHA)
-	if len(paths) > 0 {
-		args = append(args, "--")
-		args = append(args, paths...)
-	}
-
-	out, err := g.Run(ctx, workDir, args...)
-	if err != nil {
-		return "", fmt.Errorf("git diff: %w", err)
-	}
-	return strings.TrimRight(out, "\n"), nil
-}
-
 // RWDiff generates a diff for a :rw mode directory. Returns an empty string
 // (no error) when the directory is not a git repo.
-func (g *Git) RWDiff(ctx context.Context, workDir string, paths []string, stat, nameOnly bool) (string, error) {
+func (g *Git) RWDiff(ctx context.Context, workDir string, paths []string, stat, nameOnly, numstat bool) (string, error) {
 	if !IsGitRepo(workDir) {
 		return "", nil
 	}
 
 	args := []string{"diff"}
 	switch {
+	case numstat:
+		args = append(args, "--numstat")
 	case nameOnly:
 		args = append(args, "--name-only")
 	case stat:

@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sysexec"
 	"github.com/kstenerud/yoloai/internal/testutil"
+	"github.com/kstenerud/yoloai/runtime"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -184,7 +184,7 @@ func TestCheckPatch_CleanApply(t *testing.T) {
 
 	patch := generatePatch(t, dir, "file.txt", "old content\n", "new content\n")
 
-	err := NewHostWithEnv(testEnv()).CheckPatch(ctx, patch, dir, true)
+	err := NewTestHostWithEnv(testEnv()).CheckPatch(ctx, patch, dir, true)
 	assert.NoError(t, err)
 }
 
@@ -199,7 +199,7 @@ func TestCheckPatch_Conflict(t *testing.T) {
 	gitAdd(t, dir, "file.txt")
 	gitCommit(t, dir, "diverge")
 
-	err := NewHostWithEnv(testEnv()).CheckPatch(ctx, patch, dir, true)
+	err := NewTestHostWithEnv(testEnv()).CheckPatch(ctx, patch, dir, true)
 	assert.Error(t, err)
 }
 
@@ -211,7 +211,7 @@ func TestCheckPatch_NonGitDir(t *testing.T) {
 	targetDir := t.TempDir()
 	writeTestFile(t, targetDir, "file.txt", "old content\n")
 
-	err := NewHostWithEnv(testEnv()).CheckPatch(ctx, patch, targetDir, false)
+	err := NewTestHostWithEnv(testEnv()).CheckPatch(ctx, patch, targetDir, false)
 	assert.NoError(t, err)
 }
 
@@ -223,7 +223,7 @@ func TestApplyPatch_ApplyInGitRepo(t *testing.T) {
 
 	patch := generatePatch(t, dir, "file.txt", "old content\n", "new content\n")
 
-	err := NewHostWithEnv(testEnv()).ApplyPatch(ctx, patch, dir, true)
+	err := NewTestHostWithEnv(testEnv()).ApplyPatch(ctx, patch, dir, true)
 	require.NoError(t, err)
 
 	content, err := os.ReadFile(filepath.Join(dir, "file.txt")) //nolint:gosec // G304: test file path
@@ -239,7 +239,7 @@ func TestApplyPatch_NonGitDir(t *testing.T) {
 	targetDir := t.TempDir()
 	writeTestFile(t, targetDir, "file.txt", "old content\n")
 
-	err := NewHostWithEnv(testEnv()).ApplyPatch(ctx, patch, targetDir, false)
+	err := NewTestHostWithEnv(testEnv()).ApplyPatch(ctx, patch, targetDir, false)
 	require.NoError(t, err)
 
 	content, err := os.ReadFile(filepath.Join(targetDir, "file.txt")) //nolint:gosec // G304: test file path
@@ -257,14 +257,14 @@ func TestApplyPatch_ConflictReturnsError(t *testing.T) {
 	gitAdd(t, dir, "file.txt")
 	gitCommit(t, dir, "diverge")
 
-	err := NewHostWithEnv(testEnv()).ApplyPatch(ctx, patch, dir, true)
+	err := NewTestHostWithEnv(testEnv()).ApplyPatch(ctx, patch, dir, true)
 	assert.Error(t, err)
 }
 
 // ─── ApplyFormatPatch ────────────────────────────────────────────────────────
 
 func TestApplyFormatPatch_EmptyFilesList(t *testing.T) {
-	_, err := NewHostWithEnv(testEnv()).ApplyFormatPatch(ctx, "/nonexistent", nil, "/nonexistent")
+	_, err := NewTestHostWithEnv(testEnv()).ApplyFormatPatch(ctx, "/nonexistent", nil, "/nonexistent")
 	assert.NoError(t, err)
 }
 
@@ -289,7 +289,7 @@ func TestApplyFormatPatch_EmptyTargetRepo(t *testing.T) {
 	targetDir := t.TempDir()
 	initGitRepo(t, targetDir)
 
-	shaMap, err := NewHostWithEnv(testEnv()).ApplyFormatPatch(ctx, patchDir, relFiles, targetDir)
+	shaMap, err := NewTestHostWithEnv(testEnv()).ApplyFormatPatch(ctx, patchDir, relFiles, targetDir)
 	require.NoError(t, err)
 	assert.Len(t, shaMap, 1, "should have one SHA mapping")
 
@@ -302,7 +302,7 @@ func TestApplyFormatPatch_EmptyTargetRepo(t *testing.T) {
 
 func TestWithTempGitDir_CallsFn(t *testing.T) {
 	var calledWith string
-	err := NewHostWithEnv(testEnv()).withTempGitDir(ctx, func(tmpDir string) error {
+	err := NewTestHostWithEnv(testEnv()).withTempGitDir(ctx, func(tmpDir string) error {
 		calledWith = tmpDir
 		assert.True(t, IsGitRepo(tmpDir))
 		return nil
@@ -313,7 +313,7 @@ func TestWithTempGitDir_CallsFn(t *testing.T) {
 
 func TestWithTempGitDir_PropagatesError(t *testing.T) {
 	sentinel := fmt.Errorf("test sentinel error")
-	err := NewHostWithEnv(testEnv()).withTempGitDir(ctx, func(tmpDir string) error {
+	err := NewTestHostWithEnv(testEnv()).withTempGitDir(ctx, func(tmpDir string) error {
 		return sentinel
 	})
 	assert.ErrorIs(t, err, sentinel)
@@ -321,7 +321,7 @@ func TestWithTempGitDir_PropagatesError(t *testing.T) {
 
 func TestWithTempGitDir_CleansUp(t *testing.T) {
 	var capturedDir string
-	err := NewHostWithEnv(testEnv()).withTempGitDir(ctx, func(tmpDir string) error {
+	err := NewTestHostWithEnv(testEnv()).withTempGitDir(ctx, func(tmpDir string) error {
 		capturedDir = tmpDir
 		_, statErr := os.Stat(tmpDir)
 		require.NoError(t, statErr)
@@ -342,7 +342,7 @@ func TestRunGitApply_ValidPatch(t *testing.T) {
 
 	patch := generatePatch(t, dir, "file.txt", "old content\n", "new content\n")
 
-	err := NewHostWithEnv(testEnv()).runGitApply(ctx, dir, patch)
+	err := NewTestHostWithEnv(testEnv()).runGitApply(ctx, dir, patch)
 	assert.NoError(t, err)
 
 	content, err := os.ReadFile(filepath.Join(dir, "file.txt")) //nolint:gosec // G304: test file path
@@ -357,111 +357,15 @@ func TestRunGitApply_InvalidPatch(t *testing.T) {
 	gitAdd(t, dir, "dummy.txt")
 	gitCommit(t, dir, "initial")
 
-	err := NewHostWithEnv(testEnv()).runGitApply(ctx, dir, []byte("this is not a valid patch"))
+	err := NewTestHostWithEnv(testEnv()).runGitApply(ctx, dir, []byte("this is not a valid patch"))
 	assert.Error(t, err)
-}
-
-// ─── CopyDiff ────────────────────────────────────────────────────────────────
-
-func TestCopyDiff_NoChanges(t *testing.T) {
-	dir := t.TempDir()
-	initGitRepo(t, dir)
-	writeTestFile(t, dir, "file.txt", "hello\n")
-	gitAdd(t, dir, ".")
-	gitCommit(t, dir, "initial")
-
-	sha := headSHA(t, dir)
-	out, err := NewHostWithEnv(testEnv()).CopyDiff(ctx, dir, sha, nil, false, false, "")
-	require.NoError(t, err)
-	assert.Empty(t, out)
-}
-
-func TestCopyDiff_WithChanges(t *testing.T) {
-	dir := t.TempDir()
-	initGitRepo(t, dir)
-	writeTestFile(t, dir, "file.txt", "hello\n")
-	gitAdd(t, dir, ".")
-	gitCommit(t, dir, "initial")
-
-	sha := headSHA(t, dir)
-	writeTestFile(t, dir, "file.txt", "hello world\n")
-
-	out, err := NewHostWithEnv(testEnv()).CopyDiff(ctx, dir, sha, nil, false, false, "")
-	require.NoError(t, err)
-	assert.Contains(t, out, "hello world")
-}
-
-func TestCopyDiff_WithStat(t *testing.T) {
-	dir := t.TempDir()
-	initGitRepo(t, dir)
-	writeTestFile(t, dir, "file.txt", "hello\n")
-	gitAdd(t, dir, ".")
-	gitCommit(t, dir, "initial")
-
-	sha := headSHA(t, dir)
-	writeTestFile(t, dir, "file.txt", "hello world\n")
-
-	out, err := NewHostWithEnv(testEnv()).CopyDiff(ctx, dir, sha, nil, true, false, "")
-	require.NoError(t, err)
-	assert.Contains(t, out, "file.txt")
-	assert.Contains(t, out, "1 file changed")
-}
-
-func TestCopyDiff_WithPathFilter(t *testing.T) {
-	dir := t.TempDir()
-	initGitRepo(t, dir)
-	writeTestFile(t, dir, "a.txt", "a\n")
-	writeTestFile(t, dir, "b.txt", "b\n")
-	gitAdd(t, dir, ".")
-	gitCommit(t, dir, "initial")
-
-	sha := headSHA(t, dir)
-	writeTestFile(t, dir, "a.txt", "aaa\n")
-	writeTestFile(t, dir, "b.txt", "bbb\n")
-
-	out, err := NewHostWithEnv(testEnv()).CopyDiff(ctx, dir, sha, []string{"a.txt"}, false, false, "")
-	require.NoError(t, err)
-	assert.Contains(t, out, "a.txt")
-	assert.NotContains(t, out, "b.txt")
-}
-
-func TestCopyDiff_NewUntrackedFile(t *testing.T) {
-	dir := t.TempDir()
-	initGitRepo(t, dir)
-	writeTestFile(t, dir, "existing.txt", "existing\n")
-	gitAdd(t, dir, ".")
-	gitCommit(t, dir, "initial")
-
-	sha := headSHA(t, dir)
-	writeTestFile(t, dir, "new.txt", "new content\n")
-
-	out, err := NewHostWithEnv(testEnv()).CopyDiff(ctx, dir, sha, nil, false, false, "")
-	require.NoError(t, err)
-	assert.Contains(t, out, "new.txt")
-}
-
-func TestCopyDiff_WithPathPrefix(t *testing.T) {
-	dir := t.TempDir()
-	initGitRepo(t, dir)
-	writeTestFile(t, dir, "file.txt", "hello\n")
-	gitAdd(t, dir, ".")
-	gitCommit(t, dir, "initial")
-
-	sha := headSHA(t, dir)
-	writeTestFile(t, dir, "file.txt", "hello world\n")
-
-	prefix := "/abs/path/to/project/"
-	out, err := NewHostWithEnv(testEnv()).CopyDiff(ctx, dir, sha, nil, false, false, prefix)
-	require.NoError(t, err)
-	assert.Contains(t, out, "--- /abs/path/to/project/file.txt")
-	assert.Contains(t, out, "+++ /abs/path/to/project/file.txt")
 }
 
 // ─── RWDiff ──────────────────────────────────────────────────────────────────
 
 func TestRWDiff_NotGitRepo(t *testing.T) {
 	dir := t.TempDir()
-	out, err := NewHostWithEnv(testEnv()).RWDiff(ctx, dir, nil, false, false)
+	out, err := NewTestHostWithEnv(testEnv()).RWDiff(ctx, dir, nil, false, false, false)
 	require.NoError(t, err)
 	assert.Empty(t, out)
 }
@@ -473,7 +377,7 @@ func TestRWDiff_NoChanges(t *testing.T) {
 	gitAdd(t, dir, ".")
 	gitCommit(t, dir, "initial")
 
-	out, err := NewHostWithEnv(testEnv()).RWDiff(ctx, dir, nil, false, false)
+	out, err := NewTestHostWithEnv(testEnv()).RWDiff(ctx, dir, nil, false, false, false)
 	require.NoError(t, err)
 	assert.Empty(t, out)
 }
@@ -487,7 +391,7 @@ func TestRWDiff_WithChanges(t *testing.T) {
 
 	writeTestFile(t, dir, "file.txt", "hello world\n")
 
-	out, err := NewHostWithEnv(testEnv()).RWDiff(ctx, dir, nil, false, false)
+	out, err := NewTestHostWithEnv(testEnv()).RWDiff(ctx, dir, nil, false, false, false)
 	require.NoError(t, err)
 	assert.Contains(t, out, "hello world")
 }
@@ -501,7 +405,7 @@ func TestRWDiff_WithStat(t *testing.T) {
 
 	writeTestFile(t, dir, "file.txt", "hello world\n")
 
-	out, err := NewHostWithEnv(testEnv()).RWDiff(ctx, dir, nil, true, false)
+	out, err := NewTestHostWithEnv(testEnv()).RWDiff(ctx, dir, nil, true, false, false)
 	require.NoError(t, err)
 	assert.Contains(t, out, "file.txt")
 }
@@ -517,7 +421,7 @@ func TestRWDiff_WithPathFilter(t *testing.T) {
 	writeTestFile(t, dir, "a.txt", "aaa\n")
 	writeTestFile(t, dir, "b.txt", "bbb\n")
 
-	out, err := NewHostWithEnv(testEnv()).RWDiff(ctx, dir, []string{"a.txt"}, false, false)
+	out, err := NewTestHostWithEnv(testEnv()).RWDiff(ctx, dir, []string{"a.txt"}, false, false, false)
 	require.NoError(t, err)
 	assert.Contains(t, out, "a.txt")
 	assert.NotContains(t, out, "b.txt")
@@ -532,7 +436,7 @@ func TestHeadSHA_ValidRepo(t *testing.T) {
 	gitAdd(t, dir, ".")
 	gitCommit(t, dir, "initial")
 
-	sha, err := NewHostWithEnv(testEnv()).HeadSHA(ctx, dir)
+	sha, err := NewTestHostWithEnv(testEnv()).HeadSHA(ctx, dir)
 	require.NoError(t, err)
 	assert.Len(t, sha, 40)
 }
@@ -541,12 +445,12 @@ func TestHeadSHA_NoCommits(t *testing.T) {
 	dir := t.TempDir()
 	initGitRepo(t, dir)
 
-	_, err := NewHostWithEnv(testEnv()).HeadSHA(ctx, dir)
+	_, err := NewTestHostWithEnv(testEnv()).HeadSHA(ctx, dir)
 	assert.Error(t, err)
 }
 
 func TestHeadSHA_NotGitRepo(t *testing.T) {
-	_, err := NewHostWithEnv(testEnv()).HeadSHA(ctx, t.TempDir())
+	_, err := NewTestHostWithEnv(testEnv()).HeadSHA(ctx, t.TempDir())
 	assert.Error(t, err)
 }
 
@@ -565,7 +469,7 @@ func TestRun_ExitOneReturnsExecError(t *testing.T) {
 	gitCommit(t, dir, "init")
 	writeTestFile(t, dir, "f", "v2")
 
-	_, err := NewHostWithEnv(testEnv()).Run(ctx, dir, "diff", "--quiet", "HEAD")
+	_, err := NewTestHostWithEnv(testEnv()).Run(ctx, dir, "diff", "--quiet", "HEAD")
 	require.Error(t, err)
 	var execErr *runtime.ExecError
 	require.True(t, errors.As(err, &execErr), "Run must return *runtime.ExecError on non-zero exit; got %T: %v", err, err)
@@ -593,7 +497,7 @@ func TestBaseline_CreatesRepoWithCommit(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, dir, "file.txt", "hello")
 
-	sha, err := NewHostWithEnv(testEnv()).Baseline(ctx, dir)
+	sha, err := NewTestHostWithEnv(testEnv()).Baseline(ctx, dir)
 	require.NoError(t, err)
 
 	assert.Len(t, sha, 40)
@@ -608,7 +512,7 @@ func TestBaseline_CreatesRepoWithCommit(t *testing.T) {
 func TestBaseline_EmptyDir(t *testing.T) {
 	dir := t.TempDir()
 
-	sha, err := NewHostWithEnv(testEnv()).Baseline(ctx, dir)
+	sha, err := NewTestHostWithEnv(testEnv()).Baseline(ctx, dir)
 	require.NoError(t, err)
 
 	assert.Len(t, sha, 40)
@@ -618,7 +522,7 @@ func TestBaseline_EmptyDir(t *testing.T) {
 func TestBaseline_SetsUserConfig(t *testing.T) {
 	dir := t.TempDir()
 
-	_, err := NewHostWithEnv(testEnv()).Baseline(ctx, dir)
+	_, err := NewTestHostWithEnv(testEnv()).Baseline(ctx, dir)
 	require.NoError(t, err)
 
 	cmd := sysexec.Command(testutil.GitEnv(), "git", "-C", dir, "config", "user.email")
@@ -641,7 +545,7 @@ func TestBaselineUncommittedChanges_DirtyTree(t *testing.T) {
 	writeTestFile(t, dir, "file.txt", "modified\n")
 	writeTestFile(t, dir, "new.txt", "untracked\n")
 
-	newSHA, err := NewHostWithEnv(testEnv()).BaselineUncommittedChanges(ctx, dir)
+	newSHA, err := NewTestHostWithEnv(testEnv()).BaselineUncommittedChanges(ctx, dir)
 	require.NoError(t, err)
 	assert.NotEqual(t, originalSHA, newSHA, "should have created a new commit")
 	assert.Len(t, newSHA, 40)
@@ -661,7 +565,7 @@ func TestBaselineUncommittedChanges_CleanTree(t *testing.T) {
 
 	originalSHA := headSHA(t, dir)
 
-	newSHA, err := NewHostWithEnv(testEnv()).BaselineUncommittedChanges(ctx, dir)
+	newSHA, err := NewTestHostWithEnv(testEnv()).BaselineUncommittedChanges(ctx, dir)
 	require.NoError(t, err)
 	assert.Equal(t, originalSHA, newSHA, "clean tree should not create a new commit")
 }
@@ -677,7 +581,7 @@ func TestStageUntracked_NewFiles(t *testing.T) {
 
 	writeTestFile(t, dir, "b.txt", "b")
 
-	require.NoError(t, NewHostWithEnv(testEnv()).StageUntracked(ctx, dir))
+	require.NoError(t, NewTestHostWithEnv(testEnv()).StageUntracked(ctx, dir))
 
 	cmd := sysexec.Command(testutil.GitEnv(), "git", "-C", dir, "diff", "--cached", "--name-only")
 	output, err := cmd.Output()
@@ -689,7 +593,7 @@ func TestStageUntracked_EmptyRepo(t *testing.T) {
 	dir := t.TempDir()
 	initGitRepo(t, dir)
 
-	assert.NoError(t, NewHostWithEnv(testEnv()).StageUntracked(ctx, dir))
+	assert.NoError(t, NewTestHostWithEnv(testEnv()).StageUntracked(ctx, dir))
 }
 
 // ─── CheckDirtyRepo ──────────────────────────────────────────────────────────
@@ -702,7 +606,7 @@ func TestCheckDirtyRepo_CleanRepo(t *testing.T) {
 	gitAdd(t, dir, ".")
 	gitCommit(t, dir, "initial")
 
-	warning, err := NewHostWithEnv(testEnv()).CheckDirtyRepo(ctx, dir)
+	warning, err := NewTestHostWithEnv(testEnv()).CheckDirtyRepo(ctx, dir)
 	require.NoError(t, err)
 	assert.Empty(t, warning)
 }
@@ -718,7 +622,7 @@ func TestCheckDirtyRepo_DirtyRepo(t *testing.T) {
 	writeTestFile(t, dir, "file.txt", "modified")
 	writeTestFile(t, dir, "new.txt", "untracked")
 
-	warning, err := NewHostWithEnv(testEnv()).CheckDirtyRepo(ctx, dir)
+	warning, err := NewTestHostWithEnv(testEnv()).CheckDirtyRepo(ctx, dir)
 	require.NoError(t, err)
 	assert.Contains(t, warning, "modified")
 	assert.Contains(t, warning, "untracked")
@@ -727,7 +631,7 @@ func TestCheckDirtyRepo_DirtyRepo(t *testing.T) {
 func TestCheckDirtyRepo_NotGitRepo(t *testing.T) {
 	dir := t.TempDir()
 
-	warning, err := NewHostWithEnv(testEnv()).CheckDirtyRepo(ctx, dir)
+	warning, err := NewTestHostWithEnv(testEnv()).CheckDirtyRepo(ctx, dir)
 	require.NoError(t, err)
 	assert.Empty(t, warning)
 }
@@ -736,7 +640,7 @@ func TestCheckDirtyRepo_GitStatusFailureIsError(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.Mkdir(filepath.Join(dir, ".git"), 0o750))
 
-	warning, err := NewHostWithEnv(testEnv()).CheckDirtyRepo(ctx, dir)
+	warning, err := NewTestHostWithEnv(testEnv()).CheckDirtyRepo(ctx, dir)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "git status")
 	assert.Empty(t, warning)
@@ -753,13 +657,13 @@ func TestCheckDirtyRepo_IgnoresBugreportFiles(t *testing.T) {
 	writeTestFile(t, dir, "yoloai-bugreport-20260316-102123.534.md", "bugreport content")
 	writeTestFile(t, dir, "yoloai-bugreport-20260316-103627.211.md.tmp", "temp bugreport")
 
-	warning, err := NewHostWithEnv(testEnv()).CheckDirtyRepo(ctx, dir)
+	warning, err := NewTestHostWithEnv(testEnv()).CheckDirtyRepo(ctx, dir)
 	require.NoError(t, err)
 	assert.Empty(t, warning, "bugreport files should be ignored")
 
 	writeTestFile(t, dir, "new.txt", "untracked")
 
-	warning, err = NewHostWithEnv(testEnv()).CheckDirtyRepo(ctx, dir)
+	warning, err = NewTestHostWithEnv(testEnv()).CheckDirtyRepo(ctx, dir)
 	require.NoError(t, err)
 	assert.Contains(t, warning, "1 untracked")
 }
@@ -768,7 +672,7 @@ func TestCheckDirtyRepo_IgnoresBugreportFiles(t *testing.T) {
 
 func headSHA(t *testing.T, dir string) string {
 	t.Helper()
-	sha, err := NewHostWithEnv(testEnv()).HeadSHA(ctx, dir)
+	sha, err := NewTestHostWithEnv(testEnv()).HeadSHA(ctx, dir)
 	require.NoError(t, err)
 	return sha
 }

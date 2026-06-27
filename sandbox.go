@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"github.com/kstenerud/yoloai/internal/orchestrator"
-	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/store"
+	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
 
@@ -398,11 +398,26 @@ const (
 // hold the full result without naming any internal type. Built from the
 // internal status.Info at the library boundary via sandboxInfoFromStatus.
 type SandboxInfo struct {
-	Environment    *Environment `json:"environment"`
-	Status         Status       `json:"status"`
-	AgentStatus    AgentStatus  `json:"agent_status,omitempty"`
-	Changes        ChangeState  `json:"has_changes"`
-	DiskUsageBytes int64        `json:"disk_usage_bytes"`
+	Environment *Environment `json:"environment"`
+	// AgentType and Model are the sandbox's inside-process config — which agent
+	// runs inside and its model. They sit here on the aggregated read-model (next
+	// to AgentStatus), not on Environment (the substrate view), because they are
+	// not substrate facts (Q104). They are read from the sandbox's agent.json
+	// during inspection; an unmigrated pre-Q104 record yields "". The same values
+	// are available targeted via Sandbox.Agent().Type()/Model().
+	AgentType AgentType `json:"agent,omitempty"`
+	Model     string    `json:"model,omitempty"`
+	// NetworkMode and NetworkAllow are the sandbox's network policy — the mode
+	// and composed egress allowlist. They sit here on the aggregated read-model,
+	// not on Environment (the substrate view), because they are not substrate
+	// facts (D90). They are read from the sandbox's netpolicy.json during
+	// inspection; a sandbox with no network restriction has NetworkMode="".
+	NetworkMode    NetworkMode `json:"network_mode,omitempty"`
+	NetworkAllow   []string    `json:"network_allow,omitempty"`
+	Status         Status      `json:"status"`
+	AgentStatus    AgentStatus `json:"agent_status,omitempty"`
+	Changes        ChangeState `json:"has_changes"`
+	DiskUsageBytes int64       `json:"disk_usage_bytes"`
 }
 
 // Status is a sandbox's lifecycle state. Re-exported (type alias) from

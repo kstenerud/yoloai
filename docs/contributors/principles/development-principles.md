@@ -42,7 +42,7 @@ A concise reference for the engineering values that shape every code path in yol
 **DRY — Don't Repeat Yourself.** Every piece of knowledge has one authoritative location. Duplicated logic means that when the knowledge changes, it must be found and applied in N places — and N−1 will be wrong. But — Sandi Metz: "duplication is far cheaper than the wrong abstraction." Extract on the second concrete use case; don't extract preemptively.
 
 **SOLID.** Five principles for package and type design:
-- *S — Single Responsibility*: each package, type, and function has one reason to change. `internal/runtime/` is runtime backends; `internal/orchestrator/` is sandbox lifecycle; `internal/cli/` is the CLI surface. Mixing these creates coupling that blocks change.
+- *S — Single Responsibility*: each package, type, and function has one reason to change. `runtime/` is runtime backends; `internal/orchestrator/` is sandbox lifecycle; `internal/cli/` is the CLI surface. Mixing these creates coupling that blocks change.
 - *O — Open/Closed*: extend behaviour by adding code, not modifying stable core paths. New backends add a `runtime.Backend` implementation; they don't edit the dispatch. New agents add agent definitions; they don't edit the agent registry's internals.
 - *L — Liskov Substitution*: every implementation of `runtime.Backend` must be fully substitutable. A backend that panics on `Stop()` is not a valid `Backend`; it violates the contract the caller relies on.
 - *I — Interface Segregation*: narrow interfaces at consumption sites. The CLI takes a `runtime.Backend`, not `*runtime.docker.Backend`. Optional behaviours (e.g., overlay support) live behind optional interfaces (W11 step 3).
@@ -56,7 +56,7 @@ A concise reference for the engineering values that shape every code path in yol
 
 **Principle of Least Astonishment.** Code should behave the way a reader expects. A function named `Resolve` should resolve, not mutate. A middleware named `RequireAuth` should reject unauthenticated requests. An error named `ErrNotFound` should mean not-found, not a transient failure.
 
-**Encapsulation and Information Hiding.** Internal implementation details should not leak to callers. Unexported struct fields, package-private constructors, and narrow interfaces all serve this goal. Backend-specific types (Docker SDK structs, Tart VM handles, Seatbelt SBPL profiles) never leak past their `internal/runtime/<backend>/` package boundary.
+**Encapsulation and Information Hiding.** Internal implementation details should not leak to callers. Unexported struct fields, package-private constructors, and narrow interfaces all serve this goal. Backend-specific types (Docker SDK structs, Tart VM handles, Seatbelt SBPL profiles) never leak past their `runtime/<backend>/` package boundary.
 
 **Convention over Configuration.** Established Go conventions and project standards are followed by default. Diverging from a convention requires a documented reason. Convention reduces cognitive load — a developer reading unfamiliar code in a familiar structure spends mental energy on the logic, not the layout.
 
@@ -88,20 +88,20 @@ The **mechanism layer** — the domain/library — does exactly what it is asked
 
 ### Pattern
 
-Import direction is strict. The **public surface** lives at the module root: the `yoloai` package itself (the Layer-1/2 contract) and the `yoerrors/` error-sentinel package. Everything else is private under `internal/` — the embedders (`internal/cli/`, `internal/mcpsrv/`), the engine (`internal/orchestrator/` and its `store`/`copyflow`/`archetype`/`lifecycle`/`launch`/`status`/`create` subpackages), the runtime backends (`internal/runtime/` + `docker`/`tart`/`seatbelt`/`containerd`/`podman`/`caps`), and the support packages (`internal/agent/`, `internal/config/`, `internal/workspace/`, `internal/fileutil/`, `internal/testutil/`). The layering:
+Import direction is strict. The **public surface** lives at the module root: the `yoloai` package itself (the Layer-1/2 contract), the `yoerrors/` error-sentinel package, and the three promoted substrate packages — `runtime/` (+ subpackages), `store/`, and `copyflow/`. Everything else is private under `internal/` — the embedders (`internal/cli/`, `internal/mcpsrv/`), the engine (`internal/orchestrator/` and its `archetype`/`lifecycle`/`launch`/`status`/`create` subpackages), and the support packages (`internal/agent/`, `internal/config/`, `internal/workspace/`, `internal/fileutil/`, `internal/testutil/`). The layering:
 
 ```
 cmd/yoloai/main.go         → internal/cli
-internal/cli/, mcpsrv/     → yoloai (root) + yoerrors    (fenced OFF internal/orchestrator + internal/runtime — D57)
-yoloai (root)              → internal/orchestrator + internal/runtime + internal/config + yoerrors
-internal/orchestrator/     → internal/runtime + internal/agent + internal/config + internal/workspace
+internal/cli/, mcpsrv/     → yoloai (root) + yoerrors    (fenced OFF internal/orchestrator + runtime — D57)
+yoloai (root)              → internal/orchestrator + runtime + internal/config + yoerrors
+internal/orchestrator/     → runtime + internal/agent + internal/config + internal/workspace
 internal/workspace/        → internal/config   (git via os/exec; no runtime dep)
-internal/runtime/<backend> → backend SDK + internal/runtime (interfaces only) + internal/config (leaf types)
+runtime/<backend>          → backend SDK + runtime (interfaces only) + internal/config (leaf types)
 internal/agent/            → internal/config   (agent definitions reference config types)
 internal/config/           → (leaf — nothing internal)
 ```
 
-No reverse imports. No circular imports. Backend types do not appear outside `internal/runtime/<backend>/`. Backend name strings do not appear in the dispatch (W10). The embedders reach the engine **only** through the root `yoloai` package — the depguard fences (`cli-sandbox-scope`, `cli-runtime-scope`, D57) forbid `internal/cli`/`internal/mcpsrv` from importing the engine or runtime subtrees directly, which is what makes the CLI a faithful proxy for a future separate-module daemon. `internal/config/` is depended on by everyone but depends on nothing internal — it carries the leaf types (paths, profile names, mount specs) that compose the rest.
+No reverse imports. No circular imports. Backend types do not appear outside `runtime/<backend>/`. Backend name strings do not appear in the dispatch (W10). The embedders reach the engine **only** through the root `yoloai` package — the depguard fences (`cli-sandbox-scope`, `cli-runtime-scope`, D57) forbid `internal/cli`/`internal/mcpsrv` from importing the engine or runtime/store/copyflow substrate packages directly, which is what makes the CLI a faithful proxy for a future separate-module daemon. `internal/config/` is depended on by everyone but depends on nothing internal — it carries the leaf types (paths, profile names, mount specs) that compose the rest.
 
 ### What does NOT live in the policy (interface) layer
 
@@ -121,14 +121,14 @@ The flip side — the comply-or-complain contract spelled out:
 
 ### Worked examples
 
-- `yoloai apply` (CLI) → `internal/copyflow.Apply` (domain) → `runtime.Backend.GitExec` (backend boundary). The CLI parses flags, the domain assembles the patch, the runtime executes git. None of those three reach across.
-- The W12 architecture remediation (commits `a3207eb`, `e100e4d`, `ccde491`, 2026-05-20) carved `internal/orchestrator/archetype/`, `internal/copyflow/`, `internal/store/` as subpackages. Each has a clean import boundary; subsequent changes to one don't ripple.
+- `yoloai apply` (CLI) → `copyflow.Apply` (domain) → `runtime.Backend.GitExec` (backend boundary). The CLI parses flags, the domain assembles the patch, the runtime executes git. None of those three reach across.
+- The W12 architecture remediation (commits `a3207eb`, `e100e4d`, `ccde491`, 2026-05-20) carved `internal/orchestrator/archetype/`, `copyflow/`, `store/` as subpackages. Each has a clean import boundary; subsequent changes to one don't ripple.
 - W10 (commit `5f91cdf`, 2026-05-20) closed three backend-name leaks — `if backend == "docker"` branches that had crept into CLI / domain code. Replaced with capability checks or registry queries.
 - W11 (commits `3b4a9ae`, `d525d60`, `c00d367`, `1f4457c`, 2026-05-20) introduced `BackendDescriptor` and a `(factory, descriptor)` registry. Adding a backend is now purely additive — register the descriptor, no dispatch edits.
 
 The downward half — policy must not know the *how*:
 
-- **The F1 / Layer-1 carve** (D55, the G7 series) fenced the CLI off `internal/runtime` entirely: handlers speak only the public `yoloai.*` surface (`BackendType`, `IsolationMode`, `SelectBackend`, `System.CheckBackend`), and runtime construction lives behind public verbs. When the CLI needed a backend probe it gained `System.CheckBackend` rather than reaching for `runtime.New` — a reach-through becomes a new public verb. The one sanctioned exception (`internal/cli/system/tart` importing `internal/runtime/tart`) is depguard-scoped to that single package.
+- **The F1 / Layer-1 carve** (D55, the G7 series) fenced the CLI off `runtime` entirely: handlers speak only the public `yoloai.*` surface (`BackendType`, `IsolationMode`, `SelectBackend`, `System.CheckBackend`), and runtime construction lives behind public verbs. When the CLI needed a backend probe it gained `System.CheckBackend` rather than reaching for `runtime.New` — a reach-through becomes a new public verb. `internal/cli/system/tart` now reaches the backend only through the public `yoloai` surface; there is no longer any sanctioned import exception.
 - **Enforcement teeth, not just convention:** the F1 leak detector (`TestPublicAPI_NoInternalLeaks`, alias-descent aware) fails the build if a public type exposes an internal one, and depguard fails the build if a leaf package imports across a forbidden boundary. The principle is mechanically checked, so drift surfaces at CI time, not review time.
 
 Comply-or-complain (the mechanism side):
@@ -212,7 +212,7 @@ For every domain concept yoloAI cares about:
 | Network allowlist domain          | `string`          | `AllowedDomain`         | Valid hostname, not localhost (commit `4d9f7f6`)  |
 | Agent type                        | `string`          | `AgentType`             | Known agent in the registry                       |
 | Backend descriptor (W11)          | (factory return)  | `BackendDescriptor`     | Capabilities enumerated                           |
-| Patch (D9)                        | `[]byte`          | `Patch` (`internal/copyflow/`) | Valid `git format-patch` output                   |
+| Patch (D9)                        | `[]byte`          | `Patch` (`copyflow/`) | Valid `git format-patch` output                   |
 | Network policy (W-L8a)            | `(bool, bool)`    | `yoloai.NetworkMode`    | "Open / isolated / none" — invalid combo unrepresentable |
 | Isolation mode (W-L8a)            | `string`          | `yoloai.IsolationMode`  | One of the five known modes; typo = compile error |
 | Apply mode (W-L8a)                | `(bool, string)`  | `yoloai.ApplyMode`      | Default / squash / export; mutex enforced by type |
@@ -224,9 +224,9 @@ Go limits (named in the research file): same-package construction is unrestricte
 
 ### Worked examples
 
-- Sandbox name (D10) — **target:** a `SandboxName` parsed type. **Today:** `store.ValidateName(string) error` in `internal/store/paths.go` (validate-style, not yet parsed — see † above).
+- Sandbox name (D10) — **target:** a `SandboxName` parsed type. **Today:** `store.ValidateName(string) error` in `store/paths.go` (validate-style, not yet parsed — see † above).
 - Workdir path — **target:** a resolved-path type after tilde expansion + env-var interpolation (commits `25fcb82`, `a57d765`, 2026-02-27). **Today:** `config.ExpandPath(...)` in `internal/config/pathutil.go` returns a bare `string` (see † above).
-- `internal/runtime/registry.go` — `BackendDescriptor` constructed only by registered factories (W11 step 4).
+- `runtime/registry.go` — `BackendDescriptor` constructed only by registered factories (W11 step 4).
 - Reject-don't-strip: invalid input fails parsing; we never silently sanitise. Stripping is what attackers (and confused users) count on.
 
 ### Cost-vs-benefit

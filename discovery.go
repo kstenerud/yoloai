@@ -8,7 +8,7 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/orchestrator/archetype"
-	"github.com/kstenerud/yoloai/internal/runtime"
+	"github.com/kstenerud/yoloai/runtime"
 )
 
 // AgentInfo is the public, serializable view of a shipped agent definition. It
@@ -24,6 +24,10 @@ type AgentInfo struct {
 	// form (a `-p`-style non-interactive run) — what an embedder checks to decide
 	// whether it can drive the agent without an interactive session.
 	SupportsHeadless bool
+	// SupportsResume reports whether the agent has a native conversation-resume
+	// form (e.g. Claude's `--continue`) — what a caller checks to decide whether a
+	// restart can pick up the prior session rather than starting fresh.
+	SupportsResume bool
 	// IdleHook reports whether the agent emits an authoritative turn hook
 	// (tier-2 idle detection); false means idle is detected heuristically only.
 	IdleHook      bool
@@ -181,6 +185,7 @@ func agentInfoFromDefinition(def *agent.Definition) AgentInfo {
 		Description:      def.Description,
 		PromptMode:       string(def.PromptMode),
 		SupportsHeadless: def.HeadlessCmd != "",
+		SupportsResume:   def.ResumeFlag != "",
 		IdleHook:         def.Idle.Hook,
 		APIKeyEnvVars:    def.APIKeyEnvVars,
 		StateDir:         def.StateDir,

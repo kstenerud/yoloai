@@ -103,7 +103,7 @@ a string written. In practice the migration only touches macOS sandboxes.
      sandboxes get it filled. This is what accounts for **v1 users who already have the
      `agent_launch_prefix` fix.**
    - **Layering / host-independence.** `migrateLibraryStep` lives in `internal/config`, which
-     must not import `internal/runtime`; inject the backend→prefix resolver from the migrate
+     must not import `runtime`; inject the backend→prefix resolver from the migrate
      command (`internal/cli/system/migrate.go`, which already has runtime access). The
      resolver must be a pure `BackendType → prefix` lookup sourced from the backend
      descriptor, **not** a constructed `Runtime` — a Linux host must be able to migrate
@@ -128,7 +128,7 @@ a string written. In practice the migration only touches macOS sandboxes.
 **Acceptance:**
 - `system migrate` brings a v1 data dir to v2, writing `agent_launch_prefix` into any
   Tart/Seatbelt sandbox that lacked it; container-backend sandboxes are left unchanged.
-- `grep -r "prepare_launch_command" internal/runtime/monitor/` returns no production code.
+- `grep -r "prepare_launch_command" runtime/monitor/` returns no production code.
 - `restart.go` no longer references `use_launch_prefix` / `UseLaunchPrefix`.
 - The two `backend-idiosyncrasies.md` entries describe the environmental fact + current
   handling, not a yoloAI failure mode.

@@ -63,26 +63,29 @@ func TestParseNewCmdPositional_Errors(t *testing.T) {
 	}
 }
 
-func TestResolveNewCmdOptions_FlagConflicts(t *testing.T) {
-	t.Run("json + attach incompatible", func(t *testing.T) {
-		cmd := NewNewCmd("test")
-		// --json is a root persistent flag in production; register one here so
-		// cliutil.JSONEnabled finds it.
-		cmd.PersistentFlags().Bool("json", false, "")
-		require.NoError(t, cmd.PersistentFlags().Set("json", "true"))
-		require.NoError(t, cmd.Flags().Set("attach", "true"))
-
-		_, _, _, err := resolveNewCmdOptions(cmd, "box", ".", nil, "")
-		assertUsageError(t, err, "--json and --attach are incompatible")
-	})
-
+func TestResolveCreateOptions_FlagConflicts(t *testing.T) {
 	t.Run("port + network-none incompatible", func(t *testing.T) {
 		cmd := NewNewCmd("test")
 		require.NoError(t, cmd.Flags().Set("network-none", "true"))
 		require.NoError(t, cmd.Flags().Set("port", "8080:80"))
 
-		_, _, _, err := resolveNewCmdOptions(cmd, "box", ".", nil, "")
+		_, err := resolveCreateOptions(cmd, "box", ".", nil, "")
 		assertUsageError(t, err, "--port is incompatible with --network-none")
+	})
+}
+
+// TestResolveCreateOptions_RejectsInvalidNameUpFront pins the fast-feedback path:
+// a malformed name fails at the shared CLI edge (before any client/setup work),
+// not deep in the create pipeline. The swapped-with-workdir case (an absolute
+// path where the name belongs) gets the actionable "looks like a path" hint.
+func TestResolveCreateOptions_RejectsInvalidNameUpFront(t *testing.T) {
+	t.Run("charset-invalid name", func(t *testing.T) {
+		_, err := resolveCreateOptions(NewNewCmd("test"), "bad name!", ".", nil, "")
+		assertUsageError(t, err, "invalid sandbox name")
+	})
+	t.Run("path passed as name (swapped args)", func(t *testing.T) {
+		_, err := resolveCreateOptions(NewNewCmd("test"), "/home/me/project", ".", nil, "")
+		assertUsageError(t, err, "looks like a path")
 	})
 }
 

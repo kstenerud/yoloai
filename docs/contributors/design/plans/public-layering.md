@@ -176,6 +176,52 @@ This is a seed, not the full set — later cycles will add more.
    move is the proven `git mv` + import sweep + fence-repoint, gated by `make releasetest`
    (+ `go vet -tags 'integration e2e'` for the build-tagged tests). See D97 for the verdict.
 
+### Endgame roadmap (D99 — supersedes the piecemeal 3b.x / per-layer step lists)
+
+The program now runs to a **solid, mergeable state** in one branch (`substrate-move`), landing on
+`main` as **one clean break** — so *incidental per-commit API/contract churn is fine* (each commit
+compiles + passes `make check`; only the public contract may churn between commits). We build
+straight toward the final shape, no inter-commit stability dance. Three phases + a low-priority
+remainder ([D99](../../decisions/working-notes.md)):
+
+- **Phase 1 — seal every interface (behind `internal/`).** (1a) the **session-carve public
+  realization** [long pole]: `IOSession` on `sb.Agent()` (concentrate the tmux scatter), the final
+  `Launch`/`ProcSpec` contract, `AgentLaunchPrefix` off the public descriptor, slim
+  `sandbox-setup.py` / neutral PID-1 default, **+ build one-shot `-p`/Tier-3** (control-eval).
+  (1b) **Q104** agent/model → `sb.Agent().Type()/Model()` + `agent.json` + M2 migration
+  ([store-workload-split.md](store-workload-split.md)). (1c) `paths.go` helpers-only. (1d) re-home
+  the residual `entrypoint.py` secrets-read for legacy backends.
+- **Phase 2 — near-term consumer surface (control-eval).** **Done:** `yoloai wait` + `sandbox_wait`
+  (pre-existing); `yoloai run` + headless/Tier-3 (D100/D101); structured diff `--json` +
+  `Workdir.Changes()`; MCP `sandbox_run` + native concurrency (the mark3labs server runs tool calls
+  in parallel). **Deferred follow-up:** `Sandbox.Usage()` token/cost ledger — needs the headless
+  agent to emit `--output-format json` + stdout capture + per-agent parsing (claude/gemini/… differ);
+  decided 2026-06-26 to ship the rest and leave Usage as a focused later task. **UX fixes DONE
+  (2026-06-27):** the `new` summary already prints the resolved model (since Q104's
+  `printCreateSummary` reads `sb.Agent().Model()`); name-format validation now runs up front at the
+  shared CLI edge (`resolveCreateOptions`, covering `new`+`run`) so a typo'd or swapped-with-workdir
+  name fails instantly with the "looks like a path" hint instead of after client/setup work, and
+  `cliutil.ValidateName` became a pure `config.ParseSandboxName` call (no `System`/root-Layout
+  dependency); the charset error gained a valid example.
+- **Phase 3 — the Move.** `git mv` the sealed layers → public (default `runtime`+`store`+`copyflow`
+  +`agent`; plumbing layers stay clean-internal, promote later additively), fences, `releasetest`,
+  one `BREAKING-CHANGES` entry (D97). Final promotion set decided at the Move.
+  - **DONE (2026-06-27, commit `10004e1a`): `runtime`+`store`+`copyflow` promoted.** `git mv` to
+    module root, tree-wide import sweep (174 files / 155 renames), fence repoint (`.golangci.yml`
+    depguard + runtime-core glob; Makefile/lock paths), constructed-path + doc-comment fixes.
+    Verified green: `make check`, golangci-lint, `go vet -tags 'integration e2e'`, `make build`,
+    tagged-test link. **`agent` is NOT git-mv'd** — its public surface is the root capability
+    catalog (D89), already sealed. **No `BREAKING-CHANGES` entry: the promotion is additive** —
+    external consumers could never import `internal/*`, and the root `yoloai` API is unchanged, so
+    new public packages add surface without breaking anything. Remaining: the integration/e2e/smoke
+    *runs* need real backends (CI); narrative/design-doc path references are an accuracy follow-up
+    (DF51, findings-unresolved).
+- **Remainder (post-merge):** Stream `SessionKind`, D95 broker, netpolicy egress-proxy,
+  plumbing-layer promotions, macOS findings, backend research, op-hardening.
+
+The earlier "3b" framing (above) is now Phase 1's substrate slice; what 3b deferred as "Move-prep"
+is folded into Phase 1 directly (no stability constraint to defer it for).
+
 ## Non-goals
 
 - Separate `go.mod` per layer (one module until a pruned-dep-graph consumer appears).

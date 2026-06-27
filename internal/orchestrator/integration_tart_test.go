@@ -16,15 +16,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kstenerud/yoloai/copyflow"
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
-	"github.com/kstenerud/yoloai/internal/copyflow"
 	"github.com/kstenerud/yoloai/internal/git"
 	"github.com/kstenerud/yoloai/internal/orchestrator"
-	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/runtime/tart"
-	"github.com/kstenerud/yoloai/internal/store"
+	"github.com/kstenerud/yoloai/internal/orchestrator/agentcfg"
 	"github.com/kstenerud/yoloai/internal/testutil"
+	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/runtime/tart"
+	"github.com/kstenerud/yoloai/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -42,7 +43,7 @@ func tartIntegrationSetup(t *testing.T) (*orchestrator.Engine, context.Context) 
 	// Gated behind YOLOAI_TEST_TART=1 because each test clones+boots a multi-GB
 	// macOS VM. (The old "workdir symlink fails for temp dirs" note was DF27 —
 	// verified stale; the :copy path works. Runtime-level coverage now lives in
-	// internal/runtime/tart TestTartConformance.)
+	// runtime/tart TestTartConformance.)
 	if os.Getenv("YOLOAI_TEST_TART") != "1" {
 		t.Skip("skipping Tart integration test (set YOLOAI_TEST_TART=1 to enable)")
 	}
@@ -96,7 +97,9 @@ func TestIntegrationTart_FullLifecycle(t *testing.T) {
 	meta, err := store.LoadEnvironment(sandboxDir)
 	require.NoError(t, err)
 	assert.Equal(t, sandboxName, meta.Name)
-	assert.Equal(t, string(agent.AgentTest), meta.AgentType)
+	acfg, err := agentcfg.Load(sandboxDir)
+	require.NoError(t, err)
+	assert.Equal(t, string(agent.AgentTest), acfg.AgentType)
 	assert.Equal(t, runtime.BackendTart, meta.BackendType)
 	assert.Equal(t, store.DirModeCopy, meta.Workdir().Mode)
 	assert.NotEmpty(t, meta.Workdir().BaselineSHA, "baseline SHA should be set after VM work dir setup")
@@ -156,7 +159,7 @@ func TestIntegrationTart_FullLifecycle(t *testing.T) {
 		0600,
 	))
 
-	require.NoError(t, git.NewHostWithEnv(testutil.GitEnv()).ApplyPatch(context.Background(), patchBytes, targetDir, false))
+	require.NoError(t, git.NewTestHostWithEnv(testutil.GitEnv()).ApplyPatch(context.Background(), patchBytes, targetDir, false))
 
 	applied, err := os.ReadFile(filepath.Join(targetDir, "main.go")) //nolint:gosec // G304: test file path
 	require.NoError(t, err)

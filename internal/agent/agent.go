@@ -176,8 +176,11 @@ var agents = map[string]*Definition{
 		},
 	},
 	"claude": {
-		Type:           "claude",
-		Description:    "Anthropic Claude Code — AI coding assistant",
+		Type:        "claude",
+		Description: "Anthropic Claude Code — AI coding assistant",
+		// Headless command must NOT add --bare: --bare skips OAuth/keychain reads and
+		// is API-key-only, which would break subscription logins; plain `claude -p`
+		// honors a /login subscription (D101, research/agent-headless-auth.md).
 		InteractiveCmd: "claude --dangerously-skip-permissions",
 		HeadlessCmd:    `claude -p "PROMPT" --dangerously-skip-permissions`,
 		PromptMode:     PromptModeInteractive,
@@ -214,12 +217,36 @@ var agents = map[string]*Definition{
 		AgentFilesExclude: []string{"projects/", "statsig/", "todos/", ".credentials.json", "*.log"},
 		ApplySettings: func(s map[string]any) {
 			s["skipDangerousModePermissionPrompt"] = true
+			// Default the terminal renderer to the classic ("default") line
+			// renderer when the user hasn't chosen one. Claude Code added a "Try
+			// the new fullscreen renderer?" upsell that, when accepted, re-execs
+			// claude with only its own extraArgs — dropping our
+			// --dangerously-skip-permissions flag — so the relaunched session runs
+			// in default (ask) permission mode and stalls on a tool-permission
+			// prompt with no human to answer it. Claude suppresses the upsell once
+			// the persisted `tui` preference is set to ANY value, so we only fill
+			// it in when absent: an explicit user choice (default OR fullscreen)
+			// already prevents the upsell and is respected as-is. See
+			// docs/contributors/backend-idiosyncrasies.md (Claude fullscreen upsell).
+			if _, ok := s["tui"]; !ok {
+				s["tui"] = "default"
+			}
 			// Disable Claude Code's built-in sandbox-exec to prevent nesting failures.
 			// sandbox-exec cannot be nested — an inner sandbox-exec inherits the outer
 			// profile's restrictions and typically fails.
 			s["sandbox"] = map[string]any{"enabled": false}
 			// Ensure Claude Code emits BEL for tmux tab highlighting.
 			s["preferredNotifChannel"] = "terminal_bell"
+			// Disable Claude Code's auto-updater: a disposable, image-pinned sandbox never
+			// self-updates (the image owns the version), and with updates off the seeded
+			// installMethod is inert — so the substrate need not declare it. See
+			// docs/contributors/design/research/agent-self-update.md.
+			env, _ := s["env"].(map[string]any)
+			if env == nil {
+				env = map[string]any{}
+			}
+			env["DISABLE_AUTOUPDATER"] = "1"
+			s["env"] = env
 			// Inject hooks for status tracking. Claude Code's own hook system is
 			// far more reliable than polling tmux capture-pane for a ready pattern.
 			injectIdleHook(s)

@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/kstenerud/yoloai/internal/orchestrator/state"
-	"github.com/kstenerud/yoloai/internal/store"
+	"github.com/kstenerud/yoloai/store"
 )
 
 // Teardown stops and removes the named sandbox's container and deletes its

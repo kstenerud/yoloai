@@ -11,19 +11,17 @@ import (
 	"testing"
 
 	"github.com/kstenerud/yoloai/internal/cli/clitest"
-	"github.com/kstenerud/yoloai/internal/store"
+	"github.com/kstenerud/yoloai/internal/netpolicycfg"
+	"github.com/kstenerud/yoloai/store"
 	"github.com/stretchr/testify/require"
 )
 
-// createNetworkSandbox writes a fake sandbox directory (environment.json
-// + runtime-config.json) suitable for end-to-end CLI tests of
+// createNetworkSandbox writes a fake sandbox directory (environment.json +
+// netpolicy.json + runtime-config.json) suitable for end-to-end CLI tests of
 // allow/allowed/deny. Returns the sandbox directory path.
 //
-// Pre-Q-V this lived next to a `loadIsolatedMeta` / `tryLivePatchNetwork`
-// helper pair in network.go that the CLI handlers called. After
-// Q-V those moved into the library; this fixture stays because the
-// CLI integration tests construct their own sandbox state to
-// exercise the rendering path.
+// Network policy (mode/allow) goes to netpolicy.json (D90), not
+// environment.json.
 func createNetworkSandbox(t *testing.T, name, networkMode string, domains []string) string {
 	t.Helper()
 	tmpHome := clitest.Home(t)
@@ -32,14 +30,13 @@ func createNetworkSandbox(t *testing.T, name, networkMode string, domains []stri
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 
 	meta := &store.Environment{
-		Name:         name,
-		AgentType:    "test",
-		BackendType:  "docker",
-		NetworkMode:  networkMode,
-		NetworkAllow: domains,
-		Dirs:         []store.DirEnvironment{{HostPath: "/tmp/test", MountPath: "/tmp/test", Mode: "copy"}},
+		Name:        name,
+		BackendType: "docker",
+		Dirs:        []store.DirEnvironment{{HostPath: "/tmp/test", MountPath: "/tmp/test", Mode: "copy"}},
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
+	// Network policy lives in netpolicy.json (D90).
+	require.NoError(t, netpolicycfg.Save(sandboxDir, &netpolicycfg.Netpolicy{Mode: networkMode, Allow: domains}))
 
 	// Minimal runtime-config.json so the library's
 	// PatchConfigAllowedDomains has a target to update.

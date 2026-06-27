@@ -23,6 +23,30 @@ type Agent struct {
 	name   string
 }
 
+// Type returns the agent type configured for the sandbox (e.g. "claude") — the
+// agent that runs inside it. Read from the sandbox's agent.json (the
+// inside-process config Q104 splits out of the substrate record); a sandbox
+// whose record predates that split, and hasn't been migrated, yields "". This
+// is a host-filesystem read and does not require a running backend.
+func (a *Agent) Type() (AgentType, error) {
+	cfg, err := a.engine.LoadAgentConfig(a.name)
+	if err != nil {
+		return "", err
+	}
+	return AgentType(cfg.AgentType), nil
+}
+
+// Model returns the model configured for the sandbox's agent ("" when none was
+// set, or for an unmigrated pre-Q104 record). Like Type, it reads agent.json and
+// needs no running backend.
+func (a *Agent) Model() (string, error) {
+	cfg, err := a.engine.LoadAgentConfig(a.name)
+	if err != nil {
+		return "", err
+	}
+	return cfg.Model, nil
+}
+
 // Prompt returns the prompt text persisted for the sandbox. The bool reports
 // whether a prompt was configured: a sandbox with no prompt yields
 // ("", false, nil); a present-but-empty prompt yields ("", true, nil). This is

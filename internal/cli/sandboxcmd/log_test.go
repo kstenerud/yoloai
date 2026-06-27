@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/kstenerud/yoloai/internal/cli/clitest"
-	"github.com/kstenerud/yoloai/internal/store"
+	"github.com/kstenerud/yoloai/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -24,7 +24,6 @@ func setupLogTest(t *testing.T, name string) string {
 
 	meta := &store.Environment{
 		Name:      name,
-		AgentType: "claude",
 		CreatedAt: time.Now(),
 		Dirs:      []store.DirEnvironment{{HostPath: "/tmp/test", Mode: "copy"}},
 	}

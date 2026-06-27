@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kstenerud/yoloai/internal/config"
-	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/runtime/caps"
+	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/runtime/caps"
 )
 
 // Compile-time check.
@@ -55,7 +55,6 @@ func (f *fakeRuntime) TmuxSocket(_ string) string                     { return "
 func (f *fakeRuntime) AttachCommand(_ string, _, _ int, _ runtime.IsolationMode) []string {
 	return nil
 }
-func (f *fakeRuntime) PrepareAgentCommand(cmd string) string { return cmd }
 func (f *fakeRuntime) Descriptor() runtime.BackendDescriptor {
 	return runtime.BackendDescriptor{
 		Type:         "mock",

@@ -9,8 +9,8 @@ import (
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/config"
-	"github.com/kstenerud/yoloai/internal/runtime"
-	tartrt "github.com/kstenerud/yoloai/internal/runtime/tart"
+	"github.com/kstenerud/yoloai/runtime"
+	tartrt "github.com/kstenerud/yoloai/runtime/tart"
 )
 
 // baseNamePrefix is the VM-name prefix for yoloai-managed Tart runtime bases.

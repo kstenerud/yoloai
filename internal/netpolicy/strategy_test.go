@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/kstenerud/yoloai/internal/netpolicy"
-	"github.com/kstenerud/yoloai/internal/runtime"
+	"github.com/kstenerud/yoloai/runtime"
 )
 
 func TestCanEnforce(t *testing.T) {

@@ -11,16 +11,16 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/kstenerud/yoloai/internal/copyflow"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/git"
 	"github.com/kstenerud/yoloai/internal/orchestrator/launch"
 	"github.com/kstenerud/yoloai/internal/orchestrator/state"
 	"github.com/kstenerud/yoloai/internal/orchestrator/status"
-	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/store"
+	"github.com/kstenerud/yoloai/internal/orchestrator/workprobe"
 	"github.com/kstenerud/yoloai/internal/sysexec"
 	"github.com/kstenerud/yoloai/internal/workspace"
+	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/store"
 )
 
 // ResetOptions holds parameters for the reset command.
@@ -161,12 +161,12 @@ func dirWorkReason(ctx context.Context, sandboxGit *git.Git, sandboxDir string, 
 		return false, ""
 	}
 	workDir := store.WorkDir(sandboxDir, hostPath)
-	switch copyflow.HasUnappliedWorkVia(ctx, sandboxGit, workDir, baselineSHA) {
-	case copyflow.WorkDirty:
+	switch workprobe.HasUnappliedWorkVia(ctx, sandboxGit, workDir, baselineSHA) {
+	case workprobe.WorkDirty:
 		return true, "unapplied changes exist"
-	case copyflow.WorkUnknown:
+	case workprobe.WorkUnknown:
 		return true, "sandbox is stopped, so unapplied changes can't be verified (start it to check, or use --abandon-unapplied)"
-	case copyflow.WorkClean:
+	case workprobe.WorkClean:
 	}
 	return false, ""
 }

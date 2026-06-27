@@ -323,6 +323,9 @@ func TestApplySettings_Claude(t *testing.T) {
 	assert.Equal(t, true, settings["skipDangerousModePermissionPrompt"])
 	assert.Equal(t, map[string]any{"enabled": false}, settings["sandbox"])
 	assert.Equal(t, "terminal_bell", settings["preferredNotifChannel"])
+	// Default the renderer to "default" when unset so the fullscreen upsell never
+	// re-execs claude and drops --dangerously-skip-permissions (backend-idiosyncrasies.md).
+	assert.Equal(t, "default", settings["tui"])
 
 	// Verify idle hooks were injected
 	hooks, ok := settings["hooks"].(map[string]any)
@@ -330,6 +333,19 @@ func TestApplySettings_Claude(t *testing.T) {
 	assert.NotNil(t, hooks["Stop"], "Stop hook should be set")
 	assert.NotNil(t, hooks["PreToolUse"], "PreToolUse hook should be set")
 	assert.NotNil(t, hooks["UserPromptSubmit"], "UserPromptSubmit hook should be set")
+}
+
+// An explicit user `tui` choice (default OR fullscreen) already suppresses the
+// fullscreen upsell, so ApplySettings must respect it rather than overwrite it.
+func TestApplySettings_ClaudePreservesExistingTui(t *testing.T) {
+	def := GetAgent("claude")
+	require.NotNil(t, def)
+	require.NotNil(t, def.ApplySettings)
+
+	settings := map[string]any{"tui": "fullscreen"}
+	def.ApplySettings(settings)
+
+	assert.Equal(t, "fullscreen", settings["tui"], "an existing tui choice must be preserved")
 }
 
 func TestApplySettings_ClaudePreservesExistingHooks(t *testing.T) {

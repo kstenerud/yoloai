@@ -15,7 +15,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/orchestrator/archetype"
 	mountspkg "github.com/kstenerud/yoloai/internal/orchestrator/mounts"
 	"github.com/kstenerud/yoloai/internal/orchestrator/state"
-	"github.com/kstenerud/yoloai/internal/runtime"
+	"github.com/kstenerud/yoloai/runtime"
 )
 
 // resolveAndApplyArchetype loads .yoloai.yaml, resolves the archetype with priority

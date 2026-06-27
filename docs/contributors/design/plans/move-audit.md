@@ -156,6 +156,70 @@ strategy #5 and the no-scope-cut standard.
 **Open (user's call):** Q-A store split vs. opaque-transport for `AgentType/Model`; Q-B
 branch-capstone vs. merge-then-fresh-branch for the Move.
 
+## Re-audit (2026-06-27, on `substrate-move`) — post-Q104 surface re-check
+
+Re-ran the surface dimensions after Q104 (D102) landed and the carve-free work, to
+get a current (not D97-stale) Move-readiness map. Two read-only investigators
+audited the `copyflow` and `agent` export surfaces; both initially recommended
+"unexport ~25 / ~3 symbols" — **both lists were rejected on verification**: the
+copyflow "leaks" are already-lowercase helpers (the agent misread `go doc -u`,
+which shows unexported symbols), and the agent fields (`ApplySettings`, `SeedFiles`,
+`HeadlessCmd`, `PromptMode`, …) are read by *separate* packages
+(`orchestrator`/`envspec`/`envsetup`/root `discovery.go`) so they cannot be
+unexported without breaking the build. Verify subagent surface claims against actual
+cross-package callers.
+
+**Current state:**
+- **Import DAG is clean and promotable.** `agent` is a zero-import leaf; `runtime`
+  is base; `store → runtime` (clean of agent/orchestrator post-Q104);
+  `copyflow → {runtime, store}`. None import `orchestrator` or `agent`.
+- **Promotion order is import-constrained.** A public package can't import an
+  internal one, so **`store`/`copyflow` cannot promote until `runtime` is public**,
+  and `runtime` still exports `AgentLaunchPrefix` (the deferred, macOS-coupled 1a-ii)
+  + the `InteractiveSession`/tmux primitive (DF31 — *accepted as substrate* per the
+  D99 endgame; IOSession is the later ergonomic promotion, not a Move blocker).
+  `AgentProvisionedByBackend` stays a substrate fact-query (D97).
+- **`copyflow` is Move-ready.** Clean imports + high-level verbs. Only an *optional*
+  trim: ~9 exported funcs have no caller outside the package
+  (`AdvanceBaseline`, `GenerateFormatPatch{,ForRefs}`, `GenerateOverlayPatch`,
+  `GenerateUncommittedDiff`, `LoadAllDiffContexts`, `UpdateOverlayBaselineToHEAD`) —
+  candidates to unexport to slim the frozen surface; not blockers (`ParseNumstat`/
+  `ResolveRef[s]` are public vocabulary even if not yet called externally).
+- **`agent`: the public surface is the root catalog, not a package `git mv`.** Per
+  **D89 §public-surface**, the agent layer's public surface is the read-only
+  capability catalog (`yoloai.AgentTypes()` → `AgentInfo`); the fat `Definition` +
+  code-adapter **stay internal** (`orchestrator`/`envspec` read them; they can't be
+  public). So "promoting agent" is **enriching the root `AgentInfo` catalog**, not
+  exposing `internal/agent`. Done 2026-06-27: added `AgentInfo.SupportsResume`
+  (native-resume, the one capability D89 named that was still missing; only Claude
+  sets `ResumeFlag`). The agent layer's public surface is now complete; there is no
+  separate `yoloai/agent` package and no `internal/agent` `git mv`.
+
+**Net:** the agent layer's public surface is sealed. The `git mv` procedure first
+applies to **`runtime`+`store`+`copyflow`**, gated solely on the `runtime`
+`AgentLaunchPrefix` cleanup (1a-ii) — Linux-buildable but Tart/Seatbelt
+prefix-application needs the mac queue. (User chose agent-first + narrow-the-surface,
+2026-06-27; the narrowing was already D89's design — `Definition` stays internal.)
+
+**Update (2026-06-27) — `AgentLaunchPrefix` cleared; runtime Move-unblocked.** The
+per-backend agent-launch wrap moved off `runtime.BackendDescriptor` into the
+orchestrator's launch layer (`internal/orchestrator/launch/prefix.go`, keyed by
+backend type) — it is launch-assembly knowledge, not a substrate fact, so it lives
+above the substrate (D97 / arch-principles §4). The reshape is behavior-preserving:
+the same constant is written to `runtime-config.json`'s `agent_launch_prefix` and
+applied unchanged in-sandbox (`sandbox-setup.py`) and on restart; only the
+create-time *source* and the migration resolver moved (both now read the launch
+table). The two readers (`create.go`, `system.go`'s migration resolver) were
+repointed; the DTO field + application path are untouched. Tart/Seatbelt confirmatory
+smoke is queued as **V3** (low risk — the wrap value/application are byte-identical).
+With this, `runtime`'s only remaining "Agent"-named export is `AgentProvisionedByBackend`
+(a kept substrate fact-query), and `InteractiveSession`/tmux stays as an accepted
+substrate primitive (D99; IOSession is the later ergonomic). **`runtime` is now
+Move-ready**, so `store` (→runtime) and `copyflow` (→runtime,store) are unblocked.
+The next step is the mechanical `git mv runtime store copyflow` + import sweep +
+`.golangci.yml` fence repoint (depguard L66/98/100 + the runtime-glob L112) +
+`make releasetest`.
+
 ## Cross-references
 
 - [public-layering.md](public-layering.md) (the Frame this audits), the D84–D96

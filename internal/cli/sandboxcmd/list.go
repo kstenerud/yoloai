@@ -89,7 +89,7 @@ func matchesFilters(info *yoloai.SandboxInfo, f listFilters) bool {
 		return false
 	}
 	if f.agent != "" {
-		if info.Status == yoloai.StatusBroken || string(info.Environment.AgentType) != f.agent {
+		if info.Status == yoloai.StatusBroken || string(info.AgentType) != f.agent {
 			return false
 		}
 	}
@@ -207,7 +207,7 @@ func runList(cmd *cobra.Command, _ []string) error {
 			info.Environment.Name,
 			info.Status,
 			backend,
-			info.Environment.AgentType,
+			info.AgentType,
 			formatProfile(info.Environment.Profile),
 			cliutil.FormatAge(info.Environment.CreatedAt),
 			cliutil.FormatDiskUsage(info.DiskUsageBytes),

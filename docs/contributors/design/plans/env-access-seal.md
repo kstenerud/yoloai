@@ -25,7 +25,7 @@ longer a public map. Current state in `internal/config/layout_env.go`:
   - `WithEnv(map) Layout` — edge setter
   - `EnvSnapshot() map` — embedder/diagnostics full-map getter
   - `EnvProfile`/`MapEnv`/`EnvLookup` interface
-- `runtime.DaemonEnvVars` is the daemon-discovery allowlist union (in `internal/runtime/probe.go`, re-exported as `yoloai.DaemonEnvVars`).
+- `runtime.DaemonEnvVars` is the daemon-discovery allowlist union (in `runtime/probe.go`, re-exported as `yoloai.DaemonEnvVars`).
 - forbidigo gates: `EnvSnapshot`, `EnvForExtension`, `testutil.GetCuratedHostEnv` (deny-by-default + reviewed allowlists in `.golangci.yml`).
 - Test edge: `testutil.HostEnv()` → `testutil.GetCuratedHostEnv(allow)` + shared `testutil.IntegrationHostEnvVars`.
 
@@ -226,9 +226,9 @@ in `fakeruntime_test.go`). Keep that hermetic.
 - `internal/config/layout_env.go` — the accessors live here (rework target).
 - `internal/config/layout.go` — `Layout` struct (`env` field, `WithEnv`).
 - `internal/config/pathutil.go` — `expandEnvBraced`/`ExpandPath` (expansion).
-- `internal/runtime/probe.go` — `DaemonEnvVars`.
-- backend allowlists to move: `internal/runtime/docker/{docker,build}.go`,
-  `containerd/containerd.go`, `seatbelt/seatbelt.go`, `tart/tart.go`.
+- `runtime/probe.go` — `DaemonEnvVars`.
+- backend allowlists to move: `runtime/docker/{docker,build}.go`,
+  `runtime/containerd/containerd.go`, `runtime/seatbelt/seatbelt.go`, `runtime/tart/tart.go`.
 - `internal/envsetup/envsetup.go` — agent-cred `LookupEnv` loops.
 - `internal/cli/cliutil/{layout,client}.go` — the edge (`processEnv`, ClientCreateOptions).
 - `.golangci.yml` — forbidigo `forbid` + `exclusions.rules` (gate template).

@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/kstenerud/yoloai/internal/agent"
-	"github.com/kstenerud/yoloai/internal/runtime"
+	"github.com/kstenerud/yoloai/runtime"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -30,7 +30,14 @@ func TestSystem_Agents_Catalog(t *testing.T) {
 	// Capability flags an embedder uses to choose how to drive the agent.
 	assert.True(t, claude.IdleHook, "claude declares an authoritative turn hook (tier-2 idle)")
 	assert.True(t, claude.SupportsHeadless, "claude supports a headless/one-shot launch form")
+	assert.True(t, claude.SupportsResume, "claude declares native conversation-resume (--continue)")
 	assert.NotEmpty(t, claude.NetworkFloor, "claude declares a network floor (its required API domains)")
+
+	// SupportsResume is a per-agent capability, not universal: an agent without a
+	// native resume flag reports false (the catalog distinguishes them).
+	test, ok := byName["test"]
+	require.True(t, ok, "test pseudo-agent present in catalog")
+	assert.False(t, test.SupportsResume, "the test agent declares no native-resume flag")
 }
 
 func TestSystem_Agents_RealOnly(t *testing.T) {
