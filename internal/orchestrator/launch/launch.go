@@ -56,7 +56,7 @@ func LaunchContainer(ctx context.Context, d state.Deps, st *state.State) error {
 	spec := envspec.BuildEnvSpec(st.Agent)
 	var secretsDir string
 	var secretEnv map[string]string
-	if _, isLauncher := runtime.LauncherOf(d.Runtime); isLauncher {
+	if _, agentFree := usesAgentFreeLaunch(d.Runtime); agentFree {
 		// Launch path (Docker): deliver secrets via the launched process's env; no host staging, no mount, no marker.
 		secretEnv = envsetup.ResolveSecretEnv(spec, envVars, st.Layout)
 	} else {
@@ -82,16 +82,27 @@ func LaunchContainer(ctx context.Context, d state.Deps, st *state.State) error {
 	return buildAndStart(ctx, d.Runtime, st, mnts, ports, secretsDir != "", secretEnv)
 }
 
+// usesAgentFreeLaunch reports whether the backend uses the D88 agent-free
+// keepalive+Launch bring-up: it must implement runtime.ProcessLauncher AND opt in
+// via Capabilities.AgentFreeLaunch. Both the secrets-delivery choice and the
+// container bring-up gate on this single helper, so they stay in sync — a backend
+// on legacy bring-up also gets legacy /run/secrets staging. Podman inherits Launch
+// by embedding the Docker runtime but does not opt in, so it takes the legacy path.
+func usesAgentFreeLaunch(rt runtime.Backend) (runtime.ProcessLauncher, bool) {
+	launcher, ok := runtime.LauncherOf(rt)
+	return launcher, ok && rt.Descriptor().Capabilities.AgentFreeLaunch
+}
+
 // buildAndStart constructs the runtime InstanceConfig from State and
 // starts the instance. hasSecrets indicates whether secrets were injected via
 // a temporary directory that the caller will remove after this call returns.
 // secretEnv is the secret map delivered via ProcSpec.Env on the Launch path
 // (nil on the legacy path). Extracted from launchContainer().
 //
-// When the backend implements runtime.ProcessLauncher the box is brought up
-// agent-free (keepalive_only holder) and sandbox-setup.py is launched as a
-// separate process over it — the S3 re-route. Backends without ProcessLauncher
-// follow the legacy path: the agent is welded into the entrypoint as before.
+// When the backend opts into the agent-free bring-up (usesAgentFreeLaunch) the box
+// comes up on a keepalive_only holder and sandbox-setup.py is launched as a
+// separate process over it — the S3 re-route. Otherwise it follows the legacy
+// path: the agent is welded into the entrypoint as before.
 func buildAndStart(ctx context.Context, rt runtime.Backend, st *state.State, mnts []runtime.MountSpec, ports []runtime.PortMapping, hasSecrets bool, secretEnv map[string]string) error {
 	cname := store.InstanceName(st.Layout.Principal, st.Name)
 	instanceCfg, err := buildInstanceConfig(rt.Descriptor(), st, mnts, ports)
@@ -107,12 +118,11 @@ func buildAndStart(ctx context.Context, rt runtime.Backend, st *state.State, mnt
 		_ = os.Remove(markerPath) //nolint:errcheck // best-effort; absent is fine
 	}
 
-	// Use the D88 keepalive-holder + Launch bring-up only when the backend both
-	// implements ProcessLauncher AND opts in via Capabilities.AgentFreeLaunch.
-	// Podman satisfies ProcessLauncher by embedding the Docker runtime, but its
-	// rootless bring-up is not verified on this path (the keepalive holder does not
-	// reliably win the boot, so waitForReady times out), so it stays on legacy.
-	if launcher, ok := runtime.LauncherOf(rt); ok && rt.Descriptor().Capabilities.AgentFreeLaunch {
+	// Use the D88 keepalive-holder + Launch bring-up only for backends that opt in
+	// (see usesAgentFreeLaunch). Secrets delivery (above) is gated on the same
+	// condition, so the two stay in sync — a backend on the legacy bring-up also
+	// gets legacy /run/secrets staging.
+	if launcher, ok := usesAgentFreeLaunch(rt); ok {
 		if err := startViaLaunch(ctx, rt, launcher, st, cname, instanceCfg, markerPath, hasSecrets, secretEnv); err != nil {
 			return err
 		}
