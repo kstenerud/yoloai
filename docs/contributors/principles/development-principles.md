@@ -128,7 +128,7 @@ The flip side — the comply-or-complain contract spelled out:
 
 The downward half — policy must not know the *how*:
 
-- **The F1 / Layer-1 carve** (D55, the G7 series) fenced the CLI off `runtime` entirely: handlers speak only the public `yoloai.*` surface (`BackendType`, `IsolationMode`, `SelectBackend`, `System.CheckBackend`), and runtime construction lives behind public verbs. When the CLI needed a backend probe it gained `System.CheckBackend` rather than reaching for `runtime.New` — a reach-through becomes a new public verb. The one sanctioned exception (`internal/cli/system/tart` importing `runtime/tart`) is depguard-scoped to that single package.
+- **The F1 / Layer-1 carve** (D55, the G7 series) fenced the CLI off `runtime` entirely: handlers speak only the public `yoloai.*` surface (`BackendType`, `IsolationMode`, `SelectBackend`, `System.CheckBackend`), and runtime construction lives behind public verbs. When the CLI needed a backend probe it gained `System.CheckBackend` rather than reaching for `runtime.New` — a reach-through becomes a new public verb. `internal/cli/system/tart` now reaches the backend only through the public `yoloai` surface; there is no longer any sanctioned import exception.
 - **Enforcement teeth, not just convention:** the F1 leak detector (`TestPublicAPI_NoInternalLeaks`, alias-descent aware) fails the build if a public type exposes an internal one, and depguard fails the build if a leaf package imports across a forbidden boundary. The principle is mechanically checked, so drift surfaces at CI time, not review time.
 
 Comply-or-complain (the mechanism side):

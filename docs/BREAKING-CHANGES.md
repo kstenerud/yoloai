@@ -28,6 +28,8 @@ inside" belongs to the orchestration layer.
 **What breaks:** Go embedders reading `env.AgentType` / `env.Model` off the
 `Environment` view, or parsing `agent` / `model` out of the `Environment` JSON;
 anything reading `agent` / `model` directly from `environment.json` on disk.
+Shell pipelines that extract agent or model from `--json` output must also update
+their filters (see migration below).
 
 **Migration:** `info.Environment.AgentType` → `info.AgentType` (or
 `sb.Agent().Type()`); likewise for `Model`. Existing sandboxes need a one-time
@@ -37,6 +39,36 @@ startup gate prompt for it. The migration relocates each sandbox's `agent` /
 and writes `agent.json` before rewriting `environment.json`, so an interrupted
 run loses nothing. Until migrated, a sandbox's `environment.json` balks on load
 with a "needs migration" error rather than being rewritten on read.
+
+**CLI wire-format migration (`--json`):** `yoloai sandbox info --json` and
+`yoloai sandbox list --json` now emit `agent` and `model` as **top-level keys**
+on the `SandboxInfo` object, not nested under `environment`:
+
+- `jq '.environment.agent'` → `jq '.agent'`
+- `jq '.environment.model'` → `jq '.model'`
+- `jq '.sandboxes[].environment.agent'` → `jq '.sandboxes[].agent'`
+- `jq '.sandboxes[].environment.model'` → `jq '.sandboxes[].model'`
+
+MCP tool outputs (`sandbox_status`, `sandbox_list`, `sandbox_wait`) are **not
+affected** — they already build an explicit top-level `agent` key and did not
+expose the `environment` nesting.
+
+### `yoloai diff --json` gains `files`, `additions`, and `deletions` keys (additive)
+
+`yoloai diff <name> --json` now includes three additional keys alongside `diff`:
+
+```json
+{
+  "diff": "...",
+  "files":     [{"path": "...", "change": "modified", "additions": 3, "deletions": 1}, ...],
+  "additions": 4,
+  "deletions": 1
+}
+```
+
+This is **additive** — `jq '.diff'` continues to work unchanged. Strict JSON-schema
+consumers that reject unknown keys must add `files`, `additions`, and `deletions`
+to their accepted set.
 
 ### `Environment` exposes one ordered `Dirs` list instead of `Workdir` + `Directories`
 

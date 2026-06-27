@@ -111,9 +111,9 @@ The two share the same enforcement teeth.
   `cli-runtime-scope` deny `internal/orchestrator`, `store`, `copyflow`,
   and `runtime` to non-test cli+mcpsrv code — the orchestrator subtree by prefix
   (façade *and* every leaf: `archetype`/`status`/…), plus the three public substrate packages
-  `store`, `copyflow`, and `runtime` by explicit deny entries. The one
-  sanctioned exception (`internal/cli/system/tart` → `runtime/tart`) is scoped to
-  that single package.
+  `store`, `copyflow`, and `runtime` by explicit deny entries. There are no
+  sanctioned exceptions: `internal/cli/system/tart` now reaches the backend only
+  through the public `yoloai` surface.
 
 When a fence or the detector goes red, the resolution is a public verb (§1), never a
 widened allow-list.

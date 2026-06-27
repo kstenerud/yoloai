@@ -315,7 +315,7 @@ linters:
         - pattern: "^sandbox\\.Manager$"
           msg: "use yoloai.Client; CLI commands access orchestration via cliutil.WithClient / cliutil.NewSystemClient — see internal/cli/CONVENTIONS.md"
         - pattern: "^runtime\\.New$"
-          msg: "use cliutil.NewRuntime (the documented chokepoint in internal/cli/cliutil/client.go)"
+          msg: "the CLI must not construct a backend directly; depend on yoloai.Client / yoloai.System (e.g. System.CheckBackend) — see internal/cli/CONVENTIONS.md"
         - pattern: "^runtime\\.Runtime$"
           msg: "depend on yoloai.Client / yoloai.SystemClient instead of the bare backend interface — see internal/cli/CONVENTIONS.md"
   exclusions:
@@ -494,19 +494,6 @@ linters:
         linters:
           - forbidigo
         text: "sandbox\\.(NewManager|Manager)|runtime\\.(Runtime|New)"
-
-      # NewRuntime in cliutil/client.go is the only sanctioned construction
-      # site for a raw runtime.Runtime in CLI code. After F23 moved
-      # cross-backend enumeration (list, system_doctor, info) onto
-      # yoloai.SystemClient, the remaining callers are cliutil.CheckBackend
-      # (the backend availability-probe chokepoint) and the backend-scoped
-      # system_tart subtree.
-      # (Moved from internal/cli/helpers.go → internal/cli/cliutil/client.go
-      # during W-L13's cliutil/ extraction.)
-      - path: "internal/cli/cliutil/client\\.go"
-        linters:
-          - forbidigo
-        text: "runtime\\.(Runtime|New)"
 
 run:
   timeout: 2m
