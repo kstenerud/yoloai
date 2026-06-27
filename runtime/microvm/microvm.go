@@ -12,7 +12,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -160,36 +159,10 @@ func (r *Runtime) DiagHint(instanceName string) string {
 // Close releases resources. The microvm backend holds no long-lived handles.
 func (r *Runtime) Close() error { return nil }
 
-// --- Lifecycle (Setup/IsReady in setup.go; rest in later increments) ---
-
-// Create writes per-instance config and stages the workdir share. (sub-step b)
-func (r *Runtime) Create(_ context.Context, _ runtime.InstanceConfig) error { return errNotImplemented }
-
-// Start launches the daemonized QEMU process. (sub-step b)
-func (r *Runtime) Start(_ context.Context, _ string) error { return errNotImplemented }
-
-// Stop terminates the QEMU process (SIGTERM->SIGKILL). (sub-step b)
-func (r *Runtime) Stop(_ context.Context, _ string) error { return errNotImplemented }
-
-// Remove deletes the instance and its QEMU/virtiofsd state. (sub-step b)
-func (r *Runtime) Remove(_ context.Context, _ string) error { return errNotImplemented }
-
-// Inspect reports instance liveness from the QEMU PID. (sub-step b)
-func (r *Runtime) Inspect(_ context.Context, _ string) (runtime.InstanceInfo, error) {
-	return runtime.InstanceInfo{}, errNotImplemented
-}
-
-// Exec runs a command via the QEMU guest agent. (sub-step c)
-func (r *Runtime) Exec(_ context.Context, _ string, _ []string, _ string) (runtime.ExecResult, error) {
-	return runtime.ExecResult{}, errNotImplemented
-}
+// --- Lifecycle: Setup/IsReady in setup.go; Create/Start/Stop/Remove/Inspect/
+// Exec/Prune in lifecycle.go; InteractiveExec (serial attach) lands in 2c. ---
 
 // InteractiveExec bridges IOStreams to the guest serial console. (sub-step c)
 func (r *Runtime) InteractiveExec(_ context.Context, _ string, _ []string, _ string, _ string, _ runtime.IOStreams) error {
 	return errNotImplemented
-}
-
-// Prune removes orphaned microvm instances. (sub-step b)
-func (r *Runtime) Prune(_ context.Context, _ []string, _ bool, _ io.Writer) (runtime.PruneResult, error) {
-	return runtime.PruneResult{}, errNotImplemented
 }
