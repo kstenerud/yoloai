@@ -33,10 +33,7 @@ var descriptor = runtime.BackendDescriptor{
 	InstallHint:               "",
 	BaseModeName:              runtime.IsolationModeProcess,
 	AgentProvisionedByBackend: false,
-	// Source the Swift wrapper that auto-adds --disable-sandbox for Swift PM
-	// commands inside the macOS sandbox.
-	AgentLaunchPrefix:       "source ~/.swift-wrapper.sh && ",
-	SupportedIsolationModes: nil,
+	SupportedIsolationModes:   nil,
 	Capabilities: runtime.BackendCaps{
 		NetworkIsolation:   false,
 		OverlayDirs:        false,

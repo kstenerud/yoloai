@@ -54,13 +54,7 @@ var descriptor = runtime.BackendDescriptor{
 	InstallHint:               "brew install cirruslabs/cli/tart",
 	BaseModeName:              runtime.IsolationModeVM,
 	AgentProvisionedByBackend: true,
-	// Prepend the provisioned tool dirs to PATH so the agent launches from a
-	// non-login shell (tart exec bash -c does not source ~/.zprofile). Claude
-	// Code is installed natively in ~/.local/bin; node@22 is keg-only at
-	// /opt/homebrew/opt/node@22/bin. Mirrors the login PATH composed in the base
-	// image's ~/.zprofile (see build.go provisionCommands).
-	AgentLaunchPrefix:       `PATH="$HOME/.local/bin:/opt/homebrew/opt/node@22/bin:/opt/homebrew/bin:$PATH" `,
-	SupportedIsolationModes: nil,
+	SupportedIsolationModes:   nil,
 	Capabilities: runtime.BackendCaps{
 		NetworkIsolation:   false,
 		OverlayDirs:        false,

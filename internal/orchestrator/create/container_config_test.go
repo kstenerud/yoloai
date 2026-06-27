@@ -22,7 +22,8 @@ import (
 func TestBuildContainerConfig_LaunchPrefixStored(t *testing.T) {
 	// W1a/W1b: the wrap prefix passed in is stored verbatim as the single source
 	// of truth. At runtime, Python and Go restart both read agent_launch_prefix
-	// (unconditionally) from descriptor.AgentLaunchPrefix.
+	// (unconditionally) from runtime-config.json; the create-time source of the
+	// constant is launch.AgentLaunchPrefix (no longer the runtime descriptor).
 	agentDef := agent.GetAgent("claude")
 	prefix := `PATH="/opt/homebrew/opt/node/bin:$PATH" `
 	data, err := buildContainerConfig(config.NewLayout(t.TempDir()), agentDef, "claude", prefix, "default", "/tmp", false, false, nil, nil, nil, nil, 0, nil, "test", "", "", false, "", nil, false)

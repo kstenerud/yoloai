@@ -16,7 +16,24 @@ finished items to the "Verified" section at the bottom.
 
 ## Pending
 
-_(none)_
+### V3 — agent-launch prefix still applied after the AgentLaunchPrefix reshape (confirmatory)
+**Why Mac:** the per-backend agent-launch wrap moved off the public `runtime.BackendDescriptor`
+(`AgentLaunchPrefix`) into the orchestrator's launch layer (`internal/orchestrator/launch/prefix.go`)
+so the substrate descriptor stays agent-free (D97 / the Move). The change is intended to be
+**byte-identical** in behavior — the same constant is written to `runtime-config.json`'s
+`agent_launch_prefix` and applied the same way (`sandbox-setup.py` in-sandbox + Go `restart.go`) —
+but only Tart (PATH= wrap) and Seatbelt (`source ~/.swift-wrapper.sh`) have a non-empty prefix, and
+that application path runs only on macOS. This is a low-risk confirmatory check.
+**Setup:** pull `substrate-move`, `make build`. For each of seatbelt + tart, create+run a sandbox
+(`--agent claude` or `--agent test`).
+**Checks (both backends):**
+1. `cat ~/.yoloai/sandboxes/<name>/runtime-config.json | grep agent_launch_prefix` shows the expected
+   wrap — seatbelt: `source ~/.swift-wrapper.sh && `; tart: the `PATH="$HOME/.local/bin:…" ` string.
+2. The agent actually launches and reaches `done`/idle (i.e. the agent binary is found on PATH for
+   tart / runs under the swift wrapper for seatbelt) — same as before the reshape.
+3. (Optional) `yoloai system migrate` on a pre-existing sandbox still backfills the same
+   `agent_launch_prefix` (the migration resolver now sources from the launch table, not the descriptor).
+Expected: identical to pre-reshape behavior. Report ✅/❌ + the grep output.
 
 ---
 

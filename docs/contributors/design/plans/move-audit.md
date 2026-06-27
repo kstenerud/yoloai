@@ -201,6 +201,25 @@ applies to **`runtime`+`store`+`copyflow`**, gated solely on the `runtime`
 prefix-application needs the mac queue. (User chose agent-first + narrow-the-surface,
 2026-06-27; the narrowing was already D89's design — `Definition` stays internal.)
 
+**Update (2026-06-27) — `AgentLaunchPrefix` cleared; runtime Move-unblocked.** The
+per-backend agent-launch wrap moved off `runtime.BackendDescriptor` into the
+orchestrator's launch layer (`internal/orchestrator/launch/prefix.go`, keyed by
+backend type) — it is launch-assembly knowledge, not a substrate fact, so it lives
+above the substrate (D97 / arch-principles §4). The reshape is behavior-preserving:
+the same constant is written to `runtime-config.json`'s `agent_launch_prefix` and
+applied unchanged in-sandbox (`sandbox-setup.py`) and on restart; only the
+create-time *source* and the migration resolver moved (both now read the launch
+table). The two readers (`create.go`, `system.go`'s migration resolver) were
+repointed; the DTO field + application path are untouched. Tart/Seatbelt confirmatory
+smoke is queued as **V3** (low risk — the wrap value/application are byte-identical).
+With this, `runtime`'s only remaining "Agent"-named export is `AgentProvisionedByBackend`
+(a kept substrate fact-query), and `InteractiveSession`/tmux stays as an accepted
+substrate primitive (D99; IOSession is the later ergonomic). **`runtime` is now
+Move-ready**, so `store` (→runtime) and `copyflow` (→runtime,store) are unblocked.
+The next step is the mechanical `git mv runtime store copyflow` + import sweep +
+`.golangci.yml` fence repoint (depguard L66/98/100 + the runtime-glob L112) +
+`make releasetest`.
+
 ## Cross-references
 
 - [public-layering.md](public-layering.md) (the Frame this audits), the D84–D96
