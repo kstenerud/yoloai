@@ -149,6 +149,52 @@ then converts). So microvm is **not** a from-scratch image builder:
   validated. (The trixie bump also moved aider to a uv-managed Python 3.12 — aider caps
   requires-python at <3.13; unrelated to microvm but part of the same base change.)
 
+## Increment 2a — `Setup()`/`IsReady()` concrete plan (mechanism pinned 2026-06-27)
+
+Mirror **containerd's `Setup`** (`runtime/containerd/image.go:51`) for the build half,
+then add the convert+extract half. Reusable exported docker helpers:
+`dockerrt.AcquireBaseLock(layout, name) (func(), error)` · `dockerrt.NeedsBuild(layout,
+sourceDir) bool` · `dockerrt.RecordBuildChecksum(layout, sourceDir)` ·
+`dockerrt.CreateBuildContext() (io.Reader, error)` (the base-resources tar) · the build
+itself is `docker build -t <tag> -f Dockerfile -` with the tar on stdin and
+`layout.Env().EnvForDockerBuild()`.
+
+**Setup(ctx, layout, sourceDir, output, logger, force):**
+1. `unlock := AcquireBaseLock(layout, "yoloai-base")`; defer. (Shared with docker/containerd
+   — all build the same base.)
+2. If `!force` and `IsReady()` (golden ext4 + vmlinuz + initrd all present + checksum
+   current), return.
+3. **Build `yoloai-base` via docker** — same as containerd's `buildDockerImage` (LookPath
+   docker; `CreateBuildContext()`; `docker build -t yoloai-base -f Dockerfile -`). Errors
+   if docker absent (microvm needs docker at *build* time — accepted, like containerd).
+4. **Build the microvm layer** — `docker build -t yoloai-base-microvm -` with a tiny
+   in-memory tar holding just an embedded `FROM yoloai-base` Dockerfile that does
+   `RUN apt-get install -y --no-install-recommends linux-image-amd64 qemu-guest-agent`
+   (systemd-sysv is already in yoloai-base's debian base? verify; add if not). Embed this
+   Dockerfile under `runtime/microvm/resources/` via `go:embed`.
+5. **Convert → golden ext4** — `skopeo copy docker-daemon:yoloai-base-microvm
+   oci:<tmp>:latest` → `umoci unpack` → `mkfs.ext4 -F -d <rootfs> <DataDir>/microvm/
+   yoloai-base-microvm.ext4`.
+6. **Extract kernel+initrd** — copy `<rootfs>/boot/vmlinuz-*` and `/boot/initrd.img-*`
+   to `<DataDir>/microvm/{vmlinuz,initrd.img}` (newest if multiple).
+7. `RecordBuildChecksum(layout, sourceDir)`.
+
+**IsReady:** `<DataDir>/microvm/{yoloai-base-microvm.ext4,vmlinuz,initrd.img}` exist
+(extend the current kernel-only stub).
+
+**OPEN SUB-DECISION (resolve in 2a): rootfs ownership when unprivileged.** `umoci unpack`
++ `mkfs.ext4 -d` need the rootfs tree **root-owned** for a correct distro rootfs (systemd,
+setuid bins). The spike used `sudo`. Production can't assume sudo. Options: (a) require
+root for `Setup` only (one-off; document it) — simplest; (b) `unshare --map-root-user`
+userns so the unpacked tree appears 0-owned to `mkfs.ext4 -d` (rootless, but needs
+userns enabled); (c) `umoci unpack --rootless` + accept uid-mapped ownership (likely
+breaks systemd). **Lean (b) with (a) as the documented fallback.** This may want a tiny
+spike (`unshare -r` + `mkfs.ext4 -d` round-trip) before coding. NOTE this is **Linux-only
+Setup** — fine, the whole package is `//go:build linux`.
+
+**Profiles:** for a profile P, build `yoloai-<P>-microvm` (`FROM yoloai-<P>`) and a
+per-profile golden ext4; the base flow above is the P="" case.
+
 ## Build sub-steps (sizes from the scope)
 
 - **(a) Rootfs builder — `Setup()`/`IsReady()` (M):** build the `…-microvm` image via
