@@ -29,7 +29,7 @@ DOCKER_HOST_ENV := $(DOCKER_HOST)
 DOCKER_HOST_RESOLVED = $(if $(DOCKER_HOST_ENV),$(DOCKER_HOST_ENV),$(shell docker context inspect --format '{{.Endpoints.docker.Host}}' 2>/dev/null))
 integration e2e base-image smoketest smoketest-full: export DOCKER_HOST = $(DOCKER_HOST_RESOLVED)
 
-.PHONY: build test fmt lint vet-tagged tidy-check govulncheck hadolint actionlint check cover integration e2e integration-podman integration-containerd integration-apple integration-seatbelt integration-tart python-test python-typecheck ensure-python-venv setup-dev-python smoketest smoketest-full releasetest setcap clean
+.PHONY: build test fmt lint vet-tagged crosscheck tidy-check govulncheck hadolint actionlint check cover integration e2e integration-podman integration-containerd integration-apple integration-seatbelt integration-tart python-test python-typecheck ensure-python-venv setup-dev-python smoketest smoketest-full releasetest setcap clean
 
 # Always invoke `go build` and let it decide whether to relink. `go build` does
 # complete, authoritative dependency tracking — crucially including //go:embed'd
@@ -93,8 +93,20 @@ actionlint:
 vet-tagged:
 	go vet -tags 'integration e2e' ./...
 
+## crosscheck: cross-compile + typecheck the whole tree (incl. the cmd/yoloai
+## binary AND every _test.go) for macOS — the non-host platform. `make check`
+## otherwise only builds for the host (linux), so a darwin-only break — a backend
+## whose Go deps build only on linux, an unconditional import of one, a //go:build
+## typo — used to surface only when someone ran `make releasetest` on a Mac.
+## `go vet` cross-compiles every package and test file for darwin without
+## executing them (a darwin binary can't run on linux), so it stays hermetic and
+## fast. Windows is not a target (the project runs under WSL = linux; docker/tart
+## are //go:build !windows), so only darwin is cross-checked.
+crosscheck:
+	GOOS=darwin GOARCH=arm64 go vet ./...
+
 ## check: run all CI checks locally (same as PR checks)
-check: lint vet-tagged tidy-check hadolint actionlint test python-test
+check: lint vet-tagged crosscheck tidy-check hadolint actionlint test python-test
 
 ## ensure-python-venv: provision the uv-managed venv on demand (idempotent).
 ## When uv is present this syncs the lockfile-pinned tools into .venv; when uv
