@@ -23,6 +23,14 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 
 ## Findings
 
+### DF52 — claude-code >=2.1.178 stalls agent smokes on new interactive prompts (claude pinned to 2.1.177 as a stopgap)
+
+- **Discovered:** 2026-06-27 · **Workstream:** `substrate-move` releasetest verification (clone smoke)
+- **Severity:** MEDIUM
+- **Disposition:** STOPGAP-IN-PLACE (pin); proper fix PARKED
+- **Description:** A fresh `yoloai-base` build pulls the latest `@anthropic-ai/claude-code`. Versions newer than the smoke baseline 2.1.177 (observed on **2.1.195**) added an interactive **"Try the new fullscreen renderer?"** onboarding prompt and changed `--dangerously-skip-permissions` handling so claude shows a **bash permission prompt despite the flag**. yoloai's prompt automation (wait-for-`❯`, `settings.skipDangerousModePermissionPrompt`) doesn't dismiss either, so the agent stalls waiting for keyboard input and the smoke `done` sentinel never fires (it never runs `touch /yoloai/files/done`). The infra (clone/launch/keepalive/tmux/prompt-delivery) is fine — only the agent-under-test changed. **Stopgap:** pinned claude-code to **2.1.177** in the Dockerfile (against the deliberate no-pin policy; marked temporary). **Proper fix (un-pin after):** update the claude agent's prompt/permission handling for the newer client — disable the fullscreen/onboarding prompt (likely a `CLAUDE_CODE_*` env or a settings key) and re-confirm the permission bypass; then drop the pin so the client tracks the live API again.
+- **Pointer:** `runtime/docker/resources/Dockerfile` (the pin + rationale); `internal/agent/agent.go:184,218` (`--dangerously-skip-permissions`, `skipDangerousModePermissionPrompt`); smoke autopsy `.testcache/runs/yoloai-smoketest-20260627-075751.608/sandboxes/clone/attempt1/`.
+
 ### DF51 — Narrative/design docs still reference the pre-Move `internal/{runtime,store,copyflow}` paths
 
 - **Discovered:** 2026-06-27 · **Workstream:** public-layering Phase 3 (the Move, commit `10004e1a`)

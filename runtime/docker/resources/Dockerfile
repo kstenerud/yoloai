@@ -121,8 +121,17 @@ ENV DISABLE_INSTALLATION_CHECKS=1
 # DL3016 (pin npm versions) suppressed: see the comment above — agents'
 # server-side APIs evolve continuously and the CLI clients must track. A pin
 # would lock us to a stale client that fails against the live API within weeks.
+#
+# EXCEPTION (TEMPORARY): claude-code is pinned to 2.1.177 — the last version the
+# agent smokes are verified against. Newer clients (>=2.1.178, observed on 2.1.195)
+# added an interactive "fullscreen renderer" onboarding prompt and changed
+# --dangerously-skip-permissions handling, so the agent stalls on a prompt instead
+# of completing its turn (the smoke 'done' sentinel never fires). This pin is a
+# stopgap to keep smokes deterministic; the real fix is updating yoloai's claude
+# prompt/permission handling for the newer client — tracked as DF52. Revisit and
+# un-pin once that lands. The other agents stay unpinned (track latest).
 # hadolint ignore=DL3016
-RUN npm install -g @anthropic-ai/claude-code \
+RUN npm install -g @anthropic-ai/claude-code@2.1.177 \
     && npm install -g @google/gemini-cli \
     && npm install -g @openai/codex \
     && npm install -g opencode-ai
