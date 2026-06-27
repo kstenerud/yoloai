@@ -718,54 +718,6 @@ func mountDirName(hostPath string) string {
 	return "m-" + filepath.Base(hostPath)
 }
 
-// BuildNetworkArgs returns network-related arguments for tart run based on
-// the InstanceConfig. Exported for testing.
-func BuildNetworkArgs(cfg runtime.InstanceConfig) []string {
-	var args []string
-
-	switch {
-	case cfg.NetworkMode == "none" && len(cfg.Ports) > 0:
-		// Isolated network with specific port forwarding
-		args = append(args, "--net-softnet")
-		args = append(args, "--net-softnet-block=0.0.0.0/0")
-		args = append(args, "--net-softnet-block=::/0")
-		for _, p := range cfg.Ports {
-			proto := p.Protocol
-			if proto == "" {
-				proto = "tcp"
-			}
-			args = append(args, fmt.Sprintf("--net-softnet-allow=%d/%s", p.ContainerPort, proto))
-		}
-		args = append(args, portForwardArgs(cfg.Ports)...)
-
-	case cfg.NetworkMode == "none":
-		// Fully isolated: block all traffic
-		args = append(args, "--net-softnet")
-		args = append(args, "--net-softnet-block=0.0.0.0/0")
-		args = append(args, "--net-softnet-block=::/0")
-
-	case len(cfg.Ports) > 0:
-		// Port forwarding with default networking
-		args = append(args, "--net-softnet")
-		args = append(args, portForwardArgs(cfg.Ports)...)
-	}
-
-	return args
-}
-
-// portForwardArgs builds --net-softnet-expose flags from port mappings.
-func portForwardArgs(ports []runtime.PortMapping) []string {
-	if len(ports) == 0 {
-		return nil
-	}
-
-	var pairs []string
-	for _, p := range ports {
-		pairs = append(pairs, fmt.Sprintf("%d:%d", p.HostPort, p.ContainerPort))
-	}
-	return []string{"--net-softnet-expose=" + strings.Join(pairs, ",")}
-}
-
 // execArgs builds the arguments for tart exec.
 // tart exec syntax: tart exec <vm-name> <command> [args...]
 func execArgs(vmName string, cmd ...string) []string {

@@ -15,26 +15,6 @@ import (
 	"github.com/kstenerud/yoloai/runtime/monitor"
 )
 
-// BuildMountSymlinkCmds returns shell commands to create symlinks from
-// expected mount targets to their actual VirtioFS paths. Exported for testing.
-func BuildMountSymlinkCmds(mounts []runtime.MountSpec, dirNames map[string]string) []string {
-	var cmds []string
-	for _, m := range mounts {
-		dirName, ok := dirNames[m.HostPath]
-		if !ok {
-			continue
-		}
-		vfsPath := filepath.Join(sharedDirVMPath, dirName)
-		if vfsPath == m.ContainerPath {
-			continue // no symlink needed
-		}
-		parent := filepath.Dir(m.ContainerPath)
-		cmds = append(cmds, fmt.Sprintf("sudo mkdir -p %q", parent))
-		cmds = append(cmds, fmt.Sprintf("sudo ln -sf %q %q", vfsPath, m.ContainerPath))
-	}
-	return cmds
-}
-
 // remapTargetPath translates Docker/Linux-style mount targets to macOS VM paths.
 // - /home/yoloai/... → /Users/admin/...
 // - /yoloai/... → /Users/admin/.yoloai/... (sandbox control files)
