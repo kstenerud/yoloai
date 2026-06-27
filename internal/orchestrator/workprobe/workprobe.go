@@ -1,6 +1,6 @@
 // ABOUTME: DetectChanges (host probe) and HasUnappliedWorkVia (runtime-aware
 // ABOUTME: probe): git-status helpers shared by inspect, create, and lifecycle.
-package copyflow
+package workprobe
 
 import (
 	"context"

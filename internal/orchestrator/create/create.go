@@ -16,7 +16,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kstenerud/yoloai/copyflow"
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/envsetup"
@@ -29,6 +28,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/orchestrator/launch"
 	"github.com/kstenerud/yoloai/internal/orchestrator/runtimeconfig"
 	"github.com/kstenerud/yoloai/internal/orchestrator/state"
+	"github.com/kstenerud/yoloai/internal/orchestrator/workprobe"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/store"
 	"github.com/kstenerud/yoloai/yoerrors"
@@ -215,12 +215,12 @@ func unappliedWorkError(ctx context.Context, g *git.Git, name, workDir, baseline
 	if inDir != "" {
 		loc = " in " + inDir
 	}
-	switch copyflow.HasUnappliedWorkVia(ctx, g, workDir, baselineSHA) {
-	case copyflow.WorkDirty:
+	switch workprobe.HasUnappliedWorkVia(ctx, g, workDir, baselineSHA) {
+	case workprobe.WorkDirty:
 		return fmt.Errorf("sandbox %q has unapplied changes%s (use --abandon-unapplied to replace anyway, or 'yoloai apply' first)", name, loc)
-	case copyflow.WorkUnknown:
+	case workprobe.WorkUnknown:
 		return fmt.Errorf("sandbox %q is stopped, so unapplied changes%s cannot be verified (start it to check, or use --abandon-unapplied to replace anyway)", name, loc)
-	case copyflow.WorkClean:
+	case workprobe.WorkClean:
 	}
 	return nil
 }
