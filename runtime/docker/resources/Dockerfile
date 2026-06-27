@@ -7,11 +7,18 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 # with no behavioural benefit. Security updates flow through `apt-get update`,
 # not version bumps. We pin only the components whose behaviour matters (Node,
 # Go, gosu, rustup) further down.
+#
+# binutils-gold: the Go toolchain links cgo binaries with `-fuse-ld=gold` on
+# linux/arm64 (a long-standing BFD-linker workaround). Debian trixie split gold
+# out of the `binutils` package, so without this an arm64 base build fails with
+# "cannot find 'ld'" when go installs golangci-lint. (No-op on amd64, which uses
+# bfd.) See docs/contributors/backend-idiosyncrasies.md.
 # hadolint ignore=DL3008
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tmux \
     git \
     build-essential \
+    binutils-gold \
     cmake \
     clang \
     python3 \
