@@ -115,6 +115,17 @@ func SelectBackend(ctx context.Context, preferred BackendType, isolation Isolati
 		return BackendApple, ""
 	}
 
+	// microvm: Linux/KVM lightweight VM isolation via QEMU -M microvm.
+	// Reached only via --isolation microvm; Linux-only with no container
+	// fallback — IsolationAvailability rejects it off-Linux before we get
+	// here, and on Linux a registered-but-unprovisioned backend surfaces its
+	// own prerequisite error via RequiredCapabilities.
+	if isolation == IsolationModeMicroVM {
+		if IsAvailable(BackendMicroVM) {
+			return BackendMicroVM, ""
+		}
+	}
+
 	// Isolation-based routing: vm / vm-enhanced prefer containerd (Kata),
 	// falling through to the container slot when containerd isn't
 	// available on this host.

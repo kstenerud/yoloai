@@ -352,6 +352,9 @@ linters:
       - path: "runtime/containerd/containerd\\.go"
         linters: [forbidigo]
         text: "\\.EnvForContainerdExec"
+      - path: "runtime/microvm/microvm\\.go"
+        linters: [forbidigo]
+        text: "\\.EnvForMicroVMExec"
       - path: "runtime/seatbelt/seatbelt\\.go"
         linters: [forbidigo]
         text: "\\.EnvForSeatbelt(Exec|Sandbox)"

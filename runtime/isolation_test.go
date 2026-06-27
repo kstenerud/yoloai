@@ -117,6 +117,11 @@ func TestIsolationAvailability(t *testing.T) {
 		{"enhanced linux host ok", IsolationModeContainerEnhanced, "", "linux", 0, false, true},
 		// Plain container is always fine.
 		{"container darwin host", IsolationModeContainer, "", "darwin", 0, false, true},
+		// microvm: Linux/KVM only. Available on a Linux host targeting Linux;
+		// rejected on a darwin host or when targeting macOS-native backends.
+		{"microvm linux host ok", IsolationModeMicroVM, "", "linux", 0, false, true},
+		{"microvm darwin host rejected", IsolationModeMicroVM, "", "darwin", 0, false, false},
+		{"microvm os=mac rejected", IsolationModeMicroVM, "mac", "linux", 0, false, false},
 	}
 	for _, c := range cases {
 		got, _, _ := IsolationAvailability(c.isolation, c.targetOS, c.hostOS, c.macMajor, c.container)

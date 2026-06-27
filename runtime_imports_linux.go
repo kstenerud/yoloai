@@ -6,4 +6,5 @@ package yoloai
 
 import (
 	_ "github.com/kstenerud/yoloai/runtime/containerd" // register backend
+	_ "github.com/kstenerud/yoloai/runtime/microvm"    // register backend
 )

@@ -134,6 +134,12 @@ func IsolationAvailability(isolation IsolationMode, targetOS, hostOS string, hos
 		"  container   macOS sandbox-exec (seatbelt)\n" +
 		"  vm          Full macOS VM (Tart)"
 
+	// microvm is Linux/KVM only — handled up front so the macOS-precedence
+	// switch below stays focused on the container/Kata/apple/tart modes.
+	if isolation == IsolationModeMicroVM {
+		return microvmAvailability(hostOS, targetOS)
+	}
+
 	// Cases are ordered by precedence: the first matching rule wins.
 	switch {
 	case hostOS == "darwin" && targetOS != "mac" && isolation == IsolationModeVM:
@@ -176,6 +182,19 @@ func IsolationAvailability(isolation IsolationMode, targetOS, hostOS string, hos
 			macAlternatives
 	}
 
+	return true, "", ""
+}
+
+// microvmAvailability is the `--isolation microvm` verdict: QEMU -M microvm
+// runs on Linux/KVM hosts only — there is no macOS backend for it (use
+// --isolation vm for Apple container / Tart on macOS).
+func microvmAvailability(hostOS, targetOS string) (available bool, reason, help string) {
+	if hostOS != "linux" || targetOS == "mac" {
+		return false,
+			"--isolation microvm requires a Linux host with KVM.",
+			"microvm runs lightweight QEMU VMs on Linux/KVM only. Use a Linux host, or\n" +
+				"on macOS use --isolation vm for VM isolation (Apple container / Tart)."
+	}
 	return true, "", ""
 }
 

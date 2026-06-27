@@ -26,5 +26,6 @@ const (
 	IsolationModeContainerPrivileged IsolationMode = "container-privileged"
 	IsolationModeVM                  IsolationMode = "vm"
 	IsolationModeVMEnhanced          IsolationMode = "vm-enhanced"
+	IsolationModeMicroVM             IsolationMode = "microvm" // QEMU -M microvm (Linux/KVM); microvm backend's base mode
 	IsolationModeProcess             IsolationMode = "process" // seatbelt's base mode
 )

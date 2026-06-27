@@ -22,5 +22,6 @@ const (
 	BackendTart       BackendType = "tart"
 	BackendSeatbelt   BackendType = "seatbelt"
 	BackendContainerd BackendType = "containerd"
-	BackendApple      BackendType = "apple" // Apple `container` — Linux OCI in per-container VMs (macOS 26+)
+	BackendApple      BackendType = "apple"   // Apple `container` — Linux OCI in per-container VMs (macOS 26+)
+	BackendMicroVM    BackendType = "microvm" // QEMU -M microvm — Linux/KVM lightweight VMs (Linux host only)
 )

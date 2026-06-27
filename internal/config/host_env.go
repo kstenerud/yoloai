@@ -86,6 +86,13 @@ var containerdExecAllowlist = []string{
 	"XDG_RUNTIME_DIR",
 }
 
+// microvmExecAllowlist: the host CLI tools the microvm backend shells out to
+// (skopeo, umoci, qemu, virtiofsd, mkfs.ext4). PATH locates them; SSL_CERT_*
+// back skopeo's registry TLS; TMPDIR/XDG_RUNTIME_DIR back build scratch + sockets.
+var microvmExecAllowlist = []string{
+	"PATH", "TMPDIR", "SSL_CERT_FILE", "SSL_CERT_DIR", "XDG_RUNTIME_DIR",
+}
+
 // tartEnvAllowlist: the tart CLI and the tools it spawns. HOME and TART_HOME are
 // overridden from layout (not allowlisted) — TART_HOME is load-bearing because
 // tart resolves its store via NSHomeDirectory(), so overriding $HOME alone does
@@ -189,6 +196,13 @@ func (h HostEnv) EnvForDockerBuild() []string {
 // subprocesses. HOME is forced to the layout home.
 func (h HostEnv) EnvForContainerdExec() []string {
 	return sysexec.Curated(h.vars, containerdExecAllowlist, map[string]string{"HOME": h.homeDir})
+}
+
+// EnvForMicroVMExec is the environment for the microvm backend's host CLI
+// subprocesses (skopeo, umoci, qemu, virtiofsd). HOME is forced to the layout
+// home so skopeo reads only the layout-scoped registry credentials.
+func (h HostEnv) EnvForMicroVMExec() []string {
+	return sysexec.Curated(h.vars, microvmExecAllowlist, map[string]string{"HOME": h.homeDir})
 }
 
 // EnvForSeatbeltExec is the environment for seatbelt host subprocesses
