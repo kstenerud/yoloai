@@ -5,8 +5,8 @@ package launch
 import (
 	"context"
 
-	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/runtime/caps"
+	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/runtime/caps"
 )
 
 // CheckIsolationPrerequisites validates isolation prerequisites via RequiredCapabilities.

@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/kstenerud/yoloai/internal/fileutil"
-	"github.com/kstenerud/yoloai/internal/runtime"
+	"github.com/kstenerud/yoloai/runtime"
 )
 
 // ─── high-level ops ──────────────────────────────────────────────────────────

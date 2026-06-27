@@ -31,7 +31,7 @@ func TestSchemaVersion_GoPythonAgreement(t *testing.T) {
 		t.Fatal("runtime.Caller failed")
 	}
 	repoRoot := filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(thisFile)))) // runtimeconfig -> sandbox -> internal -> repo
-	monitorDir := filepath.Join(repoRoot, "internal", "runtime", "monitor")
+	monitorDir := filepath.Join(repoRoot, "runtime", "monitor")
 
 	cases := []struct {
 		file    string

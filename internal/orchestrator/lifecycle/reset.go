@@ -11,16 +11,16 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/kstenerud/yoloai/internal/copyflow"
+	"github.com/kstenerud/yoloai/copyflow"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/git"
 	"github.com/kstenerud/yoloai/internal/orchestrator/launch"
 	"github.com/kstenerud/yoloai/internal/orchestrator/state"
 	"github.com/kstenerud/yoloai/internal/orchestrator/status"
-	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/store"
 	"github.com/kstenerud/yoloai/internal/sysexec"
 	"github.com/kstenerud/yoloai/internal/workspace"
+	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/store"
 )
 
 // ResetOptions holds parameters for the reset command.

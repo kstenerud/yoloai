@@ -8,7 +8,7 @@ import (
 	"log/slog"
 
 	"github.com/kstenerud/yoloai/internal/config"
-	"github.com/kstenerud/yoloai/internal/runtime"
+	"github.com/kstenerud/yoloai/runtime"
 )
 
 // Compile-time check.

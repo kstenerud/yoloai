@@ -5,7 +5,7 @@ package yoloai
 import (
 	"testing"
 
-	tartrt "github.com/kstenerud/yoloai/internal/runtime/tart"
+	tartrt "github.com/kstenerud/yoloai/runtime/tart"
 )
 
 func TestCacheKeyFromBaseName(t *testing.T) {

@@ -13,9 +13,9 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/orchestrator/agentcfg"
-	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/store"
 	"github.com/kstenerud/yoloai/internal/testutil"
+	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/store"
 )
 
 // lifecycleMockRuntime extends mockRuntime for lifecycle-related tests in

@@ -4,7 +4,7 @@
 package runtimeconfig
 
 import (
-	"github.com/kstenerud/yoloai/internal/runtime"
+	"github.com/kstenerud/yoloai/runtime"
 )
 
 // IdleSupport is the wire form of an agent's idle-detection capabilities as

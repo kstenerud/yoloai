@@ -12,8 +12,8 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
-	"github.com/kstenerud/yoloai/internal/store"
 	"github.com/kstenerud/yoloai/internal/sysexec"
+	"github.com/kstenerud/yoloai/store"
 )
 
 // FilesDir returns the host path of the sandbox's file-exchange directory.

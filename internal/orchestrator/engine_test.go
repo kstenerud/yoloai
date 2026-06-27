@@ -17,8 +17,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kstenerud/yoloai/internal/config"
-	"github.com/kstenerud/yoloai/internal/runtime"
-	dockerrt "github.com/kstenerud/yoloai/internal/runtime/docker"
+	"github.com/kstenerud/yoloai/runtime"
+	dockerrt "github.com/kstenerud/yoloai/runtime/docker"
 )
 
 var errMockNotImplemented = fmt.Errorf("mock: not implemented")

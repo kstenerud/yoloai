@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/store"
+	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
 

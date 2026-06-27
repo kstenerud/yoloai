@@ -12,8 +12,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kstenerud/yoloai/internal/config"
-	"github.com/kstenerud/yoloai/internal/store"
 	"github.com/kstenerud/yoloai/internal/testutil"
+	"github.com/kstenerud/yoloai/store"
 )
 
 func TestTransferTags_EmptyIsNoOp(t *testing.T) {

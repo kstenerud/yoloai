@@ -4,7 +4,7 @@
 
 package yoloai
 
-import "github.com/kstenerud/yoloai/internal/runtime/caps"
+import "github.com/kstenerud/yoloai/runtime/caps"
 
 // Availability classifies a (backend, isolation-mode) combination after all of
 // its host-capability checks have run.

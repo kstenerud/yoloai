@@ -13,12 +13,12 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/kstenerud/yoloai/copyflow"
 	"github.com/kstenerud/yoloai/internal/config"
-	"github.com/kstenerud/yoloai/internal/copyflow"
 	"github.com/kstenerud/yoloai/internal/git"
 	"github.com/kstenerud/yoloai/internal/orchestrator/agentcfg"
-	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/store"
+	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/store"
 )
 
 // Status represents the current state of a sandbox.

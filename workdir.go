@@ -7,9 +7,9 @@ package yoloai
 import (
 	"context"
 
-	"github.com/kstenerud/yoloai/internal/copyflow"
+	"github.com/kstenerud/yoloai/copyflow"
 	"github.com/kstenerud/yoloai/internal/orchestrator"
-	"github.com/kstenerud/yoloai/internal/store"
+	"github.com/kstenerud/yoloai/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
 

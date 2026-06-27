@@ -12,8 +12,8 @@ import (
 	"github.com/kstenerud/yoloai/internal/orchestrator/create"
 	"github.com/kstenerud/yoloai/internal/orchestrator/lifecycle"
 	"github.com/kstenerud/yoloai/internal/orchestrator/state"
-	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/store"
+	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/store"
 )
 
 // Start launches (or relaunches) the container for an existing sandbox. Opens

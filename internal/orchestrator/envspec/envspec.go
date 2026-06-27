@@ -7,7 +7,7 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/envsetup"
-	"github.com/kstenerud/yoloai/internal/store"
+	"github.com/kstenerud/yoloai/store"
 )
 
 // BuildEnvSpec compiles an agent.Definition into an agent-agnostic

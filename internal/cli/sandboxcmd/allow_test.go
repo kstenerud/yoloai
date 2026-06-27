@@ -7,7 +7,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/kstenerud/yoloai/internal/store"
+	"github.com/kstenerud/yoloai/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

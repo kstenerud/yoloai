@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/kstenerud/yoloai/internal/cli/clitest"
-	"github.com/kstenerud/yoloai/internal/store"
+	"github.com/kstenerud/yoloai/store"
 	"github.com/stretchr/testify/require"
 )
 

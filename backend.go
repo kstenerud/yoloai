@@ -8,7 +8,7 @@ package yoloai
 import (
 	"context"
 
-	"github.com/kstenerud/yoloai/internal/runtime"
+	"github.com/kstenerud/yoloai/runtime"
 )
 
 // DaemonEnvVars names the host-env keys backend selection consults for
@@ -65,7 +65,7 @@ func IsolationAvailability(isolation IsolationMode, targetOS, hostOS string, hos
 
 // AppleVMHostSignals returns the host macOS major version and whether the Apple
 // `container` CLI is installed — the inputs IsolationAvailability needs to craft
-// the `--isolation vm` message on macOS. Re-exported from internal/runtime.
+// the `--isolation vm` message on macOS. Re-exported from runtime.
 func AppleVMHostSignals() (macOSMajor int, containerInstalled bool) {
 	return runtime.AppleVMHostSignals()
 }
@@ -83,7 +83,7 @@ const (
 // socket so an explicit pick reaches that exact daemon; every other id passes
 // through with an empty dockerHost. Embedders and the CLI resolve a backend
 // preference through this before selection so an aliased preference both routes
-// to docker and carries its socket pin. Re-exported from internal/runtime.
+// to docker and carries its socket pin. Re-exported from runtime.
 func ResolveContainerSystem(id BackendType, homeDir string) (backend BackendType, dockerHost string) {
 	return runtime.ResolveContainerSystem(id, homeDir)
 }

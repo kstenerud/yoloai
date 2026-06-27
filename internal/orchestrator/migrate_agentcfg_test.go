@@ -13,7 +13,7 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/orchestrator/agentcfg"
-	"github.com/kstenerud/yoloai/internal/store"
+	"github.com/kstenerud/yoloai/store"
 )
 
 // writeRawEnv writes a raw environment.json into a fresh sandbox dir under the

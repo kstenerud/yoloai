@@ -16,16 +16,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kstenerud/yoloai/copyflow"
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
-	"github.com/kstenerud/yoloai/internal/copyflow"
 	"github.com/kstenerud/yoloai/internal/git"
 	"github.com/kstenerud/yoloai/internal/orchestrator"
 	"github.com/kstenerud/yoloai/internal/orchestrator/agentcfg"
-	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/runtime/tart"
-	"github.com/kstenerud/yoloai/internal/store"
 	"github.com/kstenerud/yoloai/internal/testutil"
+	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/runtime/tart"
+	"github.com/kstenerud/yoloai/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -43,7 +43,7 @@ func tartIntegrationSetup(t *testing.T) (*orchestrator.Engine, context.Context) 
 	// Gated behind YOLOAI_TEST_TART=1 because each test clones+boots a multi-GB
 	// macOS VM. (The old "workdir symlink fails for temp dirs" note was DF27 —
 	// verified stale; the :copy path works. Runtime-level coverage now lives in
-	// internal/runtime/tart TestTartConformance.)
+	// runtime/tart TestTartConformance.)
 	if os.Getenv("YOLOAI_TEST_TART") != "1" {
 		t.Skip("skipping Tart integration test (set YOLOAI_TEST_TART=1 to enable)")
 	}

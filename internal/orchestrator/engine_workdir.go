@@ -7,10 +7,10 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/kstenerud/yoloai/internal/copyflow"
+	"github.com/kstenerud/yoloai/copyflow"
 	"github.com/kstenerud/yoloai/internal/git"
 	"github.com/kstenerud/yoloai/internal/orchestrator/agentcfg"
-	"github.com/kstenerud/yoloai/internal/store"
+	"github.com/kstenerud/yoloai/store"
 )
 
 // LoadEnvironment reads a sandbox's environment.json after confirming the

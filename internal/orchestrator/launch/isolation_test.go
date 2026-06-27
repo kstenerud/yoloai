@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kstenerud/yoloai/internal/config"
-	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/runtime/caps"
+	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/runtime/caps"
 )
 
 // Compile-time check.

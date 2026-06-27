@@ -11,8 +11,8 @@ import (
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
 	"github.com/kstenerud/yoloai/internal/orchestrator"
-	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/store"
+	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/store"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

@@ -12,8 +12,8 @@ import (
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/config"
-	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sysexec"
+	"github.com/kstenerud/yoloai/runtime"
 )
 
 // execer runs one git invocation in workDir for a scope.

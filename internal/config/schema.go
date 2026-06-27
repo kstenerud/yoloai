@@ -25,7 +25,7 @@ const LibrarySchemaVersion = 3
 // LaunchPrefixResolver maps a sandbox's stored backend type (the "backend"
 // string in environment.json) to that backend's constant agent-launch wrap
 // prefix. It is injected from a layer with runtime access (System.MigrateDataDir)
-// so this package stays free of an internal/runtime import. The resolver must
+// so this package stays free of a runtime import. The resolver must
 // be a pure lookup over static backend descriptors — it must not construct a
 // Runtime or probe for a backend binary, so a Linux host can migrate the
 // Tart/Seatbelt sandboxes it cannot itself run. An unknown backend resolves to
@@ -160,7 +160,7 @@ func CreateFreshLibrary(layout Layout) error {
 // in a layer that can import store/agentcfg.
 //
 // prefixFor resolves a sandbox's stored backend type to its constant launch
-// prefix; it is injected so this package stays free of an internal/runtime
+// prefix; it is injected so this package stays free of a runtime
 // import (see LaunchPrefixResolver).
 //
 // This is invoked only by the explicit migrate command (and direct embedders

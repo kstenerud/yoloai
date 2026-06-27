@@ -9,7 +9,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/netpolicy"
 	"github.com/kstenerud/yoloai/internal/orchestrator"
-	"github.com/kstenerud/yoloai/internal/store"
+	"github.com/kstenerud/yoloai/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
 

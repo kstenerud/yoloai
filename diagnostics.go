@@ -11,8 +11,8 @@ import (
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/config"
-	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sysexec"
+	"github.com/kstenerud/yoloai/runtime"
 )
 
 // Diagnostics is a structured, point-in-time snapshot of the host and yoloai

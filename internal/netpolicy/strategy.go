@@ -7,7 +7,7 @@ package netpolicy
 import (
 	"fmt"
 
-	"github.com/kstenerud/yoloai/internal/runtime"
+	"github.com/kstenerud/yoloai/runtime"
 )
 
 // Strategy names a mechanism for enforcing the network allowlist inside a sandbox.

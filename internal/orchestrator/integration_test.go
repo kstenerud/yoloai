@@ -12,13 +12,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kstenerud/yoloai/copyflow"
 	"github.com/kstenerud/yoloai/internal/agent"
-	"github.com/kstenerud/yoloai/internal/copyflow"
 	"github.com/kstenerud/yoloai/internal/git"
 	"github.com/kstenerud/yoloai/internal/orchestrator"
 	"github.com/kstenerud/yoloai/internal/orchestrator/agentcfg"
-	"github.com/kstenerud/yoloai/internal/store"
 	"github.com/kstenerud/yoloai/internal/testutil"
+	"github.com/kstenerud/yoloai/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

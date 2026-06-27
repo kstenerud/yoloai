@@ -16,9 +16,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kstenerud/yoloai/copyflow"
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
-	"github.com/kstenerud/yoloai/internal/copyflow"
 	"github.com/kstenerud/yoloai/internal/envsetup"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/git"
@@ -29,8 +29,8 @@ import (
 	"github.com/kstenerud/yoloai/internal/orchestrator/launch"
 	"github.com/kstenerud/yoloai/internal/orchestrator/runtimeconfig"
 	"github.com/kstenerud/yoloai/internal/orchestrator/state"
-	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/store"
+	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
 
@@ -69,7 +69,7 @@ const (
 type DirMode = store.DirMode
 
 // Re-exported DirMode constants. Canonical definitions in
-// internal/store/dirmode.go.
+// store/dirmode.go.
 const (
 	DirModeCopy    = store.DirModeCopy
 	DirModeOverlay = store.DirModeOverlay

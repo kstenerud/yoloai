@@ -5,7 +5,7 @@
 // TartBases admin handle: it parses flags, prompts, and formats output, but
 // performs no runtime work itself. The cli root injects a System factory
 // via NewCmd so this package depends only on the public yoloai surface (no
-// internal/runtime, internal/runtime/tart, or internal/cli imports).
+// runtime, runtime/tart, or internal/cli imports).
 package tart
 
 import (

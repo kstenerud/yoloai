@@ -19,9 +19,9 @@ import (
 	"github.com/kstenerud/yoloai/internal/git"
 	"github.com/kstenerud/yoloai/internal/orchestrator"
 	"github.com/kstenerud/yoloai/internal/orchestrator/launch"
-	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/runtime/caps"
-	"github.com/kstenerud/yoloai/internal/store"
+	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/runtime/caps"
+	"github.com/kstenerud/yoloai/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
 
@@ -247,11 +247,11 @@ func (s *System) Info(ctx context.Context) (*SystemInfo, error) {
 
 // VMCensus is a point-in-time accounting of host VM slots against the
 // platform's concurrent-VM limit. Re-exported (type alias) from
-// internal/runtime.
+// runtime.
 type VMCensus = runtime.VMCensus
 
 // VMSlot describes one VM occupying a host VM slot. Re-exported (type alias)
-// from internal/runtime.
+// from runtime.
 type VMSlot = runtime.VMSlot
 
 // SystemDoctorOptions filters Doctor's per-backend health checks. Empty filters

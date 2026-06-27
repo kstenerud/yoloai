@@ -2,7 +2,7 @@
 // ABOUTME: lives here, not on the public runtime descriptor (the substrate is agent-free).
 package launch
 
-import "github.com/kstenerud/yoloai/internal/runtime"
+import "github.com/kstenerud/yoloai/runtime"
 
 // agentLaunchPrefixes maps a backend type to the constant shell wrap prepended to
 // the agent launch command for that backend. A backend with no entry needs no

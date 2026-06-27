@@ -13,8 +13,8 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
-	"github.com/kstenerud/yoloai/internal/store"
 	"github.com/kstenerud/yoloai/internal/workspace"
+	"github.com/kstenerud/yoloai/store"
 )
 
 // CopyAgentFiles copies user-configured agent files into the sandbox's

@@ -14,8 +14,8 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/orchestrator"
-	dockerrt "github.com/kstenerud/yoloai/internal/runtime/docker"
 	"github.com/kstenerud/yoloai/internal/testutil"
+	dockerrt "github.com/kstenerud/yoloai/runtime/docker"
 )
 
 // TestMain builds the base Docker image once before any integration tests run.

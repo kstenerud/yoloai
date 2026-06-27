@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/kstenerud/yoloai/internal/config"
-	"github.com/kstenerud/yoloai/internal/runtime"
+	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

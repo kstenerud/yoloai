@@ -5,7 +5,7 @@ import (
 	"errors"
 
 	"github.com/kstenerud/yoloai/internal/orchestrator/create"
-	"github.com/kstenerud/yoloai/internal/store"
+	"github.com/kstenerud/yoloai/store"
 )
 
 // Sentinel errors for sandbox operations.

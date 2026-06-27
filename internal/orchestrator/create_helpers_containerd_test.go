@@ -7,8 +7,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/kstenerud/yoloai/internal/runtime"
-	containerdrt "github.com/kstenerud/yoloai/internal/runtime/containerd"
+	"github.com/kstenerud/yoloai/runtime"
+	containerdrt "github.com/kstenerud/yoloai/runtime/containerd"
 )
 
 func TestBackendCaps_Containerd(t *testing.T) {

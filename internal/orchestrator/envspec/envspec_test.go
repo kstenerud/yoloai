@@ -10,7 +10,7 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/orchestrator/envspec"
-	"github.com/kstenerud/yoloai/internal/store"
+	"github.com/kstenerud/yoloai/store"
 )
 
 func TestBuildEnvSpec_NormalAgent(t *testing.T) {

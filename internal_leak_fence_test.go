@@ -29,7 +29,7 @@ import (
 // Type aliases (`type BackendType = runtime.BackendType`) ARE allowed
 // here — they re-publish the internal type under a yoloai-root name,
 // so an embedder writing `var b yoloai.BackendType` compiles even
-// though the type's home is `internal/runtime`. Direct references to
+// though the type's home is `runtime`. Direct references to
 // an internal type that has no public alias are not allowed.
 func TestPublicAPI_NoInternalLeaks(t *testing.T) {
 	const modulePath = "github.com/kstenerud/yoloai"

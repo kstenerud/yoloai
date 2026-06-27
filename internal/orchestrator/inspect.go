@@ -4,7 +4,7 @@ package orchestrator
 
 import (
 	"github.com/kstenerud/yoloai/internal/orchestrator/status"
-	"github.com/kstenerud/yoloai/internal/store"
+	"github.com/kstenerud/yoloai/store"
 )
 
 // Status represents the current state of a sandbox. See status.Status.
