@@ -57,8 +57,18 @@ func TestSelectBackend_VMFallsThroughWhenContainerdAbsent(t *testing.T) {
 // the back-compat path the simple callers (build, library default) rely
 // on.
 func TestSelectBackend_NoRoutingDelegatesToContainerSlot(t *testing.T) {
-	gotRouted, _ := SelectBackend(context.Background(), "", IsolationModeDefault, "", nil)
-	gotDirect, _ := SelectContainerBackend(context.Background(), "", nil)
+	ctx := context.Background()
+	// On a macOS host where Apple `container` is installed, the documented default
+	// is the apple VM backend, not the container slot (darwinPrefersApple) — so the
+	// no-routing→container-slot contract this test pins does not apply there. The
+	// condition is false on Linux and on macOS without apple, where the contract
+	// holds (darwinPrefersApple gates on apple being installed, so it never fires
+	// off-darwin).
+	if darwinPrefersApple(ctx, "", IsolationModeDefault, nil) {
+		t.Skip("darwin with apple installed defaults to the apple VM backend, not the container slot")
+	}
+	gotRouted, _ := SelectBackend(ctx, "", IsolationModeDefault, "", nil)
+	gotDirect, _ := SelectContainerBackend(ctx, "", nil)
 	assert.Equal(t, gotDirect, gotRouted,
 		"empty isolation/OS must match SelectContainerBackend exactly")
 }
