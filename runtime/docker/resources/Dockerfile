@@ -1,4 +1,4 @@
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
@@ -47,7 +47,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN install -m 0755 -d /etc/apt/keyrings \
     && curl --retry 5 --retry-delay 2 --retry-all-errors -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
     && chmod a+r /etc/apt/keyrings/docker.asc \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian bookworm stable" \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian trixie stable" \
        > /etc/apt/sources.list.d/docker.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -129,10 +129,18 @@ RUN npm install -g @anthropic-ai/claude-code \
     && npm install -g @google/gemini-cli \
     && npm install -g @openai/codex \
     && npm install -g opencode-ai
-# DL3013 (pin pip versions) suppressed: aider-chat is on the same churn cadence
-# as the npm-installed AI clients above; same reasoning applies.
-# hadolint ignore=DL3013
-RUN pip install --break-system-packages --no-cache-dir aider-chat
+# Aider via uv on a bundled Python 3.12. aider-chat pins exact dependency
+# versions and caps requires-python at <3.13, so it cannot install against the
+# base image's system Python (3.13 on trixie) — a plain `pip install` backtracks
+# to an ancient release whose deps fail to build. uv installs aider isolated on
+# its own managed Python 3.12, yielding the *current* aider while keeping it
+# unpinned (this is aider's own recommended install path). Tools + bundled
+# interpreters live under /opt/uv (world-readable for the runtime yoloai user);
+# the `aider` launcher lands in /usr/local/bin.
+RUN curl --retry 5 --retry-delay 2 --retry-all-errors -LsSf https://astral.sh/uv/install.sh \
+      | env UV_INSTALL_DIR=/usr/local/bin sh \
+    && UV_TOOL_DIR=/opt/uv/tools UV_TOOL_BIN_DIR=/usr/local/bin UV_PYTHON_INSTALL_DIR=/opt/uv/python \
+       uv tool install --python 3.12 aider-chat
 
 # VS Code CLI for Remote Tunnels (code tunnel)
 RUN ARCH=$(dpkg --print-architecture | sed 's/amd64/x64/') \
