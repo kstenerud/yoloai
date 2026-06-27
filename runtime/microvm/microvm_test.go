@@ -6,7 +6,9 @@ package microvm
 // ABOUTME: host-prerequisite capability set (well-formedness, not host probing).
 
 import (
+	"archive/tar"
 	"context"
+	"io"
 	"path/filepath"
 	"testing"
 
@@ -53,8 +55,7 @@ func TestRequiredCapabilities(t *testing.T) {
 	caps := r.RequiredCapabilities(runtime.IsolationModeMicroVM)
 
 	wantIDs := map[string]bool{
-		"qemu-microvm": false, "kvm-device": false, "skopeo": false,
-		"umoci": false, "virtiofsd": false,
+		"qemu-microvm": false, "kvm-device": false, "virtiofsd": false,
 	}
 	if len(caps) != len(wantIDs) {
 		t.Fatalf("RequiredCapabilities returned %d caps, want %d", len(caps), len(wantIDs))
@@ -88,5 +89,45 @@ func TestRequiredCapabilities_ModeIndependent(t *testing.T) {
 	r := newTestRuntime(t)
 	if a, b := r.RequiredCapabilities(runtime.IsolationModeMicroVM), r.RequiredCapabilities(""); len(a) != len(b) {
 		t.Errorf("cap count differs by mode: %d vs %d", len(a), len(b))
+	}
+}
+
+// TestMicrovmBuildContext checks the in-memory build context carries exactly the
+// embedded Dockerfile and conversion script, named for `docker build -f Dockerfile -`.
+func TestMicrovmBuildContext(t *testing.T) {
+	rdr, err := microvmBuildContext()
+	if err != nil {
+		t.Fatalf("microvmBuildContext: %v", err)
+	}
+	got := map[string]int{}
+	tr := tar.NewReader(rdr)
+	for {
+		h, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("tar read: %v", err)
+		}
+		body, _ := io.ReadAll(tr)
+		got[h.Name] = len(body)
+	}
+	for _, name := range []string{"Dockerfile", "microvm-convert.sh"} {
+		if got[name] == 0 {
+			t.Errorf("build context missing or empty entry %q (got %v)", name, got)
+		}
+	}
+}
+
+// TestIsReady_FalseWhenAbsent confirms IsReady reports not-ready (no error) on a
+// fresh DataDir where Setup has never run.
+func TestIsReady_FalseWhenAbsent(t *testing.T) {
+	r := newTestRuntime(t)
+	ready, err := r.IsReady(context.Background())
+	if err != nil {
+		t.Fatalf("IsReady: %v", err)
+	}
+	if ready {
+		t.Error("IsReady = true on a fresh DataDir, want false")
 	}
 }

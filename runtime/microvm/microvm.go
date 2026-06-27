@@ -13,8 +13,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -123,8 +121,6 @@ type Runtime struct {
 	// Capability fields — built once in New(), returned by RequiredCapabilities.
 	qemuCap      caps.HostCapability
 	kvmCap       caps.HostCapability
-	skopeoCap    caps.HostCapability
-	umociCap     caps.HostCapability
 	virtiofsdCap caps.HostCapability
 }
 
@@ -139,12 +135,10 @@ var _ runtime.IsolationCapabilityProvider = (*Runtime)(nil)
 func New(_ context.Context, layout config.Layout) (*Runtime, error) {
 	r := &Runtime{
 		layout:  layout,
-		execEnv: layout.Env().EnvForMicroVMExec(), // curated CLI env (skopeo/umoci/qemu/virtiofsd)
+		execEnv: layout.Env().EnvForMicroVMExec(), // curated CLI env for qemu/virtiofsd (lifecycle)
 	}
 	r.qemuCap = buildQemuCap()
 	r.kvmCap = buildKVMCap()
-	r.skopeoCap = buildSkopeoCap()
-	r.umociCap = buildUmociCap()
 	r.virtiofsdCap = buildVirtiofsdCap()
 	return r, nil
 }
@@ -166,25 +160,7 @@ func (r *Runtime) DiagHint(instanceName string) string {
 // Close releases resources. The microvm backend holds no long-lived handles.
 func (r *Runtime) Close() error { return nil }
 
-// --- Lifecycle (implemented in later increments; see microvm-backend.md) ---
-
-// Setup builds the OCI->ext4 rootfs and provisions the bundled kernel. (sub-step a)
-func (r *Runtime) Setup(_ context.Context, _ config.Layout, _ string, _ io.Writer, _ *slog.Logger, _ bool) error {
-	return errNotImplemented
-}
-
-// IsReady reports whether the bundled kernel is provisioned. Until Setup
-// (sub-step a) lands, the kernel is never written, so this stays false.
-func (r *Runtime) IsReady(_ context.Context) (bool, error) {
-	if _, err := os.Stat(r.kernelPath()); err != nil {
-		if os.IsNotExist(err) {
-			return false, nil
-		}
-		return false, err
-	}
-	// TODO(microvm sub-step a): also verify the per-profile rootfs is built.
-	return true, nil
-}
+// --- Lifecycle (Setup/IsReady in setup.go; rest in later increments) ---
 
 // Create writes per-instance config and stages the workdir share. (sub-step b)
 func (r *Runtime) Create(_ context.Context, _ runtime.InstanceConfig) error { return errNotImplemented }

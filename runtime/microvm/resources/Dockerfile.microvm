@@ -1,0 +1,24 @@
+# ABOUTME: The microvm backend's image layer on top of yoloai-base — adds the
+# ABOUTME: distro kernel + initrd, the QEMU guest agent, a real init (systemd),
+# ABOUTME: and the in-container rootfs-conversion tooling.
+#
+# Built as `yoloai-base-microvm` (or `yoloai-<profile>-microvm`). When booted as
+# a microvm VM, init is systemd from /sbin/init; the guest agent auto-starts and
+# backs the host-side QGA exec path. When run as a container (the conversion
+# step), the entrypoint is overridden with `microvm-convert`, so the VM init is
+# never invoked there.
+FROM yoloai-base
+# DL3008: agent base tracks upstream; system kernel/agent packages follow the
+# base distro suite. Pinning would freeze the guest kernel against the distro's
+# security train (the whole point of the distro-kernel approach).
+# hadolint ignore=DL3008
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       linux-image-amd64 \
+       qemu-guest-agent \
+       systemd-sysv \
+       e2fsprogs \
+       rsync \
+    && rm -rf /var/lib/apt/lists/*
+COPY microvm-convert.sh /usr/local/bin/microvm-convert
+RUN chmod +x /usr/local/bin/microvm-convert

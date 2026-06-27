@@ -343,10 +343,10 @@ linters:
       - path: "internal/git/git\\.go"
         linters: [forbidigo]
         text: "\\.EnvForGitInvocation"
-      - path: "runtime/docker/docker\\.go"
+      - path: "runtime/docker/docker\\.go|runtime/microvm/setup\\.go"
         linters: [forbidigo]
         text: "\\.EnvForDockerExec"
-      - path: "runtime/docker/build\\.go|runtime/containerd/image\\.go"
+      - path: "runtime/docker/build\\.go|runtime/containerd/image\\.go|runtime/microvm/setup\\.go"
         linters: [forbidigo]
         text: "\\.EnvForDockerBuild"
       - path: "runtime/containerd/containerd\\.go"

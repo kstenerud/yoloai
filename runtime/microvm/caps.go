@@ -27,15 +27,15 @@ var virtiofsdSearchPaths = []string{
 	"/usr/lib/virtiofsd",
 }
 
-// RequiredCapabilities returns the host capabilities the microvm backend needs.
-// The bundled kernel and OCI->ext4 rootfs are provisioned by Setup, not listed
-// here — these are the prerequisites the user must install themselves.
+// RequiredCapabilities returns the host capabilities the microvm backend needs
+// to *run* a sandbox: QEMU, KVM, and virtiofsd. The kernel and rootfs are
+// provisioned by Setup, which builds + converts the image inside Docker — the
+// OCI tooling runs in-container, so there is no skopeo/umoci host prerequisite.
+// Docker is a build-time dependency surfaced by Setup, not a per-launch capability.
 func (r *Runtime) RequiredCapabilities(_ runtime.IsolationMode) []caps.HostCapability {
 	return []caps.HostCapability{
 		r.qemuCap,
 		r.kvmCap,
-		r.skopeoCap,
-		r.umociCap,
 		r.virtiofsdCap,
 	}
 }
@@ -86,53 +86,6 @@ func buildKVMCap() caps.HostCapability {
 			return []caps.FixStep{{
 				Description: "Add your user to the kvm group",
 				Command:     "sudo usermod -aG kvm $USER\nnewgrp kvm   # or log out and back in",
-				NeedsRoot:   true,
-			}}
-		},
-	}
-}
-
-// buildSkopeoCap checks for skopeo (OCI image pull at Setup time).
-func buildSkopeoCap() caps.HostCapability {
-	return caps.HostCapability{
-		ID:      "skopeo",
-		Summary: "skopeo",
-		Detail:  "Required to pull the profile OCI image when building the VM rootfs.",
-		Check: func(_ context.Context) error {
-			if _, err := exec.LookPath("skopeo"); err != nil {
-				return errors.New("skopeo not found in PATH")
-			}
-			return nil
-		},
-		Permanent: func(env caps.Environment) bool { return env.InContainer },
-		Fix: func(_ caps.Environment) []caps.FixStep {
-			return []caps.FixStep{{
-				Description: "Install skopeo",
-				Command:     "sudo apt install skopeo",
-				NeedsRoot:   true,
-			}}
-		},
-	}
-}
-
-// buildUmociCap checks for umoci (OCI image unpack at Setup time).
-func buildUmociCap() caps.HostCapability {
-	return caps.HostCapability{
-		ID:      "umoci",
-		Summary: "umoci",
-		Detail:  "Required to unpack the OCI image into a rootfs when building the VM disk.",
-		Check: func(_ context.Context) error {
-			if _, err := exec.LookPath("umoci"); err != nil {
-				return errors.New("umoci not found in PATH")
-			}
-			return nil
-		},
-		Permanent: func(env caps.Environment) bool { return env.InContainer },
-		Fix: func(_ caps.Environment) []caps.FixStep {
-			return []caps.FixStep{{
-				Description: "Install umoci",
-				Command:     "sudo apt install umoci",
-				URL:         "https://github.com/opencontainers/umoci",
 				NeedsRoot:   true,
 			}}
 		},
