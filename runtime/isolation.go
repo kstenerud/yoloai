@@ -99,6 +99,24 @@ func SupportsOverlayDirs(isolation IsolationMode) bool {
 	return isolation != IsolationModeContainerEnhanced
 }
 
+// SupportsAgentFreeLaunch reports whether the D88 keepalive-holder + host-side
+// Launch bring-up works under the given isolation mode. Returns false for
+// "container-enhanced" (gVisor/runsc): that path brings the box up on a neutral
+// keepalive holder and then launches sandbox-setup.py over it with a host-side
+// `exec` as the "yoloai" user. Under gVisor, `docker exec --user <name>`
+// resolves the username against the image's ORIGINAL /etc/passwd (snapshotted at
+// container start) and ignores the entrypoint's runtime uid-remap — so the
+// launched process runs as the stale image UID (e.g. 1001), which no longer owns
+// the remapped /yoloai dirs (now the host UID). sandbox-setup.py's first write
+// (its log redirect) hits EACCES, so it never runs and the agent never welds —
+// silently, since the detached launch swallows the error. runc re-reads the live
+// passwd, so it resolves correctly. gVisor therefore uses the legacy in-entrypoint
+// weld, which drops to "yoloai" internally (in-container, against the live passwd).
+// See docs/contributors/backend-idiosyncrasies.md (gVisor docker exec --user).
+func SupportsAgentFreeLaunch(isolation IsolationMode) bool {
+	return isolation != IsolationModeContainerEnhanced
+}
+
 // IsolationAvailability reports whether the given isolation mode is available
 // on the host/target-OS combination. Returns available=true with empty
 // reason/help when supported. Otherwise reason is a single user-facing

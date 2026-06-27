@@ -57,6 +57,28 @@ func TestIsolationEnforcesInSandboxIptables(t *testing.T) {
 	}
 }
 
+// TestSupportsAgentFreeLaunch guards the contract that the launch orchestrator
+// relies on: container-enhanced (gVisor) is the one isolation mode where the D88
+// keepalive+Launch host-side `exec --user yoloai` resolves against gVisor's stale
+// image passwd (wrong UID → can't write the remapped /yoloai dirs → agent never
+// welds), so it must report false and fall back to the legacy in-entrypoint weld.
+// Every other mode supports the agent-free path.
+func TestSupportsAgentFreeLaunch(t *testing.T) {
+	cases := map[IsolationMode]bool{
+		IsolationModeDefault:             true,
+		IsolationModeContainer:           true,
+		IsolationModeContainerPrivileged: true,
+		IsolationModeContainerEnhanced:   false, // gVisor — stale exec --user resolution
+		IsolationModeVM:                  true,
+		IsolationModeVMEnhanced:          true,
+	}
+	for isolation, want := range cases {
+		if got := SupportsAgentFreeLaunch(isolation); got != want {
+			t.Errorf("SupportsAgentFreeLaunch(%q) = %v, want %v", isolation, got, want)
+		}
+	}
+}
+
 // TestIsolationAvailability locks in the host/target-OS rules, with emphasis on
 // container-privileged: a darwin *host* is fine (Docker Desktop / OrbStack /
 // Podman Machine run --privileged inside their Linux VM), so the only privileged

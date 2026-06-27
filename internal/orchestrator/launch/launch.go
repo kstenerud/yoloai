@@ -56,7 +56,7 @@ func LaunchContainer(ctx context.Context, d state.Deps, st *state.State) error {
 	spec := envspec.BuildEnvSpec(st.Agent)
 	var secretsDir string
 	var secretEnv map[string]string
-	if _, agentFree := usesAgentFreeLaunch(d.Runtime); agentFree {
+	if _, agentFree := usesAgentFreeLaunch(d.Runtime, st.Isolation); agentFree {
 		// Launch path (Docker): deliver secrets via the launched process's env; no host staging, no mount, no marker.
 		secretEnv = envsetup.ResolveSecretEnv(spec, envVars, st.Layout)
 	} else {
@@ -82,15 +82,19 @@ func LaunchContainer(ctx context.Context, d state.Deps, st *state.State) error {
 	return buildAndStart(ctx, d.Runtime, st, mnts, ports, secretsDir != "", secretEnv)
 }
 
-// usesAgentFreeLaunch reports whether the backend uses the D88 agent-free
-// keepalive+Launch bring-up: it must implement runtime.ProcessLauncher AND opt in
-// via Capabilities.AgentFreeLaunch. Both the secrets-delivery choice and the
-// container bring-up gate on this single helper, so they stay in sync — a backend
-// on legacy bring-up also gets legacy /run/secrets staging. Podman inherits Launch
-// by embedding the Docker runtime but does not opt in, so it takes the legacy path.
-func usesAgentFreeLaunch(rt runtime.Backend) (runtime.ProcessLauncher, bool) {
+// usesAgentFreeLaunch reports whether this sandbox uses the D88 agent-free
+// keepalive+Launch bring-up: the backend must implement runtime.ProcessLauncher
+// AND opt in via Capabilities.AgentFreeLaunch AND the isolation mode must support
+// the host-side launch exec (runtime.SupportsAgentFreeLaunch — false for gVisor;
+// see that function). Both the secrets-delivery choice and the container bring-up
+// gate on this single helper, so they stay in sync — a sandbox on legacy bring-up
+// also gets legacy /run/secrets staging. Podman inherits Launch by embedding the
+// Docker runtime but does not opt in, so it takes the legacy path; docker under
+// container-enhanced (gVisor) opts in at the backend level but is excluded by
+// isolation, so it too takes the legacy in-entrypoint weld.
+func usesAgentFreeLaunch(rt runtime.Backend, isolation runtime.IsolationMode) (runtime.ProcessLauncher, bool) {
 	launcher, ok := runtime.LauncherOf(rt)
-	return launcher, ok && rt.Descriptor().Capabilities.AgentFreeLaunch
+	return launcher, ok && rt.Descriptor().Capabilities.AgentFreeLaunch && runtime.SupportsAgentFreeLaunch(isolation)
 }
 
 // buildAndStart constructs the runtime InstanceConfig from State and
@@ -122,7 +126,7 @@ func buildAndStart(ctx context.Context, rt runtime.Backend, st *state.State, mnt
 	// (see usesAgentFreeLaunch). Secrets delivery (above) is gated on the same
 	// condition, so the two stay in sync — a backend on the legacy bring-up also
 	// gets legacy /run/secrets staging.
-	if launcher, ok := usesAgentFreeLaunch(rt); ok {
+	if launcher, ok := usesAgentFreeLaunch(rt, st.Isolation); ok {
 		if err := startViaLaunch(ctx, rt, launcher, st, cname, instanceCfg, markerPath, hasSecrets, secretEnv); err != nil {
 			return err
 		}

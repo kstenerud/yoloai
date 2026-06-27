@@ -117,6 +117,7 @@ inclusion test first, then add a row to the index.
 | Smoke test: `stop_start/containerd-vm` fails with "agent idle for 9s+" | [QEMU: slow startup exceeds stall grace](#qemu-slow-startup-exceeds-smoke-test-stall-grace-period) |
 | Smoke test: `stop_start/tart` fails; exchange dir empty | [Tart: xcodebuild -runFirstLaunch blocks agent startup](#tart-xcodebuild--runfirstlaunch-blocks-agent-startup) |
 | Smoke `done` never fires; claude stuck on a Bash permission prompt despite `--dangerously-skip-permissions`; "fullscreen renderer" modal seen | [Claude: fullscreen upsell re-execs and drops the flag](#claude-the-fullscreen-renderer-upsell-re-execs-claude-and-drops---dangerously-skip-permissions) |
+| `container-enhanced` (gVisor): `new` exits 0 / `ls` active but agent never runs; box stuck on `sleep infinity`, only `entrypoint.keepalive_only` logged | [gVisor: docker exec --user resolves stale image passwd](#gvisor-container-enhanced-docker-exec---user-name-resolves-against-the-stale-image-passwd-not-the-live-one) |
 | `yoloai new --attach` hangs after "Sandbox created"; Python setup never completes | [Tart: mount_map uses Docker paths, triggering macOS automount](#tart-mount_map-uses-docker-style-paths-triggering-macos-automount-hang) |
 | `yoloai apply` fails: `git add: git [add -A]: exit status 128: … index.lock: File exists` while agent is running | [Docker/Podman: agent git and apply git race on index.lock](#dockerpodman-agent-git-and-apply-git-race-on-indexlock) |
 | `FileNotFoundError: 'tmux'` in `sandbox-setup.py::setup_tmux_session` on Tart VM (intermittent) | [Tart: transient FS/PATH failure makes tmux unresolvable during the firstlaunch window](#tart-transient-fspath-failure-makes-tmux-unresolvable-during-the-firstlaunch-window) |
@@ -2270,3 +2271,45 @@ pin was removed (no-pin policy restored).
 
 **Code:** `internal/agent/agent.go` (claude `ApplySettings`, `s["tui"] = "default"`);
 `internal/agent/agent_test.go` (`TestApplySettings_Claude`).
+
+## gVisor (container-enhanced): `docker exec --user <name>` resolves against the stale image passwd, not the live one
+
+**Symptom:** On the docker backend under `--isolation container-enhanced` (gVisor/
+runsc), `yoloai new` returns exit 0 and `yoloai ls` shows `active`, but the agent
+never actually runs: the smoke `done` sentinel never fires, `sandbox.jsonl` stops at
+`entrypoint.keepalive_only`, `agent-status.json` is `{}`, and inside the container the
+only process is `sleep infinity` — no tmux, no `sandbox-setup.py`, no monitor. The same
+sandbox on plain docker (runc) works.
+
+**Explanation:** The D88 keepalive+Launch bring-up boots the box on a neutral
+keepalive holder, then the host launches `sandbox-setup.py` over it with a detached
+`docker exec --user yoloai` (`runtime.ProcessLauncher`). The image ships `yoloai` as
+UID **1001**; the entrypoint's uid-remap rewrites the **live** `/etc/passwd` to make
+`yoloai` = the **host UID** (e.g. 1000) and chowns `/yoloai` to match. Under **runc**,
+`docker exec --user yoloai` re-reads the live passwd → resolves to 1000 → owns
+`/yoloai/logs` → the launched process writes its log and runs. Under **gVisor**,
+`docker exec --user yoloai` resolves the username against the image's **original**
+`/etc/passwd` (snapshotted at container start) → **1001** → the process runs as the
+stale UID, which no longer owns the remapped `/yoloai` dirs (now 1000, mode 750). Its
+first action — the log redirect `>> /yoloai/logs/session-runner.log` — hits `EACCES`,
+so `sh -c 'exec python3 …'` dies at the redirect **before** exec'ing python. The agent
+never welds, and because the launch is detached the error is swallowed (`new` still
+exits 0). Confirmed directly: `docker exec -u yoloai <gvisor-box> id` → `uid=1001`,
+while `docker exec -u 1000 …` and the live `/etc/passwd` both say 1000.
+
+**Fix:** Route `container-enhanced` to the **legacy in-entrypoint weld** instead of
+the D88 keepalive+Launch path (`runtime.SupportsAgentFreeLaunch` returns false for it;
+`usesAgentFreeLaunch` ANDs it in, so both bring-up and secrets delivery stay in sync).
+The legacy path runs `sandbox-setup.py` from the entrypoint's own process tree and
+drops to `yoloai` **in-container** (against the live, remapped passwd), so there is no
+host-side `exec --user` and no stale-UID write. This mirrors the podman reroute. Note a
+numeric `--user 1000:1000` would also write correctly but drops supplementary groups
+(the `docker` group needed for dind under `--isolation container-privileged`, which
+shares the same `ProcSpec`), so the legacy reroute is preferred over changing the user
+form globally.
+
+**Code:** `runtime/isolation.go` (`SupportsAgentFreeLaunch`);
+`internal/orchestrator/launch/launch.go` (`usesAgentFreeLaunch` gate);
+`internal/orchestrator/launch/launch_reroute_test.go`
+(`TestBuildAndStart_ContainerEnhancedTakesLegacyPath`); `runtime/isolation_test.go`
+(`TestSupportsAgentFreeLaunch`).

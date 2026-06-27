@@ -263,6 +263,41 @@ func TestBuildAndStart_LaunchPath(t *testing.T) {
 	assert.NoError(t, statErr, "secrets-consumed marker must exist after Launch")
 }
 
+// TestBuildAndStart_ContainerEnhancedTakesLegacyPath verifies that a
+// Launch-capable, AgentFreeLaunch-opted-in backend is STILL routed to the legacy
+// in-entrypoint weld under container-enhanced (gVisor) isolation. The D88
+// keepalive+Launch path's host-side `exec --user yoloai` resolves the username
+// against gVisor's stale image passwd and writes as the wrong UID, so the agent
+// never welds (see runtime.SupportsAgentFreeLaunch). The legacy path must be used
+// instead: no keepalive_only patch and no Launch call.
+func TestBuildAndStart_ContainerEnhancedTakesLegacyPath(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "logs"), 0750))
+	writeMinimalRuntimeConfig(t, dir)
+
+	rt := &rerouteLaunchRuntime{}
+
+	st := makeTestState(dir)
+	st.Isolation = runtime.IsolationModeContainerEnhanced
+
+	// hasSecrets=false so the legacy path doesn't block on the secrets marker
+	// (the entrypoint would write it in production; the fake doesn't simulate it).
+	err := buildAndStart(context.Background(), rt, st, nil, nil, false /*hasSecrets*/, nil)
+	require.NoError(t, err)
+
+	// Legacy path: keepalive_only stays false and Launch is never called.
+	assert.False(t, readRuntimeConfigKeepalive(t, dir),
+		"container-enhanced must NOT patch keepalive_only (legacy weld)")
+	rt.mu.Lock()
+	spec := rt.launchedSpec
+	seq := append([]string(nil), rt.callSeq...)
+	rt.mu.Unlock()
+	assert.Nil(t, spec, "Launch must NOT be called under container-enhanced (legacy path)")
+	assert.Equal(t, -1, indexOf(seq, "Launch"), "the call sequence must not contain Launch")
+	assert.NotEqual(t, -1, indexOf(seq, "Create"), "Create must still be called")
+	assert.NotEqual(t, -1, indexOf(seq, "Start"), "Start must still be called")
+}
+
 // TestBuildAndStart_LegacyPath verifies the unchanged legacy flow for backends
 // without ProcessLauncher:
 //
