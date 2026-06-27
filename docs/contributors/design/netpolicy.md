@@ -121,8 +121,11 @@ does not share.
 **Persisted home (resolves a review contradiction, D92).** The substrate's `ProvisionSpec`/`environment.json`
 (D85, agent-free) explicitly *disclaims* the egress allowlist ("egress allowlist = netpolicy refinement"). So
 the composed `mode + allowlist + provenance` is **netpolicy's own persisted record** — its own persistence
-domain (D87 `Handle`), not a field smuggled into the substrate's record. (Today's code does keep
-`NetworkMode`/`NetworkAllow` in `environment.json`; the Shape moves them to the netpolicy domain.)
+domain (D87 `Handle`), not a field smuggled into the substrate's record. (Done on
+`substrate-move`: `NetworkMode`/`NetworkAllow` were relocated out of `environment.json` into the
+sibling `netpolicy.json` record — `internal/netpolicycfg` — folded into the Q104 v2→v3
+`system migrate` so it remains the last on-disk migration; the egress-proxy enforcement reads
+them from there. D103.)
 
 ## Cross-references
 

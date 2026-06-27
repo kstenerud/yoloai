@@ -967,6 +967,14 @@ Only then the **mechanical move**: `runtime` first/with `store`, repoint the fen
 
 **Accepted residual:** `prune` classifies a load error as corrupt, so a pre-v3 record with no work data could be quarantined by `prune` before migration — but the startup gate migrates everything to v3 before `prune` runs, and data-bearing dirs are detected filesystem-side (no meta needed) and refused, so no user work is at risk.
 
+## D103 — relocate network policy off the substrate record into netpolicy.json, folded into the Q104 migration (D90)
+
+**Date:** 2026-06-27. **Status:** Active (implemented on `substrate-move`, commit `88599217`).
+
+**Context.** Before merging `substrate-move`, the goal was that Q104's `system migrate` (realm v2→v3 + agent.json) be the **last** on-disk migration. An audit of all deferred/post-merge work found exactly one design-intended *future* field relocation: D90's netpolicy Shape moves `NetworkMode`/`NetworkAllow` out of `environment.json` into netpolicy's own persisted record. Everything else deferred is additive `omitempty` fields, new sibling records, API-only promotions, or behavioral — none needs a migration. Rather than ship Q104's migration and then need a *second* one for netpolicy later, the relocation was folded in now.
+
+**Decision.** Mirror D102 exactly. `NetworkMode`/`NetworkAllow` move from `store.Environment` into a sibling **`netpolicy.json`** record (`internal/netpolicycfg` — a neutral leaf, *not* under `internal/orchestrator`, so sub-orchestrator consumers like `envsetup` read it without an upward import). metaVersion stays **3** (Q104's v3 is unreleased — expand what v3 means, no v4, no second realm bump). The same per-sandbox v2→v3 pass relocates both records: `agent.json` (2a) AND `netpolicy.json` (2b) are written durably **before** the slimmed `environment.json` re-save (3) — crash-safe. Public surface follows D102: `yoloai.Environment` sheds the fields; they ride top-level on `yoloai.SandboxInfo` (from netpolicy.json at inspect). The mutable `allow`/`deny` path loads+mutates+saves the netpolicy record. Verified: extended migration tests (relocate/idempotent/crash-resume/v0-ladder + network case) + live network-isolated create on docker (netpolicy.json written; environment.json clean at v3). The deferred egress-proxy enforcement (D90/D95) reads policy from netpolicy.json and needs **no further migration** — so Q104's `system migrate` is the last one.
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.
