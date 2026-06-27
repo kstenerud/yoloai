@@ -182,15 +182,25 @@ itself is `docker build -t <tag> -f Dockerfile -` with the tar on stdin and
 **IsReady:** `<DataDir>/microvm/{yoloai-base-microvm.ext4,vmlinuz,initrd.img}` exist
 (extend the current kernel-only stub).
 
-**OPEN SUB-DECISION (resolve in 2a): rootfs ownership when unprivileged.** `umoci unpack`
-+ `mkfs.ext4 -d` need the rootfs tree **root-owned** for a correct distro rootfs (systemd,
-setuid bins). The spike used `sudo`. Production can't assume sudo. Options: (a) require
-root for `Setup` only (one-off; document it) — simplest; (b) `unshare --map-root-user`
-userns so the unpacked tree appears 0-owned to `mkfs.ext4 -d` (rootless, but needs
-userns enabled); (c) `umoci unpack --rootless` + accept uid-mapped ownership (likely
-breaks systemd). **Lean (b) with (a) as the documented fallback.** This may want a tiny
-spike (`unshare -r` + `mkfs.ext4 -d` round-trip) before coding. NOTE this is **Linux-only
-Setup** — fine, the whole package is `//go:build linux`.
+**SUB-DECISION RESOLVED (spiked 2026-06-27): build the ext4 INSIDE a container.**
+The rootfs tree must be **root-owned** for a correct distro rootfs (systemd, setuid
+bins). Host-side unprivileged options were spiked and rejected: `unshare
+--map-root-user --map-users=auto --map-groups=auto` + `umoci unpack` **fails** on
+`lchown /etc/gshadow: operation not permitted` even with `newuidmap`/`newgidmap`
+setuid + `/etc/subuid` configured (the subid range doesn't satisfy umoci's arbitrary
+chowns turnkey); `umoci --rootless` succeeds but uid-maps ownership (breaks systemd).
+**Chosen instead:** microvm already needs Docker at build time, so run the conversion
+in a **throwaway container from `yoloai-base-microvm`** — it executes as the daemon's
+root, so `mkfs.ext4 -F -d <rootfs-copy> /out/rootfs.ext4` writes correct root-owned
+inodes with zero host privilege or userns. Recipe inside the container: ensure
+`e2fsprogs`, `rsync -aHAX --one-file-system / /tmp/root` (drop /proc,/sys,/dev), `mkfs.ext4
+-F -d /tmp/root /out/rootfs.ext4`, copy `/boot/vmlinuz*`+`/boot/initrd.img*` to `/out`,
+`chmod 644 /out/*` so the host user can read the read-only golden (rootful docker writes
+root-owned output; world-readable fixes it — rootless docker already writes host-owned).
+This **replaces the skopeo/umoci/host-mkfs path** from sub-step (a) — simpler and
+privilege-free. Per-instance writes go to the qcow2 overlay over this read-only golden.
+The `skopeo`/`umoci` host prerequisites in `caps.go` can then be **dropped** (only QEMU
++ KVM + virtiofsd + docker-at-build remain). `/out` is a bind mount to `<DataDir>/microvm/`.
 
 **Profiles:** for a profile P, build `yoloai-<P>-microvm` (`FROM yoloai-<P>`) and a
 per-profile golden ext4; the base flow above is the P="" case.
