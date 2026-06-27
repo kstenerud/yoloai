@@ -48,6 +48,7 @@ inclusion test first, then add a row to the index.
 | `yoloai destroy` hangs; `ctr tasks ls` shows RUNNING but no qemu/firecracker; host CPU 60–80% | [Kata: shim wedge with dead VM](#kata-shim-wedge-with-dead-vm-sigkill-via-containerd-doesnt-release-the-task) |
 | `yoloai destroy` hangs on a Tart sandbox; `tart list` shows VM running but guest unreachable | [Tart: VM process wedge](#tart-vm-process-wedge-tart-stop-and-sigterm-via-pgrep-dont-release-the-host-tart-run) |
 | Task stays in `Created` after `Start()` returns | [Containerd: task.Start returns early](#taskstart-returns-before-the-vm-is-actually-running) |
+| `OCI runtime exec failed: ... procReady not received` on exec/Launch | [Docker: procReady usually means the container is dying, not broken runc](#docker-procready-not-received-usually-means-the-container-is-exiting-not-a-broken-runtime) |
 | `parent snapshot sha256:... does not exist: not found` | [Containerd: WithNewSnapshot doesn't unpack](#withnewsnapshot-does-not-unpack-image-layers) |
 | `docker save \| ctr import` hangs indefinitely | [Containerd: pipe hang on ctr failure](#docker-save--ctr-import-hangs-if-ctr-fails-early) |
 | Containerd socket: no error from `os.Stat` despite permission denied | [Containerd: Stat can't detect EPERM](#osstat-on-the-containerd-socket-does-not-detect-permission-denied) |
@@ -2193,3 +2194,40 @@ its **absolute** path (`container build -t yoloai-base <abs-dir>`). The builder
 VM must also be started first (`container builder start`).
 
 **Code:** `runtime/apple/apple.go` (`buildBaseImage`).
+
+## Docker: `procReady not received` usually means the container is exiting, not a broken runtime
+
+**Symptom:** An exec into a yoloai container (`runtime.Launch`, `Exec`, or a raw
+`docker exec`) fails with `Error response from daemon: OCI runtime exec failed:
+exec failed: unable to start container process: procReady not received`.
+Intermittent — sometimes the same test passes.
+
+**Explanation:** This is almost never a broken Docker/runc. `procReady` is runc
+reporting that the exec process's init never signalled ready over its sync pipe —
+which happens when the container's PID 1 is **gone or going** at the moment of the
+exec. The classic cause here is the container **crashing on startup** and the exec
+racing the crash: a substrate-only container (created via `runtime.Create` with a
+bare `InstanceConfig`, no orchestrator `runtime-config.json`) whose `entrypoint.py`
+used to `json.load()` an empty config and exit 1. The exec lands during that brief
+dying window → `procReady`; when the exec wins the race the test passes, hence the
+flake.
+
+**How to tell it apart (do this before suspecting Docker):**
+- Plain `docker exec <vanilla-alpine> echo hi` works → runc is fine.
+- `docker exec <the yoloai container> echo hi` a few seconds after start works →
+  the container accepts execs once settled; the failure was a startup race.
+- `docker ps -a --filter name=<ctr>` shows `Exited (1)` → the container is
+  crashing; `docker logs <ctr>` shows why (here: `JSONDecodeError` from
+  `read_config`).
+
+**Fix:** Two parts. (1) The entrypoint now treats a missing/empty
+`runtime-config.json` as the agent-free keepalive case instead of crashing
+(`fa8d7fe5`), so a bare substrate box stays up. (2) Production already gates
+`Launch` on readiness (`internal/orchestrator/launch.startViaLaunch` →
+`waitForReady` → `Ready()`); tests that exec right after `Start` must do the same
+(`launchTestInstance`). Don't add a retry to `Launch` itself — it would mask a
+dying container.
+
+**Code:** `runtime/docker/resources/entrypoint.py` (`read_config`, `keepalive`),
+`runtime/docker/launch.go` (`Ready`/`Launch`),
+`internal/orchestrator/launch/launch.go` (`waitForReady`).
