@@ -72,7 +72,8 @@ type Environment struct {
 	Isolation          runtime.IsolationMode  `json:"isolation,omitempty"`          // isolation mode: container, container-enhanced, vm, vm-enhanced
 	HostFilesystem     bool                   `json:"host_filesystem,omitempty"`    // true when sandbox state lives on the host (seatbelt)
 	VscodeTunnel       bool                   `json:"vscode_tunnel,omitempty"`      // true when VS Code Remote Tunnel is enabled
-	BrokerCredentials  bool                   `json:"broker_credentials,omitempty"` // true when the agent's API key is brokered through the host-side injector (D106); sticky across restart so the key isn't silently re-delivered direct
+	BrokerCredentials  bool                   `json:"broker_credentials,omitempty"` // forced-on: --broker (D106). Sticky across restart so the key isn't silently re-delivered direct
+	BrokerDisabled     bool                   `json:"broker_disabled,omitempty"`    // forced-off: --no-broker (D106). Sticky opt-out of the default-on brokering. At most one of these two is set
 	Archetype          string                 `json:"archetype,omitempty"`          // resolved environment archetype (simple, compose, devcontainer, apple)
 }
 

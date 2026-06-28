@@ -1332,19 +1332,32 @@ func TestApplyBrokerOption_PersistsAndIsIdempotent(t *testing.T) {
 
 	d := newLifecycleDeps(&lifecycleMockRuntime{}, tmpDir)
 
-	// Without --broker: nothing persisted.
-	require.NoError(t, applyBrokerOption(d, StartOptions{Broker: false}, sandboxDir, meta, &notices{}))
+	// Auto (neither flag): nothing persisted — the default posture isn't pinned.
+	require.NoError(t, applyBrokerOption(d, StartOptions{}, sandboxDir, meta, &notices{}))
 	reloaded, err := store.LoadEnvironment(sandboxDir)
 	require.NoError(t, err)
-	assert.False(t, reloaded.BrokerCredentials, "no --broker -> not persisted")
+	assert.False(t, reloaded.BrokerCredentials, "auto -> not persisted")
+	assert.False(t, reloaded.BrokerDisabled, "auto -> not persisted")
 
-	// With --broker: persisted to meta.
+	// --broker: forced-on persisted.
 	require.NoError(t, applyBrokerOption(d, StartOptions{Broker: true}, sandboxDir, meta, &notices{}))
 	reloaded, err = store.LoadEnvironment(sandboxDir)
 	require.NoError(t, err)
-	assert.True(t, reloaded.BrokerCredentials, "--broker -> persisted (sticky across restart)")
+	assert.True(t, reloaded.BrokerCredentials, "--broker -> forced-on persisted")
+	assert.False(t, reloaded.BrokerDisabled)
 
-	// Idempotent: a second call with it already set is a no-op success.
+	// Idempotent.
 	require.NoError(t, applyBrokerOption(d, StartOptions{Broker: true}, sandboxDir, reloaded, &notices{}))
 	assert.True(t, reloaded.BrokerCredentials)
+
+	// --no-broker flips the persisted posture to forced-off (and clears forced-on).
+	require.NoError(t, applyBrokerOption(d, StartOptions{NoBroker: true}, sandboxDir, reloaded, &notices{}))
+	reloaded, err = store.LoadEnvironment(sandboxDir)
+	require.NoError(t, err)
+	assert.False(t, reloaded.BrokerCredentials, "--no-broker clears forced-on")
+	assert.True(t, reloaded.BrokerDisabled, "--no-broker -> forced-off persisted")
+
+	// Auto after an explicit choice leaves it untouched (sticky).
+	require.NoError(t, applyBrokerOption(d, StartOptions{}, sandboxDir, reloaded, &notices{}))
+	assert.True(t, reloaded.BrokerDisabled, "auto does not disturb a persisted choice")
 }

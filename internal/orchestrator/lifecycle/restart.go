@@ -213,11 +213,12 @@ func recreateContainer(ctx context.Context, d state.Deps, name string, meta *sto
 		Setup:        meta.Setup,
 		Isolation:    meta.Isolation,
 		VscodeTunnel: meta.VscodeTunnel,
-		// Brokering is sticky: the posture lives in meta. --broker persists it
-		// (applyBrokerOption, run before this in start), so by here meta is
-		// authoritative — this is what stops restart/start from silently reverting
-		// a brokered sandbox to direct key delivery (D106).
+		// Brokering posture is sticky: it lives in meta. --broker/--no-broker
+		// persist it (applyBrokerOption, run before this in start), so by here meta
+		// is authoritative. This is what stops restart/start from silently
+		// reverting a brokered sandbox to direct key delivery (D106).
 		BrokerCredentials: meta.BrokerCredentials,
+		BrokerDisabled:    meta.BrokerDisabled,
 		ConfigJSON:        configData,
 		Layout:            d.Layout,
 		HomeDir:           d.Layout.HomeDir,

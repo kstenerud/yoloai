@@ -114,11 +114,15 @@ type SandboxCreateOptions struct {
 	// VscodeTunnel starts a VS Code tunnel in the sandbox.
 	VscodeTunnel bool
 
-	// Broker opts the agent's API key into the host-side credential injector
-	// (D105/D106): the key is held host-side and never enters the sandbox. The
-	// CLI forwards this to SandboxStartOptions.Broker on launch; it is not
-	// persisted (bare `yoloai start` does not re-broker yet).
-	Broker bool
+	// Broker / NoBroker force the credential-brokering posture (D105/D106).
+	// Brokering — holding the agent's API key host-side in an injector so it never
+	// enters the sandbox — is the DEFAULT for a brokerable agent on a supporting
+	// backend (Linux docker). Broker forces it on (an error if the backend can't
+	// host an injector); NoBroker forces it off (direct key delivery). At most one
+	// may be set. The CLI forwards these to SandboxStartOptions on launch, where
+	// the posture is persisted to meta and sticky across restart.
+	Broker   bool
+	NoBroker bool
 
 	// Archetype forces a project archetype (empty = auto-detect).
 	Archetype string

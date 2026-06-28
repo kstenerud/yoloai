@@ -193,10 +193,11 @@ func startViaLaunch(ctx context.Context, rt runtime.Backend, launcher runtime.Pr
 		return err
 	}
 
-	// Brokering (opt-in): start the host-side injector and rewrite secretEnv so
-	// the real key stays host-side and the agent is pointed at the injector. Runs
-	// after Start (the network gateway is now knowable) and before secretEnv is
-	// materialized into the launched process's env.
+	// Brokering (default for supported backends; --no-broker opts out): start the
+	// host-side injector and rewrite secretEnv so the real key stays host-side and
+	// the agent is pointed at the injector. Runs after Start (the network gateway
+	// is now knowable) and before secretEnv is materialized into the launched
+	// process's env.
 	if err := brokerCredentials(ctx, rt, st, cname, secretEnv); err != nil {
 		return err
 	}
@@ -233,19 +234,22 @@ func startViaLaunch(ctx context.Context, rt runtime.Backend, launcher runtime.Pr
 	return nil
 }
 
-// brokerCredentials, when the sandbox opted into brokering (st.BrokerCredentials)
-// and its agent is brokerable, starts the host-side credential injector for this
-// sandbox and rewrites secretEnv so the real API key never enters the container:
-// the key is removed and the agent is pointed at the injector (base_url + a dummy
-// placeholder). The injector swaps the placeholder for the real key host-side.
+// brokerCredentials starts the host-side credential injector for the sandbox and
+// rewrites secretEnv so the real API key never enters the container: the key is
+// removed and the agent is pointed at the injector (base_url + a dummy
+// placeholder), which swaps in the real key host-side.
 //
-// No-op when brokering is off, the agent isn't brokerable, or no brokerable key
-// is present (e.g. a subscription login) — those fall through to direct delivery.
-// But an explicit opt-in against a backend that cannot host a sandbox-reachable
-// injector is an error, not a silent fallback: the user asked for the key to be
-// withheld, so we refuse rather than leak it via direct delivery.
+// Brokering is the DEFAULT for a brokerable agent on a supporting backend (D105).
+// The posture is tri-state: forced-off (--no-broker, st.BrokerDisabled) skips;
+// forced-on (--broker, st.BrokerCredentials) requires it; otherwise it is auto.
+// It falls through to direct delivery (a no-op here) when brokering is off, the
+// agent isn't brokerable, no brokerable key is present (e.g. a subscription
+// login), or — in auto mode only — the backend can't host an injector. The one
+// hard error is forced-on against a backend that can't host a sandbox-reachable
+// injector: the user explicitly asked for the key to be withheld, so we refuse
+// rather than silently leak it via direct delivery.
 func brokerCredentials(ctx context.Context, rt runtime.Backend, st *state.State, cname string, secretEnv map[string]string) error {
-	if !st.BrokerCredentials || st.Agent == nil || st.Agent.Broker == nil {
+	if st.BrokerDisabled || st.Agent == nil || st.Agent.Broker == nil {
 		return nil
 	}
 	bc := st.Agent.Broker
@@ -253,14 +257,32 @@ func brokerCredentials(ctx context.Context, rt runtime.Backend, st *state.State,
 	realKey := secretEnv[bc.APIKeyEnvVar]
 	if realKey == "" {
 		// Nothing brokerable (e.g. subscription/OAuth). Direct delivery unchanged.
-		slog.Info("brokering requested but no brokerable API key present; using direct delivery",
-			"event", "sandbox.broker.skip", "sandbox", st.Name, "key_env", bc.APIKeyEnvVar)
+		if st.BrokerCredentials {
+			slog.Info("brokering requested but no brokerable API key present; using direct delivery",
+				"event", "sandbox.broker.skip", "sandbox", st.Name, "key_env", bc.APIKeyEnvVar)
+		}
+		return nil
+	}
+
+	// Restricted networking can't reach the host-side injector yet: the in-sandbox
+	// allowlist (iptables) doesn't include the bridge gateway the injector binds,
+	// and --network-none has no egress at all. Composing brokering with an egress
+	// allowlist (allowlisting the injector) is the containment layer's job, a later
+	// phase. Until then auto falls back to direct delivery; an explicit --broker
+	// errors rather than silently breaking the agent's API access.
+	if st.NetworkMode == "isolated" || st.NetworkMode == "none" {
+		if st.BrokerCredentials {
+			return fmt.Errorf("--broker is not yet supported with --network-%s: the in-sandbox allowlist can't reach the host-side injector. Omit --broker, or use open networking", st.NetworkMode)
+		}
 		return nil
 	}
 
 	reachable, ok := runtime.InjectorReachOf(rt)
 	if !ok {
-		return fmt.Errorf("--broker requested but the %s backend cannot host a sandbox-reachable injector", rt.Descriptor().Type)
+		if st.BrokerCredentials {
+			return fmt.Errorf("--broker requested but the %s backend cannot host a sandbox-reachable injector", rt.Descriptor().Type)
+		}
+		return nil // auto: this backend can't broker; direct delivery
 	}
 	reach, err := reachable.InjectorReach(ctx, cname)
 	if err != nil {

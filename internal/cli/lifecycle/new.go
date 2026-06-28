@@ -66,11 +66,13 @@ func addCreateFlags(cmd *cobra.Command) {
 	cmd.Flags().StringSlice("env", nil, "Environment variable (KEY=VAL, repeatable)")
 	cmd.Flags().StringArray("runtime", []string{}, "Apple simulator runtime (ios, tvos, watchos, visionos). Repeatable. Example: --runtime ios --runtime tvos:26.1")
 	cmd.Flags().Bool("vscode-tunnel", false, "Launch a VS Code Remote Tunnel alongside the agent (connect from VS Code on any machine)")
-	cmd.Flags().Bool("broker", false, "Broker the agent's API key through a host-side injector so it never enters the sandbox (Linux docker; opt-in)")
+	cmd.Flags().Bool("broker", false, "Require credential brokering: keep the agent's API key host-side (errors if the backend can't). On by default for supported backends (Linux docker)")
+	cmd.Flags().Bool("no-broker", false, "Disable credential brokering: deliver the agent's API key into the sandbox directly (sticky across restart)")
 	cmd.Flags().String("archetype", "", fmt.Sprintf("Environment archetype (%s)", strings.Join(yoloai.Archetypes(), "|")))
 
 	cmd.MarkFlagsMutuallyExclusive("network-none", "network-isolated")
 	cmd.MarkFlagsMutuallyExclusive("profile", "no-profile")
+	cmd.MarkFlagsMutuallyExclusive("broker", "no-broker")
 }
 
 func runNewCmd(cmd *cobra.Command, args []string, version string) error {
@@ -216,6 +218,7 @@ func resolveCreateOptions(cmd *cobra.Command, name, rawWorkdirArg string, passth
 	runtimes, _ := cmd.Flags().GetStringArray("runtime")
 	vscodeTunnel, _ := cmd.Flags().GetBool("vscode-tunnel")
 	broker, _ := cmd.Flags().GetBool("broker")
+	noBroker, _ := cmd.Flags().GetBool("no-broker") // mutual exclusion enforced by MarkFlagsMutuallyExclusive
 	archetypeFlag, _ := cmd.Flags().GetString("archetype")
 
 	isolation, _, err := resolveNewIsolationOS(cmd)
@@ -263,6 +266,7 @@ func resolveCreateOptions(cmd *cobra.Command, name, rawWorkdirArg string, passth
 		Runtimes:             runtimes,
 		VscodeTunnel:         vscodeTunnel,
 		Broker:               broker,
+		NoBroker:             noBroker,
 		Archetype:            archetypeFlag,
 		// A dirty workdir never auto-proceeds here. executeNewCreate surfaces the
 		// warning and requires --allow-dirty to widen the scope — we never prompt
@@ -359,7 +363,7 @@ func executeNewCreate(cmd *cobra.Command, ctx context.Context, c *yoloai.Client,
 	// The launch output (on stderr, or discarded in --json mode) precedes the
 	// creation summary, matching the old create-starts-by-default flow.
 	if !noStart {
-		if _, err := sb.Start(ctx, yoloai.SandboxStartOptions{Env: opts.Env, Broker: opts.Broker}); err != nil {
+		if _, err := sb.Start(ctx, yoloai.SandboxStartOptions{Env: opts.Env, Broker: opts.Broker, NoBroker: opts.NoBroker}); err != nil {
 			return err
 		}
 	}

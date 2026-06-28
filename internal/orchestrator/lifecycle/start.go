@@ -35,12 +35,16 @@ type StartOptions struct {
 	PromptFile   string                // if set, read from file, overwrite prompt.txt, send directly
 	Isolation    runtime.IsolationMode // if set, override the isolation mode stored in environment.json
 	VscodeTunnel bool                  // if true, enable VS Code Remote Tunnel (persisted to meta)
-	// Broker, if true, opts the agent's API key into the host-side credential
-	// injector (D105/D106). The posture is persisted to meta (applyBrokerOption)
-	// and sticky: once enabled, restart/start re-broker from meta so the real key
-	// is never silently re-delivered into the container on a later launch. Passing
-	// it again is idempotent; opting back out is the future --no-broker.
-	Broker bool
+	// Broker forces credential brokering on (--broker): the agent's API key is
+	// injected host-side and never enters the sandbox (D105/D106). It is an error
+	// if the backend can't host an injector — the user explicitly asked for the
+	// key to be withheld. Brokering is already the default for supported backends,
+	// so this is only needed to turn an error-on-unsupported into a hard
+	// requirement. NoBroker forces it off (--no-broker): the key is delivered
+	// directly, suppressing the default. At most one may be set. Either posture is
+	// persisted to meta and sticky across restart/start (applyBrokerOption).
+	Broker   bool
+	NoBroker bool
 	// Env is the per-sandbox environment overlay, merged over the resolved
 	// config+profile env at container (re)creation. It is never persisted —
 	// the caller must re-supply it on each launch that needs it (secrets are
@@ -97,14 +101,33 @@ func applyIsolationOverride(ctx context.Context, d state.Deps, opts StartOptions
 // host-side launch path, not the entrypoint. (Opting back out is the future
 // --no-broker; not wired here.)
 func applyBrokerOption(d state.Deps, opts StartOptions, sandboxDir string, meta *store.Environment, n *notices) error {
-	if !opts.Broker || meta.BrokerCredentials {
-		return nil
+	// Resolve the explicit posture: --broker forces on, --no-broker forces off,
+	// neither leaves the persisted posture untouched (sticky). The two flags are
+	// mutually exclusive (validated at the CLI). The posture is persisted so a
+	// later restart/start re-applies the same decision rather than silently
+	// reverting to the default (D106).
+	var on, off bool
+	switch {
+	case opts.Broker:
+		on = true
+	case opts.NoBroker:
+		off = true
+	default:
+		return nil // auto: don't disturb any persisted choice
 	}
-	meta.BrokerCredentials = true
+	if meta.BrokerCredentials == on && meta.BrokerDisabled == off {
+		return nil // already in the requested posture
+	}
+	meta.BrokerCredentials = on
+	meta.BrokerDisabled = off
 	if err := store.SaveEnvironment(sandboxDir, meta); err != nil {
 		return fmt.Errorf("save meta: %w", err)
 	}
-	n.infof("Credential brokering enabled (the agent's API key stays host-side)")
+	if on {
+		n.infof("Credential brokering enabled (the agent's API key stays host-side)")
+	} else {
+		n.infof("Credential brokering disabled (the agent's API key is delivered directly)")
+	}
 	return nil
 }
 

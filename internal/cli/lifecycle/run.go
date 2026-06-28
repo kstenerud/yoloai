@@ -144,7 +144,7 @@ func executeRun(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, opts 
 			opts.AgentType, sb.Name())
 	}
 
-	if _, err := sb.Start(ctx, yoloai.SandboxStartOptions{Env: opts.Env, Broker: opts.Broker}); err != nil {
+	if _, err := sb.Start(ctx, yoloai.SandboxStartOptions{Env: opts.Env, Broker: opts.Broker, NoBroker: opts.NoBroker}); err != nil {
 		return err
 	}
 
