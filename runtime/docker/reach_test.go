@@ -3,11 +3,32 @@
 package docker
 
 import (
+	goruntime "runtime"
 	"testing"
 
 	"github.com/docker/docker/api/types/network"
 	"github.com/stretchr/testify/assert"
 )
+
+// TestIsDesktopClassEngine covers the engine-flavor branch behind InjectorReach:
+// a Desktop-class engine binds host loopback + dials the alias, a native Linux
+// Engine binds the bridge gateway. The verdict is platform-aware (macOS is always
+// a VM), so the assertion folds in GOOS to stay correct on both CI hosts.
+func TestIsDesktopClassEngine(t *testing.T) {
+	darwinHost := goruntime.GOOS == "darwin"
+
+	t.Run("no provider sockets detected", func(t *testing.T) {
+		// Native engine on Linux (gateway-for-both); always a VM on macOS.
+		r := &Runtime{}
+		assert.Equal(t, darwinHost, r.isDesktopClassEngine())
+	})
+
+	t.Run("a Desktop-class provider is detected", func(t *testing.T) {
+		// OrbStack/Docker Desktop etc. → desktop-class on every platform.
+		r := &Runtime{providerNames: []string{"OrbStack"}}
+		assert.True(t, r.isDesktopClassEngine())
+	})
+}
 
 func TestFirstGateway(t *testing.T) {
 	t.Run("no config", func(t *testing.T) {

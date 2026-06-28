@@ -240,6 +240,58 @@ guest curl 192.168.64.1:8801 (host loopback bind)  → FAIL   # expected
 host bridge101 = 192.168.64.1 (shared by buildkit VM @ .19 + probe VM)
 ```
 
+## macOS `InjectorReach` — IMPLEMENTED + verified (2026-06-28)
+
+All four macOS backends now have a network-level `InjectorReach`, verified on real hardware (macOS
+26.5 / Apple Silicon; OrbStack + tart 2.32 + apple `container` 1.0 + seatbelt all present):
+
+- **docker** (`runtime/docker/reach.go`): provider-aware. `isDesktopClassEngine()` — true on darwin
+  (the daemon is always in a VM) or when a Desktop-class provider socket is detected (`providerNames`)
+  — returns `{BindHost: "127.0.0.1", DialHost: "host.docker.internal"}`; native Linux Engine keeps
+  gateway-for-both. **Verified end-to-end** on OrbStack via the existing orchestrator broker test
+  (`TestIntegration_CredentialBroker`, both credential forms): injector binds `127.0.0.1`, container
+  dials `host.docker.internal`, real key swapped host-side. Spike re-confirmed `172.17.0.1`
+  unreachable from the container and the alias resolving implicitly (no `--add-host`).
+- **seatbelt** (`runtime/seatbelt/reach.go`): `{127.0.0.1, 127.0.0.1}`. Spike: `sandbox-exec` curl
+  reaches a host `127.0.0.1` listener.
+- **apple** (`runtime/apple/reach.go`): gateway-for-both on the shared, persistent vmnet gateway
+  (`container network inspect default` → `ipv4Gateway` = `192.168.64.1`), guarded by `ipAssignedToHost`.
+  The bridge (`bridge101`) is host-bindable **before any of our VMs boots** (only the `container`
+  system service need run), so it brokers via the pre-create bind like containerd. Spike: a host
+  listener on `192.168.64.1` is reached by an alpine guest (default route `via 192.168.64.1`), while
+  the guest's own `127.0.0.1` is **not** the host (so a loopback bind would fail).
+- **podman** (`runtime/podman/reach.go`): **does NOT broker on macOS** — `InjectorReach` returns
+  `ErrInjectorUnsupported` on darwin, so brokering degrades to direct delivery (the conservative
+  posture, like tart). Why, in two layers: (1) podman runs inside a podman-machine Linux VM, so the
+  Linux rootless slirp reach (`10.0.2.2`) reaches the *machine VM's* host, not the Mac (verified FAIL);
+  (2) the machine's gvproxy host-forward (`192.168.127.254`) IS network-reachable to a Mac-host-bound
+  injector — a one-shot curl through it succeeds (12/12) — **but it does not carry the real agent's
+  traffic**: a brokered Claude agent on podman-macOS hung on its first API call in the real-agent smoke
+  (gvproxy stalls the agent's sustained/streaming connection), whereas docker (`host.docker.internal`)
+  and apple (vmnet gateway) brokered the same agent fine and passed. The lesson: a reachability spike
+  (single curl) is **not** sufficient evidence that a host hop works for the agent — the real-agent
+  smoke is authoritative. Linux rootless keeps the slirp path; Linux rootful stays unsupported. Making
+  podman-macOS broker needs a streaming-safe host hop (follow-up). Guarded by
+  `TestIntegration_Podman_DirectDeliveryOnMacOS` (asserts no injector + direct delivery on darwin);
+  `TestIntegration_CredentialBroker_Podman` is darwin-skipped (its target is Linux rootless podman).
+- **tart** (`runtime/tart/reach.go`): returns `ErrInjectorUnsupported` (safe degrade). tart's vmnet
+  bridge is **per-VM and ephemeral** — created on VM boot, torn down on stop — but the broker binds
+  the injector in `brokerCredentials`, which runs **before** `Create`/`Start`. At bind time no tart VM
+  is running, so the gateway is on no host interface (binding it → `EADDRNOTAVAIL`). The guest's
+  `127.0.0.1` doesn't reach the host either, so no loopback fallback. tart needs the **eager
+  network-prepare follow-up** (ensure a stable host-bindable gateway before brokering — the same idea
+  as containerd's eager-bridge-ensure) before it can broker; the seam is wired so that follow-up only
+  swaps the reach body.
+
+Verification split: docker via the OrbStack orchestrator broker test; seatbelt/apple via real-backend
+`InjectorReach` bind-checks (`runtime/{seatbelt,apple}/reach_integration_test.go`, mirroring the
+broker's `SidecarHost.Ensure` → `net.Listen` on `BindHost`); tart via a unit test asserting the
+documented degrade; all three reachable backends additionally confirmed by the manual host-listener +
+guest-curl spike above. A full orchestrator-level broker test does **not** fit seatbelt/apple cheaply
+(seatbelt's host-process agent launch needs `node` on PATH + a tmux socket path short enough for
+`sun_path`; apple needs the gated full base image) — and the brokering wiring it would exercise is
+backend-agnostic, already proven on OrbStack/podman/containerd.
+
 ## Conclusion (feeds 2b-2)
 
 Discovery is a **backend responsibility**: an optional `InjectorReachable` interface returning
