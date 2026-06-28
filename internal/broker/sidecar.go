@@ -16,6 +16,13 @@ import (
 	"github.com/kstenerud/yoloai/internal/credential"
 )
 
+// InjectVerb is the hidden argv[1] under which the yoloai binary runs as a
+// credential-injector sidecar. The entrypoint (cmd/yoloai) dispatches it to
+// RunSidecar before the normal CLI bootstrap — the sidecar runs with an empty
+// env (no HOME/data dir) and reserves stdout for the address handshake, so it
+// must bypass the layout/migration machinery the CLI sets up.
+const InjectVerb = "__inject"
+
 // Binding-kind tags carried in SidecarConfig (the wire form of a credential
 // binding). Phase 1 supports only the two static-source Apply variants; the
 // reserved request-signer/minting variants are not brokerable through the
