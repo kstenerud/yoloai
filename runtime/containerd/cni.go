@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -35,6 +36,30 @@ const cniStateFileName = "cni-state.json"
 // backend-idiosyncrasies.md. setupCNI uses errors.Is to detect this and
 // retry once with a fresh netns + IPAM allocation.
 var errFirewallRulesMissing = errors.New("CNI firewall rules missing after ADD")
+
+// cniSubnetCIDR mirrors the subnet declared in cniConflistTemplate; a unit test
+// asserts the two stay in sync. The yoloai bridge gateway is this subnet's first
+// host address (.1), assigned by the bridge plugin's isGateway:true + host-local
+// IPAM — see cniGateway.
+const cniSubnetCIDR = "10.89.0.0/16"
+
+// cniGateway returns the yoloai bridge gateway IP (e.g. 10.89.0.1): the first
+// host address of cniSubnetCIDR. This is where the sandbox's traffic egresses and
+// what a host-side credential injector binds / the agent dials (gateway-IP-for-
+// both, like Linux Docker Engine). Knowable from config alone, before the bridge
+// exists.
+func cniGateway() (string, error) {
+	ip, _, err := net.ParseCIDR(cniSubnetCIDR)
+	if err != nil {
+		return "", fmt.Errorf("parse CNI subnet %q: %w", cniSubnetCIDR, err)
+	}
+	ip4 := ip.To4()
+	if ip4 == nil {
+		return "", fmt.Errorf("CNI subnet %q is not IPv4", cniSubnetCIDR)
+	}
+	ip4[3]++ // network address + 1 = the host-local/isGateway gateway
+	return ip4.String(), nil
+}
 
 // cniConflistTemplate is the CNI configuration for the yoloai network.
 // Written once to ~/.yoloai/cni/yoloai.conflist on first use.

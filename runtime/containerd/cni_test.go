@@ -111,3 +111,15 @@ func TestEnsureCNIConflist(t *testing.T) {
 	assert.NoError(t, err, "cniConflistTemplate should be valid JSON")
 	assert.Equal(t, "yoloai", parsed["name"])
 }
+
+func TestCNIGateway(t *testing.T) {
+	gw, err := cniGateway()
+	require.NoError(t, err)
+	assert.Equal(t, "10.89.0.1", gw, "yoloai CNI gateway is the subnet's .1")
+}
+
+func TestCNISubnetMatchesTemplate(t *testing.T) {
+	// cniGateway derives from cniSubnetCIDR; assert it mirrors the subnet declared
+	// in the conflist so the two can never drift.
+	assert.Contains(t, cniConflistTemplate, `"subnet": "`+cniSubnetCIDR+`"`)
+}
