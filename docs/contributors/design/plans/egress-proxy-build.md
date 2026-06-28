@@ -130,12 +130,22 @@ Key files: `internal/credential/`, `internal/broker/`, `runtime/docker/reach.go`
     backend-agnostic and already proven on OrbStack/podman/containerd.
 - **containerd eager bridge-ensure** (Linux follow-up): create `yoloai0` before brokering so the
   *first* containerd sandbox brokers too. Generalizes the "prepare network before broker" idea.
-- **Egress containment** (build step 4 — the `--network-isolated` + broker composition). Retires the
-  "skip/error under isolation" guard: allowlist the injector endpoint (or go to
-  `StrategyEgressProxy`: default-deny netns, injector as the sole egress path). Wrinkle: the
-  injector port is known only post-launch — pre-allocate a fixed port (the stable-port respawn
-  work already supports binding a chosen port) or `LivePatchNetwork` the allowlist after start.
-  See the conclusion of the host-reachability research.
+- **Egress containment — step 1 (broker × ip-filter composition) DONE, verified on real Docker.**
+  Retired the "skip/error under isolation" guard: under `--network-isolated` the broker still
+  engages, `brokerCredentials` returns a `brokerOutcome{NetworkMode, InjectorEndpoint}`, and the
+  endpoint (`DialHost:port`) is published as `YOLOAI_BROKER_INJECTOR_ENDPOINT`; `entrypoint.py`
+  `isolate_network` adds a port-specific iptables ACCEPT for it before the default REJECT. The
+  injector port being post-launch is moot — the decoupling already starts the injector pre-Create,
+  so the endpoint is known when the container config is built. So a brokered+isolated sandbox keeps
+  its credential host-side AND is egress-contained (the agent's LLM egress collapses to the injector;
+  a non-allowlisted destination is REJECTed — `TestIntegration_CredentialBroker_Isolated`). Caveat:
+  a backend needing a dedicated network mode to reach the injector (rootless podman → slirp) can't
+  compose with the isolation bridge+iptables yet → that combo falls back to direct delivery.
+  - **Step 2 (the hostile-grade future) — NOT built:** `StrategyEgressProxy` = default-deny netns
+    whose sole egress is a host-side SNI-splicing forwarder on a separate namespace the agent can't
+    disable (survives a sudo agent). Step 1's ip-filter is best-effort (a `NET_ADMIN` agent can
+    flush it); step 2 is enforcement-outside-the-agent's-reach. Large, Linux-first; needs the
+    strategy-dispatch seam for `Network.Allow/Deny`. See netpolicy.md "Hostile containment".
 
 Per-agent base_url/dummy/force-API-key/telemetry-suppression quirks for Codex/Gemini/Aider/
 OpenCode (the table below) live in **launch config** (agent definitions), not the proxy — add a
