@@ -52,7 +52,16 @@ the full cross-agent results and the generalized broker shape.
 
 ## For the build
 
-When the injector lands, relocate `mock-anthropic.py` to that package's `testdata/` and
-turn this into an integration test (assert: agent reaches the proxy, the placeholder is
-replaced, the stream renders). Extend with OpenAI-`/responses` (Codex), Chat-Completions
-(Aider/OpenCode), and `generativelanguage` (Gemini) mock shapes.
+**Landed.** This manual spike is now superseded by an automated end-to-end test:
+`internal/orchestrator/broker_integration_test.go` (`TestIntegration_CredentialBroker`,
+`//go:build integration`, runs under `make integration` / `releasetest`). It uses a Go
+`httptest` mock upstream (rather than relocating this `mock-anthropic.py` — a Go mock is
+more idiomatic in a Go integration test) and asserts the full real-Docker path: the real
+key never enters the container, the agent env is rewritten to the injector + placeholder,
+a container→gateway→injector→mock request swaps in the real key host-side, and the
+injector is reaped on destroy. This `mock-anthropic.py` stays here as the historical
+record of the original manual reproduction (referenced by D105).
+
+Still open: extend with the other agents' wire shapes — OpenAI-`/responses` (Codex),
+Chat-Completions (Aider/OpenCode), `generativelanguage` (Gemini) — when those agents gain
+`Broker` configs.
