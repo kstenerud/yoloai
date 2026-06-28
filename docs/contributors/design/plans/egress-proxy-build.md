@@ -141,6 +141,13 @@ Key files: `internal/credential/`, `internal/broker/`, `runtime/docker/reach.go`
   a non-allowlisted destination is REJECTed — `TestIntegration_CredentialBroker_Isolated`). Caveat:
   a backend needing a dedicated network mode to reach the injector (rootless podman → slirp) can't
   compose with the isolation bridge+iptables yet → that combo falls back to direct delivery.
+  - **Step 1.5 (tamper-resistant firewall) — PLANNED, next build:** step 1's in-container iptables is
+    flushable by the agent (`sudo iptables -F`; confirmed — the container holds `NET_ADMIN` and the
+    agent has NOPASSWD sudo). Fix (validated on real Docker): deny the agent container `NET_ADMIN` and
+    install the firewall from an ephemeral sidecar sharing its netns (`--network container:<id>
+    --cap-add NET_ADMIN`); the agent's `sudo iptables -F` then fails (`FLUSH_DENIED`). docker/podman +
+    agent-free path first. Full plan:
+    [tamper-resistant-network-isolation.md](tamper-resistant-network-isolation.md).
   - **Step 2 (the hostile-grade future) — NOT built:** `StrategyEgressProxy` = default-deny netns
     whose sole egress is a host-side SNI-splicing forwarder on a separate namespace the agent can't
     disable (survives a sudo agent). Step 1's ip-filter is best-effort (a `NET_ADMIN` agent can

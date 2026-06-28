@@ -20,7 +20,11 @@ Design settled + validated ([D105](../../decisions/working-notes.md#d105--egress
 agent's API key is the always-on default, egress restriction is opt-in. Actionable build plan
 in **[egress-proxy-build.md](egress-proxy-build.md)**; specs in [secure-secrets.md](../secure-secrets.md)
 (D95) + [netpolicy.md](../netpolicy.md) (D90); validating spike in
-[research/egress-broker-spike/](../research/egress-broker-spike/).
+[research/egress-broker-spike/](../research/egress-broker-spike/). Brokering ships on all backends and
+composes with `--network-isolated` (containment step 1). **Next build:
+[tamper-resistant-network-isolation.md](tamper-resistant-network-isolation.md)** — step 1.5: make the
+isolation firewall un-flushable by the agent (netns-sharing installer sidecar; design validated, not
+yet implemented).
 
 ## Architecture Remediation
 
