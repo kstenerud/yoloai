@@ -73,6 +73,16 @@ func TestIntegration_CredentialBroker_LegacyPath(t *testing.T) {
 	runBrokerScenarios(t, mgr, ctx)
 }
 
+// TestIntegration_CredentialBroker_Podman runs the same brokered-launch scenarios
+// on rootless Podman: the legacy launch path + the decoupled broker + the slirp
+// InjectorReach (injector binds 127.0.0.1, the slirp sandbox reaches it via
+// 10.0.2.2). Proves brokering works on a backend with neither a ProcessLauncher
+// nor a host-bindable bridge gateway. Skips when Podman is unavailable.
+func TestIntegration_CredentialBroker_Podman(t *testing.T) {
+	mgr, ctx := podmanIntegrationSetup(t)
+	runBrokerScenarios(t, mgr, ctx)
+}
+
 func runBrokerScenarios(t *testing.T, mgr *orchestrator.Engine, ctx context.Context) {
 	t.Helper()
 	cases := []struct {

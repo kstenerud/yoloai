@@ -19,6 +19,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/testutil"
 	"github.com/kstenerud/yoloai/runtime"
 	dockerrt "github.com/kstenerud/yoloai/runtime/docker"
+	podmanrt "github.com/kstenerud/yoloai/runtime/podman"
 	"github.com/stretchr/testify/require"
 )
 
@@ -108,6 +109,32 @@ func legacyDockerIntegrationSetup(t *testing.T) (*orchestrator.Engine, context.C
 	t.Cleanup(func() { rt.Close() }) //nolint:errcheck // test cleanup
 
 	mgr := orchestrator.NewEngineWithRuntime(&legacyDockerRuntime{Runtime: rt}, slog.Default(), strings.NewReader(""), orchestrator.WithLayout(layout))
+	require.NoError(t, mgr.EnsureSetup(ctx, io.Discard))
+
+	return mgr, ctx
+}
+
+// podmanIntegrationSetup mirrors integrationSetup on the Podman backend, to
+// validate brokering on rootless podman: it takes the legacy launch path + the
+// decoupled broker + the slirp InjectorReach. Skips when Podman isn't available.
+// The build-checksum pre-seed is backend-agnostic; it avoids a rebuild as long as
+// `yoloai system build --backend podman` has put a current image in Podman.
+func podmanIntegrationSetup(t *testing.T) (*orchestrator.Engine, context.Context) {
+	t.Helper()
+	ctx := context.Background()
+
+	home := testutil.IsolatedHome(t)
+	layout := config.NewLayout(filepath.Join(home, ".yoloai"))
+	require.NoError(t, os.MkdirAll(layout.CacheDir(), 0750))
+	dockerrt.RecordBuildChecksum(layout, "")
+
+	rt, err := podmanrt.New(ctx, config.Layout{}.WithEnv(testutil.GetCuratedHostEnv(testutil.IntegrationHostEnvVars)))
+	if err != nil {
+		t.Skipf("Podman unavailable, skipping: %v", err)
+	}
+	t.Cleanup(func() { rt.Close() }) //nolint:errcheck // test cleanup
+
+	mgr := orchestrator.NewEngineWithRuntime(rt, slog.Default(), strings.NewReader(""), orchestrator.WithLayout(layout))
 	require.NoError(t, mgr.EnsureSetup(ctx, io.Discard))
 
 	return mgr, ctx

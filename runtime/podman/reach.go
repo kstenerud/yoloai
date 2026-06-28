@@ -1,5 +1,5 @@
-// ABOUTME: Podman opts out of injector reachability for now — rootless podman's
-// ABOUTME: bridge gateway isn't host-bindable; the slirp host-loopback path is unwired.
+// ABOUTME: InjectorReach for podman — rootless reaches a loopback-bound injector
+// ABOUTME: via slirp4netns's host alias (10.0.2.2); rootful is not wired yet.
 package podman
 
 import (
@@ -8,14 +8,23 @@ import (
 	"github.com/kstenerud/yoloai/runtime"
 )
 
-// InjectorReach overrides the embedded docker.Runtime's so Podman does not broker
-// yet. Rootless Podman's bridge gateway lives inside the rootless network
-// namespace and is not host-bindable; the safe path is
-// slirp4netns:allow_host_loopback → {BindHost:127.0.0.1, DialHost:10.0.2.2},
-// which is not yet wired (see egress-broker-host-reachability.md). Until then
-// Podman returns ErrInjectorUnsupported, so brokering auto-falls-back to direct
-// delivery and an explicit --broker errors — rather than the injector failing to
-// bind the unbindable gateway.
+// InjectorReach overrides the embedded docker.Runtime's. Rootless podman's bridge
+// gateway lives inside the rootless network namespace and is not host-bindable,
+// so gateway-for-both can't work; instead the injector binds the host loopback
+// (127.0.0.1) and the sandbox — created with slirp4netns:allow_host_loopback —
+// reaches it via slirp's fixed host alias 10.0.2.2 (verified, including through
+// podman's docker-compat API). See egress-broker-host-reachability.md.
+//
+// Rootful podman uses a real host bridge (host-bindable, like docker) but that
+// path isn't validated yet, so it reports ErrInjectorUnsupported (brokering →
+// direct delivery) rather than guessing.
 func (r *Runtime) InjectorReach(_ context.Context) (runtime.InjectorReach, error) {
-	return runtime.InjectorReach{}, runtime.ErrInjectorUnsupported
+	if !r.rootless {
+		return runtime.InjectorReach{}, runtime.ErrInjectorUnsupported
+	}
+	return runtime.InjectorReach{
+		BindHost:            "127.0.0.1",
+		DialHost:            "10.0.2.2",
+		RequiredNetworkMode: "slirp4netns:allow_host_loopback=true",
+	}, nil
 }

@@ -249,12 +249,32 @@ func TestBuildInstanceConfig_RejectsNetworkIsolatedWithGvisor(t *testing.T) {
 		Isolation:   "container-enhanced",
 	}
 
-	_, err := buildInstanceConfig(runtime.BackendDescriptor{Type: "mock", Capabilities: runtime.BackendCaps{NetworkIsolation: true}}, st, nil, nil)
+	_, err := buildInstanceConfig(runtime.BackendDescriptor{Type: "mock", Capabilities: runtime.BackendCaps{NetworkIsolation: true}}, st, nil, nil, "")
 	require.Error(t, err)
 	msg := err.Error()
 	assert.Contains(t, msg, "container-enhanced", "error names the broken isolation mode")
 	assert.Contains(t, msg, "gVisor", "error explains why")
 	assert.Contains(t, msg, "--isolation=container", "error points at the working alternatives")
+}
+
+// TestBuildInstanceConfig_BrokerNetworkModeOverride verifies the brokerNetMode
+// argument overrides the container's network mode (rootless podman → slirp) while
+// leaving it as the user's mode when brokering needs nothing special.
+func TestBuildInstanceConfig_BrokerNetworkModeOverride(t *testing.T) {
+	st := &state.State{
+		Name:    "test",
+		Workdir: &state.DirSpec{Path: "/project", Mode: store.DirMode("copy")},
+		Agent:   agent.GetAgent("test"),
+	}
+	desc := runtime.BackendDescriptor{Type: "mock"}
+
+	cfg, err := buildInstanceConfig(desc, st, nil, nil, "")
+	require.NoError(t, err)
+	assert.Equal(t, "", cfg.NetworkMode, "no broker requirement: keep the user's network mode")
+
+	cfg, err = buildInstanceConfig(desc, st, nil, nil, "slirp4netns:allow_host_loopback=true")
+	require.NoError(t, err)
+	assert.Equal(t, "slirp4netns:allow_host_loopback=true", cfg.NetworkMode, "broker requirement overrides")
 }
 
 // TestBuildInstanceConfig_AllowsNetworkIsolatedOnSupportedModes is the
@@ -273,7 +293,7 @@ func TestBuildInstanceConfig_AllowsNetworkIsolatedOnSupportedModes(t *testing.T)
 				NetworkMode: "isolated",
 				Isolation:   isolation,
 			}
-			_, err := buildInstanceConfig(runtime.BackendDescriptor{Type: "mock", Capabilities: runtime.BackendCaps{NetworkIsolation: true, OverlayDirs: true, CapAdd: true}}, st, nil, nil)
+			_, err := buildInstanceConfig(runtime.BackendDescriptor{Type: "mock", Capabilities: runtime.BackendCaps{NetworkIsolation: true, OverlayDirs: true, CapAdd: true}}, st, nil, nil, "")
 			require.NoError(t, err)
 		})
 	}

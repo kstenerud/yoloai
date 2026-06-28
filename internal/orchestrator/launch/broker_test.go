@@ -128,7 +128,8 @@ func TestBrokerCredentials_ForcedOffSkips(t *testing.T) {
 	secretEnv := map[string]string{"ANTHROPIC_API_KEY": "real"}
 
 	// --no-broker: returns immediately, never touches the (panic) backend, key intact.
-	require.NoError(t, brokerCredentials(context.Background(), panicBackend{}, st, secretEnv))
+	_, err := brokerCredentials(context.Background(), panicBackend{}, st, secretEnv)
+	require.NoError(t, err)
 	assert.Equal(t, "real", secretEnv["ANTHROPIC_API_KEY"], "forced-off leaves direct delivery")
 }
 
@@ -138,7 +139,8 @@ func TestBrokerCredentials_AutoOnUnreachableBackendIsSilentDirect(t *testing.T) 
 
 	// Backend can't host an injector; auto mode falls back to direct delivery
 	// (no error — the default must not break non-supporting backends).
-	require.NoError(t, brokerCredentials(context.Background(), descriptorBackend{}, st, secretEnv))
+	_, err := brokerCredentials(context.Background(), descriptorBackend{}, st, secretEnv)
+	require.NoError(t, err)
 	assert.Equal(t, "real", secretEnv["ANTHROPIC_API_KEY"])
 }
 
@@ -148,7 +150,7 @@ func TestBrokerCredentials_ForcedOnUnreachableBackendErrors(t *testing.T) {
 
 	// --broker against a backend that can't host an injector is a hard error,
 	// not a silent leak of the key via direct delivery.
-	err := brokerCredentials(context.Background(), descriptorBackend{}, st, secretEnv)
+	_, err := brokerCredentials(context.Background(), descriptorBackend{}, st, secretEnv)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "cannot host a sandbox-reachable injector")
 }
@@ -158,7 +160,8 @@ func TestBrokerCredentials_NoBrokerableKeySkips(t *testing.T) {
 	secretEnv := map[string]string{}     // subscription/OAuth: no API key
 
 	// No brokerable key -> direct delivery, no backend touched, no error.
-	require.NoError(t, brokerCredentials(context.Background(), panicBackend{}, st, secretEnv))
+	_, err := brokerCredentials(context.Background(), panicBackend{}, st, secretEnv)
+	require.NoError(t, err)
 }
 
 func TestBrokerCredentials_RestrictedNetworkAutoSkips(t *testing.T) {
@@ -166,7 +169,8 @@ func TestBrokerCredentials_RestrictedNetworkAutoSkips(t *testing.T) {
 		st := claudeState(t, &state.State{NetworkMode: mode}) // auto
 		secretEnv := map[string]string{"ANTHROPIC_API_KEY": "real"}
 		// Auto under restricted networking falls back to direct, no backend touched.
-		require.NoError(t, brokerCredentials(context.Background(), panicBackend{}, st, secretEnv), mode)
+		_, err := brokerCredentials(context.Background(), panicBackend{}, st, secretEnv)
+		require.NoError(t, err, mode)
 		assert.Equal(t, "real", secretEnv["ANTHROPIC_API_KEY"], mode)
 	}
 }
@@ -174,7 +178,7 @@ func TestBrokerCredentials_RestrictedNetworkAutoSkips(t *testing.T) {
 func TestBrokerCredentials_RestrictedNetworkForcedErrors(t *testing.T) {
 	st := claudeState(t, &state.State{NetworkMode: "isolated", BrokerCredentials: true})
 	secretEnv := map[string]string{"ANTHROPIC_API_KEY": "real"}
-	err := brokerCredentials(context.Background(), panicBackend{}, st, secretEnv)
+	_, err := brokerCredentials(context.Background(), panicBackend{}, st, secretEnv)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not yet supported with --network-isolated")
 }

@@ -65,7 +65,8 @@ func LaunchContainer(ctx context.Context, d state.Deps, st *state.State) error {
 	// — so both paths broker identically (D105/D106).
 	spec := envspec.BuildEnvSpec(st.Agent)
 	secretEnv := envsetup.ResolveSecretEnv(spec, envVars, st.Layout)
-	if err := brokerCredentials(ctx, d.Runtime, st, secretEnv); err != nil {
+	brokerNetMode, err := brokerCredentials(ctx, d.Runtime, st, secretEnv)
+	if err != nil {
 		return err
 	}
 
@@ -92,7 +93,7 @@ func LaunchContainer(ctx context.Context, d state.Deps, st *state.State) error {
 	}
 	ports = filterAvailablePorts(ports, outputOr(st.Output))
 
-	if err := buildAndStart(ctx, d.Runtime, st, mnts, ports, secretsDir != "", secretEnv); err != nil {
+	if err := buildAndStart(ctx, d.Runtime, st, mnts, ports, secretsDir != "", secretEnv, brokerNetMode); err != nil {
 		// The injector may have started before the container; reap it so a failed
 		// launch never orphans it (Stop is a no-op when nothing was brokered).
 		_ = broker.NewSidecarHost().Stop(ctx, st.SandboxDir) //nolint:errcheck // best-effort cleanup
@@ -126,9 +127,9 @@ func usesAgentFreeLaunch(rt runtime.Backend, isolation runtime.IsolationMode) (r
 // comes up on a keepalive_only holder and sandbox-setup.py is launched as a
 // separate process over it — the S3 re-route. Otherwise it follows the legacy
 // path: the agent is welded into the entrypoint as before.
-func buildAndStart(ctx context.Context, rt runtime.Backend, st *state.State, mnts []runtime.MountSpec, ports []runtime.PortMapping, hasSecrets bool, secretEnv map[string]string) error {
+func buildAndStart(ctx context.Context, rt runtime.Backend, st *state.State, mnts []runtime.MountSpec, ports []runtime.PortMapping, hasSecrets bool, secretEnv map[string]string, brokerNetMode string) error {
 	cname := store.InstanceName(st.Layout.Principal, st.Name)
-	instanceCfg, err := buildInstanceConfig(rt.Descriptor(), st, mnts, ports)
+	instanceCfg, err := buildInstanceConfig(rt.Descriptor(), st, mnts, ports, brokerNetMode)
 	if err != nil {
 		return err
 	}
@@ -258,9 +259,14 @@ func startViaLaunch(ctx context.Context, rt runtime.Backend, launcher runtime.Pr
 // hard error is forced-on against a backend that can't host a sandbox-reachable
 // injector: the user explicitly asked for the key to be withheld, so we refuse
 // rather than silently leak it via direct delivery.
-func brokerCredentials(ctx context.Context, rt runtime.Backend, st *state.State, secretEnv map[string]string) error {
+// brokerCredentials returns the InstanceConfig.NetworkMode the sandbox must be
+// created with for the injector to be reachable (reach.RequiredNetworkMode) —
+// non-empty only when brokering engaged and the backend needs a specific mode
+// (rootless podman → slirp). "" means no override (direct delivery, or a backend
+// whose default network already reaches the injector).
+func brokerCredentials(ctx context.Context, rt runtime.Backend, st *state.State, secretEnv map[string]string) (string, error) {
 	if st.BrokerDisabled || st.Agent == nil || st.Agent.Broker == nil {
-		return nil
+		return "", nil
 	}
 	bc := st.Agent.Broker
 
@@ -272,7 +278,7 @@ func brokerCredentials(ctx context.Context, rt runtime.Backend, st *state.State,
 			slog.Info("brokering requested but no brokerable credential present; using direct delivery",
 				"event", "sandbox.broker.skip", "sandbox", st.Name)
 		}
-		return nil
+		return "", nil
 	}
 
 	// Restricted networking can't reach the host-side injector yet: the in-sandbox
@@ -283,33 +289,33 @@ func brokerCredentials(ctx context.Context, rt runtime.Backend, st *state.State,
 	// errors rather than silently breaking the agent's API access.
 	if st.NetworkMode == "isolated" || st.NetworkMode == "none" {
 		if st.BrokerCredentials {
-			return fmt.Errorf("--broker is not yet supported with --network-%s: the in-sandbox allowlist can't reach the host-side injector. Omit --broker, or use open networking", st.NetworkMode)
+			return "", fmt.Errorf("--broker is not yet supported with --network-%s: the in-sandbox allowlist can't reach the host-side injector. Omit --broker, or use open networking", st.NetworkMode)
 		}
-		return nil
+		return "", nil
 	}
 
 	reach, ok, err := resolveInjectorReach(ctx, rt)
 	if err != nil {
-		return fmt.Errorf("resolve injector reachability: %w", err)
+		return "", fmt.Errorf("resolve injector reachability: %w", err)
 	}
 	if !ok {
 		if st.BrokerCredentials {
-			return fmt.Errorf("--broker requested but the %s backend cannot host a sandbox-reachable injector", rt.Descriptor().Type)
+			return "", fmt.Errorf("--broker requested but the %s backend cannot host a sandbox-reachable injector", rt.Descriptor().Type)
 		}
-		return nil // auto: this backend can't broker; direct delivery
+		return "", nil // auto: this backend can't broker; direct delivery
 	}
 
 	addr, err := broker.NewSidecarHost().Ensure(ctx, buildInjectorSpec(st.SandboxDir, bc, cred, reach, realKey))
 	if err != nil {
-		return fmt.Errorf("start credential injector: %w", err)
+		return "", fmt.Errorf("start credential injector: %w", err)
 	}
 
 	if err := applyBrokerEnv(secretEnv, bc, reach, addr); err != nil {
-		return err
+		return "", err
 	}
 	slog.Info("brokered agent credential through host-side injector",
 		"event", "sandbox.broker.active", "sandbox", st.Name, "upstream", bc.UpstreamURL, "credential", cred.EnvVar)
-	return nil
+	return reach.RequiredNetworkMode, nil
 }
 
 // resolveInjectorReach asks the backend for its network-level injector endpoint.
@@ -491,7 +497,12 @@ func patchKeepaliveOnly(sandboxDir string, keepalive bool) error {
 }
 
 // buildInstanceConfig constructs the runtime.InstanceConfig from sandbox state.
-func buildInstanceConfig(desc runtime.BackendDescriptor, st *state.State, mnts []runtime.MountSpec, ports []runtime.PortMapping) (runtime.InstanceConfig, error) {
+// brokerNetMode, when non-empty, is the network mode brokering requires for the
+// injector to be reachable (rootless podman → slirp); it overrides the default
+// container network mode. It only applies to open networking — the
+// isolation-mode gating below keys on st.NetworkMode (the user-facing isolation),
+// which is unaffected, and brokering is skipped under isolated/none anyway.
+func buildInstanceConfig(desc runtime.BackendDescriptor, st *state.State, mnts []runtime.MountSpec, ports []runtime.PortMapping, brokerNetMode string) (runtime.InstanceConfig, error) {
 	cname := store.InstanceName(st.Layout.Principal, st.Name)
 	caps := desc.Capabilities
 
@@ -504,13 +515,21 @@ func buildInstanceConfig(desc runtime.BackendDescriptor, st *state.State, mnts [
 		}
 	}
 
+	// The container's effective network mode is the user's, unless brokering needs
+	// a specific one (rootless podman's slirp host-loopback). Brokering is gated to
+	// open networking, so this never overrides an isolated/none sandbox.
+	networkMode := st.NetworkMode
+	if brokerNetMode != "" {
+		networkMode = brokerNetMode
+	}
+
 	instanceCfg := runtime.InstanceConfig{
 		Name:        cname,
 		ImageRef:    st.ImageRef,
 		WorkingDir:  OverlayOrResolvedMountPath(st.Workdir),
 		Mounts:      mnts,
 		Ports:       ports,
-		NetworkMode: st.NetworkMode,
+		NetworkMode: networkMode,
 		UseInit:     true,
 		Labels:      instanceLabels(st.Layout.Principal, st.Name),
 		// C.UTF-8 is always present without locale-gen; without it apps like Claude Code render ASCII-only.

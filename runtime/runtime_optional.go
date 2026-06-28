@@ -434,6 +434,12 @@ type InjectorReach struct {
 	// it places in base_url). For Linux bridge backends it equals BindHost (the
 	// gateway IP).
 	DialHost string
+	// RequiredNetworkMode, when non-empty, is the InstanceConfig.NetworkMode the
+	// sandbox must be created with for DialHost to be reachable — e.g. rootless
+	// podman needs "slirp4netns:allow_host_loopback=true" so the container can
+	// reach the host loopback at DialHost (10.0.2.2). "" means the backend's
+	// default network already works (Linux docker/containerd: the bridge gateway).
+	RequiredNetworkMode string
 }
 
 // ErrInjectorUnsupported is returned by InjectorReach when a backend that

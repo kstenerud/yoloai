@@ -236,3 +236,18 @@ func TestRequiredCapabilities_Podman_RootlessIsPermanent(t *testing.T) {
 	require.NotEmpty(t, results)
 	assert.True(t, results[0].IsPermanent)
 }
+
+func TestInjectorReach_Rootless(t *testing.T) {
+	r := &Runtime{rootless: true}
+	reach, err := r.InjectorReach(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "127.0.0.1", reach.BindHost, "injector binds host loopback")
+	assert.Equal(t, "10.0.2.2", reach.DialHost, "agent dials the slirp host alias")
+	assert.Equal(t, "slirp4netns:allow_host_loopback=true", reach.RequiredNetworkMode)
+}
+
+func TestInjectorReach_RootfulUnsupported(t *testing.T) {
+	r := &Runtime{rootless: false}
+	_, err := r.InjectorReach(context.Background())
+	assert.ErrorIs(t, err, runtime.ErrInjectorUnsupported, "rootful podman brokering not wired yet")
+}
