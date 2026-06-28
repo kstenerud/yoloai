@@ -65,7 +65,7 @@ func LaunchContainer(ctx context.Context, d state.Deps, st *state.State) error {
 	// — so both paths broker identically (D105/D106).
 	spec := envspec.BuildEnvSpec(st.Agent)
 	secretEnv := envsetup.ResolveSecretEnv(spec, envVars, st.Layout)
-	brokerNetMode, err := brokerCredentials(ctx, d.Runtime, st, secretEnv)
+	bro, err := brokerCredentials(ctx, d.Runtime, st, secretEnv)
 	if err != nil {
 		return err
 	}
@@ -93,7 +93,7 @@ func LaunchContainer(ctx context.Context, d state.Deps, st *state.State) error {
 	}
 	ports = filterAvailablePorts(ports, outputOr(st.Output))
 
-	if err := buildAndStart(ctx, d.Runtime, st, mnts, ports, secretsDir != "", secretEnv, brokerNetMode); err != nil {
+	if err := buildAndStart(ctx, d.Runtime, st, mnts, ports, secretsDir != "", secretEnv, bro); err != nil {
 		// The injector may have started before the container; reap it so a failed
 		// launch never orphans it (Stop is a no-op when nothing was brokered).
 		_ = broker.NewSidecarHost().Stop(ctx, st.SandboxDir) //nolint:errcheck // best-effort cleanup
@@ -127,9 +127,9 @@ func usesAgentFreeLaunch(rt runtime.Backend, isolation runtime.IsolationMode) (r
 // comes up on a keepalive_only holder and sandbox-setup.py is launched as a
 // separate process over it — the S3 re-route. Otherwise it follows the legacy
 // path: the agent is welded into the entrypoint as before.
-func buildAndStart(ctx context.Context, rt runtime.Backend, st *state.State, mnts []runtime.MountSpec, ports []runtime.PortMapping, hasSecrets bool, secretEnv map[string]string, brokerNetMode string) error {
+func buildAndStart(ctx context.Context, rt runtime.Backend, st *state.State, mnts []runtime.MountSpec, ports []runtime.PortMapping, hasSecrets bool, secretEnv map[string]string, bro brokerOutcome) error {
 	cname := store.InstanceName(st.Layout.Principal, st.Name)
-	instanceCfg, err := buildInstanceConfig(rt.Descriptor(), st, mnts, ports, brokerNetMode)
+	instanceCfg, err := buildInstanceConfig(rt.Descriptor(), st, mnts, ports, bro)
 	if err != nil {
 		return err
 	}
@@ -259,14 +259,19 @@ func startViaLaunch(ctx context.Context, rt runtime.Backend, launcher runtime.Pr
 // hard error is forced-on against a backend that can't host a sandbox-reachable
 // injector: the user explicitly asked for the key to be withheld, so we refuse
 // rather than silently leak it via direct delivery.
-// brokerCredentials returns the InstanceConfig.NetworkMode the sandbox must be
-// created with for the injector to be reachable (reach.RequiredNetworkMode) —
-// non-empty only when brokering engaged and the backend needs a specific mode
-// (rootless podman → slirp). "" means no override (direct delivery, or a backend
-// whose default network already reaches the injector).
-func brokerCredentials(ctx context.Context, rt runtime.Backend, st *state.State, secretEnv map[string]string) (string, error) {
+// brokerOutcome is what a brokered launch needs downstream of brokerCredentials:
+// the InstanceConfig.NetworkMode the sandbox must run (non-empty only when the
+// backend needs a dedicated mode — rootless podman → slirp) and the injector's
+// agent-facing endpoint (DialHost:port) to allowlist under network isolation. The
+// zero value means brokering didn't engage (direct delivery).
+type brokerOutcome struct {
+	NetworkMode      string
+	InjectorEndpoint string
+}
+
+func brokerCredentials(ctx context.Context, rt runtime.Backend, st *state.State, secretEnv map[string]string) (brokerOutcome, error) {
 	if st.BrokerDisabled || st.Agent == nil || st.Agent.Broker == nil {
-		return "", nil
+		return brokerOutcome{}, nil
 	}
 	bc := st.Agent.Broker
 
@@ -278,44 +283,64 @@ func brokerCredentials(ctx context.Context, rt runtime.Backend, st *state.State,
 			slog.Info("brokering requested but no brokerable credential present; using direct delivery",
 				"event", "sandbox.broker.skip", "sandbox", st.Name)
 		}
-		return "", nil
+		return brokerOutcome{}, nil
 	}
 
-	// Restricted networking can't reach the host-side injector yet: the in-sandbox
-	// allowlist (iptables) doesn't include the bridge gateway the injector binds,
-	// and --network-none has no egress at all. Composing brokering with an egress
-	// allowlist (allowlisting the injector) is the containment layer's job, a later
-	// phase. Until then auto falls back to direct delivery; an explicit --broker
+	// --network-none has no egress at all, so the injector is unreachable. (Under
+	// --network-isolated brokering DOES compose now — the injector endpoint is
+	// allowlisted below.) Auto falls back to direct delivery; an explicit --broker
 	// errors rather than silently breaking the agent's API access.
-	if st.NetworkMode == "isolated" || st.NetworkMode == "none" {
+	if st.NetworkMode == "none" {
 		if st.BrokerCredentials {
-			return "", fmt.Errorf("--broker is not yet supported with --network-%s: the in-sandbox allowlist can't reach the host-side injector. Omit --broker, or use open networking", st.NetworkMode)
+			return brokerOutcome{}, fmt.Errorf("--broker is not supported with --network-none: the sandbox has no egress to reach the host-side injector. Omit --broker, or use open or isolated networking")
 		}
-		return "", nil
+		return brokerOutcome{}, nil
 	}
 
-	reach, ok, err := resolveInjectorReach(ctx, rt)
-	if err != nil {
-		return "", fmt.Errorf("resolve injector reachability: %w", err)
-	}
-	if !ok {
-		if st.BrokerCredentials {
-			return "", fmt.Errorf("--broker requested but the %s backend cannot host a sandbox-reachable injector", rt.Descriptor().Type)
-		}
-		return "", nil // auto: this backend can't broker; direct delivery
+	reach, ok, err := resolveBrokerReach(ctx, rt, st)
+	if err != nil || !ok {
+		return brokerOutcome{}, err
 	}
 
 	addr, err := broker.NewSidecarHost().Ensure(ctx, buildInjectorSpec(st.SandboxDir, bc, cred, reach, realKey))
 	if err != nil {
-		return "", fmt.Errorf("start credential injector: %w", err)
+		return brokerOutcome{}, fmt.Errorf("start credential injector: %w", err)
 	}
 
-	if err := applyBrokerEnv(secretEnv, bc, reach, addr); err != nil {
-		return "", err
+	endpoint, err := applyBrokerEnv(secretEnv, bc, reach, addr)
+	if err != nil {
+		return brokerOutcome{}, err
 	}
 	slog.Info("brokered agent credential through host-side injector",
 		"event", "sandbox.broker.active", "sandbox", st.Name, "upstream", bc.UpstreamURL, "credential", cred.EnvVar)
-	return reach.RequiredNetworkMode, nil
+	return brokerOutcome{NetworkMode: reach.RequiredNetworkMode, InjectorEndpoint: endpoint}, nil
+}
+
+// resolveBrokerReach resolves the injector reachability and applies the
+// network-mode gates for a brokered launch. ok==false with err==nil means
+// brokering can't proceed and auto falls back to direct delivery; a non-nil err
+// is the forced-on (--broker) refusal of that same situation. It refuses two
+// cases: a backend that can't host an injector, and --network-isolated on a
+// backend that needs its own network mode (rootless podman → slirp) which can't
+// compose with the isolation bridge + in-sandbox iptables yet.
+func resolveBrokerReach(ctx context.Context, rt runtime.Backend, st *state.State) (runtime.InjectorReach, bool, error) {
+	reach, ok, err := resolveInjectorReach(ctx, rt)
+	if err != nil {
+		return runtime.InjectorReach{}, false, fmt.Errorf("resolve injector reachability: %w", err)
+	}
+	if !ok {
+		if st.BrokerCredentials {
+			return runtime.InjectorReach{}, false, fmt.Errorf("--broker requested but the %s backend cannot host a sandbox-reachable injector", rt.Descriptor().Type)
+		}
+		return runtime.InjectorReach{}, false, nil
+	}
+	if st.NetworkMode == "isolated" && reach.RequiredNetworkMode != "" {
+		if st.BrokerCredentials {
+			return runtime.InjectorReach{}, false, fmt.Errorf("--broker is not yet supported with --network-isolated on the %s backend: it needs a dedicated network mode (%s) the isolation allowlist can't compose with yet", rt.Descriptor().Type, reach.RequiredNetworkMode)
+		}
+		return runtime.InjectorReach{}, false, nil
+	}
+	return reach, true, nil
 }
 
 // resolveInjectorReach asks the backend for its network-level injector endpoint.
@@ -433,18 +458,21 @@ func ReconcileInjector(ctx context.Context, d state.Deps, name string) error {
 // the injector's port), and sets the placeholder token. injectorAddr is the
 // injector's bound address (BindHost:port); only its port is used, since the
 // agent reaches the injector via DialHost (which may differ from BindHost, e.g.
-// Docker Desktop). It is a pure function so the env rewrite is unit-tested.
-func applyBrokerEnv(secretEnv map[string]string, bc *agent.BrokerConfig, reach runtime.InjectorReach, injectorAddr string) error {
+// Docker Desktop). It returns the agent-facing endpoint (DialHost:port) — the
+// destination to allowlist under network isolation. It is a pure function so the
+// env rewrite is unit-tested.
+func applyBrokerEnv(secretEnv map[string]string, bc *agent.BrokerConfig, reach runtime.InjectorReach, injectorAddr string) (string, error) {
 	_, port, err := net.SplitHostPort(injectorAddr)
 	if err != nil {
-		return fmt.Errorf("parse injector address %q: %w", injectorAddr, err)
+		return "", fmt.Errorf("parse injector address %q: %w", injectorAddr, err)
 	}
 	for _, c := range bc.Credentials {
 		delete(secretEnv, c.EnvVar)
 	}
-	secretEnv[bc.BaseURLEnvVar] = "http://" + net.JoinHostPort(reach.DialHost, port)
+	endpoint := net.JoinHostPort(reach.DialHost, port)
+	secretEnv[bc.BaseURLEnvVar] = "http://" + endpoint
 	secretEnv[bc.AuthTokenEnvVar] = bc.DummyToken
-	return nil
+	return endpoint, nil
 }
 
 // startLegacy is the original bring-up path for backends without
@@ -497,12 +525,12 @@ func patchKeepaliveOnly(sandboxDir string, keepalive bool) error {
 }
 
 // buildInstanceConfig constructs the runtime.InstanceConfig from sandbox state.
-// brokerNetMode, when non-empty, is the network mode brokering requires for the
-// injector to be reachable (rootless podman → slirp); it overrides the default
-// container network mode. It only applies to open networking — the
-// isolation-mode gating below keys on st.NetworkMode (the user-facing isolation),
-// which is unaffected, and brokering is skipped under isolated/none anyway.
-func buildInstanceConfig(desc runtime.BackendDescriptor, st *state.State, mnts []runtime.MountSpec, ports []runtime.PortMapping, brokerNetMode string) (runtime.InstanceConfig, error) {
+// bro carries the broker's network-mode override (rootless podman → slirp; only
+// set on open networking) and the injector endpoint, which is published to the
+// container as YOLOAI_BROKER_INJECTOR_ENDPOINT so the entrypoint can allowlist it
+// under isolation. The isolation-mode gating below keys on st.NetworkMode (the
+// user-facing isolation), which the override never changes.
+func buildInstanceConfig(desc runtime.BackendDescriptor, st *state.State, mnts []runtime.MountSpec, ports []runtime.PortMapping, bro brokerOutcome) (runtime.InstanceConfig, error) {
 	cname := store.InstanceName(st.Layout.Principal, st.Name)
 	caps := desc.Capabilities
 
@@ -516,24 +544,32 @@ func buildInstanceConfig(desc runtime.BackendDescriptor, st *state.State, mnts [
 	}
 
 	// The container's effective network mode is the user's, unless brokering needs
-	// a specific one (rootless podman's slirp host-loopback). Brokering is gated to
-	// open networking, so this never overrides an isolated/none sandbox.
+	// a specific one (rootless podman's slirp host-loopback). The override is only
+	// set on open networking, so it never changes an isolated/none sandbox.
 	networkMode := st.NetworkMode
-	if brokerNetMode != "" {
-		networkMode = brokerNetMode
+	if bro.NetworkMode != "" {
+		networkMode = bro.NetworkMode
+	}
+
+	// C.UTF-8 is always present without locale-gen; without it apps like Claude Code render ASCII-only.
+	containerEnv := []string{"LANG=C.UTF-8"}
+	// Publish the injector endpoint so the entrypoint can allowlist it under
+	// network isolation (the agent's LLM egress collapses to the injector). Only
+	// consumed when network_isolated; harmless on open networking.
+	if bro.InjectorEndpoint != "" {
+		containerEnv = append(containerEnv, "YOLOAI_BROKER_INJECTOR_ENDPOINT="+bro.InjectorEndpoint)
 	}
 
 	instanceCfg := runtime.InstanceConfig{
-		Name:        cname,
-		ImageRef:    st.ImageRef,
-		WorkingDir:  OverlayOrResolvedMountPath(st.Workdir),
-		Mounts:      mnts,
-		Ports:       ports,
-		NetworkMode: networkMode,
-		UseInit:     true,
-		Labels:      instanceLabels(st.Layout.Principal, st.Name),
-		// C.UTF-8 is always present without locale-gen; without it apps like Claude Code render ASCII-only.
-		ContainerEnv: []string{"LANG=C.UTF-8"},
+		Name:         cname,
+		ImageRef:     st.ImageRef,
+		WorkingDir:   OverlayOrResolvedMountPath(st.Workdir),
+		Mounts:       mnts,
+		Ports:        ports,
+		NetworkMode:  networkMode,
+		UseInit:      true,
+		Labels:       instanceLabels(st.Layout.Principal, st.Name),
+		ContainerEnv: containerEnv,
 	}
 
 	if err := applyResourceLimits(st, &instanceCfg); err != nil {

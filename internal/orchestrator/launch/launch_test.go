@@ -249,7 +249,7 @@ func TestBuildInstanceConfig_RejectsNetworkIsolatedWithGvisor(t *testing.T) {
 		Isolation:   "container-enhanced",
 	}
 
-	_, err := buildInstanceConfig(runtime.BackendDescriptor{Type: "mock", Capabilities: runtime.BackendCaps{NetworkIsolation: true}}, st, nil, nil, "")
+	_, err := buildInstanceConfig(runtime.BackendDescriptor{Type: "mock", Capabilities: runtime.BackendCaps{NetworkIsolation: true}}, st, nil, nil, brokerOutcome{})
 	require.Error(t, err)
 	msg := err.Error()
 	assert.Contains(t, msg, "container-enhanced", "error names the broken isolation mode")
@@ -257,10 +257,11 @@ func TestBuildInstanceConfig_RejectsNetworkIsolatedWithGvisor(t *testing.T) {
 	assert.Contains(t, msg, "--isolation=container", "error points at the working alternatives")
 }
 
-// TestBuildInstanceConfig_BrokerNetworkModeOverride verifies the brokerNetMode
-// argument overrides the container's network mode (rootless podman → slirp) while
-// leaving it as the user's mode when brokering needs nothing special.
-func TestBuildInstanceConfig_BrokerNetworkModeOverride(t *testing.T) {
+// TestBuildInstanceConfig_BrokerOutcome verifies the broker outcome overrides the
+// container's network mode (rootless podman → slirp) and publishes the injector
+// endpoint as YOLOAI_BROKER_INJECTOR_ENDPOINT, while leaving both untouched when
+// brokering didn't engage.
+func TestBuildInstanceConfig_BrokerOutcome(t *testing.T) {
 	st := &state.State{
 		Name:    "test",
 		Workdir: &state.DirSpec{Path: "/project", Mode: store.DirMode("copy")},
@@ -268,13 +269,18 @@ func TestBuildInstanceConfig_BrokerNetworkModeOverride(t *testing.T) {
 	}
 	desc := runtime.BackendDescriptor{Type: "mock"}
 
-	cfg, err := buildInstanceConfig(desc, st, nil, nil, "")
+	cfg, err := buildInstanceConfig(desc, st, nil, nil, brokerOutcome{})
 	require.NoError(t, err)
-	assert.Equal(t, "", cfg.NetworkMode, "no broker requirement: keep the user's network mode")
+	assert.Equal(t, "", cfg.NetworkMode, "no broker: keep the user's network mode")
+	assert.NotContains(t, cfg.ContainerEnv, "YOLOAI_BROKER_INJECTOR_ENDPOINT=", "no broker: no injector env")
 
-	cfg, err = buildInstanceConfig(desc, st, nil, nil, "slirp4netns:allow_host_loopback=true")
+	cfg, err = buildInstanceConfig(desc, st, nil, nil, brokerOutcome{
+		NetworkMode:      "slirp4netns:allow_host_loopback=true",
+		InjectorEndpoint: "172.17.0.1:44115",
+	})
 	require.NoError(t, err)
-	assert.Equal(t, "slirp4netns:allow_host_loopback=true", cfg.NetworkMode, "broker requirement overrides")
+	assert.Equal(t, "slirp4netns:allow_host_loopback=true", cfg.NetworkMode, "broker mode overrides")
+	assert.Contains(t, cfg.ContainerEnv, "YOLOAI_BROKER_INJECTOR_ENDPOINT=172.17.0.1:44115", "injector endpoint published")
 }
 
 // TestBuildInstanceConfig_AllowsNetworkIsolatedOnSupportedModes is the
@@ -293,7 +299,7 @@ func TestBuildInstanceConfig_AllowsNetworkIsolatedOnSupportedModes(t *testing.T)
 				NetworkMode: "isolated",
 				Isolation:   isolation,
 			}
-			_, err := buildInstanceConfig(runtime.BackendDescriptor{Type: "mock", Capabilities: runtime.BackendCaps{NetworkIsolation: true, OverlayDirs: true, CapAdd: true}}, st, nil, nil, "")
+			_, err := buildInstanceConfig(runtime.BackendDescriptor{Type: "mock", Capabilities: runtime.BackendCaps{NetworkIsolation: true, OverlayDirs: true, CapAdd: true}}, st, nil, nil, brokerOutcome{})
 			require.NoError(t, err)
 		})
 	}
