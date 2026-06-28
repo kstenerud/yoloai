@@ -35,6 +35,11 @@ type StartOptions struct {
 	PromptFile   string                // if set, read from file, overwrite prompt.txt, send directly
 	Isolation    runtime.IsolationMode // if set, override the isolation mode stored in environment.json
 	VscodeTunnel bool                  // if true, enable VS Code Remote Tunnel (persisted to meta)
+	// Broker, if true, opts the agent's API key into the host-side credential
+	// injector for this launch (D105/D106). NOT persisted: bare `yoloai start`
+	// will not re-broker — the caller re-supplies it on each launch (like Env).
+	// Persistence lands when brokering becomes the per-backend default.
+	Broker bool
 	// Env is the per-sandbox environment overlay, merged over the resolved
 	// config+profile env at container (re)creation. It is never persisted —
 	// the caller must re-supply it on each launch that needs it (secrets are
@@ -194,7 +199,7 @@ func handleStoppedOrRemovedStatus(ctx context.Context, d state.Deps, cname, name
 		}
 		defer cleanupResumeFiles(d, name)
 	}
-	if err := recreateContainer(ctx, d, name, meta, opts.Resume, opts.Env, n); err != nil {
+	if err := recreateContainer(ctx, d, name, meta, opts.Resume, opts.Broker, opts.Env, n); err != nil {
 		return err
 	}
 	n.infof("%s", successMsg)

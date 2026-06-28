@@ -121,6 +121,40 @@ type Definition struct {
 	// SeedsAllAgents, if true, means this agent seeds home configs for all real
 	// agents rather than just itself (used by the shell agent).
 	SeedsAllAgents bool
+
+	// Broker declares how this agent's API key can be brokered through the
+	// host-side credential injector (D105/D106): the agent is pointed at the
+	// injector via BaseURLEnvVar with a placeholder (AuthTokenEnvVar=DummyToken),
+	// and the injector swaps the placeholder for the real key (read from
+	// APIKeyEnvVar) before forwarding to UpstreamURL. Nil means the agent is not
+	// brokerable yet and always takes direct credential delivery.
+	Broker *BrokerConfig
+}
+
+// BrokerConfig declares an agent's brokerable API-key credential for the
+// host-side injector. See agent.Definition.Broker and D105/D106.
+type BrokerConfig struct {
+	// UpstreamURL is the real upstream the injector forwards to (scheme+host),
+	// e.g. "https://api.anthropic.com".
+	UpstreamURL string
+	// Destination is the host the injected credential applies to, e.g.
+	// "api.anthropic.com" (matches the upstream host).
+	Destination string
+	// Header is the request header the real key is injected into, e.g.
+	// "x-api-key"; Prefix is prepended to the value ("" for x-api-key, "Bearer "
+	// for an Authorization bearer).
+	Header string
+	Prefix string
+	// APIKeyEnvVar names the resolved secret that holds the real key, e.g.
+	// "ANTHROPIC_API_KEY". When absent from the resolved secrets (e.g. a
+	// subscription login), brokering is skipped and direct delivery is used.
+	APIKeyEnvVar string
+	// BaseURLEnvVar points the agent at the injector, e.g. "ANTHROPIC_BASE_URL".
+	BaseURLEnvVar string
+	// AuthTokenEnvVar carries the placeholder the agent sends, e.g.
+	// "ANTHROPIC_AUTH_TOKEN"; DummyToken is its value.
+	AuthTokenEnvVar string
+	DummyToken      string
 }
 
 // agentsMu guards the agents map for concurrent reads and file-agent registration.
@@ -186,6 +220,15 @@ var agents = map[string]*Definition{
 		PromptMode:     PromptModeInteractive,
 		ResumeFlag:     "--continue",
 		APIKeyEnvVars:  []string{"ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"},
+		Broker: &BrokerConfig{ //nolint:gosec // G101 false positive: env-var NAMES + a placeholder, not real credentials
+			UpstreamURL:     "https://api.anthropic.com",
+			Destination:     "api.anthropic.com",
+			Header:          "x-api-key",
+			APIKeyEnvVar:    "ANTHROPIC_API_KEY",
+			BaseURLEnvVar:   "ANTHROPIC_BASE_URL",
+			AuthTokenEnvVar: "ANTHROPIC_AUTH_TOKEN",
+			DummyToken:      "yoloai-broker-dummy",
+		},
 		SeedFiles: []SeedFile{
 			{HostPath: "~/.claude/.credentials.json", TargetPath: ".credentials.json", AuthOnly: true, KeychainService: "Claude Code-credentials"},
 			{HostPath: "~/.claude/settings.json", TargetPath: "settings.json"},

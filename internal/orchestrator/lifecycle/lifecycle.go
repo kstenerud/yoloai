@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/kstenerud/yoloai/internal/broker"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/orchestrator/launch"
 	"github.com/kstenerud/yoloai/internal/orchestrator/state"
@@ -31,7 +32,17 @@ func stop(ctx context.Context, d state.Deps, name string) error {
 		return err
 	}
 	slog.Info("stopping sandbox", "event", "sandbox.stop", "container", store.InstanceName(d.Layout.Principal, name))
+	stopInjector(ctx, d, name)
 	return d.Runtime.Stop(ctx, store.InstanceName(d.Layout.Principal, name))
+}
+
+// stopInjector tears down the sandbox's host-side credential injector, if one is
+// running (D106). Best-effort: a leftover injector process is harmless to the
+// stop/destroy outcome, so failures are logged, not surfaced.
+func stopInjector(ctx context.Context, d state.Deps, name string) {
+	if err := broker.NewSidecarHost().Stop(ctx, d.Layout.SandboxDir(name)); err != nil {
+		slog.Warn("lifecycle: could not stop credential injector", "sandbox", name, "err", err)
+	}
 }
 
 // Destroy stops the container, removes it, and deletes the sandbox directory.
@@ -52,6 +63,7 @@ func Destroy(ctx context.Context, d state.Deps, name string) (*DestroyResult, er
 }
 
 func destroy(ctx context.Context, d state.Deps, name string) (*DestroyResult, error) {
+	stopInjector(ctx, d, name)
 	warnings, err := launch.Teardown(ctx, d, name)
 	if err != nil {
 		return nil, err

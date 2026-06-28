@@ -19,6 +19,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kstenerud/yoloai/internal/agent"
+	"github.com/kstenerud/yoloai/internal/broker"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/envsetup"
 	"github.com/kstenerud/yoloai/internal/fileutil"
@@ -190,6 +192,14 @@ func startViaLaunch(ctx context.Context, rt runtime.Backend, launcher runtime.Pr
 		return err
 	}
 
+	// Brokering (opt-in): start the host-side injector and rewrite secretEnv so
+	// the real key stays host-side and the agent is pointed at the injector. Runs
+	// after Start (the network gateway is now knowable) and before secretEnv is
+	// materialized into the launched process's env.
+	if err := brokerCredentials(ctx, rt, st, cname, secretEnv); err != nil {
+		return err
+	}
+
 	env := []string{"HOME=/home/yoloai", "YOLOAI_DIR=/yoloai"}
 	if len(secretEnv) > 0 {
 		keys := make([]string, 0, len(secretEnv))
@@ -219,6 +229,83 @@ func startViaLaunch(ctx context.Context, rt runtime.Backend, launcher runtime.Pr
 	if hasSecrets {
 		waitForSecretsConsumed(markerPath, effectiveSecretsConsumedTimeout(rt.Descriptor()))
 	}
+	return nil
+}
+
+// brokerCredentials, when the sandbox opted into brokering (st.BrokerCredentials)
+// and its agent is brokerable, starts the host-side credential injector for this
+// sandbox and rewrites secretEnv so the real API key never enters the container:
+// the key is removed and the agent is pointed at the injector (base_url + a dummy
+// placeholder). The injector swaps the placeholder for the real key host-side.
+//
+// No-op when brokering is off, the agent isn't brokerable, or no brokerable key
+// is present (e.g. a subscription login) — those fall through to direct delivery.
+// But an explicit opt-in against a backend that cannot host a sandbox-reachable
+// injector is an error, not a silent fallback: the user asked for the key to be
+// withheld, so we refuse rather than leak it via direct delivery.
+func brokerCredentials(ctx context.Context, rt runtime.Backend, st *state.State, cname string, secretEnv map[string]string) error {
+	if !st.BrokerCredentials || st.Agent == nil || st.Agent.Broker == nil {
+		return nil
+	}
+	bc := st.Agent.Broker
+
+	realKey := secretEnv[bc.APIKeyEnvVar]
+	if realKey == "" {
+		// Nothing brokerable (e.g. subscription/OAuth). Direct delivery unchanged.
+		slog.Info("brokering requested but no brokerable API key present; using direct delivery",
+			"event", "sandbox.broker.skip", "sandbox", st.Name, "key_env", bc.APIKeyEnvVar)
+		return nil
+	}
+
+	reachable, ok := runtime.InjectorReachOf(rt)
+	if !ok {
+		return fmt.Errorf("--broker requested but the %s backend cannot host a sandbox-reachable injector", rt.Descriptor().Type)
+	}
+	reach, err := reachable.InjectorReach(ctx, cname)
+	if err != nil {
+		return fmt.Errorf("resolve injector reachability: %w", err)
+	}
+
+	spec := broker.InjectorSpec{
+		SandboxDir:   st.SandboxDir,
+		BindHost:     reach.BindHost,
+		UpstreamURL:  bc.UpstreamURL,
+		StripHeaders: []string{"Authorization"},
+		Bindings: []broker.BindingConfig{{
+			Destination: bc.Destination,
+			Kind:        broker.KindHeaderSet,
+			Header:      bc.Header,
+			Prefix:      bc.Prefix,
+			Secret:      realKey,
+		}},
+	}
+	addr, err := broker.NewSidecarHost().Ensure(ctx, spec)
+	if err != nil {
+		return fmt.Errorf("start credential injector: %w", err)
+	}
+
+	if err := applyBrokerEnv(secretEnv, bc, reach, addr); err != nil {
+		return err
+	}
+	slog.Info("brokered agent API key through host-side injector",
+		"event", "sandbox.broker.active", "sandbox", st.Name, "upstream", bc.UpstreamURL)
+	return nil
+}
+
+// applyBrokerEnv rewrites secretEnv in place for a brokered launch: it drops the
+// real key, points the agent at the injector via base_url (DialHost + the
+// injector's port), and sets the placeholder token. injectorAddr is the
+// injector's bound address (BindHost:port); only its port is used, since the
+// agent reaches the injector via DialHost (which may differ from BindHost, e.g.
+// Docker Desktop). It is a pure function so the env rewrite is unit-tested.
+func applyBrokerEnv(secretEnv map[string]string, bc *agent.BrokerConfig, reach runtime.InjectorReach, injectorAddr string) error {
+	_, port, err := net.SplitHostPort(injectorAddr)
+	if err != nil {
+		return fmt.Errorf("parse injector address %q: %w", injectorAddr, err)
+	}
+	delete(secretEnv, bc.APIKeyEnvVar)
+	secretEnv[bc.BaseURLEnvVar] = "http://" + net.JoinHostPort(reach.DialHost, port)
+	secretEnv[bc.AuthTokenEnvVar] = bc.DummyToken
 	return nil
 }
 

@@ -88,7 +88,7 @@ func defaultSidecarCommand() (string, []string, error) {
 	if err != nil {
 		return "", nil, fmt.Errorf("broker: resolve own executable: %w", err)
 	}
-	return exe, []string{"__inject"}, nil
+	return exe, []string{InjectVerb}, nil
 }
 
 // Ensure implements InjectorHost.

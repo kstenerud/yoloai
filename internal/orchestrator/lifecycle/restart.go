@@ -116,7 +116,7 @@ func mergeLaunchEnv(layout config.Layout, meta *store.Environment, extraEnv map[
 // progress (e.g. a port-availability warning from filterAvailablePorts) is
 // surfaced through n as Notices rather than a raw writer, since the restart
 // entry points (Start/Reset) return their output as a *Result's Notices (F8).
-func recreateContainer(ctx context.Context, d state.Deps, name string, meta *store.Environment, resume bool, extraEnv map[string]string, n *notices) error {
+func recreateContainer(ctx context.Context, d state.Deps, name string, meta *store.Environment, resume, broker bool, extraEnv map[string]string, n *notices) error {
 	agentDef, acfg, err := requireAgent(d, name)
 	if err != nil {
 		return err
@@ -213,10 +213,13 @@ func recreateContainer(ctx context.Context, d state.Deps, name string, meta *sto
 		Setup:        meta.Setup,
 		Isolation:    meta.Isolation,
 		VscodeTunnel: meta.VscodeTunnel,
-		ConfigJSON:   configData,
-		Layout:       d.Layout,
-		HomeDir:      d.Layout.HomeDir,
-		Output:       &noticeWriter{notices: n, level: NoticeWarn},
+		// Broker is per-launch (not read from meta) — re-supplied via StartOptions
+		// each launch; bare `yoloai start` does not yet re-broker (see StartOptions.Broker).
+		BrokerCredentials: broker,
+		ConfigJSON:        configData,
+		Layout:            d.Layout,
+		HomeDir:           d.Layout.HomeDir,
+		Output:            &noticeWriter{notices: n, level: NoticeWarn},
 	}
 
 	if resume {
