@@ -3,7 +3,8 @@
 ABOUTME: Per-backend map of how an in-sandbox agent reaches a host-side TCP listener (the
 credential injector), and where that listener should bind so only the sandbox — not the LAN —
 can reach it. Backs the `InjectorReach{BindHost,DialHost}` discovery seam for egress-proxy
-step 2b-2 (D105/D106). Linux findings verified; macOS items flagged for a Mac spike.
+step 2b-2 (D105/D106). Linux findings verified; macOS (docker-Desktop/OrbStack, seatbelt, tart,
+apple) verified by the 2026-06-28 Mac spike — see "Mac spike results".
 
 ## Why this exists
 
@@ -38,9 +39,10 @@ Engine the two coincide.
 | **docker** (Linux Engine) | default bridge + NAT (172.17.0.0/16) | bridge gateway IP, e.g. `172.17.0.1` | same gateway IP | in-sandbox iptables (entrypoint.py) |
 | **podman** | bridge (rootless user-netns or system); reuses docker.Runtime | bridge gateway IP (varies) | same gateway IP | same as docker |
 | **containerd** (Kata VM) | CNI bridge `yoloai0`, 10.89.0.0/16 (`runtime/containerd/cni.go:41`) | CNI gateway `10.89.0.1` | same gateway IP | same iptables |
+| **docker** (Desktop / OrbStack, macOS) | daemon in a Linux VM; bridge gateway lives *inside* the VM | `host.docker.internal` (alias; implicit on OrbStack) | macOS `127.0.0.1` (loopback — verified reachable via alias) | in-sandbox iptables |
 | **seatbelt** (macOS) | host process, host network stack, **no netns** | `127.0.0.1` | `127.0.0.1` | none (rejects `isolated`) |
-| **tart** (macOS VM) | vmnet/NAT (host IP ~`192.168.64.1`) — **unverified** | host vmnet IP — **needs Mac spike** | host vmnet IP — **needs Mac spike** | none (rejects `isolated`) |
-| **apple** (macOS 26 per-VM) | per-VM CNI bridge, Apple apiserver | per-VM gateway — **needs Mac spike** | per-VM gateway — **needs Mac spike** | in-guest iptables |
+| **tart** (macOS VM) | Apple vmnet/NAT, **per-VM bridge** (verified `192.168.65.1`) | host vmnet gateway IP (guest default route), e.g. `192.168.65.1` | same vmnet gateway IP (VM-only, not LAN) | none (rejects `isolated`) |
+| **apple** (macOS 26) | Apple vmnet/NAT, **shared subnet** (verified `192.168.64.0/24`) | shared vmnet gateway `192.168.64.1` (guest default route) | same vmnet gateway IP (VM-only, not LAN) | in-guest iptables |
 
 Gateway IP source on the bridge backends: `inspect` the running instance's
 `.NetworkSettings.Gateway` (docker/podman); for containerd it is the CNI subnet's `.1`. The
@@ -93,11 +95,93 @@ listener, and (b) a host interface the listener can bind that the guest reaches.
 
 Record results back here (verified column) before wiring the macOS `InjectorReach` variants.
 
+## Mac spike results (2026-06-28)
+
+Run on macOS 26.5.1 (build 25F80), Apple Silicon. All four backends were available. Host
+listeners: `python3 -m http.server 8801 --bind 127.0.0.1` (loopback-only) and `... 8802 --bind
+0.0.0.0` (all interfaces); python's logger reports the client IP. No real key used; read/test-only.
+
+| Backend | Available | DialHost (guest base_url) | Safe BindHost | LAN-exposed? | Isolation note |
+|---|---|---|---|---|---|
+| **docker** (OrbStack) | yes | `host.docker.internal` | **`127.0.0.1`** (loopback) | no | gateway `172.17.0.1` unreachable; alias implicit |
+| **seatbelt** | yes | `127.0.0.1` | `127.0.0.1` | no | `(allow network*)` — host loopback reachable |
+| **tart** | yes | `192.168.65.1` (per-VM vmnet gw) | `192.168.65.1` (vmnet) | no (VM-only) | guest `127.0.0.1` ≠ host; loopback bind unreachable |
+| **apple** | yes | `192.168.64.1` (shared vmnet gw) | `192.168.64.1` (vmnet) | no (VM-only) | shared subnet, not per-VM; loopback bind unreachable |
+
+**Did the Docker Desktop caveat hold? Yes — and with a useful refinement.** This machine runs
+**OrbStack** (`docker info` → `Operating System: OrbStack`, a Desktop-class engine: daemon in a
+Linux VM), not literal Docker Desktop. The caveat held exactly: the Linux bridge gateway
+`172.17.0.1` is **unreachable** from the container, and only `host.docker.internal` works — so
+`DialHost ≠ BindHost` must stay expressible. Two refinements over the doc's assumptions:
+
+1. **The alias resolves *without* `--add-host` on OrbStack** (unlike Linux Docker Engine, where
+   the live Linux spike needed `--add-host=host.docker.internal:host-gateway`). `--add-host` also
+   works but is redundant here. Whether it's implicit is engine-specific — the safe portable move
+   is still to set `ExtraHosts` when on a Desktop-class engine.
+2. **BindHost can be `127.0.0.1` (loopback), not `0.0.0.0`.** The container reaching
+   `host.docker.internal:8801` hit the **loopback-only** listener, and python logged the client as
+   `127.0.0.1` — OrbStack NATs container→host traffic onto host loopback. So the macOS injector
+   binds the *safest possible* interface (loopback, never LAN-visible) while the agent dials
+   `host.docker.internal`. This is better than the doc's earlier "binds `0.0.0.0`/`127.0.0.1` on
+   the Mac" — `0.0.0.0` is unnecessary.
+
+**Tart & apple-container both use Apple's vmnet** (not a Linux/CNI bridge): the guest's default
+route points at the host's vmnet bridge IP, which the host can bind, and that network is VM-only
+(host LAN is `en0`=`192.168.111.x`, a different subnet). The difference is allocation: **apple-
+container shares one subnet** `192.168.64.0/24` across all its VMs (gateway `192.168.64.1`; the
+buildkit helper VM and a probe alpine both sat on it) — so the doc's "per-VM gateway" guess for
+apple was wrong, it's a **shared host gateway**. **Tart spins up a fresh per-VM bridge** on boot
+(`bridge102`/`vmenet2` = `192.168.65.1` appeared only while the VM ran). For both, the guest's own
+`127.0.0.1` is the *guest's* loopback and does **not** reach the host (verified FAIL), so the
+loopback-bind trick that works on OrbStack does **not** apply — the injector must bind the vmnet
+gateway IP. Residual mirrors the Linux bridge: other VMs on the same vmnet bridge can reach it
+(acute for apple-container's shared subnet; the opt-in containment layer's job).
+
+**Seatbelt** is a host process on the host network stack (no netns); the real yoloai profile
+(`runtime/seatbelt/profile.go`, `writeProfileNetwork`) emits an unrestricted `(allow network*)`
+whenever the network mode is not `none` — so the agent can reach a host injector on
+`127.0.0.1:port` with no SBPL changes. Seatbelt rejects `--network=isolated` at the orchestration
+layer (`BackendCaps.NetworkIsolation:false` → `internal/netpolicy/strategy.go`), so there is no
+in-sandbox firewall to allowlist.
+
+### Raw confirming outputs (trimmed)
+
+```
+# docker (OrbStack)
+docker info        → Operating System: OrbStack
+host.docker.internal:8801 (loopback listener)  → OK-8801-alias   # client logged as 127.0.0.1
+host.docker.internal:8802 (0.0.0.0 listener)   → OK-8802-alias
+172.17.0.1:8802                                → FAIL (Could not connect)   # caveat holds
+--add-host=...:host-gateway → host.docker.internal:8802 → OK   # works but redundant
+
+# seatbelt
+sandbox-exec -f '(version 1)(allow default)(allow network-outbound)' curl 127.0.0.1:8801 → OK
+real profile: writeProfileNetwork → "(allow network*)" when mode != "none"
+
+# tart  (guest hostname Manageds-Virtual-Machine.local, uname Darwin arm64, guest en0=192.168.65.2)
+guest default gateway → 192.168.65.1   (host bridge102, appeared on VM boot)
+guest curl 192.168.65.1:8802 (0.0.0.0 bind)        → 200 OK
+guest curl 192.168.65.1:8804 (gateway-IP bind)     → 200 OK   # host bound 192.168.65.1 directly
+guest curl 192.168.65.1:8801 (host loopback bind)  → FAIL (Couldn't connect)   # expected
+host route -n get default → 192.168.111.1 (LAN, separate from vmnet)
+
+# apple container
+guest default route → default via 192.168.64.1 dev eth0
+guest curl 192.168.64.1:8802 (0.0.0.0 bind)        → OK
+guest curl 192.168.64.1:8803 (vmnet-IP bind)       → OK   # host bound 192.168.64.1 directly
+guest curl 192.168.64.1:8801 (host loopback bind)  → FAIL   # expected
+host bridge101 = 192.168.64.1 (shared by buildkit VM @ .19 + probe VM)
+```
+
 ## Conclusion (feeds 2b-2)
 
 Discovery is a **backend responsibility**: an optional `InjectorReachable` interface returning
 `InjectorReach{BindHost, DialHost}`. Linux docker/podman → inspect `.Gateway` (both fields equal);
-containerd → CNI gateway; seatbelt → `127.0.0.1`; tart → unimplemented (brokering falls back to
-direct delivery, D105(g)); apple → per-VM gateway (post-Mac-spike). The orchestrator calls it to
-fill `InjectorSpec.BindHost` + the agent's `base_url`. Backends that do not implement it fall back
-to today's direct credential delivery — no flag-day.
+containerd → CNI gateway; seatbelt → `127.0.0.1` (both equal); **Desktop-class docker (OrbStack /
+Docker Desktop) → `DialHost=host.docker.internal`, `BindHost=127.0.0.1`** (the only verified case
+where the two genuinely differ — the reason the split exists); **tart → vmnet gateway (guest
+default route), both fields equal, read after boot**; **apple → shared vmnet gateway `192.168.64.1`,
+both fields equal**. The orchestrator calls it to fill `InjectorSpec.BindHost` + the agent's
+`base_url`. Backends that do not implement it fall back to today's direct credential delivery —
+no flag-day. Mac note: only OrbStack/Desktop admits a loopback bind; tart/apple require binding the
+vmnet gateway IP (guest `127.0.0.1` is the guest's own loopback, verified not to reach the host).
