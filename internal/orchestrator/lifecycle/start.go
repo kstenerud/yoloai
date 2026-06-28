@@ -36,9 +36,10 @@ type StartOptions struct {
 	Isolation    runtime.IsolationMode // if set, override the isolation mode stored in environment.json
 	VscodeTunnel bool                  // if true, enable VS Code Remote Tunnel (persisted to meta)
 	// Broker, if true, opts the agent's API key into the host-side credential
-	// injector for this launch (D105/D106). NOT persisted: bare `yoloai start`
-	// will not re-broker — the caller re-supplies it on each launch (like Env).
-	// Persistence lands when brokering becomes the per-backend default.
+	// injector (D105/D106). The posture is persisted to meta (applyBrokerOption)
+	// and sticky: once enabled, restart/start re-broker from meta so the real key
+	// is never silently re-delivered into the container on a later launch. Passing
+	// it again is idempotent; opting back out is the future --no-broker.
 	Broker bool
 	// Env is the per-sandbox environment overlay, merged over the resolved
 	// config+profile env at container (re)creation. It is never persisted —
@@ -85,6 +86,25 @@ func applyIsolationOverride(ctx context.Context, d state.Deps, opts StartOptions
 		return fmt.Errorf("save meta: %w", err)
 	}
 	n.infof("Isolation mode updated to %s", opts.Isolation)
+	return nil
+}
+
+// applyBrokerOption persists the credential-brokering posture to meta when
+// --broker is requested and not already enabled (D106). It is sticky: once a
+// sandbox is brokered, restart/start re-broker from meta so the real key is never
+// silently re-delivered into the container on a later launch. Unlike the vscode
+// option there is no runtime-config patch — brokering lives entirely in the
+// host-side launch path, not the entrypoint. (Opting back out is the future
+// --no-broker; not wired here.)
+func applyBrokerOption(d state.Deps, opts StartOptions, sandboxDir string, meta *store.Environment, n *notices) error {
+	if !opts.Broker || meta.BrokerCredentials {
+		return nil
+	}
+	meta.BrokerCredentials = true
+	if err := store.SaveEnvironment(sandboxDir, meta); err != nil {
+		return fmt.Errorf("save meta: %w", err)
+	}
+	n.infof("Credential brokering enabled (the agent's API key stays host-side)")
 	return nil
 }
 
@@ -199,7 +219,7 @@ func handleStoppedOrRemovedStatus(ctx context.Context, d state.Deps, cname, name
 		}
 		defer cleanupResumeFiles(d, name)
 	}
-	if err := recreateContainer(ctx, d, name, meta, opts.Resume, opts.Broker, opts.Env, n); err != nil {
+	if err := recreateContainer(ctx, d, name, meta, opts.Resume, opts.Env, n); err != nil {
 		return err
 	}
 	n.infof("%s", successMsg)
@@ -280,6 +300,11 @@ func start(ctx context.Context, d state.Deps, name string, opts StartOptions, n 
 
 	// Apply isolation override before recreating the container.
 	if err := applyIsolationOverride(ctx, d, opts, sandboxDir, meta, n); err != nil {
+		return err
+	}
+
+	// Persist the credential-brokering posture if requested (sticky across launches).
+	if err := applyBrokerOption(d, opts, sandboxDir, meta, n); err != nil {
 		return err
 	}
 

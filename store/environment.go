@@ -68,11 +68,12 @@ type Environment struct {
 	Setup              []string               `json:"setup,omitempty"`
 	AutoCommitInterval int                    `json:"auto_commit_interval,omitempty"`
 	Debug              bool                   `json:"debug,omitempty"`
-	UsernsMode         string                 `json:"userns_mode,omitempty"`     // "keep-id" for Podman rootless keep-id; "" otherwise
-	Isolation          runtime.IsolationMode  `json:"isolation,omitempty"`       // isolation mode: container, container-enhanced, vm, vm-enhanced
-	HostFilesystem     bool                   `json:"host_filesystem,omitempty"` // true when sandbox state lives on the host (seatbelt)
-	VscodeTunnel       bool                   `json:"vscode_tunnel,omitempty"`   // true when VS Code Remote Tunnel is enabled
-	Archetype          string                 `json:"archetype,omitempty"`       // resolved environment archetype (simple, compose, devcontainer, apple)
+	UsernsMode         string                 `json:"userns_mode,omitempty"`        // "keep-id" for Podman rootless keep-id; "" otherwise
+	Isolation          runtime.IsolationMode  `json:"isolation,omitempty"`          // isolation mode: container, container-enhanced, vm, vm-enhanced
+	HostFilesystem     bool                   `json:"host_filesystem,omitempty"`    // true when sandbox state lives on the host (seatbelt)
+	VscodeTunnel       bool                   `json:"vscode_tunnel,omitempty"`      // true when VS Code Remote Tunnel is enabled
+	BrokerCredentials  bool                   `json:"broker_credentials,omitempty"` // true when the agent's API key is brokered through the host-side injector (D106); sticky across restart so the key isn't silently re-delivered direct
+	Archetype          string                 `json:"archetype,omitempty"`          // resolved environment archetype (simple, compose, devcontainer, apple)
 }
 
 // DirEnvironment stores resolved directory state at creation time, for every
