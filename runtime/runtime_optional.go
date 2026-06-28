@@ -417,3 +417,36 @@ func AttachCommandFor(rt Backend, tmuxSocket string, rows, cols int, isolation I
 	}
 	return nil, false
 }
+
+// InjectorReach describes how a host-side service (the credential injector) is
+// reached from inside a sandbox. The two hosts can differ — on Docker Desktop the
+// agent dials "host.docker.internal" while the proxy binds a macOS host interface
+// — which is why both are reported. See
+// docs/contributors/design/research/egress-broker-host-reachability.md.
+type InjectorReach struct {
+	// BindHost is the host interface a host-side proxy should listen on so that
+	// only this sandbox's network can reach it — the bridge gateway IP for
+	// bridge/NAT backends, "127.0.0.1" for host-process backends. Never
+	// "0.0.0.0", which would expose the injector on the host LAN.
+	BindHost string
+	// DialHost is what the in-sandbox agent uses to reach that listener (the host
+	// it places in base_url). For Linux bridge backends it equals BindHost (the
+	// gateway IP).
+	DialHost string
+}
+
+// InjectorReachable is an optional backend interface: report how a sandbox
+// reaches a host-side credential injector. Backends that cannot host a
+// sandbox-reachable host-side proxy do not implement it, and the credential
+// broker falls back to direct delivery for them (no flag-day, D105/D106).
+type InjectorReachable interface {
+	// InjectorReach reports the bind/dial endpoint for the named instance, which
+	// must already exist (the gateway is only knowable post-create).
+	InjectorReach(ctx context.Context, instanceName string) (InjectorReach, error)
+}
+
+// InjectorReachOf returns rt as an InjectorReachable if the backend implements one.
+func InjectorReachOf(rt Backend) (InjectorReachable, bool) {
+	r, ok := rt.(InjectorReachable)
+	return r, ok
+}
