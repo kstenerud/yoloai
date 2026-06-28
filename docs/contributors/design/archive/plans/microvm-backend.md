@@ -1,9 +1,18 @@
-# microvm backend — Linux/KVM QEMU-microvm isolation (E1)
+# microvm backend — Linux/KVM QEMU-microvm isolation (E1) — RETIRED
 
-**Status:** Planned, greenfield (nothing built). Chosen as the first post-merge
-workstream (2026-06-27). Source-audited research: [[reference_pve_microvm]]
-(https://github.com/rcarmo/pve-microvm), clone at `~/.cache/yoloai-research/pve-microvm`.
-Roadmap context: [post-merge-roadmap.md](post-merge-roadmap.md) §E1.
+> **RETIRED 2026-06-28 — see [D104](../../../decisions/working-notes.md#d104--retire-the-hand-rolled-qemu--m-microvm-backend-libkrun-is-the-tech-if-a-light-vm-tier-is-ever-added-e1).**
+> The QEMU `-M microvm` approach is abandoned: it cannot boot a stock distro
+> kernel (the `6.12.94` bump broke bzImage load + modular-virtio-mmio enumeration;
+> only a *custom-built* kernel works — the maintenance burden this plan tried to
+> avoid), and a lighter microVM adds no isolation over the existing Kata `vm`
+> backend and no boot benefit for long interactive sessions. If a light VM tier is
+> ever added it will be **libkrun** (bundled Red-Hat kernel, virtio-fs, OCI-native,
+> macOS HVF), not QEMU-microvm — but not now (see D104 for triggers). The
+> implementation spike is preserved on the unmerged `microvm-backend` branch
+> (`73cfe338`). The text below is the original plan, kept for history.
+
+**Status:** RETIRED (was: Planned, greenfield). Original research:
+[[reference_pve_microvm]] (https://github.com/rcarmo/pve-microvm).
 
 ## What & why
 

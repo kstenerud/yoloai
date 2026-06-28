@@ -1,10 +1,10 @@
 # Post-merge roadmap (after the public-layering merge, `b9c91834`)
 
 The public-layering endgame (D99) is merged. This is the remaining work: the D99
-post-merge remainder, the open findings, and one new item the user added — a
-Linux/KVM **microvm** isolation backend (from the source-audited
-[[reference_pve_microvm]] research). Scoped 2026-06-27 by four read-only survey
-agents against the live designs; sizes are S/M/L/XL with a one-line basis.
+post-merge remainder and the open findings. (E1, a Linux/KVM **microvm** backend,
+was investigated and **retired** — see [D104](../../decisions/working-notes.md#d104--retire-the-hand-rolled-qemu--m-microvm-backend-libkrun-is-the-tech-if-a-light-vm-tier-is-ever-added-e1)
+and the [archived plan](../archive/plans/microvm-backend.md).) Scoped 2026-06-27
+by four read-only survey agents against the live designs; sizes are S/M/L/XL.
 
 None of this needs a second on-disk migration (the netpolicy relocation, D103,
 made `system migrate` the last one).
@@ -27,7 +27,7 @@ made `system migrate` the last one).
 | B5 | Stream `SessionKind` (no-tmux channel) | L | any | B1/B2 + **a consumer** | eval-at-scale |
 | C | `Sandbox.Usage()` (cost/token ledger) | M–L | any | benefits from B1/B2 | observability |
 | D | **Egress proxy** (D95 broker + D90 hostile containment — ONE proxy) | XL | per-backend | spike + decisions | secure-secrets, hostile net |
-| E1 | **microvm** backend (Linux/KVM, QEMU `-M microvm`) | L–XL | **Linux+KVM** | — (phase-1 standalone) | lighter VM isolation |
+| ~~E1~~ | ~~**microvm** backend (QEMU `-M microvm`)~~ — **RETIRED (D104)**; libkrun if ever revived | — | — | — | — |
 | E2 | apple-container backend (research done, impl-ready) | M–L | **macOS** | naming decision | mac container isolation |
 | E3 | podman + gVisor (research-gated) | M (investig.) | Linux/mac | R1 spike | rootless gVisor |
 
@@ -55,7 +55,7 @@ Three coupled parts: (1) **stdout capture** — redirect the headless agent's st
 The single host-side L7 proxy does SNI/Host allowlist filtering (netpolicy), per-destination credential injection + refresh (D95), and audit. Reserved seams exist (`StrategyEgressProxy` const, the relocated `netpolicycfg` record, `Compose`, reserved `EnvSpec` fields, `LivePatchNetwork`). The build: `CredentialSource` interface + `EnvSpec` credential-shape (S+S) → **TLS-MITM proxy process** (L) → **default-deny egress enforced from *outside* the agent netns** (L, the actual security boundary, per-backend mechanics vary sharply) → per-agent **CA injection** (M) → strategy dispatch (M). **Start with the TLS-pinning spike** (verify each agent's SDK honors an injected CA — if any pins upstream certs, MITM fails for it). This is not a "start coding" item until the spike + the design decisions below are settled.
 
 ### E — New backends
-- **E1 microvm (L–XL, greenfield, Linux/KVM):** `runtime/microvm/` boots OCI-profile images as QEMU `-M microvm` VMs directly — no containerd/Kata/CNI/nerdctl (avoids the [[project_kata_nerdctl]] gotcha), only QEMU + `/dev/kvm` + skopeo/umoci (setup-time) + virtiofsd. Pieces: (a) OCI→ext4 rootfs builder (M, the `pve-oci-import` recipe in Go), (b) QEMU lifecycle Create/Start/Stop/Remove + TAP networking (L), (c) guest-agent exec for headless + serial PTY for attach (M — **QGA Go-protocol is the spike**), (f) registration (S, pattern established by containerd/tart). **Phase-1 (create/start/exec/destroy, no isolation) is standalone**; gains tier-3 "for free" when B lands and host-side network isolation when D lands (its TAP-per-VM topology is *cleaner* for the egress proxy than shared-netns containers). `//go:build linux` (crosscheck excludes it automatically).
+- **~~E1 microvm~~ — RETIRED (D104, 2026-06-28).** The QEMU `-M microvm` path was built and spiked, then retired: it can't boot a stock distro kernel (custom-kernel-only after the `6.12.94` bump), and a lighter microVM adds no isolation over the existing Kata `vm` backend and no boot benefit for long sessions. If a light VM tier is ever revived it's **libkrun** (bundled Red-Hat kernel via `libkrunfw`, virtio-fs, OCI-native, also macOS HVF), not QEMU-microvm — gated on Debian packaging + a macOS virtio-fs perm fix. See [D104](../../decisions/working-notes.md#d104--retire-the-hand-rolled-qemu--m-microvm-backend-libkrun-is-the-tech-if-a-light-vm-tier-is-ever-added-e1) and the [archived plan](../archive/plans/microvm-backend.md). Spike preserved on the unmerged `microvm-backend` branch.
 - **E2 apple-container (M–L, macOS):** all research resolved positively (virtiofs mounts, in-guest overlayfs, in-guest iptables, `--format json`, exit codes) — **implementation-ready**; one live confirmation (vmnet gateway in the isolation OUTPUT chain). Naming (`apple` vs `apple-container`) decided first.
 - **E3 podman + gVisor (M investigative):** R1 (does rootless podman + gVisor actually work, and how?) gates the design; R2 (macOS Podman Machine runsc) and R3 (compat-API `Runtime=runsc`) run in parallel once a runsc env exists. The codebase currently has an evidence-free blanket block to validate-or-lift.
 
@@ -70,7 +70,7 @@ The single host-side L7 proxy does SNI/Host allowlist filtering (netpolicy), per
 
 **Egress proxy (before D):** proxy tech (bespoke Go MITM vs embed mitmproxy/goproxy); default-deny mechanism per backend (host-netns iptables? separate no-default-route network? rootless story?); trust-posture knob (when does brokering engage?); proxy locality (per-sandbox vs per-principal). Plus the TLS-pinning spike result.
 
-**microvm (before E1):** isolation-mode name (`vm` shared vs new `vm-microvm`/`microvm`); kernel strategy (bundled/downloaded vs host `/boot` vs build-in-profile — widest downstream impact); rootfs toolchain (skopeo/umoci as setup deps vs the `umoci` Go lib); workdir sharing (virtiofs vs 9p vs copy-into-disk); TAP/bridge ownership (yoloAI-managed `yoloai0` vs user-configured).
+**~~microvm (before E1)~~ — moot (E1 retired, D104).** The kernel-strategy decision was the crux: the distro-kernel choice proved unviable on `-M microvm` (custom-kernel-only), which is what retired the backend. If libkrun is ever revived these decisions are reframed entirely (it brings its own kernel + virtio-fs).
 
 **apple-container (before E2):** `apple` vs `apple-container` backend name.
 
@@ -80,6 +80,6 @@ The single host-side L7 proxy does SNI/Host allowlist filtering (netpolicy), per
 2. **Phase 1 — session-carve (B1 → B2 → B3 → B4):** the long pole. Settle Q1–Q3 first, then it unblocks DF50, the session promotion, Usage's clean stdout path, and tier-2. Highest downstream leverage.
 3. **Phase 2 — `Usage()` (C):** rides the carved headless path; decide the two forks.
 4. **Phase 3 — egress proxy (D):** open with the TLS-pinning spike + the design decisions, then build the unified proxy. Biggest + most security-critical.
-5. **Backends track (interleave per appetite/hardware):** **microvm (E1)** is greenfield, standalone, Linux/KVM, and a satisfying self-contained build (the user's pick to slot in); **apple-container (E2)** is impl-ready but macOS; **podman+gVisor (E3)** is a research spike.
+5. **Backends track (interleave per appetite/hardware):** ~~microvm (E1)~~ **retired (D104)**; **apple-container (E2)** is impl-ready but macOS; **podman+gVisor (E3)** is a research spike.
 
-Pick any workstream to start — Phase 0 and microvm (E1) are the two with no upstream blockers and the least "decide first" overhead.
+Pick any workstream to start — Phase 0 has no upstream blockers and the least "decide first" overhead.
