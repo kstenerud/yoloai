@@ -41,7 +41,17 @@ func ResolveSecretEnv(spec EnvSpec, configEnv map[string]string, hostEnv config.
 // is honored as-is so an embedder can stage credentials on an isolated path.
 // Returns empty string if nothing was written.
 func CreateSecretsDir(spec EnvSpec, configEnv map[string]string, hostEnv config.Layout, stagingRoot string) (string, error) {
-	m := ResolveSecretEnv(spec, configEnv, hostEnv)
+	return StageSecretEnv(ResolveSecretEnv(spec, configEnv, hostEnv), hostEnv, stagingRoot)
+}
+
+// StageSecretEnv writes a resolved secret map to a fresh owner-only temp dir as
+// one file per entry (filename = env var name, contents = value), returning the
+// dir path for a /run/secrets bind mount ("" when the map is empty). This is the
+// staging half of CreateSecretsDir, separated so the broker can rewrite the map
+// first (drop the real credential, add base_url + a placeholder) and the
+// already-brokered map is what gets staged — the legacy-path analogue of the
+// agent-free env delivery (D105/D106).
+func StageSecretEnv(m map[string]string, hostEnv config.Layout, stagingRoot string) (string, error) {
 	if len(m) == 0 {
 		return "", nil
 	}

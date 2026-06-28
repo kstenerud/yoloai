@@ -6,6 +6,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"io"
 
 	"github.com/kstenerud/yoloai/internal/config"
@@ -435,14 +436,28 @@ type InjectorReach struct {
 	DialHost string
 }
 
+// ErrInjectorUnsupported is returned by InjectorReach when a backend that
+// otherwise implements InjectorReachable cannot currently host a
+// sandbox-reachable injector (e.g. rootless podman, whose bridge gateway lives
+// in a network namespace the host can't bind — its slirp host-loopback path is
+// not yet wired). The broker treats it like a non-reachable backend: auto mode
+// falls back to direct delivery; an explicit --broker errors. Distinguished from
+// a genuine reach failure (transient inspect error), which stays fatal so the
+// real key is never silently delivered when brokering was expected to work.
+var ErrInjectorUnsupported = errors.New("injector reachability not supported on this backend")
+
 // InjectorReachable is an optional backend interface: report how a sandbox
 // reaches a host-side credential injector. Backends that cannot host a
-// sandbox-reachable host-side proxy do not implement it, and the credential
-// broker falls back to direct delivery for them (no flag-day, D105/D106).
+// sandbox-reachable host-side proxy do not implement it (or return
+// ErrInjectorUnsupported), and the credential broker falls back to direct
+// delivery for them (no flag-day, D105/D106).
 type InjectorReachable interface {
-	// InjectorReach reports the bind/dial endpoint for the named instance, which
-	// must already exist (the gateway is only knowable post-create).
-	InjectorReach(ctx context.Context, instanceName string) (InjectorReach, error)
+	// InjectorReach reports the bind/dial endpoint for this backend's sandboxes.
+	// It is a network-level property (the bridge gateway, a host loopback, …)
+	// knowable before any container is created, so brokering can start the
+	// injector ahead of the container, independent of the launch path. Returns
+	// ErrInjectorUnsupported when the backend can't currently host an injector.
+	InjectorReach(ctx context.Context) (InjectorReach, error)
 }
 
 // InjectorReachOf returns rt as an InjectorReachable if the backend implements one.

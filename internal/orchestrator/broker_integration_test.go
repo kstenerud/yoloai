@@ -6,6 +6,7 @@
 package orchestrator_test
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -58,6 +59,22 @@ type brokerMockUpstream struct {
 // container->injector request is then driven via exec with an explicit argv
 // (literal base_url) to avoid any shell quoting.
 func TestIntegration_CredentialBroker(t *testing.T) {
+	mgr, ctx := integrationSetup(t)
+	runBrokerScenarios(t, mgr, ctx)
+}
+
+// TestIntegration_CredentialBroker_LegacyPath runs the same brokered-launch
+// scenarios with the runtime forced onto the LEGACY (non-agent-free) bring-up,
+// proving that brokering is now decoupled from the agent-free launch path: the
+// real credential stays host-side and the agent (run inline via the entrypoint,
+// secrets delivered as /run/secrets files) reaches the injector all the same.
+func TestIntegration_CredentialBroker_LegacyPath(t *testing.T) {
+	mgr, ctx := legacyDockerIntegrationSetup(t)
+	runBrokerScenarios(t, mgr, ctx)
+}
+
+func runBrokerScenarios(t *testing.T, mgr *orchestrator.Engine, ctx context.Context) {
+	t.Helper()
 	cases := []struct {
 		name     string // subtest name + sandbox suffix
 		envVar   string // env var the real credential is delivered in
@@ -89,8 +106,6 @@ func TestIntegration_CredentialBroker(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			mgr, ctx := integrationSetup(t)
-
 			// Host-side mock "upstream": the injector forwards here (loopback,
 			// host-side) instead of real api.anthropic.com. The container never
 			// talks to it directly.

@@ -56,22 +56,32 @@ func LaunchContainer(ctx context.Context, d state.Deps, st *state.State) error {
 		envVars = cfg.Env
 	}
 
+	// Resolve the secret map once, then broker it BEFORE the delivery split:
+	// brokerCredentials starts the host-side injector at the backend's
+	// network-level endpoint (knowable pre-create) and rewrites the map (drop the
+	// real credential, point the agent at the injector). Brokering is now
+	// bring-up-agnostic — the rewritten map is delivered by whichever channel the
+	// launch path uses (ProcSpec.Env for agent-free, /run/secrets files for legacy)
+	// — so both paths broker identically (D105/D106).
 	spec := envspec.BuildEnvSpec(st.Agent)
+	secretEnv := envsetup.ResolveSecretEnv(spec, envVars, st.Layout)
+	if err := brokerCredentials(ctx, d.Runtime, st, secretEnv); err != nil {
+		return err
+	}
+
+	// Deliver the (already-brokered) map. Agent-free hands it to the launched
+	// process's env; legacy stages it to host files bind-mounted at /run/secrets.
 	var secretsDir string
-	var secretEnv map[string]string
-	if _, agentFree := usesAgentFreeLaunch(d.Runtime, st.Isolation); agentFree {
-		// Launch path (Docker): deliver secrets via the launched process's env; no host staging, no mount, no marker.
-		secretEnv = envsetup.ResolveSecretEnv(spec, envVars, st.Layout)
-	} else {
-		// Legacy path: stage host files bind-mounted at /run/secrets (unchanged).
+	if _, agentFree := usesAgentFreeLaunch(d.Runtime, st.Isolation); !agentFree {
 		var err error
-		secretsDir, err = envsetup.CreateSecretsDir(spec, envVars, st.Layout, st.Layout.SecretsStagingDir)
+		secretsDir, err = envsetup.StageSecretEnv(secretEnv, st.Layout, st.Layout.SecretsStagingDir)
 		if err != nil {
 			return fmt.Errorf("create secrets: %w", err)
 		}
 		if secretsDir != "" {
 			defer os.RemoveAll(secretsDir) //nolint:errcheck // best-effort cleanup
 		}
+		secretEnv = nil // legacy delivers via the bind-mounted files, not ProcSpec.Env
 	}
 
 	mnts := mountspkg.Build(st, secretsDir) // secretsDir=="" on the launch path -> no /run/secrets mount
@@ -82,7 +92,13 @@ func LaunchContainer(ctx context.Context, d state.Deps, st *state.State) error {
 	}
 	ports = filterAvailablePorts(ports, outputOr(st.Output))
 
-	return buildAndStart(ctx, d.Runtime, st, mnts, ports, secretsDir != "", secretEnv)
+	if err := buildAndStart(ctx, d.Runtime, st, mnts, ports, secretsDir != "", secretEnv); err != nil {
+		// The injector may have started before the container; reap it so a failed
+		// launch never orphans it (Stop is a no-op when nothing was brokered).
+		_ = broker.NewSidecarHost().Stop(ctx, st.SandboxDir) //nolint:errcheck // best-effort cleanup
+		return err
+	}
+	return nil
 }
 
 // usesAgentFreeLaunch reports whether this sandbox uses the D88 agent-free
@@ -193,15 +209,9 @@ func startViaLaunch(ctx context.Context, rt runtime.Backend, launcher runtime.Pr
 		return err
 	}
 
-	// Brokering (default for supported backends; --no-broker opts out): start the
-	// host-side injector and rewrite secretEnv so the real key stays host-side and
-	// the agent is pointed at the injector. Runs after Start (the network gateway
-	// is now knowable) and before secretEnv is materialized into the launched
-	// process's env.
-	if err := brokerCredentials(ctx, rt, st, cname, secretEnv); err != nil {
-		return err
-	}
-
+	// secretEnv is already brokered (LaunchContainer brokers before the delivery
+	// split): the real credential is dropped and the agent points at the host-side
+	// injector. Here it is just materialized into the launched process's env.
 	env := []string{"HOME=/home/yoloai", "YOLOAI_DIR=/yoloai"}
 	if len(secretEnv) > 0 {
 		keys := make([]string, 0, len(secretEnv))
@@ -248,7 +258,7 @@ func startViaLaunch(ctx context.Context, rt runtime.Backend, launcher runtime.Pr
 // hard error is forced-on against a backend that can't host a sandbox-reachable
 // injector: the user explicitly asked for the key to be withheld, so we refuse
 // rather than silently leak it via direct delivery.
-func brokerCredentials(ctx context.Context, rt runtime.Backend, st *state.State, cname string, secretEnv map[string]string) error {
+func brokerCredentials(ctx context.Context, rt runtime.Backend, st *state.State, secretEnv map[string]string) error {
 	if st.BrokerDisabled || st.Agent == nil || st.Agent.Broker == nil {
 		return nil
 	}
@@ -278,16 +288,15 @@ func brokerCredentials(ctx context.Context, rt runtime.Backend, st *state.State,
 		return nil
 	}
 
-	reachable, ok := runtime.InjectorReachOf(rt)
+	reach, ok, err := resolveInjectorReach(ctx, rt)
+	if err != nil {
+		return fmt.Errorf("resolve injector reachability: %w", err)
+	}
 	if !ok {
 		if st.BrokerCredentials {
 			return fmt.Errorf("--broker requested but the %s backend cannot host a sandbox-reachable injector", rt.Descriptor().Type)
 		}
 		return nil // auto: this backend can't broker; direct delivery
-	}
-	reach, err := reachable.InjectorReach(ctx, cname)
-	if err != nil {
-		return fmt.Errorf("resolve injector reachability: %w", err)
 	}
 
 	addr, err := broker.NewSidecarHost().Ensure(ctx, buildInjectorSpec(st.SandboxDir, bc, cred, reach, realKey))
@@ -301,6 +310,28 @@ func brokerCredentials(ctx context.Context, rt runtime.Backend, st *state.State,
 	slog.Info("brokered agent credential through host-side injector",
 		"event", "sandbox.broker.active", "sandbox", st.Name, "upstream", bc.UpstreamURL, "credential", cred.EnvVar)
 	return nil
+}
+
+// resolveInjectorReach asks the backend for its network-level injector endpoint.
+// ok is false (with a nil error) when the backend can't host a sandbox-reachable
+// injector — either it isn't InjectorReachable at all, or it returns
+// ErrInjectorUnsupported (e.g. rootless podman, pending its slirp path) — and the
+// caller falls back to direct delivery (or errors under a forced --broker). A
+// non-nil error is a genuine reachability failure and is fatal, so the real key
+// is never silently delivered when brokering was expected to work.
+func resolveInjectorReach(ctx context.Context, rt runtime.Backend) (runtime.InjectorReach, bool, error) {
+	reachable, ok := runtime.InjectorReachOf(rt)
+	if !ok {
+		return runtime.InjectorReach{}, false, nil
+	}
+	reach, err := reachable.InjectorReach(ctx)
+	if errors.Is(err, runtime.ErrInjectorUnsupported) {
+		return runtime.InjectorReach{}, false, nil
+	}
+	if err != nil {
+		return runtime.InjectorReach{}, false, err
+	}
+	return reach, true, nil
 }
 
 // buildInjectorSpec assembles the injector spec from an agent's BrokerConfig, the
@@ -373,13 +404,12 @@ func ReconcileInjector(ctx context.Context, d state.Deps, name string) error {
 		return nil
 	}
 
-	reachable, ok := runtime.InjectorReachOf(d.Runtime)
-	if !ok {
-		return nil // backend can't host an injector (shouldn't happen if it was brokered)
-	}
-	reach, err := reachable.InjectorReach(ctx, cname)
+	reach, ok, err := resolveInjectorReach(ctx, d.Runtime)
 	if err != nil {
 		return fmt.Errorf("reconcile injector: resolve reachability: %w", err)
+	}
+	if !ok {
+		return nil // backend can't host an injector (shouldn't happen if it was brokered)
 	}
 
 	if _, err := broker.NewSidecarHost().Ensure(ctx, buildInjectorSpec(sandboxDir, bc, cred, reach, realKey)); err != nil {

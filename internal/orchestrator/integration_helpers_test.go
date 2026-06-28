@@ -17,6 +17,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/orchestrator/lifecycle"
 	"github.com/kstenerud/yoloai/internal/orchestrator/state"
 	"github.com/kstenerud/yoloai/internal/testutil"
+	"github.com/kstenerud/yoloai/runtime"
 	dockerrt "github.com/kstenerud/yoloai/runtime/docker"
 	"github.com/stretchr/testify/require"
 )
@@ -72,6 +73,41 @@ func integrationSetup(t *testing.T) (*orchestrator.Engine, context.Context) {
 	t.Cleanup(func() { rt.Close() }) //nolint:errcheck // test cleanup
 
 	mgr := orchestrator.NewEngineWithRuntime(rt, slog.Default(), strings.NewReader(""), orchestrator.WithLayout(layout))
+	require.NoError(t, mgr.EnsureSetup(ctx, io.Discard))
+
+	return mgr, ctx
+}
+
+// legacyDockerRuntime wraps the docker Runtime but reports AgentFreeLaunch=false,
+// forcing the legacy (in-entrypoint) bring-up + /run/secrets file delivery while
+// keeping docker's real Launch/InjectorReach. It lets the legacy brokering path be
+// exercised on real Docker without needing gVisor or another backend's host setup.
+type legacyDockerRuntime struct {
+	*dockerrt.Runtime
+}
+
+func (l *legacyDockerRuntime) Descriptor() runtime.BackendDescriptor {
+	d := l.Runtime.Descriptor()
+	d.Capabilities.AgentFreeLaunch = false
+	return d
+}
+
+// legacyDockerIntegrationSetup mirrors integrationSetup but wraps the runtime so
+// the engine takes the legacy launch path (secrets via /run/secrets files).
+func legacyDockerIntegrationSetup(t *testing.T) (*orchestrator.Engine, context.Context) {
+	t.Helper()
+	ctx := context.Background()
+
+	home := testutil.IsolatedHome(t)
+	layout := config.NewLayout(filepath.Join(home, ".yoloai"))
+	require.NoError(t, os.MkdirAll(layout.CacheDir(), 0750))
+	dockerrt.RecordBuildChecksum(layout, "")
+
+	rt, err := dockerrt.New(ctx, config.Layout{}.WithEnv(testutil.GetCuratedHostEnv(testutil.IntegrationHostEnvVars)))
+	require.NoError(t, err, "Docker must be running for integration tests")
+	t.Cleanup(func() { rt.Close() }) //nolint:errcheck // test cleanup
+
+	mgr := orchestrator.NewEngineWithRuntime(&legacyDockerRuntime{Runtime: rt}, slog.Default(), strings.NewReader(""), orchestrator.WithLayout(layout))
 	require.NoError(t, mgr.EnsureSetup(ctx, io.Discard))
 
 	return mgr, ctx
