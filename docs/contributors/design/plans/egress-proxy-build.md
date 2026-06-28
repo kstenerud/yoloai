@@ -93,8 +93,16 @@ Key files: `internal/credential/`, `internal/broker/`, `runtime/docker/reach.go`
 - **macOS variants** (need a Mac — hand to a Mac agent): Docker Desktop → `host.docker.internal`
   dial / `127.0.0.1` bind; tart/apple → vmnet gateway; seatbelt → `127.0.0.1` both — all mapped in
   [research/egress-broker-host-reachability.md](../research/egress-broker-host-reachability.md).
-  Each implements a network-level `InjectorReach` (some need the BindHost≠DialHost split, already
-  expressible). The launch wiring is backend-agnostic and done.
+  Each implements a network-level `InjectorReach`; the launch wiring is backend-agnostic and done.
+  **Critical gotcha:** `runtime/docker/reach.go`'s `InjectorReach` is currently **Linux-Engine-only**
+  — it returns the bridge gateway (e.g. `172.17.0.1`) for both bind and dial, but on **Docker
+  Desktop / OrbStack** that gateway lives inside the LinuxKit VM and the macOS host **can't bind
+  it**. On macOS docker it must return `{BindHost: "127.0.0.1", DialHost: "host.docker.internal"}`
+  (the BindHost≠DialHost split the struct already supports). Detect the provider via the Runtime's
+  `providerNames` (OrbStack/Docker Desktop are already detected at construction). tart/apple/seatbelt
+  are net-new `reach.go` files; tart/apple need their vmnet gateway, seatbelt is `127.0.0.1` both
+  (host process, no netns). Follow the containerd/podman `reach.go` + `*_test.go` pattern; validate
+  with a broker integration test per backend (mirror `TestIntegration_CredentialBroker_Podman`).
 - **containerd eager bridge-ensure** (Linux follow-up): create `yoloai0` before brokering so the
   *first* containerd sandbox brokers too. Generalizes the "prepare network before broker" idea.
 - **Egress containment** (build step 4 — the `--network-isolated` + broker composition). Retires the
