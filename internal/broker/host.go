@@ -77,6 +77,22 @@ type SidecarHost struct {
 
 var _ InjectorHost = (*SidecarHost)(nil)
 
+// HasRecord reports whether an injector record exists for the sandbox — i.e. the
+// sandbox was launched with brokering. Reconcile uses this to skip non-brokered
+// sandboxes cheaply, before any credential re-derivation or backend call.
+func HasRecord(sandboxDir string) bool {
+	rec, err := loadRecord(sandboxDir)
+	return err == nil && rec != nil
+}
+
+// InjectorAlive reports whether the sandbox's recorded injector process is
+// running. False when there is no record or the process is dead — the latter is
+// the reconcile respawn case.
+func InjectorAlive(sandboxDir string) bool {
+	rec, err := loadRecord(sandboxDir)
+	return err == nil && rec != nil && processAlive(rec.PID)
+}
+
 // NewSidecarHost returns a SidecarHost that spawns `<this-binary> __inject` with
 // an empty environment.
 func NewSidecarHost() *SidecarHost {

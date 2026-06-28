@@ -49,6 +49,8 @@ func runAttach(cmd *cobra.Command, args []string, opts *attachOpts) error {
 	defer cliutil.SetTerminalTitle("")
 
 	return cliutil.WithSandbox(cmd, name, func(ctx context.Context, sb *yoloai.Sandbox) error {
+		// Bring a crashed credential injector back before attaching (D106).
+		cliutil.ReconcileInjectorBestEffort(ctx, sb)
 		// --resume restarts the agent before attaching when the sandbox is
 		// stopped or in a terminal state. Active/Idle sandboxes get an
 		// in-place attach.

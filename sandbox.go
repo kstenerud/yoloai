@@ -128,6 +128,18 @@ func (s *Sandbox) Inspect(ctx context.Context) (*SandboxInfo, error) {
 	return sandboxInfoFromStatus(si), nil
 }
 
+// ReconcileInjector respawns the sandbox's host-side credential injector if it
+// has died (D106 lazy reconcile). It is best-effort and cheap when the injector
+// is healthy or the sandbox was never brokered; callers (single-sandbox CLI
+// commands) invoke it before interacting with a running brokered sandbox so a
+// crashed injector is brought back without a manual restart.
+func (s *Sandbox) ReconcileInjector(ctx context.Context) error {
+	if err := s.checkNotDestroyed(); err != nil {
+		return err
+	}
+	return s.engine.ReconcileInjector(ctx, s.name)
+}
+
 // Dir returns the on-host directory holding the sandbox's persisted state
 // (environment.json, work copies, files/, cache/, logs, prompt). Computed from the
 // Client's DataDir; returns a path even for unknown names (caller checks
