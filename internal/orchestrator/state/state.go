@@ -59,7 +59,8 @@ type State struct {
 	Isolation         runtime.IsolationMode // isolation mode from config/profile
 	IsolationExplicit bool                  // true when isolation was set via --isolation flag
 	VscodeTunnel      bool                  // true when VS Code Remote Tunnel is enabled
-	BrokerCredentials bool                  // true when the agent's API key is brokered through the host-side injector; set from --broker now OR the posture persisted in meta (sticky across restart, D106)
+	BrokerCredentials bool                  // forced-on: --broker was given (persisted). On a backend that can't host an injector this is an error, not a silent skip (D106)
+	BrokerDisabled    bool                  // forced-off: --no-broker was given (persisted). Suppresses the default-on brokering. At most one of these two is set; both false = auto (broker where supported)
 	Environment       *store.Environment
 	ConfigJSON        []byte
 	// Archetype fields

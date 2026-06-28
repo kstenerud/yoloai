@@ -2,6 +2,39 @@
 
 Tracks breaking changes made during beta. Each entry should be included in release notes for the version that introduces it.
 
+## Unreleased
+
+### Credential brokering is the default on supported backends (the agent's API key no longer enters the sandbox)
+
+When an agent's API key is brokerable (currently Claude's `ANTHROPIC_API_KEY`),
+the backend can host a host-side injector (Linux docker/podman), the key is
+present, and networking is open, yoloai now **brokers the key by default**: it
+runs a small host-side reverse proxy and points the agent at it
+(`ANTHROPIC_BASE_URL` + a placeholder `ANTHROPIC_AUTH_TOKEN`), so the **real key
+is held host-side and never enters the container** (D105/D106). Previously the
+key was written into the container environment, and brokering was opt-in
+(`--broker`).
+
+**What breaks:** anything *inside* the sandbox that read the raw key from the
+environment — e.g. a shell script or tool calling the provider API directly with
+`$ANTHROPIC_API_KEY`. Under brokering that variable is absent; in-container code
+must call the agent's configured `ANTHROPIC_BASE_URL` (which carries the
+placeholder token and is swapped to the real key host-side) instead of holding
+the key itself.
+
+**Opt out:** pass **`--no-broker`** on `yoloai new` / `yoloai run` to deliver the
+key directly as before. The posture is persisted and sticky across restart.
+`--broker` still forces brokering on (and now errors if the backend can't host an
+injector, rather than silently doing nothing).
+
+**Scope / not yet brokered (unchanged direct delivery, no action needed):**
+non-brokerable agents; subscription/OAuth logins (no static key to broker);
+backends other than Linux docker/podman; and **restricted networking**
+(`--network-isolated` / `--network-none`) — the in-sandbox allowlist can't reach
+the host-side injector yet, so auto-brokering is skipped there and an explicit
+`--broker` with restricted networking is rejected. Composing brokering with an
+egress allowlist is a later phase.
+
 ## v0.5.0
 
 ### Agent type and model move off the substrate record onto `agent.json` / `SandboxInfo` / `Sandbox.Agent()`

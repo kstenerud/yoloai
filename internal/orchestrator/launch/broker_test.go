@@ -3,12 +3,14 @@
 package launch
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/kstenerud/yoloai/internal/agent"
+	"github.com/kstenerud/yoloai/internal/orchestrator/state"
 	"github.com/kstenerud/yoloai/runtime"
 )
 
@@ -59,4 +61,80 @@ func TestApplyBrokerEnv_BadInjectorAddr(t *testing.T) {
 	assert.Contains(t, err.Error(), "parse injector address")
 	// On error the real key must remain (we did not partially rewrite into a leak).
 	assert.Equal(t, "the-real-key", secretEnv["ANTHROPIC_API_KEY"])
+}
+
+// brokerCredentials gate (the default-on flip)
+
+// descriptorBackend satisfies runtime.Backend (methods panic) but supplies a
+// real Descriptor — enough to exercise brokerCredentials' gate, which only needs
+// the type name for the forced-on error. It does NOT implement InjectorReachable,
+// so it stands in for a backend that can't host an injector.
+type descriptorBackend struct{ runtime.Backend }
+
+func (descriptorBackend) Descriptor() runtime.BackendDescriptor {
+	return runtime.BackendDescriptor{Type: "fakebackend"}
+}
+
+func claudeState(t *testing.T, st *state.State) *state.State {
+	t.Helper()
+	st.Name = "box"
+	st.SandboxDir = t.TempDir()
+	st.Agent = &agent.Definition{Broker: claudeBrokerConfig()}
+	return st
+}
+
+func TestBrokerCredentials_ForcedOffSkips(t *testing.T) {
+	st := claudeState(t, &state.State{BrokerDisabled: true})
+	secretEnv := map[string]string{"ANTHROPIC_API_KEY": "real"}
+
+	// --no-broker: returns immediately, never touches the (panic) backend, key intact.
+	require.NoError(t, brokerCredentials(context.Background(), panicBackend{}, st, "cname", secretEnv))
+	assert.Equal(t, "real", secretEnv["ANTHROPIC_API_KEY"], "forced-off leaves direct delivery")
+}
+
+func TestBrokerCredentials_AutoOnUnreachableBackendIsSilentDirect(t *testing.T) {
+	st := claudeState(t, &state.State{}) // auto: neither forced-on nor forced-off
+	secretEnv := map[string]string{"ANTHROPIC_API_KEY": "real"}
+
+	// Backend can't host an injector; auto mode falls back to direct delivery
+	// (no error — the default must not break non-supporting backends).
+	require.NoError(t, brokerCredentials(context.Background(), descriptorBackend{}, st, "cname", secretEnv))
+	assert.Equal(t, "real", secretEnv["ANTHROPIC_API_KEY"])
+}
+
+func TestBrokerCredentials_ForcedOnUnreachableBackendErrors(t *testing.T) {
+	st := claudeState(t, &state.State{BrokerCredentials: true}) // --broker
+	secretEnv := map[string]string{"ANTHROPIC_API_KEY": "real"}
+
+	// --broker against a backend that can't host an injector is a hard error,
+	// not a silent leak of the key via direct delivery.
+	err := brokerCredentials(context.Background(), descriptorBackend{}, st, "cname", secretEnv)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot host a sandbox-reachable injector")
+}
+
+func TestBrokerCredentials_NoBrokerableKeySkips(t *testing.T) {
+	st := claudeState(t, &state.State{}) // auto
+	secretEnv := map[string]string{}     // subscription/OAuth: no API key
+
+	// No brokerable key -> direct delivery, no backend touched, no error.
+	require.NoError(t, brokerCredentials(context.Background(), panicBackend{}, st, "cname", secretEnv))
+}
+
+func TestBrokerCredentials_RestrictedNetworkAutoSkips(t *testing.T) {
+	for _, mode := range []string{"isolated", "none"} {
+		st := claudeState(t, &state.State{NetworkMode: mode}) // auto
+		secretEnv := map[string]string{"ANTHROPIC_API_KEY": "real"}
+		// Auto under restricted networking falls back to direct, no backend touched.
+		require.NoError(t, brokerCredentials(context.Background(), panicBackend{}, st, "cname", secretEnv), mode)
+		assert.Equal(t, "real", secretEnv["ANTHROPIC_API_KEY"], mode)
+	}
+}
+
+func TestBrokerCredentials_RestrictedNetworkForcedErrors(t *testing.T) {
+	st := claudeState(t, &state.State{NetworkMode: "isolated", BrokerCredentials: true})
+	secretEnv := map[string]string{"ANTHROPIC_API_KEY": "real"}
+	err := brokerCredentials(context.Background(), panicBackend{}, st, "cname", secretEnv)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not yet supported with --network-isolated")
 }
