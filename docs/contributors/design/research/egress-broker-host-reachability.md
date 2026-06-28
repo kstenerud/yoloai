@@ -38,7 +38,7 @@ Engine the two coincide.
 |---|---|---|---|---|
 | **docker** (Linux Engine) | default bridge + NAT (172.17.0.0/16) | bridge gateway IP, e.g. `172.17.0.1` | same gateway IP | in-sandbox iptables (entrypoint.py) |
 | **podman (rootful**, system socket) | real host bridge; reuses docker.Runtime | bridge gateway IP (host iface) | same gateway IP | same as docker |
-| **podman (rootless**, netavark default) | bridge **inside** the rootless netns; gateway (e.g. `10.88.0.1`) **not** on any host iface | `10.0.2.2` (slirp4netns host alias) — **requires `slirp4netns:allow_host_loopback=true`** | `127.0.0.1` (loopback; safe) | same iptables |
+| **podman (rootless**, netavark default) | bridge **inside** the rootless netns; gateway (e.g. `10.88.0.1`) **not** on any host iface | `10.0.2.2` ✅ verified (slirp host alias) — **requires `slirp4netns:allow_host_loopback=true`** | `127.0.0.1` (loopback; safe) ✅ | same iptables |
 | **containerd** (Kata VM) | CNI bridge `yoloai0`, 10.89.0.0/16 (`runtime/containerd/cni.go`) | CNI gateway `10.89.0.1` ✅ verified | same gateway IP ✅ host-bindable | same iptables |
 | **docker** (Desktop / OrbStack, macOS) | daemon in a Linux VM; bridge gateway lives *inside* the VM | `host.docker.internal` (alias; implicit on OrbStack) | macOS `127.0.0.1` (loopback — verified reachable via alias) | in-sandbox iptables |
 | **seatbelt** (macOS) | host process, host network stack, **no netns** | `127.0.0.1` | `127.0.0.1` | none (rejects `isolated`) |
@@ -102,16 +102,18 @@ each requiring a specific per-sandbox network mode (verified container → host 
 | `--network pasta:--map-gw` | container default gateway (host LAN gw, **varies**, e.g. `192.168.111.1`) | ✅ reached |
 | `--network pasta` (default) / `host.containers.internal` | LAN gw / host LAN IP | ❌ |
 
-**Recommendation: `slirp4netns:allow_host_loopback=true` with `InjectorReach = {BindHost:
-"127.0.0.1", DialHost: "10.0.2.2"}`** — the DialHost is a fixed constant (no per-host inspect),
-versus pasta's `--map-gw` whose DialHost varies with the host's LAN gateway. Cost: slirp4netns is
-userspace TCP/IP (slower than the netavark bridge), acceptable for the LLM-proxy path; and the
-brokered rootless-podman sandbox must be **created** with this network mode. The mode is a
-**create-time** decision but brokering is currently decided post-start — the open design choice is
-*always* use it for rootless podman vs. only when brokering will engage (the brokering inputs —
-brokerable agent, key present, posture, open networking — are knowable at create time). Podman
-therefore needs its **own** `InjectorReach` that branches on rootless (the `Runtime.rootless`
-field already exists): rootful → gateway-for-both; rootless → `{127.0.0.1, 10.0.2.2}`.
+**DONE (merged 2026-06-28): `slirp4netns:allow_host_loopback=true` with `InjectorReach = {BindHost:
+"127.0.0.1", DialHost: "10.0.2.2", RequiredNetworkMode: "slirp4netns:allow_host_loopback=true"}`**
+(`runtime/podman/reach.go`, rootless only; rootful → `ErrInjectorUnsupported`). The DialHost is a
+fixed constant (no per-host inspect), versus pasta's `--map-gw` whose DialHost varies. The network
+mode is carried on the reach as `RequiredNetworkMode` and applied **conditionally** — only when
+brokering engages (the chosen design; non-brokered podman keeps the default netavark bridge) —
+threaded from `brokerCredentials` through `buildInstanceConfig`, which overrides the container
+network mode. Podman's docker-compat API honors the slirp mode (verified). **Verified end-to-end on
+real rootless podman** (both credential forms): injector on `127.0.0.1`, the slirp sandbox reaches
+it via `10.0.2.2`, the real credential surfaces only at the host mock. Cost accepted: slirp4netns is
+userspace TCP/IP (slightly slower than the bridge), negligible for the LLM-proxy path, and only
+brokered sandboxes pay it.
 
 The agent-free bring-up itself works on rootless podman once it opts into `AgentFreeLaunch` (it
 embeds `*docker.Runtime`, inheriting `Launch`/`Ready`); that was validated separately. The only
