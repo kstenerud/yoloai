@@ -93,10 +93,26 @@ func defaultSidecarCommand() (string, []string, error) {
 
 // Ensure implements InjectorHost.
 func (h *SidecarHost) Ensure(ctx context.Context, spec InjectorSpec) (string, error) {
-	if rec, err := loadRecord(spec.SandboxDir); err == nil && rec != nil && processAlive(rec.PID) {
+	rec, _ := loadRecord(spec.SandboxDir)
+	if rec != nil && processAlive(rec.PID) {
 		return rec.Addr, nil
 	}
-	return h.spawn(spec)
+	// Respawn (reconcile, D106): if a dead record exists, rebind its port so the
+	// container's base_url — pinned to this address at first launch — keeps
+	// reaching the injector. A fresh injector (no record) takes an ephemeral port.
+	return h.spawn(spec, respawnBindPort(rec))
+}
+
+// respawnBindPort returns the port to rebind for a respawn: the dead record's
+// port (so base_url stays valid), or "0" (ephemeral) when there is no record.
+func respawnBindPort(rec *InjectorRecord) string {
+	if rec == nil {
+		return "0"
+	}
+	if _, port, err := net.SplitHostPort(rec.Addr); err == nil && port != "" {
+		return port
+	}
+	return "0"
 }
 
 // Stop implements InjectorHost.
@@ -113,7 +129,7 @@ func (h *SidecarHost) Stop(_ context.Context, sandboxDir string) error {
 
 // spawn launches a fresh detached sidecar, hands it the config (with secrets) on
 // stdin, reads back its listen address, and records its PID+addr.
-func (h *SidecarHost) spawn(spec InjectorSpec) (string, error) {
+func (h *SidecarHost) spawn(spec InjectorSpec, bindPort string) (string, error) {
 	exe, args, err := h.command()
 	if err != nil {
 		return "", err
@@ -153,7 +169,7 @@ func (h *SidecarHost) spawn(spec InjectorSpec) (string, error) {
 	_ = outW.Close()
 
 	// Hand the config (with the secret) to the child on stdin, then EOF it.
-	encErr := json.NewEncoder(inW).Encode(sidecarConfig(spec))
+	encErr := json.NewEncoder(inW).Encode(sidecarConfig(spec, bindPort))
 	_ = inW.Close()
 	if encErr != nil {
 		_ = outR.Close()
@@ -196,10 +212,10 @@ func errEmptyAddr(addr string) error {
 
 // sidecarConfig builds the wire config from a spec, binding an ephemeral port on
 // the spec's container-reachable host.
-func sidecarConfig(spec InjectorSpec) SidecarConfig {
+func sidecarConfig(spec InjectorSpec, bindPort string) SidecarConfig {
 	return SidecarConfig{
 		UpstreamURL:  spec.UpstreamURL,
-		BindAddr:     net.JoinHostPort(spec.BindHost, "0"),
+		BindAddr:     net.JoinHostPort(spec.BindHost, bindPort),
 		StripHeaders: spec.StripHeaders,
 		Bindings:     spec.Bindings,
 	}

@@ -126,6 +126,13 @@ func TestSidecarHost_StopKillsAndClearsRecord(t *testing.T) {
 	waitUntilDead(t, pid)
 }
 
+func TestRespawnBindPort(t *testing.T) {
+	assert.Equal(t, "0", respawnBindPort(nil), "no record -> ephemeral")
+	assert.Equal(t, "34621", respawnBindPort(&InjectorRecord{Addr: "172.17.0.1:34621"}),
+		"dead record -> reuse its port so the container's base_url stays valid")
+	assert.Equal(t, "0", respawnBindPort(&InjectorRecord{Addr: "garbage"}), "unparseable addr -> ephemeral")
+}
+
 func TestSidecarHost_StopWithoutRecordIsNoop(t *testing.T) {
 	dir := t.TempDir()
 	host := fakeSidecarHost("127.0.0.1:9")
