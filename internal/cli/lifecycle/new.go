@@ -66,6 +66,7 @@ func addCreateFlags(cmd *cobra.Command) {
 	cmd.Flags().StringSlice("env", nil, "Environment variable (KEY=VAL, repeatable)")
 	cmd.Flags().StringArray("runtime", []string{}, "Apple simulator runtime (ios, tvos, watchos, visionos). Repeatable. Example: --runtime ios --runtime tvos:26.1")
 	cmd.Flags().Bool("vscode-tunnel", false, "Launch a VS Code Remote Tunnel alongside the agent (connect from VS Code on any machine)")
+	cmd.Flags().Bool("broker", false, "Broker the agent's API key through a host-side injector so it never enters the sandbox (Linux docker; opt-in)")
 	cmd.Flags().String("archetype", "", fmt.Sprintf("Environment archetype (%s)", strings.Join(yoloai.Archetypes(), "|")))
 
 	cmd.MarkFlagsMutuallyExclusive("network-none", "network-isolated")
@@ -214,6 +215,7 @@ func resolveCreateOptions(cmd *cobra.Command, name, rawWorkdirArg string, passth
 	envSlice, _ := cmd.Flags().GetStringSlice("env")
 	runtimes, _ := cmd.Flags().GetStringArray("runtime")
 	vscodeTunnel, _ := cmd.Flags().GetBool("vscode-tunnel")
+	broker, _ := cmd.Flags().GetBool("broker")
 	archetypeFlag, _ := cmd.Flags().GetString("archetype")
 
 	isolation, _, err := resolveNewIsolationOS(cmd)
@@ -260,6 +262,7 @@ func resolveCreateOptions(cmd *cobra.Command, name, rawWorkdirArg string, passth
 		Env:                  envMap,
 		Runtimes:             runtimes,
 		VscodeTunnel:         vscodeTunnel,
+		Broker:               broker,
 		Archetype:            archetypeFlag,
 		// A dirty workdir never auto-proceeds here. executeNewCreate surfaces the
 		// warning and requires --allow-dirty to widen the scope — we never prompt
@@ -356,7 +359,7 @@ func executeNewCreate(cmd *cobra.Command, ctx context.Context, c *yoloai.Client,
 	// The launch output (on stderr, or discarded in --json mode) precedes the
 	// creation summary, matching the old create-starts-by-default flow.
 	if !noStart {
-		if _, err := sb.Start(ctx, yoloai.SandboxStartOptions{Env: opts.Env}); err != nil {
+		if _, err := sb.Start(ctx, yoloai.SandboxStartOptions{Env: opts.Env, Broker: opts.Broker}); err != nil {
 			return err
 		}
 	}
