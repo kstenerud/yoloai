@@ -2,7 +2,13 @@
 
 ABOUTME: Build plan for making the `--network-isolated` firewall tamper-proof — the agent
 can no longer flush it via sudo. Bridges step 1 (best-effort ip-filter) and step 2 (hostile-grade
-SNI proxy). Design validated empirically 2026-06-28; not yet implemented.
+SNI proxy).
+
+**STATUS: IMPLEMENTED 2026-06-28** for docker + the agent-free launch path (§§1–6 below),
+validated on real Docker (agent can't flush; non-allowlisted stays blocked; injector stays
+reachable; live `network allow` patches the per-netns ipset from the sidecar). Deferred:
+containerd/Kata, the legacy launch path, macOS (see Scope). One boundary worth noting — see
+"Provisioning egress" below.
 
 ## The problem (confirmed)
 
@@ -101,10 +107,11 @@ policy data is unchanged; only the apply transport moves out-of-container.
 
 ## Open questions to resolve during build
 
-- **ipset netns scoping.** Confirm `allowed-domains` ipsets are per-netns (newer kernels) so the
-  sidecar (sharing the netns) sees the same set and there's no cross-sandbox collision. If ipsets
-  are host-global on the target kernel, name them per-sandbox (`yoloai-<name>`). Today's
-  per-container `allowed-domains` working implies per-netns scoping — verify.
+- **ipset netns scoping — CONFIRMED per-netns.** The live-patch sidecar adds an IP to
+  `allowed-domains` and reads it back, operating on the same set the launch sidecar created in the
+  agent's netns (`TestIntegration_NetworkIsolation_LivePatchViaSidecar`), and the agent (its own
+  netns view, no NET_ADMIN) can't touch it — so the set is per-netns and there's no cross-sandbox
+  collision. Per-sandbox naming (`yoloai-<name>`) is unnecessary on this kernel.
 - **Runtime interface shape** for the netns sidecar (new method vs. generalizing an existing
   container-run path). Keep it minimal and docker/podman-only at first.
 - **Image for the sidecar** = `yoloai-base` (has iptables/ipset/python3). No new image.
@@ -121,6 +128,19 @@ sandbox, `exec sudo iptables -F OUTPUT` is denied (or the rule survives), a non-
 destination stays REJECTed afterward, and the injector stays reachable. This is the regression guard
 for the whole feature — the existing `TestIntegration_CredentialBroker_Isolated` proves reachability
 + blocking; step 1.5 adds the **tamper-resistance** assertion.
+
+## Provisioning egress (a deliberate boundary)
+
+On the agent-free path the entrypoint runs `run_setup_commands` (and overlay mounts, UID
+remap) and writes `.substrate-ready` BEFORE the host runs the firewall sidecar — so under
+the sidecar path, profile **setup commands run with full network**, not the isolation
+allowlist. This mirrors the Dockerfile build, which also has unrestricted network: provisioning
+is trusted, user-authored config. The thing isolation contains — the AI agent — launches only
+AFTER the firewall is up, so the agent is fully contained. Closing this (setup commands under
+the firewall too) needs a host-written "firewall ready" barrier the entrypoint blocks on
+before setup, which is the same barrier the deferred legacy path needs; left for that increment.
+(The in-container fallback path — non-sidecar backends — still installs the firewall before
+setup commands, unchanged.)
 
 ## Relationship to the workstream
 
