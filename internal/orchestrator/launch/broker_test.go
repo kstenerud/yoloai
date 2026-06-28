@@ -16,10 +16,12 @@ import (
 
 func claudeBrokerConfig() *agent.BrokerConfig {
 	return &agent.BrokerConfig{ //nolint:gosec // G101 false positive: env-var NAMES + a placeholder, not real credentials
-		UpstreamURL:     "https://api.anthropic.com",
-		Destination:     "api.anthropic.com",
-		Header:          "x-api-key",
-		APIKeyEnvVar:    "ANTHROPIC_API_KEY",
+		UpstreamURL: "https://api.anthropic.com",
+		Destination: "api.anthropic.com",
+		Credentials: []agent.BrokerCredential{
+			{EnvVar: "ANTHROPIC_API_KEY", Header: "x-api-key", Prefix: ""},
+			{EnvVar: "CLAUDE_CODE_OAUTH_TOKEN", Header: "Authorization", Prefix: "Bearer "},
+		},
 		BaseURLEnvVar:   "ANTHROPIC_BASE_URL",
 		AuthTokenEnvVar: "ANTHROPIC_AUTH_TOKEN",
 		DummyToken:      "yoloai-broker-dummy",
@@ -61,6 +63,44 @@ func TestApplyBrokerEnv_BadInjectorAddr(t *testing.T) {
 	assert.Contains(t, err.Error(), "parse injector address")
 	// On error the real key must remain (we did not partially rewrite into a leak).
 	assert.Equal(t, "the-real-key", secretEnv["ANTHROPIC_API_KEY"])
+}
+
+func TestApplyBrokerEnv_DropsEveryBrokerableCredential(t *testing.T) {
+	// A user with BOTH an API key and a subscription token: brokering the API key
+	// must still strip the OAuth token from the container env — no brokerable
+	// credential, selected or not, may leak in.
+	secretEnv := map[string]string{ //nolint:gosec // G101 false positive: test fixture values, not real credentials
+		"ANTHROPIC_API_KEY":       "the-real-key",
+		"CLAUDE_CODE_OAUTH_TOKEN": "the-oauth-token",
+	}
+	reach := runtime.InjectorReach{BindHost: "172.17.0.1", DialHost: "172.17.0.1"}
+
+	require.NoError(t, applyBrokerEnv(secretEnv, claudeBrokerConfig(), reach, "172.17.0.1:44115"))
+
+	_, hasKey := secretEnv["ANTHROPIC_API_KEY"]
+	assert.False(t, hasKey, "API key removed")
+	_, hasToken := secretEnv["CLAUDE_CODE_OAUTH_TOKEN"]
+	assert.False(t, hasToken, "the unselected OAuth token must not leak into the container")
+}
+
+func TestBuildInjectorSpec_PerCredentialInjection(t *testing.T) {
+	bc := claudeBrokerConfig()
+	reach := runtime.InjectorReach{BindHost: "172.17.0.1", DialHost: "172.17.0.1"}
+
+	// The API key is injected raw into x-api-key.
+	apiKeySpec := buildInjectorSpec(t.TempDir(), bc, bc.Credentials[0], reach, "real-api-key")
+	require.Len(t, apiKeySpec.Bindings, 1)
+	assert.Equal(t, "x-api-key", apiKeySpec.Bindings[0].Header)
+	assert.Empty(t, apiKeySpec.Bindings[0].Prefix)
+	assert.Equal(t, "real-api-key", apiKeySpec.Bindings[0].Secret)
+	assert.Contains(t, apiKeySpec.StripHeaders, "Authorization", "the inbound dummy bearer is always stripped")
+
+	// The subscription token is injected as Authorization: Bearer.
+	oauthSpec := buildInjectorSpec(t.TempDir(), bc, bc.Credentials[1], reach, "real-oauth-token")
+	require.Len(t, oauthSpec.Bindings, 1)
+	assert.Equal(t, "Authorization", oauthSpec.Bindings[0].Header)
+	assert.Equal(t, "Bearer ", oauthSpec.Bindings[0].Prefix)
+	assert.Equal(t, "real-oauth-token", oauthSpec.Bindings[0].Secret)
 }
 
 // brokerCredentials gate (the default-on flip)

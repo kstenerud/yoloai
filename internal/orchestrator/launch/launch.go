@@ -254,12 +254,13 @@ func brokerCredentials(ctx context.Context, rt runtime.Backend, st *state.State,
 	}
 	bc := st.Agent.Broker
 
-	realKey := secretEnv[bc.APIKeyEnvVar]
-	if realKey == "" {
-		// Nothing brokerable (e.g. subscription/OAuth). Direct delivery unchanged.
+	cred, realKey, ok := bc.SelectCredential(secretEnv)
+	if !ok {
+		// No brokerable credential present (neither an API key nor a subscription
+		// token). Direct delivery unchanged.
 		if st.BrokerCredentials {
-			slog.Info("brokering requested but no brokerable API key present; using direct delivery",
-				"event", "sandbox.broker.skip", "sandbox", st.Name, "key_env", bc.APIKeyEnvVar)
+			slog.Info("brokering requested but no brokerable credential present; using direct delivery",
+				"event", "sandbox.broker.skip", "sandbox", st.Name)
 		}
 		return nil
 	}
@@ -289,7 +290,7 @@ func brokerCredentials(ctx context.Context, rt runtime.Backend, st *state.State,
 		return fmt.Errorf("resolve injector reachability: %w", err)
 	}
 
-	addr, err := broker.NewSidecarHost().Ensure(ctx, buildInjectorSpec(st.SandboxDir, bc, reach, realKey))
+	addr, err := broker.NewSidecarHost().Ensure(ctx, buildInjectorSpec(st.SandboxDir, bc, cred, reach, realKey))
 	if err != nil {
 		return fmt.Errorf("start credential injector: %w", err)
 	}
@@ -297,15 +298,18 @@ func brokerCredentials(ctx context.Context, rt runtime.Backend, st *state.State,
 	if err := applyBrokerEnv(secretEnv, bc, reach, addr); err != nil {
 		return err
 	}
-	slog.Info("brokered agent API key through host-side injector",
-		"event", "sandbox.broker.active", "sandbox", st.Name, "upstream", bc.UpstreamURL)
+	slog.Info("brokered agent credential through host-side injector",
+		"event", "sandbox.broker.active", "sandbox", st.Name, "upstream", bc.UpstreamURL, "credential", cred.EnvVar)
 	return nil
 }
 
 // buildInjectorSpec assembles the injector spec from an agent's BrokerConfig, the
-// backend's reachability, and the resolved real key. Shared by the launch-time
-// broker step and ReconcileInjector so the two never drift.
-func buildInjectorSpec(sandboxDir string, bc *agent.BrokerConfig, reach runtime.InjectorReach, realKey string) broker.InjectorSpec {
+// selected credential, the backend's reachability, and the resolved real value.
+// Shared by the launch-time broker step and ReconcileInjector so the two never
+// drift. The inbound dummy Authorization is always stripped; the selected
+// credential is injected into its own header (x-api-key for an API key,
+// Authorization: Bearer for a subscription token).
+func buildInjectorSpec(sandboxDir string, bc *agent.BrokerConfig, cred agent.BrokerCredential, reach runtime.InjectorReach, realKey string) broker.InjectorSpec {
 	return broker.InjectorSpec{
 		SandboxDir:   sandboxDir,
 		BindHost:     reach.BindHost,
@@ -314,8 +318,8 @@ func buildInjectorSpec(sandboxDir string, bc *agent.BrokerConfig, reach runtime.
 		Bindings: []broker.BindingConfig{{
 			Destination: bc.Destination,
 			Kind:        broker.KindHeaderSet,
-			Header:      bc.Header,
-			Prefix:      bc.Prefix,
+			Header:      cred.Header,
+			Prefix:      cred.Prefix,
 			Secret:      realKey,
 		}},
 	}
@@ -362,10 +366,10 @@ func ReconcileInjector(ctx context.Context, d state.Deps, name string) error {
 		return fmt.Errorf("reconcile injector: load config: %w", err)
 	}
 	secretEnv := envsetup.ResolveSecretEnv(envspec.BuildEnvSpec(agentDef), cfg.Env, d.Layout)
-	realKey := secretEnv[bc.APIKeyEnvVar]
-	if realKey == "" {
-		slog.Warn("cannot reconcile credential injector: no brokerable API key in the current environment",
-			"event", "sandbox.broker.reconcile.nokey", "sandbox", name, "key_env", bc.APIKeyEnvVar)
+	cred, realKey, ok := bc.SelectCredential(secretEnv)
+	if !ok {
+		slog.Warn("cannot reconcile credential injector: no brokerable credential in the current environment",
+			"event", "sandbox.broker.reconcile.nokey", "sandbox", name)
 		return nil
 	}
 
@@ -378,7 +382,7 @@ func ReconcileInjector(ctx context.Context, d state.Deps, name string) error {
 		return fmt.Errorf("reconcile injector: resolve reachability: %w", err)
 	}
 
-	if _, err := broker.NewSidecarHost().Ensure(ctx, buildInjectorSpec(sandboxDir, bc, reach, realKey)); err != nil {
+	if _, err := broker.NewSidecarHost().Ensure(ctx, buildInjectorSpec(sandboxDir, bc, cred, reach, realKey)); err != nil {
 		return fmt.Errorf("reconcile injector: respawn: %w", err)
 	}
 	slog.Info("respawned dead credential injector",
@@ -386,9 +390,11 @@ func ReconcileInjector(ctx context.Context, d state.Deps, name string) error {
 	return nil
 }
 
-// applyBrokerEnv rewrites secretEnv in place for a brokered launch: it drops the
-// real key, points the agent at the injector via base_url (DialHost + the
-// injector's port), and sets the placeholder token. injectorAddr is the
+// applyBrokerEnv rewrites secretEnv in place for a brokered launch: it drops
+// every brokerable credential (so neither the selected one nor an unselected
+// sibling — e.g. an OAuth token present alongside the brokered API key — leaks
+// into the container), points the agent at the injector via base_url (DialHost +
+// the injector's port), and sets the placeholder token. injectorAddr is the
 // injector's bound address (BindHost:port); only its port is used, since the
 // agent reaches the injector via DialHost (which may differ from BindHost, e.g.
 // Docker Desktop). It is a pure function so the env rewrite is unit-tested.
@@ -397,7 +403,9 @@ func applyBrokerEnv(secretEnv map[string]string, bc *agent.BrokerConfig, reach r
 	if err != nil {
 		return fmt.Errorf("parse injector address %q: %w", injectorAddr, err)
 	}
-	delete(secretEnv, bc.APIKeyEnvVar)
+	for _, c := range bc.Credentials {
+		delete(secretEnv, c.EnvVar)
+	}
 	secretEnv[bc.BaseURLEnvVar] = "http://" + net.JoinHostPort(reach.DialHost, port)
 	secretEnv[bc.AuthTokenEnvVar] = bc.DummyToken
 	return nil
