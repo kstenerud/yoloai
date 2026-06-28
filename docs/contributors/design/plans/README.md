@@ -13,6 +13,15 @@ each, and a recommended phase order). The E1 microvm backend was investigated an
 **retired** ([D104](../../decisions/working-notes.md#d104--retire-the-hand-rolled-qemu--m-microvm-backend-libkrun-is-the-tech-if-a-light-vm-tier-is-ever-added-e1);
 [archived plan](../archive/plans/microvm-backend.md)).
 
+## Egress proxy (workstream D) — build-ready
+
+Design settled + validated ([D105](../../decisions/working-notes.md#d105--egress-proxy-workstream-d-brokering-is-the-default-containment-is-opt-in-phased-by-credential-material-refines-d90d95)
++ its validation addendum). The credential-broker + egress-containment proxy: brokering the
+agent's API key is the always-on default, egress restriction is opt-in. Actionable build plan
+in **[egress-proxy-build.md](egress-proxy-build.md)**; specs in [secure-secrets.md](../secure-secrets.md)
+(D95) + [netpolicy.md](../netpolicy.md) (D90); validating spike in
+[research/egress-broker-spike/](../research/egress-broker-spike/).
+
 ## Architecture Remediation
 
 Complete — the multi-quarter program (Go↔Python boundary, `runtime.Backend` interface, dependency direction, error patterns, slog conventions) landed; the plan and its audit are archived under `../archive/`. The one release-gated remnant (W1b — retire the launch-prefix legacy path) and the rest of this branch's cross-version concerns are tracked in [release-migration.md](release-migration.md).

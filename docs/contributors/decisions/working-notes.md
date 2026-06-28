@@ -1025,6 +1025,28 @@ Only then the **mechanical move**: `runtime` first/with `store`, repoint the fen
 
 **Spike items to confirm before/at build:** Claude Code with `base_url` + dummy bearer does not fall back to interactive `/login`; subscription-through-broker sits within Anthropic's terms (still Claude Code calling, creds injected); Bun CA-var reliability *if* the MITM fallback is exercised. The honest residuals from D95 (brokering bounds blast radius / makes exfil scoped + detectable — it does not stop a duped agent misusing an in-scope capability; compose with the copy/diff/apply review gate + a narrow allowlist + egress logging) carry forward unchanged.
 
+**Validation addendum (2026-06-28) — research + live spike confirm the design; the broker shape gains one reservation.** Three research threads + a hands-on spike (recorded under [research/egress-broker-spike/](../design/research/egress-broker-spike/); build brief in [plans/egress-proxy-build.md](../design/plans/egress-proxy-build.md)).
+
+- **Live spike (Claude Code, real binary, no real creds):** with `ANTHROPIC_BASE_URL=http://127.0.0.1:PORT` + `ANTHROPIC_AUTH_TOKEN=dummy` + a pre-seeded `~/.claude.json` `{"hasCompletedOnboarding":true}`, Claude POSTed `/v1/messages?beta=true` to the mock with `Authorization: Bearer dummy-broker-token-123`, rendered the mock's canned SSE, exited 0, **no `/login` fallback.** The exact injection seam (agent sends a placeholder; proxy swaps in the real key) is proven end-to-end.
+- **All five agents are brokerable via `base_url` + a dummy credential** (plain `http://` localhost accepted by all; no cert-pinning blockers), each with per-agent launch knobs that fit the existing agent-definition pattern:
+  | Agent | Knobs | Caveat |
+  |---|---|---|
+  | Claude | `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` (precedence #2, verbatim Bearer) | pre-seed `hasCompletedOnboarding:true` or onboarding bypasses base_url to `api.anthropic.com` |
+  | Codex | custom `[model_providers.X] base_url` + `env_key` + `forced_login_method="api"` | proxy must speak the **Responses API** (`/responses`); avoid the built-in `openai` provider |
+  | Gemini | `GOOGLE_GEMINI_BASE_URL` + `GEMINI_API_KEY=dummy` | base_url honoured **only in API-key mode**; OAuth ignores it → fixed `cloudcode-pa.googleapis.com` |
+  | Aider | `--openai-api-base` + `--openai-api-key dummy` | model name **must** be `openai/<model>` or litellm routes to the real host |
+  | OpenCode | provider `options.baseURL` + `options.apiKey` | runtime `npm i` of the provider pkg + `models.dev` fetch fire **before** the proxy — pre-cache in the image; Bun `fetch()` ignores `HTTP(S)_PROXY` |
+- **Generalized broker shape — validated against git/npm/pip/Docker/AWS/GCP/Azure; gains one required reservation.** The D105 `{destination, header-template, CredentialSource}` covers static bearer/basic (git/npm/PyPI/Azure-api-key) and refreshable bearer (GCP/Vertex/Azure-Entra/GitHub-App), but **breaks on two classes**: request-signing (AWS SigV4, Azure SharedKey) and multi-request token-exchange (Docker/OCI). Reserve the richer shape now (retrofitting it later is a breaking interface change):
+  ```
+  CredentialBinding { Destination, Apply, Source }
+    Apply  = header-set | basic-auth | request-signer   // closed 3-variant enum
+    Source = static | refreshing(Fetch->value,expiresAt) | minting
+  ```
+  `request-signer` (aws-sigv4 | azure-sharedkey) is a transform over the **final** request and **must run last** — implement `header-set`/`basic-auth` first but reserve the signer variant. Docker/OCI is **not** solved in the proxy: route it to a `minting` source feeding an **in-sandbox credential helper** (the client runs its own 401->exchange->Bearer dance). `expiresAt` already covers GCP/Azure refresh, the GitHub-App 1h token, and the ~5-min OCI token.
+- **Subscription (Phase 2) de-risked:** prefer the **sanctioned** `claude setup-token` -> 1-year `CLAUDE_CODE_OAUTH_TOKEN` (held host-side, injected) over reverse-engineering Anthropic's OAuth refresh (undocumented endpoint/client_id, refresh-token rotation, discouraged for third parties — fragile).
+- **Architectural notes confirmed:** the injector stays simple — a per-sandbox forward-and-swap reverse proxy to the agent's configured real upstream; the per-agent complexity (base_url knob, force-API-key-mode for Gemini/Codex, the `openai/` prefix, telemetry/update-suppression flags, OpenCode npm pre-cache) lives in **launch config**, not the proxy. Wire-protocol divergence (Codex=Responses, others=Chat/Messages/`generativelanguage`) is handled by per-agent upstream config, not a translator.
+- **Build-time confirmation gaps (each ~30-min localhost echo):** Codex zero-key-validation + exact Responses request; Gemini's current base_url env-var spelling (version churn); OpenCode `options`-forwarding on the pinned version (#5674).
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.
