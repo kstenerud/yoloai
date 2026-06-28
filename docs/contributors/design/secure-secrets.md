@@ -1,6 +1,8 @@
 # Secure secrets — the credential boundary (DF38 design)
 
-**Status:** Design 2026-06-25 (**D95**), not yet implemented. Resolves
+> **Refined by [D105](../decisions/working-notes.md#d105--egress-proxy-workstream-d-brokering-is-the-default-containment-is-opt-in-phased-by-credential-material-refines-d90d95) (2026-06-28):** injection uses **`base_url` redirect** (no agent pins certs), not transparent MITM; **brokering the agent's API key is the always-on default** (the "trust-posture" knob below is resolved for the API key); the build is **phased by credential material** (metered keys → subscription OAuth refresh-broker → git/other tools), with today's direct delivery retained as a per-backend transitional fallback. Read D105 for the settled shape; the text below is the originating design.
+
+**Status:** Design 2026-06-25 (**D95**), refined by D105 (2026-06-28), not yet implemented. Resolves
 [DF38](findings-unresolved.md) (secure credential delivery) and
 [DF39](findings-unresolved.md) (the `$HOME` credential-file bleed). Backed by
 [research/secure-credentials.md](research/secure-credentials.md). Converges with
