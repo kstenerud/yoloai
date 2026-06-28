@@ -6,10 +6,12 @@ Create a plan file in this directory before starting implementation.
 ## Post-merge roadmap (current)
 
 The public-layering endgame (D99) merged at `b9c91834`. The remaining work — the
-D99 post-merge remainder, the open findings, and a new Linux/KVM microvm isolation
-backend — is scoped and sequenced in **[post-merge-roadmap.md](post-merge-roadmap.md)**
-(workstreams A–E with sizes, dependencies, platform constraints, the decisions a
-human must make before building each, and a recommended phase order).
+D99 post-merge remainder and the open findings — is scoped and sequenced in
+**[post-merge-roadmap.md](post-merge-roadmap.md)** (workstreams A–E with sizes,
+dependencies, platform constraints, the decisions a human must make before building
+each, and a recommended phase order). The E1 microvm backend was investigated and
+**retired** ([D104](../../decisions/working-notes.md#d104--retire-the-hand-rolled-qemu--m-microvm-backend-libkrun-is-the-tech-if-a-light-vm-tier-is-ever-added-e1);
+[archived plan](../archive/plans/microvm-backend.md)).
 
 ## Architecture Remediation
 
