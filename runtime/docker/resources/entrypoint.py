@@ -288,6 +288,25 @@ def isolate_network(cfg):
         for domain, ip in allowed_ips:
             _run_strict(["iptables", "-A", "OUTPUT", "-d", ip, "-j", "ACCEPT"],
                         "network.iptables_perip_failed", domain=domain, ip=ip)
+    # Allow the credential-broker injector endpoint when brokering is active under
+    # isolation (the host-side proxy the agent's base_url points at, e.g. the
+    # bridge gateway:port). Port-specific so it opens only the injector, not the
+    # rest of the gateway host. The injector reaches the real upstream host-side,
+    # outside this sandbox's allowlist — so the agent's LLM egress collapses to
+    # this one endpoint while its credential stays host-side.
+    injector = os.environ.get("YOLOAI_BROKER_INJECTOR_ENDPOINT", "")
+    if injector:
+        host, _, port = injector.rpartition(":")
+        if host and port:
+            _run_strict(["iptables", "-A", "OUTPUT", "-d", host, "-p", "tcp",
+                         "--dport", port, "-j", "ACCEPT"],
+                        "network.iptables_broker_failed", endpoint=injector)
+            log_info("network.broker_allow",
+                     "allowed credential-broker injector endpoint", endpoint=injector)
+        else:
+            log_error("network.broker_endpoint_malformed",
+                      "YOLOAI_BROKER_INJECTOR_ENDPOINT is not host:port; ignoring",
+                      endpoint=injector)
     # Reject everything else. This is the load-bearing rule — if every prior
     # rule succeeded but this one failed, the sandbox would be wide open.
     _run_strict(["iptables", "-A", "OUTPUT", "-j", "REJECT",

@@ -164,6 +164,111 @@ func TestIntegration_Podman_DirectDeliveryOnMacOS(t *testing.T) {
 	assert.Empty(t, env["TEST_BROKER_BASE_URL"], "no injector base_url redirect under direct delivery")
 }
 
+// TestIntegration_CredentialBroker_Isolated proves egress containment composes
+// with brokering on real Docker: with --network-isolated, the agent's egress is
+// default-deny, yet it still reaches the host-side injector (the entrypoint
+// allowlists the injector endpoint) — while a non-allowlisted destination is
+// blocked. So the credential stays host-side AND the agent is contained. Linux
+// Engine only (the injector endpoint is the bridge gateway IP; on Docker Desktop
+// it's the host.docker.internal alias, a separate path).
+func TestIntegration_CredentialBroker_Isolated(t *testing.T) {
+	if goruntime.GOOS == "darwin" {
+		t.Skip("egress containment is Linux-first; the injector endpoint is an IP on Linux Engine")
+	}
+	mgr, ctx := integrationSetup(t)
+
+	mock := &brokerMockUpstream{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		mock.mu.Lock()
+		mock.hits++
+		mock.gotKey = r.Header.Get("x-api-key")
+		mock.mu.Unlock()
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, brokerCannedSSE)
+	}))
+	defer srv.Close()
+
+	mockHost, _, _ := strings.Cut(strings.TrimPrefix(srv.URL, "http://"), ":")
+	def := agent.GetAgent("test")
+	require.NotNil(t, def, "the test agent must be registered")
+	origBroker := def.Broker
+	def.Broker = &agent.BrokerConfig{ //nolint:gosec // G101 false positive: env-var names + a placeholder, not real credentials
+		UpstreamURL:     srv.URL,
+		Destination:     mockHost,
+		Credentials:     []agent.BrokerCredential{{EnvVar: "TEST_BROKER_KEY", Header: "x-api-key", Prefix: ""}},
+		BaseURLEnvVar:   "TEST_BROKER_BASE_URL",
+		AuthTokenEnvVar: "TEST_BROKER_AUTH",
+		DummyToken:      "dummy-broker-placeholder",
+	}
+	t.Cleanup(func() { def.Broker = origBroker })
+
+	name := "broker-isolated"
+	_, err := createSandbox(ctx, mgr, orchestrator.CreateOptions{
+		Name:    name,
+		Workdir: orchestrator.DirSpec{Path: createProjectDir(t)},
+		Agent:   "test",
+		Network: orchestrator.NetworkModeIsolated,
+		Prompt:  "env > /tmp/broker-env.txt; sleep 30",
+		Version: "test",
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _, _ = destroySandbox(ctx, mgr, name) })
+
+	const realKey = "sk-test-REAL-isolated-key"
+	_, err = startSandbox(ctx, mgr, name, orchestrator.StartOptions{
+		Env: map[string]string{"TEST_BROKER_KEY": realKey},
+	})
+	require.NoError(t, err)
+
+	instance := store.InstanceName("", name)
+	testutil.WaitForActive(ctx, t, mgr.Runtime(), instance, 15*time.Second)
+
+	var envDump string
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		r, execErr := mgr.Runtime().Exec(ctx, instance, []string{"cat", "/tmp/broker-env.txt"}, "yoloai")
+		if execErr == nil && r.ExitCode == 0 && strings.Contains(r.Stdout, "TEST_BROKER_BASE_URL=") {
+			envDump = r.Stdout
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	require.NotEmpty(t, envDump, "agent never dumped its env within 15s")
+	env := parseEnvDump(envDump)
+
+	// Brokered as usual: real key host-side, agent points at the injector, and the
+	// injector endpoint is published for the entrypoint to allowlist.
+	_, hasKey := env["TEST_BROKER_KEY"]
+	assert.False(t, hasKey, "real key must not enter the isolated container")
+	baseURL := env["TEST_BROKER_BASE_URL"]
+	assert.True(t, strings.HasPrefix(baseURL, "http://"), "base_url points at the injector, got %q", baseURL)
+	assert.NotEmpty(t, env["YOLOAI_BROKER_INJECTOR_ENDPOINT"], "injector endpoint published for the allowlist")
+	assert.True(t, broker.InjectorAlive(mgr.Layout().SandboxDir(name)), "injector should be alive")
+
+	// Under default-deny isolation, the agent STILL reaches the injector (allowlisted).
+	resp, err := mgr.Runtime().Exec(ctx, instance, []string{
+		"curl", "-s", "-m", "8", "-X", "POST", baseURL + "/v1/messages",
+		"-H", "Authorization: Bearer dummy-broker-placeholder", "-d", "{}",
+	}, "yoloai")
+	require.NoError(t, err)
+	assert.Contains(t, resp.Stdout, "BROKER_INTEGRATION_OK", "agent reaches the injector under isolation")
+	mock.mu.Lock()
+	gotKey, hits := mock.gotKey, mock.hits
+	mock.mu.Unlock()
+	assert.GreaterOrEqual(t, hits, 1, "the injector forwarded to the mock upstream")
+	assert.Equal(t, realKey, gotKey, "the real key is injected host-side")
+
+	// And isolation is genuinely enforced: a NON-allowlisted destination is blocked
+	// (default-REJECT → curl exits non-zero, surfaced as an exec error), proving
+	// the injector allow is a narrow hole, not open egress.
+	_, err = mgr.Runtime().Exec(ctx, instance, []string{
+		"curl", "-s", "-m", "5", "-o", "/dev/null", "http://1.1.1.1",
+	}, "yoloai")
+	require.Error(t, err, "a non-allowlisted destination must be blocked under isolation")
+}
+
 func runBrokerScenarios(t *testing.T, mgr *orchestrator.Engine, ctx context.Context) {
 	t.Helper()
 	cases := []struct {
