@@ -39,7 +39,7 @@ Engine the two coincide.
 | **docker** (Linux Engine) | default bridge + NAT (172.17.0.0/16) | bridge gateway IP, e.g. `172.17.0.1` | same gateway IP | in-sandbox iptables (entrypoint.py) |
 | **podman (rootful**, system socket) | real host bridge; reuses docker.Runtime | bridge gateway IP (host iface) | same gateway IP | same as docker |
 | **podman (rootless**, netavark default) | bridge **inside** the rootless netns; gateway (e.g. `10.88.0.1`) **not** on any host iface | `10.0.2.2` (slirp4netns host alias) — **requires `slirp4netns:allow_host_loopback=true`** | `127.0.0.1` (loopback; safe) | same iptables |
-| **containerd** (Kata VM) | CNI bridge `yoloai0`, 10.89.0.0/16 (`runtime/containerd/cni.go:41`) | CNI gateway `10.89.0.1` | same gateway IP | same iptables |
+| **containerd** (Kata VM) | CNI bridge `yoloai0`, 10.89.0.0/16 (`runtime/containerd/cni.go`) | CNI gateway `10.89.0.1` ✅ verified | same gateway IP ✅ host-bindable | same iptables |
 | **docker** (Desktop / OrbStack, macOS) | daemon in a Linux VM; bridge gateway lives *inside* the VM | `host.docker.internal` (alias; implicit on OrbStack) | macOS `127.0.0.1` (loopback — verified reachable via alias) | in-sandbox iptables |
 | **seatbelt** (macOS) | host process, host network stack, **no netns** | `127.0.0.1` | `127.0.0.1` | none (rejects `isolated`) |
 | **tart** (macOS VM) | Apple vmnet/NAT, **per-VM bridge** (verified `192.168.65.1`) | host vmnet gateway IP (guest default route), e.g. `192.168.65.1` | same vmnet gateway IP (VM-only, not LAN) | none (rejects `isolated`) |
@@ -119,6 +119,25 @@ blocker was injector reachability, resolved as above. (Aside discovered en route
 build --backend podman` no-ops against a stale podman image because the build-inputs checksum is
 host-side and shared across backends — a docker build marks it "current" so podman never rebuilds.
 Force a rebuild by removing the podman image first.)
+
+## containerd / Kata (verified on Linux — 2026-06-28)
+
+`InjectorReach` is **implemented** (`runtime/containerd/reach.go`): gateway-for-both on the CNI
+bridge gateway `10.89.0.1` (derived from the conflist subnet via `cniGateway`). Verified end-to-end
+on real Kata (`--isolation vm`): a host process **binds** `10.89.0.1` (the persistent `yoloai0`
+bridge is a host interface), and from inside the Kata guest the default route is `10.89.0.1` and
+`curl http://10.89.0.1:<port>` **reaches** the host listener. So the gateway-for-both model holds
+for containerd exactly as for Linux Docker Engine — no rootless-podman-style namespace problem.
+
+**First-run ordering caveat (handled):** the bridge is created during the *first* sandbox's CNI ADD
+(`setupCNI`, `lifecycle.go`), which in the decoupled flow runs *after* the broker would bind the
+gateway. So on a host that has never run a yoloai containerd sandbox the gateway isn't yet bindable.
+`InjectorReach` checks whether the gateway IP is assigned to a host interface and returns
+`ErrInjectorUnsupported` when absent → brokering safely degrades to direct delivery for that launch
+and engages on the next sandbox (the bridge persists). The clean fix — eagerly ensure the bridge
+before brokering (so even the first sandbox brokers) — is a follow-up; it generalizes to any
+per-container-network backend (rootless podman's slirp likewise needs its network mode set at
+create). Live broker integration on containerd needs the test harness under sudo + `--isolation vm`.
 
 ## Mac spike brief (run on a macOS + Apple-Silicon host; not blocking Linux 2b-2)
 
