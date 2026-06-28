@@ -326,9 +326,22 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
   PTY) to reuse pane-death detection (D100), so it *has* an answerable terminal. This ties to the
   session-carve's no-TTY headless mode. Until then the auth-presence gate + `run --tty` escape hatch
   are the mitigation.
+- **Expired-precedence angle (broker, 2026-06-28).** The same "present ≠ valid" blindness governs
+  credential *selection*, not just the headless hang. Auth gating keys on env-var/file **presence**
+  via `HasAnyAPIKey`: when any of an agent's `APIKeyEnvVars` is set, the `AuthOnly` on-disk seed
+  (Claude's `~/.claude/.credentials.json`) is suppressed (`shouldSkipSeedFile`), and the broker's
+  `SelectCredential` picks the first *present* env credential. So env beats file unconditionally. The
+  benign case (file expired, env valid) resolves correctly — the stale file is never seeded and the
+  valid env credential is brokered. The footgun is the inverse: **env credential present but
+  expired/invalid while the on-disk file is still valid** → the good file is suppressed and the dead
+  env credential is brokered, so the agent 401s upstream despite a working credential existing on
+  disk. Pre-existing (env-over-file precedence predates brokering; the broker just forwards the
+  selected credential faithfully). A real fix needs validity awareness, not just presence — the same
+  root cause as the headless-hang variant above.
 - **Pointer:** `internal/orchestrator/create/create.go` (`agentHasUsableAuth`); the headless launch
-  runs in the tmux pane via `runtime/monitor/sandbox-setup.py` (`launch_agent`). Related:
-  D100, D101, session-layer.md.
+  runs in the tmux pane via `runtime/monitor/sandbox-setup.py` (`launch_agent`). Expired-precedence:
+  `internal/envsetup/envsetup.go` (`HasAnyAPIKey`, `shouldSkipSeedFile`), `internal/agent/agent.go`
+  (`BrokerConfig.SelectCredential`). Related: D100, D101, D105, session-layer.md.
 
 ## Policy origin
 

@@ -465,3 +465,35 @@ func TestSeedsAllAgents(t *testing.T) {
 		assert.False(t, def.SeedsAllAgents, "agent %q should have SeedsAllAgents=false", name)
 	}
 }
+
+func TestBrokerConfig_SelectCredential_ClaudePrecedence(t *testing.T) {
+	bc := GetAgent("claude").Broker
+	require.NotNil(t, bc, "claude must declare a broker config")
+
+	// API key wins when both are present (matches Claude's own auth precedence).
+	cred, val, ok := bc.SelectCredential(map[string]string{
+		"ANTHROPIC_API_KEY":       "the-key",
+		"CLAUDE_CODE_OAUTH_TOKEN": "the-token",
+	})
+	require.True(t, ok)
+	assert.Equal(t, "ANTHROPIC_API_KEY", cred.EnvVar)
+	assert.Equal(t, "x-api-key", cred.Header)
+	assert.Empty(t, cred.Prefix)
+	assert.Equal(t, "the-key", val)
+
+	// Only the subscription token present: it is brokered as a bearer.
+	cred, val, ok = bc.SelectCredential(map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "the-token"})
+	require.True(t, ok)
+	assert.Equal(t, "CLAUDE_CODE_OAUTH_TOKEN", cred.EnvVar)
+	assert.Equal(t, "Authorization", cred.Header)
+	assert.Equal(t, "Bearer ", cred.Prefix)
+	assert.Equal(t, "the-token", val)
+
+	// Neither present: nothing to broker.
+	_, _, ok = bc.SelectCredential(map[string]string{"UNRELATED": "x"})
+	assert.False(t, ok)
+
+	// An empty value is treated as absent (env var set but blank).
+	_, _, ok = bc.SelectCredential(map[string]string{"ANTHROPIC_API_KEY": ""})
+	assert.False(t, ok)
+}
