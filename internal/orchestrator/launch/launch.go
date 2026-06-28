@@ -198,7 +198,7 @@ func startViaLaunch(ctx context.Context, rt runtime.Backend, launcher runtime.Pr
 	// the agent is pointed at the injector. Runs after Start (the network gateway
 	// is now knowable) and before secretEnv is materialized into the launched
 	// process's env.
-	if err := brokerCredentials(ctx, rt, st, cname, secretEnv); err != nil {
+	if err := brokerCredentials(ctx, rt, st, secretEnv); err != nil {
 		return err
 	}
 
@@ -248,7 +248,7 @@ func startViaLaunch(ctx context.Context, rt runtime.Backend, launcher runtime.Pr
 // hard error is forced-on against a backend that can't host a sandbox-reachable
 // injector: the user explicitly asked for the key to be withheld, so we refuse
 // rather than silently leak it via direct delivery.
-func brokerCredentials(ctx context.Context, rt runtime.Backend, st *state.State, cname string, secretEnv map[string]string) error {
+func brokerCredentials(ctx context.Context, rt runtime.Backend, st *state.State, secretEnv map[string]string) error {
 	if st.BrokerDisabled || st.Agent == nil || st.Agent.Broker == nil {
 		return nil
 	}
@@ -278,16 +278,15 @@ func brokerCredentials(ctx context.Context, rt runtime.Backend, st *state.State,
 		return nil
 	}
 
-	reachable, ok := runtime.InjectorReachOf(rt)
+	reach, ok, err := resolveInjectorReach(ctx, rt)
+	if err != nil {
+		return fmt.Errorf("resolve injector reachability: %w", err)
+	}
 	if !ok {
 		if st.BrokerCredentials {
 			return fmt.Errorf("--broker requested but the %s backend cannot host a sandbox-reachable injector", rt.Descriptor().Type)
 		}
 		return nil // auto: this backend can't broker; direct delivery
-	}
-	reach, err := reachable.InjectorReach(ctx, cname)
-	if err != nil {
-		return fmt.Errorf("resolve injector reachability: %w", err)
 	}
 
 	addr, err := broker.NewSidecarHost().Ensure(ctx, buildInjectorSpec(st.SandboxDir, bc, cred, reach, realKey))
@@ -301,6 +300,28 @@ func brokerCredentials(ctx context.Context, rt runtime.Backend, st *state.State,
 	slog.Info("brokered agent credential through host-side injector",
 		"event", "sandbox.broker.active", "sandbox", st.Name, "upstream", bc.UpstreamURL, "credential", cred.EnvVar)
 	return nil
+}
+
+// resolveInjectorReach asks the backend for its network-level injector endpoint.
+// ok is false (with a nil error) when the backend can't host a sandbox-reachable
+// injector — either it isn't InjectorReachable at all, or it returns
+// ErrInjectorUnsupported (e.g. rootless podman, pending its slirp path) — and the
+// caller falls back to direct delivery (or errors under a forced --broker). A
+// non-nil error is a genuine reachability failure and is fatal, so the real key
+// is never silently delivered when brokering was expected to work.
+func resolveInjectorReach(ctx context.Context, rt runtime.Backend) (runtime.InjectorReach, bool, error) {
+	reachable, ok := runtime.InjectorReachOf(rt)
+	if !ok {
+		return runtime.InjectorReach{}, false, nil
+	}
+	reach, err := reachable.InjectorReach(ctx)
+	if errors.Is(err, runtime.ErrInjectorUnsupported) {
+		return runtime.InjectorReach{}, false, nil
+	}
+	if err != nil {
+		return runtime.InjectorReach{}, false, err
+	}
+	return reach, true, nil
 }
 
 // buildInjectorSpec assembles the injector spec from an agent's BrokerConfig, the
@@ -373,13 +394,12 @@ func ReconcileInjector(ctx context.Context, d state.Deps, name string) error {
 		return nil
 	}
 
-	reachable, ok := runtime.InjectorReachOf(d.Runtime)
-	if !ok {
-		return nil // backend can't host an injector (shouldn't happen if it was brokered)
-	}
-	reach, err := reachable.InjectorReach(ctx, cname)
+	reach, ok, err := resolveInjectorReach(ctx, d.Runtime)
 	if err != nil {
 		return fmt.Errorf("reconcile injector: resolve reachability: %w", err)
+	}
+	if !ok {
+		return nil // backend can't host an injector (shouldn't happen if it was brokered)
 	}
 
 	if _, err := broker.NewSidecarHost().Ensure(ctx, buildInjectorSpec(sandboxDir, bc, cred, reach, realKey)); err != nil {
