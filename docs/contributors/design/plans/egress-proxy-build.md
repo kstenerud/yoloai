@@ -4,8 +4,10 @@ ABOUTME: The "start here" kickoff for building the egress-proxy credential-broke
 settled and validated; this is the actionable build plan. Rationale lives in D105 (+ its
 validation addendum) in decisions/working-notes.md; do not re-litigate it — build to it.
 
-**Status:** **Phase 1 COMPLETE + end-to-end verified on real Docker (2026-06-28).** Brokering
-is the default for Claude on Linux docker/podman; opt out with `--no-broker`. Read first:
+**Status:** **Phases 1 & 2 COMPLETE + end-to-end verified on real Docker (2026-06-28).**
+Brokering is the default for Claude on Linux docker/podman — both the metered API key
+(`ANTHROPIC_API_KEY`, x-api-key) and the subscription token (`CLAUDE_CODE_OAUTH_TOKEN`,
+Authorization: Bearer); opt out with `--no-broker`. Read first:
 [D105 + validation addendum](../../decisions/working-notes.md#d105--egress-proxy-workstream-d-brokering-is-the-default-containment-is-opt-in-phased-by-credential-material-refines-d90d95)
 and [D106](../../decisions/working-notes.md#d106--egress-proxy-the-key-injectors-lifetime-is-a-pluggable-host-cli-sidecar--embedder-in-process-recovery-is-lazy-re-derivation-refines-d105),
 then [secure-secrets.md](../secure-secrets.md) (D95) and [netpolicy.md](../netpolicy.md) (D90),
@@ -14,8 +16,9 @@ Read the Build progress section below first.**
 
 ## Build progress (2026-06-28)
 
-Phase 1 (broker metered API keys) is **done and merged to `main`** (not pushed). What landed,
-in order — each a `--no-ff` merge:
+Phases 1 (metered API keys) and 2 (subscription OAuth token) are **done**. Phase 1 is merged
+to `main` (not pushed); Phase 2 lives on branch `broker-subscription-oauth` (not yet merged).
+What landed, in order — each a `--no-ff` merge:
 
 - **`internal/credential`** — the tool-agnostic `CredentialBinding{Destination, Apply, Source}`.
   Full closed shape reserved (D105 addendum); `header-set`/`basic-auth` + `static`/`refreshing`
@@ -47,15 +50,20 @@ Key files: `internal/credential/`, `internal/broker/`, `runtime/docker/reach.go`
 `buildInjectorSpec`), `internal/orchestrator/lifecycle/{start,restart,lifecycle}.go`,
 `internal/agent/agent.go` (`BrokerConfig` on Claude only), `store/environment.go`.
 
-**Next up (in order): Phase 2 = subscription-OAuth broker (build step 3), then the remaining
-backends, then egress containment (build step 4).** Details:
+- **Phase 2 — subscription OAuth (build step 3) — LANDED on branch `broker-subscription-oauth`.**
+  `BrokerConfig` generalized from one API key to a precedence-ordered `Credentials []BrokerCredential`
+  list; `SelectCredential` picks the first present. Claude declares two: `ANTHROPIC_API_KEY`
+  (x-api-key) and `CLAUDE_CODE_OAUTH_TOKEN` (Authorization: Bearer, from `claude setup-token`), API
+  key first. The 1-year token stays host-side instead of being delivered into the box. The
+  `.credentials.json` refresh-token seed is already suppressed when the OAuth token is present (it is
+  in `APIKeyEnvVars` → `HasAnyAPIKey` true), so brokering the token removes the *last* credential —
+  no refresh-token leak. `applyBrokerEnv` now drops *every* brokerable credential env var (not just
+  the selected one) so an unselected sibling can't leak. The real-Docker integration test runs both
+  credential forms end-to-end. We did NOT reverse-engineer Anthropic's OAuth refresh (the
+  `~/.claude/.credentials.json` interactive-login path stays on direct delivery).
 
-- **Phase 2 — subscription OAuth (build step 3 below).** Prefer the sanctioned `claude setup-token` →
-  1-year `CLAUDE_CODE_OAUTH_TOKEN` held host-side + injected, over reverse-engineering Anthropic's
-  OAuth refresh. Today subscription falls back to direct file delivery; brokering it removes the
-  refresh token from the box. This is a new `static`-source binding (Authorization: Bearer) for
-  Claude when the OAuth token is the credential — mostly launch-config + the credential-shape
-  already exists.
+**Next up (in order): the remaining backends, then egress containment (build step 4).** Details:
+
 - **More backends.** podman already implements `InjectorReachable` (untested live — add an
   integration run). containerd (CNI gateway), and the macOS variants (Docker Desktop →
   `host.docker.internal` dial / `127.0.0.1` bind; tart/apple → vmnet gateway; seatbelt →

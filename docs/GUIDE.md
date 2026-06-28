@@ -737,9 +737,9 @@ mv ~/.yoloai/library/trash/<name> ~/.yoloai/library/sandboxes/<name>
 
 ### Credential Brokering
 
-By default, yoloAI keeps the agent's LLM API key **out of the sandbox entirely**. Instead of placing the key in the container, it runs a tiny per-sandbox proxy on the host (the *broker*), points the agent at it (`ANTHROPIC_BASE_URL`) with a harmless placeholder token, and swaps in the real key on the way to the provider. The live key is never in the container's environment or filesystem, so a misbehaving or prompt-injected agent can't read or exfiltrate it.
+By default, yoloAI keeps the agent's LLM credential **out of the sandbox entirely**. Instead of placing the credential in the container, it runs a tiny per-sandbox proxy on the host (the *broker*), points the agent at it (`ANTHROPIC_BASE_URL`) with a harmless placeholder token, and swaps in the real credential on the way to the provider. The live credential is never in the container's environment or filesystem, so a misbehaving or prompt-injected agent can't read or exfiltrate it.
 
-**When it applies (the default):** a brokerable agent (currently **Claude**, via `ANTHROPIC_API_KEY`), on a supporting backend (**Linux docker / podman**), with the key present and networking open. Anything outside that — other agents, subscription/OAuth logins (no static key to broker), other backends, or restricted networking — falls back to direct delivery automatically; no action needed.
+**When it applies (the default):** a brokerable agent (currently **Claude**), on a supporting backend (**Linux docker / podman**), with a credential present and networking open. For Claude, both the metered API key (`ANTHROPIC_API_KEY`) and the subscription token (`CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`) are brokered — the API key takes precedence when both are set. Anything outside that — other agents, an interactive subscription login with no `CLAUDE_CODE_OAUTH_TOKEN` (the short-lived `~/.claude/.credentials.json` path), other backends, or restricted networking — falls back to direct delivery automatically; no action needed.
 
 ```bash
 # Brokering is automatic — nothing to do. To opt out (deliver the key directly):
@@ -753,8 +753,8 @@ The posture is **sticky**: once a sandbox is created with `--broker` / `--no-bro
 
 **Caveats:**
 - **Restricted networking not yet supported.** With `--network-isolated` or `--network-none`, brokering is skipped (direct delivery); `--broker` combined with those is rejected. Composing brokering with the egress allowlist is planned.
-- **Subscription tokens aren't brokered yet** — `CLAUDE_CODE_OAUTH_TOKEN` uses the file/env path (see below).
-- Brokering bounds the key's blast radius (the agent can call the API but can't steal the key); it does **not** stop a duped agent from misusing that in-scope API access. Compose it with the copy/diff/apply review gate and network controls.
+- **Subscription tokens are brokered** when supplied via `CLAUDE_CODE_OAUTH_TOKEN` (see below) — the long-lived token stays host-side and is injected as `Authorization: Bearer`. An interactive `claude login` that leaves only the short-lived `~/.claude/.credentials.json` (no `CLAUDE_CODE_OAUTH_TOKEN`) is not brokered and takes the file path.
+- Brokering bounds the credential's blast radius (the agent can call the API but can't steal the credential); it does **not** stop a duped agent from misusing that in-scope API access. Compose it with the copy/diff/apply review gate and network controls.
 
 ### Claude Code Authentication
 
