@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	goruntime "runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -79,8 +80,88 @@ func TestIntegration_CredentialBroker_LegacyPath(t *testing.T) {
 // 10.0.2.2). Proves brokering works on a backend with neither a ProcessLauncher
 // nor a host-bindable bridge gateway. Skips when Podman is unavailable.
 func TestIntegration_CredentialBroker_Podman(t *testing.T) {
+	// This test's brokering target is LINUX rootless podman (slirp4netns host
+	// loopback), the validated podman path. On macOS podman runs in a podman-machine
+	// VM whose host hops don't carry the real agent's traffic reliably, so podman
+	// reports ErrInjectorUnsupported on darwin and brokering degrades to direct
+	// delivery (see runtime/podman/reach.go + the real-agent smoke evidence). With
+	// direct delivery the real credential intentionally enters the container, which
+	// is the opposite of what this broker test asserts — so it cannot run on macOS.
+	if goruntime.GOOS == "darwin" {
+		t.Skip("podman doesn't broker on macOS (podman-machine host hops fail the real agent → direct delivery); brokering is validated on Linux rootless podman")
+	}
 	mgr, ctx := podmanIntegrationSetup(t)
 	runBrokerScenarios(t, mgr, ctx)
+}
+
+// TestIntegration_Podman_DirectDeliveryOnMacOS is the counterpart that locks the
+// macOS posture: podman reports ErrInjectorUnsupported on darwin, so a brokerable
+// agent with a credential present must DEGRADE TO DIRECT DELIVERY rather than
+// broker — no host-side injector is started, and the real credential is delivered
+// into the container as-is. This is the regression guard for the smoke-test failure
+// where making podman-macOS broker via a podman-machine host hop hung the real
+// agent: brokering must stay off on podman-macOS until a streaming-safe host hop
+// exists. Linux-only behavior (Linux rootless DOES broker) is covered above.
+func TestIntegration_Podman_DirectDeliveryOnMacOS(t *testing.T) {
+	if goruntime.GOOS != "darwin" {
+		t.Skip("guards the macOS podman direct-delivery posture; only meaningful on darwin")
+	}
+	mgr, ctx := podmanIntegrationSetup(t)
+
+	const realCred = "sk-test-REAL-should-be-delivered-direct"
+	def := agent.GetAgent("test")
+	require.NotNil(t, def, "the test agent must be registered")
+	origBroker := def.Broker
+	def.Broker = &agent.BrokerConfig{ //nolint:gosec // G101 false positive: env-var names + a placeholder, not real credentials
+		UpstreamURL: "http://127.0.0.1:1", // never contacted — brokering must not engage
+		Destination: "127.0.0.1",
+		Credentials: []agent.BrokerCredential{
+			{EnvVar: "TEST_BROKER_KEY", Header: "x-api-key", Prefix: ""},
+		},
+		BaseURLEnvVar:   "TEST_BROKER_BASE_URL",
+		AuthTokenEnvVar: "TEST_BROKER_AUTH",
+		DummyToken:      "dummy-broker-placeholder",
+	}
+	t.Cleanup(func() { def.Broker = origBroker })
+
+	name := "podman-direct-macos"
+	_, err := createSandbox(ctx, mgr, orchestrator.CreateOptions{
+		Name:    name,
+		Workdir: orchestrator.DirSpec{Path: createProjectDir(t)},
+		Agent:   "test",
+		Prompt:  "env > /tmp/broker-env.txt; sleep 30",
+		Version: "test",
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _, _ = destroySandbox(ctx, mgr, name) })
+
+	_, err = startSandbox(ctx, mgr, name, orchestrator.StartOptions{
+		Env: map[string]string{"TEST_BROKER_KEY": realCred},
+	})
+	require.NoError(t, err)
+
+	instance := store.InstanceName("", name)
+	testutil.WaitForActive(ctx, t, mgr.Runtime(), instance, 15*time.Second)
+
+	// No injector is started for a podman-macOS sandbox — brokering degraded.
+	assert.False(t, broker.InjectorAlive(mgr.Layout().SandboxDir(name)),
+		"podman on macOS must NOT start an injector (direct delivery)")
+
+	// The agent env carries the real credential directly, with no base_url redirect.
+	var envDump string
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		r, execErr := mgr.Runtime().Exec(ctx, instance, []string{"cat", "/tmp/broker-env.txt"}, "yoloai")
+		if execErr == nil && r.ExitCode == 0 && strings.Contains(r.Stdout, "TEST_BROKER_KEY=") {
+			envDump = r.Stdout
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	require.NotEmpty(t, envDump, "agent never dumped its env within 15s")
+	env := parseEnvDump(envDump)
+	assert.Equal(t, realCred, env["TEST_BROKER_KEY"], "the real credential is delivered directly")
+	assert.Empty(t, env["TEST_BROKER_BASE_URL"], "no injector base_url redirect under direct delivery")
 }
 
 func runBrokerScenarios(t *testing.T, mgr *orchestrator.Engine, ctx context.Context) {

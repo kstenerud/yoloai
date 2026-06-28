@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"testing"
 
 	"github.com/docker/docker/api/types"
@@ -237,7 +238,22 @@ func TestRequiredCapabilities_Podman_RootlessIsPermanent(t *testing.T) {
 	assert.True(t, results[0].IsPermanent)
 }
 
+// TestInjectorReach_Darwin covers the macOS branch: podman runs in a podman-machine
+// VM whose host hops (slirp 10.0.2.2 / gvproxy) don't carry the real agent's traffic
+// reliably, so podman reports unsupported on macOS and brokering degrades to direct
+// delivery. Only asserts on darwin (where the branch is taken).
+func TestInjectorReach_Darwin(t *testing.T) {
+	if goruntime.GOOS != "darwin" {
+		t.Skip("macOS podman reach only applies on darwin")
+	}
+	_, err := (&Runtime{rootless: true}).InjectorReach(context.Background())
+	assert.ErrorIs(t, err, runtime.ErrInjectorUnsupported, "podman doesn't broker on macOS; direct delivery")
+}
+
 func TestInjectorReach_Rootless(t *testing.T) {
+	if goruntime.GOOS == "darwin" {
+		t.Skip("on darwin the podman-machine branch overrides the Linux rootless slirp path")
+	}
 	r := &Runtime{rootless: true}
 	reach, err := r.InjectorReach(context.Background())
 	require.NoError(t, err)
@@ -247,6 +263,9 @@ func TestInjectorReach_Rootless(t *testing.T) {
 }
 
 func TestInjectorReach_RootfulUnsupported(t *testing.T) {
+	if goruntime.GOOS == "darwin" {
+		t.Skip("on darwin podman brokers via host.containers.internal regardless of rootless")
+	}
 	r := &Runtime{rootless: false}
 	_, err := r.InjectorReach(context.Background())
 	assert.ErrorIs(t, err, runtime.ErrInjectorUnsupported, "rootful podman brokering not wired yet")
