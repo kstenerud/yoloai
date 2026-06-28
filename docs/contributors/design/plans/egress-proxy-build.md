@@ -8,8 +8,9 @@ validation addendum) in decisions/working-notes.md; do not re-litigate it — bu
 end-to-end verified on real Docker (2026-06-28).** Brokering is the default for Claude on docker —
 both the metered API key (`ANTHROPIC_API_KEY`, x-api-key) and the subscription token
 (`CLAUDE_CODE_OAUTH_TOKEN`, Authorization: Bearer); opt out with `--no-broker`. Brokering is now
-**decoupled from the launch path** (works on agent-free *and* legacy bring-up), so lighting up the
-remaining backends is just a per-backend network-level `InjectorReach`. Read first:
+**decoupled from the launch path** (works on agent-free *and* legacy bring-up). **All three Linux
+backends broker — docker, containerd/Kata, and rootless podman — verified on real hardware.** Next
+is the macOS variants (→ a Mac agent). Read first:
 [D105 + validation addendum](../../decisions/working-notes.md#d105--egress-proxy-workstream-d-brokering-is-the-default-containment-is-opt-in-phased-by-credential-material-refines-d90d95)
 and [D106](../../decisions/working-notes.md#d106--egress-proxy-the-key-injectors-lifetime-is-a-pluggable-host-cli-sidecar--embedder-in-process-recovery-is-lazy-re-derivation-refines-d105),
 then [secure-secrets.md](../secure-secrets.md) (D95) and [netpolicy.md](../netpolicy.md) (D90),
@@ -77,16 +78,25 @@ Key files: `internal/credential/`, `internal/broker/`, `runtime/docker/reach.go`
   reachable-but-not-ready backend (rootless podman) cleanly opt out (auto → direct delivery). This
   makes the parked podman `AgentFreeLaunch` flip moot — podman just needs its slirp `InjectorReach`.
 
-**Next up (in order): per-backend `InjectorReach`, then egress containment (build step 4).** Details:
+- **All three Linux backends broker — LANDED + verified on real hardware.** **docker** (agent-free
+  + legacy), **containerd/Kata** (CNI gateway `10.89.0.1`, gateway-for-both; guest reach verified on
+  real Kata), and **rootless podman** (`slirp4netns:allow_host_loopback` → injector on `127.0.0.1`,
+  sandbox dials `10.0.2.2`; `RequiredNetworkMode` carried on the reach, applied conditionally only
+  when brokering engages). Each has an `InjectorReach`; podman/containerd each got a unit test + a
+  real-backend broker integration test (`TestIntegration_CredentialBroker_Podman`, the docker
+  `_LegacyPath`). One known edge: the **first** containerd sandbox on a fresh host direct-delivers
+  until `yoloai0` exists (safe degrade via `ErrInjectorUnsupported`), then brokers — eager
+  bridge-ensure is the follow-up.
 
-- **More backends — now a small, uniform task per backend** (implement a network-level `InjectorReach`,
-  no launch-path work): **containerd** next (CNI gateway `10.89.0.1` — verified host-bindable on
-  Linux; the bridge already exists so it's pre-create-knowable). Then **rootless podman**
-  (`slirp4netns:allow_host_loopback` → `{127.0.0.1, 10.0.2.2}` + the create-time network-mode
-  plumbing — see DF/parked decision) and the **macOS variants** (Docker Desktop →
-  `host.docker.internal` dial / `127.0.0.1` bind; tart/apple → vmnet gateway; seatbelt → `127.0.0.1`),
-  all mapped in
+**Next up (in order): macOS backends (→ Mac agent), then egress containment (build step 4).** Details:
+
+- **macOS variants** (need a Mac — hand to a Mac agent): Docker Desktop → `host.docker.internal`
+  dial / `127.0.0.1` bind; tart/apple → vmnet gateway; seatbelt → `127.0.0.1` both — all mapped in
   [research/egress-broker-host-reachability.md](../research/egress-broker-host-reachability.md).
+  Each implements a network-level `InjectorReach` (some need the BindHost≠DialHost split, already
+  expressible). The launch wiring is backend-agnostic and done.
+- **containerd eager bridge-ensure** (Linux follow-up): create `yoloai0` before brokering so the
+  *first* containerd sandbox brokers too. Generalizes the "prepare network before broker" idea.
 - **Egress containment** (build step 4 — the `--network-isolated` + broker composition). Retires the
   "skip/error under isolation" guard: allowlist the injector endpoint (or go to
   `StrategyEgressProxy`: default-deny netns, injector as the sole egress path). Wrinkle: the
