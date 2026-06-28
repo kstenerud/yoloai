@@ -1,6 +1,8 @@
 # Netpolicy — the network-policy refinement over the substrate
 
-**Status:** Design converged 2026-06-24 (design conversation), not yet implemented. The **netpolicy** refinement
+> **Refined by [D105](../decisions/working-notes.md#d105--egress-proxy-workstream-d-brokering-is-the-default-containment-is-opt-in-phased-by-credential-material-refines-d90d95) (2026-06-28):** the `egress-proxy` strategy is realised as an **opt-in** layer (default-deny netns + an **SNI-splicing forwarder** — no decryption — + allowlist), **Linux-first** (host nftables on the veth; uniquely fixes gVisor). Egress restriction stays opt-in/open-by-default; it composes with the always-on credential injector from D105/D95. Read D105 for the settled shape.
+
+**Status:** Design converged 2026-06-24, refined by D105 (2026-06-28), not yet implemented. The **netpolicy** refinement
 of [plans/public-layering.md](plans/public-layering.md) — a standalone layer over the substrate
 ([D84](../decisions/working-notes.md)). Resolves [DF34](findings-unresolved.md) (network isolation woven into
 the backends). Consumes the agent layer's domain-floor ([D89](../decisions/working-notes.md)). Grounded in a
