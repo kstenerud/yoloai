@@ -8,10 +8,13 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
+	"github.com/kstenerud/yoloai/internal/broker"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/orchestrator"
 	"github.com/kstenerud/yoloai/internal/testutil"
@@ -23,6 +26,21 @@ import (
 // for per-test sandbox isolation; subsequent Setup calls hit the cache and
 // return in milliseconds.
 func TestMain(m *testing.M) {
+	// The credential broker spawns its injector as `<this-binary> __inject` (it
+	// uses os.Executable()). In an integration test that binary IS this test
+	// binary, so it must dispatch __inject exactly as cmd/yoloai's main does —
+	// run the sidecar and exit before any test bootstrap. This is what lets the
+	// real launch path start a working injector during the broker integration test.
+	if len(os.Args) >= 2 && os.Args[1] == broker.InjectVerb {
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer stop()
+		if err := broker.RunSidecar(ctx, os.Stdin, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, err) //nolint:errcheck // best-effort diagnostic
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+
 	ctx := context.Background()
 	step := testutil.TestMainBreadcrumb("sandbox")
 
