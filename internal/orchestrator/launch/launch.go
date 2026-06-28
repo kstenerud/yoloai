@@ -25,6 +25,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/envsetup"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/netpolicy"
+	"github.com/kstenerud/yoloai/internal/orchestrator/agentcfg"
 	"github.com/kstenerud/yoloai/internal/orchestrator/envspec"
 	mountspkg "github.com/kstenerud/yoloai/internal/orchestrator/mounts"
 	"github.com/kstenerud/yoloai/internal/orchestrator/runtimeconfig"
@@ -266,8 +267,25 @@ func brokerCredentials(ctx context.Context, rt runtime.Backend, st *state.State,
 		return fmt.Errorf("resolve injector reachability: %w", err)
 	}
 
-	spec := broker.InjectorSpec{
-		SandboxDir:   st.SandboxDir,
+	addr, err := broker.NewSidecarHost().Ensure(ctx, buildInjectorSpec(st.SandboxDir, bc, reach, realKey))
+	if err != nil {
+		return fmt.Errorf("start credential injector: %w", err)
+	}
+
+	if err := applyBrokerEnv(secretEnv, bc, reach, addr); err != nil {
+		return err
+	}
+	slog.Info("brokered agent API key through host-side injector",
+		"event", "sandbox.broker.active", "sandbox", st.Name, "upstream", bc.UpstreamURL)
+	return nil
+}
+
+// buildInjectorSpec assembles the injector spec from an agent's BrokerConfig, the
+// backend's reachability, and the resolved real key. Shared by the launch-time
+// broker step and ReconcileInjector so the two never drift.
+func buildInjectorSpec(sandboxDir string, bc *agent.BrokerConfig, reach runtime.InjectorReach, realKey string) broker.InjectorSpec {
+	return broker.InjectorSpec{
+		SandboxDir:   sandboxDir,
 		BindHost:     reach.BindHost,
 		UpstreamURL:  bc.UpstreamURL,
 		StripHeaders: []string{"Authorization"},
@@ -279,16 +297,70 @@ func brokerCredentials(ctx context.Context, rt runtime.Backend, st *state.State,
 			Secret:      realKey,
 		}},
 	}
-	addr, err := broker.NewSidecarHost().Ensure(ctx, spec)
-	if err != nil {
-		return fmt.Errorf("start credential injector: %w", err)
+}
+
+// ReconcileInjector respawns a sandbox's host-side credential injector if it has
+// died (D106 lazy reconcile). It is best-effort and cheap on the common path: a
+// sandbox that was never brokered, or whose injector is still alive, returns
+// immediately without opening the backend or re-deriving any credential. Only a
+// dead injector triggers the heavier respawn — re-deriving the key from the
+// CURRENT ambient env (D106: no secret is ever persisted) and rebinding the
+// recorded port so the container's base_url stays valid.
+func ReconcileInjector(ctx context.Context, d state.Deps, name string) error {
+	sandboxDir := d.Layout.SandboxDir(name)
+	if !broker.HasRecord(sandboxDir) {
+		return nil // not a brokered sandbox
+	}
+	if broker.InjectorAlive(sandboxDir) {
+		return nil // injector healthy — the overwhelmingly common case
 	}
 
-	if err := applyBrokerEnv(secretEnv, bc, reach, addr); err != nil {
-		return err
+	// Dead injector: reconstruct its spec and respawn it.
+	acfg, err := agentcfg.Load(sandboxDir)
+	if err != nil {
+		return fmt.Errorf("reconcile injector: load agent config: %w", err)
 	}
-	slog.Info("brokered agent API key through host-side injector",
-		"event", "sandbox.broker.active", "sandbox", st.Name, "upstream", bc.UpstreamURL)
+	agentDef := agent.GetAgent(acfg.AgentType)
+	if agentDef == nil || agentDef.Broker == nil {
+		return nil // agent no longer registered or not brokerable
+	}
+	bc := agentDef.Broker
+
+	cname := store.InstanceName(d.Layout.Principal, name)
+	info, err := d.Runtime.Inspect(ctx, cname)
+	if err != nil {
+		return fmt.Errorf("reconcile injector: inspect %s: %w", cname, err)
+	}
+	if !info.Running {
+		return nil // injector only matters while the container runs
+	}
+
+	cfg, err := config.LoadConfig(d.Layout)
+	if err != nil {
+		return fmt.Errorf("reconcile injector: load config: %w", err)
+	}
+	secretEnv := envsetup.ResolveSecretEnv(envspec.BuildEnvSpec(agentDef), cfg.Env, d.Layout)
+	realKey := secretEnv[bc.APIKeyEnvVar]
+	if realKey == "" {
+		slog.Warn("cannot reconcile credential injector: no brokerable API key in the current environment",
+			"event", "sandbox.broker.reconcile.nokey", "sandbox", name, "key_env", bc.APIKeyEnvVar)
+		return nil
+	}
+
+	reachable, ok := runtime.InjectorReachOf(d.Runtime)
+	if !ok {
+		return nil // backend can't host an injector (shouldn't happen if it was brokered)
+	}
+	reach, err := reachable.InjectorReach(ctx, cname)
+	if err != nil {
+		return fmt.Errorf("reconcile injector: resolve reachability: %w", err)
+	}
+
+	if _, err := broker.NewSidecarHost().Ensure(ctx, buildInjectorSpec(sandboxDir, bc, reach, realKey)); err != nil {
+		return fmt.Errorf("reconcile injector: respawn: %w", err)
+	}
+	slog.Info("respawned dead credential injector",
+		"event", "sandbox.broker.reconcile.active", "sandbox", name)
 	return nil
 }
 

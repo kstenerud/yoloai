@@ -5,6 +5,7 @@ package broker
 import (
 	"context"
 	"fmt"
+	"os"
 	"syscall"
 	"testing"
 	"time"
@@ -124,6 +125,30 @@ func TestSidecarHost_StopKillsAndClearsRecord(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, gone, "record cleared on stop")
 	waitUntilDead(t, pid)
+}
+
+func TestHasRecordAndInjectorAlive(t *testing.T) {
+	dir := t.TempDir()
+	// No record yet.
+	assert.False(t, HasRecord(dir))
+	assert.False(t, InjectorAlive(dir))
+
+	// A record for a live process (this test process) → brokered + alive.
+	require.NoError(t, saveRecord(dir, &InjectorRecord{PID: os.Getpid(), Addr: "127.0.0.1:1"}))
+	assert.True(t, HasRecord(dir))
+	assert.True(t, InjectorAlive(dir))
+
+	// A record for a dead PID → brokered but not alive (the respawn case).
+	require.NoError(t, saveRecord(dir, &InjectorRecord{PID: 2147483646, Addr: "127.0.0.1:1"}))
+	assert.True(t, HasRecord(dir))
+	assert.False(t, InjectorAlive(dir))
+}
+
+func TestRespawnBindPort(t *testing.T) {
+	assert.Equal(t, "0", respawnBindPort(nil), "no record -> ephemeral")
+	assert.Equal(t, "34621", respawnBindPort(&InjectorRecord{Addr: "172.17.0.1:34621"}),
+		"dead record -> reuse its port so the container's base_url stays valid")
+	assert.Equal(t, "0", respawnBindPort(&InjectorRecord{Addr: "garbage"}), "unparseable addr -> ephemeral")
 }
 
 func TestSidecarHost_StopWithoutRecordIsNoop(t *testing.T) {

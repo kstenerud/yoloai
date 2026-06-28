@@ -201,6 +201,7 @@ func requireOverlayRunning(ctx context.Context, sb *yoloai.Sandbox, name string)
 // through container exec since git lives inside the container.
 func diffOverlay(cmd *cobra.Command, name, hostPath string, stat, nameOnly bool) error {
 	return cliutil.WithSandbox(cmd, name, func(ctx context.Context, sb *yoloai.Sandbox) error {
+		cliutil.ReconcileInjectorBestEffort(ctx, sb) // D106: revive a crashed injector
 		if err := requireOverlayRunning(ctx, sb, name); err != nil {
 			return err
 		}
@@ -487,6 +488,7 @@ func diffAll(cmd *cobra.Command, name string, rest []string, logFlag, stat, name
 
 	var combined strings.Builder
 	return cliutil.WithSandbox(cmd, name, func(ctx context.Context, sb *yoloai.Sandbox) error {
+		cliutil.ReconcileInjectorBestEffort(ctx, sb) // D106: revive a crashed injector
 		for _, d := range tracked {
 			if appendErr := diffOneDirAll(ctx, sb, d, stat, nameOnly, &combined); appendErr != nil {
 				return appendErr

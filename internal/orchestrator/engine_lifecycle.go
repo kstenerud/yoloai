@@ -10,6 +10,7 @@ import (
 	"os"
 
 	"github.com/kstenerud/yoloai/internal/orchestrator/create"
+	"github.com/kstenerud/yoloai/internal/orchestrator/launch"
 	"github.com/kstenerud/yoloai/internal/orchestrator/lifecycle"
 	"github.com/kstenerud/yoloai/internal/orchestrator/state"
 	"github.com/kstenerud/yoloai/runtime"
@@ -23,6 +24,16 @@ func (e *Engine) Start(ctx context.Context, name string, opts StartOptions) (*St
 		return nil, err
 	}
 	return lifecycle.Start(ctx, e.deps(), name, opts)
+}
+
+// ReconcileInjector respawns the sandbox's host-side credential injector if it
+// has died (D106). Cheap and best-effort: a non-brokered sandbox or a live
+// injector returns without backend or credential work.
+func (e *Engine) ReconcileInjector(ctx context.Context, name string) error {
+	if err := e.ensure(ctx); err != nil {
+		return err
+	}
+	return launch.ReconcileInjector(ctx, e.deps(), name)
 }
 
 // Stop stops the running container without destroying the sandbox.

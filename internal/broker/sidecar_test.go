@@ -7,7 +7,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"testing"
@@ -72,6 +74,32 @@ func TestRunSidecar_BindsServesAndInjects(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("RunSidecar did not return after ctx cancel")
 	}
+}
+
+func TestRunSidecar_HonorsRequestedPort(t *testing.T) {
+	// Find a free port, then ask the sidecar to bind exactly it — this is what a
+	// reconcile respawn does so the container's base_url keeps reaching it.
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	port := l.Addr().(*net.TCPAddr).Port
+	require.NoError(t, l.Close())
+
+	cfg := broker.SidecarConfig{
+		UpstreamURL: "http://127.0.0.1:9",
+		BindAddr:    fmt.Sprintf("127.0.0.1:%d", port),
+	}
+	raw, err := json.Marshal(cfg)
+	require.NoError(t, err)
+
+	hsR, hsW, err := os.Pipe()
+	require.NoError(t, err)
+	go func() { _ = broker.RunSidecar(t.Context(), bytes.NewReader(raw), hsW); _ = hsW.Close() }()
+
+	line, err := bufio.NewReader(hsR).ReadBytes('\n')
+	require.NoError(t, err)
+	var hs broker.Handshake
+	require.NoError(t, json.Unmarshal(line, &hs))
+	assert.Equal(t, fmt.Sprintf("127.0.0.1:%d", port), hs.Addr, "sidecar binds the exact requested port")
 }
 
 func TestRunSidecar_RejectsUnsupportedBindingKind(t *testing.T) {

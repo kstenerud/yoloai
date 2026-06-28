@@ -199,6 +199,16 @@ func WithSandbox(cmd *cobra.Command, name string, fn func(ctx context.Context, s
 	})
 }
 
+// ReconcileInjectorBestEffort respawns the sandbox's credential injector if it
+// died (D106 lazy reconcile). It NEVER fails or blocks the caller: a reconcile
+// error is logged and swallowed. Single-sandbox interactive/read commands call
+// it before their main action so a crashed injector is brought back transparently.
+func ReconcileInjectorBestEffort(ctx context.Context, sb *yoloai.Sandbox) {
+	if err := sb.ReconcileInjector(ctx); err != nil {
+		slog.Warn("could not reconcile credential injector", "sandbox", sb.Name(), "err", err)
+	}
+}
+
 // WithWorkdir is WithSandbox narrowed to the sandbox's Workdir sub-handle, for
 // the diff/apply/baseline commands that only operate on the changes view.
 func WithWorkdir(cmd *cobra.Command, name string, fn func(ctx context.Context, wd *yoloai.Workdir) error) error {

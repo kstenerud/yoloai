@@ -21,6 +21,8 @@ func runSandboxInfo(cmd *cobra.Command, name string) error {
 	defer closeSink()
 	slog.Info("collecting sandbox info", "event", "sandbox.info", "sandbox", name) //nolint:gosec // G706: name is an internal sandbox name, not user-injected log data
 	return cliutil.WithSandbox(cmd, name, func(ctx context.Context, sb *yoloai.Sandbox) error {
+		// Bring a crashed credential injector back when the user checks on the box (D106).
+		cliutil.ReconcileInjectorBestEffort(ctx, sb)
 		info, err := sb.Inspect(ctx)
 		if err != nil {
 			return cliutil.SandboxErrorHint(name, err)
