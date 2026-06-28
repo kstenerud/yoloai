@@ -23,6 +23,14 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 
 ## Findings
 
+### DF55 — `:copy` directory setup ignores `.gitignore`, copying gitignored secrets into the sandbox
+
+- **Discovered:** 2026-06-28 · **Workstream:** credential-hygiene (raised alongside egress-broker workstream D)
+- **Severity:** MEDIUM (secret exposure, but bounded — the sandbox runs an agent the user chose to run on their own machine; deliberately parked by the user to address later)
+- **Disposition:** PARKED
+- **Description:** `CopyDir` copies the *entire* host directory tree, filtered only by a hardcoded build-artifact/bugreport list — **`.gitignore` is not honored**. Files a user deliberately excluded from their repo (`.env`, `*.pem`, `credentials.json`, `.aws/`, local config with tokens) live on disk in the project dir and get copied into the sandbox's copy area, where the agent can read (and potentially exfiltrate) them. This defeats the user's own intent: gitignored means "not part of this project's shared surface," yet we expose it to the agent wholesale. **Fix direction:** during copy, skip paths matched by the applicable `.gitignore` set. Nuances to handle: `.gitignore` only has meaning inside a git repo (non-git `:copy` dirs have no gitignore semantics — copy as today); must respect nested `.gitignore` files, negation (`!`) patterns, and `.git/info/exclude`; the global core.excludesFile is debatable (it's user-machine state, not project intent — likely out of scope). Cleanest implementation is to enumerate via git itself (`git ls-files --cached --others --exclude-standard`) when the source is a repo, rather than re-implementing gitignore matching — this also naturally excludes `.git`-tracked-vs-ignored correctly. Interaction with diff/apply is benign: excluded files never enter the sandbox, so they can't be modified or surface in a diff. Consider an escape hatch (e.g. a `:copy-all` modifier or `--include-ignored`) for users who *do* want the ignored files.
+- **Pointer:** `internal/workspace/copy.go:21` (`CopyDir` entry — fast-clone then `copyDirWalk`), `copy.go:65` (`copyDirEntry`, where per-entry exclusion is applied), `copy.go:164` (`isBuildArtifact`, the existing hardcoded filter to extend/replace); fast-clone path (`copy.go:246`/`:272` post-clone cleanup) needs the same exclusion or must fall back to the walk when a source is a gitignore-bearing repo; entry from `internal/orchestrator/create/prepare_dirs.go:274` (`setupDirContent`).
+
 ### DF54 — New verbs (`run`, `diff --json`, `sandbox_run`) lack automated E2E/smoke coverage
 
 - **Discovered:** 2026-06-27 · **Workstream:** pre-merge audit (test-gap)
