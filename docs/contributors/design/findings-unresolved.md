@@ -23,6 +23,27 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 
 ## Findings
 
+### DF56 — `system build --backend podman` no-ops against a stale image (build-inputs checksum is host-side, shared across backends)
+
+- **Discovered:** 2026-06-28 · **Workstream:** egress-broker podman validation (workstream D)
+- **Severity:** LOW (only bites multi-backend image work; the workaround is trivial once known)
+- **Disposition:** PARKED
+- **Description:** The base-image build is skipped when the recorded build-inputs checksum
+  (`<layout>/cache/.base-image-checksum`, written by `RecordBuildChecksum`) matches the current
+  embedded inputs. But that checksum is **host-side and backend-agnostic** — a `docker` build marks
+  it "current" for *every* backend. So `yoloai system build --backend podman` silently no-ops if a
+  docker build already stamped the checksum, leaving podman's actual image stale (observed: a
+  3-week-old podman `yoloai-base` whose `entrypoint.py` predated the `keepalive_only` agent-free
+  logic, which made the agent-free launch path look broken on podman when it was just a stale
+  image). The image existence/freshness is per-backend (per daemon store); the checksum is not.
+  **Workaround:** `podman rmi -f localhost/yoloai-base:latest` then rebuild — a missing image forces
+  the build regardless of checksum. **Fix directions:** key the checksum per-backend (e.g.
+  `.base-image-checksum-<backend>`), or have the freshness check also confirm the image exists *in
+  that backend's store* before trusting the checksum.
+- **Pointer:** `runtime/docker/build.go` (`RecordBuildChecksum`, `buildBaseImage` skip logic);
+  the per-backend image lives in each daemon's store. Surfaced during the podman broker validation
+  (see `research/egress-broker-host-reachability.md` "Rootless podman" aside).
+
 ### DF55 — `:copy` directory setup ignores `.gitignore`, copying gitignored secrets into the sandbox
 
 - **Discovered:** 2026-06-28 · **Workstream:** credential-hygiene (raised alongside egress-broker workstream D)

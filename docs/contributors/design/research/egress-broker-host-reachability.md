@@ -37,7 +37,8 @@ Engine the two coincide.
 | Backend | Network model | DialHost (agent base_url) | BindHost (injector) | Isolation present? |
 |---|---|---|---|---|
 | **docker** (Linux Engine) | default bridge + NAT (172.17.0.0/16) | bridge gateway IP, e.g. `172.17.0.1` | same gateway IP | in-sandbox iptables (entrypoint.py) |
-| **podman** | bridge (rootless user-netns or system); reuses docker.Runtime | bridge gateway IP (varies) | same gateway IP | same as docker |
+| **podman (rootful**, system socket) | real host bridge; reuses docker.Runtime | bridge gateway IP (host iface) | same gateway IP | same as docker |
+| **podman (rootless**, netavark default) | bridge **inside** the rootless netns; gateway (e.g. `10.88.0.1`) **not** on any host iface | `10.0.2.2` (slirp4netns host alias) — **requires `slirp4netns:allow_host_loopback=true`** | `127.0.0.1` (loopback; safe) | same iptables |
 | **containerd** (Kata VM) | CNI bridge `yoloai0`, 10.89.0.0/16 (`runtime/containerd/cni.go:41`) | CNI gateway `10.89.0.1` | same gateway IP | same iptables |
 | **docker** (Desktop / OrbStack, macOS) | daemon in a Linux VM; bridge gateway lives *inside* the VM | `host.docker.internal` (alias; implicit on OrbStack) | macOS `127.0.0.1` (loopback — verified reachable via alias) | in-sandbox iptables |
 | **seatbelt** (macOS) | host process, host network stack, **no netns** | `127.0.0.1` | `127.0.0.1` | none (rejects `isolated`) |
@@ -73,6 +74,51 @@ interface (`127.0.0.1`/`0.0.0.0` on the Mac) and the agent dials `host.docker.in
 i.e. **DialHost ≠ BindHost**. "Gateway-IP-for-both" is therefore a **Linux-Engine-only**
 realization; the `InjectorReach` interface keeps the two fields precisely so the Docker Desktop
 backend variant can return `host.docker.internal` / Mac-host-bind without reworking the seam.
+
+## Rootless podman (verified on Linux, podman 4.9.3, netavark — 2026-06-28)
+
+The original map assumed podman == docker ("gateway-IP-for-both"). That holds for **rootful**
+podman (system socket: a real host bridge whose gateway is a host interface, bindable). It is
+**false for rootless** podman, the common case. Verified empirically on this host (yoloai sandbox
+on the default rootless `podman` network, container gateway `10.88.0.1`):
+
+- **The bridge gateway is not host-bindable.** A host process binding `10.88.0.1:0` fails with
+  `EADDRNOTAVAIL (errno 99)` — the netavark bridge and its gateway live *inside* the rootless
+  network namespace, not on any host interface (`ip addr` shows no such address). So the injector
+  cannot bind the gateway, and "gateway-IP-for-both" cannot work. (Symptom in the launch path:
+  `start credential injector: broker: sidecar handshake failed: EOF` — the sidecar's `net.Listen`
+  fails and it exits before the handshake.)
+- **`host.docker.internal` / `host.containers.internal` resolve to the host's LAN IP**
+  (`192.168.111.33` here), not loopback. Binding the injector there would expose an open
+  credential-injecting proxy to the LAN — a credential-exposure regression, so it is **not** an
+  acceptable default. (Confirmed: a loopback-bound server is `Connection refused` via that IP.)
+
+Two **safe** paths reach a **loopback-bound** injector (`BindHost = 127.0.0.1`, no LAN exposure),
+each requiring a specific per-sandbox network mode (verified container → host loopback server):
+
+| Network mode | DialHost (agent base_url host) | Verified |
+|---|---|---|
+| `--network slirp4netns:allow_host_loopback=true` | **`10.0.2.2`** (fixed slirp host alias) | ✅ reached; plain `slirp4netns` (no flag) → unreachable |
+| `--network pasta:--map-gw` | container default gateway (host LAN gw, **varies**, e.g. `192.168.111.1`) | ✅ reached |
+| `--network pasta` (default) / `host.containers.internal` | LAN gw / host LAN IP | ❌ |
+
+**Recommendation: `slirp4netns:allow_host_loopback=true` with `InjectorReach = {BindHost:
+"127.0.0.1", DialHost: "10.0.2.2"}`** — the DialHost is a fixed constant (no per-host inspect),
+versus pasta's `--map-gw` whose DialHost varies with the host's LAN gateway. Cost: slirp4netns is
+userspace TCP/IP (slower than the netavark bridge), acceptable for the LLM-proxy path; and the
+brokered rootless-podman sandbox must be **created** with this network mode. The mode is a
+**create-time** decision but brokering is currently decided post-start — the open design choice is
+*always* use it for rootless podman vs. only when brokering will engage (the brokering inputs —
+brokerable agent, key present, posture, open networking — are knowable at create time). Podman
+therefore needs its **own** `InjectorReach` that branches on rootless (the `Runtime.rootless`
+field already exists): rootful → gateway-for-both; rootless → `{127.0.0.1, 10.0.2.2}`.
+
+The agent-free bring-up itself works on rootless podman once it opts into `AgentFreeLaunch` (it
+embeds `*docker.Runtime`, inheriting `Launch`/`Ready`); that was validated separately. The only
+blocker was injector reachability, resolved as above. (Aside discovered en route: `yoloai system
+build --backend podman` no-ops against a stale podman image because the build-inputs checksum is
+host-side and shared across backends — a docker build marks it "current" so podman never rebuilds.
+Force a rebuild by removing the podman image first.)
 
 ## Mac spike brief (run on a macOS + Apple-Silicon host; not blocking Linux 2b-2)
 
