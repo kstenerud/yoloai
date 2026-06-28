@@ -36,6 +36,7 @@ inclusion test first, then add a row to the index.
 
 | Symptom / error message | Section |
 |---|---|
+| Brokered agent on podman-macOS hangs on first API call; one-shot curl to the injector works | [Podman Machine: gvproxy stalls streaming](#podman-machine-macos-gvproxy-host-forward-passes-a-one-shot-curl-but-stalls-the-agents-streaming-connection) |
 | VM loses network silently; traffic stops | [Kata: tcfilter networking model](#tcfilter-networking-model) |
 | Container starts but has no network after `NewTask()` | [Kata: netns must be configured before NewTask](#kata-shim-startup-netns-must-be-fully-configured-before-newtask) |
 | Agent idle 9s+, route=ok but dns/tcp probe times out (DF8) | [Kata: netns warm-up race](#kata-netns-warm-up-race-tap0_kata-tc-mirred-filter-not-installed-when-taskstart-returns) |
@@ -1006,6 +1007,18 @@ The estimate is left as-is — it's still a valid *upper bound* if the user stop
 **Fix:** In `PruneCache`, swallow the error when `cerrdefs.IsNotFound(err)` is true (it stays a real failure for any other error). Podman has no build cache to free, so skipping is correct.
 
 **Code:** `runtime/docker/prune.go` — `PruneCache` (`BuildCachePrune` error guarded by `!cerrdefs.IsNotFound`).
+
+---
+
+### Podman Machine (macOS): gvproxy host-forward passes a one-shot curl but stalls the agent's streaming connection
+
+**Symptom:** A credential-brokered Claude agent on the podman backend on macOS hangs on its **first** API call — the real-agent smoke (`stop_start`/`tag_transfer`) times out with `sentinel 'done' not seen in 90s`, while the same agent on docker (OrbStack) and apple brokers fine and finishes in ~10s. Confusingly, a one-shot `curl http://192.168.127.254:<port>/...` from inside the same container to the host-bound injector **succeeds** (and repeats 12/12), so a reachability spike looks green.
+
+**Explanation:** On macOS, podman runs inside a podman-machine Linux VM. The agent reaches the Mac host only through the machine's user-space network proxy, **gvproxy**, via the host-forward address `192.168.127.254` (the slirp alias `10.0.2.2` reaches the *machine VM's* host, not the Mac, so it's wrong here). gvproxy forwards a short request/response fine, but it does **not** reliably carry the credential injector's traffic for a real agent — a long-lived / streaming (SSE) LLM connection through it stalls, so the agent never gets its first completion and hangs. The injector itself is alive and host-reachable; the failure is purely the gvproxy hop under sustained/streaming load. The lesson: **a single curl is not sufficient evidence that a host hop works for the credential broker — only the real-agent smoke is.** The injector model is sound on macOS (docker's `host.docker.internal` and apple's vmnet gateway both broker a real agent successfully); gvproxy specifically is the weak link.
+
+**Fix:** podman's `InjectorReach` returns `runtime.ErrInjectorUnsupported` on darwin, so brokering degrades to **direct delivery** (the real credential is delivered into the container as-is — the conservative posture, also used for tart). This restores the working pre-broker behavior. Making podman-macOS broker needs a streaming-safe host hop (follow-up). Guard: `TestIntegration_Podman_DirectDeliveryOnMacOS` asserts no injector starts and the credential is delivered directly on darwin; `TestIntegration_CredentialBroker_Podman` (which asserts brokering) is darwin-skipped — its target is Linux rootless podman.
+
+**Code:** `runtime/podman/reach.go` — `InjectorReach` (darwin → `ErrInjectorUnsupported`). See DF57 in `design/findings-resolved.md`.
 
 ---
 

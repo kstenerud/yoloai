@@ -7,6 +7,16 @@ History of codebase findings (issues discovered mid-work) that have been address
 are moved here from [`findings-unresolved.md`](findings-unresolved.md) once resolved, so the
 active file stays a working set. Newest first.
 
+### DF57 — podman brokering on macOS hung the real agent; podman now degrades to direct delivery on darwin
+
+- **Discovered:** 2026-06-28 · **Resolved:** 2026-06-28 · **Workstream:** egress-broker macOS reach (workstream D)
+- **Severity:** MEDIUM · **Disposition:** ADDRESSED-IN-PLACE
+- **Journey (kept as a lesson):** The `make releasetest` integration tier first failed at `TestIntegration_CredentialBroker_Podman` (podman's `InjectorReach` returned the Linux rootless reach `{127.0.0.1, 10.0.2.2}`, but on macOS podman runs in a podman-machine VM so `10.0.2.2` reaches the *machine VM*, not the Mac → the brokered container couldn't reach the Mac-host injector). The first fix attempt made podman macOS-aware via the gvproxy host-forward `{127.0.0.1, 192.168.127.254}` — a one-shot curl through it succeeds (12/12), and the integration test passed in isolation. **But the real-agent `smoketest-full` then failed**: a brokered Claude agent on podman-macOS *hung on its first API call* (gvproxy stalls the agent's sustained/streaming connection), while docker (`host.docker.internal`) and apple (vmnet gateway) brokered the same agent and passed. The baseline (`4c9fccbd`, pre-broker-change) passed precisely because podman did **not** broker.
+- **Resolution:** podman's `InjectorReach` returns `ErrInjectorUnsupported` on darwin, so brokering degrades to **direct delivery** (the conservative posture, like tart) — restoring the working baseline. Linux rootless keeps the slirp path; Linux rootful stays unsupported. Making podman-macOS broker needs a *streaming-safe* host hop (follow-up); a single curl is not sufficient evidence that a hop works for the agent.
+- **Lesson:** a network reachability spike (one curl) does NOT validate a credential-broker host hop — only the real-agent smoke does. The injector model itself works on macOS (docker + apple broker fine); podman-machine's gvproxy specifically does not carry the agent's traffic.
+- **Guard added:** `TestIntegration_Podman_DirectDeliveryOnMacOS` (darwin) creates a brokerable podman sandbox with a credential and asserts **no injector starts** and the real credential is delivered directly — it would have caught the smoke regression at the integration tier. `TestIntegration_CredentialBroker_Podman` is darwin-skipped (its target is Linux rootless podman).
+- **Pointer:** `runtime/podman/reach.go`, `runtime/podman/podman_test.go` (`TestInjectorReach_Darwin`), `internal/orchestrator/broker_integration_test.go` (`TestIntegration_Podman_DirectDeliveryOnMacOS` + macOS skip).
+
 ### DF51 — Narrative/design docs updated to the post-Move `runtime`/`store`/`copyflow` paths
 
 - **Discovered:** 2026-06-27 · **Resolved:** 2026-06-27 · **Workstream:** public-layering Phase 3 (the Move, commit `10004e1a`)

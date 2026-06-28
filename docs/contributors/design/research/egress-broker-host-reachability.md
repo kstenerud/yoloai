@@ -260,6 +260,20 @@ All four macOS backends now have a network-level `InjectorReach`, verified on re
   system service need run), so it brokers via the pre-create bind like containerd. Spike: a host
   listener on `192.168.64.1` is reached by an alpine guest (default route `via 192.168.64.1`), while
   the guest's own `127.0.0.1` is **not** the host (so a loopback bind would fail).
+- **podman** (`runtime/podman/reach.go`): **does NOT broker on macOS** — `InjectorReach` returns
+  `ErrInjectorUnsupported` on darwin, so brokering degrades to direct delivery (the conservative
+  posture, like tart). Why, in two layers: (1) podman runs inside a podman-machine Linux VM, so the
+  Linux rootless slirp reach (`10.0.2.2`) reaches the *machine VM's* host, not the Mac (verified FAIL);
+  (2) the machine's gvproxy host-forward (`192.168.127.254`) IS network-reachable to a Mac-host-bound
+  injector — a one-shot curl through it succeeds (12/12) — **but it does not carry the real agent's
+  traffic**: a brokered Claude agent on podman-macOS hung on its first API call in the real-agent smoke
+  (gvproxy stalls the agent's sustained/streaming connection), whereas docker (`host.docker.internal`)
+  and apple (vmnet gateway) brokered the same agent fine and passed. The lesson: a reachability spike
+  (single curl) is **not** sufficient evidence that a host hop works for the agent — the real-agent
+  smoke is authoritative. Linux rootless keeps the slirp path; Linux rootful stays unsupported. Making
+  podman-macOS broker needs a streaming-safe host hop (follow-up). Guarded by
+  `TestIntegration_Podman_DirectDeliveryOnMacOS` (asserts no injector + direct delivery on darwin);
+  `TestIntegration_CredentialBroker_Podman` is darwin-skipped (its target is Linux rootless podman).
 - **tart** (`runtime/tart/reach.go`): returns `ErrInjectorUnsupported` (safe degrade). tart's vmnet
   bridge is **per-VM and ephemeral** — created on VM boot, torn down on stop — but the broker binds
   the injector in `brokerCredentials`, which runs **before** `Create`/`Start`. At bind time no tart VM

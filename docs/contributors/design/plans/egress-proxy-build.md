@@ -105,6 +105,13 @@ Key files: `internal/credential/`, `internal/broker/`, `runtime/docker/reach.go`
     `127.0.0.1`, the container reaches it via `host.docker.internal`, real credential swapped
     host-side (both API-key and OAuth forms PASS). Live spike confirmed the bridge gateway
     `172.17.0.1` is unreachable from the container (the caveat) and the alias resolves implicitly.
+  - **podman** (`runtime/podman/reach.go`): **does not broker on macOS** — returns
+    `ErrInjectorUnsupported` on darwin → direct delivery (like tart). podman runs in a podman-machine
+    VM; the slirp reach (`10.0.2.2`) reaches the machine VM not the Mac, and the gvproxy host-forward
+    (`192.168.127.254`), while curl-reachable, stalls the real agent's streaming traffic (the agent hung
+    in the real-agent smoke, where docker/apple brokering passed). Conservative posture restores the
+    working pre-broker behavior. Linux rootless keeps slirp; rootful stays unsupported. Guarded by
+    `TestIntegration_Podman_DirectDeliveryOnMacOS`; the broker test is darwin-skipped. See DF57.
   - **seatbelt** (`runtime/seatbelt/reach.go`): `{127.0.0.1, 127.0.0.1}` — host process, no netns.
   - **apple** (`runtime/apple/reach.go`): gateway-for-both on the **shared, persistent** vmnet gateway
     (`container network inspect default` → `ipv4Gateway`, e.g. `192.168.64.1`), guarded by
