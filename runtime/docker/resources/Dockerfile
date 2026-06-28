@@ -226,6 +226,8 @@ RUN mkdir -p \
 COPY tmux.conf /yoloai/tmux/tmux.conf
 COPY entrypoint.sh /yoloai/bin/entrypoint.sh
 COPY entrypoint.py /yoloai/bin/entrypoint.py
+COPY firewall.py /yoloai/bin/firewall.py
+COPY install-firewall.py /yoloai/bin/install-firewall.py
 COPY sandbox-setup.py /yoloai/bin/sandbox-setup.py
 COPY setup_helpers.py /yoloai/bin/setup_helpers.py
 COPY tmux_io.py /yoloai/bin/tmux_io.py
@@ -237,7 +239,7 @@ COPY yoloai-resume /yoloai/bin/yoloai-resume
 # can run `yoloai-resume` by name (D96). SC2016: the literal `$PATH` is intended —
 # it is expanded by the shell that sources the profile, same as golang.sh above.
 # hadolint ignore=SC2016
-RUN chmod +x /yoloai/bin/entrypoint.sh /yoloai/bin/entrypoint.py /yoloai/bin/diagnose-idle.sh /yoloai/bin/agent-run.sh /yoloai/bin/yoloai-resume \
+RUN chmod +x /yoloai/bin/entrypoint.sh /yoloai/bin/entrypoint.py /yoloai/bin/install-firewall.py /yoloai/bin/diagnose-idle.sh /yoloai/bin/agent-run.sh /yoloai/bin/yoloai-resume \
     && echo 'export PATH="/yoloai/bin:$PATH"' > /etc/profile.d/yoloai-bin.sh
 
 ENTRYPOINT ["/yoloai/bin/entrypoint.sh"]

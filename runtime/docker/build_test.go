@@ -40,6 +40,8 @@ func TestCreateBuildContext(t *testing.T) {
 	assert.Contains(t, found, "Dockerfile")
 	assert.Contains(t, found, "entrypoint.sh")
 	assert.Contains(t, found, "entrypoint.py")
+	assert.Contains(t, found, "firewall.py")
+	assert.Contains(t, found, "install-firewall.py")
 	assert.Contains(t, found, "sandbox-setup.py")
 	assert.Contains(t, found, "setup_helpers.py")
 	assert.Contains(t, found, "tmux_io.py")
@@ -48,7 +50,7 @@ func TestCreateBuildContext(t *testing.T) {
 	assert.Contains(t, found, "agent-run.sh")
 	assert.Contains(t, found, "yoloai-resume")
 	assert.Contains(t, found, "tmux.conf")
-	assert.Len(t, found, 11)
+	assert.Len(t, found, 13)
 }
 
 func TestCreateProfileBuildContext(t *testing.T) {

@@ -471,3 +471,44 @@ func InjectorReachOf(rt Backend) (InjectorReachable, bool) {
 	r, ok := rt.(InjectorReachable)
 	return r, ok
 }
+
+// NetnsSidecarSpec describes an ephemeral, privileged helper container that
+// shares an existing instance's network namespace. It is the primitive behind
+// tamper-resistant network isolation: the agent container is denied CAP_NET_ADMIN
+// and the firewall is installed from this sidecar instead, so the agent — even as
+// root via sudo — cannot flush a firewall installed from outside its reach.
+// See docs/contributors/design/plans/tamper-resistant-network-isolation.md.
+type NetnsSidecarSpec struct {
+	// Target is the instance whose network namespace the sidecar joins
+	// (docker/podman --network container:<target>).
+	Target string
+	// Image is the container image to run; "" means "reuse the target's image"
+	// (resolved by the backend), so callers without an image ref handy (e.g. a
+	// live network-allowlist patch) don't have to look it up.
+	Image string
+	// Argv is the full command to run; it overrides the image's entrypoint so the
+	// sidecar runs the firewall installer (or an ipset patch), not the agent boot.
+	Argv []string
+	// Env holds additional KEY=VAL variables for the sidecar process.
+	Env []string
+	// CapAdd lists Linux capabilities to grant the sidecar (e.g. NET_ADMIN) — the
+	// capabilities the agent container is deliberately denied.
+	CapAdd []string
+}
+
+// NetnsSidecarRunner is an optional backend interface: run a short-lived helper
+// container that shares a target instance's network namespace, blocking until it
+// exits. Implemented by container backends that support netns sharing
+// (docker, and podman via embedding). Returns a non-nil error on infrastructure
+// failure OR a non-zero sidecar exit, with captured logs in the message — a
+// failed firewall install must fail the operation, never run the agent unguarded.
+type NetnsSidecarRunner interface {
+	RunNetnsSidecar(ctx context.Context, spec NetnsSidecarSpec) error
+}
+
+// NetnsSidecarRunnerOf returns rt as a NetnsSidecarRunner if the backend
+// implements one.
+func NetnsSidecarRunnerOf(rt Backend) (NetnsSidecarRunner, bool) {
+	r, ok := rt.(NetnsSidecarRunner)
+	return r, ok
+}

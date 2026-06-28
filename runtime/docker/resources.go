@@ -20,6 +20,12 @@ var embeddedEntrypoint []byte
 //go:embed resources/entrypoint.py
 var embeddedEntrypointPy []byte
 
+//go:embed resources/firewall.py
+var embeddedFirewallPy []byte
+
+//go:embed resources/install-firewall.py
+var embeddedInstallFirewallPy []byte
+
 // embeddedTmuxConf is the shared default tmux.conf, sourced from the neutral
 // internal/resources/tmux package rather than re-embedded here.
 var embeddedTmuxConf = tmuxres.Embedded()

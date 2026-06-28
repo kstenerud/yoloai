@@ -269,6 +269,105 @@ func TestIntegration_CredentialBroker_Isolated(t *testing.T) {
 	require.Error(t, err, "a non-allowlisted destination must be blocked under isolation")
 }
 
+// TestIntegration_NetworkIsolation_TamperResistant is the load-bearing regression
+// guard for egress-containment step 1.5: under --network-isolated on docker, the
+// firewall is installed from a netns-sharing sidecar and the agent container is
+// denied CAP_NET_ADMIN, so the agent CANNOT flush the firewall to escape isolation.
+//
+// Before this fix the agent held NET_ADMIN and `sudo iptables -F OUTPUT` succeeded,
+// reopening egress. This test asserts the flush is now DENIED, a non-allowlisted
+// destination stays blocked afterwards, and the brokered injector stays reachable —
+// i.e. the containment is enforced outside the agent's reach. Linux Engine only
+// (the sidecar path is docker agent-free; the injector endpoint is a bridge IP).
+func TestIntegration_NetworkIsolation_TamperResistant(t *testing.T) {
+	if goruntime.GOOS == "darwin" {
+		t.Skip("the netns-sidecar firewall path is docker-on-Linux (agent-free); see the build plan's deferred scope")
+	}
+	mgr, ctx := integrationSetup(t)
+
+	mock := &brokerMockUpstream{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		mock.mu.Lock()
+		mock.hits++
+		mock.mu.Unlock()
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, brokerCannedSSE)
+	}))
+	defer srv.Close()
+
+	mockHost, _, _ := strings.Cut(strings.TrimPrefix(srv.URL, "http://"), ":")
+	def := agent.GetAgent("test")
+	require.NotNil(t, def, "the test agent must be registered")
+	origBroker := def.Broker
+	def.Broker = &agent.BrokerConfig{ //nolint:gosec // G101 false positive: env-var names + a placeholder, not real credentials
+		UpstreamURL:     srv.URL,
+		Destination:     mockHost,
+		Credentials:     []agent.BrokerCredential{{EnvVar: "TEST_BROKER_KEY", Header: "x-api-key", Prefix: ""}},
+		BaseURLEnvVar:   "TEST_BROKER_BASE_URL",
+		AuthTokenEnvVar: "TEST_BROKER_AUTH",
+		DummyToken:      "dummy-broker-placeholder",
+	}
+	t.Cleanup(func() { def.Broker = origBroker })
+
+	name := "tamper-resistant"
+	_, err := createSandbox(ctx, mgr, orchestrator.CreateOptions{
+		Name:    name,
+		Workdir: orchestrator.DirSpec{Path: createProjectDir(t)},
+		Agent:   "test",
+		Network: orchestrator.NetworkModeIsolated,
+		Prompt:  "env > /tmp/broker-env.txt; sleep 60",
+		Version: "test",
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _, _ = destroySandbox(ctx, mgr, name) })
+
+	_, err = startSandbox(ctx, mgr, name, orchestrator.StartOptions{
+		Env: map[string]string{"TEST_BROKER_KEY": "sk-test-REAL-tamper-key"},
+	})
+	require.NoError(t, err)
+
+	instance := store.InstanceName("", name)
+	testutil.WaitForActive(ctx, t, mgr.Runtime(), instance, 15*time.Second)
+
+	// The brokered base_url the agent was handed (the injector endpoint).
+	var baseURL string
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		r, execErr := mgr.Runtime().Exec(ctx, instance, []string{"cat", "/tmp/broker-env.txt"}, "yoloai")
+		if execErr == nil && r.ExitCode == 0 && strings.Contains(r.Stdout, "TEST_BROKER_BASE_URL=") {
+			baseURL = parseEnvDump(r.Stdout)["TEST_BROKER_BASE_URL"]
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	require.NotEmpty(t, baseURL, "agent never dumped its brokered base_url within 15s")
+	require.True(t, broker.InjectorAlive(mgr.Layout().SandboxDir(name)), "injector should be alive")
+
+	// The agent container must NOT hold CAP_NET_ADMIN: even root-via-sudo cannot
+	// run iptables, so the flush is DENIED. This is the whole point — the agent
+	// cannot tear down a firewall installed from outside its netns.
+	_, err = mgr.Runtime().Exec(ctx, instance, []string{"sudo", "-n", "iptables", "-F", "OUTPUT"}, "yoloai")
+	require.Error(t, err, "agent must NOT be able to flush the firewall (no CAP_NET_ADMIN)")
+
+	// After the failed flush attempt, isolation still holds: a non-allowlisted
+	// destination stays REJECTed (curl exits non-zero → surfaced as an exec error).
+	_, err = mgr.Runtime().Exec(ctx, instance, []string{
+		"curl", "-s", "-m", "5", "-o", "/dev/null", "http://1.1.1.1",
+	}, "yoloai")
+	require.Error(t, err, "a non-allowlisted destination must stay blocked after the flush attempt")
+
+	// And the brokered injector remains reachable (the sidecar allowlisted it), so
+	// the agent's legitimate LLM egress still works while it's contained.
+	resp, err := mgr.Runtime().Exec(ctx, instance, []string{
+		"curl", "-s", "-m", "8", "-X", "POST", baseURL + "/v1/messages",
+		"-H", "Authorization: Bearer dummy-broker-placeholder", "-d", "{}",
+	}, "yoloai")
+	require.NoError(t, err)
+	assert.Contains(t, resp.Stdout, "BROKER_INTEGRATION_OK", "injector stays reachable under tamper-resistant isolation")
+}
+
 func runBrokerScenarios(t *testing.T, mgr *orchestrator.Engine, ctx context.Context) {
 	t.Helper()
 	cases := []struct {
