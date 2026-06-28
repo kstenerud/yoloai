@@ -381,6 +381,10 @@ yoloai new task ./project --network-allow api.example.com
 # Disable network access entirely
 yoloai new task ./project --network-none
 
+# Credential brokering is on by default (key stays host-side). Opt out / require it:
+yoloai new task ./project --no-broker   # deliver the key directly into the sandbox
+yoloai new task ./project --broker      # require brokering (error if unsupported)
+
 # Use a profile
 yoloai new task ./project --profile go-dev
 
@@ -728,7 +732,29 @@ mv ~/.yoloai/library/trash/<name> ~/.yoloai/library/sandboxes/<name>
 - **Originals are protected.** Workdirs use `:copy` mode by default — the agent works on an isolated copy, never your original files. Opt into `:rw` explicitly for live access.
 - **Dangerous directory detection.** Refuses to mount `$HOME`, `/`, or system directories. Append `:force` to override (e.g., `$HOME:force`).
 - **Dirty repo warning.** Prompts if your workdir has uncommitted git changes, so you don't lose work.
-- **Credential injection via files.** API keys are mounted as read-only files at `/run/secrets/`, not passed as environment variables. Temp files on the host are cleaned up after container start. Some agents support additional credential sources — for example, on macOS, yoloai checks the macOS Keychain for Claude Code OAuth credentials (service `Claude Code-credentials`). If you're logged in via `claude` CLI, yoloai will automatically detect your credentials even without `~/.claude/.credentials.json` on disk.
+- **Credential brokering (default).** For supported setups the agent's LLM API key is held **host-side** and never enters the sandbox — see [Credential Brokering](#credential-brokering) below. Credentials that aren't brokered (other agents, subscription tokens, unsupported backends) are delivered as files instead (next bullet).
+- **Credential injection via files.** Non-brokered API keys are mounted as read-only files at `/run/secrets/`, not passed as environment variables. Temp files on the host are cleaned up after container start. Some agents support additional credential sources — for example, on macOS, yoloai checks the macOS Keychain for Claude Code OAuth credentials (service `Claude Code-credentials`). If you're logged in via `claude` CLI, yoloai will automatically detect your credentials even without `~/.claude/.credentials.json` on disk.
+
+### Credential Brokering
+
+By default, yoloAI keeps the agent's LLM API key **out of the sandbox entirely**. Instead of placing the key in the container, it runs a tiny per-sandbox proxy on the host (the *broker*), points the agent at it (`ANTHROPIC_BASE_URL`) with a harmless placeholder token, and swaps in the real key on the way to the provider. The live key is never in the container's environment or filesystem, so a misbehaving or prompt-injected agent can't read or exfiltrate it.
+
+**When it applies (the default):** a brokerable agent (currently **Claude**, via `ANTHROPIC_API_KEY`), on a supporting backend (**Linux docker / podman**), with the key present and networking open. Anything outside that — other agents, subscription/OAuth logins (no static key to broker), other backends, or restricted networking — falls back to direct delivery automatically; no action needed.
+
+```bash
+# Brokering is automatic — nothing to do. To opt out (deliver the key directly):
+yoloai new task ./project --no-broker
+
+# To require brokering (error out instead of falling back if it can't be done):
+yoloai new task ./project --broker
+```
+
+The posture is **sticky**: once a sandbox is created with `--broker` / `--no-broker`, restarts keep that choice (so a restart never silently puts the key back in the box). `--broker` and `--no-broker` are mutually exclusive.
+
+**Caveats:**
+- **Restricted networking not yet supported.** With `--network-isolated` or `--network-none`, brokering is skipped (direct delivery); `--broker` combined with those is rejected. Composing brokering with the egress allowlist is planned.
+- **Subscription tokens aren't brokered yet** — `CLAUDE_CODE_OAUTH_TOKEN` uses the file/env path (see below).
+- Brokering bounds the key's blast radius (the agent can call the API but can't steal the key); it does **not** stop a duped agent from misusing that in-scope API access. Compose it with the copy/diff/apply review gate and network controls.
 
 ### Claude Code Authentication
 
