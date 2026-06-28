@@ -1318,3 +1318,33 @@ func TestDestroy_ReadOnlyFiles(t *testing.T) {
 }
 
 // NeedsConfirmation edge cases
+
+// applyBrokerOption persistence (D106 sticky brokering)
+
+func TestApplyBrokerOption_PersistsAndIsIdempotent(t *testing.T) {
+	tmpDir := t.TempDir()
+	name := "brokerbox"
+	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
+	require.NoError(t, os.MkdirAll(sandboxDir, 0o750))
+
+	meta := &store.Environment{Name: name, CreatedAt: time.Now()}
+	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
+
+	d := newLifecycleDeps(&lifecycleMockRuntime{}, tmpDir)
+
+	// Without --broker: nothing persisted.
+	require.NoError(t, applyBrokerOption(d, StartOptions{Broker: false}, sandboxDir, meta, &notices{}))
+	reloaded, err := store.LoadEnvironment(sandboxDir)
+	require.NoError(t, err)
+	assert.False(t, reloaded.BrokerCredentials, "no --broker -> not persisted")
+
+	// With --broker: persisted to meta.
+	require.NoError(t, applyBrokerOption(d, StartOptions{Broker: true}, sandboxDir, meta, &notices{}))
+	reloaded, err = store.LoadEnvironment(sandboxDir)
+	require.NoError(t, err)
+	assert.True(t, reloaded.BrokerCredentials, "--broker -> persisted (sticky across restart)")
+
+	// Idempotent: a second call with it already set is a no-op success.
+	require.NoError(t, applyBrokerOption(d, StartOptions{Broker: true}, sandboxDir, reloaded, &notices{}))
+	assert.True(t, reloaded.BrokerCredentials)
+}

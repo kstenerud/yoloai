@@ -59,7 +59,7 @@ type State struct {
 	Isolation         runtime.IsolationMode // isolation mode from config/profile
 	IsolationExplicit bool                  // true when isolation was set via --isolation flag
 	VscodeTunnel      bool                  // true when VS Code Remote Tunnel is enabled
-	BrokerCredentials bool                  // true when --broker opts the agent's API key into the host-side injector (not persisted; re-supplied each launch)
+	BrokerCredentials bool                  // true when the agent's API key is brokered through the host-side injector; set from --broker now OR the posture persisted in meta (sticky across restart, D106)
 	Environment       *store.Environment
 	ConfigJSON        []byte
 	// Archetype fields
