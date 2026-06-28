@@ -4,10 +4,12 @@ ABOUTME: The "start here" kickoff for building the egress-proxy credential-broke
 settled and validated; this is the actionable build plan. Rationale lives in D105 (+ its
 validation addendum) in decisions/working-notes.md; do not re-litigate it — build to it.
 
-**Status:** **Phases 1 & 2 COMPLETE + end-to-end verified on real Docker (2026-06-28).**
-Brokering is the default for Claude on Linux docker/podman — both the metered API key
-(`ANTHROPIC_API_KEY`, x-api-key) and the subscription token (`CLAUDE_CODE_OAUTH_TOKEN`,
-Authorization: Bearer); opt out with `--no-broker`. Read first:
+**Status:** **Phases 1 & 2 COMPLETE + launch-path decoupling COMPLETE, all on `main`,
+end-to-end verified on real Docker (2026-06-28).** Brokering is the default for Claude on docker —
+both the metered API key (`ANTHROPIC_API_KEY`, x-api-key) and the subscription token
+(`CLAUDE_CODE_OAUTH_TOKEN`, Authorization: Bearer); opt out with `--no-broker`. Brokering is now
+**decoupled from the launch path** (works on agent-free *and* legacy bring-up), so lighting up the
+remaining backends is just a per-backend network-level `InjectorReach`. Read first:
 [D105 + validation addendum](../../decisions/working-notes.md#d105--egress-proxy-workstream-d-brokering-is-the-default-containment-is-opt-in-phased-by-credential-material-refines-d90d95)
 and [D106](../../decisions/working-notes.md#d106--egress-proxy-the-key-injectors-lifetime-is-a-pluggable-host-cli-sidecar--embedder-in-process-recovery-is-lazy-re-derivation-refines-d105),
 then [secure-secrets.md](../secure-secrets.md) (D95) and [netpolicy.md](../netpolicy.md) (D90),
@@ -62,15 +64,29 @@ Key files: `internal/credential/`, `internal/broker/`, `runtime/docker/reach.go`
   credential forms end-to-end. We did NOT reverse-engineer Anthropic's OAuth refresh (the
   `~/.claude/.credentials.json` interactive-login path stays on direct delivery).
 
-**Next up (in order): the remaining backends, then egress containment (build step 4).** Details:
+- **Launch-path decoupling — LANDED on `main`.** Brokering used to fire only on the agent-free
+  launch path (`startViaLaunch`), so only docker brokered; every other backend was on the legacy
+  path and never brokered. Now `brokerCredentials` runs in `LaunchContainer` *before* the
+  agent-free/legacy delivery split, operating on the shared resolved secret map: it starts the
+  injector at a **network-level** `InjectorReach()` (the bridge gateway, knowable pre-create — no
+  more inspecting a running container) and rewrites the map, which each path delivers its own way
+  (`ProcSpec.Env` for agent-free, `/run/secrets` files via the new `StageSecretEnv` for legacy).
+  Any backend can now broker, gated only by reachability — not by whether it has a `ProcessLauncher`.
+  Verified end-to-end on real Docker across both credential forms AND both launch paths
+  (`TestIntegration_CredentialBroker` + `_LegacyPath`). `runtime.ErrInjectorUnsupported` lets a
+  reachable-but-not-ready backend (rootless podman) cleanly opt out (auto → direct delivery). This
+  makes the parked podman `AgentFreeLaunch` flip moot — podman just needs its slirp `InjectorReach`.
 
-- **More backends.** podman already implements `InjectorReachable` (untested live — add an
-  integration run). containerd (CNI gateway), and the macOS variants (Docker Desktop →
-  `host.docker.internal` dial / `127.0.0.1` bind; tart/apple → vmnet gateway; seatbelt →
-  `127.0.0.1`) — all verified by the Mac spike in
+**Next up (in order): per-backend `InjectorReach`, then egress containment (build step 4).** Details:
+
+- **More backends — now a small, uniform task per backend** (implement a network-level `InjectorReach`,
+  no launch-path work): **containerd** next (CNI gateway `10.89.0.1` — verified host-bindable on
+  Linux; the bridge already exists so it's pre-create-knowable). Then **rootless podman**
+  (`slirp4netns:allow_host_loopback` → `{127.0.0.1, 10.0.2.2}` + the create-time network-mode
+  plumbing — see DF/parked decision) and the **macOS variants** (Docker Desktop →
+  `host.docker.internal` dial / `127.0.0.1` bind; tart/apple → vmnet gateway; seatbelt → `127.0.0.1`),
+  all mapped in
   [research/egress-broker-host-reachability.md](../research/egress-broker-host-reachability.md).
-  Each backend implements `InjectorReach` per that table; the launch wiring is already
-  backend-agnostic.
 - **Egress containment** (build step 4 — the `--network-isolated` + broker composition). Retires the
   "skip/error under isolation" guard: allowlist the injector endpoint (or go to
   `StrategyEgressProxy`: default-deny netns, injector as the sole egress path). Wrinkle: the
