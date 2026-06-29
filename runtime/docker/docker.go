@@ -363,12 +363,38 @@ func (r *Runtime) Setup(ctx context.Context, layout config.Layout, sourceDir str
 		return r.buildBaseImage(ctx, layout, output, logger)
 	}
 
-	if NeedsBuild(layout, r.binaryName) {
+	if r.baseImageStale(ctx) {
 		fmt.Fprintln(output, "Base image resources updated, rebuilding...") //nolint:errcheck // best-effort output
 		return r.buildBaseImage(ctx, layout, output, logger)
 	}
 
 	return nil
+}
+
+// baseImageStale reports whether the existing yoloai-base image was built from
+// older embedded resources, by comparing the build-inputs checksum stamped on the
+// image as a label (baseChecksumLabel) against the current one. The checksum lives
+// on the image, in whatever store holds it, so every local docker provider
+// (OrbStack, Docker Desktop, …) is tracked independently with no host-side marker
+// to key per store — unlike apple/containerd, the docker backend is not one store
+// per backend name. An image with no label (built before this scheme) reads as
+// stale and rebuilds once. The caller has already confirmed the image exists, so a
+// transient inspect error is treated as "not stale" rather than forcing a
+// multi-minute rebuild.
+func (r *Runtime) baseImageStale(ctx context.Context) bool {
+	want := buildInputsChecksum()
+	if want == "" {
+		return false
+	}
+	insp, err := r.client.ImageInspect(ctx, "yoloai-base")
+	if err != nil {
+		return false
+	}
+	var labels map[string]string
+	if insp.Config != nil {
+		labels = insp.Config.Labels
+	}
+	return checksumLabelStale(want, labels)
 }
 
 // IsReady returns true if the yoloai-base Docker image exists locally.

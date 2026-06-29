@@ -35,6 +35,15 @@ const lastBuildFile = ".last-build-checksum"
 // separate-store backends (podman especially) silently running a stale image after
 // a resource change (DF56). Keying by backend makes each store's freshness
 // independent so every backend rebuilds when its own image is stale.
+//
+// This host-side marker is correct only for backends that are one store per
+// backend name — apple (one host VM-image store) and containerd (one image
+// store). The docker backend is NOT: it can be connected to any of several local
+// daemons (OrbStack, Docker Desktop, Colima, …), each a separate store, so a
+// host-side marker keyed by backend can't tell them apart. The docker runtime
+// therefore stamps the checksum onto the image itself (baseChecksumLabel) and
+// reads it back via baseImageStale — staleness travels with the image, in its
+// store — instead of using this path.
 func baseImageChecksumPath(layout config.Layout, backendKey string) string {
 	return filepath.Join(layout.CacheDir(), ".base-image-checksum-"+backendKey)
 }
@@ -62,6 +71,20 @@ func RecordBuildChecksum(layout config.Layout, backendKey string) {
 	if sum := buildInputsChecksum(); sum != "" {
 		_ = fileutil.WriteFile(baseImageChecksumPath(layout, backendKey), []byte(sum), 0600) //nolint:gosec // G304: path is DataDir/cache/
 	}
+}
+
+// baseChecksumLabel is the image label that stamps the build-inputs checksum onto
+// yoloai-base, so staleness travels with the image in whatever store holds it.
+const baseChecksumLabel = "yoloai.base.checksum"
+
+// checksumLabelStale reports whether an image carrying the given labels is stale
+// relative to the current build-inputs checksum. An empty want disables the check
+// (treat as fresh); a missing or mismatched label is stale.
+func checksumLabelStale(want string, labels map[string]string) bool {
+	if want == "" {
+		return false
+	}
+	return labels[baseChecksumLabel] != want
 }
 
 // buildInputsChecksum computes a combined SHA-256 of the embedded build inputs.
@@ -131,6 +154,14 @@ func (r *Runtime) buildBaseImage(ctx context.Context, layout config.Layout, outp
 	logger.Debug("building yoloai-base image via BuildKit")
 
 	args := append([]string{"build"}, attestationOptOutFlags(r.binaryName)...)
+	// Stamp the build-inputs checksum onto the image so baseImageStale can detect
+	// a stale yoloai-base per store, without a host-side marker — the docker
+	// backend can hold separate images across local providers (OrbStack, Docker
+	// Desktop, …). --label does not affect buildInputsChecksum (which hashes the
+	// embedded file contents, not build flags), so there is no chicken-and-egg.
+	if sum := buildInputsChecksum(); sum != "" {
+		args = append(args, "--label", baseChecksumLabel+"="+sum)
+	}
 	args = append(args, "-t", "yoloai-base", "-")
 	cmd := sysexec.CommandContext(ctx, layout.Env().EnvForDockerBuild(), r.binaryName, args...)
 	cmd.Stdin = buildCtx
@@ -143,9 +174,6 @@ func (r *Runtime) buildBaseImage(ctx context.Context, layout config.Layout, outp
 		}
 		return fmt.Errorf("%s build: %w", r.binaryName, err)
 	}
-
-	// Record build inputs checksum so NeedsBuild can detect stale images.
-	RecordBuildChecksum(layout, r.binaryName)
 
 	return nil
 }

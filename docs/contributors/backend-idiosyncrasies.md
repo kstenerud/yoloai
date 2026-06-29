@@ -140,6 +140,7 @@ inclusion test first, then add a row to the index.
 | `podman build` → `Error: unknown flag: --provenance` / exit 125 | [Podman: build rejects docker BuildKit attestation flags](#podman-build-rejects-the-docker-buildkit-attestation-flags) |
 | `idle` agent / keep-alive exits 1 with `usage: sleep number[unit]` on a macOS/Tart guest | [macOS guest BSD sleep rejects sleep infinity](#macos-guest-bsd-sleep-rejects-sleep-infinity-gnu-only) |
 | `install network-isolation firewall: netns sidecar exited 2: … can't open file '/yoloai/bin/install-firewall.py'` (intermittent, under concurrent churn; file is present in image) | [Docker/OrbStack: ephemeral container transiently exposes an incomplete rootfs](#a-freshly-created-ephemeral-container-can-transiently-expose-an-incomplete-rootfs-under-heavy-concurrent-churn) |
+| Same `install-firewall.py` (or any embedded-resource) error, but **deterministic** on one docker provider while another passes — file genuinely absent from that provider's image | [Docker: base-image staleness marker keyed per backend, not per provider/store](#docker-base-image-staleness-marker-was-keyed-per-backend-not-per-image-store-second-provider-runs-stale) |
 
 ---
 
@@ -1045,6 +1046,18 @@ The estimate is left as-is — it's still a valid *upper bound* if the user stop
 **Fix:** Bounded retry of the firewall sidecar install (`runNetnsSidecarWithRetry` — 3 attempts, 500ms backoff). `install-firewall.py` is idempotent (`apply_firewall` flushes the `OUTPUT` chain and the ipset before re-adding rules), so re-running after a partial/failed attempt is safe. The retry still **fails closed**: a persistent failure surfaces after the last attempt and fails the launch rather than running the agent with unenforced isolation.
 
 **Code:** `internal/orchestrator/launch/launch.go::runNetnsSidecarWithRetry`; the single-shot sidecar primitive is `runtime/docker/sidecar.go::RunNetnsSidecar`.
+
+---
+
+### Docker: base-image staleness marker was keyed per backend, not per image store — second provider runs stale
+
+**Symptom:** The same `can't open file '/yoloai/bin/install-firewall.py'` (or any missing embedded resource) as the entry above, but **deterministic and provider-specific**: `--network-isolated` fails every time on one docker provider (e.g. Docker Desktop) while another (e.g. OrbStack) passes. Unlike the transient-rootfs case, the file is **genuinely absent** from the failing provider's `yoloai-base` (`docker run --rm --entrypoint sh yoloai-base -c 'ls /yoloai/bin/install-firewall.py'` errors on that provider, succeeds on the other), and it does **not** self-heal on re-run. Surfaced by the `--all-docker-providers` release smoke; a fresh single-provider install is unaffected.
+
+**Explanation:** The base-image build records a checksum marker so `NeedsBuild` can rebuild when the embedded resources change. The marker was keyed by *backend* (`.base-image-checksum-docker`) — but OrbStack, Docker Desktop, Colima and Rancher are **separate image stores sharing the "docker" backend**. After one provider built and recorded the checksum, `NeedsBuild` returned false for every other docker provider, so a provider whose store held an *older* `yoloai-base` (predating a resource like the netns firewall scripts) was never rebuilt and silently ran the stale image. This is the provider-dimension sibling of DF56 (which split the marker across docker/podman/containerd/apple but treated all docker providers as one store). Network isolation fails *closed*, so it is broken-feature, not a security hole.
+
+**Fix:** Stop tracking docker base-image freshness with a host-side marker at all — stamp the build-inputs checksum **onto the image** as a label (`--label yoloai.base.checksum=<sum>`) and read it back via `Runtime.baseImageStale` (`ImageInspect` → `Config.Labels`). The checksum then travels *with* the image, in whatever store holds it, so each local provider (OrbStack, Docker Desktop, …) is judged by its own image with no key to partition — structurally immune to the provider dimension, the `/var/run/docker.sock` provider-switch symlink, and remote daemons alike. An image with no label (built before this scheme) reads as stale and rebuilds once. A rejected earlier patch keyed the host-side marker by the daemon's `docker info .ID`; that fixed docker but leaned on a property that is empty for podman's docker-compat API, so its correctness varied by daemon (clever-hack smell). The host-side marker (`baseImageChecksumPath`/`NeedsBuild`/`RecordBuildChecksum`) remains, correctly, for the genuinely single-store backends **apple** (a Tart VM image, not OCI — can't carry a label) and **containerd** (one image store; no provider dimension).
+
+**Code:** `runtime/docker/docker.go::baseImageStale` + the `--label` in `runtime/docker/build.go::buildBaseImage` (helper `checksumLabelStale`, const `baseChecksumLabel`); call site `EnsureBaseImage`. Single-store backends keep `baseImageChecksumPath`/`NeedsBuild`/`RecordBuildChecksum`.
 
 ## Podman
 

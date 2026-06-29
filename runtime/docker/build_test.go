@@ -13,6 +13,25 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestChecksumLabelStale(t *testing.T) {
+	const want = "abc123"
+
+	// Matching label → fresh. This is the whole point: the image carries its own
+	// checksum, so each store (provider) is judged by its own image, not a shared
+	// host-side marker that can't tell two local docker providers apart.
+	assert.False(t, checksumLabelStale(want, map[string]string{baseChecksumLabel: want}))
+
+	// Missing label (image built before this scheme) → stale, rebuilds once.
+	assert.True(t, checksumLabelStale(want, map[string]string{}))
+	assert.True(t, checksumLabelStale(want, nil))
+
+	// Mismatched label (image built from older resources) → stale.
+	assert.True(t, checksumLabelStale(want, map[string]string{baseChecksumLabel: "old"}))
+
+	// Empty want disables the check (degrade to "fresh"; !exists still rebuilds).
+	assert.False(t, checksumLabelStale("", nil))
+}
+
 func TestAttestationOptOutFlags_DockerOnly(t *testing.T) {
 	// Docker (BuildKit) emits and accepts SBOM/provenance attestations.
 	assert.Equal(t, []string{"--provenance=false", "--sbom=false"}, attestationOptOutFlags("docker"))
