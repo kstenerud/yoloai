@@ -39,12 +39,13 @@ var descriptor = runtime.BackendDescriptor{
 	AgentProvisionedByBackend: true,
 	SupportedIsolationModes:   []runtime.IsolationMode{runtime.IsolationModeVM, runtime.IsolationModeVMEnhanced},
 	Capabilities: runtime.BackendCaps{
-		NetworkIsolation:   true,
-		OverlayDirs:        false,
-		CapAdd:             true,
-		HostFilesystem:     false,
-		FilesystemLocality: runtime.LocalityHostSide,
-		KeepAliveModel:     runtime.KeepAliveGuestOSInit,
+		NetworkIsolation:     true,
+		OverlayDirs:          false,
+		CapAdd:               true,
+		HostFilesystem:       false,
+		FilesystemLocality:   runtime.LocalityHostSide,
+		GitExecInConfinement: true, // copy-mode work-copy git runs in-container (audit C1)
+		KeepAliveModel:       runtime.KeepAliveGuestOSInit,
 	},
 	Probe:         probe,
 	VersionString: versionString,
@@ -99,6 +100,7 @@ type Runtime struct {
 
 // Compile-time check.
 var _ runtime.Backend = (*Runtime)(nil)
+var _ runtime.GitExecer = (*Runtime)(nil)
 var _ runtime.IsolationCapabilityProvider = (*Runtime)(nil)
 var _ runtime.CachePruner = (*Runtime)(nil)
 var _ runtime.InteractiveSession = (*Runtime)(nil)

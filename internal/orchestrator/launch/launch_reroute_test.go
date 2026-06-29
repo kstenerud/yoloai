@@ -64,7 +64,7 @@ func (r *rerouteBaseRuntime) Remove(_ context.Context, _ string) error { return 
 func (r *rerouteBaseRuntime) Exec(_ context.Context, _ string, _ []string, _ string) (runtime.ExecResult, error) {
 	return runtime.ExecResult{}, nil
 }
-func (r *rerouteBaseRuntime) GitExec(_ context.Context, _ string, _ string, _ ...string) (string, error) {
+func (r *rerouteBaseRuntime) GitExec(_ context.Context, _ string, _ string, _ string, _ ...string) (string, error) {
 	return "", nil
 }
 func (r *rerouteBaseRuntime) InteractiveExec(_ context.Context, _ string, _ []string, _ string, _ string, _ runtime.IOStreams) error {

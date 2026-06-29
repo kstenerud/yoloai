@@ -35,11 +35,9 @@ func loadDiffContext(layout config.Layout, name string, dirHostPath string) (wor
 
 	switch mode {
 	case store.DirModeCopy:
-		if dir.MountPath != "" && dir.MountPath != dir.HostPath {
-			workDir = dir.MountPath
-		} else {
-			workDir = store.WorkDir(sandboxDir, dir.HostPath)
-		}
+		// Host work-copy path; git.NewSandbox maps it into the sandbox itself
+		// for in-confinement backends (see git's confinementWorkPath).
+		workDir = store.WorkDir(sandboxDir, dir.HostPath)
 		baselineSHA = dir.BaselineSHA
 		if baselineSHA == "" {
 			return "", "", "", fmt.Errorf("sandbox has no baseline SHA — was it created before diff support?")

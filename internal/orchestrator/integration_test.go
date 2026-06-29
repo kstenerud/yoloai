@@ -407,6 +407,10 @@ func TestIntegration_DiffClean(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { destroySandbox(ctx, mgr, "diffclean") }) //nolint:errcheck // test cleanup
 
+	// Copy-mode diff runs git inside the sandbox (audit C1), so the box must be
+	// running — start it before diffing.
+	startAndWaitActive(ctx, t, mgr, "diffclean")
+
 	diffResult, err := copyflow.GenerateDiff(ctx, copyflow.DiffOptions{Name: "diffclean", Layout: mgr.Layout(), Runtime: mgr.Runtime()})
 	require.NoError(t, err)
 	assert.Empty(t, diffResult)
@@ -424,6 +428,8 @@ func TestIntegration_DiffWithChanges(t *testing.T) {
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { destroySandbox(ctx, mgr, "diffchanges") }) //nolint:errcheck // test cleanup
+
+	startAndWaitActive(ctx, t, mgr, "diffchanges")
 
 	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir("diffchanges"))
 	require.NoError(t, err)
@@ -453,6 +459,8 @@ func TestIntegration_ApplyPatch(t *testing.T) {
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { destroySandbox(ctx, mgr, "applypatch") }) //nolint:errcheck // test cleanup
+
+	startAndWaitActive(ctx, t, mgr, "applypatch")
 
 	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir("applypatch"))
 	require.NoError(t, err)
@@ -484,6 +492,105 @@ func TestIntegration_ApplyPatch(t *testing.T) {
 	applied, err := os.ReadFile(filepath.Join(targetDir, "main.go")) //nolint:gosec // test path
 	require.NoError(t, err)
 	assert.Contains(t, string(applied), "patched")
+}
+
+// TestIntegration_CopyModeMaliciousFilterNoHostExec is the audit-C1 regression:
+// a copy-mode work copy whose .git defines a `filter.<x>.clean` driver must NOT
+// execute that driver on the host when `yoloai diff` stages the tree. The work
+// copy's git now runs inside the sandbox, so a planted clean filter fires there
+// (harmlessly), never as the host user. Pre-fix, `git add -A` on the host ran
+// the filter and this marker file was created on the host.
+func TestIntegration_CopyModeMaliciousFilterNoHostExec(t *testing.T) {
+	mgr, ctx := integrationSetup(t)
+	assertMaliciousFilterNotRunOnHost(ctx, t, mgr, "evilfilter")
+}
+
+// TestIntegration_CopyModeMaliciousFilterNoHostExec_Podman runs the same C1
+// containment check on Podman, whose GitExec is inherited from docker.Runtime
+// and dispatched over the docker-compatible socket.
+func TestIntegration_CopyModeMaliciousFilterNoHostExec_Podman(t *testing.T) {
+	mgr, ctx := podmanIntegrationSetup(t)
+	assertMaliciousFilterNotRunOnHost(ctx, t, mgr, "evilfilter-podman")
+}
+
+// assertMaliciousFilterNotRunOnHost creates+starts a copy-mode sandbox, plants a
+// clean filter whose payload touches a host-only marker path, stages via
+// GenerateDiff, and asserts the host marker never appears — proving the filter
+// ran inside the sandbox, not as the host user.
+func assertMaliciousFilterNotRunOnHost(ctx context.Context, t *testing.T, mgr *orchestrator.Engine, name string) {
+	t.Helper()
+	projectDir := createProjectDir(t)
+
+	_, err := createSandbox(ctx, mgr, orchestrator.CreateOptions{
+		Name:    name,
+		Workdir: orchestrator.DirSpec{Path: projectDir},
+		Agent:   "test",
+		Version: "test",
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { destroySandbox(ctx, mgr, name) }) //nolint:errcheck // test cleanup
+	startAndWaitActive(ctx, t, mgr, name)
+
+	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir(name))
+	require.NoError(t, err)
+	workDir := store.WorkDir(mgr.Layout().SandboxDir(name), meta.Workdir().HostPath)
+
+	// A host-only marker path: it does not exist inside the container, so a
+	// filter that runs in-sandbox cannot create it. If the filter ran on the
+	// host, the file would appear here.
+	hostMarker := filepath.Join(t.TempDir(), "pwned")
+
+	hg := git.NewTestHostWithEnv(testutil.GitEnv())
+	// `cat` passes content through unchanged (a well-behaved clean filter would);
+	// the `touch` is the exploit. 2>/dev/null + ';' keep the filter exit 0 so the
+	// stage succeeds whether or not the touch lands — the assertion is purely
+	// "did the host file appear".
+	require.NoError(t, hg.RunCmd(ctx, workDir, "config", "filter.pwn.clean",
+		fmt.Sprintf("sh -c 'touch %s 2>/dev/null; cat'", hostMarker)))
+	require.NoError(t, os.WriteFile(filepath.Join(workDir, ".gitattributes"), []byte("evil.txt filter=pwn\n"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(workDir, "evil.txt"), []byte("content\n"), 0600))
+
+	// GenerateDiff stages the tree (`git add -A`) — the clean filter fires here.
+	_, err = copyflow.GenerateDiff(ctx, copyflow.DiffOptions{Name: name, Layout: mgr.Layout(), Runtime: mgr.Runtime()})
+	require.NoError(t, err)
+
+	assert.NoFileExists(t, hostMarker, "clean filter must not execute on the host (audit C1)")
+}
+
+// TestIntegration_CopyModeLegitFilterDiffCorrect is the correctness companion:
+// a legitimately-configured clean filter (the mechanism Git LFS / git-crypt /
+// redaction use) must still be applied when diffing, so the work-tree side is
+// normalized exactly as the committed side was. Because git runs where the
+// filter is configured (in the sandbox), the diff reflects the FILTERED content
+// — the rejected host-side "clean config" approach would have leaked the raw
+// content instead.
+func TestIntegration_CopyModeLegitFilterDiffCorrect(t *testing.T) {
+	mgr, ctx := integrationSetup(t)
+	projectDir := createProjectDir(t)
+
+	_, err := createSandbox(ctx, mgr, orchestrator.CreateOptions{
+		Name:    "legitfilter",
+		Workdir: orchestrator.DirSpec{Path: projectDir},
+		Agent:   "test",
+		Version: "test",
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { destroySandbox(ctx, mgr, "legitfilter") }) //nolint:errcheck // test cleanup
+	startAndWaitActive(ctx, t, mgr, "legitfilter")
+
+	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir("legitfilter"))
+	require.NoError(t, err)
+	workDir := store.WorkDir(mgr.Layout().SandboxDir("legitfilter"), meta.Workdir().HostPath)
+
+	hg := git.NewTestHostWithEnv(testutil.GitEnv())
+	require.NoError(t, hg.RunCmd(ctx, workDir, "config", "filter.redact.clean", "sed 's/PLAINTEXT/REDACTED/g'"))
+	require.NoError(t, os.WriteFile(filepath.Join(workDir, ".gitattributes"), []byte("secret.txt filter=redact\n"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(workDir, "secret.txt"), []byte("api_key = PLAINTEXT\n"), 0600))
+
+	diffResult, err := copyflow.GenerateDiff(ctx, copyflow.DiffOptions{Name: "legitfilter", Layout: mgr.Layout(), Runtime: mgr.Runtime()})
+	require.NoError(t, err)
+	assert.Contains(t, diffResult, "REDACTED", "diff must show the filtered (cleaned) content")
+	assert.NotContains(t, diffResult, "PLAINTEXT", "raw pre-filter content must not leak into the diff")
 }
 
 func TestIntegration_Prompt(t *testing.T) {

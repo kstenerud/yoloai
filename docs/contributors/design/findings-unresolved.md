@@ -23,14 +23,14 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 
 ## Findings
 
-### DF66 — Copy-mode host-git RCE via agent-controlled `.git/config` filter/diff/fsmonitor drivers (CRITICAL)
+### DF67 — Copy-mode work-copy host-git still runs on seatbelt + the broken-metadata probe (DF66 residuals)
 
-- **Discovered:** 2026-06-29 · **Workstream:** escape/exfil security audit (host-side execution injection C1), empirically reproduced
-- **Severity:** **CRITICAL** (host code execution via the routine diff/apply workflow). **Blocks the v0.6.0 tag.**
-- **Disposition:** PARKED — design written, implementation held for a dedicated effort (user's call; the cut waits)
-- **Description:** In `:copy` mode the work-copy `.git/config` + `.gitattributes` are agent-controlled (RW bind mount), and host git neutralizes hooks only (`git.go:93`). Agent-defined `filter.*.clean/smudge`, `diff.*.command/textconv`, and `core.fsmonitor` execute on the host when the user runs `yoloai diff`/`apply`/`status` (host `git add -A`/`diff`/`status`). Worst on Seatbelt (host git runs outside the macOS sandbox). The sandbox→host `git apply` path is NOT affected (user-owned target `.git`). Defense-in-depth flags kill the diff+fsmonitor vectors but not the `git add` clean-filter, so the git-dir relocation is required.
-- **Trigger:** implement per the plan — **run the work-copy git in the agent's confinement (in-container / in-VM / under the seatbelt profile)**, the only option that is both secure and correct. The host-side "private git-dir + clean config" alternative is **rejected**: it silently corrupts diffs for any repo using legitimate git filters (Git LFS, git-crypt, …) — the committed baseline is filtered but the work tree is read raw, yielding wrong, corrupting patches (reproduced). Needs real-Docker/Podman verification incl. a filtered/LFS repo. Seatbelt is the hard case (no container; run git under sandbox-exec + depends on caps-F5 profile tightening).
-- **Pointer:** [plans/copy-mode-git-rce.md](plans/copy-mode-git-rce.md); `internal/git/git.go:93`, `copyflow/diff.go:132`, `copyflow/apply.go:366`, `internal/git/ops.go`.
+- **Discovered:** 2026-06-29 · **Workstream:** DF66 (C1) implementation — two paths left running host git on the agent-controlled work copy
+- **Severity:** MEDIUM (seatbelt is macOS-only, the lighter isolation tier; the probe path is broken-metadata-only)
+- **Disposition:** PARKED — primary C1 fix shipped for container backends; these two residuals remain
+- **Description:** DF66 routed copy-mode work-copy git into the agent's confinement for docker/podman/containerd (and tart, already in-VM). Two paths still run host git on the work copy: **(1) seatbelt** has no container to exec into, so `git.NewSandbox` falls back to host git — a planted `.git` filter/diff/fsmonitor driver still executes on the macOS host (under `sandbox-exec`, so bounded by the SBPL profile, which caps-F5 flags as too permissive). **(2)** `status.DetectChanges` / `ProbeWorkData` run host `git status --porcelain` on the work copy, but **only** for broken/unreadable-metadata sandboxes (the backend can't be determined); the normal status/list path uses the confined `workprobe.HasUnappliedWorkVia`.
+- **Trigger:** seatbelt — wrap the work-copy git in `sandbox-exec` (the agent's profile) **and** tighten the caps-F5 SBPL (`mach-lookup`/`process-exec`); probe — make the broken-metadata fallback disable drivers (`-c core.fsmonitor=` etc.) since it only ever runs `status`, or route it through the confined path when a backend is resolvable.
+- **Pointer:** [plans/copy-mode-git-rce.md](plans/copy-mode-git-rce.md) (step 5 + residuals); `internal/git/git.go` (`NewSandbox` host fallback), `internal/orchestrator/workprobe/workprobe.go` (`DetectChanges`), `internal/orchestrator/status/` (`ProbeWorkData`).
 
 ### DF65 — `:overlay` grants CAP_SYS_ADMIN → host escape on Docker rootful
 

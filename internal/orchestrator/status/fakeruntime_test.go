@@ -46,7 +46,7 @@ func (f *fakeRuntime) Create(_ context.Context, _ runtime.InstanceConfig) error 
 func (f *fakeRuntime) Start(_ context.Context, _ string) error  { return errFakeNotImplemented }
 func (f *fakeRuntime) Stop(_ context.Context, _ string) error   { return errFakeNotImplemented }
 func (f *fakeRuntime) Remove(_ context.Context, _ string) error { return errFakeNotImplemented }
-func (f *fakeRuntime) GitExec(_ context.Context, _ string, _ string, _ ...string) (string, error) {
+func (f *fakeRuntime) GitExec(_ context.Context, _ string, _ string, _ string, _ ...string) (string, error) {
 	return "", errFakeNotImplemented
 }
 func (f *fakeRuntime) InteractiveExec(_ context.Context, _ string, _ []string, _ string, _ string, _ runtime.IOStreams) error {

@@ -111,6 +111,60 @@ func (r *Runtime) Exec(ctx context.Context, name string, cmd []string, user stri
 	return result, nil
 }
 
+// GitExec runs a git command against the copy-mode work copy INSIDE the
+// container (audit C1: an agent-controlled work-copy .git/config must not run
+// filter/diff/fsmonitor drivers on the host). instance is the resolved container
+// id; containerPath is the work copy's in-container mount path; user is the
+// agent's container user. Returns runtime.ErrNotRunning when no task is running.
+// git's stdout is returned UNTRIMMED (patches are whitespace-sensitive); a
+// non-zero exit becomes a *runtime.ExecError carrying stderr, matching the host
+// git runner's contract.
+func (r *Runtime) GitExec(ctx context.Context, instance, user, containerPath string, args ...string) (string, error) {
+	ctx = r.withNamespace(ctx)
+
+	ctr, task, err := r.loadContainerAndTask(ctx, instance)
+	if err != nil {
+		return "", err
+	}
+
+	gitArgs := append([]string{"git", "-c", "core.hooksPath=/dev/null", "-C", containerPath}, args...)
+	processSpec := &specs.Process{
+		Args:     gitArgs,
+		Cwd:      "/",
+		Terminal: false,
+		Env:      containerEnv(ctx, ctr),
+	}
+	if user != "" {
+		processSpec.User = specs.User{Username: user}
+	}
+
+	var stdout, stderr bytes.Buffer
+	ioCreator := cio.NewCreator(cio.WithStreams(nil, &stdout, &stderr))
+
+	process, err := task.Exec(ctx, fmt.Sprintf("gitexec-%d", os.Getpid()), processSpec, ioCreator)
+	if err != nil {
+		return "", fmt.Errorf("exec create: %w", err)
+	}
+	defer func() { _, _ = process.Delete(ctx) }()
+
+	exitCh, err := process.Wait(ctx)
+	if err != nil {
+		return "", fmt.Errorf("exec wait: %w", err)
+	}
+	if err := process.Start(ctx); err != nil {
+		return "", fmt.Errorf("exec start: %w", err)
+	}
+	exitStatus := <-exitCh
+
+	if code := int(exitStatus.ExitCode()); code != 0 {
+		return stdout.String(), &runtime.ExecError{
+			ExitCode: code,
+			Stderr:   strings.TrimSpace(stderr.String()),
+		}
+	}
+	return stdout.String(), nil
+}
+
 // InteractiveExec runs a command inside a containerd container, wiring
 // the supplied IOStreams to the shim's PTY/pipe. For io.TTY=true the
 // shim allocates a PTY (terminal=true on the FIFO set) and we bridge

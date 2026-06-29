@@ -14,6 +14,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/sysexec"
 	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/store"
 )
 
 // execer runs one git invocation in workDir for a scope.
@@ -43,15 +44,18 @@ func NewTestHostWithEnv(env []string) *Git {
 	return &Git{e: hostExec{env: env}}
 }
 
-// NewSandbox returns a sandbox-scoped Git with the executor *injected* by the
-// backend's FilesystemLocality — decided once, here. A SandboxSide backend (work
-// copy inside the sandbox, e.g. Tart) dispatches git through the backend; a
-// HostSide backend (and a nil runtime) runs host git. Call sites and the
-// executors never branch on locality again.
+// NewSandbox returns a sandbox-scoped Git for a sandbox's copy-mode work copy,
+// with the executor *injected* by runtime.GitRunsInConfinement — decided once,
+// here. When git runs in the sandbox's confinement (Tart's VM, or a container
+// backend, so an agent-planted .git driver can't execute on the host — audit
+// C1), it dispatches through the backend's GitExecer; otherwise (seatbelt, nil
+// runtime) it runs host git. Call sites and the executors never branch on
+// locality again. The host-TARGET apply ops (writing the user's real repo) use
+// NewHost, not this.
 func NewSandbox(layout config.Layout, rt runtime.Backend, name string) *Git {
 	env := layout.Env().EnvForGitInvocation()
-	if runtime.LocalityOf(rt) == runtime.LocalitySandboxSide {
-		return &Git{e: sandboxExec{env: env, rt: rt, name: name}, tempDir: layout.TempDir()}
+	if runtime.GitRunsInConfinement(rt) {
+		return &Git{e: sandboxExec{env: env, rt: rt, layout: layout, name: name}, tempDir: layout.TempDir()}
 	}
 	return &Git{e: hostExec{env: env}, tempDir: layout.TempDir()}
 }
@@ -113,24 +117,61 @@ func (h hostExec) run(ctx context.Context, workDir string, stdin []byte, args ..
 	return stdoutBuf.String(), nil
 }
 
-// sandboxExec is the SandboxSide strategy: it dispatches git through the
-// backend (GitExecer) so it runs against the in-sandbox work copy. It is
-// constructed only for SandboxSide backends (see NewSandbox), so it never
-// re-checks locality. Sandbox git ops are stdin-free; a stdin-bearing op
-// (apply/am) falls back to host git.
+// sandboxExec is the in-confinement strategy: it dispatches git through the
+// backend (GitExecer) so it runs against the work copy INSIDE the sandbox, where
+// an agent-controlled .git/config filter/diff/fsmonitor driver can only execute
+// in the agent's own confinement, never on the host (audit C1). It is
+// constructed only for GitRunsInConfinement backends (see NewSandbox), so it
+// never re-checks locality.
+//
+// The work-copy git ops are all stdin-free (add/diff/status/log/rev-parse/
+// format-patch); a stdin-bearing op (apply/am) targets the user's REAL repo via
+// NewHost, never this executor, so the host fallback below is defensive only.
 type sandboxExec struct {
-	env  []string
-	rt   runtime.Backend
-	name string
+	env    []string
+	rt     runtime.Backend
+	layout config.Layout
+	name   string
 }
 
 func (s sandboxExec) run(ctx context.Context, workDir string, stdin []byte, args ...string) (string, error) {
-	if stdin == nil {
-		ge, ok := s.rt.(runtime.GitExecer)
-		if !ok {
-			return "", fmt.Errorf("yoloai bug: backend %s declares SandboxSide filesystem locality but does not implement GitExecer", s.rt.Descriptor().Type)
-		}
-		return ge.GitExec(ctx, s.name, workDir, args...)
+	if stdin != nil {
+		return (hostExec{env: s.env}).run(ctx, workDir, stdin, args...)
 	}
-	return (hostExec{env: s.env}).run(ctx, workDir, stdin, args...)
+	ge, ok := s.rt.(runtime.GitExecer)
+	if !ok {
+		return "", fmt.Errorf("yoloai bug: backend %s runs git in confinement but does not implement GitExecer", s.rt.Descriptor().Type)
+	}
+
+	// The work copy lives at workDir on the host but is bind-mounted into the
+	// sandbox at a (possibly different) path; in-confinement git must run against
+	// that in-sandbox path. Resolve the instance, the agent's container user, and
+	// the in-sandbox path from the sandbox record.
+	sandboxDir := s.layout.SandboxDir(s.name)
+	meta, err := store.LoadEnvironment(sandboxDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve sandbox %q for in-confinement git: %w", s.name, err)
+	}
+	instance := store.InstanceName(meta.Principal, s.name)
+	user := store.ContainerUser(meta, s.layout.HostUID)
+	return ge.GitExec(ctx, instance, user, confinementWorkPath(meta, sandboxDir, workDir), args...)
+}
+
+// confinementWorkPath maps a host work-copy path (store.WorkDir) to the path the
+// same files are reachable at inside the sandbox — the dir's resolved mount path
+// (container target for docker/podman/containerd; VM-local path for Tart). When
+// workDir matches no tracked dir it is returned unchanged: a backend whose
+// GitExecer re-translates host paths (Tart) still copes, and it surfaces a clear
+// in-sandbox error otherwise rather than silently running on the host.
+func confinementWorkPath(meta *store.Environment, sandboxDir, workDir string) string {
+	for i := range meta.Dirs {
+		d := &meta.Dirs[i]
+		if store.WorkDir(sandboxDir, d.HostPath) == workDir {
+			if d.MountPath != "" {
+				return d.MountPath
+			}
+			return d.HostPath
+		}
+	}
+	return workDir
 }

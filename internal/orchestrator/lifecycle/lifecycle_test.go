@@ -546,7 +546,7 @@ func TestNeedsConfirmation_StoppedVMFailsafe(t *testing.T) {
 
 	mock := &lifecycleMockRuntime{
 		locality: runtime.LocalitySandboxSide, // VM: git runs in-sandbox; host probe is blind
-		gitExecFn: func(_ context.Context, _, _ string, _ ...string) (string, error) {
+		gitExecFn: func(_ context.Context, _, _, _ string, _ ...string) (string, error) {
 			return "", runtime.ErrNotRunning
 		},
 	}

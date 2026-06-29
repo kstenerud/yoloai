@@ -368,15 +368,13 @@ func loadAllDiffContexts(layout config.Layout, name string, dirHostPath string) 
 	return nil, nil
 }
 
-// copyGitWorkDir returns the path where git should run for a copy-mode directory.
-// For VM backends (e.g. Tart), the work copy is copied to a VM-local path stored in
-// mountPath, which differs from hostPath. For host-based backends (Docker, Seatbelt),
-// mountPath equals hostPath (Docker) or equals the host staging copy (Seatbelt), so
-// mountPath being distinct from hostPath reliably identifies a VM backend.
-func copyGitWorkDir(sandboxDir, hostPath, mountPath string) string {
-	if mountPath != "" && mountPath != hostPath {
-		return mountPath
-	}
+// copyGitWorkDir returns the host work-copy path for a copy-mode directory. The
+// sandbox-scoped git runner (git.NewSandbox) takes it from here: for backends
+// that run git in confinement (Tart, docker/podman/containerd) it maps this host
+// path to the in-sandbox path itself (see git's confinementWorkPath); for
+// host-side backends git runs against it directly. mountPath is no longer
+// consulted here — the locality decision lives behind git.NewSandbox.
+func copyGitWorkDir(sandboxDir, hostPath, _ string) string {
 	return store.WorkDir(sandboxDir, hostPath)
 }
 

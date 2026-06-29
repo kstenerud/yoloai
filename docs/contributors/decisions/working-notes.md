@@ -1078,6 +1078,18 @@ Only then the **mechanical move**: `runtime` first/with `store`, repoint the fen
 
 **Consequences.** GEN §14 added with this case as its worked example; `rule-index.md` gains a GEN §14 row; the principles `README.md` general index line updated. The backend-idiosyncrasies entry for the docker staleness bug records the rejected daemon-ID approach and why.
 
+## D108 — Copy-mode work-copy git runs in the agent's confinement, not on the host (closes audit C1 / DF66)
+
+**Date:** 2026-06-29. **Status:** Active. Closes the sole CRITICAL blocking the v0.6.0 tag (DF66) for the container backends. Applies GEN §14 (D107): put the *execution* where it belongs.
+
+**The decision.** The `:copy` work copy's `.git/config` + `.gitattributes` are agent-controlled (RW bind mount), and git executes shell from repo-local config — `filter.*.clean/smudge`, `diff.*.command/textconv`, `core.fsmonitor` — not only from `.git/hooks`. Running that git on the **host** (for `yoloai diff`/`apply`/`status`) is host code execution by a prompt-injected agent. A correct diff of a filtered repo *must* run the filters (Git LFS, git-crypt, redaction), so the only option that is both secure **and** correct is to run the work-copy git **inside the same confinement the agent already runs in** — exactly where Tart's `SandboxSide` git already ran. The host-side "private git-dir + clean config" alternative is rejected: it silently corrupts every filtered repo (committed blob cleaned, work tree read raw → wrong, secret-leaking patches).
+
+**Why this is the §14 move, not a hack.** git's *contract* is that diff normalizes the work tree *through* the configured filters. Any host-side fix that stays secure must subvert that contract (starve git of config) — the brittle incidental-property hack §14 warns against, breaking the moment a repo uses filters as intended. The contractual move: let git do its whole job, and place the *isolation* on the boundary we own (the agent's confinement). §14's "put the data where it belongs" reads here as **put the execution where it belongs**.
+
+**How it shipped.** New predicate `runtime.GitRunsInConfinement(rt)` = `SandboxSide` ∪ `BackendCaps.GitExecInConfinement` (set by docker/podman/containerd), decoupling *git-exec locality* from *FilesystemLocality* (work copies stay host-readable for docker; only git execution moves). `git.NewSandbox` dispatches the work-copy git through each backend's `GitExec(ctx, instance, user, workDir, …)`; `git.sandboxExec` (allowed to import `store`) maps the host work-copy path → the in-sandbox mount path and resolves the instance + agent container user, keeping `runtime` decoupled from `store` and every copyflow/orchestrator call site unchanged (they still pass the host path). The host-**target** apply path (`git apply`/`am` into the user's real repo) keeps `NewHost` — already sound. Create/reset baselining stays host-side (runs before the agent, on a clean `.git`).
+
+**Consequences.** Copy-mode `diff`/`apply` now require the sandbox running (clear "start the sandbox" error at the public `Workdir` boundary, `errors.Is(ErrNotRunning)` preserved; `status`/`list` degrade to "unknown" via `workprobe`) — same UX shape as `:overlay` and as Tart already had. Verified on real Docker + Podman (malicious-filter containment + legit-filter correctness). Residuals in **DF67**: seatbelt (no container — host git under `sandbox-exec`, macOS-only, needs caps-F5) and the broken-metadata `ProbeWorkData` host-git fallback. Full design + as-shipped deviations: [plans/copy-mode-git-rce.md](../design/plans/copy-mode-git-rce.md).
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.

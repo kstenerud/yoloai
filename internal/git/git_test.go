@@ -2,6 +2,7 @@ package git
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -9,39 +10,44 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/store"
 )
 
 // gitExecerRuntime embeds runtime.Backend (nil) so it satisfies the interface
-// without implementing every method. It declares SandboxSide locality (so the
-// sandbox execer routes git to the backend) and implements GitExec (the
-// operation the routing uses). The embedded nil is never called — the sandbox
-// execer only reads Descriptor() and GitExec.
+// without implementing every method. caps drives Descriptor() so a single mock
+// covers both SandboxSide and the container-cap (GitExecInConfinement) cases;
+// it implements GitExec (the operation the routing uses) and records its args.
+// The embedded nil is never called — the sandbox execer only reads Descriptor()
+// and GitExec.
 type gitExecerRuntime struct {
 	runtime.Backend
-	lastWorkDir string
-	lastArgs    []string
+	caps         runtime.BackendCaps
+	lastInstance string
+	lastUser     string
+	lastWorkDir  string
+	lastArgs     []string
 }
 
-func (g *gitExecerRuntime) GitExec(_ context.Context, _, workDir string, args ...string) (string, error) {
+func (g *gitExecerRuntime) GitExec(_ context.Context, instance, user, workDir string, args ...string) (string, error) {
+	g.lastInstance = instance
+	g.lastUser = user
 	g.lastWorkDir = workDir
 	g.lastArgs = args
 	return "dispatched", nil
 }
 
 func (g *gitExecerRuntime) Descriptor() runtime.BackendDescriptor {
-	return runtime.BackendDescriptor{
-		Capabilities: runtime.BackendCaps{FilesystemLocality: runtime.LocalitySandboxSide},
-	}
+	return runtime.BackendDescriptor{Capabilities: g.caps}
 }
 
-// hostSideExecerRuntime implements GitExec yet declares HostSide locality —
-// used to prove the injection decision is the FilesystemLocality property, not
-// the mere presence of GitExecer.
+// hostSideExecerRuntime implements GitExec yet declares neither SandboxSide nor
+// GitExecInConfinement — used to prove the injection decision is
+// GitRunsInConfinement, not the mere presence of GitExecer.
 type hostSideExecerRuntime struct {
 	runtime.Backend
 }
 
-func (g *hostSideExecerRuntime) GitExec(_ context.Context, _, _ string, _ ...string) (string, error) {
+func (g *hostSideExecerRuntime) GitExec(_ context.Context, _, _, _ string, _ ...string) (string, error) {
 	return "dispatched", nil
 }
 
@@ -51,33 +57,51 @@ func (g *hostSideExecerRuntime) Descriptor() runtime.BackendDescriptor {
 	}
 }
 
-// TestNewSandbox_DispatchesToGitExecer verifies the sandbox scope routes git
-// through a backend's GitExecer (e.g. Tart runs git in-VM) instead of host git.
+// TestNewSandbox_DispatchesToGitExecer verifies the sandbox scope routes the
+// work-copy git through a backend's GitExecer (in-VM for Tart, in-container for
+// docker/podman/containerd — audit C1), mapping the host work-copy path to the
+// dir's in-sandbox mount path and resolving the instance + container user.
 func TestNewSandbox_DispatchesToGitExecer(t *testing.T) {
-	rt := &gitExecerRuntime{}
-	g := NewSandbox(config.NewLayout("/home/u/.yoloai"), rt, "box")
+	layout := config.NewLayout(t.TempDir())
+	sandboxDir := layout.SandboxDir("box")
+	require.NoError(t, os.MkdirAll(sandboxDir, 0o750))
+	require.NoError(t, store.SaveEnvironment(sandboxDir, &store.Environment{
+		Version: 3,
+		Name:    "box",
+		Dirs:    []store.DirEnvironment{{HostPath: "/proj", MountPath: "/proj", Mode: store.DirModeCopy}},
+	}))
 
-	out, err := g.Run(context.Background(), "/work", "status", "--porcelain")
+	rt := &gitExecerRuntime{caps: runtime.BackendCaps{GitExecInConfinement: true}}
+	g := NewSandbox(layout, rt, "box")
+
+	out, err := g.Run(context.Background(), store.WorkDir(sandboxDir, "/proj"), "status", "--porcelain")
 	require.NoError(t, err)
 	assert.Equal(t, "dispatched", out)
-	assert.Equal(t, "/work", rt.lastWorkDir)
+	assert.Equal(t, "yoloai-box", rt.lastInstance)
+	assert.Equal(t, "yoloai", rt.lastUser)
+	assert.Equal(t, "/proj", rt.lastWorkDir, "host work-copy path maps to the dir's in-sandbox mount path")
 	assert.Equal(t, []string{"status", "--porcelain"}, rt.lastArgs)
 }
 
-// TestNewSandbox_InjectsExecerByLocality verifies the factory injects the
-// executor by FilesystemLocality (decided once), not by GitExecer presence: a
-// SandboxSide backend gets the dispatching executor; a HostSide backend (even
-// one that implements GitExec) and a nil runtime get the host executor.
-func TestNewSandbox_InjectsExecerByLocality(t *testing.T) {
+// TestNewSandbox_InjectsExecerByConfinement verifies the factory injects the
+// executor by runtime.GitRunsInConfinement (decided once), not by GitExecer
+// presence: a SandboxSide backend and a container-cap backend both get the
+// dispatching executor; a backend that merely implements GitExec without the
+// cap, and a nil runtime, get the host executor.
+func TestNewSandbox_InjectsExecerByConfinement(t *testing.T) {
 	layout := config.NewLayout("/home/u/.yoloai")
 
-	sb := NewSandbox(layout, &gitExecerRuntime{}, "box")
-	_, ok := sb.e.(sandboxExec)
+	vm := NewSandbox(layout, &gitExecerRuntime{caps: runtime.BackendCaps{FilesystemLocality: runtime.LocalitySandboxSide}}, "box")
+	_, ok := vm.e.(sandboxExec)
 	assert.True(t, ok, "SandboxSide backend must get the sandbox (dispatching) executor")
+
+	ctr := NewSandbox(layout, &gitExecerRuntime{caps: runtime.BackendCaps{GitExecInConfinement: true}}, "box")
+	_, ok = ctr.e.(sandboxExec)
+	assert.True(t, ok, "container backend (GitExecInConfinement) must get the sandbox (dispatching) executor")
 
 	hs := NewSandbox(layout, &hostSideExecerRuntime{}, "box")
 	_, ok = hs.e.(hostExec)
-	assert.True(t, ok, "HostSide backend gets the host executor even though it implements GitExec")
+	assert.True(t, ok, "host-side backend gets the host executor even though it implements GitExec")
 
 	nilrt := NewSandbox(layout, nil, "box")
 	_, ok = nilrt.e.(hostExec)

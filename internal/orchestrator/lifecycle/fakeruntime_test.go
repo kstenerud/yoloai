@@ -32,7 +32,7 @@ type lifecycleMockRuntime struct {
 	removeFn           func(ctx context.Context, name string) error
 	inspectFn          func(ctx context.Context, name string) (runtime.InstanceInfo, error)
 	execFn             func(ctx context.Context, name string, cmd []string, user string) (runtime.ExecResult, error)
-	gitExecFn          func(ctx context.Context, name, workDir string, args ...string) (string, error)
+	gitExecFn          func(ctx context.Context, instance, user, workDir string, args ...string) (string, error)
 	recreateAdvisoryFn func(ctx context.Context) string
 	// locality controls the backend's declared FilesystemLocality; zero value
 	// (LocalityHostSide) suits host-side reset/baseline tests, SandboxSide the
@@ -88,9 +88,9 @@ func (m *lifecycleMockRuntime) Create(_ context.Context, _ runtime.InstanceConfi
 // that stage real git repos under work/ exercise the real change-detection
 // path. Tests modeling a VM-local backend (Tart) set gitExecFn, e.g. to return
 // runtime.ErrNotRunning for the stopped-VM fail-safe case.
-func (m *lifecycleMockRuntime) GitExec(ctx context.Context, name, workDir string, args ...string) (string, error) {
+func (m *lifecycleMockRuntime) GitExec(ctx context.Context, instance, user, workDir string, args ...string) (string, error) {
 	if m.gitExecFn != nil {
-		return m.gitExecFn(ctx, name, workDir, args...)
+		return m.gitExecFn(ctx, instance, user, workDir, args...)
 	}
 	cmdArgs := append([]string{"-C", workDir}, args...)
 	// Curated hermetic git env (PATH + identity, never the full ambient env)

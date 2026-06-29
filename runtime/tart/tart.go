@@ -548,8 +548,11 @@ func (r *Runtime) translateWorkDirToVMPath(workDir string) string {
 // workDir may be either a host path (~/.yoloai/sandboxes/<name>/work/<encoded>)
 // or a VM path (/Users/admin/yoloai-work/<encoded>). Host paths are translated
 // to VM paths automatically.
-// name may be a sandbox name or instance name; both are accepted.
-func (r *Runtime) GitExec(ctx context.Context, name, workDir string, args ...string) (string, error) {
+// name may be a sandbox name or instance name; both are accepted. user is
+// ignored — `tart exec` runs as the VM's single logged-in user (the work copy
+// is owned by that user); the container backends use it to match the agent's
+// container user.
+func (r *Runtime) GitExec(ctx context.Context, name, _, workDir string, args ...string) (string, error) {
 	// Callers in the sandbox package pass the sandbox name (e.g. "mybox").
 	// The Tart VM is named with the instance prefix (e.g. "yoloai-mybox").
 	vmName := instancePrefix + strings.TrimPrefix(name, instancePrefix)

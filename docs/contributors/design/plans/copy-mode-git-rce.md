@@ -3,9 +3,20 @@
 ABOUTME: Design for neutralizing host code execution via git filter/diff/fsmonitor
 ABOUTME: drivers in the agent-controlled copy-mode work-copy .git — the diff/apply path.
 
-Status: **design only, not yet implemented.** Surfaced by the 2026-06-29
-escape/exfil security audit (finding C1, CRITICAL, empirically reproduced). The
-v0.6.0 tag should wait for this fix (it is the only CRITICAL finding).
+Status: **IMPLEMENTED for the container backends (docker/podman/containerd),
+2026-06-29.** Surfaced by the 2026-06-29 escape/exfil security audit (finding C1,
+CRITICAL, empirically reproduced). The recommended approach below shipped:
+work-copy `add`/`diff`/`status`/`log`/`format-patch` now run in-confinement via
+each backend's `GitExec`, dispatched by `runtime.GitRunsInConfinement` behind
+`git.NewSandbox`. Verified on real Docker **and** Podman (malicious-filter case:
+host marker never created; legit clean-filter case: diff byte-correct) — see
+`internal/orchestrator/integration_test.go`. **Two residuals remain:** (1)
+**seatbelt** still runs host-side work-copy git (no container to exec into) —
+needs the `sandbox-exec` wrapper + caps-F5 SBPL tightening (macOS-only, lighter
+tier; step 5 below); (2) `status.DetectChanges`/`ProbeWorkData` runs host `git
+status` on the work copy for **broken-metadata** sandboxes only — tracked as a
+follow-up finding. With these noted, C1 is closed for the v0.6.0 tag on the
+mainstream backends.
 
 **Recommendation: run the work-copy git inside the agent's confinement
 (in-container / in-VM / under the seatbelt profile), NOT on the host.** An earlier
@@ -166,6 +177,31 @@ Steps:
    (reuse the `ErrOverlayRequiresRuntime` precedent + UX).
 5. **seatbelt** — `sandbox-exec`-wrapped git + the caps-F5 profile work (separate),
    or a documented residual (macOS-only, lighter tier).
+
+**As shipped (deviations from the steps above).** Two refinements landed during
+implementation:
+
+- **Path mapping centralized in `git.sandboxExec`, not at the copyflow callers.**
+  Rather than change every copyflow/orchestrator call site to pass
+  `ResolvedMountPath`, `git.NewSandbox`'s `sandboxExec` loads the sandbox record
+  once per op and maps the host work-copy path (`store.WorkDir`) → the dir's
+  in-sandbox mount path itself (`confinementWorkPath`). Call sites keep passing
+  the host path uniformly (the two `loadDiffContext`/`copyGitWorkDir` helpers were
+  simplified to always return `store.WorkDir`); the locality knowledge lives in
+  exactly one place. This keeps `runtime` decoupled from `store` — the mapping
+  runs in `internal/git`, which may import `store`.
+- **`GitExecer` gained a `user` param and takes the resolved instance name.**
+  `GitExec(ctx, instance, user, workDir, …)`: `sandboxExec` resolves the instance
+  (`store.InstanceName`) and the agent's container user (`store.ContainerUser`,
+  the same identity the overlay exec uses) and passes them down, so the
+  in-container git writes the index/objects with the ownership the agent expects.
+  Tart ignores `user`.
+- **Dispatch predicate is `runtime.GitRunsInConfinement`** (`SandboxSide` ∪ the
+  `BackendCaps.GitExecInConfinement` flag set by docker/podman/containerd), exactly
+  as proposed. The "sandbox must be running" UX is surfaced as a clear message at
+  the public `Workdir` boundary (`Diff`/`Changes`/`Apply`/`Commits`), preserving
+  `errors.Is(err, runtime.ErrNotRunning)` for SDK callers; `status`/`list` keep
+  degrading to "unknown" via the existing `workprobe` path.
 
 - Do **not** add `--no-ext-diff`/`-c core.fsmonitor=`/clean-config tricks: in
   confinement we *want* the real filters to run (correctness).

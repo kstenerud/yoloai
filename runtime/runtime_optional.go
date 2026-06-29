@@ -81,13 +81,25 @@ type WorkDirSetup interface {
 	SetupWorkDirInVM(virtiofsStagingPath, vmLocalPath string) []string
 }
 
-// GitExecer is an optional interface for backends whose git execution context
-// differs from "run git on the host" — i.e. backends that run git inside a VM
-// and must translate host work paths (Tart). Backends that run git on the host
-// (Docker, Podman, Containerd, Seatbelt) don't implement it; the git package's
-// sandbox scope (git.NewSandbox) runs git on the host directly via its default.
+// GitExecer is an optional interface for backends that run the copy-mode
+// work-copy git inside the sandbox's confinement rather than on the host. A
+// SandboxSide backend (Tart) MUST implement it because the work copy isn't on
+// the host at all; the container backends (Docker, Podman, Containerd) implement
+// it so an agent-controlled work-copy .git/config cannot execute filter/diff/
+// fsmonitor drivers on the host during diff/apply/status (audit C1). The set of
+// implementers is exactly GitRunsInConfinement; the git package dispatches
+// through it for those backends and runs host git for the rest (seatbelt, nil).
+//
+// name is the resolved runtime instance name (container id), the same contract
+// as Exec — the git-package boundary resolves it from the principal. user is the
+// sandbox's container user (store.ContainerUser), also resolved at that
+// boundary; backends with a single guest user (Tart) ignore it.
+// workDir is the path git runs against inside the confinement (the dir's
+// resolved mount path), already mapped by the caller. Implementations must
+// preserve git's exact stdout (patches are whitespace-sensitive — do not trim)
+// and return runtime.ErrNotRunning when the instance is not up.
 type GitExecer interface {
-	GitExec(ctx context.Context, name, workDir string, args ...string) (string, error)
+	GitExec(ctx context.Context, name, user, workDir string, args ...string) (string, error)
 }
 
 // ===== 2. Capability probes & reporters =====

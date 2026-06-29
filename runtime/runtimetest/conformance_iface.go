@@ -79,18 +79,26 @@ func RunInterfaceConformance(t *testing.T, setup InterfaceSetupFunc) {
 
 	// --- Property invariants (no VM needed) ---
 
-	// A backend declaring SandboxSide FilesystemLocality keeps its work copy
-	// inside the sandbox, so the diff/apply layer runs git in-sandbox (GitExecer)
-	// and defers baseline creation to the sandbox (WorkDirSetup). The
-	// property-based dispatch in git.NewSandbox and ExecuteVMWorkDirSetup assumes
-	// this invariant; this asserts it for any backend, present or future.
+	// A backend that runs the work-copy git in confinement (Tart's VM, or a
+	// container backend — audit C1) MUST implement GitExecer; git.NewSandbox
+	// dispatches the work-copy git through it for exactly that set of backends.
+	t.Run("ConfinementImpliesGitExecer", func(t *testing.T) {
+		b := setup(t)
+		if !runtime.GitRunsInConfinement(b.Runtime) {
+			t.Skip("host-side git backend: no in-confinement git execution")
+		}
+		_, isGitExecer := b.Runtime.(runtime.GitExecer)
+		assert.True(t, isGitExecer, "GitRunsInConfinement backend must implement runtime.GitExecer (git runs in the sandbox)")
+	})
+
+	// A SandboxSide backend additionally keeps its work copy inside the sandbox,
+	// so baseline creation is deferred to the sandbox (WorkDirSetup). The
+	// property-based dispatch in ExecuteVMWorkDirSetup assumes this invariant.
 	t.Run("SandboxSideImplementsLocalityOps", func(t *testing.T) {
 		b := setup(t)
 		if b.Runtime.Descriptor().Capabilities.FilesystemLocality != runtime.LocalitySandboxSide {
 			t.Skip("HostSide backend: no in-sandbox locality operations required")
 		}
-		_, isGitExecer := b.Runtime.(runtime.GitExecer)
-		assert.True(t, isGitExecer, "SandboxSide backend must implement runtime.GitExecer (git runs in-sandbox)")
 		_, isWorkDirSetup := b.Runtime.(runtime.WorkDirSetup)
 		assert.True(t, isWorkDirSetup, "SandboxSide backend must implement runtime.WorkDirSetup (baseline deferred to sandbox)")
 	})

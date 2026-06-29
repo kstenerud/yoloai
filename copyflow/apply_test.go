@@ -469,7 +469,7 @@ type gitExecRuntime struct {
 	diffErr         error
 }
 
-func (g *gitExecRuntime) GitExec(_ context.Context, _, _ string, args ...string) (string, error) {
+func (g *gitExecRuntime) GitExec(_ context.Context, _, _, _ string, args ...string) (string, error) {
 	if len(args) > 0 && args[0] == "diff" {
 		return "", g.diffErr
 	}
