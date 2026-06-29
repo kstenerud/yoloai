@@ -23,26 +23,12 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 
 ## Findings
 
-### DF62 — interactive commands (`yoloai destroy`, …) have no `--yes`/non-interactive flag
-
-- **Discovered:** 2026-06-29 · **Workstream:** disk-reclaim / prune evaluation
-- **Severity:** LOW (ergonomics; blocks scripted/CI use) · **Disposition:** PARKED
-- **Description:** `yoloai destroy <name>...` prompts interactively for confirmation but exposes no `--yes`/`-y` (or `--force`) flag to skip the prompt — `-y` errors with "unknown shorthand flag". The only non-interactive lever is `--abandon-unapplied`, which is narrowly about *unapplied work*, not general confirmation; on a `CHANGES: no` sandbox there is no way to confirm non-interactively except piping `yes`. This appears to be a regression from the move away from a generic `--force` to consequence-named flags (see [[feedback_dangerous_option_naming]]): the specific flags (`--abandon-unapplied`) replaced `--force`'s *danger-acknowledgement* role but not its *non-interactive-confirmation* role. Audit all interactive commands (destroy, reset/wipe, system prune already has `-y`, profile rm, …) for a consistent non-interactive flag. **Fix direction:** add a `--yes`/`-y` that confirms the *ordinary* prompt while keeping `--abandon-unapplied` as the separate, additionally-required acknowledgement for unreviewed work (so `-y` alone still refuses a dirty sandbox). Keep the convention identical across commands.
-- **Pointer:** `yoloai destroy` cmd (cobra flag set — only `--abandon-unapplied`, `--all`); compare `system prune` which already has `-y/--yes`.
-
 ### DF61 — integration tests leak multi-GB isolated container stores in `/tmp` on SIGKILL/timeout
 
 - **Discovered:** 2026-06-29 · **Workstream:** disk-reclaim / prune evaluation
 - **Severity:** MEDIUM (silent multi-GB disk leak on a test host; compounding) · **Disposition:** PARKED
 - **Description:** The CLI/orchestrator integration harness gives each test a fresh `HOME` (`t.TempDir()` / `testutil.IsolatedHome`) under `/tmp`. For rootless podman the storage graphroot follows `$HOME`, so a test that builds/pulls the base image populates a **multi-GB image store inside that temp HOME** (observed: `/tmp/TestCLI_StartStop…` 7.3 GB, `/tmp/yoloai-cli-setup…` 5.1 GB). Go's `t.TempDir` cleanup only runs on *normal* test completion — on SIGKILL, a `-timeout` kill, or a killed parent `make`, the temp HOMEs (and their multi-GB stores) leak permanently. Several such runs filled a 116 GB disk. This was greatly amplified by DF56's mass-rebuild fallout, but the leak mechanism is independent. `yoloai system prune` cannot reclaim it — the dirs are outside `~/.yoloai`. **Fix directions:** (a) point the per-test podman/docker storage at the *shared* host store (don't let graphroot follow the isolated HOME) so the base image isn't re-copied per test; (b) failing that, register a best-effort cleanup that also runs on signal, or a sweeper (`make clean-testtmp`) for `/tmp/{TestCLI_*,yoloai-cli-setup-*}`; (c) document the leak so CI hosts sweep `/tmp`.
 - **Pointer:** `internal/cli/integration_main_test.go` / `integration_test.go` (cliSetup HOME isolation), `internal/orchestrator/integration_helpers_test.go`, `test/e2e/helpers_test.go`; rootless-podman graphroot-follows-HOME behavior.
-
-### DF60 — `yoloai system prune` misses yoloai containers that don't carry a `yoloai-*` name
-
-- **Discovered:** 2026-06-29 · **Workstream:** disk-reclaim / prune evaluation
-- **Severity:** MEDIUM (leaked containers pin GBs of image layers and are invisible to prune) · **Disposition:** PARKED
-- **Description:** Prune's orphan detection only considers containers named `yoloai-*` (see `runtime/containerd/prune.go:23` and the docker equivalent). A leaked container that runs the yoloai entrypoint on a yoloai image but carries a *random* engine-assigned name is never reclaimed — observed: `competent_benz` (docker), `Up 21h`, `cmd="/yoloai/bin/entrypoint…"`, image `yoloai-base:latest` (an old, now-dangling layer set), pinning ~7 GB. On a yoloai-dedicated host these are pure leak yet survive every prune. Such containers arise from any path that starts a yoloai image without yoloai's `--name` (a raw `docker run` in a test/debug, a crashed create before naming, etc.). **Fix directions:** also treat as orphaned any container whose image is a yoloai-managed image (yoloai-base/profile) OR whose entrypoint/labels mark it yoloai, regardless of name; or stamp every yoloai-started container with the `com.yoloai.*` label (already used for instances) and match orphans by label, not name. Report+remove under the normal prune (not `--images`).
-- **Pointer:** `runtime/containerd/prune.go` (`knownInstances`/`yoloai-*` match), docker `Prune`; the broker/launch paths that could leave an unnamed container; `runtime.LabelSandbox`/`LabelPrincipal` already exist for label-based matching.
 
 ### DF59 — `yoloai system prune` reclaim is incomplete and under-reported (containerd hard-block, devmapper non-shrink, undercounted total)
 

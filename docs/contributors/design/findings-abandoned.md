@@ -9,6 +9,14 @@ from [`findings-resolved.md`](findings-resolved.md) (the finding got *fixed*) an
 terminal and not expected to come back. Each carries a short **`Why:`** line recording the
 reason for abandonment. Newest first.
 
+### DF62 — interactive commands (`yoloai destroy`) have no `--yes`/non-interactive flag
+
+- **Discovered:** 2026-06-29 · **Workstream:** disk-reclaim / prune evaluation
+- **Severity:** LOW (ergonomics)
+- **Disposition:** ABANDONED (user decision 2026-06-29)
+- **Why:** The premise was wrong. Investigation showed `yoloai destroy` does **not** prompt interactively at all — `checkActiveWork` *refuses with an error* (requiring `--abandon-unapplied`) for unapplied work and otherwise just proceeds; the code documents this deliberate choice ("We never prompt to widen the scope, so there is no --yes to paper over it", `internal/cli/lifecycle/destroy.go`). And every command that *does* call the interactive `cliutil.Confirm` helper — `apply`, `profile delete`, `system prune`, `system tart` — **already** has a `--yes/-y` flag (via `cliutil.EffectiveYes`). So there is no lost flag and no inconsistency to fix. The only adjacent gap (`destroy --all` destroys every sandbox with no confirmation) was reviewed and the existing promptless design was kept by the user — adding `--yes`/a prompt would contradict the documented decision. The `-y` that errored simply doesn't exist by design.
+- **Pointer:** `internal/cli/lifecycle/destroy.go` (no `Confirm`; flags = `--all`, `--abandon-unapplied`); `internal/cli/cliutil/json.go` `EffectiveYes`; existing `--yes` on prune/apply/profile/tart.
+
 ### DF7 — `stall_grace_secs=120` for containerd-vm may need re-measuring against current startup latency
 
 - **Discovered:** 2026-05-26 · **Workstream:** observed during W-L8b kickoff (same failure as DF3-DF6)

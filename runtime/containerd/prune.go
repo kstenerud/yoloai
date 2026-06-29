@@ -20,8 +20,9 @@ import (
 )
 
 // Prune removes orphaned containerd containers in the yoloai namespace.
-// Any container named yoloai-* that is not in knownInstances is considered orphaned.
-// For each removed container, CNI teardown is attempted.
+// A container is orphaned when its com.yoloai.* labels mark it a yoloai instance
+// owned by this principal (runtime.IsOrphanCandidate, D62) and its name is not in
+// knownInstances. For each removed container, CNI teardown is attempted.
 func (r *Runtime) Prune(ctx context.Context, knownInstances []string, dryRun bool, output io.Writer) (runtime.PruneResult, error) {
 	ctx = r.withNamespace(ctx)
 
@@ -35,16 +36,19 @@ func (r *Runtime) Prune(ctx context.Context, knownInstances []string, dryRun boo
 		return runtime.PruneResult{}, fmt.Errorf("list containers: %w", err)
 	}
 
-	// Scope the sweep to this runtime's principal so a test or secondary
-	// principal never reclaims containers owned by a different principal (DF19).
-	prefix := config.InstancePrefix(r.layout.Principal)
-
 	var result runtime.PruneResult
 	for _, ctr := range containers {
-		name := ctr.ID()
-		if !strings.HasPrefix(name, prefix) {
+		// Identify candidates by label, not name; the principal label scopes the
+		// sweep so a test or secondary principal never reclaims another
+		// principal's containers (DF19).
+		labels, err := ctr.Labels(ctx)
+		if err != nil {
+			continue // can't read labels (container vanishing mid-sweep) — skip
+		}
+		if !runtime.IsOrphanCandidate(labels, r.layout.Principal) {
 			continue
 		}
+		name := ctr.ID()
 		if known[name] {
 			continue
 		}

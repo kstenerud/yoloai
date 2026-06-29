@@ -7,6 +7,14 @@ History of codebase findings (issues discovered mid-work) that have been address
 are moved here from [`findings-unresolved.md`](findings-unresolved.md) once resolved, so the
 active file stays a working set. Newest first.
 
+### DF60 — `yoloai system prune` orphan detection switched from `yoloai-*` name match to the canonical `com.yoloai.*` labels
+
+- **Discovered:** 2026-06-29 · **Resolved:** 2026-06-29 · **Workstream:** disk-reclaim / prune evaluation
+- **Severity:** LOW · **Disposition:** ADDRESSED-IN-PLACE
+- **Description:** docker and containerd `Prune` identified orphan candidates by the `yoloai-*` container-name prefix. That match is fragile (a foreign container merely *named* `yoloai-*` would be removed) and isn't the canonical identity. Note the case that prompted this — `competent_benz`, a leaked yoloai keepalive with a random name — had *neither* a yoloai name nor any `com.yoloai.*` label (a hand-run container), so neither name- nor label-matching can or should reclaim it; identifying that would require matching by *image*, which risks pruning a container the user ran by hand (the user chose not to). So this fix is the principled-identity half: match candidates by the labels yoloai stamps on every instance.
+- **Resolution:** new pure helper `runtime.IsOrphanCandidate(labels, principal)` returns true only when `com.yoloai.sandbox` is present (yoloai-created) AND `com.yoloai.principal` equals the runtime's principal (DF19 per-principal scoping; absent label == default ""). docker `pruneContainers` now lists by `filters.Arg("label", LabelSandbox)` and filters with the helper; containerd `Prune` reads `ctr.Labels(ctx)` and does the same. The known-instances check and removal stay keyed on the real name, so behavior is identical for every real yoloai container (all carry both name and labels) and strictly safer for foreign `yoloai-*`-named containers. Unit-tested (`runtime/orphan_test.go`); both backends already stamp the labels at create (`docker.go` `containerConfig.Labels`, containerd `WithContainerLabels`).
+- **Pointer:** `runtime/orphan.go` (+`_test.go`), `runtime/docker/prune.go` (`pruneContainers`), `runtime/containerd/prune.go` (`Prune`). Related still-open prune gaps: DF59 (reclaim completeness/reporting), DF61 (test-HOME leaks).
+
 ### DF58 — podman backend connected to docker when `$DOCKER_HOST` was set (socket discovery honored it over native podman sockets)
 
 - **Discovered:** 2026-06-29 · **Resolved:** 2026-06-29 · **Workstream:** tamper-resistant-firewall (podman validation)
