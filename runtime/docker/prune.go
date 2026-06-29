@@ -127,22 +127,6 @@ func (r *Runtime) removeImage(ctx context.Context, id, shortID string, output io
 	return false
 }
 
-// formatBytes formats a byte count as a human-readable string.
-func formatBytes(b uint64) string {
-	const (
-		mb = 1024 * 1024
-		gb = 1024 * 1024 * 1024
-	)
-	switch {
-	case b >= gb:
-		return fmt.Sprintf("%.2f GB", float64(b)/float64(gb))
-	case b >= mb:
-		return fmt.Sprintf("%.1f MB", float64(b)/float64(mb))
-	default:
-		return fmt.Sprintf("%d B", b)
-	}
-}
-
 // PruneCache implements runtime.CachePruner. The depth is set by includeImages:
 //
 //   - false (plain `prune`): stopped containers + unused volumes/networks +
@@ -225,7 +209,7 @@ func (r *Runtime) PruneCache(ctx context.Context, includeImages, dryRun bool, ou
 	if after := r.reclaimableBytes(ctx, includeImages); before >= 0 && after >= 0 && before > after {
 		reclaimed = before - after
 	}
-	fmt.Fprintf(output, "%s: reclaimed %s\n", r.binaryName, formatBytes(uint64(reclaimed))) //nolint:errcheck,gosec // G115: reclaim is non-negative
+	fmt.Fprintf(output, "%s: reclaimed %s\n", r.binaryName, runtime.FormatBytes(reclaimed)) //nolint:errcheck
 	return reclaimed, nil
 }
 
@@ -262,7 +246,7 @@ func (r *Runtime) pruneCacheDryRun(ctx context.Context, includeImages bool, outp
 		what = "unused images, volumes, build cache"
 		estimate += images
 	}
-	fmt.Fprintf(output, "%s: cache prune skipped (--dry-run): would remove %s (~%s)\n", r.binaryName, what, formatBytes(uint64(estimate))) //nolint:errcheck,gosec // G115: estimate is non-negative
+	fmt.Fprintf(output, "%s: cache prune skipped (--dry-run): would remove %s (~%s)\n", r.binaryName, what, runtime.FormatBytes(estimate)) //nolint:errcheck
 	if includeImages {
 		r.warnImageReclaimBlockers(du, output)
 	}

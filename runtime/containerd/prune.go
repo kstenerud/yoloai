@@ -108,7 +108,17 @@ func (r *Runtime) PruneCache(ctx context.Context, includeImages, dryRun bool, ou
 	if err := r.pruneImages(ctx, dryRun, output); err != nil {
 		return 0, err
 	}
-	return r.pruneSnapshots(ctx, dryRun, output), nil
+	reclaimed := r.pruneSnapshots(ctx, dryRun, output)
+	// Print a per-backend reclaim line like docker/podman so containerd's
+	// contribution to the aggregate is visible rather than silently folded in.
+	// The figure is the overlayfs snapshot reclaim only: the image content-store
+	// blobs that pruneImages frees are not separately measured (DF59), so on a
+	// host that mostly held content this can read low despite real reclaim.
+	if !dryRun {
+		fmt.Fprintf(output, "containerd: reclaimed %s (snapshot layers; image content not separately measured)\n", //nolint:errcheck
+			runtime.FormatBytes(reclaimed))
+	}
+	return reclaimed, nil
 }
 
 // refuseIfContainersExist returns an error if any container owned by this
@@ -216,39 +226,44 @@ func orderLeafFirst(infos []snapshots.Info) []string {
 }
 
 // pruneSnapshots removes every snapshot in each configured snapshotter (both
-// overlayfs and devmapper) within the namespace, returning the on-disk bytes
-// actually released (summed from each successfully removed snapshot's Usage,
-// measured just before its removal). Removal is leaf-first (see
-// orderLeafFirst), so the whole chain is freed synchronously and the returned
-// total reflects bytes truly reclaimed — not an optimistic figure that assumes
-// a later GC pass. It therefore matches what CacheUsage reported for the same
-// snapshots, so prune reclaim reconciles with the doctor/disk figures.
+// overlayfs and devmapper) within the namespace, returning only the bytes that
+// free HOST disk — i.e. the overlayfs reclaim. Each figure is summed from the
+// removed snapshot's Usage, measured just before removal; removal is leaf-first
+// (see orderLeafFirst) so the chain frees synchronously and the figure reflects
+// bytes truly reclaimed, not an optimistic later-GC assumption.
 //
-// devmapper caveat: removing a thin snapshot frees blocks back to the
-// thin-pool, but the pool's backing loopback file does not shrink, so host
-// `df` is unchanged even though the pool regains free blocks. We surface this
-// so the reported reclaim isn't mistaken for freed disk.
+// devmapper is reported separately and EXCLUDED from the returned total:
+// removing a thin snapshot returns blocks to the thin-pool, but the pool's
+// backing loopback file does not shrink, so host `df` is unchanged. Counting
+// those bytes as "reclaimed" would over-report freed disk, so we surface them in
+// their own line and leave them out of the total.
 func (r *Runtime) pruneSnapshots(ctx context.Context, dryRun bool, output io.Writer) int64 {
-	var reclaimed int64
-	touchedDevmapper := false
+	var hostFreed, devmapperBytes int64
 	for _, snapshotter := range snapshotterNames {
 		infos, present := r.snapshotInfos(ctx, snapshotter)
 		if !present || len(infos) == 0 {
 			continue
 		}
+		n := r.pruneSnapshotter(ctx, snapshotter, orderLeafFirst(infos), dryRun, output)
+		// devmapper blocks return to the thin-pool but the backing file does not
+		// shrink, so they free no host disk — report them separately and DON'T
+		// count them in the reclaimed total (overcount otherwise). overlayfs
+		// snapshots do free host disk and are counted.
 		if snapshotter == "devmapper" {
-			touchedDevmapper = true
+			devmapperBytes += n
+		} else {
+			hostFreed += n
 		}
-		reclaimed += r.pruneSnapshotter(ctx, snapshotter, orderLeafFirst(infos), dryRun, output)
 	}
-	if touchedDevmapper {
-		verb := "are returned"
+	if devmapperBytes > 0 {
+		verb := "returned"
 		if dryRun {
 			verb = "would be returned"
 		}
-		fmt.Fprintf(output, "containerd: devmapper blocks %s to the thin-pool; the pool backing file does not shrink, so host df is unchanged\n", verb) //nolint:errcheck
+		fmt.Fprintf(output, "containerd: %s of devmapper blocks %s to the thin-pool; the pool backing file does not shrink, so this frees no host disk (excluded from the reclaimed total)\n", //nolint:errcheck
+			runtime.FormatBytes(devmapperBytes), verb)
 	}
-	return reclaimed
+	return hostFreed
 }
 
 // pruneSnapshotter removes the given snapshots (in the leaf-first order the
