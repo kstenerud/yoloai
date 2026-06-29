@@ -101,8 +101,9 @@ files git considers part of the project are copied (`git ls-files --cached --oth
 agent could read them, and they never show up in diffs. Nested `.gitignore`, `!`
 negation, and `.git/info/exclude` are all respected. Non-git directories have no
 gitignore semantics and are copied in full. To include ignored files anyway, use
-`:copy-all`. (Honoring applies to host-side backends; VM backends such as tart copy
-in-VM and aren't covered yet.)
+`:copy-all`. (Honoring happens host-side when the work copy is created, so it applies
+to every backend — VM backends like tart copy the already-filtered work copy into the
+VM.)
 
 ```bash
 # Default: safe isolated copy

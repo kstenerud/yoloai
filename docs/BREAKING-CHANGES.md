@@ -18,9 +18,9 @@ the files git considers part of the project (`git ls-files --cached --others
 of the sandbox entirely, so they can't be read by the agent and never appear in
 diffs. Nested `.gitignore`, negation (`!`) patterns, `.git/info/exclude`, and the
 global excludesFile are all honored (git does the matching). Non-git directories are
-unaffected (no gitignore semantics — copied as before). This applies on the host-side
-backends (docker/podman/containerd/seatbelt); VM backends (tart) copy in-VM and are
-not yet covered.
+unaffected (no gitignore semantics — copied as before). This applies to every backend:
+the filtering happens host-side when the work copy is created, and VM backends (tart)
+then copy that already-filtered work copy into the VM.
 
 **Rationale:** safe defaults. "Gitignored" means "not part of this project's shared
 surface" — exposing those files to the agent defeated the user's own intent and was a
