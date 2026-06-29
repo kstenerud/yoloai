@@ -139,6 +139,7 @@ var _ runtime.IsolationCapabilityProvider = (*Runtime)(nil)
 var _ runtime.CachePruner = (*Runtime)(nil)
 var _ runtime.InteractiveSession = (*Runtime)(nil)
 var _ runtime.DiskUsageReporter = (*Runtime)(nil)
+var _ runtime.RecreateAdvisor = (*Runtime)(nil)
 
 // New creates a Runtime and verifies the Docker daemon is reachable. layout
 // carries the threaded environment snapshot; the daemon socket and TLS settings
@@ -254,6 +255,17 @@ func (r *Runtime) notFound() error {
 	}
 	return fmt.Errorf("%w — if you recently switched Docker providers, this sandbox's container may live in a different one (installed: %s); start the provider it was created on, or set DOCKER_HOST / 'docker context use' to point at it",
 		runtime.ErrNotFound, strings.Join(r.providerNames, ", "))
+}
+
+// RecreateAdvisory warns, when >= 2 Docker providers are installed, that a
+// container reported missing may actually live in a provider the user switched
+// away from — so recreating it here abandons the original (DF22). Implements
+// runtime.RecreateAdvisor.
+func (r *Runtime) RecreateAdvisory(_ context.Context) string {
+	if len(r.providerNames) < 2 {
+		return ""
+	}
+	return fmt.Sprintf("container not found in the current Docker provider; if you recently switched providers (installed: %s), the original sandbox — with its agent state and any uncommitted in-container work — may still exist in the other one. Recreating here starts a fresh container. To reconnect the original instead, start the provider it was created on (or set DOCKER_HOST / 'docker context use').", strings.Join(r.providerNames, ", "))
 }
 
 func pingFailureError(err error, binaryName string, env map[string]string) error {

@@ -232,6 +232,86 @@ func TestStart_Removed(t *testing.T) {
 	assert.Contains(t, err.Error(), store.RuntimeConfigFile)
 }
 
+// TestStart_Removed_RecreateAdvisory verifies that when the runtime reports
+// RecreateAdvisory and the container is missing (StatusRemoved), Start emits a
+// NoticeWarn containing the advisory text — and that the warning is suppressed
+// when Recreating is true (intentional reset path, DF22).
+func TestStart_Removed_RecreateAdvisory(t *testing.T) {
+	const advisory = "container not found; you may have switched Docker providers"
+
+	// notFoundInspect simulates a container that was removed (or lives in another
+	// Docker provider): Inspect returns ErrNotFound so DetectStatus → StatusRemoved.
+	notFoundInspect := func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
+		return runtime.InstanceInfo{}, fmt.Errorf("not found: %w", runtime.ErrNotFound)
+	}
+
+	t.Run("advisory emitted when not Recreating", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		createTestSandbox(t, tmpDir, "test-adv-warn", "/tmp/project", "copy")
+
+		mock := &lifecycleMockRuntime{
+			inspectFn: notFoundInspect,
+			recreateAdvisoryFn: func(_ context.Context) string {
+				return advisory
+			},
+		}
+		d := newLifecycleDeps(mock, tmpDir)
+
+		// recreateContainer fails (no runtime-config.json) — that's fine; we
+		// assert on the notices accumulated before the error, not the error itself.
+		result, _ := Start(context.Background(), d, "test-adv-warn", StartOptions{})
+
+		var warnNotices []Notice
+		for _, n := range result.Notices {
+			if n.Level == NoticeWarn {
+				warnNotices = append(warnNotices, n)
+			}
+		}
+		require.NotEmpty(t, warnNotices, "expected at least one NoticeWarn")
+		assert.Contains(t, warnNotices[0].Message, advisory)
+	})
+
+	t.Run("advisory suppressed when Recreating", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		createTestSandbox(t, tmpDir, "test-adv-suppress", "/tmp/project", "copy")
+
+		mock := &lifecycleMockRuntime{
+			inspectFn: notFoundInspect,
+			recreateAdvisoryFn: func(_ context.Context) string {
+				return advisory
+			},
+		}
+		d := newLifecycleDeps(mock, tmpDir)
+
+		result, _ := Start(context.Background(), d, "test-adv-suppress", StartOptions{Recreating: true})
+
+		for _, n := range result.Notices {
+			if n.Level == NoticeWarn {
+				assert.NotContains(t, n.Message, advisory, "advisory must not appear when Recreating=true")
+			}
+		}
+	})
+
+	t.Run("no advisory when backend does not implement RecreateAdvisor", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		createTestSandbox(t, tmpDir, "test-adv-none", "/tmp/project", "copy")
+
+		// recreateAdvisoryFn left nil → RecreateAdvisory returns "" → no warn.
+		mock := &lifecycleMockRuntime{
+			inspectFn: notFoundInspect,
+		}
+		d := newLifecycleDeps(mock, tmpDir)
+
+		result, _ := Start(context.Background(), d, "test-adv-none", StartOptions{})
+
+		for _, n := range result.Notices {
+			if n.Level == NoticeWarn {
+				t.Errorf("unexpected NoticeWarn when no advisory: %q", n.Message)
+			}
+		}
+	})
+}
+
 func TestStart_Resume_RequiresPrompt(t *testing.T) {
 	tmpDir := t.TempDir()
 

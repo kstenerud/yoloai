@@ -50,6 +50,10 @@ type StartOptions struct {
 	// the caller must re-supply it on each launch that needs it (secrets are
 	// the caller's concern).
 	Env map[string]string
+	// Recreating indicates the caller already intends a recreate (e.g. reset
+	// deliberately destroyed the container), so the provider-switch advisory
+	// (DF22) — which assumes the container vanished unexpectedly — is suppressed.
+	Recreating bool
 }
 
 // Start ensures a sandbox is running — idempotent.
@@ -303,6 +307,21 @@ func handleSuspendedResume(ctx context.Context, d state.Deps, cname, name string
 	return nil
 }
 
+// maybeWarnRecreateAdvisory emits the backend's recreate advisory (DF22) when a
+// sandbox's container was found missing and the recreate is not deliberate
+// (reset sets opts.Recreating). It warns, e.g., that a container missing from
+// the current Docker provider may still live in one the user switched away from,
+// so recreating here abandons the original. No-op for backends without an
+// advisory or when the recreate was expected.
+func maybeWarnRecreateAdvisory(ctx context.Context, d state.Deps, opts StartOptions, n *notices) {
+	if opts.Recreating {
+		return
+	}
+	if adv := runtime.RecreateAdvisoryFor(ctx, d.Runtime); adv != "" {
+		n.warnf("%s", adv)
+	}
+}
+
 func start(ctx context.Context, d state.Deps, name string, opts StartOptions, n *notices) error {
 	slog.Info("starting sandbox", "event", "sandbox.start", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
 	sandboxDir := d.Layout.SandboxDir(name)
@@ -363,6 +382,7 @@ func start(ctx context.Context, d state.Deps, name string, opts StartOptions, n 
 		return handleStoppedOrRemovedStatus(ctx, d, cname, name, meta, opts, promptText, customPrompt, true, fmt.Sprintf("Sandbox %s started", name), n)
 
 	case status.StatusRemoved:
+		maybeWarnRecreateAdvisory(ctx, d, opts, n)
 		return handleStoppedOrRemovedStatus(ctx, d, cname, name, meta, opts, promptText, customPrompt, false, fmt.Sprintf("Sandbox %s recreated and started", name), n)
 
 	default:

@@ -234,6 +234,26 @@ func CacheUsageFor(ctx context.Context, rt Backend) (CacheUsage, error) {
 	return CacheUsage{CachedBytes: 0, ImageBytes: -1}, nil
 }
 
+// RecreateAdvisor is an optional interface for backends whose container may
+// actually exist under a different host endpoint than the one currently
+// connected (e.g. Docker via OrbStack vs Docker Desktop). Before the lifecycle
+// layer silently recreates a sandbox whose container is reported missing, it
+// asks the backend for an advisory; a non-empty string warns the user that the
+// "missing" container may live in a provider they switched away from, so
+// recreating here would abandon the original (DF22). Empty string = no advisory.
+type RecreateAdvisor interface {
+	RecreateAdvisory(ctx context.Context) string
+}
+
+// RecreateAdvisoryFor returns the backend's recreate advisory if implemented,
+// else "".
+func RecreateAdvisoryFor(ctx context.Context, rt Backend) string {
+	if a, ok := rt.(RecreateAdvisor); ok {
+		return a.RecreateAdvisory(ctx)
+	}
+	return ""
+}
+
 // ===== 3. Optional operations =====
 
 // ExitStatus is the result of a launched process exiting. Signaled and Signal

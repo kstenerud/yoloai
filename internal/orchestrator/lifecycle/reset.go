@@ -393,7 +393,7 @@ func prepareResetRestart(ctx context.Context, d state.Deps, opts ResetOptions, s
 
 	slog.Info("reset complete", "event", "sandbox.reset.complete", "sandbox", opts.Name)
 	// Start the container; its status notices flow into the reset's notices.
-	if err := start(ctx, d, opts.Name, StartOptions{Env: opts.Env}, n); err != nil {
+	if err := start(ctx, d, opts.Name, StartOptions{Env: opts.Env, Recreating: true}, n); err != nil {
 		return err
 	}
 
