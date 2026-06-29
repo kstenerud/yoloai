@@ -350,13 +350,15 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 	cmd := sysexec.Command(r.execEnv, r.tartBin, args...)
 	cmd.Stderr = logFile
 	cmd.Stdout = logFile
-	// Setsid (not Setpgid): `tart run` hosts the agent + tmux, so a non-interactive
-	// `new`/`start` must not leave them attached to the caller's controlling
-	// terminal. Setpgid makes a new process group but stays in the same session,
-	// keeping /dev/tty and risking raw-mode corruption after the CLI returns
-	// (DF40). Setsid starts a new session with no controlling tty (same detach
-	// idiom as the broker sidecar); the kill path (kill(-pid)) still reaps the
-	// group since the child is its own process-group leader.
+	// Setsid (not Setpgid): `tart run` is a long-lived host process, so a
+	// non-interactive `new`/`start` must not leave it attached to the caller's
+	// controlling terminal. Setpgid makes a new process group but stays in the
+	// same session, keeping /dev/tty and risking raw-mode corruption after the
+	// CLI returns (DF40). Setsid starts a new session with no controlling tty
+	// (same detach idiom as the broker sidecar). Teardown is unaffected:
+	// stopVM tears down via `tart stop` plus a pgrep-and-SIGTERM of the
+	// `tart run` process by PID — independent of session/process group. (Unlike
+	// seatbelt, tmux + the agent run inside the guest VM, not as host children.)
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Setsid: true,
 	}
