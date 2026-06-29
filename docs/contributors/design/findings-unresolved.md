@@ -23,26 +23,37 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 
 ## Findings
 
-### DF56 — `system build --backend podman` no-ops against a stale image (build-inputs checksum is host-side, shared across backends)
+### DF62 — interactive commands (`yoloai destroy`, …) have no `--yes`/non-interactive flag
 
-- **Discovered:** 2026-06-28 · **Workstream:** egress-broker podman validation (workstream D)
-- **Severity:** LOW (only bites multi-backend image work; the workaround is trivial once known)
-- **Disposition:** PARKED
-- **Description:** The base-image build is skipped when the recorded build-inputs checksum
-  (`<layout>/cache/.base-image-checksum`, written by `RecordBuildChecksum`) matches the current
-  embedded inputs. But that checksum is **host-side and backend-agnostic** — a `docker` build marks
-  it "current" for *every* backend. So `yoloai system build --backend podman` silently no-ops if a
-  docker build already stamped the checksum, leaving podman's actual image stale (observed: a
-  3-week-old podman `yoloai-base` whose `entrypoint.py` predated the `keepalive_only` agent-free
-  logic, which made the agent-free launch path look broken on podman when it was just a stale
-  image). The image existence/freshness is per-backend (per daemon store); the checksum is not.
-  **Workaround:** `podman rmi -f localhost/yoloai-base:latest` then rebuild — a missing image forces
-  the build regardless of checksum. **Fix directions:** key the checksum per-backend (e.g.
-  `.base-image-checksum-<backend>`), or have the freshness check also confirm the image exists *in
-  that backend's store* before trusting the checksum.
-- **Pointer:** `runtime/docker/build.go` (`RecordBuildChecksum`, `buildBaseImage` skip logic);
-  the per-backend image lives in each daemon's store. Surfaced during the podman broker validation
-  (see `research/egress-broker-host-reachability.md` "Rootless podman" aside).
+- **Discovered:** 2026-06-29 · **Workstream:** disk-reclaim / prune evaluation
+- **Severity:** LOW (ergonomics; blocks scripted/CI use) · **Disposition:** PARKED
+- **Description:** `yoloai destroy <name>...` prompts interactively for confirmation but exposes no `--yes`/`-y` (or `--force`) flag to skip the prompt — `-y` errors with "unknown shorthand flag". The only non-interactive lever is `--abandon-unapplied`, which is narrowly about *unapplied work*, not general confirmation; on a `CHANGES: no` sandbox there is no way to confirm non-interactively except piping `yes`. This appears to be a regression from the move away from a generic `--force` to consequence-named flags (see [[feedback_dangerous_option_naming]]): the specific flags (`--abandon-unapplied`) replaced `--force`'s *danger-acknowledgement* role but not its *non-interactive-confirmation* role. Audit all interactive commands (destroy, reset/wipe, system prune already has `-y`, profile rm, …) for a consistent non-interactive flag. **Fix direction:** add a `--yes`/`-y` that confirms the *ordinary* prompt while keeping `--abandon-unapplied` as the separate, additionally-required acknowledgement for unreviewed work (so `-y` alone still refuses a dirty sandbox). Keep the convention identical across commands.
+- **Pointer:** `yoloai destroy` cmd (cobra flag set — only `--abandon-unapplied`, `--all`); compare `system prune` which already has `-y/--yes`.
+
+### DF61 — integration tests leak multi-GB isolated container stores in `/tmp` on SIGKILL/timeout
+
+- **Discovered:** 2026-06-29 · **Workstream:** disk-reclaim / prune evaluation
+- **Severity:** MEDIUM (silent multi-GB disk leak on a test host; compounding) · **Disposition:** PARKED
+- **Description:** The CLI/orchestrator integration harness gives each test a fresh `HOME` (`t.TempDir()` / `testutil.IsolatedHome`) under `/tmp`. For rootless podman the storage graphroot follows `$HOME`, so a test that builds/pulls the base image populates a **multi-GB image store inside that temp HOME** (observed: `/tmp/TestCLI_StartStop…` 7.3 GB, `/tmp/yoloai-cli-setup…` 5.1 GB). Go's `t.TempDir` cleanup only runs on *normal* test completion — on SIGKILL, a `-timeout` kill, or a killed parent `make`, the temp HOMEs (and their multi-GB stores) leak permanently. Several such runs filled a 116 GB disk. This was greatly amplified by DF56's mass-rebuild fallout, but the leak mechanism is independent. `yoloai system prune` cannot reclaim it — the dirs are outside `~/.yoloai`. **Fix directions:** (a) point the per-test podman/docker storage at the *shared* host store (don't let graphroot follow the isolated HOME) so the base image isn't re-copied per test; (b) failing that, register a best-effort cleanup that also runs on signal, or a sweeper (`make clean-testtmp`) for `/tmp/{TestCLI_*,yoloai-cli-setup-*}`; (c) document the leak so CI hosts sweep `/tmp`.
+- **Pointer:** `internal/cli/integration_main_test.go` / `integration_test.go` (cliSetup HOME isolation), `internal/orchestrator/integration_helpers_test.go`, `test/e2e/helpers_test.go`; rootless-podman graphroot-follows-HOME behavior.
+
+### DF60 — `yoloai system prune` misses yoloai containers that don't carry a `yoloai-*` name
+
+- **Discovered:** 2026-06-29 · **Workstream:** disk-reclaim / prune evaluation
+- **Severity:** MEDIUM (leaked containers pin GBs of image layers and are invisible to prune) · **Disposition:** PARKED
+- **Description:** Prune's orphan detection only considers containers named `yoloai-*` (see `runtime/containerd/prune.go:23` and the docker equivalent). A leaked container that runs the yoloai entrypoint on a yoloai image but carries a *random* engine-assigned name is never reclaimed — observed: `competent_benz` (docker), `Up 21h`, `cmd="/yoloai/bin/entrypoint…"`, image `yoloai-base:latest` (an old, now-dangling layer set), pinning ~7 GB. On a yoloai-dedicated host these are pure leak yet survive every prune. Such containers arise from any path that starts a yoloai image without yoloai's `--name` (a raw `docker run` in a test/debug, a crashed create before naming, etc.). **Fix directions:** also treat as orphaned any container whose image is a yoloai-managed image (yoloai-base/profile) OR whose entrypoint/labels mark it yoloai, regardless of name; or stamp every yoloai-started container with the `com.yoloai.*` label (already used for instances) and match orphans by label, not name. Report+remove under the normal prune (not `--images`).
+- **Pointer:** `runtime/containerd/prune.go` (`knownInstances`/`yoloai-*` match), docker `Prune`; the broker/launch paths that could leave an unnamed container; `runtime.LabelSandbox`/`LabelPrincipal` already exist for label-based matching.
+
+### DF59 — `yoloai system prune` reclaim is incomplete and under-reported (containerd hard-block, devmapper non-shrink, undercounted total)
+
+- **Discovered:** 2026-06-29 · **Workstream:** disk-reclaim / prune evaluation
+- **Severity:** MEDIUM (leaves tens of GB reclaimable + misleads the user about how much was freed) · **Disposition:** PARKED
+- **Description:** Stress-testing prune on a 100%-full yoloai host surfaced three distinct gaps:
+  1. **One stale sandbox hard-blocks ALL containerd image reclaim.** A sandbox with a valid dir but a *stopped* containerd container (`kreach`) made `prune --images` **fail** for containerd entirely (`container "yoloai-kreach" still exists in yoloai namespace; stop and remove it first`) — leaving the whole ~32 GB containerd store unreclaimed. Prune neither offers to stop/remove the blocker nor skips it to reclaim the rest; one stuck sandbox defeats the command. (`runtime/containerd/prune.go:121`.)
+  2. **devmapper thin-pool space is not returned to the host.** After removing the containerd image+snapshots, the devmapper blocks are freed back into the thin-pool but the backing `data` file (`/var/lib/containerd/devmapper/data`, ~10 GB) never shrinks, so host `df` is unchanged. Prune prints a warning ("pool backing file does not shrink") but offers no reclaim path; the only way to return the space is to discard/recreate the pool.
+  3. **Reported reclaim undercounts actual.** Prune printed "Reclaimed 7.66 GiB" while host free space rose ~20 GB in the same run — the total sums only docker+podman cache byte-counts; the containerd image/overlayfs-snapshot reclaim is not included, so the user is told a misleadingly small number.
+- **Fix directions:** (1) before the containerd cache prune, reconcile blocking containers — stop+remove a stopped one (or skip it and continue, reporting it) rather than aborting; (2) add a `--reclaim-devmapper` (or fold into `--images`) path that discards/recreates the thin-pool after snapshot removal so the host actually reclaims; (3) include containerd's reclaimed bytes (or at least an "and containerd images/snapshots" note) in the reported total, or report per-backend.
+- **Pointer:** `runtime/containerd/prune.go` (`PruneCache`, the still-exists abort + devmapper note), `internal/.../system prune` reclaim-total accounting; verified live on this host (32 GB containerd store, 11 GB devmapper data file unshrunk after `--images`).
 
 ### DF55 — `:copy` directory setup ignores `.gitignore`, copying gitignored secrets into the sandbox
 

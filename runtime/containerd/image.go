@@ -72,7 +72,7 @@ func (r *Runtime) Setup(ctx context.Context, layout config.Layout, sourceDir str
 	// while Docker still holds a current yoloai-base image. When the build
 	// inputs are unchanged, re-linking is near-instant — a full rebuild here is
 	// the cold-build footgun we are eliminating.
-	if !force && !dockerrt.NeedsBuild(layout, sourceDir) && r.tryLink(ctx, output) {
+	if !force && !dockerrt.NeedsBuild(layout, "containerd") && r.tryLink(ctx, output) {
 		return nil
 	}
 
@@ -83,7 +83,7 @@ func (r *Runtime) Setup(ctx context.Context, layout config.Layout, sourceDir str
 	// buildDockerImage shells out to `docker build`, which (unlike the docker
 	// backend's SDK build) does not record the build-inputs checksum. Record it
 	// here so the relink-without-rebuild fast path above can fire next time.
-	dockerrt.RecordBuildChecksum(layout, sourceDir)
+	dockerrt.RecordBuildChecksum(layout, "containerd")
 
 	// Fast path: Docker running in containerd-snapshotter mode stores images
 	// directly in containerd (namespace "moby"). Mark that namespace as

@@ -40,6 +40,8 @@ func TestCreateBuildContext(t *testing.T) {
 	assert.Contains(t, found, "Dockerfile")
 	assert.Contains(t, found, "entrypoint.sh")
 	assert.Contains(t, found, "entrypoint.py")
+	assert.Contains(t, found, "firewall.py")
+	assert.Contains(t, found, "install-firewall.py")
 	assert.Contains(t, found, "sandbox-setup.py")
 	assert.Contains(t, found, "setup_helpers.py")
 	assert.Contains(t, found, "tmux_io.py")
@@ -48,7 +50,7 @@ func TestCreateBuildContext(t *testing.T) {
 	assert.Contains(t, found, "agent-run.sh")
 	assert.Contains(t, found, "yoloai-resume")
 	assert.Contains(t, found, "tmux.conf")
-	assert.Len(t, found, 11)
+	assert.Len(t, found, 13)
 }
 
 func TestCreateProfileBuildContext(t *testing.T) {
@@ -86,7 +88,7 @@ func TestCreateProfileBuildContext(t *testing.T) {
 func TestNeedsBuild_NoChecksum(t *testing.T) {
 	tmp := t.TempDir()
 	layout := config.NewLayout(filepath.Join(tmp, ".yoloai"))
-	assert.True(t, NeedsBuild(layout, ""))
+	assert.True(t, NeedsBuild(layout, "docker"))
 }
 
 func TestNeedsBuild_AfterRecord(t *testing.T) {
@@ -94,8 +96,8 @@ func TestNeedsBuild_AfterRecord(t *testing.T) {
 	layout := config.NewLayout(filepath.Join(tmp, ".yoloai"))
 	// Ensure cache dir exists (normally created by EnsureSetup).
 	require.NoError(t, os.MkdirAll(filepath.Join(tmp, ".yoloai", "cache"), 0750))
-	RecordBuildChecksum(layout, "")
-	assert.False(t, NeedsBuild(layout, ""))
+	RecordBuildChecksum(layout, "docker")
+	assert.False(t, NeedsBuild(layout, "docker"))
 }
 
 func TestBuildInputsChecksum_Deterministic(t *testing.T) {

@@ -191,7 +191,7 @@ func TestEnsureSetup_AlwaysCallsSetup(t *testing.T) {
 	// Simulate a prior successful build by recording the current checksum.
 	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
 	require.NoError(t, os.MkdirAll(layout.CacheDir(), 0750))
-	dockerrt.RecordBuildChecksum(layout, "")
+	dockerrt.RecordBuildChecksum(layout, "docker")
 	mock := &mockRuntime{}
 	mgr := NewEngineWithRuntime(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
 

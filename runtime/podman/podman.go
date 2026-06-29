@@ -187,19 +187,27 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 
 // discoverSocket finds the Podman API socket path.
 // Search order:
-//  1. $CONTAINER_HOST env var
-//  2. $DOCKER_HOST env var
-//  3. $XDG_RUNTIME_DIR/podman/podman.sock (rootless)
-//  4. /run/podman/podman.sock (system-wide)
+//  1. $CONTAINER_HOST env var (podman's own explicit socket override)
+//  2. $XDG_RUNTIME_DIR/podman/podman.sock (rootless)
+//  3. /run/podman/podman.sock (system-wide)
+//  4. WSL2 podman-machine sockets
 //  5. macOS: `podman machine inspect` (Podman Machine)
+//  6. $DOCKER_HOST env var (LAST-RESORT fallback)
+//
+// $DOCKER_HOST is checked LAST, after every native podman socket, on purpose:
+// it is docker's variable, and in a mixed host it points at the DOCKER daemon.
+// Honoring it ahead of the real podman socket (the original bug) silently routed
+// the podman backend to docker — where podman-only container options like the
+// rootless slirp4netns network mode don't exist, so a brokered sandbox's
+// container failed to start with a misleading "instance not found". A user who
+// genuinely wants to target a remote/alternate podman uses $CONTAINER_HOST (which
+// still wins). $DOCKER_HOST stays only as a last resort for the "podman emulating
+// docker via DOCKER_HOST, no native socket present" setup.
 func discoverSocket(env map[string]string) (string, error) {
 	// Check the caller's env snapshot first (§12: the daemon-socket location
 	// is threaded data, not a live os.Getenv — see New's layout.CuratedEnv /
 	// the probe's probeEnv boundary).
 	if host := env["CONTAINER_HOST"]; host != "" {
-		return host, nil
-	}
-	if host := env["DOCKER_HOST"]; host != "" {
 		return host, nil
 	}
 
@@ -229,7 +237,13 @@ func discoverSocket(env map[string]string) (string, error) {
 		return sock, nil
 	}
 
-	return "", fmt.Errorf("no podman socket found (checked $CONTAINER_HOST, $DOCKER_HOST, $XDG_RUNTIME_DIR/podman/podman.sock, /run/podman/podman.sock)")
+	// Last resort: $DOCKER_HOST (a docker pointer in a mixed host; only trustworthy
+	// for podman when no native podman socket exists — see the doc comment).
+	if host := env["DOCKER_HOST"]; host != "" {
+		return host, nil
+	}
+
+	return "", fmt.Errorf("no podman socket found (checked $CONTAINER_HOST, $XDG_RUNTIME_DIR/podman/podman.sock, /run/podman/podman.sock, $DOCKER_HOST)")
 }
 
 // systemSockPath is the system-wide Podman socket path. Variable for testing.

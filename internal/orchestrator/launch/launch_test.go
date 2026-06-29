@@ -249,7 +249,7 @@ func TestBuildInstanceConfig_RejectsNetworkIsolatedWithGvisor(t *testing.T) {
 		Isolation:   "container-enhanced",
 	}
 
-	_, err := buildInstanceConfig(runtime.BackendDescriptor{Type: "mock", Capabilities: runtime.BackendCaps{NetworkIsolation: true}}, st, nil, nil, brokerOutcome{})
+	_, err := buildInstanceConfig(runtime.BackendDescriptor{Type: "mock", Capabilities: runtime.BackendCaps{NetworkIsolation: true}}, st, nil, nil, brokerOutcome{}, false)
 	require.Error(t, err)
 	msg := err.Error()
 	assert.Contains(t, msg, "container-enhanced", "error names the broken isolation mode")
@@ -269,7 +269,7 @@ func TestBuildInstanceConfig_BrokerOutcome(t *testing.T) {
 	}
 	desc := runtime.BackendDescriptor{Type: "mock"}
 
-	cfg, err := buildInstanceConfig(desc, st, nil, nil, brokerOutcome{})
+	cfg, err := buildInstanceConfig(desc, st, nil, nil, brokerOutcome{}, false)
 	require.NoError(t, err)
 	assert.Equal(t, "", cfg.NetworkMode, "no broker: keep the user's network mode")
 	assert.NotContains(t, cfg.ContainerEnv, "YOLOAI_BROKER_INJECTOR_ENDPOINT=", "no broker: no injector env")
@@ -277,7 +277,7 @@ func TestBuildInstanceConfig_BrokerOutcome(t *testing.T) {
 	cfg, err = buildInstanceConfig(desc, st, nil, nil, brokerOutcome{
 		NetworkMode:      "slirp4netns:allow_host_loopback=true",
 		InjectorEndpoint: "172.17.0.1:44115",
-	})
+	}, false)
 	require.NoError(t, err)
 	assert.Equal(t, "slirp4netns:allow_host_loopback=true", cfg.NetworkMode, "broker mode overrides")
 	assert.Contains(t, cfg.ContainerEnv, "YOLOAI_BROKER_INJECTOR_ENDPOINT=172.17.0.1:44115", "injector endpoint published")
@@ -299,7 +299,7 @@ func TestBuildInstanceConfig_AllowsNetworkIsolatedOnSupportedModes(t *testing.T)
 				NetworkMode: "isolated",
 				Isolation:   isolation,
 			}
-			_, err := buildInstanceConfig(runtime.BackendDescriptor{Type: "mock", Capabilities: runtime.BackendCaps{NetworkIsolation: true, OverlayDirs: true, CapAdd: true}}, st, nil, nil, brokerOutcome{})
+			_, err := buildInstanceConfig(runtime.BackendDescriptor{Type: "mock", Capabilities: runtime.BackendCaps{NetworkIsolation: true, OverlayDirs: true, CapAdd: true}}, st, nil, nil, brokerOutcome{}, false)
 			require.NoError(t, err)
 		})
 	}

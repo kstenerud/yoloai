@@ -50,7 +50,10 @@ func cliSetup(t *testing.T) (projectDir string) {
 	if bt := testutil.IntegrationBackendType(); bt == "" || bt == "docker" || bt == "podman" {
 		layout := config.NewLayoutFor(filepath.Join(tmpHome, ".yoloai", "library"), tmpHome)
 		require.NoError(t, os.MkdirAll(layout.CacheDir(), 0750))
-		dockerrt.RecordBuildChecksum(layout, "")
+		// DF56: seed the ACTIVE backend's checksum key (the CLI subset runs under
+		// both docker and podman); a fixed "docker" key mismatches under podman and
+		// forces a full rebuild mid-test.
+		dockerrt.RecordBuildChecksum(layout, integrationBackendKey(bt))
 	}
 
 	// Stamp both realms so the startup gate (D61) sees a consistent, current

@@ -117,6 +117,27 @@ func usesAgentFreeLaunch(rt runtime.Backend, isolation runtime.IsolationMode) (r
 	return launcher, ok && rt.Descriptor().Capabilities.AgentFreeLaunch && runtime.SupportsAgentFreeLaunch(isolation)
 }
 
+// UsesSidecarFirewall reports whether a sandbox enforces its network allowlist
+// from an out-of-container netns sidecar (tamper-resistant: the agent container is
+// denied NET_ADMIN) rather than the in-entrypoint iptables. True only for an
+// isolated sandbox on a backend that can run a netns sidecar AND uses the
+// agent-free launch path (where the box comes up on a neutral holder, so the
+// firewall can be installed before any agent egress). The legacy launch path runs
+// the agent inline in the entrypoint, so it keeps the in-container firewall for
+// now (see the build plan's deferred scope). This single predicate is the one
+// source of truth for both the launch path (withhold NET_ADMIN, run the sidecar)
+// and live allowlist patches (route ipset mutations through a sidecar).
+func UsesSidecarFirewall(rt runtime.Backend, isolation runtime.IsolationMode, networkMode string) bool {
+	if networkMode != "isolated" {
+		return false
+	}
+	if _, ok := runtime.NetnsSidecarRunnerOf(rt); !ok {
+		return false
+	}
+	_, agentFree := usesAgentFreeLaunch(rt, isolation)
+	return agentFree
+}
+
 // buildAndStart constructs the runtime InstanceConfig from State and
 // starts the instance. hasSecrets indicates whether secrets were injected via
 // a temporary directory that the caller will remove after this call returns.
@@ -129,7 +150,8 @@ func usesAgentFreeLaunch(rt runtime.Backend, isolation runtime.IsolationMode) (r
 // path: the agent is welded into the entrypoint as before.
 func buildAndStart(ctx context.Context, rt runtime.Backend, st *state.State, mnts []runtime.MountSpec, ports []runtime.PortMapping, hasSecrets bool, secretEnv map[string]string, bro brokerOutcome) error {
 	cname := store.InstanceName(st.Layout.Principal, st.Name)
-	instanceCfg, err := buildInstanceConfig(rt.Descriptor(), st, mnts, ports, bro)
+	sidecarFirewall := UsesSidecarFirewall(rt, st.Isolation, st.NetworkMode)
+	instanceCfg, err := buildInstanceConfig(rt.Descriptor(), st, mnts, ports, bro, sidecarFirewall)
 	if err != nil {
 		return err
 	}
@@ -147,7 +169,7 @@ func buildAndStart(ctx context.Context, rt runtime.Backend, st *state.State, mnt
 	// condition, so the two stay in sync — a backend on the legacy bring-up also
 	// gets legacy /run/secrets staging.
 	if launcher, ok := usesAgentFreeLaunch(rt, st.Isolation); ok {
-		if err := startViaLaunch(ctx, rt, launcher, st, cname, instanceCfg, markerPath, hasSecrets, secretEnv); err != nil {
+		if err := startViaLaunch(ctx, rt, launcher, st, cname, instanceCfg, markerPath, hasSecrets, secretEnv, bro, sidecarFirewall); err != nil {
 			return err
 		}
 	} else {
@@ -174,7 +196,7 @@ func buildAndStart(ctx context.Context, rt runtime.Backend, st *state.State, mnt
 //     + named vars); there is no /run/secrets read on this path.
 //  5. The secrets-consumed marker wait is SKIPPED on the Launch path (hasSecrets is
 //     false; secrets were not staged to a host dir so no synchronization is needed).
-func startViaLaunch(ctx context.Context, rt runtime.Backend, launcher runtime.ProcessLauncher, st *state.State, cname string, instanceCfg runtime.InstanceConfig, markerPath string, hasSecrets bool, secretEnv map[string]string) error {
+func startViaLaunch(ctx context.Context, rt runtime.Backend, launcher runtime.ProcessLauncher, st *state.State, cname string, instanceCfg runtime.InstanceConfig, markerPath string, hasSecrets bool, secretEnv map[string]string, bro brokerOutcome, sidecarFirewall bool) error {
 	if err := patchKeepaliveOnly(st.SandboxDir, true); err != nil {
 		return fmt.Errorf("patch keepalive_only: %w", err)
 	}
@@ -210,6 +232,18 @@ func startViaLaunch(ctx context.Context, rt runtime.Backend, launcher runtime.Pr
 		return err
 	}
 
+	// Tamper-resistant network isolation: install the firewall from a netns-sharing
+	// sidecar BEFORE the agent is launched. The agent container has no CAP_NET_ADMIN
+	// (buildInstanceConfig withholds it under the sidecar path), so the agent can't
+	// flush a firewall installed from outside its reach. The box is up on the neutral
+	// keepalive holder here — no agent egress yet — so installing now is safe; a failed
+	// install fails the launch and the agent never runs unguarded.
+	if sidecarFirewall {
+		if err := installFirewallSidecar(ctx, rt, st, cname, bro); err != nil {
+			return err
+		}
+	}
+
 	// secretEnv is already brokered (LaunchContainer brokers before the delivery
 	// split): the real credential is dropped and the agent points at the host-side
 	// injector. Here it is just materialized into the launched process's env.
@@ -243,6 +277,59 @@ func startViaLaunch(ctx context.Context, rt runtime.Backend, launcher runtime.Pr
 		waitForSecretsConsumed(markerPath, effectiveSecretsConsumedTimeout(rt.Descriptor()))
 	}
 	return nil
+}
+
+// installFirewallSidecar runs the network-isolation firewall installer from an
+// ephemeral container that shares the agent container's network namespace and
+// holds CAP_NET_ADMIN (which the agent container is denied). The allowlist domains
+// come from the sandbox's runtime-config.json (the same source the in-container
+// entrypoint used) and the injector endpoint from the broker outcome; both are
+// passed to the sidecar via the environment. A non-zero install fails the launch.
+func installFirewallSidecar(ctx context.Context, rt runtime.Backend, st *state.State, cname string, bro brokerOutcome) error {
+	runner, ok := runtime.NetnsSidecarRunnerOf(rt)
+	if !ok {
+		// UsesSidecarFirewall already checked this; defensive only.
+		return fmt.Errorf("backend %s cannot run a netns firewall sidecar", rt.Descriptor().Type)
+	}
+
+	allowedDomains, err := loadAllowedDomains(st.SandboxDir)
+	if err != nil {
+		return fmt.Errorf("firewall sidecar: %w", err)
+	}
+
+	env := []string{"YOLOAI_FW_ALLOWED_DOMAINS=" + strings.Join(allowedDomains, " ")}
+	if bro.InjectorEndpoint != "" {
+		env = append(env, "YOLOAI_BROKER_INJECTOR_ENDPOINT="+bro.InjectorEndpoint)
+	}
+
+	if err := runner.RunNetnsSidecar(ctx, runtime.NetnsSidecarSpec{
+		Target: cname,
+		Image:  st.ImageRef,
+		Argv:   []string{"python3", "/yoloai/bin/install-firewall.py"},
+		Env:    env,
+		CapAdd: []string{"NET_ADMIN"},
+	}); err != nil {
+		return fmt.Errorf("install network-isolation firewall: %w", err)
+	}
+	slog.Info("installed tamper-resistant network isolation via netns sidecar",
+		"event", "sandbox.firewall.sidecar", "sandbox", st.Name, "allowed_domains", len(allowedDomains))
+	return nil
+}
+
+// loadAllowedDomains reads the allowed-domains list from a sandbox's
+// runtime-config.json — the composed agent-floor + user allowlist written at
+// create time and kept current by network allow/deny.
+func loadAllowedDomains(sandboxDir string) ([]string, error) {
+	configPath := filepath.Join(sandboxDir, store.RuntimeConfigFile)
+	data, err := os.ReadFile(configPath) //nolint:gosec // path is sandbox-controlled
+	if err != nil {
+		return nil, fmt.Errorf("read runtime-config.json: %w", err)
+	}
+	var cfg runtimeconfig.ContainerConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parse runtime-config.json: %w", err)
+	}
+	return cfg.AllowedDomains, nil
 }
 
 // brokerCredentials starts the host-side credential injector for the sandbox and
@@ -530,7 +617,7 @@ func patchKeepaliveOnly(sandboxDir string, keepalive bool) error {
 // container as YOLOAI_BROKER_INJECTOR_ENDPOINT so the entrypoint can allowlist it
 // under isolation. The isolation-mode gating below keys on st.NetworkMode (the
 // user-facing isolation), which the override never changes.
-func buildInstanceConfig(desc runtime.BackendDescriptor, st *state.State, mnts []runtime.MountSpec, ports []runtime.PortMapping, bro brokerOutcome) (runtime.InstanceConfig, error) {
+func buildInstanceConfig(desc runtime.BackendDescriptor, st *state.State, mnts []runtime.MountSpec, ports []runtime.PortMapping, bro brokerOutcome, sidecarFirewall bool) (runtime.InstanceConfig, error) {
 	cname := store.InstanceName(st.Layout.Principal, st.Name)
 	caps := desc.Capabilities
 
@@ -559,6 +646,13 @@ func buildInstanceConfig(desc runtime.BackendDescriptor, st *state.State, mnts [
 	if bro.InjectorEndpoint != "" {
 		containerEnv = append(containerEnv, "YOLOAI_BROKER_INJECTOR_ENDPOINT="+bro.InjectorEndpoint)
 	}
+	// Under the sidecar-firewall path the allowlist is installed out-of-container by
+	// a netns-sharing sidecar (the container is denied NET_ADMIN below). Tell the
+	// entrypoint to skip its own in-container firewall install — without NET_ADMIN
+	// its iptables calls would fail and abort the boot.
+	if sidecarFirewall {
+		containerEnv = append(containerEnv, "YOLOAI_FIREWALL_EXTERNAL=1")
+	}
 
 	instanceCfg := runtime.InstanceConfig{
 		Name:         cname,
@@ -576,7 +670,11 @@ func buildInstanceConfig(desc runtime.BackendDescriptor, st *state.State, mnts [
 		return runtime.InstanceConfig{}, err
 	}
 
-	if st.NetworkMode == "isolated" && caps.NetworkIsolation {
+	// The agent container gets NET_ADMIN to install its own in-container firewall —
+	// EXCEPT under the sidecar-firewall path, where the firewall is installed from a
+	// netns-sharing sidecar and the agent is deliberately denied NET_ADMIN so it
+	// cannot flush the rules (tamper-resistant isolation).
+	if st.NetworkMode == "isolated" && caps.NetworkIsolation && !sidecarFirewall {
 		instanceCfg.CapAdd = append(instanceCfg.CapAdd, "NET_ADMIN")
 	}
 

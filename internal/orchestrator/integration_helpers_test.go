@@ -67,7 +67,7 @@ func integrationSetup(t *testing.T) (*orchestrator.Engine, context.Context) {
 	// "Docker daemon races on AlreadyExists when rebuilding an
 	// existing tag with identical content".
 	require.NoError(t, os.MkdirAll(layout.CacheDir(), 0750))
-	dockerrt.RecordBuildChecksum(layout, "")
+	dockerrt.RecordBuildChecksum(layout, "docker")
 
 	rt, err := dockerrt.New(ctx, config.Layout{}.WithEnv(testutil.GetCuratedHostEnv(testutil.IntegrationHostEnvVars)))
 	require.NoError(t, err, "Docker must be running for integration tests")
@@ -102,7 +102,7 @@ func legacyDockerIntegrationSetup(t *testing.T) (*orchestrator.Engine, context.C
 	home := testutil.IsolatedHome(t)
 	layout := config.NewLayout(filepath.Join(home, ".yoloai"))
 	require.NoError(t, os.MkdirAll(layout.CacheDir(), 0750))
-	dockerrt.RecordBuildChecksum(layout, "")
+	dockerrt.RecordBuildChecksum(layout, "docker")
 
 	rt, err := dockerrt.New(ctx, config.Layout{}.WithEnv(testutil.GetCuratedHostEnv(testutil.IntegrationHostEnvVars)))
 	require.NoError(t, err, "Docker must be running for integration tests")
@@ -117,8 +117,9 @@ func legacyDockerIntegrationSetup(t *testing.T) (*orchestrator.Engine, context.C
 // podmanIntegrationSetup mirrors integrationSetup on the Podman backend, to
 // validate brokering on rootless podman: it takes the legacy launch path + the
 // decoupled broker + the slirp InjectorReach. Skips when Podman isn't available.
-// The build-checksum pre-seed is backend-agnostic; it avoids a rebuild as long as
-// `yoloai system build --backend podman` has put a current image in Podman.
+// The build-checksum pre-seed is keyed to the podman image store (DF56); it avoids
+// a rebuild as long as `yoloai system build --backend podman` has put a current
+// image in Podman.
 func podmanIntegrationSetup(t *testing.T) (*orchestrator.Engine, context.Context) {
 	t.Helper()
 	ctx := context.Background()
@@ -126,7 +127,7 @@ func podmanIntegrationSetup(t *testing.T) (*orchestrator.Engine, context.Context
 	home := testutil.IsolatedHome(t)
 	layout := config.NewLayout(filepath.Join(home, ".yoloai"))
 	require.NoError(t, os.MkdirAll(layout.CacheDir(), 0750))
-	dockerrt.RecordBuildChecksum(layout, "")
+	dockerrt.RecordBuildChecksum(layout, "podman")
 
 	rt, err := podmanrt.New(ctx, config.Layout{}.WithEnv(testutil.GetCuratedHostEnv(testutil.IntegrationHostEnvVars)))
 	if err != nil {

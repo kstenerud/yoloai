@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"testing"
 	"time"
@@ -661,6 +662,47 @@ func TestIntegration_NetworkIsolation(t *testing.T) {
 	lo, _ := mgr.Runtime().Exec(ctx, store.InstanceName("", "netisolated"),
 		[]string{"curl", "-sf", "--max-time", "5", "http://127.0.0.1"}, "yoloai")
 	assert.NotEqual(t, 28, lo.ExitCode, "loopback should not time out (iptables must allow lo)")
+}
+
+// TestIntegration_NetworkIsolation_LivePatchViaSidecar proves egress-containment
+// step 1.5 §6: a live `network allow` on a tamper-resistant (sidecar-firewalled)
+// isolated docker sandbox still takes effect, even though the agent container has
+// no CAP_NET_ADMIN. The ipset mutation is run from a netns-sharing sidecar, which
+// sees the same per-netns `allowed-domains` set the launch sidecar created — so the
+// patch reports Live and the new IP is actually present in the set.
+func TestIntegration_NetworkIsolation_LivePatchViaSidecar(t *testing.T) {
+	if goruntime.GOOS == "darwin" {
+		t.Skip("the netns-sidecar firewall path is docker-on-Linux (agent-free)")
+	}
+	mgr, ctx := integrationSetup(t)
+
+	_, err := createSandbox(ctx, mgr, orchestrator.CreateOptions{
+		Name:    "netlive",
+		Workdir: orchestrator.DirSpec{Path: createProjectDir(t)},
+		Agent:   "test",
+		Network: orchestrator.NetworkModeIsolated,
+		Version: "test",
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { destroySandbox(ctx, mgr, "netlive") }) //nolint:errcheck // test cleanup
+
+	_, err = startSandbox(ctx, mgr, "netlive", orchestrator.StartOptions{})
+	require.NoError(t, err)
+	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName("", "netlive"), 15*time.Second)
+
+	// The agent container itself cannot mutate or even read the ipset (no
+	// NET_ADMIN) — confirm, so the test can't pass vacuously through an
+	// in-container exec.
+	_, agentErr := mgr.Runtime().Exec(ctx, store.InstanceName("", "netlive"),
+		[]string{"sudo", "-n", "ipset", "add", "-exist", "allowed-domains", "203.0.113.7"}, "yoloai")
+	require.Error(t, agentErr, "agent must not be able to mutate the ipset directly")
+
+	// A live allow, routed through the sidecar, adds the IP to the per-netns set
+	// and can read it back — proving the sidecar shares the agent's netns.
+	script := "ipset add -exist allowed-domains 203.0.113.7 && ipset list allowed-domains | grep -q 203.0.113.7"
+	live, err := mgr.LivePatchNetwork(ctx, "netlive", script, nil)
+	require.NoError(t, err, "sidecar live-patch should succeed")
+	assert.True(t, live, "network allow stays live on a sidecar-firewalled sandbox")
 }
 
 // TestIntegration_ReadOnlyMountVerified verifies that a read-only aux directory

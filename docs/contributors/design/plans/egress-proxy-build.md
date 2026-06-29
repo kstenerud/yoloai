@@ -90,7 +90,8 @@ Key files: `internal/credential/`, `internal/broker/`, `runtime/docker/reach.go`
   until `yoloai0` exists (safe degrade via `ErrInjectorUnsupported`), then brokers — eager
   bridge-ensure is the follow-up.
 
-**Next up (in order): egress containment (build step 4).** The macOS backends are done (below).
+**Next up: egress containment step 2** (the hostile-grade `StrategyEgressProxy`). Steps 1 and
+1.5 are DONE (below); the macOS backends are done (below).
 
 - **macOS variants — LANDED + verified on real hardware (2026-06-28, macOS 26.5 / Apple Silicon;
   OrbStack + tart 2.32 + apple `container` 1.0 + seatbelt all present).** Three of the four backends
@@ -141,13 +142,23 @@ Key files: `internal/credential/`, `internal/broker/`, `runtime/docker/reach.go`
   a non-allowlisted destination is REJECTed — `TestIntegration_CredentialBroker_Isolated`). Caveat:
   a backend needing a dedicated network mode to reach the injector (rootless podman → slirp) can't
   compose with the isolation bridge+iptables yet → that combo falls back to direct delivery.
-  - **Step 1.5 (tamper-resistant firewall) — PLANNED, next build:** step 1's in-container iptables is
-    flushable by the agent (`sudo iptables -F`; confirmed — the container holds `NET_ADMIN` and the
-    agent has NOPASSWD sudo). Fix (validated on real Docker): deny the agent container `NET_ADMIN` and
-    install the firewall from an ephemeral sidecar sharing its netns (`--network container:<id>
-    --cap-add NET_ADMIN`); the agent's `sudo iptables -F` then fails (`FLUSH_DENIED`). docker/podman +
-    agent-free path first. Full plan:
-    [tamper-resistant-network-isolation.md](tamper-resistant-network-isolation.md).
+  - **Step 1.5 (tamper-resistant firewall) — DONE, verified on real Docker (docker + agent-free path).**
+    Step 1's in-container iptables was flushable by the agent (`sudo iptables -F`; the container held
+    `NET_ADMIN` and the agent has NOPASSWD sudo). Now the agent container is denied `NET_ADMIN` and the
+    allowlist is installed from an ephemeral sidecar sharing its netns (`runtime.NetnsSidecarRunner` →
+    docker `RunNetnsSidecar`, `--network container:<id> --cap-add NET_ADMIN`), run in `startViaLaunch`
+    after `waitForReady` and before the agent launches. The rule logic moved to a shared `firewall.py`
+    (used by both `install-firewall.py` in the sidecar and `entrypoint.py`'s in-container fallback, so
+    they can't drift); the entrypoint skips its own install under `YOLOAI_FIREWALL_EXTERNAL=1`. The
+    `launch.UsesSidecarFirewall` predicate is the single gate (isolated + NetnsSidecarRunner +
+    agent-free); other backends/paths keep the in-container firewall. `LivePatchNetwork` (§6) routes
+    `network allow/deny` ipset mutations through the sidecar so they stay live without the agent
+    holding `NET_ADMIN`. Verified: agent can't flush (`sudo iptables -F` denied), non-allowlisted stays
+    REJECTed, injector stays reachable (`TestIntegration_NetworkIsolation_TamperResistant`); live allow
+    patches the per-netns ipset from the sidecar (`..._LivePatchViaSidecar`). Boundary: profile *setup
+    commands* still run pre-firewall (provisioning egress, like the Dockerfile build) — the agent
+    itself is fully contained. Deferred: containerd/Kata, legacy launch path, macOS. Full plan +
+    boundary note: [tamper-resistant-network-isolation.md](tamper-resistant-network-isolation.md).
   - **Step 2 (the hostile-grade future) — NOT built:** `StrategyEgressProxy` = default-deny netns
     whose sole egress is a host-side SNI-splicing forwarder on a separate namespace the agent can't
     disable (survives a sudo agent). Step 1's ip-filter is best-effort (a `NET_ADMIN` agent can
