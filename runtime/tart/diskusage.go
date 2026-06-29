@@ -83,7 +83,7 @@ func (r *Runtime) CacheUsage(ctx context.Context) (runtime.CacheUsage, error) {
 	}
 
 	var staleBytes int64
-	for _, s := range staleBaseImagesFrom(entries, repo) {
+	for _, s := range staleBaseImagesFrom(entries, repo, r.protectedBaseRepos()...) {
 		staleBytes += s.Bytes
 	}
 
@@ -121,22 +121,53 @@ type staleBaseImage struct {
 	Refs  []string
 }
 
+// protectedBaseRepos returns any base repos that must not be swept as stale,
+// even when they differ from the currently resolved base repo.
+//
+// When the user pins tart.image to a non-base image (e.g. an -xcode flavor),
+// the override is built on top of the host-matched base. That base co-exists
+// with the override and is still wanted — sweeping it as "superseded" would
+// delete something the user needs. Only non-base overrides trigger this: if the
+// override is itself a -base repo, it IS the current repo and is already
+// excluded by staleBaseImagesFrom's currentRepo check.
+func (r *Runtime) protectedBaseRepos() []string {
+	if r.baseImageOverride == "" {
+		return nil
+	}
+	if isBaseImageFamily(baseImageRepo(r.baseImageOverride)) {
+		return nil
+	}
+	// Override is a non-base image (e.g. -xcode). The host-matched base must
+	// survive the stale sweep.
+	return []string{baseImageRepo(hostMatchedBaseImage(r.hostMajor))}
+}
+
 // staleBaseImages returns the Cirrus base repos on disk that differ from the
 // currently resolved base — superseded bases left behind by a host-macOS (and
-// thus codename) change.
+// thus codename) change. When a non-base tart.image override is active, the
+// host-matched base is additionally protected (see protectedBaseRepos).
 func (r *Runtime) staleBaseImages(ctx context.Context) ([]staleBaseImage, error) {
 	entries, err := r.listEntries(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return staleBaseImagesFrom(entries, baseImageRepo(r.resolveBaseImage(""))), nil
+	return staleBaseImagesFrom(entries, baseImageRepo(r.resolveBaseImage("")), r.protectedBaseRepos()...), nil
 }
 
 // staleBaseImagesFrom is the pure core of staleBaseImages: given the tart-list
-// rows and the current base repo, group every other Cirrus base repo's OCI rows
-// (tag + digest) into one entry, sizing it once (max row, since both rows share
-// a single on-disk copy — mirrors CacheUsage's dedup).
-func staleBaseImagesFrom(entries []tartListEntry, currentRepo string) []staleBaseImage {
+// rows, the current base repo, and any additionally protected repos (repos that
+// must survive even though they differ from currentRepo), group every other
+// Cirrus base repo's OCI rows (tag + digest) into one entry, sizing it once
+// (max row, since both rows share a single on-disk copy — mirrors
+// CacheUsage's dedup).
+//
+// protectedRepos is used when a non-base tart.image override is active: the
+// host-matched base co-exists with the override image and must not be swept.
+func staleBaseImagesFrom(entries []tartListEntry, currentRepo string, protectedRepos ...string) []staleBaseImage {
+	protected := make(map[string]bool, len(protectedRepos))
+	for _, p := range protectedRepos {
+		protected[p] = true
+	}
 	byRepo := make(map[string]*staleBaseImage)
 	var order []string
 	for _, e := range entries {
@@ -144,7 +175,7 @@ func staleBaseImagesFrom(entries []tartListEntry, currentRepo string) []staleBas
 			continue
 		}
 		repo := baseImageRepo(e.Name)
-		if repo == currentRepo || !isBaseImageFamily(repo) {
+		if repo == currentRepo || !isBaseImageFamily(repo) || protected[repo] {
 			continue
 		}
 		s, ok := byRepo[repo]

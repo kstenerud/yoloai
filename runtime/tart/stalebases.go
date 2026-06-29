@@ -21,6 +21,17 @@ var _ runtime.StaleBasePruner = (*Runtime)(nil)
 // base and the provisioned yoloai-base VM are never touched. Implements
 // runtime.StaleBasePruner.
 func (r *Runtime) PruneStaleBases(ctx context.Context, dryRun bool, output io.Writer) ([]string, int64, error) {
+	// When tart.image is pinned to a non-base image (e.g. an -xcode flavor),
+	// the override itself becomes the "current" image for stale detection, while
+	// the host-matched base is protected and stays on disk. Print a transparency
+	// line so a stale leftover override config can't silently look like "free
+	// cleanup" to the user.
+	if r.baseImageOverride != "" && !isBaseImageFamily(baseImageRepo(r.baseImageOverride)) {
+		currentRepo := baseImageRepo(r.resolveBaseImage(""))
+		fmt.Fprintf(output, "tart: current base resolved from tart.image override = %s (current repo %s)\n", //nolint:errcheck // best-effort output
+			r.baseImageOverride, currentRepo)
+	}
+
 	stale, err := r.staleBaseImages(ctx)
 	if err != nil {
 		return nil, 0, err
