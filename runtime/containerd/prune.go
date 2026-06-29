@@ -11,6 +11,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/containerd/containerd/v2/client"
 	"github.com/containerd/containerd/v2/core/content"
 	"github.com/containerd/containerd/v2/core/images"
 	"github.com/containerd/containerd/v2/core/snapshots"
@@ -103,8 +104,12 @@ func (r *Runtime) PruneCache(ctx context.Context, includeImages, dryRun bool, ou
 
 	ctx = r.withNamespace(ctx)
 
-	if err := r.refuseIfContainersExist(ctx); err != nil {
+	proceed, err := r.reconcileBlockingContainers(ctx, dryRun, output)
+	if err != nil {
 		return 0, err
+	}
+	if !proceed {
+		return 0, nil
 	}
 
 	// Measure the content store before and after the image prune. Deleting an
@@ -151,21 +156,79 @@ func (r *Runtime) contentStoreBytes(ctx context.Context) int64 {
 	return total
 }
 
-// refuseIfContainersExist returns an error if any container owned by this
-// principal still exists in the namespace; cache prune isn't safe while one
-// exists. Scoped to this runtime's principal (DF19).
-func (r *Runtime) refuseIfContainersExist(ctx context.Context) error {
+// reconcileBlockingContainers prepares the namespace for a cache prune that
+// removes the base image and its snapshots. A container that still holds a
+// snapshot reference makes image/snapshot removal fail, so the prune cannot
+// proceed while one exists. Rather than aborting ALL containerd reclaim on the
+// first container it sees (DF59 — one stale stopped sandbox defeated the whole
+// command), it classifies the principal's containers (scoped by instance prefix,
+// DF19) and reconciles:
+//
+//   - A RUNNING container is a live sandbox whose agent must not be killed by a
+//     cache prune. Its presence skips image reclaim entirely — the shared base it
+//     pins can't be removed anyway — and each is reported with a stop/destroy fix
+//     command. Returns proceed=false.
+//   - A STOPPED container only pins the image because it lingers. `--images` is
+//     already destructive (forces a base rebuild) and a stopped container carries
+//     no live session — `start` recreates it on demand — so it is removed to let
+//     the reclaim proceed, and reported. Returns proceed=true.
+//
+// In dry-run nothing is removed; blockers are reported as "would …". A stopped
+// container that fails to remove is treated as a hard blocker (skip, report).
+func (r *Runtime) reconcileBlockingContainers(ctx context.Context, dryRun bool, output io.Writer) (proceed bool, err error) {
 	containers, err := r.client.Containers(ctx)
 	if err != nil {
-		return fmt.Errorf("list containers: %w", err)
+		return false, fmt.Errorf("list containers: %w", err)
 	}
 	prefix := config.InstancePrefix(r.layout.Principal)
+
+	var running, stopped []string
 	for _, ctr := range containers {
-		if strings.HasPrefix(ctr.ID(), prefix) {
-			return fmt.Errorf("containerd cache prune: container %q still exists in yoloai namespace; stop and remove it first (yoloai system prune)", ctr.ID())
+		if !strings.HasPrefix(ctr.ID(), prefix) {
+			continue
+		}
+		if r.containerRunning(ctx, ctr) {
+			running = append(running, ctr.ID())
+		} else {
+			stopped = append(stopped, ctr.ID())
 		}
 	}
-	return nil
+
+	if len(running) > 0 {
+		for _, name := range running {
+			fmt.Fprintf(output, "containerd: skipping image reclaim — sandbox %q is running; stop it first (yoloai stop %s, or yoloai destroy %s)\n", //nolint:errcheck
+				name, name, name)
+		}
+		return false, nil
+	}
+
+	for _, name := range stopped {
+		if dryRun {
+			fmt.Fprintf(output, "containerd: would remove stopped sandbox container %s to reclaim its image (recreated on next start)\n", name) //nolint:errcheck
+			continue
+		}
+		if rmErr := r.Remove(ctx, name); rmErr != nil && !errors.Is(rmErr, runtime.ErrNotFound) {
+			fmt.Fprintf(output, "containerd: could not remove stopped container %s: %v — skipping image reclaim\n", name, rmErr) //nolint:errcheck
+			return false, nil
+		}
+		fmt.Fprintf(output, "containerd: removed stopped sandbox container %s to reclaim its image (recreated on next start)\n", name) //nolint:errcheck
+	}
+	return true, nil
+}
+
+// containerRunning reports whether the container has a task in the Running
+// state. No task (or any status-read failure) is treated as not-running — a
+// container with no live task cannot be holding an active agent session.
+func (r *Runtime) containerRunning(ctx context.Context, ctr client.Container) bool {
+	task, taskErr := ctr.Task(ctx, nil)
+	if taskErr != nil {
+		return false
+	}
+	status, statusErr := task.Status(ctx)
+	if statusErr != nil {
+		return false
+	}
+	return status.Status == client.Running
 }
 
 // pruneImages removes every image record in the namespace (or reports what
