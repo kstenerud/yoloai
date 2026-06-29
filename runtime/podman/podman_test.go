@@ -49,16 +49,61 @@ func TestPodmanImageBytes_SkipsNilEntries(t *testing.T) {
 	assert.Equal(t, gib, podmanImageBytes(du))
 }
 
+// mockNoNativeSockets points every native podman-socket probe (system socket,
+// WSL2 paths, macOS machine) at a nonexistent/failing source so discoverSocket
+// falls through to its env-var fallbacks. Returns a restore func. Callers that
+// also want the XDG rootless probe to miss should pass an XDG_RUNTIME_DIR with no
+// podman.sock under it.
+func mockNoNativeSockets(t *testing.T) func() {
+	t.Helper()
+	origMachine := machineSocketDiscovery
+	origSystem := systemSockPath
+	origWSL := wsl2SockPaths
+	machineSocketDiscovery = func(_ map[string]string) (string, error) { return "", assert.AnError }
+	systemSockPath = filepath.Join(t.TempDir(), "nonexistent.sock")
+	wsl2SockPaths = nil
+	return func() {
+		machineSocketDiscovery = origMachine
+		systemSockPath = origSystem
+		wsl2SockPaths = origWSL
+	}
+}
+
 func TestDiscoverSocket_ContainerHost(t *testing.T) {
 	sock, err := discoverSocket(map[string]string{"CONTAINER_HOST": "unix:///custom/podman.sock"})
 	require.NoError(t, err)
 	assert.Equal(t, "unix:///custom/podman.sock", sock)
 }
 
-func TestDiscoverSocket_DockerHost(t *testing.T) {
-	sock, err := discoverSocket(map[string]string{"DOCKER_HOST": "unix:///custom/docker.sock"})
+func TestDiscoverSocket_DockerHost_FallbackWhenNoNativeSocket(t *testing.T) {
+	// $DOCKER_HOST is honored only as a last resort, when no native podman socket
+	// exists. Mock all native paths away so the fallback is reached.
+	defer mockNoNativeSockets(t)()
+	sock, err := discoverSocket(map[string]string{
+		"DOCKER_HOST":     "unix:///custom/docker.sock",
+		"XDG_RUNTIME_DIR": t.TempDir(),
+	})
 	require.NoError(t, err)
 	assert.Equal(t, "unix:///custom/docker.sock", sock)
+}
+
+// TestDiscoverSocket_NativeSocketBeatsDockerHost is the regression guard for the
+// mixed-host footgun: with a real podman socket present AND $DOCKER_HOST pointing
+// at the docker daemon, the native podman socket must win — otherwise the podman
+// backend silently talks to docker (where slirp4netns etc. don't exist).
+func TestDiscoverSocket_NativeSocketBeatsDockerHost(t *testing.T) {
+	tmpDir := t.TempDir()
+	sockDir := filepath.Join(tmpDir, "podman")
+	require.NoError(t, os.MkdirAll(sockDir, 0o750))
+	sockPath := filepath.Join(sockDir, "podman.sock")
+	require.NoError(t, os.WriteFile(sockPath, nil, 0o600))
+
+	sock, err := discoverSocket(map[string]string{
+		"XDG_RUNTIME_DIR": tmpDir,
+		"DOCKER_HOST":     "unix:///var/run/docker.sock",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "unix://"+sockPath, sock, "native podman socket must win over DOCKER_HOST")
 }
 
 func TestDiscoverSocket_ContainerHostTakesPrecedence(t *testing.T) {

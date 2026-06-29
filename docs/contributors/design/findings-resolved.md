@@ -7,6 +7,15 @@ History of codebase findings (issues discovered mid-work) that have been address
 are moved here from [`findings-unresolved.md`](findings-unresolved.md) once resolved, so the
 active file stays a working set. Newest first.
 
+### DF58 — podman backend connected to docker when `$DOCKER_HOST` was set (socket discovery honored it over native podman sockets)
+
+- **Discovered:** 2026-06-29 · **Resolved:** 2026-06-29 · **Workstream:** tamper-resistant-firewall (podman validation)
+- **Severity:** MEDIUM (wrong-daemon routing; broke `make`-run podman tests and is a production footgun) · **Disposition:** ADDRESSED-IN-PLACE
+- **Symptom:** `TestIntegration_CredentialBroker_Podman` failed *intermittently-looking* with `start instance: instance not found` — but the real correlate was **`$DOCKER_HOST` being set**. It passed in a bare shell and failed under `make integration`/`releasetest` (which `export DOCKER_HOST = <docker endpoint>`). Reproduced deterministically: `DOCKER_HOST=unix:///var/run/docker.sock go test -run TestIntegration_CredentialBroker_Podman` fails; unset, it passes. Fails identically on `main`, so it predates this branch.
+- **Cause:** `runtime/podman/podman.go` `discoverSocket` searched `CONTAINER_HOST → DOCKER_HOST → native podman sockets`. With `DOCKER_HOST` pointing at the **docker** daemon (and `CONTAINER_HOST` unset), the podman backend connected to docker. A brokered rootless-podman sandbox then sets `NetworkMode=slirp4netns:allow_host_loopback=true` (podman-only); docker can't honor it, so the container never starts and Start reports not-found. The misleading symptom — and the fact that brokering (the slirp mode) is what makes the mismatch fatal — sent the diagnosis down several wrong paths (stale image, interrupted-build buildah debris, leaked conmon) before the `DOCKER_HOST` correlation was isolated.
+- **Resolution:** reorder `discoverSocket` so `$DOCKER_HOST` is the **last resort**, after every native podman socket (`CONTAINER_HOST → XDG_RUNTIME_DIR/podman/podman.sock → /run/podman/podman.sock → WSL2 → macOS machine → DOCKER_HOST`). A real podman socket now wins over a docker-pointing `DOCKER_HOST`; `CONTAINER_HOST` remains the explicit override; `DOCKER_HOST` still serves the "podman-emulating-docker, no native socket" case. Regression guard: `TestDiscoverSocket_NativeSocketBeatsDockerHost`.
+- **Pointer:** `runtime/podman/podman.go` (`discoverSocket`), `runtime/podman/podman_test.go` (`TestDiscoverSocket_NativeSocketBeatsDockerHost`, `TestDiscoverSocket_DockerHost_FallbackWhenNoNativeSocket`).
+
 ### DF56 — base-image freshness checksum was shared across backends, so separate-store backends ran stale images
 
 - **Discovered:** 2026-06-28 · **Resolved:** 2026-06-29 · **Workstream:** egress-broker podman validation → tamper-resistant-firewall
