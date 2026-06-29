@@ -325,11 +325,15 @@ func orderLeafFirst(infos []snapshots.Info) []string {
 // (see orderLeafFirst) so the chain frees synchronously and the figure reflects
 // bytes truly reclaimed, not an optimistic later-GC assumption.
 //
-// devmapper is reported separately and EXCLUDED from the returned total:
-// removing a thin snapshot returns blocks to the thin-pool, but the pool's
-// backing loopback file does not shrink, so host `df` is unchanged. Counting
-// those bytes as "reclaimed" would over-report freed disk, so we surface them in
-// their own line and leave them out of the total.
+// devmapper is reported separately and EXCLUDED from the returned total because
+// whether it frees host disk depends on a pool config yoloai can't see over the
+// socket: removing a thin snapshot always returns its blocks to the thin-pool,
+// but only a pool created with discard_blocks = true (which yoloai cannot detect
+// via the snapshot API, and does not own — the pool is a host prerequisite)
+// passes a BLKDISCARD down to the sparse backing file so host `df` actually
+// drops. Without it the backing file stays fully allocated. Counting these bytes
+// in the reclaimed total would over-report on a no-discard pool, so we surface
+// them on their own line with the discard caveat and leave them out (DF59).
 func (r *Runtime) pruneSnapshots(ctx context.Context, dryRun bool, output io.Writer) int64 {
 	var hostFreed, devmapperBytes int64
 	for _, snapshotter := range snapshotterNames {
@@ -338,10 +342,9 @@ func (r *Runtime) pruneSnapshots(ctx context.Context, dryRun bool, output io.Wri
 			continue
 		}
 		n := r.pruneSnapshotter(ctx, snapshotter, orderLeafFirst(infos), dryRun, output)
-		// devmapper blocks return to the thin-pool but the backing file does not
-		// shrink, so they free no host disk — report them separately and DON'T
-		// count them in the reclaimed total (overcount otherwise). overlayfs
-		// snapshots do free host disk and are counted.
+		// devmapper host reclaim is discard-dependent (see the doc comment), so
+		// it's reported separately and kept out of the counted total; overlayfs
+		// snapshots always free host disk and are counted.
 		if snapshotter == "devmapper" {
 			devmapperBytes += n
 		} else {
@@ -353,8 +356,9 @@ func (r *Runtime) pruneSnapshots(ctx context.Context, dryRun bool, output io.Wri
 		if dryRun {
 			verb = "would be returned"
 		}
-		fmt.Fprintf(output, "containerd: %s of devmapper blocks %s to the thin-pool; the pool backing file does not shrink, so this frees no host disk (excluded from the reclaimed total)\n", //nolint:errcheck
+		fmt.Fprintf(output, "containerd: %s of devmapper blocks %s to the thin-pool (not counted in the reclaimed total).\n", //nolint:errcheck
 			runtime.FormatBytes(devmapperBytes), verb)
+		fmt.Fprintf(output, "  With discard_blocks = true in the pool config (recommended) this is also freed from the host; otherwise the pool backing file stays allocated — enable discard_blocks, or reclaim it manually (see backend-idiosyncrasies.md \"devmapper caveat — discard_blocks\").\n") //nolint:errcheck
 	}
 	return hostFreed
 }

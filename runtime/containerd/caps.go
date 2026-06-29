@@ -228,6 +228,13 @@ func buildDevmapperSnapshotterCap(r *Runtime) caps.HostCapability {
 				Description: "Run the devmapper setup script and restart containerd",
 				URL:         "https://github.com/kata-containers/kata-containers/blob/main/docs/how-to/containerd-kata-fc-for-ubuntu.md",
 				NeedsRoot:   true,
+			}, {
+				// Without discard_blocks, removed snapshots return blocks to the
+				// thin-pool but the pool's backing file never shrinks, so a cache
+				// prune frees nothing on the host (DF59). With it, containerd issues
+				// BLKDISCARD on removal and the sparse backing file is punched down.
+				Description: "Set discard_blocks = true in the devmapper snapshotter block of /etc/containerd/config.toml so prune actually returns disk to the host",
+				NeedsRoot:   true,
 			}}
 		},
 	}
