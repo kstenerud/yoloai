@@ -462,7 +462,7 @@ func (p *ProxyServer) handleProxyDiff(args map[string]any) map[string]any {
 	}
 
 	if diff == "" {
-		return mcpTextContent("[ERROR] no changes to diff")
+		return mcpTextContent("No changes to diff")
 	}
 	return mcpTextContent(diff)
 }

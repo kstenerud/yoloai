@@ -18,8 +18,13 @@ import (
 
 func NewCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "mcp",
-		Short:   "MCP server commands (orchestration and proxy)",
+		Use:   "mcp",
+		Short: "(experimental) MCP server commands (orchestration and proxy)",
+		Long: `Experimental: the MCP interface is under active development. The tool surface,
+protocol details, and CLI flags may change between releases without a deprecation period.
+
+Run 'yoloai mcp serve' to start the orchestration MCP server or 'yoloai mcp proxy'
+to proxy an inner MCP server through a sandbox.`,
 		GroupID: cliutil.GroupLifecycle,
 	}
 	cmd.AddCommand(newMCPServeCmd(), newMCPProxyCmd())

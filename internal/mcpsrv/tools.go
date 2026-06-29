@@ -393,7 +393,7 @@ func (s *Server) handleSandboxDestroy(ctx context.Context, req mcp.CallToolReque
 	return textResult(fmt.Sprintf("Sandbox %q destroyed.", name)), nil
 }
 
-func (s *Server) handleSandboxDiff(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func (s *Server) handleSandboxDiff(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	name := req.GetString("name", "")
 	stat := req.GetBool("stat", false)
 
@@ -405,13 +405,13 @@ func (s *Server) handleSandboxDiff(_ context.Context, req mcp.CallToolRequest) (
 	if err != nil {
 		return textResult(errorf("sandbox handle %q: %v", name, err)), nil
 	}
-	diff, err := sb.Workdir().Diff(context.Background(), yoloai.WorkdirDiffOptions{Stat: stat})
+	diff, err := sb.Workdir().Diff(ctx, yoloai.WorkdirDiffOptions{Stat: stat})
 	if err != nil {
 		return textResult(errorf("diff sandbox %q: %v", name, err)), nil
 	}
 
 	if diff == "" {
-		return textResult("[ERROR] no changes to diff"), nil
+		return textResult("No changes to diff"), nil
 	}
 	return textResult(diff), nil
 }
