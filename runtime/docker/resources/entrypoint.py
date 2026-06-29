@@ -12,8 +12,6 @@ import os
 import subprocess
 import sys
 
-import firewall
-
 
 # --- JSONL logger ---
 
@@ -187,6 +185,11 @@ def isolate_network(cfg):
                  "network isolation installed out-of-container by sidecar; "
                  "skipping in-container firewall")
         return
+
+    # Imported lazily: only an isolated sandbox using the in-container fallback path
+    # needs firewall.py, so a non-isolated boot (or the sidecar/external path) never
+    # depends on the module being present in the image.
+    import firewall
 
     allowed_ips = firewall.resolve_domains(cfg.get("allowed_domains", []), log_error)
     nameservers = firewall.read_nameservers(log_error)
