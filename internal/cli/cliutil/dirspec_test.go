@@ -45,6 +45,27 @@ func TestParseDirArg_Modes(t *testing.T) {
 	}
 }
 
+func TestParseDirArg_CopyAll(t *testing.T) {
+	dir := t.TempDir()
+	app := filepath.Join(dir, "app")
+	require.NoError(t, os.MkdirAll(app, 0750))
+
+	// :copy-all is mode copy with the gitignore-honoring opt-out set.
+	result, err := ParseDirArg(app+":copy-all", "/home/user", nil)
+	require.NoError(t, err)
+	assert.Equal(t, yoloai.DirModeCopy, result.Mode)
+	assert.True(t, result.IncludeIgnored, ":copy-all copies gitignored files")
+
+	// plain :copy honors .gitignore (default).
+	result, err = ParseDirArg(app+":copy", "/home/user", nil)
+	require.NoError(t, err)
+	assert.False(t, result.IncludeIgnored)
+
+	// conflicts with the other modes, like :copy.
+	_, err = ParseDirArg(app+":copy-all:rw", "/home/user", nil)
+	require.Error(t, err)
+}
+
 func TestParseDirArg_ConflictingModes(t *testing.T) {
 	tests := []struct {
 		input   string

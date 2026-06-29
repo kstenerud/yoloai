@@ -87,6 +87,11 @@ type DirEnvironment struct {
 	Mode         DirMode `json:"mode"` // typed; serializes as "copy"/"overlay"/"rw"/"ro"
 	BaselineSHA  string  `json:"baseline_sha,omitempty"`
 	InceptionSHA string  `json:"inception_sha,omitempty"`
+	// IncludeIgnored records the :copy-all opt-out: true when the copy included
+	// gitignored files instead of honoring .gitignore. Read on reset so a
+	// re-copy reproduces the same file set. Default (absent/false) honors
+	// .gitignore — the safe default for :copy.
+	IncludeIgnored bool `json:"include_ignored,omitempty"`
 }
 
 // Workdir returns the primary directory — Dirs[0], the agent's cwd. Returns nil

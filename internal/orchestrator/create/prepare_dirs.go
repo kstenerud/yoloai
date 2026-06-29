@@ -251,7 +251,7 @@ func checkDirtyRepos(ctx context.Context, g *git.Git, workdir *DirSpec, auxDirs 
 func setupWorkdir(ctx context.Context, g *git.Git, sandboxDir string, workdir *DirSpec, rt runtime.Backend) (string, string, error) {
 	workCopyDir := store.WorkDir(sandboxDir, workdir.Path)
 
-	if err := setupDirContent(sandboxDir, workdir, workCopyDir); err != nil {
+	if err := setupDirContent(ctx, g, sandboxDir, workdir, workCopyDir); err != nil {
 		return "", "", err
 	}
 
@@ -268,10 +268,13 @@ func setupWorkdir(ctx context.Context, g *git.Git, sandboxDir string, workdir *D
 // plain directory (used only as a placeholder; the actual mount is a live
 // bind-mount). sandboxDir is the sandbox root, dir is the DirSpec, and
 // workCopyDir is the pre-computed store.WorkDir path for dir.
-func setupDirContent(sandboxDir string, dir *DirSpec, workCopyDir string) error {
+func setupDirContent(ctx context.Context, g *git.Git, sandboxDir string, dir *DirSpec, workCopyDir string) error {
 	switch dir.Mode {
 	case "copy":
-		if err := workspace.CopyDir(dir.Path, workCopyDir); err != nil {
+		err := workspace.CopyProjectDir(dir.Path, workCopyDir, dir.IncludeIgnored, func() ([]string, bool, error) {
+			return g.ListProjectFiles(ctx, dir.Path)
+		})
+		if err != nil {
 			return fmt.Errorf("copy dir: %w", err)
 		}
 	case "overlay":
@@ -391,7 +394,7 @@ func setupAuxDir(ctx context.Context, g *git.Git, sandboxDir string, rt runtime.
 	switch ad.Mode {
 	case DirModeCopy, DirModeOverlay:
 		workCopyDir := store.WorkDir(sandboxDir, ad.Path)
-		if err := setupDirContent(sandboxDir, ad, workCopyDir); err != nil {
+		if err := setupDirContent(ctx, g, sandboxDir, ad, workCopyDir); err != nil {
 			return store.DirEnvironment{}, err
 		}
 		baselineSHA, err := createDirBaseline(ctx, g, ad, workCopyDir, rt)
@@ -399,11 +402,12 @@ func setupAuxDir(ctx context.Context, g *git.Git, sandboxDir string, rt runtime.
 			return store.DirEnvironment{}, err
 		}
 		return store.DirEnvironment{
-			HostPath:     ad.Path,
-			MountPath:    launch.OverlayOrResolvedMountPath(ad),
-			Mode:         ad.Mode,
-			BaselineSHA:  baselineSHA,
-			InceptionSHA: baselineSHA,
+			HostPath:       ad.Path,
+			MountPath:      launch.OverlayOrResolvedMountPath(ad),
+			Mode:           ad.Mode,
+			BaselineSHA:    baselineSHA,
+			InceptionSHA:   baselineSHA,
+			IncludeIgnored: ad.IncludeIgnored,
 		}, nil
 	default: // rw, ro
 		return store.DirEnvironment{

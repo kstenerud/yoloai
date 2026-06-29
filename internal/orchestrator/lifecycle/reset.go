@@ -202,11 +202,12 @@ func resetCopyWorkdir(ctx context.Context, d state.Deps, sandboxName, sandboxDir
 		return "", fmt.Errorf("original directory no longer exists: %s", meta.Workdir().HostPath)
 	}
 	slog.Debug("re-copying workdir", "event", "sandbox.reset.workdir", "sandbox", sandboxName, "host_path", meta.Workdir().HostPath)
-	if err := workspace.CopyDir(meta.Workdir().HostPath, workDir); err != nil {
+	g := git.NewHost(d.Layout)
+	if err := workspace.CopyProjectDir(meta.Workdir().HostPath, workDir, meta.Workdir().IncludeIgnored, func() ([]string, bool, error) {
+		return g.ListProjectFiles(ctx, meta.Workdir().HostPath)
+	}); err != nil {
 		return "", fmt.Errorf("re-copy workdir: %w", err)
 	}
-
-	g := git.NewHost(d.Layout)
 	if git.IsGitRepo(workDir) {
 		sha, err := g.HeadSHA(ctx, workDir)
 		if err != nil {
@@ -236,7 +237,9 @@ func resetAuxCopyDir(ctx context.Context, g *git.Git, sandboxDir string, d store
 	if _, err := os.Stat(d.HostPath); err != nil {
 		return "", fmt.Errorf("original aux directory no longer exists: %s", d.HostPath)
 	}
-	if err := workspace.CopyDir(d.HostPath, auxWorkDir); err != nil {
+	if err := workspace.CopyProjectDir(d.HostPath, auxWorkDir, d.IncludeIgnored, func() ([]string, bool, error) {
+		return g.ListProjectFiles(ctx, d.HostPath)
+	}); err != nil {
 		return "", fmt.Errorf("re-copy aux dir %s: %w", d.HostPath, err)
 	}
 	if git.IsGitRepo(auxWorkDir) {

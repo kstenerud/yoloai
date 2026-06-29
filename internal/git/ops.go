@@ -341,6 +341,41 @@ func IsGitRepo(dir string) bool {
 	return err == nil
 }
 
+// ListProjectFiles returns the project files under dir (paths relative to dir)
+// when dir is inside a git work tree: tracked plus untracked-but-not-ignored,
+// with .gitignore'd files excluded — `git ls-files --cached --others
+// --exclude-standard`, which also honors nested .gitignore, negation patterns,
+// .git/info/exclude, and the global excludesFile. Paths are relative to dir even
+// when dir is a subdirectory of a larger repo.
+//
+// isRepo is false (with a nil error) when dir is not a git work tree, so the
+// caller falls back to a full copy — a non-repo has no gitignore semantics to
+// honor. A genuine failure (e.g. git not installed) is returned as an error so a
+// secret-leaking full copy is never done silently in its place.
+func (g *Git) ListProjectFiles(ctx context.Context, dir string) (files []string, isRepo bool, err error) {
+	out, err := g.Run(ctx, dir, "rev-parse", "--is-inside-work-tree")
+	if err != nil {
+		var ee *runtime.ExecError
+		if errors.As(err, &ee) {
+			return nil, false, nil // clean non-zero exit: not a work tree
+		}
+		return nil, false, fmt.Errorf("git rev-parse in %s: %w", dir, err)
+	}
+	if strings.TrimSpace(out) != "true" {
+		return nil, false, nil // e.g. inside a bare repo / .git dir
+	}
+	lsOut, err := g.Run(ctx, dir, "ls-files", "-z", "--cached", "--others", "--exclude-standard")
+	if err != nil {
+		return nil, false, fmt.Errorf("git ls-files in %s: %w", dir, err)
+	}
+	for _, f := range strings.Split(lsOut, "\x00") {
+		if f != "" {
+			files = append(files, f)
+		}
+	}
+	return files, true, nil
+}
+
 // IsIndexLocked reports whether err is a git index.lock contention error.
 func IsIndexLocked(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "index.lock")
