@@ -97,6 +97,7 @@ inclusion test first, then add a row to the index.
 | VM dies when `Start()` context is cancelled | [Tart: tart run needs exec.Command](#tart-run-process-must-use-execcommand-not-execcommandcontext) |
 | `mkdir: /var/folders: Permission denied` or `ln: ... Permission denied` during Tart setup | [Tart: mkdir/symlink system dirs fails](#tart-cannot-mkdirsymlink-system-directories-like-varfolders) |
 | `tart exec` fails with "instance not found" right after boot | [Tart: exec needs stabilization delay](#tart-exec-needs-brief-stabilization-delay-after-boot) |
+| Intermittent podman `start instance: instance not found` (esp. after an interrupted build) | [Podman: interrupted build leaves mounted buildah working-containers](#podman-an-interrupted-build-leaves-mounted-buildah-working-containers-that-wedge-container-createstart) |
 | `tart exec` with `--` separator fails silently or returns exit status 1 | [Tart: no support for -- separator](#tart-exec-does-not-support----argument-separator) |
 | `yoloai attach` fails with "no sessions" on Tart VM | [Tart: exec -t changes environment](#tart-exec--t-changes-environment-preventing-tmux-from-finding-socket) |
 | Agent renders ASCII on Tart (logo `_______`, emoji as `_`) despite healthy TERM/locale | [Tart: attach renders ASCII (non-UTF-8 tmux client)](#tart-attach-renders-ascii-tmux-downgrades-a-non-utf-8-client) |
@@ -1033,6 +1034,22 @@ The estimate is left as-is — it's still a valid *upper bound* if the user stop
 **Code:** `runtime/docker/launch.go` (the `Detached` branch); `internal/orchestrator/launch/launch.go::startViaLaunch`. Related: DF44.
 
 ## Podman
+
+### Podman: an interrupted `build` leaves mounted buildah working-containers that wedge container create/start
+
+**Symptom:** Intermittent (flaky) `start instance: instance not found` when yoloai creates+starts a podman container — the container is "created" but the immediately-following `ContainerStart` reports it as not found. Passes some runs, fails others, with no code change between. Often appears shortly after a `podman build` (or `yoloai system build --backend=podman`) was interrupted — e.g. SIGTERM'd via `timeout`, Ctrl-C, or a killed parent.
+
+**Explanation:** `podman build` runs each stage in a **buildah working-container**. If the build is killed mid-flight, those working-containers are left behind **mounted** in podman's storage (`podman ps -a --external` shows `*-working-container` rows in state `Storage`; they don't appear in a normal `podman ps -a`). The stale mounts hold storage references and create lock/overlay contention, which sporadically makes a fresh container's create→start race fail with a spurious not-found. A normal `podman run` may still succeed, so the storage looks "healthy" while the symptom is intermittent.
+
+**Fix / cleanup:** never interrupt a podman build. To recover, remove the leftovers (they need force because they're mounted):
+```
+podman ps -a --external                 # find *-working-container rows + any orphaned run
+buildah umount <working-container>...    # unmount first (plain rm fails: "mounted ... state improper")
+buildah rm <working-container>...
+podman rm -f <orphaned-run>              # also reap any container orphaned by a killed `podman run` client
+podman image prune -f                    # drop the dangling layer the partial build left
+```
+Then the flake disappears (verified: 0/2 → 5/5 on `TestIntegration_CredentialBroker_Podman` after cleanup). Distinct from Tart's "instance not found right after boot" (that's a boot-stabilization delay; this is leftover storage state).
 
 ### Podman: `/system/df` reports `LayersSize: 0`
 
