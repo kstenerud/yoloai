@@ -128,22 +128,52 @@ carries a documented residual (and is macOS-only, the "lighter" isolation tier).
 - The in-sandbox git version is the profile image's, not the host's — acceptable
   (it is the repo's own environment, and the agent already used it).
 
-### Implementation surface
+### Implementation surface (concrete, ordered — worked out 2026-06-29)
 
-- `internal/git/git.go` — make `NewSandbox` route the work-copy execer through the
-  runtime for **all** backends in copy mode (today only `SandboxSide`), i.e. extend
-  `sandboxExec` to the container backends. The host-**target** apply ops keep using
-  `NewHost`/`hostExec` (user-owned repo, already safe) — do **not** reroute those.
-- `runtime` — a `SandboxSide`-style git exec for docker/podman/containerd
-  (`<engine> exec <container> git …` at the container-side work path), mirroring
-  the existing Tart path; path translation host→container mount target.
-- The verbs that need the runtime now require a running sandbox: surface the
-  auto-start-or-clear-error at the `copyflow`/CLI boundary (reuse the overlay
-  precedent).
-- seatbelt: a `sandbox-exec`-wrapped git exec + the F5 profile work (separate),
-  or document the residual.
-- Do **not** add `--no-ext-diff`/`-c core.fsmonitor=`/clean-config tricks here:
-  in-confinement we *want* the real filters to run (correctness).
+**The path mapping (the crux).** The work copy is bind-mounted: host
+`store.WorkDir(sandboxDir, hostPath)` = `<sandboxDir>/work/<EncodePath(hostPath)>`
+↔ container `DirSpec.ResolvedMountPath()` (the `mountPath`, else the mirrored
+`hostPath`). Two views of the **same files**. Host git runs `-C <host work copy>`;
+**in-confinement git must run `-C <ResolvedMountPath>`** (the container view). The
+diff/status/patch callers already load the meta and hold `dir.MountPath`
+(`copyflow/diff.go:loadDiffContext`, `copyGitWorkDir` at `diff.go:376`), so the
+container path is available at the call site. **This is why the path change is
+entangled with the dispatch change** — today `loadDiffContext` passes the *host*
+work path to `git.NewSandbox(...).Run`; the in-confinement path must pass the
+*container* path instead. (Tart sidesteps this with a mechanical host→VM rewrite
+`translateWorkDirToVMPath`; docker's mapping is meta-dependent, so resolve the
+container path at the copyflow caller — do **not** couple `runtime` to `store`.)
+
+Steps:
+1. **`GitExec` on docker/podman/containerd** — mirror `runtime/tart/tart.go:552`
+   exactly: resolve instance name (`store.InstanceName`), `isRunning` else
+   `runtime.ErrNotRunning`, build `git -c core.hooksPath=/dev/null -C <containerPath> <args>`,
+   run via the engine's raw exec (`docker exec`; preserve exact stdout — patches are
+   whitespace-sensitive, see Tart's `ExecRaw` note), return stdout. Each declares
+   `runtime.GitExecer`. Unit-testable: assert the argv + path with a fake engine.
+2. **Dispatch** — in `internal/git/git.go` `NewSandbox`, route the container
+   backends' work-copy git through `sandboxExec`/`GitExec` (today gated on
+   `LocalitySandboxSide`). Cleanest: a new predicate "git runs in confinement"
+   (true for SandboxSide **and** the container backends) rather than overloading
+   `FilesystemLocality` — decouple *git-exec locality* from *filesystem locality*
+   (update the `FilesystemLocality` doc at `runtime/runtime.go:260` accordingly).
+   The host-**target** apply ops keep `NewHost`/`hostExec` (user-owned repo, safe)
+   — do **not** reroute those.
+3. **Pass the container path** — at the copyflow call sites, give the
+   in-confinement execer `dir.ResolvedMountPath()` (not the host work copy).
+4. **"Sandbox must be running"** — propagate `runtime.ErrNotRunning` to
+   `diff`/`apply`/`status`; auto-start or clear error at the copyflow/CLI boundary
+   (reuse the `ErrOverlayRequiresRuntime` precedent + UX).
+5. **seatbelt** — `sandbox-exec`-wrapped git + the caps-F5 profile work (separate),
+   or a documented residual (macOS-only, lighter tier).
+
+- Do **not** add `--no-ext-diff`/`-c core.fsmonitor=`/clean-config tricks: in
+  confinement we *want* the real filters to run (correctness).
+- Verification harness on this host: `runtime/docker/integration_test.go`,
+  `internal/orchestrator/integration_test.go` (real Docker+Podman present;
+  diff/apply correctness needs no API key). Add a malicious-filter case (host file
+  NOT created) + a legit-filter case (diff correct) to the copy-mode diff/apply
+  integration tests.
 
 ### Must verify on real backends
 
