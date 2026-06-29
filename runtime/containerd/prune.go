@@ -11,6 +11,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/containerd/containerd/v2/core/content"
 	"github.com/containerd/containerd/v2/core/images"
 	"github.com/containerd/containerd/v2/core/snapshots"
 	cerrdefs "github.com/containerd/errdefs"
@@ -105,20 +106,49 @@ func (r *Runtime) PruneCache(ctx context.Context, includeImages, dryRun bool, ou
 	if err := r.refuseIfContainersExist(ctx); err != nil {
 		return 0, err
 	}
+
+	// Measure the content store before and after the image prune. Deleting an
+	// image record with SynchronousDelete GCs its now-unreferenced content blobs
+	// before returning (images.SynchronousDelete docs), so the drop in
+	// content-store size is host disk that the prune actually freed. In dry-run
+	// nothing is deleted, so the whole content store is what *would* be freed.
+	contentBefore := r.contentStoreBytes(ctx)
 	if err := r.pruneImages(ctx, dryRun, output); err != nil {
 		return 0, err
 	}
-	reclaimed := r.pruneSnapshots(ctx, dryRun, output)
+	contentFreed := contentBefore
+	if !dryRun {
+		contentFreed = max(contentBefore-r.contentStoreBytes(ctx), 0)
+	}
+
+	snapFreed := r.pruneSnapshots(ctx, dryRun, output)
+	reclaimed := contentFreed + snapFreed
 	// Print a per-backend reclaim line like docker/podman so containerd's
 	// contribution to the aggregate is visible rather than silently folded in.
-	// The figure is the overlayfs snapshot reclaim only: the image content-store
-	// blobs that pruneImages frees are not separately measured (DF59), so on a
-	// host that mostly held content this can read low despite real reclaim.
+	// Both tiers free host disk and are counted: the content store (compressed
+	// blobs) and the overlayfs snapshots (extracted layers). devmapper snapshot
+	// blocks return to the thin-pool but free no host disk, so pruneSnapshots
+	// reports them separately and excludes them from snapFreed (DF59).
 	if !dryRun {
-		fmt.Fprintf(output, "containerd: reclaimed %s (snapshot layers; image content not separately measured)\n", //nolint:errcheck
-			runtime.FormatBytes(reclaimed))
+		fmt.Fprintf(output, "containerd: reclaimed %s (%s image content + %s snapshot layers)\n", //nolint:errcheck
+			runtime.FormatBytes(reclaimed), runtime.FormatBytes(contentFreed), runtime.FormatBytes(snapFreed))
 	}
 	return reclaimed, nil
+}
+
+// contentStoreBytes sums the on-disk size of every blob in the namespace's
+// content store (compressed image layers, manifests, configs). Best-effort: a
+// Walk error yields the bytes counted so far rather than failing the prune —
+// the figure is a reporting aid, not a correctness invariant. The content store
+// is namespaced, so this counts only yoloai's blobs.
+func (r *Runtime) contentStoreBytes(ctx context.Context) int64 {
+	var total int64
+	cs := r.client.ContentStore()
+	_ = cs.Walk(ctx, func(info content.Info) error { //nolint:errcheck // best-effort accounting
+		total += info.Size
+		return nil
+	})
+	return total
 }
 
 // refuseIfContainersExist returns an error if any container owned by this
@@ -296,13 +326,15 @@ func (r *Runtime) pruneSnapshotter(ctx context.Context, snapshotter string, name
 }
 
 // CacheUsage implements runtime.DiskUsageReporter for containerd. Sums the
-// on-disk Usage of every snapshot across both snapshotters (overlayfs +
-// devmapper) in the yoloai namespace — these layers ARE the only reclaimable
-// content and removing them forces a rebuild, so the total is reported as
-// ImageBytes. CachedBytes is always 0 (containerd has no no-rebuild-forcing
-// cache). Querying Usage per snapshot goes through the containerd socket, so
-// it needs no host filesystem access (yoloai may run unprivileged via the
-// containerd group) and no devmapper/dmsetup privileges.
+// on-disk footprint of yoloai's images in the namespace — the content store
+// (compressed blobs) plus the extracted snapshots across both snapshotters
+// (overlayfs + devmapper). These ARE the only reclaimable content and removing
+// them forces a rebuild, so the total is reported as ImageBytes. The two tiers
+// are distinct on-disk storage (blobs vs extracted layers) and coexist, so
+// summing them is the true footprint, not a double-count. CachedBytes is always
+// 0 (containerd has no no-rebuild-forcing cache). Every query goes through the
+// containerd socket, so it needs no host filesystem access (yoloai may run
+// unprivileged via the containerd group) and no devmapper/dmsetup privileges.
 func (r *Runtime) CacheUsage(ctx context.Context) (runtime.CacheUsage, error) {
 	ctx = r.withNamespace(ctx)
 
@@ -311,8 +343,9 @@ func (r *Runtime) CacheUsage(ctx context.Context) (runtime.CacheUsage, error) {
 		return runtime.CacheUsage{CachedBytes: 0, ImageBytes: -1}, fmt.Errorf("list images: %w", err)
 	}
 
-	var total int64
-	var parts []string
+	contentBytes := r.contentStoreBytes(ctx)
+	total := contentBytes
+	parts := []string{fmt.Sprintf("content store: %s", runtime.FormatBytes(contentBytes))}
 	hasDevmapper := false
 	for _, snapshotter := range snapshotterNames {
 		infos, present := r.snapshotInfos(ctx, snapshotter)
