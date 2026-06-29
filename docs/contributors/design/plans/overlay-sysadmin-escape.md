@@ -10,12 +10,14 @@ treat `:overlay` as an explicit, documented dangerous opt-in (see "v0.6.0
 interim") — stands, and is now the *recommended* near-term posture, not just a
 stopgap.
 
-> ⚠️ **Read the Audit section before acting on this plan.** The original
-> recommendation (swap kernel overlayfs → fuse-overlayfs to drop `CAP_SYS_ADMIN`)
-> does **not** work in yoloAI's deployment (rootful Docker, no userns-remap):
-> fuse-overlayfs there needs the *same* `CAP_SYS_ADMIN`, so it removes nothing.
-> Proven on real Docker. The body below is kept for the record with Option A
-> struck through.
+> ⚠️ **Superseded by D109 — the resolution is to RETIRE `:overlay`, not fix it.**
+> See [retire-overlay-reflink-copy.md](retire-overlay-reflink-copy.md). The audit
+> below stands as the record of *why* a fix isn't viable (the original
+> recommendation — swap kernel overlayfs → fuse-overlayfs to drop
+> `CAP_SYS_ADMIN` — does **not** work on rootful Docker without userns-remap;
+> fuse-overlayfs needs the *same* cap there; proven on real Docker, a GEN §14
+> trap). Option A is struck through below. This plan is retained for its analysis;
+> act on the retire plan instead.
 
 ## The vulnerability
 

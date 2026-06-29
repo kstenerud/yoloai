@@ -294,13 +294,13 @@ Complete — all ten architectural-cleanup issues are resolved in current code (
 
 ## Operational Hardening
 
-### Copy-mode host-git RCE (security audit C1, CRITICAL — blocks v0.6.0)
+### Copy-mode host-git RCE (security audit C1, CRITICAL) — IMPLEMENTED
 
-Agent-controlled git `filter`/`diff`/`fsmonitor` drivers in the copy-mode work-copy `.git/config` execute on the host during `yoloai diff`/`apply`/`status` (host git neutralizes hooks only). Fix = run the work-copy git **in the agent's confinement** (in-container / in-VM / under the seatbelt profile), so a malicious filter runs in the sandbox not the host AND legitimate filters (LFS/git-crypt) stay correct. The host-side "private git-dir + clean config" alternative is rejected (it corrupts filtered repos). The v0.6.0 tag waits for this. Plan: [copy-mode-git-rce.md](copy-mode-git-rce.md).
+Agent-controlled git `filter`/`diff`/`fsmonitor` drivers in the copy-mode work-copy `.git/config` executed on the host during `yoloai diff`/`apply`/`status`. **Fixed (D108):** the work-copy git now runs in the agent's confinement via `runtime.GitRunsInConfinement` + each backend's `GitExec`; verified on real Docker + Podman. Residuals (seatbelt host git; broken-metadata probe) tracked as DF67. Plan: [copy-mode-git-rce.md](copy-mode-git-rce.md).
 
-### `:overlay` CAP_SYS_ADMIN host escape (security audit H2)
+### `:overlay` CAP_SYS_ADMIN host escape (security audit H2) — RESOLUTION: RETIRE overlay
 
-`:overlay` mounts kernel overlayfs, which forces `CAP_SYS_ADMIN` + `apparmor=unconfined`; on Docker rootful (no userns remap) + the agent's passwordless sudo this is a host escape. Proper fix = switch to **fuse-overlayfs** (already installed, eliminates the cap); userns and a custom AppArmor profile are weaker alternatives. v0.6.0 interim: treat `:overlay` as an explicit documented dangerous opt-in with a loud warning. Plan: [overlay-sysadmin-escape.md](overlay-sysadmin-escape.md).
+`:overlay` mounts kernel overlayfs, which forces `CAP_SYS_ADMIN` + `apparmor=unconfined`; on Docker rootful (no userns remap) + the agent's passwordless sudo this is a host escape. The fuse-overlayfs "fix" was **audited and refuted** (needs the same cap outside a user namespace — a GEN §14 trap). **Decision (D109): retire `:overlay`** and recover its benefit via reflink-aware `:copy` (copy-on-write clones, verified safe across btrfs/XFS/APFS with graceful fallback). v0.6.0 interim: documented dangerous opt-in + loud warning. Active plan: [retire-overlay-reflink-copy.md](retire-overlay-reflink-copy.md); audit record: [overlay-sysadmin-escape.md](overlay-sysadmin-escape.md).
 
 ### Log rotation
 
