@@ -327,8 +327,15 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 	cmd := sysexec.Command(r.sandboxEnv(), r.sandboxExecBin, sandboxArgs...)
 	cmd.Stderr = logFile
 	cmd.Stdout = logFile
+	// Setsid (not Setpgid): on seatbelt the agent + tmux run on the host, so a
+	// non-interactive `new`/`start` must not leave them attached to the caller's
+	// controlling terminal. Setpgid makes a new process group but stays in the
+	// same session, keeping /dev/tty and risking raw-mode corruption after the
+	// CLI returns (DF40). Setsid starts a new session with no controlling tty
+	// (same detach idiom as the broker sidecar); the kill path (kill(-pid)) still
+	// reaps the group since the child is its own process-group leader.
 	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setpgid: true,
+		Setsid: true,
 	}
 
 	if err := cmd.Start(); err != nil {
