@@ -23,6 +23,15 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 
 ## Findings
 
+### DF66 — Copy-mode host-git RCE via agent-controlled `.git/config` filter/diff/fsmonitor drivers (CRITICAL)
+
+- **Discovered:** 2026-06-29 · **Workstream:** escape/exfil security audit (host-side execution injection C1), empirically reproduced
+- **Severity:** **CRITICAL** (host code execution via the routine diff/apply workflow). **Blocks the v0.6.0 tag.**
+- **Disposition:** PARKED — design written, implementation held for a dedicated effort (user's call; the cut waits)
+- **Description:** In `:copy` mode the work-copy `.git/config` + `.gitattributes` are agent-controlled (RW bind mount), and host git neutralizes hooks only (`git.go:93`). Agent-defined `filter.*.clean/smudge`, `diff.*.command/textconv`, and `core.fsmonitor` execute on the host when the user runs `yoloai diff`/`apply`/`status` (host `git add -A`/`diff`/`status`). Worst on Seatbelt (host git runs outside the macOS sandbox). The sandbox→host `git apply` path is NOT affected (user-owned target `.git`). Defense-in-depth flags kill the diff+fsmonitor vectors but not the `git add` clean-filter, so the git-dir relocation is required.
+- **Trigger:** implement per the plan — host-private git-dir + `objects/info/alternates` (recommended) or in-container routing. Needs real-Docker/Podman verification of diff/apply output correctness (make check doesn't exercise real diff/apply).
+- **Pointer:** [plans/copy-mode-git-rce.md](plans/copy-mode-git-rce.md); `internal/git/git.go:93`, `copyflow/diff.go:132`, `copyflow/apply.go:366`, `internal/git/ops.go`.
+
 ### DF65 — `:overlay` grants CAP_SYS_ADMIN → host escape on Docker rootful
 
 - **Discovered:** 2026-06-29 · **Workstream:** escape/exfil security audit (caps F1 / mount F1)

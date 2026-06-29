@@ -294,6 +294,10 @@ Complete — all ten architectural-cleanup issues are resolved in current code (
 
 ## Operational Hardening
 
+### Copy-mode host-git RCE (security audit C1, CRITICAL — blocks v0.6.0)
+
+Agent-controlled git `filter`/`diff`/`fsmonitor` drivers in the copy-mode work-copy `.git/config` execute on the host during `yoloai diff`/`apply`/`status` (host git neutralizes hooks only). Fix = host-private git-dir reaching the original objects via `objects/info/alternates` (recommended) or routing copy-mode git in-container. The v0.6.0 tag waits for this. Plan: [copy-mode-git-rce.md](copy-mode-git-rce.md).
+
 ### `:overlay` CAP_SYS_ADMIN host escape (security audit H2)
 
 `:overlay` mounts kernel overlayfs, which forces `CAP_SYS_ADMIN` + `apparmor=unconfined`; on Docker rootful (no userns remap) + the agent's passwordless sudo this is a host escape. Proper fix = switch to **fuse-overlayfs** (already installed, eliminates the cap); userns and a custom AppArmor profile are weaker alternatives. v0.6.0 interim: treat `:overlay` as an explicit documented dangerous opt-in with a loud warning. Plan: [overlay-sysadmin-escape.md](overlay-sysadmin-escape.md).
