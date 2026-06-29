@@ -1066,6 +1066,18 @@ Only then the **mechanical move**: `runtime` first/with `store`, repoint the fen
 
 **Residuals carried forward (unchanged from D105).** Brokering bounds blast radius and makes exfil scoped + detectable; it does not stop a duped agent misusing an in-scope capability — compose with the copy/diff/apply review gate, a narrow allowlist, and egress logging. PID-liveness can be fooled by PID reuse (a false "alive"); the symptom is the same failing API call → harder reconcile/`restart`; a holder-lock refinement is deferred until it bites.
 
+## D107 — Clever hacks bite: lean on a foreign system's *contract*, not an incidental property (new principle GEN §14, bounds GEN §3)
+
+**Date:** 2026-06-29. **Status:** Active. Establishes a new general principle (GEN §14) and draws the boundary on GEN §3 (ecosystem-first). Grounded in the v0.6.0 docker base-image staleness fix (`e9837be8`).
+
+**The principle.** Repurposing an existing system to *incidentally* serve a use it was not designed for is brittle: the system wasn't shaped around our case and won't concern itself with changes that break us. A hack needs very strong justification — "it's clever" is the worst smell of all. Canonical illustrations (not ours): Go makes an identifier public by an *uppercase first letter*, which has no meaning in caseless scripts (forcing the ugly `X成本` workaround); Go marks test code by the `_test.go` *filename*, so sharing test helpers across packages forces them out into public `testutil`/`pkgtest` surface.
+
+**Boundary with GEN §3.** §3 says compose with git/Docker/unix rather than reinventing. §14 is its edge: compose with what a tool *contractually* provides, not with an incidental property it happens to expose. Not a tension — §3 picks the tool, §14 picks *which surface of it* you lean on.
+
+**The worked case (ours).** The docker base image could go stale on a second local provider: freshness was tracked by a host-side marker file keyed by *backend* (`.base-image-checksum-docker`), but OrbStack / Docker Desktop / Colima are separate image stores under one "docker" backend (the provider-dimension sibling of DF56). **Rejected fix (the hack):** key the marker by the daemon's `docker info .ID`. It worked for Docker but leaned on a property that is *empty* for podman's docker-compat API — so correctness silently varied by daemon. Exactly the smell: a side-channel (host file) patched with a foreign incidental (daemon ID) that doesn't serve all daemons. **Root fix:** stamp the checksum as a **label on the image itself**, read back via `ImageInspect` → `Config.Labels`. Freshness travels with the artifact, in whatever store holds it — no host-side key, no daemon property, immune to the provider/symlink/remote dimensions by construction. The single-store backends (apple — a Tart VM image, not OCI; containerd — one store) correctly keep the host marker.
+
+**Consequences.** GEN §14 added with this case as its worked example; `rule-index.md` gains a GEN §14 row; the principles `README.md` general index line updated. The backend-idiosyncrasies entry for the docker staleness bug records the rejected daemon-ID approach and why.
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.

@@ -49,6 +49,7 @@ This file is small on purpose: load all of it at the start of a task. It carries
 | GEN §11  | When in doubt, publish — docs, research, decisions, principles. Trivial cost, compounding trust.                      | Keeping a doc/decision private by default.                                       |
 | GEN §12  | A design/spec is a provisional, falsifiable model — load-bearing only after implementation verifies it; facts win.    | Treating an unimplemented design as a contract; coding to the doc when reality diverges. |
 | GEN §13  | Raise anything that looks off — even when agreed/spec'd/planned; agreement is a strong prior, not a gag order.         | Silently following an agreed plan you've spotted a problem in.                   |
+| GEN §14  | Compose with a foreign system's *contract*, not an incidental property; "it's clever" is the worst smell. Put state on the artifact, not a side-channel. | Keying behaviour off a filename / character case / daemon field that wasn't designed to carry it (and varies by version/variant). |
 
 ## architecture-principles.md
 

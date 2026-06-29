@@ -488,6 +488,36 @@ Originally established in D54.
 
 ---
 
+## §14. Clever hacks bite — lean on a foreign system's contract, not an incidental property
+
+> **Rule.** Compose with what a tool *guarantees* (its contract), not with a property it merely happens to expose. A hack — making a system incidentally serve a use it wasn't designed for — needs very strong justification; "it's clever" is the worst smell of all.
+>
+> **Bites when:** keying behaviour off a foreign system's incidental property (a filename, a character's case, a daemon field) that wasn't designed to carry that meaning and won't preserve it across the system's changes or variants. · **See also:** GEN §3, DEV §11.
+
+**Principle.** When we reach for an existing system (the §3 instinct), there are two surfaces we can lean on: what it *contractually* provides, and properties it *incidentally* exposes. Leaning on the incidental is brittle: the system was not shaped around our case, so it carries no obligation to keep serving us — a later version, or a sibling implementation, can change the property out from under us with no warning, because from its side nothing broke. The clever hack feels like leverage but is really an undocumented dependency on someone else's accident. §3 and §14 are the same decision seen from two sides: §3 says *use the tool*; §14 says *use the part of it that's a promise.*
+
+### Pattern
+
+Before building on a property of a foreign system, ask: is this a **contract** (documented, stable, uniform across the implementations and versions we support) or an **incident** (a side effect of how it happens to be built today)? If incident, either find the contractual surface that expresses the same thing, or store the state on something we control. The strongest move is usually to **put the data where it belongs** — on the artifact itself — so no foreign property has to carry it. When a hack is genuinely the only option, it must be justified by more than cleverness, and the justification (and what would break it) goes in a comment and/or a D-entry.
+
+### Worked examples
+
+- **Docker base-image staleness (D107, `e9837be8`).** Freshness was tracked by a host-side marker file keyed by *backend* — but OrbStack / Docker Desktop / Colima are separate image stores under one "docker" backend, so a second provider ran a stale image. The **rejected** fix keyed the marker by the daemon's `docker info .ID`; clever, but it leaned on a field that is *empty* for podman's docker-compat API, so correctness varied by daemon. The **adopted** fix stamps the build-inputs checksum as a **label on the image** and reads it back via `ImageInspect` — the freshness data lives on the artifact, in its store, depending on no foreign incidental at all.
+- **Go's `uppercase = public` (canonical, not ours).** Export visibility keyed off a character's *case* — meaningless in caseless scripts, forcing the `X成本` kludge. A real linguistic property (case) was overloaded to carry an unrelated semantic (visibility).
+- **Go's `_test.go` filename convention (canonical, not ours).** Test-vs-production keyed off the *filename*; sharing test helpers across packages then can't use that channel, so helpers get pushed into public `testutil`/`pkgtest` surface — the hack's edge case becomes everyone's API-surface problem.
+
+### Cost-vs-benefit
+
+Cost of applying: at design time, the discipline to distinguish contract from incident, and sometimes a slightly larger change to route state onto something we own (e.g. an image label vs. a one-line host-file key). Damage prevented: silent, variant-specific breakage that surfaces far from the cause (the podman-empty-`ID` case looked fine on Docker), and the compounding patch-on-patch tax as each new variant exposes a new way the incidental property doesn't hold. Threshold: any time correctness depends on a foreign property, require that the property be contractual and uniform across supported implementations; otherwise move the state onto the artifact or something we control. Guardrail: this does **not** override §3 — composing with a tool's *documented* behaviour is exactly right; §14 only rejects leaning on its accidents.
+
+### Sources
+
+The two Go examples are community-canonical illustrations of language-design overloads. Operationalised here via D107 (docker base-image staleness). Full discussion: D107.
+
+Originally established in D107.
+
+---
+
 # Common over-generalisations to avoid
 
 The cost-vs-benefit discipline (Framing) explicitly rejects principle-shaped statements that don't pay off at yoloAI's scale. The following are documented so future-yoloAI doesn't drift toward them.
