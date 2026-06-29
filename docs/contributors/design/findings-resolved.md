@@ -7,6 +7,29 @@ History of codebase findings (issues discovered mid-work) that have been address
 are moved here from [`findings-unresolved.md`](findings-unresolved.md) once resolved, so the
 active file stays a working set. Newest first.
 
+### DF56 — base-image freshness checksum was shared across backends, so separate-store backends ran stale images
+
+- **Discovered:** 2026-06-28 · **Resolved:** 2026-06-29 · **Workstream:** egress-broker podman validation → tamper-resistant-firewall
+- **Severity:** LOW (bites multi-backend image work) · **Disposition:** ADDRESSED-IN-PLACE
+- **Description:** The base-image build was skipped when the recorded build-inputs checksum matched the
+  current embedded inputs, but that checksum lived in ONE host-side file (`<layout>/cache/.base-image-checksum`)
+  shared by every backend. Each backend keeps the image in a SEPARATE store (docker, podman, containerd,
+  apple), so whichever backend built first stamped the checksum "current" for all the others — leaving the
+  separate-store backends (podman especially) silently running a stale image after a resource change. This
+  bit step 1.5: `make releasetest` rebuilt the docker image (writing the shared checksum), then the
+  `integration-podman` tier saw "up to date" and skipped podman's rebuild, so podman ran the new binary
+  against an old image lacking `firewall.py` → the entrypoint failed on boot (`start instance: instance not
+  found`). The release gate could not detect that a separate-store backend needed a rebuild.
+- **Resolution:** key the checksum file per image store — `.base-image-checksum-<backendKey>`
+  (`baseImageChecksumPath(layout, backendKey)`); `NeedsBuild`/`RecordBuildChecksum` take the key. docker
+  passes `r.binaryName` (`docker`/`podman` — the two backends sharing docker's Setup), containerd passes
+  `"containerd"`, apple `"apple"`. Each backend now rebuilds its own image exactly once when its inputs
+  change. Verified: with a stale podman image present, podman's `NeedsBuild("podman")` reads its own
+  (absent) marker → rebuilds; `TestIntegration_CredentialBroker_Podman` passes against the rebuilt image.
+- **Pointer:** `runtime/docker/build.go` (`baseImageChecksumPath`/`NeedsBuild`/`RecordBuildChecksum`),
+  `runtime/docker/docker.go` (Setup), `runtime/containerd/image.go`, `runtime/apple/apple.go`; test
+  pre-seeds in `internal/orchestrator/integration_helpers_test.go` keyed per backend.
+
 ### DF57 — podman brokering on macOS hung the real agent; podman now degrades to direct delivery on darwin
 
 - **Discovered:** 2026-06-28 · **Resolved:** 2026-06-28 · **Workstream:** egress-broker macOS reach (workstream D)

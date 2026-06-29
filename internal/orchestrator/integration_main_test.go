@@ -77,7 +77,7 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "failed to create cache dir: %v\n", err)
 		os.Exit(1)
 	}
-	dockerrt.RecordBuildChecksum(integLayout, "")
+	dockerrt.RecordBuildChecksum(integLayout, "docker")
 
 	mgr := orchestrator.NewEngineWithRuntime(rt, slog.Default(), strings.NewReader(""), orchestrator.WithLayout(integLayout))
 	var setupErr error

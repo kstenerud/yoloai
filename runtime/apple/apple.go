@@ -370,7 +370,7 @@ func (r *Runtime) Setup(ctx context.Context, layout config.Layout, sourceDir str
 		}
 		return r.buildBaseImage(ctx, layout, output, logger)
 	}
-	if dockerrt.NeedsBuild(layout, sourceDir) {
+	if dockerrt.NeedsBuild(layout, "apple") {
 		fmt.Fprintln(output, "Base image resources updated, rebuilding...") //nolint:errcheck // best-effort progress
 		return r.buildBaseImage(ctx, layout, output, logger)
 	}
@@ -411,7 +411,7 @@ func (r *Runtime) buildBaseImage(ctx context.Context, layout config.Layout, outp
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("container build: %w", err)
 	}
-	dockerrt.RecordBuildChecksum(layout, "")
+	dockerrt.RecordBuildChecksum(layout, "apple")
 	return nil
 }
 

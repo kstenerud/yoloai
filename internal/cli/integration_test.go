@@ -50,7 +50,7 @@ func cliSetup(t *testing.T) (projectDir string) {
 	if bt := testutil.IntegrationBackendType(); bt == "" || bt == "docker" || bt == "podman" {
 		layout := config.NewLayoutFor(filepath.Join(tmpHome, ".yoloai", "library"), tmpHome)
 		require.NoError(t, os.MkdirAll(layout.CacheDir(), 0750))
-		dockerrt.RecordBuildChecksum(layout, "")
+		dockerrt.RecordBuildChecksum(layout, "docker")
 	}
 
 	// Stamp both realms so the startup gate (D61) sees a consistent, current

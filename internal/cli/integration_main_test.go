@@ -146,7 +146,7 @@ func TestMain(m *testing.M) {
 			fmt.Fprintf(os.Stderr, "failed to create cache dir: %v\n", err)
 			os.Exit(1)
 		}
-		dockerrt.RecordBuildChecksum(integLayout, "")
+		dockerrt.RecordBuildChecksum(integLayout, "docker")
 	}
 
 	// The seeding above (backend config and/or build checksum) populates

@@ -26,32 +26,41 @@ import (
 // in a profile directory (for profile image staleness detection).
 const lastBuildFile = ".last-build-checksum"
 
-// baseImageChecksumPath returns the path where the base image build checksum
-// is stored under the given layout's cache directory.
-func baseImageChecksumPath(layout config.Layout) string {
-	return filepath.Join(layout.CacheDir(), ".base-image-checksum")
+// baseImageChecksumPath returns the path where the base image build checksum is
+// stored under the given layout's cache directory, keyed by backend.
+//
+// The key MUST be per-image-store: docker, podman, containerd, and apple each
+// keep the base image in a SEPARATE store, so a single shared marker let whichever
+// backend built first satisfy NeedsBuild for all the others — leaving the
+// separate-store backends (podman especially) silently running a stale image after
+// a resource change (DF56). Keying by backend makes each store's freshness
+// independent so every backend rebuilds when its own image is stale.
+func baseImageChecksumPath(layout config.Layout, backendKey string) string {
+	return filepath.Join(layout.CacheDir(), ".base-image-checksum-"+backendKey)
 }
 
-// NeedsBuild returns true if the Docker image needs to be (re)built because
-// the embedded resource files have changed since the last successful build.
-func NeedsBuild(layout config.Layout, _ string) bool {
+// NeedsBuild returns true if the base image for backendKey needs to be (re)built
+// because the embedded resource files have changed since that backend's last
+// successful build. backendKey identifies the image store ("docker", "podman",
+// "containerd", "apple") — see baseImageChecksumPath for why it must be per-store.
+func NeedsBuild(layout config.Layout, backendKey string) bool {
 	current := buildInputsChecksum()
 	if current == "" {
 		return true // shouldn't happen with embedded resources, but be safe
 	}
-	last, err := os.ReadFile(baseImageChecksumPath(layout)) //nolint:gosec // G304: path is DataDir/cache/
+	last, err := os.ReadFile(baseImageChecksumPath(layout, backendKey)) //nolint:gosec // G304: path is DataDir/cache/
 	if err != nil {
 		return true // no record → need build
 	}
 	return string(last) != current
 }
 
-// RecordBuildChecksum writes the current build inputs checksum to disk.
-// Exported for testing; production code uses buildBaseImage which records
-// automatically on success.
-func RecordBuildChecksum(layout config.Layout, _ string) {
+// RecordBuildChecksum writes the current build inputs checksum to disk for
+// backendKey's image store. Exported for testing; production code uses
+// buildBaseImage which records automatically on success.
+func RecordBuildChecksum(layout config.Layout, backendKey string) {
 	if sum := buildInputsChecksum(); sum != "" {
-		_ = fileutil.WriteFile(baseImageChecksumPath(layout), []byte(sum), 0600) //nolint:gosec // G304: path is DataDir/cache/
+		_ = fileutil.WriteFile(baseImageChecksumPath(layout, backendKey), []byte(sum), 0600) //nolint:gosec // G304: path is DataDir/cache/
 	}
 }
 
@@ -136,7 +145,7 @@ func (r *Runtime) buildBaseImage(ctx context.Context, layout config.Layout, outp
 	}
 
 	// Record build inputs checksum so NeedsBuild can detect stale images.
-	RecordBuildChecksum(layout, "")
+	RecordBuildChecksum(layout, r.binaryName)
 
 	return nil
 }

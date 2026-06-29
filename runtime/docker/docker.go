@@ -351,7 +351,7 @@ func (r *Runtime) Setup(ctx context.Context, layout config.Layout, sourceDir str
 		return r.buildBaseImage(ctx, layout, output, logger)
 	}
 
-	if NeedsBuild(layout, sourceDir) {
+	if NeedsBuild(layout, r.binaryName) {
 		fmt.Fprintln(output, "Base image resources updated, rebuilding...") //nolint:errcheck // best-effort output
 		return r.buildBaseImage(ctx, layout, output, logger)
 	}
