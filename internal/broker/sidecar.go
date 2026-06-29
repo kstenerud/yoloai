@@ -48,10 +48,11 @@ type BindingConfig struct {
 // stdin. It carries the real credentials and must never be persisted or placed
 // in argv/env.
 type SidecarConfig struct {
-	UpstreamURL  string          `json:"upstream_url"`
-	BindAddr     string          `json:"bind_addr"`
-	StripHeaders []string        `json:"strip_headers,omitempty"`
-	Bindings     []BindingConfig `json:"bindings"`
+	UpstreamURL   string          `json:"upstream_url"`
+	BindAddr      string          `json:"bind_addr"`
+	StripHeaders  []string        `json:"strip_headers,omitempty"`
+	ExpectedToken string          `json:"expected_token,omitempty"`
+	Bindings      []BindingConfig `json:"bindings"`
 }
 
 // Handshake is the one line the sidecar writes back (to stdout) once it has
@@ -84,7 +85,7 @@ func RunSidecar(ctx context.Context, stdin io.Reader, handshake io.Writer) error
 	if err != nil {
 		return err
 	}
-	inj, err := NewInjector(Upstream{URL: up, Bindings: bindings, StripHeaders: cfg.StripHeaders})
+	inj, err := NewInjector(Upstream{URL: up, Bindings: bindings, StripHeaders: cfg.StripHeaders, ExpectedToken: cfg.ExpectedToken})
 	if err != nil {
 		return err
 	}

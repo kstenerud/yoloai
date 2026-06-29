@@ -125,6 +125,49 @@ func TestInjector_BearerPlaceholderReplaced(t *testing.T) {
 	assert.Equal(t, "Bearer real-oauth-token", upstream.gotAuth, "bearer placeholder overwritten with real token")
 }
 
+// TestInjector_RejectsWrongPlaceholderToken is the H3 fix: with a per-sandbox
+// ExpectedToken set, a request that does not present it (e.g. a co-resident
+// container on the shared bridge probing the injector port) is rejected with 403
+// and never reaches the upstream, so the victim's credential is never injected.
+// The correct token is accepted and the real credential injected as usual.
+func TestInjector_RejectsWrongPlaceholderToken(t *testing.T) {
+	upstream := newRecordingUpstream(t)
+
+	front := startInjector(t, broker.Upstream{ //nolint:gosec // G101 false positive: test placeholder token, not a real credential
+		URL: parseURL(t, upstream.server.URL),
+		Bindings: []credential.CredentialBinding{{
+			Destination: credential.Destination(upstream.host(t)),
+			Apply:       credential.HeaderSet{Header: "x-api-key"},
+			Source:      credential.Static("sk-ant-real"),
+		}},
+		StripHeaders:  []string{"Authorization"},
+		ExpectedToken: "per-sandbox-secret",
+	})
+
+	// Wrong token → 403, never forwarded, no credential injected.
+	bad, err := http.NewRequest(http.MethodPost, front+"/v1/messages", strings.NewReader("{}"))
+	require.NoError(t, err)
+	bad.Header.Set("Authorization", "Bearer not-the-token")
+	badResp, err := http.DefaultClient.Do(bad)
+	require.NoError(t, err)
+	_, _ = io.Copy(io.Discard, badResp.Body)
+	_ = badResp.Body.Close()
+	assert.Equal(t, http.StatusForbidden, badResp.StatusCode)
+	assert.Equal(t, 0, upstream.hits, "a request with the wrong token must not reach the upstream")
+
+	// Correct token (with the Bearer prefix the agent sends) → forwarded + injected.
+	good, err := http.NewRequest(http.MethodPost, front+"/v1/messages", strings.NewReader("{}"))
+	require.NoError(t, err)
+	good.Header.Set("Authorization", "Bearer per-sandbox-secret")
+	goodResp, err := http.DefaultClient.Do(good)
+	require.NoError(t, err)
+	_, _ = io.Copy(io.Discard, goodResp.Body)
+	_ = goodResp.Body.Close()
+	assert.Equal(t, http.StatusOK, goodResp.StatusCode)
+	assert.Equal(t, 1, upstream.hits)
+	assert.Equal(t, "sk-ant-real", upstream.gotKey, "real key injected for the authenticated request")
+}
+
 func TestInjector_NoBindingForHostLeavesRequestUnauthenticated(t *testing.T) {
 	upstream := newRecordingUpstream(t)
 

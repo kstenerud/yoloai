@@ -4,6 +4,8 @@ package broker
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -47,7 +49,10 @@ type InjectorSpec struct {
 	BindHost     string
 	UpstreamURL  string
 	StripHeaders []string
-	Bindings     []BindingConfig
+	// ExpectedToken is the per-sandbox placeholder secret the injector verifies on
+	// inbound requests before injecting the real credential (see Injector).
+	ExpectedToken string
+	Bindings      []BindingConfig
 }
 
 // InjectorRecord is the persisted handle to a running sidecar (injector.json). It
@@ -230,10 +235,11 @@ func errEmptyAddr(addr string) error {
 // the spec's container-reachable host.
 func sidecarConfig(spec InjectorSpec, bindPort string) SidecarConfig {
 	return SidecarConfig{
-		UpstreamURL:  spec.UpstreamURL,
-		BindAddr:     net.JoinHostPort(spec.BindHost, bindPort),
-		StripHeaders: spec.StripHeaders,
-		Bindings:     spec.Bindings,
+		UpstreamURL:   spec.UpstreamURL,
+		BindAddr:      net.JoinHostPort(spec.BindHost, bindPort),
+		StripHeaders:  spec.StripHeaders,
+		ExpectedToken: spec.ExpectedToken,
+		Bindings:      spec.Bindings,
 	}
 }
 
@@ -247,6 +253,36 @@ func closeAll(files ...*os.File) {
 
 func recordPath(sandboxDir string) string {
 	return filepath.Join(sandboxDir, injectorRecordFile)
+}
+
+const placeholderTokenFile = "injector-token"
+
+// PlaceholderToken returns the sandbox's per-sandbox injector placeholder token,
+// generating and persisting a fresh random one on first call (get-or-create).
+// The launch path delivers it into the container as the agent's placeholder
+// credential and passes it to the injector as ExpectedToken; the reconcile path
+// recovers the same value so a respawned injector keeps accepting the running
+// agent's requests. The token lives host-side (0600, never bind-mounted), so a
+// co-resident container cannot learn another sandbox's token. It is not a real
+// credential — only a per-sandbox capability secret — so persisting it is safe.
+func PlaceholderToken(sandboxDir string) (string, error) {
+	path := filepath.Join(sandboxDir, placeholderTokenFile)
+	if data, err := os.ReadFile(path); err == nil { //nolint:gosec // path from sandbox dir
+		if tok := string(data); tok != "" {
+			return tok, nil
+		}
+	} else if !os.IsNotExist(err) {
+		return "", fmt.Errorf("broker: read %s: %w", placeholderTokenFile, err)
+	}
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("broker: generate placeholder token: %w", err)
+	}
+	tok := hex.EncodeToString(buf)
+	if err := fileutil.WriteFile(path, []byte(tok), 0600); err != nil {
+		return "", fmt.Errorf("broker: persist %s: %w", placeholderTokenFile, err)
+	}
+	return tok, nil
 }
 
 func loadRecord(sandboxDir string) (*InjectorRecord, error) {
