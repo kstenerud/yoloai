@@ -27,6 +27,30 @@ func TestCreateTag_Lightweight(t *testing.T) {
 	assert.Equal(t, sha, firstLine(out))
 }
 
+// TestCreateTag_DashLeadingNameNotParsedAsFlag ensures an agent-planted
+// dash-leading tag refname is passed as a positional name (after "--"), not
+// parsed by git as an option. Without the "--" terminator git reports
+// "unknown option"; with it, git treats the value as a (rejected) tag name.
+func TestCreateTag_DashLeadingNameNotParsedAsFlag(t *testing.T) {
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+	writeTestFile(t, dir, "f", "v1")
+	gitAdd(t, dir, ".")
+	gitCommit(t, dir, "init")
+
+	g := NewTestHostWithEnv(testEnv())
+	sha, err := g.HeadSHA(ctx, dir)
+	require.NoError(t, err)
+
+	// Lightweight and annotated forms both go through the "--" terminator.
+	for _, msg := range []string{"", "annotated"} {
+		err = g.CreateTag(ctx, dir, "--upload-pack=x", sha, msg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not a valid tag name")
+		assert.NotContains(t, err.Error(), "unknown option")
+	}
+}
+
 // TestCreateTag_DuplicateFails reports a clear error when the tag already exists.
 func TestCreateTag_DuplicateFails(t *testing.T) {
 	dir := t.TempDir()
