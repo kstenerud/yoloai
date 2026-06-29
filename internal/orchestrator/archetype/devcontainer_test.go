@@ -194,13 +194,34 @@ func TestMergedEnv_MergeAndPrecedence(t *testing.T) {
 
 func TestParsedRunArgs_KnownFlags(t *testing.T) {
 	dc := &DevcontainerConfig{
-		RunArgs: []string{"--cpus", "4", "--memory", "8g", "--cap-add", "SYS_ADMIN"},
+		// SYS_NICE is benign (not escape-enabling), so it is allowed through.
+		RunArgs: []string{"--cpus", "4", "--memory", "8g", "--cap-add", "SYS_NICE"},
 	}
 	cpus, memory, capAdd, unknownWarnings := dc.ParsedRunArgs()
 	assert.Equal(t, "4", cpus)
 	assert.Equal(t, "8g", memory)
-	assert.Equal(t, []string{"SYS_ADMIN"}, capAdd)
+	assert.Equal(t, []string{"SYS_NICE"}, capAdd)
 	assert.Empty(t, unknownWarnings)
+}
+
+func TestParsedRunArgs_RefusesDangerousCaps(t *testing.T) {
+	dc := &DevcontainerConfig{
+		// A repo must not be able to grant itself escape-enabling caps; both
+		// the spaced and =-joined forms, and CAP_-prefixed/lowercase variants,
+		// are refused with a warning rather than granted.
+		RunArgs: []string{
+			"--cap-add", "SYS_ADMIN",
+			"--cap-add=CAP_sys_ptrace",
+			"--cap-add", "NET_ADMIN",
+			"--cap-add", "SYS_NICE", // benign — still allowed
+		},
+	}
+	_, _, capAdd, unknownWarnings := dc.ParsedRunArgs()
+	assert.Equal(t, []string{"SYS_NICE"}, capAdd)
+	assert.Len(t, unknownWarnings, 3)
+	for _, w := range unknownWarnings {
+		assert.Contains(t, w, "refusing dangerous capability")
+	}
 }
 
 func TestParsedRunArgs_UnknownFlags(t *testing.T) {

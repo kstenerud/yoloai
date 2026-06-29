@@ -100,7 +100,23 @@ func TestResolveArchetype_AutoDetectCompose(t *testing.T) {
 	arch, _, _, _, err := resolveAndApplyArchetype(context.Background(), d, opts, pr)
 	require.NoError(t, err)
 	assert.Equal(t, archetype.ArchetypeCompose, arch)
-	// Should have set container-privileged isolation and dockerd required
+	// Security: an auto-detected compose file must NOT auto-escalate to
+	// container-privileged (full host access). The user must opt in explicitly.
+	assert.NotEqual(t, runtime.IsolationModeContainerPrivileged, opts.Isolation)
+	assert.False(t, pr.archetypeDockerDRequired)
+}
+
+func TestResolveArchetype_ComposeExplicitPrivilegedEnablesDockerd(t *testing.T) {
+	dir := makeWorkdir(t)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "docker-compose.yaml"), []byte("services: {}"), 0600))
+
+	d := newTestDeps(t)
+	// User explicitly opted into container-privileged → DinD is set up.
+	opts := &Options{Workdir: DirSpec{Path: dir}, Isolation: runtime.IsolationModeContainerPrivileged}
+	pr := &profileResult{}
+
+	_, _, _, _, err := resolveAndApplyArchetype(context.Background(), d, opts, pr)
+	require.NoError(t, err)
 	assert.Equal(t, runtime.IsolationModeContainerPrivileged, opts.Isolation)
 	assert.True(t, pr.archetypeDockerDRequired)
 }
@@ -214,8 +230,10 @@ func TestResolveArchetype_DevcontainerPostStartCompose(t *testing.T) {
 
 	_, _, _, _, err := resolveAndApplyArchetype(context.Background(), d, opts, pr)
 	require.NoError(t, err)
-	assert.Equal(t, runtime.IsolationModeContainerPrivileged, opts.Isolation)
-	assert.True(t, pr.archetypeDockerDRequired)
+	// Security: a repo's postStartCommand compose usage must NOT auto-escalate
+	// to container-privileged without explicit user opt-in.
+	assert.NotEqual(t, runtime.IsolationModeContainerPrivileged, opts.Isolation)
+	assert.False(t, pr.archetypeDockerDRequired)
 }
 
 // --- Transparency output ---

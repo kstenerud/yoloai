@@ -290,10 +290,55 @@ func (dc *DevcontainerConfig) MergedEnv() map[string]string {
 	return result
 }
 
+// dangerousRunArgCaps are Linux capabilities that a repo-supplied
+// devcontainer.json must NOT be able to grant itself. The workdir is untrusted
+// input and the archetype is auto-detected, so an attacker-controlled
+// devcontainer.json requesting one of these (combined with the in-container
+// passwordless sudo and Docker rootful's lack of user-namespace remapping)
+// would be a host escape. A user who genuinely needs one of these adds it
+// through yoloAI's own config/profile (a trusted, explicit channel), never via
+// the repo. Names are normalized (CAP_ prefix stripped, upper-cased) before the
+// check. This is a denylist of the well-known escape-enabling caps rather than
+// an allowlist so that benign, non-escalating caps in a devcontainer still work.
+var dangerousRunArgCaps = map[string]bool{
+	"SYS_ADMIN":          true, // mount(2), cgroup release_agent, etc.
+	"SYS_MODULE":         true, // load kernel modules
+	"SYS_RAWIO":          true, // raw I/O / physical memory
+	"SYS_PTRACE":         true, // ptrace across the (shared) init namespace
+	"SYS_BOOT":           true,
+	"SYS_TIME":           true,
+	"DAC_READ_SEARCH":    true, // bypass file read perms (open_by_handle_at escape)
+	"DAC_OVERRIDE":       true, // bypass file perms
+	"MKNOD":              true, // create device nodes → raw disk access
+	"NET_ADMIN":          true, // tamper with the egress firewall
+	"BPF":                true,
+	"PERFMON":            true,
+	"CHECKPOINT_RESTORE": true,
+	"SYSLOG":             true,
+	"AUDIT_CONTROL":      true,
+	"LINUX_IMMUTABLE":    true,
+	"SYS_CHROOT":         true,
+}
+
+// normalizeCapName strips an optional CAP_ prefix and upper-cases, so
+// "CAP_sys_admin" and "SYS_ADMIN" compare equal.
+func normalizeCapName(c string) string {
+	return strings.TrimPrefix(strings.ToUpper(strings.TrimSpace(c)), "CAP_")
+}
+
 // ParsedRunArgs parses --cpus, --memory, --cap-add from runArgs.
-// Unknown flags are collected into unknownWarnings.
+// Unknown flags are collected into unknownWarnings. Privileged-equivalent caps
+// (dangerousRunArgCaps) are rejected with a warning rather than granted, since
+// runArgs come from the untrusted, auto-detected workdir.
 func (dc *DevcontainerConfig) ParsedRunArgs() (cpus string, memory string, capAdd []string, unknownWarnings []string) {
 	args := dc.RunArgs
+	addCap := func(c string) {
+		if dangerousRunArgCaps[normalizeCapName(c)] {
+			unknownWarnings = append(unknownWarnings, fmt.Sprintf("Warning: refusing dangerous capability %q from devcontainer.json runArgs (would enable a host escape; add it via yoloAI config if you truly need it)", c))
+			return
+		}
+		capAdd = append(capAdd, c)
+	}
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch {
@@ -309,9 +354,9 @@ func (dc *DevcontainerConfig) ParsedRunArgs() (cpus string, memory string, capAd
 			memory = strings.TrimPrefix(arg, "--memory=")
 		case arg == "--cap-add" && i+1 < len(args):
 			i++
-			capAdd = append(capAdd, args[i])
+			addCap(args[i])
 		case strings.HasPrefix(arg, "--cap-add="):
-			capAdd = append(capAdd, strings.TrimPrefix(arg, "--cap-add="))
+			addCap(strings.TrimPrefix(arg, "--cap-add="))
 		default:
 			unknownWarnings = append(unknownWarnings, fmt.Sprintf("Warning: ignoring unknown runArg %q (not supported by yoloAI)", arg))
 		}

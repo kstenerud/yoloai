@@ -142,10 +142,12 @@ func expandArchetype(ctx context.Context, d state.Deps, opts *Options, pr *profi
 // applyComposeArchetype applies compose-specific settings to opts and pr.
 func applyComposeArchetype(opts *Options, pr *profileResult) []string {
 	var bullets []string
-	if opts.Isolation == "" || opts.Isolation == runtime.IsolationModeContainer {
-		opts.Isolation = runtime.IsolationModeContainerPrivileged
-		pr.isolation = runtime.IsolationModeContainerPrivileged
-		bullets = append(bullets, "isolation set to container-privileged (Compose requires nested Docker)")
+	// container-privileged is full host access; never auto-escalate to it from an
+	// untrusted, auto-detected repo signal (a docker-compose file). Require the
+	// user to have chosen it explicitly.
+	if opts.Isolation != runtime.IsolationModeContainerPrivileged {
+		bullets = append(bullets, "Compose requires nested Docker (container-privileged) — NOT auto-enabled: it grants full host access. Re-run with --isolation container-privileged if you trust this repo.")
+		return bullets
 	}
 	pr.archetypeDockerDRequired = true
 	bullets = append(bullets, "dockerd will auto-start before lifecycle commands")
@@ -238,10 +240,11 @@ func applyDevcontainerCompose(dc *archetype.DevcontainerConfig, opts *Options, p
 	if !dc.PostStartCommandUsesCompose() {
 		return bullets
 	}
-	if opts.Isolation == "" || opts.Isolation == runtime.IsolationModeContainer {
-		opts.Isolation = runtime.IsolationModeContainerPrivileged
-		pr.isolation = runtime.IsolationModeContainerPrivileged
-		bullets = append(bullets, "isolation set to container-privileged (postStartCommand uses docker compose)")
+	// container-privileged is full host access; never auto-escalate to it from an
+	// untrusted, auto-detected repo signal. Require explicit user opt-in.
+	if opts.Isolation != runtime.IsolationModeContainerPrivileged {
+		bullets = append(bullets, "postStartCommand uses docker compose, which needs nested Docker — NOT auto-enabled: container-privileged grants full host access. Re-run with --isolation container-privileged if you trust this repo.")
+		return bullets
 	}
 	pr.archetypeDockerDRequired = true
 	bullets = append(bullets, "dockerd will auto-start before lifecycle commands")
