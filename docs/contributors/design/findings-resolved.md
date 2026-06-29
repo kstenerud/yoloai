@@ -7,6 +7,15 @@ History of codebase findings (issues discovered mid-work) that have been address
 are moved here from [`findings-unresolved.md`](findings-unresolved.md) once resolved, so the
 active file stays a working set. Newest first.
 
+### DF63 — Exchange-dir symlink escape: host-side file ops followed agent-planted symlinks out of the sandbox
+
+- **Discovered:** 2026-06-29 · **Workstream:** v0.6.0 release-prep final audit (parallel security audit of `main...release-prep`)
+- **Severity:** HIGH (sandbox escape — host-file exfil and overwrite). Pre-existing in `main`, **not** a v0.6.0 regression, but this release newly exposes the path via the public `Files.ReadFile`/`WriteFile` API, so it was fixed before the cut.
+- **Disposition:** **RESOLVED 2026-06-29, commit 74a11354.** All five exchange operations (import/export/read/write/remove) now route through a single `resolveExchangePath` entry point that keeps the lexical guard and adds `assertNoSymlinkInExchange` — a component walk from the exchange root that refuses any symlink in the path (matching the symlink-rejection stance in `internal/workspace/copy.go`). Tests cover planted-final-symlink and symlinked-intermediate-dir vectors across read/write/export/remove and assert the host secret is left intact. `make check` green.
+- **Description:** The per-sandbox file-exchange dir (`<sandbox>/files`) is bind-mounted **read-write** into the container (`internal/orchestrator/mounts/mounts.go:252`, no `ReadOnly`). The untrusted in-container agent could plant a symlink there (e.g. `answer.json -> ~/.ssh/id_rsa`, or a `sub/ -> /home` dir symlink). The host-side ops validated paths **lexically only** (`validateExchangePath`) then opened them with symlink-following calls (`os.ReadFile` / `fileutil.WriteFile` / `MkdirAll` / `cp -rp` / `RemoveAll`), so a read/export exfiltrated the host file and a write/import overwrote it.
+- **Residual:** A TOCTOU race (swap a real file for a symlink between the check and the open) would need `openat2(RESOLVE_NO_SYMLINKS)`, which is Linux-only and not portable to the macOS host backends; documented in the `assertNoSymlinkInExchange` doc comment. The plant-and-wait attack is fully blocked.
+- **Pointer:** `internal/orchestrator/files.go` (`resolveExchangePath`, `assertNoSymlinkInExchange`); tests in `internal/orchestrator/files_test.go` (`TestExchange_PlantedSymlinkRefused`, `TestExchange_SymlinkedDirComponentRefused`).
+
 ### DF47 — E3 loose ends: vestigial `.secrets-consumed` write in `sandbox-setup.py`; `YOLOAI_SECRET_KEYS` visible in tmux env
 
 - **Discovered:** 2026-06-25 · **Workstream:** public-layering Shape, E3 env-delivery verification (commit 163533a9)

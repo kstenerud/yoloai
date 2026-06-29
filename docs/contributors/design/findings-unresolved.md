@@ -23,6 +23,15 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 
 ## Findings
 
+### DF64 — `internal/config.Layout` leaks through exported function/interface signatures in `store/` and `runtime/`
+
+- **Discovered:** 2026-06-29 · **Workstream:** v0.6.0 release-prep final audit (public-API seam audit of `main...release-prep`)
+- **Severity:** LOW-MEDIUM (public-surface defect; pre-existing, not introduced by this branch)
+- **Disposition:** PARKED
+- **Description:** Several exported symbols take `config.Layout` from `internal/config`, which external consumers cannot import or construct — making those "exported" functions effectively uncallable from outside the module. Pre-dates this branch and is out of scope for the v0.6.0 cut, but it is a real leak for the library's stated public surface (the MCP server in this release was built as "the first external consumer," and this is exactly the kind of seam that future consumers will hit). Found alongside DF63 during the same audit; DF63 (security) was fixed in-release, this one parked.
+- **Trigger:** when the public library API is next reshaped, or when an external consumer needs `store.AcquireLock`/`SweepStaleLocks`/etc. or implements `runtime.WorkDirSetup` — promote `Layout` (or the needed accessors) to a public package, or accept primitive paths at the boundary.
+- **Pointer:** `store/lock_unix.go:65,78,161,197,218` (`AcquireLock`, `AcquireMultiLock`, `ForceUnlock`, `RemoveLockFile`, `SweepStaleLocks`); `runtime/runtime_optional.go:140` (`WorkDirSetup.PrepareRuntimeBase`); `runtime/seatbelt/seatbelt.go:132` (`New`).
+
 ### DF54 — New verbs (`run`, `diff --json`, `sandbox_run`) lack automated E2E/smoke coverage
 
 - **Discovered:** 2026-06-27 · **Workstream:** pre-merge audit (test-gap)
