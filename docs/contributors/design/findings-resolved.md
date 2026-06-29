@@ -7,6 +7,14 @@ History of codebase findings (issues discovered mid-work) that have been address
 are moved here from [`findings-unresolved.md`](findings-unresolved.md) once resolved, so the
 active file stays a working set. Newest first.
 
+### DF64 — `config.Layout` in `store`/`runtime` exported signatures — by-design, not a leak to fix
+
+- **Discovered:** 2026-06-29 · **Workstream:** v0.6.0 release-prep final audit (public-API seam audit)
+- **Severity:** LOW (no impact on the supported surface)
+- **Disposition:** **RESOLVED 2026-06-29 (by-design).** Investigated and determined this is *not* a defect to fix. The *supported consumer* surface is the root `yoloai` package, which is gated 100% leak-free by the F1 fence (`internal_leak_fence_test.go`, empty `f1KnownLeaks`). `store`/`runtime`/`copyflow` sit at public *paths* only because Go's `internal/` rule forces it for the root package to compose them — they are layering building blocks, not the supported API. Promoting `config.Layout` to public would elevate the entire on-disk layout to a supported public contract (every future path change becomes a breaking API change), which is strictly worse than the status quo and contradicts the encapsulation the fence deliberately enforces (D48/D53). Resolution: documented the supported-surface-vs-building-block distinction in `architecture-principles.md` §Pattern so this is not re-flagged. No code change.
+- **Description:** Exported `store` lock funcs (`AcquireLock`, `AcquireMultiLock`, `ForceUnlock`, `RemoveLockFile`, `SweepStaleLocks`), `runtime.WorkDirSetup.PrepareRuntimeBase`, and `seatbelt.New` take `config.Layout` from `internal/config`, which external code cannot import. The audit initially flagged it as a public-surface leak; the deeper read (runtime uses Layout in 63 refs across 20 files — built around it, not decouplable) plus the fence's root-only scope showed the supported surface is unaffected.
+- **Pointer:** `docs/contributors/principles/architecture-principles.md` (Pattern §, "Supported surface vs. public-path building blocks"); `internal_leak_fence_test.go` (the gate).
+
 ### DF63 — Exchange-dir symlink escape: host-side file ops followed agent-planted symlinks out of the sandbox
 
 - **Discovered:** 2026-06-29 · **Workstream:** v0.6.0 release-prep final audit (parallel security audit of `main...release-prep`)
