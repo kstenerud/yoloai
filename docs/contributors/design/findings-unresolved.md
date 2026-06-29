@@ -23,6 +23,15 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 
 ## Findings
 
+### DF65 — `:overlay` grants CAP_SYS_ADMIN → host escape on Docker rootful
+
+- **Discovered:** 2026-06-29 · **Workstream:** escape/exfil security audit (caps F1 / mount F1)
+- **Severity:** HIGH (host escape), but opt-in: only reachable when the user selects `:overlay`
+- **Disposition:** PARKED — design written, implementation deferred
+- **Description:** `:overlay` mounts **kernel** overlayfs, which forces `CAP_SYS_ADMIN` + `apparmor=unconfined`. On Docker rootful the container root maps to host uid 0 (only Podman implements `UsernsProvider`), and the agent has passwordless sudo, so it becomes root with `SYS_ADMIN` in the init namespace → cgroup `release_agent` / `core_pattern` host code execution. Not default-reachable (`:copy`/RO sandboxes have no `SYS_ADMIN`). Proper fix = fuse-overlayfs (binary already installed, eliminates the cap); userns and a custom AppArmor profile are weaker. Full analysis + recommendation in the plan.
+- **Trigger:** implement the fuse-overlayfs switch (needs real-Docker verification of perf/xattr/nested-overlay), or ship the v0.6.0 interim (treat `:overlay` as an explicit documented dangerous opt-in with a loud warning).
+- **Pointer:** [plans/overlay-sysadmin-escape.md](plans/overlay-sysadmin-escape.md); `runtime/docker/resources/entrypoint.py` (overlay mount), `runtime/docker/docker.go:547`, `internal/orchestrator/launch/launch.go:843`.
+
 ### DF54 — New verbs (`run`, `diff --json`, `sandbox_run`) lack automated E2E/smoke coverage
 
 - **Discovered:** 2026-06-27 · **Workstream:** pre-merge audit (test-gap)

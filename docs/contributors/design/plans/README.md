@@ -294,6 +294,10 @@ Complete — all ten architectural-cleanup issues are resolved in current code (
 
 ## Operational Hardening
 
+### `:overlay` CAP_SYS_ADMIN host escape (security audit H2)
+
+`:overlay` mounts kernel overlayfs, which forces `CAP_SYS_ADMIN` + `apparmor=unconfined`; on Docker rootful (no userns remap) + the agent's passwordless sudo this is a host escape. Proper fix = switch to **fuse-overlayfs** (already installed, eliminates the cap); userns and a custom AppArmor profile are weaker alternatives. v0.6.0 interim: treat `:overlay` as an explicit documented dangerous opt-in with a loud warning. Plan: [overlay-sysadmin-escape.md](overlay-sysadmin-escape.md).
+
 ### Log rotation
 
 `log.txt` in the sandbox directory grows unbounded. There is no rotation or size cap. For long-running sandboxes or sessions that produce a lot of output, this can accumulate gigabytes of log data.
