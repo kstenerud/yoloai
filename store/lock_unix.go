@@ -111,6 +111,10 @@ func acquireWithRetry(layout config.Layout, name, path string) (func(), error) {
 		var err error
 		f, release, err = locking.AcquireWithFile(path)
 		if err == nil {
+			// Lock dir now exists (openLockFile created it if needed).
+			// Probe its filesystem type once and warn if it is a network FS
+			// where flock(2) advisory locking is unreliable.
+			checkNetworkFS(filepath.Dir(path))
 			break
 		}
 		if !errors.Is(err, locking.ErrWouldBlock) {
