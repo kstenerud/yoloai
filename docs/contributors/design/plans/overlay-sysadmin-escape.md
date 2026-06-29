@@ -3,9 +3,19 @@
 ABOUTME: Design for removing the host-escape surface of `:overlay` mode on Docker
 ABOUTME: rootful — fuse-overlayfs vs userns vs documented-opt-in, with a recommendation.
 
-Status: **design only, not yet implemented.** Surfaced by the 2026-06-29
-escape/exfil security audit (finding H2). The interim for v0.6.0 is to treat
-`:overlay` as an explicit, documented dangerous opt-in (see "v0.6.0 interim").
+Status: **design audited 2026-06-29 — the recommended fix (Option A,
+fuse-overlayfs) is EMPIRICALLY REFUTED; see "## Audit" below.** Surfaced by the
+2026-06-29 escape/exfil security audit (finding H2). The interim for v0.6.0 —
+treat `:overlay` as an explicit, documented dangerous opt-in (see "v0.6.0
+interim") — stands, and is now the *recommended* near-term posture, not just a
+stopgap.
+
+> ⚠️ **Read the Audit section before acting on this plan.** The original
+> recommendation (swap kernel overlayfs → fuse-overlayfs to drop `CAP_SYS_ADMIN`)
+> does **not** work in yoloAI's deployment (rootful Docker, no userns-remap):
+> fuse-overlayfs there needs the *same* `CAP_SYS_ADMIN`, so it removes nothing.
+> Proven on real Docker. The body below is kept for the record with Option A
+> struck through.
 
 ## The vulnerability
 
@@ -32,14 +42,24 @@ Podman rootless is unaffected (always in a user namespace; `SYS_ADMIN` is namesp
 
 ## Options
 
-### A. fuse-overlayfs (recommended proper fix)
+### A. fuse-overlayfs ~~(recommended proper fix)~~ — REFUTED, see Audit
 
-Switch the overlay mount from kernel overlayfs to **fuse-overlayfs**, which runs in
+> **This option does not work in yoloAI's deployment. Kept for the record.** The
+> claim below — "fuse-overlayfs … does not require `CAP_SYS_ADMIN`" — is true only
+> when the mount happens **inside a user namespace** (rootless Podman, buildah).
+> yoloAI's container runs rootful with **no userns-remap** (the init user
+> namespace), where the FUSE mount needs real `CAP_SYS_ADMIN` just like kernel
+> overlayfs. Empirically confirmed in the Audit section. This is a textbook GEN §14
+> error: the design leaned on fuse-overlayfs's *reputation* as "the unprivileged
+> overlay" (an incidental property of the rootless contexts it ships in) rather
+> than its *contract* in our rootful, init-namespace container.
+
+~~Switch the overlay mount from kernel overlayfs to **fuse-overlayfs**, which runs in
 userspace and does **not** require `CAP_SYS_ADMIN` (it needs `/dev/fuse` and
 `CAP_SYS_ADMIN` is *not* required for an unprivileged FUSE mount in a user
-namespace; in the container it works without the cap given `/dev/fuse` access). The
-`fuse-overlayfs` binary is **already installed** in the base image
-(`runtime/docker/resources/Dockerfile`) but currently unused for the mount.
+namespace; in the container it works without the cap given `/dev/fuse` access).~~ The
+`fuse-overlayfs` binary is already installed in the base image
+(`runtime/docker/resources/Dockerfile`); `fusermount3` is present and setuid-root.
 
 - Removes the `SYS_ADMIN` grant **and** the `apparmor=unconfined` downgrade for overlay → the escape primitives disappear.
 - `entrypoint.py` calls `fuse-overlayfs -o lowerdir=…,upperdir=…,workdir=… <merged>` instead of `mount -t overlay`.
@@ -66,12 +86,72 @@ fstype string). Rejected as primary: shipping + loading a custom profile via
 `apparmor_parser` is host/distro-fragile (AppArmor may be absent or be SELinux),
 and it still leaves `SYS_ADMIN` in the init namespace (other vectors).
 
-## Recommendation
+## Audit (2026-06-29) — Option A empirically refuted
 
-**Adopt A (fuse-overlayfs).** It removes both the cap and the AppArmor downgrade,
-needs no daemon config, and the binary already ships. Gate the change behind
-real-Docker verification of performance + xattr + nested-overlay behavior (the
-existing kernel path's known sharp edges). Keep B as an opportunistic add-on only.
+Tested on real rootful Docker (this dev host, no userns-remap — the exact H2
+deployment), `yoloai-base:latest`, default cap set:
+
+| Config | Result |
+|---|---|
+| `fuse-overlayfs`, `--device /dev/fuse`, **no `SYS_ADMIN`**, default seccomp | ❌ `fusermount3: mount failed: Operation not permitted` |
+| same, **no `SYS_ADMIN`**, `seccomp=unconfined` | ❌ `fuse: mount failed: Permission denied` |
+| **no `SYS_ADMIN`**, self-create a userns first (`unshare -U -m -r`) | ❌ `unshare … Operation not permitted` (default seccomp blocks `unshare(CLONE_NEWUSER)`; with seccomp off, the mount-ns step still EPERMs) |
+| `fuse-overlayfs`, **`--cap-add SYS_ADMIN` + `apparmor=unconfined`** | ✅ mounts, writes land in upperdir, handles overlay-on-overlay |
+
+**Conclusions.**
+
+1. **A removes nothing.** fuse-overlayfs in a rootful, non-userns container needs
+   the *same* `CAP_SYS_ADMIN` kernel overlayfs needs. The setuid `fusermount3`
+   cannot regain the cap because Docker drops it from the **bounding set**
+   (`CapBnd` has no `sys_admin`), so the `mount(2)` is EPERM. The headline benefit
+   ("removes the `SYS_ADMIN` grant and the AppArmor downgrade → the escape
+   primitives disappear") is false.
+2. **It is the capability, not seccomp.** Disabling seccomp does not help, so a
+   custom seccomp profile cannot rescue A either.
+3. **The container cannot self-host a userns.** Default Docker seccomp blocks
+   `unshare(CLONE_NEWUSER)` without `CAP_SYS_ADMIN`, and even with seccomp off the
+   private-mount-propagation step fails — so "run fuse-overlayfs inside a userns
+   the container makes itself" is also closed on rootful Docker.
+4. **Scope gap regardless of A.** The entrypoint's VirtioFS fallback uses
+   `mount -t tmpfs`, `mount --make-shared /`, and a nested kernel overlay
+   (`entrypoint.py` `apply_overlays`) — all `CAP_SYS_ADMIN` operations A never
+   touches. And "macOS backends don't use this path" is imprecise: **Docker
+   Desktop on macOS is the docker backend** and hits exactly this fallback.
+
+The only configuration in which an overlay mount gets a *namespaced* (safe)
+`CAP_SYS_ADMIN` is when the **whole container** is in a user namespace — i.e.
+rootless Podman (already safe) or a **userns-remapped Docker daemon** (Option B).
+There is no self-contained per-container way to get there on Docker.
+
+## Recommendation (revised after the audit)
+
+**Do not pursue A.** The honest options that actually close the hole are narrower
+than first thought:
+
+1. **Gate `:overlay` by daemon posture (reframed B).** Permit `:overlay` only when
+   the runtime puts the container in a user namespace — Podman rootless, or a
+   Docker daemon configured with `--userns-remap`. **Refuse `:overlay` on rootful,
+   non-userns-remapped Docker** with a clear message (use `:copy`, or remap the
+   daemon, or use Podman). This is the only posture that makes the cap namespaced
+   and the escape primitives inert. yoloAI *can* detect userns-remap
+   (`docker info` `SecurityOptions` lists `name=userns`), so the gate is
+   implementable and self-contained even though enabling remap is the operator's
+   job. Whether fuse-overlayfs *or* kernel overlayfs is used inside that userns is
+   then a functionality choice, not a security one (fuse-overlayfs is the better
+   pick — it handles overlay-on-overlay, which kernel overlayfs choked on in
+   TEST 7).
+2. **Reconsider whether `:overlay` needs an in-container kernel mount at all.**
+   `:copy` already gets diff/apply with no privileged mount. If `:overlay`'s only
+   real win is "instant setup, no copy," a host-side or fuse-without-mount approach
+   (e.g. a userspace diff over the upper dir) may deliver the UX without any
+   `CAP_SYS_ADMIN`. Bigger rethink; out of scope here but the strategically right
+   question.
+3. **Keep the v0.6.0 interim as the standing posture** (below) until 1 or 2 lands:
+   `:overlay` is a documented dangerous opt-in, like `container-privileged`.
+
+Option C (custom AppArmor mount-fstype filter) is also weaker than first written:
+it still leaves real `CAP_SYS_ADMIN` in the init namespace (other vectors), and the
+audit shows the blocker is the capability itself, not the LSM.
 
 ## v0.6.0 interim (chosen 2026-06-29)
 
