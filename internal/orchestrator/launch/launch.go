@@ -302,18 +302,61 @@ func installFirewallSidecar(ctx context.Context, rt runtime.Backend, st *state.S
 		env = append(env, "YOLOAI_BROKER_INJECTOR_ENDPOINT="+bro.InjectorEndpoint)
 	}
 
-	if err := runner.RunNetnsSidecar(ctx, runtime.NetnsSidecarSpec{
+	spec := runtime.NetnsSidecarSpec{
 		Target: cname,
 		Image:  st.ImageRef,
 		Argv:   []string{"python3", "/yoloai/bin/install-firewall.py"},
 		Env:    env,
 		CapAdd: []string{"NET_ADMIN"},
-	}); err != nil {
+	}
+	if err := runNetnsSidecarWithRetry(ctx, runner, spec, st.Name); err != nil {
 		return fmt.Errorf("install network-isolation firewall: %w", err)
 	}
 	slog.Info("installed tamper-resistant network isolation via netns sidecar",
 		"event", "sandbox.firewall.sidecar", "sandbox", st.Name, "allowed_domains", len(allowedDomains))
 	return nil
+}
+
+// firewallSidecarAttempts and firewallSidecarRetryBackoff bound the retry of a
+// failed firewall-sidecar install. The install is the only thing standing
+// between launch and an agent running with unenforced network isolation, so it
+// must fail closed — but the container runtime can transiently fail to
+// materialize the ephemeral sidecar under heavy concurrent churn (observed on
+// OrbStack when a fresh smoke run starts the instant a prior full-matrix run
+// ends: the sidecar's rootfs is briefly incomplete, so python3 reports the
+// embedded install-firewall.py as "No such file" even though the image has it).
+// install-firewall.py is idempotent (apply_firewall flushes the OUTPUT chain
+// and the ipset before re-adding rules), so re-running after a partial or failed
+// attempt is safe. A genuinely-broken install still fails closed after the last
+// attempt.
+const (
+	firewallSidecarAttempts     = 3
+	firewallSidecarRetryBackoff = 500 * time.Millisecond
+)
+
+// runNetnsSidecarWithRetry runs the firewall sidecar, retrying a bounded number
+// of times on any failure with a short backoff. The happy path runs once and
+// never sleeps; the final attempt's error is returned so a persistent failure
+// still fails the launch (closed).
+func runNetnsSidecarWithRetry(ctx context.Context, runner runtime.NetnsSidecarRunner, spec runtime.NetnsSidecarSpec, sandbox string) error {
+	var err error
+	for attempt := 1; attempt <= firewallSidecarAttempts; attempt++ {
+		if err = runner.RunNetnsSidecar(ctx, spec); err == nil {
+			return nil
+		}
+		if attempt == firewallSidecarAttempts {
+			break
+		}
+		slog.Warn("firewall sidecar install failed; retrying",
+			"event", "sandbox.firewall.sidecar.retry", "sandbox", sandbox,
+			"attempt", attempt, "max", firewallSidecarAttempts, "err", err)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(firewallSidecarRetryBackoff):
+		}
+	}
+	return err
 }
 
 // loadAllowedDomains reads the allowed-domains list from a sandbox's

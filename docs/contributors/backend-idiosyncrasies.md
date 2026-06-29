@@ -139,6 +139,7 @@ inclusion test first, then add a row to the index.
 | Apple: `container build .` builds nothing / `COPY` fails (`"/x": not found`) | [Apple: `container build` drops a relative context](#apple-container-build-silently-drops-a-relative--context-pass-an-absolute-dir) |
 | `podman build` → `Error: unknown flag: --provenance` / exit 125 | [Podman: build rejects docker BuildKit attestation flags](#podman-build-rejects-the-docker-buildkit-attestation-flags) |
 | `idle` agent / keep-alive exits 1 with `usage: sleep number[unit]` on a macOS/Tart guest | [macOS guest BSD sleep rejects sleep infinity](#macos-guest-bsd-sleep-rejects-sleep-infinity-gnu-only) |
+| `install network-isolation firewall: netns sidecar exited 2: … can't open file '/yoloai/bin/install-firewall.py'` (intermittent, under concurrent churn; file is present in image) | [Docker/OrbStack: ephemeral container transiently exposes an incomplete rootfs](#a-freshly-created-ephemeral-container-can-transiently-expose-an-incomplete-rootfs-under-heavy-concurrent-churn) |
 
 ---
 
@@ -1032,6 +1033,18 @@ The estimate is left as-is — it's still a valid *upper bound* if the user stop
 **Fix:** For a process that must outlive its launcher, start it **detached** — `ContainerExecStart` with `container.ExecStartOptions{Detach: true}` (no attach) — and redirect its stdio to files inside the container (detached stdio is otherwise discarded). yoloAI exposes this as `runtime.ProcSpec.Detached`.
 
 **Code:** `runtime/docker/launch.go` (the `Detached` branch); `internal/orchestrator/launch/launch.go::startViaLaunch`. Related: DF44.
+
+---
+
+### A freshly-created ephemeral container can transiently expose an incomplete rootfs under heavy concurrent churn
+
+**Symptom:** `yoloai start --network-isolated` on a container backend fails with `install network-isolation firewall: netns sidecar exited 2: python3: can't open file '/yoloai/bin/install-firewall.py': [Errno 2] No such file or directory`, even though the image demonstrably contains that file (`docker run --rm --entrypoint sh yoloai-base -c 'ls /yoloai/bin/install-firewall.py'` succeeds, and the agent container itself — same image — booted fine via `/yoloai/bin/entrypoint.py`). Observed on OrbStack during the full smoke matrix when a fresh run started the instant a prior 7-backend run finished; **both** concurrent `isolation_check` backends failed at the same second with different container-level errors (one with the file-missing sidecar exit, the other with `substrate not ready within 30s: … container … is not running`). It does **not** reproduce running the test in isolation or on re-run.
+
+**Explanation:** Under heavy concurrent container create/destroy churn, the engine can momentarily return a created container whose overlay rootfs is not fully materialized — so a process inside it sees a missing file that is genuinely in the image, or the container exits immediately. The firewall sidecar is the most exposed surface because it creates a brand-new ephemeral container (`--network container:<target>`) at the worst moment. Inclusion-test check: if you deleted all yoloAI code, `docker run` of an image during the same churn would *still* be able to hand back a briefly-incomplete rootfs — the surprise is the engine's, not our wiring. (The smoke harness already serializes VM-backed `isolation_check` for an analogous reason; the container backends were not serialized.)
+
+**Fix:** Bounded retry of the firewall sidecar install (`runNetnsSidecarWithRetry` — 3 attempts, 500ms backoff). `install-firewall.py` is idempotent (`apply_firewall` flushes the `OUTPUT` chain and the ipset before re-adding rules), so re-running after a partial/failed attempt is safe. The retry still **fails closed**: a persistent failure surfaces after the last attempt and fails the launch rather than running the agent with unenforced isolation.
+
+**Code:** `internal/orchestrator/launch/launch.go::runNetnsSidecarWithRetry`; the single-shot sidecar primitive is `runtime/docker/sidecar.go::RunNetnsSidecar`.
 
 ## Podman
 
