@@ -96,9 +96,16 @@ RUN echo 'export PATH="/usr/local/go/bin:$PATH"' > /etc/profile.d/golang.sh
 # need the current linter set, not a pin tied to yoloAI's release cadence.
 # yoloAI's own `make check` pins golangci-lint explicitly via `go run` (see
 # Makefile §lint target).
+# go install has no native retry flag (unlike the curl installs above), so wrap
+# it in a retry loop — a transient Go-proxy hiccup otherwise fails this whole
+# multi-minute base build, which every user's first run performs.
 # hadolint ignore=DL3062
-RUN GOPATH=/tmp/gopath go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest \
-    && mv /tmp/gopath/bin/golangci-lint /usr/local/bin/golangci-lint \
+RUN n=0; until [ "$n" -ge 5 ]; do \
+      GOPATH=/tmp/gopath go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest && break; \
+      n=$((n+1)); echo "golangci-lint install failed (attempt $n/5); retrying in 5s"; sleep 5; \
+    done; \
+    [ "$n" -lt 5 ] || { echo "golangci-lint install failed after 5 attempts"; exit 1; }; \
+    mv /tmp/gopath/bin/golangci-lint /usr/local/bin/golangci-lint \
     && rm -rf /tmp/gopath
 
 # Rust via rustup (installed system-wide)
