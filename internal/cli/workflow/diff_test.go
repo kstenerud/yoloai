@@ -1,10 +1,13 @@
 package workflow
 
 import (
+	"bytes"
+	"encoding/json"
 	"testing"
 
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // makeDiffCmd creates a cobra command that properly sets ArgsLenAtDash
@@ -155,4 +158,86 @@ func TestDiffAll_WithPositionalArgs_ReturnsUsageError(t *testing.T) {
 	cmd := NewDiffCmd()
 	err := diffAll(cmd, "mybox", []string{"abc123"}, false, false, false)
 	assert.Error(t, err)
+}
+
+// --- writeDiffOutput tests ---
+
+func newCmdWithBuf(t *testing.T) (*cobra.Command, *bytes.Buffer) {
+	t.Helper()
+	cmd := &cobra.Command{}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	return cmd, &buf
+}
+
+func TestWriteDiffOutput_HumanNoChanges(t *testing.T) {
+	cmd, buf := newCmdWithBuf(t)
+	require.NoError(t, writeDiffOutput(cmd, ""))
+	assert.Contains(t, buf.String(), "No changes")
+}
+
+func TestWriteDiffOutput_HumanWithDiff(t *testing.T) {
+	cmd, buf := newCmdWithBuf(t)
+	diff := "--- a/main.go\n+++ b/main.go\n@@ -1 +1 @@\n-old\n+new"
+	require.NoError(t, writeDiffOutput(cmd, diff))
+	assert.Contains(t, buf.String(), diff)
+}
+
+func TestWriteDiffOutput_JSONEmptyDiff(t *testing.T) {
+	cmd, buf := newCmdWithBuf(t)
+	cmd.PersistentFlags().Bool("json", false, "")
+	require.NoError(t, cmd.PersistentFlags().Set("json", "true"))
+
+	require.NoError(t, writeDiffOutput(cmd, ""))
+
+	var result map[string]string
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result), "output must be valid JSON: %q", buf.String())
+	assert.Equal(t, "", result["diff"])
+}
+
+func TestWriteDiffOutput_JSONNonEmptyDiff(t *testing.T) {
+	cmd, buf := newCmdWithBuf(t)
+	cmd.PersistentFlags().Bool("json", false, "")
+	require.NoError(t, cmd.PersistentFlags().Set("json", "true"))
+
+	diff := "--- a/foo.go\n+++ b/foo.go\n@@ -1 +1 @@\n-x\n+y"
+	require.NoError(t, writeDiffOutput(cmd, diff))
+
+	var result map[string]string
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result), "output must be valid JSON: %q", buf.String())
+	assert.Equal(t, diff, result["diff"])
+}
+
+// --- formatCommitLine tests ---
+
+func TestFormatCommitLine_TruncatesSHATo12(t *testing.T) {
+	line := formatCommitLine(1, "abcdef1234567890", "fix: something", nil)
+	assert.Contains(t, line, "abcdef123456")
+	assert.NotContains(t, line, "abcdef1234567890")
+}
+
+func TestFormatCommitLine_NoTags(t *testing.T) {
+	line := formatCommitLine(1, "abcdef123456", "fix: something", map[string][]string{})
+	assert.NotContains(t, line, "[tag:")
+}
+
+func TestFormatCommitLine_OneTag(t *testing.T) {
+	tags := map[string][]string{"abcdef123456": {"v1.0"}}
+	line := formatCommitLine(1, "abcdef123456", "fix: something", tags)
+	assert.Contains(t, line, "[tag: v1.0]")
+}
+
+func TestFormatCommitLine_TwoTagsJoined(t *testing.T) {
+	tags := map[string][]string{"abcdef123456": {"v1.0", "feature-x"}}
+	line := formatCommitLine(1, "abcdef123456", "fix: something", tags)
+	assert.Contains(t, line, "[tag: v1.0, feature-x]")
+}
+
+// TestFormatCommitLine_UppercaseSHAMatchesLowercaseKey verifies that
+// formatCommitLine lowercases the sha argument before looking up tags, so
+// a caller passing an uppercase SHA still gets the tag annotation.
+func TestFormatCommitLine_UppercaseSHAMatchesLowercaseKey(t *testing.T) {
+	tags := map[string][]string{"abcdef123456": {"v1.0"}}
+	line := formatCommitLine(1, "ABCDEF123456", "fix: something", tags)
+	assert.Contains(t, line, "[tag: v1.0]")
 }
