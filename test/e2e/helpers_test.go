@@ -143,7 +143,10 @@ func e2eSetup(t *testing.T) string {
 	top := filepath.Join(tmpHome, ".yoloai")
 	layout := config.NewLayout(filepath.Join(top, "library"))
 	require.NoError(t, os.MkdirAll(layout.CacheDir(), 0750))
-	dockerrt.RecordBuildChecksum(layout, "")
+	// DF56: the checksum is keyed per image store; docker's Setup checks the
+	// "docker" key, so the pre-seed must use it (an empty/mismatched key makes the
+	// bootstrap `yoloai new` rebuild the base image mid-test).
+	dockerrt.RecordBuildChecksum(layout, "docker")
 
 	// Pin the container backend to docker. Otherwise `new` resolves the
 	// backend by auto-detect, which on a host with both docker and podman
