@@ -555,6 +555,17 @@ func TestHandleSandboxDiffFile_Error(t *testing.T) {
 	assert.Contains(t, resultText(t, result), "[ERROR]")
 }
 
+func TestHandleSandboxDiff_Error(t *testing.T) {
+	s := &Server{svc: &fakeService{
+		DiffFn: func(_ context.Context, name string, opts yoloai.WorkdirDiffOptions) (string, error) {
+			return "", fmt.Errorf("diff error")
+		},
+	}}
+	result, err := s.handleSandboxDiff(context.Background(), newRunRequest(map[string]any{"name": "mybox"}))
+	require.NoError(t, err)
+	assert.Contains(t, resultText(t, result), "[ERROR]")
+}
+
 func TestHandleSandboxFilesList_Error(t *testing.T) {
 	s := &Server{svc: &fakeService{
 		ListFilesFn: func(_ context.Context, name string) ([]string, error) {

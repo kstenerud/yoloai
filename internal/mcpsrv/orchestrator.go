@@ -133,13 +133,15 @@ func (cs *clientService) SendInput(ctx context.Context, name, text string) error
 	return sb.Agent().SendInput(ctx, text)
 }
 
-// ListFiles lists all files in the sandbox's file-exchange directory.
+// ListFiles lists all files in the sandbox's file-exchange directory. The
+// ".*" pattern is included alongside "*" so hidden (dot-prefixed) files are
+// listed too — "*" alone does not match them.
 func (cs *clientService) ListFiles(_ context.Context, name string) ([]string, error) {
 	sb, err := cs.client.Sandbox(name)
 	if err != nil {
 		return nil, err
 	}
-	return sb.Files().List([]string{"*"})
+	return sb.Files().List([]string{"*", ".*"})
 }
 
 // ReadFile returns the bytes of a file in the sandbox's file-exchange directory.
