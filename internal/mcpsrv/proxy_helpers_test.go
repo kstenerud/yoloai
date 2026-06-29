@@ -5,10 +5,14 @@ package mcpsrv
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
+	"strings"
 	"sync"
 	"testing"
 
+	"github.com/kstenerud/yoloai"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -60,6 +64,17 @@ func TestDiscardLocalResponse_IDInMap_DiscardedAndRemoved(t *testing.T) {
 }
 
 // ── injectToolsIfNeeded ───────────────────────────────────────────────────────
+
+func TestInjectToolsIfNeeded_MalformedResult_NoChange(t *testing.T) {
+	// Malformed result JSON causes Unmarshal to fail — msg.Result left untouched.
+	msg := &jsonRPCMsg{
+		ID:     json.RawMessage(`1`),
+		Result: json.RawMessage(`not valid json`),
+	}
+	before := string(msg.Result)
+	injectToolsIfNeeded(msg)
+	assert.Equal(t, before, string(msg.Result))
+}
 
 func TestInjectToolsIfNeeded_NilResult_NoChange(t *testing.T) {
 	msg := &jsonRPCMsg{ID: json.RawMessage(`1`), Result: nil}
@@ -125,7 +140,7 @@ func TestHandleOuterMessage_InvalidJSON_ForwardsRawLine(t *testing.T) {
 	var inner bytes.Buffer
 	line := []byte("not valid json here")
 
-	err := p.handleOuterMessage(line, &inner, &sync.Mutex{}, map[string]bool{}, func(jsonRPCMsg) error { return nil })
+	err := p.handleOuterMessage(context.Background(), line, &inner, &sync.Mutex{}, map[string]bool{}, func(jsonRPCMsg) error { return nil })
 
 	assert.NoError(t, err)
 	assert.Contains(t, inner.String(), "not valid json here")
@@ -136,20 +151,20 @@ func TestHandleOuterMessage_NonToolsCallForwarded(t *testing.T) {
 	var inner bytes.Buffer
 	line := []byte(`{"jsonrpc":"2.0","method":"initialize","params":{},"id":1}`)
 
-	err := p.handleOuterMessage(line, &inner, &sync.Mutex{}, map[string]bool{}, func(jsonRPCMsg) error { return nil })
+	err := p.handleOuterMessage(context.Background(), line, &inner, &sync.Mutex{}, map[string]bool{}, func(jsonRPCMsg) error { return nil })
 
 	assert.NoError(t, err)
 	assert.Contains(t, inner.String(), "initialize")
 }
 
 func TestHandleOuterMessage_NonSandboxDiffToolCall_Forwarded(t *testing.T) {
-	// nil client: sandbox_diff must NOT be called (would panic); other tool calls
+	// nil svc: sandbox_diff must NOT be called (would panic); other tool calls
 	// must be forwarded to the inner server, not handled locally.
-	p := &ProxyServer{client: nil}
+	p := &ProxyServer{svc: nil}
 	var inner bytes.Buffer
 	line := []byte(`{"jsonrpc":"2.0","method":"tools/call","params":{"name":"other_tool","arguments":{}},"id":2}`)
 
-	err := p.handleOuterMessage(line, &inner, &sync.Mutex{}, map[string]bool{}, func(jsonRPCMsg) error { return nil })
+	err := p.handleOuterMessage(context.Background(), line, &inner, &sync.Mutex{}, map[string]bool{}, func(jsonRPCMsg) error { return nil })
 
 	assert.NoError(t, err)
 	assert.Contains(t, inner.String(), "other_tool")
@@ -160,7 +175,7 @@ func TestHandleOuterMessage_NonSandboxDiffToolCall_Forwarded(t *testing.T) {
 func TestTryHandleLocalToolCall_NonSandboxDiff_NotHandled(t *testing.T) {
 	// Non-sandbox_diff tool calls must be forwarded (not consumed locally),
 	// and writeOut must not be called.
-	p := &ProxyServer{client: nil}
+	p := &ProxyServer{svc: nil}
 	msg := jsonRPCMsg{
 		JSONRPC: "2.0",
 		Method:  "tools/call",
@@ -168,7 +183,7 @@ func TestTryHandleLocalToolCall_NonSandboxDiff_NotHandled(t *testing.T) {
 		Params:  json.RawMessage(`{"name":"other_tool","arguments":{}}`),
 	}
 	var writeOutCalled bool
-	handled, err := p.tryHandleLocalToolCall(msg, &sync.Mutex{}, map[string]bool{}, func(jsonRPCMsg) error {
+	handled, err := p.tryHandleLocalToolCall(context.Background(), msg, &sync.Mutex{}, map[string]bool{}, func(jsonRPCMsg) error {
 		writeOutCalled = true
 		return nil
 	})
@@ -179,14 +194,135 @@ func TestTryHandleLocalToolCall_NonSandboxDiff_NotHandled(t *testing.T) {
 
 func TestTryHandleLocalToolCall_InvalidParams_NotHandled(t *testing.T) {
 	// Unparseable params → treated as non-matching and forwarded to inner server.
-	p := &ProxyServer{client: nil}
+	p := &ProxyServer{svc: nil}
 	msg := jsonRPCMsg{
 		JSONRPC: "2.0",
 		Method:  "tools/call",
 		ID:      json.RawMessage(`1`),
 		Params:  json.RawMessage(`{not valid json`),
 	}
-	handled, err := p.tryHandleLocalToolCall(msg, &sync.Mutex{}, map[string]bool{}, func(jsonRPCMsg) error { return nil })
+	handled, err := p.tryHandleLocalToolCall(context.Background(), msg, &sync.Mutex{}, map[string]bool{}, func(jsonRPCMsg) error { return nil })
 	assert.False(t, handled)
 	assert.NoError(t, err)
+}
+
+// ── handleOuterMessage — sandbox_diff handled locally ─────────────────────────
+
+func TestHandleOuterMessage_SandboxDiff_HandledLocally(t *testing.T) {
+	svc := &fakeService{
+		DiffFn: func(_ context.Context, name string, opts yoloai.WorkdirDiffOptions) (string, error) {
+			return "the diff", nil
+		},
+	}
+	p := &ProxyServer{svc: svc, sandboxName: "mybox"}
+	var inner bytes.Buffer
+	var writtenResponse jsonRPCMsg
+	line := []byte(`{"jsonrpc":"2.0","method":"tools/call","params":{"name":"sandbox_diff","arguments":{}},"id":5}`)
+
+	err := p.handleOuterMessage(context.Background(), line, &inner, &sync.Mutex{}, map[string]bool{}, func(msg jsonRPCMsg) error {
+		writtenResponse = msg
+		return nil
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, json.RawMessage(`5`), writtenResponse.ID)
+	// sandbox_diff is handled locally — must NOT be forwarded to inner server
+	assert.Empty(t, inner.String(), "sandbox_diff must not be forwarded to inner server")
+}
+
+// ── tryHandleLocalToolCall — writeOut error ───────────────────────────────────
+
+func TestTryHandleLocalToolCall_WriteOutError_ReturnsError(t *testing.T) {
+	svc := &fakeService{
+		DiffFn: func(_ context.Context, name string, opts yoloai.WorkdirDiffOptions) (string, error) {
+			return "diff", nil
+		},
+	}
+	p := &ProxyServer{svc: svc, sandboxName: "mybox"}
+	msg := jsonRPCMsg{
+		JSONRPC: "2.0",
+		Method:  "tools/call",
+		ID:      json.RawMessage(`1`),
+		Params:  json.RawMessage(`{"name":"sandbox_diff","arguments":{}}`),
+	}
+	handled, err := p.tryHandleLocalToolCall(context.Background(), msg, &sync.Mutex{}, map[string]bool{}, func(jsonRPCMsg) error {
+		return fmt.Errorf("write failed")
+	})
+	assert.True(t, handled)
+	assert.Error(t, err)
+}
+
+// ── forwardInnerToOuter ───────────────────────────────────────────────────────
+
+func TestForwardInnerToOuter_InjectsAndForwards(t *testing.T) {
+	// A tools/list response with an empty tools array triggers injection.
+	jsonMsg := `{"jsonrpc":"2.0","id":1,"result":{"tools":[]}}` + "\n"
+	innerOut := strings.NewReader(jsonMsg)
+
+	var out bytes.Buffer
+	outMu := &sync.Mutex{}
+	localMu := &sync.Mutex{}
+	localIDs := map[string]bool{}
+
+	var writtenMsg jsonRPCMsg
+	writeOut := func(msg jsonRPCMsg) error {
+		writtenMsg = msg
+		return nil
+	}
+
+	done := make(chan error, 1)
+	p := &ProxyServer{svc: &fakeService{}, sandboxName: "mybox"}
+	p.forwardInnerToOuter(innerOut, &out, outMu, localMu, localIDs, writeOut, done)
+
+	err := <-done
+	require.NoError(t, err)
+	// The response must have been processed and tools injected
+	assert.Equal(t, json.RawMessage(`1`), writtenMsg.ID)
+	var result map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(writtenMsg.Result, &result))
+	var tools []map[string]any
+	require.NoError(t, json.Unmarshal(result["tools"], &tools))
+	assert.GreaterOrEqual(t, len(tools), 1, "sandbox_diff must be injected")
+}
+
+func TestForwardInnerToOuter_LocalIDDiscarded(t *testing.T) {
+	// Response with an ID tracked as local must be discarded (not forwarded).
+	jsonMsg := `{"jsonrpc":"2.0","id":99,"result":{"value":"x"}}` + "\n"
+	innerOut := strings.NewReader(jsonMsg)
+
+	var out bytes.Buffer
+	outMu := &sync.Mutex{}
+	localMu := &sync.Mutex{}
+	localIDs := map[string]bool{"99": true} // tracked as local
+
+	var writeOutCalled bool
+	writeOut := func(msg jsonRPCMsg) error {
+		writeOutCalled = true
+		return nil
+	}
+
+	done := make(chan error, 1)
+	p := &ProxyServer{svc: &fakeService{}, sandboxName: "mybox"}
+	p.forwardInnerToOuter(innerOut, &out, outMu, localMu, localIDs, writeOut, done)
+
+	err := <-done
+	require.NoError(t, err)
+	assert.False(t, writeOutCalled, "response for local ID must be discarded, not forwarded")
+}
+
+func TestForwardInnerToOuter_InvalidJSON_PassedThrough(t *testing.T) {
+	// Non-JSON line must be forwarded verbatim (no crash).
+	innerOut := strings.NewReader("not json at all\n")
+
+	var out bytes.Buffer
+	outMu := &sync.Mutex{}
+	localMu := &sync.Mutex{}
+
+	done := make(chan error, 1)
+	p := &ProxyServer{svc: &fakeService{}, sandboxName: "mybox"}
+	p.forwardInnerToOuter(innerOut, &out, outMu, localMu, map[string]bool{}, func(jsonRPCMsg) error { return nil }, done)
+
+	err := <-done
+	require.NoError(t, err)
+	assert.Contains(t, out.String(), "not json at all")
 }

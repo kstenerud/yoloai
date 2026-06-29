@@ -1,5 +1,5 @@
 // ABOUTME: Unit tests for handleSandboxRun's input-validation guards — they
-// ABOUTME: short-circuit before touching the client, so client may be nil.
+// ABOUTME: short-circuit before touching svc, so svc may be nil.
 
 package mcpsrv
 
@@ -35,8 +35,8 @@ func resultText(t *testing.T, result *mcp.CallToolResult) string {
 }
 
 func TestHandleSandboxRun_NameRequired(t *testing.T) {
-	// Guard returns before calling s.createAndStart — client nil is safe.
-	s := &Server{client: nil}
+	// Guard returns before calling s.createAndStart — nil svc is safe.
+	s := &Server{}
 	req := newRunRequest(map[string]any{
 		"workdir": "/some/dir",
 		"prompt":  "do something",
@@ -47,7 +47,7 @@ func TestHandleSandboxRun_NameRequired(t *testing.T) {
 }
 
 func TestHandleSandboxRun_WorkdirRequired(t *testing.T) {
-	s := &Server{client: nil}
+	s := &Server{}
 	req := newRunRequest(map[string]any{
 		"name":   "mybox",
 		"prompt": "do something",
@@ -58,7 +58,7 @@ func TestHandleSandboxRun_WorkdirRequired(t *testing.T) {
 }
 
 func TestHandleSandboxRun_PromptRequired(t *testing.T) {
-	s := &Server{client: nil}
+	s := &Server{}
 	req := newRunRequest(map[string]any{
 		"name":    "mybox",
 		"workdir": "/some/dir",
