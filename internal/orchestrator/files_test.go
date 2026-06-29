@@ -134,3 +134,60 @@ func TestRemoveExchangeFile_TraversalBlocked(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "escapes exchange directory")
 }
+
+// TestExchange_PlantedSymlinkRefused simulates the untrusted in-container agent
+// planting a symlink in the read-write exchange dir that points at a host secret
+// outside the sandbox. Every host-side operation must refuse to follow it rather
+// than exfiltrate or overwrite the host file.
+func TestExchange_PlantedSymlinkRefused(t *testing.T) {
+	layout, name := filesTestLayout(t)
+	filesDir := FilesDir(layout, name)
+	require.NoError(t, os.MkdirAll(filesDir, 0750))
+
+	secretDir := t.TempDir()
+	secret := filepath.Join(secretDir, "secret.txt")
+	require.NoError(t, os.WriteFile(secret, []byte("TOPSECRET"), 0600))
+
+	// Agent plants answer.json -> host secret.
+	require.NoError(t, os.Symlink(secret, filepath.Join(filesDir, "answer.json")))
+
+	// Read must not follow the symlink (no exfil).
+	_, err := ReadExchangeFile(layout, name, "answer.json")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "symlink")
+
+	// Write must not follow the symlink (no host overwrite); secret stays intact.
+	err = WriteExchangeFile(layout, name, "answer.json", []byte("clobbered"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "symlink")
+	got, rerr := os.ReadFile(secret) //nolint:gosec // test path
+	require.NoError(t, rerr)
+	assert.Equal(t, "TOPSECRET", string(got))
+
+	// Export must not follow the symlink.
+	err = ExportFile(context.Background(), layout, name, "answer.json", filepath.Join(t.TempDir(), "out"), false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "symlink")
+
+	// Remove must not traverse the symlink.
+	err = RemoveExchangeFile(layout, name, "answer.json")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "symlink")
+}
+
+// TestExchange_SymlinkedDirComponentRefused covers the intermediate-component
+// vector: a symlinked *directory* inside the exchange dir would let a write or
+// MkdirAll escape into the symlink target.
+func TestExchange_SymlinkedDirComponentRefused(t *testing.T) {
+	layout, name := filesTestLayout(t)
+	filesDir := FilesDir(layout, name)
+	require.NoError(t, os.MkdirAll(filesDir, 0750))
+
+	outsideDir := t.TempDir()
+	require.NoError(t, os.Symlink(outsideDir, filepath.Join(filesDir, "sub")))
+
+	err := WriteExchangeFile(layout, name, "sub/pwned.txt", []byte("x"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "symlink")
+	assert.NoFileExists(t, filepath.Join(outsideDir, "pwned.txt"))
+}

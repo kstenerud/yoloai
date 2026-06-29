@@ -134,8 +134,10 @@ func attestationOptOutFlags(binaryName string) []string {
 // buildBaseImage builds the yoloai-base Docker image from the embedded
 // Dockerfile and entrypoints. Build output is streamed to the provided
 // writer (typically os.Stderr for user-visible progress).
-// On success, records a checksum of the build inputs so NeedsBuild can
-// detect when a rebuild is required.
+// On success the image carries a yoloai.base.checksum label of the build
+// inputs, so baseImageStale can detect when a rebuild is required by reading
+// the label off the image itself (rather than a host-side marker keyed by
+// backend, which let a second Docker provider run a stale base — see D107).
 //
 // The build shells out to `<binary> build -` (BuildKit) rather than the moby
 // SDK's ImageBuild, which runs the legacy builder. On the containerd image
