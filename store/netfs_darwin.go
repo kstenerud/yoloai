@@ -7,11 +7,6 @@ package store
 
 import "golang.org/x/sys/unix"
 
-// isNetworkFilesystemMagic is a stub on Darwin. macOS statfs exposes a
-// human-readable filesystem type name (Fstypename) rather than the numeric
-// magic used on Linux, so the magic-number path is unused on this platform.
-func isNetworkFilesystemMagic(_ int64) bool { return false }
-
 // networkFSTypeNames maps macOS statfs Fstypename strings to human-readable
 // labels for filesystems where POSIX advisory locking (flock) is unreliable.
 // macOS VirtioFS and SMB are common in corporate/university environments where
