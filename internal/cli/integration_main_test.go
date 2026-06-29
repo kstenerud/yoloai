@@ -99,6 +99,18 @@ func pinPodmanSocket() {
 	os.Setenv("CONTAINER_HOST", "unix://"+sock) //nolint:errcheck // best-effort env pin in test setup
 }
 
+// integrationBackendKey maps the active integration backend type (from
+// YOLOAI_TEST_BACKEND; "" means the default docker) to the per-image-store
+// checksum key used by RecordBuildChecksum (DF56). The key equals the runtime's
+// binaryName — docker and podman each name their own store — so a pre-seed under
+// one backend doesn't satisfy (or get satisfied by) the other.
+func integrationBackendKey(backendType string) string {
+	if backendType == "" {
+		return "docker"
+	}
+	return backendType
+}
+
 // TestMain runs EnsureSetup once (via a throwaway sandbox creation) before any
 // integration tests run, so the base Docker image is ready. Individual tests
 // still call cliSetup(t) for per-test HOME isolation; subsequent EnsureSetup
@@ -146,7 +158,11 @@ func TestMain(m *testing.M) {
 			fmt.Fprintf(os.Stderr, "failed to create cache dir: %v\n", err)
 			os.Exit(1)
 		}
-		dockerrt.RecordBuildChecksum(integLayout, "docker")
+		// DF56: the checksum is keyed per image store. The CLI subset runs under
+		// both docker and podman (YOLOAI_TEST_BACKEND), so seed the ACTIVE backend's
+		// key — a fixed "docker" key would mismatch under podman and force a full
+		// rebuild mid-test. The backend type matches the runtime's binaryName.
+		dockerrt.RecordBuildChecksum(integLayout, integrationBackendKey(bt))
 	}
 
 	// The seeding above (backend config and/or build checksum) populates
