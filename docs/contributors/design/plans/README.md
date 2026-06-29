@@ -296,7 +296,7 @@ Complete — all ten architectural-cleanup issues are resolved in current code (
 
 ### Copy-mode host-git RCE (security audit C1, CRITICAL — blocks v0.6.0)
 
-Agent-controlled git `filter`/`diff`/`fsmonitor` drivers in the copy-mode work-copy `.git/config` execute on the host during `yoloai diff`/`apply`/`status` (host git neutralizes hooks only). Fix = host-private git-dir reaching the original objects via `objects/info/alternates` (recommended) or routing copy-mode git in-container. The v0.6.0 tag waits for this. Plan: [copy-mode-git-rce.md](copy-mode-git-rce.md).
+Agent-controlled git `filter`/`diff`/`fsmonitor` drivers in the copy-mode work-copy `.git/config` execute on the host during `yoloai diff`/`apply`/`status` (host git neutralizes hooks only). Fix = run the work-copy git **in the agent's confinement** (in-container / in-VM / under the seatbelt profile), so a malicious filter runs in the sandbox not the host AND legitimate filters (LFS/git-crypt) stay correct. The host-side "private git-dir + clean config" alternative is rejected (it corrupts filtered repos). The v0.6.0 tag waits for this. Plan: [copy-mode-git-rce.md](copy-mode-git-rce.md).
 
 ### `:overlay` CAP_SYS_ADMIN host escape (security audit H2)
 
