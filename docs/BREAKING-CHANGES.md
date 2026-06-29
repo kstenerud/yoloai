@@ -2,7 +2,17 @@
 
 Tracks breaking changes made during beta. Each entry should be included in release notes for the version that introduces it.
 
-## Unreleased
+## v0.6.0
+
+### `--network-isolated` sandboxes: agent container no longer holds CAP_NET_ADMIN (tamper-resistant firewall)
+
+**Previous behavior:** When `--network-isolated` was active, the agent container ran with `CAP_NET_ADMIN` so the container entrypoint could install iptables firewall rules directly. A sufficiently misbehaving or prompt-injected agent could call `iptables` itself to modify or remove those rules from inside the container.
+
+**New behavior:** The agent container no longer receives `CAP_NET_ADMIN`. Firewall rules are instead installed by a short-lived netns-sharing sidecar container (the "installer sidecar") that shares the agent container's network namespace, installs the rules with elevated privileges, and then exits. The sidecar must start and complete successfully for egress isolation to be active. Behavior for `--network-isolated` sandboxes is otherwise unchanged — the same domain allowlist applies.
+
+**Rationale:** Security hardening. Removing `CAP_NET_ADMIN` from the agent container means a misbehaving or prompt-injected agent cannot alter its own firewall rules. The sidecar runs as a privileged installer that exits immediately after setup, so no privileged process persists inside or alongside the sandbox.
+
+**Migration:** No action required for most users. If your workflow checked for or depended on the agent container having `CAP_NET_ADMIN` inside a `--network-isolated` sandbox (e.g. to run custom network tooling from within the container), that capability is now absent. Use a separate privileged sidecar or drop `--network-isolated` if you need the capability inside the container.
 
 ### `:copy` now honors `.gitignore` (gitignored files are no longer copied into the sandbox)
 
