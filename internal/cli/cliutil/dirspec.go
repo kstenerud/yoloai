@@ -13,10 +13,11 @@ import (
 
 // knownSuffixes are the recognized directory argument suffixes.
 var knownSuffixes = map[string]bool{
-	"copy":    true,
-	"overlay": true,
-	"rw":      true,
-	"force":   true,
+	"copy":     true,
+	"copy-all": true,
+	"overlay":  true,
+	"rw":       true,
+	"force":    true,
 }
 
 // applyDirSuffix applies a single recognized suffix token to result.
@@ -28,6 +29,14 @@ func applyDirSuffix(result *yoloai.DirSpec, suffix, arg string) error {
 			return fmt.Errorf("cannot combine :copy and :%s on %q", result.Mode, arg)
 		}
 		result.Mode = yoloai.DirModeCopy
+	case "copy-all":
+		// Like :copy but copies gitignored files too (opt-out of the default
+		// .gitignore-honoring). Same diff/apply workflow — it's :copy with one knob.
+		if result.Mode == yoloai.DirModeRW || result.Mode == yoloai.DirModeOverlay {
+			return fmt.Errorf("cannot combine :copy-all and :%s on %q", result.Mode, arg)
+		}
+		result.Mode = yoloai.DirModeCopy
+		result.IncludeIgnored = true
 	case "overlay":
 		if result.Mode == yoloai.DirModeCopy || result.Mode == yoloai.DirModeRW {
 			return fmt.Errorf("cannot combine :overlay and :%s on %q", result.Mode, arg)

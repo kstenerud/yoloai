@@ -7,6 +7,14 @@ History of codebase findings (issues discovered mid-work) that have been address
 are moved here from [`findings-unresolved.md`](findings-unresolved.md) once resolved, so the
 active file stays a working set. Newest first.
 
+### DF55 — `:copy` now honors `.gitignore` (gitignored secrets no longer copied into the sandbox)
+
+- **Discovered:** 2026-06-28 · **Resolved:** 2026-06-29 · **Workstream:** credential-hygiene (egress-broker workstream D)
+- **Severity:** MEDIUM (secret exposure) · **Disposition:** ADDRESSED-IN-PLACE
+- **Description:** `:copy` copied the entire host tree (minus a hardcoded build-artifact list), so `.gitignore`'d files (`.env`, `*.pem`, `credentials.json`, `.aws/`, local config with tokens) were copied into the sandbox where the agent could read/exfiltrate them — defeating the user's own "not part of this project" intent.
+- **Resolution:** when a `:copy` source is a git work tree, enumerate via `git.ListProjectFiles` (`git ls-files --cached --others --exclude-standard`, run through the curated-env `git.Run`) and copy only those — tracked + untracked-non-ignored, ignored files excluded (nested `.gitignore`, negation, `.git/info/exclude`, global excludesFile all honored by git; no matcher re-implemented). Non-git dirs fall back to a full copy; a genuine git failure errors rather than silently full-copying. `workspace.CopyProjectDir` dispatches on an `IncludeIgnored` flag, set by the new **`:copy-all`** suffix (the escape hatch / previous behavior, opt-in), persisted in `DirEnvironment` so reset reproduces the same set. Build-artifact/bugreport exclusions still apply on top. Breaking change tracked in BREAKING-CHANGES.md; documented in GUIDE.md. Scope: host-side backends (docker/podman/containerd/seatbelt); VM backends (tart, copy-in-VM) not yet covered — a follow-up.
+- **Pointer:** `internal/git/ops.go` (`ListProjectFiles`), `internal/workspace/copy_gitignore.go` (`CopyProjectDir`/`copyFileList`), `internal/cli/cliutil/dirspec.go` (`:copy-all`), `internal/orchestrator/{state.DirSpec,store.DirEnvironment}` (`IncludeIgnored`), `create/prepare_dirs.go` + `lifecycle/reset.go` (wiring). Tests: `git/listprojectfiles_test.go`, `workspace/copy_gitignore_test.go`, `cliutil/dirspec_test.go`.
+
 ### DF60 — `yoloai system prune` orphan detection switched from `yoloai-*` name match to the canonical `com.yoloai.*` labels
 
 - **Discovered:** 2026-06-29 · **Resolved:** 2026-06-29 · **Workstream:** disk-reclaim / prune evaluation

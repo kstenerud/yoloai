@@ -4,6 +4,32 @@ Tracks breaking changes made during beta. Each entry should be included in relea
 
 ## Unreleased
 
+### `:copy` now honors `.gitignore` (gitignored files are no longer copied into the sandbox)
+
+**Previous behavior:** `:copy` directories (workdir and `-d` aux dirs) were copied
+wholesale — every file on disk, minus a small hardcoded build-artifact list. Files a
+user deliberately excluded from their repo via `.gitignore` (e.g. `.env`, `*.pem`,
+`credentials.json`, `.aws/`, local config holding tokens) were copied into the
+sandbox's work copy, where the agent could read — and potentially exfiltrate — them.
+
+**New behavior:** when a `:copy` source is inside a git work tree, yoloai copies only
+the files git considers part of the project (`git ls-files --cached --others
+--exclude-standard`: tracked plus untracked-but-not-ignored). Ignored files stay out
+of the sandbox entirely, so they can't be read by the agent and never appear in
+diffs. Nested `.gitignore`, negation (`!`) patterns, `.git/info/exclude`, and the
+global excludesFile are all honored (git does the matching). Non-git directories are
+unaffected (no gitignore semantics — copied as before). This applies on the host-side
+backends (docker/podman/containerd/seatbelt); VM backends (tart) copy in-VM and are
+not yet covered.
+
+**Rationale:** safe defaults. "Gitignored" means "not part of this project's shared
+surface" — exposing those files to the agent defeated the user's own intent and was a
+credential-exposure risk.
+
+**Migration:** if you *want* a gitignored file in the sandbox, use the new `:copy-all`
+suffix (e.g. `yoloai new ./proj:copy-all` or `-d ./data:copy-all`), which copies
+everything including gitignored files — the previous behavior, now opt-in.
+
 ### Credential brokering is the default on supported backends (the agent's API key no longer enters the sandbox)
 
 When an agent's credential is brokerable (Claude's `ANTHROPIC_API_KEY` or

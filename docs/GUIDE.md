@@ -89,9 +89,20 @@ The workdir (your project directory) is copied into the sandbox by default. You 
 
 | Mode | Syntax | Behavior |
 |------|--------|----------|
-| `:copy` | `./my-app` (default) | Isolated copy. Agent changes are reviewed via diff/apply. |
+| `:copy` | `./my-app` (default) | Isolated copy. Agent changes are reviewed via diff/apply. **Honors `.gitignore`** — ignored files (secrets, build output) are not copied. |
+| `:copy-all` | `./my-app:copy-all` | Like `:copy` but copies **everything, including gitignored files**. Opt-out of gitignore-honoring; use when the sandbox genuinely needs an ignored file (e.g. a local `.env`). |
 | `:overlay` | `./my-app:overlay` | Overlay mount. Instant setup, diff/apply workflow. Docker/Podman only. |
 | `:rw` | `./my-app:rw` | Live bind-mount. Changes are immediate — no diff/apply needed. |
+
+**`.gitignore` is honored for `:copy`.** When the source is a git repository, only
+files git considers part of the project are copied (`git ls-files --cached --others
+--exclude-standard`) — so files you deliberately excluded from your repo (`.env`,
+`*.pem`, `.aws/`, `credentials.json`, local config) never enter the sandbox where the
+agent could read them, and they never show up in diffs. Nested `.gitignore`, `!`
+negation, and `.git/info/exclude` are all respected. Non-git directories have no
+gitignore semantics and are copied in full. To include ignored files anyway, use
+`:copy-all`. (Honoring applies to host-side backends; VM backends such as tart copy
+in-VM and aren't covered yet.)
 
 ```bash
 # Default: safe isolated copy
@@ -151,9 +162,10 @@ but the path is currently '/Users/user/.yoloai/library/sandboxes/name/work/.buil
 These directories are regenerated automatically when the agent runs build commands inside the sandbox.
 
 **Important notes:**
-- Exclusion only applies to `:copy` mode — `:overlay` and `:rw` modes see all files
+- This hardcoded list is applied **on top of `.gitignore` honoring** (see Workdir Modes): in a git repo, anything you've gitignored (commonly `node_modules/`, `.build/`, etc.) is already excluded by git; this list is the safety net for non-git directories and for repos that commit such artifacts. To copy everything regardless, use `:copy-all`.
+- Exclusion only applies to `:copy`/`:copy-all` mode — `:overlay` and `:rw` modes see all files
 - The exclusion list is conservative to avoid false positives (e.g., generic names like `build/`, `target/`, or `env/` are NOT excluded)
-- If you need to exclude additional project-specific artifacts, please file an issue on GitHub
+- If you need to exclude additional project-specific artifacts, gitignore them (honored by `:copy`) or file an issue on GitHub
 
 ## Auxiliary Directories
 
