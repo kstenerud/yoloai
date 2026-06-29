@@ -95,6 +95,41 @@ func RemoveExchangeFile(layout config.Layout, name, rel string) error {
 	return nil
 }
 
+// ReadExchangeFile returns the bytes of one exchange entry (rel, relative to the
+// exchange dir). rel is validated to stay within the exchange directory, so a
+// content-oriented consumer never needs its own path-traversal guard.
+func ReadExchangeFile(layout config.Layout, name, rel string) ([]byte, error) {
+	filesDir := FilesDir(layout, name)
+	target := filepath.Join(filesDir, rel)
+	if err := validateExchangePath(filesDir, target); err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(target) //nolint:gosec // G304: target validated by validateExchangePath
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", rel, err)
+	}
+	return data, nil
+}
+
+// WriteExchangeFile writes data to one exchange entry (rel, relative to the
+// exchange dir), creating the exchange directory and any parent directories as
+// needed. rel is validated to stay within the exchange directory. Files are
+// written 0600 (owner-only), matching the prior file-exchange write path.
+func WriteExchangeFile(layout config.Layout, name, rel string, data []byte) error {
+	filesDir := FilesDir(layout, name)
+	target := filepath.Join(filesDir, rel)
+	if err := validateExchangePath(filesDir, target); err != nil {
+		return err
+	}
+	if err := fileutil.MkdirAll(filepath.Dir(target), 0750); err != nil {
+		return fmt.Errorf("create files directory: %w", err)
+	}
+	if err := fileutil.WriteFile(target, data, 0600); err != nil {
+		return fmt.Errorf("write %s: %w", rel, err)
+	}
+	return nil
+}
+
 // copyTree copies src to dst preserving mode and recursing into directories,
 // honoring ctx cancellation. Uses cp -rp (matching prior CLI behavior) since the
 // exchange directory may hold directory trees.

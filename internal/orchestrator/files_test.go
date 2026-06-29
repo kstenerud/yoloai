@@ -88,6 +88,46 @@ func TestExportFile_TraversalBlocked(t *testing.T) {
 	assert.Contains(t, err.Error(), "escapes exchange directory")
 }
 
+func TestWriteReadExchangeFile_RoundTrip(t *testing.T) {
+	layout, name := filesTestLayout(t)
+
+	// Write creates the exchange dir and any parent dirs on demand.
+	require.NoError(t, WriteExchangeFile(layout, name, "sub/answer.txt", []byte("42")))
+	assert.FileExists(t, filepath.Join(FilesDir(layout, name), "sub", "answer.txt"))
+
+	got, err := ReadExchangeFile(layout, name, "sub/answer.txt")
+	require.NoError(t, err)
+	assert.Equal(t, "42", string(got))
+
+	// Overwrite is allowed (content-oriented write, unlike Import).
+	require.NoError(t, WriteExchangeFile(layout, name, "sub/answer.txt", []byte("43")))
+	got, err = ReadExchangeFile(layout, name, "sub/answer.txt")
+	require.NoError(t, err)
+	assert.Equal(t, "43", string(got))
+}
+
+func TestReadExchangeFile_NotFound(t *testing.T) {
+	layout, name := filesTestLayout(t)
+	_, err := ReadExchangeFile(layout, name, "missing.txt")
+	require.Error(t, err)
+}
+
+func TestWriteReadExchangeFile_TraversalBlocked(t *testing.T) {
+	layout, name := filesTestLayout(t)
+
+	err := WriteExchangeFile(layout, name, "../../../etc/passwd", []byte("x"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "escapes exchange directory")
+
+	_, err = ReadExchangeFile(layout, name, "../../../etc/passwd")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "escapes exchange directory")
+
+	// An absolute path is contained back into the exchange dir, not honored.
+	_, err = ReadExchangeFile(layout, name, "/etc/passwd")
+	require.Error(t, err) // not found inside the exchange dir, never /etc/passwd
+}
+
 func TestRemoveExchangeFile_TraversalBlocked(t *testing.T) {
 	layout, name := filesTestLayout(t)
 	err := RemoveExchangeFile(layout, name, "../../../etc/passwd")
