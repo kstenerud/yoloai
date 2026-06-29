@@ -9,6 +9,7 @@ Full reference for commands, flags, configuration, and internals. For a quick ov
 | Command | Description |
 |---------|-------------|
 | `yoloai new <name> [workdir]` | Create and start a sandbox |
+| `yoloai run <name> <workdir>` | Create and run a sandbox headlessly to completion |
 | `yoloai attach <name>` | Attach to the agent's tmux session |
 | `yoloai diff <name>` | Show changes the agent made |
 | `yoloai apply <name>` | Apply changes back to original directory |
@@ -24,6 +25,9 @@ Full reference for commands, flags, configuration, and internals. For a quick ov
 | `yoloai clone <source> <dest>` | Clone a sandbox (copy state to a new sandbox) |
 | `yoloai reset <name>` | Re-copy workdir and reset to original state |
 | `yoloai destroy <name>...` | Stop and remove sandboxes |
+| `yoloai baseline advance <name>` | Move the sandbox baseline to the current HEAD of the work copy |
+| `yoloai baseline set <name> <sha>` | Move the sandbox baseline to a specific commit SHA |
+| `yoloai baseline log <name>` | Show the sandbox work copy commit log, marking the current baseline |
 
 **Inspection**
 
@@ -72,6 +76,13 @@ Full reference for commands, flags, configuration, and internals. For a quick ov
 | `yoloai help [topic]` | Show help topics (agents, workflow, workdirs, config, security, flags, extensions) |
 | `yoloai system completion <shell>` | Generate shell completion (bash/zsh/fish/powershell) |
 | `yoloai version` | Show version information |
+
+**MCP Server (experimental)**
+
+| Command | Description |
+|---------|-------------|
+| `yoloai mcp serve` | Start the yoloAI MCP server on stdio |
+| `yoloai mcp proxy <name> [workdir] -- <cmd>` | Run an MCP server inside a sandbox and proxy its stdio |
 
 ### YOLOAI_SANDBOX
 
@@ -417,6 +428,29 @@ yoloai new task ./project --env MY_VAR=value --env OTHER=val2
 yoloai new task ./project --debug
 ```
 
+### Headless run
+
+`yoloai run` is an alternate entry point to `yoloai new` for scripted and CI use: it creates a sandbox, delivers the prompt in the agent's own headless mode, and optionally blocks until the agent finishes.
+
+```bash
+# Fire-and-forget: returns as soon as the agent is launched
+yoloai run mybox ./project --prompt "fix the build"
+
+# Block until the agent finishes (exit code reflects the agent's outcome)
+yoloai run mybox ./project --prompt "fix the build" --wait
+
+# Block and destroy the sandbox after the agent finishes (implies --wait)
+yoloai run mybox ./project --prompt "fix the build" --rm
+
+# Read the prompt from a file
+yoloai run mybox ./project --prompt-file instructions.md --wait
+
+# Run interactively instead of headless — useful for monitoring/debugging
+yoloai run mybox ./project --prompt "fix the build" --tty
+```
+
+`--prompt` or `--prompt-file` is required. `--rm` implies `--wait`. Without `--wait`, `yoloai run` returns as soon as the agent is launched and the sandbox persists for later `diff`/`apply`. With `--wait`, a failed agent causes `yoloai run` to exit non-zero, so `yoloai run … --wait && next-step` works. All `yoloai new` flags are accepted (see [Creating sandboxes](#creating-sandboxes)).
+
 ### Managing sandboxes
 
 ```bash
@@ -486,6 +520,8 @@ yoloai-resume   # run inside the fall-to-shell shell (yoloai attach <name> to ge
 - For agents without native resume, it starts a **fresh** session and says so —
   it never claims a resume that didn't happen.
 
+**Codex note:** Codex has no native session-continuation mechanism. Both `yoloai-resume` (in-sandbox) and `yoloai restart --resume` / `yoloai start --resume` (host-side) always start a **fresh** Codex session — the original prompt is re-fed as context, but no prior conversation state is carried over.
+
 This is distinct from the host-side `yoloai restart --resume` / `yoloai start
 --resume` (above), which relaunch from *outside* the sandbox and re-feed the
 original prompt. `yoloai-resume` runs *inside* the shell you're already in and,
@@ -541,6 +577,54 @@ yoloai apply task --tags
 # Skip the confirmation prompt
 yoloai apply task --yes
 ```
+
+### Managing the sandbox baseline
+
+`yoloai baseline` corrects the baseline SHA when it falls out of sync — for example after a stash-pop conflict or a non-contiguous selective apply.
+
+```bash
+# Advance the baseline to the current HEAD of the work copy
+yoloai baseline advance mybox
+
+# Set the baseline to a specific commit (short SHA accepted)
+yoloai baseline set mybox abc12345
+
+# Show the commit log of the sandbox work copy, marking the current baseline
+yoloai baseline log mybox
+```
+
+The baseline is the reference commit used by `yoloai diff` and `yoloai apply` to determine what the agent changed. After a normal apply, yoloai advances it automatically — `baseline` is the recovery tool when it gets out of sync. The `set` output includes an undo hint (`yoloai baseline set <name> <old-sha>`) in case you need to reverse the move.
+
+### MCP Server (experimental)
+
+**Experimental:** `yoloai mcp` is functional but under-tested; its tool surface and flags may change.
+
+`yoloai mcp serve` starts the yoloAI MCP server on stdin/stdout, exposing sandbox operations as tools for outer agents (Claude Desktop, VS Code Copilot, etc.) driving a two-layer agentic workflow. Tools: `sandbox_create`, `sandbox_status`, `sandbox_list`, `sandbox_destroy`, `sandbox_diff`, `sandbox_diff_file`, `sandbox_log`, `sandbox_input`, `sandbox_reset`, `sandbox_files_list`, `sandbox_files_read`, `sandbox_files_write`.
+
+To use with Claude Desktop, add to `~/.claude.json`:
+
+```json
+{
+  "mcpServers": {
+    "yoloai": {
+      "command": "yoloai",
+      "args": ["mcp", "serve"]
+    }
+  }
+}
+```
+
+`yoloai mcp proxy` runs an MCP server inside a sandbox and proxies its stdio, injecting `sandbox_diff` into the tool surface. The sandbox is created automatically if it does not exist; existing sandboxes are reused. Path placeholders in the inner command are expanded from sandbox metadata: `{workdir}` (primary working directory), `{files}`, `{cache}`, `{dir:N}` (Nth auxiliary dir, 0-indexed).
+
+```bash
+# New sandbox — workdir required
+yoloai mcp proxy mybox /path/to/project -- npx -y @modelcontextprotocol/server-filesystem {workdir}
+
+# Reuse existing sandbox
+yoloai mcp proxy mybox -- npx -y @modelcontextprotocol/server-filesystem {workdir}
+```
+
+Proxy flags: `--agent <name>` (default: `idle`), `--model`, `--profile`, `-d`/`--dir`, `--replace` (destroy and recreate if the sandbox exists), `--backend`.
 
 ## How It Works
 
