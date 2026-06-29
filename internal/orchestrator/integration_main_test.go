@@ -41,16 +41,28 @@ func TestMain(m *testing.M) {
 		os.Exit(0)
 	}
 
+	os.Exit(runIntegrationMain(m))
+}
+
+// runIntegrationMain holds the real TestMain body in a function that RETURNS its
+// exit code, so the deferred temp-HOME cleanup actually runs — os.Exit (called
+// only by the thin TestMain wrapper) skips defers, which previously leaked the
+// bootstrap HOME on every run. Returns the code to pass to os.Exit.
+func runIntegrationMain(m *testing.M) int {
+	// Reclaim bootstrap HOMEs leaked by a PRIOR run killed before its defer ran
+	// (SIGKILL/-timeout). The live run cleans its own HOME via the defer below.
+	testutil.SweepStaleTestHomes("yoloai-setup-")
+
 	ctx := context.Background()
 	step := testutil.TestMainBreadcrumb("sandbox")
 
 	tmpHome, err := os.MkdirTemp("", "yoloai-setup-*")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to create temp home: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
-	defer os.RemoveAll(tmpHome)
-	os.Setenv("HOME", tmpHome) //nolint:errcheck // best-effort env set in test main
+	defer os.RemoveAll(tmpHome) //nolint:errcheck // best-effort cleanup
+	os.Setenv("HOME", tmpHome)  //nolint:errcheck // best-effort env set in test main
 
 	var rt *dockerrt.Runtime
 	var dockerErr error
@@ -59,7 +71,7 @@ func TestMain(m *testing.M) {
 	})
 	if dockerErr != nil {
 		fmt.Fprintf(os.Stderr, "Docker unavailable, skipping integration tests: %v\n", dockerErr)
-		os.Exit(0)
+		return 0
 	}
 	defer rt.Close() //nolint:errcheck // best-effort close in test main
 
@@ -75,7 +87,7 @@ func TestMain(m *testing.M) {
 	integLayout := config.NewLayout(filepath.Join(tmpHome, ".yoloai"))
 	if err := os.MkdirAll(integLayout.CacheDir(), 0750); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to create cache dir: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
 	dockerrt.RecordBuildChecksum(integLayout, "docker")
 
@@ -86,8 +98,8 @@ func TestMain(m *testing.M) {
 	})
 	if setupErr != nil {
 		fmt.Fprintf(os.Stderr, "EnsureSetup failed: %v\n", setupErr)
-		os.Exit(1)
+		return 1
 	}
 
-	os.Exit(m.Run())
+	return m.Run()
 }

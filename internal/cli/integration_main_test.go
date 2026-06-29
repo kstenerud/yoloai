@@ -115,7 +115,17 @@ func integrationBackendKey(backendType string) string {
 // integration tests run, so the base Docker image is ready. Individual tests
 // still call cliSetup(t) for per-test HOME isolation; subsequent EnsureSetup
 // calls inside cliSetup hit the image cache and return in milliseconds.
-func TestMain(m *testing.M) {
+func TestMain(m *testing.M) { os.Exit(runCLIMain(m)) }
+
+// runCLIMain holds the real TestMain body in a function that RETURNS its exit
+// code, so the deferred temp-HOME cleanup actually runs — os.Exit (called only by
+// the thin TestMain wrapper) skips defers, which previously leaked the bootstrap
+// HOME on every run.
+func runCLIMain(m *testing.M) int {
+	// Reclaim bootstrap HOMEs leaked by a PRIOR run killed before its defer ran
+	// (SIGKILL/-timeout). The live run cleans its own HOME via the defer below.
+	testutil.SweepStaleTestHomes("yoloai-cli-setup-")
+
 	step := testutil.TestMainBreadcrumb("cli")
 
 	// Pin CONTAINER_HOST before overriding HOME — podman machine inspect reads
@@ -125,14 +135,14 @@ func TestMain(m *testing.M) {
 	tmpHome, err := os.MkdirTemp("", "yoloai-cli-setup-*")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to create temp home: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
 	defer os.RemoveAll(tmpHome)
 	os.Setenv("HOME", tmpHome) //nolint:errcheck // best-effort env set in test main
 
 	if err := writeTestBackendConfig(tmpHome); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to write test backend config: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
 
 	// Pre-seed the build-inputs checksum in the per-test HOME.
@@ -156,7 +166,7 @@ func TestMain(m *testing.M) {
 		integLayout := config.NewLayoutFor(filepath.Join(tmpHome, ".yoloai", "library"), tmpHome)
 		if err := os.MkdirAll(integLayout.CacheDir(), 0750); err != nil {
 			fmt.Fprintf(os.Stderr, "failed to create cache dir: %v\n", err)
-			os.Exit(1)
+			return 1
 		}
 		// DF56: the checksum is keyed per image store. The CLI subset runs under
 		// both docker and podman (YOLOAI_TEST_BACKEND), so seed the ACTIVE backend's
@@ -171,7 +181,7 @@ func TestMain(m *testing.M) {
 	// the gate reads a consistent, current install and proceeds.
 	if err := stampRealms(tmpHome); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to stamp realms: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
 
 	// Bootstrap: create a throwaway sandbox to trigger EnsureSetup (image build).
@@ -179,11 +189,11 @@ func TestMain(m *testing.M) {
 	projectDir := filepath.Join(tmpHome, "project")
 	if err := os.MkdirAll(projectDir, 0o750); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to create project dir: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
 	if err := os.WriteFile(filepath.Join(projectDir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o600); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to write project file: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
 
 	var bootstrapErr error
@@ -196,7 +206,7 @@ func TestMain(m *testing.M) {
 	})
 	if bootstrapErr != nil {
 		fmt.Fprintf(os.Stderr, "bootstrap EnsureSetup failed: %v\n", bootstrapErr)
-		os.Exit(1)
+		return 1
 	}
 
 	// Clean up the bootstrap sandbox (best-effort).
@@ -206,5 +216,5 @@ func TestMain(m *testing.M) {
 	root.SetErr(&bytes.Buffer{})
 	_ = root.ExecuteContext(context.Background())
 
-	os.Exit(m.Run())
+	return m.Run()
 }

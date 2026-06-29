@@ -23,13 +23,6 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 
 ## Findings
 
-### DF61 — integration tests leak multi-GB isolated container stores in `/tmp` on SIGKILL/timeout
-
-- **Discovered:** 2026-06-29 · **Workstream:** disk-reclaim / prune evaluation
-- **Severity:** MEDIUM (silent multi-GB disk leak on a test host; compounding) · **Disposition:** PARKED
-- **Description:** The CLI/orchestrator integration harness gives each test a fresh `HOME` (`t.TempDir()` / `testutil.IsolatedHome`) under `/tmp`. For rootless podman the storage graphroot follows `$HOME`, so a test that builds/pulls the base image populates a **multi-GB image store inside that temp HOME** (observed: `/tmp/TestCLI_StartStop…` 7.3 GB, `/tmp/yoloai-cli-setup…` 5.1 GB). Go's `t.TempDir` cleanup only runs on *normal* test completion — on SIGKILL, a `-timeout` kill, or a killed parent `make`, the temp HOMEs (and their multi-GB stores) leak permanently. Several such runs filled a 116 GB disk. This was greatly amplified by DF56's mass-rebuild fallout, but the leak mechanism is independent. `yoloai system prune` cannot reclaim it — the dirs are outside `~/.yoloai`. **Fix directions:** (a) point the per-test podman/docker storage at the *shared* host store (don't let graphroot follow the isolated HOME) so the base image isn't re-copied per test; (b) failing that, register a best-effort cleanup that also runs on signal, or a sweeper (`make clean-testtmp`) for `/tmp/{TestCLI_*,yoloai-cli-setup-*}`; (c) document the leak so CI hosts sweep `/tmp`.
-- **Pointer:** `internal/cli/integration_main_test.go` / `integration_test.go` (cliSetup HOME isolation), `internal/orchestrator/integration_helpers_test.go`, `test/e2e/helpers_test.go`; rootless-podman graphroot-follows-HOME behavior.
-
 ### DF59 — `yoloai system prune` reclaim is incomplete and under-reported (containerd hard-block, devmapper non-shrink, undercounted total)
 
 - **Discovered:** 2026-06-29 · **Workstream:** disk-reclaim / prune evaluation

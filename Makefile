@@ -29,7 +29,7 @@ DOCKER_HOST_ENV := $(DOCKER_HOST)
 DOCKER_HOST_RESOLVED = $(if $(DOCKER_HOST_ENV),$(DOCKER_HOST_ENV),$(shell docker context inspect --format '{{.Endpoints.docker.Host}}' 2>/dev/null))
 integration e2e base-image smoketest smoketest-full: export DOCKER_HOST = $(DOCKER_HOST_RESOLVED)
 
-.PHONY: build test fmt lint vet-tagged crosscheck tidy-check govulncheck hadolint actionlint check cover integration e2e integration-podman integration-containerd integration-apple integration-seatbelt integration-tart python-test python-typecheck ensure-python-venv setup-dev-python smoketest smoketest-full releasetest setcap clean
+.PHONY: build test fmt lint vet-tagged crosscheck tidy-check govulncheck hadolint actionlint check cover integration e2e integration-podman integration-containerd integration-apple integration-seatbelt integration-tart python-test python-typecheck ensure-python-venv setup-dev-python smoketest smoketest-full releasetest setcap clean clean-testtmp
 
 # Always invoke `go build` and let it decide whether to relink. `go build` does
 # complete, authoritative dependency tracking — crucially including //go:embed'd
@@ -273,5 +273,21 @@ releasetest: check integration e2e integration-podman smoketest-full
 setcap: build
 	sudo setcap cap_sys_admin,cap_dac_override+ep ./$(BINARY)
 
-clean:
+clean: clean-testtmp
 	rm -f $(BINARY)
+
+## clean-testtmp: remove integration/e2e bootstrap HOMEs left in TMPDIR by a
+## test run that was killed before its cleanup ran (SIGKILL / -timeout / OOM —
+## none run deferred cleanup). Normal runs clean up after themselves; this is the
+## deterministic sweep for leftovers. Safe: only yoloai-prefixed temp dirs.
+##
+## A cli HOME may contain a rootless-podman store whose files are owned by
+## uid-remapped (userns) ids, so a plain `rm` hits "Permission denied"; remove
+## those via `podman unshare` (which enters the user namespace) when podman is
+## available, then a plain rm for the rest. All best-effort (|| true).
+clean-testtmp:
+	@rm -rf "$${TMPDIR:-/tmp}"/yoloai-setup-* "$${TMPDIR:-/tmp}"/yoloai-e2e-* 2>/dev/null || true
+	@if command -v podman >/dev/null 2>&1; then \
+		podman unshare rm -rf "$${TMPDIR:-/tmp}"/yoloai-cli-setup-* 2>/dev/null || true; \
+	fi
+	@rm -rf "$${TMPDIR:-/tmp}"/yoloai-cli-setup-* 2>/dev/null || true

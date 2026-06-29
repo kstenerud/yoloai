@@ -7,6 +7,14 @@ History of codebase findings (issues discovered mid-work) that have been address
 are moved here from [`findings-unresolved.md`](findings-unresolved.md) once resolved, so the
 active file stays a working set. Newest first.
 
+### DF61 — integration-test bootstrap HOMEs leaked in /tmp (the `defer` cleanup was bypassed by `os.Exit`)
+
+- **Discovered:** 2026-06-29 · **Resolved:** 2026-06-29 · **Workstream:** disk-reclaim / test-infra
+- **Severity:** MEDIUM · **Disposition:** ADDRESSED-IN-PLACE
+- **Description:** The cli/orchestrator/e2e integration `TestMain`s create a bootstrap `HOME` via `os.MkdirTemp` and `defer os.RemoveAll(home)`, then end with `os.Exit(m.Run())`. **`os.Exit` does not run deferred functions**, so the defer never fired — the bootstrap HOME (`/tmp/yoloai-{setup,cli-setup,e2e}-*`) leaked on *every* run, not just on interruption (a fresh checkout had **110** leaked `yoloai-setup-*` dirs accumulated in one session). Per-test `t.TempDir` HOMEs additionally leak on SIGKILL/-timeout (those run no cleanup). The multi-GB sizes seen earlier were DF56's mass-rebuild fallout (each leaked a per-HOME rootless-podman store); with DF56 fixed the bootstrap HOMEs are small, but they still accumulated.
+- **Resolution:** moved each TestMain body into a `run(m) int` helper that RETURNS the code (`func TestMain(m){ os.Exit(run(m)) }`), so the temp-HOME defer fires on every normal/error path. Added `testutil.SweepStaleTestHomes(prefix)` (called at TestMain start) to reclaim own-prefix HOMEs left by a PRIOR killed run, age-gated (untouched ≥1h) so it never clobbers a concurrent run. Added `make clean-testtmp` (and folded into `make clean`) as the deterministic sweep — it uses `podman unshare rm -rf` for cli HOMEs whose rootless-podman store has uid-remapped files that a plain `rm`/`os.RemoveAll` can't delete (Permission denied). Verified: a normal integration run now leaves 0 bootstrap HOMEs; `make clean-testtmp` cleared the 110-dir backlog incl. a remapped-uid store. **Honest limits:** SIGKILL/-timeout still can't clean the *current* run in-process (kernel kill runs no handler) — the next run's sweep / `make clean-testtmp` recovers it; and the prevention half of the original finding (point podman storage at the shared host store so no per-HOME store is ever built — fix direction (a)) is a separate, still-open improvement that would make even a leaked HOME tiny.
+- **Pointer:** `internal/testutil/testhome.go` (`SweepStaleTestHomes`), `internal/{cli,orchestrator}/integration_main_test.go`, `test/e2e/helpers_test.go` (`run(m) int`), `Makefile` (`clean-testtmp`).
+
 ### DF55 — `:copy` now honors `.gitignore` (gitignored secrets no longer copied into the sandbox)
 
 - **Discovered:** 2026-06-28 · **Resolved:** 2026-06-29 · **Workstream:** credential-hygiene (egress-broker workstream D)

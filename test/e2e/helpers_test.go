@@ -56,7 +56,17 @@ func goBuildEnv() []string {
 }
 
 // TestMain compiles the yoloai binary once before all E2E tests run.
-func TestMain(m *testing.M) {
+func TestMain(m *testing.M) { os.Exit(runE2EMain(m)) }
+
+// runE2EMain holds the real TestMain body in a function that RETURNS its exit
+// code, so the deferred temp-dir cleanup actually runs — os.Exit (called only by
+// the thin TestMain wrapper) skips defers, which previously leaked the e2e temp
+// dir on every run. (Setup panics already run the defer via stack unwinding.)
+func runE2EMain(m *testing.M) int {
+	// Reclaim e2e temp dirs leaked by a PRIOR run killed before its defer ran
+	// (SIGKILL/-timeout). The live run cleans its own via the defer below.
+	testutil.SweepStaleTestHomes("yoloai-e2e-")
+
 	// Locate module root by walking up from this test file.
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
@@ -71,7 +81,7 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic("MkdirTemp: " + err.Error())
 	}
-	defer os.RemoveAll(tmp)
+	defer os.RemoveAll(tmp) //nolint:errcheck // best-effort cleanup
 
 	yoloaiBin = filepath.Join(tmp, "yoloai")
 	build := sysexec.Command(goBuildEnv(), "go", "build", "-o", yoloaiBin, "./cmd/yoloai")
@@ -80,7 +90,7 @@ func TestMain(m *testing.M) {
 		panic("build failed: " + string(out))
 	}
 
-	os.Exit(m.Run())
+	return m.Run()
 }
 
 // findModuleRoot walks up from dir until it finds a go.mod file.
