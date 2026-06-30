@@ -254,12 +254,23 @@ resume the run (rescan per-unit versions, migrate stragglers).
    requirement](#single-filesystem-requirement-decision-4).
 5. **Exclusivity / gate — DECIDED: whole-tree live flock.** See [Exclusivity &
    crash-recovery gating](#exclusivity--crash-recovery-gating-decision-5).
-7. **Unit granularity of a version step (OPEN).** A version transition is realm-versioned
-   and atomic. Is the unit the **whole realm** (one swap; build into a *resumable*
-   `library_^^_new` live sentinel so expensive flattens survive a crash; per-sandbox
-   record versions track build progress) — or **per-sandbox swaps** with the realm version
-   **derived** from "all sandboxes at vN+1"? Leaning whole-realm + resumable `_^^_new`.
-8. *(plus the user's pending critiques)*
+7. **Unit granularity of a version step — DECIDED: whole-realm swap.** A version step is
+   one atomic whole-realm swap. The migrator reads the **source at its old version**
+   (`library`/`_^^_orig` = vN, using the vN reader — which for v3 includes overlay) and
+   writes the new realm (`_^^_new` = vN+1), so the live realm stays **self-consistent**
+   (vN data under a vN reader) until the atomic swap — **no window where the realm version
+   disagrees with its sandboxes' format.** That window is exactly the ordering tension the
+   per-sandbox-incremental alternative creates (flip realm→v4 first: v4 machinery rejects
+   still-overlay sandboxes; flatten sandboxes first: v3 machinery is confused by v4 ones).
+   Build into a *resumable* `library_^^_new` (per-sandbox record versions track which
+   sandboxes are done) so expensive flattens survive a crash.
+8. **Overlay-reader placement (OPEN, audit R4).** The flatten irreducibly needs the
+   v3/overlay reader (the apply/extract path) to read the source. **(i)** only in 0.7.0
+   (reads v3→writes v4; 0.8.0 deletes it, keeps just the detector + "run 0.7.0" refusal),
+   or **(ii)** 0.8.0+ retains a *minimal* overlay-flatten-reader so leftover overlay
+   sandboxes can be flattened without 0.7.0 (more robust if 0.7.0 is unavailable, more code
+   carried). Affects retire-overlay's "zero overlay-read code in the post-removal binary."
+9. *(plus the user's pending critiques)*
 
 ## Cadence (D110)
 
