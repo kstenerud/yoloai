@@ -103,10 +103,14 @@ commit + durable writes.
 
 ## Durability: fsync at the promotion boundaries (audit A1, reframed)
 
-The dir-rename promotion scheme + the whole-tree flock already give commit
-**atomicity** (a reader never sees a half-written unit; concurrency is excluded), and
-the recovery scan handles resume — so there is **no general per-file atomic-write
-primitive** wrapping every write. The unit commit *is* the directory rename.
+**Two migration shapes, two tools.** For **restructuring** migrations (the overlay
+flatten), the dir-rename promotion + the whole-tree flock already give commit
+**atomicity** (a reader never sees a half-written unit; concurrency is excluded) — the
+unit commit *is* the directory rename, so the unit's *contents* need no per-file atomic
+write. For **in-place metadata** migrations (the agent.json split) and the **stamp**,
+the lighter tool is a per-file **atomic-durable write** (`write-temp-same-dir → fsync →
+rename → fsync(dir)`) applied to those specific files — **not** wrapped around every
+write everywhere. So a per-file primitive is needed, but narrowly.
 
 What rename does **not** give is **durability**: `rename(2)` is atomic but a power loss
 before the dir entry is flushed can lose it, and — worse — a moved-in `*_^^_new` whose
@@ -132,10 +136,12 @@ Recommendation: **keep the boundary fsyncs** — migrations touch irreplaceable 
 rare, and the cost is a handful of fsyncs per sandbox. (Alternative: promise only
 process-death safety and drop them — simpler, weaker.)
 
-**C3/A4 (the existing split losing data) is fixed by routing the split through this
-scheme** (writes land in disposable scratch; commit is the durable dir-rename) — *not*
-by atomic-wrapping `SaveEnvironment`. Normal-operation writes outside migration are a
-separate robustness question, out of scope here.
+**C3/A4 (the existing split losing data) is fixed by making the split's per-file writes
+atomic-durable and ordered** — write `agent.json`/`netpolicy.json`
+(temp→fsync→rename→fsync) *before* the slimmed `environment.json` rewrite, stamp-last —
+*not* by the heavyweight dir-promotion scheme (overkill for editing three small files)
+nor by blanket-wrapping `SaveEnvironment`. Normal-operation writes outside migration are
+a separate robustness question, out of scope here.
 
 ## Promotion: build complete, then resumable rename (commit state in filenames)
 
@@ -148,17 +154,27 @@ in a real sandbox/realm name** (validate/reserve it). The per-unit **version**
 disambiguates the one ambiguous state (canonical name alone = not-started *or* done →
 read its version, the truth).
 
-**Per-sandbox** (the migrator rebuilds the sandbox's data — e.g. overlay→copy extract):
-1. Build the complete new sandbox in scratch; on completion move it into the live
-   sandboxes dir as `mysandbox_^^_new` (atomic rename — same FS).
-2. rename `mysandbox` → `mysandbox_^^_orig`
-3. rename `mysandbox_^^_new` → `mysandbox`
-4. delete `mysandbox_^^_orig`
+**Per-sandbox restructuring** (the migrator rebuilds the *transformed* part — e.g. the
+overlay→copy workdir; *unchanged* parts are carried over by copy, reflink, or **move**),
+fsyncs explicit:
+1. Build the transformed part in scratch; **fsync its contents**; move into the live
+   sandboxes dir as `mysandbox_^^_new`; **fsync(live dir)**.
+2. rename `mysandbox` → `mysandbox_^^_orig`; **fsync(live dir)**.
+3. *(move variant)* move the **re-derivable** set of unchanged items (e.g. the multi-GB
+   workdir — one atomic rename, no copy) from `_^^_orig` into `_^^_new`. Moves don't
+   touch contents and are idempotent, so **no per-move fsync**; **fsync(live dir)** once
+   the list completes.
+4. rename `mysandbox_^^_new` → `mysandbox`; **fsync(live dir)**.
+5. delete `mysandbox_^^_orig`.
 
-Recovery: `mysandbox`+`_^^_new` → resume at 2; `_^^_orig`+`_^^_new` → resume at 3;
-`mysandbox`+`_^^_orig` → resume at 4; `mysandbox` alone → check its version. **Every
-dir in the live sandboxes dir is always a complete, functional sandbox** — only
-renames/deletes touch the live dir; the incomplete build stays in scratch.
+Recovery: `mysandbox` alone → check its version (not-started vs done); `_^^_orig`+`_^^_new`
+→ **with a move-list, re-derive the expected contents and verify `_^^_new` is complete**
+(presence ≠ completeness once a move-list is involved), finish pending moves, then
+promote; `mysandbox`(new)+`_^^_orig` → delete orig. The canonical `mysandbox` always
+holds **complete** data whenever it exists; any split lives only between the
+`_^^_orig`/`_^^_new` temps (union always complete, items never torn). Without the move
+variant (build-complete-in-scratch), step 3 is empty and `_^^_new` presence *is*
+completeness.
 
 **Realm-structural** (relocate/restructure *without* copying the bulk sandboxes):
 1. Build the new realm **structure** (layout + migrated files, **not** the bulk) in
