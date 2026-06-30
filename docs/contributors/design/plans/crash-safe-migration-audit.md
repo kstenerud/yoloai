@@ -93,7 +93,10 @@ real, must be handled in the build · *open-decision* = a flagged plan decision.
   **DECIDED: hard-refuse + single-FS** — migration requires the whole realm + scratch on
   one local filesystem (also guarantees atomic `mv`); refusal names the relocate escape.
 - **A12 — one corrupt sandbox bricks the whole install** (stamp-last is all-or-nothing).
-  **open-decision 1** — quarantine-and-continue (recommended) vs abort.
+  **RESOLVED by plan/apply** — the dry-run **plan** surfaces a sandbox that can't migrate as
+  a foreseen quarantine; the user approves the whole plan (quarantines included) or aborts,
+  one up-front decision. All-or-nothing is the *decision*, not the *execution* (units still
+  commit incrementally + resumably). See the plan's Plan/apply section.
 - **A13 — realm-step refusal message.** The post-removal binary's v3→v4 default must
   carry the 5-element named-tool refusal, not "no migration registered." **still-live**
   (overlay-removal build). Severity MED.

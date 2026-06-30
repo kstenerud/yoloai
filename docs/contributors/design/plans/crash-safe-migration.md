@@ -105,21 +105,55 @@ pattern (each sandbox inspects its own form), hardened with atomic commit + dura
   data survives untouched — correct-by-default, with special-file + disk-preflight
   handling written *once*, not per migrator); the **durable-atomic-rename** primitive;
   the **resumable promotion** (naming convention) and its recovery; scratch disposal +
-  transient-`*_^^_orig` cleanup; version-check gating; the **whole-tree run lock**.
-- **Each migrator owns:** how to transform its unit inside the workdir; and **source
-  consistency** — starting/stopping containers, avoiding torn reads, and **detecting
-  and refusing** an already-destroyed source (A2). It *declares* which blessed
-  consistency strategy it uses (so the discipline doesn't drift per migrator).
+  transient-`*_^^_orig` cleanup; version-check gating; the **whole-tree run lock**;
+  collecting every migrator's **plan** and enforcing the **apply-gate** (proceed only when
+  destructive operations have been approved — see [Plan / apply](#plan--apply-dry-run)).
+- **Each migrator owns** two methods: **`Plan()`** — a pure read-only inspection that
+  describes the operations it would perform (each flagged **destructive** or not, plus any
+  **refusals/quarantines** it foresees); and **`Apply()`** — performs the transform inside
+  the workdir, **re-validating** its preconditions. It also owns **source consistency** —
+  starting/stopping containers, avoiding torn reads, and **detecting and refusing** an
+  already-destroyed source (A2) — and *declares* which blessed consistency strategy it uses
+  (so the discipline doesn't drift per migrator).
 
-**Migrators are bespoke and powerful — no cathedral.** The framework stays lean (the bullet
-above); each migrator is hand-written and free to **prompt the user and abort** mid-run.
-Migration *policy* (ask / abort / quarantine) is the migrator's; migration *responsibility*
-(the durable mechanics) is the framework's — they are deliberately separate, and the
-cross-migrator dependencies are **not uniform**, which is fine. Because yoloai also runs
-**headless** (daemon contexts, no TTY), a migrator that would prompt must take its answer
-from a **flag** there, **defaulting to abort** when there is no TTY (same rule as the
-bad-sandbox policy). We deliberately did **not** build a general sub-realm/carve framework
-around migrations (it proved brittle) — see D110.
+**Bespoke migrators, lean framework — no cathedral, and no mid-run prompts.** Each migrator
+is hand-written and bespoke in *what it does* (its transform), but it does **not** prompt or
+abort interactively. Interaction is centralized via **plan → confirm → apply**: the
+framework gathers all migrators' plans, and the **app** (CLI) renders them, takes the one
+confirmation, and only then drives `Apply()`. Migration *policy* (approve / abort, and the
+per-sandbox quarantines surfaced in the plan) lives in the app; migration *responsibility*
+(the durable mechanics) lives in the framework — deliberately separate, and the
+cross-migrator dependencies are **not uniform**, which is fine. The **library never prompts**
+(it exposes plan + gated-apply; the app owns interaction). We deliberately did **not** build
+a general sub-realm/carve framework around migrations (it proved brittle) — see D110.
+
+## Plan / apply (dry-run)
+
+Every `migrate` run computes a **plan first**, then applies it — the terraform
+`plan`/`apply`, `rsync -n`, `apt --dry-run` shape:
+
+1. **Plan (read-only).** Each pending migrator's `Plan()` is collected into one list of
+   described **operations**, each flagged **destructive** or not, plus any foreseen
+   **refusals/quarantines** ("sandbox Y: stopped macOS overlay — cannot migrate, will
+   quarantine"). No mutation.
+2. **Confirm (the app).** The CLI renders the plan. If it contains destructive operations
+   and a TTY is present, it asks for one confirmation; **`--yes`** proceeds without asking
+   (the scripted path). **Headless / no TTY defaults to abort** on any destructive op unless
+   `--yes` was given.
+3. **Apply.** The framework drives each `Apply()` under the whole-tree lock, **re-deriving
+   the plan and re-validating preconditions** — it does *not* execute the printed plan
+   blindly, so a precondition that drifted since the plan (e.g. a container that stopped)
+   becomes a refusal, never an unreviewed change. The approval carried into apply is a
+   **policy flag** ("destructive approved"), not a plan object.
+
+**All-or-nothing applies to the *decision*, not the *execution*.** You approve the whole
+plan or abort — no mid-run prompts. Execution stays **incremental and resumable**: each unit
+commits via its own atomic swap, so an *unpredicted* apply-time failure stops with
+already-committed units done (re-run resumes the rest, or quarantines the failed unit). It is
+**not** transactional rollback — no-downgrade (decision 3) forbids un-committing.
+
+`yoloai system migrate --dry-run` (alias `--check`) stops after step 1 and prints the plan
+(`--json`-aware) without changing anything — this doubles as the pre-upgrade audit (A15).
 
 ## Durability: fsync makes the rename scheme trustworthy (audit A1)
 
@@ -271,14 +305,14 @@ resume the run (rescan per-unit versions, migrate stragglers).
 
 ## Open decisions (critique targets)
 
-1. **Bad-sandbox policy (A12) — DECIDED: quarantine-or-abort, user's choice.** On a
-   sandbox that can't migrate, the user chooses **quarantine** (set it aside in
-   `trash/`, continue, flip the stamp once all are migrated-or-quarantined; the
-   new-binary detector still refuses it individually) **or abort** the run. Abort is
-   clean: already-committed sandboxes stay migrated (atomic + independent), the
-   failed + remaining stay at the old version, stamp unflipped → re-runnable.
-   Non-interactive runs take the choice via a flag, **default abort** (safe in
-   headless contexts).
+1. **Bad-sandbox policy (A12) — RESOLVED by plan/apply.** A sandbox that can't migrate is
+   surfaced in the **plan** as a foreseen quarantine ("set aside in `trash/`; the new-binary
+   detector still refuses it individually"). The user then approves the **whole plan**
+   (accepting the quarantines; the stamp flips once all are migrated-or-quarantined) **or
+   aborts** — one up-front decision, no mid-run branch. Abort is clean: already-committed
+   sandboxes stay migrated (atomic + independent), the rest stay at the old version, stamp
+   unflipped → re-runnable. Headless/no-TTY **defaults to abort** on any destructive op
+   unless `--yes`. See [Plan / apply](#plan--apply-dry-run).
 2. **Ordering — DECIDED: data-dir realm (incl. its per-sandbox pass), then cli.** Each
    realm (data-dir, cli) carries its own linear `.schema-version`; a data-dir migration
    does any realm-level work plus an idempotent per-sandbox pass as **one** schema step.
