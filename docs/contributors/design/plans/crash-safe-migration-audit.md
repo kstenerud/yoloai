@@ -48,10 +48,13 @@ real, must be handled in the build · *open-decision* = a flagged plan decision.
 - **A2 — macOS overlay flatten = silent total loss.** *[rests on confirmed DF69]* The
   snapshot/seed reflinks the **empty** host upper; the real data is container-tmpfs
   only; a relaunch wipes it, so resume reads a baseline-only view and commits a
-  "successful" empty flatten. **still-live** — the migrator must **detect and refuse a
-  stopped macOS overlay sandbox** (destroyed source, not a torn read); the live
-  extract must be a single durable act never re-derived from a relaunched container.
-  The copy-and-swap spine does **not** dissolve this (nothing on disk to copy).
+  "successful" empty flatten. **still-live** — the migrator must **require the sandbox
+  running** and **refuse a *stopped* macOS overlay sandbox** (destroyed source, not a torn
+  read). Reading the live upper into scratch is itself **non-destructive** (the source is
+  never modified), so once extracted the overlay sandbox migrates exactly like any other —
+  the extract is a single durable act, never re-derived from a relaunched container. The
+  copy-and-swap spine does **not** dissolve the *stopped*-source case (nothing on disk to
+  copy), but it fully covers the running case.
 
 ## HIGH
 

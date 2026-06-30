@@ -214,19 +214,24 @@ upgrading; use `:copy`, ideally with the data dir on a CoW filesystem).
 
 Fixed by the crash-safe-migration cadence ([D110](../../decisions/working-notes.md);
 [crash-safe-migration.md](crash-safe-migration.md)) so every migration runs on a
-schema frozen in a prior shipped release:
+schema frozen in a prior shipped release. The split and the flatten are **one** sandbox
+`v0→v1` migration (fused 2026-06-30), so retirement is **two** releases, not three:
 
-- **0.6.0** — **Phase 1** (reflink-`:copy`, additive) ships, alongside the
-  crash-safe **floor** (durable-write primitive + stamp-last + run lock). Schema v3
-  is frozen here. `:overlay` remains a documented dangerous opt-in (the v0.6.0
-  interim stands).
-- **0.7.0** — the **migration version** (last release to ship overlay): the
-  per-sandbox staging/promotion machinery + the **overlay→copy flatten** (v3→v4,
-  agent-free, while-live per DF69) + `migrate --check`. Reads frozen v3.
-- **0.8.0** — **Phase 2** removal: overlay reader deleted; the v3→v4 step becomes a
-  permanent detect-and-refuse naming `yoloai-0.7.x`. (The earlier "Phase 2 in
-  0.7.0" estimate is superseded — flatten and removal **must** be different binaries,
-  since the flatten needs the overlay read/apply code the removal deletes.)
+- **Migration release** — **Phase 1** (reflink-`:copy`, additive) ships, plus the
+  crash-safe machinery and the **single** sandbox `v0→v1` migration that both splits
+  agent.json *and* flattens overlay (extract the upper into scratch — non-destructive
+  read; macOS requires the sandbox running, DF69 — then split, stamp, swap). The overlay
+  read/apply reader is present here for its **last** use. After this release, **no overlay
+  sandbox remains**.
+- **Removal release** — **Phase 2**: overlay mount option + reader **deleted**; any
+  sandbox still at v0 → a permanent **detect-and-refuse** naming the migration release.
+  Flatten and removal **must** be different binaries — the flatten needs the overlay
+  read/apply code the removal deletes; that constraint is why this can't collapse to a
+  single release.
+
+Version numbers: the in-flight **v0.6.0** (release-prep) predates this and ships without
+the machinery, so the migration release is the next minor after it (likely 0.7.0, removal
+0.8.0).
 
 ## Open questions (for the human)
 

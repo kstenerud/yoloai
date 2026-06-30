@@ -5,8 +5,9 @@ ABOUTME: per-realm, individually-versioned migrations that stage in a workdir an
 ABOUTME: commit via a resumable atomic rename; per-sandbox done one at a time.
 
 Status: **DESIGN CONVERGED ON A SPINE — open for further critique; not yet built.**
-Surfaced by overlay retirement (D109); tracked as DF68. Prerequisite (step 0) for
-the overlay `v3→v4` flatten and a retro-harden of the existing agent.json split.
+Surfaced by overlay retirement (D109); tracked as DF68. Implements the fused
+agent.json-split **+** overlay-flatten sandbox `v0→v1` migration (one migration, one
+release) and the crash-safe machinery it rides on.
 Sequencing is **D110** (the cadence table below). The independent audit behind this
 rewrite is the companion [crash-safe-migration-audit.md](crash-safe-migration-audit.md)
 (18 findings, A1–A18, four parallel reviewers + in-code verification).
@@ -72,7 +73,8 @@ realm, **each sandbox** (its own sub-realm), and the **cli** realm each carry th
 **Responsibility split:** the **library** version governs *where sandbox directories live*
 (location/layout); the **sandbox** version governs *everything inside a sandbox*. Changing
 a sandbox's internal structure bumps the **sandbox** version, never the library's (so the
-agent.json split and the overlay flatten are *sandbox* migrations, not library ones).
+agent.json split and the overlay flatten are *sandbox* migrations, fused into a
+**single** `v0→v1` step, not library ones).
 Changed files are rebuilt in scratch; unchanged bulk is **moved** (not copied) from the
 displaced original; the swap commits **all of the unit's changed files atomically** (the
 key property — a migration touching many files needs no per-file ordering; see Promotion).
@@ -195,12 +197,18 @@ A small, shared set of strategies a migrator declares — not per-migrator hand-
   reading. **Quiescence comes from `DetectStatus == Stopped`, not the flock** (A5:
   the per-sandbox flock is released once the container launches, so a live agent
   holds no lock). Per-sandbox granularity means quiescing **one** sandbox at a time.
-- `LiveContainerExtract` — for overlay: bring up an agent-free container, run the
-  existing `apply` to materialize the flatten to host staging, fsync, tear down.
-- **Destroyed-source refusal (A2, mandatory, not a "torn read"):** a *stopped* macOS
-  overlay sandbox's upper is tmpfs-only and **already gone** (DF69, confirmed). The
-  migrator must **detect and refuse** with a loud message — it cannot mitigate a
-  source that no longer exists.
+- `LiveContainerExtract` — for overlay: **read** the upper into scratch (the source is
+  never modified — reading can't destroy it), via an agent-free container running the
+  existing `apply` to materialize the flatten to host staging, fsync, tear down. Once
+  extracted, the overlay sandbox migrates *exactly* like any other: split agent.json,
+  stamp, swap. The extract is just how Promotion step 1 (build the changed files in
+  scratch) is populated — **no special destructive path**.
+- **Source-readable precondition (A2, mandatory):** on **macOS** the overlay upper is
+  tmpfs-only, so it is readable **only while the container runs** (DF69, confirmed). The
+  migrator **requires the sandbox running** before extracting; a *stopped* macOS overlay
+  sandbox's upper is **already gone** → **detect and refuse** with a loud message (it
+  cannot extract a source that no longer exists). Linux uppers live on disk — always
+  readable.
 
 ## No automated downgrade — but the prior schema is preserved in trash (decision 3)
 
@@ -277,42 +285,46 @@ resume the run (rescan per-unit versions, migrate stragglers).
    first, as a whole-library swap that moves sandbox dirs by rename); sandbox versions
    govern *format*. (Supersedes the earlier whole-realm-swap-flattens-all framing.)
 8. **Overlay-reader placement (OPEN, audit R4).** The flatten irreducibly needs the
-   v3/overlay reader (the apply/extract path) to read the source. **(i)** only in 0.7.0
-   (reads v3→writes v4; 0.8.0 deletes it, keeps just the detector + "run 0.7.0" refusal),
-   or **(ii)** 0.8.0+ retains a *minimal* overlay-flatten-reader so leftover overlay
-   sandboxes can be flattened without 0.7.0 (more robust if 0.7.0 is unavailable, more code
-   carried). Affects retire-overlay's "zero overlay-read code in the post-removal binary."
+   overlay reader (the apply/extract path) to read the source. **(i)** present only in the
+   **migration release** (the removal release deletes it, keeping just the detector + "run
+   the migration release" refusal), or **(ii)** the **removal release** retains a *minimal*
+   overlay-flatten-reader so a user who **skipped** the migration release can still flatten
+   leftover v0 overlay sandboxes (more robust, more code carried). Affects retire-overlay's
+   "zero overlay-read code in the post-removal binary."
 9. *(plus the user's pending critiques)*
 
-## Cadence (D110)
+## Cadence (D110, fused 2026-06-30)
 
-Every migration runs against a schema **frozen in a prior shipped release**:
+The chain is the **sandbox** schema version (the library version governs *location* and
+stays put through this window). The split and the overlay flatten are **one** sandbox
+migration (`v0→v1`) — see [One shape](#one-shape-applied-per-unit) — so this is **two**
+releases, not three:
 
-The chain is now the **sandbox** schema version (library version governs *location* and
-stays put through this window). Every migration runs against a schema **frozen in a prior
-shipped release**:
+| Release | Sandbox schema | What it does | Overlay code |
+|---|---|---|---|
+| **Migration release** | v0→**v1** | **One** migration: extract any overlay upper into scratch (non-destructive read; macOS requires the sandbox *running*, DF69), split agent.json, stamp `.schema_version=1`, swap. Introduces the sandbox `.schema_version` **and** the unified build-new→repopulate→swap machinery + whole-tree lock (fixes A1/A4/DF68/C3). After it, **no overlay sandbox remains**. | yes — the flatten's `LiveContainerExtract` reader is present (its last use) |
+| **Removal release** | v1 | Overlay mount option + reader **deleted**; any sandbox still at v0 → **detect-and-refuse** (5-element message naming the migration release). | no (detector kept forever) |
 
-| Release | Sandbox schema | Migration | Overlay code | Ships |
-|---|---|---|---|---|
-| **0.6.0** | v0→**v1** | agent.json split (introduces sandbox `.schema_version`); rebuilds metadata, **moves the workdir + overlay dirs as unchanged bulk** (preserves overlay; offline, no reader) | yes (dangerous opt-in + warning) | staged 12 commits; reflink-`:copy`; **the machinery**: unified build-new→repopulate→swap + version-flip-last + whole-tree lock — the split runs through it (fixes A1/A4/DF68/C3) |
-| **0.7.0** *(migration version)* | v1→**v2** | overlay→copy flatten (agent-free, while-live per DF69) + `migrate --check` audit | yes (last release with overlay) | the overlay `LiveContainerExtract` migrator on the shared (0.6.0) machinery |
-| **0.8.0** *(post-removal)* | v2 | v1→v2 step → detect-and-refuse | no (reader deleted, **detector kept forever**) | 5-element refusal naming `yoloai-0.7.x` |
+**Why two, not three — and not one.** Split and flatten share the same shape and the same
+atomic swap, so fusing them adds **no** corruption path: the only macOS hazard (DF69's
+volatile tmpfs upper) is a *read* precondition handled by the running-check, never a write
+risk. They **cannot** collapse to one release either — the flatten needs the overlay reader
+*present*, and removing that reader (the D109 payoff — it retires the SYS_ADMIN host-escape
+surface) must be a **different** binary.
 
-**Retrofit needed before 0.6.0 ships:** the split is coded today as a *library* migration
-(`LibrarySchemaVersion=3`, `MigrateLibrary` + `MigrateAgentConfigs`). Rework it into a
-**sandbox v0→v1** migration (per the responsibility split: library = location only) before
-release — 0.6.0 isn't published yet, so there's no compat constraint; sort out the library
-version's value/meaning (location-only) as part of this.
+**Retrofit before the migration release:** the split is coded today as a *library* migration
+(`LibrarySchemaVersion=3`, `MigrateLibrary` + `MigrateAgentConfigs`). Rework it into the
+**sandbox v0→v1** migration (responsibility split: library = location only) and route it
+through the build-new→swap shape so its files + version commit atomically; sort out the
+library version's value/meaning (location-only) as part of this.
 
-**0.6.0 floor is non-negotiable:** A1/A4 mean 0.6.0's *own* split loses config on power
-loss today, so 0.6.0 must make that migration crash-safe regardless.
-
-**Scope — DECIDED: build the unified machinery in 0.6.0.** The version must commit
-atomically with the data, so the split *cannot* flip the version separately — it **must**
-run through the build-new→swap shape. So the machinery lands in 0.6.0 with the split as
-its first, benign customer (baking it before the destructive 0.7.0 flatten relies on it;
-with no-downgrade the split is the only benign exercise we get). Not extra — it's needed
-for 0.7.0 regardless, just earlier.
+**Version numbers + the shipped-split question (OPEN).** The in-flight **v0.6.0**
+(release-prep) predates this work and ships *without* the machinery, so the migration
+release is the next minor after it (likely 0.7.0, removal 0.8.0). One thing to confirm: if
+v0.6.0 already ships the **un-hardened** agent.json split (bare `os.WriteFile` — the A1/A4
+power-loss loss), that shipped bug needs a release-note call-out and the migration release
+can't re-run a step v0.6.0 already applied. If v0.6.0 does **not** run the split, the fused
+v0→v1 in the migration release is the first and only time it runs.
 
 ## The git question (answered: borrow the patterns, not the tool)
 
