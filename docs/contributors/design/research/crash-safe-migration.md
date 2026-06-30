@@ -210,11 +210,12 @@ Source: [dpkg(1)](https://man7.org/linux/man-pages/man1/dpkg.1.html),
 
 ## Mapping to the draft's open questions
 
-> ⚠️ **Primitive choice reopened (2026-06-30):** "reflink" below is one of two
-> candidates — see [reflink-vs-hardlink.md](reflink-vs-hardlink.md). For a snapshot
-> built by *our own replace-only* migration code, a **hardlink** farm may be
-> preferable (works on ext4, where reflink falls back to a full copy); reflink is
-> the safer-by-construction option. Undecided; both recorded.
+> **Primitive decided (2026-06-30):** the snapshot uses **reflink-or-full-copy**
+> (the hardlink rung was considered and dropped — see
+> [reflink-vs-hardlink.md](reflink-vs-hardlink.md)). Migrations are rare, so a
+> full-copy fallback on ext4/native-NTFS is an acceptable one-time cost, and
+> reflink-or-copy is safe-by-construction (no replace-only discipline needed) and
+> unified with the Phase-1 reflink-`:copy` primitive.
 
 **(1) Snapshot scope & cost.** Reflink the **whole data dir** (cheap on
 btrfs/XFS/APFS — only changed blocks diverge, so whole-dir is as cheap as partial

@@ -1,9 +1,10 @@
-# Cheap-copy primitives: reflink vs hardlink (undecided)
+# Cheap-copy primitives: reflink vs hardlink
 
 ABOUTME: Tradeoff + verification status for the two "build-a-tree-alongside-cheaply"
 ABOUTME: primitives — reflink (CoW clone) and hardlink — used by :copy and migration.
 
-Status: **OPEN — both recorded, neither chosen.** Cross-platform support matrix:
+Status: **DECIDED 2026-06-30 — both consumers use reflink-or-full-copy; the
+hardlink rung is dropped** (see "Decision" below). Cross-platform support matrix:
 **verified + cited 2026-06-30**; macOS on-device specifics (APFS clonefile/hardlink
 semantics, cross-volume, `F_FULLFSYNC`, DF69): **verified on-device 2026-06-30 —
 results below.** Feeds the reflink-`:copy`
@@ -12,9 +13,21 @@ work
 and the migration snapshot / build-alongside model
 ([crash-safe-migration.md](crash-safe-migration.md)).
 
-> Decision posture (per the user): do **not** pick yet. Record both primitives and
-> the tradeoff; the choice may differ **per use case** and depends on facts still
-> being verified (esp. Windows, if it ever becomes a native target).
+## Decision (2026-06-30)
+
+**Both `:copy` and the migration snapshot use reflink-or-full-copy. The hardlink
+rung is dropped.** Rationale: migrations are **rare and explicit**, so a full-copy
+fallback on a non-reflink filesystem (ext4, native NTFS) is an acceptable one-time
+cost — not worth taking on hardlink's replace-only-discipline footgun (a single
+in-place write through a shared inode would silently corrupt the pre-migration
+snapshot). Reflink-or-copy is **safe by construction** (a CoW clone or a literal
+copy is fully independent), so migration steps need no special "never write in
+place" discipline, and the clone primitive is **unified** with the Phase-1
+reflink-`:copy` work. The matrix and tradeoff below remain as the backing
+reference; hardlink stays documented but unused.
+
+The original posture (record both, pick later) is now resolved; the per-use-case
+analysis that follows is kept for the reasoning trail.
 
 ## The two primitives
 
@@ -53,16 +66,16 @@ differ:
   Hardlinks are **unsafe** here (the agent's in-place edits would write through the
   shared inode to the original). → **reflink, or full copy.** This is settled:
   Phase 1 of the retire-overlay plan is already "reflink-aware `:copy`."
-- **Migration snapshot / build-alongside** — produced by **our own code**, which we
-  can *guarantee* is replace-only (write temp, rename into place; never open an
-  existing path for write). Hardlink's one hazard is thereby removed, and hardlink
-  buys cheapness on ext4 (where reflink gives nothing). → **hardlink is viable and
-  possibly preferable**, *if* we are confident in the replace-only discipline;
-  reflink remains the safer-by-construction alternative. **This is the open
-  choice.**
+- **Migration snapshot / build-alongside** — produced by **our own code**, which
+  *could* be made replace-only, making hardlink technically viable (and cheap on
+  ext4 where reflink gives nothing). **But rejected** (see Decision above): the
+  cheapness only matters for large sandboxes on ext4/NTFS *during a migration*, and
+  migrations are rare enough that a one-time full copy there is acceptable — not
+  worth hardlink's replace-only footgun. → **reflink-or-full-copy**, same as
+  `:copy`.
 
-So a plausible end state is **reflink for `:copy`, and either primitive for
-migration** — decided once the support matrix and the macOS facts are in.
+End state: **reflink-or-full-copy for both** consumers; hardlink documented but
+unused.
 
 ## Cross-platform support matrix — verified 2026-06-30
 
