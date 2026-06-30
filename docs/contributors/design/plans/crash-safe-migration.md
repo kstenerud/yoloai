@@ -208,7 +208,11 @@ sentinel can appear *partial*). Only the live dir uses the reserved sentinel nam
    the build + repopulate are done); **fsync(dir)**. Its presence is the authoritative
    "ready to promote" marker.
 6. rename `U_^^_new` → `U`; **fsync(dir)**.
-7. **move `U_^^_orig` → `trash/`** (not delete — a manual revert path); **fsync(dir)**.
+7. **dispose of `U_^^_orig`:** the default is **move → `trash/`** (not delete — a manual revert
+   path; decision 3); **fsync(dir)**. A migrator may instead **drop** (delete) it when its
+   displaced original is redundant — **the overlay flatten does** (its `_^^_orig` is the old
+   overlay upper, whose content is already baked into the new copy and is revivable only with
+   the old binary; dropping it also keeps the agent's secret-bearing upper out of `trash/`).
 
 Step 6 commits **all of `U`'s changed files + the new version atomically** — no cross-file
 ordering to coordinate (the C3 class of bug is structurally impossible).
@@ -226,8 +230,10 @@ full-copy on ext4) — a conscious trade.
 
 The rigor a WAL needed doesn't vanish; it moves into this state machine, which must be
 **exhaustively enumerated** + covered by **crash-injection tests at every rename
-boundary**. The displaced `*_^^_orig` is moved to **`trash/`** (decision 3 — no automated
-downgrade, but the prior schema's data is preserved for a manual, LLM-assisted revert).
+boundary**. By default the displaced `*_^^_orig` is moved to **`trash/`** (decision 3 — no
+automated downgrade, but the prior schema's data is preserved for a manual, LLM-assisted
+revert); the **overlay flatten opts out and drops it** (its old upper is redundant with the new
+copy — see step 7).
 
 ## Source consistency (migrator concern; blessed strategies)
 
@@ -294,9 +300,10 @@ A small, shared set of strategies a migrator declares — not per-migrator hand-
   - **macOS-stopped — already lost (DF69).** The tmpfs upper vanished at stop; downgrade-and-
     start yields an *empty* upper, so there is **no** recovery path — the plan says so plainly.
   - **Either, if the user declines/ignores** — proceed is a **destructive** op that flattens the
-    original workdir and **abandons** the agent's overlay changes (macOS: already gone; Linux:
-    the host-side upper is set aside in `trash/`, manually recoverable). Never a silent
-    empty-flatten.
+    original workdir and **abandons** the agent's overlay changes — **lost** (the user consented
+    by proceeding): macOS was already gone, and on Linux the displaced upper is **dropped**, not
+    trashed (consistent with the flatten's step-7 drop; we don't stash secret-bearing deltas in
+    `trash/`). Never a silent empty-flatten.
 
   This is the resolution of the **Op-F1 gate-deadlock**: the migration gate blocks `start`, and
   the new binary can't mount overlay anyway, so a stopped overlay sandbox genuinely **cannot** be
@@ -324,10 +331,13 @@ A small, shared set of strategies a migrator declares — not per-migrator hand-
 
 There is no *automated* downgrade: no compat window, no reversible step, and once a unit's
 `.schema_version` advances an older binary hard-errors (`RealmStatus`: "newer than this
-build supports"). **But the displaced `*_^^_orig` is moved to `trash/`, not deleted** — so
-the prior schema's complete data survives (until trash GC) and a desperate user can
+build supports"). **By default the displaced `*_^^_orig` is moved to `trash/`, not deleted** —
+so the prior schema's complete data survives (until trash GC) and a desperate user can
 manually revert (restore from trash + run the older binary), LLM-assisted. Strictly better
-than gone-forever, without building downgrade tooling.
+than gone-forever, without building downgrade tooling. **Exception — the overlay flatten drops
+its `_^^_orig`** (the old upper is redundant with the new copy and revivable only with the old
+binary; dropping also avoids stashing the agent's secret-bearing delta in `trash/`), so a
+flattened overlay sandbox has **no** trash revert generation — acceptable given the redundancy.
 The escape from a *persistent forward bug* is **quarantine** (per-sandbox: set the bad
 sandbox aside, its data preserved in `trash/`), backed by the fact that the original is
 untouched until each commit (a pre-commit failure leaves the old data fully intact at

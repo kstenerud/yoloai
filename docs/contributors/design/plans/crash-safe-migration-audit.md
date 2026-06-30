@@ -127,9 +127,18 @@ real, must be handled in the build · *open-decision* = a flagged plan decision.
 - **A17 — persistent-vs-transient classification.** Bound forward retries with a
   recorded attempt count; require explicit `--rollback`; never auto-rollback over
   committed sandboxes. **still-live** (was OQ2).
-- **A18 — stale backup/workdir GC.** **resolved** — scratch dirs are disposable (tossed
-  on every invocation when the lock is free); the transient `*_^^_orig` is deleted at
-  the end of each promotion. No retained generation to GC (no downgrade).
+- **A18 — stale backup/workdir GC.** **re-dispositioned (re-audit) — the earlier "deleted, no
+  retained generation" was wrong.** Scratch dirs are disposable (tossed on every invocation when
+  the lock is free) — that part stands. But by **decision 3** the displaced `*_^^_orig` is
+  **moved to `trash/`, not deleted** (the manual revert path), so ordinary migrations **do**
+  leave a retained generation in `trash/` until trash GC. Its disk/GC cost is real but bounded:
+  `_^^_orig` holds only the **old versions of changed items** (the unchanged bulk is *moved*, not
+  copied — never duplicated), so for a metadata migration it's tiny. **The overlay flatten is the
+  exception that matches A18's original wording:** it **drops** its `_^^_orig` (the old overlay
+  upper — redundant with the new copy, revivable only with the old binary, and secret-bearing,
+  so kept out of `trash/`). Net: general default = trash-retain (small); flatten = drop. The
+  prune-gating wrinkle (a disk-full mid-run can't run `prune`, which is gated) is a known minor
+  residual, not worth special handling at current scale.
 
 ## Summary
 

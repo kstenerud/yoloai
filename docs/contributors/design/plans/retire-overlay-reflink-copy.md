@@ -209,8 +209,9 @@ dry-run plan enumerates affected **stopped** overlay sandboxes and **branches by
 **Linux-stopped** is recoverable (upper persists host-side) → downgrade, start it, re-upgrade,
 re-run (the container survives the binary swap); **macOS-stopped** is **already lost** (DF69 —
 tmpfs upper gone at stop, so downgrade-and-start can't help). Either way the user may instead
-**proceed** — destructive, abandons the overlay changes (macOS: already gone; Linux: host-side
-upper set aside in `trash/`, manually recoverable). The gate-deadlock (the gate blocks `start`
+**proceed** — destructive, abandons the overlay changes — **lost** (macOS: already gone; Linux:
+the displaced upper is **dropped**, not trashed — the flatten doesn't stash secret-bearing
+deltas). The gate-deadlock (the gate blocks `start`
 post-upgrade) is *why* this is a **pre-upgrade** audit, not an in-migration recovery. **Security claim restated:** the host-escape vector was an *untrusted
 agent* in a `CAP_SYS_ADMIN` overlay container; the new binary has **no overlay mount
 code at all** — it cannot mount overlayfs, it only *reads* (exec `git`) from a
