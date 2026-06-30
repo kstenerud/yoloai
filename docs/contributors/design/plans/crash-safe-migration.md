@@ -135,15 +135,25 @@ trees as a repo reintroduces cross-system atomicity. The contract-fit primitives
 are `flock` + an intentions journal + a filesystem CoW snapshot — purpose-built,
 byte-exact, metadata-preserving.
 
-## Research (mine prior art before building — this is a solved problem)
+## Research (done — see [research/crash-safe-migration.md](../research/crash-safe-migration.md))
 
-- **SQLite** rollback-journal and WAL modes (the canonical small-scale crash-safe
-  journal designs).
-- **Database recovery / ARIES** — redo + undo logging, checkpointing.
-- **Package/system transactions:** dpkg/rpm transaction handling; **Nix** atomic
-  profile switch (symlink swap) + generations/rollback; **OSTree** atomic
-  deployments + rollback.
-- **POSIX atomic-rename** idioms (write-temp-then-rename as the commit primitive).
+Verified 2026-06-30 across SQLite (rollback-journal/WAL), ARIES, POSIX
+atomic-rename, Nix/OSTree, and dpkg/rpm. Headline findings that feed back into
+this design (detail + sources in the research file):
+
+- **Build-alongside + atomic pointer-swap beats mutate-in-place + restore-backup**
+  (Nix/OSTree unanimous). The pre-migration snapshot should *be* the retained old
+  generation; rollback = an O(1) pointer flip, not a copy-back. → revisit §3/§4.
+- **Forward = resume-first; rollback = wholesale snapshot-restore only**, never
+  reverse-replay (dpkg roll-forward; rpm *shipped* reverse-replay rollback and
+  **deleted it as "too unreliable"**). → confirms/sharpens §4.
+- **Journal = coarse per-sandbox state, not a fine WAL** (dpkg state-machine;
+  ARIES's CLRs exist only because a DBMS lacks our global snapshot). The snapshot
+  is the undo. → simplifies §2.
+- **WAL ordering is the one non-negotiable**; recovery validity = sentinel-after-
+  body + per-record checksum (SQLite); commit idiom = write-temp-same-dir →
+  fsync → rename → fsync(dir), macOS `F_FULLFSYNC`. → concretizes §2/§3.
+- **OQ4:** lean hard-refuse on network FS rather than "document the residual."
 
 ## Open questions (for the critique cycle)
 
