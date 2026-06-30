@@ -197,12 +197,24 @@ A small, shared set of strategies a migrator declares — not per-migrator hand-
   reading. **Quiescence comes from `DetectStatus == Stopped`, not the flock** (A5:
   the per-sandbox flock is released once the container launches, so a live agent
   holds no lock). Per-sandbox granularity means quiescing **one** sandbox at a time.
-- `LiveContainerExtract` — for overlay: **read** the upper into scratch (the source is
-  never modified — reading can't destroy it), via an agent-free container running the
-  existing `apply` to materialize the flatten to host staging, fsync, tear down. Once
-  extracted, the overlay sandbox migrates *exactly* like any other: split agent.json,
-  stamp, swap. The extract is just how Promotion step 1 (build the changed files in
-  scratch) is populated — **no special destructive path**.
+- `LiveContainerExtract` — for overlay, the flatten is a **recombination of two existing
+  operations**, not a new tree-materializer (the existing `apply` produces a *patch
+  against the original workdir*, not a flat tree, so it can't be used as-is):
+  1. **seed** a copy dir in scratch from the **lower** (the original read-only workdir) —
+     reuse copy-mode seeding (reflink-cheap on CoW); its git baseline *is* the overlay
+     baseline state.
+  2. **reuse the existing overlay patch path** (`generateOverlayPatchForContext` →
+     `git add -A` + `git diff --binary <baselineSHA>` inside the **running** agent-free
+     container; `copyflow/apply.go` / `apply_overlay.go`), **retargeted** to `git apply`
+     onto the scratch copy instead of the live workdir — the agent's changes land on top
+     and stay visible as the **same pending diff** the overlay showed.
+  3. fsync, tear down the container.
+  Reading is **non-destructive** (the source is never modified). Net-new is wiring (the
+  apply target param) + the precondition check; the heavy lifting (in-container patch-gen,
+  host `git apply`, reflink seed) already exists. Once seeded, the overlay sandbox migrates
+  *exactly* like any other: split agent.json, stamp, swap — the extract is just how
+  Promotion step 1 (build the changed files in scratch) is populated, **no special
+  destructive path**.
 - **Source-readable precondition (A2, mandatory):** on **macOS** the overlay upper is
   tmpfs-only, so it is readable **only while the container runs** (DF69, confirmed). The
   migrator **requires the sandbox running** before extracting; a *stopped* macOS overlay
