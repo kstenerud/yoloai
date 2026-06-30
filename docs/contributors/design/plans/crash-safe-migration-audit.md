@@ -30,8 +30,9 @@ real, must be handled in the build · *open-decision* = a flagged plan decision.
   + per-sandbox-version-as-truth + fsync barrier.
 - **R1 — downgrade ratchet.** *[verified]* `RealmStatus` hard-errors `version > current`
   (`schema.go:91`); stamp-forward + GC-on-commit = no way back, even for a
-  non-migration bug. **open-decision 3** (retain backups + reversible step vs document
-  one-way). Severity CRITICAL/HIGH (architectural).
+  non-migration bug. **DECIDED: no downgrade** (one-way; escape from a persistent
+  forward bug = per-sandbox quarantine + original-intact-until-commit; "back up before
+  upgrading"). Severity CRITICAL/HIGH (architectural).
 - **A5 — lock ≠ quiescence.** *[verified]* `Start` releases the per-sandbox flock once
   the container launches (`start.go:61-65`); a detached agent writes lock-free. **still-live
   — quiesce via `DetectStatus == Stopped`**, not the flock. Severity HIGH.
@@ -71,12 +72,13 @@ real, must be handled in the build · *open-decision* = a flagged plan decision.
 ## MEDIUM (operational)
 
 - **A10 — gate ordering / migration-running gate.** A running migration tells other
-  commands to "run system migrate." **open-decision 5** — wire a **live-flock**
-  try-acquire (not a presence check) ahead of the needs-migration branch.
+  commands to "run system migrate." **DECIDED: one whole-tree live flock** held for the
+  run (every other command refuses); released on death, so no permanent lock. Post-crash
+  blocking comes from the live-dir sentinel + stamp gate, not the lock.
 - **A11 — network / synced-local FS defeats flock.** Dropbox/iCloud is *local* yet
   flock is meaningless across the sync → two hosts run concurrent migrations.
-  **open-decision 4** — hard-refuse on detected network FS with a spelled-out escape;
-  host+boot-id in the run marker.
+  **DECIDED: hard-refuse + single-FS** — migration requires the whole realm + scratch on
+  one local filesystem (also guarantees atomic `mv`); refusal names the relocate escape.
 - **A12 — one corrupt sandbox bricks the whole install** (stamp-last is all-or-nothing).
   **open-decision 1** — quarantine-and-continue (recommended) vs abort.
 - **A13 — realm-step refusal message.** The post-removal binary's v3→v4 default must
@@ -93,15 +95,19 @@ real, must be handled in the build · *open-decision* = a flagged plan decision.
 - **A17 — persistent-vs-transient classification.** Bound forward retries with a
   recorded attempt count; require explicit `--rollback`; never auto-rollback over
   committed sandboxes. **still-live** (was OQ2).
-- **A18 — stale backup/workdir GC.** Tag `migration-<id>`/`*.old-<id>` with the build
-  id; sweep stale ones whose target ≤ current stamp. **still-live**.
+- **A18 — stale backup/workdir GC.** **resolved** — scratch dirs are disposable (tossed
+  on every invocation when the lock is free); the transient `*_^^_orig` is deleted at
+  the end of each promotion. No retained generation to GC (no downgrade).
 
 ## Summary
 
 The spine **dissolves** the most error-prone pieces — A8 (WAL), DF68, A6, A9 — and
 **reduces** A7 (per-sandbox staging shrinks disk + quiescence to one sandbox). The
 **still-live** core is the durable primitive (A1), the macOS overlay destroyed-source
-refusal (A2), quiescence-via-status (A5), and the operational set (A10–A18). The
-**open decisions** (1 bad-sandbox, 3 downgrade-ratchet, 4 network-FS, 5 gate-ordering)
-are surfaced in the plan for the critique cycle. R1 (downgrade) is the one
-architectural ratchet the copy-and-swap model does **not** fix on its own.
+refusal (A2), quiescence-via-status (A5 — note the whole-tree flock blocks other yoloai
+*processes*, but the in-container agent isn't one, so the migrated sandbox still needs
+`DetectStatus == Stopped`), and the operational set (A13–A17). The **decisions are now
+made** (D110 + this round): 1 quarantine-or-abort, 3 **no downgrade** (one-way), 4
+hard-refuse + single-FS, 5 whole-tree live flock, A18 scratch-disposable. R1 is accepted
+as one-way — the escape from a persistent forward bug is per-sandbox quarantine, not
+rollback.

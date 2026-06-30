@@ -51,15 +51,17 @@ one-generation backup. On failure it discards the workdir; the original is untou
 it retries. There is **no separate write-ahead journal** — progress lives in the
 per-unit version, and the commit state lives in the filesystem naming convention.
 
-### Staging workdir
+### Staging workdir (disposable, never resumed)
 
-At the top of each realm, a discrete migration stages into `migration-<build-id>/`
-(keyed to the binary's build id). It is the migrator's scratch space; its internal
-structure is the migrator's concern. The machinery cares only that it becomes the
-unit's replacement. A *different* build id → discard-and-restart (never resume
-another migrator's partial staging — the source is intact, so a clean restart is
-safe). A `target-version` marker inside the workdir records the intended end-state
-so recovery doesn't have to trust the binary. Orphaned `migration-*` dirs are GC'd.
+At the top of each realm, a discrete migration stages into `migration-<build-id>/` —
+the migrator's scratch space, its internal structure the migrator's concern. **Scratch
+is disposable and never resumed:** any yoloai invocation (when no migration holds the
+lock) throws out a leftover scratch dir — a crashed build is garbage, rebuilt fresh,
+never recovered. So the *build* phase (the complex part — containers, extract) needs no
+crash-recovery; **only the live-dir *rename* (promotion) is resumable.** A scratch dir
+is **not** a reason to block other functions. The build-id is for hygiene/debugging,
+not resume. Scratch must be on the **same filesystem** as the live dir (decision 4) so
+the move-in is atomic.
 
 ### Two granularities
 
@@ -92,8 +94,8 @@ commit + durable writes.
   the per-sandbox workdir with a faithful reflink/copy of the source (so unchanged
   data survives untouched — correct-by-default, with special-file + disk-preflight
   handling written *once*, not per migrator); the **durable-atomic-rename** primitive;
-  the **resumable promotion** (naming convention) and its recovery; backup retention
-  + GC; version-check gating; the run lock.
+  the **resumable promotion** (naming convention) and its recovery; scratch disposal +
+  transient-`*_^^_orig` cleanup; version-check gating; the **whole-tree run lock**.
 - **Each migrator owns:** how to transform its unit inside the workdir; and **source
   consistency** — starting/stopping containers, avoiding torn reads, and **detecting
   and refusing** an already-destroyed source (A2). It *declares* which blessed
@@ -151,7 +153,8 @@ ext4) — a conscious trade.
 
 The rigor a WAL needed doesn't vanish; it moves into these state machines, which must
 be **exhaustively enumerated** and covered by **crash-injection tests at every rename
-boundary**. The displaced `*_^^_orig` is the one-generation backup.
+boundary**. The displaced `*_^^_orig` is **transient** (deleted as the final step) —
+not a retained backup; migration is one-way (see No downgrade).
 
 ## Source consistency (migrator concern; blessed strategies)
 
@@ -169,13 +172,46 @@ A small, shared set of strategies a migrator declares — not per-migrator hand-
   migrator must **detect and refuse** with a loud message — it cannot mitigate a
   source that no longer exists.
 
-## Backup & downgrade
+## No downgrade (decision 3)
 
-The displaced `*.old-<build-id>` *is* the backup; retain it one generation (retire on
-the next migration). Per-sandbox backups give per-sandbox recovery *during* a run.
-**R1 (realm downgrade ratchet) is not solved by this** — once the realm stamp flips,
-an older binary hard-errors (`RealmStatus`: "newer than this build supports"). See
-open decision 3.
+Migration is **one-way.** The `*_^^_orig` displaced during a promotion is **transient**
+(deleted as the final step once the new unit is live) — *not* a retained backup; there
+is no compat window and no reversible realm step. Once the realm stamp flips, an older
+binary hard-errors (`RealmStatus`: "newer than this build supports") — accepted (R1).
+The escape from a *persistent forward bug* is **quarantine** (per-sandbox: set the bad
+sandbox aside, its data preserved in `trash/`), backed by the fact that the original is
+untouched until each commit (a pre-commit failure leaves the old data fully intact at
+the old stamp). A persistent *realm-structural* bug is fix-forward only — acceptable
+because those are simple metadata moves. Document prominently: **migration is one-way;
+back up `~/.yoloai` before upgrading.**
+
+## Single-filesystem requirement (decision 4)
+
+Migration **hard-refuses** unless the entire realm *and* its scratch dir sit on **one
+local filesystem**, so every `mv`/rename is atomic (no `EXDEV`, no copy+delete that can
+leave a partial sentinel dir). This subsumes the network-FS refusal (flock is unreliable
+on NFS/SMB and meaningless across a synced root like Dropbox/iCloud) and the
+spanning-mounts case. The refusal names the escape (relocate `~/.yoloai` onto a single
+local FS and retry).
+
+## Exclusivity & crash-recovery gating (decision 5)
+
+**One live `flock` over the entire `$YOLOAI_HOME`**, held by `system migrate` for the
+whole run — even though a given migration touches only part of the tree. While held,
+**every other yoloai command refuses** ("migration in progress"); a second `migrate`
+refuses too. It is a *live* flock (released on process death), so a crash never leaves a
+permanent lock. After a crash (flock released), two persistent signals gate recovery:
+
+- **Scratch dir present** → disposable; toss it; **does not block** anything.
+- **Half-finished rename in a live dir** (a `*_^^_new`/`*_^^_orig` sentinel) → a
+  promotion was interrupted → **block everything except `migrate`**, which completes it
+  (the dirs involved are complete, so it's only renames + a delete). An **independent**
+  guard — belt-and-suspenders with the stamp gate (a sentinel implies the stamp hasn't
+  flipped, but the physical presence of an in-flight rename must block on its own).
+- **Stamp < current** (the existing gate) → route to `migrate`.
+
+Migrate's recovery order: toss scratch → complete any in-flight live-dir renames →
+resume the run (rescan per-unit versions, migrate stragglers).
 
 ## Open decisions (critique targets)
 
@@ -190,17 +226,11 @@ open decision 3.
 2. **Ordering & realm-structural cost.** A run is an *ordered* sequence; a realm
    relocation that moves sandboxes must run before per-sandbox passes that iterate
    them. Realm-structural migrations **move/rename**, never copy sandbox bulk.
-3. **R1 downgrade.** Retain backups one generation + a reversible realm step (a
-   compat window), *or* accept and document "migration is one-way." Decide, don't
-   inherit by accident.
-4. **Network / synced FS (A11, was OQ4).** Lean **hard-refuse** on detected network
-   FS *with a spelled-out escape* (relocate / `--data-dir`); detect common synced
-   roots (Dropbox/iCloud — flock is meaningless across the sync); stamp the run with
-   a host+boot id so a second host is refused.
-5. **Gate ordering & live lock (A10/L2).** Wire a **live-flock** try-acquire (not a
-   presence/file check, so a crash never leaves a permanent refusal) into the gate,
-   evaluated **before** the needs-migration message (else a running migration tells
-   other commands to "run system migrate").
+3. **R1 downgrade — DECIDED: no downgrade.** See [No downgrade](#no-downgrade-decision-3).
+4. **Network / synced FS — DECIDED: hard-refuse + single-FS.** See [Single-filesystem
+   requirement](#single-filesystem-requirement-decision-4).
+5. **Exclusivity / gate — DECIDED: whole-tree live flock.** See [Exclusivity &
+   crash-recovery gating](#exclusivity--crash-recovery-gating-decision-5).
 6. *(plus the user's pending critiques)*
 
 ## Cadence (D110)
