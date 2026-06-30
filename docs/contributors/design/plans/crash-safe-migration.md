@@ -71,11 +71,15 @@ rebuilt in scratch; unchanged bulk is **moved** (not copied) from the displaced 
 the swap commits **all of the unit's changed files atomically** (the key property — a
 migration touching many files needs no per-file ordering; see Promotion). The realm-vs-
 sandbox difference is only the *unit*: a realm is **one** unit (all-or-nothing);
-sandboxes are **many** units done **one at a time** (each committed independently; a
-failure is quarantine-or-abort, decision 1). Per-sandbox record version is the truth; the
-`.schema-version` stamp flips last — for a realm migration it rides *inside* the swapped
-realm; for a per-sandbox run it's a separate file-granularity swap once all sandboxes are
-done.
+sandboxes are **many**, processed **one at a time** (a failure is quarantine-or-abort,
+decision 1). **The `.schema-version` lives inside the unit and commits atomically with
+the swap — never a separate flip.** Since a schema change is *new data + new version*
+together, **every migration changes ≥2 files** (no single-file migration). During
+promotion `_^^_orig` keeps the **old** version (the source whose version derives the
+move-list) and `_^^_new` carries the **new** version; recovery reads the live realm's
+version to place itself in the chain (vN→vN+1) and schedule the next step. (Whether a
+version step is one whole-realm swap or per-sandbox swaps with the realm version derived
+is **open decision 7**.)
 
 ### The truth invariant (the DF68 fix)
 
@@ -124,10 +128,10 @@ plain process death (kill/crash/Ctrl-C) keeps the page cache, so the scheme is a
 safe against it *without* fsync. Recommendation: **keep them** — irreplaceable data, rare
 op, a handful of fsyncs per unit. (Alternative: process-death-only — simpler, weaker.)
 
-**C3/A4 (the existing split losing data)** is fixed by construction when the split runs
-through the unified shape (all its files commit atomically at the swap); or, if the split
-stays file-granularity in 0.6.0, by atomic-durable + values-first ordering (siblings
-before the slimmed `environment.json`, stamp-last) — the 0.6.0 scope choice in Cadence.
+**C3/A4 (the existing split losing data) is fixed by construction:** the split runs
+through the unified shape, so its files *and* the new version commit atomically at the
+swap — the cross-file ordering C3 got wrong no longer exists. (The version must be atomic
+with the data, so the lighter file-granularity path is **not** an option — see Cadence.)
 Normal-operation writes outside migration are a separate robustness question.
 
 ## Promotion: build-new → repopulate → swap (commit state in filenames)
@@ -163,10 +167,12 @@ gutting `_^^_orig` (clean abort is only available before step 4). If a migration
 alternative that keeps `U` whole until the swap is to **reflink** the kept items into
 `_^^_new` rather than move (cheap on CoW, full-copy on ext4) — a conscious trade.
 
-**File-granularity (degenerate case).** For a single-file change — the `.schema-version`
-stamp, or any lone file — the same shape with no move-list collapses to `write f.tmp →
-fsync → rename f.tmp→f → fsync(dir)`. This is the only place a "per-file atomic write"
-appears; it's just the file-sized swap.
+**The version rides inside the swap (no separate flip, no single-file migration).** A
+schema change is the new `.schema-version` **plus** the changed data, committed together
+at step 5 — so there is no file-granularity migration. `_^^_orig` holds the **old**
+version (its value derives the move-list); `_^^_new` holds the **new**; the swap is the
+atomic vN→vN+1 transition, and recovery reads the live realm's version to know its place
+in the chain and schedule the next step.
 
 The rigor a WAL needed doesn't vanish; it moves into this state machine, which must be
 **exhaustively enumerated** + covered by **crash-injection tests at every rename
@@ -248,7 +254,12 @@ resume the run (rescan per-unit versions, migrate stragglers).
    requirement](#single-filesystem-requirement-decision-4).
 5. **Exclusivity / gate — DECIDED: whole-tree live flock.** See [Exclusivity &
    crash-recovery gating](#exclusivity--crash-recovery-gating-decision-5).
-6. *(plus the user's pending critiques)*
+7. **Unit granularity of a version step (OPEN).** A version transition is realm-versioned
+   and atomic. Is the unit the **whole realm** (one swap; build into a *resumable*
+   `library_^^_new` live sentinel so expensive flattens survive a crash; per-sandbox
+   record versions track build progress) — or **per-sandbox swaps** with the realm version
+   **derived** from "all sandboxes at vN+1"? Leaning whole-realm + resumable `_^^_new`.
+8. *(plus the user's pending critiques)*
 
 ## Cadence (D110)
 
@@ -257,21 +268,18 @@ Every migration runs against a schema **frozen in a prior shipped release**:
 | Release | Schema | Migration | Overlay code | Ships |
 |---|---|---|---|---|
 | **0.6.0** | v2→**v3** (freeze) | agent.json split, made crash-safe | yes (dangerous opt-in + warning) | staged 12 commits; reflink-`:copy`; **the floor**: the unified build-new→repopulate→swap machinery (file + dir granularity) + stamp-last (move `WriteSchemaVersion` out of `MigrateLibrary` into `MigrateDataDir`) + whole-tree lock — the split runs through it (fixes A1/A4/DF68/C3). *(Scope choice below.)* |
-| **0.7.0** *(migration version)* | v3→**v4** | overlay→copy flatten (per-sandbox, agent-free, while-live per DF69) + `migrate --check` audit | yes (last release with overlay) | the overlay `LiveContainerExtract` migrator on the shared machinery (+ the machinery itself, if deferred here per the scope choice) |
+| **0.7.0** *(migration version)* | v3→**v4** | overlay→copy flatten (agent-free, while-live per DF69) + `migrate --check` audit | yes (last release with overlay) | the overlay `LiveContainerExtract` migrator on the shared (0.6.0) machinery |
 | **0.8.0** *(post-removal)* | v4 | v3→v4 step → detect-and-refuse | no (reader deleted, **detector kept forever**) | 5-element refusal naming `yoloai-0.7.x` |
 
 **0.6.0 floor is non-negotiable:** A1/A4 mean 0.6.0's *own* v2→v3 split loses config on
 power loss today, so 0.6.0 must make that migration crash-safe regardless.
 
-**Scope choice (lean: build the unified machinery in 0.6.0).** Since the shape is now
-uniform, 0.6.0 can either **(a)** build the build-new→repopulate→swap machinery and run
-the split through it — the split commits its files atomically (C3 gone *structurally*)
-and the machinery is **baked on a benign migration** before the destructive 0.7.0
-flatten relies on it (and with no-downgrade there's no rollback to bake elsewhere, so the
-split is the only benign exercise we get) — or **(b)** keep the split on the lighter
-file-granularity + values-first ordering and land the machinery in 0.7.0. (a) is more
-0.6.0 code, but the machinery is needed for 0.7.0 regardless, so it's *earlier*, not
-*extra*. **Recommended: (a).**
+**Scope — DECIDED: build the unified machinery in 0.6.0.** The version must commit
+atomically with the data, so the split *cannot* flip the version separately — it **must**
+run through the build-new→swap shape. So the machinery lands in 0.6.0 with the split as
+its first, benign customer (baking it before the destructive 0.7.0 flatten relies on it;
+with no-downgrade the split is the only benign exercise we get). Not extra — it's needed
+for 0.7.0 regardless, just earlier.
 
 ## The git question (answered: borrow the patterns, not the tool)
 

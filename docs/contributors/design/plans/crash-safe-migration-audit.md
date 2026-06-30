@@ -18,15 +18,15 @@ real, must be handled in the build · *open-decision* = a flagged plan decision.
 ## Verified-in-code (the foundation)
 
 - **A1 — no durable/atomic write primitive.** *[verified]* Every commit/stamp is bare
-  `os.WriteFile` (`fileutil.go:144`). **still-live, reframed — one shape, two
-  granularities.** The build-new→swap commit gives atomicity (incl. **atomic multi-file
-  commit**); fsync at the boundaries gives durability (fsync built contents before move-in
-  so `_^^_new` is never durable-but-empty; fsync(dir) after each rename; `F_FULLFSYNC` on
-  darwin). The **file-granularity** case (the stamp / any lone file) is the only place a
-  "per-file atomic write" appears. fsync is the price of power-loss durability (recommended;
-  process-death alone needs none). C3/A4 fixed *structurally* if the split runs through the
-  shape, or by atomic-durable + values-first ordering if file-granularity (0.6.0 scope
-  choice). Severity CRITICAL.
+  `os.WriteFile` (`fileutil.go:144`). **reframed — no per-file primitive survives.** The
+  commit is the dir-rename **swap** (atomic, and it carries the new `.schema-version`
+  inside the unit — the version is never flipped separately, every migration changes ≥2
+  files). Durability is a **bounded fsync discipline**: fsync built contents before move-in
+  (so `_^^_new` is never durable-but-empty), fsync(dir) after each rename, `F_FULLFSYNC` on
+  darwin (the price of power-loss safety; process-death alone needs none). C3/A4 is fixed
+  **structurally** — the split runs through the swap, so its files + version commit
+  atomically; the lighter file-granularity path is *forbidden* by version-atomicity, which
+  also forces the 0.6.0 scope to "build the machinery in 0.6.0." Severity CRITICAL.
 - **A4/C3 — existing agent.json split is power-loss-lossy.** *[verified]* Values-first
   in program order but **not fsynced** (`migrate_agentcfg.go:87-110`); under power
   loss the slimmed `environment.json` can outrace its `agent.json` sibling. **still-live
