@@ -23,6 +23,15 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 
 ## Findings
 
+### DF68 — `system migrate` is not crash-safe (stamp-before-pass; no journal/atomic-commit/lock/rollback)
+
+- **Discovered:** 2026-06-30 · **Workstream:** overlay-retirement migration design (the multi-step overlay→copy flatten forced the question)
+- **Severity:** MEDIUM-HIGH (a crash/kill during `system migrate` can leave the data dir inconsistent — a green stamp over half-migrated data, or a partially-transformed sandbox — with no automated recovery and possible data loss; a *persistent* migration bug can brick the user with no escape)
+- **Disposition:** PARKED — **initial design written** ([plans/crash-safe-migration.md](plans/crash-safe-migration.md)), to be critiqued + refined before build.
+- **Description:** `System.MigrateDataDir` calls `config.MigrateLibrary` — which `WriteSchemaVersion`-stamps the realm to current — **before** running the per-sandbox pass `orchestrator.MigrateAgentConfigs`. A crash mid-pass leaves `.schema-version == current` (so `RealmStatus` → `LayoutOK`, the gate sees nothing to do) over un-split v2 records that then **balk on load** — recoverable only if the user knows to re-run, relying entirely on idempotency. More fundamentally there is **no write-ahead journal, no per-sandbox atomic commit, no exclusive migration lock, and no rollback**, so a multi-step *destructive* transform (the planned overlay→copy flatten swaps two directory layouts in one path — `OverlayWorkBaseDir == WorkDir` — and flips `Mode` in a separate file) cannot be made crash-recoverable by inspection alone. And a deterministic crash bug in forward-migration code would loop forever with no escape.
+- **Trigger:** build the crash-safe migration substrate (exclusive lock + WAL journal + non-destructive per-sandbox atomic commit + pre-migration snapshot/rollback + run-level stamp-last), per the plan; it is the prerequisite (step 0) for the overlay retirement (D109). Retrofit the agent.json split under it.
+- **Pointer:** `system.go` (`MigrateDataDir`), `internal/config/schema.go` (`MigrateLibrary` → `WriteSchemaVersion`), `internal/orchestrator/migrate_agentcfg.go`; design: [plans/crash-safe-migration.md](plans/crash-safe-migration.md).
+
 ### DF67 — Copy-mode work-copy host-git still runs on seatbelt + the broken-metadata probe (DF66 residuals)
 
 - **Discovered:** 2026-06-29 · **Workstream:** DF66 (C1) implementation — two paths left running host git on the agent-controlled work copy

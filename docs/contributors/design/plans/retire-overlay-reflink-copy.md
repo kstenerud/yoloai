@@ -153,7 +153,19 @@ Mechanical but wide. Remove, don't gate:
   ROADMAP.md, the root CLAUDE.md `:overlay` bullet, and `docs/contributors/...`
   references.
 
-**Migration of existing on-disk `:overlay` sandboxes (decision point — see Open
+**Migration substrate (prerequisite — step 0).** The overlay→copy flatten is the
+first *multi-step destructive* migration (it swaps two directory layouts in one
+path and flips `Mode` in a separate file), so it cannot be made crash-safe by
+idempotency alone. It is built on the crash-safe migration substrate (exclusive
+lock + write-ahead journal + per-sandbox atomic commit + snapshot rollback +
+run-level stamp-last) designed in
+[crash-safe-migration.md](crash-safe-migration.md) (DF68). That substrate lands
+first and retro-hardens the agent.json split. The retirement runs as the library
+realm `v3→v4` step (in `System.MigrateDataDir`), reading the single normalized v3
+`environment.json` shape; the realm stamp advances to 4 only after every overlay
+sandbox is resolved, so the existing fail-fast gate blocks the user until done.
+
+**Recovery of existing on-disk `:overlay` sandboxes (decision point — see Open
 questions).** Per the versioning philosophy (dumb checker; explicit, fail-fast
 `system migrate` owns recognition/validation), the recommended posture is:
 `system migrate` **detects** any sandbox with `Mode == overlay` and **refuses
