@@ -67,11 +67,20 @@ real, must be handled in the build · *open-decision* = a flagged plan decision.
 
 ## HIGH
 
-- **A6 — CLI-realm relocation outside the substrate.** *[verified misclassification in
-  `clischema.go`]* `MigrateCLI`'s `os.Rename` layout swap wasn't covered by the
-  substrate, and a crashed re-run green-stamps over a half-moved layout. **dissolved** —
-  it becomes a discrete realm-structural migration under the same machinery
-  (resumable rename, stamp-in-payload).
+- **A6 — CLI-realm flat→namespaced relocation isn't crash-resumable.** *[verified in
+  `clischema.go`]* `MigrateCLI`'s `os.Rename` layout swap stamps only as its **terminal**
+  step (`CreateFreshCLI` after `relocateFlatToNamespaced`). A crash **mid-move** leaves
+  `TOP/library` created but the move unfinished; a re-run sees `library/` exists →
+  `isFlatV0Install` returns false → it **green-stamps cli as done without finishing the
+  move** (`clischema.go:96-104`). **sealed as-is** — this is the existing shipped
+  flat→namespaced migration; like the agent.json split it is **not** reworked into the new
+  machinery here (the ship has sailed). **Overlay interaction (new):** a half-relocated
+  install can strand `:overlay` sandboxes at top-level `sandboxes/`, where the `v3→v4`
+  flatten's sandboxes-root fallback (`library/sandboxes/` **else** top-level — it never
+  consults *both*) won't look → silently skipped. This is A6's pre-existing exposure
+  surfacing through overlay, **not** a new flatten defect: the flatten covers the
+  *un-migrated* (look top-level) and *fully-migrated* (look library) cases by design, not the
+  *half-relocated* one. Severity HIGH (crash/power-loss-only, rare).
 - **A7 — snapshot durability / completeness / disk / special-files.** Four-way
   convergence: fsync the seed/staging tree + a manifest before trusting it; `statvfs`
   pre-flight (full-copy doubles disk); `io.Copy` **can't copy overlay whiteout
@@ -124,8 +133,12 @@ real, must be handled in the build · *open-decision* = a flagged plan decision.
 
 ## Summary
 
-The spine **dissolves** the most error-prone pieces — A8 (WAL), DF68, A6, A9 — and
-**reduces** A7 (per-sandbox staging shrinks disk + quiescence to one sandbox). The
+The spine **dissolves** the most error-prone pieces — A8 (WAL), DF68, A9 — and
+**reduces** A7 (per-sandbox staging shrinks disk + quiescence to one sandbox). **A6 is
+re-dispositioned to sealed-as-is** (the shipped flat→namespaced relocation is not reworked
+here; it keeps its crash-mid-move exposure, which the overlay flatten's `library/`-else-
+top-level sandboxes-root fallback inherits as a silent-skip on a *half*-relocated install).
+The
 **still-live** core is the durable primitive (A1), the **require-running precondition +
 stopped-sandbox plan-choice** (A2, both platforms), quiescence-via-status for host-side
 migrations (A5 — note the whole-tree flock blocks other yoloai

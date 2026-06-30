@@ -135,7 +135,10 @@ Every `migrate` run computes a **plan first**, then applies it — the terraform
 1. **Plan (read-only).** Each pending migrator's `Plan()` is collected into one list of
    described **operations**, each flagged **destructive** or not, plus any foreseen
    **refusals/quarantines** ("sandbox Y: stopped macOS overlay — cannot migrate, will
-   quarantine"). No mutation.
+   quarantine"). No mutation. A migrator enumerating realm contents resolves them at their
+   **current** physical location, not the post-migration one (see the overlay flatten's
+   [sandboxes-root resolution](#source-consistency-migrator-concern-blessed-strategies)), so
+   the plan is accurate even before a pending relocation runs.
 2. **Confirm (the app).** The CLI renders the plan. If it contains destructive operations
    and a TTY is present, it asks for one confirmation; **`--yes`** proceeds without asking
    (the scripted path). **Headless / no TTY defaults to abort** on any destructive op unless
@@ -261,6 +264,23 @@ A small, shared set of strategies a migrator declares — not per-migrator hand-
   **(b)** proceed — a **destructive** op that flattens to the original workdir and **abandons**
   the agent's uncommitted overlay changes (on macOS already gone, DF69; on Linux the displaced
   upper lands in `trash/`, manually recoverable). Never a silent empty-flatten.
+- **Sandboxes-root resolution (flat-v0 installs).** The flatten migrator lives in the
+  **orchestrator** (it needs `Exec`/`ApplyOverlay`/backend types `internal/config` cannot
+  import — exactly why `MigrateAgentConfigs` lives there too), which legitimately spans
+  realms, so it resolves its sandboxes root directly: **`library/sandboxes/` if present, else
+  top-level `sandboxes/`** (no cross-realm plumbing, no generalization). This keeps the
+  **plan accurate on a not-yet-migrated flat-v0 install**: `Plan()` runs *before* any
+  migration, so there the sandboxes still sit at top-level `sandboxes/` (the `MigrateCLI`
+  flat→namespaced relocation hasn't run yet) and a naive scan of `library/sandboxes/` would
+  see nothing and under-report the flatten work. By apply time the cli relocation has run (it
+  precedes the library realm in `system migrate`, which re-reads library status after it —
+  `migrate.go:57-77`) and the same sandboxes resolve under `library/sandboxes/` — **same set
+  either way, so the plan never lies.** This deliberately covers only *un-migrated* (look
+  top-level) and *fully-migrated* (look library); a **half-relocated** install (a crash
+  mid-relocation — audit A6 — where `library/sandboxes/` exists but some sandboxes are
+  stranded at top-level) is **not** covered: those are silently skipped. That is the
+  pre-existing A6 exposure on the sealed flat→namespaced migration surfacing through overlay,
+  not a defect this flatten introduces.
 
 ## No automated downgrade — but the prior schema is preserved in trash (decision 3)
 
@@ -352,9 +372,16 @@ resume the run (rescan per-unit versions, migrate stragglers).
 ## Migration chain (decoupled from release cadence, D110)
 
 There are **two independent realm chains** — **library** and **cli** — each with **one**
-linear `.schema-version` that orders its own migrations. They migrate independently (no
-cross-realm run-order dependency), but **both must be fully current before yoloai runs
-anything** (the existing gate). There is **no top-level `$YOLOAI_HOME` marker** (decided
+linear `.schema-version` that orders its own migrations. They migrate independently with
+**one structural exception**: the `MigrateCLI` flat→namespaced relocation creates `library/`
+and lifts the library-owned content into it, so on a flat-v0 install the **cli realm must
+relocate before the library realm can see its own contents**. `system migrate` honors this —
+cli first, then it **re-reads** library status (the relocation may have just created
+`library/`) before running the library chain (`migrate.go:57-77`). The library `v3→v4`
+overlay flatten depends on this ordering; its `Plan()`, which runs before any relocation,
+sidesteps it by resolving sandboxes at their current physical location (see Source
+consistency). **Both realms must be fully current before yoloai runs anything** (the existing
+gate). There is **no top-level `$YOLOAI_HOME` marker** (decided
 no): its direct children are just whatever is installed (library always; cli/daemon
 optionally), and the one above-realm migration we have — the `MigrateCLI` flat→namespaced
 relocation — stays as-is. Schema versions are **not tied to app versions**, so a
