@@ -162,20 +162,23 @@ run-level stamp-last) designed in
 [crash-safe-migration.md](crash-safe-migration.md) (DF68). That substrate lands
 first and retro-hardens the agent.json split.
 
-**Who runs the flatten — the read-glue stays forever; runs against an *already-running*
-sandbox (decided 2026-06-30, verified in code).**
-Overlay diff/apply reads a git **baseline inside the container** and `git diff` against
-the overlayfs **merged view**, which exists only while the container runs
-(`copyflow/apply.go:495-535`, `apply_overlay.go`). The decisive finding: flattening an
-**already-running** overlay sandbox needs **zero overlay runtime/mount code** — only generic
-`Exec` (git in the live container) + host-side `git apply` + a workdir copy + two constants
-(the merged path + the baseline SHA in `environment.json`). So the migrating binary **deletes
-all overlay create/start code** (entrypoint mount, `CAP_SYS_ADMIN` grant + AppArmor/podman
-exceptions, `mounts.go` specs, `collectOverlayMounts`, `OverlayMountConfig`, dir init) and
-**keeps only the small read-glue**, which never mounts — it execs into a container a **prior**
-binary already mounted. Every future binary can flatten a *running* overlay sandbox, so there
-is **no stepping-stone / detect-and-refuse**. The crash-safe substrate is exercised here (and
-by future host-side migrations).
+**Who runs the flatten — raw merged-tree copy against an *already-running* sandbox
+(decided 2026-06-30; revised by the 2026-06-30 re-audit).** The overlayfs **merged view**
+exists only while the container runs. The flatten captures it by a **raw recursive file copy**
+(`cp -a` / `cp -rp` — the existing primitive at `files.go:143` / `entrypoint.py:262`) and lands
+the bytes as the new `:copy` work dir — **no git, no tar, no baseline diff**. (The first cut
+reused the in-container git-diff "read-glue" — `copyflow/apply.go:495-535`, `apply_overlay.go`
+— but the re-audit retired that: a diff-against-baseline silently dropped agent work
+[empty-baseline B1, double-apply B2, gitignored-files-lost B3] and rode the **DF70**
+host-`git apply --unsafe-paths` traversal hole.) A raw tree copy is destination-confined for
+free (a dir entry can't be named `..`; symlinks copy inert; whiteouts become deletions) and
+needs **zero overlay runtime/mount code** and **zero git**. So the migrating binary **deletes
+all overlay code** — create/start (entrypoint mount, `CAP_SYS_ADMIN` grant + AppArmor/podman
+exceptions, `mounts.go` specs, `collectOverlayMounts`, `OverlayMountConfig`, dir init) **and**
+the git diff/apply read-glue — keeping only path-location knowledge for the copy. It **never
+mounts**; it copies out of a container a **prior** binary already mounted. Every future binary
+can flatten a *running* overlay sandbox, so there is **no stepping-stone / detect-and-refuse**.
+The crash-safe substrate is exercised here (and by future host-side migrations).
 
 **macOS hazard (CONFIRMED on a Mac 2026-06-30, DF69).** When the host bind-mount
 lacks `trusted.*` xattr support the entrypoint remounts the overlay upper to **tmpfs
@@ -190,14 +193,14 @@ running**, and the messaging must say so. (Results: [research/reflink-vs-hardlin
 
 **Recovery of existing on-disk `:overlay` sandboxes (DECIDED — resolves Open Q1;
 supersedes the earlier split-reader-from-detector plan).** The `v3→v4` migration
-flattens each overlay sandbox to `:copy` by reusing the existing apply path against
-the **already-running** container (crash-safe via the DF68 substrate;
+flattens each overlay sandbox to `:copy` by a **raw recursive copy** of the
+**already-running** container's merged view (crash-safe via the DF68 substrate;
 idempotent/resumable; stamp flipped **last**), plus a pre-upgrade **audit**
 (`migrate --check` / `system status`) listing sandboxes still on the overlay stamp
-so the user learns *before* upgrading. Because the **read-glue is kept forever**
-(decision 8) and the binary needs **no mount code**, there is **no post-removal
-binary distinction** and **no detect-and-refuse** — any binary flattens a *running*
-overlay sandbox. **Requires the sandbox running**, both platforms (the binary can't
+so the user learns *before* upgrading. Because the binary needs **no mount code** and
+**no overlay git path** (decision 8 — all overlay code deleted, raw copy used instead),
+there is **no post-removal binary distinction** and **no detect-and-refuse** — any binary
+flattens a *running* overlay sandbox. **Requires the sandbox running**, both platforms (the binary can't
 mount a stopped overlay); a **stopped** overlay sandbox is a plan-surfaced choice:
 **(a)** abort, downgrade, start it, re-upgrade, re-run (preserves changes); or
 **(b)** proceed — destructive, abandons the sandbox's uncommitted overlay changes
@@ -226,23 +229,25 @@ which version ships them:
 - **`v2→v3` — agent.json split (existing, sealed as-is).** Already shipping; the overlay
   flatten is **not** fused with it.
 - **`v3→v4` — overlay→copy flatten.** The first customer of the crash-safe machinery; a
-  per-sandbox pass that seeds a copy dir from the lower and applies the upper's changes onto
-  it, reading from the **already-running** container, then stamps + swaps. Reflink-`:copy`
+  per-sandbox pass that **raw-copies the merged tree** of the **already-running** container into
+  the new `:copy` work dir (no git, no tar, no baseline), then stamps + swaps. Reflink-`:copy`
   (Phase 1, additive) ships alongside or before this. **Requires the sandbox running** (both
   platforms); a stopped overlay sandbox is a plan-surfaced choice (go back & start, or proceed
   and abandon its changes).
-- **overlay removal (rides the same release).** This build **deletes all overlay create/start
-  code** + `:overlay` as a creatable mode, and **keeps only the read-glue** (no mount code).
-  Because the read-glue stays, there is **no separate post-removal binary**, **no
-  detect-and-refuse**, and **no ordering constraint** — any binary flattens a *running*
-  overlay sandbox via `v3→v4`.
+- **overlay removal (rides the same release).** This build **deletes all overlay code** —
+  create/start **and** the git diff/apply read-glue — and `:overlay` as a creatable mode; the
+  flatten uses a raw copy, so no overlay git path remains (no mount code).
+  Because no binary can mount overlay (and the flatten works by raw copy on any binary), there
+  is **no separate post-removal binary**, **no detect-and-refuse**, and **no ordering
+  constraint** — any binary flattens a *running* overlay sandbox via `v3→v4`.
 
 ## Open questions (for the human)
 
 1. **Migration policy:** ~~fail-fast refuse vs auto-convert vs quarantine~~
    **RESOLVED 2026-06-30** → the `v3→v4` migration flattens each *running* overlay sandbox
-   (plan/apply, with a pre-upgrade `migrate --check` audit); the read-glue is **kept forever**,
-   so there is **no detect-and-refuse** — any binary flattens a running sandbox. A *stopped*
+   (plan/apply, with a pre-upgrade `migrate --check` audit) via a raw merged-tree copy (no
+   overlay git path), so there is **no detect-and-refuse** — any binary flattens a running
+   sandbox. A *stopped*
    overlay sandbox is a plan choice: go back & start it, or proceed and abandon its changes.
    See the Recovery section above.
 2. **Phase 2 timing:** next minor, or sooner given it's a security-motivated
