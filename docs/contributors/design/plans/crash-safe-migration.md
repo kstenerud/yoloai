@@ -111,6 +111,16 @@ pattern (each sandbox inspects its own form), hardened with atomic commit + dura
   and refusing** an already-destroyed source (A2). It *declares* which blessed
   consistency strategy it uses (so the discipline doesn't drift per migrator).
 
+**Migrators are bespoke and powerful — no cathedral.** The framework stays lean (the bullet
+above); each migrator is hand-written and free to **prompt the user and abort** mid-run.
+Migration *policy* (ask / abort / quarantine) is the migrator's; migration *responsibility*
+(the durable mechanics) is the framework's — they are deliberately separate, and the
+cross-migrator dependencies are **not uniform**, which is fine. Because yoloai also runs
+**headless** (daemon contexts, no TTY), a migrator that would prompt must take its answer
+from a **flag** there, **defaulting to abort** when there is no TTY (same rule as the
+bad-sandbox policy). We deliberately did **not** build a general sub-realm/carve framework
+around migrations (it proved brittle) — see D110.
+
 ## Durability: fsync makes the rename scheme trustworthy (audit A1)
 
 The promotion shape gives commit **atomicity** for free (the swap; concurrency excluded
@@ -297,8 +307,13 @@ resume the run (rescan per-unit versions, migrate stragglers).
 
 ## Migration chain (decoupled from release cadence, D110)
 
-Migrations are a **linear schema chain**, **not** pinned to specific releases — a migration
-ships whenever it's ready; what matters is the order of *schema steps*, not version numbers:
+There are **two independent realm chains** — **library** and **cli** — each with **one**
+linear `.schema-version` that orders its own migrations. They migrate independently (no
+cross-realm run-order dependency), but **both must be fully current before yoloai runs
+anything** (the existing gate). Schema versions are **not tied to app versions**, so a
+single release can ship several migrations, and one migration can bundle several changes. A
+migration is free to **reach into sandboxes** (they are part of the library realm, **not** a
+sub-realm — see D110 on why we did not build a general carve framework). The chain:
 
 - **`v2→v3` — agent.json split (existing, sealed as-is).** Already built and shipping
   (`LibrarySchemaVersion=3`, `MigrateLibrary` + `MigrateAgentConfigs`, run via `yoloai
@@ -306,24 +321,25 @@ ships whenever it's ready; what matters is the order of *schema steps*, not vers
   new machinery. (It carries the A4/DF68 power-loss exposure — bare `os.WriteFile`,
   stamp-before-pass — mitigated by idempotent re-run; whether to retro-harden it is a
   separate open call, see below.)
-- **`v3→v4` — overlay→copy flatten (next migration).** The **first customer of the
-  crash-safe machinery** (build-new→repopulate→swap + fsync + resumable rename + whole-tree
-  lock). A per-sandbox pass: for each overlay sandbox, seed a copy dir from the lower and
+- **`v3→v4` — this branch's migration (overlay retirement + any other on-disk change made
+  here).** One version bump covers everything this branch changes. Its headline work is the
+  **overlay→copy flatten**, the **first customer of the crash-safe machinery**
+  (build-new→repopulate→swap + fsync + resumable rename + whole-tree lock). A per-sandbox
+  pass converts **each overlay sandbox in isolation**: seed a copy dir from the lower and
   apply the upper's changes onto it (see
-  [Source consistency](#source-consistency-migrator-concern-blessed-strategies)), stamp,
-  swap. macOS requires the sandbox *running* (DF69) — refuse if stopped. The machinery lands
-  here, with the destructive flatten as the user that both needs and exercises it.
+  [Source consistency](#source-consistency-migrator-concern-blessed-strategies)), then swap —
+  **no per-sandbox version marker** (progress is read from the sandbox's on-disk form). macOS
+  requires the sandbox *running* (DF69) — refuse if stopped. The machinery lands here, with
+  the destructive flatten as the user that both needs and exercises it.
 - **later — overlay removal.** A build that deletes the overlay reader + mount option; any
   un-flattened sandbox → permanent **detect-and-refuse** pointing at the `v3→v4` migration.
   **Only hard ordering constraint:** this build must **post-date** `v3→v4` (it deletes the
   read/apply code the flatten needs — see open decision 8).
 
-**Open: retro-harden the existing `v2→v3` split?** Sealing it "as it stands" leaves the
-A4/DF68 power-loss exposure in the shipped split (mitigated, not eliminated, by idempotent
-re-run). The fix is small — route its writes through the existing `atomicWriteJSON` and
-stamp after the per-sandbox pass — and reuses primitives that already exist, so it does
-**not** require the `v3→v4` machinery. Flagged for a decision; default per the "lock it off
-as it stands" direction is **leave it**.
+**Settled: leave the existing `v2→v3` split as-is.** "The agent.json ship has sailed" — we
+do not retro-harden it. The A4/DF68 power-loss exposure stays (bare `os.WriteFile`,
+stamp-before-pass), mitigated by idempotent re-run; the small fix (`atomicWriteJSON` +
+stamp-after-pass) exists if it ever earns priority, but it is **not** in scope here.
 
 ## The git question (answered: borrow the patterns, not the tool)
 
