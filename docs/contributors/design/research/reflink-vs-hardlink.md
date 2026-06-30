@@ -3,9 +3,10 @@
 ABOUTME: Tradeoff + verification status for the two "build-a-tree-alongside-cheaply"
 ABOUTME: primitives — reflink (CoW clone) and hardlink — used by :copy and migration.
 
-Status: **OPEN — both recorded, neither chosen (2026-06-30).** Cross-platform
-support matrix: **web verification in flight**; macOS specifics: **on-device brief
-below, awaiting a Mac run.** Feeds the reflink-`:copy` work
+Status: **OPEN — both recorded, neither chosen.** Cross-platform support matrix:
+**verified + cited 2026-06-30**; macOS on-device specifics (APFS cross-volume,
+`F_FULLFSYNC`, DF69): **brief below, awaiting a Mac run.** Feeds the reflink-`:copy`
+work
 ([retire-overlay-reflink-copy.md](../plans/retire-overlay-reflink-copy.md) Phase 1)
 and the migration snapshot / build-alongside model
 ([crash-safe-migration.md](crash-safe-migration.md)).
@@ -34,12 +35,13 @@ Two axes pull in opposite directions:
 | **Graceful degradation** | **reflink** | where unsupported, reflink falls back to a correct (slower) full copy; the calling code is unchanged. Hardlink has no "safe slow mode" — if you rely on it for cheapness you've also taken on the corruption risk. |
 | **Cross-volume** | tie (both fail) | hardlink → `EXDEV`; reflink → fails/falls back to copy. Both require same-filesystem; the temp/staging tree must live under the same mount as the source. |
 
-**The likely correction to the "reflink has wider support" intuition:** it's almost
-certainly **backwards** on raw support — the decisive datum is **ext4** (the most
-common Linux default) which has hardlinks but **no reflink** (and HFS+ and native
-NTFS the same). But reflink may still be the better *default* for the
-safe-by-construction + graceful-degrade reasons above — a different argument than
-breadth. *(Full matrix being verified — see below.)*
+**The "reflink has wider support" intuition is backwards — confirmed.** The
+decisive datum is **ext4** (the common Linux default), which has hardlinks but
+**no reflink** (`FICLONE` → `EOPNOTSUPP`); same for **HFS+** and **native NTFS**.
+Hardlink support is a **strict superset** of reflink support on every filesystem
+we care about (the only place hardlink loses is FAT/exFAT, where *neither* works).
+But reflink may still be the better *default* for the safe-by-construction +
+graceful-degrade reasons above — a different argument than breadth.
 
 ## Per-use-case fit (this is why "record both" is right)
 
@@ -61,28 +63,44 @@ differ:
 So a plausible end state is **reflink for `:copy`, and either primitive for
 migration** — decided once the support matrix and the macOS facts are in.
 
-## Cross-platform support matrix — PRELIMINARY (web verification in flight)
+## Cross-platform support matrix — verified 2026-06-30
 
-Confidence-labeled; cells marked **(v?)** await citation from the in-flight web
-pass. Do **not** treat unlabeled-confident cells as final until that lands.
+| OS | Filesystem | Hardlink | Reflink / CoW clone | Source |
+|---|---|---|---|---|
+| Linux | **ext4** | ✅ | ❌ `EOPNOTSUPP` | [ioctl_ficlonerange(2)](https://man7.org/linux/man-pages/man2/ioctl_ficlonerange.2.html) |
+| Linux | **XFS** | ✅ | ✅ (default; needs `crc=1`, also default) | [mkfs.xfs(8)](https://man7.org/linux/man-pages/man8/mkfs.xfs.8.html) |
+| Linux | **btrfs** | ✅ | ✅ (origin of `FICLONE`) | [btrfs Reflink](https://btrfs.readthedocs.io/en/latest/Reflink.html) |
+| Linux | **OpenZFS** | ✅ | ⚠️ ≥2.2, **default-off until 2.3.0** | [zfsconcepts(7)](https://openzfs.github.io/openzfs-docs/man/master/7/zfsconcepts.7.html); §ZFS below |
+| Linux | **tmpfs / F2FS / overlayfs** | ✅ | ❌ (no clone impl) | by absence of `remap_file_range` |
+| Linux/macOS | **FAT / exFAT** | ❌ | ❌ | no inode/link concept |
+| macOS | **APFS** | ✅ | ✅ `clonefile` | [Apple: About APFS](https://developer.apple.com/library/archive/documentation/FileManagement/Conceptual/APFS_Guide/Features/Features.html) |
+| macOS | **HFS+** | ✅ (incl. *directory* hardlinks) | ❌ | [Apple TN1150](https://developer.apple.com/library/archive/technotes/tn/tn1150.html) |
+| Windows | **NTFS** | ✅ `CreateHardLinkW` (files, same vol, ≤1023 added) | ❌ **no native reflink** | [Block Cloning](https://learn.microsoft.com/en-us/windows/win32/fileio/block-cloning) · [CreateHardLinkW](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-createhardlinkw) |
+| Windows | **ReFS** | ✅ | ✅ block clone (since Server 2016) | [ReFS block cloning](https://learn.microsoft.com/en-us/windows-server/storage/refs/block-cloning) |
+| Windows | **Dev Drive** (ReFS-backed) | ✅ | ✅ (Dev Drive block clone 24H2) | [Dev Drive](https://learn.microsoft.com/en-us/windows/dev-drive/) |
 
-| Filesystem | Hardlink | Reflink / CoW clone |
-|---|---|---|
-| ext4 (Linux) | ✅ | ❌ (no FICLONE) — **confident** |
-| XFS `reflink=1` (Linux) | ✅ | ✅ (mkfs default since xfsprogs 5.1) — confident |
-| btrfs (Linux) | ✅ | ✅ — confident |
-| OpenZFS (Linux) | ✅ | ⚠️ block cloning 2.2+; 2.2.0 corruption bug, default-off through ~2.2.6 **(v?)** |
-| tmpfs (Linux) | ✅ | ❌ — confident |
-| APFS (macOS) | ✅ | ✅ `clonefile` — confident (on-device brief refines cross-volume) |
-| HFS+ (macOS) | ✅ | ❌ — confident |
-| NTFS (Windows, native) | ✅ `CreateHardLinkW` | ❌ no native reflink **(v?)** |
-| ReFS / Dev Drive (Windows) | ✅ | ✅ block cloning `FSCTL_DUPLICATE_EXTENTS` **(v?)** |
-| FAT / exFAT | ❌ | ❌ — confident |
+**Verdict: hardlink support ⊋ reflink support** (strict superset; only FAT/exFAT
+support neither). Reflink is absent on the three dominant defaults — **ext4, native
+NTFS, HFS+** — plus tmpfs/overlayfs and ZFS < 2.3.
 
-If verified, this means: **hardlink support ⊃ reflink support** (strict superset on
-the filesystems we care about). The Windows story (native NTFS = no reflink;
-ReFS/Dev Drive = reflink) is the most consequential cell for a future Windows
-target and is being checked first.
+**Syscalls/APIs.** Hardlink: `link(2)`/`linkat(2)`; Windows `CreateHardLinkW`.
+Reflink: Linux `FICLONE`/`FICLONERANGE` ioctl + `copy_file_range(2)` (`cp
+--reflink=auto`); macOS `clonefile(2)`/`clonefileat` (`cp -c`); Windows
+`FSCTL_DUPLICATE_EXTENTS_TO_FILE` (**ReFS only** — does nothing on NTFS).
+
+**Windows reality (if it ever becomes a native target).** A stock install is
+`C:` = NTFS, where the **only** cheap-copy primitive is the **hardlink**; reflink
+requires a **separately-created** ReFS/Dev Drive volume (`C:` can't be a Dev Drive,
+existing volumes can't be converted). So on default Windows, a reflink-based design
+gives *nothing* (full-copy fallback) while a hardlink-based one works — a real
+point for hardlink on the migration side.
+
+**OpenZFS chronology.** Block cloning landed in **2.2.0**; the infamous 2.2.0
+zero-corruption was **not** block-cloning's bug but a ~17-year-old dnode dirty-state
+race it merely exposed at higher throughput ([issue #15526](https://github.com/openzfs/zfs/issues/15526)).
+It was disabled by default in 2.2.1, the dnode race fixed in 2.2.2 (backport
+2.1.14), and block cloning **enabled by default only in 2.3.0**. Treat **ZFS ≥
+2.3.0** as the "reflink works" line; assume silent fallback below it.
 
 ## macOS on-device verification brief (for a Mac agent on this branch)
 
