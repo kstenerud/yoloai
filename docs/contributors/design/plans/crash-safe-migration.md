@@ -69,6 +69,10 @@ Every migration uses **one shape — build-new → repopulate → atomic-rename 
 *unit*. **Each unit is independently versioned and treated like a realm:** the **library**
 realm, **each sandbox** (its own sub-realm), and the **cli** realm each carry their own
 `.schema_version` (missing = v0, first stamped value = v1 — same convention as the realms).
+**Responsibility split:** the **library** version governs *where sandbox directories live*
+(location/layout); the **sandbox** version governs *everything inside a sandbox*. Changing
+a sandbox's internal structure bumps the **sandbox** version, never the library's (so the
+agent.json split and the overlay flatten are *sandbox* migrations, not library ones).
 Changed files are rebuilt in scratch; unchanged bulk is **moved** (not copied) from the
 displaced original; the swap commits **all of the unit's changed files atomically** (the
 key property — a migration touching many files needs no per-file ordering; see Promotion).
@@ -284,14 +288,24 @@ resume the run (rescan per-unit versions, migrate stragglers).
 
 Every migration runs against a schema **frozen in a prior shipped release**:
 
-| Release | Schema | Migration | Overlay code | Ships |
-|---|---|---|---|---|
-| **0.6.0** | v2→**v3** (freeze) | agent.json split, made crash-safe | yes (dangerous opt-in + warning) | staged 12 commits; reflink-`:copy`; **the floor**: the unified build-new→repopulate→swap machinery (file + dir granularity) + stamp-last (move `WriteSchemaVersion` out of `MigrateLibrary` into `MigrateDataDir`) + whole-tree lock — the split runs through it (fixes A1/A4/DF68/C3). *(Scope choice below.)* |
-| **0.7.0** *(migration version)* | v3→**v4** | overlay→copy flatten (agent-free, while-live per DF69) + `migrate --check` audit | yes (last release with overlay) | the overlay `LiveContainerExtract` migrator on the shared (0.6.0) machinery |
-| **0.8.0** *(post-removal)* | v4 | v3→v4 step → detect-and-refuse | no (reader deleted, **detector kept forever**) | 5-element refusal naming `yoloai-0.7.x` |
+The chain is now the **sandbox** schema version (library version governs *location* and
+stays put through this window). Every migration runs against a schema **frozen in a prior
+shipped release**:
 
-**0.6.0 floor is non-negotiable:** A1/A4 mean 0.6.0's *own* v2→v3 split loses config on
-power loss today, so 0.6.0 must make that migration crash-safe regardless.
+| Release | Sandbox schema | Migration | Overlay code | Ships |
+|---|---|---|---|---|
+| **0.6.0** | v0→**v1** | agent.json split (introduces sandbox `.schema_version`); rebuilds metadata, **moves the workdir + overlay dirs as unchanged bulk** (preserves overlay; offline, no reader) | yes (dangerous opt-in + warning) | staged 12 commits; reflink-`:copy`; **the machinery**: unified build-new→repopulate→swap + version-flip-last + whole-tree lock — the split runs through it (fixes A1/A4/DF68/C3) |
+| **0.7.0** *(migration version)* | v1→**v2** | overlay→copy flatten (agent-free, while-live per DF69) + `migrate --check` audit | yes (last release with overlay) | the overlay `LiveContainerExtract` migrator on the shared (0.6.0) machinery |
+| **0.8.0** *(post-removal)* | v2 | v1→v2 step → detect-and-refuse | no (reader deleted, **detector kept forever**) | 5-element refusal naming `yoloai-0.7.x` |
+
+**Retrofit needed before 0.6.0 ships:** the split is coded today as a *library* migration
+(`LibrarySchemaVersion=3`, `MigrateLibrary` + `MigrateAgentConfigs`). Rework it into a
+**sandbox v0→v1** migration (per the responsibility split: library = location only) before
+release — 0.6.0 isn't published yet, so there's no compat constraint; sort out the library
+version's value/meaning (location-only) as part of this.
+
+**0.6.0 floor is non-negotiable:** A1/A4 mean 0.6.0's *own* split loses config on power
+loss today, so 0.6.0 must make that migration crash-safe regardless.
 
 **Scope — DECIDED: build the unified machinery in 0.6.0.** The version must commit
 atomically with the data, so the split *cannot* flip the version separately — it **must**
