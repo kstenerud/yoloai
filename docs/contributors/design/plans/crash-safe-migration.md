@@ -53,29 +53,35 @@ per-unit version, and the commit state lives in the filesystem naming convention
 
 ### Staging workdir (disposable, never resumed)
 
-At the top of each realm, a discrete migration stages into `migration-<build-id>/` —
-the migrator's scratch space, its internal structure the migrator's concern. **Scratch
-is disposable and never resumed:** any yoloai invocation (when no migration holds the
-lock) throws out a leftover scratch dir — a crashed build is garbage, rebuilt fresh,
-never recovered. So the *build* phase (the complex part — containers, extract) needs no
-crash-recovery; **only the live-dir *rename* (promotion) is resumable.** A scratch dir
-is **not** a reason to block other functions. The build-id is for hygiene/debugging,
-not resume. Scratch must be on the **same filesystem** as the live dir (decision 4) so
-the move-in is atomic.
+A single well-known scratch dir at the **top of `$YOLOAI_HOME`** (not per-realm, no
+build-id — it's never resumed, so identity is irrelevant; a fixed name makes it easy to
+find). **Scratch is disposable and never resumed:** any yoloai invocation (when no
+migration holds the lock) throws out a leftover scratch dir — a crashed build is garbage,
+rebuilt fresh, never recovered. It is also **cleared between chain steps** (v1→v2,
+delete, v2→v3, delete, …). So the *build* phase (the complex part — containers, extract)
+needs no crash-recovery; **only the live-dir *rename* (promotion) is resumable.** A
+scratch dir is **not** a reason to block other functions. Scratch must be on the **same
+filesystem** as the live dirs (decision 4) so the move-in is atomic.
 
 ### One shape, applied per unit
 
 Every migration uses **one shape — build-new → repopulate → atomic-rename swap** — on a
-*unit*, either a whole realm (`library`) or one sandbox (`mysandbox`). Changed files are
-rebuilt in scratch; unchanged bulk is **moved** (not copied) from the displaced original;
-the swap commits **all of the unit's changed files atomically** (the key property — a
-migration touching many files needs no per-file ordering; see Promotion). The realm-vs-
-sandbox difference is only the *unit*: a realm is **one** unit (all-or-nothing);
-sandboxes are **many**, processed **one at a time** (a failure is quarantine-or-abort,
-decision 1). **The `.schema-version` lives inside the unit and commits atomically with
-the swap — never a separate flip.** Since a schema change is *new data + new version*
-together, **every migration changes ≥2 files** (no single-file migration). During
-promotion `_^^_orig` keeps the **old** version (the source whose version derives the
+*unit*. **Each unit is independently versioned and treated like a realm:** the **library**
+realm, **each sandbox** (its own sub-realm), and the **cli** realm each carry their own
+`.schema_version` (missing = v0, first stamped value = v1 — same convention as the realms).
+Changed files are rebuilt in scratch; unchanged bulk is **moved** (not copied) from the
+displaced original; the swap commits **all of the unit's changed files atomically** (the
+key property — a migration touching many files needs no per-file ordering; see Promotion).
+A realm is **one** unit; sandboxes are **many**, each its own unit migrated independently
+(a crash re-does only the in-progress sandbox; a failure is quarantine-or-abort, decision
+1). **Deterministic order: migrate the library realm first, then each sandbox, then cli;
+yoloai's other functionality unlocks only when *all* units are at their current version.**
+**The `.schema_version` lives inside the unit and is flipped *last*, right before the
+swap rename** — so it commits atomically with the data *and* its presence in `_^^_new` is
+the authoritative "build complete, ready to promote" marker. Since a schema change is
+*new data + new version* together, **every migration changes ≥2 files** (no single-file
+migration). During promotion `_^^_orig` keeps the **old** version (the source whose
+version derives the
 move-list) and `_^^_new` carries the **new** version; recovery reads the live realm's
 version to place itself in the chain (vN→vN+1) and schedule the next step. (Whether a
 version step is one whole-realm swap or per-sandbox swaps with the realm version derived
@@ -123,10 +129,10 @@ discipline**:
 
 (Step-4 *moves* are exempt — idempotent + re-derivable, a lost move is just re-done.)
 
-**Scope (flagged choice).** These fsyncs buy **power-loss / kernel-panic** safety; a
-plain process death (kill/crash/Ctrl-C) keeps the page cache, so the scheme is already
-safe against it *without* fsync. Recommendation: **keep them** — irreplaceable data, rare
-op, a handful of fsyncs per unit. (Alternative: process-death-only — simpler, weaker.)
+**Scope — DECIDED: keep the fsyncs (max recoverability).** They buy **power-loss /
+kernel-panic** safety on top of the process-death safety the page cache already gives;
+migrations touch irreplaceable data and are rare, so we pay the handful of fsyncs per unit
+for recoverability across every interruption method.
 
 **C3/A4 (the existing split losing data) is fixed by construction:** the split runs
 through the unified shape, so its files *and* the new version commit atomically at the
@@ -143,41 +149,38 @@ sentinel can appear *partial*). Only the live dir uses the reserved sentinel nam
 `_^^_` token **must be illegal in a real realm/sandbox name** (validate/reserve it).
 
 **The sequence (unit `U` = `library` or `mysandbox`), fsyncs explicit:**
-1. Build the **changed** files in scratch (`migration-<id>/Unew`); **fsync contents**.
-2. move `Unew` → `U_^^_new` in the live dir; **fsync(dir)**.
+1. Build the **changed** files in scratch (without the new `.schema_version` yet);
+   **fsync contents**.
+2. move the built dir → `U_^^_new` in the live dir; **fsync(dir)**.
 3. rename `U` → `U_^^_orig`; **fsync(dir)**.
 4. **repopulate:** move the **re-derivable** set of unchanged items from `U_^^_orig` →
    `U_^^_new` — each an atomic rename (a multi-GB workdir moves as *one*, no copy;
    moves are idempotent, so **no per-move fsync**); **fsync(dir)** when the list
    completes.
-5. rename `U_^^_new` → `U`; **fsync(dir)**.
-6. delete `U_^^_orig`.
+5. **flip the version:** write the new `.schema_version` into `U_^^_new` (**last**, after
+   the build + repopulate are done); **fsync(dir)**. Its presence is the authoritative
+   "ready to promote" marker.
+6. rename `U_^^_new` → `U`; **fsync(dir)**.
+7. **move `U_^^_orig` → `trash/`** (not delete — a manual revert path); **fsync(dir)**.
 
-Step 5 commits **all of `U`'s changed files atomically** — no cross-file ordering to
-coordinate (the C3 class of bug is structurally impossible).
+Step 6 commits **all of `U`'s changed files + the new version atomically** — no cross-file
+ordering to coordinate (the C3 class of bug is structurally impossible).
 
-**Recovery** reads the live dir names: `U` alone → check its version (not-started vs
-done); `U_^^_orig`+`U_^^_new` → **re-derive `U_^^_new`'s expected contents and verify
-completeness** (presence ≠ complete while a move-list is pending), finish the moves, then
-promote; `U`(new)+`U_^^_orig` → delete orig. The canonical `U` always holds **complete**
-data whenever it exists; any split lives only between the `_^^_orig`/`_^^_new` temps
-(union always complete, items never torn). Step 4 is **forward-only** once it starts
-gutting `_^^_orig` (clean abort is only available before step 4). If a migration changes
-*everything* (empty move-list) step 4 is empty and `_^^_new` presence *is* completeness;
-alternative that keeps `U` whole until the swap is to **reflink** the kept items into
-`_^^_new` rather than move (cheap on CoW, full-copy on ext4) — a conscious trade.
-
-**The version rides inside the swap (no separate flip, no single-file migration).** A
-schema change is the new `.schema-version` **plus** the changed data, committed together
-at step 5 — so there is no file-granularity migration. `_^^_orig` holds the **old**
-version (its value derives the move-list); `_^^_new` holds the **new**; the swap is the
-atomic vN→vN+1 transition, and recovery reads the live realm's version to know its place
-in the chain and schedule the next step.
+**Recovery** reads the live dir names + `_^^_new`'s version: `U` alone → check its version
+(not-started vs done); `U_^^_orig`+`U_^^_new` **with** the new `.schema_version` → ready →
+promote (step 6); `U_^^_orig`+`U_^^_new` **without** it → build incomplete → resume the
+repopulate (re-derive what's still in `_^^_orig`), then flip + promote; `U`(new)+`U_^^_orig`
+→ finish step 7. The canonical `U` always holds **complete** data whenever it exists; any
+split lives only between the `_^^_orig`/`_^^_new` temps (union always complete, items never
+torn). Step 4 is **forward-only** once it starts gutting `_^^_orig`. If a migration changes
+*everything* (empty move-list) step 4 is empty. Alternative that keeps `U` whole until the
+swap is to **reflink** the kept items into `_^^_new` rather than move (cheap on CoW,
+full-copy on ext4) — a conscious trade.
 
 The rigor a WAL needed doesn't vanish; it moves into this state machine, which must be
 **exhaustively enumerated** + covered by **crash-injection tests at every rename
-boundary**. The displaced `*_^^_orig` is **transient** (deleted at step 6) — not a
-retained backup; migration is one-way (see No downgrade).
+boundary**. The displaced `*_^^_orig` is moved to **`trash/`** (decision 3 — no automated
+downgrade, but the prior schema's data is preserved for a manual, LLM-assisted revert).
 
 ## Source consistency (migrator concern; blessed strategies)
 
@@ -195,12 +198,14 @@ A small, shared set of strategies a migrator declares — not per-migrator hand-
   migrator must **detect and refuse** with a loud message — it cannot mitigate a
   source that no longer exists.
 
-## No downgrade (decision 3)
+## No automated downgrade — but the prior schema is preserved in trash (decision 3)
 
-Migration is **one-way.** The `*_^^_orig` displaced during a promotion is **transient**
-(deleted as the final step once the new unit is live) — *not* a retained backup; there
-is no compat window and no reversible realm step. Once the realm stamp flips, an older
-binary hard-errors (`RealmStatus`: "newer than this build supports") — accepted (R1).
+There is no *automated* downgrade: no compat window, no reversible step, and once a unit's
+`.schema_version` advances an older binary hard-errors (`RealmStatus`: "newer than this
+build supports"). **But the displaced `*_^^_orig` is moved to `trash/`, not deleted** — so
+the prior schema's complete data survives (until trash GC) and a desperate user can
+manually revert (restore from trash + run the older binary), LLM-assisted. Strictly better
+than gone-forever, without building downgrade tooling.
 The escape from a *persistent forward bug* is **quarantine** (per-sandbox: set the bad
 sandbox aside, its data preserved in `trash/`), backed by the fact that the original is
 untouched until each commit (a pre-commit failure leaves the old data fully intact at
@@ -246,24 +251,27 @@ resume the run (rescan per-unit versions, migrate stragglers).
    failed + remaining stay at the old version, stamp unflipped → re-runnable.
    Non-interactive runs take the choice via a flag, **default abort** (safe in
    headless contexts).
-2. **Ordering & realm-structural cost.** A run is an *ordered* sequence; a realm
-   relocation that moves sandboxes must run before per-sandbox passes that iterate
-   them. Realm-structural migrations **move/rename**, never copy sandbox bulk.
+2. **Ordering — DECIDED: library → sandboxes → cli.** The library *layout* migration
+   (which moves sandbox dirs) runs first, then each sandbox's *format* migration, then
+   cli; yoloai's other functionality unlocks only when every unit is at its current
+   version. Realm-layout migrations **move/rename** sandbox dirs, never copy their bulk.
 3. **R1 downgrade — DECIDED: no downgrade.** See [No downgrade](#no-downgrade-decision-3).
 4. **Network / synced FS — DECIDED: hard-refuse + single-FS.** See [Single-filesystem
    requirement](#single-filesystem-requirement-decision-4).
 5. **Exclusivity / gate — DECIDED: whole-tree live flock.** See [Exclusivity &
    crash-recovery gating](#exclusivity--crash-recovery-gating-decision-5).
-7. **Unit granularity of a version step — DECIDED: whole-realm swap.** A version step is
-   one atomic whole-realm swap. The migrator reads the **source at its old version**
-   (`library`/`_^^_orig` = vN, using the vN reader — which for v3 includes overlay) and
-   writes the new realm (`_^^_new` = vN+1), so the live realm stays **self-consistent**
-   (vN data under a vN reader) until the atomic swap — **no window where the realm version
-   disagrees with its sandboxes' format.** That window is exactly the ordering tension the
-   per-sandbox-incremental alternative creates (flip realm→v4 first: v4 machinery rejects
-   still-overlay sandboxes; flatten sandboxes first: v3 machinery is confused by v4 ones).
-   Build into a *resumable* `library_^^_new` (per-sandbox record versions track which
-   sandboxes are done) so expensive flattens survive a crash.
+7. **Unit granularity — DECIDED: each unit independently versioned (sandboxes are
+   sub-realms).** The library realm, **each sandbox**, and the cli realm each carry their
+   own `.schema_version` and migrate via their own build-new→swap. **Sandbox-format
+   migrations (the overlay flatten) are per-sandbox**: each sandbox is read at *its own*
+   old version (so the v_old reader, incl. overlay, applies) and swapped to its new version
+   independently. This dissolves the ordering tension — a migrated sandbox reads via *its
+   own* version, never the realm's, so there's no realm-version-vs-sandbox-format window
+   (flip-realm-first / flatten-first both vanish) — **and** gives natural incremental
+   progress: a crash re-does only the in-progress sandbox, so **no "resumable
+   `library_^^_new`" is needed.** The library realm version governs *layout* (migrated
+   first, as a whole-library swap that moves sandbox dirs by rename); sandbox versions
+   govern *format*. (Supersedes the earlier whole-realm-swap-flattens-all framing.)
 8. **Overlay-reader placement (OPEN, audit R4).** The flatten irreducibly needs the
    v3/overlay reader (the apply/extract path) to read the source. **(i)** only in 0.7.0
    (reads v3→writes v4; 0.8.0 deletes it, keeps just the detector + "run 0.7.0" refusal),
