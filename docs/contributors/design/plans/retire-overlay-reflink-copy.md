@@ -162,21 +162,20 @@ run-level stamp-last) designed in
 [crash-safe-migration.md](crash-safe-migration.md) (DF68). That substrate lands
 first and retro-hardens the agent.json split.
 
-**Who runs the flatten — the migration version, not the post-removal binary
-(decided; see [research/migration-version-gating.md](../research/migration-version-gating.md)).**
-The codebase map (2026-06-30) settled a crux: overlay diff/apply reads a git
-**baseline that lives *inside* the container** (established by
-`UpdateOverlayBaselineToHEAD()` exec'd in the container; `copyflow/diff.go`,
-`apply_overlay.go`), so the operation is container-bound on **every** backend —
-even on Linux/Podman where the raw upper bytes happen to sit on a host bind-mount
-(`~/.yoloai/sandboxes/<name>/work/<encoded>/upper/`). The post-removal binary
-deletes exactly that machinery, so it **cannot** flatten an overlay sandbox. The
-overlay→copy flatten is therefore essentially the existing **`apply`** operation
-(apply the overlay delta onto the workdir, then treat it as `:copy`), and it must
-run in a **migration version** that still ships the overlay/apply path — brought
-up **agent-free** (the decoupled-launch enabler) so no agent writes while we read.
-The crash-safe substrate is exercised *there* (and by future host-side
-migrations), not in the new binary.
+**Who runs the flatten — the read-glue stays forever; runs against an *already-running*
+sandbox (decided 2026-06-30, verified in code).**
+Overlay diff/apply reads a git **baseline inside the container** and `git diff` against
+the overlayfs **merged view**, which exists only while the container runs
+(`copyflow/apply.go:495-535`, `apply_overlay.go`). The decisive finding: flattening an
+**already-running** overlay sandbox needs **zero overlay runtime/mount code** — only generic
+`Exec` (git in the live container) + host-side `git apply` + a workdir copy + two constants
+(the merged path + the baseline SHA in `environment.json`). So the migrating binary **deletes
+all overlay create/start code** (entrypoint mount, `CAP_SYS_ADMIN` grant + AppArmor/podman
+exceptions, `mounts.go` specs, `collectOverlayMounts`, `OverlayMountConfig`, dir init) and
+**keeps only the small read-glue**, which never mounts — it execs into a container a **prior**
+binary already mounted. Every future binary can flatten a *running* overlay sandbox, so there
+is **no stepping-stone / detect-and-refuse**. The crash-safe substrate is exercised here (and
+by future host-side migrations).
 
 **macOS hazard (CONFIRMED on a Mac 2026-06-30, DF69).** When the host bind-mount
 lacks `trusted.*` xattr support the entrypoint remounts the overlay upper to **tmpfs
@@ -189,19 +188,26 @@ Docker-Desktop-only**. ⇒ a *stopped* macOS overlay sandbox has **already** los
 uncommitted changes; the migration version **must** convert **while the sandbox is
 running**, and the messaging must say so. (Results: [research/reflink-vs-hardlink.md](../research/reflink-vs-hardlink.md) §B/§C.)
 
-**Recovery of existing on-disk `:overlay` sandboxes (DECIDED — resolves Open Q1).**
-Split the legacy *reader* from the legacy *detector*:
-- **Migration version** ships a `migrate` verb that flattens each overlay sandbox
-  to `:copy` (drives the existing apply path, agent-free, crash-safe via the DF68
-  substrate; idempotent/resumable; flips the plain-int stamp **last**), plus a
-  pre-upgrade **audit** (`migrate --check` / surfaced in `system status`) listing
-  sandboxes still on the overlay stamp so the user learns *before* upgrading.
-- **Post-removal binary** carries **zero overlay-read code** but keeps the cheap
-  **detector forever**: a `Mode == overlay` / stamp check that **fails fast with a
-  good refusal** naming the sandbox, the version gap, and the exact migration
-  binary to run (the ES `IndexMetadataVerifier` five-element message is the model;
-  a bare "unrecognized mode" is the anti-pattern). It never silently auto-converts
-  — re-copying from source would **lose** the agent's overlay changes.
+**Recovery of existing on-disk `:overlay` sandboxes (DECIDED — resolves Open Q1;
+supersedes the earlier split-reader-from-detector plan).** The `v3→v4` migration
+flattens each overlay sandbox to `:copy` by reusing the existing apply path against
+the **already-running** container (crash-safe via the DF68 substrate;
+idempotent/resumable; stamp flipped **last**), plus a pre-upgrade **audit**
+(`migrate --check` / `system status`) listing sandboxes still on the overlay stamp
+so the user learns *before* upgrading. Because the **read-glue is kept forever**
+(decision 8) and the binary needs **no mount code**, there is **no post-removal
+binary distinction** and **no detect-and-refuse** — any binary flattens a *running*
+overlay sandbox. **Requires the sandbox running**, both platforms (the binary can't
+mount a stopped overlay); a **stopped** overlay sandbox is a plan-surfaced choice:
+**(a)** abort, downgrade, start it, re-upgrade, re-run (preserves changes); or
+**(b)** proceed — destructive, abandons the sandbox's uncommitted overlay changes
+(macOS: already gone, DF69; Linux: displaced upper to `trash/`, manually
+recoverable). **Security claim restated:** the host-escape vector was an *untrusted
+agent* in a `CAP_SYS_ADMIN` overlay container; the new binary has **no overlay mount
+code at all** — it cannot mount overlayfs, it only *reads* (exec `git`) from a
+container a prior binary mounted. So the win is **maximal**: not merely "no agent
+runs with overlay+`CAP_SYS_ADMIN`," but "the new binary cannot mount overlayfs,
+period." (Flagged for security review — security claims get the highest scrutiny.)
 
 **BREAKING-CHANGES.md** (breakage vs the last *published* release): `:overlay`
 removed; rationale (host-escape on rootful Docker, not cheaply fixable; reflink
@@ -221,22 +227,24 @@ which version ships them:
   flatten is **not** fused with it.
 - **`v3→v4` — overlay→copy flatten.** The first customer of the crash-safe machinery; a
   per-sandbox pass that seeds a copy dir from the lower and applies the upper's changes onto
-  it (non-destructive read; macOS requires the sandbox running, DF69 → refuse if stopped),
-  then stamps + swaps. Reflink-`:copy` (Phase 1, additive) ships alongside or before this.
-  The overlay read/apply reader is present here for its **last** use; after `v3→v4`, no
-  overlay sandbox remains.
-- **later — overlay removal (Phase 2).** A build that deletes the overlay mount option +
-  reader; any un-flattened sandbox → a permanent **detect-and-refuse** pointing at the
-  `v3→v4` migration. **Only hard ordering constraint:** the removal build must **post-date**
-  `v3→v4` (the flatten needs the overlay read/apply code the removal deletes).
+  it, reading from the **already-running** container, then stamps + swaps. Reflink-`:copy`
+  (Phase 1, additive) ships alongside or before this. **Requires the sandbox running** (both
+  platforms); a stopped overlay sandbox is a plan-surfaced choice (go back & start, or proceed
+  and abandon its changes).
+- **overlay removal (rides the same release).** This build **deletes all overlay create/start
+  code** + `:overlay` as a creatable mode, and **keeps only the read-glue** (no mount code).
+  Because the read-glue stays, there is **no separate post-removal binary**, **no
+  detect-and-refuse**, and **no ordering constraint** — any binary flattens a *running*
+  overlay sandbox via `v3→v4`.
 
 ## Open questions (for the human)
 
 1. **Migration policy:** ~~fail-fast refuse vs auto-convert vs quarantine~~
-   **RESOLVED 2026-06-30** → migration-version flattens (a `migrate` verb +
-   pre-upgrade audit, while overlay is still supported); post-removal binary
-   detect-and-refuses with a pointer. See the Recovery section above and
-   [research/migration-version-gating.md](../research/migration-version-gating.md).
+   **RESOLVED 2026-06-30** → the `v3→v4` migration flattens each *running* overlay sandbox
+   (plan/apply, with a pre-upgrade `migrate --check` audit); the read-glue is **kept forever**,
+   so there is **no detect-and-refuse** — any binary flattens a running sandbox. A *stopped*
+   overlay sandbox is a plan choice: go back & start it, or proceed and abandon its changes.
+   See the Recovery section above.
 2. **Phase 2 timing:** next minor, or sooner given it's a security-motivated
    removal of a beta feature?
 3. **Same-filesystem ergonomics:** do anything to nudge `~/.yoloai` onto the

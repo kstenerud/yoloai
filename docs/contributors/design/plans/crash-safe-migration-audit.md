@@ -52,18 +52,18 @@ real, must be handled in the build · *open-decision* = a flagged plan decision.
 - **A2 — macOS overlay flatten = silent total loss.** *[rests on confirmed DF69]* The
   snapshot/seed reflinks the **empty** host upper; the real data is container-tmpfs
   only; a relaunch wipes it, so resume reads a baseline-only view and commits a
-  "successful" empty flatten. **designed (plan/apply); implementation item, macOS-only.** No
-  open design question remains — it's two concrete behaviors in the overlay migrator: **(a)
-  `Plan()`** classifies a **stopped macOS overlay** sandbox as a **refusal/quarantine**
-  ("overlay changes were never persisted, DF69 — unrecoverable") instead of fabricating a
-  successful empty flatten; **(b) `Apply()`** extracts the live upper into scratch in a
-  **single durable act and never stops/restarts the container** (a restart wipes the tmpfs).
-  Reading is non-destructive (the source is never modified); once extracted the sandbox
-  migrates like any other. Scope is **macOS + stopped only** — Linux uppers persist on disk,
-  so a stopped Linux overlay can still be flattened by bringing up an agent-free container
-  (an A16 backend-up precondition, *not* a refusal); a *running* sandbox on any OS is
-  covered. The stopped-macOS upper is already gone (nothing on disk to copy), so refusing /
-  quarantining is the only honest action.
+  "successful" empty flatten. **designed (plan/apply); implementation item.** No open design
+  question remains — it's two concrete behaviors in the overlay migrator: **(a) `Plan()`**
+  requires the sandbox **already running** (both platforms — the binary has no mount code, so
+  it can't start a stopped overlay) and surfaces a **stopped** one as a plan choice: go back &
+  start it (preserves changes) **or** proceed destructively (abandons the overlay changes —
+  macOS already gone per DF69; Linux displaced upper to `trash/`, manually recoverable); never
+  a fabricated empty flatten. **(b) `Apply()`** reads the merged view from the running
+  container in a **single durable act and never stops/restarts it** (a restart wipes the macOS
+  tmpfs and unmounts overlay). Reading is non-destructive; a *running* sandbox on any OS is
+  covered. (Note: this updates the earlier "macOS-only" framing — because the binary no longer
+  mounts overlay at all, **stopped on Linux is also a refusal/choice**, not an A16 backend-up
+  bring-up.)
 
 ## HIGH
 
@@ -102,17 +102,19 @@ real, must be handled in the build · *open-decision* = a flagged plan decision.
   a foreseen quarantine; the user approves the whole plan (quarantines included) or aborts,
   one up-front decision. All-or-nothing is the *decision*, not the *execution* (units still
   commit incrementally + resumably). See the plan's Plan/apply section.
-- **A13 — realm-step refusal message.** The post-removal binary's v3→v4 default must
-  carry the 5-element named-tool refusal, not "no migration registered." **still-live**
-  (overlay-removal build). Severity MED.
-- **A14 — stepping-stone availability.** Keep the **detector** forever + pin a
-  download/checksum for the migration version. **still-live** (migration-version-gating).
+- **A13 — realm-step refusal message.** **dissolved for overlay** — the overlay extractor
+  is kept forever (decision 8), so any binary can always flatten; there is no
+  post-removal-without-reader build and no refusal to author. (The 5-element refusal pattern
+  stays as general prior art for any *future* migration that does delete a reader.)
+- **A14 — stepping-stone availability.** **dissolved for overlay** — with the reader kept
+  forever (decision 8), no intermediate/stepping-stone version is ever needed for overlay and
+  there is nothing to pin. (Migration-version-gating stays as general prior art.)
 - **A15 — recovery observability.** Signpost `--rollback` on repeated failure
   (dpkg-`--audit` style); a general "am I mid-migration / clean?" check in `system
   status` that survives the binary swap. **still-live**.
-- **A16 — backend-up pre-flight for the flatten.** The container-bound extract needs
-  the backend daemon running + base image present; emit a specific "start <backend>"
-  refusal. **still-live** (the v3→v4 flatten).
+- **A16 — folded into A2.** The flatten reads from an **already-running** sandbox via exec
+  (decision 8 — the binary no longer brings up a container or needs a base image present), so
+  "backend up + sandbox running" is exactly A2's require-running precondition. No separate item.
 - **A17 — persistent-vs-transient classification.** Bound forward retries with a
   recorded attempt count; require explicit `--rollback`; never auto-rollback over
   committed sandboxes. **still-live** (was OQ2).
@@ -124,11 +126,17 @@ real, must be handled in the build · *open-decision* = a flagged plan decision.
 
 The spine **dissolves** the most error-prone pieces — A8 (WAL), DF68, A6, A9 — and
 **reduces** A7 (per-sandbox staging shrinks disk + quiescence to one sandbox). The
-**still-live** core is the durable primitive (A1), the macOS overlay destroyed-source
-refusal (A2), quiescence-via-status (A5 — note the whole-tree flock blocks other yoloai
+**still-live** core is the durable primitive (A1), the **require-running precondition +
+stopped-sandbox plan-choice** (A2, both platforms), quiescence-via-status for host-side
+migrations (A5 — note the whole-tree flock blocks other yoloai
 *processes*, but the in-container agent isn't one, so the migrated sandbox still needs
-`DetectStatus == Stopped`), and the operational set (A13–A17). The **decisions are now
-made** (D110 + this round): 1 quarantine-or-abort, 3 **no downgrade** (one-way), 4
-hard-refuse + single-FS, 5 whole-tree live flock, A18 scratch-disposable. R1 is accepted
+`DetectStatus == Stopped` for host-side reads; the overlay flatten instead **requires the
+sandbox running** and reads via exec), and the operational set (A15 observability, A17
+retry-classification). **Dissolved / folded for overlay:** A13/A14 (decision 8 keeps the
+read-glue forever — no detect-and-refuse/stepping-stone) and A16 (folded into A2 — the
+flatten reads an already-running sandbox, no container bring-up). The **decisions are now
+made** (D110 + this round): 1 plan/apply (was quarantine-or-abort), 3 **no downgrade**
+(one-way), 4 hard-refuse + single-FS, 5 whole-tree live flock, 8
+delete-create/start-keep-read-glue, A18 scratch-disposable. R1 is accepted
 as one-way — the escape from a persistent forward bug is per-sandbox quarantine, not
 rollback.

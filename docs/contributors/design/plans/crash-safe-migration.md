@@ -235,30 +235,32 @@ A small, shared set of strategies a migrator declares — not per-migrator hand-
   reading. **Quiescence comes from `DetectStatus == Stopped`, not the flock** (A5:
   the per-sandbox flock is released once the container launches, so a live agent
   holds no lock). Per-sandbox granularity means quiescing **one** sandbox at a time.
-- `LiveContainerExtract` — for overlay, the flatten is a **recombination of two existing
-  operations**, not a new tree-materializer (the existing `apply` produces a *patch
-  against the original workdir*, not a flat tree, so it can't be used as-is):
+- `LiveContainerExtract` (overlay) — the flatten reads from a sandbox that is **already
+  running** (overlay already mounted by whatever binary started it); the migrating binary
+  **never starts or mounts** an overlay sandbox — that code is deleted (decision 8). Verified
+  in code, the read needs only generic `Exec` + git + a copy + two constants (the merged path
+  + the baseline SHA in `environment.json`):
   1. **seed** a copy dir in scratch from the **lower** (the original read-only workdir) —
-     reuse copy-mode seeding (reflink-cheap on CoW); its git baseline *is* the overlay
-     baseline state.
+     reuse copy-mode seeding (reflink-cheap on CoW).
   2. **reuse the existing overlay patch path** (`generateOverlayPatchForContext` →
-     `git add -A` + `git diff --binary <baselineSHA>` inside the **running** agent-free
-     container; `copyflow/apply.go` / `apply_overlay.go`), **retargeted** to `git apply`
-     onto the scratch copy instead of the live workdir — the agent's changes land on top
-     and stay visible as the **same pending diff** the overlay showed.
-  3. fsync, tear down the container.
-  Reading is **non-destructive** (the source is never modified). Net-new is wiring (the
-  apply target param) + the precondition check; the heavy lifting (in-container patch-gen,
-  host `git apply`, reflink seed) already exists. Once seeded, the overlay sandbox migrates
-  *exactly* like any other: split agent.json, stamp, swap — the extract is just how
-  Promotion step 1 (build the changed files in scratch) is populated, **no special
-  destructive path**.
-- **Source-readable precondition (A2, mandatory):** on **macOS** the overlay upper is
-  tmpfs-only, so it is readable **only while the container runs** (DF69, confirmed). The
-  migrator **requires the sandbox running** before extracting; a *stopped* macOS overlay
-  sandbox's upper is **already gone** → **detect and refuse** with a loud message (it
-  cannot extract a source that no longer exists). Linux uppers live on disk — always
-  readable.
+     `git add -A` + `git diff` in the **already-running** container at the merged path;
+     `copyflow/apply.go` / `apply_overlay.go`), **retargeted** to `git apply` onto the scratch
+     copy instead of the live workdir — the agent's changes land on top and stay visible as
+     the **same pending diff** the overlay showed.
+  3. fsync; **leave the container as it was** — the migrator does not stop it (stopping
+     unmounts the overlay and, on macOS, destroys the tmpfs upper).
+  Reading is **non-destructive** (the source is never modified). Net-new is wiring (the apply
+  target param) + the precondition check; in-container patch-gen, host `git apply`, and
+  reflink seed already exist. Once seeded, the overlay sandbox migrates *exactly* like any
+  other (stamp, swap) — the extract is just how Promotion step 1 is populated.
+- **Running-required precondition (A2, mandatory, both platforms):** the merged view exists
+  only while the container runs, and the migrating binary **can't mount it** (no overlay
+  runtime code). So the migrator **requires the sandbox already running**, and surfaces a
+  **stopped** overlay sandbox in the **plan** as an explicit choice: **(a)** abort, downgrade
+  to the prior binary, **start** the sandbox, re-upgrade, re-run — preserves its changes; or
+  **(b)** proceed — a **destructive** op that flattens to the original workdir and **abandons**
+  the agent's uncommitted overlay changes (on macOS already gone, DF69; on Linux the displaced
+  upper lands in `trash/`, manually recoverable). Never a silent empty-flatten.
 
 ## No automated downgrade — but the prior schema is preserved in trash (decision 3)
 
@@ -329,14 +331,22 @@ resume the run (rescan per-unit versions, migrate stragglers).
    This gives incremental progress (a crash re-does only the in-progress sandbox) without a
    second version axis. (Supersedes the earlier sandbox-as-sub-realm framing — dropped
    2026-06-30 per "bump the schema version" being a single linear chain.)
-8. **Overlay-reader placement (OPEN, audit R4).** The flatten (`v3→v4`) irreducibly needs
-   the overlay reader (the apply/extract path) to read the source. **(i)** the reader lives
-   only in builds that carry the `v3→v4` migration; a later build that drops overlay deletes
-   it and keeps just the detector + "upgrade through the flatten migration first" refusal,
-   or **(ii)** the overlay-dropping build retains a *minimal* flatten-reader so a user who
-   skipped `v3→v4` can still convert leftover overlay sandboxes (more robust, more code
-   carried). The only hard constraint: the build that **removes** the reader must post-date
-   the build that **flattens** with it.
+8. **Overlay-reader placement — RESOLVED: delete all create/start overlay code; keep only
+   the read-glue, which reads already-running containers.** Verified in code: flattening an
+   **already-running** overlay sandbox needs only generic `Exec` (git in the live container) +
+   host-side `git apply` + a workdir copy + two constants (the merged path + the baseline SHA
+   in `environment.json`) — **zero overlay runtime/mount code**. So the new binary **deletes**
+   every create/start unit (entrypoint `apply_overlays`, the `CAP_SYS_ADMIN` grant +
+   AppArmor/seccomp/podman-userns exceptions, `mounts.go` overlay specs, `collectOverlayMounts`,
+   `OverlayMountConfig`, overlay-dir init) and **keeps only** the small read-glue
+   (`generateOverlayPatchForContext` / `ApplyOverlay` / baseline helpers + path constants).
+   Consequences: **(1)** no detect-and-refuse / stepping-stone for overlay (A13/A14 dissolve) —
+   any future binary can flatten an overlay sandbox it finds; **(2)** no two-binary ordering
+   constraint — the binary that adds the flatten also removes `:overlay` as a creatable mode;
+   **(3)** the security win is **maximal and clean** — the new binary **cannot mount overlayfs
+   at all** (no `CAP_SYS_ADMIN`/mount code), it only reads from a container a prior binary
+   already mounted. The cost: the sandbox must be **already running** to flatten (the binary
+   can't start a stopped overlay) — stopped is a plan-surfaced choice (Source consistency).
 9. *(plus the user's pending critiques)*
 
 ## Migration chain (decoupled from release cadence, D110)
@@ -365,13 +375,17 @@ sub-realm — see D110 on why we did not build a general carve framework). The c
   pass converts **each overlay sandbox in isolation**: seed a copy dir from the lower and
   apply the upper's changes onto it (see
   [Source consistency](#source-consistency-migrator-concern-blessed-strategies)), then swap —
-  **no per-sandbox version marker** (progress is read from the sandbox's on-disk form). macOS
-  requires the sandbox *running* (DF69) — refuse if stopped. The machinery lands here, with
-  the destructive flatten as the user that both needs and exercises it.
-- **later — overlay removal.** A build that deletes the overlay reader + mount option; any
-  un-flattened sandbox → permanent **detect-and-refuse** pointing at the `v3→v4` migration.
-  **Only hard ordering constraint:** this build must **post-date** `v3→v4` (it deletes the
-  read/apply code the flatten needs — see open decision 8).
+  **no per-sandbox version marker** (progress is read from the sandbox's on-disk form). Both
+  platforms **require the sandbox already running** (the binary never mounts overlay); a
+  stopped overlay sandbox is a plan-surfaced choice — go back & start it, or proceed and
+  abandon its overlay changes. The machinery lands here, with the destructive flatten as the
+  user that both needs and exercises it.
+- **overlay removal (rides the same `v3→v4` release).** Delete all overlay **create/start**
+  code (entrypoint mount, `CAP_SYS_ADMIN` grant + AppArmor/podman exceptions, `mounts.go`
+  overlay specs, `collectOverlayMounts`, `OverlayMountConfig`, dir init) and `:overlay` as a
+  creatable mode; **keep only the read-glue** (decision 8), which execs into an already-running
+  container — **no mount code remains**. So there is **no later detect-and-refuse binary** and
+  **no ordering constraint**: any binary flattens a *running* overlay sandbox via `v3→v4`.
 
 **Settled: leave the existing `v2→v3` split as-is.** "The agent.json ship has sailed" — we
 do not retro-harden it. The A4/DF68 power-loss exposure stays (bare `os.WriteFile`,
@@ -395,7 +409,8 @@ metadata-preserving.
   atomic rename; forward=resume-first, rollback=wholesale-restore-only; the
   container-bound extract exception.
 - [research/migration-version-gating.md](../research/migration-version-gating.md) —
-  stepping-stone + detect-and-refuse (the flatten→removal split, the 5-element refusal).
+  stepping-stone + detect-and-refuse, kept as **general prior art**; **not applied to overlay**
+  (decision 8 keeps the read-glue forever, so the flatten never needs to refuse).
 - [research/reflink-vs-hardlink.md](../research/reflink-vs-hardlink.md) — the snapshot
   primitive is **reflink-or-full-copy** (hardlink rung dropped).
 
