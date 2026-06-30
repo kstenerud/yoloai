@@ -178,13 +178,16 @@ up **agent-free** (the decoupled-launch enabler) so no agent writes while we rea
 The crash-safe substrate is exercised *there* (and by future host-side
 migrations), not in the new binary.
 
-**macOS hazard (flagged — verify on a Mac, DF69).** On Docker Desktop, when
-VirtioFS lacks xattr support the entrypoint remounts the overlay upper to **tmpfs
-inside the container** (`entrypoint.py:240-276`); changes then appear to exist only
-while the container runs. If confirmed, a *stopped* macOS overlay sandbox may have
-already lost its uncommitted changes — so the migration version must convert
-**while the sandbox is running**, and the messaging must say so. Apple `container`
-is untested for the same xattr path; treat conservatively.
+**macOS hazard (CONFIRMED on a Mac 2026-06-30, DF69).** When the host bind-mount
+lacks `trusted.*` xattr support the entrypoint remounts the overlay upper to **tmpfs
+inside the container** (`entrypoint.py:240-276`); changes exist **only while the
+container runs**. Live-tested: agent edits to an `:overlay` workdir are **lost on
+both graceful `stop`+`start` and non-graceful `kill`+`start`** (no tmpfs→host sync
+on shutdown; the host upper stays empty). Verified on **all three** macOS container
+backends — OrbStack, Docker Desktop, and Apple `container` — so it is **not
+Docker-Desktop-only**. ⇒ a *stopped* macOS overlay sandbox has **already** lost its
+uncommitted changes; the migration version **must** convert **while the sandbox is
+running**, and the messaging must say so. (Results: [research/reflink-vs-hardlink.md](../research/reflink-vs-hardlink.md) §B/§C.)
 
 **Recovery of existing on-disk `:overlay` sandboxes (DECIDED — resolves Open Q1).**
 Split the legacy *reader* from the legacy *detector*:

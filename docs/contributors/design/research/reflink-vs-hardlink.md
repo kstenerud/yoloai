@@ -4,8 +4,9 @@ ABOUTME: Tradeoff + verification status for the two "build-a-tree-alongside-chea
 ABOUTME: primitives — reflink (CoW clone) and hardlink — used by :copy and migration.
 
 Status: **OPEN — both recorded, neither chosen.** Cross-platform support matrix:
-**verified + cited 2026-06-30**; macOS on-device specifics (APFS cross-volume,
-`F_FULLFSYNC`, DF69): **brief below, awaiting a Mac run.** Feeds the reflink-`:copy`
+**verified + cited 2026-06-30**; macOS on-device specifics (APFS clonefile/hardlink
+semantics, cross-volume, `F_FULLFSYNC`, DF69): **verified on-device 2026-06-30 —
+results below.** Feeds the reflink-`:copy`
 work
 ([retire-overlay-reflink-copy.md](../plans/retire-overlay-reflink-copy.md) Phase 1)
 and the migration snapshot / build-alongside model
@@ -102,53 +103,87 @@ It was disabled by default in 2.2.1, the dnode race fixed in 2.2.2 (backport
 2.1.14), and block cloning **enabled by default only in 2.3.0**. Treat **ZFS ≥
 2.3.0** as the "reflink works" line; assume silent fallback below it.
 
-## macOS on-device verification brief (for a Mac agent on this branch)
+## macOS on-device verification — RESULTS (verified 2026-06-30)
 
-The dev host is Linux, so these can only be confirmed on a Mac. Open this branch on
-a macOS machine (Docker Desktop installed) and have an agent work through these.
-**Report results back into this file** (replace the matrix cells / add a "macOS
-verified" subsection) and **into DF69**.
+Run on macOS 26.5.1 (build 25F80), APFS, Docker 29.4.0, Apple `container` 1.0.0, on
+this branch with the installed `yoloai` (commit `8c14d055` — current for the overlay
+code, no diffs since). Method notes inline; commands were ad-hoc shell + `yoloai`.
 
-### A. APFS clone & link semantics
-1. **clonefile CoW-shares:** `cp -c bigfile clone` on an APFS volume; confirm
-   `du`/disk-used delta ≈ 0 (blocks shared), and that the clone reads identical.
-   Cite: clonefile(2) / "APFS" man material.
-2. **clonefile is CoW-independent:** edit `clone` in place; confirm `bigfile` is
-   byte-unchanged (CoW broke the shared extent). This is the property `:copy`
-   relies on.
-3. **Cross-APFS-volume clonefile:** does `clonefile` work across two APFS volumes
-   in the same container (e.g. the Data volume vs a separate APFS volume), or does
-   it `EXDEV`/fall back to copy? Determines whether `~/.yoloai` and a project on
-   *different* APFS volumes still get the fast path.
-4. **Hardlink on APFS:** `ln a b` works within a volume; confirm a cross-volume
-   `ln` fails `EXDEV`.
-5. **`F_FULLFSYNC`:** confirm that on APFS plain `fsync(2)` does **not** flush the
-   device write cache and `F_FULLFSYNC` is required for true power-loss durability
-   (the migration commit-primitive durability point). Cite Apple's fsync/fcntl
-   docs.
+### A. APFS clone & link semantics — all VERIFIED
 
-### B. DF69 — is the macOS overlay upper "live-or-lose"? (the high-value one)
-Static code reading (`entrypoint.py:~240-276`) suggests that when VirtioFS lacks
-xattr support, the overlay `upper`/`ovlwork` are remounted to **tmpfs inside the
-container** and the host upper goes stale — implying uncommitted overlay changes
-are lost on restart. **Verify or refute on Docker Desktop:**
-1. Create an `:overlay` sandbox; have the agent modify/create files in the workdir.
-2. Inspect inside the container: is there a `tmpfs` mount at `/run/yoloai-overlay/…`
-   (the fallback path)? Inspect the host
-   `~/.yoloai/sandboxes/<name>/work/<encoded>/upper/` — is it stale/empty while the
-   container holds the real upper?
-3. **Graceful stop + restart** the sandbox: are the changes still present, or gone?
-   Is there any tmpfs→host sync on graceful shutdown?
-4. **Non-graceful kill** + restart: same check.
-5. Conclusion: does macOS overlay lose uncommitted changes across a restart? →
-   This determines whether the overlay→copy flatten must run **while the sandbox is
-   live** on macOS, and resolves DF69.
+1. **clonefile CoW-shares — ✅.** `cp -c` (clonefile) of a 200 MB file consumed
+   **0 bytes** of container free space; a plain `cp` of the same file consumed
+   ~200 MB. **`du` is misleading on APFS** — it reports each clone's *logical* size
+   (200 MB), not shared blocks; the truth is the container free-space delta. The
+   clone gets an **independent inode** (≠ source), unlike a hardlink.
+2. **clonefile is CoW-independent — ✅.** Editing the clone in place left the source
+   **byte-identical** (`shasum` unchanged); the clone diverged. This is the exact
+   property `:copy` relies on.
+3. **Cross-APFS-volume clonefile — falls back to full copy (no sharing).**
+   clonefile(2) returns **`EXDEV`** ("src and dst are not on the same filesystem" —
+   confirmed in the on-device man page); `cp -c` across volumes returns **rc=0 but
+   does a real full copy** (~100 MB actually consumed on the target volume). ⇒ the
+   staging/snapshot tree must live on the **same APFS volume** as its source to get
+   the fast path; a project and `~/.yoloai` on *different* APFS volumes get a silent
+   full copy, not a clone.
+4. **Hardlink on APFS — ✅ / EXDEV.** `ln` within a volume shares the inode; a
+   cross-volume `ln` fails **`EXDEV`** ("Cross-device link").
+5. **`F_FULLFSYNC` — ✅ confirmed via on-device docs.** `man 2 fsync` states fsync
+   flushes host→drive but "the drive itself may not physically write the data to the
+   platters … if the drive loses power or the OS crashes, the application may find
+   that only some or none of their data was written," and points to **`F_FULLFSYNC`**
+   (fcntl `51`, present in the SDK's `sys/fcntl.h`) to "flush all buffered data to
+   permanent storage." ⇒ the migration commit primitive **must** use `F_FULLFSYNC`
+   (not plain `fsync`) on macOS for true power-loss durability.
 
-### C. Apple `container` backend
-Does the Apple `container` backend (`apple.go`, `OverlayDirs=true`) hit the **same**
-VirtioFS xattr/tmpfs fallback as Docker Desktop, or is its overlay upper
-host-readable? (Untested in the codebase map.) Determines whether the macOS hazard
-is Docker-Desktop-only or both.
+**Bonus (the real use case): recursive directory clone — ✅.** `cp -cR` of a
+two-level tree (the actual `:copy` / migration-snapshot operation) shared the
+**whole tree** (0 bytes consumed), **preserved perms (640) and xattrs**, kept inodes
+independent, and CoW-isolated a leaf edit from the source. clonefile(2)'s man page
+warns against calling it directly on directories and recommends **`copyfile(3)` with
+`COPYFILE_CLONE`** — which is what `cp -cR` uses under the hood.
+
+**Net for the primitive choice on macOS:** reflink (`clonefile`/`copyfile`+CLONE) is
+fully viable, byte-exact, metadata-preserving, and degrades to a correct full copy
+cross-volume. It is the natural default for both `:copy` and the migration snapshot
+on APFS. Hardlink works too but only within a volume and only under perfect
+replace-only discipline — and buys **nothing** on APFS (clonefile already covers it).
+Hardlink's only breadth advantage is on Linux **ext4** (no reflink there); on macOS
+there is no reason to prefer it.
+
+### B. DF69 — overlay "live-or-lose" — CONFIRMED (not refuted)
+
+Reproduced with a real `:overlay` sandbox (`yoloai new … :overlay`):
+
+- **Fallback triggers.** The live overlay `upperdir` is
+  `/run/yoloai-overlay/<base64>/upper` — a **tmpfs inside the container**. The host
+  upper (`~/.yoloai/library/sandboxes/<name>/work/<encoded>/upper/`) stayed
+  **empty** the entire time.
+- **Graceful `stop` + `start`: changes LOST.** An agent edit (appended line + new
+  file) was gone after a clean restart — `file.txt` reverted to its baseline, the
+  new file vanished. **There is no tmpfs→host sync on graceful shutdown** (the host
+  upper remained empty across the stop).
+- **Non-graceful `docker kill` + `start`: changes LOST** (as expected — a strict
+  subset of the graceful case).
+- `yoloai diff` *does* show the changes while the container is up — but **only
+  because it execs `git` inside the container** against the merged overlay. This
+  confirms the readability-map claim that overlay diff/apply is container-bound.
+
+⇒ On macOS, a **stopped** overlay sandbox has *already* lost its uncommitted
+changes. The overlay→copy flatten therefore **must run while the sandbox is live**
+on macOS — there is no host-readable upper to flatten offline. This is **pre-existing
+shipped behavior**, independent of the migration. DF69 resolved; → roll into
+`backend-idiosyncrasies.md`.
+
+### C. Apple `container` backend — SAME hazard; not Docker-Desktop-only
+
+Verified on **all three** macOS container backends — **OrbStack**, **Docker
+Desktop**, and **Apple `container`** — the tmpfs fallback triggers identically. Root
+cause is the host bind-mount filesystem: **virtiofs** (OrbStack and Apple
+`container`) or **`fakeowner` over VirtioFS** (Docker Desktop). None expose the
+`trusted.*` xattrs overlayfs requires, so all three downgrade to the container-local
+tmpfs upper. The hazard is **universal to macOS virtiofs-based container backends**,
+not specific to Docker Desktop.
 
 ## Relationship to other work
 
@@ -161,4 +196,6 @@ is Docker-Desktop-only or both.
   "implications" there currently say "reflink the data dir," which this file
   reopens as undecided (hardlink may be better for the migration's replace-only
   case).
-- **DF69** — the macOS tmpfs/VirtioFS overlay hazard, verified by brief §B.
+- **DF69** — the macOS tmpfs/VirtioFS overlay hazard: **CONFIRMED** by §B/§C
+  results (live-or-lose on all three macOS container backends; flatten must run
+  while the sandbox is live).

@@ -141,6 +141,7 @@ inclusion test first, then add a row to the index.
 | `idle` agent / keep-alive exits 1 with `usage: sleep number[unit]` on a macOS/Tart guest | [macOS guest BSD sleep rejects sleep infinity](#macos-guest-bsd-sleep-rejects-sleep-infinity-gnu-only) |
 | `install network-isolation firewall: netns sidecar exited 2: … can't open file '/yoloai/bin/install-firewall.py'` (intermittent, under concurrent churn; file is present in image) | [Docker/OrbStack: ephemeral container transiently exposes an incomplete rootfs](#a-freshly-created-ephemeral-container-can-transiently-expose-an-incomplete-rootfs-under-heavy-concurrent-churn) |
 | Same `install-firewall.py` (or any embedded-resource) error, but **deterministic** on one docker provider while another passes — file genuinely absent from that provider's image | [Docker: base-image staleness marker keyed per backend, not per provider/store](#docker-base-image-staleness-marker-was-keyed-per-backend-not-per-image-store-second-provider-runs-stale) |
+| macOS `:overlay` sandbox loses the agent's uncommitted changes after `stop`/`restart`/`kill`; `yoloai diff` showed them while running | [macOS: overlayfs on a VirtioFS bind silently downgrades to a tmpfs upper (changes lost on restart)](#macos-overlayfs-on-a-virtiofs-bind-mount-silently-downgrades-to-a-container-local-tmpfs-upper-uncommitted-changes-lost-on-restart) |
 
 ---
 
@@ -2463,3 +2464,50 @@ form globally.
 `internal/orchestrator/launch/launch_reroute_test.go`
 (`TestBuildAndStart_ContainerEnhancedTakesLegacyPath`); `runtime/isolation_test.go`
 (`TestSupportsAgentFreeLaunch`).
+
+---
+
+## macOS: overlayfs on a VirtioFS bind-mount silently downgrades to a container-local tmpfs upper (uncommitted changes lost on restart)
+
+**Symptom.** A macOS `:overlay` sandbox shows the agent's changes via `yoloai diff`
+while it is running, but after `stop`+`start` (or `restart`, or a `kill`) the
+changes are **gone** — files revert to their baseline and newly-created files
+vanish. The host upper dir (`~/.yoloai/library/sandboxes/<name>/work/<encoded>/upper/`)
+is empty the whole time.
+
+**Root cause (external).** Linux overlayfs stores per-file metadata (whiteouts,
+opaque markers, origin) in `trusted.*` extended attributes on the upper dir. macOS
+container backends bind-mount host directories over **VirtioFS** (OrbStack, Apple
+`container`) or **`fakeowner` over VirtioFS** (Docker Desktop), and none of these
+expose `trusted.*` xattrs. With no xattr support overlayfs cannot use that upper, so
+the mount is unusable for writes. This is a property of overlayfs + VirtioFS, not of
+yoloAI — delete all our code and an `overlay` mount with `upperdir` on a VirtioFS
+share still fails the same way.
+
+**Our workaround (the thing that makes the loss observable).** `apply_overlays()` in
+`runtime/docker/resources/entrypoint.py` (~lines 240-276) detects the read-only
+overlay via a write probe and remounts with a **tmpfs-backed upper** at
+`/run/yoloai-overlay/<base64>/upper`. It copies any prior host-upper state *in* at
+mount time, but nothing copies the tmpfs upper back to the host — **there is no
+tmpfs→host sync on shutdown**, graceful or not. So all changes live only in
+container-local tmpfs and die with the container. The log line
+`overlay.local_upper … "changes won't persist across restarts"` is emitted when this
+path is taken.
+
+**Verified 2026-06-30** (macOS 26.5.1, Docker 29.4.0): the fallback triggers and
+changes are lost on both graceful `stop`+`start` and non-graceful `kill`+`start`, on
+**all three** macOS container backends — OrbStack, Docker Desktop, and Apple
+`container`. `yoloai diff` works only because it execs `git` *inside* the live
+container against the merged overlay (overlay diff/apply is container-bound).
+
+**Consequences.**
+- A *stopped* macOS `:overlay` sandbox has already lost its uncommitted changes; do
+  not assume the host upper is authoritative on macOS.
+- The planned overlay→copy flatten migration (D109) **cannot** flatten a stopped
+  macOS overlay sandbox — it must convert **while the sandbox is live**, and the
+  migration UX must say so. See DF69 and
+  [design/research/reflink-vs-hardlink.md](design/research/reflink-vs-hardlink.md)
+  §B/§C.
+
+**Code:** `runtime/docker/resources/entrypoint.py` (`apply_overlays`, the
+`overlay.virtofs_fallback` / `overlay.local_upper` branch).
