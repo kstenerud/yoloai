@@ -160,21 +160,45 @@ idempotency alone. It is built on the crash-safe migration substrate (exclusive
 lock + write-ahead journal + per-sandbox atomic commit + snapshot rollback +
 run-level stamp-last) designed in
 [crash-safe-migration.md](crash-safe-migration.md) (DF68). That substrate lands
-first and retro-hardens the agent.json split. The retirement runs as the library
-realm `v3→v4` step (in `System.MigrateDataDir`), reading the single normalized v3
-`environment.json` shape; the realm stamp advances to 4 only after every overlay
-sandbox is resolved, so the existing fail-fast gate blocks the user until done.
+first and retro-hardens the agent.json split.
 
-**Recovery of existing on-disk `:overlay` sandboxes (decision point — see Open
-questions).** Per the versioning philosophy (dumb checker; explicit, fail-fast
-`system migrate` owns recognition/validation), the recommended posture is:
-`system migrate` **detects** any sandbox with `Mode == overlay` and **refuses
-with guidance** ("apply or destroy your `:overlay` sandbox `<name>` before
-upgrading") rather than silently converting — an overlay sandbox's changes live
-in the container/host upper layer and are only meaningful while running, so a
-post-removal binary can't diff or apply them anyway. Auto-converting to `:copy`
-would re-copy from source and **lose** the agent's overlay changes, so it must not
-be silent.
+**Who runs the flatten — the migration version, not the post-removal binary
+(decided; see [research/migration-version-gating.md](../research/migration-version-gating.md)).**
+The codebase map (2026-06-30) settled a crux: overlay diff/apply reads a git
+**baseline that lives *inside* the container** (established by
+`UpdateOverlayBaselineToHEAD()` exec'd in the container; `copyflow/diff.go`,
+`apply_overlay.go`), so the operation is container-bound on **every** backend —
+even on Linux/Podman where the raw upper bytes happen to sit on a host bind-mount
+(`~/.yoloai/sandboxes/<name>/work/<encoded>/upper/`). The post-removal binary
+deletes exactly that machinery, so it **cannot** flatten an overlay sandbox. The
+overlay→copy flatten is therefore essentially the existing **`apply`** operation
+(apply the overlay delta onto the workdir, then treat it as `:copy`), and it must
+run in a **migration version** that still ships the overlay/apply path — brought
+up **agent-free** (the decoupled-launch enabler) so no agent writes while we read.
+The crash-safe substrate is exercised *there* (and by future host-side
+migrations), not in the new binary.
+
+**macOS hazard (flagged — verify on a Mac, DF69).** On Docker Desktop, when
+VirtioFS lacks xattr support the entrypoint remounts the overlay upper to **tmpfs
+inside the container** (`entrypoint.py:240-276`); changes then appear to exist only
+while the container runs. If confirmed, a *stopped* macOS overlay sandbox may have
+already lost its uncommitted changes — so the migration version must convert
+**while the sandbox is running**, and the messaging must say so. Apple `container`
+is untested for the same xattr path; treat conservatively.
+
+**Recovery of existing on-disk `:overlay` sandboxes (DECIDED — resolves Open Q1).**
+Split the legacy *reader* from the legacy *detector*:
+- **Migration version** ships a `migrate` verb that flattens each overlay sandbox
+  to `:copy` (drives the existing apply path, agent-free, crash-safe via the DF68
+  substrate; idempotent/resumable; flips the plain-int stamp **last**), plus a
+  pre-upgrade **audit** (`migrate --check` / surfaced in `system status`) listing
+  sandboxes still on the overlay stamp so the user learns *before* upgrading.
+- **Post-removal binary** carries **zero overlay-read code** but keeps the cheap
+  **detector forever**: a `Mode == overlay` / stamp check that **fails fast with a
+  good refusal** naming the sandbox, the version gap, and the exact migration
+  binary to run (the ES `IndexMetadataVerifier` five-element message is the model;
+  a bare "unrecognized mode" is the anti-pattern). It never silently auto-converts
+  — re-copying from source would **lose** the agent's overlay changes.
 
 **BREAKING-CHANGES.md** (breakage vs the last *published* release): `:overlay`
 removed; rationale (host-escape on rootful Docker, not cheaply fixable; reflink
@@ -194,8 +218,11 @@ upgrading; use `:copy`, ideally with the data dir on a CoW filesystem).
 
 ## Open questions (for the human)
 
-1. **Migration policy:** fail-fast refuse (recommended) vs auto-convert to `:copy`
-   (lossy) vs quarantine. 
+1. **Migration policy:** ~~fail-fast refuse vs auto-convert vs quarantine~~
+   **RESOLVED 2026-06-30** → migration-version flattens (a `migrate` verb +
+   pre-upgrade audit, while overlay is still supported); post-removal binary
+   detect-and-refuses with a pointer. See the Recovery section above and
+   [research/migration-version-gating.md](../research/migration-version-gating.md).
 2. **Phase 2 timing:** next minor, or sooner given it's a security-motivated
    removal of a beta feature?
 3. **Same-filesystem ergonomics:** do anything to nudge `~/.yoloai` onto the

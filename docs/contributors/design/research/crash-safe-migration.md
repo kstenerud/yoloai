@@ -329,11 +329,30 @@ the plan:
 - The "one migration at a time per host" invariant underpins "skip ARIES
   concurrency machinery" — confirm it holds (it does today via the migration lock).
 
+## The container-bound extract exception (overlay flatten)
+
+The "exclusive, offline, no concurrent writers" precondition holds for **host-side**
+data (the common case: the agent.json split, future metadata migrations). The
+overlay→copy flatten is the exception: its source (the git baseline) lives *inside*
+a container, so its **extract** phase is container-bound on every backend (verified
+2026-06-30 — see [migration-version-gating.md](migration-version-gating.md) and the
+retire-overlay plan's codebase map). The decomposition that contains the hazard:
+**extract** (run the existing `apply` against a live, **agent-free** container — no
+writer, so the read is quiescent) → **transform/commit** (offline host data, the
+clean journal/snapshot/flip model above, unchanged). That flatten runs in a
+**migration version** (which still ships the overlay/apply path), not the
+post-removal binary — so the substrate here is exercised by that version. The
+cheap-hardlink retention does **not** cross the container boundary, so extract is a
+genuine content copy (inherent to overlay→copy anyway). macOS adds DF69 (overlay
+upper may be tmpfs-only → convert while live).
+
 ## Relationship to other work
 
 - Backs the draft plan [crash-safe-migration.md](../plans/crash-safe-migration.md)
   (DF68) and, through it, overlay retirement (D109) +
   [retire-overlay-reflink-copy.md](../plans/retire-overlay-reflink-copy.md).
+- Pairs with [migration-version-gating.md](migration-version-gating.md) — the
+  upgrade-UX / detect-and-refuse half of the same migration story.
 - **Synergy with reflink-`:copy`:** the CoW snapshot primitive here *is* the
   reflink primitive that work adds — they share the implementation.
 - Builds on [shared-state-concurrency.md](shared-state-concurrency.md) for the

@@ -23,6 +23,14 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 
 ## Findings
 
+### DF69 — macOS overlay upper may be tmpfs-only (live-or-lose); flatten must convert while running
+
+- **Discovered:** 2026-06-30 · **Workstream:** overlay-retirement migration path (codebase readability map)
+- **Severity:** MEDIUM (macOS-only; potential silent loss of an overlay sandbox's *uncommitted* changes across a container restart — already-shipped behavior, not introduced by the migration)
+- **Disposition:** PARKED — **needs verification on a Mac** before asserting in `backend-idiosyncrasies.md`; shapes the migration-version's overlay→copy flatten.
+- **Description:** On Docker Desktop, when VirtioFS lacks xattr support `entrypoint.py` (lines ~240-276) remounts the overlay `upper`/`ovlwork` to **tmpfs inside the container** and copies prior host-upper state in; a read-only/stale host upper is left behind. The static read of the code suggests changes then persist **only for the container run** and are lost on restart — i.e. a *stopped* macOS overlay sandbox may have already lost its changes. **Unverified:** whether a graceful shutdown syncs tmpfs→host (which would refute the loss). If confirmed, the overlay→copy flatten (D109) must run **while the sandbox is live** on macOS, and Apple `container` must be checked for the same xattr path. Consequence for the migration version: it cannot reliably flatten a *stopped* macOS overlay sandbox; messaging must direct the user to convert while running.
+- **Pointer:** `runtime/docker/resources/entrypoint.py:~240-276`; design: [plans/retire-overlay-reflink-copy.md](plans/retire-overlay-reflink-copy.md) (macOS hazard note), [research/migration-version-gating.md](research/migration-version-gating.md).
+
 ### DF68 — `system migrate` is not crash-safe (stamp-before-pass; no journal/atomic-commit/lock/rollback)
 
 - **Discovered:** 2026-06-30 · **Workstream:** overlay-retirement migration design (the multi-step overlay→copy flatten forced the question)
