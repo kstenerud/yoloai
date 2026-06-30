@@ -108,15 +108,50 @@ route **every** commit *and* the `.schema-version` stamp through it, replacing
 today's bare `os.WriteFile`. Everything below assumes it. This single fix also
 closes A3/A4/C3 for the existing split.
 
-## The resumable naming convention (commit state in filenames, not a WAL)
+## Promotion: build complete, then resumable rename (commit state in filenames)
 
-To replace unit `X`: stage `X.new-<build-id>` (fsync) → rename `X` → `X.old-<build-id>`
-→ rename `X.new-<build-id>` → `X` → fsync(dir) → remove `X.old-<build-id>`. Every
-crash-point state is classifiable **from the names alone** (`{X, X.new-*, X.old-*}`
-→ exactly one recovery action). The rigor a WAL needed does not vanish — it moves
-into this state machine, which must be **exhaustively enumerated** and covered by
-**crash-injection tests at every rename boundary**. The displaced `X.old-<build-id>`
-is the one-generation backup.
+Two schemes, **one principle: copy what you *transform*, move what you only
+*relocate*.** Incomplete builds live in the `migration-<build-id>/` scratch dir, which
+**must be on the same filesystem as the live dir** (or the move-in is a non-atomic
+copy+delete and a sentinel dir can appear *partial*). Only **complete** units ever
+enter the live dir, under reserved sentinel names — the `_^^_` token **must be illegal
+in a real sandbox/realm name** (validate/reserve it). The per-unit **version**
+disambiguates the one ambiguous state (canonical name alone = not-started *or* done →
+read its version, the truth).
+
+**Per-sandbox** (the migrator rebuilds the sandbox's data — e.g. overlay→copy extract):
+1. Build the complete new sandbox in scratch; on completion move it into the live
+   sandboxes dir as `mysandbox_^^_new` (atomic rename — same FS).
+2. rename `mysandbox` → `mysandbox_^^_orig`
+3. rename `mysandbox_^^_new` → `mysandbox`
+4. delete `mysandbox_^^_orig`
+
+Recovery: `mysandbox`+`_^^_new` → resume at 2; `_^^_orig`+`_^^_new` → resume at 3;
+`mysandbox`+`_^^_orig` → resume at 4; `mysandbox` alone → check its version. **Every
+dir in the live sandboxes dir is always a complete, functional sandbox** — only
+renames/deletes touch the live dir; the incomplete build stays in scratch.
+
+**Realm-structural** (relocate/restructure *without* copying the bulk sandboxes):
+1. Build the new realm **structure** (layout + migrated files, **not** the bulk) in
+   scratch; move it to `library_^^_new` under `$YOLOAI_HOME`.
+2. **Final migration:** move the deterministically-derivable set of unchanged items
+   (sandboxes, …) from `library` into `library_^^_new` — each an atomic dir-rename.
+3. rename `library` → `library_^^_orig`; rename `library_^^_new` → `library`; delete
+   `library_^^_orig`.
+
+Recovery during step 2 re-derives the item list and resumes (idempotent: an item
+already in `_^^_new` is skipped). **Invariant relaxation to note:** during step 2
+neither `library` nor `library_^^_new` is individually complete — the **union** is,
+and every item is atomically in exactly one side (never torn). Safety rests on the
+derivable item-list being *exact* + crash-tested. Step 2 is **forward-only** (once the
+bulk move starts, old `library` is being gutted — clean abort is only available
+*before* step 2 begins). Alternative that keeps old `library` whole until the swap:
+**reflink** the bulk into `_^^_new` instead of moving (cheap on CoW FS, full-copy on
+ext4) — a conscious trade.
+
+The rigor a WAL needed doesn't vanish; it moves into these state machines, which must
+be **exhaustively enumerated** and covered by **crash-injection tests at every rename
+boundary**. The displaced `*_^^_orig` is the one-generation backup.
 
 ## Source consistency (migrator concern; blessed strategies)
 
@@ -144,10 +179,14 @@ open decision 3.
 
 ## Open decisions (critique targets)
 
-1. **Bad-sandbox policy (A12).** Recommended: **quarantine-and-continue** (set the
-   failed sandbox aside in `trash/`, migrate the rest, flip the stamp once all are
-   migrated *or* quarantined; the new-binary detector still refuses the quarantined
-   one individually). Alternative (abort the run) bricks the realm on one bad sandbox.
+1. **Bad-sandbox policy (A12) — DECIDED: quarantine-or-abort, user's choice.** On a
+   sandbox that can't migrate, the user chooses **quarantine** (set it aside in
+   `trash/`, continue, flip the stamp once all are migrated-or-quarantined; the
+   new-binary detector still refuses it individually) **or abort** the run. Abort is
+   clean: already-committed sandboxes stay migrated (atomic + independent), the
+   failed + remaining stay at the old version, stamp unflipped → re-runnable.
+   Non-interactive runs take the choice via a flag, **default abort** (safe in
+   headless contexts).
 2. **Ordering & realm-structural cost.** A run is an *ordered* sequence; a realm
    relocation that moves sandboxes must run before per-sandbox passes that iterate
    them. Realm-structural migrations **move/rename**, never copy sandbox bulk.
