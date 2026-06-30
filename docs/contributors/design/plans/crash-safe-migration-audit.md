@@ -52,13 +52,18 @@ real, must be handled in the build · *open-decision* = a flagged plan decision.
 - **A2 — macOS overlay flatten = silent total loss.** *[rests on confirmed DF69]* The
   snapshot/seed reflinks the **empty** host upper; the real data is container-tmpfs
   only; a relaunch wipes it, so resume reads a baseline-only view and commits a
-  "successful" empty flatten. **still-live** — the migrator must **require the sandbox
-  running** and **refuse a *stopped* macOS overlay sandbox** (destroyed source, not a torn
-  read). Reading the live upper into scratch is itself **non-destructive** (the source is
-  never modified), so once extracted the overlay sandbox migrates exactly like any other —
-  the extract is a single durable act, never re-derived from a relaunched container. The
-  copy-and-swap spine does **not** dissolve the *stopped*-source case (nothing on disk to
-  copy), but it fully covers the running case.
+  "successful" empty flatten. **designed (plan/apply); implementation item, macOS-only.** No
+  open design question remains — it's two concrete behaviors in the overlay migrator: **(a)
+  `Plan()`** classifies a **stopped macOS overlay** sandbox as a **refusal/quarantine**
+  ("overlay changes were never persisted, DF69 — unrecoverable") instead of fabricating a
+  successful empty flatten; **(b) `Apply()`** extracts the live upper into scratch in a
+  **single durable act and never stops/restarts the container** (a restart wipes the tmpfs).
+  Reading is non-destructive (the source is never modified); once extracted the sandbox
+  migrates like any other. Scope is **macOS + stopped only** — Linux uppers persist on disk,
+  so a stopped Linux overlay can still be flattened by bringing up an agent-free container
+  (an A16 backend-up precondition, *not* a refusal); a *running* sandbox on any OS is
+  covered. The stopped-macOS upper is already gone (nothing on disk to copy), so refusing /
+  quarantining is the only honest action.
 
 ## HIGH
 

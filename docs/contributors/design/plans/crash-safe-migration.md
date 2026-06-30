@@ -344,7 +344,10 @@ resume the run (rescan per-unit versions, migrate stragglers).
 There are **two independent realm chains** — **library** and **cli** — each with **one**
 linear `.schema-version` that orders its own migrations. They migrate independently (no
 cross-realm run-order dependency), but **both must be fully current before yoloai runs
-anything** (the existing gate). Schema versions are **not tied to app versions**, so a
+anything** (the existing gate). There is **no top-level `$YOLOAI_HOME` marker** (decided
+no): its direct children are just whatever is installed (library always; cli/daemon
+optionally), and the one above-realm migration we have — the `MigrateCLI` flat→namespaced
+relocation — stays as-is. Schema versions are **not tied to app versions**, so a
 single release can ship several migrations, and one migration can bundle several changes. A
 migration is free to **reach into sandboxes** (they are part of the library realm, **not** a
 sub-realm — see D110 on why we did not build a general carve framework). The chain:
