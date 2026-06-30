@@ -210,28 +210,25 @@ upgrading; use `:copy`, ideally with the data dir on a CoW filesystem).
 
 ---
 
-## Sequencing & timing (cadence — D110)
+## Sequencing (a linear migration chain — D110)
 
-Fixed by the crash-safe-migration cadence ([D110](../../decisions/working-notes.md);
-[crash-safe-migration.md](crash-safe-migration.md)) so every migration runs on a
-schema frozen in a prior shipped release. The split and the flatten are **one** sandbox
-`v0→v1` migration (fused 2026-06-30), so retirement is **two** releases, not three:
+Sequenced by the crash-safe-migration chain ([D110](../../decisions/working-notes.md);
+[crash-safe-migration.md](crash-safe-migration.md)). Migrations are a **linear data-dir
+schema chain, decoupled from release numbers** — what matters is schema-step order, not
+which version ships them:
 
-- **Migration release** — **Phase 1** (reflink-`:copy`, additive) ships, plus the
-  crash-safe machinery and the **single** sandbox `v0→v1` migration that both splits
-  agent.json *and* flattens overlay (extract the upper into scratch — non-destructive
-  read; macOS requires the sandbox running, DF69 — then split, stamp, swap). The overlay
-  read/apply reader is present here for its **last** use. After this release, **no overlay
-  sandbox remains**.
-- **Removal release** — **Phase 2**: overlay mount option + reader **deleted**; any
-  sandbox still at v0 → a permanent **detect-and-refuse** naming the migration release.
-  Flatten and removal **must** be different binaries — the flatten needs the overlay
-  read/apply code the removal deletes; that constraint is why this can't collapse to a
-  single release.
-
-Version numbers: the in-flight **v0.6.0** (release-prep) predates this and ships without
-the machinery, so the migration release is the next minor after it (likely 0.7.0, removal
-0.8.0).
+- **`v2→v3` — agent.json split (existing, sealed as-is).** Already shipping; the overlay
+  flatten is **not** fused with it.
+- **`v3→v4` — overlay→copy flatten.** The first customer of the crash-safe machinery; a
+  per-sandbox pass that seeds a copy dir from the lower and applies the upper's changes onto
+  it (non-destructive read; macOS requires the sandbox running, DF69 → refuse if stopped),
+  then stamps + swaps. Reflink-`:copy` (Phase 1, additive) ships alongside or before this.
+  The overlay read/apply reader is present here for its **last** use; after `v3→v4`, no
+  overlay sandbox remains.
+- **later — overlay removal (Phase 2).** A build that deletes the overlay mount option +
+  reader; any un-flattened sandbox → a permanent **detect-and-refuse** pointing at the
+  `v3→v4` migration. **Only hard ordering constraint:** the removal build must **post-date**
+  `v3→v4` (the flatten needs the overlay read/apply code the removal deletes).
 
 ## Open questions (for the human)
 

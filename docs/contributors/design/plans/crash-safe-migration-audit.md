@@ -23,17 +23,21 @@ real, must be handled in the build · *open-decision* = a flagged plan decision.
   inside the unit — the version is never flipped separately, every migration changes ≥2
   files). Durability is a **bounded fsync discipline**: fsync built contents before move-in
   (so `_^^_new` is never durable-but-empty), fsync(dir) after each rename, `F_FULLFSYNC` on
-  darwin (the price of power-loss safety; process-death alone needs none). C3/A4 is fixed
-  **structurally** — the split runs through the swap, so its files + version commit
-  atomically; the lighter file-granularity path is *forbidden* by version-atomicity, which
-  also forces the 0.6.0 scope to "build the machinery in 0.6.0." Severity CRITICAL.
+  darwin (the price of power-loss safety; process-death alone needs none). C3/A4-class
+  cross-file bugs are fixed **structurally for any migration that uses the machinery** (all
+  of a unit's changed files commit together in the swap). The existing **v2→v3 split is
+  sealed as-is**, does *not* use the machinery, and retains the A4 exposure (mitigated by
+  idempotent re-run; retro-hardening is an open call); the machinery's first user is the
+  **v3→v4** flatten. Severity CRITICAL.
 - **A4/C3 — existing agent.json split is power-loss-lossy.** *[verified]* Values-first
   in program order but **not fsynced** (`migrate_agentcfg.go:87-110`); under power
-  loss the slimmed `environment.json` can outrace its `agent.json` sibling. **still-live
-  — fix in 0.6.0** (same root as A1). Severity HIGH (power-loss-only, config-not-worktree).
+  loss the slimmed `environment.json` can outrace its `agent.json` sibling. **sealed as-is**
+  — the split ships un-hardened; retro-hardening (route through `atomicWriteJSON` +
+  stamp-after-pass) is an **open call**, default leave-it per "lock it off as it stands."
+  Severity HIGH (power-loss-only, config-not-worktree).
 - **DF68 — stamp-before-pass.** *[verified]* `MigrateLibrary` stamps before the
   per-sandbox pass (`schema.go:185` / `system.go:112-119`). **dissolved** by stamp-last
-  + per-sandbox-version-as-truth + fsync barrier.
+  + per-sandbox-on-disk-form-as-truth + fsync barrier.
 - **R1 — downgrade ratchet.** *[verified]* `RealmStatus` hard-errors `version > current`
   (`schema.go:91`); stamp-forward + GC-on-commit = no way back, even for a
   non-migration bug. **DECIDED: no downgrade** (one-way; escape from a persistent
@@ -92,7 +96,7 @@ real, must be handled in the build · *open-decision* = a flagged plan decision.
   **open-decision 1** — quarantine-and-continue (recommended) vs abort.
 - **A13 — realm-step refusal message.** The post-removal binary's v3→v4 default must
   carry the 5-element named-tool refusal, not "no migration registered." **still-live**
-  (0.8.0). Severity MED.
+  (overlay-removal build). Severity MED.
 - **A14 — stepping-stone availability.** Keep the **detector** forever + pin a
   download/checksum for the migration version. **still-live** (migration-version-gating).
 - **A15 — recovery observability.** Signpost `--rollback` on repeated failure
@@ -100,7 +104,7 @@ real, must be handled in the build · *open-decision* = a flagged plan decision.
   status` that survives the binary swap. **still-live**.
 - **A16 — backend-up pre-flight for the flatten.** The container-bound extract needs
   the backend daemon running + base image present; emit a specific "start <backend>"
-  refusal. **still-live** (0.7.0).
+  refusal. **still-live** (the v3→v4 flatten).
 - **A17 — persistent-vs-transient classification.** Bound forward retries with a
   recorded attempt count; require explicit `--rollback`; never auto-rollback over
   committed sandboxes. **still-live** (was OQ2).
