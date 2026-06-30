@@ -270,14 +270,38 @@ A small, shared set of strategies a migrator declares — not per-migrator hand-
   raw copy can catch a half-written file just as a live `git diff` could. The capture is *not*
   a consistent snapshot merely because the container is running; the plan must advise idling
   the agent (stop prompting) before migrating, and this is a known bound, not a guarantee.
-- **Running-required precondition (A2, mandatory, both platforms):** the merged view exists
-  only while the container runs, and the migrating binary **can't mount it** (no overlay
-  runtime code). So the migrator **requires the sandbox already running**, and surfaces a
-  **stopped** overlay sandbox in the **plan** as an explicit choice: **(a)** abort, downgrade
-  to the prior binary, **start** the sandbox, re-upgrade, re-run — preserves its changes; or
-  **(b)** proceed — a **destructive** op that flattens to the original workdir and **abandons**
-  the agent's uncommitted overlay changes (on macOS already gone, DF69; on Linux the displaced
-  upper lands in `trash/`, manually recoverable). Never a silent empty-flatten.
+- **Running-required precondition (A2 / re-audit Op-F1, mandatory, both platforms).** A
+  *correct* merged view comes only from overlayfs having already assembled it — i.e. from a
+  **running** container — and the new binary **cannot create that mount** (decision 8 deletes
+  the mount code). Two non-options confirm why "running" is mandatory, not incidental:
+  - *Starting it in plain mode doesn't help* — a no-overlay (`:copy`/bind) start mounts only the
+    **lower** (the pristine original workdir) without the agent's upper, so it reads the wrong
+    tree, not a recovered one.
+  - *Offline host-side reconstruction isn't safe* — even on Linux, where the upper persists as a
+    host dir, reconstructing the merge correctly requires honoring overlayfs
+    `trusted.overlay.opaque`/`redirect` xattrs (deleted-and-recreated dirs, renames), and
+    **`trusted.*` xattrs are readable only with `CAP_SYS_ADMIN`** (man 7 xattr), which the
+    unprivileged binary lacks. It can handle whiteouts (char-dev 0,0) unprivileged but cannot
+    reconstruct opaque dirs — and cannot even *detect* when it would be wrong → silent
+    incorrectness on deletions, which we refuse to ship.
+
+  So the migrator **requires the sandbox already running**, and the **dry-run plan enumerates
+  every affected *stopped* overlay sandbox and branches by backend**:
+  - **Linux-stopped — recoverable.** The upper is on the host, so the plan directs: abort,
+    downgrade to the prior binary, **start** the sandbox (overlay remounts; the container
+    survives the later binary swap), upgrade, re-run `migrate` — which now reads it running.
+    Preserves the changes.
+  - **macOS-stopped — already lost (DF69).** The tmpfs upper vanished at stop; downgrade-and-
+    start yields an *empty* upper, so there is **no** recovery path — the plan says so plainly.
+  - **Either, if the user declines/ignores** — proceed is a **destructive** op that flattens the
+    original workdir and **abandons** the agent's overlay changes (macOS: already gone; Linux:
+    the host-side upper is set aside in `trash/`, manually recoverable). Never a silent
+    empty-flatten.
+
+  This is the resolution of the **Op-F1 gate-deadlock**: the migration gate blocks `start`, and
+  the new binary can't mount overlay anyway, so a stopped overlay sandbox genuinely **cannot** be
+  recovered post-upgrade — the recovery must happen *before* upgrading, which is why the plan
+  surfaces it as a pre-upgrade audit, not an in-migration action.
 - **Sandboxes-root resolution (flat-v0 installs).** The flatten migrator lives in the
   **orchestrator** (it needs `Exec`/`ApplyOverlay`/backend types `internal/config` cannot
   import — exactly why `MigrateAgentConfigs` lives there too), which legitimately spans

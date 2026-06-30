@@ -200,12 +200,18 @@ idempotent/resumable; stamp flipped **last**), plus a pre-upgrade **audit**
 so the user learns *before* upgrading. Because the binary needs **no mount code** and
 **no overlay git path** (decision 8 — all overlay code deleted, raw copy used instead),
 there is **no post-removal binary distinction** and **no detect-and-refuse** — any binary
-flattens a *running* overlay sandbox. **Requires the sandbox running**, both platforms (the binary can't
-mount a stopped overlay); a **stopped** overlay sandbox is a plan-surfaced choice:
-**(a)** abort, downgrade, start it, re-upgrade, re-run (preserves changes); or
-**(b)** proceed — destructive, abandons the sandbox's uncommitted overlay changes
-(macOS: already gone, DF69; Linux: displaced upper to `trash/`, manually
-recoverable). **Security claim restated:** the host-escape vector was an *untrusted
+flattens a *running* overlay sandbox. **Requires the sandbox running**, both platforms — a
+correct merged view comes only from a live overlayfs mount; the new binary can't create it,
+a plain start reads only the lower (no agent changes), and offline host-side reconstruction
+needs `CAP_SYS_ADMIN` to read overlayfs `trusted.overlay.*` opaque/redirect xattrs (the
+unprivileged binary can't, so it can't reconstruct deletions correctly — re-audit Op-F1). The
+dry-run plan enumerates affected **stopped** overlay sandboxes and **branches by backend**:
+**Linux-stopped** is recoverable (upper persists host-side) → downgrade, start it, re-upgrade,
+re-run (the container survives the binary swap); **macOS-stopped** is **already lost** (DF69 —
+tmpfs upper gone at stop, so downgrade-and-start can't help). Either way the user may instead
+**proceed** — destructive, abandons the overlay changes (macOS: already gone; Linux: host-side
+upper set aside in `trash/`, manually recoverable). The gate-deadlock (the gate blocks `start`
+post-upgrade) is *why* this is a **pre-upgrade** audit, not an in-migration recovery. **Security claim restated:** the host-escape vector was an *untrusted
 agent* in a `CAP_SYS_ADMIN` overlay container; the new binary has **no overlay mount
 code at all** — it cannot mount overlayfs, it only *reads* (exec `git`) from a
 container a prior binary mounted. So the win is **maximal**: not merely "no agent
