@@ -63,19 +63,19 @@ is **not** a reason to block other functions. The build-id is for hygiene/debugg
 not resume. Scratch must be on the **same filesystem** as the live dir (decision 4) so
 the move-in is atomic.
 
-### Two granularities
+### One shape, applied per unit
 
-- **Realm-structural** (layout / shared files; e.g. the CLI flat→namespaced
-  relocation): all-or-nothing. Build the new realm form in the workdir — **moving /
-  renaming** sandbox dirs into the new layout, never *copying* their bulk — then one
-  resumable atomic swap replaces the realm. Crash → discard workdir, original
-  intact, retry. The `.schema-version` stamp lives **inside** the swapped form, so
-  it commits atomically with the realm.
-- **Per-sandbox** (e.g. agent.json split, overlay flatten): iterate sandboxes **one
-  at a time**. For each: the machinery seeds a per-sandbox workdir with a faithful
-  reflink/copy of the sandbox, the migrator transforms it, and the machinery commits
-  by atomically renaming that sandbox's dir into place. Each sandbox commits
-  independently; a sandbox that can't migrate is **quarantined**, not fatal.
+Every migration uses **one shape — build-new → repopulate → atomic-rename swap** — on a
+*unit*, either a whole realm (`library`) or one sandbox (`mysandbox`). Changed files are
+rebuilt in scratch; unchanged bulk is **moved** (not copied) from the displaced original;
+the swap commits **all of the unit's changed files atomically** (the key property — a
+migration touching many files needs no per-file ordering; see Promotion). The realm-vs-
+sandbox difference is only the *unit*: a realm is **one** unit (all-or-nothing);
+sandboxes are **many** units done **one at a time** (each committed independently; a
+failure is quarantine-or-abort, decision 1). Per-sandbox record version is the truth; the
+`.schema-version` stamp flips last — for a realm migration it rides *inside* the swapped
+realm; for a per-sandbox run it's a separate file-granularity swap once all sandboxes are
+done.
 
 ### The truth invariant (the DF68 fix)
 
@@ -101,103 +101,77 @@ commit + durable writes.
   and refusing** an already-destroyed source (A2). It *declares* which blessed
   consistency strategy it uses (so the discipline doesn't drift per migrator).
 
-## Durability: fsync at the promotion boundaries (audit A1, reframed)
+## Durability: fsync makes the rename scheme trustworthy (audit A1)
 
-**Two migration shapes, two tools.** For **restructuring** migrations (the overlay
-flatten), the dir-rename promotion + the whole-tree flock already give commit
-**atomicity** (a reader never sees a half-written unit; concurrency is excluded) — the
-unit commit *is* the directory rename, so the unit's *contents* need no per-file atomic
-write. For **in-place metadata** migrations (the agent.json split) and the **stamp**,
-the lighter tool is a per-file **atomic-durable write** (`write-temp-same-dir → fsync →
-rename → fsync(dir)`) applied to those specific files — **not** wrapped around every
-write everywhere. So a per-file primitive is needed, but narrowly.
+The promotion shape gives commit **atomicity** for free (the swap; concurrency excluded
+by the whole-tree lock). It does **not** give **durability**: `rename(2)` is atomic but a
+power loss before the dir entry flushes can lose it, and — worse — a moved-in `*_^^_new`
+whose dir entry is durable but whose *contents* are still in page cache reads back as
+zero/garbage (the classic rename-without-fsync corruption), which recovery would then
+**promote as "complete."** So the scan is trustworthy only with a **bounded fsync
+discipline**:
 
-What rename does **not** give is **durability**: `rename(2)` is atomic but a power loss
-before the dir entry is flushed can lose it, and — worse — a moved-in `*_^^_new` whose
-dir entry is durable but whose file *contents* are still in page cache reads back as
-zero/garbage after power loss (the classic rename-without-fsync corruption), which the
-recovery scan would then **promote as "complete."** The scan is only trustworthy if the
-renames *and* the built contents are durable. So the machinery owns a **bounded fsync
-discipline at the promotion boundaries** (not a wrapper on every write):
+1. **fsync the built contents before the move-in** (Promotion step 1→2) — so `*_^^_new`
+   is never durable-but-empty.
+2. **fsync the parent dir after each rename** — so the rename survives power loss and
+   recovery sees a real point in the sequence.
+3. `F_FULLFSYNC` on darwin (plain `fsync` doesn't flush the APFS device cache).
 
-1. After building a unit in scratch, **fsync its files + dir before the move-in** (so a
-   `*_^^_new` in the live dir is never durable-but-empty).
-2. **fsync the parent dir after each promotion rename** (so the rename survives power
-   loss and the scan sees a real point in the sequence).
-3. The realm stamp flip is **one** atomic-durable single-file write
-   (temp → fsync → rename → fsync(dir)), or folded into the swapped realm dir for
-   realm-structural migrations. `F_FULLFSYNC` on darwin (plain `fsync` doesn't flush the
-   APFS device cache). Same-filesystem temp (`EXDEV`; decision 4 guarantees it).
+(Step-4 *moves* are exempt — idempotent + re-derivable, a lost move is just re-done.)
 
-**Scope of the contract (flagged choice).** These fsyncs are exactly the price of
-**power-loss / kernel-panic** safety. A plain process death (kill/crash/Ctrl-C) leaves
-the page cache intact, so the scheme is already safe against it *without* fsync.
-Recommendation: **keep the boundary fsyncs** — migrations touch irreplaceable data, are
-rare, and the cost is a handful of fsyncs per sandbox. (Alternative: promise only
-process-death safety and drop them — simpler, weaker.)
+**Scope (flagged choice).** These fsyncs buy **power-loss / kernel-panic** safety; a
+plain process death (kill/crash/Ctrl-C) keeps the page cache, so the scheme is already
+safe against it *without* fsync. Recommendation: **keep them** — irreplaceable data, rare
+op, a handful of fsyncs per unit. (Alternative: process-death-only — simpler, weaker.)
 
-**C3/A4 (the existing split losing data) is fixed by making the split's per-file writes
-atomic-durable and ordered** — write `agent.json`/`netpolicy.json`
-(temp→fsync→rename→fsync) *before* the slimmed `environment.json` rewrite, stamp-last —
-*not* by the heavyweight dir-promotion scheme (overkill for editing three small files)
-nor by blanket-wrapping `SaveEnvironment`. Normal-operation writes outside migration are
-a separate robustness question, out of scope here.
+**C3/A4 (the existing split losing data)** is fixed by construction when the split runs
+through the unified shape (all its files commit atomically at the swap); or, if the split
+stays file-granularity in 0.6.0, by atomic-durable + values-first ordering (siblings
+before the slimmed `environment.json`, stamp-last) — the 0.6.0 scope choice in Cadence.
+Normal-operation writes outside migration are a separate robustness question.
 
-## Promotion: build complete, then resumable rename (commit state in filenames)
+## Promotion: build-new → repopulate → swap (commit state in filenames)
 
-Two schemes, **one principle: copy what you *transform*, move what you only
-*relocate*.** Incomplete builds live in the `migration-<build-id>/` scratch dir, which
-**must be on the same filesystem as the live dir** (or the move-in is a non-atomic
-copy+delete and a sentinel dir can appear *partial*). Only **complete** units ever
-enter the live dir, under reserved sentinel names — the `_^^_` token **must be illegal
-in a real sandbox/realm name** (validate/reserve it). The per-unit **version**
-disambiguates the one ambiguous state (canonical name alone = not-started *or* done →
-read its version, the truth).
+**One principle: rebuild what you *change*, move what you *keep*.** Incomplete builds
+live in the `migration-<build-id>/` scratch dir, which **must be on the same filesystem
+as the live dir** (decision 4; else the move-in is a non-atomic copy+delete and a
+sentinel can appear *partial*). Only the live dir uses the reserved sentinel names — the
+`_^^_` token **must be illegal in a real realm/sandbox name** (validate/reserve it).
 
-**Per-sandbox restructuring** (the migrator rebuilds the *transformed* part — e.g. the
-overlay→copy workdir; *unchanged* parts are carried over by copy, reflink, or **move**),
-fsyncs explicit:
-1. Build the transformed part in scratch; **fsync its contents**; move into the live
-   sandboxes dir as `mysandbox_^^_new`; **fsync(live dir)**.
-2. rename `mysandbox` → `mysandbox_^^_orig`; **fsync(live dir)**.
-3. *(move variant)* move the **re-derivable** set of unchanged items (e.g. the multi-GB
-   workdir — one atomic rename, no copy) from `_^^_orig` into `_^^_new`. Moves don't
-   touch contents and are idempotent, so **no per-move fsync**; **fsync(live dir)** once
-   the list completes.
-4. rename `mysandbox_^^_new` → `mysandbox`; **fsync(live dir)**.
-5. delete `mysandbox_^^_orig`.
+**The sequence (unit `U` = `library` or `mysandbox`), fsyncs explicit:**
+1. Build the **changed** files in scratch (`migration-<id>/Unew`); **fsync contents**.
+2. move `Unew` → `U_^^_new` in the live dir; **fsync(dir)**.
+3. rename `U` → `U_^^_orig`; **fsync(dir)**.
+4. **repopulate:** move the **re-derivable** set of unchanged items from `U_^^_orig` →
+   `U_^^_new` — each an atomic rename (a multi-GB workdir moves as *one*, no copy;
+   moves are idempotent, so **no per-move fsync**); **fsync(dir)** when the list
+   completes.
+5. rename `U_^^_new` → `U`; **fsync(dir)**.
+6. delete `U_^^_orig`.
 
-Recovery: `mysandbox` alone → check its version (not-started vs done); `_^^_orig`+`_^^_new`
-→ **with a move-list, re-derive the expected contents and verify `_^^_new` is complete**
-(presence ≠ completeness once a move-list is involved), finish pending moves, then
-promote; `mysandbox`(new)+`_^^_orig` → delete orig. The canonical `mysandbox` always
-holds **complete** data whenever it exists; any split lives only between the
-`_^^_orig`/`_^^_new` temps (union always complete, items never torn). Without the move
-variant (build-complete-in-scratch), step 3 is empty and `_^^_new` presence *is*
-completeness.
+Step 5 commits **all of `U`'s changed files atomically** — no cross-file ordering to
+coordinate (the C3 class of bug is structurally impossible).
 
-**Realm-structural** (relocate/restructure *without* copying the bulk sandboxes):
-1. Build the new realm **structure** (layout + migrated files, **not** the bulk) in
-   scratch; move it to `library_^^_new` under `$YOLOAI_HOME`.
-2. **Final migration:** move the deterministically-derivable set of unchanged items
-   (sandboxes, …) from `library` into `library_^^_new` — each an atomic dir-rename.
-3. rename `library` → `library_^^_orig`; rename `library_^^_new` → `library`; delete
-   `library_^^_orig`.
+**Recovery** reads the live dir names: `U` alone → check its version (not-started vs
+done); `U_^^_orig`+`U_^^_new` → **re-derive `U_^^_new`'s expected contents and verify
+completeness** (presence ≠ complete while a move-list is pending), finish the moves, then
+promote; `U`(new)+`U_^^_orig` → delete orig. The canonical `U` always holds **complete**
+data whenever it exists; any split lives only between the `_^^_orig`/`_^^_new` temps
+(union always complete, items never torn). Step 4 is **forward-only** once it starts
+gutting `_^^_orig` (clean abort is only available before step 4). If a migration changes
+*everything* (empty move-list) step 4 is empty and `_^^_new` presence *is* completeness;
+alternative that keeps `U` whole until the swap is to **reflink** the kept items into
+`_^^_new` rather than move (cheap on CoW, full-copy on ext4) — a conscious trade.
 
-Recovery during step 2 re-derives the item list and resumes (idempotent: an item
-already in `_^^_new` is skipped). **Invariant relaxation to note:** during step 2
-neither `library` nor `library_^^_new` is individually complete — the **union** is,
-and every item is atomically in exactly one side (never torn). Safety rests on the
-derivable item-list being *exact* + crash-tested. Step 2 is **forward-only** (once the
-bulk move starts, old `library` is being gutted — clean abort is only available
-*before* step 2 begins). Alternative that keeps old `library` whole until the swap:
-**reflink** the bulk into `_^^_new` instead of moving (cheap on CoW FS, full-copy on
-ext4) — a conscious trade.
+**File-granularity (degenerate case).** For a single-file change — the `.schema-version`
+stamp, or any lone file — the same shape with no move-list collapses to `write f.tmp →
+fsync → rename f.tmp→f → fsync(dir)`. This is the only place a "per-file atomic write"
+appears; it's just the file-sized swap.
 
-The rigor a WAL needed doesn't vanish; it moves into these state machines, which must
-be **exhaustively enumerated** and covered by **crash-injection tests at every rename
-boundary**. The displaced `*_^^_orig` is **transient** (deleted as the final step) —
-not a retained backup; migration is one-way (see No downgrade).
+The rigor a WAL needed doesn't vanish; it moves into this state machine, which must be
+**exhaustively enumerated** + covered by **crash-injection tests at every rename
+boundary**. The displaced `*_^^_orig` is **transient** (deleted at step 6) — not a
+retained backup; migration is one-way (see No downgrade).
 
 ## Source consistency (migrator concern; blessed strategies)
 
@@ -282,16 +256,22 @@ Every migration runs against a schema **frozen in a prior shipped release**:
 
 | Release | Schema | Migration | Overlay code | Ships |
 |---|---|---|---|---|
-| **0.6.0** | v2→**v3** (freeze) | agent.json split, made crash-safe | yes (dangerous opt-in + warning) | staged 12 commits; reflink-`:copy`; **the floor**: durable-write primitive + stamp-last (move `WriteSchemaVersion` out of `MigrateLibrary` into `MigrateDataDir`) + run lock — fixes A1/A4/DF68 in 0.6.0's own migration |
-| **0.7.0** *(migration version)* | v3→**v4** | overlay→copy flatten (per-sandbox, agent-free, while-live per DF69) + `migrate --check` audit | yes (last release with overlay) | the per-sandbox staging+promotion machinery + `LiveContainerExtract` |
+| **0.6.0** | v2→**v3** (freeze) | agent.json split, made crash-safe | yes (dangerous opt-in + warning) | staged 12 commits; reflink-`:copy`; **the floor**: the unified build-new→repopulate→swap machinery (file + dir granularity) + stamp-last (move `WriteSchemaVersion` out of `MigrateLibrary` into `MigrateDataDir`) + whole-tree lock — the split runs through it (fixes A1/A4/DF68/C3). *(Scope choice below.)* |
+| **0.7.0** *(migration version)* | v3→**v4** | overlay→copy flatten (per-sandbox, agent-free, while-live per DF69) + `migrate --check` audit | yes (last release with overlay) | the overlay `LiveContainerExtract` migrator on the shared machinery (+ the machinery itself, if deferred here per the scope choice) |
 | **0.8.0** *(post-removal)* | v4 | v3→v4 step → detect-and-refuse | no (reader deleted, **detector kept forever**) | 5-element refusal naming `yoloai-0.7.x` |
 
-**0.6.0 floor is non-negotiable:** A1/A4 mean 0.6.0's *own* v2→v3 split loses config
-on power loss today — the durable-write primitive + stamp-last must ship in 0.6.0
-even if the per-sandbox staging machinery waits for 0.7.0. The heavier
-snapshot/promotion surface lands in 0.7.0, where the destructive flatten both needs
-*and* exercises it (v2→v3 is non-destructive, so it can't meaningfully bake rollback
-anyway).
+**0.6.0 floor is non-negotiable:** A1/A4 mean 0.6.0's *own* v2→v3 split loses config on
+power loss today, so 0.6.0 must make that migration crash-safe regardless.
+
+**Scope choice (lean: build the unified machinery in 0.6.0).** Since the shape is now
+uniform, 0.6.0 can either **(a)** build the build-new→repopulate→swap machinery and run
+the split through it — the split commits its files atomically (C3 gone *structurally*)
+and the machinery is **baked on a benign migration** before the destructive 0.7.0
+flatten relies on it (and with no-downgrade there's no rollback to bake elsewhere, so the
+split is the only benign exercise we get) — or **(b)** keep the split on the lighter
+file-granularity + values-first ordering and land the machinery in 0.7.0. (a) is more
+0.6.0 code, but the machinery is needed for 0.7.0 regardless, so it's *earlier*, not
+*extra*. **Recommended: (a).**
 
 ## The git question (answered: borrow the patterns, not the tool)
 

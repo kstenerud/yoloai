@@ -18,15 +18,15 @@ real, must be handled in the build · *open-decision* = a flagged plan decision.
 ## Verified-in-code (the foundation)
 
 - **A1 — no durable/atomic write primitive.** *[verified]* Every commit/stamp is bare
-  `os.WriteFile` (`fileutil.go:144`). **still-live, reframed (two shapes, two tools).**
-  *Restructuring* migrations (flatten): the dir-rename gives atomicity, so contents need
-  no per-file write — only a **bounded fsync discipline at the promotion boundaries**
-  (fsync built contents before move-in so `_^^_new` is never durable-but-empty; fsync(dir)
-  after each rename). *In-place* migrations (the agent.json split) **and the stamp**: a
-  narrow per-file **atomic-durable write** (`temp→fsync→rename→fsync(dir)`). `F_FULLFSYNC`
-  on darwin. fsync is the price of power-loss durability (recommended; process-death alone
-  needs none). C3/A4 fixed by the split's per-file atomic-durable + ordered writes, not by
-  the dir-promotion scheme nor blanket-wrapping `SaveEnvironment`. Severity CRITICAL.
+  `os.WriteFile` (`fileutil.go:144`). **still-live, reframed — one shape, two
+  granularities.** The build-new→swap commit gives atomicity (incl. **atomic multi-file
+  commit**); fsync at the boundaries gives durability (fsync built contents before move-in
+  so `_^^_new` is never durable-but-empty; fsync(dir) after each rename; `F_FULLFSYNC` on
+  darwin). The **file-granularity** case (the stamp / any lone file) is the only place a
+  "per-file atomic write" appears. fsync is the price of power-loss durability (recommended;
+  process-death alone needs none). C3/A4 fixed *structurally* if the split runs through the
+  shape, or by atomic-durable + values-first ordering if file-granularity (0.6.0 scope
+  choice). Severity CRITICAL.
 - **A4/C3 — existing agent.json split is power-loss-lossy.** *[verified]* Values-first
   in program order but **not fsynced** (`migrate_agentcfg.go:87-110`); under power
   loss the slimmed `environment.json` can outrace its `agent.json` sibling. **still-live
