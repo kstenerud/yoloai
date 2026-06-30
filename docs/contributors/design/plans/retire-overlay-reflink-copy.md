@@ -210,14 +210,23 @@ upgrading; use `:copy`, ideally with the data dir on a CoW filesystem).
 
 ---
 
-## Sequencing & timing
+## Sequencing & timing (cadence — D110)
 
-- **Phase 1 is independent and low-risk** — it can land any time (including the
-  current release line) since it's purely additive with graceful fallback.
-- **Phase 2 is a breaking change** — target the next minor (e.g. v0.7.0), *after*
-  Phase 1 is proven. Until Phase 2 lands, the **v0.6.0 interim from the H2 plan
-  stands**: `:overlay` is a documented dangerous opt-in with a loud warning (the
-  escape requires explicit `:overlay` selection).
+Fixed by the crash-safe-migration cadence ([D110](../../decisions/working-notes.md);
+[crash-safe-migration.md](crash-safe-migration.md)) so every migration runs on a
+schema frozen in a prior shipped release:
+
+- **0.6.0** — **Phase 1** (reflink-`:copy`, additive) ships, alongside the
+  crash-safe **floor** (durable-write primitive + stamp-last + run lock). Schema v3
+  is frozen here. `:overlay` remains a documented dangerous opt-in (the v0.6.0
+  interim stands).
+- **0.7.0** — the **migration version** (last release to ship overlay): the
+  per-sandbox staging/promotion machinery + the **overlay→copy flatten** (v3→v4,
+  agent-free, while-live per DF69) + `migrate --check`. Reads frozen v3.
+- **0.8.0** — **Phase 2** removal: overlay reader deleted; the v3→v4 step becomes a
+  permanent detect-and-refuse naming `yoloai-0.7.x`. (The earlier "Phase 2 in
+  0.7.0" estimate is superseded — flatten and removal **must** be different binaries,
+  since the flatten needs the overlay read/apply code the removal deletes.)
 
 ## Open questions (for the human)
 
