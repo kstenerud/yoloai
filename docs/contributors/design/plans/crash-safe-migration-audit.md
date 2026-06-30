@@ -18,9 +18,13 @@ real, must be handled in the build · *open-decision* = a flagged plan decision.
 ## Verified-in-code (the foundation)
 
 - **A1 — no durable/atomic write primitive.** *[verified]* Every commit/stamp is bare
-  `os.WriteFile` (`fileutil.go:144`); the design's "atomic commit = atomic write of
-  the version file" does not exist. **still-live — build first** (plan: durable
-  primitive). Severity CRITICAL.
+  `os.WriteFile` (`fileutil.go:144`). **still-live, reframed** — no *general* per-file
+  primitive needed: the dir-rename promotion gives atomicity. What's needed is a
+  **bounded fsync discipline at the promotion boundaries** (fsync built contents before
+  move-in so `_^^_new` is never durable-but-empty; fsync(dir) after each rename; one
+  atomic-durable stamp write; `F_FULLFSYNC` on darwin) — the price of power-loss
+  durability (recommended; process-death alone needs no fsync). C3/A4 fixed by routing
+  the split through the scheme, not by wrapping `SaveEnvironment`. Severity CRITICAL.
 - **A4/C3 — existing agent.json split is power-loss-lossy.** *[verified]* Values-first
   in program order but **not fsynced** (`migrate_agentcfg.go:87-110`); under power
   loss the slimmed `environment.json` can outrace its `agent.json` sibling. **still-live

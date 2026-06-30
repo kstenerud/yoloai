@@ -101,14 +101,41 @@ commit + durable writes.
   and refusing** an already-destroyed source (A2). It *declares* which blessed
   consistency strategy it uses (so the discipline doesn't drift per migrator).
 
-## The durable primitive (foundation — audit A1, build first)
+## Durability: fsync at the promotion boundaries (audit A1, reframed)
 
-`write-temp-in-same-dir → fsync(temp) → rename(temp, final) → fsync(dir)`, with
-`F_FULLFSYNC` on darwin (plain `fsync` doesn't flush the APFS device cache). Temp
-must be on the **same filesystem** as the target (`EXDEV`). Build this first and
-route **every** commit *and* the `.schema-version` stamp through it, replacing
-today's bare `os.WriteFile`. Everything below assumes it. This single fix also
-closes A3/A4/C3 for the existing split.
+The dir-rename promotion scheme + the whole-tree flock already give commit
+**atomicity** (a reader never sees a half-written unit; concurrency is excluded), and
+the recovery scan handles resume — so there is **no general per-file atomic-write
+primitive** wrapping every write. The unit commit *is* the directory rename.
+
+What rename does **not** give is **durability**: `rename(2)` is atomic but a power loss
+before the dir entry is flushed can lose it, and — worse — a moved-in `*_^^_new` whose
+dir entry is durable but whose file *contents* are still in page cache reads back as
+zero/garbage after power loss (the classic rename-without-fsync corruption), which the
+recovery scan would then **promote as "complete."** The scan is only trustworthy if the
+renames *and* the built contents are durable. So the machinery owns a **bounded fsync
+discipline at the promotion boundaries** (not a wrapper on every write):
+
+1. After building a unit in scratch, **fsync its files + dir before the move-in** (so a
+   `*_^^_new` in the live dir is never durable-but-empty).
+2. **fsync the parent dir after each promotion rename** (so the rename survives power
+   loss and the scan sees a real point in the sequence).
+3. The realm stamp flip is **one** atomic-durable single-file write
+   (temp → fsync → rename → fsync(dir)), or folded into the swapped realm dir for
+   realm-structural migrations. `F_FULLFSYNC` on darwin (plain `fsync` doesn't flush the
+   APFS device cache). Same-filesystem temp (`EXDEV`; decision 4 guarantees it).
+
+**Scope of the contract (flagged choice).** These fsyncs are exactly the price of
+**power-loss / kernel-panic** safety. A plain process death (kill/crash/Ctrl-C) leaves
+the page cache intact, so the scheme is already safe against it *without* fsync.
+Recommendation: **keep the boundary fsyncs** — migrations touch irreplaceable data, are
+rare, and the cost is a handful of fsyncs per sandbox. (Alternative: promise only
+process-death safety and drop them — simpler, weaker.)
+
+**C3/A4 (the existing split losing data) is fixed by routing the split through this
+scheme** (writes land in disposable scratch; commit is the durable dir-rename) — *not*
+by atomic-wrapping `SaveEnvironment`. Normal-operation writes outside migration are a
+separate robustness question, out of scope here.
 
 ## Promotion: build complete, then resumable rename (commit state in filenames)
 
