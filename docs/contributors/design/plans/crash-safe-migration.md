@@ -231,10 +231,16 @@ Normal-operation writes outside migration are a separate robustness question.
 live in the `migration-<build-id>/` scratch dir, which **must be on the same filesystem
 as the live dir** (decision 4; else the move-in is a non-atomic copy+delete and a
 sentinel can appear *partial*). Only the live dir uses the reserved sentinel names — the
-`_^^_` token **must be illegal in a real realm/sandbox name** (the name validator already allows
-only letters/digits/underscores/dots/hyphens, so `^` is naturally reserved; #F-7 — confirm the
-**sandbox** validator matches the profile one, and that no **legacy** on-disk name predating the
-reservation can contain `^^`).
+`_^^_` token **is illegal in a real realm/sandbox name — VERIFIED** (#F-7). Sandbox names go
+through the single validated constructor `config.ParseSandboxName` (`names.go:37`, the containerd
+identifier grammar `^[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*$` — allowed set `[A-Za-z0-9._-]`, so `^`
+0x5E is rejected); **both** entry points delegate to it (CLI `cliutil.ValidateName`, library
+`store.ValidateName`), with no bypass, and no other name regex (profile/principal/agent-type)
+admits `^`. Realm/top-level unit names (`library`, `cli`, `sandboxes`, …) are fixed constants,
+also `^`-free. `^` is filesystem-legal on Linux/macOS/Windows and stricter than Docker's name
+grammar, so the sentinel is portable and backend-safe. Only residual: a *historically looser*
+validator having persisted a `^`-bearing name (very low risk — current validators all exclude it);
+the recovery catch-all (F-4) halts on any unexpected `_^^_`-bearing name defensively.
 
 **The sequence (unit `U` = `library` or `mysandbox`), fsyncs explicit. Key invariant:
 `U_^^_new` *never* coexists with the canonical `U` — `U` becomes `U_^^_orig` **before** the new
