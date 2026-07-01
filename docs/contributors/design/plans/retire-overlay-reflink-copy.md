@@ -157,10 +157,12 @@ Mechanical but wide. Remove, don't gate:
 first *multi-step destructive* migration (it swaps two directory layouts in one
 path and flips `Mode` in a separate file), so it cannot be made crash-safe by
 idempotency alone. It is built on the crash-safe migration substrate (exclusive
-lock + write-ahead journal + per-sandbox atomic commit + snapshot rollback +
-run-level stamp-last) designed in
-[crash-safe-migration.md](crash-safe-migration.md) (DF68). That substrate lands
-first and retro-hardens the agent.json split.
+whole-tree lock + resumable atomic-rename commit + keep-orig-whole repopulate +
+fsync discipline + stamp/form-flip-last) designed in
+[crash-safe-migration.md](crash-safe-migration.md) (DF68) — **no separate
+write-ahead journal or snapshot-rollback** (that first-cut design was superseded).
+The substrate lands with this migration; the existing agent.json split (v2→v3) is
+left **sealed as-is**, not retro-hardened.
 
 **Who runs the flatten — raw merged-tree copy against an *already-running* sandbox
 (decided 2026-06-30; revised by the 2026-06-30 re-audit).** The overlayfs **merged view**
@@ -214,8 +216,8 @@ the displaced upper is **dropped**, not trashed — the flatten doesn't stash se
 deltas). The gate-deadlock (the gate blocks `start`
 post-upgrade) is *why* this is a **pre-upgrade** audit, not an in-migration recovery. **Security claim restated:** the host-escape vector was an *untrusted
 agent* in a `CAP_SYS_ADMIN` overlay container; the new binary has **no overlay mount
-code at all** — it cannot mount overlayfs, it only *reads* (exec `git`) from a
-container a prior binary mounted. So the win is **maximal**: not merely "no agent
+code at all** — it cannot mount overlayfs, it only *reads* (a raw recursive copy of
+the merged tree, no git) from a container a prior binary mounted. So the win is **maximal**: not merely "no agent
 runs with overlay+`CAP_SYS_ADMIN`," but "the new binary cannot mount overlayfs,
 period." (Flagged for security review — security claims get the highest scrutiny.)
 

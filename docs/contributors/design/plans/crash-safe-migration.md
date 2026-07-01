@@ -13,9 +13,9 @@ Sequencing is **D110** (the migration chain below). The independent audit behind
 rewrite is the companion [crash-safe-migration-audit.md](crash-safe-migration-audit.md)
 (18 findings, A1–A18, four parallel reviewers + in-code verification).
 
-> This rewrite supersedes the first-cut WAL-journal design. The user has further
-> critiques pending — three open decisions are flagged at the end; treat the whole
-> doc as a live critique target, not a sealed spec.
+> This rewrite supersedes the first-cut WAL-journal design. The numbered decisions at the end
+> are now **resolved** (two audit rounds — the original A1–A18 and a fix-audit of the fixes
+> themselves); treat the whole doc as a live critique target, not a sealed spec.
 
 ## The problem (DF68 + audit-confirmed, verified in code)
 
@@ -494,18 +494,21 @@ version-or-form, migrate stragglers).
    (accepting the quarantines; the stamp flips once all are migrated-or-quarantined) **or
    aborts** — one up-front decision, no mid-run branch. Abort is clean: already-committed
    sandboxes stay migrated (atomic + independent), the rest stay at the old version, stamp
-   unflipped → re-runnable. Headless/no-TTY **defaults to abort** on any destructive op
-   unless `--yes`. See [Plan / apply](#plan--apply-dry-run).
+   unflipped → re-runnable. Headless/no-TTY **defaults to abort** on any destructive op unless
+   authorized — `--yes` for a quarantine, and additionally `--abandon-stopped-overlay` for a
+   stopped-overlay abandonment (`--yes` alone never abandons work). See [Plan /
+   apply](#plan--apply-dry-run).
 2. **Ordering — DECIDED: data-dir realm (incl. its per-sandbox pass), then cli.** Each
    realm (data-dir, cli) carries its own linear `.schema-version`; a data-dir migration
    does any realm-level work plus an idempotent per-sandbox pass as **one** schema step.
    yoloai's other functionality unlocks only when every realm is at its current version.
-3. **R1 downgrade — DECIDED: no downgrade.** See [No downgrade](#no-downgrade-decision-3).
+3. **R1 downgrade — DECIDED: no downgrade.** See [No automated
+   downgrade](#no-automated-downgrade--but-the-prior-schema-is-preserved-in-trash-decision-3).
 4. **Network / synced FS — DECIDED: hard-refuse + single-FS.** See [Single-filesystem
    requirement](#single-filesystem-requirement-decision-4).
 5. **Exclusivity / gate — DECIDED: whole-tree live flock.** See [Exclusivity &
    crash-recovery gating](#exclusivity--crash-recovery-gating-decision-5).
-7. **Unit granularity — DECIDED: one linear data-dir schema + idempotent per-sandbox pass
+6. **Unit granularity — DECIDED: one linear data-dir schema + idempotent per-sandbox pass
    (no per-sandbox version files).** The overlay flatten is a normal data-dir migration
    (`v3→v4`) whose per-sandbox pass flattens each overlay sandbox via its own
    build-new→swap; "already done" is read from the sandbox's on-disk form, not a stamp.

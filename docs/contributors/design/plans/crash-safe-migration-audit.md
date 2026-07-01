@@ -10,7 +10,7 @@ operational footguns) plus a cadence reviewer; the four load-bearing claims were
 then re-verified against the actual code by the maintainer (marked **[verified]**).
 Dispositions reference the reworked plan's spine (discrete per-realm migrations,
 per-sandbox one-at-a-time, staging workdir + resumable atomic rename, per-sandbox
-version as truth).
+on-disk form as truth).
 
 **Disposition key:** *dissolved* = removed by the reworked spine · *still-live* =
 real, must be handled in the build · *open-decision* = a flagged plan decision.
@@ -57,11 +57,12 @@ real, must be handled in the build · *open-decision* = a flagged plan decision.
   requires the sandbox **already running** (both platforms — the binary has no mount code, so
   it can't start a stopped overlay) and surfaces a **stopped** one as a plan choice: go back &
   start it (preserves changes) **or** proceed destructively (abandons the overlay changes —
-  macOS already gone per DF69; Linux displaced upper to `trash/`, manually recoverable); never
-  a fabricated empty flatten. **(b) `Apply()`** reads the merged view from the running
-  container in a **single durable act and never stops/restarts it** (a restart wipes the macOS
-  tmpfs and unmounts overlay). Reading is non-destructive; a *running* sandbox on any OS is
-  covered. (Note: this updates the earlier "macOS-only" framing — because the binary no longer
+  macOS already gone per DF69; Linux displaced upper **dropped**, not trashed — matches the
+  flatten's step-7 drop); never a fabricated empty flatten. **(b) `Apply()`** reads the merged
+  view (a raw recursive copy) from the running container and **does not stop it *during
+  capture*** (a restart wipes the macOS tmpfs and unmounts overlay); it requires the agent
+  **idle** (bounded, best-effort — F2) and **stops the container only *after* the swap commits**
+  (C2). Reading is non-destructive; a *running* sandbox on any OS is covered. (Note: this updates the earlier "macOS-only" framing — because the binary no longer
   mounts overlay at all, **stopped on Linux is also a refusal/choice**, not an A16 backend-up
   bring-up.)
 
@@ -111,13 +112,14 @@ real, must be handled in the build · *open-decision* = a flagged plan decision.
   a foreseen quarantine; the user approves the whole plan (quarantines included) or aborts,
   one up-front decision. All-or-nothing is the *decision*, not the *execution* (units still
   commit incrementally + resumably). See the plan's Plan/apply section.
-- **A13 — realm-step refusal message.** **dissolved for overlay** — the overlay extractor
-  is kept forever (decision 8), so any binary can always flatten; there is no
+- **A13 — realm-step refusal message.** **dissolved for overlay** — the flatten is a raw
+  merged-tree copy any binary can run (decision 8 deletes *all* overlay code, incl. the reader),
+  so any binary can always flatten a *running* overlay sandbox; there is no
   post-removal-without-reader build and no refusal to author. (The 5-element refusal pattern
   stays as general prior art for any *future* migration that does delete a reader.)
-- **A14 — stepping-stone availability.** **dissolved for overlay** — with the reader kept
-  forever (decision 8), no intermediate/stepping-stone version is ever needed for overlay and
-  there is nothing to pin. (Migration-version-gating stays as general prior art.)
+- **A14 — stepping-stone availability.** **dissolved for overlay** — because the raw-copy flatten
+  needs no reader/mount code (decision 8), no intermediate/stepping-stone version is ever needed
+  for overlay and there is nothing to pin. (Migration-version-gating stays as general prior art.)
 - **A15 — recovery observability.** Signpost `--rollback` on repeated failure
   (dpkg-`--audit` style); a general "am I mid-migration / clean?" check in `system
   status` that survives the binary swap. **still-live**.
@@ -159,6 +161,16 @@ read-glue forever — no detect-and-refuse/stepping-stone) and A16 (folded into 
 flatten reads an already-running sandbox, no container bring-up). The **decisions are now
 made** (D110 + this round): 1 plan/apply (was quarantine-or-abort), 3 **no downgrade**
 (one-way), 4 hard-refuse + single-FS, 5 whole-tree live flock, 8
-delete-create/start-keep-read-glue, A18 scratch-disposable. R1 is accepted
+delete-all-overlay-code-incl-read-glue (raw-copy flatten), A18 scratch-disposable. R1 is accepted
 as one-way — the escape from a persistent forward bug is per-sandbox quarantine, not
 rollback.
+
+**Fix-audit addendum (2026-07-01).** A round auditing the fixes themselves corrected several:
+the step-4 per-move source fsync was **backwards** → repopulate now **keeps `_^^_orig` whole**
+(reflink/copy, not move), dissolving the neither-dir loss; decision 8 deletes **all** overlay code
+**including the read-glue** (not "keep-read-glue") — the flatten is a **raw merged-tree copy**, not
+`git`; the DF70 fix lever is **cwd=target**, not the inert `--work-tree`; the widen-guard inventory
+must **not** live under `library/` (flat-v0 trip); Op-F1 branches on **host GOOS**, not backend, and
+must handle `Unavailable`/`Broken`/`Removed`; F7 root-resolution is a closed two-case rule the **CLI
+injects**; the idle gate is **bounded/best-effort** (soldier on if undeterminable). See D110's
+fix-audit clause and the plan body.
