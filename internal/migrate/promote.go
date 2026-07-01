@@ -25,8 +25,11 @@ const (
 	suffixNew     = "_^^_new"
 
 	// buildCompleteName marks a fully-built, contents-fsynced new dir. Written
-	// last in scratch (after FsyncTree), so a new dir lacking it is a partial
-	// build/move-in and must be discarded, never promoted.
+	// last in scratch (after FsyncTree) and removed just before the promoting
+	// swap. In the {orig,new} state it distinguishes a build that still needs
+	// repopulate (sentinel present, not yet ready) from a defensive partial
+	// move-in (sentinel absent AND not ready) that is discarded; a ready new dir
+	// is promoted regardless of the sentinel (see resolveOrigNew).
 	buildCompleteName = ".yoloai-build-complete"
 	// repopTempPrefix names in-progress per-entry repopulate copies, so a crash
 	// mid-copy leaves only a temp (cleaned on resume), never a half-copied entry
@@ -208,9 +211,25 @@ func (p Promotion) buildAndStage() error {
 }
 
 // resolveOrigNew handles the {U_^^_orig, U_^^_new} state — the heart of both the
-// forward path and recovery. It discards a partial build, resumes an
-// interrupted repopulate/marker, or promotes a ready build.
+// forward path and recovery. It promotes a ready build, resumes an interrupted
+// repopulate/marker, or (defensively) discards a build that never completed.
+//
+// Readiness is checked BEFORE the build-complete sentinel, and the order is
+// load-bearing: promoteReady removes build-complete durably just before the
+// swap, so a crash in that window leaves a new dir that is ready yet lacks
+// build-complete. That dir is a finished, promotable build — testing readiness
+// first promotes it; testing build-complete first would misread it as a partial
+// build and discard a completed migration. A new dir is only ever "not ready and
+// not complete" in a defensive/hand-crafted case (the forward path always writes
+// build-complete into scratch before the move-in), which safely rebuilds.
 func (p Promotion) resolveOrigNew() error {
+	ready, err := p.IsReady(p.newer())
+	if err != nil {
+		return fmt.Errorf("read ready marker of new %q: %w", p.Name, err)
+	}
+	if ready {
+		return p.promoteReady()
+	}
 	complete, err := hasBuildComplete(p.newer())
 	if err != nil {
 		return err
@@ -218,14 +237,7 @@ func (p Promotion) resolveOrigNew() error {
 	if !complete {
 		return p.discardPartialAndRestore()
 	}
-	ready, err := p.IsReady(p.newer())
-	if err != nil {
-		return fmt.Errorf("read ready marker of new %q: %w", p.Name, err)
-	}
-	if !ready {
-		return p.repopulateAndMark()
-	}
-	return p.promoteReady()
+	return p.repopulateAndMark()
 }
 
 // discardPartialAndRestore rolls back a new dir that never reached its
@@ -264,13 +276,22 @@ func (p Promotion) repopulateAndMark() error {
 	return checkpoint("marker")
 }
 
-// promoteReady runs step 6: drop the now-redundant build-complete sentinel so
-// the committed unit stays clean, then swap U_^^_new -> U.
+// promoteReady runs step 6: drop the now-redundant build-complete sentinel and
+// any orphaned marker-write temp so the committed unit stays clean, then swap
+// U_^^_new -> U. resolveOrigNew checks readiness before build-complete, so a
+// crash between the sentinel removal and the swap re-promotes this finished
+// build rather than discarding it.
 func (p Promotion) promoteReady() error {
 	if err := removeBuildComplete(p.newer()); err != nil {
 		return err
 	}
 	if err := fileutil.FsyncDir(p.newer()); err != nil {
+		return err
+	}
+	if err := checkpoint("pre-promote-swap"); err != nil {
+		return err
+	}
+	if err := cleanTopLevelWriteTemps(p.newer()); err != nil {
 		return err
 	}
 	if err := os.Rename(p.newer(), p.canonical()); err != nil {
@@ -410,6 +431,29 @@ func cleanRepopTemps(dir string) error {
 			if err := os.RemoveAll(filepath.Join(dir, e.Name())); err != nil {
 				return fmt.Errorf("remove stale repopulate temp %s: %w", e.Name(), err)
 			}
+		}
+	}
+	return nil
+}
+
+// cleanTopLevelWriteTemps removes any orphaned AtomicWriteFile temp left at the
+// top level of dir by an interrupted WriteReadyMarker — a crash after the temp
+// is fsynced but before its rename leaves it durable — so it never rides the
+// promoting rename into the committed unit. AtomicWriteFile names its temp
+// ".<base>.tmp-<random>"; only top-level regular files matching that shape are
+// swept, so user data (which lives under subdirs) is never touched.
+func cleanTopLevelWriteTemps(dir string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("read dir for write-temp cleanup: %w", err)
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasPrefix(name, ".") || !strings.Contains(name, ".tmp-") {
+			continue
+		}
+		if err := os.Remove(filepath.Join(dir, name)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("remove orphaned write temp %s: %w", name, err)
 		}
 	}
 	return nil

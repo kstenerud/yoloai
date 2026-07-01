@@ -121,7 +121,7 @@ func TestPromotion_TrashDisposerKeepsOrig(t *testing.T) {
 // after a plain re-run, converge to the correct committed state with no data
 // lost.
 func TestPromotion_ResumesFromEveryCrashBoundary(t *testing.T) {
-	forwardBoundaries := []string{"build", "orig", "new", "repopulate", "marker", "promote", "dispose"}
+	forwardBoundaries := []string{"build", "orig", "new", "repopulate", "marker", "pre-promote-swap", "promote", "dispose"}
 	for _, boundary := range forwardBoundaries {
 		t.Run(boundary, func(t *testing.T) {
 			t.Cleanup(func() { crashAfter = nil })
@@ -184,6 +184,97 @@ func TestPromotion_RestoresFromOrigOnly(t *testing.T) {
 	assertMigrated(t, p)
 }
 
+// Regression for the H1 recovery bug: a crash in promoteReady between removing
+// the build-complete sentinel and the swap leaves {orig, new} where new is
+// READY but lacks build-complete. That new dir is a finished build and must be
+// promoted, not misread as a partial build and discarded. An orphaned
+// marker-write temp in new must also be swept, not carried into the commit.
+func TestPromotion_PromotesReadyBuildMissingBuildComplete(t *testing.T) {
+	t.Cleanup(func() { crashAfter = nil })
+	_, p := setupUnit(t, DropDisposer)
+
+	// Stage the exact post-crash state: U -> orig, and a ready new (marker
+	// written, repopulated) with the build-complete sentinel already removed.
+	if err := os.Rename(p.canonical(), p.orig()); err != nil {
+		t.Fatalf("stage orig: %v", err)
+	}
+	if err := os.MkdirAll(p.newer(), 0o750); err != nil {
+		t.Fatalf("stage new: %v", err)
+	}
+	writeFile(t, filepath.Join(p.newer(), "data.txt"), "promoted-new")
+	writeFile(t, filepath.Join(p.newer(), "keep.txt"), "keep")
+	writeFile(t, filepath.Join(p.newer(), ".schema_version"), "2")
+	// An orphaned AtomicWriteFile temp from an interrupted marker write
+	// (".<base>.tmp-*", so "..schema_version.tmp-*").
+	writeFile(t, filepath.Join(p.newer(), "..schema_version.tmp-abcd"), "2")
+
+	if err := p.Run(); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	// Promoted the finished build verbatim — NOT discarded and rebuilt, which
+	// would yield Build's "new" rather than the staged "promoted-new".
+	if got := readFile(t, filepath.Join(p.canonical(), "data.txt")); got != "promoted-new" {
+		t.Errorf("data.txt = %q, want %q (ready build was discarded, not promoted)", got, "promoted-new")
+	}
+	if got := readFile(t, filepath.Join(p.canonical(), ".schema_version")); got != "2" {
+		t.Errorf(".schema_version = %q, want %q", got, "2")
+	}
+	// The orphaned marker temp was swept before the swap.
+	for _, e := range mustReadDir(t, p.canonical()) {
+		if strings.Contains(e.Name(), ".tmp-") {
+			t.Errorf("orphaned write temp leaked into commit: %s", e.Name())
+		}
+	}
+	if exists(p.orig()) || exists(p.newer()) {
+		t.Error("sentinel dir left after commit")
+	}
+}
+
+// The recovery-only boundaries (discard-new, restore) must themselves be
+// crash-resumable: a second crash while rolling back a partial build, or while
+// restoring the original, still converges on a plain re-run.
+func TestPromotion_ResumesFromRecoveryBoundaries(t *testing.T) {
+	t.Run("discard-new", func(t *testing.T) {
+		t.Cleanup(func() { crashAfter = nil })
+		_, p := setupUnit(t, DropDisposer)
+		// {orig, partial new (no build-complete, not ready)} -> discardPartialAndRestore.
+		if err := os.Rename(p.canonical(), p.orig()); err != nil {
+			t.Fatalf("stage orig: %v", err)
+		}
+		if err := os.MkdirAll(p.newer(), 0o750); err != nil {
+			t.Fatalf("stage partial new: %v", err)
+		}
+		writeFile(t, filepath.Join(p.newer(), "data.txt"), "halfnew")
+
+		crashAfter = failAt("discard-new")
+		if err := p.Run(); !errors.Is(err, errInjected) {
+			t.Fatalf("expected injected crash at discard-new, got %v", err)
+		}
+		crashAfter = nil
+		if err := p.Run(); err != nil {
+			t.Fatalf("recovery run after discard-new crash: %v", err)
+		}
+		assertMigrated(t, p)
+	})
+	t.Run("restore", func(t *testing.T) {
+		t.Cleanup(func() { crashAfter = nil })
+		_, p := setupUnit(t, DropDisposer)
+		// {orig} alone -> restoreFromOrig.
+		if err := os.Rename(p.canonical(), p.orig()); err != nil {
+			t.Fatalf("stage orig: %v", err)
+		}
+		crashAfter = failAt("restore")
+		if err := p.Run(); !errors.Is(err, errInjected) {
+			t.Fatalf("expected injected crash at restore, got %v", err)
+		}
+		crashAfter = nil
+		if err := p.Run(); err != nil {
+			t.Fatalf("recovery run after restore crash: %v", err)
+		}
+		assertMigrated(t, p)
+	})
+}
+
 func TestPromotion_HaltsOnCorruptState(t *testing.T) {
 	t.Cleanup(func() { crashAfter = nil })
 	for _, tc := range []struct {
@@ -223,6 +314,15 @@ func failAt(target string) func(string) error {
 		}
 		return nil
 	}
+}
+
+func mustReadDir(t *testing.T, dir string) []os.DirEntry {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read dir %s: %v", dir, err)
+	}
+	return entries
 }
 
 func writeFile(t *testing.T, path, content string) {
