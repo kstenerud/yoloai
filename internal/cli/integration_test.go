@@ -108,6 +108,16 @@ func destroySandbox(t *testing.T, name string) {
 	runCLI(t, "destroy", "--abandon-unapplied", name) //nolint:errcheck // best-effort cleanup
 }
 
+// waitActive blocks until a just-created sandbox's container is active. Copy-mode
+// diff/apply run git INSIDE the container (C1/DF66), so the container must be
+// running before the work copy is seeded and diffed/applied.
+func waitActive(t *testing.T, name string) {
+	t.Helper()
+	rt := testutil.NewIntegrationRuntime(context.Background(), t)
+	defer rt.Close() //nolint:errcheck // test cleanup
+	testutil.WaitForActive(context.Background(), t, rt, store.InstanceName("", name), 15*time.Second)
+}
+
 func TestCLI_NewAndDestroy(t *testing.T) {
 	projectDir := cliSetup(t)
 
@@ -170,9 +180,10 @@ func TestCLI_LsJSON(t *testing.T) {
 func TestCLI_Diff(t *testing.T) {
 	projectDir := cliSetup(t)
 
-	_, _, err := runCLI(t, "new", "--agent", "test", "--no-start", "cli-diff", projectDir)
+	_, _, err := runCLI(t, "new", "--agent", "test", "cli-diff", projectDir)
 	require.NoError(t, err)
 	t.Cleanup(func() { destroySandbox(t, "cli-diff") })
+	waitActive(t, "cli-diff")
 
 	// Modify work copy
 	meta, err := store.LoadEnvironment(cliutil.Layout().SandboxDir("cli-diff"))
@@ -479,9 +490,10 @@ func TestCLI_FilesExchange(t *testing.T) {
 func TestCLI_Apply(t *testing.T) {
 	projectDir := cliSetup(t)
 
-	_, _, err := runCLI(t, "new", "--agent", "test", "--no-start", "cli-apply", projectDir)
+	_, _, err := runCLI(t, "new", "--agent", "test", "cli-apply", projectDir)
 	require.NoError(t, err)
 	t.Cleanup(func() { destroySandbox(t, "cli-apply") })
+	waitActive(t, "cli-apply")
 
 	// Seed work copy with a distinctive change
 	meta, err := store.LoadEnvironment(cliutil.Layout().SandboxDir("cli-apply"))
@@ -507,9 +519,10 @@ func TestCLI_Apply(t *testing.T) {
 func TestCLI_ApplyExport(t *testing.T) {
 	projectDir := cliSetup(t)
 
-	_, _, err := runCLI(t, "new", "--agent", "test", "--no-start", "cli-export", projectDir)
+	_, _, err := runCLI(t, "new", "--agent", "test", "cli-export", projectDir)
 	require.NoError(t, err)
 	t.Cleanup(func() { destroySandbox(t, "cli-export") })
+	waitActive(t, "cli-export")
 
 	meta, err := store.LoadEnvironment(cliutil.Layout().SandboxDir("cli-export"))
 	require.NoError(t, err)
