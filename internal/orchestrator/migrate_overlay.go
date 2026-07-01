@@ -5,7 +5,9 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -328,6 +330,11 @@ func (o *OverlayFlatten) writeCopyModeEnv(newDir string) error {
 	for i := range env.Dirs {
 		if env.Dirs[i].Mode == store.DirModeOverlay {
 			env.Dirs[i].Mode = store.DirModeCopy
+			// Overlay stored MountPath as the in-container merged path; copy mode
+			// mirrors the host path (docker's ResolveCopyMount is identity, and
+			// overlay is docker-only), so a restart mounts the work copy where the
+			// agent expects it.
+			env.Dirs[i].MountPath = env.Dirs[i].HostPath
 			env.Dirs[i].BaselineSHA = ""
 		}
 	}
@@ -338,11 +345,12 @@ func (o *OverlayFlatten) writeCopyModeEnv(newDir string) error {
 }
 
 // isCopyMode reports whether dir's environment.json has no overlay dirs left —
-// the durable "flattened" form the promotion recovery reads.
+// the durable "flattened" form the promotion recovery reads. A missing
+// environment.json (the new dir before repopulate copies it in) is "not ready".
 func (o *OverlayFlatten) isCopyMode(dir string) (bool, error) {
 	env, err := store.LoadEnvironment(dir)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, fs.ErrNotExist) {
 			return false, nil
 		}
 		return false, err
