@@ -56,6 +56,53 @@ func runPlanApply(ctx context.Context, opts planApplyOpts) (yoloai.MigrationRepo
 	return opts.sys.ApplyMigration(ctx, d)
 }
 
+// refuseIfBlocked collects the framework plan at the data dir's CURRENT on-disk
+// location (before any relocation or schema step) and refuses the whole
+// migration if any sandbox can't be migrated — so a blocked sandbox never
+// triggers an irreversible schema bump the user would then have to downgrade
+// past to fix it. Nothing is mutated when this refuses.
+func refuseIfBlocked(ctx context.Context) error {
+	planSys, err := cliutil.MigratePreviewSystem()
+	if err != nil {
+		return err
+	}
+	plan, err := planSys.MigrationPlan(ctx)
+	if err != nil {
+		return err
+	}
+	var blocked []string
+	for _, op := range plan.Ops {
+		if op.Blocked {
+			blocked = append(blocked, op.Description)
+		}
+	}
+	if len(blocked) == 0 {
+		return nil
+	}
+	return fmt.Errorf("this migration can't proceed — the following can't be migrated:\n  - %s\n\n%s",
+		strings.Join(blocked, "\n  - "), downgradeGuidance(cliutil.CurrentLibrarySchema()))
+}
+
+// downgradeGuidance explains how to resolve blocked sandboxes: switch back to a
+// prior yoloai release that still reads the data dir at its current schema, fix
+// them there, then upgrade again. It names concrete release tags when the schema
+// is known (see config.PriorReleaseRange).
+func downgradeGuidance(onDiskSchema int) string {
+	from, to, ok := config.PriorReleaseRange(onDiskSchema)
+	var target string
+	switch {
+	case !ok:
+		target = "the yoloai version you were using before this upgrade"
+	case to != "":
+		target = fmt.Sprintf("a yoloai release from %s up to (but not including) %s", from, to)
+	default:
+		target = fmt.Sprintf("yoloai %s or newer (any release before the one you're upgrading to)", from)
+	}
+	return fmt.Sprintf(
+		"To fix them, switch back to %s (your data directory is still at schema v%d), recover any wanted changes there with `yoloai diff`/`yoloai apply`, then destroy and recreate those sandboxes as :copy — and upgrade again. Nothing has been changed yet.",
+		target, onDiskSchema)
+}
+
 // authorize reports whether d satisfies every op's required approval, returning
 // the unmet ops for the app to surface or prompt on.
 func authorize(plan yoloai.MigrationPlan, d yoloai.MigrationDecision) (ok bool, unmet []yoloai.MigrationOp) {
@@ -133,17 +180,36 @@ func previewMigration(ctx context.Context, opts planApplyOpts, cliSt, libSt conf
 	if err != nil {
 		return err
 	}
+	blocked := false
+	for _, op := range plan.Ops {
+		if op.Blocked {
+			blocked = true
+			break
+		}
+	}
 	if opts.json {
-		return cliutil.WriteJSON(opts.out, map[string]any{
+		payload := map[string]any{
 			"cli_realm":      statusString(cliSt),
 			"library_realm":  statusString(libSt),
 			"framework_plan": plan.Ops,
-		})
+		}
+		if blocked {
+			payload["downgrade_guidance"] = downgradeGuidance(cliutil.CurrentLibrarySchema())
+		}
+		return cliutil.WriteJSON(opts.out, payload)
 	}
 	if _, err := fmt.Fprintf(opts.out, "CLI realm:     %s\nLibrary realm: %s\n", statusString(cliSt), statusString(libSt)); err != nil {
 		return err
 	}
-	return renderPlanHuman(opts, plan)
+	if err := renderPlanHuman(opts, plan); err != nil {
+		return err
+	}
+	if blocked {
+		if _, err := fmt.Fprintf(opts.out, "\n%s\n", downgradeGuidance(cliutil.CurrentLibrarySchema())); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func statusString(s config.LayoutStatus) string {

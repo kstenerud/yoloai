@@ -229,7 +229,7 @@ func (o *OverlayFlatten) hostUnmanageableReason(name string) string {
 		}
 		uid, ok := fileOwnerUID(info)
 		if ok && uid != hostUID && uid != 0 {
-			return fmt.Sprintf("sandbox %q can't be migrated in place: its runtime state (%s) is owned by uid %d, not you (uid %d) — a rootless backend (e.g. podman) maps the container's users to host subuids the migration can't read or remove. Recover any wanted changes (yoloai diff/apply), then destroy it (yoloai destroy %s) and recreate it as :copy", name, e.Name(), uid, hostUID, name)
+			return fmt.Sprintf("sandbox %q can't be migrated in place: its runtime state (%s) is owned by uid %d, not you (uid %d) — a rootless backend (e.g. podman) maps the container's users to host subuids the migration can't read or remove", name, e.Name(), uid, hostUID)
 		}
 	}
 	return ""

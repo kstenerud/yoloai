@@ -79,6 +79,13 @@ func runSystemMigrate(cmd *cobra.Command) error {
 		return reportMigrateNoop(cmd)
 	}
 
+	// Refuse BEFORE any mutation if a sandbox can't be migrated (e.g. a rootless
+	// backend's host-unmanageable state): an irreversible schema bump would strand
+	// the user, unable to downgrade to a version that can fix the blocker.
+	if err := refuseIfBlocked(cmd.Context()); err != nil {
+		return err
+	}
+
 	// Frozen v0->v3 ladder, then the crash-safe framework (v3->v4 overlay flatten),
 	// plan/apply-gated, which stamps the realm to v4 last.
 	if err := applyFrozenLadder(cmd, sys); err != nil {

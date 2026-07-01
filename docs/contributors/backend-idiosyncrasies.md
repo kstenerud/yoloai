@@ -2575,15 +2575,19 @@ rootful Docker (committed + uncommitted + gitignored preserved, `:copy`, v4).
 privileged helper (a throwaway root container, or `podman unshare chown`), which
 isn't wired in — overlay-on-podman-rootless across a D109 upgrade is a rare edge.
 So the migrator detects the foreign-uid state and surfaces it as a hard
-**blocked** op: `migrate --check`/`--dry-run` lists it up front (`[✗] sandbox "X"
-can't be migrated in place …`, `blocked:true` in `--json`), and a real `migrate`
-**refuses the whole run** ("this migration can't proceed …") before mutating
-anything — the sandbox is left **untouched** (mode stays `overlay`, realm stays
-v3, no sentinels). The block is an `AuthBlocked` plan op (`Plan` calls
+**blocked** op: `migrate --check`/`--dry-run` lists it (`[✗] sandbox "X" can't be
+migrated in place …`, `blocked:true` in `--json`), and a real `migrate`
+**refuses the whole run** — crucially **before any mutation**: `refuseIfBlocked`
+runs *ahead of* the frozen v0→v3 ladder (relocation/stamp), so a blocked sandbox
+never triggers an irreversible schema bump the user would then have to downgrade
+past to fix it. The sandbox is left **untouched** (mode `overlay`, realm at its
+prior schema, no sentinels). The refusal prints **downgrade guidance naming real
+release tags** for the data dir's current schema (`config.LibrarySchemaReleases`
+/ `PriorReleaseRange` → e.g. "switch back to a yoloai release from v0.4.0 up to …
+recover with `yoloai diff`/`apply`, destroy + recreate as `:copy`, upgrade
+again"). The block is an `AuthBlocked` plan op (`Plan` calls
 `hostUnmanageableReason`; no `Decision` satisfies it) plus the apply-time
-`assertHostOwnedState` re-check. Workaround (in the message): recover any wanted
-changes (`yoloai diff`/`apply`), then `yoloai destroy` the sandbox and recreate
-it as `:copy`. A quarantine (rename-only) is exempt and still works.
+`assertHostOwnedState` backstop. A quarantine (rename-only) is exempt.
 
 **Code:** `internal/orchestrator/migrate_overlay.go` — `reclaimOverlayLayers`,
 `captureMerged` (capture-as-root + stage chown), `assertHostOwnedState`;

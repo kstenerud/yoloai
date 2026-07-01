@@ -68,6 +68,22 @@ func TestResolveApproval_BlockedRefused(t *testing.T) {
 	}
 }
 
+// The downgrade guidance names concrete release tags for a known schema, and
+// falls back to a generic pointer for an unknown/newer one — always noting that
+// nothing was changed.
+func TestDowngradeGuidance(t *testing.T) {
+	g2 := downgradeGuidance(2)
+	for _, want := range []string{"v0.4.0", "schema v2", "Nothing has been changed"} {
+		if !strings.Contains(g2, want) {
+			t.Errorf("guidance(2) = %q, want it to contain %q", g2, want)
+		}
+	}
+	gUnknown := downgradeGuidance(9)
+	if !strings.Contains(gUnknown, "version you were using before") {
+		t.Errorf("guidance(9) = %q, want the generic prior-version pointer", gUnknown)
+	}
+}
+
 func TestResolveApproval_ConfirmAccepted(t *testing.T) {
 	opts := planApplyOpts{in: strings.NewReader("y\n"), out: &bytes.Buffer{}, errw: &bytes.Buffer{}}
 	unmet := []yoloai.MigrationOp{{Description: "quarantine X", Destructive: true}}

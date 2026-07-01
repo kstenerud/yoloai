@@ -127,6 +127,18 @@ func CurrentLibraryDataDir() string {
 	return filepath.Join(top, libraryNamespace)
 }
 
+// CurrentLibrarySchema reads the library realm's on-disk schema version at its
+// current physical location (see CurrentLibraryDataDir), returning 0 when it is
+// unstamped or flat (pre-.schema-version). Used to name the release range a
+// blocked `system migrate` should downgrade to.
+func CurrentLibrarySchema() int {
+	v, ok, err := config.ReadSchemaVersion(config.SchemaVersionPathFor(CurrentLibraryDataDir()))
+	if err != nil || !ok {
+		return 0
+	}
+	return v
+}
+
 // isFlatV0Install reports whether top looks like a pre-namespace install: a
 // flat config.yaml directly under TOP, with no TOP/library beside it. This
 // heuristic runs at most once per TOP — after the bootstrap the stamp is
