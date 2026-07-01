@@ -157,20 +157,14 @@ func (g *Git) CheckPatch(ctx context.Context, patch []byte, targetDir string, is
 		return fmt.Errorf("resolve target dir: %w", err)
 	}
 
-	// --unsafe-paths invariant: see ApplyPatch. Patches must originate from
-	// our own git diff of the target tree, never an external raw patch.
-	return g.withTempGitDir(ctx, func(tmpDir string) error {
-		if err := g.runGitApply(ctx, tmpDir, patch, "--check", "--unsafe-paths", "--directory="+realTarget); err != nil {
-			return formatApplyError(err, targetDir)
-		}
-		return nil
-	})
+	// Confinement: see applyNonRepo. --check must measure the same working
+	// area as the real apply, so it takes the identical route.
+	return g.applyNonRepo(ctx, patch, realTarget, targetDir, "--check")
 }
 
 // ApplyPatch applies the patch to the target directory.
 // For git repos: runs `git apply` from within the repo.
-// For non-git dirs: runs `git apply --unsafe-paths --directory=<path>`
-// from a temporary git-initialized directory.
+// For non-git dirs: runs `git apply` confined to the target (see applyNonRepo).
 func (g *Git) ApplyPatch(ctx context.Context, patch []byte, targetDir string, isGit bool) error {
 	if isGit {
 		if err := g.runGitApply(ctx, targetDir, patch); err != nil {
@@ -186,17 +180,31 @@ func (g *Git) ApplyPatch(ctx context.Context, patch []byte, targetDir string, is
 		return fmt.Errorf("resolve target dir: %w", err)
 	}
 
-	// --unsafe-paths lets git apply write to a target that isn't a git
-	// worktree (these :copy dirs aren't repos) AND disables git's
-	// reject-outside-the-tree check. That is only safe because every patch
-	// reaching here is produced by our own `git diff`/`format-patch` over
-	// the target tree, so it can only name repo-relative paths — never a
-	// caller- or agent-supplied raw patch that could carry `../` traversal.
-	// Do not route externally-sourced patches through this path without
-	// adding containment. git's separate "beyond a symbolic link" check
-	// still fires and blocks the create-symlink-then-write-through escape.
+	return g.applyNonRepo(ctx, patch, realTarget, targetDir)
+}
+
+// applyNonRepo runs `git apply` against realTarget, a :copy work dir that is
+// NOT a git repo. It runs with cwd=realTarget and GIT_DIR pointed at a
+// throwaway repo. Two properties fall out, both load-bearing:
+//
+//   - The explicit git-dir stops git's upward repo search, so it never adopts
+//     an ambient repo that happens to sit above realTarget. realTarget itself
+//     is the working area git measures patch paths against.
+//   - With no --unsafe-paths, git rejects any patch path that escapes that
+//     area (`../…`, absolute paths). Patches reaching apply are produced by a
+//     `git diff` run *inside the sandbox* and are therefore attacker-
+//     influenced, so git's own path-safety guard has to be the boundary.
+//
+// The previous route — `--unsafe-paths --directory=<target>` from a temp repo
+// — deliberately disabled exactly that guard, letting a crafted patch write
+// anywhere the host user could (DF70). git's separate "beyond a symbolic link"
+// check still fires here and blocks the symlink-then-write-through escape.
+// extraArgs carries "--check" for the dry-run path; realTarget must already be
+// symlink-resolved.
+func (g *Git) applyNonRepo(ctx context.Context, patch []byte, realTarget, targetDir string, extraArgs ...string) error {
 	return g.withTempGitDir(ctx, func(tmpDir string) error {
-		if err := g.runGitApply(ctx, tmpDir, patch, "--unsafe-paths", "--directory="+realTarget); err != nil {
+		args := append([]string{"--git-dir=" + filepath.Join(tmpDir, ".git"), "apply"}, extraArgs...)
+		if err := g.runGitInput(ctx, realTarget, patch, args...); err != nil {
 			return formatApplyError(err, targetDir)
 		}
 		return nil
@@ -433,8 +441,14 @@ func (g *Git) withTempGitDir(ctx context.Context, fn func(tmpDir string) error) 
 // runGitApply executes `git apply` with the given args, feeding the patch via
 // stdin. Returns error with stderr content included on failure.
 func (g *Git) runGitApply(ctx context.Context, dir string, patch []byte, args ...string) error {
-	applyArgs := append([]string{"apply"}, args...)
-	stdout, err := g.RunInput(ctx, dir, patch, applyArgs...)
+	return g.runGitInput(ctx, dir, patch, append([]string{"apply"}, args...)...)
+}
+
+// runGitInput executes a stdin-bearing git invocation in dir; args carry the
+// subcommand and any git-global flags that must precede it (e.g. --git-dir).
+// Returns error with stderr content included on failure.
+func (g *Git) runGitInput(ctx context.Context, dir string, patch []byte, args ...string) error {
+	stdout, err := g.RunInput(ctx, dir, patch, args...)
 	if err != nil {
 		var ee *runtime.ExecError
 		if errors.As(err, &ee) {
