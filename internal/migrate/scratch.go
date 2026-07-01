@@ -16,7 +16,8 @@ import (
 // build-id) makes it easy to find; identity is irrelevant because a crashed
 // build is discarded and rebuilt, never recovered. It MUST sit on the same
 // filesystem as the live dirs (SameFilesystem) so the build's move-in is a true
-// atomic rename, not a copy that can leave a partial sentinel dir.
+// atomic rename; a cross-filesystem scratch would make os.Rename fail with
+// EXDEV mid-migration (it does not fall back to a copy) rather than move in.
 const ScratchDirName = ".migration-scratch"
 
 // ScratchPath returns the scratch dir path under home.

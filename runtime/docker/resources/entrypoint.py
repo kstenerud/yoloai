@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Root-level container entrypoint: UID remap, secrets, network isolation,
-overlay mounts, setup commands. Execs into sandbox-setup.py when done.
+setup commands. Execs into sandbox-setup.py when done.
 
 Writes structured JSONL to logs/sandbox.jsonl. Runs as root (or as the host
 user under Podman rootless with --userns=keep-id).

@@ -13,8 +13,8 @@ import (
 // SameFilesystem reports whether every given path resides on the same local
 // filesystem (device id). Migration requires it (crash-safe-migration decision
 // 4): every mv/rename must be atomic, so the scratch dir and the live dirs
-// cannot straddle a mount boundary — an EXDEV rename silently degrades to a
-// copy+delete that can leave a partial sentinel dir. This also subsumes the
+// cannot straddle a mount boundary — os.Rename across filesystems fails with
+// EXDEV (it does not copy), which would break the move-in. This also subsumes the
 // network-FS refusal (flock is unreliable on NFS/SMB and meaningless across a
 // synced root like Dropbox/iCloud). Every path must exist. The error names the
 // escape (relocate ~/.yoloai onto a single local FS).

@@ -135,7 +135,7 @@ Many AI coding tools use `git worktree` for isolation — it's instant and space
 > **Note:** An earlier `:overlay` mode used in-container overlayfs for instant setup, but
 > it required granting the agent container `CAP_SYS_ADMIN` — a host-escape primitive on
 > rootful Docker — so it was retired (D109). Existing overlay sandboxes are auto-converted
-> to `:copy` by `yoloai system migrate`. Use `:copy` (reflink-aware where supported).
+> to `:copy` by `yoloai system migrate`. Use `:copy` instead.
 
 ### Build Artifact Exclusion
 

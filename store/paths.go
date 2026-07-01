@@ -246,47 +246,15 @@ func WorkDir(sandboxDir string, hostPath string) string {
 	return filepath.Join(sandboxDir, "work", EncodePath(hostPath))
 }
 
-// OverlayWorkBaseDir returns the parent directory for all overlay layer
-// directories (upper, ovlwork, merged, lower). This entire directory is
-// bind-mounted as a single Docker volume so that upper and ovlwork share
-// the same underlying mount — a requirement for overlayfs to work inside
-// a Docker container.
-//
-//	<sandboxDir>/work/<caret-encoded-path>/
-func OverlayWorkBaseDir(sandboxDir string, hostPath string) string {
-	return filepath.Join(sandboxDir, "work", EncodePath(hostPath))
-}
-
-// OverlayUpperDir returns the upper layer directory for an overlay mount.
-//
-//	<sandboxDir>/work/<caret-encoded-path>/upper/
-func OverlayUpperDir(sandboxDir string, hostPath string) string {
-	return filepath.Join(sandboxDir, "work", EncodePath(hostPath), "upper")
-}
-
-// OverlayOvlworkDir returns the overlayfs workdir for an overlay mount.
-// Named "ovlwork" to avoid collision with the sandbox work/ directory.
-//
-//	<sandboxDir>/work/<caret-encoded-path>/ovlwork/
-func OverlayOvlworkDir(sandboxDir string, hostPath string) string {
-	return filepath.Join(sandboxDir, "work", EncodePath(hostPath), "ovlwork")
-}
-
-// OverlayLowerDir returns the mount-point directory inside OverlayWorkBaseDir
-// where the user's read-only workdir is bind-mounted (nested inside the
-// parent volume so all overlay dirs share the same Docker bind mount).
+// OverlayLowerDir returns the mount-point directory, under a retired overlay
+// sandbox's work base (<sandboxDir>/work/<caret-encoded-path>/), where the
+// user's original workdir was bind-mounted read-only. :overlay is retired
+// (D109); this is the one overlay path the v3->v4 flatten migrator still reads
+// to rebuild an abandoned overlay sandbox from its pristine lower.
 //
 //	<sandboxDir>/work/<caret-encoded-path>/lower/
 func OverlayLowerDir(sandboxDir string, hostPath string) string {
 	return filepath.Join(sandboxDir, "work", EncodePath(hostPath), "lower")
-}
-
-// OverlayMergedDir returns the directory inside OverlayWorkBaseDir that
-// serves as the overlayfs merge target (the unified view of lower+upper).
-//
-//	<sandboxDir>/work/<caret-encoded-path>/merged/
-func OverlayMergedDir(sandboxDir string, hostPath string) string {
-	return filepath.Join(sandboxDir, "work", EncodePath(hostPath), "merged")
 }
 
 // FilesDir returns the host-side file exchange directory within a sandbox.

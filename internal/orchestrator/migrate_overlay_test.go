@@ -198,7 +198,7 @@ func assertFlattenedToCopy(t *testing.T, sandboxDir, hostPath string, wantConten
 	if _, err := os.Stat(filepath.Join(work, captureStageName)); !os.IsNotExist(err) {
 		t.Error("capture stage dir leaked into the flattened work tree")
 	}
-	if _, err := os.Stat(store.OverlayMergedDir(sandboxDir, hostPath)); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(work, "merged")); !os.IsNotExist(err) {
 		t.Error("overlay subdirs leaked into the flattened work tree")
 	}
 }
