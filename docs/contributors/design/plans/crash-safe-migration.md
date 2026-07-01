@@ -153,16 +153,25 @@ Every `migrate` run computes a **plan first**, then applies it — the terraform
    - **Newly-destructive ⇒ refuse.** A sandbox that is destructive at apply but wasn't approved
      as such (e.g. running at plan time, now stopped) is **skipped and reported, stamp not
      flipped** — never silently abandoned — unless `--abandon-stopped-overlay` is set.
-   - **Widen-guard via a dry-run inventory (interim, beta-only).** While `.schema-version < 4`
-     (overlay sandboxes still possible), `migrate --dry-run` records the **destructive set** (the
-     stopped overlay sandboxes it would abandon) to `library/overlay-inventory.jsonl`. A later
-     destructive run recomputes that set and **fails iff it *widened*** — a victim not in the
-     reviewed set (a newly-stopped or newly-created overlay sandbox). A **shrink** (one came back
-     online, or was deleted) proceeds. A **missing** inventory = empty reviewed set, so anything
-     to abandon fails → a dry-run is effectively required first. The file is **deleted
-     unconditionally** on a destructive run and the whole mechanism is retired post-beta with
-     `:overlay` (it's a throwaway temp, so writing it during `--dry-run` is fine — but keep
-     **`--check`** as the pure read-only audit that writes nothing).
+   - **Widen-guard via a dry-run inventory (interim, beta-only; only meaningful with
+     `--abandon-stopped-overlay`).** While `.schema-version < 4` (overlay sandboxes still possible),
+     `migrate --dry-run` records the **destructive set** — the stopped overlay sandboxes it would
+     abandon, which is **∅ unless `--abandon-stopped-overlay` is set** (without the flag, guard (i)
+     refuses them, so there is nothing destructive to review). A later destructive run recomputes
+     the set and **fails iff it is not a subset of the reviewed set** — i.e. **any member not
+     reviewed** (a newly-stopped or newly-created victim). This is a **membership** check, not a
+     count: a *swap* (A comes online, B goes offline — count unchanged) still fails because B∉
+     reviewed. A pure **shrink** (came back online / deleted) proceeds. A **missing** inventory =
+     empty reviewed set, so anything to abandon fails → a dry-run is effectively required first (and
+     guard (i) independently backstops, so the fail is always safe; the dry-run→apply TOCTOU loop is
+     a liveness, not safety, concern — every iteration is fail-safe).
+     **Storage & ordering:** written **not** under `library/` — on a flat-v0 install `library/`
+     doesn't exist at `--dry-run` time and materializing it would trip `isFlatV0Install→false` and
+     silently break the relocation (re-audit A1). Put it under the **CLI realm** (create-freshed
+     independent of relocation) at a version-resolved path. **Check-then-delete:** verify the widen
+     guard and commit the destructive units **before** deleting the inventory; on a widen-**fail**,
+     **keep** the file (don't destroy the review evidence). Retired post-beta with `:overlay`. Keep
+     **`--check`** as the pure read-only audit that writes nothing.
 
 **All-or-nothing applies to the *decision*, not the *execution*.** You approve the whole
 plan or abort — no mid-run prompts. Execution stays **incremental and resumable**: each unit
@@ -380,13 +389,22 @@ A small, shared set of strategies a migrator declares — not per-migrator hand-
     incorrectness on deletions, which we refuse to ship.
 
   So the migrator **requires the sandbox already running**, and the **dry-run plan enumerates
-  every affected *stopped* overlay sandbox and branches by backend**:
+  every affected *stopped* overlay sandbox and branches by host platform** — **`runtime.GOOS` of
+  the migrating host, not the stored backend** (re-audit B1: overlay is docker-only, so
+  `backend=="docker"` on both Linux and macOS and tells you nothing; the real discriminator is
+  where the upper lives — host dir on Linux vs container tmpfs on macOS, DF69 — a function of the
+  host OS, and you can't migrate a Linux-created sandbox on macOS):
   - **Linux-stopped — recoverable.** The upper is on the host, so the plan directs: abort,
     downgrade to the prior binary, **start** the sandbox (overlay remounts; the container
-    survives the later binary swap), upgrade, re-run `migrate` — which now reads it running.
-    Preserves the changes.
+    survives the later binary swap — docker containers are daemon-managed), upgrade, re-run
+    `migrate` — which now reads it running. Preserves the changes.
   - **macOS-stopped — already lost (DF69).** The tmpfs upper vanished at stop; downgrade-and-
     start yields an *empty* upper, so there is **no** recovery path — the plan says so plainly.
+  - **Not cleanly stopped/running (re-audit B3).** `DetectStatus` is not binary — `Unavailable`
+    (backend daemon down) and `Broken` (`environment.json` unreadable) mean the plan **cannot
+    classify** the sandbox: surface as "cannot audit — start the backend / repair the sandbox and
+    re-plan" (or **quarantine**), **never** fall through to proceed-abandon. `Removed` (container
+    gone) = the upper is already unrecoverable, same as macOS-lost.
   - **Either, if the user declines/ignores** — proceed is a **destructive** op that flattens the
     original workdir and **abandons** the agent's overlay changes — **lost** (the user consented
     by proceeding): macOS was already gone, and on Linux the displaced upper is **dropped**, not
@@ -397,21 +415,26 @@ A small, shared set of strategies a migrator declares — not per-migrator hand-
   the new binary can't mount overlay anyway, so a stopped overlay sandbox genuinely **cannot** be
   recovered post-upgrade — the recovery must happen *before* upgrading, which is why the plan
   surfaces it as a pre-upgrade audit, not an in-migration action.
-- **Sandboxes-root resolution — version-driven, not existence-driven (F7).** The flatten
-  migrator lives in the **orchestrator** (it needs `Exec`/backend types `internal/config` cannot
-  import — exactly why `MigrateAgentConfigs` lives there too), which legitimately spans realms.
-  It resolves the sandboxes root from the **on-disk schema version** — which records whether the
-  `MigrateCLI` flat→namespaced relocation has run — **not from directory existence**: while the
-  layout is still flat/pre-relocation, live sandboxes can only be at top-level `sandboxes/`;
-  post-relocation, only at `library/sandboxes/`. Keying on the version (the authoritative signal)
-  means an **empty or stale `library/sandboxes/`** dir can never *shadow* a populated top-level
-  one (the existence-check trap). This keeps the **plan accurate before any relocation runs**:
-  `Plan()` on a flat-v0 install reads the pre-relocation version → looks top-level; by apply the
-  cli relocation has run (it precedes the library realm — `migrate.go:57-77`) → the version says
-  namespaced → looks `library/sandboxes/` — **same set, so the plan never lies.** We look only
-  where the current version says live sandboxes can be; **orphans left by a botched prior
-  migration (a half-relocated A6 install) are explicitly out of scope — we do not hunt for or
-  fix them.**
+- **Sandboxes-root resolution — a closed two-case rule, "caught in amber" (F7).** The overlay
+  flatten can *only ever* run on a pre-v4 install, and where its sandboxes live is a **closed
+  two-case rule that can never grow a third case** — a future sandbox relocation is unreachable
+  without first completing v4 (which retires overlay), so this resolver is frozen forever:
+  1. **No CLI schema stamp** (flat-v0, relocation not yet run) → `$YOLOAI_HOME/sandboxes`.
+  2. **CLI stamp present** (∴ `MigrateCLI` relocation ran) → `$YOLOAI_HOME/library/sandboxes`.
+
+  The signal is **"did the relocation run"** (the `MigrateCLI` flat→namespaced move), **not**
+  "is `library/sandboxes` non-empty" — so an empty/stale `library/sandboxes` can never *shadow* a
+  populated top-level one (the existence-check trap the first F7 draft had). **Who reads it — the
+  CLI, not the orchestrator (re-audit C1):** relocation state is a **CLI-realm** concern
+  (`CLISchemaVersion` / `isFlatV0Install`), and the orchestrator flatten cannot import `cliutil`
+  (the import direction is `internal/cli → internal/orchestrator`). So the **CLI resolves the
+  sandboxes root and injects it** into the orchestrator migrator (same pattern as
+  `LaunchPrefixResolver` / `MigrateDataDir`); the orchestrator never reaches up to a sibling
+  realm's stamp. This keeps the plan accurate before any relocation runs: at `--dry-run` on a
+  flat-v0 install the CLI resolves case 1 (top-level); by apply the relocation has run (it precedes
+  the library realm — `migrate.go:57-77`) so it resolves case 2 — **same sandbox set, so the plan
+  never lies.** **Orphans from a botched prior migration (a half-relocated A6 install) are
+  explicitly out of scope — we do not hunt for or fix them.**
 
 ## No automated downgrade — but the prior schema is preserved in trash (decision 3)
 
