@@ -55,19 +55,6 @@ func (e *Engine) GenerateWorkingDiff(ctx context.Context, name string, dirHostPa
 	})
 }
 
-// GenerateOverlayDiff returns the overlay-mode diff, which runs git inside the
-// running container (requires the runtime).
-func (e *Engine) GenerateOverlayDiff(ctx context.Context, name string, dirHostPath string, stat, nameOnly bool) (string, error) {
-	e.TryEnsure(ctx)
-	return copyflow.GenerateOverlayDiff(ctx, e.runtime, copyflow.DiffOptions{
-		Name:        name,
-		Layout:      e.layout,
-		Stat:        stat,
-		NameOnly:    nameOnly,
-		DirHostPath: dirHostPath,
-	})
-}
-
 // GenerateWorkingChanges returns the structured per-file change summary for
 // copy/rw workdirs. Best-effort backend open: a nil runtime falls back to the
 // host-git path.
@@ -78,17 +65,6 @@ func (e *Engine) GenerateWorkingChanges(ctx context.Context, name string, dirHos
 		Layout:      e.layout,
 		Paths:       paths,
 		Runtime:     e.runtime,
-		DirHostPath: dirHostPath,
-	})
-}
-
-// GenerateOverlayChanges returns the structured per-file change summary for an
-// :overlay-mode workdir (requires the running container).
-func (e *Engine) GenerateOverlayChanges(ctx context.Context, name string, dirHostPath string) ([]copyflow.FileChange, error) {
-	e.TryEnsure(ctx)
-	return copyflow.GenerateOverlayChanges(ctx, e.runtime, copyflow.DiffOptions{
-		Name:        name,
-		Layout:      e.layout,
 		DirHostPath: dirHostPath,
 	})
 }
@@ -125,23 +101,10 @@ func (e *Engine) ApplySeries(ctx context.Context, name string, opts copyflow.App
 	return copyflow.ApplySeries(ctx, e.layout, e.runtime, name, opts)
 }
 
-// ApplyOverlay lands an overlay sandbox's upper-layer changes onto the host.
-func (e *Engine) ApplyOverlay(ctx context.Context, name string, opts copyflow.ApplyOverlayOptions) (*copyflow.ApplyResult, error) {
-	e.TryEnsure(ctx)
-	return copyflow.ApplyOverlay(ctx, e.layout, e.runtime, name, opts)
-}
-
 // ApplyAll lands the net working diff (copy-mode) onto the host unstaged.
 func (e *Engine) ApplyAll(ctx context.Context, name string, opts copyflow.ApplyAllOptions) (*copyflow.ApplyResult, error) {
 	e.TryEnsure(ctx)
 	return copyflow.ApplyAll(ctx, e.layout, e.runtime, name, opts)
-}
-
-// ListCommitsOverlay returns the overlay sandbox's beyond-baseline commits (git
-// log inside the running container).
-func (e *Engine) ListCommitsOverlay(ctx context.Context, name string, dirHostPath string) ([]copyflow.CommitInfo, error) {
-	e.TryEnsure(ctx)
-	return copyflow.ListCommitsBeyondBaselineOverlay(ctx, e.layout, e.runtime, name, dirHostPath)
 }
 
 // ListCommitsWithStats returns the copy-mode beyond-baseline commits, each with

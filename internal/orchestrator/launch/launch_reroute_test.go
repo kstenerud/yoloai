@@ -64,7 +64,7 @@ func (r *rerouteBaseRuntime) Remove(_ context.Context, _ string) error { return 
 func (r *rerouteBaseRuntime) Exec(_ context.Context, _ string, _ []string, _ string) (runtime.ExecResult, error) {
 	return runtime.ExecResult{}, nil
 }
-func (r *rerouteBaseRuntime) GitExec(_ context.Context, _ string, _ string, _ ...string) (string, error) {
+func (r *rerouteBaseRuntime) GitExec(_ context.Context, _ string, _ string, _ string, _ ...string) (string, error) {
 	return "", nil
 }
 func (r *rerouteBaseRuntime) InteractiveExec(_ context.Context, _ string, _ []string, _ string, _ string, _ runtime.IOStreams) error {
@@ -90,7 +90,6 @@ func (r *rerouteBaseRuntime) Descriptor() runtime.BackendDescriptor {
 		BaseModeName: runtime.IsolationModeContainer,
 		Capabilities: runtime.BackendCaps{
 			NetworkIsolation: true,
-			OverlayDirs:      true,
 			CapAdd:           true,
 			// This fake represents a Docker-like backend that opts into the D88
 			// keepalive-holder + Launch bring-up; these tests verify that path.

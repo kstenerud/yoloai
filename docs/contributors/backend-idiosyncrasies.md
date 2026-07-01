@@ -118,6 +118,7 @@ inclusion test first, then add a row to the index.
 | `Can't open socket to ipset` / network isolation fails on Podman macOS | [Podman macOS: iptables-nft lacks xt_set module](#podman-macos-iptables-nft-lacks-xt_set-module-ipset-unusable) |
 | `no podman socket found` on macOS though `podman machine` is running (any command: `system build`, `new`, …) | [Podman macOS: socket discovery needs TMPDIR](#macos-podman-machine-socket-discovery-needs-tmpdir-without-it-inspect-reports-a-stale-tmp-path) |
 | Smoke test: `stop_start/containerd-vm` fails with "agent idle for 9s+" | [QEMU: slow startup exceeds stall grace](#qemu-slow-startup-exceeds-smoke-test-stall-grace-period) |
+| `diff`/`apply`/`status` fails only on containerd-vm with `git: detected dubious ownership in repository` | [Kata: virtiofs remaps work-copy uid; in-confinement git trips dubious-ownership](#kata-virtiofs-remaps-the-work-copy-owner-uid-so-in-confinement-git-trips-dubious-ownership) |
 | Smoke test: `stop_start/tart` fails; exchange dir empty | [Tart: xcodebuild -runFirstLaunch blocks agent startup](#tart-xcodebuild--runfirstlaunch-blocks-agent-startup) |
 | Smoke `done` never fires; claude stuck on a Bash permission prompt despite `--dangerously-skip-permissions`; "fullscreen renderer" modal seen | [Claude: fullscreen upsell re-execs and drops the flag](#claude-the-fullscreen-renderer-upsell-re-execs-claude-and-drops---dangerously-skip-permissions) |
 | `container-enhanced` (gVisor): `new` exits 0 / `ls` active but agent never runs; box stuck on `sleep infinity`, only `entrypoint.keepalive_only` logged | [gVisor: docker exec --user resolves stale image passwd](#gvisor-container-enhanced-docker-exec---user-name-resolves-against-the-stale-image-passwd-not-the-live-one) |
@@ -140,6 +141,11 @@ inclusion test first, then add a row to the index.
 | `podman build` → `Error: unknown flag: --provenance` / exit 125 | [Podman: build rejects docker BuildKit attestation flags](#podman-build-rejects-the-docker-buildkit-attestation-flags) |
 | `idle` agent / keep-alive exits 1 with `usage: sleep number[unit]` on a macOS/Tart guest | [macOS guest BSD sleep rejects sleep infinity](#macos-guest-bsd-sleep-rejects-sleep-infinity-gnu-only) |
 | `install network-isolation firewall: netns sidecar exited 2: … can't open file '/yoloai/bin/install-firewall.py'` (intermittent, under concurrent churn; file is present in image) | [Docker/OrbStack: ephemeral container transiently exposes an incomplete rootfs](#a-freshly-created-ephemeral-container-can-transiently-expose-an-incomplete-rootfs-under-heavy-concurrent-churn) |
+| Same `install-firewall.py` (or any embedded-resource) error, but **deterministic** on one docker provider while another passes — file genuinely absent from that provider's image | [Docker: base-image staleness marker keyed per backend, not per provider/store](#docker-base-image-staleness-marker-was-keyed-per-backend-not-per-image-store-second-provider-runs-stale) |
+| macOS `:overlay` sandbox loses the agent's uncommitted changes after `stop`/`restart`/`kill`; `yoloai diff` showed them while running | [macOS: overlayfs on a VirtioFS bind silently downgrades to a tmpfs upper (changes lost on restart)](#macos-overlayfs-on-a-virtiofs-bind-mount-silently-downgrades-to-a-container-local-tmpfs-upper-uncommitted-changes-lost-on-restart) |
+| `:overlay` create on Podman-macOS crashes the entrypoint (`mount … cannot mount overlay read-only`, exit 32); container `Exited`, incomplete v3 sandbox | [macOS: overlayfs on a VirtioFS bind …](#macos-overlayfs-on-a-virtiofs-bind-mount-silently-downgrades-to-a-container-local-tmpfs-upper-uncommitted-changes-lost-on-restart) (Podman applehv variant) |
+| `system migrate` of a running `:overlay` sandbox fails at dispose: `drop orig: openfdat …/ovlwork/work: permission denied` (rootful Docker) | [Linux: overlay flatten migration and host-side ownership of container-written state](#linux-overlay-flatten-migration-and-host-side-ownership-of-container-written-state) |
+| `system migrate` refuses: sandbox runtime state `owned by uid 100999, not you` (podman-rootless) | [Linux: overlay flatten migration and host-side ownership of container-written state](#linux-overlay-flatten-migration-and-host-side-ownership-of-container-written-state) |
 
 ---
 
@@ -324,6 +330,37 @@ fix: `yoloai system prune` (which now uses the same escalation), or
 Cross-references: `clearStaleContainerState` uses the same escalation
 so a `yoloai new <name>` against a wedged orphan with the same name
 auto-recovers.
+
+---
+
+### Kata: virtiofs remaps the work-copy owner uid, so in-confinement git trips "dubious ownership"
+
+**Symptom:** `yoloai diff`/`apply`/`status` on a `:copy` sandbox fails **only**
+on the Kata VM backends (`containerd-vm`, `containerd-vmenhanced`) with
+`fatal: detected dubious ownership in repository at '<work path>'` (git exit
+128). The identical flow passes on docker/podman. Surfaced by the smoke test's
+`stop_start/containerd-vm` `diff after restart` step.
+
+**Why:** the copy-mode work-copy git runs *inside* the sandbox (audit C1/DF66 —
+the agent-controlled `.git/config` must not run filter/diff/fsmonitor drivers on
+the host). The work copy is shared into the Kata guest over virtiofs, which
+presents the files under a **different uid** than the agent user git runs as, so
+git's ownership guard refuses every operation. runc backends (docker/podman)
+bind-mount the copy with the host uid intact and the agent user matches, so they
+never trip it. This only regressed once git moved into confinement — the older
+host-side git ran as the file owner, so the guard was never exercised.
+
+**Fix in code:** `internal/git/git.go::sandboxExec.run` passes
+`-c safe.directory=<in-sandbox path>` on every confined git invocation. git
+honors `safe.directory` from a trusted command-line `-c` but **ignores** it when
+set in the repo's own `.git/config`, so trusting the exact work path cannot be
+self-authorized by the agent. The entry is a no-op on backends whose ownership
+already matches (docker/podman).
+
+**Fix for the user:** none — handled automatically. Do **not** advise
+`git config --global --add safe.directory` (git's own hint): the failing git
+runs inside the ephemeral sandbox, so a host-side global config would not reach
+it.
 
 ---
 
@@ -1045,6 +1082,18 @@ The estimate is left as-is — it's still a valid *upper bound* if the user stop
 **Fix:** Bounded retry of the firewall sidecar install (`runNetnsSidecarWithRetry` — 3 attempts, 500ms backoff). `install-firewall.py` is idempotent (`apply_firewall` flushes the `OUTPUT` chain and the ipset before re-adding rules), so re-running after a partial/failed attempt is safe. The retry still **fails closed**: a persistent failure surfaces after the last attempt and fails the launch rather than running the agent with unenforced isolation.
 
 **Code:** `internal/orchestrator/launch/launch.go::runNetnsSidecarWithRetry`; the single-shot sidecar primitive is `runtime/docker/sidecar.go::RunNetnsSidecar`.
+
+---
+
+### Docker: base-image staleness marker was keyed per backend, not per image store — second provider runs stale
+
+**Symptom:** The same `can't open file '/yoloai/bin/install-firewall.py'` (or any missing embedded resource) as the entry above, but **deterministic and provider-specific**: `--network-isolated` fails every time on one docker provider (e.g. Docker Desktop) while another (e.g. OrbStack) passes. Unlike the transient-rootfs case, the file is **genuinely absent** from the failing provider's `yoloai-base` (`docker run --rm --entrypoint sh yoloai-base -c 'ls /yoloai/bin/install-firewall.py'` errors on that provider, succeeds on the other), and it does **not** self-heal on re-run. Surfaced by the `--all-docker-providers` release smoke; a fresh single-provider install is unaffected.
+
+**Explanation:** The base-image build records a checksum marker so `NeedsBuild` can rebuild when the embedded resources change. The marker was keyed by *backend* (`.base-image-checksum-docker`) — but OrbStack, Docker Desktop, Colima and Rancher are **separate image stores sharing the "docker" backend**. After one provider built and recorded the checksum, `NeedsBuild` returned false for every other docker provider, so a provider whose store held an *older* `yoloai-base` (predating a resource like the netns firewall scripts) was never rebuilt and silently ran the stale image. This is the provider-dimension sibling of DF56 (which split the marker across docker/podman/containerd/apple but treated all docker providers as one store). Network isolation fails *closed*, so it is broken-feature, not a security hole.
+
+**Fix:** Stop tracking docker base-image freshness with a host-side marker at all — stamp the build-inputs checksum **onto the image** as a label (`--label yoloai.base.checksum=<sum>`) and read it back via `Runtime.baseImageStale` (`ImageInspect` → `Config.Labels`). The checksum then travels *with* the image, in whatever store holds it, so each local provider (OrbStack, Docker Desktop, …) is judged by its own image with no key to partition — structurally immune to the provider dimension, the `/var/run/docker.sock` provider-switch symlink, and remote daemons alike. An image with no label (built before this scheme) reads as stale and rebuilds once. A rejected earlier patch keyed the host-side marker by the daemon's `docker info .ID`; that fixed docker but leaned on a property that is empty for podman's docker-compat API, so its correctness varied by daemon (clever-hack smell). The host-side marker (`baseImageChecksumPath`/`NeedsBuild`/`RecordBuildChecksum`) remains, correctly, for the genuinely single-store backends **apple** (a Tart VM image, not OCI — can't carry a label) and **containerd** (one image store; no provider dimension).
+
+**Code:** `runtime/docker/docker.go::baseImageStale` + the `--label` in `runtime/docker/build.go::buildBaseImage` (helper `checksumLabelStale`, const `baseChecksumLabel`); call site `EnsureBaseImage`. Single-store backends keep `baseImageChecksumPath`/`NeedsBuild`/`RecordBuildChecksum`.
 
 ## Podman
 
@@ -2450,3 +2499,130 @@ form globally.
 `internal/orchestrator/launch/launch_reroute_test.go`
 (`TestBuildAndStart_ContainerEnhancedTakesLegacyPath`); `runtime/isolation_test.go`
 (`TestSupportsAgentFreeLaunch`).
+
+---
+
+## macOS: overlayfs on a VirtioFS bind-mount silently downgrades to a container-local tmpfs upper (uncommitted changes lost on restart)
+
+**Symptom.** A macOS `:overlay` sandbox shows the agent's changes via `yoloai diff`
+while it is running, but after `stop`+`start` (or `restart`, or a `kill`) the
+changes are **gone** — files revert to their baseline and newly-created files
+vanish. The host upper dir (`~/.yoloai/library/sandboxes/<name>/work/<encoded>/upper/`)
+is empty the whole time.
+
+**Root cause (external).** Linux overlayfs stores per-file metadata (whiteouts,
+opaque markers, origin) in `trusted.*` extended attributes on the upper dir. macOS
+container backends bind-mount host directories over **VirtioFS** (OrbStack, Apple
+`container`) or **`fakeowner` over VirtioFS** (Docker Desktop), and none of these
+expose `trusted.*` xattrs. With no xattr support overlayfs cannot use that upper, so
+the mount is unusable for writes. This is a property of overlayfs + VirtioFS, not of
+yoloAI — delete all our code and an `overlay` mount with `upperdir` on a VirtioFS
+share still fails the same way.
+
+**Our workaround (the thing that makes the loss observable).** `apply_overlays()` in
+`runtime/docker/resources/entrypoint.py` (~lines 240-276) detects the read-only
+overlay via a write probe and remounts with a **tmpfs-backed upper** at
+`/run/yoloai-overlay/<base64>/upper`. It copies any prior host-upper state *in* at
+mount time, but nothing copies the tmpfs upper back to the host — **there is no
+tmpfs→host sync on shutdown**, graceful or not. So all changes live only in
+container-local tmpfs and die with the container. The log line
+`overlay.local_upper … "changes won't persist across restarts"` is emitted when this
+path is taken.
+
+**Verified 2026-06-30** (macOS 26.5.1, Docker 29.4.0): the fallback triggers and
+changes are lost on both graceful `stop`+`start` and non-graceful `kill`+`start`, on
+**all three** macOS container backends — OrbStack, Docker Desktop, and Apple
+`container`. `yoloai diff` works only because it execs `git` *inside* the live
+container against the merged overlay (overlay diff/apply is container-bound).
+
+**Podman Machine (applehv) fails harder — no tmpfs downgrade.** Verified on-device
+2026-07-01 (podman 5.8.2, applehv), using the `main` binary's base image. A macOS
+`:overlay` create does **not** reach the tmpfs fallback above: the very first
+`mount -t overlay` inside the container fails outright — `mount: …/merged: cannot
+mount overlay read-only` (exit 32) — so `apply_overlays()` raises and the entrypoint
+exits 1 before any write-probe runs. The result is not a lossy-but-running sandbox but
+an **incomplete v3 sandbox**: the container is `Exited`, and the host overlay dirs
+(`lower/upper/ovlwork/merged`) exist but are often empty (the crash preceded `lower`
+seeding). Why podman differs: its guest kernel/overlayfs rejects a VirtioFS `upperdir`
+at mount time, where OrbStack/Docker Desktop/Apple `container` let the mount succeed
+read-only and only fail the later write probe. Same conclusion — `:overlay` is unusable
+on macOS — but the failure mode and on-disk residue differ.
+
+**Consequences.**
+- A *stopped* macOS `:overlay` sandbox has already lost its uncommitted changes; do
+  not assume the host upper is authoritative on macOS.
+- The overlay→copy flatten migration (D109 / v3→v4) treats a stopped or removed macOS
+  overlay sandbox via the **abandon** path: the upper is already lost, so it flattens
+  onto the pristine `lower` and requires `--abandon-stopped-overlay` (a plain `--yes`
+  refuses). Live **capture** (`flattenRunning`) is Linux-only by construction — a macOS
+  host can never hold a live overlay container (podman fails the mount; the others run
+  only with a container-local tmpfs upper). Verified end-to-end on macOS 2026-07-01:
+  podman (stopped→abandon) and docker (removed→abandon). An earlier draft of this entry
+  assumed the flatten would convert "while the sandbox is live" on macOS — that path is
+  unreachable there. See DF69 and
+  [design/research/reflink-vs-hardlink.md](design/research/reflink-vs-hardlink.md)
+  §B/§C.
+
+**Code:** `runtime/docker/resources/entrypoint.py` (`apply_overlays`, the
+`overlay.virtofs_fallback` / `overlay.local_upper` branch).
+
+## Linux: overlay flatten migration and host-side ownership of container-written state
+
+**Symptom:** on Linux, `yoloai system migrate` (the v3→v4 overlay flatten) of a
+real running `:overlay` sandbox behaves differently by backend:
+- **rootful Docker:** the migration used to fail at the dispose step with
+  `drop orig: openfdat …/work/<enc>/ovlwork/work: permission denied` — *after*
+  the sandbox was already converted to `:copy` (data safe) but *before* the realm
+  stamped v4, leaving it at v3 with a leftover `_^^_orig` sentinel that wedged
+  re-runs.
+- **podman-rootless:** the migration refuses up front with `cannot migrate
+  sandbox "X": its runtime state (agent-status.json) is owned by uid 100999, not
+  you (uid 1000) …`.
+
+**Explanation.** The flatten runs host-side: it captures the container's merged
+overlay tree, then the crash-safe promotion repopulates the sandbox's non-`work/`
+state into the new dir and disposes the old one — so the invoking user must be
+able to read and remove every host-side file the container wrote.
+- The overlay `upper`/`ovlwork` layers are **root-owned kernel dirs**, and the
+  kernel creates the overlayfs workdir (`ovlwork/work`) at mode **0000** — even
+  its owner can't traverse it, defeating `os.RemoveAll`.
+- **Rootful Docker** maps the container's users to the host user or root, so the
+  rest of the sandbox state (`agent-status.json`, `logs/`, …) is host-manageable;
+  only the overlay layers are the problem.
+- **Podman-rootless** maps the container's users to host **subuids** (per
+  `/etc/subuid`, e.g. `karl:100000:65536` → container uid 999 = host **100999**),
+  so *all* container-written state (`agent-status.json`, `cache/`, `files/`,
+  `logs/`) lands under a subuid at mode 0600 — unreadable and unremovable by the
+  host process. This is a general podman-rootless trait (`teardown.go` already
+  warns about it on destroy), not specific to migration.
+
+**Fix (rootful Docker):** during capture, the migrator chowns **and** chmods
+(`u+rwX`) the `upper`/`ovlwork` layers to the invoking user via the running
+container (root) — chown alone is insufficient because of the 0000 workdir. The
+capture itself runs as root and hands the staged copy to the host user, so it
+works regardless of the backend's uid mapping. Verified end-to-end on real
+rootful Docker (committed + uncommitted + gitignored preserved, `:copy`, v4).
+
+**Limitation (podman-rootless):** normalizing subuid ownership host-side needs a
+privileged helper (a throwaway root container, or `podman unshare chown`), which
+isn't wired in — overlay-on-podman-rootless across a D109 upgrade is a rare edge.
+So the migrator detects the foreign-uid state and surfaces it as a hard
+**blocked** op: `migrate --check`/`--dry-run` lists it (`[✗] sandbox "X" can't be
+migrated in place …`, `blocked:true` in `--json`), and a real `migrate`
+**refuses the whole run** — crucially **before any mutation**: `refuseIfBlocked`
+runs *ahead of* the frozen v0→v3 ladder (relocation/stamp), so a blocked sandbox
+never triggers an irreversible schema bump the user would then have to downgrade
+past to fix it. The sandbox is left **untouched** (mode `overlay`, realm at its
+prior schema, no sentinels). The refusal prints **downgrade guidance naming real
+release tags** for the data dir's current schema (`config.LibrarySchemaReleases`
+/ `PriorReleaseRange` → e.g. "switch back to a yoloai release from v0.4.0 up to …
+recover with `yoloai diff`/`apply`, destroy + recreate as `:copy`, upgrade
+again"). The block is an `AuthBlocked` plan op (`Plan` calls
+`hostUnmanageableReason`; no `Decision` satisfies it) plus the apply-time
+`assertHostOwnedState` backstop. A quarantine (rename-only) is exempt.
+
+**Code:** `internal/orchestrator/migrate_overlay.go` — `reclaimOverlayLayers`,
+`captureMerged` (capture-as-root + stage chown), `assertHostOwnedState`;
+`fileOwnerUID` in `migrate_overlay_unix.go`. Verified on real hardware
+2026-07-01: docker migrate passes end-to-end; podman-rootless refuses cleanly
+with the sandbox state unchanged.

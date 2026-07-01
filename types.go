@@ -162,10 +162,12 @@ type DirSpec = orchestrator.DirSpec
 type DirMode = orchestrator.DirMode
 
 const (
-	DirModeCopy    DirMode = orchestrator.DirModeCopy    // full copy; diff/apply workflow (default)
-	DirModeOverlay DirMode = orchestrator.DirModeOverlay // overlayfs upper layer; diff/apply (Docker-only)
-	DirModeRW      DirMode = orchestrator.DirModeRW      // live read-write bind mount
-	DirModeRO      DirMode = orchestrator.DirModeRO      // read-only bind mount
+	DirModeCopy DirMode = orchestrator.DirModeCopy // full copy; diff/apply workflow (default)
+	// DirModeOverlay is RETIRED (D109) — no longer creatable; retained only so the
+	// v3->v4 migration can read it in an old sandbox and flatten that sandbox to :copy.
+	DirModeOverlay DirMode = orchestrator.DirModeOverlay
+	DirModeRW      DirMode = orchestrator.DirModeRW // live read-write bind mount
+	DirModeRO      DirMode = orchestrator.DirModeRO // read-only bind mount
 )
 
 // NetworkMode names a sandbox's network access policy. Closed set.

@@ -9,15 +9,7 @@ Questions encountered during design and implementation that need resolution. Res
 
 37. **Codex proxy support — RESOLVED 2026-06-24** (D92; → drain to questions-resolved.md). Codex *does* honor `HTTP_PROXY`/`HTTPS_PROXY` de-facto (reqwest default) but **inconsistently** (issue #4242 open), and **intentionally disables env proxy inside its own sandbox**. More to the point, the question's premise is moot for *containment*: env-proxy is never a boundary for an untrusted agent (it can unset it / use raw sockets / UDP / IPv6), and even transparent intercept alone is bypassable by a `NET_ADMIN`/sudo agent. The hostile-containment primitive is a **default-deny egress netns + a forced proxy on a different principal/namespace** — see [research/agent-proxy-support.md](research/agent-proxy-support.md) and [netpolicy.md](../design/netpolicy.md) §Hostile. Per-agent proxy-env injection is a *convenience hint*, not containment.
 
-38. **Codex required network domains** — Only `api.openai.com` is confirmed (see [commands.md](../design/commands.md)). Additional domains (telemetry, model downloads) may be required.
-
 39. **Codex TUI behavior in tmux** — Interactive mode (`codex --yolo` without `exec`) behavior in tmux is unverified ([Agents Research](research/agents.md)).
-
-75. **Codex follow-up limitation undocumented** — *Reopened (deferral trigger fired).* Was deferred until Codex shipped; Codex is now a first-class agent, so the session-persistence / follow-up limitation needs documenting in the user docs. Original deferral note: "Codex is post-MVP. Document the session persistence limitation when Codex is implemented."
-
-## Workflow Commands
-
-77. **No `yoloai wait` CLI command for scripting/CI** — *Reopened 2026-05-31; library half landed 2026-06-07, CLI half still open.* The **library substrate now exists**: `Sandbox.Wait(ctx, SandboxWaitOptions{For, Timeout})` blocks until the agent reaches the chosen condition (`WaitForExit` / `WaitForIdle`) and returns `ErrWaitTimeout` (wrapping `context.DeadlineExceeded`) on timeout — see `sandbox.go:178-205`. What remains unimplemented is the **CLI surface**: there is no `wait` entry in the command registry. Intended CLI behavior: `yoloai wait <name> [--timeout]` blocks until the named sandbox's agent exits, returns its exit code (124 on `--timeout`, matching `timeout(1)`); thin wrapper over `Sandbox.Wait`. Useful for CI/CD and as the substrate for the deferred `yoloai run` (#56). Design: [plans/README.md `### yoloai wait`](plans/README.md). Prior design refs: [layering.md §9.2](../archive/design/layering.md#92-yoloai-wait-q77), [D17](../archive/design/layering.md#7-decisions).
 
 ## macOS Sandbox Backend
 

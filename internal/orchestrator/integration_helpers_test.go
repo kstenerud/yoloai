@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/orchestrator"
@@ -20,6 +21,7 @@ import (
 	"github.com/kstenerud/yoloai/runtime"
 	dockerrt "github.com/kstenerud/yoloai/runtime/docker"
 	podmanrt "github.com/kstenerud/yoloai/runtime/podman"
+	"github.com/kstenerud/yoloai/store"
 	"github.com/stretchr/testify/require"
 )
 
@@ -36,6 +38,17 @@ func stopSandbox(ctx context.Context, mgr *orchestrator.Engine, name string) err
 
 func startSandbox(ctx context.Context, mgr *orchestrator.Engine, name string, opts orchestrator.StartOptions) (*orchestrator.StartResult, error) {
 	return lifecycle.Start(ctx, state.Deps{Runtime: mgr.Runtime(), Layout: mgr.Layout(), Input: strings.NewReader("")}, name, opts)
+}
+
+// startAndWaitActive starts a freshly-created sandbox and blocks until its
+// container is active. Copy-mode diff/apply runs git inside the sandbox (audit
+// C1), so tests that diff/apply must bring the box up first — create only
+// provisions, it does not launch the container.
+func startAndWaitActive(ctx context.Context, t *testing.T, mgr *orchestrator.Engine, name string) {
+	t.Helper()
+	_, err := startSandbox(ctx, mgr, name, orchestrator.StartOptions{})
+	require.NoError(t, err)
+	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName(mgr.Layout().Principal, name), 30*time.Second)
 }
 
 func resetSandbox(ctx context.Context, mgr *orchestrator.Engine, opts orchestrator.ResetOptions) (*orchestrator.ResetResult, error) {

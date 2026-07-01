@@ -94,7 +94,6 @@ func runDiffCmd(cmd *cobra.Command, args []string) error {
 	if hostPath != "" {
 		argsConsumedBeforeRest = 2
 	}
-	overlay := selectedDir.Mode == yoloai.DirModeOverlay
 	slog.Debug("generating diff", "event", "sandbox.diff", "sandbox", name, "workdir_mode", selectedDir.Mode) //nolint:gosec // G706: name is validated by ValidateName
 
 	// Skip agent warning in JSON mode
@@ -104,9 +103,6 @@ func runDiffCmd(cmd *cobra.Command, args []string) error {
 
 	// --log: list commits
 	if logFlag {
-		if overlay {
-			return diffLogOverlay(cmd, name, hostPath, stat)
-		}
 		if cliutil.JSONEnabled(cmd) {
 			return diffLogJSON(cmd, name, hostPath, stat)
 		}
@@ -117,21 +113,11 @@ func runDiffCmd(cmd *cobra.Command, args []string) error {
 	// try to detect ref from the first positional arg.
 	ref, paths := parseDiffArgs(rest, cmd, argsConsumedBeforeRest)
 
-	// Ref-based diff not supported for overlay
-	if ref != "" && overlay {
-		return yoerrors.NewPlatformError("ref-based diff is not supported for :overlay sandboxes (commits are not individually addressable from the host)")
-	}
-
 	// If ref is set, show that specific commit/range
 	if ref != "" {
 		return diffRef(cmd, name, hostPath, ref, stat)
 	}
 
-	// Q-U: diff is workdir-only — overlay routes through container
-	// exec; everything else goes through the single workdir helper.
-	if overlay {
-		return diffOverlay(cmd, name, hostPath, stat, nameOnly)
-	}
 	return diffSingle(cmd, name, hostPath, paths, stat, nameOnly)
 }
 
@@ -183,84 +169,6 @@ func writeDiffOutput(cmd *cobra.Command, out string) error {
 	}
 	_, err := fmt.Fprintln(cmd.OutOrStdout(), out)
 	return err
-}
-
-// requireOverlayRunning verifies the sandbox container is running (required for overlay ops).
-func requireOverlayRunning(ctx context.Context, sb *yoloai.Sandbox, name string) error {
-	info, err := sb.Inspect(ctx)
-	if err != nil {
-		return fmt.Errorf(":overlay sandbox %s must be running for this operation — use 'yoloai start %s'", name, name)
-	}
-	if info.Status != yoloai.StatusActive && info.Status != yoloai.StatusIdle {
-		return fmt.Errorf(":overlay sandbox %s must be running for this operation — use 'yoloai start %s'", name, name)
-	}
-	return nil
-}
-
-// diffOverlay runs the diff for an :overlay-mode workdir. Routes
-// through container exec since git lives inside the container.
-func diffOverlay(cmd *cobra.Command, name, hostPath string, stat, nameOnly bool) error {
-	return cliutil.WithSandbox(cmd, name, func(ctx context.Context, sb *yoloai.Sandbox) error {
-		cliutil.ReconcileInjectorBestEffort(ctx, sb) // D106: revive a crashed injector
-		if err := requireOverlayRunning(ctx, sb, name); err != nil {
-			return err
-		}
-		wd, err := trackedDirHandle(sb, hostPath)
-		if err != nil {
-			return err
-		}
-		out, err := wd.Diff(ctx, yoloai.WorkdirDiffOptions{Stat: stat, NameOnly: nameOnly})
-		if err != nil {
-			return err
-		}
-		return writeDiffOutput(cmd, out)
-	})
-}
-
-// diffLogOverlay lists commits for overlay sandboxes by executing git log inside the container.
-func diffLogOverlay(cmd *cobra.Command, name, hostPath string, stat bool) error {
-	if stat {
-		return yoerrors.NewPlatformError("--log --stat is not supported for :overlay sandboxes")
-	}
-
-	return cliutil.WithSandbox(cmd, name, func(ctx context.Context, sb *yoloai.Sandbox) error {
-		if err := requireOverlayRunning(ctx, sb, name); err != nil {
-			return err
-		}
-
-		wd, err := trackedDirHandle(sb, hostPath)
-		if err != nil {
-			return err
-		}
-		commits, err := wd.Commits(ctx, yoloai.WorkdirCommitsOptions{})
-		if err != nil {
-			return err
-		}
-
-		if cliutil.JSONEnabled(cmd) {
-			if commits == nil {
-				commits = []yoloai.CommitInfo{}
-			}
-			result := struct {
-				Commits               any  `json:"commits"`
-				HasUncommittedChanges bool `json:"has_uncommitted_changes"`
-			}{
-				Commits:               commits,
-				HasUncommittedChanges: false, // can't cheaply detect uncommitted changes in overlay
-			}
-			return cliutil.WriteJSON(cmd.OutOrStdout(), result)
-		}
-
-		out := cmd.OutOrStdout()
-		if len(commits) == 0 {
-			_, err = fmt.Fprintln(out, "No commits beyond baseline")
-			return err
-		}
-		for i, c := range commits {
-			fmt.Fprintf(out, "%3d  %.12s  %s\n", i+1, c.SHA, c.Subject) //nolint:errcheck
-		}
-		return nil
-	})
 }
 
 // parseDiffArgs separates a ref argument from path arguments.
@@ -507,8 +415,7 @@ func diffOneDirAll(ctx context.Context, sb *yoloai.Sandbox, d yoloai.DirInfo, st
 		return wdErr
 	}
 	diffOpts := yoloai.WorkdirDiffOptions{Stat: stat, NameOnly: nameOnly}
-	isOverlay := d.Mode == yoloai.DirModeOverlay
-	if !stat && !nameOnly && !isOverlay {
+	if !stat && !nameOnly {
 		diffOpts.PathPrefix = d.HostPath + "/"
 	}
 	out, diffErr := wd.Diff(ctx, diffOpts)
@@ -518,7 +425,7 @@ func diffOneDirAll(ctx context.Context, sb *yoloai.Sandbox, d yoloai.DirInfo, st
 	if out == "" {
 		return nil
 	}
-	if stat || nameOnly || isOverlay {
+	if stat || nameOnly {
 		fmt.Fprintf(combined, "=== %s ===\n", d.HostPath)
 	}
 	combined.WriteString(out)

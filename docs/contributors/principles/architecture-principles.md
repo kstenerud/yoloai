@@ -46,6 +46,16 @@ no, the surface has a gap.
   `System()` / `Sandbox()` sub-handles (`Sandbox` in turn exposes `Workdir()` /
   `Network()` / `Agent()`), plus the public option/result types. Everything under
   `internal/` is sealed.
+- **Supported surface vs. public-path building blocks.** The *supported consumer* API is
+  the root `yoloai` package, and it alone is gated leak-free by the F1 fence
+  (`internal_leak_fence_test.go`, empty `f1KnownLeaks`). The promoted substrate packages
+  (`runtime/`, `store/`, `copyflow/`) live at public *paths* only because Go's `internal/`
+  rule forces it for the root package to compose them — they are layering building blocks,
+  **not** the supported API. So an exported `store`/`runtime` function taking
+  `config.Layout` (an `internal/config` type) is *not* a leak to fix: promoting `Layout`
+  would elevate the entire on-disk layout to a supported public contract, making future
+  path changes breaking — the opposite of what the fence enforces. The fence scans the
+  root package precisely because that is where the contract lives. (DF64.)
 - A capability the CLI reaches `internal/` for becomes a public verb on the lower layer,
   not a retype of the CLI to wrap an internal value. (This is the D56 downward half of
   §2: *policy must not know the how*; a reach-through is converted to a verb.)

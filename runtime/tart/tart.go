@@ -57,7 +57,6 @@ var descriptor = runtime.BackendDescriptor{
 	SupportedIsolationModes:   nil,
 	Capabilities: runtime.BackendCaps{
 		NetworkIsolation:   false,
-		OverlayDirs:        false,
 		CapAdd:             false,
 		HostFilesystem:     false,
 		FilesystemLocality: runtime.LocalitySandboxSide,
@@ -350,9 +349,17 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 	cmd := sysexec.Command(r.execEnv, r.tartBin, args...)
 	cmd.Stderr = logFile
 	cmd.Stdout = logFile
-	// Detach the process from the parent so it survives
+	// Setsid (not Setpgid): `tart run` is a long-lived host process, so a
+	// non-interactive `new`/`start` must not leave it attached to the caller's
+	// controlling terminal. Setpgid makes a new process group but stays in the
+	// same session, keeping /dev/tty and risking raw-mode corruption after the
+	// CLI returns (DF40). Setsid starts a new session with no controlling tty
+	// (same detach idiom as the broker sidecar). Teardown is unaffected:
+	// stopVM tears down via `tart stop` plus a pgrep-and-SIGTERM of the
+	// `tart run` process by PID — independent of session/process group. (Unlike
+	// seatbelt, tmux + the agent run inside the guest VM, not as host children.)
 	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setpgid: true,
+		Setsid: true,
 	}
 
 	if err := cmd.Start(); err != nil {
@@ -540,8 +547,11 @@ func (r *Runtime) translateWorkDirToVMPath(workDir string) string {
 // workDir may be either a host path (~/.yoloai/sandboxes/<name>/work/<encoded>)
 // or a VM path (/Users/admin/yoloai-work/<encoded>). Host paths are translated
 // to VM paths automatically.
-// name may be a sandbox name or instance name; both are accepted.
-func (r *Runtime) GitExec(ctx context.Context, name, workDir string, args ...string) (string, error) {
+// name may be a sandbox name or instance name; both are accepted. user is
+// ignored — `tart exec` runs as the VM's single logged-in user (the work copy
+// is owned by that user); the container backends use it to match the agent's
+// container user.
+func (r *Runtime) GitExec(ctx context.Context, name, _, workDir string, args ...string) (string, error) {
 	// Callers in the sandbox package pass the sandbox name (e.g. "mybox").
 	// The Tart VM is named with the instance prefix (e.g. "yoloai-mybox").
 	vmName := instancePrefix + strings.TrimPrefix(name, instancePrefix)

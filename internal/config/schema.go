@@ -17,10 +17,22 @@ import (
 )
 
 // LibrarySchemaVersion is the current on-disk schema version the library
-// expects in its DataDir. Bump this when the library's on-disk layout or
-// file formats change in a way that needs a migration step; add a matching
-// case to migrateLibraryStep and document the change in BREAKING-CHANGES.
-const LibrarySchemaVersion = 3
+// expects in its DataDir — the target RealmStatus gates on and CreateFreshLibrary
+// stamps. Bump this when the library's on-disk layout or file formats change in a
+// way that needs a migration step, and document the change in BREAKING-CHANGES.
+//
+// The chain splits at libraryFrozenVersion: MigrateLibrary + MigrateAgentConfigs
+// own the sealed v0->v3 ladder; anything past it (v3->v4 overlay flatten) is a
+// crash-safe framework migration that owns its own stamp write, flipped LAST —
+// after its per-sandbox pass is durable — so the stamp is never ahead of the data
+// (the truth invariant). MigrateLibrary must NOT advance the stamp past
+// libraryFrozenVersion, or it would green the gate over un-flattened overlays.
+const LibrarySchemaVersion = 4
+
+// libraryFrozenVersion is the ceiling of the sealed MigrateLibrary +
+// MigrateAgentConfigs ladder (the v2->v3 agent.json split and earlier). Framework
+// migrations take the realm from here to LibrarySchemaVersion.
+const libraryFrozenVersion = 3
 
 // LaunchPrefixResolver maps a sandbox's stored backend type (the "backend"
 // string in environment.json) to that backend's constant agent-launch wrap
@@ -174,15 +186,21 @@ func MigrateLibrary(layout Layout, prefixFor LaunchPrefixResolver) error {
 	if current > LibrarySchemaVersion {
 		return fmt.Errorf("library data dir schema version %d is newer than this build supports (%d); upgrade yoloai", current, LibrarySchemaVersion)
 	}
-	for v := current; v < LibrarySchemaVersion; v++ {
+	// The sealed ladder runs only up to libraryFrozenVersion; the framework
+	// (v3->v4 overlay flatten) takes it the rest of the way and stamps last. If
+	// the realm is already at or past the frozen ceiling, there is nothing here to
+	// do and — critically — nothing to stamp: advancing the stamp toward
+	// LibrarySchemaVersion here would green the gate over data the framework has
+	// not migrated yet.
+	if current >= libraryFrozenVersion {
+		return nil
+	}
+	for v := current; v < libraryFrozenVersion; v++ {
 		if err := migrateLibraryStep(layout, v, prefixFor); err != nil {
 			return fmt.Errorf("library migration v%d -> v%d: %w", v, v+1, err)
 		}
 	}
-	if current == LibrarySchemaVersion {
-		return nil
-	}
-	return WriteSchemaVersion(stampPath, LibrarySchemaVersion)
+	return WriteSchemaVersion(stampPath, libraryFrozenVersion)
 }
 
 // migrateLibraryStep applies the single transform that takes the library's

@@ -32,14 +32,14 @@ func TestApplyBrokerEnv_LinuxGatewayForBoth(t *testing.T) {
 	secretEnv := map[string]string{"ANTHROPIC_API_KEY": "the-real-key", "OTHER": "keep"}
 	reach := runtime.InjectorReach{BindHost: "172.17.0.1", DialHost: "172.17.0.1"}
 
-	endpoint, err := applyBrokerEnv(secretEnv, claudeBrokerConfig(), reach, "172.17.0.1:44115")
+	endpoint, err := applyBrokerEnv(secretEnv, claudeBrokerConfig(), reach, "172.17.0.1:44115", "placeholder-tok")
 	require.NoError(t, err)
 	assert.Equal(t, "172.17.0.1:44115", endpoint, "agent-facing endpoint = DialHost:port")
 
 	_, hasKey := secretEnv["ANTHROPIC_API_KEY"]
 	assert.False(t, hasKey, "real key removed from the container env")
 	assert.Equal(t, "http://172.17.0.1:44115", secretEnv["ANTHROPIC_BASE_URL"])
-	assert.Equal(t, "yoloai-broker-dummy", secretEnv["ANTHROPIC_AUTH_TOKEN"])
+	assert.Equal(t, "placeholder-tok", secretEnv["ANTHROPIC_AUTH_TOKEN"], "the per-sandbox token is the agent's placeholder")
 	assert.Equal(t, "keep", secretEnv["OTHER"], "unrelated secrets are untouched")
 }
 
@@ -49,7 +49,7 @@ func TestApplyBrokerEnv_DialHostDiffersFromBindHost(t *testing.T) {
 	secretEnv := map[string]string{"ANTHROPIC_API_KEY": "the-real-key"}
 	reach := runtime.InjectorReach{BindHost: "127.0.0.1", DialHost: "host.docker.internal"}
 
-	endpoint, err := applyBrokerEnv(secretEnv, claudeBrokerConfig(), reach, "127.0.0.1:51000")
+	endpoint, err := applyBrokerEnv(secretEnv, claudeBrokerConfig(), reach, "127.0.0.1:51000", "placeholder-tok")
 	require.NoError(t, err)
 	assert.Equal(t, "host.docker.internal:51000", endpoint, "endpoint uses DialHost not BindHost")
 
@@ -62,7 +62,7 @@ func TestApplyBrokerEnv_BadInjectorAddr(t *testing.T) {
 	secretEnv := map[string]string{"ANTHROPIC_API_KEY": "the-real-key"}
 	reach := runtime.InjectorReach{BindHost: "172.17.0.1", DialHost: "172.17.0.1"}
 
-	_, err := applyBrokerEnv(secretEnv, claudeBrokerConfig(), reach, "not-an-addr")
+	_, err := applyBrokerEnv(secretEnv, claudeBrokerConfig(), reach, "not-an-addr", "placeholder-tok")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "parse injector address")
 	// On error the real key must remain (we did not partially rewrite into a leak).
@@ -79,7 +79,7 @@ func TestApplyBrokerEnv_DropsEveryBrokerableCredential(t *testing.T) {
 	}
 	reach := runtime.InjectorReach{BindHost: "172.17.0.1", DialHost: "172.17.0.1"}
 
-	_, err := applyBrokerEnv(secretEnv, claudeBrokerConfig(), reach, "172.17.0.1:44115")
+	_, err := applyBrokerEnv(secretEnv, claudeBrokerConfig(), reach, "172.17.0.1:44115", "placeholder-tok")
 	require.NoError(t, err)
 
 	_, hasKey := secretEnv["ANTHROPIC_API_KEY"]
@@ -93,15 +93,16 @@ func TestBuildInjectorSpec_PerCredentialInjection(t *testing.T) {
 	reach := runtime.InjectorReach{BindHost: "172.17.0.1", DialHost: "172.17.0.1"}
 
 	// The API key is injected raw into x-api-key.
-	apiKeySpec := buildInjectorSpec(t.TempDir(), bc, bc.Credentials[0], reach, "real-api-key")
+	apiKeySpec := buildInjectorSpec(t.TempDir(), bc, bc.Credentials[0], reach, "real-api-key", "placeholder-tok")
 	require.Len(t, apiKeySpec.Bindings, 1)
 	assert.Equal(t, "x-api-key", apiKeySpec.Bindings[0].Header)
 	assert.Empty(t, apiKeySpec.Bindings[0].Prefix)
 	assert.Equal(t, "real-api-key", apiKeySpec.Bindings[0].Secret)
 	assert.Contains(t, apiKeySpec.StripHeaders, "Authorization", "the inbound dummy bearer is always stripped")
+	assert.Equal(t, "placeholder-tok", apiKeySpec.ExpectedToken, "the injector verifies the per-sandbox token")
 
 	// The subscription token is injected as Authorization: Bearer.
-	oauthSpec := buildInjectorSpec(t.TempDir(), bc, bc.Credentials[1], reach, "real-oauth-token")
+	oauthSpec := buildInjectorSpec(t.TempDir(), bc, bc.Credentials[1], reach, "real-oauth-token", "placeholder-tok")
 	require.Len(t, oauthSpec.Bindings, 1)
 	assert.Equal(t, "Authorization", oauthSpec.Bindings[0].Header)
 	assert.Equal(t, "Bearer ", oauthSpec.Bindings[0].Prefix)

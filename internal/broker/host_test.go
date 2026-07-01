@@ -156,3 +156,23 @@ func TestSidecarHost_StopWithoutRecordIsNoop(t *testing.T) {
 	host := fakeSidecarHost("127.0.0.1:9")
 	assert.NoError(t, host.Stop(context.Background(), dir))
 }
+
+// TestPlaceholderToken_GetOrCreate verifies the per-sandbox injector token is
+// generated once and then stable across calls (so a respawned/reconciled
+// injector keeps accepting the running agent's requests), and differs per dir.
+func TestPlaceholderToken_GetOrCreate(t *testing.T) {
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+
+	a1, err := PlaceholderToken(dirA)
+	require.NoError(t, err)
+	assert.NotEmpty(t, a1)
+
+	a2, err := PlaceholderToken(dirA)
+	require.NoError(t, err)
+	assert.Equal(t, a1, a2, "same sandbox dir returns the same token (stable across reconcile)")
+
+	b1, err := PlaceholderToken(dirB)
+	require.NoError(t, err)
+	assert.NotEqual(t, a1, b1, "different sandboxes get different tokens")
+}

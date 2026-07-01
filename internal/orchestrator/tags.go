@@ -35,27 +35,22 @@ func loadDiffContext(layout config.Layout, name string, dirHostPath string) (wor
 
 	switch mode {
 	case store.DirModeCopy:
-		if dir.MountPath != "" && dir.MountPath != dir.HostPath {
-			workDir = dir.MountPath
-		} else {
-			workDir = store.WorkDir(sandboxDir, dir.HostPath)
-		}
+		// Host work-copy path; git.NewSandbox maps it into the sandbox itself
+		// for in-confinement backends (see git's confinementWorkPath).
+		workDir = store.WorkDir(sandboxDir, dir.HostPath)
 		baselineSHA = dir.BaselineSHA
 		if baselineSHA == "" {
 			return "", "", "", fmt.Errorf("sandbox has no baseline SHA — was it created before diff support?")
 		}
-	case store.DirModeOverlay:
-		workDir = dir.MountPath
-		if workDir == "" {
-			workDir = dir.HostPath
-		}
-		baselineSHA = dir.BaselineSHA
 	case store.DirModeRW:
 		workDir = dir.HostPath
 		baselineSHA = "HEAD"
 	case store.DirModeRO:
 		return "", "", "", fmt.Errorf("workdir cannot be read-only (mode %s)", mode)
 	default:
+		// DirModeOverlay (retired, D109) lands here and errors, matching
+		// diff.go/baseline.go — a still-overlay sandbox must be migrated
+		// (yoloai system migrate) before diff/apply/tags operate on it.
 		return "", "", "", fmt.Errorf("unsupported workdir mode: %s", mode)
 	}
 
@@ -70,8 +65,8 @@ type TagInfo struct {
 }
 
 // ListTagsBeyondBaseline returns tags whose target commit is beyond the baseline.
-// Returns nil for :rw and :overlay sandboxes (not supported). Reads the sandbox
-// work copy through the backend, so it is correct for Tart VM work copies.
+// Returns nil for :rw sandboxes (not supported). Reads the sandbox work copy
+// through the backend, so it is correct for Tart VM work copies.
 func ListTagsBeyondBaseline(ctx context.Context, layout config.Layout, rt runtime.Backend, name string, dirHostPath string) ([]TagInfo, error) {
 	workDir, baselineSHA, mode, err := loadDiffContext(layout, name, dirHostPath)
 	if err != nil {

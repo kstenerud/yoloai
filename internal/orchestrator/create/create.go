@@ -188,7 +188,7 @@ func checkUnappliedWork(ctx context.Context, g *git.Git, name string, sandboxDir
 		return fmt.Errorf("cannot verify unapplied work in sandbox %q: %w (pass --abandon-unapplied to replace without this check)", name, err)
 	}
 
-	if meta.Workdir().Mode == "copy" || meta.Workdir().Mode == "overlay" {
+	if meta.Workdir().Mode == "copy" {
 		workDir := store.WorkDir(sandboxDir, meta.Workdir().HostPath)
 		if err := unappliedWorkError(ctx, g, name, workDir, meta.Workdir().BaselineSHA, ""); err != nil {
 			return err
@@ -196,7 +196,7 @@ func checkUnappliedWork(ctx context.Context, g *git.Git, name string, sandboxDir
 	}
 
 	for _, d := range meta.AuxDirs() {
-		if d.Mode == "copy" || d.Mode == "overlay" {
+		if d.Mode == "copy" {
 			auxWorkDir := store.WorkDir(sandboxDir, d.HostPath)
 			if err := unappliedWorkError(ctx, g, name, auxWorkDir, d.BaselineSHA, d.HostPath); err != nil {
 				return err
@@ -367,12 +367,12 @@ func buildConfigAndEnvironment(ctx context.Context, d state.Deps, opts Options, 
 	lifecycleCfg := buildLifecycleConfig(ri.archetype, pr.archetypeDockerDRequired, ri.onCreateDone, ri.devcontainerCfg)
 
 	backend := d.Runtime.Descriptor().Type
-	configData, err := buildContainerConfig(d.Layout, agentDef, agentCommand, launch.AgentLaunchPrefix(backend), tmuxConf, launch.OverlayOrResolvedMountPath(workdir), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, collectOverlayMounts(workdir, auxDirs), pr.setup, pr.autoCommitInterval, collectCopyDirs(workdir, auxDirs), opts.Name, runtime.TmuxSocketFor(d.Runtime, sandboxDir), pr.isolation, opts.VscodeTunnel, invocation.SanitizeTunnelName(opts.Name), lifecycleCfg, headless)
+	configData, err := buildContainerConfig(d.Layout, agentDef, agentCommand, launch.AgentLaunchPrefix(backend), tmuxConf, launch.WorkdirMountPath(workdir), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, pr.setup, pr.autoCommitInterval, collectCopyDirs(workdir, auxDirs), opts.Name, runtime.TmuxSocketFor(d.Runtime, sandboxDir), pr.isolation, opts.VscodeTunnel, invocation.SanitizeTunnelName(opts.Name), lifecycleCfg, headless)
 	if err != nil {
 		return nil, nil, "", "", "", "", nil, fmt.Errorf("build %s: %w", store.RuntimeConfigFile, err)
 	}
 
-	usernsMode := resolveUsernsMode(d.Runtime, workdir, auxDirs, pr.capAdd)
+	usernsMode := resolveUsernsMode(d.Runtime, pr.capAdd)
 	meta := buildEnvironment(opts, pr, workdir, baselineSHA, dirEnvs, hasPrompt, usernsMode, d.Runtime.Descriptor().Capabilities.HostFilesystem, string(ri.archetype), backend, ri.mergedMounts)
 	meta.Principal = d.Layout.Principal // record the owning principal for attribution + runtime namespace (D62)
 	meta.Headless = headless            // effective headless mode (may be a D101 downgrade of opts.Headless)
@@ -675,25 +675,14 @@ func buildLifecycleConfig(resolvedArchetype archetype.Archetype, archetypeDocker
 	return lc
 }
 
-// resolveUsernsMode determines the effective user namespace mode for the runtime.
-func resolveUsernsMode(rt runtime.Backend, workdir *DirSpec, auxDirs []*DirSpec, capAdd []string) string {
+// resolveUsernsMode determines the effective user namespace mode for the
+// runtime, keyed on whether the sandbox holds CAP_SYS_ADMIN.
+func resolveUsernsMode(rt runtime.Backend, capAdd []string) string {
 	up, ok := rt.(runtime.UsernsProvider)
 	if !ok {
 		return ""
 	}
-	hasSysAdmin := workdir.Mode == "overlay"
-	for _, ad := range auxDirs {
-		if ad.Mode == "overlay" {
-			hasSysAdmin = true
-			break
-		}
-	}
-	if !hasSysAdmin {
-		if slices.Contains(capAdd, "SYS_ADMIN") {
-			hasSysAdmin = true
-		}
-	}
-	return up.UsernsMode(hasSysAdmin)
+	return up.UsernsMode(slices.Contains(capAdd, "SYS_ADMIN"))
 }
 
 // buildEnvironment constructs the Environment struct for a new sandbox.
@@ -709,7 +698,7 @@ func buildEnvironment(opts Options, pr *profileResult, workdir *DirSpec, baselin
 		ImageRef:      pr.imageRef,
 		Dirs: append([]store.DirEnvironment{{
 			HostPath:       workdir.Path,
-			MountPath:      launch.OverlayOrResolvedMountPath(workdir),
+			MountPath:      launch.WorkdirMountPath(workdir),
 			Mode:           workdir.Mode,
 			BaselineSHA:    baselineSHA,
 			InceptionSHA:   baselineSHA,
@@ -789,7 +778,7 @@ func writeStatFiles(sandboxDir string, meta *store.Environment, agentDef *agent.
 // agentLaunchPrefix is the backend's constant launch wrap (launch.AgentLaunchPrefix;
 // e.g. a 'PATH=...' prefix for Tart), computed once by the caller and stored here as the
 // single source of truth for the agent-command wrap (W1a of the architecture remediation plan).
-func buildContainerConfig(layout config.Layout, agentDef *agent.Definition, agentCommand string, agentLaunchPrefix string, tmuxConf string, workingDir string, debug bool, networkIsolated bool, allowedDomains []string, passthrough []string, overlayMounts []runtimeconfig.OverlayMountConfig, setupCommands []string, autoCommitInterval int, copyDirs []string, sandboxName string, tmuxSocket string, isolation runtime.IsolationMode, vscodeTunnel bool, vscodeTunnelName string, lifecycle *runtimeconfig.LifecycleConfig, headless bool) ([]byte, error) {
+func buildContainerConfig(layout config.Layout, agentDef *agent.Definition, agentCommand string, agentLaunchPrefix string, tmuxConf string, workingDir string, debug bool, networkIsolated bool, allowedDomains []string, passthrough []string, setupCommands []string, autoCommitInterval int, copyDirs []string, sandboxName string, tmuxSocket string, isolation runtime.IsolationMode, vscodeTunnel bool, vscodeTunnelName string, lifecycle *runtimeconfig.LifecycleConfig, headless bool) ([]byte, error) {
 	var stateDirName string
 	if agentDef.StateDir != "" {
 		stateDirName = filepath.Base(agentDef.StateDir)
@@ -812,7 +801,6 @@ func buildContainerConfig(layout config.Layout, agentDef *agent.Definition, agen
 		NetworkIsolated:    networkIsolated,
 		AllowedDomains:     allowedDomains,
 		Passthrough:        passthrough,
-		OverlayMounts:      overlayMounts,
 		SetupCommands:      setupCommands,
 		AutoCommitInterval: autoCommitInterval,
 		CopyDirs:           copyDirs,

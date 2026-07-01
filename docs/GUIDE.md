@@ -9,6 +9,7 @@ Full reference for commands, flags, configuration, and internals. For a quick ov
 | Command | Description |
 |---------|-------------|
 | `yoloai new <name> [workdir]` | Create and start a sandbox |
+| `yoloai run <name> <workdir>` | Create and run a sandbox headlessly to completion |
 | `yoloai attach <name>` | Attach to the agent's tmux session |
 | `yoloai diff <name>` | Show changes the agent made |
 | `yoloai apply <name>` | Apply changes back to original directory |
@@ -24,6 +25,9 @@ Full reference for commands, flags, configuration, and internals. For a quick ov
 | `yoloai clone <source> <dest>` | Clone a sandbox (copy state to a new sandbox) |
 | `yoloai reset <name>` | Re-copy workdir and reset to original state |
 | `yoloai destroy <name>...` | Stop and remove sandboxes |
+| `yoloai baseline advance <name>` | Move the sandbox baseline to the current HEAD of the work copy |
+| `yoloai baseline set <name> <sha>` | Move the sandbox baseline to a specific commit SHA |
+| `yoloai baseline log <name>` | Show the sandbox work copy commit log, marking the current baseline |
 
 **Inspection**
 
@@ -73,6 +77,13 @@ Full reference for commands, flags, configuration, and internals. For a quick ov
 | `yoloai system completion <shell>` | Generate shell completion (bash/zsh/fish/powershell) |
 | `yoloai version` | Show version information |
 
+**MCP Server (experimental)**
+
+| Command | Description |
+|---------|-------------|
+| `yoloai mcp serve` | Start the yoloAI MCP server on stdio |
+| `yoloai mcp proxy <name> [workdir] -- <cmd>` | Run an MCP server inside a sandbox and proxy its stdio |
+
 ### YOLOAI_SANDBOX
 
 All commands that take `<name>` support the `YOLOAI_SANDBOX` environment variable as a default:
@@ -91,7 +102,6 @@ The workdir (your project directory) is copied into the sandbox by default. You 
 |------|--------|----------|
 | `:copy` | `./my-app` (default) | Isolated copy. Agent changes are reviewed via diff/apply. **Honors `.gitignore`** — ignored files (secrets, build output) are not copied. |
 | `:copy-all` | `./my-app:copy-all` | Like `:copy` but copies **everything, including gitignored files**. Opt-out of gitignore-honoring; use when the sandbox genuinely needs an ignored file (e.g. a local `.env`). |
-| `:overlay` | `./my-app:overlay` | Overlay mount. Instant setup, diff/apply workflow. Docker/Podman only. |
 | `:rw` | `./my-app:rw` | Live bind-mount. Changes are immediate — no diff/apply needed. |
 
 **`.gitignore` is honored for `:copy`.** When the source is a git repository, only
@@ -109,9 +119,6 @@ VM.)
 # Default: safe isolated copy
 yoloai new task1 ./my-project
 
-# Overlay: instant setup for large projects (Docker/Podman only)
-yoloai new task2 ./large-project:overlay
-
 # Live mount (use with caution — agent writes directly to your files)
 yoloai new task3 ./my-project:rw
 ```
@@ -125,21 +132,10 @@ Many AI coding tools use `git worktree` for isolation — it's instant and space
 - **Git-only.** Worktrees require a git repository. yoloAI supports any directory.
 - **Shared object store.** Worktrees share the `.git` directory with the host repo, weakening isolation inside the container.
 
-For large projects where copy speed is a concern, use `:overlay` mode — it provides instant setup with the same isolation and diff/apply workflow.
-
-### Overlay Mode
-
-`:overlay` uses Linux kernel overlayfs inside the container to mount the original directory as a read-only lower layer, with agent changes captured in an upper layer. This provides:
-
-- **Instant setup** — no file copying, regardless of project size
-- **diff/apply workflow** — same review process as `:copy` mode
-- **Instant reset** — clearing the upper layer is immediate
-
-**Tradeoffs vs `:copy`:**
-- No snapshot isolation — changes to the original host directory are visible for files the agent hasn't modified
-- Container must be running for `yoloai diff` and `yoloai apply` (auto-started if stopped)
-- Requires `CAP_SYS_ADMIN` capability in the container
-- Not available with `--backend seatbelt` or `--backend tart`
+> **Note:** An earlier `:overlay` mode used in-container overlayfs for instant setup, but
+> it required granting the agent container `CAP_SYS_ADMIN` — a host-escape primitive on
+> rootful Docker — so it was retired (D109). Existing overlay sandboxes are auto-converted
+> to `:copy` by `yoloai system migrate`. Use `:copy` instead.
 
 ### Build Artifact Exclusion
 
@@ -164,7 +160,7 @@ These directories are regenerated automatically when the agent runs build comman
 
 **Important notes:**
 - This hardcoded list is applied **on top of `.gitignore` honoring** (see Workdir Modes): in a git repo, anything you've gitignored (commonly `node_modules/`, `.build/`, etc.) is already excluded by git; this list is the safety net for non-git directories and for repos that commit such artifacts. To copy everything regardless, use `:copy-all`.
-- Exclusion only applies to `:copy`/`:copy-all` mode — `:overlay` and `:rw` modes see all files
+- Exclusion only applies to `:copy`/`:copy-all` mode — `:rw` mode sees all files
 - The exclusion list is conservative to avoid false positives (e.g., generic names like `build/`, `target/`, or `env/` are NOT excluded)
 - If you need to exclude additional project-specific artifacts, gitignore them (honored by `:copy`) or file an issue on GitHub
 
@@ -191,7 +187,7 @@ yoloai new mybox ./app -d ./shared-lib -d ./common-types
 
 By default, directories are mounted at their original absolute host paths (mirrored paths). Use `=<path>` to mount at a custom container path instead.
 
-Auxiliary directories accept only `:rw` (live bind) or default `:ro`. `:copy` and `:overlay` are workdir-only — `yoloai diff` and `yoloai apply` operate on the workdir, and the multi-directory diff/apply surface was removed during beta (see [BREAKING-CHANGES](BREAKING-CHANGES.md)). If you need to track changes in a second project, run a separate sandbox for it.
+Auxiliary directories accept only `:rw` (live bind) or default `:ro`. `:copy` is workdir-only — `yoloai diff` and `yoloai apply` operate on the workdir, and the multi-directory diff/apply surface was removed during beta (see [BREAKING-CHANGES](BREAKING-CHANGES.md)). If you need to track changes in a second project, run a separate sandbox for it.
 
 ## Agents and Models
 
@@ -417,6 +413,29 @@ yoloai new task ./project --env MY_VAR=value --env OTHER=val2
 yoloai new task ./project --debug
 ```
 
+### Headless run
+
+`yoloai run` is an alternate entry point to `yoloai new` for scripted and CI use: it creates a sandbox, delivers the prompt in the agent's own headless mode, and optionally blocks until the agent finishes.
+
+```bash
+# Fire-and-forget: returns as soon as the agent is launched
+yoloai run mybox ./project --prompt "fix the build"
+
+# Block until the agent finishes (exit code reflects the agent's outcome)
+yoloai run mybox ./project --prompt "fix the build" --wait
+
+# Block and destroy the sandbox after the agent finishes (implies --wait)
+yoloai run mybox ./project --prompt "fix the build" --rm
+
+# Read the prompt from a file
+yoloai run mybox ./project --prompt-file instructions.md --wait
+
+# Run interactively instead of headless — useful for monitoring/debugging
+yoloai run mybox ./project --prompt "fix the build" --tty
+```
+
+`--prompt` or `--prompt-file` is required. `--rm` implies `--wait`. Without `--wait`, `yoloai run` returns as soon as the agent is launched and the sandbox persists for later `diff`/`apply`. With `--wait`, a failed agent causes `yoloai run` to exit non-zero, so `yoloai run … --wait && next-step` works. All `yoloai new` flags are accepted (see [Creating sandboxes](#creating-sandboxes)).
+
 ### Managing sandboxes
 
 ```bash
@@ -486,6 +505,8 @@ yoloai-resume   # run inside the fall-to-shell shell (yoloai attach <name> to ge
 - For agents without native resume, it starts a **fresh** session and says so —
   it never claims a resume that didn't happen.
 
+**Codex note:** Codex has no native session-continuation mechanism. Both `yoloai-resume` (in-sandbox) and `yoloai restart --resume` / `yoloai start --resume` (host-side) always start a **fresh** Codex session — the original prompt is re-fed as context, but no prior conversation state is carried over.
+
 This is distinct from the host-side `yoloai restart --resume` / `yoloai start
 --resume` (above), which relaunch from *outside* the sandbox and re-feed the
 original prompt. `yoloai-resume` runs *inside* the shell you're already in and,
@@ -541,6 +562,54 @@ yoloai apply task --tags
 # Skip the confirmation prompt
 yoloai apply task --yes
 ```
+
+### Managing the sandbox baseline
+
+`yoloai baseline` corrects the baseline SHA when it falls out of sync — for example after a stash-pop conflict or a non-contiguous selective apply.
+
+```bash
+# Advance the baseline to the current HEAD of the work copy
+yoloai baseline advance mybox
+
+# Set the baseline to a specific commit (short SHA accepted)
+yoloai baseline set mybox abc12345
+
+# Show the commit log of the sandbox work copy, marking the current baseline
+yoloai baseline log mybox
+```
+
+The baseline is the reference commit used by `yoloai diff` and `yoloai apply` to determine what the agent changed. After a normal apply, yoloai advances it automatically — `baseline` is the recovery tool when it gets out of sync. The `set` output includes an undo hint (`yoloai baseline set <name> <old-sha>`) in case you need to reverse the move.
+
+### MCP Server (experimental)
+
+**Experimental:** `yoloai mcp` is functional but under-tested; its tool surface and flags may change.
+
+`yoloai mcp serve` starts the yoloAI MCP server on stdin/stdout, exposing sandbox operations as tools for outer agents (Claude Desktop, VS Code Copilot, etc.) driving a two-layer agentic workflow. Tools: `sandbox_create`, `sandbox_status`, `sandbox_list`, `sandbox_destroy`, `sandbox_diff`, `sandbox_diff_file`, `sandbox_log`, `sandbox_input`, `sandbox_reset`, `sandbox_files_list`, `sandbox_files_read`, `sandbox_files_write`.
+
+To use with Claude Desktop, add to `~/.claude.json`:
+
+```json
+{
+  "mcpServers": {
+    "yoloai": {
+      "command": "yoloai",
+      "args": ["mcp", "serve"]
+    }
+  }
+}
+```
+
+`yoloai mcp proxy` runs an MCP server inside a sandbox and proxies its stdio, injecting `sandbox_diff` into the tool surface. The sandbox is created automatically if it does not exist; existing sandboxes are reused. Path placeholders in the inner command are expanded from sandbox metadata: `{workdir}` (primary working directory), `{files}`, `{cache}`, `{dir:N}` (Nth auxiliary dir, 0-indexed).
+
+```bash
+# New sandbox — workdir required
+yoloai mcp proxy mybox /path/to/project -- npx -y @modelcontextprotocol/server-filesystem {workdir}
+
+# Reuse existing sandbox
+yoloai mcp proxy mybox -- npx -y @modelcontextprotocol/server-filesystem {workdir}
+```
+
+Proxy flags: `--agent <name>` (default: `idle`), `--model`, `--profile`, `-d`/`--dir`, `--replace` (destroy and recreate if the sandbox exists), `--backend`.
 
 ## How It Works
 
@@ -725,7 +794,7 @@ Over time a yoloai install accumulates cruft: orphaned containers/VMs from crash
 **`yoloai system prune`** does the actual cleanup. It classifies every sandbox dir by *how recoverable it is* and never deletes anything that might hold your work:
 
 - **Deleted** — zero-stakes cruft: orphaned backend resources, stale locks, temp dirs, and never-initialized sandbox dirs (no metadata and no work directory).
-- **Refused** — dirs where yoloai can still detect uncommitted work (a dirty git copy, or a non-empty overlay upper layer). These are reported and left untouched; you review and remove them yourself.
+- **Refused** — dirs where yoloai can still detect uncommitted work (a dirty git copy). These are reported and left untouched; you review and remove them yourself.
 - **Quarantined to trash** — dirs whose metadata is corrupt or too new to read, but with no detectable work. Rather than guess, yoloai moves them to `~/.yoloai/library/trash/<name>` so nothing is lost.
 
 Use `--dry-run` to preview, `--yes` to skip the reclaim confirmation prompt, and `--trash` to also empty the trash (see below).
@@ -853,7 +922,6 @@ yoloai's system check then verifies the `runsc` binary on `PATH` and its registr
 
 **Incompatibilities:**
 
-- **`container-enhanced` + `:overlay` directories:** gVisor's VFS2 kernel does not support overlayfs mounts inside the container. Use `:copy` or `:rw` instead — yoloai will error if you combine them.
 - **`vm` and `vm-enhanced`:** On Linux, use the containerd backend (Kata), not Docker or Podman — selected automatically when `--isolation vm` or `vm-enhanced` is used. On macOS, `vm` uses the [Apple `container`](#apple-container-backend-macos) backend instead (containerd is Linux-only); `vm-enhanced` has no macOS backend.
 - **`container-privileged`:** Requires a container backend (Docker/Podman). Available on both Linux and macOS hosts via that backend's Linux VM; only unavailable with `--os mac` (Seatbelt/Tart have no privileged mode).
 

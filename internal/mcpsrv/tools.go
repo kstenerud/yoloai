@@ -7,13 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/kstenerud/yoloai"
-	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -204,14 +201,13 @@ func (s *Server) handleSandboxCreate(ctx context.Context, req mcp.CallToolReques
 // error string ("" on success) ready for textResult. Shared by sandbox_create
 // and sandbox_run, which differ only in their options and messaging.
 func (s *Server) createAndStart(ctx context.Context, opts yoloai.SandboxCreateOptions) string {
-	if err := s.client.EnsureSetup(ctx); err != nil {
+	if err := s.svc.EnsureSetup(ctx); err != nil {
 		return errorf("setup: %v", err)
 	}
-	sb, err := s.client.CreateSandbox(ctx, opts)
-	if err != nil {
+	if err := s.svc.CreateSandbox(ctx, opts); err != nil {
 		return errorf("create sandbox: %v", err)
 	}
-	if _, err := sb.Start(ctx, yoloai.SandboxStartOptions{}); err != nil {
+	if err := s.svc.Start(ctx, opts.Name); err != nil {
 		return errorf("start sandbox: %v", err)
 	}
 	return ""
@@ -264,11 +260,7 @@ func (s *Server) handleSandboxStatus(ctx context.Context, req mcp.CallToolReques
 		return textResult(errorf("name is required")), nil
 	}
 
-	sb, err := s.client.Sandbox(name)
-	if err != nil {
-		return textResult(errorf("sandbox handle %q: %v", name, err)), nil
-	}
-	info, err := sb.Inspect(ctx)
+	info, err := s.svc.Inspect(ctx, name)
 	if err != nil {
 		return textResult(errorf("inspect sandbox %q: %v", name, err)), nil
 	}
@@ -306,11 +298,7 @@ func (s *Server) handleSandboxWait(ctx context.Context, req mcp.CallToolRequest)
 
 	timeout := time.Duration(req.GetFloat("timeout_seconds", 0) * float64(time.Second))
 
-	sb, err := s.client.Sandbox(name)
-	if err != nil {
-		return textResult(errorf("sandbox handle %q: %v", name, err)), nil
-	}
-	info, err := sb.Wait(ctx, yoloai.SandboxWaitOptions{For: cond, Timeout: timeout})
+	info, err := s.svc.Wait(ctx, name, yoloai.SandboxWaitOptions{For: cond, Timeout: timeout})
 	if err != nil {
 		if info != nil && errors.Is(err, yoloai.ErrWaitTimeout) {
 			return textResult(errorf("wait timed out for sandbox %q (last status: %s)", name, info.Status)), nil
@@ -331,7 +319,7 @@ func (s *Server) handleSandboxWait(ctx context.Context, req mcp.CallToolRequest)
 }
 
 func (s *Server) handleSandboxList(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	infos, err := s.client.ListSandboxes(ctx)
+	infos, err := s.svc.ListSandboxes(ctx)
 	if err != nil {
 		return textResult(errorf("list sandboxes: %v", err)), nil
 	}
@@ -373,27 +361,26 @@ func (s *Server) handleSandboxDestroy(ctx context.Context, req mcp.CallToolReque
 		return textResult(errorf("name is required")), nil
 	}
 
-	sb, err := s.client.Sandbox(name)
-	if err != nil {
-		return textResult(errorf("sandbox handle %q: %v", name, err)), nil
-	}
-
 	if !force {
-		if active, reason := sb.HasActiveWork(ctx); active {
+		active, reason, err := s.svc.HasActiveWork(ctx, name)
+		if err != nil {
+			return textResult(errorf("sandbox %q: %v", name, err)), nil
+		}
+		if active {
 			return textResult(errorf("sandbox %q has unapplied changes (%s). Use force=true to destroy anyway.", name, reason)), nil
 		}
 	}
 
 	// Active-work gate-checked above when force was false; this skips the
 	// typed *ActiveWorkError refusal.
-	if _, err := sb.Destroy(ctx, yoloai.SandboxDestroyOptions{AbandonUnappliedWork: true}); err != nil {
+	if err := s.svc.Destroy(ctx, name, yoloai.SandboxDestroyOptions{AbandonUnappliedWork: true}); err != nil {
 		return textResult(errorf("destroy sandbox %q: %v", name, err)), nil
 	}
 
 	return textResult(fmt.Sprintf("Sandbox %q destroyed.", name)), nil
 }
 
-func (s *Server) handleSandboxDiff(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func (s *Server) handleSandboxDiff(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	name := req.GetString("name", "")
 	stat := req.GetBool("stat", false)
 
@@ -401,17 +388,13 @@ func (s *Server) handleSandboxDiff(_ context.Context, req mcp.CallToolRequest) (
 		return textResult(errorf("name is required")), nil
 	}
 
-	sb, err := s.client.Sandbox(name)
-	if err != nil {
-		return textResult(errorf("sandbox handle %q: %v", name, err)), nil
-	}
-	diff, err := sb.Workdir().Diff(context.Background(), yoloai.WorkdirDiffOptions{Stat: stat})
+	diff, err := s.svc.Diff(ctx, name, yoloai.WorkdirDiffOptions{Stat: stat})
 	if err != nil {
 		return textResult(errorf("diff sandbox %q: %v", name, err)), nil
 	}
 
 	if diff == "" {
-		return textResult("[ERROR] no changes to diff"), nil
+		return textResult("No changes to diff"), nil
 	}
 	return textResult(diff), nil
 }
@@ -430,11 +413,7 @@ func (s *Server) handleSandboxDiffFile(ctx context.Context, req mcp.CallToolRequ
 	// Workdir().Diff uses the Client's bound runtime and resolves
 	// copy-vs-overlay internally; for Docker / Podman / containerd that's
 	// host-side git (the patch package handles container-vs-host selection).
-	sb, err := s.client.Sandbox(name)
-	if err != nil {
-		return textResult(errorf("sandbox handle %q: %v", name, err)), nil
-	}
-	diff, err := sb.Workdir().Diff(ctx, yoloai.WorkdirDiffOptions{Paths: []string{path}})
+	diff, err := s.svc.Diff(ctx, name, yoloai.WorkdirDiffOptions{Paths: []string{path}})
 	if err != nil {
 		return textResult(errorf("diff file %q in sandbox %q: %v", path, name, err)), nil
 	}
@@ -445,7 +424,7 @@ func (s *Server) handleSandboxDiffFile(ctx context.Context, req mcp.CallToolRequ
 	return textResult(diff), nil
 }
 
-func (s *Server) handleSandboxLog(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func (s *Server) handleSandboxLog(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	name := req.GetString("name", "")
 	linesFloat := req.GetFloat("lines", 100)
 
@@ -458,11 +437,7 @@ func (s *Server) handleSandboxLog(_ context.Context, req mcp.CallToolRequest) (*
 		lines = 100
 	}
 
-	sb, err := s.client.Sandbox(name)
-	if err != nil {
-		return textResult(errorf("sandbox handle %q: %v", name, err)), nil
-	}
-	output, err := sb.Agent().TerminalLog(lines)
+	output, err := s.svc.TerminalLog(ctx, name, lines)
 	if err != nil {
 		return textResult(errorf("read log for sandbox %q: %v", name, err)), nil
 	}
@@ -485,11 +460,7 @@ func (s *Server) handleSandboxInput(ctx context.Context, req mcp.CallToolRequest
 		return textResult(errorf("text is required")), nil
 	}
 
-	sb, err := s.client.Sandbox(name)
-	if err != nil {
-		return textResult(errorf("sandbox handle %q: %v", name, err)), nil
-	}
-	if err := sb.Agent().SendInput(ctx, text); err != nil {
+	if err := s.svc.SendInput(ctx, name, text); err != nil {
 		return textResult(errorf("send input to sandbox %q: %v", name, err)), nil
 	}
 
@@ -504,51 +475,33 @@ func (s *Server) handleSandboxReset(ctx context.Context, req mcp.CallToolRequest
 		return textResult(errorf("name is required")), nil
 	}
 
-	sb, err := s.client.Sandbox(name)
-	if err != nil {
-		return textResult(errorf("sandbox handle %q: %v", name, err)), nil
-	}
-
 	// A non-empty prompt overwrites prompt.txt before reset (re-sent on restart).
-	if _, err := sb.Reset(ctx, yoloai.SandboxResetOptions{RestartContainer: true, Prompt: prompt}); err != nil {
+	if err := s.svc.Reset(ctx, name, yoloai.SandboxResetOptions{RestartContainer: true, Prompt: prompt}); err != nil {
 		return textResult(errorf("reset sandbox %q: %v", name, err)), nil
 	}
 
 	return textResult(fmt.Sprintf("Sandbox %q reset. Poll sandbox_status.", name)), nil
 }
 
-func (s *Server) handleSandboxFilesList(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func (s *Server) handleSandboxFilesList(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	name := req.GetString("name", "")
 	if name == "" {
 		return textResult(errorf("name is required")), nil
 	}
 
-	sb, err := s.client.Sandbox(name)
+	names, err := s.svc.ListFiles(ctx, name)
 	if err != nil {
-		return textResult(errorf("sandbox %q: %v", name, err)), nil
-	}
-	filesDir := sb.Files().Path()
-	entries, err := os.ReadDir(filesDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return textResult("(no files)"), nil
-		}
 		return textResult(errorf("list files for sandbox %q: %v", name, err)), nil
 	}
 
-	if len(entries) == 0 {
+	if len(names) == 0 {
 		return textResult("(no files)"), nil
-	}
-
-	var names []string
-	for _, e := range entries {
-		names = append(names, e.Name())
 	}
 
 	return textResult(strings.Join(names, "\n")), nil
 }
 
-func (s *Server) handleSandboxFilesRead(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func (s *Server) handleSandboxFilesRead(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	name := req.GetString("name", "")
 	filename := req.GetString("filename", "")
 
@@ -558,27 +511,16 @@ func (s *Server) handleSandboxFilesRead(_ context.Context, req mcp.CallToolReque
 	if filename == "" {
 		return textResult(errorf("filename is required")), nil
 	}
-	if err := validateFilename(filename); err != nil {
-		return textResult(errorf("%v", err)), nil
-	}
 
-	sb, err := s.client.Sandbox(name)
+	data, err := s.svc.ReadFile(ctx, name, filename)
 	if err != nil {
-		return textResult(errorf("sandbox %q: %v", name, err)), nil
-	}
-	path := filepath.Join(sb.Files().Path(), filename)
-	data, err := os.ReadFile(path) //nolint:gosec // path validated by validateFilename
-	if err != nil {
-		if os.IsNotExist(err) {
-			return textResult(errorf("file %q not found in sandbox %q files", filename, name)), nil
-		}
 		return textResult(errorf("read file %q from sandbox %q: %v", filename, name, err)), nil
 	}
 
 	return textResult(string(data)), nil
 }
 
-func (s *Server) handleSandboxFilesWrite(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func (s *Server) handleSandboxFilesWrite(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	name := req.GetString("name", "")
 	filename := req.GetString("filename", "")
 	content := req.GetString("content", "")
@@ -589,21 +531,8 @@ func (s *Server) handleSandboxFilesWrite(_ context.Context, req mcp.CallToolRequ
 	if filename == "" {
 		return textResult(errorf("filename is required")), nil
 	}
-	if err := validateFilename(filename); err != nil {
-		return textResult(errorf("%v", err)), nil
-	}
 
-	sb, err := s.client.Sandbox(name)
-	if err != nil {
-		return textResult(errorf("sandbox %q: %v", name, err)), nil
-	}
-	filesDir := sb.Files().Path()
-	if err := fileutil.MkdirAll(filesDir, 0750); err != nil {
-		return textResult(errorf("create files dir for sandbox %q: %v", name, err)), nil
-	}
-
-	path := filepath.Join(filesDir, filename)
-	if err := fileutil.WriteFile(path, []byte(content), 0600); err != nil { //nolint:gosec // path validated by validateFilename
+	if err := s.svc.WriteFile(ctx, name, filename, []byte(content)); err != nil {
 		return textResult(errorf("write file %q to sandbox %q: %v", filename, name, err)), nil
 	}
 
@@ -615,18 +544,6 @@ func (s *Server) handleSandboxFilesWrite(_ context.Context, req mcp.CallToolRequ
 // textResult wraps a string as an MCP text content result.
 func textResult(text string) *mcp.CallToolResult {
 	return mcp.NewToolResultText(text)
-}
-
-// validateFilename rejects filenames with path separators or ".." to prevent
-// path traversal attacks.
-func validateFilename(filename string) error {
-	if strings.Contains(filename, "/") || strings.Contains(filename, "\\") || strings.Contains(filename, "..") {
-		return errors.New("filename must not contain path separators or '..'")
-	}
-	if filename == "." {
-		return errors.New("filename must not be '.'")
-	}
-	return nil
 }
 
 // ── Help tool ─────────────────────────────────────────────────────────────────

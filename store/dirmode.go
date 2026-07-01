@@ -16,8 +16,11 @@ package store
 type DirMode string
 
 const (
-	DirModeCopy    DirMode = "copy"    // full copy; changes tracked via git (workdir only)
-	DirModeOverlay DirMode = "overlay" // overlayfs; original untouched (workdir only)
-	DirModeRW      DirMode = "rw"      // live bind-mount; changes immediate
-	DirModeRO      DirMode = "ro"      // read-only bind-mount (aux dirs only)
+	DirModeCopy DirMode = "copy" // full copy; changes tracked via git (workdir only)
+	// DirModeOverlay is RETIRED (D109) — no longer creatable. Retained only so the
+	// v3->v4 migration can READ it in an old sandbox's environment.json and flatten
+	// that sandbox to :copy; nothing else produces or mounts it.
+	DirModeOverlay DirMode = "overlay"
+	DirModeRW      DirMode = "rw" // live bind-mount; changes immediate
+	DirModeRO      DirMode = "ro" // read-only bind-mount (aux dirs only)
 )

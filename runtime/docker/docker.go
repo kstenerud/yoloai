@@ -50,14 +50,14 @@ var descriptor = runtime.BackendDescriptor{
 	AgentProvisionedByBackend: true,
 	SupportedIsolationModes:   []runtime.IsolationMode{runtime.IsolationModeContainerEnhanced, runtime.IsolationModeContainerPrivileged},
 	Capabilities: runtime.BackendCaps{
-		NetworkIsolation:   true,
-		OverlayDirs:        true,
-		CapAdd:             true,
-		HostFilesystem:     false,
-		FilesystemLocality: runtime.LocalityHostSide,
-		ContainerAttach:    true,
-		KeepAliveModel:     runtime.KeepAliveContainerInit,
-		AgentFreeLaunch:    true, // D88 keepalive-holder + Launch bring-up (Docker only; see BackendCaps).
+		NetworkIsolation:     true,
+		CapAdd:               true,
+		HostFilesystem:       false,
+		FilesystemLocality:   runtime.LocalityHostSide,
+		GitExecInConfinement: true, // copy-mode work-copy git runs in-container (audit C1)
+		ContainerAttach:      true,
+		KeepAliveModel:       runtime.KeepAliveContainerInit,
+		AgentFreeLaunch:      true, // D88 keepalive-holder + Launch bring-up (Docker only; see BackendCaps).
 	},
 	Probe:             probe,
 	CleanupHint:       func(image string) string { return "docker rmi " + image },
@@ -135,10 +135,12 @@ type Runtime struct {
 
 // Compile-time check.
 var _ runtime.Backend = (*Runtime)(nil)
+var _ runtime.GitExecer = (*Runtime)(nil)
 var _ runtime.IsolationCapabilityProvider = (*Runtime)(nil)
 var _ runtime.CachePruner = (*Runtime)(nil)
 var _ runtime.InteractiveSession = (*Runtime)(nil)
 var _ runtime.DiskUsageReporter = (*Runtime)(nil)
+var _ runtime.RecreateAdvisor = (*Runtime)(nil)
 
 // New creates a Runtime and verifies the Docker daemon is reachable. layout
 // carries the threaded environment snapshot; the daemon socket and TLS settings
@@ -256,6 +258,17 @@ func (r *Runtime) notFound() error {
 		runtime.ErrNotFound, strings.Join(r.providerNames, ", "))
 }
 
+// RecreateAdvisory warns, when >= 2 Docker providers are installed, that a
+// container reported missing may actually live in a provider the user switched
+// away from — so recreating it here abandons the original (DF22). Implements
+// runtime.RecreateAdvisor.
+func (r *Runtime) RecreateAdvisory(_ context.Context) string {
+	if len(r.providerNames) < 2 {
+		return ""
+	}
+	return fmt.Sprintf("container not found in the current Docker provider; if you recently switched providers (installed: %s), the original sandbox — with its agent state and any uncommitted in-container work — may still exist in the other one. Recreating here starts a fresh container. To reconnect the original instead, start the provider it was created on (or set DOCKER_HOST / 'docker context use').", strings.Join(r.providerNames, ", "))
+}
+
 func pingFailureError(err error, binaryName string, env map[string]string) error {
 	if runtime.IsPermissionDenied(err) {
 		return yoerrors.NewPermissionError("%s socket permission denied: add your user to the %s group or run with sudo", binaryName, binaryName)
@@ -351,12 +364,38 @@ func (r *Runtime) Setup(ctx context.Context, layout config.Layout, sourceDir str
 		return r.buildBaseImage(ctx, layout, output, logger)
 	}
 
-	if NeedsBuild(layout, r.binaryName) {
+	if r.baseImageStale(ctx) {
 		fmt.Fprintln(output, "Base image resources updated, rebuilding...") //nolint:errcheck // best-effort output
 		return r.buildBaseImage(ctx, layout, output, logger)
 	}
 
 	return nil
+}
+
+// baseImageStale reports whether the existing yoloai-base image was built from
+// older embedded resources, by comparing the build-inputs checksum stamped on the
+// image as a label (baseChecksumLabel) against the current one. The checksum lives
+// on the image, in whatever store holds it, so every local docker provider
+// (OrbStack, Docker Desktop, …) is tracked independently with no host-side marker
+// to key per store — unlike apple/containerd, the docker backend is not one store
+// per backend name. An image with no label (built before this scheme) reads as
+// stale and rebuilds once. The caller has already confirmed the image exists, so a
+// transient inspect error is treated as "not stale" rather than forcing a
+// multi-minute rebuild.
+func (r *Runtime) baseImageStale(ctx context.Context) bool {
+	want := buildInputsChecksum()
+	if want == "" {
+		return false
+	}
+	insp, err := r.client.ImageInspect(ctx, "yoloai-base")
+	if err != nil {
+		return false
+	}
+	var labels map[string]string
+	if insp.Config != nil {
+		labels = insp.Config.Labels
+	}
+	return checksumLabelStale(want, labels)
 }
 
 // IsReady returns true if the yoloai-base Docker image exists locally.
@@ -500,16 +539,6 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 		Runtime:      cfg.ContainerRuntime,
 		Privileged:   cfg.Privileged,
 		CgroupnsMode: container.CgroupnsMode(cfg.CgroupnsMode),
-	}
-
-	// CAP_SYS_ADMIN is required for overlay mounts inside the container.
-	// Docker's default AppArmor profile blocks mount(2) even with SYS_ADMIN;
-	// disable it so the entrypoint can mount overlayfs.
-	// Privileged mode already disables AppArmor so no SecurityOpt is needed.
-	if !cfg.Privileged {
-		if slices.Contains(cfg.CapAdd, "SYS_ADMIN") {
-			hostConfig.SecurityOpt = append(hostConfig.SecurityOpt, "apparmor=unconfined")
-		}
 	}
 
 	// Apply seccomp profile when explicitly requested.
@@ -670,6 +699,74 @@ func (r *Runtime) Exec(ctx context.Context, name string, cmd []string, user stri
 	}
 
 	return result, nil
+}
+
+// GitExec runs a git command against the copy-mode work copy INSIDE the
+// container (audit C1: an agent-controlled work-copy .git/config must not run
+// filter/diff/fsmonitor drivers on the host). instance is the resolved container
+// id; containerPath is the work copy's in-container mount path; user is the
+// agent's container user so the git index/objects are written with the ownership
+// the agent expects.
+//
+// Returns runtime.ErrNotRunning when the container is not up — diff/apply/status
+// of a copy-mode sandbox require it running, surfaced as a clear message at the
+// CLI boundary. git's stdout is returned UNTRIMMED (patches are
+// whitespace-sensitive); a non-zero exit becomes a *runtime.ExecError carrying
+// stderr, matching the host git runner's contract.
+func (r *Runtime) GitExec(ctx context.Context, instance, user, containerPath string, args ...string) (string, error) {
+	info, err := r.client.ContainerInspect(ctx, instance)
+	if err != nil {
+		if cerrdefs.IsNotFound(err) {
+			return "", runtime.ErrNotRunning
+		}
+		return "", fmt.Errorf("inspect container: %w", err)
+	}
+	if !info.State.Running {
+		return "", runtime.ErrNotRunning
+	}
+
+	gitArgs := append([]string{"git", "-c", "core.hooksPath=/dev/null", "-C", containerPath}, args...)
+	return r.execGitRaw(ctx, instance, gitArgs, user)
+}
+
+// execGitRaw runs cmd in the container and returns git's EXACT stdout (no trim,
+// unlike Exec). On a non-zero exit it returns the captured stdout plus a
+// *runtime.ExecError carrying the code and stderr — the same shape the host git
+// runner produces — so the git package's diagnostics (RunCmd, CheckDirtyRepo)
+// behave identically whether git ran on the host or in the container.
+func (r *Runtime) execGitRaw(ctx context.Context, name string, cmd []string, user string) (string, error) {
+	execResp, err := r.client.ContainerExecCreate(ctx, name, container.ExecOptions{
+		Cmd:          cmd,
+		User:         user,
+		AttachStdout: true,
+		AttachStderr: true,
+	})
+	if err != nil {
+		return "", fmt.Errorf("exec create: %w", err)
+	}
+
+	resp, err := r.client.ContainerExecAttach(ctx, execResp.ID, container.ExecAttachOptions{})
+	if err != nil {
+		return "", fmt.Errorf("exec attach: %w", err)
+	}
+	defer resp.Close()
+
+	var stdout, stderr bytes.Buffer
+	if _, err := stdcopy.StdCopy(&stdout, &stderr, resp.Reader); err != nil {
+		return "", fmt.Errorf("exec read: %w", err)
+	}
+
+	inspectResp, err := r.client.ContainerExecInspect(ctx, execResp.ID)
+	if err != nil {
+		return "", fmt.Errorf("exec inspect: %w", err)
+	}
+	if inspectResp.ExitCode != 0 {
+		return stdout.String(), &runtime.ExecError{
+			ExitCode: inspectResp.ExitCode,
+			Stderr:   strings.TrimSpace(stderr.String()),
+		}
+	}
+	return stdout.String(), nil
 }
 
 // InteractiveExec runs a command inside a Docker container over the SDK's

@@ -269,16 +269,33 @@ func System() (*yoloai.System, error) {
 // Client stays backend-less; BuildImage/CheckPrerequisites construct the runtime
 // per their BackendType option using this env.
 func SystemWithEnv(env map[string]string) (*yoloai.System, error) {
-	l := Layout()
+	return systemForDataDir(Layout().DataDir, env)
+}
+
+// systemForDataDir builds a backend-less System rooted at an explicit library
+// DataDir, paired with the CLI's resolved HomeDir. Shared by SystemWithEnv (the
+// normal namespaced root) and MigratePreviewSystem (the current on-disk library
+// root, which differs only on an un-relocated flat v0 install).
+func systemForDataDir(dataDir string, env map[string]string) (*yoloai.System, error) {
 	c, err := yoloai.NewClient(context.Background(), yoloai.ClientCreateOptions{
-		DataDir: l.DataDir,
-		HomeDir: l.HomeDir,
+		DataDir: dataDir,
+		HomeDir: Layout().HomeDir,
 		Env:     env,
 	})
 	if err != nil {
 		return nil, err
 	}
 	return c.System(), nil
+}
+
+// MigratePreviewSystem builds the System the read-only `system migrate` preview
+// audits: rooted where library data physically lives right now
+// (CurrentLibraryDataDir), so a flat v0 install that has not been relocated yet
+// is audited at TOP/sandboxes rather than the not-yet-populated
+// TOP/library/sandboxes. On any already-namespaced install it is identical to
+// System().
+func MigratePreviewSystem() (*yoloai.System, error) {
+	return systemForDataDir(CurrentLibraryDataDir(), EdgeEnv())
 }
 
 // SandboxMetadata reads a sandbox's persisted read-model (environment.json)

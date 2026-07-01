@@ -43,7 +43,7 @@ type ProxyOptions struct {
 // ensuring the container is running, and forwarding stdio between the
 // outer agent and the inner MCP process.
 type ProxyServer struct {
-	client      *yoloai.Client
+	svc         SandboxService
 	sandboxName string
 	innerCmd    []string
 	opts        ProxyOptions
@@ -56,7 +56,7 @@ func NewProxy(c *yoloai.Client, sandboxName string, innerCmd []string, opts Prox
 		opts.Agent = "idle"
 	}
 	return &ProxyServer{
-		client:      c,
+		svc:         newClientService(c),
 		sandboxName: sandboxName,
 		innerCmd:    innerCmd,
 		opts:        opts,
@@ -66,7 +66,7 @@ func NewProxy(c *yoloai.Client, sandboxName string, innerCmd []string, opts Prox
 // ServeStdio ensures the sandbox is running, then proxies stdin/stdout to
 // the inner MCP server for the duration of the connection.
 func (p *ProxyServer) ServeStdio(ctx context.Context) error {
-	if err := p.client.EnsureSetup(ctx); err != nil {
+	if err := p.svc.EnsureSetup(ctx); err != nil {
 		return fmt.Errorf("setup: %w", err)
 	}
 
@@ -75,11 +75,15 @@ func (p *ProxyServer) ServeStdio(ctx context.Context) error {
 		return err
 	}
 
-	sb, err := p.client.Sandbox(p.sandboxName)
+	filesDir, err := p.svc.FilesDir(ctx, p.sandboxName)
 	if err != nil {
-		return fmt.Errorf("sandbox handle %q: %w", p.sandboxName, err)
+		return fmt.Errorf("sandbox files dir %q: %w", p.sandboxName, err)
 	}
-	innerCmd, err := expandCmd(p.innerCmd, sb.Files().Path(), sb.CacheDir(), meta)
+	cacheDir, err := p.svc.CacheDir(ctx, p.sandboxName)
+	if err != nil {
+		return fmt.Errorf("sandbox cache dir %q: %w", p.sandboxName, err)
+	}
+	innerCmd, err := expandCmd(p.innerCmd, filesDir, cacheDir, meta)
 	if err != nil {
 		return fmt.Errorf("expand inner command: %w", err)
 	}
@@ -90,16 +94,7 @@ func (p *ProxyServer) ServeStdio(ctx context.Context) error {
 // ensureRunning guarantees the sandbox container is running, creating it if
 // needed. Returns the sandbox metadata for path template expansion.
 func (p *ProxyServer) ensureRunning(ctx context.Context) (*yoloai.Environment, error) {
-	sb, sbErr := p.client.Sandbox(p.sandboxName)
-	if errors.Is(sbErr, yoloai.ErrSandboxNotFound) {
-		return p.createSandbox(ctx)
-	}
-	if sbErr != nil {
-		return nil, fmt.Errorf("sandbox handle %q: %w", p.sandboxName, sbErr)
-	}
-
-	info, err := sb.Inspect(ctx)
-
+	info, err := p.svc.Inspect(ctx, p.sandboxName)
 	if errors.Is(err, yoloai.ErrSandboxNotFound) {
 		return p.createSandbox(ctx)
 	}
@@ -115,7 +110,7 @@ func (p *ProxyServer) ensureRunning(ctx context.Context) (*yoloai.Environment, e
 
 	case yoloai.StatusStopped, yoloai.StatusRemoved:
 		// Container stopped or removed — restart it (auto-start; notices discarded)
-		if _, err := sb.Start(ctx, yoloai.SandboxStartOptions{}); err != nil {
+		if err := p.svc.Start(ctx, p.sandboxName); err != nil {
 			return nil, fmt.Errorf("start sandbox %q: %w", p.sandboxName, err)
 		}
 		return info.Environment, nil
@@ -143,14 +138,13 @@ func (p *ProxyServer) createSandbox(ctx context.Context) (*yoloai.Environment, e
 		AllowDirtyWorkdir: true,
 	}
 
-	sb, err := p.client.CreateSandbox(ctx, opts)
-	if err != nil {
+	if err := p.svc.CreateSandbox(ctx, opts); err != nil {
 		return nil, fmt.Errorf("create sandbox %q: %w", p.sandboxName, err)
 	}
-	if _, err := sb.Start(ctx, yoloai.SandboxStartOptions{}); err != nil {
+	if err := p.svc.Start(ctx, p.sandboxName); err != nil {
 		return nil, fmt.Errorf("start sandbox %q after create: %w", p.sandboxName, err)
 	}
-	info, err := sb.Inspect(ctx)
+	info, err := p.svc.Inspect(ctx, p.sandboxName)
 	if err != nil {
 		return nil, fmt.Errorf("inspect sandbox %q after create: %w", p.sandboxName, err)
 	}
@@ -253,10 +247,7 @@ func (p *ProxyServer) run(ctx context.Context, in io.Reader, out io.Writer, _ *y
 	// outer reader and writer loops below see EOF and unwind.
 	execDone := make(chan error, 1)
 	go func() {
-		sb, err := p.client.Sandbox(p.sandboxName)
-		if err == nil {
-			err = sb.Exec(ctx, yoloai.SandboxExecOptions{Command: innerCmd}, yoloai.IOStreams{In: innerInRead, Out: innerOutWrite, Err: os.Stderr})
-		}
+		err := p.svc.Exec(ctx, p.sandboxName, yoloai.SandboxExecOptions{Command: innerCmd}, yoloai.IOStreams{In: innerInRead, Out: innerOutWrite, Err: os.Stderr})
 		_ = innerOutWrite.Close()
 		_ = innerInRead.Close()
 		execDone <- err
@@ -296,7 +287,7 @@ func (p *ProxyServer) run(ctx context.Context, in io.Reader, out io.Writer, _ *y
 			return ctx.Err()
 		default:
 		}
-		if err := p.handleOuterMessage(outerScanner.Bytes(), innerIn, &localMu, localIDs, writeOut); err != nil {
+		if err := p.handleOuterMessage(ctx, outerScanner.Bytes(), innerIn, &localMu, localIDs, writeOut); err != nil {
 			return err
 		}
 	}
@@ -391,6 +382,7 @@ func injectToolsIfNeeded(msg *jsonRPCMsg) {
 // handleOuterMessage processes a single message from the outer agent.
 // It handles injected tool calls locally and forwards everything else to innerIn.
 func (p *ProxyServer) handleOuterMessage(
+	ctx context.Context,
 	line []byte,
 	innerIn io.Writer,
 	localMu *sync.Mutex,
@@ -404,7 +396,7 @@ func (p *ProxyServer) handleOuterMessage(
 	}
 
 	if msg.Method == "tools/call" {
-		if handled, err := p.tryHandleLocalToolCall(msg, localMu, localIDs, writeOut); handled {
+		if handled, err := p.tryHandleLocalToolCall(ctx, msg, localMu, localIDs, writeOut); handled {
 			return err
 		}
 	}
@@ -418,6 +410,7 @@ func (p *ProxyServer) handleOuterMessage(
 // tryHandleLocalToolCall attempts to handle a tools/call message for locally-injected tools.
 // Returns (true, err) if the message was handled locally, (false, nil) otherwise.
 func (p *ProxyServer) tryHandleLocalToolCall(
+	ctx context.Context,
 	msg jsonRPCMsg,
 	localMu *sync.Mutex,
 	localIDs map[string]bool,
@@ -431,7 +424,7 @@ func (p *ProxyServer) tryHandleLocalToolCall(
 		return false, nil //nolint:nilerr // intentional: non-matching calls are forwarded to inner server
 	}
 
-	result := p.handleProxyDiff(params.Arguments)
+	result := p.handleProxyDiff(ctx, params.Arguments)
 	resp := jsonRPCMsg{
 		JSONRPC: "2.0",
 		ID:      msg.ID,
@@ -449,20 +442,16 @@ func (p *ProxyServer) tryHandleLocalToolCall(
 }
 
 // handleProxyDiff handles sandbox_diff tool calls locally.
-func (p *ProxyServer) handleProxyDiff(args map[string]any) map[string]any {
+func (p *ProxyServer) handleProxyDiff(ctx context.Context, args map[string]any) map[string]any {
 	stat, _ := args["stat"].(bool)
 
-	sb, err := p.client.Sandbox(p.sandboxName)
-	if err != nil {
-		return mcpTextContent(errorf("sandbox handle %q: %v", p.sandboxName, err))
-	}
-	diff, err := sb.Workdir().Diff(context.Background(), yoloai.WorkdirDiffOptions{Stat: stat})
+	diff, err := p.svc.Diff(ctx, p.sandboxName, yoloai.WorkdirDiffOptions{Stat: stat})
 	if err != nil {
 		return mcpTextContent(errorf("diff sandbox %q: %v", p.sandboxName, err))
 	}
 
 	if diff == "" {
-		return mcpTextContent("[ERROR] no changes to diff")
+		return mcpTextContent("No changes to diff")
 	}
 	return mcpTextContent(diff)
 }

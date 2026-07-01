@@ -38,7 +38,7 @@ func (f *fakeRuntime) Inspect(_ context.Context, _ string) (runtime.InstanceInfo
 func (f *fakeRuntime) Exec(_ context.Context, _ string, _ []string, _ string) (runtime.ExecResult, error) {
 	return runtime.ExecResult{}, errFakeNotImplemented
 }
-func (f *fakeRuntime) GitExec(_ context.Context, _ string, _ string, _ ...string) (string, error) {
+func (f *fakeRuntime) GitExec(_ context.Context, _ string, _ string, _ string, _ ...string) (string, error) {
 	return "", errFakeNotImplemented
 }
 func (f *fakeRuntime) InteractiveExec(_ context.Context, _ string, _ []string, _ string, _ string, _ runtime.IOStreams) error {
@@ -60,7 +60,6 @@ func (f *fakeRuntime) Descriptor() runtime.BackendDescriptor {
 		BaseModeName: runtime.IsolationModeContainer,
 		Capabilities: runtime.BackendCaps{
 			NetworkIsolation:   true,
-			OverlayDirs:        true,
 			CapAdd:             true,
 			FilesystemLocality: runtime.LocalityHostSide,
 		},

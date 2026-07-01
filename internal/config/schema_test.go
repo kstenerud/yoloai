@@ -149,12 +149,16 @@ func TestMigrateLibrary_UnstampedV0_StampsAndPreservesData(t *testing.T) {
 	layout := NewLayout(dir)
 	require.NoError(t, MigrateLibrary(layout, testPrefixResolver))
 
+	// MigrateLibrary walks only the sealed ladder and stamps its ceiling
+	// (libraryFrozenVersion); the framework flatten takes the realm from here to
+	// LibrarySchemaVersion, so the realm reads LayoutOK against the frozen ceiling
+	// and still-pending (LayoutMigrate) against the overall target.
 	v, exists, err := ReadSchemaVersion(layout.SchemaVersionPath())
 	require.NoError(t, err)
 	assert.True(t, exists)
-	assert.Equal(t, LibrarySchemaVersion, v)
+	assert.Equal(t, libraryFrozenVersion, v)
 
-	st, err := RealmStatus(dir, LibrarySchemaVersion)
+	st, err := RealmStatus(dir, libraryFrozenVersion)
 	require.NoError(t, err)
 	assert.Equal(t, LayoutOK, st)
 
@@ -186,16 +190,16 @@ func TestMigrateLibrary_NewerThanBuild_Errors(t *testing.T) {
 }
 
 // TestMigrateLibraryStep locks the per-version transform contract so a future
-// bump has a pattern to extend: every version in the registered range
-// [0, LibrarySchemaVersion) must apply cleanly, and the first unregistered
-// version must be refused rather than silently skipped. When you add a
-// vN -> vN+1 step, bump LibrarySchemaVersion and add the matching `case N:` to
-// migrateLibraryStep — the registered loop then covers the new step
-// automatically and the unregistered guard moves up with the constant.
+// bump has a pattern to extend: every version in the sealed-ladder range
+// [0, libraryFrozenVersion) must apply cleanly, and the first unregistered
+// version must be refused rather than silently skipped. The sealed ladder stops
+// at libraryFrozenVersion; framework migrations (v3->v4 overlay flatten) take it
+// the rest of the way to LibrarySchemaVersion and are NOT migrateLibraryStep
+// cases, which is why the guard sits at the frozen ceiling, not the target.
 func TestMigrateLibraryStep(t *testing.T) {
 	layout := NewLayout(t.TempDir())
 
-	for from := range LibrarySchemaVersion {
+	for from := range libraryFrozenVersion {
 		t.Run(fmt.Sprintf("registered_v%d", from), func(t *testing.T) {
 			require.NoError(t, migrateLibraryStep(layout, from, testPrefixResolver),
 				"every registered step on the path MigrateLibrary walks must succeed")
@@ -203,7 +207,7 @@ func TestMigrateLibraryStep(t *testing.T) {
 	}
 
 	t.Run("unregistered_version_errors", func(t *testing.T) {
-		err := migrateLibraryStep(layout, LibrarySchemaVersion, testPrefixResolver)
+		err := migrateLibraryStep(layout, libraryFrozenVersion, testPrefixResolver)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "no migration registered")
 	})
@@ -262,7 +266,9 @@ func TestMigrateLibrary_V1ToV2_BackfillsLaunchPrefix(t *testing.T) {
 
 	v, _, err := ReadSchemaVersion(layout.SchemaVersionPath())
 	require.NoError(t, err)
-	assert.Equal(t, LibrarySchemaVersion, v)
+	// MigrateLibrary walks only the sealed ladder and stamps its ceiling; the
+	// framework flatten takes the realm from here to LibrarySchemaVersion.
+	assert.Equal(t, libraryFrozenVersion, v)
 
 	assert.Equal(t, `PATH="/wrap/bin:$PATH" `, readLaunchPrefix(t, tartBox), "tart sandbox must be backfilled")
 	assert.Empty(t, readLaunchPrefix(t, dockerBox), "container sandbox must stay empty")

@@ -263,7 +263,7 @@ func startViaLaunch(ctx context.Context, rt runtime.Backend, launcher runtime.Pr
 	_, err := launcher.Launch(ctx, cname, runtime.ProcSpec{
 		Argv:     []string{"sh", "-c", "exec python3 /yoloai/bin/sandbox-setup.py docker >> /yoloai/logs/session-runner.log 2>&1"},
 		User:     "yoloai",
-		Cwd:      OverlayOrResolvedMountPath(st.Workdir),
+		Cwd:      WorkdirMountPath(st.Workdir),
 		Env:      env,
 		Detached: true,
 	})
@@ -432,12 +432,17 @@ func brokerCredentials(ctx context.Context, rt runtime.Backend, st *state.State,
 		return brokerOutcome{}, err
 	}
 
-	addr, err := broker.NewSidecarHost().Ensure(ctx, buildInjectorSpec(st.SandboxDir, bc, cred, reach, realKey))
+	placeholderToken, err := broker.PlaceholderToken(st.SandboxDir)
+	if err != nil {
+		return brokerOutcome{}, fmt.Errorf("broker placeholder token: %w", err)
+	}
+
+	addr, err := broker.NewSidecarHost().Ensure(ctx, buildInjectorSpec(st.SandboxDir, bc, cred, reach, realKey, placeholderToken))
 	if err != nil {
 		return brokerOutcome{}, fmt.Errorf("start credential injector: %w", err)
 	}
 
-	endpoint, err := applyBrokerEnv(secretEnv, bc, reach, addr)
+	endpoint, err := applyBrokerEnv(secretEnv, bc, reach, addr, placeholderToken)
 	if err != nil {
 		return brokerOutcome{}, err
 	}
@@ -501,12 +506,13 @@ func resolveInjectorReach(ctx context.Context, rt runtime.Backend) (runtime.Inje
 // drift. The inbound dummy Authorization is always stripped; the selected
 // credential is injected into its own header (x-api-key for an API key,
 // Authorization: Bearer for a subscription token).
-func buildInjectorSpec(sandboxDir string, bc *agent.BrokerConfig, cred agent.BrokerCredential, reach runtime.InjectorReach, realKey string) broker.InjectorSpec {
+func buildInjectorSpec(sandboxDir string, bc *agent.BrokerConfig, cred agent.BrokerCredential, reach runtime.InjectorReach, realKey, placeholderToken string) broker.InjectorSpec {
 	return broker.InjectorSpec{
-		SandboxDir:   sandboxDir,
-		BindHost:     reach.BindHost,
-		UpstreamURL:  bc.UpstreamURL,
-		StripHeaders: []string{"Authorization"},
+		SandboxDir:    sandboxDir,
+		BindHost:      reach.BindHost,
+		UpstreamURL:   bc.UpstreamURL,
+		StripHeaders:  []string{"Authorization"},
+		ExpectedToken: placeholderToken,
 		Bindings: []broker.BindingConfig{{
 			Destination: bc.Destination,
 			Kind:        broker.KindHeaderSet,
@@ -573,7 +579,11 @@ func ReconcileInjector(ctx context.Context, d state.Deps, name string) error {
 		return nil // backend can't host an injector (shouldn't happen if it was brokered)
 	}
 
-	if _, err := broker.NewSidecarHost().Ensure(ctx, buildInjectorSpec(sandboxDir, bc, cred, reach, realKey)); err != nil {
+	placeholderToken, err := broker.PlaceholderToken(sandboxDir)
+	if err != nil {
+		return fmt.Errorf("reconcile injector: placeholder token: %w", err)
+	}
+	if _, err := broker.NewSidecarHost().Ensure(ctx, buildInjectorSpec(sandboxDir, bc, cred, reach, realKey, placeholderToken)); err != nil {
 		return fmt.Errorf("reconcile injector: respawn: %w", err)
 	}
 	slog.Info("respawned dead credential injector",
@@ -591,7 +601,7 @@ func ReconcileInjector(ctx context.Context, d state.Deps, name string) error {
 // Docker Desktop). It returns the agent-facing endpoint (DialHost:port) — the
 // destination to allowlist under network isolation. It is a pure function so the
 // env rewrite is unit-tested.
-func applyBrokerEnv(secretEnv map[string]string, bc *agent.BrokerConfig, reach runtime.InjectorReach, injectorAddr string) (string, error) {
+func applyBrokerEnv(secretEnv map[string]string, bc *agent.BrokerConfig, reach runtime.InjectorReach, injectorAddr, placeholderToken string) (string, error) {
 	_, port, err := net.SplitHostPort(injectorAddr)
 	if err != nil {
 		return "", fmt.Errorf("parse injector address %q: %w", injectorAddr, err)
@@ -601,7 +611,9 @@ func applyBrokerEnv(secretEnv map[string]string, bc *agent.BrokerConfig, reach r
 	}
 	endpoint := net.JoinHostPort(reach.DialHost, port)
 	secretEnv[bc.BaseURLEnvVar] = "http://" + endpoint
-	secretEnv[bc.AuthTokenEnvVar] = bc.DummyToken
+	// The placeholder the agent presents is the per-sandbox token the injector
+	// verifies (not the shared bc.DummyToken constant) — see broker.PlaceholderToken.
+	secretEnv[bc.AuthTokenEnvVar] = placeholderToken
 	return endpoint, nil
 }
 
@@ -700,7 +712,7 @@ func buildInstanceConfig(desc runtime.BackendDescriptor, st *state.State, mnts [
 	instanceCfg := runtime.InstanceConfig{
 		Name:         cname,
 		ImageRef:     st.ImageRef,
-		WorkingDir:   OverlayOrResolvedMountPath(st.Workdir),
+		WorkingDir:   WorkdirMountPath(st.Workdir),
 		Mounts:       mnts,
 		Ports:        ports,
 		NetworkMode:  networkMode,
@@ -721,7 +733,7 @@ func buildInstanceConfig(desc runtime.BackendDescriptor, st *state.State, mnts [
 		instanceCfg.CapAdd = append(instanceCfg.CapAdd, "NET_ADMIN")
 	}
 
-	if err := applyOverlayAndCaps(st, caps, &instanceCfg, desc.Type); err != nil {
+	if err := applyCaps(st, caps, &instanceCfg, desc.Type); err != nil {
 		return runtime.InstanceConfig{}, err
 	}
 
@@ -823,26 +835,8 @@ func applyResourceLimits(st *state.State, instanceCfg *runtime.InstanceConfig) e
 	return nil
 }
 
-// applyOverlayAndCaps validates and applies overlay/capability requirements to the instance config.
-func applyOverlayAndCaps(st *state.State, caps runtime.BackendCaps, instanceCfg *runtime.InstanceConfig, runtimeName runtime.BackendType) error {
-	// Catch isolation-mode/overlay conflicts early before Docker fails with
-	// an opaque error. runtime.SupportsOverlayDirs encodes the policy
-	// (container-enhanced / gVisor is the rejection case); the message stays
-	// here because it's CLI-shaped advice.
-	if mountspkg.HasOverlayDirs(st) && !runtime.SupportsOverlayDirs(st.Isolation) {
-		return fmt.Errorf(
-			":overlay directories require --isolation container; " +
-				"--isolation container-enhanced uses gVisor, which does not support overlayfs inside the container")
-	}
-
-	// CAP_SYS_ADMIN required for overlay mounts inside the container
-	if mountspkg.HasOverlayDirs(st) {
-		if !caps.OverlayDirs {
-			return fmt.Errorf(":overlay mode requires a container backend that supports overlayfs (not supported with %s)", runtimeName)
-		}
-		instanceCfg.CapAdd = append(instanceCfg.CapAdd, "SYS_ADMIN")
-	}
-
+// applyCaps validates and applies capability requirements to the instance config.
+func applyCaps(st *state.State, caps runtime.BackendCaps, instanceCfg *runtime.InstanceConfig, runtimeName runtime.BackendType) error {
 	// Recipe fields (cap_add, devices, setup) require a backend with CapAdd support
 	if !caps.CapAdd && (len(st.CapAdd) > 0 || len(st.Devices) > 0 || len(st.Setup) > 0) {
 		return fmt.Errorf("cap_add, devices, and setup require a container backend (not supported with %s)", runtimeName)
@@ -978,12 +972,8 @@ func parsePortBindings(ports []string) ([]runtime.PortMapping, error) {
 	return result, nil
 }
 
-// OverlayOrResolvedMountPath returns the container working directory path for a directory.
-// For overlay mode, this is the bind-mounted merged path; otherwise the resolved mount path.
-func OverlayOrResolvedMountPath(d *state.DirSpec) string {
-	if d.Mode == "overlay" {
-		return "/yoloai/overlay/" + store.EncodePath(d.Path) + "/merged"
-	}
+// WorkdirMountPath returns the container working directory path for a directory.
+func WorkdirMountPath(d *state.DirSpec) string {
 	return d.ResolvedMountPath()
 }
 

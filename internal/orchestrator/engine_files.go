@@ -26,3 +26,13 @@ func (e *Engine) ExportFile(ctx context.Context, name, rel, dst string, force bo
 func (e *Engine) RemoveFile(name, rel string) error {
 	return RemoveExchangeFile(e.layout, name, rel)
 }
+
+// ReadFile returns the bytes of one exchange entry (rel).
+func (e *Engine) ReadFile(name, rel string) ([]byte, error) {
+	return ReadExchangeFile(e.layout, name, rel)
+}
+
+// WriteFile writes data to one exchange entry (rel), creating parent dirs.
+func (e *Engine) WriteFile(name, rel string, data []byte) error {
+	return WriteExchangeFile(e.layout, name, rel, data)
+}

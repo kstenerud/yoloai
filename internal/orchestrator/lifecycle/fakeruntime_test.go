@@ -27,12 +27,13 @@ func (e *mockNotImplError) Error() string { return "mock: not implemented" }
 // Hooks that are nil fall back to nil-safe defaults (Stop/Start/Remove return nil,
 // Inspect returns errMockNotImplemented, Exec returns errMockNotImplemented).
 type lifecycleMockRuntime struct {
-	stopFn    func(ctx context.Context, name string) error
-	startFn   func(ctx context.Context, name string) error
-	removeFn  func(ctx context.Context, name string) error
-	inspectFn func(ctx context.Context, name string) (runtime.InstanceInfo, error)
-	execFn    func(ctx context.Context, name string, cmd []string, user string) (runtime.ExecResult, error)
-	gitExecFn func(ctx context.Context, name, workDir string, args ...string) (string, error)
+	stopFn             func(ctx context.Context, name string) error
+	startFn            func(ctx context.Context, name string) error
+	removeFn           func(ctx context.Context, name string) error
+	inspectFn          func(ctx context.Context, name string) (runtime.InstanceInfo, error)
+	execFn             func(ctx context.Context, name string, cmd []string, user string) (runtime.ExecResult, error)
+	gitExecFn          func(ctx context.Context, instance, user, workDir string, args ...string) (string, error)
+	recreateAdvisoryFn func(ctx context.Context) string
 	// locality controls the backend's declared FilesystemLocality; zero value
 	// (LocalityHostSide) suits host-side reset/baseline tests, SandboxSide the
 	// VM tests (git dispatched in-sandbox, host probe blind).
@@ -87,9 +88,9 @@ func (m *lifecycleMockRuntime) Create(_ context.Context, _ runtime.InstanceConfi
 // that stage real git repos under work/ exercise the real change-detection
 // path. Tests modeling a VM-local backend (Tart) set gitExecFn, e.g. to return
 // runtime.ErrNotRunning for the stopped-VM fail-safe case.
-func (m *lifecycleMockRuntime) GitExec(ctx context.Context, name, workDir string, args ...string) (string, error) {
+func (m *lifecycleMockRuntime) GitExec(ctx context.Context, instance, user, workDir string, args ...string) (string, error) {
 	if m.gitExecFn != nil {
-		return m.gitExecFn(ctx, name, workDir, args...)
+		return m.gitExecFn(ctx, instance, user, workDir, args...)
 	}
 	cmdArgs := append([]string{"-C", workDir}, args...)
 	// Curated hermetic git env (PATH + identity, never the full ambient env)
@@ -97,6 +98,16 @@ func (m *lifecycleMockRuntime) GitExec(ctx context.Context, name, workDir string
 	out, err := sysexec.CommandContext(ctx, testutil.GitEnv(), "git", cmdArgs...).Output()
 	return string(out), err
 }
+
+// RecreateAdvisory implements runtime.RecreateAdvisor so the mock can simulate
+// the provider-switch advisory path (DF22) without a real Docker runtime.
+func (m *lifecycleMockRuntime) RecreateAdvisory(ctx context.Context) string {
+	if m.recreateAdvisoryFn != nil {
+		return m.recreateAdvisoryFn(ctx)
+	}
+	return ""
+}
+
 func (m *lifecycleMockRuntime) InteractiveExec(_ context.Context, _ string, _ []string, _ string, _ string, _ runtime.IOStreams) error {
 	return errMockNotImplemented
 }
@@ -118,7 +129,6 @@ func (m *lifecycleMockRuntime) Descriptor() runtime.BackendDescriptor {
 		BaseModeName: runtime.IsolationModeContainer,
 		Capabilities: runtime.BackendCaps{
 			NetworkIsolation:   true,
-			OverlayDirs:        true,
 			CapAdd:             true,
 			FilesystemLocality: m.locality,
 		},

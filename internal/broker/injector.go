@@ -4,10 +4,12 @@ package broker
 
 import (
 	"context"
+	"crypto/subtle"
 	"fmt"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strings"
 
 	"github.com/kstenerud/yoloai/internal/credential"
 )
@@ -30,8 +32,17 @@ type Upstream struct {
 	// StripHeaders names inbound headers removed before injection — the
 	// placeholder-credential carriers (e.g. "Authorization" when the agent sends
 	// ANTHROPIC_AUTH_TOKEN). Removing them ensures a dummy token never reaches the
-	// upstream alongside the injected real credential.
+	// upstream alongside the injected real credential. These are also the headers
+	// searched for ExpectedToken.
 	StripHeaders []string
+
+	// ExpectedToken is the per-sandbox placeholder secret the agent presents (in
+	// one of StripHeaders). The injector verifies it (constant-time) before
+	// injecting the real credential and rejects mismatches with 403 — this stops a
+	// co-resident container on the shared bridge from using the injector as an
+	// unauthenticated relay to spend the victim sandbox's credential. Empty
+	// disables the check (test/legacy only; the launch path always sets it).
+	ExpectedToken string
 }
 
 // Injector is the always-on key-injector (D105 layer 1): a small reverse proxy
@@ -67,7 +78,33 @@ func NewInjector(up Upstream) (*Injector, error) {
 }
 
 func (inj *Injector) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if !inj.presentsExpectedToken(r) {
+		http.Error(w, "broker: unrecognized placeholder credential", http.StatusForbidden)
+		return
+	}
 	inj.proxy.ServeHTTP(w, r)
+}
+
+// presentsExpectedToken reports whether the inbound request carries the
+// per-sandbox placeholder token in one of the StripHeaders carriers. An empty
+// ExpectedToken disables the check (test/legacy). The compare is constant-time
+// and a "Bearer " prefix is tolerated (the Authorization carrier).
+func (inj *Injector) presentsExpectedToken(r *http.Request) bool {
+	want := inj.upstream.ExpectedToken
+	if want == "" {
+		return true
+	}
+	for _, h := range inj.upstream.StripHeaders {
+		v := r.Header.Get(h)
+		if v == "" {
+			continue
+		}
+		v = strings.TrimPrefix(v, "Bearer ")
+		if subtle.ConstantTimeCompare([]byte(v), []byte(want)) == 1 {
+			return true
+		}
+	}
+	return false
 }
 
 // rewrite routes the outbound request to the real upstream and injects the real

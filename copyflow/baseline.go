@@ -171,7 +171,7 @@ func advanceBaselineUnlocked(layout config.Layout, name string, dirHostPath stri
 		return err
 	}
 	dir := meta.Dir(dirHostPath)
-	if dir == nil || dir.Mode == store.DirModeRW || dir.Mode == store.DirModeOverlay {
+	if dir == nil || dir.Mode == store.DirModeRW {
 		return nil
 	}
 	_, err = commitBaseline(sandboxDir, meta, dirHostPath, nil, resolve)
@@ -185,7 +185,7 @@ func checkBaselineMode(mode store.DirMode) error {
 	case store.DirModeRW:
 		return yoerrors.NewUsageError("baseline is not tracked for :rw directories")
 	case store.DirModeOverlay:
-		return yoerrors.NewUsageError("use git commands inside the container to manage overlay baselines")
+		return yoerrors.NewUsageError("overlay sandboxes must be converted to copy mode — run 'yoloai system migrate'")
 	case store.DirModeCopy, store.DirModeRO, "":
 		return nil
 	}

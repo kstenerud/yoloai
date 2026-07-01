@@ -78,11 +78,6 @@ func Reset(ctx context.Context, d state.Deps, opts ResetOptions) (*ResetResult, 
 		opts.Restart = true
 	}
 
-	// Auto-upgrade to restart: overlay mode requires container restart
-	if meta.Workdir().Mode == "overlay" {
-		opts.Restart = true
-	}
-
 	// Auto-upgrade to restart: a SandboxSide backend (e.g. Tart) keeps the work
 	// copy inside the sandbox, so in-place reset (host-side file access) is not
 	// possible.
@@ -154,10 +149,10 @@ func unappliedWorkReason(ctx context.Context, hostGit, sandboxGit *git.Git, sand
 	return false, ""
 }
 
-// dirWorkReason probes one copy/overlay directory for unapplied work and maps
-// the result to a destroy-blocking reason. Non-copy/overlay modes never block.
+// dirWorkReason probes one copy directory for unapplied work and maps the
+// result to a destroy-blocking reason. Non-copy modes never block.
 func dirWorkReason(ctx context.Context, sandboxGit *git.Git, sandboxDir string, mode store.DirMode, hostPath, baselineSHA string) (bool, string) {
-	if mode != "copy" && mode != "overlay" {
+	if mode != "copy" {
 		return false, ""
 	}
 	workDir := store.WorkDir(sandboxDir, hostPath)
@@ -169,25 +164,6 @@ func dirWorkReason(ctx context.Context, sandboxGit *git.Git, sandboxDir string, 
 	case workprobe.WorkClean:
 	}
 	return false, ""
-}
-
-// resetOverlayDirs clears the overlay dirs (upper/ovlwork/merged/lower) and
-// recreates them for a fresh state.
-func resetOverlayDirs(sandboxDir, hostPath string) error {
-	for _, d := range []string{
-		store.OverlayUpperDir(sandboxDir, hostPath),
-		store.OverlayOvlworkDir(sandboxDir, hostPath),
-		store.OverlayMergedDir(sandboxDir, hostPath),
-		store.OverlayLowerDir(sandboxDir, hostPath),
-	} {
-		if err := os.RemoveAll(d); err != nil {
-			return fmt.Errorf("clear overlay dir %s: %w", d, err)
-		}
-		if err := fileutil.MkdirAll(d, 0755); err != nil { //nolint:gosec // G301: world-traversable so container yoloai user can access merged/
-			return fmt.Errorf("recreate overlay dir %s: %w", d, err)
-		}
-	}
-	return nil
 }
 
 // resetCopyWorkdir removes the work copy, re-copies from the host path, and
@@ -256,8 +232,8 @@ func resetAuxCopyDir(ctx context.Context, g *git.Git, sandboxDir string, d store
 	return sha, nil
 }
 
-// resetAuxDirs resets all aux :copy and :overlay directories in meta,
-// updating BaselineSHA in-place.
+// resetAuxDirs resets all aux :copy directories in meta, updating BaselineSHA
+// in-place.
 func resetAuxDirs(ctx context.Context, g *git.Git, sandboxDir string, meta *store.Environment) error {
 	for i, d := range meta.AuxDirs() {
 		switch d.Mode {
@@ -267,13 +243,9 @@ func resetAuxDirs(ctx context.Context, g *git.Git, sandboxDir string, meta *stor
 				return err
 			}
 			meta.Dirs[1+i].BaselineSHA = sha
-		case store.DirModeOverlay:
-			if err := resetOverlayDirs(sandboxDir, d.HostPath); err != nil {
-				return fmt.Errorf("aux overlay %s: %w", d.HostPath, err)
-			}
-			meta.Dirs[1+i].BaselineSHA = ""
-		case store.DirModeRW, store.DirModeRO, "":
-			// rw and ro aux dirs have no baseline to reset
+		case store.DirModeRW, store.DirModeRO, store.DirModeOverlay, "":
+			// rw/ro aux dirs have no baseline to reset; a retired overlay dir
+			// shouldn't reach here (the migration gate forces conversion to copy).
 		}
 	}
 	return nil
@@ -307,14 +279,8 @@ func reinitLogs(sandboxDir string, perms store.IsolationPerms) {
 	}
 }
 
-// resetWorkdir resets the main workdir (overlay or copy) and returns the new baseline SHA.
+// resetWorkdir resets the main (copy-mode) workdir and returns the new baseline SHA.
 func resetWorkdir(ctx context.Context, d state.Deps, sandboxName, sandboxDir string, meta *store.Environment) (string, error) {
-	if meta.Workdir().Mode == "overlay" {
-		if err := resetOverlayDirs(sandboxDir, meta.Workdir().HostPath); err != nil {
-			return "", err
-		}
-		return "", nil // baseline deferred — container restart recreates it
-	}
 	return resetCopyWorkdir(ctx, d, sandboxName, sandboxDir, meta)
 }
 
@@ -393,7 +359,7 @@ func prepareResetRestart(ctx context.Context, d state.Deps, opts ResetOptions, s
 
 	slog.Info("reset complete", "event", "sandbox.reset.complete", "sandbox", opts.Name)
 	// Start the container; its status notices flow into the reset's notices.
-	if err := start(ctx, d, opts.Name, StartOptions{Env: opts.Env}, n); err != nil {
+	if err := start(ctx, d, opts.Name, StartOptions{Env: opts.Env, Recreating: true}, n); err != nil {
 		return err
 	}
 

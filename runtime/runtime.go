@@ -239,13 +239,22 @@ type BackendDescriptor struct {
 // Each backend returns its capabilities via BackendDescriptor.Capabilities.
 type BackendCaps struct {
 	NetworkIsolation   bool               // supports --network=isolated (iptables domain filtering)
-	OverlayDirs        bool               // supports :overlay mount mode (overlayfs inside the container)
 	CapAdd             bool               // supports cap_add, devices, and setup commands
 	HostFilesystem     bool               // true when sandbox state lives on the host (seatbelt, future SSH)
 	ContainerAttach    bool               // exposes a docker-compatible container surface so VS Code's "Attach to Running Container" works
 	VMRuntimeDir       string             // path to yoloai state inside the VM; "" means /yoloai (docker default)
 	FilesystemLocality FilesystemLocality // where tracked work copies live; see the type doc. Zero value = LocalityHostSide.
 	KeepAliveModel     KeepAliveModel     // init/keep-alive model; see the type doc. Zero value = KeepAliveContainerInit.
+	// GitExecInConfinement makes the copy-mode work-copy git run inside the
+	// sandbox (via GitExecer) instead of on the host, for a backend whose work
+	// copy IS host-readable (LocalityHostSide) but which still has a container to
+	// exec into. It closes the host-code-execution path through an agent-planted
+	// .git filter/diff/fsmonitor driver (audit C1). Set by the container backends
+	// (docker/podman/containerd); seatbelt leaves it false (no container — host
+	// git, documented residual). Orthogonal to and additive with SandboxSide,
+	// which already forces in-confinement git; read both via
+	// GitRunsInConfinement, never this field directly.
+	GitExecInConfinement bool
 	// AgentFreeLaunch opts the backend into the D88 bring-up: the box comes up
 	// agent-free on a keepalive_only holder (the entrypoint writes .substrate-ready
 	// then execs sleep) and the host Launches sandbox-setup.py over it via
@@ -289,6 +298,23 @@ func LocalityOf(rt Backend) FilesystemLocality {
 		return LocalityHostSide
 	}
 	return rt.Descriptor().Capabilities.FilesystemLocality
+}
+
+// GitRunsInConfinement reports whether rt runs the copy-mode work-copy git
+// inside the sandbox rather than on the host. True for SandboxSide backends
+// (the work copy isn't on the host) and for container backends that keep the
+// work copy host-readable but still exec git in-container so an agent-controlled
+// .git/config can't run filter/diff/fsmonitor drivers on the host (audit C1).
+// False for seatbelt (no container — host git, documented residual) and nil.
+// A backend for which this is true MUST implement GitExecer. This is the
+// dispatch predicate for git.NewSandbox; it decouples git-exec locality from
+// FilesystemLocality (which still governs where work copies physically live).
+func GitRunsInConfinement(rt Backend) bool {
+	if rt == nil {
+		return false
+	}
+	caps := rt.Descriptor().Capabilities
+	return caps.FilesystemLocality == LocalitySandboxSide || caps.GitExecInConfinement
 }
 
 // KeepAliveModel classifies how each backend keeps its isolated environment

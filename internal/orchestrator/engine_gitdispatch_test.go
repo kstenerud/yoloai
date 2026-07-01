@@ -84,7 +84,7 @@ var gitDispatchHook *gitDispatchRec
 // dispatched here rather than to host git.
 type gitDispatchMock struct{ mockRuntime }
 
-func (m *gitDispatchMock) GitExec(_ context.Context, _ string, _ string, args ...string) (string, error) {
+func (m *gitDispatchMock) GitExec(_ context.Context, _ string, _ string, _ string, args ...string) (string, error) {
 	if gitDispatchHook == nil {
 		return "", errMockNotImplemented
 	}

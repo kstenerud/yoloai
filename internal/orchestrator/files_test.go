@@ -88,9 +88,106 @@ func TestExportFile_TraversalBlocked(t *testing.T) {
 	assert.Contains(t, err.Error(), "escapes exchange directory")
 }
 
+func TestWriteReadExchangeFile_RoundTrip(t *testing.T) {
+	layout, name := filesTestLayout(t)
+
+	// Write creates the exchange dir and any parent dirs on demand.
+	require.NoError(t, WriteExchangeFile(layout, name, "sub/answer.txt", []byte("42")))
+	assert.FileExists(t, filepath.Join(FilesDir(layout, name), "sub", "answer.txt"))
+
+	got, err := ReadExchangeFile(layout, name, "sub/answer.txt")
+	require.NoError(t, err)
+	assert.Equal(t, "42", string(got))
+
+	// Overwrite is allowed (content-oriented write, unlike Import).
+	require.NoError(t, WriteExchangeFile(layout, name, "sub/answer.txt", []byte("43")))
+	got, err = ReadExchangeFile(layout, name, "sub/answer.txt")
+	require.NoError(t, err)
+	assert.Equal(t, "43", string(got))
+}
+
+func TestReadExchangeFile_NotFound(t *testing.T) {
+	layout, name := filesTestLayout(t)
+	_, err := ReadExchangeFile(layout, name, "missing.txt")
+	require.Error(t, err)
+}
+
+func TestWriteReadExchangeFile_TraversalBlocked(t *testing.T) {
+	layout, name := filesTestLayout(t)
+
+	err := WriteExchangeFile(layout, name, "../../../etc/passwd", []byte("x"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "escapes exchange directory")
+
+	_, err = ReadExchangeFile(layout, name, "../../../etc/passwd")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "escapes exchange directory")
+
+	// An absolute path is contained back into the exchange dir, not honored.
+	_, err = ReadExchangeFile(layout, name, "/etc/passwd")
+	require.Error(t, err) // not found inside the exchange dir, never /etc/passwd
+}
+
 func TestRemoveExchangeFile_TraversalBlocked(t *testing.T) {
 	layout, name := filesTestLayout(t)
 	err := RemoveExchangeFile(layout, name, "../../../etc/passwd")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "escapes exchange directory")
+}
+
+// TestExchange_PlantedSymlinkRefused simulates the untrusted in-container agent
+// planting a symlink in the read-write exchange dir that points at a host secret
+// outside the sandbox. Every host-side operation must refuse to follow it rather
+// than exfiltrate or overwrite the host file.
+func TestExchange_PlantedSymlinkRefused(t *testing.T) {
+	layout, name := filesTestLayout(t)
+	filesDir := FilesDir(layout, name)
+	require.NoError(t, os.MkdirAll(filesDir, 0750))
+
+	secretDir := t.TempDir()
+	secret := filepath.Join(secretDir, "secret.txt")
+	require.NoError(t, os.WriteFile(secret, []byte("TOPSECRET"), 0600))
+
+	// Agent plants answer.json -> host secret.
+	require.NoError(t, os.Symlink(secret, filepath.Join(filesDir, "answer.json")))
+
+	// Read must not follow the symlink (no exfil).
+	_, err := ReadExchangeFile(layout, name, "answer.json")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "symlink")
+
+	// Write must not follow the symlink (no host overwrite); secret stays intact.
+	err = WriteExchangeFile(layout, name, "answer.json", []byte("clobbered"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "symlink")
+	got, rerr := os.ReadFile(secret) //nolint:gosec // test path
+	require.NoError(t, rerr)
+	assert.Equal(t, "TOPSECRET", string(got))
+
+	// Export must not follow the symlink.
+	err = ExportFile(context.Background(), layout, name, "answer.json", filepath.Join(t.TempDir(), "out"), false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "symlink")
+
+	// Remove must not traverse the symlink.
+	err = RemoveExchangeFile(layout, name, "answer.json")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "symlink")
+}
+
+// TestExchange_SymlinkedDirComponentRefused covers the intermediate-component
+// vector: a symlinked *directory* inside the exchange dir would let a write or
+// MkdirAll escape into the symlink target.
+func TestExchange_SymlinkedDirComponentRefused(t *testing.T) {
+	layout, name := filesTestLayout(t)
+	filesDir := FilesDir(layout, name)
+	require.NoError(t, os.MkdirAll(filesDir, 0750))
+
+	outsideDir := t.TempDir()
+	require.NoError(t, os.Symlink(outsideDir, filepath.Join(filesDir, "sub")))
+
+	err := WriteExchangeFile(layout, name, "sub/pwned.txt", []byte("x"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "symlink")
+	assert.NoFileExists(t, filepath.Join(outsideDir, "pwned.txt"))
 }

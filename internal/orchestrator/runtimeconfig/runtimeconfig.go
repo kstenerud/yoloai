@@ -27,14 +27,6 @@ type IdleSupport struct {
 // W2 of the architecture remediation plan.
 const SchemaVersion = 1
 
-// OverlayMountConfig describes a single overlay mount for config.json.
-type OverlayMountConfig struct {
-	Lower  string `json:"lower"`
-	Upper  string `json:"upper"`
-	Work   string `json:"work"`
-	Merged string `json:"merged"`
-}
-
 // LifecycleConfig describes lifecycle command execution for a sandbox.
 type LifecycleConfig struct {
 	DockerDRequired bool             `json:"dockerd_required"`
@@ -58,23 +50,22 @@ type ContainerConfig struct {
 	// then skips deliver_prompt (nothing to inject) and FallToShell is off so the
 	// pane dies on exit → Tier-3 done detection (D100). Absent → off (interactive
 	// delivery). Additive optional field → no SchemaVersion bump.
-	Headless           bool                 `json:"headless,omitempty"`
-	StartupDelay       int                  `json:"startup_delay"`
-	ReadyPattern       string               `json:"ready_pattern"`
-	SubmitSequence     string               `json:"submit_sequence"`
-	TmuxConf           string               `json:"tmux_conf"`
-	WorkingDir         string               `json:"working_dir"`
-	StateDirName       string               `json:"state_dir_name"`
-	Debug              bool                 `json:"debug,omitempty"`
-	NetworkIsolated    bool                 `json:"network_isolated,omitempty"`
-	AllowedDomains     []string             `json:"allowed_domains,omitempty"`
-	Passthrough        []string             `json:"passthrough,omitempty"`
-	OverlayMounts      []OverlayMountConfig `json:"overlay_mounts,omitempty"`
-	SetupCommands      []string             `json:"setup_commands,omitempty"`
-	AutoCommitInterval int                  `json:"auto_commit_interval,omitempty"`
-	CopyDirs           []string             `json:"copy_dirs,omitempty"`
-	HookIdle           bool                 `json:"hook_idle,omitempty"`
-	Idle               IdleSupport          `json:"idle"`
+	Headless           bool        `json:"headless,omitempty"`
+	StartupDelay       int         `json:"startup_delay"`
+	ReadyPattern       string      `json:"ready_pattern"`
+	SubmitSequence     string      `json:"submit_sequence"`
+	TmuxConf           string      `json:"tmux_conf"`
+	WorkingDir         string      `json:"working_dir"`
+	StateDirName       string      `json:"state_dir_name"`
+	Debug              bool        `json:"debug,omitempty"`
+	NetworkIsolated    bool        `json:"network_isolated,omitempty"`
+	AllowedDomains     []string    `json:"allowed_domains,omitempty"`
+	Passthrough        []string    `json:"passthrough,omitempty"`
+	SetupCommands      []string    `json:"setup_commands,omitempty"`
+	AutoCommitInterval int         `json:"auto_commit_interval,omitempty"`
+	CopyDirs           []string    `json:"copy_dirs,omitempty"`
+	HookIdle           bool        `json:"hook_idle,omitempty"`
+	Idle               IdleSupport `json:"idle"`
 	// IdleMode selects how the status monitor determines active/idle: the
 	// per-agent mode selector (session-layer.md §Tier-2). "hook-authoritative" =
 	// the agent's hook is the sole idle authority (no heuristics, no startup

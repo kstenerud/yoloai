@@ -299,7 +299,7 @@ func TestBuildInstanceConfig_AllowsNetworkIsolatedOnSupportedModes(t *testing.T)
 				NetworkMode: "isolated",
 				Isolation:   isolation,
 			}
-			_, err := buildInstanceConfig(runtime.BackendDescriptor{Type: "mock", Capabilities: runtime.BackendCaps{NetworkIsolation: true, OverlayDirs: true, CapAdd: true}}, st, nil, nil, brokerOutcome{}, false)
+			_, err := buildInstanceConfig(runtime.BackendDescriptor{Type: "mock", Capabilities: runtime.BackendCaps{NetworkIsolation: true, CapAdd: true}}, st, nil, nil, brokerOutcome{}, false)
 			require.NoError(t, err)
 		})
 	}

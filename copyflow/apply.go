@@ -21,17 +21,6 @@ import (
 	"github.com/kstenerud/yoloai/yoerrors"
 )
 
-// execInSandbox runs cmd inside the sandbox's container and returns
-// stdout. Local helper so this subpackage doesn't import its parent.
-// hostUID is layout.HostUID, resolved at the boundary.
-func execInSandbox(ctx context.Context, rt runtime.Backend, name string, meta *store.Environment, hostUID int, cmd []string) (string, error) {
-	result, err := rt.Exec(ctx, store.InstanceName(meta.Principal, name), cmd, store.ContainerUser(meta, hostUID))
-	if err != nil {
-		return "", err
-	}
-	return result.Stdout, nil
-}
-
 // AppliedCommit describes one commit replayed onto the host by a series apply:
 // its subject, the source SHA in the sandbox, and the host SHA after git am
 // rewrote it (empty on a DryRun preview, where nothing is applied yet).
@@ -89,8 +78,7 @@ func ApplyAll(ctx context.Context, layout config.Layout, rt runtime.Backend, nam
 	}
 	dir := meta.Dir(opts.DirHostPath)
 	if dir == nil || dir.Mode != "copy" {
-		// :rw is live; :overlay uses GenerateOverlayPatch. Neither belongs in
-		// the squash apply path that funnels through ApplyAll.
+		// :rw is live, so it never funnels through this squash apply path.
 		return nil, nil
 	}
 
@@ -339,10 +327,6 @@ func GeneratePatch(ctx context.Context, layout config.Layout, rt runtime.Backend
 		return nil, "", fmt.Errorf("apply is not needed for :rw directories — changes are already live")
 	}
 
-	if mode == "overlay" {
-		return nil, "", fmt.Errorf("use GenerateOverlayPatch for :overlay directories")
-	}
-
 	// Pick the diff endpoint. baselineSHA..HEAD ignores the index and working
 	// tree entirely; baselineSHA against the working tree (after `git add -A`)
 	// includes them.
@@ -383,193 +367,6 @@ func GeneratePatch(ctx context.Context, layout config.Layout, rt runtime.Backend
 	}
 
 	return []byte(patchOut), strings.TrimRight(statOut, "\n"), nil
-}
-
-// ensureOverlayBaseline resolves or creates a git baseline for an overlay directory.
-// If the overlay already has a valid HEAD commit, its SHA is returned. Otherwise
-// (e.g. the entrypoint's chown broke git visibility through overlayfs), a fresh
-// git repo is initialised inside the container and used as the baseline.
-// The resolved SHA is persisted to environment.json so subsequent calls are a no-op.
-func ensureOverlayBaseline(ctx context.Context, layout config.Layout, rt runtime.Backend, name string, meta *store.Environment, dc DiffContext) (string, error) {
-	if dc.BaselineSHA != "" {
-		return dc.BaselineSHA, nil
-	}
-
-	// Try to resolve existing HEAD.
-	stdout, err := execInSandbox(ctx, rt, name, meta, layout.HostUID, []string{
-		"git", "-C", dc.WorkDir, "rev-parse", "HEAD",
-	})
-	if err == nil {
-		sha := strings.TrimSpace(stdout)
-		if len(sha) == 40 {
-			if updateErr := UpdateOverlayBaseline(layout, name, dc.HostPath, sha); updateErr != nil {
-				return "", updateErr
-			}
-			return sha, nil
-		}
-	}
-
-	// HEAD resolution failed — likely the entrypoint's chown broke git visibility
-	// through overlayfs. Create a fresh baseline from the current working tree.
-	initCmd := fmt.Sprintf(
-		"cd %s && git init -b main && git config user.email yoloai@localhost && git config user.name yoloai && git add -A && git commit -q -m baseline",
-		dc.WorkDir,
-	)
-	_, initErr := execInSandbox(ctx, rt, name, meta, layout.HostUID, []string{"sh", "-c", initCmd})
-	if initErr != nil {
-		return "", fmt.Errorf("create overlay baseline for %s: %w (original HEAD error: %w)", dc.HostPath, initErr, err)
-	}
-
-	stdout, err = execInSandbox(ctx, rt, name, meta, layout.HostUID, []string{
-		"git", "-C", dc.WorkDir, "rev-parse", "HEAD",
-	})
-	if err != nil {
-		return "", fmt.Errorf("resolve baseline SHA after init for %s: %w", dc.HostPath, err)
-	}
-	sha := strings.TrimSpace(stdout)
-	if updateErr := UpdateOverlayBaseline(layout, name, dc.HostPath, sha); updateErr != nil {
-		return "", updateErr
-	}
-	return sha, nil
-}
-
-// UpdateOverlayBaseline updates the baseline SHA for an overlay directory in environment.json.
-func UpdateOverlayBaseline(layout config.Layout, name, hostPath, sha string) error {
-	sandboxDir := layout.SandboxDir(name)
-	if err := store.RequireSandboxDir(sandboxDir); err != nil {
-		return err
-	}
-
-	meta, err := store.LoadEnvironment(sandboxDir)
-	if err != nil {
-		return err
-	}
-
-	// Update workdir or aux dir
-	found := false
-	for i := range meta.Dirs {
-		if meta.Dirs[i].HostPath == hostPath {
-			meta.Dirs[i].BaselineSHA = sha
-			found = true
-			break
-		}
-	}
-	if !found {
-		return fmt.Errorf("directory %s not found in sandbox metadata", hostPath)
-	}
-
-	return store.SaveEnvironment(sandboxDir, meta)
-}
-
-// GenerateOverlayPatch produces a binary patch for overlay-mode directories
-// by executing git commands inside the running container.
-func GenerateOverlayPatch(ctx context.Context, layout config.Layout, rt runtime.Backend, name string, dirHostPath string, paths []string) ([]PatchSet, error) {
-	meta, err := store.LoadEnvironment(layout.SandboxDir(name))
-	if err != nil {
-		return nil, fmt.Errorf("load metadata: %w", err)
-	}
-	contexts, err := loadAllDiffContexts(layout, name, dirHostPath)
-	if err != nil {
-		return nil, err
-	}
-
-	var patches []PatchSet
-	for _, dc := range contexts {
-		if dc.Mode != "overlay" {
-			continue
-		}
-		ps, err := generateOverlayPatchForContext(ctx, layout, rt, name, meta, dc, paths)
-		if err != nil {
-			return nil, err
-		}
-		if ps != nil {
-			patches = append(patches, *ps)
-		}
-	}
-
-	return patches, nil
-}
-
-// generateOverlayPatchForContext produces a PatchSet for a single overlay diff
-// context. Returns nil if there are no changes.
-func generateOverlayPatchForContext(ctx context.Context, layout config.Layout, rt runtime.Backend, name string, meta *store.Environment, dc DiffContext, paths []string) (*PatchSet, error) {
-	baselineSHA, err := ensureOverlayBaseline(ctx, layout, rt, name, meta, dc)
-	if err != nil {
-		return nil, err
-	}
-
-	if _, err := execInSandbox(ctx, rt, name, meta, layout.HostUID, []string{
-		"git", "-C", dc.WorkDir, "add", "-A",
-	}); err != nil {
-		return nil, fmt.Errorf("stage untracked in %s: %w", dc.HostPath, err)
-	}
-
-	patchArgs := append([]string{"git", "-c", "core.hooksPath=/dev/null", "-C", dc.WorkDir, "diff", "--binary", baselineSHA}, pathFilterArgs(paths)...)
-	stdout, err := execInSandbox(ctx, rt, name, meta, layout.HostUID, patchArgs)
-	if err != nil {
-		return nil, fmt.Errorf("git diff (patch) in %s: %w", dc.HostPath, err)
-	}
-	if len(stdout) == 0 {
-		return nil, nil
-	}
-
-	statArgs := append([]string{"git", "-c", "core.hooksPath=/dev/null", "-C", dc.WorkDir, "diff", "--stat", baselineSHA}, pathFilterArgs(paths)...)
-	statOut, err := execInSandbox(ctx, rt, name, meta, layout.HostUID, statArgs)
-	if err != nil {
-		return nil, fmt.Errorf("git diff (stat) in %s: %w", dc.HostPath, err)
-	}
-
-	// ExecInContainer returns strings.TrimSpace'd stdout, which strips
-	// the trailing newline. git apply requires a trailing newline to parse
-	// the patch correctly — add it back if absent.
-	patch := []byte(stdout)
-	if len(patch) > 0 && patch[len(patch)-1] != '\n' {
-		patch = append(patch, '\n')
-	}
-	return &PatchSet{
-		HostPath: dc.HostPath,
-		Mode:     "overlay",
-		Patch:    patch,
-		Stat:     strings.TrimRight(statOut, "\n"),
-	}, nil
-}
-
-// pathFilterArgs returns the "--" separator followed by paths when paths is
-// non-empty, for appending to a git diff command.
-func pathFilterArgs(paths []string) []string {
-	if len(paths) == 0 {
-		return nil
-	}
-	return append([]string{"--"}, paths...)
-}
-
-// UpdateOverlayBaselineToHEAD advances the overlay baseline for a directory
-// to the current HEAD inside the running container. Called after a successful
-// overlay apply to prevent re-applying already-applied changes.
-func UpdateOverlayBaselineToHEAD(ctx context.Context, layout config.Layout, rt runtime.Backend, name string, dirHostPath string, hostPath string) error {
-	meta, err := store.LoadEnvironment(layout.SandboxDir(name))
-	if err != nil {
-		return fmt.Errorf("load metadata: %w", err)
-	}
-	contexts, err := loadAllDiffContexts(layout, name, dirHostPath)
-	if err != nil {
-		return err
-	}
-
-	for _, dc := range contexts {
-		if dc.Mode != "overlay" || dc.HostPath != hostPath {
-			continue
-		}
-		stdout, err := execInSandbox(ctx, rt, name, meta, layout.HostUID, []string{
-			"git", "-C", dc.WorkDir, "rev-parse", "HEAD",
-		})
-		if err != nil {
-			return fmt.Errorf("get HEAD for %s: %w", hostPath, err)
-		}
-		return UpdateOverlayBaseline(layout, name, hostPath, strings.TrimSpace(stdout))
-	}
-
-	return nil
 }
 
 // ListCommitsBeyondBaseline returns the commits made in the work copy
@@ -619,10 +416,6 @@ func HasUncommittedChanges(ctx context.Context, layout config.Layout, rt runtime
 
 	if mode == "rw" {
 		return false, fmt.Errorf("uncommitted-change check is not available for :rw directories")
-	}
-
-	if mode == "overlay" {
-		return false, fmt.Errorf("uncommitted-change check for :overlay directories requires container exec")
 	}
 
 	// Stage untracked files — retry on index.lock contention from agent activity.
@@ -765,10 +558,6 @@ func GenerateFormatPatchForRefs(ctx context.Context, layout config.Layout, rt ru
 		return "", nil, fmt.Errorf("format-patch is not available for :rw directories")
 	}
 
-	if mode == "overlay" {
-		return "", nil, fmt.Errorf("format-patch for :overlay directories requires container exec")
-	}
-
 	patchDir, err = layout.MkdirTemp("yoloai-format-patch-*")
 	if err != nil {
 		return "", nil, fmt.Errorf("create temp dir: %w", err)
@@ -838,10 +627,6 @@ func GenerateFormatPatch(ctx context.Context, layout config.Layout, rt runtime.B
 		return "", nil, fmt.Errorf("format-patch is not available for :rw directories")
 	}
 
-	if mode == "overlay" {
-		return "", nil, fmt.Errorf("format-patch for :overlay directories requires container exec")
-	}
-
 	patchDir, err = layout.MkdirTemp("yoloai-format-patch-*")
 	if err != nil {
 		return "", nil, fmt.Errorf("create temp dir: %w", err)
@@ -895,10 +680,6 @@ func GenerateUncommittedDiff(ctx context.Context, layout config.Layout, rt runti
 
 	if mode == "rw" {
 		return nil, "", fmt.Errorf("uncommitted diff is not available for :rw directories")
-	}
-
-	if mode == "overlay" {
-		return nil, "", fmt.Errorf("uncommitted diff for :overlay directories requires container exec")
 	}
 
 	// Stage untracked files

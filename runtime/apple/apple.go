@@ -59,7 +59,6 @@ var descriptor = runtime.BackendDescriptor{
 	SupportedIsolationModes: nil,
 	Capabilities: runtime.BackendCaps{
 		NetworkIsolation:   true, // in-guest iptables (own per-VM kernel) — verified
-		OverlayDirs:        true, // overlayfs with --cap-add CAP_SYS_ADMIN — verified
 		CapAdd:             true,
 		HostFilesystem:     false,
 		FilesystemLocality: runtime.LocalityHostSide,

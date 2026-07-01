@@ -186,9 +186,6 @@ func dispatchApply(cmd *cobra.Command, name, hostPath string, selectedDir yoloai
 	}
 
 	slog.Info("applying changes", "event", "sandbox.apply", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
-	if selectedDir.Mode == yoloai.DirModeOverlay {
-		return applyOverlay(cmd, name, hostPath, targetDir, refs, paths, flags.yes, flags.dryRun)
-	}
 
 	if !cliutil.JSONEnabled(cmd) {
 		fmt.Fprintf(cmd.OutOrStdout(), "Target: %s\n\n", targetDir) //nolint:errcheck
@@ -375,17 +372,6 @@ func applyAll(cmd *cobra.Command, name string, flags applyFlags) error {
 
 // applyOneDir applies changes for a single tracked directory during --all.
 func applyOneDir(cmd *cobra.Command, name string, d yoloai.DirInfo, flags applyFlags) error {
-	isOverlay := d.Mode == yoloai.DirModeOverlay
-	if isOverlay {
-		return cliutil.WithTrackedDir(cmd, name, d.HostPath, func(ctx context.Context, wd *yoloai.Workdir) error {
-			_, applyErr := wd.Apply(ctx, yoloai.WorkdirApplyOptions{
-				Mode:   yoloai.ApplyModeNoCommit,
-				DryRun: flags.dryRun,
-			})
-			return applyErr
-		})
-	}
-
 	// Determine mode: commits or no-commit
 	mode := yoloai.ApplyModeCommits
 	if flags.noCommit {

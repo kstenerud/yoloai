@@ -195,9 +195,9 @@ func TestDefaultDirModes(t *testing.T) {
 }
 
 func TestDefaultDirModes_PreservesExplicitWorkdir(t *testing.T) {
-	workdir := &DirSpec{Path: "/p", Mode: DirModeOverlay}
+	workdir := &DirSpec{Path: "/p", Mode: DirModeRW}
 	defaultDirModes(workdir, nil)
-	assert.Equal(t, DirModeOverlay, workdir.Mode, "explicit workdir mode is preserved")
+	assert.Equal(t, DirModeRW, workdir.Mode, "explicit workdir mode is preserved")
 }
 
 func TestCollectCopyDirs_NoCopy(t *testing.T) {
@@ -228,60 +228,6 @@ func TestCollectCopyDirs_CustomMountPath(t *testing.T) {
 	workdir := &DirSpec{Path: "/home/user/project", Mode: DirMode("copy"), MountPath: "/app"}
 	result := collectCopyDirs(workdir, nil)
 	assert.Equal(t, []string{"/app"}, result)
-}
-
-// --- collectOverlayMounts ---
-
-func TestCollectOverlayMounts_NoOverlay(t *testing.T) {
-	workdir := &DirSpec{Path: "/home/user/project", Mode: DirMode("copy")}
-	result := collectOverlayMounts(workdir, nil)
-	assert.Empty(t, result)
-}
-
-func TestCollectOverlayMounts_WorkdirOverlay(t *testing.T) {
-	workdir := &DirSpec{Path: "/home/user/project", Mode: DirMode("overlay")}
-	result := collectOverlayMounts(workdir, nil)
-	require.Len(t, result, 1)
-	assert.Contains(t, result[0].Merged, "merged")
-	assert.Contains(t, result[0].Lower, "lower")
-	assert.Contains(t, result[0].Upper, "upper")
-	assert.Contains(t, result[0].Work, "ovlwork")
-}
-
-// Workdir :copy with no :overlay aux dirs produces an empty mount list.
-func TestCollectOverlayMounts_NoOverlayDirs(t *testing.T) {
-	workdir := &DirSpec{Path: "/home/user/project", Mode: DirMode("copy")}
-	auxDirs := []*DirSpec{{Path: "/home/user/lib", Mode: DirMode("rw")}}
-	result := collectOverlayMounts(workdir, auxDirs)
-	assert.Empty(t, result)
-}
-
-// D81 (multi-workdir Phase 2): aux :overlay dirs now contribute overlay mounts.
-func TestCollectOverlayMounts_IncludesAuxOverlay(t *testing.T) {
-	workdir := &DirSpec{Path: "/home/user/project", Mode: DirMode("copy")}
-	auxDirs := []*DirSpec{{Path: "/home/user/lib", Mode: DirMode("overlay")}}
-	result := collectOverlayMounts(workdir, auxDirs)
-	require.Len(t, result, 1)
-	assert.Contains(t, result[0].Merged, "merged")
-	assert.Contains(t, result[0].Lower, "lower")
-}
-
-func TestCollectOverlayMounts_WorkdirOnly(t *testing.T) {
-	workdir := &DirSpec{Path: "/a", Mode: DirMode("overlay")}
-	auxDirs := []*DirSpec{{Path: "/b", Mode: DirMode("rw")}}
-	result := collectOverlayMounts(workdir, auxDirs)
-	require.Len(t, result, 1)
-	assert.Contains(t, result[0].Merged, "merged")
-	assert.Contains(t, result[0].Lower, "lower")
-	assert.Contains(t, result[0].Upper, "upper")
-	assert.Contains(t, result[0].Work, "ovlwork")
-}
-
-func TestCollectOverlayMounts_CustomMountPath(t *testing.T) {
-	workdir := &DirSpec{Path: "/home/user/project", Mode: DirMode("overlay"), MountPath: "/app"}
-	result := collectOverlayMounts(workdir, nil)
-	require.Len(t, result, 1)
-	assert.Contains(t, result[0].Merged, "merged")
 }
 
 // --- validateAndExpandMounts ---
@@ -486,7 +432,7 @@ func (m *mockDockerRuntime) Inspect(ctx context.Context, name string) (runtime.I
 func (m *mockDockerRuntime) Exec(ctx context.Context, name string, cmd []string, user string) (runtime.ExecResult, error) {
 	return runtime.ExecResult{}, nil
 }
-func (m *mockDockerRuntime) GitExec(ctx context.Context, name, workDir string, args ...string) (string, error) {
+func (m *mockDockerRuntime) GitExec(ctx context.Context, name, user, workDir string, args ...string) (string, error) {
 	return "", nil
 }
 func (m *mockDockerRuntime) InteractiveExec(ctx context.Context, name string, cmd []string, user string, workdir string, io runtime.IOStreams) error {
@@ -587,36 +533,6 @@ func TestSetupWorkdir_CreatesBaselineForDockerBackends(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEmpty(t, baselineSHA, "baseline SHA should be non-empty for Docker backends (immediate baseline)")
 	assert.Len(t, baselineSHA, 40, "SHA should be 40 characters (git SHA-1)")
-}
-
-// TestSetupWorkdir_OverlayModeDeferBaseline tests that overlay mode always
-// defers baseline creation regardless of backend.
-func TestSetupWorkdir_OverlayModeDeferBaseline(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping filesystem test in short mode")
-	}
-
-	tempDir := t.TempDir()
-	sandboxDir := filepath.Join(tempDir, "test-sandbox")
-	sourceDir := filepath.Join(tempDir, "source")
-	require.NoError(t, os.MkdirAll(sourceDir, 0755)) //nolint:gosec // G301: test directory
-
-	workdir := &DirSpec{
-		Path: sourceDir,
-		Mode: DirMode("overlay"),
-	}
-
-	// Test with both runtime types
-	runtimes := []runtime.Backend{
-		&mockDockerRuntime{},
-		&mockTartRuntime{},
-	}
-
-	for _, rt := range runtimes {
-		_, baselineSHA, err := setupWorkdir(context.Background(), git.NewTestHostWithEnv(testutil.GitEnv()), sandboxDir, workdir, rt)
-		require.NoError(t, err)
-		assert.Empty(t, baselineSHA, "overlay mode should defer baseline for all backends")
-	}
 }
 
 // --- checkDirtyRepos (typed refusal, never prompts) ---

@@ -119,7 +119,7 @@ func (e *Environment) AuxDirs() []DirEnvironment {
 func (e *Environment) TrackedDirs() []int {
 	var idx []int
 	for i := range e.Dirs {
-		if e.Dirs[i].Mode == DirModeCopy || e.Dirs[i].Mode == DirModeOverlay {
+		if e.Dirs[i].Mode == DirModeCopy {
 			idx = append(idx, i)
 		}
 	}

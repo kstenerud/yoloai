@@ -95,11 +95,15 @@ func (g *Git) BuildSHAMapByMatching(ctx context.Context, hostGit *Git, hostDir, 
 // If message is non-empty, an annotated tag is created; otherwise lightweight.
 // Returns an error if the tag already exists or git tag fails.
 func (g *Git) CreateTag(ctx context.Context, dir, name, sha, message string) error {
+	// The "--" terminator before name is load-bearing: name is an agent-created
+	// tag refname transferred to the host repo on apply, and the agent can plant
+	// a dash-leading refname via plumbing (git update-ref). Without "--", git
+	// would parse e.g. "--upload-pack=x" as a flag rather than a tag name.
 	var args []string
 	if message != "" {
-		args = []string{"tag", "-a", name, sha, "-m", message}
+		args = []string{"tag", "-a", "-m", message, "--", name, sha}
 	} else {
-		args = []string{"tag", name, sha}
+		args = []string{"tag", "--", name, sha}
 	}
 	if _, err := g.Run(ctx, dir, args...); err != nil {
 		msg := err.Error()

@@ -96,9 +96,16 @@ RUN echo 'export PATH="/usr/local/go/bin:$PATH"' > /etc/profile.d/golang.sh
 # need the current linter set, not a pin tied to yoloAI's release cadence.
 # yoloAI's own `make check` pins golangci-lint explicitly via `go run` (see
 # Makefile §lint target).
+# go install has no native retry flag (unlike the curl installs above), so wrap
+# it in a retry loop — a transient Go-proxy hiccup otherwise fails this whole
+# multi-minute base build, which every user's first run performs.
 # hadolint ignore=DL3062
-RUN GOPATH=/tmp/gopath go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest \
-    && mv /tmp/gopath/bin/golangci-lint /usr/local/bin/golangci-lint \
+RUN n=0; until [ "$n" -ge 5 ]; do \
+      GOPATH=/tmp/gopath go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest && break; \
+      n=$((n+1)); echo "golangci-lint install failed (attempt $n/5); retrying in 5s"; sleep 5; \
+    done; \
+    [ "$n" -lt 5 ] || { echo "golangci-lint install failed after 5 attempts"; exit 1; }; \
+    mv /tmp/gopath/bin/golangci-lint /usr/local/bin/golangci-lint \
     && rm -rf /tmp/gopath
 
 # Rust via rustup (installed system-wide)
@@ -124,15 +131,26 @@ ENV DISABLE_INSTALLATION_CHECKS=1
 # (The claude "fullscreen renderer" upsell that previously stalled smokes is now
 # handled at the agent layer by pinning the classic renderer — settings.tui=
 # "default" in internal/agent/agent.go — so claude stays unpinned. DF52.)
+# Retry-wrapped (like the golangci-lint install above): a transient npm-registry
+# hiccup otherwise fails the whole multi-minute base build with no recovery.
 # hadolint ignore=DL3016
-RUN npm install -g @anthropic-ai/claude-code \
-    && npm install -g @google/gemini-cli \
-    && npm install -g @openai/codex \
-    && npm install -g opencode-ai
+RUN n=0; until [ "$n" -ge 5 ]; do \
+      npm install -g @anthropic-ai/claude-code \
+        && npm install -g @google/gemini-cli \
+        && npm install -g @openai/codex \
+        && npm install -g opencode-ai && break; \
+      n=$((n+1)); echo "npm install failed (attempt $n/5); retrying in 5s"; sleep 5; \
+    done; \
+    [ "$n" -lt 5 ] || { echo "npm install failed after 5 attempts"; exit 1; }
 # DL3013 (pin pip versions) suppressed: aider-chat is on the same churn cadence
 # as the npm-installed AI clients above; same reasoning applies.
+# Retry-wrapped for the same reason as the npm and golangci-lint installs.
 # hadolint ignore=DL3013
-RUN pip install --break-system-packages --no-cache-dir aider-chat
+RUN n=0; until [ "$n" -ge 5 ]; do \
+      pip install --break-system-packages --no-cache-dir aider-chat && break; \
+      n=$((n+1)); echo "pip install failed (attempt $n/5); retrying in 5s"; sleep 5; \
+    done; \
+    [ "$n" -lt 5 ] || { echo "pip install failed after 5 attempts"; exit 1; }
 
 # VS Code CLI for Remote Tunnels (code tunnel)
 RUN ARCH=$(dpkg --print-architecture | sed 's/amd64/x64/') \
