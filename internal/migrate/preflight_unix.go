@@ -1,3 +1,5 @@
+//go:build !windows
+
 // ABOUTME: Single-filesystem preflight — migration hard-refuses unless every
 // ABOUTME: live dir and its scratch share one local FS, so every rename is atomic.
 package migrate

@@ -6,13 +6,14 @@ package system
 import (
 	"fmt"
 
+	"github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/spf13/cobra"
 )
 
 func newSystemMigrateCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "migrate",
 		Short: "Migrate the data directory to the current on-disk layout",
 		Long: `Bring the yoloai data directory up to the layout this build expects.
@@ -23,19 +24,43 @@ existing data directory.
 
 It is idempotent — running it on an already-current directory is a no-op — and
 safe to re-run after a partial failure (a realm already at the current version
-is skipped).`,
+is skipped). Interrupted at any point, a re-run resumes cleanly.
+
+Use --check for a read-only pre-upgrade audit (writes nothing). A migration that
+would discard uncommitted work (e.g. a stopped overlay sandbox) refuses unless
+you additionally pass --abandon-stopped-overlay; --yes alone never destroys work.`,
 		Args:        cobra.NoArgs,
 		Annotations: cliutil.SkipMigrationGateAnnotations,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runSystemMigrate(cmd)
 		},
 	}
+	cmd.Flags().Bool("check", false, "Show what would be migrated and exit, writing nothing")
+	cmd.Flags().Bool("dry-run", false, "Preview the migration without applying it")
+	cmd.Flags().BoolP("yes", "y", false, "Skip the confirmation prompt for destructive operations")
+	cmd.Flags().Bool("abandon-stopped-overlay", false, "Authorize abandoning uncommitted changes in stopped overlay sandboxes")
+	cmd.MarkFlagsMutuallyExclusive("check", "dry-run")
+	return cmd
 }
 
 func runSystemMigrate(cmd *cobra.Command) error {
 	sys, err := cliutil.System()
 	if err != nil {
 		return err
+	}
+	migrators, err := libraryMigrators(cmd.Context())
+	if err != nil {
+		return err
+	}
+	opts := planApplyOpts{
+		home:           cliutil.TopDir(),
+		migrators:      migrators,
+		yes:            cliutil.EffectiveYes(cmd),
+		abandonOverlay: flagBool(cmd, "abandon-stopped-overlay"),
+		json:           cliutil.JSONEnabled(cmd),
+		in:             cmd.InOrStdin(),
+		out:            cmd.OutOrStdout(),
+		errw:           cmd.ErrOrStderr(),
 	}
 
 	cliSt, err := cliutil.CLIStatus()
@@ -46,37 +71,64 @@ func runSystemMigrate(cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
-	if cliSt == config.LayoutOK && libSt == config.LayoutOK {
+
+	// Read-only preview: report realm status + the framework plan, mutate nothing.
+	if flagBool(cmd, "check") || flagBool(cmd, "dry-run") {
+		return previewMigration(cmd.Context(), opts, cliSt, libSt)
+	}
+
+	if cliSt == config.LayoutOK && libSt == config.LayoutOK && len(migrators) == 0 {
 		return reportMigrateNoop(cmd)
 	}
 
-	// CLI realm first: on a v0 flat install this performs the flat -> namespaced
-	// relocation that lifts library-owned content up into TOP/library, which the
-	// library realm step below then stamps. It refuses to touch an unrecognized
-	// directory rather than mangling it.
-	if err := cliutil.MigrateCLI(); err != nil {
+	if err := applyFrozenLadder(cmd, sys); err != nil {
 		return err
 	}
 
-	// Library realm: re-read its status (the relocation above may have created
-	// TOP/library) and bring it current. A relocated-but-unstamped dir reads as
-	// Migrate; a genuinely empty dir reads as Fresh and is create-freshed.
-	libSt, err = sys.DataDirStatus()
-	if err != nil {
-		return err
-	}
-	switch libSt {
-	case config.LayoutFresh:
-		if err := sys.CreateDataDir(); err != nil {
+	// Framework (v3->v4+) migrations: plan/apply-gated, crash-safe. Empty until
+	// the overlay flatten lands, so today this is a no-op past the frozen ladder.
+	if len(migrators) > 0 {
+		report, err := runPlanApply(cmd.Context(), opts)
+		if err != nil {
 			return err
 		}
-	case config.LayoutMigrate:
-		if err := sys.MigrateDataDir(cmd.Context()); err != nil {
+		if err := renderReport(opts, report); err != nil {
 			return err
 		}
 	}
 
 	return reportMigrateOK(cmd)
+}
+
+// applyFrozenLadder runs the sealed v0->v3 migration: the CLI flat->namespaced
+// relocation, then the library realm (create-fresh or migrate). On a v0 flat
+// install the relocation lifts library-owned content up into TOP/library, which
+// the library step then stamps; it refuses to touch an unrecognized directory
+// rather than mangling it.
+func applyFrozenLadder(cmd *cobra.Command, sys *yoloai.System) error {
+	if err := cliutil.MigrateCLI(); err != nil {
+		return err
+	}
+	// Re-read library status: the relocation may have created TOP/library. A
+	// relocated-but-unstamped dir reads as Migrate; a genuinely empty dir reads
+	// as Fresh and is create-freshed.
+	libSt, err := sys.DataDirStatus()
+	if err != nil {
+		return err
+	}
+	switch libSt {
+	case config.LayoutFresh:
+		return sys.CreateDataDir()
+	case config.LayoutMigrate:
+		return sys.MigrateDataDir(cmd.Context())
+	}
+	return nil
+}
+
+// flagBool reads a bool flag, defaulting to false if absent.
+func flagBool(cmd *cobra.Command, name string) bool {
+	v, _ := cmd.Flags().GetBool(name)
+	return v
 }
 
 // reportMigrateNoop reports that the data dir was already current.
