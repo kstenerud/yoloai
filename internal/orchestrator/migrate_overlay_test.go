@@ -48,7 +48,7 @@ func TestOverlayFlatten_AbandonFromFixture(t *testing.T) {
 	}
 
 	m := NewOverlayFlatten(layout, dir, layout.SandboxesDir(), "linux",
-		func(context.Context) (runtime.Backend, error) {
+		func(context.Context, runtime.BackendType) (runtime.Backend, error) {
 			t.Error("abandon flatten must not open a runtime")
 			return nil, nil
 		})
@@ -75,6 +75,134 @@ func TestOverlayFlatten_AbandonFromFixture(t *testing.T) {
 	}
 }
 
+// captureRuntime simulates a running overlay container: Exec materializes the
+// host-visible capture stage (standing in for the in-container `cp -a merged/.
+// stage/`), and Stop records that the sandbox was finalized.
+type captureRuntime struct {
+	*mockRuntime
+	sandboxDir   string
+	hostPath     string
+	stageContent map[string]string // relative path -> content laid into the stage dir
+	stopped      bool
+}
+
+func (c *captureRuntime) Exec(_ context.Context, _ string, _ []string, _ string) (runtime.ExecResult, error) {
+	stage := filepath.Join(store.WorkDir(c.sandboxDir, c.hostPath), captureStageName)
+	if err := os.RemoveAll(stage); err != nil {
+		return runtime.ExecResult{}, err
+	}
+	for rel, content := range c.stageContent {
+		p := filepath.Join(stage, rel)
+		if err := fileutil.MkdirAll(filepath.Dir(p), 0o750); err != nil {
+			return runtime.ExecResult{}, err
+		}
+		if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+			return runtime.ExecResult{}, err
+		}
+	}
+	return runtime.ExecResult{ExitCode: 0}, nil
+}
+
+func (c *captureRuntime) Stop(_ context.Context, _ string) error { c.stopped = true; return nil }
+
+// A running overlay sandbox created with podman — the exact case the old
+// hardcoded-docker migrator mishandled (docker couldn't see it, so it read as
+// removed and would have abandoned live work). The migrator must open the
+// sandbox's OWN backend, capture the merged tree, and flatten to :copy.
+func TestOverlayFlatten_RunningCaptureFlattens(t *testing.T) {
+	dir := t.TempDir()
+	layout := config.NewLayout(dir)
+	const name, hostPath = "sbx", "/proj"
+	sandboxDir := layout.SandboxDir(name)
+	enc := store.EncodePath(hostPath)
+
+	if err := fileutil.MkdirAll(sandboxDir, 0o750); err != nil {
+		t.Fatalf("mkdir sandbox: %v", err)
+	}
+	env := &store.Environment{
+		Name:        name,
+		BackendType: runtime.BackendPodman,
+		Dirs: []store.DirEnvironment{{
+			HostPath:     hostPath,
+			MountPath:    "/yoloai/overlay/" + enc + "/merged",
+			Mode:         store.DirModeOverlay,
+			BaselineSHA:  "deadbeef",
+			InceptionSHA: "cafe",
+		}},
+	}
+	if err := store.SaveEnvironment(sandboxDir, env); err != nil {
+		t.Fatalf("save env: %v", err)
+	}
+
+	fake := &captureRuntime{
+		mockRuntime: &mockRuntime{},
+		sandboxDir:  sandboxDir,
+		hostPath:    hostPath,
+		stageContent: map[string]string{
+			"tracked.txt": "captured",    // committed + uncommitted captured alike
+			".gitignored": "ignored-too", // raw capture keeps gitignored state
+		},
+	}
+	var gotBackend runtime.BackendType
+	m := NewOverlayFlatten(layout, dir, layout.SandboxesDir(), "linux",
+		func(_ context.Context, backend runtime.BackendType) (runtime.Backend, error) {
+			gotBackend = backend
+			return fake, nil
+		})
+
+	rep, err := m.flattenRunning(context.Background(), name)
+	if err != nil {
+		t.Fatalf("flattenRunning: %v", err)
+	}
+	if gotBackend != runtime.BackendPodman {
+		t.Errorf("opened backend %q, want podman (the sandbox's own)", gotBackend)
+	}
+	if !fake.stopped {
+		t.Error("container was not stopped after flattening")
+	}
+	if len(rep.Migrated) != 1 || rep.Migrated[0] != name {
+		t.Errorf("Migrated = %v, want [%s]", rep.Migrated, name)
+	}
+	assertFlattenedToCopy(t, sandboxDir, hostPath, fake.stageContent)
+}
+
+// assertFlattenedToCopy verifies a flattened sandbox is now :copy, with its git
+// range endpoints cleared, the captured content carried under work/<enc>, and no
+// overlay/stage subdirs left behind.
+func assertFlattenedToCopy(t *testing.T, sandboxDir, hostPath string, wantContent map[string]string) {
+	t.Helper()
+	flat, err := store.LoadEnvironment(sandboxDir)
+	if err != nil {
+		t.Fatalf("reload env: %v", err)
+	}
+	wd := flat.Workdir()
+	if wd.Mode != store.DirModeCopy {
+		t.Errorf("Mode = %q, want copy", wd.Mode)
+	}
+	if wd.MountPath != hostPath {
+		t.Errorf("MountPath = %q, want %q", wd.MountPath, hostPath)
+	}
+	if wd.BaselineSHA != "" || wd.InceptionSHA != "" {
+		t.Errorf("git endpoints not cleared: baseline=%q inception=%q", wd.BaselineSHA, wd.InceptionSHA)
+	}
+	work := store.WorkDir(sandboxDir, hostPath)
+	for rel, want := range wantContent {
+		got, err := os.ReadFile(filepath.Join(work, rel)) //nolint:gosec // test path
+		if err != nil {
+			t.Fatalf("read captured %s: %v", rel, err)
+		}
+		if string(got) != want {
+			t.Errorf("%s = %q, want %q", rel, got, want)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(work, captureStageName)); !os.IsNotExist(err) {
+		t.Error("capture stage dir leaked into the flattened work tree")
+	}
+	if _, err := os.Stat(store.OverlayMergedDir(sandboxDir, hostPath)); !os.IsNotExist(err) {
+		t.Error("overlay subdirs leaked into the flattened work tree")
+	}
+}
+
 func TestClassifyOverlay(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -85,6 +213,7 @@ func TestClassifyOverlay(t *testing.T) {
 		{"active runs benign", status.StatusActive, "linux", migrate.AuthNone},
 		{"idle runs benign", status.StatusIdle, "linux", migrate.AuthNone},
 		{"done runs benign", status.StatusDone, "darwin", migrate.AuthNone},
+		{"failed runs benign", status.StatusFailed, "linux", migrate.AuthNone},
 		{"stopped linux needs abandon", status.StatusStopped, "linux", migrate.AuthAbandonOverlay},
 		{"stopped macos needs abandon", status.StatusStopped, "darwin", migrate.AuthAbandonOverlay},
 		{"removed needs abandon", status.StatusRemoved, "linux", migrate.AuthAbandonOverlay},
@@ -121,7 +250,7 @@ func TestOverlayFlatten_NoOverlayStampsV4WithoutRuntime(t *testing.T) {
 
 	runtimeOpened := false
 	m := NewOverlayFlatten(layout, dir, layout.SandboxesDir(), "linux",
-		func(context.Context) (runtime.Backend, error) {
+		func(context.Context, runtime.BackendType) (runtime.Backend, error) {
 			runtimeOpened = true
 			t.Error("runtime must not be opened when there are no overlay sandboxes")
 			return nil, nil

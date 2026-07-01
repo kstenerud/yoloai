@@ -28,10 +28,11 @@ import (
 // install never opens a runtime — the common path (and every unit test) needs no
 // backend. It stamps v4 LAST, only after the per-sandbox pass is durable.
 type OverlayFlatten struct {
-	// runtimeFor builds the backend runtime on demand — called only when overlay
-	// sandboxes are actually present, so no-overlay installs never open a backend.
-	runtimeFor func(ctx context.Context) (runtime.Backend, error)
-	rt         runtime.Backend // cached; closed by Cleanup
+	// runtimeFor builds a runtime for a specific backend on demand — called only
+	// when overlay sandboxes are actually present, and once per distinct backend,
+	// so no-overlay installs never open a backend.
+	runtimeFor func(ctx context.Context, backend runtime.BackendType) (runtime.Backend, error)
+	rts        map[runtime.BackendType]runtime.Backend // cached per backend; closed by Cleanup
 
 	layout        config.Layout
 	home          string // $YOLOAI_HOME (scratch lives here; same FS as sandboxesRoot)
@@ -39,30 +40,52 @@ type OverlayFlatten struct {
 	goos          string // host GOOS, for the stopped-overlay recoverability branch
 }
 
-// NewOverlayFlatten constructs the v3->v4 migrator. runtimeFor is invoked lazily.
-func NewOverlayFlatten(layout config.Layout, home, sandboxesRoot, goos string, runtimeFor func(ctx context.Context) (runtime.Backend, error)) *OverlayFlatten {
-	return &OverlayFlatten{runtimeFor: runtimeFor, layout: layout, home: home, sandboxesRoot: sandboxesRoot, goos: goos}
+// NewOverlayFlatten constructs the v3->v4 migrator. runtimeFor is invoked lazily,
+// once per distinct backend the overlay sandboxes were created with.
+func NewOverlayFlatten(layout config.Layout, home, sandboxesRoot, goos string, runtimeFor func(ctx context.Context, backend runtime.BackendType) (runtime.Backend, error)) *OverlayFlatten {
+	return &OverlayFlatten{runtimeFor: runtimeFor, rts: map[runtime.BackendType]runtime.Backend{}, layout: layout, home: home, sandboxesRoot: sandboxesRoot, goos: goos}
 }
 
 func (o *OverlayFlatten) Describe() string { return "v3->v4 overlay flatten" }
 
-// Cleanup closes the runtime if one was opened.
+// Cleanup closes every runtime opened during the migration.
 func (o *OverlayFlatten) Cleanup() {
-	if o.rt != nil {
-		_ = o.rt.Close() //nolint:errcheck // best-effort
-		o.rt = nil
+	for k, rt := range o.rts {
+		_ = rt.Close() //nolint:errcheck // best-effort
+		delete(o.rts, k)
 	}
 }
 
-func (o *OverlayFlatten) backend(ctx context.Context) (runtime.Backend, error) {
-	if o.rt == nil {
-		rt, err := o.runtimeFor(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("connect to runtime: %w", err)
-		}
-		o.rt = rt
+// backendFor resolves (and caches) the runtime for the backend that created
+// sandbox name, read from its stored environment. Overlay was not docker-only —
+// docker, podman, and apple all supported it — so each sandbox is contacted
+// through its own backend. A single hardcoded backend would misreport a live
+// podman/apple sandbox as removed and risk abandoning its uncommitted work.
+func (o *OverlayFlatten) backendFor(ctx context.Context, name string) (runtime.Backend, error) {
+	bt, err := o.sandboxBackend(name)
+	if err != nil {
+		return nil, err
 	}
-	return o.rt, nil
+	if rt, ok := o.rts[bt]; ok {
+		return rt, nil
+	}
+	rt, err := o.runtimeFor(ctx, bt)
+	if err != nil {
+		return nil, fmt.Errorf("connect to %s runtime: %w", bt, err)
+	}
+	o.rts[bt] = rt
+	return rt, nil
+}
+
+// sandboxBackend reads the backend that created name from its environment.
+// LoadEnvironment defaults a legacy empty backend to docker, so this is never
+// empty for a real sandbox.
+func (o *OverlayFlatten) sandboxBackend(name string) (runtime.BackendType, error) {
+	env, err := store.LoadEnvironment(o.layout.SandboxDir(name))
+	if err != nil {
+		return "", fmt.Errorf("load environment for %q: %w", name, err)
+	}
+	return env.BackendType, nil
 }
 
 // Plan enumerates overlay sandboxes off disk (no runtime) and classifies each by
@@ -170,7 +193,7 @@ func (o *OverlayFlatten) flattenRunning(ctx context.Context, name string) (migra
 	}
 
 	report := migrate.Report{Migrated: []string{name}}
-	rt, err := o.backend(ctx)
+	rt, err := o.backendFor(ctx, name)
 	if err != nil {
 		return report, err
 	}
@@ -231,7 +254,7 @@ const captureStageName = "yoloai-flatten-capture"
 // NOTE: the container-side overlay paths are validated by the Phase-3b Docker
 // integration test; captureContainerPaths is the single point to adjust.
 func (o *OverlayFlatten) captureMerged(ctx context.Context, name, hostPath string) (string, error) {
-	rt, err := o.backend(ctx)
+	rt, err := o.backendFor(ctx, name)
 	if err != nil {
 		return "", err
 	}
@@ -332,11 +355,14 @@ func (o *OverlayFlatten) writeCopyModeEnv(newDir string) error {
 		if env.Dirs[i].Mode == store.DirModeOverlay {
 			env.Dirs[i].Mode = store.DirModeCopy
 			// Overlay stored MountPath as the in-container merged path; copy mode
-			// mirrors the host path (docker's ResolveCopyMount is identity, and
-			// overlay is docker-only), so a restart mounts the work copy where the
-			// agent expects it.
+			// mirrors the host path. Every overlay-capable backend (docker, podman,
+			// apple) resolves :copy mounts at the identity host path — none
+			// implement CopyMountResolver — so a restart mounts the work copy where
+			// the agent expects it. Clear both git range endpoints: the flattened
+			// tree is a fresh capture with no baseline/inception commit yet.
 			env.Dirs[i].MountPath = env.Dirs[i].HostPath
 			env.Dirs[i].BaselineSHA = ""
+			env.Dirs[i].InceptionSHA = ""
 		}
 	}
 	if err := store.SaveEnvironment(newDir, env); err != nil {
@@ -390,9 +416,9 @@ func (o *OverlayFlatten) overlaySandboxNames() ([]string, error) {
 	return names, nil
 }
 
-// status reports name's current container status via the lazy runtime.
+// status reports name's current container status via its own backend runtime.
 func (o *OverlayFlatten) status(ctx context.Context, name string) (status.Status, error) {
-	rt, err := o.backend(ctx)
+	rt, err := o.backendFor(ctx, name)
 	if err != nil {
 		return "", err
 	}

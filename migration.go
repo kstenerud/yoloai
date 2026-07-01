@@ -107,8 +107,8 @@ func (s *System) frameworkMigrators() ([]migrate.Migrator, func()) {
 		s.layout.DataDir,        // home: scratch + lock, same FS as sandboxes
 		s.layout.SandboxesDir(), // F7-resolved sandboxes root
 		goruntime.GOOS,
-		func(ctx context.Context) (runtime.Backend, error) {
-			return runtime.New(ctx, runtime.BackendDocker, s.layout) // overlay is a docker-class mode
+		func(ctx context.Context, backend runtime.BackendType) (runtime.Backend, error) {
+			return runtime.New(ctx, backend, s.layout) // each overlay sandbox's own backend
 		},
 	)
 	return []migrate.Migrator{flatten}, flatten.Cleanup
