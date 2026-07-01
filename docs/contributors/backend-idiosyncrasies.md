@@ -143,6 +143,8 @@ inclusion test first, then add a row to the index.
 | Same `install-firewall.py` (or any embedded-resource) error, but **deterministic** on one docker provider while another passes — file genuinely absent from that provider's image | [Docker: base-image staleness marker keyed per backend, not per provider/store](#docker-base-image-staleness-marker-was-keyed-per-backend-not-per-image-store-second-provider-runs-stale) |
 | macOS `:overlay` sandbox loses the agent's uncommitted changes after `stop`/`restart`/`kill`; `yoloai diff` showed them while running | [macOS: overlayfs on a VirtioFS bind silently downgrades to a tmpfs upper (changes lost on restart)](#macos-overlayfs-on-a-virtiofs-bind-mount-silently-downgrades-to-a-container-local-tmpfs-upper-uncommitted-changes-lost-on-restart) |
 | `:overlay` create on Podman-macOS crashes the entrypoint (`mount … cannot mount overlay read-only`, exit 32); container `Exited`, incomplete v3 sandbox | [macOS: overlayfs on a VirtioFS bind …](#macos-overlayfs-on-a-virtiofs-bind-mount-silently-downgrades-to-a-container-local-tmpfs-upper-uncommitted-changes-lost-on-restart) (Podman applehv variant) |
+| `system migrate` of a running `:overlay` sandbox fails at dispose: `drop orig: openfdat …/ovlwork/work: permission denied` (rootful Docker) | [Linux: overlay flatten migration and host-side ownership of container-written state](#linux-overlay-flatten-migration-and-host-side-ownership-of-container-written-state) |
+| `system migrate` refuses: sandbox runtime state `owned by uid 100999, not you` (podman-rootless) | [Linux: overlay flatten migration and host-side ownership of container-written state](#linux-overlay-flatten-migration-and-host-side-ownership-of-container-written-state) |
 
 ---
 
@@ -2531,3 +2533,54 @@ on macOS — but the failure mode and on-disk residue differ.
 
 **Code:** `runtime/docker/resources/entrypoint.py` (`apply_overlays`, the
 `overlay.virtofs_fallback` / `overlay.local_upper` branch).
+
+## Linux: overlay flatten migration and host-side ownership of container-written state
+
+**Symptom:** on Linux, `yoloai system migrate` (the v3→v4 overlay flatten) of a
+real running `:overlay` sandbox behaves differently by backend:
+- **rootful Docker:** the migration used to fail at the dispose step with
+  `drop orig: openfdat …/work/<enc>/ovlwork/work: permission denied` — *after*
+  the sandbox was already converted to `:copy` (data safe) but *before* the realm
+  stamped v4, leaving it at v3 with a leftover `_^^_orig` sentinel that wedged
+  re-runs.
+- **podman-rootless:** the migration refuses up front with `cannot migrate
+  sandbox "X": its runtime state (agent-status.json) is owned by uid 100999, not
+  you (uid 1000) …`.
+
+**Explanation.** The flatten runs host-side: it captures the container's merged
+overlay tree, then the crash-safe promotion repopulates the sandbox's non-`work/`
+state into the new dir and disposes the old one — so the invoking user must be
+able to read and remove every host-side file the container wrote.
+- The overlay `upper`/`ovlwork` layers are **root-owned kernel dirs**, and the
+  kernel creates the overlayfs workdir (`ovlwork/work`) at mode **0000** — even
+  its owner can't traverse it, defeating `os.RemoveAll`.
+- **Rootful Docker** maps the container's users to the host user or root, so the
+  rest of the sandbox state (`agent-status.json`, `logs/`, …) is host-manageable;
+  only the overlay layers are the problem.
+- **Podman-rootless** maps the container's users to host **subuids** (per
+  `/etc/subuid`, e.g. `karl:100000:65536` → container uid 999 = host **100999**),
+  so *all* container-written state (`agent-status.json`, `cache/`, `files/`,
+  `logs/`) lands under a subuid at mode 0600 — unreadable and unremovable by the
+  host process. This is a general podman-rootless trait (`teardown.go` already
+  warns about it on destroy), not specific to migration.
+
+**Fix (rootful Docker):** during capture, the migrator chowns **and** chmods
+(`u+rwX`) the `upper`/`ovlwork` layers to the invoking user via the running
+container (root) — chown alone is insufficient because of the 0000 workdir. The
+capture itself runs as root and hands the staged copy to the host user, so it
+works regardless of the backend's uid mapping. Verified end-to-end on real
+rootful Docker (committed + uncommitted + gitignored preserved, `:copy`, v4).
+
+**Limitation (podman-rootless):** normalizing subuid ownership host-side needs a
+privileged helper (a throwaway root container, or `podman unshare chown`), which
+isn't wired in — overlay-on-podman-rootless across a D109 upgrade is a rare edge.
+So the migrator detects the foreign-uid state **up front** (`assertHostOwnedState`)
+and refuses cleanly with actionable guidance, leaving the sandbox **untouched**
+(no half-swap; mode stays `overlay`, realm stays v3). Workaround: recreate the
+sandbox as `:copy`, or run the migration under Docker.
+
+**Code:** `internal/orchestrator/migrate_overlay.go` — `reclaimOverlayLayers`,
+`captureMerged` (capture-as-root + stage chown), `assertHostOwnedState`;
+`fileOwnerUID` in `migrate_overlay_unix.go`. Verified on real hardware
+2026-07-01: docker migrate passes end-to-end; podman-rootless refuses cleanly
+with the sandbox state unchanged.

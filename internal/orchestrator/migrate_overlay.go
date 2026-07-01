@@ -173,12 +173,53 @@ func (o *OverlayFlatten) flattenOne(ctx context.Context, name string, st status.
 	}
 }
 
+// assertHostOwnedState refuses to flatten a sandbox whose host-side state is
+// owned by a user id the invoking user can neither read nor remove. The flatten
+// runs entirely host-side (repopulate copies the sandbox's non-work state into
+// the new dir; the disposer removes the old dir), so it needs host access to
+// every top-level entry except work/ (whose overlay layers are reclaimed to the
+// host user during capture). Rootless backends with a userns that maps the
+// container's users to host subuids — podman-rootless — write runtime state
+// (agent-status.json, logs/, cache/, files/) under a subuid (e.g. 100999) at
+// mode 0600, which the host process can't touch. Docker (rootful) maps container
+// users to the host user or root, both host-manageable, so it is unaffected.
+// Detected up front so the migration refuses cleanly with actionable guidance
+// instead of failing mid-promotion and stranding a half-swapped sandbox.
+func (o *OverlayFlatten) assertHostOwnedState(name string) error {
+	if fileutil.ProcessIsRoot() {
+		return nil // root manages any ownership
+	}
+	sandboxDir := o.layout.SandboxDir(name)
+	hostUID := fileutil.HostUID()
+	entries, err := os.ReadDir(sandboxDir)
+	if err != nil {
+		return fmt.Errorf("inspect sandbox dir for %q: %w", name, err)
+	}
+	for _, e := range entries {
+		if e.Name() == "work" {
+			continue // overlay layers under work/ are reclaimed to the host user during capture
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		uid, ok := fileOwnerUID(info)
+		if ok && uid != hostUID && uid != 0 {
+			return fmt.Errorf("cannot migrate sandbox %q: its runtime state (%s) is owned by uid %d, not you (uid %d) — a rootless backend (e.g. podman) mapped the container's users to host subuids, so the migration can't read or remove it host-side. Recreate this sandbox as :copy (or migrate it under Docker)", name, e.Name(), uid, hostUID)
+		}
+	}
+	return nil
+}
+
 // flattenRunning captures the running container's merged overlay tree and
 // promotes the sandbox to :copy via the crash-safe promotion, then stops the
 // container (its overlay mount is now stale). The displaced original (the old
 // upper) is dropped, not trashed — redundant with the captured copy, and
 // secret-bearing.
 func (o *OverlayFlatten) flattenRunning(ctx context.Context, name string) (migrate.Report, error) {
+	if err := o.assertHostOwnedState(name); err != nil {
+		return migrate.Report{}, err
+	}
 	prom := migrate.Promotion{
 		Parent:           o.sandboxesRoot,
 		Name:             name,
@@ -323,6 +364,9 @@ func captureContainerPaths(hostPath string) (merged, stage string) {
 // the agent's overlay changes — authorized by the caller. On macOS the upper was
 // already gone; on Linux the displaced upper is dropped, not trashed.
 func (o *OverlayFlatten) flattenAbandon(name string) (migrate.Report, error) {
+	if err := o.assertHostOwnedState(name); err != nil {
+		return migrate.Report{}, err
+	}
 	prom := migrate.Promotion{
 		Parent:           o.sandboxesRoot,
 		Name:             name,
