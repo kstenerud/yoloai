@@ -314,29 +314,43 @@ A small, shared set of strategies a migrator declares — not per-migrator hand-
   migrating binary **never starts or mounts** an overlay sandbox — that code is deleted
   (decision 8). The capture is a **raw recursive file copy of the merged tree** — **no git, no
   tar, no baseline diff** — landing the merged bytes as the new `:copy` work dir:
-  1. **copy the merged tree** out as real files via the existing real-copy primitive
-     (`cp -a` / `cp -rp` — the one that already seeds copy mode at `files.go:143` and copies
-     the macOS overlay upper at `entrypoint.py:262`), reached either by reconstructing
-     host-side from `lower` + `upper` (Linux — both are host-side) or by an in-container
-     `cp -a` of the merged mount into a host-bound dir (uniform; **required on macOS**, where
-     the upper is container-tmpfs). The copy is **destination-confined** — no write escapes
-     the new work dir — which a real-tree copy gives for free: a directory entry physically
-     cannot be named `..`, symlinks copy as inert symlinks, overlay whiteouts become
-     deletions. There is no serialized patch/tarball whose embedded paths could traverse (the
-     `--unsafe-paths`/tar-extract class of bug, DF70).
+  1. **copy the merged tree** out with a plain recursive copy (`cp -rp` — preserves
+     perms/symlinks-as-symlinks/exec bits, all copy mode needs; `-a` is fine too but its extra
+     xattr/hardlink fidelity is unneeded). The **sole route on both platforms** is an
+     **in-container `cp` of the kernel-assembled merged mount** into a host-bound dir the running
+     container already exposes (`/yoloai/overlay/<enc>` = host `<sandboxDir>/work/<enc>/`, or
+     `/yoloai/files`), then on into scratch — a **two-hop** copy, because you cannot bind-mount the
+     migration scratch dir into an already-running container. **Do *not* reconstruct host-side from
+     `lower` + `upper`:** the merged view lives only in the container's mount namespace (host
+     `merged/` is an empty backing dir), and rebuilding it host-side would need to read
+     `trusted.overlay.opaque`/`redirect` xattrs — `CAP_SYS_ADMIN`-only — so it would silently
+     mishandle deletions (the very thing Op-F1 refuses). Copying the kernel-assembled merged mount
+     is whiteout/opaque-clean by construction (userspace `cp` sees a normal POSIX tree). The copy
+     is **destination-confined** for free — a real-tree copy has no serialized path to traverse (no
+     dirent named `..`; symlinks copy inert), so it avoids the `--unsafe-paths`/tar-extract class
+     (DF70).
   2. fsync; **keep the container running *through* the capture** — stopping mid-read would
      unmount the overlay and, on macOS, destroy the tmpfs upper.
-  **Idle precondition (F2).** A raw copy of a tree the agent is actively writing can catch a
-  half-written file — "running" is not a consistent snapshot. So the flatten **requires the
-  agent idle** (via the existing idle detection) and, if it is active, **fails with a useful
-  message** ("agent busy in sandbox X; idle it — stop prompting — and re-run") rather than
-  capturing a torn tree.
+  **Idle handling — bounded, progress-biased (F2 / re-audit C3).** A raw copy of a tree the agent
+  is actively writing can catch a half-written file, and the idle check is point-in-time (nothing
+  freezes the agent *during* the copy), so idle-at-t0 ≠ idle-throughout. The stance is **bounded
+  effort, never a permanent block**: (a) the plan **warns up front** that overlay sandboxes should
+  be idled before migrating; (b) a **reasonable idle check** — if the agent is *clearly* active,
+  fail with a useful message ("agent busy in sandbox X; idle it — stop prompting — and re-run");
+  (c) a **bounded re-verify** — the capture is non-destructive and re-runnable, so re-check
+  idle/tree-stability a **limited** number of times and retry on change; (d) if idle state stays
+  **undeterminable** after the bound (stale `agent-status.json`, `unknown` detector result — which
+  can *dead-end* the Op-F1 "downgrade→start→re-migrate" recovery if the status file is stale),
+  **soldier on with a warning** rather than block forever — a permanently-wedged migration is worse
+  than the small residual torn-capture risk. So "requires idle" is best-effort, not a guarantee.
   **Stop-after-swap (C2).** The overlay mount source lives *inside* the unit the promotion swap
   renames, so once the swap lands the still-running container holds a **stale** overlay mount
   while the on-disk form reads `:copy`. The flatten therefore **stops the container immediately
   after its swap commits** (safe now — the merged view is already captured; on macOS the tmpfs
-  upper is redundant) and the CLI **reports which running sandboxes it stopped** ("stopped
-  sandbox X to finalize overlay→copy; restart to resume in copy mode").
+  upper is redundant; `Stop` is backend-generic, needs no overlay code) and the CLI **reports which
+  running sandboxes it stopped** ("stopped sandbox X to finalize overlay→copy; restart to resume in
+  copy mode"). A **stop that fails** after the swap is **non-fatal** — the on-disk form is already
+  `:copy` and a restart mounts copy cleanly — but is reported as a lingering container to remove.
   Because **no git and no tar run at migration time**, the flatten touches neither the C1
   filter/hook class (no host git over untrusted content) nor DF70 (no host `git apply` of a
   container-generated patch). The merged tree *is* exactly what a `:copy` work dir holds, so
@@ -347,11 +361,9 @@ A small, shared set of strategies a migrator declares — not per-migrator hand-
   diff/apply use copy mode's existing in-confinement git. Once captured, the sandbox migrates
   *exactly* like any other (stamp, swap) — the capture is just how Promotion step 1 is
   populated.
-  **Why the idle precondition (re-audit F2):** the merged tree is copied while the agent could
-  still be writing (it can't be quiesced without unmounting the overlay), so a raw copy can catch
-  a half-written file — "running" is not a consistent snapshot. Hence the **enforced idle check
-  above**: the flatten *fails* (not merely warns) when the agent is active, rather than committing
-  a torn capture.
+  (See the **bounded idle handling above** — reasonable check + bounded re-verify, fail only on a
+  *clearly* active agent, soldier on with a warning when idle is undeterminable, never a permanent
+  block.)
 - **Running-required precondition (A2 / re-audit Op-F1, mandatory, both platforms).** A
   *correct* merged view comes only from overlayfs having already assembled it — i.e. from a
   **running** container — and the new binary **cannot create that mount** (decision 8 deletes
