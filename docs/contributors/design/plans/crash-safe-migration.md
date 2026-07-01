@@ -189,14 +189,20 @@ discipline**:
    step 1) — so `*_^^_new` is never durable-but-incomplete even if the move-in degraded to a copy.
 2. **fsync the parent dir after each rename** — so the rename survives power loss and
    recovery sees a real point in the sequence.
-3. **fsync the source dir `U_^^_orig` after each repopulate move** (step 4) — so a source-unlink
-   can't become durable *before* its dest-add, which would strand the item in **neither** dir
-   (#5). POSIX `rename` is atomic vs. concurrent observers, **not** crash-ordered across two
-   directory updates, and single-local-FS does not imply a journaling FS — so the earlier
-   "step-4 moves are exempt, a lost move is just re-done" was wrong: a lost move is re-derivable
-   *only* if the source survives, which this fsync guarantees.
-4. **write the `.schema_version` marker durably** (step 5) — temp + fsync + rename, never a bare
-   in-place write — so its presence implies complete contents (#2).
+3. **repopulate keeps `U_^^_orig` whole — reflink (CoW) / copy (non-CoW), never move** (step
+   4). The kept items are *duplicated* into `U_^^_new` while `U_^^_orig` stays complete until the
+   swap, so a partial/lost `U_^^_new` item is **always re-derivable from the intact source** — no
+   crash-ordering to get right, no "item in neither dir" (re-audit F-1/F-2). (An earlier draft
+   *moved* items and tried to fix the resulting hazard with a per-move source fsync — that fsync
+   was **backwards** (it forces the source-unlink durable while deferring the dest-add), so
+   keeping the source whole is the correct-by-construction fix. `rename`-as-move is atomic vs.
+   observers but **not** crash-ordered across two directory inodes, and single-local-FS ≠
+   journaling FS.) fsync `U_^^_new` after populating.
+4. **write the ready-marker durably** (step 5) — temp + fsync + rename, never a bare in-place
+   write — so its presence implies complete contents (#2). The marker is realm-specific: a
+   **realm** unit writes `.schema_version`; a **per-sandbox** unit flips `Mode` → `copy` in
+   `U_^^_new/environment.json` (there is no per-sandbox version file — the durable form-flip *is*
+   the marker; see Recovery).
 5. `F_FULLFSYNC` on darwin (plain `fsync` doesn't flush the APFS device cache).
 
 **Scope — DECIDED: keep the fsyncs (max recoverability).** They buy **power-loss /
@@ -216,7 +222,10 @@ Normal-operation writes outside migration are a separate robustness question.
 live in the `migration-<build-id>/` scratch dir, which **must be on the same filesystem
 as the live dir** (decision 4; else the move-in is a non-atomic copy+delete and a
 sentinel can appear *partial*). Only the live dir uses the reserved sentinel names — the
-`_^^_` token **must be illegal in a real realm/sandbox name** (validate/reserve it).
+`_^^_` token **must be illegal in a real realm/sandbox name** (the name validator already allows
+only letters/digits/underscores/dots/hyphens, so `^` is naturally reserved; #F-7 — confirm the
+**sandbox** validator matches the profile one, and that no **legacy** on-disk name predating the
+reservation can contain `^^`).
 
 **The sequence (unit `U` = `library` or `mysandbox`), fsyncs explicit. Key invariant:
 `U_^^_new` *never* coexists with the canonical `U` — `U` becomes `U_^^_orig` **before** the new
@@ -227,20 +236,23 @@ build is placed — so the complete data always lives under exactly one well-kno
    copy+delete) is detectable and never mistaken for complete (#6).
 2. rename `U` → `U_^^_orig`; **fsync(dir)**. `U_^^_orig` is now the complete old unit.
 3. move the built dir → `U_^^_new` in the live dir; **fsync(dir)**.
-4. **repopulate:** move the unchanged items from `U_^^_orig` → `U_^^_new` using the **structural
-   filter `entries(U_^^_orig) \ entries(U_^^_new)`** — exactly the orig entries whose name is
-   **absent from `_^^_new`**, **never** re-running the migrator's transform (#3). Each is an
-   atomic rename (a multi-GB workdir moves as *one*, no copy). **fsync `U_^^_orig` (the source
-   dir) after each move** so a source-unlink can't become durable ahead of its dest-add and
-   strand the item in neither dir (#5); **fsync(`U_^^_new`)** when the list completes. Granularity
-   rule: **any directory whose children changed is rebuilt whole** (so it lands in `_^^_new` and
-   is never repopulated) — this is how the flatten's old overlay artifacts (`upper/`, `ovlwork/`)
-   stay in `_^^_orig` and are dropped, not carried forward (#4).
-5. **flip the version:** write the new `.schema_version` into `U_^^_new` **durably — temp-file +
-   fsync(temp) + rename + fsync(dir)**, *not* a bare in-place write, so its **presence guarantees
-   complete contents** (a bare write leaves the dir entry durable over zero/garbage bytes and the
-   marker promotes torn, #2). Written **last**, after build + repopulate. Its presence is the
-   authoritative "ready to promote" marker.
+4. **repopulate — keep `U_^^_orig` whole (#F-1/F-2):** **duplicate** (reflink on CoW, copy on
+   non-CoW — never move) the unchanged items — those in the **structural filter
+   `entries(U_^^_orig) \ entries(U_^^_new)`**, exactly the orig entries whose name is **absent from
+   `_^^_new`**, **never** re-running the migrator's transform (#3) — into `U_^^_new`; **fsync
+   `U_^^_new`** when done. `U_^^_orig` stays **intact until the swap**, so a partial/lost `_^^_new`
+   item is always re-derivable from it (no crash-ordering hazard). Granularity rule: **any
+   directory whose children changed is rebuilt whole** (so it lands in `_^^_new` and is never
+   repopulated) — this is how the flatten's old overlay artifacts (`upper/`, `ovlwork/`) stay in
+   `_^^_orig` and are dropped, not carried forward (#4). (For the flatten the repopulated set is
+   small metadata, so reflink-vs-copy cost is negligible; the workdir is rebuilt in `_^^_new`.)
+5. **write the ready-marker durably** — **temp-file + fsync(temp) + rename + fsync(dir)**, *not* a
+   bare in-place write, so its **presence guarantees complete contents** (a bare write leaves the
+   dir entry durable over zero/garbage bytes and the marker promotes torn, #2). Written **last**,
+   after build + repopulate. Realm-specific (#F-3): a **realm** unit writes `.schema_version` =
+   target; a **per-sandbox** unit flips `Mode` → `copy` in `U_^^_new/environment.json` (no
+   per-sandbox version file — the durable form-flip *is* the ready-marker). Its presence is the
+   authoritative "ready to promote" signal.
 6. rename `U_^^_new` → `U`; **fsync(dir)**.
 7. **dispose of `U_^^_orig`:** the default is **move → `trash/`** (not delete — a manual revert
    path; decision 3); **fsync(dir)**. A migrator may instead **drop** (delete) it when its
@@ -251,32 +263,35 @@ build is placed — so the complete data always lives under exactly one well-kno
 Step 6 commits **all of `U`'s changed files + the new version atomically** — no cross-file
 ordering to coordinate (the C3 class of bug is structurally impossible).
 
-**Recovery** is a classifier over the post-crash live-dir names + markers, and must be
-**exhaustive**:
-- **`U` alone** → not-started *or* fully-done; tell them apart by **unit kind (#7)**: a **realm**
-  unit by its `.schema_version` (`< target` = not-started, `= target` = done); a **per-sandbox**
-  unit by its **on-disk form** (`Mode` in `environment.json`, which swaps atomically with the
-  unit — overlay = not-done, copy = done; there is no per-sandbox version file). No action either
-  way.
-- **`U_^^_orig` alone** → crashed between steps 2 and 3 (renamed away, build not yet placed).
-  `U_^^_orig` is the complete old unit → **rename it back to `U`**, restart. (This clean transient
-  is what the rename-before-move ordering buys — there is never a partial `U_^^_new` beside a live
-  `U`, so the old #1 ambiguous state cannot occur.)
-- **`U_^^_orig` + `U_^^_new` *without* the version marker** → build/repopulate incomplete. If
-  `U_^^_new` also lacks its **`build-complete` sentinel**, the move-in itself was partial →
-  **discard `U_^^_new`, rename `U_^^_orig` → `U`**, restart. Otherwise → **resume repopulate** (the
-  structural filter re-derives the orig entries absent from `_^^_new`), write the version durably,
-  then swap.
-- **`U_^^_orig` + `U_^^_new` *with* the version marker** → ready → **promote** (step 6), then
-  dispose (step 7).
+**Recovery** is a classifier over the post-crash live-dir names + markers. The **ready-marker
+predicate** is realm-specific (#F-3): for a **realm** unit, `U_^^_new/.schema_version == target`;
+for a **per-sandbox** unit, `U_^^_new/environment.json` has `Mode == copy`. With that, the classifier
+is **exhaustive over all 8 name-sets** of `{U, U_^^_orig, U_^^_new}`:
+- **`U` alone** → not-started *or* fully-done; tell apart by **unit kind (#7)**: a **realm** unit by
+  its `.schema_version` (`< target` = not-started, `= target` = done); a **per-sandbox** unit by its
+  on-disk **form** (`Mode` — overlay = not-done, copy = done). No action.
+- **`U_^^_orig` alone** → crashed between steps 2 and 3 → `U_^^_orig` is the complete old unit →
+  **rename it back to `U`**, restart. (The clean transient the rename-before-move ordering buys.)
+- **`U_^^_orig` + `U_^^_new`, ready-marker absent** → build/repopulate incomplete. If `U_^^_new` also
+  lacks its **`build-complete` sentinel** → the build/move-in was partial → **discard `U_^^_new`
+  first, then rename `U_^^_orig` → `U`**, restart. Otherwise → **resume repopulate** (re-duplicate
+  the structural-filter set from the still-intact `U_^^_orig`), write the ready-marker, swap.
+- **`U_^^_orig` + `U_^^_new`, ready-marker present** → **promote** (step 6), then dispose (step 7).
+  Safe because keep-orig-whole (step 4) guarantees `U_^^_new` is complete whenever its marker is —
+  the marker can no longer launder a lost repopulate item (#F-2).
 - **`U` + `U_^^_orig`** → crashed between steps 6 and 7 → **finish step 7** (dispose `U_^^_orig`).
+- **`U_^^_new` alone, or any set containing both `U` and `U_^^_new` (`{new}`, `{U,new}`,
+  `{U,orig,new}`), or `{}`** → **unreachable under the invariants** ("`U` and `U_^^_new` never
+  coexist"; "the unit always exists"). If ever observed → **corruption: halt and surface**, never
+  silently proceed (defensive catch-all #F-4). Note the discard path above is **order-load-bearing**
+  (remove `U_^^_new` *before* restoring `U`) precisely so a crash in it can't manufacture `{U,new}`.
 
-The complete data always lives under exactly one of `{U, U_^^_orig}`; `U_^^_new` only ever
-appears **beside `U_^^_orig`** (never beside a live `U`), and their union is always complete
-(items never torn — per-item rename atomicity). Step 4 is **forward-only** once it starts gutting
-`_^^_orig`. If a migration changes *everything* (empty move-list) step 4 is empty. An alternative
-that keeps `U_^^_orig` whole until the swap is to **reflink** the kept items into `_^^_new` rather
-than move (cheap on CoW, full-copy on ext4) — a conscious trade.
+The complete data always lives under exactly one of `{U, U_^^_orig}`; `U_^^_new` only ever appears
+**beside `U_^^_orig`** (never beside a live `U`), and — because `U_^^_orig` is kept **whole** until
+the swap (step 4) — `U_^^_orig` alone is always a complete, promotable-back fallback. Recovery's
+ready-marker predicate matches the **exact** final marker name, never a `.schema_version*` glob, and
+unlinks any stale marker-temp before resuming (#F-5). Resume asserts the in-flight build's target
+matches this binary's before stamping (#F-6 — belt-and-suspenders on "recover before upgrade").
 
 The rigor a WAL needed doesn't vanish; it moves into this state machine, which must be
 **exhaustively enumerated** + covered by **crash-injection tests at every rename
