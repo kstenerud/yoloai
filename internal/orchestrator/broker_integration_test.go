@@ -238,6 +238,10 @@ func TestIntegration_CredentialBroker_Isolated(t *testing.T) {
 	require.NotEmpty(t, envDump, "agent never dumped its env within 15s")
 	env := parseEnvDump(envDump)
 
+	// The per-sandbox injector placeholder token (H3), minted by the launch path.
+	placeholder, err := broker.PlaceholderToken(mgr.Layout().SandboxDir(name))
+	require.NoError(t, err)
+
 	// Brokered as usual: real key host-side, agent points at the injector, and the
 	// injector endpoint is published for the entrypoint to allowlist.
 	_, hasKey := env["TEST_BROKER_KEY"]
@@ -250,7 +254,7 @@ func TestIntegration_CredentialBroker_Isolated(t *testing.T) {
 	// Under default-deny isolation, the agent STILL reaches the injector (allowlisted).
 	resp, err := mgr.Runtime().Exec(ctx, instance, []string{
 		"curl", "-s", "-m", "8", "-X", "POST", baseURL + "/v1/messages",
-		"-H", "Authorization: Bearer dummy-broker-placeholder", "-d", "{}",
+		"-H", "Authorization: Bearer " + placeholder, "-d", "{}",
 	}, "yoloai")
 	require.NoError(t, err)
 	assert.Contains(t, resp.Stdout, "BROKER_INTEGRATION_OK", "agent reaches the injector under isolation")
@@ -345,6 +349,10 @@ func TestIntegration_NetworkIsolation_TamperResistant(t *testing.T) {
 	require.NotEmpty(t, baseURL, "agent never dumped its brokered base_url within 15s")
 	require.True(t, broker.InjectorAlive(mgr.Layout().SandboxDir(name)), "injector should be alive")
 
+	// The per-sandbox injector placeholder token (H3), minted by the launch path.
+	placeholder, err := broker.PlaceholderToken(mgr.Layout().SandboxDir(name))
+	require.NoError(t, err)
+
 	// The agent container must NOT hold CAP_NET_ADMIN: even root-via-sudo cannot
 	// run iptables, so the flush is DENIED. This is the whole point — the agent
 	// cannot tear down a firewall installed from outside its netns.
@@ -362,7 +370,7 @@ func TestIntegration_NetworkIsolation_TamperResistant(t *testing.T) {
 	// the agent's legitimate LLM egress still works while it's contained.
 	resp, err := mgr.Runtime().Exec(ctx, instance, []string{
 		"curl", "-s", "-m", "8", "-X", "POST", baseURL + "/v1/messages",
-		"-H", "Authorization: Bearer dummy-broker-placeholder", "-d", "{}",
+		"-H", "Authorization: Bearer " + placeholder, "-d", "{}",
 	}, "yoloai")
 	require.NoError(t, err)
 	assert.Contains(t, resp.Stdout, "BROKER_INTEGRATION_OK", "injector stays reachable under tamper-resistant isolation")
@@ -476,12 +484,17 @@ func runBrokerScenarios(t *testing.T, mgr *orchestrator.Engine, ctx context.Cont
 			require.NotEmpty(t, envDump, "agent never dumped its env within 15s")
 			env := parseEnvDump(envDump)
 
+			// The placeholder the agent presents is the per-sandbox injector token
+			// (H3), minted by the launch path — not the shared DummyToken constant.
+			placeholder, err := broker.PlaceholderToken(mgr.Layout().SandboxDir(name))
+			require.NoError(t, err)
+
 			// 1. The real credential never enters the container.
 			_, hasCred := env[tc.envVar]
 			assert.False(t, hasCred, "real credential must not enter the container env")
 
 			// 2. The agent is pointed at the injector with the placeholder.
-			assert.Equal(t, "dummy-broker-placeholder", env["TEST_BROKER_AUTH"])
+			assert.Equal(t, placeholder, env["TEST_BROKER_AUTH"])
 			baseURL := env["TEST_BROKER_BASE_URL"]
 			assert.True(t, strings.HasPrefix(baseURL, "http://"), "base_url should point at the injector, got %q", baseURL)
 
@@ -494,7 +507,7 @@ func runBrokerScenarios(t *testing.T, mgr *orchestrator.Engine, ctx context.Cont
 			//    Explicit argv avoids any shell quoting of the header/url.
 			resp, err := mgr.Runtime().Exec(ctx, instance, []string{
 				"curl", "-s", "-m", "8", "-X", "POST", baseURL + "/v1/messages",
-				"-H", "Authorization: Bearer dummy-broker-placeholder", "-d", "{}",
+				"-H", "Authorization: Bearer " + placeholder, "-d", "{}",
 			}, "yoloai")
 			require.NoError(t, err)
 			assert.Contains(t, resp.Stdout, "BROKER_INTEGRATION_OK", "the injector should forward to the mock and stream the response back")

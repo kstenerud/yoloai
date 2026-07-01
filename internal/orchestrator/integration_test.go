@@ -305,13 +305,17 @@ func TestIntegration_Replace(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { destroySandbox(ctx, mgr, "replaceme") }) //nolint:errcheck // test cleanup
 
-	// Replace with new sandbox
+	// Replace with new sandbox. The prior sandbox is stopped, so copy-mode's
+	// in-confinement git (C1/DF66) cannot verify whether it holds unapplied work;
+	// it is a fresh sandbox with nothing to preserve, so authorize the replace
+	// with AbandonUnappliedWork (the library's --abandon-unapplied).
 	_, err = createSandbox(ctx, mgr, orchestrator.CreateOptions{
-		Name:    "replaceme",
-		Workdir: orchestrator.DirSpec{Path: projectDir},
-		Agent:   "test",
-		Replace: true,
-		Version: "test",
+		Name:                 "replaceme",
+		Workdir:              orchestrator.DirSpec{Path: projectDir},
+		Agent:                "test",
+		Replace:              true,
+		AbandonUnappliedWork: true,
+		Version:              "test",
 	})
 	require.NoError(t, err)
 
@@ -1002,7 +1006,14 @@ func TestIntegration_Clone(t *testing.T) {
 		destroySandbox(ctx, mgr, "clone-b") //nolint:errcheck // test cleanup
 	})
 
-	// Seed a change in A's work copy
+	// Start clone-a so its git baseline is committed in-confinement (C1/DF66);
+	// the change seeded next then reads as an uncommitted diff against it.
+	_, err = startSandbox(ctx, mgr, "clone-a", orchestrator.StartOptions{})
+	require.NoError(t, err)
+	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName("", "clone-a"), 15*time.Second)
+
+	// Seed a change in A's work copy (bind-mounted, so the running container's git
+	// sees it) after the baseline is committed.
 	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir("clone-a"))
 	require.NoError(t, err)
 	workDir := store.WorkDir(mgr.Layout().SandboxDir("clone-a"), meta.Workdir().HostPath)
@@ -1012,8 +1023,15 @@ func TestIntegration_Clone(t *testing.T) {
 		0600,
 	))
 
-	// Clone A → B
+	// Clone A → B. The copy carries A's committed baseline (BaselineSHA) plus the
+	// uncommitted seeded change, so B starts without re-baselining (start skips
+	// baseline setup when BaselineSHA is already set).
 	require.NoError(t, mgr.Clone(ctx, orchestrator.CloneOptions{Source: "clone-a", Dest: "clone-b"}))
+
+	// Start clone-b: diff/apply run git in-confinement, so the container must run.
+	_, err = startSandbox(ctx, mgr, "clone-b", orchestrator.StartOptions{})
+	require.NoError(t, err)
+	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName("", "clone-b"), 15*time.Second)
 
 	// Diff on clone should show the seeded change
 	diffResult, err := copyflow.GenerateDiff(ctx, copyflow.DiffOptions{Name: "clone-b", Layout: mgr.Layout(), Runtime: mgr.Runtime()})
