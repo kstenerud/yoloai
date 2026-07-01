@@ -158,6 +158,43 @@ func TestFormatError_MultipleFailures(t *testing.T) {
 	assert.NotContains(t, err.Error(), "Cap B")
 }
 
+// TestFormatError_IncludesDetailAndFixSteps is the UX contract: a fixable
+// failure surfaces why it's needed and the remediation commands right there,
+// plus a pointer to system doctor — the user shouldn't have to run doctor to
+// learn how to fix it.
+func TestFormatError_IncludesDetailAndFixSteps(t *testing.T) {
+	results := []CheckResult{{
+		Cap: HostCapability{
+			Summary: "network namespace creation",
+			Detail:  "VM isolation requires CAP_SYS_ADMIN to create named network namespaces.",
+		},
+		Err: errors.New("operation not permitted"),
+		Steps: []FixStep{
+			{Description: "Run as root (simplest)", Command: "sudo yoloai new mybox --isolation vm ...", NeedsRoot: true},
+			{Description: "Grant capability to binary", Command: "sudo setcap cap_sys_admin+ep $(which yoloai)", NeedsRoot: true},
+		},
+	}}
+	msg := FormatError(results).Error()
+	assert.Contains(t, msg, "VM isolation requires CAP_SYS_ADMIN", "shows why it's needed")
+	assert.Contains(t, msg, "to fix (choose one):", "labels the alternatives")
+	assert.Contains(t, msg, "sudo setcap cap_sys_admin+ep $(which yoloai)", "shows the actual command")
+	assert.Contains(t, msg, "yoloai system doctor", "points at fuller diagnostics")
+}
+
+// TestFormatError_PermanentShowsNoFixSteps: a permanent failure states why and
+// that it can't be resolved here — no misleading fix commands.
+func TestFormatError_PermanentShowsNoFixSteps(t *testing.T) {
+	results := []CheckResult{{
+		Cap:         HostCapability{Summary: "KVM device access", Detail: "Requires hardware virtualization."},
+		Err:         errors.New("/dev/kvm not found"),
+		IsPermanent: true,
+		Steps:       []FixStep{{Description: "should not appear", Command: "do-not-show"}},
+	}}
+	msg := FormatError(results).Error()
+	assert.Contains(t, msg, "cannot be resolved in the current environment")
+	assert.NotContains(t, msg, "do-not-show")
+}
+
 // --- NewGVisorRunsc tests ---
 
 func TestNewGVisorRunsc_Found(t *testing.T) {

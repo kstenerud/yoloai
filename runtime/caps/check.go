@@ -6,7 +6,7 @@ package caps
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"strings"
 )
 
@@ -57,16 +57,65 @@ func ComputeAvailability(results []CheckResult) Availability {
 
 // FormatError returns a single error describing all failed checks, suitable
 // for use in runtime error paths (e.g. sandbox creation). Returns nil if all
-// checks passed.
+// checks passed. Each failure carries its Detail (why it's needed) and, when the
+// failure is fixable, the remediation commands the capability provided — so the
+// user sees how to fix it at the point of failure, not only via system doctor.
+// (The doctor renders the same steps in richer form over the public read-model;
+// this package sits below the CLI, so the two renderers are intentionally
+// separate.)
 func FormatError(results []CheckResult) error {
-	var msgs []string
+	var blocks []string
 	for _, r := range results {
 		if r.Err != nil {
-			msgs = append(msgs, r.Cap.Summary+": "+r.Err.Error())
+			blocks = append(blocks, formatFailure(r))
 		}
 	}
-	if len(msgs) == 0 {
+	if len(blocks) == 0 {
 		return nil
 	}
-	return fmt.Errorf("missing prerequisites:\n  - %s", strings.Join(msgs, "\n  - "))
+	return errors.New("missing prerequisites:\n\n" + strings.Join(blocks, "\n\n") +
+		"\n\nrun 'yoloai system doctor' for full diagnostics")
+}
+
+// formatFailure renders one failed check: its summary + error, why it's needed,
+// and either a permanence note or its fix steps.
+func formatFailure(r CheckResult) string {
+	lines := []string{"  - " + r.Cap.Summary + ": " + r.Err.Error()}
+	if r.Cap.Detail != "" {
+		lines = append(lines, "      "+r.Cap.Detail)
+	}
+	if r.IsPermanent {
+		return strings.Join(append(lines, "      (cannot be resolved in the current environment)"), "\n")
+	}
+	return strings.Join(append(lines, fixStepLines(r.Steps)...), "\n")
+}
+
+// fixStepLines renders a capability's remediation steps. Returns nil when the
+// capability offered no command-level guidance.
+func fixStepLines(steps []FixStep) []string {
+	if len(steps) == 0 {
+		return nil
+	}
+	header := "      to fix:"
+	if len(steps) > 1 {
+		header = "      to fix (choose one):"
+	}
+	lines := []string{header}
+	for _, s := range steps {
+		desc := s.Description
+		// The command usually already carries `sudo`; only flag root when it does not.
+		if s.NeedsRoot && !strings.HasPrefix(strings.TrimSpace(s.Command), "sudo") {
+			desc += " (requires root)"
+		}
+		lines = append(lines, "        - "+desc)
+		for cmd := range strings.SplitSeq(s.Command, "\n") {
+			if cmd != "" {
+				lines = append(lines, "            "+cmd)
+			}
+		}
+		if s.URL != "" {
+			lines = append(lines, "            see: "+s.URL)
+		}
+	}
+	return lines
 }
