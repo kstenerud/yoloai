@@ -32,7 +32,10 @@ func SameFilesystem(paths ...string) error {
 		if !ok {
 			return fmt.Errorf("cannot determine the filesystem of %s", p)
 		}
-		dev := uint64(st.Dev) //nolint:unconvert // Stat_t.Dev is int32 on darwin, uint64 on linux
+		// Stat_t.Dev is int32 on darwin (this is a real widen — gosec G115) and
+		// uint64 on linux (a no-op — unconvert). Device ids are non-negative, so
+		// the sign-extension G115 warns about cannot happen; equality is all we need.
+		dev := uint64(st.Dev) //nolint:gosec,unconvert // platform-varying Stat_t.Dev width; see comment above
 		if i == 0 {
 			dev0 = dev
 			continue
