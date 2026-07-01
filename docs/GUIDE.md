@@ -102,7 +102,6 @@ The workdir (your project directory) is copied into the sandbox by default. You 
 |------|--------|----------|
 | `:copy` | `./my-app` (default) | Isolated copy. Agent changes are reviewed via diff/apply. **Honors `.gitignore`** — ignored files (secrets, build output) are not copied. |
 | `:copy-all` | `./my-app:copy-all` | Like `:copy` but copies **everything, including gitignored files**. Opt-out of gitignore-honoring; use when the sandbox genuinely needs an ignored file (e.g. a local `.env`). |
-| `:overlay` | `./my-app:overlay` | Overlay mount. Instant setup, diff/apply workflow. Docker/Podman only. |
 | `:rw` | `./my-app:rw` | Live bind-mount. Changes are immediate — no diff/apply needed. |
 
 **`.gitignore` is honored for `:copy`.** When the source is a git repository, only
@@ -120,9 +119,6 @@ VM.)
 # Default: safe isolated copy
 yoloai new task1 ./my-project
 
-# Overlay: instant setup for large projects (Docker/Podman only)
-yoloai new task2 ./large-project:overlay
-
 # Live mount (use with caution — agent writes directly to your files)
 yoloai new task3 ./my-project:rw
 ```
@@ -136,21 +132,10 @@ Many AI coding tools use `git worktree` for isolation — it's instant and space
 - **Git-only.** Worktrees require a git repository. yoloAI supports any directory.
 - **Shared object store.** Worktrees share the `.git` directory with the host repo, weakening isolation inside the container.
 
-For large projects where copy speed is a concern, use `:overlay` mode — it provides instant setup with the same isolation and diff/apply workflow.
-
-### Overlay Mode
-
-`:overlay` uses Linux kernel overlayfs inside the container to mount the original directory as a read-only lower layer, with agent changes captured in an upper layer. This provides:
-
-- **Instant setup** — no file copying, regardless of project size
-- **diff/apply workflow** — same review process as `:copy` mode
-- **Instant reset** — clearing the upper layer is immediate
-
-**Tradeoffs vs `:copy`:**
-- No snapshot isolation — changes to the original host directory are visible for files the agent hasn't modified
-- Container must be running for `yoloai diff` and `yoloai apply` (auto-started if stopped)
-- Requires `CAP_SYS_ADMIN` capability in the container
-- Not available with `--backend seatbelt` or `--backend tart`
+> **Note:** An earlier `:overlay` mode used in-container overlayfs for instant setup, but
+> it required granting the agent container `CAP_SYS_ADMIN` — a host-escape primitive on
+> rootful Docker — so it was retired (D109). Existing overlay sandboxes are auto-converted
+> to `:copy` by `yoloai system migrate`. Use `:copy` (reflink-aware where supported).
 
 ### Build Artifact Exclusion
 
@@ -175,7 +160,7 @@ These directories are regenerated automatically when the agent runs build comman
 
 **Important notes:**
 - This hardcoded list is applied **on top of `.gitignore` honoring** (see Workdir Modes): in a git repo, anything you've gitignored (commonly `node_modules/`, `.build/`, etc.) is already excluded by git; this list is the safety net for non-git directories and for repos that commit such artifacts. To copy everything regardless, use `:copy-all`.
-- Exclusion only applies to `:copy`/`:copy-all` mode — `:overlay` and `:rw` modes see all files
+- Exclusion only applies to `:copy`/`:copy-all` mode — `:rw` mode sees all files
 - The exclusion list is conservative to avoid false positives (e.g., generic names like `build/`, `target/`, or `env/` are NOT excluded)
 - If you need to exclude additional project-specific artifacts, gitignore them (honored by `:copy`) or file an issue on GitHub
 
@@ -202,7 +187,7 @@ yoloai new mybox ./app -d ./shared-lib -d ./common-types
 
 By default, directories are mounted at their original absolute host paths (mirrored paths). Use `=<path>` to mount at a custom container path instead.
 
-Auxiliary directories accept only `:rw` (live bind) or default `:ro`. `:copy` and `:overlay` are workdir-only — `yoloai diff` and `yoloai apply` operate on the workdir, and the multi-directory diff/apply surface was removed during beta (see [BREAKING-CHANGES](BREAKING-CHANGES.md)). If you need to track changes in a second project, run a separate sandbox for it.
+Auxiliary directories accept only `:rw` (live bind) or default `:ro`. `:copy` is workdir-only — `yoloai diff` and `yoloai apply` operate on the workdir, and the multi-directory diff/apply surface was removed during beta (see [BREAKING-CHANGES](BREAKING-CHANGES.md)). If you need to track changes in a second project, run a separate sandbox for it.
 
 ## Agents and Models
 
@@ -809,7 +794,7 @@ Over time a yoloai install accumulates cruft: orphaned containers/VMs from crash
 **`yoloai system prune`** does the actual cleanup. It classifies every sandbox dir by *how recoverable it is* and never deletes anything that might hold your work:
 
 - **Deleted** — zero-stakes cruft: orphaned backend resources, stale locks, temp dirs, and never-initialized sandbox dirs (no metadata and no work directory).
-- **Refused** — dirs where yoloai can still detect uncommitted work (a dirty git copy, or a non-empty overlay upper layer). These are reported and left untouched; you review and remove them yourself.
+- **Refused** — dirs where yoloai can still detect uncommitted work (a dirty git copy). These are reported and left untouched; you review and remove them yourself.
 - **Quarantined to trash** — dirs whose metadata is corrupt or too new to read, but with no detectable work. Rather than guess, yoloai moves them to `~/.yoloai/library/trash/<name>` so nothing is lost.
 
 Use `--dry-run` to preview, `--yes` to skip the reclaim confirmation prompt, and `--trash` to also empty the trash (see below).
@@ -937,7 +922,6 @@ yoloai's system check then verifies the `runsc` binary on `PATH` and its registr
 
 **Incompatibilities:**
 
-- **`container-enhanced` + `:overlay` directories:** gVisor's VFS2 kernel does not support overlayfs mounts inside the container. Use `:copy` or `:rw` instead — yoloai will error if you combine them.
 - **`vm` and `vm-enhanced`:** On Linux, use the containerd backend (Kata), not Docker or Podman — selected automatically when `--isolation vm` or `vm-enhanced` is used. On macOS, `vm` uses the [Apple `container`](#apple-container-backend-macos) backend instead (containerd is Linux-only); `vm-enhanced` has no macOS backend.
 - **`container-privileged`:** Requires a container backend (Docker/Podman). Available on both Linux and macOS hosts via that backend's Linux VM; only unavailable with `--os mac` (Seatbelt/Tart have no privileged mode).
 

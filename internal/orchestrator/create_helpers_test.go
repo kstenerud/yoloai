@@ -60,21 +60,18 @@ func mustDescriptor(t *testing.T, name runtime.BackendType) runtime.BackendDescr
 func TestBackendCaps_Docker(t *testing.T) {
 	caps := mustDescriptor(t, "docker").Capabilities
 	assert.True(t, caps.NetworkIsolation)
-	assert.True(t, caps.OverlayDirs)
 	assert.True(t, caps.CapAdd)
 }
 
 func TestBackendCaps_Tart(t *testing.T) {
 	caps := mustDescriptor(t, "tart").Capabilities
 	assert.False(t, caps.NetworkIsolation)
-	assert.False(t, caps.OverlayDirs)
 	assert.False(t, caps.CapAdd)
 }
 
 func TestBackendCaps_Seatbelt(t *testing.T) {
 	caps := mustDescriptor(t, "seatbelt").Capabilities
 	assert.False(t, caps.NetworkIsolation)
-	assert.False(t, caps.OverlayDirs)
 	assert.False(t, caps.CapAdd)
 }
 

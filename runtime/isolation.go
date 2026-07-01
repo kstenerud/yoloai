@@ -88,17 +88,6 @@ func IsolationEnforcesInSandboxIptables(isolation IsolationMode) bool {
 	return isolation != IsolationModeContainerEnhanced
 }
 
-// SupportsOverlayDirs reports whether the given isolation mode is compatible
-// with :overlay-mounted directories. Returns false for "container-enhanced"
-// (gVisor; runsc does not implement the in-container overlayfs(2) mount that
-// yoloai's entrypoint installs). All other modes (container,
-// container-privileged, vm, vm-enhanced) run a Linux kernel with overlayfs
-// support — though the backend itself must additionally declare
-// BackendCaps.OverlayDirs for the feature to actually be enabled.
-func SupportsOverlayDirs(isolation IsolationMode) bool {
-	return isolation != IsolationModeContainerEnhanced
-}
-
 // SupportsAgentFreeLaunch reports whether the D88 keepalive-holder + host-side
 // Launch bring-up works under the given isolation mode. Returns false for
 // "container-enhanced" (gVisor/runsc): that path brings the box up on a neutral

@@ -36,8 +36,6 @@ func TestTart_Descriptor_AdvertisesVMCapabilities(t *testing.T) {
 		"tart runs the agent inside a VM, not on the host filesystem")
 	assert.False(t, desc.Capabilities.ContainerAttach,
 		"tart has no docker-compatible container surface; VS Code Attach should be false")
-	assert.False(t, desc.Capabilities.OverlayDirs,
-		"tart does not support :overlay (no overlayfs in macOS VMs)")
 }
 
 func TestTart_InspectNotFound(t *testing.T) {

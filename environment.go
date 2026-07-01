@@ -67,27 +67,15 @@ func (e *Environment) AuxDirs() []DirInfo {
 }
 
 // TrackedDirs returns the directories diff/apply operates on — those in
-// :copy or :overlay mode (the workdir is included when tracked).
+// :copy mode (the workdir is included when tracked).
 func (e *Environment) TrackedDirs() []DirInfo {
 	var out []DirInfo
 	for _, d := range e.Dirs {
-		if d.Mode == DirModeCopy || d.Mode == DirModeOverlay {
+		if d.Mode == DirModeCopy {
 			out = append(out, d)
 		}
 	}
 	return out
-}
-
-// HasOverlayDirs reports whether any directory uses :overlay mode. Overlay
-// sandboxes keep their git state inside the container, so callers route
-// diff/apply through container exec rather than the host work copy.
-func (e *Environment) HasOverlayDirs() bool {
-	for _, d := range e.Dirs {
-		if d.Mode == DirModeOverlay {
-			return true
-		}
-	}
-	return false
 }
 
 // DirInfo is the resolved state of one directory captured at creation time

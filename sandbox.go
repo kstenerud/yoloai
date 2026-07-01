@@ -68,7 +68,7 @@ func (s *Sandbox) Workdir() *Workdir {
 // TrackedDir returns a Workdir sub-handle targeted at the tracked directory
 // identified by hostPath. Returns a *UsageError if no directory with that
 // host path exists in the sandbox, or if the directory is not tracked
-// (mode :copy or :overlay).
+// (mode :copy).
 func (s *Sandbox) TrackedDir(hostPath string) (*Workdir, error) {
 	if err := s.checkNotDestroyed(); err != nil {
 		return nil, err
@@ -81,8 +81,8 @@ func (s *Sandbox) TrackedDir(hostPath string) (*Workdir, error) {
 	if dir == nil {
 		return nil, yoerrors.NewUsageError("no directory %q in sandbox %q", hostPath, s.name)
 	}
-	if dir.Mode != store.DirModeCopy && dir.Mode != store.DirModeOverlay {
-		return nil, yoerrors.NewUsageError("directory %q is not tracked (mode %s); diff/apply needs :copy or :overlay", hostPath, dir.Mode)
+	if dir.Mode != store.DirModeCopy {
+		return nil, yoerrors.NewUsageError("directory %q is not tracked (mode %s); diff/apply needs :copy", hostPath, dir.Mode)
 	}
 	return &Workdir{engine: s.engine, name: s.name, dirHostPath: hostPath}, nil
 }

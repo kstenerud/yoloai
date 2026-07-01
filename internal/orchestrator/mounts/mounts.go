@@ -40,24 +40,6 @@ func buildWorkdirMounts(st *state.State) []runtime.MountSpec {
 			HostPath:      st.WorkCopyDir,
 			ContainerPath: st.Workdir.ResolvedMountPath(),
 		}}
-	case "overlay":
-		encoded := store.EncodePath(st.Workdir.Path)
-		// Mount the entire overlay work base dir (upper/ovlwork/merged/lower) as
-		// a single bind mount so upper and ovlwork share the same underlying Docker
-		// volume — a kernel requirement for overlayfs to work inside a container.
-		// The user's workdir is then nested on top as a read-only bind mount at
-		// the lower/ subdirectory within the same volume.
-		return []runtime.MountSpec{
-			{
-				HostPath:      store.OverlayWorkBaseDir(st.SandboxDir, st.Workdir.Path),
-				ContainerPath: "/yoloai/overlay/" + encoded,
-			},
-			{
-				HostPath:      st.Workdir.Path,
-				ContainerPath: "/yoloai/overlay/" + encoded + "/lower",
-				ReadOnly:      true,
-			},
-		}
 	default:
 		return []runtime.MountSpec{{
 			HostPath:      st.Workdir.Path,
@@ -85,19 +67,6 @@ func buildSingleAuxDirMount(sandboxDir string, ad *state.DirSpec) []runtime.Moun
 			HostPath:      store.WorkDir(sandboxDir, ad.Path),
 			ContainerPath: mountTarget,
 		}}
-	case "overlay":
-		encoded := store.EncodePath(ad.Path)
-		return []runtime.MountSpec{
-			{
-				HostPath:      store.OverlayWorkBaseDir(sandboxDir, ad.Path),
-				ContainerPath: "/yoloai/overlay/" + encoded,
-			},
-			{
-				HostPath:      ad.Path,
-				ContainerPath: "/yoloai/overlay/" + encoded + "/lower",
-				ReadOnly:      true,
-			},
-		}
 	case "rw":
 		return []runtime.MountSpec{{
 			HostPath:      ad.Path,
@@ -347,14 +316,6 @@ func buildConfigAndSecretsMounts(st *state.State, secretsDir string) []runtime.M
 	}
 
 	return mounts
-}
-
-// HasOverlayDirs returns true if the sandbox's workdir uses overlay
-// mode. Q-U (2026-05-25) collapsed aux :overlay to the workdir only,
-// so this is now a single-field check. Kept as a named predicate for
-// callsite readability.
-func HasOverlayDirs(st *state.State) bool {
-	return st.Workdir.Mode == "overlay"
 }
 
 // ParseConfigMount parses a "host:container[:ro]" mount string into a MountSpec.

@@ -111,23 +111,3 @@ func TestExport_RWRefused(t *testing.T) {
 	var ue *yoerrors.UsageError
 	require.ErrorAs(t, err, &ue, ":rw export must yield a *UsageError")
 }
-
-// TestExport_OverlayRefsRefused refuses Refs on an overlay sandbox — overlay
-// changes have no commit history to select from. The refusal precedes any
-// runtime call, so rt is nil here.
-func TestExport_OverlayRefsRefused(t *testing.T) {
-	tmpDir := t.TempDir()
-	name := "export-overlay-refs"
-	layout := testLayout(tmpDir)
-	require.NoError(t, os.MkdirAll(layout.SandboxDir(name), 0750))
-	meta := &store.Environment{
-		Name: name,
-		Dirs: []store.DirEnvironment{{HostPath: filepath.Join(tmpDir, "p"), MountPath: filepath.Join(tmpDir, "p"), Mode: store.DirModeOverlay, BaselineSHA: "abc"}},
-	}
-	require.NoError(t, store.SaveEnvironment(layout.SandboxDir(name), meta))
-
-	_, err := Export(context.Background(), layout, nil, name, ExportOptions{Dir: filepath.Join(tmpDir, "out"), Refs: []string{"abc"}})
-	require.Error(t, err)
-	var ue *yoerrors.UsageError
-	require.ErrorAs(t, err, &ue, "overlay + Refs export must yield a *UsageError")
-}

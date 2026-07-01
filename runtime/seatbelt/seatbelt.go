@@ -36,7 +36,6 @@ var descriptor = runtime.BackendDescriptor{
 	SupportedIsolationModes:   nil,
 	Capabilities: runtime.BackendCaps{
 		NetworkIsolation:   false,
-		OverlayDirs:        false,
 		CapAdd:             false,
 		HostFilesystem:     true,
 		FilesystemLocality: runtime.LocalityHostSide,

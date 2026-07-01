@@ -12,7 +12,6 @@ import (
 	"github.com/kstenerud/yoloai/copyflow"
 	"github.com/kstenerud/yoloai/internal/orchestrator"
 	"github.com/kstenerud/yoloai/runtime"
-	"github.com/kstenerud/yoloai/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
 
@@ -69,21 +68,12 @@ func (w *Workdir) Diff(ctx context.Context, opts WorkdirDiffOptions) (out string
 	if err != nil {
 		return "", err
 	}
-	dir := meta.Dir(w.dirHostPath)
-	if dir == nil {
+	if dir := meta.Dir(w.dirHostPath); dir == nil {
 		return "", yoerrors.NewUsageError("no tracked directory found")
 	}
-	overlay := dir.Mode == store.DirModeOverlay
 
 	if opts.Ref != "" {
-		if overlay {
-			return "", yoerrors.NewPlatformError("ref-based diff is not supported for :overlay sandboxes (commits are not individually addressable from the host)")
-		}
 		return w.engine.GenerateCommitDiff(ctx, w.name, w.dirHostPath, opts.Ref, opts.Stat)
-	}
-
-	if overlay {
-		return w.engine.GenerateOverlayDiff(ctx, w.name, w.dirHostPath, opts.Stat, opts.NameOnly)
 	}
 
 	return w.engine.GenerateWorkingDiff(ctx, w.name, w.dirHostPath, opts.Paths, opts.Stat, opts.NameOnly, opts.PathPrefix)
@@ -120,11 +110,7 @@ func (w *Workdir) Changes(ctx context.Context) (_ *Changes, err error) {
 	}
 
 	var internal []copyflow.FileChange
-	if dir.Mode == store.DirModeOverlay {
-		internal, err = w.engine.GenerateOverlayChanges(ctx, w.name, w.dirHostPath)
-	} else {
-		internal, err = w.engine.GenerateWorkingChanges(ctx, w.name, w.dirHostPath, nil)
-	}
+	internal, err = w.engine.GenerateWorkingChanges(ctx, w.name, w.dirHostPath, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -285,16 +271,11 @@ func (w *Workdir) Apply(ctx context.Context, opts WorkdirApplyOptions) (_ *Apply
 	if err != nil {
 		return nil, err
 	}
-	dir := meta.Dir(w.dirHostPath)
-	if dir == nil {
+	if dir := meta.Dir(w.dirHostPath); dir == nil {
 		return nil, yoerrors.NewUsageError("no tracked directory found")
 	}
-	overlay := dir.Mode == store.DirModeOverlay
 
 	if opts.Mode == ApplyModeCommits {
-		if overlay {
-			return nil, yoerrors.NewUsageError("cannot replay a commit series for an :overlay sandbox — overlay changes have no commit history; apply with ApplyModeNoCommit")
-		}
 		return w.engine.ApplySeries(ctx, w.name, copyflow.ApplySeriesOptions{
 			Refs:               opts.Refs,
 			IncludeUncommitted: opts.IncludeUncommitted,
@@ -304,13 +285,6 @@ func (w *Workdir) Apply(ctx context.Context, opts WorkdirApplyOptions) (_ *Apply
 		})
 	}
 
-	if overlay {
-		return w.engine.ApplyOverlay(ctx, w.name, copyflow.ApplyOverlayOptions{
-			Paths:       opts.Paths,
-			DryRun:      opts.DryRun,
-			DirHostPath: w.dirHostPath,
-		})
-	}
 	return w.engine.ApplyAll(ctx, w.name, copyflow.ApplyAllOptions{
 		IncludeUncommitted: opts.IncludeUncommitted,
 		Paths:              opts.Paths,
@@ -352,17 +326,6 @@ func (w *Workdir) Commits(ctx context.Context, opts WorkdirCommitsOptions) (_ []
 	dir := meta.Dir(w.dirHostPath)
 	if dir == nil {
 		return nil, yoerrors.NewUsageError("no tracked directory found")
-	}
-
-	if dir.Mode == store.DirModeOverlay {
-		if opts.Stat {
-			return nil, yoerrors.NewPlatformError("per-commit stat is not supported for :overlay sandboxes (overlay commits are not individually addressable from the host)")
-		}
-		cs, err := w.engine.ListCommitsOverlay(ctx, w.name, w.dirHostPath)
-		if err != nil {
-			return nil, err
-		}
-		return toCommitInfos(cs), nil
 	}
 
 	if opts.Stat {

@@ -374,7 +374,7 @@ func detectWorkdirChanges(ctx context.Context, g *git.Git, sandboxDir string, me
 	}
 	// workdir has no unapplied work — check aux dirs before reporting "no"
 	for _, d := range meta.AuxDirs() {
-		if d.Mode == "copy" || d.Mode == "overlay" {
+		if d.Mode == "copy" {
 			auxWorkDir := store.WorkDir(sandboxDir, d.HostPath)
 			switch workprobe.HasUnappliedWorkVia(ctx, g, auxWorkDir, d.BaselineSHA) {
 			case workprobe.WorkDirty:

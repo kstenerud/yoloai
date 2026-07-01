@@ -14,7 +14,6 @@ import (
 func TestBackendCaps_Containerd(t *testing.T) {
 	caps := mustDescriptor(t, "containerd").Capabilities
 	assert.True(t, caps.NetworkIsolation)
-	assert.False(t, caps.OverlayDirs) // overlayfs not supported inside Kata VMs
 	assert.True(t, caps.CapAdd)
 }
 

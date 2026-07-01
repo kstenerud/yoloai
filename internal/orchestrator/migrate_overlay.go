@@ -254,8 +254,9 @@ func (o *OverlayFlatten) captureMerged(ctx context.Context, name, hostPath strin
 // captureContainerPaths returns the in-container merged-mount path and the
 // host-visible staging path (both container-side) for an overlay dir. The
 // staging dir is a sibling of merged under the bind-mounted overlay base, so it
-// lands host-side under WorkDir. Isolated here so the Phase-3b Docker test can
-// pin the exact mount layout.
+// lands host-side under WorkDir. Docker-validated end to end at commit f5a914e5
+// (before the overlay create path was removed, which made a live create-and-
+// flatten integration test impossible); the abandon path is unit-tested here.
 func captureContainerPaths(hostPath string) (merged, stage string) {
 	base := "/yoloai/overlay/" + store.EncodePath(hostPath)
 	return base + "/merged", base + "/" + captureStageName

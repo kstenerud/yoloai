@@ -2,14 +2,78 @@ package orchestrator
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/kstenerud/yoloai/internal/config"
+	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/migrate"
 	"github.com/kstenerud/yoloai/internal/orchestrator/status"
 	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/store"
 )
+
+// TestOverlayFlatten_AbandonFromFixture exercises the promotion + copy-mode
+// conversion off disk, no container: it stages a fake stopped overlay sandbox
+// (environment.json Mode=overlay + a pristine lower/) and runs the abandon
+// flatten, asserting the sandbox becomes :copy carrying the lower's content with
+// MountPath reset to the host path. (The running-capture path is Docker-validated
+// at commit f5a914e5, before Phase 4 deleted the overlay create path.)
+func TestOverlayFlatten_AbandonFromFixture(t *testing.T) {
+	dir := t.TempDir()
+	layout := config.NewLayout(dir)
+	const name, hostPath = "sbx", "/proj"
+	sandboxDir := layout.SandboxDir(name)
+	enc := store.EncodePath(hostPath)
+
+	// Pristine lower (the original workdir copy) with a file the flatten must keep.
+	lower := store.OverlayLowerDir(sandboxDir, hostPath)
+	if err := fileutil.MkdirAll(lower, 0o750); err != nil {
+		t.Fatalf("mkdir lower: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(lower, "keep.txt"), []byte("orig"), 0o600); err != nil {
+		t.Fatalf("write lower file: %v", err)
+	}
+	// A stopped overlay sandbox's on-disk form.
+	env := &store.Environment{Name: name, Dirs: []store.DirEnvironment{{
+		HostPath:    hostPath,
+		MountPath:   "/yoloai/overlay/" + enc + "/merged",
+		Mode:        store.DirModeOverlay,
+		BaselineSHA: "deadbeef",
+	}}}
+	if err := store.SaveEnvironment(sandboxDir, env); err != nil {
+		t.Fatalf("save env: %v", err)
+	}
+
+	m := NewOverlayFlatten(layout, dir, layout.SandboxesDir(), "linux",
+		func(context.Context) (runtime.Backend, error) {
+			t.Error("abandon flatten must not open a runtime")
+			return nil, nil
+		})
+	if _, err := m.flattenAbandon(name); err != nil {
+		t.Fatalf("flattenAbandon: %v", err)
+	}
+
+	flat, err := store.LoadEnvironment(sandboxDir)
+	if err != nil {
+		t.Fatalf("reload env: %v", err)
+	}
+	if flat.Workdir().Mode != store.DirModeCopy {
+		t.Errorf("Mode = %q, want copy", flat.Workdir().Mode)
+	}
+	if flat.Workdir().MountPath != hostPath {
+		t.Errorf("MountPath = %q, want %q", flat.Workdir().MountPath, hostPath)
+	}
+	got, err := os.ReadFile(filepath.Join(store.WorkDir(sandboxDir, hostPath), "keep.txt")) //nolint:gosec // test path
+	if err != nil {
+		t.Fatalf("read flattened work file: %v", err)
+	}
+	if string(got) != "orig" {
+		t.Errorf("keep.txt = %q, want orig (lower content carried)", got)
+	}
+}
 
 func TestClassifyOverlay(t *testing.T) {
 	for _, tc := range []struct {

@@ -4,6 +4,34 @@ Tracks breaking changes made during beta. Each entry should be included in relea
 
 ## v0.6.0
 
+### `:overlay` directory mode removed
+
+**Previous behavior:** directories could be mounted with the `:overlay` suffix
+(`yoloai new ./proj:overlay`, `-d ./lib:overlay`), which set the workdir up as a Linux
+overlayfs mount inside the container — instant setup, with changes captured in an upper
+layer and a container-bound diff/apply workflow. Docker/Podman only; required
+`CAP_SYS_ADMIN` in the agent container.
+
+**New behavior:** `:overlay` is no longer a recognized directory mode — the suffix is
+not parsed and no overlayfs is mounted. `:copy` (the default) is the diff/apply mode;
+`:rw` and read-only remain. Any existing `:overlay` sandbox is **automatically
+converted to `:copy`** by `yoloai system migrate` (the v3→v4 data-dir migration):
+while the sandbox is running, its merged overlay tree — including gitignored and
+uncommitted files — is captured verbatim into a `:copy` work dir, then the sandbox is
+stopped so it restarts cleanly in copy mode.
+
+**Rationale:** security. Overlayfs-in-container required granting the agent container
+`CAP_SYS_ADMIN`, which on rootful Docker is a host-escape primitive — an unacceptable
+capability to hand an untrusted agent, and not cheaply fixable (D109). `:copy` delivers
+the same protect-original / review-before-apply workflow with no elevated capability.
+
+**Migration:** run `yoloai system migrate` after upgrading; it flattens overlay
+sandboxes to copy mode. A **stopped** overlay sandbox can't be captured (its merged
+view isn't mounted): on Linux, downgrade to the prior binary, start it, and re-run
+migrate to preserve its changes; otherwise re-run with `--abandon-stopped-overlay` to
+flatten onto the original workdir, discarding the overlay's uncommitted changes. New
+sandboxes: use `:copy` (or `:copy-all`) instead of `:overlay`.
+
 ### `--network-isolated` sandboxes: agent container no longer holds CAP_NET_ADMIN (tamper-resistant firewall)
 
 **Previous behavior:** When `--network-isolated` was active, the agent container ran with `CAP_NET_ADMIN` so the container entrypoint could install iptables firewall rules directly. A sufficiently misbehaving or prompt-injected agent could call `iptables` itself to modify or remove those rules from inside the container.

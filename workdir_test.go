@@ -46,17 +46,3 @@ func TestWorkdir_Apply_RequiresMode(t *testing.T) {
 	var ue *yoerrors.UsageError
 	require.ErrorAs(t, err, &ue, "unset apply mode must be a *UsageError")
 }
-
-// TestWorkdir_Apply_OverlayRefusesCommits verifies comply-or-complain (D29): an
-// :overlay workdir has no commit history, so ApplyModeCommits is refused with a
-// *UsageError rather than silently doing something else.
-func TestWorkdir_Apply_OverlayRefusesCommits(t *testing.T) {
-	sb := newSandboxHandle(t, &store.Environment{
-		Name: "box",
-		Dirs: []store.DirEnvironment{{HostPath: "/x", MountPath: "/x", Mode: store.DirModeOverlay, BaselineSHA: "abc"}},
-	})
-	_, err := sb.Workdir().Apply(context.Background(), WorkdirApplyOptions{Mode: ApplyModeCommits})
-	require.Error(t, err)
-	var ue *yoerrors.UsageError
-	require.ErrorAs(t, err, &ue, "ApplyModeCommits on an overlay workdir must be a *UsageError")
-}

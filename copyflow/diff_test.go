@@ -437,58 +437,6 @@ func TestLoadDiffContext_CopyMode(t *testing.T) {
 	assert.Equal(t, store.WorkDir(sandboxDir, hostPath), workDir)
 }
 
-func TestLoadDiffContext_OverlayMode(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
-
-	name := "ctx-overlay"
-	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
-	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
-
-	meta := &store.Environment{
-		Name:      name,
-		CreatedAt: time.Now(),
-		Dirs: []store.DirEnvironment{{
-			HostPath:    "/tmp/project",
-			MountPath:   "/container/project",
-			Mode:        "overlay",
-			BaselineSHA: "overlay-sha",
-		}},
-	}
-	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
-
-	workDir, baselineSHA, mode, err := loadDiffContext(testLayout(tmpDir), name, "")
-	require.NoError(t, err)
-	assert.Equal(t, store.DirModeOverlay, mode)
-	assert.Equal(t, "overlay-sha", baselineSHA)
-	assert.Equal(t, "/container/project", workDir)
-}
-
-func TestLoadDiffContext_OverlayMode_FallbackToHostPath(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
-
-	name := "ctx-overlay-fallback"
-	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
-	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
-
-	meta := &store.Environment{
-		Name:      name,
-		CreatedAt: time.Now(),
-		Dirs: []store.DirEnvironment{{
-			HostPath: "/tmp/project",
-			Mode:     "overlay",
-			// MountPath intentionally empty
-		}},
-	}
-	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
-
-	workDir, _, mode, err := loadDiffContext(testLayout(tmpDir), name, "")
-	require.NoError(t, err)
-	assert.Equal(t, store.DirModeOverlay, mode)
-	assert.Equal(t, "/tmp/project", workDir)
-}
-
 func TestLoadDiffContext_RWMode(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
@@ -709,32 +657,4 @@ func TestParseNumstat_Rename(t *testing.T) {
 	got := parseNumstat(input)
 	require.Len(t, got, 1)
 	assert.Equal(t, FileChange{Path: "{old => new}/file.go", Additions: 2, Deletions: 0}, got[0])
-}
-
-func TestLoadAllDiffContexts_OverlayWorkdirWithMountPath(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
-
-	name := "all-overlay-mount"
-	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
-	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
-
-	meta := &store.Environment{
-		Name:      name,
-		CreatedAt: time.Now(),
-		Dirs: []store.DirEnvironment{{
-			HostPath:    "/host/project",
-			MountPath:   "/container/project",
-			Mode:        "overlay",
-			BaselineSHA: "sha-ovl",
-		}},
-	}
-	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
-
-	contexts, err := loadAllDiffContexts(testLayout(tmpDir), name, "")
-	require.NoError(t, err)
-	require.Len(t, contexts, 1)
-	assert.Equal(t, store.DirModeOverlay, contexts[0].Mode)
-	assert.Equal(t, "/container/project", contexts[0].WorkDir)
-	assert.Equal(t, "/host/project", contexts[0].HostPath)
 }

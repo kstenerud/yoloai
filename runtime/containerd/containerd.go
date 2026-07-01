@@ -40,7 +40,6 @@ var descriptor = runtime.BackendDescriptor{
 	SupportedIsolationModes:   []runtime.IsolationMode{runtime.IsolationModeVM, runtime.IsolationModeVMEnhanced},
 	Capabilities: runtime.BackendCaps{
 		NetworkIsolation:     true,
-		OverlayDirs:          false,
 		CapAdd:               true,
 		HostFilesystem:       false,
 		FilesystemLocality:   runtime.LocalityHostSide,

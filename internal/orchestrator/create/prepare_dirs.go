@@ -18,7 +18,6 @@ import (
 	"github.com/kstenerud/yoloai/internal/netpolicy"
 	"github.com/kstenerud/yoloai/internal/orchestrator/envspec"
 	"github.com/kstenerud/yoloai/internal/orchestrator/launch"
-	"github.com/kstenerud/yoloai/internal/orchestrator/runtimeconfig"
 	"github.com/kstenerud/yoloai/internal/orchestrator/state"
 	"github.com/kstenerud/yoloai/internal/workspace"
 	"github.com/kstenerud/yoloai/runtime"
@@ -149,10 +148,9 @@ func checkLocalhostURLs(d state.Deps, agentDef *agent.Definition, mergedEnv map[
 }
 
 // buildAuxDirs converts auxiliary DirSpec values to DirSpec and checks
-// existence. All modes are permitted: :copy and :overlay enable the
-// diff/apply workflow for multiple directories (D81, multi-workdir Phase 2),
-// :rw provides live-edit access, and :ro (the default when unset) is
-// read-only.
+// existence. All modes are permitted: :copy enables the diff/apply workflow
+// for multiple directories (D81, multi-workdir Phase 2), :rw provides live-edit
+// access, and :ro (the default when unset) is read-only. (:overlay retired — D109.)
 func buildAuxDirs(auxSpecs []DirSpec) ([]*DirSpec, error) {
 	var auxDirs []*DirSpec
 	for _, auxSpec := range auxSpecs {
@@ -232,7 +230,7 @@ func checkDirtyRepos(ctx context.Context, g *git.Git, workdir *DirSpec, auxDirs 
 		return err
 	}
 	for _, ad := range auxDirs {
-		if ad.Mode == "copy" || ad.Mode == "overlay" || ad.Mode == "rw" {
+		if ad.Mode == "copy" || ad.Mode == "rw" {
 			if err := check(ad); err != nil {
 				return err
 			}
@@ -264,10 +262,10 @@ func setupWorkdir(ctx context.Context, g *git.Git, sandboxDir string, workdir *D
 }
 
 // setupDirContent creates the appropriate host-side directory structure for
-// a :copy or :overlay dir. For other modes the workCopyDir is created as a
-// plain directory (used only as a placeholder; the actual mount is a live
-// bind-mount). sandboxDir is the sandbox root, dir is the DirSpec, and
-// workCopyDir is the pre-computed store.WorkDir path for dir.
+// a :copy dir. For other modes the workCopyDir is created as a plain directory
+// (used only as a placeholder; the actual mount is a live bind-mount).
+// sandboxDir is the sandbox root, dir is the DirSpec, and workCopyDir is the
+// pre-computed store.WorkDir path for dir.
 func setupDirContent(ctx context.Context, g *git.Git, sandboxDir string, dir *DirSpec, workCopyDir string) error {
 	switch dir.Mode {
 	case "copy":
@@ -276,17 +274,6 @@ func setupDirContent(ctx context.Context, g *git.Git, sandboxDir string, dir *Di
 		})
 		if err != nil {
 			return fmt.Errorf("copy dir: %w", err)
-		}
-	case "overlay":
-		for _, d := range []string{
-			store.OverlayUpperDir(sandboxDir, dir.Path),
-			store.OverlayOvlworkDir(sandboxDir, dir.Path),
-			store.OverlayMergedDir(sandboxDir, dir.Path),
-			store.OverlayLowerDir(sandboxDir, dir.Path),
-		} {
-			if err := fileutil.MkdirAll(d, 0755); err != nil { //nolint:gosec // G301: world-traversable so container yoloai user can access merged/
-				return fmt.Errorf("create overlay dir %s: %w", d, err)
-			}
 		}
 	default:
 		if err := fileutil.MkdirAll(workCopyDir, 0750); err != nil {
@@ -301,8 +288,6 @@ func createDirBaseline(ctx context.Context, g *git.Git, dir *DirSpec, workCopyDi
 	switch dir.Mode {
 	case "copy":
 		return createCopyBaseline(ctx, g, workCopyDir, rt)
-	case "overlay":
-		return "", nil
 	default:
 		sha, _ := g.HeadSHA(ctx, dir.Path)
 		return sha, nil
@@ -392,7 +377,7 @@ func setupAuxDirs(ctx context.Context, g *git.Git, sandboxDir string, rt runtime
 // doesn't exist in the guest. Identity for backends without translation.
 func setupAuxDir(ctx context.Context, g *git.Git, sandboxDir string, rt runtime.Backend, ad *DirSpec) (store.DirEnvironment, error) {
 	switch ad.Mode {
-	case DirModeCopy, DirModeOverlay:
+	case DirModeCopy:
 		workCopyDir := store.WorkDir(sandboxDir, ad.Path)
 		if err := setupDirContent(ctx, g, sandboxDir, ad, workCopyDir); err != nil {
 			return store.DirEnvironment{}, err
@@ -403,7 +388,7 @@ func setupAuxDir(ctx context.Context, g *git.Git, sandboxDir string, rt runtime.
 		}
 		return store.DirEnvironment{
 			HostPath:       ad.Path,
-			MountPath:      launch.OverlayOrResolvedMountPath(ad),
+			MountPath:      launch.WorkdirMountPath(ad),
 			Mode:           ad.Mode,
 			BaselineSHA:    baselineSHA,
 			InceptionSHA:   baselineSHA,
@@ -422,27 +407,6 @@ func setupAuxDir(ctx context.Context, g *git.Git, sandboxDir string, rt runtime.
 // and agent definition.
 func buildNetworkConfig(opts Options, agentDef *agent.Definition) (string, []string) {
 	return netpolicy.Compose(string(opts.Network), agentDef.NetworkAllowlist, opts.NetworkAllow)
-}
-
-// collectOverlayMounts builds overlay mount configs for config.json from the
-// workdir and any :overlay aux dirs (D81, multi-workdir Phase 2). Kept as a
-// function returning a slice so callers don't need to special-case
-// overlay-vs-no-overlay at every config.json assembly site.
-func collectOverlayMounts(workdir *DirSpec, auxDirs []*DirSpec) []runtimeconfig.OverlayMountConfig {
-	var mounts []runtimeconfig.OverlayMountConfig
-	for _, d := range append([]*DirSpec{workdir}, auxDirs...) {
-		if d.Mode != "overlay" {
-			continue
-		}
-		base := "/yoloai/overlay/" + store.EncodePath(d.Path) + "/"
-		mounts = append(mounts, runtimeconfig.OverlayMountConfig{
-			Lower:  base + "lower",
-			Upper:  base + "upper",
-			Work:   base + "ovlwork",
-			Merged: base + "merged",
-		})
-	}
-	return mounts
 }
 
 // collectCopyDirs returns the mount paths of all :copy dirs — workdir and any
