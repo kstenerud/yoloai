@@ -142,6 +142,7 @@ inclusion test first, then add a row to the index.
 | `install network-isolation firewall: netns sidecar exited 2: … can't open file '/yoloai/bin/install-firewall.py'` (intermittent, under concurrent churn; file is present in image) | [Docker/OrbStack: ephemeral container transiently exposes an incomplete rootfs](#a-freshly-created-ephemeral-container-can-transiently-expose-an-incomplete-rootfs-under-heavy-concurrent-churn) |
 | Same `install-firewall.py` (or any embedded-resource) error, but **deterministic** on one docker provider while another passes — file genuinely absent from that provider's image | [Docker: base-image staleness marker keyed per backend, not per provider/store](#docker-base-image-staleness-marker-was-keyed-per-backend-not-per-image-store-second-provider-runs-stale) |
 | macOS `:overlay` sandbox loses the agent's uncommitted changes after `stop`/`restart`/`kill`; `yoloai diff` showed them while running | [macOS: overlayfs on a VirtioFS bind silently downgrades to a tmpfs upper (changes lost on restart)](#macos-overlayfs-on-a-virtiofs-bind-mount-silently-downgrades-to-a-container-local-tmpfs-upper-uncommitted-changes-lost-on-restart) |
+| `:overlay` create on Podman-macOS crashes the entrypoint (`mount … cannot mount overlay read-only`, exit 32); container `Exited`, incomplete v3 sandbox | [macOS: overlayfs on a VirtioFS bind …](#macos-overlayfs-on-a-virtiofs-bind-mount-silently-downgrades-to-a-container-local-tmpfs-upper-uncommitted-changes-lost-on-restart) (Podman applehv variant) |
 
 ---
 
@@ -2500,12 +2501,31 @@ changes are lost on both graceful `stop`+`start` and non-graceful `kill`+`start`
 `container`. `yoloai diff` works only because it execs `git` *inside* the live
 container against the merged overlay (overlay diff/apply is container-bound).
 
+**Podman Machine (applehv) fails harder — no tmpfs downgrade.** Verified on-device
+2026-07-01 (podman 5.8.2, applehv), using the `main` binary's base image. A macOS
+`:overlay` create does **not** reach the tmpfs fallback above: the very first
+`mount -t overlay` inside the container fails outright — `mount: …/merged: cannot
+mount overlay read-only` (exit 32) — so `apply_overlays()` raises and the entrypoint
+exits 1 before any write-probe runs. The result is not a lossy-but-running sandbox but
+an **incomplete v3 sandbox**: the container is `Exited`, and the host overlay dirs
+(`lower/upper/ovlwork/merged`) exist but are often empty (the crash preceded `lower`
+seeding). Why podman differs: its guest kernel/overlayfs rejects a VirtioFS `upperdir`
+at mount time, where OrbStack/Docker Desktop/Apple `container` let the mount succeed
+read-only and only fail the later write probe. Same conclusion — `:overlay` is unusable
+on macOS — but the failure mode and on-disk residue differ.
+
 **Consequences.**
 - A *stopped* macOS `:overlay` sandbox has already lost its uncommitted changes; do
   not assume the host upper is authoritative on macOS.
-- The planned overlay→copy flatten migration (D109) **cannot** flatten a stopped
-  macOS overlay sandbox — it must convert **while the sandbox is live**, and the
-  migration UX must say so. See DF69 and
+- The overlay→copy flatten migration (D109 / v3→v4) treats a stopped or removed macOS
+  overlay sandbox via the **abandon** path: the upper is already lost, so it flattens
+  onto the pristine `lower` and requires `--abandon-stopped-overlay` (a plain `--yes`
+  refuses). Live **capture** (`flattenRunning`) is Linux-only by construction — a macOS
+  host can never hold a live overlay container (podman fails the mount; the others run
+  only with a container-local tmpfs upper). Verified end-to-end on macOS 2026-07-01:
+  podman (stopped→abandon) and docker (removed→abandon). An earlier draft of this entry
+  assumed the flatten would convert "while the sandbox is live" on macOS — that path is
+  unreachable there. See DF69 and
   [design/research/reflink-vs-hardlink.md](design/research/reflink-vs-hardlink.md)
   §B/§C.
 
