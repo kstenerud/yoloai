@@ -21,6 +21,13 @@ const (
 	// satisfy it, so --yes alone never destroys work. E.g. flattening a stopped
 	// overlay sandbox whose upper changes are abandoned.
 	AuthAbandonOverlay
+	// AuthBlocked — the op cannot be performed at all, by any approval: a hard
+	// precondition the migrator can't satisfy (not a policy the user can waive).
+	// No Decision satisfies it (see satisfies' default), so the run refuses up
+	// front and the app surfaces the Op's Description as the reason + fix. E.g. a
+	// rootless-backend sandbox whose container-written state is owned by host
+	// subuids the migration can't read or remove.
+	AuthBlocked
 )
 
 // Op is one operation a migrator would perform, as surfaced in its plan.
@@ -34,9 +41,13 @@ type Op struct {
 	Sandbox string
 }
 
-// Destructive reports whether the op needs any approval (i.e. mutates or
-// discards user data).
-func (o Op) Destructive() bool { return o.Auth > AuthNone }
+// Destructive reports whether the op needs approval (i.e. mutates or discards
+// user data). AuthBlocked is not destructive — it never runs; it is a hard
+// refusal the app surfaces separately.
+func (o Op) Destructive() bool { return o.Auth == AuthConfirm || o.Auth == AuthAbandonOverlay }
+
+// Blocked reports whether the op cannot be performed by any approval.
+func (o Op) Blocked() bool { return o.Auth == AuthBlocked }
 
 // Plan is one migrator's read-only description of what it would do.
 type Plan struct {

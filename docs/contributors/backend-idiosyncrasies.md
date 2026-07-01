@@ -2574,10 +2574,16 @@ rootful Docker (committed + uncommitted + gitignored preserved, `:copy`, v4).
 **Limitation (podman-rootless):** normalizing subuid ownership host-side needs a
 privileged helper (a throwaway root container, or `podman unshare chown`), which
 isn't wired in — overlay-on-podman-rootless across a D109 upgrade is a rare edge.
-So the migrator detects the foreign-uid state **up front** (`assertHostOwnedState`)
-and refuses cleanly with actionable guidance, leaving the sandbox **untouched**
-(no half-swap; mode stays `overlay`, realm stays v3). Workaround: recreate the
-sandbox as `:copy`, or run the migration under Docker.
+So the migrator detects the foreign-uid state and surfaces it as a hard
+**blocked** op: `migrate --check`/`--dry-run` lists it up front (`[✗] sandbox "X"
+can't be migrated in place …`, `blocked:true` in `--json`), and a real `migrate`
+**refuses the whole run** ("this migration can't proceed …") before mutating
+anything — the sandbox is left **untouched** (mode stays `overlay`, realm stays
+v3, no sentinels). The block is an `AuthBlocked` plan op (`Plan` calls
+`hostUnmanageableReason`; no `Decision` satisfies it) plus the apply-time
+`assertHostOwnedState` re-check. Workaround (in the message): recover any wanted
+changes (`yoloai diff`/`apply`), then `yoloai destroy` the sandbox and recreate
+it as `:copy`. A quarantine (rename-only) is exempt and still works.
 
 **Code:** `internal/orchestrator/migrate_overlay.go` — `reclaimOverlayLayers`,
 `captureMerged` (capture-as-root + stage chown), `assertHostOwnedState`;

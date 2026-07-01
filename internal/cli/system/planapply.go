@@ -69,6 +69,8 @@ func authorize(plan yoloai.MigrationPlan, d yoloai.MigrationDecision) (ok bool, 
 
 func opSatisfied(op yoloai.MigrationOp, d yoloai.MigrationDecision) bool {
 	switch {
+	case op.Blocked:
+		return false // no approval satisfies a hard block
 	case !op.Destructive:
 		return true
 	case op.AbandonsWork:
@@ -84,11 +86,21 @@ func opSatisfied(op yoloai.MigrationOp, d yoloai.MigrationDecision) bool {
 // work. Remaining confirm-level ops are prompted; a headless run reads EOF and
 // declines (defaults to abort).
 func resolveApproval(ctx context.Context, opts planApplyOpts, unmet []yoloai.MigrationOp, d *yoloai.MigrationDecision) (bool, error) {
-	var needsAbandon []string
+	var blocked, needsAbandon []string
 	for _, op := range unmet {
-		if op.AbandonsWork {
+		switch {
+		case op.Blocked:
+			blocked = append(blocked, op.Description)
+		case op.AbandonsWork:
 			needsAbandon = append(needsAbandon, op.Description)
 		}
+	}
+	// A hard block can't be waived by any flag — surface it first, with the
+	// per-sandbox reason + fix carried in each Description.
+	if len(blocked) > 0 {
+		return false, fmt.Errorf(
+			"this migration can't proceed — the following can't be migrated:\n  - %s",
+			strings.Join(blocked, "\n  - "))
 	}
 	if len(needsAbandon) > 0 {
 		return false, fmt.Errorf(
@@ -162,7 +174,10 @@ func renderPlanHuman(opts planApplyOpts, plan yoloai.MigrationPlan) error {
 	}
 	for _, op := range plan.Ops {
 		marker := " "
-		if op.Destructive {
+		switch {
+		case op.Blocked:
+			marker = "✗"
+		case op.Destructive:
 			marker = "!"
 		}
 		if _, err := fmt.Fprintf(opts.out, "  [%s] %s\n", marker, op.Description); err != nil {

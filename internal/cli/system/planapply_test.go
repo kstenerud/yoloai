@@ -21,6 +21,7 @@ func TestAuthorize(t *testing.T) {
 		{"destructive needs yes — granted", yoloai.MigrationOp{Description: "q", Destructive: true}, yoloai.MigrationDecision{Yes: true}, true},
 		{"abandon needs both — yes only", yoloai.MigrationOp{Description: "a", Destructive: true, AbandonsWork: true}, yoloai.MigrationDecision{Yes: true}, false},
 		{"abandon needs both — granted", yoloai.MigrationOp{Description: "a", Destructive: true, AbandonsWork: true}, yoloai.MigrationDecision{Yes: true, AbandonStoppedOverlay: true}, true},
+		{"blocked never satisfied", yoloai.MigrationOp{Description: "b", Blocked: true}, yoloai.MigrationDecision{Yes: true, AbandonStoppedOverlay: true}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ok, unmet := authorize(yoloai.MigrationPlan{Ops: []yoloai.MigrationOp{tc.op}}, tc.dec)
@@ -46,6 +47,24 @@ func TestResolveApproval_AbandonRefusedWithoutFlag(t *testing.T) {
 	}
 	if granted {
 		t.Error("abandon op was granted without its flag")
+	}
+}
+
+// A blocked op can't be waived by any flag or prompt: resolveApproval refuses
+// with its reason, never the abandon path, even with full authorization + a "y".
+func TestResolveApproval_BlockedRefused(t *testing.T) {
+	opts := planApplyOpts{in: strings.NewReader("y\n"), out: &bytes.Buffer{}, errw: &bytes.Buffer{}}
+	unmet := []yoloai.MigrationOp{{Description: "sandbox \"x\" can't be migrated in place: owned by uid 100999 …", Blocked: true}}
+	d := yoloai.MigrationDecision{Yes: true, AbandonStoppedOverlay: true}
+	granted, err := resolveApproval(context.Background(), opts, unmet, &d)
+	if err == nil || !strings.Contains(err.Error(), "can't proceed") {
+		t.Fatalf("err = %v, want a hard 'can't proceed' refusal", err)
+	}
+	if strings.Contains(err.Error(), "--abandon-stopped-overlay") {
+		t.Error("blocked op was surfaced as an abandon-authorization prompt")
+	}
+	if granted {
+		t.Error("blocked op was granted")
 	}
 }
 

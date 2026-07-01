@@ -24,6 +24,11 @@ type MigrationOp struct {
 	// the explicit --abandon-stopped-overlay authorization (a plain "yes" never
 	// suffices).
 	AbandonsWork bool `json:"abandons_work"`
+	// Blocked reports that the op cannot be performed by any approval — a hard
+	// precondition the migration can't satisfy (not a policy the user can waive).
+	// Description carries the reason and fix; the run refuses while any op is
+	// blocked.
+	Blocked bool `json:"blocked,omitempty"`
 	// Sandbox, when set, is the sandbox the op concerns.
 	Sandbox string `json:"sandbox,omitempty"`
 }
@@ -76,6 +81,7 @@ func (s *System) MigrationPlan(ctx context.Context) (MigrationPlan, error) {
 				Description:  op.Description,
 				Destructive:  op.Destructive(),
 				AbandonsWork: op.Auth == migrate.AuthAbandonOverlay,
+				Blocked:      op.Blocked(),
 				Sandbox:      op.Sandbox,
 			})
 		}

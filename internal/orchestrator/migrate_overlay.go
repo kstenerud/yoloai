@@ -102,7 +102,18 @@ func (o *OverlayFlatten) Plan(ctx context.Context) (migrate.Plan, error) {
 		if err != nil {
 			return migrate.Plan{}, err
 		}
-		ops = append(ops, classifyOverlay(name, st, o.goos))
+		op := classifyOverlay(name, st, o.goos)
+		// A flatten (running-capture or abandon) runs host-side, so it can't
+		// proceed if the sandbox's state is owned by host subuids (rootless
+		// backend). Surface that in the plan as a hard block. Quarantine
+		// (AuthConfirm) is exempt: it only renames the sandbox dir, which survives
+		// subuid-owned children.
+		if op.Auth != migrate.AuthConfirm {
+			if reason := o.hostUnmanageableReason(name); reason != "" {
+				op = migrate.Op{Description: reason, Auth: migrate.AuthBlocked, Sandbox: name}
+			}
+		}
+		ops = append(ops, op)
 	}
 	return migrate.Plan{Ops: ops}, nil
 }
@@ -173,27 +184,40 @@ func (o *OverlayFlatten) flattenOne(ctx context.Context, name string, st status.
 	}
 }
 
-// assertHostOwnedState refuses to flatten a sandbox whose host-side state is
-// owned by a user id the invoking user can neither read nor remove. The flatten
-// runs entirely host-side (repopulate copies the sandbox's non-work state into
-// the new dir; the disposer removes the old dir), so it needs host access to
-// every top-level entry except work/ (whose overlay layers are reclaimed to the
-// host user during capture). Rootless backends with a userns that maps the
-// container's users to host subuids — podman-rootless — write runtime state
-// (agent-status.json, logs/, cache/, files/) under a subuid (e.g. 100999) at
-// mode 0600, which the host process can't touch. Docker (rootful) maps container
-// users to the host user or root, both host-manageable, so it is unaffected.
-// Detected up front so the migration refuses cleanly with actionable guidance
-// instead of failing mid-promotion and stranding a half-swapped sandbox.
+// assertHostOwnedState is the apply-time guard: it refuses (as an error) any
+// sandbox the plan would have flagged AuthBlocked, so a flatten never begins on
+// state it can't finish. Defense in depth — the plan already surfaces the same
+// reason, but the state can drift between plan and apply.
 func (o *OverlayFlatten) assertHostOwnedState(name string) error {
+	if reason := o.hostUnmanageableReason(name); reason != "" {
+		return errors.New(reason)
+	}
+	return nil
+}
+
+// hostUnmanageableReason returns a user-facing explanation when the sandbox's
+// host-side state is owned by a user id the invoking user can neither read nor
+// remove, or "" when it is manageable. The flatten runs entirely host-side
+// (repopulate copies the sandbox's non-work state into the new dir; the disposer
+// removes the old dir), so it needs host access to every top-level entry except
+// work/ (whose overlay layers are reclaimed to the host user during capture).
+// Rootless backends with a userns that maps the container's users to host
+// subuids — podman-rootless — write runtime state (agent-status.json, logs/,
+// cache/, files/) under a subuid (e.g. 100999) at mode 0600, which the host
+// process can't touch. Docker (rootful) maps container users to the host user or
+// root, both host-manageable, so it is unaffected. Surfaced in the plan (a hard
+// AuthBlocked op) and re-checked at apply, so the migration refuses cleanly with
+// actionable guidance instead of failing mid-promotion and stranding a
+// half-swapped sandbox.
+func (o *OverlayFlatten) hostUnmanageableReason(name string) string {
 	if fileutil.ProcessIsRoot() {
-		return nil // root manages any ownership
+		return "" // root manages any ownership
 	}
 	sandboxDir := o.layout.SandboxDir(name)
 	hostUID := fileutil.HostUID()
 	entries, err := os.ReadDir(sandboxDir)
 	if err != nil {
-		return fmt.Errorf("inspect sandbox dir for %q: %w", name, err)
+		return "" // an unreadable sandbox dir surfaces elsewhere; don't block on a stat hiccup
 	}
 	for _, e := range entries {
 		if e.Name() == "work" {
@@ -205,10 +229,10 @@ func (o *OverlayFlatten) assertHostOwnedState(name string) error {
 		}
 		uid, ok := fileOwnerUID(info)
 		if ok && uid != hostUID && uid != 0 {
-			return fmt.Errorf("cannot migrate sandbox %q: its runtime state (%s) is owned by uid %d, not you (uid %d) — a rootless backend (e.g. podman) mapped the container's users to host subuids, so the migration can't read or remove it host-side. Recreate this sandbox as :copy (or migrate it under Docker)", name, e.Name(), uid, hostUID)
+			return fmt.Sprintf("sandbox %q can't be migrated in place: its runtime state (%s) is owned by uid %d, not you (uid %d) — a rootless backend (e.g. podman) maps the container's users to host subuids the migration can't read or remove. Recover any wanted changes (yoloai diff/apply), then destroy it (yoloai destroy %s) and recreate it as :copy", name, e.Name(), uid, hostUID, name)
 		}
 	}
-	return nil
+	return ""
 }
 
 // flattenRunning captures the running container's merged overlay tree and
