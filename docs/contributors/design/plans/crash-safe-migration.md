@@ -541,7 +541,8 @@ version-or-form, migrate stragglers).
    at all** (no `CAP_SYS_ADMIN`/mount code) *and* runs **no git over the captured tree** (clear
    of C1 and DF70). The cost: the sandbox must be **already running** to flatten (the binary
    can't start a stopped overlay) — stopped is a plan-surfaced choice (Source consistency).
-   (DF70's `--unsafe-paths` fix is still needed independently for copy-mode's non-git apply.)
+   (DF70's `--unsafe-paths` removal — needed independently for copy-mode's non-git apply — is
+   **landed on `main`, commit 35c8c576**; see findings-resolved.md.)
 9. *(plus the user's pending critiques)*
 
 ## Migration chain (decoupled from release cadence, D110)
