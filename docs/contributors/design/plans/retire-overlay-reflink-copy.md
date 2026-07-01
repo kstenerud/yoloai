@@ -207,10 +207,11 @@ correct merged view comes only from a live overlayfs mount; the new binary can't
 a plain start reads only the lower (no agent changes), and offline host-side reconstruction
 needs `CAP_SYS_ADMIN` to read overlayfs `trusted.overlay.*` opaque/redirect xattrs (the
 unprivileged binary can't, so it can't reconstruct deletions correctly — re-audit Op-F1). The
-dry-run plan enumerates affected **stopped** overlay sandboxes and **branches by backend**:
-**Linux-stopped** is recoverable (upper persists host-side) → downgrade, start it, re-upgrade,
-re-run (the container survives the binary swap); **macOS-stopped** is **already lost** (DF69 —
-tmpfs upper gone at stop, so downgrade-and-start can't help). Either way the user may instead
+dry-run plan enumerates affected **stopped** overlay sandboxes and **branches by host platform
+(`runtime.GOOS`, not the stored backend — overlay is docker-only, so backend can't tell Linux
+from macOS)**: **Linux-stopped** is recoverable (upper persists host-side) → downgrade, start it,
+re-upgrade, re-run (the container survives the binary swap); **macOS-stopped** is **already lost**
+(DF69 — tmpfs upper gone at stop, so downgrade-and-start can't help). Either way the user may instead
 **proceed** — destructive, abandons the overlay changes — **lost** (macOS: already gone; Linux:
 the displaced upper is **dropped**, not trashed — the flatten doesn't stash secret-bearing
 deltas). The gate-deadlock (the gate blocks `start`
