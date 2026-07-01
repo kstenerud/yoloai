@@ -32,16 +32,6 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 - **Trigger:** seatbelt — wrap the work-copy git in `sandbox-exec` (the agent's profile) **and** tighten the caps-F5 SBPL (`mach-lookup`/`process-exec`); probe — make the broken-metadata fallback disable drivers (`-c core.fsmonitor=` etc.) since it only ever runs `status`, or route it through the confined path when a backend is resolvable.
 - **Pointer:** [plans/copy-mode-git-rce.md](plans/copy-mode-git-rce.md) (step 5 + residuals); `internal/git/git.go` (`NewSandbox` host fallback), `internal/orchestrator/workprobe/workprobe.go` (`DetectChanges`), `internal/orchestrator/status/` (`ProbeWorkData`).
 
-### DF65 — `:overlay` grants CAP_SYS_ADMIN → host escape on Docker rootful
-
-- **Discovered:** 2026-06-29 · **Workstream:** escape/exfil security audit (caps F1 / mount F1)
-- **Severity:** HIGH (host escape), but opt-in: only reachable when the user selects `:overlay`
-- **Disposition:** PARKED — **resolution decided: RETIRE `:overlay` (D109), not gate/fix it.** v0.6.0 interim (documented dangerous opt-in + loud warning) stands until the removal lands.
-- **Description:** `:overlay` mounts **kernel** overlayfs, which forces `CAP_SYS_ADMIN` + `apparmor=unconfined`. On Docker rootful the container root maps to host uid 0 (only Podman implements `UsernsProvider`), and the agent has passwordless sudo, so it becomes root with `SYS_ADMIN` in the init namespace → cgroup `release_agent` / `core_pattern` host code execution. Not default-reachable (`:copy`/RO sandboxes have no `SYS_ADMIN`).
-- **Plan audited 2026-06-29 — the proposed fuse-overlayfs fix is REFUTED.** Empirically tested on real rootful Docker: fuse-overlayfs there needs the *same* `CAP_SYS_ADMIN` (the cap is dropped from the bounding set, so the setuid `fusermount3` can't mount; disabling seccomp doesn't help; the container can't self-create a userns to host an unprivileged FUSE mount). fuse-overlayfs is unprivileged only **inside a user namespace** (rootless Podman / userns-remapped Docker) — yoloAI's rootful no-remap container isn't one. Classic GEN §14 trap (leaned on the tool's rootless reputation, not its contract here). The only real fixes: **gate `:overlay` to userns-remapped/rootless daemons and refuse it on rootful non-remapped Docker**, or rethink whether `:overlay` needs an in-container kernel mount at all. See the revised plan.
-- **Trigger:** **resolved direction — retire `:overlay` and replace its benefit with reflink-aware `:copy` (D109, [plans/retire-overlay-reflink-copy.md](plans/retire-overlay-reflink-copy.md)).** Phase 1 (reflink `:copy`) is additive and can land independently; Phase 2 (remove `:overlay`) is breaking and targets the next minor. The daemon-posture gate was the earlier idea but is moot once the mode is removed. Until removal, ship the v0.6.0 interim (documented dangerous opt-in + loud warning).
-- **Pointer:** [plans/overlay-sysadmin-escape.md](plans/overlay-sysadmin-escape.md); `runtime/docker/resources/entrypoint.py` (overlay mount), `runtime/docker/docker.go:547`, `internal/orchestrator/launch/launch.go:843`.
-
 ### DF54 — New verbs (`run`, `diff --json`, `sandbox_run`) lack automated E2E/smoke coverage
 
 - **Discovered:** 2026-06-27 · **Workstream:** pre-merge audit (test-gap)

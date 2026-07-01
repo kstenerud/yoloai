@@ -7,6 +7,14 @@ History of codebase findings (issues discovered mid-work) that have been address
 are moved here from [`findings-unresolved.md`](findings-unresolved.md) once resolved, so the
 active file stays a working set. Newest first.
 
+### DF65 — `:overlay` grants CAP_SYS_ADMIN → host escape on Docker rootful — RESOLVED (mode removed)
+
+- **Discovered:** 2026-06-29 · **Workstream:** escape/exfil security audit (caps F1 / mount F1)
+- **Severity:** HIGH (host escape), but opt-in: only reachable when the user selected `:overlay`
+- **Disposition:** **RESOLVED 2026-07-01** by removing the attack surface entirely: `:overlay` was retired as a directory mode (D109) and the whole kernel-overlayfs create/mount path — including the overlay `CAP_SYS_ADMIN`/`apparmor=unconfined` auto-grant (`applyOverlayAndCaps`) — was deleted in the crash-safe-migration merge (`095dab69` on `release-prep`). The `SYS_ADMIN` references that remain are unrelated to this escape: host-side CAP_SYS_ADMIN for VM/CNI networking setup, devcontainer cap-detection (H1 refuses a self-granted cap), and generic cap-name normalization. The parked interim (documented dangerous opt-in + loud warning) is moot: the mode no longer exists, and existing overlay sandboxes are auto-converted to `:copy` by the v3→v4 `system migrate` (D110). Was PARKED because the decided direction was retire-not-gate; the audited fuse-overlayfs fix was refuted (it needs the same `CAP_SYS_ADMIN` on rootful no-remap Docker — a GEN §14 trap), which is exactly why removal, not a gate, was the right call.
+- **Description:** `:overlay` mounted **kernel** overlayfs, which forces `CAP_SYS_ADMIN` + `apparmor=unconfined`. On Docker rootful the container root maps to host uid 0 (only Podman implements `UsernsProvider`) and the agent had passwordless sudo, so it became root with `SYS_ADMIN` in the init namespace → cgroup `release_agent` / `core_pattern` host code execution. Never default-reachable (`:copy`/RO sandboxes have no `SYS_ADMIN`).
+- **Pointer:** BREAKING-CHANGES.md `## v0.6.0` (`:overlay` removed); D109/D110 in `decisions/working-notes.md`; the removal deleted the entrypoint overlay mount, `applyOverlayAndCaps`, and the `OverlayDirs` cap. Sibling apply-path finding: DF71 (host-side ownership during flatten).
+
 ### DF71 — overlay flatten migration: host-side ownership of container-written state (rootful Docker fixed; podman-rootless refused) — RESOLVED
 
 - **Discovered:** 2026-07-01 · **Workstream:** crash-safe-migration post-build real-hardware E2E (Linux, docker + podman-rootless) · **Verified on-device:** 2026-07-01

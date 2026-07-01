@@ -18,13 +18,15 @@ type SchemaRelease struct {
 //
 // MAINTENANCE: append the new schema's first tag WHEN a release bumps
 // LibrarySchemaVersion — an entry here asserts "this schema shipped in this tag,"
-// so only add real, released tags. The library/cli-split release (schema 3) and
-// the :overlay-retirement release (schema 4) are intentionally absent until they
-// ship; PriorReleaseRange degrades gracefully (open-ended upper bound) until then.
+// so only add real, released tags. Schema 3 (the library/cli split) never shipped
+// as its own public tag — it folded into v0.6.0, which also retires :overlay and
+// stamps schema 4 — so there is no schema-3 entry; PriorReleaseRange degrades
+// gracefully across the gap (open-ended upper bound for onDisk == 3).
 var LibrarySchemaReleases = []SchemaRelease{
 	{Schema: 0, Tag: "v0.1.0"}, // pre-.schema-version (flat) era: v0.1.0 – v0.2.6
 	{Schema: 1, Tag: "v0.3.0"}, // v0.3.0
 	{Schema: 2, Tag: "v0.4.0"}, // v0.4.0 – v0.5.2
+	{Schema: 4, Tag: "v0.6.0"}, // v0.6.0 (:overlay retired; schema 3 never published)
 }
 
 // PriorReleaseRange returns the release-tag range whose builds read a data dir at
