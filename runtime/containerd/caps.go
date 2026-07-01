@@ -105,7 +105,7 @@ func buildCNINetAdminCap() caps.HostCapability {
 	return caps.HostCapability{
 		ID:      "cni-net-admin",
 		Summary: "CAP_NET_ADMIN for CNI bridge",
-		Detail:  "The CNI bridge plugin needs CAP_NET_ADMIN+CAP_SYS_ADMIN to set up VM networking. Run as root, or grant capabilities to the bridge binary.",
+		Detail:  "VM networking runs a chain of CNI plugins (bridge, host-local IPAM, portmap, firewall), each a separate process needing CAP_NET_ADMIN+CAP_SYS_ADMIN. They also persist state under /var/lib/cni, which is root-owned by default — so running yoloai as root is the reliable option.",
 		Check: func(_ context.Context) error {
 			return canRunCNIBridgeFunc()
 		},
@@ -113,13 +113,13 @@ func buildCNINetAdminCap() caps.HostCapability {
 		Fix: func(_ caps.Environment) []caps.FixStep {
 			return []caps.FixStep{
 				{
-					Description: "Run as root (simplest)",
+					Description: "Run yoloai as root (recommended for --isolation vm)",
 					Command:     "sudo yoloai new mybox --isolation vm ...",
 					NeedsRoot:   true,
 				},
 				{
-					Description: "Grant capabilities to the CNI bridge binary",
-					Command:     "sudo setcap cap_net_admin,cap_sys_admin+ep /opt/cni/bin/bridge",
+					Description: "Advanced (rootless): setcap EVERY CNI plugin in the chain AND make /var/lib/cni + /run/cni writable by your user — capping the bridge alone is not enough",
+					Command:     "sudo setcap cap_net_admin,cap_sys_admin+ep /opt/cni/bin/bridge   # repeat for host-local, portmap, firewall",
 					NeedsRoot:   true,
 				},
 			}
@@ -133,7 +133,7 @@ func buildNetnsCreationCap() caps.HostCapability {
 	return caps.HostCapability{
 		ID:      "netns-creation",
 		Summary: "network namespace creation",
-		Detail:  "VM isolation requires CAP_SYS_ADMIN to create named network namespaces.",
+		Detail:  "VM isolation requires CAP_SYS_ADMIN to create named network namespaces. This is only the first privileged step — the CNI plugin chain that follows also needs root (see 'CAP_NET_ADMIN for CNI bridge'), so running yoloai as root fixes the whole flow at once.",
 		Check: func(_ context.Context) error {
 			return canCreateNetNSFunc()
 		},
@@ -143,12 +143,12 @@ func buildNetnsCreationCap() caps.HostCapability {
 		Fix: func(_ caps.Environment) []caps.FixStep {
 			return []caps.FixStep{
 				{
-					Description: "Run as root (simplest)",
+					Description: "Run yoloai as root (recommended for --isolation vm)",
 					Command:     "sudo yoloai new mybox --isolation vm ...",
 					NeedsRoot:   true,
 				},
 				{
-					Description: "Grant capability to binary (lost on reinstall)",
+					Description: "Advanced: grant yoloai this capability — fixes ONLY netns creation; you will still hit the root-owned CNI state next (lost on rebuild/reinstall)",
 					Command:     "sudo setcap cap_sys_admin,cap_dac_override+ep $(which yoloai)",
 					NeedsRoot:   true,
 				},
