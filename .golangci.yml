@@ -490,7 +490,7 @@ linters:
       # unused). internal/mcpsrv/ doesn't need an exemption either —
       # it migrated to *yoloai.Client and references only sandbox
       # value types (DirSpec, Status constants, CreateOptions).
-      - path: "^client\\.go$|^system\\.go$|^discovery\\.go$|^tart_bases\\.go$|^runtime/|^internal/orchestrator/|^store/|^copyflow/|^internal/git/"
+      - path: "^client\\.go$|^system\\.go$|^migration\\.go$|^discovery\\.go$|^tart_bases\\.go$|^runtime/|^internal/orchestrator/|^store/|^copyflow/|^internal/git/"
         linters:
           - forbidigo
         text: "sandbox\\.(NewManager|Manager)|runtime\\.(Runtime|New)"

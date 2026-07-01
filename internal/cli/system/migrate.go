@@ -48,13 +48,8 @@ func runSystemMigrate(cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
-	migrators, err := libraryMigrators(cmd.Context())
-	if err != nil {
-		return err
-	}
 	opts := planApplyOpts{
-		home:           cliutil.TopDir(),
-		migrators:      migrators,
+		sys:            sys,
 		yes:            cliutil.EffectiveYes(cmd),
 		abandonOverlay: flagBool(cmd, "abandon-stopped-overlay"),
 		json:           cliutil.JSONEnabled(cmd),
@@ -77,26 +72,25 @@ func runSystemMigrate(cmd *cobra.Command) error {
 		return previewMigration(cmd.Context(), opts, cliSt, libSt)
 	}
 
-	if cliSt == config.LayoutOK && libSt == config.LayoutOK && len(migrators) == 0 {
+	// Both realms current: the library stamp reaches LibrarySchemaVersion only
+	// after the framework flatten stamps last, so LayoutOK here means there is no
+	// framework work left either — a true no-op.
+	if cliSt == config.LayoutOK && libSt == config.LayoutOK {
 		return reportMigrateNoop(cmd)
 	}
 
+	// Frozen v0->v3 ladder, then the crash-safe framework (v3->v4 overlay flatten),
+	// plan/apply-gated, which stamps the realm to v4 last.
 	if err := applyFrozenLadder(cmd, sys); err != nil {
 		return err
 	}
-
-	// Framework (v3->v4+) migrations: plan/apply-gated, crash-safe. Empty until
-	// the overlay flatten lands, so today this is a no-op past the frozen ladder.
-	if len(migrators) > 0 {
-		report, err := runPlanApply(cmd.Context(), opts)
-		if err != nil {
-			return err
-		}
-		if err := renderReport(opts, report); err != nil {
-			return err
-		}
+	report, err := runPlanApply(cmd.Context(), opts)
+	if err != nil {
+		return err
 	}
-
+	if err := renderReport(opts, report); err != nil {
+		return err
+	}
 	return reportMigrateOK(cmd)
 }
 
