@@ -3,8 +3,8 @@
 ABOUTME: Verified prior-art research backing the crash-safe `system migrate`
 ABOUTME: design (DF68): journaling, atomic commit, snapshot rollback patterns.
 
-Status: **Verified 2026-06-30.** Backs the draft plan
-[crash-safe-migration.md](../plans/crash-safe-migration.md) (DF68) — the
+Status: **Verified 2026-06-30.** Backs the implemented plan
+[crash-safe-migration.md (archived)](../../archive/crash-safe-migration.md) (DF68) — the
 prerequisite (step 0) for overlay retirement (D109) and the agent.json-split
 retro-harden. Mines the five systems the draft's "Research" section named:
 SQLite, POSIX atomic-rename, ARIES, Nix/OSTree, dpkg/rpm. The point of this pass
@@ -355,7 +355,7 @@ upper may be tmpfs-only → convert while live).
 
 ## Relationship to other work
 
-- Backs the draft plan [crash-safe-migration.md](../plans/crash-safe-migration.md)
+- Backs the implemented plan [crash-safe-migration.md (archived)](../../archive/crash-safe-migration.md)
   (DF68) and, through it, overlay retirement (D109) +
   [retire-overlay-reflink-copy.md](../plans/retire-overlay-reflink-copy.md).
 - Pairs with [migration-version-gating.md](migration-version-gating.md) — the

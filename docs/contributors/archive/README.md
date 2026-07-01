@@ -29,6 +29,8 @@ This is a tentative first cut — the broader greenfield doc reorg may move more
 - Other completed: `cli-critique-deferred`, `critique-followup` (the 31-finding critique tracker), `vm-isolation-debug`, `smoke-test-redesign`.
 - Shipped, drained from the live `../design/plans/` dir: `system-repair-cleanup` (prune/doctor surface), `tagging` (sandbox/workspace tags), `exit-codes` (exit-code taxonomy), `environment-archetypes` (the `archetype/` package), `apple-runtime-caching`, `containerd-runtime` (Phases 0–3 incl. devmapper).
 - `migration-gate` — status-driven startup gate + explicit `yoloai system migrate` (D61; builds on D60's data-dir bifurcation).
+- `crash-safe-migration` — crash-safe `system migrate` framework design (D110): exclusive lock, WAL, per-sandbox atomic commit, stamp-last, OverlayFlatten v3→v4 migrator.
+- `crash-safe-migration-audit` — post-build audit of the crash-safe migration framework (D110); A1–A18 findings, H1 recovery-ordering remediation.
 
 ### research/
 - Layering-epic spikes: `layering-cli-surface`, `layering-comparators`, `layering-leak-audit`, `layering-open-questions`, `mcp-sdk-evaluation`.
