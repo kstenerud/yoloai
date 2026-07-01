@@ -259,8 +259,14 @@ func (o *OverlayFlatten) captureMerged(ctx context.Context, name, hostPath strin
 		return "", err
 	}
 	merged, stage := captureContainerPaths(hostPath)
-	script := fmt.Sprintf("set -e; rm -rf %s; mkdir -p %s; cp -a %s/. %s/", stage, stage, merged, stage)
-	res, err := rt.Exec(ctx, store.InstanceName("", name), []string{"sh", "-c", script}, "yoloai")
+	// Run as root: the overlay base dir isn't writable by the agent user on every
+	// backend (podman-rootless denies the stage mkdir), and root can always read
+	// the merged tree. Hand the staged copy to the invoking host user so the
+	// host-side CopyPathFaithful can read it regardless of backend uid mapping.
+	uid, gid := fileutil.HostUID(), fileutil.HostGID()
+	script := fmt.Sprintf("set -e; rm -rf %s; mkdir -p %s; cp -a %s/. %s/; chown -R %d:%d %s; chmod -R u+rwX %s",
+		stage, stage, merged, stage, uid, gid, stage, stage)
+	res, err := rt.Exec(ctx, store.InstanceName("", name), []string{"sh", "-c", script}, "root")
 	if err != nil {
 		return "", fmt.Errorf("capture merged tree for %q: %w", name, err)
 	}
@@ -271,7 +277,34 @@ func (o *OverlayFlatten) captureMerged(ctx context.Context, name, hostPath strin
 	if _, err := os.Stat(hostStage); err != nil {
 		return "", fmt.Errorf("captured tree not visible host-side at %s: %w", hostStage, err)
 	}
+	if err := o.reclaimOverlayLayers(ctx, rt, name, hostPath); err != nil {
+		return "", err
+	}
 	return hostStage, nil
+}
+
+// reclaimOverlayLayers makes the writable overlay layers (upper, ovlwork)
+// removable host-side by the invoking user, via the running container (root).
+// On rootful Docker those layers are root-owned kernel overlayfs dirs; once the
+// sandbox is flattened they ride into the displaced original (_^^_orig), which
+// DropDisposer must delete host-side as the invoking user — and can't, without
+// this. Two barriers are cleared: ownership (chown to the host user) AND
+// permissions — the kernel creates the overlayfs workdir as mode 0000, so even
+// the owner can't traverse it, defeating os.RemoveAll; chmod u+rwX restores
+// owner access (X = +x on dirs only). lower is the user's read-only project
+// (never touched) and merged is a container-namespaced mountpoint (empty
+// host-side), so only upper/ovlwork are reclaimed. Best-effort (|| true): on
+// rootless/userns backends the layers are already user-owned and this is a
+// no-op; a genuine problem surfaces at the drop step rather than here.
+func (o *OverlayFlatten) reclaimOverlayLayers(ctx context.Context, rt runtime.Backend, name, hostPath string) error {
+	base := "/yoloai/overlay/" + store.EncodePath(hostPath)
+	script := fmt.Sprintf(
+		`for d in %s/upper %s/ovlwork; do chown -R %d:%d "$d"; chmod -R u+rwX "$d"; done 2>/dev/null || true`,
+		base, base, fileutil.HostUID(), fileutil.HostGID())
+	if _, err := rt.Exec(ctx, store.InstanceName("", name), []string{"sh", "-c", script}, "root"); err != nil {
+		return fmt.Errorf("reclaim overlay layer ownership for %q: %w", name, err)
+	}
+	return nil
 }
 
 // captureContainerPaths returns the in-container merged-mount path and the
