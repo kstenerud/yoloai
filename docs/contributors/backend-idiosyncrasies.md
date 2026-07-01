@@ -118,6 +118,7 @@ inclusion test first, then add a row to the index.
 | `Can't open socket to ipset` / network isolation fails on Podman macOS | [Podman macOS: iptables-nft lacks xt_set module](#podman-macos-iptables-nft-lacks-xt_set-module-ipset-unusable) |
 | `no podman socket found` on macOS though `podman machine` is running (any command: `system build`, `new`, …) | [Podman macOS: socket discovery needs TMPDIR](#macos-podman-machine-socket-discovery-needs-tmpdir-without-it-inspect-reports-a-stale-tmp-path) |
 | Smoke test: `stop_start/containerd-vm` fails with "agent idle for 9s+" | [QEMU: slow startup exceeds stall grace](#qemu-slow-startup-exceeds-smoke-test-stall-grace-period) |
+| `diff`/`apply`/`status` fails only on containerd-vm with `git: detected dubious ownership in repository` | [Kata: virtiofs remaps work-copy uid; in-confinement git trips dubious-ownership](#kata-virtiofs-remaps-the-work-copy-owner-uid-so-in-confinement-git-trips-dubious-ownership) |
 | Smoke test: `stop_start/tart` fails; exchange dir empty | [Tart: xcodebuild -runFirstLaunch blocks agent startup](#tart-xcodebuild--runfirstlaunch-blocks-agent-startup) |
 | Smoke `done` never fires; claude stuck on a Bash permission prompt despite `--dangerously-skip-permissions`; "fullscreen renderer" modal seen | [Claude: fullscreen upsell re-execs and drops the flag](#claude-the-fullscreen-renderer-upsell-re-execs-claude-and-drops---dangerously-skip-permissions) |
 | `container-enhanced` (gVisor): `new` exits 0 / `ls` active but agent never runs; box stuck on `sleep infinity`, only `entrypoint.keepalive_only` logged | [gVisor: docker exec --user resolves stale image passwd](#gvisor-container-enhanced-docker-exec---user-name-resolves-against-the-stale-image-passwd-not-the-live-one) |
@@ -329,6 +330,37 @@ fix: `yoloai system prune` (which now uses the same escalation), or
 Cross-references: `clearStaleContainerState` uses the same escalation
 so a `yoloai new <name>` against a wedged orphan with the same name
 auto-recovers.
+
+---
+
+### Kata: virtiofs remaps the work-copy owner uid, so in-confinement git trips "dubious ownership"
+
+**Symptom:** `yoloai diff`/`apply`/`status` on a `:copy` sandbox fails **only**
+on the Kata VM backends (`containerd-vm`, `containerd-vmenhanced`) with
+`fatal: detected dubious ownership in repository at '<work path>'` (git exit
+128). The identical flow passes on docker/podman. Surfaced by the smoke test's
+`stop_start/containerd-vm` `diff after restart` step.
+
+**Why:** the copy-mode work-copy git runs *inside* the sandbox (audit C1/DF66 —
+the agent-controlled `.git/config` must not run filter/diff/fsmonitor drivers on
+the host). The work copy is shared into the Kata guest over virtiofs, which
+presents the files under a **different uid** than the agent user git runs as, so
+git's ownership guard refuses every operation. runc backends (docker/podman)
+bind-mount the copy with the host uid intact and the agent user matches, so they
+never trip it. This only regressed once git moved into confinement — the older
+host-side git ran as the file owner, so the guard was never exercised.
+
+**Fix in code:** `internal/git/git.go::sandboxExec.run` passes
+`-c safe.directory=<in-sandbox path>` on every confined git invocation. git
+honors `safe.directory` from a trusted command-line `-c` but **ignores** it when
+set in the repo's own `.git/config`, so trusting the exact work path cannot be
+self-authorized by the agent. The entry is a no-op on backends whose ownership
+already matches (docker/podman).
+
+**Fix for the user:** none — handled automatically. Do **not** advise
+`git config --global --add safe.directory` (git's own hint): the failing git
+runs inside the ephemeral sandbox, so a host-side global config would not reach
+it.
 
 ---
 

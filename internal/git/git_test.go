@@ -80,7 +80,8 @@ func TestNewSandbox_DispatchesToGitExecer(t *testing.T) {
 	assert.Equal(t, "yoloai-box", rt.lastInstance)
 	assert.Equal(t, "yoloai", rt.lastUser)
 	assert.Equal(t, "/proj", rt.lastWorkDir, "host work-copy path maps to the dir's in-sandbox mount path")
-	assert.Equal(t, []string{"status", "--porcelain"}, rt.lastArgs)
+	assert.Equal(t, []string{"-c", "safe.directory=/proj", "status", "--porcelain"}, rt.lastArgs,
+		"the work path is trusted against git's dubious-ownership guard (uid may not match across a shared mount)")
 }
 
 // TestNewSandbox_InjectsExecerByConfinement verifies the factory injects the
