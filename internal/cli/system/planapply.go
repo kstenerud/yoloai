@@ -109,7 +109,15 @@ func resolveApproval(ctx context.Context, opts planApplyOpts, unmet []yoloai.Mig
 // previewMigration renders the read-only --check/--dry-run audit: realm status +
 // the framework plan, writing nothing.
 func previewMigration(ctx context.Context, opts planApplyOpts, cliSt, libSt config.LayoutStatus) error {
-	plan, err := opts.sys.MigrationPlan(ctx)
+	// Audit the framework plan against where library data physically lives now:
+	// on an un-relocated flat v0 install the sandboxes are still at TOP/sandboxes,
+	// not the namespaced location opts.sys is rooted at. (The apply path relocates
+	// first, so its plan read via opts.sys is already correct.)
+	planSys, err := cliutil.MigratePreviewSystem()
+	if err != nil {
+		return err
+	}
+	plan, err := planSys.MigrationPlan(ctx)
 	if err != nil {
 		return err
 	}
