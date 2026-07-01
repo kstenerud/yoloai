@@ -129,7 +129,6 @@ func (m *lifecycleMockRuntime) Descriptor() runtime.BackendDescriptor {
 		BaseModeName: runtime.IsolationModeContainer,
 		Capabilities: runtime.BackendCaps{
 			NetworkIsolation:   true,
-			OverlayDirs:        true,
 			CapAdd:             true,
 			FilesystemLocality: m.locality,
 		},

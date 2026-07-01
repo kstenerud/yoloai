@@ -302,9 +302,9 @@ Agent-controlled git `filter`/`diff`/`fsmonitor` drivers in the copy-mode work-c
 
 `:overlay` mounts kernel overlayfs, which forces `CAP_SYS_ADMIN` + `apparmor=unconfined`; on Docker rootful (no userns remap) + the agent's passwordless sudo this is a host escape. The fuse-overlayfs "fix" was **audited and refuted** (needs the same cap outside a user namespace — a GEN §14 trap). **Decision (D109): retire `:overlay`** and recover its benefit via reflink-aware `:copy` (copy-on-write clones, verified safe across btrfs/XFS/APFS with graceful fallback). v0.6.0 interim: documented dangerous opt-in + loud warning. Active plan: [retire-overlay-reflink-copy.md](retire-overlay-reflink-copy.md); audit record: [overlay-sysadmin-escape.md](overlay-sysadmin-escape.md).
 
-### Crash-safe data-dir migrations (DF68) — initial design
+### Crash-safe data-dir migrations (DF68) — IMPLEMENTED (D110)
 
-`yoloai system migrate` is not crash-safe: it stamps the realm `.schema-version` *before* running the per-sandbox pass (a crash leaves a green gate over half-migrated data), and has no journal, per-sandbox atomic commit, exclusive lock, or rollback — so a multi-step destructive migration (the planned overlay→copy flatten) can't recover by inspection, and a persistent migration bug would brick the user. Initial design (exclusive lock + write-ahead journal + non-destructive per-sandbox atomic commit + CoW snapshot rollback + run-level stamp-last; borrow git's *patterns* — atomic rename, reflog — not git-the-tool, §14): [crash-safe-migration.md](crash-safe-migration.md). Prerequisite (step 0) for the overlay retirement (D109).
+Built and independently audited on branch `crash-safe-migration`: `internal/fileutil` durable primitives + `internal/migrate` crash-safe promotion state machine + `Migrator` plan/apply gate + v3→v4 `OverlayFlatten` migrator. Design doc: [../../archive/crash-safe-migration.md](../../archive/crash-safe-migration.md); post-build audit: [../../archive/crash-safe-migration-audit.md](../../archive/crash-safe-migration-audit.md).
 
 ### Log rotation
 

@@ -51,7 +51,6 @@ var descriptor = runtime.BackendDescriptor{
 	SupportedIsolationModes:   []runtime.IsolationMode{runtime.IsolationModeContainerEnhanced, runtime.IsolationModeContainerPrivileged},
 	Capabilities: runtime.BackendCaps{
 		NetworkIsolation:     true,
-		OverlayDirs:          true,
 		CapAdd:               true,
 		HostFilesystem:       false,
 		FilesystemLocality:   runtime.LocalityHostSide,
@@ -540,16 +539,6 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 		Runtime:      cfg.ContainerRuntime,
 		Privileged:   cfg.Privileged,
 		CgroupnsMode: container.CgroupnsMode(cfg.CgroupnsMode),
-	}
-
-	// CAP_SYS_ADMIN is required for overlay mounts inside the container.
-	// Docker's default AppArmor profile blocks mount(2) even with SYS_ADMIN;
-	// disable it so the entrypoint can mount overlayfs.
-	// Privileged mode already disables AppArmor so no SecurityOpt is needed.
-	if !cfg.Privileged {
-		if slices.Contains(cfg.CapAdd, "SYS_ADMIN") {
-			hostConfig.SecurityOpt = append(hostConfig.SecurityOpt, "apparmor=unconfined")
-		}
 	}
 
 	// Apply seccomp profile when explicitly requested.

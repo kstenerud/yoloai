@@ -112,6 +112,33 @@ func MigrateCLI() error {
 	}
 }
 
+// CurrentLibraryDataDir returns where library-owned content physically lives
+// right now: TOP itself on an un-relocated flat v0 install (its config.yaml,
+// sandboxes/, profiles/ sit directly under TOP), otherwise the namespaced
+// TOP/library. The read-only `system migrate` preview roots its audit here so it
+// inspects the real, pre-relocation location; the apply path relocates first and
+// then operates on the namespaced layout. Uses the same flat-v0 predicate as
+// MigrateCLI, so preview and apply agree on which install is flat.
+func CurrentLibraryDataDir() string {
+	top := TopDir()
+	if isFlatV0Install(top) {
+		return top
+	}
+	return filepath.Join(top, libraryNamespace)
+}
+
+// CurrentLibrarySchema reads the library realm's on-disk schema version at its
+// current physical location (see CurrentLibraryDataDir), returning 0 when it is
+// unstamped or flat (pre-.schema-version). Used to name the release range a
+// blocked `system migrate` should downgrade to.
+func CurrentLibrarySchema() int {
+	v, ok, err := config.ReadSchemaVersion(config.SchemaVersionPathFor(CurrentLibraryDataDir()))
+	if err != nil || !ok {
+		return 0
+	}
+	return v
+}
+
 // isFlatV0Install reports whether top looks like a pre-namespace install: a
 // flat config.yaml directly under TOP, with no TOP/library beside it. This
 // heuristic runs at most once per TOP — after the bootstrap the stamp is

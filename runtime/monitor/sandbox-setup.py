@@ -228,29 +228,8 @@ class DockerBackend(Backend):
     writes_consumed_marker = False
 
     def setup(self):
-        """Docker-specific setup: git baseline for overlays, auto-commit loop."""
+        """Docker-specific setup: the auto-commit loop for :copy directories."""
         log_info("sandbox.backend_setup", "Docker backend setup", backend="docker")
-
-        # Git baseline for overlay mounts
-        overlay_mounts = self.cfg.get("overlay_mounts", [])
-        for overlay in overlay_mounts:
-            merged = overlay.get("merged", "")
-            if not merged:
-                continue
-            log_debug("overlay.git_baseline", f"creating git baseline for overlay: {merged}")
-            # Remove .git dirs (creates whiteouts in upper layer)
-            for root, dirs, _files in os.walk(merged):
-                if ".git" in dirs:
-                    import shutil
-                    shutil.rmtree(os.path.join(root, ".git"), ignore_errors=True)
-                    dirs.remove(".git")
-            tmux_io.run(["git", "-C", merged, "init"], capture_output=True)
-            tmux_io.run(["git", "-C", merged, "add", "-A"], capture_output=True)
-            tmux_io.run(
-                ["git", "-C", merged, "commit", "-m", "yoloai overlay baseline", "--no-gpg-sign"],
-                capture_output=True,
-            )
-            log_info("overlay.git_baseline", "git baseline commit created", path=merged)
 
         # Auto-commit loop for :copy directories
         auto_commit_interval = int(self.cfg.get("auto_commit_interval", 0))

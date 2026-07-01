@@ -31,7 +31,6 @@ func TestRegistered(t *testing.T) {
 	assert.Equal(t, runtime.IsolationModeVM, d.BaseModeName, "apple is vm-tier, not container-slot")
 	assert.Equal(t, []string{"darwin"}, d.Platforms)
 	assert.Equal(t, []string{"arm64"}, d.Architectures)
-	assert.True(t, d.Capabilities.OverlayDirs, "overlayfs verified")
 	assert.True(t, d.Capabilities.NetworkIsolation, "in-guest iptables verified")
 	assert.True(t, d.Capabilities.CapAdd)
 	require.NotNil(t, d.Probe)

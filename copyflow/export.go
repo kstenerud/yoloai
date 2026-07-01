@@ -65,9 +65,6 @@ func Export(ctx context.Context, layout config.Layout, rt runtime.Backend, name 
 		return nil, fmt.Errorf("create export directory: %w", err)
 	}
 
-	if dir.Mode == store.DirModeOverlay {
-		return exportOverlay(ctx, layout, rt, name, opts)
-	}
 	return exportCopy(ctx, layout, rt, name, opts)
 }
 
@@ -126,24 +123,4 @@ func generateExportPatch(ctx context.Context, layout config.Layout, rt runtime.B
 		shas[i] = c.SHA
 	}
 	return GenerateFormatPatchForRefs(ctx, layout, rt, name, opts.DirHostPath, shas, opts.Paths)
-}
-
-// exportOverlay writes the upper-layer diff(s) for an overlay-mode sandbox.
-func exportOverlay(ctx context.Context, layout config.Layout, rt runtime.Backend, name string, opts ExportOptions) (*ExportResult, error) {
-	if len(opts.Refs) > 0 {
-		return nil, yoerrors.NewUsageError("cannot export specific commits from an :overlay sandbox — overlay changes have no commit history")
-	}
-	patches, err := GenerateOverlayPatch(ctx, layout, rt, name, opts.DirHostPath, opts.Paths)
-	if err != nil {
-		return nil, err
-	}
-	result := &ExportResult{Dir: opts.Dir}
-	for i, ps := range patches {
-		dst := filepath.Join(opts.Dir, fmt.Sprintf("overlay-%d.diff", i+1))
-		if writeErr := fileutil.WriteFile(dst, ps.Patch, 0600); writeErr != nil {
-			return nil, fmt.Errorf("write patch: %w", writeErr)
-		}
-		result.Files = append(result.Files, dst)
-	}
-	return result, nil
 }

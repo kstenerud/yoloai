@@ -76,6 +76,22 @@ func TestMigrateCLI_RelocatesFlatInstall(t *testing.T) {
 	assert.Equal(t, cliutil.CLISchemaVersion, version)
 }
 
+// The migrate preview must audit where library data physically lives: TOP on an
+// un-relocated flat v0 install, the namespaced TOP/library once relocated. A
+// wrong answer here is exactly the flat-v0 --check under-report bug (the preview
+// would read the empty TOP/library/sandboxes and report no pending work).
+func TestCurrentLibraryDataDir_FlatVsNamespaced(t *testing.T) {
+	top := isolatedTop(t)
+
+	seedFlatInstall(t, top, false)
+	assert.Equal(t, top, cliutil.CurrentLibraryDataDir(),
+		"flat v0 install: library data (and its sandboxes/) sit directly under TOP")
+
+	require.NoError(t, cliutil.MigrateCLI())
+	assert.Equal(t, filepath.Join(top, "library"), cliutil.CurrentLibraryDataDir(),
+		"after relocation: library data is namespaced under TOP/library")
+}
+
 func TestMigrateCLI_SetupIncomplete_TipNotSuppressed(t *testing.T) {
 	top := isolatedTop(t)
 	seedFlatInstall(t, top, false) // no legacy state.yaml

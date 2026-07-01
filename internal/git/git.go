@@ -154,7 +154,19 @@ func (s sandboxExec) run(ctx context.Context, workDir string, stdin []byte, args
 	}
 	instance := store.InstanceName(meta.Principal, s.name)
 	user := store.ContainerUser(meta, s.layout.HostUID)
-	return ge.GitExec(ctx, instance, user, confinementWorkPath(meta, sandboxDir, workDir), args...)
+	inSandboxPath := confinementWorkPath(meta, sandboxDir, workDir)
+
+	// Trust the work copy against git's dubious-ownership guard. The copy is
+	// shared into the sandbox and its files may be owned by a uid that does not
+	// match the agent user we run git as — e.g. a Kata VM remaps ownership across
+	// virtiofs — which makes git refuse every op with "detected dubious
+	// ownership". safe.directory names the exact in-sandbox path; git ignores this
+	// setting when it comes from the agent-controlled repo .git/config and honors
+	// it only from a trusted source like this command-line -c, so the agent cannot
+	// self-authorize. Backends whose ownership already matches (docker/podman over
+	// runc) are unaffected — the entry is a no-op there.
+	trusted := append([]string{"-c", "safe.directory=" + inSandboxPath}, args...)
+	return ge.GitExec(ctx, instance, user, inSandboxPath, trusted...)
 }
 
 // confinementWorkPath maps a host work-copy path (store.WorkDir) to the path the

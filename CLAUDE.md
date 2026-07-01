@@ -38,8 +38,7 @@ Docs are organized by **role** — the layer you're operating in. Pick the tier,
 - Containers are ephemeral; state (work dirs, agent-state, logs, meta.json) lives on host. Credentials injected via file-based bind mount (not env vars).
 - Agent abstraction: per-agent definitions specify install, launch command, API key env vars, state directory, network allowlist, and prompt delivery mode. Ships Aider, Claude, Codex, Gemini, and OpenCode agents.
 - CLI separates workdir (primary project dir, positional) from aux dirs (`-d` flag). Directories mounted at mirrored host paths by default. Custom paths via `=<path>` override.
-- `:copy` directories use full directory copies with git for diff/apply.
-- `:overlay` directories use Linux overlayfs inside the container for instant setup with diff/apply workflow. Changes are captured in an upper layer; no file copying. Docker-only, requires CAP_SYS_ADMIN. Container must be running for diff/apply (git commands exec inside container).
+- `:copy` directories use full directory copies with git for diff/apply. (`:overlay` was retired — D109; existing overlay sandboxes are auto-converted to `:copy` by the v3→v4 `system migrate`.)
 - `:rw` directories are live bind-mounts. Default (no suffix) is read-only.
 - Profile system: each profile is a directory in `~/.yoloai/profiles/<name>/` containing a `Dockerfile` and `config.yaml`. The base profile at `~/.yoloai/profiles/base/` is auto-created if missing and serves as the default. "base" is a reserved profile name.
 - Two config files: global config (`~/.yoloai/config.yaml`) for user preferences (tmux_conf, model_aliases) and profile config (`~/.yoloai/profiles/base/config.yaml`) for profile-overridable defaults (agent, model, backend, env, etc.). `IsGlobalKey()` routes config commands to the correct file. Operational state (`setup_complete`) lives in `~/.yoloai/state.yaml`.
@@ -79,7 +78,7 @@ For Claude Code users, this is enforced automatically: `.claude/settings.json` r
 ## Design Principles
 
 - Copy/diff/apply is the core differentiator — protect originals, review before landing.
-- `:copy` uses full copies; `:overlay` is an explicit opt-in for instant setup with overlayfs.
+- `:copy` uses full copies with git for diff/apply. `:overlay` was retired (D109) — it needed CAP_SYS_ADMIN, a host-escape on rootful Docker.
 - Safe defaults: read-only mounts, no implicit `agent_files` inheritance, name required (no auto-generation), dirty repo warning (not error).
 - CLI for one-offs, config for repeatability (same options in both).
 - Security requires dedicated research — don't finalize ad-hoc. `CAP_SYS_ADMIN` tradeoff is documented.

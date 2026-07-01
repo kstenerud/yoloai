@@ -26,13 +26,10 @@ func TestParseDirArg_Modes(t *testing.T) {
 		{"copy suffix", app + ":copy", yoloai.DirModeCopy, false},
 		{"rw suffix", app + ":rw", yoloai.DirModeRW, false},
 		{"force suffix", app + ":force", "", true},
-		{"overlay suffix", app + ":overlay", yoloai.DirModeOverlay, false},
 		{"rw and force", app + ":rw:force", yoloai.DirModeRW, true},
 		{"force and copy", app + ":force:copy", yoloai.DirModeCopy, true},
 		{"copy and force", app + ":copy:force", yoloai.DirModeCopy, true},
 		{"force and rw", app + ":force:rw", yoloai.DirModeRW, true},
-		{"overlay and force", app + ":overlay:force", yoloai.DirModeOverlay, true},
-		{"force and overlay", app + ":force:overlay", yoloai.DirModeOverlay, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -74,10 +71,6 @@ func TestParseDirArg_ConflictingModes(t *testing.T) {
 		{"/tmp/app:copy:rw", "cannot combine"},
 		{"/tmp/app:rw:copy", "cannot combine"},
 		{"/tmp/app:copy:force:rw", "cannot combine"},
-		{"/tmp/app:overlay:copy", "cannot combine"},
-		{"/tmp/app:copy:overlay", "cannot combine"},
-		{"/tmp/app:overlay:rw", "cannot combine"},
-		{"/tmp/app:rw:overlay", "cannot combine"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
@@ -204,18 +197,11 @@ func TestDirArg_ResolvedMountPath(t *testing.T) {
 	assert.Equal(t, "/host/path", d2.ResolvedMountPath())
 }
 
-// D81 (multi-workdir Phase 2): aux :copy and :overlay are now accepted.
-// ParseAuxDirArg no longer rejects them.
+// D81 (multi-workdir Phase 2): aux :copy is accepted.
 func TestParseAuxDirArg_AcceptsCopy(t *testing.T) {
 	d, err := ParseAuxDirArg("/tmp/aux:copy", "/home/user", nil)
 	require.NoError(t, err)
 	assert.Equal(t, yoloai.DirModeCopy, d.Mode)
-}
-
-func TestParseAuxDirArg_AcceptsOverlay(t *testing.T) {
-	d, err := ParseAuxDirArg("/tmp/aux:overlay", "/home/user", nil)
-	require.NoError(t, err)
-	assert.Equal(t, yoloai.DirModeOverlay, d.Mode)
 }
 
 func TestParseAuxDirArg_AcceptsRW(t *testing.T) {

@@ -11,11 +11,12 @@ import (
 	"github.com/kstenerud/yoloai/internal/config"
 )
 
-// knownSuffixes are the recognized directory argument suffixes.
+// knownSuffixes are the recognized directory argument suffixes. :overlay was
+// retired (D109); an existing overlay sandbox is auto-converted to :copy by
+// `yoloai system migrate`, and the suffix is no longer creatable.
 var knownSuffixes = map[string]bool{
 	"copy":     true,
 	"copy-all": true,
-	"overlay":  true,
 	"rw":       true,
 	"force":    true,
 }
@@ -25,25 +26,20 @@ var knownSuffixes = map[string]bool{
 func applyDirSuffix(result *yoloai.DirSpec, suffix, arg string) error {
 	switch suffix {
 	case "copy":
-		if result.Mode == yoloai.DirModeRW || result.Mode == yoloai.DirModeOverlay {
+		if result.Mode == yoloai.DirModeRW {
 			return fmt.Errorf("cannot combine :copy and :%s on %q", result.Mode, arg)
 		}
 		result.Mode = yoloai.DirModeCopy
 	case "copy-all":
 		// Like :copy but copies gitignored files too (opt-out of the default
 		// .gitignore-honoring). Same diff/apply workflow — it's :copy with one knob.
-		if result.Mode == yoloai.DirModeRW || result.Mode == yoloai.DirModeOverlay {
+		if result.Mode == yoloai.DirModeRW {
 			return fmt.Errorf("cannot combine :copy-all and :%s on %q", result.Mode, arg)
 		}
 		result.Mode = yoloai.DirModeCopy
 		result.IncludeIgnored = true
-	case "overlay":
-		if result.Mode == yoloai.DirModeCopy || result.Mode == yoloai.DirModeRW {
-			return fmt.Errorf("cannot combine :overlay and :%s on %q", result.Mode, arg)
-		}
-		result.Mode = yoloai.DirModeOverlay
 	case "rw":
-		if result.Mode == yoloai.DirModeCopy || result.Mode == yoloai.DirModeOverlay {
+		if result.Mode == yoloai.DirModeCopy {
 			return fmt.Errorf("cannot combine :rw and :%s on %q", result.Mode, arg)
 		}
 		result.Mode = yoloai.DirModeRW
@@ -55,9 +51,9 @@ func applyDirSuffix(result *yoloai.DirSpec, suffix, arg string) error {
 
 // ParseAuxDirArg parses an auxiliary (`-d`) directory argument.
 //
-// All modes are permitted on aux dirs: `:copy` and `:overlay` enable the
-// diff/apply workflow for multiple directories (D81, multi-workdir Phase 2),
-// `:rw` provides live-edit access, and the default `:ro` is read-only.
+// All modes are permitted on aux dirs: `:copy` enables the diff/apply workflow
+// for multiple directories (D81, multi-workdir Phase 2), `:rw` provides live-edit
+// access, and the default `:ro` is read-only. (`:overlay` was retired — D109.)
 // env is the curated interpolation map for ${VAR} expansion; pass
 // layout.Env().EnvForConfigInterpolation().
 func ParseAuxDirArg(arg, homeDir string, env map[string]string) (*yoloai.DirSpec, error) {

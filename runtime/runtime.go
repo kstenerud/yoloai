@@ -239,7 +239,6 @@ type BackendDescriptor struct {
 // Each backend returns its capabilities via BackendDescriptor.Capabilities.
 type BackendCaps struct {
 	NetworkIsolation   bool               // supports --network=isolated (iptables domain filtering)
-	OverlayDirs        bool               // supports :overlay mount mode (overlayfs inside the container)
 	CapAdd             bool               // supports cap_add, devices, and setup commands
 	HostFilesystem     bool               // true when sandbox state lives on the host (seatbelt, future SSH)
 	ContainerAttach    bool               // exposes a docker-compatible container surface so VS Code's "Attach to Running Container" works

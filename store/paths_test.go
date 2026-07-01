@@ -267,16 +267,10 @@ func TestInstanceName(t *testing.T) {
 	assert.Equal(t, "yoloai-acme-mybox", InstanceName("acme", "mybox"))
 }
 
-func TestOverlayUpperDir(t *testing.T) {
+func TestOverlayLowerDir(t *testing.T) {
 	sandboxDir := "/data/sandboxes/my-sandbox"
-	expected := filepath.Join(sandboxDir, "work", EncodePath("/home/user/project"), "upper")
-	assert.Equal(t, expected, OverlayUpperDir(sandboxDir, "/home/user/project"))
-}
-
-func TestOverlayOvlworkDir(t *testing.T) {
-	sandboxDir := "/data/sandboxes/my-sandbox"
-	expected := filepath.Join(sandboxDir, "work", EncodePath("/home/user/project"), "ovlwork")
-	assert.Equal(t, expected, OverlayOvlworkDir(sandboxDir, "/home/user/project"))
+	expected := filepath.Join(sandboxDir, "work", EncodePath("/home/user/project"), "lower")
+	assert.Equal(t, expected, OverlayLowerDir(sandboxDir, "/home/user/project"))
 }
 
 func TestFilesDir(t *testing.T) {

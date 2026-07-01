@@ -305,13 +305,17 @@ func TestIntegration_Replace(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { destroySandbox(ctx, mgr, "replaceme") }) //nolint:errcheck // test cleanup
 
-	// Replace with new sandbox
+	// Replace with new sandbox. The prior sandbox is stopped, so copy-mode's
+	// in-confinement git (C1/DF66) cannot verify whether it holds unapplied work;
+	// it is a fresh sandbox with nothing to preserve, so authorize the replace
+	// with AbandonUnappliedWork (the library's --abandon-unapplied).
 	_, err = createSandbox(ctx, mgr, orchestrator.CreateOptions{
-		Name:    "replaceme",
-		Workdir: orchestrator.DirSpec{Path: projectDir},
-		Agent:   "test",
-		Replace: true,
-		Version: "test",
+		Name:                 "replaceme",
+		Workdir:              orchestrator.DirSpec{Path: projectDir},
+		Agent:                "test",
+		Replace:              true,
+		AbandonUnappliedWork: true,
+		Version:              "test",
 	})
 	require.NoError(t, err)
 
@@ -1002,7 +1006,14 @@ func TestIntegration_Clone(t *testing.T) {
 		destroySandbox(ctx, mgr, "clone-b") //nolint:errcheck // test cleanup
 	})
 
-	// Seed a change in A's work copy
+	// Start clone-a so its git baseline is committed in-confinement (C1/DF66);
+	// the change seeded next then reads as an uncommitted diff against it.
+	_, err = startSandbox(ctx, mgr, "clone-a", orchestrator.StartOptions{})
+	require.NoError(t, err)
+	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName("", "clone-a"), 15*time.Second)
+
+	// Seed a change in A's work copy (bind-mounted, so the running container's git
+	// sees it) after the baseline is committed.
 	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir("clone-a"))
 	require.NoError(t, err)
 	workDir := store.WorkDir(mgr.Layout().SandboxDir("clone-a"), meta.Workdir().HostPath)
@@ -1012,118 +1023,19 @@ func TestIntegration_Clone(t *testing.T) {
 		0600,
 	))
 
-	// Clone A → B
+	// Clone A → B. The copy carries A's committed baseline (BaselineSHA) plus the
+	// uncommitted seeded change, so B starts without re-baselining (start skips
+	// baseline setup when BaselineSHA is already set).
 	require.NoError(t, mgr.Clone(ctx, orchestrator.CloneOptions{Source: "clone-a", Dest: "clone-b"}))
+
+	// Start clone-b: diff/apply run git in-confinement, so the container must run.
+	_, err = startSandbox(ctx, mgr, "clone-b", orchestrator.StartOptions{})
+	require.NoError(t, err)
+	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName("", "clone-b"), 15*time.Second)
 
 	// Diff on clone should show the seeded change
 	diffResult, err := copyflow.GenerateDiff(ctx, copyflow.DiffOptions{Name: "clone-b", Layout: mgr.Layout(), Runtime: mgr.Runtime()})
 	require.NoError(t, err)
 	assert.NotEmpty(t, diffResult, "cloned sandbox should have changes")
 	assert.Contains(t, diffResult, "clone-test")
-}
-
-func TestIntegration_Overlay(t *testing.T) {
-	mgr, ctx := integrationSetup(t)
-
-	// Use a project dir WITHOUT git. The entrypoint's chown -R on the overlay
-	// merged dir makes overlayfs directories opaque, hiding the lower layer's
-	// .git objects. Removing .git via whiteout + re-creating is unreliable
-	// across kernel versions. Starting without .git avoids the problem entirely
-	// and matches the real-world smoke test fixture (no pre-existing git repo).
-	projectDir := testutil.GoProjectNoGit(t)
-
-	_, err := createSandbox(ctx, mgr, orchestrator.CreateOptions{
-		Name:    "overlay-integ",
-		Workdir: orchestrator.DirSpec{Path: projectDir, Mode: orchestrator.DirModeOverlay},
-		Agent:   "test",
-		Version: "test",
-	})
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		// The overlayfs workdir (ovlwork/) contains root-owned kernel files that
-		// cannot be removed by the test process. Clean them up via exec as root
-		// inside the still-running container before destroying the sandbox.
-		ovlEncoded := store.EncodePath(projectDir)
-		mgr.Runtime().Exec(ctx, store.InstanceName("", "overlay-integ"), //nolint:errcheck // best-effort
-			[]string{"rm", "-rf", "/yoloai/overlay/" + ovlEncoded + "/ovlwork"}, "root")
-		destroySandbox(ctx, mgr, "overlay-integ") //nolint:errcheck // test cleanup
-	})
-
-	// The overlay mount happens at container launch (Start), not at provision
-	// time, so the "overlay unsupported" skip is detected here rather than on create.
-	if _, startErr := startSandbox(ctx, mgr, "overlay-integ", orchestrator.StartOptions{}); startErr != nil {
-		if strings.Contains(startErr.Error(), "overlay") || strings.Contains(startErr.Error(), "mount") ||
-			strings.Contains(startErr.Error(), "CAP_SYS_ADMIN") || strings.Contains(startErr.Error(), "permission") {
-			t.Skip("overlay not supported: " + startErr.Error())
-		}
-		require.NoError(t, startErr) // fail on unexpected errors
-	}
-
-	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName("", "overlay-integ"), 15*time.Second)
-
-	// For overlay mode, MountPath is /yoloai/overlay/<encoded>/merged — not the host path.
-	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir("overlay-integ"))
-	require.NoError(t, err)
-	containerPath := meta.Workdir().MountPath
-
-	// Create a git baseline inside the container. No .git exists in the lower
-	// layer, so git init creates a fresh repo in the upper layer with no
-	// overlayfs whiteout complications.
-	//
-	// Poll because the overlay mount is done by the entrypoint; on slow systems
-	// WaitForActive may return before the mount is visible to exec calls.
-	initCmd := fmt.Sprintf(
-		"cd %s && git init -b main && git config user.email test@test && git config user.name test && git add -A && git commit -q -m baseline",
-		containerPath,
-	)
-	var baselineSHA string
-	deadline := time.Now().Add(15 * time.Second)
-	for time.Now().Before(deadline) {
-		initResult, initErr := mgr.Runtime().Exec(ctx, store.InstanceName("", "overlay-integ"),
-			[]string{"sh", "-c", initCmd}, "yoloai")
-		if initErr == nil && initResult.ExitCode == 0 {
-			shaResult, shaErr := mgr.Runtime().Exec(ctx, store.InstanceName("", "overlay-integ"),
-				[]string{"git", "-C", containerPath, "rev-parse", "HEAD"}, "yoloai")
-			if shaErr == nil && len(strings.TrimSpace(shaResult.Stdout)) == 40 {
-				baselineSHA = strings.TrimSpace(shaResult.Stdout)
-				break
-			}
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-	require.NotEmpty(t, baselineSHA, "git init + commit inside overlay should produce a valid SHA within 15s")
-	require.NoError(t, copyflow.UpdateOverlayBaseline(mgr.Layout(), "overlay-integ", projectDir, baselineSHA))
-
-	// Write a file inside the container (overlay captures it in upper layer)
-	writeResult, err := mgr.Runtime().Exec(ctx, store.InstanceName("", "overlay-integ"),
-		[]string{"sh", "-c", fmt.Sprintf("echo overlay-test > %s/output.txt", containerPath)}, "yoloai")
-	require.NoError(t, err)
-	assert.Equal(t, 0, writeResult.ExitCode)
-
-	// Diff: must use GenerateOverlayDiff (GenerateDiff returns
-	// ErrOverlayRequiresRuntime for overlay; overlay needs container
-	// exec).
-	overlayDiff, err := copyflow.GenerateOverlayDiff(ctx, mgr.Runtime(), copyflow.DiffOptions{Name: "overlay-integ", Layout: mgr.Layout()})
-	require.NoError(t, err)
-	assert.NotEmpty(t, overlayDiff, "overlay should have changes after exec write")
-	assert.Contains(t, overlayDiff, "output.txt")
-
-	// Apply via the library orchestrator copyflow.ApplyOverlay (captures the
-	// upper-layer diff, applies it to the host, advances the overlay baseline) —
-	// the same path Workdir().Apply(ApplyModeNoCommit) takes for overlay.
-	result, err := copyflow.ApplyOverlay(ctx, mgr.Layout(), mgr.Runtime(), "overlay-integ", copyflow.ApplyOverlayOptions{})
-	require.NoError(t, err)
-	require.NotNil(t, result, "overlay apply should report a result when there are changes")
-	assert.True(t, result.UncommittedApplied)
-	assert.Contains(t, result.Stat, "output.txt")
-
-	applied, err := os.ReadFile(filepath.Join(projectDir, "output.txt")) //nolint:gosec // test path
-	require.NoError(t, err)
-	assert.Contains(t, string(applied), "overlay-test")
-
-	// DryRun reports the same stat without re-applying.
-	preview, err := copyflow.ApplyOverlay(ctx, mgr.Layout(), mgr.Runtime(), "overlay-integ", copyflow.ApplyOverlayOptions{DryRun: true})
-	require.NoError(t, err)
-	require.NotNil(t, preview)
-	assert.Contains(t, preview.Stat, "output.txt")
 }

@@ -470,7 +470,19 @@ type gitExecRuntime struct {
 }
 
 func (g *gitExecRuntime) GitExec(_ context.Context, _, _, _ string, args ...string) (string, error) {
-	if len(args) > 0 && args[0] == "diff" {
+	// The confinement executor prepends git-level flags (e.g. -c safe.directory=…)
+	// before the subcommand, exactly as real git parses them; skip leading -c/-C
+	// value pairs to find it.
+	sub := ""
+	for i := 0; i < len(args); i++ {
+		if args[i] == "-c" || args[i] == "-C" {
+			i++
+			continue
+		}
+		sub = args[i]
+		break
+	}
+	if sub == "diff" {
 		return "", g.diffErr
 	}
 	return "", nil // git add -A

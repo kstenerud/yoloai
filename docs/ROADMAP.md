@@ -1,6 +1,6 @@
 # yoloAI Roadmap
 
-Core copy/diff/apply workflow ships today with Claude Code, Gemini CLI, Aider, Codex, and OpenCode agents. Docker, Tart, and Seatbelt backends are implemented. Network isolation, profiles, auxiliary directories, overlay mode, user-defined extensions, list filters, and profile recipes (`cap_add`, `devices`) are shipped.
+Core copy/diff/apply workflow ships today with Claude Code, Gemini CLI, Aider, Codex, and OpenCode agents. Docker, Tart, and Seatbelt backends are implemented. Network isolation, profiles, auxiliary directories, user-defined extensions, list filters, and profile recipes (`cap_add`, `devices`) are shipped.
 
 For the full list of designed-but-unimplemented features, see [dev/plans/TODO.md](contributors/design/plans/README.md). For design specs, see [design/](contributors/design/).
 
