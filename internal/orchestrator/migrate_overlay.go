@@ -127,6 +127,17 @@ func (o *OverlayFlatten) Apply(ctx context.Context, d migrate.Decision) (migrate
 	if err != nil {
 		return report, err
 	}
+	// Single-filesystem precondition (crash-safe-migration decision 4): scratch
+	// (under home) and the sandboxes root hold the promotion's rename endpoints,
+	// so a cross-FS split would make the scratch->U_^^_new move-in fail with
+	// EXDEV mid-flatten. Cheap insurance, re-checked against current on-disk state
+	// before any sandbox is touched. Skipped when there is nothing to flatten —
+	// the sandboxes dir may not exist and the stamp-only path moves nothing.
+	if len(names) > 0 {
+		if err := migrate.SameFilesystem(o.home, o.sandboxesRoot); err != nil {
+			return report, fmt.Errorf("migration preflight: %w", err)
+		}
+	}
 	for _, name := range names {
 		st, err := o.status(ctx, name)
 		if err != nil {
