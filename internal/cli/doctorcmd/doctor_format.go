@@ -156,6 +156,12 @@ func printFixSection(w io.Writer, r yoloai.BackendReport) {
 		if len(result.Steps) == 1 {
 			step := result.Steps[0]
 			fmt.Fprintf(w, "\nTo fix %s:\n", result.Capability.Summary) //nolint:errcheck
+			// Surface the description like the multi-step "Option A — <desc>"
+			// label does; without it a description-only step (e.g. "KVM hardware
+			// not detected …", which carries no command) prints an empty section.
+			if step.Description != "" {
+				fmt.Fprintf(w, "  %s\n", step.Description) //nolint:errcheck
+			}
 			printStep(w, step, "  ")
 		} else {
 			fmt.Fprintf(w, "\nTo fix %s — choose one option:\n", result.Capability.Summary) //nolint:errcheck
