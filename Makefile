@@ -186,11 +186,15 @@ e2e: build
 
 ## integration-podman: run Podman integration tests (requires Podman with socket)
 ##
-## Two suites run under YOLOAI_TEST_BACKEND=podman:
+## Three suites run under YOLOAI_TEST_BACKEND=podman:
 ##   1. ./runtime/podman/                    — backend-internal tests
 ##   2. ./internal/cli/ launch/lifecycle subset — CLI flow against podman
 ##      Catches sandbox-setup.py regressions that only surface on a non-Docker
 ##      runtime (CI's Docker job won't notice; that's the point of the matrix).
+##   3. ./internal/orchestrator/ podman tests — rootless-podman brokering + C1
+##      containment. These require provisioned rootless podman (slirp host-loopback,
+##      keep-id), so they are scoped OUT of the docker `integration` job and run
+##      only here, where podman is the owned+provisioned backend.
 integration-podman: build
 	@echo "Building base image with Podman..."
 	@./$(BINARY) system build --backend=podman
@@ -199,6 +203,9 @@ integration-podman: build
 	@echo "Running CLI lifecycle subset against Podman..."
 	@YOLOAI_TEST_BACKEND=podman go test -tags=integration -v -count=1 -timeout=10m \
 		-run '^TestCLI_(StartStop|StartAfterDone)$$' ./internal/cli/
+	@echo "Running orchestrator Podman brokering + containment tests..."
+	@YOLOAI_TEST_BACKEND=podman go test -tags=integration -v -count=1 -timeout=10m \
+		-run '^TestIntegration_(CredentialBroker_Podman|CopyModeMaliciousFilterNoHostExec_Podman|Podman_DirectDeliveryOnMacOS)$$' ./internal/orchestrator/
 
 ## integration-containerd: run containerd (Kata VM) integration tests.
 ## Linux-only: the real tests are `//go:build integration && linux`. On non-Linux

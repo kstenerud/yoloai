@@ -129,12 +129,27 @@ func legacyDockerIntegrationSetup(t *testing.T) (*orchestrator.Engine, context.C
 
 // podmanIntegrationSetup mirrors integrationSetup on the Podman backend, to
 // validate brokering on rootless podman: it takes the legacy launch path + the
-// decoupled broker + the slirp InjectorReach. Skips when Podman isn't available.
+// decoupled broker + the slirp InjectorReach.
+//
+// These tests belong to the podman-owning suite (`make integration-podman`),
+// which provisions rootless podman (builds the image, starts the user socket)
+// and signals ownership with YOLOAI_TEST_BACKEND=podman. The docker-owning
+// `make integration` job has podman *installed* on the runner but not
+// *provisioned* (no rootless socket/slirp host-loopback for brokering, no
+// keep-id UID mapping — container-written files land root-owned and defeat
+// t.TempDir cleanup), so running there is a false failure. The env check below
+// is job-scoping, NOT an opportunistic "skip if podman is missing": once podman
+// IS the backend under test, it is REQUIRED — a missing/unprovisioned podman is
+// a hard failure we want surfaced, not silently skipped.
+//
 // The build-checksum pre-seed is keyed to the podman image store (DF56); it avoids
 // a rebuild as long as `yoloai system build --backend podman` has put a current
 // image in Podman.
 func podmanIntegrationSetup(t *testing.T) (*orchestrator.Engine, context.Context) {
 	t.Helper()
+	if os.Getenv("YOLOAI_TEST_BACKEND") != "podman" {
+		t.Skip("podman orchestrator tests run under the podman suite (make integration-podman, YOLOAI_TEST_BACKEND=podman)")
+	}
 	ctx := context.Background()
 
 	home := testutil.IsolatedHome(t)
@@ -143,9 +158,7 @@ func podmanIntegrationSetup(t *testing.T) (*orchestrator.Engine, context.Context
 	dockerrt.RecordBuildChecksum(layout, "podman")
 
 	rt, err := podmanrt.New(ctx, config.Layout{}.WithEnv(testutil.GetCuratedHostEnv(testutil.IntegrationHostEnvVars)))
-	if err != nil {
-		t.Skipf("Podman unavailable, skipping: %v", err)
-	}
+	require.NoError(t, err, "podman must be available and provisioned when YOLOAI_TEST_BACKEND=podman")
 	t.Cleanup(func() { rt.Close() }) //nolint:errcheck // test cleanup
 
 	mgr := orchestrator.NewEngineWithRuntime(rt, slog.Default(), strings.NewReader(""), orchestrator.WithLayout(layout))

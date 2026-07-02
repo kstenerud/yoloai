@@ -146,6 +146,7 @@ inclusion test first, then add a row to the index.
 | `:overlay` create on Podman-macOS crashes the entrypoint (`mount … cannot mount overlay read-only`, exit 32); container `Exited`, incomplete v3 sandbox | [macOS: overlayfs on a VirtioFS bind …](#macos-overlayfs-on-a-virtiofs-bind-mount-silently-downgrades-to-a-container-local-tmpfs-upper-uncommitted-changes-lost-on-restart) (Podman applehv variant) |
 | `system migrate` of a running `:overlay` sandbox fails at dispose: `drop orig: openfdat …/ovlwork/work: permission denied` (rootful Docker) | [Linux: overlay flatten migration and host-side ownership of container-written state](#linux-overlay-flatten-migration-and-host-side-ownership-of-container-written-state) |
 | `system migrate` refuses: sandbox runtime state `owned by uid 100999, not you` (podman-rootless) | [Linux: overlay flatten migration and host-side ownership of container-written state](#linux-overlay-flatten-migration-and-host-side-ownership-of-container-written-state) |
+| Integration test fails only in CI's Docker job: `t.TempDir` cleanup `unlinkat …/.git/objects/…: permission denied` on podman-written files | [Linux: overlay flatten migration and host-side ownership of container-written state](#linux-overlay-flatten-migration-and-host-side-ownership-of-container-written-state) |
 
 ---
 
