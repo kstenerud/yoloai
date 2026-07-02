@@ -140,36 +140,41 @@ func printFixSection(w io.Writer, r yoloai.BackendReport) {
 
 	// Print fix steps for each failed check.
 	for _, result := range r.Results {
-		if result.Err == nil {
-			continue
+		if result.Err != nil {
+			printCheckFix(w, result)
 		}
-		if result.IsPermanent {
-			fmt.Fprintf(w, "\n%s [permanent]\n", result.Capability.Summary) //nolint:errcheck
-			if result.Capability.Detail != "" {
-				fmt.Fprintf(w, "  %s\n", result.Capability.Detail) //nolint:errcheck
-			}
-			continue
+	}
+}
+
+// printCheckFix renders the fix guidance for one failed capability check: a
+// permanence note, a single "To fix" block, or a multi-option list.
+func printCheckFix(w io.Writer, result yoloai.CapabilityCheck) {
+	if result.IsPermanent {
+		fmt.Fprintf(w, "\n%s [permanent]\n", result.Capability.Summary) //nolint:errcheck
+		if result.Capability.Detail != "" {
+			fmt.Fprintf(w, "  %s\n", result.Capability.Detail) //nolint:errcheck
 		}
-		if len(result.Steps) == 0 {
-			continue
+		return
+	}
+	if len(result.Steps) == 0 {
+		return
+	}
+	if len(result.Steps) == 1 {
+		step := result.Steps[0]
+		fmt.Fprintf(w, "\nTo fix %s:\n", result.Capability.Summary) //nolint:errcheck
+		// Surface the description like the multi-step "Option A — <desc>" label
+		// does; without it a description-only step (e.g. "KVM hardware not
+		// detected …", which carries no command) prints an empty section.
+		if step.Description != "" {
+			fmt.Fprintf(w, "  %s\n", step.Description) //nolint:errcheck
 		}
-		if len(result.Steps) == 1 {
-			step := result.Steps[0]
-			fmt.Fprintf(w, "\nTo fix %s:\n", result.Capability.Summary) //nolint:errcheck
-			// Surface the description like the multi-step "Option A — <desc>"
-			// label does; without it a description-only step (e.g. "KVM hardware
-			// not detected …", which carries no command) prints an empty section.
-			if step.Description != "" {
-				fmt.Fprintf(w, "  %s\n", step.Description) //nolint:errcheck
-			}
-			printStep(w, step, "  ")
-		} else {
-			fmt.Fprintf(w, "\nTo fix %s — choose one option:\n", result.Capability.Summary) //nolint:errcheck
-			for i, step := range result.Steps {
-				fmt.Fprintf(w, "  Option %s — %s:\n", optionLabel(i), step.Description) //nolint:errcheck
-				printStep(w, step, "    ")
-			}
-		}
+		printStep(w, step, "  ")
+		return
+	}
+	fmt.Fprintf(w, "\nTo fix %s — choose one option:\n", result.Capability.Summary) //nolint:errcheck
+	for i, step := range result.Steps {
+		fmt.Fprintf(w, "  Option %s — %s:\n", optionLabel(i), step.Description) //nolint:errcheck
+		printStep(w, step, "    ")
 	}
 }
 
