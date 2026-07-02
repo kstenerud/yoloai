@@ -1,6 +1,6 @@
 // ABOUTME: Export writes the sandbox's changes as patch files to a directory
-// ABOUTME: instead of applying them (the `apply --patches` flow). Copy-mode emits
-// ABOUTME: format-patch files (+ uncommitted.diff); overlay emits upper-layer diffs.
+// ABOUTME: instead of applying them (the `apply --patches` flow). Emits
+// ABOUTME: format-patch files (+ uncommitted.diff) for :copy workdirs.
 
 package copyflow
 
@@ -27,7 +27,7 @@ type ExportOptions struct {
 	// Paths narrows the export to specific files (relative to the workdir).
 	Paths []string
 	// IncludeUncommitted additionally writes the agent's uncommitted edits as
-	// uncommitted.diff (copy mode only; overlay has no commit/uncommitted split).
+	// uncommitted.diff (copy mode only).
 	IncludeUncommitted bool
 	// DirHostPath selects the directory to export; "" selects Dirs[0] (workdir).
 	DirHostPath string
@@ -44,11 +44,9 @@ type ExportResult struct {
 }
 
 // Export writes the sandbox's changes as patch files under opts.Dir without
-// applying them. It resolves the workdir's mount mode internally: copy-mode
-// writes git format-patch files (the whole beyond-baseline range, or the
-// opts.Refs subset) plus an optional uncommitted.diff; overlay-mode writes the
-// upper-layer diff(s) captured by running git inside the container (which must
-// be running). Never advances the baseline.
+// applying them. Writes git format-patch files (the whole beyond-baseline
+// range, or the opts.Refs subset) plus an optional uncommitted.diff.
+// Guards :rw directories and delegates to exportCopy. Never advances the baseline.
 func Export(ctx context.Context, layout config.Layout, rt runtime.Backend, name string, opts ExportOptions) (*ExportResult, error) {
 	meta, err := store.LoadEnvironment(layout.SandboxDir(name))
 	if err != nil {

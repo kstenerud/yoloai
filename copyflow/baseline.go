@@ -59,7 +59,7 @@ func shaForError(sha string) string {
 // work copy, but only if the stored baseline still equals expectedCurrentSHA
 // (compare-and-swap). On mismatch it returns *BaselineConflictError without
 // writing. expectedCurrentSHA == "" means "expect no baseline yet" and is valid
-// only when none is set. :rw and :overlay workdirs are refused with a
+// only when none is set. :rw workdirs are refused with a
 // *UsageError (their baselines aren't host-tracked).
 func AdvanceBaselineCAS(ctx context.Context, layout config.Layout, rt runtime.Backend, name, dirHostPath, expectedCurrentSHA string) (*BaselineChange, error) {
 	g := git.NewSandbox(layout, rt, name)
@@ -157,10 +157,9 @@ func commitBaseline(sandboxDir string, meta *store.Environment, dirHostPath stri
 }
 
 // advanceBaselineUnlocked is the lock-free baseline write used by the apply
-// path, which already holds the per-sandbox lock. It treats :rw and :overlay as
-// a no-op — their baselines aren't host-tracked (live mount / overlay upper
-// layer) — matching the apply flow, which only reaches here in copy mode
-// anyway. resolve computes the target SHA from the loaded work dir.
+// path, which already holds the per-sandbox lock. It treats :rw as a no-op —
+// its baseline isn't host-tracked — matching the apply flow, which only reaches
+// here in copy mode anyway. resolve computes the target SHA from the loaded work dir.
 func advanceBaselineUnlocked(layout config.Layout, name string, dirHostPath string, resolve func(workDir string) (string, error)) error {
 	sandboxDir := layout.SandboxDir(name)
 	if err := store.RequireSandboxDir(sandboxDir); err != nil {

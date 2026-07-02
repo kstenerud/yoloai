@@ -153,8 +153,8 @@ func podmanImageBytes(du types.DiskUsage) int64 {
 }
 
 // Create wraps the Docker Create to inject --userns=keep-id for rootless mode.
-// Exception: overlay mode requires CAP_SYS_ADMIN and root privileges inside the
-// container, so we skip keep-id when SYS_ADMIN is in CapAdd.
+// Exception: recipe/profile cap_add may request CAP_SYS_ADMIN, which requires
+// real root in the container, so we skip keep-id when SYS_ADMIN is in CapAdd.
 //
 // Privileged mode (dind) maps to the yoloai UID (1001) rather than the host
 // user. Plain keep-id maps the host user 1:1, so the container runs as that user
@@ -171,10 +171,10 @@ func podmanImageBytes(du types.DiskUsage) int64 {
 // remaps yoloai to the macOS user's UID via gosu — the same path Docker takes.
 func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error {
 	if r.rootless && cfg.UsernsMode == "" && goruntime.GOOS != "darwin" {
-		// Check if overlay mode is active (indicated by SYS_ADMIN capability)
-		hasOverlay := slices.Contains(cfg.CapAdd, "SYS_ADMIN")
-		// Only use keep-id for normal mounts; overlay needs root in container
-		if !hasOverlay {
+		// SYS_ADMIN (from recipe/profile cap_add) requires real root in container.
+		hasSysAdmin := slices.Contains(cfg.CapAdd, "SYS_ADMIN")
+		// Only use keep-id when SYS_ADMIN is not requested.
+		if !hasSysAdmin {
 			if cfg.Privileged {
 				cfg.UsernsMode = "keep-id:uid=1001,gid=1001"
 			} else {
@@ -308,7 +308,8 @@ func (r *Runtime) RequiredCapabilities(isolation runtime.IsolationMode) []caps.H
 // UsernsMode returns the user namespace mode for a new container.
 // Rootless Podman on Linux uses "keep-id" to map container uid to the host
 // user, which is required for correct file ownership. Exceptions:
-//   - hasSysAdmin=true: overlay mounts require real root in the container
+//   - hasSysAdmin=true: recipe/profile cap_add requests CAP_SYS_ADMIN, which
+//     requires real root in the container
 //   - macOS: Podman Machine maps the VM user (uid 1000) into the container,
 //     not the macOS user. Without keep-id, entrypoint.py remaps yoloai to
 //     the correct uid via gosu — the same path Docker takes.

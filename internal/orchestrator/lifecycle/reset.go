@@ -339,7 +339,7 @@ func prepareResetRestart(ctx context.Context, d state.Deps, opts ResetOptions, s
 		return err
 	}
 
-	// Reset aux :copy and :overlay dirs
+	// Reset aux :copy dirs
 	if err := resetAuxDirs(ctx, git.NewHost(d.Layout), sandboxDir, meta); err != nil {
 		return err
 	}

@@ -93,7 +93,7 @@ func runNewCmd(cmd *cobra.Command, args []string, version string) error {
 	}
 
 	// Courtesy free-space check before allocating ~hundreds of MB
-	// (workdir copy + overlay) and possibly fetching a multi-GB base
+	// (workdir copy) and possibly fetching a multi-GB base
 	// image. Stat errors are swallowed; the warning is non-blocking.
 	if !cliutil.JSONEnabled(cmd) {
 		cliutil.WarnIfLowDisk(cmd.ErrOrStderr(), cliutil.Layout().SandboxesDir())
@@ -329,8 +329,8 @@ func resolveNewDirSpecs(rawWorkdirArg string, rawDirs []string) (workdirSpec yol
 	for _, rawDir := range rawDirs {
 		parsed, parseErr := cliutil.ParseAuxDirArg(rawDir, homeDir, interpEnv)
 		if parseErr != nil {
-			// ParseAuxDirArg returns *UsageError for the :copy/:overlay
-			// rejection cases (already user-actionable); pass it through.
+			// ParseAuxDirArg returns *UsageError for the :copy and
+			// :overlay-retired rejection cases (already user-actionable); pass it through.
 			// Other parse errors get the "invalid directory" prefix.
 			var usage *yoerrors.UsageError
 			if errors.As(parseErr, &usage) {

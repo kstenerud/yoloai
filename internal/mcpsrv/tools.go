@@ -99,7 +99,7 @@ func sandboxDestroyTool() mcp.Tool {
 
 func sandboxDiffTool() mcp.Tool {
 	return mcp.NewTool("sandbox_diff",
-		mcp.WithDescription("Show diff of all changes made in the sandbox. Call with stat=true first for a cheap summary. Use sandbox_diff_file for specific files when the full diff is too large. Note: overlay-mode directories require a running container."),
+		mcp.WithDescription("Show diff of all changes made in the sandbox. Call with stat=true first for a cheap summary. Use sandbox_diff_file for specific files when the full diff is too large."),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Sandbox name")),
 		mcp.WithBoolean("stat", mcp.Description("Return stat summary only (default false)")),
 	)
@@ -410,8 +410,7 @@ func (s *Server) handleSandboxDiffFile(ctx context.Context, req mcp.CallToolRequ
 		return textResult(errorf("path is required")), nil
 	}
 
-	// Workdir().Diff uses the Client's bound runtime and resolves
-	// copy-vs-overlay internally; for Docker / Podman / containerd that's
+	// Workdir().Diff uses the Client's bound runtime; for Docker / Podman / containerd that's
 	// host-side git (the patch package handles container-vs-host selection).
 	diff, err := s.svc.Diff(ctx, name, yoloai.WorkdirDiffOptions{Paths: []string{path}})
 	if err != nil {

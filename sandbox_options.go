@@ -22,7 +22,7 @@ import (
 //   - inline field-by-field at the call site: only when there is NO single
 //     internal struct to map to — either because the verb fans out to several
 //     internal structs chosen by runtime state (WorkdirApplyOptions →
-//     ApplySeries/ApplyOverlay/ApplyAll; WorkdirDiffOptions → Diff/CommitDiff),
+//     ApplySeries/ApplyAll; WorkdirDiffOptions → Diff/CommitDiff),
 //     or because the fields spread across distinct internal calls
 //     (BuildImageOptions).
 

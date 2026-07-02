@@ -1,6 +1,5 @@
-// ABOUTME: Workdir is the diff/apply sub-handle off a *Sandbox (F2). It owns the
-// ABOUTME: copy-vs-overlay resolution so callers get one Diff verb regardless of
-// ABOUTME: the workdir's mount mode.
+// ABOUTME: Workdir is the diff/apply sub-handle off a *Sandbox (F2). It presents
+// ABOUTME: a single Diff/Apply/Export verb regardless of the workdir's mount mode.
 
 package yoloai
 
@@ -41,27 +40,25 @@ type Workdir struct {
 // produces the full working diff (committed changes since baseline).
 type WorkdirDiffOptions struct {
 	// Paths narrows the diff to specific files (relative to the workdir).
-	// Ignored for overlay-mode workdirs and for Ref diffs.
+	// Ignored for Ref diffs.
 	Paths []string
 	// Stat renders a `git diff --stat` summary instead of the full copyflow.
 	Stat bool
 	// NameOnly lists changed file names only (`git diff --name-only`).
 	NameOnly bool
 	// Ref diffs a specific commit or commit range from the sandbox's history
-	// instead of the working diff. Disk-only; not supported for overlay-mode
-	// workdirs (their commits aren't individually addressable from the host).
+	// instead of the working diff. Disk-only; not supported for :rw workdirs.
 	Ref string
 	// PathPrefix when set is passed to git as --src-prefix/--dst-prefix for the
 	// full diff output; used by diff --all to embed absolute host paths in the
-	// patch header. Ignored for Stat, NameOnly, Ref, and overlay mode.
+	// patch header. Ignored for Stat, NameOnly, and Ref.
 	PathPrefix string
 }
 
 // Diff returns the workdir diff as text — "" means no changes. It resolves the
-// workdir's mount mode internally: copy-mode diffs on disk, overlay-mode diffs
-// by running git inside the container (which must be running), and Ref diffs
+// workdir's mount mode internally: copy-mode diffs on disk, and Ref diffs
 // read the on-disk commit history. Folds the former Diff / DiffWithOptions /
-// DiffRef / DiffOverlay methods into one verb.
+// DiffRef methods into one verb.
 func (w *Workdir) Diff(ctx context.Context, opts WorkdirDiffOptions) (out string, err error) {
 	defer func() { err = w.wrapNotRunning(err) }()
 	meta, err := w.engine.LoadEnvironment(w.name)
@@ -97,7 +94,7 @@ type Changes struct {
 }
 
 // Changes returns the structured change summary for the workdir. Like Diff, it
-// reflects copy/overlay/rw mode automatically.
+// reflects copy/rw mode automatically.
 func (w *Workdir) Changes(ctx context.Context) (_ *Changes, err error) {
 	defer func() { err = w.wrapNotRunning(err) }()
 	meta, err := w.engine.LoadEnvironment(w.name)
@@ -148,8 +145,7 @@ type WorkdirExportOptions struct {
 	// Required; empty is rejected with a *UsageError.
 	Dir string
 	// Refs selects a subset of commits/ranges to export (copy-mode only). Empty
-	// exports all beyond-baseline commits. Refs on an overlay workdir is refused
-	// with a *UsageError (overlay changes have no commit history).
+	// exports all beyond-baseline commits.
 	Refs []string
 	// Paths narrows the export to specific files (relative to the workdir).
 	Paths []string
@@ -177,14 +173,11 @@ func (o WorkdirExportOptions) toInternal(dirHostPath string) copyflow.ExportOpti
 type ExportResult = copyflow.ExportResult
 
 // Export writes the agent's changes as patch files under opts.Dir instead of
-// applying them — the `yoloai apply --patches` flow. It resolves the workdir's
-// mount mode internally: copy-mode writes git format-patch files (the whole
-// beyond-baseline range, or the opts.Refs subset) plus an optional
-// uncommitted.diff; overlay-mode writes the upper-layer diff(s) (which requires
-// the container running). Never applies and never advances the baseline.
+// applying them — the `yoloai apply --patches` flow. Writes git format-patch
+// files (the whole beyond-baseline range, or the opts.Refs subset) plus an
+// optional uncommitted.diff. Never applies and never advances the baseline.
 //
-// Comply-or-complain (§2): Dir is required — empty is a *UsageError. Exporting
-// specific Refs from an overlay workdir is likewise refused with a *UsageError.
+// Comply-or-complain (§2): Dir is required — empty is a *UsageError.
 func (w *Workdir) Export(ctx context.Context, opts WorkdirExportOptions) (*ExportResult, error) {
 	if opts.Dir == "" {
 		return nil, yoerrors.NewUsageError("export requires a destination directory: set WorkdirExportOptions.Dir")
@@ -258,9 +251,8 @@ type WorkdirApplyOptions struct {
 // caller's. A (*ApplyResult, error) pair means the commits landed but a
 // follow-on step (git am stash, or uncommitted changes) had a non-fatal issue (see ApplySeries).
 //
-// Mount mode is resolved internally (like Diff). For an :overlay workdir there
-// is no commit history, so ApplyModeCommits is refused with a *UsageError and
-// ApplyModeNoCommit lands the overlay's upper-layer changes (see ApplyOverlay).
+// Mount mode is resolved internally (like Diff). An :overlay workdir must be
+// migrated before Apply can be used — run 'yoloai system migrate'.
 func (w *Workdir) Apply(ctx context.Context, opts WorkdirApplyOptions) (_ *ApplyResult, err error) {
 	defer func() { err = w.wrapNotRunning(err) }()
 	if opts.Mode != ApplyModeCommits && opts.Mode != ApplyModeNoCommit {
@@ -304,18 +296,14 @@ type CommitInfo struct {
 // WorkdirCommitsOptions configures Workdir.Commits.
 type WorkdirCommitsOptions struct {
 	// Stat attaches a per-commit `git diff --stat` summary to each CommitInfo.
-	// Copy-mode only — requesting Stat on an :overlay workdir is refused with a
-	// *PlatformError, since overlay commits aren't individually stat-addressable
-	// from the host.
+	// Copy-mode only.
 	Stat bool
 }
 
 // Commits returns the workdir's commit history beyond the diff baseline — one
-// entry per commit since the work started. It resolves the workdir's mount
-// mode internally: copy-mode reads the on-disk history, overlay-mode runs git
-// log inside the running container. Returns an empty slice when HEAD equals the
-// baseline. Folds the former ListCommits / ListCommitsOverlay /
-// ListCommitsWithStats methods into one verb.
+// entry per commit since the work started. Reads the on-disk history.
+// Returns an empty slice when HEAD equals the baseline. Folds the former
+// ListCommits / ListCommitsWithStats methods into one verb.
 func (w *Workdir) Commits(ctx context.Context, opts WorkdirCommitsOptions) (_ []CommitInfo, err error) {
 	defer func() { err = w.wrapNotRunning(err) }()
 	meta, err := w.engine.LoadEnvironment(w.name)
@@ -382,7 +370,7 @@ type BaselineConflictError = copyflow.BaselineConflictError
 // — see Q-P/CAS). On mismatch it returns a *BaselineConflictError without
 // writing, so a concurrent mover can't be silently clobbered. Pass
 // expectedCurrentSHA == "" to assert "no baseline yet" (valid only when none is
-// set). Refused with a *UsageError for :rw and :overlay workdirs.
+// set). Refused with a *UsageError for :rw workdirs.
 func (w *Workdir) AdvanceBaseline(ctx context.Context, expectedCurrentSHA string) (*BaselineChange, error) {
 	return w.engine.AdvanceBaseline(ctx, w.name, w.dirHostPath, expectedCurrentSHA)
 }
@@ -397,8 +385,7 @@ func (w *Workdir) SetBaseline(ctx context.Context, expectedCurrentSHA, ref strin
 // BaselineLog returns the workdir's commit history from sandbox inception to
 // HEAD, newest-first then the inception commit, marking the current baseline.
 // Bounds the output to the sandbox session so it stays useful for recovery even
-// after an accidental baseline advance. Refused with a *UsageError for :rw and
-// :overlay workdirs.
+// after an accidental baseline advance. Refused with a *UsageError for :rw workdirs.
 func (w *Workdir) BaselineLog(ctx context.Context) ([]BaselineLogEntry, error) {
 	return w.engine.BaselineLog(ctx, w.name, w.dirHostPath)
 }
@@ -417,9 +404,9 @@ type WorkdirTagsOptions struct {
 
 // Tags returns the sandbox workdir's checkpoint tags, each with its annotated
 // Message populated. Tagging is copy-mode only — returns an empty list for :rw
-// and :overlay workdirs. With opts.UnappliedOnly, returns only tags not yet
-// present on the host. Folds ListTagsBeyondBaseline / ListUnappliedTags and the
-// per-tag message lookup; reads the sandbox work copy through the backend.
+// workdirs. With opts.UnappliedOnly, returns only tags not yet present on the
+// host. Folds ListTagsBeyondBaseline / ListUnappliedTags and the per-tag
+// message lookup; reads the sandbox work copy through the backend.
 func (w *Workdir) Tags(ctx context.Context, opts WorkdirTagsOptions) ([]TagInfo, error) {
 	return w.engine.WorkdirTags(ctx, w.name, w.dirHostPath, opts.UnappliedOnly)
 }

@@ -393,7 +393,7 @@ func execExitError(err error) error {
 // because the question has four answers, not two: alongside yes/no, the working
 // copy of a VM-local backend (Tart) that is not running can't be reached to
 // check, so it reports ChangesUnknown (treated as possibly-dirty) rather than a
-// misleading "no"; and a sandbox with no copy/overlay workdir or a broken one
+// misleading "no"; and a sandbox with no copy workdir or a broken one
 // reports ChangesNotApplicable.
 type ChangeState string
 
@@ -401,7 +401,7 @@ const (
 	ChangesPresent       ChangeState = "yes"     // workdir has changes beyond baseline
 	ChangesAbsent        ChangeState = "no"      // workdir is unchanged from baseline
 	ChangesUnknown       ChangeState = "unknown" // VM-local backend is stopped; the working copy can't be reached — start it to verify (treated as possibly-dirty)
-	ChangesNotApplicable ChangeState = "-"       // the change question doesn't apply (no copy/overlay workdir, or a broken/unavailable sandbox)
+	ChangesNotApplicable ChangeState = "-"       // the change question doesn't apply (no copy workdir, or a broken/unavailable sandbox)
 )
 
 // SandboxInfo is the combined metadata + live state returned by Sandbox.Inspect /

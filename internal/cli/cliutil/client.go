@@ -300,7 +300,7 @@ func MigratePreviewSystem() (*yoloai.System, error) {
 
 // SandboxMetadata reads a sandbox's persisted read-model (environment.json)
 // using a backend-less Client, so no runtime is opened. Command handlers use it
-// for the early "load meta to branch on mount mode / overlay / baseline" reads
+// for the early "load meta to branch on mount mode / baseline" reads
 // that precede the backend-driving WithClient call.
 func SandboxMetadata(cmd *cobra.Command, name string) (*yoloai.Environment, error) {
 	c, err := Client(cmd)

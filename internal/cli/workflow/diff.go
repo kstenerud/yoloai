@@ -1,5 +1,5 @@
 // ABOUTME: Cobra "diff" command: shows agent changes as a unified diff, commit
-// ABOUTME: log, or per-ref diff; handles :copy, :overlay, and multi-directory sandboxes.
+// ABOUTME: log, or per-ref diff; handles :copy and multi-directory sandboxes.
 package workflow
 
 import (
@@ -73,7 +73,7 @@ func runDiffCmd(cmd *cobra.Command, args []string) error {
 	logFlag, _ := cmd.Flags().GetBool("log")
 	allFlag, _ := cmd.Flags().GetBool("all")
 
-	// Load meta early to detect overlay dirs and select the target dir.
+	// Load meta early to select the target dir.
 	env, metaErr := cliutil.SandboxMetadata(cmd, name)
 	if metaErr != nil {
 		return metaErr
@@ -376,8 +376,7 @@ func diffLogJSON(cmd *cobra.Command, name, hostPath string, stat bool) error {
 
 // diffAll generates a diff across all tracked directories.
 // For full diff (not stat/nameOnly): copy-mode dirs use PathPrefix for absolute
-// paths (no banner); overlay-mode dirs use a banner separator.
-// For stat/nameOnly: all dirs get a banner.
+// paths (no banner). For stat/nameOnly: all dirs get a banner.
 func diffAll(cmd *cobra.Command, name string, rest []string, logFlag, stat, nameOnly bool) error {
 	if logFlag {
 		return yoerrors.NewUsageError("--log is per-commit; use a single dir specifier with --all")
@@ -407,8 +406,8 @@ func diffAll(cmd *cobra.Command, name string, rest []string, logFlag, stat, name
 }
 
 // diffOneDirAll diffs a single tracked directory and appends its output to
-// combined. Copy-mode dirs use PathPrefix for absolute paths; overlay-mode
-// dirs and stat/nameOnly output get a banner header.
+// combined. Copy-mode dirs use PathPrefix for absolute paths;
+// stat/nameOnly output gets a banner header.
 func diffOneDirAll(ctx context.Context, sb *yoloai.Sandbox, d yoloai.DirInfo, stat, nameOnly bool, combined *strings.Builder) error {
 	wd, wdErr := sb.TrackedDir(d.HostPath)
 	if wdErr != nil {

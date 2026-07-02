@@ -161,7 +161,7 @@ func runMCPProxy(cmd *cobra.Command, args []string) error {
 	}
 
 	// Parse aux dirs. ParseAuxDirArg enforces Q-U: aux dirs cannot
-	// be :copy or :overlay (diff/apply is workdir-only).
+	// be :copy (diff/apply is workdir-only).
 	var auxDirSpecs []yoloai.DirSpec
 	for _, rawDir := range rawDirs {
 		parsed, err := cliutil.ParseAuxDirArg(rawDir, homeDir, interpEnv)

@@ -89,7 +89,7 @@ func (e *Engine) GenerateCommitDiff(ctx context.Context, name string, dirHostPat
 }
 
 // ExportPatches writes the sandbox's changes as patch files (the apply
-// --patches flow). Best-effort backend open; overlay export needs the container.
+// --patches flow). Best-effort backend open.
 func (e *Engine) ExportPatches(ctx context.Context, name string, opts copyflow.ExportOptions) (*copyflow.ExportResult, error) {
 	e.TryEnsure(ctx)
 	return copyflow.Export(ctx, e.layout, e.runtime, name, opts)
@@ -150,7 +150,7 @@ func (e *Engine) BaselineLog(ctx context.Context, name string, dirHostPath strin
 
 // WorkdirTags returns the sandbox's checkpoint tags with their annotated
 // messages populated. With unappliedOnly, returns only tags not yet on the host.
-// Tagging is copy-mode only — :rw and :overlay workdirs yield an empty list.
+// Tagging is copy-mode only — :rw workdirs yield an empty list.
 func (e *Engine) WorkdirTags(ctx context.Context, name string, dirHostPath string, unappliedOnly bool) ([]TagInfo, error) {
 	// Open the backend best-effort so Tart reads run inside the VM; a nil
 	// runtime falls back to host git (correct for Docker/Podman/Seatbelt).

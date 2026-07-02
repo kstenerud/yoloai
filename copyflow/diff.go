@@ -1,9 +1,9 @@
-// ABOUTME: Diff generation for sandbox workdirs across :copy, :overlay, and :rw modes.
-// ABOUTME: Provides context loading, workdir diff, overlay diff, and commit-level diff.
+// ABOUTME: Diff generation for sandbox workdirs across :copy and :rw modes.
+// ABOUTME: Provides context loading, workdir diff, and commit-level diff.
 
 // Package patch generates and applies git-format patches between a sandbox's
-// host work directory and its in-sandbox copy. Covers :copy, :overlay, and
-// :rw modes; supports format-patch, squash, selective, and export workflows.
+// host work directory and its in-sandbox copy. Covers :copy and :rw modes;
+// supports format-patch, squash, selective, and export workflows.
 package copyflow
 
 import (
@@ -26,10 +26,10 @@ type DiffOptions struct {
 	NameOnly    bool            // true for --name-only (list changed files)
 	Numstat     bool            // true for --numstat machine-readable per-file add/del counts
 	Paths       []string        // optional path filter (relative to workdir)
-	Runtime     runtime.Backend // runtime backend (required for :copy and :overlay)
+	Runtime     runtime.Backend // runtime backend (required for :copy)
 	DirHostPath string          // "" selects Dirs[0] (workdir)
 	// PathPrefix when set is passed to git as --src-prefix/--dst-prefix for the
-	// full diff output (copy mode only; ignored for Stat/NameOnly/overlay/Ref).
+	// full diff output (copy mode only; ignored for Stat/NameOnly/Ref).
 	PathPrefix string
 }
 

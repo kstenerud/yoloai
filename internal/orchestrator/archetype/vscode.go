@@ -15,7 +15,7 @@ import (
 
 // InjectVSCodeWorkspace writes VS Code workspace files into the workdir copy
 // based on devcontainer.json customizations. Called only when vscode-tunnel
-// is active and the workdir mode supports writes (:copy or :overlay).
+// is active and the workdir mode supports writes (:copy).
 // Existing keys win — project-checked-in settings are preserved.
 func InjectVSCodeWorkspace(workdirCopyPath string, dc *DevcontainerConfig) error {
 	if dc == nil {

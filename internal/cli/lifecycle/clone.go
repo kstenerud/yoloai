@@ -27,8 +27,8 @@ func runClone(cmd *cobra.Command, args []string) error {
 		return yoerrors.NewUsageError("--json and --attach are incompatible")
 	}
 
-	// Courtesy free-space check before duplicating the workdir copy +
-	// overlay. Clone is the heaviest allocate-per-sandbox op aside
+	// Courtesy free-space check before duplicating the workdir copy.
+	// Clone is the heaviest allocate-per-sandbox op aside
 	// from new. Swallow stat errors and non-blocking.
 	if !cliutil.JSONEnabled(cmd) {
 		cliutil.WarnIfLowDisk(cmd.ErrOrStderr(), cliutil.Layout().SandboxesDir())

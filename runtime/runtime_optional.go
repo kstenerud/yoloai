@@ -111,8 +111,8 @@ type GitExecer interface {
 type UsernsProvider interface {
 	// UsernsMode returns the user namespace mode for a new container.
 	// hasSysAdmin is true when the container will receive CAP_SYS_ADMIN
-	// (overlay mounts or recipe cap_add), which requires real root in the
-	// container and therefore cannot use keep-id.
+	// (recipe/profile cap_add), which requires real root in the container
+	// and therefore cannot use keep-id.
 	// Returns "" for the default mode.
 	UsernsMode(hasSysAdmin bool) string
 }

@@ -242,7 +242,7 @@ func checkDirtyRepos(ctx context.Context, g *git.Git, workdir *DirSpec, auxDirs 
 	return nil
 }
 
-// setupWorkdir copies/overlays the workdir, strips git metadata, and creates
+// setupWorkdir copies the workdir, strips git metadata, and creates
 // the git baseline. Returns the work copy directory path and baseline SHA.
 // For backends implementing WorkDirSetup (e.g., Tart), baseline creation is
 // deferred until the VM starts, and this function returns empty SHA.
@@ -350,7 +350,7 @@ func createBaselineForGitRepo(ctx context.Context, g *git.Git, workCopyDir strin
 }
 
 // setupAuxDirs prepares each auxiliary directory and returns its DirEnvironment
-// slice. :copy and :overlay dirs get host-side content setup and a git baseline
+// slice. :copy dirs get host-side content setup and a git baseline
 // (same pipeline as the workdir). :rw and :ro dirs are pure reference mounts
 // with no host-side preparation.
 func setupAuxDirs(ctx context.Context, g *git.Git, sandboxDir string, rt runtime.Backend, auxDirs []*DirSpec) ([]store.DirEnvironment, error) {
@@ -366,9 +366,9 @@ func setupAuxDirs(ctx context.Context, g *git.Git, sandboxDir string, rt runtime
 }
 
 // setupAuxDir prepares a single auxiliary directory and returns its
-// DirEnvironment. For :copy and :overlay modes, host-side content is set up
-// and a git baseline is created (D81, multi-workdir Phase 2). For :rw and :ro
-// modes, the function packs the mount metadata without any host-side work.
+// DirEnvironment. For :copy mode, host-side content is set up and a git
+// baseline is created (D81, multi-workdir Phase 2). For :rw and :ro modes,
+// the function packs the mount metadata without any host-side work.
 //
 // MountPath is recorded as the guest-visible path: backends that re-root
 // mounts inside the guest (tart maps host dirs under /Users/admin/host/...)

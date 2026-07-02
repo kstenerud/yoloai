@@ -48,7 +48,7 @@ type Environment struct {
 
 	// Dirs is the ordered list of directories the sandbox manages. Element 0 is
 	// the workdir (the agent's cwd; "the workdir" for docs/UI). Entries with
-	// Mode copy/overlay are "tracked" (diff/apply applies to them); rw/ro are
+	// Mode copy are "tracked" (diff/apply applies to them); rw/ro are
 	// reference mounts. Use the Workdir()/AuxDirs() helpers rather than indexing.
 	Dirs []DirEnvironment `json:"dirs,omitempty"`
 
@@ -80,7 +80,7 @@ type Environment struct {
 // DirEnvironment stores resolved directory state at creation time, for every
 // entry in Environment.Dirs (workdir and auxiliary alike — the workdir is just
 // Dirs[0]). InceptionSHA / BaselineSHA are meaningful only for tracked
-// (copy/overlay) entries.
+// (copy) entries.
 type DirEnvironment struct {
 	HostPath     string  `json:"host_path"`
 	MountPath    string  `json:"mount_path"`
@@ -113,7 +113,7 @@ func (e *Environment) AuxDirs() []DirEnvironment {
 	return e.Dirs[1:]
 }
 
-// TrackedDirs returns the indices into Dirs of the tracked (copy/overlay)
+// TrackedDirs returns the indices into Dirs of the tracked (copy)
 // entries — those diff/apply operates on. Returns indices (not copies) so
 // callers can write back BaselineSHA via &e.Dirs[i].
 func (e *Environment) TrackedDirs() []int {

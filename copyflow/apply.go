@@ -1,4 +1,4 @@
-// ABOUTME: Apply operations: patch generation, baseline advancement, overlay apply,
+// ABOUTME: Apply operations: patch generation, baseline advancement,
 // ABOUTME: selective ref resolution, format-patch, and uncommitted diff for sandbox work directories.
 
 package copyflow
@@ -60,7 +60,7 @@ type ApplyAllOptions struct {
 // generated and validated (so the caller can preview the stat and confirm) but
 // not applied — the returned ApplyResult describes what *would* apply.
 //
-// With aux :copy/:overlay dirs removed the surface is workdir-only — the name
+// With aux :copy dirs removed the surface is workdir-only — the name
 // "ApplyAll" is preserved for stability but the iteration is gone.
 //
 // layout determines where the per-sandbox lock file lives; callers

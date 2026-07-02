@@ -135,7 +135,7 @@ type CommitInfo struct {
 // PatchSet holds patch data for a single directory.
 type PatchSet struct {
 	HostPath string // original host path (for display)
-	Mode     string // "copy" or "overlay"
+	Mode     string // "copy"
 	Patch    []byte
 	Stat     string
 }

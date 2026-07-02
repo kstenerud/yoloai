@@ -1,4 +1,4 @@
-// ABOUTME: Unit tests for diff generation across :copy, :overlay, and :rw sandbox modes.
+// ABOUTME: Unit tests for diff generation across :copy and :rw sandbox modes.
 // ABOUTME: Tests loadDiffContext, loadAllDiffContexts, GenerateDiff, and related helpers.
 
 package copyflow

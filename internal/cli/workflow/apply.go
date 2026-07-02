@@ -1,5 +1,5 @@
 // ABOUTME: 'apply' command entry — wires CLI flags to the chosen apply
-// ABOUTME: workflow (format-patch, no-commit, selective, export, overlay) and
+// ABOUTME: workflow (format-patch, no-commit, selective, export) and
 // ABOUTME: holds shared helpers (arg parsing, tag transfer, result type).
 package workflow
 

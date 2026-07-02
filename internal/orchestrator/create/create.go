@@ -63,19 +63,18 @@ const (
 // callers (`Mode: DirModeCopy`, `m.Mode == DirModeRW`) continue to
 // work without churn.
 //
-// All modes are permitted on both workdir and aux dirs. :copy and :overlay
-// enable the diff/apply workflow (D81, multi-workdir Phase 2); :rw provides
-// live-edit access; :ro (the default when DirSpec.Mode is left zero on an aux
-// dir) is read-only.
+// All modes are permitted on both workdir and aux dirs. :copy enables the
+// diff/apply workflow (D81, multi-workdir Phase 2); :rw provides live-edit
+// access; :ro (the default when DirSpec.Mode is left zero on an aux dir) is
+// read-only.
 type DirMode = store.DirMode
 
 // Re-exported DirMode constants. Canonical definitions in
 // store/dirmode.go.
 const (
-	DirModeCopy    = store.DirModeCopy
-	DirModeOverlay = store.DirModeOverlay
-	DirModeRW      = store.DirModeRW
-	DirModeRO      = store.DirModeRO
+	DirModeCopy = store.DirModeCopy
+	DirModeRW   = store.DirModeRW
+	DirModeRO   = store.DirModeRO
 )
 
 // DirSpec describes a directory to mount in the sandbox. The canonical
@@ -565,7 +564,7 @@ func setupAllWorkdirs(ctx context.Context, d state.Deps, opts Options, workdir *
 		return "", "", nil, err
 	}
 
-	// VS Code workspace injection (devcontainer + vscode-tunnel + copy/overlay).
+	// VS Code workspace injection (devcontainer + vscode-tunnel + copy mode).
 	if resolvedArchetype == archetype.ArchetypeDevcontainer && opts.VscodeTunnel &&
 		workdir.Mode != "rw" && devcontainerCfg != nil {
 		if injectErr := archetype.InjectVSCodeWorkspace(workCopyDir, devcontainerCfg); injectErr != nil {

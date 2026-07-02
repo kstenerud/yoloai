@@ -1,4 +1,4 @@
-// ABOUTME: Tests for the create_prepare pipeline: network config, copy/overlay
+// ABOUTME: Tests for the create_prepare pipeline: network config, copy-mode
 // ABOUTME: mount collection, mount validation, config defaults, and workdir setup.
 package create
 
