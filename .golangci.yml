@@ -19,10 +19,19 @@ linters:
     - exhaustive
     - cyclop
     - gocognit
+    - nolintlint
   disable:
     - exhaustruct
     - varnamelen
   settings:
+    nolintlint:
+      # Fail on a //nolint directive that no longer suppresses anything, so stale
+      # bypasses can't silently accumulate (they were purged in the sweep that
+      # enabled this). Explanations are not required — the many idiomatic bare
+      # //nolint:errcheck on defer-close/best-effort writes stay terse.
+      allow-unused: false
+      require-explanation: false
+      require-specific: false
     cyclop:
       max-complexity: 15
     gocognit:

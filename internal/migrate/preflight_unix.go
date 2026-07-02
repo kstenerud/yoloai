@@ -32,10 +32,9 @@ func SameFilesystem(paths ...string) error {
 		if !ok {
 			return fmt.Errorf("cannot determine the filesystem of %s", p)
 		}
-		// Stat_t.Dev is int32 on darwin (this is a real widen — gosec G115) and
-		// uint64 on linux (a no-op — unconvert). Device ids are non-negative, so
-		// the sign-extension G115 warns about cannot happen; equality is all we need.
-		dev := uint64(st.Dev) //nolint:gosec,unconvert // platform-varying Stat_t.Dev width; see comment above
+		// statDev normalizes the platform-varying Stat_t.Dev width to uint64 (see
+		// preflight_dev_{linux,unix}.go); equality is all we need.
+		dev := statDev(st)
 		if i == 0 {
 			dev0 = dev
 			continue
