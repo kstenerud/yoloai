@@ -317,6 +317,15 @@ func GitRunsInConfinement(rt Backend) bool {
 	return caps.FilesystemLocality == LocalitySandboxSide || caps.GitExecInConfinement
 }
 
+// GitHardeningArgs returns the `git -c` flags that must precede every git
+// invocation yoloai runs against agent-controlled content — on the host or in a
+// backend's confinement. Disabling core.hooksPath stops an agent-planted
+// .git/hooks script from executing (audit C1). A single source so a future
+// hardening flag is added once here, not forgotten in one of the executors.
+func GitHardeningArgs() []string {
+	return []string{"-c", "core.hooksPath=/dev/null"}
+}
+
 // KeepAliveModel classifies how each backend keeps its isolated environment
 // alive and reaps the processes running inside it. Declared per-backend in
 // BackendCaps so callers reason by semantic property, never by backend type.

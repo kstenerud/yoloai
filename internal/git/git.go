@@ -94,7 +94,7 @@ func (g *Git) RunCmd(ctx context.Context, dir string, args ...string) error {
 type hostExec struct{ env []string }
 
 func (h hostExec) run(ctx context.Context, workDir string, stdin []byte, args ...string) (string, error) {
-	fullArgs := append([]string{"-c", "core.hooksPath=/dev/null", "-C", workDir}, args...)
+	fullArgs := append(append(runtime.GitHardeningArgs(), "-C", workDir), args...)
 	cmd := sysexec.CommandContext(ctx, h.env, "git", fullArgs...)
 	if stdin != nil {
 		cmd.Stdin = bytes.NewReader(stdin)

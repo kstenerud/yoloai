@@ -567,7 +567,8 @@ func (r *Runtime) GitExec(ctx context.Context, name, _, workDir string, args ...
 	actualWorkDir := r.translateWorkDirToVMPath(workDir)
 
 	// Build git command with -C workDir
-	gitArgs := append([]string{"-c", "core.hooksPath=/dev/null", "-C", actualWorkDir}, args...)
+	gitArgs := append(runtime.GitHardeningArgs(), "-C", actualWorkDir)
+	gitArgs = append(gitArgs, args...)
 	cmd := append([]string{"git"}, gitArgs...)
 
 	// Use ExecRaw to preserve exact git output (patches are whitespace-sensitive)

@@ -127,7 +127,9 @@ func (r *Runtime) GitExec(ctx context.Context, instance, user, containerPath str
 		return "", err
 	}
 
-	gitArgs := append([]string{"git", "-c", "core.hooksPath=/dev/null", "-C", containerPath}, args...)
+	gitArgs := append([]string{"git"}, runtime.GitHardeningArgs()...)
+	gitArgs = append(gitArgs, "-C", containerPath)
+	gitArgs = append(gitArgs, args...)
 	processSpec := &specs.Process{
 		Args:     gitArgs,
 		Cwd:      "/",
