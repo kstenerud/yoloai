@@ -95,6 +95,17 @@ func buildCNIBridgeCap() caps.HostCapability {
 	}
 }
 
+// runAsRootVMFixStep is the "run yoloai as root" remediation that both the CNI
+// and netns capability failures lead with: root satisfies the whole --isolation
+// vm privilege chain at once, so the two must give identical advice.
+func runAsRootVMFixStep() caps.FixStep {
+	return caps.FixStep{
+		Description: "Run yoloai as root (recommended for --isolation vm)",
+		Command:     "sudo yoloai new mybox --isolation vm ...",
+		NeedsRoot:   true,
+	}
+}
+
 // buildCNINetAdminCap returns a HostCapability that checks whether the CNI
 // bridge plugin has the capabilities it needs to complete the full CNI ADD
 // workflow: CAP_NET_ADMIN (bridge/veth creation) and CAP_SYS_ADMIN (setns to
@@ -112,11 +123,7 @@ func buildCNINetAdminCap() caps.HostCapability {
 		Permanent: func(_ caps.Environment) bool { return false },
 		Fix: func(_ caps.Environment) []caps.FixStep {
 			return []caps.FixStep{
-				{
-					Description: "Run yoloai as root (recommended for --isolation vm)",
-					Command:     "sudo yoloai new mybox --isolation vm ...",
-					NeedsRoot:   true,
-				},
+				runAsRootVMFixStep(),
 				{
 					Description: "Advanced (rootless): setcap EVERY CNI plugin in the chain AND make /var/lib/cni + /run/cni writable by your user — capping the bridge alone is not enough",
 					Command:     "sudo setcap cap_net_admin,cap_sys_admin+ep /opt/cni/bin/bridge   # repeat for host-local, portmap, firewall",
@@ -142,11 +149,7 @@ func buildNetnsCreationCap() caps.HostCapability {
 		},
 		Fix: func(_ caps.Environment) []caps.FixStep {
 			return []caps.FixStep{
-				{
-					Description: "Run yoloai as root (recommended for --isolation vm)",
-					Command:     "sudo yoloai new mybox --isolation vm ...",
-					NeedsRoot:   true,
-				},
+				runAsRootVMFixStep(),
 				{
 					Description: "Advanced: grant yoloai this capability — fixes ONLY netns creation; you will still hit the root-owned CNI state next (lost on rebuild/reinstall)",
 					Command:     "sudo setcap cap_sys_admin,cap_dac_override+ep $(which yoloai)",
