@@ -44,7 +44,7 @@ func runPlanApply(ctx context.Context, opts planApplyOpts) (yoloai.MigrationRepo
 	}
 
 	d := yoloai.MigrationDecision{Yes: opts.yes, AbandonStoppedOverlay: opts.abandonOverlay}
-	if ok, unmet := authorize(plan, d); !ok {
+	if ok, unmet := plan.Authorize(d); !ok {
 		granted, err := resolveApproval(ctx, opts, unmet, &d)
 		if err != nil {
 			return yoloai.MigrationReport{}, err
@@ -70,12 +70,7 @@ func refuseIfBlocked(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	var blocked []string
-	for _, op := range plan.Ops {
-		if op.Blocked {
-			blocked = append(blocked, op.Description)
-		}
-	}
+	blocked := plan.BlockedDescriptions()
 	if len(blocked) == 0 {
 		return nil
 	}
@@ -101,30 +96,6 @@ func downgradeGuidance(onDiskSchema int) string {
 	return fmt.Sprintf(
 		"To fix them, switch back to %s (your data directory is still at schema v%d), recover any wanted changes there with `yoloai diff`/`yoloai apply`, then destroy and recreate those sandboxes as :copy — and upgrade again. Nothing has been changed yet.",
 		target, onDiskSchema)
-}
-
-// authorize reports whether d satisfies every op's required approval, returning
-// the unmet ops for the app to surface or prompt on.
-func authorize(plan yoloai.MigrationPlan, d yoloai.MigrationDecision) (ok bool, unmet []yoloai.MigrationOp) {
-	for _, op := range plan.Ops {
-		if !opSatisfied(op, d) {
-			unmet = append(unmet, op)
-		}
-	}
-	return len(unmet) == 0, unmet
-}
-
-func opSatisfied(op yoloai.MigrationOp, d yoloai.MigrationDecision) bool {
-	switch {
-	case op.Blocked:
-		return false // no approval satisfies a hard block
-	case !op.Destructive:
-		return true
-	case op.AbandonsWork:
-		return d.Yes && d.AbandonStoppedOverlay
-	default:
-		return d.Yes
-	}
 }
 
 // resolveApproval turns an unmet-approval set into a granted decision or an
@@ -180,13 +151,7 @@ func previewMigration(ctx context.Context, opts planApplyOpts, cliSt, libSt conf
 	if err != nil {
 		return err
 	}
-	blocked := false
-	for _, op := range plan.Ops {
-		if op.Blocked {
-			blocked = true
-			break
-		}
-	}
+	blocked := len(plan.BlockedDescriptions()) > 0
 	if opts.json {
 		payload := map[string]any{
 			"cli_realm":      statusString(cliSt),

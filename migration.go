@@ -38,14 +38,48 @@ type MigrationPlan struct {
 	Ops []MigrationOp `json:"ops"`
 }
 
-// HasDestructive reports whether any op needs approval.
-func (p MigrationPlan) HasDestructive() bool {
+// Authorize reports whether d grants the approval every op requires, returning
+// the ops whose approval is unmet — the app surfaces these (or prompts on the
+// confirm-level ones) before calling ApplyMigration. Pure: no prompting, no
+// mutation. ApplyMigration re-checks and ENFORCES this library-side; this verb
+// lets the app decide what to confirm first, without re-deriving the policy over
+// the public op flags itself.
+func (p MigrationPlan) Authorize(d MigrationDecision) (ok bool, unmet []MigrationOp) {
 	for _, op := range p.Ops {
-		if op.Destructive {
-			return true
+		if !op.satisfiedBy(d) {
+			unmet = append(unmet, op)
 		}
 	}
-	return false
+	return len(unmet) == 0, unmet
+}
+
+// satisfiedBy reports whether d grants the approval this op requires. A hard
+// block is satisfied by nothing; a benign op by anything; an abandon-work op
+// needs both Yes and the explicit AbandonStoppedOverlay (so a plain Yes never
+// destroys work); any other destructive op needs Yes.
+func (op MigrationOp) satisfiedBy(d MigrationDecision) bool {
+	switch {
+	case op.Blocked:
+		return false
+	case !op.Destructive:
+		return true
+	case op.AbandonsWork:
+		return d.Yes && d.AbandonStoppedOverlay
+	default:
+		return d.Yes
+	}
+}
+
+// BlockedDescriptions returns the descriptions of ops that no approval can
+// satisfy (hard blocks), for the app to surface as refusal reasons.
+func (p MigrationPlan) BlockedDescriptions() []string {
+	var out []string
+	for _, op := range p.Ops {
+		if op.Blocked {
+			out = append(out, op.Description)
+		}
+	}
+	return out
 }
 
 // MigrationDecision is the approval the app grants, derived from flags (and any

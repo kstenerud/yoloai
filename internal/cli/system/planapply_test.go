@@ -24,7 +24,7 @@ func TestAuthorize(t *testing.T) {
 		{"blocked never satisfied", yoloai.MigrationOp{Description: "b", Blocked: true}, yoloai.MigrationDecision{Yes: true, AbandonStoppedOverlay: true}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ok, unmet := authorize(yoloai.MigrationPlan{Ops: []yoloai.MigrationOp{tc.op}}, tc.dec)
+			ok, unmet := yoloai.MigrationPlan{Ops: []yoloai.MigrationOp{tc.op}}.Authorize(tc.dec)
 			if ok != tc.want {
 				t.Errorf("authorize ok = %v, want %v", ok, tc.want)
 			}
