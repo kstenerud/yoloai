@@ -246,25 +246,35 @@ func (o *OverlayFlatten) hostUnmanageableReason(name string) string {
 	return ""
 }
 
+// promote runs the crash-safe promotion shared by both flatten paths: guard the
+// host-owned-state precondition, then build->stage->swap the sandbox into :copy
+// via a scratch dir under home. Only the Build step (which entries to write, and
+// from where) differs between the running-capture and abandon paths; the ready
+// marker, readiness predicate, and orig disposal (drop the secret-bearing upper)
+// are identical.
+func (o *OverlayFlatten) promote(name string, build func(dst string) error) error {
+	if err := o.assertHostOwnedState(name); err != nil {
+		return err
+	}
+	prom := migrate.Promotion{
+		Parent:           o.sandboxesRoot,
+		Name:             name,
+		ScratchDir:       filepath.Join(migrate.ScratchPath(o.home), "build"),
+		Build:            build,
+		WriteReadyMarker: o.writeCopyModeEnv,
+		IsReady:          o.isCopyMode,
+		DisposeOrig:      migrate.DropDisposer,
+	}
+	return prom.Run()
+}
+
 // flattenRunning captures the running container's merged overlay tree and
 // promotes the sandbox to :copy via the crash-safe promotion, then stops the
 // container (its overlay mount is now stale). The displaced original (the old
 // upper) is dropped, not trashed — redundant with the captured copy, and
 // secret-bearing.
 func (o *OverlayFlatten) flattenRunning(ctx context.Context, name string) (migrate.Report, error) {
-	if err := o.assertHostOwnedState(name); err != nil {
-		return migrate.Report{}, err
-	}
-	prom := migrate.Promotion{
-		Parent:           o.sandboxesRoot,
-		Name:             name,
-		ScratchDir:       filepath.Join(migrate.ScratchPath(o.home), "build"),
-		Build:            func(dst string) error { return o.buildFlattened(ctx, name, dst) },
-		WriteReadyMarker: o.writeCopyModeEnv,
-		IsReady:          o.isCopyMode,
-		DisposeOrig:      migrate.DropDisposer,
-	}
-	if err := prom.Run(); err != nil {
+	if err := o.promote(name, func(dst string) error { return o.buildFlattened(ctx, name, dst) }); err != nil {
 		return migrate.Report{}, fmt.Errorf("flatten %q: %w", name, err)
 	}
 
@@ -284,11 +294,11 @@ func (o *OverlayFlatten) flattenRunning(ctx context.Context, name string) (migra
 	return report, nil
 }
 
-// buildFlattened captures the merged overlay tree of name's overlay dirs and
-// writes the whole rebuilt work/ dir into dst (the promotion scratch), in copy
-// mode layout (files directly under work/<enc>, no overlay subdirs). Non-overlay
-// work subdirs are carried faithfully.
-func (o *OverlayFlatten) buildFlattened(ctx context.Context, name, dst string) error {
+// buildWork rebuilds the whole work/ dir into dst (the promotion scratch) in
+// copy-mode layout (files directly under work/<enc>, no overlay subdirs). srcFor
+// resolves each dir's source tree — the only thing that varies between the
+// capture and abandon paths; the enumerate/mkdir/copy scaffolding is shared.
+func (o *OverlayFlatten) buildWork(name, dst string, srcFor func(sandboxDir string, dir store.DirEnvironment) (string, error)) error {
 	sandboxDir := o.layout.SandboxDir(name)
 	env, err := store.LoadEnvironment(sandboxDir)
 	if err != nil {
@@ -300,21 +310,26 @@ func (o *OverlayFlatten) buildFlattened(ctx context.Context, name, dst string) e
 	}
 	for _, dir := range allDirs(env) {
 		enc := store.EncodePath(dir.HostPath)
-		if dir.Mode != store.DirModeOverlay {
-			if err := workspace.CopyPathFaithful(store.WorkDir(sandboxDir, dir.HostPath), filepath.Join(dstWork, enc)); err != nil {
-				return fmt.Errorf("carry work dir %s: %w", enc, err)
-			}
-			continue
-		}
-		staged, err := o.captureMerged(ctx, name, dir.HostPath)
+		src, err := srcFor(sandboxDir, dir)
 		if err != nil {
 			return err
 		}
-		if err := workspace.CopyPathFaithful(staged, filepath.Join(dstWork, enc)); err != nil {
-			return fmt.Errorf("stage flattened work dir %s: %w", enc, err)
+		if err := workspace.CopyPathFaithful(src, filepath.Join(dstWork, enc)); err != nil {
+			return fmt.Errorf("build work dir %s: %w", enc, err)
 		}
 	}
 	return nil
+}
+
+// buildFlattened captures each overlay dir's kernel-merged tree (and carries
+// non-overlay dirs verbatim) — the running-capture path's source resolver.
+func (o *OverlayFlatten) buildFlattened(ctx context.Context, name, dst string) error {
+	return o.buildWork(name, dst, func(sandboxDir string, dir store.DirEnvironment) (string, error) {
+		if dir.Mode != store.DirModeOverlay {
+			return store.WorkDir(sandboxDir, dir.HostPath), nil
+		}
+		return o.captureMerged(ctx, name, dir.HostPath)
+	})
 }
 
 const captureStageName = "yoloai-flatten-capture"
@@ -399,19 +414,7 @@ func captureContainerPaths(hostPath string) (merged, stage string) {
 // the agent's overlay changes — authorized by the caller. On macOS the upper was
 // already gone; on Linux the displaced upper is dropped, not trashed.
 func (o *OverlayFlatten) flattenAbandon(name string) (migrate.Report, error) {
-	if err := o.assertHostOwnedState(name); err != nil {
-		return migrate.Report{}, err
-	}
-	prom := migrate.Promotion{
-		Parent:           o.sandboxesRoot,
-		Name:             name,
-		ScratchDir:       filepath.Join(migrate.ScratchPath(o.home), "build"),
-		Build:            func(dst string) error { return o.buildFromLower(name, dst) },
-		WriteReadyMarker: o.writeCopyModeEnv,
-		IsReady:          o.isCopyMode,
-		DisposeOrig:      migrate.DropDisposer,
-	}
-	if err := prom.Run(); err != nil {
+	if err := o.promote(name, func(dst string) error { return o.buildFromLower(name, dst) }); err != nil {
 		return migrate.Report{}, fmt.Errorf("flatten (abandon) %q: %w", name, err)
 	}
 	return migrate.Report{
@@ -421,28 +424,15 @@ func (o *OverlayFlatten) flattenAbandon(name string) (migrate.Report, error) {
 }
 
 // buildFromLower rebuilds work/ from each overlay dir's pristine lower (the
-// original workdir copy), abandoning the upper. Non-overlay dirs carry verbatim.
+// original workdir copy), abandoning the upper — the abandon path's source
+// resolver. Non-overlay dirs carry verbatim.
 func (o *OverlayFlatten) buildFromLower(name, dst string) error {
-	sandboxDir := o.layout.SandboxDir(name)
-	env, err := store.LoadEnvironment(sandboxDir)
-	if err != nil {
-		return fmt.Errorf("load environment for %q: %w", name, err)
-	}
-	dstWork := filepath.Join(dst, "work")
-	if err := fileutil.MkdirAll(dstWork, 0o750); err != nil {
-		return err
-	}
-	for _, dir := range allDirs(env) {
-		enc := store.EncodePath(dir.HostPath)
-		src := store.WorkDir(sandboxDir, dir.HostPath)
+	return o.buildWork(name, dst, func(sandboxDir string, dir store.DirEnvironment) (string, error) {
 		if dir.Mode == store.DirModeOverlay {
-			src = store.OverlayLowerDir(sandboxDir, dir.HostPath)
+			return store.OverlayLowerDir(sandboxDir, dir.HostPath), nil
 		}
-		if err := workspace.CopyPathFaithful(src, filepath.Join(dstWork, enc)); err != nil {
-			return fmt.Errorf("build work dir %s from lower: %w", enc, err)
-		}
-	}
-	return nil
+		return store.WorkDir(sandboxDir, dir.HostPath), nil
+	})
 }
 
 // quarantine sets an unauditable sandbox aside in trash/, preserving its data.
