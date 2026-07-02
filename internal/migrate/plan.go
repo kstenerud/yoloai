@@ -135,15 +135,3 @@ func Authorize(plans []Plan, d Decision) (ok bool, unmet []Op) {
 	}
 	return len(unmet) == 0, unmet
 }
-
-// HasDestructive reports whether any plan contains a destructive op.
-func HasDestructive(plans []Plan) bool {
-	for _, p := range plans {
-		for _, op := range p.Ops {
-			if op.Destructive() {
-				return true
-			}
-		}
-	}
-	return false
-}

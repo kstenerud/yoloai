@@ -53,9 +53,9 @@ func setupUnit(t *testing.T, dispose DisposeFunc) (home string, p Promotion) {
 	writeFile(t, filepath.Join(unit, "data.txt"), "old")
 	writeFile(t, filepath.Join(unit, "keep.txt"), "keep")
 	writeFile(t, filepath.Join(unit, ".schema_version"), "1")
-	scratch, err := FreshScratch(home)
-	if err != nil {
-		t.Fatalf("fresh scratch: %v", err)
+	scratch := ScratchPath(home)
+	if err := os.MkdirAll(scratch, 0o750); err != nil {
+		t.Fatalf("create scratch: %v", err)
 	}
 	return home, fakeMigration(home, name, scratch, dispose)
 }
