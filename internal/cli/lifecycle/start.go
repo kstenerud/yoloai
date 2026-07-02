@@ -69,7 +69,7 @@ func runStart(cmd *cobra.Command, args []string, opts *startOpts) error {
 		return err
 	}
 
-	slog.Info("starting sandbox", "event", "sandbox.start", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
+	slog.Info("starting sandbox", "event", "sandbox.start", "sandbox", name)
 	return cliutil.WithSandbox(cmd, name, func(ctx context.Context, sb *yoloai.Sandbox) error {
 		res, startErr := sb.Start(ctx, yoloai.SandboxStartOptions{
 			Resume:       opts.resume,
@@ -84,7 +84,7 @@ func runStart(cmd *cobra.Command, args []string, opts *startOpts) error {
 		if startErr != nil {
 			return cliutil.SandboxErrorHint(name, startErr)
 		}
-		slog.Info("sandbox started", "event", "sandbox.start.complete", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
+		slog.Info("sandbox started", "event", "sandbox.start.complete", "sandbox", name)
 
 		if cliutil.JSONEnabled(cmd) {
 			return cliutil.WriteJSON(cmd.OutOrStdout(), map[string]string{

@@ -80,7 +80,7 @@ func StageSecretEnv(m map[string]string, hostEnv config.Layout, stagingRoot stri
 	}
 	// When running via sudo, chown the dir to the real user so the container
 	// process (running as that user) can read it.
-	_ = fileutil.ChownIfSudo(tmpDir) //nolint:errcheck // best-effort; individual files are already chowned by WriteFilePerm
+	_ = fileutil.ChownIfSudo(tmpDir)
 
 	for k, v := range m {
 		if err := fileutil.WriteFilePerm(filepath.Join(tmpDir, k), []byte(v), perms.SecretsFile); err != nil {
@@ -186,7 +186,7 @@ func CopySeedFiles(spec EnvSpec, sandboxDir string, hasAPIKey bool, homeDir stri
 		if sf.Executable {
 			writeErr = fileutil.WriteFilePerm(targetPath, data, 0700)
 		} else {
-			writeErr = fileutil.WriteFile(targetPath, data, 0600) //nolint:gosec // G703: targetPath is constructed from internal agent config, not user input
+			writeErr = fileutil.WriteFile(targetPath, data, 0600)
 		}
 		if writeErr != nil {
 			return copiedAuth, fmt.Errorf("write %s: %w", targetPath, writeErr)

@@ -66,7 +66,7 @@ func TestOverlayFlatten_AbandonFromFixture(t *testing.T) {
 	if flat.Workdir().MountPath != hostPath {
 		t.Errorf("MountPath = %q, want %q", flat.Workdir().MountPath, hostPath)
 	}
-	got, err := os.ReadFile(filepath.Join(store.WorkDir(sandboxDir, hostPath), "keep.txt")) //nolint:gosec // test path
+	got, err := os.ReadFile(filepath.Join(store.WorkDir(sandboxDir, hostPath), "keep.txt"))
 	if err != nil {
 		t.Fatalf("read flattened work file: %v", err)
 	}

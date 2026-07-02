@@ -113,7 +113,7 @@ func killKataShimEntry(e os.DirEntry, name, namespacedName string) bool {
 	if err != nil || pid <= 1 {
 		return false
 	}
-	cmdlineData, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid)) //nolint:gosec // G304: reading kernel proc file
+	cmdlineData, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
 	if err != nil {
 		return false
 	}
@@ -153,7 +153,7 @@ func removeKataStateDir(namespace, name string) {
 	// The runtime-rs shim creates /run/kata/<name>/ using the container name
 	// directly (e.g. /run/kata/yoloai-x/), not the namespace-prefixed form.
 	kataDir := fmt.Sprintf("/run/kata/%s", name)
-	_ = os.RemoveAll(kataDir) //nolint:gosec // G304: path is from internal consts
+	_ = os.RemoveAll(kataDir)
 
 	// 2. Containerd TTRPC shim socket.
 	// Replicates containerd/containerd/v2/pkg/shim.SocketAddress() formula:
@@ -170,8 +170,8 @@ func removeKataStateDir(namespace, name string) {
 	// Remove both cases defensively in case the format ever changes.
 	shimSocketUpper := fmt.Sprintf("/run/containerd/s/%X", d)
 	shimSocketLower := fmt.Sprintf("/run/containerd/s/%x", d)
-	_ = os.Remove(shimSocketUpper) //nolint:gosec // G304: path is from internal consts
-	_ = os.Remove(shimSocketLower) //nolint:gosec // G304: path is from internal consts
+	_ = os.Remove(shimSocketUpper)
+	_ = os.Remove(shimSocketLower)
 }
 
 // Create creates a new containerd container from the given InstanceConfig.

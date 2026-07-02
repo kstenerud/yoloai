@@ -95,7 +95,7 @@ func copySymlink(path, target string) error {
 	if err != nil {
 		return fmt.Errorf("readlink %s: %w", path, err)
 	}
-	if err := os.Symlink(link, target); err != nil { //nolint:gosec // G122: target is derived from a controlled destination root, TOCTOU not applicable here
+	if err := os.Symlink(link, target); err != nil {
 		return err
 	}
 	return fileutil.ChownIfSudo(target)
@@ -127,7 +127,7 @@ func copyFile(src, dst string, srcInfo fs.FileInfo) error {
 	}
 	defer in.Close() //nolint:errcheck // read-only file, close error is harmless
 
-	out, err := fileutil.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, srcInfo.Mode().Perm()) //nolint:gosec // G304: paths come from WalkDir of validated sandbox paths
+	out, err := fileutil.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, srcInfo.Mode().Perm())
 	if err != nil {
 		return fmt.Errorf("create %s: %w", dst, err)
 	}

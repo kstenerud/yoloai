@@ -57,7 +57,7 @@ func SudoParentEnv() map[string]string {
 	if SudoUID() == -1 {
 		return result
 	}
-	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/environ", os.Getppid())) //nolint:gosec // G304: read parent's environ to recover sudo-stripped credentials
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/environ", os.Getppid()))
 	if err != nil {
 		return result
 	}
@@ -173,17 +173,17 @@ func MkdirAllPerm(path string, perm fs.FileMode) error {
 	if err := MkdirAll(path, perm); err != nil {
 		return err
 	}
-	return os.Chmod(path, perm) //nolint:gosec // G302: caller is responsible for choosing the perm
+	return os.Chmod(path, perm)
 }
 
 // WriteFilePerm writes data to a file then explicitly chmods it to bypass the
 // process umask. Use this when the file will be bind-mounted into a container
 // that may run under a different uid (e.g. gVisor).
 func WriteFilePerm(path string, data []byte, perm fs.FileMode) error {
-	if err := WriteFile(path, data, perm); err != nil { //nolint:gosec // G703: path is always a trusted sandbox subpath
+	if err := WriteFile(path, data, perm); err != nil {
 		return err
 	}
-	return os.Chmod(path, perm) //nolint:gosec // G302: caller is responsible for choosing the perm
+	return os.Chmod(path, perm)
 }
 
 // CopyDirFiles copies every non-directory file directly under srcDir into

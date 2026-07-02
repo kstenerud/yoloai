@@ -125,7 +125,7 @@ func executeStop(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, name
 	if cliutil.JSONEnabled(cmd) {
 		var results []stopResult
 		for _, name := range names {
-			slog.Info("stopping sandbox", "event", "sandbox.stop", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
+			slog.Info("stopping sandbox", "event", "sandbox.stop", "sandbox", name)
 			sb, err := c.Sandbox(name)
 			if err == nil {
 				err = sb.Stop(ctx)
@@ -133,7 +133,7 @@ func executeStop(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, name
 			if err != nil {
 				results = append(results, stopResult{Name: name, Error: err.Error()})
 			} else {
-				slog.Info("sandbox stopped", "event", "sandbox.stop.complete", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
+				slog.Info("sandbox stopped", "event", "sandbox.stop.complete", "sandbox", name)
 				results = append(results, stopResult{Name: name, Action: "stopped"})
 			}
 		}
@@ -142,17 +142,17 @@ func executeStop(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, name
 
 	var errs []error
 	for _, name := range names {
-		slog.Info("stopping sandbox", "event", "sandbox.stop", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
+		slog.Info("stopping sandbox", "event", "sandbox.stop", "sandbox", name)
 		sb, err := c.Sandbox(name)
 		if err == nil {
 			err = sb.Stop(ctx)
 		}
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: stop %s: %v\n", name, cliutil.SandboxErrorHint(name, err)) //nolint:errcheck // best-effort output
+			fmt.Fprintf(os.Stderr, "Warning: stop %s: %v\n", name, cliutil.SandboxErrorHint(name, err))
 			errs = append(errs, err)
 		} else {
-			slog.Info("sandbox stopped", "event", "sandbox.stop.complete", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
-			fmt.Fprintf(cmd.OutOrStdout(), "Stopped %s\n", name)                            //nolint:errcheck // best-effort output
+			slog.Info("sandbox stopped", "event", "sandbox.stop.complete", "sandbox", name)
+			fmt.Fprintf(cmd.OutOrStdout(), "Stopped %s\n", name) //nolint:errcheck // best-effort output
 		}
 	}
 

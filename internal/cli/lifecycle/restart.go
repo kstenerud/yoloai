@@ -72,7 +72,7 @@ func runRestart(cmd *cobra.Command, args []string, opts *restartOpts) error {
 	}
 
 	return cliutil.WithSandbox(cmd, name, func(ctx context.Context, sb *yoloai.Sandbox) error {
-		slog.Info("restarting sandbox", "event", "sandbox.restart", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
+		slog.Info("restarting sandbox", "event", "sandbox.restart", "sandbox", name)
 		res, restartErr := sb.Restart(ctx, yoloai.SandboxStartOptions{
 			Resume:       opts.resume,
 			Prompt:       opts.prompt,
@@ -87,7 +87,7 @@ func runRestart(cmd *cobra.Command, args []string, opts *restartOpts) error {
 		if restartErr != nil {
 			return restartErr
 		}
-		slog.Info("sandbox restarted", "event", "sandbox.restart.complete", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
+		slog.Info("sandbox restarted", "event", "sandbox.restart.complete", "sandbox", name)
 
 		if cliutil.JSONEnabled(cmd) {
 			return cliutil.WriteJSON(cmd.OutOrStdout(), map[string]string{

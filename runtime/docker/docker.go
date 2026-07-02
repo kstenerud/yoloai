@@ -855,7 +855,7 @@ func (r *Runtime) createExec(ctx context.Context, name string, cmd []string, use
 		}
 		opts.Env = []string{"TERM=" + term}
 		if streams.Rows > 0 && streams.Cols > 0 {
-			opts.ConsoleSize = &[2]uint{uint(streams.Rows), uint(streams.Cols)} //nolint:gosec // G115: terminal dimensions fit uint
+			opts.ConsoleSize = &[2]uint{uint(streams.Rows), uint(streams.Cols)}
 		}
 	}
 	resp, err := r.client.ContainerExecCreate(ctx, name, opts)

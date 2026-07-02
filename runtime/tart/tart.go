@@ -337,7 +337,7 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 
 	// Open log file for stderr capture
 	logPath := filepath.Join(sandboxPath, backendDir, vmLogFileName)
-	logFile, err := fileutil.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600) //nolint:gosec // G304: sandboxPath is ~/.yoloai/sandboxes/<name>
+	logFile, err := fileutil.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
 		return fmt.Errorf("open VM log: %w", err)
 	}
@@ -1157,12 +1157,12 @@ func copySecretsToSandbox(sandboxPath string, mounts []runtime.MountSpec) error 
 			}
 			continue
 		}
-		data, err := os.ReadFile(m.HostPath) //nolint:gosec // G304: source is from validated mount spec
+		data, err := os.ReadFile(m.HostPath)
 		if err != nil {
 			continue
 		}
 		keyName := filepath.Base(m.ContainerPath)
-		if err := fileutil.WriteFile(filepath.Join(secretsDir, keyName), data, 0600); err != nil { //nolint:gosec // G703: secretsDir is an internal sandbox directory
+		if err := fileutil.WriteFile(filepath.Join(secretsDir, keyName), data, 0600); err != nil {
 			return fmt.Errorf("copy secret %s: %w", keyName, err)
 		}
 	}

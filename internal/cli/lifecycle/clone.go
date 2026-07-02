@@ -46,7 +46,7 @@ func runClone(cmd *cobra.Command, args []string) error {
 	// backend) is handled inside Sandbox.Clone via the Overwrite option.
 	backend := cliutil.ResolveBackendForSandbox(src)
 	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
-		slog.Info("cloning sandbox", "event", "sandbox.clone", "source", src, "dest", dst) //nolint:gosec // G706: src/dst are validated sandbox names
+		slog.Info("cloning sandbox", "event", "sandbox.clone", "source", src, "dest", dst)
 		srcSb, err := c.Sandbox(src)
 		if err != nil {
 			return err
@@ -55,7 +55,7 @@ func runClone(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		slog.Info("clone complete", "event", "sandbox.clone.complete", "source", src, "dest", dst) //nolint:gosec // G706: src/dst are validated sandbox names
+		slog.Info("clone complete", "event", "sandbox.clone.complete", "source", src, "dest", dst)
 
 		if noStart {
 			if cliutil.JSONEnabled(cmd) {

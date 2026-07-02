@@ -94,7 +94,7 @@ func runDiffCmd(cmd *cobra.Command, args []string) error {
 	if hostPath != "" {
 		argsConsumedBeforeRest = 2
 	}
-	slog.Debug("generating diff", "event", "sandbox.diff", "sandbox", name, "workdir_mode", selectedDir.Mode) //nolint:gosec // G706: name is validated by ValidateName
+	slog.Debug("generating diff", "event", "sandbox.diff", "sandbox", name, "workdir_mode", selectedDir.Mode)
 
 	// Skip agent warning in JSON mode
 	if !cliutil.JSONEnabled(cmd) {
@@ -222,7 +222,7 @@ func diffLog(cmd *cobra.Command, name, hostPath string, stat bool) error {
 
 	// Fetch tags for inline display (best-effort).
 	var tags []yoloai.TagInfo
-	//nolint:errcheck // best-effort: tag annotations are decorative
+
 	_ = cliutil.WithTrackedDir(cmd, name, hostPath, func(ctx context.Context, wd *yoloai.Workdir) error {
 		tags, _ = wd.Tags(ctx, yoloai.WorkdirTagsOptions{})
 		return nil
@@ -329,7 +329,7 @@ func diffRef(cmd *cobra.Command, name, hostPath, ref string, stat bool) error {
 // agentRunningWarning prints a warning to stderr if the agent is still running.
 // Silently skips if Docker is unavailable or inspection fails.
 func agentRunningWarning(cmd *cobra.Command, name string) {
-	//nolint:errcheck // intentional: best-effort warning, failure here should not affect the diff command
+
 	_ = cliutil.WithSandbox(cmd, name, func(ctx context.Context, sb *yoloai.Sandbox) error {
 		info, err := sb.Inspect(ctx)
 		if err != nil {

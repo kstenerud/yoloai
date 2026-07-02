@@ -179,7 +179,7 @@ func buildKVMDeviceCap() caps.HostCapability {
 			mode := info.Mode()
 			if mode&0o060 != 0 { // group read/write bits set
 				// Check group membership via detectKVMGroup (simplified: just check if we can open it).
-				f, openErr := os.Open(kvmDevPath) //nolint:gosec // G304: kvmDevPath is an injectable var pointing to /dev/kvm
+				f, openErr := os.Open(kvmDevPath)
 				if openErr != nil {
 					if errors.Is(openErr, fs.ErrPermission) {
 						return fmt.Errorf("permission denied on /dev/kvm: add user to 'kvm' group")
@@ -246,7 +246,7 @@ func buildDevmapperSnapshotterCap(r *Runtime) caps.HostCapability {
 // hasCPUVirtFlags checks /proc/cpuinfo for vmx (Intel VT-x) or svm (AMD-V) flags.
 // Returns true if either is found, indicating the CPU supports virtualization.
 func hasCPUVirtFlags() bool {
-	f, err := os.Open("/proc/cpuinfo") //nolint:gosec // G304: fixed well-known path
+	f, err := os.Open("/proc/cpuinfo")
 	if err != nil {
 		return false
 	}

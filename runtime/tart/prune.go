@@ -115,7 +115,7 @@ func (r *Runtime) PruneCache(ctx context.Context, includeImages, dryRun bool, ou
 
 	// Drop the provision checksum so needsBuild re-provisions cleanly even
 	// if a future base happens to hash identically.
-	_ = os.Remove(r.tartBaseChecksumPath()) //nolint:errcheck // best-effort
+	_ = os.Remove(r.tartBaseChecksumPath())
 
 	reclaimed := int64(0)
 	if after := r.ownedImageBytes(ctx); before >= 0 && after >= 0 && before > after {

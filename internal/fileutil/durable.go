@@ -56,7 +56,7 @@ func finalizeTemp(f *os.File, data []byte, perm fs.FileMode) error {
 		f.Close() //nolint:errcheck,gosec // G104: original write error dominates
 		return err
 	}
-	if err := f.Chmod(perm); err != nil { //nolint:gosec // G302: caller chose perm deliberately
+	if err := f.Chmod(perm); err != nil {
 		f.Close() //nolint:errcheck,gosec // G104: original chmod error dominates
 		return err
 	}

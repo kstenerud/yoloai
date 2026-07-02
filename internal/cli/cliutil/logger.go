@@ -50,7 +50,7 @@ func (m *multiSinkHandler) Handle(ctx context.Context, r slog.Record) error {
 	m.mutex.Unlock()
 	for _, s := range sinks {
 		if r.Level >= s.minLevel {
-			_ = s.handler.Handle(ctx, r) //nolint:errcheck // best-effort log fan-out
+			_ = s.handler.Handle(ctx, r)
 		}
 	}
 	return nil
@@ -163,8 +163,8 @@ func OpenCLIJSONLSink(name string, cmd *cobra.Command) func() {
 		return func() {}
 	}
 	path := sb.LogPaths().CLI
-	_ = c.Close()                                                                // backend-less close is a no-op; path is just a string
-	f, err := fileutil.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600) //nolint:gosec // G304: path derived from trusted sandbox dir
+	_ = c.Close() // backend-less close is a no-op; path is just a string
+	f, err := fileutil.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
 		return func() {}
 	}

@@ -24,7 +24,7 @@ func makeDiffCmd(rawArgs []string) (*cobra.Command, []string) {
 		},
 	}
 	cmd.SetArgs(rawArgs)
-	_ = cmd.Execute() //nolint:errcheck
+	_ = cmd.Execute()
 	return cmd, captured
 }
 

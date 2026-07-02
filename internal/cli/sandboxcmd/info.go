@@ -19,7 +19,7 @@ import (
 func runSandboxInfo(cmd *cobra.Command, name string) error {
 	closeSink := cliutil.OpenCLIJSONLSink(name, cmd)
 	defer closeSink()
-	slog.Info("collecting sandbox info", "event", "sandbox.info", "sandbox", name) //nolint:gosec // G706: name is an internal sandbox name, not user-injected log data
+	slog.Info("collecting sandbox info", "event", "sandbox.info", "sandbox", name)
 	return cliutil.WithSandbox(cmd, name, func(ctx context.Context, sb *yoloai.Sandbox) error {
 		// Bring a crashed credential injector back when the user checks on the box (D106).
 		cliutil.ReconcileInjectorBestEffort(ctx, sb)
@@ -43,7 +43,7 @@ func runSandboxInfo(cmd *cobra.Command, name string) error {
 		}
 
 		printSandboxInfo(cmd, sb, name, info)
-		slog.Debug("show complete", "event", "sandbox.info", "sandbox", name) //nolint:gosec // G706: name is an internal sandbox name, not user-injected log data
+		slog.Debug("show complete", "event", "sandbox.info", "sandbox", name)
 		return nil
 	})
 }

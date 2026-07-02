@@ -40,6 +40,6 @@ func SweepStaleTestHomes(prefix string) {
 		if statErr != nil || !fi.IsDir() || fi.ModTime().After(cutoff) {
 			continue
 		}
-		_ = os.RemoveAll(dir) //nolint:errcheck // best-effort housekeeping
+		_ = os.RemoveAll(dir)
 	}
 }

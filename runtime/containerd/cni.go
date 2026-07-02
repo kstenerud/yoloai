@@ -108,7 +108,7 @@ func cniStatePath(sandboxDir string) string {
 // conflicts with Podman) take effect without manual intervention.
 func ensureCNIConflist(layout config.Layout) error {
 	dir := cniConfDir(layout)
-	if err := fileutil.MkdirAll(dir, 0o750); err != nil { //nolint:gosec // G301: 0750 is appropriate for CNI config dir
+	if err := fileutil.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("create CNI config dir: %w", err)
 	}
 	path := filepath.Join(dir, "yoloai.conflist")
@@ -116,7 +116,7 @@ func ensureCNIConflist(layout config.Layout) error {
 	if err == nil && string(existing) == cniConflistTemplate {
 		return nil // up to date
 	}
-	if err := fileutil.WriteFile(path, []byte(cniConflistTemplate), 0o644); err != nil { //nolint:gosec // G306: world-readable config is correct
+	if err := fileutil.WriteFile(path, []byte(cniConflistTemplate), 0o644); err != nil {
 		return fmt.Errorf("write CNI conflist: %w", err)
 	}
 	return nil
@@ -145,7 +145,7 @@ func createNetNS(name string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("create netns %s: %w", name, err)
 	}
-	_ = ns.Close() //nolint:gosec // G104: fd close only — namespace persists at /var/run/netns/<name>
+	_ = ns.Close()
 
 	if err := netns.Set(origNS); err != nil {
 		return "", fmt.Errorf("restore original netns: %w", err)

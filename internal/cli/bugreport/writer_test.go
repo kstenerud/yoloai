@@ -40,7 +40,7 @@ func TestBugReportFilename_Format(t *testing.T) {
 	require.NoError(t, err)
 	tmpDir := t.TempDir()
 	require.NoError(t, os.Chdir(tmpDir))
-	t.Cleanup(func() { _ = os.Chdir(origDir) }) //nolint:gosec // G104: chdir in test cleanup
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
 
 	name, err := Filename(time.Now())
 	require.NoError(t, err)
@@ -56,7 +56,7 @@ func TestBugReportFilename_Collision(t *testing.T) {
 	require.NoError(t, err)
 	tmpDir := t.TempDir()
 	require.NoError(t, os.Chdir(tmpDir))
-	t.Cleanup(func() { _ = os.Chdir(origDir) }) //nolint:gosec // G104: chdir in test cleanup
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
 
 	ts := time.Date(2026, 3, 16, 5, 20, 52, 931000000, time.UTC)
 	name, err := Filename(ts)

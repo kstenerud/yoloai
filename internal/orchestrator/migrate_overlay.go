@@ -51,7 +51,7 @@ func (o *OverlayFlatten) Describe() string { return "v3->v4 overlay flatten" }
 // Cleanup closes every runtime opened during the migration.
 func (o *OverlayFlatten) Cleanup() {
 	for k, rt := range o.rts {
-		_ = rt.Close() //nolint:errcheck // best-effort
+		_ = rt.Close()
 		delete(o.rts, k)
 	}
 }

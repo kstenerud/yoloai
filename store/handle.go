@@ -181,7 +181,7 @@ func atomicWriteJSON(dir, dest string, data []byte) error {
 // readDoc reads the full JSON document as a map[string]json.RawMessage.
 // Returns nil map + nil error when the file is absent.
 func (h *fileHandle) readDoc() (map[string]json.RawMessage, error) {
-	data, err := os.ReadFile(h.docPath()) //nolint:gosec // G304: path is constructed from sandbox dir
+	data, err := os.ReadFile(h.docPath())
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil, nil

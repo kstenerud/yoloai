@@ -96,7 +96,7 @@ func LaunchContainer(ctx context.Context, d state.Deps, st *state.State) error {
 	if err := buildAndStart(ctx, d.Runtime, st, mnts, ports, secretsDir != "", secretEnv, bro); err != nil {
 		// The injector may have started before the container; reap it so a failed
 		// launch never orphans it (Stop is a no-op when nothing was brokered).
-		_ = broker.NewSidecarHost().Stop(ctx, st.SandboxDir) //nolint:errcheck // best-effort cleanup
+		_ = broker.NewSidecarHost().Stop(ctx, st.SandboxDir)
 		return err
 	}
 	return nil
@@ -161,7 +161,7 @@ func buildAndStart(ctx context.Context, rt runtime.Backend, st *state.State, mnt
 	// sandbox dir and survives restarts).
 	markerPath := filepath.Join(st.SandboxDir, store.SecretsConsumedMarker)
 	if hasSecrets {
-		_ = os.Remove(markerPath) //nolint:errcheck // best-effort; absent is fine
+		_ = os.Remove(markerPath)
 	}
 
 	// Use the D88 keepalive-holder + Launch bring-up only for backends that opt in
@@ -215,7 +215,7 @@ func startViaLaunch(ctx context.Context, rt runtime.Backend, launcher runtime.Pr
 	// Clear any stale readiness marker from a prior boot so the wait below sees
 	// only this launch's signal (it lives in the persistent sandbox dir).
 	readyPath := filepath.Join(st.SandboxDir, store.SubstrateReadyMarker)
-	_ = os.Remove(readyPath) //nolint:errcheck // best-effort; absent is fine
+	_ = os.Remove(readyPath)
 
 	if err := rt.Create(ctx, instanceCfg); err != nil {
 		return gvisorStartHint(st.Isolation, err)

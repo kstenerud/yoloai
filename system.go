@@ -294,7 +294,7 @@ func (s *System) VMCensus(ctx context.Context) *VMCensus {
 			continue
 		}
 		census, ok, censusErr := runtime.VMCensusFor(ctx, rt)
-		_ = rt.Close() //nolint:errcheck // best-effort close after probing
+		_ = rt.Close()
 		if !ok || censusErr != nil {
 			continue
 		}

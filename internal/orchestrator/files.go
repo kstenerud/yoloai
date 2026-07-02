@@ -52,7 +52,7 @@ func ImportFile(ctx context.Context, layout config.Layout, name, hostPath string
 		return "", err
 	}
 	if !force {
-		if _, statErr := os.Stat(dst); statErr == nil { //nolint:gosec // G703: path is under sandbox files dir
+		if _, statErr := os.Stat(dst); statErr == nil {
 			return "", fmt.Errorf("target already exists: %s (use --overwrite to replace it)", info.Name())
 		}
 	}
@@ -73,7 +73,7 @@ func ExportFile(ctx context.Context, layout config.Layout, name, rel, dst string
 		return err
 	}
 	if !force {
-		if _, err := os.Stat(dst); err == nil { //nolint:gosec // G703: dst is a user-specified destination
+		if _, err := os.Stat(dst); err == nil {
 			return fmt.Errorf("destination already exists: %s (use --overwrite to replace it)", dst)
 		}
 	}
@@ -92,7 +92,7 @@ func RemoveExchangeFile(layout config.Layout, name, rel string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.RemoveAll(target); err != nil { //nolint:gosec // G703: path is under sandbox files dir
+	if err := os.RemoveAll(target); err != nil {
 		return fmt.Errorf("remove %s: %w", rel, err)
 	}
 	return nil

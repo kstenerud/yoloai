@@ -23,7 +23,7 @@ import (
 // state) as plain strings for the caller to render. A missing sandbox is not
 // an error — there is simply nothing to tear down.
 func Teardown(ctx context.Context, d state.Deps, name string) (warnings []string, err error) {
-	slog.Info("destroying sandbox", "event", "sandbox.destroy", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
+	slog.Info("destroying sandbox", "event", "sandbox.destroy", "sandbox", name)
 	sandboxDir := d.Layout.SandboxDir(name)
 	if rerr := store.RequireSandboxDir(sandboxDir); rerr != nil {
 		if errors.Is(rerr, store.ErrSandboxNotFound) {
@@ -44,7 +44,7 @@ func Teardown(ctx context.Context, d state.Deps, name string) (warnings []string
 	// the name for reuse: Create keys "already exists" off the metadata, not the
 	// directory, so a leftover (e.g. root-owned overlay/VM state we can't delete)
 	// won't block re-creating with the same name.
-	_ = os.Remove(filepath.Join(sandboxDir, store.EnvironmentFile)) //nolint:errcheck // best-effort; forceRemoveAll removes it too in the common case
+	_ = os.Remove(filepath.Join(sandboxDir, store.EnvironmentFile))
 
 	// Remove sandbox directory. Some files (e.g. Go module cache) are
 	// read-only, so make everything writable first.
@@ -65,11 +65,11 @@ func forceRemoveAll(path string) error {
 	_ = filepath.WalkDir(path, func(p string, dirEntry os.DirEntry, err error) error {
 		if err != nil {
 			// If the directory isn't readable/executable, fix it and retry.
-			_ = os.Chmod(p, 0o700) //nolint:errcheck,gosec // best-effort; 0700 needed for directory traversal before removal
+			_ = os.Chmod(p, 0o700) //nolint:gosec // best-effort; 0700 needed for directory traversal before removal
 			return nil             //nolint:nilerr // returning nil continues the walk after a best-effort chmod
 		}
 		if dirEntry.IsDir() {
-			_ = os.Chmod(p, 0o700) //nolint:errcheck,gosec // best-effort; 0700 needed for directory traversal before removal
+			_ = os.Chmod(p, 0o700) //nolint:gosec // best-effort; 0700 needed for directory traversal before removal
 		}
 		return nil
 	})

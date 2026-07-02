@@ -123,7 +123,7 @@ func TestDetectKVMGroup_InGroup(t *testing.T) {
 		t.Skip("host UID not resolvable via /etc/passwd")
 	}
 	groupContent := "kvm:x:136:" + username + "\n"
-	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "group"), []byte(groupContent), 0o600)) //nolint:gosec // G703: test code with temp dir
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "group"), []byte(groupContent), 0o600))
 
 	env := DetectEnvironment()
 	assert.True(t, env.KVMGroup)
@@ -134,7 +134,7 @@ func TestDetectKVMGroup_NotInGroup(t *testing.T) {
 	defer restore()
 
 	groupContent := "kvm:x:136:someotheruser\n"
-	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "group"), []byte(groupContent), 0o600)) //nolint:gosec // G703: test code with temp dir
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "group"), []byte(groupContent), 0o600))
 
 	env := DetectEnvironment()
 	assert.False(t, env.KVMGroup)
@@ -145,7 +145,7 @@ func TestDetectKVMGroup_NoKVMLine(t *testing.T) {
 	defer restore()
 
 	groupContent := "docker:x:999:someuser\naudio:x:29:someuser\n"
-	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "group"), []byte(groupContent), 0o600)) //nolint:gosec // G703: test code with temp dir
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "group"), []byte(groupContent), 0o600))
 
 	env := DetectEnvironment()
 	assert.False(t, env.KVMGroup)

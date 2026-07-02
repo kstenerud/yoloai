@@ -214,12 +214,12 @@ func copySecretsToSandbox(sandboxPath string, mounts []runtime.MountSpec) error 
 			}
 			continue
 		}
-		data, err := os.ReadFile(m.HostPath) //nolint:gosec // G304: source is from validated mount spec
+		data, err := os.ReadFile(m.HostPath)
 		if err != nil {
 			continue
 		}
 		keyName := filepath.Base(m.ContainerPath)
-		if err := fileutil.WriteFile(filepath.Join(secretsDir, keyName), data, 0600); err != nil { //nolint:gosec // G703: secretsDir is an internal sandbox directory
+		if err := fileutil.WriteFile(filepath.Join(secretsDir, keyName), data, 0600); err != nil {
 			return fmt.Errorf("copy secret %s: %w", keyName, err)
 		}
 	}
@@ -229,31 +229,31 @@ func copySecretsToSandbox(sandboxPath string, mounts []runtime.MountSpec) error 
 // writeSandboxScripts writes the setup, monitor, and tmux config files.
 func writeSandboxScripts(sandboxPath string) error {
 	setupScriptPath := filepath.Join(sandboxPath, binDir, "sandbox-setup.py")
-	if err := fileutil.WriteFile(setupScriptPath, monitor.SetupScript(), 0644); err != nil { //nolint:gosec // G306: script content
+	if err := fileutil.WriteFile(setupScriptPath, monitor.SetupScript(), 0644); err != nil {
 		return fmt.Errorf("write sandbox-setup.py: %w", err)
 	}
 	helpersPath := filepath.Join(sandboxPath, binDir, "setup_helpers.py")
-	if err := fileutil.WriteFile(helpersPath, monitor.SetupHelpers(), 0644); err != nil { //nolint:gosec // G306: script content
+	if err := fileutil.WriteFile(helpersPath, monitor.SetupHelpers(), 0644); err != nil {
 		return fmt.Errorf("write setup_helpers.py: %w", err)
 	}
 	tmuxIOPath := filepath.Join(sandboxPath, binDir, "tmux_io.py")
-	if err := fileutil.WriteFile(tmuxIOPath, monitor.TmuxIO(), 0644); err != nil { //nolint:gosec // G306: script content
+	if err := fileutil.WriteFile(tmuxIOPath, monitor.TmuxIO(), 0644); err != nil {
 		return fmt.Errorf("write tmux_io.py: %w", err)
 	}
 	monitorPath := filepath.Join(sandboxPath, binDir, "status-monitor.py")
-	if err := fileutil.WriteFile(monitorPath, monitor.Script(), 0644); err != nil { //nolint:gosec // G306: script content
+	if err := fileutil.WriteFile(monitorPath, monitor.Script(), 0644); err != nil {
 		return fmt.Errorf("write status-monitor.py: %w", err)
 	}
 	diagPath := filepath.Join(sandboxPath, binDir, "diagnose-idle.sh")
-	if err := fileutil.WriteFile(diagPath, monitor.DiagnoseScript(), 0755); err != nil { //nolint:gosec // G306: script needs exec permission
+	if err := fileutil.WriteFile(diagPath, monitor.DiagnoseScript(), 0755); err != nil {
 		return fmt.Errorf("write diagnose-idle.sh: %w", err)
 	}
 	agentRunPath := filepath.Join(sandboxPath, binDir, "agent-run.sh")
-	if err := fileutil.WriteFile(agentRunPath, monitor.AgentRunScript(), 0755); err != nil { //nolint:gosec // G306: wrapper needs exec permission
+	if err := fileutil.WriteFile(agentRunPath, monitor.AgentRunScript(), 0755); err != nil {
 		return fmt.Errorf("write agent-run.sh: %w", err)
 	}
 	resumePath := filepath.Join(sandboxPath, binDir, "yoloai-resume")
-	if err := fileutil.WriteFile(resumePath, monitor.YoloaiResumeScript(), 0755); err != nil { //nolint:gosec // G306: resume script needs exec permission
+	if err := fileutil.WriteFile(resumePath, monitor.YoloaiResumeScript(), 0755); err != nil {
 		return fmt.Errorf("write yoloai-resume: %w", err)
 	}
 	tmuxConfPath := filepath.Join(sandboxPath, tmuxDir, "tmux.conf")
@@ -300,7 +300,7 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 
 	// Open log file for stderr capture
 	logPath := filepath.Join(sandboxPath, backendDir, processLogFileName)
-	logFile, err := fileutil.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600) //nolint:gosec // G304: sandboxPath is ~/.yoloai/sandboxes/<name>
+	logFile, err := fileutil.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
 		return fmt.Errorf("open log: %w", err)
 	}
@@ -424,9 +424,9 @@ func (r *Runtime) Remove(ctx context.Context, name string) error {
 			if linkPath == "" {
 				continue
 			}
-			_ = os.Remove(linkPath) //nolint:gosec // G703: linkPath is derived from internal agent mount config
+			_ = os.Remove(linkPath)
 			parent := filepath.Dir(linkPath)
-			_ = os.Remove(parent) //nolint:gosec // G703: parent is filepath.Dir of an internal controlled path
+			_ = os.Remove(parent)
 		}
 	}
 
@@ -536,7 +536,7 @@ func mountSymlinks(mounts []runtime.MountSpec) ([]string, error) {
 		// and sandbox-exec restrictions can prevent directory creation in
 		// certain locations. The entrypoint script handles these cases internally
 		// by setting up paths within its sandboxed HOME.
-		if err := fileutil.MkdirAll(filepath.Dir(m.ContainerPath), 0750); err != nil { //nolint:gosec // G301: parent dirs for mount symlinks
+		if err := fileutil.MkdirAll(filepath.Dir(m.ContainerPath), 0750); err != nil {
 			continue
 		}
 		if err := os.Symlink(m.HostPath, m.ContainerPath); err != nil {

@@ -140,7 +140,7 @@ func readBacklog(srcs []sourcePath, minLevel int, since time.Time) []LogFrame {
 // readLogFrames reads all matching frames from one source's file. A missing
 // file is not an error — it yields no frames.
 func readLogFrames(sp sourcePath, minLevel int, since time.Time) []LogFrame {
-	f, err := os.Open(sp.path) //nolint:gosec // G304: path is a store.*JSONLPath — yoloAI-owned
+	f, err := os.Open(sp.path)
 	if err != nil {
 		return nil
 	}
@@ -324,7 +324,7 @@ func tailSource(ctx context.Context, sp sourcePath, offset int64, minLevel int, 
 // pollSource reads new lines from offset, forwarding matching frames to ch, and
 // returns the offset past the last consumed line.
 func pollSource(ctx context.Context, sp sourcePath, offset int64, minLevel int, since time.Time, ch chan<- LogFrame) int64 {
-	f, err := os.Open(sp.path) //nolint:gosec // G304: path is a store.*JSONLPath — yoloAI-owned
+	f, err := os.Open(sp.path)
 	if err != nil {
 		return offset
 	}
@@ -353,7 +353,7 @@ func pollSource(ctx context.Context, sp sourcePath, offset int64, minLevel int, 
 // sandboxIsDone reports whether agent-status.json shows a terminal agent state.
 // A missing/unreadable file is treated as not-done (keep following).
 func sandboxIsDone(sandboxDir string) bool {
-	data, err := os.ReadFile(store.AgentStatusFilePath(sandboxDir)) //nolint:gosec // G304: yoloAI-owned agent-status.json
+	data, err := os.ReadFile(store.AgentStatusFilePath(sandboxDir))
 	if err != nil {
 		return false
 	}

@@ -31,7 +31,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 	cmdArgs := rest
 
 	return cliutil.WithSandbox(cmd, name, func(ctx context.Context, sb *yoloai.Sandbox) error {
-		slog.Debug("exec in container", "event", "sandbox.exec", "sandbox", name, "cmd", cmdArgs) //nolint:gosec // G706: values are internal, not user-controlled log injection
+		slog.Debug("exec in container", "event", "sandbox.exec", "sandbox", name, "cmd", cmdArgs)
 
 		if err := cliutil.WithTerminal(func(io yoloai.IOStreams) error {
 			return sb.Exec(ctx, yoloai.SandboxExecOptions{Command: cmdArgs, PTY: true}, io)

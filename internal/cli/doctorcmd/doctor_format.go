@@ -201,7 +201,7 @@ func printStep(w io.Writer, step yoloai.FixStep, indent string) {
 // optionLabel returns "A", "B", "C", ... for step index i.
 func optionLabel(i int) string {
 	if i >= 0 && i < 26 {
-		return string([]byte{byte('A') + byte(i)}) //nolint:gosec // G115: i is bounded 0-25
+		return string([]byte{byte('A') + byte(i)})
 	}
 	return fmt.Sprintf("%d", i+1)
 }

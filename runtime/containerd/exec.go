@@ -339,8 +339,8 @@ func buildInteractiveProcessSpec(cmd []string, user, workDir string, env []strin
 	// before our post-start Resize call arrives.
 	if io.TTY && io.Rows > 0 && io.Cols > 0 {
 		processSpec.ConsoleSize = &specs.Box{
-			Width:  uint(io.Cols), //nolint:gosec // G115: terminal dimensions fit in uint
-			Height: uint(io.Rows), //nolint:gosec // G115
+			Width:  uint(io.Cols),
+			Height: uint(io.Rows),
 		}
 	}
 	return processSpec

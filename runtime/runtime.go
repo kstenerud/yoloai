@@ -1,6 +1,6 @@
 // Package runtime defines the pluggable Runtime interface for sandbox backends.
 // ABOUTME: Runtime-agnostic types decouple sandbox logic from Docker SDK.
-package runtime //nolint:revive // name chosen for clarity; stdlib runtime is not needed alongside this package
+package runtime
 
 import (
 	"context"

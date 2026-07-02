@@ -82,7 +82,7 @@ func (e *Engine) LivePatchNetwork(ctx context.Context, name, script string, scri
 // Returns the empty (default) mode if the config can't be read, which keeps the
 // caller on the in-container live-patch path rather than guessing a sidecar.
 func (e *Engine) sandboxIsolation(name string) runtime.IsolationMode {
-	data, err := os.ReadFile(filepath.Join(e.layout.SandboxDir(name), store.RuntimeConfigFile)) //nolint:gosec // sandbox-controlled path
+	data, err := os.ReadFile(filepath.Join(e.layout.SandboxDir(name), store.RuntimeConfigFile))
 	if err != nil {
 		return ""
 	}

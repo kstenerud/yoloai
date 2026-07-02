@@ -246,7 +246,7 @@ func expandHostGlobs(args []string) ([]string, error) {
 // Returns the literal path if it exists, glob matches if it contains metacharacters,
 // or the original arg (pass-through for later error handling).
 func expandHostGlob(arg string) ([]string, error) {
-	if _, err := os.Stat(arg); err == nil { //nolint:gosec // G703: path is CLI-supplied by the user
+	if _, err := os.Stat(arg); err == nil {
 		return []string{arg}, nil
 	}
 	if hasGlobMeta(arg) {

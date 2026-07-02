@@ -82,7 +82,7 @@ func mergeExtensionsJSON(vscodeDir string, newExtensions []string) error {
 	if err != nil {
 		return err
 	}
-	return fileutil.WriteFile(path, out, 0644) //nolint:gosec // G306: .vscode/extensions.json is not a secret
+	return fileutil.WriteFile(path, out, 0644)
 }
 
 // mergeSettingsJSON merges settings into .vscode/settings.json.
@@ -109,5 +109,5 @@ func mergeSettingsJSON(vscodeDir string, newSettings map[string]any) error {
 	if err != nil {
 		return err
 	}
-	return fileutil.WriteFile(path, out, 0644) //nolint:gosec // G306: .vscode/settings.json is not a secret
+	return fileutil.WriteFile(path, out, 0644)
 }

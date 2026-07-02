@@ -120,7 +120,7 @@ func (s *System) BackendTypes(ctx context.Context, q BackendQuery) []BackendInfo
 				out[i].Note = err.Error()
 			} else {
 				out[i].Available = true
-				_ = rt.Close() //nolint:errcheck // best-effort close after a probe
+				_ = rt.Close()
 			}
 		}
 	}
@@ -160,7 +160,7 @@ func (s *System) CheckBackend(ctx context.Context, name BackendType) (available 
 	if err != nil {
 		return false, err.Error()
 	}
-	_ = rt.Close() //nolint:errcheck // best-effort close after a probe
+	_ = rt.Close()
 	return true, ""
 }
 

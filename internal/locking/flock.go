@@ -105,7 +105,7 @@ func openLockFile(path string) (*os.File, error) {
 	if err := fileutil.MkdirAll(filepath.Dir(path), 0750); err != nil {
 		return nil, fmt.Errorf("create lock dir: %w", err)
 	}
-	f, err := fileutil.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600) //nolint:gosec // path is callsite-controlled and validated upstream
+	f, err := fileutil.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return nil, fmt.Errorf("open lockfile %s: %w", path, err)
 	}

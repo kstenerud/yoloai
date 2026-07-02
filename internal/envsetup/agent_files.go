@@ -176,7 +176,7 @@ func copyFilePreserve(src, dst string) error {
 	}
 	defer in.Close() //nolint:errcheck // best-effort close on read-only file
 
-	out, err := fileutil.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600) //nolint:gosec // dst is sandbox-controlled path
+	out, err := fileutil.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
 		return err
 	}

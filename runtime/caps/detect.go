@@ -34,7 +34,7 @@ func detectIsRoot() bool {
 }
 
 func detectIsWSL2() bool {
-	data, err := os.ReadFile(procVersionPath) //nolint:gosec // G304: injectable path for testing
+	data, err := os.ReadFile(procVersionPath)
 	if err != nil {
 		return false
 	}
@@ -43,11 +43,11 @@ func detectIsWSL2() bool {
 
 func detectInContainer() bool {
 	// /.dockerenv exists in Docker containers.
-	if _, err := os.Stat(dockerEnvPath); err == nil { //nolint:gosec // G304: injectable path for testing
+	if _, err := os.Stat(dockerEnvPath); err == nil {
 		return true
 	}
 	// Fall back to cgroup inspection.
-	data, err := os.ReadFile(cgroupPath) //nolint:gosec // G304: injectable path for testing
+	data, err := os.ReadFile(cgroupPath)
 	if err != nil {
 		return false
 	}
@@ -58,7 +58,7 @@ func detectInContainer() bool {
 }
 
 func detectKVMGroup() bool {
-	data, err := os.ReadFile(groupFilePath) //nolint:gosec // G304: injectable path for testing
+	data, err := os.ReadFile(groupFilePath)
 	if err != nil {
 		return false
 	}

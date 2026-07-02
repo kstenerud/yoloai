@@ -57,7 +57,7 @@ func NeedsBuild(layout config.Layout, backendKey string) bool {
 	if current == "" {
 		return true // shouldn't happen with embedded resources, but be safe
 	}
-	last, err := os.ReadFile(baseImageChecksumPath(layout, backendKey)) //nolint:gosec // G304: path is DataDir/cache/
+	last, err := os.ReadFile(baseImageChecksumPath(layout, backendKey))
 	if err != nil {
 		return true // no record → need build
 	}
@@ -69,7 +69,7 @@ func NeedsBuild(layout config.Layout, backendKey string) bool {
 // buildBaseImage which records automatically on success.
 func RecordBuildChecksum(layout config.Layout, backendKey string) {
 	if sum := buildInputsChecksum(); sum != "" {
-		_ = fileutil.WriteFile(baseImageChecksumPath(layout, backendKey), []byte(sum), 0600) //nolint:gosec // G304: path is DataDir/cache/
+		_ = fileutil.WriteFile(baseImageChecksumPath(layout, backendKey), []byte(sum), 0600)
 	}
 }
 

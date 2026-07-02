@@ -176,7 +176,7 @@ func generateAgentsTopic() string {
 	b.WriteString("  Some agents (e.g. aider) support local model servers (Ollama, LM Studio):\n")
 	b.WriteString("\n")
 	b.WriteString("     yoloai config set env.OLLAMA_API_BASE \\\n")
-	fmt.Fprintf(&b, "       http://%s:11434\n", containerHostExample()) //nolint:errcheck
+	fmt.Fprintf(&b, "       http://%s:11434\n", containerHostExample())
 	b.WriteString("\n")
 	b.WriteString("More info: https://github.com/kstenerud/yoloai/blob/main/docs/GUIDE.md#agents-and-models\n")
 

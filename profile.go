@@ -267,7 +267,7 @@ func (a *ProfileAdmin) Delete(_ context.Context, name string) (*ProfileDeleteRes
 	}
 
 	dir := a.layout.ProfileDir(name)
-	if err := os.RemoveAll(dir); err != nil { //nolint:gosec // G703: dir derived from validated name
+	if err := os.RemoveAll(dir); err != nil {
 		return nil, fmt.Errorf("remove profile directory: %w", err)
 	}
 

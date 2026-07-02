@@ -36,7 +36,7 @@ func run() int {
 	// handshake. The entrypoint legitimately owns argv and the process streams.
 	if len(os.Args) >= 2 && os.Args[1] == broker.InjectVerb { //nolint:forbidigo // entrypoint owns argv; must dispatch before cobra (§12 boundary)
 		if err := broker.RunSidecar(ctx, os.Stdin, os.Stdout); err != nil { //nolint:forbidigo // sidecar transport boundary owns process stdio (§12)
-			fmt.Fprintln(os.Stderr, err) //nolint:forbidigo,errcheck // entrypoint boundary
+			fmt.Fprintln(os.Stderr, err) //nolint:forbidigo // entrypoint boundary
 			return 1
 		}
 		return 0

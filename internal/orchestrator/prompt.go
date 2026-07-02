@@ -19,7 +19,7 @@ func ReadStoredPrompt(layout config.Layout, name string) (string, bool, error) {
 	if err := store.RequireSandboxDir(sandboxDir); err != nil {
 		return "", false, err
 	}
-	data, err := os.ReadFile(store.PromptFilePath(sandboxDir)) //nolint:gosec // path is store-owned
+	data, err := os.ReadFile(store.PromptFilePath(sandboxDir))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", false, nil

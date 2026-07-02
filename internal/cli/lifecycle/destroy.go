@@ -219,11 +219,11 @@ func executeDestroy(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, n
 	if cliutil.JSONEnabled(cmd) {
 		var results []destroyResult
 		for _, name := range names {
-			slog.Info("destroying sandbox", "event", "sandbox.destroy", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
+			slog.Info("destroying sandbox", "event", "sandbox.destroy", "sandbox", name)
 			if err := destroyOne(cmd, ctx, c, name, abandonUnapplied); err != nil {
 				results = append(results, destroyResult{Name: name, Error: err.Error()})
 			} else {
-				slog.Info("sandbox destroyed", "event", "sandbox.destroy.complete", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
+				slog.Info("sandbox destroyed", "event", "sandbox.destroy.complete", "sandbox", name)
 				results = append(results, destroyResult{Name: name, Action: "destroyed"})
 			}
 		}
@@ -232,13 +232,13 @@ func executeDestroy(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, n
 
 	var errs []error
 	for _, name := range names {
-		slog.Info("destroying sandbox", "event", "sandbox.destroy", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
+		slog.Info("destroying sandbox", "event", "sandbox.destroy", "sandbox", name)
 		if err := destroyOne(cmd, ctx, c, name, abandonUnapplied); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: destroy %s: %v\n", name, err) //nolint:errcheck // best-effort output
+			fmt.Fprintf(os.Stderr, "Warning: destroy %s: %v\n", name, err)
 			errs = append(errs, err)
 		} else {
-			slog.Info("sandbox destroyed", "event", "sandbox.destroy.complete", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
-			fmt.Fprintf(cmd.OutOrStdout(), "Destroyed %s\n", name)                               //nolint:errcheck // best-effort output
+			slog.Info("sandbox destroyed", "event", "sandbox.destroy.complete", "sandbox", name)
+			fmt.Fprintf(cmd.OutOrStdout(), "Destroyed %s\n", name) //nolint:errcheck // best-effort output
 		}
 	}
 

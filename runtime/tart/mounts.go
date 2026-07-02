@@ -164,31 +164,31 @@ func (r *Runtime) createSingleVMSymlink(ctx context.Context, vmName, target, vfs
 // writeVMSetupScripts writes setup script, status monitor, and tmux config to the sandbox dir.
 func writeVMSetupScripts(sandboxPath string) error {
 	scriptPath := filepath.Join(sandboxPath, binDir, "sandbox-setup.py")
-	if err := fileutil.WriteFile(scriptPath, monitor.SetupScript(), 0644); err != nil { //nolint:gosec // G306: script content
+	if err := fileutil.WriteFile(scriptPath, monitor.SetupScript(), 0644); err != nil {
 		return fmt.Errorf("write sandbox-setup.py: %w", err)
 	}
 	helpersPath := filepath.Join(sandboxPath, binDir, "setup_helpers.py")
-	if err := fileutil.WriteFile(helpersPath, monitor.SetupHelpers(), 0644); err != nil { //nolint:gosec // G306: script content
+	if err := fileutil.WriteFile(helpersPath, monitor.SetupHelpers(), 0644); err != nil {
 		return fmt.Errorf("write setup_helpers.py: %w", err)
 	}
 	tmuxIOPath := filepath.Join(sandboxPath, binDir, "tmux_io.py")
-	if err := fileutil.WriteFile(tmuxIOPath, monitor.TmuxIO(), 0644); err != nil { //nolint:gosec // G306: script content
+	if err := fileutil.WriteFile(tmuxIOPath, monitor.TmuxIO(), 0644); err != nil {
 		return fmt.Errorf("write tmux_io.py: %w", err)
 	}
 	monitorPath := filepath.Join(sandboxPath, binDir, "status-monitor.py")
-	if err := fileutil.WriteFile(monitorPath, monitor.Script(), 0644); err != nil { //nolint:gosec // G306: script content
+	if err := fileutil.WriteFile(monitorPath, monitor.Script(), 0644); err != nil {
 		return fmt.Errorf("write status monitor: %w", err)
 	}
 	diagPath := filepath.Join(sandboxPath, binDir, "diagnose-idle.sh")
-	if err := fileutil.WriteFile(diagPath, monitor.DiagnoseScript(), 0755); err != nil { //nolint:gosec // G306: script needs exec permission
+	if err := fileutil.WriteFile(diagPath, monitor.DiagnoseScript(), 0755); err != nil {
 		return fmt.Errorf("write diagnose script: %w", err)
 	}
 	agentRunPath := filepath.Join(sandboxPath, binDir, "agent-run.sh")
-	if err := fileutil.WriteFile(agentRunPath, monitor.AgentRunScript(), 0755); err != nil { //nolint:gosec // G306: wrapper needs exec permission
+	if err := fileutil.WriteFile(agentRunPath, monitor.AgentRunScript(), 0755); err != nil {
 		return fmt.Errorf("write agent-run.sh: %w", err)
 	}
 	resumePath := filepath.Join(sandboxPath, binDir, "yoloai-resume")
-	if err := fileutil.WriteFile(resumePath, monitor.YoloaiResumeScript(), 0755); err != nil { //nolint:gosec // G306: resume script needs exec permission
+	if err := fileutil.WriteFile(resumePath, monitor.YoloaiResumeScript(), 0755); err != nil {
 		return fmt.Errorf("write yoloai-resume: %w", err)
 	}
 	tmuxConfPath := filepath.Join(sandboxPath, tmuxDir, "tmux.conf")

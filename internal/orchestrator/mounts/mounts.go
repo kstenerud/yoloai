@@ -113,7 +113,7 @@ func buildVscodeMounts(st *state.State) []runtime.MountSpec {
 	// dir (~/.yoloai/vscode-cli/) on first use so re-authentication is only needed
 	// once across all sandboxes.
 	vscodeSandboxCLIDir := filepath.Join(st.SandboxDir, "vscode-cli")
-	_ = fileutil.MkdirAll(vscodeSandboxCLIDir, 0750) //nolint:gosec // G301: sandbox dir, private
+	_ = fileutil.MkdirAll(vscodeSandboxCLIDir, 0750)
 
 	// Seed token from global dir if this sandbox hasn't authenticated yet.
 	globalTokenPath := filepath.Join(st.Layout.VscodeCLIDir(), "token.json")
@@ -362,7 +362,7 @@ func ensureMachineID(path string) error {
 	if _, err := rand.Read(b); err != nil {
 		return err
 	}
-	if err := fileutil.WriteFile(path, []byte(hex.EncodeToString(b)+"\n"), 0444); err != nil { //nolint:gosec // G703: path is a trusted sandbox subpath
+	if err := fileutil.WriteFile(path, []byte(hex.EncodeToString(b)+"\n"), 0444); err != nil {
 		return err
 	}
 	return os.Chmod(path, 0444) //nolint:gosec // G302: machine-id is non-secret, world-readable by design

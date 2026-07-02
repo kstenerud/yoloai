@@ -74,7 +74,7 @@ func runReset(cmd *cobra.Command, args []string, opts *resetOpts) error {
 	}
 
 	return cliutil.WithSandbox(cmd, name, func(ctx context.Context, sb *yoloai.Sandbox) error {
-		slog.Info("resetting sandbox", "event", "sandbox.reset", "sandbox", name, "restart", opts.restart, "clear_state", opts.clearState) //nolint:gosec // G706: name is validated by ValidateName
+		slog.Info("resetting sandbox", "event", "sandbox.reset", "sandbox", name, "restart", opts.restart, "clear_state", opts.clearState)
 		res, resetErr := sb.Reset(ctx, yoloai.SandboxResetOptions{
 			RestartContainer: opts.restart,
 			ClearState:       opts.clearState,
@@ -90,7 +90,7 @@ func runReset(cmd *cobra.Command, args []string, opts *resetOpts) error {
 		if resetErr != nil {
 			return cliutil.SandboxErrorHint(name, resetErr)
 		}
-		slog.Info("sandbox reset complete", "event", "sandbox.reset.complete", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
+		slog.Info("sandbox reset complete", "event", "sandbox.reset.complete", "sandbox", name)
 
 		if cliutil.JSONEnabled(cmd) {
 			return cliutil.WriteJSON(cmd.OutOrStdout(), map[string]string{

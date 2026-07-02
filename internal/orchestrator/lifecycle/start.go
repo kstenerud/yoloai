@@ -197,7 +197,7 @@ func preparePromptForStart(opts StartOptions, sandboxDir string, meta *store.Env
 
 // handleTerminalStatus relaunches the agent after it has exited (Done/Failed).
 func handleTerminalStatus(ctx context.Context, d state.Deps, name string, meta *store.Environment, opts StartOptions, promptText string, customPrompt bool, n *notices) error {
-	slog.Info("relaunching agent", "event", "sandbox.start.agent.relaunch", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
+	slog.Info("relaunching agent", "event", "sandbox.start.agent.relaunch", "sandbox", name)
 	switch {
 	case customPrompt:
 		if err := relaunchAgentWithCustomPrompt(ctx, d, name, meta, promptText); err != nil {
@@ -233,7 +233,7 @@ func handleStoppedOrRemovedStatus(ctx context.Context, d state.Deps, cname, name
 			return fmt.Errorf("remove stopped instance: %w", err)
 		}
 	}
-	slog.Info("recreating container", "event", "sandbox.start.container.recreate", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
+	slog.Info("recreating container", "event", "sandbox.start.container.recreate", "sandbox", name)
 	switch {
 	case customPrompt:
 		if err := prepareRelaunchFiles(d, name, meta, promptText); err != nil {
@@ -323,7 +323,7 @@ func maybeWarnRecreateAdvisory(ctx context.Context, d state.Deps, opts StartOpti
 }
 
 func start(ctx context.Context, d state.Deps, name string, opts StartOptions, n *notices) error {
-	slog.Info("starting sandbox", "event", "sandbox.start", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
+	slog.Info("starting sandbox", "event", "sandbox.start", "sandbox", name)
 	sandboxDir := d.Layout.SandboxDir(name)
 	if err := store.RequireSandboxDir(sandboxDir); err != nil {
 		return err
@@ -360,7 +360,7 @@ func start(ctx context.Context, d state.Deps, name string, opts StartOptions, n 
 	if err != nil {
 		return fmt.Errorf("detect status: %w", err)
 	}
-	slog.Debug("container status", "event", "sandbox.start.status", "sandbox", name, "status", string(st)) //nolint:gosec // G706: name is validated by ValidateName
+	slog.Debug("container status", "event", "sandbox.start.status", "sandbox", name, "status", string(st))
 
 	promptText, customPrompt, err := preparePromptForStart(opts, sandboxDir, meta, d.Layout.HomeDir, d.Layout.Env().EnvForConfigInterpolation(), d.Input)
 	if err != nil {

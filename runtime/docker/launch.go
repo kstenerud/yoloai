@@ -148,8 +148,8 @@ func buildProcessStreams(resp dockertypes.HijackedResponse, spec runtime.ProcSpe
 		stderrR, stderrW := io.Pipe()
 		go func() {
 			_, copyErr := stdcopy.StdCopy(stdoutW, stderrW, resp.Reader)
-			stdoutW.CloseWithError(copyErr) //nolint:errcheck // pipe close; read error surfaced via pipe reads
-			stderrW.CloseWithError(copyErr) //nolint:errcheck // pipe close; read error surfaced via pipe reads
+			stdoutW.CloseWithError(copyErr)
+			stderrW.CloseWithError(copyErr)
 		}()
 		streams.Stdout = stdoutR
 		streams.Stderr = stderrR

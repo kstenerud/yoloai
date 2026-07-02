@@ -38,7 +38,7 @@ func runSandboxBugReport(cmd *cobra.Command, name string, reportType string) err
 		return fmt.Errorf("bugreport: %w", err)
 	}
 
-	f, err := fileutil.OpenFile(filename+".tmp", os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600) //nolint:gosec // G304: filename from Filename
+	f, err := fileutil.OpenFile(filename+".tmp", os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
 		return fmt.Errorf("bugreport: open temp file: %w", err)
 	}

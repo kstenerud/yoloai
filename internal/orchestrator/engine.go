@@ -178,7 +178,7 @@ func (e *Engine) ensure(ctx context.Context) error {
 // stays nil and the caller falls back to its disk-only path. The error is
 // intentionally discarded.
 func (e *Engine) TryEnsure(ctx context.Context) {
-	_ = e.ensure(ctx) //nolint:errcheck // best-effort: callers fall back to a host-only path when runtime stays nil
+	_ = e.ensure(ctx)
 }
 
 // Close releases the underlying runtime connection, if one was ever opened, and
@@ -261,7 +261,7 @@ func (e *Engine) ensureDefaultsDir() error {
 	// may inspect/customize it. 0644 so uid 1001 inside Kata VMs can read it.
 	tmuxConfPath := filepath.Join(defaultsDir, "tmux.conf")
 	if _, err := os.Stat(tmuxConfPath); os.IsNotExist(err) {
-		if err := fileutil.WriteFile(tmuxConfPath, tmuxres.Embedded(), 0644); err != nil { //nolint:gosec // G306: tmux.conf contains no secrets; 0644 required for uid 1001 in Kata VMs
+		if err := fileutil.WriteFile(tmuxConfPath, tmuxres.Embedded(), 0644); err != nil {
 			return fmt.Errorf("write defaults/tmux.conf: %w", err)
 		}
 	}

@@ -95,7 +95,7 @@ func captureNetworkDiagnostics(ctx context.Context, r *Runtime, name string, tas
 		"ls", "-la", "/run/cni/networks/yoloai/")
 
 	outPath := filepath.Join(sandboxDir, "network-diag.txt")
-	if err := fileutil.WriteFile(outPath, buf.Bytes(), 0o644); err != nil { //nolint:gosec // G306: world-readable diag file is intentional
+	if err := fileutil.WriteFile(outPath, buf.Bytes(), 0o644); err != nil {
 		slog.Warn("failed to write network-diag.txt",
 			"event", "sandbox.network.diag.write_error",
 			"path", outPath,

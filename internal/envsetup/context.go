@@ -221,12 +221,12 @@ func WriteContextFiles(sandboxDir string, meta *store.Environment, spec EnvSpec)
 
 // appendToFile appends s to the file at path, creating it (0600) if absent.
 func appendToFile(path, s string) error {
-	f, err := fileutil.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600) //nolint:gosec // path is a sandbox-controlled agent-runtime path
+	f, err := fileutil.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
 		return err
 	}
 	if _, werr := f.WriteString(s); werr != nil {
-		_ = f.Close() //nolint:errcheck // returning the write error
+		_ = f.Close()
 		return werr
 	}
 	return f.Close()

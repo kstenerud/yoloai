@@ -149,7 +149,7 @@ func (r *Runtime) PruneCache(ctx context.Context, includeImages, dryRun bool, ou
 func (r *Runtime) contentStoreBytes(ctx context.Context) int64 {
 	var total int64
 	cs := r.client.ContentStore()
-	_ = cs.Walk(ctx, func(info content.Info) error { //nolint:errcheck // best-effort accounting
+	_ = cs.Walk(ctx, func(info content.Info) error {
 		total += info.Size
 		return nil
 	})

@@ -24,7 +24,7 @@ import (
 // host are returned. The returned tags carry their annotated-tag Message.
 func listSandboxTags(cmd *cobra.Command, name, hostPath string, unappliedOnly bool) []yoloai.TagInfo {
 	var tags []yoloai.TagInfo
-	//nolint:errcheck // best-effort: tag listing failure must not fail the apply
+
 	_ = cliutil.WithTrackedDir(cmd, name, hostPath, func(ctx context.Context, wd *yoloai.Workdir) error {
 		tags, _ = wd.Tags(ctx, yoloai.WorkdirTagsOptions{UnappliedOnly: unappliedOnly})
 		return nil
@@ -185,7 +185,7 @@ func dispatchApply(cmd *cobra.Command, name, hostPath string, selectedDir yoloai
 		return runExport(cmd, name, hostPath, selectedDir, refs, paths, flags.patchesDir, flags.includeUncommitted)
 	}
 
-	slog.Info("applying changes", "event", "sandbox.apply", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
+	slog.Info("applying changes", "event", "sandbox.apply", "sandbox", name)
 
 	if !cliutil.JSONEnabled(cmd) {
 		fmt.Fprintf(cmd.OutOrStdout(), "Target: %s\n\n", targetDir) //nolint:errcheck

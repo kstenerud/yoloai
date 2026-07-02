@@ -214,7 +214,7 @@ func discoverSocket(env map[string]string) (string, error) {
 	// Rootless socket via XDG_RUNTIME_DIR
 	if xdg := env["XDG_RUNTIME_DIR"]; xdg != "" {
 		sock := filepath.Join(xdg, "podman", "podman.sock")
-		if _, err := os.Stat(sock); err == nil { //nolint:gosec // G703: path is from trusted env var
+		if _, err := os.Stat(sock); err == nil {
 			return "unix://" + sock, nil
 		}
 	}
@@ -226,7 +226,7 @@ func discoverSocket(env map[string]string) (string, error) {
 
 	// WSL2: Podman Desktop on Windows exposes sockets under /mnt/wsl
 	for _, p := range wsl2SockPaths {
-		if _, err := os.Stat(p); err == nil { //nolint:gosec // G703: fixed known paths
+		if _, err := os.Stat(p); err == nil {
 			return "unix://" + p, nil
 		}
 	}

@@ -280,7 +280,7 @@ func (r *Runtime) needsBuild(ctx context.Context, baseImage string) (bool, error
 		return true, nil
 	}
 	current := r.provisionChecksum(baseImage)
-	last, err := os.ReadFile(r.tartBaseChecksumPath()) //nolint:gosec // G304: path is DataDir/cache/
+	last, err := os.ReadFile(r.tartBaseChecksumPath())
 	if err != nil {
 		return true, nil //nolint:nilerr // no record → rebuild; read error is expected on first run
 	}
@@ -291,7 +291,7 @@ func (r *Runtime) needsBuild(ctx context.Context, baseImage string) (bool, error
 // needsBuild calls can skip an unnecessary rebuild.
 func (r *Runtime) recordBuildChecksum(baseImage string) {
 	sum := r.provisionChecksum(baseImage)
-	_ = fileutil.WriteFile(r.tartBaseChecksumPath(), []byte(sum), 0600) //nolint:gosec // G304: path is DataDir/cache/
+	_ = fileutil.WriteFile(r.tartBaseChecksumPath(), []byte(sum), 0600)
 }
 
 // tartBaseInfoPath returns the path of the host-side build-info sidecar, next
@@ -314,7 +314,7 @@ func (r *Runtime) buildInfoContent(baseImage string) string {
 
 // recordBuildInfo writes the host-side build-info sidecar (best-effort).
 func (r *Runtime) recordBuildInfo(baseImage string) {
-	_ = fileutil.WriteFile(r.tartBaseInfoPath(), []byte(r.buildInfoContent(baseImage)), 0600) //nolint:gosec // G304: path is DataDir/cache/
+	_ = fileutil.WriteFile(r.tartBaseInfoPath(), []byte(r.buildInfoContent(baseImage)), 0600)
 }
 
 // verifyTools asserts every requiredTools binary resolves on the VM's login
@@ -407,7 +407,7 @@ func (r *Runtime) bootForProvisioning(ctx context.Context, vmName, baseImage str
 			if limitErr := checkVMLimitError(string(logData)); limitErr != nil {
 				return limitErr
 			}
-			fmt.Fprintf(output, "tart run output:\n%s\n", string(logData)) //nolint:errcheck,gosec // best-effort diagnostic output
+			fmt.Fprintf(output, "tart run output:\n%s\n", string(logData)) //nolint:errcheck // best-effort diagnostic output
 		}
 		return fmt.Errorf("vm did not become accessible: %w", err)
 	}

@@ -40,9 +40,9 @@ func runApplyFormatPatch(cmd *cobra.Command, name, hostPath, targetDir string, p
 		return err
 	}
 
-	slog.Debug("commits to apply", "event", "sandbox.apply.commits", "sandbox", name, "count", len(commits)) //nolint:gosec // G706: name is validated by ValidateName
+	slog.Debug("commits to apply", "event", "sandbox.apply.commits", "sandbox", name, "count", len(commits))
 	if hasUncommitted {
-		slog.Debug("uncommitted changes detected", "event", "sandbox.apply.uncommitted", "sandbox", name, "include_uncommitted", includeUncommitted) //nolint:gosec // G706: name is validated by ValidateName
+		slog.Debug("uncommitted changes detected", "event", "sandbox.apply.uncommitted", "sandbox", name, "include_uncommitted", includeUncommitted)
 	}
 	if done, doneErr := maybeReportNoChanges(cmd, name, hostPath, targetDir, commits, hasUncommitted, includeUncommitted, withTags); done {
 		return doneErr
@@ -202,7 +202,7 @@ func runApplyCommits(cmd *cobra.Command, name, hostPath, targetDir string, paths
 	tagsApplied, tagsSkipped := applyTags(cmd, name, hostPath, tags, shaMap, withTags)
 	reportUnappliedTagsHint(cmd, name, hostPath, withTags)
 
-	slog.Info("apply complete", "event", "sandbox.apply.complete", "sandbox", name, "commits_applied", commitsApplied, "uncommitted_applied", result.UncommittedApplied, "tags_applied", tagsApplied) //nolint:gosec // G706: name is validated by ValidateName
+	slog.Info("apply complete", "event", "sandbox.apply.complete", "sandbox", name, "commits_applied", commitsApplied, "uncommitted_applied", result.UncommittedApplied, "tags_applied", tagsApplied)
 	if cliutil.JSONEnabled(cmd) {
 		if writeErr := cliutil.WriteJSON(cmd.OutOrStdout(), applyResult{
 			Target:             targetDir,

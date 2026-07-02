@@ -36,7 +36,7 @@ func (r *Runtime) RunNetnsSidecar(ctx context.Context, spec runtime.NetnsSidecar
 
 	name := spec.Target + "-netns-sidecar"
 	// Clear any stale sidecar left by a crashed prior run before reusing the name.
-	_ = r.client.ContainerRemove(ctx, name, container.RemoveOptions{Force: true}) //nolint:errcheck // best-effort
+	_ = r.client.ContainerRemove(ctx, name, container.RemoveOptions{Force: true})
 
 	containerConfig := &container.Config{
 		Image:      image,
@@ -52,7 +52,7 @@ func (r *Runtime) RunNetnsSidecar(ctx context.Context, spec runtime.NetnsSidecar
 		return fmt.Errorf("netns sidecar: create: %w", err)
 	}
 	defer func() {
-		_ = r.client.ContainerRemove(ctx, name, container.RemoveOptions{Force: true}) //nolint:errcheck // best-effort cleanup
+		_ = r.client.ContainerRemove(ctx, name, container.RemoveOptions{Force: true})
 	}()
 
 	if err := r.client.ContainerStart(ctx, name, container.StartOptions{}); err != nil {

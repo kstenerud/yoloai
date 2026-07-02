@@ -286,7 +286,7 @@ func PlaceholderToken(sandboxDir string) (string, error) {
 }
 
 func loadRecord(sandboxDir string) (*InjectorRecord, error) {
-	data, err := os.ReadFile(recordPath(sandboxDir)) //nolint:gosec // path from sandbox dir
+	data, err := os.ReadFile(recordPath(sandboxDir))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil

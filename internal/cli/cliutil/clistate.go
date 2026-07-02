@@ -28,7 +28,7 @@ type CLIState struct {
 // LoadCLIState reads CLIStatePath(). A missing file is not an error — it
 // returns a zero-value CLIState (the first-run state).
 func LoadCLIState() (*CLIState, error) {
-	data, err := os.ReadFile(CLIStatePath()) //nolint:gosec // G304: app-owned state path under TOP/cli
+	data, err := os.ReadFile(CLIStatePath())
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return &CLIState{}, nil

@@ -555,7 +555,7 @@ func inspectBackendGroup(ctx context.Context, layout config.Layout, newRuntimeFu
 	var effectiveRT runtime.Backend
 	if err == nil {
 		effectiveRT = rt
-		defer rt.Close() //nolint:errcheck,gosec // best-effort cleanup
+		defer rt.Close() //nolint:errcheck // best-effort cleanup
 	} else if !unavailableSet[backend] {
 		unavailableBackends = append(unavailableBackends, string(backend))
 		unavailableSet[backend] = true

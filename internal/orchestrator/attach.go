@@ -102,7 +102,7 @@ func WaitForAttachReady(
 			return err
 		}
 	}
-	slog.Debug("WaitForAttachReady: timed out", "event", "sandbox.wait_tmux.timeout", //nolint:gosec // G706: slog uses structured logging
+	slog.Debug("WaitForAttachReady: timed out", "event", "sandbox.wait_tmux.timeout",
 		"container", containerName, "last_exec_err", lastExecErr)
 	if logs := runtime.LogsFor(ctx, rt, containerName, 50); logs != "" {
 		return fmt.Errorf("tmux session not ready after %s\n\nContainer logs:\n%s", timeout, logs)
@@ -143,7 +143,7 @@ func pollAttachReady(
 	if execErr == nil {
 		return true, nil
 	}
-	slog.Debug("WaitForAttachReady: exec check failed", "event", "sandbox.wait_tmux.exec_fail", //nolint:gosec // G706: slog uses structured logging
+	slog.Debug("WaitForAttachReady: exec check failed", "event", "sandbox.wait_tmux.exec_fail",
 		"container", containerName, "err", execErr)
 	return false, nil
 }

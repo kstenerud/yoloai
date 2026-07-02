@@ -260,7 +260,7 @@ func (r *Runtime) Stop(ctx context.Context, name string) error {
 func (r *Runtime) Remove(ctx context.Context, name string) error {
 	if _, err := r.runContainer(ctx, "delete", "--force", name); err != nil {
 		if _, ierr := r.Inspect(ctx, name); errors.Is(ierr, runtime.ErrNotFound) {
-			return nil //nolint:nilerr // best-effort: an already-removed container is a successful Remove
+			return nil
 		}
 		return fmt.Errorf("remove container: %w", err)
 	}
