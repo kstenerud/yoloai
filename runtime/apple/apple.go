@@ -321,7 +321,10 @@ func (r *Runtime) InteractiveExec(ctx context.Context, name string, cmd []string
 	args = append(args, name)
 	args = append(args, cmd...)
 	c := sysexec.CommandContext(ctx, r.execEnv, r.containerBin, args...)
-	return ptybridge.Exec(c, streams)
+	// container exec -t forces ONLCR on the host-local bridge slave, mangling the
+	// guest app's bare-LF cursor moves; WithRemotePTY strips the injected CR. See
+	// ptybridge.WithRemotePTY and backend-idiosyncrasies.md.
+	return ptybridge.Exec(c, streams, ptybridge.WithRemotePTY())
 }
 
 // runContainer shells out to the `container` CLI, returning trimmed stdout or an

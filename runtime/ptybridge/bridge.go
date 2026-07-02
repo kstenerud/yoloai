@@ -34,7 +34,12 @@ import (
 //
 // When TTY is false the child's stdio is wired straight to the streams as plain
 // pipes; no PTY is allocated.
-func Exec(cmd *exec.Cmd, streams runtime.IOStreams) error {
+func Exec(cmd *exec.Cmd, streams runtime.IOStreams, opts ...Option) error {
+	var cfg options
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
 	if !streams.TTY {
 		cmd.Stdin = streams.In
 		cmd.Stdout = streams.Out
@@ -65,9 +70,92 @@ func Exec(cmd *exec.Cmd, streams runtime.IOStreams) error {
 	if out == nil {
 		out = io.Discard
 	}
-	_, _ = io.Copy(out, ptmx)
+	// The apple backend runs the interactive app under a second, in-guest PTY
+	// (`container exec -t`) that the app owns and sets raw. The app's bare-LF
+	// same-column cursor-down (cud1) then crosses this host-local PTY, whose slave
+	// `container exec` forces to ONLCR — rewriting every \n to \r\n, so a cud1
+	// becomes carriage-return-to-col-0 and the app's output shifts out of column
+	// alignment. The exec CLI re-asserts ONLCR even if we clear it on the slave,
+	// so we undo it in the stream: strip the one CR the ONLCR injected before each
+	// LF. Only apple opts in: seatbelt is single-PTY (the app owns and raws the
+	// only PTY) and tart is double-PTY but its `tart exec -t` does not force ONLCR
+	// (tested) — for either, stripping would instead corrupt legitimate CRLFs.
+	if cfg.remotePTY {
+		s := &crStripper{w: out}
+		_, _ = io.Copy(s, ptmx)
+		_ = s.flush()
+	} else {
+		_, _ = io.Copy(out, ptmx)
+	}
 
 	return runtime.InteractiveExitError(cmd.Wait())
+}
+
+// Option configures Exec.
+type Option func(*options)
+
+type options struct {
+	remotePTY bool
+}
+
+// WithRemotePTY makes the bridge strip the redundant CR that a remote-PTY exec
+// CLI injects by forcing ONLCR on this host-local slave. The interactive app's
+// real terminal lives in the guest and is set raw by the app, but the app cannot
+// reach this slave, so its bare-LF cursor moves (cud1) arrive as \r\n and shift
+// output out of column alignment; stripping the injected CR restores verbatim
+// output. Enable only where the exec CLI actually does this: apple
+// (`container exec -t`) does; tart (`tart exec -t`, tested) and single-PTY
+// seatbelt do not — enabling it there would corrupt their legitimate CRLFs.
+// See backend-idiosyncrasies.md.
+func WithRemotePTY() Option { return func(o *options) { o.remotePTY = true } }
+
+// crStripper removes exactly one CR immediately preceding each LF, undoing the
+// single ONLCR the remote-PTY exec CLI applies to this bridge's slave: the app's
+// line advance (nel = \r\n) becomes \r\r\n and is restored to \r\n, while its
+// same-column cursor-down (cud1 = \n) becomes \r\n and is restored to \n. A lone
+// CR (no following LF, e.g. a carriage return to column 0) is left untouched. It
+// buffers a CR that lands on a read boundary so the strip stays correct across
+// chunk boundaries; flush emits any trailing held CR at EOF.
+type crStripper struct {
+	w         io.Writer
+	pendingCR bool
+}
+
+func (s *crStripper) Write(p []byte) (int, error) {
+	buf := make([]byte, 0, len(p)+1)
+	if s.pendingCR {
+		if len(p) == 0 || p[0] != '\n' {
+			buf = append(buf, '\r') // held CR was not before a LF; keep it
+		}
+		s.pendingCR = false
+	}
+	for i := 0; i < len(p); i++ {
+		if p[i] == '\r' {
+			if i+1 == len(p) {
+				s.pendingCR = true // decide once the next chunk arrives
+				break
+			}
+			if p[i+1] == '\n' {
+				continue // drop the CR the ONLCR injected before this LF
+			}
+		}
+		buf = append(buf, p[i])
+	}
+	if _, err := s.w.Write(buf); err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
+// flush emits a CR held from a chunk that ended on \r (with no LF to strip it
+// against). Call once after the copy loop drains.
+func (s *crStripper) flush() error {
+	if !s.pendingCR {
+		return nil
+	}
+	s.pendingCR = false
+	_, err := s.w.Write([]byte{'\r'})
+	return err
 }
 
 // forwardResizes applies caller-supplied geometry updates to the PTY until the

@@ -36,6 +36,7 @@ inclusion test first, then add a row to the index.
 
 | Symptom / error message | Section |
 |---|---|
+| Apple sandbox: TUI loses left gutter / leading chars orphan onto row above, only on tmux scroll; `^b r` heals it; Docker clean; both emulators affected | [Apple: exec -t forces ONLCR, corrupting column tracking](#apple-container-exec--t-forces-onlcr-on-the-host-local-bridge-pty-corrupting-the-apps-column-tracking-on-scroll) |
 | Brokered agent on podman-macOS hangs on first API call; one-shot curl to the injector works | [Podman Machine: gvproxy stalls streaming](#podman-machine-macos-gvproxy-host-forward-passes-a-one-shot-curl-but-stalls-the-agents-streaming-connection) |
 | VM loses network silently; traffic stops | [Kata: tcfilter networking model](#tcfilter-networking-model) |
 | Container starts but has no network after `NewTask()` | [Kata: netns must be configured before NewTask](#kata-shim-startup-netns-must-be-fully-configured-before-newtask) |
@@ -2383,6 +2384,43 @@ its **absolute** path (`container build -t yoloai-base <abs-dir>`). The builder
 VM must also be started first (`container builder start`).
 
 **Code:** `runtime/apple/apple.go` (`buildBaseImage`).
+
+### Apple: `container exec -t` forces ONLCR on the host-local bridge PTY, corrupting the app's column tracking on scroll
+
+**Symptom:** Inside an Apple (`container`) sandbox, a full-screen TUI (Claude
+Code) renders fine until you **scroll in tmux**, then lines lose their left
+gutter and their first 1–2 characters orphan onto the row above (e.g. `Ra`
+above `Ran 2 shell commands`), with occasional single-cell corruption. `Ctrl-b r`
+(full redraw) heals it; scrolling re-breaks it. Docker on the same terminal is
+clean, and it reproduces in **both** iTerm2 and Terminal.app — so it is not the
+emulator.
+
+**Explanation:** These backends run the interactive app under a **remote** PTY
+inside the guest (`container exec -t` / `tart exec -t`) wrapped in a **second,
+host-local** PTY (`ptybridge`). tmux draws a fixed-column gutter by moving the
+cursor **down while staying in the same column** — `cud1`, a bare `\n`. The app
+sets its own guest PTY raw, but cannot reach the host-local bridge slave, whose
+ONLCR the exec CLI **forces on and re-asserts even if you clear the termios** —
+so every `\n` becomes `\r\n`. A bare-`\n` cursor-down thus arrives as
+carriage-return-to-column-0, and the app's next write lands 2 columns left of
+its gutter, leaving the old leading chars behind. In the byte stream this shows
+as **single `\r\n` = a mangled `cud1`** and **`\r\r\n` = the app's own `nel`**;
+bare-LF count is 0 because ONLCR already converted them (so counting bare LFs in
+the *captured* stream misleads). Docker escapes this — one daemon-side PTY that
+tmux itself sets raw, so bare LFs pass verbatim — and so does Seatbelt, whose app
+owns and raws the single local PTY.
+
+**Fix:** Since the exec CLI re-asserts ONLCR (termios can't hold), `ptybridge`
+undoes it in the output copy under `WithRemotePTY()`: strip the one CR the ONLCR
+injected before each LF (`\r\n`→`\n`, `\r\r\n`→`\r\n`; a lone CR is preserved).
+Enabled for the apple backend only. **Tart is the same double-PTY shape but was
+tested and is *not* affected** — `tart exec -t` does not force ONLCR — so it is
+intentionally left disabled; enabling the strip there would corrupt its `nel`.
+Seatbelt is single-PTY (the app raws the only PTY) and likewise unaffected.
+
+**Code:** `runtime/ptybridge/bridge.go` (`WithRemotePTY`, `crStripper`),
+`runtime/apple/apple.go` (`InteractiveExec`). Related: the OPOST/stair-step note
+in the Seatbelt section.
 
 ## Docker: `procReady not received` usually means the container is exiting, not a broken runtime
 

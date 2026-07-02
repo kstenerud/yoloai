@@ -41,3 +41,38 @@ func TestExec_NonTTYNilStreams(t *testing.T) {
 	require.ErrorAs(t, err, &execErr)
 	assert.Equal(t, 3, execErr.ExitCode)
 }
+
+// crStripper undoes the remote-PTY exec's ONLCR: it removes exactly one CR before
+// each LF, so a cud1 (\r\n after ONLCR) becomes \n and a nel (\r\r\n after ONLCR)
+// becomes \r\n, while a lone CR (column-0 return) is preserved. The transform must
+// hold across arbitrary chunk boundaries, since the PTY master is read in chunks.
+func TestCRStripper(t *testing.T) {
+	cases := []struct {
+		name   string
+		chunks []string
+		want   string
+	}{
+		{"cud1 restored", []string{"a\r\nb"}, "a\nb"},
+		{"nel restored", []string{"a\r\r\nb"}, "a\r\nb"},
+		{"lone CR preserved", []string{"a\rb"}, "a\rb"},
+		{"trailing lone CR flushed", []string{"a\r"}, "a\r"},
+		{"CR split before LF", []string{"a\r", "\nb"}, "a\nb"},
+		{"CR split before non-LF", []string{"a\r", "xb"}, "a\rxb"},
+		{"double CR split", []string{"a\r\r", "\nb"}, "a\r\nb"},
+		{"empty then LF", []string{"\r", "\n"}, "\n"},
+		{"mixed sequence", []string{"x\r\r\ny\r\nz\rw"}, "x\r\ny\nz\rw"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var out strings.Builder
+			s := &crStripper{w: &out}
+			for _, c := range tc.chunks {
+				n, err := s.Write([]byte(c))
+				require.NoError(t, err)
+				assert.Equal(t, len(c), n, "Write must report full consumption")
+			}
+			require.NoError(t, s.flush())
+			assert.Equal(t, tc.want, out.String())
+		})
+	}
+}
