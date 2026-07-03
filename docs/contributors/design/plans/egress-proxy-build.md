@@ -165,6 +165,38 @@ Key files: `internal/credential/`, `internal/broker/`, `runtime/docker/reach.go`
     flush it); step 2 is enforcement-outside-the-agent's-reach. Large, Linux-first; needs the
     strategy-dispatch seam for `Network.Allow/Deny`. See netpolicy.md "Hostile containment".
 
+    > **SNI-matcher hardening (hard requirement, not a nice-to-have).** The moment step 2 filters on
+    > the SNI *hostname string* instead of the resolved *IP* (as step 1's ip-filter does), it
+    > re-opens the parser-differential attack class that the current ip-filter is structurally immune
+    > to. This is exactly how Claude Code's own SOCKS5 egress proxy was bypassed for ~5.5 months
+    > (Aonan Guan, disclosed 2026-05; every release 2.0.24→2.1.89): the proxy suffix-matched the
+    > client-supplied hostname with a JS `endsWith()` while `getaddrinfo()` truncated the same string
+    > at an embedded null byte — `evil.com\x00.anthropic.com` passed the allowlist and dialed
+    > `evil.com`. The decision and the action were about different destinations. Requirements for our
+    > forwarder:
+    > - **Validate the SNI before matching.** Reject any name containing `\x00`, `%`, CR/LF, or other
+    >   non-DNS characters (Anthropic's fix was exactly this — `isValidHost()` in sandbox-runtime
+    >   0.0.43). Normalize case, strip a single trailing dot, and IDNA/punycode-normalize before
+    >   comparing; match against parsed label boundaries, never a raw `strings.HasSuffix`.
+    > - **Decide and act on the same bytes.** The forwarder must connect to *exactly* the validated
+    >   name (or an IP it resolved from that validated name) — no re-parse, no second resolution of a
+    >   different representation between the allow decision and the `Dial`.
+    > - **Keep a packet-level floor underneath.** Treat SNI matching as an *ergonomic refinement* on
+    >   top of the default-deny netns, never the sole gate. The netns default-deny + fixed egress path
+    >   is the load-bearing boundary; the SNI check only narrows what the proxy will forward.
+    > - **Default-deny on absent/unparseable/encrypted SNI.** A ClientHello with no SNI, a malformed
+    >   extension, or Encrypted ClientHello (ECH) must be rejected, not passed. ECH is the structural
+    >   sunset for SNI filtering and should be a known limitation from day one.
+    > - **Don't confuse principal with representation.** Claude Code's proxy *did* run on a separate
+    >   host principal (the OS sandbox correctly pinned the agent to localhost) — that half was right.
+    >   It still fell because the *representation* it matched on diverged from the one it acted on. Our
+    >   sidecar/separate-netns work buys the principal half; this note is about the representation half.
+    >
+    > Refs: [oddguan.com disclosure](https://oddguan.com/blog/second-time-same-sandbox-anthropic-claude-code-network-allowlist-bypass-data-exfiltration/),
+    > [SecurityWeek](https://www.securityweek.com/anthropic-silently-patches-claude-code-sandbox-bypass/).
+    > Note CVE-2025-66479 covers the *earlier* empty-allowlist bypass, not this null-byte one (no CVE
+    > assigned for the null-byte bug as of disclosure).
+
 Per-agent base_url/dummy/force-API-key/telemetry-suppression quirks for Codex/Gemini/Aider/
 OpenCode (the table below) live in **launch config** (agent definitions), not the proxy — add a
 `BrokerConfig` per agent + its launch knobs when extending beyond Claude.
