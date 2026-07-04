@@ -3,13 +3,16 @@
 ABOUTME: Design for making `:copy` preserve the source repo's real `.git` (history,
 ABOUTME: blame, filters, real commits) instead of stripping it to a fresh baseline.
 
-Status: **DESIGN — premised on universal in-confinement git.** This design assumes the
-invariant that *every* sensitive work-copy git operation runs inside the sandbox's
+Status: **CORE IMPLEMENTED (Linux/cross-platform), 2026-07-04 — E2E-on-Docker pending** (D111).
+The default-preserve + `copy-strict` (suffix/flag/config) + `GitRunsInConfinement` gate + the
+`.git` CoW-clone all landed with unit tests; create/reset/diff/apply against a preserved `.git`
+still needs verification on a real Docker/Podman daemon (the dev sandbox has none). This design
+assumes the invariant that *every* sensitive work-copy git operation runs inside the sandbox's
 confinement. That invariant holds today only for docker/podman/containerd/tart; apple and
 seatbelt still run work-copy git host-side (a pre-existing RCE surface — see the companion
-plan **[confine-host-side-git.md](confine-host-side-git.md)**, which must land first or
-concurrently). Until a backend satisfies the invariant, this feature auto-degrades to
-`copy-strict` on that backend (see "Backend gating").
+plan **[confine-host-side-git.md](confine-host-side-git.md)**), so this feature **auto-degrades
+to `copy-strict` (with a one-time notice) on those backends** until they satisfy the invariant
+(see "Backend gating").
 
 Related: [copy-mode-git-rce.md](copy-mode-git-rce.md) (why work-copy git must run
 in-confinement; the filter/textconv/fsmonitor RCE class), [config.md](../config.md) (the

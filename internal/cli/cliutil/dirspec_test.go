@@ -63,6 +63,34 @@ func TestParseDirArg_CopyAll(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestParseDirArg_CopyStrict(t *testing.T) {
+	dir := t.TempDir()
+	app := filepath.Join(dir, "app")
+	require.NoError(t, os.MkdirAll(app, 0750))
+
+	// :copy-strict is mode copy with history stripping requested.
+	result, err := ParseDirArg(app+":copy-strict", "/home/user", nil)
+	require.NoError(t, err)
+	assert.Equal(t, yoloai.DirModeCopy, result.Mode)
+	assert.True(t, result.StripHistory, ":copy-strict strips git history")
+	assert.False(t, result.IncludeIgnored)
+
+	// plain :copy preserves history (default).
+	result, err = ParseDirArg(app+":copy", "/home/user", nil)
+	require.NoError(t, err)
+	assert.False(t, result.StripHistory, ":copy preserves history by default")
+
+	// :copy-strict conflicts with :rw and with :copy-all (either order).
+	for _, in := range []string{
+		app + ":copy-strict:rw", app + ":rw:copy-strict",
+		app + ":copy-strict:copy-all", app + ":copy-all:copy-strict",
+	} {
+		_, err := ParseDirArg(in, "/home/user", nil)
+		require.Error(t, err, "expected conflict for %q", in)
+		assert.Contains(t, err.Error(), "cannot combine")
+	}
+}
+
 func TestParseDirArg_ConflictingModes(t *testing.T) {
 	tests := []struct {
 		input   string

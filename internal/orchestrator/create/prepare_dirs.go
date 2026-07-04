@@ -249,7 +249,7 @@ func checkDirtyRepos(ctx context.Context, g *git.Git, workdir *DirSpec, auxDirs 
 func setupWorkdir(ctx context.Context, g *git.Git, sandboxDir string, workdir *DirSpec, rt runtime.Backend) (string, string, error) {
 	workCopyDir := store.WorkDir(sandboxDir, workdir.Path)
 
-	if err := setupDirContent(ctx, g, sandboxDir, workdir, workCopyDir); err != nil {
+	if err := setupDirContent(ctx, g, sandboxDir, workdir, workCopyDir, rt); err != nil {
 		return "", "", err
 	}
 
@@ -266,10 +266,16 @@ func setupWorkdir(ctx context.Context, g *git.Git, sandboxDir string, workdir *D
 // (used only as a placeholder; the actual mount is a live bind-mount).
 // sandboxDir is the sandbox root, dir is the DirSpec, and workCopyDir is the
 // pre-computed store.WorkDir path for dir.
-func setupDirContent(ctx context.Context, g *git.Git, sandboxDir string, dir *DirSpec, workCopyDir string) error {
+func setupDirContent(ctx context.Context, g *git.Git, sandboxDir string, dir *DirSpec, workCopyDir string, rt runtime.Backend) error {
 	switch dir.Mode {
 	case "copy":
-		err := workspace.CopyProjectDir(dir.Path, workCopyDir, dir.IncludeIgnored, func() ([]string, bool, error) {
+		preserveGit, downgraded := workspace.PreserveGit(dir.StripHistory, runtime.GitRunsInConfinement(rt))
+		if downgraded {
+			slog.Warn("git history not preserved on this backend; using copy-strict (fresh baseline)",
+				"event", "sandbox.copy.history_downgraded", "backend", rt.Descriptor().Type,
+				"dir", dir.Path, "detail", "work-copy git is not confined on this backend; see confine-host-side-git")
+		}
+		err := workspace.CopyProjectDir(dir.Path, workCopyDir, dir.IncludeIgnored, preserveGit, func() ([]string, bool, error) {
 			return g.ListProjectFiles(ctx, dir.Path)
 		})
 		if err != nil {
@@ -379,7 +385,7 @@ func setupAuxDir(ctx context.Context, g *git.Git, sandboxDir string, rt runtime.
 	switch ad.Mode {
 	case DirModeCopy:
 		workCopyDir := store.WorkDir(sandboxDir, ad.Path)
-		if err := setupDirContent(ctx, g, sandboxDir, ad, workCopyDir); err != nil {
+		if err := setupDirContent(ctx, g, sandboxDir, ad, workCopyDir, rt); err != nil {
 			return store.DirEnvironment{}, err
 		}
 		baselineSHA, err := createDirBaseline(ctx, g, ad, workCopyDir, rt)
@@ -393,6 +399,7 @@ func setupAuxDir(ctx context.Context, g *git.Git, sandboxDir string, rt runtime.
 			BaselineSHA:    baselineSHA,
 			InceptionSHA:   baselineSHA,
 			IncludeIgnored: ad.IncludeIgnored,
+			StripHistory:   ad.StripHistory,
 		}, nil
 	default: // rw, ro
 		return store.DirEnvironment{

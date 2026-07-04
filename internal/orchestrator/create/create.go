@@ -702,6 +702,7 @@ func buildEnvironment(opts Options, pr *profileResult, workdir *DirSpec, baselin
 			BaselineSHA:    baselineSHA,
 			InceptionSHA:   baselineSHA,
 			IncludeIgnored: workdir.IncludeIgnored,
+			StripHistory:   workdir.StripHistory,
 		}}, dirEnvs...),
 		HasPrompt:          hasPrompt,
 		Ports:              opts.Ports,

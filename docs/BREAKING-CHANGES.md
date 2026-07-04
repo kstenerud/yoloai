@@ -68,6 +68,35 @@ credential-exposure risk.
 suffix (e.g. `yoloai new ./proj:copy-all` or `-d ./data:copy-all`), which copies
 everything including gitignored files — the previous behavior, now opt-in.
 
+### `:copy` now preserves git history (the work copy keeps the source `.git`)
+
+**Previous behavior:** `:copy` directories were staged with a fresh git baseline — the
+gitignore-honoring copy enumerates the project through git, which never lists `.git`,
+so the source `.git` was dropped and a synthetic `yoloai baseline` root commit was
+created. Inside the sandbox `git log`, `git blame`, and `git bisect` showed no
+history, and repo-configured filters (Git LFS, git-crypt) had no config to run. The
+only way to get history was `:copy-all`, which also re-copies gitignored files.
+
+**New behavior:** on a backend whose work-copy git runs in the sandbox's confinement
+(docker/podman/containerd, and tart), `:copy` now CoW-clones the source `.git` into
+the work copy, so history, blame, bisect, and legitimate filters all work. The
+gitignored-file strip is unchanged (gitignored files are still excluded — history and
+gitignore hygiene are orthogonal). On a backend that does not yet confine work-copy
+git (macOS apple/seatbelt), `:copy` automatically falls back to stripping history,
+with a one-line notice, until that confinement lands.
+
+**Rationale:** history/blame/bisect are a recurring need during real work, and
+correct filter behavior requires the real `.git`. Preserving it is safe wherever
+work-copy git is confined (an agent-controlled `.git/config` can only run drivers
+inside the agent's own sandbox, not on the host). The only *new* exposure is secrets
+that were committed and later removed — the already-compromised, rotate-it case.
+
+**Migration:** if a repo has secrets in its history that you have not rotated, opt out
+of history preservation with the `:copy-strict` suffix (`yoloai new ./proj:copy-strict`,
+`-d ./lib:copy-strict`), the `--copy-strict` flag (applies to all `:copy` dirs), or the
+profile `copy_strict: true` key. `:copy-strict` reproduces the previous fresh-baseline
+behavior. Precedence: per-dir suffix > `--copy-strict` flag > profile config.
+
 ### Credential brokering is the default on supported backends (the agent's API key no longer enters the sandbox)
 
 When an agent's credential is brokerable (Claude's `ANTHROPIC_API_KEY` or

@@ -69,6 +69,7 @@ func addCreateFlags(cmd *cobra.Command) {
 	cmd.Flags().Bool("broker", false, "Require credential brokering: keep the agent's API key host-side (errors if the backend can't). On by default for supported backends (Linux docker)")
 	cmd.Flags().Bool("no-broker", false, "Disable credential brokering: deliver the agent's API key into the sandbox directly (sticky across restart)")
 	cmd.Flags().String("archetype", "", fmt.Sprintf("Environment archetype (%s)", strings.Join(yoloai.Archetypes(), "|")))
+	cmd.Flags().Bool("copy-strict", false, "For :copy dirs, strip git history instead of preserving it (fresh baseline). Use for repos with unrotated secrets in history. Per-dir :copy-all / :copy-strict suffixes still win.")
 
 	cmd.MarkFlagsMutuallyExclusive("network-none", "network-isolated")
 	cmd.MarkFlagsMutuallyExclusive("profile", "no-profile")
@@ -236,6 +237,15 @@ func resolveCreateOptions(cmd *cobra.Command, name, rawWorkdirArg string, passth
 		return yoloai.SandboxCreateOptions{}, err
 	}
 
+	if copyStrict, _ := cmd.Flags().GetBool("copy-strict"); copyStrict {
+		applyCopyStrict(&workdirSpec)
+		for i := range auxDirSpecs {
+			if auxDirSpecs[i].Mode == yoloai.DirModeCopy {
+				applyCopyStrict(&auxDirSpecs[i])
+			}
+		}
+	}
+
 	networkMode := yoloai.NetworkModeDefault
 	if networkNone {
 		networkMode = yoloai.NetworkModeNone
@@ -312,6 +322,17 @@ func parseEnvSlice(envSlice []string) (map[string]string, error) {
 		envMap[k] = v
 	}
 	return envMap, nil
+}
+
+// applyCopyStrict applies the --copy-strict default to a spec: strip git history
+// on the copy. An explicit :copy-all (IncludeIgnored) opts out of history
+// stripping entirely, so it is left untouched; a per-dir :copy-strict suffix
+// already set StripHistory, so this is a no-op there.
+func applyCopyStrict(spec *yoloai.DirSpec) {
+	if spec.IncludeIgnored {
+		return
+	}
+	spec.StripHistory = true
 }
 
 // resolveNewDirSpecs parses rawWorkdirArg and rawDirs into DirSpec values.

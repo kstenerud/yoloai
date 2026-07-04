@@ -15,10 +15,11 @@ import (
 // retired (D109); an existing overlay sandbox is auto-converted to :copy by
 // `yoloai system migrate`, and the suffix is no longer creatable.
 var knownSuffixes = map[string]bool{
-	"copy":     true,
-	"copy-all": true,
-	"rw":       true,
-	"force":    true,
+	"copy":        true,
+	"copy-all":    true,
+	"copy-strict": true,
+	"rw":          true,
+	"force":       true,
 }
 
 // applyDirSuffix applies a single recognized suffix token to result.
@@ -36,8 +37,23 @@ func applyDirSuffix(result *yoloai.DirSpec, suffix, arg string) error {
 		if result.Mode == yoloai.DirModeRW {
 			return fmt.Errorf("cannot combine :copy-all and :%s on %q", result.Mode, arg)
 		}
+		if result.StripHistory {
+			return fmt.Errorf("cannot combine :copy-all and :copy-strict on %q", arg)
+		}
 		result.Mode = yoloai.DirModeCopy
 		result.IncludeIgnored = true
+	case "copy-strict":
+		// Like :copy but strips the source .git (fresh baseline, no history)
+		// instead of preserving it — for repos with secrets in history that
+		// haven't been rotated. Same diff/apply workflow — it's :copy with one knob.
+		if result.Mode == yoloai.DirModeRW {
+			return fmt.Errorf("cannot combine :copy-strict and :%s on %q", result.Mode, arg)
+		}
+		if result.IncludeIgnored {
+			return fmt.Errorf("cannot combine :copy-strict and :copy-all on %q", arg)
+		}
+		result.Mode = yoloai.DirModeCopy
+		result.StripHistory = true
 	case "rw":
 		if result.Mode == yoloai.DirModeCopy {
 			return fmt.Errorf("cannot combine :rw and :%s on %q", result.Mode, arg)

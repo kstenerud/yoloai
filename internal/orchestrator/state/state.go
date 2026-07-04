@@ -23,6 +23,7 @@ type DirSpec struct {
 	AllowDirty         bool          // proceed even if this directory has uncommitted git changes
 	AllowDangerousPath bool          // mount even if this is a dangerous path (e.g. $HOME); the :force suffix
 	IncludeIgnored     bool          // copy gitignored files too (the :copy-all suffix); default false honors .gitignore for :copy
+	StripHistory       bool          // strip the source .git instead of preserving history (the :copy-strict suffix / --copy-strict); also the auto-fallback on backends whose work-copy git isn't confined
 }
 
 // ResolvedMountPath returns the container mount path. If MountPath is

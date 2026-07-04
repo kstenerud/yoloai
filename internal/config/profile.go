@@ -31,9 +31,10 @@ type ProfileConfig struct {
 
 // ProfileWorkdir defines a workdir from a profile.
 type ProfileWorkdir struct {
-	Path  string `json:"path"`            // host path
-	Mode  string `json:"mode,omitempty"`  // "copy" or "rw"
-	Mount string `json:"mount,omitempty"` // optional custom mount point
+	Path       string `json:"path"`                  // host path
+	Mode       string `json:"mode,omitempty"`        // "copy" or "rw"
+	Mount      string `json:"mount,omitempty"`       // optional custom mount point
+	CopyStrict bool   `json:"copy_strict,omitempty"` // strip git history on :copy (fresh baseline) instead of preserving it
 }
 
 // ProfileDir defines an auxiliary directory from a profile.

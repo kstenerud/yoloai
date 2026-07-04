@@ -21,12 +21,17 @@ import (
 //     supplies listProjectFiles — git's view of the project (tracked plus
 //     untracked-but-not-ignored, ignored files excluded; see
 //     git.ListProjectFiles). isRepo == false means src isn't a git work tree, so
-//     there's no gitignore to honor and we fall back to a full copy.
-//   - includeIgnored == true (:copy-all): copy everything via CopyDir.
+//     there's no gitignore to honor and we fall back to a full copy. When
+//     preserveGit is true, the source .git is also cloned so the work copy keeps
+//     its history/blame and filter config (the default for :copy; see
+//     copy-mode-history.md). git's file enumeration never lists .git itself, so
+//     without this step the gitignore-honoring copy would drop history entirely.
+//   - includeIgnored == true (:copy-all): copy everything via CopyDir, which
+//     already includes .git; preserveGit is not consulted.
 //
 // The same dispatch runs at initial setup and at reset, so a re-copy reproduces
 // the same file set.
-func CopyProjectDir(src, dst string, includeIgnored bool, listProjectFiles func() (files []string, isRepo bool, err error)) error {
+func CopyProjectDir(src, dst string, includeIgnored, preserveGit bool, listProjectFiles func() (files []string, isRepo bool, err error)) error {
 	if includeIgnored {
 		return CopyDir(src, dst)
 	}
@@ -37,7 +42,53 @@ func CopyProjectDir(src, dst string, includeIgnored bool, listProjectFiles func(
 	if !isRepo {
 		return CopyDir(src, dst)
 	}
-	return copyFileList(src, dst, files)
+	if err := copyFileList(src, dst, files); err != nil {
+		return err
+	}
+	if preserveGit {
+		return copyGitDir(src, dst)
+	}
+	return nil
+}
+
+// PreserveGit reports whether a :copy directory should keep the source repo's
+// real .git. History is preserved unless the user opted out (stripHistory) or
+// the backend does not run work-copy git in confinement (confined == false),
+// where a writable agent-controlled .git would widen the host-side RCE surface
+// (see confine-host-side-git.md). downgraded is true when history was wanted but
+// the backend gate forced a strip — the caller surfaces a one-time notice.
+// Call only for :copy dirs; :copy-all always copies .git via CopyDir.
+func PreserveGit(stripHistory, confined bool) (preserve, downgraded bool) {
+	if stripHistory {
+		return false, false
+	}
+	if !confined {
+		return false, true
+	}
+	return true, false
+}
+
+// copyGitDir CoW-clones src/.git into dst so the work copy keeps the source
+// repo's history (log/blame/bisect) and filter config. Only a real .git
+// *directory* is copied; a gitlink file (linked worktree / submodule) is
+// skipped — its objects live in a shared common dir outside src, out of scope
+// (see copy-mode-history.md). A missing .git is a no-op.
+func copyGitDir(src, dst string) error {
+	gitPath := filepath.Join(src, ".git")
+	info, err := os.Lstat(gitPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("stat .git in %s: %w", src, err)
+	}
+	if !info.IsDir() {
+		return nil // gitlink file (worktree/submodule) — history lives elsewhere
+	}
+	if err := CopyDir(gitPath, filepath.Join(dst, ".git")); err != nil {
+		return fmt.Errorf("copy .git: %w", err)
+	}
+	return nil
 }
 
 // copyFileList copies each src-relative path in files from src to dst, creating

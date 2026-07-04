@@ -92,6 +92,12 @@ type DirEnvironment struct {
 	// re-copy reproduces the same file set. Default (absent/false) honors
 	// .gitignore — the safe default for :copy.
 	IncludeIgnored bool `json:"include_ignored,omitempty"`
+	// StripHistory records the :copy-strict opt-out: true when the copy stripped
+	// the source .git (fresh baseline, no history) instead of preserving it. Read
+	// on reset so a re-copy reproduces the same decision. Default (absent/false)
+	// preserves history — but only where the backend confines work-copy git; the
+	// create/reset gate downgrades to strip on unconfined backends regardless.
+	StripHistory bool `json:"strip_history,omitempty"`
 }
 
 // Workdir returns the primary directory — Dirs[0], the agent's cwd. Returns nil

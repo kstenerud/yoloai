@@ -179,7 +179,8 @@ func resetCopyWorkdir(ctx context.Context, d state.Deps, sandboxName, sandboxDir
 	}
 	slog.Debug("re-copying workdir", "event", "sandbox.reset.workdir", "sandbox", sandboxName, "host_path", meta.Workdir().HostPath)
 	g := git.NewHost(d.Layout)
-	if err := workspace.CopyProjectDir(meta.Workdir().HostPath, workDir, meta.Workdir().IncludeIgnored, func() ([]string, bool, error) {
+	preserveGit, _ := workspace.PreserveGit(meta.Workdir().StripHistory, runtime.GitRunsInConfinement(d.Runtime))
+	if err := workspace.CopyProjectDir(meta.Workdir().HostPath, workDir, meta.Workdir().IncludeIgnored, preserveGit, func() ([]string, bool, error) {
 		return g.ListProjectFiles(ctx, meta.Workdir().HostPath)
 	}); err != nil {
 		return "", fmt.Errorf("re-copy workdir: %w", err)
@@ -205,7 +206,7 @@ func resetCopyWorkdir(ctx context.Context, d state.Deps, sandboxName, sandboxDir
 }
 
 // resetAuxCopyDir resets a single aux :copy dir and returns the new baseline SHA.
-func resetAuxCopyDir(ctx context.Context, g *git.Git, sandboxDir string, d store.DirEnvironment) (string, error) {
+func resetAuxCopyDir(ctx context.Context, g *git.Git, sandboxDir string, d store.DirEnvironment, rt runtime.Backend) (string, error) {
 	auxWorkDir := store.WorkDir(sandboxDir, d.HostPath)
 	if err := os.RemoveAll(auxWorkDir); err != nil {
 		return "", fmt.Errorf("remove aux work copy %s: %w", d.HostPath, err)
@@ -213,7 +214,8 @@ func resetAuxCopyDir(ctx context.Context, g *git.Git, sandboxDir string, d store
 	if _, err := os.Stat(d.HostPath); err != nil {
 		return "", fmt.Errorf("original aux directory no longer exists: %s", d.HostPath)
 	}
-	if err := workspace.CopyProjectDir(d.HostPath, auxWorkDir, d.IncludeIgnored, func() ([]string, bool, error) {
+	preserveGit, _ := workspace.PreserveGit(d.StripHistory, runtime.GitRunsInConfinement(rt))
+	if err := workspace.CopyProjectDir(d.HostPath, auxWorkDir, d.IncludeIgnored, preserveGit, func() ([]string, bool, error) {
 		return g.ListProjectFiles(ctx, d.HostPath)
 	}); err != nil {
 		return "", fmt.Errorf("re-copy aux dir %s: %w", d.HostPath, err)
@@ -234,11 +236,11 @@ func resetAuxCopyDir(ctx context.Context, g *git.Git, sandboxDir string, d store
 
 // resetAuxDirs resets all aux :copy directories in meta, updating BaselineSHA
 // in-place.
-func resetAuxDirs(ctx context.Context, g *git.Git, sandboxDir string, meta *store.Environment) error {
+func resetAuxDirs(ctx context.Context, g *git.Git, sandboxDir string, meta *store.Environment, rt runtime.Backend) error {
 	for i, d := range meta.AuxDirs() {
 		switch d.Mode {
 		case store.DirModeCopy:
-			sha, err := resetAuxCopyDir(ctx, g, sandboxDir, d)
+			sha, err := resetAuxCopyDir(ctx, g, sandboxDir, d, rt)
 			if err != nil {
 				return err
 			}
@@ -340,7 +342,7 @@ func prepareResetRestart(ctx context.Context, d state.Deps, opts ResetOptions, s
 	}
 
 	// Reset aux :copy dirs
-	if err := resetAuxDirs(ctx, git.NewHost(d.Layout), sandboxDir, meta); err != nil {
+	if err := resetAuxDirs(ctx, git.NewHost(d.Layout), sandboxDir, meta, d.Runtime); err != nil {
 		return err
 	}
 

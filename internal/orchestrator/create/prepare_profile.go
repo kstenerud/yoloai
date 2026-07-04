@@ -127,6 +127,8 @@ func applyMergedProfileToOpts(opts *Options, agentDef **agent.Definition, merged
 			Path:      wdPath,
 			Mode:      DirMode(merged.Workdir.Mode),
 			MountPath: merged.Workdir.Mount,
+			// --copy-strict (already on opts.Workdir) OR the profile's copy_strict.
+			StripHistory: opts.Workdir.StripHistory || merged.Workdir.CopyStrict,
 		}
 	}
 
