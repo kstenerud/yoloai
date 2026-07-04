@@ -319,11 +319,23 @@ func GitRunsInConfinement(rt Backend) bool {
 
 // GitHardeningArgs returns the `git -c` flags that must precede every git
 // invocation yoloai runs against agent-controlled content — on the host or in a
-// backend's confinement. Disabling core.hooksPath stops an agent-planted
-// .git/hooks script from executing (audit C1). A single source so a future
-// hardening flag is added once here, not forgotten in one of the executors.
+// backend's confinement. A single source so a future hardening flag is added
+// once here, not forgotten in one of the executors.
+//
+//   - core.hooksPath=/dev/null stops an agent-planted .git/hooks script from
+//     executing (audit C1).
+//   - core.fsmonitor=false stops an agent-planted core.fsmonitor=<command> from
+//     executing. fsmonitor is a pure performance optimization (it never affects
+//     correctness), so disabling it is always safe, and it closes an RCE vector
+//     that applies even to read-only operations like `git status` — which runs
+//     the configured fsmonitor command before scanning the work tree.
+//
+// Note: this does NOT disable filter/textconv drivers, which are attribute-bound
+// and must run for diff correctness (Git LFS, git-crypt, …). Those are safe only
+// where git runs in-confinement (GitRunsInConfinement); on a host-side backend
+// they remain a residual — see confine-host-side-git.md.
 func GitHardeningArgs() []string {
-	return []string{"-c", "core.hooksPath=/dev/null"}
+	return []string{"-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"}
 }
 
 // KeepAliveModel classifies how each backend keeps its isolated environment

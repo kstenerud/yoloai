@@ -119,19 +119,36 @@ less than a full coding agent, so it can be tightened aggressively without riski
 functionality. (Tightening the agent profile's mach-lookup/process-exec is a worthwhile
 separate hardening, but is not required to close *this* hole once git has its own profile.)
 
-### Fix 3 — broken-metadata probe: strict host-side hardening (all backends)
+### Fix 3 — host-side hardening: disable fsmonitor globally (DONE, all backends)
 
 `ProbeWorkData`/`DetectChanges` runs `git status --porcelain` host-side via `git.NewHost`
-during recovery, when the sandbox may be stopped/unrecoverable (so we cannot always exec into
-it). `git status` does not smudge/clean, so filters are not the risk here — but `core.fsmonitor`
-runs a configured command, and that is agent-controllable.
+during broken-metadata recovery, when the sandbox may be stopped/unrecoverable (so we cannot
+always exec into it). Two agent-controllable config vectors fire even on a read-only
+`git status`:
 
-Add a **strict hardening arg set** for host-side status-class operations that also neutralizes
-fsmonitor (and, defensively, any read-time driver status could invoke):
-`-c core.fsmonitor=false` (alongside the existing `-c core.hooksPath=/dev/null`). Apply it to
-the probe path specifically. This is cheap, needs no runtime, and closes the recovery-path
-exposure on every backend. (Diff/format-patch keep the current, filter-preserving hardening
-because they need drivers for correctness and now run in-confinement.)
+- **`core.fsmonitor=<command>`** — git runs the configured fsmonitor command before scanning
+  the work tree. **Fixed:** `-c core.fsmonitor=false` added to `runtime.GitHardeningArgs`
+  (`runtime/runtime.go`), the single hardening source prepended to every yoloai git invocation
+  (host **and** in-confinement — docker/containerd/tart executors all use it). fsmonitor is a
+  pure performance optimization, so disabling it never affects correctness; this closes the
+  vector everywhere in one line, not just on the probe.
+- **Clean filters via `filter.<name>.clean`** — *correction to an earlier draft of this doc:*
+  `git status` **can** run clean filters. It skips them when a stat difference already proves a
+  file changed (e.g. a size change), but on a stat-cache miss where content must be re-hashed
+  to decide (a **same-size** modification with a stale/racy stat entry), `status` invokes the
+  clean filter — verified empirically. So `fsmonitor=false` is necessary but **not sufficient**
+  to fully close the probe.
+
+**Residual (tracked in `findings-unresolved.md`):** the clean-filter-on-`git status` vector in
+the host-side probe. It is not closed by `GitHardeningArgs` because filters are attribute-bound
+(no generic `-c` off-switch without knowing driver names) and must remain enabled where they're
+needed for correctness. Robust closes: run the probe **in-confinement** when the runtime is
+available, or replace its `git status` with a filter-free dirtiness check. Exploitability is
+**low**: the probe only fires on host-side `.meta` loss, and `.meta` lives in
+`~/.yoloai/sandboxes/<name>/` — outside the sandbox, so the agent cannot corrupt it to trigger
+the path. Defense-in-depth, not an open front door. (Diff/format-patch keep the
+filter-preserving hardening because they need drivers for correctness and now run
+in-confinement on the fixed backends.)
 
 > Note — baseline creation at create time (`prepare_dirs.go`) also runs host-side, but on the
 > **user's own** repo config before the agent has run (not agent-controlled), so it is the same
