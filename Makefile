@@ -307,11 +307,14 @@ smoketest-quick: build
 ## releasetest: run every test tier, fastest first. Run as YOUR user (NOT sudo):
 ##   make releasetest
 ## The tiers have mixed privilege needs, so releasetest runs each in its correct
-## one: check / e2e / integration-podman run as you (integration-podman REQUIRES
-## a user session — rootless podman's keep-id/slirp), while integration
-## (containerd/Kata netns) and smoketest (VM backends) escalate to root
-## internally (sudo -E). Running the whole thing under `sudo` would break the
-## rootless-podman tier, which is why this escalates per-tier instead.
+## one. Everything runs as you EXCEPT, on Linux only, integration (containerd/Kata
+## netns) and smoketest (VM/netns) escalate to root internally (sudo -E). On macOS
+## nothing escalates: every backend — Docker Desktop, apple, seatbelt, tart,
+## podman-machine — is a per-user daemon (containerd is Linux-only, compiled out),
+## and running them as root breaks bind-mounts of your user-owned temp dirs. The
+## rootless-podman tier (integration-podman) always needs your login session
+## (keep-id/slirp), which is why the whole gate must NOT be run under `sudo` —
+## it escalates only the specific Linux tiers that need it.
 ## The exports flip on the heavyweight macOS-VM paths (tart conformance clones a
 ## real base VM per subtest; apple builds its real yoloai-base instead of a sleep
 ## image); they propagate through the sub-makes (and across sudo -E). On a host
@@ -326,8 +329,12 @@ releasetest:
 		exit 1; \
 	fi
 	$(MAKE) check
-	@echo "==> integration needs root (containerd/Kata netns) — escalating for this tier..."
-	sudo -E PATH="$(PATH)" $(MAKE) integration
+	@if [ "$$(uname)" = "Linux" ]; then \
+		echo "==> integration needs root on Linux (containerd/Kata netns) — escalating for this tier..."; \
+		sudo -E PATH="$(PATH)" $(MAKE) integration; \
+	else \
+		$(MAKE) integration; \
+	fi
 	$(MAKE) e2e
 	$(MAKE) integration-podman
 	$(MAKE) smoketest
