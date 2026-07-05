@@ -15,14 +15,19 @@ import (
 )
 
 // GitEnv returns a curated, hermetic environment for running git in tests:
-// only the host PATH (so the git binary is found) plus an explicit identity and
-// disabled global/system config. It deliberately does NOT hand git the full
-// ambient environment — that would re-introduce the inheritance DEV §12 exists
-// to prevent and make tests depend on the developer's ~/.gitconfig. The single
-// os.Environ read happens in GetCuratedHostEnv (the test edge), which already
-// narrows to PATH here.
+// the host PATH (so the git binary is found) and SUDO_UID, plus an explicit
+// identity and disabled global/system config. It deliberately does NOT hand git
+// the full ambient environment — that would re-introduce the inheritance DEV §12
+// exists to prevent and make tests depend on the developer's ~/.gitconfig. The
+// single os.Environ read happens in GetCuratedHostEnv (the test edge), which
+// narrows to PATH + SUDO_UID here.
+//
+// SUDO_UID mirrors production sysexec.GitEnv: under `sudo make integration`, git
+// runs as root against a work copy owned by the invoking user, and needs
+// SUDO_UID to accept it instead of failing git's dubious-ownership guard. Absent
+// off-sudo, so it is a no-op there.
 func GitEnv() []string {
-	return sysexec.Curated(GetCuratedHostEnv([]string{"PATH"}), []string{"PATH"}, map[string]string{
+	return sysexec.Curated(GetCuratedHostEnv([]string{"PATH", "SUDO_UID"}), []string{"PATH", "SUDO_UID"}, map[string]string{
 		"GIT_CONFIG_GLOBAL":   "/dev/null",
 		"GIT_CONFIG_SYSTEM":   "/dev/null",
 		"GIT_AUTHOR_NAME":     "yoloai-test",
