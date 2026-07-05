@@ -65,6 +65,12 @@ var descriptor = runtime.BackendDescriptor{
 		KeepAliveModel:     runtime.KeepAliveGuestOSInit,
 		// Literal mount paths (no Tart-style remap) → the /yoloai default works.
 		VMRuntimeDir: "",
+		// Run copy-mode work-copy git inside the per-container VM (audit C1): the
+		// work copy is host-readable (LocalityHostSide) but bind-mounted into the
+		// guest, so dispatching git through GitExec keeps an agent-planted .git
+		// filter/diff/fsmonitor driver executing inside the container, never on
+		// the macOS host. Mirrors the container backends.
+		GitExecInConfinement: true,
 	},
 	Probe:         probe,
 	VersionString: versionString,
@@ -117,6 +123,7 @@ type Runtime struct {
 // Compile-time check that the skeleton satisfies the interface.
 var _ runtime.Backend = (*Runtime)(nil)
 var _ runtime.InteractiveSession = (*Runtime)(nil)
+var _ runtime.GitExecer = (*Runtime)(nil)
 
 // New constructs the apple Runtime after verifying platform, the CLI, and the
 // macOS version gate. The apiserver is not started here — Setup does that on
@@ -300,6 +307,39 @@ func (r *Runtime) Exec(ctx context.Context, name string, cmd []string, user stri
 	args = append(args, cmd...)
 	c := sysexec.CommandContext(ctx, r.execEnv, r.containerBin, args...)
 	return runtime.RunCmdExec(c)
+}
+
+// GitExec runs a git command against the copy-mode work copy INSIDE the
+// container (audit C1). The work copy is bind-mounted into the guest at workDir
+// (the dir's mirrored mount path, already resolved by the git package), so an
+// agent-planted .git filter/diff/fsmonitor driver executes in the container,
+// never on the host. Contract mirrors the other container backends: git's
+// stdout is returned UNTRIMMED (patches are whitespace-sensitive), a non-zero
+// exit becomes a *runtime.ExecError carrying stderr, and a stopped container
+// yields runtime.ErrNotRunning. user matches the agent's container user so the
+// work copy's ownership checks out. The base image already ships git (the
+// container backends run work-copy git in it too), so no extra provisioning.
+func (r *Runtime) GitExec(ctx context.Context, name, user, workDir string, args ...string) (string, error) {
+	if info, err := r.Inspect(ctx, name); err != nil || !info.Running {
+		return "", runtime.ErrNotRunning
+	}
+
+	gitArgs := append([]string{"git"}, runtime.GitHardeningArgs()...)
+	gitArgs = append(gitArgs, "-C", workDir)
+	gitArgs = append(gitArgs, args...)
+
+	execArgs := []string{"exec"}
+	if user != "" {
+		execArgs = append(execArgs, "-u", user)
+	}
+	execArgs = append(execArgs, name)
+	execArgs = append(execArgs, gitArgs...)
+
+	// RunCmdExecRaw (not RunCmdExec) so git's exact bytes survive — Exec trims,
+	// which would corrupt patches.
+	c := sysexec.CommandContext(ctx, r.execEnv, r.containerBin, execArgs...)
+	res, err := runtime.RunCmdExecRaw(c)
+	return res.Stdout, err
 }
 
 // InteractiveExec runs a command interactively, bridging the supplied IOStreams

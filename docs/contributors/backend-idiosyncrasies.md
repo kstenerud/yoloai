@@ -111,6 +111,7 @@ inclusion test first, then add a row to the index.
 | Agent silently fails to start on Tart (claude/node not found) | [Tart: provisioned tool dirs live only on the login PATH](#provisioned-tool-dirs-live-only-on-the-login-path-cirrus-base-image) |
 | Swift PM commands fail with sandbox-exec nesting errors on Seatbelt | [Seatbelt: macOS sandbox-exec doesn't nest](#macos-sandbox-exec-doesnt-nest--swift-pm-needs-the-swift-wrapper-sourced) |
 | Agent dies silently/SIGTRAP (exit 133) on Seatbelt at launch; ICU/timezone deny in unified log | [Seatbelt: SBPL subpaths need vnode-resolved paths](#agent-dies-silently-sigtrap--sbpl-subpath-rules-must-use-vnode-resolved-paths) |
+| Confined git under `sandbox-exec` dies (`xcrun_db` / `libxcrun` denied); or a malicious filter still writes to `/tmp`; or git works with `mach-lookup` denied | [Seatbelt: sandbox-exec-wrapping git — escape surfaces + the /usr/bin/git shim](#seatbelt-sandbox-exec-wrapping-git-for-confinement-has-two-escape-surfaces-mach-lookup-process-exec--the-usrbingit-shim-cant-run-confined) |
 | Interactive error output "stair-steps" (each line shifts right) on Seatbelt/Tart | [Seatbelt/Tart: local-PTY backends must bridge, not inherit host stdio](#interactive-error-output-stair-steps--local-pty-backends-must-bridge-not-inherit-host-stdio-also-tart) |
 | VS Code tunnel re-prompts for login on every container restart | [VS Code CLI: hostname-based keychain encryption](#vs-code-cli-file-keychain-uses-hostname-in-encryption-key) |
 | Second sandbox tunnel loops `error access singleton` forever | [VS Code CLI: singleton lock blocks concurrent tunnels](#vs-code-cli-singleton-lock-blocks-concurrent-tunnels) |
@@ -2008,6 +2009,22 @@ VirtioFS should only be used for:
 **Fix:** Wrap every `systemReadPaths()` entry in `resolvePathVariants()` so the resolved `/private/var/...` variant is emitted alongside the original — matching what every other profile section already does.
 
 **Code:** `runtime/seatbelt/profile.go::writeProfileSystemPaths` (+ `resolvePathVariants`); regression test `seatbelt_test.go::TestGenerateProfile_SystemPathsSymlinkResolved`
+
+---
+
+### Seatbelt: `sandbox-exec`-wrapping git for confinement has two escape surfaces (mach-lookup, process-exec) + the `/usr/bin/git` shim can't run confined
+
+**Context:** to close the copy-mode RCE (audit C1, `confine-host-side-git.md`), seatbelt runs work-copy git under a dedicated `sandbox-exec` SBPL profile so any agent-planted `filter.<x>.clean` inherits the confinement. Three non-obvious macOS facts shaped that profile (all verified on macOS 26, Apple Silicon):
+
+1. **`/usr/bin/git` is Apple's `xcrun` shim, not git.** It re-invokes `xcrun`/`xcodebuild`, which need the per-user Darwin temp dir (`confstr(_CS_DARWIN_USER_TEMP_DIR)`), a writable `/tmp/xcrun_db` cache, and `mach-lookup` — none of which a tight git profile grants. Under the profile the shim dies with `couldn't create cache file '/tmp/xcrun_db-…' (errno=Operation not permitted)` and `unable to load libxcrun (file system sandbox blocked open())`. **Fix:** resolve the REAL toolchain binary via `xcrun -f git` (outside the sandbox) and exec *that* under `sandbox-exec`, bypassing the shim entirely (`seatbelt.resolveGitBinary`). The profile then allows `process-exec` on the resolved toolchain's Developer dir so git's `libexec/git-core` subcommands run.
+
+2. **`mach-lookup` is the primary escape vector — and git does NOT need it.** A `(deny default)` profile already denies `mach-lookup`; the surprise is that git, its clean/textconv filters, `/bin/sh`, and even **git-lfs (a Go binary)** all run correctly for `status`/`add`/`diff`/`format-patch` with `mach-lookup` fully denied. So no allowlist is required — leave it denied. (The permissive *agent* profile grants `(allow mach-lookup)` unrestricted, which is why the git op must NOT reuse the agent profile.)
+
+3. **A writable temp grant re-opens the hole.** git needs no writable dir outside the work copy for the diff path, so the profile grants `file-write*` on the **work copy only**. It is tempting to also allow `/private/tmp` or `/private/var/folders` "for git temp" — doing so lets a malicious `filter.pwn.clean` write a marker to `/tmp` or the per-user temp and **defeats containment**. Likewise `process-exec` must be confined to tool dirs (system bins, `/opt/homebrew`, the toolchain Developer dir) — never the work copy — so a payload the filter drops in-tree cannot be exec'd.
+
+**Net:** the dedicated git profile bounds a malicious filter to container-equivalent blast radius (run installed tools + read/write the work copy, no host escape). Behaviorally teeth-checked: with confinement off the marker leaks; on, it is contained.
+
+**Code:** `runtime/seatbelt/profile.go::GenerateGitProfile`, `runtime/seatbelt/seatbelt.go::{GitExec,resolveGitBinary}`; tests `runtime/seatbelt/gitprofile_test.go`, `internal/orchestrator/integration_macos_test.go`.
 
 ---
 

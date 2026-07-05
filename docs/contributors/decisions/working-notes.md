@@ -1149,6 +1149,20 @@ Only then the **mechanical move**: `runtime` first/with `store`, repoint the fen
 
 Supersedes the base-tier smoke-skip and the per-backend "unavailable → skip" gates. Ties to DEV §10 and TEST §6 (which this makes the infra *enforce*). See `docs/contributors/design/plans/mandatory-infra-test-policy.md`.
 
+## D113 — confine work-copy git on apple + seatbelt (close the last host-side copy-mode RCE)
+
+**Context.** The 2026-06-29 fix ([copy-mode-git-rce.md](../design/plans/copy-mode-git-rce.md)) moved copy-mode work-copy git into confinement for docker/podman/containerd/tart, but left **apple** and **seatbelt** running work-copy git **on the host with filter/textconv/fsmonitor drivers live** — a host RCE via an agent-planted `.git/config` driver. apple's gap was undocumented (it already exposed `container exec` but never implemented `GitExecer`). The invariant this establishes: **no git operation touches an agent-writable `.git`/work-tree outside the agent's confinement.** See [confine-host-side-git.md](../design/plans/confine-host-side-git.md) (design) and [confine-host-side-git-macos-build.md](../design/plans/confine-host-side-git-macos-build.md) (build brief).
+
+**Decision.**
+- **(a) apple** — implement `runtime.GitExecer` on the apple `Runtime`, dispatching work-copy git into its per-container VM via the existing `container exec` (untrimmed stdout, `*ExecError` on non-zero, `ErrNotRunning` when down), and set `GitExecInConfinement: true`. Mirrors the container backends; the shared base image already ships git. This closes apple with the mechanism already proven for docker.
+- **(b) seatbelt** — seatbelt has no container to exec into, so "in confinement" means running **git itself under `sandbox-exec`**: `GitExec` runs `sandbox-exec -f <gitProfile> <realGit> <hardening> -C <workDir> <args>`, so any filter git spawns inherits the profile. Set `GitExecInConfinement: true`. It does **not** require the sandbox keepalive to be running (the work copy is a plain host dir + the profile is self-contained), preserving diff-on-stopped-sandbox behavior.
+- **(c) A dedicated tight git profile, NOT the agent profile** (`seatbelt.GenerateGitProfile`). The agent profile grants `(allow mach-lookup)` and `(allow process-exec)` unrestricted — sandbox-escape vectors. git needs far less, so the git op gets its own profile: `(deny default)`; **`mach-lookup` left denied** (empirically git/filters/git-lfs need none); **`file-write*` scoped to the work copy only** (a broad temp write grant re-opens containment — a malicious filter would write a marker to `/tmp`); **`process-exec` confined to tool dirs** (system bins, `/opt/homebrew`, the toolchain Developer dir), never the work copy. This bounds a malicious filter to container-equivalent blast radius.
+- **(d) Bypass the `/usr/bin/git` xcrun shim.** It re-invokes `xcrun`/`xcodebuild`, which need per-user temp + `mach-lookup` and cannot run under the tight profile; `resolveGitBinary` resolves the real toolchain git via `xcrun -f git` and execs that directly. Recorded in `backend-idiosyncrasies.md`.
+
+**Verification (real macOS 26, Apple Silicon).** Malicious-filter integration tests extended to apple + seatbelt (`internal/orchestrator/integration_macos_test.go`, teeth-checked: confinement off ⇒ host marker leaks, on ⇒ contained); seatbelt profile containment battery (`runtime/seatbelt/gitprofile_test.go`): legit clean-filter + git-lfs round-trip byte-correct, malicious filter cannot write off-tree or exec a dropped payload.
+
+**Interaction with D111.** D111's `:copy` history preservation is gated on `GitRunsInConfinement(rt)` and auto-falls-back to strip on non-confining backends "(apple/seatbelt today)". With this decision those two now confine git, so the fallback no longer triggers for them — `:copy` history preservation extends to apple/seatbelt automatically. The **broken-metadata probe** residual (`status.ProbeWorkData` host `git status`, clean-filter vector) is unchanged and remains tracked in `findings-unresolved.md`; exploitability is low (`.meta` lives outside the sandbox).
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.

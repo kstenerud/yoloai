@@ -10,13 +10,36 @@ work-copy `add`/`diff`/`status`/`log`/`format-patch` now run in-confinement via
 each backend's `GitExec`, dispatched by `runtime.GitRunsInConfinement` behind
 `git.NewSandbox`. Verified on real Docker **and** Podman (malicious-filter case:
 host marker never created; legit clean-filter case: diff byte-correct) — see
-`internal/orchestrator/integration_test.go`. **Two residuals remain:** (1)
-**seatbelt** still runs host-side work-copy git (no container to exec into) —
-needs the `sandbox-exec` wrapper + caps-F5 SBPL tightening (macOS-only, lighter
-tier; step 5 below); (2) `status.DetectChanges`/`ProbeWorkData` runs host `git
-status` on the work copy for **broken-metadata** sandboxes only — tracked as a
-follow-up finding. With these noted, C1 is closed for the v0.6.0 tag on the
-mainstream backends.
+`internal/orchestrator/integration_test.go`.
+
+**Update (2026-07-05): the two macOS backends are now also closed.** The
+2026-06-29 fix left **apple** and **seatbelt** running work-copy git host-side —
+apple was omitted from earlier drafts of this status entirely, and it was a fully
+open, undocumented RCE (apple already exposed `container exec` but never
+implemented `GitExecer`). Both are now fixed and confined
+(`confine-host-side-git.md`, `confine-host-side-git-macos-build.md`): apple
+dispatches work-copy git into its per-container VM (`GitExecInConfinement`);
+seatbelt wraps git under a dedicated tight `sandbox-exec` SBPL profile
+(`seatbelt.GenerateGitProfile`) that denies `mach-lookup`, scopes write to the
+work copy, and confines `process-exec` to tool dirs. Both are verified on real
+hardware (`internal/orchestrator/integration_macos_test.go`, teeth-checked; the
+seatbelt profile's containment battery in `runtime/seatbelt/gitprofile_test.go`).
+
+**Neutralization gap to keep in mind:** the *host-side* hardening
+(`runtime.GitHardeningArgs` = `-c core.hooksPath=/dev/null -c
+core.fsmonitor=false`) disables hooks and fsmonitor but **leaves
+filter/textconv drivers live** — those are attribute-bound and must run for diff
+correctness (Git LFS, git-crypt). That is safe **only** where git runs
+in-confinement (`GitRunsInConfinement`). On a still-host-side path it is a live
+RCE — which is exactly why apple/seatbelt had to move git into confinement rather
+than "hardening" the host call.
+
+**Residual:** `status.DetectChanges`/`ProbeWorkData` runs host `git status` on
+the work copy for **broken-metadata** sandboxes only — a clean filter can still
+fire there (fsmonitor is off, but filters remain attribute-bound); tracked as a
+follow-up finding. Exploitability is low (`.meta` lives outside the sandbox, so
+the agent cannot corrupt it to trigger the path). With that noted, C1 is closed
+across all backends.
 
 **Recommendation: run the work-copy git inside the agent's confinement
 (in-container / in-VM / under the seatbelt profile), NOT on the host.** An earlier
