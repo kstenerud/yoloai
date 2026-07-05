@@ -70,8 +70,7 @@ func runIntegrationMain(m *testing.M) int {
 		rt, dockerErr = dockerrt.New(ctx, config.Layout{}.WithEnv(testutil.GetCuratedHostEnv(testutil.IntegrationHostEnvVars)))
 	})
 	if dockerErr != nil {
-		fmt.Fprintf(os.Stderr, "Docker unavailable, skipping integration tests: %v\n", dockerErr)
-		return 0
+		return testutil.BackendAbsent("docker", dockerErr.Error())
 	}
 	defer rt.Close() //nolint:errcheck // best-effort close in test main
 

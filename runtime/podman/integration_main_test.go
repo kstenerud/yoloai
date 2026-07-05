@@ -20,8 +20,7 @@ func TestMain(m *testing.M) {
 
 	rt, err := New(ctx, config.Layout{}.WithEnv(testutil.GetCuratedHostEnv(testutil.IntegrationHostEnvVars)))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Podman unavailable, skipping integration tests: %v\n", err)
-		os.Exit(0)
+		os.Exit(testutil.BackendAbsent("podman", err.Error()))
 	}
 	defer rt.Close() //nolint:errcheck // best-effort close in test main
 
