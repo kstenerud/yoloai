@@ -2,6 +2,59 @@
 
 Tracks breaking changes made during beta. Each entry should be included in release notes for the version that introduces it.
 
+## v0.7.0
+
+### Sandbox base image moves to Debian 13 (trixie)
+
+**Previous behavior:** the `yoloai-base` sandbox image was built on Debian 12
+(bookworm) — system Python 3.11, aider installed via `pip install
+--break-system-packages`.
+
+**New behavior:** the base image is now Debian 13 (trixie): system Python 3.13,
+newer system package versions, and the trixie apt / docker-ce repositories. Two
+build changes follow from the OS bump: aider now installs isolated on a
+uv-managed Python 3.12 (aider caps `requires-python` at `<3.13`, so it cannot run
+on trixie's system Python), and `binutils-gold` is installed explicitly because
+trixie split `gold` out of `binutils` (the Go toolchain links cgo binaries with
+`-fuse-ld=gold` on arm64).
+
+**Impact:** sandboxes now run a newer OS and toolchain. Agent workflows or project
+builds that implicitly relied on bookworm package versions, or on the sandbox's
+system Python being 3.11, may behave differently inside the sandbox.
+
+**Migration:** none required — the base image rebuilds automatically on next use
+(the build-inputs checksum changed), or run `yoloai system build` to rebuild it
+eagerly.
+
+### `:copy` now preserves git history (the work copy keeps the source `.git`)
+
+**Previous behavior:** `:copy` directories were staged with a fresh git baseline — the
+gitignore-honoring copy enumerates the project through git, which never lists `.git`,
+so the source `.git` was dropped and a synthetic `yoloai baseline` root commit was
+created. Inside the sandbox `git log`, `git blame`, and `git bisect` showed no
+history, and repo-configured filters (Git LFS, git-crypt) had no config to run. The
+only way to get history was `:copy-all`, which also re-copies gitignored files.
+
+**New behavior:** `:copy` now CoW-clones the source `.git` into the work copy, so
+history, blame, bisect, and legitimate filters all work. This is safe because every
+backend now runs work-copy git inside the sandbox's confinement — docker, podman,
+containerd, tart, and (new in this release) apple and seatbelt. The gitignored-file
+strip is unchanged (gitignored files are still excluded — history and gitignore
+hygiene are orthogonal). The strip-history fallback (with a one-line notice) remains
+as a safety net for any backend that does not confine work-copy git.
+
+**Rationale:** history/blame/bisect are a recurring need during real work, and
+correct filter behavior requires the real `.git`. Preserving it is safe wherever
+work-copy git is confined (an agent-controlled `.git/config` can only run drivers
+inside the agent's own sandbox, not on the host). The only *new* exposure is secrets
+that were committed and later removed — the already-compromised, rotate-it case.
+
+**Migration:** if a repo has secrets in its history that you have not rotated, opt out
+of history preservation with the `:copy-strict` suffix (`yoloai new ./proj:copy-strict`,
+`-d ./lib:copy-strict`), the `--copy-strict` flag (applies to all `:copy` dirs), or the
+profile `copy_strict: true` key. `:copy-strict` reproduces the previous fresh-baseline
+behavior. Precedence: per-dir suffix > `--copy-strict` flag > profile config.
+
 ## v0.6.0
 
 ### `:overlay` directory mode removed
@@ -67,35 +120,6 @@ credential-exposure risk.
 **Migration:** if you *want* a gitignored file in the sandbox, use the new `:copy-all`
 suffix (e.g. `yoloai new ./proj:copy-all` or `-d ./data:copy-all`), which copies
 everything including gitignored files — the previous behavior, now opt-in.
-
-### `:copy` now preserves git history (the work copy keeps the source `.git`)
-
-**Previous behavior:** `:copy` directories were staged with a fresh git baseline — the
-gitignore-honoring copy enumerates the project through git, which never lists `.git`,
-so the source `.git` was dropped and a synthetic `yoloai baseline` root commit was
-created. Inside the sandbox `git log`, `git blame`, and `git bisect` showed no
-history, and repo-configured filters (Git LFS, git-crypt) had no config to run. The
-only way to get history was `:copy-all`, which also re-copies gitignored files.
-
-**New behavior:** on a backend whose work-copy git runs in the sandbox's confinement
-(docker/podman/containerd, and tart), `:copy` now CoW-clones the source `.git` into
-the work copy, so history, blame, bisect, and legitimate filters all work. The
-gitignored-file strip is unchanged (gitignored files are still excluded — history and
-gitignore hygiene are orthogonal). On a backend that does not yet confine work-copy
-git (macOS apple/seatbelt), `:copy` automatically falls back to stripping history,
-with a one-line notice, until that confinement lands.
-
-**Rationale:** history/blame/bisect are a recurring need during real work, and
-correct filter behavior requires the real `.git`. Preserving it is safe wherever
-work-copy git is confined (an agent-controlled `.git/config` can only run drivers
-inside the agent's own sandbox, not on the host). The only *new* exposure is secrets
-that were committed and later removed — the already-compromised, rotate-it case.
-
-**Migration:** if a repo has secrets in its history that you have not rotated, opt out
-of history preservation with the `:copy-strict` suffix (`yoloai new ./proj:copy-strict`,
-`-d ./lib:copy-strict`), the `--copy-strict` flag (applies to all `:copy` dirs), or the
-profile `copy_strict: true` key. `:copy-strict` reproduces the previous fresh-baseline
-behavior. Precedence: per-dir suffix > `--copy-strict` flag > profile config.
 
 ### Credential brokering is the default on supported backends (the agent's API key no longer enters the sandbox)
 
