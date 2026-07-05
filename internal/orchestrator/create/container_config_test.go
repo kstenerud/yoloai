@@ -35,7 +35,8 @@ func TestBuildContainerConfig_LaunchPrefixStored(t *testing.T) {
 
 func TestBuildContainerConfig_ValidJSON(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
-	data, err := buildContainerConfig(config.NewLayout(t.TempDir()), agentDef, "claude --dangerously-skip-permissions", "", "default+host", "/Users/test/project", false, false, nil, nil, nil, 0, nil, "test", "", "", false, "", nil, false)
+	layout := config.NewLayout(t.TempDir())
+	data, err := buildContainerConfig(layout, agentDef, "claude --dangerously-skip-permissions", "", "default+host", "/Users/test/project", false, false, nil, nil, nil, 0, nil, "test", "", "", false, "", nil, false)
 	require.NoError(t, err)
 
 	var cfg runtimeconfig.ContainerConfig
@@ -45,8 +46,12 @@ func TestBuildContainerConfig_ValidJSON(t *testing.T) {
 	assert.Equal(t, "claude --dangerously-skip-permissions", cfg.AgentCommand)
 	assert.Equal(t, 3000, cfg.StartupDelay)
 	assert.Equal(t, "Enter Enter", cfg.SubmitSequence)
-	assert.Equal(t, os.Getuid(), cfg.HostUID)
-	assert.Equal(t, os.Getgid(), cfg.HostGID)
+	// The config's host uid/gid come from the Layout (which honors SUDO_UID under
+	// sudo), not the process euid — assert against that source so the test holds
+	// under `sudo make check`, where os.Getuid() is 0 but the Layout carries the
+	// invoking user's uid.
+	assert.Equal(t, layout.HostUID, cfg.HostUID)
+	assert.Equal(t, layout.HostGID, cfg.HostGID)
 	assert.Equal(t, "default+host", cfg.TmuxConf)
 	assert.Equal(t, ".claude", cfg.StateDirName)
 	assert.False(t, cfg.NetworkIsolated)

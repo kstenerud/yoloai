@@ -93,8 +93,11 @@ func layoutForTmpDir(tmpDir string) config.Layout {
 	// Mirror the CLI boundary: thread the host env so credential checks (which
 	// read the Layout, not os.Getenv) see the keys these tests inject via
 	// t.Setenv. The allowlist is every registered agent's API-key/auth-hint vars
-	// — the only env these prepare-flow tests set — never the full ambient env.
-	l = l.WithEnv(testutil.GetCuratedHostEnv(agentCredentialEnvVars()))
+	// plus SUDO_UID — the only env these prepare-flow tests need. SUDO_UID lets
+	// the copy-mode git baseline (host-side git via the Layout) accept a
+	// SUDO_UID-owned work copy under `sudo make check`; without it git rejects the
+	// tree as "dubious ownership". Never the full ambient env.
+	l = l.WithEnv(testutil.GetCuratedHostEnv(append(agentCredentialEnvVars(), "SUDO_UID")))
 	return l
 }
 

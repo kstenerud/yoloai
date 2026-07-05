@@ -28,7 +28,12 @@ import (
 // newLifecycleDeps builds a state.Deps backed by the given mock runtime and
 // a layout rooted at tmpDir/.yoloai — mirrors what the Engine would build.
 func newLifecycleDeps(rt runtime.Backend, tmpDir string) state.Deps {
-	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
+	// Thread SUDO_UID so reset's host-side git re-baseline accepts a SUDO_UID-owned
+	// work copy under `sudo make check`; without it git rejects the tree as "dubious
+	// ownership", the re-baseline fails, and the recopy/wipe silently doesn't
+	// complete. A no-op off-sudo (SUDO_UID absent). git itself is resolved via the
+	// process PATH, so only SUDO_UID needs threading here.
+	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai")).WithEnv(testutil.GetCuratedHostEnv([]string{"SUDO_UID"}))
 	return state.Deps{Runtime: rt, Layout: layout, Input: strings.NewReader("")}
 }
 
