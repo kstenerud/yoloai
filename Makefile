@@ -154,13 +154,40 @@ cover:
 base-image: build
 	./$(BINARY) system build --backend docker
 
+# require-root-for-containerd: fail fast, upfront, when a target runs the
+# containerd/Kata integration suite but isn't root. Kata needs CAP_SYS_ADMIN to
+# create the network namespace, so a non-root run can only end in an opaque
+# "operation not permitted" deep in the suite — stop now with an actionable
+# message instead (the maintainer's rule: a sudo-requiring target must say so, not
+# run-to-inevitable-failure and not silently skip). Linux-only: containerd is
+# Linux-only (the macOS stub TestMain exits 0), and non-Linux hosts need no root
+# here. Skipped when containerd is carved out via YOLOAI_TEST_UNCONTROLLED_BACKENDS
+# — then the backend won't run at all, so root isn't required. $@ is the invoking
+# target, so the suggested commands are exact.
+define require-root-for-containerd
+	@if [ "$$(uname)" = "Linux" ] && [ "$$(id -u)" != "0" ] && \
+	    ! printf '%s' "$$YOLOAI_TEST_UNCONTROLLED_BACKENDS" | tr ',' '\n' | grep -qx containerd; then \
+		echo "ERROR: '$@' includes the containerd/Kata integration suite, which needs root"; \
+		echo "       (CAP_SYS_ADMIN — to create a network namespace). Refusing to run it as a"; \
+		echo "       non-root user, which could only fail deep in the suite."; \
+		echo "  Re-run under sudo, preserving env (credentials + PATH for the Go toolchain):"; \
+		echo "      sudo -E make $@"; \
+		echo "  Or, only on a machine that genuinely cannot provide containerd, carve it out:"; \
+		echo "      YOLOAI_TEST_UNCONTROLLED_BACKENDS=containerd make $@"; \
+		exit 1; \
+	fi
+endef
+
 ## integration: run every backend's integration suite. A platform-possible
 ## backend that's absent FAILS loudly (D112) — never a silent skip; the only
 ## downgrade is the YOLOAI_TEST_UNCONTROLLED_BACKENDS carve-out (CI steps we don't
 ## own), which each backend's TestMain honors itself. Docker is mandatory here: it
 ## drives the cross-cutting sandbox/ and cli/ suites AND builds the base image, so
-## `make base-image` fails loudly if the daemon is absent.
+## `make base-image` fails loudly if the daemon is absent. On Linux this needs root
+## for the containerd/Kata suite (netns); it stops upfront with an actionable error
+## if run non-root (use `sudo -E make integration`, or carve out containerd).
 integration:
+	$(require-root-for-containerd)
 	$(MAKE) base-image
 	go test -tags=integration -v -count=1 -timeout=10m ./internal/orchestrator/ ./runtime/docker/ ./internal/cli/
 	@$(MAKE) integration-containerd integration-apple integration-seatbelt integration-tart
@@ -201,6 +228,7 @@ integration-podman: build
 ## everywhere. On Linux, skipIfNotAvailable skips cleanly when the containerd
 ## socket is absent/unconnectable or the host can't create network namespaces.
 integration-containerd:
+	$(require-root-for-containerd)
 	go test -tags=integration -v -count=1 -timeout=10m ./runtime/containerd/
 
 ## integration-apple: run Apple `container` backend integration tests (requires
