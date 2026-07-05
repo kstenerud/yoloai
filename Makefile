@@ -4,19 +4,18 @@ COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
 DATE    := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)
 
-# Recover the Go toolchain when `sudo make ...` reset PATH to the sudoers
-# secure_path, which typically omits /usr/local/go/bin (where the official
-# installer puts go). Without this, `sudo make releasetest` dies immediately with
-# "go: No such file or directory" even though go is on the invoking user's PATH.
-# Fires ONLY when `go` isn't already resolvable, so a normal non-sudo build is
-# untouched; it searches the common toolchain install dirs. A go installed
-# somewhere exotic (version manager, custom prefix) still needs the explicit
-# `sudo -E PATH="$$PATH" make ...`.
-ifeq ($(shell command -v go 2>/dev/null),)
-GO_TOOLCHAIN_DIR := $(shell for d in /usr/local/go/bin /usr/lib/go/bin /opt/go/bin /snap/bin; do [ -x "$$d/go" ] && { echo "$$d"; break; }; done)
-ifneq ($(GO_TOOLCHAIN_DIR),)
-export PATH := $(GO_TOOLCHAIN_DIR):$(PATH)
-endif
+# Under `sudo make ...`, PATH is reset to the sudoers secure_path, which drops
+# tools installed outside it: the Go toolchain (/usr/local/go/bin) and user-local
+# tools like uv (~/.local/bin). Without recovery, `sudo make releasetest` dies
+# with "go: No such file" or "uv is required". When invoked under sudo (SUDO_USER
+# set), append the Go toolchain dirs plus the INVOKING user's local bins (resolved
+# via SUDO_USER's passwd home, since HOME is /root under sudo) so those tools
+# resolve. Appended, not prepended, so a tool already in secure_path still wins; a
+# non-sudo build is untouched. A tool installed somewhere exotic still needs the
+# explicit `sudo -E PATH="$$PATH" make ...`.
+ifneq ($(SUDO_USER),)
+SUDO_USER_HOME := $(shell getent passwd "$(SUDO_USER)" 2>/dev/null | cut -d: -f6)
+export PATH := $(PATH):/usr/local/go/bin:/usr/lib/go/bin:/opt/go/bin:$(SUDO_USER_HOME)/.local/bin:$(SUDO_USER_HOME)/.cargo/bin:$(SUDO_USER_HOME)/go/bin
 endif
 
 # Python dev tooling lives in a uv-managed venv so mypy/pytest run at
@@ -67,7 +66,7 @@ lint:
 	if [ -n "$$UNFMT" ]; then \
 		echo "gofmt needed:"; echo "$$UNFMT"; exit 1; \
 	fi
-	GOTOOLCHAIN=$(shell go env GOVERSION) go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.3 run ./...
+	GOTOOLCHAIN=$(shell PATH="$(PATH)" go env GOVERSION 2>/dev/null) go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.3 run ./...
 
 tidy-check:
 	@cp go.mod go.mod.bak && cp go.sum go.sum.bak
