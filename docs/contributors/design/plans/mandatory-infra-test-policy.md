@@ -3,10 +3,16 @@
 ABOUTME: Convert every "skip a test/backend when its infra isn't present/running" path to a
 ABOUTME: hard failure on controlled machines; the only carve-out is uncontrolled envs (CI).
 
-Status: **PLAN — not yet implemented.** Authored in a non-nested sandbox that *cannot* run
-the backends, so verification is deferred to a nesting-capable environment (the whole point of
-this policy: this sandbox should *fail* integration/smoke, prompting a rebuild with nesting).
-Implement + verify where the backends can actually run.
+Status: **IMPLEMENTED (A–F) on branch `mandatory-infra-test-policy`; `make check` green.**
+Landed as D112 in six commits (A gates + testutil helper, B/C/F harness+Makefile+tooling, D CI
+carve-out, E docs, plus a unit-test commit). Verified here: `make check` (incl. `vet-tagged`),
+the carve-out decision logic (Go `BackendAbsent`/`UncontrolledBackends` + Python
+`uncontrolled_backends`) via unit tests, and the harness's own tests. **Still pending (needs the
+nesting/macOS environment):** full multi-backend runtime verification — `make integration` /
+`make smoketest` actually *running* (zero skips) on a host with every backend, the deliberate-
+absence FAIL for a backend without a self-heal fallback, and the macOS `GOOS`-guard exit-0 path.
+A live docker-absence test is defeated on any docker-running host by the backend's `dialFirstAlive`
+self-heal (`runtime/docker/docker.go:189`), so it was verified via the decision-logic unit tests.
 
 ## The policy (from the maintainer)
 
