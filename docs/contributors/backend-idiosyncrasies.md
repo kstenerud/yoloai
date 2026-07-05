@@ -78,6 +78,7 @@ inclusion test first, then add a row to the index.
 | `doctor` shows containerd image cache as `?`; `prune --images` leaves devmapper pool blocks used / df unchanged | [containerd: both snapshotters hold a copy](#containerd-both-overlayfs-and-devmapper-snapshotters-hold-a-copy-prune-and-sizing-must-cover-both) |
 | Docker base image reads ~33 GiB on Linux vs ~5 GiB on macOS; `image rm` frees ~0; prune undercounts reclaim | [Docker: containerd store pins layers via build cache](#docker-containerd-image-store-image-rm-frees-no-disk-until-the-build-cache-is-pruned-sdk-spacereclaimed-undercounts) |
 | `prune` dry-run promises to reclaim "volumes" but reports `reclaimed 0 B`; doctor counts the user's own (non-yoloai) volumes | [Docker/Podman: volume prune is anonymous-only; scope to yoloai volumes](#dockerpodman-volume-prune-default-filter-removes-only-anonymous-volumes-reclaim-accounting-must-be-scoped-to-yoloais-own-volumes) |
+| Apple: `container system df` reports `containers.reclaimable: 0` despite a multi-GB build cache; `prune` seems to free nothing | [Apple: build cache lives inside the running builder container](#apple-build-cache-lives-inside-the-running-builder-container-invisible-to-system-dfs-reclaimable-field) |
 | `system prune` finds a different dangling image every run, reclaims 0 B, never converges, even with no builds | [Docker: legacy builder leaves a dangling image per step; build with BuildKit](#docker-legacy-builder-commits-one-dangling-intermediate-image-per-dockerfile-step-build-with-buildkit) |
 | Smoke/`system build` rebuilds `yoloai-base` from scratch every run on Docker Desktop (not OrbStack), though the image is present | [Docker Desktop: ImageInspect transiently NotFounds a present image on the idle containerd store](#docker-desktop-imageinspect-transiently-notfounds-a-present-image-on-the-idle-containerd-store) |
 | Every `new`/`start`/`clone` fails on Docker Desktop (passes on OrbStack/Linux) with `substrate not ready within 30s`; container log skips `entrypoint.keepalive_only`, no `.substrate-ready` | [Docker Desktop: single-file bind mount serves stale content after atomic rename](#docker-desktop-a-single-file-bind-mount-serves-stale-content-after-the-host-atomic-renames-it-keepalive_only-never-reaches-the-entrypoint) |
@@ -2441,6 +2442,30 @@ Seatbelt is single-PTY (the app raws the only PTY) and likewise unaffected.
 **Code:** `runtime/ptybridge/bridge.go` (`WithRemotePTY`, `crStripper`),
 `runtime/apple/apple.go` (`InteractiveExec`). Related: the OPOST/stair-step note
 in the Seatbelt section.
+
+### Apple: build cache lives inside the running builder container, invisible to `system df`'s `reclaimable` field
+
+**Symptom:** `container system df --format json` reports
+`containers.reclaimable: 0` even while a multi-GB BuildKit build cache is
+sitting on disk; there is no `container build cache prune` command to free it.
+
+**Explanation:** Apple's `container` CLI builds images via a long-running
+`buildkit` builder container (`container builder start`, started by yoloai's
+`Setup` on every run). Its accumulated build cache is internal state of that
+running container, which `system df` counts as "active", not "reclaimable" —
+so the reclaimable figure never reflects it, no matter how large the cache
+grows. The only lever that frees it is deleting the builder outright
+(`container builder delete --force`); it is recreated automatically the next
+time `Setup` runs `container builder start`.
+
+**Fix:** `PruneCache` always runs `container builder delete --force` (both
+prune depths) instead of relying on any per-category reclaimable count. Since
+the builder's freed bytes don't show up as "reclaimable" before deletion, the
+prune's honest reclaim figure is measured as the drop in `system df`'s **total**
+`sizeInBytes` (images + containers + volumes) taken before vs. after the whole
+prune sequence, not the `reclaimable` field.
+
+**Code:** `runtime/apple/prune.go` (`PruneCache`, `systemDF`, `reclaimDelta`).
 
 ## Docker: `procReady not received` usually means the container is exiting, not a broken runtime
 
