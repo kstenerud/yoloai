@@ -54,6 +54,14 @@ jobs:
         run: make base-image
 
       - name: Run integration tests
+        # Mandatory-infra policy (D112): a platform-possible backend that's absent
+        # FAILS; the only carve-out is this env, for backends THIS runner genuinely
+        # cannot provision. GitHub-hosted runners give no nested KVM, so the
+        # containerd Kata backend is unprovisionable here — carve it out. Docker
+        # stays mandatory (provisioned on the runner); apple/seatbelt/tart are
+        # macOS-only and self-exclude on Linux via their TestMain GOOS guard.
+        env:
+          YOLOAI_TEST_UNCONTROLLED_BACKENDS: containerd
         run: make integration
 
       - name: Run e2e tests
