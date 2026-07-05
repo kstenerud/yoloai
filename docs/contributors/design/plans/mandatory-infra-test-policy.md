@@ -3,16 +3,23 @@
 ABOUTME: Convert every "skip a test/backend when its infra isn't present/running" path to a
 ABOUTME: hard failure on controlled machines; the only carve-out is uncontrolled envs (CI).
 
-Status: **IMPLEMENTED (A–F) on branch `mandatory-infra-test-policy`; `make check` green.**
-Landed as D112 in six commits (A gates + testutil helper, B/C/F harness+Makefile+tooling, D CI
-carve-out, E docs, plus a unit-test commit). Verified here: `make check` (incl. `vet-tagged`),
-the carve-out decision logic (Go `BackendAbsent`/`UncontrolledBackends` + Python
-`uncontrolled_backends`) via unit tests, and the harness's own tests. **Still pending (needs the
-nesting/macOS environment):** full multi-backend runtime verification — `make integration` /
-`make smoketest` actually *running* (zero skips) on a host with every backend, the deliberate-
-absence FAIL for a backend without a self-heal fallback, and the macOS `GOOS`-guard exit-0 path.
-A live docker-absence test is defeated on any docker-running host by the backend's `dialFirstAlive`
-self-heal (`runtime/docker/docker.go:189`), so it was verified via the decision-logic unit tests.
+Status: **IMPLEMENTED (A–F) + LINUX-VERIFIED on branch `mandatory-infra-test-policy`.**
+Landed as D112 (A gates + testutil helper, B/C/F harness+Makefile+tooling, D CI carve-out, E docs,
+unit tests). **Verified on a fully-provisioned Linux host (docker/podman/gVisor/containerd-Kata,
+/dev/kvm):**
+- `make check` green (incl. `vet-tagged`); carve-out decision logic unit-tested on both layers.
+- `make integration` (non-root, containerd carved) — docker/orchestrator/cli **run + pass, zero
+  skips**; apple/seatbelt/tart structural exit-0 via the `GOOS` guard.
+- **Deliberate-absence FAIL proven on the real containerd gate**: non-root + not-carved →
+  `t.Fatalf` with the D112 message (exit 1); carved → clean skip; root/provisioned → runs + passes.
+  (A live docker-absence test is defeated by `dialFirstAlive` self-heal, `runtime/docker/docker.go:189`
+  — containerd has no self-heal, so it's the honest fail-path proof.)
+- `make smoketest-quick` — real agent, docker core path, `--quick` narrowing correct.
+- `make smoketest` (full matrix, real agents) — **22 passed, 0 failed, 0 skipped** across
+  docker/docker-priv/gVisor/podman/podman-priv/containerd-vm/containerd-vmenhanced.
+
+**Still pending (needs a macOS host):** the macOS side of the `GOOS` guard — apple/seatbelt/tart
+*failing on absence* where the platform can host them (only their Linux exit-0 path was exercised here).
 
 ## The policy (from the maintainer)
 
