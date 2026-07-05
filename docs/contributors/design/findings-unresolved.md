@@ -23,14 +23,6 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 
 ## Findings
 
-### DF72 — containerd/Kata restart (Start after Stop) fails with `ttrpc: closed`
-
-- **Discovered:** 2026-07-05 · **Workstream:** D112 mandatory-infra policy (exposed while running `sudo make integration` for real, not caused by it)
-- **Severity:** MEDIUM (containerd/Kata is not the default backend; no data loss. But it consistently fails `sudo make integration` on a Kata-capable host, and may affect production `yoloai restart` on containerd.)
-- **Disposition:** PARKED
-- **Description:** `TestIntegration_ContainerLifecycle` (`runtime/containerd/integration_test.go:212`) does `Stop` then immediately `Start` (restart) and fails **consistently** (not flaky) with `create task: failed to create shim task: ttrpc: closed`. The Kata shim needs ~500ms to release its TTRPC socket after a task stops (see backend-idiosyncrasies "TTRPC shim socket"), and the immediate re-`Start` races that release. Pre-existing and latent — the test was silently skipped before D112 (containerd needs root for netns, and the old gate `t.Skipf`'d when unprivileged); D112 made it FAIL loudly instead of skip, which surfaced this. Likely fix: the containerd backend's `Start`-after-`Stop` path should wait for / retry on TTRPC-socket release (mirror the existing `runNetnsSidecarWithRetry` bounded-retry pattern), or the test should allow for the socket-release window. Needs a focused containerd-backend investigation; NOT a sudo/git or D112 defect.
-- **Pointer:** `runtime/containerd/integration_test.go:212` (assertion "Restart should succeed"); related: `docs/contributors/backend-idiosyncrasies.md` "TTRPC shim socket" (~L236, L297 "OS needs ~500ms to release the TTRPC socket file").
-
 ### DF67 — Copy-mode work-copy host-git still runs on apple + seatbelt + the broken-metadata probe (DF66 residuals)
 
 - **Discovered:** 2026-06-29 · **Workstream:** DF66 (C1) implementation — host git on the agent-controlled work copy. **Updated 2026-07-04** (added apple; corrected the probe analysis; fsmonitor now globally disabled). Fix designed in [plans/confine-host-side-git.md](plans/confine-host-side-git.md) (+ [macOS build brief](plans/confine-host-side-git-macos-build.md)).

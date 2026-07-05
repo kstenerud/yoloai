@@ -129,6 +129,7 @@ inclusion test first, then add a row to the index.
 | `VM work dir setup: get baseline SHA: exec exited with code 69: You have not agreed to the Xcode license agreements` on Tart `new` (intermittent, passes on retry) | [Tart: transient FS/PATH failure makes tmux unresolvable during the firstlaunch window](#tart-transient-fspath-failure-makes-tmux-unresolvable-during-the-firstlaunch-window) |
 | Smoke test: `stop_start` fails "agent idle"; pane shows `Error: Exit code N` + a clarifying question; other backends pass | [Smoke harness: agent stalls when the sentinel command errors](#agent-stalls-when-the-sentinel-command-errors) |
 | `create task: ... more than one sandbox exists with the provided prefix "..."` (containerd-vm, under concurrency) | [Kata: shim resolves sandboxes by name prefix](#kata-shim-resolves-a-sandbox-from-the-container-id-by-prefix-prefix-related-names-collide) |
+| `create task: failed to create shim task: ttrpc: closed` on **restart** (Stop then Start) of a containerd/Kata sandbox | [containerd: restart must re-create the netns Stop tore down](#containerd-restart-stopstart-must-re-establish-the-netns-that-stop-tore-down) |
 | Is it safe to delete a `.lock` file while holding its flock? (prune / Destroy) | [Removing a .lock file while holding its flock is safe](#removing-a-lock-file-while-holding-its-flock-is-safe) |
 | Tart base build / `tart run` fails with `The number of VMs exceeds the system limit` or VM self-stops at boot, but `tart list` shows nothing running | [Tart: orphaned Virtualization VM processes consume the macOS VM limit](#orphaned-virtualization-vm-processes-survive-a-crashed-tart-run-and-silently-consume-the-macos-vm-limit) |
 | `tart delete <name>` fails with `instance not found` for a VM that exists (e.g. `delete old base: instance not found` during base promote) | [Tart: delete of a running VM reports "instance not found"](#tart-delete-of-a-running-vm-fails-with-a-misleading-instance-not-found-stop-first) |
@@ -2665,3 +2666,32 @@ again"). The block is an `AuthBlocked` plan op (`Plan` calls
 `fileOwnerUID` in `migrate_overlay_unix.go`. Verified on real hardware
 2026-07-01: docker migrate passes end-to-end; podman-rootless refuses cleanly
 with the sandbox state unchanged.
+
+### containerd: restart (Stop→Start) must re-establish the netns that Stop tore down
+
+**Symptom:** restarting a containerd/Kata sandbox — `Stop` then `Start` on the
+same container — fails at task creation with `create task: failed to create shim
+task: ttrpc: closed`. Consistent, not a flake; retrying `NewTask` does **not**
+help (the failure is a missing resource, not a transient one).
+
+**Explanation:** `Create` calls `setupCNI`, which creates a **named** network
+namespace at `/var/run/netns/yoloai-<name>` and pins it into the container's OCI
+spec (`specs.NetworkNamespace{Path: netnsPath}`). `Stop`'s `teardownCNIForSandbox`
+runs CNI DEL and then **deletes that netns**. But `Start` only re-creates the
+task on the existing container — it did *not* re-create the netns. So on a restart
+the Kata shim boots into a netns path that no longer exists, dies during init, and
+containerd surfaces the dropped shim connection as `ttrpc: closed`. (Docker/Podman
+don't hit this: the daemon owns and re-establishes the container's network on
+start; only the containerd backend manages the named netns itself.)
+
+**Fix:** `Start` re-runs `setupCNI` when the netns is absent (guarded on
+`os.Stat(netnsPathFor(name))` so the normal create→start path, where the netns
+still exists, is untouched). The path is deterministic and `setupCNI` is
+idempotent, so re-creating it at the same path satisfies the pinned spec. This
+also re-applies the CNI firewall/isolation rules to the restarted sandbox.
+
+**Code:** `runtime/containerd/lifecycle.go` `Start` (netns-absent → `setupCNI`);
+`netnsNameFor`/`netnsPathFor` in `runtime/containerd/cni.go` are the single source
+of truth for the `yoloai-<name>` netns convention shared by setup and the restart
+check. Regression: `TestIntegration_ContainerLifecycle` (the "Restart should
+succeed" assertion) — was DF72.

@@ -7,6 +7,13 @@ History of codebase findings (issues discovered mid-work) that have been address
 are moved here from [`findings-unresolved.md`](findings-unresolved.md) once resolved, so the
 active file stays a working set. Newest first.
 
+### DF72 — containerd/Kata restart (Start after Stop) fails with `ttrpc: closed` — RESOLVED (Start re-creates the netns)
+
+- **Discovered:** 2026-07-05 · **Workstream:** D112 mandatory-infra policy (exposed while running `sudo make integration` for real, not caused by it)
+- **Severity:** MEDIUM (containerd/Kata is not the default backend; no data loss — but it was a real production bug: `yoloai` restart on containerd would fail identically, not just the test)
+- **Disposition:** **RESOLVED 2026-07-05.** The initial "TTRPC socket needs ~500ms to release; retry it" hypothesis was **wrong** — a bounded retry (5×2s) still failed, because the failure is a *missing resource*, not a transient one. Real cause: `Create` pins a **named netns** (`/var/run/netns/yoloai-<name>`) into the container's OCI spec; `Stop`'s `teardownCNIForSandbox` **deletes** that netns; but `Start` only re-created the task, never the netns — so the Kata shim booted into a non-existent netns path and died, surfacing as `ttrpc: closed`. Fix: `Start` re-runs `setupCNI` when the netns is absent (guarded on `os.Stat(netnsPathFor(name))`, so the normal create→start path is untouched); this also re-applies the CNI firewall/isolation rules on restart. `netnsNameFor`/`netnsPathFor` added as the single source of truth for the `yoloai-<name>` convention. Verified: `TestIntegration_ContainerLifecycle` 3/3 + full containerd suite green under sudo; `make check` green.
+- **Pointer:** `runtime/containerd/lifecycle.go` `Start`; `runtime/containerd/cni.go` `netnsNameFor`/`netnsPathFor`; `docs/contributors/backend-idiosyncrasies.md` "containerd: restart (Stop→Start) must re-establish the netns that Stop tore down".
+
 ### DF65 — `:overlay` grants CAP_SYS_ADMIN → host escape on Docker rootful — RESOLVED (mode removed)
 
 - **Discovered:** 2026-06-29 · **Workstream:** escape/exfil security audit (caps F1 / mount F1)
