@@ -153,6 +153,7 @@ inclusion test first, then add a row to the index.
 | Integration test fails only in CI's Docker job: `t.TempDir` cleanup `unlinkat …/.git/objects/…: permission denied` on podman-written files | [Linux: overlay flatten migration and host-side ownership of container-written state](#linux-overlay-flatten-migration-and-host-side-ownership-of-container-written-state) |
 | arm64 base build: `link: running gcc failed` / `-fuse-ld=gold` / `cannot find 'ld'` | [Base image (trixie): gold linker split out of binutils](#base-image-trixie-gold-linker-is-a-separate-package-arm64-cgo-link-fails) |
 | Base build: `pip install aider-chat` fails `setuptools.build_meta` / installs ancient 0.16.0 | [Base image (trixie): aider needs Python <3.13](#base-image-trixie-aider-chat-does-not-support-python-313-install-it-isolated-on-312-via-uv) |
+| Smoke harness crashes mid-test (flaky): `UnicodeDecodeError: 'utf-8' codec can't decode byte 0xe2 … invalid continuation byte` | [tmux `capture-pane` can slice a multibyte char at the pane edge](#tmux-capture-pane-can-emit-invalid-utf-8-a-multibyte-char-sliced-at-the-pane-edge) |
 
 ---
 
@@ -2786,3 +2787,29 @@ unpinned, and is aider's own recommended install path. Tools/interpreters live u
 system install) once aider supports 3.13.
 
 **Code:** `runtime/docker/resources/Dockerfile` (uv install + `uv tool install aider-chat`).
+
+---
+
+## tmux `capture-pane` can emit invalid UTF-8 (a multibyte char sliced at the pane edge)
+
+**Symptom.** The smoke harness crashes mid-test with `UnicodeDecodeError:
+'utf-8' codec can't decode byte 0xe2 in position N: invalid continuation byte`,
+flakily — the same test passes on a rerun. Seen after Claude Code's TUI grew
+heavier box-drawing/Unicode (`─ ● ❯ ⎿ ✻`).
+
+**Explanation.** `tmux capture-pane -p` renders the pane as a fixed-width
+character grid and emits it cell by cell. A multibyte UTF-8 char (e.g. `─` =
+`E2 94 80`) that lands at the right pane edge, or a wide char straddling the
+wrap column, can be cut so only its lead byte (`0xe2`) survives followed by an
+unrelated byte — an invalid UTF-8 sequence. yoloai embeds such a capture in its
+`--debug`/`--bugreport` snapshot, so any consumer that strict-decodes that
+output chokes. It is inherent to `capture-pane` + terminal wrapping, not our
+code: delete yoloai and the truncated bytes still come out of tmux.
+
+**Fix.** Decode tmux-derived output leniently (`errors="replace"`), never
+strict. The Python smoke harness's command runner does this
+(`scripts/smoke_test.py::Test.run`); Go holds bytes as-is so it doesn't crash,
+but any Go path that does `utf8`-validating work on a capture must tolerate it.
+
+**Code:** `scripts/smoke_test.py` (`Test.run`, `errors="replace"`);
+regression test `scripts/tests/test_smoke_runner.py`.

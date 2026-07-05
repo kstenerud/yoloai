@@ -546,9 +546,16 @@ class Test:
         # and the VM `-it` exec path doesn't fully restore it — leaving the
         # harness's own terminal stair-stepping. These invocations are never
         # interactive, so DEVNULL makes WithTerminal skip all terminal handling.
+        # errors="replace": in --debug mode yoloai embeds a tmux capture-pane
+        # snapshot of the agent TUI in its bugreport/debug output. capture-pane
+        # renders a fixed-width grid and can slice a multibyte char (e.g. Claude
+        # Code's box-drawing ─ ● ❯ ⎿) at the pane edge, emitting a lone 0xe2. A
+        # strict text=True decode then raises UnicodeDecodeError and crashes the
+        # harness mid-test (a flaky "invalid continuation byte"). This is
+        # diagnostic output, so decode leniently rather than fail the run.
         result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout,
-            stdin=subprocess.DEVNULL,
+            cmd, capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=timeout, stdin=subprocess.DEVNULL,
         )
         with self.log_file.open("a") as f:
             f.write(f"$ {' '.join(cmd)}\n")
