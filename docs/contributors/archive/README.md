@@ -26,7 +26,7 @@ This is a tentative first cut — the broader greenfield doc reorg may move more
 - The layering / separation-of-concerns refactor: `layering-refactor`, `soc-refactor`.
 - Shipped feature plans: `config-revamp`, `capability-registry`, `mcp-server`, `bugreport`, `podman-backend`.
 - The architecture-remediation program: `architecture-remediation` (its one release-gated remnant, W1b, lives in `../plans/release-migration.md`).
-- Other completed: `cli-critique-deferred`, `critique-followup` (the 31-finding critique tracker), `vm-isolation-debug`, `smoke-test-redesign`.
+- Other completed: `cli-critique-deferred`, `critique-followup` (the 31-finding critique tracker), `vm-isolation-debug`, `smoke-test-redesign`, `smoke-test-v2` (the base/full smoke-tier design; superseded by D112's strict `smoketest`/`smoketest-quick`).
 - Shipped, drained from the live `../design/plans/` dir: `system-repair-cleanup` (prune/doctor surface), `tagging` (sandbox/workspace tags), `exit-codes` (exit-code taxonomy), `environment-archetypes` (the `archetype/` package), `apple-runtime-caching`, `containerd-runtime` (Phases 0–3 incl. devmapper).
 - `migration-gate` — status-driven startup gate + explicit `yoloai system migrate` (D61; builds on D60's data-dir bifurcation).
 - `crash-safe-migration` — crash-safe `system migrate` framework design (D110): exclusive lock, WAL, per-sandbox atomic commit, stamp-last, OverlayFlatten v3→v4 migrator.
