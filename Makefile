@@ -4,6 +4,21 @@ COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
 DATE    := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)
 
+# Recover the Go toolchain when `sudo make ...` reset PATH to the sudoers
+# secure_path, which typically omits /usr/local/go/bin (where the official
+# installer puts go). Without this, `sudo make releasetest` dies immediately with
+# "go: No such file or directory" even though go is on the invoking user's PATH.
+# Fires ONLY when `go` isn't already resolvable, so a normal non-sudo build is
+# untouched; it searches the common toolchain install dirs. A go installed
+# somewhere exotic (version manager, custom prefix) still needs the explicit
+# `sudo -E PATH="$$PATH" make ...`.
+ifeq ($(shell command -v go 2>/dev/null),)
+GO_TOOLCHAIN_DIR := $(shell for d in /usr/local/go/bin /usr/lib/go/bin /opt/go/bin /snap/bin; do [ -x "$$d/go" ] && { echo "$$d"; break; }; done)
+ifneq ($(GO_TOOLCHAIN_DIR),)
+export PATH := $(GO_TOOLCHAIN_DIR):$(PATH)
+endif
+endif
+
 # Python dev tooling lives in a uv-managed venv so mypy/pytest run at
 # lockfile-pinned versions (requirements-dev.lock), decoupled from whatever
 # ambient `python3 -m mypy` happens to be installed. See setup-dev-python.
