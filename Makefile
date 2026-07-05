@@ -225,6 +225,14 @@ e2e: build
 ##      keep-id), so they are scoped OUT of the docker `integration` job and run
 ##      only here, where podman is the owned+provisioned backend.
 integration-podman: build
+	@if [ "$$(id -u)" = "0" ]; then \
+		echo "ERROR: integration-podman exercises ROOTLESS podman (keep-id, slirp host-loopback),"; \
+		echo "       which is bound to your login session (systemd --user, DBUS, the podman user"; \
+		echo "       socket) — it cannot run as root, and a sudo de-escalation doesn't reproduce"; \
+		echo "       the session (volume mounts fail). Run it directly in your own shell:"; \
+		echo "           make integration-podman        (NOT via sudo / sudo make releasetest)"; \
+		exit 1; \
+	fi
 	@echo "Building base image with Podman..."
 	@./$(BINARY) system build --backend=podman
 	@echo "Running Podman runtime tests..."
@@ -296,17 +304,33 @@ smoketest: build
 smoketest-quick: build
 	python3 scripts/smoke_test.py --quick --debug $(SMOKE_ARGS)
 
-## releasetest: run every test tier, fastest first
-## Runs: lint → unit → integration → e2e → podman integration → full smoke
-## Automatically escalates to root on Linux for smoke tests.
-## The release gate exercises everything the host supports: these exports flip on
-## the heavyweight macOS-VM paths (tart conformance clones a real base VM per
-## subtest; apple builds its real yoloai-base instead of a sleep image). They
-## propagate through the recursive sub-makes; on a host without tart/apple the
-## suites still skip cleanly via TestMain.
+## releasetest: run every test tier, fastest first. Run as YOUR user (NOT sudo):
+##   make releasetest
+## The tiers have mixed privilege needs, so releasetest runs each in its correct
+## one: check / e2e / integration-podman run as you (integration-podman REQUIRES
+## a user session — rootless podman's keep-id/slirp), while integration
+## (containerd/Kata netns) and smoketest (VM backends) escalate to root
+## internally (sudo -E). Running the whole thing under `sudo` would break the
+## rootless-podman tier, which is why this escalates per-tier instead.
+## The exports flip on the heavyweight macOS-VM paths (tart conformance clones a
+## real base VM per subtest; apple builds its real yoloai-base instead of a sleep
+## image); they propagate through the sub-makes (and across sudo -E). On a host
+## without tart/apple the suites still skip cleanly via TestMain.
 releasetest: export YOLOAI_TEST_TART_VM := 1
 releasetest: export YOLOAI_TEST_APPLE_BASE := 1
-releasetest: check integration e2e integration-podman smoketest
+releasetest:
+	@if [ "$$(id -u)" = "0" ]; then \
+		echo "ERROR: run 'make releasetest' as your normal user, NOT via sudo — the"; \
+		echo "       integration-podman tier needs your login session (rootless podman) and"; \
+		echo "       cannot run as root. The root-only tiers escalate themselves."; \
+		exit 1; \
+	fi
+	$(MAKE) check
+	@echo "==> integration needs root (containerd/Kata netns) — escalating for this tier..."
+	sudo -E PATH="$(PATH)" $(MAKE) integration
+	$(MAKE) e2e
+	$(MAKE) integration-podman
+	$(MAKE) smoketest
 
 ## setcap: grant capabilities needed for VM backends (must re-run after each build)
 setcap: build
