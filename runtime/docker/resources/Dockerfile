@@ -1,4 +1,4 @@
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
@@ -7,11 +7,18 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 # with no behavioural benefit. Security updates flow through `apt-get update`,
 # not version bumps. We pin only the components whose behaviour matters (Node,
 # Go, gosu, rustup) further down.
+#
+# binutils-gold: the Go toolchain links cgo binaries with `-fuse-ld=gold` on
+# linux/arm64 (a long-standing BFD-linker workaround). Debian trixie split gold
+# out of the `binutils` package, so without this an arm64 base build fails with
+# "cannot find 'ld'" when go installs golangci-lint. (No-op on amd64, which uses
+# bfd.) See docs/contributors/backend-idiosyncrasies.md.
 # hadolint ignore=DL3008
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tmux \
     git \
     build-essential \
+    binutils-gold \
     cmake \
     clang \
     python3 \
@@ -47,7 +54,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN install -m 0755 -d /etc/apt/keyrings \
     && curl --retry 5 --retry-delay 2 --retry-all-errors -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
     && chmod a+r /etc/apt/keyrings/docker.asc \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian bookworm stable" \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian trixie stable" \
        > /etc/apt/sources.list.d/docker.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -142,15 +149,19 @@ RUN n=0; until [ "$n" -ge 5 ]; do \
       n=$((n+1)); echo "npm install failed (attempt $n/5); retrying in 5s"; sleep 5; \
     done; \
     [ "$n" -lt 5 ] || { echo "npm install failed after 5 attempts"; exit 1; }
-# DL3013 (pin pip versions) suppressed: aider-chat is on the same churn cadence
-# as the npm-installed AI clients above; same reasoning applies.
-# Retry-wrapped for the same reason as the npm and golangci-lint installs.
-# hadolint ignore=DL3013
-RUN n=0; until [ "$n" -ge 5 ]; do \
-      pip install --break-system-packages --no-cache-dir aider-chat && break; \
-      n=$((n+1)); echo "pip install failed (attempt $n/5); retrying in 5s"; sleep 5; \
-    done; \
-    [ "$n" -lt 5 ] || { echo "pip install failed after 5 attempts"; exit 1; }
+# Aider via uv on a bundled Python 3.12. aider-chat pins exact dependency
+# versions and caps requires-python at <3.13, so it cannot install against the
+# base image's system Python (3.13 on trixie) — a plain `pip install` backtracks
+# to an ancient release whose deps fail to build. uv installs aider isolated on
+# its own managed Python 3.12, yielding the *current* aider while keeping it
+# unpinned (this is aider's own recommended install path). Tools + bundled
+# interpreters live under /opt/uv (world-readable for the runtime yoloai user);
+# the `aider` launcher lands in /usr/local/bin. Retry the network fetch like the
+# npm/golangci-lint installs above.
+RUN curl --retry 5 --retry-delay 2 --retry-all-errors -LsSf https://astral.sh/uv/install.sh \
+      | env UV_INSTALL_DIR=/usr/local/bin sh \
+    && UV_TOOL_DIR=/opt/uv/tools UV_TOOL_BIN_DIR=/usr/local/bin UV_PYTHON_INSTALL_DIR=/opt/uv/python \
+       uv tool install --python 3.12 aider-chat
 
 # VS Code CLI for Remote Tunnels (code tunnel)
 RUN ARCH=$(dpkg --print-architecture | sed 's/amd64/x64/') \
