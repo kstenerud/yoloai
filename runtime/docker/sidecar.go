@@ -13,11 +13,27 @@ import (
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/pkg/stdcopy"
 
+	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/runtime"
 )
 
 // compile-time assertion: *Runtime must satisfy NetnsSidecarRunner.
 var _ runtime.NetnsSidecarRunner = (*Runtime)(nil)
+
+// sidecarLabels stamps the canonical com.yoloai.* identity on a netns sidecar so
+// one that crash-leaks past the defer/name cleanup stays an orphan-sweep
+// candidate (runtime.IsOrphanCandidate, D62). Mirrors instanceLabels on the
+// launch path: LabelSandbox always, LabelPrincipal only for a non-default
+// principal. Keyed on the sidecar's OWN name (not the target's), so it never
+// collides with the target's com.yoloai.sandbox label in listings; the sweep
+// still reaps a leak because that name is never in the known-sandboxes set.
+func sidecarLabels(name string, principal config.PrincipalSegment) map[string]string {
+	labels := map[string]string{runtime.LabelSandbox: name}
+	if principal != "" {
+		labels[runtime.LabelPrincipal] = string(principal)
+	}
+	return labels
+}
 
 // RunNetnsSidecar runs spec.Argv in a throwaway container joined to the target's
 // network namespace (--network container:<target>) with the requested
@@ -42,6 +58,7 @@ func (r *Runtime) RunNetnsSidecar(ctx context.Context, spec runtime.NetnsSidecar
 		Image:      image,
 		Entrypoint: spec.Argv, // override the image ENTRYPOINT (entrypoint.sh)
 		Env:        spec.Env,
+		Labels:     sidecarLabels(name, r.principal),
 	}
 	hostConfig := &container.HostConfig{
 		NetworkMode: container.NetworkMode("container:" + spec.Target),
