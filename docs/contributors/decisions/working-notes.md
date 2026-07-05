@@ -1135,6 +1135,20 @@ Only then the **mechanical move**: `runtime` first/with `store`, repoint the fen
 
 **Status.** Linux/cross-platform core implemented + unit-tested (2026-07-04); create/reset/diff/apply E2E on real Docker is pending (the dev sandbox has no daemon). macOS backends auto-strict until confine-host-side-git lands. See [copy-mode-history.md](../design/plans/copy-mode-history.md).
 
+## D112 — Mandatory-infrastructure test policy: an absent platform-possible backend/tool FAILS, never silently skips
+
+**Context.** The test infra quietly undercut DEV §10 / TEST §6 ("never skip a test to land code"). Two layers skipped when platform-possible infrastructure was merely *absent*: every backend's integration `TestMain` returned 0 ("… unavailable, skipping") when its daemon was down, containerd's per-test gate `t.Skipf`'d, `make integration` swallowed Docker absence, and the smoke harness had a lenient base tier that skipped missing backends (only `smoketest-full` failed loudly). A silent skip hides a misconfiguration — a stopped daemon, an absent socket, a sandbox built without nesting — exactly the environment defect the test is there to catch. This is the same failure mode as the `sandbox allowed` bug (the fix there was to make the code backend-free, not to skip).
+
+**Decision (maintainer, 2026-07-05).**
+- **If it's technically possible to run the infrastructure on this machine, running it is mandatory.** Absence/misconfiguration of a platform-possible backend FAILS loudly. The tier selects only *breadth* (which backends are in scope), never skip-vs-fail.
+- **The sole carve-out is `YOLOAI_TEST_UNCONTROLLED_BACKENDS`** — a CSV of backends a runner *we don't own* (e.g. GitHub CI) genuinely cannot provision, applied per-step in the CI we control. A listed backend downgrades to skip on absence; any backend NOT listed stays mandatory even in CI (so an unexpected loss of Docker still fails). The name signals intent, not permission; empty/unset (every dev machine) ⇒ everything mandatory. We do **not** auto-detect `CI`/`GITHUB_ACTIONS`.
+- **Structural impossibility ≠ absence.** A (test × backend) pairing no host change can make runnable (macOS backends on Linux; gVisor honoring iptables) is *excluded from scheduling* or compiled out by build tag — not skipped, and not subject to the carve-out. The macOS `TestMain`s keep a `runtime.GOOS` exit-0 guard on non-darwin for exactly this reason.
+- **One shared helper** (`internal/testutil/uncontrolled.go`): `UncontrolledBackends` (single env read), `BackendAbsent` (TestMain exit code), `RequireBackend` (per-test). The **same env var** governs the Python smoke harness (`uncontrolled_backends()`), so the two layers stay in lockstep.
+- **Smoke tiers renamed:** `smoketest` = the whole OS matrix (strict, root-escalating on Linux; was `smoketest-full`); `smoketest-quick` = the docker/container core path only (strict, no root); `smoketest-full` removed.
+- **Dev tooling (`rsync`/`python3`/`uv`) is required, no carve-out** — it installs everywhere including CI, and the Python surface is app code, so `make check` now requires `uv`; the rsync/python3 test gates FAIL (not skip) on absence.
+
+Supersedes the base-tier smoke-skip and the per-backend "unavailable → skip" gates. Ties to DEV §10 and TEST §6 (which this makes the infra *enforce*). See `docs/contributors/design/plans/mandatory-infra-test-policy.md`.
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.

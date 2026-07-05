@@ -58,12 +58,17 @@ target works on a Linux box or an Apple Silicon Mac.
 | tart | ✓ | ✓ (Mounts skipped — path model, DF29) | `make integration-tart` | mac | macOS + Apple Silicon + tart |
 | seatbelt | ✓ | ✓ (Mounts skipped — path model) | `make integration-seatbelt` | mac | macOS (sandbox-exec) |
 
-**Gating** — each integration package self-skips when its daemon/host is absent
-(`TestMain` for docker/podman/apple/seatbelt/tart, `skipIfNotAvailable` for
-containerd — which probes a real socket connection, not just the socket file). So
-`make integration` runs every backend target and exercises only what the host
-supports. The slow apple base-image build is gated behind `YOLOAI_TEST_APPLE_BASE=1`;
-the slow tart VM clone behind `YOLOAI_TEST_TART_VM=1`.
+**Gating** — a platform-possible backend that's absent FAILS the target loudly
+(D112), never a silent skip: `TestMain` routes through `testutil.BackendAbsent`
+(docker/podman/orchestrator) and `requireAvailable` → `testutil.RequireBackend`
+probes a real socket connection for containerd. The *only* downgrade-to-skip is the
+`YOLOAI_TEST_UNCONTROLLED_BACKENDS` CSV — backends a runner we don't own (GitHub CI)
+genuinely can't provision (e.g. containerd Kata, which needs nested KVM). This is
+distinct from **structural impossibility**: the macOS-only backends (apple/seatbelt/
+tart) are impossible on Linux, so their `TestMain` still exits 0 there via a
+`runtime.GOOS` guard — excluded, not skipped. The slow apple base-image build is
+gated behind `YOLOAI_TEST_APPLE_BASE=1`; the slow tart VM clone behind
+`YOLOAI_TEST_TART_VM=1` (these select *breadth*, not infra-presence).
 
 **Tart conformance** (`TestTartConformance`, gated `YOLOAI_TEST_TART_VM=1`) — tart
 is a participant: each subtest clones+boots a real macOS VM as the sleeper. The
@@ -91,11 +96,14 @@ real mounts run in the smoke matrix). *(The earlier "no separately-startable
 instance" claim was wrong — seatbelt has a real startable, exec-able instance.)*
 
 **Smoke tiers** (`scripts/smoke_test.py`, `HOST_MATRICES`) — one matrix per host
-OS, every backend that OS can run. The tier flag changes only how *missing
-infrastructure* is treated: `make smoketest` SKIPS it (quick dev check),
-`make smoketest-full` FAILS loudly (release gate). A full run is per-OS, so the
-gate is **not** complete until `make releasetest` has passed on every supported
-host OS — the harness prints a reminder naming the others.
+OS, every backend that OS can run. Both tiers are STRICT (D112): a scheduled
+backend that's absent FAILS unless carved out via `YOLOAI_TEST_UNCONTROLLED_
+BACKENDS`. The tier selects only *breadth*: `make smoketest` runs the whole OS
+matrix (release gate; auto-escalates to root on Linux for the VM backends),
+`make smoketest-quick` runs just the docker/container core path (a fast, narrow
+but honest dev signal). A full run is per-OS, so the gate is **not** complete
+until `make releasetest` has passed on every supported host OS — the harness
+prints a reminder naming the others.
 
 **Run tests for a specific package:**
 ```
