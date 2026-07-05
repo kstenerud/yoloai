@@ -3,12 +3,16 @@
 ABOUTME: Close the pre-existing copy-mode RCE surface on backends where work-copy git still
 ABOUTME: runs on the host with filters/textconv/fsmonitor live (apple, seatbelt) + the probe.
 
-Status: **DESIGN — pre-existing security hole, prioritized.** The 2026-06-29 fix
+Status: **IMPLEMENTED (2026-07-05) for apple + seatbelt.** The 2026-06-29 fix
 ([copy-mode-git-rce.md](copy-mode-git-rce.md)) closed the RCE for docker/podman/containerd
 and tart, but left **apple and seatbelt** running work-copy git host-side, and left a
-host-side `git status` in the broken-metadata recovery path on **all** backends. This plan
-closes those. It is the invariant that [copy-mode-history.md](copy-mode-history.md) depends
-on; it should land first or concurrently.
+host-side `git status` in the broken-metadata recovery path on **all** backends. Fix 1
+(apple) and Fix 2 (seatbelt) below are now shipped and verified on real macOS hardware
+(build brief: [confine-host-side-git-macos-build.md](confine-host-side-git-macos-build.md);
+tests: `internal/orchestrator/integration_macos_test.go`,
+`runtime/seatbelt/gitprofile_test.go`). Fix 3 (probe fsmonitor hardening) is done
+cross-platform. This is the invariant that [copy-mode-history.md](copy-mode-history.md)
+depends on.
 
 ## The vulnerability (verified in code, 2026-07)
 
@@ -36,8 +40,12 @@ to in-confinement exec when true, else `hostExec` (`internal/git/git.go:55-61`).
 |---|---|---|---|
 | docker / podman / containerd | ✅ `GitExecInConfinement` | in-container | safe |
 | tart | ✅ `LocalitySandboxSide` | in-VM | safe |
-| **apple** | ❌ | **host-side, filters live** | **RCE — undocumented** |
-| **seatbelt** | ❌ | **host-side, filters live** | **RCE — profile also too loose** |
+| **apple** | ✅ `GitExecInConfinement` (2026-07-05) | in per-container VM | **safe — fixed** |
+| **seatbelt** | ✅ `GitExecInConfinement` (2026-07-05) | host, under a dedicated tight `sandbox-exec` git profile | **safe — fixed** |
+
+*(apple/seatbelt were `❌ host-side, filters live — RCE` before 2026-07-05; apple's was
+undocumented and fully open, seatbelt's compounded by an over-permissive agent profile —
+now bypassed by a dedicated git profile, not the agent one.)*
 
 Plus one path on **all** backends: the broken-metadata recovery probe
 (`status.ProbeWorkData` → `workprobe.DetectChanges`, `internal/orchestrator/status/status.go:135`)
