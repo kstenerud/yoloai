@@ -119,6 +119,20 @@ func (e *Environment) AuxDirs() []DirEnvironment {
 	return e.Dirs[1:]
 }
 
+// MountPaths returns the in-container mount path of every directory (workdir and
+// aux alike). These are the paths the agent sees as project roots — used to
+// pre-accept Claude Code's per-directory folder-trust dialog on (re)seed so the
+// agent never blocks on it. See envsetup.RefreshHomeSeed.
+func (e *Environment) MountPaths() []string {
+	paths := make([]string, 0, len(e.Dirs))
+	for i := range e.Dirs {
+		if e.Dirs[i].MountPath != "" {
+			paths = append(paths, e.Dirs[i].MountPath)
+		}
+	}
+	return paths
+}
+
 // TrackedDirs returns the indices into Dirs of the tracked (copy)
 // entries — those diff/apply operates on. Returns indices (not copies) so
 // callers can write back BaselineSHA via &e.Dirs[i].

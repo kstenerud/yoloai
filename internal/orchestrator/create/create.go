@@ -250,7 +250,7 @@ func prepareSandboxState(ctx context.Context, d state.Deps, opts Options) (*stat
 
 	// Phase 2: Create directory structure and seed sandbox.
 	perms := store.Perms()
-	agentFilesInitialized, err := createAndSeedSandbox(ctx, d, sandboxDir, agentDef, ri.profile, perms, outputFor(opts.Output))
+	agentFilesInitialized, err := createAndSeedSandbox(ctx, d, sandboxDir, agentDef, ri.profile, perms, agentDirMountPaths(workdir, auxDirs), outputFor(opts.Output))
 	if err != nil {
 		return nil, err
 	}
@@ -337,14 +337,24 @@ func resolveProfileAndArchetype(ctx context.Context, d state.Deps, opts *Options
 }
 
 // createAndSeedSandbox creates directory structure and seeds the sandbox with agent files.
-func createAndSeedSandbox(ctx context.Context, d state.Deps, sandboxDir string, agentDef *agent.Definition, pr *profileResult, perms store.IsolationPerms, output io.Writer) (bool, error) {
+func createAndSeedSandbox(ctx context.Context, d state.Deps, sandboxDir string, agentDef *agent.Definition, pr *profileResult, perms store.IsolationPerms, trustPaths []string, output io.Writer) (bool, error) {
 	_ = ctx // reserved for future use
 	if err := createSandboxDirs(sandboxDir, perms); err != nil {
 		return false, err
 	}
-	desc := d.Runtime.Descriptor()
 	spec := envspec.BuildEnvSpec(agentDef)
-	return envsetup.SeedSandbox(spec, sandboxDir, pr.agentFiles, d.Layout.HomeDir, d.Layout, desc.AgentProvisionedByBackend, output)
+	return envsetup.SeedSandbox(spec, sandboxDir, pr.agentFiles, d.Layout.HomeDir, d.Layout, trustPaths, output)
+}
+
+// agentDirMountPaths returns the guest-visible mount paths of the workdir and
+// aux dirs — the absolute paths the agent's cwd resolves to inside the sandbox.
+// Used to pre-accept Claude Code's per-directory folder-trust prompt (SeedSandbox).
+func agentDirMountPaths(workdir *state.DirSpec, auxDirs []*state.DirSpec) []string {
+	paths := []string{workdir.ResolvedMountPath()}
+	for _, ad := range auxDirs {
+		paths = append(paths, ad.ResolvedMountPath())
+	}
+	return paths
 }
 
 // buildConfigAndEnvironment builds the container config and sandbox meta structs.

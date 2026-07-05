@@ -274,8 +274,25 @@ func EnsureContainerSettings(sandboxDir string, patches []SettingsPatch) error {
 // Claude's auto-updater is disabled at the agent layer (DISABLE_AUTOUPDATER in
 // settings.json env, see docs/contributors/design/research/agent-self-update.md),
 // making installMethod inert regardless.
-func ensureHomeSeedConfig(spec EnvSpec, sandboxDir string) error {
-	// Only relevant for agents that seed .claude.json into HomeDir
+// ensureHomeSeedConfig post-processes home-seed/.claude.json (the Claude Code
+// global config seeded into the sandbox HOME): it strips the stale installMethod
+// and pre-accepts the per-directory folder-trust dialog for the agent's dirs.
+//
+// installMethod: the seeded value would record the host's install method (e.g.
+// "native"), a mismatch with how the image installed Claude that triggers spurious
+// PATH/auto-updater warnings; deleting it lets no stale value propagate. (Claude's
+// auto-updater is disabled at the agent layer via DISABLE_AUTOUPDATER, so
+// installMethod is inert regardless.)
+//
+// Folder trust: Claude Code's "Quick safety check: Is this a project you trust?"
+// dialog has NO global disable — trust is strictly per absolute path in
+// projects.<abs-path>.hasTrustDialogAccepted — and yoloai runs `claude`
+// interactively in tmux (not the headless `-p` mode that skips the check), so a
+// fresh workdir prompts every launch and the sandbox stalls with no human to
+// answer. trustPaths are the guest-visible mount paths the agent's cwd resolves
+// to; we pre-accept each. A no-op for agents that don't seed a HomeDir
+// .claude.json (only Claude does).
+func ensureHomeSeedConfig(spec EnvSpec, sandboxDir string, trustPaths []string) error {
 	var hasHomeSeed bool
 	for _, sf := range spec.SeedFiles {
 		if sf.HomeDir && sf.TargetPath == ".claude.json" {
@@ -296,7 +313,52 @@ func ensureHomeSeedConfig(spec EnvSpec, sandboxDir string) error {
 
 	delete(cfg, "installMethod")
 
+	if len(trustPaths) > 0 {
+		projects, _ := cfg["projects"].(map[string]any)
+		if projects == nil {
+			projects = map[string]any{}
+		}
+		for _, p := range trustPaths {
+			if p == "" {
+				continue
+			}
+			entry, _ := projects[p].(map[string]any)
+			if entry == nil {
+				entry = map[string]any{}
+			}
+			entry["hasTrustDialogAccepted"] = true
+			projects[p] = entry
+		}
+		cfg["projects"] = projects
+	}
 	return fileutil.WriteJSONMap(configPath, cfg)
+}
+
+// RefreshHomeSeed is the single canonical (re)seed sequence: copy host seed
+// files into the sandbox, re-apply the container settings patches, then finalize
+// the home config (strip installMethod + pre-accept folder trust for trustPaths).
+// Every path that (re)provisions a sandbox — create, restart, suspended-resume —
+// calls this so a bare CopySeedFiles can never clobber the folder-trust injection
+// by forgetting the finalize step (the second CopySeedFiles at restart used to
+// overwrite the trust-enriched .claude.json with the bare default). Returns
+// whether an auth-only seed file was copied (for the OAuth-expiry warning).
+func RefreshHomeSeed(spec EnvSpec, sandboxDir string, hasAPIKey bool, homeDir string, hostEnv config.Layout, trustPaths []string) (copiedAuth bool, err error) {
+	copiedAuth, err = CopySeedFiles(spec, sandboxDir, hasAPIKey, homeDir, hostEnv)
+	if err != nil {
+		return false, fmt.Errorf("copy seed files: %w", err)
+	}
+	// CopySeedFiles overwrites settings.json with the host version, which lacks
+	// sandbox-specific settings (skipDangerousModePermissionPrompt, tui) — re-apply.
+	if err := EnsureContainerSettings(sandboxDir, spec.SettingsPatches); err != nil {
+		return copiedAuth, fmt.Errorf("ensure container settings: %w", err)
+	}
+	// Ungated: claude runs on every backend, including apple/seatbelt whose image
+	// doesn't provision the agent, and the folder-trust pre-accept is needed there
+	// too. Self-guards via the HomeDir .claude.json check (only Claude seeds it).
+	if err := ensureHomeSeedConfig(spec, sandboxDir, trustPaths); err != nil {
+		return copiedAuth, fmt.Errorf("ensure home seed config: %w", err)
+	}
+	return copiedAuth, nil
 }
 
 // SeedSandbox copies seed files, agent config files, and seeds the home config.
@@ -304,11 +366,11 @@ func ensureHomeSeedConfig(spec EnvSpec, sandboxDir string) error {
 // homeDir is used for ~ expansion in seed file host paths.
 // hostEnv supplies both the agent-credential lookups (HasAnyAPIKey/CopySeedFiles)
 // and, via its curated interpolation map, the ${VAR} expansion in CopyAgentFiles.
-func SeedSandbox(spec EnvSpec, sandboxDir string, agentFiles *config.AgentFilesConfig, homeDir string, hostEnv config.Layout, provisionedByBackend bool, output io.Writer) (agentFilesInitialized bool, err error) {
+func SeedSandbox(spec EnvSpec, sandboxDir string, agentFiles *config.AgentFilesConfig, homeDir string, hostEnv config.Layout, trustPaths []string, output io.Writer) (agentFilesInitialized bool, err error) {
 	hasAPIKey := HasAnyAPIKey(spec, hostEnv)
-	copiedAuth, err := CopySeedFiles(spec, sandboxDir, hasAPIKey, homeDir, hostEnv)
+	copiedAuth, err := RefreshHomeSeed(spec, sandboxDir, hasAPIKey, homeDir, hostEnv, trustPaths)
 	if err != nil {
-		return false, fmt.Errorf("copy seed files: %w", err)
+		return false, err
 	}
 
 	if spec.ShortLivedOAuthWarning && copiedAuth {
@@ -318,21 +380,11 @@ func SeedSandbox(spec EnvSpec, sandboxDir string, agentFiles *config.AgentFilesC
 		fmt.Fprintln(output)                                                                                              //nolint:errcheck // best-effort warning
 	}
 
-	if err := EnsureContainerSettings(sandboxDir, spec.SettingsPatches); err != nil {
-		return false, fmt.Errorf("ensure container settings: %w", err)
-	}
-
 	if agentFiles != nil && spec.HasStateDir {
 		if err := CopyAgentFiles(spec, sandboxDir, agentFiles, homeDir, hostEnv.Env().EnvForConfigInterpolation()); err != nil {
 			return false, fmt.Errorf("copy agent files: %w", err)
 		}
 		agentFilesInitialized = true
-	}
-
-	if provisionedByBackend {
-		if err := ensureHomeSeedConfig(spec, sandboxDir); err != nil {
-			return false, fmt.Errorf("ensure home seed config: %w", err)
-		}
 	}
 
 	return agentFilesInitialized, nil

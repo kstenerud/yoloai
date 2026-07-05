@@ -266,14 +266,13 @@ func handleSuspendedResume(ctx context.Context, d state.Deps, cname, name string
 		return err
 	}
 
-	// Refresh credentials and settings from host (handles token refresh between sessions).
+	// Refresh credentials and settings from host (handles token refresh between
+	// sessions), re-apply container settings, and re-inject folder trust for every
+	// mount path — a bare CopySeedFiles here would clobber the trust pre-accept.
 	spec := envspec.BuildEnvSpec(agentDef)
 	hasAPIKey := envsetup.HasAnyAPIKey(spec, d.Layout)
-	if _, err := envsetup.CopySeedFiles(spec, sandboxDir, hasAPIKey, d.Layout.HomeDir, d.Layout); err != nil {
+	if _, err := envsetup.RefreshHomeSeed(spec, sandboxDir, hasAPIKey, d.Layout.HomeDir, d.Layout, meta.MountPaths()); err != nil {
 		return fmt.Errorf("refresh seed files: %w", err)
-	}
-	if err := envsetup.EnsureContainerSettings(sandboxDir, spec.SettingsPatches); err != nil {
-		return fmt.Errorf("ensure container settings: %w", err)
 	}
 
 	switch {

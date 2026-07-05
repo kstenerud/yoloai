@@ -552,7 +552,7 @@ func TestEnsureHomeSeedConfig_StripsStaleInstallMethod(t *testing.T) {
 	}))
 
 	agentDef := agent.GetAgent("claude")
-	require.NoError(t, ensureHomeSeedConfig(agentSpec(agentDef), sandboxDir))
+	require.NoError(t, ensureHomeSeedConfig(agentSpec(agentDef), sandboxDir, nil))
 
 	cfg, err := fileutil.ReadJSONMap(filepath.Join(homeSeedDir, ".claude.json"))
 	require.NoError(t, err)
@@ -566,7 +566,63 @@ func TestEnsureHomeSeedConfig_NoopForTestAgent(t *testing.T) {
 	agentDef := agent.GetAgent("test")
 
 	// Should not error even with no home-seed dir
-	require.NoError(t, ensureHomeSeedConfig(agentSpec(agentDef), sandboxDir))
+	require.NoError(t, ensureHomeSeedConfig(agentSpec(agentDef), sandboxDir, nil))
+}
+
+// TestEnsureHomeSeedConfig_PreAcceptsFolderTrust verifies that each mount path in
+// trustPaths is written into projects.<path>.hasTrustDialogAccepted, so Claude
+// Code's per-directory folder-trust dialog never blocks the sandbox at launch.
+func TestEnsureHomeSeedConfig_PreAcceptsFolderTrust(t *testing.T) {
+	sandboxDir := t.TempDir()
+	homeSeedDir := filepath.Join(sandboxDir, "home-seed")
+	require.NoError(t, os.MkdirAll(homeSeedDir, 0750))
+	require.NoError(t, fileutil.WriteJSONMap(filepath.Join(homeSeedDir, ".claude.json"), map[string]any{
+		"hasCompletedOnboarding": true,
+	}))
+
+	agentDef := agent.GetAgent("claude")
+	require.NoError(t, ensureHomeSeedConfig(agentSpec(agentDef), sandboxDir, []string{"/work/proj", "/work/aux"}))
+
+	cfg, err := fileutil.ReadJSONMap(filepath.Join(homeSeedDir, ".claude.json"))
+	require.NoError(t, err)
+	projects, ok := cfg["projects"].(map[string]any)
+	require.True(t, ok, "projects map should be present")
+	for _, p := range []string{"/work/proj", "/work/aux"} {
+		entry, ok := projects[p].(map[string]any)
+		require.True(t, ok, "trust entry for %s should be present", p)
+		assert.Equal(t, true, entry["hasTrustDialogAccepted"], "%s should be pre-trusted", p)
+	}
+	// Pre-existing keys must survive.
+	assert.Equal(t, true, cfg["hasCompletedOnboarding"])
+}
+
+// TestRefreshHomeSeed_TrustSurvivesReseed guards the restart-clobber bug: a bare
+// CopySeedFiles rewrites .claude.json to the controlled default (no trust), so the
+// canonical RefreshHomeSeed must re-inject folder trust after every re-copy.
+func TestRefreshHomeSeed_TrustSurvivesReseed(t *testing.T) {
+	sandboxDir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "home-seed"), 0750))
+	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
+
+	spec := agentSpec(agent.GetAgent("claude"))
+	configPath := filepath.Join(sandboxDir, "home-seed", ".claude.json")
+
+	// First seed (create).
+	_, err := RefreshHomeSeed(spec, sandboxDir, true, t.TempDir(), config.Layout{}, []string{"/work/proj"})
+	require.NoError(t, err)
+
+	// Second seed (restart) — the bare CopySeedFiles inside would otherwise clobber
+	// the trust; RefreshHomeSeed must re-inject it.
+	_, err = RefreshHomeSeed(spec, sandboxDir, true, t.TempDir(), config.Layout{}, []string{"/work/proj"})
+	require.NoError(t, err)
+
+	cfg, err := fileutil.ReadJSONMap(configPath)
+	require.NoError(t, err)
+	projects, ok := cfg["projects"].(map[string]any)
+	require.True(t, ok, "projects trust must survive the second reseed")
+	entry, ok := projects["/work/proj"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, true, entry["hasTrustDialogAccepted"])
 }
 
 // HasAnyAuthHint tests

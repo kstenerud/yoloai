@@ -306,3 +306,15 @@ func TestMeta_MigrateV1ToV2(t *testing.T) {
 	assert.NotContains(t, raw, "directories", "legacy directories key must not be written back")
 	assert.Contains(t, raw, "dirs", "new dirs key must be present")
 }
+
+func TestEnvironment_MountPaths(t *testing.T) {
+	e := &Environment{Dirs: []DirEnvironment{
+		{HostPath: "/h/proj", MountPath: "/tmp/proj"},
+		{HostPath: "/h/aux", MountPath: "/tmp/aux"},
+		{HostPath: "/h/nomount", MountPath: ""}, // skipped
+	}}
+	assert.Equal(t, []string{"/tmp/proj", "/tmp/aux"}, e.MountPaths())
+
+	// Empty environment yields an empty (non-nil is fine) slice.
+	assert.Empty(t, (&Environment{}).MountPaths())
+}

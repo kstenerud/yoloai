@@ -264,10 +264,17 @@ var agents = map[string]*Definition{
 		SeedFiles: []SeedFile{
 			{HostPath: "~/.claude/.credentials.json", TargetPath: ".credentials.json", AuthOnly: true, KeychainService: "Claude Code-credentials"},
 			{HostPath: "~/.claude/settings.json", TargetPath: "settings.json"},
-			// Default to an empty JSON object when the host has no ~/.claude.json:
-			// Claude Code treats an empty/0-byte file as corrupted (logs a scary
-			// "config corrupted" warning and backs it up). A real host file wins.
-			{HostPath: "~/.claude.json", TargetPath: ".claude.json", Content: []byte("{}\n"), HomeDir: true},
+			// Seed a minimal ~/.claude.json that marks first-run onboarding complete
+			// so Claude Code doesn't stall the sandbox on its onboarding dialogs
+			// (theme picker → security notes → "is this folder trusted?"). We do NOT
+			// copy the host ~/.claude.json: (1) it carries the user's projects,
+			// history, and MCP config, which shouldn't leak into an isolated sandbox;
+			// and (2) it records a `lastOnboardingVersion` that, once the *unpinned*
+			// Claude in the base image updates past it, re-triggers the whole
+			// onboarding flow even with hasCompletedOnboarding=true. A high sentinel
+			// version keeps onboarding suppressed across Claude updates. (Claude reads
+			// an empty/0-byte file as corrupted and backs it up, hence a real object.)
+			{TargetPath: ".claude.json", Content: []byte(`{"hasCompletedOnboarding":true,"lastOnboardingVersion":"99.0.0"}` + "\n"), HomeDir: true},
 			// statusLine script referenced by settings.json; Claude Code execs it
 			// by path, so it must keep the exec bit (Executable → 0700).
 			{HostPath: "~/.claude/statusline.sh", TargetPath: "statusline.sh", Executable: true},

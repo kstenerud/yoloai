@@ -124,18 +124,13 @@ func recreateContainer(ctx context.Context, d state.Deps, name string, meta *sto
 
 	sandboxDir := d.Layout.SandboxDir(name)
 
-	// Refresh seed files from host (handles OAuth token refresh between restarts)
+	// Refresh seed files from host (handles OAuth token refresh between restarts),
+	// re-apply container settings, and re-inject folder trust for every mount path
+	// — a bare CopySeedFiles here would otherwise clobber the trust pre-accept.
 	spec := envspec.BuildEnvSpec(agentDef)
 	hasAPIKey := envsetup.HasAnyAPIKey(spec, d.Layout)
-	if _, err := envsetup.CopySeedFiles(spec, sandboxDir, hasAPIKey, d.Layout.HomeDir, d.Layout); err != nil {
+	if _, err := envsetup.RefreshHomeSeed(spec, sandboxDir, hasAPIKey, d.Layout.HomeDir, d.Layout, meta.MountPaths()); err != nil {
 		return fmt.Errorf("refresh seed files: %w", err)
-	}
-
-	// Re-apply container settings (copySeedFiles overwrites settings.json
-	// with the host version, which lacks sandbox-specific settings like
-	// skipDangerousModePermissionPrompt)
-	if err := envsetup.EnsureContainerSettings(sandboxDir, spec.SettingsPatches); err != nil {
-		return fmt.Errorf("ensure container settings: %w", err)
 	}
 
 	// Copy agent_files if not yet initialized (e.g., sandbox created before
