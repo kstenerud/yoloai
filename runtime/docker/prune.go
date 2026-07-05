@@ -345,7 +345,19 @@ func (r *Runtime) splitCacheBytes(du types.DiskUsage) (cached, images int64) {
 		images = du.LayersSize
 	}
 	for _, ct := range du.Containers {
-		cached += ct.SizeRw
+		if ct == nil {
+			continue
+		}
+		// Only stopped containers are reclaimable: ContainersPrune (in PruneCache)
+		// removes containers in the created/exited/dead states and leaves running,
+		// paused, and restarting ones alone. Counting a live container's writable
+		// layer promised a reclaim the prune could never deliver — the estimate
+		// stayed put and every run reported "reclaimed 0 B" (the same in-use
+		// mismatch the image-layer blocker warning covers for du.LayersSize).
+		switch ct.State {
+		case container.StateCreated, container.StateExited, container.StateDead:
+			cached += ct.SizeRw
+		}
 	}
 	for _, v := range du.Volumes {
 		if _, ok := v.Labels[managedLabel]; !ok {

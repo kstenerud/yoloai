@@ -39,7 +39,7 @@ func TestSplitCacheBytes_ImageBytesFuncOverride(t *testing.T) {
 	r.SetImageBytesFunc(func(types.DiskUsage) int64 { return 7 * gib })
 	du := types.DiskUsage{
 		LayersSize: 0, // would be the image total without the override
-		Containers: []*container.Summary{{SizeRw: 42}},
+		Containers: []*container.Summary{{SizeRw: 42, State: container.StateExited}},
 	}
 	cached, images := r.splitCacheBytes(du)
 	assert.Equal(t, int64(42), cached)
@@ -60,13 +60,33 @@ func yoloaiVol(size int64) *volume.Volume {
 func TestSplitCacheBytes_NonImageUsageIsCachedTier(t *testing.T) {
 	du := types.DiskUsage{
 		LayersSize: 5 * gib,
-		Containers: []*container.Summary{{SizeRw: 100}, {SizeRw: 200}},
+		Containers: []*container.Summary{
+			{SizeRw: 100, State: container.StateExited},
+			{SizeRw: 200, State: container.StateDead},
+		},
 		Volumes:    []*volume.Volume{yoloaiVol(50)},
 		BuildCache: []*build.CacheRecord{{Size: 25}},
 	}
 	cached, images := (&Runtime{}).splitCacheBytes(du)
 	assert.Equal(t, int64(100+200+50+25), cached)
 	assert.Equal(t, 5*gib, images)
+}
+
+// Regression: a running (or paused/restarting) container's writable layer must
+// NOT count toward the reclaimable estimate — ContainersPrune leaves it alone,
+// so counting it promised a reclaim the prune never delivered and every run
+// reported "reclaimed 0 B" against an estimate that never dropped.
+func TestSplitCacheBytes_ExcludesLiveContainers(t *testing.T) {
+	du := types.DiskUsage{
+		Containers: []*container.Summary{
+			{SizeRw: 1000, State: container.StateRunning},
+			{SizeRw: 2000, State: container.StatePaused},
+			{SizeRw: 3000, State: container.StateRestarting},
+			{SizeRw: 42, State: container.StateExited}, // only this one is reclaimable
+		},
+	}
+	cached, _ := (&Runtime{}).splitCacheBytes(du)
+	assert.Equal(t, int64(42), cached)
 }
 
 // Regression: volumes yoloai didn't create (no managedLabel) — e.g. a user's
