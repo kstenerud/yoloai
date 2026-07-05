@@ -33,6 +33,108 @@ func GenerateProfile(cfg runtime.InstanceConfig, sandboxDir, homeDir string) str
 	return b.String()
 }
 
+// GenerateGitProfile builds a DEDICATED, tight SBPL profile for running a single
+// work-copy git operation under sandbox-exec (audit C1 / confine-host-side-git).
+// It is deliberately NOT the agent profile: git needs far less than a coding
+// agent, so it is locked down hard without risking agent functionality.
+//
+// The containment guarantees, all verified empirically on macOS 26:
+//   - deny default; mach-lookup is left denied (the primary sandbox-escape
+//     vector). git, its clean/textconv filters, and git-lfs all run fine with no
+//     mach service — no allowlist is needed.
+//   - file-WRITE is scoped to the work copy (which includes its .git) ONLY, so a
+//     malicious filter.<x>.clean cannot write a marker outside the work tree
+//     (not to /tmp, not to the per-user temp, not to $HOME). git needs no
+//     external writable temp for status/add/diff/format-patch.
+//   - process-exec is allowed ONLY within tool directories (system bins, the
+//     toolchain's git-core, and the Homebrew prefix for git-lfs/git-crypt), so a
+//     payload the filter drops into the work copy or /tmp cannot be exec'd.
+//
+// This bounds a malicious filter to container-equivalent blast radius: it can run
+// installed tools and read/write the work copy, but cannot escape to the host.
+//
+// toolchainExecDir is the resolved toolchain prefix (e.g. an Xcode/CLT Developer
+// dir) whose usr/libexec/git-core holds git's own subcommands; pass "" when git
+// lives under an already-listed prefix (e.g. Homebrew). workCopyPath is the
+// on-host work copy git runs against; homeDir is the user's real $HOME (for the
+// global git config, read-only).
+func GenerateGitProfile(workCopyPath, homeDir, toolchainExecDir string) string {
+	var b strings.Builder
+
+	b.WriteString("(version 1)\n")
+	b.WriteString("(deny default)\n\n")
+
+	// Process exec/fork: tool directories only. A payload dropped in the work
+	// copy or a temp dir is NOT here, so it cannot be exec'd.
+	b.WriteString("; Process exec/fork — tool directories only (git-core, filters, git-lfs)\n")
+	b.WriteString("(allow process-fork)\n")
+	b.WriteString("(allow process-exec\n")
+	for _, p := range gitExecPaths(toolchainExecDir) {
+		fmt.Fprintf(&b, "    (subpath %q)\n", p)
+	}
+	b.WriteString(")\n\n")
+
+	// mach-lookup is intentionally NOT allowed (deny default covers it). It is
+	// the primary sandbox-escape vector and git/filters/git-lfs do not need it.
+
+	b.WriteString("; System info + root listing\n")
+	b.WriteString("(allow sysctl-read)\n")
+	b.WriteString("(allow file-read-metadata)\n")
+	b.WriteString("(allow file-read* (literal \"/\"))\n\n")
+
+	b.WriteString("; System libraries, frameworks, toolchain, and git config (read-only)\n")
+	for _, path := range systemReadPaths() {
+		for _, p := range resolvePathVariants(path) {
+			fmt.Fprintf(&b, "(allow file-read* (subpath %q))\n", p)
+		}
+	}
+	if toolchainExecDir != "" {
+		for _, p := range resolvePathVariants(toolchainExecDir) {
+			fmt.Fprintf(&b, "(allow file-read* (subpath %q))\n", p)
+		}
+	}
+	for _, p := range resolvePathVariants(filepath.Join(homeDir, ".gitconfig")) {
+		fmt.Fprintf(&b, "(allow file-read* (literal %q))\n", p)
+	}
+	for _, p := range resolvePathVariants(filepath.Join(homeDir, ".config", "git")) {
+		fmt.Fprintf(&b, "(allow file-read* (subpath %q))\n", p)
+	}
+	b.WriteString("\n")
+
+	// The work copy + its .git are the ONLY writable location. This is the
+	// containment boundary: a filter payload can write here (container-equivalent)
+	// but nowhere else on the host.
+	b.WriteString("; The work copy (+ its .git) — the ONLY writable host location\n")
+	for _, p := range resolvePathVariants(workCopyPath) {
+		fmt.Fprintf(&b, "(allow file-read* file-write* (subpath %q))\n", p)
+	}
+	b.WriteString("\n")
+
+	b.WriteString("; Character devices git needs\n")
+	b.WriteString("(allow file-read* file-write* (literal \"/dev/null\") (literal \"/dev/zero\"))\n")
+	b.WriteString("(allow file-read* file-write* (literal \"/dev/random\") (literal \"/dev/urandom\"))\n")
+	b.WriteString("(allow file-ioctl (literal \"/dev/null\"))\n")
+
+	return b.String()
+}
+
+// gitExecPaths returns the directories process-exec is allowed within for the
+// git profile: system bin/libexec dirs, the Homebrew prefix (git-lfs, git-crypt,
+// and other filter tools), and the resolved toolchain prefix (Xcode/CLT) whose
+// usr/libexec/git-core holds git's own subcommands. Everything else — the work
+// copy, temp dirs — is deliberately excluded so a dropped payload cannot run.
+func gitExecPaths(toolchainExecDir string) []string {
+	paths := []string{
+		"/usr/bin", "/bin", "/usr/sbin", "/sbin",
+		"/usr/libexec",  // git-core when git is the /usr shim's target
+		"/opt/homebrew", // arm64 Homebrew prefix: git-lfs, git-crypt, filter tools
+	}
+	if toolchainExecDir != "" {
+		paths = append(paths, toolchainExecDir)
+	}
+	return paths
+}
+
 // writeProfileHeader writes process, system-info, and IPC rules.
 func writeProfileHeader(b *strings.Builder) {
 	b.WriteString("; Process execution and signals\n")

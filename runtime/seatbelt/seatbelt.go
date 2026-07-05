@@ -40,6 +40,11 @@ var descriptor = runtime.BackendDescriptor{
 		HostFilesystem:     true,
 		FilesystemLocality: runtime.LocalityHostSide,
 		KeepAliveModel:     runtime.KeepAliveHostKeepAlive,
+		// Run copy-mode work-copy git under a dedicated tight sandbox-exec profile
+		// (audit C1). Seatbelt has no container to exec into, so "in confinement"
+		// means wrapping git itself in SBPL so any filter it spawns inherits the
+		// confinement and cannot execute on the host. See GitExec + GenerateGitProfile.
+		GitExecInConfinement: true,
 	},
 	Probe:         probe,
 	VersionString: func(_ context.Context) string { return "built-in" },
@@ -108,6 +113,7 @@ type Runtime struct {
 var _ runtime.Backend = (*Runtime)(nil)
 var _ runtime.CopyMountResolver = (*Runtime)(nil)
 var _ runtime.InteractiveSession = (*Runtime)(nil)
+var _ runtime.GitExecer = (*Runtime)(nil)
 
 // Descriptor returns a BackendDescriptor with the static facts for this backend.
 func (r *Runtime) Descriptor() runtime.BackendDescriptor {
@@ -474,6 +480,112 @@ func (r *Runtime) InteractiveExec(_ context.Context, name string, cmd []string, 
 	sandboxPath := filepath.Join(r.layout.SandboxesDir(), sandboxName(name))
 	execCmd := r.buildExecCommand(sandboxPath, cmd)
 	return ptybridge.Exec(execCmd, streams)
+}
+
+// GitExec runs a copy-mode work-copy git command on the host under a DEDICATED,
+// tight sandbox-exec SBPL profile (audit C1 / confine-host-side-git). Seatbelt
+// has no VM/container to exec into, so confinement is achieved by wrapping git
+// itself: `sandbox-exec -f <gitProfile> <realGit> <hardening> -C <workDir>
+// <args>`. Every filter/textconv/fsmonitor driver git spawns inherits the
+// profile, so an agent-planted .git/config driver is bounded to
+// container-equivalent blast radius (run installed tools + read/write the work
+// copy) and cannot escape to the macOS host. GenerateGitProfile documents the
+// exact containment rules; do NOT reuse the permissive agent profile here.
+//
+// Contract matches the container backends: stdout is returned UNTRIMMED (patches
+// are whitespace-sensitive) and a non-zero exit becomes a *runtime.ExecError
+// carrying stderr. Unlike those backends it does NOT require the sandbox
+// keep-alive process to be running — the work copy is a plain host directory and
+// the git profile is self-contained — so diff/apply of a stopped seatbelt
+// sandbox still works, matching the prior host-git behavior.
+//
+// workDir is the on-host work copy path (seatbelt's ResolveCopyMount target, which
+// git.confinementWorkPath resolves to the dir's MountPath). user is ignored: git
+// runs as the host user, which owns the copy.
+func (r *Runtime) GitExec(ctx context.Context, name, _, workDir string, args ...string) (string, error) {
+	gitBin, toolchainExecDir := resolveGitBinary(ctx, r.execEnv)
+
+	profile := GenerateGitProfile(workDir, r.homeDir, toolchainExecDir)
+	profilePath, cleanup, err := r.writeGitProfile(name, profile)
+	if err != nil {
+		return "", err
+	}
+	defer cleanup()
+
+	sbArgs := []string{"-f", profilePath, gitBin}
+	sbArgs = append(sbArgs, runtime.GitHardeningArgs()...)
+	sbArgs = append(sbArgs, "-C", workDir)
+	sbArgs = append(sbArgs, args...)
+
+	// RunCmdExecRaw (not RunCmdExec) so git's exact bytes survive — trimming would
+	// corrupt patches. sandbox-exec forwards the child's stdout/stderr verbatim.
+	// r.execEnv (EnvForSeatbeltExec) carries PATH (to find git-lfs and other filter
+	// tools), HOME (the global git config, allowed read-only in the profile), and
+	// TMPDIR — the superset git needs; dubious-ownership is handled by the git
+	// package's safe.directory arg, so SUDO_UID is not required here.
+	c := sysexec.CommandContext(ctx, r.execEnv, r.sandboxExecBin, sbArgs...)
+	res, err := runtime.RunCmdExecRaw(c)
+	return res.Stdout, err
+}
+
+// resolveGitBinary returns the real git binary to run under the git profile plus
+// the toolchain prefix (Xcode/CLT Developer dir) whose usr/libexec/git-core holds
+// git's subcommands, or "" when git lives under an already-allowed prefix.
+//
+// /usr/bin/git is Apple's xcrun SHIM: it re-invokes xcrun/xcodebuild, which needs
+// the per-user temp dir and mach-lookup — neither of which the tight git profile
+// grants — so the shim cannot run confined. `xcrun -f git` resolves the real
+// binary in the active toolchain, bypassing the shim. Falls back to PATH lookup
+// only if xcrun is unavailable (a system without developer tools, where git would
+// not be a satisfied prerequisite anyway).
+func resolveGitBinary(ctx context.Context, env []string) (gitBin, toolchainExecDir string) {
+	if out, err := sysexec.CommandContext(ctx, env, "xcrun", "-f", "git").Output(); err == nil {
+		if p := strings.TrimSpace(string(out)); p != "" {
+			gitBin = p
+		}
+	}
+	if gitBin == "" {
+		if p, err := exec.LookPath("git"); err == nil {
+			gitBin = p
+		} else {
+			gitBin = "git"
+		}
+	}
+	// A toolchain git lives at <prefix>/usr/bin/git; its git-core is at
+	// <prefix>/usr/libexec/git-core, so the profile must allow exec under <prefix>.
+	// A Homebrew git (/opt/homebrew/bin/git) is already covered by the /opt/homebrew
+	// exec grant, so no extra prefix is needed there.
+	if strings.HasSuffix(gitBin, "/usr/bin/git") {
+		toolchainExecDir = strings.TrimSuffix(gitBin, "/usr/bin/git")
+	}
+	return gitBin, toolchainExecDir
+}
+
+// writeGitProfile writes the per-op git SBPL profile to a temp file and returns
+// its path plus a cleanup func. A per-op file (not a stable path) avoids racing
+// concurrent git ops on the same sandbox; sandbox-exec reads it as the host user
+// before confining, so it need not be inside the profile's allowed paths.
+func (r *Runtime) writeGitProfile(name, profile string) (path string, cleanup func(), err error) {
+	noop := func() {}
+	dir := filepath.Join(r.layout.SandboxesDir(), sandboxName(name), backendDir)
+	f, err := os.CreateTemp(dir, "git-profile-*.sb")
+	if err != nil {
+		if f, err = os.CreateTemp("", "yoloai-git-profile-*.sb"); err != nil {
+			return "", noop, fmt.Errorf("create git sandbox profile: %w", err)
+		}
+	}
+	path = f.Name()
+	cleanup = func() { _ = os.Remove(path) }
+	if _, werr := f.WriteString(profile); werr != nil {
+		_ = f.Close()
+		cleanup()
+		return "", noop, fmt.Errorf("write git sandbox profile: %w", werr)
+	}
+	if cerr := f.Close(); cerr != nil {
+		cleanup()
+		return "", noop, fmt.Errorf("close git sandbox profile: %w", cerr)
+	}
+	return path, cleanup, nil
 }
 
 // Close is a no-op for seatbelt (no persistent connection).
