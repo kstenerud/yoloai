@@ -15,6 +15,7 @@ import (
 
 	"github.com/kstenerud/yoloai/copyflow"
 	"github.com/kstenerud/yoloai/internal/agent"
+	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/git"
 	"github.com/kstenerud/yoloai/internal/orchestrator"
 	"github.com/kstenerud/yoloai/internal/orchestrator/agentcfg"
@@ -517,6 +518,18 @@ func TestIntegration_CopyModeMaliciousFilterNoHostExec_Podman(t *testing.T) {
 	assertMaliciousFilterNotRunOnHost(ctx, t, mgr, "evilfilter-podman")
 }
 
+// plantWorkFile writes name into a copy-mode work copy and, under `sudo make
+// integration`, chowns it to the invoking user (SUDO_UID). The surrounding work
+// copy is already SUDO_UID-owned, and the in-sandbox git that stages it runs as
+// that user; a root-owned 0600 file planted by the test would be unreadable to it
+// ("Permission denied" during git add). A no-op off-sudo.
+func plantWorkFile(t *testing.T, dir, name, content string) {
+	t.Helper()
+	p := filepath.Join(dir, name)
+	require.NoError(t, os.WriteFile(p, []byte(content), 0600))
+	require.NoError(t, fileutil.ChownIfSudo(p))
+}
+
 // assertMaliciousFilterNotRunOnHost creates+starts a copy-mode sandbox, plants a
 // clean filter whose payload touches a host-only marker path, stages via
 // GenerateDiff, and asserts the host marker never appears — proving the filter
@@ -551,8 +564,8 @@ func assertMaliciousFilterNotRunOnHost(ctx context.Context, t *testing.T, mgr *o
 	// "did the host file appear".
 	require.NoError(t, hg.RunCmd(ctx, workDir, "config", "filter.pwn.clean",
 		fmt.Sprintf("sh -c 'touch %s 2>/dev/null; cat'", hostMarker)))
-	require.NoError(t, os.WriteFile(filepath.Join(workDir, ".gitattributes"), []byte("evil.txt filter=pwn\n"), 0600))
-	require.NoError(t, os.WriteFile(filepath.Join(workDir, "evil.txt"), []byte("content\n"), 0600))
+	plantWorkFile(t, workDir, ".gitattributes", "evil.txt filter=pwn\n")
+	plantWorkFile(t, workDir, "evil.txt", "content\n")
 
 	// GenerateDiff stages the tree (`git add -A`) — the clean filter fires here.
 	_, err = copyflow.GenerateDiff(ctx, copyflow.DiffOptions{Name: name, Layout: mgr.Layout(), Runtime: mgr.Runtime()})
@@ -588,8 +601,8 @@ func TestIntegration_CopyModeLegitFilterDiffCorrect(t *testing.T) {
 
 	hg := git.NewTestHostWithEnv(testutil.GitEnv())
 	require.NoError(t, hg.RunCmd(ctx, workDir, "config", "filter.redact.clean", "sed 's/PLAINTEXT/REDACTED/g'"))
-	require.NoError(t, os.WriteFile(filepath.Join(workDir, ".gitattributes"), []byte("secret.txt filter=redact\n"), 0600))
-	require.NoError(t, os.WriteFile(filepath.Join(workDir, "secret.txt"), []byte("api_key = PLAINTEXT\n"), 0600))
+	plantWorkFile(t, workDir, ".gitattributes", "secret.txt filter=redact\n")
+	plantWorkFile(t, workDir, "secret.txt", "api_key = PLAINTEXT\n")
 
 	diffResult, err := copyflow.GenerateDiff(ctx, copyflow.DiffOptions{Name: "legitfilter", Layout: mgr.Layout(), Runtime: mgr.Runtime()})
 	require.NoError(t, err)

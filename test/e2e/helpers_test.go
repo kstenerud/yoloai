@@ -46,7 +46,12 @@ func sutEnv() []string {
 // flags, cross-compile target), never the full ambient env (DEV §12).
 func goBuildEnv() []string {
 	vars := []string{
-		"PATH", "HOME", "TMPDIR",
+		// SUDO_UID lets `go build`'s VCS stamping run git in this repo under
+		// `sudo make e2e`: git runs as root against a work tree owned by the
+		// invoking user, and needs SUDO_UID to accept it instead of failing its
+		// dubious-ownership guard ("error obtaining VCS status: exit status 128").
+		// Absent off-sudo, so it is a no-op there. Mirrors sysexec.GitEnv.
+		"PATH", "HOME", "TMPDIR", "SUDO_UID",
 		"GOPATH", "GOCACHE", "GOMODCACHE", "GOROOT", "GOBIN",
 		"GOFLAGS", "GOPROXY", "GOPRIVATE", "GONOSUMCHECK", "GONOSUMDB", "GOSUMDB", "GOINSECURE",
 		"GOTOOLCHAIN", "GO111MODULE", "GOOS", "GOARCH", "GOARM", "GOAMD64", "GOEXPERIMENT",

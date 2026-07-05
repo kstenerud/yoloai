@@ -418,6 +418,18 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 	}
 	removeKataStateDir(r.namespace, name)
 
+	// Re-establish the network namespace if a prior Stop tore it down. The
+	// container's OCI spec pins a named netns (netnsPathFor(name), set at Create);
+	// Stop's teardownCNI deletes that netns, so on a restart (Stop → Start) the
+	// Kata shim would boot into a missing netns path and die with "ttrpc: closed"
+	// (DF72). setupCNI recreates it at the same deterministic path. Guarded on
+	// absence so the normal create→start path (netns still present) is untouched.
+	if _, statErr := os.Stat(netnsPathFor(name)); errors.Is(statErr, os.ErrNotExist) {
+		if _, err := setupCNI(ctx, r.execEnv, r.layout, r.sandboxDirForName(name), name); err != nil {
+			return fmt.Errorf("re-establish network namespace for restart: %w", err)
+		}
+	}
+
 	// Create task with null IO — agent logs go to bind-mounted log.txt.
 	task, err := createTaskWithRetry(ctx, ctr)
 	if err != nil {

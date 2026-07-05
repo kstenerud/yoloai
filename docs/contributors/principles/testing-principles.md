@@ -194,7 +194,9 @@ Originally established alongside D19 (W3–W6 of the architecture remediation ma
 
 ### Pattern
 
-Threshold: any test that crosses the `runtime.Backend` boundary requires a real backend instance. Skip with `t.Skipf` if the backend isn't available locally; mark with the `integration` build tag so unit-test runs don't require backends. Cross-backend tests are parametrised over the backend (W5), not duplicated per backend.
+Threshold: any test that crosses the `runtime.Backend` boundary requires a real backend instance. Mark it with the `integration` build tag so unit-test runs don't require backends. Cross-backend tests are parametrised over the backend (W5), not duplicated per backend.
+
+**Absence of a platform-possible backend FAILS — never a silent skip (D112).** If it's technically possible to run the backend on this machine, running it is *mandatory*: a stopped daemon, an absent socket, or a sandbox built without nesting is a misconfiguration to fix, and a `t.Skip` hides it (this is the exact line that once misled a skip mistake — the fix was to make `sandbox allowed` backend-free, not to skip). Route the gate through `testutil.BackendAbsent` (in `TestMain`) or `testutil.RequireBackend` (per-test) so absence is a hard failure. The *only* carve-out is `YOLOAI_TEST_UNCONTROLLED_BACKENDS`, a CSV of backends a runner we don't own (e.g. GitHub CI) genuinely cannot provision; a listed backend downgrades to skip, everything else stays mandatory. This is distinct from **structural impossibility** — a (test × backend) pairing no host change can make runnable (tart/seatbelt on Linux) — which is *excluded from scheduling* or compiled out by build tag, not skipped.
 
 **Isolate and namespace real-backend state — never touch the developer's real resources.** A real backend is shared with whatever the developer is actually running. A test that creates (or, far worse, *sweeps*) resources can clobber real VMs/containers/images. Three non-negotiable rules:
 
@@ -206,7 +208,7 @@ This came up the hard way: a Tart runtime base built for an A/B kept vanishing b
 
 ### Worked examples
 
-- All `runtime/*/integration_test.go` files require a real daemon. The Docker tests skip if `docker info` fails; same for Podman and containerd.
+- All `runtime/*/integration_test.go` files require a real daemon. Docker/Podman/containerd absence now FAILS the suite (D112) unless carved out via `YOLOAI_TEST_UNCONTROLLED_BACKENDS`; it no longer silently skips.
 - W6 (commit `b99b46e`, 2026-05-20): Podman CI path runs a CLI lifecycle subset against a real Podman daemon. Catches behavioural differences from Docker that a mock would miss (rootless UID mapping, HOME directory differences, tmux exec user — all of which produced real bugs visible in commits `13c58bd`, `ce8abb0`, `8ce5ff7`, `214c32c`).
 - The runtime registry tests (`runtime/registry/*_test.go`, W11 step 4 commit `1f4457c`) test the registration contract, not the implementations — that's the right layer for the registry; implementations are tested separately against real backends.
 - `TestIntegration_FullLifecycle` (commit `028e86d`) is the canonical lifecycle integration test. It creates a sandbox, exercises start/stop/restart, applies a patch, and destroys it — all against a real backend.

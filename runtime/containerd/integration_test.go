@@ -4,6 +4,7 @@ package containerdrt
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -23,31 +24,33 @@ import (
 
 const containerdSocket = "/run/containerd/containerd.sock"
 
-// skipIfNotAvailable skips the test when containerd is not actually usable on
-// this host. The socket file can exist yet be unconnectable — the daemon is
-// down, or the test user lacks dial permission (the socket is commonly
-// root-owned srw-rw----). A bare os.Stat would pass in that case and every test
-// would then fail at first use, so we probe a real connection: stat, then dial.
-// This is the host-aware contract — run where the backend works, skip cleanly
-// where it doesn't, rather than fail loudly.
-func skipIfNotAvailable(t *testing.T) {
+// requireAvailable fails the test when containerd is not actually usable on this
+// host. containerd is a platform-possible backend on Linux, so its absence is a
+// misconfiguration to fix, not a reason to silently skip (D112) — testutil.
+// RequireBackend FAILs unless "containerd" is carved out via
+// YOLOAI_TEST_UNCONTROLLED_BACKENDS (the CI path), in which case it skips.
+//
+// The probe is three-staged because each layer can be absent independently: the
+// socket file can exist yet be unconnectable — the daemon is down, or the test
+// user lacks dial permission (the socket is commonly root-owned srw-rw----), so a
+// bare os.Stat would pass and every test would then fail at first use. And a
+// reachable daemon still isn't sufficient: every test brings up CNI networking,
+// which creates a named network namespace needing CAP_SYS_ADMIN + CAP_DAC_OVERRIDE
+// (typically root); on an unprivileged host the daemon dials fine but Create fails
+// at "create netns: operation not permitted". Each stage yields a specific reason.
+func requireAvailable(t *testing.T) {
 	t.Helper()
 	if _, err := os.Stat(containerdSocket); err != nil {
-		t.Skipf("containerd not available: %s not found", containerdSocket)
+		testutil.RequireBackend(t, "containerd", fmt.Sprintf("%s not found", containerdSocket))
 	}
 	conn, err := net.DialTimeout("unix", containerdSocket, 2*time.Second)
 	if err != nil {
-		t.Skipf("containerd not reachable (%s exists but is not connectable): %v", containerdSocket, err)
+		testutil.RequireBackend(t, "containerd", fmt.Sprintf("%s exists but is not connectable: %v", containerdSocket, err))
+	} else {
+		_ = conn.Close()
 	}
-	_ = conn.Close()
-	// A reachable daemon is not sufficient: every test brings up CNI networking,
-	// which creates a named network namespace and needs CAP_SYS_ADMIN +
-	// CAP_DAC_OVERRIDE (typically root). On an unprivileged host the daemon
-	// dials fine but Create fails at "create netns: operation not permitted" —
-	// a host incapability, not a test failure. Probe it up front and skip.
 	if err := canCreateNetNSFunc(); err != nil {
-		t.Skipf("containerd reachable but this host cannot create network namespaces "+
-			"(needs CAP_SYS_ADMIN/root): %v", err)
+		testutil.RequireBackend(t, "containerd", fmt.Sprintf("reachable but this host cannot create network namespaces (needs CAP_SYS_ADMIN/root): %v", err))
 	}
 }
 
@@ -68,7 +71,7 @@ func testSandboxDir(t *testing.T) string {
 
 // TestIntegration_New verifies that New() connects to containerd successfully.
 func TestIntegration_New(t *testing.T) {
-	skipIfNotAvailable(t)
+	requireAvailable(t)
 
 	ctx := context.Background()
 	rt, err := New(ctx, testLayout(t))
@@ -80,7 +83,7 @@ func TestIntegration_New(t *testing.T) {
 
 // TestIntegration_IsReady_False verifies IsReady returns false when yoloai-base is not imported.
 func TestIntegration_IsReady_False(t *testing.T) {
-	skipIfNotAvailable(t)
+	requireAvailable(t)
 
 	ctx := context.Background()
 	rt, err := New(ctx, testLayout(t))
@@ -97,7 +100,7 @@ func TestIntegration_IsReady_False(t *testing.T) {
 // On a machine without Kata, RunChecks should return failing results.
 // On a machine with full Kata setup, all checks should pass.
 func TestIntegration_RequiredCapabilities(t *testing.T) {
-	skipIfNotAvailable(t)
+	requireAvailable(t)
 
 	ctx := context.Background()
 	rt, err := New(ctx, testLayout(t))
@@ -115,7 +118,7 @@ func TestIntegration_RequiredCapabilities(t *testing.T) {
 // TestIntegration_RequiredCapabilities_VmEnhanced verifies the devmapper snapshotter probe
 // works against the real containerd daemon with vm-enhanced isolation.
 func TestIntegration_RequiredCapabilities_VmEnhanced(t *testing.T) {
-	skipIfNotAvailable(t)
+	requireAvailable(t)
 
 	ctx := context.Background()
 	rt, err := New(ctx, testLayout(t))
@@ -133,7 +136,7 @@ func TestIntegration_RequiredCapabilities_VmEnhanced(t *testing.T) {
 // TestIntegration_ContainerLifecycle runs a full create/start/stop/remove cycle.
 // Requires: containerd running, yoloai-base image imported, Kata shim available.
 func TestIntegration_ContainerLifecycle(t *testing.T) {
-	skipIfNotAvailable(t)
+	requireAvailable(t)
 
 	ctx := context.Background()
 	rt, err := New(ctx, testLayout(t))
@@ -230,7 +233,7 @@ func TestIntegration_ContainerLifecycle(t *testing.T) {
 // TestIntegration_ContainerLifecycle is retained for the containerd-unique
 // restart-after-stop / stopped-task-cleanup guard the shared suite does not cover.
 func TestContainerdConformance(t *testing.T) {
-	skipIfNotAvailable(t)
+	requireAvailable(t)
 
 	runtimetest.RunInterfaceConformance(t, func(t *testing.T) runtimetest.InterfaceBackend {
 		ctx := context.Background()
@@ -268,7 +271,7 @@ func TestContainerdConformance(t *testing.T) {
 
 // TestIntegration_Prune verifies that Prune removes orphaned containers.
 func TestIntegration_Prune(t *testing.T) {
-	skipIfNotAvailable(t)
+	requireAvailable(t)
 
 	ctx := context.Background()
 	rt, err := New(ctx, testLayout(t))
@@ -283,7 +286,7 @@ func TestIntegration_Prune(t *testing.T) {
 
 // TestIntegration_Logs verifies Logs returns a string without error.
 func TestIntegration_Logs(t *testing.T) {
-	skipIfNotAvailable(t)
+	requireAvailable(t)
 
 	ctx := context.Background()
 	rt, err := New(ctx, testLayout(t))
@@ -297,7 +300,7 @@ func TestIntegration_Logs(t *testing.T) {
 
 // TestIntegration_DiagHint verifies DiagHint returns a non-empty string.
 func TestIntegration_DiagHint(t *testing.T) {
-	skipIfNotAvailable(t)
+	requireAvailable(t)
 
 	ctx := context.Background()
 	rt, err := New(ctx, testLayout(t))

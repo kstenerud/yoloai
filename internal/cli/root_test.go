@@ -14,6 +14,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 	"github.com/kstenerud/yoloai/internal/cli/extension"
 	"github.com/kstenerud/yoloai/internal/config"
+	"github.com/kstenerud/yoloai/internal/testutil"
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -76,8 +77,7 @@ func withArgs(t *testing.T, args ...string) {
 // catches it because they all bypass Execute.
 func TestExecute_RunsGate(t *testing.T) {
 	t.Run("non-exempt command fails fast on a v0 dir", func(t *testing.T) {
-		home := t.TempDir()
-		t.Setenv("HOME", home)
+		home := testutil.IsolatedHome(t)
 		cliutil.SetRootLayout(config.Layout{})
 		t.Cleanup(func() { cliutil.SetRootLayout(config.Layout{}) })
 
@@ -96,8 +96,7 @@ func TestExecute_RunsGate(t *testing.T) {
 	})
 
 	t.Run("exempt version command bypasses the gate", func(t *testing.T) {
-		home := t.TempDir()
-		t.Setenv("HOME", home)
+		home := testutil.IsolatedHome(t)
 		cliutil.SetRootLayout(config.Layout{})
 		t.Cleanup(func() { cliutil.SetRootLayout(config.Layout{}) })
 
@@ -115,8 +114,7 @@ func TestExecute_RunsGate(t *testing.T) {
 	})
 
 	t.Run("fresh dir is created for a non-exempt command", func(t *testing.T) {
-		home := t.TempDir()
-		t.Setenv("HOME", home)
+		home := testutil.IsolatedHome(t)
 		cliutil.SetRootLayout(config.Layout{})
 		t.Cleanup(func() { cliutil.SetRootLayout(config.Layout{}) })
 

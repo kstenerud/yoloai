@@ -705,7 +705,8 @@ func TestKillByPID_WaitsForExit(t *testing.T) {
 func TestToolchainReadPaths_DetectsPython(t *testing.T) {
 	pythonPath, err := exec.LookPath("python3")
 	if err != nil {
-		t.Skip("python3 not on PATH")
+		t.Fatalf("python3 is required and is not on PATH "+
+			"(D112 — required tooling, no carve-out; install python3): %v", err)
 	}
 	resolved, err := filepath.EvalSymlinks(pythonPath)
 	if err != nil {

@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from typing import Callable
 
+import pytest
+
 import smoke_test
 from smoke_test import (
     LINUX_BACKENDS,
@@ -15,6 +17,7 @@ from smoke_test import (
     isolation_check_applies,
     should_run_under_filter,
     spec_needed_for_filters,
+    uncontrolled_backends,
     uncovered_backends,
     uncovered_reason,
 )
@@ -234,3 +237,29 @@ def test_filter_scheduling_and_prereq_agree() -> None:
             )
             needed = spec_needed_for_filters(b, f, None)
             assert scheduled == needed, f"filter={f} backend={b}: scheduled={scheduled} needed={needed}"
+
+
+# --- Mandatory-infra carve-out (D112) ---------------------------------------
+# The env parse mirrors the Go side (internal/testutil/uncontrolled.go); the
+# same CSV governs both layers, so absence-handling stays in lockstep.
+
+
+@pytest.mark.parametrize(
+    "raw,want",
+    [
+        ("", set()),
+        ("containerd", {"containerd"}),
+        ("containerd,apple", {"containerd", "apple"}),
+        (" containerd , , apple ,", {"containerd", "apple"}),
+    ],
+)
+def test_uncontrolled_backends_parse(
+    monkeypatch: pytest.MonkeyPatch, raw: str, want: set[str]
+) -> None:
+    monkeypatch.setenv("YOLOAI_TEST_UNCONTROLLED_BACKENDS", raw)
+    assert uncontrolled_backends() == want
+
+
+def test_uncontrolled_backends_unset_is_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("YOLOAI_TEST_UNCONTROLLED_BACKENDS", raising=False)
+    assert uncontrolled_backends() == set()

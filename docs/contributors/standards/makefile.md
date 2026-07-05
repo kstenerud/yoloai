@@ -25,7 +25,7 @@ Every target that is not a file is listed in a single `.PHONY` line:
 ```make
 .PHONY: build test fmt lint tidy-check govulncheck hadolint actionlint check cover \
         integration e2e integration-podman python-test python-typecheck \
-        setup-dev-python smoketest smoketest-full releasetest setcap clean
+        setup-dev-python smoketest smoketest-quick releasetest setcap clean
 ```
 
 File-producing targets (like `$(BINARY)`) are not phony; their dependencies and timestamps matter.
@@ -41,7 +41,7 @@ Targets that are part of the developer interface carry a `##` prefix help commen
 check: lint tidy-check hadolint actionlint test python-test
 ```
 
-The convention is `## <target>: <one-line description>`. Multi-line help blocks (for targets with notable side effects or platform constraints) use the same `##` prefix on each continuation line. The `smoketest-full` and `integration-podman` targets in the current Makefile demonstrate the multi-line form.
+The convention is `## <target>: <one-line description>`. Multi-line help blocks (for targets with notable side effects or platform constraints) use the same `##` prefix on each continuation line. The `smoketest` and `integration-podman` targets in the current Makefile demonstrate the multi-line form.
 
 Build infrastructure targets (`$(BINARY)`, internal helpers) do not need help comments.
 
@@ -74,7 +74,7 @@ A check belongs in `make check` if and only if:
 - It does not require external infrastructure (no Docker daemon, no Podman daemon, no network).
 - It catches a defect that would ship if not caught.
 
-The `python-test` target is the boundary case — it does need Python deps installed, but those installs are documented (`setup-dev-python`) and the target skips silently if deps are missing. CI installs them and treats the target as required.
+The `python-test` target is the boundary case — it does need Python deps installed, but those installs are near-instant via `uv` (self-provisioned on demand). Per D112 the Python surface is app code, so `uv` is **required**: the target FAILS if `uv` is absent (no silent skip). `uv`/`python3` install everywhere including CI, so they get no carve-out.
 
 ## Test tiers — separate targets
 
@@ -86,8 +86,8 @@ Per `../principles/testing-principles.md §5` (test at the right layer), the pro
 | `integration`        | Integration  | Docker daemon                     | Yes (separate CI job)    |
 | `integration-podman` | Integration  | Podman with socket                | Yes (W6, commit `b99b46e`) |
 | `e2e`                | End-to-end   | Docker + tmux + agent             | No (developer machines)  |
-| `smoketest`          | Smoke (base) | Docker + containerd-vm or Tart    | No                       |
-| `smoketest-full`     | Smoke (full) | All backends including gVisor     | No                       |
+| `smoketest`          | Smoke (full) | Whole host matrix (strict)        | No (pre-release; root on Linux) |
+| `smoketest-quick`    | Smoke (quick)| Docker/container core path (strict) | No                     |
 | `releasetest`        | Composite    | Everything                        | No (pre-release)         |
 
 Targets do not duplicate logic; `releasetest` invokes the others.

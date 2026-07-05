@@ -4,6 +4,20 @@ COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
 DATE    := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)
 
+# Under `sudo make ...`, PATH is reset to the sudoers secure_path, which drops
+# tools installed outside it: the Go toolchain (/usr/local/go/bin) and user-local
+# tools like uv (~/.local/bin). Without recovery, `sudo make releasetest` dies
+# with "go: No such file" or "uv is required". When invoked under sudo (SUDO_USER
+# set), append the Go toolchain dirs plus the INVOKING user's local bins (resolved
+# via SUDO_USER's passwd home, since HOME is /root under sudo) so those tools
+# resolve. Appended, not prepended, so a tool already in secure_path still wins; a
+# non-sudo build is untouched. A tool installed somewhere exotic still needs the
+# explicit `sudo -E PATH="$$PATH" make ...`.
+ifneq ($(SUDO_USER),)
+SUDO_USER_HOME := $(shell getent passwd "$(SUDO_USER)" 2>/dev/null | cut -d: -f6)
+export PATH := $(PATH):/usr/local/go/bin:/usr/lib/go/bin:/opt/go/bin:$(SUDO_USER_HOME)/.local/bin:$(SUDO_USER_HOME)/.cargo/bin:$(SUDO_USER_HOME)/go/bin
+endif
+
 # Python dev tooling lives in a uv-managed venv so mypy/pytest run at
 # lockfile-pinned versions (requirements-dev.lock), decoupled from whatever
 # ambient `python3 -m mypy` happens to be installed. See setup-dev-python.
@@ -27,9 +41,9 @@ PY_REQ_LOCK := runtime/monitor/tests/requirements-dev.lock
 # listed target actually runs.
 DOCKER_HOST_ENV := $(DOCKER_HOST)
 DOCKER_HOST_RESOLVED = $(if $(DOCKER_HOST_ENV),$(DOCKER_HOST_ENV),$(shell docker context inspect --format '{{.Endpoints.docker.Host}}' 2>/dev/null))
-integration e2e base-image smoketest smoketest-full: export DOCKER_HOST = $(DOCKER_HOST_RESOLVED)
+integration e2e base-image smoketest smoketest-quick: export DOCKER_HOST = $(DOCKER_HOST_RESOLVED)
 
-.PHONY: build test fmt lint vet-tagged crosscheck tidy-check govulncheck hadolint actionlint check cover integration e2e integration-podman integration-containerd integration-apple integration-seatbelt integration-tart python-test python-typecheck ensure-python-venv setup-dev-python smoketest smoketest-full releasetest setcap clean clean-testtmp
+.PHONY: build test fmt lint vet-tagged crosscheck tidy-check govulncheck hadolint actionlint check cover integration e2e integration-podman integration-containerd integration-apple integration-seatbelt integration-tart python-test python-typecheck ensure-python-venv setup-dev-python smoketest smoketest-quick releasetest setcap clean clean-testtmp
 
 # Always invoke `go build` and let it decide whether to relink. `go build` does
 # complete, authoritative dependency tracking — crucially including //go:embed'd
@@ -52,7 +66,7 @@ lint:
 	if [ -n "$$UNFMT" ]; then \
 		echo "gofmt needed:"; echo "$$UNFMT"; exit 1; \
 	fi
-	GOTOOLCHAIN=$(shell go env GOVERSION) go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.3 run ./...
+	GOTOOLCHAIN=$(shell PATH="$(PATH)" go env GOVERSION 2>/dev/null) go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.3 run ./...
 
 tidy-check:
 	@cp go.mod go.mod.bak && cp go.sum go.sum.bak
@@ -109,37 +123,28 @@ crosscheck:
 check: lint vet-tagged crosscheck tidy-check hadolint actionlint test python-test
 
 ## ensure-python-venv: provision the uv-managed venv on demand (idempotent).
-## When uv is present this syncs the lockfile-pinned tools into .venv; when uv
-## is absent it does nothing, so the python-* targets below skip gracefully and
-## a fresh clone without uv still gets a green `make check`. uv pip sync is
-## near-instant once the venv already matches the lock, so running this on every
-## `make check` is cheap and removes any need to call setup-dev-python by hand.
+## The Python surface is part of the app (contributors can modify it), so it is
+## REQUIRED, not optional (D112): uv is mandatory and its absence FAILS loudly —
+## `uv`/`python3` install everywhere including CI, so they get no carve-out. uv pip
+## sync is near-instant once the venv already matches the lock, so running this on
+## every `make check` is cheap and removes any need to call setup-dev-python by hand.
 ensure-python-venv:
-	@if command -v uv >/dev/null 2>&1; then \
-		[ -x $(VENV)/bin/python ] || uv venv --quiet $(VENV); \
-		uv pip sync --quiet --python $(VENV)/bin/python $(PY_REQ_LOCK); \
-	fi
+	@command -v uv >/dev/null 2>&1 || { echo "ERROR: uv is required (Python is part of the app; D112). Install: https://docs.astral.sh/uv/"; exit 1; }
+	@[ -x $(VENV)/bin/python ] || uv venv --quiet $(VENV)
+	@uv pip sync --quiet --python $(VENV)/bin/python $(PY_REQ_LOCK)
 
-## python-test: run pytest from the uv-managed venv (skip when venv absent)
+## python-test: run pytest from the uv-managed venv (uv required; see D112)
 python-test: python-typecheck
-	@if [ -x $(PYTEST) ]; then \
-		$(PYTEST) runtime/monitor/tests/ -v; \
-		$(PYTEST) scripts/tests/ -v; \
-	else \
-		echo "Python tests skipped (install uv to enable: https://docs.astral.sh/uv/)"; \
-	fi
+	$(PYTEST) runtime/monitor/tests/ -v
+	$(PYTEST) scripts/tests/ -v
 
 ## python-typecheck: run mypy --strict from the uv-managed venv on the typed surface
 ## Two invocations: the monitor surface and the smoke harness each have their
 ## own tests/conftest.py, which mypy would otherwise reject as a duplicate
 ## top-level "conftest" module if checked in one pass.
 python-typecheck: ensure-python-venv
-	@if [ -x $(MYPY) ]; then \
-		$(MYPY) --strict runtime/monitor/setup_helpers.py runtime/monitor/tmux_io.py runtime/monitor/tests/; \
-		$(MYPY) --strict scripts/smoke_test.py scripts/govulncheck.py scripts/tests/; \
-	else \
-		echo "Python type-check skipped (install uv to enable: https://docs.astral.sh/uv/)"; \
-	fi
+	$(MYPY) --strict runtime/monitor/setup_helpers.py runtime/monitor/tmux_io.py runtime/monitor/tests/
+	$(MYPY) --strict scripts/smoke_test.py scripts/govulncheck.py scripts/tests/
 
 ## setup-dev-python: explicitly provision the uv-managed venv with lockfile-pinned
 ## dev tools. Optional for local dev (the python-* targets self-provision via
@@ -163,18 +168,42 @@ cover:
 base-image: build
 	./$(BINARY) system build --backend docker
 
-## integration: run every backend's integration suite. Each backend self-skips
-## when its daemon/host isn't available (TestMain gate / skipIfNotAvailable), so
-## the same target runs on any host and exercises whatever that host supports —
-## the host-aware contract. Docker additionally drives the cross-cutting sandbox/
-## and cli/ suites, which require a real container daemon.
-integration:
-	@if docker info >/dev/null 2>&1; then \
-		$(MAKE) base-image && \
-		go test -tags=integration -v -count=1 -timeout=10m ./internal/orchestrator/ ./runtime/docker/ ./internal/cli/; \
-	else \
-		echo "Docker unavailable — skipping Docker integration tests"; \
+# require-root-for-containerd: fail fast, upfront, when a target runs the
+# containerd/Kata integration suite but isn't root. Kata needs CAP_SYS_ADMIN to
+# create the network namespace, so a non-root run can only end in an opaque
+# "operation not permitted" deep in the suite — stop now with an actionable
+# message instead (the maintainer's rule: a sudo-requiring target must say so, not
+# run-to-inevitable-failure and not silently skip). Linux-only: containerd is
+# Linux-only (the macOS stub TestMain exits 0), and non-Linux hosts need no root
+# here. Skipped when containerd is carved out via YOLOAI_TEST_UNCONTROLLED_BACKENDS
+# — then the backend won't run at all, so root isn't required. $@ is the invoking
+# target, so the suggested commands are exact.
+define require-root-for-containerd
+	@if [ "$$(uname)" = "Linux" ] && [ "$$(id -u)" != "0" ] && \
+	    ! printf '%s' "$$YOLOAI_TEST_UNCONTROLLED_BACKENDS" | tr ',' '\n' | grep -qx containerd; then \
+		echo "ERROR: '$@' includes the containerd/Kata integration suite, which needs root"; \
+		echo "       (CAP_SYS_ADMIN — to create a network namespace). Refusing to run it as a"; \
+		echo "       non-root user, which could only fail deep in the suite."; \
+		echo "  Re-run under sudo, preserving env (credentials + PATH for the Go toolchain):"; \
+		echo "      sudo -E make $@"; \
+		echo "  Or, only on a machine that genuinely cannot provide containerd, carve it out:"; \
+		echo "      YOLOAI_TEST_UNCONTROLLED_BACKENDS=containerd make $@"; \
+		exit 1; \
 	fi
+endef
+
+## integration: run every backend's integration suite. A platform-possible
+## backend that's absent FAILS loudly (D112) — never a silent skip; the only
+## downgrade is the YOLOAI_TEST_UNCONTROLLED_BACKENDS carve-out (CI steps we don't
+## own), which each backend's TestMain honors itself. Docker is mandatory here: it
+## drives the cross-cutting sandbox/ and cli/ suites AND builds the base image, so
+## `make base-image` fails loudly if the daemon is absent. On Linux this needs root
+## for the containerd/Kata suite (netns); it stops upfront with an actionable error
+## if run non-root (use `sudo -E make integration`, or carve out containerd).
+integration:
+	$(require-root-for-containerd)
+	$(MAKE) base-image
+	go test -tags=integration -v -count=1 -timeout=10m ./internal/orchestrator/ ./runtime/docker/ ./internal/cli/
 	@$(MAKE) integration-containerd integration-apple integration-seatbelt integration-tart
 
 e2e: build
@@ -196,6 +225,14 @@ e2e: build
 ##      keep-id), so they are scoped OUT of the docker `integration` job and run
 ##      only here, where podman is the owned+provisioned backend.
 integration-podman: build
+	@if [ "$$(id -u)" = "0" ]; then \
+		echo "ERROR: integration-podman exercises ROOTLESS podman (keep-id, slirp host-loopback),"; \
+		echo "       which is bound to your login session (systemd --user, DBUS, the podman user"; \
+		echo "       socket) — it cannot run as root, and a sudo de-escalation doesn't reproduce"; \
+		echo "       the session (volume mounts fail). Run it directly in your own shell:"; \
+		echo "           make integration-podman        (NOT via sudo / sudo make releasetest)"; \
+		exit 1; \
+	fi
 	@echo "Building base image with Podman..."
 	@./$(BINARY) system build --backend=podman
 	@echo "Running Podman runtime tests..."
@@ -213,6 +250,7 @@ integration-podman: build
 ## everywhere. On Linux, skipIfNotAvailable skips cleanly when the containerd
 ## socket is absent/unconnectable or the host can't create network namespaces.
 integration-containerd:
+	$(require-root-for-containerd)
 	go test -tags=integration -v -count=1 -timeout=10m ./runtime/containerd/
 
 ## integration-apple: run Apple `container` backend integration tests (requires
@@ -246,35 +284,60 @@ integration-tart:
 	fi
 	go test -tags=integration -v -count=1 -timeout=40m ./runtime/tart/
 
-## smoketest: run base-tier smoke tests (docker + containerd-vm / tart)
-## VM backends require root (CAP_SYS_ADMIN + write to /var/run/netns/).
-## Run as root: sudo -E make smoketest
+## smoketest: run the full smoke matrix — every backend this host can exercise,
+## across every installed docker provider (macOS: OrbStack + Docker Desktop; errors
+## if an installed provider isn't running). Single-provider hosts (Linux) run once.
+## STRICT (D112): a scheduled backend that's absent FAILS unless carved out via
+## YOLOAI_TEST_UNCONTROLLED_BACKENDS. VM backends require root (CAP_SYS_ADMIN +
+## /var/run/netns/), so this auto-escalates to root on Linux (preserving PATH/env).
 smoketest: build
-	python3 scripts/smoke_test.py --debug $(SMOKE_ARGS)
-
-## smoketest-full: run full-tier smoke tests (all backends including podman, gVisor)
-## across every installed docker provider (macOS: OrbStack + Docker Desktop;
-## errors if an installed provider isn't running). Single-provider hosts (Linux)
-## run once. Automatically escalates to root on Linux (preserving PATH and env).
-smoketest-full: build
 	@if [ "$$(uname)" = "Linux" ] && [ "$$(id -u)" != "0" ]; then \
-		echo "==> Escalating to root for full smoke tests..."; \
-		exec sudo -E PATH="$$PATH" $(MAKE) smoketest-full SMOKE_ARGS="$(SMOKE_ARGS)"; \
+		echo "==> Escalating to root for the full smoke matrix..."; \
+		exec sudo -E PATH="$$PATH" $(MAKE) smoketest SMOKE_ARGS="$(SMOKE_ARGS)"; \
 	else \
-		python3 scripts/smoke_test.py --full --debug --all-docker-providers $(SMOKE_ARGS); \
+		python3 scripts/smoke_test.py --debug --all-docker-providers $(SMOKE_ARGS); \
 	fi
 
-## releasetest: run every test tier, fastest first
-## Runs: lint → unit → integration → e2e → podman integration → full smoke
-## Automatically escalates to root on Linux for smoke tests.
-## The release gate exercises everything the host supports: these exports flip on
-## the heavyweight macOS-VM paths (tart conformance clones a real base VM per
-## subtest; apple builds its real yoloai-base instead of a sleep image). They
-## propagate through the recursive sub-makes; on a host without tart/apple the
-## suites still skip cleanly via TestMain.
+## smoketest-quick: run only the primary machinery — the docker/container core path
+## (create -> agent -> sentinel -> diff/apply). A fast, narrow but honest dev signal;
+## STILL STRICT — Docker is primary machinery, so its absence FAILS. No root needed.
+smoketest-quick: build
+	python3 scripts/smoke_test.py --quick --debug $(SMOKE_ARGS)
+
+## releasetest: run every test tier, fastest first. Run as YOUR user (NOT sudo):
+##   make releasetest
+## The tiers have mixed privilege needs, so releasetest runs each in its correct
+## one. Everything runs as you EXCEPT, on Linux only, integration (containerd/Kata
+## netns) and smoketest (VM/netns) escalate to root internally (sudo -E). On macOS
+## nothing escalates: every backend — Docker Desktop, apple, seatbelt, tart,
+## podman-machine — is a per-user daemon (containerd is Linux-only, compiled out),
+## and running them as root breaks bind-mounts of your user-owned temp dirs. The
+## rootless-podman tier (integration-podman) always needs your login session
+## (keep-id/slirp), which is why the whole gate must NOT be run under `sudo` —
+## it escalates only the specific Linux tiers that need it.
+## The exports flip on the heavyweight macOS-VM paths (tart conformance clones a
+## real base VM per subtest; apple builds its real yoloai-base instead of a sleep
+## image); they propagate through the sub-makes (and across sudo -E). On a host
+## without tart/apple the suites still skip cleanly via TestMain.
 releasetest: export YOLOAI_TEST_TART_VM := 1
 releasetest: export YOLOAI_TEST_APPLE_BASE := 1
-releasetest: check integration e2e integration-podman smoketest-full
+releasetest:
+	@if [ "$$(id -u)" = "0" ]; then \
+		echo "ERROR: run 'make releasetest' as your normal user, NOT via sudo — the"; \
+		echo "       integration-podman tier needs your login session (rootless podman) and"; \
+		echo "       cannot run as root. The root-only tiers escalate themselves."; \
+		exit 1; \
+	fi
+	$(MAKE) check
+	@if [ "$$(uname)" = "Linux" ]; then \
+		echo "==> integration needs root on Linux (containerd/Kata netns) — escalating for this tier..."; \
+		sudo -E PATH="$(PATH)" $(MAKE) integration; \
+	else \
+		$(MAKE) integration; \
+	fi
+	$(MAKE) e2e
+	$(MAKE) integration-podman
+	$(MAKE) smoketest
 
 ## setcap: grant capabilities needed for VM backends (must re-run after each build)
 setcap: build

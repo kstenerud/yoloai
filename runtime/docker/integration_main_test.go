@@ -25,8 +25,7 @@ func TestMain(m *testing.M) {
 		rt, dockerErr = New(ctx, config.Layout{}.WithEnv(testutil.GetCuratedHostEnv(testutil.IntegrationHostEnvVars)))
 	})
 	if dockerErr != nil {
-		fmt.Fprintf(os.Stderr, "Docker unavailable, skipping integration tests: %v\n", dockerErr)
-		os.Exit(0)
+		os.Exit(testutil.BackendAbsent("docker", dockerErr.Error()))
 	}
 	defer rt.Close() //nolint:errcheck // best-effort close in test main
 

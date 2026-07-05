@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """End-to-end smoke tests for yoloai against real agents.
 
-Run with: python3 scripts/smoke_test.py [--full]
-Or via:   make smoketest / make smoketest-full
+Run with: python3 scripts/smoke_test.py [--quick]
+Or via:   make smoketest / make smoketest-quick
 
-Base tier (default): docker + container-privileged + containerd-vm on Linux,
-                     docker + tart on macOS.
-Full tier (--full):  all backends including podman, gVisor, vm-enhanced.
+Full matrix (default): every backend this host can exercise (docker, podman,
+                       gVisor, container-privileged, containerd-vm on Linux;
+                       docker, seatbelt, tart, apple on macOS).
+Quick tier (--quick):  the docker/container core path only — a fast, narrow but
+                       honest dev signal. Both tiers are STRICT: a scheduled
+                       backend that's absent FAILS unless carved out via
+                       YOLOAI_TEST_UNCONTROLLED_BACKENDS (D112).
 
 Tests that don't need a real agent (files exchange, reset, start-after-done,
 overlay) have been moved to Go integration tests (sandbox/integration_test.go,
@@ -223,7 +227,7 @@ class RunContext:
     log_dir: Path
     run_id: str
     fixture_dir: Path
-    full: bool
+    quick: bool = False
     debug: bool = False
     test_filter: Optional[list[str]] = None
     backend_filter: Optional[list[str]] = None
@@ -252,13 +256,13 @@ class RunContext:
 # Backend matrices
 # ---------------------------------------------------------------------------
 
-# One matrix per host OS — every backend that OS can exercise. The smoke *tier*
-# does NOT change this set; it only changes how unavailable infrastructure is
-# treated (see the `ctx.full` branches in run()): `make smoketest` SKIPS a
-# backend whose prereqs are missing — a quick check on a dev box that may lack
-# full release infra — while `make smoketest-full` FAILS loudly for any missing
-# infra, the release gate that proves the whole OS-supported matrix actually ran.
-# Adding a host OS (e.g. windows) is adding a key to HOST_MATRICES below.
+# One matrix per host OS — every backend that OS can exercise. Both smoke tiers
+# are STRICT (D112): a scheduled backend whose prereqs are missing is a FAILURE,
+# never a silent skip — the only downgrade-to-skip is the YOLOAI_TEST_UNCONTROLLED_
+# BACKENDS carve-out (see uncontrolled_backends()). The tier selects only *breadth*:
+# `make smoketest` runs this whole OS matrix; `make smoketest-quick` (--quick) runs
+# just the primary machinery (docker/container core path). Adding a host OS (e.g.
+# windows) is adding a key to HOST_MATRICES below.
 LINUX_BACKENDS: list[BackendSpec] = [
     BackendSpec("linux", "container",          "docker", "docker",
                 check_backend="docker", retries=1),
@@ -360,12 +364,26 @@ ISOLATION_HOST_NOTE: dict[str, str] = {
     "on macOS (the macOS Docker VMs can't run runsc turn-key; D71). Use a Linux host.",
 }
 
-# Tests restricted to --full tier.
-FULL_ONLY_TESTS = {"clone"}
+# Tests excluded from the narrow --quick tier (heavier release-gate checks that
+# are not part of the primary create -> agent -> sentinel -> diff/apply path).
+QUICK_EXCLUDED_TESTS = {"clone", "tag_transfer"}
 
-def is_full_test(name: str) -> bool:
-    """Return True if this test requires --full."""
-    return name.split("/")[0] in FULL_ONLY_TESTS
+
+def uncontrolled_backends() -> set[str]:
+    """Backends the current (uncontrolled) runner genuinely cannot provision.
+
+    The mandatory-infrastructure policy (D112): a platform-possible backend that
+    is merely absent is a FAILURE, never a silent skip. The sole carve-out is the
+    YOLOAI_TEST_UNCONTROLLED_BACKENDS CSV — for CI steps we don't own. The SAME
+    env var governs the Go integration gates (internal/testutil/uncontrolled.go),
+    so the two layers stay in lockstep. A scheduled backend whose check_backend is
+    listed downgrades from FAIL to skip when absent; every backend NOT listed stays
+    mandatory even in CI. Empty/unset (every dev machine) => nothing carved out.
+    Keyed by the daemon name (BackendSpec.check_backend), so listing "containerd"
+    carves out both containerd-vm and containerd-vmenhanced at once.
+    """
+    raw = os.environ.get("YOLOAI_TEST_UNCONTROLLED_BACKENDS", "")
+    return {name.strip() for name in raw.split(",") if name.strip()}
 
 
 # Labels of the tests that fan out across the backend matrix (one slot per
@@ -414,9 +432,8 @@ def spec_needed_for_filters(
 # Structural applicability of matrix tests. Some (test × backend) pairings are
 # impossible by construction — no host change makes them runnable — so the runner
 # excludes them from scheduling instead of emitting a misleading SKIP, mirroring
-# how the Linux matrix simply never lists tart/seatbelt. Conditional gating (host
-# prereqs, --full tier) stays a runtime skip; only capability-level impossibility
-# belongs here.
+# how the Linux matrix simply never lists tart/seatbelt. Host-prereq absence is a
+# FAILURE (D112), not a skip; only capability-level impossibility belongs here.
 
 def dind_applies(spec: BackendSpec) -> bool:
     """dind needs a nested dockerd, which requires the --privileged caps and shared
@@ -2844,12 +2861,14 @@ def parse_args() -> argparse.Namespace:
         description="End-to-end smoke tests for yoloai against real agents.",
     )
     parser.add_argument(
-        "--full",
+        "--quick",
         action="store_true",
         help=(
-            "Run the full backend matrix (all backends). "
-            "Without --full, only base-tier backends are tested. "
-            "Missing backends are skipped with a warning."
+            "Narrow to the primary machinery only: the docker/container core path "
+            "(create -> agent -> sentinel -> diff/apply) plus required non-matrix "
+            "tests. Without --quick, the full host backend matrix runs. Both tiers "
+            "are STRICT — a scheduled backend that's absent FAILS unless carved out "
+            "via YOLOAI_TEST_UNCONTROLLED_BACKENDS."
         ),
     )
     parser.add_argument(
@@ -3198,15 +3217,17 @@ def main() -> int:
         )
         return 1
 
-    # On Linux, full-tier smoke tests need root for VM/namespace backends.
-    # Catch the common mistake of forgetting sudo early, before we hit a
-    # confusing PermissionError on a root-owned current directory.
-    if sys.platform == "linux" and args.full and os.getuid() != 0:
+    # On Linux, the full matrix needs root for VM/namespace backends. Catch the
+    # common mistake of forgetting sudo early, before we hit a confusing
+    # PermissionError on a root-owned current directory. --quick (docker/container
+    # only) needs no root, so it is exempt.
+    if sys.platform == "linux" and not args.quick and os.getuid() != 0:
         print(
-            "ERROR: full smoke tests require root on Linux (for VM/namespace backends).\n"
+            "ERROR: the full smoke matrix requires root on Linux (for VM/namespace backends).\n"
             "Run with:\n"
-            "  make smoketest-full          (auto-escalates to root)\n"
-            "  sudo -E python3 scripts/smoke_test.py --full",
+            "  make smoketest               (auto-escalates to root)\n"
+            "  make smoketest-quick         (docker/container only, no root needed)\n"
+            "  sudo -E python3 scripts/smoke_test.py",
             file=sys.stderr,
         )
         return 1
@@ -3234,7 +3255,7 @@ def main() -> int:
         log_dir=log_dir,
         run_id=run_id,
         fixture_dir=fixture_dir,
-        full=args.full,
+        quick=args.quick,
         debug=args.debug,
         test_filter=args.test,
         backend_filter=args.backend,
@@ -3257,10 +3278,22 @@ def main() -> int:
 
     is_linux = sys.platform.startswith("linux")
     host_os = "linux" if is_linux else "mac"
-    # One matrix per host OS — the same set whether tier is base or full; the tier
-    # only changes skip-vs-fail on missing infra (handled per-backend below). The
-    # other host OSes' specs (union across every other key) drive the uncovered
-    # report and the cross-OS release reminder; this stays correct for N host OSes.
+
+    # --quick narrows to the primary machinery: the docker/container core path only.
+    # Implemented as an implicit backend filter so it reuses the existing scheduling
+    # and prereq machinery (a scheduled backend not in the filter is simply never
+    # run). An explicit --backend still wins if the caller gave one. Both tiers stay
+    # strict on the backends they DO schedule — --quick changes breadth, not
+    # skip-vs-fail (D112). The heavier non-matrix checks (QUICK_EXCLUDED_TESTS) are
+    # gated separately below.
+    if ctx.quick and not ctx.backend_filter:
+        ctx.backend_filter = [DEFAULT_BACKEND.label]
+
+    # One matrix per host OS — the same set whether tier is quick or full; the tier
+    # only changes breadth (via the filter above), never skip-vs-fail on missing
+    # infra (handled per-backend below). The other host OSes' specs (union across
+    # every other key) drive the uncovered report and the cross-OS release reminder;
+    # this stays correct for N host OSes.
     matrix = HOST_MATRICES[host_os]
     other_os_specs = [
         s for os_key, specs in HOST_MATRICES.items() if os_key != host_os for s in specs
@@ -3288,7 +3321,7 @@ def main() -> int:
         if s.label != DEFAULT_BACKEND.label and _spec_needed(s)
     ]
 
-    tier = "full" if ctx.full else "base"
+    tier = "quick" if ctx.quick else "full"
     print(f"yoloai smoke test  run={log_dir.name}")
     print(f"host={'linux' if is_linux else 'macos'}  tier={tier}")
     print(f"binary={yoloai_bin}")
@@ -3330,18 +3363,24 @@ def main() -> int:
             setup_tip = (
                 "\nSetup tip: VM isolation requires root-level privileges.\n"
                 "Run the smoke test as root to include vm/vmenhanced backends:\n"
-                "  sudo make smoketest-full"
+                "  sudo make smoketest"
             )
-        # Base tier is designed to be runnable with partial backends, so it
-        # warns and skips. Full tier is the release gate: an unprovisioned
-        # backend that *could* run on this host is an environment defect, so
-        # its tests fail loudly (see _run_backend_test). The notice mirrors that.
-        if ctx.full:
-            print("ERROR: some backends unavailable on this host; full tier will FAIL their tests:")
-        else:
-            print("WARNING: some backends unavailable (will skip their tests):")
-        for label in unavailable_labels:
-            print(f"  {label}: {preq[label].note}")
+        # A platform-possible backend that's absent is an environment defect: its
+        # tests FAIL loudly (see _run_backend_test), never skip (D112). The only
+        # downgrade-to-skip is the YOLOAI_TEST_UNCONTROLLED_BACKENDS carve-out, so
+        # partition the notice accordingly.
+        carved = uncontrolled_backends()
+        fail_labels = [l for l in unavailable_labels if preq[l].spec.check_backend not in carved]
+        skip_labels = [l for l in unavailable_labels if preq[l].spec.check_backend in carved]
+        if fail_labels:
+            print("ERROR: platform-possible backends unavailable; their tests will FAIL (D112):")
+            for label in fail_labels:
+                print(f"  {label}: {preq[label].note}")
+        if skip_labels:
+            print("WARNING: backends unavailable but carved out via "
+                  "YOLOAI_TEST_UNCONTROLLED_BACKENDS (will skip their tests):")
+            for label in skip_labels:
+                print(f"  {label}: {preq[label].note}")
         if setup_tip:
             print(setup_tip)
         print()
@@ -3380,9 +3419,9 @@ def main() -> int:
             cap = plan_tart_slots(free, ctx.vm_concurrency)
             who = ", ".join(occupants) if occupants else "other VM(s)"
             if cap == 0:
-                # No free slot. Mirror the unavailable-backend contract: base
-                # tier skips tart, full tier fails it loudly. Routed through the
-                # prereq result so _run_backend_test enforces it uniformly.
+                # No free slot. Mark tart unavailable and route through the prereq
+                # result so _run_backend_test enforces the policy uniformly: absence
+                # FAILs unless "tart" is carved out (D112).
                 note = (
                     f"no free macOS VM slot: {in_use} of {limit} in use ({who}); "
                     "stop a VM to free a slot"
@@ -3390,10 +3429,10 @@ def main() -> int:
                 preq["tart"] = PrereqResult(
                     spec=tart_preq.spec, available=False, note=note,
                 )
-                if ctx.full:
-                    print(f"ERROR: full tier requires tart but {note}")
+                if "tart" in uncontrolled_backends():
+                    print(f"WARNING: tart tests will skip (carved out) — {note}")
                 else:
-                    print(f"WARNING: tart tests will skip — {note}")
+                    print(f"ERROR: tart is required but {note}")
                 print()
             elif cap < ctx.vm_concurrency:
                 print(
@@ -3431,17 +3470,19 @@ def main() -> int:
         pr = preq.get(spec.label)
         if pr is None or not pr.available:
             reason = pr.note if pr else "not in prereq results"
-            # This backend runs on this host but its prereqs aren't satisfied
-            # (daemon down, missing perms, etc.) — fixable here. Base tier tolerates
-            # a partial run and skips; full tier is the release gate, so an
-            # unprovisioned backend is an environment defect that must fail loudly.
-            if ctx.full:
+            # This backend is platform-possible on this host but its prereqs aren't
+            # satisfied (daemon down, missing perms, etc.) — a fixable environment
+            # defect that must FAIL loudly (D112), never silently skip. The sole
+            # exception is the YOLOAI_TEST_UNCONTROLLED_BACKENDS carve-out (a runner
+            # we don't own that genuinely can't provision this backend).
+            if spec.check_backend in uncontrolled_backends():
+                skip_test(ctx, test_name,
+                          f"{reason} (carved out via YOLOAI_TEST_UNCONTROLLED_BACKENDS)")
+            else:
                 _record_result(ctx, TestResult(
                     name=test_name, passed=False,
-                    reason=f"prerequisite unavailable (full tier requires it): {reason}",
+                    reason=f"prerequisite unavailable (D112 requires it): {reason}",
                 ))
-            else:
-                skip_test(ctx, test_name, reason)
             return
 
         # VM backends share a host-wide concurrency cap (macOS allows 2 Tart VMs;
@@ -3486,8 +3527,8 @@ def main() -> int:
         When applies_to is given, structurally inapplicable specs (the test could
         never run there regardless of host — e.g. dind without privileged caps) are
         excluded from scheduling and reported once, rather than each emitting a
-        misleading per-backend SKIP. Conditional gating (host prereqs, --full) is
-        handled downstream as a genuine runtime skip.
+        misleading per-backend SKIP. Host-prereq absence is handled downstream as a
+        FAILURE (D112), not a skip, unless the backend is carved out.
 
         Backends fan out concurrently (bounded by --jobs and, for VM backends, by
         --vm-concurrency); the phase joins before the caller moves on. --jobs 1
@@ -3518,14 +3559,14 @@ def main() -> int:
                 f.result()  # surface worker exceptions to the main thread
 
     # -------------------------------------------------------------------------
-    # Non-matrix tests (full tier only)
+    # Non-matrix tests (excluded from the narrow --quick tier)
     # -------------------------------------------------------------------------
 
     if should_run_test("clone"):
-        if ctx.full:
+        if "clone" not in QUICK_EXCLUDED_TESTS or not ctx.quick:
             _record_result(ctx, run_test(ctx, "clone", lambda t: test_clone(t, DEFAULT_BACKEND)))
         else:
-            skip_test(ctx, "clone", "full tier only (use --full)")
+            skip_test(ctx, "clone", "not in the --quick tier")
 
     # -------------------------------------------------------------------------
     # Matrix tests: stop_start (end-to-end workflow + restart), isolation_check
@@ -3535,12 +3576,12 @@ def main() -> int:
     run_matrix_test("stop_start", test_stop_start)
 
     # tag_transfer needs a second VM boot per backend (its own git-host sandbox),
-    # so it's a full-tier release-gate check rather than a per-PR base test.
+    # so it's a heavier release-gate check excluded from the narrow --quick tier.
     print("\nBackend matrix (tag_transfer):")
-    if ctx.full:
+    if "tag_transfer" not in QUICK_EXCLUDED_TESTS or not ctx.quick:
         run_matrix_test("tag_transfer", test_tag_transfer)
     else:
-        print("  full tier only (use --full)")
+        print("  not in the --quick tier")
 
     print("\nBackend matrix (isolation_check):")
     run_matrix_test(
@@ -3564,12 +3605,13 @@ def main() -> int:
         print(f"\nmanifest: {manifest}")
     print(f"index: {_SMOKE_INDEX}")
 
-    # Release-gate reminder: smoketest-full proves only THIS host OS's matrix.
-    # The gate is not complete until it has also passed on every other supported
-    # host OS, because each host runs backends the others physically cannot (Apple
-    # Silicon → apple / tart / seatbelt; Linux → containerd Kata / gVisor). Name
-    # the other OSes so a single-host green is never mistaken for release sign-off.
-    if ctx.full:
+    # Release-gate reminder: the full smoke matrix proves only THIS host OS's
+    # matrix. The gate is not complete until it has also passed on every other
+    # supported host OS, because each host runs backends the others physically
+    # cannot (Apple Silicon → apple / tart / seatbelt; Linux → containerd Kata /
+    # gVisor). Name the other OSes so a single-host green is never mistaken for
+    # release sign-off. Suppressed under --quick (a narrow dev signal, not a gate).
+    if not ctx.quick:
         other_oses = [HOST_OS_LABELS.get(k, k) for k in HOST_MATRICES if k != host_os]
         if other_oses:
             joined = " and ".join(other_oses)

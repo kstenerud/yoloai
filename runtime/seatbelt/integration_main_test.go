@@ -10,9 +10,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/kstenerud/yoloai/internal/config"
+	"github.com/kstenerud/yoloai/internal/testutil"
 )
 
 // TestMain verifies macOS + sandbox-exec are available before running
@@ -24,8 +26,15 @@ func TestMain(m *testing.M) {
 	defer os.RemoveAll(tmp) //nolint:errcheck // best-effort cleanup
 	rt, err := New(context.Background(), config.NewLayout(filepath.Join(tmp, ".yoloai")), tmp)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Seatbelt unavailable, skipping integration tests: %v\n", err)
-		os.Exit(0)
+		// Seatbelt (sandbox-exec) is macOS-only. On any non-macOS host it is
+		// structurally impossible, not merely absent — outside the mandatory-infra
+		// policy (D112), so it skips cleanly like the containerd non-Linux stub.
+		// Only on darwin is absence a failure, subject to the carve-out env.
+		if runtime.GOOS != "darwin" {
+			fmt.Fprintf(os.Stderr, "seatbelt backend not applicable on %s — skipping integration tests\n", runtime.GOOS)
+			os.Exit(0)
+		}
+		os.Exit(testutil.BackendAbsent("seatbelt", err.Error()))
 	}
 	_ = rt
 	os.Exit(m.Run())

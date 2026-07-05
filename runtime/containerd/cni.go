@@ -122,6 +122,17 @@ func ensureCNIConflist(layout config.Layout) error {
 	return nil
 }
 
+// netnsNameFor is the named netns for a container: the single source of truth for
+// the "yoloai-<name>" convention so setupCNI (which creates it) and Start (which
+// checks whether a prior Stop tore it down) can never drift.
+func netnsNameFor(containerName string) string { return "yoloai-" + containerName }
+
+// netnsPathFor is the filesystem path of a container's named netns
+// (/var/run/netns/yoloai-<name>) — what the container's OCI spec pins.
+func netnsPathFor(containerName string) string {
+	return "/var/run/netns/" + netnsNameFor(containerName)
+}
+
 // createNetNS creates a named network namespace and returns its path.
 // The namespace is created at /var/run/netns/<name> (standard Linux path).
 //
@@ -216,7 +227,7 @@ func setupCNI(ctx context.Context, env []string, layout config.Layout, sandboxDi
 	// Remove any stale IPAM leases from a previous failed or replaced run.
 	cleanupStaleIPAMLeases(containerName)
 
-	nsName := "yoloai-" + containerName
+	nsName := netnsNameFor(containerName)
 	// Delete any stale netns from a previous failed run before creating a fresh one.
 	_ = deleteNetNS(nsName)
 	netnsPath, err := createNetNS(nsName)
