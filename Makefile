@@ -27,9 +27,9 @@ PY_REQ_LOCK := runtime/monitor/tests/requirements-dev.lock
 # listed target actually runs.
 DOCKER_HOST_ENV := $(DOCKER_HOST)
 DOCKER_HOST_RESOLVED = $(if $(DOCKER_HOST_ENV),$(DOCKER_HOST_ENV),$(shell docker context inspect --format '{{.Endpoints.docker.Host}}' 2>/dev/null))
-integration e2e base-image smoketest smoketest-full: export DOCKER_HOST = $(DOCKER_HOST_RESOLVED)
+integration e2e base-image smoketest smoketest-quick: export DOCKER_HOST = $(DOCKER_HOST_RESOLVED)
 
-.PHONY: build test fmt lint vet-tagged crosscheck tidy-check govulncheck hadolint actionlint check cover integration e2e integration-podman integration-containerd integration-apple integration-seatbelt integration-tart python-test python-typecheck ensure-python-venv setup-dev-python smoketest smoketest-full releasetest setcap clean clean-testtmp
+.PHONY: build test fmt lint vet-tagged crosscheck tidy-check govulncheck hadolint actionlint check cover integration e2e integration-podman integration-containerd integration-apple integration-seatbelt integration-tart python-test python-typecheck ensure-python-venv setup-dev-python smoketest smoketest-quick releasetest setcap clean clean-testtmp
 
 # Always invoke `go build` and let it decide whether to relink. `go build` does
 # complete, authoritative dependency tracking — crucially including //go:embed'd
@@ -109,37 +109,28 @@ crosscheck:
 check: lint vet-tagged crosscheck tidy-check hadolint actionlint test python-test
 
 ## ensure-python-venv: provision the uv-managed venv on demand (idempotent).
-## When uv is present this syncs the lockfile-pinned tools into .venv; when uv
-## is absent it does nothing, so the python-* targets below skip gracefully and
-## a fresh clone without uv still gets a green `make check`. uv pip sync is
-## near-instant once the venv already matches the lock, so running this on every
-## `make check` is cheap and removes any need to call setup-dev-python by hand.
+## The Python surface is part of the app (contributors can modify it), so it is
+## REQUIRED, not optional (D112): uv is mandatory and its absence FAILS loudly —
+## `uv`/`python3` install everywhere including CI, so they get no carve-out. uv pip
+## sync is near-instant once the venv already matches the lock, so running this on
+## every `make check` is cheap and removes any need to call setup-dev-python by hand.
 ensure-python-venv:
-	@if command -v uv >/dev/null 2>&1; then \
-		[ -x $(VENV)/bin/python ] || uv venv --quiet $(VENV); \
-		uv pip sync --quiet --python $(VENV)/bin/python $(PY_REQ_LOCK); \
-	fi
+	@command -v uv >/dev/null 2>&1 || { echo "ERROR: uv is required (Python is part of the app; D112). Install: https://docs.astral.sh/uv/"; exit 1; }
+	@[ -x $(VENV)/bin/python ] || uv venv --quiet $(VENV)
+	@uv pip sync --quiet --python $(VENV)/bin/python $(PY_REQ_LOCK)
 
-## python-test: run pytest from the uv-managed venv (skip when venv absent)
+## python-test: run pytest from the uv-managed venv (uv required; see D112)
 python-test: python-typecheck
-	@if [ -x $(PYTEST) ]; then \
-		$(PYTEST) runtime/monitor/tests/ -v; \
-		$(PYTEST) scripts/tests/ -v; \
-	else \
-		echo "Python tests skipped (install uv to enable: https://docs.astral.sh/uv/)"; \
-	fi
+	$(PYTEST) runtime/monitor/tests/ -v
+	$(PYTEST) scripts/tests/ -v
 
 ## python-typecheck: run mypy --strict from the uv-managed venv on the typed surface
 ## Two invocations: the monitor surface and the smoke harness each have their
 ## own tests/conftest.py, which mypy would otherwise reject as a duplicate
 ## top-level "conftest" module if checked in one pass.
 python-typecheck: ensure-python-venv
-	@if [ -x $(MYPY) ]; then \
-		$(MYPY) --strict runtime/monitor/setup_helpers.py runtime/monitor/tmux_io.py runtime/monitor/tests/; \
-		$(MYPY) --strict scripts/smoke_test.py scripts/govulncheck.py scripts/tests/; \
-	else \
-		echo "Python type-check skipped (install uv to enable: https://docs.astral.sh/uv/)"; \
-	fi
+	$(MYPY) --strict runtime/monitor/setup_helpers.py runtime/monitor/tmux_io.py runtime/monitor/tests/
+	$(MYPY) --strict scripts/smoke_test.py scripts/govulncheck.py scripts/tests/
 
 ## setup-dev-python: explicitly provision the uv-managed venv with lockfile-pinned
 ## dev tools. Optional for local dev (the python-* targets self-provision via
@@ -163,18 +154,15 @@ cover:
 base-image: build
 	./$(BINARY) system build --backend docker
 
-## integration: run every backend's integration suite. Each backend self-skips
-## when its daemon/host isn't available (TestMain gate / skipIfNotAvailable), so
-## the same target runs on any host and exercises whatever that host supports —
-## the host-aware contract. Docker additionally drives the cross-cutting sandbox/
-## and cli/ suites, which require a real container daemon.
+## integration: run every backend's integration suite. A platform-possible
+## backend that's absent FAILS loudly (D112) — never a silent skip; the only
+## downgrade is the YOLOAI_TEST_UNCONTROLLED_BACKENDS carve-out (CI steps we don't
+## own), which each backend's TestMain honors itself. Docker is mandatory here: it
+## drives the cross-cutting sandbox/ and cli/ suites AND builds the base image, so
+## `make base-image` fails loudly if the daemon is absent.
 integration:
-	@if docker info >/dev/null 2>&1; then \
-		$(MAKE) base-image && \
-		go test -tags=integration -v -count=1 -timeout=10m ./internal/orchestrator/ ./runtime/docker/ ./internal/cli/; \
-	else \
-		echo "Docker unavailable — skipping Docker integration tests"; \
-	fi
+	$(MAKE) base-image
+	go test -tags=integration -v -count=1 -timeout=10m ./internal/orchestrator/ ./runtime/docker/ ./internal/cli/
 	@$(MAKE) integration-containerd integration-apple integration-seatbelt integration-tart
 
 e2e: build
@@ -246,23 +234,25 @@ integration-tart:
 	fi
 	go test -tags=integration -v -count=1 -timeout=40m ./runtime/tart/
 
-## smoketest: run base-tier smoke tests (docker + containerd-vm / tart)
-## VM backends require root (CAP_SYS_ADMIN + write to /var/run/netns/).
-## Run as root: sudo -E make smoketest
+## smoketest: run the full smoke matrix — every backend this host can exercise,
+## across every installed docker provider (macOS: OrbStack + Docker Desktop; errors
+## if an installed provider isn't running). Single-provider hosts (Linux) run once.
+## STRICT (D112): a scheduled backend that's absent FAILS unless carved out via
+## YOLOAI_TEST_UNCONTROLLED_BACKENDS. VM backends require root (CAP_SYS_ADMIN +
+## /var/run/netns/), so this auto-escalates to root on Linux (preserving PATH/env).
 smoketest: build
-	python3 scripts/smoke_test.py --debug $(SMOKE_ARGS)
-
-## smoketest-full: run full-tier smoke tests (all backends including podman, gVisor)
-## across every installed docker provider (macOS: OrbStack + Docker Desktop;
-## errors if an installed provider isn't running). Single-provider hosts (Linux)
-## run once. Automatically escalates to root on Linux (preserving PATH and env).
-smoketest-full: build
 	@if [ "$$(uname)" = "Linux" ] && [ "$$(id -u)" != "0" ]; then \
-		echo "==> Escalating to root for full smoke tests..."; \
-		exec sudo -E PATH="$$PATH" $(MAKE) smoketest-full SMOKE_ARGS="$(SMOKE_ARGS)"; \
+		echo "==> Escalating to root for the full smoke matrix..."; \
+		exec sudo -E PATH="$$PATH" $(MAKE) smoketest SMOKE_ARGS="$(SMOKE_ARGS)"; \
 	else \
-		python3 scripts/smoke_test.py --full --debug --all-docker-providers $(SMOKE_ARGS); \
+		python3 scripts/smoke_test.py --debug --all-docker-providers $(SMOKE_ARGS); \
 	fi
+
+## smoketest-quick: run only the primary machinery — the docker/container core path
+## (create -> agent -> sentinel -> diff/apply). A fast, narrow but honest dev signal;
+## STILL STRICT — Docker is primary machinery, so its absence FAILS. No root needed.
+smoketest-quick: build
+	python3 scripts/smoke_test.py --quick --debug $(SMOKE_ARGS)
 
 ## releasetest: run every test tier, fastest first
 ## Runs: lint → unit → integration → e2e → podman integration → full smoke
@@ -274,7 +264,7 @@ smoketest-full: build
 ## suites still skip cleanly via TestMain.
 releasetest: export YOLOAI_TEST_TART_VM := 1
 releasetest: export YOLOAI_TEST_APPLE_BASE := 1
-releasetest: check integration e2e integration-podman smoketest-full
+releasetest: check integration e2e integration-podman smoketest
 
 ## setcap: grant capabilities needed for VM backends (must re-run after each build)
 setcap: build

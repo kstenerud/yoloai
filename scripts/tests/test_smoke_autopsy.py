@@ -144,7 +144,6 @@ def _make_ctx(tmp_path: Path) -> smoke_test.RunContext:
         log_dir=tmp_path / "run",
         run_id="smoke-test",
         fixture_dir=tmp_path,
-        full=True,
     )
 
 

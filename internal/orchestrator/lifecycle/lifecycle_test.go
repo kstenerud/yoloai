@@ -947,7 +947,8 @@ func TestReset_OriginalMissing(t *testing.T) {
 
 func TestReset_InPlace_SyncsWorkdir(t *testing.T) {
 	if _, err := exec.LookPath("rsync"); err != nil {
-		t.Skip("rsync not installed")
+		t.Fatalf("rsync is required for in-place reset tests and is not on PATH "+
+			"(D112 — required tooling, no carve-out; install rsync): %v", err)
 	}
 
 	tmpDir := t.TempDir()
@@ -1044,7 +1045,8 @@ func TestReset_InPlace_SyncsWorkdir(t *testing.T) {
 
 func TestReset_InPlace_KeepCache(t *testing.T) {
 	if _, err := exec.LookPath("rsync"); err != nil {
-		t.Skip("rsync not installed")
+		t.Fatalf("rsync is required for in-place reset tests and is not on PATH "+
+			"(D112 — required tooling, no carve-out; install rsync): %v", err)
 	}
 
 	tmpDir := t.TempDir()
@@ -1106,7 +1108,8 @@ func TestReset_InPlace_KeepCache(t *testing.T) {
 
 func TestReset_InPlace_KeepFiles(t *testing.T) {
 	if _, err := exec.LookPath("rsync"); err != nil {
-		t.Skip("rsync not installed")
+		t.Fatalf("rsync is required for in-place reset tests and is not on PATH "+
+			"(D112 — required tooling, no carve-out; install rsync): %v", err)
 	}
 
 	tmpDir := t.TempDir()
