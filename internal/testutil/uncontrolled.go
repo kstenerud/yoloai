@@ -29,7 +29,7 @@ const uncontrolledBackendsEnv = "YOLOAI_TEST_UNCONTROLLED_BACKENDS"
 // meaning nothing is carved out and every backend is mandatory.
 func UncontrolledBackends() map[string]bool {
 	out := map[string]bool{}
-	for name := range strings.SplitSeq(os.Getenv(uncontrolledBackendsEnv), ",") { //nolint:forbidigo // policy env: THE single carve-out read
+	for name := range strings.SplitSeq(os.Getenv(uncontrolledBackendsEnv), ",") {
 		if name = strings.TrimSpace(name); name != "" {
 			out[name] = true
 		}
