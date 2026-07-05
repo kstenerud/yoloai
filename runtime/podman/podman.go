@@ -173,13 +173,19 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 	if r.rootless && cfg.UsernsMode == "" && goruntime.GOOS != "darwin" {
 		// SYS_ADMIN (from recipe/profile cap_add) requires real root in container.
 		hasSysAdmin := slices.Contains(cfg.CapAdd, "SYS_ADMIN")
-		// Only use keep-id when SYS_ADMIN is not requested.
+		// Only use keep-id when SYS_ADMIN is not requested. Map the host user onto
+		// the image's yoloai user (UID 1001), not 1:1 — privileged and
+		// non-privileged alike. Plain keep-id would run the agent as the host UID
+		// (e.g. 1000), but /home/yoloai and the seeded agent config are owned by
+		// yoloai (1001), and the entrypoint UID-remap only runs when the container
+		// starts as root (it doesn't under keep-id). The agent then can't read its
+		// own home config — for Claude Code that means its folder-trust/onboarding/
+		// permissions gating blocks on interactive dialogs and the sandbox hangs.
+		// Mapping onto 1001 also gives the agent yoloai's passwordless sudo +
+		// docker-group membership, and host-written 0600 files (prompt, credentials)
+		// still map to a UID the agent owns.
 		if !hasSysAdmin {
-			if cfg.Privileged {
-				cfg.UsernsMode = "keep-id:uid=1001,gid=1001"
-			} else {
-				cfg.UsernsMode = "keep-id"
-			}
+			cfg.UsernsMode = "keep-id:uid=1001,gid=1001"
 		}
 	}
 	return r.Runtime.Create(ctx, cfg)
