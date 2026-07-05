@@ -111,6 +111,33 @@ func TestNetwork_Allowed_NoIsolation_Empty(t *testing.T) {
 	assert.Empty(t, allowed)
 }
 
+// TestNetwork_Mode covers the daemon-free configured-mode read: Mode() branches
+// the `allowed` command without a backend, so listing works on a stopped/
+// unreachable sandbox (the mode is netpolicy.json intent — D90).
+func TestNetwork_Mode(t *testing.T) {
+	c, sys := clientWithSandbox(t)
+
+	writeIsolatedSandbox(t, sys, "iso", "claude", []string{"example.com"})
+	mode, err := mustSandbox(t, c, "iso").Network().Mode()
+	require.NoError(t, err)
+	assert.Equal(t, NetworkModeIsolated, mode)
+
+	writeNoNetworkSandbox(t, sys, "nonet")
+	mode, err = mustSandbox(t, c, "nonet").Network().Mode()
+	require.NoError(t, err)
+	assert.Equal(t, NetworkModeNone, mode)
+
+	// No netpolicy.json at all (default networking): Load returns a zero-value
+	// record, so the mode reads back as "" (NetworkModeDefault).
+	sandboxDir := sys.layout.SandboxDir("open")
+	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
+	require.NoError(t, store.SaveEnvironment(sandboxDir, &store.Environment{Name: "open", CreatedAt: time.Now()}))
+	require.NoError(t, agentcfg.Save(sandboxDir, &agentcfg.AgentConfig{AgentType: "claude"}))
+	mode, err = mustSandbox(t, c, "open").Network().Mode()
+	require.NoError(t, err)
+	assert.Equal(t, NetworkModeDefault, mode)
+}
+
 func TestNetwork_Allowed_AgentRequirement_Provenance(t *testing.T) {
 	c, sys := clientWithSandbox(t)
 	// Claude's NetworkAllowlist includes api.anthropic.com.

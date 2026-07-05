@@ -20,12 +20,12 @@ func runSandboxAllowed(cmd *cobra.Command, name string) error {
 		// cases render their static messages without making the library
 		// load the allowlist. Network.Allowed() doesn't reject those
 		// states (read-only never errors) — we surface them here.
-		// NetworkMode rides on SandboxInfo (not Environment) — D90.
-		info, err := sb.Inspect(ctx)
+		// Read the configured mode from netpolicy.json (D90) rather than a
+		// full Inspect, so listing the allowlist needs no running backend.
+		networkMode, err := sb.Network().Mode()
 		if err != nil {
 			return err
 		}
-		networkMode := info.NetworkMode
 
 		allowed, err := sb.Network().Allowed(ctx)
 		if err != nil {

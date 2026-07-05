@@ -63,6 +63,19 @@ func (n *Network) Allowed(_ context.Context) ([]AllowedDomain, error) {
 	return computeAllowedDomains(np.Allow, agentType), nil
 }
 
+// Mode returns the sandbox's configured network mode — "isolated", "none", or
+// "" (no isolation) — read from netpolicy.json. It does NOT contact the backend:
+// the mode is the configured policy intent (D90), persisted on disk, so callers
+// can branch on it without a running sandbox or a reachable daemon. A sandbox
+// with default networking writes no record, which reads back as "".
+func (n *Network) Mode() (NetworkMode, error) {
+	np, err := n.loadNetpolicy()
+	if err != nil {
+		return "", err
+	}
+	return NetworkMode(np.Mode), nil
+}
+
 // agentType resolves the sandbox's configured agent type from agent.json, the
 // inside-process config the substrate record no longer carries (Q104). It feeds
 // the network-floor provenance; a sandbox loaded successfully has been migrated,
