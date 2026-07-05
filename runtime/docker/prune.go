@@ -236,7 +236,7 @@ func (r *Runtime) reclaimableBytes(ctx context.Context, includeImages bool) int6
 func (r *Runtime) pruneCacheDryRun(ctx context.Context, includeImages bool, output io.Writer) int64 {
 	du, err := r.client.DiskUsage(ctx, types.DiskUsageOptions{})
 	if err != nil {
-		fmt.Fprintf(output, "%s: cache prune skipped (--dry-run); usage query failed: %v\n", r.binaryName, err) //nolint:errcheck
+		fmt.Fprintf(output, "%s: could not estimate reclaimable cache: %v\n", r.binaryName, err) //nolint:errcheck
 		return 0
 	}
 	cached, images := r.splitCacheBytes(du)
@@ -246,7 +246,13 @@ func (r *Runtime) pruneCacheDryRun(ctx context.Context, includeImages bool, outp
 		what = "unused images, volumes, build cache"
 		estimate += images
 	}
-	fmt.Fprintf(output, "%s: cache prune skipped (--dry-run): would remove %s (~%s)\n", r.binaryName, what, runtime.FormatBytes(estimate)) //nolint:errcheck
+	// This runs as the CLI's internal scan phase on every prune — not only under
+	// --dry-run — so it must not frame itself as a dry-run mode the user opted
+	// into. Print the per-backend breakdown only when there's something to
+	// reclaim; the aggregate banner and "Nothing to prune" cover the rest.
+	if estimate > 0 {
+		fmt.Fprintf(output, "%s: would remove %s (~%s)\n", r.binaryName, what, runtime.FormatBytes(estimate)) //nolint:errcheck
+	}
 	if includeImages {
 		r.warnImageReclaimBlockers(du, output)
 	}

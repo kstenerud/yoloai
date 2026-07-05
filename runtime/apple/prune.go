@@ -151,18 +151,22 @@ func dryRunReclaimEstimate(df dfUsage, includeImages bool) int64 {
 func (r *Runtime) pruneCacheDryRun(ctx context.Context, includeImages bool, output io.Writer) int64 {
 	df, err := r.systemDF(ctx)
 	if err != nil {
-		fmt.Fprintf(output, "apple: cache prune skipped (--dry-run); usage query failed: %v\n", err) //nolint:errcheck
+		fmt.Fprintf(output, "apple: could not estimate reclaimable cache: %v\n", err) //nolint:errcheck
 		return 0
 	}
 
+	// This runs as the CLI's internal scan on every prune, not only under
+	// --dry-run, so it must not frame itself as a dry-run mode. The BuildKit
+	// build cache freed by deleting the builder is unmeasurable up front, so it's
+	// always called out even when the measurable estimate is 0.
 	estimate := dryRunReclaimEstimate(df, includeImages)
 	if includeImages {
 		//nolint:errcheck // best-effort progress output
-		fmt.Fprintf(output, "apple: cache prune skipped (--dry-run): would remove build cache + dangling and unused images (~%s); BuildKit build cache also freed\n",
+		fmt.Fprintf(output, "apple: would remove build cache + dangling and unused images (~%s); BuildKit build cache also freed\n",
 			runtime.FormatBytes(estimate))
 	} else {
 		//nolint:errcheck // best-effort progress output
-		fmt.Fprintf(output, "apple: cache prune skipped (--dry-run): would remove build cache + dangling images (size measured after prune); BuildKit build cache also freed\n")
+		fmt.Fprintf(output, "apple: would remove build cache + dangling images (size measured after prune); BuildKit build cache also freed\n")
 	}
 	return estimate
 }
