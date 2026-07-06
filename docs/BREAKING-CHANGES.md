@@ -55,6 +55,29 @@ of history preservation with the `:copy-strict` suffix (`yoloai new ./proj:copy-
 profile `copy_strict: true` key. `:copy-strict` reproduces the previous fresh-baseline
 behavior. Precedence: per-dir suffix > `--copy-strict` flag > profile config.
 
+### A failed or interrupted `yoloai new` / `yoloai run` no longer leaves a sandbox behind
+
+**Previous behavior:** if the launch step of `yoloai new` or `yoloai run` failed —
+or was interrupted with Ctrl-C — the just-created sandbox was left on disk (in a
+"created, stopped" state), and on some failure paths its container and CNI network
+namespace leaked as well. Re-running the same `yoloai new <name>` then failed with
+"sandbox already exists", and the leaked container/netns could balk a retry.
+
+**New behavior:** a failed or interrupted `new`/`run` now **rolls back completely** —
+the container, network namespace, credential broker, and the sandbox directory are
+all removed — so re-running the *exact same command* is clean. (A failed `yoloai
+start`/`restart` on a sandbox that already existed rolls back only the partial launch
+and keeps the sandbox, so it stays "created, stopped" and is retryable in place.)
+
+**Impact:** a script that ran `yoloai new <name>`, saw it fail, and then relied on
+`<name>` still existing (e.g. to `yoloai start <name>` or inspect it) will now find
+nothing — the failed `new` cleaned up after itself. This only affects the *failure*
+path; a successful `new`/`run` is unchanged.
+
+**Migration:** on a failed `new`/`run`, re-run the same command rather than expecting
+a half-created sandbox to resume. There is no configuration to restore the old
+leave-behind behavior.
+
 ## v0.6.0
 
 ### `:overlay` directory mode removed
