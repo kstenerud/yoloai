@@ -9,8 +9,10 @@ seatbelt reaper (Phase 1c) is built and macOS-verified — see the
 [macOS build brief](host-artifact-reclamation-macos-build.md) for results. It
 surfaced a residual (DF77, orphaned monitor procs resurrecting deleted dirs)
 which was **fixed in the same pass** by generalizing the sweep from tmux-only to
-the whole host process group. Phase 3 is a manual step.
-**Decision:** [D114](../../decisions/working-notes.md#d114). **Findings:** DF73–DF77.
+the whole host process group. Phase 3 is a manual step. Both follow-ups (launch
+rollback on failure/interrupt; the `lint-darwin` gate) are **done** — see
+"Follow-ups (done)" below. **Merged to `main`** (`3f15fe87`).
+**Decision:** [D114](../../decisions/working-notes.md#d114). **Findings:** DF73–DF78.
 
 ## Problem
 
@@ -129,13 +131,33 @@ any real user's install. Therefore:
 - **On this dev host:** the `library/microvm/` tree is a one-off manual
   `rm -rf` (operator step; recorded in `reference_disk_reclaim_recipes`).
 
-## Out of scope (follow-up)
+## Follow-ups (done)
 
-- **Signal-handler teardown** — `main.go` only cancels the context on
-  SIGINT/SIGTERM with no deferred injector/netns kill. Wiring a best-effort kill
-  on SIGTERM would stop the common Ctrl-C-during-test leak at the source. SIGKILL
-  is unavoidable (that is what Phase 1 is for). Separate subsystem, separate
-  change — proposed as a follow-up, not part of this plan.
+- **Launch rollback on failure / interrupt (DONE).** The signal-handler idea
+  (`main.go` kill on SIGTERM) was investigated and rejected as the wrong layer:
+  `main.go` doesn't know the sandbox, and the injector is *deliberately*
+  detached to outlive the CLI, so a blind kill would break running agents. The
+  real gap was that a **launch failure or Ctrl-C leaked the container + netns**
+  (the old error path reaped only the broker) — a bug for *any* failure, not
+  just interrupts. Fix, guided by the invariant *"re-running the exact same
+  command must not be balked by leftover state"*: (a) `launch.LaunchContainer`
+  now rolls back its whole partial launch (`rt.Stop`+`rt.Remove` → netns
+  teardown, plus `broker.Stop`) on any post-broker failure, **keeping the dir**
+  so a failed `yoloai start`/`restart` stays cleanly "created, stopped" and is
+  retryable; (b) the composite verbs `new`/`run` additionally **destroy** the
+  sandbox they just created on a start failure, so a failed `yoloai new foo`
+  leaves nothing and `new foo` retried is clean. Both use a **detached,
+  time-bounded context** (`context.WithoutCancel`) because Ctrl-C has already
+  cancelled the caller's ctx and a cancelled ctx can't reach the backend to
+  clean up. (`internal/orchestrator/launch/launch.go` `rollbackPartialLaunch`;
+  `internal/cli/lifecycle/{new,run}.go` `rollbackFailedStart`.) SIGKILL (a hard
+  `kill -9` / second Ctrl-C) still can't run cleanup — that is what the Phase 1
+  sweep backstops.
+- **`lint-darwin` gate (DONE, DF78).** `make check` on Linux didn't lint
+  `//go:build darwin` files (golangci-lint honours build constraints), so a
+  forbidigo violation in a `*_darwin.go` file passed Linux `make check` and only
+  failed on a native-mac run. Added a `lint-darwin` target (host-native linter,
+  `GOOS=darwin` analysis) to `check`.
 
 ## Acceptance criteria
 

@@ -385,6 +385,7 @@ func executeNewCreate(cmd *cobra.Command, ctx context.Context, c *yoloai.Client,
 	// creation summary, matching the old create-starts-by-default flow.
 	if !noStart {
 		if _, err := sb.Start(ctx, yoloai.SandboxStartOptions{Env: opts.Env, Broker: opts.Broker, NoBroker: opts.NoBroker}); err != nil {
+			rollbackFailedStart(ctx, sb)
 			return err
 		}
 	}

@@ -44,7 +44,7 @@ const secretsConsumedTimeout = 30 * time.Second
 // LaunchContainer creates a sandbox instance from State, starts it,
 // and cleans up credential temp files. Used by both initial creation and
 // recreation from environment.json.
-func LaunchContainer(ctx context.Context, d state.Deps, st *state.State) error {
+func LaunchContainer(ctx context.Context, d state.Deps, st *state.State) (err error) {
 	slog.Info("launching container", "event", "sandbox.create.container.launch", "sandbox", st.Name, "image", st.ImageRef)
 	// Use pre-merged env from state if available, otherwise load from config.
 	envVars := st.Env
@@ -70,6 +70,19 @@ func LaunchContainer(ctx context.Context, d state.Deps, st *state.State) error {
 		return err
 	}
 
+	// The injector is now live, and the steps below may create/start the container
+	// and its CNI netns. Roll the whole partial launch back on any failure from
+	// here on, so re-running the launch (yoloai start) isn't balked by a leftover
+	// container/netns and the detached injector is never orphaned. This also covers
+	// Ctrl-C: the signal cancels ctx, the next ctx-aware call errors, and this defer
+	// cleans up on the way out (rollbackPartialLaunch uses a detached context, since
+	// the cancelled ctx can't reach the backend).
+	defer func() {
+		if err != nil {
+			rollbackPartialLaunch(ctx, d.Runtime, st)
+		}
+	}()
+
 	// Deliver the (already-brokered) map. Agent-free hands it to the launched
 	// process's env; legacy stages it to host files bind-mounted at /run/secrets.
 	var secretsDir string
@@ -93,13 +106,29 @@ func LaunchContainer(ctx context.Context, d state.Deps, st *state.State) error {
 	}
 	ports = filterAvailablePorts(ports, outputOr(st.Output))
 
-	if err := buildAndStart(ctx, d.Runtime, st, mnts, ports, secretsDir != "", secretEnv, bro); err != nil {
-		// The injector may have started before the container; reap it so a failed
-		// launch never orphans it (Stop is a no-op when nothing was brokered).
-		_ = broker.NewSidecarHost().Stop(ctx, st.SandboxDir)
-		return err
+	if err = buildAndStart(ctx, d.Runtime, st, mnts, ports, secretsDir != "", secretEnv, bro); err != nil {
+		return err // the deferred rollbackPartialLaunch reaps the injector + container + netns
 	}
 	return nil
+}
+
+// rollbackPartialLaunch reverses a failed LaunchContainer: it stops+removes the
+// container (Remove triggers the backend's netns/CNI teardown) and reaps the
+// detached injector, leaving the sandbox cleanly "created, stopped" so re-running
+// the launch isn't balked by leftover runtime state. Every step is best-effort and
+// idempotent — a no-op when the artifact was never created. It runs on a detached,
+// time-bounded context on purpose: the common trigger is Ctrl-C, which has already
+// cancelled the caller's ctx, and a cancelled ctx can't reach the backend to clean
+// up. The sandbox directory is intentionally kept — a failed start on an existing
+// sandbox must stay "created"; composite verbs (new/run) remove the dir themselves.
+func rollbackPartialLaunch(ctx context.Context, rt runtime.Backend, st *state.State) {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	cname := store.InstanceName(st.Layout.Principal, st.Name)
+	// All best-effort: no-ops when the artifact was never created.
+	_ = rt.Stop(cleanupCtx, cname)
+	_ = rt.Remove(cleanupCtx, cname)
+	_ = broker.NewSidecarHost().Stop(cleanupCtx, st.SandboxDir)
 }
 
 // usesAgentFreeLaunch reports whether this sandbox uses the D88 agent-free

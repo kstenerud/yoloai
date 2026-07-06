@@ -6,12 +6,29 @@ package lifecycle
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"time"
 
 	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
+
+// rollbackFailedStart destroys a sandbox whose start failed during a composite
+// new/run, so re-running the exact same command isn't balked by the half-created
+// sandbox left behind (a failed `yoloai new foo` must leave nothing, else the
+// retry hits "already exists"). Best-effort: the user sees the original start
+// error; a cleanup failure is only logged. Uses a detached, time-bounded context
+// because Ctrl-C — the common trigger — has already cancelled ctx, and teardown
+// needs a live context to reach the backend.
+func rollbackFailedStart(ctx context.Context, sb *yoloai.Sandbox) {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	if _, err := sb.Destroy(cleanupCtx, yoloai.SandboxDestroyOptions{AbandonUnappliedWork: true}); err != nil {
+		slog.Warn("could not roll back sandbox after failed start", "sandbox", sb.Name(), "err", err)
+	}
+}
 
 func NewRunCmd(version string) *cobra.Command {
 	cmd := &cobra.Command{
@@ -145,6 +162,7 @@ func executeRun(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, opts 
 	}
 
 	if _, err := sb.Start(ctx, yoloai.SandboxStartOptions{Env: opts.Env, Broker: opts.Broker, NoBroker: opts.NoBroker}); err != nil {
+		rollbackFailedStart(ctx, sb)
 		return err
 	}
 
