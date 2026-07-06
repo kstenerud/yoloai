@@ -7,6 +7,13 @@ History of codebase findings (issues discovered mid-work) that have been address
 are moved here from [`findings-unresolved.md`](findings-unresolved.md) once resolved, so the
 active file stays a working set. Newest first.
 
+### DF78 — `make check` on Linux did not lint non-host-GOOS (`*_darwin.go`) files — RESOLVED (`lint-darwin` gate added)
+
+- **Discovered:** 2026-07-06 · **Workstream:** D114 Phase 1c (macOS build — surfaced when the Mac agent's native `make check` went red)
+- **Severity:** LOW–MEDIUM (quality-gate gap — a real forbidigo violation reached a commit and passed Linux `make check`, caught only by a native-macOS run)
+- **Disposition:** **RESOLVED 2026-07-06.** `make check`'s `crosscheck` *typechecked* the darwin tree (`GOOS=darwin go vet ./...`) but golangci-lint ran host-GOOS only, and golangci-lint honours build constraints — so lint rules (forbidigo's `exec.Command` ban, etc.) on `//go:build darwin` files were unenforced on Linux. Proven with teeth: a planted `exec.Command` in `reap_darwin.go` passed host lint (`0 issues`) but was caught by the darwin-context lint. **Fix:** a new `make lint-darwin` target, added to `check`, runs golangci-lint against the darwin build context. `go run` under `GOOS=darwin` cross-builds the linter itself (exec format error), so the target installs golangci-lint host-native to a temp GOBIN and points only its *analysis* at darwin via `GOOS/GOARCH` (mirrors `crosscheck`). CI runs `make check`, so it's covered. Verified green.
+- **Pointer:** `Makefile` (`lint-darwin` target + `check`); `internal/broker/reap_darwin.go`, `runtime/seatbelt/prune_darwin.go`.
+
 ### DF72 — containerd/Kata restart (Start after Stop) fails with `ttrpc: closed` — RESOLVED (Start re-creates the netns)
 
 - **Discovered:** 2026-07-05 · **Workstream:** D112 mandatory-infra policy (exposed while running `sudo make integration` for real, not caused by it)

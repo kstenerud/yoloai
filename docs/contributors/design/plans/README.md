@@ -34,7 +34,7 @@ netns/IPAM leases, and (macOS) seatbelt tmux servers — via an **identity-keyed
 sweep** that enumerates each artifact directly and diffs against the sandbox
 registry, plus **kill-before-delete** teardown ordering so the state files that
 key teardown never predecease the artifact. Decision [D114](../../decisions/working-notes.md#d114);
-findings DF71–DF74. Plan: [host-artifact-reclamation.md](host-artifact-reclamation.md).
+findings DF73–DF76. Plan: [host-artifact-reclamation.md](host-artifact-reclamation.md).
 
 ## Architecture Remediation
 

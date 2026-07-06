@@ -7,7 +7,7 @@
 macOS 26 / Apple Silicon. Task A ✅ (darwin injector reaper reaps a real orphaned
 `__inject`, spares a live one). Task B ✅ (seatbelt-tmux reaper built, unit-tested,
 and verified against real leaked servers). One prerequisite fix and one residual
-finding (DF75) surfaced — see **Results** at the bottom. Committed on
+finding (DF77) surfaced — see **Results** at the bottom. Committed on
 `host-artifact-reclamation` (fix `d75b68fe`, reaper `5f7d056a`).
 
 **Status: START HERE (macOS agent).** Design is settled in
@@ -45,7 +45,7 @@ Confirms `internal/broker/ReapOrphanInjectors` reaps a real orphaned `__inject` 
 
 1. Create + run a brokered sandbox so a real `yoloai __inject` process spawns (check
    `~/.yoloai/sandboxes/<name>/injector.json` for its PID; confirm the process is alive).
-2. Simulate the DF71 leak: delete the sandbox dir out from under the running injector —
+2. Simulate the DF73 leak: delete the sandbox dir out from under the running injector —
    `rm -rf ~/.yoloai/sandboxes/<name>` — so `injector.json` (the PID record) is gone but the
    detached process keeps running. Confirm the `__inject` PID is still alive.
 3. `./yoloai system prune --dry-run` → must list `process __inject pid <PID>` under "Orphaned
@@ -93,7 +93,7 @@ new unit test. Commit on `host-artifact-reclamation`.
 
 - Update this brief's status and record results (✅/❌ + output) under each task.
 - Flip the plan's Phase-1c line in [host-artifact-reclamation.md](host-artifact-reclamation.md) from
-  "deferred" to done, and drain any DF74 residual accordingly.
+  "deferred" to done, and drain any DF76 residual accordingly.
 - Report back so the Linux session can fold results in before merge.
 
 ## Results (2026-07-06, macOS 26 / Apple Silicon)
@@ -112,7 +112,7 @@ analyzes host-GOOS files, so this darwin-tagged file was never linted on the Lin
 
 Created a brokered seatbelt sandbox with a dummy `ANTHROPIC_API_KEY` (claude's default OAuth is
 file-based and isn't brokered via the HTTP injector, so no `__inject` spawns — an API-key env var is
-required). Injector PID recorded in `injector.json`. `rm -rf`'d the sandbox dir (DF71 leak); the
+required). Injector PID recorded in `injector.json`. `rm -rf`'d the sandbox dir (DF73 leak); the
 `__inject` process stayed alive. `system prune`:
 
 ```
@@ -146,7 +146,7 @@ data-dir roots, `yoloai ls` reporting zero sandboxes):
 - With a freshly-created **live** seatbelt sandbox present (`active`, in the registry), `--dry-run`
   did **not** list its server and the real prune **spared** it. **No false positive.**
 
-### Residual — DF75 (found AND fixed in this pass)
+### Residual — DF77 (found AND fixed in this pass)
 
 Initial tmux-only reaping left a seatbelt sandbox's sibling `status-monitor.py` / `sandbox-setup.py`
 host processes (detached, ppid=1, separate tree) running after the server was reaped. Worse, the

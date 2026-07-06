@@ -43,7 +43,7 @@ DOCKER_HOST_ENV := $(DOCKER_HOST)
 DOCKER_HOST_RESOLVED = $(if $(DOCKER_HOST_ENV),$(DOCKER_HOST_ENV),$(shell docker context inspect --format '{{.Endpoints.docker.Host}}' 2>/dev/null))
 integration e2e base-image smoketest smoketest-quick: export DOCKER_HOST = $(DOCKER_HOST_RESOLVED)
 
-.PHONY: build test fmt lint vet-tagged crosscheck tidy-check govulncheck hadolint actionlint check cover integration e2e integration-podman integration-containerd integration-apple integration-seatbelt integration-tart python-test python-typecheck ensure-python-venv setup-dev-python smoketest smoketest-quick releasetest setcap clean clean-testtmp
+.PHONY: build test fmt lint lint-darwin vet-tagged crosscheck tidy-check govulncheck hadolint actionlint check cover integration e2e integration-podman integration-containerd integration-apple integration-seatbelt integration-tart python-test python-typecheck ensure-python-venv setup-dev-python smoketest smoketest-quick releasetest setcap clean clean-testtmp
 
 # Always invoke `go build` and let it decide whether to relink. `go build` does
 # complete, authoritative dependency tracking — crucially including //go:embed'd
@@ -67,6 +67,19 @@ lint:
 		echo "gofmt needed:"; echo "$$UNFMT"; exit 1; \
 	fi
 	GOTOOLCHAIN=$(shell PATH="$(PATH)" go env GOVERSION 2>/dev/null) go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.3 run ./...
+
+## lint-darwin: run golangci-lint against the darwin build context so lint rules
+## (forbidigo, etc.) on //go:build darwin files are ENFORCED. The host-GOOS `lint`
+## pass above skips them — golangci-lint honours build constraints, so a real
+## forbidigo violation in a *_darwin.go file passed `make check` on Linux and only
+## failed on a native-macOS run (DF76). `go run` under GOOS=darwin would cross-build
+## the linter itself (exec format error), so install it host-native to a temp GOBIN,
+## then point only its ANALYSIS target at darwin via GOOS/GOARCH. Mirrors crosscheck.
+lint-darwin:
+	@tmp=$$(mktemp -d); \
+	GOBIN=$$tmp go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.3 || { rm -rf $$tmp; exit 1; }; \
+	GOOS=darwin GOARCH=arm64 $$tmp/golangci-lint run ./...; \
+	rc=$$?; rm -rf $$tmp; exit $$rc
 
 tidy-check:
 	@cp go.mod go.mod.bak && cp go.sum go.sum.bak
@@ -120,7 +133,7 @@ crosscheck:
 	GOOS=darwin GOARCH=arm64 go vet ./...
 
 ## check: run all CI checks locally (same as PR checks)
-check: lint vet-tagged crosscheck tidy-check hadolint actionlint test python-test
+check: lint lint-darwin vet-tagged crosscheck tidy-check hadolint actionlint test python-test
 
 ## ensure-python-venv: provision the uv-managed venv on demand (idempotent).
 ## The Python surface is part of the app (contributors can modify it), so it is

@@ -7,10 +7,10 @@
 and Phase 2 built + unit-tested on branch `host-artifact-reclamation`. The
 seatbelt reaper (Phase 1c) is built and macOS-verified — see the
 [macOS build brief](host-artifact-reclamation-macos-build.md) for results. It
-surfaced a residual (DF75, orphaned monitor procs resurrecting deleted dirs)
+surfaced a residual (DF77, orphaned monitor procs resurrecting deleted dirs)
 which was **fixed in the same pass** by generalizing the sweep from tmux-only to
 the whole host process group. Phase 3 is a manual step.
-**Decision:** [D114](../../decisions/working-notes.md#d114). **Findings:** DF71–DF75.
+**Decision:** [D114](../../decisions/working-notes.md#d114). **Findings:** DF73–DF77.
 
 ## Problem
 
@@ -81,7 +81,7 @@ its identity-encoding name/path:
    Task B; `runtime/seatbelt/prune.go`). Enumerates via `ps` every host process
    whose argv points under this data dir's sandboxes but whose sandbox is not in
    the known set — the tmux server AND the detached `sandbox-setup.py` /
-   `status-monitor.py` (DF75), the latter of which otherwise keeps writing into
+   `status-monitor.py` (DF77), the latter of which otherwise keeps writing into
    and resurrecting the deleted dir. tmux servers die via `kill-server` (fallback
    SIGTERM→SIGKILL on the PID when the socket is gone, the common case);
    everything else by PID (ESRCH-tolerant). Pure decision unit-tested;
