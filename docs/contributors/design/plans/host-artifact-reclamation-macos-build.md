@@ -162,3 +162,21 @@ then cleaned by the broken-dir classification and stayed gone, a live sandbox's 
 was spared, and another data dir's processes were spared. No prevention change was needed — normal
 `destroy`/`stop` already cleans the monitor (its `tmux wait-for` returns and it exits); only the
 crash/SIGKILL path creates the orphan, which is exactly what this backstop reconciles.
+
+## Task C — verify the cross-platform lint/vet on the darwin→linux direction (verification only)
+
+`make check`'s `crosscheck` and `lint-cross` now iterate `LINT_PLATFORMS`
+(`linux/amd64 darwin/arm64` in the Makefile), cross-vetting/linting every GOOS
+that isn't the host. On Linux this was verified to cross-check darwin (unchanged
+from before). The **darwin→linux direction has only run on Linux-hosted CI**, never
+from a Mac — so confirm it here:
+
+1. `make crosscheck` on the Mac → must print `>> go vet linux/amd64` and exit 0
+   (it cross-compiles the linux-only backends — `runtime/containerd`, etc. — which
+   is the untested direction; watch for cgo/toolchain errors that only a Mac shows).
+2. `make lint-cross` on the Mac → must print `>> golangci-lint linux/amd64` and exit 0.
+3. `make check` overall green on the Mac.
+
+If the linux cross-vet/lint hits a cgo or cross-toolchain wall on macOS that can't
+be resolved cheaply, report the exact error — we may need `CGO_ENABLED=0` on the
+cross passes or to scope the linux lint. Record ✅/❌ + output.

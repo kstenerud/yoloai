@@ -43,7 +43,7 @@ DOCKER_HOST_ENV := $(DOCKER_HOST)
 DOCKER_HOST_RESOLVED = $(if $(DOCKER_HOST_ENV),$(DOCKER_HOST_ENV),$(shell docker context inspect --format '{{.Endpoints.docker.Host}}' 2>/dev/null))
 integration e2e base-image smoketest smoketest-quick: export DOCKER_HOST = $(DOCKER_HOST_RESOLVED)
 
-.PHONY: build test fmt lint lint-darwin vet-tagged crosscheck tidy-check govulncheck hadolint actionlint check cover integration e2e integration-podman integration-containerd integration-apple integration-seatbelt integration-tart python-test python-typecheck ensure-python-venv setup-dev-python smoketest smoketest-quick releasetest setcap clean clean-testtmp
+.PHONY: build test fmt lint lint-cross vet-tagged crosscheck tidy-check govulncheck hadolint actionlint check cover integration e2e integration-podman integration-containerd integration-apple integration-seatbelt integration-tart python-test python-typecheck ensure-python-venv setup-dev-python smoketest smoketest-quick releasetest setcap clean clean-testtmp
 
 # Always invoke `go build` and let it decide whether to relink. `go build` does
 # complete, authoritative dependency tracking — crucially including //go:embed'd
@@ -61,6 +61,20 @@ test:
 fmt:
 	gofmt -w .
 
+# LINT_PLATFORMS: every GOOS/GOARCH whose build-tagged code must pass `go vet` +
+# golangci-lint. The host platform is covered by `lint` + `test`; `crosscheck` and
+# `lint-cross` additionally vet/lint each OTHER GOOS in this list (host-native
+# tooling, GOOS/GOARCH pointed at the target), so an issue in a //go:build <goos>
+# file is caught whichever OS runs `make check` — not just on a Linux host. Add a
+# platform here once the tree builds for it and the cross targets pick it up.
+#
+# windows/amd64 is intentionally omitted: the tree still calls syscall.Kill /
+# Setsid / Setpgid unconditionally (internal/broker, runtime/tart, runtime/seatbelt),
+# so it does not compile for Windows. Guarding those behind build tags with Windows
+# stubs is the prerequisite for Windows sandbox support; add windows/amd64 here once
+# that lands and the cross vet/lint will start enforcing it.
+LINT_PLATFORMS := linux/amd64 darwin/arm64
+
 lint:
 	@UNFMT=$$(gofmt -l .); \
 	if [ -n "$$UNFMT" ]; then \
@@ -68,18 +82,26 @@ lint:
 	fi
 	GOTOOLCHAIN=$(shell PATH="$(PATH)" go env GOVERSION 2>/dev/null) go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.3 run ./...
 
-## lint-darwin: run golangci-lint against the darwin build context so lint rules
-## (forbidigo, etc.) on //go:build darwin files are ENFORCED. The host-GOOS `lint`
-## pass above skips them — golangci-lint honours build constraints, so a real
-## forbidigo violation in a *_darwin.go file passed `make check` on Linux and only
-## failed on a native-macOS run (DF76). `go run` under GOOS=darwin would cross-build
-## the linter itself (exec format error), so install it host-native to a temp GOBIN,
-## then point only its ANALYSIS target at darwin via GOOS/GOARCH. Mirrors crosscheck.
-lint-darwin:
-	@tmp=$$(mktemp -d); \
-	GOBIN=$$tmp go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.3 || { rm -rf $$tmp; exit 1; }; \
-	GOOS=darwin GOARCH=arm64 $$tmp/golangci-lint run ./...; \
-	rc=$$?; rm -rf $$tmp; exit $$rc
+## lint-cross: run golangci-lint against each non-host GOOS in LINT_PLATFORMS, so
+## lint rules (forbidigo, etc.) on //go:build <goos> files are ENFORCED regardless
+## of which OS runs the gate — golangci-lint honours build constraints, so the
+## host-GOOS `lint` above skips other platforms' files (a forbidigo violation in a
+## *_darwin.go file once passed `make check` on Linux and failed only on a native-mac
+## run — DF78; the mirror hole hid linux-only issues on a Mac). `go run` under a cross
+## GOOS would cross-build the linter itself (exec format error), so install it
+## host-native to a temp GOBIN and point only its ANALYSIS at the target GOOS/GOARCH.
+lint-cross:
+	@hostos="$$(go env GOOS)"; \
+	tmp="$$(mktemp -d)"; \
+	GOBIN="$$tmp" go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.3 || { rm -rf "$$tmp"; exit 1; }; \
+	rc=0; \
+	for plat in $(LINT_PLATFORMS); do \
+		goos="$${plat%/*}"; goarch="$${plat#*/}"; \
+		[ "$$goos" = "$$hostos" ] && continue; \
+		echo ">> golangci-lint $$goos/$$goarch"; \
+		GOOS="$$goos" GOARCH="$$goarch" "$$tmp/golangci-lint" run ./... || rc=1; \
+	done; \
+	rm -rf "$$tmp"; exit $$rc
 
 tidy-check:
 	@cp go.mod go.mod.bak && cp go.sum go.sum.bak
@@ -120,20 +142,25 @@ actionlint:
 vet-tagged:
 	go vet -tags 'integration e2e' ./...
 
-## crosscheck: cross-compile + typecheck the whole tree (incl. the cmd/yoloai
-## binary AND every _test.go) for macOS — the non-host platform. `make check`
-## otherwise only builds for the host (linux), so a darwin-only break — a backend
-## whose Go deps build only on linux, an unconditional import of one, a //go:build
-## typo — used to surface only when someone ran `make releasetest` on a Mac.
-## `go vet` cross-compiles every package and test file for darwin without
-## executing them (a darwin binary can't run on linux), so it stays hermetic and
-## fast. Windows is not a target (the project runs under WSL = linux; docker/tart
-## are //go:build !windows), so only darwin is cross-checked.
+## crosscheck: `go vet` (cross-compile + typecheck the whole tree, incl. the
+## cmd/yoloai binary AND every _test.go) for each non-host GOOS in LINT_PLATFORMS.
+## `make check` otherwise builds only for the host, so a break confined to another
+## platform — a backend whose Go deps build only on one OS, an unconditional import
+## of one, a //go:build typo — would surface only when someone ran the gate on that
+## OS. `go vet` cross-compiles without executing (a foreign binary can't run here),
+## so it stays hermetic and fast. See LINT_PLATFORMS for the platform set (and why
+## Windows isn't in it yet).
 crosscheck:
-	GOOS=darwin GOARCH=arm64 go vet ./...
+	@hostos="$$(go env GOOS)"; \
+	for plat in $(LINT_PLATFORMS); do \
+		goos="$${plat%/*}"; goarch="$${plat#*/}"; \
+		[ "$$goos" = "$$hostos" ] && continue; \
+		echo ">> go vet $$goos/$$goarch"; \
+		GOOS="$$goos" GOARCH="$$goarch" go vet ./... || exit 1; \
+	done
 
 ## check: run all CI checks locally (same as PR checks)
-check: lint lint-darwin vet-tagged crosscheck tidy-check hadolint actionlint test python-test
+check: lint lint-cross vet-tagged crosscheck tidy-check hadolint actionlint test python-test
 
 ## ensure-python-venv: provision the uv-managed venv on demand (idempotent).
 ## The Python surface is part of the app (contributors can modify it), so it is

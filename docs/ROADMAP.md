@@ -31,6 +31,17 @@ added during the containerd implementation correctly flags that containerd doesn
 names — gVisor-on-containerd would use a shim type string instead, fitting the same pattern as
 Kata.
 
+**Windows sandbox support** — yoloAI is Unix-only today. The tree does not compile for
+`GOOS=windows`: `syscall.Kill`, `SysProcAttr.Setsid`, and `SysProcAttr.Setpgid` are used
+unconditionally in `internal/broker` (the credential-injector lifecycle), `runtime/tart`, and
+`runtime/seatbelt` (process spawn/reap). The first, self-contained step toward Windows is to guard
+those Unix primitives behind build tags with Windows stubs (or a small cross-platform process
+helper), the same shape as the existing `//go:build` platform splits (e.g. `internal/broker/reap_*.go`).
+Once the tree builds for Windows, add `windows/amd64` to `LINT_PLATFORMS` in the Makefile — the
+`crosscheck`/`lint-cross` machinery then enforces it automatically — and the actual backend work
+(a Windows container or WSL2-backed runtime) can proceed against a compiling, linted base. Until
+then, Windows users run yoloAI under WSL2 (= Linux), which is the supported path.
+
 ## Deferred migrations
 
 **Claude Code native installer on container backends** — The npm package

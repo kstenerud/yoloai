@@ -153,11 +153,20 @@ any real user's install. Therefore:
   `internal/cli/lifecycle/{new,run}.go` `rollbackFailedStart`.) SIGKILL (a hard
   `kill -9` / second Ctrl-C) still can't run cleanup — that is what the Phase 1
   sweep backstops.
-- **`lint-darwin` gate (DONE, DF78).** `make check` on Linux didn't lint
-  `//go:build darwin` files (golangci-lint honours build constraints), so a
-  forbidigo violation in a `*_darwin.go` file passed Linux `make check` and only
-  failed on a native-mac run. Added a `lint-darwin` target (host-native linter,
-  `GOOS=darwin` analysis) to `check`.
+- **Cross-platform lint + vet machinery (DONE, DF78).** `make check` on Linux
+  didn't lint `//go:build darwin` files (golangci-lint honours build
+  constraints), so a forbidigo violation in a `*_darwin.go` file passed Linux
+  `make check` and only failed on a native-mac run — and the mirror hole hid
+  linux-only issues on a Mac. Replaced the hardcoded-darwin `crosscheck`/
+  `lint-darwin` with a **`LINT_PLATFORMS` list** (`linux/amd64 darwin/arm64`):
+  `crosscheck` (vet) and `lint-cross` (lint) now iterate it, cross-checking every
+  GOOS that isn't the host (host-native tooling, `GOOS/GOARCH` pointed at the
+  target), so the gate is symmetric on either OS. Adding a platform = one line.
+  **Windows is not in the list yet** — the tree calls `syscall.Kill`/`Setsid`/
+  `Setpgid` unconditionally (`internal/broker`, `runtime/tart`, `runtime/seatbelt`),
+  so it doesn't compile for Windows; guarding those behind build tags with Windows
+  stubs is the prerequisite for Windows sandbox support (see ROADMAP). *The
+  darwin→linux cross direction is verified on the macOS side.*
 
 ## Acceptance criteria
 
