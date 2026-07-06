@@ -640,13 +640,13 @@ Use `yoloai config` to view and change settings (keys are automatically routed t
 yoloai config get
 
 # Get a specific setting
-yoloai config get backend
+yoloai config get container_backend
 
 # Change a setting
-yoloai config set backend tart
+yoloai config set container_backend podman
 
 # Reset a setting to its default
-yoloai config reset backend
+yoloai config reset container_backend
 
 # Remove an env var
 yoloai config reset env.OLLAMA_API_BASE

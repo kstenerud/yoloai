@@ -27,10 +27,10 @@ func TestConfig_Effective_OverlaysProfileDefaults(t *testing.T) {
 	c := newTestClient(t)
 	ctx := context.Background()
 
-	require.NoError(t, c.Config().Set(ctx, "backend", "podman"))
+	require.NoError(t, c.Config().Set(ctx, "container_backend", "podman"))
 	out, err := c.Config().Effective(ctx)
 	require.NoError(t, err)
-	assert.Contains(t, out, "backend: podman")
+	assert.Contains(t, out, "container_backend: podman")
 }
 
 // --- Get ---
@@ -48,8 +48,8 @@ func TestConfig_Get_AfterSet(t *testing.T) {
 	c := newTestClient(t)
 	ctx := context.Background()
 
-	require.NoError(t, c.Config().Set(ctx, "backend", "podman"))
-	value, err := c.Config().Get(ctx, "backend")
+	require.NoError(t, c.Config().Set(ctx, "container_backend", "podman"))
+	value, err := c.Config().Get(ctx, "container_backend")
 	require.NoError(t, err)
 	assert.Equal(t, "podman", value)
 }
@@ -93,20 +93,40 @@ func TestConfig_Set_ProfileKey_WritesDefaultsConfig(t *testing.T) {
 	c := newTestClient(t)
 	ctx := context.Background()
 
-	require.NoError(t, c.Config().Set(ctx, "backend", "podman"))
+	require.NoError(t, c.Config().Set(ctx, "container_backend", "podman"))
 
 	defaultsPath := c.layout.DefaultsConfigPath()
 	require.FileExists(t, defaultsPath)
 	data, err := os.ReadFile(defaultsPath) //nolint:gosec // test path
 	require.NoError(t, err)
-	assert.Contains(t, string(data), "backend: podman")
+	assert.Contains(t, string(data), "container_backend: podman")
 }
 
 func TestConfig_Set_CreatesParentDir(t *testing.T) {
 	c := newTestClient(t)
 	// Fresh DataDir; no defaults/ subdir exists yet. Set must create it.
-	require.NoError(t, c.Config().Set(context.Background(), "backend", "podman"))
+	require.NoError(t, c.Config().Set(context.Background(), "container_backend", "podman"))
 	require.FileExists(t, c.layout.DefaultsConfigPath())
+}
+
+func TestConfig_Set_UnknownKey_TypedError(t *testing.T) {
+	c := newTestClient(t)
+
+	err := c.Config().Set(context.Background(), "backend", "podman")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrConfigKeyNotFound))
+	assert.Contains(t, err.Error(), "backend")
+	assert.NoFileExists(t, c.layout.DefaultsConfigPath())
+}
+
+func TestConfig_Set_SectionKeyRejected(t *testing.T) {
+	c := newTestClient(t)
+
+	err := c.Config().Set(context.Background(), "tart", "image")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrConfigKeyNotFound))
+	assert.Contains(t, err.Error(), "tart")
+	assert.NoFileExists(t, c.layout.DefaultsConfigPath())
 }
 
 // --- Reset ---
@@ -115,18 +135,18 @@ func TestConfig_Reset_RemovesUserOverride(t *testing.T) {
 	c := newTestClient(t)
 	ctx := context.Background()
 
-	require.NoError(t, c.Config().Set(ctx, "backend", "podman"))
-	value, err := c.Config().Get(ctx, "backend")
+	require.NoError(t, c.Config().Set(ctx, "container_backend", "podman"))
+	value, err := c.Config().Get(ctx, "container_backend")
 	require.NoError(t, err)
 	require.Equal(t, "podman", value)
 
-	require.NoError(t, c.Config().Reset(ctx, "backend"))
+	require.NoError(t, c.Config().Reset(ctx, "container_backend"))
 
 	// After reset the user override is gone. The baked-in default
-	// has no `backend` set, so Get should report not-found.
-	_, err = c.Config().Get(ctx, "backend")
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrConfigKeyNotFound))
+	// for container_backend is the empty auto-detect value.
+	value, err = c.Config().Get(ctx, "container_backend")
+	require.NoError(t, err)
+	assert.Empty(t, value)
 }
 
 func TestConfig_Reset_GlobalKey(t *testing.T) {
@@ -153,5 +173,14 @@ func TestConfig_Reset_GlobalKey(t *testing.T) {
 func TestConfig_Reset_NonexistentKey_NoError(t *testing.T) {
 	c := newTestClient(t)
 	// Reset is idempotent: clearing a never-set key is a no-op.
-	assert.NoError(t, c.Config().Reset(context.Background(), "backend"))
+	assert.NoError(t, c.Config().Reset(context.Background(), "container_backend"))
+}
+
+func TestConfig_Reset_UnknownKey_TypedError(t *testing.T) {
+	c := newTestClient(t)
+
+	err := c.Config().Reset(context.Background(), "backend")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrConfigKeyNotFound))
+	assert.Contains(t, err.Error(), "backend")
 }

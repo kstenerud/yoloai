@@ -64,6 +64,17 @@ func TestConfigGet_ScalarKey(t *testing.T) {
 	assert.Equal(t, "seatbelt\n", buf.String())
 }
 
+func TestConfigGet_UnknownKeyErrors(t *testing.T) {
+	_ = clitest.Home(t)
+
+	cmd := newConfigGetCmd()
+	cmd.SetArgs([]string{"backend"})
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "config key not found: backend")
+}
+
 func TestConfigSet_ExistingFile(t *testing.T) {
 	dir := cliConfigDir(t)
 	content := "# my config\ncontainer_backend: docker\n"
@@ -91,6 +102,18 @@ func TestConfigSet_NoFile(t *testing.T) {
 	data, err := os.ReadFile(configPath) //nolint:gosec // G304: test code with temp dir path
 	require.NoError(t, err)
 	assert.Contains(t, string(data), "container_backend: tart")
+}
+
+func TestConfigSet_UnknownKeyRejected(t *testing.T) {
+	tmpDir := clitest.Home(t)
+
+	cmd := newConfigSetCmd()
+	cmd.SetArgs([]string{"backend", "tart"})
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "config key not found: backend")
+	assert.NoFileExists(t, filepath.Join(tmpDir, ".yoloai", "library", "defaults", "config.yaml"))
 }
 
 func TestConfigSet_Agent(t *testing.T) {
@@ -139,4 +162,15 @@ func TestConfigReset_RequiresArg(t *testing.T) {
 	cmd := newConfigResetCmd()
 	cmd.SetArgs([]string{})
 	assert.Error(t, cmd.Execute())
+}
+
+func TestConfigReset_UnknownKeyRejected(t *testing.T) {
+	_ = clitest.Home(t)
+
+	cmd := newConfigResetCmd()
+	cmd.SetArgs([]string{"backend"})
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "config key not found: backend")
 }

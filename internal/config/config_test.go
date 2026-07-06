@@ -570,6 +570,75 @@ func TestIsGlobalKey(t *testing.T) {
 	assert.False(t, IsGlobalKey("env.FOO"))
 }
 
+func TestIsKnownConfigPath(t *testing.T) {
+	valid := []string{
+		"agent",
+		"container_backend",
+		"tart",
+		"tart.image",
+		"resources",
+		"resources.cpus",
+		"network",
+		"network.allow",
+		"agent_files",
+		"env",
+		"env.OLLAMA_API_BASE",
+		"agent_args.claude",
+		"model_aliases.fast",
+		"tmux_conf",
+	}
+	for _, path := range valid {
+		assert.True(t, IsKnownConfigPath(path), path)
+	}
+
+	invalid := []string{
+		"",
+		"backend",
+		"tart.foo",
+		"resources.gpu",
+		"network.foo",
+		"mounts.foo",
+		"env.",
+		"model_aliases.fast.extra",
+	}
+	for _, path := range invalid {
+		assert.False(t, IsKnownConfigPath(path), path)
+	}
+}
+
+func TestIsSettableConfigPath(t *testing.T) {
+	valid := []string{
+		"agent",
+		"container_backend",
+		"tart.image",
+		"resources.cpus",
+		"network.isolated",
+		"agent_files",
+		"env.OLLAMA_API_BASE",
+		"agent_args.claude",
+		"model_aliases.fast",
+		"tmux_conf",
+	}
+	for _, path := range valid {
+		assert.True(t, IsSettableConfigPath(path), path)
+	}
+
+	invalid := []string{
+		"",
+		"backend",
+		"tart",
+		"resources",
+		"network",
+		"network.allow",
+		"mounts",
+		"env.",
+		"model_aliases.fast.extra",
+	}
+	for _, path := range invalid {
+		assert.False(t, IsSettableConfigPath(path), path)
+	}
+}
+
 func TestDeleteGlobalConfigField(t *testing.T) {
 	dir, layout := globalConfigDir(t)
 	content := "tmux_conf: default\nmodel_aliases:\n  fast: haiku\n"

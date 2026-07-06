@@ -7,10 +7,94 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"gopkg.in/yaml.v3"
 )
+
+var configMapEntryPaths = map[string]struct{}{
+	"agent_args":    {},
+	"env":           {},
+	"model_aliases": {},
+}
+
+// IsKnownConfigPath reports whether path names a configuration field yoloAI
+// understands. Map-style settings allow exactly one dotted entry below the
+// collection, e.g. env.FOO or model_aliases.fast.
+func IsKnownConfigPath(path string) bool {
+	parts := splitDottedPath(path)
+	if !validDottedParts(parts) {
+		return false
+	}
+
+	if isKnownScalarPath(path, knownSettings) ||
+		isKnownScalarPath(path, globalKnownSettings) ||
+		isKnownCollectionPath(path, knownCollectionSettings) ||
+		isKnownCollectionPath(path, globalKnownCollectionSettings) {
+		return true
+	}
+
+	if len(parts) == 1 {
+		return knownDefaultsKeys[path] || path == "model_aliases" || path == "tmux_conf"
+	}
+
+	if len(parts) == 2 {
+		_, ok := configMapEntryPaths[parts[0]]
+		return ok
+	}
+
+	return false
+}
+
+// IsSettableConfigPath reports whether path can be safely written by
+// `yoloai config set <key> <value>`, which only writes scalar values.
+func IsSettableConfigPath(path string) bool {
+	parts := splitDottedPath(path)
+	if !validDottedParts(parts) {
+		return false
+	}
+
+	if isKnownScalarPath(path, knownSettings) ||
+		isKnownScalarPath(path, globalKnownSettings) ||
+		path == "agent_files" {
+		return true
+	}
+
+	if len(parts) == 2 {
+		_, ok := configMapEntryPaths[parts[0]]
+		return ok
+	}
+
+	return false
+}
+
+func validDottedParts(parts []string) bool {
+	for _, part := range parts {
+		if part == "" {
+			return false
+		}
+	}
+	return true
+}
+
+func isKnownScalarPath(path string, settings []knownSetting) bool {
+	for _, s := range settings {
+		if s.Path == path {
+			return true
+		}
+	}
+	return false
+}
+
+func isKnownCollectionPath(path string, settings []knownCollectionSetting) bool {
+	for _, s := range settings {
+		if s.Path == path {
+			return true
+		}
+	}
+	return false
+}
 
 // buildEffectiveConfigDefaults constructs a yaml.Node mapping tree with all
 // known settings at their default values (scalars and empty collections).
@@ -131,6 +215,10 @@ func setNodeValue(parent *yaml.Node, key string, val *yaml.Node) {
 // mappings/sequences. Falls back to the default for known settings.
 // The bool return indicates whether the key was found (in file or defaults).
 func GetConfigValue(layout Layout, path string) (string, bool, error) {
+	if !IsKnownConfigPath(path) {
+		return "", false, nil
+	}
+
 	var configPath string
 	var defaults []knownSetting
 
@@ -478,6 +566,13 @@ func sortMappingNode(node *yaml.Node) {
 
 // splitDottedPath splits "a.b.c" into ["a", "b", "c"].
 func splitDottedPath(path string) []string {
+	if path == "" {
+		return []string{""}
+	}
+	if !strings.Contains(path, ".") {
+		return []string{path}
+	}
+
 	var parts []string
 	start := 0
 	for i := 0; i < len(path); i++ {

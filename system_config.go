@@ -14,9 +14,9 @@ import (
 	"github.com/kstenerud/yoloai/internal/fileutil"
 )
 
-// ErrConfigKeyNotFound is returned by ConfigAdmin.Get when the
-// requested key isn't present in any config layer (global or
-// profile defaults). Use errors.Is to detect.
+// ErrConfigKeyNotFound is returned by ConfigAdmin when the requested key is not
+// a recognized config path, or when a known key has no value/default. Use
+// errors.Is to detect.
 var ErrConfigKeyNotFound = errors.New("config key not found")
 
 // ConfigAdmin is the System sub-handle for global and
@@ -46,19 +46,22 @@ func (a *ConfigAdmin) Effective(_ context.Context) (string, error) {
 }
 
 // Get returns a single configuration value by dotted key (e.g.
-// "backend", "tart.image", "env.MY_VAR"). Returns
+// "container_backend", "tart.image", "env.MY_VAR"). Returns
 // ErrConfigKeyNotFound when the key isn't present in any layer.
 //
 // The "found" signal is surfaced as a typed error rather than a
 // (value, found, err) tuple so embedder code looks the same as for
 // other "missing thing" cases (errors.Is(err, ErrConfigKeyNotFound)).
 func (a *ConfigAdmin) Get(_ context.Context, key string) (string, error) {
+	if !config.IsKnownConfigPath(key) {
+		return "", configKeyNotFound(key)
+	}
 	value, found, err := config.GetConfigValue(a.layout, key)
 	if err != nil {
 		return "", err
 	}
 	if !found {
-		return "", fmt.Errorf("%w: %s", ErrConfigKeyNotFound, key)
+		return "", configKeyNotFound(key)
 	}
 	return value, nil
 }
@@ -67,6 +70,9 @@ func (a *ConfigAdmin) Get(_ context.Context, key string) (string, error) {
 // layer (global vs profile defaults); the target file is created
 // with a sensible scaffold if it doesn't yet exist.
 func (a *ConfigAdmin) Set(_ context.Context, key, value string) error {
+	if !config.IsSettableConfigPath(key) {
+		return configKeyNotFound(key)
+	}
 	if config.IsGlobalKey(key) {
 		if err := a.ensureGlobalConfig(); err != nil {
 			return err
@@ -86,10 +92,17 @@ func (a *ConfigAdmin) Set(_ context.Context, key, value string) error {
 // Resetting a key that isn't set is not an error; the operation is
 // idempotent.
 func (a *ConfigAdmin) Reset(_ context.Context, key string) error {
+	if !config.IsKnownConfigPath(key) {
+		return configKeyNotFound(key)
+	}
 	if config.IsGlobalKey(key) {
 		return config.DeleteGlobalConfigField(a.layout, key)
 	}
 	return config.DeleteConfigField(a.layout, key)
+}
+
+func configKeyNotFound(key string) error {
+	return fmt.Errorf("%w: %s (run `yoloai config get` to list available keys)", ErrConfigKeyNotFound, key)
 }
 
 // ensureGlobalConfig creates ~/.yoloai/config.yaml with an empty

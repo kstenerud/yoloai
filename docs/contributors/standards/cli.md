@@ -108,7 +108,7 @@ yoloai sandbox info mybox --json      # single sandbox object
 yoloai version --json                 # {"version": "...", "commit": "...", "date": "..."}
 yoloai diff mybox --log --json        # {"commits": [...], "has_uncommitted_changes": bool, "tags": [...]}
 yoloai destroy mybox --json           # {"destroyed": [{"name": "...", "action": "destroyed"}]}
-yoloai config get backend --json      # {"key": "backend", "value": "docker"}
+yoloai config get container_backend --json      # {"key": "container_backend", "value": "docker"}
 ```
 - After state-changing operations, suggest logical next commands (e.g., after `yoloai new`, suggest `yoloai attach`)
 

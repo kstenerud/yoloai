@@ -31,7 +31,7 @@ EXAMPLES
 
      yoloai config set agent gemini
      yoloai config set model sonnet
-     yoloai config set backend tart
+     yoloai config set container_backend podman
      yoloai config set env.OLLAMA_API_BASE \
        http://host.docker.internal:11434
      yoloai config reset model
