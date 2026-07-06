@@ -146,11 +146,19 @@ data-dir roots, `yoloai ls` reporting zero sandboxes):
 - With a freshly-created **live** seatbelt sandbox present (`active`, in the registry), `--dry-run`
   did **not** list its server and the real prune **spared** it. **No false positive.**
 
-### Residual — DF75 (new finding)
+### Residual — DF75 (found AND fixed in this pass)
 
-Reaping the tmux server does **not** take down a seatbelt sandbox's sibling `status-monitor.py` /
-`sandbox-setup.py` host processes (detached, ppid=1, separate tree). After the reap, orphaned
-monitors kept running and polling their now-deleted sockets. The reaper is correct per this brief's
-tmux-only scope; the sibling processes are logged as **DF75** with two fix options (extend the sweep
-to the whole host process group, or kill-before-delete in `Stop`). **Not fixed here — flagged for
-the Linux session to fold in / prioritize.**
+Initial tmux-only reaping left a seatbelt sandbox's sibling `status-monitor.py` / `sandbox-setup.py`
+host processes (detached, ppid=1, separate tree) running after the server was reaped. Worse, the
+surviving `status-monitor.py` keeps **writing into the sandbox dir** (`agent-status.json`, `home/`,
+`logs/`), so after `rm -rf` + tmux reap it **recreated** the dir and `yoloai ls` showed a phantom
+`broken` sandbox — defeating prune's own dir cleanup.
+
+Since this is a real (crash-path) user problem, it was fixed here (commit `3a860e65`): the seatbelt
+sweep was generalized from tmux-only to the whole identity-keyed **host process group** — any host
+process whose argv points under an orphaned sandbox dir is reaped. Verified on macOS: `system prune`
+reaped 4 leaked monitors (sbcheck / wa-orphan / wa-orphan2 / wc-orphan), the resurrected dirs were
+then cleaned by the broken-dir classification and stayed gone, a live sandbox's whole process group
+was spared, and another data dir's processes were spared. No prevention change was needed — normal
+`destroy`/`stop` already cleans the monitor (its `tmux wait-for` returns and it exits); only the
+crash/SIGKILL path creates the orphan, which is exactly what this backstop reconciles.

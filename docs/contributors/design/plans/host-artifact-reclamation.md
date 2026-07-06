@@ -3,11 +3,13 @@
 
 # Host-artifact reclamation
 
-**Status:** Phase 1 (injector + netns + **seatbelt tmux, done**) and Phase 2
-built + unit-tested on branch `host-artifact-reclamation`. The seatbelt-tmux
-reaper (Phase 1c) is now built and macOS-verified — see the
-[macOS build brief](host-artifact-reclamation-macos-build.md) for results;
-it surfaced one residual (DF75). Phase 3 is a manual step.
+**Status:** Phase 1 (injector + netns + **seatbelt host process group, done**)
+and Phase 2 built + unit-tested on branch `host-artifact-reclamation`. The
+seatbelt reaper (Phase 1c) is built and macOS-verified — see the
+[macOS build brief](host-artifact-reclamation-macos-build.md) for results. It
+surfaced a residual (DF75, orphaned monitor procs resurrecting deleted dirs)
+which was **fixed in the same pass** by generalizing the sweep from tmux-only to
+the whole host process group. Phase 3 is a manual step.
 **Decision:** [D114](../../decisions/working-notes.md#d114). **Findings:** DF71–DF75.
 
 ## Problem
@@ -74,16 +76,17 @@ its identity-encoding name/path:
    matching `/var/lib/cni/networks/yoloai/<ip>` lease. Reaps both observed netns.
    The shared `yoloai0` bridge is **left alone** (intentionally persistent —
    `reach.go`).
-3. **Seatbelt host tmux** (darwin) — **DONE** (macOS build brief
+3. **Seatbelt host process group** (darwin) — **DONE** (macOS build brief
    [host-artifact-reclamation-macos-build.md](host-artifact-reclamation-macos-build.md),
-   Task B; `runtime/seatbelt/prune.go`). Enumerates leaked tmux servers via `ps`
-   whose socket path points under this data dir's sandboxes but whose sandbox is
-   not in the known set → `kill-server` (fallback SIGTERM→SIGKILL on the PID when
-   the socket is already gone, the common case). Pure `selectOrphanTmux` decision
-   unit-tested; macOS-verified against real leaked servers. The injector reaper
-   also runs on macOS via the `ps` path (brief Task A, verified). **Residual
-   (DF75):** the sibling `status-monitor.py` / `sandbox-setup.py` host processes
-   orphan independently of the tmux server and are not yet reaped.
+   Task B; `runtime/seatbelt/prune.go`). Enumerates via `ps` every host process
+   whose argv points under this data dir's sandboxes but whose sandbox is not in
+   the known set — the tmux server AND the detached `sandbox-setup.py` /
+   `status-monitor.py` (DF75), the latter of which otherwise keeps writing into
+   and resurrecting the deleted dir. tmux servers die via `kill-server` (fallback
+   SIGTERM→SIGKILL on the PID when the socket is gone, the common case);
+   everything else by PID (ESRCH-tolerant). Pure decision unit-tested;
+   macOS-verified against real leaked processes. The injector reaper also runs on
+   macOS via the `ps` path (brief Task A, verified).
 
 Each reaped artifact is reported (name + kind) and counted into the prune
 result; `doctor` lists them under "Reclaimable now". Dry-run enumerates without
