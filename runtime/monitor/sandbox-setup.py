@@ -200,6 +200,37 @@ def _prepend_macos_toolchain_path(leading_dirs=None):
         log_debug("path_augment", "prepended macOS toolchain dirs", added=":".join(extras))
 
 
+def _discover_node_bin_dir():
+    """Best-effort discovery of the host's node bin dir for host-run agents.
+
+    node may live where a non-interactive `make smoketest` shell can't see it —
+    nvm (~/.nvm/versions/node/...), a version manager, or any node exported only
+    from a login shell. The fixed-dir list in _prepend_macos_toolchain_path()
+    covers the Homebrew cases; this covers the rest by asking a login shell to
+    resolve node, mirroring how the seatbelt git path resolves the real git via
+    `xcrun -f git` (see runtime/seatbelt resolveGitBinary). Returns the bin dir
+    to prepend, or None when node is already on PATH or can't be found — a missing
+    node is NOT fatal, since the native Claude Code install bundles its own
+    runtime and needs no system node."""
+    if shutil.which("node"):
+        return None  # already resolvable on PATH; nothing to prepend
+    shell = os.environ.get("SHELL") or "/bin/zsh"
+    try:
+        proc = subprocess.run(
+            [shell, "-lc", "command -v node"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    lines = [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()]
+    node_path = lines[-1] if lines else ""
+    if node_path and os.path.isfile(node_path) and os.access(node_path, os.X_OK):
+        node_dir = os.path.dirname(node_path)
+        log_debug("node_discover", "resolved node via login shell", node_dir=node_dir)
+        return node_dir
+    return None
+
+
 class Backend(ABC):
     """Abstract base class for sandbox backends."""
 
@@ -690,8 +721,13 @@ swift() {
         """Seatbelt environment preparation: host toolchain PATH + Swift PM cache."""
         # The agent runs on the host, so — like Tart — it needs the Homebrew /
         # keg-only-node@22 dirs on PATH; a non-interactive `make smoketest` shell
-        # usually lacks them, which is why `node --version` fails at launch.
-        _prepend_macos_toolchain_path()
+        # usually lacks them, which is why `node --version` fails at launch. node
+        # may also live outside the fixed Homebrew dirs (nvm, a version manager
+        # exported only from a login shell); discover it the way the git path
+        # resolves the real git, and prepend its dir first. Tart's call site is
+        # left untouched so its behavior is unchanged.
+        node_dir = _discover_node_bin_dir()
+        _prepend_macos_toolchain_path([node_dir] if node_dir else None)
 
         # Redirect Swift PM cache to sandbox-local directories to avoid
         # "not accessible or not writable" errors and maintain isolation.
@@ -811,14 +847,22 @@ def launch_agent(cfg, socket=None, working_dir=None, backend_inst=None, secrets=
     # PATH augmentation for Tart is handled by backend.prepare_environment()
     # before this function is called.
 
-    # Diagnostic: verify Node.js works before launching the agent.
-    # Node.js 22 has known syscall incompatibilities with gVisor ARM64 that
-    # cause silent immediate crashes with no output.
-    node_check = tmux_io.run(["node", "--version"], capture_output=True, text=True)
-    log_info("sandbox.node_check", "node version check",
-             version=node_check.stdout.strip(),
-             returncode=node_check.returncode,
-             stderr=node_check.stderr.strip())
+    # Diagnostic only: verify Node.js works before launching the agent. Node.js 22
+    # has known syscall incompatibilities with gVisor ARM64 that cause silent
+    # immediate crashes with no output. A missing node must NOT abort the launch:
+    # the native Claude Code install bundles its own runtime and needs no system
+    # node, so a seatbelt host without node still runs the agent fine. Without the
+    # guard, subprocess.run raises FileNotFoundError here and kills the whole
+    # launch ("sandbox-exec exited: exit status 1").
+    try:
+        node_check = tmux_io.run(["node", "--version"], capture_output=True, text=True)
+        log_info("sandbox.node_check", "node version check",
+                 version=node_check.stdout.strip(),
+                 returncode=node_check.returncode,
+                 stderr=node_check.stderr.strip())
+    except FileNotFoundError:
+        log_info("sandbox.node_check", "node not found on PATH — skipping diagnostic",
+                 version="", returncode=-1, stderr="node not found on PATH")
 
     # Check that the agent binary exists before launching, so we can emit a
     # clear error instead of "command not found". Use shutil.which() in the
