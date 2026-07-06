@@ -26,6 +26,16 @@ composes with `--network-isolated` (containment step 1). **Next build:
 isolation firewall un-flushable by the agent (netns-sharing installer sidecar; design validated, not
 yet implemented).
 
+## Host-artifact reclamation
+
+Active. Make `yoloai system prune` / `doctor` reap the host-side artifacts yoloAI
+orphans on the non-happy path — leaked `__inject` broker processes, CNI
+netns/IPAM leases, and (macOS) seatbelt tmux servers — via an **identity-keyed
+sweep** that enumerates each artifact directly and diffs against the sandbox
+registry, plus **kill-before-delete** teardown ordering so the state files that
+key teardown never predecease the artifact. Decision [D114](../../decisions/working-notes.md#d114);
+findings DF71–DF74. Plan: [host-artifact-reclamation.md](host-artifact-reclamation.md).
+
 ## Architecture Remediation
 
 Complete — the multi-quarter program (Go↔Python boundary, `runtime.Backend` interface, dependency direction, error patterns, slog conventions) landed; the plan and its audit are archived under `../archive/`. The one release-gated remnant (W1b — retire the launch-prefix legacy path) and the rest of this branch's cross-version concerns are tracked in [release-migration.md](release-migration.md).

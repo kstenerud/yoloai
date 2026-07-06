@@ -23,6 +23,57 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 
 ## Findings
 
+### DF76 — `make check` on Linux does not lint non-host-GOOS (`*_darwin.go`) files, so their lint violations slip through
+
+- **Discovered:** 2026-07-06 · **Workstream:** D114 Phase 1c (macOS build — surfaced when the Mac agent's native `make check` went red)
+- **Severity:** LOW–MEDIUM (quality-gate gap — a real forbidigo violation reached a commit and passed Linux `make check`, caught only by a native-macOS run)
+- **Disposition:** PARKED (backstop exists: native-macOS `make check` in the mac-verification / release flow catches it, as it just did; a Linux-side darwin-lint pass would catch it earlier)
+- **Description:** `make check`'s `crosscheck` runs `GOOS=darwin GOARCH=arm64 go vet ./...` — a **typecheck** of the darwin tree — but golangci-lint (`make lint`) runs only for the **host** GOOS (linux), and golangci-lint skips files excluded by build constraints. So lint rules (forbidigo's `exec.Command` ban, etc.) on `//go:build darwin` code are **unenforced on Linux**. The committed `internal/broker/reap_darwin.go` used raw `exec.Command("ps")` (a forbidigo violation), passed Linux `make check`, and failed only when `make check` ran natively on macOS (fixed, commit `d75b68fe`, routed through `sysexec`). The symmetric risk exists for any darwin-only lint rule.
+- **Trigger / fix:** add a `GOOS=darwin` golangci-lint pass to `make check` (mirroring `crosscheck`'s cross-GOOS vet), or scope one to the backend darwin files; verify it does not introduce cross-compile-only lint noise. Until then, native-macOS `make check` (the mac-verification flow) is the backstop.
+- **Pointer:** `Makefile` (`lint` vs `crosscheck` targets); `internal/broker/reap_darwin.go`, `runtime/seatbelt/prune_darwin.go` (darwin files Linux lint skips).
+
+### DF75 — Seatbelt `status-monitor.py` / `sandbox-setup.py` host processes orphan independently of the tmux server
+
+- **Discovered:** 2026-07-06 · **Workstream:** D114 Phase 1c (macOS build — seatbelt tmux reaper verification)
+- **Severity:** MEDIUM (persistent leaked python processes *and* they resurrect deleted sandbox-dir state — see below — defeating `rm -rf`/prune dir cleanup and producing phantom "broken" sandboxes)
+- **Disposition:** ADDRESSED-IN-PLACE (2026-07-06, commit `3a860e65`) — the seatbelt sweep was generalized from tmux-only to the whole identity-keyed **host process group**: any host process whose argv points under an orphaned sandbox dir is reaped (tmux server, python setup/monitor, panes). macOS-verified: a `system prune` now reaps the leaked monitors, and because the reaper runs before the broken-dir classification, the resurrected dirs are then cleaned and stay gone. A live sandbox's whole group and another data dir's processes are spared. **This is the reconciler backstop; only the crash/SIGKILL path creates these (normal `destroy`/`stop` already cleans them — the monitor's `tmux wait-for` returns and it exits), so no prevention change was needed.**
+- **Description:** Besides its tmux server, a seatbelt sandbox spawns two detached (ppid=1) host python processes — `bin/sandbox-setup.py seatbelt <sandboxDir>` and `bin/status-monitor.py … <tmux.sock>` — a separate process tree from the server. On the DF74 leak path (sandbox dir removed out from under a running sandbox), reaping the orphaned tmux server does **not** take them down: verified on macOS 2026-07-06 that after `system prune` reaped the sbcheck/wa-orphan/wa-orphan2 tmux servers, their `status-monitor.py` processes (pids 10202, 93593, 97481) kept running, polling now-deleted sockets. They do not self-exit (pid 10202 had been alive for days).
+- **Worse — dir resurrection:** the orphaned `status-monitor.py` keeps **writing into the sandbox dir** (it holds `cwd` in `work/…` and writes `agent-status.json`, `backend/stderr.log`, `logs/monitor.jsonl`). Verified: after `rm -rf`'ing `wc-orphan` and reaping its tmux server, the surviving monitor (pid 22773) **recreated** `wc-orphan/agent-status.json` + `home/`, so `yoloai ls` then showed a phantom `broken` `wc-orphan`. So the monitor doesn't just leak a process — it defeats the very dir-deletion that prune (and the Phase-2 kill-before-delete ordering) depends on, and manufactures broken-sandbox entries. This makes the fix higher-priority than a bare process reap.
+- **Trigger / fix options:** (a) **backstop** — extend the seatbelt orphan sweep to reap **all** host processes whose argv points under an orphaned sandbox dir (identity-keyed by `SandboxesDir()` path, the same principle), not just the tmux server; or (b) **stop creation** — Phase-2-style kill-before-delete: have `Stop`/teardown kill the monitor/setup process group before the dir is removed. (a) is the reconciler backstop; (b) prevents the orphan.
+- **Pointer:** `runtime/seatbelt/prune.go` (`reapOrphanTmux` — tmux-only); `runtime/seatbelt/seatbelt.go` (`Stop`, `killByPID`); `runtime/monitor/` (`status-monitor.py`, `sandbox-setup.py`).
+
+### DF71 — Leaked `yoloai __inject` broker process outlives its sandbox with no reaper
+
+- **Discovered:** 2026-07-06 · **Workstream:** post-v0.7.0 disk-leak investigation ([host-artifact-reclamation.md](plans/host-artifact-reclamation.md), [D114](../decisions/working-notes.md#d114))
+- **Severity:** MEDIUM (leaked **root** process holding a listening socket, indefinitely; hygiene/resource, not data loss — pre-existing, latent before v0.7.0)
+- **Disposition:** ESCALATED — fixed by D114 (Phase 1 sweep + Phase 2 ordering).
+- **Description:** The broker is `Setsid`-detached by design (must outlive the CLI so the agent keeps running) and its lifetime is **not bound to the container**. Its PID is recorded only in the per-sandbox `injector.json`. The `create`-replace path (`create.go` → `launch.Teardown`) deletes the sandbox dir — **including `injector.json`** — but never calls `stopInjector`, so the process is orphaned *and* its record is gone; no later `SidecarHost.Stop` can find it. Crash/SIGKILL/timeout also skip `stopInjector`. Observed live: a 4-day-old `yoloai __inject` on `10.89.0.1:33371`, `exe` `(deleted)`, with `yoloai ls` empty. No orphan sweep enumerates `__inject` processes (prune is container-label scoped).
+- **Pointer:** `internal/broker/host.go` (`spawn` Setsid `:164`, `Stop`/`killProcess`, `injector.json`); `internal/orchestrator/create/create.go:536` (Teardown without stopInjector); `internal/orchestrator/lifecycle/lifecycle.go:42-46,66` (the correct `stopInjector`-before-Teardown ordering to mirror).
+
+### DF72 — Leaked CNI network namespace + IPAM lease unreapable once its state file or container record is gone
+
+- **Discovered:** 2026-07-06 · **Workstream:** post-v0.7.0 disk-leak investigation (D114)
+- **Severity:** MEDIUM (resource leak — netns + tap + IPAM lease; containerd/Kata on Linux)
+- **Disposition:** ESCALATED — fixed by D114 (Phase 1 netns sweep + Phase 2 ordering).
+- **Description:** `teardownCNI` is keyed on `cni-state.json` in the sandbox dir and is invoked only when removing a **known container**. The state file is written at the *end* of `runCNIAdd`, so a crash between `createNetNS` and the state write leaves a netns (`/var/run/netns/yoloai-yoloai-<x>`) with no state file and no container record → teardown no-ops and prune (which iterates container records) never sees it. Same outcome if the sandbox dir is `forceRemoveAll`'d before `deleteNetNS` succeeds. No sweep enumerates `/var/run/netns/yoloai-*`, even though the name fully encodes sandbox identity. Observed: `yoloai-yoloai-x`, `yoloai-yoloai-kreach` (each `tap0_kata`), no owning sandbox.
+- **Pointer:** `runtime/containerd/cni.go` (`netnsNameFor:128`, `createNetNS:145`, `teardownCNI:365`, state-file write); `runtime/containerd/lifecycle.go` (Remove → teardownCNI); `internal/orchestrator/launch/teardown.go:51` (`forceRemoveAll` after best-effort Stop). The shared `yoloai0` bridge is intentionally persistent (`reach.go`) and out of scope.
+
+### DF73 — Retired-microvm library dir is unreachable dead weight; nothing GCs it
+
+- **Discovered:** 2026-07-06 · **Workstream:** post-v0.7.0 disk-leak investigation (D114)
+- **Severity:** LOW (dev-host only — `library/microvm/` was **never in a released schema**, so no real install can have it)
+- **Disposition:** ADDRESSED-IN-PLACE — one-off manual `rm` on the dev host; **no product code** (D114 Phase 3). A *released* retired backend already has its idiom (a library-schema migrator, as `:overlay` used `migrate_overlay.go`); microvm never shipped, so there is nothing to build.
+- **Description:** `~/.yoloai/library/microvm/{rootfs.ext4 (5.5 GB),initrd.img,vmlinuz,instances/}` is debris from the unmerged `microvm-backend` spike (D104). Zero live code references `library/microvm`; no migrator or prune path stats it. Recorded so the disk-reclaim reference lists it.
+- **Pointer:** D104 (`working-notes.md`); `internal/config/schema.go` (frozen library ladder, no microvm migrator — correctly, since it never shipped); `reference_disk_reclaim_recipes` (manual removal).
+
+### DF74 — Neither `prune` nor `doctor` reconciles host-side artifacts against the sandbox registry
+
+- **Discovered:** 2026-07-06 · **Workstream:** post-v0.7.0 disk-leak investigation (D114) — the umbrella gap behind DF71/DF72
+- **Severity:** MEDIUM (silent false all-clear: `doctor` reports healthy while orphaned root processes / netns persist)
+- **Disposition:** ESCALATED — fixed by D114 Phase 1 (the sweep gives both reconcilers a host-artifact pass). **Phase 1c (seatbelt host tmux) built + macOS-verified 2026-07-06** (`runtime/seatbelt/prune.go`); it surfaced a residual, **DF75**.
+- **Description:** `system prune` enumerates only backend containers/VMs by `com.yoloai.*` labels (`IsOrphanCandidate`) plus images/volumes/caches/`.lock`/`yoloai-*` temp. `doctor` runs backend health + a dry-run of that same prune. The **only** host-process reconciliation anywhere is the tart VM-slot census (macOS, report-only). Nothing diffs live host processes, netns, bridges, or tmux servers against the `SandboxesDir()` registry — so any of those orphaned by the DF71/DF72 crash paths is invisible to both commands, and `doctor` gives a false all-clear. The registry to diff against already exists (`classifySandboxes`'s `known` set); the pattern already exists for Kata shims (`killStaleKataShims` walks `/proc`) — it was just never generalized.
+- **Pointer:** `system.go` (`Prune:656`, `Doctor:272`, `classifySandboxes:856`); `runtime/orphan.go:26` (`IsOrphanCandidate`); `runtime/tart/census.go` (the one existing host-process census); `runtime/containerd/lifecycle.go` (`killStaleKataShims` — the `/proc`-walk precedent to generalize).
+
 ### DF67 — Copy-mode work-copy host-git still runs on apple + seatbelt + the broken-metadata probe (DF66 residuals)
 
 - **Discovered:** 2026-06-29 · **Workstream:** DF66 (C1) implementation — host git on the agent-controlled work copy. **Updated 2026-07-04** (added apple; corrected the probe analysis; fsmonitor now globally disabled). Fix designed in [plans/confine-host-side-git.md](plans/confine-host-side-git.md) (+ [macOS build brief](plans/confine-host-side-git-macos-build.md)).

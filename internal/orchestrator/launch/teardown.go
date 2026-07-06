@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/kstenerud/yoloai/internal/broker"
 	"github.com/kstenerud/yoloai/internal/orchestrator/state"
 	"github.com/kstenerud/yoloai/store"
 )
@@ -33,6 +34,16 @@ func Teardown(ctx context.Context, d state.Deps, name string) (warnings []string
 	}
 
 	cname := store.InstanceName(d.Layout.Principal, name)
+
+	// Reap the host-side credential injector before we delete anything: its PID
+	// record (injector.json) lives in the sandbox dir, so removing the dir first
+	// would orphan the detached process with no record for any later Stop to find
+	// (DF71). Best-effort — a leftover injector doesn't change the teardown
+	// outcome. Teardown is the shared primitive, so every caller (create-replace,
+	// façade Destroy) reaps the broker here rather than each remembering to.
+	if berr := broker.NewSidecarHost().Stop(ctx, sandboxDir); berr != nil {
+		slog.Warn("teardown: could not stop credential injector", "sandbox", name, "err", berr)
+	}
 
 	// Stop instance (ignore errors — may not be running)
 	_ = d.Runtime.Stop(ctx, cname)

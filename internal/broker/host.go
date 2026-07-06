@@ -285,6 +285,13 @@ func PlaceholderToken(sandboxDir string) (string, error) {
 	return tok, nil
 }
 
+// LoadRecord returns the injector record (injector.json) recorded under
+// sandboxDir, or nil if none is recorded. The host-orphan sweep reads it from
+// every live sandbox to build the set of injector PIDs to keep (DF71).
+func LoadRecord(sandboxDir string) (*InjectorRecord, error) {
+	return loadRecord(sandboxDir)
+}
+
 func loadRecord(sandboxDir string) (*InjectorRecord, error) {
 	data, err := os.ReadFile(recordPath(sandboxDir))
 	if err != nil {
