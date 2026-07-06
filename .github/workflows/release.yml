@@ -1,0 +1,54 @@
+# Cuts a full GitHub release (cross-platform binaries, archives, checksums,
+# cosign signature, .deb/.rpm, SBOMs, Homebrew formula, SLSA provenance) when a
+# v* tag is pushed. Config lives in .goreleaser.yaml.
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write # create the release + upload assets
+  id-token: write # OIDC for cosign keyless signing + provenance
+  attestations: write # build-provenance attestation
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # full history so the changelog can diff against the prior tag
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      # cosign (keyless checksum signing) and syft (SBOMs) used by .goreleaser.yaml.
+      - uses: sigstore/cosign-installer@v3
+      - uses: anchore/sbom-action/download-syft@v0
+
+      # Use the annotated tag's message body as the release notes: always create
+      # the tag with `git tag -a vX.Y.Z -F notes.md` (first line = title, the rest
+      # = the GitHub release body). A lightweight tag yields an empty body here, so
+      # the annotation is required for curated notes.
+      - name: Extract release notes from the tag annotation
+        run: git tag -l --format='%(contents:body)' "${GITHUB_REF_NAME}" > "${RUNNER_TEMP}/release-notes.md"
+
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean --release-notes=${{ runner.temp }}/release-notes.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Optional: PAT with contents:write on kstenerud/homebrew-tap. When the
+          # secret is unset the Homebrew push is skipped (release still succeeds).
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+      # GitHub-native SLSA build provenance for the published archives + packages,
+      # verifiable with: gh attestation verify <file> --repo kstenerud/yoloai
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: "dist/*.tar.gz,dist/*.deb,dist/*.rpm,dist/checksums.txt"

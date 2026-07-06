@@ -1,0 +1,164 @@
+# GoReleaser config — builds the cross-platform binaries, archives, checksums,
+# signatures, Linux packages, and the Homebrew formula for a `v*` tag release.
+# Run locally without publishing:  goreleaser release --snapshot --clean
+# Docs: https://goreleaser.com
+version: 2
+
+project_name: yoloai
+
+before:
+  hooks:
+    - go mod tidy
+    # Shell completions are generated once from the freshly-built command tree
+    # and bundled into the archives / packages / Homebrew formula below.
+    - mkdir -p completions
+    - sh -c 'go run ./cmd/yoloai completion bash > completions/yoloai.bash'
+    - sh -c 'go run ./cmd/yoloai completion zsh  > completions/yoloai.zsh'
+    - sh -c 'go run ./cmd/yoloai completion fish > completions/yoloai.fish'
+
+builds:
+  - id: yoloai
+    main: ./cmd/yoloai
+    binary: yoloai
+    env:
+      - CGO_ENABLED=0 # pure-static binary; matches `make build`
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    # These map onto cmd/yoloai/main.go's version/commit/date vars — same as the
+    # Makefile's LDFLAGS, so `yoloai version` reports the real release.
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .Commit }}
+      - -X main.date={{ .Date }}
+
+archives:
+  - id: yoloai
+    ids: [yoloai]
+    formats: [tar.gz]
+    # yoloai_0.7.0_linux_amd64.tar.gz — standard GOOS/GOARCH names, no invented scheme.
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+      - docs/BREAKING-CHANGES.md
+      - src: completions/*
+        dst: completions
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+# Keyless (Sigstore) signature over the checksum file. The workflow provides the
+# OIDC token (id-token: write) and installs cosign. Verify with:
+#   cosign verify-blob --certificate checksums.txt.pem \
+#     --signature checksums.txt.sig \
+#     --certificate-identity-regexp 'https://github.com/kstenerud/yoloai/.*' \
+#     --certificate-oidc-issuer https://token.actions.githubusercontent.com checksums.txt
+signs:
+  - cmd: cosign
+    certificate: "${artifact}.pem"
+    args:
+      - sign-blob
+      - "--output-certificate=${certificate}"
+      - "--output-signature=${signature}"
+      - "${artifact}"
+      - "--yes"
+    artifacts: checksum
+    output: true
+
+# Linux .deb/.rpm (step 4 — remove this block if it complicates a release).
+nfpms:
+  - id: yoloai
+    ids: [yoloai]
+    package_name: yoloai
+    vendor: Karl Stenerud
+    homepage: https://github.com/kstenerud/yoloai
+    maintainer: Karl Stenerud <kstenerud@gmail.com>
+    description: Sandboxed AI coding agent runner (Claude Code, Gemini, Codex, …) in disposable containers.
+    license: MIT
+    formats: [deb, rpm]
+    bindir: /usr/bin
+    contents:
+      - src: completions/yoloai.bash
+        dst: /usr/share/bash-completion/completions/yoloai
+      - src: completions/yoloai.fish
+        dst: /usr/share/fish/vendor_completions.d/yoloai.fish
+      - src: completions/yoloai.zsh
+        dst: /usr/share/zsh/site-functions/_yoloai
+
+# CycloneDX SBOM per archive (step 4 — needs syft, installed by the workflow).
+sboms:
+  - artifacts: archive
+
+# Homebrew cask pushed to a separate tap repo (step 2). Casks are how Homebrew
+# now ships pre-compiled binaries (the old `brews` formula path is deprecated).
+# Requires the kstenerud/homebrew-tap repo to exist and a HOMEBREW_TAP_TOKEN
+# secret (a PAT with contents:write on that repo — the default GITHUB_TOKEN can't
+# cross repos). Install: `brew install --cask kstenerud/tap/yoloai`.
+homebrew_casks:
+  - name: yoloai
+    ids: [yoloai]
+    binaries: [yoloai]
+    completions:
+      bash: completions/yoloai.bash
+      zsh: completions/yoloai.zsh
+      fish: completions/yoloai.fish
+    repository:
+      owner: kstenerud
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    homepage: https://github.com/kstenerud/yoloai
+    description: Sandboxed AI coding agent runner in disposable containers.
+    url:
+      verified: github.com/kstenerud/yoloai
+    # The binary isn't Apple-notarized, so strip the Gatekeeper quarantine bit on
+    # install (otherwise macOS blocks it as "from an unidentified developer").
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/yoloai"]
+          end
+    # Skip the tap push when HOMEBREW_TAP_TOKEN isn't configured, so a release can
+    # be cut before the tap repo/secret exist (the rest of the release still runs).
+    # The workflow always sets the env var (empty when the secret is unset).
+    skip_upload: '{{ if .Env.HOMEBREW_TAP_TOKEN }}false{{ else }}true{{ end }}'
+
+changelog:
+  use: github
+  sort: asc
+  groups:
+    - title: Breaking changes
+      regexp: '(?i)(breaking|!:)'
+      order: 0
+    - title: Features
+      regexp: '^feat'
+      order: 1
+    - title: Fixes
+      regexp: '^fix'
+      order: 2
+    - title: Others
+      order: 999
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^ci:'
+      - '^chore'
+      - '^build\(make\)'
+
+release:
+  github:
+    owner: kstenerud
+    name: yoloai
+  draft: false
+  prerelease: auto # 0.7.0 -> full release; a -rc/-beta suffix -> prerelease
+  mode: replace
+  footer: |
+    ---
+    **Install:** download the archive for your platform below and extract the `yoloai` binary,
+    `brew install kstenerud/tap/yoloai`, or `go install github.com/kstenerud/yoloai/cmd/yoloai@latest`.
+    Verify with `checksums.txt` (+ the cosign signature / build provenance).

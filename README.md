@@ -42,6 +42,26 @@ yoloAI takes a different approach: let the agent do whatever it wants inside a d
 
 ## Install
 
+### Prebuilt binary (recommended)
+
+Download the archive for your platform from the [latest release](https://github.com/kstenerud/yoloai/releases/latest), extract the `yoloai` binary, and put it on your `PATH`:
+
+```bash
+# Linux x86-64 (swap in linux_arm64 / darwin_amd64 / darwin_arm64 as needed)
+VERSION=0.7.0
+curl -fsSL "https://github.com/kstenerud/yoloai/releases/download/v${VERSION}/yoloai_${VERSION}_linux_amd64.tar.gz" \
+  | tar -xz yoloai
+sudo install yoloai /usr/local/bin/
+```
+
+Each archive also ships shell completions (`completions/`), the `LICENSE`, and the changelog. Verify the download against `checksums.txt` (signed with cosign; every archive also carries GitHub build provenance — `gh attestation verify yoloai_… --repo kstenerud/yoloai`). Debian/RPM packages (`.deb`/`.rpm`) are attached to each release too.
+
+### Homebrew (macOS / Linux)
+
+```bash
+brew install --cask kstenerud/tap/yoloai
+```
+
 ### Using `go install`
 
 ```bash

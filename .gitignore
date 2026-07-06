@@ -41,3 +41,7 @@ __pycache__/
 *$py.class
 *.so
 .venv/
+
+# GoReleaser build output + generated completions
+/dist/
+/completions/
