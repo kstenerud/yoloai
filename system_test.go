@@ -6,11 +6,13 @@ package yoloai
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/kstenerud/yoloai/internal/config"
+	"github.com/kstenerud/yoloai/internal/envsetup"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/stretchr/testify/assert"
@@ -252,4 +254,84 @@ func TestEmptyTrash_NoTrashDirIsNoOp(t *testing.T) {
 	require.NoError(t, err)
 	assert.Zero(t, removed)
 	assert.Zero(t, freed)
+}
+
+// TestSystem_CheckAgent verifies the agent-credential check mirrors the runtime
+// auth-presence policy: an API-key env var, an auth credential file, OR a macOS
+// Keychain entry each satisfy it — not env vars alone. Regression guard for the
+// bug where `system check` reported "no credentials" for a native Claude Code
+// install whose token lives only in the Keychain, even though `new` succeeds.
+func TestSystem_CheckAgent(t *testing.T) {
+	// The check consults the real macOS Keychain via envsetup.KeychainReader;
+	// stub it so the test is hermetic (and can exercise the keychain branch
+	// directly rather than depending on the host's keychain contents).
+	newSystem := func(t *testing.T, env map[string]string) (*System, string) {
+		t.Helper()
+		home := t.TempDir()
+		dataDir := filepath.Join(home, ".yoloai")
+		require.NoError(t, os.MkdirAll(dataDir, 0o750))
+		c, err := NewClient(context.Background(), ClientCreateOptions{
+			DataDir: dataDir,
+			HomeDir: home,
+			Env:     env,
+		})
+		require.NoError(t, err)
+		return c.System(), home
+	}
+	stubKeychain := func(t *testing.T, data []byte, err error) {
+		t.Helper()
+		orig := envsetup.KeychainReader
+		envsetup.KeychainReader = func(string) ([]byte, error) { return data, err }
+		t.Cleanup(func() { envsetup.KeychainReader = orig })
+	}
+	noKeychain := errors.New("keychain: item not found")
+
+	t.Run("api key env var", func(t *testing.T) {
+		stubKeychain(t, nil, noKeychain)
+		s, _ := newSystem(t, map[string]string{"ANTHROPIC_API_KEY": "sk-test"})
+		res := s.checkAgent("claude")
+		assert.True(t, res.OK, res.Message)
+		assert.Contains(t, res.Message, "ANTHROPIC_API_KEY")
+	})
+
+	t.Run("keychain entry, no env", func(t *testing.T) {
+		stubKeychain(t, []byte(`{"claudeAiOauth":{"accessToken":"x"}}`), nil)
+		s, _ := newSystem(t, nil)
+		res := s.checkAgent("claude")
+		assert.True(t, res.OK, res.Message)
+		assert.Contains(t, res.Message, "Keychain")
+	})
+
+	t.Run("auth file on disk, no env, no keychain", func(t *testing.T) {
+		stubKeychain(t, nil, noKeychain)
+		s, home := newSystem(t, nil)
+		credPath := filepath.Join(home, ".claude", ".credentials.json")
+		require.NoError(t, os.MkdirAll(filepath.Dir(credPath), 0o750))
+		require.NoError(t, os.WriteFile(credPath, []byte(`{}`), 0o600))
+		res := s.checkAgent("claude")
+		assert.True(t, res.OK, res.Message)
+		assert.Contains(t, res.Message, "auth file")
+	})
+
+	t.Run("no credentials at all", func(t *testing.T) {
+		stubKeychain(t, nil, noKeychain)
+		s, _ := newSystem(t, nil)
+		res := s.checkAgent("claude")
+		assert.False(t, res.OK)
+		assert.Contains(t, res.Message, "no credentials set for agent")
+	})
+
+	t.Run("agent requiring no credentials", func(t *testing.T) {
+		stubKeychain(t, nil, noKeychain)
+		s, _ := newSystem(t, nil)
+		res := s.checkAgent("idle")
+		assert.True(t, res.OK, res.Message)
+	})
+
+	t.Run("unknown agent", func(t *testing.T) {
+		s, _ := newSystem(t, nil)
+		res := s.checkAgent("nonesuch")
+		assert.False(t, res.OK)
+		assert.Contains(t, res.Message, "unknown agent")
+	})
 }

@@ -11,14 +11,17 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/broker"
 	"github.com/kstenerud/yoloai/internal/config"
+	"github.com/kstenerud/yoloai/internal/envsetup"
 	"github.com/kstenerud/yoloai/internal/git"
 	"github.com/kstenerud/yoloai/internal/orchestrator"
+	"github.com/kstenerud/yoloai/internal/orchestrator/envspec"
 	"github.com/kstenerud/yoloai/internal/orchestrator/launch"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/runtime/caps"
@@ -508,9 +511,15 @@ func (s *System) checkImage(ctx context.Context, rt runtime.Backend, backend str
 	return CheckResult{Name: "image", OK: true}
 }
 
-// checkAgent verifies that at least one of the agent's API-key env vars is
-// present in the client's threaded env snapshot. The library never reads
-// os.Environ; credentials arrive as data via ClientCreateOptions.Env (§12).
+// checkAgent verifies the agent has authentication yoloai can observe — an
+// API-key env var, an auth credential file (or macOS Keychain entry), or an auth
+// hint (e.g. a local model server). It mirrors the runtime auth-presence policy
+// (create.agentHasUsableAuth and the create-time missing-auth gate) so that
+// `system check` agrees with what `new` will actually accept. Checking only env
+// vars here reported "no credentials" for a native Claude Code install whose
+// token lives in the Keychain, even though `new` succeeds via the seed-file
+// fallback — and the smoke harness gates launch on this check. The library never
+// reads os.Environ; credentials arrive as data via ClientCreateOptions.Env (§12).
 func (s *System) checkAgent(name string) CheckResult {
 	def := agent.GetAgent(name)
 	switch {
@@ -519,18 +528,30 @@ func (s *System) checkAgent(name string) CheckResult {
 	case len(def.APIKeyEnvVars) == 0:
 		return CheckResult{Name: "agent", OK: true, Message: fmt.Sprintf("agent %q requires no credentials", name)}
 	}
-	var found []string
-	for key := range s.layout.Env().EnvForAgentCredentials(def.APIKeyEnvVars) {
-		found = append(found, key)
-	}
-	if len(found) == 0 {
-		return CheckResult{
-			Name:    "agent",
-			OK:      false,
-			Message: fmt.Sprintf("no credentials set for agent %q (need one of: %s)", name, strings.Join(def.APIKeyEnvVars, ", ")),
+
+	spec := envspec.BuildEnvSpec(def)
+
+	if keys := s.layout.Env().EnvForAgentCredentials(def.APIKeyEnvVars); len(keys) > 0 {
+		found := make([]string, 0, len(keys))
+		for key := range keys {
+			found = append(found, key)
 		}
+		sort.Strings(found)
+		return CheckResult{Name: "agent", OK: true, Message: "found: " + strings.Join(found, ", ")}
 	}
-	return CheckResult{Name: "agent", OK: true, Message: "found: " + strings.Join(found, ", ")}
+	if envsetup.HasAnyAuthFile(spec, s.layout.HomeDir) {
+		return CheckResult{Name: "agent", OK: true, Message: "found: auth file or Keychain (" + envsetup.DescribeSeedAuthFiles(spec) + ")"}
+	}
+	if envsetup.HasAnyAuthHint(spec, nil, s.layout) {
+		return CheckResult{Name: "agent", OK: true, Message: "found: auth hint"}
+	}
+
+	msg := fmt.Sprintf("no credentials set for agent %q (need one of: %s", name, strings.Join(def.APIKeyEnvVars, ", "))
+	if desc := envsetup.DescribeSeedAuthFiles(spec); desc != "" {
+		msg += ", or an auth file / Keychain entry: " + desc
+	}
+	msg += ")"
+	return CheckResult{Name: "agent", OK: false, Message: msg}
 }
 
 // checkIsolation runs the capability checks declared by the backend
