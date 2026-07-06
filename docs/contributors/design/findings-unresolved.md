@@ -23,6 +23,15 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 
 ## Findings
 
+### DF76 — `make check` on Linux does not lint non-host-GOOS (`*_darwin.go`) files, so their lint violations slip through
+
+- **Discovered:** 2026-07-06 · **Workstream:** D114 Phase 1c (macOS build — surfaced when the Mac agent's native `make check` went red)
+- **Severity:** LOW–MEDIUM (quality-gate gap — a real forbidigo violation reached a commit and passed Linux `make check`, caught only by a native-macOS run)
+- **Disposition:** PARKED (backstop exists: native-macOS `make check` in the mac-verification / release flow catches it, as it just did; a Linux-side darwin-lint pass would catch it earlier)
+- **Description:** `make check`'s `crosscheck` runs `GOOS=darwin GOARCH=arm64 go vet ./...` — a **typecheck** of the darwin tree — but golangci-lint (`make lint`) runs only for the **host** GOOS (linux), and golangci-lint skips files excluded by build constraints. So lint rules (forbidigo's `exec.Command` ban, etc.) on `//go:build darwin` code are **unenforced on Linux**. The committed `internal/broker/reap_darwin.go` used raw `exec.Command("ps")` (a forbidigo violation), passed Linux `make check`, and failed only when `make check` ran natively on macOS (fixed, commit `d75b68fe`, routed through `sysexec`). The symmetric risk exists for any darwin-only lint rule.
+- **Trigger / fix:** add a `GOOS=darwin` golangci-lint pass to `make check` (mirroring `crosscheck`'s cross-GOOS vet), or scope one to the backend darwin files; verify it does not introduce cross-compile-only lint noise. Until then, native-macOS `make check` (the mac-verification flow) is the backstop.
+- **Pointer:** `Makefile` (`lint` vs `crosscheck` targets); `internal/broker/reap_darwin.go`, `runtime/seatbelt/prune_darwin.go` (darwin files Linux lint skips).
+
 ### DF75 — Seatbelt `status-monitor.py` / `sandbox-setup.py` host processes orphan independently of the tmux server
 
 - **Discovered:** 2026-07-06 · **Workstream:** D114 Phase 1c (macOS build — seatbelt tmux reaper verification)
