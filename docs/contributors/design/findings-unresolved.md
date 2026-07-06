@@ -23,6 +23,38 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 
 ## Findings
 
+### DF71 — Leaked `yoloai __inject` broker process outlives its sandbox with no reaper
+
+- **Discovered:** 2026-07-06 · **Workstream:** post-v0.7.0 disk-leak investigation ([host-artifact-reclamation.md](plans/host-artifact-reclamation.md), [D114](../decisions/working-notes.md#d114))
+- **Severity:** MEDIUM (leaked **root** process holding a listening socket, indefinitely; hygiene/resource, not data loss — pre-existing, latent before v0.7.0)
+- **Disposition:** ESCALATED — fixed by D114 (Phase 1 sweep + Phase 2 ordering).
+- **Description:** The broker is `Setsid`-detached by design (must outlive the CLI so the agent keeps running) and its lifetime is **not bound to the container**. Its PID is recorded only in the per-sandbox `injector.json`. The `create`-replace path (`create.go` → `launch.Teardown`) deletes the sandbox dir — **including `injector.json`** — but never calls `stopInjector`, so the process is orphaned *and* its record is gone; no later `SidecarHost.Stop` can find it. Crash/SIGKILL/timeout also skip `stopInjector`. Observed live: a 4-day-old `yoloai __inject` on `10.89.0.1:33371`, `exe` `(deleted)`, with `yoloai ls` empty. No orphan sweep enumerates `__inject` processes (prune is container-label scoped).
+- **Pointer:** `internal/broker/host.go` (`spawn` Setsid `:164`, `Stop`/`killProcess`, `injector.json`); `internal/orchestrator/create/create.go:536` (Teardown without stopInjector); `internal/orchestrator/lifecycle/lifecycle.go:42-46,66` (the correct `stopInjector`-before-Teardown ordering to mirror).
+
+### DF72 — Leaked CNI network namespace + IPAM lease unreapable once its state file or container record is gone
+
+- **Discovered:** 2026-07-06 · **Workstream:** post-v0.7.0 disk-leak investigation (D114)
+- **Severity:** MEDIUM (resource leak — netns + tap + IPAM lease; containerd/Kata on Linux)
+- **Disposition:** ESCALATED — fixed by D114 (Phase 1 netns sweep + Phase 2 ordering).
+- **Description:** `teardownCNI` is keyed on `cni-state.json` in the sandbox dir and is invoked only when removing a **known container**. The state file is written at the *end* of `runCNIAdd`, so a crash between `createNetNS` and the state write leaves a netns (`/var/run/netns/yoloai-yoloai-<x>`) with no state file and no container record → teardown no-ops and prune (which iterates container records) never sees it. Same outcome if the sandbox dir is `forceRemoveAll`'d before `deleteNetNS` succeeds. No sweep enumerates `/var/run/netns/yoloai-*`, even though the name fully encodes sandbox identity. Observed: `yoloai-yoloai-x`, `yoloai-yoloai-kreach` (each `tap0_kata`), no owning sandbox.
+- **Pointer:** `runtime/containerd/cni.go` (`netnsNameFor:128`, `createNetNS:145`, `teardownCNI:365`, state-file write); `runtime/containerd/lifecycle.go` (Remove → teardownCNI); `internal/orchestrator/launch/teardown.go:51` (`forceRemoveAll` after best-effort Stop). The shared `yoloai0` bridge is intentionally persistent (`reach.go`) and out of scope.
+
+### DF73 — Retired-microvm library dir is unreachable dead weight; nothing GCs it
+
+- **Discovered:** 2026-07-06 · **Workstream:** post-v0.7.0 disk-leak investigation (D114)
+- **Severity:** LOW (dev-host only — `library/microvm/` was **never in a released schema**, so no real install can have it)
+- **Disposition:** ADDRESSED-IN-PLACE — one-off manual `rm` on the dev host; **no product code** (D114 Phase 3). A *released* retired backend already has its idiom (a library-schema migrator, as `:overlay` used `migrate_overlay.go`); microvm never shipped, so there is nothing to build.
+- **Description:** `~/.yoloai/library/microvm/{rootfs.ext4 (5.5 GB),initrd.img,vmlinuz,instances/}` is debris from the unmerged `microvm-backend` spike (D104). Zero live code references `library/microvm`; no migrator or prune path stats it. Recorded so the disk-reclaim reference lists it.
+- **Pointer:** D104 (`working-notes.md`); `internal/config/schema.go` (frozen library ladder, no microvm migrator — correctly, since it never shipped); `reference_disk_reclaim_recipes` (manual removal).
+
+### DF74 — Neither `prune` nor `doctor` reconciles host-side artifacts against the sandbox registry
+
+- **Discovered:** 2026-07-06 · **Workstream:** post-v0.7.0 disk-leak investigation (D114) — the umbrella gap behind DF71/DF72
+- **Severity:** MEDIUM (silent false all-clear: `doctor` reports healthy while orphaned root processes / netns persist)
+- **Disposition:** ESCALATED — fixed by D114 Phase 1 (the sweep gives both reconcilers a host-artifact pass).
+- **Description:** `system prune` enumerates only backend containers/VMs by `com.yoloai.*` labels (`IsOrphanCandidate`) plus images/volumes/caches/`.lock`/`yoloai-*` temp. `doctor` runs backend health + a dry-run of that same prune. The **only** host-process reconciliation anywhere is the tart VM-slot census (macOS, report-only). Nothing diffs live host processes, netns, bridges, or tmux servers against the `SandboxesDir()` registry — so any of those orphaned by the DF71/DF72 crash paths is invisible to both commands, and `doctor` gives a false all-clear. The registry to diff against already exists (`classifySandboxes`'s `known` set); the pattern already exists for Kata shims (`killStaleKataShims` walks `/proc`) — it was just never generalized.
+- **Pointer:** `system.go` (`Prune:656`, `Doctor:272`, `classifySandboxes:856`); `runtime/orphan.go:26` (`IsOrphanCandidate`); `runtime/tart/census.go` (the one existing host-process census); `runtime/containerd/lifecycle.go` (`killStaleKataShims` — the `/proc`-walk precedent to generalize).
+
 ### DF67 — Copy-mode work-copy host-git still runs on apple + seatbelt + the broken-metadata probe (DF66 residuals)
 
 - **Discovered:** 2026-06-29 · **Workstream:** DF66 (C1) implementation — host git on the agent-controlled work copy. **Updated 2026-07-04** (added apple; corrected the probe analysis; fsmonitor now globally disabled). Fix designed in [plans/confine-host-side-git.md](plans/confine-host-side-git.md) (+ [macOS build brief](plans/confine-host-side-git-macos-build.md)).
