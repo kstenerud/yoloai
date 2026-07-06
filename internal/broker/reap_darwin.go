@@ -7,12 +7,17 @@ package broker
 import (
 	"bufio"
 	"bytes"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/kstenerud/yoloai/internal/sysexec"
 )
+
+// psEnv is the minimal explicit environment for the `ps` census: sysexec never
+// inherits the ambient env, and `ps` only needs a PATH to resolve.
+var psEnv = []string{"PATH=/usr/bin:/bin:/usr/local/bin"}
 
 // enumerateInjectorPIDs lists injector PIDs by parsing `ps -axo pid=,args=`.
 // A line matches when argv[0]'s basename equals the running binary's basename
@@ -20,7 +25,7 @@ import (
 // portable equivalent of the Linux cmdline walk. Not yet verified on a Mac —
 // tracked in the mac-verification queue.
 func platformInjectorPIDs() ([]int, error) {
-	out, err := exec.Command("ps", "-axo", "pid=,args=").Output()
+	out, err := sysexec.Command(psEnv, "ps", "-axo", "pid=,args=").Output()
 	if err != nil {
 		return nil, err
 	}
