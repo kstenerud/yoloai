@@ -107,6 +107,29 @@ def test_agent_stall_fingerprint_from_terminal_snapshot(tmp_path: Path) -> None:
     assert "sentinel-command-errors" in hits[0].fp.anchor
 
 
+def test_api_529_overload_is_headline_over_generic_timeout(tmp_path: Path) -> None:
+    """A run where the agent hit HTTP 529 Overloaded and exhausted its retries
+    surfaces as an upstream-API-overload fingerprint (from terminal-snapshot.txt),
+    NOT the generic 'sentinel not seen' timeout — so an Anthropic incident is
+    instantly distinguishable from a yoloAI regression."""
+    attempt = _make_attempt(tmp_path, setup_log="setup completed\n")
+    # The failure reason also matches the generic timeout fingerprint; the 529
+    # signature must still win as the headline.
+    (attempt / "FAILURE.md").write_text("- reason: sentinel 'done' not seen in 300s\n")
+    snapshot = (
+        "❯ echo smoke > output.txt && touch /yoloai/files/done\n"
+        "✻ 529 Overloaded · Retrying in 38s · attempt 10/10\n"
+        "● API Error: 529 Overloaded. This is a server-side issue, usually temporary.\n"
+    )
+    (attempt / "sb" / "terminal-snapshot.txt").write_text(snapshot)
+
+    hits = smoke_test.scan_fingerprints(attempt)
+    assert hits, "expected the 529-overload fingerprint to match"
+    assert hits[0].fp.label.startswith("upstream Anthropic API overload")
+    assert hits[0].source == "terminal-snapshot.txt"
+    assert "status.claude.com" in hits[0].fp.hint
+
+
 # --- timeline ------------------------------------------------------------
 
 

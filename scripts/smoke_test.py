@@ -1248,6 +1248,16 @@ FINGERPRINTS: list[Fingerprint] = [
         "dockerpodman-agent-git-and-apply-git-race-on-indexlock",
     ),
     Fingerprint(
+        "upstream Anthropic API overload (HTTP 529) — not a yoloAI fault",
+        r"api error: 529|529 +overloaded|overloaded[^\n]*retry",
+        hint=(
+            "the agent exhausted its retries against an overloaded Anthropic API "
+            "(HTTP 529) and never wrote the sentinel — an upstream capacity incident, "
+            "NOT a yoloAI regression. Check https://status.claude.com and re-run once "
+            "the API recovers."
+        ),
+    ),
+    Fingerprint(
         "agent idle / API unreachable (DF8)",
         r"agent idle for \d+s|request timed out|api unreachable",
         "request-timed-out-in-claude-code--api-unreachable-not-dns-failure",
