@@ -645,17 +645,14 @@ func resolveAgentParams(agentDef *agent.Definition, opts Options, pr *profileRes
 
 // agentHasUsableAuth reports whether the agent has authentication we can observe
 // — an API-key env var, an auth credential file (or macOS Keychain entry), or an
-// auth hint (e.g. a local model server). It reuses the same envsetup checks as
-// the create-time missing-auth gate (prepare_dirs.checkAgentAuth) so there is one
-// auth-presence convention. `yoloai run` uses it to decide headless vs the
-// interactive TTY flow (D101): headless only when auth is present, so the agent
-// can't stall on a login prompt in a headless pane. Agents that require no API
-// key (test/idle) report true via HasAnyAPIKey.
+// auth hint (e.g. a local model server). It delegates to envsetup.ResolveAuthPresence,
+// the single source of truth also used by the create-time missing-auth gate and
+// `system check`, so the policy can't diverge. `yoloai run` uses it to decide
+// headless vs the interactive TTY flow (D101): headless only when auth is present,
+// so the agent can't stall on a login prompt in a headless pane. Agents that
+// require no API key (test/idle) report true (HasAnyAPIKey is vacuously true).
 func agentHasUsableAuth(agentDef *agent.Definition, configEnv map[string]string, layout config.Layout) bool {
-	spec := envspec.BuildEnvSpec(agentDef)
-	return envsetup.HasAnyAPIKey(spec, layout) ||
-		envsetup.HasAnyAuthFile(spec, layout.HomeDir) ||
-		envsetup.HasAnyAuthHint(spec, configEnv, layout)
+	return envsetup.ResolveAuthPresence(envspec.BuildEnvSpec(agentDef), configEnv, layout).OK()
 }
 
 // buildLifecycleConfig builds the lifecycle config if the archetype requires it.

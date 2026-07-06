@@ -49,6 +49,58 @@ func agentSpec(agentDef *agent.Definition) EnvSpec {
 	}
 }
 
+// ResolveAuthPresence is the single source of truth for the auth-presence
+// policy shared by the create-time gate, `run`'s headless decision, and
+// `system check`. These lock the OR truth-table so those callers can't diverge.
+func TestResolveAuthPresence(t *testing.T) {
+	origReader := KeychainReader
+	KeychainReader = func(string) ([]byte, error) { return nil, fmt.Errorf("no keychain") }
+	defer func() { KeychainReader = origReader }()
+
+	claude := agentSpec(agent.GetAgent("claude"))
+
+	t.Run("api key env var", func(t *testing.T) {
+		layout := config.Layout{}.WithEnv(map[string]string{"ANTHROPIC_API_KEY": "sk-test"})
+		got := ResolveAuthPresence(claude, nil, layout)
+		assert.Equal(t, AuthPresence{APIKey: true}, got)
+		assert.True(t, got.OK())
+	})
+
+	t.Run("auth file on disk", func(t *testing.T) {
+		home := t.TempDir()
+		cred := filepath.Join(home, ".claude", ".credentials.json")
+		require.NoError(t, os.MkdirAll(filepath.Dir(cred), 0o750))
+		require.NoError(t, os.WriteFile(cred, []byte(`{}`), 0o600))
+		got := ResolveAuthPresence(claude, nil, config.Layout{HomeDir: home})
+		assert.Equal(t, AuthPresence{AuthFile: true}, got)
+		assert.True(t, got.OK())
+	})
+
+	t.Run("keychain entry", func(t *testing.T) {
+		KeychainReader = func(string) ([]byte, error) { return []byte(`{}`), nil }
+		defer func() {
+			KeychainReader = func(string) ([]byte, error) { return nil, fmt.Errorf("no keychain") }
+		}()
+		got := ResolveAuthPresence(claude, nil, config.Layout{HomeDir: t.TempDir()})
+		assert.True(t, got.AuthFile)
+		assert.True(t, got.OK())
+	})
+
+	t.Run("auth hint via configEnv", func(t *testing.T) {
+		aider := agentSpec(agent.GetAgent("aider"))
+		got := ResolveAuthPresence(aider, map[string]string{"OLLAMA_API_BASE": "http://host:11434"}, config.Layout{HomeDir: t.TempDir()})
+		assert.True(t, got.AuthHint)
+		assert.False(t, got.APIKey)
+		assert.True(t, got.OK())
+	})
+
+	t.Run("no auth at all", func(t *testing.T) {
+		got := ResolveAuthPresence(claude, nil, config.Layout{HomeDir: t.TempDir()})
+		assert.Equal(t, AuthPresence{}, got)
+		assert.False(t, got.OK())
+	})
+}
+
 // HasAnyAPIKey tests
 
 func TestHasAnyAPIKey_Set(t *testing.T) {

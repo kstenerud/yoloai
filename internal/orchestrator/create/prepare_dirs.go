@@ -87,16 +87,13 @@ func defaultDirModes(workdir *DirSpec, auxDirs []*DirSpec) {
 
 // checkAuthAndLocalhostWarnings performs auth checks and localhost URL warnings.
 func checkAuthAndLocalhostWarnings(d state.Deps, agentDef *agent.Definition, mergedEnv map[string]string, cfgModel string, opts Options) error {
-	spec := envspec.BuildEnvSpec(agentDef)
-	hasAPIKey := envsetup.HasAnyAPIKey(spec, d.Layout)
-	hasAuth := envsetup.HasAnyAuthFile(spec, d.Layout.HomeDir)
-	hasAuthHint := envsetup.HasAnyAuthHint(spec, mergedEnv, d.Layout)
-	if err := checkAgentAuth(agentDef, hasAPIKey, hasAuth, hasAuthHint, outputFor(opts.Output)); err != nil {
+	auth := envsetup.ResolveAuthPresence(envspec.BuildEnvSpec(agentDef), mergedEnv, d.Layout)
+	if err := checkAgentAuth(agentDef, auth, outputFor(opts.Output)); err != nil {
 		return err
 	}
 
 	// Local model server requires a model
-	if !hasAPIKey && !hasAuth && hasAuthHint && opts.Model == "" && cfgModel == "" {
+	if !auth.APIKey && !auth.AuthFile && auth.AuthHint && opts.Model == "" && cfgModel == "" {
 		return yoerrors.NewUsageError("a model is required when using a local model server: use --model or 'yoloai config set model <model>'")
 	}
 
@@ -104,8 +101,8 @@ func checkAuthAndLocalhostWarnings(d state.Deps, agentDef *agent.Definition, mer
 }
 
 // checkAgentAuth verifies that the agent has the necessary authentication configured.
-func checkAgentAuth(agentDef *agent.Definition, hasAPIKey, hasAuth, hasAuthHint bool, output io.Writer) error {
-	if hasAPIKey || hasAuth || hasAuthHint {
+func checkAgentAuth(agentDef *agent.Definition, auth envsetup.AuthPresence, output io.Writer) error {
+	if auth.OK() {
 		return nil
 	}
 	if agentDef.AuthOptional {

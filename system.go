@@ -529,20 +529,24 @@ func (s *System) checkAgent(name string) CheckResult {
 		return CheckResult{Name: "agent", OK: true, Message: fmt.Sprintf("agent %q requires no credentials", name)}
 	}
 
+	// One shared evaluation drives both the verdict and the message, so this
+	// check can't diverge from the create-time gate / `run`'s headless decision.
+	// configEnv is nil: a system-level prereq check has no per-sandbox config env.
 	spec := envspec.BuildEnvSpec(def)
+	auth := envsetup.ResolveAuthPresence(spec, nil, s.layout)
 
-	if keys := s.layout.Env().EnvForAgentCredentials(def.APIKeyEnvVars); len(keys) > 0 {
+	switch {
+	case auth.APIKey:
+		keys := s.layout.Env().EnvForAgentCredentials(def.APIKeyEnvVars)
 		found := make([]string, 0, len(keys))
 		for key := range keys {
 			found = append(found, key)
 		}
 		sort.Strings(found)
 		return CheckResult{Name: "agent", OK: true, Message: "found: " + strings.Join(found, ", ")}
-	}
-	if envsetup.HasAnyAuthFile(spec, s.layout.HomeDir) {
+	case auth.AuthFile:
 		return CheckResult{Name: "agent", OK: true, Message: "found: auth file or Keychain (" + envsetup.DescribeSeedAuthFiles(spec) + ")"}
-	}
-	if envsetup.HasAnyAuthHint(spec, nil, s.layout) {
+	case auth.AuthHint:
 		return CheckResult{Name: "agent", OK: true, Message: "found: auth hint"}
 	}
 

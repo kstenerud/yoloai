@@ -134,6 +134,33 @@ func HasAnyAuthHint(spec EnvSpec, configEnv map[string]string, hostEnv config.La
 	return false
 }
 
+// AuthPresence records which observable authentication sources an agent has.
+// It is the single source of truth for "is this agent authenticated?": every
+// caller — the create-time missing-auth gate, `run`'s headless-vs-TTY decision,
+// and `system check` — derives both its verdict (OK) and its message from one
+// ResolveAuthPresence evaluation, so the policy cannot diverge across them.
+// Callers legitimately differ only in the inputs they can supply (e.g. `system
+// check` has no per-sandbox config env for the auth hint), never in the OR logic.
+type AuthPresence struct {
+	APIKey   bool // an API-key env var is set in the host-env snapshot
+	AuthFile bool // an auth credential file exists on disk or in the macOS Keychain
+	AuthHint bool // an auth-hint env var is set (e.g. a local model server base URL)
+}
+
+// OK reports whether any observable authentication source is present.
+func (a AuthPresence) OK() bool { return a.APIKey || a.AuthFile || a.AuthHint }
+
+// ResolveAuthPresence evaluates all three observable auth sources for spec.
+// configEnv carries per-sandbox config env for the auth-hint check (pass nil
+// when the caller has none); hostEnv supplies the host-env snapshot and HomeDir.
+func ResolveAuthPresence(spec EnvSpec, configEnv map[string]string, hostEnv config.Layout) AuthPresence {
+	return AuthPresence{
+		APIKey:   HasAnyAPIKey(spec, hostEnv),
+		AuthFile: HasAnyAuthFile(spec, hostEnv.HomeDir),
+		AuthHint: HasAnyAuthHint(spec, configEnv, hostEnv),
+	}
+}
+
 // DescribeSeedAuthFiles returns a human-readable description of expected auth file paths.
 func DescribeSeedAuthFiles(spec EnvSpec) string {
 	var paths []string
