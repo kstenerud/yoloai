@@ -178,6 +178,28 @@ def write_status(status_file, status, exit_code=None):
 from abc import ABC, abstractmethod
 
 
+def _prepend_macos_toolchain_path(leading_dirs=None):
+    """Prepend the macOS host toolchain dirs to PATH so host-run agents find node
+    and Homebrew-installed CLIs. Used by the backends whose agent runs on the host
+    (Tart in-VM, Seatbelt on the host). node@22 is keg-only, so /opt/homebrew/bin
+    alone is NOT enough — the keg's own bin dir must be added, which is exactly the
+    dir a non-interactive shell (e.g. `make smoketest`) usually lacks. leading_dirs
+    (e.g. mounted Xcode tool dirs) go first. Idempotent: only dirs not already on
+    PATH are added, order preserved."""
+    toolchain_bins = list(leading_dirs or []) + [
+        os.path.expanduser("~/.local/bin"),
+        "/opt/homebrew/opt/node@22/bin",  # keg-only node@22 (not linked into /opt/homebrew/bin)
+        "/opt/homebrew/bin",
+        "/opt/homebrew/sbin",
+        "/usr/local/bin",
+    ]
+    current_path = os.environ.get("PATH", "")
+    extras = [p for p in toolchain_bins if p not in current_path.split(":")]
+    if extras:
+        os.environ["PATH"] = ":".join(extras) + ":" + current_path
+        log_debug("path_augment", "prepended macOS toolchain dirs", added=":".join(extras))
+
+
 class Backend(ABC):
     """Abstract base class for sandbox backends."""
 
@@ -514,13 +536,7 @@ class TartBackend(Backend):
     def prepare_environment(self):
         """Tart needs the provisioned tool dirs prepended: native Claude Code in
         ~/.local/bin, keg-only node@22, and Homebrew, plus Xcode tools if mounted."""
-        homebrew_bins = [
-            os.path.expanduser("~/.local/bin"),
-            "/opt/homebrew/opt/node@22/bin",
-            "/opt/homebrew/bin",
-            "/opt/homebrew/sbin",
-            "/usr/local/bin",
-        ]
+        leading = []
 
         # Add host-mounted Xcode tools to PATH and set DEVELOPER_DIR if available
         xcode_base = "/Users/admin/host-xcode/Contents"
@@ -530,14 +546,13 @@ class TartBackend(Backend):
             os.environ["DEVELOPER_DIR"] = xcode_developer
             log_debug("tart.xcode_setup", "configured Xcode environment", developer_dir=xcode_developer)
 
-            # Add Xcode binaries to PATH (for this process and child processes)
-            xcode_paths = [
+            # Prepend Xcode binaries (order preserved: usr/bin then the toolchain dir)
+            for xcode_path in [
                 os.path.join(xcode_developer, "usr/bin"),
                 os.path.join(xcode_developer, "Toolchains/XcodeDefault.xctoolchain/usr/bin"),
-            ]
-            for xcode_path in xcode_paths:
+            ]:
                 if os.path.isdir(xcode_path):
-                    homebrew_bins.insert(0, xcode_path)
+                    leading.insert(0, xcode_path)
 
             # Also add to shell profile for interactive shells
             shell_profile = os.path.expanduser("~/.zprofile")
@@ -555,11 +570,7 @@ class TartBackend(Backend):
             except OSError:
                 pass  # Non-fatal if we can't update profile
 
-        current_path = os.environ.get("PATH", "")
-        extras = [p for p in homebrew_bins if p not in current_path.split(":")]
-        if extras:
-            os.environ["PATH"] = ":".join(extras) + ":" + current_path
-            log_debug("tart.path_augment", "prepended paths", added=":".join(extras))
+        _prepend_macos_toolchain_path(leading)
 
     def read_secrets(self, socket):
         """Read secrets from VirtioFS-mounted secrets directory and pass to tmux."""
@@ -676,7 +687,12 @@ swift() {
         return working_dir
 
     def prepare_environment(self):
-        """Seatbelt environment preparation: Swift PM cache redirection."""
+        """Seatbelt environment preparation: host toolchain PATH + Swift PM cache."""
+        # The agent runs on the host, so — like Tart — it needs the Homebrew /
+        # keg-only-node@22 dirs on PATH; a non-interactive `make smoketest` shell
+        # usually lacks them, which is why `node --version` fails at launch.
+        _prepend_macos_toolchain_path()
+
         # Redirect Swift PM cache to sandbox-local directories to avoid
         # "not accessible or not writable" errors and maintain isolation.
         swiftpm_cache_dir = os.path.join(self.yoloai_dir, "cache", "swiftpm")
