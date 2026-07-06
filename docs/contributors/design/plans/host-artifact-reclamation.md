@@ -3,10 +3,12 @@
 
 # Host-artifact reclamation
 
-**Status:** Phase 1 (injector + netns) and Phase 2 built + unit-tested on branch
-`host-artifact-reclamation`. Phase 1 seatbelt-tmux reaper deferred to macOS
-verification (darwin-only, unverifiable from Linux). Phase 3 is a manual step.
-**Decision:** [D114](../../decisions/working-notes.md#d114). **Findings:** DF71–DF74.
+**Status:** Phase 1 (injector + netns + **seatbelt tmux, done**) and Phase 2
+built + unit-tested on branch `host-artifact-reclamation`. The seatbelt-tmux
+reaper (Phase 1c) is now built and macOS-verified — see the
+[macOS build brief](host-artifact-reclamation-macos-build.md) for results;
+it surfaced one residual (DF75). Phase 3 is a manual step.
+**Decision:** [D114](../../decisions/working-notes.md#d114). **Findings:** DF71–DF75.
 
 ## Problem
 
@@ -72,14 +74,16 @@ its identity-encoding name/path:
    matching `/var/lib/cni/networks/yoloai/<ip>` lease. Reaps both observed netns.
    The shared `yoloai0` bridge is **left alone** (intentionally persistent —
    `reach.go`).
-3. **Seatbelt host tmux** (darwin) — **deferred to the macOS build brief**
-   ([host-artifact-reclamation-macos-build.md](host-artifact-reclamation-macos-build.md),
-   Task B). Enumerate leaked tmux servers whose socket path points under this
-   data dir's sandboxes but whose sandbox is gone → `kill-server`. Darwin-only
-   and unverifiable from the Linux dev host, so it is authored on the Mac (like
-   the confine-git macOS work), not built blind. The injector reaper also runs
-   on macOS via the `ps` path (brief Task A verifies it), covering the
-   highest-value broker leak there in the meantime.
+3. **Seatbelt host tmux** (darwin) — **DONE** (macOS build brief
+   [host-artifact-reclamation-macos-build.md](host-artifact-reclamation-macos-build.md),
+   Task B; `runtime/seatbelt/prune.go`). Enumerates leaked tmux servers via `ps`
+   whose socket path points under this data dir's sandboxes but whose sandbox is
+   not in the known set → `kill-server` (fallback SIGTERM→SIGKILL on the PID when
+   the socket is already gone, the common case). Pure `selectOrphanTmux` decision
+   unit-tested; macOS-verified against real leaked servers. The injector reaper
+   also runs on macOS via the `ps` path (brief Task A, verified). **Residual
+   (DF75):** the sibling `status-monitor.py` / `sandbox-setup.py` host processes
+   orphan independently of the tmux server and are not yet reaped.
 
 Each reaped artifact is reported (name + kind) and counted into the prune
 result; `doctor` lists them under "Reclaimable now". Dry-run enumerates without

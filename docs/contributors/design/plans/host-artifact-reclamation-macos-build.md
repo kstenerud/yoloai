@@ -3,6 +3,13 @@
 <!-- ABOUTME: Actionable macOS brief for the parts of host-artifact-reclamation that can't be -->
 <!-- ABOUTME: authored/verified on Linux: the darwin `ps` injector path and the seatbelt-tmux reaper. -->
 
+**Status: DONE (macOS agent, 2026-07-06).** Both tasks completed and verified on
+macOS 26 / Apple Silicon. Task A ✅ (darwin injector reaper reaps a real orphaned
+`__inject`, spares a live one). Task B ✅ (seatbelt-tmux reaper built, unit-tested,
+and verified against real leaked servers). One prerequisite fix and one residual
+finding (DF75) surfaced — see **Results** at the bottom. Committed on
+`host-artifact-reclamation` (fix `d75b68fe`, reaper `5f7d056a`).
+
 **Status: START HERE (macOS agent).** Design is settled in
 [host-artifact-reclamation.md](host-artifact-reclamation.md) and [D114](../../decisions/working-notes.md#d114)
 — read them first for the root cause and the identity-keyed-sweep principle; **build to it, do not
@@ -88,3 +95,62 @@ new unit test. Commit on `host-artifact-reclamation`.
 - Flip the plan's Phase-1c line in [host-artifact-reclamation.md](host-artifact-reclamation.md) from
   "deferred" to done, and drain any DF74 residual accordingly.
 - Report back so the Linux session can fold results in before merge.
+
+## Results (2026-07-06, macOS 26 / Apple Silicon)
+
+### Prerequisite fix (make check was NOT green on the committed branch)
+
+`make check` failed on a real Mac at the lint stage: committed `internal/broker/reap_darwin.go`
+called `exec.Command("ps", …)` directly, which the project's forbidigo linter bans (subprocesses
+must go through `internal/sysexec` with an explicit, never-inherited env). golangci-lint only
+analyzes host-GOOS files, so this darwin-tagged file was never linted on the Linux dev host and
+`crosscheck` (`go vet`) doesn't run the linter — so it slipped through. Routed the census through
+`sysexec.Command` with a minimal PATH env (commit `d75b68fe`). `make check` green afterward.
+**Linux session: note this — any future darwin-only file needs a Mac lint pass, not just crosscheck.**
+
+### Task A — darwin injector reaper ✅
+
+Created a brokered seatbelt sandbox with a dummy `ANTHROPIC_API_KEY` (claude's default OAuth is
+file-based and isn't brokered via the HTTP injector, so no `__inject` spawns — an API-key env var is
+required). Injector PID recorded in `injector.json`. `rm -rf`'d the sandbox dir (DF71 leak); the
+`__inject` process stayed alive. `system prune`:
+
+```
+Orphaned resources:
+  process __inject pid 97370
+...
+Removed process __inject pid 97370
+```
+
+`ps -p 97370` → gone. A concurrently-live brokered sandbox's injector (a different PID) was **not**
+listed by `--dry-run` and **survived** the real prune. The darwin `ps` parse (`parsePsLine`/
+`platformInjectorPIDs`) selected the right PID and only the orphan. **No false positive.**
+(Note: `system prune` requires `-y` / a TTY to confirm; a piped non-TTY invocation previews but does
+not act — not a reaper bug.)
+
+### Task B — seatbelt-tmux reaper ✅
+
+Built in `runtime/seatbelt/prune.go` (+ `prune_darwin.go` / `prune_other.go` platform split for the
+`ps` enumeration, mirroring the injector reaper). Pure `selectOrphanTmux` / `sandboxDirFromSocket` /
+`parseTmuxServerLine` unit-tested in `prune_test.go` (no root, no tmux). Reaps via
+`tmux -S <socket> kill-server`, falling back to SIGTERM→SIGKILL on the PID when the socket is gone
+(the common leak case — verified sockets are always deleted with the dir).
+
+Verified against real pre-existing cruft on the host (42 leaked seatbelt processes across **two**
+data-dir roots, `yoloai ls` reporting zero sandboxes):
+
+- `system prune` reaped all **9** in-scope orphan tmux servers under `~/.yoloai/library/sandboxes/`
+  (including all **3** stacked servers for a repeatedly-leaked name `x`).
+- It **spared** the **4** servers under the legacy root `~/.yoloai/sandboxes/` (a different data dir) —
+  correct per the DF45-sibling scoping caveat.
+- With a freshly-created **live** seatbelt sandbox present (`active`, in the registry), `--dry-run`
+  did **not** list its server and the real prune **spared** it. **No false positive.**
+
+### Residual — DF75 (new finding)
+
+Reaping the tmux server does **not** take down a seatbelt sandbox's sibling `status-monitor.py` /
+`sandbox-setup.py` host processes (detached, ppid=1, separate tree). After the reap, orphaned
+monitors kept running and polling their now-deleted sockets. The reaper is correct per this brief's
+tmux-only scope; the sibling processes are logged as **DF75** with two fix options (extend the sweep
+to the whole host process group, or kill-before-delete in `Stop`). **Not fixed here — flagged for
+the Linux session to fold in / prioritize.**

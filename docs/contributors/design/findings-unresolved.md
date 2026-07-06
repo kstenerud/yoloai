@@ -23,6 +23,15 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 
 ## Findings
 
+### DF75 — Seatbelt `status-monitor.py` / `sandbox-setup.py` host processes orphan independently of the tmux server
+
+- **Discovered:** 2026-07-06 · **Workstream:** D114 Phase 1c (macOS build — seatbelt tmux reaper verification)
+- **Severity:** LOW-MEDIUM (persistent leaked python processes; they poll a deleted socket forever and accumulate — no disk growth, but a real process leak)
+- **Disposition:** OPEN — residual of DF74/Phase 1c. The tmux reaper reaps the server; these sibling processes are out of its (tmux-only) scope.
+- **Description:** Besides its tmux server, a seatbelt sandbox spawns two detached (ppid=1) host python processes — `bin/sandbox-setup.py seatbelt <sandboxDir>` and `bin/status-monitor.py … <tmux.sock>` — a separate process tree from the server. On the DF74 leak path (sandbox dir removed out from under a running sandbox), reaping the orphaned tmux server does **not** take them down: verified on macOS 2026-07-06 that after `system prune` reaped the sbcheck/wa-orphan/wa-orphan2 tmux servers, their `status-monitor.py` processes (pids 10202, 93593, 97481) kept running, polling now-deleted sockets. They do not self-exit (pid 10202 had been alive for days).
+- **Trigger / fix options:** (a) **backstop** — extend the seatbelt orphan sweep to reap **all** host processes whose argv points under an orphaned sandbox dir (identity-keyed by `SandboxesDir()` path, the same principle), not just the tmux server; or (b) **stop creation** — Phase-2-style kill-before-delete: have `Stop`/teardown kill the monitor/setup process group before the dir is removed. (a) is the reconciler backstop; (b) prevents the orphan.
+- **Pointer:** `runtime/seatbelt/prune.go` (`reapOrphanTmux` — tmux-only); `runtime/seatbelt/seatbelt.go` (`Stop`, `killByPID`); `runtime/monitor/` (`status-monitor.py`, `sandbox-setup.py`).
+
 ### DF71 — Leaked `yoloai __inject` broker process outlives its sandbox with no reaper
 
 - **Discovered:** 2026-07-06 · **Workstream:** post-v0.7.0 disk-leak investigation ([host-artifact-reclamation.md](plans/host-artifact-reclamation.md), [D114](../decisions/working-notes.md#d114))
@@ -51,7 +60,7 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 
 - **Discovered:** 2026-07-06 · **Workstream:** post-v0.7.0 disk-leak investigation (D114) — the umbrella gap behind DF71/DF72
 - **Severity:** MEDIUM (silent false all-clear: `doctor` reports healthy while orphaned root processes / netns persist)
-- **Disposition:** ESCALATED — fixed by D114 Phase 1 (the sweep gives both reconcilers a host-artifact pass).
+- **Disposition:** ESCALATED — fixed by D114 Phase 1 (the sweep gives both reconcilers a host-artifact pass). **Phase 1c (seatbelt host tmux) built + macOS-verified 2026-07-06** (`runtime/seatbelt/prune.go`); it surfaced a residual, **DF75**.
 - **Description:** `system prune` enumerates only backend containers/VMs by `com.yoloai.*` labels (`IsOrphanCandidate`) plus images/volumes/caches/`.lock`/`yoloai-*` temp. `doctor` runs backend health + a dry-run of that same prune. The **only** host-process reconciliation anywhere is the tart VM-slot census (macOS, report-only). Nothing diffs live host processes, netns, bridges, or tmux servers against the `SandboxesDir()` registry — so any of those orphaned by the DF71/DF72 crash paths is invisible to both commands, and `doctor` gives a false all-clear. The registry to diff against already exists (`classifySandboxes`'s `known` set); the pattern already exists for Kata shims (`killStaleKataShims` walks `/proc`) — it was just never generalized.
 - **Pointer:** `system.go` (`Prune:656`, `Doctor:272`, `classifySandboxes:856`); `runtime/orphan.go:26` (`IsOrphanCandidate`); `runtime/tart/census.go` (the one existing host-process census); `runtime/containerd/lifecycle.go` (`killStaleKataShims` — the `/proc`-walk precedent to generalize).
 
