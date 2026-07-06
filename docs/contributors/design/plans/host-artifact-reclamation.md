@@ -3,7 +3,9 @@
 
 # Host-artifact reclamation
 
-**Status:** Active — plan approved, implementing on branch `host-artifact-reclamation`.
+**Status:** Phase 1 (injector + netns) and Phase 2 built + unit-tested on branch
+`host-artifact-reclamation`. Phase 1 seatbelt-tmux reaper deferred to macOS
+verification (darwin-only, unverifiable from Linux). Phase 3 is a manual step.
 **Decision:** [D114](../../decisions/working-notes.md#d114). **Findings:** DF71–DF74.
 
 ## Problem
@@ -70,9 +72,12 @@ its identity-encoding name/path:
    matching `/var/lib/cni/networks/yoloai/<ip>` lease. Reaps both observed netns.
    The shared `yoloai0` bridge is **left alone** (intentionally persistent —
    `reach.go`).
-3. **Seatbelt host tmux** (darwin). Enumerate `<sandboxDir>/tmux/tmux.sock`
-   whose sandbox dir has no owning record → `tmux -S <sock> kill-server`.
-   (No-op on Linux; closes the same class for macOS/seatbelt.)
+3. **Seatbelt host tmux** (darwin) — **deferred to macOS verification.**
+   Enumerate leaked tmux servers whose socket path points under this data dir's
+   sandboxes but whose sandbox is gone → `kill-server`. Darwin-only and
+   unverifiable from the Linux dev host, so it is not built blind; tracked for
+   the mac-verification queue. The injector reaper (which also runs on macOS via
+   the `ps` path) covers the highest-value broker leak there in the meantime.
 
 Each reaped artifact is reported (name + kind) and counted into the prune
 result; `doctor` lists them under "Reclaimable now". Dry-run enumerates without

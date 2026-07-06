@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/kstenerud/yoloai/internal/agent"
+	"github.com/kstenerud/yoloai/internal/broker"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/git"
 	"github.com/kstenerud/yoloai/internal/orchestrator"
@@ -683,6 +684,12 @@ func (s *System) Prune(ctx context.Context, opts SystemPruneOptions) (*PruneResu
 		})
 	}
 
+	// Reap leaked host-side broker processes whose sandbox is gone (DF71/D114).
+	// Backend-owned host artifacts (containerd netns, seatbelt tmux) are swept
+	// inside each backend's Prune above; the broker is cross-backend, so it is
+	// reconciled here against the sandbox registry.
+	result.RemovedItems = append(result.RemovedItems, s.reapOrphanInjectors(opts.DryRun, out)...)
+
 	tempItems, err := s.pruneTempFiles(opts.DryRun, out)
 	result.RemovedItems = append(result.RemovedItems, tempItems...)
 	if err != nil {
@@ -815,6 +822,47 @@ func (s *System) pruneTempFiles(dryRun bool, out io.Writer) ([]PruneItem, error)
 		fmt.Fprintf(out, "Warning: could not remove temp dir %s: %v (try 'sudo yoloai system prune')\n", f.Path, f.Err) //nolint:errcheck // best-effort progress
 	}
 	return items, nil
+}
+
+// reapOrphanInjectors kills leaked `__inject` broker processes whose sandbox is
+// gone (DF71). The keep-set is every live sandbox's recorded injector PID; the
+// broker sweep reaps any running injector not in it. Best-effort: an enumeration
+// failure is a warning, not fatal to the prune.
+func (s *System) reapOrphanInjectors(dryRun bool, out io.Writer) []PruneItem {
+	reaped, err := broker.ReapOrphanInjectors(s.liveInjectorPIDs(), dryRun)
+	if err != nil {
+		fmt.Fprintf(out, "Warning: injector sweep failed: %v\n", err) //nolint:errcheck // best-effort progress
+		return nil
+	}
+	items := make([]PruneItem, 0, len(reaped))
+	for _, pid := range reaped {
+		items = append(items, PruneItem{Kind: PruneKindProcess, Name: fmt.Sprintf("__inject pid %d", pid)})
+	}
+	return items
+}
+
+// liveInjectorPIDs is the set of injector PIDs recorded by sandboxes that still
+// have loadable metadata — the PIDs the injector sweep must NOT reap. A sandbox
+// whose metadata won't load is not "live"; its injector (if any) is an orphan.
+func (s *System) liveInjectorPIDs() map[int]bool {
+	keep := make(map[int]bool)
+	entries, err := os.ReadDir(s.layout.SandboxesDir())
+	if err != nil {
+		return keep
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		sandboxDir := filepath.Join(s.layout.SandboxesDir(), entry.Name())
+		if _, loadErr := store.LoadEnvironment(sandboxDir); loadErr != nil {
+			continue
+		}
+		if rec, rerr := broker.LoadRecord(sandboxDir); rerr == nil && rec != nil {
+			keep[rec.PID] = true
+		}
+	}
+	return keep
 }
 
 // sandboxAction is the disposition classifySandboxes assigns to a broken

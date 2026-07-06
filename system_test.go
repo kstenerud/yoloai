@@ -112,6 +112,26 @@ func writeEnv(t *testing.T, dir, content string) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "environment.json"), []byte(content), 0o600))
 }
 
+// TestLiveInjectorPIDs_ProtectsOnlyLiveSandboxes guards the keep-set that scopes
+// the DF71 injector sweep: a sandbox with loadable metadata protects its recorded
+// injector PID; a broken sandbox's injector is fair game (an orphan).
+func TestLiveInjectorPIDs_ProtectsOnlyLiveSandboxes(t *testing.T) {
+	c := newTestClient(t)
+
+	good := mkSandboxDir(t, c, "good")
+	writeEnv(t, good, `{"version":3}`)
+	require.NoError(t, os.WriteFile(filepath.Join(good, "injector.json"), []byte(`{"pid":111,"addr":"127.0.0.1:1"}`), 0o600))
+
+	broken := mkSandboxDir(t, c, "broken")
+	writeEnv(t, broken, `{not json`)
+	require.NoError(t, os.WriteFile(filepath.Join(broken, "injector.json"), []byte(`{"pid":222,"addr":"127.0.0.1:2"}`), 0o600))
+
+	keep := c.liveInjectorPIDs()
+
+	assert.True(t, keep[111], "a live sandbox's injector PID is protected")
+	assert.False(t, keep[222], "a broken sandbox's injector is an orphan, not protected")
+}
+
 func findItem(items []PruneItem, kind PruneItemKind, name string) bool {
 	for _, it := range items {
 		if it.Kind == kind && it.Name == name {

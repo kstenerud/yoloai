@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/containerd/containerd/v2/client"
@@ -39,7 +40,11 @@ func (r *Runtime) Prune(ctx context.Context, knownInstances []string, dryRun boo
 	}
 
 	var result runtime.PruneResult
+	existing := make(map[string]bool, len(containers))
 	for _, ctr := range containers {
+		// Record every container in the namespace (any principal) so the netns
+		// sweep below never reaps a namespace a live container still pins.
+		existing[ctr.ID()] = true
 		// Identify candidates by label, not name; the principal label scopes the
 		// sweep so a test or secondary principal never reclaims another
 		// principal's containers (DF19).
@@ -72,7 +77,68 @@ func (r *Runtime) Prune(ctx context.Context, knownInstances []string, dryRun boo
 		result.Items = append(result.Items, item)
 	}
 
+	// Sweep leaked network namespaces the container-keyed teardown can no longer
+	// reach (DF72): a crash left /var/run/netns/yoloai-<instance> with no
+	// container record and no cni-state.json.
+	result.Items = append(result.Items, r.reapOrphanNetns(known, existing, dryRun, output)...)
+
 	return result, nil
+}
+
+// netnsDir is the standard Linux named-network-namespace directory.
+const netnsDir = "/var/run/netns"
+
+// reapOrphanNetns sweeps leaked yoloai network namespaces — the DF72 case where a
+// crash (or a sandbox-dir removal that outran a failed deleteNetNS) left
+// /var/run/netns/yoloai-<instance> with no container record and no
+// cni-state.json, so the container-keyed teardownCNI can never find it again. A
+// netns is orphaned when no container in the namespace pins its instance (absent
+// from both the existing container IDs and the known-sandbox set). Reaps the
+// netns and its stale IPAM lease. Scoped to this principal's instance prefix; the
+// cross-data-dir over-reap caveat (DF45 sibling) is documented in D114.
+func (r *Runtime) reapOrphanNetns(known, existing map[string]bool, dryRun bool, output io.Writer) []runtime.PruneItem {
+	entries, err := os.ReadDir(netnsDir)
+	if err != nil {
+		return nil // no netns dir (or unreadable) — nothing to sweep
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		names = append(names, entry.Name())
+	}
+	var items []runtime.PruneItem
+	for _, ns := range selectOrphanNetns(names, known, existing, config.InstancePrefix(r.layout.Principal)) {
+		containerName := strings.TrimPrefix(ns, "yoloai-")
+		if !dryRun {
+			if derr := deleteNetNS(ns); derr != nil {
+				fmt.Fprintf(output, "Warning: delete orphan netns %s: %v\n", ns, derr) //nolint:errcheck // best-effort progress
+				continue
+			}
+			cleanupStaleIPAMLeases(containerName)
+		}
+		items = append(items, runtime.PruneItem{Kind: "netns", Name: ns})
+	}
+	return items
+}
+
+// selectOrphanNetns returns the yoloai netns names (for this principal) that no
+// live or known container owns — the DF72 decision, factored out for testing.
+// netnsNameFor prepends "yoloai-" to the container name, which itself carries the
+// instance prefix, so a netns is this principal's iff stripping one "yoloai-"
+// leaves a name with that prefix; it is an orphan iff its container is absent
+// from both the existing container IDs and the known-sandbox set.
+func selectOrphanNetns(names []string, known, existing map[string]bool, instancePrefix string) []string {
+	var orphans []string
+	for _, ns := range names {
+		containerName, ok := strings.CutPrefix(ns, "yoloai-")
+		if !ok || !strings.HasPrefix(containerName, instancePrefix) {
+			continue // not a yoloai netns for this principal
+		}
+		if existing[containerName] || known[containerName] {
+			continue // a live or known container still owns it
+		}
+		orphans = append(orphans, ns)
+	}
+	return orphans
 }
 
 // snapshotterNames lists the snapshotters yoloai populates: overlayfs for

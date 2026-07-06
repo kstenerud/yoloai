@@ -83,6 +83,8 @@ const (
 	PruneKindSandboxDir PruneItemKind = "sandbox_dir" // yoloai-side: never-initialized sandbox dir (no recoverable work)
 	PruneKindLockFile   PruneItemKind = "lock_file"   // yoloai-side: orphaned per-sandbox .lock file
 	PruneKindStaleBase  PruneItemKind = "stale_base"  // tart: superseded base image (prune --stale-bases)
+	PruneKindProcess    PruneItemKind = "process"     // yoloai-side: leaked host process (orphaned __inject broker)
+	PruneKindNetns      PruneItemKind = "netns"       // containerd: leaked network namespace with no owning sandbox
 )
 
 // LogSource names a structured-log stream emitted by one of yoloai's

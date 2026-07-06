@@ -37,8 +37,10 @@ func stop(ctx context.Context, d state.Deps, name string) error {
 }
 
 // stopInjector tears down the sandbox's host-side credential injector, if one is
-// running (D106). Best-effort: a leftover injector process is harmless to the
-// stop/destroy outcome, so failures are logged, not surfaced.
+// running (D106). Used by stop() (which keeps the sandbox dir); the destroy path
+// reaps the injector inside launch.Teardown instead (DF71). Best-effort: a
+// leftover injector process is harmless to the stop outcome, so failures are
+// logged, not surfaced.
 func stopInjector(ctx context.Context, d state.Deps, name string) {
 	if err := broker.NewSidecarHost().Stop(ctx, d.Layout.SandboxDir(name)); err != nil {
 		slog.Warn("lifecycle: could not stop credential injector", "sandbox", name, "err", err)
@@ -63,7 +65,8 @@ func Destroy(ctx context.Context, d state.Deps, name string) (*DestroyResult, er
 }
 
 func destroy(ctx context.Context, d state.Deps, name string) (*DestroyResult, error) {
-	stopInjector(ctx, d, name)
+	// launch.Teardown reaps the credential injector before deleting the sandbox
+	// dir (DF71), so no separate stopInjector call is needed here.
 	warnings, err := launch.Teardown(ctx, d, name)
 	if err != nil {
 		return nil, err
