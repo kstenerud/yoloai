@@ -7,6 +7,41 @@ History of codebase findings (issues discovered mid-work) that have been address
 are moved here from [`findings-unresolved.md`](findings-unresolved.md) once resolved, so the
 active file stays a working set. Newest first.
 
+### DF73 — Leaked `yoloai __inject` broker process outlives its sandbox — RESOLVED (D114, shipped v0.7.0)
+
+- **Discovered:** 2026-07-06 · **Workstream:** post-v0.7.0 disk-leak investigation (D114)
+- **Severity:** MEDIUM (leaked root process holding a listening socket)
+- **Disposition:** **RESOLVED (D114, shipped in v0.7.0).** Fixed two ways: (Phase 1) `system prune` now reaps orphaned `__inject` processes via an identity-keyed sweep — enumerate running injectors (/proc on Linux, `ps` on macOS), diff against the live sandboxes' `injector.json` PIDs, kill the rest; (Phase 2) `launch.Teardown` now reaps the injector **before** deleting the sandbox dir, so the create-replace path no longer orphans it. `broker.ReapOrphanInjectors`/`LoadRecord`; `system.go` `reapOrphanInjectors`/`liveInjectorPIDs`.
+- **Pointer:** `internal/broker/reap*.go`, `internal/orchestrator/launch/teardown.go`, `system.go`; plan `host-artifact-reclamation.md`.
+
+### DF74 — Leaked CNI network namespace + IPAM lease unreapable once its state/container record is gone — RESOLVED (D114, v0.7.0)
+
+- **Discovered:** 2026-07-06 · **Workstream:** post-v0.7.0 disk-leak investigation (D114)
+- **Severity:** MEDIUM (resource leak — netns + tap + IPAM lease; containerd/Kata on Linux)
+- **Disposition:** **RESOLVED (D114, shipped in v0.7.0).** containerd's `Prune` now sweeps `/var/run/netns/yoloai-*` whose derived instance is owned by no live/known container, deleting the netns + its IPAM lease — no longer keyed on the vanishable `cni-state.json`. Pure `selectOrphanNetns` unit-tested.
+- **Pointer:** `runtime/containerd/prune.go` (`selectOrphanNetns`, `reapOrphanNetns`); plan `host-artifact-reclamation.md`.
+
+### DF75 — Retired-microvm library dir is unreachable dead weight — RESOLVED (dev-host manual rm; no product code)
+
+- **Discovered:** 2026-07-06 · **Workstream:** post-v0.7.0 disk-leak investigation (D114)
+- **Severity:** LOW (dev-host only — `library/microvm/` was never in a released schema)
+- **Disposition:** **RESOLVED (D114 Phase 3).** Removed by a one-off manual `rm` on the dev host; no product code, because a *released* retired backend already has its idiom (a library-schema migrator, as `:overlay` used `migrate_overlay.go`) and microvm never shipped. Recorded in `reference_disk_reclaim_recipes`.
+- **Pointer:** D104 (`working-notes.md`); `internal/config/schema.go`.
+
+### DF76 — Neither `prune` nor `doctor` reconciled host-side artifacts against the sandbox registry — RESOLVED (D114, v0.7.0)
+
+- **Discovered:** 2026-07-06 · **Workstream:** post-v0.7.0 disk-leak investigation (D114) — umbrella behind DF73/DF74/DF77
+- **Severity:** MEDIUM (silent false all-clear: `doctor` reported healthy while orphaned root processes / netns persisted)
+- **Disposition:** **RESOLVED (D114, shipped in v0.7.0).** The identity-keyed host-orphan sweep (broker procs, containerd netns, seatbelt host process group) is wired into `system prune` and surfaced by `doctor`'s dry-run, generalizing the `killStaleKataShims`/tart-census pattern. One documented, deferred caveat: cross-data-dir over-reap (DF45 sibling), scoped to the current data dir.
+- **Pointer:** `system.go` (`Prune`/`Doctor`/`reapOrphanInjectors`); `runtime/containerd/prune.go`; `runtime/seatbelt/prune.go`; plan `host-artifact-reclamation.md`.
+
+### DF77 — Seatbelt monitor/setup host processes orphan independently of the tmux server (resurrect deleted dirs) — RESOLVED (D114, v0.7.0)
+
+- **Discovered:** 2026-07-06 · **Workstream:** D114 Phase 1c (macOS build)
+- **Severity:** MEDIUM (leaked python monitors kept writing into and resurrecting a deleted sandbox dir → phantom "broken" sandboxes, defeating prune's cleanup)
+- **Disposition:** **RESOLVED (D114, shipped in v0.7.0).** The seatbelt sweep was generalized from tmux-only to the whole identity-keyed **host process group**: any host process whose argv points under an orphaned sandbox dir is reaped (tmux server, `sandbox-setup.py`/`status-monitor.py`, panes), scoped to this data dir via `filepath.Rel`. macOS-verified: `system prune` reaps the monitors, the resurrected dirs then stay cleaned, and live/other-data-dir groups are spared.
+- **Pointer:** `runtime/seatbelt/prune.go` (`selectOrphanProcs`, `reapOrphanProcs`); plan `host-artifact-reclamation.md`.
+
 ### DF78 — `make check` on Linux did not lint non-host-GOOS (`*_darwin.go`) files — RESOLVED (`lint-darwin` gate added)
 
 - **Discovered:** 2026-07-06 · **Workstream:** D114 Phase 1c (macOS build — surfaced when the Mac agent's native `make check` went red)
