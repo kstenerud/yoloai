@@ -49,6 +49,6 @@ jobs:
 
       # GitHub-native SLSA build provenance for the published archives + packages,
       # verifiable with: gh attestation verify <file> --repo kstenerud/yoloai
-      - uses: actions/attest-build-provenance@v2
+      - uses: actions/attest-build-provenance@v4
         with:
           subject-path: "dist/*.tar.gz,dist/*.deb,dist/*.rpm,dist/checksums.txt"
