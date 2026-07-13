@@ -97,6 +97,17 @@ ops (`<ref>`/`-- pathspec`) name exactly one; a specifier is required only when 
 are tracked; `apply --all` lands every dir independently. Decision [D81](../../decisions/working-notes.md#d81).
 Plan: [multi-workdir-diff-apply.md](multi-workdir-diff-apply.md).
 
+## Apply drift guard
+
+Design draft (not yet a locked decision). Close the gap between `yoloai diff` and a
+later `yoloai apply`: if the agent changes the tracked dir after the user reviews
+`diff` but before `apply` lands, `apply` today silently lands whatever is beyond
+baseline at that moment, reviewed or not. Fingerprint the exact artifact `apply`
+would land (ordered beyond-baseline commit SHAs for the default mode; a content
+hash of the generated patch for `--no-commit`) when a plain `diff` runs, and balk
+unconditionally (ignoring `--yes`) if `apply` later finds a mismatch — cleared only
+by re-running `diff`, no `--force` bypass. Plan: [apply-drift-guard.md](apply-drift-guard.md).
+
 ## Parallel Agent Workflows
 
 Based on [parallel agents research](../research/parallel-agents.md).
