@@ -36,6 +36,17 @@ registry, plus **kill-before-delete** teardown ordering so the state files that
 key teardown never predecease the artifact. Decision [D114](../../decisions/working-notes.md#d114);
 findings DF73–DF76. Plan: [host-artifact-reclamation.md](host-artifact-reclamation.md).
 
+## Tart network liveness detection
+
+Design draft. A long-idle Tart VM can lose its vmnet session (host sleep /
+subnet re-pick) — the guest drops to a link-local address and the agent spins on
+`ConnectionRefused` while `yoloai ls` still says `active`; only a VM restart
+recovers it. Detect the condition cheaply (`tart ip` empty + guest `en0` on
+`169.254.*`) and surface a directive "restart to recover" via `doctor` (first)
+and possibly the `info`/`ls` status path. Report-only, no auto-restart.
+Incident: [backend-idiosyncrasies.md](../../backend-idiosyncrasies.md#tart-vmnet-session-wedges-on-a-long-idle-vm-host-sleep--subnet-re-pick--guest-drops-to-a-169254-link-local-address-agent-gets-connectionrefused).
+Plan: [tart-network-liveness.md](tart-network-liveness.md).
+
 ## Architecture Remediation
 
 Complete — the multi-quarter program (Go↔Python boundary, `runtime.Backend` interface, dependency direction, error patterns, slog conventions) landed; the plan and its audit are archived under `../archive/`. The one release-gated remnant (W1b — retire the launch-prefix legacy path) and the rest of this branch's cross-version concerns are tracked in [release-migration.md](release-migration.md).
