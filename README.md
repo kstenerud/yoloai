@@ -1,12 +1,13 @@
 # yoloAI
 
-**Sandboxed runner for AI coding agents. No more permission fatigue. Your files stay untouched until you say otherwise.**
+**Sandboxed runner for AI coding agents. No permission fatigue, no credentials in the box, no changes to your project until you approve them.**
 
-AI coding agents want to edit your files and run commands, so you must choose between them constantly asking your permission, or bypassing permissions and risking a catastrophe.
+[![CI](https://github.com/kstenerud/yoloai/actions/workflows/ci.yml/badge.svg)](https://github.com/kstenerud/yoloai/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/kstenerud/yoloai)](https://github.com/kstenerud/yoloai/releases/latest)
+[![Go Reference](https://pkg.go.dev/badge/github.com/kstenerud/yoloai.svg)](https://pkg.go.dev/github.com/kstenerud/yoloai)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Until now.
-
-Let your agent live dangerously in a sandbox, then review the changes and decide what to keep.
+AI coding agents work best with the guardrails off, and that's a terrible way to run them on your real machine. yoloAI gives the agent a disposable sandbox where it can edit anything and run anything, unattended. Your project, your credentials, and your network stay under your control. When the agent is done, review the diff and apply what you want to keep.
 
 ```text
 You                          Sandbox                        Your project
@@ -24,21 +25,16 @@ You                          Sandbox                        Your project
  ├─ yoloai destroy fix-bug      ├─ destroys sandbox              │
 ```
 
-https://github.com/user-attachments/assets/9d6740b4-a34e-4253-82ec-cb0e4c7a8bd9
-
 ## Why?
 
-**Permission fatigue is real.** After a hundred approve/deny prompts you stop reading and just hit "yes" — or you reach for `--dangerously-skip-permissions` and hope for the best. Neither is great.
+Permission prompts exist because agents make mistakes. After the hundredth approve/deny you stop reading them, and `--dangerously-skip-permissions` is one confused agent away from a very bad day. yoloAI shrinks the blast radius until the prompts are unnecessary:
 
-**Disabling permissions is dangerous! ... Unless you've sandboxed your agent, that is!**
+- **Your files are safe.** The agent works on an isolated copy of your project. `diff` shows exactly what changed, `apply` patches your real project while preserving individual commits, and your originals never change until you apply.
+- **Your secrets are safe.** The sandbox starts from a minimal, locally built environment; host environment variables stay on the host. Credentials arrive as read-only file mounts, never environment variables. Where credential brokering applies (Claude today, on by default), the API key stays host-side entirely: a local proxy injects it on the way to the provider, so even a fully compromised agent has nothing to exfiltrate.
+- **Your network is yours.** `--network-isolated` restricts egress to the agent's API endpoints plus domains you allow. `--network-none` removes the network entirely.
+- **Your machine is isolated.** Pick your comfort level, from Linux namespaces through gVisor to hardware VMs.
 
-yoloAI takes a different approach: let the agent do whatever it wants inside a disposable container. Your original files are never modified. When the agent is done, review the diff and choose what to keep.
-
-- **Your files are untouchable.** The agent works on an isolated copy. Originals never change until you say so.
-- **Git-powered review.** `diff` shows exactly what changed. `apply` patches your project cleanly, preserving individual commits.
-- **No permission prompts.** The container is disposable — agents run with full access inside the sandbox.
-- **Persistent agent state.** Session history and config survive stops and restarts.
-- **Easy retry.** `yoloai reset` re-copies your original for a fresh attempt.
+See [Security](docs/GUIDE.md#security) for the full model, including honest limitations.
 
 ## Install
 
@@ -54,7 +50,7 @@ curl -fsSL "https://github.com/kstenerud/yoloai/releases/download/v${VERSION}/yo
 sudo install yoloai /usr/local/bin/
 ```
 
-Each archive also ships shell completions (`completions/`), the `LICENSE`, and the changelog. Verify the download against `checksums.txt` (signed with cosign; every archive also carries GitHub build provenance — `gh attestation verify yoloai_… --repo kstenerud/yoloai`). Debian/RPM packages (`.deb`/`.rpm`) are attached to each release too.
+Each archive also ships shell completions, the `LICENSE`, and the changelog. Releases are signed with cosign (`checksums.txt`) and carry GitHub build provenance (`gh attestation verify yoloai_… --repo kstenerud/yoloai`). Debian/RPM packages are attached to each release too.
 
 ### Homebrew (macOS / Linux)
 
@@ -79,17 +75,16 @@ Requires Go 1.26+. The binary is placed in `$GOPATH/bin` (typically `~/go/bin`).
 ```bash
 git clone https://github.com/kstenerud/yoloai.git
 cd yoloai
-git tag
-# then git checkout your chosen tag
+git checkout v0.7.0   # or stay on main for the latest development version
 make build
-sudo mv yoloai /usr/local/bin/  # or add to PATH
+sudo install yoloai /usr/local/bin/
 ```
 
-It's a single Go binary, with no runtime dependencies beyond your chosen backend. On first run, yoloAI builds its base image and creates `~/.yoloai/`.
+It's a single Go binary with no runtime dependencies beyond your chosen backend. On first run, yoloAI builds its base image and creates `~/.yoloai/`.
 
-## One-Shot workflow
+## Quick start
 
-### Non-Interactive
+### Non-interactive
 
 ```bash
 # Authenticate (yoloAI picks up existing credentials automatically)
@@ -97,7 +92,7 @@ export ANTHROPIC_API_KEY=sk-ant-...   # Claude Code
 export GEMINI_API_KEY=...             # Gemini CLI
 # Or just let it pick up your already authenticated session
 
-# 1. Spin up a sandbox. Agent starts working immediately when you supply a prompt here
+# 1. Spin up a sandbox. The agent starts working immediately when you supply a prompt
 yoloai new fix-bug ./my-project --prompt "fix the failing tests"
 
 # 2. See what the agent changed
@@ -106,7 +101,7 @@ yoloai diff fix-bug
 # 3. Apply the good parts to your real project
 yoloai apply fix-bug
 
-# 4. Toss the container
+# 4. Toss the sandbox
 yoloai destroy fix-bug
 ```
 
@@ -119,37 +114,53 @@ yoloai new exploration ./my-project -a
 #   yoloai attach exploration to reconnect.
 ```
 
-## Iterative workflow
+### Iterating
 
-For longer tasks, work in a commit-by-commit loop. Keep two terminals open — one for yoloAI, one for your normal shell.
+For longer sessions, work in a loop: tell the agent to commit as it goes, and run `yoloai apply` from another terminal whenever you want to pull the finished commits into your real project. Each apply brings over only the new commits since the last one. When you're happy with the result, push as usual and destroy the sandbox. See the [Usage Guide](docs/GUIDE.md) for the full workflow.
 
-```
-┌─ YOLO shell ──────────────────────┬─ Outer shell ─────────────────────┐
-│                                   │                                   │
-│ yoloai new myproject . -a         │                                   │
-│                                   │                                   │
-│ # Tell the agent what to do,      │                                   │
-│ # have it commit when done.       │                                   │
-│                                   │ yoloai apply myproject            │
-│                                   │ # Review and accept the commits.  │
-│                                   │                                   │
-│ # ... next task, next commit ...  │                                   │
-│                                   │ yoloai apply myproject            │
-│                                   │                                   │
-│                                   │ # When you have a good set of     │
-│                                   │ # commits, push:                  │
-│                                   │ git push                          │
-│                                   │                                   │
-│                                   │ # Done? Tear it down:             │
-│                                   │ yoloai destroy myproject          │
-└───────────────────────────────────┴───────────────────────────────────┘
-```
+## Demo
 
-The agent works on an isolated copy, so you can keep iterating without risk. Each `apply` patches the real project with only the new commits since the last apply.
+Creating a sandbox, prompting the agent, and applying the results:
 
-## Supported Infrastructure
+https://github.com/user-attachments/assets/9d6740b4-a34e-4253-82ec-cb0e4c7a8bd9
 
-### Sandbox Backends
+## Features
+
+**Sandboxing**
+
+- Six backends: Docker, Podman, containerd (Kata), Apple Container, Tart, and Seatbelt. Runs on Linux, macOS, and Windows (WSL2).
+- Selectable isolation strength per sandbox, from runc through gVisor up to Kata VMs (QEMU or Firecracker).
+- Network policy per sandbox: open, allowlist, or none.
+- Minimal environment inside the sandbox. Anything from the host is an explicit opt-in (`--env`, `--dir`).
+- Resource limits (`--cpus`, `--memory`) and port forwarding (`--port`).
+- Cheap workdir copies: whole-tree clones on macOS (APFS `clonefile`), per-file reflinks on Linux filesystems that support them (btrfs, XFS). Filesystems without reflink (ext4) get a regular copy.
+
+**Credentials**
+
+- Picks up your existing logins automatically: API keys, subscription credentials, macOS Keychain.
+- Credential brokering keeps the API key host-side (Claude today); other credentials are delivered as read-only file mounts.
+
+**Workflow**
+
+- Copy/diff/apply with git running sandbox-side, so repos with filters and hooks behave correctly.
+- Apply your way: replay commits (default), squash to a single patch, export `.patch` files, pick commits by ref, or `--dry-run` first.
+- Full lifecycle: create, attach, stop, restart, wait, clone, reset, destroy. Agent state survives stops and restarts.
+- Headless one-shots for scripts and CI: `yoloai run --prompt ... --rm`, with `--json` output on every command.
+- When the agent exits, its tmux pane falls to a shell so you can inspect the sandbox.
+
+**Integration**
+
+- Claude Code, Codex, Gemini CLI, Aider, and OpenCode built in, plus a `shell` mode for anything else.
+- VS Code: attach to the container, or open a Remote Tunnel from inside the sandbox (`--vscode-tunnel`).
+- MCP in both directions: `yoloai mcp serve` lets an outer agent drive sandboxes as tools; `yoloai mcp proxy` runs MCP servers inside a sandbox.
+- Profiles: per-project images and defaults (Dockerfile + config, with inheritance).
+- Extensions: add your own subcommands as YAML-wrapped shell scripts (`yoloai x`).
+- Embeddable: the CLI is a thin layer over a public [Go API](https://pkg.go.dev/github.com/kstenerud/yoloai).
+- Single static binary. State lives in `~/.yoloai/` (relocatable with `--data-dir`).
+
+## Supported infrastructure
+
+### Sandbox backends
 
 | Backend    | Supported Hosts              | Dependencies                                                       |
 |------------|------------------------------|--------------------------------------------------------------------|
@@ -160,17 +171,17 @@ The agent works on an isolated copy, so you can keep iterating without risk. Eac
 | tart       | macOS (Apple Silicon)        | [Tart](https://github.com/cirruslabs/tart) (`brew install cirruslabs/cli/tart`) |
 | seatbelt   | macOS (any)                  | None (uses built-in `sandbox-exec`)                                |
 
-### Isolation Modes
+### Isolation modes
 
-Optionally upgrade the OCI runtime for stronger isolation:
+Optionally upgrade the OCI runtime for stronger isolation. gVisor modes are available on docker and podman; the VM modes come with the containerd backend.
 
 | Mode | Description |
 |------|-------------|
-| `container` | Default `runc` — standard Linux namespaces and cgroups |
-| `container-enhanced` | Userspace kernel (gVisor/runsc) — syscall interception, no KVM needed |
-| `container-privileged` | All capabilities, seccomp/AppArmor unconfined — use for Docker-in-Docker and Compose |
-| `vm` | Kata Containers (QEMU) — hardware VM isolation |
-| `vm-enhanced` | Kata + Firecracker microVM — lightweight VM isolation |
+| `container` | Default `runc`: standard Linux namespaces and cgroups |
+| `container-enhanced` | Userspace kernel (gVisor/runsc): syscall interception, no KVM needed |
+| `container-privileged` | All capabilities, seccomp/AppArmor unconfined. Use for Docker-in-Docker and Compose |
+| `vm` | Kata Containers (QEMU): hardware VM isolation |
+| `vm-enhanced` | Kata + Firecracker microVM: lightweight VM isolation |
 
 ```bash
 # Use gVisor for all new sandboxes
@@ -180,29 +191,29 @@ yoloai config set isolation container-enhanced
 yoloai new task . --isolation container-enhanced
 ```
 
-`vm` and `vm-enhanced` require Kata Containers to be installed.
-
-### Agent Modes
+### Agents
 
 | Mode       | Description |
 |------------|-------------|
 | `claude`   | Runs [Claude Code](https://github.com/anthropics/claude-code) via API key or subscription credentials (default) |
 | `codex`    | Runs [Codex](https://github.com/openai/codex) via API key or subscription credentials |
-| `gemini`   | Runs [Gemini](https://github.com/google-gemini) via API key or subscription credentials |
+| `gemini`   | Runs [Gemini CLI](https://github.com/google-gemini/gemini-cli) via API key or subscription credentials |
 | `aider`    | Runs [Aider](https://github.com/Aider-AI/aider) (your config is copied in) |
 | `opencode` | Runs [OpenCode](https://github.com/anomalyco/opencode) (your config is copied in) |
-| `shell`    | Runs a tmux shell with all agents credentials seeded |
+| `shell`    | Runs a tmux shell with all agent credentials seeded |
 | `idle`     | Runs an idle process to allow MCP proxying |
 
 Use `yoloai system agents` to list available agents.
 
 ## Learn more
 
-- **[Usage Guide](docs/GUIDE.md)** — commands, flags, workdir modes, configuration, security
-- **[Roadmap](docs/ROADMAP.md)** — upcoming features
-- **[Architecture](docs/contributors/architecture/README.md)** — code navigation for contributors
+- **[Usage Guide](docs/GUIDE.md)**: commands, flags, workdir modes, configuration, security
+- **[Roadmap](docs/ROADMAP.md)**: upcoming features
+- **[Architecture](docs/contributors/architecture/README.md)**: code navigation for contributors
 
-Early access. Core workflow works, rough edges expected. [Feedback welcome.](https://github.com/kstenerud/yoloai/issues)
+## Status
+
+Public beta. The core workflow is stable and exercised daily; interfaces may still change between 0.x releases, and every breaking change is documented in [BREAKING-CHANGES](docs/BREAKING-CHANGES.md). [Feedback welcome.](https://github.com/kstenerud/yoloai/issues)
 
 ## License
 
