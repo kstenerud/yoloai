@@ -81,7 +81,7 @@ make build
 sudo install yoloai /usr/local/bin/
 ```
 
-It's a single Go binary with no runtime dependencies beyond your chosen backend. On first run, yoloAI builds its base image and creates `~/.yoloai/`.
+It's a single Go binary with no runtime dependencies beyond your chosen backend. On first run, yoloAI builds its base image and creates `~/.yoloai/` (or whichever directory you point `--data-dir` to).
 
 ## Quick start
 
@@ -138,7 +138,7 @@ https://github.com/user-attachments/assets/9d6740b4-a34e-4253-82ec-cb0e4c7a8bd9
 
 **Credentials**
 
-- Picks up your existing logins automatically: API keys, subscription credentials, macOS Keychain.
+- Picks up your existing agent logins automatically: API keys, subscription credentials, macOS Keychain.
 - Credential brokering keeps the API key host-side (Claude today); other credentials are delivered as read-only file mounts.
 
 **Workflow**
@@ -171,6 +171,8 @@ https://github.com/user-attachments/assets/9d6740b4-a34e-4253-82ec-cb0e4c7a8bd9
 | apple      | macOS (Apple Silicon)        | [Apple Container](https://github.com/apple/container) |
 | tart       | macOS (Apple Silicon)        | [Tart](https://github.com/cirruslabs/tart) (`brew install cirruslabs/cli/tart`) |
 | seatbelt   | macOS (any)                  | None (uses built-in `sandbox-exec`)                                |
+
+**Note**: Tart provides a full macOS VM, enabling you to run simulators within the sandbox.
 
 ### Isolation modes
 
