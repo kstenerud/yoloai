@@ -5,8 +5,6 @@ on:
     branches: [main]
   push:
     branches: [main]
-  schedule:
-    - cron: '0 3 * * *'   # nightly at 03:00 UTC
 
 permissions:
   contents: read
@@ -89,22 +87,3 @@ jobs:
 
       - name: Build image and run Podman integration tests
         run: make integration-podman
-
-  nightly-audit:
-    runs-on: ubuntu-latest
-    if: github.event_name == 'schedule'
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-
-      - name: Run govulncheck
-        run: make govulncheck
-
-      - name: Run hadolint
-        run: make hadolint
-
-      - name: Run actionlint
-        run: make actionlint

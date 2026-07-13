@@ -3,6 +3,7 @@
 **Sandboxed runner for AI coding agents. No permission fatigue, no credentials in the box, no changes to your project until you approve them.**
 
 [![CI](https://github.com/kstenerud/yoloai/actions/workflows/ci.yml/badge.svg)](https://github.com/kstenerud/yoloai/actions/workflows/ci.yml)
+[![Nightly Audit](https://github.com/kstenerud/yoloai/actions/workflows/audit.yml/badge.svg)](https://github.com/kstenerud/yoloai/actions/workflows/audit.yml)
 [![Release](https://img.shields.io/github/v/release/kstenerud/yoloai)](https://github.com/kstenerud/yoloai/releases/latest)
 [![Go Reference](https://pkg.go.dev/badge/github.com/kstenerud/yoloai.svg)](https://pkg.go.dev/github.com/kstenerud/yoloai)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
