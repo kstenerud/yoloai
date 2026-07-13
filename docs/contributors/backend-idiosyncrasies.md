@@ -110,6 +110,7 @@ inclusion test first, then add a row to the index.
 | `git diff` fails with "unable to read" object / git corruption on Tart VM | [Tart: VirtioFS corrupts git repositories](#virtiofs-corrupts-git-repositories) |
 | Tart `info` shows `Changes: no` on a dirty sandbox; `destroy` skips the unapplied-work gate | [Tart: host change probe blind to in-VM workdir](#a-host-side-change-probe-is-blind-to-the-in-vm-workdir--info-showed-changes-no-on-a-dirty-tart-sandbox-and-destroy-skipped-its-gate) |
 | Agent silently fails to start on Tart (claude/node not found) | [Tart: provisioned tool dirs live only on the login PATH](#provisioned-tool-dirs-live-only-on-the-login-path-cirrus-base-image) |
+| Agent on a long-idle Tart sandbox: `ConnectionRefused`/`FailedToOpenSocket` on every API call; `tart ip` finds nothing; guest `en0` is `169.254.x.x` | [Tart: vmnet session wedges on a long-idle VM](#tart-vmnet-session-wedges-on-a-long-idle-vm-host-sleep--subnet-re-pick--guest-drops-to-a-169254-link-local-address-agent-gets-connectionrefused) |
 | Swift PM commands fail with sandbox-exec nesting errors on Seatbelt | [Seatbelt: macOS sandbox-exec doesn't nest](#macos-sandbox-exec-doesnt-nest--swift-pm-needs-the-swift-wrapper-sourced) |
 | Agent dies silently/SIGTRAP (exit 133) on Seatbelt at launch; ICU/timezone deny in unified log | [Seatbelt: SBPL subpaths need vnode-resolved paths](#agent-dies-silently-sigtrap--sbpl-subpath-rules-must-use-vnode-resolved-paths) |
 | Confined git under `sandbox-exec` dies (`xcrun_db` / `libxcrun` denied); or a malicious filter still writes to `/tmp`; or git works with `mach-lookup` denied | [Seatbelt: sandbox-exec-wrapping git — escape surfaces + the /usr/bin/git shim](#seatbelt-sandbox-exec-wrapping-git-for-confinement-has-two-escape-surfaces-mach-lookup-process-exec--the-usrbingit-shim-cant-run-confined) |
@@ -1979,6 +1980,52 @@ VirtioFS should only be used for:
 **How yoloAI handles it:** The backend's launch wrap (`PATH="$HOME/.local/bin:/opt/homebrew/opt/node@22/bin:/opt/homebrew/bin:$PATH"`) is a compile-time constant declared on the backend descriptor (`BackendDescriptor.AgentLaunchPrefix`). It is computed once at sandbox creation and stored as `agent_launch_prefix` in `runtime-config.json` — the single source of truth. Every launch path prepends that stored value: Go restart in `lifecycle/restart.go` and Python first-launch in `sandbox-setup.py` both read the field directly (older sandboxes are backfilled by the v1→v2 schema migration), so the two paths can never drift. (Historical note: an earlier base installed Claude Code via npm with a `#!/usr/bin/env node` shebang that the Cirrus image's `node@24` shadowed; switching to the native standalone binary removed that whole class of node-version shadowing, but the agent still needs `~/.local/bin` on the non-login PATH.)
 
 **Code:** `runtime/tart/tart.go` (descriptor `AgentLaunchPrefix` + `PrepareAgentCommand`), `runtime/tart/build.go` (provisionCommands compose the login PATH), `orchestrator/create/create.go` (stores the prefix), `orchestrator/lifecycle/restart.go` (relaunch prepends it), `config/schema.go` (v1→v2 backfill)
+
+---
+
+### Tart: vmnet session wedges on a long-idle VM (host sleep / subnet re-pick) — guest drops to a 169.254 link-local address, agent gets ConnectionRefused
+
+**Symptom:** The agent in a Tart sandbox left idle for days can no longer
+reach its API: Claude shows `Unable to connect to API (ConnectionRefused)`
+and `(FailedToOpenSocket)` and retries forever. The VM is running and
+`tart exec` works normally (its control channel is Virtualization.framework,
+not IP), but `tart ip <vm>` returns "no IP address found" and the guest's
+`en0` holds a self-assigned `169.254.x.x` address.
+
+**Why:** two compounding host-side facts, observed 2026-07 on a sandbox
+idle for one week.
+
+1. macOS re-picks the vmnet shared subnet across host sleep / network
+   transitions. The guest's original gateway was `192.168.64.1`, but the
+   host's `bridge100` had moved to `192.168.139.3/23`. The guest's DHCP
+   lease expired and its renewals were answered by nobody — the DHCP
+   server it knew no longer exists on that subnet — so it fell back to a
+   link-local address.
+2. The vmnet session backing the long-running `tart run` process wedges
+   outright. Even after manually configuring the guest onto the new
+   subnet (`sudo ipconfig set en0 MANUAL <ip> <mask>` + default route),
+   **zero frames crossed the link**: ARP stayed `(incomplete)` in *both*
+   directions between guest `en0` and host `bridge100`, and host→guest
+   ping was 100% loss. The stale addressing is a symptom; the dead L2
+   link is the disease. A wedged vmnet session cannot be reattached from
+   user space — only recreating the virtio NIC (a VM restart) recovers it.
+
+**Diagnosis ladder:** `tart ip <vm>` → nothing, on a VM `tart list` says
+is running; in-guest `/sbin/ifconfig en0` → `inet 169.254.*`; in-guest
+`sudo ipconfig set en0 DHCP` never obtains a lease; a manual static IP on
+the host bridge's current subnet still can't ARP the gateway (both-ways
+`(incomplete)`) — that last step rules out "merely stale lease" and
+confirms the wedge.
+
+**Fix for the user:** restart the VM: `yoloai stop <name> && yoloai start
+<name>`. The VM disk persists, so the `:copy` workdir and the agent's
+on-disk session state survive; resume the agent's conversation after the
+restart (e.g. Claude's `--resume`). In-guest network surgery is pointless
+— don't spend time on it once ARP shows both-ways `(incomplete)`.
+
+**Fix in code:** none yet — detection/surfacing is designed in
+[`design/plans/tart-network-liveness.md`](design/plans/tart-network-liveness.md).
+A running VM whose `en0` is link-local is a reliable, cheap tell.
 
 ## Seatbelt (macOS sandboxing)
 
