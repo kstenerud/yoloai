@@ -1,6 +1,6 @@
 module github.com/kstenerud/yoloai
 
-go 1.26.4
+go 1.26.5
 
 require (
 	github.com/containerd/containerd/api v1.11.1
