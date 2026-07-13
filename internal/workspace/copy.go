@@ -132,6 +132,11 @@ func copyFile(src, dst string, srcInfo fs.FileInfo) error {
 		return fmt.Errorf("create %s: %w", dst, err)
 	}
 
+	// io.Copy between two bare *os.File values engages os.(*File).ReadFrom,
+	// which on Linux uses copy_file_range(2): a reflink (CoW, no data copied)
+	// on filesystems that support it (btrfs, XFS) when src and dst are on the
+	// same filesystem. Wrapping either file in a buffered reader/writer would
+	// silently downgrade every copy to a userspace read/write loop.
 	if _, err := io.Copy(out, in); err != nil {
 		out.Close() //nolint:errcheck,gosec // best-effort cleanup on copy failure
 		return fmt.Errorf("copy %s: %w", src, err)
