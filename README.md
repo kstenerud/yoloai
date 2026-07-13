@@ -135,6 +135,7 @@ https://github.com/user-attachments/assets/9d6740b4-a34e-4253-82ec-cb0e4c7a8bd9
 - Minimal environment inside the sandbox. Anything from the host is an explicit opt-in (`--env`, `--dir`).
 - Resource limits (`--cpus`, `--memory`) and port forwarding (`--port`).
 - Cheap workdir copies: whole-tree clones on macOS (APFS `clonefile`), per-file reflinks on Linux filesystems that support them (btrfs, XFS). Filesystems without reflink (ext4) get a regular copy.
+- `.gitignore` honored: Anything ignored is **NOT** copied to the sandbox (security practice for on-disk dev credentials).
 
 **Credentials**
 
