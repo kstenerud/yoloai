@@ -1,6 +1,15 @@
 # GoReleaser config — builds the cross-platform binaries, archives, checksums,
 # signatures, Linux packages, and the Homebrew formula for a `v*` tag release.
-# Run locally without publishing:  goreleaser release --snapshot --clean
+# Run locally without publishing:
+#   HOMEBREW_TAP_TOKEN= goreleaser release --snapshot --clean --skip=sign,sbom
+# The env var must be *set* (empty is fine): goreleaser's `.Env` errors on a
+# missing key rather than treating it as empty, so the cask's skip_upload
+# template aborts the run without it. The workflow always sets it, so this bites
+# local runs only. Drop `--skip=sign,sbom` if cosign and syft are installed
+# (`goreleaser healthcheck` reports them); CI installs both.
+# --snapshot implies --skip=announce,publish,validate, so it never pushes — but
+# that also means it cannot exercise the publish decisions (e.g. skip_upload).
+# Their resolved inputs are still inspectable in dist/artifacts.json.
 # Docs: https://goreleaser.com
 version: 2
 
