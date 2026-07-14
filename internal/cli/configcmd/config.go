@@ -111,6 +111,9 @@ func newConfigSetCmd() *cobra.Command {
 		Long: `Set a configuration value.
 
 Uses dotted paths for nested keys (e.g., tart.image).
+Only known leaf settings and one-level map entries can be set. Section-level
+keys such as tart, env, and model_aliases are rejected; set a leaf key such as
+tart.image, env.NAME, or model_aliases.NAME instead.
 Creates the config file if it doesn't exist.
 Preserves comments and formatting.
 

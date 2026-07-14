@@ -14,6 +14,10 @@ COMMANDS
      yoloai config set <key> <value>  # change a setting
      yoloai config reset <key>        # revert to default
 
+  'config set' accepts known leaf settings and one-level map entries.
+  Section-level keys such as tart, env, and model_aliases are rejected;
+  set tart.image, env.NAME, or model_aliases.NAME instead.
+
 KEY SETTINGS
 
   agent            Agent to use (default: claude)
