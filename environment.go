@@ -144,15 +144,17 @@ func sandboxInfoFromStatus(si *orchestrator.Info) *SandboxInfo {
 		return nil
 	}
 	return &SandboxInfo{
-		Environment:    environmentFromStore(si.Environment),
-		AgentType:      AgentType(si.AgentType),
-		Model:          si.Model,
-		NetworkMode:    NetworkMode(si.NetworkMode),
-		NetworkAllow:   si.NetworkAllow,
-		Status:         si.Status,
-		AgentStatus:    si.AgentStatus,
-		Changes:        ChangeState(si.HasChanges),
-		DiskUsageBytes: si.DiskUsageBytes,
+		Environment:     environmentFromStore(si.Environment),
+		AgentType:       AgentType(si.AgentType),
+		Model:           si.Model,
+		NetworkMode:     NetworkMode(si.NetworkMode),
+		NetworkAllow:    si.NetworkAllow,
+		Status:          si.Status,
+		AgentStatus:     si.AgentStatus,
+		NetHealth:       si.NetHealth,
+		NetHealthDetail: si.NetHealthDetail,
+		Changes:         ChangeState(si.HasChanges),
+		DiskUsageBytes:  si.DiskUsageBytes,
 	}
 }
 

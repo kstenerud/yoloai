@@ -165,3 +165,29 @@ esac
 	_, statErr := os.Stat(marker)
 	assert.True(t, os.IsNotExist(statErr), "exec probe must not run when tart ip succeeds")
 }
+
+// TestSandboxNetHealth_WedgedVM exercises the single-sandbox probe: the
+// sandbox name must map to the prefixed VM name, and the wedge signature
+// (`tart ip` fails, guest en0 reports link-local) must classify as wedged.
+// No `tart list` is involved — the caller guarantees the VM is running.
+func TestSandboxNetHealth_WedgedVM(t *testing.T) {
+	// Both subcommands guard on $2 so a wrong VM-name mapping classifies as
+	// unknown (not wedged) and fails the assertions below.
+	script := `#!/bin/sh
+[ "$2" = "yoloai-embrace" ] || { echo "wrong vm: $2" 1>&2; exit 98; }
+case "$1" in
+  ip) echo "no IP address found" 1>&2; exit 1 ;;
+  exec) echo "169.254.93.37" ;;
+  *) exit 99 ;;
+esac
+`
+	fakeTart := writeFakeTart(t, script)
+	rt := &Runtime{tartBin: fakeTart, execEnv: []string{"PATH=/usr/bin:/bin"}}
+
+	vm, err := rt.SandboxNetHealth(context.Background(), "embrace")
+	require.NoError(t, err)
+	assert.Equal(t, "yoloai-embrace", vm.VMName)
+	assert.Equal(t, "embrace", vm.SandboxName)
+	assert.Equal(t, runtime.NetHealthWedged, vm.State)
+	assert.Equal(t, "169.254.93.37", vm.Detail)
+}

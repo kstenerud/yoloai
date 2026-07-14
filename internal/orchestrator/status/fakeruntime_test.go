@@ -74,6 +74,23 @@ func (f *fakeRuntime) Descriptor() runtime.BackendDescriptor {
 	}
 }
 
+// fakeProberRuntime is a fakeRuntime that also implements
+// runtime.SandboxNetHealthProber, recording each probe call so tests can
+// assert whether (and for which sandbox) the probe ran.
+type fakeProberRuntime struct {
+	fakeRuntime
+	probeCalls []string
+	health     runtime.VMNetHealth
+	probeErr   error
+}
+
+var _ runtime.SandboxNetHealthProber = (*fakeProberRuntime)(nil)
+
+func (f *fakeProberRuntime) SandboxNetHealth(_ context.Context, name string) (runtime.VMNetHealth, error) {
+	f.probeCalls = append(f.probeCalls, name)
+	return f.health, f.probeErr
+}
+
 var errFakeNotImplemented = &fakeNotImplError{}
 
 type fakeNotImplError struct{}

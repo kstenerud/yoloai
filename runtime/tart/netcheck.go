@@ -15,6 +15,10 @@ import (
 // Compile-time check: tart reports guest network liveness.
 var _ runtime.NetLivenessReporter = (*Runtime)(nil)
 
+// Compile-time check: tart can also probe one sandbox's guest network health
+// on demand (ls/info), reusing the same probe NetLiveness runs fleet-wide.
+var _ runtime.SandboxNetHealthProber = (*Runtime)(nil)
+
 // en0GuestAddrCmd is the guest-side command that probes en0's address via
 // `tart exec`. -- separators are unsupported by tart exec (see
 // docs/contributors/backend-idiosyncrasies.md, "Tart exec does not support --
@@ -47,6 +51,23 @@ func (r *Runtime) NetLiveness(ctx context.Context) (runtime.NetLivenessReport, e
 		})
 	}
 	return report, nil
+}
+
+// SandboxNetHealth implements runtime.SandboxNetHealthProber. Unlike
+// NetLiveness, it does not call `tart list` first — the caller (the status
+// read-model) only invokes this for a sandbox it has already confirmed is
+// running, so the extra existence/running check would be redundant.
+func (r *Runtime) SandboxNetHealth(ctx context.Context, name string) (runtime.VMNetHealth, error) {
+	// Callers pass the sandbox name (e.g. "mybox"); the Tart VM is named with
+	// the instance prefix (e.g. "yoloai-mybox"). Same idiom as GitExec.
+	vmName := instancePrefix + strings.TrimPrefix(name, instancePrefix)
+	state, detail := r.probeNetLiveness(ctx, vmName)
+	return runtime.VMNetHealth{
+		SandboxName: sandboxName(vmName),
+		VMName:      vmName,
+		State:       state,
+		Detail:      detail,
+	}, nil
 }
 
 // probeNetLiveness runs the two-signal liveness probe for one VM. Signal 2

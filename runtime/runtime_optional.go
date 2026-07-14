@@ -277,6 +277,26 @@ func NetLivenessFor(ctx context.Context, rt Backend) (report NetLivenessReport, 
 	return report, true, err
 }
 
+// SandboxNetHealthProber is an optional interface implemented by backends
+// that can probe a single sandbox's guest-network liveness on demand, reusing
+// the same probe NetLivenessReporter runs fleet-wide for doctor. Callers must
+// only invoke this for a sandbox they already know is running (active/idle) —
+// the prober does not itself re-check the sandbox's lifecycle state.
+type SandboxNetHealthProber interface {
+	SandboxNetHealth(ctx context.Context, name string) (VMNetHealth, error)
+}
+
+// SandboxNetHealthFor probes one sandbox's guest-network health, or returns
+// ok=false when the backend does not implement SandboxNetHealthProber.
+func SandboxNetHealthFor(ctx context.Context, rt Backend, name string) (health VMNetHealth, ok bool, err error) {
+	p, ok := rt.(SandboxNetHealthProber)
+	if !ok {
+		return VMNetHealth{}, false, nil
+	}
+	health, err = p.SandboxNetHealth(ctx, name)
+	return health, true, err
+}
+
 // CacheUsage reports the backend's on-disk cache footprint, split by whether
 // reclaiming it forces a base-image rebuild. Returned by DiskUsageReporter.
 type CacheUsage struct {

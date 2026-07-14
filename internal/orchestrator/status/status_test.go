@@ -424,3 +424,119 @@ func TestProbeWorkData_OverlayUpperEmptyIsAmbiguous(t *testing.T) {
 	st, _ := ProbeWorkData(context.Background(), git.NewTestHostWithEnv(testutil.GitEnv()), dir)
 	assert.Equal(t, WorkDataAmbiguous, st)
 }
+
+// probeNetHealth / SandboxNetHealthProber tests
+
+// writeNetHealthFixture creates a minimal sandbox directory for net-health
+// tests and returns the layout to inspect it with.
+func writeNetHealthFixture(t *testing.T, name string) config.Layout {
+	t.Helper()
+	tmpDir := t.TempDir()
+	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
+	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
+	meta := &store.Environment{
+		Name: name,
+		Dirs: []store.DirEnvironment{{
+			HostPath: "/tmp/test",
+			Mode:     "copy",
+		}},
+		CreatedAt: time.Now(),
+	}
+	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
+	require.NoError(t, agentcfg.Save(sandboxDir, &agentcfg.AgentConfig{AgentType: "claude"}))
+	return config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
+}
+
+// runningInspectFn reports the instance as running, so DetectStatus (with no
+// status file) yields StatusActive.
+func runningInspectFn(_ context.Context, _ string) (runtime.InstanceInfo, error) {
+	return runtime.InstanceInfo{Running: true}, nil
+}
+
+func TestInspectSandbox_NetHealth_ProbedWhenActive(t *testing.T) {
+	name := "net-active"
+	layout := writeNetHealthFixture(t, name)
+	mock := &fakeProberRuntime{
+		fakeRuntime: fakeRuntime{inspectFn: runningInspectFn},
+		health: runtime.VMNetHealth{
+			SandboxName: name,
+			VMName:      "yoloai-" + name,
+			State:       runtime.NetHealthWedged,
+			Detail:      "169.254.93.37",
+		},
+	}
+
+	info, err := InspectSandbox(context.Background(), layout, mock, name)
+	require.NoError(t, err)
+	assert.Equal(t, StatusActive, info.Status)
+	assert.Equal(t, []string{name}, mock.probeCalls)
+	assert.Equal(t, "wedged", info.NetHealth)
+	assert.Equal(t, "169.254.93.37", info.NetHealthDetail)
+}
+
+func TestInspectSandbox_NetHealth_NotProbedWhenStopped(t *testing.T) {
+	name := "net-stopped"
+	layout := writeNetHealthFixture(t, name)
+	mock := &fakeProberRuntime{
+		fakeRuntime: fakeRuntime{
+			inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
+				return runtime.InstanceInfo{Running: false}, nil
+			},
+		},
+	}
+
+	info, err := InspectSandbox(context.Background(), layout, mock, name)
+	require.NoError(t, err)
+	assert.Equal(t, StatusStopped, info.Status)
+	assert.Empty(t, mock.probeCalls, "a stopped sandbox must not be probed")
+	assert.Empty(t, info.NetHealth)
+	assert.Empty(t, info.NetHealthDetail)
+}
+
+func TestInspectSandbox_NetHealth_EmptyWithoutProber(t *testing.T) {
+	name := "net-noprober"
+	layout := writeNetHealthFixture(t, name)
+	mock := &fakeRuntime{inspectFn: runningInspectFn}
+
+	info, err := InspectSandbox(context.Background(), layout, mock, name)
+	require.NoError(t, err)
+	assert.Equal(t, StatusActive, info.Status)
+	assert.Empty(t, info.NetHealth)
+	assert.Empty(t, info.NetHealthDetail)
+}
+
+func TestInspectSandbox_NetHealth_ProbeErrorLeavesFieldsEmpty(t *testing.T) {
+	name := "net-probeerr"
+	layout := writeNetHealthFixture(t, name)
+	mock := &fakeProberRuntime{
+		fakeRuntime: fakeRuntime{inspectFn: runningInspectFn},
+		probeErr:    fmt.Errorf("tart exec: connection refused"),
+	}
+
+	info, err := InspectSandbox(context.Background(), layout, mock, name)
+	require.NoError(t, err, "a failed probe must never fail the inspect")
+	assert.Equal(t, StatusActive, info.Status)
+	assert.Empty(t, info.NetHealth)
+	assert.Empty(t, info.NetHealthDetail)
+}
+
+func TestInspectSandboxWithBackend_NetHealth_ProbedWhenActive(t *testing.T) {
+	name := "net-backend"
+	layout := writeNetHealthFixture(t, name)
+	mock := &fakeProberRuntime{
+		fakeRuntime: fakeRuntime{inspectFn: runningInspectFn},
+		health: runtime.VMNetHealth{
+			SandboxName: name,
+			VMName:      "yoloai-" + name,
+			State:       runtime.NetHealthOK,
+			Detail:      "192.168.64.12",
+		},
+	}
+
+	info, err := InspectSandboxWithBackend(context.Background(), layout, mock, name)
+	require.NoError(t, err)
+	assert.Equal(t, StatusActive, info.Status)
+	assert.Equal(t, []string{name}, mock.probeCalls)
+	assert.Equal(t, "ok", info.NetHealth)
+	assert.Equal(t, "192.168.64.12", info.NetHealthDetail)
+}

@@ -108,8 +108,31 @@ func printSandboxNetwork(w io.Writer, info *yoloai.SandboxInfo) {
 			fmt.Fprintf(w, "Network:     %s\n", info.NetworkMode) //nolint:errcheck
 		}
 	}
+	if info.NetHealth != "" {
+		fmt.Fprintf(w, "Net health:  %s\n", netHealthValue(info)) //nolint:errcheck
+	}
 	if info.Environment != nil && len(info.Environment.Ports) > 0 {
 		fmt.Fprintf(w, "Ports:       %s\n", strings.Join(info.Environment.Ports, ", ")) //nolint:errcheck
+	}
+}
+
+// netHealthValue renders the value of the "Net health:" line. The wedged
+// message stays directive but shorter than doctor's (netHealthLabel in
+// doctorcmd): report only, point at the stop/start recovery and at doctor
+// for the full explanation.
+func netHealthValue(info *yoloai.SandboxInfo) string {
+	name := info.Environment.Name
+	switch info.NetHealth {
+	case "ok":
+		return fmt.Sprintf("ok (%s)", info.NetHealthDetail)
+	case "wedged":
+		return fmt.Sprintf(
+			"WEDGED (guest en0 is link-local %s) — vmnet session is dead; "+
+				"restart to recover: yoloai stop %s && yoloai start %s "+
+				"(run 'yoloai doctor' for details)",
+			info.NetHealthDetail, name, name)
+	default:
+		return fmt.Sprintf("could not determine (%s)", info.NetHealthDetail)
 	}
 }
 
