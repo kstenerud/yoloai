@@ -104,9 +104,24 @@ func TestConvertPorts_Multiple(t *testing.T) {
 
 func TestRequiredCapabilities_Docker_NonEnhanced(t *testing.T) {
 	r := &Runtime{binaryName: "docker"}
-	for _, mode := range []runtime.IsolationMode{"", "container", "vm", "vm-enhanced"} {
+	for _, mode := range []runtime.IsolationMode{"vm", "vm-enhanced"} {
 		capList := r.RequiredCapabilities(mode)
 		assert.Nil(t, capList, "mode %q should return nil caps", mode)
+	}
+}
+
+// TestRequiredCapabilities_Docker_BaseMode_RuncFloor locks the base ("" and
+// "container") modes to the runc version-floor check — the first (and only)
+// capability checked there. It is Advisory: a failure never blocks (see
+// TestFormatError_SkipsAdvisory in runtime/caps), just surfaces via doctor and
+// the launch-time warning.
+func TestRequiredCapabilities_Docker_BaseMode_RuncFloor(t *testing.T) {
+	r := &Runtime{binaryName: "docker", runcVersionFloor: buildRuncVersionFloorCap()}
+	for _, mode := range []runtime.IsolationMode{runtime.IsolationModeDefault, runtime.IsolationModeContainer, runtime.IsolationModeContainerPrivileged} {
+		capList := r.RequiredCapabilities(mode)
+		require.Len(t, capList, 1, "mode %q", mode)
+		assert.Equal(t, "runc-version-floor", capList[0].ID)
+		assert.True(t, capList[0].Advisory)
 	}
 }
 

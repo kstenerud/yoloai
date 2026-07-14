@@ -31,6 +31,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/orchestrator/runtimeconfig"
 	"github.com/kstenerud/yoloai/internal/orchestrator/state"
 	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/runtime/caps"
 	"github.com/kstenerud/yoloai/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
@@ -105,6 +106,10 @@ func LaunchContainer(ctx context.Context, d state.Deps, st *state.State) (err er
 		return err
 	}
 	ports = filterAvailablePorts(ports, outputOr(st.Output))
+
+	for _, w := range advisoryWarnings(ctx, d.Runtime, st.Isolation) {
+		fmt.Fprintf(outputOr(st.Output), "Warning: %s\n", w) //nolint:errcheck // best-effort output
+	}
 
 	if err = buildAndStart(ctx, d.Runtime, st, mnts, ports, secretsDir != "", secretEnv, bro); err != nil {
 		return err // the deferred rollbackPartialLaunch reaps the injector + container + netns
@@ -969,6 +974,23 @@ func filterAvailablePorts(ports []runtime.PortMapping, output io.Writer) []runti
 		available = append(available, p)
 	}
 	return available
+}
+
+// advisoryWarnings returns one-line warnings for advisory capability checks
+// that failed for the given isolation mode (e.g. a below-floor runc/crun
+// version — see runtime/caps.HostCapability.Advisory). Advisory failures
+// never block launch and never prompt; this is the passive alternative,
+// printed alongside filterAvailablePorts's warning in the same style.
+func advisoryWarnings(ctx context.Context, rt runtime.Backend, isolation runtime.IsolationMode) []string {
+	env := caps.DetectEnvironment()
+	results := caps.RunChecks(ctx, runtime.RequiredCapabilitiesFor(rt, isolation), env)
+	var warnings []string
+	for _, r := range results {
+		if r.Err != nil && r.Cap.Advisory {
+			warnings = append(warnings, r.Cap.Summary+": "+r.Err.Error())
+		}
+	}
+	return warnings
 }
 
 // parsePortBindings converts ["host:container", ...] to runtime port mappings.

@@ -66,7 +66,7 @@ func ComputeAvailability(results []CheckResult) Availability {
 func FormatError(results []CheckResult) error {
 	var blocks []string
 	for _, r := range results {
-		if r.Err != nil {
+		if r.Err != nil && !r.Cap.Advisory {
 			blocks = append(blocks, formatFailure(r))
 		}
 	}

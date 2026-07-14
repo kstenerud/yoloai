@@ -1,16 +1,52 @@
 package docker
 
-// ABOUTME: HostCapability constructors for the Docker backend — gVisor runsc binary and
-// ABOUTME: gVisor registered with the Docker daemon.
+// ABOUTME: HostCapability constructors for the Docker backend — gVisor runsc binary,
+// ABOUTME: gVisor registered with the Docker daemon, and the runc version floor.
 
 import (
 	"context"
 	"fmt"
+	"os/exec"
 	goruntime "runtime"
 	"strings"
 
+	"github.com/kstenerud/yoloai/internal/sysexec"
 	"github.com/kstenerud/yoloai/runtime/caps"
 )
+
+// runcVersionFloorMeets reports whether a runc version fixes the Nov 2025
+// masked-path/mount-race container-escape CVEs (CVE-2025-31133,
+// CVE-2025-52565, CVE-2025-52881), fixed in 1.2.8, 1.3.3, and 1.4.0-rc.3.
+func runcVersionFloorMeets(major, minor, patch int) bool {
+	switch {
+	case major != 1:
+		return major > 1
+	case minor == 2:
+		return patch >= 8
+	case minor == 3:
+		return patch >= 3
+	default:
+		return minor >= 4
+	}
+}
+
+// buildRuncVersionFloorCap returns an advisory capability warning when the
+// host's runc is older than the version fixing known container-escape CVEs.
+// Linux-only: on macOS/Windows the daemon runs inside a VM, so the host PATH
+// says nothing about the daemon's actual runc.
+func buildRuncVersionFloorCap() caps.HostCapability {
+	return caps.NewOCIRuntimeVersionFloor(
+		"runc-version-floor",
+		"runc",
+		"runc version floor",
+		"runc versions below 1.2.8/1.3.3/1.4.0-rc.3 are missing fixes for known "+
+			"mount-race container-escape CVEs (CVE-2025-31133, CVE-2025-52565, CVE-2025-52881).",
+		"https://github.com/opencontainers/runc/releases",
+		exec.LookPath,
+		func(path string) ([]byte, error) { return sysexec.Command([]string{}, path, "--version").Output() },
+		runcVersionFloorMeets,
+	)
+}
 
 // buildGVisorRegisteredCap returns a HostCapability that checks whether runsc is
 // registered as a Docker runtime. Uses the injectable dockerInfoOutput var.

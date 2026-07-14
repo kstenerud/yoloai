@@ -222,9 +222,23 @@ func buildPodmanTestRuntime(rootless bool, lookPath func(string) (string, error)
 
 func TestRequiredCapabilities_Podman_NonEnhanced(t *testing.T) {
 	r := buildPodmanTestRuntime(false, func(string) (string, error) { return "/sbin/runsc", nil })
-	for _, mode := range []runtime.IsolationMode{"", "container", "vm", "vm-enhanced"} {
+	for _, mode := range []runtime.IsolationMode{"vm", "vm-enhanced"} {
 		capList := r.RequiredCapabilities(mode)
 		assert.Nil(t, capList, "mode %q should return nil caps", mode)
+	}
+}
+
+// TestRequiredCapabilities_Podman_BaseMode_CrunFloor locks the base ("" and
+// "container") modes to the crun version-floor check. It is Advisory: a
+// failure never blocks, just surfaces via doctor and the launch-time warning.
+func TestRequiredCapabilities_Podman_BaseMode_CrunFloor(t *testing.T) {
+	r := buildPodmanTestRuntime(false, func(string) (string, error) { return "/sbin/runsc", nil })
+	r.crunVersionFloor = buildCrunVersionFloorCap()
+	for _, mode := range []runtime.IsolationMode{runtime.IsolationModeDefault, runtime.IsolationModeContainer, runtime.IsolationModeContainerPrivileged} {
+		capList := r.RequiredCapabilities(mode)
+		require.Len(t, capList, 1, "mode %q", mode)
+		assert.Equal(t, "crun-version-floor", capList[0].ID)
+		assert.True(t, capList[0].Advisory)
 	}
 }
 

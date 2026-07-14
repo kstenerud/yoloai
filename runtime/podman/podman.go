@@ -87,8 +87,9 @@ type Runtime struct {
 	rootless bool // true when connected to a rootless (user) Podman socket
 
 	// Capability fields — built once in New(), returned by RequiredCapabilities.
-	rootlessCheck caps.HostCapability
-	gvisorRunsc   caps.HostCapability
+	rootlessCheck    caps.HostCapability
+	gvisorRunsc      caps.HostCapability
+	crunVersionFloor caps.HostCapability
 }
 
 // Compile-time checks.
@@ -120,6 +121,7 @@ func New(ctx context.Context, layout config.Layout) (*Runtime, error) {
 	r := &Runtime{Runtime: dockerRT, rootless: rootless}
 	r.rootlessCheck = buildRootlessCheckCap(rootless)
 	r.gvisorRunsc = caps.NewGVisorRunsc(runscLookPath)
+	r.crunVersionFloor = buildCrunVersionFloorCap()
 
 	// Podman's docker-compat /system/df reports LayersSize=0, so the inherited
 	// docker CacheUsage would report 0 image bytes. Inject a per-image dedup.
@@ -306,6 +308,8 @@ func (r *Runtime) RequiredCapabilities(isolation runtime.IsolationMode) []caps.H
 		// gvisorRunsc avoids a confusing "install runsc" suggestion when the
 		// real answer is "rootless Podman can never run gVisor."
 		return []caps.HostCapability{r.rootlessCheck, r.gvisorRunsc}
+	case runtime.IsolationModeDefault, runtime.IsolationModeContainer, runtime.IsolationModeContainerPrivileged:
+		return []caps.HostCapability{r.crunVersionFloor}
 	default:
 		return nil
 	}

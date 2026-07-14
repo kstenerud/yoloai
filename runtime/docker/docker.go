@@ -126,6 +126,7 @@ type Runtime struct {
 	// Capability fields — built once in New(), returned by RequiredCapabilities.
 	gvisorRunsc      caps.HostCapability
 	gvisorRegistered caps.HostCapability
+	runcVersionFloor caps.HostCapability
 
 	// providerNames are the local Docker providers detected on the host at
 	// construction (OrbStack, Docker Desktop, …). Used only for the "you may have
@@ -242,6 +243,7 @@ func newDockerRuntime(cli *dockerclient.Client, binaryName string, layout config
 	}
 	r.gvisorRunsc = caps.NewGVisorRunsc(exec.LookPath)
 	r.gvisorRegistered = buildGVisorRegisteredCap(execEnv, binaryName)
+	r.runcVersionFloor = buildRuncVersionFloorCap()
 	return r
 }
 
@@ -969,6 +971,8 @@ func (r *Runtime) RequiredCapabilities(isolation runtime.IsolationMode) []caps.H
 			return []caps.HostCapability{r.gvisorRunsc, r.gvisorRegistered}
 		}
 		return []caps.HostCapability{r.gvisorRegistered}
+	case runtime.IsolationModeDefault, runtime.IsolationModeContainer, runtime.IsolationModeContainerPrivileged:
+		return []caps.HostCapability{r.runcVersionFloor}
 	default:
 		return nil
 	}
