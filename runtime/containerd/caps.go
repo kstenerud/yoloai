@@ -20,7 +20,17 @@ import (
 	"github.com/kstenerud/yoloai/runtime/caps"
 )
 
-// buildKataShimV2Cap returns a HostCapability that checks for the Kata QEMU shim.
+// kataManagerInstallOnly installs Kata onto an already-installed containerd
+// (yoloAI installs containerd separately via apt — see descriptor.InstallHint)
+// without touching the local containerd config. Verbatim from the upstream
+// docs (utils/README.md "To install Kata Containers only"): kata's own apt/OBS
+// package repo was archived in 2021 and only ever covered the legacy 1.x
+// series, so `apt install kata-containers` no longer resolves on any current
+// distro (DF83). kata-manager.sh is the current supported install path for
+// standalone (non-Kubernetes) containerd setups.
+const kataManagerInstallOnly = `bash -c "$(curl -fsSL https://raw.githubusercontent.com/kata-containers/kata-containers/main/utils/kata-manager.sh) -o"`
+
+// buildKataShimV2Cap returns a HostCapability that checks for the Kata shim.
 func buildKataShimV2Cap() caps.HostCapability {
 	return caps.HostCapability{
 		ID:      "kata-shim-v2",
@@ -37,8 +47,8 @@ func buildKataShimV2Cap() caps.HostCapability {
 		},
 		Fix: func(_ caps.Environment) []caps.FixStep {
 			return []caps.FixStep{{
-				Description: "Install kata-containers",
-				Command:     "sudo apt install kata-containers",
+				Description: "Install kata-containers via kata-manager.sh (the old apt/OBS package repo was archived in 2021)",
+				Command:     kataManagerInstallOnly,
 				NeedsRoot:   true,
 			}}
 		},
@@ -62,8 +72,8 @@ func buildKataFCShimV2Cap() caps.HostCapability {
 		},
 		Fix: func(_ caps.Environment) []caps.FixStep {
 			return []caps.FixStep{{
-				Description: "Install kata-containers with Firecracker support",
-				Command:     "sudo apt install kata-containers",
+				Description: "Install kata-containers via kata-manager.sh (the old apt/OBS package repo was archived in 2021); all hypervisor shims, including Firecracker, are installed by default",
+				Command:     kataManagerInstallOnly,
 				NeedsRoot:   true,
 			}}
 		},
@@ -229,7 +239,7 @@ func buildDevmapperSnapshotterCap(r *Runtime) caps.HostCapability {
 		Fix: func(_ caps.Environment) []caps.FixStep {
 			return []caps.FixStep{{
 				Description: "Run the devmapper setup script and restart containerd",
-				URL:         "https://github.com/kata-containers/kata-containers/blob/main/docs/how-to/containerd-kata-fc-for-ubuntu.md",
+				URL:         "https://github.com/kata-containers/kata-containers/blob/main/docs/how-to/how-to-use-kata-containers-with-firecracker.md",
 				NeedsRoot:   true,
 			}, {
 				// Without discard_blocks, removed snapshots return blocks to the

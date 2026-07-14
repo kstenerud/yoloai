@@ -44,17 +44,20 @@ func buildRootlessCheckCap(rootless bool) caps.HostCapability {
 	}
 }
 
-// crunVersionFloorMeets reports whether a crun version fixes the confirmed
-// symlink-escape container breakout (GHSA-f42g-r5jj-qh4j), fixed in 1.20.
+// crunVersionFloorMeets reports whether a crun version fixes both the
+// symlink-escape container breakout (GHSA-f42g-r5jj-qh4j, fixed in 1.20) and
+// the later masked-path-class /dev-symlink escape (CVE-2026-47766, fixed in
+// 1.28) — the crun analogue of the runc masked-path CVEs above. 1.28
+// supersedes 1.20, so the floor is 1.28.
 func crunVersionFloorMeets(major, minor, _ int) bool {
 	if major != 1 {
 		return major > 1
 	}
-	return minor >= 20
+	return minor >= 28
 }
 
 // buildCrunVersionFloorCap returns an advisory capability warning when the
-// host's crun is older than the version fixing a known container-escape CVE.
+// host's crun is older than the version fixing known container-escape CVEs.
 // Linux-only: on macOS the daemon runs inside Podman Machine (a VM), so the
 // host PATH says nothing about the daemon's actual crun.
 func buildCrunVersionFloorCap() caps.HostCapability {
@@ -62,8 +65,8 @@ func buildCrunVersionFloorCap() caps.HostCapability {
 		"crun-version-floor",
 		"crun",
 		"crun version floor",
-		"crun versions below 1.20 are missing a fix for a symlink-escape container "+
-			"breakout (GHSA-f42g-r5jj-qh4j).",
+		"crun versions below 1.28 are missing fixes for known container-escape CVEs "+
+			"(GHSA-f42g-r5jj-qh4j, fixed 1.20; CVE-2026-47766, fixed 1.28).",
 		"https://github.com/containers/crun/releases",
 		exec.LookPath,
 		func(path string) ([]byte, error) { return sysexec.Command([]string{}, path, "--version").Output() },
