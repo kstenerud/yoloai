@@ -2039,6 +2039,19 @@ on-disk session state survive; resume the agent's conversation after the
 restart (e.g. Claude's `--resume`). In-guest network surgery is pointless
 — don't spend time on it once ARP shows both-ways `(incomplete)`.
 
+**The session can die minutes after creation, awake (observed 2026-07-14):**
+don't read "long-idle / host sleep" as a precondition. On one afflicted host,
+a freshly restarted VM's bridge was torn down ~12 minutes later while the VM
+ran and the host was awake — unified log showed `bridge101` `if_detaching` →
+`if_detached` (`airportd`/`configd` at 21:13:26) with **no** WiFi roam,
+sleep, or VM churn preceding it; the guest kept its now-orphaned lease and
+went net-dead (stale-lease variant below). The same host produced three such
+re-wedges in one evening. Trigger unidentified (Tailscale's `IPNExtension`
+observed the change but wasn't shown to cause it). To catch the killer in
+the act:
+`log show --last 30m --predicate 'eventMessage CONTAINS "bridge101"'`
+around the moment `yoloai ls` flips to `(net-dead)`.
+
 **Subnet flapping under session churn (observed 2026-07-14):** tart's shared
 bridge (`bridge101` on a host where podman-machine's five-week-old session
 holds `bridge100`) is torn down and re-created as tart VMs come and go, and
