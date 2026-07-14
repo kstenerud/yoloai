@@ -130,6 +130,52 @@ type Definition struct {
 	// Nil means the agent is not brokerable yet and always takes direct
 	// credential delivery.
 	Broker *BrokerConfig
+
+	// WorkdirTrust, when set, patches an agent config file at launch to record the
+	// container working directory as trusted — for CLIs that block on a folder-trust
+	// prompt before running in a directory (Codex, DF85). It runs on every launch,
+	// independent of brokering. Nil for agents with no such prompt.
+	WorkdirTrust *WorkdirTrustPatch
+
+	// DirectCredentialFile, when set, materializes the agent's real credential into
+	// a config file when it is NOT brokered — for CLIs that read their credential
+	// only from a file, where the usual env-var/secrets-file delivery doesn't
+	// authenticate them (Codex reads auth.json; a bare OPENAI_API_KEY env var leaves
+	// it "not logged in" — DF84). The launch path writes it only when direct
+	// delivery is in effect (the credential is still present in the resolved secret
+	// env; brokering removes it and writes a placeholder instead). Nil for agents
+	// whose env-var credential works directly.
+	DirectCredentialFile *DirectCredentialFile
+}
+
+// DirectCredentialFile declares how to write an agent's real credential to a
+// config file for the non-brokered (direct) delivery path, for a CLI that reads
+// its credential only from a file.
+type DirectCredentialFile struct {
+	// RelPath is the config file relative to the agent's runtime state dir, e.g.
+	// "auth.json".
+	RelPath string
+	// EnvVars are the credential env vars in precedence order; the first present
+	// (non-empty) in the resolved secret env is the credential written. When none
+	// is present, nothing is written (no credential, or it was brokered away).
+	EnvVars []string
+	// Render builds the file's bytes from the resolved secret.
+	Render func(secret string) ([]byte, error)
+}
+
+// WorkdirTrustPatch declares how to mark the container working directory trusted
+// in an agent's config file, for a CLI that otherwise blocks on a folder-trust
+// onboarding prompt. The launch path reads the file from the sandbox's
+// agent-runtime dir, calls Patch with the resolved container workdir, and writes
+// it back before the container starts.
+type WorkdirTrustPatch struct {
+	// RelPath is the config file relative to the agent's runtime state dir, e.g.
+	// "config.toml".
+	RelPath string
+	// Patch records workdir (the container working directory) as trusted in the
+	// file's current bytes and returns the new bytes. current is empty when the
+	// file does not yet exist. It must preserve unrelated config and be idempotent.
+	Patch func(current []byte, workdir string) ([]byte, error)
 }
 
 // BrokerConfig declares an agent's brokerable credentials for the host-side
@@ -150,12 +196,52 @@ type BrokerConfig struct {
 	// is used. Claude has two: the metered API key (x-api-key) and the
 	// subscription OAuth token (Authorization: Bearer).
 	Credentials []BrokerCredential
-	// BaseURLEnvVar points the agent at the injector, e.g. "ANTHROPIC_BASE_URL".
+	// PlaceholderHeader is the HTTP header the agent's CLI transmits its
+	// placeholder token in — the header the injector strips and verifies the
+	// placeholder against before injecting the real credential. It is agent-
+	// specific: "Authorization" for Claude/Codex (Bearer), "x-goog-api-key" for
+	// Gemini. Must be non-empty for a brokerable agent.
+	PlaceholderHeader string
+	// BaseURLEnvVar points the agent at the injector via an environment variable,
+	// e.g. "ANTHROPIC_BASE_URL" (Claude) or "GOOGLE_GEMINI_BASE_URL" (Gemini).
+	// Exactly one redirect channel is used: BaseURLEnvVar for env-redirected
+	// agents, or ConfigFiles for agents whose CLI reads its base URL (and/or its
+	// credential) only from config files (e.g. Codex).
 	BaseURLEnvVar string
+	// ConfigFiles are config files the broker patches host-side to deliver the
+	// redirect and/or the placeholder credential to a CLI that reads them from
+	// files rather than env vars. The launch path reads each file from the
+	// sandbox's agent-runtime dir, calls Patch with the injector endpoint and the
+	// per-sandbox placeholder, and writes it back before the container starts
+	// (the endpoint is known only at launch). Empty for env-redirected agents.
+	ConfigFiles []BrokerConfigFile
 	// AuthTokenEnvVar carries the placeholder the agent sends, e.g.
-	// "ANTHROPIC_AUTH_TOKEN"; DummyToken is its value.
+	// "ANTHROPIC_AUTH_TOKEN" (Claude, a dedicated token var) or "GEMINI_API_KEY"
+	// (Gemini, whose CLI has no separate token var — the placeholder rides in the
+	// API-key var itself). Empty for agents that receive the placeholder via a
+	// config file instead (Codex → auth.json). DummyToken is its documented
+	// default value; the launch path delivers the per-sandbox PlaceholderToken.
 	AuthTokenEnvVar string
 	DummyToken      string
+}
+
+// BrokerConfigFile is one config file the broker patches host-side to deliver a
+// redirect or a placeholder credential to a CLI that reads them from files
+// rather than env vars. Codex needs two: config.toml (its base URL — it has no
+// base-URL env var) and auth.json (its API key — a bare OPENAI_API_KEY env var
+// does not authenticate Codex 0.144; it reads a logged-in auth.json).
+type BrokerConfigFile struct {
+	// RelPath is the config file relative to the agent's runtime state dir, e.g.
+	// "config.toml" or "auth.json".
+	RelPath string
+	// Patch merges baseURL (the injector's "http://host:port" root) and/or
+	// placeholder (the per-sandbox token the agent presents to the injector) into
+	// the file's current bytes and returns the new bytes. current is empty when
+	// the file does not yet exist (none was seeded), in which case Patch creates a
+	// minimal file. It must preserve unrelated user config and be idempotent
+	// across relaunches. A file that only carries the base URL ignores placeholder,
+	// and vice versa.
+	Patch func(current []byte, baseURL, placeholder string) ([]byte, error)
 }
 
 // BrokerCredential is one brokerable credential form: the resolved secret that
@@ -257,9 +343,11 @@ var agents = map[string]*Definition{
 				{EnvVar: "ANTHROPIC_API_KEY", Header: "x-api-key", Prefix: ""},
 				{EnvVar: "CLAUDE_CODE_OAUTH_TOKEN", Header: "Authorization", Prefix: "Bearer "},
 			},
-			BaseURLEnvVar:   "ANTHROPIC_BASE_URL",
-			AuthTokenEnvVar: "ANTHROPIC_AUTH_TOKEN",
-			DummyToken:      "yoloai-broker-dummy",
+			// Claude Code sends ANTHROPIC_AUTH_TOKEN as "Authorization: Bearer ...".
+			PlaceholderHeader: "Authorization",
+			BaseURLEnvVar:     "ANTHROPIC_BASE_URL",
+			AuthTokenEnvVar:   "ANTHROPIC_AUTH_TOKEN",
+			DummyToken:        "yoloai-broker-dummy",
 		},
 		SeedFiles: []SeedFile{
 			{HostPath: "~/.claude/.credentials.json", TargetPath: ".credentials.json", AuthOnly: true, KeychainService: "Claude Code-credentials"},
@@ -342,6 +430,27 @@ var agents = map[string]*Definition{
 		HeadlessCmd:    `gemini -p "PROMPT" --yolo`,
 		PromptMode:     PromptModeInteractive,
 		APIKeyEnvVars:  []string{"GEMINI_API_KEY"},
+		Broker: &BrokerConfig{ //nolint:gosec // G101 false positive: env-var NAMES + a placeholder, not real credentials
+			UpstreamURL: "https://generativelanguage.googleapis.com",
+			Destination: "generativelanguage.googleapis.com",
+			// The Gemini CLI (via @google/genai) sends the API key as the
+			// x-goog-api-key header on the AI-Studio path. It has no separate
+			// auth-token env var, so the placeholder rides in GEMINI_API_KEY itself
+			// (AuthTokenEnvVar below): applyBrokerEnv drops the real key, then sets
+			// the same var to the placeholder. Brokering only engages on the API-key
+			// path — a "Login with Google" OAuth session ignores the base-URL
+			// override and is left to direct delivery.
+			Credentials: []BrokerCredential{
+				{EnvVar: "GEMINI_API_KEY", Header: "x-goog-api-key", Prefix: ""},
+			},
+			PlaceholderHeader: "x-goog-api-key",
+			// @google/genai reads GOOGLE_GEMINI_BASE_URL as the scheme+host root and
+			// appends the /v1beta/... path itself, so the injector's plain endpoint
+			// works unmodified.
+			BaseURLEnvVar:   "GOOGLE_GEMINI_BASE_URL",
+			AuthTokenEnvVar: "GEMINI_API_KEY",
+			DummyToken:      "yoloai-broker-dummy",
+		},
 		SeedFiles: []SeedFile{
 			// Gemini renamed its OAuth credential file oauth_creds.json →
 			// gemini-credentials.json (current CLI, e.g. 0.47). Seed both: AuthOnly
@@ -435,6 +544,43 @@ var agents = map[string]*Definition{
 		HeadlessCmd:    `codex exec --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust "PROMPT"`,
 		PromptMode:     PromptModeInteractive,
 		APIKeyEnvVars:  []string{"CODEX_API_KEY", "OPENAI_API_KEY"},
+		Broker: &BrokerConfig{ //nolint:gosec // G101 false positive: env-var NAMES + a placeholder, not real credentials
+			UpstreamURL: "https://api.openai.com",
+			Destination: "api.openai.com",
+			// Codex sends its API key as "Authorization: Bearer ...". Brokering only
+			// engages on the API-key path (real OPENAI_API_KEY/CODEX_API_KEY on the
+			// host); a ChatGPT-subscription (OAuth) login is left to direct delivery.
+			// Current Codex speaks the Responses API at {base_url}/responses over a
+			// WebSocket (with an HTTPS fallback), both forwarded + injected by the
+			// injector.
+			Credentials: []BrokerCredential{
+				{EnvVar: "OPENAI_API_KEY", Header: "Authorization", Prefix: "Bearer "},
+				{EnvVar: "CODEX_API_KEY", Header: "Authorization", Prefix: "Bearer "},
+			},
+			PlaceholderHeader: "Authorization",
+			// Codex reads neither its base URL nor its API key from an env var: the
+			// base URL comes only from config.toml (openai_base_url) and the key only
+			// from a logged-in auth.json (a bare OPENAI_API_KEY env var leaves Codex
+			// "not logged in"). So both are delivered by patching those two files
+			// host-side — config.toml with the injector endpoint, auth.json with the
+			// per-sandbox placeholder. AuthTokenEnvVar is empty: no env placeholder.
+			ConfigFiles: []BrokerConfigFile{
+				{RelPath: "config.toml", Patch: patchCodexBaseURL},
+				{RelPath: "auth.json", Patch: patchCodexAuth},
+			},
+			DummyToken: "yoloai-broker-dummy",
+		},
+		// Codex 0.144 blocks on a folder-trust prompt unless the workdir is marked
+		// trusted in config.toml (DF85) — done on every launch, brokered or not.
+		WorkdirTrust: &WorkdirTrustPatch{RelPath: "config.toml", Patch: patchCodexWorkdirTrust},
+		// When NOT brokered, Codex needs the real key in auth.json — a bare env var
+		// doesn't authenticate it (DF84). OPENAI_API_KEY first, matching the broker
+		// credential precedence.
+		DirectCredentialFile: &DirectCredentialFile{
+			RelPath: "auth.json",
+			EnvVars: []string{"OPENAI_API_KEY", "CODEX_API_KEY"},
+			Render:  renderCodexAuth,
+		},
 		SeedFiles: []SeedFile{
 			{HostPath: "~/.codex/auth.json", TargetPath: "auth.json", AuthOnly: true},
 			{HostPath: "~/.codex/config.toml", TargetPath: "config.toml"},
