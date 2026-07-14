@@ -23,6 +23,15 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 
 ## Findings
 
+### DF85 — Codex 0.144 folder-trust onboarding prompt blocks the agent (untrusted workdir → agent exits)
+
+- **Discovered:** 2026-07-14 · **Workstream:** DF82 broker generalization (D115) — unmasked once brokering cleared the Codex login blocker.
+- **Severity:** MEDIUM (Codex is non-functional on 0.144 for any workdir the user hasn't previously trusted on the host; independent of brokering — affects `--no-broker` too).
+- **Disposition:** PARKED
+- **Description:** On launch, Codex 0.144 shows a **"Do you trust the contents of this directory?"** onboarding dialog for any working directory not recorded as trusted in `~/.codex/config.toml` (`[projects."<path>"] trust_level = "trusted"`). yoloAI launches Codex interactively and pastes the user's task prompt, which lands in that dialog instead of Codex's input box, and the agent **exits (status 0)** to a fall-to-shell. The existing launch flags do **not** suppress it: `--dangerously-bypass-approvals-and-sandbox` governs command-execution approvals and `--dangerously-bypass-hook-trust` governs hook trust — neither covers folder trust. Verified: with `[projects."<workdir>"] trust_level = "trusted"` present, Codex shows **0** trust prompts and starts normally. There is **no global trust-all / disable-folder-trust config key** (confirmed against the shipped binary) — trust is strictly per-project-root. So the workdir the container runs Codex in (the mirrored mount path) must be marked trusted at launch. This is the Codex analogue of Claude's onboarding suppression / Gemini's `folderTrust:false`, but it is **workdir-path-dependent**, so it needs a launch-time, path-aware `config.toml` write (a static `ApplySettings` patch can't know the path), and it must apply to **every** Codex launch (brokered or not).
+- **Trigger / fix:** at Codex launch, write `[projects."<container-workdir>"] trust_level = "trusted"` into `config.toml` for the resolved container workdir path (yoloAI knows the mount path). Must compose with the broker's `openai_base_url` patch on the same file (`agent.patchCodexBaseURL` already round-trips the whole TOML map, so a shared codex-config step or an added map key is the natural home). Consider also `hide_full_access_warning`/`hide_world_writable_warning` notices if they surface. Revive when someone makes Codex usable end-to-end on 0.144, or when a user reports Codex quitting to a shell right after launch.
+- **Pointer:** `internal/agent/agent.go` (codex `InteractiveCmd`/`Definition`), `internal/agent/broker_codex.go` (`patchCodexBaseURL` — the existing codex config.toml patch), `internal/orchestrator/launch/launch.go` (`patchBrokerConfigFiles` — launch-time config patching, but only runs when brokering); `docs/contributors/backend-idiosyncrasies.md` (Codex entry).
+
 ### DF84 — Direct-delivery (`--no-broker`) Codex is broken for API-key users: the env var doesn't authenticate Codex 0.144
 
 - **Discovered:** 2026-07-14 · **Workstream:** DF82 broker generalization (D115) — surfaced while wiring/verifying Codex brokering.
