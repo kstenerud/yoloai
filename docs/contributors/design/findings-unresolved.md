@@ -23,6 +23,14 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 
 ## Findings
 
+### DF87 — vmnet wedge has a second, false-healthy variant: a stale DHCP lease on a superseded subnet
+
+- **Discovered:** 2026-07-14 · **Workstream:** DF86 net-liveness validation (the post-restart smoke re-run exposed it)
+- **Severity:** MEDIUM (the net-liveness detection shipped for DF86 reported `ok` for a VM that was verifiably net-dead — a false negative is worse than no detection)
+- **Disposition:** ADDRESSED-IN-PLACE — `classifyNetLiveness` no longer trusts a non-empty `tart ip` result: the returned address must fall inside some host `bridge*` interface subnet (gathered in-process via `net.Interfaces()`, no extra subprocess). Outside every bridge subnet → wedged with a `stale DHCP lease: guest has <ip> but no host bridge is on that subnet (...)` detail; no bridge interfaces at all → unknown. All three surfaces (doctor, ls/info, smoke) inherit the fix through the shared classifier.
+- **Description:** After restarting the DF86-wedged VM, bootpd re-ACKed its old lease from `/var/db/dhcpd_leases` (~400 stale entries): the guest held `192.168.65.2` / gateway `192.168.65.1` while the only vmnet bridge was `192.168.139.3/23` — DNS dead, 100% loss to the bridge — yet `tart ip` returned the address (it reads host lease records, not liveness) and detection said `ok`. Two subtleties verified live: (1) `tart ip` output proves nothing about connectivity; (2) the check must consider **all** `bridge*` interfaces, not just `bridge100` — vmnet can allocate a new bridge per session (a later restart produced a healthy guest at `192.168.65.2` on a fresh `bridge101` at `192.168.65.1/24` while `bridge100` still sat on `192.168.139.x`; that guest verifiably reached the API, so subnet-mismatch-vs-bridge100 alone would have been a false positive).
+- **Pointer:** `runtime/tart/netcheck.go` (`classifyGuestAddr`, `hostBridgeSubnets`); `docs/contributors/backend-idiosyncrasies.md` (vmnet-wedge entry, stale-lease variant)
+
 ### DF86 — a wedged tart vmnet session poisons networking for all NEW VMs on the host
 
 - **Discovered:** 2026-07-14 · **Workstream:** smoke-test triage (macOS full tier, runs `20260714-164931.720`)

@@ -112,6 +112,7 @@ inclusion test first, then add a row to the index.
 | Agent silently fails to start on Tart (claude/node not found) | [Tart: provisioned tool dirs live only on the login PATH](#provisioned-tool-dirs-live-only-on-the-login-path-cirrus-base-image) |
 | Agent on a long-idle Tart sandbox: `ConnectionRefused`/`FailedToOpenSocket` on every API call; `tart ip` finds nothing; guest `en0` is `169.254.x.x` | [Tart: vmnet session wedges on a long-idle VM](#tart-vmnet-session-wedges-on-a-long-idle-vm-host-sleep--subnet-re-pick--guest-drops-to-a-169254-link-local-address-agent-gets-connectionrefused) |
 | Smoke test: every tart lane fails (sentinel timeout, agent `ConnectionRefused`) on **freshly created** VMs while another long-running tart VM exists; other mac backends pass | [Tart: vmnet session wedges on a long-idle VM](#tart-vmnet-session-wedges-on-a-long-idle-vm-host-sleep--subnet-re-pick--guest-drops-to-a-169254-link-local-address-agent-gets-connectionrefused) (host-wide contamination; run `yoloai doctor`) |
+| Tart guest has a normal (non-169.254) IP and `tart ip` returns it, but DNS/TCP all fail; guest's gateway pings 0% ; guest subnet matches no host `bridge*` | [Tart: vmnet session wedges on a long-idle VM](#tart-vmnet-session-wedges-on-a-long-idle-vm-host-sleep--subnet-re-pick--guest-drops-to-a-169254-link-local-address-agent-gets-connectionrefused) (stale-lease variant, DF87) |
 | Swift PM commands fail with sandbox-exec nesting errors on Seatbelt | [Seatbelt: macOS sandbox-exec doesn't nest](#macos-sandbox-exec-doesnt-nest--swift-pm-needs-the-swift-wrapper-sourced) |
 | Agent dies silently/SIGTRAP (exit 133) on Seatbelt at launch; ICU/timezone deny in unified log | [Seatbelt: SBPL subpaths need vnode-resolved paths](#agent-dies-silently-sigtrap--sbpl-subpath-rules-must-use-vnode-resolved-paths) |
 | Confined git under `sandbox-exec` dies (`xcrun_db` / `libxcrun` denied); or a malicious filter still writes to `/tmp`; or git works with `mach-lookup` denied | [Seatbelt: sandbox-exec-wrapping git — escape surfaces + the /usr/bin/git shim](#seatbelt-sandbox-exec-wrapping-git-for-confinement-has-two-escape-surfaces-mach-lookup-process-exec--the-usrbingit-shim-cant-run-confined) |
@@ -2038,12 +2039,25 @@ on-disk session state survive; resume the agent's conversation after the
 restart (e.g. Claude's `--resume`). In-guest network surgery is pointless
 — don't spend time on it once ARP shows both-ways `(incomplete)`.
 
+**Second variant — stale lease, false-healthy (DF87, observed 2026-07-14):**
+after a restart, bootpd can re-ACK the guest's old lease out of
+`/var/db/dhcpd_leases` (hundreds of stale entries survive the subnet
+re-pick), leaving the guest with a normal-looking address on a subnet no
+current bridge serves — net-dead, while `tart ip` happily returns that
+address (it reads host lease records, not liveness). Detection therefore
+must not trust `tart ip` output alone: the address is only "ok" if it falls
+inside some host `bridge*` interface subnet. Check **all** bridges, not just
+`bridge100` — vmnet allocates a new bridgeN per session, and a guest on
+`bridge101`'s subnet is healthy even while `bridge100` sits on a stale one
+(verified live: both states occurred on the same host the same day).
+
 **Fix in code:** `yoloai doctor` detects and reports the wedge per running
 VM (`runtime/tart/netcheck.go`, surfaced via `runtime.NetLivenessReporter`):
 signal 1 is `tart ip <vm>` failing on a running VM, confirmed by signal 2 —
 `tart exec <vm> /usr/sbin/ipconfig getifaddr en0` returning a `169.254.*`
 address (note: it returns the link-local address, it does not come back
-empty). A confirmed wedge prints the directive restart message and makes
+empty). A signal-1 address outside every host `bridge*` subnet is classified
+wedged (stale-lease variant, `classifyGuestAddr`) with no guest exec. A confirmed wedge prints the directive restart message and makes
 doctor exit non-zero. Detection only — nothing ever restarts the VM
 automatically. The same probe also feeds `yoloai ls` (`<status>
 (net-dead)`) and `yoloai sandbox <name> info` (`Net health:` line) via
