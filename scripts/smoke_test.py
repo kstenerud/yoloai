@@ -644,6 +644,39 @@ class Test:
         except Exception:
             return "unknown"
 
+    def _check_net_liveness(self, sandbox_name: str) -> None:
+        """Raise if `sandbox_name`'s guest network has wedged (DF86).
+
+        This is a fast-fail optimization on top of wait_for_sentinel's normal
+        terminal/idle/timeout checks, not a new source of truth: any failure
+        to get a clean answer (command error, timeout, unparseable JSON,
+        missing net_health field — e.g. a non-tart backend or a doctor build
+        that predates the field) is ignored silently so a healthy run is
+        never broken by this check.
+        """
+        try:
+            r = self.run("sandbox", sandbox_name, "info", "--json", timeout=15)
+        except (subprocess.TimeoutExpired, OSError):
+            return
+        if r.returncode != 0:
+            return
+        try:
+            info = json.loads(r.stdout)
+        except (json.JSONDecodeError, ValueError):
+            return
+        if not isinstance(info, dict):
+            return
+        parsed = parse_info_net_health(info)
+        if parsed is None:
+            return
+        state, detail = parsed
+        if state == "wedged":
+            raise AssertionError(
+                f"guest network dead (vmnet wedge): en0 link-local {detail} — "
+                f"restart to recover: yoloai stop {sandbox_name} && "
+                f"yoloai start {sandbox_name}"
+            )
+
     def wait_for_done(self, sandbox_name: str, timeout: int = 30) -> None:
         """Poll until the sandbox status is 'done' or 'failed'.
 
@@ -668,6 +701,7 @@ class Test:
         sentinel: str = SENTINEL,
         timeout: int = DEFAULT_TIMEOUT,
         stall_grace_secs: int = STALL_GRACE_SECS,
+        net_check_sandbox: Optional[str] = None,
     ) -> None:
         """Poll `yoloai files ls` until `sentinel` appears as an exact line.
 
@@ -676,12 +710,21 @@ class Test:
         Stall detection is skipped for the first stall_grace_secs to avoid false
         positives during slow VM startup. Use spec.sentinel_stall_grace() to get
         the per-backend value.
+
+        net_check_sandbox: on tart lanes, pass the sandbox name to also poll
+        `sandbox <name> info --json` for a wedged vmnet session (DF86) every
+        ~5th poll (~15s) once the stall grace has elapsed, and raise
+        immediately rather than burning out the full sentinel timeout. None
+        (the default) disables the check — non-tart backends have no such
+        wedge to detect.
         """
         deadline = time.monotonic() + timeout
         start = time.monotonic()
         consecutive_idle = 0
+        poll_count = 0
 
         while time.monotonic() < deadline:
+            poll_count += 1
             r = self.run("files", sandbox_name, "ls", timeout=15)
             if r.returncode == 0:
                 lines = [line.strip() for line in r.stdout.splitlines()]
@@ -706,6 +749,9 @@ class Test:
                         )
                 else:
                     consecutive_idle = 0
+
+                if net_check_sandbox is not None and poll_count % 5 == 0:
+                    self._check_net_liveness(net_check_sandbox)
 
             time.sleep(3)
 
@@ -1285,11 +1331,31 @@ FINGERPRINTS: list[Fingerprint] = [
         r"filenotfounderror: \[errno 2\]",
     ),
     Fingerprint(
+        "wedged tart vmnet session — guest network dead (DF86)",
+        r"vmnet wedge|guest network dead|link-local 169\.254",
+        "tart-vmnet-session-wedges-on-a-long-idle-vm-host-sleep--subnet-re-pick--"
+        "guest-drops-to-a-169254-link-local-address-agent-gets-connectionrefused",
+        "a wedged vmnet session on a running tart VM poisons networking for "
+        "every NEW tart VM on the host (DF86); restart the wedged VM (yoloai "
+        "stop <name> && yoloai start <name>) — retrying this test is pointless "
+        "until it's fixed",
+    ),
+    Fingerprint(
         "harness timeout (sentinel not seen / command timed out)",
         r"sentinel '.*' not seen|command timed out",
         hint="nothing fatal found in artifacts — the guest stalled rather than crashed",
     ),
 ]
+
+
+def is_wedge_failure(reason: str) -> bool:
+    """True when a TestResult's failure reason is the tart vmnet wedge (DF86).
+
+    The wedge is a host-side condition (a stuck vmnet session) that persists
+    unchanged across attempts until the wedged VM is restarted, so retrying
+    the test is pointless — _run_backend_test uses this to skip the retry.
+    """
+    return bool(re.search(r"vmnet wedge|guest network dead", reason, re.IGNORECASE))
 
 
 @dataclass
@@ -1864,6 +1930,47 @@ def parse_vm_census(doctor_json: dict[str, Any]) -> Optional[tuple[int, int, lis
     return limit, in_use, names
 
 
+def parse_net_liveness(doctor_json: dict[str, Any]) -> list[tuple[str, str]]:
+    """Extract (sandbox_name, detail) for every wedged VM from `net_liveness`.
+
+    Returns [] when the section is absent, null, or carries no wedged VM —
+    the caller treats that as "nothing to report". Tolerant of malformed
+    shapes (non-dict section, non-list vms, non-dict/missing-field entries):
+    they are skipped rather than raising, mirroring parse_vm_census.
+    """
+    liveness = doctor_json.get("net_liveness")
+    if not isinstance(liveness, dict):
+        return []
+    vms = liveness.get("vms")
+    if not isinstance(vms, list):
+        return []
+    out: list[tuple[str, str]] = []
+    for vm in vms:
+        if not isinstance(vm, dict) or vm.get("state") != "wedged":
+            continue
+        name = vm.get("sandbox_name")
+        if not isinstance(name, str) or not name:
+            continue
+        detail = vm.get("detail")
+        out.append((name, detail if isinstance(detail, str) else ""))
+    return out
+
+
+def parse_info_net_health(info_json: dict[str, Any]) -> Optional[tuple[str, str]]:
+    """Extract (state, detail) from `yoloai sandbox <name> info --json`.
+
+    Returns None when `net_health` is absent (not probed, or a non-tart
+    backend) or malformed; detail defaults to "" when the field is missing.
+    """
+    if not isinstance(info_json, dict):
+        return None
+    state = info_json.get("net_health")
+    if not isinstance(state, str) or not state:
+        return None
+    detail = info_json.get("net_health_detail")
+    return state, (detail if isinstance(detail, str) else "")
+
+
 def plan_tart_slots(free: int, requested_concurrency: int) -> int:
     """How many tart VMs the harness may run at once given `free` host slots.
 
@@ -1877,14 +1984,16 @@ def plan_tart_slots(free: int, requested_concurrency: int) -> int:
     return min(free, max(1, requested_concurrency))
 
 
-def query_tart_slots(ctx: RunContext) -> Optional[tuple[int, int, list[str]]]:
-    """(limit, in_use, occupant_names) from `yoloai doctor --json`, or None.
+def fetch_doctor_json(ctx: RunContext) -> Optional[dict[str, Any]]:
+    """Run `yoloai doctor --json` and return the parsed document, or None.
 
-    None on any inability to determine the census (doctor missing, timed out, or
-    unparseable, or the host has no VM limit) — the caller then proceeds without
-    a tart-slot constraint rather than letting a diagnostic hiccup gate the run.
-    doctor exits non-zero when the limit is reached but still prints the JSON, so
-    the return code is ignored.
+    None on any inability to get a usable document (doctor missing, timed
+    out, or unparseable) — callers then proceed without whatever that
+    document would have told them, rather than letting a diagnostic hiccup
+    gate the run. doctor exits non-zero when it has something to report
+    (VM limit reached, a wedged VM) but still prints the JSON, so the return
+    code is ignored. Split out of query_tart_slots so the tart-slot census
+    and the net-liveness pre-flight check can share one fetch.
     """
     try:
         result = subprocess.run(
@@ -1898,6 +2007,19 @@ def query_tart_slots(ctx: RunContext) -> Optional[tuple[int, int, list[str]]]:
     except (json.JSONDecodeError, ValueError):
         return None
     if not isinstance(data, dict):
+        return None
+    return data
+
+
+def query_tart_slots(ctx: RunContext) -> Optional[tuple[int, int, list[str]]]:
+    """(limit, in_use, occupant_names) from `yoloai doctor --json`, or None.
+
+    None on any inability to determine the census (doctor missing, timed out, or
+    unparseable, or the host has no VM limit) — the caller then proceeds without
+    a tart-slot constraint rather than letting a diagnostic hiccup gate the run.
+    """
+    data = fetch_doctor_json(ctx)
+    if data is None:
         return None
     return parse_vm_census(data)
 
@@ -2149,7 +2271,10 @@ def test_stop_start(t: Test, spec: BackendSpec) -> None:
         timeout=spec.new_timeout(),
     )
     t.assert_ok(r, "new")
-    t.wait_for_sentinel(name, timeout=spec.sentinel_timeout(), stall_grace_secs=spec.sentinel_stall_grace())
+    t.wait_for_sentinel(
+        name, timeout=spec.sentinel_timeout(), stall_grace_secs=spec.sentinel_stall_grace(),
+        net_check_sandbox=name if spec.check_backend == "tart" else None,
+    )
 
     # restart = stop + start internally.  A new prompt with a different sentinel
     # proves the agent ran successfully with injected credentials after restart.
@@ -2169,7 +2294,11 @@ def test_stop_start(t: Test, spec: BackendSpec) -> None:
     t.assert_ok(r, "restart")
 
     # Restart adds stop+start overhead on top of model inference, so allow extra time.
-    t.wait_for_sentinel(name, sentinel=sentinel2, timeout=spec.sentinel_timeout() + 60, stall_grace_secs=spec.sentinel_stall_grace())
+    t.wait_for_sentinel(
+        name, sentinel=sentinel2, timeout=spec.sentinel_timeout() + 60,
+        stall_grace_secs=spec.sentinel_stall_grace(),
+        net_check_sandbox=name if spec.check_backend == "tart" else None,
+    )
 
     # Verify diff shows the restarted agent's output (now committed, so it shows
     # in the cumulative baseline→worktree diff).
@@ -2255,7 +2384,10 @@ def test_tag_transfer(t: Test, spec: BackendSpec) -> None:
         timeout=spec.new_timeout(),
     )
     t.assert_ok(r, "new")
-    t.wait_for_sentinel(name, timeout=spec.sentinel_timeout(), stall_grace_secs=spec.sentinel_stall_grace())
+    t.wait_for_sentinel(
+        name, timeout=spec.sentinel_timeout(), stall_grace_secs=spec.sentinel_stall_grace(),
+        net_check_sandbox=name if spec.check_backend == "tart" else None,
+    )
 
     # One call: replay the commit onto the git host AND transfer the tag, mapped
     # to the just-applied commit via the apply's own sandbox→host SHA map.
@@ -2301,7 +2433,10 @@ def test_clone(t: Test, spec: BackendSpec) -> None:
         timeout=spec.new_timeout(),
     )
     t.assert_ok(r, "new sandbox A")
-    t.wait_for_sentinel(name_a, timeout=spec.sentinel_timeout(), stall_grace_secs=spec.sentinel_stall_grace())
+    t.wait_for_sentinel(
+        name_a, timeout=spec.sentinel_timeout(), stall_grace_secs=spec.sentinel_stall_grace(),
+        net_check_sandbox=name_a if spec.check_backend == "tart" else None,
+    )
 
     name_b = f"{t.ctx.run_id}-clone-b"
     r = t.run("clone", name_a, name_b, timeout=CMD_TIMEOUT)
@@ -3429,7 +3564,29 @@ def main() -> int:
     # apple under foreign-VM pressure (never a correctness issue).
     tart_preq = preq.get("tart")
     if tart_preq is not None and tart_preq.available:
-        census = query_tart_slots(ctx)
+        doctor_json = fetch_doctor_json(ctx)
+        wedged = parse_net_liveness(doctor_json) if doctor_json is not None else []
+        if wedged:
+            # A wedged vmnet session on ANY running tart VM poisons networking
+            # for every NEW tart VM on the host (DF86) — every tart lane would
+            # burn a full 180s sentinel timeout (twice, with the retry) only
+            # to discover the guest is net-dead. Fail the prereq now instead,
+            # the same way the no-free-slot case below does.
+            sandbox_name = wedged[0][0]
+            vm_name = f"yoloai-{sandbox_name}"
+            note = (
+                f"wedged vmnet (VM {vm_name}) poisons new tart VMs — recover: "
+                f"yoloai stop {sandbox_name} && yoloai start {sandbox_name}"
+            )
+            preq["tart"] = PrereqResult(spec=tart_preq.spec, available=False, note=note)
+            if "tart" in uncontrolled_backends():
+                print(f"WARNING: tart tests will skip (carved out) — {note}")
+            else:
+                print(f"ERROR: tart is required but {note}")
+            print()
+        census = None
+        if not wedged and doctor_json is not None:
+            census = parse_vm_census(doctor_json)
         if census is not None:
             limit, in_use, occupants = census
             free = limit - in_use
@@ -3508,7 +3665,16 @@ def main() -> int:
         gate = vm_sema if spec.is_vm else _NULL_GATE
         with gate:
             result = run_test(ctx, test_name, lambda t: test_fn(t, spec), attempt=1)
-            if not result.passed and not result.skipped and spec.retries > 0:
+            # A tart vmnet wedge (DF86) is a host-side condition that persists
+            # unchanged across attempts — retrying just burns another sentinel
+            # timeout for the same guaranteed failure, so skip the retry budget
+            # entirely. The failure (and its wedge fingerprint) is still
+            # recorded normally via _record_result below.
+            retryable = (
+                not result.passed and not result.skipped and spec.retries > 0
+                and not is_wedge_failure(result.reason)
+            )
+            if retryable:
                 for retry_idx in range(spec.retries):
                     attempt = retry_idx + 2  # attempt 1 was the initial run
                     _emit(ctx, f"      Retrying {test_name} (attempt {retry_idx + 1}/{spec.retries})...")
