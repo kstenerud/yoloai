@@ -111,6 +111,8 @@ inclusion test first, then add a row to the index.
 | Tart `info` shows `Changes: no` on a dirty sandbox; `destroy` skips the unapplied-work gate | [Tart: host change probe blind to in-VM workdir](#a-host-side-change-probe-is-blind-to-the-in-vm-workdir--info-showed-changes-no-on-a-dirty-tart-sandbox-and-destroy-skipped-its-gate) |
 | Agent silently fails to start on Tart (claude/node not found) | [Tart: provisioned tool dirs live only on the login PATH](#provisioned-tool-dirs-live-only-on-the-login-path-cirrus-base-image) |
 | Agent on a long-idle Tart sandbox: `ConnectionRefused`/`FailedToOpenSocket` on every API call; `tart ip` finds nothing; guest `en0` is `169.254.x.x` | [Tart: vmnet session wedges on a long-idle VM](#tart-vmnet-session-wedges-on-a-long-idle-vm-host-sleep--subnet-re-pick--guest-drops-to-a-169254-link-local-address-agent-gets-connectionrefused) |
+| Smoke test: every tart lane fails (sentinel timeout, agent `ConnectionRefused`) on **freshly created** VMs while another long-running tart VM exists; other mac backends pass | [Tart: vmnet session wedges on a long-idle VM](#tart-vmnet-session-wedges-on-a-long-idle-vm-host-sleep--subnet-re-pick--guest-drops-to-a-169254-link-local-address-agent-gets-connectionrefused) (host-wide contamination; run `yoloai doctor`) |
+| Tart guest has a normal (non-169.254) IP and `tart ip` returns it, but DNS/TCP all fail; guest's gateway pings 0% ; guest subnet matches no host `bridge*` | [Tart: vmnet session wedges on a long-idle VM](#tart-vmnet-session-wedges-on-a-long-idle-vm-host-sleep--subnet-re-pick--guest-drops-to-a-169254-link-local-address-agent-gets-connectionrefused) (stale-lease variant, DF87) |
 | Swift PM commands fail with sandbox-exec nesting errors on Seatbelt | [Seatbelt: macOS sandbox-exec doesn't nest](#macos-sandbox-exec-doesnt-nest--swift-pm-needs-the-swift-wrapper-sourced) |
 | Agent dies silently/SIGTRAP (exit 133) on Seatbelt at launch; ICU/timezone deny in unified log | [Seatbelt: SBPL subpaths need vnode-resolved paths](#agent-dies-silently-sigtrap--sbpl-subpath-rules-must-use-vnode-resolved-paths) |
 | Confined git under `sandbox-exec` dies (`xcrun_db` / `libxcrun` denied); or a malicious filter still writes to `/tmp`; or git works with `mach-lookup` denied | [Seatbelt: sandbox-exec-wrapping git — escape surfaces + the /usr/bin/git shim](#seatbelt-sandbox-exec-wrapping-git-for-confinement-has-two-escape-surfaces-mach-lookup-process-exec--the-usrbingit-shim-cant-run-confined) |
@@ -1995,6 +1997,17 @@ and `(FailedToOpenSocket)` and retries forever. The VM is running and
 not IP), but `tart ip <vm>` returns "no IP address found" and the guest's
 `en0` holds a self-assigned `169.254.x.x` address.
 
+**Scope escalation (2026-07-14):** the wedge is not confined to the long-idle
+VM. While a wedged `tart run` session stays alive, **freshly created VMs on
+the same host come up net-dead too**: full-tier smoke runs failed every tart
+lane (`stop_start/tart`, `tag_transfer/tart`) with sentinel timeouts — the
+fresh guests' `en0` sat at `169.254.x.x`, `bridge100` was parked on the
+re-picked `192.168.139.x/23` subnet, and no `bootpd` (vmnet's DHCP server)
+was running, so new leases were never served. All other macOS backends
+passed (apple included — its `container` framework uses a separate vmnet
+network). Recorded as DF86. Corollary: one wedged VM makes the whole tart
+backend unusable until that VM is restarted.
+
 **Why:** two compounding host-side facts, observed 2026-07 on a sandbox
 idle for one week.
 
@@ -2026,9 +2039,49 @@ on-disk session state survive; resume the agent's conversation after the
 restart (e.g. Claude's `--resume`). In-guest network surgery is pointless
 — don't spend time on it once ARP shows both-ways `(incomplete)`.
 
-**Fix in code:** none yet — detection/surfacing is designed in
-[`design/plans/tart-network-liveness.md`](design/plans/tart-network-liveness.md).
-A running VM whose `en0` is link-local is a reliable, cheap tell.
+**Subnet flapping under session churn (observed 2026-07-14):** tart's shared
+bridge (`bridge101` on a host where podman-machine's five-week-old session
+holds `bridge100`) is torn down and re-created as tart VMs come and go, and
+macOS re-picks its subnet on re-creation (`192.168.64.x` ↔ `192.168.65.x`
+within minutes on the same host). A long-lived tart VM that holds its lease
+across such an epoch change lands in the stale-lease state below — restarting
+it re-leases on the current epoch, but the next churn (e.g. a smoke run
+creating and destroying VMs) can strand it again. Freshly created VMs are
+fine once `/var/db/dhcpd_leases` is clean; it's the *cross-epoch survivor*
+that keeps going stale. Practical consequences: (a) after clearing a wedge,
+verify with real traffic, not just an address; (b) on a host that runs both a
+long-lived tart VM and VM-churning workloads (smoke tests), expect to restart
+the long-lived VM afterwards; (c) other Virtualization.framework VMs
+(podman-machine, Claude.app, apple `container`) each hold their own vmnet
+sessions/bridges — they are not tart orphans, and podman survives a dead
+bridge because it networks over vsock/gvproxy, not vmnet IP.
+
+**Second variant — stale lease, false-healthy (DF87, observed 2026-07-14):**
+after a restart, bootpd can re-ACK the guest's old lease out of
+`/var/db/dhcpd_leases` (hundreds of stale entries survive the subnet
+re-pick), leaving the guest with a normal-looking address on a subnet no
+current bridge serves — net-dead, while `tart ip` happily returns that
+address (it reads host lease records, not liveness). Detection therefore
+must not trust `tart ip` output alone: the address is only "ok" if it falls
+inside some host `bridge*` interface subnet. Check **all** bridges, not just
+`bridge100` — vmnet allocates a new bridgeN per session, and a guest on
+`bridge101`'s subnet is healthy even while `bridge100` sits on a stale one
+(verified live: both states occurred on the same host the same day).
+
+**Fix in code:** `yoloai doctor` detects and reports the wedge per running
+VM (`runtime/tart/netcheck.go`, surfaced via `runtime.NetLivenessReporter`):
+signal 1 is `tart ip <vm>` failing on a running VM, confirmed by signal 2 —
+`tart exec <vm> /usr/sbin/ipconfig getifaddr en0` returning a `169.254.*`
+address (note: it returns the link-local address, it does not come back
+empty). A signal-1 address outside every host `bridge*` subnet is classified
+wedged (stale-lease variant, `classifyGuestAddr`) with no guest exec. A confirmed wedge prints the directive restart message and makes
+doctor exit non-zero. Detection only — nothing ever restarts the VM
+automatically. The same probe also feeds `yoloai ls` (`<status>
+(net-dead)`) and `yoloai sandbox <name> info` (`Net health:` line) via
+`runtime.SandboxNetHealthProber`, and the smoke harness fails fast on a
+wedge (pre-flight abort + in-loop check + its own autopsy fingerprint)
+instead of burning sentinel timeouts. Full design:
+[`archive/plans/tart-network-liveness.md`](archive/plans/tart-network-liveness.md).
 
 ## Seatbelt (macOS sandboxing)
 

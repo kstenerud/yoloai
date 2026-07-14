@@ -194,3 +194,20 @@ func TestFormatProfile_Named(t *testing.T) {
 func TestFormatProfile_Base(t *testing.T) {
 	assert.Equal(t, "base", formatProfile("base"))
 }
+
+func TestStatusCell_Wedged(t *testing.T) {
+	info := makeInfo("a", yoloai.StatusActive, "claude", "", "no")
+	info.NetHealth = "wedged"
+	assert.Equal(t, "active (net-dead)", statusCell(info))
+}
+
+func TestStatusCell_OKUnqualified(t *testing.T) {
+	info := makeInfo("a", yoloai.StatusActive, "claude", "", "no")
+	info.NetHealth = "ok"
+	assert.Equal(t, "active", statusCell(info))
+}
+
+func TestStatusCell_UnprobedUnqualified(t *testing.T) {
+	info := makeInfo("a", yoloai.StatusStopped, "claude", "", "no")
+	assert.Equal(t, "stopped", statusCell(info))
+}

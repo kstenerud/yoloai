@@ -424,12 +424,19 @@ type SandboxInfo struct {
 	// not on Environment (the substrate view), because they are not substrate
 	// facts (D90). They are read from the sandbox's netpolicy.json during
 	// inspection; a sandbox with no network restriction has NetworkMode="".
-	NetworkMode    NetworkMode `json:"network_mode,omitempty"`
-	NetworkAllow   []string    `json:"network_allow,omitempty"`
-	Status         Status      `json:"status"`
-	AgentStatus    AgentStatus `json:"agent_status,omitempty"`
-	Changes        ChangeState `json:"has_changes"`
-	DiskUsageBytes int64       `json:"disk_usage_bytes"`
+	NetworkMode  NetworkMode `json:"network_mode,omitempty"`
+	NetworkAllow []string    `json:"network_allow,omitempty"`
+	Status       Status      `json:"status"`
+	AgentStatus  AgentStatus `json:"agent_status,omitempty"`
+	// NetHealth and NetHealthDetail report a running sandbox's guest-network
+	// liveness ("ok", "wedged", or "unknown", plus a human-readable detail) on
+	// backends that can probe it (Tart's vmnet-wedge detector). Both are ""
+	// when not probed: the backend has no prober, the sandbox isn't running,
+	// or the probe failed.
+	NetHealth       string      `json:"net_health,omitempty"`
+	NetHealthDetail string      `json:"net_health_detail,omitempty"`
+	Changes         ChangeState `json:"has_changes"`
+	DiskUsageBytes  int64       `json:"disk_usage_bytes"`
 }
 
 // Status is a sandbox's lifecycle state. Re-exported (type alias) from

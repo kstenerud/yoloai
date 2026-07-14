@@ -1,8 +1,26 @@
 # Tart network liveness detection
 
-**Status:** Design draft from a real incident (2026-07); not yet a locked
-decision, not implemented. Written up so the detection work has a home; the
-incident itself is documented in
+**Status:** Implemented and archived (2026-07-14). All three surfacing homes
+below shipped on the `tart-net-liveness` branch, each verified end-to-end
+against a live wedged VM (DF86 — which also established that a wedged session
+poisons networking for *new* VMs host-wide, raising the stakes for detection):
+
+- **doctor**: `runtime/tart/netcheck.go` implements the two-signal probe
+  behind a backend-neutral `runtime.NetLivenessReporter` optional interface
+  (mirroring `VMCensusReporter`); doctor reports per running VM, includes a
+  `net_liveness` section in `--json`, and exits non-zero on a confirmed wedge.
+- **info/ls status path**: `runtime.SandboxNetHealthProber` (per-sandbox,
+  probed only for active/idle sandboxes); `ls` renders `<status> (net-dead)`,
+  `sandbox <name> info` prints a directive `Net health:` line, both `--json`
+  documents carry `net_health`/`net_health_detail`.
+- **smoke harness**: pre-flight wedge check on the doctor JSON marks tart
+  unavailable with the recovery directive; sentinel waits on tart rows probe
+  `info --json` (~15s cadence past the stall grace) and raise a distinct
+  vmnet-wedge error with its own fingerprint; wedge failures skip the retry.
+
+The in-guest monitor option below was not built — the status-path probe is
+cheap enough (signal 1 gates the single exec of signal 2). Revisit only if
+that changes. The incident itself is documented in
 [backend-idiosyncrasies.md](../../backend-idiosyncrasies.md#tart-vmnet-session-wedges-on-a-long-idle-vm-host-sleep--subnet-re-pick--guest-drops-to-a-169254-link-local-address-agent-gets-connectionrefused).
 
 ## Problem
@@ -30,8 +48,9 @@ diagnosis:
    guest exec. This is how the incident first manifested to tooling. Caveat:
    also transiently true during boot, so it needs a "VM has been up > N
    minutes" or "was previously reachable" qualifier.
-2. **Guest `en0` holds a link-local address** (`ipconfig getifaddr en0` empty
-   / `ifconfig en0` shows `inet 169.254.*`) on a running VM — one `tart exec`,
+2. **Guest `en0` holds a link-local address** (`ipconfig getifaddr en0`
+   returns `169.254.*` — verified live: it prints the link-local address, it
+   does not come back empty) on a running VM — one `tart exec`,
    definitive for "DHCP failed", and it distinguishes "network dead" from
    "yoloai can't determine the IP for some other reason".
 3. **Both-ways ARP `(incomplete)`** after forcing a static IP — this is the

@@ -145,12 +145,13 @@ const (
 
 // Runtime implements runtime.Backend using the Tart CLI.
 type Runtime struct {
-	tartBin           string              // path to tart binary
-	layout            config.Layout       // DataDir-rooted path resolver (Q-W.6)
-	homeDir           string              // host home directory (layout.HomeDir); used for ~ expansion
-	baseImageOverride string              // custom base image from config (tart.image)
-	hostMajor         func() (int, error) // host macOS major version; seam for tests
-	execEnv           []string            // explicit subprocess env (DEV §12); from layout, never inherited
+	tartBin           string                // path to tart binary
+	layout            config.Layout         // DataDir-rooted path resolver (Q-W.6)
+	homeDir           string                // host home directory (layout.HomeDir); used for ~ expansion
+	baseImageOverride string                // custom base image from config (tart.image)
+	hostMajor         func() (int, error)   // host macOS major version; seam for tests
+	execEnv           []string              // explicit subprocess env (DEV §12); from layout, never inherited
+	bridgeNets        func() []bridgeSubnet // host bridge* interface subnets; seam for tests (see netcheck.go)
 }
 
 // Compile-time check.
@@ -239,6 +240,10 @@ func New(_ context.Context, layout config.Layout) (*Runtime, error) {
 		// Explicit env for every tart subprocess (DEV §12): edge-resolved
 		// allowlist plus HOME and TART_HOME forced from layout, never ambient.
 		execEnv: execEnv,
+		// bridgeNets defaults to the real net.Interfaces() scan (netcheck.go);
+		// tests inject a stub to control the subnets a fake guest address is
+		// judged against.
+		bridgeNets: hostBridgeSubnets,
 	}, nil
 }
 

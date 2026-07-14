@@ -212,6 +212,93 @@ func VMCensusFor(ctx context.Context, rt Backend) (census VMCensus, ok bool, err
 	return census, true, err
 }
 
+// NetHealthState classifies a VM's guest-network liveness as observed by a
+// backend that can probe it (currently only tart, whose shared vmnet session
+// can wedge — see docs/contributors/backend-idiosyncrasies.md, "Tart: vmnet
+// session wedges on a long-idle VM").
+type NetHealthState int
+
+const (
+	// NetHealthOK means the VM resolved a working IP address.
+	NetHealthOK NetHealthState = iota
+	// NetHealthWedged means the guest network is confirmed dead — either the
+	// guest has fallen back to a 169.254.x.x link-local address, or `tart ip`
+	// returned an address that falls outside every host bridge* subnet (a
+	// stale DHCP lease from a superseded vmnet subnet). Either way the vmnet
+	// session is dead and only a VM restart recovers it.
+	NetHealthWedged
+	// NetHealthUnknown means liveness could not be confirmed either way (the
+	// probe failed, returned nothing, or the guest reported an address that
+	// doesn't match either wedge signature — e.g. still mid-boot/DHCP).
+	NetHealthUnknown
+)
+
+// VMNetHealth is one running VM's network-liveness probe result.
+type VMNetHealth struct {
+	SandboxName string // yoloai sandbox name (instance prefix stripped)
+	VMName      string // backend-native VM/instance name
+	State       NetHealthState
+	Detail      string // a full human-readable clause: the resolved IP, or why wedged/unknown
+}
+
+// NetLivenessReport is a point-in-time network-liveness probe across every
+// running VM a backend manages. Backends whose guest network can silently
+// wedge independent of container/VM lifecycle state (e.g. tart's shared
+// vmnet session after host sleep) report it so doctor can catch a dead-network
+// VM before the user burns time debugging ConnectionRefused inside the agent.
+type NetLivenessReport struct {
+	VMs []VMNetHealth
+}
+
+// Wedged returns the VMs confirmed to have a dead (link-local) guest network.
+func (r NetLivenessReport) Wedged() []VMNetHealth {
+	var out []VMNetHealth
+	for _, v := range r.VMs {
+		if v.State == NetHealthWedged {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// NetLivenessReporter is an optional interface implemented by backends whose
+// guest network can silently wedge independent of container/VM lifecycle
+// state. Implementations probe each running VM and report its liveness.
+type NetLivenessReporter interface {
+	NetLiveness(ctx context.Context) (NetLivenessReport, error)
+}
+
+// NetLivenessFor returns the network-liveness report for the backend, or
+// ok=false when the backend does not implement NetLivenessReporter.
+func NetLivenessFor(ctx context.Context, rt Backend) (report NetLivenessReport, ok bool, err error) {
+	p, ok := rt.(NetLivenessReporter)
+	if !ok {
+		return NetLivenessReport{}, false, nil
+	}
+	report, err = p.NetLiveness(ctx)
+	return report, true, err
+}
+
+// SandboxNetHealthProber is an optional interface implemented by backends
+// that can probe a single sandbox's guest-network liveness on demand, reusing
+// the same probe NetLivenessReporter runs fleet-wide for doctor. Callers must
+// only invoke this for a sandbox they already know is running (active/idle) —
+// the prober does not itself re-check the sandbox's lifecycle state.
+type SandboxNetHealthProber interface {
+	SandboxNetHealth(ctx context.Context, name string) (VMNetHealth, error)
+}
+
+// SandboxNetHealthFor probes one sandbox's guest-network health, or returns
+// ok=false when the backend does not implement SandboxNetHealthProber.
+func SandboxNetHealthFor(ctx context.Context, rt Backend, name string) (health VMNetHealth, ok bool, err error) {
+	p, ok := rt.(SandboxNetHealthProber)
+	if !ok {
+		return VMNetHealth{}, false, nil
+	}
+	health, err = p.SandboxNetHealth(ctx, name)
+	return health, true, err
+}
+
 // CacheUsage reports the backend's on-disk cache footprint, split by whether
 // reclaiming it forces a base-image rebuild. Returned by DiskUsageReporter.
 type CacheUsage struct {

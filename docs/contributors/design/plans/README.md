@@ -38,14 +38,11 @@ findings DF73–DF76. Plan: [host-artifact-reclamation.md](host-artifact-reclama
 
 ## Tart network liveness detection
 
-Design draft. A long-idle Tart VM can lose its vmnet session (host sleep /
-subnet re-pick) — the guest drops to a link-local address and the agent spins on
-`ConnectionRefused` while `yoloai ls` still says `active`; only a VM restart
-recovers it. Detect the condition cheaply (`tart ip` empty + guest `en0` on
-`169.254.*`) and surface a directive "restart to recover" via `doctor` (first)
-and possibly the `info`/`ls` status path. Report-only, no auto-restart.
+**Implemented 2026-07-14** (doctor probe, `info`/`ls` net-health surfacing,
+smoke-harness fail-fast — all verified against a live wedged VM, DF86); plan
+archived to
+[archive/plans/tart-network-liveness.md](../../archive/plans/tart-network-liveness.md).
 Incident: [backend-idiosyncrasies.md](../../backend-idiosyncrasies.md#tart-vmnet-session-wedges-on-a-long-idle-vm-host-sleep--subnet-re-pick--guest-drops-to-a-169254-link-local-address-agent-gets-connectionrefused).
-Plan: [tart-network-liveness.md](tart-network-liveness.md).
 
 ## Architecture Remediation
 

@@ -23,6 +23,22 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 
 ## Findings
 
+### DF87 — vmnet wedge has a second, false-healthy variant: a stale DHCP lease on a superseded subnet
+
+- **Discovered:** 2026-07-14 · **Workstream:** DF86 net-liveness validation (the post-restart smoke re-run exposed it)
+- **Severity:** MEDIUM (the net-liveness detection shipped for DF86 reported `ok` for a VM that was verifiably net-dead — a false negative is worse than no detection)
+- **Disposition:** ADDRESSED-IN-PLACE — `classifyNetLiveness` no longer trusts a non-empty `tart ip` result: the returned address must fall inside some host `bridge*` interface subnet (gathered in-process via `net.Interfaces()`, no extra subprocess). Outside every bridge subnet → wedged with a `stale DHCP lease: guest has <ip> but no host bridge is on that subnet (...)` detail; no bridge interfaces at all → unknown. All three surfaces (doctor, ls/info, smoke) inherit the fix through the shared classifier.
+- **Description:** After restarting the DF86-wedged VM, bootpd re-ACKed its old lease from `/var/db/dhcpd_leases` (~400 stale entries): the guest held `192.168.65.2` / gateway `192.168.65.1` while the only vmnet bridge was `192.168.139.3/23` — DNS dead, 100% loss to the bridge — yet `tart ip` returned the address (it reads host lease records, not liveness) and detection said `ok`. Two subtleties verified live: (1) `tart ip` output proves nothing about connectivity; (2) the check must consider **all** `bridge*` interfaces, not just `bridge100` — vmnet can allocate a new bridge per session (a later restart produced a healthy guest at `192.168.65.2` on a fresh `bridge101` at `192.168.65.1/24` while `bridge100` still sat on `192.168.139.x`; that guest verifiably reached the API, so subnet-mismatch-vs-bridge100 alone would have been a false positive).
+- **Pointer:** `runtime/tart/netcheck.go` (`classifyGuestAddr`, `hostBridgeSubnets`); `docs/contributors/backend-idiosyncrasies.md` (vmnet-wedge entry, stale-lease variant)
+
+### DF86 — a wedged tart vmnet session poisons networking for all NEW VMs on the host
+
+- **Discovered:** 2026-07-14 · **Workstream:** smoke-test triage (macOS full tier, runs `20260714-164931.720`)
+- **Severity:** MEDIUM (whole tart backend unusable on the host while one wedged VM stays running; agents in fresh sandboxes spin on `ConnectionRefused` until the smoke sentinel times out)
+- **Disposition:** ADDRESSED-IN-PLACE — full detection surfacing shipped and verified live against the wedged VM: `yoloai doctor` (`runtime/tart/netcheck.go`, `runtime.NetLivenessReporter`; `network: WEDGED`, exit 1), `ls`/`sandbox info` net-health (`runtime.SandboxNetHealthProber`; `idle (net-dead)`, `Net health:` line, `net_health` in `--json`), and smoke-harness fail-fast (pre-flight abort + in-loop check + wedge fingerprint; the lane that burned 2×180s now aborts instantly with the recovery directive). Idiosyncrasies entry extended (scope escalation + new symptom-index row); plan archived to `archive/plans/tart-network-liveness.md`.
+- **Description:** The known long-idle vmnet wedge (idiosyncrasies entry of 2026-07-13) was assumed to affect only the wedged VM itself. A full-tier smoke run showed otherwise: with a week-old wedged `tart run` alive, every freshly created tart VM also came up net-dead (`en0` link-local, `bridge100` on the re-picked `192.168.139.x/23` subnet, no `bootpd` serving leases), failing all tart smoke lanes while every other macOS backend passed. Restarting the wedged VM is the recovery for the whole host, not just for that VM.
+- **Pointer:** `docs/contributors/backend-idiosyncrasies.md` (vmnet-wedge entry, "Scope escalation"); `runtime/tart/netcheck.go`; smoke run `.testcache/runs/yoloai-smoketest-20260714-164931.720`
+
 ### DF85 — Codex 0.144 folder-trust onboarding prompt blocks the agent (untrusted workdir → agent exits)
 
 - **Discovered:** 2026-07-14 · **Workstream:** DF82 broker generalization (D115) — unmasked once brokering cleared the Codex login blocker.

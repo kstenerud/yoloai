@@ -65,7 +65,14 @@ type Info struct {
 	NetworkAllow []string    `json:"network_allow,omitempty"`
 	Status       Status      `json:"status"`
 	AgentStatus  AgentStatus `json:"agent_status,omitempty"` // agent activity status (may be empty)
-	HasChanges   string      `json:"has_changes"`            // "yes", "no", "unknown" (stopped VM-local backend), or "-" (not applicable)
+	// NetHealth and NetHealthDetail report a running sandbox's guest-network
+	// liveness (the tart vmnet-wedge detector, runtime.SandboxNetHealthProber).
+	// Both are "" when not probed: the backend has no prober, the sandbox isn't
+	// in a running state (active/idle), or the probe itself errored — a probe
+	// failure never fails the surrounding inspect/list (see probeNetHealth).
+	NetHealth       string `json:"net_health,omitempty"`
+	NetHealthDetail string `json:"net_health_detail,omitempty"`
+	HasChanges      string `json:"has_changes"` // "yes", "no", "unknown" (stopped VM-local backend), or "-" (not applicable)
 	// DiskUsageBytes is the total size of the sandbox directory in bytes, or
 	// -1 when it could not be measured. Rendering to a human-readable string
 	// is the CLI's responsibility (see cliutil.FormatSize).
@@ -321,16 +328,48 @@ func InspectSandbox(ctx context.Context, layout config.Layout, rt runtime.Backen
 
 	agentType, model := loadAgentIdentity(sandboxDir)
 	networkMode, networkAllow := loadNetworkPolicy(sandboxDir)
+	netHealth, netHealthDetail := probeNetHealth(ctx, rt, name, status)
 	return &Info{
-		Environment:    meta,
-		AgentType:      agentType,
-		Model:          model,
-		NetworkMode:    networkMode,
-		NetworkAllow:   networkAllow,
-		Status:         status,
-		HasChanges:     detectWorkdirChanges(ctx, git.NewSandbox(layout, rt, name), sandboxDir, meta),
-		DiskUsageBytes: diskUsageBytes,
+		Environment:     meta,
+		AgentType:       agentType,
+		Model:           model,
+		NetworkMode:     networkMode,
+		NetworkAllow:    networkAllow,
+		Status:          status,
+		NetHealth:       netHealth,
+		NetHealthDetail: netHealthDetail,
+		HasChanges:      detectWorkdirChanges(ctx, git.NewSandbox(layout, rt, name), sandboxDir, meta),
+		DiskUsageBytes:  diskUsageBytes,
 	}, nil
+}
+
+// probeNetHealth fills Info's NetHealth/NetHealthDetail for a running sandbox
+// on a backend that can probe guest-network liveness (tart's vmnet-wedge
+// detector). It only probes the two running states — a stopped/done/failed
+// sandbox has no live guest network to check. Best-effort by design: a probe
+// error yields empty fields rather than failing the whole inspect (an `ls`
+// must never fail because one liveness probe did).
+func probeNetHealth(ctx context.Context, rt runtime.Backend, name string, status Status) (health, detail string) {
+	if status != StatusActive && status != StatusIdle {
+		return "", ""
+	}
+	vm, ok, err := runtime.SandboxNetHealthFor(ctx, rt, name)
+	if !ok || err != nil {
+		return "", ""
+	}
+	return netHealthString(vm.State), vm.Detail
+}
+
+// netHealthString renders a NetHealthState as the read-model's string value.
+func netHealthString(s runtime.NetHealthState) string {
+	switch s {
+	case runtime.NetHealthOK:
+		return "ok"
+	case runtime.NetHealthWedged:
+		return "wedged"
+	default:
+		return "unknown"
+	}
 }
 
 // loadAgentIdentity reads a sandbox's inside-process config (agent.json) for the
@@ -430,15 +469,18 @@ func InspectSandboxWithBackend(ctx context.Context, layout config.Layout, rt run
 		return nil, err
 	}
 
+	netHealth, netHealthDetail := probeNetHealth(ctx, rt, name, status)
 	return &Info{
-		Environment:    meta,
-		AgentType:      agentType,
-		Model:          model,
-		NetworkMode:    networkMode,
-		NetworkAllow:   networkAllow,
-		Status:         status,
-		HasChanges:     detectWorkdirChanges(ctx, git.NewSandbox(layout, rt, name), sandboxDir, meta),
-		DiskUsageBytes: diskUsageBytes,
+		Environment:     meta,
+		AgentType:       agentType,
+		Model:           model,
+		NetworkMode:     networkMode,
+		NetworkAllow:    networkAllow,
+		Status:          status,
+		NetHealth:       netHealth,
+		NetHealthDetail: netHealthDetail,
+		HasChanges:      detectWorkdirChanges(ctx, git.NewSandbox(layout, rt, name), sandboxDir, meta),
+		DiskUsageBytes:  diskUsageBytes,
 	}, nil
 }
 
