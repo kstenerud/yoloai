@@ -40,6 +40,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     iptables \
     ipset \
     dnsutils \
+    rsync \
     sudo \
     uidmap \
     slirp4netns \
