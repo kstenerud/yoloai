@@ -2,7 +2,7 @@
 
 Tracks breaking changes made during beta. Each entry should be included in release notes for the version that introduces it.
 
-## Unreleased
+## v0.8.0
 
 ### Credential brokering is now the default for Gemini and Codex (not just Claude)
 
