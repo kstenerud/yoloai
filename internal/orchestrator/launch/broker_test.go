@@ -4,6 +4,7 @@ package launch
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -262,6 +263,44 @@ func TestApplyWorkdirTrust(t *testing.T) {
 		require.NoError(t, applyWorkdirTrust(st))
 		_, err := os.Stat(filepath.Join(sandboxDir, store.AgentRuntimeDir))
 		assert.True(t, os.IsNotExist(err), "nothing written when the agent declares no WorkdirTrust")
+	})
+}
+
+func TestApplyDirectCredential(t *testing.T) {
+	authPath := func(sandboxDir string) string {
+		return filepath.Join(sandboxDir, store.AgentRuntimeDir, "auth.json")
+	}
+
+	t.Run("codex writes the real key to auth.json when not brokered", func(t *testing.T) {
+		sandboxDir := t.TempDir()
+		st := &state.State{SandboxDir: sandboxDir, Agent: agent.GetAgent("codex")}
+		// Direct delivery: the real key is still in secretEnv (brokering would have removed it).
+		secretEnv := map[string]string{"OPENAI_API_KEY": "sk-real-key"}
+
+		require.NoError(t, applyDirectCredential(st, secretEnv))
+		data, err := os.ReadFile(authPath(sandboxDir))
+		require.NoError(t, err)
+		var auth map[string]any
+		require.NoError(t, json.Unmarshal(data, &auth))
+		assert.Equal(t, "apikey", auth["auth_mode"])
+		assert.Equal(t, "sk-real-key", auth["OPENAI_API_KEY"], "the real key authenticates Codex directly")
+	})
+
+	t.Run("no-op when the credential was brokered away", func(t *testing.T) {
+		sandboxDir := t.TempDir()
+		st := &state.State{SandboxDir: sandboxDir, Agent: agent.GetAgent("codex")}
+		// Brokered: applyBrokerEnv removed the real key from secretEnv already.
+		require.NoError(t, applyDirectCredential(st, map[string]string{}))
+		_, err := os.Stat(authPath(sandboxDir))
+		assert.True(t, os.IsNotExist(err), "brokered launch already wrote a placeholder auth.json; direct step must not overwrite it")
+	})
+
+	t.Run("no-op for an agent without DirectCredentialFile", func(t *testing.T) {
+		sandboxDir := t.TempDir()
+		st := &state.State{SandboxDir: sandboxDir, Agent: agent.GetAgent("gemini")}
+		require.NoError(t, applyDirectCredential(st, map[string]string{"GEMINI_API_KEY": "real"}))
+		_, err := os.Stat(filepath.Join(sandboxDir, store.AgentRuntimeDir))
+		assert.True(t, os.IsNotExist(err), "gemini's env-var credential works directly; nothing written")
 	})
 }
 

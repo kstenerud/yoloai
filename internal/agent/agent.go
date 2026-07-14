@@ -136,6 +136,31 @@ type Definition struct {
 	// prompt before running in a directory (Codex, DF85). It runs on every launch,
 	// independent of brokering. Nil for agents with no such prompt.
 	WorkdirTrust *WorkdirTrustPatch
+
+	// DirectCredentialFile, when set, materializes the agent's real credential into
+	// a config file when it is NOT brokered — for CLIs that read their credential
+	// only from a file, where the usual env-var/secrets-file delivery doesn't
+	// authenticate them (Codex reads auth.json; a bare OPENAI_API_KEY env var leaves
+	// it "not logged in" — DF84). The launch path writes it only when direct
+	// delivery is in effect (the credential is still present in the resolved secret
+	// env; brokering removes it and writes a placeholder instead). Nil for agents
+	// whose env-var credential works directly.
+	DirectCredentialFile *DirectCredentialFile
+}
+
+// DirectCredentialFile declares how to write an agent's real credential to a
+// config file for the non-brokered (direct) delivery path, for a CLI that reads
+// its credential only from a file.
+type DirectCredentialFile struct {
+	// RelPath is the config file relative to the agent's runtime state dir, e.g.
+	// "auth.json".
+	RelPath string
+	// EnvVars are the credential env vars in precedence order; the first present
+	// (non-empty) in the resolved secret env is the credential written. When none
+	// is present, nothing is written (no credential, or it was brokered away).
+	EnvVars []string
+	// Render builds the file's bytes from the resolved secret.
+	Render func(secret string) ([]byte, error)
 }
 
 // WorkdirTrustPatch declares how to mark the container working directory trusted
@@ -548,6 +573,14 @@ var agents = map[string]*Definition{
 		// Codex 0.144 blocks on a folder-trust prompt unless the workdir is marked
 		// trusted in config.toml (DF85) — done on every launch, brokered or not.
 		WorkdirTrust: &WorkdirTrustPatch{RelPath: "config.toml", Patch: patchCodexWorkdirTrust},
+		// When NOT brokered, Codex needs the real key in auth.json — a bare env var
+		// doesn't authenticate it (DF84). OPENAI_API_KEY first, matching the broker
+		// credential precedence.
+		DirectCredentialFile: &DirectCredentialFile{
+			RelPath: "auth.json",
+			EnvVars: []string{"OPENAI_API_KEY", "CODEX_API_KEY"},
+			Render:  renderCodexAuth,
+		},
 		SeedFiles: []SeedFile{
 			{HostPath: "~/.codex/auth.json", TargetPath: "auth.json", AuthOnly: true},
 			{HostPath: "~/.codex/config.toml", TargetPath: "config.toml"},

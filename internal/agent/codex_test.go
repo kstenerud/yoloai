@@ -61,6 +61,18 @@ func TestPatchCodexAuth_WritesApiKeyLoginShape(t *testing.T) {
 	assert.Equal(t, "per-sandbox-placeholder", auth["OPENAI_API_KEY"], "the placeholder — not the real key — goes into the sandbox")
 }
 
+func TestRenderCodexAuth_DirectRealKey(t *testing.T) {
+	// The non-brokered path writes the real key into auth.json (DF84), same shape
+	// as the brokered placeholder — a bare env var doesn't authenticate Codex.
+	out, err := renderCodexAuth("sk-real-openai-key")
+	require.NoError(t, err)
+
+	var auth map[string]any
+	require.NoError(t, json.Unmarshal(out, &auth))
+	assert.Equal(t, "apikey", auth["auth_mode"])
+	assert.Equal(t, "sk-real-openai-key", auth["OPENAI_API_KEY"])
+}
+
 func TestPatchCodexWorkdirTrust_MarksWorkdirTrusted(t *testing.T) {
 	out, err := patchCodexWorkdirTrust(nil, "/home/karl/tmp")
 	require.NoError(t, err)

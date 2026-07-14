@@ -78,6 +78,13 @@ func LaunchContainer(ctx context.Context, d state.Deps, st *state.State) (err er
 		return err
 	}
 
+	// For a file-auth CLI that was NOT brokered, materialize the real credential
+	// into its auth file (Codex, DF84). Runs on secretEnv while it still holds the
+	// real key — brokering removed it above, so this is a no-op for brokered launches.
+	if err := applyDirectCredential(st, secretEnv); err != nil {
+		return err
+	}
+
 	// The injector is now live, and the steps below may create/start the container
 	// and its CNI netns. Roll the whole partial launch back on any failure from
 	// here on, so re-running the launch (yoloai start) isn't balked by a leftover
@@ -522,6 +529,43 @@ func applyWorkdirTrust(st *state.State) error {
 	}
 	if err := fileutil.WriteFile(path, patched, 0600); err != nil {
 		return fmt.Errorf("write workdir-trust file %s: %w", wt.RelPath, err)
+	}
+	return nil
+}
+
+// applyDirectCredential materializes an agent's real credential into its auth
+// file (Definition.DirectCredentialFile) for the non-brokered delivery path, for
+// a CLI that reads its credential only from a file (Codex → auth.json; a bare env
+// var doesn't authenticate it — DF84). It writes only when the credential is
+// still present in secretEnv: a brokered launch removed it above (and wrote a
+// placeholder auth.json), so this is a no-op then; a direct launch (--no-broker,
+// unsupported backend, --network-none) still has it. A no-op for agents that
+// declare no DirectCredentialFile, or when no credential is present at all.
+func applyDirectCredential(st *state.State, secretEnv map[string]string) error {
+	if st.Agent == nil || st.Agent.DirectCredentialFile == nil {
+		return nil
+	}
+	dc := st.Agent.DirectCredentialFile
+	var secret string
+	for _, ev := range dc.EnvVars {
+		if v := secretEnv[ev]; v != "" {
+			secret = v
+			break
+		}
+	}
+	if secret == "" {
+		return nil // no credential, or it was brokered away
+	}
+	data, err := dc.Render(secret)
+	if err != nil {
+		return fmt.Errorf("render direct-credential file %s: %w", dc.RelPath, err)
+	}
+	path := filepath.Join(st.SandboxDir, store.AgentRuntimeDir, dc.RelPath)
+	if err := fileutil.MkdirAll(filepath.Dir(path), 0750); err != nil {
+		return fmt.Errorf("create dir for direct-credential file %s: %w", dc.RelPath, err)
+	}
+	if err := fileutil.WriteFile(path, data, 0600); err != nil {
+		return fmt.Errorf("write direct-credential file %s: %w", dc.RelPath, err)
 	}
 	return nil
 }

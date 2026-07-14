@@ -43,9 +43,19 @@ func patchCodexBaseURL(current []byte, baseURL, _ string) ([]byte, error) {
 // launch always overwrites auth.json with the placeholder (the seeded host
 // auth.json, if any, is skipped when an API key is present).
 func patchCodexAuth(_ []byte, _, placeholder string) ([]byte, error) {
+	return renderCodexAuth(placeholder)
+}
+
+// renderCodexAuth builds a Codex auth.json for API-key auth, in the shape
+// `codex login --with-api-key` produces. It is the direct-delivery analogue of
+// patchCodexAuth: the launch path calls it with the REAL key when Codex is not
+// brokered (a bare OPENAI_API_KEY env var doesn't authenticate Codex 0.144 —
+// DF84), while patchCodexAuth calls it with the per-sandbox placeholder when it
+// is brokered. Same file, different key.
+func renderCodexAuth(key string) ([]byte, error) {
 	out, err := json.MarshalIndent(map[string]any{
 		"auth_mode":      "apikey",
-		"OPENAI_API_KEY": placeholder,
+		"OPENAI_API_KEY": key,
 	}, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("agent: encode codex auth.json: %w", err)

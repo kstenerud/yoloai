@@ -2888,10 +2888,11 @@ contradicting secondary-source research that described older Codex:
    (or `CODEX_API_KEY`) set in the environment, `codex login status` still reports
    **"Not logged in"** and the TUI prompts for login. Codex authenticates from a
    logged-in `~/.codex/auth.json` in the shape `codex login --with-api-key`
-   produces: `{"auth_mode":"apikey","OPENAI_API_KEY":"<key>"}`. (Consequence: a
-   yoloAI Codex sandbox with an API key but no seeded host `auth.json` was
-   *already* broken pre-broker — the env var alone can't log Codex in.) So the
-   broker delivers the placeholder by **writing auth.json**, not an env var.
+   produces: `{"auth_mode":"apikey","OPENAI_API_KEY":"<key>"}`. So the broker
+   delivers the placeholder by **writing auth.json**, not an env var — and the
+   non-brokered path writes the *real* key to auth.json too (`--no-broker` Codex
+   with a bare env var was otherwise "not logged in"; `agent.renderCodexAuth` →
+   `launch.applyDirectCredential`, DF84).
 3. **Codex hits `{base_url}/responses` over a WebSocket** (Responses API;
    chat/completions was removed Feb 2026). The WS transport is baked in — the
    `responses_websockets` feature flags are "removed", and `prefer_websockets=false`
