@@ -1,7 +1,15 @@
 # Tart network liveness detection
 
-**Status:** Design draft from a real incident (2026-07); not yet a locked
-decision, not implemented. Written up so the detection work has a home; the
+**Status:** Partially implemented (2026-07-14). The doctor surfacing below is
+done: `runtime/tart/netcheck.go` implements the two-signal probe behind a new
+backend-neutral `runtime.NetLivenessReporter` optional interface (mirroring
+`VMCensusReporter`); `yoloai doctor` reports per running VM (`network: ok` /
+`WEDGED` with the directive restart message / `could not determine`), includes
+a `net_liveness` section in `--json`, and exits non-zero on a confirmed wedge.
+Verified end-to-end against a live wedged VM (DF86 — which also established
+that a wedged session poisons networking for *new* VMs host-wide, raising the
+stakes for detection). The `info`/`ls` status path and smoke-harness fail-fast
+remain unimplemented; the in-guest monitor option remains speculative. The
 incident itself is documented in
 [backend-idiosyncrasies.md](../../backend-idiosyncrasies.md#tart-vmnet-session-wedges-on-a-long-idle-vm-host-sleep--subnet-re-pick--guest-drops-to-a-169254-link-local-address-agent-gets-connectionrefused).
 
@@ -30,8 +38,9 @@ diagnosis:
    guest exec. This is how the incident first manifested to tooling. Caveat:
    also transiently true during boot, so it needs a "VM has been up > N
    minutes" or "was previously reachable" qualifier.
-2. **Guest `en0` holds a link-local address** (`ipconfig getifaddr en0` empty
-   / `ifconfig en0` shows `inet 169.254.*`) on a running VM — one `tart exec`,
+2. **Guest `en0` holds a link-local address** (`ipconfig getifaddr en0`
+   returns `169.254.*` — verified live: it prints the link-local address, it
+   does not come back empty) on a running VM — one `tart exec`,
    definitive for "DHCP failed", and it distinguishes "network dead" from
    "yoloai can't determine the IP for some other reason".
 3. **Both-ways ARP `(incomplete)`** after forcing a static IP — this is the
