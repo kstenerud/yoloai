@@ -130,6 +130,27 @@ type Definition struct {
 	// Nil means the agent is not brokerable yet and always takes direct
 	// credential delivery.
 	Broker *BrokerConfig
+
+	// WorkdirTrust, when set, patches an agent config file at launch to record the
+	// container working directory as trusted — for CLIs that block on a folder-trust
+	// prompt before running in a directory (Codex, DF85). It runs on every launch,
+	// independent of brokering. Nil for agents with no such prompt.
+	WorkdirTrust *WorkdirTrustPatch
+}
+
+// WorkdirTrustPatch declares how to mark the container working directory trusted
+// in an agent's config file, for a CLI that otherwise blocks on a folder-trust
+// onboarding prompt. The launch path reads the file from the sandbox's
+// agent-runtime dir, calls Patch with the resolved container workdir, and writes
+// it back before the container starts.
+type WorkdirTrustPatch struct {
+	// RelPath is the config file relative to the agent's runtime state dir, e.g.
+	// "config.toml".
+	RelPath string
+	// Patch records workdir (the container working directory) as trusted in the
+	// file's current bytes and returns the new bytes. current is empty when the
+	// file does not yet exist. It must preserve unrelated config and be idempotent.
+	Patch func(current []byte, workdir string) ([]byte, error)
 }
 
 // BrokerConfig declares an agent's brokerable credentials for the host-side
@@ -524,6 +545,9 @@ var agents = map[string]*Definition{
 			},
 			DummyToken: "yoloai-broker-dummy",
 		},
+		// Codex 0.144 blocks on a folder-trust prompt unless the workdir is marked
+		// trusted in config.toml (DF85) — done on every launch, brokered or not.
+		WorkdirTrust: &WorkdirTrustPatch{RelPath: "config.toml", Patch: patchCodexWorkdirTrust},
 		SeedFiles: []SeedFile{
 			{HostPath: "~/.codex/auth.json", TargetPath: "auth.json", AuthOnly: true},
 			{HostPath: "~/.codex/config.toml", TargetPath: "config.toml"},

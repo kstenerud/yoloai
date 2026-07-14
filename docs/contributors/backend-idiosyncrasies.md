@@ -126,6 +126,7 @@ inclusion test first, then add a row to the index.
 | Smoke test: `stop_start/tart` fails; exchange dir empty | [Tart: xcodebuild -runFirstLaunch blocks agent startup](#tart-xcodebuild--runfirstlaunch-blocks-agent-startup) |
 | Smoke `done` never fires; claude stuck on a Bash permission prompt despite `--dangerously-skip-permissions`; "fullscreen renderer" modal seen | [Claude: fullscreen upsell re-execs and drops the flag](#claude-the-fullscreen-renderer-upsell-re-execs-claude-and-drops---dangerously-skip-permissions) |
 | Codex asks to log in / `codex login status` says "Not logged in" even with `OPENAI_API_KEY` set; no `OPENAI_BASE_URL` env var redirects it; WS to `/v1/responses` | [Agent CLIs: base-URL override for brokering differs per CLI](#agent-clis-base-url-override-support-for-brokering-differs-per-cli) |
+| Codex quits to a shell right after launch; "Do you trust the contents of this directory?" prompt seen; pasted prompt swallowed | [Agent CLIs: base-URL override for brokering differs per CLI](#agent-clis-base-url-override-support-for-brokering-differs-per-cli) (point 4, folder trust) |
 | Brokering doesn't redirect Gemini when signed in with "Login with Google"; only `GEMINI_API_KEY` auth honors `GOOGLE_GEMINI_BASE_URL` | [Agent CLIs: base-URL override for brokering differs per CLI](#agent-clis-base-url-override-support-for-brokering-differs-per-cli) |
 | `container-enhanced` (gVisor): `new` exits 0 / `ls` active but agent never runs; box stuck on `sleep infinity`, only `entrypoint.keepalive_only` logged | [gVisor: docker exec --user resolves stale image passwd](#gvisor-container-enhanced-docker-exec---user-name-resolves-against-the-stale-image-passwd-not-the-live-one) |
 | `yoloai new --attach` hangs after "Sandbox created"; Python setup never completes | [Tart: mount_map uses Docker paths, triggering macOS automount](#tart-mount_map-uses-docker-style-paths-triggering-macos-automount-hang) |
@@ -2903,6 +2904,18 @@ contradicting secondary-source research that described older Codex:
 The broker therefore patches **two** files host-side before the container starts
 (`agent.patchCodexBaseURL` + `agent.patchCodexAuth` → `launch.patchBrokerConfigFiles`):
 config.toml for the redirect, auth.json for the placeholder key.
+
+4. **Codex blocks on a folder-trust onboarding prompt** for any working directory
+   not recorded as trusted in `config.toml` (`[projects."<path>"] trust_level =
+   "trusted"`). yoloAI launches Codex interactively and pastes the task prompt,
+   which lands in that dialog instead of the input box, and the agent exits to a
+   shell. `--dangerously-bypass-approvals-and-sandbox` (command approvals) and
+   `--dangerously-bypass-hook-trust` (hook trust) do **not** cover folder trust,
+   and there is **no global trust-disable** — trust is strictly per-project-root.
+   yoloAI marks the container workdir trusted on every launch
+   (`agent.Definition.WorkdirTrust` → `launch.applyWorkdirTrust` →
+   `agent.patchCodexWorkdirTrust`; DF85). This is separate from brokering (it runs
+   for `--no-broker` too).
 
 **Gemini's base-URL override is honored only on the API-key auth path.** The
 Gemini CLI's `GOOGLE_GEMINI_BASE_URL` (read by the underlying `@google/genai`

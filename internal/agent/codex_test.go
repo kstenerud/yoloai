@@ -61,6 +61,49 @@ func TestPatchCodexAuth_WritesApiKeyLoginShape(t *testing.T) {
 	assert.Equal(t, "per-sandbox-placeholder", auth["OPENAI_API_KEY"], "the placeholder — not the real key — goes into the sandbox")
 }
 
+func TestPatchCodexWorkdirTrust_MarksWorkdirTrusted(t *testing.T) {
+	out, err := patchCodexWorkdirTrust(nil, "/home/karl/tmp")
+	require.NoError(t, err)
+
+	var cfg map[string]any
+	require.NoError(t, toml.Unmarshal(out, &cfg))
+	projects, ok := cfg["projects"].(map[string]any)
+	require.True(t, ok, "projects table written")
+	entry, ok := projects["/home/karl/tmp"].(map[string]any)
+	require.True(t, ok, "workdir marked as a project")
+	assert.Equal(t, "trusted", entry["trust_level"])
+}
+
+func TestPatchCodexWorkdirTrust_PreservesBrokerPatchAndOtherProjects(t *testing.T) {
+	// Composes with the broker's openai_base_url patch and existing trusted
+	// projects on the same file (the launch path runs this after the broker patch).
+	existing := []byte("openai_base_url = 'http://172.17.0.1:44115/v1'\n\n[projects.'/home/karl']\ntrust_level = 'trusted'\n")
+	out, err := patchCodexWorkdirTrust(existing, "/work/proj")
+	require.NoError(t, err)
+
+	var cfg map[string]any
+	require.NoError(t, toml.Unmarshal(out, &cfg))
+	assert.Equal(t, "http://172.17.0.1:44115/v1", cfg["openai_base_url"], "broker redirect survives")
+	projects := cfg["projects"].(map[string]any)
+	assert.Contains(t, projects, "/home/karl", "existing trusted project survives")
+	assert.Equal(t, "trusted", projects["/work/proj"].(map[string]any)["trust_level"], "workdir added")
+}
+
+func TestPatchCodexWorkdirTrust_Idempotent(t *testing.T) {
+	first, err := patchCodexWorkdirTrust([]byte("model = 'gpt-5.3-codex'\n"), "/work/proj")
+	require.NoError(t, err)
+	second, err := patchCodexWorkdirTrust(first, "/work/proj")
+	require.NoError(t, err)
+	assert.Equal(t, string(first), string(second), "re-trusting the same workdir is stable")
+}
+
+func TestPatchCodexWorkdirTrust_EmptyWorkdirIsNoOp(t *testing.T) {
+	in := []byte("model = 'gpt-5.3-codex'\n")
+	out, err := patchCodexWorkdirTrust(in, "")
+	require.NoError(t, err)
+	assert.Equal(t, string(in), string(out), "no workdir → config untouched")
+}
+
 func TestPatchCodexAuth_OverwritesSeededAuth(t *testing.T) {
 	// A brokered launch always replaces auth.json with the placeholder, even if a
 	// host auth.json leaked through — the real credential must never reach the box.

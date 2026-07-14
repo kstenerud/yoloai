@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	toml "github.com/pelletier/go-toml/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -209,6 +210,58 @@ func TestPatchBrokerConfigFiles(t *testing.T) {
 		require.NoError(t, patchBrokerConfigFiles(sandboxDir, claudeBrokerConfig(), "172.17.0.1:44115", "tok"))
 		_, err := os.Stat(filepath.Join(sandboxDir, store.AgentRuntimeDir))
 		assert.True(t, os.IsNotExist(err), "nothing written when ConfigFiles is empty")
+	})
+}
+
+func TestApplyWorkdirTrust(t *testing.T) {
+	readConfig := func(t *testing.T, sandboxDir string) map[string]any {
+		t.Helper()
+		data, err := os.ReadFile(filepath.Join(sandboxDir, store.AgentRuntimeDir, "config.toml")) //nolint:gosec // test path under t.TempDir()
+		require.NoError(t, err)
+		var cfg map[string]any
+		require.NoError(t, toml.Unmarshal(data, &cfg))
+		return cfg
+	}
+
+	t.Run("codex trusts the resolved container workdir", func(t *testing.T) {
+		sandboxDir := t.TempDir()
+		st := &state.State{
+			SandboxDir: sandboxDir,
+			Agent:      agent.GetAgent("codex"),
+			Workdir:    &state.DirSpec{Path: "/home/karl/proj"},
+		}
+		require.NoError(t, applyWorkdirTrust(st))
+
+		projects := readConfig(t, sandboxDir)["projects"].(map[string]any)
+		entry, ok := projects["/home/karl/proj"].(map[string]any)
+		require.True(t, ok, "the container workdir is recorded as a trusted project")
+		assert.Equal(t, "trusted", entry["trust_level"])
+	})
+
+	t.Run("custom mount path is trusted, not the host path", func(t *testing.T) {
+		sandboxDir := t.TempDir()
+		st := &state.State{
+			SandboxDir: sandboxDir,
+			Agent:      agent.GetAgent("codex"),
+			Workdir:    &state.DirSpec{Path: "/host/path", MountPath: "/container/path"},
+		}
+		require.NoError(t, applyWorkdirTrust(st))
+
+		projects := readConfig(t, sandboxDir)["projects"].(map[string]any)
+		assert.Contains(t, projects, "/container/path", "trusts the container path codex actually runs in")
+		assert.NotContains(t, projects, "/host/path")
+	})
+
+	t.Run("no-op for an agent without WorkdirTrust", func(t *testing.T) {
+		sandboxDir := t.TempDir()
+		st := &state.State{
+			SandboxDir: sandboxDir,
+			Agent:      agent.GetAgent("gemini"),
+			Workdir:    &state.DirSpec{Path: "/home/karl/proj"},
+		}
+		require.NoError(t, applyWorkdirTrust(st))
+		_, err := os.Stat(filepath.Join(sandboxDir, store.AgentRuntimeDir))
+		assert.True(t, os.IsNotExist(err), "nothing written when the agent declares no WorkdirTrust")
 	})
 }
 

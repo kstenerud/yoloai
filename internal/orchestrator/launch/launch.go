@@ -71,6 +71,13 @@ func LaunchContainer(ctx context.Context, d state.Deps, st *state.State) (err er
 		return err
 	}
 
+	// Record the workdir as trusted for CLIs that block on a folder-trust prompt
+	// (Codex, DF85). Unconditional — independent of brokering — and after the
+	// broker patch so it composes with any openai_base_url written above.
+	if err := applyWorkdirTrust(st); err != nil {
+		return err
+	}
+
 	// The injector is now live, and the steps below may create/start the container
 	// and its CNI netns. Roll the whole partial launch back on any failure from
 	// here on, so re-running the launch (yoloai start) isn't balked by a leftover
@@ -486,6 +493,37 @@ func brokerCredentials(ctx context.Context, rt runtime.Backend, st *state.State,
 	slog.Info("brokered agent credential through host-side injector",
 		"event", "sandbox.broker.active", "sandbox", st.Name, "upstream", bc.UpstreamURL, "credential", cred.EnvVar)
 	return brokerOutcome{NetworkMode: reach.RequiredNetworkMode, InjectorEndpoint: endpoint}, nil
+}
+
+// applyWorkdirTrust records the container working directory as trusted in an
+// agent's config file (Definition.WorkdirTrust), for CLIs that block on a
+// folder-trust prompt before running in a directory (Codex, DF85). It runs on
+// every launch, independent of brokering, patching the host-side config file in
+// the sandbox's agent-runtime dir (bind-mounted into the sandbox) before the
+// container starts. A no-op for agents that declare no WorkdirTrust or that have
+// no workdir. Because config.toml is re-seeded from the host each launch, this
+// re-applies every time.
+func applyWorkdirTrust(st *state.State) error {
+	if st.Agent == nil || st.Agent.WorkdirTrust == nil || st.Workdir == nil {
+		return nil
+	}
+	wt := st.Agent.WorkdirTrust
+	path := filepath.Join(st.SandboxDir, store.AgentRuntimeDir, wt.RelPath)
+	current, err := os.ReadFile(path) //nolint:gosec // path from the sandbox dir + agent-declared RelPath
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("read workdir-trust file %s: %w", wt.RelPath, err)
+	}
+	patched, err := wt.Patch(current, WorkdirMountPath(st.Workdir))
+	if err != nil {
+		return fmt.Errorf("patch workdir-trust file %s: %w", wt.RelPath, err)
+	}
+	if err := fileutil.MkdirAll(filepath.Dir(path), 0750); err != nil {
+		return fmt.Errorf("create dir for workdir-trust file %s: %w", wt.RelPath, err)
+	}
+	if err := fileutil.WriteFile(path, patched, 0600); err != nil {
+		return fmt.Errorf("write workdir-trust file %s: %w", wt.RelPath, err)
+	}
+	return nil
 }
 
 // patchBrokerConfigFiles applies a file-based redirect/placeholder delivery
