@@ -125,6 +125,8 @@ inclusion test first, then add a row to the index.
 | `diff`/`apply`/`status` fails only on containerd-vm with `git: detected dubious ownership in repository` | [Kata: virtiofs remaps work-copy uid; in-confinement git trips dubious-ownership](#kata-virtiofs-remaps-the-work-copy-owner-uid-so-in-confinement-git-trips-dubious-ownership) |
 | Smoke test: `stop_start/tart` fails; exchange dir empty | [Tart: xcodebuild -runFirstLaunch blocks agent startup](#tart-xcodebuild--runfirstlaunch-blocks-agent-startup) |
 | Smoke `done` never fires; claude stuck on a Bash permission prompt despite `--dangerously-skip-permissions`; "fullscreen renderer" modal seen | [Claude: fullscreen upsell re-execs and drops the flag](#claude-the-fullscreen-renderer-upsell-re-execs-claude-and-drops---dangerously-skip-permissions) |
+| Codex asks to log in / `codex login status` says "Not logged in" even with `OPENAI_API_KEY` set; no `OPENAI_BASE_URL` env var redirects it; WS to `/v1/responses` | [Agent CLIs: base-URL override for brokering differs per CLI](#agent-clis-base-url-override-support-for-brokering-differs-per-cli) |
+| Brokering doesn't redirect Gemini when signed in with "Login with Google"; only `GEMINI_API_KEY` auth honors `GOOGLE_GEMINI_BASE_URL` | [Agent CLIs: base-URL override for brokering differs per CLI](#agent-clis-base-url-override-support-for-brokering-differs-per-cli) |
 | `container-enhanced` (gVisor): `new` exits 0 / `ls` active but agent never runs; box stuck on `sleep infinity`, only `entrypoint.keepalive_only` logged | [gVisor: docker exec --user resolves stale image passwd](#gvisor-container-enhanced-docker-exec---user-name-resolves-against-the-stale-image-passwd-not-the-live-one) |
 | `yoloai new --attach` hangs after "Sandbox created"; Python setup never completes | [Tart: mount_map uses Docker paths, triggering macOS automount](#tart-mount_map-uses-docker-style-paths-triggering-macos-automount-hang) |
 | `yoloai apply` fails: `git add: git [add -A]: exit status 128: … index.lock: File exists` while agent is running | [Docker/Podman: agent git and apply git race on index.lock](#dockerpodman-agent-git-and-apply-git-race-on-indexlock) |
@@ -2860,3 +2862,66 @@ but any Go path that does `utf8`-validating work on a capture must tolerate it.
 
 **Code:** `scripts/smoke_test.py` (`Test.run`, `errors="replace"`);
 regression test `scripts/tests/test_smoke_runner.py`.
+
+---
+
+## Agent CLIs: base-URL override support for brokering differs per CLI
+
+**Symptom:** wiring an agent for credential brokering (D105/D115 — point the CLI
+at the host-side injector via a base URL, hand it a placeholder key) works for
+Claude and Gemini but the redirect mechanism is **not uniform**: what works for
+one CLI silently no-ops on another. Two specific traps bit the D115 wiring.
+
+**Codex (0.144) authenticates from `auth.json`, not an env var, and reads its
+base URL only from `config.toml` — and it talks over a WebSocket.** Three
+separate surprises, all verified empirically on the shipped CLI (0.144.4), all
+contradicting secondary-source research that described older Codex:
+
+1. **No base-URL env var.** Codex reads its base URL **only** from `openai_base_url`
+   (or a custom `[model_providers.*]` block) in `~/.codex/config.toml`. There is
+   **no** `OPENAI_BASE_URL`/`CODEX_BASE_URL` env var — third-party blogs claiming
+   one describe the retired TypeScript Codex. `openai_base_url` is honored **only
+   in user-level config** (ignored, with a warning, in a project-local
+   `.codex/config.toml`).
+2. **A bare API-key env var does NOT authenticate Codex.** With `OPENAI_API_KEY`
+   (or `CODEX_API_KEY`) set in the environment, `codex login status` still reports
+   **"Not logged in"** and the TUI prompts for login. Codex authenticates from a
+   logged-in `~/.codex/auth.json` in the shape `codex login --with-api-key`
+   produces: `{"auth_mode":"apikey","OPENAI_API_KEY":"<key>"}`. (Consequence: a
+   yoloAI Codex sandbox with an API key but no seeded host `auth.json` was
+   *already* broken pre-broker — the env var alone can't log Codex in.) So the
+   broker delivers the placeholder by **writing auth.json**, not an env var.
+3. **Codex hits `{base_url}/responses` over a WebSocket** (Responses API;
+   chat/completions was removed Feb 2026). The WS transport is baked in — the
+   `responses_websockets` feature flags are "removed", and `prefer_websockets=false`
+   does not disable it — with an automatic (slow, retrying) HTTPS fallback.
+   yoloAI's injector is a Go `httputil.ReverseProxy`, which **does** proxy the WS
+   upgrade and inject the real credential on the handshake, so Codex's WS transport
+   works natively through the broker (no fallback). `openai_base_url` gets a `/v1`
+   suffix so Codex's appended `/responses` resolves to the real `/v1/responses`.
+
+The broker therefore patches **two** files host-side before the container starts
+(`agent.patchCodexBaseURL` + `agent.patchCodexAuth` → `launch.patchBrokerConfigFiles`):
+config.toml for the redirect, auth.json for the placeholder key.
+
+**Gemini's base-URL override is honored only on the API-key auth path.** The
+Gemini CLI's `GOOGLE_GEMINI_BASE_URL` (read by the underlying `@google/genai`
+SDK) redirects requests **only** when the CLI resolves to `GEMINI_API_KEY`
+(AI-Studio) auth. A "Login with Google" **OAuth** session hits Google's Code
+Assist endpoints **hardcoded** and silently ignores the override (acknowledged
+upstream, gemini-cli #15430). Also: `GOOGLE_API_KEY` takes precedence over
+`GEMINI_API_KEY` and can push the CLI onto the Vertex path — so brokering sets
+only `GEMINI_API_KEY`. Consequence baked into D115: brokering engages **only when
+an API key is present**; an OAuth/subscription login is left to direct delivery
+for every agent, not just Gemini (Codex ChatGPT-subscription is the same class).
+
+**Why this is here (not our bug):** these are properties of the external CLIs —
+delete all of yoloAI and Codex still has no base-URL env var and Gemini's OAuth
+path still ignores the override. The takeaway for a future maintainer wiring
+another agent for brokering: **verify the CLI's actual base-URL mechanism (env
+var vs config file vs per-provider) and which auth paths honor it** before
+assuming the Claude-style env redirect applies.
+
+**Code:** `internal/agent/agent.go` (`gemini`/`codex` `Broker`),
+`internal/agent/broker_codex.go`, `internal/orchestrator/launch/launch.go`
+(`patchBrokerBaseURLFile`); decision D115.

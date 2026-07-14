@@ -480,9 +480,46 @@ func brokerCredentials(ctx context.Context, rt runtime.Backend, st *state.State,
 	if err != nil {
 		return brokerOutcome{}, err
 	}
+	if err := patchBrokerConfigFiles(st.SandboxDir, bc, endpoint, placeholderToken); err != nil {
+		return brokerOutcome{}, err
+	}
 	slog.Info("brokered agent credential through host-side injector",
 		"event", "sandbox.broker.active", "sandbox", st.Name, "upstream", bc.UpstreamURL, "credential", cred.EnvVar)
 	return brokerOutcome{NetworkMode: reach.RequiredNetworkMode, InjectorEndpoint: endpoint}, nil
+}
+
+// patchBrokerConfigFiles applies a file-based redirect/placeholder delivery
+// (BrokerConfig.ConfigFiles) for agents whose CLI reads its base URL and/or
+// credential only from config files (Codex: config.toml for the base URL,
+// auth.json for the key). For each file it reads the current bytes from the
+// sandbox's agent-runtime dir (empty when none was seeded), lets the agent's
+// Patch merge in the injector endpoint and per-sandbox placeholder, and writes it
+// back before the container starts. A no-op for env-redirected agents (empty
+// ConfigFiles). The files are host-side and bind-mounted into the sandbox, so the
+// patch is visible to the agent at launch; the reconcile path rebinds the same
+// port, so the persisted values stay valid without a rewrite.
+func patchBrokerConfigFiles(sandboxDir string, bc *agent.BrokerConfig, endpoint, placeholderToken string) error {
+	for _, cf := range bc.ConfigFiles {
+		path := filepath.Join(sandboxDir, store.AgentRuntimeDir, cf.RelPath)
+		current, err := os.ReadFile(path) //nolint:gosec // path from the sandbox dir + agent-declared RelPath
+		if err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("read broker config file %s: %w", cf.RelPath, err)
+		}
+		patched, err := cf.Patch(current, "http://"+endpoint, placeholderToken)
+		if err != nil {
+			return fmt.Errorf("patch broker config file %s: %w", cf.RelPath, err)
+		}
+		// The agent-runtime dir normally exists from seed-copy, but a brokered agent
+		// with no seeded config (no host config.toml, and API-key auth so no
+		// auth.json) may have none yet — create it so the file can be written.
+		if err := fileutil.MkdirAll(filepath.Dir(path), 0750); err != nil {
+			return fmt.Errorf("create dir for broker config file %s: %w", cf.RelPath, err)
+		}
+		if err := fileutil.WriteFile(path, patched, 0600); err != nil {
+			return fmt.Errorf("write broker config file %s: %w", cf.RelPath, err)
+		}
+	}
+	return nil
 }
 
 // resolveBrokerReach resolves the injector reachability and applies the
@@ -537,15 +574,16 @@ func resolveInjectorReach(ctx context.Context, rt runtime.Backend) (runtime.Inje
 // buildInjectorSpec assembles the injector spec from an agent's BrokerConfig, the
 // selected credential, the backend's reachability, and the resolved real value.
 // Shared by the launch-time broker step and ReconcileInjector so the two never
-// drift. The inbound dummy Authorization is always stripped; the selected
-// credential is injected into its own header (x-api-key for an API key,
-// Authorization: Bearer for a subscription token).
+// drift. The agent's placeholder-carrier header (bc.PlaceholderHeader) is
+// stripped and searched for the expected token; the selected credential is then
+// injected into its own header (x-api-key or Authorization: Bearer for Claude,
+// x-goog-api-key for Gemini, Authorization: Bearer for Codex).
 func buildInjectorSpec(sandboxDir string, bc *agent.BrokerConfig, cred agent.BrokerCredential, reach runtime.InjectorReach, realKey, placeholderToken string) broker.InjectorSpec {
 	return broker.InjectorSpec{
 		SandboxDir:    sandboxDir,
 		BindHost:      reach.BindHost,
 		UpstreamURL:   bc.UpstreamURL,
-		StripHeaders:  []string{"Authorization"},
+		StripHeaders:  []string{bc.PlaceholderHeader},
 		ExpectedToken: placeholderToken,
 		Bindings: []broker.BindingConfig{{
 			Destination: bc.Destination,
@@ -644,10 +682,19 @@ func applyBrokerEnv(secretEnv map[string]string, bc *agent.BrokerConfig, reach r
 		delete(secretEnv, c.EnvVar)
 	}
 	endpoint := net.JoinHostPort(reach.DialHost, port)
-	secretEnv[bc.BaseURLEnvVar] = "http://" + endpoint
+	// Env-redirected agents (Claude, Gemini) get their base URL via an env var;
+	// file-redirected agents (Codex) have BaseURLEnvVar=="" and are redirected by
+	// patchBrokerConfigFiles instead.
+	if bc.BaseURLEnvVar != "" {
+		secretEnv[bc.BaseURLEnvVar] = "http://" + endpoint
+	}
 	// The placeholder the agent presents is the per-sandbox token the injector
 	// verifies (not the shared bc.DummyToken constant) — see broker.PlaceholderToken.
-	secretEnv[bc.AuthTokenEnvVar] = placeholderToken
+	// AuthTokenEnvVar is empty for agents that receive the placeholder via a config
+	// file instead (Codex → auth.json), so only set it when named.
+	if bc.AuthTokenEnvVar != "" {
+		secretEnv[bc.AuthTokenEnvVar] = placeholderToken
+	}
 	return endpoint, nil
 }
 
