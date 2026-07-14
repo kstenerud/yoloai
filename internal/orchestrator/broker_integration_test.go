@@ -118,9 +118,10 @@ func TestIntegration_Podman_DirectDeliveryOnMacOS(t *testing.T) {
 		Credentials: []agent.BrokerCredential{
 			{EnvVar: "TEST_BROKER_KEY", Header: "x-api-key", Prefix: ""},
 		},
-		BaseURLEnvVar:   "TEST_BROKER_BASE_URL",
-		AuthTokenEnvVar: "TEST_BROKER_AUTH",
-		DummyToken:      "dummy-broker-placeholder",
+		PlaceholderHeader: "Authorization",
+		BaseURLEnvVar:     "TEST_BROKER_BASE_URL",
+		AuthTokenEnvVar:   "TEST_BROKER_AUTH",
+		DummyToken:        "dummy-broker-placeholder",
 	}
 	t.Cleanup(func() { def.Broker = origBroker })
 
@@ -195,12 +196,13 @@ func TestIntegration_CredentialBroker_Isolated(t *testing.T) {
 	require.NotNil(t, def, "the test agent must be registered")
 	origBroker := def.Broker
 	def.Broker = &agent.BrokerConfig{ //nolint:gosec // G101 false positive: env-var names + a placeholder, not real credentials
-		UpstreamURL:     srv.URL,
-		Destination:     mockHost,
-		Credentials:     []agent.BrokerCredential{{EnvVar: "TEST_BROKER_KEY", Header: "x-api-key", Prefix: ""}},
-		BaseURLEnvVar:   "TEST_BROKER_BASE_URL",
-		AuthTokenEnvVar: "TEST_BROKER_AUTH",
-		DummyToken:      "dummy-broker-placeholder",
+		UpstreamURL:       srv.URL,
+		Destination:       mockHost,
+		Credentials:       []agent.BrokerCredential{{EnvVar: "TEST_BROKER_KEY", Header: "x-api-key", Prefix: ""}},
+		PlaceholderHeader: "Authorization",
+		BaseURLEnvVar:     "TEST_BROKER_BASE_URL",
+		AuthTokenEnvVar:   "TEST_BROKER_AUTH",
+		DummyToken:        "dummy-broker-placeholder",
 	}
 	t.Cleanup(func() { def.Broker = origBroker })
 
@@ -306,12 +308,13 @@ func TestIntegration_NetworkIsolation_TamperResistant(t *testing.T) {
 	require.NotNil(t, def, "the test agent must be registered")
 	origBroker := def.Broker
 	def.Broker = &agent.BrokerConfig{ //nolint:gosec // G101 false positive: env-var names + a placeholder, not real credentials
-		UpstreamURL:     srv.URL,
-		Destination:     mockHost,
-		Credentials:     []agent.BrokerCredential{{EnvVar: "TEST_BROKER_KEY", Header: "x-api-key", Prefix: ""}},
-		BaseURLEnvVar:   "TEST_BROKER_BASE_URL",
-		AuthTokenEnvVar: "TEST_BROKER_AUTH",
-		DummyToken:      "dummy-broker-placeholder",
+		UpstreamURL:       srv.URL,
+		Destination:       mockHost,
+		Credentials:       []agent.BrokerCredential{{EnvVar: "TEST_BROKER_KEY", Header: "x-api-key", Prefix: ""}},
+		PlaceholderHeader: "Authorization",
+		BaseURLEnvVar:     "TEST_BROKER_BASE_URL",
+		AuthTokenEnvVar:   "TEST_BROKER_AUTH",
+		DummyToken:        "dummy-broker-placeholder",
 	}
 	t.Cleanup(func() { def.Broker = origBroker })
 
@@ -440,9 +443,10 @@ func runBrokerScenarios(t *testing.T, mgr *orchestrator.Engine, ctx context.Cont
 				Credentials: []agent.BrokerCredential{
 					{EnvVar: tc.envVar, Header: tc.header, Prefix: tc.prefix},
 				},
-				BaseURLEnvVar:   "TEST_BROKER_BASE_URL",
-				AuthTokenEnvVar: "TEST_BROKER_AUTH",
-				DummyToken:      "dummy-broker-placeholder",
+				PlaceholderHeader: "Authorization",
+				BaseURLEnvVar:     "TEST_BROKER_BASE_URL",
+				AuthTokenEnvVar:   "TEST_BROKER_AUTH",
+				DummyToken:        "dummy-broker-placeholder",
 			}
 			t.Cleanup(func() { def.Broker = origBroker })
 
