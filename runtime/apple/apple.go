@@ -472,11 +472,60 @@ func (r *Runtime) buildBaseImage(ctx context.Context, layout config.Layout, outp
 	return nil
 }
 
-// Prune sweeps orphaned apple containers — instances this principal created that
-// no longer correspond to a known sandbox. Mirrors the docker/containerd sweep:
-// list with labels, filter by label equality, skip known, then stop+delete the
-// rest. The base image is an OCI image (not a container), so it never appears in
-// `container list` and needs no special exclusion.
+// BuildProfileImage builds a profile's Dockerfile via `container build`,
+// following the shape planned in docs/contributors/design/plans/apple-container-backend.md
+// ("reuses the existing Dockerfile/profile images unchanged"). Like
+// buildBaseImage, the context is materialized into an absolute temp dir —
+// `container build .` silently drops a relative context (AC1) — reusing the
+// same profile-directory filtering (skip the checksum marker and
+// config.yaml) the docker backend uses for its tar context.
+//
+// container build has no documented --secret plumbing (unlike the docker
+// backend's BuildKit invocation), so any auto-detected build secrets (e.g. an
+// ~/.npmrc) are reported and dropped rather than silently ignored or failing
+// the build outright.
+func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir string, tag string, secrets []string, buildEnv config.Layout, output io.Writer, logger *slog.Logger) error {
+	if len(secrets) > 0 {
+		fmt.Fprintf(output, "Warning: build secrets are not supported on the apple backend; %d secret(s) will not be available to the build\n", len(secrets)) //nolint:errcheck // best-effort progress
+	}
+
+	dir, err := buildEnv.MkdirTemp("yoloai-apple-profile-build-")
+	if err != nil {
+		return fmt.Errorf("create build dir: %w", err)
+	}
+	defer os.RemoveAll(dir) //nolint:errcheck // best-effort temp cleanup
+
+	if err := dockerrt.WriteProfileBuildContextDir(sourceDir, dir); err != nil {
+		return fmt.Errorf("write profile build context: %w", err)
+	}
+	logger.Debug("building profile image via container build", "tag", tag, "sourceDir", sourceDir, "context", dir)
+
+	cmd := sysexec.CommandContext(ctx, r.execEnv, r.containerBin, "build", "-t", tag, dir)
+	cmd.Stdout = output
+	cmd.Stderr = output
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("container build: %w", err)
+	}
+	return nil
+}
+
+// ProfileImageNeedsBuild reports whether the profile image is stale. Delegates
+// to the docker backend's checksum scheme (pure file I/O, backend-agnostic).
+func (r *Runtime) ProfileImageNeedsBuild(profileDir string, parentDir string) bool {
+	return dockerrt.ProfileImageNeedsBuild(profileDir, parentDir)
+}
+
+// RecordProfileBuildChecksum records the profile's Dockerfile checksum after a
+// successful build. Delegates to the docker backend's checksum scheme.
+func (r *Runtime) RecordProfileBuildChecksum(profileDir string) {
+	dockerrt.RecordProfileBuildChecksum(profileDir)
+}
+
+// Prune sweeps orphaned apple containers — `yoloai-*` instances (scoped to this
+// runtime's principal) that no longer correspond to a known sandbox. Mirrors the
+// tart/docker sweep: list, filter to this principal's prefix, skip known, then
+// stop+delete the rest. The base image is an OCI image (not a container), so it
+// never appears in `container list` and needs no special exclusion.
 func (r *Runtime) Prune(ctx context.Context, knownInstances []string, dryRun bool, output io.Writer) (runtime.PruneResult, error) {
 	out, err := r.runContainer(ctx, "list", "--all", "--format", "json")
 	if err != nil {
