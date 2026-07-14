@@ -125,7 +125,10 @@ homebrew_casks:
     # Skip the tap push when HOMEBREW_TAP_TOKEN isn't configured, so a release can
     # be cut before the tap repo/secret exist (the rest of the release still runs).
     # The workflow always sets the env var (empty when the secret is unset).
-    skip_upload: '{{ if .Env.HOMEBREW_TAP_TOKEN }}false{{ else }}true{{ end }}'
+    # With the token, `auto` (not `false`) so a prerelease tag is skipped too: the
+    # tap serves stable users, and an -rc cask published here would overwrite the
+    # stable one. `release.prerelease: auto` only guards the GitHub release.
+    skip_upload: '{{ if .Env.HOMEBREW_TAP_TOKEN }}auto{{ else }}true{{ end }}'
 
 changelog:
   use: github
