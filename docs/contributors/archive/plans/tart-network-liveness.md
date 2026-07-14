@@ -1,16 +1,26 @@
 # Tart network liveness detection
 
-**Status:** Partially implemented (2026-07-14). The doctor surfacing below is
-done: `runtime/tart/netcheck.go` implements the two-signal probe behind a new
-backend-neutral `runtime.NetLivenessReporter` optional interface (mirroring
-`VMCensusReporter`); `yoloai doctor` reports per running VM (`network: ok` /
-`WEDGED` with the directive restart message / `could not determine`), includes
-a `net_liveness` section in `--json`, and exits non-zero on a confirmed wedge.
-Verified end-to-end against a live wedged VM (DF86 — which also established
-that a wedged session poisons networking for *new* VMs host-wide, raising the
-stakes for detection). The `info`/`ls` status path and smoke-harness fail-fast
-remain unimplemented; the in-guest monitor option remains speculative. The
-incident itself is documented in
+**Status:** Implemented and archived (2026-07-14). All three surfacing homes
+below shipped on the `tart-net-liveness` branch, each verified end-to-end
+against a live wedged VM (DF86 — which also established that a wedged session
+poisons networking for *new* VMs host-wide, raising the stakes for detection):
+
+- **doctor**: `runtime/tart/netcheck.go` implements the two-signal probe
+  behind a backend-neutral `runtime.NetLivenessReporter` optional interface
+  (mirroring `VMCensusReporter`); doctor reports per running VM, includes a
+  `net_liveness` section in `--json`, and exits non-zero on a confirmed wedge.
+- **info/ls status path**: `runtime.SandboxNetHealthProber` (per-sandbox,
+  probed only for active/idle sandboxes); `ls` renders `<status> (net-dead)`,
+  `sandbox <name> info` prints a directive `Net health:` line, both `--json`
+  documents carry `net_health`/`net_health_detail`.
+- **smoke harness**: pre-flight wedge check on the doctor JSON marks tart
+  unavailable with the recovery directive; sentinel waits on tart rows probe
+  `info --json` (~15s cadence past the stall grace) and raise a distinct
+  vmnet-wedge error with its own fingerprint; wedge failures skip the retry.
+
+The in-guest monitor option below was not built — the status-path probe is
+cheap enough (signal 1 gates the single exec of signal 2). Revisit only if
+that changes. The incident itself is documented in
 [backend-idiosyncrasies.md](../../backend-idiosyncrasies.md#tart-vmnet-session-wedges-on-a-long-idle-vm-host-sleep--subnet-re-pick--guest-drops-to-a-169254-link-local-address-agent-gets-connectionrefused).
 
 ## Problem

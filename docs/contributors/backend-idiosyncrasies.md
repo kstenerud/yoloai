@@ -2044,10 +2044,13 @@ signal 1 is `tart ip <vm>` failing on a running VM, confirmed by signal 2 —
 `tart exec <vm> /usr/sbin/ipconfig getifaddr en0` returning a `169.254.*`
 address (note: it returns the link-local address, it does not come back
 empty). A confirmed wedge prints the directive restart message and makes
-doctor exit non-zero. Detection only — doctor never restarts the VM.
-Remaining surfacing (info/ls status path, smoke-harness fail-fast) is
-tracked in
-[`design/plans/tart-network-liveness.md`](design/plans/tart-network-liveness.md).
+doctor exit non-zero. Detection only — nothing ever restarts the VM
+automatically. The same probe also feeds `yoloai ls` (`<status>
+(net-dead)`) and `yoloai sandbox <name> info` (`Net health:` line) via
+`runtime.SandboxNetHealthProber`, and the smoke harness fails fast on a
+wedge (pre-flight abort + in-loop check + its own autopsy fingerprint)
+instead of burning sentinel timeouts. Full design:
+[`archive/plans/tart-network-liveness.md`](archive/plans/tart-network-liveness.md).
 
 ## Seatbelt (macOS sandboxing)
 
