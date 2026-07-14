@@ -2039,6 +2039,23 @@ on-disk session state survive; resume the agent's conversation after the
 restart (e.g. Claude's `--resume`). In-guest network surgery is pointless
 — don't spend time on it once ARP shows both-ways `(incomplete)`.
 
+**Subnet flapping under session churn (observed 2026-07-14):** tart's shared
+bridge (`bridge101` on a host where podman-machine's five-week-old session
+holds `bridge100`) is torn down and re-created as tart VMs come and go, and
+macOS re-picks its subnet on re-creation (`192.168.64.x` ↔ `192.168.65.x`
+within minutes on the same host). A long-lived tart VM that holds its lease
+across such an epoch change lands in the stale-lease state below — restarting
+it re-leases on the current epoch, but the next churn (e.g. a smoke run
+creating and destroying VMs) can strand it again. Freshly created VMs are
+fine once `/var/db/dhcpd_leases` is clean; it's the *cross-epoch survivor*
+that keeps going stale. Practical consequences: (a) after clearing a wedge,
+verify with real traffic, not just an address; (b) on a host that runs both a
+long-lived tart VM and VM-churning workloads (smoke tests), expect to restart
+the long-lived VM afterwards; (c) other Virtualization.framework VMs
+(podman-machine, Claude.app, apple `container`) each hold their own vmnet
+sessions/bridges — they are not tart orphans, and podman survives a dead
+bridge because it networks over vsock/gvproxy, not vmnet IP.
+
 **Second variant — stale lease, false-healthy (DF87, observed 2026-07-14):**
 after a restart, bootpd can re-ACK the guest's old lease out of
 `/var/db/dhcpd_leases` (hundreds of stale entries survive the subnet
