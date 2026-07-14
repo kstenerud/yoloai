@@ -233,6 +233,25 @@ func WriteBuildContextDir(dir string) error {
 	if err != nil {
 		return err
 	}
+	return writeTarToDir(tarReader, dir)
+}
+
+// WriteProfileBuildContextDir materializes a profile's build context (its
+// Dockerfile and sibling files, excluding the internal checksum marker and
+// config.yaml — same filtering as createProfileBuildContext) into dir.
+// Backends whose build command needs a *directory* context rather than a
+// stdin tar — e.g. Apple `container build <dir>` — use this instead of the
+// tar-based profile build context.
+func WriteProfileBuildContextDir(sourceDir string, dir string) error {
+	tarReader, err := createProfileBuildContext(sourceDir)
+	if err != nil {
+		return err
+	}
+	return writeTarToDir(tarReader, dir)
+}
+
+// writeTarToDir unpacks a tar stream into dir, one file per entry.
+func writeTarToDir(tarReader io.Reader, dir string) error {
 	tr := tar.NewReader(tarReader)
 	for {
 		hdr, err := tr.Next()

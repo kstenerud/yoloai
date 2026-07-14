@@ -176,7 +176,7 @@ Profiles live in `~/.yoloai/profiles/<name>/` and are always selected explicitly
 **Backend handling:**
 - `os` — optional. Selects the guest OS for the sandbox. Valid values: `linux` (default), `mac`. `linux` is the default and requires no special hardware. `mac` requires a macOS host; the backend depends on `isolation`: `container` uses Seatbelt, `vm` uses Tart. Fails loudly on non-macOS hosts or if the required backend is not installed. CLI `--os` overrides.
 - `container_backend` — optional preference. Only meaningful for `--isolation container` or `container-enhanced`; ignored for `vm`, `vm-enhanced`, and `--os mac`.
-- `Dockerfile` — optional. Used with Docker and Podman backends to build a `yoloai-cli-<profile>` image. Must use `FROM yoloai-base`. Ignored with Tart and Seatbelt backends. When absent, Docker/Podman backends use `yoloai-base`.
+- `Dockerfile` — optional. Used with Docker, Podman, and Apple `container` backends to build a `yoloai-<profile>` image (`container build`, mirroring `docker build`/`podman build`). Must use `FROM yoloai-base`. Ignored with Tart and Seatbelt backends (no OCI image concept). When absent, image-based backends use `yoloai-base`. The Apple backend has no `--secret` build-secret support (unlike Docker/Podman's BuildKit invocation): any auto-detected secrets (e.g. `~/.npmrc`) are reported and dropped rather than passed through.
 - `tart.image` — optional. Used only with the Tart backend. Ignored with other backends.
 
 **Sandbox metadata:** When a profile is used, `environment.json` records the profile name and the resolved image ref. Lifecycle commands use the stored image ref — profile changes only take effect on new sandboxes.
