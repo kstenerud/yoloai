@@ -55,7 +55,7 @@ func netHealthTestInfo(health, detail string) *yoloai.SandboxInfo {
 
 func TestPrintSandboxNetwork_NetHealthWedged(t *testing.T) {
 	var buf bytes.Buffer
-	printSandboxNetwork(&buf, netHealthTestInfo("wedged", "169.254.93.37"))
+	printSandboxNetwork(&buf, netHealthTestInfo("wedged", "guest en0 is link-local 169.254.93.37"))
 	out := buf.String()
 	assert.Contains(t, out, "Net health:  WEDGED (guest en0 is link-local 169.254.93.37)")
 	assert.Contains(t, out, "yoloai stop embrace && yoloai start embrace")

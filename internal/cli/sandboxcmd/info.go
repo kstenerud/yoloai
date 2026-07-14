@@ -127,7 +127,7 @@ func netHealthValue(info *yoloai.SandboxInfo) string {
 		return fmt.Sprintf("ok (%s)", info.NetHealthDetail)
 	case "wedged":
 		return fmt.Sprintf(
-			"WEDGED (guest en0 is link-local %s) — vmnet session is dead; "+
+			"WEDGED (%s) — vmnet session is dead; "+
 				"restart to recover: yoloai stop %s && yoloai start %s "+
 				"(run 'yoloai doctor' for details)",
 			info.NetHealthDetail, name, name)

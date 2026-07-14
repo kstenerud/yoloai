@@ -672,7 +672,7 @@ class Test:
         state, detail = parsed
         if state == "wedged":
             raise AssertionError(
-                f"guest network dead (vmnet wedge): en0 link-local {detail} — "
+                f"guest network dead (vmnet wedge): {detail} — "
                 f"restart to recover: yoloai stop {sandbox_name} && "
                 f"yoloai start {sandbox_name}"
             )

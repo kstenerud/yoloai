@@ -128,13 +128,29 @@ def _make_attempt(tmp_path: Path) -> Path:
 
 def test_wedge_fingerprint_matches_the_new_raise_message(tmp_path: Path) -> None:
     reason = (
-        "guest network dead (vmnet wedge): en0 link-local 169.254.93.37 — "
+        "guest network dead (vmnet wedge): guest en0 is link-local 169.254.93.37 — "
         "restart to recover: yoloai stop embrace && yoloai start embrace"
     )
     hits = scan_fingerprints(_make_attempt(tmp_path), extra_text=reason)
     assert hits, "expected the wedge fingerprint to match"
     assert hits[0].fp.label.startswith("wedged tart vmnet session")
     assert "169254-link-local" in hits[0].fp.anchor
+
+
+def test_wedge_fingerprint_matches_the_stale_lease_variant(tmp_path: Path) -> None:
+    """The stale-DHCP-lease wedge variant (DF86 follow-up) has no 169.254
+    address at all — it must still match on "guest network dead"/"vmnet
+    wedge", not on the link-local alternative."""
+    reason = (
+        "guest network dead (vmnet wedge): stale DHCP lease: guest has "
+        "192.168.65.2 but no host bridge is on that subnet "
+        "(bridge100 is 192.168.139.3/23) — "
+        "restart to recover: yoloai stop embrace && yoloai start embrace"
+    )
+    hits = scan_fingerprints(_make_attempt(tmp_path), extra_text=reason)
+    assert hits, "expected the wedge fingerprint to match the stale-lease variant"
+    assert hits[0].fp.label.startswith("wedged tart vmnet session")
+    assert is_wedge_failure(reason)
 
 
 def test_wedge_fingerprint_precedes_generic_harness_timeout(tmp_path: Path) -> None:
@@ -148,7 +164,7 @@ def test_wedge_fingerprint_precedes_generic_harness_timeout(tmp_path: Path) -> N
 
 def test_wedge_fingerprint_not_the_generic_harness_timeout(tmp_path: Path) -> None:
     reason = (
-        "guest network dead (vmnet wedge): en0 link-local 169.254.93.37 — "
+        "guest network dead (vmnet wedge): guest en0 is link-local 169.254.93.37 — "
         "restart to recover: yoloai stop embrace && yoloai start embrace"
     )
     hits = scan_fingerprints(_make_attempt(tmp_path), extra_text=reason)
@@ -160,7 +176,7 @@ def test_wedge_fingerprint_not_the_generic_harness_timeout(tmp_path: Path) -> No
 
 def test_is_wedge_failure_matches_the_raise_message() -> None:
     reason = (
-        "guest network dead (vmnet wedge): en0 link-local 169.254.93.37 — "
+        "guest network dead (vmnet wedge): guest en0 is link-local 169.254.93.37 — "
         "restart to recover: yoloai stop embrace && yoloai start embrace"
     )
     assert is_wedge_failure(reason)

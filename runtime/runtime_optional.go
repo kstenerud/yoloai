@@ -221,13 +221,15 @@ type NetHealthState int
 const (
 	// NetHealthOK means the VM resolved a working IP address.
 	NetHealthOK NetHealthState = iota
-	// NetHealthWedged means the guest has fallen back to a 169.254.x.x
-	// link-local address — the vmnet session is dead and only a VM restart
-	// recovers it.
+	// NetHealthWedged means the guest network is confirmed dead — either the
+	// guest has fallen back to a 169.254.x.x link-local address, or `tart ip`
+	// returned an address that falls outside every host bridge* subnet (a
+	// stale DHCP lease from a superseded vmnet subnet). Either way the vmnet
+	// session is dead and only a VM restart recovers it.
 	NetHealthWedged
 	// NetHealthUnknown means liveness could not be confirmed either way (the
 	// probe failed, returned nothing, or the guest reported an address that
-	// doesn't match the wedge signature — e.g. still mid-boot/DHCP).
+	// doesn't match either wedge signature — e.g. still mid-boot/DHCP).
 	NetHealthUnknown
 )
 
@@ -236,7 +238,7 @@ type VMNetHealth struct {
 	SandboxName string // yoloai sandbox name (instance prefix stripped)
 	VMName      string // backend-native VM/instance name
 	State       NetHealthState
-	Detail      string // the resolved IP, the link-local address, or why unknown
+	Detail      string // a full human-readable clause: the resolved IP, or why wedged/unknown
 }
 
 // NetLivenessReport is a point-in-time network-liveness probe across every

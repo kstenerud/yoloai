@@ -149,7 +149,7 @@ func TestRenderReclaimableNow_CapsPreview(t *testing.T) {
 func sampleNetLiveness() *yoloai.NetLivenessReport {
 	return &yoloai.NetLivenessReport{
 		VMs: []yoloai.VMNetHealth{
-			{SandboxName: "embrace", VMName: "yoloai-embrace", State: yoloai.NetHealthWedged, Detail: "169.254.93.37"},
+			{SandboxName: "embrace", VMName: "yoloai-embrace", State: yoloai.NetHealthWedged, Detail: "guest en0 is link-local 169.254.93.37"},
 			{SandboxName: "healthy", VMName: "yoloai-healthy", State: yoloai.NetHealthOK, Detail: "192.168.64.12"},
 		},
 	}

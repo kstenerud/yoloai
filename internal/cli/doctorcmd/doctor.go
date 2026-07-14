@@ -417,7 +417,7 @@ func netHealthLabel(vm yoloai.VMNetHealth) string {
 		return fmt.Sprintf("network: ok (%s)", vm.Detail)
 	case yoloai.NetHealthWedged:
 		return fmt.Sprintf(
-			"network: WEDGED (guest en0 is link-local %s) — vmnet session is dead; "+
+			"network: WEDGED (%s) — vmnet session is dead; "+
 				"only a restart recovers it: yoloai stop %s && yoloai start %s "+
 				"(agent session state on disk survives). A wedged VM also breaks "+
 				"networking for NEW tart VMs on this host.",
