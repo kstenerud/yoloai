@@ -11,6 +11,8 @@ Usage:
     sandbox-setup.py tart <shared-dir>       # Tart
 """
 
+from __future__ import annotations
+
 import datetime
 import json
 import os
@@ -21,6 +23,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
+from typing import Any, Callable, TextIO, cast
 
 from setup_helpers import (
     build_agent_launch_command,
@@ -38,10 +41,10 @@ from tmux_io import set_title, tmux, tmux_output
 
 # --- JSONL logger ---
 
-_sandbox_log = None
+_sandbox_log: TextIO | None = None
 
 
-def _init_sandbox_log(yoloai_dir):
+def _init_sandbox_log(yoloai_dir: str) -> None:
     global _sandbox_log
     log_path = os.path.join(yoloai_dir, "logs", "sandbox.jsonl")
     try:
@@ -50,10 +53,10 @@ def _init_sandbox_log(yoloai_dir):
         print(f"[sandbox-setup] warning: cannot open log: {e}", file=sys.stderr)
 
 
-def _log(level, event, msg, **fields):
+def _log(level: str, event: str, msg: str, **fields: Any) -> None:
     now = datetime.datetime.now(datetime.timezone.utc)
     ts = now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{now.microsecond // 1000:03d}Z"
-    entry = {"ts": ts, "level": level, "event": event, "msg": msg}
+    entry: dict[str, Any] = {"ts": ts, "level": level, "event": event, "msg": msg}
     entry.update(fields)
     if _sandbox_log:
         try:
@@ -63,28 +66,28 @@ def _log(level, event, msg, **fields):
             pass
 
 
-def log_info(event, msg, **fields):
+def log_info(event: str, msg: str, **fields: Any) -> None:
     _log("info", event, msg, **fields)
 
 
-def log_debug(event, msg, **fields):
+def log_debug(event: str, msg: str, **fields: Any) -> None:
     if DEBUG:
         _log("debug", event, msg, **fields)
 
 
-def log_error(event, msg, **fields):
+def log_error(event: str, msg: str, **fields: Any) -> None:
     _log("error", event, msg, **fields)
 
 
 # --- Utility functions ---
 
 
-def read_config(path):
+def read_config(path: str) -> dict[str, Any]:
     """Read and return the runtime-config.json as a dict."""
     return read_runtime_config(path)
 
 
-def read_secrets(secrets_dir, socket=None):
+def read_secrets(secrets_dir: str, socket: str | None = None) -> dict[str, str]:
     """Read secret files from a directory into os.environ and tmux environment.
 
     For Docker, entrypoint.py reads secrets and execs into sandbox-setup.py,
@@ -109,7 +112,7 @@ def read_secrets(secrets_dir, socket=None):
     return secrets
 
 
-def read_secrets_from_env(socket=None):
+def read_secrets_from_env(socket: str | None = None) -> dict[str, str]:
     """Build the secrets dict from the env vars named in YOLOAI_SECRET_KEYS.
 
     The values are already in os.environ (delivered via the launched process's
@@ -131,7 +134,7 @@ def read_secrets_from_env(socket=None):
     return secrets
 
 
-def signal_secrets_consumed(yoloai_dir):
+def signal_secrets_consumed(yoloai_dir: str) -> None:
     """Touch a host-visible marker after secrets have been read.
 
     The host (buildAndStart) waits for this marker before removing the
@@ -157,9 +160,9 @@ def signal_secrets_consumed(yoloai_dir):
 AGENT_STATUS_SCHEMA_VERSION = 1
 
 
-def write_status(status_file, status, exit_code=None):
+def write_status(status_file: str, status: str, exit_code: int | None = None) -> None:
     """Write agent-status.json."""
-    data = {
+    data: dict[str, Any] = {
         "schema_version": AGENT_STATUS_SCHEMA_VERSION,
         "status": status,
         "exit_code": exit_code,
@@ -178,7 +181,7 @@ def write_status(status_file, status, exit_code=None):
 from abc import ABC, abstractmethod
 
 
-def _prepend_macos_toolchain_path(leading_dirs=None):
+def _prepend_macos_toolchain_path(leading_dirs: list[str] | None = None) -> None:
     """Prepend the macOS host toolchain dirs to PATH so host-run agents find node
     and Homebrew-installed CLIs. Used by the backends whose agent runs on the host
     (Tart in-VM, Seatbelt on the host). node@22 is keg-only, so /opt/homebrew/bin
@@ -200,7 +203,7 @@ def _prepend_macos_toolchain_path(leading_dirs=None):
         log_debug("path_augment", "prepended macOS toolchain dirs", added=":".join(extras))
 
 
-def _discover_node_bin_dir():
+def _discover_node_bin_dir() -> str | None:
     """Best-effort discovery of the host's node bin dir for host-run agents.
 
     node may live where a non-interactive `make smoketest` shell can't see it —
@@ -240,32 +243,32 @@ class Backend(ABC):
     # receives secrets via the launch env, so there is no staged dir to release.
     writes_consumed_marker = True
 
-    def __init__(self, cfg, yoloai_dir):
+    def __init__(self, cfg: dict[str, Any], yoloai_dir: str) -> None:
         self.cfg = cfg
         self.yoloai_dir = yoloai_dir
 
     @abstractmethod
-    def setup(self):
+    def setup(self) -> None:
         """Run backend-specific setup (mount symlinks, overlays, etc.)."""
         pass
 
     @abstractmethod
-    def get_tmux_socket(self):
+    def get_tmux_socket(self) -> str | None:
         """Return the tmux socket path, or None for default."""
         pass
 
     @abstractmethod
-    def get_working_dir(self):
+    def get_working_dir(self) -> str | None:
         """Return the working directory path, or None if not needed."""
         pass
 
     @abstractmethod
-    def prepare_environment(self):
+    def prepare_environment(self) -> None:
         """Set up environment variables before launching the agent."""
         pass
 
     @abstractmethod
-    def read_secrets(self, socket):
+    def read_secrets(self, socket: str | None) -> dict[str, str]:
         """Read secrets and make them available to the agent.
 
         Returns a dict of {name: value} for all loaded secrets.
@@ -280,7 +283,7 @@ class DockerBackend(Backend):
     # so there is nothing for the host to release — the consumed-marker is moot.
     writes_consumed_marker = False
 
-    def setup(self):
+    def setup(self) -> None:
         """Docker-specific setup: the auto-commit loop for :copy directories."""
         log_info("sandbox.backend_setup", "Docker backend setup", backend="docker")
 
@@ -291,7 +294,7 @@ class DockerBackend(Backend):
         if auto_commit_interval > 0 and copy_dirs:
             log_debug("auto_commit.start", f"starting auto-commit loop (interval={auto_commit_interval}s, dirs={len(copy_dirs)})")
 
-            def _auto_commit():
+            def _auto_commit() -> None:
                 while True:
                     time.sleep(auto_commit_interval)
                     timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -306,19 +309,19 @@ class DockerBackend(Backend):
             t = threading.Thread(target=_auto_commit, daemon=True)
             t.start()
 
-    def get_tmux_socket(self):
+    def get_tmux_socket(self) -> str | None:
         """Docker uses a fixed socket path from config (for gVisor compatibility)."""
         return self.cfg.get("tmux_socket") or None
 
-    def get_working_dir(self):
+    def get_working_dir(self) -> str | None:
         """Docker doesn't need explicit cd - containers start at the right path."""
         return None
 
-    def prepare_environment(self):
+    def prepare_environment(self) -> None:
         """Docker environment is already prepared by entrypoint.py."""
         pass
 
-    def read_secrets(self, socket):
+    def read_secrets(self, socket: str | None) -> dict[str, str]:
         """Read secrets from env vars named in YOLOAI_SECRET_KEYS.
 
         On the Launch path secrets arrive in the process environment (ProcSpec.Env);
@@ -332,7 +335,7 @@ class DockerBackend(Backend):
 class TartBackend(Backend):
     """Backend for Tart macOS VMs with VirtioFS mounts."""
 
-    def setup(self):
+    def setup(self) -> None:
         """Tart-specific setup: create VirtioFS mount symlinks via sudo."""
         log_info("sandbox.backend_setup", "Tart backend setup", backend="tart")
 
@@ -474,8 +477,15 @@ class TartBackend(Backend):
         # Runtimes must be copied locally to /Library/Developer/CoreSimulator/Profiles/Runtimes/
         # Users can copy from /Volumes/My Shared Files/m-Volumes/ if available on host.
 
-        # Add iOS testing note to CLAUDE.md if Xcode is mounted (agent context)
-        if os.path.isdir(xcode_mount):
+        # Add iOS testing note to CLAUDE.md if Xcode is mounted (agent context).
+        # The `xcode_mount and` guard is load-bearing, not defensive: xcode_mount is
+        # None whenever the glob above finds no mounted Xcode, and os.path.isdir(None)
+        # raises TypeError — which main() does not catch, so setup() died and the
+        # sandbox never initialized. Every Tart VM without a hand-mounted Xcode hit it.
+        # It survived because the lifecycle tier that covers this path was gated on an
+        # env var nothing set (see integration_tart_test.go). Found by mypy --strict
+        # the day the gate was turned on (D117).
+        if xcode_mount and os.path.isdir(xcode_mount):
             claude_md = os.path.expanduser("~/.claude/CLAUDE.md")
             os.makedirs(os.path.dirname(claude_md), exist_ok=True)
 
@@ -514,13 +524,13 @@ class TartBackend(Backend):
             except OSError:
                 pass  # Non-fatal if we can't write CLAUDE.md
 
-    def get_tmux_socket(self):
+    def get_tmux_socket(self) -> str | None:
         """Tart uses the uid-based default socket (/tmp/tmux-<uid>/default)."""
         return None
 
-    def get_working_dir(self):
+    def get_working_dir(self) -> str | None:
         """Tart needs explicit cd to the VirtioFS-mounted working directory."""
-        working_dir = self.cfg.get("working_dir", "")
+        working_dir: str = self.cfg.get("working_dir", "")
         if not working_dir:
             return working_dir
 
@@ -555,7 +565,7 @@ class TartBackend(Backend):
         return working_dir
 
     @staticmethod
-    def _baseline_committed(working_dir):
+    def _baseline_committed(working_dir: str) -> bool:
         """True once a git baseline commit exists in working_dir (HEAD resolves)."""
         result = tmux_io.run(
             ["git", "-C", working_dir, "rev-parse", "HEAD"],
@@ -564,10 +574,10 @@ class TartBackend(Backend):
         )
         return result.returncode == 0
 
-    def prepare_environment(self):
+    def prepare_environment(self) -> None:
         """Tart needs the provisioned tool dirs prepended: native Claude Code in
         ~/.local/bin, keg-only node@22, and Homebrew, plus Xcode tools if mounted."""
-        leading = []
+        leading: list[str] = []
 
         # Add host-mounted Xcode tools to PATH and set DEVELOPER_DIR if available
         xcode_base = "/Users/admin/host-xcode/Contents"
@@ -603,7 +613,7 @@ class TartBackend(Backend):
 
         _prepend_macos_toolchain_path(leading)
 
-    def read_secrets(self, socket):
+    def read_secrets(self, socket: str | None) -> dict[str, str]:
         """Read secrets from VirtioFS-mounted secrets directory and pass to tmux."""
         return read_secrets(os.path.join(self.yoloai_dir, "secrets"), socket=socket)
 
@@ -611,7 +621,7 @@ class TartBackend(Backend):
 class SeatbeltBackend(Backend):
     """Backend for macOS Seatbelt sandboxing (lightweight, no VM)."""
 
-    def setup(self):
+    def setup(self) -> None:
         """Seatbelt-specific setup: HOME redirection, CLI tool symlinks, git config."""
         log_info("sandbox.backend_setup", "Seatbelt backend setup", backend="seatbelt")
 
@@ -706,18 +716,18 @@ swift() {
             except OSError as e:
                 log_info("seatbelt.swift_wrapper_error", f"failed to update {rcfile}: {e}", path=rc_path, error=str(e))
 
-    def get_tmux_socket(self):
+    def get_tmux_socket(self) -> str | None:
         """Seatbelt uses a per-sandbox socket in the sandbox directory."""
         return os.path.join(self.yoloai_dir, "tmux", "tmux.sock")
 
-    def get_working_dir(self):
+    def get_working_dir(self) -> str | None:
         """Seatbelt needs explicit cd to the working directory."""
-        working_dir = self.cfg.get("working_dir", "")
+        working_dir: str = self.cfg.get("working_dir", "")
         if working_dir:
             os.chdir(working_dir)
         return working_dir
 
-    def prepare_environment(self):
+    def prepare_environment(self) -> None:
         """Seatbelt environment preparation: host toolchain PATH + Swift PM cache."""
         # The agent runs on the host, so — like Tart — it needs the Homebrew /
         # keg-only-node@22 dirs on PATH; a non-interactive `make smoketest` shell
@@ -744,13 +754,15 @@ swift() {
         log_debug("seatbelt.swiftpm_cache", "redirected Swift PM cache to sandbox",
                   cache_dir=swiftpm_cache_dir, config_dir=swiftpm_config_dir)
 
-    def read_secrets(self, socket):
+    def read_secrets(self, socket: str | None) -> dict[str, str]:
         """Read secrets from sandbox secrets directory and pass to tmux."""
         return read_secrets(os.path.join(self.yoloai_dir, "secrets"), socket=socket)
 
 
 # Backend registry (similar to Go's runtime.Register pattern)
-_backend_registry = {
+# Typed as a constructor Callable (not type[Backend]) so mypy doesn't treat
+# calling backend_class(...) as instantiating the abstract Backend base.
+_backend_registry: dict[str, Callable[[dict[str, Any], str], Backend]] = {
     "docker": DockerBackend,
     "podman": DockerBackend,  # Podman uses Docker backend
     "seatbelt": SeatbeltBackend,
@@ -758,7 +770,7 @@ _backend_registry = {
 }
 
 
-def get_backend(name, cfg, yoloai_dir):
+def get_backend(name: str, cfg: dict[str, Any], yoloai_dir: str) -> Backend:
     """Create a backend instance by name."""
     if name not in _backend_registry:
         raise ValueError(f"Unknown backend: {name} (available: {list(_backend_registry.keys())})")
@@ -768,7 +780,7 @@ def get_backend(name, cfg, yoloai_dir):
 
 # --- Shared setup functions ---
 
-def setup_tmux_session(cfg, yoloai_dir, socket=None):
+def setup_tmux_session(cfg: dict[str, Any], yoloai_dir: str, socket: str | None = None) -> None:
     """Start a tmux session with config based on tmux_conf setting."""
     tmux_conf = cfg.get("tmux_conf", "")
     tmux_conf_file = os.path.join(yoloai_dir, "tmux", "tmux.conf")
@@ -776,7 +788,7 @@ def setup_tmux_session(cfg, yoloai_dir, socket=None):
     host_tmux_conf = os.path.join(home, ".tmux.conf") if home else ""
 
     # Build new-session arguments
-    base_args = []
+    base_args: list[str] = []
     if socket:
         base_args.extend(["-S", socket])
 
@@ -837,7 +849,14 @@ def setup_tmux_session(cfg, yoloai_dir, socket=None):
              alive_after_pipe_pane=bool(_sessions_after_pp.strip()))
 
 
-def launch_agent(cfg, socket=None, working_dir=None, backend_inst=None, secrets=None, yoloai_dir=None):
+def launch_agent(
+    cfg: dict[str, Any],
+    socket: str | None = None,
+    working_dir: str | None = None,
+    backend_inst: Backend | None = None,
+    secrets: dict[str, str] | None = None,
+    yoloai_dir: str | None = None,
+) -> None:
     """Launch the agent command inside the tmux session."""
     agent_command = cfg.get("agent_command", "")
     agent = cfg.get("agent", "")
@@ -924,7 +943,7 @@ def launch_agent(cfg, socket=None, working_dir=None, backend_inst=None, secrets=
              pane_sample=pane.strip()[:400] if pane else "")
 
 
-def launch_vscode_tunnel(cfg, socket=None):
+def launch_vscode_tunnel(cfg: dict[str, Any], socket: str | None = None) -> None:
     """Launch VS Code Remote Tunnel in a background tmux window.
 
     The window is created with -d so focus stays on the agent window.
@@ -965,9 +984,9 @@ def launch_vscode_tunnel(cfg, socket=None):
     log_info("vscode_tunnel.launch", "VS Code tunnel started", tunnel_name=tunnel_name)
 
 
-def monitor_exit(socket=None):
+def monitor_exit(socket: str | None = None) -> None:
     """Daemon thread: poll pane_dead and detach clients when agent exits."""
-    def _monitor():
+    def _monitor() -> None:
         while True:
             output = tmux_output("list-panes", "-t", "main", "-F", "#{pane_dead}:#{pane_dead_status}", socket=socket)
             if ":" in (output or ""):
@@ -996,7 +1015,7 @@ def monitor_exit(socket=None):
     t.start()
 
 
-def wait_for_ready(cfg, socket=None):
+def wait_for_ready(cfg: dict[str, Any], socket: str | None = None) -> None:
     """Wait for agent ready pattern, auto-accept trust/confirmation prompts."""
     ready_pattern = cfg.get("ready_pattern", "")
     startup_delay = cfg.get("startup_delay", 5)
@@ -1050,7 +1069,12 @@ def wait_for_ready(cfg, socket=None):
         prev = curr
 
 
-def deliver_prompt(cfg, yoloai_dir, socket=None, preamble=None):
+def deliver_prompt(
+    cfg: dict[str, Any],
+    yoloai_dir: str,
+    socket: str | None = None,
+    preamble: str | None = None,
+) -> bool:
     """Deliver preamble and/or prompt file to the agent via tmux paste-buffer.
 
     preamble is prepended to the user prompt when provided (e.g. lifecycle
@@ -1115,7 +1139,7 @@ def deliver_prompt(cfg, yoloai_dir, socket=None, preamble=None):
     return has_prompt  # True only when a real user task was submitted
 
 
-def _var_lib_docker_fstype():
+def _var_lib_docker_fstype() -> str:
     """Backing filesystem type of /var/lib/docker ('overlay', 'ext4', 'xfs', …),
     or '' if it can't be determined. `-T` resolves the containing mount so a
     non-mountpoint path reports the rootfs (overlay) rather than nothing."""
@@ -1131,7 +1155,7 @@ def _var_lib_docker_fstype():
     return ""
 
 
-def start_dockerd(log):
+def start_dockerd(log: Callable[[str], None]) -> None:
     """Start the Docker daemon and wait for it to be ready."""
     import shutil as _shutil
     import time as _time
@@ -1163,7 +1187,7 @@ def start_dockerd(log):
     # Don't hard-fail — lifecycle commands will fail with a clear error
 
 
-def run_lifecycle_command(cmd_entry, log):
+def run_lifecycle_command(cmd_entry: dict[str, Any], log: Callable[[str], None]) -> bool:
     """Run one lifecycle command entry (string, array, or object form).
 
     Object form runs all values in parallel; fails if any exit non-zero.
@@ -1175,22 +1199,25 @@ def run_lifecycle_command(cmd_entry, log):
     cmd  = cmd_entry.get("cmd")
 
     if kind == "string":
-        r = tmux_io.run(["sh", "-c", cmd])
+        cmd_str = cast(str, cmd)
+        r = tmux_io.run(["sh", "-c", cmd_str])
         if r.returncode != 0:
             log(f"lifecycle command failed (exit {r.returncode}): {cmd}")
             return False
     elif kind == "array":
-        r = tmux_io.run(cmd)
+        cmd_list = cast("list[str]", cmd)
+        r = tmux_io.run(cmd_list)
         if r.returncode != 0:
             log(f"lifecycle command failed (exit {r.returncode}): {cmd}")
             return False
     elif kind == "object":
-        failures = []
-        def run_one(name, subcmd):
+        cmd_obj = cast("dict[str, str | list[str]]", cmd)
+        failures: list[str] = []
+        def run_one(name: str, subcmd: str | list[str]) -> tuple[str, int]:
             r = tmux_io.run(["sh", "-c", subcmd] if isinstance(subcmd, str) else subcmd)
             return name, r.returncode
         with ThreadPoolExecutor() as pool:
-            futures = {pool.submit(run_one, n, c): n for n, c in cmd.items()}
+            futures = {pool.submit(run_one, n, c): n for n, c in cmd_obj.items()}
             for fut in as_completed(futures):
                 name, rc = fut.result()
                 if rc != 0:
@@ -1201,7 +1228,7 @@ def run_lifecycle_command(cmd_entry, log):
     return True
 
 
-def run_lifecycle_commands(cfg, yoloai_dir, log):
+def run_lifecycle_commands(cfg: dict[str, Any], yoloai_dir: str, log: Callable[[str], None]) -> bool:
     """Run lifecycle commands from the runtime config.
 
     On-create commands run once (guarded by marker file).
@@ -1238,7 +1265,13 @@ def run_lifecycle_commands(cfg, yoloai_dir, log):
     return True
 
 
-def run_lifecycle_background(cfg, yoloai_dir, socket, log, pane_ready_event):
+def run_lifecycle_background(
+    cfg: dict[str, Any],
+    yoloai_dir: str,
+    socket: str | None,
+    log: Callable[[str], None],
+    pane_ready_event: threading.Event,
+) -> None:
     """Run lifecycle commands in a background thread, then notify the agent.
 
     Called from a daemon thread so it never blocks the main setup flow.
@@ -1277,7 +1310,7 @@ def run_lifecycle_background(cfg, yoloai_dir, socket, log, pane_ready_event):
         os.unlink(tmpname)
 
 
-def launch_monitor(cfg_path, status_file, yoloai_dir, socket=None):
+def launch_monitor(cfg_path: str, status_file: str, yoloai_dir: str, socket: str | None = None) -> None:
     """Launch the Python status monitor as a background process."""
     monitor_script = os.path.join(yoloai_dir, "bin", "status-monitor.py")
     cmd = ["python3", monitor_script, cfg_path, status_file]
@@ -1291,10 +1324,10 @@ def launch_monitor(cfg_path, status_file, yoloai_dir, socket=None):
 
 # --- Main ---
 
-DEBUG = False
+DEBUG: bool = False
 
 
-def main():
+def main() -> None:
     global DEBUG
 
     if len(sys.argv) < 2:
@@ -1370,7 +1403,7 @@ def main():
     # pane_ready gates the notification on completion of the main thread's
     # own pane writes (launch_agent + deliver_prompt), so the banner cannot
     # race into the agent's startup line or its initial prompt.
-    def _log_lifecycle(msg):
+    def _log_lifecycle(msg: str) -> None:
         log_info("lifecycle.event", msg)
     preamble = lifecycle_preamble(cfg, yoloai_dir) or None
     pane_ready = threading.Event()

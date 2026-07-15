@@ -2,7 +2,8 @@
 
 // ABOUTME: Integration tests for the Tart VM backend — full lifecycle, aux dirs,
 // ABOUTME: git corruption resistance, and VM-local storage verification.
-// ABOUTME: Guarded by YOLOAI_TEST_TART=1 because they require Apple Silicon + tart.
+// ABOUTME: Guarded by YOLOAI_TEST_TART_VM=1 (the same gate as the tart conformance
+// ABOUTME: suite) because they require Apple Silicon + tart and clone a multi-GB VM.
 
 package orchestrator_test
 
@@ -32,20 +33,25 @@ import (
 
 // tartIntegrationSetup creates a Tart-based test environment.
 // Returns nil if Tart is not available (caller should skip test).
-// These tests are currently experimental and disabled by default.
-// Set YOLOAI_TEST_TART=1 to enable them.
+// Set YOLOAI_TEST_TART_VM=1 to enable them; `make releasetest` sets it.
 func tartIntegrationSetup(t *testing.T) (*orchestrator.Engine, context.Context) {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping Tart integration test in short mode")
 	}
 
-	// Gated behind YOLOAI_TEST_TART=1 because each test clones+boots a multi-GB
+	// Gated behind YOLOAI_TEST_TART_VM=1 — the SAME variable as the tart conformance
+	// suite in runtime/tart. It used to be YOLOAI_TEST_TART (no _VM), which nothing set:
+	// releasetest exported only YOLOAI_TEST_TART_VM, so this whole lifecycle tier silently
+	// self-skipped on the one platform that can run it, while the identically-named-looking
+	// conformance suite ran and made the tier look covered. D112's own plan quoted this
+	// line in its keep-list of scope gates and never noticed the two names differed.
+	// Because each test clones+boots a multi-GB
 	// macOS VM. (The old "workdir symlink fails for temp dirs" note was DF27 —
 	// verified stale; the :copy path works. Runtime-level coverage now lives in
 	// runtime/tart TestTartConformance.)
-	if os.Getenv("YOLOAI_TEST_TART") != "1" {
-		t.Skip("skipping Tart integration test (set YOLOAI_TEST_TART=1 to enable)")
+	if os.Getenv("YOLOAI_TEST_TART_VM") != "1" {
+		t.Skip("skipping Tart integration test (set YOLOAI_TEST_TART_VM=1 to enable)")
 	}
 
 	ctx := context.Background()
