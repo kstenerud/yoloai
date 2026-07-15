@@ -37,7 +37,9 @@ come back here to route.
 - **`procedures/`** — how we work: PRs, issues.
 - **`backend-idiosyncrasies.md`** — backend behaviour that contradicts its own documentation.
   Has a symptom index. Add an entry when you find a new one.
-- **`archive/`** — completed or superseded work, kept for history. Not a live reference.
+- **`archive/`** — completed or abandoned work, frozen. Kept for archaeology ("did we consider
+  X?", "why was X decided that way?"), never as a live reference: treat its contents as aged and
+  possibly rotted, and don't sweep or conform them. It is the *only* archive.
 
 ## Doc conventions
 

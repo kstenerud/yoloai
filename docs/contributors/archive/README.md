@@ -1,13 +1,38 @@
-<!-- ABOUTME: Index of archived yoloAI dev docs — completed/superseded plans, research, -->
-<!-- ABOUTME: investigations, and design specs kept for history, not as live references. -->
+> **ABOUTME:** Index of the archive: what belongs here, what its contents are worth, and why
+> nothing in it is maintained. The only live document under `archive/` — everything it indexes
+> is frozen.
 
 # Archive
 
-Historical documents kept for the record. Nothing here is a live reference: these are
-**completed**, **superseded**, or **point-in-time** docs. Live docs may still cite them as
-history (links rewritten to point here); new work should not depend on them.
+**This is the only archive.** Everything retired lives here, under `docs/contributors/archive/`.
+There is no second archive tree; there was one briefly (`design/archive/`, holding a single file)
+and consolidating it away is why this paragraph exists.
 
-This is a tentative first cut — the broader greenfield doc reorg may move more in later.
+## What the contents are worth
+
+**Treat everything here as aged and possibly rotted.** Not wrong on purpose, but not checked
+either: these documents were true when written, nobody has re-read them since, and the code they
+describe has moved. Nothing here is a live reference. Do not resolve a question by citing an
+archived doc — find the current answer and cite that.
+
+What the archive *is* good for is archaeology, which is a real need and the reason to keep it:
+
+- **Did we consider X?** — usually yes, and the plan that considered it is here.
+- **Did we ever do X?** — the plan says what shipped and what was dropped.
+- **Why was X decided that way?** — the reasoning, as it stood at the time. Cross-check the
+  decision log (`../decisions/`) for whether it still holds.
+
+## Frozen means frozen
+
+Archived files are **not swept and not conformed**. Convention sweeps, ABOUTME headers, renames
+and citation fixes stop at this boundary (`../standards/markdown.md` → Exempt). Two reasons: a
+frozen doc reformatted to today's conventions implies someone vouched for its contents, which is
+exactly the opposite of the warning above; and a sweep puts a fresh commit on prose no one re-read,
+which makes aged material look current.
+
+A file moves here **whole**, when its work is complete or abandoned, and stops changing. If an
+archived doc turns out to matter again, the answer is a new live document that supersedes it, not
+an edit here. This README is the exception — it is the index, so it stays current.
 
 ## Layout
 
@@ -19,28 +44,19 @@ This is a tentative first cut — the broader greenfield doc reorg may move more
 | `design/` | Superseded design specs. |
 | `old/` | The original pre-archive `old/` pile (initial PLAN + phase notes + early flag/devcontainer designs). |
 
-## Contents
+## Finding things
 
-### plans/
-- The Layer-1 public-API epic: `f1-f3-public-surface`, `f2-f1f3-implementation`, `f2-subhandle-mapping`, `layer1-public-api`. (Live successor: `../plans/layer1-completion.md`.)
-- The layering / separation-of-concerns refactor: `layering-refactor`, `soc-refactor`.
-- Shipped feature plans: `config-revamp`, `capability-registry`, `mcp-server`, `bugreport`, `podman-backend`.
-- The architecture-remediation program: `architecture-remediation` (its one release-gated remnant, W1b, lives in `../plans/release-migration.md`).
-- Other completed: `cli-critique-deferred`, `critique-followup` (the 31-finding critique tracker), `vm-isolation-debug`, `smoke-test-redesign`, `smoke-test-v2` (the base/full smoke-tier design; superseded by D112's strict `smoketest`/`smoketest-quick`).
-- Shipped, drained from the live `../design/plans/` dir: `system-repair-cleanup` (prune/doctor surface), `tagging` (sandbox/workspace tags), `exit-codes` (exit-code taxonomy), `environment-archetypes` (the `archetype/` package), `apple-runtime-caching`, `containerd-runtime` (Phases 0–3 incl. devmapper).
-- `migration-gate` — status-driven startup gate + explicit `yoloai system migrate` (D61; builds on D60's data-dir bifurcation).
-- `crash-safe-migration` — crash-safe `system migrate` framework design (D110): exclusive lock, WAL, per-sandbox atomic commit, stamp-last, OverlayFlatten v3→v4 migrator.
-- `crash-safe-migration-audit` — post-build audit of the crash-safe migration framework (D110); A1–A18 findings, H1 recovery-ordering remediation.
+There is no index of files here, deliberately. The one that used to sit in this README drifted
+out of date four times without anyone noticing, and a partial index of an archive is worse than
+none: ask "did we ever consider a microvm backend?", grep a list that has silently lost that
+entry, and you get a confident **no** when the plan is sitting in `plans/`. The directory itself
+cannot be incomplete.
 
-### research/
-- Layering-epic spikes: `layering-cli-surface`, `layering-comparators`, `layering-leak-audit`, `layering-open-questions`, `mcp-sdk-evaluation`.
-
-### investigations/
-- `architecture-audit-2026-05` (the audit the remediation plan addressed), `macos-disk-reporting-checklist`, `tart-regression`, `ios-testing-investigation`, `ios-testing-status`.
-
-### design/
-- `layering`, `layering-greenfield` (superseded layering design specs).
-- Shipped design specs: `ios-testing` (self-marked "Implemented (Hybrid Approach)"), `apple-runtime-caching`, `containerd-runtime`.
-
-### old/
-- `PLAN`, `devcontainer`, `json-flag`, and `phases/` (PHASE_0 … PHASE_8).
+- **What's here:** `ls` the subdir. Filenames are lowercase kebab-case and name their subject.
+- **What it says:** open it. Most files here have no ABOUTME header, since frozen files are
+  exempt from that convention; the ones that do carried it in from before they were archived.
+  Either way the opening paragraph is the summary.
+- **When and why it was archived:** `git log --diff-filter=A -- <path>` for the commit that moved
+  it, whose message says what superseded it.
+- **Whether the reasoning still holds:** it may not. Check `../decisions/` — that log is
+  append-only and is the authority on what was decided and what superseded it.

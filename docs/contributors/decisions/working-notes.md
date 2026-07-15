@@ -978,7 +978,7 @@ Only then the **mechanical move**: `runtime` first/with `store`, repoint the fen
 
 ## D104 — retire the hand-rolled QEMU `-M microvm` backend; libkrun is the tech if a light VM tier is ever added (E1)
 
-**Date:** 2026-06-28. **Status:** Active. **Supersedes** the E1 microvm plan ([archived](../design/archive/plans/microvm-backend.md)); parks branch `microvm-backend` (unmerged; spike preserved at `73cfe338`).
+**Date:** 2026-06-28. **Status:** Active. **Supersedes** the E1 microvm plan ([archived](../archive/plans/microvm-backend.md)); parks branch `microvm-backend` (unmerged; spike preserved at `73cfe338`).
 
 **Context.** E1 (post-merge-roadmap) was a greenfield Linux/KVM `runtime/microvm/` backend booting OCI-profile images as QEMU `-M microvm` VMs directly — the pitch was VM isolation *without* Kata's containerd/CNI/nerdctl stack. The spike and a full agent-launch increment were built (lifecycle, QGA client, OCI→ext4 conversion, baked systemd launcher, `MicrovmBackend` in sandbox-setup.py, virtiofs workdir+state shares). Real-boot validation then exposed a structural problem, and a four-thread sourced research pass reframed the whole question.
 

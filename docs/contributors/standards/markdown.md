@@ -1,7 +1,6 @@
-ABOUTME: Markdown prose conventions for yoloAI docs: ABOUTME header for source-
-ABOUTME: file context, ATX headings, sentence per line is NOT mandatory, tables
-ABOUTME: pipe-aligned when manageable, relative cross-references, fenced code
-ABOUTME: blocks with language tag, no auto-formatting in docs/ (preserves intent).
+> **ABOUTME:** Prose conventions for yoloAI's Markdown: what an ABOUTME header is and where it
+> goes, heading and table style, cross-references, and why docs/ is never auto-formatted. The
+> authority for how a doc in this repo should read.
 
 # Markdown Standard
 
@@ -11,14 +10,29 @@ See also: `../principles/general-principles.md §11` (default to public — docs
 
 ## ABOUTME header (source files)
 
-Every yoloAI source file — Go, Python, shell, or Markdown under `docs/contributors/` — opens with an ABOUTME comment block saying what the file is for and why it exists:
+Every yoloAI source file — Go, Python, shell, or Markdown under `docs/contributors/` — opens with an ABOUTME block saying what the file is for and why it exists. It goes at the very top: before package declarations, module docstrings, or the document title.
 
-```markdown
-ABOUTME: One-line description of what this file is for.
-ABOUTME: Continue here if needed.
+**In Go, Python and shell**, every line carries the language's comment marker and repeats the prefix:
+
+```go
+// ABOUTME: One-line description of what this file is for.
+// ABOUTME: Continue here if needed.
 ```
 
-In Go and Python the lines are prefixed by the language's comment marker (`// ABOUTME:` / `# ABOUTME:`). The lines come at the very top of the file, before package declarations / module docstrings. A package godoc or module docstring does not substitute — see below.
+**In Markdown**, the block is a blockquote and the prefix appears once:
+
+```markdown
+> **ABOUTME:** One-line description of what this file is for.
+> Continue here if needed.
+
+# Document Title
+```
+
+The two forms differ because the constraints do, and the difference is not cosmetic. A comment marker is invisible when rendered, so repeating `ABOUTME:` on every line costs nothing and keeps each line independently greppable. Markdown has no comment syntax and it *joins* consecutive lines into a single paragraph — so the same per-line prefix renders as a run-on with `ABOUTME:` repeated mid-sentence. The blockquote marks the block once, lets the prose flow, and renders as a set-apart callout in every renderer rather than only on GitHub.
+
+The header stays **visible** on purpose. It is written for humans as much as for agents, and it is the answer to "what is this file for?" that a reader wants before the title, not a machine annotation to be hidden. An HTML comment (`<!-- ABOUTME: ... -->`) renders as nothing and is therefore **not** the form, despite having been half of a 38/38 split in the tree before this rule existed.
+
+A package godoc or module docstring does not substitute — see below.
 
 **Each line wraps at 100 columns**, comment marker included. This is enforced by `TestRepoHygiene_ABOUTMEHeaders_AllTrackedFilesCompliant`, so it cannot drift. The limit was 80 until D117 and was stated only inside the example above rather than as a rule — 351 lines had drifted past it, which is what an unenforced number in an example block gets you. 100 is what the code already does: exactly four lines exceeded it, and they were reflowed rather than grandfathered.
 
@@ -27,27 +41,26 @@ Say something true and specific. "Tests for foo.go" restates the filename and is
 **Say what the file is for. Don't inventory what it contains** (D121; DEV §1's DRY corollary). An ABOUTME that copies facts the file already states is a second authoritative location for them, and nothing keeps the two in step:
 
 - **Never state a count.** `general-principles.md` opened with "Thirteen principles" while sixteen `## §n` headings sat below it, and `repo_hygiene_test.go` claimed "three standing claims" with four gates defined. A count carries no information the artifact doesn't, and the next addition makes it false.
-- **Avoid exhaustive lists.** They carry names, which is worth something, but they imply completeness and the next addition falsifies them in silence. Three of the five principles docs currently name fewer sections than they have.
-- **Characterize instead.** Say the file's purpose and role; leave the contents to the headings, which are the authoritative location and are greppable. The two ABOUTMEs in `principles/` that cannot drift — `architecture-principles.md` and `README.md` — are exactly the two that describe rather than enumerate.
+- **Avoid exhaustive lists.** They carry names, which is worth something, but they imply completeness and the next addition falsifies them in silence. Several of the principles docs name fewer sections than they have. This bullet used to say "three of the five" — there are seven, so the example arguing against counts had itself rotted.
+- **Characterize instead.** Say the file's purpose and role; leave the contents to the headings, which are the authoritative location and are greppable. The ABOUTMEs in `principles/` that cannot drift are exactly the ones that describe rather than enumerate.
 
 The test: if adding a section to the file would oblige you to edit its ABOUTME, the ABOUTME is a copy and will be wrong the first time someone forgets. The 100-column rule above is the counter-example that proves the shape of the fix — it is a number that survives *because* a gate enforces it. Ungated numbers rot.
 
 ### Required
 
 - All Go files (`*.go`, including `*_test.go`), wherever they live. Test files are not exempt: the doc used to exempt them against the evidence of a codebase that already mostly carried the header, and D117 closed the gap. This is enforced by `TestRepoHygiene_ABOUTMEHeaders_AllTrackedFilesCompliant`, so compliance is total by construction and no count belongs here — the previous "171 of 257 (~two-thirds)" was falsified the moment the remaining files were filled in, and stood as its own argument for D121.
-- All Python files in `runtime/monitor/`, including test files. All four files under `runtime/monitor/tests/test_*.py` already carry ABOUTME headers despite the (former) exemption below.
+- All Python files in `runtime/monitor/`, including test files. The test files under `runtime/monitor/tests/` already carried ABOUTME headers despite the (former) exemption below.
 - All shell scripts under `scripts/`.
 - All Markdown source documents under `docs/contributors/` (principles, standards, research, plans, working-notes, ARCHITECTURE, etc.).
 
-A package godoc or module docstring is **not** a substitute — the two coexist, ABOUTME first. 29 Go files already carry both, and `yoerrors/errors.go` and the two `runtime/monitor/*.py` scripts that once relied on their docstring now do too. A substitution carve-out was briefly written down and removed (D117): it contradicted the code, and "the godoc must actually describe the purpose" is a judgement no gate can make, so it would have meant an allowlist — which is grandfathering by another name.
+A package godoc or module docstring is **not** a substitute — the two coexist, ABOUTME first. Many Go files carry both, and `yoerrors/errors.go` and the `runtime/monitor/*.py` scripts that once relied on their docstring now do too. A substitution carve-out was briefly written down and removed (D117): it contradicted the code, and "the godoc must actually describe the purpose" is a judgement no gate can make, so it would have meant an allowlist — which is grandfathering by another name.
 
 ### Exempt
 
 - **Shell scripts whose purpose is part of the project's runtime contract** rather than a standalone utility: `.claude/hooks/*.sh` (Claude Code hook signaling), `runtime/docker/resources/entrypoint.sh` (container entrypoint trampoline). Their role is documented in adjacent code or design docs.
 - **User-facing Markdown** at the top level of `docs/` (the GUIDE, BREAKING-CHANGES, ROADMAP, README). These are content destinations, not source context.
+- **The contents of `docs/contributors/archive/`.** The archive is frozen: it is kept for archaeology, is not maintained, and its reliability is to be treated as aged and possibly rotted. Conforming a frozen document to a current convention implies someone vouched for it, which is the opposite of what the archive says about itself — and it would put a fresh timestamp on prose nobody re-read. Sweeps stop at the boundary. Its own `README.md` is the exception: an index is live navigation, so it carries a header and stays current. See `../archive/README.md`.
 - **Files generated by tooling** (`vendor/`, build output). Not committed in this project, but if such files appear they don't need headers.
-
-Bulk-adding headers to the files newly classed as Required above is a separate, tracked task — this section documents the target convention, not a completed migration.
 
 ### When in doubt
 
