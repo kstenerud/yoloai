@@ -28,12 +28,19 @@ var networkMagics = map[int64]string{
 	0x65735546: "FUSE",
 }
 
-// isNetworkFilesystemMagic reports whether magic is a known network or
-// FUSE filesystem magic number. This is a pure classifier — no I/O, no
-// side effects — making it the primary unit-test target for FS detection.
-func isNetworkFilesystemMagic(magic int64) bool {
-	_, ok := networkMagics[magic]
-	return ok
+// networkMagicName maps a statfs(2) f_type magic to its short name, reporting
+// false for anything not in the table. It is the pure half of the probe — no
+// I/O, no side effects — which is what makes it unit-testable against a literal
+// magic number, and networkFilesystemName is its only caller.
+//
+// The split earns its keep only because production goes through it. It
+// previously sat beside a networkFilesystemName that repeated the map lookup
+// inline, so the unit tests exercised a parallel copy of the classifier rather
+// than the code that runs — a divergence nothing would have caught, since both
+// copies were right (DF108).
+func networkMagicName(magic int64) (string, bool) {
+	name, ok := networkMagics[magic]
+	return name, ok
 }
 
 // networkFilesystemName calls statfs(2) on path and returns a short
@@ -46,6 +53,5 @@ func networkFilesystemName(path string) (string, bool) {
 	if err := unix.Statfs(path, &st); err != nil {
 		return "", false
 	}
-	name, ok := networkMagics[st.Type]
-	return name, ok
+	return networkMagicName(st.Type)
 }

@@ -38,8 +38,8 @@ import (
 // Sentinel errors for the create pipeline.
 var (
 	// ErrSandboxExists is returned when a sandbox with the given name already
-	// exists and Replace is false. Aliased in the façade (package sandbox) so
-	// the public sandbox.ErrSandboxExists symbol is unchanged.
+	// exists and Replace is false. Aliased in the orchestrator façade, which the
+	// root yoloai package re-exports, so the public symbol is unchanged.
 	ErrSandboxExists = errors.New("sandbox already exists")
 
 	// ErrMissingAPIKey is returned when the selected agent requires an API key

@@ -1426,6 +1426,31 @@ What it claimed, against what the code does:
 **Consequences.** The tier gets terser and less satisfying to read on its own; that is the trade. `docProseNouns` is the gate's one concession — a short, explicit list of proper nouns that appear in ASCII diagrams (`macOS`, `yoloAI`) and that no Go tree will declare. If it ever accumulates entries that look like Go identifiers, the concession has become a loophole. Two classes stay uncaught by construction: a name that still exists but has **moved package** (a path question, which the path half covers only where the doc names a path), and a chain whose **order** silently changed. The second is precisely what (1) removes from the docs' surface area rather than trying to check.
 
 **Rejected.** *Fix the docs and skip the gate* — the tier had been swept the same week and was still false; a sweep is a snapshot, and the next one is three months out. *Gate the prose too* (assert described orderings against the call graph) — that is a static analyser, not a hygiene test, and the honest alternative is not writing the orderings down twice.
+
+## D125 — no speculative API: a function with no production caller is deleted, and "it's the unit-test target" is a defect, not a justification
+
+**Date:** 2026-07-15. **Status:** Active — scopes GEN §1 (YAGNI applied) to the API surface, and applies D121's "don't state what nothing enforces" to code rather than prose.
+
+**Context.** The D124 sweep found two functions in the tree kept alive only by their own tests (DF105). `envsetup.CreateSecretsDir` had eight callers, every one in `envsetup_test.go`. `copyflow.loadAllDiffContexts` had three, all in `diff_test.go`. Both read as live API — exported, documented, tested, green.
+
+The maintainer's rule, stated on being shown them: *None of the API should be speculative. Either it's used, or it should be removed unless it has a good justification.*
+
+Two things make this worth an entry rather than a cleanup.
+
+**First, the justification in the code was a mirage, and a plausible one.** `CreateSecretsDir`'s doc comment offered one: a non-empty `stagingRoot` "is honored as-is so an embedder can stage credentials on an isolated path". That sentence is true about the *parameter* and irrelevant about the *function* — it lives under `internal/`, nothing re-exports it, and no embedder can call it. The affordance it describes is real and reachable through `StageSecretEnv`, which is the live path. A justification that survives only because nobody checked whether it still applies is the same failure as a stale doc, in a place we do not usually look for one.
+
+**Second, the linter cannot see this class, which is why it accumulated.** `unused` counts a test caller as a caller. A function whose only user is its own test is invisible to the normal lint *forever*, and the test suite is what makes it invisible — the coverage is the camouflage. `unused --tests=false` surfaces the class; on this tree it found three, of which one was real (DF108) and two were GOOS artifacts (`runtime/seatbelt/` code whose production caller lives in a `_darwin.go` file excluded on Linux).
+
+**Decision.**
+
+1. **A function with no production caller is deleted.** The bar for keeping one is a doc comment saying why it exists without a caller — and the justification must be checked against the code, not read. `internal/` plus "for an embedder" does not survive that check.
+2. **"It is the pure/testable seam" is not a justification — it is the defect.** DF108 is the worked example: `isNetworkFilesystemMagic` was a pure classifier whose comment called it "the primary unit-test target", while the shipping probe repeated the same map lookup inline. The tests asserted against a sibling of the production logic. Both copies were correct, which is exactly why nothing would have caught them diverging. The fix is never to keep the seam for the test's sake; it is to make production call the thing under test.
+3. **When the subject goes, retarget the test — do not delete it with the code.** `CreateSecretsDir`'s tests were the *only* entry point into `ResolveSecretEnv`/`StageSecretEnv`; deleting them alongside the wrapper would have silently removed every test from the credential-staging path. They now call the pair directly. Where a test genuinely needs the deleted convenience, the convenience belongs in the test — production kept the halves apart deliberately, so the broker can rewrite the map between them.
+4. **Not gated.** `unused --tests=false` is the right probe but needs per-GOOS runs to avoid the `_darwin.go` false positives, alongside the existing `lint-cross`/`lint-darwin` split. Recorded here rather than left implicit: this class is currently review-caught, and the review that catches it is the one that thinks to run the probe.
+
+**Consequences.** Deleting a tested function feels like losing coverage and is usually the opposite: DF105's tests got *stronger* on retargeting (they now exercise the code that runs), and DF108's gained an assertion it never had (the returned name, not just a bool). The risk this accepts is deleting something a near-future change wanted. That is the YAGNI trade §1 already makes, and git remembers.
+
+**Rejected.** *Keep it, it might be useful* — the position §1 exists to refuse; an unused function is not an asset, it is an unverified claim that a shape is right, with tests lending it false credibility. *Mark it `//nolint` and move on* — this was never lint-visible in the first place, so there is nothing to silence; that is the point.
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.

@@ -1,5 +1,5 @@
-// ABOUTME: Façade aliases re-exporting notice types from lifecycle/ so
-// ABOUTME: existing callers in package sandbox continue to compile unmodified.
+// ABOUTME: Façade aliases re-exporting notice types from lifecycle/ so the
+// ABOUTME: leaf carve stays invisible to package orchestrator's callers.
 package orchestrator
 
 import "github.com/kstenerud/yoloai/internal/orchestrator/lifecycle"

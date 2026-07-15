@@ -31,26 +31,21 @@ func ResolveSecretEnv(spec EnvSpec, configEnv map[string]string, hostEnv config.
 	return out
 }
 
-// CreateSecretsDir creates a temp directory with one file per env var / API key.
-// configEnv (the ${VAR}-expanded profile env) is written first; the agent's API-key
-// and auth-hint values are then resolved from hostEnv (the caller-supplied host
-// environment snapshot) and overwrite on conflict (take precedence). hostEnv is the
-// sole credential source — the library never reads os.Environ (§12). The directory
-// is created under stagingRoot; "" uses hostEnv.MkdirTemp (DataDir/tmp), keeping
-// yoloai's footprint localized; a non-empty stagingRoot (e.g. a per-principal tmpfs)
-// is honored as-is so an embedder can stage credentials on an isolated path.
-// Returns empty string if nothing was written.
-func CreateSecretsDir(spec EnvSpec, configEnv map[string]string, hostEnv config.Layout, stagingRoot string) (string, error) {
-	return StageSecretEnv(ResolveSecretEnv(spec, configEnv, hostEnv), hostEnv, stagingRoot)
-}
-
 // StageSecretEnv writes a resolved secret map to a fresh owner-only temp dir as
 // one file per entry (filename = env var name, contents = value), returning the
-// dir path for a /run/secrets bind mount ("" when the map is empty). This is the
-// staging half of CreateSecretsDir, separated so the broker can rewrite the map
-// first (drop the real credential, add base_url + a placeholder) and the
-// already-brokered map is what gets staged — the legacy-path analogue of the
-// agent-free env delivery (D105/D106).
+// dir path for a /run/secrets bind mount ("" when the map is empty).
+//
+// This is the staging half of the pair: callers resolve with ResolveSecretEnv
+// first, so the broker can rewrite the map in between (drop the real credential,
+// add base_url + a placeholder) and the already-brokered map is what gets staged
+// — the legacy-path analogue of the agent-free env delivery (D105/D106). The two
+// halves are never recombined behind one call; the broker step is the reason
+// they are separate.
+//
+// The directory is created under stagingRoot; "" uses hostEnv.MkdirTemp
+// (DataDir/tmp), keeping yoloai's footprint localized. A non-empty stagingRoot
+// (e.g. a per-principal tmpfs) is honored as-is — the launch path passes
+// Layout.SecretsStagingDir (D63).
 func StageSecretEnv(m map[string]string, hostEnv config.Layout, stagingRoot string) (string, error) {
 	if len(m) == 0 {
 		return "", nil

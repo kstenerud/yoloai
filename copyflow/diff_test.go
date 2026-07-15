@@ -1,5 +1,5 @@
 // ABOUTME: Unit tests for diff generation across :copy and :rw sandbox modes.
-// ABOUTME: Tests loadDiffContext, loadAllDiffContexts, GenerateDiff, and related helpers.
+// ABOUTME: Tests loadDiffContext, GenerateDiff, and related helpers.
 
 package copyflow
 
@@ -518,102 +518,6 @@ func TestLoadDiffContext_DirSelector(t *testing.T) {
 	_, _, _, err = loadDiffContext(testLayout(tmpDir), name, "/tmp/nope")
 	assert.Error(t, err)
 }
-
-// --- loadAllDiffContexts tests ---
-
-func TestLoadAllDiffContexts_SingleCopyWorkdir(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
-
-	name := "all-copy"
-	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
-	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
-
-	meta := &store.Environment{
-		Name:      name,
-		CreatedAt: time.Now(),
-		Dirs: []store.DirEnvironment{{
-			HostPath:    "/tmp/project",
-			MountPath:   "/tmp/project",
-			Mode:        "copy",
-			BaselineSHA: "sha1",
-		}},
-	}
-	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
-
-	contexts, err := loadAllDiffContexts(testLayout(tmpDir), name, "")
-	require.NoError(t, err)
-	require.Len(t, contexts, 1)
-	assert.Equal(t, store.DirModeCopy, contexts[0].Mode)
-	assert.Equal(t, "/tmp/project", contexts[0].HostPath)
-	assert.Equal(t, "sha1", contexts[0].BaselineSHA)
-}
-
-// Q-U (2026-05-25): the workdir is the only diffable directory.
-// loadAllDiffContexts ignores meta.Directories entirely — aux dirs
-// are aux mounts, not diff sources. The test regress-guards both
-// "aux entries are not in the result" and "the existing meta on disk
-// is tolerated when aux entries are present" (a real on-disk state
-// for sandboxes created before Q-U landed).
-func TestLoadAllDiffContexts_WorkdirOnly_IgnoresAuxEntries(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
-
-	name := "workdir-only"
-	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
-	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
-
-	meta := &store.Environment{
-		Name:      name,
-		CreatedAt: time.Now(),
-		Dirs: []store.DirEnvironment{{
-			HostPath:    "/tmp/project",
-			Mode:        "copy",
-			BaselineSHA: "sha-main",
-		}},
-		LegacyDirectories: []store.DirEnvironment{
-			// Pre-Q-U sandboxes may have these on disk. We must ignore
-			// them rather than fault.
-			{HostPath: "/tmp/aux-rw", Mode: "rw"},
-			{HostPath: "/tmp/aux-ro", Mode: "ro"},
-		},
-	}
-	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
-
-	contexts, err := loadAllDiffContexts(testLayout(tmpDir), name, "")
-	require.NoError(t, err)
-	require.Len(t, contexts, 1)
-	assert.Equal(t, store.DirModeCopy, contexts[0].Mode)
-	assert.Equal(t, "/tmp/project", contexts[0].HostPath)
-	assert.Equal(t, "sha-main", contexts[0].BaselineSHA)
-}
-
-func TestLoadAllDiffContexts_NoAuxDirs(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
-
-	name := "all-noaux"
-	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
-	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
-
-	meta := &store.Environment{
-		Name:      name,
-		CreatedAt: time.Now(),
-		Dirs: []store.DirEnvironment{{
-			HostPath:    "/tmp/project",
-			Mode:        "copy",
-			BaselineSHA: "sha-only",
-		}},
-	}
-	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
-
-	contexts, err := loadAllDiffContexts(testLayout(tmpDir), name, "")
-	require.NoError(t, err)
-	require.Len(t, contexts, 1)
-	assert.Equal(t, "/tmp/project", contexts[0].HostPath)
-}
-
-// ─── parseNumstat ────────────────────────────────────────────────────────────
 
 func TestParseNumstat_Normal(t *testing.T) {
 	input := "1\t2\tfoo.go\n3\t0\tbar.go\n"

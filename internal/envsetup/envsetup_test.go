@@ -199,13 +199,30 @@ func TestDescribeSeedAuthFiles_NoAuthFiles(t *testing.T) {
 	assert.Empty(t, DescribeSeedAuthFiles(agentSpec(agentDef)))
 }
 
-// CreateSecretsDir tests
+// ResolveSecretEnv → StageSecretEnv tests
+//
+// These cover the credential-staging pair the launch path actually calls
+// (launch.go: resolve, let the broker rewrite the map, then stage). They used to
+// run through a CreateSecretsDir wrapper that combined the two; it was deleted
+// as unused, and combining them is exactly what production must not do — the
+// broker step goes in between. So the convenience lives here, in the test, where
+// no broker is involved.
+//
+// Deleting these along with the wrapper would have been a silent loss: it was
+// the only test entry point into either half of a security-sensitive path.
 
-func TestCreateSecretsDir_WithKey(t *testing.T) {
+// resolveAndStage runs the pair back-to-back, mirroring the launch path minus
+// the broker interposition.
+func resolveAndStage(t *testing.T, spec EnvSpec, configEnv map[string]string, hostEnv config.Layout, stagingRoot string) (string, error) {
+	t.Helper()
+	return StageSecretEnv(ResolveSecretEnv(spec, configEnv, hostEnv), hostEnv, stagingRoot)
+}
+
+func TestResolveAndStageSecretEnv_WithKey(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
 	hostEnv := config.Layout{}.WithEnv(map[string]string{"ANTHROPIC_API_KEY": "sk-test-secret"})
 
-	dir, err := CreateSecretsDir(agentSpec(agentDef), nil, hostEnv, "")
+	dir, err := resolveAndStage(t, agentSpec(agentDef), nil, hostEnv, "")
 	require.NoError(t, err)
 	require.NotEmpty(t, dir)
 	defer os.RemoveAll(dir) //nolint:errcheck
@@ -215,30 +232,30 @@ func TestCreateSecretsDir_WithKey(t *testing.T) {
 	assert.Equal(t, "sk-test-secret", string(content))
 }
 
-func TestCreateSecretsDir_NoKey(t *testing.T) {
+func TestResolveAndStageSecretEnv_NoKey(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
 
-	dir, err := CreateSecretsDir(agentSpec(agentDef), nil, config.Layout{}, "")
+	dir, err := resolveAndStage(t, agentSpec(agentDef), nil, config.Layout{}, "")
 	require.NoError(t, err)
 	assert.Empty(t, dir)
 }
 
-func TestCreateSecretsDir_NoEnvVars(t *testing.T) {
+func TestResolveAndStageSecretEnv_NoEnvVars(t *testing.T) {
 	agentDef := agent.GetAgent("test")
 
-	dir, err := CreateSecretsDir(agentSpec(agentDef), nil, config.Layout{}, "")
+	dir, err := resolveAndStage(t, agentSpec(agentDef), nil, config.Layout{}, "")
 	require.NoError(t, err)
 	assert.Empty(t, dir)
 }
 
-func TestCreateSecretsDir_WithEnvVars(t *testing.T) {
+func TestResolveAndStageSecretEnv_WithEnvVars(t *testing.T) {
 	agentDef := agent.GetAgent("test") // no API keys
 	envVars := map[string]string{
 		"OLLAMA_API_BASE": "http://host.docker.internal:11434",
 		"CUSTOM_VAR":      "myvalue",
 	}
 
-	dir, err := CreateSecretsDir(agentSpec(agentDef), envVars, config.Layout{}, "")
+	dir, err := resolveAndStage(t, agentSpec(agentDef), envVars, config.Layout{}, "")
 	require.NoError(t, err)
 	require.NotEmpty(t, dir)
 	defer os.RemoveAll(dir) //nolint:errcheck
@@ -252,14 +269,14 @@ func TestCreateSecretsDir_WithEnvVars(t *testing.T) {
 	assert.Equal(t, "myvalue", string(content))
 }
 
-func TestCreateSecretsDir_APIKeyOverridesEnv(t *testing.T) {
+func TestResolveAndStageSecretEnv_APIKeyOverridesEnv(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
 	envVars := map[string]string{
 		"ANTHROPIC_API_KEY": "should-be-overwritten",
 	}
 	hostEnv := config.Layout{}.WithEnv(map[string]string{"ANTHROPIC_API_KEY": "sk-real-key"})
 
-	dir, err := CreateSecretsDir(agentSpec(agentDef), envVars, hostEnv, "")
+	dir, err := resolveAndStage(t, agentSpec(agentDef), envVars, hostEnv, "")
 	require.NoError(t, err)
 	require.NotEmpty(t, dir)
 	defer os.RemoveAll(dir) //nolint:errcheck
@@ -269,20 +286,20 @@ func TestCreateSecretsDir_APIKeyOverridesEnv(t *testing.T) {
 	assert.Equal(t, "sk-real-key", string(content), "API key should override env var")
 }
 
-func TestCreateSecretsDir_EmptyBoth(t *testing.T) {
+func TestResolveAndStageSecretEnv_EmptyBoth(t *testing.T) {
 	agentDef := agent.GetAgent("test")
 
-	dir, err := CreateSecretsDir(agentSpec(agentDef), map[string]string{}, config.Layout{}, "")
+	dir, err := resolveAndStage(t, agentSpec(agentDef), map[string]string{}, config.Layout{}, "")
 	require.NoError(t, err)
 	assert.Empty(t, dir)
 }
 
-func TestCreateSecretsDir_HonorsStagingRoot(t *testing.T) {
+func TestResolveAndStageSecretEnv_HonorsStagingRoot(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
 	hostEnv := config.Layout{}.WithEnv(map[string]string{"ANTHROPIC_API_KEY": "sk-test-secret"})
 	stagingRoot := t.TempDir()
 
-	dir, err := CreateSecretsDir(agentSpec(agentDef), nil, hostEnv, stagingRoot)
+	dir, err := resolveAndStage(t, agentSpec(agentDef), nil, hostEnv, stagingRoot)
 	require.NoError(t, err)
 	require.NotEmpty(t, dir)
 	defer os.RemoveAll(dir) //nolint:errcheck

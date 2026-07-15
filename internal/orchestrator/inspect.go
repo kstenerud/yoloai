@@ -1,5 +1,5 @@
 // ABOUTME: Façade re-exports of the sandbox read-model. The implementation lives
-// ABOUTME: in the status/ leaf; these aliases keep the public sandbox API stable.
+// ABOUTME: in the status/ leaf; these aliases keep package orchestrator's surface stable.
 package orchestrator
 
 import (

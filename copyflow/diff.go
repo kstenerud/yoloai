@@ -277,54 +277,6 @@ func loadDiffContext(layout config.Layout, name string, dirHostPath string) (wor
 	return workDir, baselineSHA, mode, nil
 }
 
-// DiffContext holds the resolved paths needed for diff/apply on the workdir.
-type DiffContext struct {
-	HostPath    string        // original host path (for display)
-	WorkDir     string        // path to diff against (work copy for :copy, host path for :rw)
-	BaselineSHA string        // baseline SHA for :copy dirs
-	Mode        store.DirMode // "copy" or "rw"
-}
-
-// loadAllDiffContexts returns the diff context for the sandbox's
-// workdir. After Q-U (2026-05-25) the diff/apply surface is
-// workdir-only; aux dirs only support :rw / :ro and aren't diffable.
-func loadAllDiffContexts(layout config.Layout, name string, dirHostPath string) ([]DiffContext, error) {
-	sandboxDir := layout.SandboxDir(name)
-	if err := store.RequireSandboxDir(sandboxDir); err != nil {
-		return nil, err
-	}
-
-	meta, err := store.LoadEnvironment(sandboxDir)
-	if err != nil {
-		return nil, err
-	}
-
-	dir := meta.Dir(dirHostPath)
-	if dir == nil {
-		return nil, nil
-	}
-
-	switch dir.Mode {
-	case store.DirModeCopy:
-		return []DiffContext{{
-			HostPath:    dir.HostPath,
-			WorkDir:     copyGitWorkDir(sandboxDir, dir.HostPath, dir.MountPath),
-			BaselineSHA: dir.BaselineSHA,
-			Mode:        store.DirModeCopy,
-		}}, nil
-	case store.DirModeRW:
-		return []DiffContext{{
-			HostPath: dir.HostPath,
-			WorkDir:  dir.HostPath,
-			Mode:     store.DirModeRW,
-		}}, nil
-	case store.DirModeRO, store.DirModeOverlay, "":
-		// not diffable (a retired overlay dir shouldn't reach here — the
-		// migration gate forces conversion to copy first)
-	}
-	return nil, nil
-}
-
 // copyGitWorkDir returns the host work-copy path for a copy-mode directory. The
 // sandbox-scoped git runner (git.NewSandbox) takes it from here: for backends
 // that run git in confinement (Tart, docker/podman/containerd) it maps this host

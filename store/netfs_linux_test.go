@@ -1,5 +1,5 @@
 // ABOUTME: Unit tests for the Linux network-filesystem magic-number classifier.
-// ABOUTME: Validates that isNetworkFilesystemMagic correctly classifies known FS types.
+// ABOUTME: Validates that networkMagicName correctly classifies known FS types.
 
 //go:build linux
 
@@ -7,10 +7,10 @@ package store
 
 import "testing"
 
-// TestIsNetworkFilesystemMagic covers the complete known-magic table plus a
+// TestNetworkMagicName covers the complete known-magic table plus a
 // representative set of local filesystem magic numbers. This is a pure
 // function test — no mounts, no I/O.
-func TestIsNetworkFilesystemMagic(t *testing.T) {
+func TestNetworkMagicName(t *testing.T) {
 	t.Parallel()
 
 	networkCases := []struct {
@@ -27,8 +27,11 @@ func TestIsNetworkFilesystemMagic(t *testing.T) {
 	for _, tc := range networkCases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if !isNetworkFilesystemMagic(tc.magic) {
-				t.Errorf("isNetworkFilesystemMagic(0x%X) = false, want true for %s", tc.magic, tc.name)
+			got, ok := networkMagicName(tc.magic)
+			if !ok {
+				t.Errorf("networkMagicName(0x%X) = _, false; want true for %s", tc.magic, tc.name)
+			} else if got != tc.name {
+				t.Errorf("networkMagicName(0x%X) = %q; want %q", tc.magic, got, tc.name)
 			}
 		})
 	}
@@ -47,8 +50,8 @@ func TestIsNetworkFilesystemMagic(t *testing.T) {
 	for _, tc := range localCases {
 		t.Run(tc.name+"_local", func(t *testing.T) {
 			t.Parallel()
-			if isNetworkFilesystemMagic(tc.magic) {
-				t.Errorf("isNetworkFilesystemMagic(0x%X) = true, want false for local FS %s", tc.magic, tc.name)
+			if name, ok := networkMagicName(tc.magic); ok {
+				t.Errorf("networkMagicName(0x%X) = %q, true; want false for local FS %s", tc.magic, name, tc.name)
 			}
 		})
 	}

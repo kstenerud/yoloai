@@ -23,8 +23,8 @@ import (
 )
 
 // lifecycleMockRuntime extends mockRuntime for lifecycle-related tests in
-// package sandbox (clone_test.go, terminal_test.go). Mirrors the struct that
-// lived in the old lifecycle_test.go before it moved to sandbox/lifecycle/.
+// package orchestrator (clone_test.go, terminal_test.go). Mirrors the struct
+// that lived in the old lifecycle_test.go before it moved to lifecycle/.
 type lifecycleMockRuntime struct {
 	mockRuntime
 	stopFn    func(ctx context.Context, name string) error

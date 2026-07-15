@@ -1,5 +1,5 @@
 // ABOUTME: Type and constant aliases that re-export the create/ and state/ leaf
-// ABOUTME: symbols into package sandbox, keeping the public sandbox API stable.
+// ABOUTME: symbols into package orchestrator, so the leaf carve stays internal.
 package orchestrator
 
 import (

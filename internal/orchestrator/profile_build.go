@@ -1,5 +1,5 @@
 // ABOUTME: Façade re-exports of profile image-build helpers. The implementation
-// ABOUTME: lives in the profiles/ leaf; these aliases keep the public sandbox API stable.
+// ABOUTME: lives in the profiles/ leaf; these aliases keep orchestrator's surface stable.
 package orchestrator
 
 import "github.com/kstenerud/yoloai/internal/orchestrator/profiles"
