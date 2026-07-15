@@ -56,6 +56,17 @@ Every command supports:
 | `--json`          | Output as JSON (machine-readable)                |
 | `--yes`, `-y`     | Skip confirmation prompts (where applicable)     |
 
+## CLI and config parity
+
+**The CLI is for one-offs; config is for repeatability. An option worth setting at all is
+settable in both, under the same name.** `yoloai new --agent gemini` for this run; `agent:
+gemini` in config for every run.
+
+The failure is asymmetry in either direction: a flag with no config key makes a user retype
+their own defaults forever, and a config key with no flag makes them edit a file to try
+something once. When you add one, add the other — or say in the PR why the option is
+genuinely single-shot (`--json`) or genuinely persistent-only.
+
 ### Verbosity Mapping
 
 | Flags     | Log Level  |

@@ -50,6 +50,7 @@ This file is small on purpose: load all of it at the start of a task. It carries
 | GEN §12  | A design/spec is a provisional, falsifiable model — load-bearing only after implementation verifies it; facts win.    | Treating an unimplemented design as a contract; coding to the doc when reality diverges. |
 | GEN §13  | Raise anything that looks off — even when agreed/spec'd/planned; agreement is a strong prior, not a gag order.         | Silently following an agreed plan you've spotted a problem in.                   |
 | GEN §14  | Compose with a foreign system's *contract*, not an incidental property; "it's clever" is the worst smell. Put state on the artifact, not a side-channel. | Keying behaviour off a filename / character case / daemon field that wasn't designed to carry it (and varies by version/variant). |
+| GEN §15  | Check design↔research in *both* directions; say whether you found a wrong fact or a contested tradeoff — they have different remedies.                | Reviewing a design/research doc; about to write "this is wrong" without saying which kind of wrong. |
 
 ## architecture-principles.md
 

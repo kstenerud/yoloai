@@ -1200,6 +1200,29 @@ Supersedes the base-tier smoke-skip and the per-backend "unavailable → skip" g
 
 **Consequences.** Brokering is now the **default for Gemini and Codex** API-key users (key stays host-side; transparent for a valid API key). Direct delivery still applies on OAuth-only auth, `--no-broker`, `--network-none`, or a backend that can't host an injector. A new invariant test (`TestBrokerConfig_WellFormed`) guards every brokerable agent's config so a future edit can't ship a broken redirect. **Composition:** builds directly on D105/D106; the multi-provider and request-signing extensions remain the reserved next steps.
 
+## D116 — `AGENTS.md` is the agent contract; `CLAUDE.md`'s condensed principle restatement retires into the formal system
+
+**Date:** 2026-07-15. **Status:** Active — implementing on branch `contributor-docs-sweep`. Establishes `general-principles.md` §15. Prompted by PR #36, the project's first outside code contribution to merge.
+
+**Context.** yoloAI was a solo project until 2026-07-14. Its conventions lived in the maintainer's head and in `CLAUDE.md` — which **only Claude Code reads**. PR #36 was prepared with Codex, which reads `AGENTS.md`; the repo had none. It then missed two rules recorded nowhere a contributor could see: a user-visible break needs a `docs/BREAKING-CHANGES.md` entry in the same PR (PR #36 made `yoloai config set backend docker` exit 1 across nine changed files, none of them that one — the entry existed only because review asked), and invalidating a name obliges sweeping the surfaces that mirror it (the help topic advertised `backend` for all 15 releases from v0.2.0 to v0.8.0 after the March 2026 rename, `make check` green throughout). Neither miss was the contributor's fault. The maintainer's own follow-up then misfiled the breaking-changes entry into a shipped section — twice — because the `## Unreleased` convention existed only in the shape of three stamp commits (`883600b9`, `00f5a046`, `3c72c962`).
+
+A 44-agent convention audit (adversarially verified, streams over git history / docs / hooks / CI) confirmed 25 conventions existing only in practice. Its own completeness critic found the audit had missed the one rule PR #36 actually broke — evidence for §15's both-directions rule, and the reason this entry exists rather than a larger one.
+
+**Decision.**
+- **(a) `AGENTS.md` at the repo root is the canonical instruction file for every coding agent.** `CLAUDE.md` imports it via `@AGENTS.md`. Verified against the Claude Code docs: Claude Code does **not** read `AGENTS.md` natively and there is no flag that changes this; the import is the officially documented bridge, and is preferred over a `CLAUDE.md → AGENTS.md` symlink, which needs Admin/Developer Mode on Windows.
+- **(b) `AGENTS.md` stays small on purpose (~520 words).** Every agent ingests it every session, so it carries the contract and routes outward; detail lives one hop away in `docs/contributors/procedures/`. Size is a feature, not an accident — a long contract is skimmed.
+- **(c) `CLAUDE.md`'s "Design Principles" and "Critique Principles" sections retire.** They were a condensed restatement of the formal system, not a parallel one: `general-principles.md` already carries ecosystem-first (§3), safe defaults (§6), factual accuracy including the platform-specific test and the highest-scrutiny-for-security bar (§7), cross-platform verification (§10), and design-as-hypothesis (§12); "don't reinvent the wheel" is development §3's parent, "security requires dedicated research" is in `architecture-principles.md`. Retiring the restatement removes a second, drifting copy rather than deleting principles.
+- **(d) What was genuinely absent becomes §15** — the critique mechanics: cross-reference design↔research in both directions, and distinguish a wrong fact from a contested tradeoff. Absent from every live doc; surviving only in `working-notes-archive.md`, which is history, not guidance.
+- **(e) `docs/contributors/procedures/`** is a new subtree for how-we-work docs (PRs, issues), distinct from principles (**why**) and standards (**what/how**).
+- **(f) The tier indexes `docs/README.md` and `docs/contributors/README.md` now exist.** `CLAUDE.md` had instructed agents to "read that dir's `README.md` to route" for both; neither file existed, so the first routing hop hit nothing.
+
+**Rejected / deferred.**
+- **A sixth principles doc (`design-principles.md`)** — rejected on inspection. The first cut of this decision assumed `CLAUDE.md`'s lists were homeless and would need one; a full-repo check found all but the §15 material already stated, in richer form, in the existing five. Adding the doc would have duplicated §2/§3/§6 and grown the principle set by accretion — the exact drift `principles/README.md`'s change ritual exists to prevent.
+- **Moving the principles informally into a README** — rejected: they are principles by content, and this file's process is what stops the set growing in whatever file happened to be open.
+- **Folding `CONTRIBUTING.md` into `AGENTS.md`** — rejected: it stays the human front door and links onward. Its claim that a green `make check` predicts green CI was false since `8cf5a984` added the integration job, and is corrected rather than deleted.
+
+**Consequences.** Every agent, not just Claude Code, now loads the same contract. `CLAUDE.md` shrinks to the import plus Claude-specific hook mechanics. The rules PR #36 broke are written down for the first time, and the audit's remaining output — ~13 mechanical gates, the false claims in `python.md`/`shell.md`/`Makefile:123`, the `where-to-change.md` recipes that name zero doc surfaces — lands as follow-on work on this branch. §15 applies immediately to the critique queues in `design/`.
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.

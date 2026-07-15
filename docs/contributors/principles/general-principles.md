@@ -518,6 +518,37 @@ Originally established in D107.
 
 ---
 
+## §15. Critique cross-references both directions — separate the fact from the tradeoff
+
+> **Rule.** Check design claims against their research backing *and* research recommendations against the design that was built; then say which kind of defect you found — a wrong fact, or a tradeoff worth arguing.
+>
+> **Bites when:** reviewing a design or a research file; about to write "this is wrong" without saying which kind of wrong. · **See also:** GEN §7, GEN §12.
+
+**Principle.** Research establishes facts; the design makes tradeoff decisions on top of those facts. A critique that blurs the two is unactionable, because the two have different remedies: a wrong fact is corrected, a contested tradeoff is discussed and decided. State which one you are raising. And check the correspondence in *both* directions — a design claim with no research behind it, and a research recommendation that never reached the design, are both defects, but only the second survives a one-way review.
+
+### Pattern
+
+Threshold: a critique is worth writing when it changes a decision. Small research inaccuracies that move no decision (a count off by 10%) are noise; the same inaccuracy is worth raising the moment a decision rests on it (§7's verification bar). Two questions, always both: *does every design claim have backing?* and *did every research recommendation land?*
+
+### Worked examples
+
+- **The one-way review that passes a dead design.** `../design/github-issues.md` is a 387-line issue workflow researched against seven projects (aider, continue, cline, gh, docker/cli, terraform, helm). Direction one — "is this design backed by research?" — passes cleanly. Direction two — "did the recommendation reach the implementation?" — finds no `.github/ISSUE_TEMPLATE/` at all, and labels specified (`needs-triage`, `needs-info`) that the repo never created. Fully-backed, never built, invisible to a one-way check (D116).
+- **Fact defect vs tradeoff, in the same report.** The D116 convention audit claimed "436 of 437 code commits carry a body" (recount: 435 — two are bodyless) and separately recommended the release ritual stay out of `AGENTS.md`. The first is a fact, remedied by recounting. The second is a tradeoff, remedied by a decision. Filing both as "findings" would have obscured that only one of them was arguable.
+- **A wrong fact wrapped around a right recommendation.** The same audit reported "zero hadolint references in `.github/`" — false (`audit.yml` runs `make hadolint`) — while its recommendation (fail loud instead of skipping) was correct and landed. Rejecting the recommendation because the fact was wrong would have been as much an error as accepting the fact because the recommendation was right.
+- **Critique cycle** (D2) — twelve pre-implementation rounds against `../design/` and `../design/research/`, each round asked in both directions.
+
+### Cost-vs-benefit
+
+Cost of applying: the reverse pass costs a `grep` per recommendation, and naming the defect kind costs a clause. Damage prevented: designed-and-forgotten work that reads as shipped (the issue workflow sat unbuilt while its design sat reviewed and public); and critique threads that stall because nobody can tell whether the author is reporting an error or opening a debate. Threshold: apply to any design or research doc that will drive implementation; skip for scratch notes.
+
+### Sources
+
+Operationalised from the project's own critique-cycle practice (D2, D5) after the D116 convention audit demonstrated all three failure modes in one report. Full discussion: D116.
+
+Originally established in D116.
+
+---
+
 # Common over-generalisations to avoid
 
 The cost-vs-benefit discipline (Framing) explicitly rejects principle-shaped statements that don't pay off at yoloAI's scale. The following are documented so future-yoloAI doesn't drift toward them.
