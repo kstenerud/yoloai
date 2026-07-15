@@ -294,6 +294,25 @@ func (r *Runtime) recordBuildChecksum(baseImage string) {
 	_ = fileutil.WriteFile(r.tartBaseChecksumPath(), []byte(sum), 0600)
 }
 
+// RecordBuildChecksum seeds the provision checksum for this Runtime's layout, so
+// a following needsBuild trusts an existing yoloai-base rather than rebuilding
+// it. sourceDir selects the base image the checksum is computed against — pass
+// what you pass Setup. Exported for testing; production records automatically
+// after a successful build.
+//
+// It exists for the integration suites, which isolate state by giving the layout
+// a temp DataDir. The checksum record lives under layout.CacheDir(), so a fresh
+// DataDir never has one, and needsBuild therefore always reports stale — which
+// for tart means re-cloning and re-provisioning a ~29 GB VM per test, into the
+// developer's real ~/.tart. Seeding it says "the base is current, trust it",
+// which the Makefile makes true by running tart-base-image first. It cannot mask
+// an absent base: needsBuild checks existence before it reads the checksum.
+// The docker backend solves the same problem the same way (RecordBuildChecksum
+// in runtime/docker/build.go, seeded by the orchestrator suite's TestMain).
+func (r *Runtime) RecordBuildChecksum(sourceDir string) {
+	r.recordBuildChecksum(r.resolveBaseImage(sourceDir))
+}
+
 // tartBaseInfoPath returns the path of the host-side build-info sidecar, next
 // to the checksum file under the layout's cache directory.
 func (r *Runtime) tartBaseInfoPath() string {
