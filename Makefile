@@ -260,6 +260,21 @@ cover:
 base-image: build
 	./$(BINARY) system build --backend docker
 
+## tart-base-image: build the provisioned yoloai-base VM into the real ~/.tart.
+## The tart analogue of base-image: the shared, expensive artifact every tart
+## test reuses, built ONCE before any suite runs rather than on the test clock.
+## It matters more here than for docker — a cold tart base is a ~30 GB pull plus
+## a full provision boot, which no test timeout can or should absorb (DF19).
+## No-op unless the VM tier is enabled on a host that can run it, so dependent
+## targets stay runnable everywhere; the suites self-skip via TestMain there.
+## Re-running is cheap: Setup short-circuits in needsBuild once the base exists.
+tart-base-image:
+	@if [ "$$YOLOAI_TEST_TART_VM" = "1" ] && [ "$$(uname)" = "Darwin" ] && [ "$$(uname -m)" = "arm64" ]; then \
+		$(MAKE) build && \
+		echo "Building tart base image (one-time ~30 GB pull if absent)..." && \
+		./$(BINARY) system build --backend tart; \
+	fi
+
 # require-root-for-containerd: fail fast, upfront, when a target runs the
 # containerd/Kata integration suite but isn't root. Kata needs CAP_SYS_ADMIN to
 # create the network namespace, so a non-root run can only end in an opaque
@@ -292,10 +307,18 @@ endef
 ## `make base-image` fails loudly if the daemon is absent. On Linux this needs root
 ## for the containerd/Kata suite (netns); it stops upfront with an actionable error
 ## if run non-root (use `sudo -E make integration`, or carve out containerd).
+## The orchestrator suite is split by weight, not by package. Its TestIntegrationTart_*
+## tests boot real macOS VMs (create + suspend/restore + reset is several boots),
+## which does not fit the 10m that sizes the container tests — but they need this
+## target's docker, since ./internal/orchestrator/'s TestMain requires it (D112).
+## So they run here, as their own invocation with the VM budget, rather than under
+## integration-tart, which would make that target lie about depending on docker.
 integration:
 	$(require-root-for-containerd)
 	$(MAKE) base-image
-	go test -tags=integration -v -count=1 -timeout=10m ./internal/orchestrator/ ./runtime/docker/ ./internal/cli/
+	$(MAKE) tart-base-image
+	go test -tags=integration -v -count=1 -timeout=10m -skip '^TestIntegrationTart_' ./internal/orchestrator/ ./runtime/docker/ ./internal/cli/
+	go test -tags=integration -v -count=1 -timeout=40m -run '^TestIntegrationTart_' ./internal/orchestrator/
 	@$(MAKE) integration-containerd integration-apple integration-seatbelt integration-tart
 
 e2e: build
@@ -364,16 +387,13 @@ integration-seatbelt:
 ## The heavyweight TestTartConformance suite clones a multi-GB macOS VM per subtest,
 ## so it is gated behind YOLOAI_TEST_TART_VM=1 (skipped for a quick `make
 ## integration-tart`). `make releasetest` sets it, so the release gate runs the
-## full suite — building the tart base first so a missing base fails loudly rather
-## than silently skipping. The base build only runs on macOS + Apple Silicon (where
-## tart can actually run); on any other host it is skipped and the go test self-skips
-## via TestMain, keeping this target runnable everywhere like the other backends.
-integration-tart:
-	@if [ "$$YOLOAI_TEST_TART_VM" = "1" ] && [ "$$(uname)" = "Darwin" ] && [ "$$(uname -m)" = "arm64" ]; then \
-		$(MAKE) build && \
-		echo "Building tart base image for the conformance suite..." && \
-		./$(BINARY) system build --backend tart; \
-	fi
+## full suite — building the tart base first (tart-base-image) so a missing base
+## fails loudly rather than silently skipping.
+##
+## This covers the tart RUNTIME only. The sandbox-level TestIntegrationTart_*
+## lifecycle tests live in ./internal/orchestrator/, whose TestMain requires
+## docker, so `make integration` runs them instead.
+integration-tart: tart-base-image
 	go test -tags=integration -v -count=1 -timeout=40m ./runtime/tart/
 
 ## smoketest: run the full smoke matrix — every backend this host can exercise,
@@ -435,8 +455,26 @@ releasetest:
 setcap: build
 	sudo setcap cap_sys_admin,cap_dac_override+ep ./$(BINARY)
 
-clean: clean-testtmp
+clean: clean-testtmp clean-tart-vms
 	rm -f $(BINARY)
+
+## clean-tart-vms: remove test VMs left in ~/.tart by a tart test run that was
+## killed before its cleanup ran (SIGKILL / -timeout / OOM — none run t.Cleanup).
+## Each leaked VM is ~29 GB, so a couple of killed runs are a disk-filling event.
+##
+## The tart suites share the real ~/.tart deliberately — an isolated TART_HOME is
+## an empty store, which costs a ~30 GB re-download per run (DF19) — so they
+## isolate by NAME instead: testutil.TartStoreLayout stamps a unique principal on
+## the layout, making every instance yoloai-<principal>-<sandbox>. Test
+## principals are UniqueTestPrincipal's t + 7 digits, so this sweep matches
+## exactly those and cannot touch a real VM (yoloai-base, yoloai-embrace, or any
+## yoloai-<sandbox> from normal use). Best-effort; no-op without tart.
+clean-tart-vms:
+	@command -v tart >/dev/null 2>&1 || exit 0; \
+	for vm in $$(tart list --source local --quiet 2>/dev/null | grep -E '^yoloai-t[0-9]{7}-' || true); do \
+		echo "removing leaked test VM $$vm"; \
+		tart delete "$$vm" 2>/dev/null || true; \
+	done
 
 ## clean-testtmp: remove integration/e2e bootstrap HOMEs left in TMPDIR by a
 ## test run that was killed before its cleanup ran (SIGKILL / -timeout / OOM —
