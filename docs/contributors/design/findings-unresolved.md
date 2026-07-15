@@ -344,6 +344,22 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 - **Description:** `git tag --list` carries a tag literally named `show` (almost certainly a mistyped `git show`), and it is pushed: `git ls-remote --tags origin` resolves `refs/tags/show`. Harmless to the release path — `release.yml` triggers on `v*` — but it breaks any tag query that does not filter `v*` (it silently became the answer to "first tag containing commit X" during this sweep). Deleting a published tag is not free: the Go module proxy caches pushed tags immutably, so `git push --delete origin show` removes it from GitHub but not from the proxy.
 - **Pointer:** `refs/tags/show` → `564b294b`.
 
+### DF94 — the Tart lifecycle tier had never run; verify it on Apple Silicon
+
+- **Discovered:** 2026-07-15 · **Workstream:** contributor-docs sweep (D117)
+- **Severity:** MEDIUM (the tier is now wired on; nobody has yet watched it run)
+- **Disposition:** PARKED — needs an Apple Silicon host
+- **Description:** `internal/orchestrator/integration_tart_test.go` — the tier that boots a real macOS VM and runs `sandbox-setup.py` end to end — was gated on `YOLOAI_TEST_TART`, which **nothing set**: not the Makefile, not CI, not any script. `releasetest` exports `YOLOAI_TEST_TART_VM` (no relation), which gates the *conformance* suite in `runtime/tart/` — a suite that clones multi-GB VMs, exercises start/exec/stop, and never touches `sandbox-setup.py`. So the lifecycle tier self-skipped on the only platform that can run it, while a busy sibling with a near-identical name made the tier look covered. D112's plan quoted this exact line in its scope-gate keep-list and never noticed the two names differed (`plans/mandatory-infra-test-policy.md:114-117` — its own "re-confirm during implementation" note was never actioned). Unified onto `YOLOAI_TEST_TART_VM` under D117, so `make releasetest` now runs it. **This has consequently never executed.** A tier that has never run is unlikely to pass first time; expect unrelated Tart failures and budget for them rather than meeting them mid-release. It immediately found one bug already (the `xcode_mount` TypeError, fixed under D117) — that crash is the kind of thing it exists to catch.
+- **Pointer:** `internal/orchestrator/integration_tart_test.go:47`, `Makefile:405` (releasetest), `runtime/tart/integration_test.go:78`.
+
+### DF95 — silent scope gates are invisible; D112 only closed the availability half
+
+- **Discovered:** 2026-07-15 · **Workstream:** contributor-docs sweep (D117)
+- **Severity:** LOW
+- **Disposition:** PARKED
+- **Description:** D112 made *availability* skips fail loudly (absent platform-possible backend → FAIL, carve-out `YOLOAI_TEST_UNCONTROLLED_BACKENDS`), and explicitly left *scope* gates alone as "a different axis" — `YOLOAI_TEST_TART_VM`, `YOLOAI_TEST_APPLE_BASE`, `YOLOAI_TEST_BACKEND=podman`. DF94 shows the axis is not as separate as it looked: a scope gate nothing turns on is indistinguishable from a deleted test, and it reports green forever. Worth deciding whether a scope gate should announce itself — e.g. every gated tier prints one line naming the variable and whether it fired, so a `releasetest` transcript states what it did *not* do. Note the constraint from D117: `.claude/hooks/on-stop.sh` discards `make check` output on success, so anything that only prints on the happy path is invisible to agents — the announcement has to survive that, or live where a human reads it.
+- **Pointer:** `docs/contributors/design/plans/mandatory-infra-test-policy.md:113-117`; DF94.
+
 ## Policy origin
 
 Established in [architecture-remediation.md](../archive/plans/architecture-remediation.md) and inherited by [layering-refactor.md](../archive/plans/layering-refactor.md).
