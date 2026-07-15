@@ -236,7 +236,7 @@ PY_SCRIPTS = $(shell git ls-files '*.py' | grep '^scripts/')
 
 python-typecheck: ensure-python-venv
 	$(MYPY) --strict $(PY_RUNTIME)
-	$(MYPY) --strict scripts/smoke_test.py scripts/govulncheck.py scripts/tests/
+	$(MYPY) --strict $(PY_SCRIPTS)
 
 ## setup-dev-python: explicitly provision the uv-managed venv with lockfile-pinned
 ## dev tools. Optional for local dev (the python-* targets self-provision via
