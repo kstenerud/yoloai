@@ -1,27 +1,34 @@
 # Issues
 
-This is deliberately thin, and the reason is worth stating: there is barely any issue
-practice to document. The repo has a handful of issues, and the labels GitHub created by
-default have never been applied to any of them. What follows is the useful minimum, not a
-transcription of an existing ritual.
+Issues are filed through the forms in [`.github/ISSUE_TEMPLATE/`](../../../.github/ISSUE_TEMPLATE/).
+Blank issues are disabled: feature requests and questions route to Discussions via
+`contact_links`, so the tracker holds bugs and documentation defects.
+
+The design behind the templates — the field choices, the label scheme, the triage flow, and the
+research they came from — is [`../design/github-issues.md`](../design/github-issues.md). Change
+the design first, then the templates.
 
 ## Filing a bug
 
-yoloAI spans several sandbox backends across two host OSes, and almost every bug report is
-unactionable without knowing which combination you hit. Include:
+Use the bug report template. yoloAI spans several sandbox backends across two host OSes, and
+most reports are unactionable without knowing which combination you hit.
 
-- **`yoloai version`** output.
-- **Backend and isolation mode** — Docker, Podman, containerd, Tart, Seatbelt, Apple
-  `container`; and `--isolation` if you set it.
-- **Host OS** — Linux, macOS, or Windows/WSL. Behaviour genuinely differs, and a bug that
-  reproduces on Linux may not on macOS Docker Desktop.
-- **Agent** — Claude, Codex, Gemini, Aider, OpenCode.
-- **What you ran and what happened**, ideally the smallest command that shows it.
+The fastest way to give a complete report is to let the tool write it:
 
-Before filing a backend bug, check
-[`../backend-idiosyncrasies.md`](../backend-idiosyncrasies.md). It catalogues backend
-behaviour that contradicts its own documentation, with a symptom index — several
-"bugs" are known upstream quirks with documented workarounds.
+```sh
+yoloai --debug --bugreport safe <command>          # a one-shot command
+yoloai sandbox <name> bugreport safe               # an existing sandbox
+```
+
+That writes `yoloai-bugreport-<timestamp>.md` with version, backend, isolation mode, host OS,
+and agent already filled in. Paste it into the template.
+
+`safe` redacts; `unsafe` does not. **Do not post an `unsafe` report publicly** — it can contain
+credentials and paths. Send it privately, or use a private Gist.
+
+Before filing a backend bug, check [`../backend-idiosyncrasies.md`](../backend-idiosyncrasies.md).
+It catalogues backend behaviour that contradicts its own documentation and has a symptom index;
+several "bugs" are known upstream quirks with documented workarounds.
 
 ## Security
 
@@ -30,9 +37,10 @@ network-isolation bypass. See [`SECURITY.md`](../../../SECURITY.md).
 
 ## Feature requests
 
-Check [`../../ROADMAP.md`](../../ROADMAP.md) first — it lists what is already planned.
-Say what you are trying to accomplish, not only the mechanism you have in mind; the
-copy/diff/apply model often solves things a different way than expected.
+They go to Discussions, not the tracker. Check [`../../ROADMAP.md`](../../ROADMAP.md) first —
+it lists what is already planned. Say what you are trying to accomplish rather than only the
+mechanism you have in mind; the copy/diff/apply model often solves things a different way than
+expected.
 
 ## Working an issue
 
