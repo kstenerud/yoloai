@@ -1,11 +1,13 @@
 > **ABOUTME:** Proposes giving the CLI the principal it already has on disk and deleting the
-> empty-principal sentinel that let a hardcoded prefix ship. Scoped, not yet started; breaking.
+> empty-principal sentinel that let a hardcoded prefix ship. Breaking change (AGENTS.md rule 1).
 
 # Plan: the CLI is a principal — name it, and delete the empty-principal sentinel
 
-**Status:** Scoping, 2026-07-15. Proposed after DF98's third instance landed. **Not started; needs
-maintainer decisions (see [Open questions](#open-questions)) before any code moves.** Breaking change
-under [AGENTS.md rule 1](../../../../AGENTS.md); name invalidation under rule 2; wants a D-entry.
+- **Status:** PLANNED — scoping as of 2026-07-15, proposed after DF98's third instance landed. Not
+  started; needs maintainer decisions (see [Open questions](#open-questions)) before any code moves.
+  Breaking change under [AGENTS.md rule 1](../../../../AGENTS.md); name invalidation under rule 2;
+  wants a D-entry.
+- **Depends on:** —
 
 ## The one-sentence version
 

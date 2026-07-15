@@ -1463,3 +1463,324 @@ func TestRepoHygiene_DiscardMatcher_ScopesToIntegrationTaggedFiles(t *testing.T)
 		})
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Plan status: every plan declares one, and a finished plan doesn't live here.
+//
+// The archive rule was stated in four places and followed in none —
+// design/plans/ held plans reading "IMPLEMENTED", "DONE" and "Phases 1 & 2
+// COMPLETE" while its own index called itself "Unimplemented Features". Prose
+// asking people to remember to move a file cannot fire: the author of a finished
+// plan is never prompted, and nothing downstream notices. So the token carries
+// it, and marking a plan finished is what trips the gate.
+//
+// Each token earns its place by answering a question someone actually asks:
+// "what haven't we fleshed out?" (UNSPECIFIED), "what can I build?" (PLANNED),
+// "what's underway?" (IN-PROGRESS), "did we ever do or consider X?" (the
+// archive). A DEFERRED token was proposed and dropped for failing that test —
+// "what's deferred?" is "what's planned but parked", and the parking reason is
+// prose in the plan, not a state. Nothing in the tree had ever carried the
+// Trigger: line the deferred convention requires, so it was a distinction never
+// practiced.
+//
+// IN-PROGRESS exists because six live plans would otherwise have to lie:
+// tamper-resistant-network-isolation shipped for docker and defers
+// containerd/Kata and macOS; mandatory-infra-test-policy is Linux-verified with
+// macOS pending. A four-token vocabulary without it archives those and buries
+// the pending work — the plan is usually the only record of it.
+//
+// What this deliberately does NOT do: read archive/. The archive is frozen, and
+// gating a frozen file means conforming it (archive/README.md). Forbidding the
+// finished tokens *here* forces the move without the gate ever having an opinion
+// about a file that has already left.
+// ---------------------------------------------------------------------------
+
+// planStatusRe matches "**Status:** TOKEN" at the start of a line, where TOKEN is
+// followed by an em-dash separator or the end of the line.
+//
+// The separator is load-bearing, not punctuation. Without it this pattern reads
+// the tree's legacy free-form lines as tokens, and it reads them wrong in the one
+// direction that costs something: "**Status:** IMPLEMENTED for the container
+// backends" tokenizes as IMPLEMENTED, and the gate would then order a plan into
+// the archive on the strength of a sentence saying only part of it shipped.
+// "**Status:** Active on the module-split branch" degrades the same way, to a
+// bare "A". Requiring the separator makes every legacy line fail as undeclared,
+// which is the safe direction: it demands an explicit classification rather than
+// inferring one from a sentence's first word.
+var planStatusRe = regexp.MustCompile(`(?m)^- \*\*Status:\*\* ([A-Z][A-Z-]*)(?: —|\s*$)`)
+
+// planDependsRe matches the "Depends on" entry of the same metadata list. The
+// value is other plans' filenames, or an em dash for nothing.
+//
+// This field is gateable, which is the whole reason it exists rather than living
+// in a roadmap table: a named plan must be a real file here, so the reference
+// cannot rot, and archiving a plan that something still depends on fails loudly
+// instead of leaving a dangling name behind (DF103). It answers "what can I start
+// now?" — a plan whose dependencies have all left for the archive is unblocked.
+var planDependsRe = regexp.MustCompile(`(?m)^- \*\*Depends on:\*\* (.+)$`)
+
+// livePlanStatuses are the tokens a plan in design/plans/ may carry.
+var livePlanStatuses = []string{"UNSPECIFIED", "PLANNED", "IN-PROGRESS"}
+
+// retiredPlanStatuses mean the plan's work is over. Valid tokens — just not here.
+var retiredPlanStatuses = []string{"IMPLEMENTED", "ABANDONED"}
+
+// planStatusTokens returns every canonical status token declared in a plan.
+//
+// Every, not the first, because "the first one wins" is how a plan ends up with
+// two answers and no way to tell which is live. store-workload-split carried a
+// top line reading "Scoped ... gated decision pending" while a section below it
+// read "C1 + C2 + C3 all DONE" — it had shipped, and the line a reader trusts
+// first was the stale one. A gate that silently took the first match would
+// inherit that bug rather than report it.
+func planStatusTokens(t *testing.T, path string) []string {
+	t.Helper()
+	body, err := os.ReadFile(path) //nolint:gosec // G304: path comes from git ls-files under repoRoot
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	var out []string
+	for _, m := range planStatusRe.FindAllSubmatch(body, -1) {
+		out = append(out, string(m[1]))
+	}
+	return out
+}
+
+// livePlanFiles returns the tracked plan documents, excluding the index.
+func livePlanFiles(paths []string) []string {
+	var out []string
+	for _, p := range paths {
+		if strings.HasPrefix(p, "docs/contributors/design/plans/") && strings.HasSuffix(p, ".md") &&
+			p != "docs/contributors/design/plans/README.md" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// planDependencies returns the plan filenames a plan declares it depends on.
+// A bare em dash means none. Returns ok=false when the field is absent entirely,
+// which is a different failure from declaring no dependencies.
+func planDependencies(t *testing.T, path string) (deps []string, ok bool) {
+	t.Helper()
+	body, err := os.ReadFile(path) //nolint:gosec // G304: path comes from git ls-files under repoRoot
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	m := planDependsRe.FindSubmatch(body)
+	if m == nil {
+		return nil, false
+	}
+	raw := strings.TrimSpace(string(m[1]))
+	if raw == "—" || raw == "-" || raw == "none" {
+		return nil, true
+	}
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(strings.Trim(strings.TrimSpace(part), "`[]()"))
+		if part != "" {
+			deps = append(deps, part)
+		}
+	}
+	return deps, true
+}
+
+// TestRepoHygiene_PlanDependencies_Resolve is the other half of the plan-status
+// gate: a declared dependency must name a plan that is actually here.
+//
+// This is what makes the field worth carrying. An ungated metadata field is a
+// claim that ages in silence — the reason "Effort" and "Layer" were considered
+// and left out. A dependency, by contrast, is checkable: the name either
+// resolves to a live plan or it does not. That kills two failures at once. A
+// dangling name (typo, or a plan renamed under it) fails here rather than
+// misleading a reader into thinking work is blocked on something that no longer
+// exists. And archiving a plan that another still depends on fails loudly, which
+// is the case a human review would miss — the dependent plan is untouched by
+// that PR, so nothing draws the eye to it.
+//
+// An archived plan is finished and therefore blocks nothing, so pointing at one
+// is an error rather than a special case: rephrase the dependency or drop it.
+func TestRepoHygiene_PlanDependencies_Resolve(t *testing.T) {
+	root := repoRoot(t)
+	plans := livePlanFiles(trackedFiles(t, root))
+	live := map[string]bool{}
+	for _, rel := range plans {
+		live[filepath.Base(rel)] = true
+	}
+
+	declared := 0
+	for _, rel := range plans {
+		deps, ok := planDependencies(t, filepath.Join(root, rel))
+		if !ok {
+			t.Errorf("%s declares no \"- **Depends on:**\" entry. Every plan carries one, under "+
+				"its Status; use an em dash if it depends on nothing. Without it, \"what can I "+
+				"start now?\" has no answer that a grep can give.", rel)
+			continue
+		}
+		declared++
+		for _, d := range deps {
+			if live[d] {
+				continue
+			}
+			hint := "no plan by that name is here"
+			if _, err := os.Stat(filepath.Join(root, "docs/contributors/archive/plans", d)); err == nil {
+				hint = "that plan is archived, so its work is finished and it blocks nothing — " +
+					"drop the dependency or say what actually remains"
+			}
+			t.Errorf("%s depends on %q, but %s. A dependency names a live plan file in "+
+				"design/plans/ (see design/plans/README.md).", rel, d, hint)
+		}
+	}
+	t.Logf("plan-dependency gate scope: %d plans declaring dependencies", declared)
+}
+
+// TestRepoHygiene_PlanStatus_IsDeclaredAndLive is the plan-status gate.
+func TestRepoHygiene_PlanStatus_IsDeclaredAndLive(t *testing.T) {
+	root := repoRoot(t)
+	plans := livePlanFiles(trackedFiles(t, root))
+
+	t.Logf("plan-status gate scope: %d live plans", len(plans))
+	if len(plans) == 0 {
+		t.Fatal("no plans under design/plans/ — the gate's corpus went quiet, which means it is " +
+			"checking nothing (the failure mode DF94 documents)")
+	}
+
+	for _, rel := range plans {
+		toks := planStatusTokens(t, filepath.Join(root, rel))
+		if len(toks) > 1 {
+			t.Errorf("%s declares its status %d times (%v). One plan, one status: a second "+
+				"declaration is a second authoritative location and nothing keeps them in step "+
+				"(D121). Per-phase progress belongs in that phase's prose, not in another "+
+				"\"**Status:** TOKEN\" line.", rel, len(toks), toks)
+			continue
+		}
+		tok := ""
+		if len(toks) == 1 {
+			tok = toks[0]
+		}
+		switch {
+		case tok == "":
+			t.Errorf("%s declares no status. Add \"**Status:** TOKEN — prose\" under the title. "+
+				"TOKEN is one of %v for a plan that lives here; %v means the work is over and the "+
+				"plan belongs in archive/plans/ — see design/plans/README.md",
+				rel, livePlanStatuses, retiredPlanStatuses)
+		case slices.Contains(retiredPlanStatuses, tok):
+			t.Errorf("%s is marked %s but still lives in design/plans/. A finished plan is "+
+				"archaeology: move it whole to docs/contributors/archive/plans/ in this same "+
+				"change (AGENTS.md rule 8). If work remains, it is IN-PROGRESS, not %s.",
+				rel, tok, tok)
+		case !slices.Contains(livePlanStatuses, tok):
+			t.Errorf("%s declares unknown status %q. The vocabulary is exactly %v here, plus %v "+
+				"for a plan on its way to the archive.", rel, tok, livePlanStatuses, retiredPlanStatuses)
+		}
+	}
+}
+
+// TestRepoHygiene_PlanStatusMatcher_RejectsBadTokens proves the matcher fails in
+// both directions. The prose after the token stays free — that is where "what
+// remains" lives, and constraining it would push the detail out of the doc.
+func TestRepoHygiene_PlanStatusMatcher_RejectsBadTokens(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"canonical unspecified", "# T\n\n- **Status:** UNSPECIFIED — an idea; no design yet.\n", "UNSPECIFIED"},
+		{"canonical planned", "# T\n\n- **Status:** PLANNED — designed 2026-07-01, not started.\n", "PLANNED"},
+		{"canonical in-progress", "# T\n\n- **Status:** IN-PROGRESS — docker shipped; macOS pending.\n", "IN-PROGRESS"},
+		{"retired token is still extracted, so the gate can reject it", "# T\n\n- **Status:** IMPLEMENTED — done 2026-07-06.\n", "IMPLEMENTED"},
+		{"a bare token with no prose is fine", "# T\n\n- **Status:** PLANNED\n", "PLANNED"},
+		{"no status line at all", "# T\n\nSome prose about the plan.\n", ""},
+		{"the old bolded shape is not a token", "# T\n\n- Status: **IMPLEMENTED for the container backends**\n", ""},
+
+		// The dangerous class: right prefix, legacy prose after it. Reading a
+		// token out of these is worse than reading none — the sentence usually
+		// contradicts the word it opens with.
+		{"legacy prose is NOT a token, even when it opens with one", "# T\n\n- **Status:** IMPLEMENTED for the container backends (docker/podman), 2026-06-29.\n", ""},
+		{"a capitalised sentence does not degrade to its first letter", "# T\n\n- **Status:** Active on the module-split branch, cut from main.\n", ""},
+		{"nor does a hyphenated one", "# T\n\n- **Status:** Scoping-stage draft, not started.\n", ""},
+		{"lower-case is not a token", "# T\n\n- **Status:** implemented — done.\n", ""},
+		{"the token must open the line, not appear mid-sentence", "# T\n\n- The **Status:** PLANNED marker goes below.\n", ""},
+		{"prose after the token is unconstrained", "# T\n\n- **Status:** IN-PROGRESS — Phases 1 & 2 of 4 on `main`; next is egress (D105).\n", "IN-PROGRESS"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "plan.md")
+			if err := os.WriteFile(path, []byte(c.body), 0600); err != nil {
+				t.Fatalf("write fixture: %v", err)
+			}
+			got := ""
+			if toks := planStatusTokens(t, path); len(toks) > 0 {
+				got = toks[0]
+			}
+			if got != c.want {
+				t.Errorf("planStatusTokens first = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+// TestRepoHygiene_PlanStatusDup_IsDetected proves the extractor sees a second
+// declaration rather than silently taking the first — the shape that let
+// store-workload-split read "gated decision pending" at the top while a section
+// below it said the work had all landed.
+func TestRepoHygiene_PlanStatusDup_IsDetected(t *testing.T) {
+	body := "# T\n\n- **Status:** PLANNED — scoped, gated decision pending.\n\n" +
+		"## Phase C\n\n- **Status:** IMPLEMENTED — C1, C2 and C3 all landed.\n"
+	path := filepath.Join(t.TempDir(), "plan.md")
+	if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	got := planStatusTokens(t, path)
+	want := []string{"PLANNED", "IMPLEMENTED"}
+	if !slices.Equal(got, want) {
+		t.Errorf("planStatusTokens = %v, want %v — both declarations must be seen, or the gate "+
+			"inherits the ambiguity instead of reporting it", got, want)
+	}
+}
+
+// TestRepoHygiene_PlanDependsMatcher_ParsesTheField proves the dependency parser
+// distinguishes the three states that matter: no field at all (a gate error),
+// an explicit "nothing" (fine), and a real list (each name must resolve).
+func TestRepoHygiene_PlanDependsMatcher_ParsesTheField(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want []string
+		ok   bool
+	}{
+		{"absent entirely", "# T\n\n- **Status:** PLANNED — x.\n", nil, false},
+		{"em dash means nothing blocks it", "# T\n\n- **Depends on:** —\n", nil, true},
+		{"a single plan", "# T\n\n- **Depends on:** store-workload-split.md\n", []string{"store-workload-split.md"}, true},
+		{"several, comma separated", "# T\n\n- **Depends on:** a-plan.md, b-plan.md\n", []string{"a-plan.md", "b-plan.md"}, true},
+		{"backticked names are unwrapped", "# T\n\n- **Depends on:** `a-plan.md`\n", []string{"a-plan.md"}, true},
+		{"not a list item is not the field", "# T\n\n**Depends on:** a-plan.md\n", nil, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "plan.md")
+			if err := os.WriteFile(path, []byte(c.body), 0600); err != nil {
+				t.Fatalf("write fixture: %v", err)
+			}
+			got, ok := planDependencies(t, path)
+			if ok != c.ok || !slices.Equal(got, c.want) {
+				t.Errorf("planDependencies = (%v, %v), want (%v, %v)", got, ok, c.want, c.ok)
+			}
+		})
+	}
+}
+
+// TestRepoHygiene_PlanStatusScope_ExcludesTheIndexAndTheArchive pins the gate's
+// corpus: the index is not a plan, and the archive is frozen.
+func TestRepoHygiene_PlanStatusScope_ExcludesTheIndexAndTheArchive(t *testing.T) {
+	got := livePlanFiles([]string{
+		"docs/contributors/design/plans/some-plan.md",
+		"docs/contributors/design/plans/README.md",
+		"docs/contributors/archive/plans/old-plan.md",
+		"docs/contributors/design/research/a-spike.md",
+		"docs/contributors/design/plans/notes.txt",
+	})
+	want := []string{"docs/contributors/design/plans/some-plan.md"}
+	if !slices.Equal(got, want) {
+		t.Errorf("livePlanFiles = %v, want %v", got, want)
+	}
+}

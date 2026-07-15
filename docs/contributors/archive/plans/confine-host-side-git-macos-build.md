@@ -1,16 +1,18 @@
-> **ABOUTME:** Actionable macOS-only build brief for confine-host-side-git — the apple GitExecer
-> wiring and seatbelt sandbox-exec git confinement, meant to be run on real Apple Silicon.
+> **ABOUTME:** macOS-only build brief for confine-host-side-git — the apple GitExecer wiring and
+> seatbelt sandbox-exec git confinement, requiring real Apple Silicon to author and verify.
 
 # Build brief (macOS agent): confine work-copy git on apple + seatbelt
 
-**Status: START HERE (macOS agent).** Design is settled in
+**Status:** IMPLEMENTED — both tasks shipped and merged to main (D113): apple's `GitExecer`
+(`GitExecInConfinement: true`, `runtime/apple/apple.go`) and seatbelt's sandbox-exec-wrapped git
+with a dedicated tight SBPL profile (`GenerateGitProfile`, `runtime/seatbelt/profile.go`), both
+verified by the malicious-filter containment test extended to apple and seatbelt (`57d5328b`
+"Merge confine-git-macos: confine apple + seatbelt work-copy git"). Design is settled in
 [confine-host-side-git.md](confine-host-side-git.md) — read it first for the threat model and
-rationale; **build to it, do not re-litigate it.** This brief is the actionable plan for the
-parts that require real macOS (Apple Silicon, macOS 26+): they cannot be authored or verified
-on Linux because `sandbox-exec` and Apple's `container` CLI don't exist there. The
-cross-platform pieces (Fix 3 probe hardening; the `copy-mode-history.md` core) are handled
-separately on Linux and may already be present in the tree you receive — **do not duplicate
-them**; if they conflict, prefer what's already committed and flag it.
+rationale. This brief was the actionable plan for the parts that require real macOS (Apple
+Silicon, macOS 26+): they cannot be authored or verified on Linux because `sandbox-exec` and
+Apple's `container` CLI don't exist there. The cross-platform pieces (Fix 3 probe hardening; the
+`copy-mode-history.md` core) were handled separately on Linux.
 
 ## Why this is macOS-only
 

@@ -1,12 +1,16 @@
-> **ABOUTME:** Scoping plan for gates that catch agent-error classes existing rules couldn't,
-> because they trigger on observable repo/transcript actions rather than an agent noticing its
-> own uncertainty. Written to run standalone from a fresh session.
+> **ABOUTME:** Plan for gates that catch agent-error classes existing rules couldn't, because they
+> trigger on observable repo/transcript actions rather than an agent noticing its own
+> uncertainty. Written to run standalone from a fresh session.
 
 # Plan: gates for the agent-error classes D119-D121 could not prevent
 
-**Status:** Scoping, 2026-07-15. Written to be executed on a **fresh context** — everything needed is
-below, no session history required. Three independent items; each lands as its own commit; any can be
-skipped without affecting the others.
+**Status:** IMPLEMENTED — all three items shipped: `scripts/next-id.sh` (item 1), the
+integration-setup `io.Discard` gate in `repo_hygiene_test.go`
+(`TestRepoHygiene_IntegrationSetupOutput_IsNotDiscarded` /
+`TestRepoHygiene_DiscardMatcher_ScopesToIntegrationTaggedFiles`, item 2), and
+`scripts/check_citation_provenance.py` as a `PostToolUse` hook (item 3, see D122 and the Outcome
+note below). Written to be executed on a **fresh context** — everything needed was below, no
+session history required — as three independent items, each landed as its own commit.
 
 ## Why these three
 

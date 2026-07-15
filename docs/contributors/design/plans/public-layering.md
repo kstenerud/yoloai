@@ -1,16 +1,20 @@
 > **ABOUTME:** The design doc ("Frame") that laid out yoloAI's public-layering strategy —
 > staging composable public packages behind `internal/`, auditing each layer, and promoting by
 > mechanical move once its contract stabilizes. Records the audit methodology and the phased
-> endgame; the runtime/store/copyflow move it designed has since landed.
+> endgame.
 
 # Public layering: stage the composable API behind `internal/`, promote by move
 
-**Status:** Active on the `public-layering` branch (cut from `main` after the module-split
-renames landed). This is the **Frame** doc — it fixes the layer boundaries, the strategy, and
-the audit methodology. Per-layer exported surface is deliberately *not* specified here; it
-emerges from the audit cycles (decision: facts drive the surface). Supersedes the deferred
-C-full / F notes in [D83](../../decisions/working-notes.md) and builds directly on
-[module-split.md](module-split.md).
+- **Status:** IN-PROGRESS — active on the `public-layering` branch (cut from `main` after the
+  module-split renames landed); the runtime/store/copyflow move it designed has landed, but the
+  branch does not merge to `main` until per-agent custom detection strategies are wired (merge
+  gate below), and Phase 3's remaining integration/e2e/smoke CI runs plus a doc-accuracy follow-up
+  (DF51) are still open. This is the **Frame** doc — it fixes the layer boundaries, the strategy, and
+  the audit methodology. Per-layer exported surface is deliberately *not* specified here; it
+  emerges from the audit cycles (decision: facts drive the surface). Supersedes the deferred
+  C-full / F notes in [D83](../../decisions/working-notes.md) and builds directly on
+  [module-split.md](module-split.md).
+- **Depends on:** —
 
 > **🚧 Merge gate (decided 2026-06-25).** This branch does **not** merge to `main`
 > until per-agent custom detection strategies are wired for every agent that

@@ -1,16 +1,16 @@
 > **ABOUTME:** Security analysis of the `:overlay` mode's CAP_SYS_ADMIN host-escape surface on
 > rootful Docker, weighing fixes (fuse-overlayfs, userns, AppArmor) and auditing them against
-> a real container. Superseded by D109, which retires `:overlay` rather than fixing it; kept
-> for the escape mechanics and why the fixes don't hold.
+> a real container.
 
 # Plan: eliminate the `:overlay` CAP_SYS_ADMIN host escape (audit H2)
 
-Status: **design audited 2026-06-29 — the recommended fix (Option A,
-fuse-overlayfs) is EMPIRICALLY REFUTED; see "## Audit" below.** Surfaced by the
-2026-06-29 escape/exfil security audit (finding H2). The interim for v0.6.0 —
-treat `:overlay` as an explicit, documented dangerous opt-in (see "v0.6.0
-interim") — stands, and is now the *recommended* near-term posture, not just a
-stopgap.
+**Status:** ABANDONED — superseded by D109, which retires `:overlay` rather than fixing it
+(see [retire-overlay-reflink-copy.md](retire-overlay-reflink-copy.md)); kept for the escape
+mechanics and why the fixes don't hold. Design audited 2026-06-29 — the recommended fix
+(Option A, fuse-overlayfs) is EMPIRICALLY REFUTED; see "## Audit" below. Surfaced by the
+2026-06-29 escape/exfil security audit (finding H2). The interim for v0.6.0 — treat
+`:overlay` as an explicit, documented dangerous opt-in (see "v0.6.0 interim") — stood as the
+near-term posture until the retirement landed.
 
 > ⚠️ **Superseded by D109 — the resolution is to RETIRE `:overlay`, not fix it.**
 > See [retire-overlay-reflink-copy.md](retire-overlay-reflink-copy.md). The audit

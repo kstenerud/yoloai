@@ -1,15 +1,17 @@
 > **ABOUTME:** Audit plan that re-validates the public-layering Move (S6) against what the
 > branch actually built, before executing it — output is decisions and a resequenced plan,
-> not code. Records verdicts inline (D97) as re-audits land, most recently confirming
-> `runtime` is Move-ready.
+> not code. Records verdicts inline (D97) as re-audits land.
 
 # Pre-Move audit — re-validate "the Move" (S6) before executing it
 
-**Status:** Audit plan, 2026-06-26. Written to survive a context compaction and be
-**executed fresh**. The goal is NOT to do the Move — it is to decide *whether and
-how the Move plan should change* given everything learned on the `public-layering`
-branch since the Move was framed. Output is a set of decisions + a (possibly
-re-sequenced) Move plan, not code.
+- **Status:** IN-PROGRESS — written 2026-06-26 to survive a context compaction and be
+  **executed fresh**; most recent re-audit (2026-06-27) confirms `runtime` is Move-ready, but
+  the mechanical `git mv runtime store copyflow` + import sweep + `.golangci.yml` fence
+  repoint + `make releasetest` this audit unblocks has not yet been executed. The goal of this
+  doc is NOT to do the Move — it is to decide *whether and how the Move plan should change*
+  given everything learned on the `public-layering` branch since the Move was framed. Output is
+  a set of decisions + a (possibly re-sequenced) Move plan, not code.
+- **Depends on:** —
 
 ## Why now
 

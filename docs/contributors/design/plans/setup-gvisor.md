@@ -1,8 +1,14 @@
 > **ABOUTME:** Design for an opt-in `yoloai system setup-gvisor` (macOS) to install and register
-> runsc in the Docker VM so `container-enhanced` works there. Paused: a spike found neither
-> Docker Desktop nor OrbStack installs runsc cleanly, so `container-enhanced` stays Linux-primary.
+> runsc in the Docker VM so `container-enhanced` works there. Captures the motivation, the
+> Docker-Desktop-vs-OrbStack provider tradeoffs, and a phased implementation plan.
 
 # `yoloai system setup-gvisor` (macOS)
+
+- **Status:** PLANNED — paused 2026-06-06. Phase 0 (the R-DD spike) ran and came back negative on
+  both macOS providers — see [Phase 0 verdict](#phase-0-verdict-gvisor-on-macos-is-not-turn-key--pause-recommended).
+  gVisor on macOS is not turn-key; the recommendation is to keep `container-enhanced`
+  Linux-primary and defer the macOS command. This doc is retained as the record + revival plan.
+- **Depends on:** —
 
 ## Why this doc exists
 
@@ -12,11 +18,6 @@ ships runsc, so on a fresh Mac `--isolation container-enhanced` fails — there 
 path. This doc designs an **opt-in** `yoloai system setup-gvisor` command that does that
 setup explicitly, captures the motivation (is gVisor on macOS even worth it?), and lays out
 a phased implementation plan.
-
-Status: **paused (2026-06-06).** Phase 0 (the R-DD spike) ran and came back negative on both
-macOS providers — see [Phase 0 verdict](#phase-0-verdict-gvisor-on-macos-is-not-turn-key--pause-recommended).
-gVisor on macOS is not turn-key; the recommendation is to keep `container-enhanced`
-Linux-primary and defer the macOS command. This doc is retained as the record + revival plan.
 
 ## Motivation — is gVisor on macOS worth it?
 

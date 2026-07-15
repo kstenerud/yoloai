@@ -4,6 +4,13 @@
 
 # Release migration — `layering-refactor` → `main` → release tag
 
+- **Status:** IN-PROGRESS — the prerelease cross-version test (§1) ran and passed on Linux and
+  macOS (2026-06-08), and W1b (§3) shipped as the v1→v2 migration step. Remaining: the
+  `docs/BREAKING-CHANGES.md` entry for this branch's public-API reshape and the `agent_files`
+  inner json-tag change, and keeping §2's format/version-gate table current as new on-disk/
+  boundary fields are added before merge.
+- **Depends on:** —
+
 ## Why this doc exists
 
 This branch introduces on-disk and Go↔Python boundary format changes that affect

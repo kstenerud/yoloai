@@ -1,23 +1,24 @@
 > **ABOUTME:** macOS verification brief for the darwin-only pieces of host-artifact-reclamation: the
 > `ps`-based injector reaper and the seatbelt-tmux reaper, neither authorable nor verifiable on
-> Linux. Completed; results and a residual finding are recorded inline.
+> Linux.
 
 # Build brief (macOS agent): host-artifact reclamation — darwin injector verify + seatbelt-tmux reaper
 
-**Status: DONE (macOS agent, 2026-07-06).** Both tasks completed and verified on
-macOS 26 / Apple Silicon. Task A ✅ (darwin injector reaper reaps a real orphaned
+**Status:** IMPLEMENTED — both tasks completed and verified on macOS 26 / Apple Silicon,
+2026-07-06. Task A ✅ (darwin injector reaper reaps a real orphaned
 `__inject`, spares a live one). Task B ✅ (seatbelt-tmux reaper built, unit-tested,
-and verified against real leaked servers). One prerequisite fix and one residual
-finding (DF77) surfaced — see **Results** at the bottom. Committed on
-`host-artifact-reclamation` (fix `d75b68fe`, reaper `5f7d056a`).
+and verified against real leaked servers). Task C ✅ (darwin→linux cross-lint/vet direction
+confirmed clean — see [host-artifact-reclamation.md](host-artifact-reclamation.md)'s
+"Follow-ups (done)"). One prerequisite fix and one residual finding (DF77) surfaced — see
+**Results** at the bottom. Committed on `host-artifact-reclamation`
+(fix `d75b68fe`, reaper `5f7d056a`, DF77 fix `3a860e65`).
 
-**Status: START HERE (macOS agent).** Design is settled in
+Design is settled in
 [host-artifact-reclamation.md](host-artifact-reclamation.md) and [D114](../../decisions/working-notes.md#d114)
-— read them first for the root cause and the identity-keyed-sweep principle; **build to it, do not
-re-litigate it.** The Linux-verifiable pieces (the broker injector reaper, the containerd netns
-sweep, the kill-before-delete teardown) are **already committed** on branch
-`host-artifact-reclamation` (commit `c2feca66`). Do **not** duplicate or rewrite them; if something
-conflicts, prefer what's committed and flag it.
+— read them first for the root cause and the identity-keyed-sweep principle. The Linux-verifiable
+pieces (the broker injector reaper, the containerd netns sweep, the kill-before-delete teardown)
+were already committed on branch `host-artifact-reclamation` (commit `c2feca66`) before this brief
+started.
 
 Branch: `host-artifact-reclamation`. Pull it, `make build`, confirm `make check` is green on the Mac
 before changing anything.

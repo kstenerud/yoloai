@@ -4,11 +4,15 @@
 
 # macOS verification queue (`substrate-move`)
 
-**Status:** Live queue for the `substrate-move` branch. **Working model:** the Linux session is the
-**sole code writer**; this queue holds **verification-only** tasks — run the commands, record
-pass/fail + any output, do **not** commit code from the Mac (avoids two-writer branch divergence).
-If a smoke fails, report the failure here and the Linux session fixes it. Pull `substrate-move`,
-build (`make build` or `go build ./cmd/yoloai`), then work the queue.
+- **Status:** IN-PROGRESS — live queue for the `substrate-move` branch; V1 and V2 verified
+  2026-06-26, V3 still pending.
+- **Depends on:** —
+
+**Working model:** the Linux session is the **sole code writer**; this queue holds
+**verification-only** tasks — run the commands, record pass/fail + any output, do **not**
+commit code from the Mac (avoids two-writer branch divergence). If a smoke fails, report the
+failure here and the Linux session fixes it. Pull `substrate-move`, build (`make build` or
+`go build ./cmd/yoloai`), then work the queue.
 
 Record results inline under each item (`✅ verified <date>` / `❌ <what failed>`), and move
 finished items to the "Verified" section at the bottom.

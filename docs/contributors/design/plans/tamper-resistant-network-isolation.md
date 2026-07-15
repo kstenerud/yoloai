@@ -4,11 +4,12 @@
 
 # Tamper-resistant network isolation (egress containment "step 1.5")
 
-**STATUS: IMPLEMENTED 2026-06-28** for docker + the agent-free launch path (§§1–6 below),
-validated on real Docker (agent can't flush; non-allowlisted stays blocked; injector stays
-reachable; live `network allow` patches the per-netns ipset from the sidecar). Deferred:
-containerd/Kata, the legacy launch path, macOS (see Scope). One boundary worth noting — see
-"Provisioning egress" below.
+- **Status:** IN-PROGRESS — implemented 2026-06-28 for docker + the agent-free launch path
+  (§§1–6 below), validated on real Docker (agent can't flush; non-allowlisted stays blocked;
+  injector stays reachable; live `network allow` patches the per-netns ipset from the sidecar).
+  Deferred: containerd/Kata, the legacy launch path, macOS (see Scope). One boundary worth
+  noting — see "Provisioning egress" below.
+- **Depends on:** —
 
 ## The problem (confirmed)
 

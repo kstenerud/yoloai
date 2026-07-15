@@ -1,13 +1,17 @@
-> **ABOUTME:** Deferred plan to promote per-agent turn-completion detection (native callbacks
-> like Codex `notify`, Gemini `AfterAgent`) to a first-class strategy. Gates the
-> public-layering branch's merge to main until done.
+> **ABOUTME:** Plan to promote per-agent turn-completion detection (native callbacks like Codex
+> `notify`, Gemini `AfterAgent`) to a first-class strategy, gating the public-layering branch's
+> merge to main until every shipped agent uses its native callback instead of the heuristic
+> fallback.
 
 # Per-agent custom detection strategies — deferred follow-up (MERGE GATE)
 
-**Status:** Planned, not started. Deferred out of the agent-owned-detection plan
-([agent-owned-detection.md](agent-owned-detection.md)) on 2026-06-25. The
-abstraction's contract is best shaped with all the real callback shapes in hand,
-so it lands as its own task.
+**Status:** IMPLEMENTED — deferred out of the agent-owned-detection plan
+([agent-owned-detection.md](agent-owned-detection.md)) on 2026-06-25, then built directly rather
+than through the originally-planned `DetectionSpec` abstraction: all four remaining agents
+(Gemini, Codex, OpenCode, Aider) now wire their native turn-completion callback, each verified
+live on a real backend (see Progress below), meeting the merge-gate requirement. The
+`DetectionSpec` formalization itself turned out unnecessary. Residual, non-blocking: Aider's
+stop-only active-gap (user-typed-via-attach turns) awaits a future hook-assisted mode.
 
 > **🚧 MERGE GATE.** The `public-layering` branch **does not merge to `main`**
 > until this work is done: every shipped agent that exposes a native

@@ -66,6 +66,50 @@ A package godoc or module docstring is **not** a substitute — the two coexist,
 
 If the file is hand-edited source code and lives alongside other source code, write the ABOUTME header — test files included. If it's user-facing reference content, you can skip. If a class of file isn't covered here, propose a D-entry rather than improvising.
 
+## Metadata list (plans)
+
+A document with structured facts about itself carries them as a bolded list directly under its
+title, one field per line. Plans in `design/plans/` are the case that exists today:
+
+```markdown
+> **ABOUTME:** What this plan would build, and why.
+
+# Plan title
+
+- **Status:** PLANNED — designed 2026-07-01; the long pole of Phase 1a.
+- **Depends on:** store-workload-split.md
+```
+
+The list is greppable per field (`grep '^- \*\*Status:\*\*' *.md`), renders as a list rather than
+as noise, and extends without changing shape. It is deliberately not YAML front-matter: that
+renders as junk in a plain Markdown view, which is the same mistake as hiding the ABOUTME in an
+HTML comment.
+
+**The ABOUTME and the metadata list divide cleanly, and must.** The ABOUTME says what the document
+is *for* — prose, stable for the document's life. The list says where it *stands* — structured,
+changing. Status in an ABOUTME is a second copy of a fact the list owns two lines below it, and
+that copy is what goes stale: plans here read "Planned, not started" above their own Progress
+section recording four completed phases with commit hashes.
+
+**Only add a field that answers a question someone asks, and prefer one a gate can check.**
+`Status` answers "what can I build / what's underway / what haven't we fleshed out", and a gate
+enforces the vocabulary. `Depends on` answers "what can I start now", and a gate resolves each
+name to a live plan, so it cannot rot and archiving a plan something still needs fails loudly.
+`Effort` and `Layer` were proposed and left out: no gate can check either, so both would age in
+silence the way every ungated number in this repo has (D121). A field nobody reads is worse than
+no field, because the next reader trusts it.
+
+**A relation is declared in one direction only.** "A depends on B" is a single fact, and it lives
+in A. There is deliberately no `Unblocks:` field — it would store that same edge a second time, on
+B, pointing the other way, and the two can then disagree with nothing to catch it. Direction is not
+arbitrary either: a plan's author knows what their plan needs, so `Depends on` is local knowledge;
+`Unblocks` would mean editing B whenever some later A starts needing it, by someone who may never
+open B. The reverse view is a grep, and grep cannot be out of date:
+
+```
+grep -l 'Depends on:.*session-carve.md' docs/contributors/design/plans/*.md   # what B unblocks
+```
+
 ## Headings
 
 - **ATX-style** (`#`, `##`, `###`) — never Setext-style (`===`, `---` underlines). ATX is unambiguous at all heading levels.

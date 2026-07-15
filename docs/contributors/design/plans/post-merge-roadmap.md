@@ -5,6 +5,12 @@
 
 # Post-merge roadmap (after the public-layering merge, `b9c91834`)
 
+- **Status:** IN-PROGRESS — sequences the D99 post-merge remainder rather than building any of
+  it; every workstream has its own plan, and that plan's Status line is authoritative for where
+  it stands. The per-workstream status in the table below is a copy of those and is known to lag
+  (DF103). E1, the Linux/KVM microvm backend, was investigated and retired (D104).
+- **Depends on:** —
+
 The public-layering endgame (D99) is merged. This is the remaining work: the D99
 post-merge remainder and the open findings. (E1, a Linux/KVM **microvm** backend,
 was investigated and **retired** — see [D104](../../decisions/working-notes.md#d104--retire-the-hand-rolled-qemu--m-microvm-backend-libkrun-is-the-tech-if-a-light-vm-tier-is-ever-added-e1)

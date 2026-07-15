@@ -1,8 +1,22 @@
-> **ABOUTME:** Planning doc (not yet implemented) for an Apple `container` runtime backend —
-> Linux OCI in per-container VMs on macOS — plus the resulting macOS backend priority and
-> setup-wizard rework needed once several container systems can coexist there.
+> **ABOUTME:** Plan for an Apple `container` runtime backend — Linux OCI in per-container VMs on
+> macOS — plus the resulting macOS backend priority and setup-wizard rework needed once several
+> container systems can coexist there.
 
 # Apple `container` backend
+
+- **Status:** IN-PROGRESS — the backend and the macOS priority/wizard rework described here have
+  shipped: backend skeleton + two-tier probe + lifecycle/exec/mounts (`b85a11ad`, `5bd44b91`,
+  `c2f90c7f`), network isolation, the container-system selector (Phase 4c, `4a90d1a9`), curated env
+  keyset (Phase 6, `4651b645`), wizard preset rework (Phase 5, `cff6aebd`), and docs (Phase 7,
+  `66f596c1`) are all on `main`, and the macOS default-isolation shift is recorded in
+  `BREAKING-CHANGES.md`. **Remaining: the AC10 network-allowlist end-to-end run** — the real
+  `--network-isolated` path has never been exercised against a live apple backend (the only
+  coverage is `runtime/apple/apple_test.go` asserting the descriptor's `NetworkIsolation` flag),
+  and apple's DNS is the vmnet gateway (`192.168.64.1`), so the default-deny chain must ACCEPT
+  gateway:53. See "Open questions / risks" below. Work-copy git confinement for apple + seatbelt
+  followed as its own plan:
+  [confine-host-side-git-macos-build.md](confine-host-side-git-macos-build.md) (D113).
+- **Depends on:** —
 
 ## Why this doc exists
 
@@ -19,8 +33,6 @@ native on macOS, no Docker Desktop.
 This plan covers (1) the new backend and (2) a related change the user asked
 for: a defined **macOS backend priority** now that four Docker-like systems can
 coexist.
-
-Nothing here is implemented. Status: **planning.**
 
 ## Naming decision (resolve first)
 

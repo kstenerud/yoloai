@@ -47,8 +47,15 @@ come back here to route.
 
 ## Doc conventions
 
-Every directory's `README.md` is its index. Filenames are lowercase kebab-case and name the
-subject, not its status.
+Every directory's `README.md` **routes**; it does not inventory. It says which document to read
+for which task, what supersedes or blocks what, and where to start — the things a directory
+listing cannot tell you. It does not carry a row per file: every doc states its own purpose in
+its ABOUTME, so a per-file list is a second copy of a fact the file already owns, and it goes
+stale silently. `plans/README.md` listed 20 of 29 plans before this rule existed, which means
+"is there a plan for X?" could be answered *no* while the plan sat in the directory. `ls` plus
+`head -3` is the inventory, and it cannot be incomplete.
+
+Filenames are lowercase kebab-case and name the subject, not its status.
 
 Three content-retirement patterns:
 
@@ -57,7 +64,13 @@ Three content-retirement patterns:
   **`Trigger:`** stating what revives it, and can flow back), or `<topic>-abandoned.md`
   (won't do; carries a **`Why:`**). Used for critiques, questions, and findings.
 - **Append-only logs** (`decisions/`) grow and age-split.
-- **File-documents** (plans, specs, research) move whole to `archive/` when complete.
+- **File-documents** (plans, specs, research) move whole to `archive/` when their work is complete
+  or abandoned — at that point their only remaining use is archaeological. A plan declares where it
+  stands in a metadata list under its title (`- **Status:**`, `- **Depends on:**`), and a gate keeps
+  the finished ones out of `design/plans/`. An idea is a plan file too, marked `UNSPECIFIED` until
+  someone designs it — a backlog kept as README bullets is invisible to `ls`, to grep and to every
+  gate, which is exactly how finished items sat in one for months. See
+  [`design/plans/README.md`](design/plans/README.md).
 
 ## How we work
 

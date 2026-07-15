@@ -55,7 +55,13 @@ Full detail and the reasoning behind each rule:
    from a grep that missed a sink.
 7. **File the defects you don't fix** in `design/findings-unresolved.md`. Fixing in scope is
    fine *if you record it*; silently working around it never is.
-8. **Multi-phase work starts with a plan** in `design/plans/`. A one-commit fix doesn't.
+8. **An idea worth building is a plan file** in `design/plans/` — not a bullet in a README, which
+   is where a backlog goes to be invisible. Each carries a metadata list under its title:
+   `- **Status:**` (`UNSPECIFIED` no design yet / `PLANNED` designed / `IN-PROGRESS` partly built /
+   `IMPLEMENTED` / `ABANDONED`) and `- **Depends on:**` (live plan filenames, or `—`). A one-commit
+   fix needs no plan. `design/plans/` holds only the unfinished three: once the work is done or
+   dropped the plan is archaeology, and it moves whole to `archive/plans/` in the same PR. Gated,
+   so none of it is something to remember.
 
 ## The quality gate
 

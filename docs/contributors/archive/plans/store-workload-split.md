@@ -1,11 +1,12 @@
 > **ABOUTME:** Plan (Q104, settled as D102) to split agent/model, inside-process config, out of
 > the sandbox's substrate record (`store.Environment`) into its own orchestration-owned
-> `agent.json`, so the record promoted to the public store package stays substrate-only. Done.
+> `agent.json`, so the record promoted to the public store package stays substrate-only.
 
 # Q104 — split the inside-process config out of the substrate record
 
-**Status:** Scoped 2026-06-26 (Stage 3b of the public-layering Move). Resolves **Q104**.
-Gated decision pending (migration style, below). Branch: `substrate-move`.
+**Status:** IMPLEMENTED — scoped 2026-06-26 (Stage 3b of the public-layering Move) on branch
+`substrate-move`; C1 (additive groundwork), C2 (the cutover), and C3 (migration test +
+BREAKING-CHANGES) all landed 2026-06-26, `make check` + tagged vet green, settled as **D102**.
 
 ## Why
 

@@ -1,11 +1,12 @@
 > **ABOUTME:** Decision (D109) to remove the `:overlay` mount mode — a rootful-Docker host-escape
 > surface — and recover its performance benefit via reflink/clonefile copy-on-write in `:copy`.
-> Decided but not yet implemented; sequences the reflink addition before the overlay removal.
+> Sequences the reflink addition before the overlay removal.
 
 # Plan: retire `:overlay`, base `:copy` on reflink-aware copy
 
-Status: **decided (D109), not yet implemented.** Supersedes the "gate `:overlay`"
-direction in [overlay-sysadmin-escape.md](overlay-sysadmin-escape.md) (H2/DF65).
+- **Status:** PLANNED — decided (D109), not yet implemented. Supersedes the "gate `:overlay`"
+  direction in [overlay-sysadmin-escape.md](overlay-sysadmin-escape.md) (H2/DF65).
+- **Depends on:** —
 
 ## Why (the short version)
 
