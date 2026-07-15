@@ -61,10 +61,10 @@ import (
 //     docker build failure to an exit code with no cause.
 //
 // Deliberately NOT gated here: markdown.md also requires ABOUTME headers on
-// docs/contributors/**/*.md. 122 of those files are currently missing one —
-// a known, tracked bulk-add task, not a per-PR regression. Gating it here
-// would make this test permanently red for a gap a separate task owns; once
-// that sweep lands, extend Gate A to cover docs/contributors/**/*.md too.
+// docs/contributors/**/*.md. Most of those files are still missing one — a
+// known, tracked bulk-add task, not a per-PR regression. Gating it here would
+// make this test permanently red for a gap a separate task owns; once that
+// sweep lands, extend Gate A to cover docs/contributors/**/*.md too.
 //
 // (ABOUTME line width USED to be listed here as deliberately not gated, on the
 // grounds that markdown.md stated no width rule. D117 made it a rule at 100
@@ -235,12 +235,12 @@ func TestRepoHygiene_GoFileComments_IgnoresStringLiterals(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // hasABOUTMEHeader reports whether an ABOUTME: line appears anywhere in the
-// given lines (callers pass the file's first N lines). It is a plain
-// substring test — deliberately not a column/prefix match — because the
-// comment marker differs by language ("// ABOUTME:" / "# ABOUTME:") and
-// markdown.md imposes no width rule on the header (330+ existing lines
-// already exceed 80 columns; enforcing width would be inventing a rule
-// markdown.md doesn't state).
+// given lines (callers pass the file's first N lines). It is a plain substring
+// test — deliberately not a column/prefix match — because the comment marker
+// differs by language ("// ABOUTME:" / "# ABOUTME:").
+//
+// Presence only. Width is markdown.md's other rule and is checked separately
+// against aboutmeMaxCols, so this function has no opinion on it.
 func hasABOUTMEHeader(lines []string) bool {
 	for _, l := range lines {
 		if strings.Contains(l, "ABOUTME:") {
@@ -265,12 +265,6 @@ func aboutmeCategory(path string) string {
 	}
 }
 
-// TestRepoHygiene_ABOUTMEHeaders_AllTrackedFilesCompliant is Gate A: every
-// tracked *.go, runtime/monitor/*.py, and scripts/*.sh file must carry an
-// ABOUTME: line in its first 6 lines. Verified at authoring time: Go
-// 580/580, Python runtime/monitor 9/9, scripts/*.sh 4/4 — this should be
-// GREEN today. A failure here is a real gap (a new file that skipped the
-// convention), not a flaky check; there is no allowlist to add to.
 // aboutmeMaxCols is the ABOUTME line-width limit from
 // docs/contributors/standards/markdown.md, comment marker included.
 //
@@ -279,8 +273,21 @@ func aboutmeCategory(path string) string {
 // drifted past. Gating at 80 would have meant reflowing a quarter of the repo to
 // satisfy a number nobody had ever applied. 100 is what the code already does —
 // exactly four lines exceeded it, and those were reflowed, not grandfathered.
+//
+// Those numbers are past tense on purpose: they are what the tree held when D117
+// decided the threshold, so no later edit can falsify them. That is the only kind
+// of count D121 leaves standing outside a gate.
 const aboutmeMaxCols = 100
 
+// TestRepoHygiene_ABOUTMEHeaders_AllTrackedFilesCompliant is Gate A: every
+// tracked *.go, runtime/monitor/*.py, and scripts/*.sh file must carry an
+// ABOUTME: line in its first 6 lines, within aboutmeMaxCols.
+//
+// A failure here is a real gap (a new file that skipped the convention), not a
+// flaky check; there is no allowlist to add to. The gate logs its own live scope
+// per bucket, which is where to look for the counts this comment used to state
+// and get wrong: "Go 580/580, scripts/*.sh 4/4" was written here at authoring
+// time and was 585 and 5 within days (D121).
 func TestRepoHygiene_ABOUTMEHeaders_AllTrackedFilesCompliant(t *testing.T) {
 	root := repoRoot(t)
 	files := trackedFiles(t, root)
@@ -659,15 +666,17 @@ func assertNoDuplicates(t *testing.T, headings map[string][]idSite, corpusDesc s
 // D<n>/DF<n> cited from a Go comment must resolve to a real heading, and no
 // heading may define the same ID twice.
 //
-// False-positive rate on the current tree: 0%. Matching method: parse every
-// tracked *.go file (goFileComments) and run \bD(\d+)\b / \bDF(\d+)\b
-// against each genuine "//" comment's text — string-literal content is
-// structurally excluded by construction (see goFileComments and
-// TestRepoHygiene_GoFileComments_IgnoresStringLiterals), not merely checked
-// by hand. That yields exactly 33 distinct D citations and 30 distinct DF
-// citations; every one was manually checked against its source line and is
-// a genuine rationale-ID reference (no hex/version/URL/prose collision
-// found). An earlier line-scanning draft of this gate (strings.Index(line,
+// Matching method: parse every tracked *.go file (goFileComments) and run
+// \bD(\d+)\b / \bDF(\d+)\b against each genuine "//" comment's text —
+// string-literal content is structurally excluded by construction (see
+// goFileComments and TestRepoHygiene_GoFileComments_IgnoresStringLiterals),
+// not merely checked by hand. Every citation it extracted was manually
+// checked against its source line when this gate was written, and all were
+// genuine rationale-ID references — no hex/version/URL/prose collision. The
+// live counts are in the gate's own scope log; the tally that stood here
+// ("exactly 33 distinct D citations and 30 distinct DF citations") had drifted
+// to 36 and 35 within days, which is D121 in the file that gates for it. An
+// earlier line-scanning draft of this gate (strings.Index(line,
 // "//")) self-hosted false positives against this very file's own
 // table-driven test fixtures before goFileComments replaced it — the fixed
 // approach is immune to that class of bug by construction.
@@ -952,8 +961,9 @@ func nolintComplexityName(line string) (string, bool) {
 
 // TestRepoHygiene_NoComplexitySuppression_AllTrackedFiles is Gate C part 1:
 // no tracked *.go file may contain a //nolint directive naming
-// cyclop/gocognit/gocyclo. Verified at authoring time: 0 of ~1152 //nolint
-// directives suppress any of the three — this should be GREEN today.
+// cyclop/gocognit/gocyclo. The repo has many //nolint directives and none of
+// them suppress any of the three — which is the gate's whole claim, so it is
+// enforced rather than tallied here (D121).
 //
 // Scans genuine comments only (goFileComments), not raw text lines: this
 // file's own nolintComplexityName test fixtures below embed
@@ -1094,11 +1104,11 @@ func TestRepoHygiene_ComplexitySuppressionMatcher_RejectsBadDirectives(t *testin
 // indistinguishable once the output is gone, which is exactly when it is needed.
 //
 // Why this is a gate and not a forbidigo rule: the wanted rule is
-// argument-positional. Of the 60 io.Discard sites in the tree, most production
-// ones are `if out == nil { out = io.Discard }` — the correct implementation of a
+// argument-positional. Most io.Discard sites in the tree are production
+// `if out == nil { out = io.Discard }` — the correct implementation of a
 // documented `Default: io.Discard` contract (client.go, system.go, engine.go,
-// launch.go, ptybridge, the --json writers). Banning the expression forces ~20
-// reflexive nolints and teaches the habit that defeats the rule. forbidigo
+// launch.go, ptybridge, the --json writers). Banning the expression buys a crop
+// of reflexive nolints and teaches the habit that defeats the rule. forbidigo
 // matches the expression and cannot see the call it sits in; this file already
 // parses Go and can see both.
 // ---------------------------------------------------------------------------
@@ -1114,7 +1124,7 @@ var setupOutputSinks = []string{"EnsureSetup", "Setup"}
 // tag is set. That tag is the discriminator this whole gate rests on:
 // integration-tagged files drive real backends, where EnsureSetup pulls, builds
 // and can hang; untagged ones drive fakes. internal/orchestrator/engine_test.go
-// passes io.Discard to EnsureSetup five times and every one is correct — the
+// passes io.Discard to EnsureSetup repeatedly and every one is correct — the
 // fake runtime emits nothing, so there is no output to lose. A gate that flags
 // those is dead on arrival.
 func requiresIntegrationTag(f *ast.File) bool {
