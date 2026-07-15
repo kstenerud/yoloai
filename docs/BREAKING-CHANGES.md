@@ -29,8 +29,6 @@ injector and is skipped under `--network-none`.
 **Migration:** none required for standard use. To restore direct key delivery for
 a sandbox, pass `--no-broker` at `new` (sticky across restart), same as Claude.
 
-## v0.7.0
-
 ### Config commands reject unknown paths; `config set` requires a leaf key
 
 **Previous behavior:** `yoloai config set` accepted arbitrary paths, including
@@ -56,6 +54,8 @@ current key name (for example, `container_backend` instead of `backend`), and
 set a leaf or map entry (`tart.image`, `env.NAME`, or `model_aliases.NAME`)
 rather than a whole section. Edit the YAML file directly when replacing a
 structured section as a unit.
+
+## v0.7.0
 
 ### Sandbox base image moves to Debian 13 (trixie)
 
