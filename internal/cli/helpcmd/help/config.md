@@ -14,24 +14,28 @@ COMMANDS
      yoloai config set <key> <value>  # change a setting
      yoloai config reset <key>        # revert to default
 
+  'config set' accepts known leaf settings and one-level map entries.
+  Section-level keys such as tart, env, and model_aliases are rejected;
+  set tart.image, env.NAME, or model_aliases.NAME instead.
+
 KEY SETTINGS
 
-  agent            Agent to use (default: claude)
-  model            Model name or alias (default: agent's default)
-  backend          Runtime backend: docker, podman, tart, seatbelt, containerd
-  isolation        Isolation mode (container backends only): container,
-                   container-enhanced (gVisor), container-privileged,
-                   vm (Kata+QEMU), vm-enhanced (Kata+Firecracker).
-                   VM modes are experimental.
-  os               Target OS: linux (default), mac
-  tmux_conf        Tmux config mode: default+host, default, host, none
-  env.<NAME>       Environment variable forwarded to container
+  agent              Agent to use (default: claude)
+  model              Model name or alias (default: agent's default)
+  container_backend  Runtime backend: docker, podman, tart, seatbelt, containerd
+  isolation          Isolation mode (container backends only): container,
+                     container-enhanced (gVisor), container-privileged,
+                     vm (Kata+QEMU), vm-enhanced (Kata+Firecracker).
+                     VM modes are experimental.
+  os                 Target OS: linux (default), mac
+  tmux_conf          Tmux config mode: default+host, default, host, none
+  env.<NAME>         Environment variable forwarded to container
 
 EXAMPLES
 
      yoloai config set agent gemini
      yoloai config set model sonnet
-     yoloai config set backend tart
+     yoloai config set container_backend podman
      yoloai config set env.OLLAMA_API_BASE \
        http://host.docker.internal:11434
      yoloai config reset model

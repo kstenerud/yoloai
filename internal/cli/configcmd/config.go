@@ -6,7 +6,6 @@ package configcmd
 import (
 	"errors"
 	"fmt"
-	"os"
 
 	"github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
@@ -38,7 +37,7 @@ func newConfigGetCmd() *cobra.Command {
 		Long: `Print configuration values.
 
 Without arguments, prints all settings with effective values (defaults + overrides).
-With a dotted key (e.g., backend), prints just that value.
+With a dotted key (e.g., container_backend), prints just that value.
 
 Global settings (tmux_conf, model_aliases) are stored in ~/.yoloai/config.yaml.
 Default settings are stored in ~/.yoloai/defaults/config.yaml.`,
@@ -78,10 +77,8 @@ func configGetAll(cmd *cobra.Command) error {
 
 // configGetKey prints a single configuration value by dotted key.
 //
-// CLI semantics: a missing key exits 1 silently in human mode (matches
-// shell expectations for "is this set?"-style scripts) but returns a
-// loud error in --json mode so machine-readable callers always get
-// structured failure.
+// CLI semantics: unknown keys are loud errors so typos and renamed settings do
+// not look like valid configuration values.
 func configGetKey(cmd *cobra.Command, key string) error {
 	sys, err := cliutil.System()
 	if err != nil {
@@ -93,7 +90,7 @@ func configGetKey(cmd *cobra.Command, key string) error {
 			if cliutil.JSONEnabled(cmd) {
 				return fmt.Errorf("key %q not found", key)
 			}
-			os.Exit(1)
+			return err
 		}
 		return err
 	}
@@ -114,6 +111,9 @@ func newConfigSetCmd() *cobra.Command {
 		Long: `Set a configuration value.
 
 Uses dotted paths for nested keys (e.g., tart.image).
+Only known leaf settings and one-level map entries can be set. Section-level
+keys such as tart, env, and model_aliases are rejected; set a leaf key such as
+tart.image, env.NAME, or model_aliases.NAME instead.
 Creates the config file if it doesn't exist.
 Preserves comments and formatting.
 
@@ -150,7 +150,7 @@ func newConfigResetCmd() *cobra.Command {
 		Short: "Reset a configuration value to its default",
 		Long: `Remove a key from configuration, reverting it to the internal default.
 
-Works at any level: a single value (backend), a map entry
+Works at any level: a single value (container_backend), a map entry
 (env.OLLAMA_API_BASE), or an entire section (tart).
 
 Global settings (tmux_conf, model_aliases) are stored in ~/.yoloai/config.yaml.

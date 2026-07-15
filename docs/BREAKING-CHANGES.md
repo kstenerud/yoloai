@@ -29,6 +29,32 @@ injector and is skipped under `--network-none`.
 **Migration:** none required for standard use. To restore direct key delivery for
 a sandbox, pass `--no-broker` at `new` (sticky across restart), same as Claude.
 
+### Config commands reject unknown paths; `config set` requires a leaf key
+
+**Previous behavior:** `yoloai config set` accepted arbitrary paths, including
+misspelled or renamed keys such as `backend` and section-level keys such as
+`tart`. It could therefore report success while writing configuration that
+yoloai did not use, or replace a structured section with a scalar. `config
+reset` silently accepted unknown paths, and human-readable `config get` exited
+without explaining that a path was unknown.
+
+**New behavior:** `config get`, `set`, and `reset` validate paths against the
+configuration schema and return a `config key not found` error for unknown
+paths. `config set` additionally accepts only scalar leaf settings and one-level
+map entries; section-level keys are rejected before a config file is created or
+modified. `config reset` can still remove an entire known section.
+
+**Impact:** scripts that used an obsolete or misspelled key and treated a
+successful write as proof that the setting took effect now fail explicitly.
+Commands such as `yoloai config set backend podman` and `yoloai config set tart
+image` no longer succeed.
+
+**Migration:** run `yoloai config get` to list available settings, use the
+current key name (for example, `container_backend` instead of `backend`), and
+set a leaf or map entry (`tart.image`, `env.NAME`, or `model_aliases.NAME`)
+rather than a whole section. Edit the YAML file directly when replacing a
+structured section as a unit.
+
 ## v0.7.0
 
 ### Sandbox base image moves to Debian 13 (trixie)
@@ -1237,4 +1263,3 @@ All entrypoint scripts now use `$YOLOAI_DIR` instead of hardcoded paths. Docker 
 **Rationale:** `tmux_conf` and `model_aliases` are user preferences that should apply to all sandboxes regardless of profile. They don't belong in profile-overridable config.
 
 **Migration:** Automatic. On first run, yoloai moves `tmux_conf` and `model_aliases` from the base profile config to the global config. No manual action needed.
-
