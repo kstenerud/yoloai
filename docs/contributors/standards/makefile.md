@@ -51,11 +51,13 @@ Build infrastructure targets (`$(BINARY)`, internal helpers) do not need help co
 
 ## The `make check` contract
 
-`make check` is the single quality gate (D20, `../principles/development-principles.md §10`). Its prerequisite list is the source of truth — read the live `check:` line in the Makefile rather than trusting a pasted copy here; it has grown twice (`vet-tagged`, then `crosscheck`/`lint-cross`) without every doc catching up. As of this writing it is:
-
-```make
-check: lint lint-cross vet-tagged crosscheck tidy-check hadolint actionlint test python-test
-```
+`make check` is the single quality gate (D20, `../principles/development-principles.md §10`). Its
+prerequisite list is the source of truth, so **read the live `check:` line in the Makefile** —
+this file deliberately does not copy it. The list has grown four times (`vet-tagged`, then
+`crosscheck`/`lint-cross`, then `shellcheck`, then `lint-speculative-api`) and the copy that used
+to sit here was stale on three of those occasions — including while the paragraph above it warned
+the reader not to trust a pasted copy. A second authoritative list is the defect, not the
+staleness (D121, D124).
 
 Concretely, `make check` runs:
 

@@ -43,7 +43,7 @@ DOCKER_HOST_ENV := $(DOCKER_HOST)
 DOCKER_HOST_RESOLVED = $(if $(DOCKER_HOST_ENV),$(DOCKER_HOST_ENV),$(shell docker context inspect --format '{{.Endpoints.docker.Host}}' 2>/dev/null))
 integration e2e base-image smoketest smoketest-quick: export DOCKER_HOST = $(DOCKER_HOST_RESOLVED)
 
-.PHONY: build test fmt lint lint-cross vet-tagged crosscheck tidy-check govulncheck hadolint shellcheck actionlint lint-commits check cover integration e2e integration-podman integration-containerd integration-apple integration-seatbelt integration-tart python-test python-typecheck ensure-python-venv setup-dev-python smoketest smoketest-quick releasetest setcap clean clean-testtmp
+.PHONY: build test fmt lint lint-cross vet-tagged crosscheck tidy-check govulncheck hadolint shellcheck actionlint lint-commits lint-speculative-api check cover integration e2e integration-podman integration-containerd integration-apple integration-seatbelt integration-tart python-test python-typecheck ensure-python-venv setup-dev-python smoketest smoketest-quick releasetest setcap clean clean-testtmp
 
 # Always invoke `go build` and let it decide whether to relink. `go build` does
 # complete, authoritative dependency tracking — crucially including //go:embed'd
@@ -75,6 +75,12 @@ fmt:
 # that lands and the cross vet/lint will start enforcing it.
 LINT_PLATFORMS := linux/amd64 darwin/arm64
 
+# Make has no literal for either, and lint-speculative-api needs the platform
+# list comma-joined for argv while lint-cross needs it space-separated to loop.
+empty :=
+space := $(empty) $(empty)
+comma := ,
+
 lint:
 	@UNFMT=$$(gofmt -l .); \
 	if [ -n "$$UNFMT" ]; then \
@@ -102,6 +108,24 @@ lint-cross:
 		GOOS="$$goos" GOARCH="$$goarch" "$$tmp/golangci-lint" run ./... || rc=1; \
 	done; \
 	rm -rf "$$tmp"; exit $$rc
+
+## lint-speculative-api: fail on API whose only callers are tests (D125).
+## `unused` counts a test caller as a caller, so a function used only by its own
+## test is invisible to `lint` above — forever, and the coverage is what hides it
+## (DF105). Re-running `unused` with --tests=false surfaces the class, but the
+## verdict needs every platform: a decl in a _linux.go file isn't compiled under
+## darwin (so darwin has no opinion), while a decl whose only caller sits in a
+## _darwin.go file looks unused under linux. Both shapes are live here, so the
+## script cross-references `go list` per platform rather than unioning or
+## intersecting the runs. Same host-native-binary/cross-analysis trick as
+## lint-cross, and for the same reason (DF78).
+lint-speculative-api:
+	@tmp="$$(mktemp -d)"; \
+	GOBIN="$$tmp" go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.3 || { rm -rf "$$tmp"; exit 1; }; \
+	python3 scripts/lint_speculative_api.py \
+		--linter "$$tmp/golangci-lint" \
+		--platforms "$(subst $(space),$(comma),$(LINT_PLATFORMS))"; \
+	rc=$$?; rm -rf "$$tmp"; exit $$rc
 
 tidy-check:
 	@cp go.mod go.mod.bak && cp go.sum go.sum.bak
@@ -194,7 +218,7 @@ crosscheck:
 ## check: the local gate. NOT all of CI — CI also runs the integration and
 ## integration-podman jobs, and `test` here is a bare `go test ./...` which skips
 ## every build-tagged file. See docs/contributors/procedures/pull-requests.md.
-check: lint lint-cross vet-tagged crosscheck tidy-check hadolint shellcheck actionlint test python-test
+check: lint lint-cross lint-speculative-api vet-tagged crosscheck tidy-check hadolint shellcheck actionlint test python-test
 
 ## ensure-python-venv: provision the uv-managed venv on demand (idempotent).
 ## The Python surface is part of the app (contributors can modify it), so it is

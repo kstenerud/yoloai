@@ -70,8 +70,14 @@ not a test.
 make check
 ```
 
-`make check` runs: `lint lint-cross vet-tagged crosscheck tidy-check hadolint actionlint test
-python-test`.
+For what it runs, read the `check:` line in the Makefile. It is not copied here on purpose: the
+list has grown four times and every pasted copy of it in this repo has been stale at some point
+(D121).
+
+One target is worth knowing by name, because its failure is the least self-explanatory:
+`lint-speculative-api` fails on a declaration whose only callers are tests (D125). The normal
+lint cannot see that class — `unused` counts a test caller as a caller — so this is the only
+thing standing between the tree and API that nothing calls.
 
 **It is not all of CI.** CI runs three jobs on every PR:
 
