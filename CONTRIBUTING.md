@@ -1,39 +1,62 @@
 # Contributing to yoloai
 
+Thanks for contributing. Nearly all changes here are prepared with the help of a coding
+agent, so the rules live in a file agents load automatically:
+
+**Read [`AGENTS.md`](AGENTS.md) before you start.** It is short, and it is the contract.
+The detail behind it is in
+[`docs/contributors/procedures/pull-requests.md`](docs/contributors/procedures/pull-requests.md).
+
+Two rules catch nearly everyone, so they are worth repeating here:
+
+- **A user-visible break needs a `docs/BREAKING-CHANGES.md` entry, under `## Unreleased`, in
+  the same PR as the code.**
+- **If you rename or invalidate a name, sweep every surface that names it** — including the
+  help topics under `internal/cli/helpcmd/help/`, which are compiled into the binary and are
+  shipped UI. `make check` does not check any of this.
+
 ## Building
 
 ```sh
 make build
 ```
 
-## Running Tests
+## Running tests
 
 Unit tests:
+
 ```sh
 make test
 ```
 
 Integration tests (requires Docker):
+
 ```sh
 make integration
 ```
 
-## Before Submitting a PR
+## Before submitting a PR
 
-Run the full check suite locally:
 ```sh
 make check
 ```
 
-This runs the same checks as CI: formatting, linting, `go mod tidy` verification, and tests. If `make check` passes locally, CI will pass too.
+`make check` is your local gate and it must pass. **It is not all of CI** — CI additionally
+runs the `integration` and `integration-podman` jobs, and `make check`'s `test` target skips
+every build-tagged test. It also cannot see docs or shipped help text. See
+[`pull-requests.md`](docs/contributors/procedures/pull-requests.md) for the CI jobs, the
+required tooling (`rsync`, `uv`, `hadolint`, `actionlint`, Docker), and the test tiers.
 
-## Code Style
+## Code style
 
-- Go code is formatted with `gofmt`
-- Linting via `golangci-lint` (see `.golangci.yml` for config)
-- See `docs/contributors/standards/go.md` for Go conventions and `docs/contributors/standards/cli.md` for CLI conventions
-- See `docs/contributors/principles/` for the principles those standards ground out from
+- Go is formatted with `gofmt`; linting via `golangci-lint` (see `.golangci.yml`).
+- [`docs/contributors/standards/`](docs/contributors/standards/) — per-technology conventions
+  (`go.md`, `cli.md`, `shell.md`, `python.md`, …).
+- [`docs/contributors/principles/`](docs/contributors/principles/) — the reasoning those
+  standards ground out from. A principle wins over a conflicting standard.
 
-## Commit Style
+## Commit style
 
-One commit per logical change. Keep commits focused and self-contained.
+One commit per logical change; keep commits focused and self-contained. Subject is
+`type(scope): summary`, code commits carry a prose body, and AI-assisted commits name the
+model in a `Co-Authored-By` trailer — see [`AGENTS.md`](AGENTS.md) for the full rules.
