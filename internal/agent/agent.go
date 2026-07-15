@@ -43,8 +43,8 @@ type SeedFile struct {
 	HomeDir         bool   // if true, TargetPath is relative to /home/yoloai/ instead of StateDir
 	KeychainService string // macOS Keychain service name; used as fallback when HostPath is missing
 	// OwnerAPIKeys lists env vars whose presence means this seed file's auth
-	// is unnecessary. When non-nil, copySeedFiles checks these instead of
-	// the agent-level hasAPIKey.
+	// is unnecessary. When non-nil, envsetup.CopySeedFiles checks these
+	// instead of the agent-level hasAPIKey.
 	OwnerAPIKeys []string
 	// Executable seeds the file mode 0700 (owner rwx) instead of the default
 	// 0600, for scripts the agent execs by path (e.g. Claude Code's statusLine
