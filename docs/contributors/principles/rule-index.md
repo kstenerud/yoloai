@@ -51,6 +51,7 @@ This file is small on purpose: load all of it at the start of a task. It carries
 | GEN §13  | Raise anything that looks off — even when agreed/spec'd/planned; agreement is a strong prior, not a gag order.         | Silently following an agreed plan you've spotted a problem in.                   |
 | GEN §14  | Compose with a foreign system's *contract*, not an incidental property; "it's clever" is the worst smell. Put state on the artifact, not a side-channel. | Keying behaviour off a filename / character case / daemon field that wasn't designed to carry it (and varies by version/variant). |
 | GEN §15  | Check design↔research in *both* directions; say whether you found a wrong fact or a contested tradeoff — they have different remedies.                | Reviewing a design/research doc; about to write "this is wrong" without saying which kind of wrong. |
+| GEN §16  | Docs drift silently — nothing executes prose. Sweep on a clock (~3 months), say so unprompted when overdue, and gate what a machine can check.        | Trusting a doc's factual claim because it's written down; `Docs last swept:` in AGENTS.md is stale. |
 
 ## architecture-principles.md
 

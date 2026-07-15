@@ -5,11 +5,15 @@ them and the reasoning that makes them stick. Read `AGENTS.md` first.
 
 ## Start from an up-to-date `main`
 
-Not from a release tag. A tag looks like a reasonable starting point and quietly is not:
-at `v0.7.0`, `docs/BREAKING-CHANGES.md`'s topmost section is `## v0.7.0`, so the section
-that has already shipped reads as the open one. An entry filed there merges **cleanly** —
-no conflict warns you. This has now happened twice, once to an outside contributor and once
-to a maintainer's agent that was fixing the first instance.
+Not from a release tag. A tag is a stale base by definition — you miss whatever landed since.
+
+It also used to be actively dangerous, which is worth knowing because it explains a convention
+you will meet. Releasing once *renamed* `## Unreleased` to the version being tagged, so a tag's
+tree had no marker at all and the freshly-shipped section sat on top, reading exactly like the
+open one. An entry filed there merged **cleanly** — no conflict to warn anyone. It happened
+twice: once to an outside contributor, and once to a maintainer's agent that was fixing the
+first instance. D117 made the marker permanent, so that trap is closed even from a bad base.
+Branch from an up-to-date `main` regardless.
 
 ## 1. Breaking changes
 
@@ -18,8 +22,9 @@ config keys, changed defaults, new validation rejecting previously-accepted inpu
 output shape that scripts parse.
 
 **Where:** `docs/BREAKING-CHANGES.md`, under `## Unreleased`, in the same PR as the code.
-Never under a `## vX.Y.Z` heading — releasing renames `## Unreleased` to the version being
-tagged, so a version heading means shipped and frozen. Check with `git tag --list`.
+Never under a `## vX.Y.Z` heading — a version heading means shipped and frozen. The
+`## Unreleased` marker is always present, so it is always where you need it; releasing drains
+its entries into a new version heading beneath it rather than renaming it away.
 
 **Shape:** previous behaviour, new behaviour, impact, migration. Copy the surrounding entries.
 

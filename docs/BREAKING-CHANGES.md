@@ -2,16 +2,24 @@
 
 Tracks breaking changes made during beta. Each entry should be included in release notes for the version that introduces it.
 
-**Every new entry goes under `## Unreleased`, and nowhere else.** A version section is
-frozen the moment its tag exists: releasing renames `## Unreleased` to the version being
-tagged, so anything already carrying a `vX.Y.Z` heading has shipped and must not be added
-to or edited. Check with `git tag --list`. If `## Unreleased` is absent, add it back
-directly above the newest version section.
+**Every new entry goes under `## Unreleased`, and nowhere else.** That section is *always*
+present — including inside a release tag, where it stands empty. A `## vX.Y.Z` heading means
+shipped: those sections are frozen history and are never added to or edited.
 
-The trap: branching from a release tag puts you at a commit where that version's section
-is still the topmost one, so it reads as the open section. It is not — it was stamped and
-tagged. Branch from an up-to-date `main`, and expect no merge conflict to catch this for
-you; misfiling an entry into a shipped section merges cleanly and silently.
+**Releasing does not rename `## Unreleased`; it drains it.** The entries move down into a new
+`## vX.Y.Z` heading beneath the marker, and the empty marker stays. Two things follow, and
+they are the reason for the convention:
+
+- **An empty `## Unreleased` at a tag is the proof that every change was accounted for.** If
+  it still has entries when a release is cut, something shipped undocumented.
+- **The marker is always where you need it, even from a bad starting point.** Branch from a
+  release tag by mistake and the topmost section is still `## Unreleased` — the one you should
+  be writing into. Nothing to get wrong.
+
+That last point is not hypothetical. Before this convention, releasing renamed the marker away,
+so a tag left the *shipped* version's section on top, reading exactly like an open one. Two
+separate agents filed an entry into a frozen section that way, and neither hit a merge
+conflict — a misfile lands cleanly and silently.
 
 ## Unreleased
 

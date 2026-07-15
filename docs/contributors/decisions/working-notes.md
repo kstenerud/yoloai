@@ -1223,6 +1223,28 @@ A 44-agent convention audit (adversarially verified, streams over git history / 
 
 **Consequences.** Every agent, not just Claude Code, now loads the same contract. `CLAUDE.md` shrinks to the import plus Claude-specific hook mechanics. The rules PR #36 broke are written down for the first time, and the audit's remaining output — ~13 mechanical gates, the false claims in `python.md`/`shell.md`/`Makefile:123`, the `where-to-change.md` recipes that name zero doc surfaces — lands as follow-on work on this branch. §15 applies immediately to the critique queues in `design/`.
 
+## D117 — `## Unreleased` is permanent; standards conflicts are surfaced, not silently resolved; docs get swept on a clock (§16)
+
+**Date:** 2026-07-15. **Status:** Active — implementing on branch `contributor-docs-sweep`. Refines [D116](#d116--agentsmd-is-the-agent-contract-claudemds-condensed-principle-restatement-retires-into-the-formal-system). Establishes `general-principles.md` §16.
+
+**Context.** D116 wrote down the `## Unreleased` convention but kept the existing release ritual, in which the marker is *renamed* to the version being tagged. That ritual is the mechanism that produced the bug D116 documented: after a release, the tag's tree has no `## Unreleased` at all, so the topmost heading is the freshly-shipped version — which reads exactly like an open section to anyone who branches from the tag. Two agents filed an entry into frozen history that way, neither hit a merge conflict, and D116's response was a warning in the preamble. A warning is prose; §16 is the reason that is not good enough.
+
+Separately, D116's `standards/README.md` authority rule ("the artifact wins — fix the standard in the same commit") answered *which rule wins* but silently also instructed **contributors** to edit the project's standards inline, as part of a feature PR. That is precisely how an unreviewed contradiction enters a document.
+
+And the audit behind D116 found four distinct classes of silent documentation rot in one pass — a fabricated statistic, a config key advertised for 15 releases after its removal, twelve stale paths in the recipe agents open first, and two standards asserting checks no gate runs. No existing gate could have caught any of them, and none was caused by carelessness at writing time.
+
+**Decision.**
+- **(a) `## Unreleased` is always present, including inside a release tag, where it stands empty.** Releasing no longer renames it: the entries **drain** down into a new `## vX.Y.Z` heading beneath the marker, and the marker stays. Two consequences, both the point: an empty `## Unreleased` at a tag is *proof* that everything was accounted for, and branching from a tag — the mistake — now lands on a file whose topmost section is the correct one to write into. The trap is removed rather than documented.
+- **(b) Standards conflicts are resolved by role, not by whoever noticed.** Which rule wins is unchanged (principle > standard; specific > general; artifact > the standard describing it). What changes is who may edit the document: a **contributor's agent** resolves the conflict as best it can and does **not** touch standards or principles in that PR — a proposed change is a separate, isolated PR that defends itself. The **maintainer's agent** must **complain loudly and stop**, because a contradiction between documents is a defect in the documents, and reconciling it deliberately is the fix. Rationale for the asymmetry: a contributor cannot know which of two conflicting rules the project meant, and guessing silently is worse than asking; the maintainer can decide, but only if the agent surfaces it rather than absorbing it.
+- **(c) §16 — documentation drifts.** Prose has no backstop: nothing executes it, so nothing reports it wrong, and rotted prose reads exactly like true prose. `AGENTS.md` carries a `Docs last swept:` date; agents compare it against today and volunteer the reminder when it exceeds **~3 months**. The sweep covers the docs and periodically the code comments, which decay identically while being read as if the compiler had checked them.
+
+**Rejected / deferred.**
+- **A `make check` warning for sweep staleness** — rejected on a mechanical fact: `.claude/hooks/on-stop.sh` runs `if output=$(make check 2>&1); then` and discards output on success, so a passing-with-warning is structurally invisible to the agents that are its entire audience. Failing the build on a calendar date is worse. The date must live where it is already read every session, which is `AGENTS.md`.
+- **Putting the date in `docs/contributors/README.md`** — rejected: only an agent that routes there sees it, and a drive-by contributor fixing a bug never does.
+- **A 6- or 12-month interval** — rejected in favour of 3. This sweep's own evidence: four months was long enough to ship a dead config key through 15 releases.
+
+**Consequences.** The release ritual changes for the maintainer (drain, don't rename) and gains a mechanical precondition worth gating: at a `vX.Y.Z` tag, `## Unreleased` must exist and be empty. §16 makes "the docs are probably stale" a thing an agent says on its own rather than something the maintainer has to remember to ask. §16 also states the ordering against D116/§15: where a claim can be gated, gate it — the sweep is for what no gate can reach.
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.

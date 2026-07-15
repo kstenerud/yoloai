@@ -549,6 +549,41 @@ Originally established in D116.
 
 ---
 
+## §16. Documentation drifts — sweep it on a clock, because nothing else will
+
+> **Rule.** Docs decay silently: nothing executes them, so nothing reports them wrong. Sweep them on a schedule rather than on a trigger, and say so when the sweep is overdue.
+>
+> **Bites when:** trusting a doc's factual claim because it is written down. · **See also:** GEN §7, GEN §15, DEV §6.
+
+**Principle.** Code that rots fails a test. Prose that rots reads exactly like prose that is true — confident, specific, and wrong. Every other quality bar in this project is enforced by something that runs; documentation has no such backstop, so it drifts by default and the drift is invisible until someone acts on it. The remedy is not more care at writing time. It is a periodic, deliberate sweep, and an agent that volunteers the reminder rather than waiting to be asked.
+
+The sweep covers the docs proper, and periodically the **code comments** too: a comment is documentation that happens to live in a `.go` file, and it decays the same way — with the added hazard that reviewers read it as if the compiler had checked it.
+
+### Pattern
+
+`AGENTS.md` carries a `Docs last swept:` date. It is loaded every session, so the check costs nothing: compare it against today, and if it is more than **~3 months** old, say so — to the user, unprompted, before starting work that depends on a doc being right. Then record the new date when a sweep lands. A warning inside `make check` would not do the job: `.claude/hooks/on-stop.sh` discards output on success, so a passing-with-warning is structurally invisible to the agents that are the audience.
+
+Where a claim can be enforced by a gate instead of a sweep, prefer the gate — a swept doc drifts again the next day; a gated one cannot (D116, §15). The sweep is for what no gate can reach: narrative, rationale, worked examples, and "why".
+
+### Worked examples
+
+- **A statistic that was never true.** `../standards/markdown.md` justified exempting test files from ABOUTME headers with "the 89/99 unconvered Go test files reflect this convention". No point in the project's history matched those numbers; the real figure when checked was 171 of 257. It had been read and cited, never verified (D116).
+- **A key dead for 15 releases.** `backend` became `container_backend` in March 2026. The shipped help topic advertised the dead key through every release from v0.2.0 to v0.8.0, with `make check` green throughout, until a human read it (D116).
+- **Paths that outlived their files.** The `internal/` move left `architecture/where-to-change.md` — the doc an agent opens *first* to find what to change — pointing at twelve files that no longer existed. Following it faithfully was worse than having no recipe (D116).
+- **Docs asserting checks nobody runs.** `Makefile:123` claimed "CI installs hadolint"; no install step had ever existed. `../standards/python.md` claimed `mypy --strict` coverage it did not have. Both read as guarantees (D116).
+
+### Cost-vs-benefit
+
+Cost of applying: one date comparison per session (free), plus a real sweep a few times a year. Damage prevented: an agent acting confidently on a false claim — which is strictly worse than acting on no claim, because a wrong recipe is followed and a missing one prompts a question. Threshold: sweep the whole doc surface on the clock; sweep code comments when the surrounding code has materially changed; gate anything a machine can check instead.
+
+### Sources
+
+Established after the D116 convention audit found four distinct classes of silent doc rot in one pass, none of which any existing gate could have caught. Full discussion: D117.
+
+Originally established in D117.
+
+---
+
 # Common over-generalisations to avoid
 
 The cost-vs-benefit discipline (Framing) explicitly rejects principle-shaped statements that don't pay off at yoloAI's scale. The following are documented so future-yoloAI doesn't drift toward them.

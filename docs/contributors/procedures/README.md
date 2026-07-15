@@ -8,6 +8,8 @@ docs are the detail behind them.
 | [`pull-requests.md`](pull-requests.md) | Branching, breaking changes, the name sweep, commits, the quality gate, CI jobs, required tooling, test tiers. |
 | [`issues.md`](issues.md) | What an issue needs to be actionable. |
 
-Releases are cut by the maintainer: `docs/BREAKING-CHANGES.md`'s `## Unreleased` section is
-renamed to the version, then an annotated `vX.Y.Z` tag is pushed, which drives
-`.github/workflows/release.yml`.
+Releases are cut by the maintainer. `docs/BREAKING-CHANGES.md`'s `## Unreleased` entries are
+**drained** into a new `## vX.Y.Z` heading beneath the marker — the marker itself stays, now
+empty, and must be empty for the tag to be correct. Then an annotated `vX.Y.Z` tag is pushed,
+which drives `.github/workflows/release.yml`; the tag's annotation body becomes the release
+notes verbatim.
