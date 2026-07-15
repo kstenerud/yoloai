@@ -38,4 +38,4 @@ Standards can change without principles changing. A principle is a strategic dis
 
 ## Authority
 
-When a standard conflicts with a principle, the principle wins — fix the standard. When two standards conflict, the more specific one wins (e.g., `CLI.md` > `GO.md` for CLI-specific concerns). When in doubt, ask in the PR.
+When a standard conflicts with a principle, the principle wins — fix the standard. When two standards conflict, the more specific one wins (e.g., `CLI.md` > `GO.md` for CLI-specific concerns). When a standard conflicts with the executable artifact it documents (`Makefile`, `ci.yml`, `.claude/hooks/*.sh`), **the artifact wins** — fix the standard in the same commit that changes the artifact, not later. This has drifted before: `check:`'s prerequisite list changed three times (`e827d11b`, `eb231d87`, `05dc06bd`) without a matching `MAKEFILE.md` edit, and the eventual catch-up commit (`c7f08466`) fixed `MAKEFILE.md`'s test-tier table (`python-test` made required, no silent skip, per D112) but left `PYTHON.md`'s "skips silently if pytest isn't installed" claim stale. When in doubt, ask in the PR.

@@ -11,7 +11,7 @@ See also: `../principles/general-principles.md §2` (innovation tokens — Pytho
 
 ## Why Python exists at all in yoloAI
 
-Python is a *single deliberate token spend* (`../principles/general-principles.md §2`). The runtime/monitor/ surface is the only Python in the project. Reasons:
+Python is a *single deliberate token spend* (`../principles/general-principles.md §2`). `runtime/monitor/` is not the only Python in the project — 23 tracked `.py` files exist repo-wide, including `scripts/` (smoke harness, `govulncheck.py`) and the `runtime/docker/resources/` in-container scripts — but `runtime/monitor/` is the surface this standard covers: the pluggable-idle-detection surface the token spend was justified for. Reasons:
 
 - The status monitor runs *inside the sandbox container* alongside the agent. It needs structured types, JSON handling, and pytest-style test coverage — not a Go binary.
 - The base Docker image already includes Python 3 + pip for agent installation (Claude Code, Codex, Gemini CLI all install via npm/pip-adjacent tooling). Adding Python *here* costs nothing additional.

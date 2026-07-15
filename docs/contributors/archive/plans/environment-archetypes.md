@@ -653,6 +653,12 @@ Phase 7: ARCHITECTURE.md updates
 Each commit message should follow the existing project convention
 (`Feature:` / `Feat:` prefix with brief description).
 
+> **Superseded:** this `Feature:`/`Feat:` prefix convention is no longer current. The
+> live commit-message contract is `AGENTS.md` ("Preparing a PR", rule 4): subject line
+> is `type(scope): summary` (`feat`, `fix`, `docs`, `test`, `refactor`, `build`, `ci`,
+> `chore`, `perf`), imperative, no trailing period. This plan document is preserved
+> as-written for history; do not follow its commit-message example.
+
 ---
 
 ## Key cross-references

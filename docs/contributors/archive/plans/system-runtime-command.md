@@ -431,6 +431,12 @@ All checks must pass.
 
 ### 9. Commit Message Template
 
+> **Superseded:** the `Feat:` prefix below is no longer current. The live
+> commit-message contract is `AGENTS.md` ("Preparing a PR", rule 4): subject line is
+> `type(scope): summary` (`feat`, `fix`, `docs`, `test`, `refactor`, `build`, `ci`,
+> `chore`, `perf`), imperative, no trailing period. This plan document is preserved
+> as-written for history; do not follow its commit-message example.
+
 ```
 Feat: implement 'yoloai system runtime' commands
 

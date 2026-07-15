@@ -298,18 +298,18 @@ Effective Go §Errors; Bertrand Meyer *OOSC* (Design by Contract). Full citation
 
 ## §6. Warnings are signal; suppressions require justification
 
-> **Rule.** A lint / scanner / type warning is information about the code. Every suppression (`//nolint`, `#nosec`, a complexity-threshold override) carries a co-located comment explaining *why the finding doesn't apply here* — never "makes CI pass" or a restatement of the directive.
+> **Rule.** A lint / scanner / type warning is information about the code. Every suppression (`//nolint`, `#nosec`) carries a co-located comment explaining *why the finding doesn't apply here* — never "makes CI pass" or a restatement of the directive. This does not extend to the complexity linters (`cyclop`, `gocognit`, `gocyclo`): those are never suppressed and their threshold is never raised — see §10.
 >
-> **Bites when:** adding a suppression or raising a threshold to get the gate green. · **See also:** §7, §10.
+> **Bites when:** adding a suppression to get the gate green. · **See also:** §7, §10.
 
-**Principle.** Lint findings, complexity alerts, security scanner warnings, and type errors are information about the code. Suppressing one without understanding what it's telling you discards that information permanently, silently, and often incorrectly. The fact that a suppression makes the checks pass is not a reason to add it; it is the definition of what suppressions do.
+**Principle.** Lint findings, security scanner warnings, and type errors are information about the code. Suppressing one without understanding what it's telling you discards that information permanently, silently, and often incorrectly. The fact that a suppression makes the checks pass is not a reason to add it; it is the definition of what suppressions do.
 
-Every suppression directive — `//nolint:lintername`, `#nosec`, `// nolint:cyclop`, `//noinspection`, any complexity threshold override — must be accompanied by a co-located comment explaining **why the finding does not apply here**, not why the directive was added.
+Every suppression directive — `//nolint:lintername`, `#nosec`, `//noinspection` — must be accompanied by a co-located comment explaining **why the finding does not apply here**, not why the directive was added. This section covers ordinary lint/scanner findings. It does **not** cover the complexity gate (`cyclop`, `gocognit`, `gocyclo`): §10 forbids suppressing or loosening that gate outright, with no "documented trade-off" escape hatch — a complexity finding is resolved by extracting named sub-functions, never by `//nolint` or a raised threshold. As of this writing the codebase has zero `//nolint` directives naming those three linters, out of 1152 `//nolint` directives total.
 
 ### Acceptable reasons
 
 - *Tool false positive*: "`noctx` flags this because the function signature doesn't take a `ctx`, but this is a CLI command body that uses `cmd.Context()` — the tool doesn't model that pattern."
-- *Intentional trade-off with documented reasoning*: "`gocyclo` exceeds threshold here; this switch is the canonical dispatch table for backend selection — splitting it across functions would scatter the cases without reducing actual complexity."
+- *Intentional trade-off with documented reasoning*: "`unparam` flags this parameter as always receiving the same value today; it's part of the public interface signature and future callers will vary it."
 - *Known external-library quirk*: "`deadcode` flags this function; it is called only via the runtime registry at startup, not visible to static analysis."
 
 ### Unacceptable reasons
@@ -327,7 +327,7 @@ Every suppression directive — `//nolint:lintername`, `#nosec`, `// nolint:cycl
 
 ### Cost-vs-benefit
 
-Cost of applying: a few extra characters per suppression. Damage prevented: silent accumulation of suppressions that hide real bugs; the future developer who reads `//nolint:gocyclo` and doesn't know whether to trust it; the technical debt that piles up when "linter complained" is a valid reason to silence it.
+Cost of applying: a few extra characters per suppression. Damage prevented: silent accumulation of suppressions that hide real bugs; the future developer who reads `//nolint:errcheck` and doesn't know whether to trust it; the technical debt that piles up when "linter complained" is a valid reason to silence it.
 
 ### Sources
 
