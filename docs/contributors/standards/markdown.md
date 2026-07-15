@@ -11,14 +11,18 @@ See also: `../principles/general-principles.md §11` (default to public — docs
 
 ## ABOUTME header (source files)
 
-Every yoloAI source file — Go, Python, shell, or Markdown under `docs/contributors/` — opens with an ABOUTME comment block. The convention is from `~/.claude/CLAUDE.md`:
+Every yoloAI source file — Go, Python, shell, or Markdown under `docs/contributors/` — opens with an ABOUTME comment block saying what the file is for and why it exists:
 
 ```markdown
 ABOUTME: One-line description of what this file is for.
-ABOUTME: Continue here if needed; keep under 80 chars each.
+ABOUTME: Continue here if needed.
 ```
 
-In Go and Python the lines are prefixed by the language's comment marker (`// ABOUTME:` / `# ABOUTME:`). The lines come at the very top of the file, before package declarations / module docstrings.
+In Go and Python the lines are prefixed by the language's comment marker (`// ABOUTME:` / `# ABOUTME:`). The lines come at the very top of the file, before package declarations / module docstrings. A package godoc or module docstring does not substitute — see below.
+
+**Each line wraps at 100 columns**, comment marker included. This is enforced by `TestRepoHygiene_ABOUTMEHeaders_AllTrackedFilesCompliant`, so it cannot drift. The limit was 80 until D117 and was stated only inside the example above rather than as a rule — 351 lines had drifted past it, which is what an unenforced number in an example block gets you. 100 is what the code already does: exactly four lines exceeded it, and they were reflowed rather than grandfathered.
+
+Say something true and specific. "Tests for foo.go" restates the filename and is worse than nothing — it is documentation that will be trusted.
 
 ### Required
 

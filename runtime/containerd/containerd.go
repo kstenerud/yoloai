@@ -1,7 +1,8 @@
 //go:build linux
 
 // Package containerdrt implements the runtime.Backend interface using containerd.
-// ABOUTME: Manages container/VM lifecycle via the containerd API for Kata Containers (vm isolation).
+// ABOUTME: Manages container/VM lifecycle via the containerd API for Kata
+// ABOUTME: Containers (vm isolation).
 package containerdrt
 
 import (

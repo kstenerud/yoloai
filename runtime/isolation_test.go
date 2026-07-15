@@ -1,4 +1,5 @@
-// ABOUTME: Tests for isolation-mode helpers (OCI runtime mapping, snapshotter, network enforcement).
+// ABOUTME: Tests for isolation-mode helpers (OCI runtime mapping, snapshotter,
+// ABOUTME: network enforcement).
 package runtime
 
 import "testing"

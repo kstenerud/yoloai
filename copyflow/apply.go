@@ -1,5 +1,6 @@
 // ABOUTME: Apply operations: patch generation, baseline advancement,
-// ABOUTME: selective ref resolution, format-patch, and uncommitted diff for sandbox work directories.
+// ABOUTME: selective ref resolution, format-patch, and uncommitted diff for
+// ABOUTME: sandbox work directories.
 
 package copyflow
 
