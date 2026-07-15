@@ -195,6 +195,28 @@ func TestFormatError_PermanentShowsNoFixSteps(t *testing.T) {
 	assert.NotContains(t, msg, "do-not-show")
 }
 
+// TestFormatError_SkipsAdvisory: an Advisory failure never blocks — FormatError
+// must omit it entirely, even alongside a genuine blocking failure.
+func TestFormatError_SkipsAdvisory(t *testing.T) {
+	results := []CheckResult{
+		{Cap: HostCapability{Summary: "runc version floor", Advisory: true}, Err: errors.New("runc 1.1.0 is below the floor")},
+		{Cap: HostCapability{Summary: "KVM device access"}, Err: errors.New("not found")},
+	}
+	err := FormatError(results)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "KVM device access")
+	assert.NotContains(t, err.Error(), "runc version floor")
+}
+
+// TestFormatError_AllAdvisoryMeansNoError: if every failure is advisory,
+// FormatError must not block at all.
+func TestFormatError_AllAdvisoryMeansNoError(t *testing.T) {
+	results := []CheckResult{
+		{Cap: HostCapability{Summary: "runc version floor", Advisory: true}, Err: errors.New("below floor")},
+	}
+	assert.NoError(t, FormatError(results))
+}
+
 // --- NewGVisorRunsc tests ---
 
 func TestNewGVisorRunsc_Found(t *testing.T) {

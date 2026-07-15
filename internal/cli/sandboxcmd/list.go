@@ -123,6 +123,17 @@ func formatProfile(profile string) string {
 	return profile
 }
 
+// statusCell renders the STATUS column for one sandbox. A running sandbox
+// whose guest network is confirmed dead (the tart vmnet wedge) gets a
+// "(net-dead)" qualifier; healthy and unprobed sandboxes render the bare
+// status so normal output stays unchanged.
+func statusCell(info *yoloai.SandboxInfo) string {
+	if info.NetHealth == "wedged" {
+		return string(info.Status) + " (net-dead)"
+	}
+	return string(info.Status)
+}
+
 // runList is the shared implementation for `sandbox list` and the `ls` alias.
 func runList(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
@@ -205,7 +216,7 @@ func runList(cmd *cobra.Command, _ []string) error {
 		}
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", //nolint:errcheck
 			info.Environment.Name,
-			info.Status,
+			statusCell(info),
 			backend,
 			info.AgentType,
 			formatProfile(info.Environment.Profile),

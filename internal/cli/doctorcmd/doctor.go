@@ -86,6 +86,19 @@ type vmCensusJSON struct {
 	Slots   []vmSlotJSON `json:"slots"`
 }
 
+// vmNetHealthJSON is one running VM's network-liveness probe result.
+type vmNetHealthJSON struct {
+	SandboxName string `json:"sandbox_name"`
+	VMName      string `json:"vm_name"`
+	State       string `json:"state"`
+	Detail      string `json:"detail,omitempty"`
+}
+
+// netLivenessJSON is the guest-network liveness probe across running VMs.
+type netLivenessJSON struct {
+	VMs []vmNetHealthJSON `json:"vms"`
+}
+
 // doctorReportJSON is the single --json document: backend capability reports
 // plus the read-only repair advisory sections.
 type doctorReportJSON struct {
@@ -95,6 +108,7 @@ type doctorReportJSON struct {
 	UnreviewedWork   []unreviewedWorkJSON `json:"unreviewed_work"`
 	Trash            trashJSON            `json:"trash"`
 	VMCensus         *vmCensusJSON        `json:"vm_census,omitempty"`
+	NetLiveness      *netLivenessJSON     `json:"net_liveness,omitempty"`
 }
 
 // NewCmd builds the top-level `yoloai doctor` command.
@@ -156,33 +170,39 @@ func runDoctor(cmd *cobra.Command, backendFilter, isolationFilter string, isJSON
 	prune := dryRunPrune(ctx, sys)
 	disk := cacheUsage(ctx, sys)
 	census := sys.VMCensus(ctx)
+	netLiveness := sys.NetLiveness(ctx)
 
 	if isJSON {
 		// JSON mode reports failures in the document rather than via exit code,
 		// matching the prior `system doctor --json` behavior.
-		return cliutil.WriteJSON(out, buildDoctorJSON(reports, prune, disk, census))
+		return cliutil.WriteJSON(out, buildDoctorJSON(reports, prune, disk, census, netLiveness))
 	}
 
 	formatDoctor(out, reports)
 	renderVMCensus(out, census)
+	renderNetLiveness(out, netLiveness)
 	renderReclaimableNow(out, prune)
 	renderReclaimableSpace(out, disk)
 	renderUnreviewedWork(out, prune)
 	renderTrash(out, prune)
 
-	return doctorExitError(reports, census)
+	return doctorExitError(reports, census, netLiveness)
 }
 
 // doctorExitError returns a non-nil error (→ exit 1) when the host needs
-// attention: a backend needs setup, or the VM-slot limit is reached (which
-// blocks new sandboxes — a functional failure, unlike the advisory cruft
-// sections, which never affect the exit code).
-func doctorExitError(reports []yoloai.BackendReport, census *yoloai.VMCensus) error {
+// attention: a backend needs setup, the VM-slot limit is reached (which
+// blocks new sandboxes), or a VM's guest network is confirmed wedged (which
+// silently breaks the agent inside it) — all functional failures, unlike the
+// advisory cruft sections, which never affect the exit code.
+func doctorExitError(reports []yoloai.BackendReport, census *yoloai.VMCensus, netLiveness *yoloai.NetLivenessReport) error {
 	if err := needsSetupError(reports); err != nil {
 		return err
 	}
 	if census != nil && census.Blocked() {
 		return fmt.Errorf("macOS VM limit reached — see 'VM slots' above")
+	}
+	if netLiveness != nil && len(netLiveness.Wedged()) > 0 {
+		return fmt.Errorf("a VM's guest network is wedged — see 'network' above")
 	}
 	return nil
 }
@@ -374,8 +394,43 @@ func vmSlotLabel(s yoloai.VMSlot) string {
 	}
 }
 
+// renderNetLiveness shows one line per running VM's guest-network liveness.
+// Nothing is printed when there's no report (backend doesn't support the
+// probe, or platform has no running VMs to check) — mirrors renderVMCensus's
+// silence-on-absence.
+func renderNetLiveness(w io.Writer, report *yoloai.NetLivenessReport) {
+	if report == nil || len(report.VMs) == 0 {
+		return
+	}
+	fmt.Fprintln(w) //nolint:errcheck
+	for _, vm := range report.VMs {
+		fmt.Fprintf(w, "%s: %s\n", vm.SandboxName, netHealthLabel(vm)) //nolint:errcheck
+	}
+}
+
+// netHealthLabel renders one VM's network-liveness line. The wedged message
+// is directive: report only, never restart automatically — the user runs the
+// stop/start themselves, and agent session state on disk survives it.
+func netHealthLabel(vm yoloai.VMNetHealth) string {
+	switch vm.State {
+	case yoloai.NetHealthOK:
+		return fmt.Sprintf("network: ok (%s)", vm.Detail)
+	case yoloai.NetHealthWedged:
+		return fmt.Sprintf(
+			"network: WEDGED (%s) — vmnet session is dead; "+
+				"only a restart recovers it: yoloai stop %s && yoloai start %s "+
+				"(agent session state on disk survives). A wedged VM also breaks "+
+				"networking for NEW tart VMs on this host.",
+			vm.Detail, vm.SandboxName, vm.SandboxName)
+	default:
+		return fmt.Sprintf(
+			"network: could not determine (%s) — if the VM booted moments ago, "+
+				"DHCP may still be pending; re-run doctor", vm.Detail)
+	}
+}
+
 // buildDoctorJSON assembles the single --json document.
-func buildDoctorJSON(reports []yoloai.BackendReport, prune *yoloai.PruneResult, disk *yoloai.DiskUsage, census *yoloai.VMCensus) doctorReportJSON {
+func buildDoctorJSON(reports []yoloai.BackendReport, prune *yoloai.PruneResult, disk *yoloai.DiskUsage, census *yoloai.VMCensus, netLiveness *yoloai.NetLivenessReport) doctorReportJSON {
 	return doctorReportJSON{
 		Backends:         convertDoctorReportsToJSON(reports),
 		ReclaimableNow:   reclaimItemsJSON(prune),
@@ -383,6 +438,7 @@ func buildDoctorJSON(reports []yoloai.BackendReport, prune *yoloai.PruneResult, 
 		UnreviewedWork:   unreviewedWorkJSONList(prune),
 		Trash:            trashJSONOf(prune),
 		VMCensus:         vmCensusJSONOf(census),
+		NetLiveness:      netLivenessJSONOf(netLiveness),
 	}
 }
 
@@ -400,6 +456,34 @@ func vmCensusJSONOf(census *yoloai.VMCensus) *vmCensusJSON {
 		Blocked: census.Blocked(),
 		Slots:   slots,
 	}
+}
+
+// netHealthStateJSON renders a NetHealthState as a lowercase JSON string.
+func netHealthStateJSON(s yoloai.NetHealthState) string {
+	switch s {
+	case yoloai.NetHealthOK:
+		return "ok"
+	case yoloai.NetHealthWedged:
+		return "wedged"
+	default:
+		return "unknown"
+	}
+}
+
+func netLivenessJSONOf(report *yoloai.NetLivenessReport) *netLivenessJSON {
+	if report == nil {
+		return nil
+	}
+	vms := make([]vmNetHealthJSON, 0, len(report.VMs))
+	for _, vm := range report.VMs {
+		vms = append(vms, vmNetHealthJSON{
+			SandboxName: vm.SandboxName,
+			VMName:      vm.VMName,
+			State:       netHealthStateJSON(vm.State),
+			Detail:      vm.Detail,
+		})
+	}
+	return &netLivenessJSON{VMs: vms}
 }
 
 func reclaimItemsJSON(prune *yoloai.PruneResult) []reclaimItemJSON {

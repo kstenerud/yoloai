@@ -36,6 +36,14 @@ registry, plus **kill-before-delete** teardown ordering so the state files that
 key teardown never predecease the artifact. Decision [D114](../../decisions/working-notes.md#d114);
 findings DF73–DF76. Plan: [host-artifact-reclamation.md](host-artifact-reclamation.md).
 
+## Tart network liveness detection
+
+**Implemented 2026-07-14** (doctor probe, `info`/`ls` net-health surfacing,
+smoke-harness fail-fast — all verified against a live wedged VM, DF86); plan
+archived to
+[archive/plans/tart-network-liveness.md](../../archive/plans/tart-network-liveness.md).
+Incident: [backend-idiosyncrasies.md](../../backend-idiosyncrasies.md#tart-vmnet-session-wedges-on-a-long-idle-vm-host-sleep--subnet-re-pick--guest-drops-to-a-169254-link-local-address-agent-gets-connectionrefused).
+
 ## Architecture Remediation
 
 Complete — the multi-quarter program (Go↔Python boundary, `runtime.Backend` interface, dependency direction, error patterns, slog conventions) landed; the plan and its audit are archived under `../archive/`. The one release-gated remnant (W1b — retire the launch-prefix legacy path) and the rest of this branch's cross-version concerns are tracked in [release-migration.md](release-migration.md).
@@ -96,6 +104,17 @@ removed, behind the clean surface it deferred: bulk ops span all tracked dirs, p
 ops (`<ref>`/`-- pathspec`) name exactly one; a specifier is required only when 2+ dirs
 are tracked; `apply --all` lands every dir independently. Decision [D81](../../decisions/working-notes.md#d81).
 Plan: [multi-workdir-diff-apply.md](multi-workdir-diff-apply.md).
+
+## Apply drift guard
+
+Design draft (not yet a locked decision). Close the gap between `yoloai diff` and a
+later `yoloai apply`: if the agent changes the tracked dir after the user reviews
+`diff` but before `apply` lands, `apply` today silently lands whatever is beyond
+baseline at that moment, reviewed or not. Fingerprint the exact artifact `apply`
+would land (ordered beyond-baseline commit SHAs for the default mode; a content
+hash of the generated patch for `--no-commit`) when a plain `diff` runs, and balk
+unconditionally (ignoring `--yes`) if `apply` later finds a mismatch — cleared only
+by re-running `diff`, no `--force` bypass. Plan: [apply-drift-guard.md](apply-drift-guard.md).
 
 ## Parallel Agent Workflows
 

@@ -31,9 +31,18 @@ from dataclasses import dataclass
 #   docker/docker release exists -- the fix lives in github.com/moby/moby/v2
 #   (>= v2.0.0-beta.8), a separate module. These entries auto-fail if and when
 #   docker/docker publishes a fixed version.
+# GO-2026-5617: race in `docker cp` allows bind-mount redirection to a host path.
+# GO-2026-5668: race in `docker cp` allows creating empty host files via symlink swap.
+# GO-2026-5746: PUT /containers/{id}/archive executes a container binary on the host.
+#   Same situation as the two above: daemon-side handlers yoloAI never runs, no
+#   affected symbols declared, no fixed docker/docker release (fix is in
+#   github.com/moby/moby/v2).
 ALLOW: dict[str, str] = {
     "GO-2026-4887": "github.com/docker/docker",
     "GO-2026-4883": "github.com/docker/docker",
+    "GO-2026-5617": "github.com/docker/docker",
+    "GO-2026-5668": "github.com/docker/docker",
+    "GO-2026-5746": "github.com/docker/docker",
 }
 
 

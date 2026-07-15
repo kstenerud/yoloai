@@ -27,3 +27,15 @@ func RenderNotices(cmd *cobra.Command, ns []yoloai.Notice) {
 		}
 	}
 }
+
+// RenderWarnings writes only the warn-level notices, to stderr (always). Use
+// when a caller already prints its own info-level summary (e.g. `yoloai new`'s
+// creation summary) and would otherwise duplicate the info notices from the
+// same underlying call.
+func RenderWarnings(cmd *cobra.Command, ns []yoloai.Notice) {
+	for _, n := range ns {
+		if n.Level == yoloai.NoticeWarn {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: %s\n", n.Message) //nolint:errcheck // best-effort
+		}
+	}
+}

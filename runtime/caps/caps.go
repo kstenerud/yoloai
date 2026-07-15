@@ -27,6 +27,12 @@ type HostCapability struct {
 	// Called only when Check fails and Permanent returns false (or is nil).
 	// May return nil when no command-level guidance is available.
 	Fix func(env Environment) []FixStep
+
+	// Advisory marks a failure as worth a warning, never a hard block. doctor
+	// still reports it via the normal NeedsSetup tier, but FormatError (the
+	// blocking create/start prerequisite check) skips it, and callers may
+	// surface it as a passive launch-time warning instead.
+	Advisory bool
 }
 
 // FixStep is one discrete remediation action.

@@ -1,6 +1,6 @@
 module github.com/kstenerud/yoloai
 
-go 1.26.4
+go 1.26.5
 
 require (
 	github.com/containerd/containerd/api v1.11.1
@@ -14,11 +14,12 @@ require (
 	github.com/mark3labs/mcp-go v0.55.1
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/opencontainers/runtime-spec v1.3.0
+	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
 	github.com/vishvananda/netns v0.0.5
-	golang.org/x/sys v0.46.0
-	golang.org/x/term v0.44.0
+	golang.org/x/sys v0.47.0
+	golang.org/x/term v0.45.0
 	golang.org/x/tools v0.47.0
 	gopkg.in/yaml.v3 v3.0.1
 )

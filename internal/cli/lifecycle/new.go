@@ -384,7 +384,13 @@ func executeNewCreate(cmd *cobra.Command, ctx context.Context, c *yoloai.Client,
 	// The launch output (on stderr, or discarded in --json mode) precedes the
 	// creation summary, matching the old create-starts-by-default flow.
 	if !noStart {
-		if _, err := sb.Start(ctx, yoloai.SandboxStartOptions{Env: opts.Env, Broker: opts.Broker, NoBroker: opts.NoBroker}); err != nil {
+		res, err := sb.Start(ctx, yoloai.SandboxStartOptions{Env: opts.Env, Broker: opts.Broker, NoBroker: opts.NoBroker})
+		if res != nil {
+			// Only warnings — info-level notices (e.g. "Sandbox X started") would
+			// duplicate the creation summary printed below.
+			cliutil.RenderWarnings(cmd, res.Notices)
+		}
+		if err != nil {
 			rollbackFailedStart(ctx, sb)
 			return err
 		}

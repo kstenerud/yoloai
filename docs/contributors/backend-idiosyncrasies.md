@@ -110,6 +110,9 @@ inclusion test first, then add a row to the index.
 | `git diff` fails with "unable to read" object / git corruption on Tart VM | [Tart: VirtioFS corrupts git repositories](#virtiofs-corrupts-git-repositories) |
 | Tart `info` shows `Changes: no` on a dirty sandbox; `destroy` skips the unapplied-work gate | [Tart: host change probe blind to in-VM workdir](#a-host-side-change-probe-is-blind-to-the-in-vm-workdir--info-showed-changes-no-on-a-dirty-tart-sandbox-and-destroy-skipped-its-gate) |
 | Agent silently fails to start on Tart (claude/node not found) | [Tart: provisioned tool dirs live only on the login PATH](#provisioned-tool-dirs-live-only-on-the-login-path-cirrus-base-image) |
+| Agent on a long-idle Tart sandbox: `ConnectionRefused`/`FailedToOpenSocket` on every API call; `tart ip` finds nothing; guest `en0` is `169.254.x.x` | [Tart: vmnet session wedges on a long-idle VM](#tart-vmnet-session-wedges-on-a-long-idle-vm-host-sleep--subnet-re-pick--guest-drops-to-a-169254-link-local-address-agent-gets-connectionrefused) |
+| Smoke test: every tart lane fails (sentinel timeout, agent `ConnectionRefused`) on **freshly created** VMs while another long-running tart VM exists; other mac backends pass | [Tart: vmnet session wedges on a long-idle VM](#tart-vmnet-session-wedges-on-a-long-idle-vm-host-sleep--subnet-re-pick--guest-drops-to-a-169254-link-local-address-agent-gets-connectionrefused) (host-wide contamination; run `yoloai doctor`) |
+| Tart guest has a normal (non-169.254) IP and `tart ip` returns it, but DNS/TCP all fail; guest's gateway pings 0% ; guest subnet matches no host `bridge*` | [Tart: vmnet session wedges on a long-idle VM](#tart-vmnet-session-wedges-on-a-long-idle-vm-host-sleep--subnet-re-pick--guest-drops-to-a-169254-link-local-address-agent-gets-connectionrefused) (stale-lease variant, DF87) |
 | Swift PM commands fail with sandbox-exec nesting errors on Seatbelt | [Seatbelt: macOS sandbox-exec doesn't nest](#macos-sandbox-exec-doesnt-nest--swift-pm-needs-the-swift-wrapper-sourced) |
 | Agent dies silently/SIGTRAP (exit 133) on Seatbelt at launch; ICU/timezone deny in unified log | [Seatbelt: SBPL subpaths need vnode-resolved paths](#agent-dies-silently-sigtrap--sbpl-subpath-rules-must-use-vnode-resolved-paths) |
 | Confined git under `sandbox-exec` dies (`xcrun_db` / `libxcrun` denied); or a malicious filter still writes to `/tmp`; or git works with `mach-lookup` denied | [Seatbelt: sandbox-exec-wrapping git — escape surfaces + the /usr/bin/git shim](#seatbelt-sandbox-exec-wrapping-git-for-confinement-has-two-escape-surfaces-mach-lookup-process-exec--the-usrbingit-shim-cant-run-confined) |
@@ -124,6 +127,9 @@ inclusion test first, then add a row to the index.
 | `diff`/`apply`/`status` fails only on containerd-vm with `git: detected dubious ownership in repository` | [Kata: virtiofs remaps work-copy uid; in-confinement git trips dubious-ownership](#kata-virtiofs-remaps-the-work-copy-owner-uid-so-in-confinement-git-trips-dubious-ownership) |
 | Smoke test: `stop_start/tart` fails; exchange dir empty | [Tart: xcodebuild -runFirstLaunch blocks agent startup](#tart-xcodebuild--runfirstlaunch-blocks-agent-startup) |
 | Smoke `done` never fires; claude stuck on a Bash permission prompt despite `--dangerously-skip-permissions`; "fullscreen renderer" modal seen | [Claude: fullscreen upsell re-execs and drops the flag](#claude-the-fullscreen-renderer-upsell-re-execs-claude-and-drops---dangerously-skip-permissions) |
+| Codex asks to log in / `codex login status` says "Not logged in" even with `OPENAI_API_KEY` set; no `OPENAI_BASE_URL` env var redirects it; WS to `/v1/responses` | [Agent CLIs: base-URL override for brokering differs per CLI](#agent-clis-base-url-override-support-for-brokering-differs-per-cli) |
+| Codex quits to a shell right after launch; "Do you trust the contents of this directory?" prompt seen; pasted prompt swallowed | [Agent CLIs: base-URL override for brokering differs per CLI](#agent-clis-base-url-override-support-for-brokering-differs-per-cli) (point 4, folder trust) |
+| Brokering doesn't redirect Gemini when signed in with "Login with Google"; only `GEMINI_API_KEY` auth honors `GOOGLE_GEMINI_BASE_URL` | [Agent CLIs: base-URL override for brokering differs per CLI](#agent-clis-base-url-override-support-for-brokering-differs-per-cli) |
 | `container-enhanced` (gVisor): `new` exits 0 / `ls` active but agent never runs; box stuck on `sleep infinity`, only `entrypoint.keepalive_only` logged | [gVisor: docker exec --user resolves stale image passwd](#gvisor-container-enhanced-docker-exec---user-name-resolves-against-the-stale-image-passwd-not-the-live-one) |
 | `yoloai new --attach` hangs after "Sandbox created"; Python setup never completes | [Tart: mount_map uses Docker paths, triggering macOS automount](#tart-mount_map-uses-docker-style-paths-triggering-macos-automount-hang) |
 | `yoloai apply` fails: `git add: git [add -A]: exit status 128: … index.lock: File exists` while agent is running | [Docker/Podman: agent git and apply git race on index.lock](#dockerpodman-agent-git-and-apply-git-race-on-indexlock) |
@@ -1980,6 +1986,116 @@ VirtioFS should only be used for:
 
 **Code:** `runtime/tart/tart.go` (descriptor `AgentLaunchPrefix` + `PrepareAgentCommand`), `runtime/tart/build.go` (provisionCommands compose the login PATH), `orchestrator/create/create.go` (stores the prefix), `orchestrator/lifecycle/restart.go` (relaunch prepends it), `config/schema.go` (v1→v2 backfill)
 
+---
+
+### Tart: vmnet session wedges on a long-idle VM (host sleep / subnet re-pick) — guest drops to a 169.254 link-local address, agent gets ConnectionRefused
+
+**Symptom:** The agent in a Tart sandbox left idle for days can no longer
+reach its API: Claude shows `Unable to connect to API (ConnectionRefused)`
+and `(FailedToOpenSocket)` and retries forever. The VM is running and
+`tart exec` works normally (its control channel is Virtualization.framework,
+not IP), but `tart ip <vm>` returns "no IP address found" and the guest's
+`en0` holds a self-assigned `169.254.x.x` address.
+
+**Scope escalation (2026-07-14):** the wedge is not confined to the long-idle
+VM. While a wedged `tart run` session stays alive, **freshly created VMs on
+the same host come up net-dead too**: full-tier smoke runs failed every tart
+lane (`stop_start/tart`, `tag_transfer/tart`) with sentinel timeouts — the
+fresh guests' `en0` sat at `169.254.x.x`, `bridge100` was parked on the
+re-picked `192.168.139.x/23` subnet, and no `bootpd` (vmnet's DHCP server)
+was running, so new leases were never served. All other macOS backends
+passed (apple included — its `container` framework uses a separate vmnet
+network). Recorded as DF86. Corollary: one wedged VM makes the whole tart
+backend unusable until that VM is restarted.
+
+**Why:** two compounding host-side facts, observed 2026-07 on a sandbox
+idle for one week.
+
+1. macOS re-picks the vmnet shared subnet across host sleep / network
+   transitions. The guest's original gateway was `192.168.64.1`, but the
+   host's `bridge100` had moved to `192.168.139.3/23`. The guest's DHCP
+   lease expired and its renewals were answered by nobody — the DHCP
+   server it knew no longer exists on that subnet — so it fell back to a
+   link-local address.
+2. The vmnet session backing the long-running `tart run` process wedges
+   outright. Even after manually configuring the guest onto the new
+   subnet (`sudo ipconfig set en0 MANUAL <ip> <mask>` + default route),
+   **zero frames crossed the link**: ARP stayed `(incomplete)` in *both*
+   directions between guest `en0` and host `bridge100`, and host→guest
+   ping was 100% loss. The stale addressing is a symptom; the dead L2
+   link is the disease. A wedged vmnet session cannot be reattached from
+   user space — only recreating the virtio NIC (a VM restart) recovers it.
+
+**Diagnosis ladder:** `tart ip <vm>` → nothing, on a VM `tart list` says
+is running; in-guest `/sbin/ifconfig en0` → `inet 169.254.*`; in-guest
+`sudo ipconfig set en0 DHCP` never obtains a lease; a manual static IP on
+the host bridge's current subnet still can't ARP the gateway (both-ways
+`(incomplete)`) — that last step rules out "merely stale lease" and
+confirms the wedge.
+
+**Fix for the user:** restart the VM: `yoloai stop <name> && yoloai start
+<name>`. The VM disk persists, so the `:copy` workdir and the agent's
+on-disk session state survive; resume the agent's conversation after the
+restart (e.g. Claude's `--resume`). In-guest network surgery is pointless
+— don't spend time on it once ARP shows both-ways `(incomplete)`.
+
+**The session can die minutes after creation, awake (observed 2026-07-14):**
+don't read "long-idle / host sleep" as a precondition. On one afflicted host,
+a freshly restarted VM's bridge was torn down ~12 minutes later while the VM
+ran and the host was awake — unified log showed `bridge101` `if_detaching` →
+`if_detached` (`airportd`/`configd` at 21:13:26) with **no** WiFi roam,
+sleep, or VM churn preceding it; the guest kept its now-orphaned lease and
+went net-dead (stale-lease variant below). The same host produced three such
+re-wedges in one evening. Trigger unidentified (Tailscale's `IPNExtension`
+observed the change but wasn't shown to cause it). To catch the killer in
+the act:
+`log show --last 30m --predicate 'eventMessage CONTAINS "bridge101"'`
+around the moment `yoloai ls` flips to `(net-dead)`.
+
+**Subnet flapping under session churn (observed 2026-07-14):** tart's shared
+bridge (`bridge101` on a host where podman-machine's five-week-old session
+holds `bridge100`) is torn down and re-created as tart VMs come and go, and
+macOS re-picks its subnet on re-creation (`192.168.64.x` ↔ `192.168.65.x`
+within minutes on the same host). A long-lived tart VM that holds its lease
+across such an epoch change lands in the stale-lease state below — restarting
+it re-leases on the current epoch, but the next churn (e.g. a smoke run
+creating and destroying VMs) can strand it again. Freshly created VMs are
+fine once `/var/db/dhcpd_leases` is clean; it's the *cross-epoch survivor*
+that keeps going stale. Practical consequences: (a) after clearing a wedge,
+verify with real traffic, not just an address; (b) on a host that runs both a
+long-lived tart VM and VM-churning workloads (smoke tests), expect to restart
+the long-lived VM afterwards; (c) other Virtualization.framework VMs
+(podman-machine, Claude.app, apple `container`) each hold their own vmnet
+sessions/bridges — they are not tart orphans, and podman survives a dead
+bridge because it networks over vsock/gvproxy, not vmnet IP.
+
+**Second variant — stale lease, false-healthy (DF87, observed 2026-07-14):**
+after a restart, bootpd can re-ACK the guest's old lease out of
+`/var/db/dhcpd_leases` (hundreds of stale entries survive the subnet
+re-pick), leaving the guest with a normal-looking address on a subnet no
+current bridge serves — net-dead, while `tart ip` happily returns that
+address (it reads host lease records, not liveness). Detection therefore
+must not trust `tart ip` output alone: the address is only "ok" if it falls
+inside some host `bridge*` interface subnet. Check **all** bridges, not just
+`bridge100` — vmnet allocates a new bridgeN per session, and a guest on
+`bridge101`'s subnet is healthy even while `bridge100` sits on a stale one
+(verified live: both states occurred on the same host the same day).
+
+**Fix in code:** `yoloai doctor` detects and reports the wedge per running
+VM (`runtime/tart/netcheck.go`, surfaced via `runtime.NetLivenessReporter`):
+signal 1 is `tart ip <vm>` failing on a running VM, confirmed by signal 2 —
+`tart exec <vm> /usr/sbin/ipconfig getifaddr en0` returning a `169.254.*`
+address (note: it returns the link-local address, it does not come back
+empty). A signal-1 address outside every host `bridge*` subnet is classified
+wedged (stale-lease variant, `classifyGuestAddr`) with no guest exec. A confirmed wedge prints the directive restart message and makes
+doctor exit non-zero. Detection only — nothing ever restarts the VM
+automatically. The same probe also feeds `yoloai ls` (`<status>
+(net-dead)`) and `yoloai sandbox <name> info` (`Net health:` line) via
+`runtime.SandboxNetHealthProber`, and the smoke harness fails fast on a
+wedge (pre-flight abort + in-loop check + its own autopsy fingerprint)
+instead of burning sentinel timeouts. Full design:
+[`archive/plans/tart-network-liveness.md`](archive/plans/tart-network-liveness.md).
+
 ## Seatbelt (macOS sandboxing)
 
 ### Seatbelt has no backend image/cache store — `CacheUsage`/`PruneCache` are correctly absent
@@ -2813,3 +2929,79 @@ but any Go path that does `utf8`-validating work on a capture must tolerate it.
 
 **Code:** `scripts/smoke_test.py` (`Test.run`, `errors="replace"`);
 regression test `scripts/tests/test_smoke_runner.py`.
+
+---
+
+## Agent CLIs: base-URL override support for brokering differs per CLI
+
+**Symptom:** wiring an agent for credential brokering (D105/D115 — point the CLI
+at the host-side injector via a base URL, hand it a placeholder key) works for
+Claude and Gemini but the redirect mechanism is **not uniform**: what works for
+one CLI silently no-ops on another. Two specific traps bit the D115 wiring.
+
+**Codex (0.144) authenticates from `auth.json`, not an env var, and reads its
+base URL only from `config.toml` — and it talks over a WebSocket.** Three
+separate surprises, all verified empirically on the shipped CLI (0.144.4), all
+contradicting secondary-source research that described older Codex:
+
+1. **No base-URL env var.** Codex reads its base URL **only** from `openai_base_url`
+   (or a custom `[model_providers.*]` block) in `~/.codex/config.toml`. There is
+   **no** `OPENAI_BASE_URL`/`CODEX_BASE_URL` env var — third-party blogs claiming
+   one describe the retired TypeScript Codex. `openai_base_url` is honored **only
+   in user-level config** (ignored, with a warning, in a project-local
+   `.codex/config.toml`).
+2. **A bare API-key env var does NOT authenticate Codex.** With `OPENAI_API_KEY`
+   (or `CODEX_API_KEY`) set in the environment, `codex login status` still reports
+   **"Not logged in"** and the TUI prompts for login. Codex authenticates from a
+   logged-in `~/.codex/auth.json` in the shape `codex login --with-api-key`
+   produces: `{"auth_mode":"apikey","OPENAI_API_KEY":"<key>"}`. So the broker
+   delivers the placeholder by **writing auth.json**, not an env var — and the
+   non-brokered path writes the *real* key to auth.json too (`--no-broker` Codex
+   with a bare env var was otherwise "not logged in"; `agent.renderCodexAuth` →
+   `launch.applyDirectCredential`, DF84).
+3. **Codex hits `{base_url}/responses` over a WebSocket** (Responses API;
+   chat/completions was removed Feb 2026). The WS transport is baked in — the
+   `responses_websockets` feature flags are "removed", and `prefer_websockets=false`
+   does not disable it — with an automatic (slow, retrying) HTTPS fallback.
+   yoloAI's injector is a Go `httputil.ReverseProxy`, which **does** proxy the WS
+   upgrade and inject the real credential on the handshake, so Codex's WS transport
+   works natively through the broker (no fallback). `openai_base_url` gets a `/v1`
+   suffix so Codex's appended `/responses` resolves to the real `/v1/responses`.
+
+The broker therefore patches **two** files host-side before the container starts
+(`agent.patchCodexBaseURL` + `agent.patchCodexAuth` → `launch.patchBrokerConfigFiles`):
+config.toml for the redirect, auth.json for the placeholder key.
+
+4. **Codex blocks on a folder-trust onboarding prompt** for any working directory
+   not recorded as trusted in `config.toml` (`[projects."<path>"] trust_level =
+   "trusted"`). yoloAI launches Codex interactively and pastes the task prompt,
+   which lands in that dialog instead of the input box, and the agent exits to a
+   shell. `--dangerously-bypass-approvals-and-sandbox` (command approvals) and
+   `--dangerously-bypass-hook-trust` (hook trust) do **not** cover folder trust,
+   and there is **no global trust-disable** — trust is strictly per-project-root.
+   yoloAI marks the container workdir trusted on every launch
+   (`agent.Definition.WorkdirTrust` → `launch.applyWorkdirTrust` →
+   `agent.patchCodexWorkdirTrust`; DF85). This is separate from brokering (it runs
+   for `--no-broker` too).
+
+**Gemini's base-URL override is honored only on the API-key auth path.** The
+Gemini CLI's `GOOGLE_GEMINI_BASE_URL` (read by the underlying `@google/genai`
+SDK) redirects requests **only** when the CLI resolves to `GEMINI_API_KEY`
+(AI-Studio) auth. A "Login with Google" **OAuth** session hits Google's Code
+Assist endpoints **hardcoded** and silently ignores the override (acknowledged
+upstream, gemini-cli #15430). Also: `GOOGLE_API_KEY` takes precedence over
+`GEMINI_API_KEY` and can push the CLI onto the Vertex path — so brokering sets
+only `GEMINI_API_KEY`. Consequence baked into D115: brokering engages **only when
+an API key is present**; an OAuth/subscription login is left to direct delivery
+for every agent, not just Gemini (Codex ChatGPT-subscription is the same class).
+
+**Why this is here (not our bug):** these are properties of the external CLIs —
+delete all of yoloAI and Codex still has no base-URL env var and Gemini's OAuth
+path still ignores the override. The takeaway for a future maintainer wiring
+another agent for brokering: **verify the CLI's actual base-URL mechanism (env
+var vs config file vs per-provider) and which auth paths honor it** before
+assuming the Claude-style env redirect applies.
+
+**Code:** `internal/agent/agent.go` (`gemini`/`codex` `Broker`),
+`internal/agent/broker_codex.go`, `internal/orchestrator/launch/launch.go`
+(`patchBrokerBaseURLFile`); decision D115.

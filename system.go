@@ -258,6 +258,25 @@ type VMCensus = runtime.VMCensus
 // from runtime.
 type VMSlot = runtime.VMSlot
 
+// NetLivenessReport is a point-in-time network-liveness probe across every
+// running VM a backend manages. Re-exported (type alias) from runtime.
+type NetLivenessReport = runtime.NetLivenessReport
+
+// VMNetHealth is one running VM's network-liveness probe result. Re-exported
+// (type alias) from runtime.
+type VMNetHealth = runtime.VMNetHealth
+
+// NetHealthState classifies a VM's guest-network liveness. Re-exported (type
+// alias) from runtime.
+type NetHealthState = runtime.NetHealthState
+
+// Re-exported (const aliases) from runtime.
+const (
+	NetHealthOK      = runtime.NetHealthOK
+	NetHealthWedged  = runtime.NetHealthWedged
+	NetHealthUnknown = runtime.NetHealthUnknown
+)
+
 // SystemDoctorOptions filters Doctor's per-backend health checks. Empty filters
 // (the zero value) report every backend and every isolation mode.
 type SystemDoctorOptions struct {
@@ -303,6 +322,26 @@ func (s *System) VMCensus(ctx context.Context) *VMCensus {
 			continue
 		}
 		return &census
+	}
+	return nil
+}
+
+// NetLiveness reports guest-network liveness for every running VM on whichever
+// backend can probe it (currently only tart on macOS). Returns nil when no
+// such backend is available, or when the available one reports no running
+// VMs. Best-effort: a backend that errors while reporting is skipped.
+func (s *System) NetLiveness(ctx context.Context) *NetLivenessReport {
+	for _, desc := range runtime.Descriptors() {
+		rt, err := runtime.New(ctx, desc.Type, s.layout)
+		if err != nil {
+			continue
+		}
+		report, ok, reportErr := runtime.NetLivenessFor(ctx, rt)
+		_ = rt.Close()
+		if !ok || reportErr != nil {
+			continue
+		}
+		return &report
 	}
 	return nil
 }

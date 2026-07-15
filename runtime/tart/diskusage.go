@@ -23,11 +23,12 @@ const bytesPerGB = 1_000_000_000
 
 // tartListEntry is one row of `tart list --format json`. Size is the on-disk
 // footprint in whole GB; Source is "local" (cloned/provisioned VMs) or "OCI"
-// (pulled registry images).
+// (pulled registry images); Running reports whether the VM is currently up.
 type tartListEntry struct {
-	Name   string `json:"Name"`
-	Source string `json:"Source"`
-	Size   int64  `json:"Size"`
+	Name    string `json:"Name"`
+	Source  string `json:"Source"`
+	Size    int64  `json:"Size"`
+	Running bool   `json:"Running"`
 }
 
 // listEntries returns every VM and OCI image tart tracks.

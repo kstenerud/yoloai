@@ -14,7 +14,7 @@ NewNewCmd (cli/lifecycle/new.go)
               → compose: set isolation=container-privileged, archetypeDockerDRequired=true
               → transparency output (signals, bullets, suppress hint)
           → validate name/agent/workdir/auxdirs (DirSpecs already parsed upstream by cliutil.ParseDirArg) → safety checks
-          → :copy dirs: copyDir (cp -rp / clonefile on macOS) → removeGitDirs → gitBaseline
+          → :copy dirs: CopyDir (clonefile on macOS; walk + io.Copy → copy_file_range reflink on Linux) → removeGitDirs → gitBaseline
           → :overlay dirs: createOverlayDirs (upper/ovlwork in sandbox state)
           → seed phase (provision/ leaf):
               copySeedFiles → copyAgentFiles → ensureContainerSettings → seedHomeConfig

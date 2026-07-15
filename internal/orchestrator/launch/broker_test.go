@@ -4,14 +4,19 @@ package launch
 
 import (
 	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
+	toml "github.com/pelletier/go-toml/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/orchestrator/state"
 	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/store"
 )
 
 func claudeBrokerConfig() *agent.BrokerConfig {
@@ -22,9 +27,10 @@ func claudeBrokerConfig() *agent.BrokerConfig {
 			{EnvVar: "ANTHROPIC_API_KEY", Header: "x-api-key", Prefix: ""},
 			{EnvVar: "CLAUDE_CODE_OAUTH_TOKEN", Header: "Authorization", Prefix: "Bearer "},
 		},
-		BaseURLEnvVar:   "ANTHROPIC_BASE_URL",
-		AuthTokenEnvVar: "ANTHROPIC_AUTH_TOKEN",
-		DummyToken:      "yoloai-broker-dummy",
+		PlaceholderHeader: "Authorization",
+		BaseURLEnvVar:     "ANTHROPIC_BASE_URL",
+		AuthTokenEnvVar:   "ANTHROPIC_AUTH_TOKEN",
+		DummyToken:        "yoloai-broker-dummy",
 	}
 }
 
@@ -107,6 +113,195 @@ func TestBuildInjectorSpec_PerCredentialInjection(t *testing.T) {
 	assert.Equal(t, "Authorization", oauthSpec.Bindings[0].Header)
 	assert.Equal(t, "Bearer ", oauthSpec.Bindings[0].Prefix)
 	assert.Equal(t, "real-oauth-token", oauthSpec.Bindings[0].Secret)
+}
+
+func TestApplyBrokerEnv_GeminiPlaceholderRidesInAPIKeyVar(t *testing.T) {
+	// Gemini has no dedicated auth-token env var: the placeholder must ride in
+	// GEMINI_API_KEY itself (AuthTokenEnvVar==GEMINI_API_KEY). applyBrokerEnv drops
+	// the real key, then sets the same var to the placeholder.
+	bc := agent.GetAgent("gemini").Broker
+	require.NotNil(t, bc, "gemini must be wired for brokering")
+	secretEnv := map[string]string{"GEMINI_API_KEY": "real-gemini-key", "OTHER": "keep"}
+	reach := runtime.InjectorReach{BindHost: "172.17.0.1", DialHost: "172.17.0.1"}
+
+	endpoint, err := applyBrokerEnv(secretEnv, bc, reach, "172.17.0.1:44115", "placeholder-tok")
+	require.NoError(t, err)
+	assert.Equal(t, "172.17.0.1:44115", endpoint)
+	assert.Equal(t, "http://172.17.0.1:44115", secretEnv["GOOGLE_GEMINI_BASE_URL"])
+	assert.Equal(t, "placeholder-tok", secretEnv["GEMINI_API_KEY"], "the real key is replaced by the placeholder in the same var")
+	assert.Equal(t, "keep", secretEnv["OTHER"])
+}
+
+func TestApplyBrokerEnv_CodexDeliversNothingViaEnv(t *testing.T) {
+	// Codex redirects via config.toml and delivers its placeholder via auth.json —
+	// neither via env vars (BaseURLEnvVar=="" and AuthTokenEnvVar==""). So
+	// applyBrokerEnv must NOT write any empty-keyed env var; it only drops the real
+	// key(s) so they don't leak into the container. The files are handled separately
+	// by patchBrokerConfigFiles.
+	bc := agent.GetAgent("codex").Broker
+	require.NotNil(t, bc, "codex must be wired for brokering")
+	secretEnv := map[string]string{"OPENAI_API_KEY": "real-openai-key", "OTHER": "keep"}
+	reach := runtime.InjectorReach{BindHost: "172.17.0.1", DialHost: "172.17.0.1"}
+
+	_, err := applyBrokerEnv(secretEnv, bc, reach, "172.17.0.1:44115", "placeholder-tok")
+	require.NoError(t, err)
+	_, hasEmptyKey := secretEnv[""]
+	assert.False(t, hasEmptyKey, "no env var is written for a file-delivered agent")
+	_, hasKey := secretEnv["OPENAI_API_KEY"]
+	assert.False(t, hasKey, "the real key is dropped from the container env")
+	assert.NotContains(t, secretEnv, "CODEX_API_KEY", "no placeholder is delivered via env for Codex")
+	assert.Equal(t, "keep", secretEnv["OTHER"])
+}
+
+func TestBuildInjectorSpec_StripsPlaceholderHeaderPerAgent(t *testing.T) {
+	reach := runtime.InjectorReach{BindHost: "172.17.0.1", DialHost: "172.17.0.1"}
+
+	// Gemini's placeholder rides in x-goog-api-key, so that is the header stripped
+	// and searched for the token — not the hardcoded Authorization.
+	gem := agent.GetAgent("gemini").Broker
+	gemSpec := buildInjectorSpec(t.TempDir(), gem, gem.Credentials[0], reach, "real", "tok")
+	assert.Equal(t, []string{"x-goog-api-key"}, gemSpec.StripHeaders)
+	assert.Equal(t, "x-goog-api-key", gemSpec.Bindings[0].Header)
+
+	// Codex carries its placeholder in Authorization (Bearer).
+	cod := agent.GetAgent("codex").Broker
+	codSpec := buildInjectorSpec(t.TempDir(), cod, cod.Credentials[0], reach, "real", "tok")
+	assert.Equal(t, []string{"Authorization"}, codSpec.StripHeaders)
+	assert.Equal(t, "Bearer ", codSpec.Bindings[0].Prefix)
+}
+
+func TestPatchBrokerConfigFiles(t *testing.T) {
+	bc := agent.GetAgent("codex").Broker
+	require.NotEmpty(t, bc.ConfigFiles, "codex delivers redirect + placeholder via config files")
+
+	read := func(t *testing.T, sandboxDir, rel string) string {
+		t.Helper()
+		data, err := os.ReadFile(filepath.Join(sandboxDir, store.AgentRuntimeDir, rel)) //nolint:gosec // test path under t.TempDir()
+		require.NoError(t, err)
+		return string(data)
+	}
+
+	t.Run("writes both config.toml redirect and auth.json placeholder", func(t *testing.T) {
+		sandboxDir := t.TempDir()
+		require.NoError(t, patchBrokerConfigFiles(sandboxDir, bc, "172.17.0.1:44115", "per-sandbox-tok"))
+
+		cfg := read(t, sandboxDir, "config.toml")
+		assert.Contains(t, cfg, "openai_base_url")
+		assert.Contains(t, cfg, "http://172.17.0.1:44115/v1", "Codex appends /responses to this, yielding the real /v1/responses path")
+
+		auth := read(t, sandboxDir, "auth.json")
+		assert.Contains(t, auth, "apikey")
+		assert.Contains(t, auth, "per-sandbox-tok", "the placeholder — not the real key — is written to auth.json")
+	})
+
+	t.Run("preserves existing user config.toml", func(t *testing.T) {
+		sandboxDir := t.TempDir()
+		dir := filepath.Join(sandboxDir, store.AgentRuntimeDir)
+		require.NoError(t, os.MkdirAll(dir, 0o750))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "config.toml"), []byte("model = \"gpt-5.3-codex\"\n"), 0o600))
+
+		require.NoError(t, patchBrokerConfigFiles(sandboxDir, bc, "172.17.0.1:44115", "tok"))
+		cfg := read(t, sandboxDir, "config.toml")
+		assert.Contains(t, cfg, "gpt-5.3-codex", "unrelated user settings survive")
+		assert.Contains(t, cfg, "openai_base_url")
+	})
+
+	t.Run("no-op for env-redirected agents", func(t *testing.T) {
+		sandboxDir := t.TempDir()
+		require.NoError(t, patchBrokerConfigFiles(sandboxDir, claudeBrokerConfig(), "172.17.0.1:44115", "tok"))
+		_, err := os.Stat(filepath.Join(sandboxDir, store.AgentRuntimeDir))
+		assert.True(t, os.IsNotExist(err), "nothing written when ConfigFiles is empty")
+	})
+}
+
+func TestApplyWorkdirTrust(t *testing.T) {
+	readConfig := func(t *testing.T, sandboxDir string) map[string]any {
+		t.Helper()
+		data, err := os.ReadFile(filepath.Join(sandboxDir, store.AgentRuntimeDir, "config.toml")) //nolint:gosec // test path under t.TempDir()
+		require.NoError(t, err)
+		var cfg map[string]any
+		require.NoError(t, toml.Unmarshal(data, &cfg))
+		return cfg
+	}
+
+	t.Run("codex trusts the resolved container workdir", func(t *testing.T) {
+		sandboxDir := t.TempDir()
+		st := &state.State{
+			SandboxDir: sandboxDir,
+			Agent:      agent.GetAgent("codex"),
+			Workdir:    &state.DirSpec{Path: "/home/karl/proj"},
+		}
+		require.NoError(t, applyWorkdirTrust(st))
+
+		projects := readConfig(t, sandboxDir)["projects"].(map[string]any)
+		entry, ok := projects["/home/karl/proj"].(map[string]any)
+		require.True(t, ok, "the container workdir is recorded as a trusted project")
+		assert.Equal(t, "trusted", entry["trust_level"])
+	})
+
+	t.Run("custom mount path is trusted, not the host path", func(t *testing.T) {
+		sandboxDir := t.TempDir()
+		st := &state.State{
+			SandboxDir: sandboxDir,
+			Agent:      agent.GetAgent("codex"),
+			Workdir:    &state.DirSpec{Path: "/host/path", MountPath: "/container/path"},
+		}
+		require.NoError(t, applyWorkdirTrust(st))
+
+		projects := readConfig(t, sandboxDir)["projects"].(map[string]any)
+		assert.Contains(t, projects, "/container/path", "trusts the container path codex actually runs in")
+		assert.NotContains(t, projects, "/host/path")
+	})
+
+	t.Run("no-op for an agent without WorkdirTrust", func(t *testing.T) {
+		sandboxDir := t.TempDir()
+		st := &state.State{
+			SandboxDir: sandboxDir,
+			Agent:      agent.GetAgent("gemini"),
+			Workdir:    &state.DirSpec{Path: "/home/karl/proj"},
+		}
+		require.NoError(t, applyWorkdirTrust(st))
+		_, err := os.Stat(filepath.Join(sandboxDir, store.AgentRuntimeDir))
+		assert.True(t, os.IsNotExist(err), "nothing written when the agent declares no WorkdirTrust")
+	})
+}
+
+func TestApplyDirectCredential(t *testing.T) {
+	authPath := func(sandboxDir string) string {
+		return filepath.Join(sandboxDir, store.AgentRuntimeDir, "auth.json")
+	}
+
+	t.Run("codex writes the real key to auth.json when not brokered", func(t *testing.T) {
+		sandboxDir := t.TempDir()
+		st := &state.State{SandboxDir: sandboxDir, Agent: agent.GetAgent("codex")}
+		// Direct delivery: the real key is still in secretEnv (brokering would have removed it).
+		secretEnv := map[string]string{"OPENAI_API_KEY": "sk-real-key"}
+
+		require.NoError(t, applyDirectCredential(st, secretEnv))
+		data, err := os.ReadFile(authPath(sandboxDir))
+		require.NoError(t, err)
+		var auth map[string]any
+		require.NoError(t, json.Unmarshal(data, &auth))
+		assert.Equal(t, "apikey", auth["auth_mode"])
+		assert.Equal(t, "sk-real-key", auth["OPENAI_API_KEY"], "the real key authenticates Codex directly")
+	})
+
+	t.Run("no-op when the credential was brokered away", func(t *testing.T) {
+		sandboxDir := t.TempDir()
+		st := &state.State{SandboxDir: sandboxDir, Agent: agent.GetAgent("codex")}
+		// Brokered: applyBrokerEnv removed the real key from secretEnv already.
+		require.NoError(t, applyDirectCredential(st, map[string]string{}))
+		_, err := os.Stat(authPath(sandboxDir))
+		assert.True(t, os.IsNotExist(err), "brokered launch already wrote a placeholder auth.json; direct step must not overwrite it")
+	})
+
+	t.Run("no-op for an agent without DirectCredentialFile", func(t *testing.T) {
+		sandboxDir := t.TempDir()
+		st := &state.State{SandboxDir: sandboxDir, Agent: agent.GetAgent("gemini")}
+		require.NoError(t, applyDirectCredential(st, map[string]string{"GEMINI_API_KEY": "real"}))
+		_, err := os.Stat(filepath.Join(sandboxDir, store.AgentRuntimeDir))
+		assert.True(t, os.IsNotExist(err), "gemini's env-var credential works directly; nothing written")
+	})
 }
 
 // brokerCredentials gate (the default-on flip)

@@ -497,3 +497,44 @@ func TestBrokerConfig_SelectCredential_ClaudePrecedence(t *testing.T) {
 	_, _, ok = bc.SelectCredential(map[string]string{"ANTHROPIC_API_KEY": ""})
 	assert.False(t, ok)
 }
+
+// TestBrokerConfig_WellFormed guards the invariants the launch path relies on for
+// every brokerable agent, so a new or edited BrokerConfig can't silently ship a
+// broken redirect: a non-empty placeholder header, exactly one redirect delivery
+// channel (env var XOR config files), a placeholder carrier (env var for env
+// agents; a config file for file agents), each credential fully specified, and
+// the upstream host present in the agent's own network allowlist (required for
+// the --network-isolated path).
+func TestBrokerConfig_WellFormed(t *testing.T) {
+	for _, name := range AllAgentTypes() {
+		def := GetAgent(name)
+		if def.Broker == nil {
+			continue
+		}
+		t.Run(name, func(t *testing.T) {
+			bc := def.Broker
+			assert.NotEmpty(t, bc.UpstreamURL, "UpstreamURL")
+			assert.NotEmpty(t, bc.Destination, "Destination")
+			assert.NotEmpty(t, bc.PlaceholderHeader, "PlaceholderHeader (the injector strips + verifies this)")
+			require.NotEmpty(t, bc.Credentials, "at least one brokerable credential")
+
+			hasEnv := bc.BaseURLEnvVar != ""
+			hasFiles := len(bc.ConfigFiles) > 0
+			assert.True(t, hasEnv != hasFiles, "exactly one redirect channel: BaseURLEnvVar XOR ConfigFiles")
+			if hasEnv {
+				// Env-redirected agents deliver the placeholder via an env var too.
+				assert.NotEmpty(t, bc.AuthTokenEnvVar, "env-redirected agents need AuthTokenEnvVar for the placeholder")
+			}
+			for _, cf := range bc.ConfigFiles {
+				assert.NotEmpty(t, cf.RelPath, "ConfigFile RelPath")
+				assert.NotNil(t, cf.Patch, "ConfigFile Patch")
+			}
+			for i, c := range bc.Credentials {
+				assert.NotEmpty(t, c.EnvVar, "credential %d EnvVar", i)
+				assert.NotEmpty(t, c.Header, "credential %d Header", i)
+			}
+			assert.Contains(t, def.NetworkAllowlist, bc.Destination,
+				"the brokered upstream host must be allowlisted for --network-isolated")
+		})
+	}
+}

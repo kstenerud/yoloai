@@ -10,6 +10,7 @@ import (
 
 	"github.com/kstenerud/yoloai"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func samplePrune() *yoloai.PruneResult {
@@ -112,7 +113,7 @@ func TestRenderTrash(t *testing.T) {
 func TestBuildDoctorJSON(t *testing.T) {
 	rep := buildDoctorJSON(nil, samplePrune(), &yoloai.DiskUsage{
 		PerBackend: []yoloai.BackendDiskUsage{{Type: "docker", CachedBytes: 2048, ImageBytes: 4096}},
-	}, nil)
+	}, nil, nil)
 	assert.Len(t, rep.ReclaimableNow, 3)
 	assert.Len(t, rep.ReclaimableSpace, 1)
 	assert.Len(t, rep.UnreviewedWork, 1)
@@ -124,7 +125,7 @@ func TestBuildDoctorJSON(t *testing.T) {
 }
 
 func TestBuildDoctorJSON_NilProbesYieldEmptySlices(t *testing.T) {
-	rep := buildDoctorJSON(nil, nil, nil, nil)
+	rep := buildDoctorJSON(nil, nil, nil, nil, nil)
 	// Non-nil empty slices so the JSON document carries [] rather than null.
 	assert.NotNil(t, rep.ReclaimableNow)
 	assert.NotNil(t, rep.ReclaimableSpace)
@@ -143,4 +144,67 @@ func TestRenderReclaimableNow_CapsPreview(t *testing.T) {
 	out := b.String()
 	assert.Contains(t, out, "... and 5 more")
 	assert.Equal(t, reclaimPreviewMax, strings.Count(out, "temp_dir: t"))
+}
+
+func sampleNetLiveness() *yoloai.NetLivenessReport {
+	return &yoloai.NetLivenessReport{
+		VMs: []yoloai.VMNetHealth{
+			{SandboxName: "embrace", VMName: "yoloai-embrace", State: yoloai.NetHealthWedged, Detail: "guest en0 is link-local 169.254.93.37"},
+			{SandboxName: "healthy", VMName: "yoloai-healthy", State: yoloai.NetHealthOK, Detail: "192.168.64.12"},
+		},
+	}
+}
+
+func TestRenderNetLiveness(t *testing.T) {
+	var b bytes.Buffer
+	renderNetLiveness(&b, sampleNetLiveness())
+	out := b.String()
+	assert.Contains(t, out, "WEDGED")
+	assert.Contains(t, out, "169.254.93.37")
+	assert.Contains(t, out, "yoloai stop embrace && yoloai start embrace")
+	assert.Contains(t, out, "breaks")
+	assert.Contains(t, out, "networking for NEW tart VMs on this host")
+	assert.Contains(t, out, "healthy: network: ok (192.168.64.12)")
+}
+
+func TestRenderNetLiveness_EmptyIsSilent(t *testing.T) {
+	var b bytes.Buffer
+	renderNetLiveness(&b, &yoloai.NetLivenessReport{})
+	assert.Empty(t, b.String())
+	renderNetLiveness(&b, nil)
+	assert.Empty(t, b.String())
+}
+
+func TestRenderNetLiveness_Unknown(t *testing.T) {
+	var b bytes.Buffer
+	renderNetLiveness(&b, &yoloai.NetLivenessReport{
+		VMs: []yoloai.VMNetHealth{
+			{SandboxName: "booting", VMName: "yoloai-booting", State: yoloai.NetHealthUnknown, Detail: "guest network probe returned no address"},
+		},
+	})
+	out := b.String()
+	assert.Contains(t, out, "could not determine")
+	assert.Contains(t, out, "DHCP may still be pending")
+	assert.Contains(t, out, "guest network probe returned no address")
+}
+
+func TestDoctorExitError_WedgedNetworkIsNonZero(t *testing.T) {
+	err := doctorExitError(nil, nil, sampleNetLiveness())
+	assert.Error(t, err)
+}
+
+func TestDoctorExitError_NoWedgeIsNil(t *testing.T) {
+	err := doctorExitError(nil, nil, &yoloai.NetLivenessReport{
+		VMs: []yoloai.VMNetHealth{{SandboxName: "healthy", State: yoloai.NetHealthOK, Detail: "192.168.64.12"}},
+	})
+	assert.NoError(t, err)
+	assert.NoError(t, doctorExitError(nil, nil, nil))
+}
+
+func TestBuildDoctorJSON_IncludesNetLiveness(t *testing.T) {
+	rep := buildDoctorJSON(nil, nil, nil, nil, sampleNetLiveness())
+	require.NotNil(t, rep.NetLiveness)
+	require.Len(t, rep.NetLiveness.VMs, 2)
+	assert.Equal(t, "wedged", rep.NetLiveness.VMs[0].State)
+	assert.Equal(t, "ok", rep.NetLiveness.VMs[1].State)
 }

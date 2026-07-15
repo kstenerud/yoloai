@@ -29,12 +29,15 @@ import (
 // descriptor holds the static facts for the containerd backend; shared by the
 // registry registration and the Runtime.Descriptor() method.
 var descriptor = runtime.BackendDescriptor{
-	Type:                      runtime.BackendContainerd,
-	Description:               "Linux VMs via Kata Containers (--isolation vm/vm-enhanced)",
-	Platforms:                 []string{"linux"},
-	IsolationTargetOnly:       true,
-	Requires:                  "containerd, Kata Containers shim, CNI plugins, /dev/kvm",
-	InstallHint:               "sudo apt install containerd kata-containers containernetworking-plugins",
+	Type:                runtime.BackendContainerd,
+	Description:         "Linux VMs via Kata Containers (--isolation vm/vm-enhanced)",
+	Platforms:           []string{"linux"},
+	IsolationTargetOnly: true,
+	Requires:            "containerd, Kata Containers shim, CNI plugins, /dev/kvm",
+	// kata-containers has no current apt/OBS package (that repo was archived in
+	// 2021, DF83) — install it via kata-manager.sh after apt installs the rest.
+	InstallHint: "sudo apt install containerd containernetworking-plugins && " +
+		kataManagerInstallOnly,
 	BaseModeName:              runtime.IsolationModeVM,
 	AgentProvisionedByBackend: true,
 	SupportedIsolationModes:   []runtime.IsolationMode{runtime.IsolationModeVM, runtime.IsolationModeVMEnhanced},

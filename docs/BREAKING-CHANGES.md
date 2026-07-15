@@ -2,6 +2,33 @@
 
 Tracks breaking changes made during beta. Each entry should be included in release notes for the version that introduces it.
 
+## v0.8.0
+
+### Credential brokering is now the default for Gemini and Codex (not just Claude)
+
+**Previous behavior:** only Claude Code's API credential was brokered by default
+(delivered to a host-side injector, never into the sandbox). Gemini and Codex
+received their API keys **directly** in the sandbox environment — `GEMINI_API_KEY`
+and `OPENAI_API_KEY`/`CODEX_API_KEY` held the real key inside the container.
+
+**New behavior:** when an API key is present, Gemini and Codex are brokered by
+default too (D115). The real key stays host-side; inside the sandbox the agent is
+pointed at the injector and its key env var holds only a per-sandbox placeholder.
+For Gemini this is via `GOOGLE_GEMINI_BASE_URL`; for Codex the redirect is written
+into `~/.codex/config.toml` (`openai_base_url`) since Codex has no base-URL env var.
+
+**Impact:** transparent for normal agent use with a valid API key — requests still
+reach the same upstream. But (1) the key env var inside the sandbox now holds a
+placeholder, so a custom script that reads `GEMINI_API_KEY`/`OPENAI_API_KEY` from
+inside the box to call the provider itself will get the placeholder, not the real
+key; (2) brokering only engages on the **API-key** path — an OAuth/subscription
+login (Gemini "Login with Google", Codex ChatGPT) is unaffected and still uses
+direct delivery; (3) brokering requires a backend that can host a sandbox-reachable
+injector and is skipped under `--network-none`.
+
+**Migration:** none required for standard use. To restore direct key delivery for
+a sandbox, pass `--no-broker` at `new` (sticky across restart), same as Claude.
+
 ## v0.7.0
 
 ### Config commands reject unknown paths; `config set` requires a leaf key

@@ -36,7 +36,7 @@ jobs:
       - name: Extract release notes from the tag annotation
         run: git tag -l --format='%(contents:body)' "${GITHUB_REF_NAME}" > "${RUNNER_TEMP}/release-notes.md"
 
-      - uses: goreleaser/goreleaser-action@v6
+      - uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
           version: "~> v2"
@@ -49,6 +49,9 @@ jobs:
 
       # GitHub-native SLSA build provenance for the published archives + packages,
       # verifiable with: gh attestation verify <file> --repo kstenerud/yoloai
-      - uses: actions/attest-build-provenance@v2
+      # With no predicate/sbom-path inputs, actions/attest defaults to SLSA build
+      # provenance. Called directly rather than via the attest-build-provenance
+      # wrapper, which upstream now keeps only for backwards compatibility.
+      - uses: actions/attest@v4
         with:
           subject-path: "dist/*.tar.gz,dist/*.deb,dist/*.rpm,dist/checksums.txt"

@@ -31,6 +31,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/orchestrator/runtimeconfig"
 	"github.com/kstenerud/yoloai/internal/orchestrator/state"
 	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/runtime/caps"
 	"github.com/kstenerud/yoloai/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
@@ -70,6 +71,20 @@ func LaunchContainer(ctx context.Context, d state.Deps, st *state.State) (err er
 		return err
 	}
 
+	// Record the workdir as trusted for CLIs that block on a folder-trust prompt
+	// (Codex, DF85). Unconditional — independent of brokering — and after the
+	// broker patch so it composes with any openai_base_url written above.
+	if err := applyWorkdirTrust(st); err != nil {
+		return err
+	}
+
+	// For a file-auth CLI that was NOT brokered, materialize the real credential
+	// into its auth file (Codex, DF84). Runs on secretEnv while it still holds the
+	// real key — brokering removed it above, so this is a no-op for brokered launches.
+	if err := applyDirectCredential(st, secretEnv); err != nil {
+		return err
+	}
+
 	// The injector is now live, and the steps below may create/start the container
 	// and its CNI netns. Roll the whole partial launch back on any failure from
 	// here on, so re-running the launch (yoloai start) isn't balked by a leftover
@@ -105,6 +120,10 @@ func LaunchContainer(ctx context.Context, d state.Deps, st *state.State) (err er
 		return err
 	}
 	ports = filterAvailablePorts(ports, outputOr(st.Output))
+
+	for _, w := range advisoryWarnings(ctx, d.Runtime, st.Isolation) {
+		fmt.Fprintf(outputOr(st.Output), "Warning: %s\n", w) //nolint:errcheck // best-effort output
+	}
 
 	if err = buildAndStart(ctx, d.Runtime, st, mnts, ports, secretsDir != "", secretEnv, bro); err != nil {
 		return err // the deferred rollbackPartialLaunch reaps the injector + container + netns
@@ -475,9 +494,114 @@ func brokerCredentials(ctx context.Context, rt runtime.Backend, st *state.State,
 	if err != nil {
 		return brokerOutcome{}, err
 	}
+	if err := patchBrokerConfigFiles(st.SandboxDir, bc, endpoint, placeholderToken); err != nil {
+		return brokerOutcome{}, err
+	}
 	slog.Info("brokered agent credential through host-side injector",
 		"event", "sandbox.broker.active", "sandbox", st.Name, "upstream", bc.UpstreamURL, "credential", cred.EnvVar)
 	return brokerOutcome{NetworkMode: reach.RequiredNetworkMode, InjectorEndpoint: endpoint}, nil
+}
+
+// applyWorkdirTrust records the container working directory as trusted in an
+// agent's config file (Definition.WorkdirTrust), for CLIs that block on a
+// folder-trust prompt before running in a directory (Codex, DF85). It runs on
+// every launch, independent of brokering, patching the host-side config file in
+// the sandbox's agent-runtime dir (bind-mounted into the sandbox) before the
+// container starts. A no-op for agents that declare no WorkdirTrust or that have
+// no workdir. Because config.toml is re-seeded from the host each launch, this
+// re-applies every time.
+func applyWorkdirTrust(st *state.State) error {
+	if st.Agent == nil || st.Agent.WorkdirTrust == nil || st.Workdir == nil {
+		return nil
+	}
+	wt := st.Agent.WorkdirTrust
+	path := filepath.Join(st.SandboxDir, store.AgentRuntimeDir, wt.RelPath)
+	current, err := os.ReadFile(path) //nolint:gosec // path from the sandbox dir + agent-declared RelPath
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("read workdir-trust file %s: %w", wt.RelPath, err)
+	}
+	patched, err := wt.Patch(current, WorkdirMountPath(st.Workdir))
+	if err != nil {
+		return fmt.Errorf("patch workdir-trust file %s: %w", wt.RelPath, err)
+	}
+	if err := fileutil.MkdirAll(filepath.Dir(path), 0750); err != nil {
+		return fmt.Errorf("create dir for workdir-trust file %s: %w", wt.RelPath, err)
+	}
+	if err := fileutil.WriteFile(path, patched, 0600); err != nil {
+		return fmt.Errorf("write workdir-trust file %s: %w", wt.RelPath, err)
+	}
+	return nil
+}
+
+// applyDirectCredential materializes an agent's real credential into its auth
+// file (Definition.DirectCredentialFile) for the non-brokered delivery path, for
+// a CLI that reads its credential only from a file (Codex → auth.json; a bare env
+// var doesn't authenticate it — DF84). It writes only when the credential is
+// still present in secretEnv: a brokered launch removed it above (and wrote a
+// placeholder auth.json), so this is a no-op then; a direct launch (--no-broker,
+// unsupported backend, --network-none) still has it. A no-op for agents that
+// declare no DirectCredentialFile, or when no credential is present at all.
+func applyDirectCredential(st *state.State, secretEnv map[string]string) error {
+	if st.Agent == nil || st.Agent.DirectCredentialFile == nil {
+		return nil
+	}
+	dc := st.Agent.DirectCredentialFile
+	var secret string
+	for _, ev := range dc.EnvVars {
+		if v := secretEnv[ev]; v != "" {
+			secret = v
+			break
+		}
+	}
+	if secret == "" {
+		return nil // no credential, or it was brokered away
+	}
+	data, err := dc.Render(secret)
+	if err != nil {
+		return fmt.Errorf("render direct-credential file %s: %w", dc.RelPath, err)
+	}
+	path := filepath.Join(st.SandboxDir, store.AgentRuntimeDir, dc.RelPath)
+	if err := fileutil.MkdirAll(filepath.Dir(path), 0750); err != nil {
+		return fmt.Errorf("create dir for direct-credential file %s: %w", dc.RelPath, err)
+	}
+	if err := fileutil.WriteFile(path, data, 0600); err != nil {
+		return fmt.Errorf("write direct-credential file %s: %w", dc.RelPath, err)
+	}
+	return nil
+}
+
+// patchBrokerConfigFiles applies a file-based redirect/placeholder delivery
+// (BrokerConfig.ConfigFiles) for agents whose CLI reads its base URL and/or
+// credential only from config files (Codex: config.toml for the base URL,
+// auth.json for the key). For each file it reads the current bytes from the
+// sandbox's agent-runtime dir (empty when none was seeded), lets the agent's
+// Patch merge in the injector endpoint and per-sandbox placeholder, and writes it
+// back before the container starts. A no-op for env-redirected agents (empty
+// ConfigFiles). The files are host-side and bind-mounted into the sandbox, so the
+// patch is visible to the agent at launch; the reconcile path rebinds the same
+// port, so the persisted values stay valid without a rewrite.
+func patchBrokerConfigFiles(sandboxDir string, bc *agent.BrokerConfig, endpoint, placeholderToken string) error {
+	for _, cf := range bc.ConfigFiles {
+		path := filepath.Join(sandboxDir, store.AgentRuntimeDir, cf.RelPath)
+		current, err := os.ReadFile(path) //nolint:gosec // path from the sandbox dir + agent-declared RelPath
+		if err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("read broker config file %s: %w", cf.RelPath, err)
+		}
+		patched, err := cf.Patch(current, "http://"+endpoint, placeholderToken)
+		if err != nil {
+			return fmt.Errorf("patch broker config file %s: %w", cf.RelPath, err)
+		}
+		// The agent-runtime dir normally exists from seed-copy, but a brokered agent
+		// with no seeded config (no host config.toml, and API-key auth so no
+		// auth.json) may have none yet — create it so the file can be written.
+		if err := fileutil.MkdirAll(filepath.Dir(path), 0750); err != nil {
+			return fmt.Errorf("create dir for broker config file %s: %w", cf.RelPath, err)
+		}
+		if err := fileutil.WriteFile(path, patched, 0600); err != nil {
+			return fmt.Errorf("write broker config file %s: %w", cf.RelPath, err)
+		}
+	}
+	return nil
 }
 
 // resolveBrokerReach resolves the injector reachability and applies the
@@ -532,15 +656,16 @@ func resolveInjectorReach(ctx context.Context, rt runtime.Backend) (runtime.Inje
 // buildInjectorSpec assembles the injector spec from an agent's BrokerConfig, the
 // selected credential, the backend's reachability, and the resolved real value.
 // Shared by the launch-time broker step and ReconcileInjector so the two never
-// drift. The inbound dummy Authorization is always stripped; the selected
-// credential is injected into its own header (x-api-key for an API key,
-// Authorization: Bearer for a subscription token).
+// drift. The agent's placeholder-carrier header (bc.PlaceholderHeader) is
+// stripped and searched for the expected token; the selected credential is then
+// injected into its own header (x-api-key or Authorization: Bearer for Claude,
+// x-goog-api-key for Gemini, Authorization: Bearer for Codex).
 func buildInjectorSpec(sandboxDir string, bc *agent.BrokerConfig, cred agent.BrokerCredential, reach runtime.InjectorReach, realKey, placeholderToken string) broker.InjectorSpec {
 	return broker.InjectorSpec{
 		SandboxDir:    sandboxDir,
 		BindHost:      reach.BindHost,
 		UpstreamURL:   bc.UpstreamURL,
-		StripHeaders:  []string{"Authorization"},
+		StripHeaders:  []string{bc.PlaceholderHeader},
 		ExpectedToken: placeholderToken,
 		Bindings: []broker.BindingConfig{{
 			Destination: bc.Destination,
@@ -639,10 +764,19 @@ func applyBrokerEnv(secretEnv map[string]string, bc *agent.BrokerConfig, reach r
 		delete(secretEnv, c.EnvVar)
 	}
 	endpoint := net.JoinHostPort(reach.DialHost, port)
-	secretEnv[bc.BaseURLEnvVar] = "http://" + endpoint
+	// Env-redirected agents (Claude, Gemini) get their base URL via an env var;
+	// file-redirected agents (Codex) have BaseURLEnvVar=="" and are redirected by
+	// patchBrokerConfigFiles instead.
+	if bc.BaseURLEnvVar != "" {
+		secretEnv[bc.BaseURLEnvVar] = "http://" + endpoint
+	}
 	// The placeholder the agent presents is the per-sandbox token the injector
 	// verifies (not the shared bc.DummyToken constant) — see broker.PlaceholderToken.
-	secretEnv[bc.AuthTokenEnvVar] = placeholderToken
+	// AuthTokenEnvVar is empty for agents that receive the placeholder via a config
+	// file instead (Codex → auth.json), so only set it when named.
+	if bc.AuthTokenEnvVar != "" {
+		secretEnv[bc.AuthTokenEnvVar] = placeholderToken
+	}
 	return endpoint, nil
 }
 
@@ -969,6 +1103,23 @@ func filterAvailablePorts(ports []runtime.PortMapping, output io.Writer) []runti
 		available = append(available, p)
 	}
 	return available
+}
+
+// advisoryWarnings returns one-line warnings for advisory capability checks
+// that failed for the given isolation mode (e.g. a below-floor runc/crun
+// version — see runtime/caps.HostCapability.Advisory). Advisory failures
+// never block launch and never prompt; this is the passive alternative,
+// printed alongside filterAvailablePorts's warning in the same style.
+func advisoryWarnings(ctx context.Context, rt runtime.Backend, isolation runtime.IsolationMode) []string {
+	env := caps.DetectEnvironment()
+	results := caps.RunChecks(ctx, runtime.RequiredCapabilitiesFor(rt, isolation), env)
+	var warnings []string
+	for _, r := range results {
+		if r.Err != nil && r.Cap.Advisory {
+			warnings = append(warnings, r.Cap.Summary+": "+r.Err.Error())
+		}
+	}
+	return warnings
 }
 
 // parsePortBindings converts ["host:container", ...] to runtime port mappings.
