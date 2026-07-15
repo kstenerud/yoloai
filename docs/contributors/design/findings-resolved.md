@@ -7,6 +7,39 @@ History of codebase findings (issues discovered mid-work) that have been address
 are moved here from [`findings-unresolved.md`](findings-unresolved.md) once resolved, so the
 active file stays a working set. Newest first.
 
+### DF108 — the netfs unit tests exercised a parallel copy of the classifier, not the code that runs — RESOLVED (fixed on discovery)
+
+- **Discovered:** 2026-07-15 · **Workstream:** D124 sweep, "no speculative API" pass (surfaced by running `unused --tests=false`, which the normal lint cannot see)
+- **Severity:** LOW (both copies were correct, so nothing was broken — the defect is that the tests vouched for code production did not call) · **Disposition:** RESOLVED (fixed on discovery)
+- **Description.** `store/netfs_linux.go` had `isNetworkFilesystemMagic(magic) bool`, a pure classifier whose own doc comment called it "the primary unit-test target for FS detection". It had exactly one caller: its test. The production probe, `networkFilesystemName`, repeated the `networkMagics` map lookup inline instead of calling it. So `TestIsNetworkFilesystemMagic` asserted against a *sibling* of the shipping logic. Both were right, which is precisely why nothing would have caught them diverging: a change to one copy leaves the other green.
+- **Fix.** Replaced it with `networkMagicName(magic) (string, bool)` — the same pure classifier, but returning the name production actually needs — and made `networkFilesystemName` call it. Now the tested function is the shipped function, and the test additionally asserts the returned name rather than only a bool.
+- **Pointer:** `store/netfs_linux.go`, `store/netfs_linux_test.go`
+
+### DF107 — the architecture-doc path gate suffix-matched, so a row could name a file from another package — RESOLVED (D124)
+
+- **Discovered:** 2026-07-15 · **Workstream:** D124 architecture-doc gate
+- **Severity:** LOW · **Disposition:** RESOLVED
+- **Description.** `TestRepoHygiene_ArchitectureDocRefs_Resolve` accepts a Go path that suffix-matches any tracked file, because the docs abbreviate. A row under `### workspace/` naming `apply.go` therefore passed on the strength of `copyflow/apply.go`. Found by hand, not by the gate: `internal/workspace/` listed `apply.go` and `diff.go` (both in `copyflow/`), `internal/config/` listed `errors.go` (it is `yoerrors/`), `create/` claimed `context.go` (it is `internal/envsetup/`).
+- **Fix.** Added `TestRepoHygiene_ArchitectureDocSections_NameRealFiles`, which reads each table row against **its own section heading** rather than the whole tree: the first backticked token ending in `/` is the section's package, that package must be a real directory, and each row's file must exist inside it. Scope: 28 package sections, 108 file rows. It caught two more on landing that the whole-tree check could not see (`internal/config/errors.go`, `internal/orchestrator/fileutil.go`). Prerequisite: `code-map.md`'s section headings are now real paths — the abbreviations (`agent/`, `config/`, `orchestrator/`) were the reason tolerance was needed, and `extension/` named a directory that does not exist at that path (the package is `internal/cli/extension/`), so every row under it had been scoped to nothing.
+- **Pointer:** `repo_hygiene_test.go` (`docSectionFileRefs`), `docs/contributors/architecture/code-map.md`
+
+### DF106 — the orchestrator façade's comments still named `package sandbox`, which no longer exists — RESOLVED
+
+- **Discovered:** 2026-07-15 · **Workstream:** D124 architecture-doc sweep
+- **Severity:** LOW · **Disposition:** RESOLVED
+- **Description.** Seven comments across `internal/orchestrator` claimed to keep "the public sandbox API stable" or to let "existing callers in package sandbox continue to compile" — in files declaring `package orchestrator`. No `package sandbox` exists anywhere in the tree; it was renamed. The comments were the last surviving record of the old name, and `data-flows.md` had inherited it (`sandbox.ProbeWorkData`), which is how it surfaced. Filed as two files; the grep found five more.
+- **Fix.** All seven rewritten to describe the leaf carve they actually document. Note the ABOUTME gate checks that a header exists, not that it is true — this class stays review-caught, as D124 records for narrative generally.
+- **Pointer:** `internal/orchestrator/{aliases,inspect,lifecycle,notice,profile_build}.go`, `internal/orchestrator/create/create.go`, `internal/orchestrator/testhelpers_test.go`
+
+### DF105 — two functions in the seed and diff paths were kept alive only by their own tests — RESOLVED
+
+- **Discovered:** 2026-07-15 · **Workstream:** D124 architecture-doc sweep (found while verifying data-flows.md's call chains)
+- **Severity:** LOW · **Disposition:** RESOLVED
+- **Description.** `envsetup.CreateSecretsDir` had eight callers, all in its own test file, and none in production — the launch path calls its two halves separately so the broker can rewrite the map in between. Its doc comment offered "an embedder can stage credentials on an isolated path" as justification, but it lives under `internal/` and nothing re-exports it, so no embedder could reach it; `stagingRoot` is honored by `StageSecretEnv`, which is the live path. `copyflow.loadAllDiffContexts` was likewise test-only, and returned at most one context since the diff surface became workdir-only.
+- **Fix.** Both deleted, with the `DiffContext` type that only `loadAllDiffContexts` produced. **The `CreateSecretsDir` tests were retargeted, not deleted:** the dead wrapper was the only test entry point into `ResolveSecretEnv`/`StageSecretEnv`, so removing them wholesale would have silently stripped all coverage from the credential-staging path. The combining wrapper now lives in the test, which is the right home for it — production must *not* combine the halves, because the broker step goes between them.
+- **Why the linter missed it.** `unused` counts a test caller as a caller, so a function whose only user is its own test is invisible to the normal lint. `unused --tests=false` surfaces the class; the remaining hits tree-wide are GOOS artifacts (`runtime/seatbelt/` code whose real caller is in a `_darwin.go` file excluded on Linux), so a standing gate needs per-GOOS runs — not built. See D125.
+- **Pointer:** `internal/envsetup/envsetup.go`, `copyflow/diff.go`
+
 ### DF73 — Leaked `yoloai __inject` broker process outlives its sandbox — RESOLVED (D114, shipped v0.7.0)
 
 - **Discovered:** 2026-07-06 · **Workstream:** post-v0.7.0 disk-leak investigation (D114)

@@ -84,7 +84,7 @@ Dependency direction (W-L8 + W-L12 shape): `cmd/yoloai` → `internal/cli` → `
 |------|---------|
 | `main.go` | Entry point. Sets up signal context, calls `cli.Execute`, exits with code. Build-time version/commit/date vars. |
 
-### `agent/`
+### `internal/agent/`
 
 | File | Purpose |
 |------|---------|
@@ -261,7 +261,7 @@ Shared test helpers — a non-`_test.go` package importable by test files across
 | `home.go` | `IsolatedHome(t)` — `t.Setenv("HOME", t.TempDir())` for per-test sandbox isolation. |
 | `wait.go` | `WaitForActive`, `WaitForStopped` — poll `rt.Inspect` at 200ms intervals instead of `time.Sleep`. |
 
-### `config/`
+### `internal/config/`
 
 | File | Purpose |
 |------|---------|
@@ -271,7 +271,6 @@ Shared test helpers — a non-`_test.go` package importable by test files across
 | `profile.go` | `ProfileConfig`, `LoadProfile()`, `MergedConfig` — profile loading, inheritance chain resolution, config merging. |
 | `schema.go` | `ReadSchemaVersion()` / `WriteSchemaVersion()` — plain-text-integer layout stamp. `LayoutStatus` + `RealmStatus(dataDir, version)` — the pure read-only realm check (absent/empty→Fresh, `<`→Migrate, `==`→OK, `>`→error) shared by both realms. `CreateFreshLibrary(layout)` fresh-inits + stamps; `MigrateLibrary(layout)` brings the library DataDir up to version (v0→v1 no-op today). The engine no longer auto-migrates — the startup gate + `yoloai system migrate` drive these (see D60/D61). |
 | `pathutil.go` | `ExpandPath()` — tilde and `${VAR}` expansion for config paths. |
-| `errors.go` | `UsageError` (exit 2), `ConfigError` (exit 3), sentinel errors. |
 | `names.go` | Name validation constants and regex (`ValidNameRe`, `MaxNameLength`). |
 | `encode.go` | Safe ASCII caret encoding for filesystem-safe names (keys and values). |
 | `layout.go` | `Layout` — the DataDir-rooted path helpers (`SandboxesDir()`, `TrashDir()`, `SecretsStagingDir()`, …) and the resolved `HomeDir` every path helper expands against. |
@@ -281,7 +280,7 @@ Home-directory detection moved to the CLI edge: `resolveHome()` in
 `internal/cli/cliutil/layout.go` honors `SUDO_USER` when running under sudo, and hands the
 result to `Layout`. The library does not probe for it.
 
-### `extension/`
+### `internal/cli/extension/`
 
 | File | Purpose |
 |------|---------|
@@ -397,7 +396,7 @@ Build-tag-`integration` shared conformance suite; `docs/contributors/architectur
 | `status-monitor.py` | Writes `agent-status.json` with idle detection and agent process health. |
 | `diagnose-idle.sh` | Diagnostic script for idle detection troubleshooting. |
 
-### `orchestrator/` (façade)
+### `internal/orchestrator/` (façade)
 
 Post-F5, `package orchestrator` is a thin façade. Orchestration lives in the leaf
 subpackages below; the root holds the `Engine` deps-holder plus alias files
@@ -417,14 +416,13 @@ few helpers not yet carved out (clone, parse, setup, terminal/attach).
 | `attach.go` | Attach-readiness helpers — polls `sandbox.jsonl` / tmux `has-session`. |
 | `prune.go` | `PruneTempFiles()` — cleans stale `/tmp/yoloai-*` dirs. |
 | `tags.go` | Git tag info — `TagInfo`, commit matching, delegates to `workspace`. |
-| `fileutil.go` | Path-expansion + JSON read/write wrappers. |
 | `errors.go` | Sentinel errors; `ErrSandboxNotFound` re-exported from `store`. |
 | `*_test.go` | Façade + remaining-helper unit tests. `integration_test.go` has the `integration` build tag. |
 
 Interactive first-run setup no longer lives here: it moved to the CLI tier as unexported
 `runSystemSetup` (`internal/cli/system/setup.go`), wired from `internal/cli/system/system.go`.
 
-### `orchestrator/create/`, `lifecycle/`, `status/`, `launch/`
+### `internal/orchestrator/create/` and the `lifecycle/`, `status/`, `launch/` leaves
 
 The F5 orchestration leaves. Functions take `state.Deps` (runtime + layout +
 input) rather than hanging off `Engine`. DAG: `state ← {mounts, invocation,
@@ -438,7 +436,7 @@ provision, profiles, runtimeconfig} ← launch ← {create, lifecycle}`.
 | `launch/` | Shared launch primitives both create/ and lifecycle/ use: instance build/start, `Teardown`, vm-workdir resolution, and `CheckIsolationPrerequisites` (host-capability gate, homed here so create/ and lifecycle/ stay siblings). |
 | `mounts/`, `invocation/`, `provision/`, `profiles/`, `runtimeconfig/` | Lower leaves: mount-spec construction, agent invocation assembly, agent-files seeding + keychain sourcing, profile image building, and runtime `ContainerConfig` assembly respectively. |
 
-### `orchestrator/archetype/`
+### `internal/orchestrator/archetype/`
 
 Environment archetype detection, devcontainer.json parsing, `.yoloai.yaml` loading, and VS Code workspace injection. Imported by `orchestrator/` (one-way; archetype/ does not import orchestrator/).
 
@@ -455,7 +453,7 @@ Git-format diff and apply machinery. Imports `orchestrator` (for exec helpers an
 
 | File | Purpose |
 |------|---------|
-| `diff.go` | `DiffOptions`, `FileChange`, `GenerateChanges()`, `GenerateDiff()`, `CommitDiffOptions`, `GenerateCommitDiff()`, `CommitInfoWithStat`, `ListCommitsWithStats()`, `DiffContext` — diff generation for the single-workdir `:copy`/`:rw` engine (`loadAllDiffContexts` is package-private, no longer public API). |
+| `diff.go` | `DiffOptions`, `FileChange`, `GenerateChanges()`, `GenerateDiff()`, `CommitDiffOptions`, `GenerateCommitDiff()`, `CommitInfoWithStat`, `ListCommitsWithStats()` — diff generation for the single-workdir `:copy`/`:rw` engine. |
 | `apply.go` | `ApplyAll()`, `ApplySeries()`, `GeneratePatch()`, `GenerateFormatPatch()`, `GenerateFormatPatchForRefs()`, `GenerateUncommittedDiff()`, `AdvanceBaseline()`, `AdvanceBaselineTo()`, `HasUncommittedChanges()`, `ListCommitsBeyondBaseline()`, `ResolveRefs()`. `ApplyAll()` keeps its name for stability but no longer iterates multiple dirs since the diff/apply surface went workdir-only. |
 | `export.go` | `Export()` — write the sandbox's changes as patch files to a directory (the `apply --patches` flow): format-patch (+ `uncommitted.diff`) over the workdir. |
 
@@ -469,7 +467,7 @@ On-disk sandbox state — paths, metadata, and creation-completion flags. Leaf s
 | `environment.go` | `Environment` / `WorkdirEnvironment` / `DirEnvironment` structs, `SaveEnvironment()` / `LoadEnvironment()` — sandbox metadata persistence as `environment.json`. `Environment.BackendType` records which runtime backend was used; `Environment.Principal` records the owning principal (D62). |
 | `sandbox_state.go` | `SandboxState` struct, `LoadSandboxState()`, `SaveSandboxState()` — per-sandbox runtime state (`sandbox-state.json`, legacy: `state.json`). Tracks `agent_files_initialized` and `on_create_commands_done`. Separate from `Environment` which is immutable after creation. |
 
-### `workspace/`
+### `internal/workspace/`
 
 | File | Purpose |
 |------|---------|

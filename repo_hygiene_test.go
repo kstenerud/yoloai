@@ -2111,3 +2111,122 @@ func Exported(workDir string) error { sandboxState := 1; _ = sandboxState; retur
 		}
 	}
 }
+
+var (
+	// docSectionRe matches a package section heading. The first backticked token
+	// ending in `/` is the section's package; anything after it (a "(façade)"
+	// note, sibling leaves) is prose the gate ignores.
+	docSectionRe = regexp.MustCompile("^#+ +`([A-Za-z0-9_./-]+/)`")
+	// docFileRowRe matches a table row whose first cell is a bare filename, which
+	// is how code-map.md names a file *within* the section's package.
+	docFileRowRe = regexp.MustCompile("^\\| +`([A-Za-z0-9_.-]+\\.(?:go|py|sh|js|ts))` +\\|")
+)
+
+// docSectionFileRefs returns (section-package, filename) for every table row
+// that names a file inside a package section.
+//
+// This is the section-scoped half of the doc gate. It exists because the
+// whole-tree path check cannot see it: a row under `internal/workspace/` naming
+// `apply.go` passes there on the strength of `copyflow/apply.go`, which is a
+// different file in a different package. Reading the row against its own
+// heading is the only way to ask the question the reader is actually asking.
+func docSectionFileRefs(body string) [][2]string {
+	var out [][2]string
+	section := ""
+	for _, line := range strings.Split(body, "\n") {
+		if m := docSectionRe.FindStringSubmatch(line); m != nil {
+			section = m[1]
+			continue
+		}
+		if strings.HasPrefix(line, "#") {
+			// A non-package heading (a type, a file, a prose section) ends the
+			// previous package's scope rather than inheriting it.
+			section = ""
+			continue
+		}
+		if section == "" {
+			continue
+		}
+		if m := docFileRowRe.FindStringSubmatch(line); m != nil {
+			out = append(out, [2]string{section, m[1]})
+		}
+	}
+	return out
+}
+
+// TestRepoHygiene_ArchitectureDocSections_NameRealFiles is the section-scoped
+// path gate (DF107).
+//
+// Its sibling, TestRepoHygiene_ArchitectureDocRefs_Resolve, suffix-matches
+// against the whole tree, because the docs abbreviate. That tolerance has a
+// hole: a *moved* file still resolves somewhere. When this gate was written,
+// code-map.md's `internal/workspace/` section listed `apply.go` and `diff.go`
+// — both had moved to `copyflow/` — its `internal/config/` section listed
+// `errors.go` (it is `yoerrors/`), and its `create/` section claimed
+// `context.go` (it is `internal/envsetup/`). All three passed the whole-tree
+// check and were found by hand.
+//
+// A section heading must name a real package for the same reason: `extension/`
+// pointed at a directory that does not exist at that path (the package is
+// `internal/cli/extension/`), so every row under it was scoped to nothing.
+func TestRepoHygiene_ArchitectureDocSections_NameRealFiles(t *testing.T) {
+	root := repoRoot(t)
+	docs := architectureDocs(trackedFiles(t, root))
+
+	sections, rows := 0, 0
+	seen := map[string]bool{}
+	for _, rel := range docs {
+		body, err := os.ReadFile(filepath.Join(root, rel)) //nolint:gosec // G304: path from git ls-files under repoRoot
+		if err != nil {
+			t.Fatalf("read %s: %v", rel, err)
+		}
+		for _, ref := range docSectionFileRefs(string(body)) {
+			pkg, file := ref[0], ref[1]
+			if !seen[pkg] {
+				seen[pkg] = true
+				sections++
+				if fi, statErr := os.Stat(filepath.Join(root, pkg)); statErr != nil || !fi.IsDir() {
+					t.Errorf("%s has a section for package %q, which is not a directory. Name the "+
+						"real path (the repo spells these out — `internal/cli/`, not `cli/`) so a "+
+						"reader can follow it and this gate can scope its rows.", rel, pkg)
+				}
+			}
+			rows++
+			if _, statErr := os.Stat(filepath.Join(root, pkg, file)); statErr != nil {
+				t.Errorf("%s lists %q under section %q, but %s does not exist. The file may have "+
+					"moved to another package — in which case the row belongs there, not here.",
+					rel, file, pkg, pkg+file)
+			}
+		}
+	}
+	t.Logf("architecture-doc section gate scope: %d package sections, %d file rows", sections, rows)
+}
+
+// TestRepoHygiene_ArchitectureDocSectionMatcher_ScopesRowsToTheirHeading pins
+// the matcher: rows belong to the package heading above them, a non-package
+// heading ends that scope rather than inheriting it, and a type heading is not
+// a package.
+func TestRepoHygiene_ArchitectureDocSectionMatcher_ScopesRowsToTheirHeading(t *testing.T) {
+	body := "" +
+		"### `internal/workspace/` (façade)\n" +
+		"| File | Purpose |\n" +
+		"|------|---------|\n" +
+		"| `copy.go` | copies things. |\n" +
+		"| `apply.go` | moved away; must still be attributed to workspace. |\n" +
+		"### `copyflow/`\n" +
+		"| `diff.go` | diffs things. |\n" +
+		"### `yoloai.Client`\n" +
+		"| `stray.go` | a type section is not a package; this row has no scope. |\n" +
+		"## Prose\n" +
+		"| `alsostray.go` | likewise. |\n"
+
+	got := docSectionFileRefs(body)
+	want := [][2]string{
+		{"internal/workspace/", "copy.go"},
+		{"internal/workspace/", "apply.go"},
+		{"copyflow/", "diff.go"},
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("docSectionFileRefs = %v, want %v", got, want)
+	}
+}

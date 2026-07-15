@@ -450,29 +450,6 @@ is worse than none because it also supplies the confidence.
 - **Pointer:** `internal/orchestrator/integration_main_test.go` (TestMain, now backend-free); `internal/orchestrator/integration_helpers_test.go` (`warmDockerBase`); `internal/orchestrator/integration_macos_test.go`; `Makefile` (`ORCHESTRATOR_NON_DOCKER_TESTS`, `integration-seatbelt`, `integration-apple`, `integration-tart`); `runtime/containerd/containerd.go:50` (the untested claim); DF94, DF95.
 
 
-### DF105 — two functions in the seed and diff paths are kept alive only by their own tests
-
-- **Discovered:** 2026-07-15 · **Workstream:** D124 architecture-doc sweep (found while verifying data-flows.md's call chains against the code)
-- **Severity:** LOW (no user-visible defect; the cost is that a green test suite vouches for code nothing calls, and a doc cited one of them as a live step)
-- **Disposition:** PARKED
-- **Description:** `envsetup.CreateSecretsDir` has eight callers, all in `envsetup_test.go`, and none in production — the launch path inlines its two halves instead (`ResolveSecretEnv`, then `brokerCredentials`, then `StageSecretEnv`). `copyflow.loadAllDiffContexts` likewise has callers only in `diff_test.go`; per its own comment it now returns at most one context, because the diff surface became workdir-only. Both were verified by grep for non-test callers. Either delete them or, if `CreateSecretsDir` is a deliberate library affordance, say so in its doc comment — right now its tests are the only thing asserting it should exist. Note the doc that cited `createSecretsDir` as a live step in the launch chain was describing this dead path; that half is fixed under D124.
-- **Pointer:** `internal/envsetup/envsetup.go:43` (`CreateSecretsDir`), `copyflow/diff.go:291` (`loadAllDiffContexts`)
-
-### DF106 — the orchestrator façade's ABOUTME headers still name `package sandbox`, which no longer exists
-
-- **Discovered:** 2026-07-15 · **Workstream:** D124 architecture-doc sweep
-- **Severity:** LOW
-- **Disposition:** PARKED
-- **Description:** `internal/orchestrator/aliases.go` and `inspect.go` both declare `package orchestrator`, but their ABOUTME headers say the aliases re-export "into package sandbox" and "keep the public sandbox API stable". There is no `package sandbox` anywhere in the tree — it was renamed to `orchestrator`. The headers are the last record of a name the code dropped, so a reader looking for the package they describe finds nothing, and `data-flows.md` had inherited the same dead name (`sandbox.ProbeWorkData`), which is how this surfaced. The ABOUTME gate checks that a header exists, not that it is true — this class stays review-caught, as D124 notes for narrative generally.
-- **Pointer:** `internal/orchestrator/aliases.go:1-2`, `internal/orchestrator/inspect.go:1-2`
-
-### DF107 — the architecture-doc path gate suffix-matches, so a row can name a file that exists in a different package
-
-- **Discovered:** 2026-07-15 · **Workstream:** D124 architecture-doc gate (found while fixing the rot the gate itself surfaced)
-- **Severity:** LOW (the gate still catches every deleted file; what it misses is a *moved* one)
-- **Disposition:** PARKED
-- **Description:** `TestRepoHygiene_ArchitectureDocRefs_Resolve` accepts a Go path if it suffix-matches any tracked file, because `code-map.md` deliberately abbreviates (its section headings say `config/`, meaning `internal/config/`). That tolerance means a row under `### workspace/` naming `apply.go` passes on the strength of `copyflow/apply.go`. Three real instances were found by hand, not by the gate, and fixed under D124: `workspace/` listed `apply.go` and `diff.go` (both live in `copyflow/`), the `config/` section lists `errors.go` (it is `yoerrors/`), and `create/` claimed `context.go` (it is `internal/envsetup/`). Closing this means resolving a section heading's abbreviated package to a real directory and checking each row's file against *that* directory, rather than against the whole tree. Worth doing — the section tables are most of `code-map.md`'s surface — but it is a distinct matcher from the one D124 landed.
-- **Pointer:** `repo_hygiene_test.go` (`trackedPathMatches`), `docs/contributors/architecture/code-map.md` section tables
 ## Policy origin
 
 Established in [architecture-remediation.md](../archive/plans/architecture-remediation.md) and inherited by [layering-refactor.md](../archive/plans/layering-refactor.md).
