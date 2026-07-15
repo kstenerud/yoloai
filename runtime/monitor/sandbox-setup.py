@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# ABOUTME: Consolidated sandbox setup for every backend, run inside the sandbox.
+# ABOUTME: Replaces the old per-backend shell entrypoints; dispatches on a CLI arg.
 """Consolidated sandbox setup script for all yoloAI backends.
 
 Replaces the per-backend shell entrypoint scripts (entrypoint-user.sh for

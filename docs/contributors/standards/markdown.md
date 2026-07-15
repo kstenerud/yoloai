@@ -27,9 +27,7 @@ In Go and Python the lines are prefixed by the language's comment marker (`// AB
 - All shell scripts under `scripts/`.
 - All Markdown source documents under `docs/contributors/` (principles, standards, research, plans, working-notes, ARCHITECTURE, etc.).
 
-### Carve-out: package-godoc substitution
-
-A file whose package (or module) godoc comment already states the file's purpose — e.g. `yoerrors/errors.go`, which opens with a `// Package yoerrors ...` doc comment — may use that godoc in place of a separate ABOUTME block. The godoc comment must actually describe the file's purpose, not just declare the package name.
+A package godoc or module docstring is **not** a substitute — the two coexist, ABOUTME first. 29 Go files already carry both, and `yoerrors/errors.go` and the two `runtime/monitor/*.py` scripts that once relied on their docstring now do too. A substitution carve-out was briefly written down and removed (D117): it contradicted the code, and "the godoc must actually describe the purpose" is a judgement no gate can make, so it would have meant an allowlist — which is grandfathering by another name.
 
 ### Exempt
 

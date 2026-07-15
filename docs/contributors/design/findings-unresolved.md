@@ -341,8 +341,8 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 - **Discovered:** 2026-07-15 · **Workstream:** contributor-docs sweep (D116)
 - **Severity:** LOW
 - **Disposition:** PARKED
-- **Description:** `git tag --list` carries a tag literally named `show` (almost certainly a mistyped `git show`), and it is pushed: `git ls-remote --tags origin` resolves `refs/tags/show`. Harmless to the release path — `release.yml` triggers on `v*` — but it breaks any tag query that does not filter `v*` (it silently became the answer to "first tag containing commit X" during this sweep). Deleting a published tag is not free: the Go module proxy caches pushed tags immutably, so `git push --delete origin show` removes it from GitHub but not from the proxy.
-- **Pointer:** `refs/tags/show` → `564b294b`.
+- **Description:** `git tag --list` carries a tag literally named `show`, and it is pushed (`git ls-remote --tags origin` resolves `refs/tags/show`). It is **not** a mistyped `git show`, which would produce a lightweight tag: it is **annotated, with v0.5.2's complete release notes** — subject `v0.5.2 — Backend reliability fixes (Tart UTF-8, Docker rebuild churn)` — pointing at `564b294b`, the same commit as `v0.5.2`, created 46 minutes after it (2026-06-12 13:06 vs 12:20). So a `git tag -a … -F notes.md` during the v0.5.2 release took `show` as its tag-name argument, duplicating that release's annotation under a junk name. Harmless to the release path (`release.yml` triggers on `v*`, so it never fired), but it breaks any tag query that does not filter `v*` — it silently became the answer to "first tag containing commit X" during this sweep. Deleting a published tag is not free: the Go module proxy caches pushed tags immutably, so `git push --delete origin show` removes it from GitHub but not from the proxy.
+- **Pointer:** `refs/tags/show` → `564b294b` (= `v0.5.2`).
 
 ### DF94 — the Tart lifecycle tier had never run; verify it on Apple Silicon
 

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# ABOUTME: In-container status monitor: polls detectors in priority order to
+# ABOUTME: classify the agent idle/active, writes status.json, sets the tmux title.
 """yoloAI in-container status monitor.
 
 Runs as a background process inside the sandbox. Polls detectors in priority
