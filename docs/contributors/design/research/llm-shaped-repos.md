@@ -207,7 +207,7 @@ Process engineering for human error is the right family: checklists, blameless p
 defense in depth. The framing that unlocks it is that **a repeated same-shape agent error is a defect
 report against the docs**, the way a repeated human error is a defect report against the process.
 
-Two places the analogy breaks, and both favour the mechanical countermeasure:
+Where the analogy breaks, it breaks toward the mechanical countermeasure every time:
 
 - **Human process design assumes attention lapses.** Checklists exist because people get tired and skip
   steps, and they know they are guessing. None of the six errors here involved fatigue or felt
@@ -218,6 +218,18 @@ Two places the analogy breaks, and both favour the mechanical countermeasure:
   on it. That makes stale prose strictly more dangerous with an agent in the loop, and it is why
   "Thirteen principles" is a bug with a blast radius rather than a typo. It also means the repo's prose
   is part of its runtime, and should be gated like code where it can be.
+
+- **Verifying a colleague costs something; verifying an agent costs nothing.** This is the one that
+  inverts a whole management instinct rather than a technique. Between people, trust is a good you
+  spend: checking a colleague's work has a real social price, a false suspicion damages a relationship
+  you need, and so "take the report at face value" is usually correct. None of that premise survives
+  contact with a probabilistic model. There is no relationship to damage, so a false suspicion is not
+  a failure — it is two minutes. Measured on this session's own delegated sweep: 25 subagent-written
+  claims of the falsifiable kind (all/every/shipped/verified), **three false**, none detectable from
+  the report, each obvious in about a minute beside the source it summarized. And the suspicions that
+  turned out wrong cost exactly the two minutes and bought certainty. The instinct to extend trust is
+  not generosity here, it is a human heuristic executing where its reason has been removed. Written up
+  as D123.
 
 The synthesis: an agent will read everything you wrote, believe all of it equally, cannot tell a summary
 from a source, cannot see what is missing, and will defend whatever it said first. Design accordingly.

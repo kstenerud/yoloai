@@ -1361,6 +1361,35 @@ The design question was scope, and it turned on measurement rather than taste. S
 
 **Consequences.** The hook can only complain about what it can positively establish: no transcript means silence, an existing-but-empty one does not. It accuses on a *new* citation only, so reflows and moves pass. The cost is one false pass whenever a session consults a doc by a route the transcript does not name (a subagent's read, a prior session), which the message tells the agent to say out loud and move past. `research/*.md` is a small corpus, so if research docs are ever reorganized, the regex is the thing to re-point.
 
+## D123 — a subagent's report is a secondary source; check it, because a false suspicion costs nothing
+
+**Date:** 2026-07-15. **Status:** Active — scopes GEN §7's accuracy bar to delegated work (fourth corollary). Composes with [D119](#d119--7s-accuracy-bar-covers-our-own-code-where-the-primary-source-is-a-grep-a-finding-parks-its-fix-never-its-verification) and [D120](#d120--a-conflict-between-sources-is-a-finding-not-a-decision-to-make).
+
+**Context.** GEN §7 already says plausibility is not evidence and that the failure mode is confabulation rather than lying. It does not say what to do with a report handed back by a subagent, and that gap has a measurable cost. In one session, a sweep delegated across five subagents produced 25 doc headers making a falsifiable completeness or status claim. **Three were false** — a 12% rate on exactly the claims worth making:
+
+- `egress-proxy-build`'s header said brokering "ships as the default across Linux and macOS backends". Its own body said "default for Claude **on docker**", and listed tart as degrading to direct delivery. The header was strictly broader than the source it was written from.
+- `code-map.md`'s header claimed it covered "every package's purpose" while omitting eight, including an entire backend (DF102).
+- `agent-headless-auth`'s header claimed a "Verified matrix" for research its own status line scopes to docs-only.
+
+None were visible from the report, which was fluent, specific, and confident. Each was visible in about a minute by reading the header against the body it summarized. This is the asymmetry table's "fluency is constant" row (`research/llm-shaped-repos.md` Part 7) arriving through a new door: a subagent's report is maximally fluent by construction, and the error rate is unchanged.
+
+**The insight this turns on is a cost asymmetry, and it is why the human instinct misfires here.** Between colleagues, verification is not free: trust is a social good you spend, and a false suspicion damages a relationship you need. So "take the report at face value" is correct for humans most of the time. **A probabilistic model has no relationship to damage.** Checking its work costs minutes and insults no one, so the calculus that justifies extending trust does not transfer — it is a human intuition running on a case where its premise is absent. In the same session the maintainer named it: *a false suspicion is not a failure, because we are dealing with probabilistic models*. Evidence for the cheap half: two subagent classifications were suspected here and **both were correct** — the repo's own status lines were the liars. Each check cost about two minutes and bought certainty. That is the expected outcome, not a wasted trip.
+
+**Decision.**
+- **(a) A subagent's report is a secondary source.** Its claims are unverified until checked against the primary one — the code, or the document it summarized. "I read each file and verified it" is itself a claim in the report.
+- **(b) The trigger is a returned delegation, not a feeling.** This is what makes the rule able to fire where D119's could not: "a subagent handed back work" is observable, while "am I sure?" is the internal state whose absence *is* the defect. Every returned delegation gets the check; no judgement about whether this one needs it.
+- **(c) Check the falsifiable claims, against the source — not against plausibility.** Completeness ("all", "every", "each"), status ("shipped", "complete", "verified"), and counts. Read the claim against the thing it describes: the egress-proxy error was invisible on its own and obvious beside its own body. Scanning a report for things that "look wrong" is not this — plausibility is what fails.
+- **(d) Verify the verifier.** A checking tool is code you did not test. Two written in that session were wrong: a body-integrity check that flagged 18 files when 4 were real, and a `perl -ne ... END{exit 1}` whose END block inverted its exit code and reported every plan undeclared. Both times the tool was broken and the tree was fine. A broken checker is a gate reporting green (DF94's shape), so prove the check can fail before believing that it passed.
+- **(e) Verification is part of delegation's cost.** A fan-out you cannot afford to check is a fan-out you should not launch. Budget the check in when deciding to delegate, not after the reports land.
+
+**Rejected alternatives.**
+- **Trust the report; the agent said it verified.** Rejected — that sentence is the very thing under review. All three false claims came with confident reports; one agent explicitly reported having source-verified every entry it wrote.
+- **A gate.** None is possible: "did you check the claim?" is semantic, and no check knows which sentence is a claim about what. Where the class *is* mechanical it has been gated instead — the citation gate, the plan-status gate, the ABOUTME form. This principle is for what no gate reaches, per GEN §16's ordering.
+- **A new principle (GEN §17).** Rejected on D121's reasoning: §7 already states the bar, and a second rule competing with it is how two rules end up disagreeing. Scope the principle that exists.
+- **Check everything a subagent returns, line by line.** Rejected as self-defeating: re-doing the work removes the reason to delegate. The claims are the small, high-yield surface — 25 headers out of 137 files, 3 hits.
+
+**Consequences.** Delegation gets slower and more honest. The failure this does *not* reach is a report that is true but incomplete — an agent that silently skipped a file reports nothing about it, and there is no claim to check; that class needs a corpus check (`ls` the directory, diff against the work list), which is why the completeness of a *work list* is gated by construction elsewhere. Note also the inverse cost, paid the same session: a subagent, seeing unexplained edits appear in a shared tree, correctly reverted them as an unauthorized change — they were the parent's. Distrust between agents is cheap but not free once they share a working tree; the fix there is sequencing, not trust.
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.
