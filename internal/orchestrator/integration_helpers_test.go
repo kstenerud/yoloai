@@ -9,7 +9,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -166,7 +165,7 @@ func integrationSetup(t *testing.T) (*orchestrator.Engine, context.Context) {
 	t.Cleanup(func() { rt.Close() }) //nolint:errcheck // test cleanup
 
 	mgr := orchestrator.NewEngineWithRuntime(rt, slog.Default(), strings.NewReader(""), orchestrator.WithLayout(layout))
-	require.NoError(t, mgr.EnsureSetup(ctx, io.Discard))
+	require.NoError(t, mgr.EnsureSetup(ctx, testutil.LogWriter(t)))
 
 	return mgr, ctx
 }
@@ -206,7 +205,7 @@ func legacyDockerIntegrationSetup(t *testing.T) (*orchestrator.Engine, context.C
 	t.Cleanup(func() { rt.Close() }) //nolint:errcheck // test cleanup
 
 	mgr := orchestrator.NewEngineWithRuntime(&legacyDockerRuntime{Runtime: rt}, slog.Default(), strings.NewReader(""), orchestrator.WithLayout(layout))
-	require.NoError(t, mgr.EnsureSetup(ctx, io.Discard))
+	require.NoError(t, mgr.EnsureSetup(ctx, testutil.LogWriter(t)))
 
 	return mgr, ctx
 }
@@ -251,7 +250,7 @@ func podmanIntegrationSetup(t *testing.T) (*orchestrator.Engine, context.Context
 	t.Cleanup(func() { rt.Close() }) //nolint:errcheck // test cleanup
 
 	mgr := orchestrator.NewEngineWithRuntime(rt, slog.Default(), strings.NewReader(""), orchestrator.WithLayout(layout))
-	require.NoError(t, mgr.EnsureSetup(ctx, io.Discard))
+	require.NoError(t, mgr.EnsureSetup(ctx, testutil.LogWriter(t)))
 
 	return mgr, ctx
 }

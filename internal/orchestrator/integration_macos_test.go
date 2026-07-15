@@ -8,7 +8,6 @@ package orchestrator_test
 import (
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -81,7 +80,7 @@ func seatbeltMaliciousSetup(t *testing.T) (*orchestrator.Engine, context.Context
 	t.Cleanup(func() { rt.Close() }) //nolint:errcheck // test cleanup
 
 	mgr := orchestrator.NewEngineWithRuntime(rt, slog.Default(), strings.NewReader(""), orchestrator.WithLayout(layout))
-	require.NoError(t, mgr.EnsureSetup(ctx, io.Discard))
+	require.NoError(t, mgr.EnsureSetup(ctx, testutil.LogWriter(t)))
 	return mgr, ctx
 }
 
@@ -108,7 +107,7 @@ func appleMaliciousSetup(t *testing.T) (*orchestrator.Engine, context.Context) {
 	t.Cleanup(func() { rt.Close() }) //nolint:errcheck // test cleanup
 
 	mgr := orchestrator.NewEngineWithRuntime(rt, slog.Default(), strings.NewReader(""), orchestrator.WithLayout(layout))
-	require.NoError(t, mgr.EnsureSetup(ctx, io.Discard))
+	require.NoError(t, mgr.EnsureSetup(ctx, testutil.LogWriter(t)))
 	return mgr, ctx
 }
 

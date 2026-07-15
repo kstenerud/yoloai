@@ -9,6 +9,7 @@ import (
 	"bufio"
 	"fmt"
 	"go/ast"
+	"go/build/constraint"
 	"go/parser"
 	"go/token"
 	"os"
@@ -53,6 +54,11 @@ import (
 //     reports green forever, and no diff ever says so — see DF94, where a
 //     whole tier self-skipped for months behind a near-namesake variable, and
 //     DF99, where two C1 security tests had never run.
+//  5. No `//go:build integration` file passes `io.Discard` to a setup call.
+//     Without this, a step that pulls ~30 GB or builds an image reports nothing
+//     while it runs, and a stall becomes indistinguishable from a wedge — see
+//     DF97, where it cost a ~35 minute misdiagnosis on Tart and reduced a real
+//     docker build failure to an exit code with no cause.
 //
 // Deliberately NOT gated here: markdown.md also requires ABOUTME headers on
 // docs/contributors/**/*.md. 122 of those files are currently missing one —
@@ -1073,4 +1079,255 @@ func TestRepoHygiene_ComplexitySuppressionMatcher_RejectsBadDirectives(t *testin
 			})
 		}
 	})
+}
+
+// ---------------------------------------------------------------------------
+// Gate D: a real-backend test must not discard the output of a chatty,
+// long-running setup call (DF97).
+//
+// EnsureSetup pulls base images and builds them. `io.Discard` there hid two
+// separate failures in one session: the Tart tier swallowed the base-image
+// banner ("This is a one-time download (~30 GB)"), so a ~35 minute download
+// presented as a wedged VM and a bare 10 minute timeout panic; the docker
+// bootstrap swallowed a build's stderr, reducing a real failure to "docker build
+// exited with code 1" with no cause. A slow step and a hung step are
+// indistinguishable once the output is gone, which is exactly when it is needed.
+//
+// Why this is a gate and not a forbidigo rule: the wanted rule is
+// argument-positional. Of the 60 io.Discard sites in the tree, most production
+// ones are `if out == nil { out = io.Discard }` — the correct implementation of a
+// documented `Default: io.Discard` contract (client.go, system.go, engine.go,
+// launch.go, ptybridge, the --json writers). Banning the expression forces ~20
+// reflexive nolints and teaches the habit that defeats the rule. forbidigo
+// matches the expression and cannot see the call it sits in; this file already
+// parses Go and can see both.
+// ---------------------------------------------------------------------------
+
+// setupOutputSinks are the setup callees whose output argument must not be
+// discarded under a real backend. Matched on the selector name alone: this gate
+// has no type information, and a false positive here can only be a call named
+// EnsureSetup/Setup that takes an io.Discard it does not print to, which the
+// matcher test pins as acceptable.
+var setupOutputSinks = []string{"EnsureSetup", "Setup"}
+
+// requiresIntegrationTag reports whether f is built only when the integration
+// tag is set. That tag is the discriminator this whole gate rests on:
+// integration-tagged files drive real backends, where EnsureSetup pulls, builds
+// and can hang; untagged ones drive fakes. internal/orchestrator/engine_test.go
+// passes io.Discard to EnsureSetup five times and every one is correct — the
+// fake runtime emits nothing, so there is no output to lose. A gate that flags
+// those is dead on arrival.
+func requiresIntegrationTag(f *ast.File) bool {
+	for _, group := range f.Comments {
+		// Build constraints precede the package clause; a //go:build-shaped line
+		// anywhere after it is just a comment.
+		if group.Pos() > f.Package {
+			return false
+		}
+		for _, c := range group.List {
+			if !constraint.IsGoBuild(c.Text) {
+				continue
+			}
+			expr, err := constraint.Parse(c.Text)
+			if err != nil {
+				return false
+			}
+			return constraintRequiresTag(expr, "integration")
+		}
+	}
+	return false
+}
+
+// constraintRequiresTag reports whether expr is unsatisfiable without tag. The
+// three shapes in the tree are "integration", "integration && linux" and
+// "integration && !linux", but spelling this out structurally rather than
+// string-matching the first line is what keeps a fourth shape from silently
+// falling out of scope — a gate's corpus going quiet is the failure mode Gate C
+// exists to catch, and it applies to this gate too.
+func constraintRequiresTag(expr constraint.Expr, tag string) bool {
+	switch x := expr.(type) {
+	case *constraint.TagExpr:
+		return x.Tag == tag
+	case *constraint.AndExpr:
+		return constraintRequiresTag(x.X, tag) || constraintRequiresTag(x.Y, tag)
+	case *constraint.OrExpr:
+		// An alternative only requires the tag if every branch does.
+		return constraintRequiresTag(x.X, tag) && constraintRequiresTag(x.Y, tag)
+	case *constraint.NotExpr:
+		// "!integration" marks a file as explicitly NOT an integration file.
+		return false
+	}
+	return false
+}
+
+// discardedSetupOutput returns the lines where path passes io.Discard to a setup
+// callee, plus whether path was in scope at all. A file that does not require
+// the integration tag is never in scope, so its correct io.Discard calls are
+// invisible here rather than allowlisted.
+func discardedSetupOutput(t *testing.T, path string) (lines []int, inScope bool) {
+	t.Helper()
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, path, nil, parser.ParseComments|parser.SkipObjectResolution)
+	if err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
+	if !requiresIntegrationTag(f) {
+		return nil, false
+	}
+	ast.Inspect(f, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || !slices.Contains(setupOutputSinks, sel.Sel.Name) {
+			return true
+		}
+		for _, arg := range call.Args {
+			if isIODiscard(arg) {
+				lines = append(lines, fset.Position(arg.Pos()).Line)
+			}
+		}
+		return true
+	})
+	return lines, true
+}
+
+// isIODiscard reports whether e is the expression io.Discard. An assignment
+// (`out = io.Discard`) is structurally not a call argument, so the nil-default
+// contract shape never reaches this.
+func isIODiscard(e ast.Expr) bool {
+	sel, ok := e.(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	pkg, ok := sel.X.(*ast.Ident)
+	return ok && pkg.Name == "io" && sel.Sel.Name == "Discard"
+}
+
+// TestRepoHygiene_IntegrationSetupOutput_IsNotDiscarded is Gate D: no
+// integration-tagged file may discard a setup call's output.
+//
+// The replacement exists, which is what makes the ban fair: testutil.LogWriter(t)
+// forwards to t.Log, and `go test` prints the log of a failed or verbose test, so
+// a stalled step explains itself. Where there is no *testing.T to log through (a
+// sync.Once, a TestMain), the answer is still not io.Discard: capture into a
+// bytes.Buffer and attach it to the error — warmDockerBase in
+// integration_helpers_test.go is the worked example, and it exists precisely
+// because "docker build exited with code 1" with the cause discarded is what made
+// DF97.
+func TestRepoHygiene_IntegrationSetupOutput_IsNotDiscarded(t *testing.T) {
+	root := repoRoot(t)
+	goFiles := filterGoSuffix(trackedFiles(t, root))
+
+	scoped := 0
+	for _, rel := range goFiles {
+		lines, inScope := discardedSetupOutput(t, filepath.Join(root, rel))
+		if !inScope {
+			continue
+		}
+		scoped++
+		for _, line := range lines {
+			t.Errorf("%s:%d discards the output of a setup call in an integration-tagged file. "+
+				"A real backend pulls, builds and can hang here, and a discarded stall is "+
+				"indistinguishable from a wedge (DF97). Pass testutil.LogWriter(t) instead; "+
+				"with no *testing.T in scope, capture into a bytes.Buffer and attach it to the "+
+				"error, as warmDockerBase does.", rel, line)
+		}
+	}
+
+	t.Logf("Gate D scope: %d integration-tagged Go files of %d tracked", scoped, len(goFiles))
+	if scoped == 0 {
+		t.Error("Gate D matched no integration-tagged files at all — the corpus went quiet, " +
+			"which means the gate is not checking anything (compare Gate C's DF94)")
+	}
+}
+
+// TestRepoHygiene_DiscardMatcher_ScopesToIntegrationTaggedFiles proves Gate D's
+// matcher can fail in both directions that matter. It must catch the banned shape
+// under each build-tag spelling the tree actually uses, and it must NOT flag the
+// io.Discard shapes that are correct: the same setup call in an untagged unit
+// test (engine_test.go's five), the nil-default contract assignment, and a
+// discard handed to something that is not a setup call.
+func TestRepoHygiene_DiscardMatcher_ScopesToIntegrationTaggedFiles(t *testing.T) {
+	const body = "\npackage p\n" +
+		"\n" +
+		"import \"io\"\n" +
+		"\n" +
+		"func f(mgr M, ctx C, out io.Writer) {\n" +
+		"\t_ = mgr.EnsureSetup(ctx, io.Discard)\n" +
+		"}\n"
+
+	cases := []struct {
+		name      string
+		src       string
+		wantLines []int
+		wantScope bool
+	}{
+		{
+			name:      "bare integration tag is in scope and flags",
+			src:       "//go:build integration\n" + body,
+			wantLines: []int{8},
+			wantScope: true,
+		},
+		{
+			name:      "integration && linux is still an integration file",
+			src:       "//go:build integration && linux\n" + body,
+			wantLines: []int{8},
+			wantScope: true,
+		},
+		{
+			name:      "integration && !linux is still an integration file",
+			src:       "//go:build integration && !linux\n" + body,
+			wantLines: []int{8},
+			wantScope: true,
+		},
+		{
+			name:      "an untagged unit test is out of scope entirely",
+			src:       body,
+			wantScope: false,
+		},
+		{
+			name:      "!integration is not an integration file",
+			src:       "//go:build !integration\n" + body,
+			wantScope: false,
+		},
+		{
+			name: "the nil-default contract shape is not a discarded argument",
+			src: "//go:build integration\n" +
+				"\npackage p\n\nimport \"io\"\n\n" +
+				"func g(out io.Writer) io.Writer {\n" +
+				"\tif out == nil {\n" +
+				"\t\tout = io.Discard\n" +
+				"\t}\n" +
+				"\treturn out\n" +
+				"}\n",
+			wantScope: true,
+		},
+		{
+			name: "a discard passed to a non-setup callee is not this gate's business",
+			src: "//go:build integration\n" +
+				"\npackage p\n\nimport (\n\t\"fmt\"\n\t\"io\"\n)\n\n" +
+				"func h() {\n" +
+				"\tfmt.Fprintln(io.Discard, \"noise\")\n" +
+				"}\n",
+			wantScope: true,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "fixture.go")
+			if err := os.WriteFile(path, []byte(c.src), 0600); err != nil {
+				t.Fatalf("write fixture: %v", err)
+			}
+			lines, inScope := discardedSetupOutput(t, path)
+			if inScope != c.wantScope {
+				t.Errorf("inScope = %v, want %v", inScope, c.wantScope)
+			}
+			if !slices.Equal(lines, c.wantLines) {
+				t.Errorf("lines = %v, want %v", lines, c.wantLines)
+			}
+		})
+	}
 }
