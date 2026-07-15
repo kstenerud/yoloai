@@ -2,6 +2,19 @@
 
 Tracks breaking changes made during beta. Each entry should be included in release notes for the version that introduces it.
 
+**Every new entry goes under `## Unreleased`, and nowhere else.** A version section is
+frozen the moment its tag exists: releasing renames `## Unreleased` to the version being
+tagged, so anything already carrying a `vX.Y.Z` heading has shipped and must not be added
+to or edited. Check with `git tag --list`. If `## Unreleased` is absent, add it back
+directly above the newest version section.
+
+The trap: branching from a release tag puts you at a commit where that version's section
+is still the topmost one, so it reads as the open section. It is not — it was stamped and
+tagged. Branch from an up-to-date `main`, and expect no merge conflict to catch this for
+you; misfiling an entry into a shipped section merges cleanly and silently.
+
+## Unreleased
+
 ## v0.8.0
 
 ### Credential brokering is now the default for Gemini and Codex (not just Claude)
