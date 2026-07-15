@@ -17,6 +17,31 @@ import (
 // tests. Default is "docker"; CI's podman job sets it to "podman".
 const integrationBackendEnv = "YOLOAI_TEST_BACKEND"
 
+// hostEnvAtStart is the curated host environment captured at package init — the
+// test binary's outermost layer, and the only point at which $HOME still names
+// the real user home.
+//
+// Reading the environment later returns a rewritten HOME, not the real one: an
+// integration TestMain repoints $HOME at a temp bootstrap dir for every test in
+// its package (internal/orchestrator/integration_main_test.go), and
+// IsolatedHome does the same per-test. A helper that resolves HOME at call time
+// therefore silently yields the temp dir. That is invisible to a backend whose
+// state lives in a daemon (docker), and catastrophic for one whose store lives
+// under the home dir: tart defaults TART_HOME to <HomeDir>/.tart, so a temp
+// HOME points it at an EMPTY store and it re-downloads the ~30 GB base image on
+// every run (DF19).
+//
+// Init runs before TestMain, so this capture beats both rewrites. Callers take
+// it as an explicit config.Layout rather than re-reading ambient state — the
+// §12 rule that ambient config is resolved once, at the edge, and threaded down.
+var hostEnvAtStart = GetCuratedHostEnv(IntegrationHostEnvVars)
+
+// HostHomeAtStart returns the real user home as of process start, before any
+// TestMain or IsolatedHome rewrote $HOME. Use it to build a Layout that must
+// reach a real on-disk store; see hostEnvAtStart for why resolving HOME later
+// is wrong.
+func HostHomeAtStart() string { return hostEnvAtStart["HOME"] }
+
 // IntegrationBackendType returns the backend name driven by
 // YOLOAI_TEST_BACKEND, defaulting to "docker". Callers must ensure the
 // backend has been registered (via blank-import of its runtime package).
@@ -79,6 +104,14 @@ var IntegrationHostEnvVars = []string{
 func NewIntegrationRuntime(ctx context.Context, t *testing.T) yrt.Backend {
 	t.Helper()
 	name := IntegrationBackendType()
+	// The ambient HOME is deliberate here, NOT a stale read to "fix": it is
+	// whatever the calling suite's TestMain established, and this layout must
+	// agree with it. internal/cli's TestMain points HOME at a temp dir and then
+	// runs the real CLI as a subprocess against it; resolving the real home
+	// instead would inspect a different store than the CLI under test uses, and
+	// would put test writes in the developer's actual ~/.yoloai. Contrast
+	// TartStoreLayout, which needs the pre-clobber home precisely because tart's
+	// store is shared host infrastructure rather than per-test state.
 	home, _ := os.UserHomeDir()
 	// Tests are the boundary equivalent of the CLI's licensed os.Environ read:
 	// thread the host env so backend socket discovery (e.g. podman's
