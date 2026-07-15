@@ -225,6 +225,95 @@ common path. And do not spend the budget on asking for care.
 
 ---
 
+## Part 7 — the asymmetry table, and why it produces the WTF moments
+
+The maintainer's account of the ah-ha: feeling the incongruity between how a human thinks and how an
+agent thinks, watching something painfully obvious be invisible to the agent, in the most infuriating way
+possible. That reaction is the thing to explain, because it is what drives the "LLMs produce nothing but
+slop" conclusion, and the conclusion is wrong in an interesting way.
+
+**The fallacy is not "the agent made a dumb mistake". It is "a human would not have made that mistake",
+which smuggles in a human as the model of the maker.** Fluency invites this. When an agent is on a roll it
+reads exactly like a competent colleague, so the human model gets loaded, and then the agent fails in a way
+no colleague ever would. The surprise is the model breaking, not the failure itself.
+
+### Shared, and this is the part people skip
+
+Both are susceptible, and this repo has human-authored instances of each:
+
+| Failure | Agent instance today | Human instance in this repo |
+| --- | --- | --- |
+| Anchoring on the first plausible answer | read `needsBuild`'s first early return, stopped, concluded it short-circuits | — |
+| Near-namesake blindness | would not have caught it either | the test-policy plan quoted the gating line in its keep-list and never noticed `YOLOAI_TEST_TART` differs from `YOLOAI_TEST_TART_VM` |
+| Motivated reasoning | resolved a source conflict toward the story already built | a finding marked "verified stale; the copy path works" about a tier that had never run |
+| Commitment escalation | argued the maintainer into a false attribution | — |
+| Denormalized facts rotting | — | four counts, all drifted, all written by someone confident at the time |
+
+The near-namesake row is the important one. **Neither a human nor an agent catches
+`YOLOAI_TEST_TART` vs `YOLOAI_TEST_TART_VM` by reading.** A machine does, in milliseconds, because it is a
+set difference. That is not an argument about agent competence. It is an argument that some classes belong
+to machines regardless of who is at the keyboard.
+
+### Where the agent is worse, and by how much
+
+These generate the WTF moments, because a human genuinely would not do them:
+
+| Asymmetry | Today | Why the human does not have it |
+| --- | --- | --- |
+| **Absence has no representation** | grepped one decisions file, wrote D118, an archive already had one | The human holds a persistent model of the repo and can think "wait, is there an archive?" The agent has the grep output and nothing else. Absence is not a fact it holds; it is a non-event. |
+| **Code-says beats system-means** | encoded "TestMain requires docker" as a constraint, designed a Makefile around it, and defended it in a comment | The human knows seatbelt has no daemon, so the dependency is absurd on sight. The agent had a true fact about the code and no model of what the code is for. |
+| **No provenance on a fact** | cited a research doc's framing from a decision's one-line preamble, never opening the doc | The human has a nagging "did I actually read that, or hear it?" Imperfect, but nonzero. |
+| **Fluency is constant** | all six errors read exactly like the correct work around them | Human prose hedges under uncertainty. The tell exists. |
+| **No self-knowledge** | claimed to be a model it was not, from its own system prompt | The human can look at their screen. |
+| **Coherence pressure** | asserting the claim is what generated the defense of it | A human can drop a position cheaply, and often does. |
+
+The first two are the "painfully obvious" class, and they share a root: **the agent has facts, the human
+has a model.** Facts do not tell you what is missing, and they do not tell you when they are absurd.
+
+### Where the human is worse, and by how much
+
+This is why the codebase is good, and it is not a small list:
+
+| Asymmetry | Evidence in this repo |
+| --- | --- |
+| **Skimming** | "Thirteen principles" survived three additions. Nobody reads an ABOUTME. The agent reads every one. |
+| **Tedium aversion** | 351 lines drifted past a width limit stated in an example block. An agent reflows all 351 without complaint. |
+| **Not re-running** | a finding was marked "verified stale" about a suite that had never executed. An agent will run it five times, in a container, and inject a fault to prove the check fails. |
+| **Inconsistency at scale** | nine seatbelt call sites, one identical fix, no drift. |
+| **Fatigue** | there is no 5pm. |
+
+### The inversion worth building the post around
+
+**The agent's greatest strength is the delivery mechanism for the docs' defects.**
+
+A human skims the stale comment and is protected by their own laziness. An agent ingests it, believes it,
+and acts on it. So the same document is safe with a human and dangerous with an agent, and the property
+that makes the agent valuable (it actually reads everything you wrote) is exactly the property that makes
+your prose part of its runtime.
+
+That is why "docs are code an agent executes" is not a metaphor. `"Thirteen principles"` is not a typo. It
+is a wrong constant, and it has a blast radius, and it stayed wrong because the only readers who would have
+caught it were skimming.
+
+### What follows
+
+Stop asking which is smarter. Ask which class of error is in play:
+
+- **Shared classes** (anchoring, motivated reasoning, near-namesakes): give them to a machine. Neither
+  party catches them by reading, and the gate does not care who typed it.
+- **Agent-worse classes** (absence, code-vs-meaning): keep the human in the loop precisely here, and
+  cheaply. The maintainer's three interventions today each took one sentence and each caught something no
+  gate could: "why does that need docker?", "what does `/model` say?", "principals are namespacing, not
+  security". None required reading the diff.
+- **Human-worse classes** (volume, tedium, consistency, re-running): hand them over completely, and stop
+  feeling bad about it.
+
+The agent is not a junior engineer, and the infuriating moments come from grading it as one. It is a very
+fast reader with no memory, no model, no stake, and perfect confidence. Design for that and it produces
+this codebase. Design for a colleague and it produces slop, on schedule.
+
+---
+
 ## Raw evidence index
 
 Commits from the session (branch `contributor-docs-sweep`): the Tart tier fix, the principal fix across
