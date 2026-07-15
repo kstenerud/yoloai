@@ -1,3 +1,7 @@
+// ABOUTME: Shared fixtures for package orchestrator's tests: a lifecycle-aware
+// ABOUTME: mockRuntime with overridable Stop/Start/Remove/Inspect/Exec, an
+// ABOUTME: Engine builder, and helpers to stage a sandbox's environment.json
+// ABOUTME: on disk.
 package orchestrator
 
 import (

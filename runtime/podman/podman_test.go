@@ -1,3 +1,6 @@
+// ABOUTME: Podman-specific behavior unit-tested without a daemon: image-byte
+// ABOUTME: dedup working around a docker-compat API bug, socket discovery
+// ABOUTME: precedence across env vars/XDG/WSL2, and required-capability gating.
 package podman
 
 import (

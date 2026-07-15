@@ -1,3 +1,6 @@
+// ABOUTME: Tests for the destroy command: --all vs explicit-name conflict,
+// ABOUTME: missing-name/invalid-name errors, flag registration, and the
+// ABOUTME: hasWildcard glob-pattern detector.
 package lifecycle
 
 import (

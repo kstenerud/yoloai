@@ -1,3 +1,6 @@
+// ABOUTME: Tests for stripANSI: removes SGR color, cursor movement, OSC
+// ABOUTME: title, charset-selection, and other control sequences from
+// ABOUTME: agent terminal output while preserving plain text.
 package sandboxcmd
 
 import (

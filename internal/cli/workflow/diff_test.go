@@ -1,3 +1,6 @@
+// ABOUTME: Tests for `diff` argument/ref parsing (looksLikeRef, ref-vs-
+// ABOUTME: path split, range refs), diffAll's usage-error guards, diff
+// ABOUTME: output rendering (human/JSON), and commit-line/tag formatting.
 package workflow
 
 import (

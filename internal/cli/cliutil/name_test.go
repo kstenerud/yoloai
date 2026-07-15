@@ -1,3 +1,5 @@
+// ABOUTME: Tests for ResolveName: sandbox name resolution from an explicit
+// ABOUTME: arg vs YOLOAI_SANDBOX, precedence, and the missing-name error.
 package cliutil_test
 
 import (

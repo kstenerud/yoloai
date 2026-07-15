@@ -1,5 +1,10 @@
 //go:build integration
 
+// ABOUTME: End-to-end orchestrator integration tests against real
+// ABOUTME: Docker/Podman: full lifecycle, copy/rw/aux dir modes, reset, exec,
+// ABOUTME: diff/apply (including malicious-filter safety), prompts, resource
+// ABOUTME: limits, port forwarding, network isolation (including live-patch),
+// ABOUTME: credential injection, and clone.
 package orchestrator_test
 
 import (

@@ -1,3 +1,6 @@
+// ABOUTME: Tests for user extension loading and validation: YAML parsing
+// ABOUTME: (agent as string or list), directory scan/sort/skip rules, and
+// ABOUTME: Validate's name-collision, arg/flag, and reserved-flag checks.
 package extension
 
 import (

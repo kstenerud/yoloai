@@ -1,3 +1,6 @@
+// ABOUTME: Tests for migration-plan approval: Authorize's benign/
+// ABOUTME: destructive/abandon/blocked op gating, resolveApproval's prompt
+// ABOUTME: and flag handling, and per-schema downgrade guidance text.
 package system
 
 import (

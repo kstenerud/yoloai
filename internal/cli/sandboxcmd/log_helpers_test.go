@@ -1,3 +1,6 @@
+// ABOUTME: Tests for log-command internals: --since parsing (duration or
+// ABOUTME: clock time), level-code formatting, --source key parsing, JSONL
+// ABOUTME: record parsing with timestamp fallback, and line formatting.
 package sandboxcmd
 
 import (

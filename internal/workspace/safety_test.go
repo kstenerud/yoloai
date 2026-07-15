@@ -1,3 +1,6 @@
+// ABOUTME: Guardrails against unsafe workdir/aux-dir configuration: flagging
+// ABOUTME: home/root/system dirs as dangerous mount targets, and rejecting
+// ABOUTME: overlapping (identical or parent/child) directory sets.
 package workspace
 
 import (

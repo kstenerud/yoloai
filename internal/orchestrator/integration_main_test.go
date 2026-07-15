@@ -1,5 +1,9 @@
 //go:build integration
 
+// ABOUTME: TestMain for orchestrator integration tests: dispatches the
+// ABOUTME: credential-broker injector subprocess, builds a temp HOME plus
+// ABOUTME: Docker runtime, pre-seeds the build checksum, and runs EnsureSetup
+// ABOUTME: once before the suite.
 package orchestrator_test
 
 import (

@@ -1,5 +1,8 @@
 //go:build integration
 
+// ABOUTME: TestMain for CLI integration tests: pins the container backend,
+// ABOUTME: pre-seeds the build-inputs checksum so the base image isn't
+// ABOUTME: rebuilt, stamps schema versions, and bootstraps EnsureSetup once.
 package cli
 
 import (

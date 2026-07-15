@@ -1,3 +1,6 @@
+// ABOUTME: Durable file writes: AtomicWriteFile/AtomicWriteJSON leave no
+// ABOUTME: partial or leftover temp files, plus FsyncDir/FsyncTree helpers.
+
 package fileutil
 
 import (

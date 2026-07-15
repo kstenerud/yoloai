@@ -1,3 +1,7 @@
+// ABOUTME: Typed-error family (UsageError, ConfigError, DiskSpaceError, etc.):
+// ABOUTME: message/unwrap contracts, ENOSPC detection (syscall + string
+// ABOUTME: markers), and the ExitCoder table (F16) the CLI's exit-status
+// ABOUTME: handler relies on — distinct codes, found through wrapped errors.
 package yoerrors
 
 import (

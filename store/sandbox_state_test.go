@@ -1,3 +1,6 @@
+// ABOUTME: SandboxState (sandbox-state.json) save/load round-trip, the
+// ABOUTME: zero-value default when the file is absent, and error surfacing on
+// ABOUTME: corrupt JSON.
 package store
 
 import (

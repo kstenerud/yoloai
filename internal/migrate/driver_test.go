@@ -1,3 +1,7 @@
+// ABOUTME: Tests the migration driver: Authorize's per-op auth-level gating
+// ABOUTME: (none/confirm/abandon-overlay), plan collection stamping migrator
+// ABOUTME: names, ApplyAll's happy path, refusal of a newly-destructive plan,
+// ABOUTME: lock contention, and leftover-scratch cleanup.
 package migrate
 
 import (

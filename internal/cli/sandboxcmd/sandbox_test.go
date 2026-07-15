@@ -1,3 +1,6 @@
+// ABOUTME: Tests for the `sandbox` command dispatcher: name+subcommand
+// ABOUTME: parsing, YOLOAI_SANDBOX env fallback, and unknown-subcommand/
+// ABOUTME: missing-name/invalid-name error paths.
 package sandboxcmd
 
 import (

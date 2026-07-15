@@ -1,3 +1,6 @@
+// ABOUTME: Package-local wrappers around testutil's git fixture helpers (repo
+// ABOUTME: init, add/commit, hermetic env) shared by this package's tests.
+
 package git
 
 import (

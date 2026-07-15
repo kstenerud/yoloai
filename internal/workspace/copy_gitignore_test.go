@@ -1,3 +1,7 @@
+// ABOUTME: CopyProjectDir's git-aware filtering: honors git's tracked and
+// ABOUTME: untracked file list by default, --include-ignored copies everything,
+// ABOUTME: falls back to a full copy outside a repo, and PreserveGit keeps or
+// ABOUTME: drops .git history.
 package workspace
 
 import (

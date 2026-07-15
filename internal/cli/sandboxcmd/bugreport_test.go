@@ -1,3 +1,6 @@
+// ABOUTME: Tests for bug-report section writers: JSON/plain file sections
+// ABOUTME: with safe-mode key omission, JSONL event filtering and large-
+// ABOUTME: dump tailing, and the monitor detector-decision tail (DF4/DF8).
 package sandboxcmd
 
 import (

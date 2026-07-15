@@ -1,3 +1,6 @@
+// ABOUTME: ListProjectFiles walks a git worktree honoring .gitignore (including
+// ABOUTME: nested ignores) and errors when the directory isn't a git repo.
+
 package git
 
 import (

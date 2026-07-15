@@ -1,5 +1,8 @@
 //go:build linux
 
+// ABOUTME: CNI state-file lifecycle (teardown, idempotency) and the pure
+// ABOUTME: iptables-output parser that catches the DF9 CNI-FORWARD silent
+// ABOUTME: no-op.
 package containerdrt
 
 import (

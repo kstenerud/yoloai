@@ -1,3 +1,6 @@
+// ABOUTME: GitHardeningArgs neutralizes config-driven code-execution vectors
+// ABOUTME: (hooks, fsmonitor) in git invocations over agent-controlled content,
+// ABOUTME: without disabling attribute-bound filters diff correctness needs.
 package runtime
 
 import (

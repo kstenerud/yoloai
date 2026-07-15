@@ -1,3 +1,5 @@
+// ABOUTME: FormatBytes' byte/MB/GB rounding and threshold boundaries, used by
+// ABOUTME: disk-usage reporting commands (system disk, prune summaries).
 package runtime
 
 import (

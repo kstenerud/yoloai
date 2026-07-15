@@ -1,3 +1,6 @@
+// ABOUTME: Tests for bug-report generation: secret redaction in YAML/text/
+// ABOUTME: JSONL, event omission, filename collision handling, and the
+// ABOUTME: safe/unsafe header, live-log, and exit-code sections.
 package bugreport
 
 import (

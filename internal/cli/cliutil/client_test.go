@@ -1,3 +1,6 @@
+// ABOUTME: Tests for CLI flag/config resolution: backend selection
+// ABOUTME: (including orbstack/docker-desktop aliases and DOCKER_HOST
+// ABOUTME: pinning), agent, model, profile, and per-sandbox backend lookup.
 package cliutil_test
 
 import (

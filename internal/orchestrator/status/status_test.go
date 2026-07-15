@@ -1,3 +1,7 @@
+// ABOUTME: Sandbox status detection: pane-death/status.json/staleness-driven
+// ABOUTME: state classification, workdir-data presence probing (copy and
+// ABOUTME: overlay), and InspectSandbox/ListSandboxes including net-health
+// ABOUTME: probes.
 package status
 
 import (

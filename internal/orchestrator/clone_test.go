@@ -1,3 +1,6 @@
+// ABOUTME: Tests Engine.Clone: success (meta/agent-config copy, refreshed
+// ABOUTME: CreatedAt), destination-name validation, missing-source and
+// ABOUTME: already-exists errors, and cleanup on a corrupt cloned meta.
 package orchestrator
 
 import (

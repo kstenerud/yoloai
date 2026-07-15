@@ -1,3 +1,6 @@
+// ABOUTME: ReadJSONMap/WriteJSONMap round-trip a JSON object file, tolerating a
+// ABOUTME: missing file (empty map) and rejecting invalid JSON.
+
 package fileutil
 
 import (

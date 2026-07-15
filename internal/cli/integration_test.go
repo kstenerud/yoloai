@@ -1,5 +1,8 @@
 //go:build integration
 
+// ABOUTME: End-to-end tests driving the yoloai CLI via Cobra commands:
+// ABOUTME: new/ls/diff/start-stop/log/destroy, network-isolation allow/
+// ABOUTME: deny, apply and patch-export, and safe/unsafe bugreport output.
 package cli
 
 import (

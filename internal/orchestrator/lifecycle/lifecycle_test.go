@@ -1,3 +1,7 @@
+// ABOUTME: Sandbox lifecycle transitions — start/stop/destroy/reset (including
+// ABOUTME: in-place resync, recreate-advisory, and resume-with-prompt paths) —
+// ABOUTME: plus needs-confirmation gating and config-patch (debug/domains)
+// ABOUTME: helpers.
 package lifecycle
 
 import (

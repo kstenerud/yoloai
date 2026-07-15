@@ -1,3 +1,7 @@
+// ABOUTME: Tests runtime.IsolationSnapshotter/IsolationContainerRuntime
+// ABOUTME: isolation-tier mapping, and each backend's declared capabilities,
+// ABOUTME: AgentProvisionedByBackend, and ResolveCopyMount behavior
+// ABOUTME: (docker/tart/seatbelt).
 package orchestrator
 
 import (

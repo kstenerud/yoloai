@@ -1,5 +1,8 @@
 //go:build integration
 
+// ABOUTME: Runs the shared docker-API conformance suite against a real Podman
+// ABOUTME: daemon (Podman's docker-compat socket, W5) and pins the backend
+// ABOUTME: identity that distinguishes it from the embedded docker runtime.
 package podman_test
 
 import (

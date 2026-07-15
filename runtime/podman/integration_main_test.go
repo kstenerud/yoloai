@@ -1,5 +1,8 @@
 //go:build integration
 
+// ABOUTME: TestMain for podman package-internal integration tests: connects to
+// ABOUTME: a real Podman once and verifies the base image exists before any
+// ABOUTME: test runs, so failures point at setup, not a flaky per-test dial.
 package podman
 
 import (

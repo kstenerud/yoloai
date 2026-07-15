@@ -1,5 +1,7 @@
 //go:build integration && linux
 
+// ABOUTME: Full lifecycle (create/start/exec/stop/restart/remove) and shared
+// ABOUTME: conformance-suite coverage against a real containerd + Kata daemon.
 package containerdrt
 
 import (

@@ -1,5 +1,8 @@
 //go:build integration
 
+// ABOUTME: Shared integration-test helpers: create/stop/start/reset/destroy
+// ABOUTME: wrappers over the state.Deps pipeline, per-backend (docker,
+// ABOUTME: legacy-docker, podman) setup fixtures, and project/aux-dir fixtures.
 package orchestrator_test
 
 import (

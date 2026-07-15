@@ -1,3 +1,6 @@
+// ABOUTME: CopyAgentFiles: string- and list-form agent_files config copied into
+// ABOUTME: the sandbox, honoring exclusions, missing sources, and no-overwrite.
+
 package envsetup
 
 import (

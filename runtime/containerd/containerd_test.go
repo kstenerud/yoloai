@@ -1,5 +1,8 @@
 //go:build linux
 
+// ABOUTME: Containerd Runtime unit tests: namespace/sandbox-dir plumbing and
+// ABOUTME: RequiredCapabilities gating (Kata shim, CNI, netns, KVM, devmapper)
+// ABOUTME: per isolation mode, plus tmux attach-command construction.
 package containerdrt
 
 import (

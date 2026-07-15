@@ -1,3 +1,8 @@
+// ABOUTME: Tests the crash-safe Promotion state machine
+// ABOUTME: (build/orig/new/repopulate/marker/swap/dispose): happy path,
+// ABOUTME: trash-vs-drop disposal, resuming after an injected crash at every
+// ABOUTME: boundary, discarding partial builds, promoting a
+// ABOUTME: ready-but-incomplete build, and halting on unreachable state.
 package migrate
 
 import (

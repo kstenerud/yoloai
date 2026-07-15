@@ -1,3 +1,6 @@
+// ABOUTME: Tests for ParseDirArg/ParseAuxDirArg: dir-spec suffix parsing
+// ABOUTME: (:copy/:rw/:force/:copy-all/:copy-strict), mode conflicts, path
+// ABOUTME: expansion, mount-path overrides, and colon-in-path edge cases.
 package cliutil
 
 import (

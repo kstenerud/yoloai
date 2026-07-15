@@ -1,3 +1,6 @@
+// ABOUTME: Tests for the agent registry: per-agent command/seed-file/model
+// ABOUTME: contracts, ApplySettings hook injection and idempotency, and
+// ABOUTME: BrokerConfig invariants the launch path relies on.
 package agent
 
 import (

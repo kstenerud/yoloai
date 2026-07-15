@@ -1,5 +1,9 @@
 //go:build e2e
 
+// ABOUTME: Shared e2e infrastructure: TestMain compiles the yoloai binary once,
+// ABOUTME: curated-env helpers for running it and `go build` (DEV §12), and
+// ABOUTME: e2eSetup, which bootstraps a per-test HOME past the migration gate.
+
 // Package e2e_test contains end-to-end tests that compile the yoloai binary
 // and exercise it as a subprocess. These tests require Docker to be running.
 package e2e_test
