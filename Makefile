@@ -307,19 +307,24 @@ endef
 ## `make base-image` fails loudly if the daemon is absent. On Linux this needs root
 ## for the containerd/Kata suite (netns); it stops upfront with an actionable error
 ## if run non-root (use `sudo -E make integration`, or carve out containerd).
-## The orchestrator suite is split by weight, not by package. Its TestIntegrationTart_*
-## tests boot real macOS VMs (create + suspend/restore + reset is several boots),
-## which does not fit the 10m that sizes the container tests — but they need this
-## target's docker, since ./internal/orchestrator/'s TestMain requires it (D112).
-## So they run here, as their own invocation with the VM budget, rather than under
-## integration-tart, which would make that target lie about depending on docker.
+## ./internal/orchestrator/ is the one multi-backend test package: docker, podman,
+## seatbelt, apple and tart tests all live in it. Each backend's tests belong to
+## that backend's target, so this invocation runs the DOCKER ones and skips the
+## rest — the tart/seatbelt/apple tests are picked up by integration-tart,
+## integration-seatbelt and integration-apple, which warm their own backends
+## (DF99). The podman ones self-skip unless YOLOAI_TEST_BACKEND=podman, which is
+## integration-podman's job.
 integration:
 	$(require-root-for-containerd)
 	$(MAKE) base-image
-	$(MAKE) tart-base-image
-	go test -tags=integration -v -count=1 -timeout=10m -skip '^TestIntegrationTart_' ./internal/orchestrator/ ./runtime/docker/ ./internal/cli/
-	go test -tags=integration -v -count=1 -timeout=40m -run '^TestIntegrationTart_' ./internal/orchestrator/
+	go test -tags=integration -v -count=1 -timeout=10m -skip '$(ORCHESTRATOR_NON_DOCKER_TESTS)' ./internal/orchestrator/ ./runtime/docker/ ./internal/cli/
 	@$(MAKE) integration-containerd integration-apple integration-seatbelt integration-tart
+
+## ORCHESTRATOR_NON_DOCKER_TESTS: the tests in ./internal/orchestrator/ that belong
+## to a backend other than docker. Defined once so the `integration` skip and the
+## per-backend `-run` filters cannot drift apart and silently drop a test — which
+## is exactly how the seatbelt and apple containment tests went unrun (DF99).
+ORCHESTRATOR_NON_DOCKER_TESTS := ^TestIntegrationTart_|_(Seatbelt|Apple)$$
 
 e2e: build
 	@if ! docker info >/dev/null 2>&1; then \
@@ -373,14 +378,29 @@ integration-containerd:
 ## skips cleanly via TestMain. The full base-image build is gated behind
 ## YOLOAI_TEST_APPLE_BASE=1 (slow); the conformance + lifecycle tests use a tiny
 ## alpine sleep image and run whenever the backend is available.
+##
+## The second invocation is apple's share of the multi-backend orchestrator
+## package (the C1 malicious-filter containment test). It needs no docker since
+## DF99 — that test had never run, because it was gated on YOLOAI_TEST_APPLE,
+## which nothing set. Still gated: it boots a VM and takes ~5 minutes, so a bare
+## `go test ./internal/orchestrator/` should not pay for it by surprise.
 integration-apple:
 	go test -tags=integration -v -count=1 -timeout=15m ./runtime/apple/
+	YOLOAI_TEST_APPLE=1 go test -tags=integration -v -count=1 -timeout=15m -run '_Apple$$' ./internal/orchestrator/
 
 ## integration-seatbelt: run Seatbelt integration tests (requires macOS with sandbox-exec)
 ## On non-macOS platforms the tests skip cleanly via TestMain (exit 0).
 ## Pair-runs are encouraged on macOS as part of releasetest on Apple Silicon machines.
+##
+## The second invocation is seatbelt's share of the multi-backend orchestrator
+## package (the C1 malicious-filter containment test, which matters most here:
+## seatbelt has no container, so containment is an SBPL profile wrapping git
+## itself). It needs no docker since DF99, and it is NOT gated — it costs half a
+## second, so there was never a cost argument for the YOLOAI_TEST_SEATBELT gate
+## that kept it from running at all. It self-skips off macOS.
 integration-seatbelt:
 	go test -tags=integration -v -count=1 -timeout=5m ./runtime/seatbelt/
+	go test -tags=integration -v -count=1 -timeout=5m -run '_Seatbelt$$' ./internal/orchestrator/
 
 ## integration-tart: run Tart integration tests (requires macOS with Apple Silicon + tart).
 ## On platforms without tart the tests skip cleanly via TestMain (exit 0).
@@ -390,11 +410,15 @@ integration-seatbelt:
 ## full suite — building the tart base first (tart-base-image) so a missing base
 ## fails loudly rather than silently skipping.
 ##
-## This covers the tart RUNTIME only. The sandbox-level TestIntegrationTart_*
-## lifecycle tests live in ./internal/orchestrator/, whose TestMain requires
-## docker, so `make integration` runs them instead.
+## The second invocation is tart's share of the multi-backend orchestrator
+## package: the sandbox-level TestIntegrationTart_* lifecycle tier that boots
+## real macOS VMs (create plus stop, restart and reset is several boots, ~370s
+## for the four). It gets the VM budget rather than the 10m that sizes the
+## container tests, and it needs no docker since DF99 — before that, this
+## target could not own its own tests.
 integration-tart: tart-base-image
 	go test -tags=integration -v -count=1 -timeout=40m ./runtime/tart/
+	go test -tags=integration -v -count=1 -timeout=40m -run '^TestIntegrationTart_' ./internal/orchestrator/
 
 ## smoketest: run the full smoke matrix — every backend this host can exercise,
 ## across every installed docker provider (macOS: OrbStack + Docker Desktop; errors
