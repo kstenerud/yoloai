@@ -1331,6 +1331,36 @@ The last one is the tell. The count was written to *argue* for the convention ("
 
 **Consequences.** Prose gets slightly vaguer and stops being wrong, which is the trade. Note what this does not reach: a characterization can still be stale in substance ("cross-cutting strategic principles" would survive the file becoming something else entirely), so §16's sweep is still the backstop for meaning, and this rule only removes the class that rots by construction.
 
+## D122 — check citation provenance where it is cheap and quiet; accept that D/DF citations stay review-caught
+
+**Date:** 2026-07-15. **Status:** Active — `scripts/check_citation_provenance.py`, wired as a `PostToolUse` hook in `.claude/settings.json`. Implements the countermeasure for the "no provenance on a fact" row of the asymmetry table in [research/llm-shaped-repos.md](../design/research/llm-shaped-repos.md) Part 7. Composes with [D119](#d119--7s-accuracy-bar-covers-our-own-code-where-the-primary-source-is-a-grep-a-finding-parks-its-fix-never-its-verification) and [D121](#d121--dont-count-things-unless-something-enforces-the-count-counts-rot-fastest-lists-second).
+
+**Context.** Every agent error in the D119-D121 session had one shape: a summary was in context and the source was not. The worked instance: an agent wrote "the runtime-namespace confused-deputy" into a finding, citing a research doc it had never opened, having read only a one-line description in a decision that cited it. The finding was wrong, duplicated a documented MAJOR item, and landed in a file whose first sentence excludes it. Nothing mechanical caught it; the maintainer did.
+
+A rule cannot reach this. Context is flat: it carries no bit distinguishing "I read `research/x.md`" from "a decision claims `research/x.md` says Y", so there is no moment of doubt for a "check your sources" rule to fire on. But provenance is observable *outside* the agent — the transcript records whether the session ever reached for the file. That makes it a set difference, which is the shape D119's own evidence says to hand to a machine.
+
+The design question was scope, and it turned on measurement rather than taste. Sampling the last 200 commits on `contributor-docs-sweep`:
+
+| Citation type | Commits (of 200) adding one |
+| --- | --- |
+| `D<n>` / `DF<n>` | 101 — of which 19 are pure moves (same IDs deleted elsewhere in the diff) |
+| `GEN §` / `DEV §` | 14 |
+| `research/*.md` path | 3 |
+
+**Decision.**
+- **(a) Gate research-path citations only.** Adding a `research/*.md` path to a file fires the check ~1.5% of commits. The plan's own criterion — rare means cheap and quiet — is met here and nowhere else.
+- **(b) Only a tool *input* counts as having opened a file, never a tool *result*.** This is the load-bearing line. Reaching for a path is an act; having its content arrive because another file quoted it is exactly the defect. A check that scanned results would agree with the mistake it exists to catch.
+- **(c) Accept that `D<n>`/`DF<n>` provenance stays review-caught, and write it down rather than half-gate it.** Firing on every other commit with a ~19% false-positive rate from moves alone produces a hook people disable, and a disabled hook is worse than none. Gate B already catches the falsifiable half (a citation that resolves to nothing).
+- **(d) Gaming it is fine.** An agent can open the file purely to silence the hook, but that is the same act as doing it sincerely, and it puts the source in context — which is the thing that would have prevented the error. Unusually for a proxy, satisfying it cheaply still produces the outcome, so no anti-gaming machinery is warranted.
+
+**Rejected alternatives.**
+- **A Stop-time hook over the git diff** (the original sketch) — rejected on mechanism. By end of turn the work may already be committed and the working-tree diff empty, and a diff against `origin/main` re-flags citations from earlier sessions whose reads no transcript holds. `PostToolUse` on `Write`/`Edit` hands over the added text directly, with no git and no commit-timing assumption.
+- **Gating every citation type** — rejected on the data above. This is the same failure Gate D avoids by scoping to `//go:build integration`: a matcher that flags correct work is dead on arrival, and the only question is whether it dies by being disabled or by being ignored.
+- **A repo-side gate instead** — not possible for this. The transcript is a harness artifact, so the check is Claude-specific by construction, which is what `CLAUDE.md` says `.claude/` is for. The repo-side variant available (a cited path must exist) catches link rot, not the unread-source problem, and Gate B already covers the D/DF analogue.
+- **Doing nothing and recording the idea** — genuinely close, and it was the plan's own leading option. Rejected only because the narrow scope turned out to be measurably quiet; at 101/200 the answer would have been to record and stop.
+
+**Consequences.** The hook can only complain about what it can positively establish: no transcript means silence, an existing-but-empty one does not. It accuses on a *new* citation only, so reflows and moves pass. The cost is one false pass whenever a session consults a doc by a route the transcript does not name (a subagent's read, a prior session), which the message tells the agent to say out loud and move past. `research/*.md` is a small corpus, so if research docs are ever reorganized, the regex is the thing to re-point.
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.

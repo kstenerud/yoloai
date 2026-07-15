@@ -159,6 +159,27 @@ citation at all. If it is rare, the hook is cheap and quiet. If it is every othe
 **Size:** unknown, gated on the decision. **Risk:** an ignored hook is worse than none. **Depends on:**
 maintainer call.
 
+### Outcome, 2026-07-15 — built narrow; see D122
+
+The noise question was answered by sampling, and the answer split by citation type rather than
+landing on the yes/no this section anticipated. Of the last 200 commits: 101 add a `D<n>`/`DF<n>`
+citation (19 of those are pure moves, so false positives), 14 add a `GEN §`/`DEV §`, and **3 add a
+`research/*.md` path**. Since the defect described above *is* a path citation, scoping to paths
+satisfies this section's own "if it is rare, the hook is cheap and quiet" criterion, while gating
+every type fails it. That middle option was not visible until the types were counted separately.
+
+Built: `scripts/check_citation_provenance.py`, a `PostToolUse` hook — not the Stop hook sketched in
+option 1. By Stop time the work may already be committed and the diff empty; `Write`/`Edit` hands
+over the added text directly. `D<n>`/`DF<n>` provenance is accepted as review-caught (option 3 for
+that half). Rationale, rejected alternatives and consequences: **D122**.
+
+Two things worth keeping from building it. The hook's **first live firing was a false positive
+against D122's own text** — the `research/x.md` placeholder in the prose explaining the hook — which
+is what forced the rule that a name resolving to no file is not a citation. And the first attempt to
+prove it was **self-poisoned**: probing with a doc whose name had appeared in an earlier test
+command showed silence, which reads exactly like a dead gate. It was alive; 36 of 38 research docs
+block. Both failures were the plan's own thesis biting the hand that wrote it.
+
 ---
 
 ## Order and expectations
