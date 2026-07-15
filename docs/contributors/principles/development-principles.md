@@ -41,6 +41,14 @@ A concise reference for the engineering values that shape every code path in yol
 
 **DRY — Don't Repeat Yourself.** Every piece of knowledge has one authoritative location. Duplicated logic means that when the knowledge changes, it must be found and applied in N places — and N−1 will be wrong. But — Sandi Metz: "duplication is far cheaper than the wrong abstraction." Extract on the second concrete use case; don't extract preemptively.
 
+**The Metz caveat is about code, and does not license restating a derivable fact in prose** (D121). Its trade is duplication against a *bad abstraction*; when you write into a comment, an ABOUTME or a doc a fact the artifact already states, there is no abstraction being avoided and nothing on the other side of the scale. The duplication is pure loss, and worse than duplicated logic, because logic that drifts usually breaks a test while prose that drifts just quietly lies. Don't state what the artifact already states unless the restatement earns something the original cannot give. Ranked by how fast they rot:
+
+- **Counts rot fastest.** "Thirteen principles" carries zero information the sixteen `## §n` headings below it don't, and the next section makes it false. Never write one unless something enforces it.
+- **Exhaustive lists rot second.** They at least carry names, but they claim completeness, so the next addition falsifies them silently. This file's own ABOUTME names fourteen of sixteen sections.
+- **Characterizations don't rot.** They claim nothing that a later edit can falsify. Prefer them: say what the thing is *for*, and let the reader grep the headings for what it *contains* — the headings are the authoritative location, and they are searchable.
+
+The test: if adding an item to the artifact would require editing prose elsewhere, that prose is a denormalized copy and will be wrong the first time someone forgets. Either delete it, or gate it — see GEN §16's ordering, where a claim that can be gated is gated and the sweep is for what no gate can reach.
+
 **SOLID.** Five principles for package and type design:
 - *S — Single Responsibility*: each package, type, and function has one reason to change. `runtime/` is runtime backends; `internal/orchestrator/` is sandbox lifecycle; `internal/cli/` is the CLI surface. Mixing these creates coupling that blocks change.
 - *O — Open/Closed*: extend behaviour by adding code, not modifying stable core paths. New backends add a `runtime.Backend` implementation; they don't edit the dispatch. New agents add agent definitions; they don't edit the agent registry's internals.

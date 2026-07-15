@@ -1301,6 +1301,35 @@ D117(b) already states the rule for documents — "a contradiction between docum
 
 **Consequences.** One more thing an agent must stop and ask about, at the cost of a sentence. The worked example is preserved in §7 rather than only here, because §7 is what gets read at the moment the bar applies. Note the honest limit, since D119's failure is precisely why this entry exists: nothing here would have caught the four D119 errors, and nothing in D119 would have caught this one. They are complementary halves — don't assert what you haven't read, and don't resolve what you haven't asked about.
 
+## D121 — don't count things unless something enforces the count; counts rot fastest, lists second
+
+**Date:** 2026-07-15. **Status:** Active — implementing on branch `contributor-docs-sweep`. Scopes DRY in `development-principles.md` §1 (established in D22) and the ABOUTME rules in `standards/markdown.md`. Generalises the ABOUTME fix made under [D119](#d119--7s-accuracy-bar-covers-our-own-code-where-the-primary-source-is-a-grep-a-finding-parks-its-fix-never-its-verification).
+
+**Context.** DEV §1 already states DRY at full strength: "Every piece of knowledge has one authoritative location." A count in a comment is plainly a second location for a fact the artifact already states. The rule did not prevent a single instance, and the reason is in the sentence immediately after it: "But — Sandi Metz: *duplication is far cheaper than the wrong abstraction*. Extract on the second concrete use case."
+
+That caveat is about code. Its trade is duplication against a *bad abstraction*. Applied to a count in prose it is nonsense — there is no abstraction being avoided, nothing on the other side of the scale — but it reads, to anyone about to write "Thirteen principles", as permission. So the repo states DRY prominently and drifted four ways, all found in one session:
+
+- `general-principles.md`'s ABOUTME said "Thirteen principles" with sixteen `## §n` headings below it. §14, §15 and §16 were added and the count was not.
+- `repo_hygiene_test.go` said "three standing claims" with four gates defined beneath it.
+- `markdown.md` stated the ABOUTME width limit as "80" only inside an example block. 351 lines drifted past it (D117).
+- `markdown.md` also claimed "171 of 257 tracked `*_test.go` files (~two-thirds) already carry an ABOUTME header". After D117's sweep it is 260 of 260, enforced by a gate: both numbers stale and the ratio false, in the same paragraph that now carries this rule.
+
+The last one is the tell. The count was written to *argue* for the convention ("the code already votes for this"), which is the one thing a count is genuinely good for — and it was still wrong within days, because the argument won and nobody went back.
+
+**Decision.**
+- **(a) Don't state what the artifact already states**, unless the restatement earns something the original cannot give. The test: if adding an item to the artifact would oblige you to edit prose elsewhere, that prose is a denormalized copy and will be wrong the first time someone forgets.
+- **(b) Ranked by rot speed: counts, then lists, then characterizations.** A **count** carries zero information the artifact doesn't and the next addition falsifies it — never write one unless a gate enforces it. An **exhaustive list** at least carries names, but claims completeness, so the next addition falsifies it silently. A **characterization** claims nothing a later edit can falsify. Prefer characterizations: say what the thing is for, and leave what it contains to the headings, which are authoritative and greppable.
+- **(c) The Metz caveat is scoped to code.** It does not license restating a derivable fact in prose. Duplicated logic that drifts usually breaks a test; duplicated prose that drifts just quietly lies, which is worse — it is trusted precisely because someone bothered to write it.
+- **(d) A number that a gate enforces is fine.** The 100-column ABOUTME rule is the counter-example: it survives because `TestRepoHygiene_ABOUTMEHeaders_AllTrackedFilesCompliant` fails when it is wrong. Per GEN §16's ordering — where a claim can be gated, gate it; the sweep is for what no gate can reach — the choice is *gate the number or delete it*, never "write it down and hope".
+
+**Rejected alternatives.**
+- **A new principle (GEN §17)** — rejected. DRY already says this; the defect was a code-shaped caveat quietly exempting the most common case. A second principle competing with DRY is how two rules end up disagreeing. Same reasoning as D119's fix to §7: scope the principle that exists.
+- **Fixing the counts and moving on** — rejected, and this was the initial instinct: update "Thirteen" to "Sixteen". That re-arms the trap for §17. The count had to go, not be corrected.
+- **Banning lists in ABOUTMEs outright** — rejected as too strong. A list is a real navigational aid and the sibling docs' partial lists are useful, if imprecise. The rule is to prefer characterizations and to never imply a completeness you are not enforcing.
+- **A gate for this** — none is possible in general: no check knows that "Thirteen" refers to the `## §n` headings rather than to something else. Specific instances *are* gateable (a count of a thing the gate can also count), and where that is true, (d) applies.
+
+**Consequences.** Prose gets slightly vaguer and stops being wrong, which is the trade. Note what this does not reach: a characterization can still be stale in substance ("cross-cutting strategic principles" would survive the file becoming something else entirely), so §16's sweep is still the backstop for meaning, and this rule only removes the class that rots by construction.
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.

@@ -24,9 +24,17 @@ In Go and Python the lines are prefixed by the language's comment marker (`// AB
 
 Say something true and specific. "Tests for foo.go" restates the filename and is worse than nothing — it is documentation that will be trusted.
 
+**Say what the file is for. Don't inventory what it contains** (D121; DEV §1's DRY corollary). An ABOUTME that copies facts the file already states is a second authoritative location for them, and nothing keeps the two in step:
+
+- **Never state a count.** `general-principles.md` opened with "Thirteen principles" while sixteen `## §n` headings sat below it, and `repo_hygiene_test.go` claimed "three standing claims" with four gates defined. A count carries no information the artifact doesn't, and the next addition makes it false.
+- **Avoid exhaustive lists.** They carry names, which is worth something, but they imply completeness and the next addition falsifies them in silence. Three of the five principles docs currently name fewer sections than they have.
+- **Characterize instead.** Say the file's purpose and role; leave the contents to the headings, which are the authoritative location and are greppable. The two ABOUTMEs in `principles/` that cannot drift — `architecture-principles.md` and `README.md` — are exactly the two that describe rather than enumerate.
+
+The test: if adding a section to the file would oblige you to edit its ABOUTME, the ABOUTME is a copy and will be wrong the first time someone forgets. The 100-column rule above is the counter-example that proves the shape of the fix — it is a number that survives *because* a gate enforces it. Ungated numbers rot.
+
 ### Required
 
-- All Go files (`*.go`, including `*_test.go`), wherever they live — today that is `cmd/`, `copyflow/`, `runtime/`, `store/`, `yoerrors/`, and `internal/`. As of this writing, 171 of 257 tracked `*_test.go` files (~two-thirds) already carry an ABOUTME header in their first five lines — the code already votes for this convention; the doc previously exempted test files, against the evidence.
+- All Go files (`*.go`, including `*_test.go`), wherever they live. Test files are not exempt: the doc used to exempt them against the evidence of a codebase that already mostly carried the header, and D117 closed the gap. This is enforced by `TestRepoHygiene_ABOUTMEHeaders_AllTrackedFilesCompliant`, so compliance is total by construction and no count belongs here — the previous "171 of 257 (~two-thirds)" was falsified the moment the remaining files were filled in, and stood as its own argument for D121.
 - All Python files in `runtime/monitor/`, including test files. All four files under `runtime/monitor/tests/test_*.py` already carry ABOUTME headers despite the (former) exemption below.
 - All shell scripts under `scripts/`.
 - All Markdown source documents under `docs/contributors/` (principles, standards, research, plans, working-notes, ARCHITECTURE, etc.).
