@@ -96,6 +96,23 @@ active file stays a working set. Newest first.
 - **Implementation:** `agent.Definition.DirectCredentialFile` (a new declarative `*DirectCredentialFile{RelPath, EnvVars, Render}`) is applied by `launch.applyDirectCredential` (in `LaunchContainer`, right after `applyWorkdirTrust`, while `secretEnv` still holds the real key). It writes `auth.json` = `{"auth_mode":"apikey","OPENAI_API_KEY":<real-key>}` (`agent.renderCodexAuth`, shared with the brokered `patchCodexAuth`) **only** when a credential is still present in `secretEnv` — a brokered launch removed it and wrote the placeholder, so this is a no-op then; the direct path (`--no-broker`, unsupported backend, `--network-none`) still has it. Codex declares `EnvVars: ["OPENAI_API_KEY","CODEX_API_KEY"]`.
 - **Pointer:** `internal/agent/agent.go` (`DirectCredentialFile`, codex def), `internal/agent/codex.go` (`renderCodexAuth`), `internal/orchestrator/launch/launch.go` (`applyDirectCredential`); `docs/contributors/backend-idiosyncrasies.md` (Codex auth.json entry).
 
+### DF93 — a stray non-version tag `show` is published on origin — RESOLVED
+
+- **Discovered:** 2026-07-15 · **Workstream:** contributor-docs sweep (D116)
+- **Severity:** LOW · **Disposition:** RESOLVED (maintainer deleted it 2026-07-15)
+- **Description.** `refs/tags/show` was published on origin. It was not a mistyped `git show`: it pointed at the *same annotated tag object* as `v0.5.2` (`7df2a308`), carrying v0.5.2's complete release notes on v0.5.2's commit — a duplicate ref, not a stray commit. Verified identical before deletion, so nothing was lost with it; `v0.5.2` is untouched. Worth noting the release workflow triggers on `v*`, so `show` never could have cut a release — the risk was a reader mistaking it for a version.
+- **Fix.** `git push origin :refs/tags/show`.
+- **Pointer:** `refs/tags/v0.5.2` (the surviving tag object).
+
+### DF90 — `scripts/audit/*.sh` have zero callers, while `shell.md` holds one up as the canonical example — RESOLVED
+
+- **Discovered:** 2026-07-15 · **Workstream:** contributor-docs sweep (D116)
+- **Severity:** LOW · **Disposition:** RESOLVED (deleted 2026-07-15, under D125)
+- **Description.** Four scripts under `scripts/audit/` — `error-handling.sh`, `import-graph.sh`, `observability.sh`, `runtime-interface-shape.sh` — each "reproduces the <topic> check from the 2026-05 audit". Nothing called them: not the Makefile, not CI, not another script. The maintainer confirmed never having run one. `shell.md` meanwhile held `error-handling.sh` up as "a canonical example" of the shell standard, and the standards index listed `scripts/audit/*.sh` as a whole category — so the docs pointed contributors at code the project had already stopped using.
+- **Fix.** Deleted, and every surface that named them swept (`shell.md` ×4, `standards/README.md` ×1). The canonical example is now `scripts/next-id.sh`, which is live and load-bearing.
+- **Why deleting was safe — the checks are gated now, which is the point.** Each script's subject is covered by a linter that runs on every `make check`, rather than by a script nobody ran: `errorlint` (error wrapping/comparison — `error-handling.sh`), `sloglint` (slog conventions — `observability.sh`), `depguard` (import direction — `import-graph.sh`). The fourth, `runtime-interface-shape.sh`, counted methods to answer a one-time design question (F2) that the architecture-remediation program settled. This is D125's rule reaching shell: speculative code is deleted, and a check worth keeping becomes a gate, not a script.
+- **Pointer:** `docs/contributors/standards/shell.md`, `.golangci.yml` (errorlint/sloglint/depguard).
+
 ### DF108 — the netfs unit tests exercised a parallel copy of the classifier, not the code that runs — RESOLVED (fixed on discovery)
 
 - **Discovered:** 2026-07-15 · **Workstream:** D124 sweep, "no speculative API" pass (surfaced by running `unused --tests=false`, which the normal lint cannot see)

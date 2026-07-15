@@ -15,7 +15,7 @@ Standards live one level below `principles/`. Principles explain **why**; standa
 | ------------------------------ | ----------------------------------------------------------------------------------------------------------- |
 | [GO.md](go.md)                 | Go source code (`cmd/`, `internal/`, `runtime/`, `sandbox/`); gofmt, golangci-lint set, package layout, naming, error handling, dependency policy. |
 | [CLI.md](cli.md)               | The `yoloai` CLI: Cobra subcommand layout, flag naming, argument order, exit codes, help text format, stdout/stderr discipline. |
-| [SHELL.md](shell.md)           | Shell scripts (`.claude/hooks/*.sh`, `scripts/audit/*.sh`, `runtime/docker/resources/entrypoint.sh`, `runtime/monitor/*.sh`); three contexts, strict mode, ShellCheck. |
+| [SHELL.md](shell.md)           | Shell scripts (`.claude/hooks/*.sh`, `scripts/*.sh`, `runtime/docker/resources/entrypoint.sh`, `runtime/monitor/*.sh`); three contexts, strict mode, ShellCheck. |
 | [PYTHON.md](python.md)         | `runtime/monitor/` Python surface; typed pure functions vs I/O seams, pytest, mypy `--strict`. |
 | [MAKEFILE.md](makefile.md)     | `Makefile`; target naming, `.PHONY` discipline, the `make check` contract, test tiers, tool pinning.        |
 | [DOCKERFILE.md](dockerfile.md) | Base image at `runtime/docker/resources/Dockerfile` and profile Dockerfiles at `~/.yoloai/profiles/<name>/Dockerfile`; hadolint, apt patterns, layer ordering. |

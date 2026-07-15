@@ -5,7 +5,7 @@
 
 # Shell Script Standard
 
-Reference for shell scripts in yoloAI: `.claude/hooks/*.sh`, `scripts/audit/*.sh`, `runtime/docker/resources/entrypoint.sh`, `runtime/monitor/diagnose-idle.sh`.
+Reference for shell scripts in yoloAI: `.claude/hooks/*.sh`, `scripts/*.sh`, `runtime/docker/resources/entrypoint.sh`, `runtime/monitor/diagnose-idle.sh`.
 
 See also: `../principles/development-principles.md §5` (fail fast — applies to scripts too); `../principles/general-principles.md §3` (don't reinvent — compose with grep, awk, jq, git rather than rewriting in Python); `MAKEFILE.md` for `make check` integration.
 
@@ -15,7 +15,7 @@ yoloAI has three classes of shell script, each with different constraints:
 
 | Context                                            | Shebang             | Strict mode          | Why                                                                                                                                  |
 | -------------------------------------------------- | ------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| **Audit / dev tooling** (`scripts/audit/*.sh`)     | `#!/usr/bin/env bash` | `set -euo pipefail` | Runs on developer machines + CI. Fail loudly on any error. ABOUTME header. Output goes to stdout for the developer.                  |
+| **Dev tooling** (`scripts/*.sh`)                   | `#!/usr/bin/env bash` | `set -euo pipefail` | Runs on developer machines + CI. Fail loudly on any error. ABOUTME header. Output goes to stdout for the developer.                  |
 | **Hook scripts** (`.claude/hooks/*.sh`)            | `#!/bin/bash`         | `set -u`             | Runs from Claude Code's hook surface. Must not block on errors (exit 0 even on minor issues); the hook is a stamping / signaling mechanism, not a quality gate itself. |
 | **Container entrypoint trampoline** (`runtime/docker/resources/entrypoint.sh`) | `#!/bin/sh`           | `set -e`             | Runs inside a minimal Debian container. `sh` (not `bash`) for portability — the trampoline must work before any package install. Hands off to Python ASAP. |
 
@@ -82,7 +82,9 @@ Shell is the glue, not the implementation. The right pattern:
 - **Use `find` for file matching.** Don't loop with `for f in *` over a deep tree.
 - **Use `awk` for column-shaped data.** Don't write fragile `cut` + `tr` chains.
 
-`scripts/audit/error-handling.sh` is a canonical example — it composes `grep`, `wc`, `awk`, and `sed` to produce a structured audit report.
+`scripts/next-id.sh` is a canonical example — it composes `grep`, `sort` and `tr` over a globbed
+corpus to answer one question, and its ABOUTME says why the glob (not a hand-written file list)
+is load-bearing.
 
 ## When NOT to use shell
 
@@ -109,7 +111,7 @@ Audit scripts write to stdout. Use markdown-style section headers (`## fmt.Error
 
 ## File naming
 
-- Audit scripts: `scripts/audit/<topic>.sh` — one topic per file.
+- Dev tooling: `scripts/<topic>.sh` — one topic per file.
 - Hook scripts: `.claude/hooks/<event>.sh` (e.g., `post-edit.sh`, `on-stop.sh`).
 - Container scripts: `runtime/<backend>/resources/<purpose>.sh`.
 - Diagnostic scripts: `runtime/<area>/<verb>-<noun>.sh` (e.g., `diagnose-idle.sh`).
