@@ -18,31 +18,34 @@ Exits non-zero if any rule fails to install, so the host fails the launch rather
 than running the agent with unenforced isolation.
 """
 
+from __future__ import annotations
+
 import datetime
 import json
 import os
 import sys
+from typing import TextIO
 
 import firewall
 
 
-def _emit(stream, level, event, msg, **fields):
+def _emit(stream: TextIO, level: str, event: str, msg: str, **fields: object) -> None:
     now = datetime.datetime.utcnow()
     ts = now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{now.microsecond // 1000:03d}Z"
-    entry = {"ts": ts, "level": level, "event": event, "msg": msg}
+    entry: dict[str, object] = {"ts": ts, "level": level, "event": event, "msg": msg}
     entry.update(fields)
     print(json.dumps(entry), file=stream, flush=True)
 
 
-def log_info(event, msg, **fields):
+def log_info(event: str, msg: str, **fields: object) -> None:
     _emit(sys.stdout, "info", event, msg, **fields)
 
 
-def log_error(event, msg, **fields):
+def log_error(event: str, msg: str, **fields: object) -> None:
     _emit(sys.stderr, "error", event, msg, **fields)
 
 
-def main():
+def main() -> None:
     domains = os.environ.get("YOLOAI_FW_ALLOWED_DOMAINS", "").split()
     injector = os.environ.get("YOLOAI_BROKER_INJECTOR_ENDPOINT", "")
 

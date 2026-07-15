@@ -1,3 +1,8 @@
+> **ABOUTME:** Diagram-first conceptual tour of yoloAI's architecture — the layer stack, backend
+> plugin model, sandbox lifecycle states, workdir modes, and the create/diff-apply/config-merge
+> flows. Deliberately carries no file paths or symbol names, since those drift; read this for
+> the mental model, code-map.md for where the code actually lives.
+
 # System Overview
 
 Visual, conceptual guide to how yoloAI's components fit together — diagrams and mental models only, with **no file paths or symbol catalogs by design** (those drift, and they belong to [README.md](README.md), the code-navigation source of truth). Open this doc to understand *how the pieces fit*; open README.md to find *where the code lives*.

@@ -1,3 +1,7 @@
+> **ABOUTME:** Design for structured per-sandbox logging and the bug-report tooling built on it:
+> the log file/event taxonomy, the `sandbox log` viewer, and the sanitized-vs-full report
+> mechanisms for sharing diagnostics without leaking sensitive sandbox contents.
+
 # Bug Report and Structured Logging Design
 
 ## Structured Logging

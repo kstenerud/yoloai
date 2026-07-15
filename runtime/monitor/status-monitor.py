@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# ABOUTME: In-container status monitor: polls detectors in priority order to
+# ABOUTME: classify the agent idle/active, writes status.json, sets the tmux title.
 """yoloAI in-container status monitor.
 
 Runs as a background process inside the sandbox. Polls detectors in priority
@@ -7,6 +9,8 @@ and updates the tmux window title.
 
 Usage: status-monitor.py /path/to/config.json /path/to/status.json
 """
+
+from __future__ import annotations
 
 import datetime
 import json
@@ -17,6 +21,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Any, Protocol, TextIO
 
 # --- Constants ---
 
@@ -55,7 +60,7 @@ IS_MACOS = platform.system() == "Darwin"
 
 # --- Utility functions ---
 
-def tmux_cmd(args, tmux_sock=None):
+def tmux_cmd(args: list[str], tmux_sock: str | None = None) -> str:
     """Run a tmux command and return stdout, or empty string on failure."""
     cmd = ["tmux"]
     if tmux_sock:
@@ -67,7 +72,7 @@ def tmux_cmd(args, tmux_sock=None):
         return ""
 
 
-def write_status(status_file, status, exit_code=None):
+def write_status(status_file: str, status: str, exit_code: int | None = None) -> None:
     """Write status JSON in-place.
 
     Writes directly to the status file rather than using atomic rename, because
@@ -80,7 +85,7 @@ def write_status(status_file, status, exit_code=None):
     """
     # This schema_version must equal agentStatusSchemaVersion in
     # internal/orchestrator/status/status.go (fenced by schema_version_test.go).
-    data = {
+    data: dict[str, Any] = {
         "schema_version": 1,
         "status": status,
         "exit_code": exit_code,
@@ -94,7 +99,7 @@ def write_status(status_file, status, exit_code=None):
         pass
 
 
-def read_status_value(status_file):
+def read_status_value(status_file: str) -> str:
     """Read the current status string from status_file ("" on any error).
 
     Used so the respawn idle-seed can tell whether something out-of-band (a
@@ -103,19 +108,20 @@ def read_status_value(status_file):
     """
     try:
         with open(status_file) as f:
-            return json.load(f).get("status", "")
+            result: str = json.load(f).get("status", "")
+            return result
     except (OSError, ValueError):
         return ""
 
 
-def set_title(name, tmux_sock=None):
+def set_title(name: str, tmux_sock: str | None = None) -> None:
     """Set tmux window title."""
     tmux_cmd(["rename-window", "-t", "main", name], tmux_sock)
 
 
 # --- Wchan detector ---
 
-def read_wchan_linux(pid):
+def read_wchan_linux(pid: int | None) -> str:
     """Read /proc/PID/wchan on Linux."""
     try:
         return Path(f"/proc/{pid}/wchan").read_text().strip()
@@ -123,7 +129,7 @@ def read_wchan_linux(pid):
         return "unknown"
 
 
-def read_wchan_macos(pid):
+def read_wchan_macos(pid: int | None) -> str:
     """Read wait channel via ps on macOS."""
     try:
         out = subprocess.check_output(
@@ -135,7 +141,7 @@ def read_wchan_macos(pid):
         return "unknown"
 
 
-def read_wchan(pid):
+def read_wchan(pid: int | None) -> str:
     """Read wait channel, platform-dispatched."""
     if IS_LINUX:
         return read_wchan_linux(pid)
@@ -144,7 +150,7 @@ def read_wchan(pid):
     return "unknown"
 
 
-def has_active_connections_linux(pid):
+def has_active_connections_linux(pid: int | None) -> bool:
     """Check for ESTABLISHED TCP connections via /proc/net/tcp6.
 
     Uses the network namespace approach: /proc/<pid>/net/tcp6 covers all
@@ -162,7 +168,7 @@ def has_active_connections_linux(pid):
     return False
 
 
-def has_active_connections_macos(pid):
+def has_active_connections_macos(pid: int | None) -> bool:
     """Check for ESTABLISHED TCP connections via lsof on macOS."""
     try:
         out = subprocess.check_output(
@@ -174,7 +180,7 @@ def has_active_connections_macos(pid):
         return False
 
 
-def has_active_connections(pid):
+def has_active_connections(pid: int | None) -> bool:
     """Check for active network connections, platform-dispatched."""
     if IS_LINUX:
         return has_active_connections_linux(pid)
@@ -189,12 +195,23 @@ class DetectorResult:
     """Result from a detector check."""
     __slots__ = ("status", "confidence")
 
-    def __init__(self, status, confidence="high"):
+    def __init__(self, status: str, confidence: str = "high") -> None:
         self.status = status  # "idle", "active", or "unknown"
         self.confidence = confidence  # "high", "medium", "low"
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"DetectorResult({self.status!r}, {self.confidence!r})"
+
+
+class Detector(Protocol):
+    """Structural type for the detector classes below (HookDetector,
+    WchanDetector, ReadyPatternDetector, ContextSignalDetector,
+    OutputStabilityDetector). They share no base class — this Protocol
+    captures the duck-typed interface build_detectors()/run_monitor() rely
+    on: a `name` attribute and a `check(pid)` method."""
+    name: str
+
+    def check(self, agent_pid: int | None) -> DetectorResult: ...
 
 
 class HookDetector:
@@ -227,9 +244,9 @@ class HookDetector:
     name = "hook"
     confidence = "high"
 
-    def __init__(self, log_path):
+    def __init__(self, log_path: str) -> None:
         self.log_path = log_path
-        self._state = None  # "idle" | "active" | None: last observed hook event
+        self._state: str | None = None  # "idle" | "active" | None: last observed hook event
         self._idle_since = 0.0  # monotonic time the idle event was first observed
         self._active_since = 0.0  # monotonic time the latest active event was observed
         # Skip a prior session's events: start reading at the current EOF.
@@ -238,7 +255,7 @@ class HookDetector:
         except OSError:
             self._offset = 0
 
-    def _consume_new_events(self):
+    def _consume_new_events(self) -> None:
         """Read newly appended whole lines and fold them into the state."""
         try:
             size = os.path.getsize(self.log_path)
@@ -279,7 +296,7 @@ class HookDetector:
                 self._state = "active"
                 self._active_since = now
 
-    def check(self, _agent_pid):
+    def check(self, _agent_pid: int | None) -> DetectorResult:
         self._consume_new_events()
         if self._state is None:
             return DetectorResult("unknown")
@@ -306,10 +323,10 @@ class WchanDetector:
     name = "wchan"
     confidence = "high"
 
-    def __init__(self):
-        self._prev_result = None  # last non-unknown DetectorResult
+    def __init__(self) -> None:
+        self._prev_result: DetectorResult | None = None  # last non-unknown DetectorResult
 
-    def check(self, agent_pid):
+    def check(self, agent_pid: int | None) -> DetectorResult:
         wchan = read_wchan(agent_pid)
 
         # "0" means the process is on-CPU (not blocked). This is transient —
@@ -350,11 +367,11 @@ class ReadyPatternDetector:
     name = "ready_pattern"
     confidence = "medium"
 
-    def __init__(self, pattern, tmux_sock=None):
+    def __init__(self, pattern: str, tmux_sock: str | None = None) -> None:
         self.pattern = pattern
         self.tmux_sock = tmux_sock
 
-    def check(self, _agent_pid):
+    def check(self, _agent_pid: int | None) -> DetectorResult:
         content = tmux_cmd(["capture-pane", "-t", "main", "-p"], self.tmux_sock)
         if not content:
             return DetectorResult("unknown")
@@ -374,17 +391,17 @@ class ContextSignalDetector:
     name = "context_signal"
     confidence = "medium"
 
-    def __init__(self, log_path):
+    def __init__(self, log_path: str) -> None:
         self.log_path = log_path
         self.last_pos = 0
-        self.last_signal = None
+        self.last_signal: str | None = None
         # Seek to end of file at startup
         try:
             self.last_pos = os.path.getsize(log_path)
         except OSError:
             pass
 
-    def check(self, _agent_pid):
+    def check(self, _agent_pid: int | None) -> DetectorResult:
         try:
             size = os.path.getsize(self.log_path)
             if size <= self.last_pos:
@@ -419,11 +436,11 @@ class OutputStabilityDetector:
     name = "output_stability"
     confidence = "low"
 
-    def __init__(self, tmux_sock=None):
+    def __init__(self, tmux_sock: str | None = None) -> None:
         self.tmux_sock = tmux_sock
-        self.prev_content = None
+        self.prev_content: str | None = None
 
-    def check(self, _agent_pid):
+    def check(self, _agent_pid: int | None) -> DetectorResult:
         content = tmux_cmd(["capture-pane", "-t", "main", "-p"], self.tmux_sock)
         if not content:
             return DetectorResult("unknown")
@@ -448,14 +465,16 @@ STABILITY_THRESHOLDS = {
 }
 
 
-def build_detectors(config, tmux_sock=None, yoloai_dir=None):
+def build_detectors(
+    config: dict[str, Any], tmux_sock: str | None = None, yoloai_dir: str | None = None
+) -> list[Detector]:
     """Instantiate detectors based on runtime-config.json detector list."""
     detector_names = config.get("detectors", [])
     idle = config.get("idle", {})
     logs_dir = os.path.join(yoloai_dir, "logs") if yoloai_dir else "/yoloai/logs"
     log_path = os.path.join(logs_dir, "agent.log")
     hook_log_path = os.path.join(logs_dir, "agent-hooks.jsonl")
-    detectors = []
+    detectors: list[Detector] = []
 
     for name in detector_names:
         if name == "hook":
@@ -474,7 +493,7 @@ def build_detectors(config, tmux_sock=None, yoloai_dir=None):
     return detectors
 
 
-def _run(cmd):
+def _run(cmd: list[str]) -> str:
     """Run a command and return stripped stdout, or "" on any failure."""
     try:
         return subprocess.check_output(
@@ -483,7 +502,7 @@ def _run(cmd):
         return ""
 
 
-def proc_is_wrapper(pid):
+def proc_is_wrapper(pid: int) -> bool:
     """True if PID is the fall-to-shell wrapper (agent-run.sh, D96).
 
     Under fall-to-shell the wrapper is the pane process and runs the agent as a
@@ -501,7 +520,7 @@ def proc_is_wrapper(pid):
     return "agent-run.sh" in _run(["ps", "-o", "command=", "-p", str(pid)])
 
 
-def first_child_pid(pid):
+def first_child_pid(pid: int) -> int | None:
     """Return the first child PID of PID, or None."""
     if IS_LINUX:
         try:
@@ -519,7 +538,7 @@ def first_child_pid(pid):
     return None
 
 
-def get_agent_pid(tmux_sock=None):
+def get_agent_pid(tmux_sock: str | None = None) -> int | None:
     """Get the PID of the agent process running in the tmux pane.
 
     When the pane process is the fall-to-shell wrapper (agent-run.sh), descend
@@ -545,7 +564,7 @@ _tmux_fail_count = 0  # consecutive cycles where tmux returned no usable data
 _TMUX_FAIL_THRESHOLD = 3  # report death after this many consecutive failures
 
 
-def check_pane_dead(tmux_sock=None):
+def check_pane_dead(tmux_sock: str | None = None) -> tuple[bool, int | None]:
     """Check if the tmux pane has exited. Returns (dead, exit_code) or (False, None).
 
     Handles two failure modes:
@@ -596,17 +615,17 @@ def check_pane_dead(tmux_sock=None):
     return False, None
 
 
-_monitor_log = None  # file handle for logs/monitor.jsonl
+_monitor_log: TextIO | None = None  # file handle for logs/monitor.jsonl
 _debug_enabled = False  # set by run_monitor based on config
 
 
-def _log_jsonl(level, event, msg, **fields):
+def _log_jsonl(level: str, event: str, msg: str, **fields: Any) -> None:
     """Write a structured JSONL entry to logs/monitor.jsonl."""
     if _monitor_log is None:
         return
     now = datetime.datetime.now(datetime.timezone.utc)
     ts = now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{now.microsecond // 1000:03d}Z"
-    entry = {"ts": ts, "level": level, "event": event, "msg": msg}
+    entry: dict[str, Any] = {"ts": ts, "level": level, "event": event, "msg": msg}
     entry.update(fields)
     try:
         _monitor_log.write(json.dumps(entry) + "\n")
@@ -615,7 +634,7 @@ def _log_jsonl(level, event, msg, **fields):
         pass
 
 
-def debug(msg):
+def debug(msg: str) -> None:
     """Write a debug-level entry to monitor.jsonl if debug mode is enabled.
 
     Accepts a plain string (legacy format) for compatibility with existing callers.
@@ -626,7 +645,7 @@ def debug(msg):
     _log_jsonl("debug", "detector.result", msg)
 
 
-def run_monitor(config_path, status_file, tmux_sock=None):
+def run_monitor(config_path: str, status_file: str, tmux_sock: str | None = None) -> None:
     """Main monitor loop."""
     global _monitor_log, _debug_enabled
 
@@ -674,16 +693,16 @@ def run_monitor(config_path, status_file, tmux_sock=None):
     debug(f"platform: linux={IS_LINUX} macos={IS_MACOS}")
 
     # Per-detector stability counters: {detector_name: (last_status, count)}
-    stability = {}
+    stability: dict[str, tuple[str | None, int]] = {}
     # Global hold: when idle, require GLOBAL_HOLD_CYCLES consecutive non-idle
     # decisions before transitioning to active. Prevents brief sensor gaps
     # (e.g. wchan "0" blip) from causing idle->active->idle flaps.
-    hold_status = None  # last written status
+    hold_status: str | None = None  # last written status
     hold_active_count = 0  # consecutive cycles wanting to leave idle
 
     prev_title = ""
 
-    def update_title(title):
+    def update_title(title: str) -> None:
         nonlocal prev_title
         if title != prev_title:
             set_title(title, tmux_sock)
@@ -767,8 +786,8 @@ def run_monitor(config_path, status_file, tmux_sock=None):
 
         # 3. Evaluate detectors in order
         final_status = "active"  # safe default
-        decided_by = None
-        detector_results = []
+        decided_by: str | None = None
+        detector_results: list[str] = []
         for det in detectors:
             result = det.check(agent_pid)
             if result.status == "unknown":
@@ -830,7 +849,7 @@ def run_monitor(config_path, status_file, tmux_sock=None):
         time.sleep(POLL_INTERVAL)
 
 
-def write_status_cli(args):
+def write_status_cli(args: list[str]) -> None:
     """Handle `status-monitor.py --write-status STATUS STATUS_FILE [EXIT_CODE]`.
 
     The fall-to-shell wrapper (agent-run.sh, D96) records the agent's
@@ -846,7 +865,7 @@ def write_status_cli(args):
         sys.exit(2)
     status = args[0]
     status_file = args[1]
-    exit_code = None
+    exit_code: int | None = None
     if len(args) > 2:
         try:
             exit_code = int(args[2])
@@ -855,7 +874,7 @@ def write_status_cli(args):
     write_status(status_file, status, exit_code)
 
 
-def main():
+def main() -> None:
     if len(sys.argv) >= 2 and sys.argv[1] == "--write-status":
         write_status_cli(sys.argv[2:])
         return

@@ -1,3 +1,6 @@
+// ABOUTME: Docker build-secret handling for profile builds: auto-detecting a
+// ABOUTME: host ~/.npmrc, and parsing/validating id=,src= specs (order, missing
+// ABOUTME: fields, tilde expansion, source-file existence).
 package profiles
 
 import (

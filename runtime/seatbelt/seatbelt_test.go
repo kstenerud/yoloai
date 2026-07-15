@@ -307,11 +307,34 @@ func TestSandboxName(t *testing.T) {
 		{"noprefix", "noprefix"},
 	}
 
+	r := &Runtime{}
 	for _, tt := range tests {
-		got := sandboxName(tt.input)
+		got := r.sandboxName(tt.input)
 		if got != tt.expected {
 			t.Errorf("sandboxName(%q) = %q, want %q", tt.input, got, tt.expected)
 		}
+	}
+}
+
+// A principal-scoped Layout (ClientCreateOptions.Principal, D58/D59) makes the
+// instance prefix "yoloai-<principal>-". The orchestrator hands Create/Start/Stop
+// an instance name (launch.go: store.InstanceName(layout.Principal, name)), so
+// stripping a hardcoded "yoloai-" left the principal glued to the sandbox name
+// and all nine sandbox paths resolved to directories that never existed. See
+// DF98; tart had the identical defect.
+func TestSandboxNameIsPrincipalScoped(t *testing.T) {
+	p, err := config.ParsePrincipalSegment("acme")
+	if err != nil {
+		t.Fatalf("parse principal: %v", err)
+	}
+	r := &Runtime{layout: config.Layout{}.WithPrincipal(p)}
+
+	if got := r.instancePrefix(); got != "yoloai-acme-" {
+		t.Errorf("instancePrefix() = %q, want %q", got, "yoloai-acme-")
+	}
+	if got := r.sandboxName("yoloai-acme-mybox"); got != "mybox" {
+		t.Errorf("sandboxName(%q) = %q, want %q — the principal must be stripped with the prefix, not left on the name",
+			"yoloai-acme-mybox", got, "mybox")
 	}
 }
 

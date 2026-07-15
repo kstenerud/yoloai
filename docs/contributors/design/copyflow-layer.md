@@ -1,3 +1,7 @@
+> **ABOUTME:** Design for the copyflow layer, yoloAI's copy/diff/apply review workflow: how a
+> tracked directory's work copy diverges from its original, how changes are diffed and landed
+> selectively, and the hermetic-git seal that keeps in-sandbox git from touching the original.
+
 # Copyflow layer — the copy / diff / apply review refinement
 
 **Status:** Design converged 2026-06-14 (design conversation), not yet implemented. The target

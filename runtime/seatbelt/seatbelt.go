@@ -157,7 +157,7 @@ func New(_ context.Context, layout config.Layout, homeDir string) (*Runtime, err
 // directory, patches working_dir for :copy mode, generates the SBPL
 // profile, and writes the entrypoint script and tmux config.
 func (r *Runtime) Create(_ context.Context, cfg runtime.InstanceConfig) error {
-	sandboxPath := filepath.Join(r.layout.SandboxesDir(), sandboxName(cfg.Name))
+	sandboxPath := filepath.Join(r.layout.SandboxesDir(), r.sandboxName(cfg.Name))
 
 	for _, dir := range []string{backendDir, binDir, tmuxDir} {
 		if err := fileutil.MkdirAll(filepath.Join(sandboxPath, dir), 0750); err != nil {
@@ -272,7 +272,7 @@ func writeSandboxScripts(sandboxPath string) error {
 // Start launches the sandboxed process in the background and waits for
 // the tmux session to become available.
 func (r *Runtime) Start(ctx context.Context, name string) error {
-	sandboxPath := filepath.Join(r.layout.SandboxesDir(), sandboxName(name))
+	sandboxPath := filepath.Join(r.layout.SandboxesDir(), r.sandboxName(name))
 
 	// Check if already running
 	if r.isRunning(sandboxPath) {
@@ -401,7 +401,7 @@ func (r *Runtime) awaitInstanceReady(ctx context.Context, sandboxPath, logPath s
 
 // Stop kills the sandbox-exec process and the tmux server.
 func (r *Runtime) Stop(_ context.Context, name string) error {
-	sandboxPath := filepath.Join(r.layout.SandboxesDir(), sandboxName(name))
+	sandboxPath := filepath.Join(r.layout.SandboxesDir(), r.sandboxName(name))
 
 	// Kill tmux server via socket
 	tmuxSock := filepath.Join(sandboxPath, tmuxDir, tmuxSocketName)
@@ -418,7 +418,7 @@ func (r *Runtime) Stop(_ context.Context, name string) error {
 
 // Remove stops the instance and removes all sandbox state from disk.
 func (r *Runtime) Remove(ctx context.Context, name string) error {
-	sandboxPath := filepath.Join(r.layout.SandboxesDir(), sandboxName(name))
+	sandboxPath := filepath.Join(r.layout.SandboxesDir(), r.sandboxName(name))
 
 	_ = r.Stop(ctx, name)
 
@@ -442,7 +442,7 @@ func (r *Runtime) Remove(ctx context.Context, name string) error {
 
 // Inspect returns the current state of the sandboxed process.
 func (r *Runtime) Inspect(_ context.Context, name string) (runtime.InstanceInfo, error) {
-	sandboxPath := filepath.Join(r.layout.SandboxesDir(), sandboxName(name))
+	sandboxPath := filepath.Join(r.layout.SandboxesDir(), r.sandboxName(name))
 
 	// Use the instance config as the existence marker — it's written by Create,
 	// while the PID file only exists after Start.
@@ -459,7 +459,7 @@ func (r *Runtime) Inspect(_ context.Context, name string) (runtime.InstanceInfo,
 // Exec runs a command inside the sandbox. For tmux commands, injects the
 // per-sandbox socket. For other commands, runs under sandbox-exec.
 func (r *Runtime) Exec(_ context.Context, name string, cmd []string, _ string) (runtime.ExecResult, error) {
-	sandboxPath := filepath.Join(r.layout.SandboxesDir(), sandboxName(name))
+	sandboxPath := filepath.Join(r.layout.SandboxesDir(), r.sandboxName(name))
 
 	if !r.isRunning(sandboxPath) {
 		return runtime.ExecResult{}, runtime.ErrNotRunning
@@ -477,7 +477,7 @@ func (r *Runtime) Exec(_ context.Context, name string, cmd []string, _ string) (
 // the bridge keeps error output from stair-stepping under the CLI's raw mode and
 // makes the path safe for non-CLI embedders whose streams aren't real *os.Files.
 func (r *Runtime) InteractiveExec(_ context.Context, name string, cmd []string, _ string, _ string, streams runtime.IOStreams) error {
-	sandboxPath := filepath.Join(r.layout.SandboxesDir(), sandboxName(name))
+	sandboxPath := filepath.Join(r.layout.SandboxesDir(), r.sandboxName(name))
 	execCmd := r.buildExecCommand(sandboxPath, cmd)
 	return ptybridge.Exec(execCmd, streams)
 }
@@ -567,7 +567,7 @@ func resolveGitBinary(ctx context.Context, env []string) (gitBin, toolchainExecD
 // before confining, so it need not be inside the profile's allowed paths.
 func (r *Runtime) writeGitProfile(name, profile string) (path string, cleanup func(), err error) {
 	noop := func() {}
-	dir := filepath.Join(r.layout.SandboxesDir(), sandboxName(name), backendDir)
+	dir := filepath.Join(r.layout.SandboxesDir(), r.sandboxName(name), backendDir)
 	f, err := os.CreateTemp(dir, "git-profile-*.sb")
 	if err != nil {
 		if f, err = os.CreateTemp("", "yoloai-git-profile-*.sb"); err != nil {
@@ -595,7 +595,7 @@ func (r *Runtime) Close() error {
 
 // DiagHint returns a seatbelt-specific hint for checking logs.
 func (r *Runtime) DiagHint(instanceName string) string {
-	logPath := filepath.Join(r.layout.SandboxesDir(), sandboxName(instanceName), backendDir, processLogFileName)
+	logPath := filepath.Join(r.layout.SandboxesDir(), r.sandboxName(instanceName), backendDir, processLogFileName)
 	return fmt.Sprintf("check log at %s", logPath)
 }
 
@@ -664,11 +664,26 @@ func mountSymlinks(mounts []runtime.MountSpec) ([]string, error) {
 
 // --- Internal helpers ---
 
-const instancePrefix = "yoloai-"
+// instancePrefix returns the prefix the store prepends to sandbox names to form
+// instance names, for THIS runtime's principal: "yoloai-" by default, or
+// "yoloai-<principal>-" when the Layout is principal-scoped (D58/D59, settable
+// by an integrator via ClientCreateOptions.Principal).
+//
+// It must be derived from the layout, never hardcoded. This was
+// `const instancePrefix = "yoloai-"`, which silently broke every principal-scoped
+// caller: the orchestrator hands these methods an instance name
+// (launch.go builds `store.InstanceName(layout.Principal, name)`), so stripping
+// only "yoloai-" from "yoloai-acme-mybox" left "acme-mybox" and every sandbox
+// path resolved to a directory that does not exist. Prune was already
+// principal-aware (prune.go), so the backend disagreed with itself. Same defect
+// as tart's, found the same way — see DF98.
+func (r *Runtime) instancePrefix() string {
+	return config.InstancePrefix(r.layout.Principal)
+}
 
 // sandboxName strips the instance prefix to recover the sandbox name.
-func sandboxName(instanceName string) string {
-	return strings.TrimPrefix(instanceName, instancePrefix)
+func (r *Runtime) sandboxName(instanceName string) string {
+	return strings.TrimPrefix(instanceName, r.instancePrefix())
 }
 
 // isRunning checks if the sandbox-exec process is alive.

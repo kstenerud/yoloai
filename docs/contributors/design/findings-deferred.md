@@ -1,5 +1,5 @@
-<!-- ABOUTME: Holding pen for deferred findings parked from findings-unresolved.md. -->
-<!-- ABOUTME: Each item carries a revival trigger; when it fires the item flows back to unresolved. -->
+> **ABOUTME:** Holding pen for findings parked as "not now" but still potentially actionable.
+> Each entry carries a revival trigger that, once it fires, pulls it back to the unresolved queue.
 
 # Deferred findings
 

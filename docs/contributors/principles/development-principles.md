@@ -1,11 +1,7 @@
-ABOUTME: Engineering practice for yoloAI. YAGNI/KISS/DRY/SOLID vocabulary,
-ABOUTME: boundary discipline ("none of your business" — comply-or-complain),
-ABOUTME: validate-at-every-layer, parse-don't-validate, fail-fast,
-ABOUTME: warnings-are-signal, justify-every-discard, no-half-finished,
-ABOUTME: plan-then-execute cleanup, make-check gate, iterate-when-first-approach
-ABOUTME: -fails, raw-until-it-has-to-change, library-defaults-are-safety-only,
-ABOUTME: name-for-the-reader's-distance.
-ABOUTME: How to write yoloAI code so future-you can change it safely.
+> **ABOUTME:** Engineering practice for yoloAI — the concrete code-structure and process
+> conventions that keep a single-author, five-backend codebase malleable for the next change.
+> Specialises general-principles.md for the engineering surface; each section pairs a rule with
+> a "bites when" trigger and a cost-vs-benefit threshold.
 
 # Development principles
 
@@ -40,6 +36,14 @@ A concise reference for the engineering values that shape every code path in yol
 **KISS — Keep It Simple.** The simplest solution that correctly satisfies the requirement is the right solution. Prefer flat over nested, explicit over clever, boring over novel. A future maintainer (or future-Karl debugging at 2am) should be able to read any code path and understand it without surprises.
 
 **DRY — Don't Repeat Yourself.** Every piece of knowledge has one authoritative location. Duplicated logic means that when the knowledge changes, it must be found and applied in N places — and N−1 will be wrong. But — Sandi Metz: "duplication is far cheaper than the wrong abstraction." Extract on the second concrete use case; don't extract preemptively.
+
+**The Metz caveat is about code, and does not license restating a derivable fact in prose** (D121). Its trade is duplication against a *bad abstraction*; when you write into a comment, an ABOUTME or a doc a fact the artifact already states, there is no abstraction being avoided and nothing on the other side of the scale. The duplication is pure loss, and worse than duplicated logic, because logic that drifts usually breaks a test while prose that drifts just quietly lies. Don't state what the artifact already states unless the restatement earns something the original cannot give. Ranked by how fast they rot:
+
+- **Counts rot fastest.** "Thirteen principles" carries zero information the sixteen `## §n` headings below it don't, and the next section makes it false. Never write one unless something enforces it.
+- **Exhaustive lists rot second.** They at least carry names, but they claim completeness, so the next addition falsifies them silently. This file's own ABOUTME names fourteen of sixteen sections.
+- **Characterizations don't rot.** They claim nothing that a later edit can falsify. Prefer them: say what the thing is *for*, and let the reader grep the headings for what it *contains* — the headings are the authoritative location, and they are searchable.
+
+The test: if adding an item to the artifact would require editing prose elsewhere, that prose is a denormalized copy and will be wrong the first time someone forgets. Either delete it, or gate it — see GEN §16's ordering, where a claim that can be gated is gated and the sweep is for what no gate can reach.
 
 **SOLID.** Five principles for package and type design:
 - *S — Single Responsibility*: each package, type, and function has one reason to change. `runtime/` is runtime backends; `internal/orchestrator/` is sandbox lifecycle; `internal/cli/` is the CLI surface. Mixing these creates coupling that blocks change.
@@ -298,18 +302,18 @@ Effective Go §Errors; Bertrand Meyer *OOSC* (Design by Contract). Full citation
 
 ## §6. Warnings are signal; suppressions require justification
 
-> **Rule.** A lint / scanner / type warning is information about the code. Every suppression (`//nolint`, `#nosec`, a complexity-threshold override) carries a co-located comment explaining *why the finding doesn't apply here* — never "makes CI pass" or a restatement of the directive.
+> **Rule.** A lint / scanner / type warning is information about the code. Every suppression (`//nolint`, `#nosec`) carries a co-located comment explaining *why the finding doesn't apply here* — never "makes CI pass" or a restatement of the directive. This does not extend to the complexity linters (`cyclop`, `gocognit`, `gocyclo`): those are never suppressed and their threshold is never raised — see §10.
 >
-> **Bites when:** adding a suppression or raising a threshold to get the gate green. · **See also:** §7, §10.
+> **Bites when:** adding a suppression to get the gate green. · **See also:** §7, §10.
 
-**Principle.** Lint findings, complexity alerts, security scanner warnings, and type errors are information about the code. Suppressing one without understanding what it's telling you discards that information permanently, silently, and often incorrectly. The fact that a suppression makes the checks pass is not a reason to add it; it is the definition of what suppressions do.
+**Principle.** Lint findings, security scanner warnings, and type errors are information about the code. Suppressing one without understanding what it's telling you discards that information permanently, silently, and often incorrectly. The fact that a suppression makes the checks pass is not a reason to add it; it is the definition of what suppressions do.
 
-Every suppression directive — `//nolint:lintername`, `#nosec`, `// nolint:cyclop`, `//noinspection`, any complexity threshold override — must be accompanied by a co-located comment explaining **why the finding does not apply here**, not why the directive was added.
+Every suppression directive — `//nolint:lintername`, `#nosec`, `//noinspection` — must be accompanied by a co-located comment explaining **why the finding does not apply here**, not why the directive was added. This section covers ordinary lint/scanner findings. It does **not** cover the complexity gate (`cyclop`, `gocognit`, `gocyclo`): §10 forbids suppressing or loosening that gate outright, with no "documented trade-off" escape hatch — a complexity finding is resolved by extracting named sub-functions, never by `//nolint` or a raised threshold. As of this writing the codebase has zero `//nolint` directives naming those three linters, out of 1152 `//nolint` directives total.
 
 ### Acceptable reasons
 
 - *Tool false positive*: "`noctx` flags this because the function signature doesn't take a `ctx`, but this is a CLI command body that uses `cmd.Context()` — the tool doesn't model that pattern."
-- *Intentional trade-off with documented reasoning*: "`gocyclo` exceeds threshold here; this switch is the canonical dispatch table for backend selection — splitting it across functions would scatter the cases without reducing actual complexity."
+- *Intentional trade-off with documented reasoning*: "`unparam` flags this parameter as always receiving the same value today; it's part of the public interface signature and future callers will vary it."
 - *Known external-library quirk*: "`deadcode` flags this function; it is called only via the runtime registry at startup, not visible to static analysis."
 
 ### Unacceptable reasons
@@ -327,7 +331,7 @@ Every suppression directive — `//nolint:lintername`, `#nosec`, `// nolint:cycl
 
 ### Cost-vs-benefit
 
-Cost of applying: a few extra characters per suppression. Damage prevented: silent accumulation of suppressions that hide real bugs; the future developer who reads `//nolint:gocyclo` and doesn't know whether to trust it; the technical debt that piles up when "linter complained" is a valid reason to silence it.
+Cost of applying: a few extra characters per suppression. Damage prevented: silent accumulation of suppressions that hide real bugs; the future developer who reads `//nolint:errcheck` and doesn't know whether to trust it; the technical debt that piles up when "linter complained" is a valid reason to silence it.
 
 ### Sources
 

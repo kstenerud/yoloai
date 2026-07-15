@@ -1,3 +1,7 @@
+> **ABOUTME:** Working reference on the AI coding CLI agents yoloAI does or could drive: how each
+> behaves headless, what it needs to run inside a sandbox, and where it resists automation. This is
+> the evidence behind which agents are supported and how yoloAI launches them.
+
 # AI Coding Agents
 
 ## AI Coding CLI Agents: Multi-Agent Support Research

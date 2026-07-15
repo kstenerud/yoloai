@@ -32,11 +32,43 @@ jobs:
           version: v2.11.3
           args: --help
 
+      # `make check` requires hadolint (D112) and no longer skips when it is
+      # absent. It previously "worked" here only because ubuntu-latest happens to
+      # ship Docker and the Makefile fell back to it — an incidental property, not
+      # a contract (GEN §14). Install it explicitly.
+      - name: Install hadolint
+        env:
+          HADOLINT_VERSION: v2.14.0
+        run: |
+          base="https://github.com/hadolint/hadolint/releases/download/${HADOLINT_VERSION}"
+          curl -fsSL -o /tmp/hadolint "${base}/hadolint-linux-x86_64"
+          curl -fsSL -o /tmp/hadolint.sha256 "${base}/hadolint-linux-x86_64.sha256"
+          echo "$(cut -d' ' -f1 /tmp/hadolint.sha256)  /tmp/hadolint" | sha256sum -c -
+          sudo install -m 0755 /tmp/hadolint /usr/local/bin/hadolint
+          hadolint --version
+
       - name: Install Python dev deps
         run: make setup-dev-python
 
       - name: Run checks
         run: make check
+
+  # Commit messages are a PR-only concern: the range base..HEAD only exists for a
+  # PR, and fork PRs never run .claude/hooks, so this is the only place the rules
+  # in AGENTS.md get enforced for an outside contribution.
+  commits:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # need the base commit to diff against
+
+      - name: Lint commit messages
+        run: |
+          python3 scripts/lint_commits.py \
+            --base "origin/${{ github.base_ref }}" \
+            --head "${{ github.event.pull_request.head.sha }}"
 
   integration:
     runs-on: ubuntu-latest

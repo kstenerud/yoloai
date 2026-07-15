@@ -1,3 +1,6 @@
+// ABOUTME: resolveDockerHost precedence (DOCKER_HOST, DOCKER_CONTEXT, the
+// ABOUTME: docker CLI's config.json/contexts store, well-known provider
+// ABOUTME: sockets) and the socket-existence/display helpers it relies on.
 package docker
 
 import (

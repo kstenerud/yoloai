@@ -1,3 +1,5 @@
+// ABOUTME: Tests agent.json Save/Load roundtrip and the zero-value default when
+// ABOUTME: the file is missing.
 package agentcfg_test
 
 import (

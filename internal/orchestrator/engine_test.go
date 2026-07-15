@@ -1,3 +1,7 @@
+// ABOUTME: Tests EnsureSetup's directory/config bootstrapping and
+// ABOUTME: rebuild-on-stale-checksum behavior, and Engine's lazy-open
+// ABOUTME: concurrency safety: exactly-once open, and terminal/idempotent
+// ABOUTME: Close.
 package orchestrator
 
 import (

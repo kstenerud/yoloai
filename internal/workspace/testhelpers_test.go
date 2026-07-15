@@ -1,3 +1,5 @@
+// ABOUTME: Shared test fixture for package workspace: writeTestFile wraps
+// ABOUTME: testutil.WriteFile for staging file contents under a temp dir.
 package workspace
 
 import (

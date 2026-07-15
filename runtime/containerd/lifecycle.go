@@ -22,6 +22,7 @@ import (
 	"github.com/containerd/containerd/v2/pkg/cio"
 	"github.com/containerd/containerd/v2/pkg/oci"
 	"github.com/containerd/errdefs"
+	"github.com/kstenerud/yoloai/internal/config"
 	specs "github.com/opencontainers/runtime-spec/specs-go"
 
 	"github.com/kstenerud/yoloai/runtime"
@@ -45,9 +46,17 @@ func kataConfigPath(_ string) string {
 }
 
 // sandboxDirForName returns the sandbox directory path for a container name.
+//
+// The prefix comes from the layout, never a literal. A principal-scoped Layout
+// (ClientCreateOptions.Principal, D58/D59) makes it "yoloai-<principal>-", and
+// the orchestrator hands this an instance name — launch.go builds
+// store.InstanceName(layout.Principal, name). Stripping a hardcoded "yoloai-"
+// off "yoloai-acme-mybox" left "acme-mybox", so every path built here addressed
+// a directory that never existed. tart and seatbelt had the identical defect
+// (DF98); all three are the backends that keep sandbox state on the host, which
+// is why the daemon-backed ones were immune.
 func (r *Runtime) sandboxDirForName(name string) string {
-	// Strip the "yoloai-" prefix from the container name to get the sandbox name.
-	sandboxName := strings.TrimPrefix(name, "yoloai-")
+	sandboxName := strings.TrimPrefix(name, config.InstancePrefix(r.layout.Principal))
 	return r.layout.SandboxesDir() + "/" + sandboxName
 }
 

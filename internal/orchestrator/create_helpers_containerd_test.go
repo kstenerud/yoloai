@@ -1,5 +1,8 @@
 //go:build linux
 
+// ABOUTME: Tests the containerd backend's declared capabilities
+// ABOUTME: (NetworkIsolation, CapAdd, AgentProvisionedByBackend) and its
+// ABOUTME: ResolveCopyMount fallback. Linux-only (containerd is Linux-only).
 package orchestrator
 
 import (

@@ -1,10 +1,15 @@
+> **ABOUTME:** Implementation plan turning the converged session-layer design (D88) into ordered,
+> buildable steps for the session-carve phase of the endgame roadmap (D99), on the
+> substrate-move branch. The structural core it builds on is already live.
+
 # Phase 1a — the session-carve public realization (the long pole)
 
-**Status:** Scoping, 2026-06-26. The implementation plan for Phase 1a of the endgame roadmap
-([D99](../../decisions/working-notes.md)) — turning the converged design
-([session-layer.md](../session-layer.md), D88) into ordered, buildable steps. Branch:
-`substrate-move`. Per D99, incidental per-commit contract churn is fine; build straight to the
-final shape (each commit compiles + `make check` green).
+- **Status:** PLANNED — scoping as of 2026-06-26; the implementation plan for Phase 1a of the
+  endgame roadmap ([D99](../../decisions/working-notes.md)) — turning the converged design
+  ([session-layer.md](../session-layer.md), D88) into ordered, buildable steps. Branch:
+  `substrate-move`. Per D99, incidental per-commit contract churn is fine; build straight to the
+  final shape (each commit compiles + `make check` green).
+- **Depends on:** —
 
 ## What's already built (don't re-do)
 

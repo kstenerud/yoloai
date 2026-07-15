@@ -1,3 +1,7 @@
+// ABOUTME: The typed errors yoloAI surfaces across its public and internal
+// ABOUTME: packages to drive CLI exit codes. Stdlib-only and dependency-light,
+// ABOUTME: so embedders can match them without importing internal/.
+
 // Package yoerrors provides the typed errors yoloAI surfaces across its
 // public and internal packages to drive CLI exit codes. It is a top-level,
 // dependency-light package (stdlib only, Docker errdefs style) so external

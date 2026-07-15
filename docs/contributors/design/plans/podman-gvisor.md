@@ -1,7 +1,18 @@
-<!-- ABOUTME: Plan to support gVisor (container-enhanced) on the Podman backend, -->
-<!-- ABOUTME: with rootless podman as a first-class research track, not an afterthought. -->
+> **ABOUTME:** Plan to bring the podman backend to gVisor (`container-enhanced`) parity with
+> docker, treating rootless podman as a first-class goal rather than something routed around;
+> the rootless-viability question gates the design.
 
 # Podman + gVisor (`container-enhanced`) support
+
+- **Status:** PLANNED — planning and research only; no gVisor-on-podman support is implemented.
+  R1 (does rootless podman + gVisor actually work?) gates the rest of the design and has not been
+  run. Verified 2026-07-15: what *is* shipped is the **refusal** — `buildRootlessCheckCap`
+  (`runtime/podman/caps.go`) returns `Permanent: true` for any rootless socket and tells the user
+  "rootless Podman cannot run gVisor (cgroup v2 delegation)", steering them to root Podman or to
+  Docker. That message is the unverified claim R1 exists to settle, shipped as a hard no; if R1
+  comes back "it works", yoloAI has been turning users away from the main reason they chose podman.
+  That is the argument for running R1, and it is stronger than "the plan is unfinished".
+- **Depends on:** —
 
 ## Why this doc exists
 

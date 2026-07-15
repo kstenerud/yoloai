@@ -1,5 +1,5 @@
-<!-- ABOUTME: Holding pen for deferred critiques parked from critiques-unresolved.md. -->
-<!-- ABOUTME: Each item carries a revival trigger; when it fires the item flows back to unresolved. -->
+> **ABOUTME:** Holding pen for critiques parked as not-now, each carrying a revival trigger.
+> Distinct from critiques-resolved.md (applied) and critiques-abandoned.md (permanently dropped).
 
 # Deferred critiques
 

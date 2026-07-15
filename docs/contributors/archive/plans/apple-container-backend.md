@@ -1,7 +1,23 @@
-<!-- ABOUTME: Plan for an Apple `container` runtime backend (Linux OCI in -->
-<!-- ABOUTME: per-container VMs on macOS) plus the 4-way macOS backend priority. -->
+> **ABOUTME:** Plan for an Apple `container` runtime backend — Linux OCI in per-container VMs on
+> macOS — plus the resulting macOS backend priority and setup-wizard rework needed once several
+> container systems can coexist there.
 
 # Apple `container` backend
+
+- **Status:** IMPLEMENTED — the backend and the macOS priority/wizard rework shipped on `main`
+  (skeleton + two-tier probe + lifecycle/exec/mounts `b85a11ad`, `5bd44b91`, `c2f90c7f`; network
+  isolation; container-system selector `4a90d1a9`; curated env keyset `4651b645`; wizard presets
+  `cff6aebd`; docs `66f596c1`), with the macOS default-isolation shift recorded in
+  `BREAKING-CHANGES.md`. **AC10 closed 2026-07-15** by the live end-to-end run it always needed:
+  `--network-isolated` on a real apple sandbox resolves DNS through the vmnet gateway
+  (`/etc/resolv.conf` = `192.168.64.1`, as this plan predicted), the default-deny OUTPUT chain
+  ACCEPTs that gateway on udp+tcp `:53` with no host-DNS assumption hard-coded, an allowlisted
+  domain returns HTTP 200, and a non-allowlisted one is REJECTed and fails fast. The run also
+  surfaced DF104 — the allowlist is IPv4-only on every backend, latent because vmnet hands out a
+  non-routable ULA — which is the shared firewall's gap, not apple's, and is filed rather than
+  fixed here. Work-copy git confinement for apple + seatbelt followed as its own plan
+  ([confine-host-side-git-macos-build.md](../../archive/plans/confine-host-side-git-macos-build.md), D113).
+- **Depends on:** —
 
 ## Why this doc exists
 
@@ -18,8 +34,6 @@ native on macOS, no Docker Desktop.
 This plan covers (1) the new backend and (2) a related change the user asked
 for: a defined **macOS backend priority** now that four Docker-like systems can
 coexist.
-
-Nothing here is implemented. Status: **planning.**
 
 ## Naming decision (resolve first)
 

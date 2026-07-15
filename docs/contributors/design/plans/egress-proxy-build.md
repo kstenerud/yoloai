@@ -1,23 +1,24 @@
+> **ABOUTME:** The "start here" build brief for the egress-proxy credential broker; design is
+> settled in D105/D106 so this is the actionable plan, not a place to re-litigate it.
+
 # Egress proxy (workstream D) — build brief
 
-ABOUTME: The "start here" kickoff for building the egress-proxy credential-broker. Design is
-settled and validated; this is the actionable build plan. Rationale lives in D105 (+ its
-validation addendum) in decisions/working-notes.md; do not re-litigate it — build to it.
-
-**Status:** **Phases 1 & 2 COMPLETE + launch-path decoupling COMPLETE, all on `main`,
-end-to-end verified on real Docker (2026-06-28).** Brokering is the default for Claude on docker —
-both the metered API key (`ANTHROPIC_API_KEY`, x-api-key) and the subscription token
-(`CLAUDE_CODE_OAUTH_TOKEN`, Authorization: Bearer); opt out with `--no-broker`. Brokering is now
-**decoupled from the launch path** (works on agent-free *and* legacy bring-up). **All three Linux
-backends broker — docker, containerd/Kata, and rootless podman — verified on real hardware.** The
-**macOS backends are done too** (2026-06-28): docker (OrbStack/Desktop), seatbelt, and apple broker;
-tart degrades to direct delivery (per-VM ephemeral bridge, not bindable pre-create). Next is egress
-containment (build step 4). Read first:
-[D105 + validation addendum](../../decisions/working-notes.md#d105--egress-proxy-workstream-d-brokering-is-the-default-containment-is-opt-in-phased-by-credential-material-refines-d90d95)
-and [D106](../../decisions/working-notes.md#d106--egress-proxy-the-key-injectors-lifetime-is-a-pluggable-host-cli-sidecar--embedder-in-process-recovery-is-lazy-re-derivation-refines-d105),
-then [secure-secrets.md](../secure-secrets.md) (D95) and [netpolicy.md](../netpolicy.md) (D90),
-then the spike at [research/egress-broker-spike/](../research/egress-broker-spike/). **Resuming?
-Read the Build progress section below first.**
+- **Status:** IN-PROGRESS — Phases 1 & 2 and launch-path decoupling are COMPLETE, all on `main`,
+  end-to-end verified on real Docker (2026-06-28); egress containment step 2 (the hostile-grade
+  `StrategyEgressProxy`) is NOT built. Brokering is the default for Claude on docker —
+  both the metered API key (`ANTHROPIC_API_KEY`, x-api-key) and the subscription token
+  (`CLAUDE_CODE_OAUTH_TOKEN`, Authorization: Bearer); opt out with `--no-broker`. Brokering is now
+  **decoupled from the launch path** (works on agent-free *and* legacy bring-up). **All three Linux
+  backends broker — docker, containerd/Kata, and rootless podman — verified on real hardware.** The
+  **macOS backends are done too** (2026-06-28): docker (OrbStack/Desktop), seatbelt, and apple broker;
+  tart degrades to direct delivery (per-VM ephemeral bridge, not bindable pre-create). Next is egress
+  containment (build step 4). Read first:
+  [D105 + validation addendum](../../decisions/working-notes.md#d105--egress-proxy-workstream-d-brokering-is-the-default-containment-is-opt-in-phased-by-credential-material-refines-d90d95)
+  and [D106](../../decisions/working-notes.md#d106--egress-proxy-the-key-injectors-lifetime-is-a-pluggable-host-cli-sidecar--embedder-in-process-recovery-is-lazy-re-derivation-refines-d105),
+  then [secure-secrets.md](../secure-secrets.md) (D95) and [netpolicy.md](../netpolicy.md) (D90),
+  then the spike at [research/egress-broker-spike/](../research/egress-broker-spike/). **Resuming?
+  Read the Build progress section below first.**
+- **Depends on:** —
 
 ## Build progress (2026-06-28)
 

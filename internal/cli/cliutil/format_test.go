@@ -1,3 +1,5 @@
+// ABOUTME: Tests for FormatAge and FormatSize, the human-readable
+// ABOUTME: duration/size strings used in sandbox listings.
 package cliutil
 
 import (

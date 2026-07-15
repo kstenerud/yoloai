@@ -1,8 +1,7 @@
-ABOUTME: Primary-source evidence backing each security principle in yoloAI's
-ABOUTME: sandbox-containment security design. Covers threat modeling, containment
-ABOUTME: philosophy, least-privilege, credential hygiene, network isolation,
-ABOUTME: defense-in-depth, and residual risk disclosure. Not customer-trust /
-ABOUTME: regulatory-compliance security. Uncertain attributions marked [verify].
+> **ABOUTME:** Primary-source evidence backing yoloAI's sandbox-containment security principles —
+> each section names the source and explains why it backs the principle. Scoped to
+> containment/blast-radius security for a local CLI, not customer-trust or regulatory-compliance
+> security. Uncertain attributions are marked [verify] rather than asserted as fact.
 
 # Security-principles research — primary-source backing for yoloAI
 

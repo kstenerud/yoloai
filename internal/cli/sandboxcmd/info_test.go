@@ -1,3 +1,6 @@
+// ABOUTME: Tests for sandbox info rendering: prompt-preview truncation
+// ABOUTME: (rune-safe) and the network-health line (wedged/ok/unknown/
+// ABOUTME: unprobed) shown by `sandbox info`.
 package sandboxcmd
 
 import (

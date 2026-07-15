@@ -1,3 +1,8 @@
+> **ABOUTME:** Design for the substrate interface — the agent-free isolated-environment layer
+> beneath sessions and agents, providing process mechanism (launch, signal, wait) while leaving
+> all supervision policy to callers. Defines the Backend/Substrate/Process handle surface and
+> what deliberately sits above this boundary.
+
 # Substrate interface — the agent-free isolated-environment layer
 
 **Status:** Design converged 2026-06-14 (design conversation), not yet implemented. The target

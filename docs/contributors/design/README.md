@@ -1,5 +1,6 @@
-<!-- ABOUTME: Index/router for the design/ directory — the shaping cluster of feature specs, -->
-<!-- ABOUTME: review queues, and the plans/ and research/ sub-clusters. Content lives in named files. -->
+> **ABOUTME:** Index for the design/ directory — the shaping cluster of feature specs, review
+> queues, and their supporting sub-clusters. Each document listed below owns its own content;
+> this file only routes to it.
 
 # Design
 
@@ -53,5 +54,5 @@ note for the full model.
 
 | Directory | What's here |
 | --- | --- |
-| [plans/](plans/README.md) | Designed-but-unimplemented features (backlog). Implemented plans move to [`../archive/plans/`](../archive/README.md). |
+| [plans/](plans/README.md) | Unfinished work — one file per idea, from `UNSPECIFIED` (no design yet) through `PLANNED` to `IN-PROGRESS`. `ls` it for the complete list; each file's Status line says where it stands. Once `IMPLEMENTED` or `ABANDONED` a plan is archaeology and moves whole to [`../archive/plans/`](../archive/README.md) — gated, not remembered. |
 | [research/](research/README.md) | Research topics and spikes backing the design decisions. |

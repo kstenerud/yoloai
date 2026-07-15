@@ -1,3 +1,7 @@
+> **ABOUTME:** Audits yoloAI's current idle-detection implementation, surveys how other tools and
+> OS-level signals detect an agent waiting for input, and proposes a pluggable, confidence-scored
+> detector architecture to replace today's single-strategy-per-agent approach.
+
 # Idle Detection: Audit, Research, and Architecture
 
 Comprehensive analysis of yoloAI's idle detection system — what we do today, what's broken, what alternatives exist, and the proposed pluggable architecture. Conducted 2026-03.

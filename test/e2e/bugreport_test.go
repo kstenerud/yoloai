@@ -1,5 +1,8 @@
 //go:build e2e
 
+// ABOUTME: Compiled-binary smoke for --debug's cli.jsonl debug entries and the
+// ABOUTME: --bugreport flag's flag-only report sections (Live log, Exit code)
+// ABOUTME: that only the real Execute() entrypoint can exercise.
 package e2e_test
 
 import (

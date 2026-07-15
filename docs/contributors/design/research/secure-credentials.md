@@ -1,3 +1,8 @@
+> **ABOUTME:** Research establishing the threat model (a duped, not malicious, agent) and
+> surveying prior art for delivering credentials into sandboxed agents. Feeds the secure-secrets
+> seam (DF38) and converges with netpolicy's egress-proxy strategy (D90); recommends a layered
+> broker-plus-allowlist direction for the design phase to ratify.
+
 # Secure credential delivery for sandboxed AI agents (research)
 
 **Status:** Research complete 2026-06-25. Verified, source-cited. Feeds **DF38**

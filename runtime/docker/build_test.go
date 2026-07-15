@@ -1,3 +1,7 @@
+// ABOUTME: Docker/profile image build inputs — checksum staleness, attestation
+// ABOUTME: opt-out flags (Docker vs podman), embedded build-context tar
+// ABOUTME: contents, and the env allowlist that keeps secrets out of the build
+// ABOUTME: child.
 package docker
 
 import (

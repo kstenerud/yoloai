@@ -1,5 +1,8 @@
 //go:build linux
 
+// ABOUTME: Containerd Runtime unit tests: namespace/sandbox-dir plumbing and
+// ABOUTME: RequiredCapabilities gating (Kata shim, CNI, netns, KVM, devmapper)
+// ABOUTME: per isolation mode, plus tmux attach-command construction.
 package containerdrt
 
 import (
@@ -43,6 +46,25 @@ func TestSandboxDirForName(t *testing.T) {
 	dir := r.sandboxDirForName("yoloai-mybox")
 	assert.Contains(t, dir, "mybox")
 	assert.NotContains(t, dir, "yoloai-mybox") // prefix stripped
+}
+
+// TestSandboxDirForName_IsPrincipalScoped pins the prefix to the layout rather
+// than a literal. A principal-scoped Layout (ClientCreateOptions.Principal,
+// D58/D59) makes the instance prefix "yoloai-<principal>-", and the orchestrator
+// passes an instance name here (launch.go builds store.InstanceName(Principal,
+// name)). Stripping a hardcoded "yoloai-" left the principal glued to the
+// sandbox name, so every path built from it addressed a directory that never
+// existed. tart and seatbelt had the identical defect; the three of them are the
+// backends that keep sandbox state on the host, which is why the daemon-backed
+// ones could not hit it. See DF98.
+func TestSandboxDirForName_IsPrincipalScoped(t *testing.T) {
+	p, err := config.ParsePrincipalSegment("acme")
+	require.NoError(t, err)
+	r := &Runtime{layout: config.NewLayout("/home/testuser/.yoloai").WithPrincipal(p)}
+
+	dir := r.sandboxDirForName("yoloai-acme-mybox")
+	assert.Equal(t, "/home/testuser/.yoloai/sandboxes/mybox", dir,
+		"the principal must be stripped along with the prefix, not left on the sandbox name")
 }
 
 // RequiredCapabilities tests

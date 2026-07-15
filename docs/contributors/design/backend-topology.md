@@ -1,3 +1,7 @@
+> **ABOUTME:** Reference mapping where the agent process, PID 1, and the status monitor actually
+> run on each supported backend, correcting prior host-vs-guest assumptions so the layer specs
+> and their carves reason about real backend topology instead of an oversimplified split.
+
 # Backend topology — where the agent, PID 1, and the monitor actually run
 
 **Status:** Verified against the code 2026-06-24 (design-review remediation, [D92](../decisions/working-notes.md)).

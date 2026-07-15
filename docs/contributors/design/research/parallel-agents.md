@@ -1,3 +1,7 @@
+> **ABOUTME:** Survey of how practitioners actually coordinate several coding agents at once, drawn
+> from community write-ups and discussion, and what those workarounds reveal about the gaps yoloAI's
+> sandbox model could close. Evidence for where parallel-agent support is worth taking further.
+
 # Parallel Agent Workflows
 
 Research on multi-agent coordination patterns for AI coding agents, based on community practices and HN discussion (2025-06).

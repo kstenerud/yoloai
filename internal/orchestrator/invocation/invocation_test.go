@@ -1,3 +1,6 @@
+// ABOUTME: Agent-launch invocation building: model alias resolution, shell
+// ABOUTME: command assembly (interactive/headless/resume), prompt sourcing,
+// ABOUTME: idle-detector selection, and fall-to-shell wrapper eligibility.
 package invocation
 
 import (

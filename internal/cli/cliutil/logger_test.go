@@ -1,3 +1,6 @@
+// ABOUTME: Tests for the slog logging setup: multi-sink fan-out with
+// ABOUTME: per-sink level filtering, the JSONL wire format (ts/level/msg,
+// ABOUTME: UTC timestamps), the text handler, and AddLogSink's nil-safety.
 package cliutil
 
 import (

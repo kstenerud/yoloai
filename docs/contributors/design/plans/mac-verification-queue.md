@@ -1,13 +1,18 @@
+> **ABOUTME:** Live queue of Mac-only verification smokes (tart VM, seatbelt sandbox, macOS
+> Keychain) for the `substrate-move` branch, batched so a single Mac pass clears them before
+> merge. Linux stays the sole code writer; this file records pass/fail results, not code.
+
 # macOS verification queue (`substrate-move`)
 
-**ABOUTME:** Verification smokes that need a real Mac (tart VM / seatbelt sandbox / macOS
-**ABOUTME:** Keychain), batched so a Mac run knocks them out in one pass before merge.
+- **Status:** IN-PROGRESS — live queue for the `substrate-move` branch; V1 and V2 verified
+  2026-06-26, V3 still pending.
+- **Depends on:** —
 
-**Status:** Live queue for the `substrate-move` branch. **Working model:** the Linux session is the
-**sole code writer**; this queue holds **verification-only** tasks — run the commands, record
-pass/fail + any output, do **not** commit code from the Mac (avoids two-writer branch divergence).
-If a smoke fails, report the failure here and the Linux session fixes it. Pull `substrate-move`,
-build (`make build` or `go build ./cmd/yoloai`), then work the queue.
+**Working model:** the Linux session is the **sole code writer**; this queue holds
+**verification-only** tasks — run the commands, record pass/fail + any output, do **not**
+commit code from the Mac (avoids two-writer branch divergence). If a smoke fails, report the
+failure here and the Linux session fixes it. Pull `substrate-move`, build (`make build` or
+`go build ./cmd/yoloai`), then work the queue.
 
 Record results inline under each item (`✅ verified <date>` / `❌ <what failed>`), and move
 finished items to the "Verified" section at the bottom.

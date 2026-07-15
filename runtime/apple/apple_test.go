@@ -1,3 +1,5 @@
+// ABOUTME: Apple (Tart VM) backend registration, probe status, and the
+// ABOUTME: macOS host routing that prefers apple over the container backends.
 package apple
 
 import (

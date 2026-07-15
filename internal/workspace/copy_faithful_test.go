@@ -1,3 +1,6 @@
+// ABOUTME: CopyPathFaithful — the unfiltered sibling of CopyDir — preserves
+// ABOUTME: files, symlinks, permissions, and everything CopyDir would exclude
+// ABOUTME: (node_modules, .git, bugreports) verbatim.
 package workspace
 
 import (

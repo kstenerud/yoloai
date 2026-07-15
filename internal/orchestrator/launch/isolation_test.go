@@ -1,3 +1,6 @@
+// ABOUTME: CheckIsolationPrerequisites against a fake runtime.Backend: no-ops
+// ABOUTME: when the backend declares no required host capabilities, runs and
+// ABOUTME: reports each capability's Check for backends that do.
 package launch
 
 import (

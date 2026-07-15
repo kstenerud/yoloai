@@ -46,12 +46,14 @@ echo
 # 4. Wchan for agent PID
 echo "--- Wchan ---"
 if [ -n "$PANE_PID" ] && [ -f "/proc/$PANE_PID/wchan" ]; then
-    echo "PID $PANE_PID: $(cat /proc/$PANE_PID/wchan)"
+    echo "PID $PANE_PID: $(cat "/proc/$PANE_PID/wchan")"
     # Also check child processes
-    for child in /proc/$PANE_PID/task/*/children; do
+    for child in "/proc/$PANE_PID"/task/*/children; do
         [ -f "$child" ] || continue
+        # shellcheck disable=SC2013  # children is one line of space-separated PIDs;
+        # a read-per-line loop would yield the whole list as a single value.
         for cpid in $(cat "$child" 2>/dev/null); do
-            [ -f "/proc/$cpid/wchan" ] && echo "PID $cpid (child): $(cat /proc/$cpid/wchan)"
+            [ -f "/proc/$cpid/wchan" ] && echo "PID $cpid (child): $(cat "/proc/$cpid/wchan")"
         done
     done
 elif [ -n "$PANE_PID" ]; then

@@ -1,3 +1,6 @@
+// ABOUTME: PriorReleaseRange lookup and the invariant that its registry stays
+// ABOUTME: strictly ascending by schema, which the prefix scan relies on.
+
 package config
 
 import "testing"

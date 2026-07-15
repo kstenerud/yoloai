@@ -1,7 +1,8 @@
-# Per-agent headless-mode authentication behavior
+> **ABOUTME:** Docs-researched matrix of how each agent's headless mode behaves under different
+> auth states, backing the `yoloai run` rule that headless launch is only safe when auth can be
+> observed, falling back to interactive TTY otherwise (D101).
 
-**ABOUTME:** Verified matrix of how each agent's headless/non-interactive mode behaves
-**ABOUTME:** under different auth, backing the `yoloai run` headless-vs-TTY fallback (D101).
+# Per-agent headless-mode authentication behavior
 
 **Status:** Researched 2026-06-26 (sourced against official docs + GitHub issues). Backs
 [D101](../../decisions/working-notes.md) and `agent.Definition.HeadlessSafeWithoutAPIKey`.

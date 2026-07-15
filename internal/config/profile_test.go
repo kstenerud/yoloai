@@ -1,3 +1,7 @@
+// ABOUTME: Profile system: name validation, per-profile config loading, chain
+// ABOUTME: resolution (extends) and merge semantics — scalar override vs
+// ABOUTME: additive lists across the base->profile chain.
+
 package config
 
 import (

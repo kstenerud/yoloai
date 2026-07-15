@@ -1,3 +1,7 @@
+> **ABOUTME:** Competitive-landscape survey of AI-coding-agent sandboxing tools and cloud sandbox
+> platforms — their architectures, failures, and community sentiment — kept to inform yoloAI's
+> positioning and roadmap. Updated across periodic HN/GitHub sweeps, not a one-time snapshot.
+
 # Competitive Landscape
 
 ## Existing Tools

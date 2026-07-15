@@ -1,6 +1,7 @@
-<!-- ABOUTME: Research backing the runtime-namespace partition for multi-principal -->
-<!-- ABOUTME: embedding (principal-isolation.md B1). Verifies the naming constraints -->
-<!-- ABOUTME: across every backend and frames how to fold a principal id into the name. -->
+> **ABOUTME:** Research backing the runtime-namespace partition for multi-principal embedding,
+> following on from principal-isolation.md's B1 finding. Verifies naming constraints across every
+> backend and frames the schemes for folding a principal id into the runtime instance name — the
+> reasoning trail behind the D62 namespacing decision.
 
 # Principal namespacing (runtime instance names) — naming research
 

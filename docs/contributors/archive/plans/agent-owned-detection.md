@@ -1,12 +1,16 @@
+> **ABOUTME:** Design-and-build plan that makes session detection agent-owned: on agent exit the
+> wrapper writes `done` and falls to an interactive shell instead of killing the pane, and
+> `yoloai-resume` re-establishes the agent and its detection machinery.
+
 # Agent-owned detection + fall-to-shell + resume — design & build plan
 
-**Status:** Plan 2026-06-25, not yet started. Supersedes the deferred
-"fall-to-shell resume" item (public-layering S3). This is a **plan for a fresh
-session** — read it top to bottom, then execute the phases in order, Docker-
-testing at each checkpoint before moving on. Detection is the most fragile,
-historically-troubled subsystem in yoloai (DF44/DF46, the tier-2 blip, the
-stale-idle window) — the whole point of this plan is to change it *carefully,
-validated on real Docker at every step*, not in one improvised leap.
+**Status:** IMPLEMENTED — Phases 0-4 all done 2026-06-25 (design; fall-to-shell +
+wrapper-writes-done for Claude; `yoloai-resume` + the resume command; honor-wrapper-done extended
+to heuristic agents; polish + docs), each verified at a real-Docker checkpoint before the next
+phase started. Supersedes the deferred "fall-to-shell resume" item (public-layering S3). Detection
+is the most fragile, historically-troubled subsystem in yoloai (DF44/DF46, the tier-2 blip, the
+stale-idle window), which is why this plan was executed phase-gated with a Docker checkpoint at
+every step rather than in one improvised leap.
 
 ## Goal
 

@@ -1,17 +1,17 @@
-<!-- ABOUTME: Plan to make yoloAI reap the host-side artifacts (broker processes, -->
-<!-- ABOUTME: netns/IPAM, seatbelt tmux) it orphans on the non-happy path. D114. -->
+> **ABOUTME:** Design for reconciling host-side artifacts (broker processes, netns/IPAM leases,
+> seatbelt host processes) that yoloAI can orphan on a non-happy-path teardown, plus the
+> kill-before-delete ordering fix that stops creating them.
 
 # Host-artifact reclamation
 
-**Status:** Phase 1 (injector + netns + **seatbelt host process group, done**)
-and Phase 2 built + unit-tested on branch `host-artifact-reclamation`. The
-seatbelt reaper (Phase 1c) is built and macOS-verified — see the
-[macOS build brief](host-artifact-reclamation-macos-build.md) for results. It
-surfaced a residual (DF77, orphaned monitor procs resurrecting deleted dirs)
-which was **fixed in the same pass** by generalizing the sweep from tmux-only to
-the whole host process group. Phase 3 is a manual step. Both follow-ups (launch
-rollback on failure/interrupt; the `lint-darwin` gate) are **done** — see
-"Follow-ups (done)" below. **Merged to `main`** (`3f15fe87`).
+**Status:** IMPLEMENTED — Phase 1 (injector + netns + seatbelt host process group) and Phase 2
+built, unit-tested, and macOS-verified on branch `host-artifact-reclamation` (seatbelt reaper /
+Phase 1c results in the [macOS build brief](host-artifact-reclamation-macos-build.md); it
+surfaced a residual, DF77, orphaned monitor procs resurrecting deleted dirs, which was **fixed in
+the same pass** by generalizing the sweep from tmux-only to the whole host process group). Phase 3
+needed no code (a one-off manual `rm -rf`, see below). Both follow-ups (launch
+rollback on failure/interrupt; the `lint-darwin` gate) are done — see
+"Follow-ups (done)" below. Merged to `main` (`3f15fe87`).
 **Decision:** [D114](../../decisions/working-notes.md#d114). **Findings:** DF73–DF78.
 
 ## Problem

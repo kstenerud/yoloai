@@ -1,3 +1,6 @@
+// ABOUTME: Error-classification helpers (IsPermissionDenied, IsAddressInUse)
+// ABOUTME: across syscall errno and SDK text-only forms, plus ExecError's
+// ABOUTME: errors.As reachability (W8) for matching exit codes without strings.
 package runtime
 
 import (

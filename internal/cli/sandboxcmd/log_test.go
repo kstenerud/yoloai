@@ -1,3 +1,6 @@
+// ABOUTME: Tests for the `log` command end to end: --agent/--agent-raw
+// ABOUTME: ANSI handling, JSONL rendering, --raw passthrough, level/source/
+// ABOUTME: since filters, malformed-line skipping, and multi-file merge sort.
 package sandboxcmd
 
 import (

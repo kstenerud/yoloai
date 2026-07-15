@@ -1,5 +1,5 @@
-<!-- ABOUTME: History sink for resolved open questions drained from questions-unresolved.md. -->
-<!-- ABOUTME: Item-queue pattern: active items live in the unresolved- file, done ones land here. -->
+> **ABOUTME:** History sink for design/implementation questions that have been answered.
+> Companion to questions-unresolved.md, which holds the active working queue.
 
 # Resolved questions
 

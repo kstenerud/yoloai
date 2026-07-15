@@ -1,3 +1,7 @@
+> **ABOUTME:** Early sketch exploring multi-agent collaboration — role-scoped agents sharing a
+> project through mount composition and cross-sandbox visibility, built on existing primitives
+> rather than a new coordination layer. Marked as needing significant further design work.
+
 # Multi-Agent Workflows: Design Sketch
 
 **Status:** Early sketch. Needs significant design work before implementation.

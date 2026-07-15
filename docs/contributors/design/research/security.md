@@ -1,3 +1,8 @@
+> **ABOUTME:** Research backing yoloAI's Docker credential-handling and network-egress
+> isolation design: how secrets are safely passed into a sandbox, how outbound traffic is
+> filtered against an allowlist, and what proxy implementation to build it with. Documents
+> what competitors and prior art do alongside the choices adopted for the current design.
+
 # Security Research
 
 ## Credential Management for Docker Containers

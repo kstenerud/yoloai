@@ -1,3 +1,7 @@
+> **ABOUTME:** Running collection of implementation-level research spikes backing specific yoloAI
+> design decisions — evaluating third-party tools, libraries, and prior-art conventions before
+> committing to an approach. Each section stands alone and grows as new decisions need grounding.
+
 # Implementation Research
 
 ## Environment Variable Interpolation in Config Files

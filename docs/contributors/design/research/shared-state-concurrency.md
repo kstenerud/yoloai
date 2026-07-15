@@ -1,3 +1,8 @@
+> **ABOUTME:** Research backing the persistence-helper decision (D87) on whether independent
+> tools can safely share file-locked per-sandbox state without a central daemon. Surveys
+> daemon-vs-daemonless tradeoffs in Docker and Podman and file-locking practice, then applies
+> the verdict to yoloAI's specific envelope.
+
 # Shared-state concurrency: daemon vs daemonless, and file-locking wisdom
 
 **Purpose.** Back the persistence-helper decision ([persistence-helper.md](../persistence-helper.md),

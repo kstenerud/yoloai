@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Feature Request
+    url: https://github.com/kstenerud/yoloai/discussions/new?category=ideas
+    about: Suggest a new feature or improvement
+  - name: Question / Support
+    url: https://github.com/kstenerud/yoloai/discussions/new?category=q-a
+    about: Ask a usage question or get help with configuration

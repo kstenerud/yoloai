@@ -1,5 +1,8 @@
 //go:build integration
 
+// ABOUTME: TestMain for the docker package's integration tests: connects to a
+// ABOUTME: real Docker daemon once and requires the yoloai-base image be ready
+// ABOUTME: before any test runs, so failures point at setup, not a flaky test.
 package docker
 
 import (

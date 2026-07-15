@@ -1,3 +1,7 @@
+> **ABOUTME:** Determines which nested-`dockerd` storage driver yoloAI should select, and how, so
+> Docker-in-Docker works across every container provider yoloAI targets instead of relying on a
+> hardcoded pin that only works on some of them. Verified findings supersede the current pin.
+
 # Docker-in-Docker Storage Drivers
 
 Making nested `dockerd` (dind) "just work" under `--isolation container-privileged` across the

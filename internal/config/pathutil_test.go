@@ -1,3 +1,6 @@
+// ABOUTME: ExpandPath/ExpandTilde: ${VAR} and ~ expansion in config paths,
+// ABOUTME: including chained vars, unset-var errors, and no re-expansion.
+
 package config
 
 import (

@@ -1,3 +1,6 @@
+// ABOUTME: Tests the create pipeline's cleanup behavior: a leftover incomplete
+// ABOUTME: sandbox dir doesn't trip ErrSandboxExists, and a failed prepare step
+// ABOUTME: removes both the sandbox dir and its lock file.
 package orchestrator
 
 import (

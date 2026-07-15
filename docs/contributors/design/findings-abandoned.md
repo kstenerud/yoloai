@@ -1,5 +1,5 @@
-<!-- ABOUTME: Terminal sink for abandoned findings — decided "won't fix", drained from findings-unresolved.md. -->
-<!-- ABOUTME: Distinct from resolved- (fixed) and deferred- (parked w/ trigger): these are permanently dropped. -->
+> **ABOUTME:** Terminal sink for findings decided "won't fix" and permanently dropped.
+> Distinct from resolved (the issue got fixed) and deferred (parked with a revival trigger).
 
 # Abandoned findings
 

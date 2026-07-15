@@ -1,3 +1,6 @@
+// ABOUTME: Environment (environment.json) save/load round-trip, omitempty
+// ABOUTME: field shaping, and the versioned migration ladder (v0->v1->v2) that
+// ABOUTME: balks below-current-version reads (M2/D61) rather than auto-migrate.
 package store
 
 import (

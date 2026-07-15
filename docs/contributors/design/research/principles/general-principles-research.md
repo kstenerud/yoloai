@@ -1,8 +1,7 @@
-ABOUTME: Primary-source evidence backing each principle in yoloAI's
-ABOUTME: general-principles.md. Each section names the source (author, year,
-ABOUTME: where to find it), explains why it backs the principle, and notes
-ABOUTME: where the source does NOT cleanly apply to yoloAI's single-author
-ABOUTME: OSS CLI scope. Uncertain attributions are marked [verify].
+> **ABOUTME:** Primary-source evidence backing each principle in general-principles.md — each
+> section names the source and explains why it backs the principle, and where it doesn't cleanly
+> apply to yoloAI's single-author OSS CLI scope. Evidence, not principle; uncertain attributions
+> are marked [verify] rather than asserted as fact.
 
 # General-principles research — primary-source backing for yoloAI
 

@@ -1,0 +1,19 @@
+> **ABOUTME:** Index for procedures/ — the operational detail behind AGENTS.md's rules for
+> opening a PR and filing an issue. Also states how a release is cut, which isn't itself a
+> per-doc procedure.
+
+# Procedures
+
+How we work. The rules an agent must follow are in [`AGENTS.md`](../../../AGENTS.md); these
+docs are the detail behind them.
+
+| Doc | Covers |
+| --- | --- |
+| [`pull-requests.md`](pull-requests.md) | Branching, breaking changes, the name sweep, commits, the quality gate, CI jobs, required tooling, test tiers. |
+| [`issues.md`](issues.md) | What an issue needs to be actionable. |
+
+Releases are cut by the maintainer. `docs/BREAKING-CHANGES.md`'s `## Unreleased` entries are
+**drained** into a new `## vX.Y.Z` heading beneath the marker — the marker itself stays, now
+empty, and must be empty for the tag to be correct. Then an annotated `vX.Y.Z` tag is pushed,
+which drives `.github/workflows/release.yml`; the tag's annotation body becomes the release
+notes verbatim.

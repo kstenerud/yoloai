@@ -1,3 +1,6 @@
+// ABOUTME: Host-path <-> on-disk-name encoding (EncodePath/DecodePath, escaping
+// ABOUTME: non-ASCII/special chars, round-trips), sandbox name validation
+// ABOUTME: (DF16 separator rules), and the sandbox-dir path-builder helpers.
 package store
 
 import (

@@ -1,3 +1,7 @@
+> **ABOUTME:** The on-disk layout under `~/.yoloai/` — the CLI/library namespace split, the
+> per-namespace schema-version stamps, and what each path holds. The reference for "where does
+> yoloAI keep this on disk" and how the startup migration gate reasons about that layout.
+
 # Host Directory Layout
 
 The CLI splits `~/.yoloai/` into two namespaces: `library/` (everything the

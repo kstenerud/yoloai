@@ -1,3 +1,6 @@
+// ABOUTME: Config load/save round-trip: env-var expansion, per-field get/set/
+// ABOUTME: delete, global-vs-profile key routing, and defaults fallback.
+
 package config
 
 import (

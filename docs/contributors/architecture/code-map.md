@@ -1,3 +1,7 @@
+> **ABOUTME:** Package-by-package map of the implemented codebase — the mapped packages' purpose,
+> key public types, and which file a given CLI command dispatches into. The where-does-this-live
+> companion to overview.md's how-it-fits and data-flows.md's runtime call chains.
+
 # Code Map
 
 The source of truth for **where the code lives** — every package and file, the key public types, and which CLI command dispatches to which code. For the conceptual view of how the layers fit, see [overview.md](overview.md); for runtime call chains, see [data-flows.md](data-flows.md).
@@ -26,7 +30,15 @@ runtime/podman/      → Podman implementation (embeds Docker runtime, overrides
 runtime/tart/        → Tart (macOS VM) implementation of runtime.Backend
 runtime/seatbelt/    → Seatbelt (macOS sandbox-exec) implementation of runtime.Backend
 runtime/containerd/  → Containerd implementation of runtime.Backend (Kata Containers VM isolation)
+runtime/apple/       → Apple `container` CLI implementation of runtime.Backend (per-container Linux VMs, macOS 26+)
 runtime/monitor/     → Embedded monitoring scripts shared across all backends (sandbox-setup.py, status-monitor.py, diagnose-idle.sh)
+runtime/ptybridge/   → Shared local-PTY exec bridge used by the process/VM backends (apple, tart, seatbelt)
+runtime/runtimetest/ → Backend-agnostic conformance suite (build tag `integration`) every backend runs against
+internal/broker/     → Credential-injector host + reverse proxy (D105/D106): swaps an agent's placeholder credential for the real one
+internal/credential/ → CredentialSource/Apply/CredentialBinding — the resolve+inject primitives internal/broker composes
+internal/netpolicy/  → Network-allowlist composition and enforcement-strategy capability checks (ip-filter vs egress-proxy)
+internal/netpolicycfg/ → Per-sandbox netpolicy.json persistence (D90) — kept out of store.Environment
+internal/sysexec/    → The single licensed subprocess site (DEV §12): every exec.Command in yoloai routes through here with an explicit env
 internal/orchestrator/             → Façade (package orchestrator): Engine deps-holder + alias re-exports; clone, parse, setup, terminal/attach
 internal/orchestrator/create/      → Leaf: sandbox-creation orchestration (Run = prepare → seed → build) + context files
 internal/orchestrator/lifecycle/   → Leaf: Start/Stop/Destroy/Reset/NeedsConfirmation free functions + restart/relaunch + Notice types
@@ -191,6 +203,53 @@ MCP server exposing sandbox operations as tools for outer agents driving two-lay
 | `tools.go` | MCP tool definitions: sandbox lifecycle, observation, refinement, and file exchange tools. |
 | `proxy.go` | MCP proxy — forwards MCP protocol between outer agent and inner MCP server running inside a sandbox. |
 
+### `internal/sysexec/`
+
+The single licensed subprocess site named by `development-principles.md` §12: every `exec.Command`/`exec.CommandContext` in yoloai routes through here, never called directly elsewhere (forbidigo bans the raw calls, including in tests).
+
+| File | Purpose |
+|------|---------|
+| `sysexec.go` | `Command`/`CommandContext` — build an `*exec.Cmd` with an explicit, non-nil `Env` (a nil env would make the child inherit the parent's full ambient environment, the exact leak §12 forbids; pass an empty slice for "no environment"). `Curated()` builds a subprocess env from an allowlist over the layout env plus overrides. `GitEnv()` is the shared curated-env allowlist for host-side git invocations. |
+
+### `internal/broker/`
+
+Credential brokering (D105/D106): an always-on, per-sandbox reverse proxy so a real API key never enters the sandbox — the agent holds only a placeholder credential, and the proxy swaps it for the real one on the way out.
+
+| File | Purpose |
+|------|---------|
+| `injector.go` | `Injector` — the reverse proxy itself (implements `http.Handler`): verifies the inbound placeholder token (constant-time compare, 403 on mismatch — stops a co-resident container from using the injector as an unauthenticated relay), strips the placeholder-carrying headers, and injects the real credential via `internal/credential.ApplyTo` before forwarding to the one configured `Upstream`. |
+| `host.go` | `InjectorHost` interface and `SidecarHost`, the CLI implementation: spawns the injector as a detached, `Setsid`'d child process (survives the CLI exiting) via `internal/sysexec`, tracks it by PID+address in a per-sandbox `injector.json` record, and respawns it (reusing the same bind port) if the recorded process died — the reconcile path. `PlaceholderToken` get-or-creates the per-sandbox placeholder secret the launch path hands the agent. |
+| `sidecar.go` | `RunSidecar` — the body of the out-of-process injector: reads its `SidecarConfig` (with the real secret) from stdin, never argv/env, binds its listener, writes the resolved address back as a handshake, then serves until its context is cancelled. Dispatched to from `cmd/yoloai` under the hidden `__inject` argv[1]. |
+| `reap.go` | `ReapOrphanInjectors` — the host-orphan half of `yoloai system prune` (DF71): enumerates running `__inject` processes and kills any not in the caller's keep-set, backstopping a broker leaked by a crash or SIGKILL whose `injector.json` record is gone. |
+
+### `internal/credential/`
+
+The resolve-and-inject primitives `internal/broker` composes into the proxy — general enough to cover LLM API keys, git, and package-registry auth alike, not proxy-specific.
+
+| File | Purpose |
+|------|---------|
+| `source.go` | `CredentialSource` — a closed interface (`StaticSource` \| `RefreshingSource` \| reserved `MintingSource`) yielding the current secret value, refreshing short-lived tokens transparently before they expire. |
+| `apply.go` | `Apply` — a closed interface (`HeaderSet` \| `BasicAuth` \| reserved `RequestSigner`) injecting a resolved credential into an outbound request. `RequestSigner` is reserved to run last (it must see every other transform's output) but returns `ErrNotImplemented` until built. |
+| `binding.go` | `CredentialBinding` ties a `Destination` (request host to match) to an `Apply`+`Source`; `ApplyTo` runs every matching binding against a request in two passes (non-signers, then signers). |
+| `errors.go` | `ErrNotImplemented` — returned by the reserved `RequestSigner`/`MintingSource` variants so the closed interface sets need not break later to add them. |
+
+### `internal/netpolicy/`
+
+Network-allowlist composition and the capability model for whether an enforcement strategy can actually work on a given (backend, isolation-mode) pair.
+
+| File | Purpose |
+|------|---------|
+| `strategy.go` | `Strategy` (`StrategyIPFilter`, the only one shipped; reserved `StrategyEgressProxy`) and `CanEnforce()` — reports whether a strategy can enforce the allowlist for a backend/isolation combination, e.g. refusing `ip-filter` under gVisor (`container-enhanced`) because its userspace netstack ignores in-sandbox iptables rules rather than silently no-op'ing. |
+| `compose.go` | `Compose()` resolves the effective network mode and allowlist from the raw mode string plus the agent's built-in domains and the user's added domains; `WithProvenance()` tags each resulting domain as agent-required vs. user-added so callers can warn before removing one the agent needs. |
+
+### `internal/netpolicycfg/`
+
+Per-sandbox network-policy persistence (`netpolicy.json`), split out from the substrate's `store.Environment` (D90) so netpolicy owns its own record.
+
+| File | Purpose |
+|------|---------|
+| `netpolicycfg.go` | `Netpolicy` struct (mode + composed allowlist) and `Save`/`Load` for `netpolicy.json`. A sandbox with default non-isolated networking writes no record — `Load` returns a zero-value `Netpolicy` when the file is absent. |
+
 ### `internal/testutil/`
 
 Shared test helpers — a non-`_test.go` package importable by test files across all packages. Not included in production builds (nothing in the main binary imports it).
@@ -300,6 +359,29 @@ Dynamic capability detection system. Probes the host, checks backend prerequisit
 | `image.go` | `Setup()` — builds via `docker build` + `ctr images import`; `IsReady()` — checks containerd image store in `yoloai` namespace. |
 | `prune.go` | `Prune()` — lists containers in `yoloai` namespace, removes orphaned `yoloai-*` containers, tears down their CNI namespaces. |
 | `logs.go` | `Logs()` — reads bind-mounted `log.txt`. `DiagHint()` — points to `ctr -n yoloai tasks ls` and `journalctl -u containerd`. |
+
+### `runtime/apple/`
+
+| File | Purpose |
+|------|---------|
+| `apple.go` | `Runtime` struct — implements `runtime.Backend` by shelling out to Apple's `container` CLI (per-container Linux VMs, macOS 26+ / Apple Silicon only; gated by `minMacOSMajor`). Lifecycle (`Create`/`Start`/`Stop`/`Remove`/`Inspect`), `Exec`/`InteractiveExec` (the latter via `ptybridge.Exec` with `WithRemotePTY`, since `container exec -t` forces ONLCR on the bridge slave), `GitExec` (dispatches host-side work-copy git into the guest — `GitExecInConfinement: true`, mirroring the container backends), and `Setup`/`IsReady`/`buildBaseImage`. Registers via `init()`. |
+| `reach.go` | `InjectorReach` — apple puts every sandbox on a shared vmnet "default" network whose gateway is both host-bindable and the guest's default route, so the credential injector binds and the agent dials the same IP (gateway-IP-for-both, like Docker Engine/containerd). Falls back to `ErrInjectorUnsupported` when the vmnet bridge isn't up. |
+| `prune.go` | `PruneCache` implementing `runtime.CachePruner` — dangling/unused image prune plus build-cache reclaim (the `container` CLI has no cache-prune command, so reclaim is deleting-and-recreating the builder); reclaim is measured as the before/after `container system df` delta rather than trusted per-category figures. |
+
+### `runtime/ptybridge/`
+
+| File | Purpose |
+|------|---------|
+| `bridge.go` | `Exec()` — runs a child command under a locally-allocated PTY and copies it to the caller's `IOStreams`, the shared exec-bridging model for backends with no docker-API-style exec socket (apple, tart, seatbelt). Isolated in its own package so backends that don't need it avoid pulling in `github.com/creack/pty`. `WithRemotePTY` strips a redundant CR that a remote-PTY exec CLI (apple's `container exec -t`) injects via forced ONLCR on the local bridge slave — tart and seatbelt don't need it. |
+
+### `runtime/runtimetest/`
+
+Build-tag-`integration` shared conformance suite; `docs/contributors/architecture/testing.md` describes it as the one behavioral suite every backend runs against.
+
+| File | Purpose |
+|------|---------|
+| `conformance_iface.go` | `RunInterfaceConformance` — the universal `runtime.Backend` contract exercised through interface methods only (lifecycle, exec exit-codes, exec-on-stopped, idempotency, `IsReady`, capability-gated `Mounts`/`Stdio` sections). A backend that can't honor a section declares it skipped (with a reason) via `InterfaceBackend.SkipMounts`/`SkipStdio` rather than forcing an inapplicable assertion. Each backend supplies its own `Sleeper` (how it keeps a long-running instance alive for exec tests) since that's genuinely backend-specific. |
+| `conformance.go` | `DockerCompatRuntime`/`SetupFunc` — the narrower conformance table for docker-API-compatible backends (docker, podman) that also exposes the docker SDK client, for assertions the `runtime.Backend` interface alone can't reach (host-config facts like resource limits and port bindings). |
 
 ### `runtime/monitor/`
 

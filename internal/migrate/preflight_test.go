@@ -1,3 +1,5 @@
+// ABOUTME: Tests SameFilesystem: same-device detection for same/trivial path
+// ABOUTME: counts and a missing-path error.
 package migrate
 
 import (

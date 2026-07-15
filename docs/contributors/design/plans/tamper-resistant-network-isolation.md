@@ -1,14 +1,15 @@
+> **ABOUTME:** Build plan for making the `--network-isolated` firewall tamper-proof against a
+> hostile agent with sudo, by installing it from a privileged sidecar outside the agent's netns
+> reach. Bridges the best-effort ip-filter and the later hostile-grade SNI proxy.
+
 # Tamper-resistant network isolation (egress containment "step 1.5")
 
-ABOUTME: Build plan for making the `--network-isolated` firewall tamper-proof — the agent
-can no longer flush it via sudo. Bridges step 1 (best-effort ip-filter) and step 2 (hostile-grade
-SNI proxy).
-
-**STATUS: IMPLEMENTED 2026-06-28** for docker + the agent-free launch path (§§1–6 below),
-validated on real Docker (agent can't flush; non-allowlisted stays blocked; injector stays
-reachable; live `network allow` patches the per-netns ipset from the sidecar). Deferred:
-containerd/Kata, the legacy launch path, macOS (see Scope). One boundary worth noting — see
-"Provisioning egress" below.
+- **Status:** IN-PROGRESS — implemented 2026-06-28 for docker + the agent-free launch path
+  (§§1–6 below), validated on real Docker (agent can't flush; non-allowlisted stays blocked;
+  injector stays reachable; live `network allow` patches the per-netns ipset from the sidecar).
+  Deferred: containerd/Kata, the legacy launch path, macOS (see Scope). One boundary worth
+  noting — see "Provisioning egress" below.
+- **Depends on:** —
 
 ## The problem (confirmed)
 

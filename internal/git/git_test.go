@@ -1,3 +1,6 @@
+// ABOUTME: git.NewSandbox picks the in-container vs host-side git executer by
+// ABOUTME: confinement mode, and HostExec runs git directly on the host.
+
 package git
 
 import (

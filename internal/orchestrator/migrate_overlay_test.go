@@ -1,3 +1,7 @@
+// ABOUTME: D109 overlay-to-copy migration (NewOverlayFlatten): flattening a
+// ABOUTME: stopped sandbox from its on-disk lower, capturing a running sandbox
+// ABOUTME: via its own backend (not hardcoded docker), and status
+// ABOUTME: classification.
 package orchestrator
 
 import (

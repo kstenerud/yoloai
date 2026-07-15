@@ -43,7 +43,7 @@ DOCKER_HOST_ENV := $(DOCKER_HOST)
 DOCKER_HOST_RESOLVED = $(if $(DOCKER_HOST_ENV),$(DOCKER_HOST_ENV),$(shell docker context inspect --format '{{.Endpoints.docker.Host}}' 2>/dev/null))
 integration e2e base-image smoketest smoketest-quick: export DOCKER_HOST = $(DOCKER_HOST_RESOLVED)
 
-.PHONY: build test fmt lint lint-cross vet-tagged crosscheck tidy-check govulncheck hadolint actionlint check cover integration e2e integration-podman integration-containerd integration-apple integration-seatbelt integration-tart python-test python-typecheck ensure-python-venv setup-dev-python smoketest smoketest-quick releasetest setcap clean clean-testtmp
+.PHONY: build test fmt lint lint-cross vet-tagged crosscheck tidy-check govulncheck hadolint shellcheck actionlint lint-commits check cover integration e2e integration-podman integration-containerd integration-apple integration-seatbelt integration-tart python-test python-typecheck ensure-python-venv setup-dev-python smoketest smoketest-quick releasetest setcap clean clean-testtmp
 
 # Always invoke `go build` and let it decide whether to relink. `go build` does
 # complete, authoritative dependency tracking — crucially including //go:embed'd
@@ -118,17 +118,49 @@ tidy-check:
 govulncheck:
 	python3 scripts/govulncheck.py
 
-## hadolint: lint the Dockerfile (skip when neither hadolint CLI nor Docker is available)
-## Prefers a local hadolint install; falls back to Docker; skips if neither is usable.
-## CI installs hadolint and treats this target as required.
+## hadolint: lint the Dockerfile. The Dockerfile ships in the binary and builds
+## every sandbox image, so this is REQUIRED, not optional (D112) — its absence
+## FAILS loudly rather than skipping. It used to `echo "skipping"` and exit 0
+## while claiming CI treated it as required; no CI install step had ever existed,
+## and it only ran at all because GitHub's ubuntu-latest happens to ship Docker.
+## A gate that can silently not run is not a gate (D117).
+## Prefers a local hadolint; falls back to Docker, which needs no install.
 hadolint:
 	@if command -v hadolint >/dev/null 2>&1; then \
 		hadolint runtime/docker/resources/Dockerfile; \
 	elif docker info >/dev/null 2>&1; then \
 		docker run --rm -i hadolint/hadolint < runtime/docker/resources/Dockerfile; \
 	else \
-		echo "hadolint: skipping (install hadolint or start Docker to enable)"; \
+		echo "ERROR: hadolint is required (the Dockerfile ships in the binary; D112)."; \
+		echo "       Install hadolint (https://github.com/hadolint/hadolint) or start Docker."; \
+		exit 1; \
 	fi
+
+## shellcheck: lint every tracked shell script. Required, not optional (D112) —
+## runtime/monitor/*.sh and the docker entrypoint ship inside the binary, and
+## shell.md asserts these pass clean. Before D117 that assertion was ungated
+## prose: true when written, with nothing to keep it true. Prefers a local
+## shellcheck; falls back to Docker.
+shellcheck:
+	@scripts_list="$$(git ls-files '*.sh')"; \
+	if command -v shellcheck >/dev/null 2>&1; then \
+		shellcheck $$scripts_list; \
+	elif docker info >/dev/null 2>&1; then \
+		docker run --rm -v "$(CURDIR)":/mnt -w /mnt koalaman/shellcheck:stable $$scripts_list; \
+	else \
+		echo "ERROR: shellcheck is required (shell scripts ship in the binary; D112)."; \
+		echo "       Install shellcheck (https://www.shellcheck.net/) or start Docker."; \
+		exit 1; \
+	fi
+
+## lint-commits: check this branch's commit messages against AGENTS.md.
+## Deliberately NOT a `check` prerequisite: it needs a base ref to diff against,
+## which `make check` has no notion of (on main the range is empty and the check
+## is vacuous). CI runs it on every PR; this target is for checking before you
+## push. Override the base with `make lint-commits BASE=upstream/main`.
+BASE ?= origin/main
+lint-commits:
+	python3 scripts/lint_commits.py --base $(BASE) --head HEAD
 
 actionlint:
 	go run github.com/rhysd/actionlint/cmd/actionlint@latest
@@ -159,8 +191,10 @@ crosscheck:
 		GOOS="$$goos" GOARCH="$$goarch" go vet ./... || exit 1; \
 	done
 
-## check: run all CI checks locally (same as PR checks)
-check: lint lint-cross vet-tagged crosscheck tidy-check hadolint actionlint test python-test
+## check: the local gate. NOT all of CI — CI also runs the integration and
+## integration-podman jobs, and `test` here is a bare `go test ./...` which skips
+## every build-tagged file. See docs/contributors/procedures/pull-requests.md.
+check: lint lint-cross vet-tagged crosscheck tidy-check hadolint shellcheck actionlint test python-test
 
 ## ensure-python-venv: provision the uv-managed venv on demand (idempotent).
 ## The Python surface is part of the app (contributors can modify it), so it is
@@ -178,13 +212,31 @@ python-test: python-typecheck
 	$(PYTEST) runtime/monitor/tests/ -v
 	$(PYTEST) scripts/tests/ -v
 
-## python-typecheck: run mypy --strict from the uv-managed venv on the typed surface
+## python-typecheck: run mypy --strict from the uv-managed venv over EVERY tracked
+## .py under runtime/ and scripts/.
+##
+## The file list is DERIVED, never hand-maintained. A hand-maintained list is
+## precisely how five //go:embed'ed scripts — entrypoint.py, firewall.py,
+## install-firewall.py, sandbox-setup.py, status-monitor.py — shipped inside every
+## sandbox for months with no typecheck, no test, and not even a syntax check,
+## while python.md claimed the opposite (D117). Anything added under runtime/ or
+## scripts/ is now covered the moment it is tracked.
+##
+## Scope note: docs/**/*.py is excluded on purpose — the only one is a research
+## spike (design/research/egress-broker-spike/mock-anthropic.py) that no code
+## references and nothing ships.
+##
 ## Two invocations: the monitor surface and the smoke harness each have their
 ## own tests/conftest.py, which mypy would otherwise reject as a duplicate
 ## top-level "conftest" module if checked in one pass.
+## Lazy (`=`, not `:=`) so the git call happens only when this target runs,
+## rather than on every `make` invocation including `make build`.
+PY_RUNTIME = $(shell git ls-files '*.py' | grep '^runtime/')
+PY_SCRIPTS = $(shell git ls-files '*.py' | grep '^scripts/')
+
 python-typecheck: ensure-python-venv
-	$(MYPY) --strict runtime/monitor/setup_helpers.py runtime/monitor/tmux_io.py runtime/monitor/tests/
-	$(MYPY) --strict scripts/smoke_test.py scripts/govulncheck.py scripts/tests/
+	$(MYPY) --strict $(PY_RUNTIME)
+	$(MYPY) --strict $(PY_SCRIPTS)
 
 ## setup-dev-python: explicitly provision the uv-managed venv with lockfile-pinned
 ## dev tools. Optional for local dev (the python-* targets self-provision via
@@ -207,6 +259,21 @@ cover:
 
 base-image: build
 	./$(BINARY) system build --backend docker
+
+## tart-base-image: build the provisioned yoloai-base VM into the real ~/.tart.
+## The tart analogue of base-image: the shared, expensive artifact every tart
+## test reuses, built ONCE before any suite runs rather than on the test clock.
+## It matters more here than for docker — a cold tart base is a ~30 GB pull plus
+## a full provision boot, which no test timeout can or should absorb (DF19).
+## No-op unless the VM tier is enabled on a host that can run it, so dependent
+## targets stay runnable everywhere; the suites self-skip via TestMain there.
+## Re-running is cheap: Setup short-circuits in needsBuild once the base exists.
+tart-base-image:
+	@if [ "$$YOLOAI_TEST_TART_VM" = "1" ] && [ "$$(uname)" = "Darwin" ] && [ "$$(uname -m)" = "arm64" ]; then \
+		$(MAKE) build && \
+		echo "Building tart base image (one-time ~30 GB pull if absent)..." && \
+		./$(BINARY) system build --backend tart; \
+	fi
 
 # require-root-for-containerd: fail fast, upfront, when a target runs the
 # containerd/Kata integration suite but isn't root. Kata needs CAP_SYS_ADMIN to
@@ -240,11 +307,24 @@ endef
 ## `make base-image` fails loudly if the daemon is absent. On Linux this needs root
 ## for the containerd/Kata suite (netns); it stops upfront with an actionable error
 ## if run non-root (use `sudo -E make integration`, or carve out containerd).
+## ./internal/orchestrator/ is the one multi-backend test package: docker, podman,
+## seatbelt, apple and tart tests all live in it. Each backend's tests belong to
+## that backend's target, so this invocation runs the DOCKER ones and skips the
+## rest — the tart/seatbelt/apple tests are picked up by integration-tart,
+## integration-seatbelt and integration-apple, which warm their own backends
+## (DF99). The podman ones self-skip unless YOLOAI_TEST_BACKEND=podman, which is
+## integration-podman's job.
 integration:
 	$(require-root-for-containerd)
 	$(MAKE) base-image
-	go test -tags=integration -v -count=1 -timeout=10m ./internal/orchestrator/ ./runtime/docker/ ./internal/cli/
+	go test -tags=integration -v -count=1 -timeout=10m -skip '$(ORCHESTRATOR_NON_DOCKER_TESTS)' ./internal/orchestrator/ ./runtime/docker/ ./internal/cli/
 	@$(MAKE) integration-containerd integration-apple integration-seatbelt integration-tart
+
+## ORCHESTRATOR_NON_DOCKER_TESTS: the tests in ./internal/orchestrator/ that belong
+## to a backend other than docker. Defined once so the `integration` skip and the
+## per-backend `-run` filters cannot drift apart and silently drop a test — which
+## is exactly how the seatbelt and apple containment tests went unrun (DF99).
+ORCHESTRATOR_NON_DOCKER_TESTS := ^TestIntegrationTart_|_(Seatbelt|Apple)$$
 
 e2e: build
 	@if ! docker info >/dev/null 2>&1; then \
@@ -298,31 +378,47 @@ integration-containerd:
 ## skips cleanly via TestMain. The full base-image build is gated behind
 ## YOLOAI_TEST_APPLE_BASE=1 (slow); the conformance + lifecycle tests use a tiny
 ## alpine sleep image and run whenever the backend is available.
+##
+## The second invocation is apple's share of the multi-backend orchestrator
+## package (the C1 malicious-filter containment test). It needs no docker since
+## DF99 — that test had never run, because it was gated on YOLOAI_TEST_APPLE,
+## which nothing set. Still gated: it boots a VM and takes ~5 minutes, so a bare
+## `go test ./internal/orchestrator/` should not pay for it by surprise.
 integration-apple:
 	go test -tags=integration -v -count=1 -timeout=15m ./runtime/apple/
+	YOLOAI_TEST_APPLE=1 go test -tags=integration -v -count=1 -timeout=15m -run '_Apple$$' ./internal/orchestrator/
 
 ## integration-seatbelt: run Seatbelt integration tests (requires macOS with sandbox-exec)
 ## On non-macOS platforms the tests skip cleanly via TestMain (exit 0).
 ## Pair-runs are encouraged on macOS as part of releasetest on Apple Silicon machines.
+##
+## The second invocation is seatbelt's share of the multi-backend orchestrator
+## package (the C1 malicious-filter containment test, which matters most here:
+## seatbelt has no container, so containment is an SBPL profile wrapping git
+## itself). It needs no docker since DF99, and it is NOT gated — it costs half a
+## second, so there was never a cost argument for the YOLOAI_TEST_SEATBELT gate
+## that kept it from running at all. It self-skips off macOS.
 integration-seatbelt:
 	go test -tags=integration -v -count=1 -timeout=5m ./runtime/seatbelt/
+	go test -tags=integration -v -count=1 -timeout=5m -run '_Seatbelt$$' ./internal/orchestrator/
 
 ## integration-tart: run Tart integration tests (requires macOS with Apple Silicon + tart).
 ## On platforms without tart the tests skip cleanly via TestMain (exit 0).
 ## The heavyweight TestTartConformance suite clones a multi-GB macOS VM per subtest,
 ## so it is gated behind YOLOAI_TEST_TART_VM=1 (skipped for a quick `make
 ## integration-tart`). `make releasetest` sets it, so the release gate runs the
-## full suite — building the tart base first so a missing base fails loudly rather
-## than silently skipping. The base build only runs on macOS + Apple Silicon (where
-## tart can actually run); on any other host it is skipped and the go test self-skips
-## via TestMain, keeping this target runnable everywhere like the other backends.
-integration-tart:
-	@if [ "$$YOLOAI_TEST_TART_VM" = "1" ] && [ "$$(uname)" = "Darwin" ] && [ "$$(uname -m)" = "arm64" ]; then \
-		$(MAKE) build && \
-		echo "Building tart base image for the conformance suite..." && \
-		./$(BINARY) system build --backend tart; \
-	fi
+## full suite — building the tart base first (tart-base-image) so a missing base
+## fails loudly rather than silently skipping.
+##
+## The second invocation is tart's share of the multi-backend orchestrator
+## package: the sandbox-level TestIntegrationTart_* lifecycle tier that boots
+## real macOS VMs (create plus stop, restart and reset is several boots, ~370s
+## for the four). It gets the VM budget rather than the 10m that sizes the
+## container tests, and it needs no docker since DF99 — before that, this
+## target could not own its own tests.
+integration-tart: tart-base-image
 	go test -tags=integration -v -count=1 -timeout=40m ./runtime/tart/
+	go test -tags=integration -v -count=1 -timeout=40m -run '^TestIntegrationTart_' ./internal/orchestrator/
 
 ## smoketest: run the full smoke matrix — every backend this host can exercise,
 ## across every installed docker provider (macOS: OrbStack + Docker Desktop; errors
@@ -383,8 +479,26 @@ releasetest:
 setcap: build
 	sudo setcap cap_sys_admin,cap_dac_override+ep ./$(BINARY)
 
-clean: clean-testtmp
+clean: clean-testtmp clean-tart-vms
 	rm -f $(BINARY)
+
+## clean-tart-vms: remove test VMs left in ~/.tart by a tart test run that was
+## killed before its cleanup ran (SIGKILL / -timeout / OOM — none run t.Cleanup).
+## Each leaked VM is ~29 GB, so a couple of killed runs are a disk-filling event.
+##
+## The tart suites share the real ~/.tart deliberately — an isolated TART_HOME is
+## an empty store, which costs a ~30 GB re-download per run (DF19) — so they
+## isolate by NAME instead: testutil.TartStoreLayout stamps a unique principal on
+## the layout, making every instance yoloai-<principal>-<sandbox>. Test
+## principals are UniqueTestPrincipal's t + 7 digits, so this sweep matches
+## exactly those and cannot touch a real VM (yoloai-base, yoloai-embrace, or any
+## yoloai-<sandbox> from normal use). Best-effort; no-op without tart.
+clean-tart-vms:
+	@command -v tart >/dev/null 2>&1 || exit 0; \
+	for vm in $$(tart list --source local --quiet 2>/dev/null | grep -E '^yoloai-t[0-9]{7}-' || true); do \
+		echo "removing leaked test VM $$vm"; \
+		tart delete "$$vm" 2>/dev/null || true; \
+	done
 
 ## clean-testtmp: remove integration/e2e bootstrap HOMEs left in TMPDIR by a
 ## test run that was killed before its cleanup ran (SIGKILL / -timeout / OOM —

@@ -1,3 +1,8 @@
+> **ABOUTME:** Runtime call-chain traces through yoloAI's major operations — sandbox creation,
+> backend init, diff, apply, overlay mounts, start/restart, doctor, and prune classification.
+> The step-by-step path a request actually takes through the code, as opposed to code-map.md's
+> static package structure.
+
 # Data Flow
 
 ## Sandbox Creation (`yoloai new`)

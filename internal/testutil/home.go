@@ -9,6 +9,14 @@ import (
 // IsolatedHome sets HOME to a new temp directory for the duration of the test.
 // Returns the temp directory path.
 //
+// Do NOT use it for a test that drives the tart backend: tart resolves its VM
+// store from the home dir (TART_HOME defaults to <HomeDir>/.tart), so an
+// isolated HOME points it at an empty store and it re-downloads the ~30 GB base
+// image on every run — the DF19 trap. Use TartStoreLayout, which isolates
+// yoloai's state by path and tart's instances by principal while sharing the
+// expensive store. The same caution applies to any future backend whose store
+// lives under the home dir rather than in a daemon.
+//
 // It also clears SUDO_USER, because under `sudo` the CLI's resolveHome()
 // (internal/cli/cliutil/layout.go) deliberately ignores $HOME and looks the
 // invoking user's home up in /etc/passwd via SUDO_USER — correct for real

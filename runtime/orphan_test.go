@@ -1,3 +1,6 @@
+// ABOUTME: IsOrphanCandidate's principal-scoping rules for prune eligibility —
+// ABOUTME: a container is only a candidate if its principal label matches the
+// ABOUTME: caller's (DF19), never cross-principal or non-yoloai containers.
 package runtime
 
 import (

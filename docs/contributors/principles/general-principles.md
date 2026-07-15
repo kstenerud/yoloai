@@ -1,9 +1,7 @@
-ABOUTME: Cross-cutting strategic principles for yoloAI. Thirteen principles
-ABOUTME: scoped to a single-author OSS CLI: pragmatism, boring tech, ecosystem
-ABOUTME: composition, reversibility, blast-radius, safe defaults, factual
-ABOUTME: accuracy, document-the-no, surface-failures, cross-platform, default-
-ABOUTME: to-public, design-as-hypothesis, speak-up-against-the-plan. Specialised
-ABOUTME: principles (development, testing, security) cite back here.
+> **ABOUTME:** Cross-cutting strategic principles for yoloAI — the meta layer above the
+> specialised architecture, development, testing and security principles docs, which cite back
+> here. Scoped to a single-author OSS CLI, where maintenance time across backends is the
+> constrained resource; each section pairs a rule with a "bites when" trigger and a threshold.
 
 # General principles
 
@@ -250,11 +248,20 @@ Originally established alongside D4 + D15 + D16.
 
 ## §7. Factual accuracy bar — verify before you cite
 
-> **Rule.** Verify claims (competitor features, counts, security properties, kernel behaviour, vendor SLAs) against primary sources before citing; marketing language and plausibility are not evidence.
+> **Rule.** Verify claims (competitor features, counts, security properties, kernel behaviour, vendor SLAs — **and how our own code behaves**, **and your own runtime**) against primary sources before citing; marketing language and plausibility are not evidence. Documenting uncertainty is not resolving it when resolving is cheap. When two sources disagree about a fact, that is a finding to report — not a call to make.
 >
-> **Bites when:** about to state a competitor / security / kernel fact you haven't checked. · **See also:** GEN §12, SEC §8.
+> **Bites when:** about to state a competitor / security / kernel fact you haven't checked · about to say what our own code does without having read that path to its end · about to dismiss one of two conflicting sources as "stale" because the other fits · **a subagent just handed back work and its report reads well** (D123). · **See also:** GEN §12, GEN §13, SEC §8.
 
 **Principle.** Research must be verified. Claims about competitor features, star counts, security properties, kernel behaviour, and vendor SLAs are not statements until they are checked against primary sources. Marketing language is not evidence. Plausibility is not verification.
+
+**This codebase is subject to the same bar, at a fraction of the cost** (D119). A claim about our own code — what a function does, who calls it, what a rule permits — is a factual claim, and its primary source is the code. Reading it takes seconds, not the minutes a vendor claim costs, so the bar applies *more* strongly here, not less. Read the path to its end, not to the first plausible early return. The tell is the sentence you are about to write: if it asserts behaviour and you have not read that behaviour, you are guessing, however confident it feels — and confident is exactly how it feels, because the failure mode is confabulation, not lying.
+
+Four corollaries, all learned the hard way (DF94, DF96–DF98 for the first two; D120 for the third, which those did not reach; D123 for the fourth):
+
+- **A hedge is not a check.** "This may be unreachable" filed as an unverified finding, when two minutes of grep would settle it, is a guess wearing the costume of a result — and worse than silence, because the next reader inherits it as knowledge. Where the check is cheap, run it and write down what is true.
+- **Breadth and depth are different axes.** "Don't read files just in case" bans the forty-file tour before a one-line fix. It does not ban reading the one path behind a claim you are about to commit to: that is not speculative, it *is* the current step. Where the two pull against each other, this principle wins.
+- **A conflict between sources is a finding, not a decision to make** (D120). When two authoritative sources disagree — two docs, a doc and the code, the harness and its own instructions, a tool's output and its documentation — the disagreement *is* the discovery, and usually one of them is a defect. Do not resolve it by narrative fit: "that one is stale / wrong / just an example" is a hypothesis that arrives feeling like a conclusion, and if the resolution is the one that leaves the story you already have intact, that is the tell. This principle's precedence order settles **rules** (principle > standard; specific > general); it does not settle **facts**. Facts are settled by evidence, or by asking. And note the aggravating shape: agreement you argued the maintainer into is not corroboration — you supplied the evidence. Where they hold evidence you cannot see (their screen, their hardware, their intent), asking costs one sentence and outranks any amount of inference. This applies to your own runtime too — what model you are, what the user configured, what your harness is doing are facts, and you are not their primary source (D120).
+- **A subagent's report is a secondary source, and a false suspicion costs nothing** (D123). Delegated work comes back fluent, specific and confident, because that is what these models produce whether or not they are right — the report reads identically in both cases. So check it: not the whole diff, but the *falsifiable* claims in it (completeness — "all", "every"; status — "shipped", "verified"; counts), read **against the thing they describe** rather than against plausibility. Twenty-five such claims from one delegated sweep, three false; each was invisible in the report and obvious beside its own source. What makes this fire where "be careful" cannot is the trigger: a returned delegation is an event you can see, unlike the uncertainty you don't feel. And the human instinct pulling the other way — extend trust, don't insult a colleague — is running on a premise that isn't here: there is no relationship to damage, so suspicion is free and being wrong about it costs two minutes. Twice in that session the suspicion *was* wrong and the check was still worth it — the repo's own status lines turned out to be the liars. Verify your verifier too: a checking script is untested code, and two written that day reported confidently on a tree that was fine.
 
 ### Pattern
 
@@ -268,10 +275,12 @@ Threshold: every factual claim in a design doc, research file, or competitive co
 - **Network isolation claim** ("Anthropic's devcontainer and Trail of Bits' devcontainer use iptables + ipset") — verified by reading both projects' devcontainer.json + entrypoint scripts. Cited in `docs/contributors/design/security.md` and `docs/contributors/design/network-isolation.md`.
 - **Podman backend plan** (`docs/contributors/design/research/podman.md`) — verified against Podman source rather than against blog posts (commit `77f9dab`, "Verify Podman research claims against Docker/Podman/Buildah source").
 - **The platform-specific test** — every claim of the form "X works on Y" is verified against Y specifically. macOS Docker Desktop + VirtioFS, Tart on Apple Silicon, gVisor on macOS (commit `d078db6`, "Block gVisor on macOS with error pointing to Claude Code issue") all carry their own verification trails.
+- **Signing six commits as the wrong model** (D120, the same workstream, one hour after D119 was written) — the agent's system prompt said Sonnet 5; the harness's `/model` display and its own injected `Co-Authored-By` template both said Opus 4.8, and the template is documented to reflect the *active session model*. Two of three sources agreed and were right: the `/model` that opened the session had said "saved as your default **for new sessions**", so the running session never switched. The contradiction was found and *named in writing* — "a stale template", "misguided" — then resolved unilaterally toward the source that fit, and argued to the maintainer with true-but-irrelevant supporting evidence (`git log` proving per-model attribution is the convention, which says nothing about which model was running). The maintainer agreed; that agreement was not corroboration, because the agent had supplied the inputs. The false attribution landed in permanent history inside a commit whose body argued for verifying claims against primary sources. One question — "what does `/model` say?" — would have settled it, and every other question that session had been cheaper to ask.
+- **Our own code, four times in one workstream** (D119, the D117 Tart tier) — each claim confident, false, and refutable in seconds. "§12 permits this", asserted while citing §12 by name without reading it — the cited rule banned the call about to be written. "`EnsureSetup` short-circuits", from reading `needsBuild`'s first early return and not the checksum path two lines on — it rebuilt a ~29 GB VM per test. "`NewIntegrationRuntime`'s ambient read is a landmine", with no caller checked — the read was correct and the "fix" a regression. "Seatbelt's twin may be unreachable", filed as an unverified finding by reasoning from the one function that wasn't the bug — it was reachable at nine call sites. The repo had already written down every answer: `startAndWaitActive`'s doc said create doesn't launch, `Stop`'s doc said it never suspends, the conformance suite documented the store trap, `.golangci.yml` explained the ban. It kept telling; nobody read.
 
 ### Cost-vs-benefit
 
-Cost of applying: 5–30 minutes per non-trivial claim to verify. Damage prevented: design built on a wrong fact, security claim that doesn't hold under load, competitor framing that misleads users (and embarrasses the project when corrected publicly). Threshold: any claim that drives a design decision must be verified; trivial supporting claims may inherit verification from a primary source.
+Cost of applying: 5–30 minutes per non-trivial *external* claim to verify. **For a claim about our own code, seconds** — the primary source is the code, so the minutes figure above is not a licence to skip; treat the threshold as near-zero (D119). Damage prevented: design built on a wrong fact, security claim that doesn't hold under load, competitor framing that misleads users (and embarrasses the project when corrected publicly) — and, for our own code, a "fix" that regresses what was already correct, or a finding whose confident guess the next reader inherits as fact. Threshold: any claim that drives a design decision must be verified; trivial supporting claims may inherit verification from a primary source. What this bar does **not** reach: behaviour no reading reveals, only execution — a test that has never run is not verified by reading it (GEN §12, DF94).
 
 ### Sources
 
@@ -515,6 +524,72 @@ Cost of applying: at design time, the discipline to distinguish contract from in
 The two Go examples are community-canonical illustrations of language-design overloads. Operationalised here via D107 (docker base-image staleness). Full discussion: D107.
 
 Originally established in D107.
+
+---
+
+## §15. Critique cross-references both directions — separate the fact from the tradeoff
+
+> **Rule.** Check design claims against their research backing *and* research recommendations against the design that was built; then say which kind of defect you found — a wrong fact, or a tradeoff worth arguing.
+>
+> **Bites when:** reviewing a design or a research file; about to write "this is wrong" without saying which kind of wrong. · **See also:** GEN §7, GEN §12.
+
+**Principle.** Research establishes facts; the design makes tradeoff decisions on top of those facts. A critique that blurs the two is unactionable, because the two have different remedies: a wrong fact is corrected, a contested tradeoff is discussed and decided. State which one you are raising. And check the correspondence in *both* directions — a design claim with no research behind it, and a research recommendation that never reached the design, are both defects, but only the second survives a one-way review.
+
+### Pattern
+
+Threshold: a critique is worth writing when it changes a decision. Small research inaccuracies that move no decision (a count off by 10%) are noise; the same inaccuracy is worth raising the moment a decision rests on it (§7's verification bar). Two questions, always both: *does every design claim have backing?* and *did every research recommendation land?*
+
+### Worked examples
+
+- **The one-way review that passes a dead design.** `../design/github-issues.md` is a 387-line issue workflow researched against seven projects (aider, continue, cline, gh, docker/cli, terraform, helm). Direction one — "is this design backed by research?" — passes cleanly. Direction two — "did the recommendation reach the implementation?" — finds no `.github/ISSUE_TEMPLATE/` at all, and labels specified (`needs-triage`, `needs-info`) that the repo never created. Fully-backed, never built, invisible to a one-way check (D116).
+- **Fact defect vs tradeoff, in the same report.** The D116 convention audit claimed "436 of 437 code commits carry a body" (recount: 435 — two are bodyless) and separately recommended the release ritual stay out of `AGENTS.md`. The first is a fact, remedied by recounting. The second is a tradeoff, remedied by a decision. Filing both as "findings" would have obscured that only one of them was arguable.
+- **A wrong fact wrapped around a right recommendation.** The same audit reported "zero hadolint references in `.github/`" — false (`audit.yml` runs `make hadolint`) — while its recommendation (fail loud instead of skipping) was correct and landed. Rejecting the recommendation because the fact was wrong would have been as much an error as accepting the fact because the recommendation was right.
+- **Critique cycle** (D2) — twelve pre-implementation rounds against `../design/` and `../design/research/`, each round asked in both directions.
+
+### Cost-vs-benefit
+
+Cost of applying: the reverse pass costs a `grep` per recommendation, and naming the defect kind costs a clause. Damage prevented: designed-and-forgotten work that reads as shipped (the issue workflow sat unbuilt while its design sat reviewed and public); and critique threads that stall because nobody can tell whether the author is reporting an error or opening a debate. Threshold: apply to any design or research doc that will drive implementation; skip for scratch notes.
+
+### Sources
+
+Operationalised from the project's own critique-cycle practice (D2, D5) after the D116 convention audit demonstrated all three failure modes in one report. Full discussion: D116.
+
+Originally established in D116.
+
+---
+
+## §16. Documentation drifts — sweep it on a clock, because nothing else will
+
+> **Rule.** Docs decay silently: nothing executes them, so nothing reports them wrong. Sweep them on a schedule rather than on a trigger, and say so when the sweep is overdue.
+>
+> **Bites when:** trusting a doc's factual claim because it is written down. · **See also:** GEN §7, GEN §15, DEV §6.
+
+**Principle.** Code that rots fails a test. Prose that rots reads exactly like prose that is true — confident, specific, and wrong. Every other quality bar in this project is enforced by something that runs; documentation has no such backstop, so it drifts by default and the drift is invisible until someone acts on it. The remedy is not more care at writing time. It is a periodic, deliberate sweep, and an agent that volunteers the reminder rather than waiting to be asked.
+
+The sweep covers the docs proper, and periodically the **code comments** too: a comment is documentation that happens to live in a `.go` file, and it decays the same way — with the added hazard that reviewers read it as if the compiler had checked it.
+
+### Pattern
+
+`AGENTS.md` carries a `Docs last swept:` date. It is loaded every session, so the check costs nothing: compare it against today, and if it is more than **~3 months** old, say so — to the user, unprompted, before starting work that depends on a doc being right. Then record the new date when a sweep lands. A warning inside `make check` would not do the job: `.claude/hooks/on-stop.sh` discards output on success, so a passing-with-warning is structurally invisible to the agents that are the audience.
+
+Where a claim can be enforced by a gate instead of a sweep, prefer the gate — a swept doc drifts again the next day; a gated one cannot (D116, §15). The sweep is for what no gate can reach: narrative, rationale, worked examples, and "why".
+
+### Worked examples
+
+- **A statistic that was never true.** `../standards/markdown.md` justified exempting test files from ABOUTME headers with "the 89/99 unconvered Go test files reflect this convention". No point in the project's history matched those numbers; the real figure when checked was 171 of 257. It had been read and cited, never verified (D116).
+- **A key dead for 15 releases.** `backend` became `container_backend` in March 2026. The shipped help topic advertised the dead key through every release from v0.2.0 to v0.8.0, with `make check` green throughout, until a human read it (D116).
+- **Paths that outlived their files.** The `internal/` move left `architecture/where-to-change.md` — the doc an agent opens *first* to find what to change — pointing at twelve files that no longer existed. Following it faithfully was worse than having no recipe (D116).
+- **Docs asserting checks nobody runs.** `Makefile:123` claimed "CI installs hadolint"; no install step had ever existed. `../standards/python.md` claimed `mypy --strict` coverage it did not have. Both read as guarantees (D116).
+
+### Cost-vs-benefit
+
+Cost of applying: one date comparison per session (free), plus a real sweep a few times a year. Damage prevented: an agent acting confidently on a false claim — which is strictly worse than acting on no claim, because a wrong recipe is followed and a missing one prompts a question. Threshold: sweep the whole doc surface on the clock; sweep code comments when the surrounding code has materially changed; gate anything a machine can check instead.
+
+### Sources
+
+Established after the D116 convention audit found four distinct classes of silent doc rot in one pass, none of which any existing gate could have caught. Full discussion: D117.
+
+Originally established in D117.
 
 ---
 

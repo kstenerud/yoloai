@@ -1,5 +1,6 @@
-<!-- ABOUTME: Terminal sink for abandoned questions — decided "won't do", drained from questions-unresolved.md. -->
-<!-- ABOUTME: Distinct from resolved- (answered) and deferred- (parked w/ trigger): these are permanently dropped. -->
+> **ABOUTME:** Terminal sink for questions permanently dropped as "won't do," each with a
+> reason. Distinct from questions-resolved.md (answered) and questions-deferred.md (parked
+> with a trigger).
 
 # Abandoned questions
 

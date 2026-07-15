@@ -1,5 +1,5 @@
-<!-- ABOUTME: History sink for resolved critiques drained from critiques-unresolved.md. -->
-<!-- ABOUTME: Item-queue pattern: active items live in the unresolved- file, done ones land here. -->
+> **ABOUTME:** History sink for critiques that were resolved and applied.
+> Companion to critiques-unresolved.md, which holds the active working queue.
 
 # Resolved critiques
 

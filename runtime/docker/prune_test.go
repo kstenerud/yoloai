@@ -1,3 +1,7 @@
+// ABOUTME: Disk-usage tiering for `system prune`: deduplicated image-layer
+// ABOUTME: sizing (avoids multiply-counting shared base layers), which
+// ABOUTME: container/volume bytes count as reclaimable cache, and image-reclaim
+// ABOUTME: blockers.
 package docker
 
 import (

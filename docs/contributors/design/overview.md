@@ -1,5 +1,6 @@
-<!-- ABOUTME: Product/design-altitude overview of yoloAI — goal, value proposition, competitive -->
-<!-- ABOUTME: positioning, high-level architecture, directory layout, and resolved design decisions. -->
+> **ABOUTME:** Product/design-altitude overview of yoloAI: the goal, the competitive
+> positioning, and the architecture rationale behind the sandboxed-agent approach — the
+> orientation a reader wants before diving into the per-layer design specs.
 
 > Design-overview companion to [`README.md`](README.md) (this directory's index). For the
 > code-architecture altitude (layer diagram, backend plugin model, data flows) see

@@ -1,7 +1,7 @@
-ABOUTME: Append-only decision log for yoloAI (live, D45 onward). D-numbered
-ABOUTME: entries record the choices that shape principles, standards, and
-ABOUTME: design. Earlier entries D1–D44 live in working-notes-archive.md and
-ABOUTME: are still cited by D-number. New decisions append to the bottom here.
+> **ABOUTME:** Live half of yoloAI's append-only decision log. D-numbered entries record what
+> was decided, what was rejected, and why; principles and standards cite them by number. New
+> decisions append to the bottom here. Earlier entries live in working-notes-archive.md, this
+> file's aged-out counterpart.
 
 # Working notes
 
@@ -12,6 +12,7 @@ Append-only decision log. Each entry is a proto-ADR: what was decided, what was 
 ## Conventions
 
 - One D-number per meaningful decision. Trivial choices (rename a flag, fix a typo) don't get a D-number.
+- Get the number from `scripts/next-id.sh D`, which scans this file **and** the archive. Grepping only this file for the highest D is how D118 got minted twice.
 - Each entry includes: **Date**, **Decision**, **Rejected**, **Why**, **Consequences**, **Composition** (which earlier D-entries this builds on), and where useful an **Expiration trigger** (the condition under which we'd revisit it).
 - Retroactive entries are marked **(retroactive)** at the start of the decision line. They are reconstructed from commit history and design docs — the consequences are observed, but the original reasoning may be partial.
 
@@ -977,7 +978,7 @@ Only then the **mechanical move**: `runtime` first/with `store`, repoint the fen
 
 ## D104 — retire the hand-rolled QEMU `-M microvm` backend; libkrun is the tech if a light VM tier is ever added (E1)
 
-**Date:** 2026-06-28. **Status:** Active. **Supersedes** the E1 microvm plan ([archived](../design/archive/plans/microvm-backend.md)); parks branch `microvm-backend` (unmerged; spike preserved at `73cfe338`).
+**Date:** 2026-06-28. **Status:** Active. **Supersedes** the E1 microvm plan ([archived](../archive/plans/microvm-backend.md)); parks branch `microvm-backend` (unmerged; spike preserved at `73cfe338`).
 
 **Context.** E1 (post-merge-roadmap) was a greenfield Linux/KVM `runtime/microvm/` backend booting OCI-profile images as QEMU `-M microvm` VMs directly — the pitch was VM isolation *without* Kata's containerd/CNI/nerdctl stack. The spike and a full agent-launch increment were built (lifecycle, QGA client, OCI→ext4 conversion, baked systemd launcher, `MicrovmBackend` in sandbox-setup.py, virtiofs workdir+state shares). Real-boot validation then exposed a structural problem, and a four-thread sourced research pass reframed the whole question.
 
@@ -1199,6 +1200,195 @@ Supersedes the base-tier smoke-skip and the per-backend "unavailable → skip" g
 - **AWS / non-LLM resources = separate workstream.** Already reserved in the closed `credential` sets (`RequestSigner{aws-sigv4}`, `MintingSource`, both `ErrNotImplemented`) per D105's survey; needs request-signing + the injector fronting non-LLM hosts. Out of DF82's scope.
 
 **Consequences.** Brokering is now the **default for Gemini and Codex** API-key users (key stays host-side; transparent for a valid API key). Direct delivery still applies on OAuth-only auth, `--no-broker`, `--network-none`, or a backend that can't host an injector. A new invariant test (`TestBrokerConfig_WellFormed`) guards every brokerable agent's config so a future edit can't ship a broken redirect. **Composition:** builds directly on D105/D106; the multi-provider and request-signing extensions remain the reserved next steps.
+
+## D116 — `AGENTS.md` is the agent contract; `CLAUDE.md`'s condensed principle restatement retires into the formal system
+
+**Date:** 2026-07-15. **Status:** Active — implementing on branch `contributor-docs-sweep`. Establishes `general-principles.md` §15. Prompted by PR #36, the project's first outside code contribution to merge.
+
+**Context.** yoloAI was a solo project until 2026-07-14. Its conventions lived in the maintainer's head and in `CLAUDE.md` — which **only Claude Code reads**. PR #36 was prepared with Codex, which reads `AGENTS.md`; the repo had none. It then missed two rules recorded nowhere a contributor could see: a user-visible break needs a `docs/BREAKING-CHANGES.md` entry in the same PR (PR #36 made `yoloai config set backend docker` exit 1 across nine changed files, none of them that one — the entry existed only because review asked), and invalidating a name obliges sweeping the surfaces that mirror it (the help topic advertised `backend` for all 15 releases from v0.2.0 to v0.8.0 after the March 2026 rename, `make check` green throughout). Neither miss was the contributor's fault. The maintainer's own follow-up then misfiled the breaking-changes entry into a shipped section — twice — because the `## Unreleased` convention existed only in the shape of three stamp commits (`883600b9`, `00f5a046`, `3c72c962`).
+
+A 44-agent convention audit (adversarially verified, streams over git history / docs / hooks / CI) confirmed 25 conventions existing only in practice. Its own completeness critic found the audit had missed the one rule PR #36 actually broke — evidence for §15's both-directions rule, and the reason this entry exists rather than a larger one.
+
+**Decision.**
+- **(a) `AGENTS.md` at the repo root is the canonical instruction file for every coding agent.** `CLAUDE.md` imports it via `@AGENTS.md`. Verified against the Claude Code docs: Claude Code does **not** read `AGENTS.md` natively and there is no flag that changes this; the import is the officially documented bridge, and is preferred over a `CLAUDE.md → AGENTS.md` symlink, which needs Admin/Developer Mode on Windows.
+- **(b) `AGENTS.md` stays small on purpose (~520 words).** Every agent ingests it every session, so it carries the contract and routes outward; detail lives one hop away in `docs/contributors/procedures/`. Size is a feature, not an accident — a long contract is skimmed.
+- **(c) `CLAUDE.md`'s "Design Principles" and "Critique Principles" sections retire.** They were a condensed restatement of the formal system, not a parallel one: `general-principles.md` already carries ecosystem-first (§3), safe defaults (§6), factual accuracy including the platform-specific test and the highest-scrutiny-for-security bar (§7), cross-platform verification (§10), and design-as-hypothesis (§12); "don't reinvent the wheel" is development §3's parent, "security requires dedicated research" is in `architecture-principles.md`. Retiring the restatement removes a second, drifting copy rather than deleting principles.
+- **(d) What was genuinely absent becomes §15** — the critique mechanics: cross-reference design↔research in both directions, and distinguish a wrong fact from a contested tradeoff. Absent from every live doc; surviving only in `working-notes-archive.md`, which is history, not guidance.
+- **(e) `docs/contributors/procedures/`** is a new subtree for how-we-work docs (PRs, issues), distinct from principles (**why**) and standards (**what/how**).
+- **(f) The tier indexes `docs/README.md` and `docs/contributors/README.md` now exist.** `CLAUDE.md` had instructed agents to "read that dir's `README.md` to route" for both; neither file existed, so the first routing hop hit nothing.
+
+**Rejected / deferred.**
+- **A sixth principles doc (`design-principles.md`)** — rejected on inspection. The first cut of this decision assumed `CLAUDE.md`'s lists were homeless and would need one; a full-repo check found all but the §15 material already stated, in richer form, in the existing five. Adding the doc would have duplicated §2/§3/§6 and grown the principle set by accretion — the exact drift `principles/README.md`'s change ritual exists to prevent.
+- **Moving the principles informally into a README** — rejected: they are principles by content, and this file's process is what stops the set growing in whatever file happened to be open.
+- **Folding `CONTRIBUTING.md` into `AGENTS.md`** — rejected: it stays the human front door and links onward. Its claim that a green `make check` predicts green CI was false since `8cf5a984` added the integration job, and is corrected rather than deleted.
+
+**Consequences.** Every agent, not just Claude Code, now loads the same contract. `CLAUDE.md` shrinks to the import plus Claude-specific hook mechanics. The rules PR #36 broke are written down for the first time, and the audit's remaining output — ~13 mechanical gates, the false claims in `python.md`/`shell.md`/`Makefile:123`, the `where-to-change.md` recipes that name zero doc surfaces — lands as follow-on work on this branch. §15 applies immediately to the critique queues in `design/`.
+
+## D117 — `## Unreleased` is permanent; standards conflicts are surfaced, not silently resolved; docs get swept on a clock (§16)
+
+**Date:** 2026-07-15. **Status:** Active — implementing on branch `contributor-docs-sweep`. Refines [D116](#d116--agentsmd-is-the-agent-contract-claudemds-condensed-principle-restatement-retires-into-the-formal-system). Establishes `general-principles.md` §16.
+
+**Context.** D116 wrote down the `## Unreleased` convention but kept the existing release ritual, in which the marker is *renamed* to the version being tagged. That ritual is the mechanism that produced the bug D116 documented: after a release, the tag's tree has no `## Unreleased` at all, so the topmost heading is the freshly-shipped version — which reads exactly like an open section to anyone who branches from the tag. Two agents filed an entry into frozen history that way, neither hit a merge conflict, and D116's response was a warning in the preamble. A warning is prose; §16 is the reason that is not good enough.
+
+Separately, D116's `standards/README.md` authority rule ("the artifact wins — fix the standard in the same commit") answered *which rule wins* but silently also instructed **contributors** to edit the project's standards inline, as part of a feature PR. That is precisely how an unreviewed contradiction enters a document.
+
+And the audit behind D116 found four distinct classes of silent documentation rot in one pass — a fabricated statistic, a config key advertised for 15 releases after its removal, twelve stale paths in the recipe agents open first, and two standards asserting checks no gate runs. No existing gate could have caught any of them, and none was caused by carelessness at writing time.
+
+**Decision.**
+- **(a) `## Unreleased` is always present, including inside a release tag, where it stands empty.** Releasing no longer renames it: the entries **drain** down into a new `## vX.Y.Z` heading beneath the marker, and the marker stays. Two consequences, both the point: an empty `## Unreleased` at a tag is *proof* that everything was accounted for, and branching from a tag — the mistake — now lands on a file whose topmost section is the correct one to write into. The trap is removed rather than documented.
+- **(b) Standards conflicts are resolved by role, not by whoever noticed.** Which rule wins is unchanged (principle > standard; specific > general; artifact > the standard describing it). What changes is who may edit the document: a **contributor's agent** resolves the conflict as best it can and does **not** touch standards or principles in that PR — a proposed change is a separate, isolated PR that defends itself. The **maintainer's agent** must **complain loudly and stop**, because a contradiction between documents is a defect in the documents, and reconciling it deliberately is the fix. Rationale for the asymmetry: a contributor cannot know which of two conflicting rules the project meant, and guessing silently is worse than asking; the maintainer can decide, but only if the agent surfaces it rather than absorbing it.
+- **(c) §16 — documentation drifts.** Prose has no backstop: nothing executes it, so nothing reports it wrong, and rotted prose reads exactly like true prose. `AGENTS.md` carries a `Docs last swept:` date; agents compare it against today and volunteer the reminder when it exceeds **~3 months**. The sweep covers the docs and periodically the code comments, which decay identically while being read as if the compiler had checked them.
+- **(d) The ABOUTME line limit becomes a stated, gated rule at 100 columns** (was 80). A worked example of (c) and of the artifact-wins rule in (b), which is why it lands here rather than in its own entry. `markdown.md` did state 80 — but inside an example block ("keep under 80 chars each") rather than as a rule, and nothing enforced it, so **351 lines across 256 files** had drifted past. Gating at 80 would have meant reflowing a quarter of the repo to satisfy a number nobody had ever applied; the artifact wins, and the artifact says ~100. At 100 exactly **four** lines exceeded it, and those were reflowed rather than grandfathered. Now enforced by `TestRepoHygiene_ABOUTMEHeaders_AllTrackedFilesCompliant`, so it cannot drift again. The gate counts **runes, not bytes**: `len()` on a Go string counts bytes, these comments use em-dashes freely (3 bytes each), and the first cut rejected a correct 99-column line as 101. Also retired here: the same section's package-godoc substitution carve-out, refuted by 29 files that carry both — and unmechanizable besides ("the godoc must actually describe the purpose" is a judgement), so gating it would have required an allowlist.
+
+**Rejected / deferred.**
+- **A `make check` warning for sweep staleness** — rejected on a mechanical fact: `.claude/hooks/on-stop.sh` runs `if output=$(make check 2>&1); then` and discards output on success, so a passing-with-warning is structurally invisible to the agents that are its entire audience. Failing the build on a calendar date is worse. The date must live where it is already read every session, which is `AGENTS.md`.
+- **Putting the date in `docs/contributors/README.md`** — rejected: only an agent that routes there sees it, and a drive-by contributor fixing a bug never does.
+- **A 6- or 12-month interval** — rejected in favour of 3. This sweep's own evidence: four months was long enough to ship a dead config key through 15 releases.
+
+**Consequences.** The release ritual changes for the maintainer (drain, don't rename) and gains a mechanical precondition worth gating: at a `vX.Y.Z` tag, `## Unreleased` must exist and be empty. §16 makes "the docs are probably stale" a thing an agent says on its own rather than something the maintainer has to remember to ask. §16 also states the ordering against D116/§15: where a claim can be gated, gate it — the sweep is for what no gate can reach.
+
+## D119 — §7's accuracy bar covers our own code, where the primary source is a grep; a finding parks its fix, never its verification
+
+**Date:** 2026-07-15. **Status:** Active — implementing on branch `contributor-docs-sweep`. Extends §7 of `general-principles.md` (established in [D5](working-notes-archive.md#d5--critique-principles-in-claudemd)). Prompted by [DF94](../design/findings-unresolved.md)'s first run and the four findings it produced (DF96–DF98).
+
+**Context.** §7 already names the failure mode exactly — "the failure mode is confident confabulation, not malicious lying"; "plausibility is not verification"; "if a claim is 'everyone knows this,' check it anyway". It did not prevent a single one of the errors in the D117 Tart work, because every one of them was a claim about **our own code**, and §7 is scoped to *external* facts: its Rule enumerates "competitor features, counts, security properties, kernel behaviour, vendor SLAs", its trigger reads "about to state a competitor / security / kernel fact you haven't checked", and its threshold is "every factual claim in a design doc, research file, or competitive comparison".
+
+Four claims in one workstream, each stated confidently, each false, each refutable in seconds by reading this repo:
+
+- "§12 permits this" — asserted while *citing §12 by name*, without reading it. The rule being cited banned the call about to be written.
+- "`EnsureSetup` short-circuits when the base exists" — `needsBuild`'s first early return was read; the checksum path two lines on (`layout.CacheDir()`, under an isolated temp dir) was not. It rebuilt a ~29 GB VM per test.
+- "`NewIntegrationRuntime`'s ambient `os.UserHomeDir` is a latent landmine" — no caller was checked. The ambient read was correct, the "fix" a regression that would have pointed tests at the developer's real `~/.yoloai`.
+- "seatbelt's twin bug may be unreachable" — filed as an unverified finding, reasoning from the one function that *wasn't* the bug. It was reachable at nine call sites, and two minutes of grep disproved it.
+
+The asymmetry §7 misses: it budgets "5–30 minutes per non-trivial claim", which is honest for a vendor SLA and reads as *expensive*, so the bar is reserved for Big External Claims. For our own code the primary source is the code. Checking is seconds. The principle therefore applies **more** strongly at **lower** cost precisely where it was not scoped, and the cost line was quietly licensing the skip.
+
+Separately, `findings-unresolved.md`'s policy says "Don't expand a workstream's scope to absorb new findings." That governs **fixing**. It was read as licensing a parked **verification**, which is how DF98 shipped into a permanent record as a confident wrong guess — the shape a reader trusts most, because it looks like knowledge that someone already did the work on.
+
+**Decision.**
+- **(a) §7 covers claims about this codebase, at a near-zero cost threshold.** Before stating how our own code behaves — in a comment, a finding, a commit message, or an explanation to the maintainer — read the path end to end. Not the first plausible early return: the end. The primary source is the code, and it is a grep away, so the 5–30 minute budget does not apply and is not a reason to skip. If verification genuinely isn't cheap, say the claim is unverified *and name the check that would settle it*.
+- **(b) Documenting uncertainty is not resolving it.** Where the check is cheap, run it. A hedge is not a substitute for two minutes of grep, and an unverified finding is worse than no finding: it occupies the slot, and the next reader inherits a guess wearing the costume of a result.
+- **(c) A finding parks its fix, never its verification.** The discovered-findings policy's no-scope-creep rule applies to the remedy. Establishing whether the defect is *real* is not scope creep — it is what makes the entry worth writing. File what is true, not what is plausible.
+- **(d) Breadth and depth are different axes.** "Don't read files just in case" governs *surveying* — the forty-file tour before a one-line fix, which remains banned. Reading the one path behind a claim you are about to commit to is not speculative: it *is* the current step. Where the two pull against each other, (a) wins; that is what §7 being a principle means.
+
+**Rejected alternatives.**
+- **A new §17** — rejected, and the rejection is the evidence for the decision: adding one was proposed *without checking whether §7 already existed*. It did, and it already said the right thing. The defect was scope, not absence. A second principle saying "verify" would have split the authority and taught that §7 is the external-facts one.
+- **A lint rule for this** — rejected as a category error; no linter detects an unverified belief. What *is* gateable are the specific consequences (a `YOLOAI_TEST_*` gate nothing sets; a hardcoded `"yoloai-"` outside `internal/config/names.go`), and those are being gated separately. Per §16's ordering: where a claim can be gated, gate it — this bar is for what no gate can reach.
+- **Deleting or weakening "avoid speculative exploration"** — rejected. It was initially blamed for these errors; the evidence does not support it. Three of the four were overconfidence, not thrift, and the rule prevents a real failure mode. It needed scoping, not removal — see (d).
+
+**Consequences.** The bar an agent must clear before writing a sentence about this codebase goes up, and the cost of clearing it is a grep. DF98's entry is the worked example, preserved with its wrong first guess recorded rather than quietly corrected, because the guess is the lesson. Note the limit honestly: (a)–(d) would have caught the §12, `NewIntegrationRuntime` and seatbelt errors, and would **not** have caught "the test never starts its VM" or "the assertion contradicts a design we abandoned" — those needed execution, which is what `releasetest` is for and what DF94 proves the value of.
+
+## D120 — a conflict between sources is a finding, not a decision to make
+
+**Date:** 2026-07-15. **Status:** Active — implementing on branch `contributor-docs-sweep`. Extends [D119](#d119--7s-accuracy-bar-covers-our-own-code-where-the-primary-source-is-a-grep-a-finding-parks-its-fix-never-its-verification), which did not reach this case. Generalises [D117](#d117--unreleased-is-permanent-standards-conflicts-are-surfaced-not-silently-resolved-docs-get-swept-on-a-clock-16)(b) from standards documents to any two sources of a fact.
+
+**Context.** D119 was written, committed, and within the hour its author made a fifth error of the same family that D119's scope did not reach. That sequence is the argument for this entry, and it is why D119 was left as written rather than quietly widened.
+
+The error: attributing six commits to the wrong model. The agent's system prompt said it was Sonnet 5; the harness's `/model` display and its own injected `Co-Authored-By` template both said Opus 4.8. The template is documented to reflect the *active session model*, so two of the three sources agreed and were right. The `/model` invocation that opened the session had said "saved as your default **for new sessions**" — the running session never switched.
+
+The mechanism is what makes this distinct from D119's four. Those were *unchecked* claims. This one was **checked**: the contradiction was found, named in writing ("a stale template", "misguided"), resolved unilaterally in favour of the source that fit the story already built, and then argued to the maintainer with selected supporting evidence (`git log` showing per-model attribution — true, and irrelevant to which model was running). The maintainer agreed. That agreement was not corroboration: the agent had supplied the inputs. The false attribution then went into permanent history inside a commit whose body argued for verifying claims against primary sources.
+
+D117(b) already states the rule for documents — "a contradiction between documents is a defect in the documents, and reconciling it deliberately is the fix" — and it was read that same session. It did not fire, because the conflict was between a system prompt and a UI rather than between two standards docs. The shape is identical; only the subjects differed.
+
+**Decision.**
+- **(a) A conflict between sources is itself the finding.** When two authoritative sources disagree about a fact — two docs, a doc and the code, the harness and its own instructions, a tool's output and its documentation — the disagreement is the discovery. Usually one of them is a defect. Report it; do not silently pick a winner.
+- **(b) Never resolve a conflict by narrative fit.** "That one is stale / wrong / obviously an example" is a hypothesis, not a finding, and it arrives feeling like a conclusion. If the resolution is the one that lets the story you already have stay intact, treat that as the tell. §7's precedence order (principle > standard; specific > general; artifact > the standard describing it) settles *rules*; it does not settle *facts*. Facts are settled by evidence or by asking.
+- **(c) Agreement you argued for is not corroboration.** Persuading the maintainer with evidence you selected proves only that the argument was coherent. Where the maintainer holds evidence you cannot see — their screen, their hardware, their intent — asking for it costs one sentence and outranks any amount of inference.
+- **(d) Claims about your own runtime are subject to the bar too.** What model am I, what did the user configure, what is my own harness doing — these are facts with primary sources, and the agent is not one of them. D119 scoped to this codebase; that gap is what let this through.
+
+**Rejected alternatives.**
+- **Amending D119 to add this clause** — rejected. D119 is unpushed and could have absorbed it invisibly. That would have deleted the evidence: a principle written and then failed by its own author within the hour is a stronger argument for the principle than the principle is. Same reasoning as DF98, which keeps its wrong first guess on the record.
+- **"Trust the harness over your own reasoning"** — rejected as the wrong lesson, and unstable: the harness is sometimes wrong too, and a rule that ranks sources by origin just relocates the narrative-fit problem. The rule is about what to do with a *disagreement*, not about which source wins.
+- **A gate** — none exists. No check detects an agent confidently resolving a contradiction in its own favour. This is squarely §16's "for what no gate can reach" category.
+
+**Consequences.** One more thing an agent must stop and ask about, at the cost of a sentence. The worked example is preserved in §7 rather than only here, because §7 is what gets read at the moment the bar applies. Note the honest limit, since D119's failure is precisely why this entry exists: nothing here would have caught the four D119 errors, and nothing in D119 would have caught this one. They are complementary halves — don't assert what you haven't read, and don't resolve what you haven't asked about.
+
+## D121 — don't count things unless something enforces the count; counts rot fastest, lists second
+
+**Date:** 2026-07-15. **Status:** Active — implementing on branch `contributor-docs-sweep`. Scopes DRY in `development-principles.md` §1 (established in D22) and the ABOUTME rules in `standards/markdown.md`. Generalises the ABOUTME fix made under [D119](#d119--7s-accuracy-bar-covers-our-own-code-where-the-primary-source-is-a-grep-a-finding-parks-its-fix-never-its-verification).
+
+**Context.** DEV §1 already states DRY at full strength: "Every piece of knowledge has one authoritative location." A count in a comment is plainly a second location for a fact the artifact already states. The rule did not prevent a single instance, and the reason is in the sentence immediately after it: "But — Sandi Metz: *duplication is far cheaper than the wrong abstraction*. Extract on the second concrete use case."
+
+That caveat is about code. Its trade is duplication against a *bad abstraction*. Applied to a count in prose it is nonsense — there is no abstraction being avoided, nothing on the other side of the scale — but it reads, to anyone about to write "Thirteen principles", as permission. So the repo states DRY prominently and drifted four ways, all found in one session:
+
+- `general-principles.md`'s ABOUTME said "Thirteen principles" with sixteen `## §n` headings below it. §14, §15 and §16 were added and the count was not.
+- `repo_hygiene_test.go` said "three standing claims" with four gates defined beneath it.
+- `markdown.md` stated the ABOUTME width limit as "80" only inside an example block. 351 lines drifted past it (D117).
+- `markdown.md` also claimed "171 of 257 tracked `*_test.go` files (~two-thirds) already carry an ABOUTME header". After D117's sweep it is 260 of 260, enforced by a gate: both numbers stale and the ratio false, in the same paragraph that now carries this rule.
+
+The last one is the tell. The count was written to *argue* for the convention ("the code already votes for this"), which is the one thing a count is genuinely good for — and it was still wrong within days, because the argument won and nobody went back.
+
+**Decision.**
+- **(a) Don't state what the artifact already states**, unless the restatement earns something the original cannot give. The test: if adding an item to the artifact would oblige you to edit prose elsewhere, that prose is a denormalized copy and will be wrong the first time someone forgets.
+- **(b) Ranked by rot speed: counts, then lists, then characterizations.** A **count** carries zero information the artifact doesn't and the next addition falsifies it — never write one unless a gate enforces it. An **exhaustive list** at least carries names, but claims completeness, so the next addition falsifies it silently. A **characterization** claims nothing a later edit can falsify. Prefer characterizations: say what the thing is for, and leave what it contains to the headings, which are authoritative and greppable.
+- **(c) The Metz caveat is scoped to code.** It does not license restating a derivable fact in prose. Duplicated logic that drifts usually breaks a test; duplicated prose that drifts just quietly lies, which is worse — it is trusted precisely because someone bothered to write it.
+- **(d) A number that a gate enforces is fine.** The 100-column ABOUTME rule is the counter-example: it survives because `TestRepoHygiene_ABOUTMEHeaders_AllTrackedFilesCompliant` fails when it is wrong. Per GEN §16's ordering — where a claim can be gated, gate it; the sweep is for what no gate can reach — the choice is *gate the number or delete it*, never "write it down and hope".
+
+**Rejected alternatives.**
+- **A new principle (GEN §17)** — rejected. DRY already says this; the defect was a code-shaped caveat quietly exempting the most common case. A second principle competing with DRY is how two rules end up disagreeing. Same reasoning as D119's fix to §7: scope the principle that exists.
+- **Fixing the counts and moving on** — rejected, and this was the initial instinct: update "Thirteen" to "Sixteen". That re-arms the trap for §17. The count had to go, not be corrected.
+- **Banning lists in ABOUTMEs outright** — rejected as too strong. A list is a real navigational aid and the sibling docs' partial lists are useful, if imprecise. The rule is to prefer characterizations and to never imply a completeness you are not enforcing.
+- **A gate for this** — none is possible in general: no check knows that "Thirteen" refers to the `## §n` headings rather than to something else. Specific instances *are* gateable (a count of a thing the gate can also count), and where that is true, (d) applies.
+
+**Consequences.** Prose gets slightly vaguer and stops being wrong, which is the trade. Note what this does not reach: a characterization can still be stale in substance ("cross-cutting strategic principles" would survive the file becoming something else entirely), so §16's sweep is still the backstop for meaning, and this rule only removes the class that rots by construction.
+
+## D122 — check citation provenance where it is cheap and quiet; accept that D/DF citations stay review-caught
+
+**Date:** 2026-07-15. **Status:** Active — `scripts/check_citation_provenance.py`, wired as a `PostToolUse` hook in `.claude/settings.json`. Implements the countermeasure for the "no provenance on a fact" row of the asymmetry table in [research/llm-shaped-repos.md](../design/research/llm-shaped-repos.md) Part 7. Composes with [D119](#d119--7s-accuracy-bar-covers-our-own-code-where-the-primary-source-is-a-grep-a-finding-parks-its-fix-never-its-verification) and [D121](#d121--dont-count-things-unless-something-enforces-the-count-counts-rot-fastest-lists-second).
+
+**Context.** Every agent error in the D119-D121 session had one shape: a summary was in context and the source was not. The worked instance: an agent wrote "the runtime-namespace confused-deputy" into a finding, citing a research doc it had never opened, having read only a one-line description in a decision that cited it. The finding was wrong, duplicated a documented MAJOR item, and landed in a file whose first sentence excludes it. Nothing mechanical caught it; the maintainer did.
+
+A rule cannot reach this. Context is flat: it carries no bit distinguishing "I read `research/x.md`" from "a decision claims `research/x.md` says Y", so there is no moment of doubt for a "check your sources" rule to fire on. But provenance is observable *outside* the agent — the transcript records whether the session ever reached for the file. That makes it a set difference, which is the shape D119's own evidence says to hand to a machine.
+
+The design question was scope, and it turned on measurement rather than taste. Sampling the last 200 commits on `contributor-docs-sweep`:
+
+| Citation type | Commits (of 200) adding one |
+| --- | --- |
+| `D<n>` / `DF<n>` | 101 — of which 19 are pure moves (same IDs deleted elsewhere in the diff) |
+| `GEN §` / `DEV §` | 14 |
+| `research/*.md` path | 3 |
+
+**Decision.**
+- **(a) Gate research-path citations only.** Adding a `research/*.md` path to a file fires the check ~1.5% of commits. The plan's own criterion — rare means cheap and quiet — is met here and nowhere else.
+- **(b) Only a tool *input* counts as having opened a file, never a tool *result*.** This is the load-bearing line. Reaching for a path is an act; having its content arrive because another file quoted it is exactly the defect. A check that scanned results would agree with the mistake it exists to catch.
+- **(c) Accept that `D<n>`/`DF<n>` provenance stays review-caught, and write it down rather than half-gate it.** Firing on every other commit with a ~19% false-positive rate from moves alone produces a hook people disable, and a disabled hook is worse than none. Gate B already catches the falsifiable half (a citation that resolves to nothing).
+- **(d) Gaming it is fine.** An agent can open the file purely to silence the hook, but that is the same act as doing it sincerely, and it puts the source in context — which is the thing that would have prevented the error. Unusually for a proxy, satisfying it cheaply still produces the outcome, so no anti-gaming machinery is warranted.
+
+**Rejected alternatives.**
+- **A Stop-time hook over the git diff** (the original sketch) — rejected on mechanism. By end of turn the work may already be committed and the working-tree diff empty, and a diff against `origin/main` re-flags citations from earlier sessions whose reads no transcript holds. `PostToolUse` on `Write`/`Edit` hands over the added text directly, with no git and no commit-timing assumption.
+- **Gating every citation type** — rejected on the data above. This is the same failure Gate D avoids by scoping to `//go:build integration`: a matcher that flags correct work is dead on arrival, and the only question is whether it dies by being disabled or by being ignored.
+- **A repo-side gate instead** — not possible for this. The transcript is a harness artifact, so the check is Claude-specific by construction, which is what `CLAUDE.md` says `.claude/` is for. The repo-side variant available (a cited path must exist) catches link rot, not the unread-source problem, and Gate B already covers the D/DF analogue.
+- **Doing nothing and recording the idea** — genuinely close, and it was the plan's own leading option. Rejected only because the narrow scope turned out to be measurably quiet; at 101/200 the answer would have been to record and stop.
+
+**Consequences.** The hook can only complain about what it can positively establish: no transcript means silence, an existing-but-empty one does not. It accuses on a *new* citation only, so reflows and moves pass. The cost is one false pass whenever a session consults a doc by a route the transcript does not name (a subagent's read, a prior session), which the message tells the agent to say out loud and move past. `research/*.md` is a small corpus, so if research docs are ever reorganized, the regex is the thing to re-point.
+
+## D123 — a subagent's report is a secondary source; check it, because a false suspicion costs nothing
+
+**Date:** 2026-07-15. **Status:** Active — scopes GEN §7's accuracy bar to delegated work (fourth corollary). Composes with [D119](#d119--7s-accuracy-bar-covers-our-own-code-where-the-primary-source-is-a-grep-a-finding-parks-its-fix-never-its-verification) and [D120](#d120--a-conflict-between-sources-is-a-finding-not-a-decision-to-make).
+
+**Context.** GEN §7 already says plausibility is not evidence and that the failure mode is confabulation rather than lying. It does not say what to do with a report handed back by a subagent, and that gap has a measurable cost. In one session, a sweep delegated across five subagents produced 25 doc headers making a falsifiable completeness or status claim. **Three were false** — a 12% rate on exactly the claims worth making:
+
+- `egress-proxy-build`'s header said brokering "ships as the default across Linux and macOS backends". Its own body said "default for Claude **on docker**", and listed tart as degrading to direct delivery. The header was strictly broader than the source it was written from.
+- `code-map.md`'s header claimed it covered "every package's purpose" while omitting eight, including an entire backend (DF102).
+- `agent-headless-auth`'s header claimed a "Verified matrix" for research its own status line scopes to docs-only.
+
+None were visible from the report, which was fluent, specific, and confident. Each was visible in about a minute by reading the header against the body it summarized. This is the asymmetry table's "fluency is constant" row (`research/llm-shaped-repos.md` Part 7) arriving through a new door: a subagent's report is maximally fluent by construction, and the error rate is unchanged.
+
+**The insight this turns on is a cost asymmetry, and it is why the human instinct misfires here.** Between colleagues, verification is not free: trust is a social good you spend, and a false suspicion damages a relationship you need. So "take the report at face value" is correct for humans most of the time. **A probabilistic model has no relationship to damage.** Checking its work costs minutes and insults no one, so the calculus that justifies extending trust does not transfer — it is a human intuition running on a case where its premise is absent. In the same session the maintainer named it: *a false suspicion is not a failure, because we are dealing with probabilistic models*. Evidence for the cheap half: two subagent classifications were suspected here and **both were correct** — the repo's own status lines were the liars. Each check cost about two minutes and bought certainty. That is the expected outcome, not a wasted trip.
+
+**Decision.**
+- **(a) A subagent's report is a secondary source.** Its claims are unverified until checked against the primary one — the code, or the document it summarized. "I read each file and verified it" is itself a claim in the report.
+- **(b) The trigger is a returned delegation, not a feeling.** This is what makes the rule able to fire where D119's could not: "a subagent handed back work" is observable, while "am I sure?" is the internal state whose absence *is* the defect. Every returned delegation gets the check; no judgement about whether this one needs it.
+- **(c) Check the falsifiable claims, against the source — not against plausibility.** Completeness ("all", "every", "each"), status ("shipped", "complete", "verified"), and counts. Read the claim against the thing it describes: the egress-proxy error was invisible on its own and obvious beside its own body. Scanning a report for things that "look wrong" is not this — plausibility is what fails.
+- **(d) Verify the verifier.** A checking tool is code you did not test. Two written in that session were wrong: a body-integrity check that flagged 18 files when 4 were real, and a `perl -ne ... END{exit 1}` whose END block inverted its exit code and reported every plan undeclared. Both times the tool was broken and the tree was fine. A broken checker is a gate reporting green (DF94's shape), so prove the check can fail before believing that it passed.
+- **(e) Verification is part of delegation's cost.** A fan-out you cannot afford to check is a fan-out you should not launch. Budget the check in when deciding to delegate, not after the reports land.
+
+**Rejected alternatives.**
+- **Trust the report; the agent said it verified.** Rejected — that sentence is the very thing under review. All three false claims came with confident reports; one agent explicitly reported having source-verified every entry it wrote.
+- **A gate.** None is possible: "did you check the claim?" is semantic, and no check knows which sentence is a claim about what. Where the class *is* mechanical it has been gated instead — the citation gate, the plan-status gate, the ABOUTME form. This principle is for what no gate reaches, per GEN §16's ordering.
+- **A new principle (GEN §17).** Rejected on D121's reasoning: §7 already states the bar, and a second rule competing with it is how two rules end up disagreeing. Scope the principle that exists.
+- **Check everything a subagent returns, line by line.** Rejected as self-defeating: re-doing the work removes the reason to delegate. The claims are the small, high-yield surface — 25 headers out of 137 files, 3 hits.
+
+**Consequences.** Delegation gets slower and more honest. The failure this does *not* reach is a report that is true but incomplete — an agent that silently skipped a file reports nothing about it, and there is no claim to check; that class needs a corpus check (`ls` the directory, diff against the work list), which is why the completeness of a *work list* is gated by construction elsewhere. Note also the inverse cost, paid the same session: a subagent, seeing unexplained edits appear in a shared tree, correctly reverted them as an unauthorized change — they were the parent's. Distrust between agents is cheap but not free once they share a working tree; the fix there is sequencing, not trust.
 
 # Convention reminders
 

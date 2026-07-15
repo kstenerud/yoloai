@@ -1,5 +1,6 @@
-<!-- ABOUTME: Index for the decisions directory — the append-only D-numbered -->
-<!-- ABOUTME: decision log (working notes) plus its aged-out archive. -->
+> **ABOUTME:** Index for the decisions directory — the append-only, D-numbered decision log.
+> Each entry is a proto-ADR that principles and standards cite by number; this file routes to
+> the live log and its aged-out archive without restating their contents.
 
 # Decisions
 

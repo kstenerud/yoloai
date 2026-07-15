@@ -1,12 +1,15 @@
+> **ABOUTME:** Plan and policy converting "skip a test when its backend infra is absent" into a
+> hard failure on any machine that can host it, with an explicit carve-out only for environments
+> we don't control, like CI.
+
 # Plan: mandatory-infrastructure test policy (expunge skip-when-possible-but-absent)
 
-ABOUTME: Convert every "skip a test/backend when its infra isn't present/running" path to a
-ABOUTME: hard failure on controlled machines; the only carve-out is uncontrolled envs (CI).
-
-Status: **IMPLEMENTED (A–F) + LINUX-VERIFIED on branch `mandatory-infra-test-policy`.**
-Landed as D112 (A gates + testutil helper, B/C/F harness+Makefile+tooling, D CI carve-out, E docs,
-unit tests). **Verified on a fully-provisioned Linux host (docker/podman/gVisor/containerd-Kata,
-/dev/kvm):**
+- **Status:** IN-PROGRESS — IMPLEMENTED (A–F) + LINUX-VERIFIED on branch
+  `mandatory-infra-test-policy`; macOS-side verification of the `GOOS` guard still pending.
+  Landed as D112 (A gates + testutil helper, B/C/F harness+Makefile+tooling, D CI carve-out, E docs,
+  unit tests). **Verified on a fully-provisioned Linux host (docker/podman/gVisor/containerd-Kata,
+  /dev/kvm):**
+- **Depends on:** —
 - `make check` green (incl. `vet-tagged`); carve-out decision logic unit-tested on both layers.
 - `make integration` (non-root, containerd carved) — docker/orchestrator/cli **run + pass, zero
   skips**; apple/seatbelt/tart structural exit-0 via the `GOOS` guard.

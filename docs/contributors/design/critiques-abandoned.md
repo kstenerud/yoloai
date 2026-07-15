@@ -1,5 +1,6 @@
-<!-- ABOUTME: Terminal sink for abandoned critiques — decided "won't act on", drained from critiques-unresolved.md. -->
-<!-- ABOUTME: Distinct from resolved- (applied) and deferred- (parked w/ trigger): these are permanently dropped. -->
+> **ABOUTME:** Terminal sink for critiques permanently dropped as "won't act on," each with a
+> reason. Distinct from critiques-resolved.md (applied) and critiques-deferred.md (parked with
+> a trigger).
 
 # Abandoned critiques
 

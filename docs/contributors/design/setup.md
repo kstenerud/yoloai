@@ -1,3 +1,7 @@
+> **ABOUTME:** Design for first-run readiness and the `yoloai system setup` wizard — the
+> non-interactive library-side setup step, the one-time CLI onboarding tip, and the sole
+> interactive path for choosing tmux/backend/agent defaults. One page of the split design-doc set.
+
 > **Design documents:** [Overview](README.md) | [Commands](commands.md) | [Config](config.md) | [Security](security.md) | [Environments](environments.md) | [Research](research/README.md) | [research/](research/)
 
 ## First-Run Experience

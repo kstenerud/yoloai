@@ -1,5 +1,6 @@
-<!-- ABOUTME: Verified survey of native turn-finished/stop/idle callbacks across the four non-Claude shipped agents. -->
-<!-- ABOUTME: Gates the detection-strategy design: which agents supply a native completion callback vs fall to the heuristic default. -->
+> **ABOUTME:** Verified survey of native turn-finished/stop/idle callbacks each non-Claude shipped
+> agent exposes, gating the pluggable detection-strategy design (native callback vs heuristic
+> fallback) that backs the idle-detection architecture.
 
 # Agent Turn-Completion Callbacks (Codex, Gemini, OpenCode, Aider)
 

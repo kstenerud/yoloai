@@ -1,3 +1,5 @@
+// ABOUTME: Tests for the interactive y/N confirmation prompt: yes/no/
+// ABOUTME: empty/EOF input handling and context cancellation.
 package cliutil
 
 import (

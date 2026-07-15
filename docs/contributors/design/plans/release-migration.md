@@ -1,7 +1,15 @@
-<!-- ABOUTME: Release-gated cross-version concerns for the layering-refactor branch: -->
-<!-- ABOUTME: the prerelease sandbox-compat test, the on-disk format gates, and W1b. -->
+> **ABOUTME:** Tracks what must be verified or finished before the layering-refactor branch's
+> on-disk and cross-binary format changes reach a release, so nothing is silently missed. A
+> living checklist, kept current as gates are added or retired while the branch changes.
 
 # Release migration — `layering-refactor` → `main` → release tag
+
+- **Status:** IN-PROGRESS — the prerelease cross-version test (§1) ran and passed on Linux and
+  macOS (2026-06-08), and W1b (§3) shipped as the v1→v2 migration step. Remaining: the
+  `docs/BREAKING-CHANGES.md` entry for this branch's public-API reshape and the `agent_files`
+  inner json-tag change, and keeping §2's format/version-gate table current as new on-disk/
+  boundary fields are added before merge.
+- **Depends on:** —
 
 ## Why this doc exists
 

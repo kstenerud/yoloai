@@ -1,14 +1,19 @@
 //go:build integration
 
+// ABOUTME: Shared integration-test helpers: create/stop/start/reset/destroy
+// ABOUTME: wrappers over the state.Deps pipeline, per-backend (docker,
+// ABOUTME: legacy-docker, podman) setup fixtures, and project/aux-dir fixtures.
 package orchestrator_test
 
 import (
+	"bytes"
 	"context"
-	"io"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -62,9 +67,77 @@ func destroySandbox(ctx context.Context, mgr *orchestrator.Engine, name string) 
 // integrationSetup sets HOME to a temp dir, connects to Docker,
 // builds the base image, and returns a Engine. Uses t.Cleanup
 // for automatic teardown.
+// dockerWarm guards the once-per-run docker bootstrap. It used to live in
+// TestMain, which ran it unconditionally and so made docker a prerequisite for
+// every test in this multi-backend package — including seatbelt, apple and tart
+// tests that never touch a daemon (DF99). Owning it here means the first docker
+// test pays for it and a run with no docker tests never connects at all.
+var (
+	dockerWarmOnce sync.Once
+	dockerWarmErr  error
+)
+
+// warmDockerBase builds the docker base image once per test binary, so the
+// per-test EnsureSetup calls below hit the cache and return in milliseconds
+// instead of each rebuilding. Absence is reported to the caller rather than
+// exiting: `make integration` already fails loudly via `make base-image` if the
+// daemon is down (D112), so the second copy of that check here bought nothing
+// and cost every non-docker test a docker dependency.
+func warmDockerBase(ctx context.Context) error {
+	dockerWarmOnce.Do(func() {
+		step := testutil.TestMainBreadcrumb("sandbox")
+		var rt *dockerrt.Runtime
+		step("connecting to docker", func() {
+			rt, dockerWarmErr = dockerrt.New(ctx, config.Layout{}.WithEnv(testutil.GetCuratedHostEnv(testutil.IntegrationHostEnvVars)))
+		})
+		if dockerWarmErr != nil {
+			return
+		}
+		defer rt.Close() //nolint:errcheck // best-effort close
+
+		// Pre-seed the build-inputs checksum in this bootstrap HOME. `make
+		// integration` builds the base image (via `make base-image`) immediately
+		// before this binary runs, so the daemon already has yoloai-base:latest
+		// matching the current embedded build inputs. Without the seed,
+		// EnsureSetup finds no checksum and triggers a redundant rebuild, which
+		// races the daemon's delete-then-create on the tag and surfaces as
+		// "AlreadyExists after deleting the existing one". See
+		// backend-idiosyncrasies.md "Docker daemon races on AlreadyExists when
+		// rebuilding an existing tag with identical content".
+		home, err := os.MkdirTemp("", "yoloai-warm-*")
+		if err != nil {
+			dockerWarmErr = fmt.Errorf("warm docker: temp home: %w", err)
+			return
+		}
+		defer os.RemoveAll(home) //nolint:errcheck // best-effort cleanup
+		layout := config.NewLayout(filepath.Join(home, ".yoloai"))
+		if err := os.MkdirAll(layout.CacheDir(), 0750); err != nil { //nolint:forbidigo // test-edge dir create
+			dockerWarmErr = fmt.Errorf("warm docker: cache dir: %w", err)
+			return
+		}
+		dockerrt.RecordBuildChecksum(layout, "docker")
+
+		// Capture the build output rather than discarding it, and attach it to the
+		// error. There is no *testing.T here to log through, and io.Discard is what
+		// reduced a real failure to a bare "docker build exited with code 1" with
+		// the cause thrown away (DF97). On success the buffer is dropped.
+		mgr := orchestrator.NewEngineWithRuntime(rt, slog.Default(), strings.NewReader(""), orchestrator.WithLayout(layout))
+		var out bytes.Buffer
+		step("ensuring base image is ready", func() {
+			if err := mgr.EnsureSetup(ctx, &out); err != nil {
+				dockerWarmErr = fmt.Errorf("warm docker base image: %w\n--- build output ---\n%s", err, out.String())
+			}
+		})
+	})
+	return dockerWarmErr
+}
+
 func integrationSetup(t *testing.T) (*orchestrator.Engine, context.Context) {
 	t.Helper()
 	ctx := context.Background()
+
+	// Docker is this helper's backend, so this helper warms it (DF99).
+	require.NoError(t, warmDockerBase(ctx), "docker must be running for docker integration tests")
 
 	home := testutil.IsolatedHome(t)
 	// Thread the curated host env into the Engine's layout so host-side git (the
@@ -92,7 +165,7 @@ func integrationSetup(t *testing.T) (*orchestrator.Engine, context.Context) {
 	t.Cleanup(func() { rt.Close() }) //nolint:errcheck // test cleanup
 
 	mgr := orchestrator.NewEngineWithRuntime(rt, slog.Default(), strings.NewReader(""), orchestrator.WithLayout(layout))
-	require.NoError(t, mgr.EnsureSetup(ctx, io.Discard))
+	require.NoError(t, mgr.EnsureSetup(ctx, testutil.LogWriter(t)))
 
 	return mgr, ctx
 }
@@ -132,7 +205,7 @@ func legacyDockerIntegrationSetup(t *testing.T) (*orchestrator.Engine, context.C
 	t.Cleanup(func() { rt.Close() }) //nolint:errcheck // test cleanup
 
 	mgr := orchestrator.NewEngineWithRuntime(&legacyDockerRuntime{Runtime: rt}, slog.Default(), strings.NewReader(""), orchestrator.WithLayout(layout))
-	require.NoError(t, mgr.EnsureSetup(ctx, io.Discard))
+	require.NoError(t, mgr.EnsureSetup(ctx, testutil.LogWriter(t)))
 
 	return mgr, ctx
 }
@@ -177,7 +250,7 @@ func podmanIntegrationSetup(t *testing.T) (*orchestrator.Engine, context.Context
 	t.Cleanup(func() { rt.Close() }) //nolint:errcheck // test cleanup
 
 	mgr := orchestrator.NewEngineWithRuntime(rt, slog.Default(), strings.NewReader(""), orchestrator.WithLayout(layout))
-	require.NoError(t, mgr.EnsureSetup(ctx, io.Discard))
+	require.NoError(t, mgr.EnsureSetup(ctx, testutil.LogWriter(t)))
 
 	return mgr, ctx
 }

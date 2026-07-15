@@ -1,3 +1,6 @@
+// ABOUTME: CreateTag (including names starting with '-' not being parsed as a
+// ABOUTME: flag) and BuildSHAMapByMatching's commit-to-tag SHA lookup.
+
 package git
 
 import (

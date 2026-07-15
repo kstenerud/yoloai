@@ -1,3 +1,6 @@
+// ABOUTME: Docker Runtime unit tests: mount/port SDK conversion, per-mode
+// ABOUTME: RequiredCapabilities gating (runc floor, gVisor), descriptor/probe
+// ABOUTME: behavior, and the image-presence confirm-by-list retry/backoff.
 package docker
 
 import (

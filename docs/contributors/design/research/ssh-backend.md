@@ -1,3 +1,8 @@
+> **ABOUTME:** Design for a remote SSH backend giving yoloAI bare-metal isolation and resource
+> offloading beyond the local Docker/Tart/Seatbelt backends. Deferred once other work covered
+> its main use cases more cheaply, but the interface-rename ideas here already landed and the
+> rest is kept as a ready-to-pick-up record if demand returns.
+
 # SSH Backend Design
 
 Research/design date: 2026-03-21

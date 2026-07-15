@@ -268,7 +268,7 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 	slog.Debug("tart Create: clone succeeded", "name", cfg.Name)
 
 	// Save instance config so Start can read mounts/network/ports
-	sandboxPath := filepath.Join(r.layout.SandboxesDir(), sandboxName(cfg.Name))
+	sandboxPath := filepath.Join(r.layout.SandboxesDir(), r.sandboxName(cfg.Name))
 	cfgData, err := json.Marshal(cfg)
 	if err != nil {
 		return fmt.Errorf("marshal instance config: %w", err)
@@ -307,7 +307,7 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 // giving the agent a clean process state.
 func (r *Runtime) Start(ctx context.Context, name string) error {
 	slog.Debug("tart Start", "name", name)
-	sandboxPath := filepath.Join(r.layout.SandboxesDir(), sandboxName(name))
+	sandboxPath := filepath.Join(r.layout.SandboxesDir(), r.sandboxName(name))
 
 	// Check if already running
 	if r.isRunning(ctx, name) {
@@ -443,7 +443,7 @@ func (r *Runtime) Stop(ctx context.Context, name string) error {
 // Uses a hard stop (not suspend) before deleting — suspending before an
 // immediate delete would waste time writing RAM state to disk.
 func (r *Runtime) Remove(ctx context.Context, name string) error {
-	sandboxPath := filepath.Join(r.layout.SandboxesDir(), sandboxName(name))
+	sandboxPath := filepath.Join(r.layout.SandboxesDir(), r.sandboxName(name))
 
 	// Hard stop first (don't suspend — state is about to be deleted)
 	r.stopVM(ctx, name)
@@ -559,7 +559,7 @@ func (r *Runtime) translateWorkDirToVMPath(workDir string) string {
 func (r *Runtime) GitExec(ctx context.Context, name, _, workDir string, args ...string) (string, error) {
 	// Callers in the sandbox package pass the sandbox name (e.g. "mybox").
 	// The Tart VM is named with the instance prefix (e.g. "yoloai-mybox").
-	vmName := instancePrefix + strings.TrimPrefix(name, instancePrefix)
+	vmName := r.instanceName(name)
 	if !r.isRunning(ctx, vmName) {
 		return "", runtime.ErrNotRunning
 	}
@@ -614,7 +614,7 @@ func (r *Runtime) Close() error {
 
 // DiagHint returns a Tart-specific hint for checking logs.
 func (r *Runtime) DiagHint(instanceName string) string {
-	logPath := filepath.Join(r.layout.SandboxesDir(), sandboxName(instanceName), backendDir, vmLogFileName)
+	logPath := filepath.Join(r.layout.SandboxesDir(), r.sandboxName(instanceName), backendDir, vmLogFileName)
 	return fmt.Sprintf("check VM log at %s", logPath)
 }
 
@@ -645,14 +645,34 @@ func (r *Runtime) AttachCommand(tmuxSocket string, _ int, _ int, _ runtime.Isola
 	return append(cmd, "attach", "-t", "main")
 }
 
-// instancePrefix is prepended to sandbox names by the sandbox package
-// to form instance names. We strip it to recover the sandbox name for
-// constructing file-system paths.
-const instancePrefix = "yoloai-"
+// instancePrefix returns the prefix the store prepends to sandbox names to form
+// instance names, for THIS runtime's principal: "yoloai-" by default, or
+// "yoloai-<principal>-" when the Layout is principal-scoped (D58/D59, settable
+// by an integrator via ClientCreateOptions.Principal).
+//
+// It must be derived from the layout, never hardcoded. This used to be a
+// `const instancePrefix = "yoloai-"`, which silently broke every principal-scoped
+// caller: stripping only "yoloai-" from "yoloai-acme-mybox" yields
+// "acme-mybox", so sandboxName resolved <SandboxesDir>/acme-mybox — a directory
+// that does not exist. The VirtioFS share then pointed nowhere and every :copy
+// workdir failed to stage with a bare "(l)stat: No such file or directory" from
+// rsync inside the guest. Prune was already principal-aware (prune.go), so the
+// backend disagreed with itself. Found by the DF94 lifecycle tier, the first
+// test ever to run tart with a principal set.
+func (r *Runtime) instancePrefix() string {
+	return config.InstancePrefix(r.layout.Principal)
+}
 
 // sandboxName strips the instance prefix to recover the sandbox name.
-func sandboxName(instanceName string) string {
-	return strings.TrimPrefix(instanceName, instancePrefix)
+func (r *Runtime) sandboxName(instanceName string) string {
+	return strings.TrimPrefix(instanceName, r.instancePrefix())
+}
+
+// instanceName accepts either a sandbox name or an already-prefixed instance
+// name and returns the instance name — the idiom used by callers that take
+// whatever the sandbox package hands them.
+func (r *Runtime) instanceName(name string) string {
+	return r.instancePrefix() + r.sandboxName(name)
 }
 
 // buildRunArgs constructs the arguments for tart run.

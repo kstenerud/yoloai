@@ -1,3 +1,8 @@
+> **ABOUTME:** Go coding standard for yoloAI — formatting and lint configuration, naming and
+> file-organization conventions, error-handling and API-design shape, and the operational
+> practices (idempotent resource creation, ambient-config bans) this codebase has learned the
+> hard way. The concrete "what and how" behind development-principles.md's "why."
+
 # Go Coding Standard
 
 Reference for consistent Go code style and practices across yoloAI.

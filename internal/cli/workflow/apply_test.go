@@ -1,3 +1,6 @@
+// ABOUTME: Tests for `apply` argument parsing: refs-vs-paths disambiguation
+// ABOUTME: (with/without --), dispatchApply's mutually-exclusive-flag and
+// ABOUTME: :rw-dir guards, and buildTagsByCommit's SHA normalization.
 package workflow
 
 import (

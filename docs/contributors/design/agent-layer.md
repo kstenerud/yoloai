@@ -1,3 +1,7 @@
+> **ABOUTME:** Design for the agent layer: the one place that knows concrete agent types exist,
+> translating agent-agnostic requests from upper layers into each agent's own launch, model,
+> credential, and context specifics while keeping every layer below it agent-free.
+
 # Agent layer — per-agent adapters over the agent-free lower layers
 
 **Status:** Design converged 2026-06-24 (design conversation), not yet implemented. The **agent** refinement of

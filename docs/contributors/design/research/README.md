@@ -1,3 +1,7 @@
+> **ABOUTME:** Index of yoloAI's design research: topic-by-topic notes backing architecture and
+> backend decisions, each summarizing what was verified and which decision or open question it
+> feeds. Start here to find the evidence trail behind a given design choice.
+
 # Research
 
 Research documents supporting yoloAI's design decisions. Each file covers a broad topic area with verified facts, community sentiment, and design implications.

@@ -1,3 +1,7 @@
+// ABOUTME: Sandbox env bootstrap: auth-presence detection (key/file/keychain),
+// ABOUTME: secrets dir creation, seed-file copying, and container settings
+// ABOUTME: patches (skip-permissions, folder-trust, stale install-method).
+
 package envsetup
 
 import (

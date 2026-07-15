@@ -1,3 +1,7 @@
+> **ABOUTME:** Feasibility research for a dedicated Podman runtime backend: what it would add over
+> pointing the Docker backend at Podman's socket, the Docker-compat API's coverage gaps, and the
+> recommended reuse-by-embedding architecture. Backs the decision on whether/how to implement it.
+
 # Podman Backend Research
 
 Podman is a daemonless OCI container runtime with a Docker-compatible CLI. A user has requested support.

@@ -1,3 +1,7 @@
+> **ABOUTME:** Community-sentiment research on how practitioners structure autonomous coding-agent
+> workflows and what they trust, translated into implications for yoloAI's copy/diff/apply model
+> and its filesystem-enforced authority-splitting between sandboxes.
+
 # Agentic Workflow Patterns and Community Sentiment
 
 Research on how practitioners structure AI coding agent workflows, what works, what doesn't, and community attitudes toward autonomous agent execution. Conducted 2026-03.

@@ -1,3 +1,7 @@
+// ABOUTME: Patch apply/check plumbing: error message formatting, contiguous-
+// ABOUTME: applied-prefix detection, CheckPatch/ApplyPatch (including traversal
+// ABOUTME: rejection for non-git target dirs), and the WithTempGitDir helper.
+
 package git
 
 import (

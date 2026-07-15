@@ -1,3 +1,7 @@
+// ABOUTME: CopyDir's baseline behavior: symlink/permission/modtime fidelity,
+// ABOUTME: clone isolation from the source, and skipping bugreports/build
+// ABOUTME: artifacts/.git dirs — plus the isBuildArtifact and RemoveGitDirs
+// ABOUTME: helpers.
 package workspace
 
 import (

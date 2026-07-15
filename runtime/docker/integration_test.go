@@ -1,5 +1,8 @@
 //go:build integration
 
+// ABOUTME: Runs the shared docker/podman-API conformance suite (runtimetest)
+// ABOUTME: against a real Docker daemon so both backends share one behavior
+// ABOUTME: table.
 package docker_test
 
 import (

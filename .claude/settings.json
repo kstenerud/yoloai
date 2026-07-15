@@ -7,6 +7,10 @@
           {
             "type": "command",
             "command": "${CLAUDE_PROJECT_DIR:-$PWD}/.claude/hooks/post-edit.sh"
+          },
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PROJECT_DIR:-$PWD}/scripts/check_citation_provenance.py"
           }
         ]
       }

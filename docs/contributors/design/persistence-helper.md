@@ -1,3 +1,8 @@
+> **ABOUTME:** Design for the persistence helper — scoped, versioned handles that let a component
+> read and write its own slice of storage while staying blind to physical layout and migration
+> sequencing. Covers the domain/handle model, ordered migration steps, and the concurrency
+> contract components mutate through.
+
 # Persistence helper — scoped versioned handles over per-domain single docs
 
 **Status:** Design converged 2026-06-15 (design conversation), not yet implemented. Foundation

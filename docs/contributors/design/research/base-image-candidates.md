@@ -1,5 +1,6 @@
-<!-- ABOUTME: Survey of pre-built Docker base images that could replace debian:bookworm-slim -->
-<!-- ABOUTME: for yoloai-base, with the gotchas that bite yoloAI specifically and a recommendation. -->
+> **ABOUTME:** Survey of pre-built Docker base images considered as a replacement for
+> `debian:bookworm-slim` in `yoloai-base`, weighed against yoloAI-specific constraints like
+> Docker-in-Docker and the fixed sandbox user. Parked: no candidate offered a worthwhile win.
 
 # Base Image Candidates for `yoloai-base`
 

@@ -1,10 +1,10 @@
+> **ABOUTME:** Design for neutralizing host code execution via git filter/diff/fsmonitor drivers
+> in the agent-controlled copy-mode work copy.
+
 # Plan: close the copy-mode host-git RCE (audit C1, CRITICAL)
 
-ABOUTME: Design for neutralizing host code execution via git filter/diff/fsmonitor
-ABOUTME: drivers in the agent-controlled copy-mode work-copy .git — the diff/apply path.
-
-Status: **IMPLEMENTED for the container backends (docker/podman/containerd),
-2026-06-29.** Surfaced by the 2026-06-29 escape/exfil security audit (finding C1,
+**Status:** IMPLEMENTED — shipped for the container backends (docker/podman/containerd) on
+2026-06-29. Surfaced by the 2026-06-29 escape/exfil security audit (finding C1,
 CRITICAL, empirically reproduced). The recommended approach below shipped:
 work-copy `add`/`diff`/`status`/`log`/`format-patch` now run in-confinement via
 each backend's `GitExec`, dispatched by `runtime.GitRunsInConfinement` behind

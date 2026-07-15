@@ -8,7 +8,6 @@ package orchestrator_test
 import (
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -63,9 +62,12 @@ func seatbeltMaliciousSetup(t *testing.T) (*orchestrator.Engine, context.Context
 	if goruntime.GOOS != "darwin" {
 		t.Skip("seatbelt is macOS-only")
 	}
-	if os.Getenv("YOLOAI_TEST_SEATBELT") != "1" {
-		t.Skip("set YOLOAI_TEST_SEATBELT=1 to run the seatbelt malicious-filter test")
-	}
+	// No cost gate: this test takes ~0.5s and needs no daemon. It used to sit
+	// behind YOLOAI_TEST_SEATBELT=1, which nothing set — not the Makefile, not
+	// CI, not any script — so the C1 containment check it performs had never run
+	// once, on the backend that needs it most (seatbelt has no container; the
+	// confinement is an SBPL profile wrapping git itself). A gate with no cost
+	// to justify it is a deleted test that reports green (DF99, DF95).
 	ctx := context.Background()
 
 	home := testutil.IsolatedHome(t)
@@ -78,7 +80,7 @@ func seatbeltMaliciousSetup(t *testing.T) (*orchestrator.Engine, context.Context
 	t.Cleanup(func() { rt.Close() }) //nolint:errcheck // test cleanup
 
 	mgr := orchestrator.NewEngineWithRuntime(rt, slog.Default(), strings.NewReader(""), orchestrator.WithLayout(layout))
-	require.NoError(t, mgr.EnsureSetup(ctx, io.Discard))
+	require.NoError(t, mgr.EnsureSetup(ctx, testutil.LogWriter(t)))
 	return mgr, ctx
 }
 
@@ -105,7 +107,7 @@ func appleMaliciousSetup(t *testing.T) (*orchestrator.Engine, context.Context) {
 	t.Cleanup(func() { rt.Close() }) //nolint:errcheck // test cleanup
 
 	mgr := orchestrator.NewEngineWithRuntime(rt, slog.Default(), strings.NewReader(""), orchestrator.WithLayout(layout))
-	require.NoError(t, mgr.EnsureSetup(ctx, io.Discard))
+	require.NoError(t, mgr.EnsureSetup(ctx, testutil.LogWriter(t)))
 	return mgr, ctx
 }
 

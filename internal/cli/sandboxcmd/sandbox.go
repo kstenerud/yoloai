@@ -1,6 +1,7 @@
 // ABOUTME: `yoloai sandbox` parent command with name-first dispatch.
 // ABOUTME: `list` is a real Cobra subcommand; everything else dispatched by RunE.
-// ABOUTME: Subcommands: list, info, log, exec, prompt, allow, allowed, deny, bugreport, vscode, unlock, terminal-snapshot.
+// ABOUTME: Subcommands: list, info, log, exec, prompt, allow, allowed, deny,
+// ABOUTME: bugreport, vscode, unlock, terminal-snapshot.
 package sandboxcmd
 
 import (

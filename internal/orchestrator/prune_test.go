@@ -1,3 +1,6 @@
+// ABOUTME: PruneTempFiles age-based sweeping of ~/.yoloai temp dirs: dry-run
+// ABOUTME: vs real removal, non-dir entries skipped, and unremovable dirs
+// ABOUTME: reported as failed rather than falsely claimed as pruned.
 package orchestrator
 
 import (

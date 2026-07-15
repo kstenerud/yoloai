@@ -2,32 +2,26 @@
 
 Tracks breaking changes made during beta. Each entry should be included in release notes for the version that introduces it.
 
-## v0.8.0
+**Every new entry goes under `## Unreleased`, and nowhere else.** That section is *always*
+present — including inside a release tag, where it stands empty. A `## vX.Y.Z` heading means
+shipped: those sections are frozen history and are never added to or edited.
 
-### Credential brokering is now the default for Gemini and Codex (not just Claude)
+**Releasing does not rename `## Unreleased`; it drains it.** The entries move down into a new
+`## vX.Y.Z` heading beneath the marker, and the empty marker stays. Two things follow, and
+they are the reason for the convention:
 
-**Previous behavior:** only Claude Code's API credential was brokered by default
-(delivered to a host-side injector, never into the sandbox). Gemini and Codex
-received their API keys **directly** in the sandbox environment — `GEMINI_API_KEY`
-and `OPENAI_API_KEY`/`CODEX_API_KEY` held the real key inside the container.
+- **An empty `## Unreleased` at a tag is the proof that every change was accounted for.** If
+  it still has entries when a release is cut, something shipped undocumented.
+- **The marker is always where you need it, even from a bad starting point.** Branch from a
+  release tag by mistake and the topmost section is still `## Unreleased` — the one you should
+  be writing into. Nothing to get wrong.
 
-**New behavior:** when an API key is present, Gemini and Codex are brokered by
-default too (D115). The real key stays host-side; inside the sandbox the agent is
-pointed at the injector and its key env var holds only a per-sandbox placeholder.
-For Gemini this is via `GOOGLE_GEMINI_BASE_URL`; for Codex the redirect is written
-into `~/.codex/config.toml` (`openai_base_url`) since Codex has no base-URL env var.
+That last point is not hypothetical. Before this convention, releasing renamed the marker away,
+so a tag left the *shipped* version's section on top, reading exactly like an open one. Two
+separate agents filed an entry into a frozen section that way, and neither hit a merge
+conflict — a misfile lands cleanly and silently.
 
-**Impact:** transparent for normal agent use with a valid API key — requests still
-reach the same upstream. But (1) the key env var inside the sandbox now holds a
-placeholder, so a custom script that reads `GEMINI_API_KEY`/`OPENAI_API_KEY` from
-inside the box to call the provider itself will get the placeholder, not the real
-key; (2) brokering only engages on the **API-key** path — an OAuth/subscription
-login (Gemini "Login with Google", Codex ChatGPT) is unaffected and still uses
-direct delivery; (3) brokering requires a backend that can host a sandbox-reachable
-injector and is skipped under `--network-none`.
-
-**Migration:** none required for standard use. To restore direct key delivery for
-a sandbox, pass `--no-broker` at `new` (sticky across restart), same as Claude.
+## Unreleased
 
 ### Config commands reject unknown paths; `config set` requires a leaf key
 
@@ -54,6 +48,33 @@ current key name (for example, `container_backend` instead of `backend`), and
 set a leaf or map entry (`tart.image`, `env.NAME`, or `model_aliases.NAME`)
 rather than a whole section. Edit the YAML file directly when replacing a
 structured section as a unit.
+
+## v0.8.0
+
+### Credential brokering is now the default for Gemini and Codex (not just Claude)
+
+**Previous behavior:** only Claude Code's API credential was brokered by default
+(delivered to a host-side injector, never into the sandbox). Gemini and Codex
+received their API keys **directly** in the sandbox environment — `GEMINI_API_KEY`
+and `OPENAI_API_KEY`/`CODEX_API_KEY` held the real key inside the container.
+
+**New behavior:** when an API key is present, Gemini and Codex are brokered by
+default too (D115). The real key stays host-side; inside the sandbox the agent is
+pointed at the injector and its key env var holds only a per-sandbox placeholder.
+For Gemini this is via `GOOGLE_GEMINI_BASE_URL`; for Codex the redirect is written
+into `~/.codex/config.toml` (`openai_base_url`) since Codex has no base-URL env var.
+
+**Impact:** transparent for normal agent use with a valid API key — requests still
+reach the same upstream. But (1) the key env var inside the sandbox now holds a
+placeholder, so a custom script that reads `GEMINI_API_KEY`/`OPENAI_API_KEY` from
+inside the box to call the provider itself will get the placeholder, not the real
+key; (2) brokering only engages on the **API-key** path — an OAuth/subscription
+login (Gemini "Login with Google", Codex ChatGPT) is unaffected and still uses
+direct delivery; (3) brokering requires a backend that can host a sandbox-reachable
+injector and is skipped under `--network-none`.
+
+**Migration:** none required for standard use. To restore direct key delivery for
+a sandbox, pass `--no-broker` at `new` (sticky across restart), same as Claude.
 
 ## v0.7.0
 

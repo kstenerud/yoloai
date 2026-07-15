@@ -1,7 +1,7 @@
-ABOUTME: Shell-script conventions for yoloAI: bash strict mode, ShellCheck,
-ABOUTME: ABOUTME headers, three distinct contexts (audit scripts / hook scripts
-ABOUTME: / container entrypoint). The .claude/hooks/ scripts are part of the
-ABOUTME: project contract — committed and required for any clone.
+> **ABOUTME:** Shell-script conventions for yoloAI — why audit scripts, Claude Code hook scripts,
+> and the container entrypoint trampoline each need a different strict-mode and shebang
+> contract, plus the ShellCheck and composition discipline they share. Read this before adding a
+> script rather than picking a strict-mode convention by guessing.
 
 # Shell Script Standard
 

@@ -29,12 +29,73 @@ jobs:
       - uses: sigstore/cosign-installer@v3
       - uses: anchore/sbom-action/download-syft@v0
 
-      # Use the annotated tag's message body as the release notes: always create
-      # the tag with `git tag -a vX.Y.Z -F notes.md` (first line = title, the rest
-      # = the GitHub release body). A lightweight tag yields an empty body here, so
-      # the annotation is required for curated notes.
+      # Use the annotated tag's message body as the release notes: always create the
+      # tag with `git tag -a vX.Y.Z -F notes.md`. `%(contents:body)` EXCLUDES the
+      # subject line, so the tag's first line is DISCARDED — write it as the version
+      # string (that is what we do) and put the notes below it. The release *title*
+      # is the tag name, from goreleaser's default name_template, not that line.
+      # A lightweight tag yields an empty body, so the annotation is required.
       - name: Extract release notes from the tag annotation
         run: git tag -l --format='%(contents:body)' "${GITHUB_REF_NAME}" > "${RUNNER_TEMP}/release-notes.md"
+
+      # Release preconditions no local gate can reach — `make check` cannot see a tag.
+      # This runs BEFORE goreleaser on purpose: a failure here means delete-and-retag,
+      # which is cheap, rather than deleting an already-published release.
+      - name: Verify release preconditions
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+
+          # An annotated tag is required: the release body comes from its message.
+          if [ "$(git cat-file -t "$tag")" != "tag" ]; then
+            echo "ERROR: $tag is a lightweight tag, so it carries no message and the"
+            echo "       release body would be empty."
+            echo "       Re-cut it: git tag -a $tag -F notes.md && git push --force origin $tag"
+            exit 1
+          fi
+
+          if [ ! -s "${RUNNER_TEMP}/release-notes.md" ]; then
+            echo "ERROR: $tag's annotation has no body, so the release notes are empty."
+            echo "       The first line of the annotation is the subject and is DISCARDED;"
+            echo "       the notes must follow it. Re-cut: git tag -a $tag -F notes.md"
+            exit 1
+          fi
+
+          python3 - "$tag" <<'PY'
+          import re, sys
+
+          tag = sys.argv[1]
+          text = open("docs/BREAKING-CHANGES.md").read()
+
+          # D117: `## Unreleased` is permanent and must be EMPTY at a release tag.
+          # Releasing drains its entries down into a new `## vX.Y.Z` heading and leaves
+          # the marker in place. So an empty marker here is the proof that every change
+          # was accounted for; entries still sitting in it mean something is shipping
+          # undocumented, under a version heading that does not mention it.
+          m = re.search(r"^## Unreleased[ \t]*$(.*?)(?=^## |\Z)", text, re.M | re.S)
+          if not m:
+              sys.exit(
+                  "ERROR: docs/BREAKING-CHANGES.md has no '## Unreleased' section.\n"
+                  "       It is permanent (D117) — releasing drains it, never renames it.\n"
+                  "       Add it back directly above the newest version heading."
+              )
+
+          leftover = m.group(1).strip()
+          if leftover:
+              first = leftover.splitlines()[0]
+              sys.exit(
+                  f"ERROR: '## Unreleased' still has entries at {tag}, starting:\n"
+                  f"         {first}\n"
+                  "       Those changes are about to ship under a version heading that does\n"
+                  f"       not describe them. Drain them into a new '## {tag}' section below\n"
+                  "       the marker, leave the marker empty, then re-cut the tag."
+              )
+
+          if not re.search(rf"^## {re.escape(tag)}[ \t]*$", text, re.M):
+              print(f"note: no '## {tag}' section in docs/BREAKING-CHANGES.md — "
+                    f"reading that as 'no breaking changes in this release'.")
+          print(f"ok: '## Unreleased' is empty; {tag} is annotated with a non-empty body.")
+          PY
 
       - uses: goreleaser/goreleaser-action@v7
         with:

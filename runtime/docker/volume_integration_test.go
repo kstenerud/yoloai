@@ -1,5 +1,8 @@
 //go:build integration
 
+// ABOUTME: The managed /var/lib/docker volume backing docker-in-docker: a
+// ABOUTME: privileged sandbox gets one on Create and Remove reclaims it, while
+// ABOUTME: a non-privileged sandbox never gets one.
 package docker
 
 import (

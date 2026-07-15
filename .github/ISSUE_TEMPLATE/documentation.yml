@@ -1,0 +1,25 @@
+name: Documentation
+description: Missing, incorrect, or unclear documentation
+labels: ["docs", "needs-triage"]
+body:
+  - type: input
+    id: location
+    attributes:
+      label: Where is the problem?
+      description: Link to the page, command help text, or section.
+      placeholder: "e.g. https://github.com/kstenerud/yoloai/blob/main/docs/GUIDE.md#profiles"
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What's wrong or missing?
+    validations:
+      required: true
+
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested improvement
+      description: Optional — how should it read instead?

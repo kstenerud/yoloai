@@ -1,6 +1,7 @@
-ABOUTME: Makefile conventions for yoloAI. GNU Make, single top-level Makefile,
-ABOUTME: targets are the developer interface, make check is the contract, every
-ABOUTME: target .PHONY-listed, help-comments visible via ## prefix.
+> **ABOUTME:** Makefile conventions for yoloAI's single top-level Makefile — why targets are the
+> developer interface for every build/test/quality action, the shape `make check` and the test
+> tiers must keep, and phony/help-comment/variable discipline. Points at the live Makefile for
+> anything that would otherwise be a pasted, driftable copy.
 
 # Makefile Standard
 
@@ -20,13 +21,13 @@ Why: convention over configuration (`../principles/development-principles.md §1
 
 ## `.PHONY` discipline
 
-Every target that is not a file is listed in a single `.PHONY` line:
+Every target that is not a file is listed in a single `.PHONY` line near the top of the Makefile:
 
 ```make
-.PHONY: build test fmt lint tidy-check govulncheck hadolint actionlint check cover \
-        integration e2e integration-podman python-test python-typecheck \
-        setup-dev-python smoketest smoketest-quick releasetest setcap clean
+.PHONY: build test fmt lint ... clean
 ```
+
+This standard intentionally does not paste the full member list — it grows independently of this doc (it currently has close to 30 entries) and a pasted copy silently drifts every time a target is added. Read the live line in the Makefile for the current membership.
 
 File-producing targets (like `$(BINARY)`) are not phony; their dependencies and timestamps matter.
 
@@ -37,9 +38,12 @@ The `.PHONY` line is exhaustive — every phony target appears there, in one pla
 Targets that are part of the developer interface carry a `##` prefix help comment immediately above:
 
 ```make
-## check: run all CI checks locally (same as PR checks)
-check: lint tidy-check hadolint actionlint test python-test
+## <target>: <one-line description of what running it does>
+<target>: <prerequisite-targets>
+	<recipe>
 ```
+
+(`hadolint`, `crosscheck`, and `check` in the current Makefile are worked examples of this shape — read them there rather than here, since a pasted copy of a real target's help text drifts the moment that target's prerequisites change.)
 
 The convention is `## <target>: <one-line description>`. Multi-line help blocks (for targets with notable side effects or platform constraints) use the same `##` prefix on each continuation line. The `smoketest` and `integration-podman` targets in the current Makefile demonstrate the multi-line form.
 
@@ -47,20 +51,23 @@ Build infrastructure targets (`$(BINARY)`, internal helpers) do not need help co
 
 ## The `make check` contract
 
-`make check` is the single quality gate (D20, `../principles/development-principles.md §10`):
+`make check` is the single quality gate (D20, `../principles/development-principles.md §10`). Its prerequisite list is the source of truth — read the live `check:` line in the Makefile rather than trusting a pasted copy here; it has grown twice (`vet-tagged`, then `crosscheck`/`lint-cross`) without every doc catching up. As of this writing it is:
 
 ```make
-check: lint tidy-check hadolint actionlint test python-test
+check: lint lint-cross vet-tagged crosscheck tidy-check hadolint actionlint test python-test
 ```
 
 Concretely, `make check` runs:
 
-1. **`lint`** — gofmt verification + golangci-lint.
-2. **`tidy-check`** — verifies `go mod tidy` produces no changes; fails if `go.mod`/`go.sum` are out of date.
-3. **`hadolint`** — Dockerfile linter for the base image.
-4. **`actionlint`** — GitHub Actions workflow linter.
-5. **`test`** — full unit-test suite.
-6. **`python-test`** (which runs `python-typecheck` first) — pytest + mypy on the typed Python surface in `runtime/monitor/`.
+1. **`lint`** — gofmt verification + golangci-lint (host platform).
+2. **`lint-cross`** — golangci-lint against every non-host `GOOS` in `LINT_PLATFORMS`.
+3. **`vet-tagged`** — `go vet -tags 'integration e2e'`, typechecking build-tagged test files the default build skips.
+4. **`crosscheck`** — `go vet` cross-compiled for every non-host `GOOS`/`GOARCH`, catching platform-only breaks (e.g. darwin-only code) without needing that platform.
+5. **`tidy-check`** — verifies `go mod tidy` produces no changes; fails if `go.mod`/`go.sum` are out of date.
+6. **`hadolint`** — Dockerfile linter for the base image.
+7. **`actionlint`** — GitHub Actions workflow linter.
+8. **`test`** — full unit-test suite.
+9. **`python-test`** (which runs `python-typecheck` first) — pytest + mypy on the typed Python surface.
 
 All must pass. Locally, `make check` is invoked manually before commit and automatically by the Claude Code Stop hook (`.claude/hooks/on-stop.sh`). CI runs the same target.
 
@@ -85,7 +92,7 @@ Per `../principles/testing-principles.md §5` (test at the right layer), the pro
 | `test`               | Unit         | Go toolchain only                 | Yes (in `make check`)    |
 | `integration`        | Integration  | Docker daemon                     | Yes (separate CI job)    |
 | `integration-podman` | Integration  | Podman with socket                | Yes (W6, commit `b99b46e`) |
-| `e2e`                | End-to-end   | Docker + tmux + agent             | No (developer machines)  |
+| `e2e`                | End-to-end   | Docker + tmux + agent             | Yes (`integration` CI job runs `make e2e` after `make integration`) |
 | `smoketest`          | Smoke (full) | Whole host matrix (strict)        | No (pre-release; root on Linux) |
 | `smoketest-quick`    | Smoke (quick)| Docker/container core path (strict) | No                     |
 | `releasetest`        | Composite    | Everything                        | No (pre-release)         |
@@ -116,7 +123,7 @@ Targets do not duplicate logic; `releasetest` invokes the others.
 
 - **Business logic.** The Makefile is the developer interface, not the implementation. Build and test orchestration only.
 - **State persisted across invocations** beyond the build artefact and Make's own timestamp mechanism. Anything that needs persistent state lives in `~/.yoloai/` (managed by the binary).
-- **Network-fetched runtime dependencies.** Tool versions are pinned (`golangci-lint@v2.11.3`, `govulncheck@latest` is the lone exception — vulncheck-of-the-week semantics are intentional).
+- **Network-fetched runtime dependencies.** Tool versions are pinned (`golangci-lint@v2.11.3`); see "Tool version pinning" below for the deliberately-floating exceptions.
 
 ## Tool version pinning
 

@@ -1,9 +1,14 @@
+> **ABOUTME:** Design for splitting yoloAI's sandbox substrate from its agent-orchestration layer
+> into a layered capability DAG, so a consumer can pull only the substrate capability it needs;
+> drives where the substrate/refinement boundary falls.
+
 # Module split: sandbox substrate vs. agent orchestration
 
-**Status:** Active on the `module-split` branch (cut from `main` after `multi-workdir`
-merged). The agent map, the backend-leakage map, and the Phase 0 **first cut**
-(`FilesystemLocality` + git routing) have landed here; remaining phases below. Will earn
-a D-number in `working-notes.md` when adopted.
+- **Status:** IN-PROGRESS — active on the `module-split` branch (cut from `main` after
+  `multi-workdir` merged). Phases 0, A, B, and E are DONE; C-minimal is DONE, C-full is
+  deferred pending a concrete headless/non-PTY consumer; Phase D (depguard fences encoding the
+  full DAG) remains. Will earn a D-number in `working-notes.md` when adopted.
+- **Depends on:** —
 
 **Premise (from the coupling map, 2026-06-13):** yoloAI is already, structurally,
 a reusable *sandbox substrate* under an *agent-specific* shell. The substrate's

@@ -1,9 +1,15 @@
+> **ABOUTME:** Design for restoring multi-directory diff/apply — tracking `:copy`/`:overlay`
+> across more than one working directory — with a narrower CLI surface than the version Q-U
+> cut for being over-engineered. Records D81.
+
 # Multi-workdir diff/apply
 
-**Status:** Implemented on the `multi-workdir` branch (all 4 phases). Records
-[D81](../../decisions/working-notes.md#d81). Revives the multi-dir diff/apply capability
-that [Q-U](../../decisions/working-notes.md) (2026-05-25) removed, with the cleaner CLI
-surface Q-U explicitly deferred to "real demand".
+- **Status:** IN-PROGRESS — implemented on the `multi-workdir` branch for `diff`/`apply`
+  (all 4 phases, merged to `main`); the specifier resolver is not yet wired into `reset`/export
+  (see Open questions). Records [D81](../../decisions/working-notes.md#d81). Revives the
+  multi-dir diff/apply capability that [Q-U](../../decisions/working-notes.md) (2026-05-25)
+  removed, with the cleaner CLI surface Q-U explicitly deferred to "real demand".
+- **Depends on:** —
 
 ## Problem
 

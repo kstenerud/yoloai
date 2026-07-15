@@ -89,7 +89,7 @@ func TestSeatbelt_CreateInspectRemove(t *testing.T) {
 	require.NoError(t, rt.Create(ctx, cfg))
 
 	// The sandbox directory layout should now exist.
-	sandboxPath := filepath.Join(rt.layout.SandboxesDir(), sandboxName(cfg.Name))
+	sandboxPath := filepath.Join(rt.layout.SandboxesDir(), rt.sandboxName(cfg.Name))
 	require.DirExists(t, sandboxPath, "sandbox directory should be created")
 	require.DirExists(t, filepath.Join(sandboxPath, backendDir),
 		"backend dir should be created")

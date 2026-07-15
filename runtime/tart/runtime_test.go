@@ -1,3 +1,6 @@
+// ABOUTME: Simulator-runtime handling for the Tart backend: parsing "platform:
+// ABOUTME: version" specs, deterministic multi-platform cache-key generation,
+// ABOUTME: and simctl JSON output parsing.
 package tart
 
 import (

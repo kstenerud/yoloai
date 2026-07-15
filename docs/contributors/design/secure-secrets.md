@@ -1,3 +1,8 @@
+> **ABOUTME:** Design for the credential boundary (DF38): a host-side egress proxy that holds real
+> credentials, injects them on allowlisted egress, and refreshes short-lived tokens, so a live
+> credential never enters the sandbox. Shares its enforcement point with netpolicy's egress-proxy
+> strategy and lays out the phased build-out toward it.
+
 # Secure secrets — the credential boundary (DF38 design)
 
 > **Refined by [D105](../decisions/working-notes.md#d105--egress-proxy-workstream-d-brokering-is-the-default-containment-is-opt-in-phased-by-credential-material-refines-d90d95) (2026-06-28):** injection uses **`base_url` redirect** (no agent pins certs), not transparent MITM; **brokering the agent's API key is the always-on default** (the "trust-posture" knob below is resolved for the API key); the build is **phased by credential material** (metered keys → subscription OAuth refresh-broker → git/other tools), with today's direct delivery retained as a per-backend transitional fallback. Read D105 for the settled shape; the text below is the originating design.

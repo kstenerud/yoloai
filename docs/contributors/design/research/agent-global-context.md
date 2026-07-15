@@ -1,3 +1,7 @@
+> **ABOUTME:** Verified survey of how each shipped agent ingests global, user-level context (its
+> file, path, and import mechanism), so the agent-layer's Context capability can inject yoloAI's
+> operating instructions without assuming a Claude-shaped mechanism.
+
 # Agent global-context ingestion
 
 **Verified mid-2026 (web survey of official docs); a fast-moving snapshot — treat as version-dependent.**

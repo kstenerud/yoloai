@@ -1,5 +1,5 @@
-<!-- ABOUTME: History sink for resolved findings drained from findings-unresolved.md. -->
-<!-- ABOUTME: Item-queue pattern: active items live in the unresolved- file, done ones land here. -->
+> **ABOUTME:** History sink for findings drained from findings-unresolved.md once addressed.
+> Items move here so the active queue stays a working set of only the still-open concerns.
 
 # Resolved findings
 

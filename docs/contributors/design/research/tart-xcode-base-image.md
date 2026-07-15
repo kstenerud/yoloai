@@ -1,3 +1,8 @@
+> **ABOUTME:** A/B investigation comparing Tart's plain base image (host-mounted Xcode, in-VM
+> runtime download) against the `-xcode` baked image for iOS sandboxes, weighing per-sandbox
+> download time against one-time image footprint. Leaves the adoption decision open and
+> records the bugs surfaced during validation.
+
 # Tart `-xcode` base image — A/B findings
 
 **Status:** investigation complete, feature (image mode) **uncommitted, pending adoption decision.** 2026-06-09.

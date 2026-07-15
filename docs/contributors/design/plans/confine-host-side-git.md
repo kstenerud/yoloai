@@ -1,18 +1,21 @@
+> **ABOUTME:** Closes the pre-existing copy-mode RCE surface on backends where work-copy git ran
+> on the host with filters/textconv/fsmonitor live.
+
 # Plan: confine all host-side work-copy git (apple, seatbelt, broken-metadata probe)
 
-ABOUTME: Close the pre-existing copy-mode RCE surface on backends where work-copy git still
-ABOUTME: runs on the host with filters/textconv/fsmonitor live (apple, seatbelt) + the probe.
-
-Status: **IMPLEMENTED (2026-07-05) for apple + seatbelt.** The 2026-06-29 fix
-([copy-mode-git-rce.md](copy-mode-git-rce.md)) closed the RCE for docker/podman/containerd
-and tart, but left **apple and seatbelt** running work-copy git host-side, and left a
-host-side `git status` in the broken-metadata recovery path on **all** backends. Fix 1
-(apple) and Fix 2 (seatbelt) below are now shipped and verified on real macOS hardware
-(build brief: [confine-host-side-git-macos-build.md](confine-host-side-git-macos-build.md);
-tests: `internal/orchestrator/integration_macos_test.go`,
-`runtime/seatbelt/gitprofile_test.go`). Fix 3 (probe fsmonitor hardening) is done
-cross-platform. This is the invariant that [copy-mode-history.md](copy-mode-history.md)
-depends on.
+- **Status:** IN-PROGRESS — The 2026-06-29 fix
+  ([copy-mode-git-rce.md](copy-mode-git-rce.md)) closed the RCE for docker/podman/containerd
+  and tart, but left **apple and seatbelt** running work-copy git host-side, and left a
+  host-side `git status` in the broken-metadata recovery path on **all** backends. Fix 1
+  (apple) and Fix 2 (seatbelt) below shipped and were verified on real macOS hardware
+  2026-07-05 (build brief: [confine-host-side-git-macos-build.md](confine-host-side-git-macos-build.md);
+  tests: `internal/orchestrator/integration_macos_test.go`,
+  `runtime/seatbelt/gitprofile_test.go`). Fix 3 (probe fsmonitor hardening) is done
+  cross-platform, but the clean-filter-on-`git status` vector in the broken-metadata probe
+  remains open — tracked as DF67 in `findings-unresolved.md` (low exploitability: `.meta`
+  lives outside the sandbox, so the agent can't corrupt it to trigger the path). This is the
+  invariant that [copy-mode-history.md](copy-mode-history.md) depends on.
+- **Depends on:** —
 
 ## The vulnerability (verified in code, 2026-07)
 

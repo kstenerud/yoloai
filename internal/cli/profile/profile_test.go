@@ -1,3 +1,6 @@
+// ABOUTME: Tests for profile diff rendering: scalar/map/list-addition
+// ABOUTME: diffs, and the workdir/resources/network/dir-addition diff
+// ABOUTME: formatters used to preview profile changes before applying.
 package profile
 
 import (

@@ -1,5 +1,7 @@
 //go:build e2e
 
+// ABOUTME: Compiled-binary smoke for --json output on `ls` and `sandbox
+// ABOUTME: allowed`: verifies valid JSON and the documented field shapes.
 package e2e_test
 
 import (
