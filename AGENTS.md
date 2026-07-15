@@ -50,6 +50,9 @@ Full detail and the reasoning behind each rule:
    Never a bare `Claude`, never a `🤖 Generated with` footer. Humans and bots omit it.
 6. **Cite the rationale ID** (`D<n>` decisions, `DF<n>` findings) wherever you write
    rationale. Never invent one; never strip one. No decision behind the change? Cite nothing.
+   Allocating a new one? Run **`scripts/next-id.sh D`** / **`scripts/next-id.sh DF`**; it prints
+   the next free number. Don't grep for the highest — every duplicate ID this repo has had came
+   from a grep that missed a sink.
 7. **File the defects you don't fix** in `design/findings-unresolved.md`. Fixing in scope is
    fine *if you record it*; silently working around it never is.
 8. **Multi-phase work starts with a plan** in `design/plans/`. A one-commit fix doesn't.

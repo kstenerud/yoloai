@@ -12,6 +12,7 @@ Append-only decision log. Each entry is a proto-ADR: what was decided, what was 
 ## Conventions
 
 - One D-number per meaningful decision. Trivial choices (rename a flag, fix a typo) don't get a D-number.
+- Get the number from `scripts/next-id.sh D`, which scans this file **and** the archive. Grepping only this file for the highest D is how D118 got minted twice.
 - Each entry includes: **Date**, **Decision**, **Rejected**, **Why**, **Consequences**, **Composition** (which earlier D-entries this builds on), and where useful an **Expiration trigger** (the condition under which we'd revisit it).
 - Retroactive entries are marked **(retroactive)** at the start of the decision line. They are reconstructed from commit history and design docs — the consequences are observed, but the original reasoning may be partial.
 

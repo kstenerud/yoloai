@@ -22,6 +22,10 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 - **Pointer:** <file:line or commit hash>
 ```
 
+`<N>` comes from **`scripts/next-id.sh DF`**, which scans all four findings sinks. Don't grep for
+the highest DF yourself: the sink you forget is where the duplicate comes from, and a partial grep
+is worse than none because it also supplies the confidence.
+
 ## Findings
 
 ### DF87 — vmnet wedge has a second, false-healthy variant: a stale DHCP lease on a superseded subnet
