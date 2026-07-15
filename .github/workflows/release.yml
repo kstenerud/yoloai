@@ -61,6 +61,26 @@ jobs:
             exit 1
           fi
 
+          # A prerelease (v1.2.3-rc.1, -beta, -alpha) is a rehearsal of this
+          # machinery, not a shipment, so the changelog checks below do NOT apply to
+          # it: its changes ship under the real vX.Y.Z that follows, and draining
+          # `## Unreleased` into a `## v1.2.3-rc.1` heading would file them under a
+          # version no user ever installs — then the real tag would find the marker
+          # empty and its own heading missing. The tag-annotation checks above DO
+          # apply: an rc with empty release notes is a broken rehearsal.
+          #
+          # Detected the same way goreleaser's `prerelease: auto` and the cask's
+          # `skip_upload: auto` (DF88) decide it: a semver prerelease component.
+          # Those two already knew about rc tags; this step did not, and would have
+          # failed the very rc that DF89 exists to run.
+          case "$tag" in
+            *-*)
+              echo "==> $tag is a prerelease: skipping the BREAKING-CHANGES checks."
+              echo "    Its entries stay in '## Unreleased' and drain at the real tag."
+              exit 0
+              ;;
+          esac
+
           python3 - "$tag" <<'PY'
           import re, sys
 
