@@ -248,14 +248,6 @@ is worse than none because it also supplies the confidence.
   `internal/envsetup/envsetup.go` (`HasAnyAPIKey`, `shouldSkipSeedFile`), `internal/agent/agent.go`
   (`BrokerConfig.SelectCredential`). Related: D100, D101, D105, session-layer.md.
 
-### DF89 — the release workflow's node24 action bump is statically verified but has never executed; validate with an rc tag
-
-- **Discovered:** 2026-07-14 · **Workstream:** node20 action-runtime clearing (post-v0.8.0)
-- **Severity:** MEDIUM (the release path is the one flow no local gate can reach; a break surfaces at tag time, i.e. mid-release)
-- **Disposition:** PARKED — do before the next real `vX.Y.Z` tag
-- **Description:** `goreleaser-action@v6` (node20) → `@v7` (node24) and `attest-build-provenance@v2` (composite → `actions/attest@v2.4.0`, node20) → `actions/attest@v4` (node24) landed on main as `94a3cbe3` + `c2f74355`. Both were verified **statically only**: every input we pass still exists in the new `action.yml`, `.goreleaser.yaml` is `version: 2` matching v7's `~> v2` constraint, `attestations: write` is already granted, and `actions/attest` with no predicate/sbom-path inputs auto-generates SLSA build provenance (upstream README). But `make check` does not and cannot execute workflows — the release job only runs on a `v*` tag push, so none of this has actually run. Validate with an annotated `v0.8.1-rc.1`: `prerelease: auto` marks it a GitHub prerelease, then confirm the 15 assets, the cosign signature, and `gh attestation verify <file> --repo kstenerud/yoloai`. **Fix DF88 first** or the rc clobbers the stable Homebrew cask. Teardown afterwards is `gh release delete` + `git push --delete origin <tag>`; note two residues are permanent and unremovable — the Go module proxy caches any pushed tag immutably (benign: `@latest` ignores prereleases), as does the attestation store.
-- **Pointer:** `.github/workflows/release.yml:39` (goreleaser-action), `:52` (actions/attest); commits `94a3cbe3`, `c2f74355`. Related: DF88.
-
 ### DF91 — `.goreleaser.yaml`'s `changelog:` block is inert; release notes come from the tag annotation
 
 - **Discovered:** 2026-07-15 · **Workstream:** contributor-docs sweep (D116)
