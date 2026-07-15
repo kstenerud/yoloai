@@ -54,7 +54,12 @@ jobs:
             exit 1
           fi
 
-          if [ ! -s "${RUNNER_TEMP}/release-notes.md" ]; then
+          # Test for non-whitespace content, NOT file size: `%(contents:body)` emits
+          # a bare newline for a subject-only annotation, so the file is 1 byte and
+          # `[ ! -s ]` never fires — this guard was a no-op for the one case it
+          # exists to catch, and would have shipped a release with empty notes
+          # (DF109, found by actually running it against a subject-only tag).
+          if ! grep -q '[^[:space:]]' "${RUNNER_TEMP}/release-notes.md"; then
             echo "ERROR: $tag's annotation has no body, so the release notes are empty."
             echo "       The first line of the annotation is the subject and is DISCARDED;"
             echo "       the notes must follow it. Re-cut: git tag -a $tag -F notes.md"
