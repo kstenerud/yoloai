@@ -43,7 +43,7 @@ DOCKER_HOST_ENV := $(DOCKER_HOST)
 DOCKER_HOST_RESOLVED = $(if $(DOCKER_HOST_ENV),$(DOCKER_HOST_ENV),$(shell docker context inspect --format '{{.Endpoints.docker.Host}}' 2>/dev/null))
 integration e2e base-image smoketest smoketest-quick: export DOCKER_HOST = $(DOCKER_HOST_RESOLVED)
 
-.PHONY: build test fmt lint lint-cross vet-tagged crosscheck tidy-check govulncheck hadolint shellcheck actionlint check cover integration e2e integration-podman integration-containerd integration-apple integration-seatbelt integration-tart python-test python-typecheck ensure-python-venv setup-dev-python smoketest smoketest-quick releasetest setcap clean clean-testtmp
+.PHONY: build test fmt lint lint-cross vet-tagged crosscheck tidy-check govulncheck hadolint shellcheck actionlint lint-commits check cover integration e2e integration-podman integration-containerd integration-apple integration-seatbelt integration-tart python-test python-typecheck ensure-python-venv setup-dev-python smoketest smoketest-quick releasetest setcap clean clean-testtmp
 
 # Always invoke `go build` and let it decide whether to relink. `go build` does
 # complete, authoritative dependency tracking — crucially including //go:embed'd
@@ -152,6 +152,15 @@ shellcheck:
 		echo "       Install shellcheck (https://www.shellcheck.net/) or start Docker."; \
 		exit 1; \
 	fi
+
+## lint-commits: check this branch's commit messages against AGENTS.md.
+## Deliberately NOT a `check` prerequisite: it needs a base ref to diff against,
+## which `make check` has no notion of (on main the range is empty and the check
+## is vacuous). CI runs it on every PR; this target is for checking before you
+## push. Override the base with `make lint-commits BASE=upstream/main`.
+BASE ?= origin/main
+lint-commits:
+	python3 scripts/lint_commits.py --base $(BASE) --head HEAD
 
 actionlint:
 	go run github.com/rhysd/actionlint/cmd/actionlint@latest

@@ -53,6 +53,23 @@ jobs:
       - name: Run checks
         run: make check
 
+  # Commit messages are a PR-only concern: the range base..HEAD only exists for a
+  # PR, and fork PRs never run .claude/hooks, so this is the only place the rules
+  # in AGENTS.md get enforced for an outside contribution.
+  commits:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # need the base commit to diff against
+
+      - name: Lint commit messages
+        run: |
+          python3 scripts/lint_commits.py \
+            --base "origin/${{ github.base_ref }}" \
+            --head "${{ github.event.pull_request.head.sha }}"
+
   integration:
     runs-on: ubuntu-latest
     needs: check

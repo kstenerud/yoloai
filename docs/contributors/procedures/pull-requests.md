@@ -74,12 +74,21 @@ python-test`.
 | Job | Runs |
 | --- | --- |
 | `check` | `make setup-dev-python`, `make check` |
+| `commits` | `scripts/lint_commits.py` over your PR's commits (PR events only) |
 | `integration` | `make base-image`, `make integration`, `make e2e` |
 | `integration-podman` | `make integration-podman` |
 
 `make check`'s `test` target is a bare `go test ./...`, which skips every
 `//go:build integration` and `//go:build e2e` file. A green `make check` does **not** predict
 a green CI.
+
+**Commit messages are checked in CI, not by `make check`** — the check needs a base ref
+to diff against, which `make check` has no notion of. Run it yourself before pushing:
+
+```sh
+make lint-commits              # against origin/main
+make lint-commits BASE=upstream/main
+```
 
 **What the gate cannot see:**
 
