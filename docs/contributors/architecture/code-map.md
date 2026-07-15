@@ -4,7 +4,17 @@
 
 # Code Map
 
-The source of truth for **where the code lives** — every package and file, the key public types, and which CLI command dispatches to which code. For the conceptual view of how the layers fit, see [overview.md](overview.md); for runtime call chains, see [data-flows.md](data-flows.md).
+Where the code lives: the mapped packages' purpose, their key public types, and which CLI command
+dispatches to which code. For the conceptual view of how the layers fit, see
+[overview.md](overview.md); for runtime call chains, see [data-flows.md](data-flows.md).
+
+**This map is partial, and nothing enforces otherwise.** It covers 30 of the tree's 62 packages;
+`go list ./...` is the authority on what exists. It claimed to cover "every package and file"
+until 2026-07-15, which is how it came to silently omit an entire backend and seven other
+packages (DF102) — and, once those were added, five more nobody had noticed. The names and paths
+it *does* give are gated (`TestRepoHygiene_ArchitectureDocRefs_Resolve`,
+`TestRepoHygiene_ArchitectureDocSections_NameRealFiles`); its coverage is not. Prefer a
+completeness claim you can check over one that sounds better (D121, D124).
 
 ## Package Map
 

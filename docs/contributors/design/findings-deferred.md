@@ -9,6 +9,15 @@ potentially actionable and carries a **`Trigger:`** line — the condition that 
 back into [`findings-unresolved.md`](findings-unresolved.md). The trigger may be unlikely, but
 it must exist so the item can be evaluated for eviction later. Newest first.
 
+### DF45 — base-image build lock is keyed by data-dir but the image tag is global to the docker daemon
+
+- **Discovered:** 2026-06-24 · **Workstream:** public-layering Shape (concurrency question raised during the smoke)
+- **Severity:** LOW (benign redundancy, **not** corruption — surfaced for the multi-principal/[D62](../decisions/working-notes.md) direction)
+- **Disposition:** DEFERRED — single-data-dir behaviour is correct today; this is benign redundancy, not corruption.
+- **Trigger:** a multi-principal daemon that serves several data dirs against one docker daemon — at that point the data-dir-keyed lock no longer covers the globally-tagged image and two principals can rebuild `yoloai-base` over each other.
+- **Description:** `Setup` serializes base-image builds with a proper double-checked `flock`: acquire `layout.DockerBaseLockPath("yoloai-base")` → re-check `imageExists` + `NeedsBuild` **inside** the lock → build only if needed → write the checksum inside the lock. So concurrent `yoloai new` within one data dir **cooperate** (one builds, the rest block then skip — no double build, no checksum race, no tag stomp). BUT the lock path derives from the **data-dir** (`layout`), while the image tag `yoloai-base` is **global to the docker daemon**. Two `yoloai new` with *different* `--data-dir` against the *same* daemon (the D62 multi-principal case) do **not** serialize on this lock → redundant concurrent `docker build` of the same global tag, last-write-wins. Benign (wasted work; per-data-dir checksum files don't corrupt each other), but a latent inefficiency the multi-tenant work should account for — e.g. namespace the tag per principal, or key the lock on the global image name rather than the data dir. Ties into the [shared-state-concurrency](research/shared-state-concurrency.md) research (D87): "is the lock keyed to the same scope as the resource it guards?"
+- **Pointer:** `runtime/docker/docker.go:332` (`Setup`, the double-checked lock), `runtime/docker/base_lock.go` (`AcquireBaseLock` → `DockerBaseLockPath`), `runtime/docker/build.go:42-54,134` (checksum). Tart mirrors the same pattern.
+
 ### DF15 — Sandbox name + workdir path validate by a different convention than their parse-don't-validate peers
 
 - **Discovered:** 2026-06-01 · **Workstream:** W-L1 (F9 doc-truth fix)
