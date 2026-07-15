@@ -1276,6 +1276,31 @@ Separately, `findings-unresolved.md`'s policy says "Don't expand a workstream's 
 
 **Consequences.** The bar an agent must clear before writing a sentence about this codebase goes up, and the cost of clearing it is a grep. DF98's entry is the worked example, preserved with its wrong first guess recorded rather than quietly corrected, because the guess is the lesson. Note the limit honestly: (a)–(d) would have caught the §12, `NewIntegrationRuntime` and seatbelt errors, and would **not** have caught "the test never starts its VM" or "the assertion contradicts a design we abandoned" — those needed execution, which is what `releasetest` is for and what DF94 proves the value of.
 
+## D120 — a conflict between sources is a finding, not a decision to make
+
+**Date:** 2026-07-15. **Status:** Active — implementing on branch `contributor-docs-sweep`. Extends [D119](#d119--7s-accuracy-bar-covers-our-own-code-where-the-primary-source-is-a-grep-a-finding-parks-its-fix-never-its-verification), which did not reach this case. Generalises [D117](#d117--unreleased-is-permanent-standards-conflicts-are-surfaced-not-silently-resolved-docs-get-swept-on-a-clock-16)(b) from standards documents to any two sources of a fact.
+
+**Context.** D119 was written, committed, and within the hour its author made a fifth error of the same family that D119's scope did not reach. That sequence is the argument for this entry, and it is why D119 was left as written rather than quietly widened.
+
+The error: attributing six commits to the wrong model. The agent's system prompt said it was Sonnet 5; the harness's `/model` display and its own injected `Co-Authored-By` template both said Opus 4.8. The template is documented to reflect the *active session model*, so two of the three sources agreed and were right. The `/model` invocation that opened the session had said "saved as your default **for new sessions**" — the running session never switched.
+
+The mechanism is what makes this distinct from D119's four. Those were *unchecked* claims. This one was **checked**: the contradiction was found, named in writing ("a stale template", "misguided"), resolved unilaterally in favour of the source that fit the story already built, and then argued to the maintainer with selected supporting evidence (`git log` showing per-model attribution — true, and irrelevant to which model was running). The maintainer agreed. That agreement was not corroboration: the agent had supplied the inputs. The false attribution then went into permanent history inside a commit whose body argued for verifying claims against primary sources.
+
+D117(b) already states the rule for documents — "a contradiction between documents is a defect in the documents, and reconciling it deliberately is the fix" — and it was read that same session. It did not fire, because the conflict was between a system prompt and a UI rather than between two standards docs. The shape is identical; only the subjects differed.
+
+**Decision.**
+- **(a) A conflict between sources is itself the finding.** When two authoritative sources disagree about a fact — two docs, a doc and the code, the harness and its own instructions, a tool's output and its documentation — the disagreement is the discovery. Usually one of them is a defect. Report it; do not silently pick a winner.
+- **(b) Never resolve a conflict by narrative fit.** "That one is stale / wrong / obviously an example" is a hypothesis, not a finding, and it arrives feeling like a conclusion. If the resolution is the one that lets the story you already have stay intact, treat that as the tell. §7's precedence order (principle > standard; specific > general; artifact > the standard describing it) settles *rules*; it does not settle *facts*. Facts are settled by evidence or by asking.
+- **(c) Agreement you argued for is not corroboration.** Persuading the maintainer with evidence you selected proves only that the argument was coherent. Where the maintainer holds evidence you cannot see — their screen, their hardware, their intent — asking for it costs one sentence and outranks any amount of inference.
+- **(d) Claims about your own runtime are subject to the bar too.** What model am I, what did the user configure, what is my own harness doing — these are facts with primary sources, and the agent is not one of them. D119 scoped to this codebase; that gap is what let this through.
+
+**Rejected alternatives.**
+- **Amending D119 to add this clause** — rejected. D119 is unpushed and could have absorbed it invisibly. That would have deleted the evidence: a principle written and then failed by its own author within the hour is a stronger argument for the principle than the principle is. Same reasoning as DF98, which keeps its wrong first guess on the record.
+- **"Trust the harness over your own reasoning"** — rejected as the wrong lesson, and unstable: the harness is sometimes wrong too, and a rule that ranks sources by origin just relocates the narrative-fit problem. The rule is about what to do with a *disagreement*, not about which source wins.
+- **A gate** — none exists. No check detects an agent confidently resolving a contradiction in its own favour. This is squarely §16's "for what no gate can reach" category.
+
+**Consequences.** One more thing an agent must stop and ask about, at the cost of a sentence. The worked example is preserved in §7 rather than only here, because §7 is what gets read at the moment the bar applies. Note the honest limit, since D119's failure is precisely why this entry exists: nothing here would have caught the four D119 errors, and nothing in D119 would have caught this one. They are complementary halves — don't assert what you haven't read, and don't resolve what you haven't asked about.
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.
