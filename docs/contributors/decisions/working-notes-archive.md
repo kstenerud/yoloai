@@ -503,7 +503,7 @@ Operational state (`setup_complete`) lives in `~/.yoloai/state.yaml`.
 
 ---
 
-## D26 — `signal_secrets_consumed` must precede `get_working_dir` in sandbox-setup.py
+## D118 — `signal_secrets_consumed` must precede `get_working_dir` in sandbox-setup.py
 
 **Date:** 2026-05-28
 
