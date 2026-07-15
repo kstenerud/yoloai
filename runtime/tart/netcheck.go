@@ -41,12 +41,12 @@ func (r *Runtime) NetLiveness(ctx context.Context) (runtime.NetLivenessReport, e
 	}
 	var report runtime.NetLivenessReport
 	for _, e := range entries {
-		if !e.Running || !strings.HasPrefix(e.Name, instancePrefix) {
+		if !e.Running || !strings.HasPrefix(e.Name, r.instancePrefix()) {
 			continue
 		}
 		state, detail := r.probeNetLiveness(ctx, e.Name)
 		report.VMs = append(report.VMs, runtime.VMNetHealth{
-			SandboxName: sandboxName(e.Name),
+			SandboxName: r.sandboxName(e.Name),
 			VMName:      e.Name,
 			State:       state,
 			Detail:      detail,
@@ -62,10 +62,10 @@ func (r *Runtime) NetLiveness(ctx context.Context) (runtime.NetLivenessReport, e
 func (r *Runtime) SandboxNetHealth(ctx context.Context, name string) (runtime.VMNetHealth, error) {
 	// Callers pass the sandbox name (e.g. "mybox"); the Tart VM is named with
 	// the instance prefix (e.g. "yoloai-mybox"). Same idiom as GitExec.
-	vmName := instancePrefix + strings.TrimPrefix(name, instancePrefix)
+	vmName := r.instanceName(name)
 	state, detail := r.probeNetLiveness(ctx, vmName)
 	return runtime.VMNetHealth{
-		SandboxName: sandboxName(vmName),
+		SandboxName: r.sandboxName(vmName),
 		VMName:      vmName,
 		State:       state,
 		Detail:      detail,

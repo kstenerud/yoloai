@@ -19,9 +19,29 @@ import (
 )
 
 func TestSandboxName(t *testing.T) {
-	assert.Equal(t, "mysandbox", sandboxName("yoloai-mysandbox"))
-	assert.Equal(t, "test-box", sandboxName("yoloai-test-box"))
-	assert.Equal(t, "plain", sandboxName("plain")) // no prefix — returns as-is
+	r := &Runtime{}
+	assert.Equal(t, "mysandbox", r.sandboxName("yoloai-mysandbox"))
+	assert.Equal(t, "test-box", r.sandboxName("yoloai-test-box"))
+	assert.Equal(t, "plain", r.sandboxName("plain")) // no prefix — returns as-is
+}
+
+// A principal-scoped Layout (ClientCreateOptions.Principal, D58/D59) makes the
+// instance prefix "yoloai-<principal>-". Stripping a hardcoded "yoloai-" left
+// the principal glued to the sandbox name, so every path built from it — most
+// destructively the VirtioFS share pointing at <SandboxesDir>/<name> — resolved
+// to a directory that does not exist, and :copy workdirs failed to stage.
+func TestSandboxNameIsPrincipalScoped(t *testing.T) {
+	p, err := config.ParsePrincipalSegment("acme")
+	require.NoError(t, err)
+	r := &Runtime{layout: config.Layout{}.WithPrincipal(p)}
+
+	assert.Equal(t, "yoloai-acme-", r.instancePrefix())
+	assert.Equal(t, "mybox", r.sandboxName("yoloai-acme-mybox"),
+		"the principal must be stripped along with the prefix, not left on the name")
+	assert.Equal(t, "yoloai-acme-mybox", r.instanceName("mybox"),
+		"a bare sandbox name must gain the principal-scoped prefix")
+	assert.Equal(t, "yoloai-acme-mybox", r.instanceName("yoloai-acme-mybox"),
+		"an already-prefixed instance name must round-trip unchanged")
 }
 
 func TestExecArgs(t *testing.T) {
