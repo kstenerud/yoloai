@@ -312,6 +312,38 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 - **Description:** `goreleaser-action@v6` (node20) → `@v7` (node24) and `attest-build-provenance@v2` (composite → `actions/attest@v2.4.0`, node20) → `actions/attest@v4` (node24) landed on main as `94a3cbe3` + `c2f74355`. Both were verified **statically only**: every input we pass still exists in the new `action.yml`, `.goreleaser.yaml` is `version: 2` matching v7's `~> v2` constraint, `attestations: write` is already granted, and `actions/attest` with no predicate/sbom-path inputs auto-generates SLSA build provenance (upstream README). But `make check` does not and cannot execute workflows — the release job only runs on a `v*` tag push, so none of this has actually run. Validate with an annotated `v0.8.1-rc.1`: `prerelease: auto` marks it a GitHub prerelease, then confirm the 15 assets, the cosign signature, and `gh attestation verify <file> --repo kstenerud/yoloai`. **Fix DF88 first** or the rc clobbers the stable Homebrew cask. Teardown afterwards is `gh release delete` + `git push --delete origin <tag>`; note two residues are permanent and unremovable — the Go module proxy caches any pushed tag immutably (benign: `@latest` ignores prereleases), as does the attestation store.
 - **Pointer:** `.github/workflows/release.yml:39` (goreleaser-action), `:52` (actions/attest); commits `94a3cbe3`, `c2f74355`. Related: DF88.
 
+### DF90 — `scripts/audit/*.sh` have zero callers, while `shell.md` holds one up as the canonical example
+
+- **Discovered:** 2026-07-15 · **Workstream:** contributor-docs sweep (D116)
+- **Severity:** LOW
+- **Disposition:** PARKED
+- **Description:** Four scripts (`error-handling.sh`, `import-graph.sh`, `observability.sh`, `runtime-interface-shape.sh`) are invoked by nothing: `grep -rn "scripts/audit" Makefile .github/` returns nothing. They are referenced only by `archive/plans/architecture-remediation.md`, which made them load-bearing for the F-finding closure protocol, and by `standards/shell.md:18/85/112`, which cites `error-handling.sh` as the **canonical example** of the shell standard. So they are either a real manual-invocation ritual that was never written down, or dead code that a live standard still points at. Decide which; a `make check`-shaped worldview cannot discover them either way.
+- **Pointer:** `scripts/audit/`, `docs/contributors/standards/shell.md:18`, `:85`, `:112`.
+
+### DF91 — `.goreleaser.yaml`'s `changelog:` block is inert; release notes come from the tag annotation
+
+- **Discovered:** 2026-07-15 · **Workstream:** contributor-docs sweep (D116)
+- **Severity:** LOW
+- **Disposition:** PARKED
+- **Description:** `release.yml:37` extracts `%(contents:body)` from the annotated tag and `:43` always passes `--release-notes=<file>`, which supplies the release body wholesale. goreleaser therefore never generates a changelog, so the `changelog:` block's groups (`^feat`/`^fix`/`(?i)(breaking|!:)`) and filters (`^docs:`, `^test:`, `^ci:`, `^chore`, `^build\(make\)`) never apply to anything. Not a rendering bug — `release.footer` **does** render (verified verbatim at the tail of the published v0.8.0 body) — but ~25 lines of config that look load-bearing and are not. **This matters beyond tidiness:** it is tempting to justify the commit-subject type set by "goreleaser groups the changelog by it", and that justification is false. The type set is a convention, full stop. Either delete the block or comment it as a fallback for hand-written-notes-absent releases.
+- **Pointer:** `.goreleaser.yaml:142-163` (changelog), `:172` (footer, works); `.github/workflows/release.yml:37`, `:43`.
+
+### DF92 — the bug-report templates promise a triage flow and labels that do not exist
+
+- **Discovered:** 2026-07-15 · **Workstream:** contributor-docs sweep (D116)
+- **Severity:** MEDIUM (the templates apply labels silently to nothing until the labels exist)
+- **Disposition:** PARKED
+- **Description:** `.github/ISSUE_TEMPLATE/` was built from `design/github-issues.md` (D116) after sitting designed-but-unimplemented. The templates auto-apply `needs-triage`, which **does not exist** in the repo — labels cannot be created from repo files, only via the API/UI. The design's wider taxonomy (`needs-info`, `confirmed`, `stale`, `keep`, `runtime/*`, `agent/*`, `cmd/*`) and the triage automation that would apply it are also unbuilt; those labels are deliberately not created until something applies them. Additionally the design's `--bugreport` sections specify an **outer** `<details>` wrapper around the whole report and a 64,000-byte threshold; `bugreport/writer.go` emits per-section `<details>` (`:96`, `:116`, `:122`) but no outer wrapper and no size check, so the template's "pastes render as a single collapsible line" is not yet true of real reports.
+- **Pointer:** `.github/ISSUE_TEMPLATE/`, `docs/contributors/design/github-issues.md`, `internal/cli/bugreport/writer.go:96`.
+
+### DF93 — a stray non-version tag `show` is published on origin
+
+- **Discovered:** 2026-07-15 · **Workstream:** contributor-docs sweep (D116)
+- **Severity:** LOW
+- **Disposition:** PARKED
+- **Description:** `git tag --list` carries a tag literally named `show` (almost certainly a mistyped `git show`), and it is pushed: `git ls-remote --tags origin` resolves `refs/tags/show`. Harmless to the release path — `release.yml` triggers on `v*` — but it breaks any tag query that does not filter `v*` (it silently became the answer to "first tag containing commit X" during this sweep). Deleting a published tag is not free: the Go module proxy caches pushed tags immutably, so `git push --delete origin show` removes it from GitHub but not from the proxy.
+- **Pointer:** `refs/tags/show` → `564b294b`.
+
 ## Policy origin
 
 Established in [architecture-remediation.md](../archive/plans/architecture-remediation.md) and inherited by [layering-refactor.md](../archive/plans/layering-refactor.md).

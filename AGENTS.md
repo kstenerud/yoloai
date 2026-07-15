@@ -39,9 +39,9 @@ Full detail and the reasoning behind each rule:
 3. **Code commits carry a prose body** saying what was wrong or missing and why this fixes
    it — not a restatement of the diff. `feat`/`fix`/`refactor`/`perf`. Near-universal here.
 4. **Subject is `type(scope): summary`** — `feat`, `fix`, `docs`, `test`, `refactor`, `build`,
-   `ci`, `chore`, `perf`. Imperative, no trailing period. Breaking gets `!` after the scope;
-   never a `BREAKING CHANGE:` footer. Don't infer the format from `git log` — pre-June-2026
-   commits use a superseded convention.
+   `ci`, `chore`, `perf`. Imperative, no trailing period (0 of 2137 have one). Breaking gets
+   `!` after the scope; never a `BREAKING CHANGE:` footer. Don't infer the format from
+   `git log` — pre-June-2026 commits use a superseded convention.
 5. **Attribute AI work by model:** `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`.
    Never a bare `Claude`, never a `🤖 Generated with` footer. Humans and bots omit it.
 6. **Cite the rationale ID** (`D<n>` decisions, `DF<n>` findings) wherever you write
