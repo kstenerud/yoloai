@@ -1,3 +1,8 @@
+> **ABOUTME:** Catalogues behaviour of external backends and tooling — container/VM runtimes,
+> CNI plugins, iptables, macOS sandboxing — that contradicts their own documentation or forces
+> a non-obvious workaround. Read this before diagnosing a backend problem; the symptom index
+> maps an error or symptom to the relevant entry.
+
 # Backend Idiosyncrasies
 
 Durable facts about **external tooling and platforms we depend on but cannot

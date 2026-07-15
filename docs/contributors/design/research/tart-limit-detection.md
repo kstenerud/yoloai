@@ -1,3 +1,7 @@
+> **ABOUTME:** Research answering how yoloAI's Tart backend should learn it has hit Apple's
+> concurrent macOS VM limit, and why reading Tart's own failure output beats hardcoding the limit or
+> pre-counting VMs. Carries the recommendation and the on-device verification behind it.
+
 # Tart Concurrent macOS VM Limit Detection
 
 Research question: how can yoloAI detect Apple's concurrent-macOS-VM limit from

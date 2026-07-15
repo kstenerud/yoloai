@@ -1,8 +1,8 @@
-# Egress-broker spike — `base_url` redirect + credential injection (D105)
+> **ABOUTME:** Records the spike that validated the egress-proxy credential-broker's core
+> mechanism end-to-end with a real agent, before the automated integration test existed. The
+> mock upstream server here is the historical seed that test grew from.
 
-ABOUTME: Records the 2026-06-28 spike that validated the egress-proxy credential-broker's
-central mechanism end-to-end with a real agent. The mock here is the seed for the future
-injector's integration test.
+# Egress-broker spike — `base_url` redirect + credential injection (D105)
 
 ## What this proves
 

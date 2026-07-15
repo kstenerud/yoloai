@@ -1,3 +1,7 @@
+> **ABOUTME:** Design-and-build plan, now implemented, that made session detection agent-owned:
+> on agent exit the wrapper writes `done` and falls to an interactive shell instead of killing
+> the pane, and `yoloai-resume` re-establishes the agent and its detection machinery.
+
 # Agent-owned detection + fall-to-shell + resume — design & build plan
 
 **Status:** Plan 2026-06-25, not yet started. Supersedes the deferred

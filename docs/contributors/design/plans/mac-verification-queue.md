@@ -1,7 +1,8 @@
-# macOS verification queue (`substrate-move`)
+> **ABOUTME:** Live queue of Mac-only verification smokes (tart VM, seatbelt sandbox, macOS
+> Keychain) for the `substrate-move` branch, batched so a single Mac pass clears them before
+> merge. Linux stays the sole code writer; this file records pass/fail results, not code.
 
-**ABOUTME:** Verification smokes that need a real Mac (tart VM / seatbelt sandbox / macOS
-**ABOUTME:** Keychain), batched so a Mac run knocks them out in one pass before merge.
+# macOS verification queue (`substrate-move`)
 
 **Status:** Live queue for the `substrate-move` branch. **Working model:** the Linux session is the
 **sole code writer**; this queue holds **verification-only** tasks — run the commands, record

@@ -1,5 +1,6 @@
-<!-- ABOUTME: Raw material for an external post on structuring repos around LLM failure -->
-<!-- ABOUTME: modes. Evidence from the 2026-07-15 Tart session. Not doctrine; not a spec. -->
+> **ABOUTME:** Raw material and evidence for an external post arguing that repo docs are code an
+> agent executes, so a repeated same-shape agent error is a defect report against the docs rather
+> than the agent. Captured from a single working session; not project doctrine and not a spec.
 
 # Material: repos as the instruction set an agent executes
 

@@ -1,3 +1,6 @@
+> **ABOUTME:** Index of designed-but-unbuilt yoloAI features and plans, one section per topic.
+> Each entry links to its own plan file or research doc; start a plan here before building.
+
 # Unimplemented Features
 
 Designed features not yet implemented. Each links to its design spec.

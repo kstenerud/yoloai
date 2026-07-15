@@ -1,3 +1,7 @@
+> **ABOUTME:** Router for docs/contributors — picks the right doc by task (open a PR, file an
+> issue, find where a change lives, understand why something is the way it is) and states the
+> conventions shared across the tree, including how content in it retires over time.
+
 # Contributors
 
 Docs for changing yoloAI itself. If you are *running* yoloAI, start at [`../GUIDE.md`](../GUIDE.md);

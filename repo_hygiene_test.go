@@ -32,11 +32,12 @@ import (
 // four gates were defined below (the same denormalisation D119 removed from
 // general-principles.md's ABOUTME).
 //
-//  1. Every Go/Python(runtime/monitor)/shell(scripts/) source file carries an
-//     ABOUTME header, per docs/contributors/standards/markdown.md. Without
-//     this, a new file can silently skip the convention forever — nothing
-//     else notices; the doc's "100% compliant" claim would rot the moment
-//     someone forgets.
+//  1. Every Go, runtime/monitor Python, scripts/ shell, and live
+//     docs/contributors Markdown file carries an ABOUTME header, in the form
+//     its language requires, per docs/contributors/standards/markdown.md.
+//     Without this, a new file can silently skip the convention forever —
+//     nothing else notices; the doc's "100% compliant" claim would rot the
+//     moment someone forgets.
 //  2. Every `D<n>`/`DF<n>` rationale ID cited from a Go comment resolves to
 //     a real entry in decisions/working-notes*.md or design/findings-*.md,
 //     and no ID is defined twice. Without this, a citation can silently
@@ -60,11 +61,13 @@ import (
 //     DF97, where it cost a ~35 minute misdiagnosis on Tart and reduced a real
 //     docker build failure to an exit code with no cause.
 //
-// Deliberately NOT gated here: markdown.md also requires ABOUTME headers on
-// docs/contributors/**/*.md. Most of those files are still missing one — a
-// known, tracked bulk-add task, not a per-PR regression. Gating it here would
-// make this test permanently red for a gap a separate task owns; once that
-// sweep lands, extend the ABOUTME gate to cover docs/contributors/**/*.md too.
+// (docs/contributors/**/*.md USED to be listed here as deliberately not gated,
+// on the grounds that the bulk-add was "a known, tracked bulk-add task". It was
+// known and it was not tracked: no issue, no plan, no finding, in a repo that
+// files everything. The exemption had become the only record of the gap it
+// described, which is a backlog of one that nothing would ever drain. The sweep
+// landed and the gate now covers them; the archive stays out, and that is a
+// standing rule with a reason, not a deferral.)
 //
 // (ABOUTME line width USED to be listed here as deliberately not gated, on the
 // grounds that markdown.md stated no width rule. D117 made it a rule at 100
@@ -234,24 +237,45 @@ func TestRepoHygiene_GoFileComments_IgnoresStringLiterals(t *testing.T) {
 // on Go, runtime/monitor Python, and scripts/ shell files.
 // ---------------------------------------------------------------------------
 
-// hasABOUTMEHeader reports whether an ABOUTME: line appears anywhere in the
-// given lines (callers pass the file's first N lines). It is a plain substring
-// test — deliberately not a column/prefix match — because the comment marker
-// differs by language ("// ABOUTME:" / "# ABOUTME:").
+// aboutmeBlock returns the ABOUTME header lines in head (the file's first N
+// lines) for the given category, or nil if there is no correctly-formed header.
 //
-// Presence only. Width is markdown.md's other rule and is checked separately
-// against aboutmeMaxCols, so this function has no opinion on it.
-func hasABOUTMEHeader(lines []string) bool {
-	for _, l := range lines {
-		if strings.Contains(l, "ABOUTME:") {
-			return true
-		}
+// It matches the required form, not merely the string "ABOUTME:", because the
+// form is now the rule: a bare `ABOUTME:` or an `<!-- ABOUTME: -->` in a
+// Markdown doc is a header in the wrong shape, and a presence-only test would
+// pass both. Those were 38 files each before markdown.md settled the question.
+//
+// Returning the block rather than a bool is what lets the caller width-check
+// every line of it. That matters for Markdown specifically: only the first line
+// carries the marker, so a "lines containing ABOUTME:" width check would leave
+// every continuation line unbounded.
+func aboutmeBlock(head []string, category string) []string {
+	marker, everyLine := aboutmeHeaderForm(category)
+	if marker == "" {
+		return nil
 	}
-	return false
+	start := slices.IndexFunc(head, func(l string) bool {
+		return strings.HasPrefix(strings.TrimSpace(l), marker)
+	})
+	if start < 0 {
+		return nil
+	}
+	if everyLine {
+		return slices.DeleteFunc(slices.Clone(head), func(l string) bool {
+			return !strings.HasPrefix(strings.TrimSpace(l), marker)
+		})
+	}
+	// Markdown: the marker opens a blockquote and the block is the rest of it.
+	end := start
+	for end < len(head) && strings.HasPrefix(strings.TrimSpace(head[end]), ">") {
+		end++
+	}
+	return head[start:end]
 }
 
-// aboutmeCategory classifies a tracked path into one of the three gated
-// buckets, or "" if the file isn't in scope for the ABOUTME gate.
+// aboutmeCategory classifies a tracked path into one of the gated buckets, or
+// "" if the file isn't in scope for the ABOUTME gate. The buckets exist because
+// the required header form differs per bucket (see aboutmeHeaderForm).
 func aboutmeCategory(path string) string {
 	switch {
 	case strings.HasSuffix(path, ".go"):
@@ -260,8 +284,52 @@ func aboutmeCategory(path string) string {
 		return "python"
 	case strings.HasPrefix(path, "scripts/") && strings.HasSuffix(path, ".sh"):
 		return "shell"
+	case isGatedContributorDoc(path):
+		return "markdown"
 	default:
 		return ""
+	}
+}
+
+// isGatedContributorDoc reports whether path is a contributor Markdown doc that
+// must carry an ABOUTME (markdown.md → Required / Exempt).
+//
+// The archive is the carve-out, and it is a real rule rather than a backlog
+// dodge: docs/contributors/archive/ is frozen, its contents are to be read as
+// aged and possibly rotted, and conforming a frozen document to a current
+// convention implies someone vouched for it. Its own README is the exception —
+// an index is live navigation, so it is gated like any other doc.
+//
+// docs/ above contributors/ is out of scope entirely: the GUIDE, ROADMAP and
+// BREAKING-CHANGES are content destinations, not source context.
+func isGatedContributorDoc(path string) bool {
+	if !strings.HasPrefix(path, "docs/contributors/") || !strings.HasSuffix(path, ".md") {
+		return false
+	}
+	if strings.HasPrefix(path, "docs/contributors/archive/") {
+		return path == "docs/contributors/archive/README.md"
+	}
+	return true
+}
+
+// aboutmeHeaderForm returns the marker a bucket's ABOUTME must start each line
+// with, and whether every line must carry it.
+//
+// Markdown differs from the comment languages on purpose, and shallowly: it has
+// no comment syntax, and it joins consecutive lines into one paragraph, so a
+// per-line "ABOUTME:" prefix renders as a run-on with the marker repeated
+// mid-sentence. The blockquote marks the block once and lets the prose flow.
+// markdown.md carries the full reasoning; this function is the enforcement.
+func aboutmeHeaderForm(category string) (marker string, everyLine bool) {
+	switch category {
+	case "go":
+		return "// ABOUTME:", true
+	case "python", "shell":
+		return "# ABOUTME:", true
+	case "markdown":
+		return "> **ABOUTME:**", false
+	default:
+		return "", false
 	}
 }
 
@@ -292,7 +360,7 @@ func TestRepoHygiene_ABOUTMEHeaders_AllTrackedFilesCompliant(t *testing.T) {
 	root := repoRoot(t)
 	files := trackedFiles(t, root)
 
-	counted := map[string]int{"go": 0, "python": 0, "shell": 0}
+	counted := map[string]int{}
 	var missing []string
 	var tooWide []string
 	for _, rel := range files {
@@ -303,34 +371,37 @@ func TestRepoHygiene_ABOUTMEHeaders_AllTrackedFilesCompliant(t *testing.T) {
 		counted[cat]++
 		abs := filepath.Join(root, rel)
 		head := firstLines(t, abs, 8)
-		if !hasABOUTMEHeader(head) {
-			missing = append(missing, rel)
+		block := aboutmeBlock(head, cat)
+		if block == nil {
+			marker, _ := aboutmeHeaderForm(cat)
+			missing = append(missing, fmt.Sprintf("%s (wants %q)", rel, marker))
+			continue
 		}
-		for _, line := range head {
+		for _, line := range block {
 			// RuneCountInString, not len(): len() counts BYTES, and these comments
 			// use em-dashes freely (3 bytes each). A byte count reports a 99-column
 			// line as 101 and rejects correct code — it fired on
 			// runtime/containerd/exec.go the first time this ran. The limit is columns.
-			cols := utf8.RuneCountInString(line)
-			if strings.Contains(line, "ABOUTME:") && cols > aboutmeMaxCols {
+			if cols := utf8.RuneCountInString(line); cols > aboutmeMaxCols {
 				tooWide = append(tooWide, fmt.Sprintf("%s (%d cols)", rel, cols))
 			}
 		}
 	}
 
-	t.Logf("ABOUTME gate scope: go=%d python(runtime/monitor)=%d shell(scripts/)=%d",
-		counted["go"], counted["python"], counted["shell"])
+	t.Logf("ABOUTME gate scope: go=%d python(runtime/monitor)=%d shell(scripts/)=%d markdown(docs/contributors)=%d",
+		counted["go"], counted["python"], counted["shell"], counted["markdown"])
 
 	if len(missing) > 0 {
 		sort.Strings(missing)
 		var b strings.Builder
-		b.WriteString("files missing an ABOUTME: line in their first 6 lines ")
-		b.WriteString("(docs/contributors/standards/markdown.md requires one on every ")
-		b.WriteString("*.go, runtime/monitor/*.py, and scripts/*.sh file):\n")
+		b.WriteString("files with no ABOUTME header in the required form, in their first 6 lines\n")
+		b.WriteString("(docs/contributors/standards/markdown.md → \"ABOUTME header (source files)\"):\n")
 		for _, m := range missing {
 			b.WriteString("  " + m + "\n")
 		}
-		b.WriteString("Fix: add an ABOUTME header block at the top of the file.\n")
+		b.WriteString("Fix: add the header at the top of the file, in the form named above. A\n")
+		b.WriteString("Markdown doc needs the blockquote form; a bare \"ABOUTME:\" renders as a\n")
+		b.WriteString("run-on paragraph and an HTML comment renders as nothing.\n")
 		t.Error(b.String())
 	}
 
@@ -385,37 +456,88 @@ func TestRepoHygiene_ABOUTMEWidth_RejectsOverlongAndCountsRunes(t *testing.T) {
 func TestRepoHygiene_ABOUTMEMatcher_RejectsBadHeaders(t *testing.T) {
 	cases := []struct {
 		name string
-		want bool
+		cat  string
+		want int // lines in the returned block; 0 means "no valid header"
 		body []string
 	}{
-		{"go header present", true, []string{
+		{"go header present", "go", 1, []string{
 			"// ABOUTME: does the thing.", "", "package foo",
 		}},
-		{"python header present", true, []string{
+		{"go header spanning lines collects them all", "go", 2, []string{
+			"// ABOUTME: does the thing,", "// ABOUTME: and the other thing.", "", "package foo",
+		}},
+		{"python header present", "python", 1, []string{
 			"# ABOUTME: does the other thing.", "", "import os",
 		}},
-		{"missing entirely", false, []string{
+		{"missing entirely", "go", 0, []string{
 			"package foo", "", "func main() {}",
 		}},
-		{"header beyond the 6-line window is not seen by caller", false, []string{
+		{"header beyond the 6-line window is not seen by caller", "go", 0, []string{
 			// firstLines(path, 6) would never hand this slice to the matcher
 			// in the real gate; included here to document that the matcher
 			// itself only looks at what it's given, the window is the
 			// caller's job.
 			"package foo", "", "", "", "", "",
 		}},
-		{"empty file", false, nil},
-		{"similar but wrong marker (typo) is rejected", false, []string{
+		{"empty file", "go", 0, nil},
+		{"similar but wrong marker (typo) is rejected", "go", 0, []string{
 			"// ABOUT: does the thing.",
+		}},
+
+		// Markdown: the form IS the rule. Both rejected shapes below existed in
+		// the tree in roughly equal numbers before markdown.md settled it, so a
+		// presence-only matcher passed all three and enforced nothing.
+		{"markdown blockquote header, continuation lines included", "markdown", 2, []string{
+			"> **ABOUTME:** what this doc is for,", "> continued here.", "", "# Title",
+		}},
+		{"markdown bare ABOUTME is rejected — it renders as a run-on", "markdown", 0, []string{
+			"ABOUTME: what this doc is for.", "", "# Title",
+		}},
+		{"markdown HTML comment is rejected — it renders as nothing", "markdown", 0, []string{
+			"<!-- ABOUTME: what this doc is for. -->", "", "# Title",
+		}},
+		{"markdown blockquote that is not an ABOUTME is not a header", "markdown", 0, []string{
+			"> Note: this doc is deprecated.", "", "# Title",
+		}},
+		{"the blockquote block stops at the end of the quote", "markdown", 1, []string{
+			"> **ABOUTME:** one line only.", "", "# Title", "> a later quote is not the header",
 		}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := hasABOUTMEHeader(c.body)
-			if got != c.want {
-				t.Errorf("hasABOUTMEHeader(%q) = %v, want %v", c.body, got, c.want)
+			got := aboutmeBlock(c.body, c.cat)
+			if len(got) != c.want {
+				t.Errorf("aboutmeBlock(%q, %q) = %q (%d lines), want %d lines",
+					c.body, c.cat, got, len(got), c.want)
 			}
 		})
+	}
+}
+
+// TestRepoHygiene_ABOUTMEScope_ExemptsTheFrozenArchive pins the one carve-out in
+// the ABOUTME gate's Markdown scope, in both directions.
+//
+// The archive is exempt because it is frozen and its contents are to be read as
+// aged and possibly rotted; conforming them would imply someone vouched for them
+// (../archive/README.md). Its own README is not exempt — an index is live
+// navigation. Everything above docs/contributors/ is out of scope entirely.
+func TestRepoHygiene_ABOUTMEScope_ExemptsTheFrozenArchive(t *testing.T) {
+	cases := map[string]bool{
+		"docs/contributors/README.md":                     true,
+		"docs/contributors/standards/markdown.md":         true,
+		"docs/contributors/design/plans/some-plan.md":     true,
+		"docs/contributors/archive/README.md":             true,  // the index stays live
+		"docs/contributors/archive/plans/old-plan.md":     false, // frozen
+		"docs/contributors/archive/old/phases/PHASE_0.md": false,
+		"docs/GUIDE.md":              false, // a content destination
+		"docs/integrators/README.md": false,
+		"README.md":                  false,
+		"docs/contributors/design/plans/notes.txt": false, // not Markdown
+	}
+	for path, want := range cases {
+		if got := isGatedContributorDoc(path); got != want {
+			t.Errorf("isGatedContributorDoc(%q) = %v, want %v", path, got, want)
+		}
 	}
 }
 

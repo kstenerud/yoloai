@@ -1,3 +1,7 @@
+> **ABOUTME:** Design for restoring multi-directory diff/apply — tracking `:copy`/`:overlay`
+> across more than one working directory — with a narrower CLI surface than the version Q-U
+> cut for being over-engineered. Implemented on the `multi-workdir` branch; records D81.
+
 # Multi-workdir diff/apply
 
 **Status:** Implemented on the `multi-workdir` branch (all 4 phases). Records

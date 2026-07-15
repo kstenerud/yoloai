@@ -1,3 +1,8 @@
+> **ABOUTME:** Survey of macOS techniques for telling whether an interactive agent process is idle
+> or working, undertaken because Linux's `/proc/PID/wchan` has no macOS equivalent. Recommends
+> combining the `sysctl KERN_PROC` wait channel with a network-activity check, and feeds directly
+> into the detector catalog in `idle-detection.md`.
+
 # macOS Process Idle Detection Research
 
 Research into macOS-specific techniques for detecting when an interactive TUI process (AI coding agent) is waiting for user input vs actively working. Conducted 2026-03.

@@ -1,6 +1,7 @@
-ABOUTME: Index for yoloAI's per-technology coding standards. Standards explain
-ABOUTME: WHAT and HOW; principles under ../principles/ explain WHY. When in
-ABOUTME: doubt, the principle wins.
+> **ABOUTME:** Entry point and map for yoloAI's per-technology coding standards — what a standard
+> is, how it relates to the principles under `../principles/`, and how a standard is allowed to
+> change. Read this to route a "what's the convention for X" question, not to find the rule
+> itself here.
 
 # Standards
 

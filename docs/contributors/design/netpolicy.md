@@ -1,3 +1,8 @@
+> **ABOUTME:** Design for netpolicy, the layer that composes a network egress policy (mode, agent
+> floor, user allow/deny) and enforces it over the substrate through a pluggable strategy —
+> carving that logic out of the backends. Covers the ip-filter/egress-proxy strategy split and
+> what each honestly does and doesn't guarantee.
+
 # Netpolicy — the network-policy refinement over the substrate
 
 > **Refined by [D105](../decisions/working-notes.md#d105--egress-proxy-workstream-d-brokering-is-the-default-containment-is-opt-in-phased-by-credential-material-refines-d90d95) (2026-06-28):** the `egress-proxy` strategy is realised as an **opt-in** layer (default-deny netns + an **SNI-splicing forwarder** — no decryption — + allowlist), **Linux-first** (host nftables on the veth; uniquely fixes gVisor). Egress restriction stays opt-in/open-by-default; it composes with the always-on credential injector from D105/D95. Read D105 for the settled shape.

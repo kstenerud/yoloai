@@ -1,10 +1,9 @@
-# Egress-broker host reachability — how a sandbox reaches the host-side injector (per backend)
+> **ABOUTME:** Backend-by-backend map of how an in-sandbox agent reaches the host-side
+> credential-injector listener, and which host interface that listener can safely bind without
+> exposing it to the LAN. Backs the `InjectorReach` discovery seam behind the egress-proxy
+> broker (D105/D106). The per-platform spikes behind it are done and its conclusion has landed.
 
-ABOUTME: Per-backend map of how an in-sandbox agent reaches a host-side TCP listener (the
-credential injector), and where that listener should bind so only the sandbox — not the LAN —
-can reach it. Backs the `InjectorReach{BindHost,DialHost}` discovery seam for egress-proxy
-step 2b-2 (D105/D106). Linux findings verified; macOS (docker-Desktop/OrbStack, seatbelt, tart,
-apple) verified by the 2026-06-28 Mac spike — see "Mac spike results".
+# Egress-broker host reachability — how a sandbox reaches the host-side injector (per backend)
 
 ## Why this exists
 

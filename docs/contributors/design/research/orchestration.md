@@ -1,3 +1,7 @@
+> **ABOUTME:** Survey of how the wider agent-orchestrator ecosystem detects idle/completion state,
+> coordinates multi-agent workflows, and interfaces with coding-agent CLIs. Grounds the conclusion
+> that yoloAI should expose reliable per-sandbox status rather than build its own orchestrator.
+
 # Agent Orchestration, Idle Detection, and Handoffs
 
 Research on how the ecosystem detects agent completion/idle state, orchestrates multi-agent workflows, and interfaces with coding agent CLIs. Conducted 2026-03.

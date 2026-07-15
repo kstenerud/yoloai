@@ -1,5 +1,6 @@
-<!-- ABOUTME: Plan for an Apple `container` runtime backend (Linux OCI in -->
-<!-- ABOUTME: per-container VMs on macOS) plus the 4-way macOS backend priority. -->
+> **ABOUTME:** Planning doc (not yet implemented) for an Apple `container` runtime backend —
+> Linux OCI in per-container VMs on macOS — plus the resulting macOS backend priority and
+> setup-wizard rework needed once several container systems can coexist there.
 
 # Apple `container` backend
 

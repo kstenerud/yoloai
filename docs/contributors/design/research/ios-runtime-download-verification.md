@@ -1,3 +1,7 @@
+> **ABOUTME:** Verification report proving the `xcodebuild -downloadPlatform` approach fixes the
+> iOS Simulator boot failures that the prior ditto-copy approach caused in Tart VMs, and
+> recommending the implementation change to `runtime/tart/runtime_copy.go`.
+
 # iOS Runtime Download Approach Verification Report
 
 **Date:** 2026-03-27

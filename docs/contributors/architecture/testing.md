@@ -1,3 +1,7 @@
+> **ABOUTME:** How yoloAI's Go test suite is organised — the unit/integration/e2e tiers, the
+> shared backend-conformance suite every runtime implementation runs against, and the gating
+> rule that fails (rather than silently skips) a platform-possible backend that's unavailable.
+
 # Testing
 
 Three tiers of tests, each requiring progressively more infrastructure:

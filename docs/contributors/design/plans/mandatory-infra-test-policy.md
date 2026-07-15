@@ -1,7 +1,8 @@
-# Plan: mandatory-infrastructure test policy (expunge skip-when-possible-but-absent)
+> **ABOUTME:** Plan and now-implemented policy converting "skip a test when its backend infra is
+> absent" into a hard failure on any machine that can host it, with an explicit carve-out only
+> for environments we don't control, like CI. Implemented and Linux-verified; macOS pending.
 
-ABOUTME: Convert every "skip a test/backend when its infra isn't present/running" path to a
-ABOUTME: hard failure on controlled machines; the only carve-out is uncontrolled envs (CI).
+# Plan: mandatory-infrastructure test policy (expunge skip-when-possible-but-absent)
 
 Status: **IMPLEMENTED (A–F) + LINUX-VERIFIED on branch `mandatory-infra-test-policy`.**
 Landed as D112 (A gates + testutil helper, B/C/F harness+Makefile+tooling, D CI carve-out, E docs,

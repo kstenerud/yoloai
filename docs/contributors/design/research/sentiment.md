@@ -1,3 +1,8 @@
+> **ABOUTME:** Living tracker of developer sentiment on AI coding tools and agent sandboxing,
+> gathered from Hacker News and Lobsters discussion threads, used to gauge how yoloAI's
+> positioning lands with the community. Documents the fetch/update procedure alongside a
+> dated log of findings.
+
 # Developer Sentiment Tracker
 
 Tracks developer sentiment about AI coding tools from community discussion sites. Used to understand how developers feel about AI tooling trends and where yoloAI fits in.

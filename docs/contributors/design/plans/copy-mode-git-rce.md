@@ -1,7 +1,7 @@
-# Plan: close the copy-mode host-git RCE (audit C1, CRITICAL)
+> **ABOUTME:** Design for neutralizing host code execution via git filter/diff/fsmonitor drivers
+> in the agent-controlled copy-mode work copy. Shipped across all backends, container and macOS.
 
-ABOUTME: Design for neutralizing host code execution via git filter/diff/fsmonitor
-ABOUTME: drivers in the agent-controlled copy-mode work-copy .git — the diff/apply path.
+# Plan: close the copy-mode host-git RCE (audit C1, CRITICAL)
 
 Status: **IMPLEMENTED for the container backends (docker/podman/containerd),
 2026-06-29.** Surfaced by the 2026-06-29 escape/exfil security audit (finding C1,

@@ -1,3 +1,7 @@
+> **ABOUTME:** Design draft, not a locked decision or implemented, for closing the gap where
+> `yoloai apply` can silently land sandbox changes made after the user reviewed `diff` but
+> before `apply` ran, by fingerprinting the reviewed artifact and balking on mismatch.
+
 # Apply drift guard
 
 **Status:** Design draft from a design conversation; not yet a locked decision, not

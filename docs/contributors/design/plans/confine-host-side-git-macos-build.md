@@ -1,7 +1,7 @@
-# Build brief (macOS agent): confine work-copy git on apple + seatbelt
+> **ABOUTME:** Actionable macOS-only build brief for confine-host-side-git — the apple GitExecer
+> wiring and seatbelt sandbox-exec git confinement, meant to be run on real Apple Silicon.
 
-ABOUTME: Actionable build brief for the macOS-only portion of confine-host-side-git — the
-ABOUTME: apple GitExecer wiring and the seatbelt sandbox-exec git confinement + tight profile.
+# Build brief (macOS agent): confine work-copy git on apple + seatbelt
 
 **Status: START HERE (macOS agent).** Design is settled in
 [confine-host-side-git.md](confine-host-side-git.md) — read it first for the threat model and

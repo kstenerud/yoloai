@@ -1,3 +1,8 @@
+> **ABOUTME:** Audit plan that re-validates the public-layering Move (S6) against what the
+> branch actually built, before executing it — output is decisions and a resequenced plan,
+> not code. Records verdicts inline (D97) as re-audits land, most recently confirming
+> `runtime` is Move-ready.
+
 # Pre-Move audit — re-validate "the Move" (S6) before executing it
 
 **Status:** Audit plan, 2026-06-26. Written to survive a context compaction and be

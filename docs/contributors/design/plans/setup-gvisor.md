@@ -1,5 +1,6 @@
-<!-- ABOUTME: Design + implementation plan for an opt-in `yoloai system setup-gvisor` that -->
-<!-- ABOUTME: installs/registers runsc in the macOS Docker VM so container-enhanced works. -->
+> **ABOUTME:** Design for an opt-in `yoloai system setup-gvisor` (macOS) to install and register
+> runsc in the Docker VM so `container-enhanced` works there. Paused: a spike found neither
+> Docker Desktop nor OrbStack installs runsc cleanly, so `container-enhanced` stays Linux-primary.
 
 # `yoloai system setup-gvisor` (macOS)
 

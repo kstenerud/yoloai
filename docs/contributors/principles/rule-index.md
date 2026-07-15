@@ -1,7 +1,7 @@
-ABOUTME: Cross-doc rule sheet for the principles — one imperative line per
-ABOUTME: principle plus the symptom that should make you reach for it. The
-ABOUTME: working-memory layer: load this whole file, match your current action
-ABOUTME: against "Bites when", then open the cited section for the full why.
+> **ABOUTME:** Fast-lookup rule sheet spanning the principles docs — one imperative line per
+> principle plus the symptom that should make you reach for it. The working-memory layer: load
+> this whole file, match your action against "Bites when", then open the cited section for the
+> full reasoning; the principles docs remain the authority.
 
 # Principles — rule index
 

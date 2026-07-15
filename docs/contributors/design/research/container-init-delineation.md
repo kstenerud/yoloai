@@ -1,3 +1,7 @@
+> **ABOUTME:** Defines the substrate boundary for yoloAI backends: how a sandbox environment stays
+> "up" without yoloAI reinventing process supervision or orchestration. Feeds the public-layering
+> substrate boundary and the PID-1-coupling finding driving the container keep-alive fix.
+
 # Container init / keep-alive: where the substrate stops and the OS begins
 
 **Purpose.** Decide how a yoloAI *substrate* (an isolated environment where processes *can*

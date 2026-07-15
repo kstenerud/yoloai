@@ -1,8 +1,7 @@
-ABOUTME: Testing philosophy for yoloAI. Confidence over coverage, behaviour
-ABOUTME: over implementation, error paths first-class, regression by default,
-ABOUTME: test at the right layer, real backends for integration, manual fakes,
-ABOUTME: production-code-health over green-bar. Applied across Go unit/integration
-ABOUTME: /e2e tiers and the Python pytest surface in runtime/monitor/.
+> **ABOUTME:** Testing philosophy for yoloAI — how to decide what to test, at which layer, and
+> what distinguishes a test that protects production code from one that only exercises it.
+> Applies across the Go unit/integration/e2e tiers and the Python pytest surface in
+> `runtime/monitor/`; each section pairs a rule with a "bites when" trigger.
 
 # Testing principles
 

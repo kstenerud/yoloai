@@ -1,7 +1,8 @@
-# Build brief (macOS agent): host-artifact reclamation — darwin injector verify + seatbelt-tmux reaper
+> **ABOUTME:** macOS verification brief for the darwin-only pieces of host-artifact-reclamation: the
+> `ps`-based injector reaper and the seatbelt-tmux reaper, neither authorable nor verifiable on
+> Linux. Completed; results and a residual finding are recorded inline.
 
-<!-- ABOUTME: Actionable macOS brief for the parts of host-artifact-reclamation that can't be -->
-<!-- ABOUTME: authored/verified on Linux: the darwin `ps` injector path and the seatbelt-tmux reaper. -->
+# Build brief (macOS agent): host-artifact reclamation — darwin injector verify + seatbelt-tmux reaper
 
 **Status: DONE (macOS agent, 2026-07-06).** Both tasks completed and verified on
 macOS 26 / Apple Silicon. Task A ✅ (darwin injector reaper reaps a real orphaned

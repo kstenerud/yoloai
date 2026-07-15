@@ -1,6 +1,6 @@
-<!-- ABOUTME: Security research backing the multi-principal isolation axis (D59). -->
-<!-- ABOUTME: Grounds the deployment-vs-principal split in yoloAI's CURRENT single- -->
-<!-- ABOUTME: principal mechanisms, then asks what breaks when a daemon serves many. -->
+> **ABOUTME:** Security research backing the multi-principal isolation axis (D59). Grounds the
+> deployment-vs-principal split in yoloAI's current single-principal mechanisms, then surveys what
+> breaks when a daemon serves many principals instead of one.
 
 # Principal isolation (multi-tenant) — security research
 

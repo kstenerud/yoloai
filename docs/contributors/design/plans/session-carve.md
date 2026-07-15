@@ -1,3 +1,7 @@
+> **ABOUTME:** Implementation plan turning the converged session-layer design (D88) into ordered,
+> buildable steps for the session-carve phase of the endgame roadmap (D99), on the
+> substrate-move branch. Scoping stage; the structural core it builds on is already live.
+
 # Phase 1a — the session-carve public realization (the long pole)
 
 **Status:** Scoping, 2026-06-26. The implementation plan for Phase 1a of the endgame roadmap

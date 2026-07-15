@@ -1,5 +1,6 @@
-<!-- ABOUTME: Index/router for the design/ directory — the shaping cluster of feature specs, -->
-<!-- ABOUTME: review queues, and the plans/ and research/ sub-clusters. Content lives in named files. -->
+> **ABOUTME:** Index for the design/ directory — the shaping cluster of feature specs, review
+> queues, and their supporting sub-clusters. Each document listed below owns its own content;
+> this file only routes to it.
 
 # Design
 

@@ -1,3 +1,7 @@
+> **ABOUTME:** Read-only inventory of where backend-specific behavior leaks above the runtime
+> layer, distinguishing decision-driving capabilities that need a named property from optional
+> operations that can stay call-if-present. Feeds Phase 0 of the module-split plan.
+
 # Backend-leakage map (Phase 0 of the module split)
 
 **Date:** 2026-06-13. **Status:** Research; feeds

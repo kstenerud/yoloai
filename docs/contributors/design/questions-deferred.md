@@ -1,5 +1,6 @@
-<!-- ABOUTME: Holding pen for deferred open questions parked from questions-unresolved.md. -->
-<!-- ABOUTME: Each item carries a revival trigger; when it fires the item flows back to unresolved. -->
+> **ABOUTME:** Holding pen for questions parked as not-now, each carrying a revival trigger.
+> Distinct from questions-resolved.md (answered) and questions-abandoned.md (permanently
+> dropped).
 
 # Deferred questions
 

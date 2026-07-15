@@ -1,5 +1,6 @@
-<!-- ABOUTME: Release-gated cross-version concerns for the layering-refactor branch: -->
-<!-- ABOUTME: the prerelease sandbox-compat test, the on-disk format gates, and W1b. -->
+> **ABOUTME:** Tracks what must be verified or finished before the layering-refactor branch's
+> on-disk and cross-binary format changes reach a release, so nothing is silently missed. A
+> living checklist, kept current as gates are added or retired while the branch changes.
 
 # Release migration — `layering-refactor` → `main` → release tag
 

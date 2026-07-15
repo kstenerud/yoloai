@@ -1,3 +1,7 @@
+> **ABOUTME:** Index for procedures/ — the operational detail behind AGENTS.md's rules for
+> opening a PR and filing an issue. Also states how a release is cut, which isn't itself a
+> per-doc procedure.
+
 # Procedures
 
 How we work. The rules an agent must follow are in [`AGENTS.md`](../../../AGENTS.md); these

@@ -1,3 +1,7 @@
+> **ABOUTME:** Package-by-package map of the implemented codebase — the mapped packages' purpose,
+> key public types, and which file a given CLI command dispatches into. The where-does-this-live
+> companion to overview.md's how-it-fits and data-flows.md's runtime call chains.
+
 # Code Map
 
 The source of truth for **where the code lives** — every package and file, the key public types, and which CLI command dispatches to which code. For the conceptual view of how the layers fit, see [overview.md](overview.md); for runtime call chains, see [data-flows.md](data-flows.md).

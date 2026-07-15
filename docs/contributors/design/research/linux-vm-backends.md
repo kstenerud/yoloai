@@ -1,3 +1,7 @@
+> **ABOUTME:** Surveys VM- and sandbox-level isolation backends beyond standard Docker
+> namespaces/cgroups — hardware VMs, userspace kernels, and OS-virtualization runtimes —
+> evaluating each for integration cost and isolation strength as a future Linux backend option.
+
 # Linux VM Backends for AI Agent Sandboxing
 
 Research date: 2026-03-17

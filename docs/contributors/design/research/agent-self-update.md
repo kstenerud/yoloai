@@ -1,3 +1,7 @@
+> **ABOUTME:** Spike tracing what Claude Code's `installMethod` actually drives, resolving whether
+> the backend substrate needs to carry an agent install-method fact at all. Backs the decision to
+> delete `AgentInstallMethod` from the substrate rather than re-home or manifest it.
+
 # Agent self-update in the sandbox — and why the substrate needs no install-method fact
 
 **Verified 2026-06-26** (spike during Stage 3b of the public-layering Move, to resolve

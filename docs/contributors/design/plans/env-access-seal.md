@@ -1,7 +1,8 @@
-# Env access seal — `config.HostEnv` curated accessors
+> **ABOUTME:** Design and handoff record for `config.HostEnv`, a purpose-named, forbidigo-gated
+> replacement for the ad-hoc host-env accessors on `config.Layout`. Implemented; kept for the
+> locked design and its recorded deviations.
 
-ABOUTME: Handoff/plan for replacing the ad-hoc `config.Layout` env accessors
-ABOUTME: with a single opaque, purpose-method, forbidigo-gated curation type.
+# Env access seal — `config.HostEnv` curated accessors
 
 Status: **IMPLEMENTED** on branch `df19-test-isolation` (commits `2f9e4fd`
 Phase 1, `2dcb9aa` Phase 2, `04c4c32` Phase 3, `764556d` Phase 4; `make check`

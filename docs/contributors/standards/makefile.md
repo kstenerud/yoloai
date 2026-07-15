@@ -1,6 +1,7 @@
-ABOUTME: Makefile conventions for yoloAI. GNU Make, single top-level Makefile,
-ABOUTME: targets are the developer interface, make check is the contract, every
-ABOUTME: target .PHONY-listed, help-comments visible via ## prefix.
+> **ABOUTME:** Makefile conventions for yoloAI's single top-level Makefile — why targets are the
+> developer interface for every build/test/quality action, the shape `make check` and the test
+> tiers must keep, and phony/help-comment/variable discipline. Points at the live Makefile for
+> anything that would otherwise be a pasted, driftable copy.
 
 # Makefile Standard
 

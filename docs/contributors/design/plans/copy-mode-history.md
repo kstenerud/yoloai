@@ -1,7 +1,8 @@
-# Plan: preserve git history in copy mode
+> **ABOUTME:** Design for making `:copy` preserve the source repo's real `.git` instead of
+> stripping it to a fresh baseline. Core is implemented cross-platform; E2E-on-Docker verification
+> is still pending, and backends lacking the host-git confinement invariant auto-degrade.
 
-ABOUTME: Design for making `:copy` preserve the source repo's real `.git` (history,
-ABOUTME: blame, filters, real commits) instead of stripping it to a fresh baseline.
+# Plan: preserve git history in copy mode
 
 Status: **CORE IMPLEMENTED (Linux/cross-platform), 2026-07-04 — E2E-on-Docker pending** (D111).
 The default-preserve + `copy-strict` (suffix/flag/config) + `GitRunsInConfinement` gate + the

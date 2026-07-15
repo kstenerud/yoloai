@@ -1,3 +1,7 @@
+> **ABOUTME:** Design for the two-layer environment UX: high-level project archetypes that
+> expand into low-level sandbox configuration, so users can express project intent (compose
+> services, devcontainers, Apple platform builds) without knowing the underlying flags.
+
 > **Design documents:** [Overview](README.md) | [Commands](commands.md) | [Config](config.md) | [Setup](setup.md) | [Security](security.md) | [Research](research/README.md) | [research/](research/)
 
 # Development Environments

@@ -1,3 +1,7 @@
+> **ABOUTME:** Verified survey of whether each shipped agent honors proxy environment variables,
+> establishing that env-proxy cooperation is never a containment boundary for an untrusted agent.
+> Backs the netpolicy design's default-deny-egress-namespace-plus-forced-proxy primitive.
+
 # Agent proxy-env support + egress-containment primitive
 
 **Verified mid-2026 (web survey of official docs + source; design-review remediation [D92]).** Backs the

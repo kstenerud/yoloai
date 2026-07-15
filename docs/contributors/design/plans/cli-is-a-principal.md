@@ -1,5 +1,5 @@
-<!-- ABOUTME: Give the CLI the principal it already has on disk ("cli") and delete the -->
-<!-- ABOUTME: empty-principal sentinel, so a hardcoded "yoloai-" cannot ship. Breaking. -->
+> **ABOUTME:** Proposes giving the CLI the principal it already has on disk and deleting the
+> empty-principal sentinel that let a hardcoded prefix ship. Scoped, not yet started; breaking.
 
 # Plan: the CLI is a principal — name it, and delete the empty-principal sentinel
 

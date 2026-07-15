@@ -1,7 +1,7 @@
-ABOUTME: Python conventions for yoloAI's runtime/monitor/ surface. Typed pure
-ABOUTME: functions split from I/O seams (W3/W4), pytest + mypy --strict, the
-ABOUTME: small Python surface exists because the in-container monitor needs
-ABOUTME: structured types Go can't give us from the host.
+> **ABOUTME:** Python conventions for yoloAI's `runtime/monitor/` surface — why this narrow,
+> deliberate Python token-spend exists alongside a Go-first codebase, and the pure-function/
+> I/O-seam split, typing, and testing discipline that keep it as small and healthy as the Go
+> surface it sits beside.
 
 # Python Standard
 

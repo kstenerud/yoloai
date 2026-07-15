@@ -1,3 +1,7 @@
+> **ABOUTME:** Spike record evaluating whether the runtime.Backend interface's static
+> per-backend facts can be extracted into a BackendDescriptor, catalogued backend-by-backend
+> against the plan's abort threshold. Closes with the extraction already landed.
+
 # Runtime interface spike — W11 catalog
 
 **Status:** Spike complete. Verdict: **proceed** with `BackendDescriptor` extraction. The plan's abort threshold (">30% of `Capabilities()` values dynamic") is not hit — `BackendCaps` is 100% statically declared across all backends.

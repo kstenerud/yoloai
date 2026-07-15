@@ -1,3 +1,7 @@
+> **ABOUTME:** The detail and reasoning behind AGENTS.md's PR rules — why branch from main
+> instead of a tag, what counts as a breaking change, how to sweep a renamed identifier across
+> every surface that mirrors it, and what `make check` covers versus the rest of CI.
+
 # Pull requests
 
 The rules themselves are in [`AGENTS.md`](../../../AGENTS.md); this is the detail behind

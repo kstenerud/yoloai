@@ -1,7 +1,9 @@
-# Plan: eliminate the `:overlay` CAP_SYS_ADMIN host escape (audit H2)
+> **ABOUTME:** Security analysis of the `:overlay` mode's CAP_SYS_ADMIN host-escape surface on
+> rootful Docker, weighing fixes (fuse-overlayfs, userns, AppArmor) and auditing them against
+> a real container. Superseded by D109, which retires `:overlay` rather than fixing it; kept
+> for the escape mechanics and why the fixes don't hold.
 
-ABOUTME: Design for removing the host-escape surface of `:overlay` mode on Docker
-ABOUTME: rootful — fuse-overlayfs vs userns vs documented-opt-in, with a recommendation.
+# Plan: eliminate the `:overlay` CAP_SYS_ADMIN host escape (audit H2)
 
 Status: **design audited 2026-06-29 — the recommended fix (Option A,
 fuse-overlayfs) is EMPIRICALLY REFUTED; see "## Audit" below.** Surfaced by the

@@ -1,8 +1,9 @@
-# Egress proxy (workstream D) — build brief
+> **ABOUTME:** The "start here" build brief for the egress-proxy credential broker; design is
+> settled in D105/D106 so this is the actionable plan, not a place to re-litigate it. Brokering
+> ships as the default wherever a backend can host the injector; egress containment is what
+> remains.
 
-ABOUTME: The "start here" kickoff for building the egress-proxy credential-broker. Design is
-settled and validated; this is the actionable build plan. Rationale lives in D105 (+ its
-validation addendum) in decisions/working-notes.md; do not re-litigate it — build to it.
+# Egress proxy (workstream D) — build brief
 
 **Status:** **Phases 1 & 2 COMPLETE + launch-path decoupling COMPLETE, all on `main`,
 end-to-end verified on real Docker (2026-06-28).** Brokering is the default for Claude on docker —

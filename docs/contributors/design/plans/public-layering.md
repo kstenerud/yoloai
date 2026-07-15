@@ -1,3 +1,8 @@
+> **ABOUTME:** The design doc ("Frame") that laid out yoloAI's public-layering strategy —
+> staging composable public packages behind `internal/`, auditing each layer, and promoting by
+> mechanical move once its contract stabilizes. Records the audit methodology and the phased
+> endgame; the runtime/store/copyflow move it designed has since landed.
+
 # Public layering: stage the composable API behind `internal/`, promote by move
 
 **Status:** Active on the `public-layering` branch (cut from `main` after the module-split

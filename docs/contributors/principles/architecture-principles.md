@@ -1,8 +1,7 @@
-ABOUTME: Architectural principles for yoloAI — the STANCE and SHAPE of the module
-ABOUTME: (library-first, public surface as contract, how host knowledge binds), as
-ABOUTME: distinct from development-principles.md's code PRACTICE. Cross-references
-ABOUTME: development §2 (boundary discipline) and §12 (no ambient config) rather than
-ABOUTME: restating them. A principle wins over any conflicting standard.
+> **ABOUTME:** Architectural principles for yoloAI — the stance and shape of the module (what an
+> embedder is allowed to see and call, and how host knowledge is allowed to enter it), as
+> distinct from development-principles.md's code-practice mechanics. Cross-references rather
+> than restates the development-principles.md sections it extends.
 
 # Architecture principles
 

@@ -1,3 +1,8 @@
+> **ABOUTME:** Entry point for the architecture directory — code-as-built navigation docs, as
+> opposed to `design/` which covers aspirational features. Routes a "how do the pieces fit" or
+> "where does this live" question to the right file here; keep those files in sync as the
+> architecture changes.
+
 # Architecture
 
 Code-navigation docs for the yoloAI codebase — the source of truth for **where the implemented code lives** and **how it behaves at runtime**. Focused on the code as built, not aspirational features (see [design/](../design/README.md) for those).

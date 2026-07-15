@@ -1,3 +1,7 @@
+> **ABOUTME:** Build-facing contract for agent-owned turn detection, fall-to-shell, and resume.
+> Pins design decisions from the linked layer specs to concrete shapes so implementation has
+> a spec to build against instead of improvising them at code time.
+
 # Agent-owned detection + fall-to-shell + resume — the build contracts
 
 **Status:** Design converged 2026-06-25 (Phase 0 of

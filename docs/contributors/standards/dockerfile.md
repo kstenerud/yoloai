@@ -1,7 +1,7 @@
-ABOUTME: Dockerfile conventions for yoloAI: hadolint clean, debian:bookworm-slim
-ABOUTME: base, pinned versions, layer ordering, profile system, the base image
-ABOUTME: at runtime/docker/resources/Dockerfile is the contract every profile
-ABOUTME: inherits via FROM yoloai-base.
+> **ABOUTME:** Dockerfile conventions for yoloAI's base image and the user-authored profile
+> Dockerfiles built on top of it — base-distro choice, apt/layer/pinning discipline, and the
+> runtime contract every profile inherits via `FROM yoloai-base`. Covers only the base image;
+> profile Dockerfiles are user-owned and asked, not forced, to follow it.
 
 # Dockerfile Standard
 

@@ -1,3 +1,8 @@
+> **ABOUTME:** Design proposal for `--network-isolated` that moves enforcement out of the sandbox
+> to host-side iptables/ipset, unifying behavior across backends in place of the in-container
+> approach described in `security.md`. Defines the threat model, filtering mechanics, and the
+> failure-mode guarantees the design commits to.
+
 > **Design documents:** [Overview](README.md) | [Commands](commands.md) | [Config](config.md) | [Setup](setup.md) | [Security](security.md) | [Environments](environments.md) | [Research](research/README.md) | [research/](research/)
 
 # Network Isolation

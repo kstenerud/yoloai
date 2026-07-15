@@ -1,3 +1,8 @@
+> **ABOUTME:** Documents yoloAI's current security posture — credential injection, seatbelt's
+> default-deny environment, gVisor's permission model, and the in-container network-isolation
+> approach that `network-isolation.md` is designed to replace. One page of the split design-doc
+> set (see the breadcrumb below).
+
 > **Design documents:** [Overview](README.md) | [Commands](commands.md) | [Config](config.md) | [Setup](setup.md) | [Environments](environments.md) | [Research](research/README.md) | [research/](research/)
 
 ## Credential Management

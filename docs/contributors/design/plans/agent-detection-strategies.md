@@ -1,3 +1,7 @@
+> **ABOUTME:** Deferred plan to promote per-agent turn-completion detection (native callbacks
+> like Codex `notify`, Gemini `AfterAgent`) to a first-class strategy. Gates the
+> public-layering branch's merge to main until done.
+
 # Per-agent custom detection strategies — deferred follow-up (MERGE GATE)
 
 **Status:** Planned, not started. Deferred out of the agent-owned-detection plan

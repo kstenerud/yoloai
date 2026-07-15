@@ -1,7 +1,7 @@
-ABOUTME: Primary-source evidence backing each principle in yoloAI's
-ABOUTME: development-principles.md. Each section names the source (author, year,
-ABOUTME: where to find it), explains why it backs the principle, and notes where
-ABOUTME: the source does NOT cleanly apply to yoloAI's single-author OSS CLI scope.
+> **ABOUTME:** Primary-source evidence backing each principle in development-principles.md — each
+> section names the source and explains why it backs the principle, and where it doesn't cleanly
+> apply to yoloAI's single-author OSS CLI scope. Evidence, not principle; the principles doc cites
+> this file, this file cites the outside world.
 
 # Development-principles research — primary-source backing for yoloAI
 

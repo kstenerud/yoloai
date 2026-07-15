@@ -1,5 +1,6 @@
-<!-- ABOUTME: Plan to make yoloAI reap the host-side artifacts (broker processes, -->
-<!-- ABOUTME: netns/IPAM, seatbelt tmux) it orphans on the non-happy path. D114. -->
+> **ABOUTME:** Design for reconciling host-side artifacts (broker processes, netns/IPAM leases,
+> seatbelt host processes) that yoloAI can orphan on a non-happy-path teardown, plus the
+> kill-before-delete ordering fix that stops creating them. Merged to main; D114.
 
 # Host-artifact reclamation
 

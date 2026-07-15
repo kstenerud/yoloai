@@ -1,11 +1,7 @@
-ABOUTME: Engineering practice for yoloAI. YAGNI/KISS/DRY/SOLID vocabulary,
-ABOUTME: boundary discipline ("none of your business" — comply-or-complain),
-ABOUTME: validate-at-every-layer, parse-don't-validate, fail-fast,
-ABOUTME: warnings-are-signal, justify-every-discard, no-half-finished,
-ABOUTME: plan-then-execute cleanup, make-check gate, iterate-when-first-approach
-ABOUTME: -fails, raw-until-it-has-to-change, library-defaults-are-safety-only,
-ABOUTME: name-for-the-reader's-distance.
-ABOUTME: How to write yoloAI code so future-you can change it safely.
+> **ABOUTME:** Engineering practice for yoloAI — the concrete code-structure and process
+> conventions that keep a single-author, five-backend codebase malleable for the next change.
+> Specialises general-principles.md for the engineering surface; each section pairs a rule with
+> a "bites when" trigger and a cost-vs-benefit threshold.
 
 # Development principles
 

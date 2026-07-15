@@ -1,3 +1,7 @@
+> **ABOUTME:** Design for wiring yoloAI's `--bugreport` output into GitHub's issue tracker: the
+> issue templates, the resulting triage workflow, and the label taxonomy that drives it. Grounded
+> in a survey of comparable projects' issue-template practices.
+
 # GitHub Issue Workflow Design
 
 ## Overview

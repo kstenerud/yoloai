@@ -1,3 +1,7 @@
+> **ABOUTME:** How to file a yoloAI issue well — which template to use, how to generate a bug
+> report that pins down the backend/OS/agent combination, why security reports and feature
+> requests route elsewhere, and when a PR resolving an issue needs its own plan file.
+
 # Issues
 
 Issues are filed through the forms in [`.github/ISSUE_TEMPLATE/`](../../../.github/ISSUE_TEMPLATE/).

@@ -1,3 +1,7 @@
+> **ABOUTME:** Design for the envsetup layer, the dual of the substrate: stages a sandbox's
+> agent-specific contents (credentials, seed files, settings, assembled context, resolved env)
+> host-side before the neutral container runs, and is the security home for credential crossing.
+
 # Envsetup — the inside-the-sandbox environment preparer
 
 **Status:** Design converged 2026-06-24 (design conversation), not yet implemented. The **envsetup** refinement

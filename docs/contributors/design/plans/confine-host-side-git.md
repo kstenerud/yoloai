@@ -1,7 +1,7 @@
-# Plan: confine all host-side work-copy git (apple, seatbelt, broken-metadata probe)
+> **ABOUTME:** Closes the pre-existing copy-mode RCE surface on backends where work-copy git ran
+> on the host with filters/textconv/fsmonitor live. Implemented for apple and seatbelt.
 
-ABOUTME: Close the pre-existing copy-mode RCE surface on backends where work-copy git still
-ABOUTME: runs on the host with filters/textconv/fsmonitor live (apple, seatbelt) + the probe.
+# Plan: confine all host-side work-copy git (apple, seatbelt, broken-metadata probe)
 
 Status: **IMPLEMENTED (2026-07-05) for apple + seatbelt.** The 2026-06-29 fix
 ([copy-mode-git-rce.md](copy-mode-git-rce.md)) closed the RCE for docker/podman/containerd

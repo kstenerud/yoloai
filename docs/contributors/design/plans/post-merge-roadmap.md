@@ -1,3 +1,8 @@
+> **ABOUTME:** Roadmap of the work remaining after the public-layering merge (D99) — sized and
+> sequenced by read-only survey against the live designs, tracking what's blocked, retired, or
+> ready to start. Living document: check status inline before assuming any workstream is still
+> open.
+
 # Post-merge roadmap (after the public-layering merge, `b9c91834`)
 
 The public-layering endgame (D99) is merged. This is the remaining work: the D99

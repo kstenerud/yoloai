@@ -1,7 +1,7 @@
-ABOUTME: Index for yoloAI's principles docs. Principles explain WHY; standards
-ABOUTME: under ../standards/ explain WHAT and HOW. A principle wins over any
-ABOUTME: conflicting standard. Each principles doc cites research backing in
-ABOUTME: ../research/principles/ and D-entries in ../working-notes.md.
+> **ABOUTME:** Entry point and map for yoloAI's principles docs — how they relate to the
+> standards under `../standards/`, how they relate to each other, and how a principle is
+> allowed to change. Read this to route a question to the right doc, not to find principles
+> themselves here.
 
 # Principles
 

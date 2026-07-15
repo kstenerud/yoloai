@@ -1,5 +1,5 @@
-<!-- ABOUTME: Active queue of open design critiques for yoloAI. Resolved items drain to -->
-<!-- ABOUTME: critiques-resolved.md; deferred to critiques-deferred.md; abandoned to critiques-abandoned.md. -->
+> **ABOUTME:** Active queue of open design critiques for yoloAI awaiting action.
+> Settled items drain to the co-located resolved/deferred/abandoned sinks in this directory.
 
 # Open critiques
 

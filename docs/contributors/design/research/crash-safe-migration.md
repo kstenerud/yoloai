@@ -1,7 +1,8 @@
-# Crash-safe migration — prior art
+> **ABOUTME:** Prior-art research grounding the crash-safe `system migrate` design (DF68) in
+> decades of proven recovery patterns from databases, package managers, and immutable-OS
+> deployment tools, rather than inventing a bespoke recovery scheme for a solved problem.
 
-ABOUTME: Verified prior-art research backing the crash-safe `system migrate`
-ABOUTME: design (DF68): journaling, atomic commit, snapshot rollback patterns.
+# Crash-safe migration — prior art
 
 Status: **Verified 2026-06-30.** Backs the implemented plan
 [crash-safe-migration.md (archived)](../../archive/crash-safe-migration.md) (DF68) — the

@@ -1,5 +1,7 @@
-<!-- ABOUTME: Plan to support gVisor (container-enhanced) on the Podman backend, -->
-<!-- ABOUTME: with rootless podman as a first-class research track, not an afterthought. -->
+> **ABOUTME:** Plan to bring the podman backend to gVisor (`container-enhanced`) parity with
+> docker, treating rootless podman as a first-class goal rather than something routed around.
+> Status: planning and research — nothing implemented; the rootless-viability question gates
+> the design.
 
 # Podman + gVisor (`container-enhanced`) support
 

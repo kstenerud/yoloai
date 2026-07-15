@@ -1,3 +1,7 @@
+> **ABOUTME:** Design for splitting yoloAI's sandbox substrate from its agent-orchestration layer
+> into a layered capability DAG, so a consumer can pull only the substrate capability it needs.
+> Active work on the `module-split` branch; drives where the substrate/refinement boundary falls.
+
 # Module split: sandbox substrate vs. agent orchestration
 
 **Status:** Active on the `module-split` branch (cut from `main` after `multi-workdir`

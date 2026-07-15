@@ -1,5 +1,6 @@
-<!-- ABOUTME: Three cheap gates that trigger on observable actions rather than on an -->
-<!-- ABOUTME: agent noticing its own uncertainty. Self-contained; executable on a fresh context. -->
+> **ABOUTME:** Scoping plan for gates that catch agent-error classes existing rules couldn't,
+> because they trigger on observable repo/transcript actions rather than an agent noticing its
+> own uncertainty. Written to run standalone from a fresh session.
 
 # Plan: gates for the agent-error classes D119-D121 could not prevent
 

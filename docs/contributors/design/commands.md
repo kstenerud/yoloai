@@ -1,3 +1,7 @@
+> **ABOUTME:** Design spec for the yoloai CLI surface: global flags, agent definitions, and the
+> per-command behavior (creation, lifecycle, inspection, workflow, and admin commands) that the
+> implementation is expected to match.
+
 > **Design documents:** [Overview](README.md) | [Config](config.md) | [Setup](setup.md) | [Security](security.md) | [Environments](environments.md) | [Research](research/README.md) | [research/](research/)
 
 ### 4. CLI (`yoloai`)

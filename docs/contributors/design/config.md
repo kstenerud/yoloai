@@ -1,3 +1,7 @@
+> **ABOUTME:** Design for yoloAI's configuration surface: the base/profile Docker image model,
+> the layered config-file resolution (baked-in defaults, user defaults, profile config), and
+> how profile fields merge with CLI flags at sandbox-creation time.
+
 > **Design documents:** [Overview](README.md) | [Commands](commands.md) | [Setup](setup.md) | [Security](security.md) | [Environments](environments.md) | [Research](research/README.md) | [research/](research/)
 
 ## Components

@@ -1,7 +1,7 @@
-ABOUTME: Archived decision log for yoloAI — entries D1–D44, covering work
-ABOUTME: completed through the F5 god-package carve + 31-finding layering
-ABOUTME: critique (concluded 2026-05-29). Still cited by D-number; the
-ABOUTME: citations resolve here. Live log (D45 onward): working-notes.md.
+> **ABOUTME:** Archived half of the decision log — entries aged out of the live log once the
+> work they closed concluded. Still cited by D-number from principles and standards; the
+> citations resolve here. New decisions never land in this file — they append to
+> working-notes.md, the live counterpart this one ages out of.
 
 # Working notes — archive (D1–D44)
 

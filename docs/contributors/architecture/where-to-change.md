@@ -1,3 +1,7 @@
+> **ABOUTME:** Task-oriented recipes mapping a common change — new CLI command, new agent, new
+> runtime backend, a config field — onto the files it touches and the doc surfaces that must be
+> swept alongside it. The fast path for "I want to change X, where do I start."
+
 # Where to Change
 
 **Add a new CLI command:**

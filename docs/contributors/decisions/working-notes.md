@@ -1,7 +1,7 @@
-ABOUTME: Append-only decision log for yoloAI (live, D45 onward). D-numbered
-ABOUTME: entries record the choices that shape principles, standards, and
-ABOUTME: design. Earlier entries D1–D44 live in working-notes-archive.md and
-ABOUTME: are still cited by D-number. New decisions append to the bottom here.
+> **ABOUTME:** Live half of yoloAI's append-only decision log. D-numbered entries record what
+> was decided, what was rejected, and why; principles and standards cite them by number. New
+> decisions append to the bottom here. Earlier entries live in working-notes-archive.md, this
+> file's aged-out counterpart.
 
 # Working notes
 

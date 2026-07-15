@@ -1,3 +1,7 @@
+> **ABOUTME:** Hands-on spike verifying Apple's `container` CLI as a yoloAI backend: its per-VM
+> isolation model, mount and network-allowlist behavior, and env-var surface, concluding it is
+> viable at Docker-level capability with stronger isolation.
+
 # Apple `container` as a yoloAI Backend
 
 Research date: 2026-06-10

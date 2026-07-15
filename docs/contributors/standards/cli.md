@@ -1,3 +1,8 @@
+> **ABOUTME:** Behavioral contract for the `yoloai` CLI surface — argument ordering, flag and
+> exit-code conventions, the `--json` output contract, and how errors, prompts, color, and
+> progress are presented. Grounded in POSIX, GNU, and clig.dev conventions rather than invented
+> locally.
+
 # CLI Design Standard
 
 Reference for consistent CLI behavior across all yoloAI commands.

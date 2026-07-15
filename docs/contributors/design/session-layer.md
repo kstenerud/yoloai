@@ -1,3 +1,8 @@
+> **ABOUTME:** Design for the session layer — a durable, reattachable I/O channel (`IOSession`)
+> over a running agent process, replacing today's scattered tmux plumbing and lifting the agent
+> session off the container's mandatory init so the substrate underneath stays agent-free.
+> Covers channel strategies, completion tiers, re-launch semantics, and the capture trust boundary.
+
 # Session layer — the durable I/O channel over an agent process
 
 **Status:** Design converged 2026-06-23 (design conversation), not yet implemented. The target surface for

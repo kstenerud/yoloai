@@ -1,9 +1,7 @@
-ABOUTME: Sandbox security principles for yoloAI. Threat model is bounded
-ABOUTME: (agent mistakes + supply-chain, not nation-state); containment over
-ABOUTME: prevention; defense-in-depth as opt-in layers; least privilege by
-ABOUTME: mode; credentials via file injection; default-deny; agent output
-ABOUTME: untrusted; verify isolation claims; document residual risk; power-user
-ABOUTME: escapes are explicit. NOT customer-trust UX; this is containment.
+> **ABOUTME:** Sandbox-containment security principles for yoloAI — what the threat model covers
+> and explicitly excludes, and the defense posture (containment over prevention, layered and
+> opt-in) that follows from it. This is not customer-trust UX; it governs how the sandbox bounds
+> an untrusted agent, not how yoloAI markets safety.
 
 # Security principles
 

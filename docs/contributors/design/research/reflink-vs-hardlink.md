@@ -1,7 +1,8 @@
-# Cheap-copy primitives: reflink vs hardlink
+> **ABOUTME:** Tradeoff and verification record for reflink (copy-on-write clone) versus
+> hardlink as yoloAI's cheap-copy primitive for `:copy` and the migration snapshot,
+> including the decision to drop hardlink and the macOS on-device confirmation behind it.
 
-ABOUTME: Tradeoff + verification status for the two "build-a-tree-alongside-cheaply"
-ABOUTME: primitives — reflink (CoW clone) and hardlink — used by :copy and migration.
+# Cheap-copy primitives: reflink vs hardlink
 
 Status: **DECIDED 2026-06-30 — both consumers use reflink-or-full-copy; the
 hardlink rung is dropped** (see "Decision" below). Cross-platform support matrix:

@@ -1,9 +1,7 @@
-ABOUTME: Cross-cutting strategic principles for yoloAI — the meta layer above the
-ABOUTME: specialised architecture, development, testing and security principles docs,
-ABOUTME: which cite back here. Scoped to a single-author OSS CLI, where maintenance
-ABOUTME: time across the backends is the constrained resource. Each §n carries a rule,
-ABOUTME: a "bites when" trigger, worked examples, and an explicit cost-vs-benefit
-ABOUTME: threshold; rule-index.md is the one-line-per-principle lookup layer.
+> **ABOUTME:** Cross-cutting strategic principles for yoloAI — the meta layer above the
+> specialised architecture, development, testing and security principles docs, which cite back
+> here. Scoped to a single-author OSS CLI, where maintenance time across backends is the
+> constrained resource; each section pairs a rule with a "bites when" trigger and a threshold.
 
 # General principles
 

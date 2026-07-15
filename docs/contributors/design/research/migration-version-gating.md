@@ -1,7 +1,7 @@
-# Migration-version gating — stepping-stone upgrades & detect-and-refuse
+> **ABOUTME:** Verified prior art for retiring an on-disk feature via a designated migration
+> version, plus a newer version that detects and refuses leftovers rather than reading them.
 
-ABOUTME: Verified prior art for retiring an on-disk feature via a designated
-ABOUTME: migration version + a newer version that detects and refuses leftovers.
+# Migration-version gating — stepping-stone upgrades & detect-and-refuse
 
 Status: **Verified 2026-06-30.** Backs the `:overlay` retirement migration path
 ([plans/retire-overlay-reflink-copy.md](../plans/retire-overlay-reflink-copy.md),

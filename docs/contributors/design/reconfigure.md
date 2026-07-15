@@ -1,3 +1,7 @@
+> **ABOUTME:** Design for `yoloai reconfigure`, the command that changes a sandbox's configuration
+> after creation — mounts, env vars, resource limits, agent — by recreating the container while
+> preserving accumulated work-tree and agent state.
+
 > **Design documents:** [Overview](README.md) | [Commands](commands.md) | [Config](config.md) | [Setup](setup.md) | [Security](security.md) | [Environments](environments.md)
 
 # `yoloai reconfigure` Design

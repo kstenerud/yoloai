@@ -1,3 +1,7 @@
+> **ABOUTME:** Technology survey behind yoloAI's sandbox isolation choices, comparing what each host
+> platform offers against what the copy/diff/apply workflow actually needs. This is the evidence for
+> why the shipped isolation modes and macOS backends came out where they did.
+
 # Sandbox Isolation Technologies
 
 ## Alternative Filesystem Isolation Approaches
