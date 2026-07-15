@@ -68,6 +68,13 @@ func tartIntegrationSetup(t *testing.T) (*orchestrator.Engine, context.Context) 
 	}
 	t.Cleanup(func() { rt.Close() }) //nolint:errcheck // test cleanup
 
+	// Reap before provisioning, never after: an earlier run that died on a
+	// timeout skipped its t.Cleanup and left a VM standing under this exact
+	// principal, which Start would otherwise adopt as "already running" — running
+	// the test against a VM it never built (DF110). Scoped to this test's
+	// t000NNNN namespace, so the developer's real VMs are untouchable.
+	testutil.ReapLeakedInstances(ctx, t, rt)
+
 	mgr := orchestrator.NewEngineWithRuntime(rt, slog.Default(), strings.NewReader(""), orchestrator.WithLayout(layout))
 
 	// Pre-seed the provision checksum, exactly as the docker tier does in

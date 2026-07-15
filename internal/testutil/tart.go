@@ -35,12 +35,15 @@ import (
 // it is in the IntegrationHostEnvVars allowlist and EnvForTartInvocation
 // prefers it over the <HomeDir>/.tart default.
 //
-// Uniqueness is per-process: UniqueTestPrincipal counts from t0000001 in each
-// test binary, so two test PROCESSES running tart concurrently draw the same
-// principal and collide over one VM name in the shared store — the second sees
-// the first's VM as already running, then fails on a work dir that is not its
-// own. Tests within a process are fine. `make integration` runs the tart tier
-// as its own single invocation, which is what keeps this theoretical.
+// Uniqueness is per-process, not per-run: UniqueTestPrincipal counts from
+// t0000001 in each test binary, so a given test recomputes the same VM name on
+// every run. Two concurrent test PROCESSES therefore collide over one VM name —
+// but so do two SEQUENTIAL runs whenever the first leaks its VM, and that is the
+// case that actually bites: a timeout panics, a panic skips t.Cleanup, and the
+// next run adopts the leftover as "already running" (DF110, DF94). `make
+// integration` running the tier as a single invocation bounds the concurrent
+// case; it does nothing for the sequential one, which is why callers reap first
+// via testutil.ReapLeakedInstances rather than trusting cleanup to have run.
 func TartStoreLayout(t *testing.T) config.Layout {
 	t.Helper()
 	home := HostHomeAtStart()
