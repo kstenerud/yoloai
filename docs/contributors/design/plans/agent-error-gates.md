@@ -92,10 +92,10 @@ The discriminator is mechanical: **`//go:build integration`**. Integration-tagge
 backends, where EnsureSetup pulls, builds and can hang. Untagged unit tests drive fakes. `engine_test.go`
 has no tag; the real-backend setups all do.
 
-**The fix.** A gate in `repo_hygiene_test.go` (Gate D), following that file's established shape:
+**The fix.** A gate in `repo_hygiene_test.go` (the discard gate), following that file's established shape:
 - Ban `io.Discard` as the output argument of `EnsureSetup` / `Setup`, **only in files carrying
   `//go:build integration`**.
-- Parse, do not grep. `goFileComments` documents why; `envGateReads` (Gate C) is the closest model —
+- Parse, do not grep. `goFileComments` documents why; `envGateReads` (the test-gate liveness gate) is the closest model —
   walk `*ast.CallExpr`, match the callee by selector name, inspect the args. The build tag is available
   from the parsed file's comments, or by reading the first line.
 - Add the matcher-proof test the file's convention requires: it must catch the banned shape in a tagged
@@ -121,7 +121,7 @@ with the cause discarded is what made this finding.
 
 **Verify.** Prove it fails: inject `EnsureSetup(ctx, io.Discard)` into a tracked test file, confirm the
 gate names the file and line, revert. A gate that has never failed is not known to work — this session's
-first attempt at proving Gate C failed silently missed its injection target and reported green.
+first attempt at proving the test-gate liveness gate failed silently missed its injection target and reported green.
 
 **Size:** small-medium. **Risk:** false positives on legitimate non-output `io.Discard`; the matcher test
 is what bounds it. **Depends on:** nothing.
@@ -146,7 +146,7 @@ this may not be a `make check` gate at all. Options, in rough order of cheapness
 1. A `.claude/hooks/` check on the session transcript at Stop time, alongside the existing
    `post-edit.sh` / `on-stop.sh`. Fits the existing machinery. Claude-specific, which `CLAUDE.md` says is
    where Claude-specific mechanics belong.
-2. A weaker repo-side gate: citations must resolve (already exists, Gate B) **and** the cited file must
+2. A weaker repo-side gate: citations must resolve (already exists, the citation gate) **and** the cited file must
    exist at the cited path (catches `research/*.md` link rot, not the read-it problem).
 3. Nothing. Accept that this class is caught by review, and write it down as accepted.
 
@@ -184,7 +184,7 @@ block. Both failures were the plan's own thesis biting the hand that wrote it.
 
 ## Order and expectations
 
-1 first (ten lines, removes a class outright). Then 2 (the pattern is established by Gate C; the shape is
+1 first (ten lines, removes a class outright). Then 2 (the pattern is established by the test-gate liveness gate; the shape is
 known). 3 only after its noise question is answered.
 
 Each is one commit, `type(scope): summary` with a prose body saying what was wrong (see AGENTS.md rules
@@ -192,6 +192,6 @@ Each is one commit, `type(scope): summary` with a prose body saying what was wro
 actually did the work, which is not necessarily what the system prompt claims — see the upstream issue
 linked from `research/llm-shaped-repos.md`, and ask the maintainer to run `/model` rather than guessing.
 
-**Expect these gates to find live defects when they land.** Gate C found three dead gates before it ran
+**Expect these gates to find live defects when they land.** The test-gate liveness gate found three dead gates before it ran
 once, two of them guarding security tests that had never executed. That is the normal outcome, not a
 surprise. Budget for the findings rather than meeting them mid-release.

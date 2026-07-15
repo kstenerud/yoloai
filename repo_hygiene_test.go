@@ -64,7 +64,7 @@ import (
 // docs/contributors/**/*.md. Most of those files are still missing one — a
 // known, tracked bulk-add task, not a per-PR regression. Gating it here would
 // make this test permanently red for a gap a separate task owns; once that
-// sweep lands, extend Gate A to cover docs/contributors/**/*.md too.
+// sweep lands, extend the ABOUTME gate to cover docs/contributors/**/*.md too.
 //
 // (ABOUTME line width USED to be listed here as deliberately not gated, on the
 // grounds that markdown.md stated no width rule. D117 made it a rule at 100
@@ -230,8 +230,8 @@ func TestRepoHygiene_GoFileComments_IgnoresStringLiterals(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Gate A: ABOUTME headers (docs/contributors/standards/markdown.md
-// "Required" list) on Go, runtime/monitor Python, and scripts/ shell files.
+// ABOUTME headers (docs/contributors/standards/markdown.md "Required" list)
+// on Go, runtime/monitor Python, and scripts/ shell files.
 // ---------------------------------------------------------------------------
 
 // hasABOUTMEHeader reports whether an ABOUTME: line appears anywhere in the
@@ -251,7 +251,7 @@ func hasABOUTMEHeader(lines []string) bool {
 }
 
 // aboutmeCategory classifies a tracked path into one of the three gated
-// buckets, or "" if the file isn't in scope for Gate A.
+// buckets, or "" if the file isn't in scope for the ABOUTME gate.
 func aboutmeCategory(path string) string {
 	switch {
 	case strings.HasSuffix(path, ".go"):
@@ -279,7 +279,7 @@ func aboutmeCategory(path string) string {
 // of count D121 leaves standing outside a gate.
 const aboutmeMaxCols = 100
 
-// TestRepoHygiene_ABOUTMEHeaders_AllTrackedFilesCompliant is Gate A: every
+// TestRepoHygiene_ABOUTMEHeaders_AllTrackedFilesCompliant is the ABOUTME gate: every
 // tracked *.go, runtime/monitor/*.py, and scripts/*.sh file must carry an
 // ABOUTME: line in its first 6 lines, within aboutmeMaxCols.
 //
@@ -318,7 +318,7 @@ func TestRepoHygiene_ABOUTMEHeaders_AllTrackedFilesCompliant(t *testing.T) {
 		}
 	}
 
-	t.Logf("Gate A scope: go=%d python(runtime/monitor)=%d shell(scripts/)=%d",
+	t.Logf("ABOUTME gate scope: go=%d python(runtime/monitor)=%d shell(scripts/)=%d",
 		counted["go"], counted["python"], counted["shell"])
 
 	if len(missing) > 0 {
@@ -348,7 +348,7 @@ func TestRepoHygiene_ABOUTMEHeaders_AllTrackedFilesCompliant(t *testing.T) {
 }
 
 // TestRepoHygiene_ABOUTMEWidth_RejectsOverlongAndCountsRunes proves the width
-// half of Gate A can fail, and pins the byte-vs-rune trap it was born from:
+// half of the ABOUTME gate can fail, and pins the byte-vs-rune trap it was born from:
 // len() counts bytes, these comments are full of em-dashes at 3 bytes each, and
 // the first cut rejected a correct 99-column line as 101.
 func TestRepoHygiene_ABOUTMEWidth_RejectsOverlongAndCountsRunes(t *testing.T) {
@@ -378,7 +378,7 @@ func TestRepoHygiene_ABOUTMEWidth_RejectsOverlongAndCountsRunes(t *testing.T) {
 	}
 }
 
-// TestRepoHygiene_ABOUTMEMatcher_RejectsBadHeaders proves Gate A's matcher
+// TestRepoHygiene_ABOUTMEMatcher_RejectsBadHeaders proves the ABOUTME gate's matcher
 // can fail: it is a pure table test against literal strings, independent of
 // repo content, so a gate that has silently stopped checking anything would
 // still be caught here.
@@ -420,8 +420,8 @@ func TestRepoHygiene_ABOUTMEMatcher_RejectsBadHeaders(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Gate B: D<n>/DF<n> rationale-ID citations resolve, and no ID is defined
-// twice.
+// Rationale-ID citations: every D<n>/DF<n> cited from a Go comment resolves,
+// and no ID is defined twice.
 // ---------------------------------------------------------------------------
 
 // canonicalDHeadingRe matches a decision heading in
@@ -662,7 +662,7 @@ func assertNoDuplicates(t *testing.T, headings map[string][]idSite, corpusDesc s
 	}
 }
 
-// TestRepoHygiene_DecisionCitations_ResolveAndAreUnique is Gate B: every
+// TestRepoHygiene_DecisionCitations_ResolveAndAreUnique is the citation gate: every
 // D<n>/DF<n> cited from a Go comment must resolve to a real heading, and no
 // heading may define the same ID twice.
 //
@@ -689,7 +689,7 @@ func TestRepoHygiene_DecisionCitations_ResolveAndAreUnique(t *testing.T) {
 	dCitations := scanCitations(t, root, goFiles, "D", citationDRe)
 	dfCitations := scanCitations(t, root, goFiles, "DF", citationDFRe)
 
-	t.Logf("Gate B scope: %d canonical D headings, %d canonical DF headings, %d cited D ids, %d cited DF ids",
+	t.Logf("citation gate scope: %d canonical D headings, %d canonical DF headings, %d cited D ids, %d cited DF ids",
 		len(dHeadings), len(dfHeadings), len(dCitations), len(dfCitations))
 
 	t.Run("CitedDecisionsResolve", func(t *testing.T) {
@@ -726,7 +726,7 @@ func envGateSetterFiles(paths []string) []string {
 	return out
 }
 
-// TestRepoHygiene_TestGates_AreSetBySomething is Gate C: every YOLOAI_TEST_*
+// TestRepoHygiene_TestGates_AreSetBySomething is the test-gate liveness gate: every YOLOAI_TEST_*
 // gate the Go code reads must be settable by something in the tree.
 //
 // A scope gate nothing sets is not a skipped test, it is a deleted one that
@@ -758,7 +758,7 @@ func TestRepoHygiene_TestGates_AreSetBySomething(t *testing.T) {
 		}
 	}
 
-	t.Logf("Gate C scope: %d gates read in Go, %d settable in Makefile/CI/scripts",
+	t.Logf("test-gate liveness scope: %d gates read in Go, %d settable in Makefile/CI/scripts",
 		len(reads), len(setters))
 
 	for _, name := range sortedKeys(reads) {
@@ -771,7 +771,7 @@ func TestRepoHygiene_TestGates_AreSetBySomething(t *testing.T) {
 	}
 }
 
-// TestRepoHygiene_EnvGateMatcher_CountsReadsNotMentions proves Gate C's
+// TestRepoHygiene_EnvGateMatcher_CountsReadsNotMentions proves the test-gate liveness gate's
 // extractor can fail in both directions that matter. It must find a gate behind
 // each shape a real read takes (a bare os.Getenv literal, an os.LookupEnv, and
 // the const indirection testutil uses), and it must NOT report gate-shaped text
@@ -925,8 +925,8 @@ func allSubmatches(re *regexp.Regexp, s string) []string {
 }
 
 // ---------------------------------------------------------------------------
-// Gate C: no //nolint directive suppresses the complexity gate, and
-// .golangci.yml still pins its thresholds.
+// Complexity: no //nolint directive suppresses cyclop/gocognit/gocyclo, and
+// .golangci.yml still pins their thresholds.
 // ---------------------------------------------------------------------------
 
 // complexityLinters are the three names development-principles.md §10
@@ -959,7 +959,7 @@ func nolintComplexityName(line string) (string, bool) {
 	return "", false
 }
 
-// TestRepoHygiene_NoComplexitySuppression_AllTrackedFiles is Gate C part 1:
+// TestRepoHygiene_NoComplexitySuppression_AllTrackedFiles is the complexity gate's first half:
 // no tracked *.go file may contain a //nolint directive naming
 // cyclop/gocognit/gocyclo. The repo has many //nolint directives and none of
 // them suppress any of the three — which is the gate's whole claim, so it is
@@ -998,7 +998,7 @@ func TestRepoHygiene_NoComplexitySuppression_AllTrackedFiles(t *testing.T) {
 	}
 }
 
-// TestRepoHygiene_ComplexityThresholds_PinnedInGolangciYML is Gate C part
+// TestRepoHygiene_ComplexityThresholds_PinnedInGolangciYML is the complexity gate's second half
 // 2: raising the limit is the other way to defeat the gate instead of
 // extracting a function, so the thresholds themselves must stay pinned to
 // their literal values.
@@ -1020,7 +1020,7 @@ func TestRepoHygiene_ComplexityThresholds_PinnedInGolangciYML(t *testing.T) {
 var cyclopThresholdRe = regexp.MustCompile(`(?s)cyclop:\s*\n\s*max-complexity:\s*15\b`)
 var gocognitThresholdRe = regexp.MustCompile(`(?s)gocognit:\s*\n\s*min-complexity:\s*20\b`)
 
-// checkComplexityThresholds is the matcher Gate C part 2 runs against
+// checkComplexityThresholds is the matcher the complexity gate's second half runs against
 // .golangci.yml's contents; factored out so it can be table-tested against
 // literal strings without touching the real file.
 func checkComplexityThresholds(yaml string) error {
@@ -1038,7 +1038,7 @@ func checkComplexityThresholds(yaml string) error {
 }
 
 // TestRepoHygiene_ComplexitySuppressionMatcher_RejectsBadDirectives proves
-// both halves of Gate C can fail: a //nolint that does name a complexity
+// both halves of the complexity gate can fail: a //nolint that does name a complexity
 // linter, and a .golangci.yml whose thresholds have drifted from the pinned
 // values.
 func TestRepoHygiene_ComplexitySuppressionMatcher_RejectsBadDirectives(t *testing.T) {
@@ -1092,8 +1092,8 @@ func TestRepoHygiene_ComplexitySuppressionMatcher_RejectsBadDirectives(t *testin
 }
 
 // ---------------------------------------------------------------------------
-// Gate D: a real-backend test must not discard the output of a chatty,
-// long-running setup call (DF97).
+// The discard gate: a real-backend test must not discard the output of a
+// chatty, long-running setup call (DF97).
 //
 // EnsureSetup pulls base images and builds them. `io.Discard` there hid two
 // separate failures in one session: the Tart tier swallowed the base-image
@@ -1152,7 +1152,7 @@ func requiresIntegrationTag(f *ast.File) bool {
 // three shapes in the tree are "integration", "integration && linux" and
 // "integration && !linux", but spelling this out structurally rather than
 // string-matching the first line is what keeps a fourth shape from silently
-// falling out of scope — a gate's corpus going quiet is the failure mode Gate C
+// falling out of scope — a gate's corpus going quiet is the failure mode the test-gate liveness gate
 // exists to catch, and it applies to this gate too.
 func constraintRequiresTag(expr constraint.Expr, tag string) bool {
 	switch x := expr.(type) {
@@ -1215,7 +1215,7 @@ func isIODiscard(e ast.Expr) bool {
 	return ok && pkg.Name == "io" && sel.Sel.Name == "Discard"
 }
 
-// TestRepoHygiene_IntegrationSetupOutput_IsNotDiscarded is Gate D: no
+// TestRepoHygiene_IntegrationSetupOutput_IsNotDiscarded is the discard gate: no
 // integration-tagged file may discard a setup call's output.
 //
 // The replacement exists, which is what makes the ban fair: testutil.LogWriter(t)
@@ -1246,14 +1246,14 @@ func TestRepoHygiene_IntegrationSetupOutput_IsNotDiscarded(t *testing.T) {
 		}
 	}
 
-	t.Logf("Gate D scope: %d integration-tagged Go files of %d tracked", scoped, len(goFiles))
+	t.Logf("discard gate scope: %d integration-tagged Go files of %d tracked", scoped, len(goFiles))
 	if scoped == 0 {
-		t.Error("Gate D matched no integration-tagged files at all — the corpus went quiet, " +
-			"which means the gate is not checking anything (compare Gate C's DF94)")
+		t.Error("the discard gate matched no integration-tagged files at all — the corpus went quiet, " +
+			"which means the gate is not checking anything (compare the test-gate liveness gate's DF94)")
 	}
 }
 
-// TestRepoHygiene_DiscardMatcher_ScopesToIntegrationTaggedFiles proves Gate D's
+// TestRepoHygiene_DiscardMatcher_ScopesToIntegrationTaggedFiles proves the discard gate's
 // matcher can fail in both directions that matter. It must catch the banned shape
 // under each build-tag spelling the tree actually uses, and it must NOT flag the
 // io.Discard shapes that are correct: the same setup call in an untagged unit

@@ -177,7 +177,7 @@ Per-backend rename support must be established before committing to rename-over-
 
 Nothing here makes the *lexical* problem gateable. `"yoloai-"` still names several things (base
 image, guest paths, netns marker, profile tags) and a linter still cannot tell which is which — see
-DF98 for why Gate B' was rejected. This plan removes the class by making the wrong code fail loudly
+DF98 for why a lexical ban on the prefix was rejected. This plan removes the class by making the wrong code fail loudly
 on the common path, which is the poka-yoke answer rather than the lint answer.
 
 ## References
