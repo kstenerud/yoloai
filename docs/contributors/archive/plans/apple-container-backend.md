@@ -4,18 +4,19 @@
 
 # Apple `container` backend
 
-- **Status:** IN-PROGRESS — the backend and the macOS priority/wizard rework described here have
-  shipped: backend skeleton + two-tier probe + lifecycle/exec/mounts (`b85a11ad`, `5bd44b91`,
-  `c2f90c7f`), network isolation, the container-system selector (Phase 4c, `4a90d1a9`), curated env
-  keyset (Phase 6, `4651b645`), wizard preset rework (Phase 5, `cff6aebd`), and docs (Phase 7,
-  `66f596c1`) are all on `main`, and the macOS default-isolation shift is recorded in
-  `BREAKING-CHANGES.md`. **Remaining: the AC10 network-allowlist end-to-end run** — the real
-  `--network-isolated` path has never been exercised against a live apple backend (the only
-  coverage is `runtime/apple/apple_test.go` asserting the descriptor's `NetworkIsolation` flag),
-  and apple's DNS is the vmnet gateway (`192.168.64.1`), so the default-deny chain must ACCEPT
-  gateway:53. See "Open questions / risks" below. Work-copy git confinement for apple + seatbelt
-  followed as its own plan:
-  [confine-host-side-git-macos-build.md](confine-host-side-git-macos-build.md) (D113).
+- **Status:** IMPLEMENTED — the backend and the macOS priority/wizard rework shipped on `main`
+  (skeleton + two-tier probe + lifecycle/exec/mounts `b85a11ad`, `5bd44b91`, `c2f90c7f`; network
+  isolation; container-system selector `4a90d1a9`; curated env keyset `4651b645`; wizard presets
+  `cff6aebd`; docs `66f596c1`), with the macOS default-isolation shift recorded in
+  `BREAKING-CHANGES.md`. **AC10 closed 2026-07-15** by the live end-to-end run it always needed:
+  `--network-isolated` on a real apple sandbox resolves DNS through the vmnet gateway
+  (`/etc/resolv.conf` = `192.168.64.1`, as this plan predicted), the default-deny OUTPUT chain
+  ACCEPTs that gateway on udp+tcp `:53` with no host-DNS assumption hard-coded, an allowlisted
+  domain returns HTTP 200, and a non-allowlisted one is REJECTed and fails fast. The run also
+  surfaced DF104 — the allowlist is IPv4-only on every backend, latent because vmnet hands out a
+  non-routable ULA — which is the shared firewall's gap, not apple's, and is filed rather than
+  fixed here. Work-copy git confinement for apple + seatbelt followed as its own plan
+  ([confine-host-side-git-macos-build.md](../../archive/plans/confine-host-side-git-macos-build.md), D113).
 - **Depends on:** —
 
 ## Why this doc exists
