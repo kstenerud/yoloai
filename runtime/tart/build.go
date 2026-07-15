@@ -660,19 +660,30 @@ func (r *Runtime) configureXcodeInVM(ctx context.Context, vmName string) error {
 		}
 	}
 
+	// Accept the licence BEFORE making the mounted Xcode active, scoping the
+	// acceptance with DEVELOPER_DIR. Switching first points Apple's /usr/bin/git
+	// shim at an Xcode this VM has not accepted, and every in-VM git then exits 69
+	// until the accept lands — a window callers really do land in, measured at 1
+	// failure per 10 tart tier runs before this order was fixed (DF111). The live
+	// sandbox path carries the same ordering and the same reasoning; see the DF111
+	// note in sandbox-setup.py.
+	//
+	// The accept is required, not defensive: the acceptance record is version-keyed
+	// and lives in the VM's /Library/Preferences, so a fresh VM has none (DF112).
+	acceptLicenseCmd := fmt.Sprintf("sudo env DEVELOPER_DIR='%s/Contents/Developer' xcodebuild -license accept", xcodePath)
+	args = execArgs(vmName, "bash", "-c", acceptLicenseCmd)
+	if _, err := r.runTart(ctx, args...); err != nil {
+		// Non-fatal here (the base build verifies its tools before promoting), but
+		// logged as a warning rather than swallowed: an unreported accept failure
+		// leaves the VM's git broken for its whole life (DF114).
+		slog.Warn("xcodebuild -license accept failed; in-VM git may fail exit 69", "err", err)
+	}
+
 	// Set active developer directory
 	xcodeSelectCmd := fmt.Sprintf("sudo xcode-select -s '%s/Contents/Developer'", xcodePath)
 	args = execArgs(vmName, "bash", "-c", xcodeSelectCmd)
 	if _, err := r.runTart(ctx, args...); err != nil {
 		return fmt.Errorf("run xcode-select: %w", err)
-	}
-
-	// Accept Xcode license (non-interactive)
-	acceptLicenseCmd := "sudo xcodebuild -license accept"
-	args = execArgs(vmName, "bash", "-c", acceptLicenseCmd)
-	if _, err := r.runTart(ctx, args...); err != nil {
-		// Non-fatal: license might already be accepted or not required
-		slog.Debug("xcodebuild -license accept failed (might already be accepted)", "err", err)
 	}
 
 	// Run xcodebuild -runFirstLaunch to complete setup

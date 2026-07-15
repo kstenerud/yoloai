@@ -381,6 +381,45 @@ class TartBackend(Backend):
             xcode_developer = None
 
         if xcode_developer and os.path.isdir(xcode_developer):
+            # Accept the licence BEFORE xcode-select, scoping it with DEVELOPER_DIR
+            # rather than making the mounted Xcode active first (DF111).
+            #
+            # /usr/bin/git is Apple's shim: it resolves the ACTIVE developer dir and
+            # exits 69 ("You have not agreed to the Xcode license agreements")
+            # whenever that dir is an Xcode this VM has not accepted. Acceptance
+            # lives in the VM's own /Library/Preferences, so it dies with the VM and
+            # must be re-established on every start; the base image cannot pre-accept
+            # because it cannot know the host's future Xcode version (the record is
+            # version-keyed). Switching first therefore opened a window in which every
+            # in-VM git failed, and callers do land in it: the host does not wait for
+            # this script when no secrets are staged (launch.go:128,802 — hasSecrets
+            # is secretsDir != ""), and D113 routes copy-mode work-copy git into the
+            # VM, so real agent work shares the window with the tests that caught it.
+            #
+            # DEVELOPER_DIR out-ranks xcode-select for the shim, so this accepts the
+            # mounted Xcode's licence while the active dir is still the
+            # CommandLineTools git that already works. Once accepted, the switch below
+            # cannot open a gap. Keep this order.
+            log_debug("tart.xcode.license", "accepting xcode license")
+            # Accept Xcode license (stored in VM's /Library/Preferences, not in Xcode.app)
+            result = tmux_io.run(
+                ["sudo", "env", f"DEVELOPER_DIR={xcode_developer}", "xcodebuild", "-license", "accept"],
+                capture_output=True,
+                text=True
+            )
+            # Check it. An unchecked accept leaves the VM switched to an unlicensed
+            # Xcode — every in-VM git exits 69 for the VM's whole life — while the log
+            # says the licence was accepted, which is why this class of failure was
+            # invisible (DF114). Do not retry it into working: a failure here should
+            # stay legible.
+            if result.returncode != 0:
+                import syslog
+                syslog.syslog(syslog.LOG_ERR, f"Failed to accept Xcode license: {result.stderr}")
+                log_debug("tart.xcode.license.failed", "xcode license accept FAILED",
+                          returncode=result.returncode, stderr=(result.stderr or "")[:400])
+            else:
+                log_debug("tart.xcode.license.done", "xcode license accepted")
+
             log_debug("tart.xcode.select", "switching xcode-select", developer=xcode_developer)
             # Point xcode-select to the mounted Xcode so xcrun can find simctl and other tools
             result = tmux_io.run(
@@ -405,15 +444,6 @@ class TartBackend(Backend):
                         f.write(path_export)
                 except OSError:
                     pass  # Non-fatal if we can't update profile
-
-            log_debug("tart.xcode.license", "accepting xcode license")
-            # Accept Xcode license (stored in VM's /Library/Preferences, not in Xcode.app)
-            result = tmux_io.run(
-                ["sudo", "xcodebuild", "-license", "accept"],
-                capture_output=True,
-                text=True
-            )
-            log_debug("tart.xcode.license.done", "xcode license accepted")
 
             # Run first launch in background — this initializes device types and can
             # take 60-120+ seconds on first run. State persists in the Xcode.app bundle
