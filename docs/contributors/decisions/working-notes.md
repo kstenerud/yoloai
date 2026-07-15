@@ -1246,6 +1246,36 @@ And the audit behind D116 found four distinct classes of silent documentation ro
 
 **Consequences.** The release ritual changes for the maintainer (drain, don't rename) and gains a mechanical precondition worth gating: at a `vX.Y.Z` tag, `## Unreleased` must exist and be empty. §16 makes "the docs are probably stale" a thing an agent says on its own rather than something the maintainer has to remember to ask. §16 also states the ordering against D116/§15: where a claim can be gated, gate it — the sweep is for what no gate can reach.
 
+## D119 — §7's accuracy bar covers our own code, where the primary source is a grep; a finding parks its fix, never its verification
+
+**Date:** 2026-07-15. **Status:** Active — implementing on branch `contributor-docs-sweep`. Extends §7 of `general-principles.md` (established in [D5](working-notes-archive.md#d5--critique-principles-in-claudemd)). Prompted by [DF94](../design/findings-unresolved.md)'s first run and the four findings it produced (DF96–DF98).
+
+**Context.** §7 already names the failure mode exactly — "the failure mode is confident confabulation, not malicious lying"; "plausibility is not verification"; "if a claim is 'everyone knows this,' check it anyway". It did not prevent a single one of the errors in the D117 Tart work, because every one of them was a claim about **our own code**, and §7 is scoped to *external* facts: its Rule enumerates "competitor features, counts, security properties, kernel behaviour, vendor SLAs", its trigger reads "about to state a competitor / security / kernel fact you haven't checked", and its threshold is "every factual claim in a design doc, research file, or competitive comparison".
+
+Four claims in one workstream, each stated confidently, each false, each refutable in seconds by reading this repo:
+
+- "§12 permits this" — asserted while *citing §12 by name*, without reading it. The rule being cited banned the call about to be written.
+- "`EnsureSetup` short-circuits when the base exists" — `needsBuild`'s first early return was read; the checksum path two lines on (`layout.CacheDir()`, under an isolated temp dir) was not. It rebuilt a ~29 GB VM per test.
+- "`NewIntegrationRuntime`'s ambient `os.UserHomeDir` is a latent landmine" — no caller was checked. The ambient read was correct, the "fix" a regression that would have pointed tests at the developer's real `~/.yoloai`.
+- "seatbelt's twin bug may be unreachable" — filed as an unverified finding, reasoning from the one function that *wasn't* the bug. It was reachable at nine call sites, and two minutes of grep disproved it.
+
+The asymmetry §7 misses: it budgets "5–30 minutes per non-trivial claim", which is honest for a vendor SLA and reads as *expensive*, so the bar is reserved for Big External Claims. For our own code the primary source is the code. Checking is seconds. The principle therefore applies **more** strongly at **lower** cost precisely where it was not scoped, and the cost line was quietly licensing the skip.
+
+Separately, `findings-unresolved.md`'s policy says "Don't expand a workstream's scope to absorb new findings." That governs **fixing**. It was read as licensing a parked **verification**, which is how DF98 shipped into a permanent record as a confident wrong guess — the shape a reader trusts most, because it looks like knowledge that someone already did the work on.
+
+**Decision.**
+- **(a) §7 covers claims about this codebase, at a near-zero cost threshold.** Before stating how our own code behaves — in a comment, a finding, a commit message, or an explanation to the maintainer — read the path end to end. Not the first plausible early return: the end. The primary source is the code, and it is a grep away, so the 5–30 minute budget does not apply and is not a reason to skip. If verification genuinely isn't cheap, say the claim is unverified *and name the check that would settle it*.
+- **(b) Documenting uncertainty is not resolving it.** Where the check is cheap, run it. A hedge is not a substitute for two minutes of grep, and an unverified finding is worse than no finding: it occupies the slot, and the next reader inherits a guess wearing the costume of a result.
+- **(c) A finding parks its fix, never its verification.** The discovered-findings policy's no-scope-creep rule applies to the remedy. Establishing whether the defect is *real* is not scope creep — it is what makes the entry worth writing. File what is true, not what is plausible.
+- **(d) Breadth and depth are different axes.** "Don't read files just in case" governs *surveying* — the forty-file tour before a one-line fix, which remains banned. Reading the one path behind a claim you are about to commit to is not speculative: it *is* the current step. Where the two pull against each other, (a) wins; that is what §7 being a principle means.
+
+**Rejected alternatives.**
+- **A new §17** — rejected, and the rejection is the evidence for the decision: adding one was proposed *without checking whether §7 already existed*. It did, and it already said the right thing. The defect was scope, not absence. A second principle saying "verify" would have split the authority and taught that §7 is the external-facts one.
+- **A lint rule for this** — rejected as a category error; no linter detects an unverified belief. What *is* gateable are the specific consequences (a `YOLOAI_TEST_*` gate nothing sets; a hardcoded `"yoloai-"` outside `internal/config/names.go`), and those are being gated separately. Per §16's ordering: where a claim can be gated, gate it — this bar is for what no gate can reach.
+- **Deleting or weakening "avoid speculative exploration"** — rejected. It was initially blamed for these errors; the evidence does not support it. Three of the four were overconfidence, not thrift, and the rule prevents a real failure mode. It needed scoping, not removal — see (d).
+
+**Consequences.** The bar an agent must clear before writing a sentence about this codebase goes up, and the cost of clearing it is a grep. DF98's entry is the worked example, preserved with its wrong first guess recorded rather than quietly corrected, because the guess is the lesson. Note the limit honestly: (a)–(d) would have caught the §12, `NewIntegrationRuntime` and seatbelt errors, and would **not** have caught "the test never starts its VM" or "the assertion contradicts a design we abandoned" — those needed execution, which is what `releasetest` is for and what DF94 proves the value of.
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.

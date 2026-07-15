@@ -1,9 +1,9 @@
-ABOUTME: Cross-cutting strategic principles for yoloAI. Thirteen principles
-ABOUTME: scoped to a single-author OSS CLI: pragmatism, boring tech, ecosystem
-ABOUTME: composition, reversibility, blast-radius, safe defaults, factual
-ABOUTME: accuracy, document-the-no, surface-failures, cross-platform, default-
-ABOUTME: to-public, design-as-hypothesis, speak-up-against-the-plan. Specialised
-ABOUTME: principles (development, testing, security) cite back here.
+ABOUTME: Cross-cutting strategic principles for yoloAI — the meta layer above the
+ABOUTME: specialised architecture, development, testing and security principles docs,
+ABOUTME: which cite back here. Scoped to a single-author OSS CLI, where maintenance
+ABOUTME: time across the backends is the constrained resource. Each §n carries a rule,
+ABOUTME: a "bites when" trigger, worked examples, and an explicit cost-vs-benefit
+ABOUTME: threshold; rule-index.md is the one-line-per-principle lookup layer.
 
 # General principles
 
@@ -250,11 +250,18 @@ Originally established alongside D4 + D15 + D16.
 
 ## §7. Factual accuracy bar — verify before you cite
 
-> **Rule.** Verify claims (competitor features, counts, security properties, kernel behaviour, vendor SLAs) against primary sources before citing; marketing language and plausibility are not evidence.
+> **Rule.** Verify claims (competitor features, counts, security properties, kernel behaviour, vendor SLAs — **and how our own code behaves**) against primary sources before citing; marketing language and plausibility are not evidence. Documenting uncertainty is not resolving it when resolving is cheap.
 >
-> **Bites when:** about to state a competitor / security / kernel fact you haven't checked. · **See also:** GEN §12, SEC §8.
+> **Bites when:** about to state a competitor / security / kernel fact you haven't checked — or about to say what our own code does without having read that path to its end. · **See also:** GEN §12, SEC §8.
 
 **Principle.** Research must be verified. Claims about competitor features, star counts, security properties, kernel behaviour, and vendor SLAs are not statements until they are checked against primary sources. Marketing language is not evidence. Plausibility is not verification.
+
+**This codebase is subject to the same bar, at a fraction of the cost** (D119). A claim about our own code — what a function does, who calls it, what a rule permits — is a factual claim, and its primary source is the code. Reading it takes seconds, not the minutes a vendor claim costs, so the bar applies *more* strongly here, not less. Read the path to its end, not to the first plausible early return. The tell is the sentence you are about to write: if it asserts behaviour and you have not read that behaviour, you are guessing, however confident it feels — and confident is exactly how it feels, because the failure mode is confabulation, not lying.
+
+Two corollaries, both learned the hard way (DF94, DF96–DF98):
+
+- **A hedge is not a check.** "This may be unreachable" filed as an unverified finding, when two minutes of grep would settle it, is a guess wearing the costume of a result — and worse than silence, because the next reader inherits it as knowledge. Where the check is cheap, run it and write down what is true.
+- **Breadth and depth are different axes.** "Don't read files just in case" bans the forty-file tour before a one-line fix. It does not ban reading the one path behind a claim you are about to commit to: that is not speculative, it *is* the current step. Where the two pull against each other, this principle wins.
 
 ### Pattern
 
@@ -268,10 +275,11 @@ Threshold: every factual claim in a design doc, research file, or competitive co
 - **Network isolation claim** ("Anthropic's devcontainer and Trail of Bits' devcontainer use iptables + ipset") — verified by reading both projects' devcontainer.json + entrypoint scripts. Cited in `docs/contributors/design/security.md` and `docs/contributors/design/network-isolation.md`.
 - **Podman backend plan** (`docs/contributors/design/research/podman.md`) — verified against Podman source rather than against blog posts (commit `77f9dab`, "Verify Podman research claims against Docker/Podman/Buildah source").
 - **The platform-specific test** — every claim of the form "X works on Y" is verified against Y specifically. macOS Docker Desktop + VirtioFS, Tart on Apple Silicon, gVisor on macOS (commit `d078db6`, "Block gVisor on macOS with error pointing to Claude Code issue") all carry their own verification trails.
+- **Our own code, four times in one workstream** (D119, the D117 Tart tier) — each claim confident, false, and refutable in seconds. "§12 permits this", asserted while citing §12 by name without reading it — the cited rule banned the call about to be written. "`EnsureSetup` short-circuits", from reading `needsBuild`'s first early return and not the checksum path two lines on — it rebuilt a ~29 GB VM per test. "`NewIntegrationRuntime`'s ambient read is a landmine", with no caller checked — the read was correct and the "fix" a regression. "Seatbelt's twin may be unreachable", filed as an unverified finding by reasoning from the one function that wasn't the bug — it was reachable at nine call sites. The repo had already written down every answer: `startAndWaitActive`'s doc said create doesn't launch, `Stop`'s doc said it never suspends, the conformance suite documented the store trap, `.golangci.yml` explained the ban. It kept telling; nobody read.
 
 ### Cost-vs-benefit
 
-Cost of applying: 5–30 minutes per non-trivial claim to verify. Damage prevented: design built on a wrong fact, security claim that doesn't hold under load, competitor framing that misleads users (and embarrasses the project when corrected publicly). Threshold: any claim that drives a design decision must be verified; trivial supporting claims may inherit verification from a primary source.
+Cost of applying: 5–30 minutes per non-trivial *external* claim to verify. **For a claim about our own code, seconds** — the primary source is the code, so the minutes figure above is not a licence to skip; treat the threshold as near-zero (D119). Damage prevented: design built on a wrong fact, security claim that doesn't hold under load, competitor framing that misleads users (and embarrasses the project when corrected publicly) — and, for our own code, a "fix" that regresses what was already correct, or a finding whose confident guess the next reader inherits as fact. Threshold: any claim that drives a design decision must be verified; trivial supporting claims may inherit verification from a primary source. What this bar does **not** reach: behaviour no reading reveals, only execution — a test that has never run is not verified by reading it (GEN §12, DF94).
 
 ### Sources
 
