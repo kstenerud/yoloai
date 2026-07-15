@@ -37,20 +37,25 @@ runtime/monitor/
 
 ## Python version
 
-Python 3.11+. The base image ships `python3` from Debian bookworm-slim (currently 3.11). Don't use 3.12-only syntax (e.g., `type` statements for type aliases) until the base image is bumped — there's no business case yet.
+The sandbox base image is `debian:trixie-slim`, whose system `python3` is 3.13. Scripts that
+ship in the binary run on that interpreter and on **standard library only** — no pip packages
+are available inside the sandbox, so a third-party import is a runtime failure, not a lint
+error.
 
 ## Typing — `mypy --strict`
 
-Every file in `runtime/monitor/` that ships in the binary (not test code) is type-annotated and passes `mypy --strict`. The Makefile `python-typecheck` target enforces this:
+**Every tracked `.py` under `runtime/` and `scripts/` passes `mypy --strict`**, test code
+included. `make python-typecheck` enforces it, and it is a `make check` prerequisite.
 
-```make
-python-typecheck:
-    @if python3 -m mypy --version >/dev/null 2>&1; then \
-        python3 -m mypy --strict runtime/monitor/setup_helpers.py runtime/monitor/tmux_io.py runtime/monitor/tests/; \
-    else \
-        echo "Python type-check skipped (install mypy via 'make setup-dev-python' to enable)"; \
-    fi
-```
+The target derives its file list from `git ls-files` rather than enumerating files. That is
+deliberate and load-bearing: this section previously claimed `--strict` coverage while the
+target named files by hand, and five `//go:embed`ed scripts — `entrypoint.py`, `firewall.py`,
+`install-firewall.py`, `sandbox-setup.py`, `status-monitor.py` — sat outside that list. They
+shipped inside every sandbox for months with no typecheck, no test, and no syntax check, while
+this document asserted the opposite (D117). A derived list cannot develop that gap: add a file
+under `runtime/` or `scripts/` and it is covered the moment it is tracked.
+
+`docs/**/*.py` is out of scope — the only one is a research spike nothing ships.
 
 The pattern:
 
@@ -82,7 +87,7 @@ This is the "test at the right layer" principle (`../principles/testing-principl
 - **Framework**: pytest (`runtime/monitor/tests/requirements-dev.txt` pins the version).
 - **Pattern**: table-driven where applicable; pytest fixtures for any common setup.
 - **Coverage**: not gated on a percentage (per `../principles/testing-principles.md §1`). The gate is "does the test catch a real failure mode."
-- **Skip discipline**: `make python-test` skips silently if pytest isn't installed; CI installs pytest via `setup-dev-python` and treats the target as required.
+- **No skip discipline**: `make python-test` does not skip. The Python surface is app code, so `uv` is required and its absence FAILS loudly (D112); the venv is provisioned on demand from `requirements-dev.lock`. A gate that can silently not run is not a gate (D117).
 
 ```python
 import pytest

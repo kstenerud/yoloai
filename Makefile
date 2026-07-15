@@ -43,7 +43,7 @@ DOCKER_HOST_ENV := $(DOCKER_HOST)
 DOCKER_HOST_RESOLVED = $(if $(DOCKER_HOST_ENV),$(DOCKER_HOST_ENV),$(shell docker context inspect --format '{{.Endpoints.docker.Host}}' 2>/dev/null))
 integration e2e base-image smoketest smoketest-quick: export DOCKER_HOST = $(DOCKER_HOST_RESOLVED)
 
-.PHONY: build test fmt lint lint-cross vet-tagged crosscheck tidy-check govulncheck hadolint actionlint check cover integration e2e integration-podman integration-containerd integration-apple integration-seatbelt integration-tart python-test python-typecheck ensure-python-venv setup-dev-python smoketest smoketest-quick releasetest setcap clean clean-testtmp
+.PHONY: build test fmt lint lint-cross vet-tagged crosscheck tidy-check govulncheck hadolint shellcheck actionlint check cover integration e2e integration-podman integration-containerd integration-apple integration-seatbelt integration-tart python-test python-typecheck ensure-python-venv setup-dev-python smoketest smoketest-quick releasetest setcap clean clean-testtmp
 
 # Always invoke `go build` and let it decide whether to relink. `go build` does
 # complete, authoritative dependency tracking — crucially including //go:embed'd
@@ -118,16 +118,39 @@ tidy-check:
 govulncheck:
 	python3 scripts/govulncheck.py
 
-## hadolint: lint the Dockerfile (skip when neither hadolint CLI nor Docker is available)
-## Prefers a local hadolint install; falls back to Docker; skips if neither is usable.
-## CI installs hadolint and treats this target as required.
+## hadolint: lint the Dockerfile. The Dockerfile ships in the binary and builds
+## every sandbox image, so this is REQUIRED, not optional (D112) — its absence
+## FAILS loudly rather than skipping. It used to `echo "skipping"` and exit 0
+## while claiming CI treated it as required; no CI install step had ever existed,
+## and it only ran at all because GitHub's ubuntu-latest happens to ship Docker.
+## A gate that can silently not run is not a gate (D117).
+## Prefers a local hadolint; falls back to Docker, which needs no install.
 hadolint:
 	@if command -v hadolint >/dev/null 2>&1; then \
 		hadolint runtime/docker/resources/Dockerfile; \
 	elif docker info >/dev/null 2>&1; then \
 		docker run --rm -i hadolint/hadolint < runtime/docker/resources/Dockerfile; \
 	else \
-		echo "hadolint: skipping (install hadolint or start Docker to enable)"; \
+		echo "ERROR: hadolint is required (the Dockerfile ships in the binary; D112)."; \
+		echo "       Install hadolint (https://github.com/hadolint/hadolint) or start Docker."; \
+		exit 1; \
+	fi
+
+## shellcheck: lint every tracked shell script. Required, not optional (D112) —
+## runtime/monitor/*.sh and the docker entrypoint ship inside the binary, and
+## shell.md asserts these pass clean. Before D117 that assertion was ungated
+## prose: true when written, with nothing to keep it true. Prefers a local
+## shellcheck; falls back to Docker.
+shellcheck:
+	@scripts_list="$$(git ls-files '*.sh')"; \
+	if command -v shellcheck >/dev/null 2>&1; then \
+		shellcheck $$scripts_list; \
+	elif docker info >/dev/null 2>&1; then \
+		docker run --rm -v "$(CURDIR)":/mnt -w /mnt koalaman/shellcheck:stable $$scripts_list; \
+	else \
+		echo "ERROR: shellcheck is required (shell scripts ship in the binary; D112)."; \
+		echo "       Install shellcheck (https://www.shellcheck.net/) or start Docker."; \
+		exit 1; \
 	fi
 
 actionlint:
@@ -159,8 +182,10 @@ crosscheck:
 		GOOS="$$goos" GOARCH="$$goarch" go vet ./... || exit 1; \
 	done
 
-## check: run all CI checks locally (same as PR checks)
-check: lint lint-cross vet-tagged crosscheck tidy-check hadolint actionlint test python-test
+## check: the local gate. NOT all of CI — CI also runs the integration and
+## integration-podman jobs, and `test` here is a bare `go test ./...` which skips
+## every build-tagged file. See docs/contributors/procedures/pull-requests.md.
+check: lint lint-cross vet-tagged crosscheck tidy-check hadolint shellcheck actionlint test python-test
 
 ## ensure-python-venv: provision the uv-managed venv on demand (idempotent).
 ## The Python surface is part of the app (contributors can modify it), so it is
@@ -178,12 +203,30 @@ python-test: python-typecheck
 	$(PYTEST) runtime/monitor/tests/ -v
 	$(PYTEST) scripts/tests/ -v
 
-## python-typecheck: run mypy --strict from the uv-managed venv on the typed surface
+## python-typecheck: run mypy --strict from the uv-managed venv over EVERY tracked
+## .py under runtime/ and scripts/.
+##
+## The file list is DERIVED, never hand-maintained. A hand-maintained list is
+## precisely how five //go:embed'ed scripts — entrypoint.py, firewall.py,
+## install-firewall.py, sandbox-setup.py, status-monitor.py — shipped inside every
+## sandbox for months with no typecheck, no test, and not even a syntax check,
+## while python.md claimed the opposite (D117). Anything added under runtime/ or
+## scripts/ is now covered the moment it is tracked.
+##
+## Scope note: docs/**/*.py is excluded on purpose — the only one is a research
+## spike (design/research/egress-broker-spike/mock-anthropic.py) that no code
+## references and nothing ships.
+##
 ## Two invocations: the monitor surface and the smoke harness each have their
 ## own tests/conftest.py, which mypy would otherwise reject as a duplicate
 ## top-level "conftest" module if checked in one pass.
+## Lazy (`=`, not `:=`) so the git call happens only when this target runs,
+## rather than on every `make` invocation including `make build`.
+PY_RUNTIME = $(shell git ls-files '*.py' | grep '^runtime/')
+PY_SCRIPTS = $(shell git ls-files '*.py' | grep '^scripts/')
+
 python-typecheck: ensure-python-venv
-	$(MYPY) --strict runtime/monitor/setup_helpers.py runtime/monitor/tmux_io.py runtime/monitor/tests/
+	$(MYPY) --strict $(PY_RUNTIME)
 	$(MYPY) --strict scripts/smoke_test.py scripts/govulncheck.py scripts/tests/
 
 ## setup-dev-python: explicitly provision the uv-managed venv with lockfile-pinned

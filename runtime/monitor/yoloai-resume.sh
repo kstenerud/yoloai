@@ -44,5 +44,8 @@ fi
 # Clear the stale `done` before the agent comes back up.
 python3 "$monitor" --write-status idle "$status_file" 2>/dev/null || true
 
-[ -n "$workdir" ] && cd "$workdir"
+if [ -n "$workdir" ]; then
+	cd "$workdir" || exit 1
+fi
+# shellcheck disable=SC2086  # $cmd is a command line that must split into argv
 exec "$wrapper" $cmd

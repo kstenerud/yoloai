@@ -13,8 +13,23 @@ injected via callables so the same code logs to entrypoint.py's JSONL stream or 
 the sidecar's stdout/stderr.
 """
 
+from __future__ import annotations
+
 import socket
 import subprocess
+from collections.abc import Iterable
+from typing import Protocol, cast
+
+
+class LogFn(Protocol):
+    """A structured logger supplied by the caller.
+
+    entrypoint.py logs to its JSONL stream; install-firewall.py logs to the
+    sidecar's stdout/stderr. Both accept an event name, a message, and arbitrary
+    structured fields.
+    """
+
+    def __call__(self, event: str, msg: str, **fields: object) -> None: ...
 
 
 class NetworkIsolationError(RuntimeError):
@@ -26,7 +41,9 @@ class NetworkIsolationError(RuntimeError):
     """
 
 
-def run_strict(args, log_error, event, **fields):
+def run_strict(
+    args: list[str], log_error: LogFn, event: str, **fields: object
+) -> subprocess.CompletedProcess[str]:
     """Run a command, raising NetworkIsolationError on non-zero exit or missing binary."""
     try:
         result = subprocess.run(args, capture_output=True, text=True)
@@ -43,18 +60,20 @@ def run_strict(args, log_error, event, **fields):
     return result
 
 
-def resolve_domains(domains, log_error):
+def resolve_domains(domains: Iterable[str], log_error: LogFn) -> set[tuple[str, str]]:
     """Resolve allowlisted domains to (domain, ipv4) pairs.
 
     A domain that doesn't resolve is logged but not fatal — the user may have
     listed a domain that's down or typo'd, and we still want the deny-by-default
     posture applied.
     """
-    allowed_ips = set()
+    allowed_ips: set[tuple[str, str]] = set()
     for domain in domains:
         try:
             for r in socket.getaddrinfo(domain, None, socket.AF_INET):
-                allowed_ips.add((domain, r[4][0]))
+                # sockaddr is typed loosely (str | int); AF_INET is requested
+                # explicitly above, so element 0 is always the IPv4 address string.
+                allowed_ips.add((domain, cast(str, r[4][0])))
         except OSError as e:
             log_error("network.resolve_failed",
                       "could not resolve allowlisted domain; entry will be ignored",
@@ -62,14 +81,14 @@ def resolve_domains(domains, log_error):
     return allowed_ips
 
 
-def read_nameservers(log_error):
+def read_nameservers(log_error: LogFn) -> list[str]:
     """Read nameserver IPs from /etc/resolv.conf so DNS egress can be allowed.
 
     Without these, DNS lookups inside the sandbox are blocked by the default-deny
     rule, so an empty result is logged loudly — the symptom (every hostname fails
     to resolve) is otherwise hard to attribute to network isolation.
     """
-    nameservers = []
+    nameservers: list[str] = []
     try:
         with open("/etc/resolv.conf") as f:
             for line in f:
@@ -87,7 +106,13 @@ def read_nameservers(log_error):
     return nameservers
 
 
-def apply_firewall(allowed_ips, nameservers, injector_endpoint, log_info, log_error):
+def apply_firewall(
+    allowed_ips: set[tuple[str, str]],
+    nameservers: list[str],
+    injector_endpoint: str | None,
+    log_info: LogFn,
+    log_error: LogFn,
+) -> None:
     """Install the iptables default-deny + allowlist rules on the OUTPUT chain.
 
     allowed_ips is a set of (domain, ip) pairs; nameservers a list of DNS server

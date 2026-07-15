@@ -21,6 +21,19 @@ jobs:
       - name: Run govulncheck
         run: make govulncheck
 
+      # `make hadolint` requires hadolint (D112) and no longer skips when absent;
+      # it previously only ran because ubuntu-latest happens to ship Docker.
+      - name: Install hadolint
+        env:
+          HADOLINT_VERSION: v2.14.0
+        run: |
+          base="https://github.com/hadolint/hadolint/releases/download/${HADOLINT_VERSION}"
+          curl -fsSL -o /tmp/hadolint "${base}/hadolint-linux-x86_64"
+          curl -fsSL -o /tmp/hadolint.sha256 "${base}/hadolint-linux-x86_64.sha256"
+          echo "$(cut -d' ' -f1 /tmp/hadolint.sha256)  /tmp/hadolint" | sha256sum -c -
+          sudo install -m 0755 /tmp/hadolint /usr/local/bin/hadolint
+          hadolint --version
+
       - name: Run hadolint
         run: make hadolint
 

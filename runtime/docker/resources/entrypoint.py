@@ -6,19 +6,22 @@ Writes structured JSONL to logs/sandbox.jsonl. Runs as root (or as the host
 user under Podman rootless with --userns=keep-id).
 """
 
+from __future__ import annotations
+
 import datetime
 import json
 import os
 import subprocess
 import sys
+from typing import Any, TextIO
 
 
 # --- JSONL logger ---
 
-_log_file = None
+_log_file: TextIO | None = None
 
 
-def _init_log(yoloai_dir):
+def _init_log(yoloai_dir: str) -> None:
     global _log_file
     log_path = os.path.join(yoloai_dir, "logs", "sandbox.jsonl")
     try:
@@ -27,10 +30,10 @@ def _init_log(yoloai_dir):
         print(f"[entrypoint.py] warning: cannot open log: {e}", file=sys.stderr)
 
 
-def _log(level, event, msg, **fields):
+def _log(level: str, event: str, msg: str, **fields: object) -> None:
     now = datetime.datetime.utcnow()
     ts = now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{now.microsecond // 1000:03d}Z"
-    entry = {"ts": ts, "level": level, "event": event, "msg": msg}
+    entry: dict[str, object] = {"ts": ts, "level": level, "event": event, "msg": msg}
     entry.update(fields)
     line = json.dumps(entry) + "\n"
     if _log_file:
@@ -41,16 +44,16 @@ def _log(level, event, msg, **fields):
             pass
 
 
-def log_info(event, msg, **fields):
+def log_info(event: str, msg: str, **fields: object) -> None:
     _log("info", event, msg, **fields)
 
 
-def log_debug(event, msg, **fields):
+def log_debug(event: str, msg: str, **fields: object) -> None:
     if DEBUG:
         _log("debug", event, msg, **fields)
 
 
-def log_error(event, msg, **fields):
+def log_error(event: str, msg: str, **fields: object) -> None:
     _log("error", event, msg, **fields)
 
 
@@ -59,7 +62,7 @@ def log_error(event, msg, **fields):
 DEBUG = False
 
 
-def read_config(path):
+def read_config(path: str) -> dict[str, Any]:
     """Read runtime-config.json into a dict.
 
     A missing or empty file means a bare substrate instance — one created via the
@@ -76,12 +79,13 @@ def read_config(path):
         return {}
     if not data.strip():
         return {}
-    return json.loads(data)
+    cfg: dict[str, Any] = json.loads(data)
+    return cfg
 
 
 # --- Setup stages ---
 
-def remap_uid(cfg, running_as_root):
+def remap_uid(cfg: dict[str, Any], running_as_root: bool) -> None:
     """Remap UID/GID and fix ownership to match host user."""
     if not running_as_root:
         log_debug("uid.remap_skip", "skipping UID remap (not running as root)")
@@ -117,7 +121,7 @@ def remap_uid(cfg, running_as_root):
              host_gid=int(host_gid) if host_gid else 0)
 
 
-def read_secrets():
+def read_secrets() -> None:
     """Read secret files from /run/secrets into os.environ."""
     secrets_dir = "/run/secrets"
     if not os.path.isdir(secrets_dir):
@@ -143,7 +147,7 @@ def read_secrets():
         log_debug("secrets.skip", "no secrets to inject")
 
 
-def signal_secrets_consumed(yoloai_dir):
+def signal_secrets_consumed(yoloai_dir: str) -> None:
     """Touch a host-visible marker after /run/secrets has been read.
 
     The host (buildAndStart) waits for this marker before removing the
@@ -165,7 +169,7 @@ def signal_secrets_consumed(yoloai_dir):
         log_error("secrets.consumed_error", "cannot write secrets-consumed marker", error=str(e))
 
 
-def isolate_network(cfg):
+def isolate_network(cfg: dict[str, Any]) -> None:
     """Apply iptables default-deny and allowlist rules in this container.
 
     Raises firewall.NetworkIsolationError if any rule fails to install, so the
@@ -197,7 +201,7 @@ def isolate_network(cfg):
     firewall.apply_firewall(allowed_ips, nameservers, injector, log_info, log_error)
 
 
-def run_setup_commands(cfg):
+def run_setup_commands(cfg: dict[str, Any]) -> None:
     """Run each setup command in sequence, logging start/done/error."""
     commands = cfg.get("setup_commands", [])
     total = len(commands)
@@ -219,7 +223,7 @@ def run_setup_commands(cfg):
 
 # --- Main ---
 
-def main():
+def main() -> None:
     global DEBUG
 
     yoloai_dir = os.environ.get("YOLOAI_DIR", "/yoloai")
