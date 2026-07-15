@@ -23,12 +23,12 @@
 
 **Change agent files seeding:**
 1. Config parsing: `parseAgentFilesNode()` in `internal/config/config.go`
-2. Copy logic: `copyAgentFiles()` in `internal/envsetup/agent_files.go`
+2. Copy logic: `CopyAgentFiles()` in `internal/envsetup/agent_files.go`
 3. Exclusion patterns: `AgentFilesExclude` in agent definitions (`internal/agent/agent.go`)
 4. State tracking: `SandboxState.AgentFilesInitialized` in `store/sandbox_state.go`
 
 **Add a new CLI flag to an existing command:**
-1. Add `cmd.Flags().XxxP(...)` in the command's `newXxxCmd()` function
+1. Add the flag on the `*cobra.Command` the command's constructor builds (`NewDiffCmd`, `NewApplyCmd`, …)
 2. Read it with `cmd.Flags().GetXxx(...)` in the `RunE` handler
 3. Sweep the doc surfaces that name flags verbatim — see `docs/contributors/procedures/pull-requests.md` ("The name sweep — the surfaces") for the full surface list and why each one drifts independently of the code: `internal/cli/helpcmd/help/*.md` (`//go:embed`'ed **shipped UI** despite living under `internal/` — check every block, the settings table and the examples drift separately; wrap at 80 columns per `../standards/cli.md`), cobra `Short`/`Long` strings, `docs/GUIDE.md`, `README.md`.
 
@@ -91,8 +91,14 @@
 
 **Add capability checks for a backend:**
 1. Create `runtime/<name>/caps.go` with `HostCapability` constructors
-2. Implement `RequiredCapabilities(isolation)` and `SupportedIsolationModes()` on your Runtime
-3. Shared capability constructors live in `runtime/caps/common.go`
+2. List the modes in your descriptor's `SupportedIsolationModes` field — it is data on
+   `runtime.BackendDescriptor`, not a method to implement
+3. Implement `RequiredCapabilities(isolation)` only if the backend has prerequisites: it is the
+   *optional* `runtime.IsolationCapabilityProvider` interface, reached through
+   `runtime.RequiredCapabilitiesFor`. A backend that omits it has no isolation-mode
+   prerequisites. Note the base mode is never capability-checked — `doctor` reports it Ready
+   outright
+4. Shared capability constructors live in `runtime/caps/common.go`
 
 **Add MCP tools for outer agents:**
 1. Add tool registration in `internal/mcpsrv/tools.go`

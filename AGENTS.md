@@ -7,9 +7,15 @@ Seatbelt) with a copy/diff/apply workflow. Go binary, no runtime deps beyond the
 This is the contract for changing yoloAI, and the canonical instruction file for every agent
 working on it. `CLAUDE.md` imports it. Keep it short; detail lives behind the pointers.
 
-**Docs last swept: 2026-07-15 (D116).** Docs drift silently — nothing executes prose. If that
-date is more than ~3 months ago, say so, unprompted, before relying on a doc being right. Bump
-it when a sweep lands. Why this exists: `general-principles.md` §16.
+**Docs last swept: 2026-07-15 (D116, D124).** Docs drift silently — nothing executes prose. If
+that date is more than ~3 months ago, say so, unprompted, before relying on a doc being right.
+Bump it when a sweep lands. Why this exists: `general-principles.md` §16.
+
+The marker is a claim, so treat it as one. When first written it named a sweep that had never
+opened `architecture/`, which at that moment documented a mode retired two releases earlier and
+a package that has never existed — the drift-detector's own first reading was wrong. D124 made
+it true and gated the names, so `architecture/` now fails loudly rather than drifting quietly.
+No other tier has that backstop.
 
 ## Where things are
 

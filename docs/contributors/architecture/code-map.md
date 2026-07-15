@@ -50,7 +50,7 @@ internal/envsetup/       → Layer (D91): stages agent-specific sandbox contents
 internal/orchestrator/profiles/    → Leaf: profile image building (dependency order, staleness)
 internal/orchestrator/runtimeconfig/ → Leaf: ContainerConfig assembly for the runtime layer
 internal/orchestrator/archetype/   → Project archetype detection (devcontainer, compose, apple, simple) + .yoloai.yaml + VS Code workspace injection
-copyflow/       → Git-format diff/apply machinery for :copy, :overlay, and :rw modes
+copyflow/       → Git-format diff/apply machinery for :copy and :rw modes
 internal/orchestrator/state/       → Leaf: shared value types (DirSpec, State, Deps, IsolationPerms/Perms) every F5 leaf imports
 store/       → On-disk sandbox state: paths, Meta record, SandboxState completion flags
 internal/testutil/            → Shared test helpers (git, fixtures, home isolation, container polling) — test use only
@@ -122,7 +122,7 @@ should import the root cli package back (the few tests that need
 | `clistate.go` | `CLIState` (`first_run_tip_shown`), `LoadCLIState()`/`SaveCLIState()`, `MaybeShowFirstRunTip()` — CLI app state under `TOP/cli/state.yaml` (replaces the library's removed `setup_complete`). |
 | `name.go` | `ResolveName` and `EnvSandboxName` — sandbox-name resolution from args / `YOLOAI_SANDBOX`. |
 | `json.go` | `--json` flag helpers: `JSONEnabled`, `WriteJSON`, `WriteJSONError`, `EffectiveYes`. |
-| `streams.go`, `terminal.go` | `IOStreams()` (PTY-sized terminal binding for Client.Attach) and `SetTerminalTitle` (OSC-0 + tmux window rename). |
+| `streams.go`, `terminal.go` | `WithTerminal()` binds the caller's terminal to a `yoloai.IOStreams` (PTY-sized, for Client.Attach) and `SetTerminalTitle` (OSC-0 + tmux window rename). |
 | `lowdisk.go` | `WarnIfLowDisk`, `HumanBytes` — free-space courtesy check used by new/clone/build/disk. |
 | `confirm.go` | `Confirm()` — context-aware y/N prompt with stdin/context racing. Moved here from `internal/orchestrator` (B3); prompting is CLI-tier, not domain. |
 | `format.go` | `FormatAge`, `FormatSize`, `FormatDiskUsage` — human-readable age/size rendering for CLI display. Domain returns structured data (`Info.DiskUsageBytes`); the CLI renders it. |
@@ -274,7 +274,12 @@ Shared test helpers — a non-`_test.go` package importable by test files across
 | `errors.go` | `UsageError` (exit 2), `ConfigError` (exit 3), sentinel errors. |
 | `names.go` | Name validation constants and regex (`ValidNameRe`, `MaxNameLength`). |
 | `encode.go` | Safe ASCII caret encoding for filesystem-safe names (keys and values). |
-| `homedir.go` | Home directory detection and expansion, respecting `SUDO_USER` when running under sudo. |
+| `layout.go` | `Layout` — the DataDir-rooted path helpers (`SandboxesDir()`, `TrashDir()`, `SecretsStagingDir()`, …) and the resolved `HomeDir` every path helper expands against. |
+| `host_env.go` | The host-env snapshot (`EnvForAgentCredentials()`, `EnvForConfigInterpolation()`) — the curated maps that keep ambient env out of the core (D63). |
+
+Home-directory detection moved to the CLI edge: `resolveHome()` in
+`internal/cli/cliutil/layout.go` honors `SUDO_USER` when running under sudo, and hands the
+result to `Layout`. The library does not probe for it.
 
 ### `extension/`
 
@@ -298,7 +303,7 @@ Dynamic capability detection system. Probes the host, checks backend prerequisit
 | File | Purpose |
 |------|---------|
 | `caps.go` | Core types: `HostCapability` (check function + fix steps + permanence), `FixStep`, `Availability` (Ready/NeedsSetup/Unavailable), `CheckResult`, `BackendReport`, `Environment`. |
-| `check.go` | `RunChecks()` — runs capability checks and returns results. `ComputeAvailability()`, `FormatError()`, `FormatDoctor()` — output formatters. |
+| `check.go` | `RunChecks()` — runs capability checks and returns results. `ComputeAvailability()`, `FormatError()` — output formatters. (`FormatDoctor` moved out of this package entirely — see `doctorcmd/doctor_format.go`.) |
 | `common.go` | Shared `HostCapability` constructors reused across backends (e.g., Docker socket, Tart binary). Each takes injectable function pointers for testability. |
 | `detect.go` | `DetectEnvironment()` — probes host (root, WSL2, container, KVM group) using injectable file path vars. |
 
@@ -309,7 +314,7 @@ Dynamic capability detection system. Probes the host, checks backend prerequisit
 | `docker.go` | `Runtime` struct — implements `Runtime` interface, wraps Docker SDK. Registers itself via `init()`. |
 | `build.go` | `Setup()` / `IsReady()` — builds `yoloai-base` image. `NeedsBuild()` / `RecordBuildChecksum()` for rebuild detection. Tar context creation, build output streaming. |
 | `caps.go` | `HostCapability` constructors for Docker backend — gVisor runsc binary and gVisor registered with Docker daemon. |
-| `resources.go` | `//go:embed` for Dockerfile, entrypoint.sh, tmux.conf. Imports `sandbox-setup.py`, `status-monitor.py`, and `diagnose-idle.sh` from `runtime/monitor`. `EmbeddedTmuxConf()` — accessor used by setup wizard. |
+| `resources.go` | `//go:embed` for Dockerfile, entrypoint.sh, tmux.conf. Imports `sandbox-setup.py`, `status-monitor.py`, and `diagnose-idle.sh` from `runtime/monitor`. The shared tmux.conf itself comes from `tmuxres.Embedded()` (`internal/resources/tmux`); this file just keeps a local unexported `embeddedTmuxConf` var pointing at it. |
 | `resources/Dockerfile` | Container Dockerfile (embedded at compile time). |
 | `resources/entrypoint.sh` | Root container entrypoint script (embedded at compile time). Handles UID/GID remapping, iptables, overlayfs, then invokes `sandbox-setup.py`. |
 | `resources/tmux.conf` | Default tmux config (embedded at compile time). |
@@ -413,9 +418,11 @@ few helpers not yet carved out (clone, parse, setup, terminal/attach).
 | `prune.go` | `PruneTempFiles()` — cleans stale `/tmp/yoloai-*` dirs. |
 | `tags.go` | Git tag info — `TagInfo`, commit matching, delegates to `workspace`. |
 | `fileutil.go` | Path-expansion + JSON read/write wrappers. |
-| `setup.go` | `RunSetup()`, `runNewUserSetup()` — interactive first-run setup. |
 | `errors.go` | Sentinel errors; `ErrSandboxNotFound` re-exported from `store`. |
 | `*_test.go` | Façade + remaining-helper unit tests. `integration_test.go` has the `integration` build tag. |
+
+Interactive first-run setup no longer lives here: it moved to the CLI tier as unexported
+`runSystemSetup` (`internal/cli/system/setup.go`), wired from `internal/cli/system/system.go`.
 
 ### `orchestrator/create/`, `lifecycle/`, `status/`, `launch/`
 
@@ -425,7 +432,7 @@ provision, profiles, runtimeconfig} ← launch ← {create, lifecycle}`.
 
 | Package | Purpose |
 |---------|---------|
-| `create/` | `Run()` orchestrates creation (prepare → seed → build) via `create_prepare.go`; `context.go` writes `context.md` + inlines env into the agent instruction file. |
+| `create/` | `Run()` provisions a sandbox — it does **not** launch the container; see its doc comment. `prepareSandboxState()` in `create.go` drives the phases, with the `prepare_profile.go` / `prepare_archetype.go` / `prepare_dirs.go` leaves. Context files are written by `envsetup.WriteContextFiles` (`internal/envsetup/context.go`), not from here. |
 | `lifecycle/` | `Start/Stop/Destroy/Reset/NeedsConfirmation` free functions. `recreateContainer()`/`relaunchAgent()` for restart; `resetInPlace()` for in-place resets; overlay/cache clearing; `PatchConfigAllowedDomains`. `notice.go` defines the `Notice`/result types. |
 | `status/` | Read-model: `DetectStatus()` (reads `agent-status.json`, falls back to tmux exec), `InspectSandbox()`, `ListSandboxes()`, work-data probing, `DirSize()`. Returns structured data (`Info.DiskUsageBytes`); rendering is the CLI's job. |
 | `launch/` | Shared launch primitives both create/ and lifecycle/ use: instance build/start, `Teardown`, vm-workdir resolution, and `CheckIsolationPrerequisites` (host-capability gate, homed here so create/ and lifecycle/ stay siblings). |
@@ -438,7 +445,7 @@ Environment archetype detection, devcontainer.json parsing, `.yoloai.yaml` loadi
 | File | Purpose |
 |------|---------|
 | `archetype.go` | `Archetype` type, constants (simple/compose/devcontainer/apple), `ParseArchetype()`, `ValidArchetypes()`, `DetectArchetype()` — auto-detects project type from workdir signals. |
-| `devcontainer.go` | `LifecycleCmd` (string/array/object unmarshaling), `DevcontainerConfig` struct, `LoadDevcontainer()`, `ExtractPorts()`, `FilterMounts()`, `MergedEnv()`, `ParsedRunArgs()`, `WarnIgnoredFields()`, `PostStartCommandUsesCompose()`, `DockerComposeFilePresent()`, `LifecycleCmdToJSON()`. |
+| `devcontainer.go` | `LifecycleCmd` (string/array/object unmarshaling), `DevcontainerConfig` struct, `LoadDevcontainer()`, `ExtractPorts()`, `FilterMounts()`, `MergedEnv()`, `ParsedRunArgs()`, `WarnIgnoredFields()`, `PostStartCommandUsesCompose()`, `DockerComposeFilePresent()`. Converting a `LifecycleCmd` to `runtime-config.json`'s representation moved to the consumer: unexported `lifecycleCmdToJSON()` in `internal/orchestrator/create/create.go`. |
 | `yoloaiyaml.go` | `YoloAIProjectConfig` struct, `LoadYoloAIYaml()` — loads `.yoloai.yaml` project config with archetype declaration, extra mounts, and requires constraints. |
 | `vscode.go` | `InjectVSCodeWorkspace()` — writes `.vscode/extensions.json` and `.vscode/settings.json` from devcontainer.json customizations into the workdir copy. Existing keys win. |
 
@@ -448,10 +455,9 @@ Git-format diff and apply machinery. Imports `orchestrator` (for exec helpers an
 
 | File | Purpose |
 |------|---------|
-| `diff.go` | `GenerateDiff()`, `GenerateMultiDiff()`, `GenerateOverlayDiff()`, `GenerateCommitDiff()`, `ListCommitsWithStats()`, `DiffContext`, `LoadAllDiffContexts()` — diff generation for `:copy`, `:overlay`, and `:rw` modes. |
-| `apply.go` | `ApplyAll()`, `ApplySeries()`, `GeneratePatch()`, `GenerateFormatPatch()`, `GenerateFormatPatchForRefs()`, `GenerateMultiPatch()`, `GenerateOverlayPatch()`, `GenerateUncommittedDiff()`, `UpdateOverlayBaselineToHEAD()`, `UpdateOverlayBaseline()`, `AdvanceBaseline()`, `AdvanceBaselineTo()`, `HasUncommittedChanges()`, `ListCommitsBeyondBaseline()`, `ResolveRef()`, `ResolveRefs()`. |
-| `apply_overlay.go` | `ApplyOverlay()` — net-diff apply for `:overlay` workdirs (capture upper-layer diff inside the container → apply to host → advance overlay baseline). |
-| `export.go` | `Export()` — write the sandbox's changes as patch files to a directory (the `apply --patches` flow); copy → format-patch (+ `uncommitted.diff`), overlay → upper-layer diffs. |
+| `diff.go` | `DiffOptions`, `FileChange`, `GenerateChanges()`, `GenerateDiff()`, `CommitDiffOptions`, `GenerateCommitDiff()`, `CommitInfoWithStat`, `ListCommitsWithStats()`, `DiffContext` — diff generation for the single-workdir `:copy`/`:rw` engine (`loadAllDiffContexts` is package-private, no longer public API). |
+| `apply.go` | `ApplyAll()`, `ApplySeries()`, `GeneratePatch()`, `GenerateFormatPatch()`, `GenerateFormatPatchForRefs()`, `GenerateUncommittedDiff()`, `AdvanceBaseline()`, `AdvanceBaselineTo()`, `HasUncommittedChanges()`, `ListCommitsBeyondBaseline()`, `ResolveRefs()`. `ApplyAll()` keeps its name for stability but no longer iterates multiple dirs since the diff/apply surface went workdir-only. |
+| `export.go` | `Export()` — write the sandbox's changes as patch files to a directory (the `apply --patches` flow): format-patch (+ `uncommitted.diff`) over the workdir. |
 
 ### `store/`
 
@@ -459,7 +465,7 @@ On-disk sandbox state — paths, metadata, and creation-completion flags. Leaf s
 
 | File | Purpose |
 |------|---------|
-| `paths.go` | `EncodePath()` / `DecodePath()` — caret encoding for filesystem-safe names. `InstanceName(principal, name)` — principal-aware runtime handle: `yoloai-<name>` for the default `""` principal, `yoloai-<principal>-<name>` otherwise (D62). `Dir()`, `WorkDir()`, `RequireSandboxDir()`. `OverlayUpperDir()` / `OverlayOvlworkDir()` for `:overlay` mount paths. `ValidateName()` delegates to `config.ParseSandboxName` (containerd-conformant grammar). Centralized filename constants (`EnvironmentFile`, `RuntimeConfigFile`, `AgentStatusFile`, `SandboxStateFile`, etc.) and `ErrSandboxNotFound`. |
+| `paths.go` | `EncodePath()` / `DecodePath()` — caret encoding for filesystem-safe names. `InstanceName(principal, name)` — principal-aware runtime handle: `yoloai-<name>` for the default `""` principal, `yoloai-<principal>-<name>` otherwise (D62). `Dir()`, `WorkDir()`, `RequireSandboxDir()`. `OverlayLowerDir()` is the sole survivor of the retired `:overlay` mode — used only by `yoloai system migrate` to read legacy on-disk sandboxes. `ValidateName()` delegates to `config.ParseSandboxName` (containerd-conformant grammar). Centralized filename constants (`EnvironmentFile`, `RuntimeConfigFile`, `AgentStatusFile`, `SandboxStateFile`, etc.) and `ErrSandboxNotFound`. |
 | `environment.go` | `Environment` / `WorkdirEnvironment` / `DirEnvironment` structs, `SaveEnvironment()` / `LoadEnvironment()` — sandbox metadata persistence as `environment.json`. `Environment.BackendType` records which runtime backend was used; `Environment.Principal` records the owning principal (D62). |
 | `sandbox_state.go` | `SandboxState` struct, `LoadSandboxState()`, `SaveSandboxState()` — per-sandbox runtime state (`sandbox-state.json`, legacy: `state.json`). Tracks `agent_files_initialized` and `on_create_commands_done`. Separate from `Environment` which is immutable after creation. |
 
@@ -467,14 +473,22 @@ On-disk sandbox state — paths, metadata, and creation-completion flags. Leaf s
 
 | File | Purpose |
 |------|---------|
-| `apply.go` | `ApplyPatch()`, `ApplyFormatPatch()` — apply patches to host working directories. |
 | `copy.go` | `CopyDir()` — walk-based directory copy preserving symlinks, permissions, and times. |
+| `copy_gitignore.go` | `CopyProjectDir()` — the default `:copy` entry point; copies a project while honoring `.gitignore`. Falls back to `CopyDir()` for `:copy-all` and non-git sources. |
+| `copy_faithful.go` | `CopyPathFaithful()` — an exact, unfiltered replica of a file, dir, or symlink. |
 | `copy_darwin.go` | macOS `clonefile(2)` for copy-on-write clones on APFS. Falls back to walk-based copy. |
 | `copy_other.go` | Non-macOS stub (always uses walk-based copy). |
-| `diff.go` | `GenerateDiff()`, `DiffResult` — git diff generation for workspace directories. |
-| `git.go` | Git command helpers with hooks disabled (`GIT_HOOKS_DISABLED=1`). `NewGitCmd()`, `RunGit()`, `GitInit()`, `GitBaseline()`. |
-| `safety.go` | `CheckDangerousDir()` — validates directories are safe to operate on (not `/`, not `$HOME`). |
-| `tags.go` | `CommitExists()`, commit metadata matching for tag operations. |
+| `safety.go` | `IsDangerousDir()` — validates directories are safe to operate on (not `/`, not `$HOME`). |
+
+Patch and diff generation are **not** here — they live in `copyflow/` (`copyflow/apply.go`,
+`copyflow/diff.go`). This package only puts files in place.
+
+Git command helpers moved out of this package into `internal/git/`: constructors `NewHost()` /
+`NewSandbox()` return a `*Git` (replacing the old standalone `NewGitCmd`); `git init` no longer
+stands alone — it runs inline inside `(g *Git) Baseline()` (`internal/git/ops.go`). Commit-existence
+lookups for tag operations are likewise gone as a standalone `CommitExists`; the role is now
+served by unexported `getCommitMeta()` via `BuildSHAMapByMatching()` (`internal/git/tags.go`), which
+matches commits across host/sandbox by (author, timestamp, subject) rather than SHA.
 
 ## Key Types
 
@@ -493,8 +507,9 @@ Per-sandbox runtime state persisted as `sandbox-state.json` (legacy: `state.json
 ### `orchestrator.CreateOptions` / `orchestrator.DirSpec`
 Internal parameters for `Engine.Create()`. `DirSpec` specifies a directory path, mount mode (copy/overlay/rw/ro), and per-directory safety acks (`AllowDirty`, `AllowDangerousPath`). `CreateOptions` includes name, workdir `DirSpec`, auxiliary `DirSpec` list, agent, model, prompt, network, ports, profile, replace, passthrough args. The **public** creation surface is `yoloai.SandboxCreateOptions` (root `sandbox_options.go`); `Client.CreateSandbox` maps it onto this internal struct via `toInternal()`. A dirty workdir surfaces as `*yoerrors.DirtyWorkdirError` (never an in-library prompt — D24).
 
-### `copyflow.DiffOptions` / `copyflow.DiffResult`
-Input/output for `copyflow.GenerateDiff()` / `copyflow.GenerateMultiDiff()`. Supports path filtering and stat-only mode. `DiffResult` carries the diff text, workdir, mode, and empty flag. Lives in `copyflow`.
+### `copyflow.DiffOptions`
+Input for `copyflow.GenerateDiff()`, the single-workdir diff engine call. Supports path filtering and
+stat-only mode; returns the diff text directly. Lives in `copyflow`.
 
 ### `orchestrator.CloneOptions`
 Parameters for `Engine.Clone()`. Source and destination sandbox names, optional overrides.
@@ -547,7 +562,7 @@ Host context: `IsRoot`, `IsWSL2`, `InContainer`, `KVMGroup`. Detected once per i
 |-------------|-------------|------------|
 | `yoloai new` | `cli/lifecycle/new.go:NewNewCmd` | `yoloai.Client.CreateSandbox()` (→ `create.Run` in `orchestrator/create/create.go`) |
 | `yoloai attach` | `cli/workflow/attach.go:NewAttachCmd` | `yoloai.Client.Attach()` (PTY-sized via `cliutil.IOStreams`) |
-| `yoloai diff` | `cli/workflow/diff.go:NewDiffCmd` | `yoloai.Client.GenerateMultiPatch()` (→ `copyflow.GenerateMultiDiff` in `copyflow/diff.go`) |
+| `yoloai diff` | `cli/workflow/diff.go:NewDiffCmd` | `Workdir.Diff()` (`workdir.go`) → `Engine.GenerateWorkingDiff()` (`internal/orchestrator/engine_workdir.go`) → `copyflow.GenerateDiff()` (`copyflow/diff.go`) |
 | `yoloai apply` | `cli/workflow/apply.go:NewApplyCmd` | `yoloai.Client.GeneratePatch()` / `ApplyPatch()` / `GenerateFormatPatch()` |
 | `yoloai start` | `cli/lifecycle/start.go:NewStartCmd` | `yoloai.Client.Start()` |
 | `yoloai stop` | `cli/lifecycle/stop.go:NewStopCmd` | `yoloai.Client.Stop()` |
@@ -559,9 +574,9 @@ Host context: `IsRoot`, `IsWSL2`, `InContainer`, `KVMGroup`. Detected once per i
 | `yoloai system agents` | `cli/system/backends_agents.go` | Lists agent definitions from `agent` package |
 | `yoloai system backends` | `cli/system/backends_agents.go` | Probes each backend via `cliutil.CheckBackend` |
 | `yoloai system build` | `cli/system/system.go` | `yoloai.System.BuildImage()` |
-| `yoloai system setup` | `cli/system/system.go` + `cli/system/setup.go` (the wizard owns host inspection, prompts, auto-pick) | `yoloai.System.Config().Set()` (writes `tmux_conf`/`container_backend`/`agent`); `Backends()`/`Agents()` for choices — no library setup verb |
+| `yoloai system setup` | `cli/system/system.go` + `cli/system/setup.go` (the wizard owns host inspection, prompts, auto-pick) | `yoloai.System.Config().Set()` (writes `tmux_conf`/`container_backend`/`agent`); `System.BackendTypes()`/`System.AgentTypes()` for choices — no library setup verb |
 | `yoloai system check` | `cli/system/check.go` | `yoloai.System.CheckPrerequisites()` |
-| `yoloai doctor` | `cli/doctorcmd/doctor.go` | `System.Doctor()` (→ `caps.RunChecks()` + `caps.FormatDoctor()`) + a dry-run `System.Prune()` and `DiskUsage()` for the advisory sections |
+| `yoloai doctor` | `cli/doctorcmd/doctor.go` | `System.Doctor()` (→ `caps.RunChecks()` + unexported `formatDoctor()` in `doctorcmd/doctor_format.go`) + a dry-run `System.Prune()` and `DiskUsage()` for the advisory sections |
 | `yoloai system prune` | `cli/system/prune.go` | `yoloai.System.Prune()` |
 | `yoloai system tart` | `cli/system/tart/tart.go` | `tart.RuntimeVersion` / `tart.CopyRuntimeToVM()` / `tart.Runtime.ListVMs` / `tart.Runtime.DeleteVM` |
 | `yoloai system completion` | `cli/system/completion.go` | Cobra's built-in completion generators |
@@ -574,11 +589,11 @@ Host context: `IsRoot`, `IsWSL2`, `InContainer`, `KVMGroup`. Detected once per i
 | `yoloai sandbox <name> prompt` | `cli/sandboxcmd/prompt.go` | Reads `prompt.txt` from sandbox dir |
 | `yoloai sandbox <name> bugreport` | `cli/sandboxcmd/bugreport.go` | Forensic diagnostic collection (calls `bugreport.Write*`) |
 | `yoloai sandbox <name> allow` | `cli/sandboxcmd/allow.go` | `orchestrator.PatchConfigAllowedDomains()` + `tryLivePatchNetwork` ipset update |
-| `yoloai sandbox <name> allowed` | `cli/sandboxcmd/allowed.go` | `sandbox.LoadMeta()` — pure file read |
+| `yoloai sandbox <name> allowed` | `cli/sandboxcmd/allowed.go` | `Sandbox.Network().Mode()` + `Network().Allowed()` — reads `netpolicy.json`, no running backend needed |
 | `yoloai sandbox <name> deny` | `cli/sandboxcmd/deny.go` | `orchestrator.PatchConfigAllowedDomains()` + `tryLivePatchNetwork` ipset removal |
 | `yoloai sandbox <name> vscode` | `cli/sandboxcmd/vscode.go` | Builds `vscode-remote://attached-container+<hex>/<path>` URI and launches `code --folder-uri` |
 | `yoloai files` | `cli/workflow/files.go:NewFilesCmd` | File exchange via `~/.yoloai/library/sandboxes/<name>/files/` |
-| `yoloai baseline` | `cli/workflow/baseline.go:NewBaselineCmd` | `yoloai.Client.AdvanceBaseline()` / `ResolveCommitRefs()` |
+| `yoloai baseline` | `cli/workflow/baseline.go:NewBaselineCmd` | `Workdir.AdvanceBaseline()` / `SetBaseline()` (→ `copyflow.AdvanceBaseline()` / `AdvanceBaselineTo()`) |
 | `yoloai profile` | `cli/profile/profile.go:NewCmd` | Profile create/list/info/delete |
 | `yoloai help` | `cli/helpcmd/help.go:NewCmd` | Topic-based help with embedded markdown |
 | `yoloai config get/set/reset` | `cli/configcmd/config.go:NewCmd` | `config.{Get,Update,Delete}…Config…` routed via `config.IsGlobalKey()` |

@@ -125,7 +125,7 @@ A sandbox progresses through well-defined states. The `active` state has sub-sta
 
 ## Workdir Modes
 
-Each mounted directory has a mode that controls how changes are tracked and isolated. The primary workdir is positional; auxiliary dirs use the `-d` flag. The mode suffix (`:copy`, `:overlay`, `:rw`) is appended to the path.
+Each mounted directory has a mode that controls how changes are tracked and isolated. The primary workdir is positional; auxiliary dirs use the `-d` flag. The mode suffix (`:copy`, `:rw`) is appended to the path; the workdir defaults to `:copy` and auxiliary dirs default to `:ro`. (`:copy-all`, `:copy-strict`, and `:force` are knobs on `:copy` rather than modes of their own — see `cliutil.ParseDirArg`.)
 
 ```
 Host                            Container
@@ -139,16 +139,6 @@ Host                            Container
      ▲                             │
      │     diff: git diff vs       │
      └──── apply: git apply ◄──────┘
-
-
-:overlay (Linux only, needs CAP_SYS_ADMIN)
-┌──────────┐                 ┌──────────────────────┐
-│ original │ ─── lower ────► │ overlayfs merged/    │ ← agent sees this
-│ project/ │   (read-only)   │  upper/ has changes  │
-└──────────┘                 └──────────────────────┘
-     ▲                             │
-     │     diff/apply via git      │
-     └──── inside container ◄──────┘
 
 
 :rw (live bind-mount)
@@ -203,7 +193,7 @@ Creating a sandbox happens in three stages: prepare resolves all configuration, 
                                ▼
 ┌─────────────────────── BUILD & START ────────────────────────┐
 │                                                              │
-│  prepare workdir (copy files / create overlay dirs)          │
+│  prepare workdir (copy files)                                │
 │  create git baseline (for :copy mode)                        │
 │  generate runtime-config.json (entrypoint configuration)     │
 │  prepare prompt delivery (interactive paste / headless arg)  │
@@ -229,7 +219,7 @@ The core workflow: an AI agent makes changes inside the sandbox, the user review
                     │
                     ▼
     ┌────────────────────────────────┐
-    │  For each :copy/:overlay dir:  │
+    │  For each :copy dir:           │
     │    git add -A (stage changes)  │
     │    git diff --binary baseline  │
     └───────────────┬────────────────┘
@@ -247,9 +237,10 @@ The core workflow: an AI agent makes changes inside the sandbox, the user review
                     │
                     ▼
    ┌──────────────────────────────────┐
-   │  For each :copy/:overlay dir:    │
-   │    generate binary patch         │
-   │    apply to host (git apply)     │
+   │  For each :copy dir:             │
+   │    apply commit series (git am)  │
+   │    (--no-commit: one squashed    │
+   │     patch via git apply)         │
    │    advance baseline SHA in meta  │
    └────────────────┬─────────────────┘
                     │
@@ -309,21 +300,22 @@ The `yoloai doctor` command probes the host environment, checks each backend's p
           ┌───────────────────────────────┐
           │  caps.DetectEnvironment()     │
           │                               │
-          │  isRoot?  isWSL2?             │
-          │  inContainer?  kvmGroup?      │
+          │  IsRoot?  IsWSL2?             │
+          │  InContainer?  KVMGroup?      │
           └───────────────┬───────────────┘
                           │
                           ▼
   ┌───────────────────────────────────────────────────┐
   │  For each registered backend:                     │
   │                                                   │
-  │    runtime.New(ctx, name)                         │
+  │    runtime.New(ctx, name, layout)                 │
   │         │                                         │
-  │         ├── RequiredCapabilities(baseMode)        │
-  │         │     → [HostCapability, ...]             │
+  │         ├── base mode: reported Ready outright    │
+  │         │     (no capability check runs for it)   │
   │         │                                         │
-  │         └── For each SupportedIsolationModes():   │
-  │               RequiredCapabilities(mode)          │
+  │         └── For each Descriptor().               │
+  │               SupportedIsolationModes (a field):  │
+  │             runtime.RequiredCapabilitiesFor(rt, mode) │
   │                    → [HostCapability, ...]        │
   └───────────────────────┬───────────────────────────┘
                           │
@@ -340,7 +332,8 @@ The `yoloai doctor` command probes the host environment, checks each backend's p
                           │
                           ▼
   ┌───────────────────────────────────────────────────┐
-  │  caps.FormatDoctor(reports, output)               │
+  │  formatDoctor(output, reports)                    │
+  │    (internal/cli/doctorcmd/doctor_format.go)      │
   │                                                   │
   │  Backend     Mode                Status           │
   │  ──────────  ──────────────────  ────────         │

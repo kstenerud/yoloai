@@ -1390,6 +1390,42 @@ None were visible from the report, which was fluent, specific, and confident. Ea
 
 **Consequences.** Delegation gets slower and more honest. The failure this does *not* reach is a report that is true but incomplete — an agent that silently skipped a file reports nothing about it, and there is no claim to check; that class needs a corpus check (`ls` the directory, diff against the work list), which is why the completeness of a *work list* is gated by construction elsewhere. Note also the inverse cost, paid the same session: a subagent, seeing unexplained edits appear in a shared tree, correctly reverted them as an unauthorized change — they were the parent's. Distrust between agents is cheap but not free once they share a working tree; the fix there is sequencing, not trust.
 
+
+## D124 — the architecture tier points at source comments for rationale; its names are gated, its narrative is not
+
+**Date:** 2026-07-15. **Status:** Active — scopes GEN §16 (documentation drifts) to `docs/contributors/architecture/`, and applies D121's "don't state what nothing enforces" to prose that restates code. Composes with D109 (`:overlay` retired) and D116.
+
+**Context.** A sweep of the architecture tier — the three docs whose entire job is describing the code *as it is now* — found it comprehensively false, four days after `AGENTS.md` was stamped "Docs last swept: 2026-07-15 (D116)". The stamp was written by the sweep that never opened this tier.
+
+What it claimed, against what the code does:
+
+- `data-flows.md` carried a present-tense `## Overlay Mount Flow` section for a mode retired in D109, two releases earlier. It attributed the seed phase to a `provision/` package **that has never existed**. It documented `applySquash` as the default `yoloai apply`, when the default became the commit series and squash became opt-in behind `--no-commit`. It said the compose archetype "set isolation=container-privileged" — the code deliberately **refuses** to auto-escalate, so the doc rotted in the *dangerous* direction. Of the 83 identifiers it named, 9 did not exist and 10 had drifted case.
+- `code-map.md` listed `copyflow/apply_overlay.go`, a file that is not on disk, and ~21 functions that are not in the tree (`ApplyOverlay`, `GenerateMultiDiff`, `GenerateMultiPatch`, `NewGitCmd`, `RunSetup`, …).
+- `testing.md` pointed at two deleted test files.
+- `where-to-change.md` — the doc `AGENTS.md` routes a contributor to — told a backend author to "implement `SupportedIsolationModes()` on your Runtime". It is a **field** on `BackendDescriptor`, not a method. The instruction could not be followed.
+
+`make check` was green for all of it, because nothing executes prose.
+
+**The observation this turns on.** Every load-bearing rationale the docs got wrong was **already correct at the source, in a doc comment, and had been all along**:
+
+- `create.Run`: *"Create provisions only — it does not launch the container."*
+- `doctorExitError`: names all three exit conditions, and the contrast — *"unlike the advisory cruft sections, which never affect the exit code."*
+- `applyComposeArchetype`: *"never auto-escalate to it from an untrusted, auto-detected repo signal."*
+- `handleStoppedOrRemovedStatus`, `store.DirModeOverlay` (*"RETIRED (D109) … Retained only so the v3→v4 migration can READ it"*), `cliutil` on the retired suffix.
+
+**The source never rotted. The second copy did.** That is not luck: a comment sits against the code it describes, so a change that falsifies it is in the same diff, under the same reviewer. A doc in another directory has neither. Restating rationale in prose does not preserve it — it manufactures a copy whose only guarantee is that it will disagree with the code eventually, and disagree confidently.
+
+**Decision.**
+
+1. **The architecture tier is a router, not an explanation.** It names entry points and hops so a reader can find the code. The *why* of a step lives in the doc comment on the thing itself, which is the single source of truth; the doc points at it and stops. Where a rationale is missing, the fix is to write it **in the source**, not in the doc.
+2. **Names are gated.** `TestRepoHygiene_ArchitectureDocRefs_Resolve` checks every `*.go` path and every symbol the tier names (identifiers inside fenced blocks, plus backticked `Name()` spans) against the identifiers the Go tree actually contains. Scope at landing: 7 docs, ~253 path refs, ~324 symbol refs.
+3. **The gate parses; it does not grep.** A retired symbol is usually still *discussed* in the code — "`ApplyOverlay` was removed in D109" is exactly the comment a careful codebase leaves behind — so a grep oracle would let the retirement note vouch for the retired name and report the tier clean. Comments and string literals are not identifiers.
+4. **The oracle admits any identifier, not just exported declarations.** The question is "does the code still know this name?", not "is it public surface": a map doc legitimately names a struct field, a parameter, an unexported local. Demanding a top-level declaration produced three false failures and caught nothing extra — every real defect was a name the tree does not contain **in any position**.
+5. **The narrative is not gated, and that is the point, not a gap to close.** A gate can prove a pointer resolves; it cannot prove a paraphrase is still true. That asymmetry is the reason for (1) — the tier is built out of the claims a gate can hold, and delegates the rest to where it can't drift.
+
+**Consequences.** The tier gets terser and less satisfying to read on its own; that is the trade. `docProseNouns` is the gate's one concession — a short, explicit list of proper nouns that appear in ASCII diagrams (`macOS`, `yoloAI`) and that no Go tree will declare. If it ever accumulates entries that look like Go identifiers, the concession has become a loophole. Two classes stay uncaught by construction: a name that still exists but has **moved package** (a path question, which the path half covers only where the doc names a path), and a chain whose **order** silently changed. The second is precisely what (1) removes from the docs' surface area rather than trying to check.
+
+**Rejected.** *Fix the docs and skip the gate* — the tier had been swept the same week and was still false; a sweep is a snapshot, and the next one is three months out. *Gate the prose too* (assert described orderings against the call graph) — that is a static analyser, not a hygiene test, and the honest alternative is not writing the orderings down twice.
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.

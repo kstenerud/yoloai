@@ -60,6 +60,12 @@ import (
 //     while it runs, and a stall becomes indistinguishable from a wedge — see
 //     DF97, where it cost a ~35 minute misdiagnosis on Tart and reduced a real
 //     docker build failure to an exit code with no cause.
+//  6. Every Go path and every symbol named by docs/contributors/architecture/**
+//     still exists in the tree. Without this, the tier whose whole job is
+//     describing the code as it is now drifts silently and confidently: at D124
+//     it documented a mode retired two releases earlier, a package that has
+//     never existed, a file that is not on disk, and ~30 absent functions —
+//     green the entire time, because nothing executes prose.
 //
 // (docs/contributors/**/*.md USED to be listed here as deliberately not gated,
 // on the grounds that the bulk-add was "a known, tracked bulk-add task". It was
@@ -1782,5 +1788,326 @@ func TestRepoHygiene_PlanStatusScope_ExcludesTheIndexAndTheArchive(t *testing.T)
 	want := []string{"docs/contributors/design/plans/some-plan.md"}
 	if !slices.Equal(got, want) {
 		t.Errorf("livePlanFiles = %v, want %v", got, want)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Architecture-doc reference gate
+// ---------------------------------------------------------------------------
+
+// architectureDocs returns the tracked Markdown under docs/contributors/architecture/.
+// That tier's whole job is describing the code as it is now, which is exactly
+// the claim that rots without something checking it.
+func architectureDocs(files []string) []string {
+	var out []string
+	for _, p := range files {
+		if strings.HasPrefix(p, "docs/contributors/architecture/") && strings.HasSuffix(p, ".md") {
+			out = append(out, p)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// collectGoIdents adds every identifier appearing in f to names — declarations,
+// but also parameters, locals, and use sites.
+//
+// The question this gate asks is "does the code still know this name?", not "is
+// it exported surface": a map doc legitimately names a struct field
+// (SupportedIsolationModes, which is a field and not the method a doc once
+// claimed), a parameter (workDir), and an unexported local. Demanding a
+// top-level declaration failed all three while catching nothing extra — every
+// real defect it found (ApplyOverlay, GenerateMultiDiff, NewGitCmd) is a name
+// the tree does not contain at all, in any position.
+//
+// Comments and string literals are not identifiers, so they still cannot vouch
+// for a name — which is the whole reason this parses instead of grepping.
+func collectGoIdents(f *ast.File, names map[string]bool) {
+	ast.Inspect(f, func(n ast.Node) bool {
+		if id, ok := n.(*ast.Ident); ok {
+			names[id.Name] = true
+		}
+		return true
+	})
+}
+
+// goIdentSet is the oracle the doc gate checks against: every identifier the Go
+// tree contains.
+//
+// It parses rather than greps, for the same reason the ABOUTME gate does: a
+// grep for a bare name also matches that name inside a comment or a string
+// literal, so a symbol that survives only in the prose describing it would
+// vouch for itself. Parsing asks the one question that matters — does the code
+// still know this name?
+func goIdentSet(t *testing.T, root string, files []string) map[string]bool {
+	t.Helper()
+	names := map[string]bool{}
+	fset := token.NewFileSet()
+	for _, rel := range files {
+		if !strings.HasSuffix(rel, ".go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, filepath.Join(root, rel), nil, parser.SkipObjectResolution)
+		if err != nil {
+			continue // unparseable fixture — the ABOUTME gate owns that complaint, not this one
+		}
+		collectGoIdents(f, names)
+	}
+	return names
+}
+
+// docProseNouns are words that appear inside fenced blocks but are pictures,
+// not code: platform and product names in ASCII diagrams. Nothing in the Go
+// tree will ever declare them, so the gate would demand the impossible.
+//
+// Kept tiny and explicit on purpose. This is the gate's one concession, and it
+// is a list of proper nouns — if it ever starts accumulating things that look
+// like Go identifiers, the concession has become a loophole and the entry
+// belongs back in the doc as a real name instead.
+var docProseNouns = map[string]bool{
+	"macOS":    true,
+	"yoloAI":   true,
+	"OpenCode": true,
+	"OpenAI":   true,
+	"GitHub":   true,
+}
+
+var (
+	// docGoPathRe matches a Go file path written anywhere in a doc.
+	docGoPathRe = regexp.MustCompile(`\b[A-Za-z0-9_][A-Za-z0-9_./-]*\.go\b`)
+	// docCallRe matches a backticked `Name()` / `pkg.Name()` call reference.
+	docCallRe = regexp.MustCompile("`([A-Za-z_][A-Za-z0-9_.]*)\\(\\)`")
+	// docIdentRe matches an identifier, optionally package- or type-qualified.
+	docIdentRe = regexp.MustCompile(`[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*`)
+	// docCamelRe is the "this is a symbol, not prose" test: an inner lower→upper
+	// transition. It keeps GenerateDiff and envsetup.SeedSandbox, and drops
+	// English, flags (--no-start), and SHOUTING_CONSTANTS.
+	docCamelRe = regexp.MustCompile(`[a-z][A-Z]`)
+)
+
+// baseIdent strips any package or receiver qualifier: store.SaveEnvironment and
+// Workdir.Apply are checked as SaveEnvironment and Apply. The qualifier is not
+// checked — a package rename is a path question, which docGoPathRefs covers.
+func baseIdent(tok string) string {
+	if i := strings.LastIndex(tok, "."); i >= 0 {
+		return tok[i+1:]
+	}
+	return tok
+}
+
+// docGoPathRefs returns every *.go path a doc names.
+func docGoPathRefs(body string) []string {
+	return uniqueSorted(docGoPathRe.FindAllString(body, -1))
+}
+
+// docSymbolRefs returns the symbol names a doc commits to: identifiers inside
+// fenced blocks (where the call chains live) plus backticked `Name()` calls
+// anywhere (where the package tables live).
+//
+// Scoping to those two forms — rather than all prose — is what lets this gate
+// run with no allowlist. Free prose says "yoloAI" and "macOS"; fenced diagrams
+// and `Name()` spans only ever mean code.
+func docSymbolRefs(body string) []string {
+	var toks []string
+	for _, m := range docCallRe.FindAllStringSubmatch(body, -1) {
+		toks = append(toks, baseIdent(m[1]))
+	}
+	inFence := false
+	for _, line := range strings.Split(body, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "```") {
+			inFence = !inFence
+			continue
+		}
+		if !inFence {
+			continue
+		}
+		for _, tok := range docIdentRe.FindAllString(line, -1) {
+			if docCamelRe.MatchString(tok) {
+				toks = append(toks, baseIdent(tok))
+			}
+		}
+	}
+	return uniqueSorted(toks)
+}
+
+func uniqueSorted(in []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, s := range in {
+		if s != "" && !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// TestRepoHygiene_ArchitectureDocRefs_Resolve is the architecture-doc reference
+// gate: every Go path and every symbol the architecture tier names must still
+// exist.
+//
+// Without it, that tier drifts silently and confidently. When this gate was
+// written, data-flows.md documented a `provision/` package that has never
+// existed, a squash-by-default apply that had become opt-in, and an entire
+// "Overlay Mount Flow" section for a mode retired two releases earlier;
+// code-map.md listed `copyflow/apply_overlay.go`, a file that is not there, and
+// 20-odd functions that are not either. `make check` was green throughout —
+// nothing executes prose (D124).
+//
+// The gate checks names, not narrative. It cannot know whether a described
+// ordering is still true, which is the other half of why the tier points at
+// source comments for rationale instead of restating them: a pointer can be
+// verified, a paraphrase cannot.
+func TestRepoHygiene_ArchitectureDocRefs_Resolve(t *testing.T) {
+	root := repoRoot(t)
+	files := trackedFiles(t, root)
+	docs := architectureDocs(files)
+	if len(docs) == 0 {
+		t.Fatal("no docs under docs/contributors/architecture/ — the gate's corpus went quiet, " +
+			"which means it is checking nothing (the failure mode DF94 documents)")
+	}
+	declared := goIdentSet(t, root, files)
+	tracked := map[string]bool{}
+	for _, p := range files {
+		tracked[p] = true
+	}
+
+	paths, syms := 0, 0
+	for _, rel := range docs {
+		body, err := os.ReadFile(filepath.Join(root, rel)) //nolint:gosec // G304: path from git ls-files under repoRoot
+		if err != nil {
+			t.Fatalf("read %s: %v", rel, err)
+		}
+		text := string(body)
+		paths += checkDocGoPaths(t, rel, text, tracked)
+		syms += checkDocSymbols(t, rel, text, declared)
+	}
+	t.Logf("architecture-doc ref gate scope: %d docs, %d Go-path refs, %d symbol refs", len(docs), paths, syms)
+}
+
+// checkDocGoPaths reports every Go path rel names that no tracked file matches,
+// and returns how many it checked.
+func checkDocGoPaths(t *testing.T, rel, text string, tracked map[string]bool) int {
+	t.Helper()
+	n := 0
+	for _, p := range docGoPathRefs(text) {
+		// A `_`-prefixed name is a suffix pattern being described ("a _linux.go
+		// file"), not a path: the Go toolchain ignores files that start with _,
+		// so no such file can exist to point at.
+		if strings.HasPrefix(filepath.Base(p), "_") {
+			continue
+		}
+		n++
+		if !trackedPathMatches(tracked, p) {
+			t.Errorf("%s names Go file %q, which does not exist. A doc that points at a moved "+
+				"or deleted file sends the reader somewhere empty; fix the path or drop the "+
+				"claim.", rel, p)
+		}
+	}
+	return n
+}
+
+// checkDocSymbols reports every symbol rel names that the Go tree does not
+// contain, and returns how many it checked.
+func checkDocSymbols(t *testing.T, rel, text string, declared map[string]bool) int {
+	t.Helper()
+	n := 0
+	for _, s := range docSymbolRefs(text) {
+		if docProseNouns[s] {
+			continue
+		}
+		n++
+		if !declared[s] {
+			t.Errorf("%s names %q, which the Go tree does not declare (checked case-sensitively: "+
+				"an export or de-export counts as a rename). Point at what the code calls it "+
+				"now, or delete the claim.", rel, s)
+		}
+	}
+	return n
+}
+
+// trackedPathMatches accepts an exact tracked path or a suffix of one, because
+// the docs abbreviate (`copyflow/diff.go` for a repo-root package). A suffix
+// match still fails for a file that is gone, which is what the gate is for.
+func trackedPathMatches(tracked map[string]bool, p string) bool {
+	if tracked[p] {
+		return true
+	}
+	for got := range tracked {
+		if strings.HasSuffix(got, "/"+p) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestRepoHygiene_ArchitectureDocRefMatcher_ExtractsConservatively pins what the
+// matcher does and does not claim, because a matcher that quietly extracted
+// nothing would report a clean tier forever.
+func TestRepoHygiene_ArchitectureDocRefMatcher_ExtractsConservatively(t *testing.T) {
+	body := "" +
+		"Prose naming yoloAI and macOS must not be extracted, nor must a `plain` span.\n" +
+		"But `GenerateMultiDiff()` and `copyflow.ApplyOverlay()` are call claims.\n" +
+		"```\n" +
+		"NewDiffCmd (internal/cli/workflow/diff.go)\n" +
+		"  → envsetup.SeedSandbox → CAP_SYS_ADMIN --no-start git add -A\n" +
+		"```\n" +
+		"Outside the fence, camelCase like someLocalThing is prose, not a claim.\n"
+
+	gotSyms := docSymbolRefs(body)
+	wantSyms := []string{"ApplyOverlay", "GenerateMultiDiff", "NewDiffCmd", "SeedSandbox"}
+	if !slices.Equal(gotSyms, wantSyms) {
+		t.Errorf("docSymbolRefs = %v, want %v", gotSyms, wantSyms)
+	}
+
+	gotPaths := docGoPathRefs(body)
+	wantPaths := []string{"internal/cli/workflow/diff.go"}
+	if !slices.Equal(gotPaths, wantPaths) {
+		t.Errorf("docGoPathRefs = %v, want %v", gotPaths, wantPaths)
+	}
+}
+
+// TestRepoHygiene_ArchitectureDocOracle_IgnoresCommentsAndStrings pins the
+// oracle's one load-bearing property: a name that survives only in a comment or
+// a string literal must not vouch for a doc that cites it.
+//
+// This is the whole reason the oracle parses instead of grepping. A retired
+// symbol is usually still *discussed* in the code — "ApplyOverlay was removed
+// in D109" is exactly the kind of comment a careful codebase leaves behind — so
+// a grep-based oracle would have called the retired name live and reported the
+// architecture tier clean while it documented a deleted feature.
+func TestRepoHygiene_ArchitectureDocOracle_IgnoresCommentsAndStrings(t *testing.T) {
+	src := `package p
+// ApplyOverlay was retired in D109; this comment must not vouch for it.
+type Descriptor struct { SupportedIsolationModes []string }
+type Backend interface { Inspect(ctx string) error }
+const ApplyModeCommits = "commits"
+var note = "GenerateMultiDiff lives on only in this string"
+func Exported(workDir string) error { sandboxState := 1; _ = sandboxState; return nil }
+`
+	f, err := parser.ParseFile(token.NewFileSet(), "p.go", src, parser.SkipObjectResolution)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	names := map[string]bool{}
+	collectGoIdents(f, names)
+
+	// Real identifiers vouch — including a struct field, an interface method, a
+	// parameter, and a local, all of which a map doc legitimately names.
+	for _, want := range []string{
+		"Descriptor", "SupportedIsolationModes", "Backend", "Inspect",
+		"ApplyModeCommits", "Exported", "workDir", "sandboxState",
+	} {
+		if !names[want] {
+			t.Errorf("collectGoIdents dropped %q, which the code really does contain", want)
+		}
+	}
+	// Prose does not.
+	for _, reject := range []string{"ApplyOverlay", "GenerateMultiDiff"} {
+		if names[reject] {
+			t.Errorf("collectGoIdents admitted %q, which appears only in a comment or string — "+
+				"a retired symbol that the code merely talks about must not vouch for a doc", reject)
+		}
 	}
 }

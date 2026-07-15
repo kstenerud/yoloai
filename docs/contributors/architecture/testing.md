@@ -138,12 +138,12 @@ golangci-lint run
 
 Integration test files:
 - `orchestrator/integration_test.go` — full sandbox lifecycle; includes `TestIntegration_AgentStubWorkflow` (agent runs in container → diff → apply)
-- `runtime/docker/docker_integration_test.go` — Docker runtime operations
+- `runtime/docker/integration_test.go` — Docker runtime operations
 - `internal/cli/integration_test.go` — CLI commands via Cobra
 
 E2E test files (`test/e2e/`):
 - `helpers_test.go` — `TestMain` (builds binary), `runYoloai`, `e2eSetup`
-- `workflow_test.go` — `new` / `ls` / `destroy` lifecycle
 - `json_test.go` — `--json` output shape contracts
 - `error_test.go` — exit codes and error messages
+- `bugreport_test.go` — `bugreport` capture
 - `bugreport_test.go` — bug report generation
