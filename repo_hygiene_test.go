@@ -1,19 +1,22 @@
 // ABOUTME: Repo-hygiene gates that run under plain `go test ./...` (no build
-// ABOUTME: tags), so `make check` enforces them on every PR: ABOUTME headers
-// ABOUTME: (markdown.md), D/DF rationale-ID citations resolve and don't
-// ABOUTME: collide, and no //nolint suppresses the complexity gate.
+// ABOUTME: tags), so `make check` enforces on every PR the standing claims that
+// ABOUTME: no linter can express. Each gate below states what it enforces and
+// ABOUTME: what went wrong without it; grep `func TestRepoHygiene_` for the set.
 
 package yoloai_test
 
 import (
 	"bufio"
 	"fmt"
+	"go/ast"
 	"go/parser"
 	"go/token"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -22,8 +25,11 @@ import (
 	"github.com/kstenerud/yoloai/internal/testutil"
 )
 
-// This file enforces three standing claims that nothing else in the build
-// checks:
+// This file enforces the standing claims that nothing else in the build checks.
+// The list is deliberately un-numbered: a count here is a copy of a fact the
+// file already states, nothing keeps the two in step, and it read "three" while
+// four gates were defined below (the same denormalisation D119 removed from
+// general-principles.md's ABOUTME).
 //
 //  1. Every Go/Python(runtime/monitor)/shell(scripts/) source file carries an
 //     ABOUTME header, per docs/contributors/standards/markdown.md. Without
@@ -42,6 +48,11 @@ import (
 //     `//nolint:cyclop` at a time, or the threshold itself can be loosened
 //     — both defeat development-principles.md §10 without anyone noticing
 //     until the complexity has already piled up elsewhere.
+//  4. Every `YOLOAI_TEST_*` gate the Go code reads is set by something in the
+//     tree. Without this, a gate nothing turns on is a deleted test that
+//     reports green forever, and no diff ever says so — see DF94, where a
+//     whole tier self-skipped for months behind a near-namesake variable, and
+//     DF99, where two C1 security tests had never run.
 //
 // Deliberately NOT gated here: markdown.md also requires ABOUTME headers on
 // docs/contributors/**/*.md. 122 of those files are currently missing one —
@@ -49,12 +60,12 @@ import (
 // would make this test permanently red for a gap a separate task owns; once
 // that sweep lands, extend Gate A to cover docs/contributors/**/*.md too.
 //
-// Also deliberately NOT gated: ABOUTME line width. markdown.md's ABOUTME
-// section states no width rule (the "keep under 80 chars" text lives only
-// inside the illustrative example block, not as a stated requirement), and
-// 330+ existing ABOUTME lines already exceed 80 columns. Adding a width
-// check here would invent a rule the standard doesn't make and fail on
-// pre-existing, compliant files.
+// (ABOUTME line width USED to be listed here as deliberately not gated, on the
+// grounds that markdown.md stated no width rule. D117 made it a rule at 100
+// columns and this file gained aboutmeMaxCols to enforce it, but the paragraph
+// saying the opposite stayed — sitting twenty lines above the check that
+// refuted it. Removed under D119. A comment that describes what the code does
+// not do is the first thing to rot, because nothing fails when it goes wrong.)
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -484,6 +495,101 @@ func sortedKeys[V any](m map[string]V) []string {
 	return keys
 }
 
+// envGateRe matches a test-gate variable name and nothing else. The anchors
+// matter: config and cli tests pass gate-SHAPED text as expansion fixtures
+// ("${YOLOAI_TEST_NONEXISTENT}/dir"), and those are data, not gates. Used to
+// validate a whole string literal.
+var envGateRe = regexp.MustCompile(`^YOLOAI_TEST_[A-Z0-9_]+$`)
+
+// envGateTokenRe finds gate names embedded in a line of make/YAML/shell, where
+// they appear as `YOLOAI_TEST_X := 1` or `YOLOAI_TEST_X=1`. Unanchored, unlike
+// envGateRe, because here the name is a token inside a larger line.
+var envGateTokenRe = regexp.MustCompile(`YOLOAI_TEST_[A-Z0-9_]+`)
+
+// envGateReads returns every test gate the Go file reads, keyed by name.
+//
+// A string literal counts as a gate only where it is an argument to os.Getenv /
+// os.LookupEnv, or the value of a const/var declaration — the indirection
+// testutil uses (`const integrationBackendEnv = "YOLOAI_TEST_BACKEND"`). That
+// is narrower than "every matching literal" on purpose: pathutil_test.go passes
+// a gate-shaped name to assert.Contains as expected error text, and an
+// assertion is not a gate.
+//
+// Parsing rather than grepping also makes comment mentions structurally
+// invisible, which is not hypothetical: integration_tart_test.go's comment
+// explains the DF94 YOLOAI_TEST_TART rename, and a grep counts that dead name
+// as a live read. See goFileComments' note on the same class of false positive.
+func envGateReads(t *testing.T, path string) map[string]int {
+	t.Helper()
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+	if err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
+	out := map[string]int{}
+	note := func(lit *ast.BasicLit) {
+		if lit == nil || lit.Kind != token.STRING {
+			return
+		}
+		val, err := strconv.Unquote(lit.Value)
+		if err != nil || !envGateRe.MatchString(val) {
+			return
+		}
+		out[val] = fset.Position(lit.Pos()).Line
+	}
+	ast.Inspect(f, func(n ast.Node) bool {
+		switch node := n.(type) {
+		case *ast.CallExpr:
+			if isEnvReadCall(node.Fun) {
+				for _, arg := range node.Args {
+					lit, _ := arg.(*ast.BasicLit)
+					note(lit)
+				}
+			}
+		case *ast.ValueSpec:
+			for _, v := range node.Values {
+				lit, _ := v.(*ast.BasicLit)
+				note(lit)
+			}
+		}
+		return true
+	})
+	return out
+}
+
+// isEnvReadCall reports whether fun is os.Getenv or os.LookupEnv.
+func isEnvReadCall(fun ast.Expr) bool {
+	sel, ok := fun.(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	pkg, ok := sel.X.(*ast.Ident)
+	if !ok || pkg.Name != "os" {
+		return false
+	}
+	return sel.Sel.Name == "Getenv" || sel.Sel.Name == "LookupEnv"
+}
+
+// envGateSetters returns every test gate something in-tree can actually turn
+// on. Comment lines are dropped so a gate that is only *discussed* in a
+// Makefile or workflow does not count as wired — "#" opens a comment in make,
+// YAML and shell alike, which is the whole corpus here.
+func envGateSetters(t *testing.T, root string, paths []string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	for _, rel := range paths {
+		eachLine(t, filepath.Join(root, rel), func(lineNum int, line string) {
+			if strings.HasPrefix(strings.TrimSpace(line), "#") {
+				return
+			}
+			for _, name := range envGateTokenRe.FindAllString(line, -1) {
+				out[name] = fmt.Sprintf("%s:%d", rel, lineNum)
+			}
+		})
+	}
+	return out
+}
+
 // filterGoSuffix returns the subset of paths ending in ".go".
 func filterGoSuffix(paths []string) []string {
 	var out []string
@@ -590,6 +696,125 @@ func TestRepoHygiene_DecisionCitations_ResolveAndAreUnique(t *testing.T) {
 	})
 }
 
+// envGateSetterFiles returns the corpus that can turn a gate on: the Makefile,
+// CI workflows, and scripts. A gate wired anywhere in here is reachable by
+// somebody; a gate wired nowhere is reachable by nobody.
+func envGateSetterFiles(paths []string) []string {
+	var out []string
+	for _, p := range paths {
+		switch {
+		case p == "Makefile", strings.HasSuffix(p, ".mk"),
+			strings.HasPrefix(p, ".github/"), strings.HasPrefix(p, "scripts/"):
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// TestRepoHygiene_TestGates_AreSetBySomething is Gate C: every YOLOAI_TEST_*
+// gate the Go code reads must be settable by something in the tree.
+//
+// A scope gate nothing sets is not a skipped test, it is a deleted one that
+// reports green forever — and unlike a deleted test, nothing in the diff ever
+// says so. This is a grep asymmetry, which is precisely what a gate is for and
+// what human review demonstrably does not catch.
+//
+// DF94 is the worked example. The tart lifecycle tier was gated on
+// YOLOAI_TEST_TART, which nothing set: not the Makefile, not CI, not any
+// script. Its near-namesake YOLOAI_TEST_TART_VM gated a busy sibling suite and
+// made the tier look covered, so it self-skipped for months on the only
+// platform that could run it. D112's own plan quoted the gating line in its
+// keep-list and did not notice the two names differed. When it was finally
+// wired on, it failed immediately, and the bugs it had been hiding included a
+// shipped defect in two backends' handling of a public API.
+//
+// Writing this gate found two more before it ever ran: YOLOAI_TEST_SEATBELT and
+// YOLOAI_TEST_APPLE, guarding the audit-C1 malicious-filter containment tests.
+// Both had never run. Both passed first time. See DF99.
+func TestRepoHygiene_TestGates_AreSetBySomething(t *testing.T) {
+	root := repoRoot(t)
+	tracked := trackedFiles(t, root)
+
+	setters := envGateSetters(t, root, envGateSetterFiles(tracked))
+	reads := map[string]string{}
+	for _, rel := range filterGoSuffix(tracked) {
+		for name, line := range envGateReads(t, filepath.Join(root, rel)) {
+			reads[name] = fmt.Sprintf("%s:%d", rel, line)
+		}
+	}
+
+	t.Logf("Gate C scope: %d gates read in Go, %d settable in Makefile/CI/scripts",
+		len(reads), len(setters))
+
+	for _, name := range sortedKeys(reads) {
+		if _, ok := setters[name]; !ok {
+			t.Errorf("%s is read at %s but nothing sets it — no Makefile target, CI job or "+
+				"script turns it on, so the tests behind it never run and report green (DF94, DF95). "+
+				"Wire it into a Makefile target, or delete the gate if the cost that justified it is gone",
+				name, reads[name])
+		}
+	}
+}
+
+// TestRepoHygiene_EnvGateMatcher_CountsReadsNotMentions proves Gate C's
+// extractor can fail in both directions that matter. It must find a gate behind
+// each shape a real read takes (a bare os.Getenv literal, an os.LookupEnv, and
+// the const indirection testutil uses), and it must NOT report gate-shaped text
+// that is merely data: a name inside a larger expansion string, a name passed to
+// an assertion, and a name mentioned in a comment. Every one of those false
+// positives exists in the real tree, and a grep-based first draft reported all
+// three.
+func TestRepoHygiene_EnvGateMatcher_CountsReadsNotMentions(t *testing.T) {
+	src := "package p\n" +
+		"\n" +
+		"import \"os\"\n" +
+		"\n" +
+		"// YOLOAI_TEST_COMMENTED was renamed; this comment is not a read.\n" +
+		"const wired = \"YOLOAI_TEST_VIA_CONST\"\n" +
+		"\n" +
+		"func f() {\n" +
+		"\t_ = os.Getenv(\"YOLOAI_TEST_VIA_GETENV\")\n" +
+		"\t_, _ = os.LookupEnv(\"YOLOAI_TEST_VIA_LOOKUP\")\n" +
+		"\t_ = os.Getenv(wired)\n" +
+		"\t_ = expand(\"${YOLOAI_TEST_INSIDE_STRING}/dir:copy\")\n" +
+		"\tassertContains(\"YOLOAI_TEST_IN_ASSERTION\")\n" +
+		"}\n"
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "fixture.go")
+	if err := os.WriteFile(path, []byte(src), 0600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	got := sortedKeys(envGateReads(t, path))
+	want := []string{"YOLOAI_TEST_VIA_CONST", "YOLOAI_TEST_VIA_GETENV", "YOLOAI_TEST_VIA_LOOKUP"}
+	if !slices.Equal(got, want) {
+		t.Errorf("envGateReads = %v, want %v", got, want)
+	}
+}
+
+// TestRepoHygiene_EnvGateSetters_IgnoreCommentedMentions proves a gate merely
+// discussed in a Makefile comment does not count as wired. Make, YAML and shell
+// all open comments with "#", and every setter file is one of those. Without
+// this, DF94's gate would have "passed" on the strength of the comment that
+// explained it.
+func TestRepoHygiene_EnvGateSetters_IgnoreCommentedMentions(t *testing.T) {
+	dir := t.TempDir()
+	rel := "Makefile"
+	body := "## gated behind YOLOAI_TEST_ONLY_DISCUSSED=1, see the docs\n" +
+		"target:\n" +
+		"\tYOLOAI_TEST_REALLY_SET=1 go test ./...\n"
+	if err := os.WriteFile(filepath.Join(dir, rel), []byte(body), 0600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	got := sortedKeys(envGateSetters(t, dir, []string{rel}))
+	want := []string{"YOLOAI_TEST_REALLY_SET"}
+	if !slices.Equal(got, want) {
+		t.Errorf("envGateSetters = %v, want %v — a commented mention must not count as wired", got, want)
+	}
+}
+
 // TestRepoHygiene_HeadingMatcher_RejectsFalseDuplicates proves the DF
 // discriminator can fail in both directions: it must accept a real
 // canonical heading and it must reject the continuation/split shapes that a
@@ -664,10 +889,10 @@ func TestRepoHygiene_CitationMatcher_ExtractsConservatively(t *testing.T) {
 			t.Run(c.name, func(t *testing.T) {
 				gotD := allSubmatches(citationDRe, c.comment)
 				gotDF := allSubmatches(citationDFRe, c.comment)
-				if !equalStringSlices(gotD, c.wantD) {
+				if !slices.Equal(gotD, c.wantD) {
 					t.Errorf("citationDRe on %q = %v, want %v", c.comment, gotD, c.wantD)
 				}
-				if !equalStringSlices(gotDF, c.wantDF) {
+				if !slices.Equal(gotDF, c.wantDF) {
 					t.Errorf("citationDFRe on %q = %v, want %v", c.comment, gotDF, c.wantDF)
 				}
 			})
@@ -682,18 +907,6 @@ func allSubmatches(re *regexp.Regexp, s string) []string {
 		out = append(out, m[1])
 	}
 	return out
-}
-
-func equalStringSlices(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
 
 // ---------------------------------------------------------------------------
