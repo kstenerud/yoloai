@@ -8,12 +8,15 @@ package yoloai_test
 import (
 	"bufio"
 	"fmt"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/kstenerud/yoloai/internal/sysexec"
 	"github.com/kstenerud/yoloai/internal/testutil"
@@ -139,6 +142,76 @@ func eachLine(t *testing.T, path string, fn func(lineNum int, line string)) {
 	}
 }
 
+// commentSite is a single "//" line comment extracted from a parsed Go
+// source file: its 1-based line number and its full text, "//" prefix
+// included.
+type commentSite struct {
+	line int
+	text string
+}
+
+// goFileComments parses path as Go source and returns every "//" line
+// comment in it — doc comments and inline trailing comments alike — each
+// with its line number.
+//
+// This uses go/parser rather than scanning raw text lines for a reason
+// proven the hard way: a naive strings.Index(line, "//") scan cannot tell a
+// real comment from a "//nolint:..." - or "D<n>"-shaped string that merely
+// APPEARS inside a Go string literal. This file's own table-driven test
+// fixtures embed exactly that kind of text as data (see the
+// nolintComplexityName and citation matcher test cases below), and a
+// line-scanning first draft of the real-tree gates below self-hosted false
+// positives against this very file before this function existed. Parsing
+// the file and reading only genuine *ast.Comment nodes makes that class of
+// false positive structurally impossible: string-literal content is never
+// visited. See TestRepoHygiene_GoFileComments_IgnoresStringLiterals.
+func goFileComments(t *testing.T, path string) []commentSite {
+	t.Helper()
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, path, nil, parser.ParseComments|parser.SkipObjectResolution)
+	if err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
+	var out []commentSite
+	for _, group := range f.Comments {
+		for _, c := range group.List {
+			if strings.HasPrefix(c.Text, "//") {
+				out = append(out, commentSite{line: fset.Position(c.Pos()).Line, text: c.Text})
+			}
+		}
+	}
+	return out
+}
+
+// TestRepoHygiene_GoFileComments_IgnoresStringLiterals proves goFileComments
+// can fail in the way that matters: fed a file whose only "//nolint:..." and
+// "D<n>"-shaped text lives inside a backtick string literal, it must not
+// report that text as a comment at all — only the two genuine comments (one
+// doc comment, one trailing) should come back.
+func TestRepoHygiene_GoFileComments_IgnoresStringLiterals(t *testing.T) {
+	dir := t.TempDir()
+	src := "package fixture\n\n" +
+		"// real comment citing D999, safe to suppress: //nolint:gocognit is fake below.\n" +
+		"const lookalike = `//nolint:gocognit fake directive; D888 fake citation`\n" +
+		"var x = 1 // real trailing comment citing DF999\n"
+	path := filepath.Join(dir, "fixture.go")
+	if err := os.WriteFile(path, []byte(src), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	comments := goFileComments(t, path)
+	if len(comments) != 2 {
+		t.Fatalf("got %d comments, want 2 (the doc comment and the trailing comment): %+v", len(comments), comments)
+	}
+	joined := comments[0].text + "\n" + comments[1].text
+	if !strings.Contains(joined, "D999") || !strings.Contains(joined, "DF999") {
+		t.Errorf("the two genuine comments were not both captured: %+v", comments)
+	}
+	if strings.Contains(joined, "D888") || strings.Contains(joined, "fake directive") {
+		t.Errorf("string-literal content leaked into extracted comments: %+v", comments)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Gate A: ABOUTME headers (docs/contributors/standards/markdown.md
 // "Required" list) on Go, runtime/monitor Python, and scripts/ shell files.
@@ -181,12 +254,23 @@ func aboutmeCategory(path string) string {
 // 580/580, Python runtime/monitor 9/9, scripts/*.sh 4/4 — this should be
 // GREEN today. A failure here is a real gap (a new file that skipped the
 // convention), not a flaky check; there is no allowlist to add to.
+// aboutmeMaxCols is the ABOUTME line-width limit from
+// docs/contributors/standards/markdown.md, comment marker included.
+//
+// 100, not 80 (D117). markdown.md said 80, but only inside an example block
+// rather than as a rule, and nothing enforced it: 351 lines across 256 files had
+// drifted past. Gating at 80 would have meant reflowing a quarter of the repo to
+// satisfy a number nobody had ever applied. 100 is what the code already does —
+// exactly four lines exceeded it, and those were reflowed, not grandfathered.
+const aboutmeMaxCols = 100
+
 func TestRepoHygiene_ABOUTMEHeaders_AllTrackedFilesCompliant(t *testing.T) {
 	root := repoRoot(t)
 	files := trackedFiles(t, root)
 
 	counted := map[string]int{"go": 0, "python": 0, "shell": 0}
 	var missing []string
+	var tooWide []string
 	for _, rel := range files {
 		cat := aboutmeCategory(rel)
 		if cat == "" {
@@ -194,8 +278,19 @@ func TestRepoHygiene_ABOUTMEHeaders_AllTrackedFilesCompliant(t *testing.T) {
 		}
 		counted[cat]++
 		abs := filepath.Join(root, rel)
-		if !hasABOUTMEHeader(firstLines(t, abs, 6)) {
+		head := firstLines(t, abs, 8)
+		if !hasABOUTMEHeader(head) {
 			missing = append(missing, rel)
+		}
+		for _, line := range head {
+			// RuneCountInString, not len(): len() counts BYTES, and these comments
+			// use em-dashes freely (3 bytes each). A byte count reports a 99-column
+			// line as 101 and rejects correct code — it fired on
+			// runtime/containerd/exec.go the first time this ran. The limit is columns.
+			cols := utf8.RuneCountInString(line)
+			if strings.Contains(line, "ABOUTME:") && cols > aboutmeMaxCols {
+				tooWide = append(tooWide, fmt.Sprintf("%s (%d cols)", rel, cols))
+			}
 		}
 	}
 
@@ -213,6 +308,49 @@ func TestRepoHygiene_ABOUTMEHeaders_AllTrackedFilesCompliant(t *testing.T) {
 		}
 		b.WriteString("Fix: add an ABOUTME header block at the top of the file.\n")
 		t.Error(b.String())
+	}
+
+	if len(tooWide) > 0 {
+		sort.Strings(tooWide)
+		var b strings.Builder
+		fmt.Fprintf(&b, "ABOUTME lines wider than %d columns "+
+			"(docs/contributors/standards/markdown.md):\n", aboutmeMaxCols)
+		for _, w := range tooWide {
+			b.WriteString("  " + w + "\n")
+		}
+		b.WriteString("Fix: wrap onto another ABOUTME line.\n")
+		t.Error(b.String())
+	}
+}
+
+// TestRepoHygiene_ABOUTMEWidth_RejectsOverlongAndCountsRunes proves the width
+// half of Gate A can fail, and pins the byte-vs-rune trap it was born from:
+// len() counts bytes, these comments are full of em-dashes at 3 bytes each, and
+// the first cut rejected a correct 99-column line as 101.
+func TestRepoHygiene_ABOUTMEWidth_RejectsOverlongAndCountsRunes(t *testing.T) {
+	const marker = "// ABOUTME: "
+	cases := []struct {
+		name    string
+		line    string
+		tooWide bool
+	}{
+		{"comfortably short", marker + "short.", false},
+		{"exactly at the limit", marker + strings.Repeat("x", aboutmeMaxCols-len(marker)), false},
+		{"one past the limit", marker + strings.Repeat("x", aboutmeMaxCols-len(marker)+1), true},
+		{
+			// At the limit in columns, over it in bytes: a byte count rejects this.
+			"em-dashes are one column each, not three",
+			marker + strings.Repeat("\u2014", 2) + strings.Repeat("x", aboutmeMaxCols-len(marker)-2),
+			false,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := utf8.RuneCountInString(c.line) > aboutmeMaxCols; got != c.tooWide {
+				t.Errorf("width check on a %d-rune/%d-byte line = %v, want %v",
+					utf8.RuneCountInString(c.line), len(c.line), got, c.tooWide)
+			}
+		})
 	}
 }
 
@@ -281,9 +419,10 @@ var canonicalDHeadingRe = regexp.MustCompile(`^## D(\d+) — `)
 var canonicalDFHeadingRe = regexp.MustCompile(`^### DF(\d+) — `)
 
 // citationDRe / citationDFRe extract rationale-ID citations from a Go
-// comment's text. \b on both ends keeps "D620" from matching as "D62", and
-// keeps prose like "gocognitD30" (no word boundary before D) from matching
-// at all. Because citationDRe requires a digit immediately after "D", it
+// comment's text. The \b anchors on both ends stop a longer citation number
+// from matching on just its leading digits, and stop word-embedded text
+// like "gocognitD30" (no boundary before the D) from matching at all.
+// Because citationDRe requires a digit immediately after "D", it
 // never matches inside "DF71" (the character after D is "F", not a digit) —
 // so the two regexes naturally partition without needing to special-case
 // each other.
@@ -317,39 +456,20 @@ func mergeSites(dst, src map[string][]idSite) {
 	}
 }
 
-// commentText returns the "//..." suffix of line, or "", false if line has
-// no "//". Conservative by construction: everything before the first "//"
-// is ignored, so an ID appearing only in code (not in any comment) is never
-// picked up. Checked against the current tree: no tracked Go file has a
-// string literal containing "//" followed by a D<n>/DF<n>-shaped token
-// ahead of its real trailing comment, so this simple split has a 0%
-// false-positive rate today; if that ever changes, tighten this to a real
-// token scanner instead of widening an allowlist.
-func commentText(line string) (string, bool) {
-	idx := strings.Index(line, "//")
-	if idx == -1 {
-		return "", false
-	}
-	return line[idx:], true
-}
-
 // scanCitations scans every *.go file under root (as listed in goFiles,
-// root-relative) for re-matching IDs inside `//` comments, returning id ->
-// every citing site.
+// root-relative) for re-matching IDs inside genuine `//` comments (via
+// goFileComments — never inside string literals), returning id -> every
+// citing site.
 func scanCitations(t *testing.T, root string, goFiles []string, prefix string, re *regexp.Regexp) map[string][]idSite {
 	t.Helper()
 	out := map[string][]idSite{}
 	for _, rel := range goFiles {
-		eachLine(t, filepath.Join(root, rel), func(lineNum int, line string) {
-			comment, ok := commentText(line)
-			if !ok {
-				return
-			}
-			for _, m := range re.FindAllStringSubmatch(comment, -1) {
+		for _, c := range goFileComments(t, filepath.Join(root, rel)) {
+			for _, m := range re.FindAllStringSubmatch(c.text, -1) {
 				id := prefix + m[1]
-				out[id] = append(out[id], fmt.Sprintf("%s:%d", rel, lineNum))
+				out[id] = append(out[id], fmt.Sprintf("%s:%d", rel, c.line))
 			}
-		})
+		}
 	}
 	return out
 }
@@ -427,14 +547,18 @@ func assertNoDuplicates(t *testing.T, headings map[string][]idSite, corpusDesc s
 // D<n>/DF<n> cited from a Go comment must resolve to a real heading, and no
 // heading may define the same ID twice.
 //
-// False-positive rate on the current tree: 0%. Matching method: for every
-// tracked *.go file, take the "//"-suffix of each line (see commentText)
-// and run \bD(\d+)\b / \bDF(\d+)\b against it. That yields exactly 33
-// distinct D citations and 30 distinct DF citations; every one was manually
-// checked against its source line and is a genuine rationale-ID reference
-// (no hex/version/URL/prose collision found). If a future change to this
-// codebase's comment style produces a collision, narrow commentText (or the
-// regexes) rather than adding an ignore-list.
+// False-positive rate on the current tree: 0%. Matching method: parse every
+// tracked *.go file (goFileComments) and run \bD(\d+)\b / \bDF(\d+)\b
+// against each genuine "//" comment's text — string-literal content is
+// structurally excluded by construction (see goFileComments and
+// TestRepoHygiene_GoFileComments_IgnoresStringLiterals), not merely checked
+// by hand. That yields exactly 33 distinct D citations and 30 distinct DF
+// citations; every one was manually checked against its source line and is
+// a genuine rationale-ID reference (no hex/version/URL/prose collision
+// found). An earlier line-scanning draft of this gate (strings.Index(line,
+// "//")) self-hosted false positives against this very file's own
+// table-driven test fixtures before goFileComments replaced it — the fixed
+// approach is immune to that class of bug by construction.
 func TestRepoHygiene_DecisionCitations_ResolveAndAreUnique(t *testing.T) {
 	root := repoRoot(t)
 	goFiles := filterGoSuffix(trackedFiles(t, root))
@@ -513,30 +637,10 @@ func TestRepoHygiene_HeadingMatcher_RejectsFalseDuplicates(t *testing.T) {
 
 // TestRepoHygiene_CitationMatcher_ExtractsConservatively proves the
 // citation matcher can fail: it must find real citations, must not cross
-// the D/DF namespace boundary, must not fire on prose, and must not look
-// outside a `//` comment.
+// the D/DF namespace boundary, and must not fire on prose. (Confinement to
+// genuine comments — never string literals — is goFileComments's job; see
+// TestRepoHygiene_GoFileComments_IgnoresStringLiterals for that proof.)
 func TestRepoHygiene_CitationMatcher_ExtractsConservatively(t *testing.T) {
-	t.Run("commentText", func(t *testing.T) {
-		cases := []struct {
-			name string
-			line string
-			want string
-			ok   bool
-		}{
-			{"line with trailing comment", `x := 1 // see D62`, `// see D62`, true},
-			{"pure comment line", `// D62/D63 refinement`, `// D62/D63 refinement`, true},
-			{"no comment marker at all", `return errD62`, "", false},
-		}
-		for _, c := range cases {
-			t.Run(c.name, func(t *testing.T) {
-				got, ok := commentText(c.line)
-				if ok != c.ok || got != c.want {
-					t.Errorf("commentText(%q) = (%q, %v), want (%q, %v)", c.line, got, ok, c.want, c.ok)
-				}
-			})
-		}
-	})
-
 	t.Run("citationDRe and citationDFRe", func(t *testing.T) {
 		cases := []struct {
 			name    string
@@ -631,6 +735,12 @@ func nolintComplexityName(line string) (string, bool) {
 // no tracked *.go file may contain a //nolint directive naming
 // cyclop/gocognit/gocyclo. Verified at authoring time: 0 of ~1152 //nolint
 // directives suppress any of the three — this should be GREEN today.
+//
+// Scans genuine comments only (goFileComments), not raw text lines: this
+// file's own nolintComplexityName test fixtures below embed
+// "//nolint:...gocognit..." as string-literal data, and a raw line scan
+// self-hosted a false positive against them before this switched to the
+// parser. See TestRepoHygiene_GoFileComments_IgnoresStringLiterals.
 func TestRepoHygiene_NoComplexitySuppression_AllTrackedFiles(t *testing.T) {
 	root := repoRoot(t)
 	files := trackedFiles(t, root)
@@ -640,11 +750,11 @@ func TestRepoHygiene_NoComplexitySuppression_AllTrackedFiles(t *testing.T) {
 		if !strings.HasSuffix(rel, ".go") {
 			continue
 		}
-		eachLine(t, filepath.Join(root, rel), func(lineNum int, line string) {
-			if name, ok := nolintComplexityName(line); ok {
-				violations = append(violations, fmt.Sprintf("%s:%d suppresses %s", rel, lineNum, name))
+		for _, c := range goFileComments(t, filepath.Join(root, rel)) {
+			if name, ok := nolintComplexityName(c.text); ok {
+				violations = append(violations, fmt.Sprintf("%s:%d suppresses %s", rel, c.line, name))
 			}
-		})
+		}
 	}
 
 	if len(violations) > 0 {
