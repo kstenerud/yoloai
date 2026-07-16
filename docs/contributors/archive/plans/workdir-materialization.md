@@ -4,13 +4,14 @@
 
 # Plan: one owner for work-copy materialization
 
-- **Status:** IN-PROGRESS — **stages 1 & 2 landed** (2026-07-16). Stage 1: `Materialize` extracted
-  with `WipeAndCopy`, create routed through it (`prepare_dirs.go` −53 lines). Stage 2:
-  reset `--restart` (`resetCopyWorkdir`, `resetAuxCopyDir`) routed through it (`reset.go` −12 lines);
-  no observable change (restart-path guards pass), and it erased divergence (a) — aux dirs now get
-  the SandboxSide baseline deferral the aux path used to omit. Added the previously-absent
-  `resetAuxCopyDir` tests. **Stage 3** (reset in-place `resyncWorkCopy` → `InPlaceAndPrune`, plus
-  the DF123 aux loop) not started; `InPlaceAndPrune` is still unbuilt until it lands.
+- **Status:** IMPLEMENTED (2026-07-16). All four materialization sites — create, reset `--restart`
+  (workdir + aux), and reset in-place — now go through `workcopy.Materialize`, whose only
+  behavioural parameter is the `Strategy` enum (`WipeAndCopy` / `InPlaceAndPrune`), as the research
+  predicted: no per-caller boolean appeared. Stage 1 extracted the coordinator (create,
+  `prepare_dirs.go` −53); stage 2 moved reset `--restart` onto it and erased divergence (a); stage 3
+  moved reset in-place onto `InPlaceAndPrune` and fixed DF123 (the in-place path now loops aux dirs).
+  Each stage merged on its own with a red-green guard. This plan is now archaeology and moves to
+  `archive/plans/` in the same change.
 - **Depends on:** —
 
 ## The problem, stated as a pattern rather than a bug

@@ -9,17 +9,14 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"sync"
 
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/git"
-	"github.com/kstenerud/yoloai/internal/orchestrator/baseline"
 	"github.com/kstenerud/yoloai/internal/orchestrator/launch"
 	"github.com/kstenerud/yoloai/internal/orchestrator/state"
 	"github.com/kstenerud/yoloai/internal/orchestrator/status"
 	"github.com/kstenerud/yoloai/internal/orchestrator/workcopy"
 	"github.com/kstenerud/yoloai/internal/orchestrator/workprobe"
-	"github.com/kstenerud/yoloai/internal/workspace"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/store"
 )
@@ -185,7 +182,7 @@ func resetCopyWorkdir(ctx context.Context, d state.Deps, sandboxName, sandboxDir
 		return "", fmt.Errorf("original directory no longer exists: %s", meta.Workdir().HostPath)
 	}
 	slog.Debug("re-copying workdir", "event", "sandbox.reset.workdir", "sandbox", sandboxName, "host_path", meta.Workdir().HostPath)
-	sha, _, err := workcopy.Materialize(ctx, specOf(*meta.Workdir()), workDir, git.NewHost(d.Layout), d.Runtime)
+	sha, _, err := workcopy.Materialize(ctx, specOf(*meta.Workdir()), workDir, workcopy.WipeAndCopy, git.NewHost(d.Layout), d.Runtime)
 	if err != nil {
 		return "", fmt.Errorf("re-copy workdir: %w", err)
 	}
@@ -201,7 +198,7 @@ func resetAuxCopyDir(ctx context.Context, g *git.Git, sandboxDir string, d store
 	if _, err := os.Stat(d.HostPath); err != nil {
 		return "", fmt.Errorf("original aux directory no longer exists: %s", d.HostPath)
 	}
-	sha, _, err := workcopy.Materialize(ctx, specOf(d), auxWorkDir, g, rt)
+	sha, _, err := workcopy.Materialize(ctx, specOf(d), auxWorkDir, workcopy.WipeAndCopy, g, rt)
 	if err != nil {
 		return "", fmt.Errorf("re-copy aux dir %s: %w", d.HostPath, err)
 	}
@@ -350,66 +347,16 @@ func prepareResetRestart(ctx context.Context, d state.Deps, opts ResetOptions, s
 	return nil
 }
 
-// resyncWorkCopy re-copies dir's host directory into the work copy at workDir
-// and returns the copy's new baseline SHA: its own HEAD when it carries a real
-// repo, a fresh baseline otherwise. The bind-mount makes the result visible to
-// the running container.
-//
-// It re-copies through CopyProjectDir — the same dispatch create uses — so a
-// reset reproduces the copy create would have made, rather than approximating it
-// with a second set of rules that can disagree. That is the whole fix for DF117:
-// the previous `rsync -a --delete` mirrored the host tree verbatim and honored
-// none of the copy's semantics, so one reset re-imported the .gitignore'd
-// secrets :copy exists to exclude and the history --copy-strict exists to strip.
-//
-// Copying in place is what makes this safe against a live agent, and is why
-// there is no RemoveAll of workDir here: CopyProjectDir overwrites entries
-// without replacing the directory itself, so the inode the container's
-// bind-mount resolves to survives. Wiping first would leave the agent looking at
-// a deleted directory for the rest of the session.
+// resyncWorkCopy re-copies dir's host directory into the work copy at workDir and
+// returns the new baseline SHA. InPlaceAndPrune — the strategy that overwrites a
+// live bind-mounted work copy without replacing the directory the container is
+// watching, then prunes what the source dropped. Shared with create/restart via
+// workcopy.Materialize, so an in-place reset reproduces the copy create would
+// have made rather than approximating it (the DF117/DF118 fix), and the two
+// cannot drift.
 func resyncWorkCopy(ctx context.Context, g *git.Git, dir store.DirEnvironment, workDir string, rt runtime.Backend) (string, error) {
-	src := dir.HostPath
-	preserveGit, _ := workspace.PreserveGit(dir.StripHistory, runtime.GitRunsInConfinement(rt))
-
-	// One enumeration answers both the copy and the prune. They must agree: a
-	// second `git ls-files` could return a different answer if the host changed
-	// under us, and the prune would then delete a file the copy just wrote.
-	var (
-		once     sync.Once
-		lsFiles  []string
-		lsIsRepo bool
-		lsErr    error
-	)
-	listProjectFiles := func() ([]string, bool, error) {
-		once.Do(func() { lsFiles, lsIsRepo, lsErr = g.ListProjectFiles(ctx, src) })
-		return lsFiles, lsIsRepo, lsErr
-	}
-
-	files, err := workspace.ProjectFileSet(src, dir.IncludeIgnored, listProjectFiles)
-	if err != nil {
-		return "", fmt.Errorf("enumerate project files of %s: %w", src, err)
-	}
-
-	// .git is replaced as a unit, never merged. Copying it entry by entry over an
-	// existing repo unions the two: stale objects go, but a 41-byte ref whose
-	// mtime happens to match is skipped, leaving it pointing at an object that is
-	// no longer there (DF118). Removing it first also restores the CoW clone,
-	// which needs a fresh destination.
-	if err := os.RemoveAll(filepath.Join(workDir, ".git")); err != nil {
-		return "", fmt.Errorf("remove work copy .git: %w", err)
-	}
-	if err := workspace.CopyProjectDir(src, workDir, dir.IncludeIgnored, preserveGit, listProjectFiles); err != nil {
-		return "", fmt.Errorf("re-copy workdir: %w", err)
-	}
-
-	// Copying refreshes what the source still has; only pruning removes what the
-	// agent added, what the source dropped, and anything an older and laxer sync
-	// should never have put here — a leaked secret included (DF117).
-	if err := workspace.PruneToFileSet(workDir, files); err != nil {
-		return "", fmt.Errorf("prune work copy: %w", err)
-	}
-
-	return baseline.WorkCopy(ctx, g, workDir)
+	sha, _, err := workcopy.Materialize(ctx, specOf(dir), workDir, workcopy.InPlaceAndPrune, g, rt)
+	return sha, err
 }
 
 // resetInPlace resets the workspace while the agent is still running.
@@ -421,16 +368,31 @@ func resetInPlace(ctx context.Context, d state.Deps, opts ResetOptions, meta *st
 		return fmt.Errorf("in-place reset not supported when the work copy is inside the sandbox (SandboxSide backend, e.g. Tart)")
 	}
 
-	workDir := store.WorkDir(sandboxDir, meta.Workdir().HostPath)
 	g := git.NewHost(d.Layout)
 
+	workDir := store.WorkDir(sandboxDir, meta.Workdir().HostPath)
 	newSHA, err := resyncWorkCopy(ctx, g, *meta.Workdir(), workDir, d.Runtime)
 	if err != nil {
 		return err
 	}
-
-	// Update environment.json
 	meta.Workdir().BaselineSHA = newSHA
+
+	// Aux :copy dirs get the same in-place resync. Omitting them was DF123: the
+	// default reset refreshed only the workdir and left aux dirs holding the
+	// agent's changes, while telling the user everything was reverted. The
+	// restart path already resets aux dirs; the in-place path now matches it.
+	for i, aux := range meta.AuxDirs() {
+		if aux.Mode != store.DirModeCopy {
+			continue
+		}
+		auxWorkDir := store.WorkDir(sandboxDir, aux.HostPath)
+		sha, err := resyncWorkCopy(ctx, g, aux, auxWorkDir, d.Runtime)
+		if err != nil {
+			return fmt.Errorf("reset aux dir %s: %w", aux.HostPath, err)
+		}
+		meta.Dirs[1+i].BaselineSHA = sha
+	}
+
 	if err := store.SaveEnvironment(sandboxDir, meta); err != nil {
 		return err
 	}

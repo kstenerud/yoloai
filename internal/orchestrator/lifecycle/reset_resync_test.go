@@ -381,3 +381,57 @@ func TestResetAuxCopyDir_OriginalMissing(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "original aux directory no longer exists")
 }
+
+// DF123: the default in-place reset used to refresh only the workdir, silently
+// skipping aux :copy dirs. It now resets them the way the restart path does —
+// this asserts both the workdir and the aux dir come back clean and current.
+func TestReset_InPlace_ResetsAuxCopyDir(t *testing.T) {
+	tmp := t.TempDir()
+	workSrc := secretRepo(t)
+	auxSrc := filepath.Join(t.TempDir(), "auxsrc")
+	require.NoError(t, os.MkdirAll(auxSrc, 0o750))
+	testutil.InitGitRepo(t, auxSrc)
+	testutil.WriteFile(t, auxSrc, "aux.txt", "aux-v1\n")
+	testutil.GitAdd(t, auxSrc, ".")
+	testutil.GitCommit(t, auxSrc, "aux initial")
+
+	name := "df123-fixed"
+	sandboxDir := filepath.Join(tmp, ".yoloai", "sandboxes", name)
+	workDir := filepath.Join(sandboxDir, "work", store.EncodePath(workSrc))
+	auxWorkDir := filepath.Join(sandboxDir, "work", store.EncodePath(auxSrc))
+	for _, d := range []struct{ dir, f, c string }{{workDir, "app.js", "v1\n"}, {auxWorkDir, "aux.txt", "aux-v1\n"}} {
+		require.NoError(t, os.MkdirAll(d.dir, 0o750))
+		testutil.WriteFile(t, d.dir, d.f, d.c)
+		testutil.InitGitRepo(t, d.dir)
+		testutil.GitAdd(t, d.dir, ".")
+		testutil.GitCommit(t, d.dir, "baseline")
+	}
+	meta := &store.Environment{
+		Name: name, CreatedAt: time.Now(),
+		Dirs: []store.DirEnvironment{
+			{HostPath: workSrc, MountPath: workSrc, Mode: "copy", BaselineSHA: gitHEAD(t, workDir)},
+			{HostPath: auxSrc, MountPath: auxSrc, Mode: "copy", BaselineSHA: gitHEAD(t, auxWorkDir)},
+		},
+	}
+	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
+	require.NoError(t, agentcfg.Save(sandboxDir, &agentcfg.AgentConfig{AgentType: "claude"}))
+
+	// Agent leaves a marker in both work copies; both sources advance upstream.
+	testutil.WriteFile(t, workDir, "agent.txt", "agent")
+	testutil.WriteFile(t, auxWorkDir, "agent.txt", "agent")
+	testutil.WriteFile(t, workSrc, "upstream.txt", "up")
+	testutil.WriteFile(t, auxSrc, "upstream.txt", "up")
+
+	mock := &lifecycleMockRuntime{
+		gitExecInConfinement: true,
+		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
+			return runtime.InstanceInfo{Running: true}, nil // in-place path
+		},
+	}
+	_, _ = Reset(context.Background(), newLifecycleDeps(mock, tmp), ResetOptions{Name: name})
+
+	assert.False(t, exists(filepath.Join(auxWorkDir, "agent.txt")), "aux agent change is reverted (DF123)")
+	assert.True(t, exists(filepath.Join(auxWorkDir, "upstream.txt")), "aux upstream arrives (DF123)")
+	assert.False(t, exists(filepath.Join(workDir, "agent.txt")), "workdir still reset too")
+	assert.True(t, exists(filepath.Join(workDir, "upstream.txt")))
+}

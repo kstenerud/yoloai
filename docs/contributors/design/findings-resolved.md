@@ -7,6 +7,28 @@ History of codebase findings (issues discovered mid-work) that have been address
 are moved here from [`findings-unresolved.md`](findings-unresolved.md) once resolved, so the
 active file stays a working set. Newest first.
 
+### DF123 — the default (in-place) reset refreshes only the workdir, silently skipping aux `:copy` dirs, while telling the user everything was reverted (RESOLVED 2026-07-16)
+
+- **Resolved** in workdir-materialization stage 3: `resetInPlace` now loops `meta.AuxDirs()` and
+  resyncs each `:copy` dir through `workcopy.Materialize` (InPlaceAndPrune), the same way the
+  restart path already reset them. It was a missing caller loop, not a materialization defect, so
+  the coordinator did not fix it on its own — the fix rode in with stage 3 because the loop body is
+  now one `Materialize` call. Verified by `TestReset_InPlace_ResetsAuxCopyDir`, the DF123 repro
+  inverted (aux agent-change reverted, aux upstream arrives); it fails against the missing loop.
+- Original finding follows.
+
+- **Discovered:** 2026-07-16 · **Workstream:** none — found while researching the workdir-materialization plan, checking whether the aux path diverges from the workdir path (it does, in two ways; this is the live one).
+- **Severity:** MEDIUM — no data loss (the workdir resets correctly, and the aux *source* on the host is never touched), but the reset is incomplete and **misreported**: the agent's changes to an aux `:copy` dir survive a reset that announces "All previous changes have been reverted and any new upstream changes are now present", and upstream changes to the aux source never arrive in the sandbox. A user who resets to discard the agent's aux-dir work, or to pick up an aux-dir upstream change, silently gets neither.
+- **Disposition:** PARKED — filed, not fixed. The fix is a caller-loop change (make `resetInPlace` reset aux dirs the way the restart path does), and it is cleanest to land alongside the [workdir-materialization](../archive/plans/workdir-materialization.md) consolidation, whose per-dir `Materialize` is exactly what the loop would call.
+- **Description:** `Reset` has two paths. The restart path (`prepareResetRestart`) resets the workdir **and** aux dirs — `resetWorkdir` then `resetAuxDirs` (`reset.go:325,331`). The in-place path (`resetInPlace`, the **default** when the container is running on a HostSide backend) resets **only** the workdir: it calls `resyncWorkCopy(*meta.Workdir(), …)` (`reset.go:439`) and never loops `meta.AuxDirs()`. Nothing masks it — in-place reset deliberately does not recreate the container (the agent keeps running), so there is no VM re-setup or re-copy to cover the gap the way the recreate covers DF122.
+- **Verified by execution, 2026-07-16.** A sandbox with a workdir and one aux `:copy` dir, both carrying an agent-created `agent.txt`, both sources advanced with an `upstream.txt`; a running HostSide mock so `Reset` takes the in-place path; then `Reset`:
+  - **workdir** → `agent.txt` **absent**, `upstream.txt` **present** — reset as promised.
+  - **aux dir** → `agent.txt` **present**, `upstream.txt` **absent** — untouched.
+- **Reachability.** HostSide backend (docker/podman/containerd/apple/seatbelt), container running, at least one aux `:copy` dir (`--dir path:copy`, D81 multi-workdir), default `yoloai reset` (no `--restart`). SandboxSide (tart) is unaffected — it always upgrades to restart, which resets aux. So this is HostSide-only, and it is the common path there.
+- **A second, non-live divergence noted in passing** (not filed, per the DF122 lesson): `resetAuxCopyDir` (restart path) omits the SandboxSide baseline-deferral that `resetCopyWorkdir` and `createCopyBaseline` both have (`reset.go:216` calls `baseline.WorkCopy` with no `LocalityOf` check). On tart the recreate's unconditional `ExecuteVMWorkDirSetup` re-baselines every copy dir including aux and overwrites it, so it never bites — the same masking that retracted DF122. Recorded here so the consolidation removes the inconsistency; not a bug on its own.
+- **Fix:** `resetInPlace` must reset aux `:copy` dirs, mirroring `prepareResetRestart`. The in-place strategy (copy-in-place + prune, no `RemoveAll` of the live-mounted dir) applies to aux dirs identically, so this is a loop, not new logic — and it is one call to the planned `Materialize` per aux dir.
+- **Pointer:** `internal/orchestrator/lifecycle/reset.go:429-457` (`resetInPlace`, no aux loop), `:315-333` (`prepareResetRestart`, which does loop via `resetAuxDirs`), `:223-243` (`resetAuxDirs`), `:473-475` (`resetNotification`, the "all reverted" claim it breaks). Related: DF117/DF120 (same in-place function, workdir side), [workdir-materialization.md](../archive/plans/workdir-materialization.md) (the consolidation this fix belongs with).
+
 ### DF120 — every reset baselines a dirty source at HEAD where create commits it, so `diff` reports the user's own uncommitted work as the agent's and `apply` then refuses (RESOLVED 2026-07-16)
 
 - **Resolved by removing the second opinion, not by editing three call sites.** `baseline.WorkCopy`

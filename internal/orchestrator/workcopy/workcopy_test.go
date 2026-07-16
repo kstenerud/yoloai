@@ -62,7 +62,7 @@ func TestMaterialize_CopyCleanRepo(t *testing.T) {
 	src := repo(t)
 	dst := filepath.Join(t.TempDir(), "work")
 
-	sha, notice, err := Materialize(context.Background(), Spec{Src: src}, dst, hostGit(t), hostSide())
+	sha, notice, err := Materialize(context.Background(), Spec{Src: src}, dst, WipeAndCopy, hostGit(t), hostSide())
 	require.NoError(t, err)
 
 	assert.Equal(t, testutil.RunGitOutput(t, src, "rev-parse", "HEAD"), sha, "clean repo: baseline is HEAD")
@@ -80,7 +80,7 @@ func TestMaterialize_CopyDirtyRepo_CommitsSoAgentStartsClean(t *testing.T) {
 	testutil.WriteFile(t, src, "app.js", "v1\nwork in progress\n")
 
 	dst := filepath.Join(t.TempDir(), "work")
-	sha, _, err := Materialize(context.Background(), Spec{Src: src}, dst, hostGit(t), hostSide())
+	sha, _, err := Materialize(context.Background(), Spec{Src: src}, dst, WipeAndCopy, hostGit(t), hostSide())
 	require.NoError(t, err)
 
 	assert.NotEqual(t, head, sha, "dirty state is committed, baseline moves past HEAD")
@@ -91,7 +91,7 @@ func TestMaterialize_CopyAll_IncludesIgnored(t *testing.T) {
 	src := repo(t)
 	dst := filepath.Join(t.TempDir(), "work")
 
-	_, _, err := Materialize(context.Background(), Spec{Src: src, IncludeIgnored: true}, dst, hostGit(t), hostSide())
+	_, _, err := Materialize(context.Background(), Spec{Src: src, IncludeIgnored: true}, dst, WipeAndCopy, hostGit(t), hostSide())
 	require.NoError(t, err)
 	assert.True(t, exists(filepath.Join(dst, ".env")), ":copy-all includes gitignored files")
 }
@@ -102,7 +102,7 @@ func TestMaterialize_CopyStrict_FreshBaselineNoDowngradeNotice(t *testing.T) {
 	src := repo(t)
 	dst := filepath.Join(t.TempDir(), "work")
 
-	sha, notice, err := Materialize(context.Background(), Spec{Src: src, StripHistory: true}, dst, hostGit(t), hostSide())
+	sha, notice, err := Materialize(context.Background(), Spec{Src: src, StripHistory: true}, dst, WipeAndCopy, hostGit(t), hostSide())
 	require.NoError(t, err)
 
 	assert.Len(t, sha, 40)
@@ -118,7 +118,7 @@ func TestMaterialize_UnconfinedBackend_DowngradesWithNotice(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "work")
 	backend := fakeBackend{locality: runtime.LocalityHostSide, confinedGit: false}
 
-	sha, notice, err := Materialize(context.Background(), Spec{Src: src}, dst, hostGit(t), backend)
+	sha, notice, err := Materialize(context.Background(), Spec{Src: src}, dst, WipeAndCopy, hostGit(t), backend)
 	require.NoError(t, err)
 
 	assert.True(t, notice.HistoryDowngraded, "an unconfined backend reports the forced strip")
@@ -142,7 +142,7 @@ func TestMaterialize_Worktree_SeversLinkAndReportsIt(t *testing.T) {
 	mainHead := testutil.RunGitOutput(t, main, "rev-parse", "HEAD")
 
 	dst := filepath.Join(t.TempDir(), "work")
-	sha, notice, err := Materialize(context.Background(), Spec{Src: wt}, dst, hostGit(t), hostSide())
+	sha, notice, err := Materialize(context.Background(), Spec{Src: wt}, dst, WipeAndCopy, hostGit(t), hostSide())
 	require.NoError(t, err)
 
 	assert.True(t, notice.SourceIsGitLink, "a worktree source is reported as a gitlink")
@@ -157,7 +157,7 @@ func TestMaterialize_NonRepo_FreshBaseline(t *testing.T) {
 	testutil.WriteFile(t, src, "app.js", "v1\n")
 	dst := filepath.Join(t.TempDir(), "work")
 
-	sha, notice, err := Materialize(context.Background(), Spec{Src: src}, dst, hostGit(t), hostSide())
+	sha, notice, err := Materialize(context.Background(), Spec{Src: src}, dst, WipeAndCopy, hostGit(t), hostSide())
 	require.NoError(t, err)
 	assert.Len(t, sha, 40)
 	assert.Equal(t, HistoryNotice{}, notice)
@@ -171,7 +171,7 @@ func TestMaterialize_SandboxSide_DefersBaseline(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "work")
 	backend := fakeBackend{locality: runtime.LocalitySandboxSide, confinedGit: true}
 
-	sha, _, err := Materialize(context.Background(), Spec{Src: src}, dst, hostGit(t), backend)
+	sha, _, err := Materialize(context.Background(), Spec{Src: src}, dst, WipeAndCopy, hostGit(t), backend)
 	require.NoError(t, err)
 	assert.Empty(t, sha, "SandboxSide baseline is deferred to the VM")
 	assert.True(t, exists(filepath.Join(dst, "app.js")), "but the copy is staged on the host")
@@ -185,8 +185,55 @@ func TestMaterialize_RebuildsStaleDestination(t *testing.T) {
 	require.NoError(t, os.MkdirAll(dst, 0o750))
 	testutil.WriteFile(t, dst, "agent-leftover.txt", "stale")
 
-	_, _, err := Materialize(context.Background(), Spec{Src: src}, dst, hostGit(t), hostSide())
+	_, _, err := Materialize(context.Background(), Spec{Src: src}, dst, WipeAndCopy, hostGit(t), hostSide())
 	require.NoError(t, err)
 	assert.False(t, exists(filepath.Join(dst, "agent-leftover.txt")), "wipe-and-copy clears the stale dst")
 	assert.True(t, exists(filepath.Join(dst, "app.js")))
+}
+
+// InPlaceAndPrune overwrites a live-mounted dst without replacing the directory:
+// the inode survives (a bind-mount resolves to it), the agent's leftovers are
+// pruned, and a gitignored secret is not re-imported (DF117).
+func TestMaterialize_InPlaceAndPrune_OverwritesWithoutReplacing(t *testing.T) {
+	src := repo(t)
+	testutil.WriteFile(t, src, "upstream.txt", "from host\n")
+	testutil.GitAdd(t, src, ".")
+	testutil.GitCommit(t, src, "upstream")
+
+	// dst as a live work copy: has the agent's leftover and a previously-leaked secret.
+	dst := filepath.Join(t.TempDir(), "work")
+	require.NoError(t, os.MkdirAll(dst, 0o750))
+	testutil.WriteFile(t, dst, "agent-leftover.txt", "stale")
+	testutil.WriteFile(t, dst, ".env", "LEAKED")
+	before, err := os.Stat(dst)
+	require.NoError(t, err)
+
+	_, _, err = Materialize(context.Background(), Spec{Src: src}, dst, InPlaceAndPrune, hostGit(t), hostSide())
+	require.NoError(t, err)
+
+	after, err := os.Stat(dst)
+	require.NoError(t, err)
+	assert.True(t, os.SameFile(before, after), "the dst inode must survive: a bind-mount resolves to it")
+	assert.False(t, exists(filepath.Join(dst, "agent-leftover.txt")), "the agent's leftover is pruned")
+	assert.False(t, exists(filepath.Join(dst, ".env")), "a leaked secret is pruned, not re-imported (DF117)")
+	assert.True(t, exists(filepath.Join(dst, "upstream.txt")), "upstream arrives")
+}
+
+// .git is replaced as a unit, not merged: a work copy whose repo is unrelated to
+// the source's adopts the source's history cleanly, with no dangling ref (DF118).
+func TestMaterialize_InPlaceAndPrune_ReplacesGitCleanly(t *testing.T) {
+	src := repo(t)
+	dst := filepath.Join(t.TempDir(), "work")
+	require.NoError(t, os.MkdirAll(dst, 0o750))
+	testutil.InitGitRepo(t, dst)
+	testutil.WriteFile(t, dst, "old.txt", "unrelated")
+	testutil.GitAdd(t, dst, ".")
+	testutil.GitCommit(t, dst, "unrelated baseline")
+
+	sha, _, err := Materialize(context.Background(), Spec{Src: src}, dst, InPlaceAndPrune, hostGit(t), hostSide())
+	require.NoError(t, err)
+
+	assert.Equal(t, testutil.RunGitOutput(t, src, "rev-parse", "HEAD"), sha, "adopts the source's history")
+	assert.Equal(t, "initial", testutil.RunGitOutput(t, dst, "log", "-1", "--format=%s"),
+		"repo is readable — a merged .git would say 'bad object HEAD'")
 }

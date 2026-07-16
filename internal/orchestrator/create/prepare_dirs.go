@@ -267,13 +267,13 @@ func setupWorkdir(ctx context.Context, g *git.Git, sandboxDir string, workdir *D
 // and surfaces the history warnings create emits. rw/ro dirs never reach here —
 // their callers dispatch on mode first. This is the single create-side seam onto
 // workcopy.Materialize, so the workdir and each aux :copy dir go through the same
-// sequence create and reset share (design/plans/workdir-materialization.md).
+// sequence create and reset share (the archived workdir-materialization plan).
 func materializeCopyDir(ctx context.Context, g *git.Git, dir *DirSpec, workCopyDir string, rt runtime.Backend) (string, error) {
 	sha, notice, err := workcopy.Materialize(ctx, workcopy.Spec{
 		Src:            dir.Path,
 		IncludeIgnored: dir.IncludeIgnored,
 		StripHistory:   dir.StripHistory,
-	}, workCopyDir, g, rt)
+	}, workCopyDir, workcopy.WipeAndCopy, g, rt)
 	if err != nil {
 		return "", fmt.Errorf("materialize %s: %w", dir.Path, err)
 	}
