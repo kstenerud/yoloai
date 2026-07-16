@@ -132,6 +132,13 @@ Many AI coding tools use `git worktree` for isolation — it's instant and space
 - **Git-only.** Worktrees require a git repository. yoloAI supports any directory.
 - **Shared object store.** Worktrees share the `.git` directory with the host repo, weakening isolation inside the container.
 
+**Using a worktree as your workdir.** You can point yoloAI at a linked worktree, and your real
+repo is left alone. Its history does not come along, though. A worktree keeps its objects in the
+main repo's `.git`, outside the directory being copied, so a copy of that directory has no
+history in it to carry. yoloAI gives the sandbox a fresh baseline instead and warns you that
+history was not preserved. Inside the sandbox, `git log` and `git blame` show only that baseline
+commit. Diff and apply work as usual, and the agent can commit normally.
+
 > **Note:** An earlier `:overlay` mode used in-container overlayfs for instant setup, but
 > it required granting the agent container `CAP_SYS_ADMIN` — a host-escape primitive on
 > rootful Docker — so it was retired (D109). Existing overlay sandboxes are auto-converted
@@ -159,7 +166,7 @@ but the path is currently '/Users/user/.yoloai/library/sandboxes/name/work/.buil
 These directories are regenerated automatically when the agent runs build commands inside the sandbox.
 
 **Important notes:**
-- This hardcoded list is applied **on top of `.gitignore` honoring** (see Workdir Modes): in a git repo, anything you've gitignored (commonly `node_modules/`, `.build/`, etc.) is already excluded by git; this list is the safety net for non-git directories and for repos that commit such artifacts. To copy everything regardless, use `:copy-all`.
+- This hardcoded list is applied **on top of `.gitignore` honoring** (see Workdir Modes): in a git repo, anything you've gitignored (commonly `node_modules/`, `.build/`, etc.) is already excluded by git; this list is the safety net for non-git directories and for repos that commit such artifacts. `:copy-all` turns off gitignore honoring and so copies ignored files, but this list still applies to it, so these directories stay excluded in both copy modes.
 - Exclusion only applies to `:copy`/`:copy-all` mode — `:rw` mode sees all files
 - The exclusion list is conservative to avoid false positives (e.g., generic names like `build/`, `target/`, or `env/` are NOT excluded)
 - If you need to exclude additional project-specific artifacts, gitignore them (honored by `:copy`) or file an issue on GitHub
